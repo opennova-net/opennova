@@ -1,0 +1,1553 @@
+from __future__ import annotations
+
+import enum
+import os
+
+import bpy
+from mathutils import Vector, Matrix, Quaternion
+
+from .math_utils import (
+    render_space,
+    bone_space,
+    collision_space,
+    conjugate_y_to_z,
+    orthonormalize,
+    compute_polyhedron_controlled,
+)
+from .mesh_primitives import create_cube_mesh, create_direction_arrow_mesh
+
+
+class OcclusionType(enum.IntEnum):
+    OB = 0
+    OS = 1
+    OP = 2
+    OP2 = 3
+
+    @property
+    def prefix(self) -> str:
+        return _OCCLUSION_PREFIXES[self]
+
+    @property
+    def color(self) -> tuple[float, float, float]:
+        return _OCCLUSION_COLORS[self]
+
+
+_OCCLUSION_PREFIXES = {
+    OcclusionType.OB: "OB",
+    OcclusionType.OS: "OS",
+    OcclusionType.OP: "OP",
+    OcclusionType.OP2: "OP",
+}
+
+_OCCLUSION_COLORS = {
+    OcclusionType.OB: (1.0, 0.2, 0.2),
+    OcclusionType.OS: (0.2, 0.6, 1.0),
+    OcclusionType.OP: (1.0, 0.8, 0.2),
+    OcclusionType.OP2: (1.0, 0.0, 0.6),
+}
+
+
+def _build_occlusion_name(type_code: int, parent_subobject: int,
+                           connecting_subobject: int) -> str:
+    display_index = parent_subobject if parent_subobject >= 0 else 0
+    try:
+        occ = OcclusionType(type_code)
+        prefix = occ.prefix
+    except ValueError:
+        prefix = "OX"
+    name = f"{prefix}{display_index + 1:02d}"
+    if (type_code == 2 or type_code == 3) and connecting_subobject >= 0:
+        name += f"-{connecting_subobject + 1:02d}"
+    return name
+
+
+
+
+class CollisionType(enum.IntEnum):
+    CB = 1; CS = 2; CC = 3; CL = 4; CV = 5; CA = 6
+    VC = 7; BB = 8; CD = 9; CT = 10; CM = 11; VK = 12
+    CF = 13; LP = 14; CP = 19
+
+    @property
+    def color(self) -> tuple[float, float, float]:
+        return _COLLISION_COLORS[self]
+
+
+_COLLISION_COLORS = {
+    CollisionType.CB: (0.0, 1.0, 0.0),
+    CollisionType.CS: (0.0, 0.8, 1.0),
+    CollisionType.CC: (1.0, 0.5, 0.0),
+    CollisionType.CL: (1.0, 1.0, 0.0),
+    CollisionType.CV: (0.5, 0.0, 1.0),
+    CollisionType.CA: (0.2, 1.0, 0.5),
+    CollisionType.VC: (0.6, 0.6, 0.6),
+    CollisionType.BB: (1.0, 0.0, 1.0),
+    CollisionType.CD: (0.8, 0.4, 0.0),
+    CollisionType.CT: (1.0, 0.2, 0.2),
+    CollisionType.CM: (0.4, 0.4, 1.0),
+    CollisionType.VK: (1.0, 0.0, 0.0),
+    CollisionType.CF: (0.3, 1.0, 0.3),
+    CollisionType.LP: (1.0, 0.8, 0.2),
+    CollisionType.CP: (0.7, 0.7, 1.0),
+}
+
+
+def _blinkbox_enabled_suffix(flags: int) -> str:
+    enabled = (~flags) & 0x3E
+    if enabled == 0:
+        return ""
+    out = ""
+    if enabled & (1 << 1): out += "V"
+    if enabled & (1 << 2): out += "S"
+    if enabled & (1 << 3): out += "W"
+    if enabled & (1 << 4): out += "L"
+    if enabled & (1 << 5): out += "O"
+    return out
+
+
+def _format_duplicate_suffix(occurrence: int) -> str:
+    if occurrence <= 1:
+        return ""
+    index = occurrence - 1
+    out = ""
+    while index > 0:
+        index -= 1
+        out = chr(ord('a') + (index % 26)) + out
+        index //= 26
+    return out
+
+
+def _build_volume_name(type_code: int, flags: int, index: int, occurrence: int) -> str:
+    try:
+        base = CollisionType(type_code).name
+    except ValueError:
+        base = "CX"
+    if type_code == 8:  # BB
+        suffix = _blinkbox_enabled_suffix(flags)
+        if suffix:
+            base += suffix
+    display_index = index if index >= 0 else 0
+    return f"{base}{display_index + 1:02d}{_format_duplicate_suffix(occurrence)}"
+
+
+class BlenderSceneBuilder:
+    """Build a Blender scene from a ThreediModelIR + optional BadFile.
+
+    - Part hierarchy using empties
+    - Vertices localized to their part's coordinate space
+    - Meshes parented to their part node
+    """
+
+    def __init__(self, ir, bad_file=None, anim_context=None,
+                 resolver=None, import_collisions=True, import_occlusion=True,
+                 import_lights=True):
+        self.ir = ir
+        self.bad_file = bad_file
+        self.anim_context = anim_context
+        self.resolver = resolver
+        self.import_collisions = import_collisions
+        self.import_occlusion = import_occlusion
+        self.import_lights = import_lights
+
+        # Runtime state
+        self.part_nodes: dict[int, object] = {}   # index -> Empty object
+        self.mesh_objects: list[object] = []       # mesh objects with _part_index
+        self.material_dict: dict[int, object] = {}
+        self.root_object = None
+        self.armature_object = None
+        self._bone_infos = []                      # populated by build_armature_from_bad
+        self._mesh_bone_data = {}                  # mesh_obj.name -> per-vertex bone data
+
+    def build_basic_scene(self, name: str):
+        if bpy.context.active_object and bpy.context.active_object.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+
+        self.build_part_hierarchy(name)
+        mesh_objects = self.create_basic_meshes(name)
+        self.create_scene_markers()
+        self.create_user_points()
+        if self.import_occlusion:
+            self.create_occlusion_visualization()
+        if self.import_collisions:
+            self.create_collision_visualization()
+        if self.import_lights:
+            self.create_scene_lights()
+
+        # Build armature, bind meshes, and build animations if BAD + anim context
+        if self.bad_file and self.anim_context:
+            try:
+                self.build_armature_from_bad(self.bad_file, name)
+                self.bind_meshes_to_armature()
+                self.build_animations_from_context(self.anim_context)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"Warning: failed to build animations: {e}")
+
+        if not mesh_objects:
+            print(f"No meshes created for {name}")
+            return None
+
+        if self.root_object:
+            self.root_object.select_set(True)
+            bpy.context.view_layer.objects.active = self.root_object
+        for obj in mesh_objects:
+            obj.select_set(True)
+
+        print(f"Imported {len(self.part_nodes)} parts + {len(mesh_objects)} meshes for {name}")
+        return mesh_objects
+
+    # Armature building (ported from adm_scene_builder.h)
+
+    def build_armature_from_bad(self, bad_file, name: str):
+        """Build a Blender Armature from BAD bone data.
+
+        Bone positions and rotations are converted from Y-up to Blender Z-up
+        via bone_space and conjugate_y_to_z.
+        """
+        bone_count = bad_file.num_bones
+        if bone_count == 0:
+            print("[ARMATURE] No bones in BAD file")
+            return
+
+        # -- adm_build_bone_data_from_bad --
+        # Each entry: (name, parent_idx, rest_origin, local_basis_3x3)
+        bone_infos = []
+
+        for i in range(bone_count):
+            bone = bad_file.bones[i]
+            bone_name = bone.name.decode("utf-8", errors="replace").rstrip("\x00").replace(":", "")
+
+            parent_idx = bone.parent_index
+            if parent_idx < 0 or parent_idx >= bone_count or parent_idx == i:
+                parent_idx = -1
+
+            # AdmMat3 bone_mat = adm_bad_to_mat3(bone.rotation)
+            bone_rot = Matrix((
+                (bone.rotation[0], bone.rotation[1], bone.rotation[2]),
+                (bone.rotation[3], bone.rotation[4], bone.rotation[5]),
+                (bone.rotation[6], bone.rotation[7], bone.rotation[8]),
+            ))
+
+            # BAD stores world-space rotations and parent-local position offsets.
+            # rest_origin is the parent-local offset (converted to Blender Z-up).
+            # The animation accumulation uses: world_pos = parent_pos + parent_rot @ rest_origin.
+            # rest.basis = local rotation (bone_rot * inv(parent_rot)) for keyframe conversion.
+            rest_origin = bone_space(Vector(bone.position))
+
+            if parent_idx < 0:
+                local_rot = conjugate_y_to_z(bone_rot)
+            else:
+                parent_bone = bad_file.bones[parent_idx]
+                parent_rot = Matrix((
+                    (parent_bone.rotation[0], parent_bone.rotation[1], parent_bone.rotation[2]),
+                    (parent_bone.rotation[3], parent_bone.rotation[4], parent_bone.rotation[5]),
+                    (parent_bone.rotation[6], parent_bone.rotation[7], parent_bone.rotation[8]),
+                ))
+                local_rot = conjugate_y_to_z(bone_rot @ parent_rot.inverted())
+
+            # Orthonormalize to clean up floating-point drift
+            local_rot = orthonormalize(local_rot)
+
+            bone_infos.append((bone_name, parent_idx, rest_origin, local_rot))
+
+        # root_motion bone (identity transform, no parent)
+        bone_infos.append(("root_motion", -1, (0, 0, 0), Matrix.Identity(3)))
+
+        self._bone_infos = bone_infos
+
+        # -- Compute absolute head positions and rotations --
+        # BAD stores world-space rotation matrices and parent-local position offsets.
+        # Use BAD world rotations directly (conjugated Y-up → Z-up) for abs_rotations.
+        # Accumulate abs_positions through parent world rotations (matching animation logic):
+        #   world_pos = parent_world_pos + parent_world_rot @ local_offset
+        abs_positions = [None] * len(bone_infos)
+        abs_rotations = [None] * len(bone_infos)
+
+        # Pre-compute BAD world rotation matrices (conjugated to Blender Z-up).
+        # BAD stores rotation matrices in transposed form (basis vectors in rows),
+        # so we transpose after converting to Blender Matrix for correct operation.
+        for i in range(bone_count):
+            bone = bad_file.bones[i]
+            bone_rot = Matrix((
+                (bone.rotation[0], bone.rotation[1], bone.rotation[2]),
+                (bone.rotation[3], bone.rotation[4], bone.rotation[5]),
+                (bone.rotation[6], bone.rotation[7], bone.rotation[8]),
+            ))
+            world_rot = orthonormalize(conjugate_y_to_z(bone_rot))
+            abs_rotations[i] = world_rot.transposed()
+        # root_motion bone: identity
+        abs_rotations[bone_count] = Matrix.Identity(3)
+
+        # Accumulate world positions from parent-local offsets
+        for i, (bname, parent_idx, rest_origin, local_rot) in enumerate(bone_infos):
+            if parent_idx >= 0 and abs_positions[parent_idx] is not None:
+                abs_positions[i] = abs_positions[parent_idx] + abs_rotations[parent_idx] @ Vector(rest_origin)
+            else:
+                abs_positions[i] = Vector(rest_origin)
+
+        # -- adm_create_skeleton_from_bone_data --
+        armature_data = bpy.data.armatures.new(f"{name}_Armature")
+        armature_obj = bpy.data.objects.new("Skeleton", armature_data)
+        bpy.context.collection.objects.link(armature_obj)
+
+        if self.root_object:
+            armature_obj.parent = self.root_object
+
+        self.armature_object = armature_obj
+
+        bpy.context.view_layer.objects.active = armature_obj
+        bpy.ops.object.mode_set(mode='EDIT')
+
+        edit_bones = armature_data.edit_bones
+        bl_bones = []
+
+        for i, (bname, parent_idx, rest_origin, local_rot) in enumerate(bone_infos):
+            eb = edit_bones.new(bname)
+            eb.head = abs_positions[i]
+
+            # Bone tail must follow the BAD world rotation's Y axis so that
+            # Blender's rest rotation matches the animation rotation convention.
+            # Using child-pointing tails would change the Y axis, creating a
+            # mismatch between rest rotation and animation keyframes.
+            tail_dir = abs_rotations[i] @ Vector((0, 0.05, 0))
+
+            eb.tail = eb.head + tail_dir
+            eb.use_connect = False
+            bl_bones.append(eb)
+
+        for i, (bname, parent_idx, rest_origin, local_rot) in enumerate(bone_infos):
+            if parent_idx >= 0 and parent_idx < len(bl_bones):
+                bl_bones[i].parent = bl_bones[parent_idx]
+
+        # Align roll so the edit bone's Z axis matches the desired rest orientation.
+        # This fully constrains the bone's rest rotation (head/tail sets Y, roll sets X/Z).
+        for i, (bname, parent_idx, rest_origin, local_rot) in enumerate(bone_infos):
+            z_axis = abs_rotations[i] @ Vector((0, 0, 1))
+            bl_bones[i].align_roll(z_axis)
+
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        # Read back Blender's actual rest transforms per bone.
+        # These may differ slightly from our computed values due to Blender's
+        # internal edit bone → rest matrix conversion. Using Blender's actual
+        # values ensures animation conversion is exact.
+        self._rest_local_quats = []
+        self._rest_local_inv_mats = []
+
+        for i, (bname, parent_idx, rest_origin, local_rot) in enumerate(bone_infos):
+            pose_bone = armature_obj.pose.bones.get(bname)
+            if pose_bone is None:
+                self._rest_local_quats.append(Quaternion())
+                self._rest_local_inv_mats.append(Matrix.Identity(3))
+                continue
+
+            bone = pose_bone.bone
+            if bone.parent:
+                parent_mat = bone.parent.matrix_local
+                local_mat = parent_mat.inverted() @ bone.matrix_local
+            else:
+                local_mat = bone.matrix_local.copy()
+
+            self._rest_local_quats.append(local_mat.to_quaternion())
+            self._rest_local_inv_mats.append(local_mat.to_3x3().inverted())
+
+        print(f"[ARMATURE] Created armature with {len(bone_infos)} bones")
+
+    # Mesh-to-armature binding
+
+    def bind_meshes_to_armature(self):
+        """Bind mesh objects to the armature via vertex groups + Armature modifier.
+
+        For skinned meshes, each vertex has up to 4 bone influences from the
+        IR's bone_indices/bone_weights remapped through the primitive's bone_table.
+        For non-skinned meshes, each vertex gets weight 1.0 to its part bone.
+        """
+        if not self.armature_object or not hasattr(self, '_bone_infos'):
+            return
+
+        bone_infos = self._bone_infos
+        mesh_list = getattr(self, 'mesh_objects', [])
+
+        for mesh_obj in mesh_list:
+            bone_data = self._mesh_bone_data.get(mesh_obj.name)
+            if bone_data is None:
+                continue
+
+            vert_count = len(mesh_obj.data.vertices)
+
+            # Collect all bone indices referenced by this mesh's vertices
+            # and build vertex groups per bone
+            bone_vgroups = {}  # skeleton_bone_idx -> vertex_group
+
+            for vert_idx in range(min(vert_count, len(bone_data))):
+                entries = bone_data[vert_idx]
+                for bone_idx, weight in entries:
+                    if bone_idx < 0 or bone_idx >= len(bone_infos):
+                        continue
+                    if weight <= 0:
+                        continue
+
+                    if bone_idx not in bone_vgroups:
+                        bone_name = bone_infos[bone_idx][0]
+                        # Reuse existing vertex group if already created
+                        vg = mesh_obj.vertex_groups.get(bone_name)
+                        if vg is None:
+                            vg = mesh_obj.vertex_groups.new(name=bone_name)
+                        bone_vgroups[bone_idx] = vg
+
+                    bone_vgroups[bone_idx].add([vert_idx], weight, 'REPLACE')
+
+            mod = mesh_obj.modifiers.new(name="Armature", type='ARMATURE')
+            mod.object = self.armature_object
+
+        # Clean up stored bone data (no longer needed, saves memory)
+        self._mesh_bone_data.clear()
+
+        print(f"[BIND] Bound {len(mesh_list)} meshes to armature")
+
+    # Animation building (ported from adm_scene_builder.h)
+
+    def build_animations_from_context(self, anim_context):
+        """Build Blender Actions from AnimationContext and push to NLA tracks."""
+        from .opennova.bad_ffi import parse_bad, free_bad
+
+        if not self.armature_object:
+            print("[ANIM] No armature object, skipping animations")
+            return
+
+        armature_obj = self.armature_object
+
+        # Ensure armature has animation data
+        if not armature_obj.animation_data:
+            armature_obj.animation_data_create()
+
+        # Collect all animations: reset + others
+        all_anims = []
+        if anim_context.reset_animation:
+            all_anims.append(anim_context.reset_animation)
+        all_anims.extend(anim_context.animations)
+
+        nla_frame_offset = 0
+        for anim_meta in all_anims:
+            try:
+                bad_file = parse_bad(anim_meta.bad_filepath)
+            except Exception as e:
+                print(f"[ANIM] Failed to parse {anim_meta.bad_filepath}: {e}")
+                continue
+
+            try:
+                action = self._build_action_from_bad(
+                    bad_file, armature_obj, anim_meta.animation_name
+                )
+                if action:
+                    action.use_fake_user = True
+
+                    # Push action to NLA track
+                    track = armature_obj.animation_data.nla_tracks.new()
+                    track.name = action.name
+                    strip = track.strips.new(action.name, int(nla_frame_offset + 1), action)
+                    strip.name = action.name
+                    strip.influence = 1.0
+
+                    # Blender 4.5+: bind the strip to the action's slot
+                    if hasattr(action, 'slots') and len(action.slots) > 0:
+                        strip.action_slot = action.slots[0]
+
+                    frame_count = int(action.frame_range[1] - action.frame_range[0] + 1)
+                    nla_frame_offset += frame_count
+
+                    print(f"[ANIM] Created action '{action.name}' "
+                          f"({frame_count} frames) → NLA track")
+            finally:
+                free_bad(bad_file)
+
+        # Expand scene frame range to cover all NLA strips
+        if nla_frame_offset > 0:
+            bpy.context.scene.frame_start = 1
+            bpy.context.scene.frame_end = int(nla_frame_offset)
+
+
+    def _build_action_from_bad(self, bad_file, armature_obj, anim_name: str):
+        """Build a single Blender Action from a parsed BAD file.
+
+        Quaternions and translations are converted from Y-up to Blender Z-up.
+        Blender pose values are rest-relative (delta from rest pose).
+        """
+        fps = bad_file.fps if bad_file.fps > 0 else 30
+        frame_count = bad_file.frame_count if bad_file.frame_count > 0 else 0
+
+        # Determine loop mode
+        force_no_loop = False
+        lower_name = anim_name.lower()
+        if any(kw in lower_name for kw in ("fire", "reload", "switch", "recoil", "empty")):
+            force_no_loop = True
+
+        kTranslated = 0x02
+        is_translated = (bad_file.flags & kTranslated) != 0
+
+        action = bpy.data.actions.new(name=anim_name)
+
+        # Blender 4.5+ action slot system: create a slot bound to the armature
+        # so fcurves are visible in the Action Editor and NLA.
+        if hasattr(action, 'slots'):
+            slot = action.slots.new(id_type='OBJECT', name=armature_obj.name)
+            # Temporarily assign action+slot so fcurves get associated with the slot
+            ad = armature_obj.animation_data
+            old_action = ad.action
+            old_slot = getattr(ad, 'action_slot', None)
+            ad.action = action
+            ad.action_slot = slot
+            # Will be restored after fcurves are built (at end of function)
+
+        bone_infos = self._bone_infos
+        skeleton_bone_count = len(bone_infos)
+        bone_count = min(bad_file.num_bones, skeleton_bone_count)
+
+        if frame_count == 0 or bone_count == 0:
+            return action
+
+        # Set pose bones to quaternion mode
+        pose_bones = armature_obj.pose.bones
+        for bone_idx in range(bone_count):
+            bname = bone_infos[bone_idx][0]
+            pb = pose_bones.get(bname)
+            if pb:
+                pb.rotation_mode = 'QUATERNION'
+
+        # Pre-create FCurves for rotation (and position if translated)
+        bone_rot_fcurves = []
+        bone_pos_fcurves = []
+
+        for bone_idx in range(bone_count):
+            bname = bone_infos[bone_idx][0]
+            data_path_rot = f'pose.bones["{bname}"].rotation_quaternion'
+            fc_w = action.fcurves.new(data_path=data_path_rot, index=0)
+            fc_x = action.fcurves.new(data_path=data_path_rot, index=1)
+            fc_y = action.fcurves.new(data_path=data_path_rot, index=2)
+            fc_z = action.fcurves.new(data_path=data_path_rot, index=3)
+            bone_rot_fcurves.append((fc_w, fc_x, fc_y, fc_z))
+
+            if is_translated:
+                data_path_pos = f'pose.bones["{bname}"].location'
+                fc_px = action.fcurves.new(data_path=data_path_pos, index=0)
+                fc_py = action.fcurves.new(data_path=data_path_pos, index=1)
+                fc_pz = action.fcurves.new(data_path=data_path_pos, index=2)
+                bone_pos_fcurves.append((fc_px, fc_py, fc_pz))
+            else:
+                bone_pos_fcurves.append(None)
+
+        # Pre-allocate keyframe points
+        for bone_idx in range(bone_count):
+            for fc in bone_rot_fcurves[bone_idx]:
+                fc.keyframe_points.add(frame_count)
+            if bone_pos_fcurves[bone_idx]:
+                for fc in bone_pos_fcurves[bone_idx]:
+                    fc.keyframe_points.add(frame_count)
+
+        # Build rest origin vectors and parent indices from bone_infos
+        rest_origins = []
+        parent_indices = []
+        for bone_idx in range(bone_count):
+            bname, parent_idx, rest_origin, local_rot = bone_infos[bone_idx]
+            rest_origins.append(Vector(rest_origin))
+            parent_indices.append(parent_idx)
+
+        # Blender rest transforms (read back from armature after edit mode)
+        # Used to convert animation values from absolute-local to rest-relative
+        rest_local_quats = getattr(self, '_rest_local_quats', [Quaternion()] * bone_count)
+        rest_local_inv_mats = getattr(self, '_rest_local_inv_mats', [Matrix.Identity(3)] * bone_count)
+
+        # Frame-by-frame animation
+        world_transforms = [None] * bone_count  # Transform3D equivalents
+        world_rots = [Quaternion((1, 0, 0, 0))] * bone_count
+        world_positions = [Vector((0, 0, 0))] * bone_count
+        prev_local_rots = [Quaternion((1, 0, 0, 0))] * bone_count
+
+        for frame_idx in range(frame_count):
+            # First pass: compute world transforms
+            for bone_idx in range(bone_count):
+                # Blender quaternion order: (w, x, y, z)
+                rot_q = Quaternion((1, 0, 0, 0))
+                if bone_idx < bad_file.num_channels:
+                    channel = bad_file.channels[bone_idx]
+                    if frame_idx < channel.frame_count:
+                        rq = channel.rotations[frame_idx]
+                        rot_q = Quaternion((rq.w, rq.x, -rq.z, rq.y))
+
+                # adm_transform_position is identity, so convert Y-up to Z-up directly
+                translation = Vector((0, 0, 0))
+                if is_translated:
+                    stride = bad_file.num_bones
+                    idx = frame_idx * stride + bone_idx
+                    if idx < bad_file.num_translations:
+                        tl = bad_file.translations[idx]
+                        translation = Vector((tl[0], -tl[2], tl[1]))
+
+                parent_idx = parent_indices[bone_idx]
+
+                if parent_idx < 0 or parent_idx >= bone_count:
+                    # Root bone: world_pos = rest.origin + translation
+                    world_rots[bone_idx] = rot_q
+                    world_pos = rest_origins[bone_idx] + translation
+                    world_positions[bone_idx] = world_pos
+                else:
+                    # Child: world_pos = parent_world.xform(rest.origin) + translation
+                    world_rots[bone_idx] = rot_q
+                    parent_rot_mat = world_rots[parent_idx].to_matrix()
+                    world_pos = world_positions[parent_idx] + parent_rot_mat @ rest_origins[bone_idx] + translation
+                    world_positions[bone_idx] = world_pos
+
+            # Second pass: compute local transforms and insert keyframes.
+            # Blender pose values are relative to the bone's rest pose.
+            # Convert from absolute-local to rest-relative:
+            #   pose_rot = rest_rot.inverted() @ local_rot
+            #   pose_pos = rest_rot_3x3.inverted() @ (local_pos - rest_origin)
+            bl_frame = frame_idx + 1
+
+            for bone_idx in range(bone_count):
+                parent_idx = parent_indices[bone_idx]
+
+                # local_rot = parent_world_rot.inverse() * world_rot (or world_rot for roots)
+                if parent_idx < 0 or parent_idx >= bone_count:
+                    local_rot = world_rots[bone_idx]
+                else:
+                    local_rot = world_rots[parent_idx].inverted() @ world_rots[bone_idx]
+
+                # Convert to Blender rest-relative space
+                rest_quat = rest_local_quats[bone_idx]
+                pose_rot = rest_quat.inverted() @ local_rot
+
+                # Quaternion flip prevention (dot < 0 → negate)
+                if frame_idx == 0:
+                    prev_local_rots[bone_idx] = pose_rot
+                else:
+                    prev = prev_local_rots[bone_idx]
+                    dot = pose_rot.dot(prev)
+                    if dot < 0:
+                        pose_rot = Quaternion((-pose_rot.w, -pose_rot.x,
+                                                -pose_rot.y, -pose_rot.z))
+                    prev_local_rots[bone_idx] = pose_rot
+
+                # Insert rotation keyframes
+                fc_w, fc_x, fc_y, fc_z = bone_rot_fcurves[bone_idx]
+                fc_w.keyframe_points[frame_idx].co = (bl_frame, pose_rot.w)
+                fc_x.keyframe_points[frame_idx].co = (bl_frame, pose_rot.x)
+                fc_y.keyframe_points[frame_idx].co = (bl_frame, pose_rot.y)
+                fc_z.keyframe_points[frame_idx].co = (bl_frame, pose_rot.z)
+                fc_w.keyframe_points[frame_idx].interpolation = 'LINEAR'
+                fc_x.keyframe_points[frame_idx].interpolation = 'LINEAR'
+                fc_y.keyframe_points[frame_idx].interpolation = 'LINEAR'
+                fc_z.keyframe_points[frame_idx].interpolation = 'LINEAR'
+
+                # Insert position keyframes if translated
+                if bone_pos_fcurves[bone_idx]:
+                    if parent_idx < 0 or parent_idx >= bone_count:
+                        # Root: local_t = world_transform
+                        local_pos = world_positions[bone_idx]
+                    else:
+                        # Child: local_t = parent_world.affine_inverse() * world_transform
+                        parent_rot_mat = world_rots[parent_idx].to_matrix()
+                        parent_inv_rot = parent_rot_mat.inverted()
+                        local_pos = parent_inv_rot @ (world_positions[bone_idx] - world_positions[parent_idx])
+
+                    # Blender pose bone location is in rest-local space:
+                    # final_pos = rest_origin + rest_rot @ pose_location
+                    # So: pose_location = rest_rot_inv @ (local_pos - rest_origin)
+                    delta_pos = rest_local_inv_mats[bone_idx] @ (local_pos - rest_origins[bone_idx])
+
+                    fc_px, fc_py, fc_pz = bone_pos_fcurves[bone_idx]
+                    fc_px.keyframe_points[frame_idx].co = (bl_frame, delta_pos.x)
+                    fc_py.keyframe_points[frame_idx].co = (bl_frame, delta_pos.y)
+                    fc_pz.keyframe_points[frame_idx].co = (bl_frame, delta_pos.z)
+                    fc_px.keyframe_points[frame_idx].interpolation = 'LINEAR'
+                    fc_py.keyframe_points[frame_idx].interpolation = 'LINEAR'
+                    fc_pz.keyframe_points[frame_idx].interpolation = 'LINEAR'
+
+        # Root motion from events
+        # adm_transform_root_motion(x,y,z) = (-x, y, -z)
+        if bad_file.num_events > 0:
+            rm_bone_name = "root_motion"
+            data_path_rm = f'pose.bones["{rm_bone_name}"].location'
+            fc_rmx = action.fcurves.new(data_path=data_path_rm, index=0)
+            fc_rmy = action.fcurves.new(data_path=data_path_rm, index=1)
+            fc_rmz = action.fcurves.new(data_path=data_path_rm, index=2)
+            fc_rmx.keyframe_points.add(bad_file.num_events)
+            fc_rmy.keyframe_points.add(bad_file.num_events)
+            fc_rmz.keyframe_points.add(bad_file.num_events)
+
+            rm_pos = Vector((0, 0, 0))
+            for i in range(bad_file.num_events):
+                evt = bad_file.events[i]
+                vx, vy, vz = evt.velocity[0], evt.velocity[1], evt.velocity[2]
+                rm_pos = rm_pos + Vector((vx, -vz, vy))
+
+                bl_frame = i + 1
+                fc_rmx.keyframe_points[i].co = (bl_frame, rm_pos.x)
+                fc_rmy.keyframe_points[i].co = (bl_frame, rm_pos.y)
+                fc_rmz.keyframe_points[i].co = (bl_frame, rm_pos.z)
+                fc_rmx.keyframe_points[i].interpolation = 'LINEAR'
+                fc_rmy.keyframe_points[i].interpolation = 'LINEAR'
+                fc_rmz.keyframe_points[i].interpolation = 'LINEAR'
+
+        for fc in action.fcurves:
+            fc.update()
+
+        action.frame_start = 1
+        action.frame_end = frame_count
+
+        # Restore previous action/slot after building fcurves (Blender 4.5+ slot system)
+        if hasattr(action, 'slots'):
+            ad = armature_obj.animation_data
+            ad.action = old_action
+            if old_slot is not None:
+                ad.action_slot = old_slot
+
+        return action
+
+    def merge_with_existing_scene(self, main_builder):
+        if bpy.context.active_object and bpy.context.active_object.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        self.root_object = main_builder.root_object
+        self.part_nodes = main_builder.part_nodes
+        mesh_objects = self.create_basic_meshes("merged")
+
+        # Bind arms meshes to the main builder's existing armature
+        if main_builder.armature_object and hasattr(main_builder, '_bone_infos'):
+            self.armature_object = main_builder.armature_object
+            self._bone_infos = main_builder._bone_infos
+            self.bind_meshes_to_armature()
+
+        return bool(mesh_objects)
+
+    def build_part_hierarchy(self, base_name: str):
+        """Create a hierarchy of Empty objects for the part tree."""
+        if self.ir.lod_count == 0:
+            return
+
+        lod0 = self.ir.lods[0]
+        num_parts = int(lod0.part_count)
+
+        root = bpy.data.objects.new(base_name, None)
+        root.empty_display_type = 'PLAIN_AXES'
+        root.empty_display_size = 0.1
+        bpy.context.collection.objects.link(root)
+        self.root_object = root
+
+        for i in range(num_parts):
+            part_name = f"PN{i + 1:02d}"
+            part_obj = bpy.data.objects.new(part_name, None)
+            part_obj.empty_display_type = 'PLAIN_AXES'
+            part_obj.empty_display_size = 0.05
+            bpy.context.collection.objects.link(part_obj)
+            self.part_nodes[i] = part_obj
+
+        # Parent and position parts
+        for i in range(num_parts):
+            part = lod0.parts[i]
+            part_obj = self.part_nodes[i]
+
+            abs_pos = render_space(Vector(part.abs_position))
+            rel_pos = render_space(Vector(part.rel_position))
+
+            parent = root
+            if (part.parent_index >= 0 and
+                part.parent_index < num_parts and
+                part.parent_index != i):
+                parent = self.part_nodes[part.parent_index]
+
+            part_obj.parent = parent
+            if parent == root:
+                part_obj.location = abs_pos
+            else:
+                part_obj.location = rel_pos
+
+        return root
+
+    def create_basic_meshes(self, base_name: str) -> list:
+        """Create meshes from the IR.
+
+        Creates one mesh object per (part, material) pair.  Primitives that
+        share the same part and material are merged into a single mesh.
+        Each resulting mesh has exactly one material slot, which eliminates
+        the need for exporter-side splitting by material.
+
+        Naming: "{part_idx+1:02d} Mesh{seq}" where seq is 0-based per part.
+
+        UV V-flip applied: Blender UV convention has V=0 at bottom,
+        while DDS/game convention has V=0 at top.
+        """
+        mesh_objects = []
+        if self.ir.lod_count == 0:
+            return mesh_objects
+
+        lod0 = self.ir.lods[0]
+        num_parts = int(lod0.part_count)
+        num_primitives = int(lod0.primitive_count)
+
+        is_skinned = (int(self.ir.mesh_type) == 3)  # THREEDI_IR_MESH_SKINNED
+        print(f"[MESH] parts={num_parts} primitives={num_primitives} skinned={is_skinned}")
+        for pi in range(num_primitives):
+            p = lod0.primitives[pi]
+            print(f"[MESH]   prim {pi}: part={p.part_index} idx_off={p.index_offset} idx_cnt={p.index_count} vtx_off={p.vertex_offset} vtx_cnt={p.vertex_count} mat={p.material_index}")
+
+        # Group primitives by (part_index, material_index)
+        from collections import defaultdict, OrderedDict
+        # For each part, track the unique materials in encounter order
+        part_materials = defaultdict(OrderedDict)  # part_idx -> OrderedDict{mat_idx -> [prim_indices]}
+        for prim_idx in range(num_primitives):
+            prim = lod0.primitives[prim_idx]
+            part_idx = int(prim.part_index)
+            if part_idx < 0 or part_idx >= num_parts:
+                continue
+            if part_idx not in self.part_nodes:
+                continue
+            mat_idx = int(prim.material_index)
+            if mat_idx not in part_materials[part_idx]:
+                part_materials[part_idx][mat_idx] = []
+            part_materials[part_idx][mat_idx].append(prim_idx)
+
+        # Create one mesh per (part, material)
+        for part_idx in sorted(part_materials.keys()):
+            mat_groups = part_materials[part_idx]
+            part = lod0.parts[part_idx]
+            part_abs = Vector(part.abs_position)
+
+            for seq, (mat_idx, prim_indices) in enumerate(mat_groups.items()):
+                all_vertices = []
+                all_faces = []
+                all_uvs = []
+                all_normals = []
+                # Per-vertex bone data: list of list of (skeleton_bone_idx, weight)
+                all_bone_data = []
+
+                if mat_idx not in self.material_dict:
+                    if 0 <= mat_idx < int(self.ir.material_count):
+                        self.material_dict[mat_idx] = self._create_material(self.ir.materials[mat_idx])
+
+                for prim_idx in prim_indices:
+                    prim = lod0.primitives[prim_idx]
+                    idx_offset = int(prim.index_offset)
+                    idx_count = int(prim.index_count)
+                    vert_offset = int(prim.vertex_offset)
+
+                    if idx_count < 3:
+                        continue
+
+                    for j in range(0, idx_count, 3):
+                        i0 = int(lod0.indices[idx_offset + j + 0]) + vert_offset
+                        i1 = int(lod0.indices[idx_offset + j + 2]) + vert_offset
+                        i2 = int(lod0.indices[idx_offset + j + 1]) + vert_offset
+
+                        if i0 >= int(lod0.vertex_count) or i1 >= int(lod0.vertex_count) or i2 >= int(lod0.vertex_count):
+                            continue
+
+                        v0 = lod0.vertices[i0]
+                        v1 = lod0.vertices[i1]
+                        v2 = lod0.vertices[i2]
+
+                        tri_start = len(all_vertices)
+                        all_vertices.extend([
+                            render_space(Vector(v0.position) - part_abs),
+                            render_space(Vector(v1.position) - part_abs),
+                            render_space(Vector(v2.position) - part_abs),
+                        ])
+                        all_faces.append((tri_start, tri_start + 1, tri_start + 2))
+                        # UV V-flip: Blender V=0 at bottom, game/DDS V=0 at top
+                        all_uvs.extend([
+                            (v0.uv0[0], 1.0 - v0.uv0[1]),
+                            (v1.uv0[0], 1.0 - v1.uv0[1]),
+                            (v2.uv0[0], 1.0 - v2.uv0[1]),
+                        ])
+                        all_normals.extend([
+                            render_space(Vector(v0.normal)),
+                            render_space(Vector(v1.normal)),
+                            render_space(Vector(v2.normal)),
+                        ])
+
+                        # Per-vertex bone assignments
+                        for v in (v0, v1, v2):
+                            if is_skinned:
+                                bone_entries = []
+                                for bi in range(4):
+                                    w = v.bone_weights[bi]
+                                    if w > 0:
+                                        local_idx = v.bone_indices[bi]
+                                        if prim.bone_table_length > 0 and local_idx < prim.bone_table_length:
+                                            skel_idx = prim.bone_table[local_idx]
+                                        else:
+                                            skel_idx = 0
+                                        bone_entries.append((skel_idx, w))
+                                if not bone_entries:
+                                    bone_entries.append((part_idx, 1.0))
+                                all_bone_data.append(bone_entries)
+                            else:
+                                all_bone_data.append([(part_idx, 1.0)])
+
+                if not all_vertices or not all_faces:
+                    continue
+
+                mesh_name = f"{part_idx + 1:02d} Mesh{seq}"
+                mesh_data = bpy.data.meshes.new(mesh_name)
+
+                mesh_data.from_pydata(all_vertices, [], all_faces)
+                mesh_data.update()
+
+                # Store default smoothing group for ASE export (all faces smooth)
+                sg_attr = mesh_data.attributes.new('smoothing_group', 'INT', 'FACE')
+                for fi in range(len(mesh_data.polygons)):
+                    sg_attr.data[fi].value = 1
+
+                # Apply custom split normals from 3di vertex data
+                if all_normals and len(all_normals) == len(mesh_data.loops):
+                    for poly in mesh_data.polygons:
+                        poly.use_smooth = True
+                    mesh_data.normals_split_custom_set(all_normals)
+
+                if all_uvs:
+                    uv_layer = mesh_data.uv_layers.new(name="UVMap")
+                    for loop_idx in range(len(mesh_data.loops)):
+                        if loop_idx < len(all_uvs):
+                            uv_layer.data[loop_idx].uv = all_uvs[loop_idx]
+
+                if mat_idx in self.material_dict:
+                    mesh_data.materials.append(self.material_dict[mat_idx])
+
+                print(f"[MAT] mesh={mesh_name} mat={mat_idx} polys={len(mesh_data.polygons)}")
+
+                mesh_obj = bpy.data.objects.new(mesh_name, mesh_data)
+                bpy.context.collection.objects.link(mesh_obj)
+
+                mesh_obj.parent = self.part_nodes[part_idx]
+
+                # Track mesh→part mapping and per-vertex bone data for armature binding
+                mesh_obj["_part_index"] = part_idx
+                self._mesh_bone_data[mesh_obj.name] = all_bone_data
+
+                mesh_objects.append(mesh_obj)
+
+        self.mesh_objects = mesh_objects
+        return mesh_objects
+
+    def _create_material(self, ir_mat):
+        mat = bpy.data.materials.new(f"Material_{ir_mat.index}")
+        mat.use_nodes = True
+        mat.node_tree.nodes.clear()
+
+        bsdf = mat.node_tree.nodes.new("ShaderNodeBsdfPrincipled")
+        output = mat.node_tree.nodes.new("ShaderNodeOutputMaterial")
+        mat.node_tree.links.new(bsdf.outputs["BSDF"], output.inputs["Surface"])
+        bsdf.inputs["Base Color"].default_value = (0.8, 0.2, 0.2, 1.0)
+
+        # NovaLogic's engine (D3D8 fixed-function) defaults to diffuse-only
+        # with no specular contribution. The gsys_phong lookup texture provides
+        # specular only when shader_type explicitly enables it. Set Blender
+        # defaults to match: fully rough, no specular.
+        bsdf.inputs["Roughness"].default_value = 1.0
+        if "Specular IOR Level" in bsdf.inputs:
+            bsdf.inputs["Specular IOR Level"].default_value = 0.0
+        elif "Specular" in bsdf.inputs:
+            bsdf.inputs["Specular"].default_value = 0.0
+
+        shader = ir_mat.shader_name.decode("utf-8", errors="replace").rstrip("\x00")
+        if shader:
+            mat.name = f"{mat.name}_{shader}"
+
+        # Store original name before Blender mangles duplicates with .NNN suffixes
+        mat["ase_material_name"] = mat.name
+
+        # Store all IR texture names as custom properties for round-trip export.
+        # IR texture slots:
+        #   1 = DIFFUSE  -> exported as MAP_DIFFUSE
+        #   2 = DETAIL   -> lightmap/overlay, NOT exported (causes df4oed crash)
+        #   3 = NORMAL   -> stored but not exported to ASE
+        # NOTE: We do NOT export slot 2 as MAP_OPACITY because:
+        # 1. These are lightmaps, not alpha masks
+        # 2. MAP_OPACITY triggers a crash in df4oed's material preview (sub_403750)
+        for t_idx in range(ir_mat.texture_count):
+            tex = ir_mat.textures[t_idx]
+            tex_name = tex.name.decode("utf-8", errors="replace").rstrip("\x00").strip()
+            if not tex_name:
+                continue
+            if tex.slot == 1 or (t_idx == 0 and "ase_diffuse_bitmap" not in mat):
+                mat["ase_diffuse_bitmap"] = tex_name
+            elif tex.slot == 2:
+                mat["ase_detail_bitmap"] = tex_name  # Lightmap/overlay (not exported)
+            elif tex.slot == 3:
+                mat["ase_normal_bitmap"] = tex_name
+                mat["ase_normal_type"] = int(tex.type)  # 0=diffuse, 4=MDT, 5=TGA alpha
+
+        # Default diffuse matching 3ds Max Standard material (0.588)
+        mat.diffuse_color = (0.588, 0.588, 0.588, 1.0)
+
+        if ir_mat.flags & 0x04:  # TWO_SIDED
+            mat.use_backface_culling = False
+
+        # Find and load diffuse texture for Blender viewport display
+        tex_node = None
+        diffuse_bitmap = mat.get("ase_diffuse_bitmap", "")
+        if diffuse_bitmap:
+            tex_path = self._resolve_texture(diffuse_bitmap)
+            print(f"[TEX] mat={ir_mat.index} diffuse={diffuse_bitmap!r} -> {tex_path}")
+            if tex_path:
+                tex_node = mat.node_tree.nodes.new("ShaderNodeTexImage")
+                tex_node.name = f"Diffuse_{diffuse_bitmap}"
+                try:
+                    existing = bpy.data.images.get(os.path.basename(tex_path))
+                    if existing:
+                        tex_node.image = existing
+                    else:
+                        tex_node.image = bpy.data.images.load(tex_path)
+                    img = tex_node.image
+                    print(f"[TEX] Loaded image: {img.name} size={img.size[0]}x{img.size[1]} channels={img.channels}")
+                    mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Base Color"])
+
+                    if ir_mat.flags & 0x01:  # ALPHA_TEST
+                        mat.node_tree.links.new(tex_node.outputs["Alpha"], bsdf.inputs["Alpha"])
+                        mat.blend_method = "CLIP"
+                except Exception as e:
+                    print(f"Failed to load texture {tex_path}: {e}")
+
+        # Blend mode (overrides CLIP for true alpha-blend materials)
+        if ir_mat.blend_mode == 1:  # ALPHA
+            mat.blend_method = "BLEND"
+            mat.show_transparent_back = False
+            if tex_node:
+                mat.node_tree.links.new(tex_node.outputs["Alpha"], bsdf.inputs["Alpha"])
+        elif ir_mat.blend_mode == 2:  # ADDITIVE
+            mat.blend_method = "BLEND"
+            if "Emission Strength" in bsdf.inputs:
+                bsdf.inputs["Emission Strength"].default_value = 1.0
+            if tex_node and "Emission Color" in bsdf.inputs:
+                mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Emission Color"])
+
+        mat["blend_mode"] = ir_mat.blend_mode
+
+        # Wire bump/normal map (slot 3)
+        # NovaLogic's engine uses height-based bump mapping, NOT tangent-space
+        # normal maps. The bump data comes from:
+        #   - Type 4 (NORMAL_MDT): .mdt files — proprietary format, can't load
+        #   - Type 5 (NORMAL_TGA): TGA alpha channel contains height data
+        #   - Stage1:alpha: diffuse texture alpha = height map (DOT3 shaders)
+        # Use ShaderNodeBump (height→normal) instead of ShaderNodeNormalMap.
+        normal_bitmap = mat.get("ase_normal_bitmap", "")
+        normal_type = mat.get("ase_normal_type", 0)
+        bump_wired = False
+        if normal_bitmap and normal_type != 4:  # Skip MDT — Blender can't load
+            tex_path = self._resolve_texture(normal_bitmap)
+            if tex_path:
+                try:
+                    normal_tex = mat.node_tree.nodes.new("ShaderNodeTexImage")
+                    normal_tex.name = f"Bump_{normal_bitmap}"
+                    existing = bpy.data.images.get(os.path.basename(tex_path))
+                    if existing:
+                        normal_tex.image = existing
+                    else:
+                        normal_tex.image = bpy.data.images.load(tex_path)
+                    normal_tex.image.colorspace_settings.name = "Non-Color"
+                    bump_node = mat.node_tree.nodes.new("ShaderNodeBump")
+                    if normal_type == 5:
+                        # NORMAL_TGA: height data is in the alpha channel
+                        mat.node_tree.links.new(normal_tex.outputs["Alpha"], bump_node.inputs["Height"])
+                    else:
+                        mat.node_tree.links.new(normal_tex.outputs["Color"], bump_node.inputs["Height"])
+                    mat.node_tree.links.new(bump_node.outputs["Normal"], bsdf.inputs["Normal"])
+                    bump_wired = True
+                except Exception as e:
+                    print(f"Failed to load bump map {tex_path}: {e}")
+
+        # Fallback: for bump shaders with no separate bump texture,
+        # the diffuse texture's alpha channel IS the height map.
+        # Shader types 1-6 (DOT3, PHONGT, BUMP) all use diffuse alpha as bump.
+        _bump_shaders = ("DOT3", "PHONGT", "BUMP")
+        if not bump_wired and tex_node and any(s in shader for s in _bump_shaders):
+            bump_node = mat.node_tree.nodes.new("ShaderNodeBump")
+            mat.node_tree.links.new(tex_node.outputs["Alpha"], bump_node.inputs["Height"])
+            mat.node_tree.links.new(bump_node.outputs["Normal"], bsdf.inputs["Normal"])
+
+        # Handle EMISSIVE flag / emissive_type
+        if ir_mat.flags & 0x08:
+            if "Emission Strength" in bsdf.inputs:
+                bsdf.inputs["Emission Strength"].default_value = 1.0
+
+        # Glass / reflection
+        if ir_mat.is_glass:
+            if "Transmission Weight" in bsdf.inputs:
+                bsdf.inputs["Transmission Weight"].default_value = 0.5
+            elif "Transmission" in bsdf.inputs:
+                bsdf.inputs["Transmission"].default_value = 0.5
+            if "IOR" in bsdf.inputs:
+                bsdf.inputs["IOR"].default_value = 1.45
+            rc = ir_mat.reflect_color
+            if rc[0] != 0.0 or rc[1] != 0.0 or rc[2] != 0.0:
+                mat["reflect_color"] = [rc[0], rc[1], rc[2], rc[3]]
+
+        # Specular intensity — in the NovaLogic engine, specular is only active
+        # when shader_type selects a bump+specular or phong+specular mode.
+        # The gsys_phong lookup uses fixed exponents (pow 4/16/64).
+        # Map specular_intensity to both Specular IOR Level and Roughness.
+        if ir_mat.specular_intensity > 0:
+            spec = min(ir_mat.specular_intensity / 255.0, 1.0)
+            if "Specular IOR Level" in bsdf.inputs:
+                bsdf.inputs["Specular IOR Level"].default_value = spec
+            elif "Specular" in bsdf.inputs:
+                bsdf.inputs["Specular"].default_value = spec
+            # Derive roughness from specular: higher specular = lower roughness.
+            # The phong LUT exponents (4-64) produce relatively tight highlights,
+            # so map 0->1.0 roughness, 255->0.3 roughness.
+            bsdf.inputs["Roughness"].default_value = 1.0 - spec * 0.7
+
+        # Luminosity — drives emission in the engine
+        if ir_mat.luminosity > 0:
+            lum = min(ir_mat.luminosity / 255.0, 1.0)
+            if "Emission Strength" in bsdf.inputs:
+                bsdf.inputs["Emission Strength"].default_value = lum
+
+        # UV tiling (apply Mapping node if tiling != 0 and != 1)
+        u_tile = ir_mat.u_tiling
+        v_tile = ir_mat.v_tiling
+        if (u_tile != 0.0 and u_tile != 1.0) or (v_tile != 0.0 and v_tile != 1.0):
+            if u_tile == 0.0:
+                u_tile = 1.0
+            if v_tile == 0.0:
+                v_tile = 1.0
+            uv_node = mat.node_tree.nodes.new("ShaderNodeUVMap")
+            mapping = mat.node_tree.nodes.new("ShaderNodeMapping")
+            mapping.inputs["Scale"].default_value = (u_tile, v_tile, 1.0)
+            mat.node_tree.links.new(uv_node.outputs["UV"], mapping.inputs["Vector"])
+            # Wire mapping output to all existing texture image nodes
+            for node in mat.node_tree.nodes:
+                if node.type == "TEX_IMAGE":
+                    mat.node_tree.links.new(mapping.outputs["Vector"], node.inputs["Vector"])
+
+        # Store shader animation parameters as custom properties for round-trip
+        if ir_mat.u_params.style != 0:
+            mat["uv_u_style"] = int(ir_mat.u_params.style)
+            mat["uv_u_rate"] = ir_mat.u_params.gen_rate
+        if ir_mat.v_params.style != 0:
+            mat["uv_v_style"] = int(ir_mat.v_params.style)
+            mat["uv_v_rate"] = ir_mat.v_params.gen_rate
+        if ir_mat.alpha_gen.style != 0:
+            mat["alpha_gen_style"] = int(ir_mat.alpha_gen.style)
+            mat["alpha_gen_rate"] = ir_mat.alpha_gen.rate
+            mat["alpha_gen_start"] = int(ir_mat.alpha_gen.start)
+            mat["alpha_gen_end"] = int(ir_mat.alpha_gen.end)
+        if ir_mat.rgb_gen.style != 0:
+            mat["rgb_gen_style"] = int(ir_mat.rgb_gen.style)
+            mat["rgb_gen_rate"] = ir_mat.rgb_gen.rate
+            sc = ir_mat.rgb_gen.start_color
+            ec = ir_mat.rgb_gen.end_color
+            mat["rgb_gen_start_color"] = [sc[0], sc[1], sc[2], sc[3]]
+            mat["rgb_gen_end_color"] = [ec[0], ec[1], ec[2], ec[3]]
+        if ir_mat.animation.num_frames > 0:
+            mat["tex_anim_frames"] = int(ir_mat.animation.num_frames)
+            mat["tex_anim_type"] = int(ir_mat.animation.animation_type)
+            mat["tex_anim_time"] = int(ir_mat.animation.cycle_frame_time)
+
+        return mat
+
+    def _resolve_texture(self, texture_name: str) -> str | None:
+        if not texture_name or not self.resolver:
+            return None
+        return self.resolver.resolve_texture(texture_name)
+
+    def _create_marker_material(self, name: str, color: tuple):
+        if name in bpy.data.materials:
+            return bpy.data.materials[name]
+        mat = bpy.data.materials.new(name)
+        mat.use_nodes = True
+        mat.node_tree.nodes.clear()
+        bsdf = mat.node_tree.nodes.new("ShaderNodeBsdfPrincipled")
+        output = mat.node_tree.nodes.new("ShaderNodeOutputMaterial")
+        mat.node_tree.links.new(bsdf.outputs["BSDF"], output.inputs["Surface"])
+        bsdf.inputs["Base Color"].default_value = (*color, 1.0)
+        bsdf.inputs["Roughness"].default_value = 1.0
+        if "Emission Color" in bsdf.inputs:
+            bsdf.inputs["Emission Color"].default_value = (*color, 1.0)
+        elif "Emission" in bsdf.inputs:
+            bsdf.inputs["Emission"].default_value = (*color, 1.0)
+        if "Emission Strength" in bsdf.inputs:
+            bsdf.inputs["Emission Strength"].default_value = 0.3
+        return mat
+
+    def create_scene_markers(self):
+        """Create center and attachment point markers, parented to part nodes."""
+        if self.ir.lod_count == 0:
+            return
+        lod0 = self.ir.lods[0]
+
+        for i in range(int(lod0.part_count)):
+            if i not in self.part_nodes:
+                continue
+            part_node = self.part_nodes[i]
+
+            # Center point (child of part node, at origin = part center)
+            center_mesh = bpy.data.meshes.new(f"_{i + 1:02d} center")
+            center_obj = bpy.data.objects.new(f"_{i + 1:02d} center", center_mesh)
+            create_cube_mesh(center_mesh, 0.015)
+            center_obj.data.materials.append(self._create_marker_material("center_magenta", (1.0, 0.0, 1.0)))
+            bpy.context.collection.objects.link(center_obj)
+            center_obj.parent = part_node
+
+        # Create tilde attachment point objects (~01a, ~01b, etc.)
+        num_parts = int(lod0.part_count)
+        pi_counter: dict[int, int] = {}
+        for i in range(num_parts):
+            if i not in self.part_nodes:
+                continue
+            part = lod0.parts[i]
+            pi = int(part.parent_index)
+
+            # Skip root parts (no parent to attach to)
+            if i == 0 or pi < 0:
+                continue
+
+            count = pi_counter.get(pi, 0)
+            pi_counter[pi] = count + 1
+            suffix = chr(ord('a') + (count % 26))
+            attach_name = f"~{pi + 1:02d}{suffix} attach"
+
+            attach_mesh = bpy.data.meshes.new(attach_name)
+            attach_obj = bpy.data.objects.new(attach_name, attach_mesh)
+            create_cube_mesh(attach_mesh, 0.012)
+
+            bpy.context.collection.objects.link(attach_obj)
+            attach_obj.parent = self.part_nodes[i]
+
+    def create_user_points(self):
+        """Create user point markers, localized to parent part space."""
+        if self.ir.lod_count == 0:
+            return
+        lod0 = self.ir.lods[0]
+
+        for i in range(int(self.ir.userpoint_count)):
+            up = self.ir.userpoints[i]
+            name = up.name.decode("utf-8", errors="replace").rstrip("\x00")
+
+            # Build display name from type code
+            display_idx = up.part_index if up.part_index >= 0 else 0
+            type_code = up.type_code
+            if type_code == 71:
+                prefix = "UPG"
+            elif type_code == 83:
+                prefix = "UPS"
+            elif type_code == 49:
+                prefix = "NVG"
+            elif type_code == 48:
+                prefix = "GND"
+            else:
+                prefix = "USR"
+            marker_name = f"{prefix}{display_idx + 1:02d}"
+            if name:
+                marker_name += f" {name}"
+
+            marker_mesh = bpy.data.meshes.new(marker_name)
+            marker_obj = bpy.data.objects.new(marker_name, marker_mesh)
+            create_cube_mesh(marker_mesh, 0.015)
+            marker_obj.data.materials.append(self._create_marker_material("user_point_white", (1.0, 1.0, 1.0)))
+            bpy.context.collection.objects.link(marker_obj)
+
+            # Position: negate X input, then convert to Blender space and subtract parent abs
+            raw = Vector(up.position)
+            up_pos = render_space(Vector((-raw.x, raw.y, raw.z)))
+            if up.part_index >= 0 and up.part_index < int(lod0.part_count):
+                parent_part = lod0.parts[up.part_index]
+                up_pos = up_pos - render_space(Vector(parent_part.abs_position))
+
+            marker_obj.location = up_pos
+
+            # direction stores the userpoint's local Z-axis as a unit vector
+            # (stored as rot_y/65536, rot_z/65536, rot_x/65536 in the file).
+            # Build rotation that aligns local Z with this direction.
+            raw_dir = Vector(up.direction)
+            z_axis = render_space(Vector((-raw_dir.x, raw_dir.y, raw_dir.z))).normalized()
+            if z_axis.length_squared > 1e-6:
+                # Construct orthonormal basis from Z-axis direction
+                world_up = Vector((0.0, 0.0, 1.0))
+                if abs(z_axis.dot(world_up)) > 0.999:
+                    world_up = Vector((0.0, 1.0, 0.0))
+                x_axis = world_up.cross(z_axis).normalized()
+                y_axis = z_axis.cross(x_axis).normalized()
+                rot_mat = Matrix((
+                    (x_axis.x, y_axis.x, z_axis.x),
+                    (x_axis.y, y_axis.y, z_axis.y),
+                    (x_axis.z, y_axis.z, z_axis.z),
+                )).to_3x3()
+                marker_obj.rotation_euler = rot_mat.to_euler()
+
+            parent_node = self.root_object
+            if up.part_index >= 0 and up.part_index < len(self.part_nodes):
+                parent_node = self.part_nodes[up.part_index]
+            marker_obj.parent = parent_node
+
+            # Direction arrow child
+            arrow_mesh = bpy.data.meshes.new(marker_name + "_dir")
+            arrow_obj = bpy.data.objects.new(marker_name + "_dir", arrow_mesh)
+            create_direction_arrow_mesh(arrow_mesh, 0.04, 0.003)
+            arrow_obj.data.materials.append(self._create_marker_material("user_point_arrow", (1.0, 0.8, 0.0)))
+            bpy.context.collection.objects.link(arrow_obj)
+            arrow_obj.parent = marker_obj
+
+            marker_obj["nl_raw_position"] = tuple(up.position)
+            marker_obj["nl_raw_direction"] = tuple(up.direction)
+            marker_obj["nl_parent_index"] = int(up.part_index)
+            marker_obj["nl_type_code"] = int(up.type_code)
+
+    def create_scene_lights(self):
+        """Create light objects from the IR's light data."""
+        for i in range(int(self.ir.light_count)):
+            light = self.ir.lights[i]
+            light_idx = light.part_index if light.part_index >= 0 else i
+            light_name = f"LP{light_idx + 1:02d}"
+
+            light_data = bpy.data.lights.new(name=f"{light_name}_data", type="POINT")
+            light_obj = bpy.data.objects.new(light_name, light_data)
+
+            light_data.color = (light.color_start[0], light.color_start[1], light.color_start[2])
+            light_data.energy = 1.0
+            if light.attenuation_end > 0:
+                light_data.use_custom_distance = True
+                light_data.cutoff_distance = light.attenuation_end
+            light_data.use_shadow = False
+
+            bpy.context.collection.objects.link(light_obj)
+
+            # Convert position to Blender space
+            light_obj.location = render_space(Vector(light.offset))
+
+            parent_node = self.root_object
+            if light.part_index >= 0 and light.part_index in self.part_nodes:
+                parent_node = self.part_nodes[light.part_index]
+            light_obj.parent = parent_node
+
+    def create_collision_visualization(self):
+        coll = self.ir.collision
+        if not coll:
+            return
+
+        lod0 = self.ir.lods[0] if self.ir.lod_count > 0 else None
+        part_count = int(lod0.part_count) if lod0 else 0
+        name_counters = {}
+
+        for vol_idx in range(int(coll.contents.volume_count)):
+            vol = coll.contents.volumes[vol_idx]
+            try:
+                color = CollisionType(vol.type).color
+            except ValueError:
+                color = (1.0, 1.0, 1.0)
+
+            # Determine parent node and parent position
+            parent = self.root_object
+            parent_pos = Vector((0, 0, 0))
+            parent_set = False
+            if vol.object_index >= 0 and vol.object_index < part_count:
+                parent = self.part_nodes.get(vol.object_index, self.root_object)
+                part = lod0.parts[vol.object_index]
+                parent_pos = render_space(Vector(part.abs_position))
+                parent_set = True
+            if not parent_set and vol.part_index >= 0 and vol.part_index < part_count:
+                parent = self.part_nodes.get(vol.part_index, self.root_object)
+                part = lod0.parts[vol.part_index]
+                parent_pos = render_space(Vector(part.abs_position))
+
+            # Compute world center and local offset
+            world_min = collision_space(Vector(vol.min))
+            world_max = collision_space(Vector(vol.max))
+            world_center = (world_min + world_max) * 0.5
+            local_center = world_center - parent_pos
+
+            # Build name: type + object_index + duplicate suffix
+            name_index = vol.object_index if vol.object_index >= 0 else vol.part_index
+            name_key = name_index if name_index >= 0 else -1
+            counter_key = (vol.type, name_key)
+            name_counters[counter_key] = name_counters.get(counter_key, 0) + 1
+            occurrence = name_counters[counter_key]
+            mesh_name = _build_volume_name(vol.type, vol.flags, name_index, occurrence) + "-colonly"
+
+            # Gather planes (respecting plane_start/plane_count bounds)
+            hs_list = []
+            if (vol.plane_count > 0 and vol.plane_start >= 0 and
+                    vol.plane_start + vol.plane_count <= int(coll.contents.plane_count)):
+                for p_idx in range(vol.plane_count):
+                    gp_idx = vol.plane_start + p_idx
+                    plane = coll.contents.planes[gp_idx]
+                    n = collision_space(Vector(plane.normal))
+                    hs_list.append([n.x, n.y, n.z, plane.distance])
+
+            min_pt = collision_space(Vector(vol.min))
+            max_pt = collision_space(Vector(vol.max))
+
+            try:
+                hull_ok = False
+                if hs_list:
+                    vertices, faces = compute_polyhedron_controlled(hs_list, min_pt, max_pt)
+                    if vertices is not None and len(vertices) >= 4:
+                        vertices = [v - world_center for v in vertices]
+                        self._create_collision_mesh(
+                            mesh_name, vertices, faces, color,
+                            parent=parent, location=local_center,
+                        )
+                        hull_ok = True
+
+                if not hull_ok:
+                    # Fallback box from min/max bounds
+                    half = (abs((world_max.x - world_min.x) * 0.5),
+                            abs((world_max.y - world_min.y) * 0.5),
+                            abs((world_max.z - world_min.z) * 0.5))
+                    # Skip degenerate volumes where all dimensions are zero
+                    if half[0] <= 0.0 and half[1] <= 0.0 and half[2] <= 0.0:
+                        continue
+                    # Box vertices: iterate s0 in (-1,1), s1 in (-1,1), s2 in (-1,1)
+                    # Index layout: 0=(-,-,-) 1=(-,-,+) 2=(-,+,-) 3=(-,+,+)
+                    #               4=(+,-,-) 5=(+,-,+) 6=(+,+,-) 7=(+,+,+)
+                    box_pts = [
+                        (s0 * half[0], s1 * half[1], s2 * half[2])
+                        for s0 in (-1, 1) for s1 in (-1, 1) for s2 in (-1, 1)
+                    ]
+                    # Hardcoded 6 quad faces, fan-triangulated
+                    box_faces = [
+                        [0, 2, 3, 1],  # -X face
+                        [4, 5, 7, 6],  # +X face
+                        [0, 1, 5, 4],  # -Y face
+                        [2, 6, 7, 3],  # +Y face
+                        [0, 4, 6, 2],  # -Z face
+                        [1, 3, 7, 5],  # +Z face
+                    ]
+                    self._create_collision_mesh(
+                        mesh_name, box_pts, box_faces, color,
+                        parent=parent, location=local_center,
+                    )
+            except Exception as e:
+                print(f"Failed to create collision mesh {mesh_name}: {e}")
+
+    def _create_collision_mesh(self, name, vertices, polygon_faces, color,
+                               parent=None, location=None):
+        """Create a collision mesh with shared vertices.
+
+        polygon_faces: list of polygon faces (each a list of vertex indices).
+        Fan-triangulated using the shared vertex indices directly.
+        """
+        mesh_data = bpy.data.meshes.new(name)
+        mesh_obj = bpy.data.objects.new(name, mesh_data)
+        # Build shared vertex list
+        verts = [tuple(vertices[i]) for i in range(len(vertices))]
+        # Fan-triangulate each polygon face using shared vertex indices
+        tri_faces = []
+        for face in polygon_faces:
+            for i in range(1, len(face) - 1):
+                tri_faces.append((face[0], face[i], face[i + 1]))
+        mesh_data.from_pydata(verts, [], tri_faces)
+        mesh_data.update()
+
+        # Store constant smoothing group for ASE export (matches reference)
+        sg_attr = mesh_data.attributes.new('smoothing_group', 'INT', 'FACE')
+        for j in range(len(tri_faces)):
+            sg_attr.data[j].value = 1
+
+        bpy.context.collection.objects.link(mesh_obj)
+
+        if parent is not None:
+            mesh_obj.parent = parent
+        if location is not None:
+            mesh_obj.location = location
+
+        mat_name = f"Collision_{name}"
+        mat = bpy.data.materials.get(mat_name)
+        if mat is None:
+            mat = bpy.data.materials.new(mat_name)
+            mat.diffuse_color = (*color, 0.5)
+        mesh_data.materials.append(mat)
+        mesh_obj.display_type = "SOLID"
+        mesh_obj.color = (*color, 0.7)
+
+    def create_occlusion_visualization(self):
+        """Create occlusion meshes from the IR's occlusion data."""
+        occ = self.ir.occlusion
+        if not occ or int(occ.contents.object_count) == 0:
+            return
+
+        if self.ir.lod_count == 0:
+            return
+        lod0 = self.ir.lods[0]
+
+        occ_counters = {}
+        for i in range(int(occ.contents.object_count)):
+            occ_obj = occ.contents.objects[i]
+            if occ_obj.num_vertices <= 0 or occ_obj.face_count <= 0:
+                continue
+
+            vert_start = occ_obj.vertex_start
+            face_start = occ_obj.face_start
+            vert_count = occ_obj.num_vertices
+            face_count_val = occ_obj.face_count
+
+            if vert_start + vert_count > int(occ.contents.vertex_count):
+                continue
+            if face_start + face_count_val > int(occ.contents.face_count):
+                continue
+
+            # Compute parent abs position for localization
+            occ_parent = occ_obj.parent_subobject_index
+            part_abs = Vector((0, 0, 0))
+            if occ_parent >= 0 and occ_parent < int(lod0.part_count):
+                parent_part = lod0.parts[occ_parent]
+                part_abs = render_space(Vector(parent_part.abs_position))
+
+            # Vertices: transform_position then subtract parent abs
+            vertices = []
+            for j in range(vert_count):
+                v = occ.contents.vertices[vert_start + j]
+                pos = render_space(Vector(v.position))
+                vertices.append(pos - part_abs)
+
+            # Faces: unpack raw_indices as 3 x uint8
+            faces = []
+            face_flags = []
+            for j in range(face_count_val):
+                face = occ.contents.faces[face_start + j]
+                raw = face.raw_indices
+                v1 = raw & 0xFF
+                v2 = (raw >> 8) & 0xFF
+                v3 = (raw >> 16) & 0xFF
+                if v1 < len(vertices) and v2 < len(vertices) and v3 < len(vertices):
+                    faces.append([v1, v2, v3])
+                    face_flags.append(((raw >> 24) & 0xFF) + 1)
+
+            if not vertices or not faces:
+                continue
+
+            base_name = _build_occlusion_name(occ_obj.type, occ_obj.parent_subobject_index, occ_obj.connecting_subobject)
+            key = (occ_obj.type, int(occ_obj.parent_subobject_index), int(occ_obj.connecting_subobject))
+            occ_counters[key] = occ_counters.get(key, 0) + 1
+            mesh_name = base_name + _format_duplicate_suffix(occ_counters[key]) + "-occonly"
+            mesh_data = bpy.data.meshes.new(mesh_name)
+            bl_obj = bpy.data.objects.new(mesh_name, mesh_data)
+
+            mesh_data.from_pydata(vertices, [], faces)
+            mesh_data.update()
+
+            # Store face_flag as smoothing group for ASE export
+            sg_attr = mesh_data.attributes.new('smoothing_group', 'INT', 'FACE')
+            for j, sg_val in enumerate(face_flags):
+                sg_attr.data[j].value = sg_val
+
+            bpy.context.collection.objects.link(bl_obj)
+
+            try:
+                occ_color = OcclusionType(occ_obj.type).color
+            except ValueError:
+                occ_color = (1.0, 0.0, 0.0)
+
+            mat_name = f"Occlusion_{mesh_name}"
+            mat = bpy.data.materials.get(mat_name)
+            if mat is None:
+                mat = bpy.data.materials.new(mat_name)
+                mat.diffuse_color = (*occ_color, 0.25)
+            mesh_data.materials.append(mat)
+            bl_obj.display_type = "SOLID"
+            bl_obj.color = (*occ_color, 0.25)
+
+            parent_node = self.root_object
+            if occ_parent >= 0 and occ_parent in self.part_nodes:
+                parent_node = self.part_nodes[occ_parent]
+            bl_obj.parent = parent_node
