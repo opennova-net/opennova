@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <dirent.h>
 
 #include "threedi/threedi.h"
 #include "threedi/threedi_3di3.h"
@@ -76,7 +75,12 @@ static int roundtrip_and_compare(const char *path, const char id[4]) {
         free(before.data);
         return 0;
     }
-    snprintf(tmp, sizeof(tmp), "/tmp/%s.rt", strrchr(path, '/') ? strrchr(path, '/') + 1 : path);
+    const char *base = strrchr(path, '/');
+#ifdef _WIN32
+    { const char *bs = strrchr(path, '\\'); if (bs && (!base || bs > base)) base = bs; }
+#endif
+    base = base ? base + 1 : path;
+    snprintf(tmp, sizeof(tmp), "%s/%s.rt", test_paths_temp_dir(), base);
     if (threedi_3di3_write(tmp, &model) != 0) {
         fprintf(stderr, "threedi_3di3_write failed for %s\n", tmp);
         ok = 0;
