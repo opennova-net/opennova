@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "novalogic_importer"
-version = "1.0.0"
+version = "0.0.1"
 name = "Novalogic 3DI Importer/Exporter"
 tagline = "Import Novalogic 3D models (.3di, .bad, .adm) and Export ASE files"
 maintainer = "Taylor Finnell <noreply@anthropic.com>"

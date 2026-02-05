@@ -111,4 +111,15 @@ static const char *test_paths_repo_root(const char *file_path) {
     return result;
 }
 
+static const char *test_paths_temp_dir(void) {
+#ifdef _WIN32
+    const char *tmp = getenv("TEMP");
+    if (!tmp) tmp = getenv("TMP");
+    if (!tmp) tmp = ".";
+    return tmp;
+#else
+    return "/tmp";
+#endif
+}
+
 #endif // TEST_PATHS_H

@@ -17,9 +17,9 @@ jobs:
         with:
           lfs: true
 
-      - name: Run tests
+      - name: Build and test
         shell: bash
-        run: scripts/run_tests.sh
+        run: scripts/build.sh
 
   package:
     runs-on: ubuntu-latest

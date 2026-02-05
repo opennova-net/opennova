@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "def/def.h"
+#include "common/test_paths.h"
 
 int main(void) {
     const char *test_def =
@@ -18,7 +19,8 @@ int main(void) {
         "  sound_profile SP_Test\t\t// Male Sound Profile\n"
         "end\n";
 
-    const char *temp_path = "/tmp/def_comment_strip_test.def";
+    char temp_path[4096];
+    snprintf(temp_path, sizeof(temp_path), "%s/def_comment_strip_test.def", test_paths_temp_dir());
     FILE *f = fopen(temp_path, "wb");
     if (!f) {
         fprintf(stderr, "FAIL: could not create temp file\n");

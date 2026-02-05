@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "adm/adm.h"
+#include "common/test_paths.h"
 
 int main(void) {
     const char *test_content =
@@ -11,7 +12,8 @@ int main(void) {
         "anim_run\t\t\"RunAnim.bad\"\n"
         "anim_walk  \"  WalkAnim.bad  \"\n";
 
-    const char *temp_path = "/tmp/adm_trim_test.adm";
+    char temp_path[4096];
+    snprintf(temp_path, sizeof(temp_path), "%s/adm_trim_test.adm", test_paths_temp_dir());
     FILE *f = fopen(temp_path, "wb");
     if (!f) {
         fprintf(stderr, "FAIL: could not create temp file\n");

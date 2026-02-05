@@ -8,7 +8,7 @@ from __future__ import annotations
 bl_info = {
     "name": "Novalogic 3DI Importer & ASE Exporter",
     "author": "Taylor Finnell",
-    "version": (1, 0, 0),
+    "version": (0, 0, 1),
     "blender": (2, 80, 0),
     "location": "File > Import-Export",
     "description": "Import Novalogic 3D models and Export ASE files",
