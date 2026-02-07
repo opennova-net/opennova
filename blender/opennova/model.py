@@ -14,6 +14,8 @@ class AnimationMeta:
     bad_filepath: str
     fps: int
     frame_count: int
+    bad_name: str = ""  # Original BAD filename stem (e.g. "Dt1RunF")
+    flags: int = 0      # Original BAD flags (0x01=loop, 0x02=translation)
 
 
 @dataclass

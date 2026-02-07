@@ -83,6 +83,7 @@ class AseExporter:
         self.include_uvs = True
         self.include_vertex_colors = False
         self.include_bone_weights = True
+        self.export_textures = True
         self.precision = 4
         self.scale = 1.0
 
@@ -91,6 +92,8 @@ class AseExporter:
         self.material_keeper = MaterialKeeper()
         self.float_format = f"%.{self.precision}f"
         self.scene = None
+        self._texture_queue = {}  # bitmap_filename -> bpy.types.Image
+        self._used_tex_names = {}  # lowercase short name -> original short name (dedup)
 
         # Node processing
         self.total_node_count = 0
@@ -142,8 +145,12 @@ class AseExporter:
                 # Export scene objects
                 self.export_scene_objects()
 
-                print(f"ASE Export: Export completed successfully")
-                return True
+            # Save texture files after the ASE is written
+            if self.export_textures and self._texture_queue:
+                self._save_textures(os.path.dirname(filepath) or '.')
+
+            print(f"ASE Export: Export completed successfully")
+            return True
 
         except PermissionError as e:
             error_msg = f"Permission denied writing to {filepath}: {str(e)}"
@@ -295,6 +302,47 @@ class AseExporter:
         # Export texture maps
         self.export_material_textures(material, indent_level + 1)
 
+    # OED MaterialTexSlot.path is char[16] (15 usable chars + null).
+    # copy_str(dst, 16, src) uses strncpy(dst, src, 15) so texture filenames
+    # (including extension) must be at most 15 characters to survive the
+    # OED's ensure_bucket -> 3DI export pipeline without truncation.
+    MAX_TEX_FILENAME = 15
+
+    def _fit_texture_name(self, name):
+        """Shorten a texture filename to fit OED's 15-char limit.
+
+        Truncates the stem, preserving the extension.  Appends a digit
+        suffix when truncation would create a duplicate.
+
+        Returns the (possibly shortened) filename.
+        """
+        if not name:
+            return name
+        if len(name) <= self.MAX_TEX_FILENAME:
+            self._used_tex_names[name.lower()] = name.lower()
+            return name
+
+        root, ext = os.path.splitext(name)
+        max_stem = self.MAX_TEX_FILENAME - len(ext)
+
+        candidate = root[:max_stem] + ext
+        key = candidate.lower()
+
+        # Deduplicate: if this short name is already taken by a DIFFERENT
+        # original name, shorten further and append a digit.
+        if key in self._used_tex_names and self._used_tex_names[key] != name.lower():
+            for i in range(2, 100):
+                suffix = str(i)
+                candidate = root[:max_stem - len(suffix)] + suffix + ext
+                key = candidate.lower()
+                if key not in self._used_tex_names:
+                    break
+
+        self._used_tex_names[key] = name.lower()
+        if candidate != name:
+            print(f"ASE Export: Texture name shortened: '{name}' -> '{candidate}'")
+        return candidate
+
     def export_material_textures(self, material, indent_level):
         """Export material texture maps.
 
@@ -304,12 +352,13 @@ class AseExporter:
         """
         indent = self.get_indent(indent_level)
 
-        # --- Resolve diffuse bitmap path ---
+        # --- Resolve diffuse bitmap path and image object ---
         diffuse_bitmap = material.get("ase_diffuse_bitmap", "")
+        diffuse_image = None
 
         # If no stored name, try to extract from Blender node tree
         if not diffuse_bitmap and material.use_nodes and material.node_tree:
-            diffuse_bitmap = self._find_bitmap_from_nodes(material)
+            diffuse_bitmap, diffuse_image = self._find_bitmap_from_nodes(material)
 
         # Fix texture extensions for df4oed compatibility.
         # df4oed only supports TGA/PCX/MDT in ASE files.
@@ -325,6 +374,13 @@ class AseExporter:
             return root + '.TGA'
 
         diffuse_bitmap = fix_ext(diffuse_bitmap)
+
+        # Fit to OED's 15-char filename limit
+        diffuse_bitmap = self._fit_texture_name(diffuse_bitmap)
+
+        # Queue the image for TGA export
+        if diffuse_bitmap and diffuse_image:
+            self._texture_queue[diffuse_bitmap] = diffuse_image
 
         def write_map_block(map_token, bitmap_name, subno, amount):
             if not bitmap_name:
@@ -358,7 +414,10 @@ class AseExporter:
         # pointer when alpha_mode == 2 but the TGA loading path isn't taken.
 
     def _find_bitmap_from_nodes(self, material):
-        """Extract a bitmap path from the Blender shader node tree (fallback)."""
+        """Extract a bitmap path and Image object from the Blender shader node tree.
+
+        Returns (path_string, bpy.types.Image or None).
+        """
         def find_image_from_socket(socket, visited=None):
             if not socket or not socket.is_linked:
                 return None
@@ -400,8 +459,34 @@ class AseExporter:
             path = image.filepath or image.filepath_raw or image.name or ""
             if path:
                 path = bpy.path.abspath(path)
-            return path
-        return ""
+            return path, image
+        return "", None
+
+    def _save_textures(self, output_dir):
+        """Save queued texture images as TGA files alongside the ASE."""
+        for filename, image in self._texture_queue.items():
+            dest = os.path.join(output_dir, filename)
+            if os.path.exists(dest):
+                print(f"ASE Export: Texture already exists, skipping: {filename}")
+                continue
+
+            try:
+                # Save via a temporary scene settings override to force TGA output.
+                # We work on a copy so the original image's settings are untouched.
+                orig_path = image.filepath_raw
+                orig_format = image.file_format
+
+                image.filepath_raw = dest
+                image.file_format = 'TARGA'
+                image.save()
+
+                # Restore original values
+                image.filepath_raw = orig_path
+                image.file_format = orig_format
+
+                print(f"ASE Export: Saved texture {filename}")
+            except Exception as e:
+                print(f"ASE Export: Failed to save texture {filename}: {e}")
 
     def export_scene_objects(self):
         """Export all scene objects"""
@@ -479,16 +564,29 @@ class AseExporter:
 
         return mesh_eval, bm, temp_mesh, neg_scale, orig_edge_keys
 
+    def _export_name(self, name):
+        """Map Blender object name to ASE node name.
+
+        PN## helpers (part nodes) must be exported as bare numbers ("01", "02", ...)
+        so that df4oed's classification loop recognises the first digit character and
+        assigns them to the correct numbered group.
+        """
+        if name.startswith("PN") and len(name) >= 4 and name[2:4].isdigit():
+            return name[2:]  # "PN01" -> "01", "PN40" -> "40"
+        return name
+
     def export_node_header(self, obj, indent_level):
         """Export node header information"""
         indent = self.get_indent(indent_level)
 
         # Node name
-        self.write_line(f'{indent}{tokens.ID_NODE_NAME} "{self.fixup_name(obj.name)}"')
+        export_name = self._export_name(obj.name)
+        self.write_line(f'{indent}{tokens.ID_NODE_NAME} "{self.fixup_name(export_name)}"')
 
         # Parent node — export for any linked object (matches 3ds Max behavior)
         if obj.parent:
-            self.write_line(f'{indent}{tokens.ID_NODE_PARENT} "{self.fixup_name(obj.parent.name)}"')
+            parent_name = self._export_name(obj.parent.name)
+            self.write_line(f'{indent}{tokens.ID_NODE_PARENT} "{self.fixup_name(parent_name)}"')
 
         # Check for bone numbering (nodes starting with "BN")
         if obj.name.startswith("BN") and len(obj.name) >= 4:
@@ -500,7 +598,7 @@ class AseExporter:
 
     def export_node_transform(self, obj, indent_level):
         """Export node transformation matrix (world space, like 3ds Max's GetNodeTM)"""
-        self._write_node_tm(obj.name, obj.matrix_world, indent_level)
+        self._write_node_tm(self._export_name(obj.name), obj.matrix_world, indent_level)
 
     def _write_node_tm(self, name, matrix, indent_level):
         """Write a NODE_TM block from a matrix."""
@@ -696,8 +794,9 @@ class AseExporter:
         self.write_line(f"{indent}{tokens.ID_MESH_TVERTLIST} {{")
 
         for i, uv in enumerate(uv_coords):
-            # Use UV coordinates directly (like reference implementation)
-            self.write_line(f"{indent}\t{tokens.ID_MESH_TVERT} {i}\t{self.format_float(uv.x)}\t{self.format_float(uv.y)}\t{self.format_float(0.0)}")
+            # UV V-flip: Blender V=0 at bottom, game/OED/DDS convention V=0 at top.
+            # The importer applies (1-V) on load, so we reverse it here.
+            self.write_line(f"{indent}\t{tokens.ID_MESH_TVERT} {i}\t{self.format_float(uv.x)}\t{self.format_float(1.0 - uv.y)}\t{self.format_float(0.0)}")
 
         self.write_line(f"{indent}}}")  # End UV vertex list
 

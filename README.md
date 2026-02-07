@@ -31,6 +31,10 @@ A Blender 4.2+ addon for importing and exporting NovaLogic assets.
 
 - **3di_dump** — CLI tool for inspecting 3DI binary files in a diff-friendly text format
 
+## Documentation
+
+- BAD/ADM animation import notes: `docs/formats/bad-adm-animation.md`
+
 ## Building
 
 ### Prerequisites

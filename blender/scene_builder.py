@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import enum
+import math
 import os
 
 import bpy
@@ -157,6 +158,9 @@ class BlenderSceneBuilder:
         self.armature_object = None
         self._bone_infos = []                      # populated by build_armature_from_bad
         self._mesh_bone_data = {}                  # mesh_obj.name -> per-vertex bone data
+        self._world_rot_corrections = []           # BAD world rot -> Blender rest world rot
+        self._rest_local_quats = []                # Blender local rest quaternions
+        self._rest_local_inv_mats = []             # Blender local rest inverse 3x3 matrices
 
     def build_basic_scene(self, name: str):
         if bpy.context.active_object and bpy.context.active_object.mode != "OBJECT":
@@ -249,10 +253,10 @@ class BlenderSceneBuilder:
             # Orthonormalize to clean up floating-point drift
             local_rot = orthonormalize(local_rot)
 
-            bone_infos.append((bone_name, parent_idx, rest_origin, local_rot))
+            bone_infos.append((bone_name, parent_idx, rest_origin, local_rot, bone.length))
 
         # root_motion bone (identity transform, no parent)
-        bone_infos.append(("root_motion", -1, (0, 0, 0), Matrix.Identity(3)))
+        bone_infos.append(("root_motion", -1, (0, 0, 0), Matrix.Identity(3), 0.0))
 
         self._bone_infos = bone_infos
 
@@ -280,11 +284,19 @@ class BlenderSceneBuilder:
         abs_rotations[bone_count] = Matrix.Identity(3)
 
         # Accumulate world positions from parent-local offsets
-        for i, (bname, parent_idx, rest_origin, local_rot) in enumerate(bone_infos):
+        for i, (_bname, parent_idx, rest_origin, _local_rot, _bad_length) in enumerate(bone_infos):
             if parent_idx >= 0 and abs_positions[parent_idx] is not None:
                 abs_positions[i] = abs_positions[parent_idx] + abs_rotations[parent_idx] @ Vector(rest_origin)
             else:
                 abs_positions[i] = Vector(rest_origin)
+
+        # Child lookup for tail-length estimation (use actual hierarchy spacing,
+        # not BAD bone length fields).
+        children_by_parent = [[] for _ in range(bone_count)]
+        for child_idx in range(bone_count):
+            parent_idx = bone_infos[child_idx][1]
+            if 0 <= parent_idx < bone_count:
+                children_by_parent[parent_idx].append(child_idx)
 
         # -- adm_create_skeleton_from_bone_data --
         armature_data = bpy.data.armatures.new(f"{name}_Armature")
@@ -302,27 +314,54 @@ class BlenderSceneBuilder:
         edit_bones = armature_data.edit_bones
         bl_bones = []
 
-        for i, (bname, parent_idx, rest_origin, local_rot) in enumerate(bone_infos):
+        for i, (bname, parent_idx, rest_origin, _local_rot, _bad_length) in enumerate(bone_infos):
             eb = edit_bones.new(bname)
             eb.head = abs_positions[i]
 
-            # Bone tail must follow the BAD world rotation's Y axis so that
-            # Blender's rest rotation matches the animation rotation convention.
-            # Using child-pointing tails would change the Y axis, creating a
-            # mismatch between rest rotation and animation keyframes.
-            tail_dir = abs_rotations[i] @ Vector((0, 0.05, 0))
+            if i < bone_count:
+                # Use the opposite Y direction from the converted BAD basis.
+                # This fixes bones appearing reversed in Edit Mode.
+                forward = abs_rotations[i] @ Vector((0, -1.0, 0))
+                if forward.length <= 1e-8:
+                    forward = Vector((0, -1.0, 0))
+                forward.normalize()
+
+                # Prefer child-head distance as display length; fallback to a small
+                # constant so leaves still have visible tails.
+                tail_len = 0.05
+                if children_by_parent[i]:
+                    parent_head = abs_positions[i]
+                    max_child_dist = max(
+                        (abs_positions[c] - parent_head).length
+                        for c in children_by_parent[i]
+                    )
+                    if max_child_dist > 1e-5:
+                        tail_len = max_child_dist
+
+                tail_dir = forward * tail_len
+            else:
+                tail_dir = Vector((0, 0.05, 0))
 
             eb.tail = eb.head + tail_dir
             eb.use_connect = False
+            if i < bone_count:
+                eb["bad_length"] = bone_infos[i][4]
             bl_bones.append(eb)
 
-        for i, (bname, parent_idx, rest_origin, local_rot) in enumerate(bone_infos):
+        for i, (_bname, parent_idx, _rest_origin, _local_rot, _bad_length) in enumerate(bone_infos):
             if parent_idx >= 0 and parent_idx < len(bl_bones):
                 bl_bones[i].parent = bl_bones[parent_idx]
 
+        # Parent BAD root bones under root_motion so the skeleton follows
+        # root_motion displacement.  root_motion is appended last.
+        rm_bone_idx = len(bone_infos) - 1  # root_motion is last
+        for i in range(bone_count):
+            if bone_infos[i][1] < 0:  # BAD root bone (parent_idx == -1)
+                bl_bones[i].parent = bl_bones[rm_bone_idx]
+
         # Align roll so the edit bone's Z axis matches the desired rest orientation.
         # This fully constrains the bone's rest rotation (head/tail sets Y, roll sets X/Z).
-        for i, (bname, parent_idx, rest_origin, local_rot) in enumerate(bone_infos):
+        for i, (_bname, _parent_idx, _rest_origin, _local_rot, _bad_length) in enumerate(bone_infos):
             z_axis = abs_rotations[i] @ Vector((0, 0, 1))
             bl_bones[i].align_roll(z_axis)
 
@@ -335,7 +374,7 @@ class BlenderSceneBuilder:
         self._rest_local_quats = []
         self._rest_local_inv_mats = []
 
-        for i, (bname, parent_idx, rest_origin, local_rot) in enumerate(bone_infos):
+        for i, (bname, parent_idx, rest_origin, _local_rot, _bad_length) in enumerate(bone_infos):
             pose_bone = armature_obj.pose.bones.get(bname)
             if pose_bone is None:
                 self._rest_local_quats.append(Quaternion())
@@ -352,6 +391,41 @@ class BlenderSceneBuilder:
             self._rest_local_quats.append(local_mat.to_quaternion())
             self._rest_local_inv_mats.append(local_mat.to_3x3().inverted())
 
+        # Per-bone world-space basis correction:
+        # BAD channel rotations are authored in BAD world bone axes; Blender edit-bone
+        # display changes (tail direction/roll) can alter rest axes.  Map each BAD
+        # world rotation into Blender rest world rotation with:
+        #   R_bl_world = R_bad_world * C
+        # where C = inv(R_bad_rest_world) * R_bl_rest_world.
+        self._world_rot_corrections = []
+        corr_errs = []
+        for i, (bname, parent_idx, rest_origin, _local_rot, _bad_length) in enumerate(bone_infos):
+            pose_bone = armature_obj.pose.bones.get(bname)
+            if pose_bone is None:
+                self._world_rot_corrections.append(Quaternion((1.0, 0.0, 0.0, 0.0)))
+                continue
+
+            bad_rest_world_q = abs_rotations[i].to_quaternion()
+            bl_rest_world_q = pose_bone.bone.matrix_local.to_quaternion()
+            bad_rest_world_q = self._normalize_quat(bad_rest_world_q)
+            bl_rest_world_q = self._normalize_quat(bl_rest_world_q)
+
+            corr_q = bad_rest_world_q.inverted() @ bl_rest_world_q
+            corr_q = self._normalize_quat(corr_q)
+            self._world_rot_corrections.append(corr_q)
+
+            mapped_rest = bad_rest_world_q @ corr_q
+            err_deg = math.degrees(
+                bl_rest_world_q.rotation_difference(mapped_rest).angle
+            )
+            corr_errs.append(err_deg)
+
+        if corr_errs:
+            print(
+                f"[ARMATURE_CORR] bones={len(corr_errs)} "
+                f"rest-map err deg max/avg={max(corr_errs):.4f}/{(sum(corr_errs)/len(corr_errs)):.4f}"
+            )
+
         print(f"[ARMATURE] Created armature with {len(bone_infos)} bones")
 
     # Mesh-to-armature binding
@@ -363,11 +437,11 @@ class BlenderSceneBuilder:
         IR's bone_indices/bone_weights remapped through the primitive's bone_table.
         For non-skinned meshes, each vertex gets weight 1.0 to its part bone.
         """
-        if not self.armature_object or not hasattr(self, '_bone_infos'):
+        if not self.armature_object:
             return
 
         bone_infos = self._bone_infos
-        mesh_list = getattr(self, 'mesh_objects', [])
+        mesh_list = self.mesh_objects
 
         for mesh_obj in mesh_list:
             bone_data = self._mesh_bone_data.get(mesh_obj.name)
@@ -408,6 +482,23 @@ class BlenderSceneBuilder:
 
     # Animation building (ported from adm_scene_builder.h)
 
+    @staticmethod
+    def _quat_norm_sq(q: Quaternion) -> float:
+        """Version-safe quaternion norm squared for mathutils."""
+        return q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z
+
+    def _normalize_quat(self, q: Quaternion) -> Quaternion:
+        """Return normalized q, or identity if degenerate."""
+        if self._quat_norm_sq(q) <= 1e-24:
+            return Quaternion((1.0, 0.0, 0.0, 0.0))
+        q.normalize()
+        return q
+
+    def _bad_channel_to_blender_quat(self, rq) -> Quaternion:
+        """Convert BAD channel quaternion sample (xyzw) to Blender (wxyz) in Z-up."""
+        q = Quaternion((rq.w, rq.x, -rq.z, rq.y))
+        return self._normalize_quat(q)
+
     def build_animations_from_context(self, anim_context):
         """Build Blender Actions from AnimationContext and push to NLA tracks."""
         from .opennova.bad_ffi import parse_bad, free_bad
@@ -440,25 +531,27 @@ class BlenderSceneBuilder:
                 action = self._build_action_from_bad(
                     bad_file, armature_obj, anim_meta.animation_name
                 )
-                if action:
-                    action.use_fake_user = True
+                action.use_fake_user = True
+                if anim_meta.bad_name:
+                    action["bad_name"] = anim_meta.bad_name
+                action["bad_flags"] = anim_meta.flags
 
-                    # Push action to NLA track
-                    track = armature_obj.animation_data.nla_tracks.new()
-                    track.name = action.name
-                    strip = track.strips.new(action.name, int(nla_frame_offset + 1), action)
-                    strip.name = action.name
-                    strip.influence = 1.0
+                # Push action to NLA track
+                track = armature_obj.animation_data.nla_tracks.new()
+                track.name = action.name
+                strip = track.strips.new(action.name, int(nla_frame_offset + 1), action)
+                strip.name = action.name
+                strip.influence = 1.0
 
-                    # Blender 4.5+: bind the strip to the action's slot
-                    if hasattr(action, 'slots') and len(action.slots) > 0:
-                        strip.action_slot = action.slots[0]
+                # Blender 4.5+: bind the strip to the action's slot
+                if hasattr(action, 'slots') and len(action.slots) > 0:
+                    strip.action_slot = action.slots[0]
 
-                    frame_count = int(action.frame_range[1] - action.frame_range[0] + 1)
-                    nla_frame_offset += frame_count
+                frame_count = int(action.frame_range[1] - action.frame_range[0] + 1)
+                nla_frame_offset += frame_count
 
-                    print(f"[ANIM] Created action '{action.name}' "
-                          f"({frame_count} frames) → NLA track")
+                print(f"[ANIM] Created action '{action.name}' "
+                      f"({frame_count} frames) → NLA track")
             finally:
                 free_bad(bad_file)
 
@@ -474,17 +567,9 @@ class BlenderSceneBuilder:
         Quaternions and translations are converted from Y-up to Blender Z-up.
         Blender pose values are rest-relative (delta from rest pose).
         """
-        fps = bad_file.fps if bad_file.fps > 0 else 30
         frame_count = bad_file.frame_count if bad_file.frame_count > 0 else 0
 
-        # Determine loop mode
-        force_no_loop = False
-        lower_name = anim_name.lower()
-        if any(kw in lower_name for kw in ("fire", "reload", "switch", "recoil", "empty")):
-            force_no_loop = True
-
-        kTranslated = 0x02
-        is_translated = (bad_file.flags & kTranslated) != 0
+        is_translated = (bad_file.flags & 0x02) != 0
 
         action = bpy.data.actions.new(name=anim_name)
 
@@ -546,20 +631,15 @@ class BlenderSceneBuilder:
                     fc.keyframe_points.add(frame_count)
 
         # Build rest origin vectors and parent indices from bone_infos
-        rest_origins = []
-        parent_indices = []
-        for bone_idx in range(bone_count):
-            bname, parent_idx, rest_origin, local_rot = bone_infos[bone_idx]
-            rest_origins.append(Vector(rest_origin))
-            parent_indices.append(parent_idx)
+        rest_origins = [Vector(bone_infos[i][2]) for i in range(bone_count)]
+        parent_indices = [bone_infos[i][1] for i in range(bone_count)]
 
         # Blender rest transforms (read back from armature after edit mode)
         # Used to convert animation values from absolute-local to rest-relative
-        rest_local_quats = getattr(self, '_rest_local_quats', [Quaternion()] * bone_count)
-        rest_local_inv_mats = getattr(self, '_rest_local_inv_mats', [Matrix.Identity(3)] * bone_count)
+        rest_local_quats = self._rest_local_quats
+        rest_local_inv_mats = self._rest_local_inv_mats
 
         # Frame-by-frame animation
-        world_transforms = [None] * bone_count  # Transform3D equivalents
         world_rots = [Quaternion((1, 0, 0, 0))] * bone_count
         world_positions = [Vector((0, 0, 0))] * bone_count
         prev_local_rots = [Quaternion((1, 0, 0, 0))] * bone_count
@@ -572,8 +652,12 @@ class BlenderSceneBuilder:
                 if bone_idx < bad_file.num_channels:
                     channel = bad_file.channels[bone_idx]
                     if frame_idx < channel.frame_count:
-                        rq = channel.rotations[frame_idx]
-                        rot_q = Quaternion((rq.w, rq.x, -rq.z, rq.y))
+                        rot_q = self._bad_channel_to_blender_quat(
+                            channel.rotations[frame_idx]
+                        )
+                        if bone_idx < len(self._world_rot_corrections):
+                            rot_q = rot_q @ self._world_rot_corrections[bone_idx]
+                            rot_q = self._normalize_quat(rot_q)
 
                 # adm_transform_position is identity, so convert Y-up to Z-up directly
                 translation = Vector((0, 0, 0))
@@ -672,12 +756,15 @@ class BlenderSceneBuilder:
             fc_rmx = action.fcurves.new(data_path=data_path_rm, index=0)
             fc_rmy = action.fcurves.new(data_path=data_path_rm, index=1)
             fc_rmz = action.fcurves.new(data_path=data_path_rm, index=2)
-            fc_rmx.keyframe_points.add(bad_file.num_events)
-            fc_rmy.keyframe_points.add(bad_file.num_events)
-            fc_rmz.keyframe_points.add(bad_file.num_events)
+            # Events include a terminal duplicate (num_events = frame_count + 1).
+            # Only keyframe the actual animation frames to match BN* bone keyframes.
+            rm_count = min(bad_file.num_events, frame_count)
+            fc_rmx.keyframe_points.add(rm_count)
+            fc_rmy.keyframe_points.add(rm_count)
+            fc_rmz.keyframe_points.add(rm_count)
 
             rm_pos = Vector((0, 0, 0))
-            for i in range(bad_file.num_events):
+            for i in range(rm_count):
                 evt = bad_file.events[i]
                 vx, vy, vz = evt.velocity[0], evt.velocity[1], evt.velocity[2]
                 rm_pos = rm_pos + Vector((vx, -vz, vy))

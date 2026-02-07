@@ -141,6 +141,7 @@ def build_animation_context(
     reset_bad_path = resolver.resolve(reset_bad_name)
     if not reset_bad_path:
         return None
+    reset_bad_stem = reset_bad_name.rsplit(".", 1)[0] if "." in reset_bad_name else reset_bad_name
     reset_bad = parse_bad(str(reset_bad_path))
     try:
         reset_meta = AnimationMeta(
@@ -148,6 +149,8 @@ def build_animation_context(
             bad_filepath=str(reset_bad_path),
             fps=reset_bad.fps,
             frame_count=reset_bad.frame_count,
+            bad_name=reset_bad_stem,
+            flags=reset_bad.flags,
         )
     finally:
         free_bad(reset_bad)
@@ -157,6 +160,7 @@ def build_animation_context(
         if key == "anim_reset":
             continue
         bad_name = ensure_extension(value, ".bad")
+        bad_stem = bad_name.rsplit(".", 1)[0] if "." in bad_name else bad_name
         bad_path = resolver.resolve(bad_name)
         if not bad_path:
             continue
@@ -167,6 +171,8 @@ def build_animation_context(
                 bad_filepath=str(bad_path),
                 fps=bf.fps,
                 frame_count=bf.frame_count,
+                bad_name=bad_stem,
+                flags=bf.flags,
             )
             anim_metas.append(meta)
         finally:
