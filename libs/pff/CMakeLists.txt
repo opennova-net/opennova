@@ -1,5 +1,5 @@
 add_library(opennova_pff STATIC
-    src/pff.c
+    src/pff.cpp
 )
 
 target_include_directories(opennova_pff
@@ -7,6 +7,6 @@ target_include_directories(opennova_pff
 )
 
 set_target_properties(opennova_pff PROPERTIES
-    C_STANDARD 99
-    C_STANDARD_REQUIRED ON
+    CXX_STANDARD 11
+    CXX_STANDARD_REQUIRED ON
 )

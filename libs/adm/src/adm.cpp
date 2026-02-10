@@ -146,12 +146,12 @@ int adm_parse(const char *path, AdmFile *out) {
             }
 
             // Find quotes
-            q1 = memchr(trimmed_start, '"',
+            q1 = (const char *)memchr(trimmed_start, '"',
                         (size_t)(trimmed_end - trimmed_start));
             if (!q1) {
                 free(data); adm_free(out); return -1;
             }
-            q2 = memchr(q1 + 1, '"', (size_t)(trimmed_end - (q1 + 1)));
+            q2 = (const char *)memchr(q1 + 1, '"', (size_t)(trimmed_end - (q1 + 1)));
             if (!q2) {
                 free(data); adm_free(out); return -1;
             }

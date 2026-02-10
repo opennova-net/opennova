@@ -18,6 +18,10 @@
 #  endif
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define BFC1_MAGIC       0x31434642u  /* "BFC1" little-endian */
 #define BFC1_HEADER_SIZE 8
 
@@ -36,5 +40,9 @@ BFC1_EXPORT int bfc1_decompress(const uint8_t *data, size_t size,
    Returns 0 on success (writes to *out_size), non-zero if not BFC1. */
 BFC1_EXPORT int bfc1_uncompressed_size(const uint8_t *data, size_t size,
                            uint32_t *out_size);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* BFC1_H */

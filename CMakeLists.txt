@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(opennova LANGUAGES C)
+project(opennova LANGUAGES C CXX)
 
 # Add libraries
 add_subdirectory(libs/threedi)
@@ -88,7 +88,7 @@ endif()
 option(BUILD_TOOLS "Build development tools" OFF)
 
 if(BUILD_TOOLS)
-    add_executable(3di_dump tools/3di_dump.c)
+    add_executable(3di_dump tools/3di_dump.cpp)
     target_link_libraries(3di_dump PRIVATE opennova_threedi m)
 endif()
 

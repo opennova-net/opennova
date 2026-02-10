@@ -7,6 +7,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct ThreediChunk {
     char id[5];                // FourCC, null-terminated.
     int is_parent;             // Non-zero if the chunk has children.
@@ -38,5 +42,8 @@ int threedi_write_file(const char *path, const ThreediFile *file);
 // Recursively free a ThreediFile and its chunks.
 void threedi_free_file(ThreediFile *file);
 
+#ifdef __cplusplus
+}
+#endif
 
 #endif // THREEDI_H

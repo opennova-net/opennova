@@ -21,6 +21,10 @@
 #  endif
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct BadBone {
     char name[17];          // Null-terminated bone name (max 16 chars)
     int32_t num_children;
@@ -83,5 +87,9 @@ BAD_EXPORT int bad_parse(const char *path, BadFile *out);
 
 // Free all allocations inside a BadFile.
 BAD_EXPORT void bad_free(BadFile *bf);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // BAD_H
