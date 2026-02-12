@@ -187,13 +187,13 @@ int bad_parse(const char *path, BadFile *out) {
                 int r, c;
 
                 memset(b->name, 0, sizeof(b->name));
-                memcpy(b->name, &data[off], 16);
+                memcpy(b->name, &data[off], 32);
                 // Determine actual name length
                 name_len = 0;
-                while (name_len < 16 && b->name[name_len]) ++name_len;
+                while (name_len < 32 && b->name[name_len]) ++name_len;
                 b->name[name_len] = '\0';
 
-                // Skip 20 bytes of unknown data at offset +16..+35
+                // Skip 4 unknown bytes at offset +32..+35
                 b->num_children  = read_s32(data, off + 36);
                 b->child_offset  = read_s32(data, off + 40);
                 b->parent_offset = read_s32(data, off + 44);

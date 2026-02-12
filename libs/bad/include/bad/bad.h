@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 typedef struct BadBone {
-    char name[17];          // Null-terminated bone name (max 16 chars)
+    char name[33];          // Null-terminated bone name (max 32 chars)
     int32_t num_children;
     int32_t child_offset;
     int32_t parent_offset;

@@ -15,7 +15,7 @@ from ._native import load_lib
 
 class BadBone(ctypes.Structure):
     _fields_ = [
-        ("name",          ctypes.c_char * 17),
+        ("name",          ctypes.c_char * 33),
         ("num_children",  ctypes.c_int32),
         ("child_offset",  ctypes.c_int32),
         ("parent_offset", ctypes.c_int32),
