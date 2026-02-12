@@ -843,14 +843,14 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
         out->rgb_gen.phase = 0.0f;
     }
     out->rgb_gen.rate = (float)read_s16_le(base + cursor + 2) / 256.0f;
-    out->rgb_gen.start_color[2] = (float)read_u8(base + cursor + 3) / 255.0f;
-    out->rgb_gen.start_color[1] = (float)read_u8(base + cursor + 4) / 255.0f;
-    out->rgb_gen.start_color[0] = (float)read_u8(base + cursor + 5) / 255.0f;
-    out->rgb_gen.start_color[3] = (float)read_u8(base + cursor + 6) / 255.0f;
-    out->rgb_gen.end_color[2] = (float)read_u8(base + cursor + 7) / 255.0f;
-    out->rgb_gen.end_color[1] = (float)read_u8(base + cursor + 8) / 255.0f;
-    out->rgb_gen.end_color[0] = (float)read_u8(base + cursor + 9) / 255.0f;
-    out->rgb_gen.end_color[3] = (float)read_u8(base + cursor + 10) / 255.0f;
+    out->rgb_gen.start_color[2] = (float)read_u8(base + cursor + 4) / 255.0f;
+    out->rgb_gen.start_color[1] = (float)read_u8(base + cursor + 5) / 255.0f;
+    out->rgb_gen.start_color[0] = (float)read_u8(base + cursor + 6) / 255.0f;
+    out->rgb_gen.start_color[3] = (float)read_u8(base + cursor + 7) / 255.0f;
+    out->rgb_gen.end_color[2] = (float)read_u8(base + cursor + 8) / 255.0f;
+    out->rgb_gen.end_color[1] = (float)read_u8(base + cursor + 9) / 255.0f;
+    out->rgb_gen.end_color[0] = (float)read_u8(base + cursor + 10) / 255.0f;
+    out->rgb_gen.end_color[3] = (float)read_u8(base + cursor + 11) / 255.0f;
     cursor += 12;
 
     assert(cursor + 12 <= record_size);
@@ -1007,7 +1007,7 @@ static int parse_lght(const ThreediChunk *chunk, ThreediLight **out_lights, size
         l->subobj_index = read_u8(base + 32);
         l->flags = read_u8(base + 33);
         l->unknown1 = read_u8(base + 34);
-        l->unknown2 = read_u8(base + 35);
+        l->falloff_byte = read_u8(base + 35);
         l->rotation[0] = read_f32_le(base + 36);
         l->rotation[1] = read_f32_le(base + 40);
         l->rotation[2] = read_f32_le(base + 44);
@@ -1971,18 +1971,16 @@ static int append_rgb_gen(BufferBuilder *buf, const ThreediRgbGen *rgb)
     block[0] = rgb->style;
     block[1] = rgb->style <= 112 ? float_to_byte(rgb->phase, 256.0f) : (uint8_t)rgb->reg;
     uint16_t rate_raw = (uint16_t)round_nearest((double)rgb->rate * 256.0);
-    uint8_t start_b = float_to_byte(rgb->start_color[2], 255.0f);
-    rate_raw = (uint16_t)((rate_raw & 0x00FFu) | ((uint16_t)start_b << 8));
     block[2] = (uint8_t)(rate_raw & 0xFFu);
-    block[3] = start_b;
-    block[4] = float_to_byte(rgb->start_color[1], 255.0f);
-    block[5] = float_to_byte(rgb->start_color[0], 255.0f);
-    block[6] = float_to_byte(rgb->start_color[3], 255.0f);
-    block[7] = float_to_byte(rgb->end_color[2], 255.0f);
-    block[8] = float_to_byte(rgb->end_color[1], 255.0f);
-    block[9] = float_to_byte(rgb->end_color[0], 255.0f);
-    block[10] = float_to_byte(rgb->end_color[3], 255.0f);
-    // block[11] left as 0 padding.
+    block[3] = (uint8_t)((rate_raw >> 8) & 0xFFu);
+    block[4] = float_to_byte(rgb->start_color[2], 255.0f);
+    block[5] = float_to_byte(rgb->start_color[1], 255.0f);
+    block[6] = float_to_byte(rgb->start_color[0], 255.0f);
+    block[7] = float_to_byte(rgb->start_color[3], 255.0f);
+    block[8] = float_to_byte(rgb->end_color[2], 255.0f);
+    block[9] = float_to_byte(rgb->end_color[1], 255.0f);
+    block[10] = float_to_byte(rgb->end_color[0], 255.0f);
+    block[11] = float_to_byte(rgb->end_color[3], 255.0f);
     if (buffer_append(buf, block, sizeof(block)) != 0) {
         return -1;
     }
@@ -2127,7 +2125,7 @@ static int build_lght_chunk(const Threedi3di3 *model, ChunkBuilder *out)
             buffer_append_u8(&out->payload, l->subobj_index) != 0 ||
             buffer_append_u8(&out->payload, l->flags) != 0 ||
             buffer_append_u8(&out->payload, l->unknown1) != 0 ||
-            buffer_append_u8(&out->payload, l->unknown2) != 0) {
+            buffer_append_u8(&out->payload, l->falloff_byte) != 0) {
             chunk_builder_free(out);
             return -1;
         }

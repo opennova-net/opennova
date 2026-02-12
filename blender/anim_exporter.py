@@ -703,10 +703,10 @@ class NovalogicAnimExporter:
             if c.is_reset:
                 continue
             lines.append(f'{c.action_name}\t\t\t\t"{c.bad_name}"')
-        text = "\n".join(lines) + "\n"
+        text = "\r\n".join(lines) + "\r\n\r\n\r\n\x00"
 
-        with open(out_adm_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
+        with open(out_adm_path, "wb") as f:
+            f.write(text.encode("utf-8"))
 
         _log(f"Wrote {os.path.basename(out_adm_path)} ({len(clips)} entries)")
 

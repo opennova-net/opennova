@@ -166,6 +166,12 @@ class ThreediIRMaterial(ctypes.Structure):
         # Tiling
         ("u_tiling", ctypes.c_float),
         ("v_tiling", ctypes.c_float),
+
+        # Collision surface type
+        ("surface_type", ctypes.c_uint8),
+
+        # Collision polygon attributes
+        ("pattrib", ctypes.c_uint32),
     ]
 
 
@@ -181,6 +187,9 @@ class ThreediIRLight(ctypes.Structure):
         ("rate",              ctypes.c_uint16),
         ("part_index",        ctypes.c_int32),
         ("flags",             ctypes.c_uint8),
+        ("falloff",           ctypes.c_float),
+        ("rotation",          ctypes.c_float * 3),
+        ("light_type",        ctypes.c_uint8),
     ]
 
 
@@ -290,8 +299,9 @@ class ThreediIROcclusion(ctypes.Structure):
 
 class ThreediIRLod(ctypes.Structure):
     _fields_ = [
-        ("threshold",       ctypes.c_int32),
-        ("vertices",        ctypes.POINTER(ThreediIRVertex)),
+        ("threshold",            ctypes.c_int32),
+        ("declared_part_count",  ctypes.c_int32),
+        ("vertices",             ctypes.POINTER(ThreediIRVertex)),
         ("vertex_count",    ctypes.c_size_t),
         ("indices",         ctypes.POINTER(ctypes.c_uint16)),
         ("index_count",     ctypes.c_size_t),
@@ -344,8 +354,9 @@ class ThreediIRMatrix(ctypes.Structure):
 
 class ThreediModelIR(ctypes.Structure):
     _fields_ = [
-        ("name",          ctypes.c_char * 32),
-        ("source_format", ctypes.c_int),       # ThreediIRSourceFormat enum
+        ("name",            ctypes.c_char * 32),
+        ("render_function", ctypes.c_char * 5),
+        ("source_format",   ctypes.c_int),       # ThreediIRSourceFormat enum
         ("mesh_type",     ctypes.c_int),       # ThreediIRMeshType enum
 
         ("lods",      ctypes.POINTER(ThreediIRLod)),

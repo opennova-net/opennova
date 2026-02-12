@@ -50,3 +50,35 @@ add_executable(pff_unit_test pff/pff_unit_test.cpp)
 target_link_libraries(pff_unit_test PRIVATE opennova_pff)
 target_include_directories(pff_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_unit COMMAND pff_unit_test)
+
+# ASE tests
+add_executable(ase_smoke_test ase/ase_smoke_test.cpp)
+target_link_libraries(ase_smoke_test PRIVATE opennova_ase)
+target_include_directories(ase_smoke_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ase_smoke COMMAND ase_smoke_test)
+
+add_executable(ase_parser_unit_test ase/ase_parser_unit_test.cpp)
+target_link_libraries(ase_parser_unit_test PRIVATE opennova_ase)
+target_include_directories(ase_parser_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ase_parser_unit COMMAND ase_parser_unit_test)
+
+add_executable(ase_writer_test ase/ase_writer_test.cpp)
+target_link_libraries(ase_writer_test PRIVATE opennova_ase)
+target_include_directories(ase_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ase_writer COMMAND ase_writer_test)
+
+# TDP tests
+add_executable(tdp_roundtrip_test tdp/tdp_roundtrip_test.cpp)
+target_link_libraries(tdp_roundtrip_test PRIVATE opennova_tdp opennova_threedi)
+target_include_directories(tdp_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tdp_roundtrip COMMAND tdp_roundtrip_test)
+
+add_executable(tdp_from_3di_test tdp/tdp_from_3di_test.cpp)
+target_link_libraries(tdp_from_3di_test PRIVATE opennova_tdp opennova_threedi)
+target_include_directories(tdp_from_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tdp_from_3di COMMAND tdp_from_3di_test)
+
+add_executable(tdp_3da_write_test tdp/tdp_3da_write_test.cpp)
+target_link_libraries(tdp_3da_write_test PRIVATE opennova_tdp)
+target_include_directories(tdp_3da_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tdp_3da_write COMMAND tdp_3da_write_test)

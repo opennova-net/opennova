@@ -202,7 +202,7 @@ typedef struct ThreediLight {
     uint8_t subobj_index;
     uint8_t flags;
     uint8_t unknown1;
-    uint8_t unknown2;
+    uint8_t falloff_byte;  // (u8)falloff angle in degrees
     float rotation[4];    // { -rotY, rotZ, rotX, cos(falloff) }
     float view_proj[16];  // 4x4 matrix row-major
 } ThreediLight;

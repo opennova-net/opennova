@@ -126,6 +126,7 @@ typedef enum ThreediIRBlendMode {
 #define THREEDI_IR_TEX_SLOT_DIFFUSE  1
 #define THREEDI_IR_TEX_SLOT_DETAIL   2
 #define THREEDI_IR_TEX_SLOT_NORMAL   3
+#define THREEDI_IR_TEX_SLOT_NORMAL_B 4
 
 typedef struct ThreediIRMaterialTexture {
     char name[17];           // Texture filename (null-terminated)
@@ -199,6 +200,15 @@ typedef struct ThreediIRMaterial {
     // Tiling
     float u_tiling;
     float v_tiling;
+
+    // Collision surface type (raw binary value from collision faces)
+    // Default 0x01 (Mud). Maps to ptype via surface_type_to_ptype().
+    uint8_t surface_type;
+
+    // Collision polygon attributes (reconstructed from collision face material_flags).
+    // Bit mapping from collision face flags:
+    //   coll 0x100 → pattrib 0x100, coll 0x400 → pattrib 0x1000, coll 0x800 → pattrib 0x2000
+    uint32_t pattrib;
 } ThreediIRMaterial;
 
 // ============================================================================
@@ -215,7 +225,10 @@ typedef struct ThreediIRLight {
     uint8_t phase;              // Animation phase
     uint16_t rate;              // Animation rate
     int32_t part_index;         // Attached part index
-    uint8_t flags;              // Light flags
+    uint8_t flags;              // Light flags (bits 0-2: disable, bit 3: type)
+    float falloff;              // Light falloff angle (degrees, from 3di byte)
+    float rotation[3];          // Light direction (-rotY, rotZ, rotX from 3di)
+    uint8_t light_type;         // 0=Omni, 1=Target (from flags bit 3)
 } ThreediIRLight;
 
 // ============================================================================
@@ -328,6 +341,7 @@ typedef struct ThreediIROcclusion {
 
 typedef struct ThreediIRLod {
     int32_t threshold;              // LOD distance threshold
+    int32_t declared_part_count;    // RMDL declared count (may differ from part_count)
 
     // Vertices (unified format)
     ThreediIRVertex *vertices;
@@ -389,6 +403,7 @@ typedef struct ThreediIRMatrix {
 typedef struct ThreediModelIR {
     // Identification
     char name[32];
+    char render_function[5];    // RMDL model_type tag (e.g. "org0", "gnrc")
     ThreediIRSourceFormat source_format;
     ThreediIRMeshType mesh_type;
 

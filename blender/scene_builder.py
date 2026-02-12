@@ -168,6 +168,7 @@ class BlenderSceneBuilder:
 
         self.build_part_hierarchy(name)
         mesh_objects = self.create_basic_meshes(name)
+        self._build_additional_lods(name)
         self.create_scene_markers()
         self.create_user_points()
         if self.import_occlusion:
@@ -797,6 +798,10 @@ class BlenderSceneBuilder:
             bpy.ops.object.mode_set(mode="OBJECT")
         self.root_object = main_builder.root_object
         self.part_nodes = main_builder.part_nodes
+        # Share material_dict so secondary models reuse existing Blender
+        # material objects instead of creating duplicates (Material_0.001 etc.).
+        # This prevents material count explosion during ASE export.
+        self.material_dict = main_builder.material_dict
         mesh_objects = self.create_basic_meshes("merged")
 
         # Bind arms meshes to the main builder's existing armature
@@ -819,6 +824,7 @@ class BlenderSceneBuilder:
         root.empty_display_type = 'PLAIN_AXES'
         root.empty_display_size = 0.1
         bpy.context.collection.objects.link(root)
+        root["_lod_index"] = 0
         self.root_object = root
 
         for i in range(num_parts):
@@ -852,42 +858,51 @@ class BlenderSceneBuilder:
         return root
 
     def create_basic_meshes(self, base_name: str) -> list:
-        """Create meshes from the IR.
+        """Create meshes from the IR (LOD 0).
+
+        Delegates to _create_meshes_for_lod() which creates one mesh object
+        per (part, material) pair.
+        """
+        if self.ir.lod_count == 0:
+            return []
+
+        mesh_objects = self._create_meshes_for_lod(
+            self.ir.lods[0], self.part_nodes, track_bone_data=True)
+        self.mesh_objects = mesh_objects
+        return mesh_objects
+
+    def _create_meshes_for_lod(self, lod, part_nodes, track_bone_data=False):
+        """Create meshes for a single LOD level.
 
         Creates one mesh object per (part, material) pair.  Primitives that
         share the same part and material are merged into a single mesh.
-        Each resulting mesh has exactly one material slot, which eliminates
-        the need for exporter-side splitting by material.
+        Each resulting mesh has exactly one material slot.
 
-        Naming: "{part_idx+1:02d} Mesh{seq}" where seq is 0-based per part.
-
-        UV V-flip applied: Blender UV convention has V=0 at bottom,
-        while DDS/game convention has V=0 at top.
+        Args:
+            lod: IR LOD data (self.ir.lods[N])
+            part_nodes: dict mapping part index -> Blender Empty object
+            track_bone_data: if True, store bone data in self._mesh_bone_data
+                             (only needed for LOD 0 armature binding)
         """
         mesh_objects = []
-        if self.ir.lod_count == 0:
-            return mesh_objects
-
-        lod0 = self.ir.lods[0]
-        num_parts = int(lod0.part_count)
-        num_primitives = int(lod0.primitive_count)
+        num_parts = int(lod.part_count)
+        num_primitives = int(lod.primitive_count)
 
         is_skinned = (int(self.ir.mesh_type) == 3)  # THREEDI_IR_MESH_SKINNED
         print(f"[MESH] parts={num_parts} primitives={num_primitives} skinned={is_skinned}")
         for pi in range(num_primitives):
-            p = lod0.primitives[pi]
+            p = lod.primitives[pi]
             print(f"[MESH]   prim {pi}: part={p.part_index} idx_off={p.index_offset} idx_cnt={p.index_count} vtx_off={p.vertex_offset} vtx_cnt={p.vertex_count} mat={p.material_index}")
 
         # Group primitives by (part_index, material_index)
         from collections import defaultdict, OrderedDict
-        # For each part, track the unique materials in encounter order
-        part_materials = defaultdict(OrderedDict)  # part_idx -> OrderedDict{mat_idx -> [prim_indices]}
+        part_materials = defaultdict(OrderedDict)
         for prim_idx in range(num_primitives):
-            prim = lod0.primitives[prim_idx]
+            prim = lod.primitives[prim_idx]
             part_idx = int(prim.part_index)
             if part_idx < 0 or part_idx >= num_parts:
                 continue
-            if part_idx not in self.part_nodes:
+            if part_idx not in part_nodes:
                 continue
             mat_idx = int(prim.material_index)
             if mat_idx not in part_materials[part_idx]:
@@ -897,7 +912,7 @@ class BlenderSceneBuilder:
         # Create one mesh per (part, material)
         for part_idx in sorted(part_materials.keys()):
             mat_groups = part_materials[part_idx]
-            part = lod0.parts[part_idx]
+            part = lod.parts[part_idx]
             part_abs = Vector(part.abs_position)
 
             for seq, (mat_idx, prim_indices) in enumerate(mat_groups.items()):
@@ -905,15 +920,43 @@ class BlenderSceneBuilder:
                 all_faces = []
                 all_uvs = []
                 all_normals = []
-                # Per-vertex bone data: list of list of (skeleton_bone_idx, weight)
                 all_bone_data = []
+                vert_map = {}
+
+                def _bone_entries(v, prim, is_skinned, part_idx):
+                    if is_skinned:
+                        entries = []
+                        for bi in range(4):
+                            w = v.bone_weights[bi]
+                            if w > 0:
+                                local_idx = v.bone_indices[bi]
+                                if prim.bone_table_length > 0 and local_idx < prim.bone_table_length:
+                                    skel_idx = prim.bone_table[local_idx]
+                                else:
+                                    skel_idx = 0
+                                entries.append((skel_idx, w))
+                        if not entries:
+                            entries.append((part_idx, 1.0))
+                        return entries
+                    else:
+                        return [(part_idx, 1.0)]
+
+                def get_or_add_vert(pos, bone_data_entry):
+                    key = (round(pos.x, 6), round(pos.y, 6), round(pos.z, 6))
+                    if key in vert_map:
+                        return vert_map[key]
+                    idx = len(all_vertices)
+                    all_vertices.append(pos)
+                    all_bone_data.append(bone_data_entry)
+                    vert_map[key] = idx
+                    return idx
 
                 if mat_idx not in self.material_dict:
                     if 0 <= mat_idx < int(self.ir.material_count):
                         self.material_dict[mat_idx] = self._create_material(self.ir.materials[mat_idx])
 
                 for prim_idx in prim_indices:
-                    prim = lod0.primitives[prim_idx]
+                    prim = lod.primitives[prim_idx]
                     idx_offset = int(prim.index_offset)
                     idx_count = int(prim.index_count)
                     vert_offset = int(prim.vertex_offset)
@@ -922,24 +965,34 @@ class BlenderSceneBuilder:
                         continue
 
                     for j in range(0, idx_count, 3):
-                        i0 = int(lod0.indices[idx_offset + j + 0]) + vert_offset
-                        i1 = int(lod0.indices[idx_offset + j + 2]) + vert_offset
-                        i2 = int(lod0.indices[idx_offset + j + 1]) + vert_offset
+                        i0 = int(lod.indices[idx_offset + j + 0]) + vert_offset
+                        i1 = int(lod.indices[idx_offset + j + 2]) + vert_offset
+                        i2 = int(lod.indices[idx_offset + j + 1]) + vert_offset
 
-                        if i0 >= int(lod0.vertex_count) or i1 >= int(lod0.vertex_count) or i2 >= int(lod0.vertex_count):
+                        if i0 >= int(lod.vertex_count) or i1 >= int(lod.vertex_count) or i2 >= int(lod.vertex_count):
                             continue
 
-                        v0 = lod0.vertices[i0]
-                        v1 = lod0.vertices[i1]
-                        v2 = lod0.vertices[i2]
+                        v0 = lod.vertices[i0]
+                        v1 = lod.vertices[i1]
+                        v2 = lod.vertices[i2]
 
-                        tri_start = len(all_vertices)
-                        all_vertices.extend([
-                            render_space(Vector(v0.position) - part_abs),
-                            render_space(Vector(v1.position) - part_abs),
-                            render_space(Vector(v2.position) - part_abs),
-                        ])
-                        all_faces.append((tri_start, tri_start + 1, tri_start + 2))
+                        pos0 = render_space(Vector(v0.position) - part_abs)
+                        pos1 = render_space(Vector(v1.position) - part_abs)
+                        pos2 = render_space(Vector(v2.position) - part_abs)
+
+                        bd0 = _bone_entries(v0, prim, is_skinned, part_idx)
+                        bd1 = _bone_entries(v1, prim, is_skinned, part_idx)
+                        bd2 = _bone_entries(v2, prim, is_skinned, part_idx)
+
+                        vi0 = get_or_add_vert(pos0, bd0)
+                        vi1 = get_or_add_vert(pos1, bd1)
+                        vi2 = get_or_add_vert(pos2, bd2)
+
+                        # Skip degenerate faces created by vertex merging
+                        if vi0 == vi1 or vi1 == vi2 or vi0 == vi2:
+                            continue
+
+                        all_faces.append((vi0, vi1, vi2))
                         # UV V-flip: Blender V=0 at bottom, game/DDS V=0 at top
                         all_uvs.extend([
                             (v0.uv0[0], 1.0 - v0.uv0[1]),
@@ -951,25 +1004,6 @@ class BlenderSceneBuilder:
                             render_space(Vector(v1.normal)),
                             render_space(Vector(v2.normal)),
                         ])
-
-                        # Per-vertex bone assignments
-                        for v in (v0, v1, v2):
-                            if is_skinned:
-                                bone_entries = []
-                                for bi in range(4):
-                                    w = v.bone_weights[bi]
-                                    if w > 0:
-                                        local_idx = v.bone_indices[bi]
-                                        if prim.bone_table_length > 0 and local_idx < prim.bone_table_length:
-                                            skel_idx = prim.bone_table[local_idx]
-                                        else:
-                                            skel_idx = 0
-                                        bone_entries.append((skel_idx, w))
-                                if not bone_entries:
-                                    bone_entries.append((part_idx, 1.0))
-                                all_bone_data.append(bone_entries)
-                            else:
-                                all_bone_data.append([(part_idx, 1.0)])
 
                 if not all_vertices or not all_faces:
                     continue
@@ -1005,16 +1039,97 @@ class BlenderSceneBuilder:
                 mesh_obj = bpy.data.objects.new(mesh_name, mesh_data)
                 bpy.context.collection.objects.link(mesh_obj)
 
-                mesh_obj.parent = self.part_nodes[part_idx]
+                mesh_obj.parent = part_nodes[part_idx]
 
-                # Track mesh→part mapping and per-vertex bone data for armature binding
                 mesh_obj["_part_index"] = part_idx
-                self._mesh_bone_data[mesh_obj.name] = all_bone_data
+                if track_bone_data:
+                    self._mesh_bone_data[mesh_obj.name] = all_bone_data
 
                 mesh_objects.append(mesh_obj)
 
-        self.mesh_objects = mesh_objects
         return mesh_objects
+
+    def _build_additional_lods(self, name: str):
+        """Import LODs 1+ as separate root hierarchies, hidden by default."""
+        if self.ir.lod_count <= 1:
+            return
+
+        # Build material name manifest for _material_names property
+        mat_names = []
+        for i in range(int(self.ir.material_count)):
+            mat = self.ir.materials[i]
+            shader = mat.shader_name.decode("utf-8", errors="replace").rstrip("\x00")
+            if not shader:
+                shader = "FF_ST_OP"
+            mat_names.append(f"Material_{i}_{shader}")
+        mat_names_str = ";".join(mat_names)
+
+        # Store on LOD 0 root too
+        if self.root_object:
+            self.root_object["_material_names"] = mat_names_str
+
+        for lod_idx in range(1, int(self.ir.lod_count)):
+            lod = self.ir.lods[lod_idx]
+            num_parts = int(lod.part_count)
+            if num_parts == 0:
+                continue
+
+            # Create LOD root empty
+            lod_root_name = f"{name}_LOD{lod_idx}"
+            lod_root = bpy.data.objects.new(lod_root_name, None)
+            lod_root.empty_display_type = 'PLAIN_AXES'
+            lod_root.empty_display_size = 0.1
+            bpy.context.collection.objects.link(lod_root)
+            lod_root["_lod_index"] = lod_idx
+            lod_root["_material_names"] = mat_names_str
+            lod_root.hide_viewport = True
+
+            # Build part hierarchy for this LOD
+            lod_part_nodes = {}
+            for i in range(num_parts):
+                part_name = f"PN{i + 1:02d}"
+                part_obj = bpy.data.objects.new(part_name, None)
+                part_obj.empty_display_type = 'PLAIN_AXES'
+                part_obj.empty_display_size = 0.05
+                bpy.context.collection.objects.link(part_obj)
+                lod_part_nodes[i] = part_obj
+
+            for i in range(num_parts):
+                part = lod.parts[i]
+                part_obj = lod_part_nodes[i]
+
+                abs_pos = render_space(Vector(part.abs_position))
+                rel_pos = render_space(Vector(part.rel_position))
+
+                parent = lod_root
+                if (part.parent_index >= 0 and
+                    part.parent_index < num_parts and
+                    part.parent_index != i):
+                    parent = lod_part_nodes[part.parent_index]
+
+                part_obj.parent = parent
+                if parent == lod_root:
+                    part_obj.location = abs_pos
+                else:
+                    part_obj.location = rel_pos
+
+            # Create meshes for this LOD (shared material_dict)
+            lod_meshes = self._create_meshes_for_lod(
+                lod, lod_part_nodes, track_bone_data=False)
+
+            print(f"[LOD] {lod_root_name}: {num_parts} parts, "
+                  f"{len(lod_meshes)} meshes")
+
+    def _resolve_ctrl_reg(self, reg_index):
+        """Resolve a control register index to its name string from the IR."""
+        if reg_index < 0 or reg_index >= self.ir.control_register_count:
+            return None
+        if not self.ir.control_registers:
+            return None
+        name = self.ir.control_registers[reg_index].name
+        if isinstance(name, bytes):
+            name = name.decode("utf-8", errors="replace").rstrip("\x00")
+        return name if name else None
 
     def _create_material(self, ir_mat):
         mat = bpy.data.materials.new(f"Material_{ir_mat.index}")
@@ -1039,6 +1154,7 @@ class BlenderSceneBuilder:
         shader = ir_mat.shader_name.decode("utf-8", errors="replace").rstrip("\x00")
         if shader:
             mat.name = f"{mat.name}_{shader}"
+            mat["oed_shader"] = shader
 
         # Store original name before Blender mangles duplicates with .NNN suffixes
         mat["ase_material_name"] = mat.name
@@ -1059,7 +1175,7 @@ class BlenderSceneBuilder:
             if tex.slot == 1 or (t_idx == 0 and "ase_diffuse_bitmap" not in mat):
                 mat["ase_diffuse_bitmap"] = tex_name
             elif tex.slot == 2:
-                mat["ase_detail_bitmap"] = tex_name  # Lightmap/overlay (not exported)
+                mat["ase_detail_bitmap"] = tex_name
             elif tex.slot == 3:
                 mat["ase_normal_bitmap"] = tex_name
                 mat["ase_normal_type"] = int(tex.type)  # 0=diffuse, 4=MDT, 5=TGA alpha
@@ -1109,6 +1225,40 @@ class BlenderSceneBuilder:
                 mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Emission Color"])
 
         mat["blend_mode"] = ir_mat.blend_mode
+
+        # Detail/lightmap texture (slot 2): create MixRGB Multiply node.
+        # This gives visual representation in Blender (diffuse * detail) and
+        # an exportable node structure (exporter detects MixRGB Multiply → 2 textures).
+        detail_bitmap = mat.get("ase_detail_bitmap", "")
+        if detail_bitmap and tex_node:
+            detail_path = self._resolve_texture(detail_bitmap)
+            if detail_path:
+                try:
+                    detail_tex = mat.node_tree.nodes.new("ShaderNodeTexImage")
+                    detail_tex.name = f"Detail_{detail_bitmap}"
+                    existing = bpy.data.images.get(os.path.basename(detail_path))
+                    if existing:
+                        detail_tex.image = existing
+                    else:
+                        detail_tex.image = bpy.data.images.load(detail_path)
+
+                    # Create MixRGB Multiply node: diffuse * detail → Base Color
+                    mix_node = mat.node_tree.nodes.new("ShaderNodeMixRGB")
+                    mix_node.blend_type = 'MULTIPLY'
+                    mix_node.inputs["Fac"].default_value = 1.0
+                    # Disconnect current diffuse → Base Color link
+                    for link in list(mat.node_tree.links):
+                        if (link.to_socket == bsdf.inputs["Base Color"]
+                                and link.from_node == tex_node):
+                            mat.node_tree.links.remove(link)
+                            break
+                    # Wire: diffuse → Color1, detail → Color2, Mix → Base Color
+                    mat.node_tree.links.new(tex_node.outputs["Color"], mix_node.inputs["Color1"])
+                    mat.node_tree.links.new(detail_tex.outputs["Color"], mix_node.inputs["Color2"])
+                    mat.node_tree.links.new(mix_node.outputs["Color"], bsdf.inputs["Base Color"])
+                    print(f"[TEX] mat={ir_mat.index} detail={detail_bitmap!r} -> MixRGB Multiply")
+                except Exception as e:
+                    print(f"Failed to load detail texture {detail_path}: {e}")
 
         # Wire bump/normal map (slot 3)
         # NovaLogic's engine uses height-based bump mapping, NOT tangent-space
@@ -1184,6 +1334,16 @@ class BlenderSceneBuilder:
             # so map 0->1.0 roughness, 255->0.3 roughness.
             bsdf.inputs["Roughness"].default_value = 1.0 - spec * 0.7
 
+        # Phong shader minimum specular for round-trip fidelity.
+        # Without this, the exporter can't detect Phong (specular=0 → DOT3 path).
+        _phong_shaders = ("PHONGT", "PHONGO", "BUMPPHONG", "ENVPHONG")
+        if any(s in shader for s in _phong_shaders):
+            spec_key = "Specular IOR Level" if "Specular IOR Level" in bsdf.inputs else "Specular"
+            if spec_key in bsdf.inputs and bsdf.inputs[spec_key].default_value == 0:
+                bsdf.inputs[spec_key].default_value = 0.3
+            if bsdf.inputs["Roughness"].default_value >= 1.0:
+                bsdf.inputs["Roughness"].default_value = 0.5
+
         # Luminosity — drives emission in the engine
         if ir_mat.luminosity > 0:
             lum = min(ir_mat.luminosity / 255.0, 1.0)
@@ -1211,17 +1371,25 @@ class BlenderSceneBuilder:
         if ir_mat.u_params.style != 0:
             mat["uv_u_style"] = int(ir_mat.u_params.style)
             mat["uv_u_rate"] = ir_mat.u_params.gen_rate
+            mat["uv_u_phase"] = ir_mat.u_params.phase
+            mat["uv_u_start"] = ir_mat.u_params.start
+            mat["uv_u_end"] = ir_mat.u_params.end
         if ir_mat.v_params.style != 0:
             mat["uv_v_style"] = int(ir_mat.v_params.style)
             mat["uv_v_rate"] = ir_mat.v_params.gen_rate
+            mat["uv_v_phase"] = ir_mat.v_params.phase
+            mat["uv_v_start"] = ir_mat.v_params.start
+            mat["uv_v_end"] = ir_mat.v_params.end
         if ir_mat.alpha_gen.style != 0:
             mat["alpha_gen_style"] = int(ir_mat.alpha_gen.style)
             mat["alpha_gen_rate"] = ir_mat.alpha_gen.rate
+            mat["alpha_gen_phase"] = ir_mat.alpha_gen.phase
             mat["alpha_gen_start"] = int(ir_mat.alpha_gen.start)
             mat["alpha_gen_end"] = int(ir_mat.alpha_gen.end)
         if ir_mat.rgb_gen.style != 0:
             mat["rgb_gen_style"] = int(ir_mat.rgb_gen.style)
             mat["rgb_gen_rate"] = ir_mat.rgb_gen.rate
+            mat["rgb_gen_phase"] = ir_mat.rgb_gen.phase
             sc = ir_mat.rgb_gen.start_color
             ec = ir_mat.rgb_gen.end_color
             mat["rgb_gen_start_color"] = [sc[0], sc[1], sc[2], sc[3]]
@@ -1230,6 +1398,30 @@ class BlenderSceneBuilder:
             mat["tex_anim_frames"] = int(ir_mat.animation.num_frames)
             mat["tex_anim_type"] = int(ir_mat.animation.animation_type)
             mat["tex_anim_time"] = int(ir_mat.animation.cycle_frame_time)
+        if ir_mat.alpha_threshold > 0:
+            mat["alpha_threshold"] = ir_mat.alpha_threshold
+
+        # Store emissive_type for round-trip (0=none, 2=full)
+        if ir_mat.emissive_type != 0:
+            mat["emissive_type"] = int(ir_mat.emissive_type)
+
+        # Store control register names for round-trip (resolved from IR indices)
+        if ir_mat.rgb_gen.style > 0x70 and ir_mat.rgb_gen.reg >= 0:
+            creg = self._resolve_ctrl_reg(ir_mat.rgb_gen.reg)
+            if creg:
+                mat["rgb_gen_ctrlreg"] = creg
+        if ir_mat.alpha_gen.style > 0x70 and ir_mat.alpha_gen.reg >= 0:
+            creg = self._resolve_ctrl_reg(ir_mat.alpha_gen.reg)
+            if creg:
+                mat["alpha_gen_ctrlreg"] = creg
+        if ir_mat.u_params.style > 0x70 and ir_mat.u_params.reg >= 0:
+            creg = self._resolve_ctrl_reg(ir_mat.u_params.reg)
+            if creg:
+                mat["uv_u_ctrlreg"] = creg
+        if ir_mat.v_params.style > 0x70 and ir_mat.v_params.reg >= 0:
+            creg = self._resolve_ctrl_reg(ir_mat.v_params.reg)
+            if creg:
+                mat["uv_v_ctrlreg"] = creg
 
         return mat
 
@@ -1401,6 +1593,45 @@ class BlenderSceneBuilder:
 
             # Convert position to Blender space
             light_obj.location = render_space(Vector(light.offset))
+
+            # Store light fields as custom properties for round-trip export
+            if light.attenuation_start > 0:
+                light_obj["atten_start"] = float(light.attenuation_start)
+            if light.falloff > 0:
+                light_obj["falloff"] = float(light.falloff)
+            rot_bl = render_space(Vector((light.rotation[0],
+                                        light.rotation[1],
+                                        light.rotation[2])))
+            light_obj["tm_row2"] = [rot_bl.x, rot_bl.y, rot_bl.z]
+            if light.light_type != 0:
+                light_obj["light_type"] = int(light.light_type)
+
+            # Store light colorgen fields as custom properties for 3dp round-trip
+            if light.style != 0:
+                light_obj["colorgen_style"] = int(light.style)
+                light_obj["colorgen_rate"] = float(light.rate) / 256.0
+                light_obj["colorgen_phase"] = float(light.phase) / 256.0
+            # color_end (color_start is already stored in light_data.color)
+            ce = light.color_end
+            if ce[0] != 0.0 or ce[1] != 0.0 or ce[2] != 0.0:
+                light_obj["colorgen_end"] = [
+                    min(255, int(ce[0] * 255.0)),
+                    min(255, int(ce[1] * 255.0)),
+                    min(255, int(ce[2] * 255.0)),
+                ]
+            # Control register for colorgen (style > 0x70 means phase is reg index)
+            if light.style > 0x70:
+                creg = self._resolve_ctrl_reg(int(light.phase))
+                if creg:
+                    light_obj["colorgen_ctrlreg"] = creg
+            # Light disable flags
+            flags = int(light.flags)
+            if flags & 0x01:
+                light_obj["disable_corona"] = 1
+            if flags & 0x02:
+                light_obj["disable_lightterrain"] = 1
+            if flags & 0x04:
+                light_obj["disable_lightobjects"] = 1
 
             parent_node = self.root_object
             if light.part_index >= 0 and light.part_index in self.part_nodes:

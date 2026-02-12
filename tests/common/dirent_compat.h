@@ -9,6 +9,11 @@
 #include <windows.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+
+#ifndef S_ISDIR
+#define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
+#endif
 
 struct dirent {
     char d_name[MAX_PATH];

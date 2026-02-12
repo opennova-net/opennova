@@ -70,6 +70,7 @@ class NovalogicWeaponItem(PropertyGroup):
     has_model: BoolProperty(name="Has Model", default=False)
     has_animations: BoolProperty(name="Has Animations", default=False)
     context_data: StringProperty(name="Context Data")
+    graphic_name: StringProperty(name="Graphic")
 
 
 class NovalogicAnimClipItem(PropertyGroup):
@@ -103,6 +104,14 @@ class NovalogicPanelProperties(PropertyGroup):
     import_collisions: BoolProperty(name="Collisions", default=True)
     import_occlusion: BoolProperty(name="Occlusion", default=True)
     import_lights: BoolProperty(name="Lights", default=True)
+    export_project: BoolProperty(
+        name="Export project files",
+        default=False,
+    )
+    output_directory: StringProperty(
+        name="Output Directory",
+        subtype='DIR_PATH',
+    )
     active_tab: EnumProperty(
         items=[
             ('ITEMS', "Items", "Show items"),
@@ -158,7 +167,13 @@ class VIEW3D_PT_novalogic_panel(Panel):
                     box.prop(props, "import_collisions")
                     box.prop(props, "import_occlusion")
                     box.prop(props, "import_lights")
+                    box.prop(props, "export_project")
+                    if props.export_project:
+                        box.prop(props, "output_directory")
                     layout.operator("novalogic.import_selected", text="Import Selected", icon='IMPORT')
+
+            layout.separator()
+            layout.operator("novalogic.export_all_projects", text="Export all project files (slow)", icon='EXPORT')
         else:
             layout.label(text="No items found. Select directory and scan.")
 
@@ -183,10 +198,13 @@ class NOVALOGIC_UL_weapon_list(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
             row = layout.row(align=True)
+            label = item.name
+            if item.graphic_name:
+                label = f"{item.name} ({item.graphic_name})"
             if item.item_type == 'weapon':
-                row.label(text=item.name, icon='TOOL_SETTINGS')
+                row.label(text=label, icon='TOOL_SETTINGS')
             else:
-                row.label(text=item.name, icon='OBJECT_DATA')
+                row.label(text=label, icon='OBJECT_DATA')
             sub = row.row(align=True)
             sub.alignment = 'RIGHT'
             if item.has_model:
@@ -206,7 +224,7 @@ class NOVALOGIC_UL_weapon_list(UIList):
         for item in items:
             if item.item_type != tab_type:
                 flags.append(0)
-            elif search and search not in item.name.lower():
+            elif search and search not in item.name.lower() and search not in item.graphic_name.lower():
                 flags.append(0)
             else:
                 flags.append(self.bitflag_filter_item)
@@ -235,6 +253,7 @@ class NOVALOGIC_OT_scan_directory(Operator):
                 item.has_model = bool(w.graphic1.main)
                 item.has_animations = bool(w.anim_adm)
                 item.context_data = w.name
+                item.graphic_name = w.graphic1.main if w.graphic1.main else ""
 
             for gi in items:
                 item = props.weapon_items.add()
@@ -243,6 +262,7 @@ class NOVALOGIC_OT_scan_directory(Operator):
                 item.has_model = bool(gi.graphic_us)
                 item.has_animations = bool(gi.anim_def)
                 item.context_data = gi.name
+                item.graphic_name = gi.graphic_us if gi.graphic_us else ""
 
             self.report({'INFO'}, f"Found {len(weapons)} weapons and {len(items)} items")
         except Exception as e:
@@ -263,9 +283,16 @@ class NOVALOGIC_OT_import_selected(Operator):
             return {'CANCELLED'}
 
         selected = props.weapon_items[props.selected_item_index]
+
+        if props.export_project and not props.output_directory:
+            self.report({'ERROR'}, "Output directory must be set when exporting project files")
+            return {'CANCELLED'}
+
         try:
             _reload_modules()
             from .blender_importer import import_basic_model
+
+            output_dir = props.output_directory if props.export_project else ""
 
             if props.import_main_model and selected.has_model:
                 result = import_basic_model(
@@ -277,6 +304,7 @@ class NOVALOGIC_OT_import_selected(Operator):
                     import_collisions=props.import_collisions,
                     import_occlusion=props.import_occlusion,
                     import_lights=props.import_lights,
+                    output_dir=output_dir,
                 )
                 if result:
                     self.report({'INFO'}, f"Imported {selected.name}")
@@ -307,6 +335,59 @@ class NOVALOGIC_OT_import_selected(Operator):
         return {'FINISHED'}
 
 
+class NOVALOGIC_OT_export_all_projects(Operator):
+    """Export project files for every scanned item that has a model"""
+    bl_idname = "novalogic.export_all_projects"
+    bl_label = "Export All Project Files"
+
+    directory: StringProperty(
+        name="Output Directory",
+        subtype='DIR_PATH',
+    )
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        if not self.directory:
+            self.report({'ERROR'}, "No output directory selected")
+            return {'CANCELLED'}
+
+        props = context.scene.novalogic_props
+        _reload_modules()
+        from .blender_importer import import_basic_model
+
+        successes = 0
+        failures = 0
+        for item in props.weapon_items:
+            if not item.has_model:
+                continue
+            try:
+                result = import_basic_model(
+                    base_dir=props.resource_directory,
+                    item_name=item.name,
+                    item_type=item.item_type,
+                    import_arms=item.item_type == "weapon",
+                    import_animations=item.has_animations,
+                    import_collisions=True,
+                    import_occlusion=True,
+                    import_lights=True,
+                    output_dir=self.directory,
+                )
+                if result:
+                    successes += 1
+                else:
+                    failures += 1
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                failures += 1
+
+        self.report({'INFO'}, f"Exported {successes} project(s), {failures} failure(s)")
+        return {'FINISHED'}
+
+
 # ==========================================================================
 # Loose .3di Import operator (File > Import)
 # ==========================================================================
@@ -321,16 +402,40 @@ class IMPORT_OT_novalogic_3di(Operator, ImportHelper):
     import_collisions: BoolProperty(name="Collisions", default=True)
     import_occlusion: BoolProperty(name="Occlusion", default=True)
     import_lights: BoolProperty(name="Lights", default=True)
+    export_project: BoolProperty(
+        name="Export project files",
+        default=False,
+    )
+    output_directory: StringProperty(
+        name="Output Directory",
+        subtype='DIR_PATH',
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "import_collisions")
+        layout.prop(self, "import_occlusion")
+        layout.prop(self, "import_lights")
+        layout.prop(self, "export_project")
+        if self.export_project:
+            layout.prop(self, "output_directory")
 
     def execute(self, context):
+        if self.export_project and not self.output_directory:
+            self.report({'ERROR'}, "Output directory must be set when exporting project files")
+            return {'CANCELLED'}
+
         try:
             _reload_modules()
             from .blender_importer import import_loose_3di
 
+            output_dir = self.output_directory if self.export_project else ""
+
             if import_loose_3di(self.filepath,
                                 import_collisions=self.import_collisions,
                                 import_occlusion=self.import_occlusion,
-                                import_lights=self.import_lights):
+                                import_lights=self.import_lights,
+                                output_dir=output_dir):
                 self.report({'INFO'}, f"Imported {os.path.basename(self.filepath)}")
                 return {'FINISHED'}
             else:
@@ -663,6 +768,7 @@ classes = [
     VIEW3D_PT_novalogic_panel,
     NOVALOGIC_OT_scan_directory,
     NOVALOGIC_OT_import_selected,
+    NOVALOGIC_OT_export_all_projects,
     IMPORT_OT_novalogic_3di,
     IMPORT_OT_mixamo_novalogic,
     EXPORT_OT_novalogic_ase,

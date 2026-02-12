@@ -498,6 +498,54 @@ static int convert_materials(const ThreediGpFile *gp, ThreediModelIR *ir) {
     return 0;
 }
 
+static void assign_surface_types(const ThreediGpFile *gp, ThreediModelIR *ir) {
+    if (!gp->collision || gp->collision->object_count == 0 ||
+        gp->collision->face_count == 0 || gp->rmodel_count == 0)
+        return;
+
+    const ThreediGpCollision *col = gp->collision;
+    const ThreediGpRModel *rm = &gp->rmodels[0];
+
+    // Set default surface_type (0x01 = Mud) for all materials
+    for (size_t i = 0; i < ir->material_count; ++i)
+        ir->materials[i].surface_type = 0x01;
+
+    // Walk collision objects; faces are a flat array consumed in order.
+    // Each collision object has a uniform surface_type across all its faces.
+    size_t face_cursor = 0;
+    for (int32_t obj_idx = 0; obj_idx < col->object_count; ++obj_idx) {
+        const ThreediGpCollisionObject *obj = &col->objects[obj_idx];
+        if (obj->face_count <= 0 || face_cursor >= (size_t)col->face_count) {
+            face_cursor += (size_t)obj->face_count;
+            continue;
+        }
+
+        uint8_t st = col->faces[face_cursor].surface_type;
+
+        // Assert all faces in this object share the same surface_type
+        for (int32_t f = 1; f < obj->face_count; ++f) {
+            size_t fi = face_cursor + (size_t)f;
+            if (fi < (size_t)col->face_count && col->faces[fi].surface_type != st) {
+                fprintf(stderr, "WARNING: GP collision object %d has mixed surface_types "
+                        "(face 0: 0x%02X, face %d: 0x%02X)\n",
+                        obj_idx, st, f, col->faces[fi].surface_type);
+                break;
+            }
+        }
+        face_cursor += (size_t)obj->face_count;
+
+        // Assign to all materials used by the parent subobject's render polys
+        int32_t sub_idx = obj->parent_subobject;
+        for (size_t p = 0; p < rm->poly_count; ++p) {
+            if (rm->polys[p].subobject_index == sub_idx) {
+                int32_t mi = rm->polys[p].material_index;
+                if (mi >= 0 && (size_t)mi < ir->material_count)
+                    ir->materials[mi].surface_type = st;
+            }
+        }
+    }
+}
+
 static int convert_userpoints(const ThreediGpFile *gp, ThreediModelIR *ir) {
     ir->userpoint_count = gp->userpoint_count;
     if (ir->userpoint_count == 0) return 0;
@@ -601,6 +649,9 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
 
     // Convert materials (from first LOD)
     if (convert_materials(gp, out) != 0) goto error;
+
+    // Assign collision surface types to materials
+    assign_surface_types(gp, out);
 
     // Convert userpoints
     if (convert_userpoints(gp, out) != 0) goto error;

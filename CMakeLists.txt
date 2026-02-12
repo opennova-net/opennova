@@ -9,6 +9,8 @@ add_subdirectory(libs/pff)
 add_subdirectory(libs/bfc1)
 add_subdirectory(libs/def)
 add_subdirectory(libs/scr)
+add_subdirectory(libs/ase)
+add_subdirectory(libs/tdp)
 
 # --------------------------------------------------------------------------
 # Shared library for FFI (Python ctypes, etc.)
@@ -28,7 +30,7 @@ if(BUILD_SHARED_LIB)
     # (the linker would otherwise discard unreferenced threedi symbols)
     if(MSVC)
         target_link_libraries(opennova_shared
-            PRIVATE opennova_threedi opennova_pff opennova_bfc1 oed_bad oed_adm oed_def oed_scr
+            PRIVATE opennova_threedi opennova_pff opennova_bfc1 oed_bad oed_adm oed_def oed_scr opennova_ase opennova_tdp
         )
         target_link_options(opennova_shared PRIVATE
             /WHOLEARCHIVE:opennova_threedi
@@ -37,11 +39,13 @@ if(BUILD_SHARED_LIB)
             /WHOLEARCHIVE:oed_adm
             /WHOLEARCHIVE:oed_def
             /WHOLEARCHIVE:oed_scr
+            /WHOLEARCHIVE:opennova_ase
+            /WHOLEARCHIVE:opennova_tdp
         )
     else()
         target_link_libraries(opennova_shared
             PRIVATE -Wl,--whole-archive
-            PRIVATE opennova_threedi opennova_pff opennova_bfc1 oed_bad oed_adm oed_def oed_scr
+            PRIVATE opennova_threedi opennova_pff opennova_bfc1 oed_bad oed_adm oed_def oed_scr opennova_ase opennova_tdp
             PRIVATE -Wl,--no-whole-archive
         )
     endif()
@@ -57,9 +61,9 @@ if(BUILD_SHARED_LIB)
         POSITION_INDEPENDENT_CODE ON
     )
 
-    # Statically link the C runtime so the DLL has no MinGW dependencies
+    # Statically link the C/C++ runtimes so the DLL has no MinGW dependencies
     if(MINGW)
-        target_link_options(opennova_shared PRIVATE -static-libgcc)
+        target_link_options(opennova_shared PRIVATE -static-libgcc -static-libstdc++)
     endif()
 
     # Static libs need OPENNOVA_SHARED_EXPORTS so their functions get dllexport
@@ -71,6 +75,8 @@ if(BUILD_SHARED_LIB)
     target_compile_definitions(oed_def PRIVATE OPENNOVA_SHARED_EXPORTS)
     target_compile_definitions(opennova_bfc1 PRIVATE OPENNOVA_SHARED_EXPORTS)
     target_compile_definitions(oed_scr PRIVATE OPENNOVA_SHARED_EXPORTS)
+    target_compile_definitions(opennova_ase PRIVATE OPENNOVA_SHARED_EXPORTS)
+    target_compile_definitions(opennova_tdp PRIVATE OPENNOVA_SHARED_EXPORTS)
 
     # On Linux the static libs must be compiled with -fPIC
     set_target_properties(opennova_threedi PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -80,6 +86,8 @@ if(BUILD_SHARED_LIB)
     set_target_properties(oed_def PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(opennova_bfc1 PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(oed_scr PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(opennova_ase PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(opennova_tdp PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 
 # --------------------------------------------------------------------------
@@ -90,6 +98,9 @@ option(BUILD_TOOLS "Build development tools" OFF)
 if(BUILD_TOOLS)
     add_executable(3di_dump tools/3di_dump.cpp)
     target_link_libraries(3di_dump PRIVATE opennova_threedi m)
+
+    add_executable(survey_3di3 tools/survey_3di3.cpp)
+    target_link_libraries(survey_3di3 PRIVATE opennova_threedi m)
 endif()
 
 # Enable testing
