@@ -62,10 +62,10 @@ static void to_lower_buf(char *dst, const char *src, size_t len) {
 
 /* Extract quoted string from line: first "..." pair */
 static size_t extract_quoted(const char *line, size_t line_len, char *dst, size_t dst_size) {
-    const char *q0 = memchr(line, '"', line_len);
+    const char *q0 = (const char *)memchr(line, '"', line_len);
     if (!q0) { dst[0] = '\0'; return 0; }
     size_t rem = line_len - (size_t)(q0 - line) - 1;
-    const char *q1 = memchr(q0 + 1, '"', rem);
+    const char *q1 = (const char *)memchr(q0 + 1, '"', rem);
     if (!q1 || q1 <= q0 + 1) { dst[0] = '\0'; return 0; }
     size_t slen = (size_t)(q1 - q0 - 1);
     safe_copy(dst, dst_size, q0 + 1, slen);
@@ -168,7 +168,7 @@ static int lower_match_key(const char *lower, size_t lower_len, const char *pref
 #define DA_PUSH(arr, count, cap, elem) do { \
     if ((count) >= (cap)) { \
         (cap) = (cap) ? (cap) * 2 : 8; \
-        (arr) = realloc((arr), (cap) * sizeof(*(arr))); \
+        (arr) = (decltype(arr))realloc((arr), (cap) * sizeof(*(arr))); \
     } \
     (arr)[(count)++] = (elem); \
 } while(0)
@@ -176,7 +176,7 @@ static int lower_match_key(const char *lower, size_t lower_len, const char *pref
 #define DA_PUSH_RAW(raw_lines, raw_count, raw_cap, line, line_len) do { \
     if ((raw_count) >= (raw_cap)) { \
         (raw_cap) = (raw_cap) ? (raw_cap) * 2 : 8; \
-        (raw_lines) = realloc((raw_lines), (raw_cap) * sizeof(*(raw_lines))); \
+        (raw_lines) = (decltype(raw_lines))realloc((raw_lines), (raw_cap) * sizeof(*(raw_lines))); \
     } \
     size_t _cplen = (line_len) < 511 ? (line_len) : 511; \
     memcpy((raw_lines)[(raw_count)], (line), _cplen); \
@@ -194,7 +194,7 @@ typedef struct {
 static int next_line(LineIter *it, const char **out, size_t *out_len) {
     if (it->pos >= it->buf_len) return 0;
     const char *start = it->buf + it->pos;
-    const char *nl = memchr(start, '\n', it->buf_len - it->pos);
+    const char *nl = (const char *)memchr(start, '\n', it->buf_len - it->pos);
     size_t len;
     if (nl) {
         len = (size_t)(nl - start);

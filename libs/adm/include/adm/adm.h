@@ -20,6 +20,10 @@
 #  endif
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct AdmEntry {
     char key[64];
     char value[256];
@@ -36,5 +40,9 @@ ADM_EXPORT int adm_parse(const char *path, AdmFile *out);
 
 // Free all allocations inside an AdmFile.
 ADM_EXPORT void adm_free(AdmFile *af);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // ADM_H

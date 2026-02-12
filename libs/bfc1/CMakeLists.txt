@@ -1,5 +1,5 @@
 add_library(opennova_bfc1 STATIC
-    src/bfc1.c
+    src/bfc1.cpp
     src/miniz.c
 )
 
@@ -9,6 +9,10 @@ target_include_directories(opennova_bfc1
 )
 
 set_target_properties(opennova_bfc1 PROPERTIES
-    C_STANDARD 99
-    C_STANDARD_REQUIRED ON
+    CXX_STANDARD 11
+    CXX_STANDARD_REQUIRED ON
 )
+
+# miniz.c stays as C — set C99 for that file only
+set_source_files_properties(src/miniz.c PROPERTIES LANGUAGE C)
+set_target_properties(opennova_bfc1 PROPERTIES C_STANDARD 99)

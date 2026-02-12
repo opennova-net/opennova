@@ -18,6 +18,10 @@
 #  endif
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define SCR_HEADER_SIZE 4
 
 /* Known encryption keys used by NovaLogic games */
@@ -45,5 +49,9 @@ SCR_EXPORT void scr_decrypt(uint8_t *data, size_t size, uint32_t key);
            -2 if output buffer is too small. */
 SCR_EXPORT int scr_decrypt_buf(const uint8_t *data, size_t size,
                     uint8_t *out, size_t *out_size, uint32_t key);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SCR_H */

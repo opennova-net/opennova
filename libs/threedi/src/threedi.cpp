@@ -62,7 +62,7 @@ static int parse_chunk(const uint8_t *buf, size_t buf_len, size_t cursor, Threed
         while (consumed < out_chunk->content_len) {
             if (out_chunk->child_count == cap) {
                 size_t new_cap = cap == 0 ? 4 : cap * 2;
-                ThreediChunk *tmp = realloc(out_chunk->children, new_cap * sizeof(ThreediChunk));
+                ThreediChunk *tmp = (ThreediChunk *)realloc(out_chunk->children, new_cap * sizeof(ThreediChunk));
                 if (!tmp) {
                     return -1;
                 }

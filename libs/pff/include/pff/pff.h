@@ -18,6 +18,10 @@
 #  endif
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* --- Format constants --- */
 #define PFF_HEADER_SIZE  20
 #define PFF_ENTRY_SIZE   36
@@ -77,5 +81,9 @@ PFF_EXPORT int pff_extract(const PffArchive *archive, const PffEntry *entry,
 
 /* Check if raw data starts with a valid PFF header. */
 PFF_EXPORT int pff_is_pff(const uint8_t *data, size_t size);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PFF_H */
