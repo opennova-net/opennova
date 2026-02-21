@@ -104,10 +104,6 @@ class NovalogicPanelProperties(PropertyGroup):
     import_collisions: BoolProperty(name="Collisions", default=True)
     import_occlusion: BoolProperty(name="Occlusion", default=True)
     import_lights: BoolProperty(name="Lights", default=True)
-    export_project: BoolProperty(
-        name="Export project files",
-        default=False,
-    )
     output_directory: StringProperty(
         name="Output Directory",
         subtype='DIR_PATH',
@@ -122,17 +118,18 @@ class NovalogicPanelProperties(PropertyGroup):
 
 
 class VIEW3D_PT_novalogic_panel(Panel):
-    """Novalogic Importer Panel in 3D View sidebar"""
-    bl_label = "Novalogic Importer"
+    """OpenNova Importer Panel in 3D View sidebar"""
+    bl_label = "OpenNova Importer"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Novalogic"
+    bl_category = "OpenNova Importer"
 
     def draw(self, context):
         layout = self.layout
         props = context.scene.novalogic_props
 
         layout.prop(props, "resource_directory")
+        layout.prop(props, "output_directory")
         layout.operator("novalogic.scan_directory", text="Scan Directory", icon='FILE_REFRESH')
         layout.separator()
 
@@ -167,13 +164,7 @@ class VIEW3D_PT_novalogic_panel(Panel):
                     box.prop(props, "import_collisions")
                     box.prop(props, "import_occlusion")
                     box.prop(props, "import_lights")
-                    box.prop(props, "export_project")
-                    if props.export_project:
-                        box.prop(props, "output_directory")
                     layout.operator("novalogic.import_selected", text="Import Selected", icon='IMPORT')
-
-            layout.separator()
-            layout.operator("novalogic.export_all_projects", text="Export all project files (slow)", icon='EXPORT')
         else:
             layout.label(text="No items found. Select directory and scan.")
 
@@ -190,6 +181,18 @@ class VIEW3D_PT_novalogic_panel(Panel):
             dep_box.label(text="Native library: missing", icon='ERROR')
             dep_box.label(text=f"  {native_info}", icon='BLANK1')
 
+
+
+class VIEW3D_PT_opennova_oed_panel(Panel):
+    """OpenNova OED Panel in 3D View sidebar"""
+    bl_label = "OpenNova OED"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "OpenNova OED"
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Coming soon.")
 
 
 class NOVALOGIC_UL_weapon_list(UIList):
@@ -284,15 +287,15 @@ class NOVALOGIC_OT_import_selected(Operator):
 
         selected = props.weapon_items[props.selected_item_index]
 
-        if props.export_project and not props.output_directory:
-            self.report({'ERROR'}, "Output directory must be set when exporting project files")
+        if not props.output_directory:
+            self.report({'ERROR'}, "Output directory must be set")
             return {'CANCELLED'}
 
         try:
             _reload_modules()
             from .blender_importer import import_basic_model
 
-            output_dir = props.output_directory if props.export_project else ""
+            output_dir = props.output_directory
 
             if props.import_main_model and selected.has_model:
                 result = import_basic_model(
@@ -335,61 +338,8 @@ class NOVALOGIC_OT_import_selected(Operator):
         return {'FINISHED'}
 
 
-class NOVALOGIC_OT_export_all_projects(Operator):
-    """Export project files for every scanned item that has a model"""
-    bl_idname = "novalogic.export_all_projects"
-    bl_label = "Export All Project Files"
-
-    directory: StringProperty(
-        name="Output Directory",
-        subtype='DIR_PATH',
-    )
-
-    def invoke(self, context, event):
-        context.window_manager.fileselect_add(self)
-        return {'RUNNING_MODAL'}
-
-    def execute(self, context):
-        if not self.directory:
-            self.report({'ERROR'}, "No output directory selected")
-            return {'CANCELLED'}
-
-        props = context.scene.novalogic_props
-        _reload_modules()
-        from .blender_importer import import_basic_model
-
-        successes = 0
-        failures = 0
-        for item in props.weapon_items:
-            if not item.has_model:
-                continue
-            try:
-                result = import_basic_model(
-                    base_dir=props.resource_directory,
-                    item_name=item.name,
-                    item_type=item.item_type,
-                    import_arms=item.item_type == "weapon",
-                    import_animations=item.has_animations,
-                    import_collisions=True,
-                    import_occlusion=True,
-                    import_lights=True,
-                    output_dir=self.directory,
-                )
-                if result:
-                    successes += 1
-                else:
-                    failures += 1
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                failures += 1
-
-        self.report({'INFO'}, f"Exported {successes} project(s), {failures} failure(s)")
-        return {'FINISHED'}
-
-
 # ==========================================================================
-# Loose .3di Import operator (File > Import)
+# Loose .3di Import operator (File > Import) — disabled, kept for reference
 # ==========================================================================
 
 class IMPORT_OT_novalogic_3di(Operator, ImportHelper):
@@ -751,7 +701,6 @@ class IMPORT_OT_mixamo_novalogic(Operator, ImportHelper):
 # ==========================================================================
 
 def menu_func_import(self, context):
-    self.layout.operator(IMPORT_OT_novalogic_3di.bl_idname, text="Novalogic 3DI (.3di)")
     self.layout.operator(IMPORT_OT_mixamo_novalogic.bl_idname, text="Mixamo FBX for Novalogic (.fbx)")
 
 
@@ -766,10 +715,9 @@ classes = [
     NovalogicPanelProperties,
     NOVALOGIC_UL_weapon_list,
     VIEW3D_PT_novalogic_panel,
+    VIEW3D_PT_opennova_oed_panel,
     NOVALOGIC_OT_scan_directory,
     NOVALOGIC_OT_import_selected,
-    NOVALOGIC_OT_export_all_projects,
-    IMPORT_OT_novalogic_3di,
     IMPORT_OT_mixamo_novalogic,
     EXPORT_OT_novalogic_ase,
     EXPORT_OT_novalogic_anims,
