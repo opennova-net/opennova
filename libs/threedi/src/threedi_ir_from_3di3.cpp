@@ -2,6 +2,7 @@
 
 #include "threedi/threedi_ir.h"
 #include "threedi/threedi_3di3.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -56,6 +57,7 @@ static int convert_lod(const ThreediLod *src, const Threedi3di3 *model, ThreediI
 
     // Convert parts (render objects)
     dst->part_count = src->render_object_count;
+    dst->declared_part_count = src->rmdl_render_object_count;
     if (dst->part_count > 0) {
         dst->parts = (ThreediIRPart *)calloc(dst->part_count, sizeof(ThreediIRPart));
         if (!dst->parts) return -1;
@@ -240,6 +242,17 @@ static int convert_lights(const Threedi3di3 *model, ThreediModelIR *ir) {
         dl->rate = sl->rate;
         dl->part_index = sl->subobj_index;
         dl->flags = sl->flags;
+
+        // Falloff angle (byte → degrees)
+        dl->falloff = (float)sl->falloff_byte;
+
+        // Light direction (-rotY, rotZ, rotX)
+        dl->rotation[0] = sl->rotation[0];
+        dl->rotation[1] = sl->rotation[1];
+        dl->rotation[2] = sl->rotation[2];
+
+        // Light type from flags bit 3
+        dl->light_type = (sl->flags >> 3) & 1;
     }
 
     return 0;
@@ -275,6 +288,297 @@ static int convert_userpoints(const Threedi3di3 *model, ThreediModelIR *ir) {
     }
 
     return 0;
+}
+
+// Map collision face material_flags to pattrib bits (from IDA RE of WriteCFAC).
+static uint32_t collision_flags_to_pattrib(uint32_t coll_flags) {
+    uint32_t pa = 0;
+    if (coll_flags & 0x100) pa |= 0x100;
+    if (coll_flags & 0x400) pa |= 0x1000;
+    if (coll_flags & 0x800) pa |= 0x2000;
+    return pa;
+}
+
+// Extract a 3-bit index from collision material_flags for histogram voting.
+// bit 0: 0x100, bit 1: 0x400, bit 2: 0x800
+static uint32_t collision_flags_index(uint32_t coll_flags) {
+    uint32_t idx = 0;
+    if (coll_flags & 0x100) idx |= 1;
+    if (coll_flags & 0x400) idx |= 2;
+    if (coll_flags & 0x800) idx |= 4;
+    return idx;
+}
+
+// Reconstruct collision flags from a 3-bit index (inverse of collision_flags_index).
+static uint32_t collision_flags_from_index(uint32_t idx) {
+    uint32_t flags = 0;
+    if (idx & 1) flags |= 0x100;
+    if (idx & 2) flags |= 0x400;
+    if (idx & 4) flags |= 0x800;
+    return flags;
+}
+
+// Recursive backtracker for optimal material-to-face-group assignment.
+// Sorts materials by descending triangle count and prunes branches where
+// any group's remaining capacity goes negative.
+struct AssignCtx {
+    int32_t group_remaining[16];
+    int assign[16];
+    int best_assign[16];
+    uint32_t best_residual;
+    int fg_count;
+    int mt_count;
+    uint32_t *tri_counts;
+};
+
+static void backtrack_assign(AssignCtx *ctx, int m) {
+    if (m == ctx->mt_count) {
+        uint32_t residual = 0;
+        for (int g = 0; g < ctx->fg_count; ++g) {
+            int32_t r = ctx->group_remaining[g];
+            residual += (uint32_t)(r > 0 ? r : -r);
+        }
+        if (residual < ctx->best_residual) {
+            ctx->best_residual = residual;
+            memcpy(ctx->best_assign, ctx->assign, ctx->mt_count * sizeof(int));
+        }
+        return;
+    }
+    for (int g = 0; g < ctx->fg_count; ++g) {
+        int32_t new_rem = ctx->group_remaining[g] - (int32_t)ctx->tri_counts[m];
+        if (new_rem < 0) continue;  // prune: would overcommit
+        ctx->assign[m] = g;
+        ctx->group_remaining[g] = new_rem;
+        backtrack_assign(ctx, m + 1);
+        ctx->group_remaining[g] = new_rem + (int32_t)ctx->tri_counts[m];
+        if (ctx->best_residual == 0) return;  // perfect match found
+    }
+}
+
+static void assign_surface_types(const Threedi3di3 *model, ThreediModelIR *ir) {
+    if (!model->collision || model->collision->object_count == 0 ||
+        model->collision->face_count == 0 || ir->material_count == 0)
+        return;
+    if (model->lod_count == 0 || ir->lod_count == 0) return;
+
+    const ThreediCollisionModel *col = model->collision;
+    const ThreediIRLod *ir_lod0 = &ir->lods[0];
+
+    // Set default surface_type (0x01 = Mud) for all materials
+    for (size_t i = 0; i < ir->material_count; ++i)
+        ir->materials[i].surface_type = 0x01;
+
+    // Per-material vote histograms for poly_type and material_flags.
+    // For single-material subobjects, all faces vote directly.
+    // For multi-material subobjects, face groups (unique poly_type +
+    // material_flags) are assigned to materials by matching collision face
+    // counts to render triangle counts per material.
+    // Max 256 distinct poly_type values (uint8_t).
+    size_t mat_count = ir->material_count;
+    uint32_t (*votes)[256] = (uint32_t (*)[256])calloc(mat_count, sizeof(uint32_t[256]));
+    // Per-material histogram over the 3 pattrib-related bits of material_flags (8 buckets)
+    uint32_t (*flag_hist)[8] = (uint32_t (*)[8])calloc(mat_count, sizeof(uint32_t[8]));
+    if (!votes || !flag_hist) {
+        free(votes); free(flag_hist);
+        return;
+    }
+
+    // WriteCOBJ creates one COBJ per subobject in order (confirmed via IDA RE).
+    // Collision face vert_index[] are LOCAL to the collision object (0-based).
+
+    size_t face_cursor = 0;
+    size_t vert_cursor = 0;
+
+    for (size_t obj_idx = 0; obj_idx < col->object_count; ++obj_idx) {
+        const ThreediCollisionObject *obj = &col->objects[obj_idx];
+        if (obj->num_faces <= 0 || face_cursor >= col->face_count) {
+            face_cursor += (size_t)(obj->num_faces > 0 ? obj->num_faces : 0);
+            vert_cursor += (size_t)(obj->num_vertices > 0 ? obj->num_vertices : 0);
+            continue;
+        }
+
+        // Collision object index i = subobject/part index i
+        int32_t part_idx = (int32_t)obj_idx;
+
+        // Collect unique materials for this subobject
+        int32_t unique_mats[64];
+        size_t unique_mat_count = 0;
+        for (size_t p = 0; p < ir_lod0->primitive_count; ++p) {
+            const ThreediIRPrimitive *prim = &ir_lod0->primitives[p];
+            if (prim->part_index != part_idx) continue;
+            bool found = false;
+            for (size_t m = 0; m < unique_mat_count; ++m) {
+                if (unique_mats[m] == prim->material_index) { found = true; break; }
+            }
+            if (!found && unique_mat_count < 64)
+                unique_mats[unique_mat_count++] = prim->material_index;
+        }
+
+        if (unique_mat_count == 0) {
+            face_cursor += (size_t)obj->num_faces;
+            vert_cursor += (size_t)(obj->num_vertices > 0 ? obj->num_vertices : 0);
+            continue;
+        }
+
+        // Single material: all faces belong to it — vote directly
+        if (unique_mat_count == 1) {
+            int32_t mi = unique_mats[0];
+            if ((size_t)mi < mat_count) {
+                for (int32_t f = 0; f < obj->num_faces; ++f) {
+                    size_t fi = face_cursor + (size_t)f;
+                    if (fi >= col->face_count) break;
+                    votes[mi][col->faces[fi].poly_type]++;
+                    flag_hist[mi][collision_flags_index(col->faces[fi].material_flags)]++;
+                }
+            }
+            face_cursor += (size_t)obj->num_faces;
+            vert_cursor += (size_t)(obj->num_vertices > 0 ? obj->num_vertices : 0);
+            continue;
+        }
+
+        // Multiple materials: count-based assignment.
+        // Since the engine generates one collision face per render triangle,
+        // we match face groups (unique poly_type + material_flags) to materials
+        // by comparing collision face counts to render triangle counts.
+
+        // Step 1: count render triangles per material for this part
+        struct { int32_t mat; uint32_t count; } mat_tris[64];
+        size_t mt_count = 0;
+        for (size_t p = 0; p < ir_lod0->primitive_count; ++p) {
+            const ThreediIRPrimitive *prim = &ir_lod0->primitives[p];
+            if (prim->part_index != part_idx) continue;
+
+            uint32_t tris = 0;
+            if (prim->topology == THREEDI_IR_TOPOLOGY_STRIP) {
+                for (uint32_t i = 0; i + 2 < prim->index_count; ++i) {
+                    uint16_t i0 = ir_lod0->indices[prim->index_offset + i];
+                    uint16_t i1 = ir_lod0->indices[prim->index_offset + i + 1];
+                    uint16_t i2 = ir_lod0->indices[prim->index_offset + i + 2];
+                    if (i0 != i1 && i1 != i2 && i0 != i2) tris++;
+                }
+            } else {
+                tris = prim->index_count / 3;
+            }
+
+            bool found = false;
+            for (size_t m = 0; m < mt_count; ++m) {
+                if (mat_tris[m].mat == prim->material_index) {
+                    mat_tris[m].count += tris;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found && mt_count < 64) {
+                mat_tris[mt_count].mat = prim->material_index;
+                mat_tris[mt_count].count = tris;
+                mt_count++;
+            }
+        }
+
+        // Step 2: identify face groups (unique poly_type + material_flags)
+        struct { uint8_t poly_type; uint32_t material_flags; uint32_t count; } fgroups[16];
+        int fg_count = 0;
+        for (int32_t f = 0; f < obj->num_faces; ++f) {
+            size_t fi = face_cursor + (size_t)f;
+            if (fi >= col->face_count) break;
+            uint8_t pt = col->faces[fi].poly_type;
+            uint32_t mf = col->faces[fi].material_flags;
+            bool found = false;
+            for (int g = 0; g < fg_count; ++g) {
+                if (fgroups[g].poly_type == pt && fgroups[g].material_flags == mf) {
+                    fgroups[g].count++;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found && fg_count < 16) {
+                fgroups[fg_count].poly_type = pt;
+                fgroups[fg_count].material_flags = mf;
+                fgroups[fg_count].count = 1;
+                fg_count++;
+            }
+        }
+
+        // Step 3: optimal assignment of materials to face groups.
+        // Multiple materials may share the same group (same values).
+        // Find the assignment that minimizes the total residual:
+        //   residual = sum over groups of |face_count - sum(tri_count for assigned mats)|
+        // Use recursive backtracker with pruning (handles all practical sizes).
+        if (fg_count > 0 && mt_count > 0 && mt_count <= 16) {
+            int best_assign[16] = {};
+
+            // Sort mat_tris by descending count for better pruning
+            for (size_t i = 0; i < mt_count; ++i) {
+                for (size_t j = i + 1; j < mt_count; ++j) {
+                    if (mat_tris[j].count > mat_tris[i].count) {
+                        int32_t tmp_mat = mat_tris[i].mat;
+                        uint32_t tmp_count = mat_tris[i].count;
+                        mat_tris[i].mat = mat_tris[j].mat;
+                        mat_tris[i].count = mat_tris[j].count;
+                        mat_tris[j].mat = tmp_mat;
+                        mat_tris[j].count = tmp_count;
+                    }
+                }
+            }
+
+            // Set up backtracker context
+            uint32_t tri_counts[16];
+            AssignCtx ctx = {};
+            ctx.fg_count = fg_count;
+            ctx.mt_count = (int)mt_count;
+            ctx.tri_counts = tri_counts;
+            ctx.best_residual = UINT32_MAX;
+            for (size_t m = 0; m < mt_count; ++m)
+                tri_counts[m] = mat_tris[m].count;
+            for (int g = 0; g < fg_count; ++g)
+                ctx.group_remaining[g] = (int32_t)fgroups[g].count;
+
+            backtrack_assign(&ctx, 0);
+            memcpy(best_assign, ctx.best_assign, mt_count * sizeof(int));
+
+            // Apply the best assignment
+            for (size_t m = 0; m < mt_count; ++m) {
+                int32_t mi = mat_tris[m].mat;
+                int g = best_assign[m];
+                if ((size_t)mi < mat_count && g >= 0 && g < fg_count) {
+                    votes[mi][fgroups[g].poly_type] += fgroups[g].count;
+                    flag_hist[mi][collision_flags_index(fgroups[g].material_flags)] += fgroups[g].count;
+                }
+            }
+        }
+
+        face_cursor += (size_t)obj->num_faces;
+        vert_cursor += (size_t)(obj->num_vertices > 0 ? obj->num_vertices : 0);
+    }
+
+    // Resolve: for each material, pick the poly_type and flag index with the most votes
+    for (size_t mi = 0; mi < mat_count; ++mi) {
+        uint32_t best_count = 0;
+        uint8_t best_pt = 0x01; // default
+        for (int pt = 0; pt < 256; ++pt) {
+            if (votes[mi][pt] > best_count) {
+                best_count = votes[mi][pt];
+                best_pt = (uint8_t)pt;
+            }
+        }
+        if (best_count > 0) {
+            ir->materials[mi].surface_type = best_pt;
+
+            // Pick the flag index with the most votes
+            uint32_t best_fi_count = 0;
+            uint32_t best_fi = 0;
+            for (int fi = 0; fi < 8; ++fi) {
+                if (flag_hist[mi][fi] > best_fi_count) {
+                    best_fi_count = flag_hist[mi][fi];
+                    best_fi = (uint32_t)fi;
+                }
+            }
+            ir->materials[mi].pattrib = collision_flags_to_pattrib(collision_flags_from_index(best_fi));
+        }
+    }
+
+    free(votes);
+    free(flag_hist);
 }
 
 static int convert_collision(const Threedi3di3 *model, ThreediModelIR *ir) {
@@ -542,6 +846,12 @@ int threedi_ir_from_3di3(const Threedi3di3 *model, ThreediModelIR *out) {
     memcpy(out->name, model->header.name, sizeof(out->name) - 1);
     out->source_format = THREEDI_IR_SOURCE_3DI3;
 
+    // Copy render function from first LOD's RMDL model_type
+    if (model->lod_count > 0 && model->lods[0].model_type[0]) {
+        memcpy(out->render_function, model->lods[0].model_type, 4);
+        out->render_function[4] = '\0';
+    }
+
     switch (model->header.mesh_type) {
         case THREEDI_MESH_BASIC:
             out->mesh_type = THREEDI_IR_MESH_BASIC;
@@ -576,6 +886,9 @@ int threedi_ir_from_3di3(const Threedi3di3 *model, ThreediModelIR *out) {
 
     // Convert collision
     if (convert_collision(model, out) != 0) goto error;
+
+    // Assign collision surface types to materials
+    assign_surface_types(model, out);
 
     // Convert occlusion
     if (convert_occlusion(model, out) != 0) goto error;

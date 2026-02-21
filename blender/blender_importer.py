@@ -5,9 +5,47 @@ Uses ctypes FFI bindings (threedi_ffi / bad_ffi) instead of pure-Python parsers.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import bpy
+
+
+def _clear_scene():
+    """Remove all objects and purge all data blocks for a clean import."""
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    for attr in ('meshes', 'armatures', 'materials', 'textures', 'images',
+                 'actions', 'collections', 'cameras', 'lights', 'curves'):
+        for block in list(getattr(bpy.data, attr)):
+            getattr(bpy.data, attr).remove(block)
+
+
+def write_3dp_from_ir(ir, tdp_path):
+    """Write .3dp and .3da project files from the C IR using the native tdp library."""
+    from .opennova.tdp_ffi import tdp_from_ir, write_tdp, write_3da, free_tdp
+    proj = tdp_from_ir(ir)
+    try:
+        write_tdp(tdp_path, proj)
+        tda_path = tdp_path.replace('.3dp', '.3da')
+        write_3da(tda_path, proj)
+    finally:
+        free_tdp(proj)
+    print(f"3DI Import: Wrote 3DP project file {tdp_path}")
+    print(f"3DI Import: Wrote 3DA project file {tda_path}")
+
+
+def _export_ase_and_save_blend(project_dir: str, name: str):
+    """Export ASE file(s) and save the .blend into the project directory."""
+    from .ase_exporter import AseExporter
+
+    ase_path = os.path.join(project_dir, name + ".ase")
+    AseExporter().export_scene(bpy.context.scene, ase_path)
+    print(f"3DI Import: Wrote ASE file {ase_path}")
+
+    blend_path = os.path.join(project_dir, name + ".blend")
+    bpy.ops.wm.save_as_mainfile(filepath=blend_path)
+    print(f"3DI Import: Saved blend file {blend_path}")
 
 
 def scan_and_parse_directory(directory: str):
@@ -21,8 +59,10 @@ def scan_and_parse_directory(directory: str):
 def import_basic_model(base_dir: str, item_name: str, item_type: str,
                        import_arms: bool = False, import_animations: bool = True,
                        import_collisions: bool = True, import_occlusion: bool = True,
-                       import_lights: bool = True) -> bool:
+                       import_lights: bool = True, output_dir: str = "") -> bool:
     """Import a basic rigid model using the C IR pipeline."""
+    _clear_scene()
+
     from .opennova.definitions import (
         process_def_files, ensure_extension, build_animation_context,
     )
@@ -61,6 +101,8 @@ def import_basic_model(base_dir: str, item_name: str, item_type: str,
         if not models_to_import:
             print(f"No model files specified for {item_name}")
             return False
+
+        graphic_name = Path(main_file).stem if main_file else item_name
 
         # Get BAD bone data and animation context if available
         bad_file = None
@@ -104,6 +146,10 @@ def import_basic_model(base_dir: str, item_name: str, item_type: str,
                     result = main_builder.build_basic_scene(item_name)
                     if result:
                         success_count += 1
+                        if output_dir:
+                            project_dir = os.path.join(output_dir, graphic_name)
+                            os.makedirs(project_dir, exist_ok=True)
+                            write_3dp_from_ir(ir, os.path.join(project_dir, graphic_name + ".3dp"))
                 else:
                     if main_builder is None:
                         continue
@@ -122,12 +168,19 @@ def import_basic_model(base_dir: str, item_name: str, item_type: str,
         if bad_file is not None:
             free_bad(bad_file)
 
+        if success_count > 0 and output_dir:
+            project_dir = os.path.join(output_dir, graphic_name)
+            _export_ase_and_save_blend(project_dir, graphic_name)
+
         return success_count > 0
 
 
 def import_loose_3di(filepath: str, import_collisions: bool = True,
-                     import_occlusion: bool = True, import_lights: bool = True) -> bool:
+                     import_occlusion: bool = True, import_lights: bool = True,
+                     output_dir: str = "") -> bool:
     """Import a standalone .3di file with textures resolved from its directory."""
+    _clear_scene()
+
     from .opennova.threedi_ffi import read_model_ir, free_model_ir
     from .opennova.asset_resolver import AssetResolver
     from .scene_builder import BlenderSceneBuilder
@@ -143,7 +196,15 @@ def import_loose_3di(filepath: str, import_collisions: bool = True,
                                           import_occlusion=import_occlusion,
                                           import_lights=import_lights)
             result = builder.build_basic_scene(name)
+
+            if result and output_dir:
+                project_dir = os.path.join(output_dir, name)
+                os.makedirs(project_dir, exist_ok=True)
+                write_3dp_from_ir(ir, os.path.join(project_dir, name + ".3dp"))
         finally:
             free_model_ir(ir)
+
+    if result and output_dir:
+        _export_ase_and_save_blend(project_dir, name)
 
     return bool(result)

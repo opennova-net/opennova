@@ -918,8 +918,13 @@ static void dump_3di3_part_animations(const Threedi3di3 *model) {
     printf("=== PART ANIMATIONS (%zu) ===\n", model->part_animation_count);
     for (size_t i = 0; i < model->part_animation_count; ++i) {
         const ThreediPartAnimation *pa = &model->part_animations[i];
-        printf("  [%zu] flags=0x%08X parent=%u subobj=%u mat_idx=%u mat_off=%u bind=%d\n",
-               i, pa->flags, pa->parent_subobject, pa->subobject_index,
+        uint8_t scale_t = pa->flags & 0xFF;
+        uint8_t rot_t = (pa->flags >> 8) & 0xFF;
+        uint8_t rot_rev = (pa->flags >> 16) & 0xFF;
+        uint8_t trans_t = (pa->flags >> 24) & 0xFF;
+        printf("  [%zu] flags=0x%08X (scale=%u rot=%u rot_rev=%u trans=%u) parent=%u subobj=%u mat_idx=%u mat_off=%u bind=%d\n",
+               i, pa->flags, scale_t, rot_t, rot_rev, trans_t,
+               pa->parent_subobject, pa->subobject_index,
                pa->matrix_index, pa->matrix_offset, pa->bind_matrix_index);
         printf("       rot_x=(ctrl=%u p=%u rate=%d s=%d e=%d)\n",
                pa->rotation_x.control, pa->rotation_x.control_param,
@@ -933,6 +938,12 @@ static void dump_3di3_part_animations(const Threedi3di3 *model) {
         printf("       scale_x=(ctrl=%u p=%u rate=%d s=%d e=%d)\n",
                pa->scale_x.control, pa->scale_x.control_param,
                pa->scale_x.rate, pa->scale_x.start, pa->scale_x.end);
+        printf("       scale_y=(ctrl=%u p=%u rate=%d s=%d e=%d)\n",
+               pa->scale_y.control, pa->scale_y.control_param,
+               pa->scale_y.rate, pa->scale_y.start, pa->scale_y.end);
+        printf("       scale_z=(ctrl=%u p=%u rate=%d s=%d e=%d)\n",
+               pa->scale_z.control, pa->scale_z.control_param,
+               pa->scale_z.rate, pa->scale_z.start, pa->scale_z.end);
         printf("       translate=(ctrl=%u p=%u rate=%d s=%d e=%d)\n",
                pa->translation.control, pa->translation.control_param,
                pa->translation.rate, pa->translation.start, pa->translation.end);
@@ -968,14 +979,39 @@ static int dump_3di3(const char *path) {
     dump_3di3_ctrl_regs(&model);
 
     if (model.collision) {
+        const ThreediCollisionModel *col = model.collision;
         printf("=== COLLISION ===\n");
         printf("  vertices=%d normals=%d faces=%d objects=%zu volumes=%zu planes=%zu\n",
-               model.collision->model_data.num_vertices,
-               model.collision->model_data.num_normals,
-               model.collision->model_data.num_faces,
-               model.collision->object_count,
-               model.collision->volume_count,
-               model.collision->plane_count);
+               col->model_data.num_vertices,
+               col->model_data.num_normals,
+               col->model_data.num_faces,
+               col->object_count,
+               col->volume_count,
+               col->plane_count);
+
+        // Per-object detail with poly_type histogram
+        size_t face_cursor = 0;
+        for (size_t oi = 0; oi < col->object_count; ++oi) {
+            const ThreediCollisionObject *obj = &col->objects[oi];
+            printf("  object[%zu]: verts=%d faces=%d parent_subobj=%d\n",
+                   oi, obj->num_vertices, obj->num_faces, obj->parent_subobject_index);
+
+            // Build poly_type histogram for this object's faces
+            uint32_t pt_counts[256] = {};
+            for (int32_t f = 0; f < obj->num_faces; ++f) {
+                size_t fi = face_cursor + (size_t)f;
+                if (fi < col->face_count)
+                    pt_counts[col->faces[fi].poly_type]++;
+            }
+            printf("    poly_types:");
+            for (int pt = 0; pt < 256; ++pt) {
+                if (pt_counts[pt] > 0)
+                    printf(" 0x%02X(%u)", pt, pt_counts[pt]);
+            }
+            printf("\n");
+
+            face_cursor += (size_t)(obj->num_faces > 0 ? obj->num_faces : 0);
+        }
         printf("\n");
     }
 
