@@ -115,6 +115,8 @@ class NovalogicPanelProperties(PropertyGroup):
         ],
         default='ITEMS',
     )
+    export_all_running: BoolProperty(name="Export All Running", default=False)
+    export_all_status: StringProperty(name="Export All Status", default="")
 
 
 class VIEW3D_PT_novalogic_panel(Panel):
@@ -165,6 +167,14 @@ class VIEW3D_PT_novalogic_panel(Panel):
                     box.prop(props, "import_occlusion")
                     box.prop(props, "import_lights")
                     layout.operator("novalogic.import_selected", text="Import Selected", icon='IMPORT')
+
+            layout.separator()
+            if props.export_all_running:
+                box = layout.box()
+                box.label(text=props.export_all_status, icon='SORTTIME')
+                box.label(text="Press Esc to cancel")
+            else:
+                layout.operator("novalogic.export_all", text="Export All (slow)", icon='EXPORT')
         else:
             layout.label(text="No items found. Select directory and scan.")
 
@@ -336,6 +346,130 @@ class NOVALOGIC_OT_import_selected(Operator):
                 break
 
         return {'FINISHED'}
+
+
+class NOVALOGIC_OT_export_all(Operator):
+    """Export all items and weapons with models to the output directory"""
+    bl_idname = "novalogic.export_all"
+    bl_label = "Export All"
+
+    _items: list = []
+    _index: int = 0
+    _total: int = 0
+    _success: int = 0
+    _failed: int = 0
+    _timer = None
+
+    def invoke(self, context, event):
+        props = context.scene.novalogic_props
+        if not props.resource_directory:
+            self.report({'ERROR'}, "Resource directory must be set")
+            return {'CANCELLED'}
+        if not props.output_directory:
+            self.report({'ERROR'}, "Output directory must be set")
+            return {'CANCELLED'}
+        if not props.weapon_items:
+            self.report({'ERROR'}, "No items scanned. Click 'Scan Directory' first")
+            return {'CANCELLED'}
+
+        self._items = [
+            (item.name, item.item_type, item.has_animations)
+            for item in props.weapon_items if item.has_model
+        ]
+        if not self._items:
+            self.report({'ERROR'}, "No items with models found")
+            return {'CANCELLED'}
+
+        self._index = 0
+        self._total = len(self._items)
+        self._success = 0
+        self._failed = 0
+
+        props.export_all_running = True
+        props.export_all_status = f"Starting export of {self._total} items..."
+
+        wm = context.window_manager
+        wm.progress_begin(0, self._total)
+        self._timer = wm.event_timer_add(0.1, window=context.window)
+        wm.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def modal(self, context, event):
+        props = context.scene.novalogic_props
+
+        if event.type == 'ESC':
+            self._finish(context, cancelled=True)
+            return {'CANCELLED'}
+
+        if event.type != 'TIMER':
+            return {'PASS_THROUGH'}
+
+        if self._index >= self._total:
+            self._finish(context, cancelled=False)
+            return {'FINISHED'}
+
+        item_name, item_type, has_animations = self._items[self._index]
+        self._index += 1
+
+        props.export_all_status = f"Exporting {self._index}/{self._total}: {item_name}"
+        context.window_manager.progress_update(self._index)
+
+        # Force UI redraw so the status text updates
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+
+        try:
+            _reload_modules()
+            from .blender_importer import import_basic_model
+
+            result = import_basic_model(
+                base_dir=props.resource_directory,
+                item_name=item_name,
+                item_type=item_type,
+                import_arms=(item_type == "weapon"),
+                import_animations=has_animations,
+                import_collisions=True,
+                import_occlusion=True,
+                import_lights=True,
+                output_dir=props.output_directory,
+            )
+            if result:
+                self._success += 1
+            else:
+                self._failed += 1
+                print(f"Export All: no model files for {item_name}")
+        except Exception as e:
+            self._failed += 1
+            import traceback
+            traceback.print_exc()
+            print(f"Export All: failed to export {item_name}: {e}")
+
+        return {'RUNNING_MODAL'}
+
+    def _finish(self, context, cancelled: bool):
+        props = context.scene.novalogic_props
+        wm = context.window_manager
+
+        if self._timer is not None:
+            wm.event_timer_remove(self._timer)
+            self._timer = None
+
+        wm.progress_end()
+        props.export_all_running = False
+        props.export_all_status = ""
+
+        if cancelled:
+            self.report({'WARNING'},
+                        f"Export cancelled after {self._index}/{self._total} "
+                        f"({self._success} succeeded, {self._failed} failed)")
+        else:
+            self.report({'INFO'},
+                        f"Export complete: {self._success} succeeded, {self._failed} failed "
+                        f"out of {self._total}")
+
+    def cancel(self, context):
+        self._finish(context, cancelled=True)
 
 
 # ==========================================================================
@@ -718,6 +852,7 @@ classes = [
     VIEW3D_PT_opennova_oed_panel,
     NOVALOGIC_OT_scan_directory,
     NOVALOGIC_OT_import_selected,
+    NOVALOGIC_OT_export_all,
     IMPORT_OT_mixamo_novalogic,
     EXPORT_OT_novalogic_ase,
     EXPORT_OT_novalogic_anims,
