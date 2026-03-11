@@ -38,5 +38,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: novalogic_importer
+          name: opennova_blender
           path: dist/*.zip

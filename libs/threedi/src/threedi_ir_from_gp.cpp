@@ -506,7 +506,7 @@ static void assign_surface_types(const ThreediGpFile *gp, ThreediModelIR *ir) {
     const ThreediGpCollision *col = gp->collision;
     const ThreediGpRModel *rm = &gp->rmodels[0];
 
-    // Set default surface_type (0x01 = Mud) for all materials
+    // Set default surface_type (0x01 = Dirt) for all materials
     for (size_t i = 0; i < ir->material_count; ++i)
         ir->materials[i].surface_type = 0x01;
 
@@ -823,17 +823,29 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
         }
     }
 
-    // Convert part animations from first LOD
-    if (gp->rmodel_count > 0 && gp->rmodels[0].part_animation_count > 0) {
-        const ThreediGpRModel *rm = &gp->rmodels[0];
-        out->part_animation_count = rm->part_animation_count;
-        out->part_animations = (ThreediIRPartAnimation *)calloc(out->part_animation_count,
-                                                                  sizeof(ThreediIRPartAnimation));
-        if (!out->part_animations) goto error;
+    // Convert part animations per-LOD
+    #define GP_READ_XFORM(dst, src) do { \
+        (dst).control = (src).control; \
+        (dst).control_param = (src).param; \
+        (dst).rate = (src).rate; \
+        (dst).start = (src).start; \
+        (dst).end = (src).end; \
+    } while(0)
 
-        for (size_t i = 0; i < out->part_animation_count; ++i) {
+    for (size_t li = 0; li < out->lod_count; ++li) {
+        if (li >= gp->rmodel_count) break;
+        const ThreediGpRModel *rm = &gp->rmodels[li];
+        if (rm->part_animation_count == 0) continue;
+
+        ThreediIRLod *dst_lod = &out->lods[li];
+        dst_lod->part_animation_count = rm->part_animation_count;
+        dst_lod->part_animations = (ThreediIRPartAnimation *)calloc(dst_lod->part_animation_count,
+                                                                      sizeof(ThreediIRPartAnimation));
+        if (!dst_lod->part_animations) goto error;
+
+        for (size_t i = 0; i < dst_lod->part_animation_count; ++i) {
             const ThreediGpPartAnimation *sp = &rm->part_animations[i];
-            ThreediIRPartAnimation *dp = &out->part_animations[i];
+            ThreediIRPartAnimation *dp = &dst_lod->part_animations[i];
 
             dp->flags = sp->flags;
             dp->parent_part = sp->parent_subobject;
@@ -842,15 +854,6 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
             dp->matrix_offset = sp->matrix_offset;
             dp->bind_matrix_index = sp->bind_matrix_index;
 
-            // GP stores scale(12-35) then rot(36-59), IR expects rot then scale
-            #define GP_READ_XFORM(dst, src) do { \
-                (dst).control = (src).control; \
-                (dst).control_param = (src).param; \
-                (dst).rate = (src).rate; \
-                (dst).start = (src).start; \
-                (dst).end = (src).end; \
-            } while(0)
-
             GP_READ_XFORM(dp->rotation_x, sp->rot_x);
             GP_READ_XFORM(dp->rotation_y, sp->rot_y);
             GP_READ_XFORM(dp->rotation_z, sp->rot_z);
@@ -858,10 +861,10 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
             GP_READ_XFORM(dp->scale_y, sp->scale_y);
             GP_READ_XFORM(dp->scale_z, sp->scale_z);
             GP_READ_XFORM(dp->translation, sp->translate);
-
-            #undef GP_READ_XFORM
         }
     }
+
+    #undef GP_READ_XFORM
 
     // Convert control registers
     if (gp->control_register_count > 0) {

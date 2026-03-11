@@ -202,7 +202,7 @@ typedef struct ThreediIRMaterial {
     float v_tiling;
 
     // Collision surface type (raw binary value from collision faces)
-    // Default 0x01 (Mud). Maps to ptype via surface_type_to_ptype().
+    // Default 0x01 (Dirt). Maps to ptype via surface_type_to_ptype().
     uint8_t surface_type;
 
     // Collision polygon attributes (reconstructed from collision face material_flags).
@@ -268,6 +268,23 @@ typedef struct ThreediIRCollisionVolume {
     int32_t object_index;       // Source collision object index (if available)
 } ThreediIRCollisionVolume;
 
+typedef struct ThreediIRCollisionFace {
+    int16_t vert_index[3];      // Local vertex indices (within subobject)
+    uint32_t material_flags;    // CFAC material_flags (for material reverse-mapping)
+    uint8_t poly_type;          // CFAC poly_type (for material reverse-mapping)
+} ThreediIRCollisionFace;
+
+typedef struct ThreediIRCollisionObject {
+    int32_t num_vertices;       // Vertex count for this subobject
+    int32_t num_faces;          // Face count for this subobject
+    int32_t parent_subobject_index;  // Part hierarchy parent
+    float offset[3];            // Center point position (raw fp16.16 stored as float)
+} ThreediIRCollisionObject;
+
+typedef struct ThreediIRCollisionTranslation {
+    float translation[3];       // Attachment point position (raw fp16.16 stored as float)
+} ThreediIRCollisionTranslation;
+
 typedef struct ThreediIRCollision {
     // Global collision data
     float model_min[3];
@@ -285,6 +302,16 @@ typedef struct ThreediIRCollision {
     // Bounding volumes
     ThreediIRCollisionVolume *volumes;
     size_t volume_count;
+
+    // Mesh data (for BulletLOD reconstruction)
+    ThreediIRCollisionFace *faces;
+    size_t face_count;
+
+    ThreediIRCollisionObject *objects;
+    size_t object_count;
+
+    ThreediIRCollisionTranslation *translations;
+    size_t translation_count;
 } ThreediIRCollision;
 
 // ============================================================================
@@ -336,31 +363,6 @@ typedef struct ThreediIROcclusion {
 } ThreediIROcclusion;
 
 // ============================================================================
-// LOD (Level of Detail)
-// ============================================================================
-
-typedef struct ThreediIRLod {
-    int32_t threshold;              // LOD distance threshold
-    int32_t declared_part_count;    // RMDL declared count (may differ from part_count)
-
-    // Vertices (unified format)
-    ThreediIRVertex *vertices;
-    size_t vertex_count;
-
-    // Indices
-    uint16_t *indices;
-    size_t index_count;
-
-    // Primitives (triangle strips/lists)
-    ThreediIRPrimitive *primitives;
-    size_t primitive_count;
-
-    // Parts (render objects)
-    ThreediIRPart *parts;
-    size_t part_count;
-} ThreediIRLod;
-
-// ============================================================================
 // Part Animation (from PANM)
 // ============================================================================
 
@@ -387,6 +389,35 @@ typedef struct ThreediIRPartAnimation {
     ThreediIRTransform scale_z;
     ThreediIRTransform translation;
 } ThreediIRPartAnimation;
+
+// ============================================================================
+// LOD (Level of Detail)
+// ============================================================================
+
+typedef struct ThreediIRLod {
+    int32_t threshold;              // LOD distance threshold
+    int32_t declared_part_count;    // RMDL declared count (may differ from part_count)
+
+    // Vertices (unified format)
+    ThreediIRVertex *vertices;
+    size_t vertex_count;
+
+    // Indices
+    uint16_t *indices;
+    size_t index_count;
+
+    // Primitives (triangle strips/lists)
+    ThreediIRPrimitive *primitives;
+    size_t primitive_count;
+
+    // Parts (render objects)
+    ThreediIRPart *parts;
+    size_t part_count;
+
+    // Part animations (PANM) — per-LOD, as in the 3DI format
+    ThreediIRPartAnimation *part_animations;
+    size_t part_animation_count;
+} ThreediIRLod;
 
 typedef struct ThreediIRControlRegister {
     char name[25];
@@ -425,13 +456,10 @@ typedef struct ThreediModelIR {
 
     // Collision data
     ThreediIRCollision *collision;
+    int32_t collision_lod;          // LOD index used as collision source (-1 = last)
 
     // Occlusion data
     ThreediIROcclusion *occlusion;
-
-    // Part animations (PANM)
-    ThreediIRPartAnimation *part_animations;
-    size_t part_animation_count;
 
     // Control registers (CTRL)
     ThreediIRControlRegister *control_registers;

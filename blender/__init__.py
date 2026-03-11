@@ -1,17 +1,16 @@
 """
-Blender addon for importing Novalogic .3di/.bad/.adm files and exporting ASE.
-Unified from the import pipeline (.scratch/onblender) and the mature ASE exporter.
+Blender addon for exporting Novalogic ASE and animation files.
 """
 
 from __future__ import annotations
 
 bl_info = {
-    "name": "Novalogic 3DI Importer & ASE Exporter",
+    "name": "Novalogic ASE & Anim Exporter",
     "author": "Taylor Finnell",
     "version": (0, 0, 1),
     "blender": (2, 80, 0),
     "location": "File > Import-Export",
-    "description": "Import Novalogic 3D models and Export ASE files",
+    "description": "Export ASE files and Novalogic ADM/BAD animations; import Mixamo FBX for animation workflow",
     "warning": "",
     "doc_url": "",
     "category": "Import-Export",
@@ -22,28 +21,21 @@ import bpy
 import importlib
 from bpy.props import (
     StringProperty, BoolProperty, FloatProperty, IntProperty,
-    EnumProperty, CollectionProperty,
+    CollectionProperty,
 )
-from bpy.types import Operator, Panel, PropertyGroup, UIList
+from bpy.types import Operator, PropertyGroup
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 
 # Hot-reload support
 if "math_utils" in locals():
     importlib.reload(math_utils)
-if "blender_importer" in locals():
-    importlib.reload(blender_importer)
-if "scene_builder" in locals():
-    importlib.reload(scene_builder)
 if "ase_exporter" in locals():
     importlib.reload(ase_exporter)
 if "anim_exporter" in locals():
     importlib.reload(anim_exporter)
 if "mixamo_importer" in locals():
     importlib.reload(mixamo_importer)
-
 from . import math_utils
-from . import blender_importer
-from . import scene_builder
 from . import ase_exporter
 from . import anim_exporter
 from . import mixamo_importer
@@ -52,26 +44,14 @@ from . import mixamo_importer
 def _reload_modules():
     """Reload all addon modules for development iteration."""
     importlib.reload(math_utils)
-    importlib.reload(blender_importer)
-    importlib.reload(scene_builder)
     importlib.reload(ase_exporter)
     importlib.reload(anim_exporter)
     importlib.reload(mixamo_importer)
 
 
 # ==========================================================================
-# Import UI (from .scratch/onblender)
+# Animation clip property group (used by EXPORT_OT_novalogic_anims)
 # ==========================================================================
-
-class NovalogicWeaponItem(PropertyGroup):
-    """Property group for weapon/item entries"""
-    name: StringProperty(name="Name")
-    item_type: StringProperty(name="Type")
-    has_model: BoolProperty(name="Has Model", default=False)
-    has_animations: BoolProperty(name="Has Animations", default=False)
-    context_data: StringProperty(name="Context Data")
-    graphic_name: StringProperty(name="Graphic")
-
 
 class NovalogicAnimClipItem(PropertyGroup):
     action_name: StringProperty(name="Action")
@@ -82,458 +62,8 @@ class NovalogicAnimClipItem(PropertyGroup):
     filename: StringProperty(name="Filename", description="BAD filename (without extension)")
 
 
-
-class NovalogicPanelProperties(PropertyGroup):
-    """Properties for the Novalogic panel"""
-    resource_directory: StringProperty(
-        name="Resource Directory",
-        description="Path to Novalogic resource files",
-        subtype='DIR_PATH',
-        default="",
-    )
-    weapon_items: CollectionProperty(type=NovalogicWeaponItem)
-    selected_item_index: IntProperty(name="Selected Item", default=-1)
-    search_filter: StringProperty(
-        name="Search",
-        description="Filter items by name",
-        default="",
-    )
-    import_main_model: BoolProperty(name="Main Model", default=True)
-    import_arms_model: BoolProperty(name="Arms Model", default=True)
-    import_animations: BoolProperty(name="Animations", default=True)
-    import_collisions: BoolProperty(name="Collisions", default=True)
-    import_occlusion: BoolProperty(name="Occlusion", default=True)
-    import_lights: BoolProperty(name="Lights", default=True)
-    output_directory: StringProperty(
-        name="Output Directory",
-        subtype='DIR_PATH',
-    )
-    active_tab: EnumProperty(
-        items=[
-            ('ITEMS', "Items", "Show items"),
-            ('WEAPONS', "Weapons", "Show weapons"),
-        ],
-        default='ITEMS',
-    )
-    export_all_running: BoolProperty(name="Export All Running", default=False)
-    export_all_status: StringProperty(name="Export All Status", default="")
-
-
-class VIEW3D_PT_novalogic_panel(Panel):
-    """OpenNova Importer Panel in 3D View sidebar"""
-    bl_label = "OpenNova Importer"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "OpenNova Importer"
-
-    def draw(self, context):
-        layout = self.layout
-        props = context.scene.novalogic_props
-
-        layout.prop(props, "resource_directory")
-        layout.prop(props, "output_directory")
-        layout.operator("novalogic.scan_directory", text="Scan Directory", icon='FILE_REFRESH')
-        layout.separator()
-
-        if props.weapon_items:
-            row = layout.row(align=True)
-            row.prop(props, "active_tab", expand=True)
-
-            tab_label = "Weapons" if props.active_tab == 'WEAPONS' else "Items"
-            layout.label(text=f"Available {tab_label}:")
-            layout.prop(props, "search_filter", icon='VIEWZOOM')
-            row = layout.row()
-            row.template_list(
-                "NOVALOGIC_UL_weapon_list", "",
-                props, "weapon_items",
-                props, "selected_item_index",
-                rows=8,
-            )
-
-            if 0 <= props.selected_item_index < len(props.weapon_items):
-                selected = props.weapon_items[props.selected_item_index]
-                expected_type = "weapon" if props.active_tab == 'WEAPONS' else "item"
-                if selected.item_type == expected_type:
-                    layout.separator()
-                    layout.label(text=f"Import Options for {selected.name}:")
-                    box = layout.box()
-                    if selected.has_model:
-                        box.prop(props, "import_main_model")
-                        if selected.item_type == "weapon":
-                            box.prop(props, "import_arms_model")
-                    if selected.has_animations:
-                        box.prop(props, "import_animations")
-                    box.prop(props, "import_collisions")
-                    box.prop(props, "import_occlusion")
-                    box.prop(props, "import_lights")
-                    layout.operator("novalogic.import_selected", text="Import Selected", icon='IMPORT')
-
-            layout.separator()
-            if props.export_all_running:
-                box = layout.box()
-                box.label(text=props.export_all_status, icon='SORTTIME')
-                box.label(text="Press Esc to cancel")
-            else:
-                layout.operator("novalogic.export_all", text="Export All (slow)", icon='EXPORT')
-        else:
-            layout.label(text="No items found. Select directory and scan.")
-
-        # Dependencies — only show when something is wrong
-        try:
-            from .dependencies import check_native_library
-            native_ok, native_info = check_native_library()
-        except Exception as e:
-            native_ok, native_info = False, str(e)
-
-        if not native_ok:
-            layout.separator()
-            dep_box = layout.box()
-            dep_box.label(text="Native library: missing", icon='ERROR')
-            dep_box.label(text=f"  {native_info}", icon='BLANK1')
-
-
-
-class VIEW3D_PT_opennova_oed_panel(Panel):
-    """OpenNova OED Panel in 3D View sidebar"""
-    bl_label = "OpenNova OED"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "OpenNova OED"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.label(text="Coming soon.")
-
-
-class NOVALOGIC_UL_weapon_list(UIList):
-    """UI List for weapons and items"""
-
-    def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
-        if self.layout_type in {'DEFAULT', 'COMPACT'}:
-            row = layout.row(align=True)
-            label = item.name
-            if item.graphic_name:
-                label = f"{item.name} ({item.graphic_name})"
-            if item.item_type == 'weapon':
-                row.label(text=label, icon='TOOL_SETTINGS')
-            else:
-                row.label(text=label, icon='OBJECT_DATA')
-            sub = row.row(align=True)
-            sub.alignment = 'RIGHT'
-            if item.has_model:
-                sub.label(text="", icon='MESH_DATA')
-            if item.has_animations:
-                sub.label(text="", icon='ANIM_DATA')
-        elif self.layout_type == 'GRID':
-            layout.alignment = 'CENTER'
-            layout.label(text=item.name)
-
-    def filter_items(self, context, data, propname):
-        items = getattr(data, propname)
-        props = context.scene.novalogic_props
-        search = props.search_filter.lower()
-        tab_type = "weapon" if props.active_tab == 'WEAPONS' else "item"
-        flags = []
-        for item in items:
-            if item.item_type != tab_type:
-                flags.append(0)
-            elif search and search not in item.name.lower() and search not in item.graphic_name.lower():
-                flags.append(0)
-            else:
-                flags.append(self.bitflag_filter_item)
-        return flags, []
-
-
-class NOVALOGIC_OT_scan_directory(Operator):
-    """Scan directory for weapons and items"""
-    bl_idname = "novalogic.scan_directory"
-    bl_label = "Scan Directory"
-
-    def execute(self, context):
-        props = context.scene.novalogic_props
-        if not props.resource_directory:
-            self.report({'ERROR'}, "Please select a directory")
-            return {'CANCELLED'}
-        try:
-            props.weapon_items.clear()
-            from .blender_importer import scan_and_parse_directory
-            weapons, items = scan_and_parse_directory(props.resource_directory)
-
-            for w in weapons:
-                item = props.weapon_items.add()
-                item.name = w.name
-                item.item_type = "weapon"
-                item.has_model = bool(w.graphic1.main)
-                item.has_animations = bool(w.anim_adm)
-                item.context_data = w.name
-                item.graphic_name = w.graphic1.main if w.graphic1.main else ""
-
-            for gi in items:
-                item = props.weapon_items.add()
-                item.name = gi.name
-                item.item_type = "item"
-                item.has_model = bool(gi.graphic_us)
-                item.has_animations = bool(gi.anim_def)
-                item.context_data = gi.name
-                item.graphic_name = gi.graphic_us if gi.graphic_us else ""
-
-            self.report({'INFO'}, f"Found {len(weapons)} weapons and {len(items)} items")
-        except Exception as e:
-            self.report({'ERROR'}, f"Error scanning: {e}")
-            return {'CANCELLED'}
-        return {'FINISHED'}
-
-
-class NOVALOGIC_OT_import_selected(Operator):
-    """Import the selected weapon/item"""
-    bl_idname = "novalogic.import_selected"
-    bl_label = "Import Selected"
-
-    def execute(self, context):
-        props = context.scene.novalogic_props
-        if props.selected_item_index < 0 or props.selected_item_index >= len(props.weapon_items):
-            self.report({'ERROR'}, "No item selected")
-            return {'CANCELLED'}
-
-        selected = props.weapon_items[props.selected_item_index]
-
-        if not props.output_directory:
-            self.report({'ERROR'}, "Output directory must be set")
-            return {'CANCELLED'}
-
-        try:
-            _reload_modules()
-            from .blender_importer import import_basic_model
-
-            output_dir = props.output_directory
-
-            if props.import_main_model and selected.has_model:
-                result = import_basic_model(
-                    base_dir=props.resource_directory,
-                    item_name=selected.name,
-                    item_type=selected.item_type,
-                    import_arms=props.import_arms_model,
-                    import_animations=props.import_animations and selected.has_animations,
-                    import_collisions=props.import_collisions,
-                    import_occlusion=props.import_occlusion,
-                    import_lights=props.import_lights,
-                    output_dir=output_dir,
-                )
-                if result:
-                    self.report({'INFO'}, f"Imported {selected.name}")
-                else:
-                    self.report({'ERROR'}, f"Failed to import {selected.name}: no model files found")
-                    return {'CANCELLED'}
-            else:
-                self.report({'WARNING'}, "No model to import")
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            msg = str(e)
-            if len(msg) > 200:
-                msg = msg[:200] + "..."
-            self.report({'ERROR'}, f"Import failed: {msg}")
-            return {'CANCELLED'}
-
-        # Auto-frame the NLA editor view on all strips
-        for area in bpy.context.screen.areas:
-            if area.type == 'NLA_EDITOR':
-                for region in area.regions:
-                    if region.type == 'WINDOW':
-                        with bpy.context.temp_override(area=area, region=region):
-                            bpy.ops.nla.view_all()
-                        break
-                break
-
-        return {'FINISHED'}
-
-
-class NOVALOGIC_OT_export_all(Operator):
-    """Export all items and weapons with models to the output directory"""
-    bl_idname = "novalogic.export_all"
-    bl_label = "Export All"
-
-    _items: list = []
-    _index: int = 0
-    _total: int = 0
-    _success: int = 0
-    _failed: int = 0
-    _timer = None
-
-    def invoke(self, context, event):
-        props = context.scene.novalogic_props
-        if not props.resource_directory:
-            self.report({'ERROR'}, "Resource directory must be set")
-            return {'CANCELLED'}
-        if not props.output_directory:
-            self.report({'ERROR'}, "Output directory must be set")
-            return {'CANCELLED'}
-        if not props.weapon_items:
-            self.report({'ERROR'}, "No items scanned. Click 'Scan Directory' first")
-            return {'CANCELLED'}
-
-        self._items = [
-            (item.name, item.item_type, item.has_animations)
-            for item in props.weapon_items if item.has_model
-        ]
-        if not self._items:
-            self.report({'ERROR'}, "No items with models found")
-            return {'CANCELLED'}
-
-        self._index = 0
-        self._total = len(self._items)
-        self._success = 0
-        self._failed = 0
-
-        props.export_all_running = True
-        props.export_all_status = f"Starting export of {self._total} items..."
-
-        wm = context.window_manager
-        wm.progress_begin(0, self._total)
-        self._timer = wm.event_timer_add(0.1, window=context.window)
-        wm.modal_handler_add(self)
-        return {'RUNNING_MODAL'}
-
-    def modal(self, context, event):
-        props = context.scene.novalogic_props
-
-        if event.type == 'ESC':
-            self._finish(context, cancelled=True)
-            return {'CANCELLED'}
-
-        if event.type != 'TIMER':
-            return {'PASS_THROUGH'}
-
-        if self._index >= self._total:
-            self._finish(context, cancelled=False)
-            return {'FINISHED'}
-
-        item_name, item_type, has_animations = self._items[self._index]
-        self._index += 1
-
-        props.export_all_status = f"Exporting {self._index}/{self._total}: {item_name}"
-        context.window_manager.progress_update(self._index)
-
-        # Force UI redraw so the status text updates
-        for area in context.screen.areas:
-            if area.type == 'VIEW_3D':
-                area.tag_redraw()
-
-        try:
-            _reload_modules()
-            from .blender_importer import import_basic_model
-
-            result = import_basic_model(
-                base_dir=props.resource_directory,
-                item_name=item_name,
-                item_type=item_type,
-                import_arms=(item_type == "weapon"),
-                import_animations=has_animations,
-                import_collisions=True,
-                import_occlusion=True,
-                import_lights=True,
-                output_dir=props.output_directory,
-            )
-            if result:
-                self._success += 1
-            else:
-                self._failed += 1
-                print(f"Export All: no model files for {item_name}")
-        except Exception as e:
-            self._failed += 1
-            import traceback
-            traceback.print_exc()
-            print(f"Export All: failed to export {item_name}: {e}")
-
-        return {'RUNNING_MODAL'}
-
-    def _finish(self, context, cancelled: bool):
-        props = context.scene.novalogic_props
-        wm = context.window_manager
-
-        if self._timer is not None:
-            wm.event_timer_remove(self._timer)
-            self._timer = None
-
-        wm.progress_end()
-        props.export_all_running = False
-        props.export_all_status = ""
-
-        if cancelled:
-            self.report({'WARNING'},
-                        f"Export cancelled after {self._index}/{self._total} "
-                        f"({self._success} succeeded, {self._failed} failed)")
-        else:
-            self.report({'INFO'},
-                        f"Export complete: {self._success} succeeded, {self._failed} failed "
-                        f"out of {self._total}")
-
-    def cancel(self, context):
-        self._finish(context, cancelled=True)
-
-
 # ==========================================================================
-# Loose .3di Import operator (File > Import) — disabled, kept for reference
-# ==========================================================================
-
-class IMPORT_OT_novalogic_3di(Operator, ImportHelper):
-    """Import a Novalogic 3DI model file"""
-    bl_idname = "import_scene.novalogic_3di"
-    bl_label = "Import Novalogic 3DI"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    filter_glob: StringProperty(default="*.3di", options={'HIDDEN'})
-    import_collisions: BoolProperty(name="Collisions", default=True)
-    import_occlusion: BoolProperty(name="Occlusion", default=True)
-    import_lights: BoolProperty(name="Lights", default=True)
-    export_project: BoolProperty(
-        name="Export project files",
-        default=False,
-    )
-    output_directory: StringProperty(
-        name="Output Directory",
-        subtype='DIR_PATH',
-    )
-
-    def draw(self, context):
-        layout = self.layout
-        layout.prop(self, "import_collisions")
-        layout.prop(self, "import_occlusion")
-        layout.prop(self, "import_lights")
-        layout.prop(self, "export_project")
-        if self.export_project:
-            layout.prop(self, "output_directory")
-
-    def execute(self, context):
-        if self.export_project and not self.output_directory:
-            self.report({'ERROR'}, "Output directory must be set when exporting project files")
-            return {'CANCELLED'}
-
-        try:
-            _reload_modules()
-            from .blender_importer import import_loose_3di
-
-            output_dir = self.output_directory if self.export_project else ""
-
-            if import_loose_3di(self.filepath,
-                                import_collisions=self.import_collisions,
-                                import_occlusion=self.import_occlusion,
-                                import_lights=self.import_lights,
-                                output_dir=output_dir):
-                self.report({'INFO'}, f"Imported {os.path.basename(self.filepath)}")
-                return {'FINISHED'}
-            else:
-                self.report({'ERROR'}, "Import returned no result")
-                return {'CANCELLED'}
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            self.report({'ERROR'}, f"Import failed: {e}")
-            return {'CANCELLED'}
-
-
-# ==========================================================================
-# ASE Export operator (kept from mature blender/ version)
+# ASE Export operator
 # ==========================================================================
 
 class EXPORT_OT_novalogic_ase(Operator, ExportHelper):
@@ -770,7 +300,7 @@ class EXPORT_OT_novalogic_anims(Operator, ExportHelper):
 
 
 # ==========================================================================
-# Mixamo FBX Import operator (File > Import)
+# Mixamo FBX Import operator (File > Import — animation workflow only)
 # ==========================================================================
 
 class IMPORT_OT_mixamo_novalogic(Operator, ImportHelper):
@@ -844,15 +374,7 @@ def menu_func_export(self, context):
 
 
 classes = [
-    NovalogicWeaponItem,
     NovalogicAnimClipItem,
-    NovalogicPanelProperties,
-    NOVALOGIC_UL_weapon_list,
-    VIEW3D_PT_novalogic_panel,
-    VIEW3D_PT_opennova_oed_panel,
-    NOVALOGIC_OT_scan_directory,
-    NOVALOGIC_OT_import_selected,
-    NOVALOGIC_OT_export_all,
     IMPORT_OT_mixamo_novalogic,
     EXPORT_OT_novalogic_ase,
     EXPORT_OT_novalogic_anims,
@@ -862,7 +384,6 @@ classes = [
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-    bpy.types.Scene.novalogic_props = bpy.props.PointerProperty(type=NovalogicPanelProperties)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
 
@@ -870,7 +391,6 @@ def register():
 def unregister():
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
-    del bpy.types.Scene.novalogic_props
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
 

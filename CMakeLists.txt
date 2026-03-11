@@ -35,6 +35,7 @@ if(BUILD_SHARED_LIB)
         target_link_options(opennova_shared PRIVATE
             /WHOLEARCHIVE:opennova_threedi
             /WHOLEARCHIVE:opennova_pff
+            /WHOLEARCHIVE:opennova_bfc1
             /WHOLEARCHIVE:oed_bad
             /WHOLEARCHIVE:oed_adm
             /WHOLEARCHIVE:oed_def

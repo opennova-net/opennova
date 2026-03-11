@@ -138,7 +138,6 @@ typedef struct ThreediRgbGen {
     float rate;
     float start_color[4]; // RGBA 0..1
     float end_color[4];   // RGBA 0..1
-    uint8_t unknown_tail[12];
 } ThreediRgbGen;
 
 typedef struct ThreediUvParams {
@@ -175,18 +174,18 @@ typedef struct ThreediMaterial {
     ThreediMaterialTexture textures[24]; // Texture slots (unused slots zeroed)
     uint8_t material_flags;              // THREEDI_MATERIAL_FLAG_* bits
     ThreediAlphaGen alpha_gen;           // Alpha animation parameters
-    ThreediRgbGen rgb_gen;               // RGB color animation parameters
+    ThreediRgbGen rgb_gen;               // RGB color animation parameters (channel 0)
+    ThreediRgbGen rgb_gen2;              // RGB color animation parameters (channel 1, always zero in practice)
     ThreediUvParams u_params;            // U-axis UV animation parameters
     ThreediUvParams v_params;            // V-axis UV animation parameters
     float reflect_color[4];              // Glass reflection color (BGRA, 0..1)
-    uint32_t unknown1;                   // Always 0
+    float reflect_color2[4];             // Second reflect color (always zero in practice)
     uint8_t emissive_type;               // THREEDI_EMISSIVE_NONE or THREEDI_EMISSIVE_FULL
-    uint8_t unknown3;                    // Always 0
-    int is_glass;                        // 1 if reflective/env-mapped (misnomer: not transparent glass)
-    uint8_t unknown4;                    // Always 0
+    uint8_t emissive_type2;              // Second emissive type (always 0 in practice)
+    uint8_t is_glass;                    // 1 if reflective/env-mapped
+    uint8_t glass_type2;                 // Second glass flag (always 0 in practice)
     uint8_t alpha_test_value_byte;       // Alpha test threshold (0-255, divide by 255 for 0..1)
-    uint8_t unknown5;                    // Always 0
-    uint8_t unknown6;                    // Always 0
+    uint8_t pad[3];                      // Always 0
     ThreediTexAnim animation;
 } ThreediMaterial;
 
@@ -225,9 +224,8 @@ typedef struct ThreediUserPoint {
 } ThreediUserPoint;
 
 typedef struct ThreediCollisionModelData {
-    float min[3];
-    float max[3];
-    float center[3];
+    float bbox[6];                // {minX, minY, minZ, maxX, maxY, maxZ}
+    float radii[3];               // {max_radius, max_radius_xy, max_radius_z}
     int32_t num_vertices;
     int32_t num_normals;
     int32_t num_faces;
@@ -538,6 +536,11 @@ typedef struct ThreediLod {
 
     ThreediRenderObject *render_objects;
     size_t render_object_count;
+
+    // Per-LOD part animations (PANM is written per-RLOD in the original).
+    ThreediPartAnimation *part_animations;
+    size_t part_animation_count;
+    uint32_t part_animation_record_size;
 } ThreediLod;
 
 typedef struct Threedi3di3 {

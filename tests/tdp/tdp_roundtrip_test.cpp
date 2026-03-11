@@ -232,8 +232,8 @@ int main() {
         panms[1].translation.control = 7;
         panms[1].translation.rate = 256;
 
-        ir.part_animations = panms;
-        ir.part_animation_count = 2;
+        lod0.part_animations = panms;
+        lod0.part_animation_count = 2;
 
         TdpProject proj;
         int rc2 = tdp_from_ir(&ir, &proj);
@@ -332,8 +332,8 @@ int main() {
         panm.rotation_x.start = 0;
         panm.rotation_x.end = static_cast<int16_t>(360.0f * (16384.0f / 360.0f)); // 360 deg
 
-        ir.part_animations = &panm;
-        ir.part_animation_count = 1;
+        lod0.part_animations = &panm;
+        lod0.part_animation_count = 1;
 
         TdpProject proj;
         int rc3 = tdp_from_ir(&ir, &proj);
@@ -496,9 +496,9 @@ int main() {
         copy_str(mats[1].shader_name, sizeof(mats[1].shader_name), "FF_ST_OP");
         copy_str(mats[2].shader_name, sizeof(mats[2].shader_name), "FF_ST_OP");
 
-        mats[0].surface_type = 0x12; // Cement → ptype 4
-        mats[1].surface_type = 0x01; // Mud → ptype 9
-        mats[2].surface_type = 0x10; // Sand → ptype 5
+        mats[0].surface_type = 0x12; // Hard Metal → ptype 4
+        mats[1].surface_type = 0x01; // Dirt → ptype 9
+        mats[2].surface_type = 0x10; // Cloth → ptype 5
 
         ir.materials = mats;
         ir.material_count = 3;
@@ -507,9 +507,9 @@ int main() {
         int rc5 = tdp_from_ir(&ir, &proj);
         assert(rc5 == 0 && "tdp_from_ir failed");
         assert(proj.material_count == 3);
-        assert(proj.materials[0].ptype == 4);  // Cement
-        assert(proj.materials[1].ptype == 9);  // Mud
-        assert(proj.materials[2].ptype == 5);  // Sand
+        assert(proj.materials[0].ptype == 4);  // Hard Metal
+        assert(proj.materials[1].ptype == 9);  // Dirt
+        assert(proj.materials[2].ptype == 5);  // Cloth
 
         // Also verify all defined surface_type mappings
         struct { uint8_t st; int ptype; } mappings[] = {

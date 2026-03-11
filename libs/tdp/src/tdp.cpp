@@ -115,6 +115,43 @@ void tdp_free(TdpProject *proj) {
 }
 
 // ---------------------------------------------------------------------------
+// Allocators (for FFI callers)
+// ---------------------------------------------------------------------------
+
+void tdp_alloc_materials(TdpProject *proj, size_t count) {
+    if (!proj) return;
+    std::free(proj->materials);
+    proj->materials = nullptr;
+    proj->material_count = 0;
+    if (count > 0) {
+        proj->materials = static_cast<TdpMaterial *>(std::calloc(count, sizeof(TdpMaterial)));
+        if (proj->materials) proj->material_count = count;
+    }
+}
+
+void tdp_alloc_part_anims(TdpLod *lod, size_t count) {
+    if (!lod) return;
+    std::free(lod->part_anims);
+    lod->part_anims = nullptr;
+    lod->part_anim_count = 0;
+    if (count > 0) {
+        lod->part_anims = static_cast<TdpPartAnim *>(std::calloc(count, sizeof(TdpPartAnim)));
+        if (lod->part_anims) lod->part_anim_count = count;
+    }
+}
+
+void tdp_alloc_lights(TdpLod *lod, size_t count) {
+    if (!lod) return;
+    std::free(lod->lights);
+    lod->lights = nullptr;
+    lod->light_count = 0;
+    if (count > 0) {
+        lod->lights = static_cast<TdpLight *>(std::calloc(count, sizeof(TdpLight)));
+        if (lod->lights) lod->light_count = count;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Parser
 // ---------------------------------------------------------------------------
 
@@ -728,16 +765,16 @@ int tdp_write(const char *path, const TdpProject *proj) {
 // ptype → physical_attributes bitfield mapping (inverse of parser's lookup)
 static int ptype_to_physical_attributes(int ptype) {
     switch (ptype) {
-        case 0: return 0x1;     // Generic
-        case 1: return 0x2;     // Dirt
-        case 2: return 0x4;     // Grass
-        case 3: return 0x8;     // Snow
-        case 4: return 0x200;   // Cement
-        case 5: return 0x400;   // Sand
-        case 6: return 0x800;   // Packed dirt
+        case 0: return 0x1;     // Metal
+        case 1: return 0x2;     // Wood
+        case 2: return 0x4;     // Stone
+        case 3: return 0x8;     // Foliage
+        case 4: return 0x200;   // Hard Metal
+        case 5: return 0x400;   // Cloth
+        case 6: return 0x800;   // Glass
         case 7: return 0x10000; // Water
-        case 8: return 0x20000; // Railroad
-        case 9: return 0x40000; // Mud
+        case 8: return 0x20000; // Flesh
+        case 9: return 0x40000; // Dirt
         default: return 0x1;
     }
 }
@@ -936,16 +973,16 @@ static void resolve_mat_ctrlreg(char *dst, size_t dst_size,
 
 static int surface_type_to_ptype(uint8_t st) {
     switch (st) {
-        case 0x0E: return 0;  // Generic
-        case 0x0D: return 1;  // Dirt
-        case 0x0C: return 2;  // Grass
-        case 0x11: return 3;  // Snow
-        case 0x12: return 4;  // Cement
-        case 0x10: return 5;  // Sand
-        case 0x0F: return 6;  // Packed dirt
+        case 0x0E: return 0;  // Metal
+        case 0x0D: return 1;  // Wood
+        case 0x0C: return 2;  // Stone
+        case 0x11: return 3;  // Foliage
+        case 0x12: return 4;  // Hard Metal
+        case 0x10: return 5;  // Cloth
+        case 0x0F: return 6;  // Glass
         case 0x07: return 7;  // Water
-        case 0x13: return 8;  // Railroad
-        case 0x01: return 9;  // Mud
+        case 0x13: return 8;  // Flesh
+        case 0x01: return 9;  // Dirt
         default:   return 9;
     }
 }
@@ -981,6 +1018,82 @@ static void ir_transform_to_axis(const ThreediIRTransform *xf, TdpAxisFunc *out,
                  ctrl_regs[xf->control_param].name);
         out->param1 = 0.0f;
     }
+}
+
+// Populate a TdpLod's part_anims from an IR LOD's part_animations.
+// Returns 0 on success, -1 on allocation failure.
+static int populate_tdp_lod_panm(TdpLod *lod, const ThreediIRLod *ir_lod,
+                                  const ThreediModelIR *ir) {
+    // Part count from this LOD
+    size_t part_count = 0;
+    if (ir_lod->declared_part_count > 0)
+        part_count = (size_t)ir_lod->declared_part_count;
+    else
+        part_count = ir_lod->part_count;
+
+    // Check if any PANM entry has non-zero flags
+    bool has_panm = false;
+    for (size_t i = 0; i < ir_lod->part_animation_count; ++i) {
+        if (ir_lod->part_animations[i].flags != 0) { has_panm = true; break; }
+    }
+    size_t panm_count = part_count;
+    if (has_panm && ir_lod->part_animation_count > part_count)
+        panm_count = ir_lod->part_animation_count;
+    lod->part_anim_enabled = has_panm ? 1 : 0;
+
+    if (panm_count == 0) return 0;
+
+    lod->part_anims = static_cast<TdpPartAnim *>(
+        std::calloc(panm_count, sizeof(TdpPartAnim)));
+    if (!lod->part_anims) return -1;
+    lod->part_anim_count = panm_count;
+
+    if (has_panm) {
+        for (size_t i = 0; i < ir_lod->part_animation_count; ++i) {
+            const ThreediIRPartAnimation *src = &ir_lod->part_animations[i];
+            TdpPartAnim *dst = &lod->part_anims[i];
+            dst->transform_as = src->part_index;
+
+            uint32_t flags = src->flags;
+            dst->rotate_type = threedi_panm_rotation_type(flags);
+            dst->scale_type = threedi_panm_scale_type(flags);
+            dst->trans_type = threedi_panm_translate_type(flags);
+            dst->reverse_rotate = threedi_panm_rotation_reversed(flags);
+
+            const ThreediIRControlRegister *cregs = ir->control_registers;
+            size_t creg_count = ir->control_register_count;
+
+            if (dst->rotate_type == 2) {
+                ir_transform_to_axis(&src->rotation_x, &dst->yaw, true, cregs, creg_count);
+                ir_transform_to_axis(&src->rotation_y, &dst->pitch, true, cregs, creg_count);
+                ir_transform_to_axis(&src->rotation_z, &dst->roll, true, cregs, creg_count);
+            }
+
+            if (dst->scale_type == 1) {
+                ir_transform_to_axis(&src->scale_x, &dst->scale, false, cregs, creg_count);
+            } else if (dst->scale_type == 2) {
+                ir_transform_to_axis(&src->scale_x, &dst->scale_x, false, cregs, creg_count);
+                ir_transform_to_axis(&src->scale_y, &dst->scale_y, false, cregs, creg_count);
+                ir_transform_to_axis(&src->scale_z, &dst->scale_z, false, cregs, creg_count);
+            }
+
+            uint8_t tt = dst->trans_type;
+            if (tt == 1)
+                ir_transform_to_axis(&src->translation, &dst->trans_x, false, cregs, creg_count);
+            else if (tt == 2)
+                ir_transform_to_axis(&src->translation, &dst->trans_y, false, cregs, creg_count);
+            else if (tt == 3)
+                ir_transform_to_axis(&src->translation, &dst->trans_z, false, cregs, creg_count);
+        }
+        for (size_t i = ir_lod->part_animation_count; i < panm_count; ++i) {
+            lod->part_anims[i].transform_as = static_cast<int32_t>(i);
+        }
+    } else {
+        for (size_t i = 0; i < panm_count; ++i) {
+            lod->part_anims[i].transform_as = static_cast<int32_t>(i);
+        }
+    }
+    return 0;
 }
 
 int tdp_from_ir(const ThreediModelIR *ir, TdpProject *out) {
@@ -1179,83 +1292,15 @@ int tdp_from_ir(const ThreediModelIR *ir, TdpProject *out) {
     } else {
         copy_str(lod->render_function, sizeof(lod->render_function), "gnrc");
     }
-
-    // Part count from LOD 0
-    size_t part_count = 0;
+    // LOD 0 threshold from IR
     if (ir->lod_count > 0) {
-        // Use RMDL declared count (subobjectCount) if available, else actual part_count
-        if (ir->lods[0].declared_part_count > 0)
-            part_count = (size_t)ir->lods[0].declared_part_count;
-        else
-            part_count = ir->lods[0].part_count;
+        lod->threshold = static_cast<float>(ir->lods[0].threshold);
     }
 
-    // Part animations — reference uses lod.subobjectCount (= declared_part_count)
-    bool has_panm = false;
-    for (size_t i = 0; i < ir->part_animation_count; ++i) {
-        if (ir->part_animations[i].flags != 0) { has_panm = true; break; }
-    }
-    size_t panm_count = part_count;
-    if (has_panm && ir->part_animation_count > part_count)
-        panm_count = ir->part_animation_count;
-    lod->part_anim_enabled = has_panm ? 1 : 0;
-
-    if (panm_count > 0) {
-        lod->part_anims = static_cast<TdpPartAnim *>(
-            std::calloc(panm_count, sizeof(TdpPartAnim)));
-        if (!lod->part_anims) { tdp_free(out); return -1; }
-        lod->part_anim_count = panm_count;
-
-        if (has_panm) {
-            for (size_t i = 0; i < ir->part_animation_count; ++i) {
-                const ThreediIRPartAnimation *src = &ir->part_animations[i];
-                TdpPartAnim *dst = &lod->part_anims[i];
-                dst->transform_as = src->part_index;
-
-                // Extract type flags from packed IR flags
-                uint32_t flags = src->flags;
-                dst->rotate_type = threedi_panm_rotation_type(flags);
-                dst->scale_type = threedi_panm_scale_type(flags);
-                dst->trans_type = threedi_panm_translate_type(flags);
-                dst->reverse_rotate = threedi_panm_rotation_reversed(flags);
-
-                const ThreediIRControlRegister *cregs = ir->control_registers;
-                size_t creg_count = ir->control_register_count;
-
-                // Rotation: only when rotate_type == 2 (per-axis)
-                if (dst->rotate_type == 2) {
-                    ir_transform_to_axis(&src->rotation_x, &dst->yaw, true, cregs, creg_count);
-                    ir_transform_to_axis(&src->rotation_y, &dst->pitch, true, cregs, creg_count);
-                    ir_transform_to_axis(&src->rotation_z, &dst->roll, true, cregs, creg_count);
-                }
-
-                // Scale: type 1 = uniform, type 2 = per-axis
-                if (dst->scale_type == 1) {
-                    ir_transform_to_axis(&src->scale_x, &dst->scale, false, cregs, creg_count);
-                } else if (dst->scale_type == 2) {
-                    ir_transform_to_axis(&src->scale_x, &dst->scale_x, false, cregs, creg_count);
-                    ir_transform_to_axis(&src->scale_y, &dst->scale_y, false, cregs, creg_count);
-                    ir_transform_to_axis(&src->scale_z, &dst->scale_z, false, cregs, creg_count);
-                }
-
-                // Translation: single channel routed by trans_type (1=X, 2=Y, 3=Z).
-                // trans_type 0 means no translation track in the binary.
-                uint8_t tt = dst->trans_type;
-                if (tt == 1)
-                    ir_transform_to_axis(&src->translation, &dst->trans_x, false, cregs, creg_count);
-                else if (tt == 2)
-                    ir_transform_to_axis(&src->translation, &dst->trans_y, false, cregs, creg_count);
-                else if (tt == 3)
-                    ir_transform_to_axis(&src->translation, &dst->trans_z, false, cregs, creg_count);
-            }
-            // Fill remaining entries (parts beyond PANM count) with identity
-            for (size_t i = ir->part_animation_count; i < panm_count; ++i) {
-                lod->part_anims[i].transform_as = static_cast<int32_t>(i);
-            }
-        } else {
-            for (size_t i = 0; i < panm_count; ++i) {
-                lod->part_anims[i].transform_as = static_cast<int32_t>(i);
-            }
+    // Part animations for LOD 0
+    if (ir->lod_count > 0) {
+        if (populate_tdp_lod_panm(lod, &ir->lods[0], ir) != 0) {
+            tdp_free(out); return -1;
         }
     }
 
@@ -1291,7 +1336,7 @@ int tdp_from_ir(const ThreediModelIR *ir, TdpProject *out) {
         }
     }
 
-    // LODs 1+ — populate scene_file, attributes, render_function, threshold
+    // LODs 1+ — populate scene_file, attributes, render_function, threshold, PANM
     for (size_t li = 1; li < ir->lod_count && li < TDP_MAX_LODS; ++li) {
         TdpLod *extra = &out->lods[li];
         if (ir->name[0]) {
@@ -1304,6 +1349,10 @@ int tdp_from_ir(const ThreediModelIR *ir, TdpProject *out) {
         copy_str(extra->render_function, sizeof(extra->render_function),
                  lod->render_function);
         extra->threshold = static_cast<float>(ir->lods[li].threshold);
+
+        if (populate_tdp_lod_panm(extra, &ir->lods[li], ir) != 0) {
+            tdp_free(out); return -1;
+        }
     }
 
     return 0;

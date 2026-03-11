@@ -7,7 +7,7 @@ import os
 import bpy
 from mathutils import Vector, Matrix, Quaternion
 
-from .math_utils import (
+from blender.math_utils import (
     render_space,
     bone_space,
     collision_space,
@@ -15,7 +15,7 @@ from .math_utils import (
     orthonormalize,
     compute_polyhedron_controlled,
 )
-from .mesh_primitives import create_cube_mesh, create_direction_arrow_mesh
+from blender.mesh_primitives import create_cube_mesh, create_direction_arrow_mesh
 
 
 class OcclusionType(enum.IntEnum):
@@ -46,6 +46,144 @@ _OCCLUSION_COLORS = {
     OcclusionType.OP: (1.0, 0.8, 0.2),
     OcclusionType.OP2: (1.0, 0.0, 0.6),
 }
+
+
+def _mtrx_to_center_rotation(mat_data):
+    """Convert MTRX 4x4 matrix → Blender 3x3 rotation for a center point.
+
+    Inverts build_matrix_from_axis (export_3di.cpp) + ASE parser swizzle chain.
+    Returns a 4x4 Matrix or None if the matrix contains NaN (zero-axis sentinel).
+    """
+    m = [mat_data[i] for i in range(16)]
+    if any(math.isnan(v) for v in m):
+        return None
+    ax0 = (m[10], -m[2],  m[6])
+    ax1 = (-m[8],  m[0], -m[4])
+    ax2 = (m[9],  -m[1],  m[5])
+    return Matrix([
+        [ ax1[1], -ax0[1],  ax2[1]],
+        [-ax1[0],  ax0[0], -ax2[0]],
+        [ ax1[2], -ax0[2],  ax2[2]],
+    ]).to_4x4()
+
+
+def _compute_smoothing_groups(faces, normals, epsilon=1e-4):
+    """Compute smoothing group bitmasks from per-loop normals.
+
+    Compares normals at shared edges to classify them as smooth or sharp,
+    then flood-fills connected smooth regions.  Uses greedy graph coloring
+    on the component adjacency graph so that adjacent components never
+    share a smoothing-group bit (prevents false smoothing from bit
+    collisions).
+    """
+    from collections import defaultdict, deque
+
+    # Build edge → face adjacency
+    edge_faces = defaultdict(list)
+    for fi, (v0, v1, v2) in enumerate(faces):
+        for a, b in ((v0, v1), (v1, v2), (v2, v0)):
+            edge_faces[(min(a, b), max(a, b))].append(fi)
+
+    # Classify edges as smooth or sharp by comparing per-loop normals
+    eps_sq = epsilon * epsilon
+    smooth_adj = defaultdict(set)
+    for (ea, eb), flist in edge_faces.items():
+        if len(flist) != 2:
+            continue
+        fi_a, fi_b = flist[0], flist[1]
+        fa, fb = faces[fi_a], faces[fi_b]
+        smooth = True
+        for sv in (ea, eb):
+            na = normals[fi_a * 3 + list(fa).index(sv)]
+            nb = normals[fi_b * 3 + list(fb).index(sv)]
+            dx = na[0] - nb[0]
+            dy = na[1] - nb[1]
+            dz = na[2] - nb[2]
+            if dx * dx + dy * dy + dz * dz > eps_sq:
+                smooth = False
+                break
+        if smooth:
+            smooth_adj[fi_a].add(fi_b)
+            smooth_adj[fi_b].add(fi_a)
+
+    # Flood-fill smooth-connected components
+    comp = [-1] * len(faces)
+    cid = 0
+    for fi in range(len(faces)):
+        if comp[fi] >= 0:
+            continue
+        queue = deque([fi])
+        while queue:
+            f = queue.popleft()
+            if comp[f] >= 0:
+                continue
+            comp[f] = cid
+            for adj in smooth_adj.get(f, ()):
+                if comp[adj] < 0:
+                    queue.append(adj)
+        cid += 1
+
+    # Detect flat components: all per-loop normals within the component
+    # are identical.  Flat components get SG=0 (no smoothing) because the
+    # original model likely used SG=0 for co-planar faces — smoothing has
+    # no effect on normals there, but SG=0 gives per-face tangent/bitangent
+    # in compute_smoothed_vectors, which matters for vertex dedup.
+    comp_varies = [False] * cid
+    comp_ref = [None] * cid
+    for fi in range(len(faces)):
+        c = comp[fi]
+        if c < 0 or comp_varies[c]:
+            continue
+        for j in range(3):
+            n = normals[fi * 3 + j]
+            if comp_ref[c] is None:
+                comp_ref[c] = n
+            else:
+                ref = comp_ref[c]
+                dx = n[0] - ref[0]
+                dy = n[1] - ref[1]
+                dz = n[2] - ref[2]
+                if dx * dx + dy * dy + dz * dz > eps_sq:
+                    comp_varies[c] = True
+                    break
+    flat_comps = set(c for c in range(cid) if not comp_varies[c])
+
+    # Build component adjacency graph (sharp edges between components)
+    comp_adj = defaultdict(set)
+    for (ea, eb), flist in edge_faces.items():
+        if len(flist) != 2:
+            continue
+        fi_a, fi_b = flist[0], flist[1]
+        ca, cb = comp[fi_a], comp[fi_b]
+        if ca != cb and ca >= 0 and cb >= 0:
+            comp_adj[ca].add(cb)
+            comp_adj[cb].add(ca)
+
+    # Greedy graph coloring: assign each component a bit such that no
+    # two adjacent components share the same bit (up to 31 distinct bits).
+    comp_color = {}
+    for c in range(cid):
+        if c in flat_comps:
+            comp_color[c] = -1  # will map to SG=0
+            continue
+        used = set()
+        for neighbor in comp_adj.get(c, ()):
+            if neighbor in comp_color and comp_color[neighbor] >= 0:
+                used.add(comp_color[neighbor])
+        color = 0
+        while color in used:
+            color += 1
+        comp_color[c] = color
+
+    result = []
+    for fi in range(len(faces)):
+        c = comp[fi]
+        if c < 0:
+            result.append(0)
+        else:
+            color = comp_color.get(c, 0)
+            result.append(0 if color < 0 else (1 << (color % 31)))
+    return result
 
 
 def _build_occlusion_name(type_code: int, parent_subobject: int,
@@ -161,9 +299,11 @@ class BlenderSceneBuilder:
         self._world_rot_corrections = []           # BAD world rot -> Blender rest world rot
         self._rest_local_quats = []                # Blender local rest quaternions
         self._rest_local_inv_mats = []             # Blender local rest inverse 3x3 matrices
+        self.bullet_lod_index = -1                 # Set by create_bullet_lod()
 
     def build_basic_scene(self, name: str):
-        if bpy.context.active_object and bpy.context.active_object.mode != "OBJECT":
+        active = getattr(bpy.context, 'active_object', None)
+        if active and active.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
 
         self.build_part_hierarchy(name)
@@ -175,6 +315,9 @@ class BlenderSceneBuilder:
             self.create_occlusion_visualization()
         if self.import_collisions:
             self.create_collision_visualization()
+            self.bullet_lod_index = self.create_bullet_lod(name)
+        else:
+            self.bullet_lod_index = -1
         if self.import_lights:
             self.create_scene_lights()
 
@@ -188,6 +331,17 @@ class BlenderSceneBuilder:
                 import traceback
                 traceback.print_exc()
                 print(f"Warning: failed to build animations: {e}")
+        elif int(self.ir.mesh_type) == 3:
+            # Preserve skin weights for static skinned models that have no BAD.
+            # This keeps ASE MESH_WEIGHTS data so OED re-export doesn't collapse
+            # all vertices onto subobject 0.
+            try:
+                self.build_armature_from_parts(name)
+                self.bind_meshes_to_armature()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"Warning: failed to build synthetic armature: {e}")
 
         if not mesh_objects:
             print(f"No meshes created for {name}")
@@ -203,6 +357,88 @@ class BlenderSceneBuilder:
         return mesh_objects
 
     # Armature building (ported from adm_scene_builder.h)
+
+    def build_armature_from_parts(self, name: str):
+        """Build a minimal BN## armature from part hierarchy for skinned meshes.
+
+        This path is used when the source model has skin weights but no BAD
+        animation payload.  It preserves vertex-weight export without requiring
+        gameplay animation data.
+        """
+        if self.ir.lod_count == 0:
+            return
+        lod0 = self.ir.lods[0]
+        part_count = int(lod0.part_count)
+        if part_count <= 0:
+            return
+
+        abs_positions = []
+        for i in range(part_count):
+            part = lod0.parts[i]
+            abs_positions.append(render_space(Vector(part.abs_position)))
+
+        children_by_parent = [[] for _ in range(part_count)]
+        parent_indices = []
+        for i in range(part_count):
+            pi = int(lod0.parts[i].parent_index)
+            if pi < 0 or pi >= part_count or pi == i:
+                pi = -1
+            parent_indices.append(pi)
+            if pi >= 0:
+                children_by_parent[pi].append(i)
+
+        armature_data = bpy.data.armatures.new(f"{name}_Armature")
+        armature_obj = bpy.data.objects.new("Skeleton", armature_data)
+        bpy.context.collection.objects.link(armature_obj)
+        if self.root_object:
+            armature_obj.parent = self.root_object
+        self.armature_object = armature_obj
+
+        bpy.context.view_layer.objects.active = armature_obj
+        bpy.ops.object.mode_set(mode='EDIT')
+
+        edit_bones = armature_data.edit_bones
+        bl_bones = []
+        for i in range(part_count):
+            bname = f"BN{i + 1:02d}"
+            eb = edit_bones.new(bname)
+            head = abs_positions[i]
+            eb.head = head
+
+            tail = None
+            for child_idx in children_by_parent[i]:
+                delta = abs_positions[child_idx] - head
+                if delta.length > 1e-5:
+                    tail = head + delta
+                    break
+            if tail is None:
+                tail = head + Vector((0.0, 0.05, 0.0))
+
+            eb.tail = tail
+            eb.use_connect = False
+            bl_bones.append(eb)
+
+        for i, pi in enumerate(parent_indices):
+            if pi >= 0:
+                bl_bones[i].parent = bl_bones[pi]
+
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        self._bone_infos = []
+        for i, pi in enumerate(parent_indices):
+            rest_origin = (Vector(lod0.parts[i].rel_position)
+                           if pi >= 0
+                           else Vector(lod0.parts[i].abs_position))
+            rest_origin = render_space(rest_origin)
+            self._bone_infos.append((
+                f"BN{i + 1:02d}",
+                pi,
+                rest_origin,
+                Matrix.Identity(3),
+                0.0,
+            ))
+
+        print(f"[ARMATURE] Created synthetic armature with {part_count} bones")
 
     def build_armature_from_bad(self, bad_file, name: str):
         """Build a Blender Armature from BAD bone data.
@@ -469,6 +705,13 @@ class BlenderSceneBuilder:
                         vg = mesh_obj.vertex_groups.get(bone_name)
                         if vg is None:
                             vg = mesh_obj.vertex_groups.new(name=bone_name)
+                        # Some bpy builds do not allow id-properties on
+                        # VertexGroup.  Keep this best-effort so binding
+                        # never aborts and skin weights are still exported.
+                        try:
+                            vg["oed_bone_index"] = int(bone_idx)
+                        except Exception:
+                            pass
                         bone_vgroups[bone_idx] = vg
 
                     bone_vgroups[bone_idx].add([vert_idx], weight, 'REPLACE')
@@ -500,9 +743,64 @@ class BlenderSceneBuilder:
         q = Quaternion((rq.w, rq.x, -rq.z, rq.y))
         return self._normalize_quat(q)
 
+    @staticmethod
+    def _find_or_create_action_slot(action, armature_obj):
+        """Return action slot bound to armature (Blender 4.5+ API)."""
+        if not hasattr(action, "slots"):
+            return None
+        target_id = f"OB{armature_obj.name}"
+        for slot in action.slots:
+            if getattr(slot, "identifier", "") == target_id:
+                return slot
+        return action.slots.new(id_type='OBJECT', name=armature_obj.name)
+
+    def _get_action_fcurves(self, action, armature_obj, slot=None):
+        """Return an FCurve collection for both legacy and layered Action APIs."""
+        if hasattr(action, "fcurves"):
+            return action.fcurves, slot
+
+        if not hasattr(action, "layers"):
+            raise AttributeError("Action has neither fcurves nor layers")
+
+        if slot is None:
+            slot = self._find_or_create_action_slot(action, armature_obj)
+
+        if len(action.layers) == 0:
+            layer = action.layers.new("Base Layer")
+        else:
+            layer = action.layers[0]
+
+        strip = None
+        for s in layer.strips:
+            if hasattr(s, "channelbags"):
+                strip = s
+                break
+        if strip is None:
+            strip = layer.strips.new(type='KEYFRAME')
+
+        cb = None
+        for candidate in strip.channelbags:
+            cslot = getattr(candidate, "slot", None)
+            if cslot is None:
+                continue
+            if cslot == slot:
+                cb = candidate
+                break
+            if getattr(cslot, "identifier", "") == getattr(slot, "identifier", ""):
+                cb = candidate
+                break
+        if cb is None:
+            cb = strip.channelbags.new(slot)
+
+        if not hasattr(cb, "fcurves"):
+            raise AttributeError("Layered Action channelbag has no fcurves")
+
+        return cb.fcurves, slot
+
     def build_animations_from_context(self, anim_context):
         """Build Blender Actions from AnimationContext and push to NLA tracks."""
-        from .opennova.bad_ffi import parse_bad, free_bad
+        import traceback
+        from blender.opennova.bad_ffi import parse_bad, free_bad
 
         if not self.armature_object:
             print("[ANIM] No armature object, skipping animations")
@@ -521,6 +819,7 @@ class BlenderSceneBuilder:
         all_anims.extend(anim_context.animations)
 
         nla_frame_offset = 0
+        reset_action = None
         for anim_meta in all_anims:
             try:
                 bad_file = parse_bad(anim_meta.bad_filepath)
@@ -533,6 +832,8 @@ class BlenderSceneBuilder:
                     bad_file, armature_obj, anim_meta.animation_name
                 )
                 action.use_fake_user = True
+                if reset_action is None and anim_context.reset_animation:
+                    reset_action = action
                 if anim_meta.bad_name:
                     action["bad_name"] = anim_meta.bad_name
                 action["bad_flags"] = anim_meta.flags
@@ -546,13 +847,18 @@ class BlenderSceneBuilder:
 
                 # Blender 4.5+: bind the strip to the action's slot
                 if hasattr(action, 'slots') and len(action.slots) > 0:
-                    strip.action_slot = action.slots[0]
+                    slot = self._find_or_create_action_slot(action, armature_obj)
+                    if slot is not None:
+                        strip.action_slot = slot
 
                 frame_count = int(action.frame_range[1] - action.frame_range[0] + 1)
                 nla_frame_offset += frame_count
 
                 print(f"[ANIM] Created action '{action.name}' "
                       f"({frame_count} frames) → NLA track")
+            except Exception as e:
+                print(f"[ANIM] Failed to build action '{anim_meta.animation_name}': {e}")
+                traceback.print_exc()
             finally:
                 free_bad(bad_file)
 
@@ -560,6 +866,13 @@ class BlenderSceneBuilder:
         if nla_frame_offset > 0:
             bpy.context.scene.frame_start = 1
             bpy.context.scene.frame_end = int(nla_frame_offset)
+
+        # Set the reset action as active so the armature displays the reset pose.
+        if reset_action:
+            armature_obj.animation_data.action = reset_action
+            if hasattr(reset_action, 'slots') and len(reset_action.slots) > 0:
+                armature_obj.animation_data.action_slot = reset_action.slots[0]
+        bpy.context.scene.frame_set(1)
 
 
     def _build_action_from_bad(self, bad_file, armature_obj, anim_name: str):
@@ -576,8 +889,9 @@ class BlenderSceneBuilder:
 
         # Blender 4.5+ action slot system: create a slot bound to the armature
         # so fcurves are visible in the Action Editor and NLA.
+        slot = None
         if hasattr(action, 'slots'):
-            slot = action.slots.new(id_type='OBJECT', name=armature_obj.name)
+            slot = self._find_or_create_action_slot(action, armature_obj)
             # Temporarily assign action+slot so fcurves get associated with the slot
             ad = armature_obj.animation_data
             old_action = ad.action
@@ -585,6 +899,8 @@ class BlenderSceneBuilder:
             ad.action = action
             ad.action_slot = slot
             # Will be restored after fcurves are built (at end of function)
+
+        fcurves, slot = self._get_action_fcurves(action, armature_obj, slot)
 
         bone_infos = self._bone_infos
         skeleton_bone_count = len(bone_infos)
@@ -608,17 +924,17 @@ class BlenderSceneBuilder:
         for bone_idx in range(bone_count):
             bname = bone_infos[bone_idx][0]
             data_path_rot = f'pose.bones["{bname}"].rotation_quaternion'
-            fc_w = action.fcurves.new(data_path=data_path_rot, index=0)
-            fc_x = action.fcurves.new(data_path=data_path_rot, index=1)
-            fc_y = action.fcurves.new(data_path=data_path_rot, index=2)
-            fc_z = action.fcurves.new(data_path=data_path_rot, index=3)
+            fc_w = fcurves.new(data_path=data_path_rot, index=0)
+            fc_x = fcurves.new(data_path=data_path_rot, index=1)
+            fc_y = fcurves.new(data_path=data_path_rot, index=2)
+            fc_z = fcurves.new(data_path=data_path_rot, index=3)
             bone_rot_fcurves.append((fc_w, fc_x, fc_y, fc_z))
 
             if is_translated:
                 data_path_pos = f'pose.bones["{bname}"].location'
-                fc_px = action.fcurves.new(data_path=data_path_pos, index=0)
-                fc_py = action.fcurves.new(data_path=data_path_pos, index=1)
-                fc_pz = action.fcurves.new(data_path=data_path_pos, index=2)
+                fc_px = fcurves.new(data_path=data_path_pos, index=0)
+                fc_py = fcurves.new(data_path=data_path_pos, index=1)
+                fc_pz = fcurves.new(data_path=data_path_pos, index=2)
                 bone_pos_fcurves.append((fc_px, fc_py, fc_pz))
             else:
                 bone_pos_fcurves.append(None)
@@ -754,9 +1070,9 @@ class BlenderSceneBuilder:
         if bad_file.num_events > 0:
             rm_bone_name = "root_motion"
             data_path_rm = f'pose.bones["{rm_bone_name}"].location'
-            fc_rmx = action.fcurves.new(data_path=data_path_rm, index=0)
-            fc_rmy = action.fcurves.new(data_path=data_path_rm, index=1)
-            fc_rmz = action.fcurves.new(data_path=data_path_rm, index=2)
+            fc_rmx = fcurves.new(data_path=data_path_rm, index=0)
+            fc_rmy = fcurves.new(data_path=data_path_rm, index=1)
+            fc_rmz = fcurves.new(data_path=data_path_rm, index=2)
             # Events include a terminal duplicate (num_events = frame_count + 1).
             # Only keyframe the actual animation frames to match BN* bone keyframes.
             rm_count = min(bad_file.num_events, frame_count)
@@ -778,7 +1094,7 @@ class BlenderSceneBuilder:
                 fc_rmy.keyframe_points[i].interpolation = 'LINEAR'
                 fc_rmz.keyframe_points[i].interpolation = 'LINEAR'
 
-        for fc in action.fcurves:
+        for fc in fcurves:
             fc.update()
 
         action.frame_start = 1
@@ -794,7 +1110,8 @@ class BlenderSceneBuilder:
         return action
 
     def merge_with_existing_scene(self, main_builder):
-        if bpy.context.active_object and bpy.context.active_object.mode != "OBJECT":
+        active = getattr(bpy.context, 'active_object', None)
+        if active and active.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
         self.root_object = main_builder.root_object
         self.part_nodes = main_builder.part_nodes
@@ -889,14 +1206,13 @@ class BlenderSceneBuilder:
         num_primitives = int(lod.primitive_count)
 
         is_skinned = (int(self.ir.mesh_type) == 3)  # THREEDI_IR_MESH_SKINNED
-        print(f"[MESH] parts={num_parts} primitives={num_primitives} skinned={is_skinned}")
-        for pi in range(num_primitives):
-            p = lod.primitives[pi]
-            print(f"[MESH]   prim {pi}: part={p.part_index} idx_off={p.index_offset} idx_cnt={p.index_count} vtx_off={p.vertex_offset} vtx_cnt={p.vertex_count} mat={p.material_index}")
 
-        # Group primitives by (part_index, material_index)
+        # Group primitives by part_index.
+        # Creating one mesh per part (not per part+material) ensures that
+        # normal smoothing crosses material boundaries within a part,
+        # matching the reference tool's per-subobject smoothing behaviour.
         from collections import defaultdict, OrderedDict
-        part_materials = defaultdict(OrderedDict)
+        part_prims = defaultdict(list)
         for prim_idx in range(num_primitives):
             prim = lod.primitives[prim_idx]
             part_idx = int(prim.part_index)
@@ -904,147 +1220,211 @@ class BlenderSceneBuilder:
                 continue
             if part_idx not in part_nodes:
                 continue
-            mat_idx = int(prim.material_index)
-            if mat_idx not in part_materials[part_idx]:
-                part_materials[part_idx][mat_idx] = []
-            part_materials[part_idx][mat_idx].append(prim_idx)
+            part_prims[part_idx].append(prim_idx)
 
-        # Create one mesh per (part, material)
-        for part_idx in sorted(part_materials.keys()):
-            mat_groups = part_materials[part_idx]
+        # Create one mesh per part (all materials merged)
+        for part_idx in sorted(part_prims.keys()):
+            prim_indices = part_prims[part_idx]
             part = lod.parts[part_idx]
             part_abs = Vector(part.abs_position)
 
-            for seq, (mat_idx, prim_indices) in enumerate(mat_groups.items()):
-                all_vertices = []
-                all_faces = []
-                all_uvs = []
-                all_normals = []
-                all_bone_data = []
-                vert_map = {}
+            all_vertices = []
+            all_faces = []
+            all_uvs = []
+            all_uvs1 = []
+            all_normals = []
+            all_bone_data = []
+            all_face_mat_indices = []   # per-face material index
+            vert_map = {}
 
-                def _bone_entries(v, prim, is_skinned, part_idx):
-                    if is_skinned:
-                        entries = []
-                        for bi in range(4):
-                            w = v.bone_weights[bi]
-                            if w > 0:
-                                local_idx = v.bone_indices[bi]
-                                if prim.bone_table_length > 0 and local_idx < prim.bone_table_length:
-                                    skel_idx = prim.bone_table[local_idx]
-                                else:
-                                    skel_idx = 0
-                                entries.append((skel_idx, w))
-                        if not entries:
-                            entries.append((part_idx, 1.0))
-                        return entries
-                    else:
-                        return [(part_idx, 1.0)]
+            def _bone_entries(v, prim, is_skinned, part_idx):
+                if is_skinned:
+                    entries = []
+                    for bi in range(4):
+                        w = v.bone_weights[bi]
+                        if w > 0:
+                            local_idx = v.bone_indices[bi]
+                            if prim.bone_table_length > 0 and local_idx < prim.bone_table_length:
+                                skel_idx = prim.bone_table[local_idx]
+                            else:
+                                skel_idx = 0
+                            entries.append((skel_idx, w))
+                    if not entries:
+                        entries.append((part_idx, 1.0))
+                    return entries
+                else:
+                    return [(part_idx, 1.0)]
 
-                def get_or_add_vert(pos, bone_data_entry):
-                    key = (round(pos.x, 6), round(pos.y, 6), round(pos.z, 6))
-                    if key in vert_map:
-                        return vert_map[key]
-                    idx = len(all_vertices)
-                    all_vertices.append(pos)
-                    all_bone_data.append(bone_data_entry)
-                    vert_map[key] = idx
-                    return idx
+            def _bone_key(entries):
+                """Build a stable dedup key for skinned per-vertex weights."""
+                if not is_skinned:
+                    return ()
+                return tuple(
+                    (int(bone_idx), round(float(weight), 6))
+                    for bone_idx, weight in entries
+                )
 
-                if mat_idx not in self.material_dict:
-                    if 0 <= mat_idx < int(self.ir.material_count):
-                        self.material_dict[mat_idx] = self._create_material(self.ir.materials[mat_idx])
+            def get_or_add_vert(pos, bone_data_entry, source_index=None):
+                if is_skinned and source_index is not None:
+                    # Preserve original vertex indexing for skinned meshes.
+                    # Position-only dedup collapses distinct source vertices and
+                    # breaks CDTA/COBJ parity on models like US01.
+                    key = ("src", int(source_index))
+                else:
+                    key = (round(pos.x, 6), round(pos.y, 6), round(pos.z, 6),
+                           _bone_key(bone_data_entry))
+                if key in vert_map:
+                    return vert_map[key]
+                idx = len(all_vertices)
+                all_vertices.append(pos)
+                all_bone_data.append(bone_data_entry)
+                vert_map[key] = idx
+                return idx
 
-                for prim_idx in prim_indices:
-                    prim = lod.primitives[prim_idx]
-                    idx_offset = int(prim.index_offset)
-                    idx_count = int(prim.index_count)
-                    vert_offset = int(prim.vertex_offset)
+            # Collect unique material indices for this part and ensure
+            # materials are created.
+            mat_idx_set = OrderedDict()
+            for prim_idx in prim_indices:
+                mi = int(lod.primitives[prim_idx].material_index)
+                if mi not in mat_idx_set:
+                    mat_idx_set[mi] = len(mat_idx_set)
+                if mi not in self.material_dict:
+                    if 0 <= mi < int(self.ir.material_count):
+                        self.material_dict[mi] = self._create_material(self.ir.materials[mi])
 
-                    if idx_count < 3:
-                        continue
+            for prim_idx in prim_indices:
+                prim = lod.primitives[prim_idx]
+                idx_offset = int(prim.index_offset)
+                idx_count = int(prim.index_count)
+                vert_offset = int(prim.vertex_offset)
+                prim_mat_idx = int(prim.material_index)
 
-                    for j in range(0, idx_count, 3):
-                        i0 = int(lod.indices[idx_offset + j + 0]) + vert_offset
-                        i1 = int(lod.indices[idx_offset + j + 2]) + vert_offset
-                        i2 = int(lod.indices[idx_offset + j + 1]) + vert_offset
-
-                        if i0 >= int(lod.vertex_count) or i1 >= int(lod.vertex_count) or i2 >= int(lod.vertex_count):
-                            continue
-
-                        v0 = lod.vertices[i0]
-                        v1 = lod.vertices[i1]
-                        v2 = lod.vertices[i2]
-
-                        pos0 = render_space(Vector(v0.position) - part_abs)
-                        pos1 = render_space(Vector(v1.position) - part_abs)
-                        pos2 = render_space(Vector(v2.position) - part_abs)
-
-                        bd0 = _bone_entries(v0, prim, is_skinned, part_idx)
-                        bd1 = _bone_entries(v1, prim, is_skinned, part_idx)
-                        bd2 = _bone_entries(v2, prim, is_skinned, part_idx)
-
-                        vi0 = get_or_add_vert(pos0, bd0)
-                        vi1 = get_or_add_vert(pos1, bd1)
-                        vi2 = get_or_add_vert(pos2, bd2)
-
-                        # Skip degenerate faces created by vertex merging
-                        if vi0 == vi1 or vi1 == vi2 or vi0 == vi2:
-                            continue
-
-                        all_faces.append((vi0, vi1, vi2))
-                        # UV V-flip: Blender V=0 at bottom, game/DDS V=0 at top
-                        all_uvs.extend([
-                            (v0.uv0[0], 1.0 - v0.uv0[1]),
-                            (v1.uv0[0], 1.0 - v1.uv0[1]),
-                            (v2.uv0[0], 1.0 - v2.uv0[1]),
-                        ])
-                        all_normals.extend([
-                            render_space(Vector(v0.normal)),
-                            render_space(Vector(v1.normal)),
-                            render_space(Vector(v2.normal)),
-                        ])
-
-                if not all_vertices or not all_faces:
+                if idx_count < 3:
                     continue
 
-                mesh_name = f"{part_idx + 1:02d} Mesh{seq}"
+                for j in range(0, idx_count, 3):
+                    i0 = int(lod.indices[idx_offset + j + 0]) + vert_offset
+                    i1 = int(lod.indices[idx_offset + j + 2]) + vert_offset
+                    i2 = int(lod.indices[idx_offset + j + 1]) + vert_offset
+
+                    if i0 >= int(lod.vertex_count) or i1 >= int(lod.vertex_count) or i2 >= int(lod.vertex_count):
+                        continue
+
+                    v0 = lod.vertices[i0]
+                    v1 = lod.vertices[i1]
+                    v2 = lod.vertices[i2]
+
+                    pos0 = render_space(Vector(v0.position) - part_abs)
+                    pos1 = render_space(Vector(v1.position) - part_abs)
+                    pos2 = render_space(Vector(v2.position) - part_abs)
+
+                    bd0 = _bone_entries(v0, prim, is_skinned, part_idx)
+                    bd1 = _bone_entries(v1, prim, is_skinned, part_idx)
+                    bd2 = _bone_entries(v2, prim, is_skinned, part_idx)
+
+                    vi0 = get_or_add_vert(pos0, bd0, i0)
+                    vi1 = get_or_add_vert(pos1, bd1, i1)
+                    vi2 = get_or_add_vert(pos2, bd2, i2)
+
+                    # Skip degenerate faces created by vertex merging
+                    if vi0 == vi1 or vi1 == vi2 or vi0 == vi2:
+                        continue
+
+                    all_faces.append((vi0, vi1, vi2))
+                    all_face_mat_indices.append(prim_mat_idx)
+                    # UV V-flip: Blender V=0 at bottom, game/DDS V=0 at top
+                    all_uvs.extend([
+                        (v0.uv0[0], 1.0 - v0.uv0[1]),
+                        (v1.uv0[0], 1.0 - v1.uv0[1]),
+                        (v2.uv0[0], 1.0 - v2.uv0[1]),
+                    ])
+                    all_normals.extend([
+                        render_space(Vector(v0.normal)),
+                        render_space(Vector(v1.normal)),
+                        render_space(Vector(v2.normal)),
+                    ])
+                    all_uvs1.extend([
+                        (v0.uv1[0], 1.0 - v0.uv1[1]),
+                        (v1.uv1[0], 1.0 - v1.uv1[1]),
+                        (v2.uv1[0], 1.0 - v2.uv1[1]),
+                    ])
+
+            if not all_vertices or not all_faces:
+                continue
+
+            mesh_name = f"{part_idx + 1:02d} Mesh0"
+            mesh_data = bpy.data.meshes.new(mesh_name)
+
+            mesh_data.from_pydata(all_vertices, [], all_faces)
+            mesh_data.update()
+
+            # Compute smoothing groups from per-loop normals so that
+            # the vertex builder reproduces the correct normal splits.
+            if all_normals and len(all_normals) == len(all_faces) * 3:
+                sg_values = _compute_smoothing_groups(all_faces, all_normals)
+            else:
+                sg_values = [1] * len(all_faces)
+
+            sg_attr = mesh_data.attributes.new('smoothing_group', 'INT', 'FACE')
+            for fi in range(len(mesh_data.polygons)):
+                sg_attr.data[fi].value = sg_values[fi] if fi < len(sg_values) else 1
+                mesh_data.polygons[fi].use_smooth = True
+            if all_normals and len(all_normals) == len(mesh_data.loops):
+                mesh_data.normals_split_custom_set(all_normals)
+
+            if all_uvs:
+                uv_layer = mesh_data.uv_layers.new(name="UVMap")
+                for loop_idx in range(len(mesh_data.loops)):
+                    if loop_idx < len(all_uvs):
+                        uv_layer.data[loop_idx].uv = all_uvs[loop_idx]
+
+            if all_uvs1:
+                uv_layer1 = mesh_data.uv_layers.new(name="UVMap_Lightmap")
+                for loop_idx in range(len(mesh_data.loops)):
+                    if loop_idx < len(all_uvs1):
+                        uv_layer1.data[loop_idx].uv = all_uvs1[loop_idx]
+
+            # Add all materials used by this part as mesh material slots.
+            # mat_slot_map maps global mat_idx -> local slot index.
+            mat_slot_map = {}
+            for mi in mat_idx_set:
+                slot_idx = len(mesh_data.materials)
+                mat_slot_map[mi] = slot_idx
+                if mi in self.material_dict:
+                    mesh_data.materials.append(self.material_dict[mi])
+                else:
+                    mesh_data.materials.append(None)
+
+            # Assign per-face material index
+            for fi in range(len(mesh_data.polygons)):
+                if fi < len(all_face_mat_indices):
+                    global_mi = all_face_mat_indices[fi]
+                    mesh_data.polygons[fi].material_index = mat_slot_map.get(global_mi, 0)
+
+            mesh_obj = bpy.data.objects.new(mesh_name, mesh_data)
+            bpy.context.collection.objects.link(mesh_obj)
+
+            mesh_obj.parent = part_nodes[part_idx]
+
+            mesh_obj["_part_index"] = part_idx
+            if track_bone_data:
+                self._mesh_bone_data[mesh_obj.name] = all_bone_data
+
+            mesh_objects.append(mesh_obj)
+
+        # Create empty mesh objects for parts with no geometry.
+        # The original ASE always had mesh objects for all subobjects, even
+        # empty ones.  This preserves subobjectCount in ConvertToInternal.
+        for part_idx in sorted(part_nodes.keys()):
+            if part_idx not in part_prims:
+                mesh_name = f"{part_idx + 1:02d} Mesh0"
                 mesh_data = bpy.data.meshes.new(mesh_name)
-
-                mesh_data.from_pydata(all_vertices, [], all_faces)
+                mesh_data.from_pydata([], [], [])
                 mesh_data.update()
-
-                # Store default smoothing group for ASE export (all faces smooth)
-                sg_attr = mesh_data.attributes.new('smoothing_group', 'INT', 'FACE')
-                for fi in range(len(mesh_data.polygons)):
-                    sg_attr.data[fi].value = 1
-
-                # Apply custom split normals from 3di vertex data
-                if all_normals and len(all_normals) == len(mesh_data.loops):
-                    for poly in mesh_data.polygons:
-                        poly.use_smooth = True
-                    mesh_data.normals_split_custom_set(all_normals)
-
-                if all_uvs:
-                    uv_layer = mesh_data.uv_layers.new(name="UVMap")
-                    for loop_idx in range(len(mesh_data.loops)):
-                        if loop_idx < len(all_uvs):
-                            uv_layer.data[loop_idx].uv = all_uvs[loop_idx]
-
-                if mat_idx in self.material_dict:
-                    mesh_data.materials.append(self.material_dict[mat_idx])
-
-                print(f"[MAT] mesh={mesh_name} mat={mat_idx} polys={len(mesh_data.polygons)}")
-
                 mesh_obj = bpy.data.objects.new(mesh_name, mesh_data)
                 bpy.context.collection.objects.link(mesh_obj)
-
                 mesh_obj.parent = part_nodes[part_idx]
-
                 mesh_obj["_part_index"] = part_idx
-                if track_bone_data:
-                    self._mesh_bone_data[mesh_obj.name] = all_bone_data
-
                 mesh_objects.append(mesh_obj)
 
         return mesh_objects
@@ -1117,8 +1497,291 @@ class BlenderSceneBuilder:
             lod_meshes = self._create_meshes_for_lod(
                 lod, lod_part_nodes, track_bone_data=False)
 
+            # Create center markers for each part (mirrors create_scene_markers
+            # for LOD 0).  The original OED tool derives per-LOD center axes
+            # from each LOD's own _XX center objects.
+            for i in range(num_parts):
+                if i not in lod_part_nodes:
+                    continue
+                center_mesh = bpy.data.meshes.new(f"_{i + 1:02d} center")
+                center_obj = bpy.data.objects.new(f"_{i + 1:02d} center", center_mesh)
+                create_cube_mesh(center_mesh, 0.015)
+                bpy.context.collection.objects.link(center_obj)
+                center_obj.parent = lod_part_nodes[i]
+
+                # Apply rotation from MTRX if available.
+                if (i < int(lod.part_animation_count) and
+                        int(self.ir.matrix_count) > 0):
+                    mi = lod.part_animations[i].matrix_index
+                    if mi != 0xFF and mi < int(self.ir.matrix_count):
+                        rot = _mtrx_to_center_rotation(self.ir.matrices[mi].m)
+                        if rot is not None:
+                            center_obj.matrix_local = rot
+                    else:
+                        # Preserve "no matrix" centers so export can emit a
+                        # PANM matrix index of 0xFF.
+                        center_obj["oed_zero_axis"] = True
+
+            # Create attach point markers (~XXx attach) for child parts
+            pi_counter: dict[int, int] = {}
+            for i in range(num_parts):
+                if i not in lod_part_nodes:
+                    continue
+                part = lod.parts[i]
+                pi = int(part.parent_index)
+                if i == 0 or pi < 0:
+                    continue
+                count = pi_counter.get(pi, 0)
+                pi_counter[pi] = count + 1
+                suffix = chr(ord('a') + (count % 26))
+                attach_name = f"~{pi + 1:02d}{suffix} attach"
+                attach_mesh = bpy.data.meshes.new(attach_name)
+                attach_obj = bpy.data.objects.new(attach_name, attach_mesh)
+                create_cube_mesh(attach_mesh, 0.012)
+                bpy.context.collection.objects.link(attach_obj)
+                attach_obj.parent = lod_part_nodes[i]
+
             print(f"[LOD] {lod_root_name}: {num_parts} parts, "
                   f"{len(lod_meshes)} meshes")
+
+    def create_bullet_lod(self, name: str) -> int:
+        """Create a hidden BulletLOD from collision mesh data (CVRT/CFAC/COBJ).
+
+        The BulletLOD preserves the original collision geometry so that
+        build_collision_model() in export_3di.cpp produces correct CVRT/CNRM/
+        CFAC/COBJ/CXLT output.  The 3DP's poly_collision_lod is set to this
+        LOD index by the caller.
+
+        Returns the BulletLOD index, or -1 if no collision mesh data exists.
+        """
+        coll = self.ir.collision
+        if not coll:
+            return -1
+
+        obj_count = int(coll.contents.object_count)
+        face_count_total = int(coll.contents.face_count)
+        vert_count_total = int(coll.contents.vertex_count)
+        if obj_count == 0 or vert_count_total == 0:
+            return -1
+
+        bullet_lod_idx = int(self.ir.lod_count)
+
+        # --- Material reverse-map: (material_flags, poly_type) → Blender mat ---
+        # Reconstruct what export_3di.cpp:material_flags() and
+        # material_poly_type() would produce for each IR material, then build
+        # a lookup so collision faces can be assigned the correct material.
+        flag_to_mat = {}
+        for ir_idx, bmat in self.material_dict.items():
+            ir_mat = self.ir.materials[ir_idx]
+            flags = int(ir_mat.flags)
+            pattrib = int(ir_mat.pattrib)
+            surface_type = int(ir_mat.surface_type)
+
+            # Reconstruct rattrib (same as tdp_from_ir in tdp.cpp:1264-1272)
+            rattrib = 0
+            if flags & 0x04:    # TWO_SIDED
+                rattrib |= 0x1
+            if flags & 0x01:    # ALPHA_TEST
+                rattrib |= 0x400
+            if flags & 0x02:    # ALPHA_INVERT
+                rattrib |= 0x1000
+
+            # material_flags() from export_3di.cpp:742-750
+            mflags = 0
+            if rattrib & 1:      mflags |= 1
+            # rattrib & 0x20 → mflags |= 2 (NOT preserved through IR)
+            if pattrib & 0x100:  mflags |= 0x100
+            if pattrib & 0x2000: mflags |= 0x800
+            if pattrib & 0x1000: mflags |= 0x400
+
+            # poly_type = surface_type (surface_type_to_ptype + material_poly_type
+            # are exact inverses, so the CFAC poly_type == IR surface_type)
+            flag_to_mat.setdefault((mflags, surface_type), bmat)
+
+        # --- Per-object vertex/face ranges (CVRT/CFAC are flattened by COBJ order) ---
+        vert_ranges = []
+        face_ranges = []
+        v_off, f_off = 0, 0
+        for oi in range(obj_count):
+            obj = coll.contents.objects[oi]
+            nv = int(obj.num_vertices)
+            nf = int(obj.num_faces)
+            vert_ranges.append((v_off, nv))
+            face_ranges.append((f_off, nf))
+            v_off += nv
+            f_off += nf
+
+        # --- Create BulletLOD root ---
+        lod_root_name = f"{name}_BulletLOD"
+        lod_root = bpy.data.objects.new(lod_root_name, None)
+        lod_root.empty_display_type = 'PLAIN_AXES'
+        lod_root.empty_display_size = 0.1
+        bpy.context.collection.objects.link(lod_root)
+        lod_root["_lod_index"] = bullet_lod_idx
+        lod_root.hide_viewport = True
+
+        # Material name manifest (same as _build_additional_lods)
+        mat_names = []
+        for i in range(int(self.ir.material_count)):
+            mat = self.ir.materials[i]
+            shader = mat.shader_name.decode("utf-8", errors="replace").rstrip("\x00")
+            if not shader:
+                shader = "FF_ST_OP"
+            mat_names.append(f"Material_{i}_{shader}")
+        lod_root["_material_names"] = ";".join(mat_names)
+
+        # --- Build part hierarchy from COBJ ---
+        bullet_parts = {}
+        obj_positions = []  # internal-space absolute positions per COBJ
+        for oi in range(obj_count):
+            obj = coll.contents.objects[oi]
+            offset_pos = Vector((obj.offset[0] / 65536.0,
+                                 obj.offset[1] / 65536.0,
+                                 obj.offset[2] / 65536.0))
+            obj_positions.append(offset_pos)
+
+            part_name = f"PN{oi + 1:02d}"
+            part_obj = bpy.data.objects.new(part_name, None)
+            part_obj.empty_display_type = 'PLAIN_AXES'
+            part_obj.empty_display_size = 0.05
+            bpy.context.collection.objects.link(part_obj)
+            bullet_parts[oi] = part_obj
+
+        for oi in range(obj_count):
+            obj = coll.contents.objects[oi]
+            part_obj = bullet_parts[oi]
+            pi = int(obj.parent_subobject_index)
+            abs_pos = collision_space(obj_positions[oi])
+
+            if pi >= 0 and pi < obj_count and pi != oi and pi in bullet_parts:
+                part_obj.parent = bullet_parts[pi]
+                parent_abs = collision_space(obj_positions[pi])
+                part_obj.location = abs_pos - parent_abs
+            else:
+                part_obj.parent = lod_root
+                part_obj.location = abs_pos
+
+        # --- Create meshes per subobject from CVRT/CFAC ---
+        for oi in range(obj_count):
+            v_start, v_count = vert_ranges[oi]
+            f_start, f_count = face_ranges[oi]
+            part_pos = obj_positions[oi]
+
+            verts = []
+            for vi in range(v_count):
+                gvi = v_start + vi
+                if gvi >= vert_count_total:
+                    break
+                cv = coll.contents.vertices[gvi]
+                world_pos = Vector(cv.position)
+                verts.append(collision_space(world_pos - part_pos))
+
+            faces = []
+            face_mat_keys = []
+            for fi in range(f_count):
+                gfi = f_start + fi
+                if gfi >= face_count_total:
+                    break
+                cf = coll.contents.faces[gfi]
+                v0, v1, v2 = int(cf.vert_index[0]), int(cf.vert_index[1]), int(cf.vert_index[2])
+                if v0 < v_count and v1 < v_count and v2 < v_count:
+                    faces.append((v0, v1, v2))
+                    face_mat_keys.append((int(cf.material_flags), int(cf.poly_type)))
+
+            mesh_name = f"{oi + 1:02d} Mesh0"
+            mesh_data = bpy.data.meshes.new(mesh_name)
+
+            if verts:
+                mesh_data.from_pydata(verts, [], faces)
+                mesh_data.update()
+
+                if faces:
+                    sg_attr = mesh_data.attributes.new('smoothing_group', 'INT', 'FACE')
+                    for fi in range(len(mesh_data.polygons)):
+                        sg_attr.data[fi].value = 1
+                        mesh_data.polygons[fi].use_smooth = True
+
+                    # Assign materials via reverse-mapping
+                    mat_slot_map = {}
+                    for key in face_mat_keys:
+                        if key not in mat_slot_map:
+                            slot_idx = len(mesh_data.materials)
+                            mat_slot_map[key] = slot_idx
+                            mesh_data.materials.append(flag_to_mat.get(key))
+                    for fi in range(len(mesh_data.polygons)):
+                        if fi < len(face_mat_keys):
+                            mesh_data.polygons[fi].material_index = mat_slot_map.get(
+                                face_mat_keys[fi], 0)
+            else:
+                mesh_data.from_pydata([], [], [])
+                mesh_data.update()
+
+            mesh_obj = bpy.data.objects.new(mesh_name, mesh_data)
+            bpy.context.collection.objects.link(mesh_obj)
+            mesh_obj.parent = bullet_parts[oi]
+            mesh_obj["_part_index"] = oi
+
+        # --- Center point markers ---
+        for oi in range(obj_count):
+            center_mesh = bpy.data.meshes.new(f"_{oi + 1:02d} center")
+            center_obj = bpy.data.objects.new(f"_{oi + 1:02d} center", center_mesh)
+            create_cube_mesh(center_mesh, 0.015)
+            bpy.context.collection.objects.link(center_obj)
+            center_obj.parent = bullet_parts[oi]
+
+        # --- Attach point markers from CXLT translations ---
+        # Use the IR translation data directly to preserve exact count and positions.
+        # Ensure world matrices are current before reading parent positions.
+        bpy.context.view_layer.update()
+        # Build child-part list in order to map translations to parts.
+        trans_count = int(coll.contents.translation_count)
+        child_parts = []  # (child_oi, parent_oi) in part order
+        for oi in range(obj_count):
+            if oi == 0:
+                continue
+            obj = coll.contents.objects[oi]
+            pi = int(obj.parent_subobject_index)
+            if pi >= 0:
+                child_parts.append((oi, pi))
+
+        pi_counter: dict[int, int] = {}
+        attach_specs = []  # (attach_name, parent_obj)
+        for child_oi, parent_oi in child_parts:
+            count = pi_counter.get(parent_oi, 0)
+            pi_counter[parent_oi] = count + 1
+            suffix = chr(ord('a') + (count % 26))
+            attach_name = f"~{parent_oi + 1:02d}{suffix} attach"
+            attach_specs.append((attach_name, bullet_parts[child_oi]))
+
+        # If CXLT has more entries than parent-child links, emit synthetic root
+        # attaches. Keep them lexically after numbered attaches to avoid
+        # reordering the primary chain.
+        extra_needed = max(0, trans_count - len(attach_specs))
+        for extra_idx in range(extra_needed):
+            suffix = chr(ord('a') + (extra_idx % 26))
+            attach_specs.append((f"~99{suffix} attach", lod_root))
+
+        # ConvertToInternal (non-skinned) sorts attach objects by name before
+        # writing attachPoints/CXLT.  Assign translations in that sorted order
+        # to preserve original CXLT sequence.
+        attach_specs.sort(key=lambda it: it[0].lower())
+        for ti, (attach_name, parent_part) in enumerate(attach_specs[:trans_count]):
+            trans = coll.contents.translations[ti]
+            eng_pos = Vector((trans.translation[0] / 65536.0,
+                              trans.translation[1] / 65536.0,
+                              trans.translation[2] / 65536.0))
+            blender_pos = collision_space(eng_pos)
+            attach_mesh = bpy.data.meshes.new(attach_name)
+            attach_obj = bpy.data.objects.new(attach_name, attach_mesh)
+            create_cube_mesh(attach_mesh, 0.012)
+            bpy.context.collection.objects.link(attach_obj)
+            attach_obj.parent = parent_part
+            # Position: CXLT stores absolute world pos; compute relative to parent
+            parent_abs = parent_part.matrix_world.translation if parent_part != lod_root else Vector((0, 0, 0))
+            attach_obj.location = blender_pos - parent_abs
+
+        print(f"[BulletLOD] {lod_root_name}: {obj_count} parts from collision mesh")
+        return bullet_lod_idx
 
     def _resolve_ctrl_reg(self, reg_index):
         """Resolve a control register index to its name string from the IR."""
@@ -1468,6 +2131,20 @@ class BlenderSceneBuilder:
             bpy.context.collection.objects.link(center_obj)
             center_obj.parent = part_node
 
+            # Apply rotation from MTRX if available (preserves center axis
+            # through the Blender → ASE → convert_internal roundtrip).
+            if (i < int(lod0.part_animation_count) and
+                    int(self.ir.matrix_count) > 0):
+                mi = lod0.part_animations[i].matrix_index
+                if mi != 0xFF and mi < int(self.ir.matrix_count):
+                    rot = _mtrx_to_center_rotation(self.ir.matrices[mi].m)
+                    if rot is not None:
+                        center_obj.matrix_local = rot
+                else:
+                    # Preserve "no matrix" centers so export can emit a
+                    # PANM matrix index of 0xFF.
+                    center_obj["oed_zero_axis"] = True
+
         # Create tilde attachment point objects (~01a, ~01b, etc.)
         num_parts = int(lod0.part_count)
         pi_counter: dict[int, int] = {}
@@ -1499,21 +2176,20 @@ class BlenderSceneBuilder:
             return
         lod0 = self.ir.lods[0]
 
+        # Ensure world matrices are computed before reading parent positions.
+        bpy.context.view_layer.update()
+
         for i in range(int(self.ir.userpoint_count)):
             up = self.ir.userpoints[i]
             name = up.name.decode("utf-8", errors="replace").rstrip("\x00")
 
             # Build display name from type code
             display_idx = up.part_index if up.part_index >= 0 else 0
+            # Build display name: always use "UP{type_char}" so classify_name
+            # recognizes it as objType=6.
             type_code = up.type_code
-            if type_code == 71:
-                prefix = "UPG"
-            elif type_code == 83:
-                prefix = "UPS"
-            elif type_code == 49:
-                prefix = "NVG"
-            elif type_code == 48:
-                prefix = "GND"
+            if type_code and 32 <= type_code <= 126:
+                prefix = f"UP{chr(type_code)}"
             else:
                 prefix = "USR"
             marker_name = f"{prefix}{display_idx + 1:02d}"
@@ -1526,20 +2202,20 @@ class BlenderSceneBuilder:
             marker_obj.data.materials.append(self._create_marker_material("user_point_white", (1.0, 1.0, 1.0)))
             bpy.context.collection.objects.link(marker_obj)
 
-            # Position: negate X input, then convert to Blender space and subtract parent abs
+            # Position: IR stores (3di.y, 3di.z, 3di.x) in internal/swizzled
+            # space.  Map to Blender via internal→render→render_space:
+            # blender = (ir[0], -ir[2], ir[1]).
             raw = Vector(up.position)
-            up_pos = render_space(Vector((-raw.x, raw.y, raw.z)))
-            if up.part_index >= 0 and up.part_index < int(lod0.part_count):
-                parent_part = lod0.parts[up.part_index]
-                up_pos = up_pos - render_space(Vector(parent_part.abs_position))
+            up_pos = Vector((raw[0], -raw[2], raw[1]))
+            if up.part_index >= 0 and up.part_index < len(self.part_nodes):
+                parent_node = self.part_nodes[up.part_index]
+                up_pos = up_pos - Vector(parent_node.matrix_world.translation)
 
             marker_obj.location = up_pos
 
-            # direction stores the userpoint's local Z-axis as a unit vector
-            # (stored as rot_y/65536, rot_z/65536, rot_x/65536 in the file).
-            # Build rotation that aligns local Z with this direction.
+            # Direction: same coordinate mapping as position.
             raw_dir = Vector(up.direction)
-            z_axis = render_space(Vector((-raw_dir.x, raw_dir.y, raw_dir.z))).normalized()
+            z_axis = Vector((raw_dir[0], -raw_dir[2], raw_dir[1])).normalized()
             if z_axis.length_squared > 1e-6:
                 # Construct orthonormal basis from Z-axis direction
                 world_up = Vector((0.0, 0.0, 1.0))
@@ -1559,14 +2235,7 @@ class BlenderSceneBuilder:
                 parent_node = self.part_nodes[up.part_index]
             marker_obj.parent = parent_node
 
-            # Direction arrow child
-            arrow_mesh = bpy.data.meshes.new(marker_name + "_dir")
-            arrow_obj = bpy.data.objects.new(marker_name + "_dir", arrow_mesh)
-            create_direction_arrow_mesh(arrow_mesh, 0.04, 0.003)
-            arrow_obj.data.materials.append(self._create_marker_material("user_point_arrow", (1.0, 0.8, 0.0)))
-            bpy.context.collection.objects.link(arrow_obj)
-            arrow_obj.parent = marker_obj
-
+            marker_obj["nl_ase_name"] = marker_name  # original before Blender dedup
             marker_obj["nl_raw_position"] = tuple(up.position)
             marker_obj["nl_raw_direction"] = tuple(up.direction)
             marker_obj["nl_parent_index"] = int(up.part_index)

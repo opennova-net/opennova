@@ -110,6 +110,7 @@ static void free_model_arrays(Threedi3di3 *model)
             free(lod->indices.indices);
             free(lod->strips);
             free(lod->render_objects);
+            free(lod->part_animations);
         }
         free(model->lods);
     }
@@ -427,6 +428,8 @@ static int parse_robj_chunk(const ThreediChunk *chunk, ThreediRenderObject **out
     return 0;
 }
 
+static int parse_panm(const ThreediChunk *chunk, ThreediPartAnimation **out_anims, size_t *out_count, uint32_t *out_record_size);
+
 static int parse_rlod(const ThreediChunk *rlod_chunk, ThreediLod *out_lod)
 {
     if (!rlod_chunk || !out_lod) {
@@ -483,6 +486,18 @@ static int parse_rlod(const ThreediChunk *rlod_chunk, ThreediLod *out_lod)
         }
     }
 
+    const ThreediChunk *panm = find_child(rlod_chunk, "PANM");
+    if (panm) {
+        if (parse_panm(panm, &out_lod->part_animations, &out_lod->part_animation_count, &out_lod->part_animation_record_size) != 0) {
+            free(out_lod->vertices.items);
+            free(out_lod->indices.indices);
+            free(out_lod->strips);
+            free(out_lod->render_objects);
+            memset(out_lod, 0, sizeof(*out_lod));
+            return -1;
+        }
+    }
+
     return 0;
 }
 
@@ -504,21 +519,18 @@ static int parse_cmdl(const ThreediChunk *chunk, ThreediCollisionModelData *out)
         return -1;
     }
     assert(chunk->data_len == 64);
-    out->min[0] = read_fp_16_16(chunk->data + 0);
-    out->min[1] = read_fp_16_16(chunk->data + 4);
-    out->min[2] = read_fp_16_16(chunk->data + 8);
-    out->max[0] = read_fp_16_16(chunk->data + 12);
-    out->max[1] = read_fp_16_16(chunk->data + 16);
-    out->max[2] = read_fp_16_16(chunk->data + 20);
-    out->center[0] = read_fp_16_16(chunk->data + 24);
-    out->center[1] = read_fp_16_16(chunk->data + 28);
-    out->center[2] = read_fp_16_16(chunk->data + 32);
-    out->num_vertices = read_s32_le(chunk->data + 36);
-    out->num_normals = read_s32_le(chunk->data + 40);
-    out->num_faces = read_s32_le(chunk->data + 44);
-    out->num_objects = read_s32_le(chunk->data + 48);
-    out->num_transforms = read_s32_le(chunk->data + 52);
-    out->num_bounding_planes = read_s32_le(chunk->data + 56);
+    // bbox {minX, minY, minZ, maxX, maxY, maxZ}, radii, 7 counts.
+    for (int i = 0; i < 6; ++i)
+        out->bbox[i] = read_fp_16_16(chunk->data + i * 4);
+    out->radii[0] = read_fp_16_16(chunk->data + 24);  // max_radius
+    out->radii[1] = read_fp_16_16(chunk->data + 28);  // max_radius_xy
+    out->radii[2] = read_fp_16_16(chunk->data + 32);  // max_radius_z
+    out->num_vertices         = read_s32_le(chunk->data + 36);
+    out->num_normals          = read_s32_le(chunk->data + 40);
+    out->num_faces            = read_s32_le(chunk->data + 44);
+    out->num_objects          = read_s32_le(chunk->data + 48);
+    out->num_transforms       = read_s32_le(chunk->data + 52);
+    out->num_bounding_planes  = read_s32_le(chunk->data + 56);
     out->num_bounding_volumes = read_s32_le(chunk->data + 60);
     return 0;
 }
@@ -812,7 +824,7 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
     assert(cursor + tex_block <= record_size);
     for (uint32_t i = 0; i < tex_count && i < 24; ++i) {
         parse_material_texture(base + cursor + i * 20, &out->textures[i]);
-        assert(out->textures[i].slot >= 1 && out->textures[i].slot <= 3);
+        assert(out->textures[i].slot >= 1 && out->textures[i].slot <= 4);
         assert(out->textures[i].type == 0 || out->textures[i].type == 4 || out->textures[i].type == 5);
     }
     cursor += tex_block;
@@ -853,8 +865,26 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
     out->rgb_gen.end_color[3] = (float)read_u8(base + cursor + 11) / 255.0f;
     cursor += 12;
 
+    // Second RGB generator (same 12-byte compact format, always zero in practice)
     assert(cursor + 12 <= record_size);
-    memcpy(out->rgb_gen.unknown_tail, base + cursor, 12);
+    out->rgb_gen2.style = read_u8(base + cursor);
+    uint8_t rgb2_phase_or_reg = read_u8(base + cursor + 1);
+    if (out->rgb_gen2.style <= 112) {
+        out->rgb_gen2.phase = (float)rgb2_phase_or_reg / 256.0f;
+        out->rgb_gen2.reg = -1;
+    } else {
+        out->rgb_gen2.reg = rgb2_phase_or_reg;
+        out->rgb_gen2.phase = 0.0f;
+    }
+    out->rgb_gen2.rate = (float)read_s16_le(base + cursor + 2) / 256.0f;
+    out->rgb_gen2.start_color[2] = (float)read_u8(base + cursor + 4) / 255.0f;
+    out->rgb_gen2.start_color[1] = (float)read_u8(base + cursor + 5) / 255.0f;
+    out->rgb_gen2.start_color[0] = (float)read_u8(base + cursor + 6) / 255.0f;
+    out->rgb_gen2.start_color[3] = (float)read_u8(base + cursor + 7) / 255.0f;
+    out->rgb_gen2.end_color[2] = (float)read_u8(base + cursor + 8) / 255.0f;
+    out->rgb_gen2.end_color[1] = (float)read_u8(base + cursor + 9) / 255.0f;
+    out->rgb_gen2.end_color[0] = (float)read_u8(base + cursor + 10) / 255.0f;
+    out->rgb_gen2.end_color[3] = (float)read_u8(base + cursor + 11) / 255.0f;
     cursor += 12;
 
     assert(cursor + 8 <= record_size);
@@ -894,32 +924,31 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
     out->reflect_color[3] = (float)read_u8(base + cursor + 3) / 255.0f;
     cursor += 4;
 
+    // Second reflect color (always zero in practice — WriteMTRL only populates channel 0)
     assert(cursor + 4 <= record_size);
-    out->unknown1 = (uint32_t)read_s32_le(base + cursor);
-    assert(out->unknown1 == 0);
+    out->reflect_color2[2] = (float)read_u8(base + cursor + 0) / 255.0f;
+    out->reflect_color2[1] = (float)read_u8(base + cursor + 1) / 255.0f;
+    out->reflect_color2[0] = (float)read_u8(base + cursor + 2) / 255.0f;
+    out->reflect_color2[3] = (float)read_u8(base + cursor + 3) / 255.0f;
     cursor += 4;
     assert(cursor + 4 <= record_size);
     out->emissive_type = read_u8(base + cursor);
     assert(out->emissive_type == 0 || out->emissive_type == 2);
     cursor += 1;
-    out->unknown3 = read_u8(base + cursor);
-    assert(out->unknown3 == 0);
+    out->emissive_type2 = read_u8(base + cursor);
     cursor += 1;
-    uint8_t glass_raw = read_u8(base + cursor);
-    assert(glass_raw == 0 || glass_raw == 1);
-    out->is_glass = glass_raw == 1 ? 1 : 0;
+    out->is_glass = read_u8(base + cursor);
+    assert(out->is_glass == 0 || out->is_glass == 1);
     cursor += 1;
-    out->unknown4 = read_u8(base + cursor);
-    assert(out->unknown4 == 0);
+    out->glass_type2 = read_u8(base + cursor);
     cursor += 1;
     assert(cursor + 4 <= record_size);
     out->material_flags = read_u8(base + cursor);
     cursor += 1;
     out->alpha_test_value_byte = read_u8(base + cursor);
     cursor += 1;
-    out->unknown5 = read_u8(base + cursor);
-    out->unknown6 = read_u8(base + cursor + 1);
-    assert(out->unknown5 == 0 && out->unknown6 == 0);
+    out->pad[0] = read_u8(base + cursor);
+    out->pad[1] = read_u8(base + cursor + 1);
     cursor += 2;
     assert(cursor + 4 <= record_size);
     out->animation.num_frames = read_u8(base + cursor);
@@ -1984,7 +2013,7 @@ static int append_rgb_gen(BufferBuilder *buf, const ThreediRgbGen *rgb)
     if (buffer_append(buf, block, sizeof(block)) != 0) {
         return -1;
     }
-    return buffer_append(buf, rgb->unknown_tail, sizeof(rgb->unknown_tail));
+    return 0;
 }
 
 static int append_uv_params(BufferBuilder *buf, const ThreediUvParams *uv)
@@ -2022,7 +2051,8 @@ static int append_material(BufferBuilder *buf, const ThreediMaterial *mat, uint3
     if (append_alpha_gen(buf, &mat->alpha_gen) != 0) {
         return -1;
     }
-    if (append_rgb_gen(buf, &mat->rgb_gen) != 0) {
+    if (append_rgb_gen(buf, &mat->rgb_gen) != 0 ||
+        append_rgb_gen(buf, &mat->rgb_gen2) != 0) {
         return -1;
     }
     if (append_uv_params(buf, &mat->u_params) != 0 ||
@@ -2035,17 +2065,20 @@ static int append_material(BufferBuilder *buf, const ThreediMaterial *mat, uint3
         buffer_append_u8(buf, float_to_byte(mat->reflect_color[3], 255.0f)) != 0) {
         return -1;
     }
-    if (buffer_append_u32_le(buf, mat->unknown1) != 0) {
+    if (buffer_append_u8(buf, float_to_byte(mat->reflect_color2[2], 255.0f)) != 0 ||
+        buffer_append_u8(buf, float_to_byte(mat->reflect_color2[1], 255.0f)) != 0 ||
+        buffer_append_u8(buf, float_to_byte(mat->reflect_color2[0], 255.0f)) != 0 ||
+        buffer_append_u8(buf, float_to_byte(mat->reflect_color2[3], 255.0f)) != 0) {
         return -1;
     }
     if (buffer_append_u8(buf, mat->emissive_type) != 0 ||
-        buffer_append_u8(buf, mat->unknown3) != 0 ||
-        buffer_append_u8(buf, mat->is_glass ? 1u : 0u) != 0 ||
-        buffer_append_u8(buf, mat->unknown4) != 0 ||
+        buffer_append_u8(buf, mat->emissive_type2) != 0 ||
+        buffer_append_u8(buf, mat->is_glass) != 0 ||
+        buffer_append_u8(buf, mat->glass_type2) != 0 ||
         buffer_append_u8(buf, mat->material_flags) != 0 ||
         buffer_append_u8(buf, mat->alpha_test_value_byte) != 0 ||
-        buffer_append_u8(buf, mat->unknown5) != 0 ||
-        buffer_append_u8(buf, mat->unknown6) != 0) {
+        buffer_append_u8(buf, mat->pad[0]) != 0 ||
+        buffer_append_u8(buf, mat->pad[1]) != 0) {
         return -1;
     }
     if (buffer_append_u8(buf, mat->animation.num_frames) != 0 ||
@@ -2344,15 +2377,16 @@ static int build_cmdl_chunk(const ThreediCollisionModelData *cmdl, ChunkBuilder 
         return -1;
     }
     chunk_builder_init(out, "CMDL", 0);
-    if (buffer_append_fixed_16_16(&out->payload, cmdl->min[0]) != 0 ||
-        buffer_append_fixed_16_16(&out->payload, cmdl->min[1]) != 0 ||
-        buffer_append_fixed_16_16(&out->payload, cmdl->min[2]) != 0 ||
-        buffer_append_fixed_16_16(&out->payload, cmdl->max[0]) != 0 ||
-        buffer_append_fixed_16_16(&out->payload, cmdl->max[1]) != 0 ||
-        buffer_append_fixed_16_16(&out->payload, cmdl->max[2]) != 0 ||
-        buffer_append_fixed_16_16(&out->payload, cmdl->center[0]) != 0 ||
-        buffer_append_fixed_16_16(&out->payload, cmdl->center[1]) != 0 ||
-        buffer_append_fixed_16_16(&out->payload, cmdl->center[2]) != 0 ||
+    // Layout: bbox {minX,minY,minZ,maxX,maxY,maxZ}, radii, 7 counts.
+    if (buffer_append_fixed_16_16(&out->payload, cmdl->bbox[0]) != 0 ||
+        buffer_append_fixed_16_16(&out->payload, cmdl->bbox[1]) != 0 ||
+        buffer_append_fixed_16_16(&out->payload, cmdl->bbox[2]) != 0 ||
+        buffer_append_fixed_16_16(&out->payload, cmdl->bbox[3]) != 0 ||
+        buffer_append_fixed_16_16(&out->payload, cmdl->bbox[4]) != 0 ||
+        buffer_append_fixed_16_16(&out->payload, cmdl->bbox[5]) != 0 ||
+        buffer_append_fixed_16_16(&out->payload, cmdl->radii[0]) != 0 ||
+        buffer_append_fixed_16_16(&out->payload, cmdl->radii[1]) != 0 ||
+        buffer_append_fixed_16_16(&out->payload, cmdl->radii[2]) != 0 ||
         buffer_append_s32_le(&out->payload, cmdl->num_vertices) != 0 ||
         buffer_append_s32_le(&out->payload, cmdl->num_normals) != 0 ||
         buffer_append_s32_le(&out->payload, cmdl->num_faces) != 0 ||
@@ -2488,9 +2522,10 @@ static int build_cnrm_chunk(const ThreediCollisionModel *collision, ChunkBuilder
     }
     for (size_t i = 0; i < collision->normal_count; ++i) {
         const ThreediCollisionNormal *n = &collision->normals[i];
-        int16_t raw_x = (int16_t)floorf(n->normal[0] * 16384.0f);
-        int16_t raw_y = (int16_t)floorf(n->normal[1] * 16384.0f);
-        int16_t raw_z = (int16_t)floorf(n->normal[2] * 16384.0f);
+        // Truncation toward zero, matching original WriteCNRM's (unsigned __int64) cast.
+        int16_t raw_x = (int16_t)(n->normal[0] * 16384.0f);
+        int16_t raw_y = (int16_t)(n->normal[1] * 16384.0f);
+        int16_t raw_z = (int16_t)(n->normal[2] * 16384.0f);
         if (buffer_append_s16_le(&out->payload, raw_x) != 0 ||
             buffer_append_s16_le(&out->payload, raw_y) != 0 ||
             buffer_append_s16_le(&out->payload, raw_z) != 0 ||
@@ -2846,23 +2881,28 @@ static int append_transform(BufferBuilder *buf, const ThreediTransform *t)
     return 0;
 }
 
-static int build_panm_chunk(const Threedi3di3 *model, ChunkBuilder *out)
+static int build_panm_chunk(const ThreediLod *lod, const Threedi3di3 *model, ChunkBuilder *out)
 {
-    uint32_t record_size = model->part_animation_record_size == 0 ? 68u : model->part_animation_record_size;
-    if (record_size != 68u) {
+    // Use per-LOD PANM data if available, otherwise fall back to global (for backwards compat).
+    const ThreediPartAnimation *panm_data = lod->part_animations ? lod->part_animations : model->part_animations;
+    const size_t panm_count = lod->part_animations ? lod->part_animation_count : model->part_animation_count;
+    const uint32_t panm_rec_size = lod->part_animations
+        ? (lod->part_animation_record_size == 0 ? 68u : lod->part_animation_record_size)
+        : (model->part_animation_record_size == 0 ? 68u : model->part_animation_record_size);
+    if (panm_rec_size != 68u) {
         return -1;
     }
-    if (model->part_animation_count > 0 && !model->part_animations) {
+    if (panm_count > 0 && !panm_data) {
         return -1;
     }
     chunk_builder_init(out, "PANM", 0);
-    if (buffer_append_u32_le(&out->payload, (uint32_t)model->part_animation_count) != 0 ||
-        buffer_append_u32_le(&out->payload, record_size) != 0) {
+    if (buffer_append_u32_le(&out->payload, (uint32_t)panm_count) != 0 ||
+        buffer_append_u32_le(&out->payload, panm_rec_size) != 0) {
         chunk_builder_free(out);
         return -1;
     }
-    for (size_t i = 0; i < model->part_animation_count; ++i) {
-        const ThreediPartAnimation *a = &model->part_animations[i];
+    for (size_t i = 0; i < panm_count; ++i) {
+        const ThreediPartAnimation *a = &panm_data[i];
         size_t record_start = out->payload.len;
         if (buffer_append_u32_le(&out->payload, a->flags) != 0 ||
             buffer_append_u8(&out->payload, a->parent_subobject) != 0 ||
@@ -2881,12 +2921,12 @@ static int build_panm_chunk(const Threedi3di3 *model, ChunkBuilder *out)
             return -1;
         }
         size_t record_written = out->payload.len - record_start;
-        if (record_written != (size_t)record_size) {
+        if (record_written != (size_t)panm_rec_size) {
             chunk_builder_free(out);
             return -1;
         }
     }
-    size_t expected = 8u + (size_t)model->part_animation_count * (size_t)record_size;
+    size_t expected = 8u + (size_t)panm_count * (size_t)panm_rec_size;
     if (out->payload.len != expected) {
         chunk_builder_free(out);
         return -1;
@@ -2942,7 +2982,7 @@ static int build_rlod_chunk(const Threedi3di3 *model, const ThreediLod *lod, Ser
     }
 
     ChunkBuilder panm = {0};
-    if (build_panm_chunk(model, &panm) != 0 || chunk_builder_add_child(out, &panm) != 0) {
+    if (build_panm_chunk(lod, model, &panm) != 0 || chunk_builder_add_child(out, &panm) != 0) {
         chunk_builder_free(&panm);
         chunk_builder_free(out);
         return -1;

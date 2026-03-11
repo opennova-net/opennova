@@ -74,6 +74,8 @@ class AseObject(ctypes.Structure):
         ("color_face_count", ctypes.c_int32),
         ("tm_row", (ctypes.c_float * 3) * 4),
         ("skinned", ctypes.c_int32),
+        ("face_normal_count", ctypes.c_int32),
+        ("face_normals", ctypes.POINTER(ctypes.c_float)),
     ]
 
 

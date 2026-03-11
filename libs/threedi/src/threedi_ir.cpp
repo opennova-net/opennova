@@ -10,6 +10,7 @@
 void threedi_ir_init(ThreediModelIR *ir) {
     if (!ir) return;
     memset(ir, 0, sizeof(ThreediModelIR));
+    ir->collision_lod = -1;
 }
 
 static void threedi_ir_lod_free(ThreediIRLod *lod) {
@@ -18,6 +19,7 @@ static void threedi_ir_lod_free(ThreediIRLod *lod) {
     free(lod->indices);
     free(lod->primitives);
     free(lod->parts);
+    free(lod->part_animations);
     memset(lod, 0, sizeof(ThreediIRLod));
 }
 
@@ -26,6 +28,9 @@ static void threedi_ir_collision_free(ThreediIRCollision *col) {
     free(col->vertices);
     free(col->planes);
     free(col->volumes);
+    free(col->faces);
+    free(col->objects);
+    free(col->translations);
 }
 
 static void threedi_ir_occlusion_free(ThreediIROcclusion *occ) {
@@ -67,9 +72,6 @@ void threedi_ir_free(ThreediModelIR *ir) {
         threedi_ir_occlusion_free(ir->occlusion);
         free(ir->occlusion);
     }
-
-    // Free part animations
-    free(ir->part_animations);
 
     // Free control registers
     free(ir->control_registers);
