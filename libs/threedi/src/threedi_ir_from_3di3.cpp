@@ -329,6 +329,7 @@ struct AssignCtx {
     int fg_count;
     int mt_count;
     uint32_t *tri_counts;
+    int strict;   // 1 = prune overcommit, 0 = allow overcommit
 };
 
 static void backtrack_assign(AssignCtx *ctx, int m) {
@@ -346,7 +347,7 @@ static void backtrack_assign(AssignCtx *ctx, int m) {
     }
     for (int g = 0; g < ctx->fg_count; ++g) {
         int32_t new_rem = ctx->group_remaining[g] - (int32_t)ctx->tri_counts[m];
-        if (new_rem < 0) continue;  // prune: would overcommit
+        if (ctx->strict && new_rem < 0) continue;  // prune: would overcommit
         ctx->assign[m] = g;
         ctx->group_remaining[g] = new_rem;
         backtrack_assign(ctx, m + 1);
@@ -362,9 +363,14 @@ static void assign_surface_types(const Threedi3di3 *model, ThreediModelIR *ir) {
     if (model->lod_count == 0 || ir->lod_count == 0) return;
 
     const ThreediCollisionModel *col = model->collision;
-    const ThreediIRLod *ir_lod0 = &ir->lods[0];
 
-    // Set default surface_type (0x01 = Mud) for all materials
+    // Resolve collision LOD: use collision_lod if set, otherwise last LOD.
+    size_t lod_idx = (ir->collision_lod >= 0 && (size_t)ir->collision_lod < ir->lod_count)
+                   ? (size_t)ir->collision_lod
+                   : 0;
+    const ThreediIRLod *ir_lod = &ir->lods[lod_idx];
+
+    // Set default surface_type (0x01 = Dirt) for all materials
     for (size_t i = 0; i < ir->material_count; ++i)
         ir->materials[i].surface_type = 0x01;
 
@@ -403,8 +409,8 @@ static void assign_surface_types(const Threedi3di3 *model, ThreediModelIR *ir) {
         // Collect unique materials for this subobject
         int32_t unique_mats[64];
         size_t unique_mat_count = 0;
-        for (size_t p = 0; p < ir_lod0->primitive_count; ++p) {
-            const ThreediIRPrimitive *prim = &ir_lod0->primitives[p];
+        for (size_t p = 0; p < ir_lod->primitive_count; ++p) {
+            const ThreediIRPrimitive *prim = &ir_lod->primitives[p];
             if (prim->part_index != part_idx) continue;
             bool found = false;
             for (size_t m = 0; m < unique_mat_count; ++m) {
@@ -444,16 +450,16 @@ static void assign_surface_types(const Threedi3di3 *model, ThreediModelIR *ir) {
         // Step 1: count render triangles per material for this part
         struct { int32_t mat; uint32_t count; } mat_tris[64];
         size_t mt_count = 0;
-        for (size_t p = 0; p < ir_lod0->primitive_count; ++p) {
-            const ThreediIRPrimitive *prim = &ir_lod0->primitives[p];
+        for (size_t p = 0; p < ir_lod->primitive_count; ++p) {
+            const ThreediIRPrimitive *prim = &ir_lod->primitives[p];
             if (prim->part_index != part_idx) continue;
 
             uint32_t tris = 0;
             if (prim->topology == THREEDI_IR_TOPOLOGY_STRIP) {
                 for (uint32_t i = 0; i + 2 < prim->index_count; ++i) {
-                    uint16_t i0 = ir_lod0->indices[prim->index_offset + i];
-                    uint16_t i1 = ir_lod0->indices[prim->index_offset + i + 1];
-                    uint16_t i2 = ir_lod0->indices[prim->index_offset + i + 2];
+                    uint16_t i0 = ir_lod->indices[prim->index_offset + i];
+                    uint16_t i1 = ir_lod->indices[prim->index_offset + i + 1];
+                    uint16_t i2 = ir_lod->indices[prim->index_offset + i + 2];
                     if (i0 != i1 && i1 != i2 && i0 != i2) tris++;
                 }
             } else {
@@ -528,12 +534,22 @@ static void assign_surface_types(const Threedi3di3 *model, ThreediModelIR *ir) {
             ctx.mt_count = (int)mt_count;
             ctx.tri_counts = tri_counts;
             ctx.best_residual = UINT32_MAX;
+            ctx.strict = 1;
             for (size_t m = 0; m < mt_count; ++m)
                 tri_counts[m] = mat_tris[m].count;
             for (int g = 0; g < fg_count; ++g)
                 ctx.group_remaining[g] = (int32_t)fgroups[g].count;
 
             backtrack_assign(&ctx, 0);
+
+            // If strict pruning found no valid assignment, retry relaxed.
+            if (ctx.best_residual == UINT32_MAX) {
+                for (int g = 0; g < fg_count; ++g)
+                    ctx.group_remaining[g] = (int32_t)fgroups[g].count;
+                ctx.strict = 0;
+                backtrack_assign(&ctx, 0);
+            }
+
             memcpy(best_assign, ctx.best_assign, mt_count * sizeof(int));
 
             // Apply the best assignment
@@ -549,6 +565,55 @@ static void assign_surface_types(const Threedi3di3 *model, ThreediModelIR *ir) {
 
         face_cursor += (size_t)obj->num_faces;
         vert_cursor += (size_t)(obj->num_vertices > 0 ? obj->num_vertices : 0);
+    }
+
+    // If no material received any vote (can happen on skinned assets where
+    // collision objects don't map cleanly to render part indices), fall back
+    // to the dominant collision face group globally so we do not lose
+    // collision surface metadata when generating a .3dp from IR.
+    bool any_votes = false;
+    for (size_t mi = 0; mi < mat_count && !any_votes; ++mi) {
+        for (int pt = 0; pt < 256; ++pt) {
+            if (votes[mi][pt] != 0) {
+                any_votes = true;
+                break;
+            }
+        }
+    }
+
+    if (!any_votes && col->face_count > 0) {
+        uint32_t global_poly_hist[256] = {};
+        uint32_t global_flag_hist[8] = {};
+        for (size_t fi = 0; fi < col->face_count; ++fi) {
+            const ThreediCollisionFace *cf = &col->faces[fi];
+            global_poly_hist[cf->poly_type]++;
+            global_flag_hist[collision_flags_index(cf->material_flags)]++;
+        }
+
+        uint8_t dominant_pt = 0x01;
+        uint32_t dominant_pt_count = 0;
+        for (int pt = 0; pt < 256; ++pt) {
+            if (global_poly_hist[pt] > dominant_pt_count) {
+                dominant_pt_count = global_poly_hist[pt];
+                dominant_pt = (uint8_t)pt;
+            }
+        }
+
+        uint32_t dominant_fi = 0;
+        uint32_t dominant_fi_count = 0;
+        for (int fi = 0; fi < 8; ++fi) {
+            if (global_flag_hist[fi] > dominant_fi_count) {
+                dominant_fi_count = global_flag_hist[fi];
+                dominant_fi = (uint32_t)fi;
+            }
+        }
+        const uint32_t dominant_pattrib =
+            collision_flags_to_pattrib(collision_flags_from_index(dominant_fi));
+
+        for (size_t mi = 0; mi < mat_count; ++mi) {
+            ir->materials[mi].surface_type = dominant_pt;
+            ir->materials[mi].pattrib = dominant_pattrib;
+        }
     }
 
     // Resolve: for each material, pick the poly_type and flag index with the most votes
@@ -588,9 +653,14 @@ static int convert_collision(const Threedi3di3 *model, ThreediModelIR *ir) {
     ir->collision = (ThreediIRCollision *)calloc(1, sizeof(ThreediIRCollision));
     if (!ir->collision) return -1;
 
-    memcpy(ir->collision->model_min, col->model_data.min, sizeof(float) * 3);
-    memcpy(ir->collision->model_max, col->model_data.max, sizeof(float) * 3);
-    memcpy(ir->collision->model_center, col->model_data.center, sizeof(float) * 3);
+    // bbox: {minX, minY, minZ, maxX, maxY, maxZ}
+    ir->collision->model_min[0] = col->model_data.bbox[0];
+    ir->collision->model_min[1] = col->model_data.bbox[1];
+    ir->collision->model_min[2] = col->model_data.bbox[2];
+    ir->collision->model_max[0] = col->model_data.bbox[3];
+    ir->collision->model_max[1] = col->model_data.bbox[4];
+    ir->collision->model_max[2] = col->model_data.bbox[5];
+    memcpy(ir->collision->model_center, col->model_data.radii, sizeof(float) * 3);
 
     // Convert vertices
     ir->collision->vertex_count = col->vertex_count;
@@ -661,6 +731,56 @@ static int convert_collision(const Threedi3di3 *model, ThreediModelIR *ir) {
                 plane_cursor += ir->collision->volumes[vol_cursor].plane_count;
                 ++vol_cursor;
             }
+        }
+    }
+
+    // Convert faces (for BulletLOD reconstruction)
+    ir->collision->face_count = col->face_count;
+    if (col->face_count > 0 && col->faces) {
+        ir->collision->faces = (ThreediIRCollisionFace *)calloc(
+            col->face_count, sizeof(ThreediIRCollisionFace));
+        if (!ir->collision->faces) return -1;
+
+        for (size_t i = 0; i < col->face_count; ++i) {
+            const ThreediCollisionFace *sf = &col->faces[i];
+            ThreediIRCollisionFace *df = &ir->collision->faces[i];
+            df->vert_index[0] = sf->vert_index[0];
+            df->vert_index[1] = sf->vert_index[1];
+            df->vert_index[2] = sf->vert_index[2];
+            df->material_flags = sf->material_flags;
+            df->poly_type = sf->poly_type;
+        }
+    }
+
+    // Convert objects (COBJ — one per subobject)
+    ir->collision->object_count = col->object_count;
+    if (col->object_count > 0 && col->objects) {
+        ir->collision->objects = (ThreediIRCollisionObject *)calloc(
+            col->object_count, sizeof(ThreediIRCollisionObject));
+        if (!ir->collision->objects) return -1;
+
+        for (size_t i = 0; i < col->object_count; ++i) {
+            const ThreediCollisionObject *so = &col->objects[i];
+            ThreediIRCollisionObject *d = &ir->collision->objects[i];
+            d->num_vertices = so->num_vertices;
+            d->num_faces = so->num_faces;
+            d->parent_subobject_index = so->parent_subobject_index;
+            d->offset[0] = so->offset[0];
+            d->offset[1] = so->offset[1];
+            d->offset[2] = so->offset[2];
+        }
+    }
+
+    // Convert translations (CXLT — attachment points)
+    ir->collision->translation_count = col->translation_count;
+    if (col->translation_count > 0 && col->translations) {
+        ir->collision->translations = (ThreediIRCollisionTranslation *)calloc(
+            col->translation_count, sizeof(ThreediIRCollisionTranslation));
+        if (!ir->collision->translations) return -1;
+
+        for (size_t i = 0; i < col->translation_count; ++i) {
+            memcpy(ir->collision->translations[i].translation,
+                   col->translations[i].translation, sizeof(float) * 3);
         }
     }
 
@@ -764,17 +884,22 @@ static int convert_occlusion(const Threedi3di3 *model, ThreediModelIR *ir) {
     return 0;
 }
 
-static int convert_part_animations(const Threedi3di3 *model, ThreediModelIR *ir) {
-    ir->part_animation_count = model->part_animation_count;
-    if (ir->part_animation_count == 0) return 0;
+static int convert_part_animations(const ThreediLod *src_lod, ThreediIRLod *dst_lod) {
+    // Only store PANM if this LOD actually has its own PANM chunk.
+    // Fallback to model-level PANM (for LODs without their own) is handled at write-time.
+    const ThreediPartAnimation *src_anims = src_lod->part_animations;
+    size_t src_count = src_lod->part_animation_count;
 
-    ir->part_animations = (ThreediIRPartAnimation *)calloc(
-        ir->part_animation_count, sizeof(ThreediIRPartAnimation));
-    if (!ir->part_animations) return -1;
+    dst_lod->part_animation_count = src_count;
+    if (src_count == 0) return 0;
 
-    for (size_t i = 0; i < ir->part_animation_count; ++i) {
-        const ThreediPartAnimation *sp = &model->part_animations[i];
-        ThreediIRPartAnimation *dp = &ir->part_animations[i];
+    dst_lod->part_animations = (ThreediIRPartAnimation *)calloc(
+        src_count, sizeof(ThreediIRPartAnimation));
+    if (!dst_lod->part_animations) return -1;
+
+    for (size_t i = 0; i < src_count; ++i) {
+        const ThreediPartAnimation *sp = &src_anims[i];
+        ThreediIRPartAnimation *dp = &dst_lod->part_animations[i];
 
         dp->flags = sp->flags;
         dp->parent_part = sp->parent_subobject;
@@ -872,6 +997,7 @@ int threedi_ir_from_3di3(const Threedi3di3 *model, ThreediModelIR *out) {
 
         for (size_t i = 0; i < out->lod_count; ++i) {
             if (convert_lod(&model->lods[i], model, &out->lods[i]) != 0) goto error;
+            if (convert_part_animations(&model->lods[i], &out->lods[i]) != 0) goto error;
         }
     }
 
@@ -892,9 +1018,6 @@ int threedi_ir_from_3di3(const Threedi3di3 *model, ThreediModelIR *out) {
 
     // Convert occlusion
     if (convert_occlusion(model, out) != 0) goto error;
-
-    // Convert part animations
-    if (convert_part_animations(model, out) != 0) goto error;
 
     // Convert control registers
     if (convert_control_registers(model, out) != 0) goto error;

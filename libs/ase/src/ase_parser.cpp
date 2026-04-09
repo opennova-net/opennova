@@ -15,6 +15,13 @@ namespace {
 
 // Helpers --------------------------------------------------------------------
 
+// Match the game engine's float parsing: atof() returns double, then fstp dword
+// truncates to float.  This double-rounding (string→double→float) can differ from
+// strtof's single-rounding (string→float) by 1 ULP on boundary values.
+static inline float parse_float(const char* s) {
+  return static_cast<float>(std::strtod(s, nullptr));
+}
+
 static inline bool iequals(std::string_view a, std::string_view b) {
   return a.size() == b.size() &&
          std::equal(a.begin(), a.end(), b.begin(), b.end(),
@@ -91,6 +98,8 @@ struct ParserState {
   // Current context
   int root_section = 0;
   int block_tag = 0;
+  int cur_normal_face = -1;     // face index from last *MESH_FACENORMAL
+  int cur_normal_vert = 0;      // 0..2 counter within current face
   int sub_tag = 0;
   int map_tag = 0;
   int nested_map_tag = 0;
@@ -220,9 +229,9 @@ static void handle_mesh_vertex(ParserState& st, const std::vector<std::string>& 
   if (!st.cur_obj || t.size() < 5) return;
   int idx = std::strtol(t[1].c_str(), nullptr, 10);
   if (idx < 0 || idx >= st.cur_obj->vert_count) return;
-  float x = std::strtof(t[2].c_str(), nullptr);
-  float y = std::strtof(t[3].c_str(), nullptr);
-  float z = std::strtof(t[4].c_str(), nullptr);
+  float x = parse_float(t[2].c_str());
+  float y = parse_float(t[3].c_str());
+  float z = parse_float(t[4].c_str());
   float swz[3];
   swizzle_vec3(x, y, z, swz);
   float* vptr = &st.cur_obj->verts[idx * 3];
@@ -235,9 +244,9 @@ static void handle_mesh_tvert(ParserState& st, const std::vector<std::string>& t
   if (!st.cur_obj || t.size() < 5) return;
   int idx = std::strtol(t[1].c_str(), nullptr, 10);
   if (idx < 0 || idx >= st.cur_obj->uv_count) return;
-  st.cur_obj->uvs[idx].u = std::strtof(t[2].c_str(), nullptr);
-  st.cur_obj->uvs[idx].v = std::strtof(t[3].c_str(), nullptr);
-  st.cur_obj->uvs[idx].w = std::strtof(t[4].c_str(), nullptr);
+  st.cur_obj->uvs[idx].u = parse_float(t[2].c_str());
+  st.cur_obj->uvs[idx].v = parse_float(t[3].c_str());
+  st.cur_obj->uvs[idx].w = parse_float(t[4].c_str());
 }
 
 static void handle_mesh_face(ParserState& st, const std::vector<std::string>& t) {
@@ -282,9 +291,9 @@ static void handle_mesh_vertcol(ParserState& st, const std::vector<std::string>&
   if (!st.cur_obj || t.size() < 5) return;
   int idx = std::strtol(t[1].c_str(), nullptr, 10);
   if (idx < 0 || idx >= st.cur_obj->color_count) return;
-  uint32_t r = static_cast<uint32_t>(std::strtof(t[2].c_str(), nullptr) * 255.0f);
-  uint32_t g = static_cast<uint32_t>(std::strtof(t[3].c_str(), nullptr) * 255.0f);
-  uint32_t b = static_cast<uint32_t>(std::strtof(t[4].c_str(), nullptr) * 255.0f);
+  uint32_t r = static_cast<uint32_t>(parse_float(t[2].c_str()) * 255.0f);
+  uint32_t g = static_cast<uint32_t>(parse_float(t[3].c_str()) * 255.0f);
+  uint32_t b = static_cast<uint32_t>(parse_float(t[4].c_str()) * 255.0f);
   st.cur_obj->colors[idx] = (r << 16) | (g << 8) | b;
 }
 
@@ -307,7 +316,7 @@ static void handle_mesh_weight(ParserState& st, const std::vector<std::string>& 
     w.bone_index[i] = std::strtol(t[2 + i].c_str(), nullptr, 10);
   }
   for (int i = 0; i < 4; ++i) {
-    w.weight[i] = std::strtof(t[6 + i].c_str(), nullptr);
+    w.weight[i] = parse_float(t[6 + i].c_str());
   }
 }
 
@@ -484,26 +493,35 @@ static void parse_node(ParserState& st, const std::vector<std::string>& t) {
         } else if (iequals(t[0], "*MESH_WEIGHTS")) {
           st.sub_tag = 19;
           st.cur_obj->skinned = 1;
+        } else if (iequals(t[0], "*MESH_NORMALS")) {
+          st.sub_tag = 20;
+          st.cur_normal_face = -1;
+          st.cur_normal_vert = 0;
+          // Allocate face_normals if not already allocated
+          if (st.cur_obj->face_count > 0 && !st.cur_obj->face_normals) {
+            st.cur_obj->face_normal_count = st.cur_obj->face_count;
+            st.cur_obj->face_normals = new float[static_cast<size_t>(st.cur_obj->face_count) * 9]();
+          }
         }
       } else if (st.block_tag == 17) {
         if (iequals(t[0], "*LIGHT_COLOR") && t.size() > 3) {
-          st.cur_light->color[0] = std::strtof(t[1].c_str(), nullptr);
-          st.cur_light->color[1] = std::strtof(t[2].c_str(), nullptr);
-          st.cur_light->color[2] = std::strtof(t[3].c_str(), nullptr);
+          st.cur_light->color[0] = parse_float(t[1].c_str());
+          st.cur_light->color[1] = parse_float(t[2].c_str());
+          st.cur_light->color[2] = parse_float(t[3].c_str());
         } else if (iequals(t[0], "*LIGHT_INTENS") && t.size() > 1) {
-          st.cur_light->intensity = std::strtof(t[1].c_str(), nullptr);
+          st.cur_light->intensity = parse_float(t[1].c_str());
         } else if ((iequals(t[0], "*LIGHT_FAR_ATTNSTART") || iequals(t[0], "*LIGHT_ATTNSTART")) && t.size() > 1) {
-          st.cur_light->atten_start = std::strtof(t[1].c_str(), nullptr);
+          st.cur_light->atten_start = parse_float(t[1].c_str());
         } else if ((iequals(t[0], "*LIGHT_FAR_ATTNEND") || iequals(t[0], "*LIGHT_ATTNEND")) && t.size() > 1) {
-          st.cur_light->atten_end = std::strtof(t[1].c_str(), nullptr);
+          st.cur_light->atten_end = parse_float(t[1].c_str());
         } else if (iequals(t[0], "*LIGHT_NEAR_ATTNSTART") && t.size() > 1) {
-          st.cur_light->near_atten_start = std::strtof(t[1].c_str(), nullptr);
+          st.cur_light->near_atten_start = parse_float(t[1].c_str());
         } else if (iequals(t[0], "*LIGHT_NEAR_ATTNEND") && t.size() > 1) {
-          st.cur_light->near_atten_end = std::strtof(t[1].c_str(), nullptr);
+          st.cur_light->near_atten_end = parse_float(t[1].c_str());
         } else if (iequals(t[0], "*LIGHT_HOTSPOT") && t.size() > 1) {
-          st.cur_light->hotspot = 0.5f * std::strtof(t[1].c_str(), nullptr);
+          st.cur_light->hotspot = 0.5f * parse_float(t[1].c_str());
         } else if (iequals(t[0], "*LIGHT_FALLOFF") && t.size() > 1) {
-          st.cur_light->falloff = 0.5f * std::strtof(t[1].c_str(), nullptr);
+          st.cur_light->falloff = 0.5f * parse_float(t[1].c_str());
         }
       } else if (st.block_tag == 2 || st.block_tag == 18) {
         if (st.block_tag == 18) {
@@ -512,16 +530,16 @@ static void parse_node(ParserState& st, const std::vector<std::string>& t) {
           }
           if (!st.light_tm_matches) break;
           if (iequals(t[0], "*TM_ROW2") && t.size() > 3) {
-            float x = std::strtof(t[1].c_str(), nullptr);
-            float y = std::strtof(t[2].c_str(), nullptr);
-            float z = std::strtof(t[3].c_str(), nullptr);
+            float x = parse_float(t[1].c_str());
+            float y = parse_float(t[2].c_str());
+            float z = parse_float(t[3].c_str());
             st.cur_light->tm_row2[0] = y;
             st.cur_light->tm_row2[1] = -x;
             st.cur_light->tm_row2[2] = -z;
           } else if (iequals(t[0], "*TM_POS") && t.size() > 3) {
-            float x = std::strtof(t[1].c_str(), nullptr);
-            float y = std::strtof(t[2].c_str(), nullptr);
-            float z = std::strtof(t[3].c_str(), nullptr);
+            float x = parse_float(t[1].c_str());
+            float y = parse_float(t[2].c_str());
+            float z = parse_float(t[3].c_str());
             st.cur_light->pos[0] = -y;
             st.cur_light->pos[1] = x;
             st.cur_light->pos[2] = z;
@@ -529,26 +547,26 @@ static void parse_node(ParserState& st, const std::vector<std::string>& t) {
         } else {
           if (!st.cur_obj) break;
           if (iequals(t[0], "*TM_ROW0") && t.size() > 3) {
-            handle_tm_row(std::strtof(t[1].c_str(), nullptr),
-                          std::strtof(t[2].c_str(), nullptr),
-                          std::strtof(t[3].c_str(), nullptr),
+            handle_tm_row(parse_float(t[1].c_str()),
+                          parse_float(t[2].c_str()),
+                          parse_float(t[3].c_str()),
                           st.cur_obj->tm_row[1]);
           } else if (iequals(t[0], "*TM_ROW1") && t.size() > 3) {
-            float x = std::strtof(t[1].c_str(), nullptr);
-            float y = std::strtof(t[2].c_str(), nullptr);
-            float z = std::strtof(t[3].c_str(), nullptr);
+            float x = parse_float(t[1].c_str());
+            float y = parse_float(t[2].c_str());
+            float z = parse_float(t[3].c_str());
             st.cur_obj->tm_row[0][0] = y;
             st.cur_obj->tm_row[0][1] = -x;
             st.cur_obj->tm_row[0][2] = -z;
           } else if (iequals(t[0], "*TM_ROW2") && t.size() > 3) {
-            handle_tm_row(std::strtof(t[1].c_str(), nullptr),
-                          std::strtof(t[2].c_str(), nullptr),
-                          std::strtof(t[3].c_str(), nullptr),
+            handle_tm_row(parse_float(t[1].c_str()),
+                          parse_float(t[2].c_str()),
+                          parse_float(t[3].c_str()),
                           st.cur_obj->tm_row[2]);
           } else if (iequals(t[0], "*TM_ROW3") && t.size() > 3) {
-            handle_tm_row(std::strtof(t[1].c_str(), nullptr),
-                          std::strtof(t[2].c_str(), nullptr),
-                          std::strtof(t[3].c_str(), nullptr),
+            handle_tm_row(parse_float(t[1].c_str()),
+                          parse_float(t[2].c_str()),
+                          parse_float(t[3].c_str()),
                           st.cur_obj->tm_row[3]);
           }
         }
@@ -588,6 +606,26 @@ static void parse_node(ParserState& st, const std::vector<std::string>& t) {
           handle_mesh_cface(st, t);
         } else if (st.sub_tag == 19 && iequals(t[0], "*MESH_WEIGHTSVERTEX")) {
           handle_mesh_weight(st, t);
+        } else if (st.sub_tag == 20 && iequals(t[0], "*MESH_FACENORMAL") && t.size() > 1) {
+          st.cur_normal_face = std::strtol(t[1].c_str(), nullptr, 10);
+          st.cur_normal_vert = 0;
+        } else if (st.sub_tag == 20 && iequals(t[0], "*MESH_VERTEXNORMAL") && t.size() > 4) {
+          if (st.cur_obj && st.cur_obj->face_normals &&
+              st.cur_normal_face >= 0 && st.cur_normal_face < st.cur_obj->face_count &&
+              st.cur_normal_vert < 3) {
+            float nx = parse_float(t[2].c_str());
+            float ny = parse_float(t[3].c_str());
+            float nz = parse_float(t[4].c_str());
+            float swz[3];
+            swizzle_vec3(nx, ny, nz, swz);
+            float* dst = &st.cur_obj->face_normals[
+                static_cast<size_t>(st.cur_normal_face) * 9 +
+                static_cast<size_t>(st.cur_normal_vert) * 3];
+            dst[0] = swz[0];
+            dst[1] = swz[1];
+            dst[2] = swz[2];
+            ++st.cur_normal_vert;
+          }
         } else if (st.sub_tag == 11 && iequals(t[0], "*BITMAP") && t.size() > 1) {
           auto& slot = ensure_slot(st, st.current_material_ref);
           store_bitmap(slot, st.current_sub_material, t[1], 0);
@@ -602,19 +640,19 @@ static void parse_node(ParserState& st, const std::vector<std::string>& t) {
         } else if (iequals(t[0], "*UVW_U_OFFSET") && t.size() > 1) {
           auto& mat = ensure_slot(st, st.current_material_ref).mats[st.current_sub_material];
           int idx = current_uv_channel(st);
-          if (idx >= 0) mat.uv_u_offset[idx] = std::strtof(t[1].c_str(), nullptr);
+          if (idx >= 0) mat.uv_u_offset[idx] = parse_float(t[1].c_str());
         } else if (iequals(t[0], "*UVW_V_OFFSET") && t.size() > 1) {
           auto& mat = ensure_slot(st, st.current_material_ref).mats[st.current_sub_material];
           int idx = current_uv_channel(st);
-          if (idx >= 0) mat.uv_v_offset[idx] = std::strtof(t[1].c_str(), nullptr);
+          if (idx >= 0) mat.uv_v_offset[idx] = parse_float(t[1].c_str());
         } else if (iequals(t[0], "*UVW_U_TILING") && t.size() > 1) {
           auto& mat = ensure_slot(st, st.current_material_ref).mats[st.current_sub_material];
           int idx = current_uv_channel(st);
-          if (idx >= 0) mat.uv_u_tiling[idx] = std::strtof(t[1].c_str(), nullptr);
+          if (idx >= 0) mat.uv_u_tiling[idx] = parse_float(t[1].c_str());
         } else if (iequals(t[0], "*UVW_V_TILING") && t.size() > 1) {
           auto& mat = ensure_slot(st, st.current_material_ref).mats[st.current_sub_material];
           int idx = current_uv_channel(st);
-          if (idx >= 0) mat.uv_v_tiling[idx] = std::strtof(t[1].c_str(), nullptr);
+          if (idx >= 0) mat.uv_v_tiling[idx] = parse_float(t[1].c_str());
         } else if (iequals(t[0], "*MAP_CLASS") && t.size() > 1 && iequals(t[1], "RGB Multiply")) {
           st.map_tag = 12;
         } else if (iequals(t[0], "*MAP_SUBNO") && t.size() > 1) {
@@ -640,16 +678,16 @@ static void parse_node(ParserState& st, const std::vector<std::string>& t) {
           st.current_map_subno = std::strtol(t[1].c_str(), nullptr, 10);
         } else if (iequals(t[0], "*UVW_U_OFFSET") && t.size() > 1) {
           int idx = current_uv_channel(st);
-          if (idx >= 0) mat.uv_u_offset[idx] = std::strtof(t[1].c_str(), nullptr);
+          if (idx >= 0) mat.uv_u_offset[idx] = parse_float(t[1].c_str());
         } else if (iequals(t[0], "*UVW_V_OFFSET") && t.size() > 1) {
           int idx = current_uv_channel(st);
-          if (idx >= 0) mat.uv_v_offset[idx] = std::strtof(t[1].c_str(), nullptr);
+          if (idx >= 0) mat.uv_v_offset[idx] = parse_float(t[1].c_str());
         } else if (iequals(t[0], "*UVW_U_TILING") && t.size() > 1) {
           int idx = current_uv_channel(st);
-          if (idx >= 0) mat.uv_u_tiling[idx] = std::strtof(t[1].c_str(), nullptr);
+          if (idx >= 0) mat.uv_u_tiling[idx] = parse_float(t[1].c_str());
         } else if (iequals(t[0], "*UVW_V_TILING") && t.size() > 1) {
           int idx = current_uv_channel(st);
-          if (idx >= 0) mat.uv_v_tiling[idx] = std::strtof(t[1].c_str(), nullptr);
+          if (idx >= 0) mat.uv_v_tiling[idx] = parse_float(t[1].c_str());
         }
       }
       break;
@@ -673,16 +711,16 @@ static void parse_node(ParserState& st, const std::vector<std::string>& t) {
         }
       } else if (iequals(t[0], "*UVW_U_OFFSET") && t.size() > 1) {
         int idx = current_uv_channel(st);
-        if (idx >= 0) mat.uv_u_offset[idx] = std::strtof(t[1].c_str(), nullptr);
+        if (idx >= 0) mat.uv_u_offset[idx] = parse_float(t[1].c_str());
       } else if (iequals(t[0], "*UVW_V_OFFSET") && t.size() > 1) {
         int idx = current_uv_channel(st);
-        if (idx >= 0) mat.uv_v_offset[idx] = std::strtof(t[1].c_str(), nullptr);
+        if (idx >= 0) mat.uv_v_offset[idx] = parse_float(t[1].c_str());
       } else if (iequals(t[0], "*UVW_U_TILING") && t.size() > 1) {
         int idx = current_uv_channel(st);
-        if (idx >= 0) mat.uv_u_tiling[idx] = std::strtof(t[1].c_str(), nullptr);
+        if (idx >= 0) mat.uv_u_tiling[idx] = parse_float(t[1].c_str());
       } else if (iequals(t[0], "*UVW_V_TILING") && t.size() > 1) {
         int idx = current_uv_channel(st);
-        if (idx >= 0) mat.uv_v_tiling[idx] = std::strtof(t[1].c_str(), nullptr);
+        if (idx >= 0) mat.uv_v_tiling[idx] = parse_float(t[1].c_str());
       }
       break;
     }
@@ -700,12 +738,14 @@ static void free_object(Object& o) {
   delete[] o.faces;
   delete[] o.colors;
   delete[] o.mapping_channels;
+  delete[] o.face_normals;
   o.verts = nullptr;
   o.weights = nullptr;
   o.uvs = nullptr;
   o.faces = nullptr;
   o.colors = nullptr;
   o.mapping_channels = nullptr;
+  o.face_normals = nullptr;
 }
 
 }  // namespace

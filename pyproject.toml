@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "opennova-tools"
+version = "0.1.0"
+description = "Standalone OpenNova tools (importer)"
+readme = "README.md"
+packages = [{include = "apps"}]
+
+[tool.poetry.dependencies]
+python = "~3.11"
+bpy = ">=4.0"
+
+[tool.poetry.scripts]
+onimport = "apps.importer.__main__:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

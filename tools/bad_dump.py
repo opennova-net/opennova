@@ -101,7 +101,7 @@ def _find_lib() -> str:
     if not path.is_file():
         raise FileNotFoundError(
             f"Native library not found at {path}. "
-            f"Run scripts/build_blender_libs.sh to build it."
+            f"Run scripts/package_addon.sh to build it."
         )
     return str(path)
 

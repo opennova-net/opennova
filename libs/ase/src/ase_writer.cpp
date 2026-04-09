@@ -417,7 +417,9 @@ private:
     line("\t}");
   }
 
-  // Compute and write *MESH_NORMALS block (face normals + per-face vertex normals)
+  // Write *MESH_NORMALS block.
+  // If obj.face_normals is provided, use pre-computed per-face-vertex normals.
+  // Otherwise compute from geometry + smoothing groups.
   void write_normals(const Object& obj) {
     struct Vec3 { float x, y, z; };
 
@@ -436,7 +438,7 @@ private:
       return {obj.verts[idx*3], obj.verts[idx*3+1], obj.verts[idx*3+2]};
     };
 
-    // Compute face normals
+    // Compute face normals (always needed for MESH_FACENORMAL lines)
     std::vector<Vec3> face_normals(obj.face_count);
     for (int i = 0; i < obj.face_count; ++i) {
       const Face& f = obj.faces[i];
@@ -446,16 +448,28 @@ private:
       face_normals[i] = normalize(cross(sub(v1, v0), sub(v2, v0)));
     }
 
-    // Build per-vertex face adjacency list
-    std::vector<std::vector<int>> vert_faces(obj.vert_count);
-    for (int i = 0; i < obj.face_count; ++i) {
-      const Face& f = obj.faces[i];
-      for (int j = 0; j < 3; ++j) {
-        int vi = f.vert[j];
-        if (vi >= 0 && vi < obj.vert_count)
-          vert_faces[vi].push_back(i);
+    const bool has_pre = (obj.face_normals && obj.face_normal_count == obj.face_count);
+
+    // Build per-vertex face adjacency only if computing from smoothing groups
+    std::vector<std::vector<int>> vert_faces;
+    if (!has_pre) {
+      vert_faces.resize(obj.vert_count);
+      for (int i = 0; i < obj.face_count; ++i) {
+        const Face& f = obj.faces[i];
+        for (int j = 0; j < 3; ++j) {
+          int vi = f.vert[j];
+          if (vi >= 0 && vi < obj.vert_count)
+            vert_faces[vi].push_back(i);
+        }
       }
     }
+
+    // Use high precision for vertex normals to preserve float32 fidelity.
+    auto hp3 = [](float x, float y, float z) -> std::string {
+      char buf[128];
+      std::snprintf(buf, sizeof(buf), "%.9g\t%.9g\t%.9g", x, y, z);
+      return buf;
+    };
 
     line("\t\t*MESH_NORMALS {");
     for (int i = 0; i < obj.face_count; ++i) {
@@ -466,12 +480,13 @@ private:
                     i, p3(fn.x, fn.y, fn.z).c_str());
       line(buf);
 
-      // Three vertex normals for this face
       for (int j = 0; j < 3; ++j) {
         int vi = f.vert[j];
         Vec3 vn;
-        if (f.smoothing_mask != 0 && vi >= 0 && vi < obj.vert_count) {
-          // Average normals of adjacent faces sharing smoothing group
+        if (has_pre) {
+          const float* pn = &obj.face_normals[i * 9 + j * 3];
+          vn = {pn[0], pn[1], pn[2]};
+        } else if (f.smoothing_mask != 0 && vi >= 0 && vi < obj.vert_count) {
           float sx = 0, sy = 0, sz = 0;
           for (int adj : vert_faces[vi]) {
             if (obj.faces[adj].smoothing_mask & f.smoothing_mask) {
@@ -480,14 +495,13 @@ private:
               sz += face_normals[adj].z;
             }
           }
-          Vec3 avg = {sx, sy, sz};
-          vn = normalize(avg);
+          vn = normalize(Vec3{sx, sy, sz});
         } else {
-          // No smoothing group — use face normal
           vn = fn;
         }
+        // Use high precision for vertex normals to ensure lossless float32 roundtrip
         std::snprintf(buf, sizeof(buf), "\t\t\t\t*MESH_VERTEXNORMAL %d\t%s",
-                      vi, p3(vn.x, vn.y, vn.z).c_str());
+                      vi, (has_pre ? hp3(vn.x, vn.y, vn.z) : p3(vn.x, vn.y, vn.z)).c_str());
         line(buf);
       }
     }

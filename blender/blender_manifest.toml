@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
-id = "novalogic_importer"
+id = "opennova_blender"
 version = "0.0.1"
-name = "Novalogic 3DI Importer/Exporter"
-tagline = "Import Novalogic 3D models (.3di, .bad, .adm) and Export ASE files"
+name = "OpenNova Blender Addon"
+tagline = "Export Novalogic ASE files and animations; import Mixamo FBX for animation workflow"
 maintainer = "Taylor Finnell <noreply@anthropic.com>"
 type = "add-on"
 

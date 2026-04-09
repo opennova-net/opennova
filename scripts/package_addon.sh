@@ -75,9 +75,9 @@ fi
 mkdir -p "$DIST_DIR"
 
 if [[ -n "$VERSION" ]]; then
-    ZIP_NAME="novalogic_importer-v${VERSION}.zip"
+    ZIP_NAME="opennova_blender-v${VERSION}.zip"
 else
-    ZIP_NAME="novalogic_importer.zip"
+    ZIP_NAME="opennova_blender.zip"
 fi
 
 echo "=== Packaging $ZIP_NAME ==="

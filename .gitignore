@@ -33,6 +33,13 @@ CMakeFiles/
 cmake_install.cmake
 Makefile
 compile_commands.json
+Testing/Temporary/
+
+# PyInstaller
+*.spec
+
+# Runtime logs
+*.log
 
 # Blender addon native libs and wheels (built/downloaded artifacts)
 blender/lib/**/*.so
@@ -42,6 +49,7 @@ blender/wheels/
 
 # Shared library build directories
 build-*/
+build_*/
 dist/
 
 # OS files

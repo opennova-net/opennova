@@ -8,7 +8,7 @@
 namespace ase {
 
 struct WriteOptions {
-  int precision = 4;  // float decimal places
+  int precision = 8;  // float decimal places (8 needed for int16/256 roundtrip)
 };
 
 // Write a Document to an ASE file. Returns true on success.

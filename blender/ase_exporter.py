@@ -12,6 +12,7 @@ produces the final .ase file.
 
 from __future__ import annotations
 
+import ctypes
 import bpy
 import bmesh
 import math
@@ -260,6 +261,10 @@ class AseExporter:
 
             # Phase 4: Write via C library
             ase_ffi.write_file(filepath, doc)
+            # Clear Python-allocated face_normals before C-side free
+            for i in range(doc.object_count):
+                doc.objects[i].face_normals = None
+                doc.objects[i].face_normal_count = 0
             ase_ffi.free_document(doc)
 
             # Phase 5: Save texture files after the ASE is written
@@ -272,7 +277,8 @@ class AseExporter:
             for lod_root in lod_extra_roots:
                 lod_idx = lod_root["_lod_index"]
                 stem, ext = os.path.splitext(filepath)
-                lod_filepath = f"{stem}_lod{lod_idx}{ext}"
+                is_bullet = lod_root.name.endswith("_BulletLOD")
+                lod_filepath = f"{stem}_bullet{ext}" if is_bullet else f"{stem}_lod{lod_idx}{ext}"
 
                 lod_mesh_objects = [o for o in all_mesh_objects
                                     if self._is_descendant_of(o, lod_root)]
@@ -286,8 +292,13 @@ class AseExporter:
                 lod_total = len(lod_mesh_objects)
                 lod_doc_mats = math.ceil(total_materials / self.SUBS_PER_SLOT) if total_materials > 0 else 0
                 lod_doc = ase_ffi.create_document(lod_total, lod_doc_mats, 0)
-                lod_doc.flags = 0
-                lod_doc.skinned_flags = 0
+                # Bullet collision LODs must be exported as non-skinned.
+                # OED's ConvertToInternalSkinned path ignores "~attach" markers
+                # and derives attach points from digit/node-id objects, which
+                # corrupts CXLT/COBJ for collision-only data (e.g. US01).
+                lod_has_skinned = has_skinned and not is_bullet
+                lod_doc.flags = 1 if lod_has_skinned else 0
+                lod_doc.skinned_flags = 1 if lod_has_skinned else 0
 
                 if self.include_materials:
                     self._populate_materials(lod_doc)
@@ -296,6 +307,9 @@ class AseExporter:
                     self._populate_geometry(lod_doc.objects[li], mesh_obj)
 
                 ase_ffi.write_file(lod_filepath, lod_doc)
+                for li2 in range(lod_doc.object_count):
+                    lod_doc.objects[li2].face_normals = None
+                    lod_doc.objects[li2].face_normal_count = 0
                 ase_ffi.free_document(lod_doc)
 
                 print(f"ASE Export: LOD {lod_idx} export completed")
@@ -383,8 +397,14 @@ class AseExporter:
             diffuse_image = None
             if material:
                 diffuse_bitmap = material.get("ase_diffuse_bitmap", "")
-                if not diffuse_bitmap and material.use_nodes and material.node_tree:
-                    diffuse_bitmap, diffuse_image = self._find_bitmap_from_nodes(material)
+            # Always get the image from the node tree regardless of whether
+            # ase_diffuse_bitmap provides the name — the stored name takes priority.
+            if material and material.use_nodes and material.node_tree:
+                found_name, found_image = self._find_bitmap_from_nodes(material)
+                if found_image:
+                    diffuse_image = found_image
+                if not diffuse_bitmap and found_name:
+                    diffuse_bitmap = found_name
 
             # Resolve detail bitmap from node tree (MixRGB Multiply)
             detail_bitmap = ""
@@ -494,11 +514,12 @@ class AseExporter:
             ase_ffi.alloc_object(ase_obj, vert_count, uv_count, face_count,
                                 color_count, weight_count)
 
-            # Metadata
-            export_name = self._export_name(obj.name)
+            # Metadata — prefer nl_ase_name (preserves original pre-dedup name)
+            raw_name = obj.get("nl_ase_name", obj.name)
+            export_name = self._export_name(raw_name)
             ase_obj.name = self.fixup_name(export_name).encode('utf-8')[:63]
             if obj.parent:
-                parent_name = self._export_name(obj.parent.name)
+                parent_name = self._export_name(obj.parent.get("nl_ase_name", obj.parent.name))
                 ase_obj.parent_name = self.fixup_name(parent_name).encode('utf-8')[:63]
             ase_obj.node_id = -1
             if obj.name.startswith("BN") and len(obj.name) >= 4 and obj.name[2:4].isdigit():
@@ -506,6 +527,9 @@ class AseExporter:
                     ase_obj.node_id = int(obj.name[2:4]) - 1
                 except ValueError:
                     pass
+            # ASE writer emits *MESH_WEIGHTS only when object.skinned is set.
+            # Without this flag, weighted meshes silently lose skin data.
+            ase_obj.skinned = 1 if weight_count > 0 else 0
             # Compute which Multi/Sub-Object slot this object references.
             # material_ref selects the top-level slot; face.material_id selects
             # the submaterial within it.
@@ -514,7 +538,26 @@ class AseExporter:
                 ase_obj.material_ref = global_idx // self.SUBS_PER_SLOT
             else:
                 ase_obj.material_ref = 0
-            self._set_object_tm(ase_obj, obj.matrix_world)
+
+            # Build per-slot material_id lookup for multi-material meshes
+            _slot_mat_ids = []
+            for slot_mat in obj.data.materials:
+                if slot_mat is not None:
+                    _slot_mat_ids.append(
+                        self.material_keeper.get_global_index(slot_mat) % self.SUBS_PER_SLOT)
+                else:
+                    _slot_mat_ids.append(0)
+            # Legacy OED keeps certain center markers as "no matrix" (all-zero
+            # axis rows), which maps to PANM matrix index 0xFF.
+            if bool(obj.get("oed_zero_axis", False)):
+                for r in range(3):
+                    for c in range(3):
+                        ase_obj.tm_row[r][c] = 0.0
+                ase_obj.tm_row[3][0] = obj.matrix_world.translation.x * self.scale
+                ase_obj.tm_row[3][1] = obj.matrix_world.translation.y * self.scale
+                ase_obj.tm_row[3][2] = obj.matrix_world.translation.z * self.scale
+            else:
+                self._set_object_tm(ase_obj, obj.matrix_world)
 
             # Vertices (world-space, scaled)
             transform = obj.matrix_world
@@ -529,14 +572,6 @@ class AseExporter:
                        if hasattr(temp_mesh, 'attributes') else None)
             sg_is_face = sg_attr and sg_attr.domain == 'FACE'
 
-            # Compute local submaterial index once (all faces in a mesh share
-            # the same material — scene_builder creates one mesh per part+material).
-            if obj.data.materials and obj.data.materials[0] is not None:
-                local_mat_id = self.material_keeper.get_global_index(
-                    obj.data.materials[0]) % self.SUBS_PER_SLOT
-            else:
-                local_mat_id = 0
-
             for i, tri in enumerate(temp_mesh.loop_triangles):
                 face = ase_obj.faces[i]
 
@@ -550,8 +585,14 @@ class AseExporter:
                     face.vert[2] = int(tri.vertices[2])
 
                 # Map face to the local submaterial index within its
-                # Multi/Sub-Object slot.  Each mesh has one material slot.
-                face.material_id = local_mat_id
+                # Multi/Sub-Object slot, supporting multi-material meshes.
+                slot_idx = tri.material_index if hasattr(tri, 'material_index') else 0
+                if slot_idx < len(_slot_mat_ids):
+                    face.material_id = _slot_mat_ids[slot_idx]
+                elif _slot_mat_ids:
+                    face.material_id = _slot_mat_ids[0]
+                else:
+                    face.material_id = 0
 
                 if sg_is_face:
                     face.smoothing_mask = sg_attr.data[i].value
@@ -600,9 +641,64 @@ class AseExporter:
                     ase_obj.weights[i].bone_index[j] = influences[j]
                     ase_obj.weights[i].weight[j] = wts[j]
 
+            # Pre-computed per-face-vertex normals from custom split normals.
+            # These bypass smoothing-group recomputation in the vertex builder,
+            # giving exact normal values from the original IR.
+            self._populate_face_normals(ase_obj, temp_mesh, neg_scale, obj.matrix_world)
+
         finally:
-            bm.free()
+            if bm is not None:
+                bm.free()
             bpy.data.meshes.remove(temp_mesh)
+
+    def _populate_face_normals(self, ase_obj, temp_mesh, neg_scale, world_matrix):
+        """Populate pre-computed per-face-vertex normals on the ase_Object.
+
+        Reads Blender's custom split normals (which carry the original IR
+        normals through the roundtrip) and stores them in Blender world space
+        (same as vertex positions). The ASE parser's swizzle_vec3 will handle
+        the coordinate conversion to internal space when reading back.
+        """
+        face_count = len(temp_mesh.loop_triangles)
+        if face_count == 0:
+            return
+
+        # Check if custom split normals are available
+        has_custom = hasattr(temp_mesh, 'has_custom_normals') and temp_mesh.has_custom_normals
+        if not has_custom:
+            return
+
+        # Get the rotation part of the world matrix for transforming normals
+        rot = world_matrix.to_3x3().normalized()
+
+        # Allocate the float array: face_count * 9 floats
+        FloatArray = ctypes.c_float * (face_count * 9)
+        normals_array = FloatArray()
+
+        for i, tri in enumerate(temp_mesh.loop_triangles):
+            # Match winding reversal with face vertex order
+            loops = list(reversed(tri.loops)) if neg_scale else list(tri.loops)
+
+            for j, loop_idx in enumerate(loops):
+                loop = temp_mesh.loops[loop_idx]
+                # Get the custom split normal in object space, then world space
+                n = Vector(loop.normal)
+                n = rot @ n
+                n.normalize()
+
+                # Write in Blender world space (no swizzle — parser handles it)
+                base = i * 9 + j * 3
+                normals_array[base + 0] = n.x
+                normals_array[base + 1] = n.y
+                normals_array[base + 2] = n.z
+
+        # Store on the ase_Object — keep a reference to prevent GC
+        ase_obj.face_normal_count = face_count
+        ase_obj.face_normals = ctypes.cast(normals_array, ctypes.POINTER(ctypes.c_float))
+        # Prevent garbage collection of the backing array
+        if not hasattr(self, '_face_normal_arrays'):
+            self._face_normal_arrays = []
+        self._face_normal_arrays.append(normals_array)
 
     def _collect_uv_data(self, temp_mesh, neg_scale):
         """Collect deduplicated UV coordinates and per-face UV indices.
@@ -713,8 +809,24 @@ class AseExporter:
                 except ValueError:
                     pass
 
-        if not bone_number_map:
-            return []
+        def _group_bone_index(group):
+            # Preferred mapping: armature BN## names.
+            if group.name in bone_number_map:
+                return bone_number_map[group.name]
+            # Fallback for synthetic/renamed rigs: explicit index cached
+            # when binding mesh weights.
+            idx = None
+            if hasattr(group, "get"):
+                idx = group.get("oed_bone_index", None)
+            if isinstance(idx, (int, float)):
+                return int(idx)
+            # Last fallback: parse BN## directly from group name.
+            if group.name.startswith("BN") and len(group.name) >= 4:
+                try:
+                    return int(group.name[2:4]) - 1
+                except ValueError:
+                    return None
+            return None
 
         result = []
         weighted_count = 0
@@ -725,10 +837,13 @@ class AseExporter:
             # Collect all vertex group influences for this vertex
             vertex_influences = []
             for group in obj.vertex_groups:
+                bone_idx = _group_bone_index(group)
+                if bone_idx is None or bone_idx < 0:
+                    continue
                 try:
                     w = group.weight(vertex.index)
-                    if w > 0 and group.name in bone_number_map:
-                        vertex_influences.append((bone_number_map[group.name], w))
+                    if w > 0:
+                        vertex_influences.append((bone_idx, w))
                 except RuntimeError:
                     continue
 
@@ -890,12 +1005,18 @@ class AseExporter:
         obj_eval = obj.evaluated_get(depsgraph)
         mesh_eval = obj_eval.data
 
-        bm = bmesh.new()
-        bm.from_mesh(mesh_eval)
-        bmesh.ops.triangulate(bm, faces=bm.faces)
-
-        temp_mesh = bpy.data.meshes.new("temp_export")
-        bm.to_mesh(temp_mesh)
+        bm = None
+        if all(len(poly.vertices) == 3 for poly in mesh_eval.polygons):
+            # Preserve original polygon/loop ordering when the mesh is already
+            # triangulated. Re-triangulating with bmesh can reshuffle triangles
+            # and shift face-normal insertion order in OED collision export.
+            temp_mesh = mesh_eval.copy()
+        else:
+            bm = bmesh.new()
+            bm.from_mesh(mesh_eval)
+            bmesh.ops.triangulate(bm, faces=bm.faces)
+            temp_mesh = bpy.data.meshes.new("temp_export")
+            bm.to_mesh(temp_mesh)
         temp_mesh.calc_loop_triangles()
         self._ensure_split_normals(temp_mesh)
 
@@ -1286,7 +1407,7 @@ class AseExporter:
                 orig_format = image.file_format
 
                 image.filepath_raw = dest
-                image.file_format = 'TARGA'
+                image.file_format = 'TARGA_RAW'  # uncompressed — avoids RLE+top-origin issues in stb_image
                 image.save()
 
                 # Restore original values

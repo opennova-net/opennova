@@ -25,6 +25,14 @@ def render_space(pos: Vector) -> Vector:
     return Vector((-pos[0], -pos[2], pos[1]))
 
 
+def inverse_render_space(pos: Vector) -> Vector:
+    """Convert Blender space back to engine render coords.
+
+    Inverse of render_space: Blender (bx, by, bz) -> engine (-bx, bz, -by)
+    """
+    return Vector((-pos[0], pos[2], -pos[1]))
+
+
 def bone_space(pos: Vector) -> Vector:
     """Convert bone position from Y-up to Blender Z-up.
 

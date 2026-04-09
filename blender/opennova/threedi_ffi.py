@@ -230,17 +230,44 @@ class ThreediIRCollisionVolume(ctypes.Structure):
     ]
 
 
+class ThreediIRCollisionFace(ctypes.Structure):
+    _fields_ = [
+        ("vert_index",      ctypes.c_int16 * 3),
+        ("material_flags",  ctypes.c_uint32),
+        ("poly_type",       ctypes.c_uint8),
+    ]
+
+
+class ThreediIRCollisionObject(ctypes.Structure):
+    _fields_ = [
+        ("num_vertices",            ctypes.c_int32),
+        ("num_faces",               ctypes.c_int32),
+        ("parent_subobject_index",  ctypes.c_int32),
+        ("offset",                  ctypes.c_float * 3),
+    ]
+
+
+class ThreediIRCollisionTranslation(ctypes.Structure):
+    _fields_ = [("translation", ctypes.c_float * 3)]
+
+
 class ThreediIRCollision(ctypes.Structure):
     _fields_ = [
-        ("model_min",    ctypes.c_float * 3),
-        ("model_max",    ctypes.c_float * 3),
-        ("model_center", ctypes.c_float * 3),
-        ("vertices",     ctypes.POINTER(ThreediIRCollisionVertex)),
-        ("vertex_count", ctypes.c_size_t),
-        ("planes",       ctypes.POINTER(ThreediIRCollisionPlane)),
-        ("plane_count",  ctypes.c_size_t),
-        ("volumes",      ctypes.POINTER(ThreediIRCollisionVolume)),
-        ("volume_count", ctypes.c_size_t),
+        ("model_min",          ctypes.c_float * 3),
+        ("model_max",          ctypes.c_float * 3),
+        ("model_center",       ctypes.c_float * 3),
+        ("vertices",           ctypes.POINTER(ThreediIRCollisionVertex)),
+        ("vertex_count",       ctypes.c_size_t),
+        ("planes",             ctypes.POINTER(ThreediIRCollisionPlane)),
+        ("plane_count",        ctypes.c_size_t),
+        ("volumes",            ctypes.POINTER(ThreediIRCollisionVolume)),
+        ("volume_count",       ctypes.c_size_t),
+        ("faces",              ctypes.POINTER(ThreediIRCollisionFace)),
+        ("face_count",         ctypes.c_size_t),
+        ("objects",            ctypes.POINTER(ThreediIRCollisionObject)),
+        ("object_count",       ctypes.c_size_t),
+        ("translations",       ctypes.POINTER(ThreediIRCollisionTranslation)),
+        ("translation_count",  ctypes.c_size_t),
     ]
 
 
@@ -295,23 +322,6 @@ class ThreediIROcclusion(ctypes.Structure):
     ]
 
 
-# --- LOD ---
-
-class ThreediIRLod(ctypes.Structure):
-    _fields_ = [
-        ("threshold",            ctypes.c_int32),
-        ("declared_part_count",  ctypes.c_int32),
-        ("vertices",             ctypes.POINTER(ThreediIRVertex)),
-        ("vertex_count",    ctypes.c_size_t),
-        ("indices",         ctypes.POINTER(ctypes.c_uint16)),
-        ("index_count",     ctypes.c_size_t),
-        ("primitives",      ctypes.POINTER(ThreediIRPrimitive)),
-        ("primitive_count", ctypes.c_size_t),
-        ("parts",           ctypes.POINTER(ThreediIRPart)),
-        ("part_count",      ctypes.c_size_t),
-    ]
-
-
 # --- Animation ---
 
 class ThreediIRTransform(ctypes.Structure):
@@ -339,6 +349,25 @@ class ThreediIRPartAnimation(ctypes.Structure):
         ("scale_y",         ThreediIRTransform),
         ("scale_z",         ThreediIRTransform),
         ("translation",     ThreediIRTransform),
+    ]
+
+
+# --- LOD ---
+
+class ThreediIRLod(ctypes.Structure):
+    _fields_ = [
+        ("threshold",            ctypes.c_int32),
+        ("declared_part_count",  ctypes.c_int32),
+        ("vertices",             ctypes.POINTER(ThreediIRVertex)),
+        ("vertex_count",    ctypes.c_size_t),
+        ("indices",         ctypes.POINTER(ctypes.c_uint16)),
+        ("index_count",     ctypes.c_size_t),
+        ("primitives",      ctypes.POINTER(ThreediIRPrimitive)),
+        ("primitive_count", ctypes.c_size_t),
+        ("parts",           ctypes.POINTER(ThreediIRPart)),
+        ("part_count",      ctypes.c_size_t),
+        ("part_animations",      ctypes.POINTER(ThreediIRPartAnimation)),
+        ("part_animation_count", ctypes.c_size_t),
     ]
 
 
@@ -372,10 +401,8 @@ class ThreediModelIR(ctypes.Structure):
         ("userpoint_count", ctypes.c_size_t),
 
         ("collision", ctypes.POINTER(ThreediIRCollision)),
+        ("collision_lod", ctypes.c_int32),
         ("occlusion", ctypes.POINTER(ThreediIROcclusion)),
-
-        ("part_animations",      ctypes.POINTER(ThreediIRPartAnimation)),
-        ("part_animation_count", ctypes.c_size_t),
 
         ("control_registers",      ctypes.POINTER(ThreediIRControlRegister)),
         ("control_register_count", ctypes.c_size_t),

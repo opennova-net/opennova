@@ -168,6 +168,12 @@ def _bind():
     lib.tdp_write_3da.argtypes = [ctypes.c_char_p, ctypes.POINTER(TdpProject)]
     lib.tdp_from_ir.restype = ctypes.c_int
     lib.tdp_from_ir.argtypes = [ctypes.POINTER(ThreediModelIR), ctypes.POINTER(TdpProject)]
+    lib.tdp_alloc_materials.restype = None
+    lib.tdp_alloc_materials.argtypes = [ctypes.POINTER(TdpProject), ctypes.c_size_t]
+    lib.tdp_alloc_part_anims.restype = None
+    lib.tdp_alloc_part_anims.argtypes = [ctypes.POINTER(TdpLod), ctypes.c_size_t]
+    lib.tdp_alloc_lights.restype = None
+    lib.tdp_alloc_lights.argtypes = [ctypes.POINTER(TdpLod), ctypes.c_size_t]
     _bound = True
 
 
@@ -217,8 +223,38 @@ def tdp_from_ir(ir) -> TdpProject:
     return proj
 
 
+def init_tdp() -> TdpProject:
+    """Create a zero-initialized TdpProject."""
+    _bind()
+    lib = load_lib()
+    proj = TdpProject()
+    lib.tdp_init(ctypes.byref(proj))
+    return proj
+
+
 def free_tdp(proj) -> None:
     """Free all C-side allocations inside a TdpProject."""
     _bind()
     lib = load_lib()
     lib.tdp_free(ctypes.byref(proj))
+
+
+def alloc_materials(proj, count: int) -> None:
+    """Allocate (or reallocate) the materials array in a TdpProject."""
+    _bind()
+    lib = load_lib()
+    lib.tdp_alloc_materials(ctypes.byref(proj), count)
+
+
+def alloc_part_anims(lod, count: int) -> None:
+    """Allocate (or reallocate) the part_anims array in a TdpLod."""
+    _bind()
+    lib = load_lib()
+    lib.tdp_alloc_part_anims(ctypes.byref(lod), count)
+
+
+def alloc_lights(lod, count: int) -> None:
+    """Allocate (or reallocate) the lights array in a TdpLod."""
+    _bind()
+    lib = load_lib()
+    lib.tdp_alloc_lights(ctypes.byref(lod), count)

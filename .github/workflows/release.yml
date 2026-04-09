@@ -20,11 +20,9 @@ jobs:
         shell: bash
         run: scripts/build.sh
 
-  release:
+  package-addon:
     runs-on: ubuntu-latest
     needs: [test]
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,8 +34,50 @@ jobs:
       - name: Package addon
         run: scripts/package_addon.sh --version "${GITHUB_REF#refs/tags/v}"
 
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova_blender
+          path: dist/*.zip
+
+  package-importer:
+    runs-on: windows-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Package importer
+        shell: pwsh
+        run: scripts/package_importer_windows.ps1
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova_importer
+          path: dist/onimport.exe
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [package-addon, package-importer]
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.zip
+          files: |
+            dist/*.zip
+            dist/onimport.exe
           generate_release_notes: true
