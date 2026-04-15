@@ -1,0 +1,76 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="OpenNova"
+config/version="0.0.6"
+run/main_scene="res://modtools/terrain/terrain_editor.tscn"
+config/features=PackedStringArray("4.6", "Forward Plus")
+boot_splash/bg_color=Color(0.08, 0.09, 0.12, 1)
+boot_splash/show_image=false
+config/icon="res://icon.svg"
+run/main_scene.runtime_game="res://game/main_game.tscn"
+
+[display]
+
+window/vsync/vsync_mode=0
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gut/plugin.cfg")
+
+[rendering]
+
+rendering_device/driver.windows="d3d12"
+environment/defaults/default_clear_color=Color(0.08, 0.09, 0.12, 1)
+
+[shader_globals]
+
+opennova_fill_light={
+"type": "vec3",
+"value": Vector3(0.3, 0.3, 0.35)
+}
+opennova_sun_light={
+"type": "vec3",
+"value": Vector3(0.8, 0.75, 0.65)
+}
+opennova_sky_ambient={
+"type": "vec3",
+"value": Vector3(0.4, 0.45, 0.55)
+}
+opennova_sun_direction={
+"type": "vec3",
+"value": Vector3(0, 0.70710677, 0.70710677)
+}
+opennova_fog_color={
+"type": "vec3",
+"value": Vector3(0.5, 0.6, 0.8)
+}
+opennova_fog_start={
+"type": "float",
+"value": 30000.0
+}
+opennova_fog_end={
+"type": "float",
+"value": 100000.0
+}
+opennova_fog_type={
+"type": "int",
+"value": 1
+}
+opennova_wind_sway_amount={
+"type": "float",
+"value": 1.0
+}
+opennova_wind_sway_phase={
+"type": "float",
+"value": 0.0
+}

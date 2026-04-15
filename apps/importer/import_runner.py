@@ -40,6 +40,22 @@ def _export_ase(output_dir: str, name: str) -> None:
     log.info("Wrote ASE: %s", ase_path)
 
 
+def _export_glb(output_dir: str, name: str) -> None:
+    """Export the current bpy scene to a glTF 2.0 binary (.glb) in output_dir."""
+    import bpy
+    glb_path = os.path.join(output_dir, name + ".glb")
+    bpy.ops.export_scene.gltf(filepath=glb_path, export_format="GLB")
+    log.info("Wrote GLB: %s", glb_path)
+
+
+def _export_fbx(output_dir: str, name: str) -> None:
+    """Export the current bpy scene to FBX in output_dir."""
+    import bpy
+    fbx_path = os.path.join(output_dir, name + ".fbx")
+    bpy.ops.export_scene.fbx(filepath=fbx_path)
+    log.info("Wrote FBX: %s", fbx_path)
+
+
 
 def _import_basic_model(
     base_dir: str,
@@ -55,6 +71,8 @@ def _import_basic_model(
     output_name: str = "",
     write_ase: bool = True,
     write_3dp: bool = True,
+    write_glb: bool = False,
+    write_fbx: bool = False,
 ) -> bool:
     """Import a single weapon/item via the C IR pipeline and write .ase + .3dp."""
     import bpy
@@ -168,6 +186,10 @@ def _import_basic_model(
             project_dir = os.path.join(output_dir, export_name)
             if write_ase:
                 _export_ase(project_dir, export_name)
+            if write_glb:
+                _export_glb(project_dir, export_name)
+            if write_fbx:
+                _export_fbx(project_dir, export_name)
             blend_path = os.path.join(project_dir, export_name + ".blend")
             log.debug("[CKPT] save_as_mainfile start (%s)", blend_path)
             for _h in log.root.handlers: _h.flush()
@@ -191,6 +213,8 @@ def run_import(
     import_lights: bool = True,
     write_ase: bool = True,
     write_3dp: bool = True,
+    write_glb: bool = False,
+    write_fbx: bool = False,
 ) -> bool:
     """Import a single weapon/item and produce .ase + .3dp files.
 
@@ -217,6 +241,8 @@ def run_import(
             import_lights=import_lights,
             write_ase=write_ase,
             write_3dp=write_3dp,
+            write_glb=write_glb,
+            write_fbx=write_fbx,
         )
     except Exception as exc:
         log.error("import failed: %s", exc, exc_info=True)
@@ -248,11 +274,21 @@ def run_loose_import(
     threedi_path: str,
     output_dir: str,
     output_stem: str | None = None,
+    *,
+    asset_base_dir: str | None = None,
+    import_collisions: bool = True,
+    import_occlusion: bool = True,
+    import_lights: bool = True,
+    write_ase: bool = True,
+    write_3dp: bool = True,
+    write_glb: bool = False,
+    write_fbx: bool = False,
 ) -> bool:
     """Import a standalone .3di file (no DEF lookup required).
 
-    Produces .ase + .3dp/.3da in output_dir.
+    Produces .ase + .3dp/.3da + .blend in output_dir.
     output_stem overrides the output filename stem (default: derived from threedi_path).
+    asset_base_dir overrides the texture/material search root (default: parent of threedi_path).
     """
     _setup_blender_package()
 
@@ -267,7 +303,7 @@ def run_loose_import(
     os.makedirs(output_dir, exist_ok=True)
     bpy_session.new_scene()
 
-    base_dir = str(Path(threedi_path).parent)
+    base_dir = asset_base_dir or str(Path(threedi_path).parent)
     name = output_stem or Path(threedi_path).stem
 
     ir = read_model_ir(threedi_path)
@@ -275,11 +311,11 @@ def run_loose_import(
     try:
         with AssetResolver(base_dir) as resolver:
             builder = BlenderSceneBuilder(ir, resolver=resolver,
-                                          import_collisions=True,
-                                          import_occlusion=True,
-                                          import_lights=True)
+                                          import_collisions=import_collisions,
+                                          import_occlusion=import_occlusion,
+                                          import_lights=import_lights)
             result = builder.build_basic_scene(name)
-            if result:
+            if result and write_3dp:
                 _write_3dp_from_ir(
                     ir,
                     os.path.join(output_dir, name + ".3dp"),
@@ -291,9 +327,17 @@ def run_loose_import(
         free_model_ir(ir)
 
     if result:
-        ase_path = os.path.join(output_dir, name + ".ase")
-        AseExporter().export_scene(bpy.context.scene, ase_path)
-        log.info("Wrote ASE: %s", ase_path)
+        if write_ase:
+            ase_path = os.path.join(output_dir, name + ".ase")
+            AseExporter().export_scene(bpy.context.scene, ase_path)
+            log.info("Wrote ASE: %s", ase_path)
+        if write_glb:
+            _export_glb(output_dir, name)
+        if write_fbx:
+            _export_fbx(output_dir, name)
+        blend_path = os.path.join(output_dir, name + ".blend")
+        bpy.ops.wm.save_as_mainfile(filepath=blend_path)
+        log.info("Wrote blend: %s", blend_path)
 
     return bool(result)
 

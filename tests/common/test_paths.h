@@ -4,6 +4,8 @@
 #ifndef TEST_PATHS_H
 #define TEST_PATHS_H
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 

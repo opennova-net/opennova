@@ -1,0 +1,24 @@
+[gd_scene format=3 uid="uid://dqiq0mn3kghyi"]
+
+[ext_resource type="NovaTerrainData" uid="uid://llim506ipe7g" path="res://game/assets/terrains/Dvxi5/Dvxi5.trn" id="1_h5ihh"]
+[ext_resource type="Script" uid="uid://bh7gceflcrkfx" path="res://engine/fly_camera.gd" id="2_io4ac"]
+[ext_resource type="PackedScene" path="res://engine/ui/fps_label.tscn" id="3_fps"]
+
+[node name="MainGame" type="Node3D" unique_id=1969900999]
+
+[node name="NovaTerrain" type="NovaTerrain" parent="." unique_id=1162114807]
+terrain_data = ExtResource("1_h5ihh")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1908144657]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 71.472435, 0)
+script = ExtResource("2_io4ac")
+
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1222701923]
+
+[node name="FpsLabel" parent="HUD" unique_id=788385088 instance=ExtResource("3_fps")]
+layout_mode = 3
+
+[node name="Label" type="Label" parent="HUD" unique_id=65127373]
+offset_right = 40.0
+offset_bottom = 23.0
+text = "Placeholder scene for game runtime"

@@ -58,3 +58,10 @@ Thumbs.db
 TODO
 
 RE/
+
+# Godot
+godot/.godot/
+*.TMP
+godot/exports/
+.godot-bin/
+godot/addons/gut/

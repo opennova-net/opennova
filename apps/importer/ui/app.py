@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext
@@ -11,13 +11,15 @@ from tkinter import ttk, filedialog, scrolledtext
 
 @dataclass
 class ImportJob:
-    base_dir:   str
-    item_name:  str
-    item_type:  str
-    output_dir: str
-    flags:      dict
-    status:     str = "pending"  # pending | running | done | error
-    error:      str = ""
+    base_dir:     str  = ""
+    item_name:    str  = ""
+    item_type:    str  = ""        # "weapon" | "item" | "loose"
+    output_dir:   str  = ""
+    flags:        dict = field(default_factory=dict)
+    mode:         str  = "def"     # "def" | "loose"
+    threedi_path: str  = ""        # populated when mode="loose"
+    status:       str  = "pending"  # pending | running | done | error
+    error:        str  = ""
 
 
 class ImporterApp(tk.Tk):
@@ -108,6 +110,9 @@ class ImporterApp(tk.Tk):
             btn_frame, text="Export All Visible (0)",
             command=self._export_all_visible)
         self._export_all_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+        ttk.Button(btn_frame, text="Import Loose .3di…",
+                   command=self._import_loose).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
         # --- Right: options + queue ---
         right = ttk.Frame(paned)
@@ -149,10 +154,16 @@ class ImporterApp(tk.Tk):
         fmt_lf.pack(fill=tk.X, pady=(0, 6))
         self._flag_write_3dp = tk.BooleanVar(value=True)
         self._flag_write_ase = tk.BooleanVar(value=True)
+        self._flag_write_glb = tk.BooleanVar(value=False)
+        self._flag_write_fbx = tk.BooleanVar(value=False)
         ttk.Checkbutton(fmt_lf, text="Project files (.3dp / .3da)",
                         variable=self._flag_write_3dp).pack(anchor=tk.W)
         ttk.Checkbutton(fmt_lf, text="ASE (.ase)",
                         variable=self._flag_write_ase).pack(anchor=tk.W)
+        ttk.Checkbutton(fmt_lf, text="glTF 2.0 binary (.glb)",
+                        variable=self._flag_write_glb).pack(anchor=tk.W)
+        ttk.Checkbutton(fmt_lf, text="FBX (.fbx)",
+                        variable=self._flag_write_fbx).pack(anchor=tk.W)
 
         # Queue
         queue_lf = ttk.LabelFrame(right, text="Queue", padding=6)
@@ -274,6 +285,8 @@ class ImporterApp(tk.Tk):
             "import_arms":        self._flag_arms.get(),
             "write_3dp":          self._flag_write_3dp.get(),
             "write_ase":          self._flag_write_ase.get(),
+            "write_glb":          self._flag_write_glb.get(),
+            "write_fbx":          self._flag_write_fbx.get(),
         }
 
     def _import_selected(self):
@@ -322,6 +335,35 @@ class ImporterApp(tk.Tk):
         self._log_append(f"Queued {queued} items for export")
         self._ensure_worker()
 
+    def _import_loose(self):
+        out_dir = self._out_var.get().strip()
+        if not out_dir:
+            self._log_append("ERROR: No output directory set.")
+            return
+        paths = filedialog.askopenfilenames(
+            title="Select .3di file(s) to import",
+            filetypes=[("3DI models", "*.3di"), ("All files", "*.*")],
+        )
+        if not paths:
+            return
+        from pathlib import Path
+        flags    = self._build_flags()
+        base_dir = self._dir_var.get().strip()
+        with self._jobs_lock:
+            for p in paths:
+                stem = Path(p).stem
+                self._jobs.append(ImportJob(
+                    base_dir=base_dir,
+                    item_name=stem,
+                    item_type="loose",
+                    output_dir=out_dir,
+                    flags=flags,
+                    mode="loose",
+                    threedi_path=p,
+                ))
+        self._log_append(f"Queued {len(paths)} loose .3di file(s) → {out_dir}")
+        self._ensure_worker()
+
     def _ensure_worker(self):
         if self._worker is None or not self._worker.is_alive():
             self._worker = threading.Thread(target=self._worker_loop, daemon=True)
@@ -337,8 +379,9 @@ class ImporterApp(tk.Tk):
                 h.flush()
 
         try:
+            import os
             from apps.importer import bpy_session
-            from apps.importer.import_runner import run_import
+            from apps.importer.import_runner import run_import, run_loose_import
             _ckpt("init_headless start")
             try:
                 bpy_session.init_headless()
@@ -355,13 +398,30 @@ class ImporterApp(tk.Tk):
                     _ckpt(f"new_scene start ({job.item_name})")
                     bpy_session.new_scene()
                     _ckpt(f"new_scene done ({job.item_name})")
-                    ok = run_import(
-                        base_dir=job.base_dir,
-                        item_name=job.item_name,
-                        item_type=job.item_type,
-                        output_dir=job.output_dir,
-                        **job.flags,
-                    )
+                    if job.mode == "loose":
+                        subdir = os.path.join(job.output_dir, job.item_name)
+                        os.makedirs(subdir, exist_ok=True)
+                        ok = run_loose_import(
+                            threedi_path=job.threedi_path,
+                            output_dir=subdir,
+                            output_stem=job.item_name,
+                            asset_base_dir=job.base_dir or None,
+                            import_collisions=job.flags.get("import_collisions", True),
+                            import_occlusion=job.flags.get("import_occlusion", True),
+                            import_lights=job.flags.get("import_lights", True),
+                            write_ase=job.flags.get("write_ase", True),
+                            write_3dp=job.flags.get("write_3dp", True),
+                            write_glb=job.flags.get("write_glb", False),
+                            write_fbx=job.flags.get("write_fbx", False),
+                        )
+                    else:
+                        ok = run_import(
+                            base_dir=job.base_dir,
+                            item_name=job.item_name,
+                            item_type=job.item_type,
+                            output_dir=job.output_dir,
+                            **job.flags,
+                        )
                     _ckpt(f"run_import done ({job.item_name}) ok={ok}")
                     with self._jobs_lock:
                         job.status = "done" if ok else "error"

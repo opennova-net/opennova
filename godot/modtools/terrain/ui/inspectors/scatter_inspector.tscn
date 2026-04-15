@@ -1,0 +1,143 @@
+[gd_scene load_steps=4 format=3 uid="uid://dlb7pkxmat8u7"]
+
+[ext_resource type="Script" path="res://modtools/terrain/ui/inspectors/scatter_inspector.gd" id="1_scatter"]
+[ext_resource type="PackedScene" uid="uid://cnx8qa9a1k5rh" path="res://modtools/terrain/ui/widgets/brush_controls.tscn" id="2_brush"]
+[ext_resource type="PackedScene" uid="uid://dvegpicker001" path="res://modtools/terrain/ui/widgets/veg_picker.tscn" id="3_picker"]
+
+[node name="ScatterInspector" type="MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_scatter")
+
+[node name="Scroll" type="ScrollContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Box" type="VBoxContainer" parent="Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 14
+
+[node name="Heading" type="Label" parent="Scroll/Box"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "Foliage"
+
+[node name="TypesHeader" type="HBoxContainer" parent="Scroll/Box"]
+layout_mode = 2
+
+[node name="TypesLabel" type="Label" parent="Scroll/Box/TypesHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Foliage types"
+
+[node name="CountLabel" type="Label" parent="Scroll/Box/TypesHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "0 / 4"
+
+[node name="FoliageList" type="ItemList" parent="Scroll/Box"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 120)
+layout_mode = 2
+
+[node name="ListButtons" type="HBoxContainer" parent="Scroll/Box"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="AddButton" type="Button" parent="Scroll/Box/ListButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Add type"
+
+[node name="RemoveButton" type="Button" parent="Scroll/Box/ListButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Remove"
+disabled = true
+
+[node name="DetailEmpty" type="Label" parent="Scroll/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Select a foliage type above to edit it."
+autowrap_mode = 3
+
+[node name="DetailBox" type="VBoxContainer" parent="Scroll/Box"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="GraphicRow" type="VBoxContainer" parent="Scroll/Box/DetailBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="GraphicLabel" type="Label" parent="Scroll/Box/DetailBox/GraphicRow"]
+layout_mode = 2
+text = "Graphic"
+
+[node name="GraphicButton" type="Button" parent="Scroll/Box/DetailBox/GraphicRow"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(0, 180)
+clip_contents = true
+tooltip_text = "Click to choose a foliage graphic"
+
+[node name="GraphicNameLabel" type="Label" parent="Scroll/Box/DetailBox/GraphicRow"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+text = "(none)"
+
+[node name="ColorLowerRow" type="VBoxContainer" parent="Scroll/Box/DetailBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ColorLowerLabel" type="Label" parent="Scroll/Box/DetailBox/ColorLowerRow"]
+layout_mode = 2
+text = "Base color"
+
+[node name="ColorLowerOption" type="OptionButton" parent="Scroll/Box/DetailBox/ColorLowerRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ColorUpperRow" type="VBoxContainer" parent="Scroll/Box/DetailBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ColorUpperLabel" type="Label" parent="Scroll/Box/DetailBox/ColorUpperRow"]
+layout_mode = 2
+text = "Tip color"
+
+[node name="ColorUpperOption" type="OptionButton" parent="Scroll/Box/DetailBox/ColorUpperRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="TogglesRow" type="HBoxContainer" parent="Scroll/Box/DetailBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ShadowToggle" type="CheckBox" parent="Scroll/Box/DetailBox/TogglesRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Shadow"
+
+[node name="ForceOnToggle" type="CheckBox" parent="Scroll/Box/DetailBox/TogglesRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Force on"
+
+[node name="Separator" type="HSeparator" parent="Scroll/Box"]
+layout_mode = 2
+
+[node name="BrushControls" parent="Scroll/Box" instance=ExtResource("2_brush")]
+unique_name_in_owner = true
+layout_mode = 2

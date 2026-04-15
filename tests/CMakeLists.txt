@@ -82,3 +82,91 @@ add_executable(tdp_3da_write_test tdp/tdp_3da_write_test.cpp)
 target_link_libraries(tdp_3da_write_test PRIVATE opennova_tdp)
 target_include_directories(tdp_3da_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tdp_3da_write COMMAND tdp_3da_write_test)
+
+# Terrain format library tests
+add_executable(pcx_roundtrip_test pcx/pcx_roundtrip_test.cpp)
+target_link_libraries(pcx_roundtrip_test PRIVATE opennova_pcx)
+target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pcx_roundtrip COMMAND pcx_roundtrip_test)
+
+add_executable(til_roundtrip_test til/til_roundtrip_test.cpp)
+target_link_libraries(til_roundtrip_test PRIVATE opennova_til)
+target_include_directories(til_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME til_roundtrip COMMAND til_roundtrip_test)
+
+add_executable(foliage_map_test foliage/foliage_map_test.cpp)
+target_link_libraries(foliage_map_test PRIVATE opennova_foliage)
+target_include_directories(foliage_map_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME foliage_map COMMAND foliage_map_test)
+
+add_executable(tpj_roundtrip_test tpj/tpj_roundtrip_test.cpp)
+target_link_libraries(tpj_roundtrip_test PRIVATE opennova_tpj)
+target_include_directories(tpj_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tpj_roundtrip COMMAND tpj_roundtrip_test)
+
+add_executable(trn_roundtrip_test trn/trn_roundtrip_test.cpp)
+target_link_libraries(trn_roundtrip_test PRIVATE opennova_trn)
+target_include_directories(trn_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME trn_roundtrip COMMAND trn_roundtrip_test)
+
+add_executable(cpt_roundtrip_test cpt/cpt_roundtrip_test.cpp)
+target_link_libraries(cpt_roundtrip_test PRIVATE opennova_cpt)
+target_include_directories(cpt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cpt_roundtrip COMMAND cpt_roundtrip_test)
+
+# Terrain build foundation + parity tests ported from the canonical terrain reference.
+#   parametric_parity — byte-identical CPT output across Sample/Gradient/Checker64/Perlin fixtures
+#   crypto_roundtrip   — rotate_encrypt/decrypt round-trip
+#   depthmap_smooth    — 8-bit -> 16-bit smoothing formula parity
+#   tpm1_roundtrip     — .tml MeshData read/write
+#   cdep_read          — CDEP header parity against a known Dvxi5.cpt capture
+#   cdep_roundtrip     — CDEP encode/decode round-trip independent of the bake
+foreach(name parametric_parity depthmap_smooth tpm1_roundtrip)
+    add_executable(${name}_test trngen/${name}_test.cpp)
+    target_link_libraries(${name}_test PRIVATE opennova_terrain)
+    target_include_directories(${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME ${name} COMMAND ${name}_test)
+endforeach()
+
+foreach(name crypto_roundtrip cdep_read cdep_roundtrip)
+    add_executable(${name}_test trngen/${name}_test.cpp)
+    target_link_libraries(${name}_test PRIVATE opennova_cpt)
+    target_include_directories(${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME ${name} COMMAND ${name}_test)
+endforeach()
+
+add_executable(trn_config_roundtrip_test trngen/trn_config_roundtrip_test.cpp)
+target_link_libraries(trn_config_roundtrip_test PRIVATE opennova_trn)
+target_include_directories(trn_config_roundtrip_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/libs/terrain/include
+)
+add_test(NAME trn_config_roundtrip COMMAND trn_config_roundtrip_test)
+
+# DVD4 parity test: drives opennova::build_terrain() on the captured BHD-era heightmap.
+# Regression test for the LoadSectionDedup crash that hit older terrains where
+# the root merge ingests face indices past level.vertex_count.
+add_executable(dvd4_parity_test trngen/dvd4_parity_test.cpp)
+target_link_libraries(dvd4_parity_test PRIVATE opennova_terrain)
+target_include_directories(dvd4_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME dvd4_parity COMMAND dvd4_parity_test)
+
+# CDEP overflow guard: bake must throw rather than silently corrupt the .cpt
+# when a 256-pixel block exceeds the 4-bit bits_per_delta field's 15-bit limit.
+add_executable(cdep_overflow_guard_test trngen/cdep_overflow_guard_test.cpp)
+target_link_libraries(cdep_overflow_guard_test PRIVATE opennova_terrain opennova_cpt)
+target_include_directories(cdep_overflow_guard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cdep_overflow_guard COMMAND cdep_overflow_guard_test)
+
+# Dvxi5 repro: exercises a post-clamp heightmap with block ranges at the
+# CDEP ceiling. Checked in as the anchor for the "Unknown build failure"
+# investigation — fails today, must pass after the bake pipeline fix.
+add_executable(dvxi5_repro_test trngen/dvxi5_repro_test.cpp)
+target_link_libraries(dvxi5_repro_test PRIVATE opennova_terrain)
+target_include_directories(dvxi5_repro_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+    # /EHa so the SEH translator in main() can convert access violations
+    # into std::runtime_error instead of bypassing C++ catch blocks.
+    target_compile_options(dvxi5_repro_test PRIVATE /EHa)
+endif()
+add_test(NAME dvxi5_repro COMMAND dvxi5_repro_test)

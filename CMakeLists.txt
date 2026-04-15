@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.16)
 project(opennova LANGUAGES C CXX)
 
 # Add libraries
+add_subdirectory(libs/pcx)
+add_subdirectory(libs/foliage)
+add_subdirectory(libs/til)
+add_subdirectory(libs/tpj)
+add_subdirectory(libs/trn)
+add_subdirectory(libs/cpt)
 add_subdirectory(libs/threedi)
 add_subdirectory(libs/bad)
 add_subdirectory(libs/adm)
@@ -11,6 +17,7 @@ add_subdirectory(libs/def)
 add_subdirectory(libs/scr)
 add_subdirectory(libs/ase)
 add_subdirectory(libs/tdp)
+add_subdirectory(libs/terrain)
 
 # --------------------------------------------------------------------------
 # Shared library for FFI (Python ctypes, etc.)
@@ -30,9 +37,17 @@ if(BUILD_SHARED_LIB)
     # (the linker would otherwise discard unreferenced threedi symbols)
     if(MSVC)
         target_link_libraries(opennova_shared
+            PRIVATE opennova_pcx opennova_foliage opennova_til opennova_tpj opennova_trn opennova_cpt opennova_terrain
             PRIVATE opennova_threedi opennova_pff opennova_bfc1 oed_bad oed_adm oed_def oed_scr opennova_ase opennova_tdp
         )
         target_link_options(opennova_shared PRIVATE
+            /WHOLEARCHIVE:opennova_pcx
+            /WHOLEARCHIVE:opennova_foliage
+            /WHOLEARCHIVE:opennova_til
+            /WHOLEARCHIVE:opennova_tpj
+            /WHOLEARCHIVE:opennova_trn
+            /WHOLEARCHIVE:opennova_cpt
+            /WHOLEARCHIVE:opennova_terrain
             /WHOLEARCHIVE:opennova_threedi
             /WHOLEARCHIVE:opennova_pff
             /WHOLEARCHIVE:opennova_bfc1
@@ -46,6 +61,7 @@ if(BUILD_SHARED_LIB)
     else()
         target_link_libraries(opennova_shared
             PRIVATE -Wl,--whole-archive
+            PRIVATE opennova_pcx opennova_foliage opennova_til opennova_tpj opennova_trn opennova_cpt opennova_terrain
             PRIVATE opennova_threedi opennova_pff opennova_bfc1 oed_bad oed_adm oed_def oed_scr opennova_ase opennova_tdp
             PRIVATE -Wl,--no-whole-archive
         )
@@ -69,6 +85,13 @@ if(BUILD_SHARED_LIB)
 
     # Static libs need OPENNOVA_SHARED_EXPORTS so their functions get dllexport
     # when their object files are linked into the shared library
+    target_compile_definitions(opennova_pcx PRIVATE OPENNOVA_SHARED_EXPORTS)
+    target_compile_definitions(opennova_foliage PRIVATE OPENNOVA_SHARED_EXPORTS)
+    target_compile_definitions(opennova_til PRIVATE OPENNOVA_SHARED_EXPORTS)
+    target_compile_definitions(opennova_tpj PRIVATE OPENNOVA_SHARED_EXPORTS)
+    target_compile_definitions(opennova_trn PRIVATE OPENNOVA_SHARED_EXPORTS)
+    target_compile_definitions(opennova_cpt PRIVATE OPENNOVA_SHARED_EXPORTS)
+    target_compile_definitions(opennova_terrain PRIVATE OPENNOVA_SHARED_EXPORTS)
     target_compile_definitions(opennova_threedi PRIVATE OPENNOVA_SHARED_EXPORTS)
     target_compile_definitions(opennova_pff PRIVATE OPENNOVA_SHARED_EXPORTS)
     target_compile_definitions(oed_bad PRIVATE OPENNOVA_SHARED_EXPORTS)
@@ -80,6 +103,13 @@ if(BUILD_SHARED_LIB)
     target_compile_definitions(opennova_tdp PRIVATE OPENNOVA_SHARED_EXPORTS)
 
     # On Linux the static libs must be compiled with -fPIC
+    set_target_properties(opennova_pcx PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(opennova_foliage PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(opennova_til PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(opennova_tpj PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(opennova_trn PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(opennova_cpt PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(opennova_terrain PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(opennova_threedi PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(opennova_pff PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(oed_bad PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -102,6 +132,9 @@ if(BUILD_TOOLS)
 
     add_executable(survey_3di3 tools/survey_3di3.cpp)
     target_link_libraries(survey_3di3 PRIVATE opennova_threedi m)
+
+    add_executable(dvxi5_drift tools/dvxi5_drift.cpp)
+    target_link_libraries(dvxi5_drift PRIVATE opennova_terrain)
 endif()
 
 # Enable testing
