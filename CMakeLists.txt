@@ -132,9 +132,6 @@ if(BUILD_TOOLS)
 
     add_executable(survey_3di3 tools/survey_3di3.cpp)
     target_link_libraries(survey_3di3 PRIVATE opennova_threedi m)
-
-    add_executable(dvxi5_drift tools/dvxi5_drift.cpp)
-    target_link_libraries(dvxi5_drift PRIVATE opennova_terrain)
 endif()
 
 # Enable testing
