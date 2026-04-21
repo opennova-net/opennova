@@ -1,6 +1,6 @@
 # OpenNova
 
-Open-source tools for extracting, converting, and editing 3D assets from Delta Force and other NovaLogic games.
+Open-source tools for extracting, converting, and editing 3D assets from Delta Force and other NovaLogic games — importer, Blender addon, and a Godot-based terrain editor and runtime.
 
 ![OpenNova screenshot](https://snaps.screensnapr.io/9192c63)
 
@@ -10,6 +10,8 @@ Pre-built binaries are available on the [Releases](../../releases) page:
 
 - **`onimport.exe`** — Standalone Windows importer. No Python or Blender install required.
 - **`opennova_blender.zip`** — Blender 4.2+ addon with pre-built native libraries for Windows and Linux.
+- **`opennova-modtools.exe`** — Standalone terrain editor. No Godot install required.
+- **`opennova.exe`** — Game runtime for previewing exported scenes.
 
 ## Importer
 
@@ -78,6 +80,12 @@ Exports armature NLA actions to NovaLogic's BAD (bone animation data) and ADM (a
 
 Imports Mixamo FBX animations and retargets them onto a NovaLogic skeleton. Strips the `mixamorig:` prefix, optionally creates a root motion bone, and pushes each animation as an NLA strip ready for export.
 
+## Mod Tools
+
+A standalone terrain editor for authoring Delta Force maps. Sculpt heightmaps, paint surface types, scatter foliage, and bake the result straight to the game's terrain formats. Reads and writes `.tpj`, `.trn`, `.cpt`, and `.til` directly — no round-trip through other tools.
+
+Launches the editor scene (`godot/modtools/terrain/terrain_editor.tscn`) on startup.
+
 ## C/C++ Libraries
 
 Modular libraries for parsing and writing NovaLogic formats. All expose a C API suitable for FFI.
@@ -100,6 +108,7 @@ Modular libraries for parsing and writing NovaLogic formats. All expose a C API 
 
 - CMake 3.16+
 - C++ compiler with C++17 support
+- Godot 4.6.1 (only for Godot work; `scripts/build.sh` fetches it via `scripts/bootstrap_godot.sh`)
 
 ### Build and Test
 
@@ -131,9 +140,30 @@ Builds `onimport.exe` for Windows using PyInstaller. Requires Python 3.11.
 scripts/package_importer_windows.ps1
 ```
 
-## Documentation
+### Build the GDExtension
 
-- BAD/ADM animation format notes: `docs/formats/bad-adm-animation.md`
+```bash
+cmake -S godot/engine -B build-godot -DCMAKE_BUILD_TYPE=Release
+cmake --build build-godot --config Release --target opennova
+```
+
+Outputs `godot/bin/libopennova.<platform>.template_debug.x86_64.{dll,so}`. Open `godot/project.godot` in Godot to load the editor with the extension available.
+
+### Run the Godot tests
+
+```bash
+scripts/test_godot.sh
+```
+
+Runs the GDScript suite under `godot/tests/` headless via GUT. Requires `GODOT_BIN` set, or a Godot binary in `.godot-bin/` (populated by `scripts/bootstrap_godot.sh`).
+
+### Package Godot Exports
+
+Builds `opennova.exe` and `opennova-modtools.exe` via headless Godot export. Windows-only; requires MSVC and CMake.
+
+```powershell
+scripts/package_godot_windows.ps1
+```
 
 ## License
 
