@@ -196,29 +196,23 @@ void write_depth_section(BitWriter &bits,
 
 		int clamped_blocks = 0;
 		for (int block = 0; block < num_blocks; ++block) {
-			std::vector<uint16_t> row(
-				depth_buffer.begin() + static_cast<size_t>(block * block_width),
-				depth_buffer.begin() + static_cast<size_t>((block + 1) * block_width));
+			const size_t block_start = static_cast<size_t>(block * block_width);
 
-			uint16_t min_value = row[0];
-			uint16_t max_value = row[0];
+			uint16_t min_value = depth_buffer[block_start];
+			uint16_t max_value = depth_buffer[block_start];
 			for (int i = 1; i < block_width; ++i) {
-				min_value = std::min(min_value, row[static_cast<size_t>(i)]);
-				max_value = std::max(max_value, row[static_cast<size_t>(i)]);
+				const uint16_t value = depth_buffer[block_start + static_cast<size_t>(i)];
+				min_value = std::min(min_value, value);
+				max_value = std::max(max_value, value);
 			}
 
-			if (static_cast<int>(max_value) - static_cast<int>(min_value) > 32767) {
-				const int ceiling = static_cast<int>(min_value) + 32767;
-				for (uint16_t &value : row) {
-					if (static_cast<int>(value) > ceiling) {
-						value = static_cast<uint16_t>(ceiling);
-					}
-				}
-				max_value = static_cast<uint16_t>(ceiling);
+			int range = static_cast<int>(max_value) - static_cast<int>(min_value);
+			const bool needs_clamp = range > 32767;
+			if (needs_clamp) {
+				range = 32767;
 				++clamped_blocks;
 			}
 
-			const int range = static_cast<int>(max_value) - static_cast<int>(min_value);
 			const int width = count_bit_width(range);
 			if (width > 15) {
 				throw std::runtime_error("CDEP block range exceeds 15-bit delta limit");
@@ -228,7 +222,12 @@ void write_depth_section(BitWriter &bits,
 			bits.write_field(16, min_value);
 			bits.set_bit_width(width);
 			for (int i = 0; i < block_width; ++i) {
-				bits.write_bits(static_cast<uint32_t>(row[static_cast<size_t>(i)] - min_value));
+				int delta = static_cast<int>(depth_buffer[block_start + static_cast<size_t>(i)]) -
+				            static_cast<int>(min_value);
+				if (needs_clamp && delta > 32767) {
+					delta = 32767;
+				}
+				bits.write_bits(static_cast<uint32_t>(delta));
 			}
 		}
 

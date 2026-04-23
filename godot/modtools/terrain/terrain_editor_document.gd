@@ -663,16 +663,27 @@ func capture_trn_resource(resource: NovaTerrainData) -> void:
 func apply_loaded_textures_from_data(material: ShaderMaterial) -> void:
 	if data == null:
 		return
-	if data.get_colormap():
-		var loaded_colormap := TerrainEditorSlots.texture_to_image(data.get_colormap())
-		if loaded_colormap != null:
-			set_colormap_image(material, loaded_colormap)
-	if data.get_detailblendmap():
-		var loaded_blendmap := TerrainEditorSlots.texture_to_image(data.get_detailblendmap())
-		if loaded_blendmap != null:
-			set_blendmap_image(material, loaded_blendmap)
+	var source_dir := String(data.get_trn_path()).get_base_dir()
+	var loaded_colormap := _load_source_image(source_dir, String(data.get_trn_texture_filename("colormap")))
+	if loaded_colormap == null and data.get_colormap():
+		loaded_colormap = TerrainEditorSlots.texture_to_image(data.get_colormap())
+	if loaded_colormap != null:
+		set_colormap_image(material, loaded_colormap)
+
+	var loaded_blendmap := _load_source_image(source_dir, String(data.get_trn_texture_filename("detailblendmap")))
+	if loaded_blendmap == null and data.get_detailblendmap():
+		loaded_blendmap = TerrainEditorSlots.texture_to_image(data.get_detailblendmap())
+	if loaded_blendmap != null:
+		set_blendmap_image(material, loaded_blendmap)
 
 	for slot_id in TerrainEditorSlots.get_slot_ids():
+		var slot: Dictionary = TerrainEditorSlots.get_slot(String(slot_id))
+		var trn_key := String(slot.get("trn_key", ""))
+		if String(slot.get("format", "")) != "pcx_paletted" and not trn_key.is_empty():
+			var loaded_slot_image := _load_source_image(source_dir, String(data.get_trn_texture_filename(trn_key)))
+			if loaded_slot_image != null:
+				TerrainEditorSlots.apply_slot_image(material, data, String(slot_id), loaded_slot_image)
+				continue
 		var texture := TerrainEditorSlots.get_slot_texture(data, String(slot_id))
 		if texture != null or slot_id == "detailmap" or slot_id == "detailmap2" or slot_id == "detailmapdist2":
 			TerrainEditorSlots.apply_slot_texture(material, data, String(slot_id), texture)
@@ -738,15 +749,21 @@ func save_texture_assets(material: ShaderMaterial, output_dir: String, terrain_n
 
 	for slot_id in TerrainEditorSlots.get_slot_ids():
 		var slot: Dictionary = TerrainEditorSlots.get_slot(String(slot_id))
-		var filename := TerrainEditorSlots.get_export_filename(String(slot_id), terrain_name)
+		var filename := get_slot_filename(String(slot_id))
+		if filename.is_empty():
+			filename = TerrainEditorSlots.get_export_filename(String(slot_id), terrain_name)
 		var output_path := output_dir + "/" + filename
 		if String(slot.get("format", "")) == "pcx_paletted":
 			err = data.save_pcx_slot(String(slot_id), output_path)
 		else:
 			var image := TerrainEditorSlots.texture_to_image(material.get_shader_parameter(String(slot["uniform"])))
 			if image == null:
-				image = TerrainEditorSlots.create_export_placeholder_image()
-			if int(slot["bpp"]) == 24:
+				if TerrainEditorSlots.uses_placeholder_default(String(slot_id)):
+					image = TerrainEditorSlots.create_export_placeholder_image()
+				else:
+					texture_files.erase(String(slot_id))
+					continue
+			if _tga_bpp_for_export(String(slot_id), filename) == 24:
 				err = NovaTerrainBuilder.save_image_tga24(image, output_path)
 			else:
 				err = NovaTerrainBuilder.save_image_tga(image, output_path)
@@ -774,10 +791,13 @@ func prepare_data_for_trn_save(terrain_name: String, polydata_filename: String) 
 		var trn_key := String(slot.get("trn_key", ""))
 		if trn_key.is_empty():
 			continue
-		data.set_trn_texture_filename(trn_key, get_slot_filename_or_default(String(slot_id), terrain_name))
+		data.set_trn_texture_filename(trn_key, get_slot_filename(String(slot_id)))
 
 
 func build_heightmap_from_data() -> Image:
+	var raw_bytes: PackedByteArray = data.get_depth_raw16()
+	if raw_bytes.size() == HM_SIZE * HM_SIZE * 2:
+		return build_heightmap_from_raw16(raw_bytes)
 	var image := Image.create(HM_SIZE, HM_SIZE, false, Image.FORMAT_RF)
 	for z in HM_SIZE:
 		for x in HM_SIZE:
@@ -858,6 +878,48 @@ func get_terrain_name() -> String:
 	if data and not data.get_terrain_name().is_empty():
 		return data.get_terrain_name()
 	return "untitled"
+
+
+func _load_source_image(base_dir: String, filename: String) -> Image:
+	var path := _resolve_existing_file(base_dir, filename)
+	if path.is_empty():
+		return null
+	return TerrainEditorSlots.load_image_from_file(path)
+
+
+func _tga_bpp_for_export(slot_id: String, filename: String) -> int:
+	if filename.get_extension().to_lower() == "tga" and not current_trn_path.is_empty():
+		var source_path := _resolve_existing_file(current_trn_path.get_base_dir(), filename)
+		var source_bpp := _read_tga_bpp(source_path)
+		if source_bpp == 24 or source_bpp == 32:
+			return source_bpp
+	return int(TerrainEditorSlots.get_slot(slot_id).get("bpp", 32))
+
+
+func _read_tga_bpp(path: String) -> int:
+	if path.is_empty():
+		return 0
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null or file.get_length() < 18:
+		return 0
+	file.seek(16)
+	var bpp := file.get_8()
+	file.close()
+	return bpp
+
+
+func _resolve_existing_file(base_dir: String, filename: String) -> String:
+	if base_dir.is_empty() or filename.is_empty():
+		return ""
+	var direct := base_dir.path_join(filename)
+	if FileAccess.file_exists(direct):
+		return direct
+
+	var wanted := filename.to_lower()
+	for existing in DirAccess.get_files_at(base_dir):
+		if String(existing).to_lower() == wanted:
+			return base_dir.path_join(String(existing))
+	return ""
 
 
 func _clear_tileinfo_resource() -> void:

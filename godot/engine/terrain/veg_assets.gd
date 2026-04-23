@@ -7,12 +7,17 @@ const SEARCH_PREFIXES := [
 
 static var _mesh_cache: Dictionary = {}
 static var _scene_path_cache: Dictionary = {}
+static var _graphics_cache: Array = []
+static var _graphics_cache_valid: bool = false
 
 
 ## Enumerate all *veg*.glb graphics across the search paths.
 ## Returns an Array of dictionaries: [{"basename": String, "scene_path": String}, ...]
 ## Sorted by basename, deduplicated (modtools path wins when both have the same basename).
-static func list_graphics() -> Array:
+static func list_graphics(force_refresh: bool = false) -> Array:
+	if _graphics_cache_valid and not force_refresh:
+		return _graphics_cache.duplicate(true)
+
 	var out: Array = []
 	var seen: Dictionary = {}
 	_scene_path_cache.clear()
@@ -39,7 +44,9 @@ static func list_graphics() -> Array:
 			name = dir.get_next()
 		dir.list_dir_end()
 	out.sort_custom(func(a, b): return String(a.basename) < String(b.basename))
-	return out
+	_graphics_cache = out
+	_graphics_cache_valid = true
+	return _graphics_cache.duplicate(true)
 
 
 ## Resolve each def's `graphic` name to the first Mesh inside its .glb.
@@ -82,6 +89,10 @@ static func load_mesh(graphic: String) -> Mesh:
 
 
 static func _find_scene_path(basename: String) -> String:
+	if _scene_path_cache.has(basename):
+		return String(_scene_path_cache[basename])
+	if not _graphics_cache_valid:
+		list_graphics()
 	if _scene_path_cache.has(basename):
 		return String(_scene_path_cache[basename])
 

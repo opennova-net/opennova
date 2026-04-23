@@ -19,8 +19,10 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <string>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -55,7 +57,9 @@ int main() {
         return 1;
     }
 
-    const fs::path output_dir = fs::path(test_paths_temp_dir()) / "opennova_trngen_dvd4";
+    const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+    const fs::path output_dir =
+        fs::path(test_paths_temp_dir()) / ("opennova_trngen_dvd4_" + std::to_string(suffix));
     fs::remove_all(output_dir);
     fs::create_directories(output_dir);
 

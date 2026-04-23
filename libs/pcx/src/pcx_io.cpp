@@ -1,5 +1,6 @@
 #include "pcx/pcx_io.h"
 
+#include <algorithm>
 #include <fstream>
 #include <vector>
 
@@ -223,6 +224,7 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
 	header[1] = 5;
 	header[2] = 1;
 	header[3] = 8;
+	std::fill(header + 16, header + 64, 0xFF);
 	header[8] = static_cast<uint8_t>((image.width - 1) & 0xFF);
 	header[9] = static_cast<uint8_t>(((image.width - 1) >> 8) & 0xFF);
 	header[10] = static_cast<uint8_t>((image.height - 1) & 0xFF);

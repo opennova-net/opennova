@@ -25,17 +25,21 @@ func _ready() -> void:
 	_brush.radius_changed.connect(_on_brush_radius)
 	_brush.strength_changed.connect(_on_brush_strength)
 	_brush.hardness_changed.connect(_on_brush_hardness)
-	set_process(true)
 
 
 func set_editor(value: TerrainEditor) -> void:
+	var callback := Callable(self, "_on_editor_ui_state_changed")
+	if editor != null and editor.ui_state_changed.is_connected(callback):
+		editor.ui_state_changed.disconnect(callback)
 	editor = value
+	if editor != null and not editor.ui_state_changed.is_connected(callback):
+		editor.ui_state_changed.connect(callback)
 	if editor and not _tool_buttons.has(editor.current_tool):
 		editor.set_tool(TerrainEditor.Tool.RAISE)
 	_sync_from_editor()
 
 
-func _process(_delta: float) -> void:
+func _on_editor_ui_state_changed(_version: int) -> void:
 	_sync_from_editor()
 
 

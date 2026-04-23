@@ -27,6 +27,7 @@ var editor: TerrainEditor
 var _syncing: bool = false
 var _atlas_tile_count: int = 0
 var _cached_tilestrip_hash: int = -1
+var _tile_icon_cache: Dictionary = {}
 var _file_dialog: FileDialog
 
 
@@ -50,18 +51,21 @@ func _ready() -> void:
 	_selection_preview.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_hint_label.text = "Empty: place. Tile: edit."
 
-	set_process(true)
-
 
 func set_editor(value: TerrainEditor) -> void:
+	var callback := Callable(self, "_on_editor_ui_state_changed")
+	if editor != null and editor.ui_state_changed.is_connected(callback):
+		editor.ui_state_changed.disconnect(callback)
 	editor = value
+	if editor != null and not editor.ui_state_changed.is_connected(callback):
+		editor.ui_state_changed.connect(callback)
 	if editor and editor.current_tool != TerrainEditor.Tool.TILE_STAMP:
 		editor.set_tool(TerrainEditor.Tool.TILE_STAMP)
 	_cached_tilestrip_hash = -1
 	_sync_from_editor()
 
 
-func _process(_delta: float) -> void:
+func _on_editor_ui_state_changed(_version: int) -> void:
 	_sync_from_editor()
 
 
@@ -124,6 +128,7 @@ func _refresh_atlas() -> void:
 
 	if needs_rebuild:
 		_atlas_list.clear()
+		_tile_icon_cache.clear()
 		if tilestrip:
 			for i in tile_count:
 				_atlas_list.add_item("%03d" % i, _build_icon(tilestrip, i, tiles_x), true)
@@ -192,6 +197,9 @@ func _build_tile_preview(tilestrip: Texture2D, tile_index: int) -> Texture2D:
 
 
 func _build_icon(tilestrip: Texture2D, tile_index: int, tiles_x: int) -> Texture2D:
+	var cache_key := "%d:%d:%d" % [tilestrip.get_instance_id(), tile_index, tiles_x]
+	if _tile_icon_cache.has(cache_key):
+		return _tile_icon_cache[cache_key]
 	var atlas := AtlasTexture.new()
 	atlas.atlas = tilestrip
 	atlas.region = Rect2(
@@ -200,6 +208,7 @@ func _build_icon(tilestrip: Texture2D, tile_index: int, tiles_x: int) -> Texture
 		NovaTerrainTileInfo.ATLAS_TILE_PIXELS,
 		NovaTerrainTileInfo.ATLAS_TILE_PIXELS
 	)
+	_tile_icon_cache[cache_key] = atlas
 	return atlas
 
 

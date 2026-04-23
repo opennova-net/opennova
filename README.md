@@ -10,8 +10,8 @@ Pre-built binaries are available on the [Releases](../../releases) page:
 
 - **`onimport.exe`** — Standalone Windows importer. No Python or Blender install required.
 - **`opennova_blender.zip`** — Blender 4.2+ addon with pre-built native libraries for Windows and Linux.
-- **`opennova-modtools.exe`** — Standalone terrain editor. No Godot install required.
-- **`opennova.exe`** — Game runtime for previewing exported scenes.
+- **`opennova-modtools-windows.zip`** — Standalone terrain editor for Windows. Includes the native runtime DLL; no Godot install required.
+- **`opennova-runtime-windows.zip`** — Game runtime for previewing exported scenes on Windows. Includes the native runtime DLL.
 
 ## Importer
 
@@ -159,7 +159,7 @@ Runs the GDScript suite under `godot/tests/` headless via GUT. Requires `GODOT_B
 
 ### Package Godot Exports
 
-Builds `opennova.exe` and `opennova-modtools.exe` via headless Godot export. Windows-only; requires MSVC and CMake.
+Builds `opennova-runtime-windows.zip` and `opennova-modtools-windows.zip` via headless Godot export. Windows-only; requires MSVC and CMake.
 
 ```powershell
 scripts/package_godot_windows.ps1

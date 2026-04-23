@@ -19,8 +19,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <string>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -33,7 +35,9 @@ int main() {
     // CDEP's 32 767 ceiling. The encoder must clamp rather than desync.
     heightmap[100 * HM_SIZE + 100] = 40000;
 
-    const fs::path output_dir = fs::path(test_paths_temp_dir()) / "opennova_trngen_cdep_overflow";
+    const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+    const fs::path output_dir =
+        fs::path(test_paths_temp_dir()) / ("opennova_trngen_cdep_overflow_" + std::to_string(suffix));
     fs::remove_all(output_dir);
     fs::create_directories(output_dir);
 

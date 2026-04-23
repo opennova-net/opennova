@@ -212,7 +212,20 @@ static func is_previewable(slot_id: String) -> bool:
 
 
 static func load_image_from_file(path: String) -> Image:
-	var image := Image.load_from_file(path)
+	var bytes := FileAccess.get_file_as_bytes(path)
+	if bytes.is_empty():
+		return null
+	var image := Image.new()
+	var err := OK
+	match path.get_extension().to_lower():
+		"png":
+			err = image.load_png_from_buffer(bytes)
+		"tga":
+			err = image.load_tga_from_buffer(bytes)
+		_:
+			err = image.load(path)
+	if err != OK:
+		return null
 	return normalize_image(image)
 
 

@@ -1,6 +1,8 @@
 class_name TerrainEditor
 extends Node3D
 
+signal ui_state_changed(version: int)
+
 enum Tool { RAISE, LOWER, SMOOTH, FLATTEN, PAINT_DETAIL, EDIT_SECTORS, PAINT_COLORMAP, CLONE_COLOR, TILE_STAMP, FOLIAGE_PAINT, SURFACE_PAINT }
 enum TileInteractionMode { PLACE, EDIT_SELECTED }
 
@@ -233,6 +235,7 @@ var is_dirty: bool:
 		return _document.is_dirty
 	set(value):
 		_document.is_dirty = value
+		_mark_ui_state_changed()
 
 var _last_open_dir: String = ""
 var _last_save_dir: String = ""
@@ -240,6 +243,7 @@ var _last_export_dir: String = ""
 var _pending_unsaved_action: Callable = Callable()
 var _pending_unsaved_action_name: String = ""
 var _previous_window_min_size: Vector2i = Vector2i.ZERO
+var _ui_state_version: int = 0
 
 
 func _ready() -> void:
@@ -506,7 +510,10 @@ func select_detail_paint_channel(channel: int) -> void:
 
 
 func set_paint_color(color: Color) -> void:
+	if paint_color == color:
+		return
 	paint_color = color
+	_update_hud()
 
 
 func get_paint_color() -> Color:
@@ -821,8 +828,11 @@ func is_water_visible() -> bool:
 
 
 func set_water_visible(visible: bool) -> void:
+	if water_visible == visible:
+		return
 	water_visible = visible
 	_update_water_plane()
+	_update_hud()
 
 
 func is_sector_overlay_visible() -> bool:
@@ -1453,12 +1463,14 @@ func _set_clone_source(world_pos: Vector3) -> void:
 	if _clone_source_marker:
 		_clone_source_marker.position = world_pos
 		_clone_source_marker.visible = true
+	_update_hud()
 
 
 func clear_clone_source() -> void:
 	_brush_session.clear_clone_source()
 	if _clone_source_marker:
 		_clone_source_marker.visible = false
+	_update_hud()
 
 
 func has_clone_source() -> bool:
@@ -1795,11 +1807,20 @@ func _source_image_for_kind(kind: int) -> Image:
 
 
 func _update_hud() -> void:
-	if workstation and workstation.has_method("sync_from_editor_state"):
-		workstation.sync_from_editor_state()
+	_mark_ui_state_changed()
 
 
 func _sync_hud_from_editor() -> void:
+	_mark_ui_state_changed()
+
+
+func get_ui_state_version() -> int:
+	return _ui_state_version
+
+
+func _mark_ui_state_changed() -> void:
+	_ui_state_version += 1
+	ui_state_changed.emit(_ui_state_version)
 	if workstation and workstation.has_method("sync_from_editor_state"):
 		workstation.sync_from_editor_state()
 

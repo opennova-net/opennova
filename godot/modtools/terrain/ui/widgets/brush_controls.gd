@@ -22,6 +22,10 @@ const HARDNESS_MAX := 1.0
 var _syncing: bool = false
 
 
+func get_radius_spin() -> SpinBox:
+	return _radius_spin
+
+
 func _ready() -> void:
 	_radius_slider.value_changed.connect(_on_radius_slider)
 	_radius_spin.value_changed.connect(_on_radius_spin)

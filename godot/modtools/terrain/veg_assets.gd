@@ -4,8 +4,8 @@ extends RefCounted
 const SharedVegAssets := preload("res://engine/terrain/veg_assets.gd")
 
 
-static func list_graphics() -> Array:
-	return SharedVegAssets.list_graphics()
+static func list_graphics(force_refresh: bool = false) -> Array:
+	return SharedVegAssets.list_graphics(force_refresh)
 
 
 static func resolve_slot_meshes(defs: Array) -> Array:

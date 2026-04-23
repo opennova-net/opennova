@@ -43,17 +43,20 @@ func _ready() -> void:
 	_wrap_x_toggle.toggled.connect(_on_wrap_x_toggled)
 	_wrap_y_toggle.toggled.connect(_on_wrap_y_toggled)
 
-	set_process(true)
-
 
 func set_editor(value: TerrainEditor) -> void:
+	var callback := Callable(self, "_on_editor_ui_state_changed")
+	if editor != null and editor.ui_state_changed.is_connected(callback):
+		editor.ui_state_changed.disconnect(callback)
 	editor = value
+	if editor != null and not editor.ui_state_changed.is_connected(callback):
+		editor.ui_state_changed.connect(callback)
 	if editor and editor.current_tool != TerrainEditor.Tool.EDIT_SECTORS:
 		editor.set_tool(TerrainEditor.Tool.EDIT_SECTORS)
 	_sync_from_editor()
 
 
-func _process(_delta: float) -> void:
+func _on_editor_ui_state_changed(_version: int) -> void:
 	_sync_from_editor()
 
 

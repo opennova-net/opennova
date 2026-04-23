@@ -136,6 +136,7 @@ void NovaTerrainData::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("load"), &NovaTerrainData::load);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaTerrainData::is_loaded);
+	ClassDB::bind_method(D_METHOD("get_depth_raw16"), &NovaTerrainData::get_depth_raw16);
 	ClassDB::bind_method(D_METHOD("get_height", "world_pos"), &NovaTerrainData::get_height);
 	ClassDB::bind_method(D_METHOD("get_height_world", "world_pos"), &NovaTerrainData::get_height_world);
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &NovaTerrainData::get_height_world_bilinear);
@@ -735,6 +736,22 @@ Error NovaTerrainData::load() {
 
 bool NovaTerrainData::is_loaded() const {
 	return loaded;
+}
+
+PackedByteArray NovaTerrainData::get_depth_raw16() const {
+	PackedByteArray out;
+	if (cpt.depth_buffer.empty()) {
+		return out;
+	}
+
+	out.resize(static_cast<int64_t>(cpt.depth_buffer.size() * 2u));
+	uint8_t *dst = out.ptrw();
+	for (size_t i = 0; i < cpt.depth_buffer.size(); ++i) {
+		const uint16_t value = cpt.depth_buffer[i];
+		dst[i * 2u] = static_cast<uint8_t>(value & 0xFFu);
+		dst[i * 2u + 1u] = static_cast<uint8_t>((value >> 8u) & 0xFFu);
+	}
+	return out;
 }
 
 float NovaTerrainData::get_height(const Vector3 &p_world_pos) const {

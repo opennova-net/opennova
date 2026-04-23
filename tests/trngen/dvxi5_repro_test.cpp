@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -67,8 +68,9 @@ int main() {
     std::vector<uint8_t> raw(EXPECTED_RAW);
     f.read(reinterpret_cast<char *>(raw.data()), raw.size());
 
+    const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const fs::path output_dir =
-        fs::path(test_paths_temp_dir()) / "opennova_trngen_dvxi5";
+        fs::path(test_paths_temp_dir()) / ("opennova_trngen_dvxi5_" + std::to_string(suffix));
     fs::remove_all(output_dir);
     fs::create_directories(output_dir);
 

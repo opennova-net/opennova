@@ -45,7 +45,6 @@ func _ready() -> void:
 	_fly_speed_spin.value_changed.connect(_on_fly_speed_changed)
 	_near_plane_spin.value_changed.connect(_on_near_plane_changed)
 	_far_plane_spin.value_changed.connect(_on_far_plane_changed)
-	set_process(true)
 
 
 func _configure_tabs() -> void:
@@ -54,7 +53,12 @@ func _configure_tabs() -> void:
 
 
 func set_editor(value: TerrainEditor) -> void:
+	var callback := Callable(self, "_on_editor_ui_state_changed")
+	if editor != null and editor.ui_state_changed.is_connected(callback):
+		editor.ui_state_changed.disconnect(callback)
 	editor = value
+	if editor != null and not editor.ui_state_changed.is_connected(callback):
+		editor.ui_state_changed.connect(callback)
 	_sync_from_editor()
 
 
@@ -62,7 +66,7 @@ func sync_from_editor_state() -> void:
 	_sync_from_editor()
 
 
-func _process(_delta: float) -> void:
+func _on_editor_ui_state_changed(_version: int) -> void:
 	_sync_from_editor()
 
 

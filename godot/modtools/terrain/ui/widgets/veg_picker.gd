@@ -58,7 +58,7 @@ func _populate() -> void:
 	for child in _grid.get_children():
 		child.queue_free()
 
-	var graphics := VegAssets.list_graphics()
+	var graphics := VegAssets.list_graphics(true)
 	_empty_label.visible = graphics.is_empty()
 	_grid.visible = not graphics.is_empty()
 

@@ -5,7 +5,9 @@ const TerrainEditorWorkstationScene = preload("res://modtools/terrain/ui/editor_
 const TerrainEditorWorkstationScript = preload("res://modtools/terrain/ui/editor_workstation.gd")
 const TerrainEditorAssetDockScene = preload("res://modtools/terrain/ui/editor_asset_dock.tscn")
 const LayoutInspectorScene = preload("res://modtools/terrain/ui/inspectors/layout_inspector.tscn")
+const PaintInspectorScene = preload("res://modtools/terrain/ui/inspectors/paint_inspector.tscn")
 const ScatterInspectorScene = preload("res://modtools/terrain/ui/inspectors/scatter_inspector.tscn")
+const SculptInspectorScene = preload("res://modtools/terrain/ui/inspectors/sculpt_inspector.tscn")
 const StampInspectorScene = preload("res://modtools/terrain/ui/inspectors/stamp_inspector.tscn")
 const QuadrantBoardScript = preload("res://modtools/terrain/ui/widgets/quadrant_board.gd")
 
@@ -114,6 +116,33 @@ func test_asset_dock_uses_properties_tab_and_removes_old_toggles() -> void:
 	assert_null(dock.get_node_or_null("%HorizonSpin"), "Horizon controls should be removed from the dock.")
 	assert_null(dock.get_node_or_null("%ColormapToggle"), "Colormap visibility toggle should be removed from the dock.")
 	assert_null(dock.get_node_or_null("%WireframeToggle"), "Wireframe toggle should be removed from the dock.")
+
+
+func test_asset_dock_and_inspectors_do_not_poll_when_idle() -> void:
+	var dock = add_child_autofree(TerrainEditorAssetDockScene.instantiate())
+	var sculpt = add_child_autofree(SculptInspectorScene.instantiate())
+	var paint = add_child_autofree(PaintInspectorScene.instantiate())
+	var scatter = add_child_autofree(ScatterInspectorScene.instantiate())
+	var stamp = add_child_autofree(StampInspectorScene.instantiate())
+	var layout = add_child_autofree(LayoutInspectorScene.instantiate())
+
+	assert_false(dock.is_processing(), "Asset dock should sync from editor state changes instead of idle polling.")
+	assert_false(sculpt.is_processing(), "Sculpt inspector should sync from editor state changes instead of idle polling.")
+	assert_false(paint.is_processing(), "Paint inspector should sync from editor state changes instead of idle polling.")
+	assert_false(scatter.is_processing(), "Foliage inspector should sync from editor state changes instead of idle polling.")
+	assert_false(stamp.is_processing(), "Tile inspector should sync from editor state changes instead of idle polling.")
+	assert_false(layout.is_processing(), "Layout inspector should sync from editor state changes instead of idle polling.")
+
+
+func test_sculpt_inspector_syncs_from_editor_ui_state_signal() -> void:
+	var inspector = add_child_autofree(SculptInspectorScene.instantiate())
+	var editor = autofree(TerrainEditorScript.new())
+
+	inspector.set_editor(editor)
+	editor.set_brush_radius_value(37.0)
+
+	var radius_spin: SpinBox = inspector._brush.get_radius_spin()
+	assert_eq(radius_spin.value, 37.0, "Editor UI state changes should update subscribed inspectors without per-frame polling.")
 
 
 func test_workstation_uses_clip_text_for_long_labels() -> void:
@@ -251,6 +280,24 @@ func test_stamp_inspector_atlas_focus_follows_selected_tile() -> void:
 	var atlas_list: ItemList = inspector.get_node("%AtlasList")
 	assert_string_contains(atlas_status.text, "editing 002", "Atlas status should reflect the selected tile when replace-on-click is active.")
 	assert_true(atlas_list.is_selected(2), "Atlas selection should follow the selected tile while a placed tile is active.")
+
+
+func test_stamp_inspector_reuses_tile_preview_icons_until_atlas_changes() -> void:
+	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var editor = autofree(TerrainEditorScript.new())
+	editor._document.data = NovaTerrainData.new()
+	var strip_image := Image.create(256, 64, false, Image.FORMAT_RGBA8)
+	strip_image.fill(Color(0.5, 0.5, 0.5, 1.0))
+	var tilestrip := ImageTexture.create_from_image(strip_image)
+	editor._document.data.set_tilestrip_tex(tilestrip)
+
+	inspector.set_editor(editor)
+	var cache_size: int = inspector._tile_icon_cache.size()
+	var first: Texture2D = inspector._build_icon(tilestrip, 2, 4)
+	var second: Texture2D = inspector._build_icon(tilestrip, 2, 4)
+
+	assert_true(first == second, "Tile preview icons should be cached while the tilestrip is unchanged.")
+	assert_eq(inspector._tile_icon_cache.size(), cache_size, "Repeated tile icon requests should not allocate duplicate AtlasTextures.")
 
 
 func test_stamp_inspector_flag_toggle_updates_selected_tile_immediately() -> void:

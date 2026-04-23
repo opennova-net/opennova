@@ -188,14 +188,14 @@ jobs:
         shell: pwsh
         run: scripts/package_godot_windows.ps1
 
-      - name: Upload opennova-modtools.exe
+      - name: Upload opennova-modtools Windows zip
         uses: actions/upload-artifact@v4
         with:
           name: opennova_modtools_windows
-          path: dist/opennova-modtools.exe
+          path: dist/opennova-modtools-windows.zip
 
-      - name: Upload opennova.exe
+      - name: Upload opennova runtime Windows zip
         uses: actions/upload-artifact@v4
         with:
           name: opennova_runtime_windows
-          path: dist/opennova.exe
+          path: dist/opennova-runtime-windows.zip

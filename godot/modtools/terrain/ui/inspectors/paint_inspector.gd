@@ -64,11 +64,14 @@ func _ready() -> void:
 	_populate_surface_presets()
 	_show_sub(SubTool.COLOR)
 
-	set_process(true)
-
 
 func set_editor(value: TerrainEditor) -> void:
+	var callback := Callable(self, "_on_editor_ui_state_changed")
+	if editor != null and editor.ui_state_changed.is_connected(callback):
+		editor.ui_state_changed.disconnect(callback)
 	editor = value
+	if editor != null and not editor.ui_state_changed.is_connected(callback):
+		editor.ui_state_changed.connect(callback)
 	if editor:
 		var tool := editor.current_tool
 		if tool == TerrainEditor.Tool.PAINT_DETAIL:
@@ -86,7 +89,7 @@ func set_editor(value: TerrainEditor) -> void:
 	_sync_from_editor()
 
 
-func _process(_delta: float) -> void:
+func _on_editor_ui_state_changed(_version: int) -> void:
 	_sync_from_editor()
 
 
