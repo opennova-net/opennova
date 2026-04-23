@@ -1,9 +1,9 @@
-[gd_resource type="Theme" load_steps=5 format=3 uid="uid://brsq3gfp1bk2a"]
+[gd_resource type="Theme" format=3 uid="uid://brsq3gfp1bk2a"]
 
-[ext_resource type="Texture2D" path="res://modtools/terrain/ui/theme/icons/checkbox_unchecked.svg" id="1_checkbox_unchecked"]
-[ext_resource type="Texture2D" path="res://modtools/terrain/ui/theme/icons/checkbox_checked.svg" id="2_checkbox_checked"]
-[ext_resource type="Texture2D" path="res://modtools/terrain/ui/theme/icons/checkbox_unchecked_disabled.svg" id="3_checkbox_unchecked_disabled"]
-[ext_resource type="Texture2D" path="res://modtools/terrain/ui/theme/icons/checkbox_checked_disabled.svg" id="4_checkbox_checked_disabled"]
+[ext_resource type="Texture2D" uid="uid://cpvagxqi47w7g" path="res://modtools/terrain/ui/theme/icons/checkbox_unchecked.svg" id="1_checkbox_unchecked"]
+[ext_resource type="Texture2D" uid="uid://dme8iqgexfna5" path="res://modtools/terrain/ui/theme/icons/checkbox_checked.svg" id="2_checkbox_checked"]
+[ext_resource type="Texture2D" uid="uid://c0y5ehqlr1g5e" path="res://modtools/terrain/ui/theme/icons/checkbox_unchecked_disabled.svg" id="3_checkbox_unchecked_disabled"]
+[ext_resource type="Texture2D" uid="uid://c4cst33r5u08u" path="res://modtools/terrain/ui/theme/icons/checkbox_checked_disabled.svg" id="4_checkbox_checked_disabled"]
 
 [sub_resource type="StyleBoxFlat" id="sbx_panel_flat"]
 content_margin_left = 0.0
@@ -88,7 +88,21 @@ corner_radius_top_right = 3
 corner_radius_bottom_right = 3
 corner_radius_bottom_left = 3
 
-[sub_resource type="StyleBoxEmpty" id="sbx_empty"]
+[sub_resource type="StyleBoxFlat" id="sbx_check_disabled"]
+content_margin_left = 6.0
+content_margin_top = 4.0
+content_margin_right = 6.0
+content_margin_bottom = 4.0
+bg_color = Color(0.0863, 0.0941, 0.1098, 0.5)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.1373, 0.1529, 0.1804, 0.75)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
 
 [sub_resource type="StyleBoxFlat" id="sbx_check_focus"]
 draw_center = false
@@ -97,22 +111,6 @@ border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
 border_color = Color(0.8392, 0.5529, 0.2902, 0.85)
-corner_radius_top_left = 3
-corner_radius_top_right = 3
-corner_radius_bottom_right = 3
-corner_radius_bottom_left = 3
-
-[sub_resource type="StyleBoxFlat" id="sbx_check_normal"]
-content_margin_left = 6.0
-content_margin_top = 4.0
-content_margin_right = 6.0
-content_margin_bottom = 4.0
-bg_color = Color(0.0863, 0.0941, 0.1098, 0.92)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.1804, 0.2, 0.2314, 1)
 corner_radius_top_left = 3
 corner_radius_top_right = 3
 corner_radius_bottom_right = 3
@@ -134,6 +132,22 @@ corner_radius_top_right = 3
 corner_radius_bottom_right = 3
 corner_radius_bottom_left = 3
 
+[sub_resource type="StyleBoxFlat" id="sbx_check_normal"]
+content_margin_left = 6.0
+content_margin_top = 4.0
+content_margin_right = 6.0
+content_margin_bottom = 4.0
+bg_color = Color(0.0863, 0.0941, 0.1098, 0.92)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.1804, 0.2, 0.2314, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
 [sub_resource type="StyleBoxFlat" id="sbx_check_pressed"]
 content_margin_left = 6.0
 content_margin_top = 4.0
@@ -145,22 +159,6 @@ border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
 border_color = Color(0.8392, 0.5529, 0.2902, 1)
-corner_radius_top_left = 3
-corner_radius_top_right = 3
-corner_radius_bottom_right = 3
-corner_radius_bottom_left = 3
-
-[sub_resource type="StyleBoxFlat" id="sbx_check_disabled"]
-content_margin_left = 6.0
-content_margin_top = 4.0
-content_margin_right = 6.0
-content_margin_bottom = 4.0
-bg_color = Color(0.0863, 0.0941, 0.1098, 0.5)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.1373, 0.1529, 0.1804, 0.75)
 corner_radius_top_left = 3
 corner_radius_top_right = 3
 corner_radius_bottom_right = 3
@@ -390,6 +388,8 @@ content_margin_bottom = 10.0
 bg_color = Color(0.1137, 0.1255, 0.1451, 1)
 border_width_top = 1
 border_color = Color(0.1804, 0.2, 0.2314, 1)
+
+[sub_resource type="StyleBoxEmpty" id="sbx_empty"]
 
 [sub_resource type="StyleBoxFlat" id="sbx_window"]
 content_margin_left = 12.0

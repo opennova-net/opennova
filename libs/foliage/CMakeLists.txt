@@ -1,5 +1,7 @@
 add_library(opennova_foliage STATIC
     src/foliage.cpp
+    src/placement.cpp
+    src/dispatcher.cpp
 )
 
 target_include_directories(opennova_foliage

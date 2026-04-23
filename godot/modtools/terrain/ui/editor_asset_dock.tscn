@@ -46,6 +46,13 @@ text = "Terrain name"
 unique_name_in_owner = true
 layout_mode = 2
 placeholder_text = "untitled"
+editable = false
+
+[node name="TerrainNameHint" type="Label" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox/TerrainNameRow"]
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "To rename, use File → Save As…"
+autowrap_mode = 2
 
 [node name="DensityRow" type="VBoxContainer" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox"]
 layout_mode = 2
@@ -183,4 +190,4 @@ size_flags_horizontal = 3
 min_value = 100.0
 max_value = 1000000.0
 step = 100.0
-value = 100000.0
+value = 1500.0

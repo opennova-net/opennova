@@ -16,6 +16,7 @@ namespace godot {
 
 class NovaTerrainFoliageDef;
 class NovaTerrainFoliageMap;
+class NovaTerrainTileInfo;
 
 class NovaTerrainData : public Resource {
 	GDCLASS(NovaTerrainData, Resource)
@@ -69,8 +70,13 @@ private:
 	int foliagemap_width = 0;
 	int foliagemap_height = 0;
 	Ref<NovaTerrainFoliageMap> foliage_map_resource;
+	// Lazy-loaded on first call to get_tileinfo_resource(). Cached keyed by
+	// the source path so an edit to trn.tileinfo re-loads on next request.
+	mutable Ref<NovaTerrainTileInfo> tileinfo_resource_cache;
+	mutable String tileinfo_resource_cache_path;
 
-	void _sync_trn_from_properties();
+	void _sync_trn_scalars_from_properties();
+	void _sync_trn_texture_filenames_from_refs();
 	void _notify_terrain_changed();
 	void _sync_foliage_map_resource_from_slot();
 	void _apply_foliage_map_to_slot(const opennova::FoliageMap &map);
@@ -147,6 +153,13 @@ public:
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;
+	// Returns the foliagemap palette index at the given world position, or 0
+	// for "outside map / empty".
+	// Engine: jodemo.exe sub_5C65E0@0x5C65E0
+	// docs/engine_spec_foliage.md 4.4.4, docs/engine_spec_stampdown.md 4.5
+	// Shared by runtime NovaFoliageDispatcher wiring and editor paint previews
+	// so the world->sector->source mapping lives in exactly one place.
+	int get_foliage_index_world(float world_x, float world_z) const;
 	int get_tile_count() const;
 
 	// GDScript-facing accessors for foliage + sector grid
@@ -163,6 +176,10 @@ public:
 	String get_polydata_filename() const;
 	void set_tileinfo_filename(const String &filename);
 	String get_tileinfo_filename() const;
+	// Lazy-load the .til referenced by trn.tileinfo, resolved relative to
+	// trn_path's directory. Cached across calls; invalidated on filename
+	// change. Returns a null Ref if the file is missing or unparseable.
+	Ref<NovaTerrainTileInfo> get_tileinfo_resource() const;
 
 	// Generic PCX slot API. Palette+indices are owned internally; slot_id
 	// picks which slot to operate on ("charmap" or "foliagemap" today).

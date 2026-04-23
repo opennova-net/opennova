@@ -46,7 +46,6 @@ var blendmap_tex: ImageTexture
 var is_dirty: bool = false
 
 var current_project_dir: String = ""
-var current_project_tpj_path: String = ""
 var current_trn_path: String = ""
 
 var tileinfo_filename: String = ""
@@ -64,7 +63,6 @@ var selected_foliage_def_index: int = -1
 
 func reset_paths() -> void:
 	current_project_dir = ""
-	current_project_tpj_path = ""
 	current_trn_path = ""
 
 
@@ -658,23 +656,6 @@ func capture_trn_resource(resource: NovaTerrainData) -> void:
 	surface_map_state = _clone_surface_map_state(resource.get_pcx_slot_state("charmap"))
 	foliage_defs = _clone_foliage_defs(resource.get_foliage_defs())
 	foliage_map = _clone_foliage_map(resource.get_foliage_map())
-	normalize_foliage_state_for_editor()
-	_clamp_foliage_selection()
-
-
-func capture_tpj_resource(project: NovaTerrainProject, overwrite_slot_filenames: bool = false) -> void:
-	if project == null:
-		return
-	merge_slot_filenames({
-		"charmap": project.charmap,
-		"foliagemap": project.foliagemap,
-		"tilestrip": project.tilestrip,
-	}, overwrite_slot_filenames)
-	tileinfo_filename = _normalize_tileinfo_reference(String(project.tileinfo))
-	_clear_tileinfo_resource()
-	var defs: Array = project.foliage_defs
-	if defs.size() > 0:
-		foliage_defs = _clone_foliage_defs(defs)
 	normalize_foliage_state_for_editor()
 	_clamp_foliage_selection()
 

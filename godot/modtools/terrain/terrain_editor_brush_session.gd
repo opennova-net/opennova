@@ -7,7 +7,9 @@ const TerrainEditHistory = preload("res://modtools/terrain/terrain_edit_history.
 const CDEPConstraint = preload("res://modtools/terrain/terrain_editor_cdep_constraint.gd")
 const HM_SIZE := 1024
 
-var current_tool: int = 0
+enum Tool { RAISE, LOWER, SMOOTH, FLATTEN, PAINT_DETAIL, EDIT_SECTORS, PAINT_COLORMAP, CLONE_COLOR, TILE_STAMP, FOLIAGE_PAINT, SURFACE_PAINT }
+
+var current_tool: int = Tool.RAISE
 var brush_radius: float = 16.0
 var brush_strength: float = 0.5
 var brush_hardness: float = 0.5
@@ -145,7 +147,7 @@ func apply_brush_stroke(delta: float, hover_hit: Vector3, hover_hit_valid: bool,
 			continue
 		var dab_delta := delta / float(dab_count)
 
-		if current_tool == 3 and not flatten_target_set:
+		if current_tool == Tool.FLATTEN and not flatten_target_set:
 			var hit_source: Vector2 = terrain_mesh.world_to_source_coords(dab_hit.x, dab_hit.z)
 			if hit_source.x >= 0.0:
 				flatten_target_height = TerrainEditorBrushes.sample_flatten_target(heightmap_image, hit_source.x, hit_source.y)
@@ -172,12 +174,7 @@ func apply_brush_stroke(delta: float, hover_hit: Vector3, hover_hit_valid: bool,
 				if dab_rect.size.x > 0 and dab_rect.size.y > 0:
 					_history.expand_rect(dab_rect, HM_SIZE)
 
-			var effective_tool := current_tool
-			if _stroke_invert:
-				if effective_tool == 0:
-					effective_tool = 1
-				elif effective_tool == 1:
-					effective_tool = 0
+			var effective_tool := _effective_tool_for_stroke(current_tool, _stroke_invert)
 
 			# Rect of pixels this dab can touch — used to identify which CDEP
 			# blocks need re-checking after the brush runs.
@@ -189,30 +186,30 @@ func apply_brush_stroke(delta: float, hover_hit: Vector3, hover_hit_valid: bool,
 			).intersection(clip_rect)
 
 			match effective_tool:
-				0:
+				Tool.RAISE:
 					TerrainEditorBrushes.apply_raise_lower(heightmap_image, center_x, center_z, radius, brush_strength * dab_delta * 20.0, brush_hardness, clip_rect)
 					CDEPConstraint.clamp_blocks_in_rect(heightmap_image, height_dab_rect)
 					result["changed_heightmap"] = true
-				1:
+				Tool.LOWER:
 					TerrainEditorBrushes.apply_raise_lower(heightmap_image, center_x, center_z, radius, -brush_strength * dab_delta * 20.0, brush_hardness, clip_rect)
 					CDEPConstraint.clamp_blocks_in_rect(heightmap_image, height_dab_rect)
 					result["changed_heightmap"] = true
-				2:
+				Tool.SMOOTH:
 					TerrainEditorBrushes.apply_smooth(heightmap_image, center_x, center_z, radius, brush_strength * dab_delta * 5.0, brush_hardness, clip_rect)
 					CDEPConstraint.clamp_blocks_in_rect(heightmap_image, height_dab_rect)
 					result["changed_heightmap"] = true
-				3:
+				Tool.FLATTEN:
 					if flatten_target_set:
 						TerrainEditorBrushes.apply_flatten(heightmap_image, center_x, center_z, radius, flatten_target_height, brush_strength * dab_delta * 5.0, brush_hardness, clip_rect)
 						CDEPConstraint.clamp_blocks_in_rect(heightmap_image, height_dab_rect)
 						result["changed_heightmap"] = true
-				4:
+				Tool.PAINT_DETAIL:
 					TerrainEditorBrushes.apply_blend_paint(blendmap_image, paint_detail_channel, center_x, center_z, radius, brush_strength * dab_delta * 3.0, brush_hardness, clip_rect)
 					result["changed_blendmap"] = true
-				6:
+				Tool.PAINT_COLORMAP:
 					TerrainEditorBrushes.apply_colormap_paint(colormap_image, paint_color, center_x, center_z, radius, brush_strength * dab_delta * 3.0, brush_hardness, clip_rect, _paint_texture_image)
 					result["changed_colormap"] = true
-				7:
+				Tool.CLONE_COLOR:
 					if _clone_source_image != null:
 						var src_cx := center_x + _clone_offset_px.x
 						var src_cy := center_z + _clone_offset_px.y
@@ -271,10 +268,20 @@ func apply_history_snapshot(snapshot: Dictionary, is_undo: bool, heightmap_image
 
 func history_kind_for_tool(tool: int) -> int:
 	match tool:
-		0, 1, 2, 3:
+		Tool.RAISE, Tool.LOWER, Tool.SMOOTH, Tool.FLATTEN:
 			return TerrainEditHistory.Kind.HEIGHTMAP
-		4:
+		Tool.PAINT_DETAIL:
 			return TerrainEditHistory.Kind.BLENDMAP
-		6, 7:
+		Tool.PAINT_COLORMAP, Tool.CLONE_COLOR:
 			return TerrainEditHistory.Kind.COLORMAP
 	return -1
+
+
+func _effective_tool_for_stroke(tool: int, invert: bool) -> int:
+	if not invert:
+		return tool
+	if tool == Tool.RAISE:
+		return Tool.LOWER
+	if tool == Tool.LOWER:
+		return Tool.RAISE
+	return tool

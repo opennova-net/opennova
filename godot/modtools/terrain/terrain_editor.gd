@@ -1839,15 +1839,12 @@ func request_new_terrain() -> void:
 
 
 func request_open_trn(trn_path: String) -> Error:
+	# Single entry point for "user picked a .trn". Project vs. import mode is
+	# auto-detected inside open_trn by the presence of a sibling <name>_depth.raw
+	# (project) vs. a .cpt alongside (imported game asset).
 	if _queue_unsaved_action("open a terrain", Callable(self, "open_trn").bind(trn_path)):
 		return OK
 	return open_trn(trn_path)
-
-
-func request_open_tpj(tpj_path: String) -> Error:
-	if _queue_unsaved_action("open a project", Callable(self, "open_tpj").bind(tpj_path)):
-		return OK
-	return open_tpj(tpj_path)
 
 
 func request_quit_editor() -> void:
@@ -1976,22 +1973,47 @@ func open_trn(trn_path: String) -> Error:
 
 	texture_files = {}
 	_apply_default_visual_state(false)
-	_set_heightmap_image(_build_heightmap_from_data())
+
+	# Prefer a sibling <name>_depth.raw if present (project mode — depth.raw
+	# is the authoring source of truth). Fall back to building the heightmap
+	# from the CPT (import mode — original game assets have a CPT but no
+	# depth.raw). With CPT optional, a project .trn may have neither; in
+	# that case _build_heightmap_from_data returns a zero image.
+	var dir_path := trn_path.get_base_dir()
+	var depth_path := dir_path + "/" + _data.get_terrain_name() + "_depth.raw"
+	var depth_bytes: PackedByteArray
+	if FileAccess.file_exists(depth_path):
+		var depth_file := FileAccess.open(depth_path, FileAccess.READ)
+		if depth_file:
+			depth_bytes = depth_file.get_buffer(HM_SIZE * HM_SIZE * 2)
+			depth_file.close()
+	if depth_bytes.size() == HM_SIZE * HM_SIZE * 2:
+		_set_heightmap_image(_build_heightmap_from_raw16(depth_bytes))
+	else:
+		_set_heightmap_image(_build_heightmap_from_data())
+
 	_apply_loaded_textures_from_data()
 	var normalized := _normalize_sector_layout_if_needed()
 	_sync_sector_layout(true)
 	_document.capture_trn_resource(_data)
-	_document.load_tileinfo_from_dir(trn_path.get_base_dir())
+	_document.load_tileinfo_from_dir(dir_path)
 	var normalized_tileinfo := _normalize_loaded_tileinfo_if_needed()
 	_document.current_trn_path = trn_path
-	_document.current_project_dir = ""
-	_document.current_project_tpj_path = ""
+	# When opening a .trn that sits next to its depth.raw + texture assets,
+	# treat the directory as the current project dir (Save uses it as the
+	# default target). If none of those sidecars exist this is an import of
+	# an external .trn; leave project_dir empty so the next Save prompts.
+	if depth_bytes.size() > 0:
+		_document.current_project_dir = dir_path
+	else:
+		_document.current_project_dir = ""
 	_remember_open_path(trn_path)
 
 	is_dirty = normalized or normalized_tileinfo
 	_mark_foliage_preview_dirty()
 	_update_hud()
 	_sync_hud_from_editor()
+	_check_loaded_cdep_violations()
 	return OK
 
 
@@ -2000,7 +2022,15 @@ func save_project(dir_path: String) -> Error:
 		return ERR_BUSY
 	DirAccess.make_dir_recursive_absolute(dir_path)
 	_document.normalize_foliage_state_for_editor()
-	var name := _get_terrain_name()
+	# The terrain name is the project directory's basename. Renaming the
+	# terrain is done by Save-As'ing into a differently-named directory —
+	# the name field in the properties panel is read-only on purpose, so
+	# there is no way for the terrain name and the dir name to drift apart.
+	var name := dir_path.get_file()
+	if name.is_empty():
+		name = "untitled"
+	if _data and String(_data.get_terrain_name()) != name:
+		_data.set_terrain_name(name)
 
 	var raw16 := _image_to_raw16(_heightmap_image)
 	var depth_path := dir_path + "/" + name + "_depth.raw"
@@ -2017,35 +2047,15 @@ func save_project(dir_path: String) -> Error:
 	if err != OK:
 		return err
 
-	var project := NovaTerrainProject.new()
-	project.terrain_name = name
-	project.creator = ""
-	project.project_path = dir_path.replace("/", "\\") + "\\"
-	project.depthmap = "%s_depth.raw" % name
-	project.output = name
-	project.charmap = _document.get_slot_filename_or_default("charmap", name)
-	project.foliagemap = _document.get_slot_filename_or_default("foliagemap", name)
-	project.tilestrip = _document.get_slot_filename_or_default("tilestrip", name)
-	project.tileinfo = String(_document.get_tileinfo_summary().get("reference", ""))
-	project.foliage_defs = _document.foliage_defs.duplicate(true)
-	project.has_metadata = (
-		not project.charmap.is_empty()
-		or not project.foliagemap.is_empty()
-		or not project.tilestrip.is_empty()
-		or not project.tileinfo.is_empty()
-		or project.foliage_defs.size() > 0
-	)
-	err = ResourceSaver.save(project, dir_path + "/" + name + ".tpj")
-	if err != OK:
-		return err
-
+	# Project save writes the .trn with no polydata — CPT is an export-time
+	# bake artifact, not an authoring one. NovaTerrainData::load() tolerates
+	# missing CPT since the "make CPT optional" change.
 	_document.prepare_data_for_trn_save(name, "")
 	err = ResourceSaver.save(_data, dir_path + "/" + name + ".trn")
 	if err != OK:
 		return err
 
 	_document.current_project_dir = dir_path
-	_document.current_project_tpj_path = dir_path + "/" + name + ".tpj"
 	_document.current_trn_path = dir_path + "/" + name + ".trn"
 	_remember_save_dir(dir_path)
 	is_dirty = false
@@ -2054,57 +2064,7 @@ func save_project(dir_path: String) -> Error:
 	return OK
 
 
-func open_tpj(tpj_path: String) -> Error:
-	if is_export_running():
-		return ERR_BUSY
-	_brush_session.clear_history()
-	clear_clone_source()
-	var project := ResourceLoader.load(tpj_path, "NovaTerrainProject") as NovaTerrainProject
-	if project == null or String(project.depthmap).is_empty():
-		return ERR_FILE_CANT_READ
-
-	var dir_path := tpj_path.get_base_dir()
-	var depth_file: FileAccess = FileAccess.open(dir_path + "/" + String(project.depthmap), FileAccess.READ)
-	if not depth_file:
-		return ERR_FILE_CANT_READ
-	var raw_bytes := depth_file.get_buffer(HM_SIZE * HM_SIZE * 2)
-	depth_file.close()
-
-	_create_default_document(String(project.terrain_name))
-	_set_heightmap_image(_build_heightmap_from_raw16(raw_bytes))
-
-	var has_tpj_metadata: bool = project.has_metadata
-	var trn_path := dir_path + "/" + String(project.terrain_name) + ".trn"
-	var trn_resource := ResourceLoader.load(trn_path, "NovaTerrainData", ResourceLoader.CACHE_MODE_IGNORE) as NovaTerrainData
-	if trn_resource != null:
-		_data = trn_resource
-		texture_files = {}
-		_apply_default_visual_state(false)
-		_apply_loaded_textures_from_data()
-		_document.capture_trn_resource(_data)
-	elif has_tpj_metadata:
-		_document.capture_tpj_resource(project, false)
-	else:
-		texture_files = {}
-		_document.reset_trn_metadata()
-	_document.load_tileinfo_from_dir(dir_path)
-	var normalized_tileinfo := _normalize_loaded_tileinfo_if_needed()
-
-	_document.current_project_dir = dir_path
-	_document.current_project_tpj_path = tpj_path
-	_document.current_trn_path = trn_path
-	_remember_open_path(tpj_path)
-	var normalized := _normalize_sector_layout_if_needed()
-	_sync_sector_layout(true)
-	_mark_foliage_preview_dirty()
-	is_dirty = normalized or normalized_tileinfo
-	_update_hud()
-	_sync_hud_from_editor()
-	_check_loaded_cdep_violations()
-	return OK
-
-
-# Heightmaps loaded from existing TPJ projects can predate the editor's live
+# Heightmaps loaded from project .trn files can predate the editor's live
 # CDEP enforcement (or originate from external tools). If any 256-pixel
 # horizontal block exceeds the per-block range limit, prompt the user to
 # auto-clamp; otherwise the eventual DFX/JO export will fail at the bake
@@ -2339,10 +2299,55 @@ func _frame_camera_to_terrain() -> void:
 	var bounds := terrain_mesh.get_world_bounds()
 	if bounds.size.x <= 0.0 or bounds.size.z <= 0.0:
 		return
-	var center := bounds.position + bounds.size * 0.5
-	var extent := maxf(bounds.size.x, bounds.size.z)
+	# Prefer the authored sector region over the full grid extent — many
+	# terrains only populate a handful of sectors out of the 8×8 grid, and
+	# fitting the full empty extent puts the camera well past the far
+	# plane for nothing. Fall back to the full bounds if no sectors are
+	# authored yet.
+	var authored_rect := _authored_sector_world_rect()
+	var center: Vector3
+	var extent: float
+	if authored_rect.size.x > 0.0 and authored_rect.size.y > 0.0:
+		center = Vector3(
+			authored_rect.position.x + authored_rect.size.x * 0.5,
+			bounds.position.y + bounds.size.y * 0.5,
+			authored_rect.position.y + authored_rect.size.y * 0.5)
+		extent = maxf(authored_rect.size.x, authored_rect.size.y)
+	else:
+		center = bounds.position + bounds.size * 0.5
+		extent = maxf(bounds.size.x, bounds.size.z)
 	if camera and camera.has_method("frame_bounds"):
 		camera.frame_bounds(center, extent)
+
+
+# Returns the XZ-plane AABB covering sectors that the grid marks as authored
+# (cell value != 0). Rect2.size is zero when nothing is authored.
+func _authored_sector_world_rect() -> Rect2:
+	var sector_count: int = terrain_mesh.get_sector_count()
+	var sector_rows: int = terrain_mesh.get_sector_rows()
+	if sector_count <= 0 or sector_rows <= 0:
+		return Rect2()
+	var sector_size: float = terrain_mesh.SECTOR_SIZE
+	var origin_x: float = float(_data.get_origin_x()) if _data else 0.0
+	var origin_y: float = float(_data.get_origin_y()) if _data else 0.0
+	var min_col := sector_count
+	var max_col := -1
+	var min_row := sector_rows
+	var max_row := -1
+	for row in sector_rows:
+		for col in sector_count:
+			if terrain_mesh.get_sector_cell_value(row, col) != 0:
+				min_col = mini(min_col, col)
+				max_col = maxi(max_col, col)
+				min_row = mini(min_row, row)
+				max_row = maxi(max_row, row)
+	if max_col < min_col or max_row < min_row:
+		return Rect2()
+	var world_x := (origin_x + float(min_col)) * sector_size
+	var world_z := (origin_y + float(min_row)) * sector_size
+	var width := float(max_col - min_col + 1) * sector_size
+	var height := float(max_row - min_row + 1) * sector_size
+	return Rect2(world_x, world_z, width, height)
 
 
 func _build_default_sector_grid() -> PackedInt32Array:

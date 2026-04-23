@@ -19,14 +19,14 @@ add_library(${TARGET_NAME} SHARED
     terrain/nova_terrain_build_job.cpp
     terrain/nova_terrain_data.cpp
     terrain/nova_terrain_builder.cpp
-    terrain/nova_terrain_project.cpp
     terrain/nova_terrain_foliage_def.cpp
     terrain/nova_terrain_foliage_map.cpp
+    terrain/nova_foliage_dispatcher.cpp
     terrain/nova_terrain_tile_entry.cpp
     terrain/nova_terrain_tile_info.cpp
+    terrain/nova_terrain_tile_overlay.cpp
     terrain/trn_resource_format.cpp
     terrain/cpt_resource_format.cpp
-    terrain/tpj_resource_format.cpp
     terrain/til_resource_format.cpp
     util/nova_data_format.cpp
     util/nova_texture_format.cpp

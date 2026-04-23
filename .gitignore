@@ -65,3 +65,5 @@ godot/.godot/
 godot/exports/
 .godot-bin/
 godot/addons/gut/
+
+docs/

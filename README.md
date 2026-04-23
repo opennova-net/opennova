@@ -82,7 +82,7 @@ Imports Mixamo FBX animations and retargets them onto a NovaLogic skeleton. Stri
 
 ## Mod Tools
 
-A standalone terrain editor for authoring Delta Force maps. Sculpt heightmaps, paint surface types, scatter foliage, and bake the result straight to the game's terrain formats. Reads and writes `.tpj`, `.trn`, `.cpt`, and `.til` directly — no round-trip through other tools.
+A standalone terrain editor for authoring Delta Force maps. Sculpt heightmaps, paint surface types, scatter foliage, and bake the result straight to the game's terrain formats. Reads and writes `.trn`, `.cpt`, and `.til` directly — no round-trip through other tools.
 
 Launches the editor scene (`godot/modtools/terrain/terrain_editor.tscn`) on startup.
 

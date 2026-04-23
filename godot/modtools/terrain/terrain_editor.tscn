@@ -14,7 +14,7 @@ script = ExtResource("2")
 [node name="FlyCamera" type="Camera3D" parent="." unique_id=1351897193]
 transform = Transform3D(1, 0, 0, 0, 0.866, 0.5, 0, -0.5, 0.866, 512, 80, 600)
 near = 0.5
-far = 100000.0
+far = 1500.0
 script = ExtResource("3")
 move_speed = 300.0
 fast_speed = 2000.0

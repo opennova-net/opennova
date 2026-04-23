@@ -25,7 +25,7 @@ const INSPECTOR_SCENES := {
 	Mode.LAYOUT: preload("res://modtools/terrain/ui/inspectors/layout_inspector.tscn"),
 }
 
-enum FileMenuItem { NEW, OPEN_PROJECT, IMPORT_TERRAIN, SEP1, SAVE, SAVE_AS, SEP2, EXPORT }
+enum FileMenuItem { NEW, OPEN, SEP1, SAVE, SAVE_AS, SEP2, EXPORT }
 
 @onready var _file_menu: MenuButton = %FileMenu
 @onready var _project_label: Label = %ProjectLabel
@@ -166,8 +166,7 @@ func _build_file_menu() -> void:
 	var popup := _file_menu.get_popup()
 	popup.clear()
 	popup.add_item("New", FileMenuItem.NEW)
-	popup.add_item("Open project...", FileMenuItem.OPEN_PROJECT)
-	popup.add_item("Import .trn", FileMenuItem.IMPORT_TERRAIN)
+	popup.add_item("Open .trn...", FileMenuItem.OPEN)
 	popup.add_separator()
 	popup.add_item("Save", FileMenuItem.SAVE)
 	popup.add_item("Save as...", FileMenuItem.SAVE_AS)
@@ -180,27 +179,18 @@ func _build_file_menu() -> void:
 func _on_file_menu_selected(id: int) -> void:
 	if editor == null:
 		return
-	var open_project := func(path: String) -> void:
-		editor.request_open_tpj(path)
-	var import_trn := func(path: String) -> void:
+	var open_trn := func(path: String) -> void:
 		editor.request_open_trn(path)
 	var save_project_as := func(dir_path: String) -> void:
 		editor.save_project(dir_path)
 	match id:
 		FileMenuItem.NEW:
 			editor.request_new_terrain()
-		FileMenuItem.OPEN_PROJECT:
+		FileMenuItem.OPEN:
 			_open_file_dialog(
-				"Open project",
-				PackedStringArray(["*.tpj ; Terrain project"]),
-				open_project,
-				editor.get_last_open_dir()
-			)
-		FileMenuItem.IMPORT_TERRAIN:
-			_open_file_dialog(
-				"Import .trn",
-				PackedStringArray(["*.trn ; Terrain heightmap"]),
-				import_trn,
+				"Open .trn",
+				PackedStringArray(["*.trn ; Terrain"]),
+				open_trn,
 				editor.get_last_open_dir()
 			)
 		FileMenuItem.SAVE:

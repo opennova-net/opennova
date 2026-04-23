@@ -76,6 +76,8 @@ private:
 	void _build_collision();
 	void _load_textures();
 	void _clear_terrain();
+	void _clear_collision_bodies();
+	void _clear_patch_pool();
 	void _on_terrain_changed();
 	Ref<Shader> _load_terrain_shader();
 

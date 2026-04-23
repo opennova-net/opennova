@@ -1,8 +1,10 @@
 // NovaTerrain — Godot Node3D that builds and renders terrain meshes from CPT data.
-// Mesh building ported from RE/opennova-godot/libs/engine/src/terrain_scene.cpp.
-// Quadtree traversal ported from RE/opennova-godot/libs/engine/src/quadtree.cpp.
 
 #include "nova_terrain.h"
+
+// Engine: jodemo.exe Terrain_RenderSectorTile@0x5CDAA0,
+// Terrain_TraverseQuadTreeNode@0x5C89C0, Terrain_CollectVisibleSectors@0x5C9120
+// docs/engine_spec_terrain.md 7.1-7.2
 
 #include <godot_cpp/classes/collision_shape3d.hpp>
 #include <godot_cpp/classes/engine.hpp>
@@ -97,6 +99,7 @@ NovaTerrain::NovaTerrain() {
 }
 
 NovaTerrain::~NovaTerrain() {
+	_clear_patch_pool();
 }
 
 void NovaTerrain::set_terrain_data(const Ref<NovaTerrainData> &p_data) {
@@ -218,7 +221,8 @@ void NovaTerrain::_notification(int p_what) {
 		visible.reserve(256);
 		opennova::TraversalStats tstats;
 
-		// Sector iteration: (int)cam_pos >> 9 matches reference terrain_scene.cpp:408-409
+		// Engine: sector iteration uses 512-world-unit sectors before the shared
+		// quadtree walk (Terrain_CollectVisibleSectors@0x5C9120).
 		int cam_sx = (int)cam_pos.x >> 9;
 		int cam_sz = (int)cam_pos.z >> 9;
 		int mask_x = trn.wrap_x ? 0 : -16;
@@ -384,6 +388,7 @@ void NovaTerrain::_notification(int p_what) {
 		terrain_node_cache_valid = false;
 		set_process(true);
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
+		_clear_patch_pool();
 		cached_env_node = nullptr;
 		cached_weather_node = nullptr;
 		terrain_node_cache_valid = false;
@@ -499,16 +504,23 @@ void NovaTerrain::_on_terrain_changed() {
 	_load_textures();
 }
 
-void NovaTerrain::_clear_terrain() {
+void NovaTerrain::_clear_collision_bodies() {
 	for (StaticBody3D* body : collision_bodies) {
 		if (body) {
-			remove_child(body);
+			if (body->get_parent() == this) {
+				remove_child(body);
+			}
 			body->queue_free();
 		}
 	}
 	collision_bodies.clear();
+}
 
+void NovaTerrain::_clear_patch_pool() {
 	RenderingServer* rs = RenderingServer::get_singleton();
+	if (!rs) {
+		return;
+	}
 	for (int i = 0; i < PATCH_POOL_SIZE; i++) {
 		if (patch_instances[i].is_valid()) {
 			rs->free_rid(patch_instances[i]);
@@ -519,6 +531,12 @@ void NovaTerrain::_clear_terrain() {
 		patch_visible[i] = false;
 	}
 	patches_active = 0;
+}
+
+void NovaTerrain::_clear_terrain() {
+	_clear_collision_bodies();
+	_clear_patch_pool();
+
 	tile_infos.clear();
 	quad_nodes.clear();
 	tile_mesh_meta.clear();
@@ -708,7 +726,8 @@ void NovaTerrain::_build_quadtree() {
 	// Build mipchain
 	mipchain = opennova::build_mipchain(cpt.depth_buffer, 1024);
 
-	// Recursive quadtree builder (matches terrain_scene.cpp QuadBuilder)
+	// Shared quadtree builder feeding the same 1024 -> leaf subdivision the
+	// engine traverses in Terrain_TraverseQuadTreeNode@0x5C89C0.
 	struct Builder {
 		std::vector<opennova::QuadNode>& nodes;
 		const std::map<TileKey, int>& lut;

@@ -1,19 +1,25 @@
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <vector>
 
 namespace opennova {
 
+// Engine: jodemo.exe Terrain_DrawTileOverlays2D@0x5C79C0,
+// sub_5C42B0@0x5C42B0, Terrain_RenderSectorTile@0x5CDAA0
+// docs/engine_spec_tiles.md 4.1-4.5
+
 constexpr uint32_t TIL_MAGIC = 0x74696C30u;
 
 constexpr uint8_t TIL_FLAG_FLIP_X = 0x01u;
 constexpr uint8_t TIL_FLAG_FLIP_Y = 0x02u;
 constexpr uint8_t TIL_FLAG_ROTATE_90 = 0x04u;
-// Bit 0x08 — the original game renderer emits a secondary LINELIST pass when this
-// is set (4 edges / 8 vertices, interpreted as a perimeter outline). Named here for
-// that observable effect. See memory/reference_ida_tiles.md Audit (2026-04-20).
+// Bit 0x08 - the original game renderer emits a secondary LINELIST pass when this
+// is set (4 edges / 8 vertices, interpreted as a perimeter outline).
+// Engine: jodemo.exe Terrain_DrawTileOverlays2D@0x5C79C0
+// docs/engine_spec_tiles.md 4.5
 constexpr uint8_t TIL_FLAG_OUTLINE = 0x08u;
 constexpr uint8_t TIL_FLAG_AUTHORED_MASK = TIL_FLAG_FLIP_X | TIL_FLAG_FLIP_Y | TIL_FLAG_ROTATE_90 | TIL_FLAG_OUTLINE;
 
@@ -26,6 +32,23 @@ constexpr int32_t TIL_FIXED_CELL_UNITS = TIL_CELL_WORLD_UNITS << TIL_FIXED_SHIFT
 struct TilCellCoord {
 	int x = 0;
 	int z = 0;
+};
+
+struct TilUv {
+	float u = 0.0f;
+	float v = 0.0f;
+};
+
+struct TilUvQuad {
+	std::array<TilUv, 4> corners{};
+	bool valid = false;
+};
+
+struct TilAtlasLayout {
+	int tiles_x = 0;
+	int tiles_y = 0;
+	float step_u = 0.0f;
+	float step_v = 0.0f;
 };
 
 struct TilOverlayEntry {
@@ -89,6 +112,73 @@ inline float til_world_z_from_cell(int cell_z) {
 
 inline float til_world_center_from_cell(int cell) {
 	return til_world_from_cell(cell) + static_cast<float>(TIL_CELL_WORLD_UNITS) * 0.5f;
+}
+
+inline TilAtlasLayout til_make_atlas_layout(int atlas_width, int atlas_height) {
+	TilAtlasLayout layout;
+	if (atlas_width < TIL_ATLAS_TILE_PIXELS || atlas_height < TIL_ATLAS_TILE_PIXELS) {
+		return layout;
+	}
+	layout.tiles_x = atlas_width / TIL_ATLAS_TILE_PIXELS;
+	layout.tiles_y = atlas_height / TIL_ATLAS_TILE_PIXELS;
+	if (layout.tiles_x <= 0 || layout.tiles_y <= 0) {
+		layout = TilAtlasLayout{};
+		return layout;
+	}
+	layout.step_u = 1.0f / static_cast<float>(layout.tiles_x);
+	layout.step_v = 1.0f / static_cast<float>(layout.tiles_y);
+	return layout;
+}
+
+inline TilUv til_transform_local_uv(TilUv uv, uint8_t flags) {
+	// Engine: jodemo.exe Terrain_DrawTileOverlays2D@0x5C79C0,
+	// sub_5C42B0@0x5C42B0
+	// docs/engine_spec_tiles.md 4.2
+	if (flags & TIL_FLAG_FLIP_X) {
+		uv.u = 1.0f - uv.u;
+	}
+	if (flags & TIL_FLAG_FLIP_Y) {
+		uv.v = 1.0f - uv.v;
+	}
+	if (flags & TIL_FLAG_ROTATE_90) {
+		uv = TilUv{uv.v, 1.0f - uv.u};
+	}
+	return uv;
+}
+
+inline TilUvQuad til_build_entry_uv_quad(uint8_t tile_index,
+                                         uint8_t flags,
+                                         int atlas_width,
+                                         int atlas_height) {
+	TilUvQuad quad;
+	const TilAtlasLayout layout = til_make_atlas_layout(atlas_width, atlas_height);
+	if (layout.tiles_x <= 0 || layout.tiles_y <= 0) {
+		return quad;
+	}
+
+	int tile_col = tile_index % layout.tiles_x;
+	int tile_row = tile_index / layout.tiles_x;
+	if (tile_row < 0 || tile_row >= layout.tiles_y) {
+		tile_col = 0;
+		tile_row = 0;
+	}
+
+	const float origin_u = static_cast<float>(tile_col) * layout.step_u;
+	const float origin_v = static_cast<float>(tile_row) * layout.step_v;
+	const std::array<TilUv, 4> local = {
+	    til_transform_local_uv(TilUv{0.0f, 0.0f}, flags),
+	    til_transform_local_uv(TilUv{1.0f, 0.0f}, flags),
+	    til_transform_local_uv(TilUv{0.0f, 1.0f}, flags),
+	    til_transform_local_uv(TilUv{1.0f, 1.0f}, flags),
+	};
+	for (size_t i = 0; i < local.size(); ++i) {
+		quad.corners[i] = TilUv{
+		    origin_u + local[i].u * layout.step_u,
+		    origin_v + local[i].v * layout.step_v,
+		};
+	}
+	quad.valid = true;
+	return quad;
 }
 
 inline float til_world_x_from_fixed(int32_t x_fixed) {

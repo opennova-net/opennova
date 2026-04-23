@@ -1,5 +1,9 @@
 #include <til/til_io.h>
 
+// Engine: jodemo.exe Terrain_LoadTileInfoFile@0x5CA730,
+// sub_6081D0@0x6081D0, sub_6080F0@0x6080F0
+// docs/engine_spec_tiles.md 4.1, 5.1
+
 #include <limits>
 
 namespace opennova {

@@ -1,7 +1,10 @@
 // Quadtree LOD traversal, frustum culling, mipchain.
-// Ported from RE/opennova-godot/libs/engine/src/{quadtree,mipchain,frustum}.cpp
 
 #include "terrain/quadtree.h"
+
+// Engine: jodemo.exe Terrain_TraverseQuadTreeNode@0x5C89C0,
+// Terrain_CollectVisibleSectors@0x5C9120, Terrain_BuildHeightMipChain@0x5C5310
+// docs/engine_spec_terrain.md 5.3, 7.1
 
 #include <algorithm>
 #include <cmath>

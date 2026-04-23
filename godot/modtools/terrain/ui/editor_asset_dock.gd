@@ -38,8 +38,8 @@ var _file_dialog: FileDialog
 func _ready() -> void:
 	_configure_tabs()
 	_build_slot_sections()
-	_terrain_name_edit.text_submitted.connect(_on_terrain_name_submitted)
-	_terrain_name_edit.focus_exited.connect(_on_terrain_name_commit)
+	# TerrainNameEdit is read-only — renaming happens via File → Save As,
+	# which derives the new terrain name from the destination directory.
 	_detail_density_spin.value_changed.connect(_on_detail_density_changed)
 	_detail_density2_spin.value_changed.connect(_on_detail_density2_changed)
 	_fly_speed_spin.value_changed.connect(_on_fly_speed_changed)
@@ -273,20 +273,6 @@ func _open_file_dialog(title: String, filters: PackedStringArray, on_pick: Calla
 		_file_dialog.file_selected.disconnect(sig.callable)
 	_file_dialog.file_selected.connect(on_pick, CONNECT_ONE_SHOT)
 	_file_dialog.popup_centered()
-
-
-func _on_terrain_name_submitted(text: String) -> void:
-	_commit_terrain_name(text)
-
-
-func _on_terrain_name_commit() -> void:
-	_commit_terrain_name(_terrain_name_edit.text)
-
-
-func _commit_terrain_name(text: String) -> void:
-	if _syncing or editor == null:
-		return
-	editor.set_terrain_name_value(text)
 
 
 func _on_detail_density_changed(value: float) -> void:

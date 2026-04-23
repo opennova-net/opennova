@@ -26,15 +26,13 @@ class DummyTerrainMesh:
 
 
 func test_raise_lower_invert() -> void:
-	pending("pre-existing: brush session emits out-of-bounds push_errors that GUT treats as unexpected. Needs brush/DummyTerrainMesh coord fix.")
-	return
 	var mesh := DummyTerrainMesh.new()
 	var session := TerrainEditorBrushSession.new()
 	var heightmap := _make_heightmap(10.0)
 	var blendmap := _make_color_image(Color(1.0, 0.0, 0.0, 1.0))
 	var colormap := _make_color_image(Color(0.0, 0.0, 0.0, 1.0))
 
-	session.current_tool = 0
+	session.current_tool = TerrainEditorBrushSession.Tool.RAISE
 	session.brush_radius = 4.0
 	session.brush_strength = 1.0
 	session.brush_hardness = 1.0
@@ -45,7 +43,7 @@ func test_raise_lower_invert() -> void:
 	assert_lt(heightmap.get_pixel(32, 32).r, 10.0, "Ctrl+Raise should invert into lowering terrain.")
 
 	heightmap = _make_heightmap(10.0)
-	session.current_tool = 1
+	session.current_tool = TerrainEditorBrushSession.Tool.LOWER
 	session.begin_brush_drag(heightmap, true)
 	var lower_result := session.apply_brush_stroke(1.0, Vector3(32, 0, 32), true, mesh, heightmap, blendmap, colormap)
 	session.end_brush_drag(heightmap)
@@ -98,13 +96,11 @@ func test_clone_paint_uses_source_color() -> void:
 
 
 func test_blend_paint_stays_normalized() -> void:
-	pending("pre-existing: 0.0001 tolerance is too tight for RGBA8 quantization (~1/255 ≈ 0.004).")
-	return
 	var image := _make_color_image(Color(1.0, 0.0, 0.0, 1.0))
 	TerrainEditorBrushes.apply_blend_paint(image, 1, 16, 16, 4, 1.0, 1.0, Rect2i(0, 0, 64, 64))
 	var painted := image.get_pixel(16, 16)
 	var total := painted.r + painted.g + painted.b
-	assert_almost_eq(total, 1.0, 0.0001, "Blend painting should keep channel weights normalized.")
+	assert_almost_eq(total, 1.0, 0.005, "Blend painting should keep channel weights normalized within RGBA8 precision.")
 	assert_true(painted.g > 0.0 and painted.g < 1.0, "Blend painting should add weight to the selected channel.")
 
 
@@ -121,7 +117,7 @@ func test_hardness_changes_edge_falloff() -> void:
 
 
 func _make_heightmap(fill_height: float) -> Image:
-	var image := Image.create(64, 64, false, Image.FORMAT_RF)
+	var image := Image.create(1024, 1024, false, Image.FORMAT_RF)
 	image.fill(Color(fill_height, 0, 0, 1))
 	return image
 

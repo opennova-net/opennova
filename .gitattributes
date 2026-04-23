@@ -1,7 +1,12 @@
-# Git LFS tracking for binary fixtures
-fixtures/** filter=lfs diff=lfs merge=lfs -text
-assets/** filter=lfs diff=lfs merge=lfs -text
 # Enforce LF line endings for all text files
 * text=auto eol=lf
-godot/assets/** filter=lfs diff=lfs merge=lfs -text
-game/assets/** filter=lfs diff=lfs merge=lfs -text
+
+# Git LFS tracking for binary fixtures and assets
+fixtures/** filter=lfs diff=lfs merge=lfs -text -eol
+assets/** filter=lfs diff=lfs merge=lfs -text -eol
+godot/assets/** filter=lfs diff=lfs merge=lfs -text -eol
+game/assets/** filter=lfs diff=lfs merge=lfs -text -eol
+
+# Existing Godot sample assets are committed as regular binary files.
+godot/game/assets/** -text -eol
+godot/modtools/assets/** -text -eol

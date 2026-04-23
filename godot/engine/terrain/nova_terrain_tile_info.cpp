@@ -2,6 +2,9 @@
 
 #include "nova_terrain_tile_entry.h"
 
+// Engine: jodemo.exe Terrain_LoadTileInfoFile@0x5CA730
+// docs/engine_spec_tiles.md 4.1
+
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 

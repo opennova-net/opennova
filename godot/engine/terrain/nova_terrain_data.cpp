@@ -2,6 +2,9 @@
 
 #include "nova_terrain_foliage_def.h"
 #include "nova_terrain_foliage_map.h"
+#include "nova_terrain_tile_info.h"
+
+#include <til/til_io.h>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
@@ -75,6 +78,38 @@ static opennova::FoliageMap foliage_map_from_slot_data(const std::vector<uint8_t
 	return map;
 }
 
+struct TerrainWorldSample {
+	int sector_sx = 0;
+	int sector_sz = 0;
+	int sector_id = 0;
+	float source_x = 0.0f;
+	float source_z = 0.0f;
+};
+
+bool resolve_world_sample(const opennova::TrnConfig &trn,
+                          float world_x,
+                          float world_z,
+                          TerrainWorldSample &out_sample) {
+	out_sample = TerrainWorldSample{};
+	out_sample.sector_sx = static_cast<int>(std::floor(world_x / 512.0f));
+	out_sample.sector_sz = static_cast<int>(std::floor(world_z / 512.0f));
+
+	const int grid_x = out_sample.sector_sx - trn.origin_x;
+	const int grid_z = out_sample.sector_sz - trn.origin_y;
+	out_sample.sector_id = trn.sector_grid[grid_z & 0xF][grid_x & 0xF];
+	if (out_sample.sector_id <= 0) {
+		return false;
+	}
+
+	const float local_x = world_x - static_cast<float>(out_sample.sector_sx * 512);
+	const float local_z = world_z - static_cast<float>(out_sample.sector_sz * 512);
+	const float quadrant_x = (out_sample.sector_id == 3 || out_sample.sector_id == 4) ? 512.0f : 0.0f;
+	const float quadrant_z = (out_sample.sector_id == 2 || out_sample.sector_id == 4) ? 512.0f : 0.0f;
+	out_sample.source_x = quadrant_x + local_x;
+	out_sample.source_z = quadrant_z + local_z;
+	return true;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -82,7 +117,7 @@ static opennova::FoliageMap foliage_map_from_slot_data(const std::vector<uint8_t
 // ---------------------------------------------------------------------------
 
 #define IMPL_TEX_PROP(field, setter, getter) \
-	void NovaTerrainData::setter(const Ref<Texture2D> &p_tex) { field = p_tex; _notify_terrain_changed(); } \
+	void NovaTerrainData::setter(const Ref<Texture2D> &p_tex) { field = p_tex; _sync_trn_texture_filenames_from_refs(); _notify_terrain_changed(); } \
 	Ref<Texture2D> NovaTerrainData::getter() const { return field; }
 
 #define BIND_TEX_PROP(prop, setter, getter) \
@@ -104,6 +139,7 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_height", "world_pos"), &NovaTerrainData::get_height);
 	ClassDB::bind_method(D_METHOD("get_height_world", "world_pos"), &NovaTerrainData::get_height_world);
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &NovaTerrainData::get_height_world_bilinear);
+	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("get_tile_count"), &NovaTerrainData::get_tile_count);
 	ClassDB::bind_method(D_METHOD("load_foliage_indices"), &NovaTerrainData::load_foliage_indices);
 	ClassDB::bind_method(D_METHOD("set_sector_grid", "value"), &NovaTerrainData::set_sector_grid);
@@ -118,6 +154,7 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_polydata_filename"), &NovaTerrainData::get_polydata_filename);
 	ClassDB::bind_method(D_METHOD("set_tileinfo_filename", "filename"), &NovaTerrainData::set_tileinfo_filename);
 	ClassDB::bind_method(D_METHOD("get_tileinfo_filename"), &NovaTerrainData::get_tileinfo_filename);
+	ClassDB::bind_method(D_METHOD("get_tileinfo_resource"), &NovaTerrainData::get_tileinfo_resource);
 
 	ClassDB::bind_method(D_METHOD("import_pcx_slot", "slot_id", "path"), &NovaTerrainData::import_pcx_slot);
 	ClassDB::bind_method(D_METHOD("save_pcx_slot", "slot_id", "path"), &NovaTerrainData::save_pcx_slot);
@@ -508,20 +545,13 @@ static void _sync_texture_filename(const Ref<Texture2D> &texture, std::string &t
 	}
 }
 
-void NovaTerrainData::_sync_trn_from_properties() {
+// Sync Godot scalar properties (name, sector grid, water, wrap, etc.) into
+// the underlying TrnConfig. Always safe to run — does not touch texture
+// filename fields, which are either (a) owned by Ref<Texture2D> setters
+// (covered by _sync_trn_texture_filenames_from_refs below), or (b) set
+// explicitly via set_trn_texture_filename().
+void NovaTerrainData::_sync_trn_scalars_from_properties() {
 	trn.name = terrain_name.utf8().get_data();
-	_sync_texture_filename(colormap, trn.colormap);
-	_sync_texture_filename(detailmap, trn.detailmap);
-	_sync_texture_filename(detailmap_c1, trn.detailmap_c1);
-	_sync_texture_filename(detailmap_c2, trn.detailmap_c2);
-	_sync_texture_filename(detailmap_c3, trn.detailmap_c3);
-	_sync_texture_filename(detailmap2, trn.detailmap2);
-	_sync_texture_filename(detailmapdist, trn.detailmapdist);
-	_sync_texture_filename(detailmapdist2, trn.detailmapdist2);
-	_sync_texture_filename(detailblendmap, trn.detailblendmap);
-	// PCX-backed slot filenames are owned by import/reset paths because their
-	// preview textures are generated in memory and do not carry resource paths.
-	_sync_texture_filename(tilestrip_tex, trn.tilestrip);
 	trn.detail_density = detail_density;
 	trn.detail_density2 = detail_density2;
 	trn.sector_count = sector_count;
@@ -540,8 +570,33 @@ void NovaTerrainData::_sync_trn_from_properties() {
 	}
 }
 
+// Re-derive texture filename fields from the Ref<Texture2D> paths. Only
+// called from IMPL_TEX_PROP setters — running this elsewhere would
+// silently overwrite filenames that set_trn_texture_filename had
+// explicitly set (the Ref still carries its source path even after the
+// user asked for a new export name).
+void NovaTerrainData::_sync_trn_texture_filenames_from_refs() {
+	_sync_texture_filename(colormap, trn.colormap);
+	_sync_texture_filename(detailmap, trn.detailmap);
+	_sync_texture_filename(detailmap_c1, trn.detailmap_c1);
+	_sync_texture_filename(detailmap_c2, trn.detailmap_c2);
+	_sync_texture_filename(detailmap_c3, trn.detailmap_c3);
+	_sync_texture_filename(detailmap2, trn.detailmap2);
+	_sync_texture_filename(detailmapdist, trn.detailmapdist);
+	_sync_texture_filename(detailmapdist2, trn.detailmapdist2);
+	_sync_texture_filename(detailblendmap, trn.detailblendmap);
+	// PCX-backed slot filenames are owned by import/reset paths because their
+	// preview textures are generated in memory and do not carry resource paths.
+	_sync_texture_filename(tilestrip_tex, trn.tilestrip);
+}
+
 void NovaTerrainData::_notify_terrain_changed() {
-	_sync_trn_from_properties();
+	// Always sync scalars — cheap and needed so `trn` stays consistent for
+	// saves. Deliberately DO NOT sync texture filenames here: that would
+	// clobber filenames set via set_trn_texture_filename (e.g. Save Project's
+	// rename-from-imported-to-exported step). Texture Ref setters call the
+	// filename sync themselves.
+	_sync_trn_scalars_from_properties();
 	emit_signal("terrain_changed");
 	emit_changed();
 }
@@ -640,17 +695,26 @@ Error NovaTerrainData::load() {
 	tilestrip_tex = _load_texture_from_dir(trn_dir, tilestrip_filename);
 	trn.tilestrip = tilestrip_filename.utf8().get_data();
 
-	// Load CPT from polytrn_polydata
+	// CPT is an export-time bake artefact; editor projects legitimately save
+	// a .trn without one (see plan: "Make CPT optional"). Missing/empty
+	// polydata is not an error — load() still succeeds, cpt stays empty, and
+	// consumers that need CPT (NovaTerrain::_build_terrain @ nova_terrain.cpp:571,
+	// get_height* guards @ nova_terrain_data.cpp:714/739/758) already early-out
+	// gracefully.
 	if (trn.polydata.empty()) {
-		UtilityFunctions::printerr("NovaTerrainData: TRN has no polytrn_polydata field");
-		return ERR_FILE_CANT_READ;
+		loaded = true;
+		UtilityFunctions::print("NovaTerrainData: Loaded terrain '", terrain_name,
+			"' (no CPT — editor project mode)");
+		return OK;
 	}
 
 	String cpt_path = trn_dir.path_join(String(trn.polydata.c_str()));
 	Ref<FileAccess> cpt_file = FileAccess::open(cpt_path, FileAccess::READ);
 	if (cpt_file.is_null()) {
-		UtilityFunctions::printerr("NovaTerrainData: Cannot open CPT: ", cpt_path);
-		return ERR_FILE_CANT_READ;
+		loaded = true;
+		UtilityFunctions::push_warning("NovaTerrainData: CPT '", cpt_path,
+			"' missing; continuing without baked terrain (run Export to generate it)");
+		return OK;
 	}
 	PackedByteArray cpt_bytes = cpt_file->get_buffer(cpt_file->get_length());
 	cpt_file.unref();
@@ -696,61 +760,85 @@ float NovaTerrainData::get_height(const Vector3 &p_world_pos) const {
 }
 
 float NovaTerrainData::get_height_world(const Vector3 &p_world_pos) const {
-	// Port of TerrainScene::sample_height_world (RE terrain_scene.cpp:66-81)
-	// Maps world coords -> sector -> local heightmap coords via sector_grid
-	if (!loaded || cpt.depth_buffer.empty()) return 0.0f;
-	int hm_size = 1024;
-	int sector_sx = (int)std::floor(p_world_pos.x / 512.0f);
-	int sector_sz = (int)std::floor(p_world_pos.z / 512.0f);
-	int gx = sector_sx - trn.origin_x;
-	int gz = sector_sz - trn.origin_y;
-	int sector_id = trn.sector_grid[gz & 0xF][gx & 0xF];
-	if (sector_id <= 0) return 0.0f;
-	int local_x = (int)p_world_pos.x - sector_sx * 512;
-	int local_z = (int)p_world_pos.z - sector_sz * 512;
-	int qx = (sector_id == 3 || sector_id == 4) ? 512 : 0;
-	int qz = (sector_id == 2 || sector_id == 4) ? 512 : 0;
-	int hx = (local_x + qx) & (hm_size - 1);
-	int hz = (local_z + qz) & (hm_size - 1);
+	// Engine: jodemo.exe terrain world->heightmap mapping used by
+	// Terrain_SampleHeightBilinear@0x5C6770 and Terrain_GetFoliageMapValue@0x5C65E0
+	// docs/engine_spec_terrain.md 5.2, docs/engine_spec_foliage.md 4.4.4
+	if (!loaded || cpt.depth_buffer.empty()) {
+		return 0.0f;
+	}
+
+	TerrainWorldSample sample;
+	if (!resolve_world_sample(trn, p_world_pos.x, p_world_pos.z, sample)) {
+		return 0.0f;
+	}
+
+	const int hm_size = 1024;
+	const int mask = hm_size - 1;
+	const int hx = static_cast<int>(std::floor(sample.source_x)) & mask;
+	const int hz = static_cast<int>(std::floor(sample.source_z)) & mask;
 	return cpt.depth_buffer[hz * hm_size + hx] / 256.0f;
 }
 
 float NovaTerrainData::get_height_world_bilinear(const Vector3 &p_world_pos) const {
-	// Port of TerrainScene::sample_height_world_bilinear (RE terrain_scene.cpp:49-64)
-	// Bilinear interpolation with sector grid mapping
-	if (!loaded || cpt.depth_buffer.empty()) return 0.0f;
-	int hm_size = 1024;
-	int mask = hm_size - 1;
-	int sector_sx = (int)std::floor(p_world_pos.x / 512.0f);
-	int sector_sz = (int)std::floor(p_world_pos.z / 512.0f);
-	int gx = sector_sx - trn.origin_x;
-	int gz = sector_sz - trn.origin_y;
-	int sector_id = trn.sector_grid[gz & 0xF][gx & 0xF];
-	if (sector_id <= 0) return 0.0f;
-	float local_x = p_world_pos.x - static_cast<float>(sector_sx * 512);
-	float local_z = p_world_pos.z - static_cast<float>(sector_sz * 512);
-	int qx = (sector_id == 3 || sector_id == 4) ? 512 : 0;
-	int qz = (sector_id == 2 || sector_id == 4) ? 512 : 0;
-	float hmx = local_x + static_cast<float>(qx);
-	float hmz = local_z + static_cast<float>(qz);
-	// Bilinear interpolation (port of gobj_trn_sample_height_bilinear 0x100314A1)
-	int ix = (int)std::floor(hmx);
-	int iz = (int)std::floor(hmz);
-	float fx = hmx - static_cast<float>(ix);
-	float fz = hmz - static_cast<float>(iz);
-	int x0 = ix & mask, x1 = (ix + 1) & mask;
-	int z0 = iz & mask, z1 = (iz + 1) & mask;
-	float h00 = static_cast<float>(cpt.depth_buffer[z0 * hm_size + x0]);
-	float h10 = static_cast<float>(cpt.depth_buffer[z0 * hm_size + x1]);
-	float h01 = static_cast<float>(cpt.depth_buffer[z1 * hm_size + x0]);
-	float h11 = static_cast<float>(cpt.depth_buffer[z1 * hm_size + x1]);
-	float top = h00 + (h10 - h00) * fx;
-	float bot = h01 + (h11 - h01) * fx;
+	// Engine: jodemo.exe Terrain_SampleHeightBilinear@0x5C6770
+	// docs/engine_spec_terrain.md 5.2
+	if (!loaded || cpt.depth_buffer.empty()) {
+		return 0.0f;
+	}
+
+	TerrainWorldSample sample;
+	if (!resolve_world_sample(trn, p_world_pos.x, p_world_pos.z, sample)) {
+		return 0.0f;
+	}
+
+	const int hm_size = 1024;
+	const int mask = hm_size - 1;
+	const int ix = static_cast<int>(std::floor(sample.source_x));
+	const int iz = static_cast<int>(std::floor(sample.source_z));
+	const float fx = sample.source_x - static_cast<float>(ix);
+	const float fz = sample.source_z - static_cast<float>(iz);
+	const int x0 = ix & mask;
+	const int x1 = (ix + 1) & mask;
+	const int z0 = iz & mask;
+	const int z1 = (iz + 1) & mask;
+	const float h00 = static_cast<float>(cpt.depth_buffer[z0 * hm_size + x0]);
+	const float h10 = static_cast<float>(cpt.depth_buffer[z0 * hm_size + x1]);
+	const float h01 = static_cast<float>(cpt.depth_buffer[z1 * hm_size + x0]);
+	const float h11 = static_cast<float>(cpt.depth_buffer[z1 * hm_size + x1]);
+	const float top = h00 + (h10 - h00) * fx;
+	const float bot = h01 + (h11 - h01) * fx;
 	return (top + (bot - top) * fz) / 256.0f;
 }
 
 int NovaTerrainData::get_tile_count() const {
 	return static_cast<int>(cpt.tiles.size());
+}
+
+int NovaTerrainData::get_foliage_index_world(float world_x, float world_z) const {
+	// Engine sub_5C65E0 (Terrain_GetFoliageMapValue) analogue. Uses the same
+	// sector+origin+quadrant math as get_height_world_bilinear — the sector
+	// grid is always 16×16; origin places the active region inside it with a
+	// wraparound mask on the lookup.
+	if (!loaded || foliage_map_resource.is_null()) {
+		return 0;
+	}
+
+	TerrainWorldSample sample;
+	if (!resolve_world_sample(trn, world_x, world_z, sample)) {
+		return 0;
+	}
+
+	const int w = foliage_map_resource->get_width();
+	const int h = foliage_map_resource->get_height();
+	if (w <= 0 || h <= 0) {
+		return 0;
+	}
+	const int map_x = foliage_map_resource->map_x_from_heightmap_x(sample.source_x);
+	const int map_y = foliage_map_resource->map_y_from_heightmap_y(sample.source_z);
+	if (map_x < 0 || map_x >= w || map_y < 0 || map_y >= h) {
+		return 0;
+	}
+	return static_cast<int>(foliage_map_resource->get_index(map_x, map_y));
 }
 
 Dictionary NovaTerrainData::load_foliage_indices() const {
@@ -867,9 +955,55 @@ String NovaTerrainData::get_polydata_filename() const {
 
 void NovaTerrainData::set_tileinfo_filename(const String &filename) {
 	trn.tileinfo = filename.utf8().get_data();
+	tileinfo_resource_cache.unref();
+	tileinfo_resource_cache_path = String();
 	_notify_terrain_changed();
 }
 
 String NovaTerrainData::get_tileinfo_filename() const {
 	return String(trn.tileinfo.c_str());
+}
+
+Ref<NovaTerrainTileInfo> NovaTerrainData::get_tileinfo_resource() const {
+	const String filename = String(trn.tileinfo.c_str());
+	if (filename.is_empty() || trn_path.is_empty()) {
+		tileinfo_resource_cache.unref();
+		tileinfo_resource_cache_path = String();
+		return Ref<NovaTerrainTileInfo>();
+	}
+
+	const String resolved = opennova::resolve_texture_path(trn_path.get_base_dir(), filename);
+	const String lookup = resolved.is_empty() ? trn_path.get_base_dir().path_join(filename) : resolved;
+
+	if (tileinfo_resource_cache.is_valid() && tileinfo_resource_cache_path == lookup) {
+		return tileinfo_resource_cache;
+	}
+
+	Ref<FileAccess> file = FileAccess::open(lookup, FileAccess::READ);
+	if (file.is_null()) {
+		UtilityFunctions::push_warning("NovaTerrainData: tileinfo file not found at ", lookup);
+		tileinfo_resource_cache.unref();
+		tileinfo_resource_cache_path = String();
+		return Ref<NovaTerrainTileInfo>();
+	}
+
+	PackedByteArray bytes = file->get_buffer(file->get_length());
+	file.unref();
+
+	opennova::TilFile til;
+	std::string error;
+	if (!opennova::load_til(bytes.ptr(), static_cast<size_t>(bytes.size()), til, error)) {
+		UtilityFunctions::push_warning("NovaTerrainData: tileinfo parse failed for ",
+			lookup, ": ", String(error.c_str()));
+		tileinfo_resource_cache.unref();
+		tileinfo_resource_cache_path = String();
+		return Ref<NovaTerrainTileInfo>();
+	}
+
+	Ref<NovaTerrainTileInfo> resource;
+	resource.instantiate();
+	resource->copy_from_native(til);
+	tileinfo_resource_cache = resource;
+	tileinfo_resource_cache_path = lookup;
+	return resource;
 }
