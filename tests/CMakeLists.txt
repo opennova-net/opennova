@@ -176,7 +176,7 @@ target_link_libraries(dvd4_parity_test PRIVATE opennova_terrain)
 target_include_directories(dvd4_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME dvd4_parity COMMAND dvd4_parity_test)
 
-# CDEP overflow guard: bake must throw rather than silently corrupt the .cpt
+# CDEP overflow guard: bake must clamp rather than silently corrupt the .cpt
 # when a 256-pixel block exceeds the 4-bit bits_per_delta field's 15-bit limit.
 add_executable(cdep_overflow_guard_test trngen/cdep_overflow_guard_test.cpp)
 target_link_libraries(cdep_overflow_guard_test PRIVATE opennova_terrain opennova_cpt)
