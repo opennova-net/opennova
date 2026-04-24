@@ -106,6 +106,13 @@ Modular libraries for parsing and writing NovaLogic formats. All expose a C API 
 | **bfc1** | | BFC1 decompression (zlib-based) |
 | **scr** | | SCR decryption (multiple keys for different game editions) |
 
+### Repo Boundaries and Naming
+
+- Core format code lives under `libs/`. CMake targets use `opennova_<domain>` names, C++ APIs use the `opennova` namespace where available, and C ABI exports stay flat and domain-prefixed for FFI stability.
+- Blender-specific scene construction lives in `apps/importer/scene_builder.py` and the `blender/` addon. Blender custom properties owned by this project use `opennova_*` keys.
+- Godot-specific runtime and editor integration lives under `godot/engine` and links the runtime/editor subset of the core libraries.
+- The shared FFI library target is `opennova_shared`; it bundles the core static libraries and outputs `opennova.dll` or `libopennova.so`.
+
 ## Building
 
 ### Prerequisites

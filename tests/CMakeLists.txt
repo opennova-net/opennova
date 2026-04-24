@@ -27,20 +27,26 @@ endforeach()
 # ADM tests
 foreach(test comment trim_value parse)
     add_executable(adm_${test}_test adm/adm_${test}_test.cpp)
-    target_link_libraries(adm_${test}_test PRIVATE oed_adm)
+    target_link_libraries(adm_${test}_test PRIVATE opennova_adm)
     target_include_directories(adm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME adm_${test} COMMAND adm_${test}_test)
 endforeach()
 
+# BAD tests
+add_executable(bad_parse_test bad/bad_parse_test.cpp)
+target_link_libraries(bad_parse_test PRIVATE opennova_bad)
+target_include_directories(bad_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME bad_parse COMMAND bad_parse_test)
+
 # DEF tests
 add_executable(def_comment_strip_test def/def_comment_strip_test.cpp)
-target_link_libraries(def_comment_strip_test PRIVATE oed_def)
+target_link_libraries(def_comment_strip_test PRIVATE opennova_def)
 target_include_directories(def_comment_strip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME def_comment_strip COMMAND def_comment_strip_test)
 
 foreach(test items weapons ammo hudpos)
     add_executable(def_parse_${test}_test def/def_parse_${test}_test.cpp)
-    target_link_libraries(def_parse_${test}_test PRIVATE oed_def)
+    target_link_libraries(def_parse_${test}_test PRIVATE opennova_def)
     target_include_directories(def_parse_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME def_parse_${test} COMMAND def_parse_${test}_test)
 endforeach()
@@ -50,6 +56,18 @@ add_executable(pff_unit_test pff/pff_unit_test.cpp)
 target_link_libraries(pff_unit_test PRIVATE opennova_pff)
 target_include_directories(pff_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_unit COMMAND pff_unit_test)
+
+# BFC1 tests
+add_executable(bfc1_unit_test bfc1/bfc1_unit_test.cpp)
+target_link_libraries(bfc1_unit_test PRIVATE opennova_bfc1)
+target_include_directories(bfc1_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME bfc1_unit COMMAND bfc1_unit_test)
+
+# SCR tests
+add_executable(scr_unit_test scr/scr_unit_test.cpp)
+target_link_libraries(scr_unit_test PRIVATE opennova_scr)
+target_include_directories(scr_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME scr_unit COMMAND scr_unit_test)
 
 # ASE tests
 add_executable(ase_smoke_test ase/ase_smoke_test.cpp)

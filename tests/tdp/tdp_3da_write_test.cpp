@@ -8,6 +8,8 @@
 #include <cstring>
 #include <string>
 
+#include "common/test_paths.h"
+
 static void copy_str(char *dst, size_t n, const char *src) {
     std::strncpy(dst, src, n - 1);
     dst[n - 1] = '\0';
@@ -121,7 +123,9 @@ int main() {
     lod->lights[0].colorgen_start[2] = 100;
 
     // Write 3DA
-    const char *tmp_path = "/tmp/tdp_3da_write_test.3da";
+    char tmp_path[4096];
+    std::snprintf(tmp_path, sizeof(tmp_path), "%s%ctdp_3da_write_test.3da",
+                  test_paths_temp_dir(), TEST_PATHS_SEP);
     int rc = tdp_write_3da(tmp_path, &proj);
     assert(rc == 0 && "tdp_write_3da failed");
 

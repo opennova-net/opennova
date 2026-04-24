@@ -1156,6 +1156,7 @@ int tdp_from_ir(const ThreediModelIR *ir, TdpProject *out) {
                             : &dst->anim_diffuse[slot_idx][tex->frame];
                         copy_str(af->path, sizeof(af->path), tex->name);
                         af->enabled = clamped;
+                        dst->anim_frames = std::max(dst->anim_frames, static_cast<int32_t>(tex->frame + 1));
                     }
                 } else {
                     // Static texture (frame 0)
@@ -1186,7 +1187,7 @@ int tdp_from_ir(const ThreediModelIR *ir, TdpProject *out) {
             dst->alphatestvalue = clamp_255(src->alpha_threshold);
 
             // Animation params
-            dst->anim_frames = src->animation.num_frames;
+            dst->anim_frames = std::max(dst->anim_frames, static_cast<int32_t>(src->animation.num_frames));
             dst->anim_type = src->animation.animation_type;
             // For ctrl-reg-driven animation (type 1), cycle_frame_time is the
             // register index, not a frame time — write 0 as the engine does.
@@ -1268,7 +1269,7 @@ int tdp_from_ir(const ThreediModelIR *ir, TdpProject *out) {
                 dst->rattrib |= 0x400;
             if (src->flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT)
                 dst->rattrib |= 0x1000;
-            if (src->animation.num_frames > 0)
+            if (dst->anim_frames > 0)
                 dst->rattrib |= 0x100;
 
         }

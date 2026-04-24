@@ -709,7 +709,7 @@ class BlenderSceneBuilder:
                         # VertexGroup.  Keep this best-effort so binding
                         # never aborts and skin weights are still exported.
                         try:
-                            vg["oed_bone_index"] = int(bone_idx)
+                            vg["opennova_bone_index"] = int(bone_idx)
                         except Exception:
                             pass
                         bone_vgroups[bone_idx] = vg
@@ -1520,7 +1520,7 @@ class BlenderSceneBuilder:
                     else:
                         # Preserve "no matrix" centers so export can emit a
                         # PANM matrix index of 0xFF.
-                        center_obj["oed_zero_axis"] = True
+                        center_obj["opennova_zero_axis"] = True
 
             # Create attach point markers (~XXx attach) for child parts
             pi_counter: dict[int, int] = {}
@@ -1817,7 +1817,7 @@ class BlenderSceneBuilder:
         shader = ir_mat.shader_name.decode("utf-8", errors="replace").rstrip("\x00")
         if shader:
             mat.name = f"{mat.name}_{shader}"
-            mat["oed_shader"] = shader
+            mat["opennova_shader"] = shader
 
         # Store original name before Blender mangles duplicates with .NNN suffixes
         mat["ase_material_name"] = mat.name
@@ -2143,7 +2143,7 @@ class BlenderSceneBuilder:
                 else:
                     # Preserve "no matrix" centers so export can emit a
                     # PANM matrix index of 0xFF.
-                    center_obj["oed_zero_axis"] = True
+                    center_obj["opennova_zero_axis"] = True
 
         # Create tilde attachment point objects (~01a, ~01b, etc.)
         num_parts = int(lod0.part_count)

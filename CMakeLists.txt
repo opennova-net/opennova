@@ -20,9 +20,29 @@ add_subdirectory(libs/ase)
 add_subdirectory(libs/tdp)
 add_subdirectory(libs/terrain)
 
+set(OPENNOVA_CORE_TARGETS
+    opennova_pcx
+    opennova_foliage
+    opennova_til
+    opennova_tpj
+    opennova_trn
+    opennova_cpt
+    opennova_env
+    opennova_terrain
+    opennova_threedi
+    opennova_pff
+    opennova_bfc1
+    opennova_bad
+    opennova_adm
+    opennova_def
+    opennova_scr
+    opennova_ase
+    opennova_tdp
+)
+
 # --------------------------------------------------------------------------
 # Shared library for FFI (Python ctypes, etc.)
-# Bundles threedi IR + BAD + ADM into a single .so / .dll
+# Bundles the core static libs into a single .so / .dll.
 # --------------------------------------------------------------------------
 option(BUILD_SHARED_LIB "Build the opennova shared library for FFI" OFF)
 
@@ -37,34 +57,14 @@ if(BUILD_SHARED_LIB)
     # Use --whole-archive to include all symbols from static libs
     # (the linker would otherwise discard unreferenced threedi symbols)
     if(MSVC)
-        target_link_libraries(opennova_shared
-            PRIVATE opennova_pcx opennova_foliage opennova_til opennova_tpj opennova_trn opennova_cpt opennova_env opennova_terrain
-            PRIVATE opennova_threedi opennova_pff opennova_bfc1 oed_bad oed_adm oed_def oed_scr opennova_ase opennova_tdp
-        )
-        target_link_options(opennova_shared PRIVATE
-            /WHOLEARCHIVE:opennova_pcx
-            /WHOLEARCHIVE:opennova_foliage
-            /WHOLEARCHIVE:opennova_til
-            /WHOLEARCHIVE:opennova_tpj
-            /WHOLEARCHIVE:opennova_trn
-            /WHOLEARCHIVE:opennova_cpt
-            /WHOLEARCHIVE:opennova_env
-            /WHOLEARCHIVE:opennova_terrain
-            /WHOLEARCHIVE:opennova_threedi
-            /WHOLEARCHIVE:opennova_pff
-            /WHOLEARCHIVE:opennova_bfc1
-            /WHOLEARCHIVE:oed_bad
-            /WHOLEARCHIVE:oed_adm
-            /WHOLEARCHIVE:oed_def
-            /WHOLEARCHIVE:oed_scr
-            /WHOLEARCHIVE:opennova_ase
-            /WHOLEARCHIVE:opennova_tdp
-        )
+        target_link_libraries(opennova_shared PRIVATE ${OPENNOVA_CORE_TARGETS})
+        foreach(target IN LISTS OPENNOVA_CORE_TARGETS)
+            target_link_options(opennova_shared PRIVATE "/WHOLEARCHIVE:${target}")
+        endforeach()
     else()
         target_link_libraries(opennova_shared
             PRIVATE -Wl,--whole-archive
-            PRIVATE opennova_pcx opennova_foliage opennova_til opennova_tpj opennova_trn opennova_cpt opennova_env opennova_terrain
-            PRIVATE opennova_threedi opennova_pff opennova_bfc1 oed_bad oed_adm oed_def oed_scr opennova_ase opennova_tdp
+            PRIVATE ${OPENNOVA_CORE_TARGETS}
             PRIVATE -Wl,--no-whole-archive
         )
     endif()
@@ -87,42 +87,10 @@ if(BUILD_SHARED_LIB)
 
     # Static libs need OPENNOVA_SHARED_EXPORTS so their functions get dllexport
     # when their object files are linked into the shared library
-    target_compile_definitions(opennova_pcx PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(opennova_foliage PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(opennova_til PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(opennova_tpj PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(opennova_trn PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(opennova_cpt PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(opennova_env PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(opennova_terrain PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(opennova_threedi PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(opennova_pff PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(oed_bad PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(oed_adm PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(oed_def PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(opennova_bfc1 PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(oed_scr PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(opennova_ase PRIVATE OPENNOVA_SHARED_EXPORTS)
-    target_compile_definitions(opennova_tdp PRIVATE OPENNOVA_SHARED_EXPORTS)
-
-    # On Linux the static libs must be compiled with -fPIC
-    set_target_properties(opennova_pcx PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(opennova_foliage PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(opennova_til PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(opennova_tpj PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(opennova_trn PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(opennova_cpt PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(opennova_env PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(opennova_terrain PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(opennova_threedi PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(opennova_pff PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(oed_bad PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(oed_adm PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(oed_def PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(opennova_bfc1 PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(oed_scr PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(opennova_ase PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(opennova_tdp PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    foreach(target IN LISTS OPENNOVA_CORE_TARGETS)
+        target_compile_definitions(${target} PRIVATE OPENNOVA_SHARED_EXPORTS)
+        set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    endforeach()
 endif()
 
 # --------------------------------------------------------------------------
