@@ -9,12 +9,21 @@ import sys
 import types
 import logging
 
+from .jobs import (
+    IMPORT_MODE_DEF,
+    IMPORT_MODE_LOOSE,
+    ImportRequest,
+    ImportResult,
+    ScanResult,
+    validate_import_request,
+)
+
 log = logging.getLogger(__name__)
 
 
 def _setup_blender_package() -> None:
     """Register the blender/ directory as a Python package without executing __init__.py."""
-    # Repo root is two levels up from this file (apps/importer/ → apps/ → repo root)
+    # Repo root is two levels up from this file (apps/importer/ -> apps/ -> repo root)
     apps_dir = os.path.dirname(os.path.dirname(__file__))
     repo_root = os.path.dirname(apps_dir)
 
@@ -56,6 +65,23 @@ def _export_fbx(output_dir: str, name: str) -> None:
     log.info("Wrote FBX: %s", fbx_path)
 
 
+def _save_blend_scene(output_dir: str, name: str, *, checkpoint: bool = False) -> None:
+    """Save the current bpy scene to a .blend file in output_dir."""
+    import bpy
+    blend_path = os.path.join(output_dir, name + ".blend")
+    if checkpoint:
+        log.debug("[CKPT] save_as_mainfile start (%s)", blend_path)
+        for handler in log.root.handlers:
+            handler.flush()
+    bpy.ops.wm.save_as_mainfile(filepath=blend_path)
+    if checkpoint:
+        log.info("[CKPT] save_as_mainfile done -> Wrote blend: %s", blend_path)
+        for handler in log.root.handlers:
+            handler.flush()
+    else:
+        log.info("Wrote blend: %s", blend_path)
+
+
 
 def _import_basic_model(
     base_dir: str,
@@ -69,13 +95,13 @@ def _import_basic_model(
     import_occlusion: bool = True,
     import_lights: bool = True,
     output_name: str = "",
+    write_blend: bool = True,
     write_ase: bool = True,
     write_3dp: bool = True,
     write_glb: bool = False,
     write_fbx: bool = False,
 ) -> bool:
-    """Import a single weapon/item via the C IR pipeline and write .ase + .3dp."""
-    import bpy
+    """Import a single weapon/item via the C IR pipeline and write selected outputs."""
     from pathlib import Path
     from blender.opennova.definitions import (  # type: ignore[import]
         process_def_files, ensure_extension, build_animation_context,
@@ -190,12 +216,8 @@ def _import_basic_model(
                 _export_glb(project_dir, export_name)
             if write_fbx:
                 _export_fbx(project_dir, export_name)
-            blend_path = os.path.join(project_dir, export_name + ".blend")
-            log.debug("[CKPT] save_as_mainfile start (%s)", blend_path)
-            for _h in log.root.handlers: _h.flush()
-            bpy.ops.wm.save_as_mainfile(filepath=blend_path)
-            log.info("[CKPT] save_as_mainfile done → Wrote blend: %s", blend_path)
-            for _h in log.root.handlers: _h.flush()
+            if write_blend:
+                _save_blend_scene(project_dir, export_name, checkpoint=True)
 
         return success_count > 0
 
@@ -206,23 +228,24 @@ def run_import(
     item_type: str,
     output_dir: str,
     *,
-    import_arms: bool = False,
+    import_arms: bool = True,
     import_animations: bool = True,
     import_collisions: bool = True,
-    import_occlusion: bool = False,
+    import_occlusion: bool = True,
     import_lights: bool = True,
+    write_blend: bool = True,
     write_ase: bool = True,
     write_3dp: bool = True,
     write_glb: bool = False,
     write_fbx: bool = False,
 ) -> bool:
-    """Import a single weapon/item and produce .ase + .3dp files.
+    """Import a single weapon/item and produce selected output files.
 
     Args:
         base_dir:    Root directory containing game assets (weapon.def / items.def).
         item_name:   Name of the weapon or item (e.g. "M16A2", "Armry01").
         item_type:   "weapon" or "item".
-        output_dir:  Directory where .ase/.3dp will be written.
+        output_dir:  Root directory where selected files will be written.
     """
     _setup_blender_package()
 
@@ -239,6 +262,7 @@ def run_import(
             import_collisions=import_collisions,
             import_occlusion=import_occlusion,
             import_lights=import_lights,
+            write_blend=write_blend,
             write_ase=write_ase,
             write_3dp=write_3dp,
             write_glb=write_glb,
@@ -279,29 +303,30 @@ def run_loose_import(
     import_collisions: bool = True,
     import_occlusion: bool = True,
     import_lights: bool = True,
+    write_blend: bool = True,
     write_ase: bool = True,
     write_3dp: bool = True,
     write_glb: bool = False,
     write_fbx: bool = False,
+    reset_scene: bool = True,
 ) -> bool:
     """Import a standalone .3di file (no DEF lookup required).
 
-    Produces .ase + .3dp/.3da + .blend in output_dir.
+    Produces the selected output files in output_dir.
     output_stem overrides the output filename stem (default: derived from threedi_path).
     asset_base_dir overrides the texture/material search root (default: parent of threedi_path).
     """
     _setup_blender_package()
 
-    import bpy
     from pathlib import Path
     from blender.opennova.threedi_ffi import read_model_ir, free_model_ir  # type: ignore[import]
     from blender.opennova.asset_resolver import AssetResolver  # type: ignore[import]
     from .scene_builder import BlenderSceneBuilder
-    from blender.ase_exporter import AseExporter  # type: ignore[import]
-    from . import bpy_session
 
     os.makedirs(output_dir, exist_ok=True)
-    bpy_session.new_scene()
+    if reset_scene:
+        from . import bpy_session
+        bpy_session.new_scene()
 
     base_dir = asset_base_dir or str(Path(threedi_path).parent)
     name = output_stem or Path(threedi_path).stem
@@ -328,39 +353,109 @@ def run_loose_import(
 
     if result:
         if write_ase:
-            ase_path = os.path.join(output_dir, name + ".ase")
-            AseExporter().export_scene(bpy.context.scene, ase_path)
-            log.info("Wrote ASE: %s", ase_path)
+            _export_ase(output_dir, name)
         if write_glb:
             _export_glb(output_dir, name)
         if write_fbx:
             _export_fbx(output_dir, name)
-        blend_path = os.path.join(output_dir, name + ".blend")
-        bpy.ops.wm.save_as_mainfile(filepath=blend_path)
-        log.info("Wrote blend: %s", blend_path)
+        if write_blend:
+            _save_blend_scene(output_dir, name)
 
     return bool(result)
 
 
-def scan_directory(base_dir: str) -> list[dict]:
+def execute_import_request(
+    request: ImportRequest,
+    *,
+    init_blender: bool = True,
+    reset_scene: bool = True,
+) -> ImportResult:
+    """Run one shared import request for the GUI or CLI."""
+    errors = validate_import_request(request)
+    if errors:
+        return ImportResult.failure(request, error=" ".join(errors))
+
+    output_path = request.output_root
+    try:
+        if init_blender:
+            from . import bpy_session
+            bpy_session.init_headless()
+        if reset_scene:
+            from . import bpy_session
+            bpy_session.new_scene()
+
+        if request.mode == IMPORT_MODE_DEF:
+            ok = run_import(
+                base_dir=request.base_dir,
+                item_name=request.item_name,
+                item_type=request.item_type,
+                output_dir=request.output_root,
+                **request.options.as_def_kwargs(),
+            )
+        elif request.mode == IMPORT_MODE_LOOSE:
+            output_path = request.loose_output_dir
+            ok = run_loose_import(
+                threedi_path=request.threedi_path,
+                output_dir=output_path,
+                output_stem=request.display_name,
+                asset_base_dir=request.base_dir or None,
+                reset_scene=False,
+                **request.options.as_loose_kwargs(),
+            )
+        else:
+            return ImportResult.failure(
+                request,
+                error=f"Unknown import mode: {request.mode}",
+            )
+    except Exception as exc:
+        log.error("execute_import_request failed: %s", exc, exc_info=True)
+        return ImportResult.failure(request, error=str(exc), output_path=output_path)
+
+    if ok:
+        return ImportResult.success(
+            request,
+            message=f"Imported {request.label}.",
+            output_path=output_path,
+        )
+    return ImportResult.failure(
+        request,
+        error="import returned False",
+        output_path=output_path,
+    )
+
+
+def scan_directory_result(base_dir: str) -> ScanResult:
     """Scan a game directory and return available weapons and items.
 
-    Returns a list of dicts: {"name": str, "type": "weapon"|"item"}
+    Returns ScanResult with items shaped as {"name": str, "type": "weapon"|"item"}.
     """
     _setup_blender_package()
+
+    from pathlib import Path
+
+    if not base_dir:
+        return ScanResult(ok=False, error="Game directory is required.")
+    if not Path(base_dir).is_dir():
+        return ScanResult(ok=False, error="Game directory does not exist.")
 
     from blender.opennova import definitions as defs  # type: ignore[import]
     from blender.opennova import asset_resolver as ar  # type: ignore[import]
 
     items = []
     try:
-        resolver = ar.AssetResolver(base_dir)
-        weapons, item_defs = defs.process_def_files(resolver)
-        for w in weapons:
-            items.append({"name": w.name, "type": "weapon"})
-        for it in item_defs:
-            items.append({"name": it.name, "type": "item"})
+        with ar.AssetResolver(base_dir) as resolver:
+            weapons, item_defs = defs.process_def_files(resolver)
+            for w in weapons:
+                items.append({"name": w.name, "type": "weapon"})
+            for it in item_defs:
+                items.append({"name": it.name, "type": "item"})
     except Exception as exc:
         log.error("scan_directory failed: %s", exc, exc_info=True)
+        return ScanResult(ok=False, error=str(exc))
 
-    return items
+    return ScanResult(ok=True, items=items)
+
+
+def scan_directory(base_dir: str) -> list[dict]:
+    """Compatibility wrapper returning only scanned items."""
+    return scan_directory_result(base_dir).items

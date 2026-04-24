@@ -17,10 +17,11 @@ Pre-built binaries are available on the [Releases](../../releases) page:
 
 Extract weapons, vehicles, buildings, and other models from game files. Reads directly from PFF archives with automatic decryption and decompression — just point it at your game directory.
 
-Each import produces:
-- `.blend` — Blender project with the full scene hierarchy
-- `.ase` — 3DS Max ASCII Scene Export
-- `.3dp` / `.3da` — Project metadata for round-trip editing
+Each import can write one or more selected output files:
+- `.blend` - Blender project with the full scene hierarchy
+- `.ase` - 3DS Max ASCII Scene Export
+- `.3dp` / `.3da` - Project metadata for round-trip editing
+- `.glb` / `.fbx` - Optional runtime/interchange exports
 
 Imported scenes include meshes, materials, textures, LODs, skeletal armatures, collision volumes, occlusion geometry, lights, and user points.
 
@@ -32,6 +33,9 @@ onimport scan --dir "C:\Games\Delta Force"
 
 # Import a single weapon or item
 onimport import --dir "C:\Games\Delta Force" --item M16A2 --type weapon --output ./out
+
+# Skip writing a Blender scene when only sidecar exports are needed
+onimport import --dir "C:\Games\Delta Force" --item M16A2 --type weapon --output ./out --no-blend
 
 # Import a loose .3di file
 onimport import-loose --file model.3di --output ./out
