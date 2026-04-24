@@ -33,6 +33,8 @@ var _pending_flush: bool = true
 func _ready() -> void:
 	_dispatcher = NovaFoliageDispatcher.new()
 	_dispatcher.name = "Dispatcher"
+	_dispatcher.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
+	_dispatcher.cell_grid_radius = 8
 	add_child(_dispatcher)
 
 

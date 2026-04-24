@@ -44,6 +44,8 @@ func _refresh_runtime_assets() -> void:
 	_dispatcher.terrain_data = _terrain_data
 	_dispatcher.height_sampler = Callable(self, "_sample_height_xz")
 	_dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
+	_dispatcher.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
+	_dispatcher.cell_grid_radius = 8
 
 	var defs: Array = _terrain_data.get_foliage_defs()
 	_dispatcher.foliage_defs = defs
@@ -83,15 +85,7 @@ func _process(_delta: float) -> void:
 	_refresh_runtime_assets()
 	if not _runtime_assets_configured:
 		return
-	# Engine increments its global frame counter per frame and re-dispatches
-	# every visible entity every frame — the 8-frame stagger gate inside
-	# the shared dispatcher is what throttles actual re-bakes. Mirroring that
-	# cadence here so `((frame + 2*slot) & 7) == 0` stays aligned.
-	#
-	# We dispatch around the camera (single-camera port) and deliberately
-	# omit the view transform: the 38.0 near-Z reject was designed for
-	# per-entity dispatch where `centre` is a distant entity, not the camera
-	# itself. Passing a real view_xform here would give view_local.z ≈ 0 and
-	# skip every frame. The identity-transform default is the correct no-op
-	# until per-entity dispatch (spec §4.5) lands.
+	# Runtime currently uses the camera CELL_GRID coverage algorithm. The
+	# IDA-matched ENGINE_CENTERS path remains available for future visible-
+	# entity dispatch; this scene needs broad camera-local coverage today.
 	_dispatcher.dispatch(_camera.global_position)

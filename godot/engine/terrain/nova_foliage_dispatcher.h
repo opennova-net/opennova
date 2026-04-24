@@ -24,7 +24,7 @@ namespace godot {
 
 class NovaTerrainData;
 
-// Runtime foliage adapter for the shared engine-spec placement/dispatcher core.
+// Foliage adapter for the shared engine-spec placement/dispatcher core.
 //
 // Engine provenance:
 //   - Jointops.exe Foliage_RenderAtPosition@0x5C1940 (per-slot dispatcher)
@@ -32,17 +32,19 @@ class NovaTerrainData;
 //   - docs/engine_spec_foliage.md 4.3-4.4
 //
 // Fidelity:
-//   - Runtime path uses four shared `opennova::foliage::Dispatcher` instances
-//     and `place_cell` for the original quadrant/LRU/stagger logic.
-//   - Editor preview keeps a wider cell-grid path as an authoring-only extension
-//     because the original visible-entity driver does not exist in the editor.
-//   - Runtime still dispatches around a single supplied centre until a true
-//     visible-entity list exists, so that mode is closer to the engine but not
-//     yet byte-for-byte identical.
+//   - ENGINE_CENTERS uses shared `opennova::foliage::Dispatcher` instances and
+//     `place_cell` for the original quadrant/LRU/stagger logic.
+//   - CELL_GRID is a camera/editor coverage algorithm that scans a wider 16u
+//     cell grid while still using the same per-cell placement kernel.
 class NovaFoliageDispatcher : public Node3D {
 	GDCLASS(NovaFoliageDispatcher, Node3D)
 
 public:
+	enum DispatchAlgorithm {
+		DISPATCH_ALGORITHM_ENGINE_CENTERS = 0,
+		DISPATCH_ALGORITHM_CELL_GRID = 1,
+	};
+
 	NovaFoliageDispatcher();
 	~NovaFoliageDispatcher();
 
@@ -79,12 +81,21 @@ public:
 
 	// Configuration ---------------------------------------------------------
 
-	// Editor-only extension: preview grid radius in 16u cells.
+	// Coverage algorithm. ENGINE_CENTERS is the IDA-matched per-center path;
+	// CELL_GRID scans a wider 16u cell grid around the supplied camera/preview center.
+	void set_dispatch_algorithm(int p_algorithm);
+	int get_dispatch_algorithm() const;
+
+	// Cell-grid algorithm radius in 16u cells.
+	void set_cell_grid_radius(int p_radius);
+	int get_cell_grid_radius() const;
+
+	// Compatibility alias for older editor code/scenes.
 	void set_preview_cell_radius(int p_radius);
 	int get_preview_cell_radius() const;
 
-	// Editor-only extension: preview-grid cache capacity. Runtime uses the
-	// shared engine-spec 128-entry LRU inside each slot dispatcher.
+	// Cell-grid cache capacity. ENGINE_CENTERS uses the shared engine-spec
+	// 128-entry LRU inside each slot dispatcher.
 	void set_lru_capacity(int p_capacity);
 	int get_lru_capacity() const;
 
@@ -96,14 +107,15 @@ public:
 
 	// Main API --------------------------------------------------------------
 
-	// Runtime mode: dispatch shared-core foliage around `centre`, using
-	// `view_xform` (world → view) to compute the 38.0 near-plane reject the
-	// engine performs via Math_TransformPoint(view_matrix, center). Identity
-	// transform (default arg) skips the reject — editor / test callers that
-	// don't have a live camera transform rely on that.
-	// Editor mode: `view_xform` is ignored; preview scans a wider cell grid
-	// around `centre`.
+	// Dispatch around `centre` using the configured coverage algorithm.
+	// ENGINE_CENTERS uses `view_xform` to compute the 38.0 near-plane reject
+	// from the original per-center path; identity transform skips that reject.
+	// CELL_GRID ignores `view_xform` and scans a wider 16u cell grid.
 	void dispatch(Vector3 centre, Transform3D view_xform = Transform3D());
+
+	// Future visible-entity API: run ENGINE_CENTERS over all supplied centers
+	// regardless of the configured single-center dispatch_algorithm.
+	void dispatch_centers(PackedVector3Array centers, Transform3D view_xform = Transform3D());
 
 	// Drop runtime/editor caches and MultiMesh state. Call on paint / def edits.
 	void reset();
@@ -141,15 +153,15 @@ private:
 		int64_t touch = 0;
 	};
 
-	// Editor preview extension: cell (cell_x, cell_z, slot) -> placed instances.
+	// CELL_GRID algorithm: cell (cell_x, cell_z, slot) -> placed instances.
 	std::unordered_map<CellKey, LRUEntry, CellKeyHash> lru_;
 	int64_t touch_counter_ = 0;
 
-	// Runtime shared-core dispatchers, one per foliage slot.
-	std::array<opennova::foliage::Dispatcher, opennova::FOLIAGE_MAX_DEFS> runtime_dispatchers_{};
-	std::array<std::vector<Transform3D>, opennova::FOLIAGE_MAX_DEFS> runtime_transforms_{};
-	std::array<std::vector<Color>, opennova::FOLIAGE_MAX_DEFS> runtime_colors_{};
-	int32_t runtime_frame_counter_ = 0;
+	// ENGINE_CENTERS algorithm: one shared-core dispatcher per foliage slot.
+	std::array<opennova::foliage::Dispatcher, opennova::FOLIAGE_MAX_DEFS> engine_dispatchers_{};
+	std::array<std::vector<Transform3D>, opennova::FOLIAGE_MAX_DEFS> engine_transforms_{};
+	std::array<std::vector<Color>, opennova::FOLIAGE_MAX_DEFS> engine_colors_{};
+	int32_t engine_frame_counter_ = 0;
 
 	// Per-slot rendered children (one MultiMeshInstance3D per def slot).
 	MultiMeshInstance3D *mm_by_slot_[4] = {};
@@ -162,7 +174,9 @@ private:
 	Callable height_sampler_;
 	Callable foliage_sampler_;
 	Ref<NovaTerrainData> terrain_data_;
-	int preview_cell_radius_ = 8;
+	int dispatch_algorithm_ = DISPATCH_ALGORITHM_ENGINE_CENTERS;
+	int render_algorithm_ = DISPATCH_ALGORITHM_ENGINE_CENTERS;
+	int cell_grid_radius_ = 8;
 	int lru_capacity_ = 128;
 	float quad_half_width_ = 2.0f;
 	float surface_offset_ = 0.05f;
@@ -171,8 +185,11 @@ private:
 
 	// Helpers ---------------------------------------------------------------
 
-	bool _is_runtime_dispatch_mode() const;
-	void _dispatch_runtime(Vector3 centre, const Transform3D &view_xform, const Dictionary &defs_by_match);
+	bool _has_sampling_source() const;
+	void _dispatch_engine_centers(const PackedVector3Array &centers,
+	                              const Transform3D &view_xform,
+	                              const Dictionary &defs_by_match);
+	void _dispatch_cell_grid(Vector3 centre, const Dictionary &defs_by_match);
 	void _rebuild_multimeshes();
 	void _update_slot_material(int slot_index, const Ref<Mesh> &slot_mesh);
 	Color _sample_ground_color(const opennova::foliage::PlacementInstance &inst,
