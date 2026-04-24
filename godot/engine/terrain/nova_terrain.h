@@ -15,14 +15,18 @@
 
 namespace godot {
 
+class NovaTerrainTileInfo;
+
 class NovaTerrain : public Node3D {
 	GDCLASS(NovaTerrain, Node3D)
 
 private:
 	Ref<NovaTerrainData> terrain_data;
+	Ref<NovaTerrainTileInfo> tile_info_override;
 	NodePath environment_path;
 	NodePath weather_path;
 	float lod_quality = 1.0f;
+	bool tile_overlay_enabled = true;
 
 	// Per-tile: one single-surface ArrayMesh per LOD level
 	struct TileInfo {
@@ -49,6 +53,7 @@ private:
 	// Shader
 	Ref<Shader> terrain_shader;
 	Ref<ShaderMaterial> terrain_material;
+	Ref<Texture2D> tile_overlay_texture;
 
 	bool built = false;
 
@@ -75,6 +80,8 @@ private:
 	void _build_quadtree();
 	void _build_collision();
 	void _load_textures();
+	void _rebuild_tile_overlay_texture();
+	void _clear_tile_overlay_texture();
 	void _clear_terrain();
 	void _clear_collision_bodies();
 	void _clear_patch_pool();
@@ -99,6 +106,13 @@ public:
 
 	void set_lod_quality(float p_quality);
 	float get_lod_quality() const;
+
+	void set_tile_overlay_enabled(bool p_enabled);
+	bool get_tile_overlay_enabled() const;
+
+	void set_tile_info_override(const Ref<NovaTerrainTileInfo> &p_info);
+	Ref<NovaTerrainTileInfo> get_tile_info_override() const;
+	void rebuild_tile_overlay();
 
 	void set_environment_path(const NodePath& p_path);
 	NodePath get_environment_path() const;

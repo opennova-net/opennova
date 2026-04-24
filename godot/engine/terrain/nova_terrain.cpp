@@ -1,6 +1,7 @@
 // NovaTerrain — Godot Node3D that builds and renders terrain meshes from CPT data.
 
 #include "nova_terrain.h"
+#include "nova_terrain_tile_info.h"
 
 // Engine: jodemo.exe Terrain_RenderSectorTile@0x5CDAA0,
 // Terrain_TraverseQuadTreeNode@0x5C89C0, Terrain_CollectVisibleSectors@0x5C9120
@@ -9,6 +10,7 @@
 #include <godot_cpp/classes/collision_shape3d.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/height_map_shape3d.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -17,6 +19,8 @@
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/projection.hpp>
+
+#include <til/til_overlay_bake.h>
 
 #include <algorithm>
 #include <cmath>
@@ -35,6 +39,17 @@ void NovaTerrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_lod_quality"), &NovaTerrain::get_lod_quality);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_quality", PROPERTY_HINT_RANGE, "0.1,4.0,0.1"),
 		"set_lod_quality", "get_lod_quality");
+
+	ClassDB::bind_method(D_METHOD("set_tile_overlay_enabled", "enabled"), &NovaTerrain::set_tile_overlay_enabled);
+	ClassDB::bind_method(D_METHOD("get_tile_overlay_enabled"), &NovaTerrain::get_tile_overlay_enabled);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "tile_overlay_enabled"),
+		"set_tile_overlay_enabled", "get_tile_overlay_enabled");
+
+	ClassDB::bind_method(D_METHOD("set_tile_info_override", "tile_info"), &NovaTerrain::set_tile_info_override);
+	ClassDB::bind_method(D_METHOD("get_tile_info_override"), &NovaTerrain::get_tile_info_override);
+	ClassDB::bind_method(D_METHOD("rebuild_tile_overlay"), &NovaTerrain::rebuild_tile_overlay);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tile_info_override", PROPERTY_HINT_RESOURCE_TYPE, "NovaTerrainTileInfo"),
+		"set_tile_info_override", "get_tile_info_override");
 
 	ClassDB::bind_method(D_METHOD("set_environment_path", "path"), &NovaTerrain::set_environment_path);
 	ClassDB::bind_method(D_METHOD("get_environment_path"), &NovaTerrain::get_environment_path);
@@ -122,6 +137,35 @@ void NovaTerrain::set_lod_quality(float p_quality) {
 
 float NovaTerrain::get_lod_quality() const {
 	return lod_quality;
+}
+
+void NovaTerrain::set_tile_overlay_enabled(bool p_enabled) {
+	if (tile_overlay_enabled == p_enabled) {
+		return;
+	}
+	tile_overlay_enabled = p_enabled;
+	if (built) {
+		_rebuild_tile_overlay_texture();
+	}
+}
+
+bool NovaTerrain::get_tile_overlay_enabled() const {
+	return tile_overlay_enabled;
+}
+
+void NovaTerrain::set_tile_info_override(const Ref<NovaTerrainTileInfo> &p_info) {
+	tile_info_override = p_info;
+	if (built) {
+		_rebuild_tile_overlay_texture();
+	}
+}
+
+Ref<NovaTerrainTileInfo> NovaTerrain::get_tile_info_override() const {
+	return tile_info_override;
+}
+
+void NovaTerrain::rebuild_tile_overlay() {
+	_rebuild_tile_overlay_texture();
 }
 
 void NovaTerrain::set_environment_path(const NodePath& p_path) {
@@ -365,7 +409,9 @@ void NovaTerrain::_notification(int p_what) {
 					terrain_material->set_shader_parameter("u_fog_color", cached_env_node->call("get_fog_color"));
 				}
 				terrain_material->set_shader_parameter("u_sun_direction", cached_env_node->call("get_sun_direction"));
-				terrain_material->set_shader_parameter("u_terrain_tint", cached_env_node->call("get_terrain_tint"));
+				const Variant terrain_tint = cached_env_node->call("get_terrain_tint");
+				terrain_material->set_shader_parameter("u_terrain_tint", terrain_tint);
+				terrain_material->set_shader_parameter("u_tile_overlay_tint", terrain_tint);
 				float fog_end = (float)cached_env_node->call("get_fog_level");
 				terrain_material->set_shader_parameter("u_fog_end", fog_end);
 				terrain_material->set_shader_parameter("u_fog_start", fog_end * 0.3f);
@@ -492,6 +538,88 @@ void NovaTerrain::_load_textures() {
 
 	terrain_material->set_shader_parameter("u_detail_density",
 		static_cast<float>(terrain_data->get_detail_density()));
+	_rebuild_tile_overlay_texture();
+}
+
+void NovaTerrain::_clear_tile_overlay_texture() {
+	tile_overlay_texture.unref();
+	if (terrain_material.is_valid()) {
+		terrain_material->set_shader_parameter("u_has_tile_overlay", false);
+		terrain_material->set_shader_parameter("u_tile_overlay", Ref<Texture2D>());
+	}
+}
+
+void NovaTerrain::_rebuild_tile_overlay_texture() {
+	if (terrain_material.is_null()) {
+		return;
+	}
+	if (!tile_overlay_enabled || terrain_data.is_null() || !terrain_data->is_loaded()) {
+		_clear_tile_overlay_texture();
+		return;
+	}
+
+	Ref<NovaTerrainTileInfo> tile_info = tile_info_override;
+	if (tile_info.is_null()) {
+		tile_info = terrain_data->get_tileinfo_resource();
+	}
+	const Ref<Texture2D> tilestrip = terrain_data->get_tilestrip_tex();
+	if (tile_info.is_null() || tilestrip.is_null() || tile_info->get_entry_count() <= 0) {
+		_clear_tile_overlay_texture();
+		return;
+	}
+
+	Ref<Image> atlas_image = tilestrip->get_image();
+	if (atlas_image.is_null()) {
+		_clear_tile_overlay_texture();
+		return;
+	}
+	if (atlas_image->is_compressed()) {
+		const Error err = atlas_image->decompress();
+		if (err != OK) {
+			_clear_tile_overlay_texture();
+			return;
+		}
+	}
+	atlas_image->convert(Image::FORMAT_RGBA8);
+	const int atlas_w = atlas_image->get_width();
+	const int atlas_h = atlas_image->get_height();
+	PackedByteArray atlas_bytes = atlas_image->get_data();
+	if (atlas_w <= 0 || atlas_h <= 0 || atlas_bytes.size() < atlas_w * atlas_h * 4) {
+		_clear_tile_overlay_texture();
+		return;
+	}
+
+	constexpr int OVERLAY_DIM = 1024;
+	std::vector<uint8_t> overlay_rgba;
+	const opennova::TilFile native = tile_info->to_native();
+	if (!opennova::til_bake_overlay_rgba(native,
+	                                     atlas_bytes.ptr(),
+	                                     atlas_w,
+	                                     atlas_h,
+	                                     OVERLAY_DIM,
+	                                     OVERLAY_DIM,
+	                                     overlay_rgba)) {
+		_clear_tile_overlay_texture();
+		return;
+	}
+
+	PackedByteArray overlay_bytes;
+	overlay_bytes.resize(static_cast<int64_t>(overlay_rgba.size()));
+	if (!overlay_rgba.empty()) {
+		std::memcpy(overlay_bytes.ptrw(), overlay_rgba.data(), overlay_rgba.size());
+	}
+
+	Ref<Image> overlay_image =
+	    Image::create_from_data(OVERLAY_DIM, OVERLAY_DIM, false, Image::FORMAT_RGBA8, overlay_bytes);
+	if (overlay_image.is_null()) {
+		_clear_tile_overlay_texture();
+		return;
+	}
+
+	Ref<ImageTexture> image_texture = ImageTexture::create_from_image(overlay_image);
+	tile_overlay_texture = image_texture;
+	terrain_material->set_shader_parameter("u_tile_overlay", tile_overlay_texture);
+	terrain_material->set_shader_parameter("u_has_tile_overlay", tile_overlay_texture.is_valid());
 }
 
 // ---------------------------------------------------------------------------
@@ -536,6 +664,7 @@ void NovaTerrain::_clear_patch_pool() {
 void NovaTerrain::_clear_terrain() {
 	_clear_collision_bodies();
 	_clear_patch_pool();
+	_clear_tile_overlay_texture();
 
 	tile_infos.clear();
 	quad_nodes.clear();

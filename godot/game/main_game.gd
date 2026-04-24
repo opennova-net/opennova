@@ -50,17 +50,13 @@ func _refresh_runtime_assets() -> void:
 	_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(defs)
 
 	if _tile_overlay != null:
-		# Prefer the scene-assigned tile_info if present; fall back to loading
-		# from NovaTerrainData.tileinfo_filename. Avoids clobbering an editor-
-		# set ExtResource when the .trn's filename doesn't resolve at runtime.
-		if _tile_overlay.tile_info == null:
-			_tile_overlay.tile_info = _terrain_data.get_tileinfo_resource()
-		_tile_overlay.tilestrip = _terrain_data.tilestrip_tex
-		# Direct C++ fast-path (see feedback_dispatcher_callable_perf). The
-		# Callable stays assigned as a fallback and for editor symmetry.
-		_tile_overlay.terrain_data = _terrain_data
-		_tile_overlay.height_sampler = Callable(self, "_sample_height_xz")
-		_tile_overlay.rebuild()
+		# Runtime tile parity is handled by NovaTerrain's terrain-composited
+		# overlay bake. A scene-assigned TileOverlay remains useful as an
+		# authoring override provider, but should not draw separate quads.
+		if _terrain.tile_info_override == null and _tile_overlay.tile_info != null:
+			_terrain.tile_info_override = _tile_overlay.tile_info
+		_tile_overlay.clear()
+		_tile_overlay.visible = false
 
 	_runtime_assets_configured = true
 

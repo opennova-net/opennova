@@ -181,6 +181,31 @@ inline TilUvQuad til_build_entry_uv_quad(uint8_t tile_index,
 	return quad;
 }
 
+inline TilUvQuad til_build_entry_render_uv_quad(uint8_t tile_index,
+                                                uint8_t flags,
+                                                int atlas_width,
+                                                int atlas_height) {
+	TilUvQuad quad = til_build_entry_uv_quad(tile_index, flags, atlas_width, atlas_height);
+	if (!quad.valid || atlas_width <= 0 || atlas_height <= 0) {
+		return quad;
+	}
+
+	// Engine: jodemo.exe sub_5C42B0@0x005C42B0.
+	// The in-world sector pass shifts the already-transformed UV quad by a
+	// D3D half-texel in the active texture direction before drawing the
+	// TRIANGLESTRIP. This is separate from the authored atlas UVs above.
+	const float half_u = 0.5f / static_cast<float>(atlas_width);
+	const float half_v = 0.5f / static_cast<float>(atlas_height);
+	const TilUv &tl = quad.corners[0];
+	const float sign_u = (tl.u > quad.corners[1].u || tl.u > quad.corners[2].u) ? -1.0f : 1.0f;
+	const float sign_v = (tl.v > quad.corners[2].v || tl.v > quad.corners[1].v) ? -1.0f : 1.0f;
+	for (TilUv &uv : quad.corners) {
+		uv.u += sign_u * half_u;
+		uv.v += sign_v * half_v;
+	}
+	return quad;
+}
+
 inline float til_world_x_from_fixed(int32_t x_fixed) {
 	return static_cast<float>(x_fixed) / static_cast<float>(TIL_FIXED_UNITS);
 }

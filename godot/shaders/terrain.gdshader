@@ -10,6 +10,8 @@ uniform sampler2D u_detailmap : filter_linear_mipmap, repeat_enable;
 uniform sampler2D u_detailmapdist : filter_linear_mipmap, repeat_enable;
 uniform sampler2D u_detailmap2 : filter_linear_mipmap, repeat_enable;
 uniform sampler2D u_detailmapdist2 : filter_linear_mipmap, repeat_enable;
+uniform sampler2D u_tile_overlay : source_color, filter_linear, repeat_enable;
+uniform bool u_has_tile_overlay = false;
 uniform float u_detail_near_dist = 40.0;
 uniform float u_detail_far_dist = 80.0;
 uniform vec3 u_fill_light = vec3(0.3, 0.3, 0.35);
@@ -17,6 +19,7 @@ uniform vec3 u_sun_light = vec3(0.8, 0.75, 0.65);
 uniform vec3 u_sky_ambient = vec3(0.4, 0.45, 0.55);
 uniform vec3 u_sun_direction = vec3(0.0, 0.70710678, 0.70710678);
 uniform vec3 u_terrain_tint = vec3(1.0, 1.0, 1.0);
+uniform vec3 u_tile_overlay_tint = vec3(1.0, 1.0, 1.0);
 uniform float u_detail_density = 128.0;
 uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
 uniform float u_fog_start = 0.0;
@@ -131,6 +134,11 @@ void fragment() {
 
 	// Apply terrain tint
 	result *= u_terrain_tint;
+	if (u_has_tile_overlay) {
+		vec2 tile_uv = fract(vec2(v_world_pos.x, -v_world_pos.z) * (1.0 / 1024.0));
+		vec4 tile = texture(u_tile_overlay, tile_uv);
+		result = mix(result, tile.rgb * u_tile_overlay_tint, tile.a);
+	}
 
 	// Distance fog — port of reference terrain.frag:109-129
 	// 4 fog types: 0=linear, 1=haze(exp), 2=haze wall(exp²), 3=mild haze wall
