@@ -4,7 +4,6 @@
 #include "tdp/tdp.h"
 #include "threedi/threedi_ir.h"
 
-#include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>

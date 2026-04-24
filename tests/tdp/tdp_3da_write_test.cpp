@@ -2,12 +2,12 @@
 
 #include "tdp/tdp.h"
 
-#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 
+#include "common/test_expect.h"
 #include "common/test_paths.h"
 
 static void copy_str(char *dst, size_t n, const char *src) {
@@ -127,139 +127,139 @@ int main() {
     std::snprintf(tmp_path, sizeof(tmp_path), "%s%ctdp_3da_write_test.3da",
                   test_paths_temp_dir(), TEST_PATHS_SEP);
     int rc = tdp_write_3da(tmp_path, &proj);
-    assert(rc == 0 && "tdp_write_3da failed");
+    TEST_EXPECT(rc == 0 && "tdp_write_3da failed");
 
     // Read back and verify structure
     std::string output = read_file(tmp_path);
-    assert(!output.empty() && "3DA output file is empty");
+    TEST_EXPECT(!output.empty() && "3DA output file is empty");
 
     // --- Comment line ---
-    assert(contains(output, "/ 3DI metafile"));
+    TEST_EXPECT(contains(output, "/ 3DI metafile"));
 
     // --- General information: v3 format ---
-    assert(contains(output, "begin general_information"));
-    assert(contains(output, "3da_version 3"));
-    assert(contains(output, "3di_version 5"));
-    assert(contains(output, "username opennova"));
-    assert(contains(output, "attributes: 1"));
-    assert(contains(output, "render_function gnrc"));
-    assert(contains(output, "threshold"));
+    TEST_EXPECT(contains(output, "begin general_information"));
+    TEST_EXPECT(contains(output, "3da_version 3"));
+    TEST_EXPECT(contains(output, "3di_version 5"));
+    TEST_EXPECT(contains(output, "username opennova"));
+    TEST_EXPECT(contains(output, "attributes: 1"));
+    TEST_EXPECT(contains(output, "render_function gnrc"));
+    TEST_EXPECT(contains(output, "threshold"));
     // 3 source materials → mat0(1 entry) + mat1(2 entries) + mat2(1 entry) = 4
-    assert(contains(output, "num_materials 4"));
-    assert(contains(output, "scale_factor 1.000000"));
-    assert(contains(output, "diffuse_set  TRUE"));
-    assert(contains(output, "pm_enable 0"));
-    assert(contains(output, "pm_polythresh 0"));
-    assert(contains(output, "part_anim_enable 1"));
-    assert(contains(output, "fakeskin_z 0"));
-    assert(contains(output, "polycollision 2"));
-    assert(contains(output, "end general_information"));
+    TEST_EXPECT(contains(output, "num_materials 4"));
+    TEST_EXPECT(contains(output, "scale_factor 1.000000"));
+    TEST_EXPECT(contains(output, "diffuse_set  TRUE"));
+    TEST_EXPECT(contains(output, "pm_enable 0"));
+    TEST_EXPECT(contains(output, "pm_polythresh 0"));
+    TEST_EXPECT(contains(output, "part_anim_enable 1"));
+    TEST_EXPECT(contains(output, "fakeskin_z 0"));
+    TEST_EXPECT(contains(output, "polycollision 2"));
+    TEST_EXPECT(contains(output, "end general_information"));
 
     // --- Material splitting: 4 3DA material entries ---
-    assert(contains(output, "begin material 0"));
-    assert(contains(output, "begin material 1"));
-    assert(contains(output, "begin material 2")); // detail slot of mat1
-    assert(contains(output, "begin material 3")); // mat2
-    assert(!contains(output, "{") && "3DA should not contain braces");
+    TEST_EXPECT(contains(output, "begin material 0"));
+    TEST_EXPECT(contains(output, "begin material 1"));
+    TEST_EXPECT(contains(output, "begin material 2")); // detail slot of mat1
+    TEST_EXPECT(contains(output, "begin material 3")); // mat2
+    TEST_EXPECT(!contains(output, "{") && "3DA should not contain braces");
 
     // --- v3 material fields ---
-    assert(contains(output, "multitexture_flags"));
-    assert(contains(output, "color_type 2"));
-    assert(contains(output, "blending_mode 1"));
-    assert(contains(output, "alpha_texture"));
-    assert(contains(output, "reflect_type 0"));
-    assert(contains(output, "reflect_alpha 0"));
-    assert(contains(output, "actionplane_type 0"));
-    assert(contains(output, "projector_type 0"));
-    assert(contains(output, "projector_no_receive 0"));
-    assert(contains(output, "projector_yaw 0"));
-    assert(contains(output, "projector_pitch 0"));
-    assert(contains(output, "shader_type 0"));
+    TEST_EXPECT(contains(output, "multitexture_flags"));
+    TEST_EXPECT(contains(output, "color_type 2"));
+    TEST_EXPECT(contains(output, "blending_mode 1"));
+    TEST_EXPECT(contains(output, "alpha_texture"));
+    TEST_EXPECT(contains(output, "reflect_type 0"));
+    TEST_EXPECT(contains(output, "reflect_alpha 0"));
+    TEST_EXPECT(contains(output, "actionplane_type 0"));
+    TEST_EXPECT(contains(output, "projector_type 0"));
+    TEST_EXPECT(contains(output, "projector_no_receive 0"));
+    TEST_EXPECT(contains(output, "projector_yaw 0"));
+    TEST_EXPECT(contains(output, "projector_pitch 0"));
+    TEST_EXPECT(contains(output, "shader_type 0"));
 
     // --- Removed v1-only fields ---
-    assert(!contains(output, "render_attributes"));
-    assert(!contains(output, "physical_attributes"));
-    assert(!contains(output, "alpha_type"));
-    assert(!contains(output, "alpha_test"));
+    TEST_EXPECT(!contains(output, "render_attributes"));
+    TEST_EXPECT(!contains(output, "physical_attributes"));
+    TEST_EXPECT(!contains(output, "alpha_type"));
+    TEST_EXPECT(!contains(output, "alpha_test"));
 
     // --- Material name = texture filename, description = material name ---
     // Material 0: name="body.pic", description="Material_0_FF_ST_OP"
-    assert(contains(output, "name \"body.pic\""));
-    assert(contains(output, "description \"Material_0_FF_ST_OP\""));
+    TEST_EXPECT(contains(output, "name \"body.pic\""));
+    TEST_EXPECT(contains(output, "description \"Material_0_FF_ST_OP\""));
 
     // Material 1 primary slot: name="hull.pic"
-    assert(contains(output, "name \"hull.pic\""));
-    assert(contains(output, "description \"Material_1_FF_DT_OP\""));
+    TEST_EXPECT(contains(output, "name \"hull.pic\""));
+    TEST_EXPECT(contains(output, "description \"Material_1_FF_DT_OP\""));
 
     // Material 1 detail slot: name="hull_d.pic", multitexture_flags 2
-    assert(contains(output, "name \"hull_d.pic\""));
-    assert(contains(output, "multitexture_flags 2"));
+    TEST_EXPECT(contains(output, "name \"hull_d.pic\""));
+    TEST_EXPECT(contains(output, "multitexture_flags 2"));
     // Count multitexture_flags 1 (should be 3: mat0, mat1-primary, mat2)
-    assert(count_occurrences(output, "multitexture_flags 1") == 3);
+    TEST_EXPECT(count_occurrences(output, "multitexture_flags 1") == 3);
     // Count multitexture_flags 2 (should be 1: mat1-detail)
-    assert(count_occurrences(output, "multitexture_flags 2") == 1);
+    TEST_EXPECT(count_occurrences(output, "multitexture_flags 2") == 1);
 
     // --- green_texture values ---
-    assert(contains(output, "green_texture \"body.pic\""));
-    assert(contains(output, "green_texture \"hull.pic\""));
-    assert(contains(output, "green_texture \"hull_d.pic\""));
+    TEST_EXPECT(contains(output, "green_texture \"body.pic\""));
+    TEST_EXPECT(contains(output, "green_texture \"hull.pic\""));
+    TEST_EXPECT(contains(output, "green_texture \"hull_d.pic\""));
 
     // --- use_alpha_pcx ---
     // mat0 has alphatestvalue=128 → 1; mat1 and mat2 have 0 → 0
-    assert(contains(output, "use_alpha_pcx 1"));
-    assert(contains(output, "use_alpha_pcx 0"));
+    TEST_EXPECT(contains(output, "use_alpha_pcx 1"));
+    TEST_EXPECT(contains(output, "use_alpha_pcx 0"));
 
     // --- Per-component RGB fields (NOT combined triplets) ---
-    assert(contains(output, "rgbgen_sr"));
-    assert(contains(output, "rgbgen_sg"));
-    assert(contains(output, "rgbgen_sb"));
-    assert(contains(output, "rgbgen_er"));
-    assert(contains(output, "rgbgen_eg"));
-    assert(contains(output, "rgbgen_eb"));
-    assert(contains(output, "reflect_r"));
-    assert(contains(output, "reflect_g"));
-    assert(contains(output, "reflect_b"));
-    assert(!contains(output, "rgbgen_srgb"));
-    assert(!contains(output, "rgbgen_ergb"));
-    assert(!contains(output, "reflect_rgb"));
+    TEST_EXPECT(contains(output, "rgbgen_sr"));
+    TEST_EXPECT(contains(output, "rgbgen_sg"));
+    TEST_EXPECT(contains(output, "rgbgen_sb"));
+    TEST_EXPECT(contains(output, "rgbgen_er"));
+    TEST_EXPECT(contains(output, "rgbgen_eg"));
+    TEST_EXPECT(contains(output, "rgbgen_eb"));
+    TEST_EXPECT(contains(output, "reflect_r"));
+    TEST_EXPECT(contains(output, "reflect_g"));
+    TEST_EXPECT(contains(output, "reflect_b"));
+    TEST_EXPECT(!contains(output, "rgbgen_srgb"));
+    TEST_EXPECT(!contains(output, "rgbgen_ergb"));
+    TEST_EXPECT(!contains(output, "reflect_rgb"));
 
     // --- Should NOT have 3DP-only field names ---
-    assert(!contains(output, "rattrib"));
-    assert(!contains(output, "pattrib"));
-    assert(!contains(output, "alphatestvalue"));
-    assert(!contains(output, "diffusetex"));
+    TEST_EXPECT(!contains(output, "rattrib"));
+    TEST_EXPECT(!contains(output, "pattrib"));
+    TEST_EXPECT(!contains(output, "alphatestvalue"));
+    TEST_EXPECT(!contains(output, "diffusetex"));
 
     // --- Descriptive end tags ---
-    assert(contains(output, "end general_information"));
-    assert(contains(output, "end material"));
-    assert(contains(output, "end part_animation"));
+    TEST_EXPECT(contains(output, "end general_information"));
+    TEST_EXPECT(contains(output, "end material"));
+    TEST_EXPECT(contains(output, "end part_animation"));
     // 4 material blocks → 4 "end material" tags
-    assert(count_occurrences(output, "end material") == 4);
+    TEST_EXPECT(count_occurrences(output, "end material") == 4);
     // 2 part_animation blocks → 2 "end part_animation" tags
-    assert(count_occurrences(output, "end part_animation") == 2);
+    TEST_EXPECT(count_occurrences(output, "end part_animation") == 2);
 
     // --- Part animation fields ---
-    assert(contains(output, "begin part_animation 0"));
-    assert(contains(output, "begin part_animation 1"));
-    assert(contains(output, "rotate_type"));
-    assert(contains(output, "transform_as"));
-    assert(contains(output, "yaw_func"));
+    TEST_EXPECT(contains(output, "begin part_animation 0"));
+    TEST_EXPECT(contains(output, "begin part_animation 1"));
+    TEST_EXPECT(contains(output, "rotate_type"));
+    TEST_EXPECT(contains(output, "transform_as"));
+    TEST_EXPECT(contains(output, "yaw_func"));
 
     // 3DA does NOT contain translation fields
-    assert(!contains(output, "trans_type"));
-    assert(!contains(output, "transx_func"));
-    assert(!contains(output, "transy_func"));
-    assert(!contains(output, "transz_func"));
+    TEST_EXPECT(!contains(output, "trans_type"));
+    TEST_EXPECT(!contains(output, "transx_func"));
+    TEST_EXPECT(!contains(output, "transy_func"));
+    TEST_EXPECT(!contains(output, "transz_func"));
 
     // --- Light fields ---
-    assert(contains(output, "begin light 0"));
-    assert(contains(output, "colorgen_style"));
-    assert(contains(output, "colorgen_start"));
+    TEST_EXPECT(contains(output, "begin light 0"));
+    TEST_EXPECT(contains(output, "colorgen_style"));
+    TEST_EXPECT(contains(output, "colorgen_start"));
 
     // 3DA does NOT contain disable_* fields
-    assert(!contains(output, "disable_corona"));
-    assert(!contains(output, "disable_lightterrain"));
-    assert(!contains(output, "disable_lightobjects"));
+    TEST_EXPECT(!contains(output, "disable_corona"));
+    TEST_EXPECT(!contains(output, "disable_lightterrain"));
+    TEST_EXPECT(!contains(output, "disable_lightobjects"));
 
     // Cleanup
     tdp_free(&proj);

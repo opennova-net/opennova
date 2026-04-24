@@ -1,8 +1,9 @@
 #include "bfc1/bfc1.h"
 
-#include <cassert>
 #include <cstdint>
 #include <cstring>
+
+#include "common/test_expect.h"
 
 int main() {
     static const uint8_t blob[] = {
@@ -16,27 +17,27 @@ int main() {
     };
     static const uint8_t expected[] = "OpenNova BFC1 test payload\n";
 
-    assert(bfc1_is_bfc1(blob, sizeof(blob)) == 1);
-    assert(bfc1_is_bfc1(blob, BFC1_HEADER_SIZE - 1) == 0);
+    TEST_EXPECT(bfc1_is_bfc1(blob, sizeof(blob)) == 1);
+    TEST_EXPECT(bfc1_is_bfc1(blob, BFC1_HEADER_SIZE - 1) == 0);
 
     uint32_t uncompressed_size = 0;
-    assert(bfc1_uncompressed_size(blob, sizeof(blob), &uncompressed_size) == 0);
-    assert(uncompressed_size == sizeof(expected) - 1);
+    TEST_EXPECT(bfc1_uncompressed_size(blob, sizeof(blob), &uncompressed_size) == 0);
+    TEST_EXPECT(uncompressed_size == sizeof(expected) - 1);
 
     uint8_t tiny[4] = {};
     size_t tiny_size = sizeof(tiny);
-    assert(bfc1_decompress(blob, sizeof(blob), tiny, &tiny_size) == -2);
+    TEST_EXPECT(bfc1_decompress(blob, sizeof(blob), tiny, &tiny_size) == -2);
 
     uint8_t out[64] = {};
     size_t out_size = sizeof(out);
-    assert(bfc1_decompress(blob, sizeof(blob), out, &out_size) == 0);
-    assert(out_size == sizeof(expected) - 1);
-    assert(std::memcmp(out, expected, out_size) == 0);
+    TEST_EXPECT(bfc1_decompress(blob, sizeof(blob), out, &out_size) == 0);
+    TEST_EXPECT(out_size == sizeof(expected) - 1);
+    TEST_EXPECT(std::memcmp(out, expected, out_size) == 0);
 
     static const uint8_t invalid[] = {'N', 'O', 'P', 'E'};
-    assert(bfc1_uncompressed_size(invalid, sizeof(invalid), &uncompressed_size) == -1);
+    TEST_EXPECT(bfc1_uncompressed_size(invalid, sizeof(invalid), &uncompressed_size) == -1);
     out_size = sizeof(out);
-    assert(bfc1_decompress(invalid, sizeof(invalid), out, &out_size) == -1);
+    TEST_EXPECT(bfc1_decompress(invalid, sizeof(invalid), out, &out_size) == -1);
 
     return 0;
 }
