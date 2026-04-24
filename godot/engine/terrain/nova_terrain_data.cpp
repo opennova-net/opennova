@@ -5,6 +5,7 @@
 #include "nova_terrain_tile_info.h"
 
 #include <til/til_io.h>
+#include <terrain/lighting.h>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
@@ -140,6 +141,9 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_height", "world_pos"), &NovaTerrainData::get_height);
 	ClassDB::bind_method(D_METHOD("get_height_world", "world_pos"), &NovaTerrainData::get_height_world);
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &NovaTerrainData::get_height_world_bilinear);
+	ClassDB::bind_method(D_METHOD("get_colormap_color_world", "world_x", "world_z"), &NovaTerrainData::get_colormap_color_world);
+	ClassDB::bind_method(D_METHOD("get_modulated_colormap_color_world", "world_x", "world_z", "light_color"),
+	                     &NovaTerrainData::get_modulated_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("get_tile_count"), &NovaTerrainData::get_tile_count);
 	ClassDB::bind_method(D_METHOD("load_foliage_indices"), &NovaTerrainData::load_foliage_indices);
@@ -480,7 +484,15 @@ String NovaTerrainData::get_trn_path() const { return trn_path; }
 void NovaTerrainData::set_terrain_name(const String &p_name) { terrain_name = p_name; _notify_terrain_changed(); }
 String NovaTerrainData::get_terrain_name() const { return terrain_name; }
 
-IMPL_TEX_PROP(colormap, set_colormap, get_colormap)
+void NovaTerrainData::set_colormap(const Ref<Texture2D> &p_tex) {
+	colormap = p_tex;
+	_invalidate_colormap_cpu_cache();
+	_sync_trn_texture_filenames_from_refs();
+	_notify_terrain_changed();
+}
+
+Ref<Texture2D> NovaTerrainData::get_colormap() const { return colormap; }
+
 IMPL_TEX_PROP(detailmap, set_detailmap, get_detailmap)
 IMPL_TEX_PROP(detailmap_c1, set_detailmap_c1, get_detailmap_c1)
 IMPL_TEX_PROP(detailmap_c2, set_detailmap_c2, get_detailmap_c2)
@@ -530,6 +542,43 @@ String NovaTerrainData::_texture_to_filename(const Ref<Texture2D> &p_tex) {
 	String path = p_tex->get_path();
 	if (path.is_empty()) return "";
 	return path.get_file();
+}
+
+void NovaTerrainData::_invalidate_colormap_cpu_cache() const {
+	colormap_cpu_image.unref();
+	colormap_cpu_width = 0;
+	colormap_cpu_height = 0;
+}
+
+bool NovaTerrainData::_ensure_colormap_cpu_cache() const {
+	if (colormap_cpu_image.is_valid() && colormap_cpu_width > 0 && colormap_cpu_height > 0) {
+		return true;
+	}
+	if (colormap.is_null()) {
+		return false;
+	}
+
+	Ref<Image> image = colormap->get_image();
+	if (image.is_null() || image->is_empty()) {
+		return false;
+	}
+	if (image->is_compressed()) {
+		const Error err = image->decompress();
+		if (err != OK) {
+			return false;
+		}
+	}
+	if (image->get_format() != Image::FORMAT_RGBA8) {
+		image->convert(Image::FORMAT_RGBA8);
+	}
+	colormap_cpu_width = image->get_width();
+	colormap_cpu_height = image->get_height();
+	if (colormap_cpu_width <= 0 || colormap_cpu_height <= 0) {
+		_invalidate_colormap_cpu_cache();
+		return false;
+	}
+	colormap_cpu_image = image;
+	return true;
 }
 
 static void _sync_texture_filename(const Ref<Texture2D> &texture, std::string &target_field) {
@@ -695,6 +744,7 @@ Error NovaTerrainData::load() {
 	}
 	tilestrip_tex = _load_texture_from_dir(trn_dir, tilestrip_filename);
 	trn.tilestrip = tilestrip_filename.utf8().get_data();
+	_invalidate_colormap_cpu_cache();
 
 	// CPT is an export-time bake artefact; editor projects legitimately save
 	// a .trn without one (see plan: "Make CPT optional"). Missing/empty
@@ -825,6 +875,40 @@ float NovaTerrainData::get_height_world_bilinear(const Vector3 &p_world_pos) con
 	const float top = h00 + (h10 - h00) * fx;
 	const float bot = h01 + (h11 - h01) * fx;
 	return (top + (bot - top) * fz) / 256.0f;
+}
+
+Color NovaTerrainData::get_colormap_color_world(float world_x, float world_z) const {
+	// Engine: Terrain_GetModulatedColorAtPos@0x005C5FE0 indexes the colormap
+	// directly as x & 0x3FF, (-z) & 0x3FF. It does not go through sector-grid
+	// quadrant remapping; Foliage_BuildGeometry@0x005BF5F0 passes world fixed
+	// coords to it when baking foliage vertex colors.
+	if (!_ensure_colormap_cpu_cache()) {
+		return Color(1.0f, 1.0f, 1.0f, 1.0f);
+	}
+
+	const int x = static_cast<int>(std::floor(world_x));
+	const int z = static_cast<int>(std::floor(-world_z));
+	const int sample_x = ((x % colormap_cpu_width) + colormap_cpu_width) % colormap_cpu_width;
+	const int sample_z = ((z % colormap_cpu_height) + colormap_cpu_height) % colormap_cpu_height;
+	return colormap_cpu_image->get_pixel(sample_x, sample_z);
+}
+
+Color NovaTerrainData::get_modulated_colormap_color_world(float world_x,
+                                                          float world_z,
+                                                          const Color &light_color) const {
+	auto to_byte = [](float value) -> uint32_t {
+		return static_cast<uint32_t>(std::clamp(static_cast<int>(std::lround(value * 255.0f)), 0, 255));
+	};
+	const Color base = get_colormap_color_world(world_x, world_z);
+	const uint32_t base_argb = (to_byte(base.a) << 24) | (to_byte(base.r) << 16) |
+	                           (to_byte(base.g) << 8) | to_byte(base.b);
+	const uint32_t light_argb = 0xFF000000u | (to_byte(light_color.r) << 16) |
+	                            (to_byte(light_color.g) << 8) | to_byte(light_color.b);
+	const uint32_t modulated = opennova::terrain::terrain_modulate_color_argb(base_argb, light_argb);
+	return Color(static_cast<float>((modulated >> 16) & 0xFFu) / 255.0f,
+	             static_cast<float>((modulated >> 8) & 0xFFu) / 255.0f,
+	             static_cast<float>(modulated & 0xFFu) / 255.0f,
+	             static_cast<float>((modulated >> 24) & 0xFFu) / 255.0f);
 }
 
 int NovaTerrainData::get_tile_count() const {

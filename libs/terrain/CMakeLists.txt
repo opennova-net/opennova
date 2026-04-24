@@ -4,6 +4,7 @@ add_library(opennova_terrain STATIC
     src/cpt_export.cpp
     src/depthmap.cpp
     src/lod.cpp
+    src/lighting.cpp
     src/mesh_data.cpp
     src/mesh_simp.cpp
     src/packing.cpp

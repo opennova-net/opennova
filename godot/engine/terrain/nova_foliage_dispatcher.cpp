@@ -3,9 +3,16 @@
 #include "nova_terrain_data.h"
 
 #include <godot_cpp/classes/box_mesh.hpp>
+#include <godot_cpp/classes/base_material3d.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
+#include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/multi_mesh.hpp>
 #include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
+#include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/quaternion.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
@@ -21,9 +28,9 @@ namespace {
 constexpr float INVALID_HEIGHT_THRESHOLD = -1.0e6f;
 constexpr int32_t RUNTIME_VIEW_RADIUS_FIXED = 0x40000;
 
-// Engine does not write per-instance colors. sub_5C0240 computes height-derived
-// curvature/slope data for a later shader consumer. Until that shader path is
-// isolated, this adapter renders white instances.
+// Engine foliage lighting is not normal/slope lighting. Foliage_BuildGeometry
+// @0x005BF5F0 samples Terrain_GetModulatedColorAtPos@0x005C5FE0; sub_5C0240
+// only prepares height/patch-control data for the later render emitter.
 
 } // namespace
 
@@ -77,6 +84,9 @@ Array NovaFoliageDispatcher::get_foliage_defs() const { return foliage_defs_; }
 
 void NovaFoliageDispatcher::set_slot_meshes(const Array &p_meshes) {
 	slot_meshes_ = p_meshes;
+	for (Ref<ShaderMaterial> &material : foliage_materials_) {
+		material.unref();
+	}
 	mm_dirty_ = true;
 }
 
@@ -292,6 +302,35 @@ float NovaFoliageDispatcher::_sample_height(float world_x, float world_z) const 
 	return static_cast<float>(static_cast<double>(result));
 }
 
+Color NovaFoliageDispatcher::_sample_ground_color(const opennova::foliage::PlacementInstance &inst,
+                                                  float quad_half_width) const {
+	using opennova::foliage::FIXED_TO_FLOAT;
+
+	NovaTerrainData *td = terrain_data_.ptr();
+	if (td == nullptr) {
+		return Color(1.0f, 1.0f, 1.0f, 1.0f);
+	}
+
+	const float wx = static_cast<float>(inst.world_x_fixed) * FIXED_TO_FLOAT;
+	const float wz = static_cast<float>(inst.world_z_fixed) * FIXED_TO_FLOAT;
+	const float yaw = inst.rotation_radians;
+	const float cos_y = std::cos(yaw);
+	const float sin_y = std::sin(yaw);
+
+	Color accum = td->get_colormap_color_world(wx, wz);
+	int samples = 1;
+	for (int c = 0; c < 4; ++c) {
+		const float qx = ((c & 1) ? 1.0f : -1.0f) * quad_half_width;
+		const float qy = ((c & 2) ? 1.0f : -1.0f) * quad_half_width;
+		const float dx = qx * cos_y - qy * sin_y;
+		const float dz = -(qy * cos_y + qx * sin_y);
+		accum += td->get_colormap_color_world(wx + dx, wz + dz);
+		++samples;
+	}
+
+	return accum / static_cast<float>(samples);
+}
+
 void NovaFoliageDispatcher::_append_render_instance(const opennova::foliage::PlacementInstance &inst,
                                                     float quad_half_width,
                                                     std::vector<Transform3D> &out_transforms,
@@ -314,7 +353,6 @@ void NovaFoliageDispatcher::_append_render_instance(const opennova::foliage::Pla
 	};
 
 	Basis basis(Quaternion(Vector3(0, 1, 0), yaw));
-	float slope_shade = 1.0f;
 	float corner_heights[4];
 	bool valid_corners = true;
 	for (int c = 0; c < 4; ++c) {
@@ -339,14 +377,11 @@ void NovaFoliageDispatcher::_append_render_instance(const opennova::foliage::Pla
 			const Quaternion slope_rot(Vector3(0, 1, 0), normal);
 			const Quaternion yaw_rot(Vector3(0, 1, 0), yaw);
 			basis = Basis(slope_rot * yaw_rot);
-			// Shared stand-in for spec §4.4.8 color_lower/color_upper blend;
-			// actual formula is §7.2 untraced.
-			slope_shade = opennova::foliage::foliage_slope_shade_from_normal_y(normal.y);
 		}
 	}
 
 	out_transforms.emplace_back(basis, Vector3(wx, wy + surface_offset_, wz));
-	out_colors.emplace_back(slope_shade, slope_shade, slope_shade, 1.0f);
+	out_colors.emplace_back(_sample_ground_color(inst, quad_half_width));
 }
 
 void NovaFoliageDispatcher::_dispatch_runtime(Vector3 centre, const Transform3D &view_xform, const Dictionary &defs_by_match) {
@@ -575,6 +610,48 @@ Ref<Mesh> NovaFoliageDispatcher::_fallback_mesh() const {
 	return box;
 }
 
+void NovaFoliageDispatcher::_update_slot_material(int slot_index, const Ref<Mesh> &slot_mesh) {
+	if (slot_index < 0 || slot_index >= opennova::FOLIAGE_MAX_DEFS) {
+		return;
+	}
+
+	if (foliage_shader_.is_null()) {
+		foliage_shader_ = ResourceLoader::get_singleton()->load("res://shaders/foliage.gdshader", "Shader");
+	}
+	if (foliage_shader_.is_null()) {
+		return;
+	}
+
+	Ref<ShaderMaterial> material = foliage_materials_[slot_index];
+	if (material.is_null()) {
+		material.instantiate();
+		material->set_shader(foliage_shader_);
+		foliage_materials_[slot_index] = material;
+	} else if (material->get_shader() != foliage_shader_) {
+		material->set_shader(foliage_shader_);
+	}
+
+	Ref<Texture2D> albedo_tex;
+	if (slot_mesh.is_valid() && slot_mesh->get_surface_count() > 0) {
+		Ref<Material> source_material = slot_mesh->surface_get_material(0);
+		if (source_material.is_valid()) {
+			if (BaseMaterial3D *base_material = Object::cast_to<BaseMaterial3D>(source_material.ptr())) {
+				albedo_tex = base_material->get_texture(BaseMaterial3D::TEXTURE_ALBEDO);
+			}
+		}
+	}
+
+	material->set_shader_parameter("u_albedo_texture", albedo_tex);
+	material->set_shader_parameter("u_has_albedo_texture", albedo_tex.is_valid());
+	if (terrain_data_.is_valid()) {
+		material->set_shader_parameter("u_colormap", terrain_data_->get_colormap());
+	}
+
+	if (mm_by_slot_[slot_index] != nullptr) {
+		mm_by_slot_[slot_index]->set_material_override(material);
+	}
+}
+
 void NovaFoliageDispatcher::_rebuild_multimeshes() {
 	std::vector<Transform3D> per_slot_t[opennova::FOLIAGE_MAX_DEFS];
 	std::vector<Color> per_slot_c[opennova::FOLIAGE_MAX_DEFS];
@@ -645,6 +722,8 @@ void NovaFoliageDispatcher::_rebuild_multimeshes() {
 		// The bit is a shadow-render opt-in; when set the slot's instances cast shadows,
 		// otherwise we disable the pass entirely. Applied every rebuild so def edits
 		// propagate without forcing a full scene reload.
+		_update_slot_material(s, slot_mesh);
+
 		int shadow_attrib = 0;
 		if (s < foliage_defs_.size()) {
 			Ref<NovaTerrainFoliageDef> def = foliage_defs_[s];

@@ -7,8 +7,7 @@
 namespace opennova {
 
 // Engine: jodemo.exe foliage-def sync into placement/render globals,
-// sub_5C0240@0x5C0240, sub_5C65E0@0x5C65E0
-// docs/engine_spec_foliage.md 2.3, 4.4, 8
+// Foliage_BuildPatchData@0x005C0240, Terrain_GetFoliageMapValue@0x005C65E0.
 
 constexpr int FOLIAGE_MAX_DEFS = 4;
 constexpr int FOLIAGE_HEIGHTMAP_SIZE = 1024;
@@ -16,12 +15,9 @@ constexpr uint8_t FOLIAGE_ATTRIB_FORCE_ON = 1 << 0;
 constexpr uint8_t FOLIAGE_ATTRIB_SHADOW = 1 << 1;
 constexpr uint8_t FOLIAGE_ATTRIB_KNOWN_MASK = FOLIAGE_ATTRIB_FORCE_ON | FOLIAGE_ATTRIB_SHADOW;
 
-// Fidelity: bounded stand-in. The three values are the integers observed in
-// shipped .trn files; their binary-side consumer at sub_5C0240 @0x600d88
-// blends them with 8 heightmap samples to produce per-vertex color (spec
-// §4.4.8), but the exact expression is engine_spec_foliage.md §7.2 untraced.
-// Our renderer falls back to a slope-derived shade (NovaFoliageDispatcher::
-// _append_render_instance) until the formula is decompiled.
+// Values observed in shipped .trn files. Direct jodemo RE shows
+// Foliage_BuildGeometry@0x005BF5F0 applies them to terrain-modulated colormap
+// samples as color modes; Foliage_BuildPatchData does not compute final RGB.
 enum class FoliageColorMode : int {
 	MatchGround = 0,
 	Blend50 = 1,
@@ -32,9 +28,9 @@ struct FoliageDef {
 	std::string graphic;
 	int color_lower = static_cast<int>(FoliageColorMode::MatchGround);
 	int color_upper = static_cast<int>(FoliageColorMode::MatchGround);
-	// Fidelity: bounded deviation.
-	// Engine stores up to 4 match codes per slot; the shared port still exposes
-	// one authored match until the terrain/TRN wrappers are widened.
+	// Fidelity: bounded deviation. Engine stores up to 4 match codes per slot;
+	// the shared port still exposes one authored match until the terrain/TRN
+	// wrappers are widened.
 	int match = -1;
 	uint8_t attrib_flags = 0;
 };

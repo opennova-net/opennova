@@ -1,8 +1,10 @@
 #pragma once
 
 #include <godot_cpp/classes/resource.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
@@ -41,6 +43,9 @@ private:
 	Ref<Texture2D> charmap_tex;
 	Ref<Texture2D> foliagemap_tex;
 	Ref<Texture2D> tilestrip_tex;
+	mutable Ref<Image> colormap_cpu_image;
+	mutable int colormap_cpu_width = 0;
+	mutable int colormap_cpu_height = 0;
 
 	// Numeric/bool properties
 	int detail_density = 128;
@@ -81,6 +86,8 @@ private:
 	void _notify_terrain_changed();
 	void _sync_foliage_map_resource_from_slot();
 	void _apply_foliage_map_to_slot(const opennova::FoliageMap &map);
+	void _invalidate_colormap_cpu_cache() const;
+	bool _ensure_colormap_cpu_cache() const;
 
 	// Extract bare filename from a Texture2D's resource path
 	static String _texture_to_filename(const Ref<Texture2D> &p_tex);
@@ -155,6 +162,8 @@ public:
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;
+	Color get_colormap_color_world(float world_x, float world_z) const;
+	Color get_modulated_colormap_color_world(float world_x, float world_z, const Color &light_color) const;
 	// Returns the foliagemap palette index at the given world position, or 0
 	// for "outside map / empty".
 	// Engine: jodemo.exe sub_5C65E0@0x5C65E0

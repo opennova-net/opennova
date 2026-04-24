@@ -188,6 +188,27 @@ PlacementResult place_cell(int slot_index,
 			                               : 0;
 		}
 
+		// Engine: Foliage_BuildPatchData@0x005C0240, 0x5C06B8..0x5C07FC.
+		// These four values are derived from the same asymmetric midpoint
+		// samples above and written into the patch record after the corner
+		// offsets/heights. They are patch control data, not final foliage color.
+		const float c0 = static_cast<float>(inst.corner_y_fixed[0]) * FIXED_TO_FLOAT;
+		const float c1 = static_cast<float>(inst.corner_y_fixed[1]) * FIXED_TO_FLOAT;
+		const float c2 = static_cast<float>(inst.corner_y_fixed[2]) * FIXED_TO_FLOAT;
+		const float c3 = static_cast<float>(inst.corner_y_fixed[3]) * FIXED_TO_FLOAT;
+		const float m0 = static_cast<float>(inst.midpoint_y_fixed[0]) * FIXED_TO_FLOAT;
+		const float m1 = static_cast<float>(inst.midpoint_y_fixed[1]) * FIXED_TO_FLOAT;
+		const float m2 = static_cast<float>(inst.midpoint_y_fixed[2]) * FIXED_TO_FLOAT;
+		const float m3 = static_cast<float>(inst.midpoint_y_fixed[3]) * FIXED_TO_FLOAT;
+		const float edge_bottom = m1 - (c3 + c1) * 0.5f;
+		const float edge_right = m3 - (c3 + c2) * 0.5f;
+		const float control0 = (m0 - (c2 + c0) * 0.5f + edge_bottom) * 0.5f;
+		const float control2 = (m2 - (c1 + c0) * 0.5f + edge_right) * 0.5f;
+		inst.patch_control[0] = control0;
+		inst.patch_control[1] = edge_bottom - control0;
+		inst.patch_control[2] = control2;
+		inst.patch_control[3] = edge_right - control2;
+
 		// Centre-point height (used as the instance's world_y). Not in the engine's
 		// per-instance output (engine consumes corners only), but convenient for the
 		// Godot side that positions MultiMesh instances by centre.

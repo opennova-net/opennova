@@ -3,6 +3,8 @@
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/multi_mesh_instance3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -151,6 +153,8 @@ private:
 
 	// Per-slot rendered children (one MultiMeshInstance3D per def slot).
 	MultiMeshInstance3D *mm_by_slot_[4] = {};
+	Ref<Shader> foliage_shader_;
+	Ref<ShaderMaterial> foliage_materials_[4];
 
 	// Configuration
 	Array foliage_defs_;
@@ -170,6 +174,9 @@ private:
 	bool _is_runtime_dispatch_mode() const;
 	void _dispatch_runtime(Vector3 centre, const Transform3D &view_xform, const Dictionary &defs_by_match);
 	void _rebuild_multimeshes();
+	void _update_slot_material(int slot_index, const Ref<Mesh> &slot_mesh);
+	Color _sample_ground_color(const opennova::foliage::PlacementInstance &inst,
+	                           float quad_half_width) const;
 	bool _scatter_cell(int slot_index,
 	                   int cell_x_int, int cell_z_int,
 	                   const Ref<NovaTerrainFoliageDef> &def,

@@ -108,7 +108,7 @@ add_test(NAME foliage_map COMMAND foliage_map_test)
 # invariants (deterministic PRNG, 21-cap, 4-quadrant walk, 128-LRU, 8-frame
 # stagger, 38.0 near-Z reject). See libs/foliage/include/foliage/placement.h,
 # docs/engine_spec_foliage.md §4–§5, RE/kong/kong_output_jodemo/terrain.c:15026+.
-foreach(name placement_determinism placement_cap placement_midpoints dispatcher_quadrants dispatcher_lru dispatcher_stagger dispatcher_near_z dispatcher_frame_progression color_slope)
+foreach(name placement_determinism placement_cap placement_midpoints dispatcher_quadrants dispatcher_lru dispatcher_stagger dispatcher_near_z dispatcher_frame_progression)
     add_executable(foliage_${name}_test foliage/foliage_${name}_test.cpp)
     target_link_libraries(foliage_${name}_test PRIVATE opennova_foliage)
     target_include_directories(foliage_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -155,6 +155,11 @@ foreach(name parametric_parity depthmap_smooth tpm1_roundtrip)
     target_include_directories(${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME ${name} COMMAND ${name}_test)
 endforeach()
+
+add_executable(terrain_lighting_test trngen/terrain_lighting_test.cpp)
+target_link_libraries(terrain_lighting_test PRIVATE opennova_terrain)
+target_include_directories(terrain_lighting_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_lighting COMMAND terrain_lighting_test)
 
 # parametric_parity is a long byte-identical fixture parity run and remains
 # disabled until its CI stability/performance cost is addressed.

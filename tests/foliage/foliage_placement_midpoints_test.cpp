@@ -1,5 +1,6 @@
 #include <foliage/placement.h>
 
+#include <cmath>
 #include <cstdio>
 #include <utility>
 #include <vector>
@@ -27,6 +28,14 @@ SampleCall midpoint(const SampleCall &a, const SampleCall &b) {
 	    static_cast<Fixed16_16>((a.x + b.x) >> 1),
 	    static_cast<Fixed16_16>((a.z + b.z) >> 1),
 	};
+}
+
+float fixed_to_float(Fixed16_16 value) {
+	return static_cast<float>(value) * FIXED_TO_FLOAT;
+}
+
+bool near(float a, float b, float eps = 1.0e-5f) {
+	return std::fabs(a - b) <= eps;
 }
 
 } // namespace
@@ -94,6 +103,32 @@ int main() {
 	}
 	if (!expect(differs_from_legacy, "midpoint layout should not collapse back to the old edge-midpoint approximation")) return 1;
 
-	std::printf("OK: foliage midpoint samples follow the recovered asymmetric engine pairing\n");
+	const PlacementInstance &inst = result.instances[0];
+	const float corner0 = fixed_to_float(inst.corner_y_fixed[0]);
+	const float corner1 = fixed_to_float(inst.corner_y_fixed[1]);
+	const float corner2 = fixed_to_float(inst.corner_y_fixed[2]);
+	const float corner3 = fixed_to_float(inst.corner_y_fixed[3]);
+	const float hm0 = fixed_to_float(inst.midpoint_y_fixed[0]);
+	const float hm1 = fixed_to_float(inst.midpoint_y_fixed[1]);
+	const float hm2 = fixed_to_float(inst.midpoint_y_fixed[2]);
+	const float hm3 = fixed_to_float(inst.midpoint_y_fixed[3]);
+	const float edge_bottom = hm1 - (corner3 + corner1) * 0.5f;
+	const float edge_right = hm3 - (corner3 + corner2) * 0.5f;
+	float expected_control[4] = {
+	    (hm0 - (corner2 + corner0) * 0.5f + edge_bottom) * 0.5f,
+	    0.0f,
+	    (hm2 - (corner1 + corner0) * 0.5f + edge_right) * 0.5f,
+	    0.0f,
+	};
+	expected_control[1] = edge_bottom - expected_control[0];
+	expected_control[3] = edge_right - expected_control[2];
+	for (int i = 0; i < 4; ++i) {
+		if (!expect(near(inst.patch_control[i], expected_control[i]),
+		            "patch_control should match Foliage_BuildPatchData curvature writes")) {
+			return 1;
+		}
+	}
+
+	std::printf("OK: foliage midpoint samples and patch controls follow Foliage_BuildPatchData\n");
 	return 0;
 }
