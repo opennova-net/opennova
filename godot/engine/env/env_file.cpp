@@ -60,6 +60,7 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("interpolate_time_of_day", "time"), &EnvFile::interpolate_time_of_day);
 	ClassDB::bind_method(D_METHOD("compute_sun_direction", "time"), &EnvFile::compute_sun_direction);
 	ClassDB::bind_method(D_METHOD("compute_moon_direction", "time"), &EnvFile::compute_moon_direction);
+	ClassDB::bind_method(D_METHOD("has_water_height"), &EnvFile::has_water_height);
 	ClassDB::bind_method(D_METHOD("_on_keyframe_changed"), &EnvFile::_on_keyframe_changed);
 
 #define BIND_PROP(type, name, setter, getter, hint, hint_string) \
@@ -91,6 +92,7 @@ void EnvFile::_bind_methods() {
 #undef BIND_COLOR
 
 	ADD_GROUP("Water", "water_");
+	BIND_PROP(Variant::FLOAT, water_height, set_water_height, get_water_height, PROPERTY_HINT_RANGE, "-1000,1000,0.1")
 	BIND_PROP(Variant::FLOAT, water_murk, set_water_murk, get_water_murk, PROPERTY_HINT_RANGE, "0.0,0.99,0.01")
 
 	ADD_GROUP("Iris", "iris_");
@@ -150,6 +152,9 @@ IMPL_SET_GET(fog_level, set_fog_level, get_fog_level, float, float)
 IMPL_SET_GET(fog_type, set_fog_type, get_fog_type, int, int)
 IMPL_SET_GET(terrain_tint, set_terrain_tint, get_terrain_tint, const Color &, Color)
 IMPL_SET_GET(water_color, set_water_color, get_water_color, const Color &, Color)
+void EnvFile::set_water_height(float p_value) { water_height = p_value; water_height_set = true; _notify_environment_changed(); }
+float EnvFile::get_water_height() const { return water_height; }
+bool EnvFile::has_water_height() const { return water_height_set; }
 IMPL_SET_GET(cloud_tint, set_cloud_tint, get_cloud_tint, const Color &, Color)
 IMPL_SET_GET(vertex_tint, set_vertex_tint, get_vertex_tint, const Color &, Color)
 IMPL_SET_GET(lightning_color, set_lightning_color, get_lightning_color, const Color &, Color)
@@ -209,6 +214,8 @@ void EnvFile::_sync_env_from_properties() {
 	env.fog_type = fog_type;
 	env.terrain_rgb = to_rgb(terrain_tint);
 	env.water_rgb = to_rgb(water_color);
+	env.water_height = water_height;
+	env.water_height_set = water_height_set;
 	env.cloud_rgb = to_rgb(cloud_tint);
 	env.vertex_rgb = to_rgb(vertex_tint);
 	env.lightning_rgb = to_rgb(lightning_color);
@@ -247,6 +254,8 @@ void EnvFile::_sync_properties_from_env() {
 	fog_type = env.fog_type;
 	terrain_tint = to_color(env.terrain_rgb);
 	water_color = to_color(env.water_rgb);
+	water_height = env.water_height;
+	water_height_set = env.water_height_set;
 	cloud_tint = to_color(env.cloud_rgb);
 	vertex_tint = to_color(env.vertex_rgb);
 	lightning_color = to_color(env.lightning_rgb);

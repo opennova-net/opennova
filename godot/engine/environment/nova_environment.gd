@@ -6,7 +6,8 @@ extends Node
 # Engine equivalents:
 # - sub_540B90@0x540B90 advances time.
 # - sub_53FCC0@0x53FCC0 interpolates keyframe colors.
-# - Terrain_SetEnvironmentData@0x53F840 / sub_422000 push lighting and fog.
+# - Jointops.exe Render_SetFogParams@0x54B4B0 / Terrain_SetLightingColors@0x5C4B10
+#   push fog and terrain lighting state.
 
 @export var environment_data: EnvFile:
 	set(value):
@@ -95,7 +96,7 @@ func _write_shader_globals() -> void:
 	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", _sun_dir)
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_color", _fog_color_rt)
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_end", get_fog_level())
-	RenderingServer.global_shader_parameter_set(&"opennova_fog_start", get_fog_level() * 0.3)
+	RenderingServer.global_shader_parameter_set(&"opennova_fog_start", get_fog_start())
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_type", get_fog_type())
 	RenderingServer.global_shader_parameter_set(&"opennova_wind_sway_amount", 1.0)
 	RenderingServer.global_shader_parameter_set(&"opennova_wind_sway_phase", 0.0)
@@ -124,11 +125,26 @@ func get_terrain_tint() -> Vector3:
 	return Vector3(color.r, color.g, color.b)
 
 
+func get_terrain_lighting_attenuation() -> Vector3:
+	# terrain_rgb is a recovered reciprocal attenuation LUT, not a direct tint.
+	# Jointops.exe Terrain_SetEnvironmentData@0x53F840 is only a buffer copy;
+	# keep this neutral until the exact runtime consumer is located.
+	return Vector3.ONE
+
+
 func get_water_color() -> Vector3:
 	if environment_data == null:
 		return Vector3(0.408, 0.314, 0.224)
 	var color := environment_data.get_water_color()
 	return Vector3(color.r, color.g, color.b)
+
+
+func has_water_height() -> bool:
+	return environment_data != null and environment_data.has_water_height()
+
+
+func get_water_height() -> float:
+	return environment_data.get_water_height() if has_water_height() else 0.0
 
 
 func get_cloud_tint() -> Vector3:
@@ -200,6 +216,17 @@ func get_fog_distance() -> float:
 
 func get_fog_level() -> float:
 	return environment_data.get_fog_level() if environment_data else 1000.0
+
+
+func get_fog_start() -> float:
+	var fog_end := get_fog_level()
+	match get_fog_type():
+		2:
+			return fog_end * 0.5
+		3:
+			return fog_end * 0.25
+		_:
+			return 0.5
 
 
 func get_fog_type() -> int:

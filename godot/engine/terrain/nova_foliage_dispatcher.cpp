@@ -2,6 +2,8 @@
 
 #include "nova_terrain_data.h"
 
+#include <terrain/lighting.h>
+
 #include <godot_cpp/classes/box_mesh.hpp>
 #include <godot_cpp/classes/base_material3d.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
@@ -31,6 +33,21 @@ constexpr int32_t RUNTIME_VIEW_RADIUS_FIXED = 0x40000;
 // Engine foliage lighting is not normal/slope lighting. Foliage_BuildGeometry
 // @0x005BF5F0 samples Terrain_GetModulatedColorAtPos@0x005C5FE0; sub_5C0240
 // only prepares height/patch-control data for the later render emitter.
+
+uint32_t color_to_argb(const Color &color) {
+	auto to_byte = [](float value) -> uint32_t {
+		return static_cast<uint32_t>(std::clamp(static_cast<int>(std::lround(value * 255.0f)), 0, 255));
+	};
+	return (to_byte(color.a) << 24) | (to_byte(color.r) << 16) | (to_byte(color.g) << 8) | to_byte(color.b);
+}
+
+Color argb_to_color(uint32_t argb) {
+	constexpr float INV_255 = 1.0f / 255.0f;
+	return Color(static_cast<float>((argb >> 16) & 0xFFu) * INV_255,
+	             static_cast<float>((argb >> 8) & 0xFFu) * INV_255,
+	             static_cast<float>(argb & 0xFFu) * INV_255,
+	             static_cast<float>((argb >> 24) & 0xFFu) * INV_255);
+}
 
 } // namespace
 
@@ -306,6 +323,7 @@ Color NovaFoliageDispatcher::_sample_ground_color(const opennova::foliage::Place
                                                   float quad_half_width) const {
 	using opennova::foliage::FIXED_TO_FLOAT;
 
+	(void)quad_half_width;
 	NovaTerrainData *td = terrain_data_.ptr();
 	if (td == nullptr) {
 		return Color(1.0f, 1.0f, 1.0f, 1.0f);
@@ -313,22 +331,16 @@ Color NovaFoliageDispatcher::_sample_ground_color(const opennova::foliage::Place
 
 	const float wx = static_cast<float>(inst.world_x_fixed) * FIXED_TO_FLOAT;
 	const float wz = static_cast<float>(inst.world_z_fixed) * FIXED_TO_FLOAT;
-	const float yaw = inst.rotation_radians;
-	const float cos_y = std::cos(yaw);
-	const float sin_y = std::sin(yaw);
 
-	Color accum = td->get_colormap_color_world(wx, wz);
-	int samples = 1;
-	for (int c = 0; c < 4; ++c) {
-		const float qx = ((c & 1) ? 1.0f : -1.0f) * quad_half_width;
-		const float qy = ((c & 2) ? 1.0f : -1.0f) * quad_half_width;
-		const float dx = qx * cos_y - qy * sin_y;
-		const float dz = -(qy * cos_y + qx * sin_y);
-		accum += td->get_colormap_color_world(wx + dx, wz + dz);
-		++samples;
-	}
-
-	return accum / static_cast<float>(samples);
+	// Jointops.exe Foliage_BuildGeometry@0x005BF5F0 averages four 0x8000
+	// fixed-point offsets around each source vertex. MultiMesh has one color per
+	// instance, so use the instance center as the proxy source vertex.
+	const uint32_t c0 = color_to_argb(td->get_colormap_color_world(wx - 0.5f, wz - 0.5f));
+	const uint32_t c1 = color_to_argb(td->get_colormap_color_world(wx + 0.5f, wz - 0.5f));
+	const uint32_t c2 = color_to_argb(td->get_colormap_color_world(wx - 0.5f, wz + 0.5f));
+	const uint32_t c3 = color_to_argb(td->get_colormap_color_world(wx + 0.5f, wz + 0.5f));
+	const uint32_t packed = opennova::terrain::terrain_average_four_argb(c0, c1, c2, c3);
+	return argb_to_color(packed);
 }
 
 void NovaFoliageDispatcher::_append_render_instance(const opennova::foliage::PlacementInstance &inst,
@@ -718,7 +730,7 @@ void NovaFoliageDispatcher::_rebuild_multimeshes() {
 			mm->set_mesh(slot_mesh);
 		}
 
-		// SHADOW attribute bit (jodemo FoliageDef +532 bit 1, engine_spec_foliage §3.1).
+		// SHADOW attribute bit (Jointops.exe FoliageDef +532 bit 1, engine_spec_foliage §3.1).
 		// The bit is a shadow-render opt-in; when set the slot's instances cast shadows,
 		// otherwise we disable the pass entirely. Applied every rebuild so def edits
 		// propagate without forcing a full scene reload.

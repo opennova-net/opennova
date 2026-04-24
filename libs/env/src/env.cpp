@@ -227,6 +227,9 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 			parse_rgb(value, out.terrain_rgb);
 		} else if (key == "water_rgb") {
 			parse_rgb(value, out.water_rgb);
+		} else if (key == "water_height") {
+			out.water_height = static_cast<float>(std::atof(value.c_str()));
+			out.water_height_set = true;
 		} else if (key == "cloud_rgb") {
 			parse_rgb(value, out.cloud_rgb);
 		} else if (key == "vertex_rgb") {
@@ -292,6 +295,9 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 	output << "iris_center " << number_to_string(cfg.iris_center) << NL;
 	output << NL;
 	output << "water_rgb " << rgb_to_string(cfg.water_rgb) << NL;
+	if (cfg.water_height_set) {
+		output << "water_height " << number_to_string(cfg.water_height) << NL;
+	}
 	output << NL;
 	output << "sky_map1 " << cfg.sky_map1 << NL;
 	output << "sky_map2 " << cfg.sky_map2 << NL;

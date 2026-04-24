@@ -15,6 +15,7 @@ func test_full_00_env_loads_through_resource_loader() -> void:
 	assert_eq(env.get_curtime(), 1200, "Stock curtime should be parsed.")
 	assert_eq(env.get_fog_level(), 1000.0, "Stock fog level should be parsed.")
 	assert_eq(env.get_fog_type(), 2, "Stock fog type should be parsed.")
+	assert_false(env.has_water_height(), "Stock fixture should not claim an authored water height.")
 	assert_eq(env.get_advanced_clouds(), 1, "Stock advanced cloud mode should be parsed.")
 	assert_eq(env.get_tod_keyframes().size(), 10, "FULL_00 should expose all TOD keyframes.")
 	assert_not_null(env.get_sky_map1_tex(), "Sky map 1 should resolve through the shared texture resolver.")

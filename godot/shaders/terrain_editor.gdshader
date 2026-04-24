@@ -115,6 +115,22 @@ vec3 sector_overlay_color(float sector_id) {
 	return vec3(0.22, 0.23, 0.26);
 }
 
+float jointops_fog_factor(float dist, float fog_start, float fog_end, int fog_type) {
+	float safe_end = max(fog_end, 1.0);
+	if (fog_type == 0) {
+		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);
+	}
+
+	float start = fog_start;
+	if (fog_type == 2) {
+		start = safe_end * 0.5;
+	} else if (fog_type == 3) {
+		start = safe_end * 0.25;
+	}
+	float fog_range = max(safe_end - start, 1.0);
+	return clamp((safe_end - dist) / fog_range, 0.0, 1.0);
+}
+
 
 void fragment() {
 	vec3 result;
@@ -141,8 +157,6 @@ void fragment() {
 
 		vec3 cm_rgb = cm.rgb;
 		vec3 lit = ambient * cm_rgb * 2.0;
-		float sun_ndl = max(dot(normalize(v_world_normal), normalize(u_sun_direction)), 0.0);
-		lit += cm_rgb * u_sun_light * sun_ndl * 1.5;
 		lit *= normal_factor;
 
 		// Layer-2 normal pair: detailmap2 (near) + detailmapdist2 (far).
@@ -157,19 +171,7 @@ void fragment() {
 		result *= u_terrain_tint;
 
 		float dist = length(v_world_pos - CAMERA_POSITION_WORLD);
-		float fog_range = max(u_fog_end - u_fog_start, 1.0);
-		float density = 1.0 / fog_range;
-		float fog_factor;
-		if (u_fog_type == 1) {
-			fog_factor = exp(-dist * density);
-		} else if (u_fog_type == 2) {
-			fog_factor = exp(-(dist * density) * (dist * density));
-		} else if (u_fog_type == 3) {
-			fog_factor = exp(-dist * density * 0.5);
-		} else {
-			fog_factor = 1.0;
-		}
-		fog_factor = clamp(fog_factor, 0.0, 1.0);
+		float fog_factor = jointops_fog_factor(dist, u_fog_start, u_fog_end, u_fog_type);
 		result = mix(u_fog_color, result, fog_factor);
 		if (u_show_surface_overlay) {
 			vec3 surface_rgb = texture(u_charmap, v_colormap_uv).rgb;

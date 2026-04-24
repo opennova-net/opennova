@@ -16,6 +16,22 @@ uniform int u_fog_type = 2;
 
 varying vec3 v_world_pos;
 
+float jointops_fog_factor(float dist, float fog_start, float fog_end, int fog_type) {
+	float safe_end = max(fog_end, 1.0);
+	if (fog_type == 0) {
+		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);
+	}
+
+	float start = fog_start;
+	if (fog_type == 2) {
+		start = safe_end * 0.5;
+	} else if (fog_type == 3) {
+		start = safe_end * 0.25;
+	}
+	float fog_range = max(safe_end - start, 1.0);
+	return clamp((safe_end - dist) / fog_range, 0.0, 1.0);
+}
+
 void vertex() {
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
@@ -35,19 +51,7 @@ void fragment() {
 	float alpha = mix(u_water_alpha, 0.95, fresnel);
 
 	float dist = length(v_world_pos - CAMERA_POSITION_WORLD);
-	float fog_range = max(u_fog_end - u_fog_start, 1.0);
-	float density = 1.0 / fog_range;
-	float fog_factor;
-	if (u_fog_type == 1) {
-		fog_factor = exp(-dist * density);
-	} else if (u_fog_type == 2) {
-		fog_factor = exp(-(dist * density) * (dist * density));
-	} else if (u_fog_type == 3) {
-		fog_factor = exp(-dist * density * 0.5);
-	} else {
-		fog_factor = (u_fog_end - dist) / fog_range;
-	}
-	fog_factor = clamp(fog_factor, 0.0, 1.0);
+	float fog_factor = jointops_fog_factor(dist, u_fog_start, u_fog_end, u_fog_type);
 	color = mix(u_fog_color, color, fog_factor);
 
 	ALBEDO = color;

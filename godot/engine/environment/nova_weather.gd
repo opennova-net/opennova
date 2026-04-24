@@ -219,8 +219,9 @@ func _write_shader_globals(env: Node) -> void:
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_color", _smooth_fog)
 	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", env.get_sun_direction())
 	var fog_end: float = float(env.get_fog_level())
+	var fog_start: float = float(env.get_fog_start()) if env.has_method("get_fog_start") else 0.5
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_end", fog_end)
-	RenderingServer.global_shader_parameter_set(&"opennova_fog_start", fog_end * 0.3)
+	RenderingServer.global_shader_parameter_set(&"opennova_fog_start", fog_start)
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_type", env.get_fog_type())
 	RenderingServer.global_shader_parameter_set(&"opennova_wind_sway_amount", maxf(0.25, absf(get_sway_amount())))
 	RenderingServer.global_shader_parameter_set(&"opennova_wind_sway_phase", get_sway_phase())

@@ -66,6 +66,8 @@ struct Config {
 	int fog_type = 2;
 	Rgb terrain_rgb = {1.0f, 1.0f, 1.0f};
 	Rgb water_rgb = {56.0f / 255.0f, 59.0f / 255.0f, 39.0f / 255.0f};
+	float water_height = 0.0f;
+	bool water_height_set = false;
 	Rgb cloud_rgb = {128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f};
 	Rgb vertex_rgb = {128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f};
 	Rgb lightning_rgb = {85.0f / 255.0f, 85.0f / 255.0f, 90.0f / 255.0f};

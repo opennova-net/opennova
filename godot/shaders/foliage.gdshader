@@ -33,19 +33,19 @@ vec3 terrain_light_modulation() {
 }
 
 float fog_factor_for_distance(float dist) {
-	float fog_range = max(opennova_fog_end - opennova_fog_start, 1.0);
-	float density = 1.0 / fog_range;
-	float fog_factor = 1.0;
-	if (opennova_fog_type == 1) {
-		fog_factor = exp(-dist * density);
-	} else if (opennova_fog_type == 2) {
-		fog_factor = exp(-(dist * density) * (dist * density));
-	} else if (opennova_fog_type == 3) {
-		fog_factor = exp(-dist * density * 0.5);
-	} else {
-		fog_factor = clamp((opennova_fog_end - dist) / fog_range, 0.0, 1.0);
+	float safe_end = max(opennova_fog_end, 1.0);
+	if (opennova_fog_type == 0) {
+		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);
 	}
-	return clamp(fog_factor, 0.0, 1.0);
+
+	float start = opennova_fog_start;
+	if (opennova_fog_type == 2) {
+		start = safe_end * 0.5;
+	} else if (opennova_fog_type == 3) {
+		start = safe_end * 0.25;
+	}
+	float fog_range = max(safe_end - start, 1.0);
+	return clamp((safe_end - dist) / fog_range, 0.0, 1.0);
 }
 
 void vertex() {

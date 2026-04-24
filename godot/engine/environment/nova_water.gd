@@ -3,8 +3,8 @@ class_name NovaWater
 extends Node3D
 
 # Water plane preview/runtime adapter.
-# Engine equivalents: water color/murk consume globals parsed by sub_53E3F0 and
-# fog colors interpolated by sub_53FCC0; terrain water height still comes from .trn.
+# Engine equivalents: water color/height/murk consume globals parsed by
+# sub_53E3F0 and fog colors interpolated by sub_53FCC0.
 
 @export var environment_path: NodePath
 @export var terrain_data: NovaTerrainData
@@ -21,6 +21,7 @@ var elapsed_time: float = 0.0
 var built: bool = false
 var _cached_env: Node = null
 var _cached_cam: Camera3D = null
+var _terrain_fallback_water_height: float = 0.0
 
 
 func _ready() -> void:
@@ -28,7 +29,9 @@ func _ready() -> void:
 	if terrain_data and terrain_data.is_loaded():
 		var raw := terrain_data.get_water_height()
 		if raw > 0:
-			water_height = float(raw) * 0.5
+			_terrain_fallback_water_height = float(raw) * 0.5
+			water_height = _terrain_fallback_water_height
+	_apply_environment_water_height()
 	build()
 
 
@@ -102,16 +105,26 @@ func _process(delta: float) -> void:
 
 	var env := _cached_env
 	if env and env.has_method("is_loaded") and env.is_loaded():
+		_apply_environment_water_height()
 		water_material.set_shader_parameter("u_water_color", env.get_water_color())
 		water_material.set_shader_parameter("u_scroll_speed", env.get_sky_speed() * 0.000229)
 		var fog_end: float = env.get_fog_level()
+		var fog_start: float = env.get_fog_start() if env.has_method("get_fog_start") else 0.5
 		water_material.set_shader_parameter("u_fog_color", env.get_fog_color())
-		water_material.set_shader_parameter("u_fog_start", fog_end * 0.3)
+		water_material.set_shader_parameter("u_fog_start", fog_start)
 		water_material.set_shader_parameter("u_fog_end", fog_end)
 		water_material.set_shader_parameter("u_fog_type", env.get_fog_type())
 		var env_data: EnvFile = env.get_environment_data()
 		if env_data:
 			water_material.set_shader_parameter("u_water_alpha", env_data.get_water_murk())
+
+
+func _apply_environment_water_height() -> void:
+	var env := _cached_env
+	if env and env.has_method("has_water_height") and env.has_water_height():
+		water_height = float(env.get_water_height())
+	elif _terrain_fallback_water_height != 0.0:
+		water_height = _terrain_fallback_water_height
 
 
 func _find_camera() -> Camera3D:

@@ -27,8 +27,8 @@ class NovaTerrainData;
 // Runtime foliage adapter for the shared engine-spec placement/dispatcher core.
 //
 // Engine provenance:
-//   - jodemo.exe sub_5C1940@0x5C1940 (per-slot dispatcher)
-//   - jodemo.exe sub_5C0240@0x5C0240 (per-cell placement)
+//   - Jointops.exe Foliage_RenderAtPosition@0x5C1940 (per-slot dispatcher)
+//   - Jointops.exe Foliage_BuildPatchData@0x5C0240 (per-cell placement)
 //   - docs/engine_spec_foliage.md 4.3-4.4
 //
 // Fidelity:

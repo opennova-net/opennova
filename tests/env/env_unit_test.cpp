@@ -49,6 +49,7 @@ int main() {
 	if (!expect(loaded.curtime == 1200, "curtime should parse")) return 1;
 	if (!expect(near(loaded.fog_level, 1000.0f), "fog_level should parse")) return 1;
 	if (!expect(loaded.fog_type == 2, "fog_type should parse")) return 1;
+	if (!expect(!loaded.water_height_set, "full_00 does not author water_height")) return 1;
 	if (!expect(loaded.sky_map1 == "Cloud01.pcx", "sky_map1 should parse")) return 1;
 	if (!expect(loaded.sky_map2 == "Cloud01b.pcx", "sky_map2 should parse")) return 1;
 	if (!expect(loaded.star_3di.empty(), "blank star_3di should parse as empty")) return 1;
@@ -108,6 +109,25 @@ int main() {
 		return 1;
 	}
 	if (!expect(!default_reparsed.keyframes.empty(), "default env should include TOD keyframes")) return 1;
+
+	std::istringstream water_input("water_height 32\r\nwater_murk 1.25\r\n");
+	opennova::env::Config water_cfg;
+	error.clear();
+	if (!opennova::env::load_env(water_input, water_cfg, error)) {
+		std::fprintf(stderr, "FAIL: water env should parse: %s\n", error.c_str());
+		return 1;
+	}
+	if (!expect(water_cfg.water_height_set, "water_height should record authored presence")) return 1;
+	if (!expect(near(water_cfg.water_height, 32.0f), "water_height should parse as world units")) return 1;
+	if (!expect(near(water_cfg.water_murk, 0.99f), "water_murk should clamp at 0.99")) return 1;
+
+	std::ostringstream water_saved;
+	if (!opennova::env::save_env(water_saved, water_cfg, error)) {
+		std::fprintf(stderr, "FAIL: save_env water failed: %s\n", error.c_str());
+		return 1;
+	}
+	if (!expect(water_saved.str().find("water_height 32\r\n") != std::string::npos,
+	            "writer should preserve authored water_height")) return 1;
 
 	std::printf("OK: env parse/write/interpolation\n");
 	return 0;

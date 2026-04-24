@@ -3,7 +3,7 @@
 #include "nova_terrain.h"
 #include "nova_terrain_tile_info.h"
 
-// Engine: jodemo.exe Terrain_RenderSectorTile@0x5CDAA0,
+// Engine: Jointops.exe Terrain_RenderSectorTile@0x5CDAA0,
 // Terrain_TraverseQuadTreeNode@0x5C89C0, Terrain_CollectVisibleSectors@0x5C9120
 // docs/engine_spec_terrain.md 7.1-7.2
 
@@ -409,12 +409,16 @@ void NovaTerrain::_notification(int p_what) {
 					terrain_material->set_shader_parameter("u_fog_color", cached_env_node->call("get_fog_color"));
 				}
 				terrain_material->set_shader_parameter("u_sun_direction", cached_env_node->call("get_sun_direction"));
-				const Variant terrain_tint = cached_env_node->call("get_terrain_tint");
-				terrain_material->set_shader_parameter("u_terrain_tint", terrain_tint);
-				terrain_material->set_shader_parameter("u_tile_overlay_tint", terrain_tint);
+				const Variant terrain_attenuation = cached_env_node->call("get_terrain_lighting_attenuation");
+				terrain_material->set_shader_parameter("u_terrain_tint", terrain_attenuation);
+				terrain_material->set_shader_parameter("u_tile_overlay_tint", terrain_attenuation);
 				float fog_end = (float)cached_env_node->call("get_fog_level");
+				float fog_start = 0.5f;
+				if (cached_env_node->has_method("get_fog_start")) {
+					fog_start = (float)cached_env_node->call("get_fog_start");
+				}
 				terrain_material->set_shader_parameter("u_fog_end", fog_end);
-				terrain_material->set_shader_parameter("u_fog_start", fog_end * 0.3f);
+				terrain_material->set_shader_parameter("u_fog_start", fog_start);
 				terrain_material->set_shader_parameter("u_fog_type", cached_env_node->call("get_fog_type"));
 			}
 		}

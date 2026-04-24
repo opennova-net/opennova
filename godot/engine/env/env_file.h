@@ -31,6 +31,8 @@ private:
 	int fog_type = 2;
 	Color terrain_tint = Color(1, 1, 1);
 	Color water_color = Color(56.0f / 255.0f, 59.0f / 255.0f, 39.0f / 255.0f);
+	float water_height = 0.0f;
+	bool water_height_set = false;
 	Color cloud_tint = Color(128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f);
 	Color vertex_tint = Color(128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f);
 	Color lightning_color = Color(85.0f / 255.0f, 85.0f / 255.0f, 90.0f / 255.0f);
@@ -87,6 +89,9 @@ public:
 	Color get_terrain_tint() const;
 	void set_water_color(const Color &p_value);
 	Color get_water_color() const;
+	void set_water_height(float p_value);
+	float get_water_height() const;
+	bool has_water_height() const;
 	void set_cloud_tint(const Color &p_value);
 	Color get_cloud_tint() const;
 	void set_vertex_tint(const Color &p_value);
