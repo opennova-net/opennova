@@ -1,29 +1,21 @@
-class_name TerrainEditorWorkstation
+class_name EditorWorkstation
 extends Control
 
-enum Mode { SCULPT, PAINT, SCATTER, STAMP, LAYOUT }
+const TerrainWorkspaceAdapter = preload("res://modtools/editor/terrain_workspace.gd")
+const EnvironmentWorkspaceAdapter = preload("res://modtools/editor/environment_workspace.gd")
+const PlaceholderWorkspaceAdapter = preload("res://modtools/editor/placeholder_workspace.gd")
 
-const MODE_LABELS := {
-	Mode.SCULPT: "Sculpt",
-	Mode.PAINT: "Paint",
-	Mode.SCATTER: "Foliage",
-	Mode.STAMP: "Tile",
-	Mode.LAYOUT: "Layout",
+enum Workspace { TERRAIN, ENVIRONMENT, MISSION }
+
+const WORKSPACE_LABELS := {
+	Workspace.TERRAIN: "Terrain",
+	Workspace.ENVIRONMENT: "Environment",
+	Workspace.MISSION: "Mission",
 }
-
-const DETAIL_LABELS := ["Detail A", "Detail B", "Detail C"]
 
 enum PromptKind { NONE, UNSAVED, EXPORT, CDEP }
 
-signal mode_changed(mode: int)
-
-const INSPECTOR_SCENES := {
-	Mode.SCULPT: preload("res://modtools/terrain/ui/inspectors/sculpt_inspector.tscn"),
-	Mode.PAINT: preload("res://modtools/terrain/ui/inspectors/paint_inspector.tscn"),
-	Mode.SCATTER: preload("res://modtools/terrain/ui/inspectors/scatter_inspector.tscn"),
-	Mode.STAMP: preload("res://modtools/terrain/ui/inspectors/stamp_inspector.tscn"),
-	Mode.LAYOUT: preload("res://modtools/terrain/ui/inspectors/layout_inspector.tscn"),
-}
+signal workflow_changed(workflow_id: int)
 
 enum FileMenuItem { NEW, OPEN, SEP1, SAVE, SAVE_AS, SEP2, EXPORT }
 
@@ -34,10 +26,12 @@ enum FileMenuItem { NEW, OPEN, SEP1, SAVE, SAVE_AS, SEP2, EXPORT }
 @onready var _undo_button: Button = %UndoButton
 @onready var _redo_button: Button = %RedoButton
 @onready var _left_lane: PanelContainer = %LeftLane
+@onready var _workspace_rail: HBoxContainer = %WorkspaceRail
+@onready var _modes_label: Label = %ModesLabel
 @onready var _mode_rail: VBoxContainer = %ModeRail
 @onready var _inspector_host: Control = %InspectorHost
 @onready var _viewport_lane: Control = %ViewportLane
-@onready var _asset_dock: TerrainEditorAssetDock = %AssetDock
+@onready var _asset_dock: Control = %AssetDock
 @onready var _status_bar: PanelContainer = %StatusBar
 @onready var _status_tool_label: Label = %StatusToolLabel
 @onready var _status_context_label: Label = %StatusContextLabel
@@ -72,9 +66,13 @@ enum FileMenuItem { NEW, OPEN, SEP1, SAVE, SAVE_AS, SEP2, EXPORT }
 @onready var _prompt_tertiary_button: Button = %PromptTertiaryButton
 @onready var _prompt_primary_button: Button = %PromptPrimaryButton
 
-var editor: TerrainEditor
-var _current_mode: int = -1
-var _mode_buttons: Dictionary = {}
+var editor: Node
+var _active_workspace_id: int = Workspace.TERRAIN
+var _workspaces: Dictionary = {}
+var _workspace_buttons: Dictionary = {}
+var _current_workflow_id: int = -1
+var _workflow_buttons: Dictionary = {}
+var _placeholder_workspace_id: int = -1
 var _message_text: String = ""
 var _message_until: float = 0.0
 var _export_ui_active: bool = false
@@ -87,7 +85,8 @@ var _prompt_tertiary_action: Callable = Callable()
 
 
 func _ready() -> void:
-	_build_mode_rail()
+	_ensure_workspaces()
+	_build_workspace_rail()
 	_wire_top_bar()
 	_wire_prompts()
 	_wire_tile_gizmo()
@@ -96,15 +95,20 @@ func _ready() -> void:
 	_status_camera_label.clip_text = true
 	_status_fps_label.clip_text = true
 	set_process(true)
-	set_mode(Mode.SCULPT)
+	_refresh_workspace_surface()
 	sync_from_editor_state()
 
 
-func set_editor(value: TerrainEditor) -> void:
+func set_editor(value: Node) -> void:
 	editor = value
-	_refresh_mode_from_tool()
-	if _asset_dock and _asset_dock.has_method("set_editor"):
-		_asset_dock.set_editor(value)
+	_ensure_workspaces()
+	var terrain_workspace = _workspaces.get(Workspace.TERRAIN)
+	if terrain_workspace != null and terrain_workspace.has_method("set_terrain_editor"):
+		terrain_workspace.set_terrain_editor(value)
+	var environment_workspace = _workspaces.get(Workspace.ENVIRONMENT)
+	if environment_workspace != null and environment_workspace.has_method("set_environment_editor") and value != null and value.has_method("get_environment_editor"):
+		environment_workspace.set_environment_editor(value.get_environment_editor())
+	_refresh_workspace_surface()
 	for child in _inspector_host.get_children():
 		if child.has_method("set_editor"):
 			child.set_editor(value)
@@ -112,14 +116,17 @@ func set_editor(value: TerrainEditor) -> void:
 
 
 func sync_from_editor_state() -> void:
-	_refresh_mode_from_tool()
+	_ensure_workspaces()
+	_refresh_workspace_buttons()
+	_refresh_workflow_from_workspace()
 	_refresh_project_label()
 	_refresh_top_bar_state()
 	_refresh_status()
 	_refresh_tile_gizmo()
 	_sync_export_progress()
-	if _asset_dock and _asset_dock.has_method("sync_from_editor_state"):
-		_asset_dock.sync_from_editor_state()
+	var workspace = _get_active_workspace()
+	if workspace != null:
+		workspace.sync_asset_dock()
 
 
 func _process(_delta: float) -> void:
@@ -135,6 +142,139 @@ func _wire_top_bar() -> void:
 	_save_button.pressed.connect(_on_save_pressed)
 	_export_button.pressed.connect(_on_export_pressed)
 	_build_file_menu()
+
+
+func _ensure_workspaces() -> void:
+	if _workspaces.is_empty():
+		_workspaces[Workspace.TERRAIN] = TerrainWorkspaceAdapter.new(editor)
+		var environment_editor: Variant = editor.get_environment_editor() if editor != null and editor.has_method("get_environment_editor") else null
+		_workspaces[Workspace.ENVIRONMENT] = EnvironmentWorkspaceAdapter.new(environment_editor)
+		_workspaces[Workspace.MISSION] = PlaceholderWorkspaceAdapter.new(
+			"mission",
+			"Mission",
+			"Mission entity editing is planned; mission formats are not implemented yet."
+		)
+	for workspace in _workspaces.values():
+		if workspace != null and workspace.has_method("set_editor_shell"):
+			workspace.set_editor_shell(self)
+
+
+func _build_workspace_rail() -> void:
+	for workspace_id in Workspace.values():
+		var btn := Button.new()
+		btn.text = WORKSPACE_LABELS[workspace_id]
+		btn.toggle_mode = true
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.custom_minimum_size = Vector2(0, 36)
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.tooltip_text = _workspace_tooltip(workspace_id)
+		btn.pressed.connect(_on_workspace_pressed.bind(workspace_id))
+		_workspace_rail.add_child(btn)
+		_workspace_buttons[workspace_id] = btn
+	_refresh_workspace_buttons()
+
+
+func _workspace_tooltip(workspace_id: int) -> String:
+	match workspace_id:
+		Workspace.TERRAIN:
+			return "Edit terrain sculpting, paint, foliage, tiles, and layout."
+		Workspace.ENVIRONMENT:
+			return "Edit .env weather, lighting, atmosphere, and time of day."
+		Workspace.MISSION:
+			return "Reserved for mission entities, objectives, and triggers."
+		_:
+			return ""
+
+
+func _on_workspace_pressed(workspace_id: int) -> void:
+	set_active_workspace(workspace_id)
+
+
+func set_active_workspace(workspace_id: int) -> void:
+	if not _workspaces.has(workspace_id) or workspace_id == _active_workspace_id:
+		_refresh_workspace_buttons()
+		return
+	var current_workspace = _get_active_workspace()
+	if current_workspace != null and current_workspace.has_method("deactivate"):
+		current_workspace.deactivate()
+	_active_workspace_id = workspace_id
+	var next_workspace = _get_active_workspace()
+	if next_workspace != null and next_workspace.has_method("activate"):
+		next_workspace.activate()
+	_refresh_workspace_surface()
+	sync_from_editor_state()
+
+
+func get_active_workspace_id() -> int:
+	return _active_workspace_id
+
+
+func _get_active_workspace() -> Variant:
+	return _workspaces.get(_active_workspace_id)
+
+
+func _is_terrain_workspace_active() -> bool:
+	return _active_workspace_id == Workspace.TERRAIN
+
+
+func _any_workspace_busy() -> bool:
+	for workspace in _workspaces.values():
+		if workspace != null and workspace.has_method("is_busy") and workspace.is_busy():
+			return true
+	return false
+
+
+func _refresh_workspace_buttons() -> void:
+	var busy := _any_workspace_busy()
+	for workspace_id in _workspace_buttons:
+		var btn: Button = _workspace_buttons[workspace_id]
+		btn.set_pressed_no_signal(workspace_id == _active_workspace_id)
+		btn.disabled = busy
+
+
+func _refresh_workspace_surface() -> void:
+	var workspace = _get_active_workspace()
+	var workflows: Array = workspace.get_workflows() if workspace != null else []
+	var has_workflows: bool = not workflows.is_empty()
+	_modes_label.visible = has_workflows
+	_mode_rail.visible = has_workflows
+	_asset_dock.visible = workspace != null and workspace.uses_asset_dock()
+	if workspace != null:
+		workspace.set_asset_dock(_asset_dock if _asset_dock.visible else null)
+	_rebuild_workflow_rail(workflows)
+	if has_workflows:
+		_placeholder_workspace_id = -1
+		_current_workflow_id = -1
+		_refresh_workflow_from_workspace()
+	else:
+		_show_workspace_inspector(workspace)
+	_refresh_workspace_buttons()
+
+
+func _show_workspace_inspector(workspace: Variant) -> void:
+	if _placeholder_workspace_id == _active_workspace_id:
+		return
+	_placeholder_workspace_id = _active_workspace_id
+	for child in _inspector_host.get_children():
+		child.queue_free()
+	if workspace != null and workspace.has_method("build_inspector"):
+		workspace.build_inspector(_inspector_host)
+		if _inspector_host.get_child_count() > 0:
+			return
+	var label := Label.new()
+	var workspace_label := "Workspace"
+	var context := "This workspace is not implemented yet."
+	if workspace != null:
+		workspace_label = workspace.get_workspace_label()
+		context = workspace.get_status_context()
+	label.text = "%s workspace\n%s" % [workspace_label, context]
+	label.theme_type_variation = &"Muted"
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_inspector_host.add_child(label)
 
 
 func _wire_prompts() -> void:
@@ -177,27 +317,35 @@ func _build_file_menu() -> void:
 
 
 func _on_file_menu_selected(id: int) -> void:
-	if editor == null:
+	var workspace = _get_active_workspace()
+	if workspace == null:
 		return
 	var open_trn := func(path: String) -> void:
-		editor.request_open_trn(path)
+		var err: Error = workspace.open_file(path)
+		if err != OK:
+			show_status_message("Open failed (error %d)" % err, 6.0)
 	var save_project_as := func(dir_path: String) -> void:
-		editor.save_project(dir_path)
+		var err: Error = workspace.save_as(dir_path)
+		if err != OK:
+			show_status_message("Save failed (error %d)" % err, 6.0)
 	match id:
 		FileMenuItem.NEW:
-			editor.request_new_terrain()
+			if workspace.can_new():
+				workspace.new_current()
 		FileMenuItem.OPEN:
+			if not workspace.can_open():
+				return
 			_open_file_dialog(
-				"Open .trn",
-				PackedStringArray(["*.trn ; Terrain"]),
+				workspace.get_open_dialog_title(),
+				workspace.get_open_dialog_filters(),
 				open_trn,
-				editor.get_last_open_dir()
+				workspace.get_open_dialog_dir()
 			)
 		FileMenuItem.SAVE:
 			_on_save_pressed()
 		FileMenuItem.SAVE_AS:
 			_open_dir_dialog(
-				"Choose where to save your project",
+				workspace.get_save_dialog_title(),
 				save_project_as,
 				_preferred_save_dir()
 			)
@@ -247,6 +395,11 @@ func _open_dir_dialog(title: String, on_pick: Callable, current_dir: String = ""
 
 
 func _preferred_save_dir() -> String:
+	var workspace = _get_active_workspace()
+	if workspace != null:
+		var dir: String = workspace.get_save_dialog_dir()
+		if not dir.is_empty():
+			return dir
 	if editor == null:
 		return ""
 	if editor.has_current_project_dir():
@@ -255,6 +408,11 @@ func _preferred_save_dir() -> String:
 
 
 func _preferred_export_dir() -> String:
+	var workspace = _get_active_workspace()
+	if workspace != null:
+		var dir: String = workspace.get_export_dialog_dir()
+		if not dir.is_empty():
+			return dir
 	if editor == null:
 		return ""
 	if not editor.get_last_export_dir().is_empty():
@@ -265,50 +423,66 @@ func _preferred_export_dir() -> String:
 
 
 func _on_undo_pressed() -> void:
-	if editor:
-		editor.undo()
+	var workspace = _get_active_workspace()
+	if workspace != null:
+		workspace.undo()
 
 
 func _on_redo_pressed() -> void:
-	if editor:
-		editor.redo()
+	var workspace = _get_active_workspace()
+	if workspace != null:
+		workspace.redo()
 
 
 func _on_save_pressed() -> void:
-	if editor == null:
+	var workspace = _get_active_workspace()
+	if workspace == null:
 		return
-	var err := editor.save_project_to_current_dir()
+	var err: Error = workspace.save_current()
 	if err == ERR_INVALID_PARAMETER:
 		var save_project_as := func(dir_path: String) -> void:
-			editor.save_project(dir_path)
+			workspace.save_as(dir_path)
 		_open_dir_dialog(
 			"Choose where to save your project",
 			save_project_as,
 			_preferred_save_dir()
 		)
+	elif err != OK:
+		show_status_message("%s save is not available." % workspace.get_workspace_label(), 4.0)
 
 
 func _on_export_pressed() -> void:
-	if editor == null:
+	var workspace = _get_active_workspace()
+	if workspace == null or not workspace.can_export():
 		return
-	var choose_flavor := func(dir_path: String) -> void:
-		_show_export_flavor_dialog(dir_path)
+	var choose_export_dir := func(dir_path: String) -> void:
+		if _is_terrain_workspace_active():
+			_show_export_flavor_dialog(dir_path)
+		else:
+			var err: Error = workspace.begin_export(dir_path, 0)
+			if err == OK:
+				show_status_message("%s exported." % workspace.get_workspace_label(), 4.0)
+			else:
+				show_status_message("Export failed (error %d)" % err, 6.0)
 	_open_dir_dialog(
-		"Choose where to export",
-		choose_flavor,
+		workspace.get_export_dialog_title(),
+		choose_export_dir,
 		_preferred_export_dir()
 	)
 
 
 func _refresh_top_bar_state() -> void:
-	var busy := editor != null and editor.is_export_running()
-	_file_menu.disabled = editor == null or busy
-	for button in _mode_buttons.values():
-		var mode_button := button as Button
-		if mode_button:
-			mode_button.disabled = busy
+	var workspace = _get_active_workspace()
+	var busy := _any_workspace_busy()
+	_file_menu.disabled = workspace == null or busy or not _workspace_has_file_actions(workspace)
+	_sync_file_menu_labels(workspace)
+	_sync_file_menu_state(workspace, busy)
+	for button in _workflow_buttons.values():
+		var workflow_button := button as Button
+		if workflow_button:
+			workflow_button.disabled = busy
 
-	if editor == null:
+	if workspace == null:
 		_save_button.disabled = true
 		_export_button.disabled = true
 		_undo_button.disabled = true
@@ -316,11 +490,52 @@ func _refresh_top_bar_state() -> void:
 		_apply_busy_modulation(false)
 		return
 
-	_save_button.disabled = busy or not editor.is_dirty
-	_export_button.disabled = busy
-	_undo_button.disabled = busy or not editor.can_undo()
-	_redo_button.disabled = busy or not editor.can_redo()
+	_save_button.disabled = busy or not workspace.can_save()
+	_export_button.disabled = busy or not workspace.can_export()
+	_undo_button.disabled = busy or not workspace.can_undo()
+	_redo_button.disabled = busy or not workspace.can_redo()
 	_apply_busy_modulation(busy)
+
+
+func _workspace_has_file_actions(workspace: Variant) -> bool:
+	if workspace == null:
+		return false
+	return workspace.can_new() or workspace.can_open() or workspace.can_save() or workspace.can_save_as() or workspace.can_export()
+
+
+func _sync_file_menu_labels(workspace: Variant) -> void:
+	if _file_menu == null:
+		return
+	var popup := _file_menu.get_popup()
+	if popup == null or popup.get_item_count() < 7:
+		return
+	var open_label := "Open..."
+	if workspace != null:
+		match workspace.get_workspace_id():
+			"terrain":
+				open_label = "Open .trn..."
+			"environment":
+				open_label = "Open .env..."
+	popup.set_item_text(popup.get_item_index(FileMenuItem.OPEN), open_label)
+
+
+func _sync_file_menu_state(workspace: Variant, busy: bool) -> void:
+	if _file_menu == null:
+		return
+	var popup := _file_menu.get_popup()
+	if popup == null or popup.get_item_count() < 7:
+		return
+	_set_file_menu_item_disabled(popup, FileMenuItem.NEW, busy or workspace == null or not workspace.can_new())
+	_set_file_menu_item_disabled(popup, FileMenuItem.OPEN, busy or workspace == null or not workspace.can_open())
+	_set_file_menu_item_disabled(popup, FileMenuItem.SAVE, busy or workspace == null or not workspace.can_save())
+	_set_file_menu_item_disabled(popup, FileMenuItem.SAVE_AS, busy or workspace == null or not workspace.can_save_as())
+	_set_file_menu_item_disabled(popup, FileMenuItem.EXPORT, busy or workspace == null or not workspace.can_export())
+
+
+func _set_file_menu_item_disabled(popup: PopupMenu, id: int, disabled: bool) -> void:
+	var index := popup.get_item_index(id)
+	if index >= 0:
+		popup.set_item_disabled(index, disabled)
 
 
 func _apply_busy_modulation(active: bool) -> void:
@@ -331,103 +546,74 @@ func _apply_busy_modulation(active: bool) -> void:
 	_status_bar.modulate = color
 
 
-func _refresh_mode_from_tool() -> void:
-	if editor == null:
-		return
-	var mode := _mode_for_tool(editor.current_tool)
-	if mode != _current_mode:
-		set_mode(mode)
-
-
-func set_mode(mode: int) -> void:
-	if mode == _current_mode:
-		return
-	_current_mode = mode
-	for m in _mode_buttons:
-		var button: Button = _mode_buttons[m]
-		button.set_pressed_no_signal(m == mode)
-	_swap_inspector(mode)
-	mode_changed.emit(mode)
-
-
-func _swap_inspector(mode: int) -> void:
-	for child in _inspector_host.get_children():
+func _rebuild_workflow_rail(workflows: Array) -> void:
+	for child in _mode_rail.get_children():
 		child.queue_free()
-	if INSPECTOR_SCENES.has(mode):
-		var inspector: Node = INSPECTOR_SCENES[mode].instantiate()
-		_inspector_host.add_child(inspector)
-		if editor and inspector.has_method("set_editor"):
-			inspector.set_editor(editor)
-	else:
-		var placeholder := Label.new()
-		placeholder.text = "%s inspector coming soon" % MODE_LABELS[mode]
-		placeholder.theme_type_variation = &"Muted"
-		placeholder.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		placeholder.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		placeholder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		placeholder.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		_inspector_host.add_child(placeholder)
-
-
-func _mode_for_tool(tool: int) -> int:
-	match tool:
-		TerrainEditor.Tool.RAISE, TerrainEditor.Tool.LOWER, TerrainEditor.Tool.SMOOTH, TerrainEditor.Tool.FLATTEN:
-			return Mode.SCULPT
-		TerrainEditor.Tool.PAINT_DETAIL, TerrainEditor.Tool.PAINT_COLORMAP, TerrainEditor.Tool.CLONE_COLOR, TerrainEditor.Tool.SURFACE_PAINT:
-			return Mode.PAINT
-		TerrainEditor.Tool.FOLIAGE_PAINT:
-			return Mode.SCATTER
-		TerrainEditor.Tool.TILE_STAMP:
-			return Mode.STAMP
-		_:
-			return Mode.LAYOUT
-
-
-func _build_mode_rail() -> void:
-	for mode in Mode.values():
+	_workflow_buttons.clear()
+	for workflow in workflows:
+		var workflow_id: int = int(workflow.get("id", -1))
 		var btn := Button.new()
-		btn.text = MODE_LABELS[mode]
+		btn.text = String(workflow.get("label", "Workflow"))
 		btn.toggle_mode = true
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.custom_minimum_size = Vector2(0, 44)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.tooltip_text = _mode_tooltip(mode)
-		btn.pressed.connect(_on_mode_pressed.bind(mode))
+		btn.tooltip_text = String(workflow.get("tooltip", ""))
+		btn.pressed.connect(_on_workflow_pressed.bind(workflow_id))
 		_mode_rail.add_child(btn)
-		_mode_buttons[mode] = btn
+		_workflow_buttons[workflow_id] = btn
 
 
-func _mode_tooltip(mode: int) -> String:
-	match mode:
-		Mode.SCULPT:
-			return "Raise, lower, smooth, and flatten the terrain."
-		Mode.PAINT:
-			return "Paint detail layers, color, clone, and surface types."
-		Mode.SCATTER:
-			return "Manage and paint foliage placement."
-		Mode.STAMP:
-			return "Place and edit tiles."
-		Mode.LAYOUT:
-			return "Edit sectors, map size, origin, and water."
-		_:
-			return ""
+func _refresh_workflow_from_workspace() -> void:
+	var workspace = _get_active_workspace()
+	if workspace == null or workspace.get_workflows().is_empty():
+		return
+	_set_workflow(workspace.get_active_workflow_id(), false)
 
 
-func _on_mode_pressed(mode: int) -> void:
-	if mode == Mode.LAYOUT and editor:
-		editor.set_tool(TerrainEditor.Tool.EDIT_SECTORS)
-	set_mode(mode)
+func _on_workflow_pressed(workflow_id: int) -> void:
+	_set_workflow(workflow_id, true)
+
+
+func _set_workflow(workflow_id: int, activate: bool) -> void:
+	var workspace = _get_active_workspace()
+	if workspace == null or not _workflow_buttons.has(workflow_id):
+		return
+	if activate:
+		workspace.activate_workflow(workflow_id)
+	if workflow_id == _current_workflow_id:
+		return
+	_current_workflow_id = workflow_id
+	for id in _workflow_buttons:
+		var button: Button = _workflow_buttons[id]
+		button.set_pressed_no_signal(id == workflow_id)
+	_swap_workflow_inspector(workspace, workflow_id)
+	workflow_changed.emit(workflow_id)
+
+
+func _swap_workflow_inspector(workspace: Variant, workflow_id: int) -> void:
+	for child in _inspector_host.get_children():
+		child.queue_free()
+	if workspace != null:
+		workspace.build_workflow_inspector(workflow_id, _inspector_host)
+	if _inspector_host.get_child_count() > 0:
+		return
+	var placeholder := Label.new()
+	placeholder.text = "Workflow inspector coming soon"
+	placeholder.theme_type_variation = &"Muted"
+	placeholder.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	placeholder.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	placeholder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	placeholder.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_inspector_host.add_child(placeholder)
 
 
 func _refresh_project_label() -> void:
-	if editor == null:
+	var workspace = _get_active_workspace()
+	if workspace == null:
 		_project_label.text = "OpenNova Terrain Editor"
 		return
-	var name := editor.get_terrain_name_value()
-	if name.is_empty():
-		name = "untitled"
-	var dirty := "*" if editor.is_dirty else ""
-	_project_label.text = "%s%s" % [name, dirty]
+	_project_label.text = workspace.get_project_title()
 
 
 func show_status_message(text: String, duration: float = 4.0) -> void:
@@ -436,7 +622,8 @@ func show_status_message(text: String, duration: float = 4.0) -> void:
 
 
 func _refresh_status() -> void:
-	if editor == null:
+	var workspace = _get_active_workspace()
+	if workspace == null:
 		_status_tool_label.text = ""
 		_status_context_label.text = ""
 		_status_camera_label.text = ""
@@ -448,12 +635,12 @@ func _refresh_status() -> void:
 		_status_tool_label.text = _message_text
 		_status_tool_label.theme_type_variation = &"Warn"
 	else:
-		_status_tool_label.text = _tool_name(editor.current_tool)
+		_status_tool_label.text = workspace.get_status_tool()
 		_status_tool_label.theme_type_variation = &""
 
-	_status_context_label.text = _context_summary()
-	if editor.camera:
-		var pos := editor.camera.global_position
+	_status_context_label.text = workspace.get_status_context()
+	if _is_terrain_workspace_active() and editor and editor.camera:
+		var pos: Vector3 = editor.camera.global_position
 		_status_camera_label.text = "%.0f, %.0f, %.0f" % [pos.x, pos.y, pos.z]
 	else:
 		_status_camera_label.text = ""
@@ -465,18 +652,18 @@ func _refresh_tile_gizmo() -> void:
 	if not is_node_ready() or _tile_gizmo == null or _viewport_lane == null or _tile_gizmo_label == null:
 		return
 	_tile_gizmo.visible = false
-	if editor == null or _current_mode != Mode.STAMP or not editor.has_selected_tileinfo_entry():
+	if not _is_terrain_workspace_active() or editor == null or _current_workflow_id != TerrainWorkspaceAdapter.Workflow.STAMP or not editor.has_selected_tileinfo_entry():
 		return
 
-	var camera := editor.get_editor_camera()
+	var camera: Camera3D = editor.get_editor_camera()
 	if camera == null:
 		return
 
-	var entry := editor.get_selected_tileinfo_entry()
+	var entry: Variant = editor.get_selected_tileinfo_entry()
 	if entry == null:
 		return
 
-	var anchor_world := editor.get_selected_tileinfo_world_center() + Vector3(0.0, 2.0, 0.0)
+	var anchor_world: Vector3 = editor.get_selected_tileinfo_world_center() + Vector3(0.0, 2.0, 0.0)
 	var lane_rect := _viewport_lane.get_global_rect()
 	var lane_end := lane_rect.position + lane_rect.size
 	_tile_gizmo_label.text = "Editing tile %03d @ (%d, %d)" % [
@@ -492,7 +679,7 @@ func _refresh_tile_gizmo() -> void:
 		lane_rect.position.y + 18.0
 	)
 	if not camera.is_position_behind(anchor_world):
-		var screen_pos := camera.unproject_position(anchor_world)
+		var screen_pos: Vector2 = camera.unproject_position(anchor_world)
 		target = Vector2(
 			screen_pos.x - gizmo_size.x * 0.5,
 			screen_pos.y - gizmo_size.y - 24.0
@@ -501,57 +688,6 @@ func _refresh_tile_gizmo() -> void:
 	target.y = clampf(target.y, lane_rect.position.y + 12.0, lane_end.y - gizmo_size.y - 12.0)
 	_tile_gizmo.global_position = target
 	_tile_gizmo.visible = true
-
-
-func _context_summary() -> String:
-	if editor == null:
-		return ""
-	match editor.current_tool:
-		TerrainEditor.Tool.PAINT_DETAIL:
-			var channel := clampi(editor.get_paint_detail_channel(), 0, DETAIL_LABELS.size() - 1)
-			return DETAIL_LABELS[channel]
-		TerrainEditor.Tool.PAINT_COLORMAP:
-			return "#" + editor.get_paint_color().to_html(false).to_upper()
-		TerrainEditor.Tool.CLONE_COLOR:
-			return "Clone source ready" if editor.has_clone_source() else "Clone source not set"
-		TerrainEditor.Tool.SURFACE_PAINT:
-			return "%s (%d)" % [editor.get_selected_surface_label(), editor.get_selected_surface_index()]
-		TerrainEditor.Tool.FOLIAGE_PAINT:
-			var def := editor.get_selected_foliage_def()
-			if def == null:
-				return "No foliage type selected"
-			var label := String(def.graphic).strip_edges()
-			if label.is_empty():
-				label = "unnamed foliage type"
-			return label
-		TerrainEditor.Tool.TILE_STAMP:
-			var selected := editor.get_tileinfo_selected_index()
-			if selected >= 0:
-				var entry := editor.get_tileinfo_entry(selected)
-				if entry:
-					return "Editing tile %03d at cell (%d, %d)" % [entry.get_tile_index(), entry.get_cell_x(), entry.get_cell_z()]
-			return "Brush tile %03d" % editor.get_tile_stamp_tile_index()
-		TerrainEditor.Tool.EDIT_SECTORS:
-			return "%d x %d sector grid" % [editor.get_sector_count(), editor.get_sector_rows()]
-		_:
-			return "R %d  S %.2f  H %.2f" % [roundi(editor.brush_radius), editor.brush_strength, editor.brush_hardness]
-
-
-func _tool_name(tool: int) -> String:
-	match tool:
-		TerrainEditor.Tool.RAISE: return "Raise"
-		TerrainEditor.Tool.LOWER: return "Lower"
-		TerrainEditor.Tool.SMOOTH: return "Smooth"
-		TerrainEditor.Tool.FLATTEN: return "Flatten"
-		TerrainEditor.Tool.PAINT_DETAIL: return "Paint detail"
-		TerrainEditor.Tool.PAINT_COLORMAP: return "Paint color"
-		TerrainEditor.Tool.SURFACE_PAINT: return "Paint surface"
-		TerrainEditor.Tool.CLONE_COLOR: return "Clone color"
-		TerrainEditor.Tool.FOLIAGE_PAINT: return "Foliage"
-		TerrainEditor.Tool.TILE_STAMP: return "Tile"
-		TerrainEditor.Tool.EDIT_SECTORS: return "Edit sectors"
-		_:
-			return ""
 
 
 func _on_tile_gizmo_rotate_pressed() -> void:
@@ -647,7 +783,7 @@ func _on_prompt_leave_as_is() -> void:
 
 func _show_export_flavor_dialog(dir_path: String) -> void:
 	_pending_export_dir = dir_path
-	_select_export_flavor(TerrainEditor.ExportFlavor.DFX_JO)
+	_select_export_flavor(TerrainWorkspaceAdapter.ExportFlavor.DFX_JO)
 	_sync_export_prompt_copy()
 	_set_prompt_state(
 		PromptKind.EXPORT,
@@ -666,8 +802,11 @@ func _show_export_flavor_dialog(dir_path: String) -> void:
 func _on_prompt_export_confirmed() -> void:
 	if editor == null or _pending_export_dir.is_empty():
 		return
+	var workspace = _get_active_workspace()
+	if workspace == null:
+		return
 	var flavor := _current_export_flavor()
-	var err := editor.begin_export_terrain(_pending_export_dir, flavor)
+	var err: Error = workspace.begin_export(_pending_export_dir, flavor)
 	_pending_export_dir = ""
 	_set_prompt_visible(false)
 	if err != OK:
@@ -716,17 +855,17 @@ func _sync_export_prompt_copy() -> void:
 	_prompt_info_label.text = ""
 	_prompt_format_section.visible = true
 	_prompt_info_panel.visible = false
-	_prompt_format_bhd.button_pressed = flavor == TerrainEditor.ExportFlavor.BHD
-	_prompt_format_cdep.button_pressed = flavor == TerrainEditor.ExportFlavor.DFX_JO
+	_prompt_format_bhd.button_pressed = flavor == TerrainWorkspaceAdapter.ExportFlavor.BHD
+	_prompt_format_cdep.button_pressed = flavor == TerrainWorkspaceAdapter.ExportFlavor.DFX_JO
 
 
 func _select_export_flavor(flavor: int) -> void:
-	_prompt_format_bhd.button_pressed = flavor == TerrainEditor.ExportFlavor.BHD
-	_prompt_format_cdep.button_pressed = flavor == TerrainEditor.ExportFlavor.DFX_JO
+	_prompt_format_bhd.button_pressed = flavor == TerrainWorkspaceAdapter.ExportFlavor.BHD
+	_prompt_format_cdep.button_pressed = flavor == TerrainWorkspaceAdapter.ExportFlavor.DFX_JO
 
 
 func _current_export_flavor() -> int:
-	return TerrainEditor.ExportFlavor.BHD if _prompt_format_bhd.button_pressed else TerrainEditor.ExportFlavor.DFX_JO
+	return TerrainWorkspaceAdapter.ExportFlavor.BHD if _prompt_format_bhd.button_pressed else TerrainWorkspaceAdapter.ExportFlavor.DFX_JO
 
 
 func _set_prompt_state(kind: int, eyebrow_text: String, lead_text: String, body_text: String, info_text: String, show_format_section: bool) -> void:
@@ -795,23 +934,24 @@ func on_export_completed(err: Error, message: String) -> void:
 
 
 func _sync_export_progress() -> void:
-	if editor == null:
+	var workspace = _get_active_workspace()
+	if workspace == null:
 		_set_export_ui_active(false)
 		return
 
-	var export_running := editor.is_export_running()
+	var export_running: bool = workspace.is_busy()
 	if export_running != _export_ui_active:
 		_set_export_ui_active(export_running)
 	if not export_running:
 		return
 
-	var phase := editor.get_export_progress_phase()
-	var message := editor.get_export_progress_message()
-	var current := editor.get_export_progress_current()
-	var total := editor.get_export_progress_total()
-	var ratio := clampf(editor.get_export_progress_ratio(), 0.0, 1.0)
+	var phase: String = workspace.get_export_progress_phase()
+	var message: String = workspace.get_export_progress_message()
+	var current: int = workspace.get_export_progress_current()
+	var total: int = workspace.get_export_progress_total()
+	var ratio: float = clampf(workspace.get_export_progress_ratio(), 0.0, 1.0)
 
-	_progress_title_label.text = "Exporting terrain..."
+	_progress_title_label.text = workspace.get_export_progress_title()
 	if not phase.is_empty():
 		_progress_message_label.text = phase.capitalize() + ": " + message
 	else:

@@ -5,14 +5,19 @@
 [ext_resource type="NovaTerrainTileInfo" uid="uid://b2awmiuci06mx" path="res://game/assets/terrains/Dvxi5/00TRg.til" id="3_433cb"]
 [ext_resource type="PackedScene" path="res://engine/ui/fps_label.tscn" id="3_fps"]
 [ext_resource type="Script" uid="uid://u6bng4ck62r0" path="res://game/main_game.gd" id="4_main"]
-
-[sub_resource type="Environment" id="Environment_433cb"]
+[ext_resource type="EnvFile" uid="uid://dcg6gvj6q5kw" path="res://game/assets/environments/Full_00/full_00.env" id="5_envfile"]
+[ext_resource type="Script" uid="uid://dnr7qwrpuk7j1" path="res://engine/environment/nova_environment.gd" id="6_env"]
+[ext_resource type="Script" uid="uid://casqbhajylbpc" path="res://engine/environment/nova_sky.gd" id="7_sky"]
+[ext_resource type="Script" uid="uid://ba4ar1y0eklyp" path="res://engine/environment/nova_weather.gd" id="8_weather"]
+[ext_resource type="Script" uid="uid://dabwlp4s5mh65" path="res://engine/environment/nova_water.gd" id="9_water"]
 
 [node name="MainGame" type="Node3D" unique_id=1969900999]
 script = ExtResource("4_main")
 
 [node name="NovaTerrain" type="NovaTerrain" parent="." unique_id=1162114807]
 terrain_data = ExtResource("1_h5ihh")
+environment_path = NodePath("../NovaEnvironment")
+weather_path = NodePath("../NovaWeather")
 
 [node name="FoliageDispatcher" type="NovaFoliageDispatcher" parent="NovaTerrain" unique_id=1787737906]
 
@@ -23,6 +28,26 @@ tile_info = ExtResource("3_433cb")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 71.472435, 0)
 script = ExtResource("2_io4ac")
 
+[node name="NovaEnvironment" type="Node" parent="." unique_id=123901441]
+process_priority = -20
+script = ExtResource("6_env")
+environment_data = ExtResource("5_envfile")
+
+[node name="NovaSky" type="Node3D" parent="." unique_id=135451725]
+script = ExtResource("7_sky")
+environment_path = NodePath("../NovaEnvironment")
+
+[node name="NovaWeather" type="Node3D" parent="." unique_id=1083381516]
+process_priority = -10
+script = ExtResource("8_weather")
+environment_path = NodePath("../NovaEnvironment")
+
+[node name="NovaWater" type="Node3D" parent="." unique_id=688076420]
+script = ExtResource("9_water")
+environment_path = NodePath("../NovaEnvironment")
+terrain_data = ExtResource("1_h5ihh")
+water_height = 10.5
+
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1222701923]
 
 [node name="FpsLabel" parent="HUD" unique_id=788385088 instance=ExtResource("3_fps")]
@@ -32,8 +57,3 @@ layout_mode = 3
 offset_right = 40.0
 offset_bottom = 23.0
 text = "Runtime with engine-spec foliage (NovaFoliageDispatcher)"
-
-[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=2027510576]
-environment = SubResource("Environment_433cb")
-
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1596353512]

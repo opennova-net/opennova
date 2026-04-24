@@ -12,4 +12,6 @@ godot/game/assets/** -text -eol
 godot/modtools/assets/** -text -eol
 
 # TRN files are Windows-style game config files; CRLF is part of the format.
-*.trn whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+*.trn text eol=crlf whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+*.env text eol=crlf whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+*.ENV text eol=crlf whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

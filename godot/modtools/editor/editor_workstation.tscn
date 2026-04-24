@@ -1,6 +1,6 @@
 [gd_scene load_steps=4 format=3]
 
-[ext_resource type="Script" path="res://modtools/terrain/ui/editor_workstation.gd" id="1_workstation"]
+[ext_resource type="Script" path="res://modtools/editor/editor_workstation.gd" id="1_workstation"]
 [ext_resource type="Theme" uid="uid://brsq3gfp1bk2a" path="res://modtools/terrain/ui/theme/editor_theme.tres" id="2_theme"]
 [ext_resource type="PackedScene" path="res://modtools/terrain/ui/editor_asset_dock.tscn" id="3_asset_dock"]
 
@@ -101,7 +101,21 @@ layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 10
 
+[node name="WorkspaceLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "Workspace"
+
+[node name="WorkspaceRail" type="HBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="WorkspaceSeparator" type="HSeparator" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+layout_mode = 2
+
 [node name="ModesLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"Heading"
 text = "Workflows"

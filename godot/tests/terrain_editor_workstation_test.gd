@@ -1,9 +1,12 @@
 extends GutTest
 
 const TerrainEditorScript = preload("res://modtools/terrain/terrain_editor.gd")
-const TerrainEditorWorkstationScene = preload("res://modtools/terrain/ui/editor_workstation.tscn")
-const TerrainEditorWorkstationScript = preload("res://modtools/terrain/ui/editor_workstation.gd")
+const EditorWorkstationScene = preload("res://modtools/editor/editor_workstation.tscn")
+const EditorWorkstationScript = preload("res://modtools/editor/editor_workstation.gd")
+const TerrainWorkspaceScript = preload("res://modtools/editor/terrain_workspace.gd")
 const TerrainEditorAssetDockScene = preload("res://modtools/terrain/ui/editor_asset_dock.tscn")
+const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
+const EnvironmentInspectorScript = preload("res://modtools/environment/environment_inspector.gd")
 const LayoutInspectorScene = preload("res://modtools/terrain/ui/inspectors/layout_inspector.tscn")
 const PaintInspectorScene = preload("res://modtools/terrain/ui/inspectors/paint_inspector.tscn")
 const ScatterInspectorScene = preload("res://modtools/terrain/ui/inspectors/scatter_inspector.tscn")
@@ -12,8 +15,79 @@ const StampInspectorScene = preload("res://modtools/terrain/ui/inspectors/stamp_
 const QuadrantBoardScript = preload("res://modtools/terrain/ui/widgets/quadrant_board.gd")
 
 
+func test_workstation_starts_with_three_domain_workspaces() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+
+	var workspace_rail: HBoxContainer = workstation.get_node("%WorkspaceRail")
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Terrain should remain the default workspace.")
+	assert_eq(workspace_rail.get_child_count(), 3, "The shell should expose Terrain, Environment, and Mission workspaces.")
+	assert_eq((workspace_rail.get_child(0) as Button).text, "Terrain", "Terrain should be the first workspace.")
+	assert_eq((workspace_rail.get_child(1) as Button).text, "Environment", "Environment should have a reserved workspace.")
+	assert_eq((workspace_rail.get_child(2) as Button).text, "Mission", "Mission should have a reserved workspace.")
+
+
+func test_mission_placeholder_disables_file_commands() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var editor = autofree(TerrainEditorScript.new())
+	editor.is_dirty = true
+
+	workstation.set_editor(editor)
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
+
+	assert_eq(workstation.get_node("%ProjectLabel").text, "Mission", "Placeholder workspaces should own the shell title while active.")
+	assert_false(workstation.get_node("%AssetDock").visible, "Terrain properties should hide outside the terrain workspace.")
+	assert_true((workstation.get_node("%FileMenu") as MenuButton).disabled, "Terrain file commands should be disabled for placeholder domains.")
+	assert_true((workstation.get_node("%SaveButton") as Button).disabled, "Save should be disabled until the domain implements persistence.")
+	assert_true((workstation.get_node("%ExportButton") as Button).disabled, "Export should be disabled until the domain implements export.")
+	assert_true((workstation.get_node("%UndoButton") as Button).disabled, "Undo should route through the active workspace and stay disabled for placeholders.")
+
+
+func test_environment_workspace_exposes_env_document_controls() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
+	environment_editor.create_default_environment(false)
+	workstation._workspaces[EditorWorkstationScript.Workspace.ENVIRONMENT].set_environment_editor(environment_editor)
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.ENVIRONMENT)
+	await get_tree().process_frame
+
+	var file_menu := workstation.get_node("%FileMenu") as MenuButton
+	var save_button := workstation.get_node("%SaveButton") as Button
+	var export_button := workstation.get_node("%ExportButton") as Button
+	var popup := file_menu.get_popup()
+	var inspector_host: Control = workstation.get_node("%InspectorHost")
+	var inspector := inspector_host.get_child(inspector_host.get_child_count() - 1)
+	assert_eq(workstation.get_node("%ProjectLabel").text, "untitled", "Environment should own the shell title when active.")
+	assert_false(workstation.get_node("%AssetDock").visible, "Terrain properties should hide outside the environment workspace.")
+	assert_false(file_menu.disabled, "Environment should expose file commands.")
+	assert_eq(popup.get_item_text(popup.get_item_index(EditorWorkstationScript.FileMenuItem.OPEN)), "Open .env...", "Open should use the active workspace file type.")
+	assert_true(save_button.disabled, "Clean new environments should not enable Save until changed.")
+	assert_false(export_button.disabled, "Environment export should be available once an EnvFile exists.")
+	assert_true(inspector.get_script() == EnvironmentInspectorScript, "Environment should build its inspector instead of a placeholder.")
+
+	environment_editor.env_file.set_env_name("storm_test")
+	workstation.sync_from_editor_state()
+
+	assert_eq(workstation.get_node("%ProjectLabel").text, "storm_test*", "Environment edits should dirty the active document title.")
+	assert_false(save_button.disabled, "Dirty environments should enable Save.")
+
+
+func test_switching_workspaces_preserves_terrain_dirty_state() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var editor = autofree(TerrainEditorScript.new())
+	editor.is_dirty = true
+
+	workstation.set_editor(editor)
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
+
+	assert_true(editor.is_dirty, "Switching placeholder domains should not reset terrain document state.")
+	assert_eq(workstation.get_node("%ProjectLabel").text, "untitled*", "Returning to Terrain should restore the terrain project title and dirty marker.")
+	assert_true(workstation.get_node("%AssetDock").visible, "Terrain properties should return when Terrain is active.")
+
+
 func test_workstation_tracks_mode_from_editor_tool() -> void:
-	var workstation = add_child_autofree(TerrainEditorWorkstationScene.instantiate())
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
 	editor.current_tool = TerrainEditorScript.Tool.FOLIAGE_PAINT
 	editor.brush_radius = 20.0
@@ -23,16 +97,16 @@ func test_workstation_tracks_mode_from_editor_tool() -> void:
 	workstation.set_editor(editor)
 	workstation.sync_from_editor_state()
 
-	assert_eq(workstation._current_mode, TerrainEditorWorkstationScript.Mode.SCATTER, "Workstation should switch to Foliage mode when the editor tool is foliage paint.")
+	assert_eq(workstation._current_workflow_id, TerrainWorkspaceScript.Workflow.SCATTER, "Workstation should switch to Foliage mode when the editor tool is foliage paint.")
 
 	editor.current_tool = TerrainEditorScript.Tool.TILE_STAMP
 	workstation.sync_from_editor_state()
 
-	assert_eq(workstation._current_mode, TerrainEditorWorkstationScript.Mode.STAMP, "Workstation should switch to Tile mode when the editor tool becomes tile placement.")
+	assert_eq(workstation._current_workflow_id, TerrainWorkspaceScript.Workflow.STAMP, "Workstation should switch to Tile mode when the editor tool becomes tile placement.")
 
 
 func test_prompt_unsaved_changes_updates_custom_copy() -> void:
-	var workstation = add_child_autofree(TerrainEditorWorkstationScene.instantiate())
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
 	workstation.prompt_unsaved_changes("quit")
 
@@ -55,7 +129,7 @@ func test_prompt_unsaved_changes_updates_custom_copy() -> void:
 
 
 func test_export_flavor_dialog_updates_format_copy() -> void:
-	var workstation = add_child_autofree(TerrainEditorWorkstationScene.instantiate())
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
 	workstation._show_export_flavor_dialog("C:/Exports/TestTerrain")
 
@@ -146,7 +220,7 @@ func test_sculpt_inspector_syncs_from_editor_ui_state_signal() -> void:
 
 
 func test_workstation_uses_clip_text_for_long_labels() -> void:
-	var workstation = add_child_autofree(TerrainEditorWorkstationScene.instantiate())
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
 	var project_label: Label = workstation.get_node("%ProjectLabel")
 	var status_context_label: Label = workstation.get_node("%StatusContextLabel")
@@ -158,12 +232,12 @@ func test_workstation_uses_clip_text_for_long_labels() -> void:
 
 
 func test_pressing_layout_mode_restores_edit_sectors_tool() -> void:
-	var workstation = add_child_autofree(TerrainEditorWorkstationScene.instantiate())
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
 	editor.current_tool = TerrainEditorScript.Tool.PAINT_DETAIL
 
 	workstation.set_editor(editor)
-	workstation._on_mode_pressed(TerrainEditorWorkstationScript.Mode.LAYOUT)
+	workstation._on_workflow_pressed(TerrainWorkspaceScript.Workflow.LAYOUT)
 
 	assert_eq(editor.current_tool, TerrainEditorScript.Tool.EDIT_SECTORS, "Selecting Layout should restore the sector editing tool.")
 

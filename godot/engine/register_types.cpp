@@ -20,6 +20,8 @@
 #include "terrain/trn_resource_format.h"
 #include "terrain/cpt_resource_format.h"
 #include "terrain/til_resource_format.h"
+#include "env/nova_env_keyframe.h"
+#include "env/env_file.h"
 #include "util/nova_data_format.h"
 #include "util/nova_texture_format.h"
 
@@ -30,6 +32,8 @@ static Ref<ResourceFormatSaverTRN> trn_saver;
 static Ref<ResourceFormatLoaderCPT> cpt_loader;
 static Ref<ResourceFormatLoaderTIL> til_loader;
 static Ref<ResourceFormatSaverTIL> til_saver;
+static Ref<EnvFileLoader> env_loader;
+static Ref<EnvFileSaver> env_saver;
 static Ref<ResourceFormatLoaderNovaTexture> nova_tex_loader;
 
 void initialize_opennova_module(ModuleInitializationLevel p_level) {
@@ -52,6 +56,10 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ResourceFormatLoaderCPT);
 	GDREGISTER_CLASS(ResourceFormatLoaderTIL);
 	GDREGISTER_CLASS(ResourceFormatSaverTIL);
+	GDREGISTER_CLASS(NovaEnvKeyframe);
+	GDREGISTER_CLASS(EnvFile);
+	GDREGISTER_CLASS(EnvFileLoader);
+	GDREGISTER_CLASS(EnvFileSaver);
 	GDREGISTER_CLASS(NovaDataFile);
 	GDREGISTER_CLASS(ResourceFormatLoaderNovaTexture);
 
@@ -69,6 +77,12 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	til_saver.instantiate();
 	ResourceSaver::get_singleton()->add_resource_format_saver(til_saver);
+
+	env_loader.instantiate();
+	ResourceLoader::get_singleton()->add_resource_format_loader(env_loader);
+
+	env_saver.instantiate();
+	ResourceSaver::get_singleton()->add_resource_format_saver(env_saver);
 
 	nova_tex_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(nova_tex_loader);
@@ -93,6 +107,12 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	ResourceSaver::get_singleton()->remove_resource_format_saver(til_saver);
 	til_saver.unref();
+
+	ResourceLoader::get_singleton()->remove_resource_format_loader(env_loader);
+	env_loader.unref();
+
+	ResourceSaver::get_singleton()->remove_resource_format_saver(env_saver);
+	env_saver.unref();
 
 	ResourceLoader::get_singleton()->remove_resource_format_loader(nova_tex_loader);
 	nova_tex_loader.unref();

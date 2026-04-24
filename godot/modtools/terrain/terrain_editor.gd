@@ -24,6 +24,9 @@ const TerrainEditorBrushSession = preload("res://modtools/terrain/terrain_editor
 const CDEPConstraint = preload("res://modtools/terrain/terrain_editor_cdep_constraint.gd")
 const TerrainFoliagePreview = preload("res://modtools/terrain/terrain_foliage_preview.gd")
 const TerrainTileOverlayPreview = preload("res://modtools/terrain/terrain_tile_overlay_preview.gd")
+const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
+const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
+const NovaSkyScript = preload("res://engine/environment/nova_sky.gd")
 const DEFAULT_SECTOR_PATTERN := [
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,
@@ -37,7 +40,7 @@ const DEFAULT_SECTOR_PATTERN := [
 
 @onready var terrain_mesh: EditorTerrainMesh = $EditorTerrainMesh
 @onready var camera: Camera3D = $FlyCamera
-@onready var workstation: TerrainEditorWorkstation = $CanvasLayer/EditorWorkstation
+@onready var workstation = $CanvasLayer/EditorWorkstation
 
 var _document: TerrainEditorDocument = TerrainEditorDocument.new()
 var _brush_session: TerrainEditorBrushSession = TerrainEditorBrushSession.new()
@@ -222,6 +225,10 @@ var _water_material: StandardMaterial3D
 var water_visible: bool = true
 var sector_overlay_visible: bool = false
 
+var environment_editor
+var _environment_node: Node
+var _sky_node: Node3D
+
 var _foliage_preview: TerrainFoliagePreview
 var _tile_overlay_preview: TerrainTileOverlayPreview
 var _tile_interaction_mode: int = TileInteractionMode.PLACE
@@ -234,6 +241,8 @@ var is_dirty: bool:
 	get:
 		return _document.is_dirty
 	set(value):
+		if _document.is_dirty == value:
+			return
 		_document.is_dirty = value
 		_mark_ui_state_changed()
 
@@ -252,6 +261,7 @@ func _ready() -> void:
 	camera.position = Vector3(512, 80, 600)
 	camera.rotation_degrees = Vector3(-30, 0, 0)
 	_init_water_plane()
+	_init_environment_preview()
 	_init_foliage_preview()
 	_init_tile_overlay_preview()
 	_init_clone_marker()
@@ -341,6 +351,66 @@ func _init_water_plane() -> void:
 	add_child(_water_instance)
 
 
+func _init_environment_preview() -> void:
+	environment_editor = EnvironmentEditorScript.new()
+	environment_editor.name = "EnvironmentEditor"
+	add_child(environment_editor)
+
+	_environment_node = Node.new()
+	_environment_node.name = "EditorEnvironment"
+	_environment_node.set_script(NovaEnvironmentScript)
+	add_child(_environment_node)
+
+	_sky_node = Node3D.new()
+	_sky_node.name = "EditorSky"
+	_sky_node.set_script(NovaSkyScript)
+	_sky_node.environment_path = NodePath("../EditorEnvironment")
+	add_child(_sky_node)
+
+	if not environment_editor.environment_changed.is_connected(_on_environment_editor_changed):
+		environment_editor.environment_changed.connect(_on_environment_editor_changed)
+	if not environment_editor.state_changed.is_connected(_on_environment_state_changed):
+		environment_editor.state_changed.connect(_on_environment_state_changed)
+	_on_environment_editor_changed(environment_editor.env_file, environment_editor.time_of_day)
+
+
+func _on_environment_state_changed() -> void:
+	if workstation and workstation.has_method("sync_from_editor_state"):
+		workstation.sync_from_editor_state()
+
+
+func _on_environment_editor_changed(env_file: EnvFile, preview_time: float) -> void:
+	if _environment_node:
+		_environment_node.environment_data = env_file
+		_environment_node.time_of_day = preview_time
+	_apply_environment_to_preview()
+	if workstation and workstation.has_method("sync_from_editor_state"):
+		workstation.sync_from_editor_state()
+
+
+func _apply_environment_to_preview() -> void:
+	if _environment_node == null or not _environment_node.has_method("is_loaded") or not _environment_node.is_loaded():
+		return
+	var material := _get_material()
+	if material:
+		material.set_shader_parameter("u_sun_light", _environment_node.get_sun_light())
+		material.set_shader_parameter("u_fill_light", _environment_node.get_fill_light())
+		material.set_shader_parameter("u_sky_ambient", _environment_node.get_sky_ambient())
+		material.set_shader_parameter("u_sun_direction", _environment_node.get_sun_direction())
+		material.set_shader_parameter("u_terrain_tint", _environment_node.get_terrain_tint())
+		material.set_shader_parameter("u_fog_color", _environment_node.get_fog_color())
+		var fog_end: float = _environment_node.get_fog_level()
+		material.set_shader_parameter("u_fog_end", fog_end)
+		material.set_shader_parameter("u_fog_start", fog_end * 0.3)
+		material.set_shader_parameter("u_fog_type", _environment_node.get_fog_type())
+	if _water_material:
+		var water: Vector3 = _environment_node.get_water_color()
+		var alpha := 0.55
+		if environment_editor and environment_editor.env_file:
+			alpha = environment_editor.env_file.get_water_murk()
+		_water_material.albedo_color = Color(water.x, water.y, water.z, alpha)
+
+
 func _update_water_plane() -> void:
 	if _water_instance == null:
 		return
@@ -360,6 +430,7 @@ func _update_water_plane() -> void:
 			center_z = bounds.position.z + bounds.size.z * 0.5
 	_water_instance.position = Vector3(center_x, float(get_water_height()), center_z)
 	_water_instance.visible = water_visible and has_bounds
+	_apply_environment_to_preview()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -477,6 +548,8 @@ func set_tool(tool: Tool) -> void:
 		_mark_tile_overlay_dirty()
 	if tool != Tool.TILE_STAMP:
 		_tile_interaction_mode = TileInteractionMode.PLACE
+	if current_tool == tool:
+		return
 	current_tool = tool
 	flatten_target_set = false
 	_sync_surface_overlay_state(_get_material())
@@ -530,6 +603,8 @@ func set_terrain_name_value(value: String) -> void:
 	var next_value := value.strip_edges()
 	if next_value.is_empty():
 		next_value = "untitled"
+	if _data.get_terrain_name() == next_value:
+		return
 	_data.set_terrain_name(next_value)
 	is_dirty = true
 	_update_hud()
@@ -541,6 +616,8 @@ func get_detail_density() -> int:
 
 func set_detail_density_value(value: int) -> void:
 	if is_export_running() or not _data:
+		return
+	if _data.get_detail_density() == value:
 		return
 	_data.set_detail_density(value)
 	_document.sync_material_from_data(_get_material())
@@ -555,6 +632,8 @@ func get_detail_density2() -> int:
 func set_detail_density2_value(value: int) -> void:
 	if is_export_running() or not _data:
 		return
+	if _data.get_detail_density2() == value:
+		return
 	_data.set_detail_density2(value)
 	is_dirty = true
 	_update_hud()
@@ -566,6 +645,8 @@ func get_wrap_x_enabled() -> bool:
 
 func set_wrap_x_enabled(enabled: bool) -> void:
 	if is_export_running() or not _data:
+		return
+	if _data.get_wrap_x() == enabled:
 		return
 	_data.set_wrap_x(enabled)
 	is_dirty = true
@@ -579,12 +660,18 @@ func get_wrap_y_enabled() -> bool:
 func set_wrap_y_enabled(enabled: bool) -> void:
 	if is_export_running() or not _data:
 		return
+	if _data.get_wrap_y() == enabled:
+		return
 	_data.set_wrap_y(enabled)
 	is_dirty = true
 	_update_hud()
 
 func get_data() -> NovaTerrainData:
 	return _data
+
+
+func get_environment_editor():
+	return environment_editor
 
 
 func get_metadata_summary() -> Dictionary:
@@ -610,7 +697,10 @@ func get_selected_surface_index() -> int:
 
 
 func set_selected_surface_index(value: int) -> void:
-	selected_surface_index = clampi(value, 0, 255)
+	var next := clampi(value, 0, 255)
+	if selected_surface_index == next:
+		return
+	selected_surface_index = next
 	_update_hud()
 
 
@@ -719,21 +809,30 @@ func get_paint_detail_channel() -> int:
 func set_brush_radius_value(value: float) -> void:
 	if is_export_running():
 		return
-	brush_radius = clampf(value, 1.0, 128.0)
+	var next := clampf(value, 1.0, 128.0)
+	if is_equal_approx(brush_radius, next):
+		return
+	brush_radius = next
 	_update_hud()
 
 
 func set_brush_strength_value(value: float) -> void:
 	if is_export_running():
 		return
-	brush_strength = clampf(value, 0.01, 5.0)
+	var next := clampf(value, 0.01, 5.0)
+	if is_equal_approx(brush_strength, next):
+		return
+	brush_strength = next
 	_update_hud()
 
 
 func set_brush_hardness_value(value: float) -> void:
 	if is_export_running():
 		return
-	brush_hardness = clampf(value, 0.0, 1.0)
+	var next := clampf(value, 0.0, 1.0)
+	if is_equal_approx(brush_hardness, next):
+		return
+	brush_hardness = next
 	_update_hud()
 
 
@@ -794,6 +893,8 @@ func get_origin_x() -> int:
 func set_origin_x_value(value: int) -> void:
 	if is_export_running() or not _data:
 		return
+	if _data.get_origin_x() == value:
+		return
 	_data.set_origin_x(value)
 	_sync_sector_layout(true)
 	is_dirty = true
@@ -806,6 +907,8 @@ func get_origin_y() -> int:
 func set_origin_y_value(value: int) -> void:
 	if is_export_running() or not _data:
 		return
+	if _data.get_origin_y() == value:
+		return
 	_data.set_origin_y(value)
 	_sync_sector_layout(true)
 	is_dirty = true
@@ -817,6 +920,8 @@ func get_water_height() -> int:
 
 func set_water_height_value(value: int) -> void:
 	if is_export_running() or not _data:
+		return
+	if get_water_height() == value:
 		return
 	_data.set_water_height(value * 2)
 	_update_water_plane()
@@ -840,6 +945,8 @@ func is_sector_overlay_visible() -> bool:
 
 
 func set_sector_overlay_visible(visible: bool) -> void:
+	if sector_overlay_visible == visible:
+		return
 	sector_overlay_visible = visible
 	if terrain_mesh:
 		_sync_surface_overlay_state(_get_material())
@@ -951,7 +1058,10 @@ func get_selected_foliage_def_index() -> int:
 
 
 func set_selected_foliage_def_index(index: int) -> void:
+	var before := _document.selected_foliage_def_index
 	_document.set_selected_foliage_def_index(index)
+	if _document.selected_foliage_def_index == before:
+		return
 	_mark_foliage_preview_dirty()
 	_sync_hud_from_editor()
 
@@ -1004,6 +1114,8 @@ func is_tile_placement_mode() -> bool:
 
 
 func clear_tileinfo_selection() -> void:
+	if _document.get_tileinfo_selected_index() < 0 and _tile_interaction_mode == TileInteractionMode.PLACE:
+		return
 	_document.clear_tileinfo_selection()
 	_tile_interaction_mode = TileInteractionMode.PLACE
 	_mark_tile_overlay_dirty()
@@ -1011,6 +1123,10 @@ func clear_tileinfo_selection() -> void:
 
 
 func select_tileinfo_entry(index: int, focus_camera: bool = false) -> void:
+	if _document.get_tileinfo_selected_index() == index and _tile_interaction_mode == TileInteractionMode.EDIT_SELECTED:
+		if focus_camera:
+			focus_selected_tileinfo_entry()
+		return
 	_document.set_tileinfo_selected_index(index, false)
 	_tile_interaction_mode = TileInteractionMode.EDIT_SELECTED
 	_mark_tile_overlay_dirty()
@@ -1026,6 +1142,8 @@ func get_tile_stamp_tile_index() -> int:
 func set_tile_stamp_tile_index(value: int) -> void:
 	if is_export_running():
 		return
+	if _document.get_tile_stamp_tile_index() == clampi(value, 0, 255):
+		return
 	_document.set_tile_stamp_tile_index(value)
 	_sync_hud_from_editor()
 
@@ -1036,6 +1154,14 @@ func get_tile_stamp_flags() -> int:
 
 func set_tile_stamp_flags(value: int) -> void:
 	if is_export_running():
+		return
+	var normalized := value & (
+		NovaTerrainTileInfo.FLAG_FLIP_X |
+		NovaTerrainTileInfo.FLAG_FLIP_Y |
+		NovaTerrainTileInfo.FLAG_ROTATE_90 |
+		NovaTerrainTileInfo.FLAG_OUTLINE
+	)
+	if _document.get_tile_stamp_flags() == normalized:
 		return
 	_document.set_tile_stamp_flags(value)
 	_sync_hud_from_editor()
@@ -2291,6 +2417,7 @@ func _set_blendmap_image(image: Image, sync_data: bool = true) -> void:
 
 func _sync_material_from_data() -> void:
 	_document.sync_material_from_data(_get_material())
+	_apply_environment_to_preview()
 
 
 func _sync_sector_layout(reframe_camera: bool) -> void:

@@ -9,6 +9,7 @@ add_subdirectory(../../libs/til opennova_til)
 add_subdirectory(../../libs/tpj opennova_tpj)
 add_subdirectory(../../libs/trn opennova_trn)
 add_subdirectory(../../libs/cpt opennova_cpt)
+add_subdirectory(../../libs/env opennova_env)
 add_subdirectory(../../libs/terrain opennova_terrain)
 
 set(TARGET_NAME "opennova")
@@ -28,6 +29,8 @@ add_library(${TARGET_NAME} SHARED
     terrain/trn_resource_format.cpp
     terrain/cpt_resource_format.cpp
     terrain/til_resource_format.cpp
+    env/nova_env_keyframe.cpp
+    env/env_file.cpp
     util/nova_data_format.cpp
     util/nova_texture_format.cpp
     util/pcx_texture_bridge.cpp
@@ -46,6 +49,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_tpj
     opennova_trn
     opennova_cpt
+    opennova_env
     opennova_terrain
 )
 

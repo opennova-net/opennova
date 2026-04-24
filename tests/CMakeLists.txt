@@ -135,6 +135,13 @@ target_link_libraries(cpt_roundtrip_test PRIVATE opennova_cpt)
 target_include_directories(cpt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cpt_roundtrip COMMAND cpt_roundtrip_test)
 
+# ENV environment/time-of-day format tests
+add_executable(env_unit_test env/env_unit_test.cpp)
+target_link_libraries(env_unit_test PRIVATE opennova_env)
+target_include_directories(env_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(env_unit_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME env_unit COMMAND env_unit_test)
+
 # Terrain build foundation + parity tests ported from the canonical terrain reference.
 #   parametric_parity — byte-identical CPT output across Sample/Gradient/Checker64/Perlin fixtures
 #   crypto_roundtrip   — rotate_encrypt/decrypt round-trip

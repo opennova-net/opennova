@@ -8,6 +8,7 @@ add_subdirectory(libs/til)
 add_subdirectory(libs/tpj)
 add_subdirectory(libs/trn)
 add_subdirectory(libs/cpt)
+add_subdirectory(libs/env)
 add_subdirectory(libs/threedi)
 add_subdirectory(libs/bad)
 add_subdirectory(libs/adm)
@@ -37,7 +38,7 @@ if(BUILD_SHARED_LIB)
     # (the linker would otherwise discard unreferenced threedi symbols)
     if(MSVC)
         target_link_libraries(opennova_shared
-            PRIVATE opennova_pcx opennova_foliage opennova_til opennova_tpj opennova_trn opennova_cpt opennova_terrain
+            PRIVATE opennova_pcx opennova_foliage opennova_til opennova_tpj opennova_trn opennova_cpt opennova_env opennova_terrain
             PRIVATE opennova_threedi opennova_pff opennova_bfc1 oed_bad oed_adm oed_def oed_scr opennova_ase opennova_tdp
         )
         target_link_options(opennova_shared PRIVATE
@@ -47,6 +48,7 @@ if(BUILD_SHARED_LIB)
             /WHOLEARCHIVE:opennova_tpj
             /WHOLEARCHIVE:opennova_trn
             /WHOLEARCHIVE:opennova_cpt
+            /WHOLEARCHIVE:opennova_env
             /WHOLEARCHIVE:opennova_terrain
             /WHOLEARCHIVE:opennova_threedi
             /WHOLEARCHIVE:opennova_pff
@@ -61,7 +63,7 @@ if(BUILD_SHARED_LIB)
     else()
         target_link_libraries(opennova_shared
             PRIVATE -Wl,--whole-archive
-            PRIVATE opennova_pcx opennova_foliage opennova_til opennova_tpj opennova_trn opennova_cpt opennova_terrain
+            PRIVATE opennova_pcx opennova_foliage opennova_til opennova_tpj opennova_trn opennova_cpt opennova_env opennova_terrain
             PRIVATE opennova_threedi opennova_pff opennova_bfc1 oed_bad oed_adm oed_def oed_scr opennova_ase opennova_tdp
             PRIVATE -Wl,--no-whole-archive
         )
@@ -91,6 +93,7 @@ if(BUILD_SHARED_LIB)
     target_compile_definitions(opennova_tpj PRIVATE OPENNOVA_SHARED_EXPORTS)
     target_compile_definitions(opennova_trn PRIVATE OPENNOVA_SHARED_EXPORTS)
     target_compile_definitions(opennova_cpt PRIVATE OPENNOVA_SHARED_EXPORTS)
+    target_compile_definitions(opennova_env PRIVATE OPENNOVA_SHARED_EXPORTS)
     target_compile_definitions(opennova_terrain PRIVATE OPENNOVA_SHARED_EXPORTS)
     target_compile_definitions(opennova_threedi PRIVATE OPENNOVA_SHARED_EXPORTS)
     target_compile_definitions(opennova_pff PRIVATE OPENNOVA_SHARED_EXPORTS)
@@ -109,6 +112,7 @@ if(BUILD_SHARED_LIB)
     set_target_properties(opennova_tpj PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(opennova_trn PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(opennova_cpt PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(opennova_env PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(opennova_terrain PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(opennova_threedi PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(opennova_pff PROPERTIES POSITION_INDEPENDENT_CODE ON)
