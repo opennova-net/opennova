@@ -1,7 +1,7 @@
 # Build and package the standalone OpenNova Importer for Windows.
 #
 # Produces:
-#   dist\onimport.exe
+#   dist\onimport-v<version>.exe   (version read from pyproject.toml)
 #
 # Run on a windows-latest GitHub Actions runner or any Windows machine with
 # Python 3.11, uv, and CMake available.
@@ -16,6 +16,14 @@ Set-Location $ROOT
 if (-not $env:UV_CACHE_DIR) {
     $env:UV_CACHE_DIR = Join-Path $env:TEMP "opennova-uv-cache"
 }
+
+# Read importer component version from its source file
+$pyproject = Get-Content "$ROOT\pyproject.toml" -Raw
+if ($pyproject -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
+    throw "Could not extract version from pyproject.toml"
+}
+$Version = $Matches[1]
+Write-Host "=== Importer version: $Version ==="
 
 # Locate Python 3.11 (bpy 5.x requires exactly 3.11)
 $PY = (& py -3.11 -c "import sys; print(sys.executable)" 2>$null)
@@ -55,8 +63,9 @@ Copy-Item build-pkg\Release\opennova.dll blender\lib\windows-x64\opennova.dll
 # ---------------------------------------------------------------------------
 Write-Host "=== Building onimport.exe ==="
 $distPath = "$ROOT\dist"
+$ExeName = "onimport-v$Version"
 & $PY -m uv run --frozen --group dev python -m PyInstaller apps\importer\__main__.py `
-    --name onimport `
+    --name $ExeName `
     --onefile `
     --collect-all bpy `
     --collect-all numpy `
@@ -66,5 +75,5 @@ $distPath = "$ROOT\dist"
     --clean
 
 Write-Host "=== Done ==="
-Write-Host "  -> dist\onimport.exe"
-Get-Item "$distPath\onimport.exe" | Select-Object Name, Length
+Write-Host "  -> dist\$ExeName.exe"
+Get-Item "$distPath\$ExeName.exe" | Select-Object Name, Length

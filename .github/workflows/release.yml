@@ -54,13 +54,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y mingw-w64
 
       - name: Package addon
-        run: scripts/package_addon.sh --version "${GITHUB_REF#refs/tags/v}"
+        run: scripts/package_addon.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: opennova_blender
-          path: dist/*.zip
+          path: dist/opennova_blender-v*.zip
 
   package-importer:
     runs-on: windows-latest
@@ -89,7 +89,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: opennova_importer
-          path: dist/onimport.exe
+          path: dist/onimport-v*.exe
 
   package-godot:
     runs-on: windows-latest
@@ -115,13 +115,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: opennova_modtools_windows
-          path: dist/opennova-modtools-windows.zip
+          path: dist/opennova-modtools-windows-v*.zip
 
       - name: Upload opennova runtime Windows zip
         uses: actions/upload-artifact@v4
         with:
           name: opennova_runtime_windows
-          path: dist/opennova-runtime-windows.zip
+          path: dist/opennova-runtime-windows-v*.zip
 
   release:
     runs-on: ubuntu-latest
@@ -129,16 +129,37 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
+      - name: Build component manifest
+        run: |
+          BLENDER=$(grep -E '^version = ' blender/blender_manifest.toml | sed -E 's/.*"(.*)".*/\1/')
+          IMPORTER=$(grep -E '^version = ' pyproject.toml | sed -E 's/.*"(.*)".*/\1/')
+          GODOT=$(grep -E '^config/version=' godot/project.godot | sed -E 's/.*"(.*)".*/\1/')
+          cat > release-body.md <<EOF
+          ## Components in this release
+
+          | Component | Version |
+          |---|---|
+          | Blender addon | ${BLENDER} |
+          | Standalone importer | ${IMPORTER} |
+          | Godot mod tools | ${GODOT} |
+          | Godot runtime | ${GODOT} |
+
+          EOF
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.zip
-            dist/onimport.exe
+            dist/onimport-v*.exe
+          body_path: release-body.md
+          append_body: true
           generate_release_notes: true

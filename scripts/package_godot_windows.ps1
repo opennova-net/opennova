@@ -1,8 +1,8 @@
 # Build and export OpenNova Godot applications for Windows.
 #
-# Produces:
-#   dist\opennova-runtime-windows.zip    (Runtime exe + GDExtension DLL)
-#   dist\opennova-modtools-windows.zip   (Mod Tools exe + GDExtension DLL)
+# Produces (version read from godot/project.godot):
+#   dist\opennova-runtime-windows-v<version>.zip    (Runtime exe + GDExtension DLL)
+#   dist\opennova-modtools-windows-v<version>.zip   (Mod Tools exe + GDExtension DLL)
 #
 # Requires:
 #   - MSVC toolchain + cmake (preinstalled on windows-latest)
@@ -16,6 +16,27 @@ $ProgressPreference = "SilentlyContinue"  # keeps Invoke-WebRequest fast on larg
 
 $ROOT = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location $ROOT
+
+# Read Godot apps' component version from project.godot
+$projectGodot = Get-Content "$ROOT\godot\project.godot" -Raw
+if ($projectGodot -notmatch '(?m)^config/version\s*=\s*"([^"]+)"') {
+    throw "Could not extract config/version from godot/project.godot"
+}
+$Version = $Matches[1]
+Write-Host "=== Godot apps version: $Version ==="
+
+# Pad to 4 numeric parts for Windows VERSIONINFO (Godot requires major.minor.patch.build)
+$versionParts = @($Version.Split("."))
+while ($versionParts.Count -lt 4) { $versionParts += "0" }
+$WinVersion = $versionParts -join "."
+
+# Stamp version into both export presets so Godot embeds it in the .exe VERSIONINFO
+$presetsPath = "$ROOT\godot\export_presets.cfg"
+$presets = Get-Content $presetsPath -Raw
+$presets = $presets -replace 'application/file_version="[^"]*"',    "application/file_version=`"$WinVersion`""
+$presets = $presets -replace 'application/product_version="[^"]*"', "application/product_version=`"$WinVersion`""
+Set-Content -Path $presetsPath -Value $presets -NoNewline
+Write-Host "    file_version / product_version -> $WinVersion"
 
 $GODOT_VERSION = "4.6.1-stable"
 $GODOT_VERSION_PLAIN = "4.6.1"
@@ -107,8 +128,8 @@ New-Item -ItemType Directory -Force -Path $DIST | Out-Null
 
 $RUNTIME_EXE = "$DIST\opennova.exe"
 $MODTOOLS_EXE = "$DIST\opennova-modtools.exe"
-$RUNTIME_ZIP = "$DIST\opennova-runtime-windows.zip"
-$MODTOOLS_ZIP = "$DIST\opennova-modtools-windows.zip"
+$RUNTIME_ZIP = "$DIST\opennova-runtime-windows-v$Version.zip"
+$MODTOOLS_ZIP = "$DIST\opennova-modtools-windows-v$Version.zip"
 
 function Invoke-GodotExport {
     param([string]$PresetName, [string]$OutputPath)
@@ -191,10 +212,10 @@ function New-GodotAppZip {
     }
 }
 
-Write-Host "=== Packaging opennova-modtools-windows.zip ==="
+Write-Host "=== Packaging $(Split-Path $MODTOOLS_ZIP -Leaf) ==="
 New-GodotAppZip -PackageName "opennova-modtools" -ExePath $MODTOOLS_EXE -ZipPath $MODTOOLS_ZIP
 
-Write-Host "=== Packaging opennova-runtime-windows.zip ==="
+Write-Host "=== Packaging $(Split-Path $RUNTIME_ZIP -Leaf) ==="
 New-GodotAppZip -PackageName "opennova-runtime" -ExePath $RUNTIME_EXE -ZipPath $RUNTIME_ZIP
 
 # ---------------------------------------------------------------------------

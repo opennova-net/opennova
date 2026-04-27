@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="OpenNova"
-config/version="0.0.6"
+config/version="0.0.7"
 run/main_scene="res://modtools/terrain/terrain_editor.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 boot_splash/bg_color=Color(0.08, 0.09, 0.12, 1)

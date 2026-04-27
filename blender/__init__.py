@@ -7,7 +7,7 @@ from __future__ import annotations
 bl_info = {
     "name": "Novalogic ASE & Anim Exporter",
     "author": "Taylor Finnell",
-    "version": (0, 0, 1),
+    "version": (0, 0, 2),
     "blender": (2, 80, 0),
     "location": "File > Import-Export",
     "description": "Export ASE files and Novalogic ADM/BAD animations; import Mixamo FBX for animation workflow",

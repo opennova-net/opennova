@@ -74,11 +74,10 @@ fi
 # ---------------------------------------------------------------------------
 mkdir -p "$DIST_DIR"
 
-if [[ -n "$VERSION" ]]; then
-    ZIP_NAME="opennova_blender-v${VERSION}.zip"
-else
-    ZIP_NAME="opennova_blender.zip"
+if [[ -z "$VERSION" ]]; then
+    VERSION=$(grep -E '^version = ' "$MANIFEST" | sed -E 's/.*"(.*)".*/\1/')
 fi
+ZIP_NAME="opennova_blender-v${VERSION}.zip"
 
 echo "=== Packaging $ZIP_NAME ==="
 (cd "$BLENDER_DIR" && zip -r "$DIST_DIR/$ZIP_NAME" . \
