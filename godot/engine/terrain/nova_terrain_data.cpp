@@ -1,0 +1,1110 @@
+#include "nova_terrain_data.h"
+
+#include "nova_terrain_foliage_def.h"
+#include "nova_terrain_foliage_map.h"
+#include "nova_terrain_tile_info.h"
+
+#include <til/til_io.h>
+#include <terrain/lighting.h>
+
+#include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/classes/project_settings.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/core/object.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
+
+#include "util/pcx_texture_bridge.h"
+#include "util/texture_path_resolver.h"
+
+#include <godot_cpp/classes/file_access.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <sstream>
+
+using namespace godot;
+
+namespace {
+
+static Ref<NovaTerrainFoliageDef> foliage_def_to_object(const opennova::FoliageDef &def) {
+	Ref<NovaTerrainFoliageDef> object;
+	object.instantiate();
+	object->copy_from_native(def);
+	return object;
+}
+
+static bool foliage_def_from_variant(const Variant &value, opennova::FoliageDef &out_def) {
+	if (value.get_type() == Variant::OBJECT) {
+		Object *object = value;
+		if (const NovaTerrainFoliageDef *def = Object::cast_to<NovaTerrainFoliageDef>(object)) {
+			out_def = def->to_native();
+			return true;
+		}
+	}
+
+	if (value.get_type() == Variant::DICTIONARY) {
+		const Dictionary dict = value;
+		out_def.graphic = String(dict.get("graphic", "")).utf8().get_data();
+		out_def.color_lower = static_cast<int>(dict.get("color_lower", static_cast<int>(opennova::FoliageColorMode::MatchGround)));
+		out_def.color_upper = static_cast<int>(dict.get("color_upper", static_cast<int>(opennova::FoliageColorMode::MatchGround)));
+		out_def.match = static_cast<int>(dict.get("match", -1));
+		int attrib_flags = static_cast<int>(dict.get("attrib_flags", 0));
+		if (static_cast<bool>(dict.get("shadow", false))) {
+			attrib_flags |= opennova::FOLIAGE_ATTRIB_SHADOW;
+		}
+		if (static_cast<bool>(dict.get("force_on", false))) {
+			attrib_flags |= opennova::FOLIAGE_ATTRIB_FORCE_ON;
+		}
+		out_def.attrib_flags = static_cast<uint8_t>(std::clamp(attrib_flags, 0, 255));
+		out_def = opennova::foliage_normalize_def(out_def);
+		return true;
+	}
+
+	return false;
+}
+
+static opennova::FoliageMap foliage_map_from_slot_data(const std::vector<uint8_t> &indices,
+                                                       const uint8_t palette[256][3],
+                                                       int width,
+                                                       int height) {
+	const int map_width = width > 0 ? width : opennova::FOLIAGE_HEIGHTMAP_SIZE;
+	const int map_height = height > 0 ? height : opennova::FOLIAGE_HEIGHTMAP_SIZE;
+	opennova::FoliageMap map = opennova::foliage_make_default_map(map_width, map_height, 0);
+	if (width <= 0 || height <= 0 || indices.size() < static_cast<size_t>(width * height)) {
+		return map;
+	}
+	map.indices = indices;
+	std::memcpy(map.palette, palette, sizeof(map.palette));
+	return map;
+}
+
+struct TerrainWorldSample {
+	int sector_sx = 0;
+	int sector_sz = 0;
+	int sector_id = 0;
+	float source_x = 0.0f;
+	float source_z = 0.0f;
+};
+
+bool resolve_world_sample(const opennova::TrnConfig &trn,
+                          float world_x,
+                          float world_z,
+                          TerrainWorldSample &out_sample) {
+	out_sample = TerrainWorldSample{};
+	out_sample.sector_sx = static_cast<int>(std::floor(world_x / 512.0f));
+	out_sample.sector_sz = static_cast<int>(std::floor(world_z / 512.0f));
+
+	const int grid_x = out_sample.sector_sx - trn.origin_x;
+	const int grid_z = out_sample.sector_sz - trn.origin_y;
+	out_sample.sector_id = trn.sector_grid[grid_z & 0xF][grid_x & 0xF];
+	if (out_sample.sector_id <= 0) {
+		return false;
+	}
+
+	const float local_x = world_x - static_cast<float>(out_sample.sector_sx * 512);
+	const float local_z = world_z - static_cast<float>(out_sample.sector_sz * 512);
+	const float quadrant_x = (out_sample.sector_id == 3 || out_sample.sector_id == 4) ? 512.0f : 0.0f;
+	const float quadrant_z = (out_sample.sector_id == 2 || out_sample.sector_id == 4) ? 512.0f : 0.0f;
+	out_sample.source_x = quadrant_x + local_x;
+	out_sample.source_z = quadrant_z + local_z;
+	return true;
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------
+// Macros for texture property boilerplate
+// ---------------------------------------------------------------------------
+
+#define IMPL_TEX_PROP(field, setter, getter) \
+	void NovaTerrainData::setter(const Ref<Texture2D> &p_tex) { field = p_tex; _sync_trn_texture_filenames_from_refs(); _notify_terrain_changed(); } \
+	Ref<Texture2D> NovaTerrainData::getter() const { return field; }
+
+#define BIND_TEX_PROP(prop, setter, getter) \
+	ClassDB::bind_method(D_METHOD(#setter, "texture"), &NovaTerrainData::setter); \
+	ClassDB::bind_method(D_METHOD(#getter), &NovaTerrainData::getter); \
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, #prop, PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), #setter, #getter);
+
+// ---------------------------------------------------------------------------
+// _bind_methods
+// ---------------------------------------------------------------------------
+
+void NovaTerrainData::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_trn_path", "path"), &NovaTerrainData::set_trn_path);
+	ClassDB::bind_method(D_METHOD("get_trn_path"), &NovaTerrainData::get_trn_path);
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "trn_path", PROPERTY_HINT_FILE, "*.trn"), "set_trn_path", "get_trn_path");
+
+	ClassDB::bind_method(D_METHOD("load"), &NovaTerrainData::load);
+	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaTerrainData::is_loaded);
+	ClassDB::bind_method(D_METHOD("get_depth_raw16"), &NovaTerrainData::get_depth_raw16);
+	ClassDB::bind_method(D_METHOD("get_height", "world_pos"), &NovaTerrainData::get_height);
+	ClassDB::bind_method(D_METHOD("get_height_world", "world_pos"), &NovaTerrainData::get_height_world);
+	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &NovaTerrainData::get_height_world_bilinear);
+	ClassDB::bind_method(D_METHOD("get_colormap_color_world", "world_x", "world_z"), &NovaTerrainData::get_colormap_color_world);
+	ClassDB::bind_method(D_METHOD("get_modulated_colormap_color_world", "world_x", "world_z", "light_color"),
+	                     &NovaTerrainData::get_modulated_colormap_color_world);
+	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
+	ClassDB::bind_method(D_METHOD("get_tile_count"), &NovaTerrainData::get_tile_count);
+	ClassDB::bind_method(D_METHOD("load_foliage_indices"), &NovaTerrainData::load_foliage_indices);
+	ClassDB::bind_method(D_METHOD("set_sector_grid", "value"), &NovaTerrainData::set_sector_grid);
+	ClassDB::bind_method(D_METHOD("get_sector_grid"), &NovaTerrainData::get_sector_grid);
+	ClassDB::bind_method(D_METHOD("get_foliage_map"), &NovaTerrainData::get_foliage_map);
+	ClassDB::bind_method(D_METHOD("set_foliage_map", "value"), &NovaTerrainData::set_foliage_map);
+	ClassDB::bind_method(D_METHOD("get_foliage_defs"), &NovaTerrainData::get_foliage_defs);
+	ClassDB::bind_method(D_METHOD("set_foliage_defs", "value"), &NovaTerrainData::set_foliage_defs);
+	ClassDB::bind_method(D_METHOD("set_trn_texture_filename", "slot_id", "filename"), &NovaTerrainData::set_trn_texture_filename);
+	ClassDB::bind_method(D_METHOD("get_trn_texture_filename", "slot_id"), &NovaTerrainData::get_trn_texture_filename);
+	ClassDB::bind_method(D_METHOD("set_polydata_filename", "filename"), &NovaTerrainData::set_polydata_filename);
+	ClassDB::bind_method(D_METHOD("get_polydata_filename"), &NovaTerrainData::get_polydata_filename);
+	ClassDB::bind_method(D_METHOD("set_tileinfo_filename", "filename"), &NovaTerrainData::set_tileinfo_filename);
+	ClassDB::bind_method(D_METHOD("get_tileinfo_filename"), &NovaTerrainData::get_tileinfo_filename);
+	ClassDB::bind_method(D_METHOD("get_tileinfo_resource"), &NovaTerrainData::get_tileinfo_resource);
+
+	ClassDB::bind_method(D_METHOD("import_pcx_slot", "slot_id", "path"), &NovaTerrainData::import_pcx_slot);
+	ClassDB::bind_method(D_METHOD("save_pcx_slot", "slot_id", "path"), &NovaTerrainData::save_pcx_slot);
+	ClassDB::bind_method(D_METHOD("reset_pcx_slot_default", "slot_id", "width", "height"), &NovaTerrainData::reset_pcx_slot_default);
+	ClassDB::bind_method(D_METHOD("get_pcx_slot_state", "slot_id"), &NovaTerrainData::get_pcx_slot_state);
+	ClassDB::bind_method(D_METHOD("set_pcx_slot_state", "slot_id", "state"), &NovaTerrainData::set_pcx_slot_state);
+
+	// Identity
+	ClassDB::bind_method(D_METHOD("set_terrain_name", "value"), &NovaTerrainData::set_terrain_name);
+	ClassDB::bind_method(D_METHOD("get_terrain_name"), &NovaTerrainData::get_terrain_name);
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "terrain_name"), "set_terrain_name", "get_terrain_name");
+
+	// Textures (Texture2D resources — drag and drop in inspector)
+	ADD_GROUP("Textures", "");
+	BIND_TEX_PROP(colormap, set_colormap, get_colormap)
+	BIND_TEX_PROP(detailmap, set_detailmap, get_detailmap)
+	BIND_TEX_PROP(detailmap_c1, set_detailmap_c1, get_detailmap_c1)
+	BIND_TEX_PROP(detailmap_c2, set_detailmap_c2, get_detailmap_c2)
+	BIND_TEX_PROP(detailmap_c3, set_detailmap_c3, get_detailmap_c3)
+	BIND_TEX_PROP(detailmap2, set_detailmap2, get_detailmap2)
+	BIND_TEX_PROP(detailmapdist, set_detailmapdist, get_detailmapdist)
+	BIND_TEX_PROP(detailmapdist2, set_detailmapdist2, get_detailmapdist2)
+	BIND_TEX_PROP(detailblendmap, set_detailblendmap, get_detailblendmap)
+	BIND_TEX_PROP(charmap_tex, set_charmap_tex, get_charmap_tex)
+	BIND_TEX_PROP(foliagemap_tex, set_foliagemap_tex, get_foliagemap_tex)
+	BIND_TEX_PROP(tilestrip_tex, set_tilestrip_tex, get_tilestrip_tex)
+
+	// Detail density
+	ADD_GROUP("Detail", "detail_");
+	ClassDB::bind_method(D_METHOD("set_detail_density", "value"), &NovaTerrainData::set_detail_density);
+	ClassDB::bind_method(D_METHOD("get_detail_density"), &NovaTerrainData::get_detail_density);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "detail_density", PROPERTY_HINT_RANGE, "1,512,1"), "set_detail_density", "get_detail_density");
+	ClassDB::bind_method(D_METHOD("set_detail_density2", "value"), &NovaTerrainData::set_detail_density2);
+	ClassDB::bind_method(D_METHOD("get_detail_density2"), &NovaTerrainData::get_detail_density2);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "detail_density2", PROPERTY_HINT_RANGE, "1,128,1"), "set_detail_density2", "get_detail_density2");
+
+	// Sectors
+	ADD_GROUP("Sectors", "");
+	ClassDB::bind_method(D_METHOD("set_sector_count", "value"), &NovaTerrainData::set_sector_count);
+	ClassDB::bind_method(D_METHOD("get_sector_count"), &NovaTerrainData::get_sector_count);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "sector_count", PROPERTY_HINT_RANGE, "1,16,1"), "set_sector_count", "get_sector_count");
+	ClassDB::bind_method(D_METHOD("set_sector_rows", "value"), &NovaTerrainData::set_sector_rows);
+	ClassDB::bind_method(D_METHOD("get_sector_rows"), &NovaTerrainData::get_sector_rows);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "sector_rows", PROPERTY_HINT_RANGE, "1,16,1"), "set_sector_rows", "get_sector_rows");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "sector_grid"), "set_sector_grid", "get_sector_grid");
+	ClassDB::bind_method(D_METHOD("set_origin_x", "value"), &NovaTerrainData::set_origin_x);
+	ClassDB::bind_method(D_METHOD("get_origin_x"), &NovaTerrainData::get_origin_x);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "origin_x"), "set_origin_x", "get_origin_x");
+	ClassDB::bind_method(D_METHOD("set_origin_y", "value"), &NovaTerrainData::set_origin_y);
+	ClassDB::bind_method(D_METHOD("get_origin_y"), &NovaTerrainData::get_origin_y);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "origin_y"), "set_origin_y", "get_origin_y");
+	ClassDB::bind_method(D_METHOD("set_wrap_x", "value"), &NovaTerrainData::set_wrap_x);
+	ClassDB::bind_method(D_METHOD("get_wrap_x"), &NovaTerrainData::get_wrap_x);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "wrap_x"), "set_wrap_x", "get_wrap_x");
+	ClassDB::bind_method(D_METHOD("set_wrap_y", "value"), &NovaTerrainData::set_wrap_y);
+	ClassDB::bind_method(D_METHOD("get_wrap_y"), &NovaTerrainData::get_wrap_y);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "wrap_y"), "set_wrap_y", "get_wrap_y");
+
+	// Environment
+	ADD_GROUP("Environment", "");
+	ClassDB::bind_method(D_METHOD("set_water_height", "value"), &NovaTerrainData::set_water_height);
+	ClassDB::bind_method(D_METHOD("get_water_height"), &NovaTerrainData::get_water_height);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "water_height"), "set_water_height", "get_water_height");
+	ClassDB::bind_method(D_METHOD("set_horizon", "value"), &NovaTerrainData::set_horizon);
+	ClassDB::bind_method(D_METHOD("get_horizon"), &NovaTerrainData::get_horizon);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "horizon"), "set_horizon", "get_horizon");
+
+	// Foliage
+	ADD_GROUP("Foliage", "");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "foliage_defs", PROPERTY_HINT_ARRAY_TYPE, "NovaTerrainFoliageDef"),
+	             "set_foliage_defs",
+	             "get_foliage_defs");
+
+	ADD_SIGNAL(MethodInfo("terrain_changed"));
+}
+
+NovaTerrainData::NovaTerrainData() {
+	sector_grid.resize(256);
+}
+NovaTerrainData::~NovaTerrainData() {}
+
+// ---------------------------------------------------------------------------
+// PCX map data — palette-indexed slots (charmap, foliagemap). Palette and
+// indices are owned internally; slot_id dispatches to the right field set.
+// ---------------------------------------------------------------------------
+
+static void _fill_grayscale_palette(uint8_t palette[256][3]) {
+	for (int i = 0; i < 256; i++) {
+		palette[i][0] = static_cast<uint8_t>(i);
+		palette[i][1] = static_cast<uint8_t>(i);
+		palette[i][2] = static_cast<uint8_t>(i);
+	}
+}
+
+static void _fill_default_charmap_palette(uint8_t palette[256][3]) {
+	_fill_grayscale_palette(palette);
+	const struct {
+		uint8_t index;
+		uint8_t r;
+		uint8_t g;
+		uint8_t b;
+	} entries[] = {
+		{0, 0, 0, 0},        // Null
+		{1, 153, 118, 61},   // Dirt
+		{2, 0, 210, 0},      // Grass
+		{3, 204, 239, 244},  // Snow
+		{4, 152, 152, 152},  // Cement
+		{5, 255, 255, 0},    // Sand
+		{6, 255, 128, 0},    // PackedDirt
+		{7, 0, 0, 255},      // Unused
+		{8, 255, 0, 0},      // Unused
+		{9, 114, 64, 0},     // Mud
+		{10, 160, 190, 219}, // Ice
+		{11, 161, 0, 161},   // Unused
+		{12, 255, 0, 186},   // Rock/Stone
+		{13, 158, 78, 0},    // Wood
+		{14, 0, 201, 203},   // Metal
+		{15, 255, 255, 255}, // Unused
+	};
+	for (const auto &entry : entries) {
+		palette[entry.index][0] = entry.r;
+		palette[entry.index][1] = entry.g;
+		palette[entry.index][2] = entry.b;
+	}
+}
+
+static uint8_t _default_fill_index_for_pcx_slot(const String &slot_id) {
+	return slot_id == "charmap" ? 1 : 0;
+}
+
+// Slot dispatch — maps slot_id to the per-slot state. Extend here when new
+// PCX-backed slots (e.g. additional surface maps) are introduced.
+struct NovaTerrainData::PcxSlotRefs {
+	std::vector<uint8_t>* indices;
+	uint8_t (*palette)[3];
+	int* width;
+	int* height;
+	Ref<Texture2D>* tex;
+	std::string* trn_filename;
+};
+
+bool NovaTerrainData::_resolve_pcx_slot(const String &slot_id, PcxSlotRefs &out) {
+	if (slot_id == "charmap") {
+		out.indices = &charmap_indices;
+		out.palette = charmap_palette;
+		out.width = &charmap_width;
+		out.height = &charmap_height;
+		out.tex = &charmap_tex;
+		out.trn_filename = &trn.charmap;
+		return true;
+	}
+	if (slot_id == "foliagemap") {
+		out.indices = &foliagemap_indices;
+		out.palette = foliagemap_palette;
+		out.width = &foliagemap_width;
+		out.height = &foliagemap_height;
+		out.tex = &foliagemap_tex;
+		out.trn_filename = &trn.foliagemap;
+		return true;
+	}
+	return false;
+}
+
+void NovaTerrainData::_sync_foliage_map_resource_from_slot() {
+	if (foliage_map_resource.is_null()) {
+		foliage_map_resource.instantiate();
+	}
+	foliage_map_resource->copy_from_native(
+			foliage_map_from_slot_data(foliagemap_indices, foliagemap_palette, foliagemap_width, foliagemap_height));
+}
+
+void NovaTerrainData::_apply_foliage_map_to_slot(const opennova::FoliageMap &map) {
+	const opennova::FoliageMap normalized = opennova::foliage_has_size(map)
+			? map
+			: opennova::foliage_make_default_map(opennova::FOLIAGE_HEIGHTMAP_SIZE, opennova::FOLIAGE_HEIGHTMAP_SIZE, 0);
+	foliagemap_width = normalized.width;
+	foliagemap_height = normalized.height;
+	foliagemap_indices = normalized.indices;
+	std::memcpy(foliagemap_palette, normalized.palette, sizeof(foliagemap_palette));
+	foliagemap_tex = opennova::build_indexed_texture(foliagemap_indices, foliagemap_palette, foliagemap_width, foliagemap_height);
+}
+
+Error NovaTerrainData::import_pcx_slot(const String &slot_id, const String &path) {
+	PcxSlotRefs refs;
+	if (!_resolve_pcx_slot(slot_id, refs)) {
+		UtilityFunctions::push_error("import_pcx_slot: unknown slot '", slot_id, "'");
+		return ERR_INVALID_PARAMETER;
+	}
+
+	Ref<FileAccess> f = FileAccess::open(path, FileAccess::READ);
+	if (f.is_null()) {
+		UtilityFunctions::push_error("import_pcx_slot: cannot open ", path);
+		return ERR_FILE_CANT_OPEN;
+	}
+	PackedByteArray bytes = f->get_buffer(f->get_length());
+	f.unref();
+
+	int w = 0, h = 0;
+	if (!opennova::decode_pcx_with_palette(bytes.ptr(), bytes.size(),
+	                                        *refs.indices, refs.palette, w, h)) {
+		UtilityFunctions::push_error("import_pcx_slot: decode failed for ", path);
+		return ERR_FILE_CORRUPT;
+	}
+	*refs.width = w;
+	*refs.height = h;
+	*refs.tex = opennova::build_indexed_texture(*refs.indices, refs.palette, w, h);
+	*refs.trn_filename = path.get_file().utf8().get_data();
+	if (slot_id == "foliagemap") {
+		_sync_foliage_map_resource_from_slot();
+	}
+	_notify_terrain_changed();
+	return OK;
+}
+
+Error NovaTerrainData::save_pcx_slot(const String &slot_id, const String &path) const {
+	PcxSlotRefs refs;
+	if (!const_cast<NovaTerrainData*>(this)->_resolve_pcx_slot(slot_id, refs)) {
+		UtilityFunctions::push_error("save_pcx_slot: unknown slot '", slot_id, "'");
+		return ERR_INVALID_PARAMETER;
+	}
+	int w = *refs.width, h = *refs.height;
+	if (w <= 0 || h <= 0 || (int)refs.indices->size() < w * h) {
+		UtilityFunctions::push_error("save_pcx_slot: '", slot_id, "' not initialized");
+		return ERR_UNCONFIGURED;
+	}
+	PackedByteArray bytes = opennova::encode_pcx_indices(refs.indices->data(), w, h, refs.palette);
+	Ref<FileAccess> f = FileAccess::open(path, FileAccess::WRITE);
+	if (f.is_null()) {
+		UtilityFunctions::push_error("save_pcx_slot: cannot open for write ", path);
+		return ERR_FILE_CANT_WRITE;
+	}
+	f->store_buffer(bytes);
+	f->close();
+	return OK;
+}
+
+void NovaTerrainData::reset_pcx_slot_default(const String &slot_id, int width, int height) {
+	PcxSlotRefs refs;
+	if (!_resolve_pcx_slot(slot_id, refs)) return;
+	if (width <= 0 || height <= 0) return;
+	*refs.width = width;
+	*refs.height = height;
+	refs.indices->assign(width * height, _default_fill_index_for_pcx_slot(slot_id));
+	if (slot_id == "charmap") {
+		_fill_default_charmap_palette(refs.palette);
+	} else {
+		_fill_grayscale_palette(refs.palette);
+	}
+	refs.trn_filename->clear();
+	*refs.tex = opennova::build_indexed_texture(*refs.indices, refs.palette, width, height);
+	if (slot_id == "foliagemap") {
+		_sync_foliage_map_resource_from_slot();
+	}
+	_notify_terrain_changed();
+}
+
+Dictionary NovaTerrainData::get_pcx_slot_state(const String &slot_id) const {
+	PcxSlotRefs refs;
+	if (!const_cast<NovaTerrainData *>(this)->_resolve_pcx_slot(slot_id, refs)) {
+		return Dictionary();
+	}
+	const int width = *refs.width;
+	const int height = *refs.height;
+	if (width <= 0 || height <= 0 || refs.indices->size() < static_cast<size_t>(width * height)) {
+		return Dictionary();
+	}
+
+	PackedByteArray indices;
+	indices.resize(static_cast<int64_t>(refs.indices->size()));
+	if (!refs.indices->empty()) {
+		std::memcpy(indices.ptrw(), refs.indices->data(), refs.indices->size());
+	}
+
+	PackedByteArray palette;
+	palette.resize(256 * 3);
+	std::memcpy(palette.ptrw(), refs.palette, 256 * 3);
+
+	Dictionary result;
+	result["width"] = width;
+	result["height"] = height;
+	result["indices"] = indices;
+	result["palette"] = palette;
+	return result;
+}
+
+void NovaTerrainData::set_pcx_slot_state(const String &slot_id, const Dictionary &state) {
+	PcxSlotRefs refs;
+	if (!_resolve_pcx_slot(slot_id, refs)) {
+		UtilityFunctions::push_error("set_pcx_slot_state: unknown slot '", slot_id, "'");
+		return;
+	}
+
+	const int width = std::max(static_cast<int>(state.get("width", *refs.width)), 1);
+	const int height = std::max(static_cast<int>(state.get("height", *refs.height)), 1);
+	const int expected = width * height;
+	const PackedByteArray indices = state.get("indices", PackedByteArray());
+	const PackedByteArray palette = state.get("palette", PackedByteArray());
+	if (indices.size() < expected || palette.size() < 256 * 3) {
+		UtilityFunctions::push_error("set_pcx_slot_state: invalid payload for slot '", slot_id, "'");
+		return;
+	}
+
+	*refs.width = width;
+	*refs.height = height;
+	refs.indices->resize(static_cast<size_t>(expected));
+	std::memcpy(refs.indices->data(), indices.ptr(), static_cast<size_t>(expected));
+	std::memcpy(refs.palette, palette.ptr(), 256 * 3);
+	*refs.tex = opennova::build_indexed_texture(*refs.indices, refs.palette, width, height);
+	if (slot_id == "foliagemap") {
+		_sync_foliage_map_resource_from_slot();
+	}
+	_notify_terrain_changed();
+}
+
+// ---------------------------------------------------------------------------
+// Property accessors
+// ---------------------------------------------------------------------------
+
+void NovaTerrainData::set_trn_path(const String &p_path) { trn_path = p_path; }
+String NovaTerrainData::get_trn_path() const { return trn_path; }
+
+void NovaTerrainData::set_terrain_name(const String &p_name) { terrain_name = p_name; _notify_terrain_changed(); }
+String NovaTerrainData::get_terrain_name() const { return terrain_name; }
+
+void NovaTerrainData::set_colormap(const Ref<Texture2D> &p_tex) {
+	colormap = p_tex;
+	_invalidate_colormap_cpu_cache();
+	_sync_trn_texture_filenames_from_refs();
+	_notify_terrain_changed();
+}
+
+Ref<Texture2D> NovaTerrainData::get_colormap() const { return colormap; }
+
+IMPL_TEX_PROP(detailmap, set_detailmap, get_detailmap)
+IMPL_TEX_PROP(detailmap_c1, set_detailmap_c1, get_detailmap_c1)
+IMPL_TEX_PROP(detailmap_c2, set_detailmap_c2, get_detailmap_c2)
+IMPL_TEX_PROP(detailmap_c3, set_detailmap_c3, get_detailmap_c3)
+IMPL_TEX_PROP(detailmap2, set_detailmap2, get_detailmap2)
+IMPL_TEX_PROP(detailmapdist, set_detailmapdist, get_detailmapdist)
+IMPL_TEX_PROP(detailmapdist2, set_detailmapdist2, get_detailmapdist2)
+IMPL_TEX_PROP(detailblendmap, set_detailblendmap, get_detailblendmap)
+IMPL_TEX_PROP(charmap_tex, set_charmap_tex, get_charmap_tex)
+IMPL_TEX_PROP(foliagemap_tex, set_foliagemap_tex, get_foliagemap_tex)
+IMPL_TEX_PROP(tilestrip_tex, set_tilestrip_tex, get_tilestrip_tex)
+
+void NovaTerrainData::set_detail_density(int p_val) { detail_density = p_val; _notify_terrain_changed(); }
+int NovaTerrainData::get_detail_density() const { return detail_density; }
+void NovaTerrainData::set_detail_density2(int p_val) { detail_density2 = p_val; _notify_terrain_changed(); }
+int NovaTerrainData::get_detail_density2() const { return detail_density2; }
+void NovaTerrainData::set_sector_count(int p_val) { sector_count = p_val; _notify_terrain_changed(); }
+int NovaTerrainData::get_sector_count() const { return sector_count; }
+void NovaTerrainData::set_sector_rows(int p_val) { sector_rows = p_val; _notify_terrain_changed(); }
+int NovaTerrainData::get_sector_rows() const { return sector_rows; }
+void NovaTerrainData::set_origin_x(int p_val) { origin_x = p_val; _notify_terrain_changed(); }
+int NovaTerrainData::get_origin_x() const { return origin_x; }
+void NovaTerrainData::set_origin_y(int p_val) { origin_y = p_val; _notify_terrain_changed(); }
+int NovaTerrainData::get_origin_y() const { return origin_y; }
+void NovaTerrainData::set_water_height(int p_val) { water_height = p_val; _notify_terrain_changed(); }
+int NovaTerrainData::get_water_height() const { return water_height; }
+void NovaTerrainData::set_wrap_x(bool p_val) { wrap_x = p_val; _notify_terrain_changed(); }
+bool NovaTerrainData::get_wrap_x() const { return wrap_x; }
+void NovaTerrainData::set_wrap_y(bool p_val) { wrap_y = p_val; _notify_terrain_changed(); }
+bool NovaTerrainData::get_wrap_y() const { return wrap_y; }
+void NovaTerrainData::set_horizon(double p_val) { horizon = p_val; _notify_terrain_changed(); }
+double NovaTerrainData::get_horizon() const { return horizon; }
+void NovaTerrainData::set_sector_grid(const PackedInt32Array &p_grid) {
+	sector_grid.resize(256);
+	for (int i = 0; i < 256; i++) {
+		sector_grid.set(i, i < p_grid.size() ? p_grid[i] : 0);
+	}
+	_notify_terrain_changed();
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+String NovaTerrainData::_texture_to_filename(const Ref<Texture2D> &p_tex) {
+	if (p_tex.is_null()) return "";
+	String path = p_tex->get_path();
+	if (path.is_empty()) return "";
+	return path.get_file();
+}
+
+void NovaTerrainData::_invalidate_colormap_cpu_cache() const {
+	colormap_cpu_image.unref();
+	colormap_cpu_width = 0;
+	colormap_cpu_height = 0;
+}
+
+bool NovaTerrainData::_ensure_colormap_cpu_cache() const {
+	if (colormap_cpu_image.is_valid() && colormap_cpu_width > 0 && colormap_cpu_height > 0) {
+		return true;
+	}
+	if (colormap.is_null()) {
+		return false;
+	}
+
+	Ref<Image> image = colormap->get_image();
+	if (image.is_null() || image->is_empty()) {
+		return false;
+	}
+	if (image->is_compressed()) {
+		const Error err = image->decompress();
+		if (err != OK) {
+			return false;
+		}
+	}
+	if (image->get_format() != Image::FORMAT_RGBA8) {
+		image->convert(Image::FORMAT_RGBA8);
+	}
+	colormap_cpu_width = image->get_width();
+	colormap_cpu_height = image->get_height();
+	if (colormap_cpu_width <= 0 || colormap_cpu_height <= 0) {
+		_invalidate_colormap_cpu_cache();
+		return false;
+	}
+	colormap_cpu_image = image;
+	return true;
+}
+
+static void _sync_texture_filename(const Ref<Texture2D> &texture, std::string &target_field) {
+	if (texture.is_null()) {
+		return;
+	}
+	String path = texture->get_path();
+	if (path.is_empty()) {
+		return;
+	}
+	const String filename = path.get_file();
+	if (!filename.is_empty()) {
+		target_field = filename.utf8().get_data();
+	}
+}
+
+// Sync Godot scalar properties (name, sector grid, water, wrap, etc.) into
+// the underlying TrnConfig. Always safe to run — does not touch texture
+// filename fields, which are either (a) owned by Ref<Texture2D> setters
+// (covered by _sync_trn_texture_filenames_from_refs below), or (b) set
+// explicitly via set_trn_texture_filename().
+void NovaTerrainData::_sync_trn_scalars_from_properties() {
+	trn.name = terrain_name.utf8().get_data();
+	trn.detail_density = detail_density;
+	trn.detail_density2 = detail_density2;
+	trn.sector_count = sector_count;
+	trn.sector_rows = sector_rows;
+	trn.origin_x = origin_x;
+	trn.origin_y = origin_y;
+	trn.water_height = water_height;
+	trn.wrap_x = wrap_x ? 1 : 0;
+	trn.wrap_y = wrap_y ? 1 : 0;
+	trn.horizon = horizon;
+	for (int gz = 0; gz < 16; gz++) {
+		for (int gx = 0; gx < 16; gx++) {
+			const int idx = gz * 16 + gx;
+			trn.sector_grid[gz][gx] = idx < sector_grid.size() ? sector_grid[idx] : 0;
+		}
+	}
+}
+
+// Re-derive texture filename fields from the Ref<Texture2D> paths. Only
+// called from IMPL_TEX_PROP setters — running this elsewhere would
+// silently overwrite filenames that set_trn_texture_filename had
+// explicitly set (the Ref still carries its source path even after the
+// user asked for a new export name).
+void NovaTerrainData::_sync_trn_texture_filenames_from_refs() {
+	_sync_texture_filename(colormap, trn.colormap);
+	_sync_texture_filename(detailmap, trn.detailmap);
+	_sync_texture_filename(detailmap_c1, trn.detailmap_c1);
+	_sync_texture_filename(detailmap_c2, trn.detailmap_c2);
+	_sync_texture_filename(detailmap_c3, trn.detailmap_c3);
+	_sync_texture_filename(detailmap2, trn.detailmap2);
+	_sync_texture_filename(detailmapdist, trn.detailmapdist);
+	_sync_texture_filename(detailmapdist2, trn.detailmapdist2);
+	_sync_texture_filename(detailblendmap, trn.detailblendmap);
+	// PCX-backed slot filenames are owned by import/reset paths because their
+	// preview textures are generated in memory and do not carry resource paths.
+	_sync_texture_filename(tilestrip_tex, trn.tilestrip);
+}
+
+void NovaTerrainData::_notify_terrain_changed() {
+	// Always sync scalars — cheap and needed so `trn` stays consistent for
+	// saves. Deliberately DO NOT sync texture filenames here: that would
+	// clobber filenames set via set_trn_texture_filename (e.g. Save Project's
+	// rename-from-imported-to-exported step). Texture Ref setters call the
+	// filename sync themselves.
+	_sync_trn_scalars_from_properties();
+	emit_signal("terrain_changed");
+	emit_changed();
+}
+
+// ---------------------------------------------------------------------------
+// Texture loading helper — delegates to shared util/texture_loader.h
+// ---------------------------------------------------------------------------
+
+static Ref<Texture2D> _load_texture_from_dir(const String &dir, const String &filename) {
+	return opennova::load_texture_from_dir(dir, filename);
+}
+
+// ---------------------------------------------------------------------------
+// Load
+// ---------------------------------------------------------------------------
+
+Error NovaTerrainData::load() {
+	loaded = false;
+	cpt = opennova::CptFile();
+	trn = opennova::TrnConfig();
+
+	if (trn_path.is_empty()) {
+		UtilityFunctions::printerr("NovaTerrainData: trn_path must be set before loading");
+		return ERR_INVALID_PARAMETER;
+	}
+
+	// Read TRN via Godot FileAccess (works in editor and exported builds)
+	Ref<FileAccess> trn_file = FileAccess::open(trn_path, FileAccess::READ);
+	if (trn_file.is_null()) {
+		UtilityFunctions::printerr("NovaTerrainData: Cannot open TRN: ", trn_path);
+		return ERR_FILE_CANT_READ;
+	}
+	std::string trn_content = trn_file->get_as_text().utf8().get_data();
+	trn_file.unref();
+
+	std::string error;
+	std::istringstream trn_stream(trn_content);
+	if (!opennova::load_trn(trn_stream, trn, error)) {
+		UtilityFunctions::printerr("NovaTerrainData: TRN parse failed: ", error.c_str());
+		return ERR_FILE_CANT_READ;
+	}
+
+	// Sync scalar properties from parsed TRN
+	terrain_name = String(trn.name.c_str());
+	detail_density = trn.detail_density;
+	detail_density2 = trn.detail_density2;
+	sector_count = trn.sector_count;
+	sector_rows = trn.sector_rows > 0 ? trn.sector_rows : trn.sector_count;
+	origin_x = trn.origin_x;
+	origin_y = trn.origin_y;
+	water_height = trn.water_height;
+	wrap_x = trn.wrap_x != 0;
+	wrap_y = trn.wrap_y != 0;
+	horizon = trn.horizon;
+	sector_grid.resize(256);
+	for (int gz = 0; gz < 16; gz++) {
+		for (int gx = 0; gx < 16; gx++) {
+			sector_grid.set(gz * 16 + gx, trn.sector_grid[gz][gx]);
+		}
+	}
+
+	// Load textures from TRN filenames → Texture2D resources
+	String trn_dir = trn_path.get_base_dir();
+	const String charmap_filename = String(trn.charmap.c_str());
+	const String foliagemap_filename = String(trn.foliagemap.c_str());
+	const String tilestrip_filename = String(trn.tilestrip.c_str());
+	colormap = _load_texture_from_dir(trn_dir, String(trn.colormap.c_str()));
+	detailmap = _load_texture_from_dir(trn_dir, String(trn.detailmap.c_str()));
+	detailmap_c1 = _load_texture_from_dir(trn_dir, String(trn.detailmap_c1.c_str()));
+	detailmap_c2 = _load_texture_from_dir(trn_dir, String(trn.detailmap_c2.c_str()));
+	detailmap_c3 = _load_texture_from_dir(trn_dir, String(trn.detailmap_c3.c_str()));
+	detailmap2 = _load_texture_from_dir(trn_dir, String(trn.detailmap2.c_str()));
+	detailmapdist = _load_texture_from_dir(trn_dir, String(trn.detailmapdist.c_str()));
+	detailmapdist2 = _load_texture_from_dir(trn_dir, String(trn.detailmapdist2.c_str()));
+	detailblendmap = _load_texture_from_dir(trn_dir, String(trn.detailblendmap.c_str()));
+	for (const char* slot : {"charmap", "foliagemap"}) {
+		String slot_id(slot);
+		String filename = (slot_id == "charmap")
+			? charmap_filename
+			: foliagemap_filename;
+		String resolved = opennova::resolve_texture_path(trn_dir, filename);
+		if (!resolved.is_empty()) {
+			Error err = import_pcx_slot(slot_id, resolved);
+			if (err != OK) {
+				UtilityFunctions::push_warning(
+					"NovaTerrainData: failed to import ", slot_id,
+					" from '", resolved, "' (error ", err, "); resetting slot to default");
+				reset_pcx_slot_default(slot_id, 1024, 1024);
+			}
+		} else {
+			if (!filename.is_empty())
+				UtilityFunctions::push_warning("NovaTerrainData: ", slot_id, " not found for '", filename, "' under ", trn_dir);
+			reset_pcx_slot_default(slot_id, 1024, 1024);
+		}
+	}
+	tilestrip_tex = _load_texture_from_dir(trn_dir, tilestrip_filename);
+	trn.tilestrip = tilestrip_filename.utf8().get_data();
+	_invalidate_colormap_cpu_cache();
+
+	// CPT is an export-time bake artefact; editor projects legitimately save
+	// a .trn without one (see plan: "Make CPT optional"). Missing/empty
+	// polydata is not an error — load() still succeeds, cpt stays empty, and
+	// consumers that need CPT (NovaTerrain::_build_terrain @ nova_terrain.cpp:571,
+	// get_height* guards @ nova_terrain_data.cpp:714/739/758) already early-out
+	// gracefully.
+	if (trn.polydata.empty()) {
+		loaded = true;
+		UtilityFunctions::print("NovaTerrainData: Loaded terrain '", terrain_name,
+			"' (no CPT — editor project mode)");
+		return OK;
+	}
+
+	String cpt_path = trn_dir.path_join(String(trn.polydata.c_str()));
+	Ref<FileAccess> cpt_file = FileAccess::open(cpt_path, FileAccess::READ);
+	if (cpt_file.is_null()) {
+		loaded = true;
+		UtilityFunctions::push_warning("NovaTerrainData: CPT '", cpt_path,
+			"' missing; continuing without baked terrain (run Export to generate it)");
+		return OK;
+	}
+	PackedByteArray cpt_bytes = cpt_file->get_buffer(cpt_file->get_length());
+	cpt_file.unref();
+
+	if (!opennova::load_cpt(cpt_bytes.ptr(), cpt_bytes.size(), cpt, error)) {
+		UtilityFunctions::printerr("NovaTerrainData: CPT parse failed: ", error.c_str());
+		return ERR_FILE_CANT_READ;
+	}
+
+	loaded = true;
+
+	UtilityFunctions::print("NovaTerrainData: Loaded terrain '", terrain_name,
+		"' — ", static_cast<int>(cpt.tiles.size()), " tiles, depth buffer ",
+		static_cast<int>(cpt.depth_buffer.size()), " pixels");
+
+	return OK;
+}
+
+bool NovaTerrainData::is_loaded() const {
+	return loaded;
+}
+
+PackedByteArray NovaTerrainData::get_depth_raw16() const {
+	PackedByteArray out;
+	if (cpt.depth_buffer.empty()) {
+		return out;
+	}
+
+	out.resize(static_cast<int64_t>(cpt.depth_buffer.size() * 2u));
+	uint8_t *dst = out.ptrw();
+	for (size_t i = 0; i < cpt.depth_buffer.size(); ++i) {
+		const uint16_t value = cpt.depth_buffer[i];
+		dst[i * 2u] = static_cast<uint8_t>(value & 0xFFu);
+		dst[i * 2u + 1u] = static_cast<uint8_t>((value >> 8u) & 0xFFu);
+	}
+	return out;
+}
+
+float NovaTerrainData::get_height(const Vector3 &p_world_pos) const {
+	if (!loaded || cpt.depth_buffer.empty()) return 0.0f;
+
+	// Port of gobj_trn_sample_height_bilinear (0x100314A1)
+	int hm_size = (int)std::sqrt((double)cpt.depth_buffer.size());
+	if (hm_size <= 0) return 0.0f;
+	int mask = hm_size - 1;
+	int ix = (int)std::floor(p_world_pos.x);
+	int iz = (int)std::floor(p_world_pos.z);
+	float fx = p_world_pos.x - (float)ix;
+	float fz = p_world_pos.z - (float)iz;
+	int x0 = ix & mask, x1 = (ix + 1) & mask;
+	int z0 = iz & mask, z1 = (iz + 1) & mask;
+	float h00 = (float)cpt.depth_buffer[z0 * hm_size + x0];
+	float h10 = (float)cpt.depth_buffer[z0 * hm_size + x1];
+	float h01 = (float)cpt.depth_buffer[z1 * hm_size + x0];
+	float h11 = (float)cpt.depth_buffer[z1 * hm_size + x1];
+	float top = h00 + (h10 - h00) * fx;
+	float bot = h01 + (h11 - h01) * fx;
+	return (top + (bot - top) * fz) / 256.0f;
+}
+
+float NovaTerrainData::get_height_world(const Vector3 &p_world_pos) const {
+	// Engine: jodemo.exe terrain world->heightmap mapping used by
+	// Terrain_SampleHeightBilinear@0x5C6770 and Terrain_GetFoliageMapValue@0x5C65E0
+	// docs/engine_spec_terrain.md 5.2, docs/engine_spec_foliage.md 4.4.4
+	if (!loaded || cpt.depth_buffer.empty()) {
+		return 0.0f;
+	}
+
+	TerrainWorldSample sample;
+	if (!resolve_world_sample(trn, p_world_pos.x, p_world_pos.z, sample)) {
+		return 0.0f;
+	}
+
+	const int hm_size = 1024;
+	const int mask = hm_size - 1;
+	const int hx = static_cast<int>(std::floor(sample.source_x)) & mask;
+	const int hz = static_cast<int>(std::floor(sample.source_z)) & mask;
+	return cpt.depth_buffer[hz * hm_size + hx] / 256.0f;
+}
+
+float NovaTerrainData::get_height_world_bilinear(const Vector3 &p_world_pos) const {
+	// Engine: jodemo.exe Terrain_SampleHeightBilinear@0x5C6770
+	// docs/engine_spec_terrain.md 5.2
+	if (!loaded || cpt.depth_buffer.empty()) {
+		return 0.0f;
+	}
+
+	TerrainWorldSample sample;
+	if (!resolve_world_sample(trn, p_world_pos.x, p_world_pos.z, sample)) {
+		return 0.0f;
+	}
+
+	const int hm_size = 1024;
+	const int mask = hm_size - 1;
+	const int ix = static_cast<int>(std::floor(sample.source_x));
+	const int iz = static_cast<int>(std::floor(sample.source_z));
+	const float fx = sample.source_x - static_cast<float>(ix);
+	const float fz = sample.source_z - static_cast<float>(iz);
+	const int x0 = ix & mask;
+	const int x1 = (ix + 1) & mask;
+	const int z0 = iz & mask;
+	const int z1 = (iz + 1) & mask;
+	const float h00 = static_cast<float>(cpt.depth_buffer[z0 * hm_size + x0]);
+	const float h10 = static_cast<float>(cpt.depth_buffer[z0 * hm_size + x1]);
+	const float h01 = static_cast<float>(cpt.depth_buffer[z1 * hm_size + x0]);
+	const float h11 = static_cast<float>(cpt.depth_buffer[z1 * hm_size + x1]);
+	const float top = h00 + (h10 - h00) * fx;
+	const float bot = h01 + (h11 - h01) * fx;
+	return (top + (bot - top) * fz) / 256.0f;
+}
+
+Color NovaTerrainData::get_colormap_color_world(float world_x, float world_z) const {
+	// Engine: Terrain_GetModulatedColorAtPos@0x005C5FE0 indexes the colormap
+	// directly as x & 0x3FF, (-z) & 0x3FF. It does not go through sector-grid
+	// quadrant remapping; Foliage_BuildGeometry@0x005BF5F0 passes world fixed
+	// coords to it when baking foliage vertex colors.
+	if (!_ensure_colormap_cpu_cache()) {
+		return Color(1.0f, 1.0f, 1.0f, 1.0f);
+	}
+
+	const int x = static_cast<int>(std::floor(world_x));
+	const int z = static_cast<int>(std::floor(-world_z));
+	const int sample_x = ((x % colormap_cpu_width) + colormap_cpu_width) % colormap_cpu_width;
+	const int sample_z = ((z % colormap_cpu_height) + colormap_cpu_height) % colormap_cpu_height;
+	return colormap_cpu_image->get_pixel(sample_x, sample_z);
+}
+
+Color NovaTerrainData::get_modulated_colormap_color_world(float world_x,
+                                                          float world_z,
+                                                          const Color &light_color) const {
+	auto to_byte = [](float value) -> uint32_t {
+		return static_cast<uint32_t>(std::clamp(static_cast<int>(std::lround(value * 255.0f)), 0, 255));
+	};
+	const Color base = get_colormap_color_world(world_x, world_z);
+	const uint32_t base_argb = (to_byte(base.a) << 24) | (to_byte(base.r) << 16) |
+	                           (to_byte(base.g) << 8) | to_byte(base.b);
+	const uint32_t light_argb = 0xFF000000u | (to_byte(light_color.r) << 16) |
+	                            (to_byte(light_color.g) << 8) | to_byte(light_color.b);
+	const uint32_t modulated = opennova::terrain::terrain_modulate_color_argb(base_argb, light_argb);
+	return Color(static_cast<float>((modulated >> 16) & 0xFFu) / 255.0f,
+	             static_cast<float>((modulated >> 8) & 0xFFu) / 255.0f,
+	             static_cast<float>(modulated & 0xFFu) / 255.0f,
+	             static_cast<float>((modulated >> 24) & 0xFFu) / 255.0f);
+}
+
+int NovaTerrainData::get_tile_count() const {
+	return static_cast<int>(cpt.tiles.size());
+}
+
+int NovaTerrainData::get_foliage_index_world(float world_x, float world_z) const {
+	// Engine sub_5C65E0 (Terrain_GetFoliageMapValue) analogue. Uses the same
+	// sector+origin+quadrant math as get_height_world_bilinear — the sector
+	// grid is always 16×16; origin places the active region inside it with a
+	// wraparound mask on the lookup.
+	if (!loaded || foliage_map_resource.is_null()) {
+		return 0;
+	}
+
+	TerrainWorldSample sample;
+	if (!resolve_world_sample(trn, world_x, world_z, sample)) {
+		return 0;
+	}
+
+	const int w = foliage_map_resource->get_width();
+	const int h = foliage_map_resource->get_height();
+	if (w <= 0 || h <= 0) {
+		return 0;
+	}
+	const int map_x = foliage_map_resource->map_x_from_heightmap_x(sample.source_x);
+	const int map_y = foliage_map_resource->map_y_from_heightmap_y(sample.source_z);
+	if (map_x < 0 || map_x >= w || map_y < 0 || map_y >= h) {
+		return 0;
+	}
+	return static_cast<int>(foliage_map_resource->get_index(map_x, map_y));
+}
+
+Dictionary NovaTerrainData::load_foliage_indices() const {
+	Dictionary result;
+	if (foliagemap_width <= 0 || foliagemap_height <= 0 ||
+	    foliagemap_indices.size() < static_cast<size_t>(foliagemap_width * foliagemap_height)) {
+		return result;
+	}
+
+	PackedByteArray data;
+	data.resize(static_cast<int64_t>(foliagemap_indices.size()));
+	std::memcpy(data.ptrw(), foliagemap_indices.data(), foliagemap_indices.size());
+
+	PackedByteArray palette;
+	palette.resize(256 * 3);
+	std::memcpy(palette.ptrw(), foliagemap_palette, sizeof(foliagemap_palette));
+
+	result["data"] = data;
+	result["width"] = foliagemap_width;
+	result["height"] = foliagemap_height;
+	result["palette"] = palette;
+	return result;
+}
+
+PackedInt32Array NovaTerrainData::get_sector_grid() const {
+	return sector_grid;
+}
+
+Ref<NovaTerrainFoliageMap> NovaTerrainData::get_foliage_map() const {
+	if (foliage_map_resource.is_null()) {
+		const_cast<NovaTerrainData *>(this)->_sync_foliage_map_resource_from_slot();
+	}
+	return foliage_map_resource;
+}
+
+void NovaTerrainData::set_foliage_map(const Ref<NovaTerrainFoliageMap> &p_map) {
+	if (p_map.is_null()) {
+		_apply_foliage_map_to_slot(
+				opennova::foliage_make_default_map(opennova::FOLIAGE_HEIGHTMAP_SIZE, opennova::FOLIAGE_HEIGHTMAP_SIZE, 0));
+		foliage_map_resource.unref();
+	} else {
+		_apply_foliage_map_to_slot(p_map->to_native());
+		foliage_map_resource = p_map;
+	}
+	_notify_terrain_changed();
+}
+
+Array NovaTerrainData::get_foliage_defs() const {
+	Array arr;
+	for (const auto& def : trn.foliage_defs) {
+		arr.push_back(foliage_def_to_object(def));
+	}
+	return arr;
+}
+
+void NovaTerrainData::set_foliage_defs(const Array &p_defs) {
+	trn.foliage_defs.clear();
+	int count = p_defs.size();
+	if (count > opennova::FOLIAGE_MAX_DEFS) count = opennova::FOLIAGE_MAX_DEFS;
+	for (int i = 0; i < count; i++) {
+		opennova::FoliageDef def;
+		if (foliage_def_from_variant(p_defs[i], def)) {
+			trn.foliage_defs.push_back(opennova::foliage_normalize_def(def));
+		}
+	}
+	_notify_terrain_changed();
+}
+
+void NovaTerrainData::set_trn_texture_filename(const String &slot_id, const String &filename) {
+	const std::string native = filename.utf8().get_data();
+	if (slot_id == "colormap") trn.colormap = native;
+	else if (slot_id == "detailmap") trn.detailmap = native;
+	else if (slot_id == "detailmap_c1") trn.detailmap_c1 = native;
+	else if (slot_id == "detailmap_c2") trn.detailmap_c2 = native;
+	else if (slot_id == "detailmap_c3") trn.detailmap_c3 = native;
+	else if (slot_id == "detailmap2") trn.detailmap2 = native;
+	else if (slot_id == "detailmapdist") trn.detailmapdist = native;
+	else if (slot_id == "detailmapdist2") trn.detailmapdist2 = native;
+	else if (slot_id == "detailblendmap") trn.detailblendmap = native;
+	else if (slot_id == "charmap") trn.charmap = native;
+	else if (slot_id == "foliagemap") trn.foliagemap = native;
+	else if (slot_id == "tilestrip") trn.tilestrip = native;
+	else {
+		UtilityFunctions::push_error("NovaTerrainData: unknown TRN texture field '", slot_id, "'");
+		return;
+	}
+	_notify_terrain_changed();
+}
+
+String NovaTerrainData::get_trn_texture_filename(const String &slot_id) const {
+	if (slot_id == "colormap") return String(trn.colormap.c_str());
+	if (slot_id == "detailmap") return String(trn.detailmap.c_str());
+	if (slot_id == "detailmap_c1") return String(trn.detailmap_c1.c_str());
+	if (slot_id == "detailmap_c2") return String(trn.detailmap_c2.c_str());
+	if (slot_id == "detailmap_c3") return String(trn.detailmap_c3.c_str());
+	if (slot_id == "detailmap2") return String(trn.detailmap2.c_str());
+	if (slot_id == "detailmapdist") return String(trn.detailmapdist.c_str());
+	if (slot_id == "detailmapdist2") return String(trn.detailmapdist2.c_str());
+	if (slot_id == "detailblendmap") return String(trn.detailblendmap.c_str());
+	if (slot_id == "charmap") return String(trn.charmap.c_str());
+	if (slot_id == "foliagemap") return String(trn.foliagemap.c_str());
+	if (slot_id == "tilestrip") return String(trn.tilestrip.c_str());
+	return "";
+}
+
+void NovaTerrainData::set_polydata_filename(const String &filename) {
+	trn.polydata = filename.utf8().get_data();
+	_notify_terrain_changed();
+}
+
+String NovaTerrainData::get_polydata_filename() const {
+	return String(trn.polydata.c_str());
+}
+
+void NovaTerrainData::set_tileinfo_filename(const String &filename) {
+	trn.tileinfo = filename.utf8().get_data();
+	tileinfo_resource_cache.unref();
+	tileinfo_resource_cache_path = String();
+	_notify_terrain_changed();
+}
+
+String NovaTerrainData::get_tileinfo_filename() const {
+	return String(trn.tileinfo.c_str());
+}
+
+Ref<NovaTerrainTileInfo> NovaTerrainData::get_tileinfo_resource() const {
+	const String filename = String(trn.tileinfo.c_str());
+	if (filename.is_empty() || trn_path.is_empty()) {
+		tileinfo_resource_cache.unref();
+		tileinfo_resource_cache_path = String();
+		return Ref<NovaTerrainTileInfo>();
+	}
+
+	const String resolved = opennova::resolve_texture_path(trn_path.get_base_dir(), filename);
+	const String lookup = resolved.is_empty() ? trn_path.get_base_dir().path_join(filename) : resolved;
+
+	if (tileinfo_resource_cache.is_valid() && tileinfo_resource_cache_path == lookup) {
+		return tileinfo_resource_cache;
+	}
+
+	Ref<FileAccess> file = FileAccess::open(lookup, FileAccess::READ);
+	if (file.is_null()) {
+		UtilityFunctions::push_warning("NovaTerrainData: tileinfo file not found at ", lookup);
+		tileinfo_resource_cache.unref();
+		tileinfo_resource_cache_path = String();
+		return Ref<NovaTerrainTileInfo>();
+	}
+
+	PackedByteArray bytes = file->get_buffer(file->get_length());
+	file.unref();
+
+	opennova::TilFile til;
+	std::string error;
+	if (!opennova::load_til(bytes.ptr(), static_cast<size_t>(bytes.size()), til, error)) {
+		UtilityFunctions::push_warning("NovaTerrainData: tileinfo parse failed for ",
+			lookup, ": ", String(error.c_str()));
+		tileinfo_resource_cache.unref();
+		tileinfo_resource_cache_path = String();
+		return Ref<NovaTerrainTileInfo>();
+	}
+
+	Ref<NovaTerrainTileInfo> resource;
+	resource.instantiate();
+	resource->copy_from_native(til);
+	tileinfo_resource_cache = resource;
+	tileinfo_resource_cache_path = lookup;
+	return resource;
+}

@@ -4,12 +4,12 @@
 #include "threedi/threedi_ir.h"
 #include "threedi/threedi_panm.h"
 
-#include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
+#include "common/test_expect.h"
 #include "common/test_paths.h"
 
 static void copy_str(char *dst, size_t n, const char *src) {
@@ -111,80 +111,80 @@ int main() {
     std::snprintf(tmp_path, sizeof(tmp_path), "%s%ctdp_roundtrip_test.3dp",
                   test_paths_temp_dir(), TEST_PATHS_SEP);
     int rc = tdp_write(tmp_path, &src);
-    assert(rc == 0 && "tdp_write failed");
+    TEST_EXPECT(rc == 0 && "tdp_write failed");
 
     // Parse back
     TdpProject dst;
     rc = tdp_parse(tmp_path, &dst);
-    assert(rc == 0 && "tdp_parse failed");
+    TEST_EXPECT(rc == 0 && "tdp_parse failed");
 
     // Verify header
-    assert(dst.version == src.version);
-    assert(dst.poly_collision_lod == src.poly_collision_lod);
+    TEST_EXPECT(dst.version == src.version);
+    TEST_EXPECT(dst.poly_collision_lod == src.poly_collision_lod);
 
     // Verify materials
-    assert(dst.material_count == src.material_count);
+    TEST_EXPECT(dst.material_count == src.material_count);
     for (size_t i = 0; i < src.material_count; ++i) {
         const TdpMaterial *s = &src.materials[i];
         const TdpMaterial *d = &dst.materials[i];
-        assert(std::strcmp(s->name, d->name) == 0);
-        assert(std::strcmp(s->shader_tag, d->shader_tag) == 0);
-        assert(s->ptype == d->ptype);
-        assert(s->alphatestvalue == d->alphatestvalue);
-        assert(std::strcmp(s->diffuse_tex[0], d->diffuse_tex[0]) == 0);
-        assert(std::strcmp(s->diffuse_tex[1], d->diffuse_tex[1]) == 0);
-        assert(std::strcmp(s->normal_tex[0], d->normal_tex[0]) == 0);
-        assert(s->diffuse_flags[1] == d->diffuse_flags[1]);
-        assert(s->reflect_rgb[0] == d->reflect_rgb[0]);
-        assert(s->reflect_rgb[1] == d->reflect_rgb[1]);
-        assert(s->reflect_rgb[2] == d->reflect_rgb[2]);
-        assert(s->rgbgen_style == d->rgbgen_style);
-        assert(float_eq(s->rgbgen_rate, d->rgbgen_rate));
-        assert(float_eq(s->rgbgen_phase, d->rgbgen_phase));
-        assert(s->rgbgen_srgb[0] == d->rgbgen_srgb[0]);
-        assert(s->rgbgen_ergb[2] == d->rgbgen_ergb[2]);
-        assert(s->alphagen_style == d->alphagen_style);
-        assert(float_eq(s->alphagen_rate, d->alphagen_rate));
+        TEST_EXPECT(std::strcmp(s->name, d->name) == 0);
+        TEST_EXPECT(std::strcmp(s->shader_tag, d->shader_tag) == 0);
+        TEST_EXPECT(s->ptype == d->ptype);
+        TEST_EXPECT(s->alphatestvalue == d->alphatestvalue);
+        TEST_EXPECT(std::strcmp(s->diffuse_tex[0], d->diffuse_tex[0]) == 0);
+        TEST_EXPECT(std::strcmp(s->diffuse_tex[1], d->diffuse_tex[1]) == 0);
+        TEST_EXPECT(std::strcmp(s->normal_tex[0], d->normal_tex[0]) == 0);
+        TEST_EXPECT(s->diffuse_flags[1] == d->diffuse_flags[1]);
+        TEST_EXPECT(s->reflect_rgb[0] == d->reflect_rgb[0]);
+        TEST_EXPECT(s->reflect_rgb[1] == d->reflect_rgb[1]);
+        TEST_EXPECT(s->reflect_rgb[2] == d->reflect_rgb[2]);
+        TEST_EXPECT(s->rgbgen_style == d->rgbgen_style);
+        TEST_EXPECT(float_eq(s->rgbgen_rate, d->rgbgen_rate));
+        TEST_EXPECT(float_eq(s->rgbgen_phase, d->rgbgen_phase));
+        TEST_EXPECT(s->rgbgen_srgb[0] == d->rgbgen_srgb[0]);
+        TEST_EXPECT(s->rgbgen_ergb[2] == d->rgbgen_ergb[2]);
+        TEST_EXPECT(s->alphagen_style == d->alphagen_style);
+        TEST_EXPECT(float_eq(s->alphagen_rate, d->alphagen_rate));
         // alphagen_start/end are written as %i (truncated to int), so roundtrip loses fractional part
-        assert(float_eq(d->alphagen_start, static_cast<float>(static_cast<int>(s->alphagen_start))));
-        assert(float_eq(d->alphagen_end, static_cast<float>(static_cast<int>(s->alphagen_end))));
+        TEST_EXPECT(float_eq(d->alphagen_start, static_cast<float>(static_cast<int>(s->alphagen_start))));
+        TEST_EXPECT(float_eq(d->alphagen_end, static_cast<float>(static_cast<int>(s->alphagen_end))));
         // normaltex sentinel
-        assert(std::strcmp(s->normal_tex[0], d->normal_tex[0]) == 0);
-        assert(std::strcmp(s->normal_tex[1], d->normal_tex[1]) == 0);
-        assert(s->mapfunc_u_style == d->mapfunc_u_style);
-        assert(float_eq(s->mapfunc_u_rate, d->mapfunc_u_rate));
-        assert(s->mapfunc_v_style == d->mapfunc_v_style);
-        assert(float_eq(s->mapfunc_v_end, d->mapfunc_v_end));
+        TEST_EXPECT(std::strcmp(s->normal_tex[0], d->normal_tex[0]) == 0);
+        TEST_EXPECT(std::strcmp(s->normal_tex[1], d->normal_tex[1]) == 0);
+        TEST_EXPECT(s->mapfunc_u_style == d->mapfunc_u_style);
+        TEST_EXPECT(float_eq(s->mapfunc_u_rate, d->mapfunc_u_rate));
+        TEST_EXPECT(s->mapfunc_v_style == d->mapfunc_v_style);
+        TEST_EXPECT(float_eq(s->mapfunc_v_end, d->mapfunc_v_end));
     }
 
     // Verify LOD 0
     const TdpLod *sl = &src.lods[0];
     const TdpLod *dl = &dst.lods[0];
-    assert(std::strcmp(sl->scene_file, dl->scene_file) == 0);
-    assert(sl->attributes == dl->attributes);
-    assert(std::strcmp(sl->render_function, dl->render_function) == 0);
-    assert(sl->part_anim_enabled == dl->part_anim_enabled);
-    assert(sl->part_anim_count == dl->part_anim_count);
+    TEST_EXPECT(std::strcmp(sl->scene_file, dl->scene_file) == 0);
+    TEST_EXPECT(sl->attributes == dl->attributes);
+    TEST_EXPECT(std::strcmp(sl->render_function, dl->render_function) == 0);
+    TEST_EXPECT(sl->part_anim_enabled == dl->part_anim_enabled);
+    TEST_EXPECT(sl->part_anim_count == dl->part_anim_count);
 
     // Verify part anims
     for (size_t p = 0; p < sl->part_anim_count; ++p) {
         const TdpPartAnim *sp = &sl->part_anims[p];
         const TdpPartAnim *dp = &dl->part_anims[p];
-        assert(sp->transform_as == dp->transform_as);
-        assert(sp->rotate_type == dp->rotate_type);
-        assert(sp->yaw.func_id == dp->yaw.func_id);
-        assert(float_eq(sp->yaw.param0, dp->yaw.param0));
-        assert(float_eq(sp->yaw.param2, dp->yaw.param2));
-        assert(float_eq(sp->yaw.param3, dp->yaw.param3));
+        TEST_EXPECT(sp->transform_as == dp->transform_as);
+        TEST_EXPECT(sp->rotate_type == dp->rotate_type);
+        TEST_EXPECT(sp->yaw.func_id == dp->yaw.func_id);
+        TEST_EXPECT(float_eq(sp->yaw.param0, dp->yaw.param0));
+        TEST_EXPECT(float_eq(sp->yaw.param2, dp->yaw.param2));
+        TEST_EXPECT(float_eq(sp->yaw.param3, dp->yaw.param3));
     }
 
     // Verify lights
-    assert(sl->light_count == dl->light_count);
-    assert(std::strcmp(sl->lights[0].name, dl->lights[0].name) == 0);
-    assert(sl->lights[0].colorgen_style == dl->lights[0].colorgen_style);
-    assert(sl->lights[0].colorgen_start[0] == dl->lights[0].colorgen_start[0]);
-    assert(sl->lights[0].colorgen_start[1] == dl->lights[0].colorgen_start[1]);
-    assert(sl->lights[0].colorgen_end[0] == dl->lights[0].colorgen_end[0]);
+    TEST_EXPECT(sl->light_count == dl->light_count);
+    TEST_EXPECT(std::strcmp(sl->lights[0].name, dl->lights[0].name) == 0);
+    TEST_EXPECT(sl->lights[0].colorgen_style == dl->lights[0].colorgen_style);
+    TEST_EXPECT(sl->lights[0].colorgen_start[0] == dl->lights[0].colorgen_start[0]);
+    TEST_EXPECT(sl->lights[0].colorgen_start[1] == dl->lights[0].colorgen_start[1]);
+    TEST_EXPECT(sl->lights[0].colorgen_end[0] == dl->lights[0].colorgen_end[0]);
 
     // Cleanup
     tdp_free(&src);
@@ -237,61 +237,61 @@ int main() {
 
         TdpProject proj;
         int rc2 = tdp_from_ir(&ir, &proj);
-        assert(rc2 == 0 && "tdp_from_ir failed");
+        TEST_EXPECT(rc2 == 0 && "tdp_from_ir failed");
 
         // Verify flag extraction for PANM 0
         {
             const TdpPartAnim *pa = &proj.lods[0].part_anims[0];
-            assert(pa->rotate_type == 2);
-            assert(pa->scale_type == 1);
-            assert(pa->trans_type == 1);
-            assert(pa->reverse_rotate == 1);
+            TEST_EXPECT(pa->rotate_type == 2);
+            TEST_EXPECT(pa->scale_type == 1);
+            TEST_EXPECT(pa->trans_type == 1);
+            TEST_EXPECT(pa->reverse_rotate == 1);
 
             // Rotation should be populated (rotate_type == 2)
             // rotation_y maps to pitch (rotation_x→yaw, rotation_y→pitch, rotation_z→roll)
-            assert(pa->pitch.func_id == 3);
+            TEST_EXPECT(pa->pitch.func_id == 3);
 
             // Uniform scale: scale_func populated, per-axis NOT
-            assert(pa->scale.func_id == 1);
-            assert(pa->scale_x.func_id == 0);
-            assert(pa->scale_y.func_id == 0);
-            assert(pa->scale_z.func_id == 0);
+            TEST_EXPECT(pa->scale.func_id == 1);
+            TEST_EXPECT(pa->scale_x.func_id == 0);
+            TEST_EXPECT(pa->scale_y.func_id == 0);
+            TEST_EXPECT(pa->scale_z.func_id == 0);
 
             // Translation routed to X only
-            assert(pa->trans_x.func_id == 5);
-            assert(pa->trans_y.func_id == 0);
-            assert(pa->trans_z.func_id == 0);
+            TEST_EXPECT(pa->trans_x.func_id == 5);
+            TEST_EXPECT(pa->trans_y.func_id == 0);
+            TEST_EXPECT(pa->trans_z.func_id == 0);
         }
 
         // Verify flag extraction for PANM 1
         {
             const TdpPartAnim *pa = &proj.lods[0].part_anims[1];
-            assert(pa->rotate_type == 0);
-            assert(pa->scale_type == 2);
-            assert(pa->trans_type == 3);
-            assert(pa->reverse_rotate == 0);
+            TEST_EXPECT(pa->rotate_type == 0);
+            TEST_EXPECT(pa->scale_type == 2);
+            TEST_EXPECT(pa->trans_type == 3);
+            TEST_EXPECT(pa->reverse_rotate == 0);
 
             // No rotation (rotate_type == 0)
-            assert(pa->yaw.func_id == 0);
-            assert(pa->pitch.func_id == 0);
-            assert(pa->roll.func_id == 0);
+            TEST_EXPECT(pa->yaw.func_id == 0);
+            TEST_EXPECT(pa->pitch.func_id == 0);
+            TEST_EXPECT(pa->roll.func_id == 0);
 
             // Per-axis scale
-            assert(pa->scale.func_id == 0);
-            assert(pa->scale_x.func_id == 2);
-            assert(pa->scale_y.func_id == 4);
-            assert(pa->scale_z.func_id == 6);
+            TEST_EXPECT(pa->scale.func_id == 0);
+            TEST_EXPECT(pa->scale_x.func_id == 2);
+            TEST_EXPECT(pa->scale_y.func_id == 4);
+            TEST_EXPECT(pa->scale_z.func_id == 6);
 
             // Translation routed to Z only
-            assert(pa->trans_x.func_id == 0);
-            assert(pa->trans_y.func_id == 0);
-            assert(pa->trans_z.func_id == 7);
+            TEST_EXPECT(pa->trans_x.func_id == 0);
+            TEST_EXPECT(pa->trans_y.func_id == 0);
+            TEST_EXPECT(pa->trans_z.func_id == 7);
         }
 
         // Verify normaltex is empty (not "0")
         for (size_t i = 0; i < proj.material_count; ++i) {
-            assert(proj.materials[i].normal_tex[0][0] == '\0');
-            assert(proj.materials[i].normal_tex[1][0] == '\0');
+            TEST_EXPECT(proj.materials[i].normal_tex[0][0] == '\0');
+            TEST_EXPECT(proj.materials[i].normal_tex[1][0] == '\0');
         }
 
         tdp_free(&proj);
@@ -337,28 +337,28 @@ int main() {
 
         TdpProject proj;
         int rc3 = tdp_from_ir(&ir, &proj);
-        assert(rc3 == 0 && "tdp_from_ir failed");
+        TEST_EXPECT(rc3 == 0 && "tdp_from_ir failed");
 
         const TdpPartAnim *pa = &proj.lods[0].part_anims[0];
-        assert(pa->yaw.func_id == 113);
-        assert(std::strcmp(pa->yaw.ctrl_reg, "VEHICLE_GUNYAW") == 0);
-        assert(pa->yaw.param1 == 0.0f);
+        TEST_EXPECT(pa->yaw.func_id == 113);
+        TEST_EXPECT(std::strcmp(pa->yaw.ctrl_reg, "VEHICLE_GUNYAW") == 0);
+        TEST_EXPECT(pa->yaw.param1 == 0.0f);
 
         // Write and parse back to verify roundtrip
         char tmp2[4096];
         std::snprintf(tmp2, sizeof(tmp2), "%s%ctdp_ctrlreg_test.3dp",
                       test_paths_temp_dir(), TEST_PATHS_SEP);
         int wrc = tdp_write(tmp2, &proj);
-        assert(wrc == 0 && "tdp_write failed");
+        TEST_EXPECT(wrc == 0 && "tdp_write failed");
 
         TdpProject parsed;
         int prc = tdp_parse(tmp2, &parsed);
-        assert(prc == 0 && "tdp_parse failed");
+        TEST_EXPECT(prc == 0 && "tdp_parse failed");
 
         const TdpPartAnim *pa2 = &parsed.lods[0].part_anims[0];
-        assert(pa2->yaw.func_id == 113);
-        assert(std::strcmp(pa2->yaw.ctrl_reg, "VEHICLE_GUNYAW") == 0);
-        assert(pa2->yaw.param1 == 0.0f);
+        TEST_EXPECT(pa2->yaw.func_id == 113);
+        TEST_EXPECT(std::strcmp(pa2->yaw.ctrl_reg, "VEHICLE_GUNYAW") == 0);
+        TEST_EXPECT(pa2->yaw.param1 == 0.0f);
 
         tdp_free(&proj);
         tdp_free(&parsed);
@@ -425,48 +425,48 @@ int main() {
 
         TdpProject proj;
         int rc4 = tdp_from_ir(&ir, &proj);
-        assert(rc4 == 0 && "tdp_from_ir failed");
-        assert(proj.material_count == 1);
+        TEST_EXPECT(rc4 == 0 && "tdp_from_ir failed");
+        TEST_EXPECT(proj.material_count == 1);
 
         const TdpMaterial *dm = &proj.materials[0];
 
         // mapfunc_u_ctrlreg should be resolved (style > 0x70)
-        assert(std::strcmp(dm->mapfunc_u_ctrlreg, "VEHICLE_WHEELS00") == 0);
+        TEST_EXPECT(std::strcmp(dm->mapfunc_u_ctrlreg, "VEHICLE_WHEELS00") == 0);
 
         // mapfunc_v_ctrlreg should be empty (style <= 0x70)
-        assert(dm->mapfunc_v_ctrlreg[0] == '\0');
+        TEST_EXPECT(dm->mapfunc_v_ctrlreg[0] == '\0');
 
         // rgbgen_ctrlreg should be resolved
-        assert(std::strcmp(dm->rgbgen_ctrlreg, "ANIM_CTRL_01") == 0);
+        TEST_EXPECT(std::strcmp(dm->rgbgen_ctrlreg, "ANIM_CTRL_01") == 0);
 
         // alphagen_ctrlreg should be resolved
-        assert(std::strcmp(dm->alphagen_ctrlreg, "VEHICLE_WHEELS00") == 0);
+        TEST_EXPECT(std::strcmp(dm->alphagen_ctrlreg, "VEHICLE_WHEELS00") == 0);
 
         // anim_ctrlreg should be resolved (animation_type == 1)
-        assert(std::strcmp(dm->anim_ctrlreg, "ANIM_CTRL_01") == 0);
+        TEST_EXPECT(std::strcmp(dm->anim_ctrlreg, "ANIM_CTRL_01") == 0);
 
         // rattrib: bit 0 = two-sided, bit 8 = animated (num_frames=4)
-        assert(dm->rattrib == 0x101);
+        TEST_EXPECT(dm->rattrib == 0x101);
 
         // Write and parse back to verify roundtrip
         char tmp3[4096];
         std::snprintf(tmp3, sizeof(tmp3), "%s%ctdp_mat_ctrlreg_test.3dp",
                       test_paths_temp_dir(), TEST_PATHS_SEP);
         int wrc3 = tdp_write(tmp3, &proj);
-        assert(wrc3 == 0 && "tdp_write failed");
+        TEST_EXPECT(wrc3 == 0 && "tdp_write failed");
 
         TdpProject parsed3;
         int prc3 = tdp_parse(tmp3, &parsed3);
-        assert(prc3 == 0 && "tdp_parse failed");
+        TEST_EXPECT(prc3 == 0 && "tdp_parse failed");
 
         const TdpMaterial *pm = &parsed3.materials[0];
-        assert(std::strcmp(pm->mapfunc_u_ctrlreg, "VEHICLE_WHEELS00") == 0);
-        assert(pm->mapfunc_v_ctrlreg[0] == '\0');
-        assert(std::strcmp(pm->rgbgen_ctrlreg, "ANIM_CTRL_01") == 0);
-        assert(std::strcmp(pm->alphagen_ctrlreg, "VEHICLE_WHEELS00") == 0);
-        assert(std::strcmp(pm->anim_ctrlreg, "ANIM_CTRL_01") == 0);
+        TEST_EXPECT(std::strcmp(pm->mapfunc_u_ctrlreg, "VEHICLE_WHEELS00") == 0);
+        TEST_EXPECT(pm->mapfunc_v_ctrlreg[0] == '\0');
+        TEST_EXPECT(std::strcmp(pm->rgbgen_ctrlreg, "ANIM_CTRL_01") == 0);
+        TEST_EXPECT(std::strcmp(pm->alphagen_ctrlreg, "VEHICLE_WHEELS00") == 0);
+        TEST_EXPECT(std::strcmp(pm->anim_ctrlreg, "ANIM_CTRL_01") == 0);
         // bit 0 = two-sided, bit 8 = animated (num_frames > 0)
-        assert(pm->rattrib == 0x101);
+        TEST_EXPECT(pm->rattrib == 0x101);
 
         tdp_free(&proj);
         tdp_free(&parsed3);
@@ -505,11 +505,11 @@ int main() {
 
         TdpProject proj;
         int rc5 = tdp_from_ir(&ir, &proj);
-        assert(rc5 == 0 && "tdp_from_ir failed");
-        assert(proj.material_count == 3);
-        assert(proj.materials[0].ptype == 4);  // Hard Metal
-        assert(proj.materials[1].ptype == 9);  // Dirt
-        assert(proj.materials[2].ptype == 5);  // Cloth
+        TEST_EXPECT(rc5 == 0 && "tdp_from_ir failed");
+        TEST_EXPECT(proj.material_count == 3);
+        TEST_EXPECT(proj.materials[0].ptype == 4);  // Hard Metal
+        TEST_EXPECT(proj.materials[1].ptype == 9);  // Dirt
+        TEST_EXPECT(proj.materials[2].ptype == 5);  // Cloth
 
         // Also verify all defined surface_type mappings
         struct { uint8_t st; int ptype; } mappings[] = {
@@ -531,8 +531,8 @@ int main() {
 
             TdpProject p2;
             int r = tdp_from_ir(&ir2, &p2);
-            assert(r == 0);
-            assert(p2.materials[0].ptype == m.ptype);
+            TEST_EXPECT(r == 0);
+            TEST_EXPECT(p2.materials[0].ptype == m.ptype);
             tdp_free(&p2);
         }
 
@@ -552,8 +552,8 @@ int main() {
 
             TdpProject p3;
             int r = tdp_from_ir(&ir3, &p3);
-            assert(r == 0);
-            assert(p3.materials[0].ptype == 9);
+            TEST_EXPECT(r == 0);
+            TEST_EXPECT(p3.materials[0].ptype == 9);
             tdp_free(&p3);
         }
 
@@ -573,8 +573,8 @@ int main() {
 
             TdpProject p4;
             int r = tdp_from_ir(&ir4, &p4);
-            assert(r == 0);
-            assert(p4.materials[0].ptype == 9);
+            TEST_EXPECT(r == 0);
+            TEST_EXPECT(p4.materials[0].ptype == 9);
             tdp_free(&p4);
         }
 
@@ -648,52 +648,52 @@ int main() {
 
         TdpProject proj;
         int rc6 = tdp_from_ir(&ir, &proj);
-        assert(rc6 == 0 && "tdp_from_ir failed");
-        assert(proj.material_count == 1);
+        TEST_EXPECT(rc6 == 0 && "tdp_from_ir failed");
+        TEST_EXPECT(proj.material_count == 1);
 
         const TdpMaterial *dm = &proj.materials[0];
 
         // Static textures
-        assert(std::strcmp(dm->diffuse_tex[0], "body.pic") == 0);
-        assert(dm->diffuse_flags[0] == 1); // clamped
-        assert(std::strcmp(dm->diffuse_tex[1], "detail.pic") == 0);
-        assert(dm->diffuse_flags[1] == 0);
-        assert(std::strcmp(dm->normal_tex[0], "body_n.pic") == 0);
-        assert(dm->normal_flags[0] == 1); // clamped
-        assert(std::strcmp(dm->normal_tex[1], "detail_n.pic") == 0);
-        assert(dm->normal_flags[1] == 0);
+        TEST_EXPECT(std::strcmp(dm->diffuse_tex[0], "body.pic") == 0);
+        TEST_EXPECT(dm->diffuse_flags[0] == 1); // clamped
+        TEST_EXPECT(std::strcmp(dm->diffuse_tex[1], "detail.pic") == 0);
+        TEST_EXPECT(dm->diffuse_flags[1] == 0);
+        TEST_EXPECT(std::strcmp(dm->normal_tex[0], "body_n.pic") == 0);
+        TEST_EXPECT(dm->normal_flags[0] == 1); // clamped
+        TEST_EXPECT(std::strcmp(dm->normal_tex[1], "detail_n.pic") == 0);
+        TEST_EXPECT(dm->normal_flags[1] == 0);
 
         // Animated diffuse[0] frames
-        assert(std::strcmp(dm->anim_diffuse[0][0].path, "anim0.pic") == 0);
-        assert(dm->anim_diffuse[0][0].enabled == 0); // not clamped
-        assert(std::strcmp(dm->anim_diffuse[0][1].path, "anim1.pic") == 0);
-        assert(dm->anim_diffuse[0][1].enabled == 1); // clamped
+        TEST_EXPECT(std::strcmp(dm->anim_diffuse[0][0].path, "anim0.pic") == 0);
+        TEST_EXPECT(dm->anim_diffuse[0][0].enabled == 0); // not clamped
+        TEST_EXPECT(std::strcmp(dm->anim_diffuse[0][1].path, "anim1.pic") == 0);
+        TEST_EXPECT(dm->anim_diffuse[0][1].enabled == 1); // clamped
 
         // Animated normal[0] frame 0
-        assert(std::strcmp(dm->anim_normal[0][0].path, "anim_n0.pic") == 0);
-        assert(dm->anim_normal[0][0].enabled == 0);
+        TEST_EXPECT(std::strcmp(dm->anim_normal[0][0].path, "anim_n0.pic") == 0);
+        TEST_EXPECT(dm->anim_normal[0][0].enabled == 0);
 
         // Write and parse back to verify full roundtrip
         char tmp4[4096];
         std::snprintf(tmp4, sizeof(tmp4), "%s%ctdp_texslot_test.3dp",
                       test_paths_temp_dir(), TEST_PATHS_SEP);
         int wrc4 = tdp_write(tmp4, &proj);
-        assert(wrc4 == 0 && "tdp_write failed");
+        TEST_EXPECT(wrc4 == 0 && "tdp_write failed");
 
         TdpProject parsed4;
         int prc4 = tdp_parse(tmp4, &parsed4);
-        assert(prc4 == 0 && "tdp_parse failed");
+        TEST_EXPECT(prc4 == 0 && "tdp_parse failed");
 
         const TdpMaterial *pm4 = &parsed4.materials[0];
-        assert(std::strcmp(pm4->normal_tex[0], "body_n.pic") == 0);
-        assert(pm4->normal_flags[0] == 1);
-        assert(std::strcmp(pm4->normal_tex[1], "detail_n.pic") == 0);
-        assert(pm4->normal_flags[1] == 0);
-        assert(std::strcmp(pm4->anim_diffuse[0][0].path, "anim0.pic") == 0);
-        assert(pm4->anim_diffuse[0][0].enabled == 0);
-        assert(std::strcmp(pm4->anim_diffuse[0][1].path, "anim1.pic") == 0);
-        assert(pm4->anim_diffuse[0][1].enabled == 1);
-        assert(std::strcmp(pm4->anim_normal[0][0].path, "anim_n0.pic") == 0);
+        TEST_EXPECT(std::strcmp(pm4->normal_tex[0], "body_n.pic") == 0);
+        TEST_EXPECT(pm4->normal_flags[0] == 1);
+        TEST_EXPECT(std::strcmp(pm4->normal_tex[1], "detail_n.pic") == 0);
+        TEST_EXPECT(pm4->normal_flags[1] == 0);
+        TEST_EXPECT(std::strcmp(pm4->anim_diffuse[0][0].path, "anim0.pic") == 0);
+        TEST_EXPECT(pm4->anim_diffuse[0][0].enabled == 0);
+        TEST_EXPECT(std::strcmp(pm4->anim_diffuse[0][1].path, "anim1.pic") == 0);
+        TEST_EXPECT(pm4->anim_diffuse[0][1].enabled == 1);
+        TEST_EXPECT(std::strcmp(pm4->anim_normal[0][0].path, "anim_n0.pic") == 0);
 
         tdp_free(&proj);
         tdp_free(&parsed4);

@@ -1,0 +1,74 @@
+[gd_scene format=3 uid="uid://dvegpicker001"]
+
+[ext_resource type="Script" path="res://modtools/terrain/ui/widgets/veg_picker.gd" id="1_picker"]
+
+[node name="VegPicker" type="Window"]
+title = "Choose graphic"
+initial_position = 2
+size = Vector2i(640, 480)
+borderless = true
+visible = false
+exclusive = true
+transient = true
+script = ExtResource("1_picker")
+
+[node name="Card" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Margin" type="MarginContainer" parent="Card"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="Box" type="VBoxContainer" parent="Card/Margin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="Heading" type="Label" parent="Card/Margin/Box"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "Choose graphic"
+
+[node name="EmptyLabel" type="Label" parent="Card/Margin/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "No foliage graphics found."
+autowrap_mode = 3
+visible = false
+
+[node name="Scroll" type="ScrollContainer" parent="Card/Margin/Box"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+custom_minimum_size = Vector2(0, 320)
+horizontal_scroll_mode = 0
+
+[node name="Grid" type="GridContainer" parent="Card/Margin/Box/Scroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 4
+columns = 4
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
+
+[node name="Footer" type="HBoxContainer" parent="Card/Margin/Box"]
+layout_mode = 2
+size_flags_horizontal = 3
+alignment = 2
+
+[node name="CloseButton" type="Button" parent="Card/Margin/Box/Footer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Close"

@@ -27,6 +27,11 @@ build/
 *.pyc
 __pycache__/
 
+# Python tooling
+.venv/
+.pytest_cache/
+*.egg-info/
+
 # CMake
 CMakeCache.txt
 CMakeFiles/
@@ -58,3 +63,13 @@ Thumbs.db
 TODO
 
 RE/
+
+# Godot
+godot/.godot/
+*.TMP
+godot/exports/
+.godot-bin/
+godot/addons/gut/
+
+docs/
+CLAUDE.md

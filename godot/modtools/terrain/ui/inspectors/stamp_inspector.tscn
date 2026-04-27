@@ -1,0 +1,222 @@
+[gd_scene load_steps=2 format=3 uid="uid://bonlthwg7oat8"]
+
+[ext_resource type="Script" path="res://modtools/terrain/ui/inspectors/stamp_inspector.gd" id="1_stamp"]
+
+[node name="StampInspector" type="MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_stamp")
+
+[node name="Scroll" type="ScrollContainer" parent="."]
+layout_mode = 2
+
+[node name="Box" type="VBoxContainer" parent="Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="Heading" type="Label" parent="Scroll/Box"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "Tile"
+
+[node name="LayoutHeader" type="VBoxContainer" parent="Scroll/Box"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="LayoutLabel" type="Label" parent="Scroll/Box/LayoutHeader"]
+layout_mode = 2
+text = "Tile layout"
+
+[node name="LayoutStatus" type="Label" parent="Scroll/Box/LayoutHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Load a .til file or create a blank layout before placing tiles."
+autowrap_mode = 3
+
+[node name="LayoutButtons" type="HFlowContainer" parent="Scroll/Box"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="LayoutLoadButton" type="Button" parent="Scroll/Box/LayoutButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Load .til"
+
+[node name="LayoutNewButton" type="Button" parent="Scroll/Box/LayoutButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "New blank"
+
+[node name="LayoutResetButton" type="Button" parent="Scroll/Box/LayoutButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Reset"
+disabled = true
+
+[node name="LayoutFilename" type="Label" parent="Scroll/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "(none)"
+autowrap_mode = 3
+
+[node name="HintLabel" type="Label" parent="Scroll/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Empty: place. Tile: edit."
+autowrap_mode = 3
+
+[node name="BrushHeader" type="Label" parent="Scroll/Box"]
+layout_mode = 2
+text = "Brush"
+
+[node name="BrushPanel" type="PanelContainer" parent="Scroll/Box"]
+layout_mode = 2
+
+[node name="BrushMargin" type="MarginContainer" parent="Scroll/Box/BrushPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="BrushBox" type="VBoxContainer" parent="Scroll/Box/BrushPanel/BrushMargin"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="BrushPreview" type="TextureRect" parent="Scroll/Box/BrushPanel/BrushMargin/BrushBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(44, 44)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="BrushSummary" type="Label" parent="Scroll/Box/BrushPanel/BrushMargin/BrushBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Brush 000."
+autowrap_mode = 3
+
+[node name="AtlasHeader" type="VBoxContainer" parent="Scroll/Box"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="AtlasLabel" type="Label" parent="Scroll/Box/AtlasHeader"]
+layout_mode = 2
+text = "Atlas"
+
+[node name="AtlasStatus" type="Label" parent="Scroll/Box/AtlasHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Load a tile atlas in Properties."
+autowrap_mode = 3
+
+[node name="AtlasList" type="ItemList" parent="Scroll/Box"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 200)
+layout_mode = 2
+
+[node name="FlagsHeader" type="VBoxContainer" parent="Scroll/Box"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="FlagsLabel" type="Label" parent="Scroll/Box/FlagsHeader"]
+layout_mode = 2
+text = "Transform"
+
+[node name="FlagsStatus" type="Label" parent="Scroll/Box/FlagsHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Brush transform."
+autowrap_mode = 3
+
+[node name="FlagsRow" type="HFlowContainer" parent="Scroll/Box"]
+layout_mode = 2
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 6
+
+[node name="FlipXToggle" type="CheckBox" parent="Scroll/Box/FlagsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Flip X"
+
+[node name="FlipYToggle" type="CheckBox" parent="Scroll/Box/FlagsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Flip Y"
+
+[node name="RotateToggle" type="CheckBox" parent="Scroll/Box/FlagsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Rotate 90"
+
+[node name="SelectionHeader" type="VBoxContainer" parent="Scroll/Box"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="SelectionLabel" type="Label" parent="Scroll/Box/SelectionHeader"]
+layout_mode = 2
+text = "Selection"
+
+[node name="SelectionStatus" type="Label" parent="Scroll/Box/SelectionHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Click a placed tile to edit it."
+autowrap_mode = 3
+
+[node name="SelectionPanel" type="PanelContainer" parent="Scroll/Box"]
+layout_mode = 2
+
+[node name="SelectionMargin" type="MarginContainer" parent="Scroll/Box/SelectionPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="SelectionBox" type="VBoxContainer" parent="Scroll/Box/SelectionPanel/SelectionMargin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SelectionPreview" type="TextureRect" parent="Scroll/Box/SelectionPanel/SelectionMargin/SelectionBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(44, 44)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="SelectionSummary" type="Label" parent="Scroll/Box/SelectionPanel/SelectionMargin/SelectionBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "No tile selected."
+autowrap_mode = 3
+
+[node name="SelectionButtons" type="HFlowContainer" parent="Scroll/Box/SelectionPanel/SelectionMargin/SelectionBox"]
+layout_mode = 2
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 6
+
+[node name="SelectionDoneButton" type="Button" parent="Scroll/Box/SelectionPanel/SelectionMargin/SelectionBox/SelectionButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Done"
+disabled = true
+
+[node name="SelectionDeleteButton" type="Button" parent="Scroll/Box/SelectionPanel/SelectionMargin/SelectionBox/SelectionButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Delete selected tile"
+disabled = true

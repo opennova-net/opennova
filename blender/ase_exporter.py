@@ -440,9 +440,9 @@ class AseExporter:
 
             # Use original shader code from 3DI import if available,
             # otherwise derive from Blender material node tree
-            shader_code = material.get("oed_shader", "") if material else ""
+            shader_code = material.get("opennova_shader", "") if material else ""
             if not shader_code:
-                shader_code = self._derive_oed_shader(material, has_skinned)
+                shader_code = self._derive_opennova_shader(material, has_skinned)
 
             # Set submaterial name to include shader code for OED auto-detection.
             # This name is critical: EnsureMaterialBucket uses stricmp on it
@@ -549,7 +549,7 @@ class AseExporter:
                     _slot_mat_ids.append(0)
             # Legacy OED keeps certain center markers as "no matrix" (all-zero
             # axis rows), which maps to PANM matrix index 0xFF.
-            if bool(obj.get("oed_zero_axis", False)):
+            if bool(obj.get("opennova_zero_axis", False)):
                 for r in range(3):
                     for c in range(3):
                         ase_obj.tm_row[r][c] = 0.0
@@ -817,7 +817,7 @@ class AseExporter:
             # when binding mesh weights.
             idx = None
             if hasattr(group, "get"):
-                idx = group.get("oed_bone_index", None)
+                idx = group.get("opennova_bone_index", None)
             if isinstance(idx, (int, float)):
                 return int(idx)
             # Last fallback: parse BN## directly from group name.
@@ -1171,7 +1171,7 @@ class AseExporter:
             return path, image
         return "", None
 
-    def _derive_oed_shader(self, material, is_skinned):
+    def _derive_opennova_shader(self, material, is_skinned):
         """Derive OED shader code from Blender material's node tree.
 
         Inspects the Principled BSDF node for bump, specular, emission,

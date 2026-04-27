@@ -1,0 +1,100 @@
+[gd_scene load_steps=2 format=3 uid="uid://cnx8qa9a1k5rh"]
+
+[ext_resource type="Script" path="res://modtools/terrain/ui/widgets/brush_controls.gd" id="1_brush"]
+
+[node name="BrushControls" type="VBoxContainer"]
+theme_override_constants/separation = 10
+script = ExtResource("1_brush")
+
+[node name="Heading" type="Label" parent="."]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "Brush"
+
+[node name="RadiusRow" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="RadiusHeader" type="HBoxContainer" parent="RadiusRow"]
+layout_mode = 2
+
+[node name="RadiusLabel" type="Label" parent="RadiusRow/RadiusHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Radius"
+
+[node name="RadiusSpin" type="SpinBox" parent="RadiusRow/RadiusHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 1.0
+max_value = 128.0
+step = 1.0
+value = 16.0
+rounded = true
+alignment = 2
+
+[node name="RadiusSlider" type="HSlider" parent="RadiusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 1.0
+max_value = 128.0
+step = 1.0
+value = 16.0
+
+[node name="StrengthRow" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="StrengthHeader" type="HBoxContainer" parent="StrengthRow"]
+layout_mode = 2
+
+[node name="StrengthLabel" type="Label" parent="StrengthRow/StrengthHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Strength"
+
+[node name="StrengthSpin" type="SpinBox" parent="StrengthRow/StrengthHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.01
+max_value = 5.0
+step = 0.01
+value = 0.5
+alignment = 2
+
+[node name="StrengthSlider" type="HSlider" parent="StrengthRow"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.01
+max_value = 5.0
+step = 0.01
+value = 0.5
+
+[node name="HardnessRow" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="HardnessHeader" type="HBoxContainer" parent="HardnessRow"]
+layout_mode = 2
+
+[node name="HardnessLabel" type="Label" parent="HardnessRow/HardnessHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Hardness"
+
+[node name="HardnessSpin" type="SpinBox" parent="HardnessRow/HardnessHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.0
+max_value = 1.0
+step = 0.01
+value = 0.5
+alignment = 2
+
+[node name="HardnessSlider" type="HSlider" parent="HardnessRow"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.0
+max_value = 1.0
+step = 0.01
+value = 0.5

@@ -1,10 +1,10 @@
-add_library(oed_def STATIC
+add_library(opennova_def STATIC
     src/def.cpp
 )
 
-target_include_directories(oed_def
+target_include_directories(opennova_def
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_compile_features(oed_def PUBLIC cxx_std_11)
+target_compile_features(opennova_def PUBLIC cxx_std_11)

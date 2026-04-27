@@ -4,8 +4,10 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 jobs="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
+"$root/scripts/bootstrap_godot.sh"
+
 echo "Building opennova libraries and tests..."
-cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
+cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release -DOPENNOVA_ENABLE_PYTHON_TESTS=ON
 cmake --build "$root/build" --config Release -j "$jobs"
 
 echo "Running tests..."

@@ -269,6 +269,31 @@ def _build_volume_name(type_code: int, flags: int, index: int, occurrence: int) 
     return f"{base}{display_index + 1:02d}{_format_duplicate_suffix(occurrence)}"
 
 
+def _set_object_mode(obj, mode: str) -> None:
+    """Set Blender mode with an explicit Blender 5 operator context."""
+    if obj is None:
+        raise ValueError("Cannot change Blender mode without an object")
+
+    view_layer = bpy.context.view_layer
+    view_layer.update()
+    obj.select_set(True)
+    view_layer.objects.active = obj
+
+    with bpy.context.temp_override(
+        object=obj,
+        active_object=obj,
+        selected_objects=[obj],
+        selected_editable_objects=[obj],
+    ):
+        bpy.ops.object.mode_set(mode=mode)
+
+
+def _ensure_object_mode() -> None:
+    active = getattr(bpy.context, "active_object", None)
+    if active and getattr(active, "mode", "OBJECT") != "OBJECT":
+        _set_object_mode(active, "OBJECT")
+
+
 class BlenderSceneBuilder:
     """Build a Blender scene from a ThreediModelIR + optional BadFile.
 
@@ -302,9 +327,7 @@ class BlenderSceneBuilder:
         self.bullet_lod_index = -1                 # Set by create_bullet_lod()
 
     def build_basic_scene(self, name: str):
-        active = getattr(bpy.context, 'active_object', None)
-        if active and active.mode != "OBJECT":
-            bpy.ops.object.mode_set(mode="OBJECT")
+        _ensure_object_mode()
 
         self.build_part_hierarchy(name)
         mesh_objects = self.create_basic_meshes(name)
@@ -394,8 +417,7 @@ class BlenderSceneBuilder:
             armature_obj.parent = self.root_object
         self.armature_object = armature_obj
 
-        bpy.context.view_layer.objects.active = armature_obj
-        bpy.ops.object.mode_set(mode='EDIT')
+        _set_object_mode(armature_obj, "EDIT")
 
         edit_bones = armature_data.edit_bones
         bl_bones = []
@@ -422,7 +444,7 @@ class BlenderSceneBuilder:
             if pi >= 0:
                 bl_bones[i].parent = bl_bones[pi]
 
-        bpy.ops.object.mode_set(mode='OBJECT')
+        _set_object_mode(armature_obj, "OBJECT")
 
         self._bone_infos = []
         for i, pi in enumerate(parent_indices):
@@ -545,8 +567,7 @@ class BlenderSceneBuilder:
 
         self.armature_object = armature_obj
 
-        bpy.context.view_layer.objects.active = armature_obj
-        bpy.ops.object.mode_set(mode='EDIT')
+        _set_object_mode(armature_obj, "EDIT")
 
         edit_bones = armature_data.edit_bones
         bl_bones = []
@@ -602,7 +623,7 @@ class BlenderSceneBuilder:
             z_axis = abs_rotations[i] @ Vector((0, 0, 1))
             bl_bones[i].align_roll(z_axis)
 
-        bpy.ops.object.mode_set(mode='OBJECT')
+        _set_object_mode(armature_obj, "OBJECT")
 
         # Read back Blender's actual rest transforms per bone.
         # These may differ slightly from our computed values due to Blender's
@@ -709,7 +730,7 @@ class BlenderSceneBuilder:
                         # VertexGroup.  Keep this best-effort so binding
                         # never aborts and skin weights are still exported.
                         try:
-                            vg["oed_bone_index"] = int(bone_idx)
+                            vg["opennova_bone_index"] = int(bone_idx)
                         except Exception:
                             pass
                         bone_vgroups[bone_idx] = vg
@@ -1110,9 +1131,7 @@ class BlenderSceneBuilder:
         return action
 
     def merge_with_existing_scene(self, main_builder):
-        active = getattr(bpy.context, 'active_object', None)
-        if active and active.mode != "OBJECT":
-            bpy.ops.object.mode_set(mode="OBJECT")
+        _ensure_object_mode()
         self.root_object = main_builder.root_object
         self.part_nodes = main_builder.part_nodes
         # Share material_dict so secondary models reuse existing Blender
@@ -1520,7 +1539,7 @@ class BlenderSceneBuilder:
                     else:
                         # Preserve "no matrix" centers so export can emit a
                         # PANM matrix index of 0xFF.
-                        center_obj["oed_zero_axis"] = True
+                        center_obj["opennova_zero_axis"] = True
 
             # Create attach point markers (~XXx attach) for child parts
             pi_counter: dict[int, int] = {}
@@ -1817,7 +1836,7 @@ class BlenderSceneBuilder:
         shader = ir_mat.shader_name.decode("utf-8", errors="replace").rstrip("\x00")
         if shader:
             mat.name = f"{mat.name}_{shader}"
-            mat["oed_shader"] = shader
+            mat["opennova_shader"] = shader
 
         # Store original name before Blender mangles duplicates with .NNN suffixes
         mat["ase_material_name"] = mat.name
@@ -2143,7 +2162,7 @@ class BlenderSceneBuilder:
                 else:
                     # Preserve "no matrix" centers so export can emit a
                     # PANM matrix index of 0xFF.
-                    center_obj["oed_zero_axis"] = True
+                    center_obj["opennova_zero_axis"] = True
 
         # Create tilde attachment point objects (~01a, ~01b, etc.)
         num_parts = int(lod0.part_count)

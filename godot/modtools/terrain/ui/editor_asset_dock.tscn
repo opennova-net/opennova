@@ -1,0 +1,193 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modtools/terrain/ui/editor_asset_dock.gd" id="1_dock"]
+
+[node name="TerrainAssetDock" type="PanelContainer"]
+script = ExtResource("1_dock")
+
+[node name="Tabs" type="TabContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+current_tab = 0
+
+[node name="TerrainPropertiesTab" type="ScrollContainer" parent="Tabs"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+metadata/_tab_index = 0
+
+[node name="TerrainPropertiesMargin" type="MarginContainer" parent="Tabs/TerrainPropertiesTab"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 12
+
+[node name="TerrainPropertiesBox" type="VBoxContainer" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="TerrainNameRow" type="VBoxContainer" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TerrainNameLabel" type="Label" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox/TerrainNameRow"]
+layout_mode = 2
+text = "Terrain name"
+
+[node name="TerrainNameEdit" type="LineEdit" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox/TerrainNameRow"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "untitled"
+editable = false
+
+[node name="TerrainNameHint" type="Label" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox/TerrainNameRow"]
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "To rename, use File → Save As…"
+autowrap_mode = 2
+
+[node name="DensityRow" type="VBoxContainer" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="DetailDensityLabel" type="Label" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox/DensityRow"]
+layout_mode = 2
+text = "Detail density"
+
+[node name="DetailDensitySpin" type="SpinBox" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox/DensityRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 1.0
+max_value = 512.0
+step = 1.0
+value = 128.0
+rounded = true
+
+[node name="Density2Row" type="VBoxContainer" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="DetailDensity2Label" type="Label" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox/Density2Row"]
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Broad detail density"
+
+[node name="DetailDensity2Spin" type="SpinBox" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox/Density2Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 1.0
+max_value = 128.0
+step = 1.0
+value = 8.0
+rounded = true
+
+[node name="DensityHint" type="Label" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox"]
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Density controls how tightly detail textures repeat. Higher = finer repeat. Broad density runs independently for large-scale variation."
+autowrap_mode = 3
+
+[node name="PropertiesSeparator" type="HSeparator" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox"]
+layout_mode = 2
+
+[node name="AssetSectionsBox" type="VBoxContainer" parent="Tabs/TerrainPropertiesTab/TerrainPropertiesMargin/TerrainPropertiesBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="CameraTab" type="ScrollContainer" parent="Tabs"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+metadata/_tab_index = 1
+
+[node name="CameraMargin" type="MarginContainer" parent="Tabs/CameraTab"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 12
+
+[node name="CameraBox" type="VBoxContainer" parent="Tabs/CameraTab/CameraMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="FlySpeedRow" type="VBoxContainer" parent="Tabs/CameraTab/CameraMargin/CameraBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="FlySpeedLabel" type="Label" parent="Tabs/CameraTab/CameraMargin/CameraBox/FlySpeedRow"]
+layout_mode = 2
+text = "Flight speed"
+
+[node name="FlySpeedSpin" type="SpinBox" parent="Tabs/CameraTab/CameraMargin/CameraBox/FlySpeedRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 5.0
+max_value = 2000.0
+step = 1.0
+value = 30.0
+
+[node name="FlySpeedHint" type="Label" parent="Tabs/CameraTab/CameraMargin/CameraBox"]
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Right-click + scroll wheel adjusts speed while flying."
+autowrap_mode = 3
+
+[node name="VisibilityLabel" type="Label" parent="Tabs/CameraTab/CameraMargin/CameraBox"]
+layout_mode = 2
+text = "Visibility range"
+
+[node name="NearPlaneRow" type="VBoxContainer" parent="Tabs/CameraTab/CameraMargin/CameraBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="NearPlaneLabel" type="Label" parent="Tabs/CameraTab/CameraMargin/CameraBox/NearPlaneRow"]
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Near"
+
+[node name="NearPlaneSpin" type="SpinBox" parent="Tabs/CameraTab/CameraMargin/CameraBox/NearPlaneRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.01
+max_value = 100.0
+step = 0.01
+value = 0.5
+
+[node name="FarPlaneRow" type="VBoxContainer" parent="Tabs/CameraTab/CameraMargin/CameraBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="FarPlaneLabel" type="Label" parent="Tabs/CameraTab/CameraMargin/CameraBox/FarPlaneRow"]
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Far"
+
+[node name="FarPlaneSpin" type="SpinBox" parent="Tabs/CameraTab/CameraMargin/CameraBox/FarPlaneRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 100.0
+max_value = 1000000.0
+step = 100.0
+value = 1500.0

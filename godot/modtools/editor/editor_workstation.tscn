@@ -1,0 +1,392 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://modtools/editor/editor_workstation.gd" id="1_workstation"]
+[ext_resource type="Theme" uid="uid://brsq3gfp1bk2a" path="res://modtools/terrain/ui/theme/editor_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://modtools/terrain/ui/editor_asset_dock.tscn" id="3_asset_dock"]
+
+[sub_resource type="ButtonGroup" id="PromptFormatGroup"]
+
+[node name="EditorWorkstation" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_workstation")
+
+[node name="WorkstationLayout" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="BodyRow" type="HBoxContainer" parent="WorkstationLayout"]
+layout_mode = 2
+mouse_filter = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="LeftLane" type="PanelContainer" parent="WorkstationLayout/BodyRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(320, 0)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="LeftMargin" type="MarginContainer" parent="WorkstationLayout/BodyRow/LeftLane"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="LeftBox" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="ProjectLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Heading"
+text = "OpenNova Terrain Editor"
+vertical_alignment = 1
+
+[node name="WorkspaceLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "Workspace"
+
+[node name="WorkspaceRail" type="HBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="WorkspaceActionsHost" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="WorkspaceSeparator" type="HSeparator" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+layout_mode = 2
+
+[node name="ModesLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "Workflows"
+
+[node name="ModeRail" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="InspectorSeparator" type="HSeparator" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+layout_mode = 2
+
+[node name="InspectorHost" type="PanelContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="ViewportLane" type="Control" parent="WorkstationLayout/BodyRow"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="AssetDock" parent="WorkstationLayout/BodyRow" instance=ExtResource("3_asset_dock")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(360, 0)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="StatusBar" type="PanelContainer" parent="WorkstationLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="StatusMargin" type="MarginContainer" parent="WorkstationLayout/StatusBar"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 4
+
+[node name="StatusRow" type="HBoxContainer" parent="WorkstationLayout/StatusBar/StatusMargin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="StatusToolLabel" type="Label" parent="WorkstationLayout/StatusBar/StatusMargin/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+vertical_alignment = 1
+
+[node name="StatusSep1" type="VSeparator" parent="WorkstationLayout/StatusBar/StatusMargin/StatusRow"]
+layout_mode = 2
+
+[node name="StatusContextLabel" type="Label" parent="WorkstationLayout/StatusBar/StatusMargin/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Muted"
+vertical_alignment = 1
+
+[node name="StatusCameraLabel" type="Label" parent="WorkstationLayout/StatusBar/StatusMargin/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+vertical_alignment = 1
+
+[node name="StatusSep2" type="VSeparator" parent="WorkstationLayout/StatusBar/StatusMargin/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="StatusFpsLabel" type="Label" parent="WorkstationLayout/StatusBar/StatusMargin/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+vertical_alignment = 1
+
+[node name="TileGizmo" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+offset_right = 248.0
+offset_bottom = 88.0
+
+[node name="TileGizmoMargin" type="MarginContainer" parent="TileGizmo"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="TileGizmoBox" type="VBoxContainer" parent="TileGizmo/TileGizmoMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TileGizmoLabel" type="Label" parent="TileGizmo/TileGizmoMargin/TileGizmoBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Tile 000 @ (0, 0)"
+
+[node name="TileGizmoButtons" type="HBoxContainer" parent="TileGizmo/TileGizmoMargin/TileGizmoBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TileGizmoDone" type="Button" parent="TileGizmo/TileGizmoMargin/TileGizmoBox/TileGizmoButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Done"
+
+[node name="TileGizmoRotate" type="Button" parent="TileGizmo/TileGizmoMargin/TileGizmoBox/TileGizmoButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Rotate"
+
+[node name="TileGizmoFlipX" type="Button" parent="TileGizmo/TileGizmoMargin/TileGizmoBox/TileGizmoButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Flip X"
+
+[node name="TileGizmoFlipY" type="Button" parent="TileGizmo/TileGizmoMargin/TileGizmoBox/TileGizmoButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Flip Y"
+
+[node name="TileGizmoDelete" type="Button" parent="TileGizmo/TileGizmoMargin/TileGizmoBox/TileGizmoButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Delete"
+
+[node name="ProgressBackdrop" type="ColorRect" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.03, 0.04, 0.72)
+
+[node name="ProgressPanel" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -220.0
+offset_top = -88.0
+offset_right = 220.0
+offset_bottom = 88.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Margin" type="MarginContainer" parent="ProgressPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="ProgressBox" type="VBoxContainer" parent="ProgressPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ProgressTitleLabel" type="Label" parent="ProgressPanel/Margin/ProgressBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Exporting terrain..."
+
+[node name="ProgressMessageLabel" type="Label" parent="ProgressPanel/Margin/ProgressBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Preparing export..."
+autowrap_mode = 3
+
+[node name="ProgressBar" type="ProgressBar" parent="ProgressPanel/Margin/ProgressBox"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ProgressCountsLabel" type="Label" parent="ProgressPanel/Margin/ProgressBox"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="PromptBackdrop" type="ColorRect" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0.02, 0.03, 0.04, 0.72)
+
+[node name="PromptHost" type="CenterContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="PromptCard" type="PanelContainer" parent="PromptHost"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(480, 0)
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="PromptHost/PromptCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 18
+
+[node name="VBox" type="VBoxContainer" parent="PromptHost/PromptCard/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PromptEyebrow" type="Label" parent="PromptHost/PromptCard/Margin/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+visible = false
+theme_type_variation = &"Muted"
+text = "Prompt"
+
+[node name="PromptLead" type="Label" parent="PromptHost/PromptCard/Margin/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "Prompt title"
+autowrap_mode = 3
+
+[node name="PromptBody" type="Label" parent="PromptHost/PromptCard/Margin/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+visible = false
+theme_type_variation = &"Muted"
+autowrap_mode = 3
+text = "Prompt body"
+
+[node name="PromptInfoPanel" type="PanelContainer" parent="PromptHost/PromptCard/Margin/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="PromptHost/PromptCard/Margin/VBox/PromptInfoPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="PromptInfoLabel" type="Label" parent="PromptHost/PromptCard/Margin/VBox/PromptInfoPanel/Margin"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Prompt info"
+autowrap_mode = 3
+
+[node name="PromptFormatSection" type="VBoxContainer" parent="PromptHost/PromptCard/Margin/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PromptFormatRow" type="HBoxContainer" parent="PromptHost/PromptCard/Margin/VBox/PromptFormatSection"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="PromptFormatBHD" type="CheckButton" parent="PromptHost/PromptCard/Margin/VBox/PromptFormatSection/PromptFormatRow"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = false
+button_group = SubResource("PromptFormatGroup")
+text = "BHD"
+
+[node name="PromptFormatCDEP" type="CheckButton" parent="PromptHost/PromptCard/Margin/VBox/PromptFormatSection/PromptFormatRow"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
+button_group = SubResource("PromptFormatGroup")
+text = "JO/DFX"
+
+[node name="PromptButtonRow" type="HBoxContainer" parent="PromptHost/PromptCard/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PromptSecondaryButton" type="Button" parent="PromptHost/PromptCard/Margin/VBox/PromptButtonRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Cancel"
+
+[node name="PromptTertiaryButton" type="Button" parent="PromptHost/PromptCard/Margin/VBox/PromptButtonRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Discard"
+
+[node name="PromptSpacer" type="Control" parent="PromptHost/PromptCard/Margin/VBox/PromptButtonRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PromptPrimaryButton" type="Button" parent="PromptHost/PromptCard/Margin/VBox/PromptButtonRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Save"

@@ -1,0 +1,333 @@
+class_name TerrainEditorWorkspace
+extends "res://modtools/editor/editor_workspace.gd"
+
+const SculptInspectorScene = preload("res://modtools/terrain/ui/inspectors/sculpt_inspector.tscn")
+const PaintInspectorScene = preload("res://modtools/terrain/ui/inspectors/paint_inspector.tscn")
+const ScatterInspectorScene = preload("res://modtools/terrain/ui/inspectors/scatter_inspector.tscn")
+const StampInspectorScene = preload("res://modtools/terrain/ui/inspectors/stamp_inspector.tscn")
+const LayoutInspectorScene = preload("res://modtools/terrain/ui/inspectors/layout_inspector.tscn")
+
+enum Workflow { SCULPT, PAINT, SCATTER, STAMP, LAYOUT }
+enum ExportFlavor { BHD = 0, DFX_JO = 1 }
+
+const DETAIL_LABELS := ["Detail A", "Detail B", "Detail C"]
+
+const WORKFLOW_DEFS := [
+	{"id": Workflow.SCULPT, "label": "Sculpt", "tooltip": "Raise, lower, smooth, and flatten the terrain."},
+	{"id": Workflow.PAINT, "label": "Paint", "tooltip": "Paint detail layers, color, clone, and surface types."},
+	{"id": Workflow.SCATTER, "label": "Foliage", "tooltip": "Manage and paint foliage placement."},
+	{"id": Workflow.STAMP, "label": "Tile", "tooltip": "Place and edit tiles."},
+	{"id": Workflow.LAYOUT, "label": "Layout", "tooltip": "Edit sectors, map size, origin, and water."},
+]
+
+const INSPECTOR_SCENES := {
+	Workflow.SCULPT: SculptInspectorScene,
+	Workflow.PAINT: PaintInspectorScene,
+	Workflow.SCATTER: ScatterInspectorScene,
+	Workflow.STAMP: StampInspectorScene,
+	Workflow.LAYOUT: LayoutInspectorScene,
+}
+
+var terrain_editor: Node
+var _asset_dock: Control
+
+
+func _init(value: Node = null) -> void:
+	terrain_editor = value
+
+
+func set_terrain_editor(value: Node) -> void:
+	terrain_editor = value
+
+
+func get_workspace_id() -> String:
+	return "terrain"
+
+
+func get_workspace_label() -> String:
+	return "Terrain"
+
+
+func get_project_title() -> String:
+	if terrain_editor == null:
+		return "Terrain"
+	var name: String = terrain_editor.get_terrain_name_value()
+	if name.is_empty():
+		name = "untitled"
+	var dirty := "*" if terrain_editor.is_dirty else ""
+	return "%s%s" % [name, dirty]
+
+
+func get_status_tool() -> String:
+	if terrain_editor == null:
+		return "Terrain"
+	return _tool_name(terrain_editor.current_tool)
+
+
+func get_status_context() -> String:
+	if terrain_editor == null:
+		return ""
+	match terrain_editor.current_tool:
+		TerrainEditor.Tool.PAINT_DETAIL:
+			var channel := clampi(terrain_editor.get_paint_detail_channel(), 0, DETAIL_LABELS.size() - 1)
+			return DETAIL_LABELS[channel]
+		TerrainEditor.Tool.PAINT_COLORMAP:
+			return "#" + terrain_editor.get_paint_color().to_html(false).to_upper()
+		TerrainEditor.Tool.CLONE_COLOR:
+			return "Clone source ready" if terrain_editor.has_clone_source() else "Clone source not set"
+		TerrainEditor.Tool.SURFACE_PAINT:
+			return "%s (%d)" % [terrain_editor.get_selected_surface_label(), terrain_editor.get_selected_surface_index()]
+		TerrainEditor.Tool.FOLIAGE_PAINT:
+			var def: Variant = terrain_editor.get_selected_foliage_def()
+			if def == null:
+				return "No foliage type selected"
+			var label := String(def.graphic).strip_edges()
+			if label.is_empty():
+				label = "unnamed foliage type"
+			return label
+		TerrainEditor.Tool.TILE_STAMP:
+			var selected: int = terrain_editor.get_tileinfo_selected_index()
+			if selected >= 0:
+				var entry: Variant = terrain_editor.get_tileinfo_entry(selected)
+				if entry:
+					return "Editing tile %03d at cell (%d, %d)" % [entry.get_tile_index(), entry.get_cell_x(), entry.get_cell_z()]
+			return "Brush tile %03d" % terrain_editor.get_tile_stamp_tile_index()
+		TerrainEditor.Tool.EDIT_SECTORS:
+			return "%d x %d sector grid" % [terrain_editor.get_sector_count(), terrain_editor.get_sector_rows()]
+		_:
+			return "R %d  S %.2f  H %.2f" % [roundi(terrain_editor.brush_radius), terrain_editor.brush_strength, terrain_editor.brush_hardness]
+
+
+func uses_asset_dock() -> bool:
+	return true
+
+
+func set_asset_dock(dock: Control) -> void:
+	_asset_dock = dock
+	if _asset_dock != null and _asset_dock.has_method("set_editor"):
+		_asset_dock.set_editor(terrain_editor)
+
+
+func sync_asset_dock() -> void:
+	if _asset_dock != null and _asset_dock.has_method("sync_from_editor_state"):
+		_asset_dock.sync_from_editor_state()
+
+
+func get_workflows() -> Array:
+	return WORKFLOW_DEFS
+
+
+func get_active_workflow_id() -> int:
+	if terrain_editor == null:
+		return Workflow.SCULPT
+	return _workflow_for_tool(terrain_editor.current_tool)
+
+
+func activate_workflow(workflow_id: int) -> void:
+	if terrain_editor == null:
+		return
+	if workflow_id == Workflow.LAYOUT:
+		terrain_editor.set_tool(TerrainEditor.Tool.EDIT_SECTORS)
+
+
+func build_workflow_inspector(workflow_id: int, host: Control) -> void:
+	if not INSPECTOR_SCENES.has(workflow_id):
+		return
+	var inspector: Node = INSPECTOR_SCENES[workflow_id].instantiate()
+	host.add_child(inspector)
+	if terrain_editor != null and inspector.has_method("set_editor"):
+		inspector.set_editor(terrain_editor)
+
+
+func is_busy() -> bool:
+	return terrain_editor != null and terrain_editor.is_export_running()
+
+
+func get_export_progress_title() -> String:
+	return "Exporting terrain..."
+
+
+func get_export_progress_phase() -> String:
+	return terrain_editor.get_export_progress_phase() if terrain_editor != null and is_busy() else ""
+
+
+func get_export_progress_message() -> String:
+	return terrain_editor.get_export_progress_message() if terrain_editor != null and is_busy() else ""
+
+
+func get_export_progress_current() -> int:
+	return terrain_editor.get_export_progress_current() if terrain_editor != null and is_busy() else 0
+
+
+func get_export_progress_total() -> int:
+	return terrain_editor.get_export_progress_total() if terrain_editor != null and is_busy() else 0
+
+
+func get_export_progress_ratio() -> float:
+	return terrain_editor.get_export_progress_ratio() if terrain_editor != null and is_busy() else 0.0
+
+
+func has_unsaved_changes() -> bool:
+	return terrain_editor != null and terrain_editor.is_dirty
+
+
+func can_new() -> bool:
+	return terrain_editor != null and not is_busy()
+
+
+func get_new_action_label() -> String:
+	return "New Terrain"
+
+
+func new_current() -> Error:
+	if terrain_editor == null:
+		return ERR_UNAVAILABLE
+	terrain_editor.request_new_terrain()
+	return OK
+
+
+func can_open() -> bool:
+	return terrain_editor != null and not is_busy()
+
+
+func get_open_action_label() -> String:
+	return "Open Terrain..."
+
+
+func get_open_dialog_title() -> String:
+	return "Open .trn"
+
+
+func get_open_dialog_filters() -> PackedStringArray:
+	return PackedStringArray(["*.trn ; Terrain"])
+
+
+func get_open_dialog_dir() -> String:
+	return terrain_editor.get_last_open_dir() if terrain_editor else ""
+
+
+func open_file(path: String) -> Error:
+	if terrain_editor == null:
+		return ERR_UNAVAILABLE
+	return terrain_editor.request_open_trn(path)
+
+
+func can_save() -> bool:
+	return terrain_editor != null and terrain_editor.is_dirty and not is_busy()
+
+
+func get_save_action_label() -> String:
+	return "Save Project"
+
+
+func can_save_as() -> bool:
+	return terrain_editor != null and not is_busy()
+
+
+func get_save_as_action_label() -> String:
+	return "Save Project As..."
+
+
+func save_current() -> Error:
+	if terrain_editor == null:
+		return ERR_UNAVAILABLE
+	return terrain_editor.save_project_to_current_dir()
+
+
+func save_as(dir_path: String) -> Error:
+	if terrain_editor == null:
+		return ERR_UNAVAILABLE
+	return terrain_editor.save_project(dir_path)
+
+
+func can_export() -> bool:
+	return terrain_editor != null and not is_busy()
+
+
+func has_export_action() -> bool:
+	return terrain_editor != null
+
+
+func get_export_action_label() -> String:
+	return "Export Terrain..."
+
+
+func begin_export(dir_path: String, flavor: int) -> Error:
+	if terrain_editor == null:
+		return ERR_UNAVAILABLE
+	return terrain_editor.begin_export_terrain(dir_path, flavor)
+
+
+func get_save_dialog_title() -> String:
+	return "Choose where to save your project"
+
+
+func get_save_dialog_dir() -> String:
+	if terrain_editor == null:
+		return ""
+	if terrain_editor.has_current_project_dir():
+		return terrain_editor.get_current_project_dir()
+	return terrain_editor.get_last_save_dir()
+
+
+func get_export_dialog_title() -> String:
+	return "Choose where to export"
+
+
+func get_export_dialog_dir() -> String:
+	if terrain_editor == null:
+		return ""
+	if not terrain_editor.get_last_export_dir().is_empty():
+		return terrain_editor.get_last_export_dir()
+	if terrain_editor.has_current_project_dir():
+		return terrain_editor.get_current_project_dir()
+	return terrain_editor.get_last_save_dir()
+
+
+func can_undo() -> bool:
+	return terrain_editor != null and not is_busy() and terrain_editor.can_undo()
+
+
+func can_redo() -> bool:
+	return terrain_editor != null and not is_busy() and terrain_editor.can_redo()
+
+
+func undo() -> void:
+	if terrain_editor:
+		terrain_editor.undo()
+
+
+func redo() -> void:
+	if terrain_editor:
+		terrain_editor.redo()
+
+
+func _workflow_for_tool(tool: int) -> int:
+	match tool:
+		TerrainEditor.Tool.RAISE, TerrainEditor.Tool.LOWER, TerrainEditor.Tool.SMOOTH, TerrainEditor.Tool.FLATTEN:
+			return Workflow.SCULPT
+		TerrainEditor.Tool.PAINT_DETAIL, TerrainEditor.Tool.PAINT_COLORMAP, TerrainEditor.Tool.CLONE_COLOR, TerrainEditor.Tool.SURFACE_PAINT:
+			return Workflow.PAINT
+		TerrainEditor.Tool.FOLIAGE_PAINT:
+			return Workflow.SCATTER
+		TerrainEditor.Tool.TILE_STAMP:
+			return Workflow.STAMP
+		_:
+			return Workflow.LAYOUT
+
+
+func _tool_name(tool: int) -> String:
+	match tool:
+		TerrainEditor.Tool.RAISE: return "Raise"
+		TerrainEditor.Tool.LOWER: return "Lower"
+		TerrainEditor.Tool.SMOOTH: return "Smooth"
+		TerrainEditor.Tool.FLATTEN: return "Flatten"
+		TerrainEditor.Tool.PAINT_DETAIL: return "Paint detail"
+		TerrainEditor.Tool.PAINT_COLORMAP: return "Paint color"
+		TerrainEditor.Tool.SURFACE_PAINT: return "Paint surface"
+		TerrainEditor.Tool.CLONE_COLOR: return "Clone color"
+		TerrainEditor.Tool.FOLIAGE_PAINT: return "Foliage"
+		TerrainEditor.Tool.TILE_STAMP: return "Tile"
+		TerrainEditor.Tool.EDIT_SECTORS: return "Edit sectors"
+		_:
+			return ""

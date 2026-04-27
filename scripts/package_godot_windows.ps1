@@ -1,0 +1,204 @@
+# Build and export OpenNova Godot applications for Windows.
+#
+# Produces:
+#   dist\opennova-runtime-windows.zip    (Runtime exe + GDExtension DLL)
+#   dist\opennova-modtools-windows.zip   (Mod Tools exe + GDExtension DLL)
+#
+# Requires:
+#   - MSVC toolchain + cmake (preinstalled on windows-latest)
+#   - Git submodules already initialised (third_party/godot-cpp)
+#
+# Usage:
+#   pwsh -File scripts\package_godot_windows.ps1
+
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"  # keeps Invoke-WebRequest fast on large files
+
+$ROOT = (Resolve-Path "$PSScriptRoot\..").Path
+Set-Location $ROOT
+
+$GODOT_VERSION = "4.6.1-stable"
+$GODOT_VERSION_PLAIN = "4.6.1"
+$GODOT_ZIP_URL = "https://github.com/godotengine/godot/releases/download/$GODOT_VERSION/Godot_v${GODOT_VERSION}_win64.exe.zip"
+$TEMPLATES_URL = "https://github.com/godotengine/godot/releases/download/$GODOT_VERSION/Godot_v${GODOT_VERSION}_export_templates.tpz"
+$TEMPLATES_DIR = "$env:APPDATA\Godot\export_templates\${GODOT_VERSION_PLAIN}.stable"
+
+$GODOT_DIR = "$ROOT\.godot-bin"
+$GODOT_EXE = "$GODOT_DIR\Godot_v${GODOT_VERSION}_win64.exe"
+
+# ---------------------------------------------------------------------------
+# 1. Install Godot editor (skip if already present)
+# ---------------------------------------------------------------------------
+if (-not (Test-Path $GODOT_EXE)) {
+    Write-Host "=== Downloading Godot $GODOT_VERSION ==="
+    New-Item -ItemType Directory -Force -Path $GODOT_DIR | Out-Null
+    $tempZip = "$GODOT_DIR\godot.zip"
+    Invoke-WebRequest -Uri $GODOT_ZIP_URL -OutFile $tempZip
+    Expand-Archive -Path $tempZip -DestinationPath $GODOT_DIR -Force
+    Remove-Item $tempZip
+}
+if (-not (Test-Path $GODOT_EXE)) {
+    throw "Godot executable missing after extraction: $GODOT_EXE"
+}
+
+# ---------------------------------------------------------------------------
+# 2. Install export templates (skip if already present)
+# ---------------------------------------------------------------------------
+if (-not (Test-Path "$TEMPLATES_DIR\version.txt")) {
+    Write-Host "=== Downloading export templates ==="
+    New-Item -ItemType Directory -Force -Path $TEMPLATES_DIR | Out-Null
+    $tempTpz = "$GODOT_DIR\templates.zip"
+    Invoke-WebRequest -Uri $TEMPLATES_URL -OutFile $tempTpz
+    $extractDir = "$GODOT_DIR\templates-extract"
+    if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+    Expand-Archive -Path $tempTpz -DestinationPath $extractDir -Force
+    # .tpz archives contain a "templates" root folder
+    Copy-Item "$extractDir\templates\*" $TEMPLATES_DIR -Recurse -Force
+    Remove-Item $tempTpz
+    Remove-Item $extractDir -Recurse -Force
+}
+
+# ---------------------------------------------------------------------------
+# 3. Build GDExtension binaries
+# ---------------------------------------------------------------------------
+function Invoke-GDExtensionBuild {
+    param(
+        [string]$GodotCppTarget,
+        [string]$BuildDir,
+        [string]$Config,
+        [string]$ExpectedDll
+    )
+
+    Write-Host "=== Building $GodotCppTarget GDExtension ==="
+    cmake -S godot/engine -B $BuildDir "-DGODOTCPP_TARGET=$GodotCppTarget"
+    if ($LASTEXITCODE -ne 0) { throw "CMake configure failed for $GodotCppTarget (exit $LASTEXITCODE)" }
+
+    cmake --build $BuildDir --config $Config --target opennova
+    if ($LASTEXITCODE -ne 0) { throw "CMake build failed for $GodotCppTarget (exit $LASTEXITCODE)" }
+
+    if (-not (Test-Path $ExpectedDll)) {
+        throw "GDExtension DLL missing after $GodotCppTarget build: $ExpectedDll"
+    }
+}
+
+$DEBUG_DLL = "$ROOT\godot\bin\libopennova.windows.template_debug.x86_64.dll"
+$RELEASE_DLL = "$ROOT\godot\bin\libopennova.windows.template_release.x86_64.dll"
+
+# The Godot editor loads the debug/editor library while scanning scripts for an
+# export. The release export template then needs the release library for the
+# packaged app. Fresh CI runners must have both.
+Invoke-GDExtensionBuild `
+    -GodotCppTarget "template_debug" `
+    -BuildDir "build-godot-debug" `
+    -Config "Debug" `
+    -ExpectedDll $DEBUG_DLL
+
+Invoke-GDExtensionBuild `
+    -GodotCppTarget "template_release" `
+    -BuildDir "build-godot-release" `
+    -Config "Release" `
+    -ExpectedDll $RELEASE_DLL
+
+# ---------------------------------------------------------------------------
+# 4. Run headless exports
+# ---------------------------------------------------------------------------
+$DIST = "$ROOT\dist"
+New-Item -ItemType Directory -Force -Path $DIST | Out-Null
+
+$RUNTIME_EXE = "$DIST\opennova.exe"
+$MODTOOLS_EXE = "$DIST\opennova-modtools.exe"
+$RUNTIME_ZIP = "$DIST\opennova-runtime-windows.zip"
+$MODTOOLS_ZIP = "$DIST\opennova-modtools-windows.zip"
+
+function Invoke-GodotExport {
+    param([string]$PresetName, [string]$OutputPath)
+    # Pass as a single command-line string so spaces in $PresetName survive.
+    # Start-Process -Wait blocks until Godot exits; plain `&` has shown to return
+    # before Godot finishes writing the .exe under some output-redirection setups.
+    $arguments = "--headless --path godot --export-release `"$PresetName`" `"$OutputPath`""
+    $stdoutLog = [System.IO.Path]::GetTempFileName()
+    $stderrLog = [System.IO.Path]::GetTempFileName()
+
+    try {
+        $proc = Start-Process `
+            -FilePath $GODOT_EXE `
+            -ArgumentList $arguments `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $stdoutLog `
+            -RedirectStandardError $stderrLog
+
+        $stdout = Get-Content $stdoutLog -Raw
+        $stderr = Get-Content $stderrLog -Raw
+        $combinedOutput = "$stdout`n$stderr"
+
+        if ($stdout) { Write-Host $stdout.TrimEnd() }
+        if ($stderr) { Write-Host $stderr.TrimEnd() }
+
+        if ($proc.ExitCode -ne 0) {
+            throw "Godot export of '$PresetName' exited with code $($proc.ExitCode)"
+        }
+
+        if ($combinedOutput -match "SCRIPT ERROR: Parse Error|GDExtension dynamic library not found|No loader found for resource|Failed to load script") {
+            throw "Godot export of '$PresetName' logged script or GDExtension load errors"
+        }
+    }
+    finally {
+        Remove-Item $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
+    }
+
+    if (-not (Test-Path $OutputPath)) {
+        throw "Godot export of '$PresetName' produced no file at $OutputPath"
+    }
+}
+
+Write-Host "=== Exporting opennova-modtools.exe ==="
+Invoke-GodotExport -PresetName "OpenNova Mod Tools" -OutputPath $MODTOOLS_EXE
+
+Write-Host "=== Exporting opennova.exe ==="
+Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
+
+function New-GodotAppZip {
+    param(
+        [string]$PackageName,
+        [string]$ExePath,
+        [string]$ZipPath
+    )
+
+    if (-not (Test-Path $ExePath)) {
+        throw "Cannot package '$PackageName'; exe is missing: $ExePath"
+    }
+    if (-not (Test-Path $RELEASE_DLL)) {
+        throw "Cannot package '$PackageName'; release DLL is missing: $RELEASE_DLL"
+    }
+
+    $stageDir = Join-Path $DIST ".stage-$PackageName"
+    if (Test-Path $stageDir) {
+        Remove-Item -LiteralPath $stageDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+
+    Copy-Item -LiteralPath $ExePath -Destination (Join-Path $stageDir (Split-Path $ExePath -Leaf)) -Force
+    Copy-Item -LiteralPath $RELEASE_DLL -Destination (Join-Path $stageDir (Split-Path $RELEASE_DLL -Leaf)) -Force
+
+    Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue
+    Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $ZipPath -Force
+    Remove-Item -LiteralPath $stageDir -Recurse -Force
+
+    if (-not (Test-Path $ZipPath)) {
+        throw "Package '$PackageName' produced no zip at $ZipPath"
+    }
+}
+
+Write-Host "=== Packaging opennova-modtools-windows.zip ==="
+New-GodotAppZip -PackageName "opennova-modtools" -ExePath $MODTOOLS_EXE -ZipPath $MODTOOLS_ZIP
+
+Write-Host "=== Packaging opennova-runtime-windows.zip ==="
+New-GodotAppZip -PackageName "opennova-runtime" -ExePath $RUNTIME_EXE -ZipPath $RUNTIME_ZIP
+
+# ---------------------------------------------------------------------------
+# 5. Done
+# ---------------------------------------------------------------------------
+Write-Host "=== Done ==="
+Get-Item $RUNTIME_ZIP,$MODTOOLS_ZIP | Select-Object Name, Length

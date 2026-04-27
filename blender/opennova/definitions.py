@@ -6,6 +6,7 @@ the local opennova package (FFI + pure-Python parsers).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from .adm_ffi import parse_adm, free_adm
@@ -13,6 +14,8 @@ from .bad_ffi import parse_bad, free_bad
 from .def_ffi import parse_weapons_def, free_weapons_def, parse_items_def, free_items_def
 from .model import AnimationContext, AnimationMeta
 
+
+log = logging.getLogger(__name__)
 
 
 def ensure_extension(filename: str, ext: str) -> str:
@@ -76,7 +79,7 @@ def process_def_files(resolver) -> tuple[list[WeaponContext], list[ItemContext]]
     items_path = resolver.resolve("items.def")
 
     if weapons_path:
-        print("[DEBUG] Processing weapon.def")
+        log.debug("Processing weapon.def")
         wf = parse_weapons_def(str(weapons_path))
         try:
             for i in range(wf.count):
@@ -87,7 +90,7 @@ def process_def_files(resolver) -> tuple[list[WeaponContext], list[ItemContext]]
             free_weapons_def(wf)
 
     if items_path:
-        print("[DEBUG] Processing items.def")
+        log.debug("Processing items.def")
         ifl = parse_items_def(str(items_path))
         try:
             for i in range(ifl.count):
@@ -97,7 +100,7 @@ def process_def_files(resolver) -> tuple[list[WeaponContext], list[ItemContext]]
         finally:
             free_items_def(ifl)
 
-    print(f"[DEBUG] Found {len(weapons)} weapons and {len(items)} items")
+    log.debug("Found %d weapons and %d items", len(weapons), len(items))
     return weapons, items
 
 
