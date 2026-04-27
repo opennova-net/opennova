@@ -2,7 +2,7 @@
 
 Open-source tools for extracting, converting, and editing 3D assets from Delta Force and other NovaLogic games — importer, Blender addon, and a Godot-based terrain editor and runtime.
 
-![OpenNova screenshot](https://snaps.screensnapr.io/9192c63)
+![OpenNova screenshot](https://snaps.screensnapr.io/75a69f1)
 
 ## Downloads
 
