@@ -109,3 +109,32 @@ endif()
 # Enable testing
 enable_testing()
 add_subdirectory(tests)
+
+option(OPENNOVA_ENABLE_PYTHON_TESTS "Add Python pytest suite to CTest" OFF)
+
+if(OPENNOVA_ENABLE_PYTHON_TESTS)
+    find_program(UV_EXECUTABLE NAMES uv)
+    if(NOT UV_EXECUTABLE)
+        message(FATAL_ERROR "OPENNOVA_ENABLE_PYTHON_TESTS requires uv on PATH")
+    endif()
+    set(OPENNOVA_UV_CACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/uv-cache")
+    set(OPENNOVA_PYTEST_COMMAND
+        ${CMAKE_COMMAND} -E env
+        "UV_CACHE_DIR=${OPENNOVA_UV_CACHE_DIR}"
+        ${UV_EXECUTABLE} run --frozen pytest
+    )
+
+    add_test(
+        NAME opennova_python_pytest
+        COMMAND ${OPENNOVA_PYTEST_COMMAND}
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
+
+    add_custom_target(opennova_python_tests
+        COMMAND
+            ${CMAKE_COMMAND} -E chdir
+            "${CMAKE_SOURCE_DIR}"
+            ${OPENNOVA_PYTEST_COMMAND}
+        USES_TERMINAL
+    )
+endif()

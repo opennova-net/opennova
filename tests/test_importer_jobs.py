@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 import types
-import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -34,19 +33,19 @@ FIXTURE_DEF_DIR = ROOT / "fixtures" / "def"
 FIXTURE_3DI = ROOT / "fixtures" / "threedi" / "3di3" / "Shed.3di"
 
 
-class ImportOptionsTests(unittest.TestCase):
+class TestImportOptions:
     def test_defaults_match_gui_baseline(self) -> None:
         options = ImportOptions()
-        self.assertTrue(options.import_animations)
-        self.assertTrue(options.import_collisions)
-        self.assertTrue(options.import_occlusion)
-        self.assertTrue(options.import_lights)
-        self.assertTrue(options.import_arms)
-        self.assertTrue(options.write_blend)
-        self.assertTrue(options.write_3dp)
-        self.assertTrue(options.write_ase)
-        self.assertFalse(options.write_glb)
-        self.assertFalse(options.write_fbx)
+        assert options.import_animations
+        assert options.import_collisions
+        assert options.import_occlusion
+        assert options.import_lights
+        assert options.import_arms
+        assert options.write_blend
+        assert options.write_3dp
+        assert options.write_ase
+        assert not options.write_glb
+        assert not options.write_fbx
 
     def test_cli_options_override_defaults(self) -> None:
         parser = build_parser()
@@ -67,30 +66,30 @@ class ImportOptionsTests(unittest.TestCase):
             "--glb",
         ])
         options = options_from_args(args)
-        self.assertFalse(options.import_occlusion)
-        self.assertFalse(options.import_arms)
-        self.assertFalse(options.write_blend)
-        self.assertFalse(options.write_3dp)
-        self.assertTrue(options.write_ase)
-        self.assertTrue(options.write_glb)
+        assert not options.import_occlusion
+        assert not options.import_arms
+        assert not options.write_blend
+        assert not options.write_3dp
+        assert options.write_ase
+        assert options.write_glb
 
     def test_blender_only_preset_writes_only_blend(self) -> None:
         options = OPTION_PRESETS["Blender only"]
-        self.assertTrue(options.write_blend)
-        self.assertTrue(options.writes_any_output_file())
-        self.assertFalse(options.writes_any_export_format())
-        self.assertTrue(options.import_collisions)
+        assert options.write_blend
+        assert options.writes_any_output_file()
+        assert not options.writes_any_export_format()
+        assert options.import_collisions
 
     def test_preset_name_matches_known_options(self) -> None:
-        self.assertEqual("Round-trip", preset_name_for_options(ImportOptions()))
-        self.assertEqual(
-            "Godot/runtime export",
-            preset_name_for_options(OPTION_PRESETS["Godot/runtime export"]),
+        assert preset_name_for_options(ImportOptions()) == "Round-trip"
+        assert (
+            preset_name_for_options(OPTION_PRESETS["Godot/runtime export"])
+            == "Godot/runtime export"
         )
 
     def test_preset_name_reports_custom_options(self) -> None:
         options = ImportOptions(write_fbx=True)
-        self.assertEqual(CUSTOM_PRESET_LABEL, preset_name_for_options(options))
+        assert preset_name_for_options(options) == CUSTOM_PRESET_LABEL
 
     def test_legacy_preferences_default_missing_new_options(self) -> None:
         app = object.__new__(ImporterApp)
@@ -108,11 +107,11 @@ class ImportOptionsTests(unittest.TestCase):
             }
         }
         options = app._options_from_preferences()
-        self.assertTrue(options.write_blend)
-        self.assertEqual("Round-trip", preset_name_for_options(options))
+        assert options.write_blend
+        assert preset_name_for_options(options) == "Round-trip"
 
 
-class ImportRequestValidationTests(unittest.TestCase):
+class TestImportRequestValidation:
     def test_definition_request_allows_blender_only_output(self) -> None:
         request = ImportRequest.for_definition(
             base_dir=str(FIXTURE_DEF_DIR),
@@ -122,7 +121,7 @@ class ImportRequestValidationTests(unittest.TestCase):
             options=ImportOptions(write_3dp=False, write_ase=False),
         )
         errors = validate_import_request(request)
-        self.assertNotIn("Select at least one file to write.", errors)
+        assert "Select at least one file to write." not in errors
 
     def test_request_requires_at_least_one_output_file(self) -> None:
         request = ImportRequest.for_definition(
@@ -139,7 +138,7 @@ class ImportRequestValidationTests(unittest.TestCase):
             ),
         )
         errors = validate_import_request(request)
-        self.assertIn("Select at least one file to write.", errors)
+        assert "Select at least one file to write." in errors
 
     def test_loose_request_requires_3di_file(self) -> None:
         request = ImportRequest.for_loose(
@@ -147,7 +146,7 @@ class ImportRequestValidationTests(unittest.TestCase):
             output_root=str(ROOT),
         )
         errors = validate_import_request(request)
-        self.assertIn("Loose imports require a .3di file.", errors)
+        assert "Loose imports require a .3di file." in errors
 
     def test_active_duplicate_only_blocks_pending_or_running_jobs(self) -> None:
         request = ImportRequest.for_definition(
@@ -157,12 +156,12 @@ class ImportRequestValidationTests(unittest.TestCase):
             output_root=str(ROOT),
         )
         job = ImportJob(request=request)
-        self.assertTrue(has_active_duplicate([job], request))
+        assert has_active_duplicate([job], request)
         job.status = JOB_ERROR
-        self.assertFalse(has_active_duplicate([job], request))
+        assert not has_active_duplicate([job], request)
         job.retry()
-        self.assertEqual(JOB_PENDING, job.status)
-        self.assertTrue(has_active_duplicate([job], request))
+        assert job.status == JOB_PENDING
+        assert has_active_duplicate([job], request)
 
     def test_likely_output_dir_matches_mode(self) -> None:
         definition = ImportRequest.for_definition(
@@ -175,11 +174,11 @@ class ImportRequestValidationTests(unittest.TestCase):
             threedi_path=str(FIXTURE_3DI),
             output_root=str(ROOT),
         )
-        self.assertEqual(str(ROOT / "M16"), definition.likely_output_dir)
-        self.assertEqual(str(ROOT / "Shed"), loose.likely_output_dir)
+        assert definition.likely_output_dir == str(ROOT / "M16")
+        assert loose.likely_output_dir == str(ROOT / "Shed")
 
 
-class ImportRunnerTests(unittest.TestCase):
+class TestImportRunner:
     def test_execute_definition_request_dispatches_shared_options(self) -> None:
         request = ImportRequest.for_definition(
             base_dir=str(FIXTURE_DEF_DIR),
@@ -196,14 +195,14 @@ class ImportRunnerTests(unittest.TestCase):
         with patch("apps.importer.import_runner.run_import", return_value=True) as run_import:
             result = execute_import_request(request, init_blender=False, reset_scene=False)
 
-        self.assertTrue(result.ok)
+        assert result.ok
         run_import.assert_called_once()
         kwargs = run_import.call_args.kwargs
-        self.assertEqual("M16", kwargs["item_name"])
-        self.assertFalse(kwargs["import_occlusion"])
-        self.assertFalse(kwargs["import_arms"])
-        self.assertFalse(kwargs["write_blend"])
-        self.assertTrue(kwargs["write_glb"])
+        assert kwargs["item_name"] == "M16"
+        assert not kwargs["import_occlusion"]
+        assert not kwargs["import_arms"]
+        assert not kwargs["write_blend"]
+        assert kwargs["write_glb"]
 
     def test_execute_loose_request_uses_single_scene_reset_boundary(self) -> None:
         output_root = ROOT
@@ -214,13 +213,13 @@ class ImportRunnerTests(unittest.TestCase):
         with patch("apps.importer.import_runner.run_loose_import", return_value=True) as run_loose:
             result = execute_import_request(request, init_blender=False, reset_scene=False)
 
-        self.assertTrue(result.ok)
-        self.assertEqual(str(output_root / "Shed"), result.output_path)
+        assert result.ok
+        assert result.output_path == str(output_root / "Shed")
         run_loose.assert_called_once()
         kwargs = run_loose.call_args.kwargs
-        self.assertEqual(str(output_root / "Shed"), kwargs["output_dir"])
-        self.assertFalse(kwargs["reset_scene"])
-        self.assertTrue(kwargs["write_blend"])
+        assert kwargs["output_dir"] == str(output_root / "Shed")
+        assert not kwargs["reset_scene"]
+        assert kwargs["write_blend"]
 
     def test_run_import_passes_blend_choice_to_basic_model(self) -> None:
         from apps.importer.import_runner import run_import
@@ -235,9 +234,9 @@ class ImportRunnerTests(unittest.TestCase):
                     write_blend=False,
                 )
 
-        self.assertTrue(ok)
+        assert ok
         basic.assert_called_once()
-        self.assertFalse(basic.call_args.kwargs["write_blend"])
+        assert not basic.call_args.kwargs["write_blend"]
 
     def test_run_loose_import_skips_blend_save_when_disabled(self) -> None:
         from apps.importer.import_runner import run_loose_import
@@ -284,17 +283,13 @@ class ImportRunnerTests(unittest.TestCase):
                                 reset_scene=False,
                             )
 
-        self.assertTrue(ok)
+        assert ok
         save_blend.assert_not_called()
 
     def test_scan_failure_is_not_empty_success(self) -> None:
         missing = str(ROOT / ".scratch" / "__missing_scan_dir__")
         result = scan_directory_result(missing)
         items = scan_directory(missing)
-        self.assertFalse(result.ok)
-        self.assertEqual("Game directory does not exist.", result.error)
-        self.assertEqual([], items)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert not result.ok
+        assert result.error == "Game directory does not exist."
+        assert items == []

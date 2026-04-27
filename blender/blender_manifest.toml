@@ -9,7 +9,7 @@ type = "add-on"
 
 tags = ["Import-Export", "3D View", "Animation"]
 
-blender_version_min = "4.2.0"
+blender_version_min = "5.0.0"
 license = ["SPDX:GPL-2.0-or-later"]
 
 platforms = ["windows-x64", "linux-x64"]

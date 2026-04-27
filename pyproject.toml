@@ -1,17 +1,28 @@
-[tool.poetry]
+[project]
 name = "opennova-tools"
 version = "0.1.0"
 description = "Standalone OpenNova tools (importer)"
 readme = "README.md"
-packages = [{include = "apps"}]
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "bpy>=5.0,<6.0",
+]
 
-[tool.poetry.dependencies]
-python = "~3.11"
-bpy = ">=4.0"
-
-[tool.poetry.scripts]
+[project.scripts]
 onimport = "apps.importer.__main__:main"
 
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pyinstaller>=6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["apps*"]

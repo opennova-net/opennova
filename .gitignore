@@ -27,6 +27,11 @@ build/
 *.pyc
 __pycache__/
 
+# Python tooling
+.venv/
+.pytest_cache/
+*.egg-info/
+
 # CMake
 CMakeCache.txt
 CMakeFiles/

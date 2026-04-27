@@ -1,1 +1,1 @@
-"""Python test package for unittest discovery."""
+"""Python test package."""

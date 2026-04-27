@@ -9,7 +9,7 @@ Open-source tools for extracting, converting, and editing 3D assets from Delta F
 Pre-built binaries are available on the [Releases](../../releases) page:
 
 - **`onimport.exe`** — Standalone Windows importer. No Python or Blender install required.
-- **`opennova_blender.zip`** — Blender 4.2+ addon with pre-built native libraries for Windows and Linux.
+- **`opennova_blender.zip`** — Blender 5.x addon with pre-built native libraries for Windows and Linux.
 - **`opennova-modtools-windows.zip`** — Standalone terrain editor for Windows. Includes the native runtime DLL; no Godot install required.
 - **`opennova-runtime-windows.zip`** — Game runtime for previewing exported scenes on Windows. Includes the native runtime DLL.
 
@@ -48,10 +48,10 @@ Run `onimport` with no arguments for the GUI.
 
 ### Running from source
 
-Requires Python 3.11 and the native library (see [Building](#building)).
+Requires Python 3.11, uv, bpy 5.x, and the native library (see [Building](#building)).
 
 ```bash
-poetry install
+uv sync
 
 # Build and copy the native library
 cmake -S . -B build -DBUILD_SHARED_LIB=ON -DCMAKE_BUILD_TYPE=Release
@@ -59,12 +59,12 @@ cmake --build build --config Release --target opennova_shared
 mkdir -p blender/lib/windows-x64
 cp build/Release/opennova.dll blender/lib/windows-x64/
 
-poetry run onimport scan --dir "C:\Games\Delta Force"
+uv run onimport scan --dir "C:\Games\Delta Force"
 ```
 
 ## Blender Addon
 
-A Blender 4.2+ addon for the export side of the asset pipeline. Install via the zip from [Releases](../../releases) or point Blender at the `blender/` directory for development.
+A Blender 5.x addon for the export side of the asset pipeline. Install via the zip from [Releases](../../releases) or point Blender at the `blender/` directory for development.
 
 ### ASE Export
 
@@ -119,6 +119,7 @@ Modular libraries for parsing and writing NovaLogic formats. All expose a C API 
 
 - CMake 3.16+
 - C++ compiler with C++17 support
+- Python 3.11 and uv for importer tooling and Python tests
 - Godot 4.6.1 (only for Godot work; `scripts/build.sh` fetches it via `scripts/bootstrap_godot.sh`)
 
 ### Build and Test
@@ -130,10 +131,12 @@ scripts/build.sh
 Or manually:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOPENNOVA_ENABLE_PYTHON_TESTS=ON
 cmake --build build --config Release
 ctest --test-dir build --build-config Release
 ```
+
+For the Python suite alone, run `bash scripts/test_python.sh`.
 
 ### Package Blender Addon
 
