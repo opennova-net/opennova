@@ -41,6 +41,10 @@ func can_new() -> bool:
 	return environment_editor != null
 
 
+func get_new_action_label() -> String:
+	return "New Environment"
+
+
 func new_current() -> Error:
 	if environment_editor == null:
 		return ERR_UNAVAILABLE
@@ -50,6 +54,10 @@ func new_current() -> Error:
 
 func can_open() -> bool:
 	return environment_editor != null
+
+
+func get_open_action_label() -> String:
+	return "Open Environment..."
 
 
 func get_open_dialog_title() -> String:
@@ -76,8 +84,16 @@ func can_save() -> bool:
 	return environment_editor != null and environment_editor.is_dirty
 
 
+func get_save_action_label() -> String:
+	return "Save Environment"
+
+
 func can_save_as() -> bool:
 	return environment_editor != null
+
+
+func get_save_as_action_label() -> String:
+	return "Save Environment As..."
 
 
 func save_current() -> Error:
@@ -90,6 +106,10 @@ func save_as(dir_path: String) -> Error:
 
 func can_export() -> bool:
 	return environment_editor != null and environment_editor.env_file != null
+
+
+func has_export_action() -> bool:
+	return false
 
 
 func begin_export(dir_path: String, _flavor: int) -> Error:

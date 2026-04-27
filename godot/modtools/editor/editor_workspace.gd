@@ -103,12 +103,28 @@ func can_new() -> bool:
 	return false
 
 
+func has_new_action() -> bool:
+	return can_new()
+
+
+func get_new_action_label() -> String:
+	return "New"
+
+
 func new_current() -> Error:
 	return ERR_UNAVAILABLE
 
 
 func can_open() -> bool:
 	return false
+
+
+func has_open_action() -> bool:
+	return can_open()
+
+
+func get_open_action_label() -> String:
+	return "Open..."
 
 
 func get_open_dialog_title() -> String:
@@ -131,8 +147,24 @@ func can_save() -> bool:
 	return false
 
 
+func has_save_action() -> bool:
+	return can_save() or can_save_as()
+
+
+func get_save_action_label() -> String:
+	return "Save"
+
+
 func can_save_as() -> bool:
 	return false
+
+
+func has_save_as_action() -> bool:
+	return can_save_as()
+
+
+func get_save_as_action_label() -> String:
+	return "Save As..."
 
 
 func save_current() -> Error:
@@ -145,6 +177,14 @@ func save_as(_dir_path: String) -> Error:
 
 func can_export() -> bool:
 	return false
+
+
+func has_export_action() -> bool:
+	return can_export()
+
+
+func get_export_action_label() -> String:
+	return "Export..."
 
 
 func begin_export(_dir_path: String, _flavor: int) -> Error:

@@ -27,56 +27,6 @@ grow_vertical = 2
 mouse_filter = 2
 theme_override_constants/separation = 12
 
-[node name="TopBar" type="PanelContainer" parent="WorkstationLayout"]
-layout_mode = 2
-
-[node name="TopBarMargin" type="MarginContainer" parent="WorkstationLayout/TopBar"]
-layout_mode = 2
-theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 8
-theme_override_constants/margin_right = 12
-theme_override_constants/margin_bottom = 8
-
-[node name="TopBarRow" type="HBoxContainer" parent="WorkstationLayout/TopBar/TopBarMargin"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="FileMenu" type="MenuButton" parent="WorkstationLayout/TopBar/TopBarMargin/TopBarRow"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "File"
-
-[node name="ProjectLabel" type="Label" parent="WorkstationLayout/TopBar/TopBarMargin/TopBarRow"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-theme_type_variation = &"Heading"
-text = "OpenNova Terrain Editor"
-vertical_alignment = 1
-
-[node name="SaveButton" type="Button" parent="WorkstationLayout/TopBar/TopBarMargin/TopBarRow"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Save"
-
-[node name="ExportButton" type="Button" parent="WorkstationLayout/TopBar/TopBarMargin/TopBarRow"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Export"
-
-[node name="TopBarSep" type="VSeparator" parent="WorkstationLayout/TopBar/TopBarMargin/TopBarRow"]
-layout_mode = 2
-
-[node name="UndoButton" type="Button" parent="WorkstationLayout/TopBar/TopBarMargin/TopBarRow"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Undo"
-
-[node name="RedoButton" type="Button" parent="WorkstationLayout/TopBar/TopBarMargin/TopBarRow"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Redo"
-
 [node name="BodyRow" type="HBoxContainer" parent="WorkstationLayout"]
 layout_mode = 2
 mouse_filter = 2
@@ -101,6 +51,14 @@ layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 10
 
+[node name="ProjectLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Heading"
+text = "OpenNova Terrain Editor"
+vertical_alignment = 1
+
 [node name="WorkspaceLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
 layout_mode = 2
 theme_type_variation = &"Heading"
@@ -110,6 +68,11 @@ text = "Workspace"
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 4
+
+[node name="WorkspaceActionsHost" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
 
 [node name="WorkspaceSeparator" type="HSeparator" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
 layout_mode = 2

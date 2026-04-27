@@ -15,6 +15,33 @@ const StampInspectorScene = preload("res://modtools/terrain/ui/inspectors/stamp_
 const QuadrantBoardScript = preload("res://modtools/terrain/ui/widgets/quadrant_board.gd")
 
 
+func _workspace_action_texts(host: Node) -> Array:
+	var texts := []
+	for child in host.get_children():
+		if child is Button:
+			texts.append((child as Button).text)
+	return texts
+
+
+func _find_button_by_text(root: Node, text: String) -> Button:
+	if root is Button and (root as Button).text == text:
+		return root as Button
+	for child in root.get_children():
+		var found := _find_button_by_text(child, text)
+		if found != null:
+			return found
+	return null
+
+
+func _has_label_text(root: Node, text: String) -> bool:
+	if root is Label and (root as Label).text == text:
+		return true
+	for child in root.get_children():
+		if _has_label_text(child, text):
+			return true
+	return false
+
+
 func test_workstation_starts_with_three_domain_workspaces() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
@@ -26,7 +53,7 @@ func test_workstation_starts_with_three_domain_workspaces() -> void:
 	assert_eq((workspace_rail.get_child(2) as Button).text, "Mission", "Mission should have a reserved workspace.")
 
 
-func test_mission_placeholder_disables_file_commands() -> void:
+func test_mission_placeholder_shows_no_document_actions() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
 	editor.is_dirty = true
@@ -34,12 +61,19 @@ func test_mission_placeholder_disables_file_commands() -> void:
 	workstation.set_editor(editor)
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
 
+	var actions_host: VBoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	var inspector_host: Control = workstation.get_node("%InspectorHost")
 	assert_eq(workstation.get_node("%ProjectLabel").text, "Mission", "Placeholder workspaces should own the shell title while active.")
 	assert_false(workstation.get_node("%AssetDock").visible, "Terrain properties should hide outside the terrain workspace.")
-	assert_true((workstation.get_node("%FileMenu") as MenuButton).disabled, "Terrain file commands should be disabled for placeholder domains.")
-	assert_true((workstation.get_node("%SaveButton") as Button).disabled, "Save should be disabled until the domain implements persistence.")
-	assert_true((workstation.get_node("%ExportButton") as Button).disabled, "Export should be disabled until the domain implements export.")
-	assert_true((workstation.get_node("%UndoButton") as Button).disabled, "Undo should route through the active workspace and stay disabled for placeholders.")
+	assert_null(workstation.get_node_or_null("%FileMenu"), "Global File menu should be removed.")
+	assert_null(workstation.get_node_or_null("%SaveButton"), "Global Save button should be removed.")
+	assert_null(workstation.get_node_or_null("%ExportButton"), "Global Export button should be removed.")
+	assert_null(workstation.get_node_or_null("WorkstationLayout/TopBar"), "The global top bar should be removed.")
+	assert_null(workstation.get_node_or_null("%UndoButton"), "Undo should not have a toolbar button; it stays on universal shortcuts.")
+	assert_null(workstation.get_node_or_null("%RedoButton"), "Redo should not have a toolbar button; it stays on universal shortcuts.")
+	assert_false(actions_host.visible, "Mission should not expose workspace document actions.")
+	assert_eq(actions_host.get_child_count(), 0, "Mission should not build document action buttons.")
+	assert_true(_has_label_text(inspector_host, "Coming soon"), "Mission should show a compact coming-soon placeholder.")
 
 
 func test_environment_workspace_exposes_env_document_controls() -> void:
@@ -51,18 +85,16 @@ func test_environment_workspace_exposes_env_document_controls() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.ENVIRONMENT)
 	await get_tree().process_frame
 
-	var file_menu := workstation.get_node("%FileMenu") as MenuButton
-	var save_button := workstation.get_node("%SaveButton") as Button
-	var export_button := workstation.get_node("%ExportButton") as Button
-	var popup := file_menu.get_popup()
+	var actions_host: VBoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	var save_button := _find_button_by_text(actions_host, "Save Environment")
 	var inspector_host: Control = workstation.get_node("%InspectorHost")
 	var inspector := inspector_host.get_child(inspector_host.get_child_count() - 1)
 	assert_eq(workstation.get_node("%ProjectLabel").text, "untitled", "Environment should own the shell title when active.")
 	assert_false(workstation.get_node("%AssetDock").visible, "Terrain properties should hide outside the environment workspace.")
-	assert_false(file_menu.disabled, "Environment should expose file commands.")
-	assert_eq(popup.get_item_text(popup.get_item_index(EditorWorkstationScript.FileMenuItem.OPEN)), "Open .env...", "Open should use the active workspace file type.")
+	assert_eq(_workspace_action_texts(actions_host), ["New Environment", "Open Environment...", "Save Environment", "Save Environment As..."], "Environment should own its document actions without a separate export.")
+	assert_not_null(save_button, "Environment should expose Save Environment.")
 	assert_true(save_button.disabled, "Clean new environments should not enable Save until changed.")
-	assert_false(export_button.disabled, "Environment export should be available once an EnvFile exists.")
+	assert_null(_find_button_by_text(actions_host, "Export Environment..."), "Environment should not advertise export separately from save.")
 	assert_true(inspector.get_script() == EnvironmentInspectorScript, "Environment should build its inspector instead of a placeholder.")
 
 	environment_editor.env_file.set_env_name("storm_test")
@@ -70,6 +102,23 @@ func test_environment_workspace_exposes_env_document_controls() -> void:
 
 	assert_eq(workstation.get_node("%ProjectLabel").text, "storm_test*", "Environment edits should dirty the active document title.")
 	assert_false(save_button.disabled, "Dirty environments should enable Save.")
+
+
+func test_terrain_workspace_exposes_project_save_and_export_actions() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var editor = autofree(TerrainEditorScript.new())
+	editor.is_dirty = true
+
+	workstation.set_editor(editor)
+
+	var actions_host: VBoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	var save_button := _find_button_by_text(actions_host, "Save Project")
+	var export_button := _find_button_by_text(actions_host, "Export Terrain...")
+	assert_eq(_workspace_action_texts(actions_host), ["New Terrain", "Open Terrain...", "Save Project", "Save Project As...", "Export Terrain..."], "Terrain should expose project actions and a distinct export action.")
+	assert_not_null(save_button, "Terrain should expose Save Project.")
+	assert_not_null(export_button, "Terrain should expose Export Terrain.")
+	assert_false(save_button.disabled, "Dirty terrain projects should enable Save Project.")
+	assert_false(export_button.disabled, "Terrain export should be available when the editor is idle.")
 
 
 func test_switching_workspaces_preserves_terrain_dirty_state() -> void:

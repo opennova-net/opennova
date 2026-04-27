@@ -175,6 +175,10 @@ func can_new() -> bool:
 	return terrain_editor != null and not is_busy()
 
 
+func get_new_action_label() -> String:
+	return "New Terrain"
+
+
 func new_current() -> Error:
 	if terrain_editor == null:
 		return ERR_UNAVAILABLE
@@ -184,6 +188,10 @@ func new_current() -> Error:
 
 func can_open() -> bool:
 	return terrain_editor != null and not is_busy()
+
+
+func get_open_action_label() -> String:
+	return "Open Terrain..."
 
 
 func get_open_dialog_title() -> String:
@@ -208,8 +216,16 @@ func can_save() -> bool:
 	return terrain_editor != null and terrain_editor.is_dirty and not is_busy()
 
 
+func get_save_action_label() -> String:
+	return "Save Project"
+
+
 func can_save_as() -> bool:
 	return terrain_editor != null and not is_busy()
+
+
+func get_save_as_action_label() -> String:
+	return "Save Project As..."
 
 
 func save_current() -> Error:
@@ -226,6 +242,14 @@ func save_as(dir_path: String) -> Error:
 
 func can_export() -> bool:
 	return terrain_editor != null and not is_busy()
+
+
+func has_export_action() -> bool:
+	return terrain_editor != null
+
+
+func get_export_action_label() -> String:
+	return "Export Terrain..."
 
 
 func begin_export(dir_path: String, flavor: int) -> Error:

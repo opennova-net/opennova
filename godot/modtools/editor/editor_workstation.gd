@@ -17,16 +17,12 @@ enum PromptKind { NONE, UNSAVED, EXPORT, CDEP }
 
 signal workflow_changed(workflow_id: int)
 
-enum FileMenuItem { NEW, OPEN, SEP1, SAVE, SAVE_AS, SEP2, EXPORT }
+enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 
-@onready var _file_menu: MenuButton = %FileMenu
 @onready var _project_label: Label = %ProjectLabel
-@onready var _save_button: Button = %SaveButton
-@onready var _export_button: Button = %ExportButton
-@onready var _undo_button: Button = %UndoButton
-@onready var _redo_button: Button = %RedoButton
 @onready var _left_lane: PanelContainer = %LeftLane
 @onready var _workspace_rail: HBoxContainer = %WorkspaceRail
+@onready var _workspace_actions_host: VBoxContainer = %WorkspaceActionsHost
 @onready var _modes_label: Label = %ModesLabel
 @onready var _mode_rail: VBoxContainer = %ModeRail
 @onready var _inspector_host: Control = %InspectorHost
@@ -70,6 +66,7 @@ var editor: Node
 var _active_workspace_id: int = Workspace.TERRAIN
 var _workspaces: Dictionary = {}
 var _workspace_buttons: Dictionary = {}
+var _workspace_action_buttons: Dictionary = {}
 var _current_workflow_id: int = -1
 var _workflow_buttons: Dictionary = {}
 var _placeholder_workspace_id: int = -1
@@ -87,7 +84,6 @@ var _prompt_tertiary_action: Callable = Callable()
 func _ready() -> void:
 	_ensure_workspaces()
 	_build_workspace_rail()
-	_wire_top_bar()
 	_wire_prompts()
 	_wire_tile_gizmo()
 	_project_label.clip_text = true
@@ -120,7 +116,7 @@ func sync_from_editor_state() -> void:
 	_refresh_workspace_buttons()
 	_refresh_workflow_from_workspace()
 	_refresh_project_label()
-	_refresh_top_bar_state()
+	_refresh_shell_state()
 	_refresh_status()
 	_refresh_tile_gizmo()
 	_sync_export_progress()
@@ -130,18 +126,10 @@ func sync_from_editor_state() -> void:
 
 
 func _process(_delta: float) -> void:
-	_refresh_top_bar_state()
+	_refresh_shell_state()
 	_sync_export_progress()
 	_refresh_status()
 	_refresh_tile_gizmo()
-
-
-func _wire_top_bar() -> void:
-	_undo_button.pressed.connect(_on_undo_pressed)
-	_redo_button.pressed.connect(_on_redo_pressed)
-	_save_button.pressed.connect(_on_save_pressed)
-	_export_button.pressed.connect(_on_export_pressed)
-	_build_file_menu()
 
 
 func _ensure_workspaces() -> void:
@@ -172,6 +160,79 @@ func _build_workspace_rail() -> void:
 		_workspace_rail.add_child(btn)
 		_workspace_buttons[workspace_id] = btn
 	_refresh_workspace_buttons()
+
+
+func _rebuild_workspace_actions(workspace: Variant) -> void:
+	for child in _workspace_actions_host.get_children():
+		_workspace_actions_host.remove_child(child)
+		child.free()
+	_workspace_action_buttons.clear()
+
+	if workspace == null:
+		_workspace_actions_host.visible = false
+		return
+
+	var action_defs := [
+		{"id": WorkspaceAction.NEW, "visible": workspace.has_new_action(), "label": workspace.get_new_action_label()},
+		{"id": WorkspaceAction.OPEN, "visible": workspace.has_open_action(), "label": workspace.get_open_action_label()},
+		{"id": WorkspaceAction.SAVE, "visible": workspace.has_save_action(), "label": workspace.get_save_action_label()},
+		{"id": WorkspaceAction.SAVE_AS, "visible": workspace.has_save_as_action(), "label": workspace.get_save_as_action_label()},
+		{"id": WorkspaceAction.EXPORT, "visible": workspace.has_export_action(), "label": workspace.get_export_action_label()},
+	]
+	for action_def in action_defs:
+		if not bool(action_def["visible"]):
+			continue
+		var btn := Button.new()
+		var action_id := int(action_def["id"])
+		btn.name = _workspace_action_button_name(action_id)
+		btn.text = String(action_def["label"])
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.custom_minimum_size = Vector2(0, 34)
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.pressed.connect(_on_workspace_action_pressed.bind(action_id))
+		_workspace_actions_host.add_child(btn)
+		_workspace_action_buttons[action_id] = btn
+
+	_workspace_actions_host.visible = not _workspace_action_buttons.is_empty()
+	_refresh_workspace_actions_state()
+
+
+func _workspace_action_button_name(action_id: int) -> String:
+	match action_id:
+		WorkspaceAction.NEW:
+			return "NewActionButton"
+		WorkspaceAction.OPEN:
+			return "OpenActionButton"
+		WorkspaceAction.SAVE:
+			return "SaveActionButton"
+		WorkspaceAction.SAVE_AS:
+			return "SaveAsActionButton"
+		WorkspaceAction.EXPORT:
+			return "ExportActionButton"
+		_:
+			return "WorkspaceActionButton"
+
+
+func _refresh_workspace_actions_state() -> void:
+	if _workspace_actions_host == null:
+		return
+	var workspace = _get_active_workspace()
+	var busy := _any_workspace_busy()
+	for action_id in _workspace_action_buttons:
+		var btn := _workspace_action_buttons[action_id] as Button
+		if btn == null:
+			continue
+		match int(action_id):
+			WorkspaceAction.NEW:
+				btn.disabled = busy or workspace == null or not workspace.can_new()
+			WorkspaceAction.OPEN:
+				btn.disabled = busy or workspace == null or not workspace.can_open()
+			WorkspaceAction.SAVE:
+				btn.disabled = busy or workspace == null or not workspace.can_save()
+			WorkspaceAction.SAVE_AS:
+				btn.disabled = busy or workspace == null or not workspace.can_save_as()
+			WorkspaceAction.EXPORT:
+				btn.disabled = busy or workspace == null or not workspace.can_export()
 
 
 func _workspace_tooltip(workspace_id: int) -> String:
@@ -236,6 +297,7 @@ func _refresh_workspace_surface() -> void:
 	var workspace = _get_active_workspace()
 	var workflows: Array = workspace.get_workflows() if workspace != null else []
 	var has_workflows: bool = not workflows.is_empty()
+	_rebuild_workspace_actions(workspace)
 	_modes_label.visible = has_workflows
 	_mode_rail.visible = has_workflows
 	_asset_dock.visible = workspace != null and workspace.uses_asset_dock()
@@ -302,21 +364,7 @@ func _wire_tile_gizmo() -> void:
 	_tile_gizmo_delete.pressed.connect(_on_tile_gizmo_delete_pressed)
 
 
-func _build_file_menu() -> void:
-	var popup := _file_menu.get_popup()
-	popup.clear()
-	popup.add_item("New", FileMenuItem.NEW)
-	popup.add_item("Open .trn...", FileMenuItem.OPEN)
-	popup.add_separator()
-	popup.add_item("Save", FileMenuItem.SAVE)
-	popup.add_item("Save as...", FileMenuItem.SAVE_AS)
-	popup.add_separator()
-	popup.add_item("Export...", FileMenuItem.EXPORT)
-	if not popup.id_pressed.is_connected(_on_file_menu_selected):
-		popup.id_pressed.connect(_on_file_menu_selected)
-
-
-func _on_file_menu_selected(id: int) -> void:
+func _on_workspace_action_pressed(action_id: int) -> void:
 	var workspace = _get_active_workspace()
 	if workspace == null:
 		return
@@ -328,11 +376,11 @@ func _on_file_menu_selected(id: int) -> void:
 		var err: Error = workspace.save_as(dir_path)
 		if err != OK:
 			show_status_message("Save failed (error %d)" % err, 6.0)
-	match id:
-		FileMenuItem.NEW:
+	match action_id:
+		WorkspaceAction.NEW:
 			if workspace.can_new():
 				workspace.new_current()
-		FileMenuItem.OPEN:
+		WorkspaceAction.OPEN:
 			if not workspace.can_open():
 				return
 			_open_file_dialog(
@@ -341,15 +389,15 @@ func _on_file_menu_selected(id: int) -> void:
 				open_trn,
 				workspace.get_open_dialog_dir()
 			)
-		FileMenuItem.SAVE:
+		WorkspaceAction.SAVE:
 			_on_save_pressed()
-		FileMenuItem.SAVE_AS:
+		WorkspaceAction.SAVE_AS:
 			_open_dir_dialog(
 				workspace.get_save_dialog_title(),
 				save_project_as,
 				_preferred_save_dir()
 			)
-		FileMenuItem.EXPORT:
+		WorkspaceAction.EXPORT:
 			_on_export_pressed()
 
 
@@ -422,18 +470,6 @@ func _preferred_export_dir() -> String:
 	return editor.get_last_save_dir()
 
 
-func _on_undo_pressed() -> void:
-	var workspace = _get_active_workspace()
-	if workspace != null:
-		workspace.undo()
-
-
-func _on_redo_pressed() -> void:
-	var workspace = _get_active_workspace()
-	if workspace != null:
-		workspace.redo()
-
-
 func _on_save_pressed() -> void:
 	var workspace = _get_active_workspace()
 	if workspace == null:
@@ -471,71 +507,14 @@ func _on_export_pressed() -> void:
 	)
 
 
-func _refresh_top_bar_state() -> void:
-	var workspace = _get_active_workspace()
+func _refresh_shell_state() -> void:
 	var busy := _any_workspace_busy()
-	_file_menu.disabled = workspace == null or busy or not _workspace_has_file_actions(workspace)
-	_sync_file_menu_labels(workspace)
-	_sync_file_menu_state(workspace, busy)
+	_refresh_workspace_actions_state()
 	for button in _workflow_buttons.values():
 		var workflow_button := button as Button
 		if workflow_button:
 			workflow_button.disabled = busy
-
-	if workspace == null:
-		_save_button.disabled = true
-		_export_button.disabled = true
-		_undo_button.disabled = true
-		_redo_button.disabled = true
-		_apply_busy_modulation(false)
-		return
-
-	_save_button.disabled = busy or not workspace.can_save()
-	_export_button.disabled = busy or not workspace.can_export()
-	_undo_button.disabled = busy or not workspace.can_undo()
-	_redo_button.disabled = busy or not workspace.can_redo()
 	_apply_busy_modulation(busy)
-
-
-func _workspace_has_file_actions(workspace: Variant) -> bool:
-	if workspace == null:
-		return false
-	return workspace.can_new() or workspace.can_open() or workspace.can_save() or workspace.can_save_as() or workspace.can_export()
-
-
-func _sync_file_menu_labels(workspace: Variant) -> void:
-	if _file_menu == null:
-		return
-	var popup := _file_menu.get_popup()
-	if popup == null or popup.get_item_count() < 7:
-		return
-	var open_label := "Open..."
-	if workspace != null:
-		match workspace.get_workspace_id():
-			"terrain":
-				open_label = "Open .trn..."
-			"environment":
-				open_label = "Open .env..."
-	popup.set_item_text(popup.get_item_index(FileMenuItem.OPEN), open_label)
-
-
-func _sync_file_menu_state(workspace: Variant, busy: bool) -> void:
-	if _file_menu == null:
-		return
-	var popup := _file_menu.get_popup()
-	if popup == null or popup.get_item_count() < 7:
-		return
-	_set_file_menu_item_disabled(popup, FileMenuItem.NEW, busy or workspace == null or not workspace.can_new())
-	_set_file_menu_item_disabled(popup, FileMenuItem.OPEN, busy or workspace == null or not workspace.can_open())
-	_set_file_menu_item_disabled(popup, FileMenuItem.SAVE, busy or workspace == null or not workspace.can_save())
-	_set_file_menu_item_disabled(popup, FileMenuItem.SAVE_AS, busy or workspace == null or not workspace.can_save_as())
-	_set_file_menu_item_disabled(popup, FileMenuItem.EXPORT, busy or workspace == null or not workspace.can_export())
-
-
-func _set_file_menu_item_disabled(popup: PopupMenu, id: int, disabled: bool) -> void:
-	var index := popup.get_item_index(id)
-	if index >= 0:
-		popup.set_item_disabled(index, disabled)
 
 
 func _apply_busy_modulation(active: bool) -> void:
@@ -930,7 +909,7 @@ func on_export_completed(err: Error, message: String) -> void:
 		show_status_message(message, 6.0)
 	else:
 		show_status_message("Export failed (error %d)" % err, 6.0)
-	_refresh_top_bar_state()
+	_refresh_shell_state()
 
 
 func _sync_export_progress() -> void:

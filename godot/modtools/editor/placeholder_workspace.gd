@@ -33,3 +33,31 @@ func get_status_tool() -> String:
 
 func get_status_context() -> String:
 	return _status_context
+
+
+func build_inspector(host: Control) -> void:
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	host.add_child(margin)
+
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_child(box)
+
+	var title := Label.new()
+	title.text = "Coming soon"
+	title.theme_type_variation = &"Heading"
+	box.add_child(title)
+
+	var body := Label.new()
+	body.text = _status_context
+	body.theme_type_variation = &"Muted"
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(body)
