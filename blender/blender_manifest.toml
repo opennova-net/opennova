@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "opennova_blender"
-version = "0.0.1"
+version = "0.0.2"
 name = "OpenNova Blender Addon"
 tagline = "Export Novalogic ASE files and animations; import Mixamo FBX for animation workflow"
 maintainer = "Taylor Finnell <noreply@anthropic.com>"
