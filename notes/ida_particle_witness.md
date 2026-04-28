@@ -22,6 +22,99 @@ GRAVITATE move, 8-mode shader split). See plan
 - **pending** — not yet evaluated.
 - **deferred** — out of scope for this worktree (runtime / emitter / atlasing).
 
+## Bump / Bumpadd lit-color RE (2026-04-28, port deferred)
+
+The engine's "bump" lighting effect is implemented via a 2-color vertex
+format combined with a fixed-function texture stage combiner. Hard data:
+
+**Light direction** (`flt_848D34/D38/D3C` at `0x848D34`, raw bytes
+`46 B6 13 BF / 46 B6 13 BF / 46 B6 13 3F`):
+
+```
+flt_848D34 = -0.5773503  // = -1/√3
+flt_848D38 = -0.5773503  // = -1/√3
+flt_848D3C = +0.5773503  // = +1/√3
+```
+
+This is the engine's hardcoded global directional light, a unit vector
+along the diagonal `(-1, -1, +1)/√3`. Used for ALL bump-shaded particles
+across the engine — there's no per-emitter or per-spawn override.
+
+**Lit-color computation in `BuildBillboardQuads @ 0x5e6d60`** (when
+`particle.flags & 0x80` (LitColor for Bump=3 and Bumpadd=6) is set):
+
+```
+1. Compose per-particle rotation matrix:
+   D3DXMatrixRotationX(R, particle.rotation_radians)  // around X axis
+   composed = R × parent_matrix  // parent_matrix at emitter+664
+
+2. Compute inverse via D3DXMatrixTranspose (sub_68BF44 → off_8507A8 IAT
+   thunk, mirrored at internal `?c_D3DXMatrixTranspose` @ 0x68bf4a):
+   inv_rotation = transpose(composed)
+
+3. Build light direction in particle local space:
+   light_local.x = bump_scale * (-flt_848D34)   // = +bump_scale * 0.577
+   light_local.y = bump_scale * (-flt_848D38)   // = +bump_scale * 0.577
+   light_local.z = bump_scale * (+flt_848D3C)   // = +bump_scale * 0.577
+   light_local = inv_rotation × light_local      // sub_68B52B = D3DXVec3Transform
+
+4. Encode each component to a byte via remap signed → unsigned:
+   byte = clamp((value + 1.0) * 0.5, 0.0, 1.0) * 255
+
+5. Compose primary vertex color:
+   primary_RGB = (byte_x << 16) | (byte_y << 8) | byte_z
+   primary = (modulated.alpha << 24) | primary_RGB
+   // i.e., RGB replaced by encoded light direction; alpha kept from modulated
+
+6. Compose secondary vertex color:
+   secondary = modulated_RGB | 0xFF000000
+   // i.e., raw modulated RGB with full alpha
+```
+
+The resulting vertex carries TWO colors per corner. The fixed-function
+texture stage combiner (TSS state — not yet decoded) uses both:
+- Bump (mode 3): combiner does `texture × diffuse × specular` (modulate)
+  giving a lit-color-tinted modulated texture
+- Bumpadd (mode 6): different combiner op (additive blend of stages)
+
+**Vertex layout** at offsets relative to `_ESI` (vertex base) per the
+engine code:
+- `+0..+8`: position xyz (12 B)
+- `+12`: primary color (lit color or modulated color, depending on flags)
+- `+16`: secondary color (modulated, full alpha)
+- `+20..+24`: uv (8 B)
+- Stride = 28 B/vertex × 4 verts/quad = 112 B/quad
+
+**Port scope** (deferred to a future slice):
+1. Add a 2nd Color vertex attribute to our `ArrayMesh` quads (Godot's
+   `ARRAY_CUSTOM0..3` for an extra per-vertex value).
+2. In `nova_particle_emitter.cpp::_update_meshes`, when
+   `particle.flags & particle_runtime_flag::LitColor` is set, compute the
+   lit color per-particle:
+   - Build rotation matrix from particle.rotation around an axis
+     consistent with our billboard's local frame (likely camera forward,
+     not engine's X axis convention — needs validation).
+   - Multiply by camera basis (or emitter orientation, depending on
+     interpretation).
+   - Invert via transpose.
+   - Transform light direction into local space.
+   - Encode to bytes.
+3. Update `particle_blend_bump.gdshader` to consume the lit color via
+   the custom attribute, producing `texture × secondary × primary` in
+   fragment.
+4. Same for `particle_blend_bumpadd.gdshader` but with additive
+   composition.
+
+**Outstanding RE for the port to be engine-faithful:**
+- Texture-stage combiner state (D3DTSS_COLOROP, _COLORARG1, _COLORARG2)
+  for Bump vs Bumpadd. Currently we don't know whether the engine uses
+  D3DTOP_MODULATE or D3DTOP_ADD (or some 2x variant) for stage 1.
+- Whether the per-particle rotation in the engine's matrix is around
+  X-axis literally (D3DXMatrixRotationX) or whether the X here is a
+  billboard-local "screen normal" axis re-named in the engine's
+  coordinate convention. The composition with `parent_matrix` at
+  emitter+664 (which IS world-space) suggests the X really is X.
+
 ## Kong-rename corrections (RE 2026-04-28)
 
 Kong renamed several engine functions involved in the particle render path
