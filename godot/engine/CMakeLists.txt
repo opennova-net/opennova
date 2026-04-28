@@ -11,6 +11,7 @@ add_subdirectory(../../libs/trn opennova_trn)
 add_subdirectory(../../libs/cpt opennova_cpt)
 add_subdirectory(../../libs/env opennova_env)
 add_subdirectory(../../libs/terrain opennova_terrain)
+add_subdirectory(../../libs/particle opennova_particle)
 
 set(TARGET_NAME "opennova")
 
@@ -31,6 +32,15 @@ add_library(${TARGET_NAME} SHARED
     terrain/til_resource_format.cpp
     env/nova_env_keyframe.cpp
     env/env_file.cpp
+    particle/nova_particle_curve_ref.cpp
+    particle/nova_particle_effect.cpp
+    particle/nova_particle_table_handles.cpp
+    particle/nova_particle_table.cpp
+    particle/nova_particle_graphic_layer.cpp
+    particle/nova_particle_def.cpp
+    particle/nova_particle_file.cpp
+    particle/nova_particle_emitter.cpp
+    particle/ptl_resource_format.cpp
     util/nova_data_format.cpp
     util/nova_texture_format.cpp
     util/pcx_texture_bridge.cpp
@@ -51,6 +61,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_cpt
     opennova_env
     opennova_terrain
+    opennova_particle
 )
 
 # The bake worker thread in nova_terrain_build_job.cpp installs
