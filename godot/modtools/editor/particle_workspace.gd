@@ -10,7 +10,7 @@ extends "res://modtools/editor/editor_workspace.gd"
 #   CParticleEmitter_AdvanceFrame   @ 0x5e6570  (per-frame sim)
 #   CParticleEffectDef_WriteToFile  @ 0x5e0fe0  (effectdef writer)
 
-const ParticleEditorScene = preload("res://modtools/particle/particle_editor.tscn")
+const ParticleEditorScript = preload("res://modtools/particle/particle_editor.gd")
 const ParticlePreviewScript = preload("res://modtools/particle/particle_preview.gd")
 const EffectInspectorScene = preload("res://modtools/particle/inspectors/effect_inspector.tscn")
 const ParticleInspectorScene = preload("res://modtools/particle/inspectors/particle_inspector.tscn")
@@ -32,7 +32,7 @@ var _last_open_dir: String = ""
 
 
 func _init() -> void:
-	particle_editor = ParticleEditor.new()
+	particle_editor = ParticleEditorScript.new()
 
 
 func activate() -> void:

@@ -142,6 +142,27 @@ Per-graphic-layer (788 B) layout, parsed in the loop at `0x5ee47f`+:
 | `+716` | `flip_frames` | i32 | Defaults to 1 if not provided |
 | `+720` | `flip_rate` | i32 | |
 
+## Godot integration (Phase 3, 2026-04-28)
+
+GDExtension wrappers in `godot/engine/particle/` plus modtools workspace in
+`godot/modtools/particle/`. The portable simulator drives `NovaParticleEmitter`
+(Node3D) → `MultiMeshInstance3D` billboards. Editor exposes effects, particles,
+and curve tables via three workflow inspectors with a live SubViewport preview
+(FlyCamera + reference grid, mirroring `objects-codex/godot/modtools/object/`).
+
+| Code-loc | Item | Tag/struct/fn | IDA witness | Verdict |
+| --- | --- | --- | --- | --- |
+| `godot/engine/particle/nova_particle_file.{h,cpp}` | wrapper | `CParticleSystemDef_*` (file-scope) | top-level Resource owns parsed `opennova::particle::ParticleFile`; `load_from_file` / `save_to_file` route through libs/particle. | match (semantic) |
+| `godot/engine/particle/nova_particle_def.{h,cpp}` | wrapper | `CParticleEffectDef` (~5204 B) | exposes ~80 fields via inspector groups (Identity / Emission / Lifetime / Visual / Curves / Motion / Sounds + Graphics). flags + move stored as both raw string AND uint32 bitfield (engine has both). | match (semantic) |
+| `godot/engine/particle/nova_particle_graphic_layer.{h,cpp}` | wrapper | per-graphic 788 B block (engine offsets +148/+936/+1724/+2512) | inspector enum hint exposes the 8 BlendMode values from CParticleDefEntry_ParseBlendMode @ 0x5e29f0. | match (semantic) |
+| `godot/engine/particle/nova_particle_curve_ref.{h,cpp}` | wrapper | curve reference (name + reverse + inverse) | reverse=bit 0x02, inverse=bit 0x01 from CParticleDef_ParseProperties @ 0x5ea320. | match (semantic) |
+| `godot/engine/particle/nova_particle_table.{h,cpp}` | wrapper | TableDef LUT | 32 rows × 8 = 256-byte logical curve; `sample(t)` does linear interpolation for editor visualization and future runtime curve evaluation. | match (semantic) |
+| `godot/engine/particle/nova_particle_emitter.{h,cpp}` | wrapper | `CParticleEmitter` Node3D | drives MultiMeshInstance3D + ShaderMaterial; runs `opennova::particle::emitter_advance` per-frame. Default StandardMaterial3D (additive) until 8-mode shader lands. | match (semantic) |
+| `godot/engine/particle/ptl_resource_format.{h,cpp}` | loader/saver | (no engine analogue — Godot ResourceFormat) | `_get_recognized_extensions()` = `.ptl`; `_load()` returns `NovaParticleFile`; `_save()` round-trips. | match (semantic) |
+| `godot/modtools/editor/particle_workspace.gd` | editor adapter | n/a | three workflows (Effects / Particles / Tables); save/save-as/open file actions; mounts ParticlePreview SubViewport into shell `_viewport_lane`. | match (semantic) |
+| `godot/modtools/particle/particle_preview.gd` | editor viewport | `CParticleEmitter_BuildBillboardQuads @ 0x5e6d60` (visual surface only) | SubViewport + FlyCamera + grid; one NovaParticleEmitter spawns whatever the inspector selected. | match (semantic) |
+| `godot/modtools/particle/shaders/particle_billboard.gdshader` | shader | `CParticleDefEntry_ParseBlendMode @ 0x5e29f0` (blend semantics) | spatial billboard shader, additive blend, soft-circle fallback. The full 8-mode shader (additive/blend/premult/bump/mod/mod2x/bumpadd/distort) is deferred — see open_questions.md. | match (semantic, partial — additive only) |
+
 ## Runtime — semantic port in `libs/particle/src/emitter.cpp` (Phase 2, 2026-04-27)
 
 This row group is "match (semantic)" — our portable simulator captures the

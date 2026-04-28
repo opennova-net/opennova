@@ -16,6 +16,30 @@ how blocking they are for follow-up work.
 6. **`CParticleDefEntry_ParseBlendMode @ 0x5e29f0`. RESOLVED 2026-04-27.** Full enum: `additive`=1, `blend`=0, `premult`=2, `bump`=3, `mod`=4 (string at `off_7DCBA8`), `mod2x`=5, `bumpadd`=6, `distort`=7. **Engine quirk:** chained strstr matches `bump` before `bumpadd`, so the latter resolves to 3 in practice. Our parser mirrors this.
 7. **`flags` & `move` enums. RESOLVED 2026-04-27.** Flags table @ 0x846A18: 26 named bits in 29 declared slots (3 trailing entries are zero-padded). Move table @ 0x848800: 5 entries (`NORMAL`, `GRAVITATE`, `WANDER`, `BUBBLE`, `ORBIT`). Both stored as `uint32_t` bitfields plus the raw string for round-trip; constants live in `particle::particle_flag::*` and `particle::move_flag::*`.
 
+## Particle editor MVP follow-ups (Phase 3+, same worktree)
+
+- **8-mode IDA shader.** `particle_billboard.gdshader` ships additive only.
+  Authentic blend / premult / mod / mod2x / bumpadd / bump / distort branches
+  per `CParticleDefEntry_ParseBlendMode @ 0x5e29f0` are pending.
+- **Texture loading from PFF.** Per-graphic `texture` field is parsed but the
+  shader uses a generated soft-circle fallback. Needs `libs/pff` resolution
+  pipeline so `dirtpuf.tga` etc. render correctly.
+- **Curve animation sampling.** `NovaParticleTable.sample(t)` exists; the
+  emitter doesn't feed `t = 1 - age/lifetime` into per-particle alpha/color
+  yet. Wire when implementing `*_func` evaluation per
+  `CParticleDef_ParseProperties` curve handlers.
+- **Child particles.** `child_id` field is present on the def; spawning
+  child emitters on death (or per ONMYDEATH flag) is unimplemented in the
+  Godot wrapper.
+- **Effect-level driver.** Selecting an effect previews only the first pdef
+  it references. A real spawn would instantiate one Emitter per pdef under
+  a shared transform parent — analog to
+  `CEffectWorld_SpawnEmitterAtPosition @ 0x5f6df0`.
+- **Multi-graphic preview.** The Node3D wrapper currently spawns one
+  particle per spawn-tick using `pick_graphic` selection from the simulator.
+  Engine renders all 4 graphic layers per particle simultaneously; we need
+  4 MultiMeshInstance3D or a multi-pass shader to match.
+
 ## Engine bugs preserved or worked-around
 
 - **Per-graphic color rewrites.** `CParticleDef_ParseProperties @ 0x5ea320` collapses `g2_color1` → `g2_color2` handler, `g3_color1` + `g3_color2` + `g3_color3` all → `g3_color3` handler, and `g4_color1` + `g4_color2` → `g4_color2` handler. So if an editor writes distinct color1/2/3 to graphics 2/3/4, the engine corrupts them on read. Our parser does the *correct* mapping (g{N}_color{M} → graphics[N-1].color[M]); corpus files generally write all four colors identically per layer so the bug isn't visible at runtime.

@@ -1,8 +1,10 @@
 class_name ParticleEditor
-extends Node
+extends RefCounted
 ## Document controller for the particle workspace. Owns the parsed
 ## NovaParticleFile (loaded from .ptl), tracks dirty state, and exposes the
 ## current selection to the workspace shell.
+## RefCounted (not Node): no scene-tree role; freed when the workspace
+## adapter drops the only reference.
 
 signal document_changed
 signal selection_changed
