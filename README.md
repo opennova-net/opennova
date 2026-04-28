@@ -1,21 +1,34 @@
 # OpenNova
 
-Open-source tools for extracting, converting, and editing 3D assets from Delta Force and other NovaLogic games — importer, Blender addon, and a Godot-based terrain editor and runtime.
+Open-source toolchain and runtime for NovaLogic's Joint Operations (JO) and newer games. Extract and edit assets with the importer, Blender addon, and OpenNova Editor (ONED). Load them in a C++ reimplementation of the game engine, hosted in Godot.
 
 ![OpenNova screenshot](https://snaps.screensnapr.io/75a69f1)
+
+## Architecture
+
+Three layers:
+
+- **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): terrain, environment, etc that writes the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.env`, …) directly.
+- **Core engine (`libs/`).** Format parsers, terrain LOD, foliage scatter, environment sampling. Also consumed by Python (`apps/importer/`) and Blender (`blender/`).
+- **Godot (`godot/engine/` + `godot/game/`).** GDExtension wrappers in `engine/` bind the core into Godot; `game/` is the runtime scene.
+
+All of this is pre-1.0 and under active development. Nothing here is production-ready. The asset pipeline (importer, Blender addon, and ONED) is the most exercised surface today; the Godot runtime loads exported scenes and runs the terrain and foliage systems; gameplay (player, missions, multiplayer) is still being built.
+
+Pre-JO NovaLogic titles may sort of work by chance, but are not officially supported.
 
 ## Downloads
 
 Pre-built binaries are available on the [Releases](../../releases) page:
 
-- **`onimport.exe`** — Standalone Windows importer. No Python or Blender install required.
-- **`opennova_blender.zip`** — Blender 5.x addon with pre-built native libraries for Windows and Linux.
-- **`opennova-modtools-windows.zip`** — Standalone terrain editor for Windows. Includes the native runtime DLL; no Godot install required.
-- **`opennova-runtime-windows.zip`** — Game runtime for previewing exported scenes on Windows. Includes the native runtime DLL.
+- **`onimport.exe`**: standalone Windows importer. Use this to convert models etc to modern formats like .glb, .blend and .fbx. Also exports files
+compat. with NovaLogic's original tools (ie: OED).
+- **`opennova_blender.zip`**: Blender 5.x addon with pre-built native libraries for Windows and Linux.
+- **`opennova-modtools-windows.zip`**: standalone OpenNova Editor (ONED) for Windows. The open source NILE.
+- **`opennova-runtime-windows.zip`**: "game" runtime.
 
-## Importer
+## Exporter (confusingly called the importer sometimes)
 
-Extract weapons, vehicles, buildings, and other models from game files. Reads directly from PFF archives with automatic decryption and decompression — just launch `onimport.exe`, point it at your game directory, and select what to export.
+Extract models from game files. Reads directly from PFF archives with automatic decryption and decompression. Just launch `onimport.exe`, point it at your game directory, and select what to export.
 
 Each import can write one or more selected output files:
 - `.blend` - Blender project with the full scene hierarchy
@@ -51,11 +64,9 @@ Exports armature NLA actions to NovaLogic's BAD (bone animation data) and ADM (a
 
 Imports Mixamo FBX animations and retargets them onto a NovaLogic skeleton. Strips the `mixamorig:` prefix, optionally creates a root motion bone, and pushes each animation as an NLA strip ready for export.
 
-## Mod Tools
+## OpenNova Editor (ONED)
 
-A standalone terrain editor for authoring Delta Force maps. Sculpt heightmaps, paint surface types, scatter foliage, and bake the result straight to the game's terrain formats. Reads and writes `.trn`, `.cpt`, and `.til` directly — no round-trip through other tools.
-
-Launches the editor scene (`godot/modtools/terrain/terrain_editor.tscn`) on startup.
+The authoring layer for JO assets: terrain, environments, and objects in one editor. Sculpt heightmaps, paint surface types, scatter foliage, and bake straight to the game's data formats (`.trn`, `.cpt`, `.til`, `.env`). The packaged build launches into the terrain editing scene (`godot/modtools/terrain/terrain_editor.tscn`).
 
 ## Repo Layout
 
@@ -64,7 +75,7 @@ Launches the editor scene (`godot/modtools/terrain/terrain_editor.tscn`) on star
 | `libs/` | C/C++ format libraries (`adm`, `ase`, `bad`, `bfc1`, `cpt`, `def`, `env`, `pcx`, `pff`, `scr`, `tdp`, `threedi`, `til`, `tpj`, `trn`) plus runtime subsystems (`terrain`, `foliage`, `runtime`). |
 | `apps/importer/` | Python importer + scene builder; backs `onimport.exe`. |
 | `blender/` | Blender 5.x addon (export side of the pipeline). |
-| `godot/` | Godot 4.6.1 project — `engine/` (GDExtension C++), `modtools/` (terrain editor), `game/` (runtime), `tests/` (GUT suite). |
+| `godot/` | Godot 4.6.1 host. `engine/` (GDExtension bindings to `libs/`), `modtools/` (authoring), `game/` (runtime scene), `tests/` (GUT suite). |
 | `scripts/` | Build, test, and packaging scripts (sh + ps1). |
 | `tests/` | C++ test suite (ctest). Godot tests live under `godot/tests/`. |
 | `third_party/` | Vendored deps: godot-cpp, gut, minhook, imgui. |
@@ -77,13 +88,13 @@ Modular libraries for parsing and writing NovaLogic formats. All expose a C API 
 
 | Library | Format | Description |
 |---------|--------|-------------|
-| **threedi** | `.3di` | 3D models — geometry, materials, part animations, collision, occlusion. GP and 3DI3 formats. |
-| **ase** | `.ase` | ASCII Scene Export — read/write 3DS Max scene files |
-| **tdp** | `.3dp`/`.3da` | Project files — material definitions, LOD settings, part animation metadata |
-| **bad** | `.bad` | Skeletal animation — bone hierarchies, quaternion keyframes, events |
-| **adm** | `.adm` | Animation definitions — key/value metadata mapping actions to BAD files |
-| **def** | `.def` | Game definitions — weapons, items, ammo, HUD configuration |
-| **pff** | `.pff`/`.bhd` | Archive containers — PFF3, PFF4, BHD variants |
+| **threedi** | `.3di` | 3D models: geometry, materials, part animations, collision, occlusion. GP and 3DI3 formats. |
+| **ase** | `.ase` | ASCII Scene Export: read/write 3DS Max scene files. |
+| **tdp** | `.3dp`/`.3da` | Project files: material definitions, LOD settings, part animation metadata. |
+| **bad** | `.bad` | Skeletal animation: bone hierarchies, quaternion keyframes, events. |
+| **adm** | `.adm` | Animation definitions: key/value metadata mapping actions to BAD files. |
+| **def** | `.def` | Game definitions: weapons, items, ammo, HUD configuration. |
+| **pff** | `.pff` | Archive containers: PFF3, PFF4, BHD variants. |
 | **bfc1** | | BFC1 decompression (zlib-based) |
 | **scr** | | SCR decryption (multiple keys for different game editions) |
 
@@ -94,7 +105,7 @@ Modular libraries for parsing and writing NovaLogic formats. All expose a C API 
 - CMake 3.16+
 - C++ compiler with C++17 support
 - Python 3.11 and uv for importer tooling and Python tests
-- Godot 4.6.1 — only for Godot work. Set `GODOT_BIN` or drop the binary in `.godot-bin/`. `scripts/package_godot_windows.ps1` will fetch it automatically when packaging Windows builds.
+- Godot 4.6.1 (only for Godot work). Set `GODOT_BIN` or drop the binary in `.godot-bin/`. `scripts/package_godot_windows.ps1` will fetch it automatically when packaging Windows builds.
 
 ### Build and Test
 
@@ -153,4 +164,4 @@ scripts/package_godot_windows.ps1
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE) for details.
