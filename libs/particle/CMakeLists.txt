@@ -1,6 +1,8 @@
 add_library(opennova_particle STATIC
     src/parser.cpp
     src/particle.cpp
+    src/writer.cpp
+    src/emitter.cpp
 )
 
 target_include_directories(opennova_particle

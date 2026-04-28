@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <istream>
+#include <ostream>
 #include <string>
 
 #include "particle/particle.h"
@@ -24,5 +25,16 @@ struct ParseError {
 bool load_particles(std::istream &input, ParticleFile &out, ParseError &error);
 bool load_particles_from_file(const std::string &path, ParticleFile &out, ParseError &error);
 bool load_particles_from_buffer(const char *data, std::size_t size, ParticleFile &out, ParseError &error);
+
+// Serializes a ParticleFile back to text. Field ordering, leading whitespace,
+// numeric format ("%5.3f"), pdefs separator (", ") and the duplicated `emit_dur`
+// line all mirror the engine writers:
+//   CParticleEffectDef_WriteToFile @ 0x5e0fe0
+//   CParticleDef_SaveToFile        @ 0x5e4d70
+//   CParticleTableDef_WriteToFile  @ 0x5e27e0
+// LF line endings (engine uses bare "\n" in fprintf format strings; on Windows
+// stdio in text mode the OS may translate to CRLF).
+bool save_particles(std::ostream &output, const ParticleFile &file, std::string &error);
+bool save_particles_to_file(const std::string &path, const ParticleFile &file, std::string &error);
 
 } // namespace opennova::particle

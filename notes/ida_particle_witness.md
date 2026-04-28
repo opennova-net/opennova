@@ -38,21 +38,24 @@ The four section strings live in `.rdata` and are referenced by the section disp
 
 | Code-loc | Item | Tag/struct/fn | Claimed citation | Resolved IDA witness | Verdict | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| (none yet) | parser-fn | `CParticleDef_ParseProperties` | `@ 0x5ea320` (size 0x2525) | Tokenizes `[particledef]` body into a `CConfigReader` map | pending | Inner tokenizer; not yet decompiled in detail. Cross-check via `[tabledef_edithandles]` ref @ `0x5ea346` (section terminator). |
-| (none yet) | hydrator-fn | `CParticleDef_ParseFromConfigMap` | `@ 0x5ed210` (size 0x1da5) | Reads ~80 named keys from config map → `CParticleEffectDef` (~5204 B); see field offset table below | match (witness only) | Drives our C++ `ParticleDef` field set. |
-| (none yet) | parser-fn | `CParticleTableDef_ParseScriptLine` | `@ 0x5e92b0` (size 0x266) | `[tabledef]` line driver | pending | |
+| `libs/particle/src/parser.cpp` (apply_particle_key) | parser-fn | `CParticleDef_ParseProperties` | `@ 0x5ea320` (size 0x2525) | Full decomp 2026-04-27: stricmp dispatch on ~80 keys — matches our switch. Sets bit 0x02 on `reverse` trailing token (e.g. scale_func @ 0x5eafdd) and bit 0x01 on `inverse`. `[tabledef_edithandles]` @ 0x5ea346 returns 1 to skip section. | match | **Engine bugs preserved as documented**: g{2,3,4}_color1 falls through to higher-color slots in this dispatcher. Our parser does the *correct* mapping (g{N}_color{M} → graphics[N-1].color[M]); see open_questions.md. |
+| `libs/particle/src/parser.cpp` (apply_particle_key) | hydrator-fn | `CParticleDef_ParseFromConfigMap` | `@ 0x5ed210` (size 0x1da5) | Reads ~80 named keys from config map → `CParticleEffectDef` (~5204 B); see field offset table below | match (witness only) | Drives our C++ `ParticleDef` field set. |
+| `libs/particle/src/parser.cpp` (apply_table_key) | parser-fn | `CParticleTableDef_ParseScriptLine` | `@ 0x5e92b0` (size 0x266) | `[tabledef]` line driver | pending | Equivalent line-handler not directly decompiled; the corpus 32×8 invariant is verified across 77/77 files via the smoke test. |
 | (none yet) | parser-fn | `CParticleTableDef_ParseProperties` | `@ 0x5eefc0` (size 0x228) | Companion property reader for `[tabledef]` | pending | |
-| (none yet) | parser-fn | `CParticleDefEntry_ParseGraphicProperty` | `@ 0x5e3550` (size 0xabe) | Per-graphic-layer parser; 4 layers, 788 B each | pending | |
-| (none yet) | parser-fn | `CParticleDefEntry_ParseBlendMode` | `@ 0x5e29f0` (size 0xc8) | Maps `additive` / `blend` / `distort` strings → enum | pending | Decode the full enum next round. |
+| `libs/particle/src/parser.cpp` (apply_particle_key, graphic decl + g_* dispatch) | parser-fn | `CParticleDefEntry_ParseGraphicProperty` | `@ 0x5e3550` (size 0xabe) | Full decomp 2026-04-27: graphic1 resets idx=0, graphicN++ (capped at 3); per-key dispatch via strstr; "reverse"/"inverse" trailing tokens set bits 0x02/0x01 on each func. | match | Engine quirk: g2_color1 / g3_color1 / g3_color2 / g4_color1 / g4_color2 are remapped by the outer dispatcher (CParticleDef_ParseProperties) to higher-color slots before reaching here — see row above. |
+| `libs/particle/src/particle.cpp::parse_blend_mode` + `blend_mode_name` | parser-fn | `CParticleDefEntry_ParseBlendMode` | `@ 0x5e29f0` (size 0xc8) | Full decomp 2026-04-27: chained strstr in this exact order: additive=1, blend=0, premult=2, bump=3, mod=4 (`off_7DCBA8`), mod2x=5, bumpadd=6, distort=7. Engine quirk: "bump" matches before "bumpadd" so `bumpadd` resolves to 3 (Bump), not 6. | match | Quirk replicated by our parser (otherwise corpus diverges). |
 | (none yet) | parser-fn | `CParticleTableDef_ParseTransformFlags` | `@ 0x5e2950` (size 0x39) | Tabledef flag bits | pending | |
+| `libs/particle/src/particle.cpp::parse_flag_table` | helper-fn | `FlagTable_ParseFromString` | `@ 0x5df970` (size 0x45) | Iterates {bit:u32, name:char[260]} entries (264 B stride, 4-byte preamble); ORs all matched bits via `strstr`. | match | Used to parse both flags table @ 0x846A18 (26 named bits / 29 slots) and move table @ 0x848800 (5 bits). |
+| `libs/particle/src/particle.cpp::format_flag_table` | helper-fn | `sub_5DF9C0` (BuildFlagString) | `@ 0x5df9c0` (size 0x98) | Inverse of FlagTable_ParseFromString; emits names in table order, single-space separated, with one trailing space. | match | Replicated exactly so writer output matches engine layout. |
 
 ## Save / write (round-trip verification gold)
 
 | Code-loc | Item | Tag/struct/fn | Claimed citation | Resolved IDA witness | Verdict | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| (none yet) | writer-fn | `CParticleDef_SaveToFile` | `@ 0x5e4d70` (size 0x9ef) | Emits a `[particledef]` block | pending | Future: implement a C++ writer and round-trip against this output. |
-| (none yet) | writer-fn | `CParticleEffectDef_WriteToFile` | `@ 0x5e0fe0` (size 0xc7) | Emits an `[effectdef]` block | pending | |
-| (none yet) | writer-fn | `CParticleTableDef_WriteToFile` | `@ 0x5e27e0` (size 0xee) | Emits a `[tabledef]` block | pending | |
+| `libs/particle/src/writer.cpp::write_particle` | writer-fn | `CParticleDef_SaveToFile` | `@ 0x5e4d70` (size 0x9ef) | full decomp 2026-04-27: field-by-field fprintf, `%5.3f` floats, BGR-byte order in memory printed back as R,G,B. Engine writes `emit_dur` **twice** (lines 0x5e4e6a + 0x5e4f30, same field +906) and `lod` (offset +38) regardless of whether ParseProperties consumed it. | match | Round-trip parity verified by `particle_writer_roundtrip_test`. Not byte-exact against corpus (engine writer uses `\n` only; OS may translate). |
+| `libs/particle/src/writer.cpp::write_effect` | writer-fn | `CParticleEffectDef_WriteToFile` | `@ 0x5e0fe0` (size 0xc7) | full decomp 2026-04-27: `\tid = %s;`, `\tpdefs = name1, name2;` (separator from word_7CDA14 = ", "). Note: space-equals (not tab-equals like particledef). | match | |
+| `libs/particle/src/writer.cpp::write_table` | writer-fn | `CParticleTableDef_WriteToFile` | `@ 0x5e27e0` (size 0xee) | full decomp 2026-04-27: 32 fixed rows of 8 `%u` values; `\ttlN = ...;` lines; "id = " uses space-equals. | match | Our writer zero-fills if parsed table has < 32 rows (defensive; corpus always has 32). |
+| (none yet) | writer-fn | (no engine writer found for `[tabledef_edithandles]`) | n/a | format inferred from boatwake.ptl:40-45 | match (corpus-derived) | Implemented in `write_handles`; round-trip verified. |
 
 ## `CParticleEffectDef` layout (heap, ~5204 B)
 
@@ -139,22 +142,26 @@ Per-graphic-layer (788 B) layout, parsed in the loop at `0x5ee47f`+:
 | `+716` | `flip_frames` | i32 | Defaults to 1 if not provided |
 | `+720` | `flip_rate` | i32 | |
 
-## Runtime — out of scope, documented for next worktree
+## Runtime — semantic port in `libs/particle/src/emitter.cpp` (Phase 2, 2026-04-27)
+
+This row group is "match (semantic)" — our portable simulator captures the
+engine's per-particle behavior (emission, lifetime, integration, RNG resolution)
+without claiming byte-exact parity with the DirectX-bound renderer.
 
 | Code-loc | Item | Tag/struct/fn | Claimed citation | Resolved IDA witness | Verdict |
 | --- | --- | --- | --- | --- | --- |
-| (none yet) | struct | `CParticleEmitter` | runtime instance, ~252 B | parentPos, orient matrix, AABB, particle buffer ptr, stride, spring/drag/damping, force vec | deferred |
-| (none yet) | runtime-fn | `CParticleEmitter_AdvanceFrame` | `@ 0x5e6570` (size 0x40b) | emission/expiration/child spawning | deferred |
-| (none yet) | runtime-fn | `CParticleEmitter_UpdateParticles` | `@ 0x5e6980` (size 0x3df) | per-frame physics integration | deferred |
-| (none yet) | runtime-fn | `CParticleEmitter_UpdateAllParticles` | `@ 0x5f3be0` (size 0x1224) | combined update (large) | deferred |
-| (none yet) | runtime-fn | `CParticleEmitter_BuildBillboardQuads` | `@ 0x5e6d60` (size 0x7d7) | render — vertex 28 B, 4 verts/quad | deferred |
-| (none yet) | runtime-fn | `CParticleEmitter_RenderStaticBillboards` | `@ 0x5f4e10` (size 0x80c) | non-rotating quad render | deferred |
-| (none yet) | runtime-fn | `CParticleEmitter_BuildOrientationMatrix` | `@ 0x5f3970` (size 0x267) | parent transform compose | deferred |
-| (none yet) | runtime-fn | `CParticleEmitter_TrySubmitForRender` | `@ 0x5e7540` (size 0x33) | submit gate | deferred |
-| (none yet) | runtime-fn | `CParticleEmitter_TranslatePosition` | `@ 0x5efe90` (size 0xad) | per-emitter position | deferred |
-| (none yet) | runtime-fn | `CParticleEmitter_SpawnParticle` | `@ 0x5e7640` (size 0xaa9) | per-particle init | deferred |
-| (none yet) | runtime-fn | `CParticleEmitter_SpawnNewParticle` | `@ 0x5f35b0` (size 0x28c) | wrapper / scheduler | deferred |
-| (none yet) | runtime-fn | `CParticleEmitter_Init` | `@ 0x5419e0` (size 0x86) | emitter ctor / init | deferred |
+| `libs/particle/include/particle/emitter.h::Emitter` | struct | `CParticleEmitter` | runtime instance, ~252 B | parentPos, orient matrix, AABB, particle buffer ptr, stride, spring/drag/damping, force vec — full layout in SpawnParticle decomp | match (semantic) | Our portable struct does NOT mirror byte layout. |
+| `libs/particle/src/emitter.cpp::emitter_advance` | runtime-fn | `CParticleEmitter_AdvanceFrame` | `@ 0x5e6570` (size 0x40b) | full decomp 2026-04-27: emit timing (interval = 1/emit_rate), burst loop, expire-by-age | match (semantic) | We collapse AdvanceFrame + UpdateParticles into one function. |
+| `libs/particle/src/emitter.cpp::integrate_particle` | runtime-fn | `CParticleEmitter_UpdateParticles` | `@ 0x5e6980` (size 0x3df) | full decomp 2026-04-27: pos+=vel\*dt, vel.y += gravity\*dt, vel-=drag\*dt\*vel, scale+=scale_vel\*dt, age-=dt unless NEVERAGE | match (semantic) | Order matches engine (explicit Euler — pos first, then forces). |
+| (none yet) | runtime-fn | `CParticleEmitter_UpdateAllParticles` | `@ 0x5f3be0` (size 0x1224) | combined update (large; orchestrates Update + Submit + Render) | deferred | Renderer-bound; out of scope for the portable simulator. |
+| (none yet) | runtime-fn | `CParticleEmitter_BuildBillboardQuads` | `@ 0x5e6d60` (size 0x7d7) | render — vertex 28 B, 4 verts/quad | deferred | DirectX-bound; lives in the Godot wrapper layer. |
+| (none yet) | runtime-fn | `CParticleEmitter_RenderStaticBillboards` | `@ 0x5f4e10` (size 0x80c) | non-rotating quad render | deferred | Renderer-bound. |
+| (none yet) | runtime-fn | `CParticleEmitter_BuildOrientationMatrix` | `@ 0x5f3970` (size 0x267) | parent transform compose (4x4) | deferred | Skipped for the MVP simulator; `Emitter::position` + `Emitter::forward` is sufficient until parent-binding lands. |
+| (none yet) | runtime-fn | `CParticleEmitter_TrySubmitForRender` | `@ 0x5e7540` (size 0x33) | submit gate | deferred | Renderer-bound. |
+| (none yet) | runtime-fn | `CParticleEmitter_TranslatePosition` | `@ 0x5efe90` (size 0xad) | per-emitter position update | deferred | Set `Emitter::position` directly each frame. |
+| `libs/particle/src/emitter.cpp::emit_one_internal` + `apply_emission_shape` | runtime-fn | `CParticleEmitter_SpawnParticle` | `@ 0x5e7640` (size 0xaa9) | full decomp 2026-04-27: emit_shape switch (1=box, 2=sphere, 3=cone), random color1..4 pick, age = age + age_adj\*rand10, scale_velocity = 1/age, per-particle flags from per-graphic _func presence | match (semantic) | Engine RNG resolution `rand() & 0x3FF` mirrored in `emitter_rand10`; we use a portable LCG so test seeds are platform-stable. |
+| (none yet) | runtime-fn | `CParticleEmitter_SpawnNewParticle` | `@ 0x5f35b0` (size 0x28c) | wrapper / scheduler around SpawnParticle | deferred | Folded into `emitter_advance`'s emission loop. |
+| `libs/particle/src/emitter.cpp::emitter_init` | runtime-fn | `CParticleEmitter_Init` | `@ 0x5419e0` (size 0x86) | emitter ctor / init | match (semantic) | Engine init also handles AnimMap + sound triggers — out of scope for our pure simulator. |
 | (none yet) | runtime-fn | `CParticleSystemDef_InitDefaults` | `@ 0x5e14f0` (size 0x3a3) | startup defaults | deferred |
 | (none yet) | runtime-fn | `CParticleManager_Construct` | `@ 0x5e87f0` (size 0x1e2) | manager singleton | deferred |
 | (none yet) | runtime-fn | `CParticleManager_BuildTextureAtlases` | `@ 0x5e8db0` (size 0x44d) | atlas baking from `graphicN` textures | deferred |

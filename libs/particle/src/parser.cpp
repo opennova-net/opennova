@@ -105,8 +105,12 @@ bool parse_vec3(const std::vector<std::string> &values, Vec3 &out) {
 	return true;
 }
 
-// "table12" or "table12 reverse" — split on whitespace; last token is the
-// optional reverse flag.
+// "table12", "table12 reverse", "table12 inverse", "table12 reverse inverse"
+// (modifiers in either order). CParticleDef_ParseProperties @ 0x5ea320 sets
+// reverse on bit 0x02 and inverse on bit 0x01 — see e.g. scale_func @ 0x5eafdd.
+// The engine only checks one trailing token, so "table12 reverse inverse" only
+// captures the last one. Our parser is more forgiving (accepts both modifiers
+// regardless of order); fixtures observed in the corpus only use one at a time.
 CurveRef parse_curve_ref(const std::string &raw) {
 	CurveRef out;
 	out.present = true;
@@ -119,8 +123,15 @@ CurveRef parse_curve_ref(const std::string &raw) {
 	if (tokens.empty()) {
 		return out;
 	}
-	if (tokens.size() >= 2 && lowercase(tokens.back()) == "reverse") {
-		out.reverse = true;
+	while (tokens.size() >= 2) {
+		const std::string trailing = lowercase(tokens.back());
+		if (trailing == "reverse") {
+			out.reverse = true;
+		} else if (trailing == "inverse") {
+			out.inverse = true;
+		} else {
+			break;
+		}
 		tokens.pop_back();
 	}
 	std::ostringstream rebuilt;
@@ -231,6 +242,7 @@ void apply_particle_key(ParticleDef &particle, const std::string &key,
 		layer.index = decl_index + 1;
 		layer.texture = values.empty() ? std::string() : values[0];
 		layer.blend_mode_raw = values.size() >= 2 ? lowercase(values[1]) : std::string();
+		layer.blend_mode = parse_blend_mode(layer.blend_mode_raw);
 		// Initialize per-layer color/scale/alpha defaults from the particle level
 		// (qmemcpy at 0x5ee9d0..0x5eea3d in CParticleDef_ParseFromConfigMap).
 		layer.color1 = particle.color1;
@@ -258,8 +270,10 @@ void apply_particle_key(ParticleDef &particle, const std::string &key,
 		particle.child_id = raw_value;
 	} else if (key == "flags") {
 		particle.flags_raw = raw_value;
+		particle.flags = parse_particle_flags(raw_value);
 	} else if (key == "move") {
 		particle.move_raw = raw_value;
+		particle.move = parse_move_bits(raw_value);
 	} else if (key == "lod") {
 		particle.lod = parse_float(raw_value);
 	} else if (key == "emit_dur") {

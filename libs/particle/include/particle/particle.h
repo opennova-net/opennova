@@ -27,10 +27,79 @@ struct Vec3 {
 	float z = 0.0f;
 };
 
-// "table12" or "table12 reverse" — resolved against TableDef::id at link time.
+// CParticleDefEntry_ParseBlendMode @ 0x5e29f0 — full set decoded.
+enum class BlendMode : std::uint8_t {
+	Blend = 0,     // default; matched first by string fallback
+	Additive = 1,
+	Premult = 2,
+	Bump = 3,
+	Mod = 4,       // matches "mod" substring (off_7DCBA8); also matches "mod2x" before that branch
+	Mod2x = 5,
+	Bumpadd = 6,
+	Distort = 7,
+};
+
+const char *blend_mode_name(BlendMode mode) noexcept;
+BlendMode parse_blend_mode(std::string_view raw) noexcept;
+
+// FlagTable @ 0x848800, 5 entries (flagCount @ 0x848d28). Stored as bitfield
+// because FlagTable_ParseFromString @ 0x5df970 ORs matched bits — typical use
+// is one bit set, but the engine never enforces.
+namespace move_flag {
+constexpr std::uint32_t Normal    = 1u <<  0;
+constexpr std::uint32_t Gravitate = 1u <<  1;
+constexpr std::uint32_t Wander    = 1u <<  2;
+constexpr std::uint32_t Bubble    = 1u <<  3;
+constexpr std::uint32_t Orbit     = 1u <<  4;
+} // namespace move_flag
+
+std::uint32_t parse_move_bits(std::string_view raw) noexcept;
+std::string format_move_bits(std::uint32_t bits);
+
+// FlagTable @ 0x846A18, 26 named entries (`dword_846A14` reports 29 slots, the
+// last 3 are zeroed). Bits are powers of two in the FlagTable order observed
+// at 0x846A20+. Engine semantics: FlagTable_ParseFromString matches each token
+// in the input string and ORs the bit; output writer emits space-separated
+// names in table order via sub_5DF9C0 @ 0x5df9c0.
+namespace particle_flag {
+constexpr std::uint32_t NoVisNoUpdate         = 1u <<  0;
+constexpr std::uint32_t InitialClip           = 1u <<  1;  // "INITIALYCLIP" (sic)
+constexpr std::uint32_t NeverAge              = 1u <<  2;
+constexpr std::uint32_t TopAlign              = 1u <<  3;
+constexpr std::uint32_t OnMyDeath             = 1u <<  4;
+constexpr std::uint32_t UseParentScale        = 1u <<  5;
+constexpr std::uint32_t UseParentColor        = 1u <<  6;
+constexpr std::uint32_t UseParentAlpha        = 1u <<  7;
+constexpr std::uint32_t YawAndPitch           = 1u <<  8;
+constexpr std::uint32_t GlobalWind            = 1u <<  9;
+constexpr std::uint32_t FocalWind             = 1u << 10;
+constexpr std::uint32_t FocalWindForceAging   = 1u << 11;
+constexpr std::uint32_t CollideBounce         = 1u << 12;
+constexpr std::uint32_t CollideSlide          = 1u << 13;
+constexpr std::uint32_t CollideKill           = 1u << 14;
+constexpr std::uint32_t EmitVector            = 1u << 15;
+constexpr std::uint32_t PositionInterpolate   = 1u << 16;
+constexpr std::uint32_t ForeverEmit           = 1u << 17;
+constexpr std::uint32_t PositionRelative      = 1u << 18;
+constexpr std::uint32_t UseParentRotations    = 1u << 19;
+constexpr std::uint32_t GfxFlipRand           = 1u << 20;
+constexpr std::uint32_t ControledAlignment    = 1u << 21;  // "CONTROLEDALLIGNMENT" (sic)
+constexpr std::uint32_t SignedRotations       = 1u << 22;
+constexpr std::uint32_t OneFrame              = 1u << 23;
+constexpr std::uint32_t BurstDistribute       = 1u << 24;
+constexpr std::uint32_t AmbientColor          = 1u << 25;
+} // namespace particle_flag
+
+std::uint32_t parse_particle_flags(std::string_view raw) noexcept;
+std::string format_particle_flags(std::uint32_t bits);
+
+// "table12", "table12 reverse", "table12 inverse", or both modifiers in any
+// order. Engine: per-func dispatch in CParticleDef_ParseProperties (e.g.
+// scale_func @ 0x5eafdd) sets bit 0x02 on "reverse" and bit 0x01 on "inverse".
 struct CurveRef {
 	std::string name;
 	bool reverse = false;
+	bool inverse = false;
 	bool present = false; // true once any *_func key has been seen
 };
 
@@ -42,7 +111,7 @@ struct GraphicLayer {
 	bool present = false;
 	std::string texture;           // +0..259, e.g. "dirtpuf.tga"; may be empty ("blank" layer)
 	std::string blend_mode_raw;    // +260..323, lowercased input to ParseBlendMode
-	int blend_mode_id = 0;         // +324, result of CParticleDefEntry_ParseBlendMode @ 0x5e29f0
+	BlendMode blend_mode = BlendMode::Blend;  // +324, result of CParticleDefEntry_ParseBlendMode @ 0x5e29f0
 	int flip_frames = 1;           // +716, default 1
 	int flip_rate = 8;             // +720
 	Color3 color1, color2, color3, color4;   // +700/+704/+708/+712
@@ -63,9 +132,11 @@ struct GraphicLayer {
 struct ParticleDef {
 	std::string id;             // +0
 	std::string child_id;       // +132
-	std::string flags_raw;      // +136 — FlagTable_ParseFromString @ 0x846A18
-	std::string move_raw;       // +140 — FlagTable_ParseFromString @ 0x848800
-	float lod = 0.0f;           // observed in corpus, consumed by tokenizer @ 0x5ea320 (not in ParseFromConfigMap switch)
+	std::string flags_raw;      // +136 — preserved verbatim from source for round-trip
+	std::uint32_t flags = 0;    // +136 — FlagTable_ParseFromString @ 0x846A18 (see particle_flag::*)
+	std::string move_raw;       // +140 — preserved verbatim
+	std::uint32_t move = 0;     // +140 — FlagTable_ParseFromString @ 0x848800 (see move_flag::*)
+	float lod = 0.0f;           // observed in corpus; CParticleDef_ParseProperties has no `lod` case — value is silently ignored on parse but written by CParticleDef_SaveToFile @ 0x5e4d70
 
 	// Emission
 	float emit_dur = 0.0f;
