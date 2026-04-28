@@ -20,12 +20,31 @@ how blocking they are for follow-up work.
 
 ## Particle editor MVP follow-ups (Phase 3+, same worktree)
 
-- **Bump / bumpadd / distort shader fidelity (2026-04-28).** The 8-mode shader
-  split landed (`particle_blend_*.gdshader`); however `bump` falls back to
-  alpha blend (no normal-map Phong), `bumpadd` to additive, and `distort` to
-  a fixed-strength screen-tex offset. Engine combiner state for these three
-  modes is not yet witnessed. Tracked under Bounded Deviations in
-  `particle_visual_parity.md`.
+- **Bump / bumpadd / distort shader fidelity (RE 2026-04-28, port deferred).**
+  The 8-mode shader split landed (`particle_blend_*.gdshader`); however
+  `bump` falls back to alpha blend (no normal-map Phong), `bumpadd` to
+  additive, and `distort` to a fixed-strength screen-tex offset. RE
+  investigation findings:
+  1. The engine does NOT switch D3D blend state per blend mode in the
+     per-particle render loop. `CEffectChannel_PlaySample` (kong-misnamed
+     — actually `BindRenderStateAndTexture`) only handles fog state and
+     `SetTexture`. `CD3DDevice_SetFogAndBlendMode` (also misnamed) is fog
+     -only. Alpha-blend state likely set once at manager init level.
+  2. Bump/Bumpadd realised via a 2-color vertex format. When
+     `particle.flags & 0x80` (LitColor) is set in
+     `BuildBillboardQuads @ 0x5e6d60`, each vertex carries primary
+     (lit color, composed from `def[+304..+312]` × light constants
+     `flt_848D34/D38/D3C`) and secondary (raw modulated | 0xFF000000)
+     colors. The fixed-function texture stage combiner produces the
+     bump-lit visual.
+  3. Distort (flag 0x100) similar but with stage-1 screen-tex sampler
+     for back-buffer refraction (combiner state not yet decoded).
+  Full port (multi-slice scope): add `lit_color` vertex attribute,
+  port the lit-color computation Godot-side, update
+  `particle_blend_bump.gdshader` / `particle_blend_bumpadd.gdshader` to
+  consume both colors. Tracked in Bounded Deviations in
+  `particle_visual_parity.md`; corrected kong-misnames recorded in
+  `ida_particle_witness.md`.
 - **`mod2x` gamma curve.** Approximated via `blend_mul + ALBEDO *= 2.0`;
   engine state SrcBlend = DESTCOLOR / DestBlend = SRCCOLOR is not byte-exact
   reproducible without a custom render pass. Visual deviation is mild for

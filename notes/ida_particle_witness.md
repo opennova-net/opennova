@@ -22,6 +22,38 @@ GRAVITATE move, 8-mode shader split). See plan
 - **pending** — not yet evaluated.
 - **deferred** — out of scope for this worktree (runtime / emitter / atlasing).
 
+## Kong-rename corrections (RE 2026-04-28)
+
+Kong renamed several engine functions involved in the particle render path
+incorrectly. Recording the actual semantics here so future RE doesn't
+re-trip:
+
+| Kong name | Address | Actual purpose |
+| --- | --- | --- |
+| `CEffectChannel_PlaySample` | `0x5e4230` | **`BindRenderStateAndTexture`**. Called from `BuildBillboardQuads @ 0x5e6d60` whenever the bound texture for the next batch differs from the current. Calls `GDynamicVB_FlushAndRender` (drains pending verts), dispatches `CD3DDevice_SetFogAndBlendMode` based on `*sample` (the material struct's first dword), then calls `device->SetTexture(sample[4])` via vtable+368. Has nothing to do with audio. |
+| `CD3DDevice_SetFogAndBlendMode` | `0x677740` | **`SetFogStateAndTextureFactor`**. Only writes fog render states (D3DRS_FOGTABLEMODE=35, _FOGSTART=36, _FOGEND=37, _FOGDENSITY=38, _FOGVERTEXMODE=140) + D3DRS_FOGCOLOR (=34) — the latter selected by low 2 bits of `mode` from {self-color, gray 0xFF7F7F7F, black 0xFF000000, white 0xFFFFFFFF}. Never writes D3DRS_SRCBLEND/DESTBLEND/ALPHABLENDENABLE. The "BlendMode" in the kong name is misleading. |
+| `Render_ResetFogAndBlendState` | `0x589ad0` | **`Render_ResetFogState`**. Two-step fog reset (`SetFogStateAndTextureFactor(-1)` then `(0)`) plus 3 dirty flags. No alpha-blend reset. |
+
+Implication for the bump/bumpadd/distort RE: alpha-blend state for
+particles is NOT switched per-blend-mode in the per-particle render loop.
+It's likely set once at the manager level (probably `SrcAlpha + InvSrcAlpha`
+or `SrcAlpha + One`) and the per-blend-mode visual differentiation comes
+from:
+
+1. The 2-color vertex format that `BuildBillboardQuads` writes when
+   `particle.flags & 0x80` (LitColor for Bump/Bumpadd) is set: primary
+   color = lit color (composed from `def[+304..+312]` orientation/normal
+   × light-direction constants `flt_848D34/D38/D3C`), secondary color =
+   raw modulated color OR'd with 0xFF000000 (full alpha).
+2. The fixed-function texture stage combiner (D3DTSS_*) which multiplies
+   `texture × primary × secondary` in the appropriate combiner mode.
+3. Per-mode `flag` bits (0x80 = LitColor for Bump/Bumpadd; 0x100 =
+   Distort) drive the spawn-time setup; the renderer then dispatches the
+   vertex format accordingly.
+
+Full port deferred — see `notes/particle_visual_parity.md` Bounded
+Deviations.
+
 ## Section-tag dispatch
 
 The four section strings live in `.rdata` and are referenced by the section dispatcher:

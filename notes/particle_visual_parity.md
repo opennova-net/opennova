@@ -125,11 +125,30 @@ not a struct-offset witness; exact layout claims still belong in
   atlas-bake support can replace the defaults with explicit per-frame rects
   without renderer changes.
 - `bump`, `bumpadd`, and `distort` shader variants approximate the engine's
-  Direct3D combiner: `bump` falls back to standard alpha blend (no normal-map
+  pipeline: `bump` falls back to standard alpha blend (no normal-map
   Phong), `bumpadd` to additive blend, `distort` to screen-texture sample
-  with a fixed-strength UV offset. Engine combiner state is not yet
-  witnessed; the visual deviation is most visible for heat-haze and bump-lit
-  particle fixtures.
+  with a fixed-strength UV offset. **RE investigation 2026-04-28**: the
+  engine's bump/bumpadd modes are NOT realised via D3D blend-state
+  switching — they're realised via a 2-color vertex format. When
+  `particle.flags & 0x80` (LitColor) is set in
+  `CParticleEmitter_BuildBillboardQuads @ 0x5e6d60`, each vertex carries
+  two color attributes: primary (+12, +40, +68, +96) = lit color
+  (composed from `def[+304..+312]` orientation/normal vector ×
+  light-direction constants `flt_848D34/D38/D3C`, byte-clamped, then
+  XOR-mid-blended with the modulated particle color), secondary (+16,
+  +44, +72, +100) = raw modulated color OR'd with 0xFF000000. The
+  fixed-function texture stage combiner produces the bump-lit effect
+  by multiplying the texture by both colors. **Deferred** (multi-slice
+  scope): adding a `lit_color` vertex attribute to our quad mesh,
+  porting the engine's lit-color computation, and updating
+  `particle_blend_bump.gdshader` / `particle_blend_bumpadd.gdshader`
+  to consume it. Distort uses a screen-tex sampler in stage 1 with UV
+  offset (RE not yet complete). Adjacent finding: kong's renames in
+  this area are wildly wrong — `CEffectChannel_PlaySample` is actually
+  `BindRenderStateAndTexture` (calls SetTexture at vtable+368),
+  `CD3DDevice_SetFogAndBlendMode` is fog-only (D3DRS_FOGENABLE/COLOR/
+  TABLEMODE/START/END/DENSITY/TEXTUREFACTOR), never touches
+  D3DRS_SRCBLEND/DESTBLEND.
 - `mod2x` (BlendMode 5) approximates engine SrcBlend = DESTCOLOR + DestBlend
   = SRCCOLOR by pre-multiplying the source RGB by 2.0 in fragment and using
   Godot's `blend_mul` render mode. The "darken-or-brighten around 0.5"
@@ -140,8 +159,14 @@ not a struct-offset witness; exact layout claims still belong in
 
 - Confirm `CParticleManager_BuildTextureAtlases @ 0x5e8db0` UV-rect array
   layout (engine reads `graphic+724` as a 4-float-per-frame buffer).
-- Witness the engine's `bump` / `bumpadd` D3D texture-stage state to replace
-  the current shader approximations.
+- Port the 2-color vertex format for `bump` / `bumpadd` (lit color +
+  modulated color attributes). Investigation 2026-04-28: the engine's
+  approach is documented above in Bounded Deviations; full port needs
+  vertex format + Godot-side lit-color computation + shader update.
+  Multi-slice scope.
+- Decode `distort` mode's stage-1 screen-texture sampler setup
+  (specifically what UV offset / scale the engine applies relative to
+  the alpha-tex sample).
 - `WANDER` (move & 0x08) and `BUBBLE` (move & 0x10) are engine-vestigial in
   JO retail: zero code xrefs to their flag table rows at 0x848A10 / 0x848B18,
   and the corpus never authors them (only NORMAL / GRAVITATE / NORMAL+ORBIT
