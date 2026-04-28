@@ -1,0 +1,11 @@
+add_library(opennova_particle STATIC
+    src/parser.cpp
+    src/particle.cpp
+)
+
+target_include_directories(opennova_particle
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_compile_features(opennova_particle PUBLIC cxx_std_17)

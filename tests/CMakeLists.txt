@@ -234,3 +234,18 @@ if(MSVC)
     target_compile_options(dvxi5_repro_test PRIVATE /EHa)
 endif()
 add_test(NAME dvxi5_repro COMMAND dvxi5_repro_test)
+
+# Particle (.ptl) text-format parser tests. See libs/particle, the witness
+# matrix at .claude/worktrees/particles/notes/ida_particle_witness.md, and
+# CParticleDef_ParseFromConfigMap @ 0x5ed210 (Jointops.exe IDB).
+foreach(name smallest minimal_effect multi_section multi_layer table_handles smoke_all_fixtures)
+    add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
+    target_link_libraries(particle_${name}_test PRIVATE opennova_particle)
+    target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(particle_${name}_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME particle_${name} COMMAND particle_${name}_test)
+endforeach()
+
+# Smoke test starts disabled until the full 77-file corpus is mirrored into
+# fixtures/particle/ (mirrors the parametric_parity DISABLED pattern above).
+set_tests_properties(particle_smoke_all_fixtures PROPERTIES DISABLED TRUE)
