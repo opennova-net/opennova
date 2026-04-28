@@ -5,7 +5,6 @@ extends Control
 ## a single emitter.
 
 const FlyCameraScript = preload("res://engine/fly_camera.gd")
-const PARTICLE_SHADER = preload("res://modtools/particle/shaders/particle_billboard.gdshader")
 
 var _viewport_container: SubViewportContainer
 var _viewport: SubViewport
@@ -15,21 +14,12 @@ var _emitters_root: Node3D
 var _emitters: Array[NovaParticleEmitter] = []
 var _particle_file: NovaParticleFile
 var _grid: MeshInstance3D
-var _shader_material: ShaderMaterial
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	clip_contents = true
 	_build_viewport()
-	set_process(true)
-
-
-func _process(_delta: float) -> void:
-	for emitter in _emitters:
-		if emitter != null and emitter.get_alive_count() == 0:
-			emitter.restart()
-			_warm_emitter(emitter)
 
 
 func _build_viewport() -> void:
@@ -53,11 +43,9 @@ func _build_viewport() -> void:
 	_camera.fov = 50.0
 	_camera.near = 0.05
 	_camera.far = 5000.0
+	_camera.fly_speed = 10.0
 	_camera.look_at_from_position(Vector3(0.0, 4.0, 12.0), Vector3.ZERO)
 	_root.add_child(_camera)
-
-	_shader_material = ShaderMaterial.new()
-	_shader_material.shader = PARTICLE_SHADER
 
 	_emitters_root = Node3D.new()
 	_emitters_root.name = "ParticleEmitters"
@@ -142,7 +130,9 @@ func _add_emitter(def: NovaParticleDef, index: int) -> NovaParticleEmitter:
 		return null
 	var emitter := NovaParticleEmitter.new()
 	emitter.name = "ParticleEmitter%d" % index
-	emitter.shader_material = _shader_material
+	# Blend-mode shader cache lives inside NovaParticleEmitter (Phase 6 of
+	# notes/particle_visual_parity.md); the preview no longer binds a single
+	# fallback shader.
 	emitter.auto_advance = true
 	emitter.seed = 1 + index * 101
 	emitter.texture_dir = _texture_dir()
@@ -208,6 +198,10 @@ func get_textured_layer_count() -> int:
 		if emitter != null:
 			total += emitter.get_textured_layer_count()
 	return total
+
+
+func get_preview_camera() -> Camera3D:
+	return _camera
 
 
 func restart() -> void:

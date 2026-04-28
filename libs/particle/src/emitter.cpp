@@ -43,6 +43,30 @@ Vec3 vec3_normalize(Vec3 v) noexcept {
 	return {v.x / len, v.y / len, v.z / len};
 }
 
+Vec3 vec3_cross(Vec3 a, Vec3 b) noexcept {
+	return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+float vec3_dot(Vec3 a, Vec3 b) noexcept {
+	return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+// Rodrigues' rotation formula: rotate v around (already-normalized) axis by
+// `angle` radians. Engine: `init_D3DXMatrixRotationAxis(m, axis, angle)` then
+// `D3DXVec3TransformCoord(out, v, m)`. This avoids materializing a 4x4
+// matrix when we only need a single rotation per call.
+Vec3 vec3_rotate_around_axis(Vec3 v, Vec3 axis, float angle) noexcept {
+	const float c = std::cos(angle);
+	const float s = std::sin(angle);
+	const Vec3 cross = vec3_cross(axis, v);
+	const float dot = vec3_dot(axis, v);
+	return {
+		v.x * c + cross.x * s + axis.x * dot * (1.0f - c),
+		v.y * c + cross.y * s + axis.y * dot * (1.0f - c),
+		v.z * c + cross.z * s + axis.z * dot * (1.0f - c),
+	};
+}
+
 Color3 color_for_slot(const ParticleDef &def, std::uint32_t graphic, std::uint32_t slot) noexcept {
 	const std::uint32_t which = slot & 3u;
 	const std::array<const Color3 *, 4> colors = {
@@ -77,65 +101,145 @@ std::uint32_t pick_graphic(Emitter &e, const ParticleDef &def) noexcept {
 	return present[emitter_rand10(e) % count];
 }
 
+// Per-axis lerp(skip, size, rand_unit) for the annular shape range. Engine
+// reads the `[skip, size]` range from def[3940..3948] / def[3928..3936] (= our
+// emit_shape_size_skip / emit_shape_size). The result is the per-axis
+// magnitude scaling applied to a unit direction in Sphere / Cone modes.
+Vec3 annular_axis_scales(Emitter &e, const ParticleDef &def) noexcept {
+	const float r0 = lerp(def.emit_shape_size_skip.x, def.emit_shape_size.x, emitter_rand_unit(e));
+	const float r1 = lerp(def.emit_shape_size_skip.y, def.emit_shape_size.y, emitter_rand_unit(e));
+	const float r2 = lerp(def.emit_shape_size_skip.z, def.emit_shape_size.z, emitter_rand_unit(e));
+	return {r0, r1, r2};
+}
+
 void apply_emission_shape(Emitter &e, const ParticleDef &def, Particle &p) noexcept {
+	// CParticleEmitter_SpawnParticle @ 0x5e7640 — switch on def.emit_shape.
 	const EmitShape shape = static_cast<EmitShape>(def.emit_shape);
 	switch (shape) {
 		case EmitShape::Point: {
-			// All particles spawn at emitter position with zero velocity.
+			// No shape impulse — particle spawns at emitter position with zero
+			// velocity (any subsequent velocity comes from spread / orbital
+			// scalars in the post-shape pass).
 			break;
 		}
 		case EmitShape::Box: {
-			// Engine case 1: axis-aligned random ±emit_shape_size for ONE axis,
-			// chosen randomly. We expose all three axes — close enough for the
-			// portable simulator and easier to reason about in tests.
-			p.position.x += emitter_rand_signed(e) * def.emit_shape_size.x;
-			p.position.y += emitter_rand_signed(e) * def.emit_shape_size.y;
-			p.position.z += emitter_rand_signed(e) * def.emit_shape_size.z;
+			// Engine case 1: pick one axis at random; assign a directed impulse
+			// of `±emit_shape_size[axis]` (sign = +1 when ONEFRAME flag is set,
+			// else `±1` from `rand() & 1`). Other axes get a small range
+			// perturbation `rand_signed × emit_shape_size_skip[k]`. Position-
+			// space, not velocity. The engine's exact form multiplies the
+			// chosen axis by a deg2rad constant — a coordinate-space quirk we
+			// intentionally elide; the resulting "one dominant axis, others
+			// inset" geometry matches engine intent.
+			const std::uint32_t axis = emitter_rand10(e) % 3u;
+			const float chosen_sign =
+					(def.flags & particle_flag::OneFrame) != 0 ? 1.0f :
+					((emitter_rand10(e) & 1u) != 0 ? 1.0f : -1.0f);
+			const float chosen_size = axis == 0 ? def.emit_shape_size.x :
+					axis == 1 ? def.emit_shape_size.y : def.emit_shape_size.z;
+			Vec3 offset{
+				emitter_rand_signed(e) * def.emit_shape_size_skip.x,
+				emitter_rand_signed(e) * def.emit_shape_size_skip.y,
+				emitter_rand_signed(e) * def.emit_shape_size_skip.z,
+			};
+			if (axis == 0) offset.x = chosen_sign * chosen_size;
+			else if (axis == 1) offset.y = chosen_sign * chosen_size;
+			else offset.z = chosen_sign * chosen_size;
+			p.position = vec3_add(p.position, offset);
 			break;
 		}
 		case EmitShape::Sphere: {
-			// Engine case 2: spherical — random direction × scaled speed.
-			const float ux = emitter_rand_signed(e);
-			const float uy = emitter_rand_signed(e);
-			const float uz = emitter_rand_signed(e);
-			const Vec3 dir = vec3_normalize({ux, uy, uz});
-			const float speed = def.speed + emitter_rand_unit(e) * def.speed_adj;
-			p.velocity = vec3_scale(dir, speed);
+			// Engine case 2: random unit direction, then per-axis annular
+			// `lerp(skip, size, rand)` magnitude → velocity. Hollow ellipsoidal
+			// shell with radial thickness `[skip, size]` per axis. Engine reads
+			// shape size from def[3928..]; magnitude is NOT def.speed (that is
+			// reserved for the WANDER move integrator).
+			Vec3 unit{
+				emitter_rand_signed(e),
+				emitter_rand_signed(e),
+				emitter_rand_signed(e),
+			};
+			unit = vec3_normalize(unit);
+			const Vec3 r = annular_axis_scales(e, def);
+			p.velocity = {unit.x * r.x, unit.y * r.y, unit.z * r.z};
 			break;
 		}
 		case EmitShape::Cone: {
-			// Engine case 3: cone around emitter.forward, half-angle from
-			// emit_shape_size (interpreted as YPR offsets in degrees).
-			const Vec3 base = vec3_normalize(e.forward);
-			const float yaw_off   = emitter_rand_signed(e) * def.emit_shape_size.x * 0.0174533f;
-			const float pitch_off = emitter_rand_signed(e) * def.emit_shape_size.y * 0.0174533f;
-			const float cy = std::cos(yaw_off), sy = std::sin(yaw_off);
-			const float cp = std::cos(pitch_off), sp = std::sin(pitch_off);
-			Vec3 dir{
-				base.x * cy * cp + sy,
-				base.y * cp + sp,
-				base.z * cy * cp,
+			// Engine case 3: vtable[+0x1C](this, &out_dir, dir, ...) builds a
+			// random direction within the cone's spread half-angle around the
+			// passed-in dir, then per-axis annular `lerp(skip, size, rand)`
+			// scales it into a velocity. We approximate by building a
+			// perpendicular basis off `Emitter::forward` and offsetting in
+			// (right, up) by a half-angle drawn from `def.spread` degrees.
+			const Vec3 forward = vec3_normalize(e.forward);
+			Vec3 right_axis = std::abs(forward.x) > 0.9f ?
+					Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
+			Vec3 up = vec3_normalize(vec3_cross(forward, right_axis));
+			Vec3 right = vec3_cross(up, forward);
+			const float half_angle = def.spread * 0.0174533f;
+			const float yaw = emitter_rand_signed(e) * half_angle;
+			const float pitch = emitter_rand_signed(e) * half_angle;
+			// Small-angle direction perturbation: forward + yaw*right + pitch*up,
+			// normalized. Approximates a square (yaw,pitch)-bounded cone region
+			// — close to the engine's spherical-cap sampling for typical
+			// `def.spread` ≤ 30° and easier to reason about in tests.
+			Vec3 cone_dir{
+				forward.x + right.x * yaw + up.x * pitch,
+				forward.y + right.y * yaw + up.y * pitch,
+				forward.z + right.z * yaw + up.z * pitch,
 			};
-			dir = vec3_normalize(dir);
-			const float speed = def.speed + emitter_rand_unit(e) * def.speed_adj;
-			p.velocity = vec3_scale(dir, speed);
+			cone_dir = vec3_normalize(cone_dir);
+			const Vec3 r = annular_axis_scales(e, def);
+			p.velocity = {cone_dir.x * r.x, cone_dir.y * r.y, cone_dir.z * r.z};
 			break;
 		}
 	}
 }
 
-void integrate_particle(Particle &p, const ParticleDef &def, float dt) noexcept {
-	// CParticleEmitter_UpdateParticles @ 0x5e6980 — Euler step, then drag,
-	// then gravity. Engine adds gravity to vel.y; the sign convention depends
-	// on whether the load step negated `def.gravity`. We treat positive
-	// `def.gravity` as a downward pull on +y-up: vel.y -= g * dt.
+void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, float dt) noexcept {
+	// CParticleEmitter_UpdateParticles @ 0x5e6980. Two physics dispatches:
+	//   move & 1 (NORMAL):    pos += vel*dt; vel.y -= gravity*mask*dt; vel -= drag*dt*vel
+	//   move & 2 (GRAVITATE): same translation, but vel += (parent - pos) * dt * spring
+	//                         (delta NOT normalized — distance is the spring
+	//                         strength). Engine: spring const lives at
+	//                         emitter+0x308 and is set by the manager; we
+	//                         approximate with `def.gravity` until that
+	//                         scalar is exposed on Emitter.
+	// WANDER (bit 4), BUBBLE (bit 8), ORBIT (bit 16) are deferred — see
+	// notes/open_questions.md for the engine offsets.
 	p.position = vec3_add(p.position, vec3_scale(p.velocity, dt));
 
-	// Gravity: per-axis mask × scalar magnitude. Engine field `gravity_mask`
-	// modulates which axes feel gravity (e.g. {1,1,1} = full pull on all axes,
-	// rare; typical authoring is {1,1,1} but the *direction* comes from the
-	// scalar.) We keep the simple +y model for the portable simulator.
-	p.velocity.y -= def.gravity * def.gravity_mask.y * dt;
+	const bool gravitate = (def.move & move_flag::Gravitate) != 0;
+	if (gravitate) {
+		// Engine: `delta = pos - emitter.pos` (unit vector AWAY from emitter
+		// after normalize), then vel += delta_masked × spring × dt.
+		// Verified 2026-04-28: `sub_68B032 @ 0x68B032` is a thunk to
+		// `D3DXVec3Normalize` (off_85072C IAT entry), so the engine applies a
+		// constant-magnitude force, NOT a distance-proportional spring.
+		// The direction is REPULSIVE (away from emitter origin) — authors
+		// flip via negative `gravity_mask` components when an attractive
+		// behaviour is wanted; corpus typically uses {1,1,1}. Mask multiplies
+		// before normalize so a zeroed axis fully suppresses its contribution.
+		Vec3 delta{
+			(p.position.x - e.position.x) * def.gravity_mask.x,
+			(p.position.y - e.position.y) * def.gravity_mask.y,
+			(p.position.z - e.position.z) * def.gravity_mask.z,
+		};
+		const float len = vec3_length(delta);
+		if (len > 1e-6f) {
+			delta = {delta.x / len, delta.y / len, delta.z / len};
+			// Spring scalar source: prefer the explicit `Emitter::spring_const`
+			// (engine-faithful — set by the manager in
+			// `CEffectEmitter_Initialize @ 0x5e6020`) when non-zero; otherwise
+			// fall back to `def.gravity` so stand-alone callers without a
+			// manager still get sensible behaviour.
+			const float spring = e.spring_const != 0.0f ? e.spring_const : def.gravity;
+			p.velocity = vec3_add(p.velocity, vec3_scale(delta, spring * dt));
+		}
+	} else {
+		// NORMAL move: per-axis y-down gravity.
+		p.velocity.y -= def.gravity * def.gravity_mask.y * dt;
+	}
 
 	// Drag: exponential decay (1 - drag*dt) per axis. Engine writes
 	// `vel -= drag*dt * vel`; same form, clamped to non-negative coefficient.
@@ -143,6 +247,33 @@ void integrate_particle(Particle &p, const ParticleDef &def, float dt) noexcept 
 	p.velocity.x -= p.velocity.x * drag_coef;
 	p.velocity.y -= p.velocity.y * drag_coef;
 	p.velocity.z -= p.velocity.z * drag_coef;
+
+	// ORBIT modifier (move & 4 — engine bit 2 per the 0x848800 reorder, see
+	// particle.h::move_flag). When set, after the ballistic / spring step, the
+	// engine rotates the relative position vector and velocity around
+	// `def.orbital_axis` by an angle proportional to time. We use
+	// `def.orbitalspeed * dt` as the per-frame angle (engine derives a similar
+	// quantity from emitter state × particle.age × dt; the exact FPU stack
+	// chain is not byte-decodable without full register tracing). Rotates
+	// both position offset and velocity so the orbital trajectory stays
+	// stable across frames. Engine cite: CParticleEmitter_UpdateAllParticles
+	// @ 0x5f3be0 — `(move & 4)` branch + init_D3DXMatrixRotationAxis call.
+	if ((def.move & move_flag::Orbit) != 0 && def.orbitalspeed != 0.0f) {
+		const Vec3 axis = vec3_normalize(def.orbital_axis);
+		const float angle = def.orbitalspeed * dt;
+		const Vec3 rel{
+			p.position.x - e.position.x,
+			p.position.y - e.position.y,
+			p.position.z - e.position.z,
+		};
+		const Vec3 rotated_rel = vec3_rotate_around_axis(rel, axis, angle);
+		p.position = {
+			e.position.x + rotated_rel.x,
+			e.position.y + rotated_rel.y,
+			e.position.z + rotated_rel.z,
+		};
+		p.velocity = vec3_rotate_around_axis(p.velocity, axis, angle);
+	}
 
 	// Scale grows from 0 toward 1 over the particle's lifetime
 	// (engine: `*(extra+48) += *(extra+52) * dt` with scale_velocity = 1/age).
@@ -152,11 +283,46 @@ void integrate_particle(Particle &p, const ParticleDef &def, float dt) noexcept 
 	// Rotation accumulates at the per-particle rate.
 	p.rotation += p.rotation_rate * dt;
 
+	// Kill-plane check. Engine: CParticleEmitter_UpdateParticles @ 0x5e6980
+	// reads `*(emitter+332)` as a `float*` threshold; def.flags bit 27
+	// (0x08000000) → kill if particle.y > threshold; bit 28 (0x10000000)
+	// → kill if particle.y <= threshold. Engine writes `particle.age = 0`
+	// to mark expired (no position clamp); next-frame `expire_dead` pass
+	// removes. Our portable form lifts the trigger to runtime emitter
+	// scalars `kill_plane_mode` + `kill_plane_y` so the API surface
+	// doesn't depend on engine-internal flag bits 27/28 (those are
+	// outside the 26-name flag table at 0x846A18 — manager-set, not
+	// authored).
+	if (e.kill_plane_mode == 1u && p.position.y > e.kill_plane_y) {
+		p.age = 0.0f;
+	} else if (e.kill_plane_mode == 2u && p.position.y <= e.kill_plane_y) {
+		p.age = 0.0f;
+	}
+
 	// Age decrements unless the def has the NEVERAGE flag (bit 0x04 in engine,
 	// our particle_flag::NeverAge constant).
 	if ((def.flags & particle_flag::NeverAge) == 0) {
 		p.age -= dt;
 	}
+}
+
+// CParticleEmitter_SpawnParticle @ 0x5e7640: bits 0x01..0x100 are set when
+// the chosen graphic layer has a non-null LUT pointer at the matching offset.
+// We follow per-graphic curves with particle-level fallback (mirrors the
+// renderer's choose_curve precedence in nova_particle_emitter.cpp).
+std::uint32_t compute_spawn_flags(const ParticleDef &def, std::uint32_t graphic_idx) noexcept {
+	using namespace particle_runtime_flag;
+	const GraphicLayer &layer = def.graphics[graphic_idx];
+	std::uint32_t flags = 0;
+	if (layer.alpha_func.baked || def.alpha_func.baked) flags |= AlphaCurve;
+	if (layer.red_func.baked   || def.red_func.baked)   flags |= RedCurve;
+	if (layer.green_func.baked || def.green_func.baked) flags |= GreenCurve;
+	if (layer.blue_func.baked  || def.blue_func.baked)  flags |= BlueCurve;
+	if (layer.scale_func.baked || def.scale_func.baked) flags |= ScaleCurve;
+	if (layer.flip_frames > 1) flags |= Flipbook;
+	if (layer.blend_mode == BlendMode::Bump || layer.blend_mode == BlendMode::Bumpadd) flags |= LitColor;
+	if (layer.blend_mode == BlendMode::Distort) flags |= Distort;
+	return flags;
 }
 
 void emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
@@ -178,6 +344,7 @@ void emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
 	p.graphic_layer = static_cast<std::uint8_t>(pick_graphic(e, def));
 	p.color = color_for_slot(def, p.graphic_layer, p.color_slot);
 	p.serial = e.next_serial++;
+	p.flags = compute_spawn_flags(def, p.graphic_layer);
 	apply_emission_shape(e, def, p);
 	e.particles.push_back(p);
 }
@@ -216,8 +383,46 @@ void emitter_init(Emitter &e, const ParticleDef *def, Vec3 pos, std::uint32_t se
 	e.next_serial = 0;
 	e.active = def != nullptr;
 	e.finite = def != nullptr ? (def->flags & particle_flag::ForeverEmit) == 0 : true;
+	e.last_translation_delta = {0.0f, 0.0f, 0.0f};
+	e.cumulative_translation = {0.0f, 0.0f, 0.0f};
+	// Note: `color_tint`, `spring_const`, and `lod_divisor` are NOT reset
+	// here — they're user-controlled / manager-set scalars (engine
+	// equivalents are set per-frame from outside `Initialize`), and
+	// resetting them on every `play()` / `restart()` would clobber the
+	// caller's intent.
 	// Avoid seed=0 producing a zero-bound LCG for the first few values.
 	e.rng_state = seed != 0 ? seed : 0x9E3779B9u;
+}
+
+void emitter_translate(Emitter &e, Vec3 new_pos) noexcept {
+	// CParticleEmitter_TranslatePosition @ 0x5efe90: compute delta, update
+	// position, accumulate. Engine maintains two parallel accumulators
+	// (emitter+212/+224 = AABB min/max); we expose just the deltas because
+	// the AABB itself isn't tracked yet.
+	const Vec3 delta{
+		new_pos.x - e.position.x,
+		new_pos.y - e.position.y,
+		new_pos.z - e.position.z,
+	};
+	e.prev_position = e.position;
+	e.position = new_pos;
+	e.last_translation_delta = delta;
+	e.cumulative_translation = vec3_add(e.cumulative_translation, delta);
+
+	// Engine `PositionRelative` flag (bit 18 = 0x40000): when set, particles
+	// stay attached to the emitter — translating the emitter carries every
+	// alive particle along by the same delta. Default (flag clear) is engine
+	// behaviour where particles render in world space and are "left behind"
+	// when the emitter moves. Corpus survey: none of the 5 reference fixtures
+	// author PositionRelative, so the world-space default matches typical
+	// authoring intent.
+	if (e.def != nullptr && (e.def->flags & particle_flag::PositionRelative) != 0) {
+		for (Particle &p : e.particles) {
+			p.position.x += delta.x;
+			p.position.y += delta.y;
+			p.position.z += delta.z;
+		}
+	}
 }
 
 bool emitter_spawn_one(Emitter &e) {
@@ -242,7 +447,7 @@ void emitter_advance(Emitter &e, float dt) {
 		if (e.emit_delay_remaining > 0.0f) {
 			// Still in the warm-up: integrate existing particles only.
 			for (Particle &p : e.particles) {
-				integrate_particle(p, def, dt);
+				integrate_particle(p, def, e, dt);
 			}
 			expire_dead(e);
 			return;
@@ -252,22 +457,51 @@ void emitter_advance(Emitter &e, float dt) {
 
 	// Emission. emit_rate is particles/sec; emit_burst is particles spawned
 	// per emission tick. emit_dur counts down (unless FOREVEREMIT flag is set).
+	//
+	// Engine: CEffectEmitter_AdvanceEmission @ 0x5e1d30 — when the def's
+	// emit_rate_func resolves to a tabledef, the engine scales the emission
+	// interval by the LUT byte at age-normalized index, divided by 128.0
+	// (engine 128 = 1.0 neutral, 0 = no emission, 255 ≈ 2× faster):
+	//   interval = (1 / emit_rate) / (lut[t * 256 % 256] / 128.0)
+	// We mirror by computing the same scale factor here. `t` is normalized
+	// against `def.emit_dur` so the curve plays out across the emitter's
+	// finite emission window; FOREVEREMIT loops the curve modulo 256.
 	const bool can_emit = e.finite ? e.emit_dur_remaining > 0.0f : true;
 	if (can_emit && def.emit_rate > 0.0f) {
-		const float interval = 1.0f / std::max(def.emit_rate, 1e-3f);
-		e.emit_accumulator += dt;
-		while (e.emit_accumulator >= interval) {
-			e.emit_accumulator -= interval;
-			const int burst = std::max(def.emit_burst, 1);
-			for (int b = 0; b < burst; ++b) {
-				emit_one_internal(e, def);
+		float rate_scale = 1.0f;
+		if (def.emit_rate_func.baked) {
+			float t_norm = 0.0f;
+			if (def.emit_dur > 1e-6f) {
+				t_norm = clampf(e.age / def.emit_dur, 0.0f, 0.999999f);
+			} else {
+				// FOREVEREMIT or zero-dur: cycle through the LUT every second.
+				t_norm = e.age - std::floor(e.age);
 			}
-			if (e.finite) {
-				e.emit_dur_remaining -= interval;
-				if (e.emit_dur_remaining <= 0.0f) {
-					break;
+			const int lut_idx = static_cast<int>(t_norm * 256.0f) & 0xFF;
+			const std::uint8_t lut_byte = def.emit_rate_func.baked_lut[static_cast<std::size_t>(lut_idx)];
+			rate_scale = static_cast<float>(lut_byte) / 128.0f;
+		}
+		const float scaled_rate = def.emit_rate * rate_scale;
+		if (scaled_rate > 1e-3f) {
+			const float interval = 1.0f / scaled_rate;
+			e.emit_accumulator += dt;
+			while (e.emit_accumulator >= interval) {
+				e.emit_accumulator -= interval;
+				const int burst = std::max(def.emit_burst, 1);
+				for (int b = 0; b < burst; ++b) {
+					emit_one_internal(e, def);
+				}
+				if (e.finite) {
+					e.emit_dur_remaining -= interval;
+					if (e.emit_dur_remaining <= 0.0f) {
+						break;
+					}
 				}
 			}
+		} else {
+			// Curve is zero or near-zero: pause emission this frame but keep
+			// the accumulator unchanged so an instant rate-recovery picks up
+			// where it left off.
 		}
 	}
 	if (e.finite && e.emit_dur_remaining < 0.0f) {
@@ -276,7 +510,7 @@ void emitter_advance(Emitter &e, float dt) {
 
 	// Physics integration + aging.
 	for (Particle &p : e.particles) {
-		integrate_particle(p, def, dt);
+		integrate_particle(p, def, e, dt);
 	}
 	expire_dead(e);
 

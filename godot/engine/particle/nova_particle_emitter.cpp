@@ -1,15 +1,30 @@
 #include "nova_particle_emitter.h"
 
-#include <godot_cpp/classes/multi_mesh.hpp>
+#include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/geometry_instance3d.hpp>
+#include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/mesh_instance3d.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/shader.hpp>
-#include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
+#include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/variant/packed_color_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
 #include "util/texture_path_resolver.h"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
+#include <vector>
 
 using namespace godot;
 
@@ -22,6 +37,18 @@ Ref<NovaParticleCurveRef> choose_curve(const Ref<NovaParticleCurveRef> &primary,
 	}
 	return fallback;
 }
+
+struct RenderParticle {
+	int layer_idx = 0;
+	float depth = 0.0f;
+	float rotation = 0.0f;
+	float scale = 1.0f;
+	int frame = 0;
+	int flip_frames = 1;
+	int blend_mode = 0;
+	Vector3 position;
+	Color color;
+};
 
 } // namespace
 
@@ -42,21 +69,47 @@ void NovaParticleEmitter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_auto_advance"), &NovaParticleEmitter::get_auto_advance);
 	ClassDB::bind_method(D_METHOD("set_time_scale", "p_value"), &NovaParticleEmitter::set_time_scale);
 	ClassDB::bind_method(D_METHOD("get_time_scale"), &NovaParticleEmitter::get_time_scale);
-	ClassDB::bind_method(D_METHOD("set_shader_material", "p_material"), &NovaParticleEmitter::set_shader_material);
-	ClassDB::bind_method(D_METHOD("get_shader_material"), &NovaParticleEmitter::get_shader_material);
 	ClassDB::bind_method(D_METHOD("set_texture_dir", "p_dir"), &NovaParticleEmitter::set_texture_dir);
 	ClassDB::bind_method(D_METHOD("get_texture_dir"), &NovaParticleEmitter::get_texture_dir);
 	ClassDB::bind_method(D_METHOD("get_resolved_texture_path", "layer_index"),
 			&NovaParticleEmitter::get_resolved_texture_path);
+	ClassDB::bind_method(D_METHOD("set_color_tint", "p_tint"), &NovaParticleEmitter::set_color_tint);
+	ClassDB::bind_method(D_METHOD("get_color_tint"), &NovaParticleEmitter::get_color_tint);
+	ClassDB::bind_method(D_METHOD("set_spring_const", "p_value"), &NovaParticleEmitter::set_spring_const);
+	ClassDB::bind_method(D_METHOD("get_spring_const"), &NovaParticleEmitter::get_spring_const);
+	ClassDB::bind_method(D_METHOD("set_lod_divisor", "p_value"), &NovaParticleEmitter::set_lod_divisor);
+	ClassDB::bind_method(D_METHOD("get_lod_divisor"), &NovaParticleEmitter::get_lod_divisor);
+	ClassDB::bind_method(D_METHOD("set_kill_plane_mode", "p_value"), &NovaParticleEmitter::set_kill_plane_mode);
+	ClassDB::bind_method(D_METHOD("get_kill_plane_mode"), &NovaParticleEmitter::get_kill_plane_mode);
+	ClassDB::bind_method(D_METHOD("set_kill_plane_y", "p_value"), &NovaParticleEmitter::set_kill_plane_y);
+	ClassDB::bind_method(D_METHOD("get_kill_plane_y"), &NovaParticleEmitter::get_kill_plane_y);
 
 	ClassDB::bind_method(D_METHOD("play"), &NovaParticleEmitter::play);
 	ClassDB::bind_method(D_METHOD("stop"), &NovaParticleEmitter::stop);
 	ClassDB::bind_method(D_METHOD("restart"), &NovaParticleEmitter::restart);
 	ClassDB::bind_method(D_METHOD("advance", "dt"), &NovaParticleEmitter::advance);
+	ClassDB::bind_method(D_METHOD("is_finite"), &NovaParticleEmitter::is_finite);
+	ClassDB::bind_method(D_METHOD("is_finished"), &NovaParticleEmitter::is_finished);
 	ClassDB::bind_method(D_METHOD("get_alive_count"), &NovaParticleEmitter::get_alive_count);
 	ClassDB::bind_method(D_METHOD("get_visual_layer_count"), &NovaParticleEmitter::get_visual_layer_count);
 	ClassDB::bind_method(D_METHOD("get_rendered_instance_count"), &NovaParticleEmitter::get_rendered_instance_count);
 	ClassDB::bind_method(D_METHOD("get_textured_layer_count"), &NovaParticleEmitter::get_textured_layer_count);
+	ClassDB::bind_method(D_METHOD("get_render_batch_count"), &NovaParticleEmitter::get_render_batch_count);
+	ClassDB::bind_method(D_METHOD("get_sorted_depth_count"), &NovaParticleEmitter::get_sorted_depth_count);
+	ClassDB::bind_method(D_METHOD("get_debug_first_rotation"), &NovaParticleEmitter::get_debug_first_rotation);
+	ClassDB::bind_method(D_METHOD("get_debug_first_flip_frame"), &NovaParticleEmitter::get_debug_first_flip_frame);
+	ClassDB::bind_method(D_METHOD("get_debug_first_blend_mode"), &NovaParticleEmitter::get_debug_first_blend_mode);
+	ClassDB::bind_method(D_METHOD("get_debug_static_billboard"), &NovaParticleEmitter::get_debug_static_billboard);
+	ClassDB::bind_method(D_METHOD("get_debug_first_shader_path"),
+			&NovaParticleEmitter::get_debug_first_shader_path);
+	ClassDB::bind_method(D_METHOD("get_debug_first_color"),
+			&NovaParticleEmitter::get_debug_first_color);
+	ClassDB::bind_method(D_METHOD("get_debug_last_translation_delta"),
+			&NovaParticleEmitter::get_debug_last_translation_delta);
+	ClassDB::bind_method(D_METHOD("get_debug_first_layer_aabb_center"),
+			&NovaParticleEmitter::get_debug_first_layer_aabb_center);
+	ClassDB::bind_method(D_METHOD("get_debug_first_quad_vertices"),
+			&NovaParticleEmitter::get_debug_first_quad_vertices);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "def", PROPERTY_HINT_RESOURCE_TYPE, "NovaParticleDef"),
 			"set_def", "get_def");
@@ -66,14 +119,23 @@ void NovaParticleEmitter::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "seed"), "set_seed", "get_seed");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_advance"), "set_auto_advance", "get_auto_advance");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "time_scale"), "set_time_scale", "get_time_scale");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "shader_material", PROPERTY_HINT_RESOURCE_TYPE, "ShaderMaterial"),
-			"set_shader_material", "get_shader_material");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "texture_dir", PROPERTY_HINT_DIR), "set_texture_dir", "get_texture_dir");
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "color_tint"), "set_color_tint", "get_color_tint");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "spring_const"), "set_spring_const", "get_spring_const");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "lod_divisor",
+			PROPERTY_HINT_RANGE, "1,16,1"),
+			"set_lod_divisor", "get_lod_divisor");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "kill_plane_mode",
+			PROPERTY_HINT_ENUM, "Disabled,Kill Above,Kill At/Below"),
+			"set_kill_plane_mode", "get_kill_plane_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "kill_plane_y"),
+			"set_kill_plane_y", "get_kill_plane_y");
 }
 
 void NovaParticleEmitter::_notification(int p_what) {
 	switch (p_what) {
 		case NOTIFICATION_READY:
+			set_notify_transform(true);
 			_ensure_visual_setup();
 			if (def.is_valid()) {
 				_refresh_emitter();
@@ -87,59 +149,133 @@ void NovaParticleEmitter::_notification(int p_what) {
 			advance(static_cast<float>(get_process_delta_time()) * time_scale);
 			break;
 		}
+		case NOTIFICATION_TRANSFORM_CHANGED: {
+			// Engine: CParticleEmitter_TranslatePosition @ 0x5efe90 — when
+			// the emitter's world origin moves, push the new position into
+			// the simulator so the delta accumulators stay in sync. Note
+			// that the rendering pipeline still applies global_transform at
+			// vertex emission, so this currently only feeds the delta
+			// metadata; switching the renderer to world-space coordinates
+			// is a follow-up gated on `PositionRelative` flag handling.
+			if (emitter.def != nullptr) {
+				const Vector3 origin = get_global_transform().origin;
+				opennova::particle::emitter_translate(emitter,
+						opennova::particle::Vec3{origin.x, origin.y, origin.z});
+			}
+			break;
+		}
 		default:
 			break;
 	}
 }
 
 void NovaParticleEmitter::_ensure_visual_setup() {
-	if (quad_mesh.is_null()) {
-		quad_mesh.instantiate();
-		quad_mesh->set_size(Vector2(1.0f, 1.0f));
-	}
-
+	_ensure_fallback_texture();
 	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
-		if (mmi_layers[i] == nullptr) {
-			mmi_layers[i] = memnew(MultiMeshInstance3D);
-			mmi_layers[i]->set_name(String("ParticleLayer") + String::num_int64(i + 1));
-			add_child(mmi_layers[i]);
-			mmi_layers[i]->set_owner(get_owner());
-		}
-		if (multimeshes[i].is_null()) {
-			multimeshes[i].instantiate();
-			multimeshes[i]->set_transform_format(MultiMesh::TRANSFORM_3D);
-			multimeshes[i]->set_use_colors(true);
-			multimeshes[i]->set_mesh(quad_mesh);
+		if (mesh_layers[i] == nullptr) {
+			mesh_layers[i] = memnew(MeshInstance3D);
+			mesh_layers[i]->set_name(String("ParticleLayer") + String::num_int64(i + 1));
+			mesh_layers[i]->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+			mesh_layers[i]->set_extra_cull_margin(200.0f);
+			// World-space rendering: vertex positions are already in world
+			// coords (simulator runs in world space, seeded from the
+			// NovaParticleEmitter's global origin). `set_as_top_level(true)`
+			// makes the MeshInstance3D ignore the parent transform so the
+			// vertices are interpreted directly as world coordinates,
+			// matching the engine default where particles are "left behind"
+			// when the emitter Node3D moves. PositionRelative flag (bit 18)
+			// opts back into local-space behaviour at the simulator level
+			// via `emitter_translate` carrying alive particles.
+			mesh_layers[i]->set_as_top_level(true);
+			mesh_layers[i]->set_transform(Transform3D());
+			add_child(mesh_layers[i]);
+			mesh_layers[i]->set_owner(get_owner());
 		}
 		if (layer_materials[i].is_null()) {
-			layer_materials[i] = _make_layer_material();
+			layer_materials[i] = _make_layer_material(layer_blend_modes[i]);
 		}
-		mmi_layers[i]->set_multimesh(multimeshes[i]);
-		mmi_layers[i]->set_material_override(layer_materials[i]);
+		mesh_layers[i]->set_material_override(layer_materials[i]);
 	}
 }
 
-Ref<ShaderMaterial> NovaParticleEmitter::_make_layer_material() const {
-	if (shader_material.is_valid()) {
-		Ref<ShaderMaterial> copy = shader_material->duplicate();
-		if (copy.is_valid()) {
-			return copy;
-		}
-		Ref<ShaderMaterial> mat;
-		mat.instantiate();
-		mat->set_shader(shader_material->get_shader());
-		return mat;
+void NovaParticleEmitter::_ensure_fallback_texture() {
+	if (fallback_texture.is_valid()) {
+		return;
 	}
+	constexpr int FALLBACK_SIZE = 32;
+	Ref<Image> image = Image::create(FALLBACK_SIZE, FALLBACK_SIZE, false, Image::FORMAT_RGBA8);
+	if (image.is_null()) {
+		return;
+	}
+	const float center = (static_cast<float>(FALLBACK_SIZE) - 1.0f) * 0.5f;
+	for (int y = 0; y < FALLBACK_SIZE; ++y) {
+		for (int x = 0; x < FALLBACK_SIZE; ++x) {
+			const float dx = (static_cast<float>(x) - center) / center;
+			const float dy = (static_cast<float>(y) - center) / center;
+			const float r = std::sqrt(dx * dx + dy * dy);
+			const float alpha = std::clamp(1.0f - r, 0.0f, 1.0f);
+			image->set_pixel(x, y, Color(1.0f, 1.0f, 1.0f, alpha));
+		}
+	}
+	fallback_texture = ImageTexture::create_from_image(image);
+}
 
+String NovaParticleEmitter::_shader_path_for_blend(int p_blend_mode) {
+	using opennova::particle::BlendMode;
+	switch (static_cast<BlendMode>(std::clamp(p_blend_mode, 0, 7))) {
+		case BlendMode::Blend:    return "res://modtools/particle/shaders/particle_blend_blend.gdshader";
+		case BlendMode::Additive: return "res://modtools/particle/shaders/particle_blend_additive.gdshader";
+		case BlendMode::Premult:  return "res://modtools/particle/shaders/particle_blend_premult.gdshader";
+		case BlendMode::Bump:     return "res://modtools/particle/shaders/particle_blend_bump.gdshader";
+		case BlendMode::Mod:      return "res://modtools/particle/shaders/particle_blend_mod.gdshader";
+		case BlendMode::Mod2x:    return "res://modtools/particle/shaders/particle_blend_mod2x.gdshader";
+		case BlendMode::Bumpadd:  return "res://modtools/particle/shaders/particle_blend_bumpadd.gdshader";
+		case BlendMode::Distort:  return "res://modtools/particle/shaders/particle_blend_distort.gdshader";
+	}
+	return "res://modtools/particle/shaders/particle_blend_blend.gdshader";
+}
+
+Ref<Shader> NovaParticleEmitter::_get_blend_shader(int p_blend_mode) {
+	// Per-emitter cache. Lazy-load each blend mode on first use; the Ref<>s
+	// release with the emitter (via _clear_meshes / dtor), so the
+	// RenderingServer is still alive when shader RIDs are freed even at
+	// engine shutdown.
+	const int idx = std::clamp(p_blend_mode, 0, 7);
+	if (blend_shader_cache[static_cast<std::size_t>(idx)].is_null()) {
+		ResourceLoader *loader = ResourceLoader::get_singleton();
+		if (loader != nullptr) {
+			Ref<Resource> res = loader->load(_shader_path_for_blend(idx));
+			blend_shader_cache[static_cast<std::size_t>(idx)] = res;
+		}
+	}
+	return blend_shader_cache[static_cast<std::size_t>(idx)];
+}
+
+Ref<ShaderMaterial> NovaParticleEmitter::_make_layer_material(int p_blend_mode) {
 	Ref<ShaderMaterial> mat;
 	mat.instantiate();
+	mat->set_shader(_get_blend_shader(p_blend_mode));
+	mat->set_shader_parameter("has_texture", false);
 	return mat;
 }
 
-void NovaParticleEmitter::_clear_multimeshes() {
+void NovaParticleEmitter::_clear_meshes() {
+	last_render_batch_count = 0;
+	last_sorted_depth_count = 0;
+	debug_first_rotation = 0.0f;
+	debug_first_flip_frame = 0;
+	debug_first_blend_mode = 0;
+	debug_static_billboard = false;
+	debug_first_color = Color(1.0f, 1.0f, 1.0f, 1.0f);
+	debug_first_quad_vertices.clear();
 	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
-		if (multimeshes[i].is_valid()) {
-			multimeshes[i]->set_instance_count(0);
+		layer_quad_counts[i] = 0;
+		layer_last_flip_frames[i] = 1;
+		layer_last_flip_frame[i] = 0;
+		layer_meshes[i].unref();
+		if (mesh_layers[i] != nullptr) {
+			mesh_layers[i]->set_mesh(Ref<Mesh>());
+			mesh_layers[i]->set_visible(false);
 		}
 	}
 }
@@ -149,15 +285,44 @@ void NovaParticleEmitter::_refresh_emitter() {
 		native_def = std::make_unique<opennova::particle::ParticleDef>(def->to_native());
 		emitter.max_particles = native_def->emit_maxoverride > 0 ?
 				static_cast<std::size_t>(native_def->emit_maxoverride) : 256u;
-		opennova::particle::emitter_init(emitter, native_def.get(),
-				opennova::particle::Vec3{0, 0, 0},
+
+		// Bake per-graphic curve LUTs (and any other runtime-resolved
+		// graphic state) before init. Engine analogue:
+		// `CEffectDef_ResolveAllReferences @ 0x5e9d70` runs once per def
+		// after parse — resolving every CurveRef name against the tabledef
+		// pool, baking flat 256-byte LUTs, and populating the runtime UV
+		// rect array used by the flipbook UV strip. Without this call the
+		// simulator's `compute_spawn_flags` saw no `CurveRef::baked` set
+		// and silently emitted particles with `flags = 0`, suppressing all
+		// curve modulation in the editor preview.
+		std::vector<opennova::particle::TableDef> native_tables;
+		native_tables.reserve(static_cast<std::size_t>(tables.size()));
+		for (int i = 0; i < tables.size(); ++i) {
+			Ref<NovaParticleTable> table = tables[i];
+			if (table.is_valid()) {
+				native_tables.push_back(table->to_native());
+			}
+		}
+		opennova::particle::bake_particle_def_curves(*native_def, native_tables);
+
+		// Seed the simulator from the Node3D world origin so the delta
+		// accumulators (last_translation_delta / cumulative_translation) are
+		// referenced against the actual world position, not (0,0,0). Engine
+		// equivalent: CEffectEmitter_Initialize @ 0x5e6020 reads
+		// `spawnParams[0..2]` for emitter+24..32.
+		opennova::particle::Vec3 origin{0.0f, 0.0f, 0.0f};
+		if (is_inside_tree()) {
+			const Vector3 world = get_global_transform().origin;
+			origin = {world.x, world.y, world.z};
+		}
+		opennova::particle::emitter_init(emitter, native_def.get(), origin,
 				static_cast<std::uint32_t>(seed));
 	} else {
 		native_def.reset();
 		emitter.def = nullptr;
 		emitter.particles.clear();
 	}
-	_clear_multimeshes();
+	_clear_meshes();
 }
 
 Ref<NovaParticleTable> NovaParticleEmitter::_find_table(const String &id) const {
@@ -224,11 +389,14 @@ void NovaParticleEmitter::_refresh_layer_materials(
 		const std::array<Ref<NovaParticleGraphicLayer>, MAX_VISUAL_LAYERS> &layers,
 		const std::array<bool, MAX_VISUAL_LAYERS> &present) {
 	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
-		if (layer_materials[i].is_null()) {
-			layer_materials[i] = _make_layer_material();
+		const int blend_mode = present[i] && layers[i].is_valid() ?
+				std::clamp(layers[i]->get_blend_mode(), 0, 7) : 0;
+		if (layer_materials[i].is_null() || layer_blend_modes[i] != blend_mode) {
+			layer_blend_modes[i] = blend_mode;
+			layer_materials[i] = _make_layer_material(blend_mode);
 		}
-		if (mmi_layers[i] != nullptr) {
-			mmi_layers[i]->set_material_override(layer_materials[i]);
+		if (mesh_layers[i] != nullptr) {
+			mesh_layers[i]->set_material_override(layer_materials[i]);
 		}
 
 		String texture_name;
@@ -246,14 +414,17 @@ void NovaParticleEmitter::_refresh_layer_materials(
 			}
 		}
 
-		layer_materials[i]->set_shader_parameter("has_texture", layer_textures[i].is_valid());
-		layer_materials[i]->set_shader_parameter("albedo_tex", layer_textures[i]);
+		const bool layer_has_texture = layer_textures[i].is_valid();
+		const Ref<Texture2D> texture_for_material =
+				layer_has_texture ? layer_textures[i] : fallback_texture;
+		layer_materials[i]->set_shader_parameter("albedo_tex", texture_for_material);
+		layer_materials[i]->set_shader_parameter("has_texture", layer_has_texture);
 	}
 }
 
-void NovaParticleEmitter::_update_multimesh() {
+void NovaParticleEmitter::_update_meshes() {
 	if (def.is_null() || native_def == nullptr) {
-		_clear_multimeshes();
+		_clear_meshes();
 		return;
 	}
 	_ensure_visual_setup();
@@ -277,7 +448,6 @@ void NovaParticleEmitter::_update_multimesh() {
 	_refresh_layer_materials(layers, present);
 
 	const int alive = static_cast<int>(emitter.particles.size());
-	std::array<int, MAX_VISUAL_LAYERS> counts{};
 	int fallback_layer = 0;
 	for (int layer_idx = 0; layer_idx < MAX_VISUAL_LAYERS; ++layer_idx) {
 		if (present[layer_idx]) {
@@ -290,26 +460,60 @@ void NovaParticleEmitter::_update_multimesh() {
 		return present[particle_layer] ? particle_layer : fallback_layer;
 	};
 
-	for (const opennova::particle::Particle &p : emitter.particles) {
-		++counts[render_layer_for_particle(p)];
-	}
-	for (int layer_idx = 0; layer_idx < MAX_VISUAL_LAYERS; ++layer_idx) {
-		if (multimeshes[layer_idx].is_valid()) {
-			const int target_count = present[layer_idx] ? counts[layer_idx] : 0;
-			if (multimeshes[layer_idx]->get_instance_count() != target_count) {
-				multimeshes[layer_idx]->set_instance_count(target_count);
-			}
-		}
-	}
 	if (alive == 0) {
+		_clear_meshes();
 		return;
 	}
 
-	std::array<int, MAX_VISUAL_LAYERS> cursors{};
+	// World-space rendering. The simulator's `Particle::position` is in
+	// world coordinates (emitter is seeded from `get_global_transform().origin`
+	// in `_refresh_emitter`, kept in sync via NOTIFICATION_TRANSFORM_CHANGED
+	// → `emitter_translate`). MeshInstance3D children are configured with
+	// `set_as_top_level(true)` in `_ensure_visual_setup`, so the vertex
+	// positions are interpreted directly as world coordinates without
+	// applying the NovaParticleEmitter's transform. Camera basis is read in
+	// world space so billboards face the camera regardless of parent
+	// rotation. PositionRelative flag carries alive particles with the
+	// emitter at the simulator level (see emitter_translate).
+	Viewport *viewport = get_viewport();
+	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
+	Vector3 right(1.0f, 0.0f, 0.0f);
+	Vector3 up(0.0f, 1.0f, 0.0f);
+	Transform3D camera_view;
+	if (camera != nullptr) {
+		const Transform3D camera_global = camera->get_global_transform();
+		camera_view = camera_global.affine_inverse();
+		right = camera_global.basis.get_column(0);
+		up = camera_global.basis.get_column(1);
+		if (right.length_squared() > 0.0f) {
+			right.normalize();
+		} else {
+			right = Vector3(1.0f, 0.0f, 0.0f);
+		}
+		if (up.length_squared() > 0.0f) {
+			up.normalize();
+		} else {
+			up = Vector3(0.0f, 1.0f, 0.0f);
+		}
+	}
+
+	std::vector<RenderParticle> sorted;
+	sorted.reserve(static_cast<std::size_t>(alive));
+
+	// CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 LOD decimation: when
+	// the manager-set divisor is > 1, skip particles whose `serial`
+	// (per-particle byte at +0) is not aligned. divisor=1 = render all
+	// (engine behaviour at full perf budget); divisor>1 = uniform skip
+	// without touching simulation state. See Emitter::lod_divisor doc.
+	const std::uint32_t lod_divisor = std::max<std::uint32_t>(emitter.lod_divisor, 1u);
+
 	for (int i = 0; i < alive; ++i) {
 		const opennova::particle::Particle &p = emitter.particles[static_cast<std::size_t>(i)];
+		if (lod_divisor > 1u && (static_cast<std::uint32_t>(p.serial) % lod_divisor) != 0u) {
+			continue;
+		}
 		const int layer_idx = render_layer_for_particle(p);
-		if (!present[layer_idx] || multimeshes[layer_idx].is_null()) {
+		if (!present[layer_idx]) {
 			continue;
 		}
 		const float t = p.lifetime > 0.0f ?
@@ -343,20 +547,213 @@ void NovaParticleEmitter::_update_multimesh() {
 		const float green_mult = _sample_curve(green_curve, t, 1.0f);
 		const float blue_mult = _sample_curve(blue_curve, t, 1.0f);
 
-		Transform3D xf;
 		const float s = std::max(0.01f, p.scale * base_scale * scale_mult);
-		xf.basis = Basis().scaled(Vector3(s, s, s));
-		xf.origin = Vector3(p.position.x, p.position.y, p.position.z);
-		const int instance_idx = cursors[layer_idx]++;
-		multimeshes[layer_idx]->set_instance_transform(instance_idx, xf);
+
+		// Manager-level RGB tint — CParticleEmitter_BuildBillboardQuads @
+		// 0x5e6d60 multiplies each channel by `(emitter_byte * channel) >> 7`
+		// (so engine byte 128 = 1.0). Our portable simulator stores the tint
+		// as a Vec3 in [0..2] range. Default {1, 1, 1} = no change. Applied
+		// AFTER the per-curve modulation, BEFORE the 0..1 clamp.
+		const opennova::particle::Vec3 tint = emitter.color_tint;
 
 		Color color = _layer_color(layer, p.color_slot);
-		color.r = std::clamp(color.r * red_mult, 0.0f, 1.0f);
-		color.g = std::clamp(color.g * green_mult, 0.0f, 1.0f);
-		color.b = std::clamp(color.b * blue_mult, 0.0f, 1.0f);
+		color.r = std::clamp(color.r * red_mult * tint.x, 0.0f, 1.0f);
+		color.g = std::clamp(color.g * green_mult * tint.y, 0.0f, 1.0f);
+		color.b = std::clamp(color.b * blue_mult * tint.z, 0.0f, 1.0f);
 		color.a = std::clamp((static_cast<float>(p.alpha) / 255.0f) * layer_alpha * alpha_mult,
 				0.0f, 1.0f);
-		multimeshes[layer_idx]->set_instance_color(instance_idx, color);
+
+		const int flip_frames = layer.is_valid() && layer->get_present() ?
+				std::max(1, layer->get_flip_frames()) : 1;
+		const int flip_rate = layer.is_valid() && layer->get_present() ?
+				std::max(0, layer->get_flip_rate()) : 0;
+		const float elapsed = p.lifetime > 0.0f ? std::max(0.0f, p.lifetime - p.age) : 0.0f;
+		const int frame = flip_frames > 1 && flip_rate > 0 ?
+				static_cast<int>(std::floor(elapsed * static_cast<float>(flip_rate))) % flip_frames : 0;
+
+		RenderParticle rp;
+		rp.layer_idx = layer_idx;
+		rp.rotation = p.rotation;
+		rp.scale = s;
+		rp.frame = frame;
+		rp.flip_frames = flip_frames;
+		rp.blend_mode = layer_blend_modes[layer_idx];
+		rp.position = Vector3(p.position.x, p.position.y, p.position.z);
+		rp.color = color;
+		// Particle position is already world-space (top_level mesh +
+		// world-space simulator). Project directly to view space without
+		// applying the NovaParticleEmitter's local transform.
+		if (camera != nullptr) {
+			rp.depth = -camera_view.xform(rp.position).z;
+		} else {
+			rp.depth = -rp.position.z;
+		}
+		sorted.push_back(rp);
+	}
+
+	std::sort(sorted.begin(), sorted.end(), [](const RenderParticle &a, const RenderParticle &b) {
+		if (a.depth == b.depth) {
+			return a.layer_idx < b.layer_idx;
+		}
+		return a.depth > b.depth;
+	});
+
+	std::array<std::vector<RenderParticle>, MAX_VISUAL_LAYERS> per_layer;
+	for (const RenderParticle &rp : sorted) {
+		per_layer[static_cast<std::size_t>(rp.layer_idx)].push_back(rp);
+	}
+
+	last_render_batch_count = 0;
+	last_sorted_depth_count = static_cast<int>(sorted.size());
+	debug_first_rotation = 0.0f;
+	debug_first_flip_frame = 0;
+	debug_first_blend_mode = 0;
+	// Engine: CParticleEmitter_RenderStaticBillboards @ 0x5f4e10 is selected
+	// when `def.flags & 0x100` is set (= particle_flag::YawAndPitch); that path
+	// uses D3DXMatrixScaling only (no per-particle rotation). We mirror by
+	// suppressing the 2D rotate when the bit is set. The debug bool is
+	// captured per render so GUT tests can verify the branch was taken.
+	debug_static_billboard =
+			(native_def->flags & opennova::particle::particle_flag::YawAndPitch) != 0;
+	debug_first_color = Color(1.0f, 1.0f, 1.0f, 1.0f);
+	debug_first_quad_vertices.clear();
+	bool debug_quad_set = false;
+
+	for (int layer_idx = 0; layer_idx < MAX_VISUAL_LAYERS; ++layer_idx) {
+		const std::vector<RenderParticle> &layer_particles = per_layer[static_cast<std::size_t>(layer_idx)];
+		const int quad_count = static_cast<int>(layer_particles.size());
+		layer_quad_counts[layer_idx] = quad_count;
+		layer_last_flip_frames[layer_idx] = 1;
+		layer_last_flip_frame[layer_idx] = 0;
+
+		if (mesh_layers[layer_idx] == nullptr) {
+			continue;
+		}
+		if (quad_count == 0) {
+			layer_meshes[layer_idx].unref();
+			mesh_layers[layer_idx]->set_mesh(Ref<Mesh>());
+			mesh_layers[layer_idx]->set_visible(false);
+			continue;
+		}
+
+		PackedVector3Array verts;
+		PackedVector2Array uvs;
+		PackedColorArray colors;
+		PackedInt32Array indices;
+		verts.resize(quad_count * 4);
+		uvs.resize(quad_count * 4);
+		colors.resize(quad_count * 4);
+		indices.resize(quad_count * 6);
+
+		for (int q = 0; q < quad_count; ++q) {
+			const RenderParticle &rp = layer_particles[static_cast<std::size_t>(q)];
+			const float half = 0.5f * rp.scale;
+			// CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 vs.
+			// CParticleEmitter_RenderStaticBillboards @ 0x5f4e10 dispatch:
+			// rotated path applies a `D3DXMatrixRotationX(angle)` per particle,
+			// static path uses `D3DXMatrixScaling` only. The engine selects
+			// based on `(def.flags & 0x100) == 0` (YawAndPitch suppresses
+			// rotation). We branch the same way using the per-render
+			// `debug_static_billboard` snapshot so all particles in a frame
+			// take a consistent path.
+			const float effective_rotation = debug_static_billboard ? 0.0f : rp.rotation;
+			const float c = std::cos(effective_rotation);
+			const float s = std::sin(effective_rotation);
+			const Vector2 local_corners[4] = {
+				Vector2(-half, half),
+				Vector2(half, half),
+				Vector2(-half, -half),
+				Vector2(half, -half),
+			};
+			Vector3 quad_verts[4];
+			for (int corner = 0; corner < 4; ++corner) {
+				const Vector2 local = local_corners[corner];
+				const float rx = local.x * c - local.y * s;
+				const float ry = local.x * s + local.y * c;
+				quad_verts[corner] = rp.position + right * rx + up * ry;
+			}
+
+			// Engine: CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 reads
+			// per-frame UV rects from `graphic+724` (a runtime-baked array
+			// populated by CParticleManager_BuildTextureAtlases @ 0x5e8db0).
+			// Our portable form embeds the rects in
+			// `GraphicLayer::baked_uv_rects` via `bake_graphic_uv_rects`,
+			// defaulting to horizontal-strip layout but allowing future
+			// atlas-bake replacements. The renderer applies `inset` as
+			// symmetric texel padding to suppress neighbour-tile bleeding.
+			const auto &uv_rects = native_def->graphics[
+					static_cast<std::size_t>(layer_idx)].baked_uv_rects;
+			const std::size_t rect_count = std::max<std::size_t>(uv_rects.size(), 1);
+			const std::size_t frame_idx = static_cast<std::size_t>(
+					std::max(0, rp.frame)) % rect_count;
+			float u0 = 0.0f, u1 = 1.0f, v0 = 0.0f, v1 = 1.0f;
+			if (!uv_rects.empty()) {
+				const opennova::particle::UvRect &rect = uv_rects[frame_idx];
+				u0 = rect.u_min + rect.inset;
+				u1 = rect.u_max - rect.inset;
+				v0 = rect.v_min + rect.inset;
+				v1 = rect.v_max - rect.inset;
+			} else {
+				// Fallback for legacy paths where bake hasn't run yet.
+				const float inv_frames = 1.0f / static_cast<float>(std::max(1, rp.flip_frames));
+				u0 = static_cast<float>(rp.frame) * inv_frames;
+				u1 = static_cast<float>(rp.frame + 1) * inv_frames;
+			}
+			const int vertex_offset = q * 4;
+			const int index_offset = q * 6;
+			verts[vertex_offset + 0] = quad_verts[0];
+			verts[vertex_offset + 1] = quad_verts[1];
+			verts[vertex_offset + 2] = quad_verts[2];
+			verts[vertex_offset + 3] = quad_verts[3];
+			uvs[vertex_offset + 0] = Vector2(u0, v0);
+			uvs[vertex_offset + 1] = Vector2(u1, v0);
+			uvs[vertex_offset + 2] = Vector2(u0, v1);
+			uvs[vertex_offset + 3] = Vector2(u1, v1);
+			for (int corner = 0; corner < 4; ++corner) {
+				colors[vertex_offset + corner] = rp.color;
+			}
+			indices[index_offset + 0] = vertex_offset + 0;
+			indices[index_offset + 1] = vertex_offset + 1;
+			indices[index_offset + 2] = vertex_offset + 2;
+			indices[index_offset + 3] = vertex_offset + 1;
+			indices[index_offset + 4] = vertex_offset + 3;
+			indices[index_offset + 5] = vertex_offset + 2;
+
+			if (!debug_quad_set) {
+				// debug_first_rotation reflects the *effective* rotation used
+				// to construct the quad (= 0 when static-billboard, particle
+				// rotation otherwise). Tests use this to verify YawAndPitch
+				// suppresses rotation regardless of the per-particle accumulator.
+				debug_first_rotation = effective_rotation;
+				debug_first_flip_frame = rp.frame;
+				debug_first_blend_mode = rp.blend_mode;
+				debug_first_color = rp.color;
+				debug_first_quad_vertices.resize(4);
+				for (int corner = 0; corner < 4; ++corner) {
+					debug_first_quad_vertices[corner] = quad_verts[corner];
+				}
+				debug_quad_set = true;
+			}
+			layer_last_flip_frames[layer_idx] = rp.flip_frames;
+			layer_last_flip_frame[layer_idx] = rp.frame;
+		}
+
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		arrays[Mesh::ARRAY_VERTEX] = verts;
+		arrays[Mesh::ARRAY_TEX_UV] = uvs;
+		arrays[Mesh::ARRAY_COLOR] = colors;
+		arrays[Mesh::ARRAY_INDEX] = indices;
+
+		Ref<ArrayMesh> mesh;
+		mesh.instantiate();
+		mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+		mesh->surface_set_material(0, layer_materials[layer_idx]);
+		layer_meshes[layer_idx] = mesh;
+		mesh_layers[layer_idx]->set_material_override(layer_materials[layer_idx]);
+		mesh_layers[layer_idx]->set_mesh(mesh);
+		mesh_layers[layer_idx]->set_visible(true);
+		++last_render_batch_count;
 	}
 }
 
@@ -372,7 +769,7 @@ Ref<NovaParticleDef> NovaParticleEmitter::get_def() const { return def; }
 void NovaParticleEmitter::set_tables(const TypedArray<NovaParticleTable> &p_tables) {
 	tables = p_tables;
 	if (is_inside_tree()) {
-		_update_multimesh();
+		_update_meshes();
 	}
 }
 
@@ -396,22 +793,6 @@ void NovaParticleEmitter::set_time_scale(float p_value) {
 
 float NovaParticleEmitter::get_time_scale() const { return time_scale; }
 
-void NovaParticleEmitter::set_shader_material(const Ref<ShaderMaterial> &p_material) {
-	shader_material = p_material;
-	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
-		layer_materials[i].unref();
-		layer_texture_names[i] = String();
-		layer_texture_paths[i] = String();
-		layer_textures[i].unref();
-	}
-	if (is_inside_tree()) {
-		_ensure_visual_setup();
-		_update_multimesh();
-	}
-}
-
-Ref<ShaderMaterial> NovaParticleEmitter::get_shader_material() const { return shader_material; }
-
 void NovaParticleEmitter::set_texture_dir(const String &p_dir) {
 	if (texture_dir == p_dir) {
 		return;
@@ -423,7 +804,7 @@ void NovaParticleEmitter::set_texture_dir(const String &p_dir) {
 		layer_textures[i].unref();
 	}
 	if (is_inside_tree()) {
-		_update_multimesh();
+		_update_meshes();
 	}
 }
 
@@ -434,6 +815,52 @@ String NovaParticleEmitter::get_resolved_texture_path(int p_layer_index) const {
 		return String();
 	}
 	return layer_texture_paths[p_layer_index];
+}
+
+void NovaParticleEmitter::set_color_tint(const Color &p_tint) {
+	emitter.color_tint = {p_tint.r, p_tint.g, p_tint.b};
+}
+
+Color NovaParticleEmitter::get_color_tint() const {
+	return Color(emitter.color_tint.x, emitter.color_tint.y, emitter.color_tint.z, 1.0f);
+}
+
+void NovaParticleEmitter::set_spring_const(float p_value) {
+	emitter.spring_const = p_value;
+}
+
+float NovaParticleEmitter::get_spring_const() const {
+	return emitter.spring_const;
+}
+
+void NovaParticleEmitter::set_lod_divisor(int p_value) {
+	emitter.lod_divisor = static_cast<std::uint32_t>(std::max(1, p_value));
+}
+
+int NovaParticleEmitter::get_lod_divisor() const {
+	return static_cast<int>(emitter.lod_divisor);
+}
+
+void NovaParticleEmitter::set_kill_plane_mode(int p_value) {
+	// Engine: bits 27/28 in def.flags select kill-above vs kill-at/below.
+	// Our portable form clamps to {0=Disabled, 1=KillAbove, 2=KillAtOrBelow}
+	// — out-of-range values fall back to Disabled.
+	const std::uint32_t clamped = (p_value == 1 || p_value == 2)
+			? static_cast<std::uint32_t>(p_value)
+			: 0u;
+	emitter.kill_plane_mode = clamped;
+}
+
+int NovaParticleEmitter::get_kill_plane_mode() const {
+	return static_cast<int>(emitter.kill_plane_mode);
+}
+
+void NovaParticleEmitter::set_kill_plane_y(float p_value) {
+	emitter.kill_plane_y = p_value;
+}
+
+float NovaParticleEmitter::get_kill_plane_y() const {
+	return emitter.kill_plane_y;
 }
 
 void NovaParticleEmitter::play() {
@@ -450,7 +877,7 @@ void NovaParticleEmitter::play() {
 void NovaParticleEmitter::stop() {
 	playing = false;
 	emitter.particles.clear();
-	_clear_multimeshes();
+	_clear_meshes();
 }
 
 void NovaParticleEmitter::restart() {
@@ -466,7 +893,27 @@ void NovaParticleEmitter::advance(float dt) {
 		return;
 	}
 	opennova::particle::emitter_advance(emitter, dt);
-	_update_multimesh();
+	_update_meshes();
+	if (is_finished()) {
+		playing = false;
+	}
+}
+
+bool NovaParticleEmitter::is_finite() const {
+	if (emitter.def == nullptr) {
+		return true;
+	}
+	return emitter.finite;
+}
+
+bool NovaParticleEmitter::is_finished() const {
+	if (emitter.def == nullptr) {
+		return true;
+	}
+	if (!emitter.finite) {
+		return false;
+	}
+	return emitter.emit_dur_remaining <= 0.0f && emitter.particles.empty();
 }
 
 int NovaParticleEmitter::get_alive_count() const {
@@ -492,9 +939,7 @@ int NovaParticleEmitter::get_visual_layer_count() const {
 int NovaParticleEmitter::get_rendered_instance_count() const {
 	int total = 0;
 	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
-		if (multimeshes[i].is_valid()) {
-			total += multimeshes[i]->get_instance_count();
-		}
+		total += layer_quad_counts[i];
 	}
 	return total;
 }
@@ -507,4 +952,74 @@ int NovaParticleEmitter::get_textured_layer_count() const {
 		}
 	}
 	return total;
+}
+
+int NovaParticleEmitter::get_render_batch_count() const {
+	return last_render_batch_count;
+}
+
+int NovaParticleEmitter::get_sorted_depth_count() const {
+	return last_sorted_depth_count;
+}
+
+float NovaParticleEmitter::get_debug_first_rotation() const {
+	return debug_first_rotation;
+}
+
+int NovaParticleEmitter::get_debug_first_flip_frame() const {
+	return debug_first_flip_frame;
+}
+
+int NovaParticleEmitter::get_debug_first_blend_mode() const {
+	return debug_first_blend_mode;
+}
+
+bool NovaParticleEmitter::get_debug_static_billboard() const {
+	return debug_static_billboard;
+}
+
+Color NovaParticleEmitter::get_debug_first_color() const {
+	return debug_first_color;
+}
+
+Vector3 NovaParticleEmitter::get_debug_last_translation_delta() const {
+	return Vector3(emitter.last_translation_delta.x,
+			emitter.last_translation_delta.y,
+			emitter.last_translation_delta.z);
+}
+
+Vector3 NovaParticleEmitter::get_debug_first_layer_aabb_center() const {
+	// Return the world-space AABB center of the first present layer's
+	// MeshInstance3D. Engine equivalent: per-emitter bbox center projected
+	// to view space in CParticleManager_TransformToViewSpace @ 0x5ecc50.
+	// Godot's transparent renderer auto-sorts meshes back-to-front by AABB
+	// center depth — with our top_level=true layer meshes + world-space
+	// vertex data, this serves as the cross-emitter sort key without
+	// needing a manager-level coordinator.
+	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
+		if (mesh_layers[i] != nullptr && mesh_layers[i]->get_mesh().is_valid()) {
+			const AABB box = mesh_layers[i]->get_aabb();
+			return box.get_center();
+		}
+	}
+	return Vector3();
+}
+
+String NovaParticleEmitter::get_debug_first_shader_path() const {
+	// Return the resource path of the shader bound to the first present
+	// layer's material — used by GUT tests to assert the BlendMode → shader
+	// dispatch picks the matching .gdshader file.
+	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
+		if (layer_materials[i].is_valid()) {
+			Ref<Shader> shader = layer_materials[i]->get_shader();
+			if (shader.is_valid()) {
+				return shader->get_path();
+			}
+		}
+	}
+	return String();
+}
+
+PackedVector3Array NovaParticleEmitter::get_debug_first_quad_vertices() const {
+	return debug_first_quad_vertices;
 }

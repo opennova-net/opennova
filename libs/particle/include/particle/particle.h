@@ -27,6 +27,26 @@ struct Vec3 {
 	float z = 0.0f;
 };
 
+// Per-frame UV rectangle for flipbook animations. Engine writes runtime-
+// resolved rects at `graphic+724` as a contiguous array of pointers — each
+// pointer references a 5-float struct read by
+// `CParticleEmitter_BuildBillboardQuads @ 0x5e6d60` as
+// (u_min, v_max, u_max, v_min, inset). The renderer applies `inset` as a
+// symmetric texel padding to avoid bleeding from neighbouring atlas tiles.
+//
+// Our portable form embeds the rects directly in `GraphicLayer::baked_uv_rects`
+// (as derived state alongside the curve LUTs). Default fill is a horizontal
+// strip — `u_min = frame/N, u_max = (frame+1)/N, v_min = 0, v_max = 1,
+// inset = 0` — which matches the previous on-the-fly UV math. Future atlas-
+// bake support replaces the default with explicit per-frame rects.
+struct UvRect {
+	float u_min = 0.0f;
+	float v_min = 0.0f;
+	float u_max = 1.0f;
+	float v_max = 1.0f;
+	float inset = 0.0f;
+};
+
 // CParticleDefEntry_ParseBlendMode @ 0x5e29f0 — full set decoded.
 enum class BlendMode : std::uint8_t {
 	Blend = 0,     // default; matched first by string fallback
@@ -45,12 +65,20 @@ BlendMode parse_blend_mode(std::string_view raw) noexcept;
 // FlagTable @ 0x848800, 5 entries (flagCount @ 0x848d28). Stored as bitfield
 // because FlagTable_ParseFromString @ 0x5df970 ORs matched bits — typical use
 // is one bit set, but the engine never enforces.
+//
+// **Engine quirk (verified 2026-04-28 from raw table bytes)**: the `bitmask`
+// fields in the engine struct are NOT sequential. Memory order at 0x848800
+// is `[NORMAL, GRAVITATE, WANDER, BUBBLE, ORBIT]` but the bitmask field of
+// each entry is reordered: ORBIT lives at bit 2 (=0x04), WANDER at bit 3
+// (=0x08), BUBBLE at bit 4 (=0x10). The renderer code path
+// `(def.move & 4)` in `UpdateAllParticles @ 0x5f3be0` is therefore the
+// ORBIT integrator (rotation around `def.orbital_axis`), not WANDER.
 namespace move_flag {
-constexpr std::uint32_t Normal    = 1u <<  0;
-constexpr std::uint32_t Gravitate = 1u <<  1;
-constexpr std::uint32_t Wander    = 1u <<  2;
-constexpr std::uint32_t Bubble    = 1u <<  3;
-constexpr std::uint32_t Orbit     = 1u <<  4;
+constexpr std::uint32_t Normal    = 1u <<  0;  // bit 0 = 0x01
+constexpr std::uint32_t Gravitate = 1u <<  1;  // bit 1 = 0x02
+constexpr std::uint32_t Orbit     = 1u <<  2;  // bit 2 = 0x04 — engine table entry @ 0x848C20
+constexpr std::uint32_t Wander    = 1u <<  3;  // bit 3 = 0x08 — engine table entry @ 0x848A10
+constexpr std::uint32_t Bubble    = 1u <<  4;  // bit 4 = 0x10 — engine table entry @ 0x848B18
 } // namespace move_flag
 
 std::uint32_t parse_move_bits(std::string_view raw) noexcept;
@@ -96,11 +124,21 @@ std::string format_particle_flags(std::uint32_t bits);
 // "table12", "table12 reverse", "table12 inverse", or both modifiers in any
 // order. Engine: per-func dispatch in CParticleDef_ParseProperties (e.g.
 // scale_func @ 0x5eafdd) sets bit 0x02 on "reverse" and bit 0x01 on "inverse".
+//
+// `baked_lut` mirrors the runtime LUT pointer the engine writes at
+// CurveRef-equivalent offset +68 (e.g. graphic+480 for alpha_func, +552 for
+// red_func, ...). Engine: CEffectDef_ResolveTblDefReference @ 0x5e9630 stores
+// `TableDefByName + 328` — i.e. the tabledef's 32 × 8 byte buffer read row-
+// major as a flat 256-byte array. The renderer indexes
+// `lut[(int)(t * 256) & 0xFF]` (no interpolation) per
+// CParticleEmitter_BuildBillboardQuads @ 0x5e6d60.
 struct CurveRef {
 	std::string name;
 	bool reverse = false;
 	bool inverse = false;
-	bool present = false; // true once any *_func key has been seen
+	bool present = false;                          // true once any *_func key has been seen
+	bool baked = false;                            // true after bake_particle_def_curves resolves a TableDef
+	std::array<std::uint8_t, 256> baked_lut{};
 };
 
 // One of up to 4 graphic layers per particle. Engine layout: 788 bytes each
@@ -114,6 +152,13 @@ struct GraphicLayer {
 	BlendMode blend_mode = BlendMode::Blend;  // +324, result of CParticleDefEntry_ParseBlendMode @ 0x5e29f0
 	int flip_frames = 1;           // +716, default 1
 	int flip_rate = 8;             // +720
+
+	// Per-frame UV rect array (runtime-baked alongside CurveRef LUTs). Engine
+	// stores equivalents at graphic+724 as a pointer array populated by
+	// `CParticleManager_BuildTextureAtlases @ 0x5e8db0`. Filled by
+	// `bake_graphic_uv_rects` with horizontal-strip defaults; atlas-bake
+	// support would replace the defaults with explicit per-frame rects.
+	std::vector<UvRect> baked_uv_rects;
 	Color3 color1, color2, color3, color4;   // +700/+704/+708/+712
 	bool color_overrides_set = false;
 	float alpha = 1.0f;            // +408
@@ -229,5 +274,31 @@ struct ParticleFile {
 	const ParticleDef *find_particle(std::string_view id) const noexcept;
 	const TableDef *find_table(std::string_view id) const noexcept;
 };
+
+// Engine: CEffectDef_ResolveTblDefReference @ 0x5e9630. Flatten `table.rows`
+// (32 × 8 bytes) row-major into a 256-byte LUT. `reverse` reads source bytes
+// in reverse index order; `inverse` writes `255 - src` per byte. Both modifiers
+// are independent and may combine. Output array is overwritten in full.
+void bake_curve_lut(const TableDef &table, bool reverse, bool inverse,
+		std::array<std::uint8_t, 256> &out) noexcept;
+
+// Walks every `*_func` CurveRef on `def` (5 particle-level + 5 per graphic),
+// looks up each `CurveRef::name` in `tables`, and bakes the LUT into
+// `CurveRef::baked_lut` (sets `baked = true` on success). Curves with
+// `present == false` are skipped. Curves whose name does not resolve leave
+// `baked = false` and the LUT untouched. Also bakes per-frame UV rects via
+// `bake_graphic_uv_rects` for every present graphic layer. Mirrors the
+// engine's resolve-after-parse pass
+// (CEffectDef_ResolveAllReferences @ 0x5e9d70).
+void bake_particle_def_curves(ParticleDef &def,
+		const std::vector<TableDef> &tables) noexcept;
+
+// Fill `layer.baked_uv_rects` with per-frame UV rectangles. Default fill is
+// horizontal strip (frame N spans u in [N/count, (N+1)/count], v in [0, 1])
+// matching the renderer's prior on-the-fly math. Engine equivalent:
+// `CParticleManager_BuildTextureAtlases @ 0x5e8db0` populates the
+// `graphic+724` rect-pointer array from the atlas placement of each frame.
+// Idempotent — calling it multiple times overwrites the same entries.
+void bake_graphic_uv_rects(GraphicLayer &layer) noexcept;
 
 } // namespace opennova::particle

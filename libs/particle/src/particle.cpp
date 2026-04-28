@@ -175,4 +175,73 @@ std::string format_particle_flags(std::uint32_t bits) {
 	return format_flag_table(bits, kParticleFlagEntries);
 }
 
+void bake_curve_lut(const TableDef &table, bool reverse, bool inverse,
+		std::array<std::uint8_t, 256> &out) noexcept {
+	// Engine: CEffectDef_ResolveTblDefReference @ 0x5e9630. The 32 × 8 byte
+	// rows are read row-major into a flat 256-byte buffer (TableDef +328 in
+	// the engine heap layout). We mirror that by walking row*8 + col.
+	std::array<std::uint8_t, 256> flat{};
+	const std::size_t row_count = table.rows.size();
+	for (std::size_t r = 0; r < 32 && r < row_count; ++r) {
+		for (std::size_t c = 0; c < 8; ++c) {
+			flat[r * 8 + c] = table.rows[r][c];
+		}
+	}
+	for (std::size_t i = 0; i < 256; ++i) {
+		const std::size_t src = reverse ? (255 - i) : i;
+		const std::uint8_t v = flat[src];
+		out[i] = inverse ? static_cast<std::uint8_t>(255 - v) : v;
+	}
+}
+
+namespace {
+
+void bake_one_curve(CurveRef &curve, const std::vector<TableDef> &tables) noexcept {
+	curve.baked = false;
+	if (!curve.present || curve.name.empty()) {
+		return;
+	}
+	for (const TableDef &table : tables) {
+		if (table.id == curve.name) {
+			bake_curve_lut(table, curve.reverse, curve.inverse, curve.baked_lut);
+			curve.baked = true;
+			return;
+		}
+	}
+}
+
+} // namespace
+
+void bake_graphic_uv_rects(GraphicLayer &layer) noexcept {
+	const int frames = std::max(layer.flip_frames, 1);
+	layer.baked_uv_rects.assign(static_cast<std::size_t>(frames), UvRect{});
+	const float inv_frames = 1.0f / static_cast<float>(frames);
+	for (int i = 0; i < frames; ++i) {
+		UvRect &rect = layer.baked_uv_rects[static_cast<std::size_t>(i)];
+		rect.u_min = static_cast<float>(i) * inv_frames;
+		rect.u_max = static_cast<float>(i + 1) * inv_frames;
+		rect.v_min = 0.0f;
+		rect.v_max = 1.0f;
+		rect.inset = 0.0f;
+	}
+}
+
+void bake_particle_def_curves(ParticleDef &def,
+		const std::vector<TableDef> &tables) noexcept {
+	bake_one_curve(def.scale_func, tables);
+	bake_one_curve(def.alpha_func, tables);
+	bake_one_curve(def.red_func, tables);
+	bake_one_curve(def.green_func, tables);
+	bake_one_curve(def.blue_func, tables);
+	bake_one_curve(def.emit_rate_func, tables);
+	for (GraphicLayer &layer : def.graphics) {
+		bake_one_curve(layer.scale_func, tables);
+		bake_one_curve(layer.alpha_func, tables);
+		bake_one_curve(layer.red_func, tables);
+		bake_one_curve(layer.green_func, tables);
+		bake_one_curve(layer.blue_func, tables);
+		bake_graphic_uv_rects(layer);
+	}
+}
+
 } // namespace opennova::particle

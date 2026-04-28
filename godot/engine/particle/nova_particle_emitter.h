@@ -4,14 +4,15 @@
 #include <cstdint>
 #include <memory>
 
-#include <godot_cpp/classes/multi_mesh.hpp>
-#include <godot_cpp/classes/multi_mesh_instance3d.hpp>
+#include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
-#include <godot_cpp/classes/quad_mesh.hpp>
+#include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
@@ -25,7 +26,8 @@
 namespace godot {
 
 // Node3D that owns a portable opennova::particle::Emitter and visualizes its
-// particles via one MultiMeshInstance3D per pdef graphic layer.
+// particles as camera-facing quad batches, one MeshInstance3D per pdef graphic
+// layer.
 //
 // Engine reference: CParticleEmitter_AdvanceFrame @ 0x5e6570 (sim) +
 // CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 (render quads).
@@ -46,22 +48,45 @@ private:
 	opennova::particle::Emitter emitter;
 	std::unique_ptr<opennova::particle::ParticleDef> native_def;
 
-	std::array<MultiMeshInstance3D *, MAX_VISUAL_LAYERS> mmi_layers{};
-	std::array<Ref<MultiMesh>, MAX_VISUAL_LAYERS> multimeshes;
+	std::array<MeshInstance3D *, MAX_VISUAL_LAYERS> mesh_layers{};
+	std::array<Ref<ArrayMesh>, MAX_VISUAL_LAYERS> layer_meshes;
+	// CParticleDefEntry_ParseBlendMode @ 0x5e29f0 → 8 distinct D3D blend
+	// states; each maps to a dedicated `.gdshader` under modtools/particle/
+	// shaders/. Materials are per-layer ShaderMaterials so the texture +
+	// has_texture uniforms stay layer-scoped while the shader resource is
+	// shared across all emitters via the static cache below.
 	std::array<Ref<ShaderMaterial>, MAX_VISUAL_LAYERS> layer_materials;
+	// Per-emitter shader cache so each emitter holds its own Ref<Shader>
+	// values; clears with the emitter, avoiding leaked-Shader RID warnings on
+	// engine shutdown (which destroys RenderingServer before global statics).
+	std::array<Ref<Shader>, 8> blend_shader_cache;
 	std::array<Ref<Texture2D>, MAX_VISUAL_LAYERS> layer_textures;
 	std::array<String, MAX_VISUAL_LAYERS> layer_texture_names;
 	std::array<String, MAX_VISUAL_LAYERS> layer_texture_paths;
-	Ref<QuadMesh> quad_mesh;
-	Ref<ShaderMaterial> shader_material;
+	std::array<int, MAX_VISUAL_LAYERS> layer_blend_modes{};
+	std::array<int, MAX_VISUAL_LAYERS> layer_quad_counts{};
+	std::array<int, MAX_VISUAL_LAYERS> layer_last_flip_frames{};
+	std::array<int, MAX_VISUAL_LAYERS> layer_last_flip_frame{};
+	Ref<Texture2D> fallback_texture;
+	int last_render_batch_count = 0;
+	int last_sorted_depth_count = 0;
+	float debug_first_rotation = 0.0f;
+	int debug_first_flip_frame = 0;
+	int debug_first_blend_mode = 0;
+	bool debug_static_billboard = false;
+	Color debug_first_color = Color(1.0f, 1.0f, 1.0f, 1.0f);
+	PackedVector3Array debug_first_quad_vertices;
 
 	void _ensure_visual_setup();
-	Ref<ShaderMaterial> _make_layer_material() const;
-	void _clear_multimeshes();
+	void _ensure_fallback_texture();
+	Ref<ShaderMaterial> _make_layer_material(int p_blend_mode);
+	Ref<Shader> _get_blend_shader(int p_blend_mode);
+	static String _shader_path_for_blend(int p_blend_mode);
+	void _clear_meshes();
 	void _refresh_emitter();
 	void _refresh_layer_materials(const std::array<Ref<NovaParticleGraphicLayer>, MAX_VISUAL_LAYERS> &layers,
 			const std::array<bool, MAX_VISUAL_LAYERS> &present);
-	void _update_multimesh();
+	void _update_meshes();
 
 	Ref<NovaParticleTable> _find_table(const String &id) const;
 	float _sample_curve(const Ref<NovaParticleCurveRef> &curve, float t, float fallback) const;
@@ -90,22 +115,47 @@ public:
 	void set_time_scale(float p_value);
 	float get_time_scale() const;
 
-	void set_shader_material(const Ref<ShaderMaterial> &p_material);
-	Ref<ShaderMaterial> get_shader_material() const;
-
 	void set_texture_dir(const String &p_dir);
 	String get_texture_dir() const;
 	String get_resolved_texture_path(int p_layer_index) const;
+
+	void set_color_tint(const Color &p_tint);
+	Color get_color_tint() const;
+
+	void set_spring_const(float p_value);
+	float get_spring_const() const;
+
+	void set_lod_divisor(int p_value);
+	int get_lod_divisor() const;
+
+	void set_kill_plane_mode(int p_value);
+	int get_kill_plane_mode() const;
+	void set_kill_plane_y(float p_value);
+	float get_kill_plane_y() const;
+
+	Vector3 get_debug_last_translation_delta() const;
+	Vector3 get_debug_first_layer_aabb_center() const;
 
 	void play();
 	void stop();
 	void restart();
 	void advance(float dt);
 
+	bool is_finite() const;
+	bool is_finished() const;
 	int get_alive_count() const;
 	int get_visual_layer_count() const;
 	int get_rendered_instance_count() const;
 	int get_textured_layer_count() const;
+	int get_render_batch_count() const;
+	int get_sorted_depth_count() const;
+	float get_debug_first_rotation() const;
+	int get_debug_first_flip_frame() const;
+	int get_debug_first_blend_mode() const;
+	bool get_debug_static_billboard() const;
+	String get_debug_first_shader_path() const;
+	Color get_debug_first_color() const;
+	PackedVector3Array get_debug_first_quad_vertices() const;
 };
 
 } // namespace godot
