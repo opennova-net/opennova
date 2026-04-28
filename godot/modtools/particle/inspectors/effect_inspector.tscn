@@ -1,0 +1,48 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modtools/particle/inspectors/effect_inspector.gd" id="1_effect"]
+
+[node name="EffectInspector" type="VBoxContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_effect")
+
+[node name="Header" type="Label" parent="."]
+text = "[effectdef]"
+theme_type_variation = &"HeaderSmall"
+
+[node name="EffectList" type="ItemList" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 160)
+size_flags_vertical = 3
+
+[node name="EmptyLabel" type="Label" parent="."]
+unique_name_in_owner = true
+text = "Open a .ptl to browse effects."
+theme_type_variation = &"Muted"
+horizontal_alignment = 1
+visible = true
+
+[node name="IdRow" type="HBoxContainer" parent="."]
+
+[node name="IdLabel" type="Label" parent="IdRow"]
+custom_minimum_size = Vector2(56, 0)
+text = "id"
+
+[node name="IdEdit" type="LineEdit" parent="IdRow"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+placeholder_text = "Effect identifier"
+editable = false
+
+[node name="PdefsLabel" type="Label" parent="."]
+text = "pdefs (one per line)"
+
+[node name="PdefsEdit" type="TextEdit" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 120)
+size_flags_vertical = 3
+editable = false

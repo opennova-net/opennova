@@ -3,13 +3,15 @@ extends Control
 
 const TerrainWorkspaceAdapter = preload("res://modtools/editor/terrain_workspace.gd")
 const EnvironmentWorkspaceAdapter = preload("res://modtools/editor/environment_workspace.gd")
+const ParticleWorkspaceAdapter = preload("res://modtools/editor/particle_workspace.gd")
 const PlaceholderWorkspaceAdapter = preload("res://modtools/editor/placeholder_workspace.gd")
 
-enum Workspace { TERRAIN, ENVIRONMENT, MISSION }
+enum Workspace { TERRAIN, ENVIRONMENT, PARTICLE, MISSION }
 
 const WORKSPACE_LABELS := {
 	Workspace.TERRAIN: "Terrain",
 	Workspace.ENVIRONMENT: "Environment",
+	Workspace.PARTICLE: "Particles",
 	Workspace.MISSION: "Mission",
 }
 
@@ -137,6 +139,7 @@ func _ensure_workspaces() -> void:
 		_workspaces[Workspace.TERRAIN] = TerrainWorkspaceAdapter.new(editor)
 		var environment_editor: Variant = editor.get_environment_editor() if editor != null and editor.has_method("get_environment_editor") else null
 		_workspaces[Workspace.ENVIRONMENT] = EnvironmentWorkspaceAdapter.new(environment_editor)
+		_workspaces[Workspace.PARTICLE] = ParticleWorkspaceAdapter.new()
 		_workspaces[Workspace.MISSION] = PlaceholderWorkspaceAdapter.new(
 			"mission",
 			"Mission",
@@ -241,6 +244,8 @@ func _workspace_tooltip(workspace_id: int) -> String:
 			return "Edit terrain sculpting, paint, foliage, tiles, and layout."
 		Workspace.ENVIRONMENT:
 			return "Edit .env weather, lighting, atmosphere, and time of day."
+		Workspace.PARTICLE:
+			return "Edit .ptl particle effects, particle defs, and curve tables."
 		Workspace.MISSION:
 			return "Reserved for mission entities, objectives, and triggers."
 		_:

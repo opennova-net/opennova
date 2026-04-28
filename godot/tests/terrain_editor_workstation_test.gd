@@ -42,15 +42,16 @@ func _has_label_text(root: Node, text: String) -> bool:
 	return false
 
 
-func test_workstation_starts_with_three_domain_workspaces() -> void:
+func test_workstation_starts_with_four_domain_workspaces() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
 	var workspace_rail: HBoxContainer = workstation.get_node("%WorkspaceRail")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Terrain should remain the default workspace.")
-	assert_eq(workspace_rail.get_child_count(), 3, "The shell should expose Terrain, Environment, and Mission workspaces.")
+	assert_eq(workspace_rail.get_child_count(), 4, "The shell should expose Terrain, Environment, Particles, and Mission workspaces.")
 	assert_eq((workspace_rail.get_child(0) as Button).text, "Terrain", "Terrain should be the first workspace.")
 	assert_eq((workspace_rail.get_child(1) as Button).text, "Environment", "Environment should have a reserved workspace.")
-	assert_eq((workspace_rail.get_child(2) as Button).text, "Mission", "Mission should have a reserved workspace.")
+	assert_eq((workspace_rail.get_child(2) as Button).text, "Particles", "Particles workspace should follow Environment.")
+	assert_eq((workspace_rail.get_child(3) as Button).text, "Mission", "Mission should have a reserved workspace.")
 
 
 func test_mission_placeholder_shows_no_document_actions() -> void:
