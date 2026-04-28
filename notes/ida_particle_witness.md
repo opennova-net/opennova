@@ -80,10 +80,20 @@ texture stage combiner (TSS state — not yet decoded) uses both:
 **Vertex layout** at offsets relative to `_ESI` (vertex base) per the
 engine code:
 - `+0..+8`: position xyz (12 B)
-- `+12`: primary color (lit color or modulated color, depending on flags)
-- `+16`: secondary color (modulated, full alpha)
-- `+20..+24`: uv (8 B)
+- `+12`: primary color (lit color or modulated color, depending on flags) — D3DFVF_DIFFUSE
+- `+16`: secondary color (modulated, full alpha) — D3DFVF_SPECULAR
+- `+20..+24`: uv (8 B) — D3DFVF_TEX1
 - Stride = 28 B/vertex × 4 verts/quad = 112 B/quad
+
+**FVF anchor** confirmed via `GDynamicVB_FlushAndRender @ 0x5e0b10`:
+the engine calls `device->SetFVF(450)` before `DrawIndexedPrimitive`.
+`450 = 0x1C2 = D3DFVF_XYZ (0x002) | D3DFVF_DIFFUSE (0x040) | D3DFVF_SPECULAR
+(0x080) | D3DFVF_TEX1 (0x100)` — exact match to the 2-color + position +
+1-uv layout. This confirms the 2-color path is universal across all
+particle blend modes (the FVF doesn't change per mode); the per-mode
+visual differentiation comes from how the renderer writes those colors
+(LitColor branch vs standard branch in `BuildBillboardQuads`) plus the
+texture stage combiner state.
 
 **Port scope** (deferred to a future slice):
 1. Add a 2nd Color vertex attribute to our `ArrayMesh` quads (Godot's
