@@ -383,6 +383,42 @@ func test_color_tint_zeroes_channel() -> void:
 const PARTICLE_FLAG_POSITION_RELATIVE := 1 << 18
 
 
+# CParticleEmitter_BuildBillboardQuads @ 0x5e6d60: lit-color path triggered
+# when particle.flags & 0x80 (LitColor for Bump=3 / Bumpadd=6 blend modes).
+# Engine encodes `bump_scale * (1/√3, 1/√3, 1/√3)` per axis into a byte via
+# `clamp((value + 1) * 0.5, 0, 1) * 255`. Bounded deviation: we skip the
+# per-particle rotation transform (uniform tint instead of directional).
+func test_lit_color_default_neutral_when_not_bump() -> void:
+	# blend mode 0 (Blend) → particle.flags has no LitColor bit → lit_color
+	# stays neutral white in our renderer.
+	var emitter := _add_render_test_emitter(_make_render_test_particle(0))
+	var lit: Color = emitter.get_debug_first_lit_color()
+	assert_almost_eq(lit.r, 1.0, 0.001, "non-bump lit_color.r is neutral 1.0")
+	assert_almost_eq(lit.g, 1.0, 0.001, "non-bump lit_color.g is neutral 1.0")
+	assert_almost_eq(lit.b, 1.0, 0.001, "non-bump lit_color.b is neutral 1.0")
+
+
+func test_lit_color_encoded_when_bump_blend_mode() -> void:
+	# blend mode 3 (Bump) → particle.flags has LitColor bit set during spawn.
+	# With default bump_scale = 0, encoded value = (0 + 1) * 0.5 = 0.5 → byte
+	# 127 ≈ 0.498 in [0, 1] (RGBA8 quantisation).
+	var emitter := _add_render_test_emitter(_make_render_test_particle(3))
+	var lit: Color = emitter.get_debug_first_lit_color()
+	assert_almost_eq(lit.r, 0.5, 0.02, "bump lit_color.r ≈ 0.5 (default bump_scale=0)")
+	assert_almost_eq(lit.g, 0.5, 0.02, "bump lit_color.g ≈ 0.5")
+	assert_almost_eq(lit.b, 0.5, 0.02, "bump lit_color.b ≈ 0.5")
+
+
+func test_lit_color_brighter_with_higher_bump_scale() -> void:
+	# bump_scale = 1.0 → encoded value ≈ (0.577 + 1) * 0.5 = 0.789 ≈ byte 201.
+	var particle := _make_render_test_particle(3)
+	particle.bump_scale = 1.0
+	var emitter := _add_render_test_emitter(particle)
+	var lit: Color = emitter.get_debug_first_lit_color()
+	assert_almost_eq(lit.r, 0.789, 0.02, "bump_scale=1 → lit_color ≈ 0.789")
+	assert_gt(lit.r, 0.6, "lit_color brighter than neutral 0.5")
+
+
 func test_world_space_default_keeps_particles_when_emitter_moves() -> void:
 	# Engine default (PositionRelative clear): particles render in world
 	# space. Translating the emitter mid-life does NOT carry alive particles

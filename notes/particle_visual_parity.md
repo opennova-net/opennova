@@ -124,31 +124,32 @@ not a struct-offset witness; exact layout claims still belong in
   and the rect range is always (0..1, 0..1) split by frame count. Future
   atlas-bake support can replace the defaults with explicit per-frame rects
   without renderer changes.
-- `bump`, `bumpadd`, and `distort` shader variants approximate the engine's
-  pipeline: `bump` falls back to standard alpha blend (no normal-map
-  Phong), `bumpadd` to additive blend, `distort` to screen-texture sample
-  with a fixed-strength UV offset. **RE investigation 2026-04-28**: the
-  engine's bump/bumpadd modes are NOT realised via D3D blend-state
-  switching — they're realised via a 2-color vertex format. When
-  `particle.flags & 0x80` (LitColor) is set in
-  `CParticleEmitter_BuildBillboardQuads @ 0x5e6d60`, each vertex carries
-  two color attributes: primary (+12, +40, +68, +96) = lit color
-  (composed from `def[+304..+312]` orientation/normal vector ×
-  light-direction constants `flt_848D34/D38/D3C`, byte-clamped, then
-  XOR-mid-blended with the modulated particle color), secondary (+16,
-  +44, +72, +100) = raw modulated color OR'd with 0xFF000000. The
-  fixed-function texture stage combiner produces the bump-lit effect
-  by multiplying the texture by both colors. **Deferred** (multi-slice
-  scope): adding a `lit_color` vertex attribute to our quad mesh,
-  porting the engine's lit-color computation, and updating
-  `particle_blend_bump.gdshader` / `particle_blend_bumpadd.gdshader`
-  to consume it. Distort uses a screen-tex sampler in stage 1 with UV
-  offset (RE not yet complete). Adjacent finding: kong's renames in
-  this area are wildly wrong — `CEffectChannel_PlaySample` is actually
-  `BindRenderStateAndTexture` (calls SetTexture at vtable+368),
-  `CD3DDevice_SetFogAndBlendMode` is fog-only (D3DRS_FOGENABLE/COLOR/
-  TABLEMODE/START/END/DENSITY/TEXTUREFACTOR), never touches
-  D3DRS_SRCBLEND/DESTBLEND.
+- `bump`, `bumpadd`, `distort`: **partially implemented**. RE confirmed
+  the engine's vertex format (FVF 450 = `D3DFVF_XYZ | DIFFUSE | SPECULAR
+  | TEX1`) carries two colors per vertex; when `particle.flags & 0x80`
+  (LitColor) is set in `BuildBillboardQuads @ 0x5e6d60`, DIFFUSE = lit
+  color (encoded from `bump_scale × (-1/√3, -1/√3, +1/√3)` light
+  direction × inverse per-particle rotation, then `(value + 1) * 0.5`
+  per channel) and SPECULAR = modulated raw color. The
+  `flt_848D34/D38/D3C` light direction was extracted from raw bytes
+  (`46 B6 13 BF / 46 B6 13 BF / 46 B6 13 3F` → `±0.5773503`) and
+  `sub_68BF44` confirmed via the function symbol table to be
+  `D3DXMatrixTranspose`. **Implemented this slice**: `lit_color`
+  per-vertex via Godot's `ARRAY_CUSTOM0` (RGBA8 unorm, matching
+  engine's RGBA byte encoding). `particle_blend_bump.gdshader` and
+  `particle_blend_bumpadd.gdshader` now read `CUSTOM0` and combine
+  with `COLOR` (modulated). **Bounded deviations**: we skip the
+  engine's per-particle rotation transform (would require building a
+  4x4 matrix per particle Godot-side and matching the engine's
+  D3DXMatrixRotationX axis convention against our billboard frame), so
+  the lit color is a uniform `bump_scale`-derived tint rather than
+  direction-dependent. The exact texture-stage combiner mode for Bump
+  vs Bumpadd (D3DTSS_COLOROP) is also unwitnessed — the bump shader
+  approximates with full multiplication, the bumpadd shader with
+  texture+lit additive. `distort` still falls back to the
+  fixed-strength screen-tex offset; the engine's stage-1 sampler setup
+  is not yet decoded. Adjacent kong-rename corrections recorded in
+  `notes/ida_particle_witness.md`.
 - `mod2x` (BlendMode 5) approximates engine SrcBlend = DESTCOLOR + DestBlend
   = SRCCOLOR by pre-multiplying the source RGB by 2.0 in fragment and using
   Godot's `blend_mul` render mode. The "darken-or-brighten around 0.5"

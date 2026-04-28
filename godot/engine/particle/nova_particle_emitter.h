@@ -75,6 +75,7 @@ private:
 	int debug_first_blend_mode = 0;
 	bool debug_static_billboard = false;
 	Color debug_first_color = Color(1.0f, 1.0f, 1.0f, 1.0f);
+	Color debug_first_lit_color = Color(1.0f, 1.0f, 1.0f, 1.0f);
 	PackedVector3Array debug_first_quad_vertices;
 
 	void _ensure_visual_setup();
@@ -135,6 +136,7 @@ public:
 
 	Vector3 get_debug_last_translation_delta() const;
 	Vector3 get_debug_first_layer_aabb_center() const;
+	Color get_debug_first_lit_color() const;
 
 	void play();
 	void stop();

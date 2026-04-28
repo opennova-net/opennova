@@ -48,6 +48,12 @@ struct RenderParticle {
 	int blend_mode = 0;
 	Vector3 position;
 	Color color;
+	// Engine's `D3DFVF_DIFFUSE` slot becomes lit color when
+	// `particle.flags & 0x80` (LitColor) is set in
+	// `BuildBillboardQuads @ 0x5e6d60`. Default white = no tint;
+	// shader multiplies texture × color × lit_color (matches engine
+	// `texture × DIFFUSE × SPECULAR` combiner intent for Bump mode).
+	Color lit_color = Color(1.0f, 1.0f, 1.0f, 1.0f);
 };
 
 } // namespace
@@ -104,6 +110,8 @@ void NovaParticleEmitter::_bind_methods() {
 			&NovaParticleEmitter::get_debug_first_shader_path);
 	ClassDB::bind_method(D_METHOD("get_debug_first_color"),
 			&NovaParticleEmitter::get_debug_first_color);
+	ClassDB::bind_method(D_METHOD("get_debug_first_lit_color"),
+			&NovaParticleEmitter::get_debug_first_lit_color);
 	ClassDB::bind_method(D_METHOD("get_debug_last_translation_delta"),
 			&NovaParticleEmitter::get_debug_last_translation_delta);
 	ClassDB::bind_method(D_METHOD("get_debug_first_layer_aabb_center"),
@@ -267,6 +275,7 @@ void NovaParticleEmitter::_clear_meshes() {
 	debug_first_blend_mode = 0;
 	debug_static_billboard = false;
 	debug_first_color = Color(1.0f, 1.0f, 1.0f, 1.0f);
+	debug_first_lit_color = Color(1.0f, 1.0f, 1.0f, 1.0f);
 	debug_first_quad_vertices.clear();
 	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
 		layer_quad_counts[i] = 0;
@@ -580,6 +589,32 @@ void NovaParticleEmitter::_update_meshes() {
 		rp.blend_mode = layer_blend_modes[layer_idx];
 		rp.position = Vector3(p.position.x, p.position.y, p.position.z);
 		rp.color = color;
+
+		// Engine-faithful lit color computation when the LitColor flag is
+		// set (Bump=3 or Bumpadd=6 blend modes). Engine reference:
+		// `CParticleEmitter_BuildBillboardQuads @ 0x5e6d60`, second-color
+		// branch when `particle.flags & 0x80`. The engine multiplies
+		// `def.bump_scale` by hardcoded light direction
+		// `(-0.5773, -0.5773, +0.5773) = (-1/√3, -1/√3, +1/√3)`
+		// (`flt_848D34/D38/D3C`), transforms through the inverse per-
+		// particle rotation matrix (D3DXMatrixTranspose), then encodes
+		// each component as `byte = clamp((value + 1) * 0.5, 0, 1) * 255`.
+		// **Bounded deviation**: we skip the per-particle rotation
+		// transform (would require building a 4x4 matrix per particle and
+		// inverting it, plus matching the engine's D3DXMatrixRotationX
+		// axis convention which doesn't directly map to our billboard
+		// frame). Result: lit_color is a uniform bump_scale-derived tint
+		// rather than direction-dependent. Without the rotation, the
+		// encoded value is the same on all 3 axes — `(bump_scale * 0.577 + 1) * 0.5`.
+		if ((p.flags & opennova::particle::particle_runtime_flag::LitColor) != 0) {
+			const float bump_scale = native_def->bump_scale;
+			constexpr float k = 0.5773503f;  // 1/√3
+			const float v = bump_scale * k;
+			const float encoded = std::clamp((v + 1.0f) * 0.5f, 0.0f, 1.0f);
+			rp.lit_color = Color(encoded, encoded, encoded, color.a);
+		} else {
+			rp.lit_color = Color(1.0f, 1.0f, 1.0f, 1.0f);  // neutral (multiply identity)
+		}
 		// Particle position is already world-space (top_level mesh +
 		// world-space simulator). Project directly to view space without
 		// applying the NovaParticleEmitter's local transform.
@@ -616,6 +651,7 @@ void NovaParticleEmitter::_update_meshes() {
 	debug_static_billboard =
 			(native_def->flags & opennova::particle::particle_flag::YawAndPitch) != 0;
 	debug_first_color = Color(1.0f, 1.0f, 1.0f, 1.0f);
+	debug_first_lit_color = Color(1.0f, 1.0f, 1.0f, 1.0f);
 	debug_first_quad_vertices.clear();
 	bool debug_quad_set = false;
 
@@ -640,9 +676,16 @@ void NovaParticleEmitter::_update_meshes() {
 		PackedVector2Array uvs;
 		PackedColorArray colors;
 		PackedInt32Array indices;
+		// Engine FVF 450 = D3DFVF_XYZ | DIFFUSE | SPECULAR | TEX1. We mirror
+		// the SPECULAR slot via Godot's ARRAY_CUSTOM0 (RGBA8 unorm = 4 bytes
+		// per vertex). Bump and Bumpadd shaders read it via the CUSTOM0
+		// fragment input.
+		PackedByteArray custom0;
 		verts.resize(quad_count * 4);
 		uvs.resize(quad_count * 4);
 		colors.resize(quad_count * 4);
+		custom0.resize(quad_count * 4 * 4);
+		uint8_t *custom0_ptr = custom0.ptrw();
 		indices.resize(quad_count * 6);
 
 		for (int q = 0; q < quad_count; ++q) {
@@ -712,6 +755,21 @@ void NovaParticleEmitter::_update_meshes() {
 			for (int corner = 0; corner < 4; ++corner) {
 				colors[vertex_offset + corner] = rp.color;
 			}
+			// Engine `D3DFVF_DIFFUSE` slot — the lit color when LitColor flag
+			// is set, white otherwise. Encoded as RGBA8 unorm (4 bytes) into
+			// ARRAY_CUSTOM0. Engine writes this at vertex offset +12 in the
+			// 28-byte vertex layout per `BuildBillboardQuads @ 0x5e6d60`.
+			const uint8_t lit_r = static_cast<uint8_t>(std::clamp(rp.lit_color.r, 0.0f, 1.0f) * 255.0f);
+			const uint8_t lit_g = static_cast<uint8_t>(std::clamp(rp.lit_color.g, 0.0f, 1.0f) * 255.0f);
+			const uint8_t lit_b = static_cast<uint8_t>(std::clamp(rp.lit_color.b, 0.0f, 1.0f) * 255.0f);
+			const uint8_t lit_a = static_cast<uint8_t>(std::clamp(rp.lit_color.a, 0.0f, 1.0f) * 255.0f);
+			for (int corner = 0; corner < 4; ++corner) {
+				const int byte_offset = (vertex_offset + corner) * 4;
+				custom0_ptr[byte_offset + 0] = lit_r;
+				custom0_ptr[byte_offset + 1] = lit_g;
+				custom0_ptr[byte_offset + 2] = lit_b;
+				custom0_ptr[byte_offset + 3] = lit_a;
+			}
 			indices[index_offset + 0] = vertex_offset + 0;
 			indices[index_offset + 1] = vertex_offset + 1;
 			indices[index_offset + 2] = vertex_offset + 2;
@@ -728,6 +786,7 @@ void NovaParticleEmitter::_update_meshes() {
 				debug_first_flip_frame = rp.frame;
 				debug_first_blend_mode = rp.blend_mode;
 				debug_first_color = rp.color;
+				debug_first_lit_color = rp.lit_color;
 				debug_first_quad_vertices.resize(4);
 				for (int corner = 0; corner < 4; ++corner) {
 					debug_first_quad_vertices[corner] = quad_verts[corner];
@@ -743,11 +802,18 @@ void NovaParticleEmitter::_update_meshes() {
 		arrays[Mesh::ARRAY_VERTEX] = verts;
 		arrays[Mesh::ARRAY_TEX_UV] = uvs;
 		arrays[Mesh::ARRAY_COLOR] = colors;
+		arrays[Mesh::ARRAY_CUSTOM0] = custom0;
 		arrays[Mesh::ARRAY_INDEX] = indices;
 
 		Ref<ArrayMesh> mesh;
 		mesh.instantiate();
-		mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+		// ARRAY_FORMAT_CUSTOM0 enables the CUSTOM0 attribute; the format
+		// bits at ARRAY_FORMAT_CUSTOM0_SHIFT default to 0 = RGBA8_UNORM,
+		// matching our 4-byte-per-vertex encoding above.
+		const uint64_t surface_flags = static_cast<uint64_t>(Mesh::ARRAY_FORMAT_CUSTOM0);
+		mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays,
+				TypedArray<Array>(), Dictionary(),
+				static_cast<Mesh::ArrayFormat>(surface_flags));
 		mesh->surface_set_material(0, layer_materials[layer_idx]);
 		layer_meshes[layer_idx] = mesh;
 		mesh_layers[layer_idx]->set_material_override(layer_materials[layer_idx]);
@@ -980,6 +1046,10 @@ bool NovaParticleEmitter::get_debug_static_billboard() const {
 
 Color NovaParticleEmitter::get_debug_first_color() const {
 	return debug_first_color;
+}
+
+Color NovaParticleEmitter::get_debug_first_lit_color() const {
+	return debug_first_lit_color;
 }
 
 Vector3 NovaParticleEmitter::get_debug_last_translation_delta() const {
