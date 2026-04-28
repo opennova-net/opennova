@@ -19,6 +19,18 @@ func deactivate() -> void:
 	pass
 
 
+func mount_viewport(_host: Control) -> void:
+	pass
+
+
+func unmount_viewport(_host: Control) -> void:
+	pass
+
+
+func release_viewport() -> void:
+	pass
+
+
 func get_workspace_id() -> String:
 	return ""
 

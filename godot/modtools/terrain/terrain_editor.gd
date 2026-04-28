@@ -38,8 +38,9 @@ const DEFAULT_SECTOR_PATTERN := [
 	0, 0, 0, 0, 0, 0, 0, 0,
 ]
 
-@onready var terrain_mesh: EditorTerrainMesh = $EditorTerrainMesh
-@onready var camera: Camera3D = $FlyCamera
+@onready var terrain_world_root: Node3D = $TerrainWorldRoot
+@onready var terrain_mesh: EditorTerrainMesh = $TerrainWorldRoot/EditorTerrainMesh
+@onready var camera: Camera3D = $TerrainWorldRoot/FlyCamera
 @onready var workstation = $CanvasLayer/EditorWorkstation
 
 var _document: TerrainEditorDocument = TerrainEditorDocument.new()
@@ -253,6 +254,9 @@ var _pending_unsaved_action: Callable = Callable()
 var _pending_unsaved_action_name: String = ""
 var _previous_window_min_size: Vector2i = Vector2i.ZERO
 var _ui_state_version: int = 0
+var _uses_workspace_viewport: bool = false
+var _viewport_active: bool = false
+var _viewport_mouse_position: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
@@ -317,19 +321,19 @@ func _init_clone_marker() -> void:
 	_clone_source_marker.material_override = mat
 	_clone_source_marker.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_clone_source_marker.visible = false
-	add_child(_clone_source_marker)
+	terrain_world_root.add_child(_clone_source_marker)
 
 
 func _init_tile_overlay_preview() -> void:
 	_tile_overlay_preview = TerrainTileOverlayPreview.new()
 	_tile_overlay_preview.name = "TileOverlayPreview"
-	add_child(_tile_overlay_preview)
+	terrain_world_root.add_child(_tile_overlay_preview)
 
 
 func _init_foliage_preview() -> void:
 	_foliage_preview = TerrainFoliagePreview.new()
 	_foliage_preview.name = "FoliagePreview"
-	add_child(_foliage_preview)
+	terrain_world_root.add_child(_foliage_preview)
 
 
 func _init_water_plane() -> void:
@@ -348,7 +352,7 @@ func _init_water_plane() -> void:
 	_water_instance.mesh = _water_plane_mesh
 	_water_instance.material_override = _water_material
 	_water_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(_water_instance)
+	terrain_world_root.add_child(_water_instance)
 
 
 func _init_environment_preview() -> void:
@@ -359,13 +363,13 @@ func _init_environment_preview() -> void:
 	_environment_node = Node.new()
 	_environment_node.name = "EditorEnvironment"
 	_environment_node.set_script(NovaEnvironmentScript)
-	add_child(_environment_node)
+	terrain_world_root.add_child(_environment_node)
 
 	_sky_node = Node3D.new()
 	_sky_node.name = "EditorSky"
 	_sky_node.set_script(NovaSkyScript)
 	_sky_node.environment_path = NodePath("../EditorEnvironment")
-	add_child(_sky_node)
+	terrain_world_root.add_child(_sky_node)
 
 	if not environment_editor.environment_changed.is_connected(_on_environment_editor_changed):
 		environment_editor.environment_changed.connect(_on_environment_editor_changed)
@@ -435,6 +439,20 @@ func _update_water_plane() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _uses_workspace_viewport:
+		return
+	_handle_viewport_input(event)
+
+
+func handle_viewport_input(event: InputEvent) -> void:
+	if not _viewport_active:
+		return
+	if event is InputEventMouse:
+		_viewport_mouse_position = (event as InputEventMouse).position
+	_handle_viewport_input(event)
+
+
+func _handle_viewport_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		var focus_owner := get_viewport().gui_get_focus_owner()
 		if focus_owner != null:
@@ -521,6 +539,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	_poll_export_job()
+	if not _viewport_active and _uses_workspace_viewport:
+		return
 
 	_hover_hit = _raycast_terrain()
 	_hover_hit_valid = _is_valid_hit(_hover_hit)
@@ -673,6 +693,31 @@ func get_data() -> NovaTerrainData:
 
 func get_environment_editor():
 	return environment_editor
+
+
+func get_terrain_world_root() -> Node3D:
+	return terrain_world_root
+
+
+func set_viewport_active(active: bool) -> void:
+	_uses_workspace_viewport = true
+	if _viewport_active == active:
+		return
+	_viewport_active = active
+	if camera != null:
+		camera.current = active
+	if not active:
+		brush_active = false
+		_hover_hit = INVALID_HIT
+		_hover_hit_valid = false
+
+
+func is_viewport_active() -> bool:
+	return _viewport_active
+
+
+func set_viewport_mouse_position(position: Vector2) -> void:
+	_viewport_mouse_position = position
 
 
 func get_metadata_summary() -> Dictionary:
@@ -1726,7 +1771,7 @@ func _log_stroke_height_delta() -> void:
 
 
 func _raycast_terrain() -> Vector3:
-	var mouse_pos := get_viewport().get_mouse_position()
+	var mouse_pos := _viewport_mouse_position if _uses_workspace_viewport else get_viewport().get_mouse_position()
 	var from := camera.project_ray_origin(mouse_pos)
 	var direction := camera.project_ray_normal(mouse_pos)
 	var bounds_hit := _intersect_ray_xz_bounds(from, direction)

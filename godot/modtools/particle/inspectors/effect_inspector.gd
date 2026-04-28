@@ -2,7 +2,7 @@ class_name ParticleEffectInspector
 extends Control
 
 ## Lists [effectdef] entries; selecting one feeds it back to the workspace
-## which spawns the first pdef in the live preview.
+## which spawns one preview emitter per referenced pdef.
 
 @onready var _list: ItemList = %EffectList
 @onready var _id_edit: LineEdit = %IdEdit

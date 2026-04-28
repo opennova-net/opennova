@@ -1,9 +1,8 @@
 class_name ParticlePreview
 extends Control
-## SubViewport host for the particle editor — mirrors objects-codex
-## ObjectPreview's structure (SubViewportContainer + SubViewport + FlyCamera).
-## Owns one NovaParticleEmitter that we re-bind each time the user picks a
-## different ParticleDef in the inspector.
+## SubViewport host for the particle editor. Effects are previewed as one
+## NovaParticleEmitter per referenced pdef, while individual particle defs use
+## a single emitter.
 
 const FlyCameraScript = preload("res://engine/fly_camera.gd")
 const PARTICLE_SHADER = preload("res://modtools/particle/shaders/particle_billboard.gdshader")
@@ -12,7 +11,9 @@ var _viewport_container: SubViewportContainer
 var _viewport: SubViewport
 var _root: Node3D
 var _camera: Camera3D
-var _emitter: NovaParticleEmitter
+var _emitters_root: Node3D
+var _emitters: Array[NovaParticleEmitter] = []
+var _particle_file: NovaParticleFile
 var _grid: MeshInstance3D
 var _shader_material: ShaderMaterial
 
@@ -21,6 +22,14 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	clip_contents = true
 	_build_viewport()
+	set_process(true)
+
+
+func _process(_delta: float) -> void:
+	for emitter in _emitters:
+		if emitter != null and emitter.get_alive_count() == 0:
+			emitter.restart()
+			_warm_emitter(emitter)
 
 
 func _build_viewport() -> void:
@@ -50,16 +59,14 @@ func _build_viewport() -> void:
 	_shader_material = ShaderMaterial.new()
 	_shader_material.shader = PARTICLE_SHADER
 
-	_emitter = NovaParticleEmitter.new()
-	_emitter.shader_material = _shader_material
-	_emitter.auto_advance = true
-	_root.add_child(_emitter)
+	_emitters_root = Node3D.new()
+	_emitters_root.name = "ParticleEmitters"
+	_root.add_child(_emitters_root)
 
 	_add_grid()
 
 
 func _add_grid() -> void:
-	# Simple xz-plane reference grid centered at origin.
 	const HALF: float = 50.0
 	const STEP: float = 5.0
 	var lines := ImmediateMesh.new()
@@ -91,26 +98,126 @@ func _add_grid() -> void:
 	_root.add_child(_grid)
 
 
-func set_particle_def(def: NovaParticleDef) -> void:
-	if _emitter == null:
+func set_particle_file(file: NovaParticleFile) -> void:
+	_particle_file = file
+	var tables: Array = []
+	if _particle_file != null:
+		tables = _particle_file.get_tables()
+	var texture_dir := _texture_dir()
+	for emitter in _emitters:
+		if emitter != null:
+			emitter.set_tables(tables)
+			emitter.texture_dir = texture_dir
+
+
+func set_effect(effect: NovaParticleEffect) -> void:
+	clear_preview()
+	if effect == null or _particle_file == null:
 		return
-	_emitter.def = def
+	var pdefs: PackedStringArray = effect.pdefs
+	for i in range(pdefs.size()):
+		var def := _particle_file.find_particle(pdefs[i])
+		if def != null:
+			_add_emitter(def, i)
+
+
+func set_particle_def(def: NovaParticleDef) -> void:
+	clear_preview()
 	if def != null:
-		_emitter.play()
-	else:
-		_emitter.stop()
+		_add_emitter(def, 0)
+
+
+func clear_preview() -> void:
+	for emitter in _emitters:
+		if emitter == null:
+			continue
+		if emitter.get_parent() != null:
+			emitter.get_parent().remove_child(emitter)
+		emitter.queue_free()
+	_emitters.clear()
+
+
+func _add_emitter(def: NovaParticleDef, index: int) -> NovaParticleEmitter:
+	if _emitters_root == null:
+		return null
+	var emitter := NovaParticleEmitter.new()
+	emitter.name = "ParticleEmitter%d" % index
+	emitter.shader_material = _shader_material
+	emitter.auto_advance = true
+	emitter.seed = 1 + index * 101
+	emitter.texture_dir = _texture_dir()
+	if _particle_file != null:
+		emitter.set_tables(_particle_file.get_tables())
+	emitter.def = def
+	_emitters_root.add_child(emitter)
+	emitter.play()
+	_warm_emitter(emitter)
+	_emitters.append(emitter)
+	return emitter
+
+
+func _texture_dir() -> String:
+	if _particle_file == null:
+		return ""
+	var source_path := String(_particle_file.get_source_path())
+	if source_path.is_empty():
+		return ""
+	return source_path.get_base_dir()
+
+
+func _warm_emitter(emitter: NovaParticleEmitter) -> void:
+	if emitter == null:
+		return
+	for i in range(90):
+		emitter.advance(1.0 / 60.0)
+		if emitter.get_alive_count() > 0:
+			return
 
 
 func get_alive_count() -> int:
-	if _emitter == null:
-		return 0
-	return _emitter.get_alive_count()
+	var total := 0
+	for emitter in _emitters:
+		if emitter != null:
+			total += emitter.get_alive_count()
+	return total
+
+
+func get_emitter_count() -> int:
+	return _emitters.size()
+
+
+func get_visual_layer_count() -> int:
+	var total := 0
+	for emitter in _emitters:
+		if emitter != null:
+			total += emitter.get_visual_layer_count()
+	return total
+
+
+func get_rendered_instance_count() -> int:
+	var total := 0
+	for emitter in _emitters:
+		if emitter != null:
+			total += emitter.get_rendered_instance_count()
+	return total
+
+
+func get_textured_layer_count() -> int:
+	var total := 0
+	for emitter in _emitters:
+		if emitter != null:
+			total += emitter.get_textured_layer_count()
+	return total
 
 
 func restart() -> void:
-	if _emitter != null:
-		_emitter.restart()
+	for emitter in _emitters:
+		if emitter != null:
+			emitter.restart()
+			_warm_emitter(emitter)
 
 
 func get_emitter() -> NovaParticleEmitter:
-	return _emitter
+	if _emitters.is_empty():
+		return null
+	return _emitters[0]

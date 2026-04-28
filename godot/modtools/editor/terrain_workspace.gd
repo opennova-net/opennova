@@ -6,6 +6,7 @@ const PaintInspectorScene = preload("res://modtools/terrain/ui/inspectors/paint_
 const ScatterInspectorScene = preload("res://modtools/terrain/ui/inspectors/scatter_inspector.tscn")
 const StampInspectorScene = preload("res://modtools/terrain/ui/inspectors/stamp_inspector.tscn")
 const LayoutInspectorScene = preload("res://modtools/terrain/ui/inspectors/layout_inspector.tscn")
+const TerrainViewportScript = preload("res://modtools/terrain/terrain_viewport.gd")
 
 enum Workflow { SCULPT, PAINT, SCATTER, STAMP, LAYOUT }
 enum ExportFlavor { BHD = 0, DFX_JO = 1 }
@@ -30,6 +31,7 @@ const INSPECTOR_SCENES := {
 
 var terrain_editor: Node
 var _asset_dock: Control
+var _viewport: Control
 
 
 func _init(value: Node = null) -> void:
@@ -38,6 +40,51 @@ func _init(value: Node = null) -> void:
 
 func set_terrain_editor(value: Node) -> void:
 	terrain_editor = value
+	if _viewport != null:
+		_viewport.set_terrain_editor(terrain_editor)
+
+
+func activate() -> void:
+	if terrain_editor != null and _viewport != null and _viewport.get_parent() != null:
+		terrain_editor.set_viewport_active(true)
+
+
+func deactivate() -> void:
+	if terrain_editor != null:
+		terrain_editor.set_viewport_active(false)
+
+
+func mount_viewport(host: Control) -> void:
+	if host == null or terrain_editor == null:
+		return
+	if _viewport == null:
+		_viewport = TerrainViewportScript.new()
+		_viewport.name = "TerrainViewport"
+		_viewport.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_viewport.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_viewport.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_viewport.set_terrain_editor(terrain_editor)
+	if _viewport.get_parent() == null:
+		host.add_child(_viewport)
+		_viewport.set_anchors_preset(Control.PRESET_FULL_RECT)
+
+
+func unmount_viewport(_host: Control) -> void:
+	if terrain_editor != null:
+		terrain_editor.set_viewport_active(false)
+	if _viewport != null and _viewport.get_parent() != null:
+		_viewport.get_parent().remove_child(_viewport)
+
+
+func release_viewport() -> void:
+	if terrain_editor != null:
+		terrain_editor.set_viewport_active(false)
+	if _viewport == null:
+		return
+	if _viewport.get_parent() != null:
+		_viewport.get_parent().remove_child(_viewport)
+	_viewport.free()
+	_viewport = null
 
 
 func get_workspace_id() -> String:

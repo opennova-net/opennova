@@ -3,7 +3,7 @@ shader_type spatial;
 // MVP uses additive blending — the IDA-faithful 8-mode shader (additive,
 // blend, premult, bump, mod, mod2x, bumpadd, distort from
 // CParticleDefEntry_ParseBlendMode @ 0x5e29f0) lands in a follow-up plan.
-render_mode unshaded, cull_disabled, blend_add, particle_trails;
+render_mode unshaded, cull_disabled, blend_add;
 
 uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
 uniform bool has_texture = false;

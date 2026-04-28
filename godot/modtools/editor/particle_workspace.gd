@@ -2,8 +2,8 @@ class_name ParticleEditorWorkspace
 extends "res://modtools/editor/editor_workspace.gd"
 
 # Workspace adapter for the .ptl particle editor. Owns a ParticleEditor
-# document model and a ParticlePreview viewport that mounts into the shell's
-# _viewport_lane on activate / unmounts on deactivate.
+# document model and a ParticlePreview viewport that the shell mounts into its
+# dedicated viewport lane.
 #
 # Engine references for the simulation surfaced here:
 #   CParticleDef_ParseFromConfigMap @ 0x5ed210  (def hydration)
@@ -26,7 +26,6 @@ const WORKFLOW_DEFS := [
 
 var particle_editor: ParticleEditor
 var _preview: ParticlePreview
-var _viewport_lane: Control
 var _active_workflow: int = Workflow.PARTICLES
 var _last_open_dir: String = ""
 
@@ -35,51 +34,54 @@ func _init() -> void:
 	particle_editor = ParticleEditorScript.new()
 
 
-func activate() -> void:
-	_mount_preview()
-
-
-func deactivate() -> void:
-	_unmount_preview()
-
-
-func _mount_preview() -> void:
-	if editor_shell == null or _preview != null:
+func mount_viewport(host: Control) -> void:
+	if host == null:
 		return
-	_viewport_lane = editor_shell.get_node_or_null("%ViewportLane")
-	if _viewport_lane == null:
-		return
-	_preview = ParticlePreviewScript.new()
-	_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_viewport_lane.add_child(_preview)
+	if _preview == null:
+		_preview = ParticlePreviewScript.new()
+		_preview.name = "ParticlePreview"
+		_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	if _preview.get_parent() == null:
+		host.add_child(_preview)
+		_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_apply_current_selection_to_preview()
 
 
-func _unmount_preview() -> void:
+func unmount_viewport(_host: Control) -> void:
 	if _preview == null:
 		return
-	if _viewport_lane != null and _preview.get_parent() == _viewport_lane:
-		_viewport_lane.remove_child(_preview)
-	_preview.queue_free()
+	if _preview.get_parent() != null:
+		_preview.get_parent().remove_child(_preview)
+
+
+func release_viewport() -> void:
+	if _preview == null:
+		return
+	if _preview.get_parent() != null:
+		_preview.get_parent().remove_child(_preview)
+	_preview.free()
 	_preview = null
 
 
 func _apply_current_selection_to_preview() -> void:
 	if _preview == null or particle_editor == null:
 		return
-	if particle_editor.current_particle != null:
-		_preview.set_particle_def(particle_editor.current_particle)
-	elif particle_editor.current_effect != null and particle_editor.particle_file != null:
-		# Effect previews use the first referenced pdef.
-		var pdefs: PackedStringArray = particle_editor.current_effect.pdefs
-		if not pdefs.is_empty():
-			var def := particle_editor.particle_file.find_particle(pdefs[0])
-			if def != null:
-				_preview.set_particle_def(def)
-				return
-		_preview.set_particle_def(null)
-	else:
-		_preview.set_particle_def(null)
+	_preview.set_particle_file(particle_editor.particle_file)
+	match _active_workflow:
+		Workflow.EFFECTS:
+			if particle_editor.current_effect != null and particle_editor.particle_file != null:
+				_preview.set_effect(particle_editor.current_effect)
+			else:
+				_preview.clear_preview()
+		Workflow.PARTICLES:
+			if particle_editor.current_particle != null:
+				_preview.set_particle_def(particle_editor.current_particle)
+			else:
+				_preview.clear_preview()
+		_:
+			_preview.clear_preview()
 
 
 func get_workspace_id() -> String:
@@ -260,3 +262,5 @@ func select_table(table: NovaParticleTable) -> void:
 	if particle_editor == null:
 		return
 	particle_editor.select_table(table)
+	if _preview != null:
+		_preview.clear_preview()

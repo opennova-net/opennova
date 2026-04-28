@@ -43,10 +43,8 @@ Vec3 vec3_normalize(Vec3 v) noexcept {
 	return {v.x / len, v.y / len, v.z / len};
 }
 
-// Engine: SpawnParticle picks one of color1..4 via `rand() & 3` and packs into
-// the per-particle DWORD at +8. We mirror the choice but drop into Color3.
-Color3 pick_initial_color(Emitter &e, const ParticleDef &def, std::uint32_t graphic) noexcept {
-	const std::uint32_t which = emitter_rand10(e) & 3u;
+Color3 color_for_slot(const ParticleDef &def, std::uint32_t graphic, std::uint32_t slot) noexcept {
+	const std::uint32_t which = slot & 3u;
 	const std::array<const Color3 *, 4> colors = {
 		&def.graphics[graphic].color1, &def.graphics[graphic].color2,
 		&def.graphics[graphic].color3, &def.graphics[graphic].color4,
@@ -60,16 +58,23 @@ Color3 pick_initial_color(Emitter &e, const ParticleDef &def, std::uint32_t grap
 	return *particle_colors[which];
 }
 
+std::uint32_t pick_color_slot(Emitter &e) noexcept {
+	return emitter_rand10(e) & 3u;
+}
+
 std::uint32_t pick_graphic(Emitter &e, const ParticleDef &def) noexcept {
+	std::array<std::uint32_t, 4> present{};
 	std::uint32_t count = 0;
-	for (const GraphicLayer &layer : def.graphics) {
-		if (layer.present) ++count;
+	for (std::uint32_t i = 0; i < def.graphics.size(); ++i) {
+		if (def.graphics[i].present) {
+			present[count++] = i;
+		}
 	}
 	if (count == 0) {
 		return 0;
 	}
 	// Engine: `788 * (rand() % graphic_count)` — pick uniform random graphic.
-	return emitter_rand10(e) % count;
+	return present[emitter_rand10(e) % count];
 }
 
 void apply_emission_shape(Emitter &e, const ParticleDef &def, Particle &p) noexcept {
@@ -167,8 +172,11 @@ void emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
 	p.rotation = (def.yaw_rot + emitter_rand_unit(e) * def.yaw_rot_adj) * 0.0174533f;
 	p.rotation_rate = (def.roll_rot + emitter_rand_unit(e) * def.roll_rot_adj) * 0.0174533f;
 	p.alpha = static_cast<std::uint8_t>(clampf(def.alpha * 255.0f, 0.0f, 255.0f));
+	p.position.y += def.y_offset;
+	p.position.z += def.z_offset;
+	p.color_slot = static_cast<std::uint8_t>(pick_color_slot(e));
 	p.graphic_layer = static_cast<std::uint8_t>(pick_graphic(e, def));
-	p.color = pick_initial_color(e, def, p.graphic_layer);
+	p.color = color_for_slot(def, p.graphic_layer, p.color_slot);
 	p.serial = e.next_serial++;
 	apply_emission_shape(e, def, p);
 	e.particles.push_back(p);

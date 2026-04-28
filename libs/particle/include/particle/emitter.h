@@ -34,6 +34,7 @@ struct Particle {
 	float rotation_rate = 0.0f;
 	Color3 color{};            // sampled from one of color1..4 at spawn (per engine, DWORD-randomized)
 	std::uint8_t alpha = 255;
+	std::uint8_t color_slot = 0;     // which of color1..4 this particle sampled at spawn
 	std::uint8_t graphic_layer = 0;  // which of def.graphics[0..3] this particle uses
 	std::uint8_t serial = 0;         // monotonic serial within emitter (matches engine's per-particle byte at +0)
 };

@@ -81,6 +81,32 @@ bool test_manual_spawn() {
 	return true;
 }
 
+bool test_spawn_records_visual_choices() {
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.y_offset = 3.0f;
+	def.z_offset = -2.0f;
+	def.graphics[0].present = false;
+	GraphicLayer &g2 = def.graphics[2];
+	g2.present = true;
+	g2.index = 3;
+	g2.color1 = {10, 20, 30};
+	g2.color2 = {40, 50, 60};
+	g2.color3 = {70, 80, 90};
+	g2.color4 = {100, 110, 120};
+	g2.color_overrides_set = true;
+
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 7);
+	if (!expect(emitter_spawn_one(e), "visual choice spawn returns true")) return false;
+	const Particle &p = e.particles[0];
+	if (!expect(p.color_slot <= 3, "spawn records color slot")) return false;
+	if (!expect(p.graphic_layer == 2, "single present graphic preserves actual layer index")) return false;
+	if (!expect(near(p.position.y, 3.0f), "y_offset applies at spawn")) return false;
+	if (!expect(near(p.position.z, -2.0f), "z_offset applies at spawn")) return false;
+	return true;
+}
+
 bool test_advance_emits() {
 	using namespace opennova::particle;
 	ParticleDef def = make_minimal_def();
@@ -297,6 +323,7 @@ int main() {
 	int failures = 0;
 	if (!test_init())                       ++failures;
 	if (!test_manual_spawn())               ++failures;
+	if (!test_spawn_records_visual_choices()) ++failures;
 	if (!test_advance_emits())              ++failures;
 	if (!test_burst())                      ++failures;
 	if (!test_lifetime_expires())           ++failures;

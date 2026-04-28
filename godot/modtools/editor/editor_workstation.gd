@@ -69,6 +69,7 @@ var _active_workspace_id: int = Workspace.TERRAIN
 var _workspaces: Dictionary = {}
 var _workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
+var _mounted_workspace_id: int = -1
 var _current_workflow_id: int = -1
 var _workflow_buttons: Dictionary = {}
 var _placeholder_workspace_id: int = -1
@@ -93,8 +94,17 @@ func _ready() -> void:
 	_status_camera_label.clip_text = true
 	_status_fps_label.clip_text = true
 	set_process(true)
+	_mount_active_workspace_viewport()
 	_refresh_workspace_surface()
 	sync_from_editor_state()
+
+
+func _exit_tree() -> void:
+	for workspace in _workspaces.values():
+		if workspace != null and workspace.has_method("release_viewport"):
+			workspace.release_viewport()
+	_clear_viewport_lane()
+	_mounted_workspace_id = -1
 
 
 func set_editor(value: Node) -> void:
@@ -106,6 +116,7 @@ func set_editor(value: Node) -> void:
 	var environment_workspace = _workspaces.get(Workspace.ENVIRONMENT)
 	if environment_workspace != null and environment_workspace.has_method("set_environment_editor") and value != null and value.has_method("get_environment_editor"):
 		environment_workspace.set_environment_editor(value.get_environment_editor())
+	_remount_active_workspace_viewport()
 	_refresh_workspace_surface()
 	for child in _inspector_host.get_children():
 		if child.has_method("set_editor"):
@@ -263,8 +274,10 @@ func set_active_workspace(workspace_id: int) -> void:
 	var current_workspace = _get_active_workspace()
 	if current_workspace != null and current_workspace.has_method("deactivate"):
 		current_workspace.deactivate()
+	_unmount_workspace_viewport(_active_workspace_id, current_workspace)
 	_active_workspace_id = workspace_id
 	var next_workspace = _get_active_workspace()
+	_mount_active_workspace_viewport()
 	if next_workspace != null and next_workspace.has_method("activate"):
 		next_workspace.activate()
 	_refresh_workspace_surface()
@@ -277,6 +290,42 @@ func get_active_workspace_id() -> int:
 
 func _get_active_workspace() -> Variant:
 	return _workspaces.get(_active_workspace_id)
+
+
+func _mount_active_workspace_viewport() -> void:
+	if _viewport_lane == null:
+		return
+	_clear_viewport_lane()
+	var workspace = _get_active_workspace()
+	if workspace == null:
+		_mounted_workspace_id = -1
+		return
+	if workspace.has_method("mount_viewport"):
+		workspace.mount_viewport(_viewport_lane)
+	_mounted_workspace_id = _active_workspace_id
+
+
+func _unmount_workspace_viewport(workspace_id: int, workspace: Variant) -> void:
+	if _viewport_lane == null:
+		return
+	if workspace != null and workspace.has_method("unmount_viewport"):
+		workspace.unmount_viewport(_viewport_lane)
+	_clear_viewport_lane()
+	if _mounted_workspace_id == workspace_id:
+		_mounted_workspace_id = -1
+
+
+func _remount_active_workspace_viewport() -> void:
+	var workspace = _get_active_workspace()
+	_unmount_workspace_viewport(_active_workspace_id, workspace)
+	_mount_active_workspace_viewport()
+
+
+func _clear_viewport_lane() -> void:
+	if _viewport_lane == null:
+		return
+	for child in _viewport_lane.get_children():
+		_viewport_lane.remove_child(child)
 
 
 func _is_terrain_workspace_active() -> bool:
