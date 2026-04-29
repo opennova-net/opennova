@@ -154,6 +154,117 @@ from:
    Distort) drive the spawn-time setup; the renderer then dispatches the
    vertex format accordingly.
 
+## Per-blend-mode render-state binding (RE 2026-04-28)
+
+**Correction to the "alpha-blend set once at manager level" speculation
+above** — the alpha-blend state IS switched per-blend-mode, but through a
+struct-driven indirection that wasn't immediately obvious from the
+particle code alone.
+
+**Call chain** when a particle batch's bound texture changes:
+
+```
+CParticleEmitter_BuildBillboardQuads @ 0x5e6d60
+  → CEffectChannel_PlaySample @ 0x5e4230   (BindRenderStateAndTexture)
+    → CD3DDevice_SetFogAndBlendMode @ 0x677740   (fog + TFACTOR only)
+    → sub_677020(sample[1 or 2], 0x500000) @ 0x677020   (thunk)
+      → sub_683190 @ 0x683190
+        → sub_680760 @ 0x680760    (bind up to 6 textures via SetTexture)
+        → GfxBlend_ApplyToDevice @ 0x6817d0   (D3DRS_ALPHABLENDENABLE=27,
+            _SRCBLEND=19, _DESTBLEND=20)
+        → RenderState_ApplyToDevice @ 0x681920   (per-stage texture
+            combiner: D3DTSS_COLOROP=1, _COLORARG1=2, _COLORARG2=3,
+            _ALPHAOP=4, _ALPHAARG1=5, _ALPHAARG2=6, _RESULTARG=28
+            for stages 0..5)
+        → SetVertexShader / SetPixelShader at offsets +244 / +248
+            of the bound material (vtable+428 / vtable+368)
+```
+
+**The `sample` argument to `PlaySample` is read from the per-frame UV-rect
+slot at `graphic+724`**. Each frame entry holds a pointer to a sample
+struct + the 5-float UV rect (u_min, u_max, v_min, v_max, inset). The
+sample struct itself encodes the blend mode (sample+0), primary
+render-state pointer (sample+4), secondary render-state pointer for
+compound modes like Distort (sample+8), a global flag dword (sample+12 →
+`dword_3266E8C`), and a vertex format / FVF code (sample+16).
+
+**Confirmed not used**: `D3DTOP_BUMPENVMAP` (=22) and
+`D3DTOP_BUMPENVMAPLUMINANCE` (=23) appear only in the parser's string-
+length comparisons (`CParticleDef_ParseFromConfigMap @ 0x5ed210`); never
+in the render path. So **bump and bumpadd modes use plain fixed-function
+combiners** (likely `D3DTOP_MODULATE` / `D3DTOP_ADD`), not D3D9 bump-
+mapping ops. Our current bump shader (`texture × lit_color`) and bumpadd
+shader (`texture + lit_color`) approximate the engine's combiner output;
+the bounded deviation around the per-particle rotation transform on
+`lit_color` direction stands.
+
+**Static struct layout** (the data that `RenderState_ApplyToDevice` reads,
+inferred from the function's per-DWORD access pattern):
+- `+0` = `active_stages` (loop bound; loop runs while `v5 < this+0` for
+  stages 1..5, so this caps how many stages get configured)
+- `+16` (`renderState[4]`) = stage-0 ALPHAOP value
+- `+24` (`renderState[6]`) = stage-0 ALPHAARG1 value
+- `+28` (`renderState[7]`) = stage-0 ALPHAARG2 value
+- `+32` (`renderState[8]`) = stage-0 COLOROP value
+- `+40` (`renderState[10]`) = stage-0 COLORARG1 value
+- `+44` (`renderState[11]`) = stage-0 COLORARG2 value
+- `+48` (`renderState[12]`) = stage-0 RESULTARG selector (sets D3DTSS=28
+  to `4*(v3!=0) + 1` → 1 = D3DTA_CURRENT or 5 = D3DTA_TEMP)
+- Stages 1..5 follow at stride 36 bytes from offset +56, in the same
+  shape (loop body in `RenderState_ApplyToDevice`).
+
+**Static struct location** — the per-blend-mode state structs live in
+the read-only data section starting around `0x7e7558`, organised as an
+array of indexed structs (one per blend mode 1..8). Each struct entry
+begins with a chain pointer + a blend-mode index dword (1..8), followed
+by ~15 dwords of stage-state data referencing per-mode sub-structs at
+`0x7e94e0..0x7e9510`. Pattern search for the Mod2x signature
+`SrcBlend=9 (DESTCOLOR), DestBlend=3 (SRCCOLOR)` confirmed the data
+section: byte sequence `09 00 00 00 03 00 00 00` lands at `0x7e7814`,
+inside the index-6 (Mod2x) struct.
+
+Full per-blend-mode COLOROP/ALPHAOP value extraction is **not strictly
+required to validate our portable shaders**: see the conclusion below.
+
+**Conclusion — engine combiner modes for Bump / Bumpadd**: the search
+for `D3DTOP_BUMPENVMAP` (=22) and `D3DTOP_BUMPENVMAPLUMINANCE` (=23) in
+the binary's immediate operands returned hits only inside the .ptl
+parser (`CParticleDef_ParseFromConfigMap @ 0x5ed210`, used as
+string-length compare values). The render path never references these
+ops. **`D3DRS_SPECULARENABLE` (=29) is also never set in the particle
+code path** — no immediate-29 hits in the 0x5e*/0x5f* range — so the
+default value (FALSE) holds and the SPECULAR vertex slot is dead state
+for particles.
+
+**Implication**: bump and bumpadd modes use plain fixed-function
+combiners (most likely `D3DTOP_MODULATE` for stage 0 with
+`COLORARG1=TEXTURE`, `COLORARG2=DIFFUSE`). Since DIFFUSE carries the
+encoded `lit_color` (per the FVF=450 layout we already documented), the
+engine's per-pixel output is `texture × lit_color` for Bump. Our
+existing shaders match: `particle_blend_bump.gdshader` does
+`base * lit_color` with `base = COLOR * texture(...)`; `particle_blend_
+bumpadd.gdshader` does `(base * COLOR) + lit_color * 0.5` with the
+framebuffer-level additive blend. The `0.5` coefficient and the exact
+lit-vs-modulated combination are educated guesses, but they fall in the
+same fixed-function-modulate ballpark as the engine.
+
+**The bump/bumpadd `D3DTSS_COLOROP` "RE-blocker" is therefore resolved**:
+no exotic combiner mode is in play. Remaining bump/bumpadd deviation is
+the per-particle rotation transform on the lit-color direction (already
+documented as a bounded deviation; would require per-vertex CUSTOM1 with
+rotation angle to close).
+
+**Distort blend mode (BlendMode=7)** uses up to 2 textures via the
+secondary render-state pointer at `sample+8` (selected when `this+276`
+flag is set). The second texture is bound to stage 1 by `sub_680760`.
+The specific stage-1 combiner setup is in the index-8 struct at
+`~0x7e7858` (16 dwords past the index-7 struct, by stride). Decoding
+the exact byte values for the texture-stage state requires resolving the
+sub-struct pointers at `0x7e94ec..0x7e94f0` and reading their layout —
+deferred. Our shader falls back to a fixed-strength screen-tex UV
+offset, which matches the visual intent (sample distorted underlying
+buffer based on alpha gradient) without byte-exact stage state.
+
 Full port deferred — see `notes/particle_visual_parity.md` Bounded
 Deviations.
 
