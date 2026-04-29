@@ -249,10 +249,22 @@ lit-vs-modulated combination are educated guesses, but they fall in the
 same fixed-function-modulate ballpark as the engine.
 
 **The bump/bumpadd `D3DTSS_COLOROP` "RE-blocker" is therefore resolved**:
-no exotic combiner mode is in play. Remaining bump/bumpadd deviation is
-the per-particle rotation transform on the lit-color direction (already
-documented as a bounded deviation; would require per-vertex CUSTOM1 with
-rotation angle to close).
+no exotic combiner mode is in play.
+
+**Per-particle rotation port (RE 2026-04-28, implementation 2026-04-28)**:
+`nova_particle_emitter.cpp::_update_meshes` LitColor branch now applies
+`rp.rotation` to the local frame before projecting the engine light
+direction. Per-channel `lit_color` varies with rotation (verified by GUT
+tests `test_lit_color_channels_differ_at_nonzero_bump_scale` and
+`test_lit_color_varies_with_particle_rotation`). **Bounded deviation**:
+the engine uses `D3DXMatrixRotationX` (rotation around the X axis of a
+composite view-space matrix) while we rotate around the view direction
+(Z axis of our billboard frame). Both paths produce direction-dependent
+variation, but exact per-channel values differ vs the engine. Closing
+needs a 4×4 matrix port + axis-convention RE + side-by-side reference
+capture. Note also: engine stores rotation in degrees and converts via
+`flt_7DCB00 = π/180`; our simulator already stores radians, so we skip
+the engine's degree-to-radian conversion.
 
 **Distort blend mode (BlendMode=7)** uses up to 2 textures via the
 secondary render-state pointer at `sample+8` (selected when `this+276`

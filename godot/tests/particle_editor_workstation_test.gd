@@ -385,9 +385,11 @@ const PARTICLE_FLAG_POSITION_RELATIVE := 1 << 18
 
 # CParticleEmitter_BuildBillboardQuads @ 0x5e6d60: lit-color path triggered
 # when particle.flags & 0x80 (LitColor for Bump=3 / Bumpadd=6 blend modes).
-# Engine encodes `bump_scale * (1/√3, 1/√3, 1/√3)` per axis into a byte via
-# `clamp((value + 1) * 0.5, 0, 1) * 255`. Bounded deviation: we skip the
-# per-particle rotation transform (uniform tint instead of directional).
+# Engine encodes `bump_scale × M^T × (-1/√3, -1/√3, +1/√3)` per axis into a
+# byte via `clamp((value + 1) × 0.5, 0, 1) × 255` where M = particle's
+# composite view + rotation matrix. Bounded deviation: we rotate around the
+# view direction instead of the engine's D3DXMatrixRotationX axis (full RE
+# of the engine's exact axis convention is deferred — see witness notes).
 func test_lit_color_default_neutral_when_not_bump() -> void:
 	# blend mode 0 (Blend) → particle.flags has no LitColor bit → lit_color
 	# stays neutral white in our renderer.
@@ -400,8 +402,9 @@ func test_lit_color_default_neutral_when_not_bump() -> void:
 
 func test_lit_color_encoded_when_bump_blend_mode() -> void:
 	# blend mode 3 (Bump) → particle.flags has LitColor bit set during spawn.
-	# With default bump_scale = 0, encoded value = (0 + 1) * 0.5 = 0.5 → byte
-	# 127 ≈ 0.498 in [0, 1] (RGBA8 quantisation).
+	# With default bump_scale = 0, the per-axis term zeroes regardless of
+	# rotation: encoded value = (0 + 1) × 0.5 = 0.5 → byte 127 ≈ 0.498 in
+	# [0, 1] (RGBA8 quantisation).
 	var emitter := _add_render_test_emitter(_make_render_test_particle(3))
 	var lit: Color = emitter.get_debug_first_lit_color()
 	assert_almost_eq(lit.r, 0.5, 0.02, "bump lit_color.r ≈ 0.5 (default bump_scale=0)")
@@ -409,14 +412,61 @@ func test_lit_color_encoded_when_bump_blend_mode() -> void:
 	assert_almost_eq(lit.b, 0.5, 0.02, "bump lit_color.b ≈ 0.5")
 
 
-func test_lit_color_brighter_with_higher_bump_scale() -> void:
-	# bump_scale = 1.0 → encoded value ≈ (0.577 + 1) * 0.5 = 0.789 ≈ byte 201.
+func test_lit_color_channels_differ_at_nonzero_bump_scale() -> void:
+	# Rotation port (RE 2026-04-28): with bump_scale > 0 the engine's light
+	# direction (-k, -k, +k) projects into the particle's local frame to
+	# give per-axis differences. This test pins the rotation-port behaviour
+	# vs the prior uniform-tint impl which would have made all 3 channels
+	# equal regardless of bump_scale.
 	var particle := _make_render_test_particle(3)
 	particle.bump_scale = 1.0
 	var emitter := _add_render_test_emitter(particle)
 	var lit: Color = emitter.get_debug_first_lit_color()
-	assert_almost_eq(lit.r, 0.789, 0.02, "bump_scale=1 → lit_color ≈ 0.789")
-	assert_gt(lit.r, 0.6, "lit_color brighter than neutral 0.5")
+	# Expect a meaningful spread between min and max channels.
+	var lo: float = minf(lit.r, minf(lit.g, lit.b))
+	var hi: float = maxf(lit.r, maxf(lit.g, lit.b))
+	assert_gt(hi - lo, 0.1,
+			"bump_scale=1 should give per-channel spread >0.1 (got lo=%f hi=%f)" % [lo, hi])
+
+
+func test_lit_color_brighter_with_higher_bump_scale() -> void:
+	# bump_scale = 1.0 → with the engine light direction (-k, -k, +k) and
+	# a default-oriented headless camera (right=+X, up=+Y), the projection
+	# gives lit.r ≈ encode(-k) = 0.211 and lit.b ≈ encode(+k) = 0.789. The
+	# B channel is the brightest one. Distance from neutral 0.5 confirms
+	# the bump_scale modulation is wired through.
+	var particle := _make_render_test_particle(3)
+	particle.bump_scale = 1.0
+	var emitter := _add_render_test_emitter(particle)
+	var lit: Color = emitter.get_debug_first_lit_color()
+	assert_gt(lit.b, 0.7, "bump_scale=1 → lit.b should be in (+k) bright range")
+	assert_lt(lit.r, 0.3, "bump_scale=1 → lit.r should be in (-k) dim range")
+	assert_gt(absf(lit.b - 0.5), 0.2,
+			"lit.b should be far from neutral 0.5 with bump_scale=1")
+
+
+func test_lit_color_varies_with_particle_rotation() -> void:
+	# Two emitters with the same particle but different roll_rot values
+	# should produce different lit_colors when bump_scale > 0. This drives
+	# the rotation-aware path: rp.rotation feeds local_right/local_up
+	# which feed the dot products with the engine light direction.
+	var particle_a := _make_render_test_particle(3, 1, 8, 0.0, 0.0)
+	particle_a.bump_scale = 1.0
+	var emitter_a := _add_render_test_emitter(particle_a)
+	var lit_a: Color = emitter_a.get_debug_first_lit_color()
+
+	var particle_b := _make_render_test_particle(3, 1, 8, 0.0, 90.0)  # 90° roll
+	particle_b.bump_scale = 1.0
+	var emitter_b := _add_render_test_emitter(particle_b)
+	var lit_b: Color = emitter_b.get_debug_first_lit_color()
+
+	# At least one channel should differ meaningfully between rotations.
+	var dr: float = absf(lit_a.r - lit_b.r)
+	var dg: float = absf(lit_a.g - lit_b.g)
+	var db: float = absf(lit_a.b - lit_b.b)
+	var max_delta: float = maxf(dr, maxf(dg, db))
+	assert_gt(max_delta, 0.1,
+			"lit_color should differ between rotation 0° and 90° (got max delta %f)" % max_delta)
 
 
 func test_atlas_texture_combines_multiple_layers() -> void:

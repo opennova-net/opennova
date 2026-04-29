@@ -696,25 +696,55 @@ void NovaParticleEmitter::_update_meshes() {
 		// Engine-faithful lit color computation when the LitColor flag is
 		// set (Bump=3 or Bumpadd=6 blend modes). Engine reference:
 		// `CParticleEmitter_BuildBillboardQuads @ 0x5e6d60`, second-color
-		// branch when `particle.flags & 0x80`. The engine multiplies
-		// `def.bump_scale` by hardcoded light direction
-		// `(-0.5773, -0.5773, +0.5773) = (-1/√3, -1/√3, +1/√3)`
-		// (`flt_848D34/D38/D3C`), transforms through the inverse per-
-		// particle rotation matrix (D3DXMatrixTranspose), then encodes
-		// each component as `byte = clamp((value + 1) * 0.5, 0, 1) * 255`.
-		// **Bounded deviation**: we skip the per-particle rotation
-		// transform (would require building a 4x4 matrix per particle and
-		// inverting it, plus matching the engine's D3DXMatrixRotationX
-		// axis convention which doesn't directly map to our billboard
-		// frame). Result: lit_color is a uniform bump_scale-derived tint
-		// rather than direction-dependent. Without the rotation, the
-		// encoded value is the same on all 3 axes — `(bump_scale * 0.577 + 1) * 0.5`.
+		// branch when `particle.flags & 0x80`. Engine pipeline (RE 2026-04-28):
+		//   1. Build `D3DXMatrixRotationX(rotation × π/180)` (engine stores
+		//      rotation in degrees; flt_7DCB00 = π/180).
+		//   2. Multiply with the emitter's view matrix at emitter+8+664.
+		//   3. `D3DXMatrixTranspose` the composite (= sub_68BF44 @ 0x68bf4a).
+		//   4. Multiply hardcoded light direction (-1/√3, -1/√3, +1/√3)
+		//      (flt_848D34/D38/D3C) by the transposed matrix.
+		//   5. Scale by def.bump_scale and encode per channel:
+		//      `byte = clamp((value + 1) × 0.5, 0, 1) × 255`.
+		//
+		// Our portable form rotates the camera right/up axes by rp.rotation
+		// around the view direction (matches our billboard frame
+		// construction exactly), then projects the engine light direction
+		// into the local frame via dot products with the orthonormal axes.
+		// Result: lit_color varies with particle rotation, matching the
+		// engine's intent of direction-dependent shading.
+		//
+		// **Bounded deviation**: the engine rotates around the X axis of a
+		// composite view-space matrix (D3DXMatrixRotationX), while we rotate
+		// around the view direction (Z axis of our billboard frame). Both
+		// paths produce direction-dependent variation that responds to
+		// rotation, but exact per-channel values differ vs the engine.
+		// Closing this gap requires a 4×4 matrix port + axis-convention RE.
 		if ((p.flags & opennova::particle::particle_runtime_flag::LitColor) != 0) {
 			const float bump_scale = native_def->bump_scale;
-			constexpr float k = 0.5773503f;  // 1/√3
-			const float v = bump_scale * k;
-			const float encoded = std::clamp((v + 1.0f) * 0.5f, 0.0f, 1.0f);
-			rp.lit_color = Color(encoded, encoded, encoded, color.a);
+			constexpr float k = 0.5773503f;  // 1/√3 (engine: flt_848D34/D38/D3C)
+			const Vector3 light_world(-k, -k, +k);
+
+			const float rc = std::cos(rp.rotation);
+			const float rs = std::sin(rp.rotation);
+			const Vector3 local_right = right * rc + up * rs;
+			const Vector3 local_up = -right * rs + up * rc;
+			Vector3 local_forward = right.cross(up);
+			if (local_forward.length_squared() > 0.0f) {
+				local_forward.normalize();
+			}
+
+			const Vector3 light_local(
+					local_right.dot(light_world),
+					local_up.dot(light_world),
+					local_forward.dot(light_world));
+
+			const float lit_r = std::clamp(
+					(bump_scale * light_local.x + 1.0f) * 0.5f, 0.0f, 1.0f);
+			const float lit_g = std::clamp(
+					(bump_scale * light_local.y + 1.0f) * 0.5f, 0.0f, 1.0f);
+			const float lit_b = std::clamp(
+					(bump_scale * light_local.z + 1.0f) * 0.5f, 0.0f, 1.0f);
+			rp.lit_color = Color(lit_r, lit_g, lit_b, color.a);
 		} else {
 			rp.lit_color = Color(1.0f, 1.0f, 1.0f, 1.0f);  // neutral (multiply identity)
 		}

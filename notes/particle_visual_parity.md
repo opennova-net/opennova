@@ -133,31 +133,37 @@ not a struct-offset witness; exact layout claims still belong in
   Godot's `blend_mul` render mode. The "darken-or-brighten around 0.5"
   midpoint of the engine's modulate2x is preserved; the gamma curve is not
   byte-exact.
-- `bump`, `bumpadd`, `distort`: **lit-color implemented; combiner is
-  fixed-function modulate (RE 2026-04-28)**. RE confirmed the engine's
-  vertex format (FVF 450 = `D3DFVF_XYZ | DIFFUSE | SPECULAR | TEX1`)
-  and the per-blend-mode state-binding chain (`PlaySample → sub_683190
-  → GfxBlend_ApplyToDevice + RenderState_ApplyToDevice + sub_680760`
-  for blend / texture-stage / texture binding respectively).
-  **Confirmed via immediate search**: `D3DTOP_BUMPENVMAP`/`_LUMINANCE`
-  and `D3DRS_SPECULARENABLE` are never set on the particle render
-  path — so bump / bumpadd use plain `D3DTOP_MODULATE` combiners with
-  DIFFUSE carrying the encoded `lit_color`. Our shaders
-  (`particle_blend_bump.gdshader` does `texture × COLOR × lit_color`;
-  `particle_blend_bumpadd.gdshader` does `texture + lit_color` with
-  framebuffer-additive) match this combiner topology. **Remaining
-  bounded deviation**: per-particle rotation transform on the lit-color
-  direction. The engine multiplies the light direction
-  `(-1/√3, -1/√3, +1/√3)` by the particle's inverse rotation matrix
-  (D3DXMatrixTranspose @ 0x68bf4a) before encoding to `(value+1)*0.5`,
-  giving direction-dependent shading. We skip the rotation, so
-  `lit_color` is a uniform `bump_scale`-derived tint. Closing this gap
-  needs a per-vertex CUSTOM1 with the rotation angle plus shader-side
-  Rodrigues rotation. `distort` still falls back to a fixed-strength
-  screen-tex UV offset; the engine's exact stage-1 combiner is in
-  the index-8 static struct at `~0x7e7858` (sub-struct ptr `0x7e94ec`)
-  but the byte layout is undecoded. Adjacent kong-rename corrections
-  and full call-chain witness in `notes/ida_particle_witness.md`.
+- `bump`, `bumpadd`, `distort`: **lit-color rotation port landed; axis-
+  convention deviation remains (RE 2026-04-28)**. RE confirmed the
+  engine's vertex format (FVF 450 = `D3DFVF_XYZ | DIFFUSE | SPECULAR |
+  TEX1`) and per-blend-mode state-binding chain (`PlaySample →
+  sub_683190 → GfxBlend_ApplyToDevice + RenderState_ApplyToDevice +
+  sub_680760`). **Confirmed via immediate search**:
+  `D3DTOP_BUMPENVMAP`/`_LUMINANCE` and `D3DRS_SPECULARENABLE` are never
+  set on the particle render path — so bump / bumpadd use plain
+  `D3DTOP_MODULATE` with DIFFUSE carrying the encoded `lit_color`. Our
+  shaders match this combiner topology
+  (`particle_blend_bump.gdshader`: `texture × COLOR × lit_color`;
+  `particle_blend_bumpadd.gdshader`: `texture + lit_color` with
+  framebuffer-additive). **Per-particle rotation port (this slice)**:
+  `nova_particle_emitter.cpp::_update_meshes` now builds the particle's
+  local frame from the camera basis + `rp.rotation` (rotating
+  `right`/`up` around the view direction), inverse-transforms the
+  engine light direction `(-1/√3, -1/√3, +1/√3)` into local space via
+  dot products, scales by `bump_scale`, and encodes per channel via
+  `(value+1) × 0.5`. Result: lit_color varies with particle rotation,
+  matching the engine's intent of direction-dependent shading.
+  **Remaining bounded deviation**: the engine rotates around the X
+  axis of a composite view-space matrix (`D3DXMatrixRotationX`), while
+  we rotate around the view direction (Z axis of our billboard frame).
+  Both produce direction-dependent variation responsive to rotation,
+  but exact per-channel values differ vs the engine. Closing this gap
+  needs a 4×4 matrix port + axis-convention RE + side-by-side reference
+  capture. `distort` still falls back to a fixed-strength screen-tex UV
+  offset; engine's exact stage-1 combiner is in the index-8 static
+  struct at `~0x7e7858` (sub-struct ptr `0x7e94ec`), byte layout
+  undecoded. Adjacent kong-rename corrections and full call-chain
+  witness in `notes/ida_particle_witness.md`.
 - `CParticleManager_BuildTextureAtlases @ 0x5e8db0` exact pack layout:
   the engine's algorithm (shelf vs row vs binary tree) was not decoded.
   Our portable form uses a horizontal shelf packer (layers laid
@@ -171,12 +177,12 @@ not a struct-offset witness; exact layout claims still belong in
 - Confirm `CParticleManager_BuildTextureAtlases @ 0x5e8db0` exact pack
   algorithm (shelf vs row vs binary tree). Our portable form uses a
   horizontal shelf packer; the resulting UV rect data shape matches.
-- Per-particle rotation matrix for `lit_color` direction: the engine
-  applies `D3DXMatrixTranspose(particle_rotation)` to the light vector
-  before encoding into DIFFUSE. Our portable form skips this so the
-  lit-color is a uniform tint. Closing the gap needs a per-vertex
-  CUSTOM1 (rotation angle) + shader-side Rodrigues rotation. Visual
-  impact only on bump/bumpadd particles; rare in corpus.
+- Engine's exact axis convention for `lit_color` rotation: the engine
+  uses `D3DXMatrixRotationX(rotation × π/180) × view_matrix`; our
+  portable form rotates around the view direction (Z axis of our
+  billboard frame). Both produce direction-dependent variation, but
+  exact per-channel values differ. Closing this gap needs a 4×4 matrix
+  port + side-by-side reference capture to validate the axis match.
 - Decode `distort` mode's stage-1 screen-texture sampler setup
   (specifically what UV offset / scale the engine applies relative to
   the alpha-tex sample). The relevant data lives in the index-8 struct
