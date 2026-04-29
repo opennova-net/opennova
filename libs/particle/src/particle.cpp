@@ -1,5 +1,6 @@
 #include "particle/particle.h"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstring>
@@ -242,6 +243,63 @@ void bake_particle_def_curves(ParticleDef &def,
 		bake_one_curve(layer.blue_func, tables);
 		bake_graphic_uv_rects(layer);
 	}
+}
+
+AtlasLayout bake_atlas_layout(ParticleDef &def,
+		const std::array<AtlasInputSize, 4> &sizes) noexcept {
+	AtlasLayout layout{};
+	int total_width = 0;
+	int max_height = 0;
+	for (std::size_t i = 0; i < def.graphics.size(); ++i) {
+		const bool present_for_atlas = def.graphics[i].present
+				&& sizes[i].width > 0 && sizes[i].height > 0;
+		if (!present_for_atlas) {
+			continue;
+		}
+		layout.layer_x_offset[i] = total_width;
+		total_width += sizes[i].width;
+		if (sizes[i].height > max_height) {
+			max_height = sizes[i].height;
+		}
+	}
+	layout.atlas_width = total_width;
+	layout.atlas_height = max_height;
+
+	for (std::size_t i = 0; i < def.graphics.size(); ++i) {
+		GraphicLayer &layer = def.graphics[i];
+		const bool present_for_atlas = layer.present
+				&& sizes[i].width > 0 && sizes[i].height > 0
+				&& total_width > 0 && max_height > 0;
+		if (!present_for_atlas) {
+			// Reset rects to horizontal-strip defaults so renderer's
+			// fallback path (no atlas / missing texture) keeps working.
+			bake_graphic_uv_rects(layer);
+			continue;
+		}
+
+		const int frames = std::max(layer.flip_frames, 1);
+		layer.baked_uv_rects.assign(static_cast<std::size_t>(frames), UvRect{});
+
+		const float u_min_layer = static_cast<float>(layout.layer_x_offset[i])
+				/ static_cast<float>(total_width);
+		const float u_max_layer = static_cast<float>(layout.layer_x_offset[i] + sizes[i].width)
+				/ static_cast<float>(total_width);
+		const float v_max_layer = static_cast<float>(sizes[i].height)
+				/ static_cast<float>(max_height);
+		const float frame_width = (u_max_layer - u_min_layer)
+				/ static_cast<float>(frames);
+
+		for (int j = 0; j < frames; ++j) {
+			UvRect &rect = layer.baked_uv_rects[static_cast<std::size_t>(j)];
+			rect.u_min = u_min_layer + static_cast<float>(j) * frame_width;
+			rect.u_max = u_min_layer + static_cast<float>(j + 1) * frame_width;
+			rect.v_min = 0.0f;
+			rect.v_max = v_max_layer;
+			rect.inset = 0.0f;
+		}
+	}
+
+	return layout;
 }
 
 } // namespace opennova::particle

@@ -118,6 +118,10 @@ void NovaParticleEmitter::_bind_methods() {
 			&NovaParticleEmitter::get_debug_first_layer_aabb_center);
 	ClassDB::bind_method(D_METHOD("get_debug_first_quad_vertices"),
 			&NovaParticleEmitter::get_debug_first_quad_vertices);
+	ClassDB::bind_method(D_METHOD("get_debug_atlas_texture"),
+			&NovaParticleEmitter::get_debug_atlas_texture);
+	ClassDB::bind_method(D_METHOD("get_debug_layer_material", "layer_index"),
+			&NovaParticleEmitter::get_debug_layer_material);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "def", PROPERTY_HINT_RESOURCE_TYPE, "NovaParticleDef"),
 			"set_def", "get_def");
@@ -330,6 +334,10 @@ void NovaParticleEmitter::_refresh_emitter() {
 		native_def.reset();
 		emitter.def = nullptr;
 		emitter.particles.clear();
+		atlas_texture.unref();
+		atlas_layer_widths.fill(0);
+		atlas_layer_heights.fill(0);
+		atlas_layer_present.fill(false);
 	}
 	_clear_meshes();
 }
@@ -397,6 +405,10 @@ Color NovaParticleEmitter::_layer_color(const Ref<NovaParticleGraphicLayer> &lay
 void NovaParticleEmitter::_refresh_layer_materials(
 		const std::array<Ref<NovaParticleGraphicLayer>, MAX_VISUAL_LAYERS> &layers,
 		const std::array<bool, MAX_VISUAL_LAYERS> &present) {
+	// Phase 1: per-layer blend-mode + source-texture load (cached on
+	// texture_name change). Engine analogue: each particle graphic carries
+	// its own loose-texture name; the atlas builder consumes the loaded
+	// images.
 	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
 		const int blend_mode = present[i] && layers[i].is_valid() ?
 				std::clamp(layers[i]->get_blend_mode(), 0, 7) : 0;
@@ -422,13 +434,104 @@ void NovaParticleEmitter::_refresh_layer_materials(
 				layer_textures[i] = opennova::load_texture_from_dir(texture_dir, texture_name);
 			}
 		}
+	}
 
+	// Phase 2: build/refresh the per-emitter atlas from the loaded source
+	// textures. Updates `native_def->graphics[i].baked_uv_rects` to atlas
+	// coordinates so the renderer reads atlas-relative UVs without any
+	// further plumbing. Engine: CParticleManager_BuildTextureAtlases @ 0x5e8db0.
+	_rebuild_atlas_texture(present);
+
+	// Phase 3: bind the shared atlas texture to every layer material's
+	// `albedo_tex`. `has_texture` stays per-layer (drives the procedural
+	// soft-disc fallback path in shaders).
+	const Ref<Texture2D> atlas_or_fallback = atlas_texture.is_valid() ?
+			Ref<Texture2D>(atlas_texture) : fallback_texture;
+	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
 		const bool layer_has_texture = layer_textures[i].is_valid();
-		const Ref<Texture2D> texture_for_material =
-				layer_has_texture ? layer_textures[i] : fallback_texture;
-		layer_materials[i]->set_shader_parameter("albedo_tex", texture_for_material);
+		layer_materials[i]->set_shader_parameter("albedo_tex", atlas_or_fallback);
 		layer_materials[i]->set_shader_parameter("has_texture", layer_has_texture);
 	}
+}
+
+void NovaParticleEmitter::_rebuild_atlas_texture(
+		const std::array<bool, MAX_VISUAL_LAYERS> &present) {
+	if (native_def == nullptr) {
+		atlas_texture.unref();
+		atlas_layer_widths.fill(0);
+		atlas_layer_heights.fill(0);
+		atlas_layer_present.fill(false);
+		return;
+	}
+
+	// Snapshot the per-layer (width, height, present) signature so we can
+	// skip the rebuild if nothing meaningful changed (texture cache miss
+	// without dimension change is the common steady-state path).
+	std::array<int, MAX_VISUAL_LAYERS> widths{};
+	std::array<int, MAX_VISUAL_LAYERS> heights{};
+	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
+		if (present[i] && layer_textures[i].is_valid()) {
+			widths[i] = layer_textures[i]->get_width();
+			heights[i] = layer_textures[i]->get_height();
+		}
+	}
+	bool unchanged = atlas_texture.is_valid();
+	for (int i = 0; i < MAX_VISUAL_LAYERS && unchanged; ++i) {
+		if (atlas_layer_widths[i] != widths[i] ||
+				atlas_layer_heights[i] != heights[i] ||
+				atlas_layer_present[i] != present[i]) {
+			unchanged = false;
+		}
+	}
+	if (unchanged) {
+		return;
+	}
+
+	atlas_layer_widths = widths;
+	atlas_layer_heights = heights;
+	atlas_layer_present = present;
+
+	std::array<opennova::particle::AtlasInputSize, 4> sizes{};
+	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
+		sizes[static_cast<std::size_t>(i)] = {widths[i], heights[i]};
+	}
+
+	const opennova::particle::AtlasLayout layout =
+			opennova::particle::bake_atlas_layout(*native_def, sizes);
+
+	if (layout.atlas_width <= 0 || layout.atlas_height <= 0) {
+		atlas_texture.unref();
+		return;
+	}
+
+	Ref<Image> atlas_image = Image::create(layout.atlas_width, layout.atlas_height,
+			false, Image::FORMAT_RGBA8);
+	if (atlas_image.is_null()) {
+		atlas_texture.unref();
+		return;
+	}
+
+	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
+		if (widths[i] <= 0 || heights[i] <= 0) {
+			continue;
+		}
+		// ImageTexture::get_image returns a decompressed copy; safe to
+		// blit into our RGBA8 atlas without further processing. Convert
+		// to RGBA8 if the source format differs (PCX/TGA decoders may
+		// hand back RGB8 or grayscale formats).
+		Ref<Image> layer_image = layer_textures[i]->get_image();
+		if (layer_image.is_null()) {
+			continue;
+		}
+		if (layer_image->get_format() != Image::FORMAT_RGBA8) {
+			layer_image->convert(Image::FORMAT_RGBA8);
+		}
+		atlas_image->blit_rect(layer_image,
+				Rect2i(Vector2i(0, 0), Vector2i(widths[i], heights[i])),
+				Vector2i(layout.layer_x_offset[i], 0));
+	}
+
+	atlas_texture = ImageTexture::create_from_image(atlas_image);
 }
 
 void NovaParticleEmitter::_update_meshes() {
@@ -1050,6 +1153,17 @@ Color NovaParticleEmitter::get_debug_first_color() const {
 
 Color NovaParticleEmitter::get_debug_first_lit_color() const {
 	return debug_first_lit_color;
+}
+
+Ref<ImageTexture> NovaParticleEmitter::get_debug_atlas_texture() const {
+	return atlas_texture;
+}
+
+Ref<ShaderMaterial> NovaParticleEmitter::get_debug_layer_material(int p_layer_index) const {
+	if (p_layer_index < 0 || p_layer_index >= MAX_VISUAL_LAYERS) {
+		return Ref<ShaderMaterial>();
+	}
+	return layer_materials[static_cast<std::size_t>(p_layer_index)];
 }
 
 Vector3 NovaParticleEmitter::get_debug_last_translation_delta() const {

@@ -419,6 +419,81 @@ func test_lit_color_brighter_with_higher_bump_scale() -> void:
 	assert_gt(lit.r, 0.6, "lit_color brighter than neutral 0.5")
 
 
+func test_atlas_texture_combines_multiple_layers() -> void:
+	# CParticleManager_BuildTextureAtlases @ 0x5e8db0: per-emitter atlas
+	# combining all present graphic layers' textures into one image, with
+	# atlas-relative UV rects. Verify the wrapper builds the atlas correctly
+	# from two distinct loose PNG textures and binds it to all 4 layer
+	# materials' `albedo_tex`.
+	var dir := _output_dir()
+	DirAccess.make_dir_recursive_absolute(dir)
+	var path0 := dir.path_join("atlas_layer_a.png")
+	var path1 := dir.path_join("atlas_layer_b.png")
+	# Distinct sizes pin the horizontal-shelf layout: layer 0 = 8w, layer 1 = 16w.
+	var image0 := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	image0.fill(Color(1.0, 0.0, 0.0, 1.0))
+	assert_eq(image0.save_png(path0), OK, "layer 0 source PNG written")
+	var image1 := Image.create(16, 8, false, Image.FORMAT_RGBA8)
+	image1.fill(Color(0.0, 1.0, 0.0, 1.0))
+	assert_eq(image1.save_png(path1), OK, "layer 1 source PNG written")
+
+	var particle := _make_render_test_particle(0, 1, 8, 0.0, 0.0, "atlas_layer_a.png")
+	var graphics: Array = particle.get_graphics()
+	var layer1 := graphics[1] as NovaParticleGraphicLayer
+	layer1.present = true
+	layer1.index = 2
+	layer1.texture = "atlas_layer_b.png"
+	layer1.blend_mode = 0
+	layer1.flip_frames = 1
+	layer1.flip_rate = 8
+	layer1.alpha = 1.0
+	layer1.scale_value = 4.0
+	particle.set_graphics(graphics)
+
+	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	emitter.auto_advance = false
+	emitter.texture_dir = dir
+	emitter.def = particle
+	emitter.play()
+	emitter.advance(0.26)
+
+	var atlas: ImageTexture = emitter.get_debug_atlas_texture()
+	assert_not_null(atlas, "Atlas texture should be built when both layers loaded.")
+	assert_eq(atlas.get_width(), 24, "Atlas width = sum of layer widths (8+16=24).")
+	assert_eq(atlas.get_height(), 8, "Atlas height = max of layer heights.")
+
+	# Every layer material's albedo_tex points at the same atlas RID.
+	var atlas_rid := atlas.get_rid()
+	for i in range(4):
+		var material: ShaderMaterial = emitter.get_debug_layer_material(i)
+		assert_not_null(material, "Layer %d should have a material." % i)
+		var bound: Texture2D = material.get_shader_parameter("albedo_tex")
+		assert_not_null(bound, "Layer %d should have albedo_tex bound." % i)
+		assert_eq(bound.get_rid(), atlas_rid,
+				"Layer %d albedo_tex points at the shared atlas." % i)
+
+
+func test_atlas_clears_when_def_unset() -> void:
+	# Setting def back to null releases the atlas reference + resets the
+	# rebuild signature so a subsequent set_def rebuilds.
+	var dir := _output_dir()
+	DirAccess.make_dir_recursive_absolute(dir)
+	var path0 := dir.path_join("atlas_clear_a.png")
+	_write_test_texture(path0)
+	var particle := _make_render_test_particle(0, 1, 8, 0.0, 0.0, "atlas_clear_a.png")
+	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	emitter.auto_advance = false
+	emitter.texture_dir = dir
+	emitter.def = particle
+	emitter.play()
+	emitter.advance(0.26)
+	assert_not_null(emitter.get_debug_atlas_texture(), "Atlas built when def has present layers.")
+
+	emitter.def = null
+	assert_null(emitter.get_debug_atlas_texture(),
+			"Atlas should clear when def is unset.")
+
+
 func test_world_space_default_keeps_particles_when_emitter_moves() -> void:
 	# Engine default (PositionRelative clear): particles render in world
 	# space. Translating the emitter mid-life does NOT carry alive particles

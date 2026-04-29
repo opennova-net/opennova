@@ -5,6 +5,7 @@
 #include <memory>
 
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/shader.hpp>
@@ -67,6 +68,16 @@ private:
 	std::array<int, MAX_VISUAL_LAYERS> layer_quad_counts{};
 	std::array<int, MAX_VISUAL_LAYERS> layer_last_flip_frames{};
 	std::array<int, MAX_VISUAL_LAYERS> layer_last_flip_frame{};
+	// CParticleManager_BuildTextureAtlases @ 0x5e8db0: per-emitter atlas
+	// combining all present graphic layers' textures into one image. The
+	// atlas is bound to every layer material's `albedo_tex`; per-layer
+	// `baked_uv_rects` are updated to atlas coordinates by
+	// `bake_atlas_layout`. Cache invalidates on any per-layer
+	// (width, height, present) change to skip rebuild work.
+	Ref<ImageTexture> atlas_texture;
+	std::array<int, MAX_VISUAL_LAYERS> atlas_layer_widths{};
+	std::array<int, MAX_VISUAL_LAYERS> atlas_layer_heights{};
+	std::array<bool, MAX_VISUAL_LAYERS> atlas_layer_present{};
 	Ref<Texture2D> fallback_texture;
 	int last_render_batch_count = 0;
 	int last_sorted_depth_count = 0;
@@ -87,6 +98,7 @@ private:
 	void _refresh_emitter();
 	void _refresh_layer_materials(const std::array<Ref<NovaParticleGraphicLayer>, MAX_VISUAL_LAYERS> &layers,
 			const std::array<bool, MAX_VISUAL_LAYERS> &present);
+	void _rebuild_atlas_texture(const std::array<bool, MAX_VISUAL_LAYERS> &present);
 	void _update_meshes();
 
 	Ref<NovaParticleTable> _find_table(const String &id) const;
@@ -137,6 +149,8 @@ public:
 	Vector3 get_debug_last_translation_delta() const;
 	Vector3 get_debug_first_layer_aabb_center() const;
 	Color get_debug_first_lit_color() const;
+	Ref<ImageTexture> get_debug_atlas_texture() const;
+	Ref<ShaderMaterial> get_debug_layer_material(int p_layer_index) const;
 
 	void play();
 	void stop();

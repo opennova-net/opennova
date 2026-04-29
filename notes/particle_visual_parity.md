@@ -106,6 +106,19 @@ not a struct-offset witness; exact layout claims still belong in
   y unchanged).
 - Graphic flipbooks use `flip_frames` and `flip_rate` to select a horizontal
   UV frame from elapsed particle lifetime.
+- **Atlas packing**
+  (`CParticleManager_BuildTextureAtlases @ 0x5e8db0`):
+  `opennova::particle::bake_atlas_layout` packs all present graphic
+  layers' source textures into one combined `Image` per emitter using a
+  horizontal shelf pack (layers laid left-to-right, atlas height = max
+  layer height). Each layer's `baked_uv_rects` are updated to atlas
+  coordinates so the renderer reads atlas-relative UVs without any
+  further plumbing. `NovaParticleEmitter::_rebuild_atlas_texture` builds
+  a Godot `ImageTexture` via `Image::blit_rect` and binds it to all 4
+  layer materials' `albedo_tex`. Cache-keyed on the per-layer
+  (width, height, present) signature so identical inputs skip rebuild
+  work. `inset` (bleed-prevention padding) is not yet applied — see
+  Bounded Deviations.
 - Finite preview emitters no longer auto-repeat after all spawned particles
   expire; `FOREVEREMIT` keeps the emitter eligible for continuous spawning.
 - Loose texture lookup remains routed through the shared texture path resolver;
@@ -115,15 +128,11 @@ not a struct-offset witness; exact layout claims still belong in
 
 - `CParticleManager_RenderBatch @ 0x5e9890`: Godot submits one mesh batch per
   graphic layer rather than reproducing the exact Direct3D batch state.
-- `CParticleManager_BuildTextureAtlases @ 0x5e8db0`: **UV rect array implemented**
-  via `GraphicLayer::baked_uv_rects` (filled by `bake_graphic_uv_rects` with
-  horizontal-strip defaults to match the renderer's prior on-the-fly UV
-  math). Renderer reads from the baked array, applying `inset` as symmetric
-  texel padding. **Atlas packing itself remains deferred** — current batches
-  bind resolved loose textures directly per-graphic, so `inset` defaults to 0
-  and the rect range is always (0..1, 0..1) split by frame count. Future
-  atlas-bake support can replace the defaults with explicit per-frame rects
-  without renderer changes.
+- `mod2x` (BlendMode 5) approximates engine SrcBlend = DESTCOLOR + DestBlend
+  = SRCCOLOR by pre-multiplying the source RGB by 2.0 in fragment and using
+  Godot's `blend_mul` render mode. The "darken-or-brighten around 0.5"
+  midpoint of the engine's modulate2x is preserved; the gamma curve is not
+  byte-exact.
 - `bump`, `bumpadd`, `distort`: **partially implemented**. RE confirmed
   the engine's vertex format (FVF 450 = `D3DFVF_XYZ | DIFFUSE | SPECULAR
   | TEX1`) carries two colors per vertex; when `particle.flags & 0x80`
@@ -150,16 +159,19 @@ not a struct-offset witness; exact layout claims still belong in
   fixed-strength screen-tex offset; the engine's stage-1 sampler setup
   is not yet decoded. Adjacent kong-rename corrections recorded in
   `notes/ida_particle_witness.md`.
-- `mod2x` (BlendMode 5) approximates engine SrcBlend = DESTCOLOR + DestBlend
-  = SRCCOLOR by pre-multiplying the source RGB by 2.0 in fragment and using
-  Godot's `blend_mul` render mode. The "darken-or-brighten around 0.5"
-  midpoint of the engine's modulate2x is preserved; the gamma curve is not
-  byte-exact.
+- `CParticleManager_BuildTextureAtlases @ 0x5e8db0` exact pack layout:
+  the engine's algorithm (shelf vs row vs binary tree) was not decoded.
+  Our portable form uses a horizontal shelf packer (layers laid
+  left-to-right, atlas height = max layer height); the resulting UV
+  rect data shape matches the engine. `inset` defaults to 0 (texel
+  padding for bleed prevention isn't applied yet — would set to
+  `0.5 / atlas_dim` once we observe artifacts in dense scenes).
 
 ## Open RE Work
 
-- Confirm `CParticleManager_BuildTextureAtlases @ 0x5e8db0` UV-rect array
-  layout (engine reads `graphic+724` as a 4-float-per-frame buffer).
+- Confirm `CParticleManager_BuildTextureAtlases @ 0x5e8db0` exact pack
+  algorithm (shelf vs row vs binary tree). Our portable form uses a
+  horizontal shelf packer; the resulting UV rect data shape matches.
 - Port the 2-color vertex format for `bump` / `bumpadd` (lit color +
   modulated color attributes). Investigation 2026-04-28: the engine's
   approach is documented above in Bounded Deviations; full port needs

@@ -238,7 +238,7 @@ add_test(NAME dvxi5_repro COMMAND dvxi5_repro_test)
 # Particle (.ptl) text-format parser tests. See libs/particle, the witness
 # matrix at .claude/worktrees/particles/notes/ida_particle_witness.md, and
 # CParticleDef_ParseFromConfigMap @ 0x5ed210 (Jointops.exe IDB).
-foreach(name smallest minimal_effect multi_section multi_layer table_handles smoke_all_fixtures enum_parse writer_roundtrip emitter curve_lut emit_shape translate)
+foreach(name smallest minimal_effect multi_section multi_layer table_handles smoke_all_fixtures enum_parse writer_roundtrip emitter curve_lut emit_shape translate atlas)
     add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
     target_link_libraries(particle_${name}_test PRIVATE opennova_particle)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
