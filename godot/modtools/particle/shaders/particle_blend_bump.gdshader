@@ -13,7 +13,7 @@ shader_type spatial;
 // the engine's per-particle rotation transform, so the lit color is a
 // uniform tint rather than direction-dependent — see
 // notes/ida_particle_witness.md for the full RE.
-render_mode unshaded, cull_disabled, blend_mix, depth_draw_never, depth_test_disabled;
+render_mode unshaded, cull_disabled, blend_mix, depth_draw_never, depth_test_disabled, fog_disabled;
 
 uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
 uniform bool has_texture = false;

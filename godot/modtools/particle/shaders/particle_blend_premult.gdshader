@@ -3,7 +3,7 @@ shader_type spatial;
 // Engine D3D state: SrcBlend = ONE, DestBlend = INVSRCALPHA — pre-multiplied
 // alpha. Texture pixels are expected to be authored with RGB already
 // multiplied by alpha; `blend_premul_alpha` matches this.
-render_mode unshaded, cull_disabled, blend_premul_alpha, depth_draw_never, depth_test_disabled;
+render_mode unshaded, cull_disabled, blend_premul_alpha, depth_draw_never, depth_test_disabled, fog_disabled;
 
 uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
 uniform bool has_texture = false;

@@ -3,7 +3,7 @@ shader_type spatial;
 // Engine D3D state: SrcBlend = SRCALPHA, DestBlend = ONE.
 // We emit COLOR.rgb * COLOR.a as the source by writing pre-multiplied output;
 // blend_add then sums into the framebuffer.
-render_mode unshaded, cull_disabled, blend_add, depth_draw_never, depth_test_disabled;
+render_mode unshaded, cull_disabled, blend_add, depth_draw_never, depth_test_disabled, fog_disabled;
 
 uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
 uniform bool has_texture = false;

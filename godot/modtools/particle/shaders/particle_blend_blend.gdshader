@@ -2,7 +2,7 @@ shader_type spatial;
 // CParticleDefEntry_ParseBlendMode @ 0x5e29f0 → BlendMode::Blend (0).
 // Engine D3D state: SrcBlend = SRCALPHA, DestBlend = INVSRCALPHA — standard
 // alpha blending.
-render_mode unshaded, cull_disabled, blend_mix, depth_draw_never, depth_test_disabled;
+render_mode unshaded, cull_disabled, blend_mix, depth_draw_never, depth_test_disabled, fog_disabled;
 
 uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
 uniform bool has_texture = false;

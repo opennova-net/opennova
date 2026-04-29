@@ -84,14 +84,13 @@ int NovaParticleTable::sample(float t) const {
 	if (data.size() < TOTAL) {
 		return 0;
 	}
+	// Engine: `BuildBillboardQuads @ 0x5e6d60` reads `lut[(int)(t * 256) & 0xFF]`
+	// — flat byte lookup, no interpolation. The prior linear-interp variant
+	// drifted from engine output by up to ~1 byte at midtones. Integer
+	// indexing matches the engine exactly.
 	const float clamped = std::clamp(t, 0.0f, 1.0f);
-	const float index = clamped * static_cast<float>(TOTAL - 1);
-	const int i0 = static_cast<int>(index);
-	const int i1 = std::min(i0 + 1, TOTAL - 1);
-	const float frac = index - static_cast<float>(i0);
-	const int a = data[i0];
-	const int b = data[i1];
-	return static_cast<int>(static_cast<float>(a) + (static_cast<float>(b) - static_cast<float>(a)) * frac);
+	const int index = static_cast<int>(clamped * static_cast<float>(TOTAL)) & 0xFF;
+	return data[index];
 }
 
 void NovaParticleTable::copy_from_native(const opennova::particle::TableDef &table) {

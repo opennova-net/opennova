@@ -4,7 +4,7 @@ shader_type spatial;
 // modulation. Unauthored / transparent pixels must read as `vec3(1.0)` so
 // they don't darken the framebuffer where the soft-circle fallback is empty.
 // We blend toward white via `mix(white, base, alpha)` before the multiply.
-render_mode unshaded, cull_disabled, blend_mul, depth_draw_never, depth_test_disabled;
+render_mode unshaded, cull_disabled, blend_mul, depth_draw_never, depth_test_disabled, fog_disabled;
 
 uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
 uniform bool has_texture = false;
