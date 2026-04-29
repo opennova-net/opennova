@@ -31,6 +31,13 @@ add_subdirectory(../../libs/mnu opennova_mnu)
 add_subdirectory(../../libs/mns opennova_mns)
 add_subdirectory(../../libs/def opennova_def)
 add_subdirectory(../../libs/mission opennova_mission)
+add_subdirectory(../../libs/novacrypto opennova_novacrypto)
+add_subdirectory(../../libs/napi opennova_napi)
+# novaworld depends on sqlite (db/), so pull sqlite in too. The Godot
+# extension only uses the protocol bits, but linking the whole library is
+# fine — the .a is small.
+add_subdirectory(../../third_party/sqlite opennova_sqlite)
+add_subdirectory(../../libs/novaworld opennova_novaworld)
 
 set(TARGET_NAME "opennova")
 
@@ -61,6 +68,7 @@ add_library(${TARGET_NAME} SHARED
     mission/nova_mission_data.cpp
     rtxt/rtxt_string_file.cpp
     rtxt/rtxt_resource_format.cpp
+    network/nova_world_client.cpp
     util/nova_data_format.cpp
     util/nova_paths.cpp
     util/nova_texture_format.cpp
@@ -137,6 +145,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_mns
     opennova_def
     opennova_mission
+    opennova_novacrypto
+    opennova_napi
+    opennova_novaworld
 )
 
 # The bake worker thread in nova_terrain_build_job.cpp installs
