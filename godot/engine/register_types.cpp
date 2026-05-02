@@ -24,6 +24,7 @@
 #include "env/env_file.h"
 #include "util/nova_data_format.h"
 #include "util/nova_texture_format.h"
+#include "resource_index/nova_resource_index.h"
 
 using namespace godot;
 
@@ -62,6 +63,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvFileSaver);
 	GDREGISTER_CLASS(NovaDataFile);
 	GDREGISTER_CLASS(ResourceFormatLoaderNovaTexture);
+	GDREGISTER_CLASS(NovaResourceIndex);
 
 	trn_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(trn_loader);

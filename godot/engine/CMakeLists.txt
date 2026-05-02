@@ -11,6 +11,7 @@ add_subdirectory(../../libs/trn opennova_trn)
 add_subdirectory(../../libs/cpt opennova_cpt)
 add_subdirectory(../../libs/env opennova_env)
 add_subdirectory(../../libs/terrain opennova_terrain)
+add_subdirectory(../../libs/resource_index opennova_resource_index)
 
 set(TARGET_NAME "opennova")
 
@@ -35,6 +36,7 @@ add_library(${TARGET_NAME} SHARED
     util/nova_texture_format.cpp
     util/pcx_texture_bridge.cpp
     util/texture_path_resolver.cpp
+    resource_index/nova_resource_index.cpp
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE
@@ -51,6 +53,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_cpt
     opennova_env
     opennova_terrain
+    opennova_resource_index
 )
 
 # The bake worker thread in nova_terrain_build_job.cpp installs

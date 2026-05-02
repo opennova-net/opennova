@@ -2027,6 +2027,10 @@ func get_current_project_dir() -> String:
 	return _document.current_project_dir
 
 
+func get_current_trn_path() -> String:
+	return _document.current_trn_path
+
+
 func has_current_project_dir() -> bool:
 	return not _document.current_project_dir.is_empty()
 

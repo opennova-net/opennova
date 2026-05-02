@@ -8,6 +8,11 @@ const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_setti
 
 enum Workspace { TERRAIN, ENVIRONMENT, MISSION }
 
+const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const RESOURCE_STATE_SECTION := "resources"
+const RESOURCE_DIR_KEY := "resource_dir"
+const RESOURCE_RECURSIVE_KEY := "resource_recursive"
+
 const WORKSPACE_LABELS := {
 	Workspace.TERRAIN: "Terrain",
 	Workspace.ENVIRONMENT: "Environment",
@@ -41,6 +46,13 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _environment_popup_close: Button = %EnvironmentPopupClose
 @onready var _environment_actions_host: VBoxContainer = %EnvironmentActionsHost
 @onready var _environment_inspector_host: Control = %EnvironmentInspectorHost
+@onready var _settings_toggle_button: Button = %SettingsToggleButton
+@onready var _settings_popup: PanelContainer = %SettingsPopup
+@onready var _settings_popup_close: Button = %SettingsPopupClose
+@onready var _settings_resource_dir_edit: LineEdit = %SettingsResourceDirEdit
+@onready var _settings_browse_resource_dir_button: Button = %SettingsBrowseResourceDirButton
+@onready var _settings_apply_resource_dir_button: Button = %SettingsApplyResourceDirButton
+@onready var _settings_recursive_toggle: CheckBox = %SettingsRecursiveToggle
 @onready var _asset_dock: Control = %AssetDock
 @onready var _status_bar: PanelContainer = %StatusBar
 @onready var _status_tool_label: Label = %StatusToolLabel
@@ -84,6 +96,9 @@ var _workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
 var _environment_action_buttons: Dictionary = {}
 var _camera_settings_panel: Control
+var _resource_index: RefCounted
+var _resource_root_dir: String = ""
+var _resource_recursive: bool = true
 var _mounted_workspace_id: int = -1
 var _current_workflow_id: int = -1
 var _workflow_buttons: Dictionary = {}
@@ -97,13 +112,31 @@ var _prompt_kind: int = PromptKind.NONE
 var _prompt_primary_action: Callable = Callable()
 var _prompt_secondary_action: Callable = Callable()
 var _prompt_tertiary_action: Callable = Callable()
+var _resource_browser_dialog: ConfirmationDialog
+var _resource_browser_directory_label: Label
+var _resource_browser_settings_button: Button
+var _resource_browser_search: LineEdit
+var _resource_browser_hint: Label
+var _resource_browser_list: ItemList
+var _resource_browser_browse_button: Button
+var _resource_browser_open_button: Button
+var _resource_browser_kind: String = ""
+var _resource_browser_title: String = ""
+var _resource_browser_filters: PackedStringArray = PackedStringArray()
+var _resource_browser_current_dir: String = ""
+var _resource_browser_entries: Array = []
+var _resource_browser_visible_entries: Array = []
+var _resource_browser_open_action: Callable = Callable()
 
 
 func _ready() -> void:
 	_ensure_workspaces()
+	_ensure_resource_index()
+	_load_resource_state()
 	_build_workspace_rail()
 	_wire_camera_popup()
 	_wire_environment_popup()
+	_wire_settings_popup()
 	_wire_prompts()
 	_wire_tile_gizmo()
 	_project_label.clip_text = true
@@ -111,6 +144,8 @@ func _ready() -> void:
 	_status_camera_label.clip_text = true
 	_status_fps_label.clip_text = true
 	set_process(true)
+	if not _resource_root_dir.is_empty():
+		_scan_resource_root(false)
 	_mount_active_workspace_viewport()
 	_refresh_workspace_surface()
 	sync_from_editor_state()
@@ -465,6 +500,25 @@ func _wire_environment_popup() -> void:
 	_refresh_environment_popup_state()
 
 
+func _wire_settings_popup() -> void:
+	if _settings_popup != null:
+		_settings_popup.visible = false
+	if _settings_toggle_button != null and not _settings_toggle_button.toggled.is_connected(_on_settings_toggle_toggled):
+		_settings_toggle_button.icon = _build_settings_icon()
+		_settings_toggle_button.toggled.connect(_on_settings_toggle_toggled)
+	if _settings_popup_close != null and not _settings_popup_close.pressed.is_connected(_on_settings_popup_close_pressed):
+		_settings_popup_close.pressed.connect(_on_settings_popup_close_pressed)
+	if _settings_browse_resource_dir_button != null and not _settings_browse_resource_dir_button.pressed.is_connected(_on_settings_browse_resource_dir_pressed):
+		_settings_browse_resource_dir_button.pressed.connect(_on_settings_browse_resource_dir_pressed)
+	if _settings_apply_resource_dir_button != null and not _settings_apply_resource_dir_button.pressed.is_connected(_on_settings_apply_resource_dir_pressed):
+		_settings_apply_resource_dir_button.pressed.connect(_on_settings_apply_resource_dir_pressed)
+	if _settings_resource_dir_edit != null and not _settings_resource_dir_edit.text_submitted.is_connected(_on_settings_resource_dir_submitted):
+		_settings_resource_dir_edit.text_submitted.connect(_on_settings_resource_dir_submitted)
+	if _settings_recursive_toggle != null and not _settings_recursive_toggle.toggled.is_connected(_on_settings_recursive_toggled):
+		_settings_recursive_toggle.toggled.connect(_on_settings_recursive_toggled)
+	_sync_settings_popup_state()
+
+
 func _build_camera_icon() -> Texture2D:
 	var image := Image.create(20, 20, false, Image.FORMAT_RGBA8)
 	image.fill(Color(0.0, 0.0, 0.0, 0.0))
@@ -498,6 +552,26 @@ func _build_sun_icon() -> Texture2D:
 	return ImageTexture.create_from_image(image)
 
 
+func _build_settings_icon() -> Texture2D:
+	var image := Image.create(20, 20, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.0, 0.0, 0.0, 0.0))
+	var color := Color(0.8941, 0.8941, 0.9059, 1.0)
+	var center := Vector2(9.5, 9.5)
+	for y in 20:
+		for x in 20:
+			var p := Vector2(float(x), float(y))
+			var d := p.distance_to(center)
+			var ring := d >= 4.2 and d <= 6.0
+			var hub := d <= 2.0
+			var tooth_horizontal := y >= 8 and y <= 11 and (x <= 4 or x >= 15)
+			var tooth_vertical := x >= 8 and x <= 11 and (y <= 4 or y >= 15)
+			var diag_a := absf((p.x - center.x) - (p.y - center.y)) < 1.0 and d >= 6.0 and d <= 8.4
+			var diag_b := absf((p.x - center.x) + (p.y - center.y)) < 1.0 and d >= 6.0 and d <= 8.4
+			if hub or ring or tooth_horizontal or tooth_vertical or diag_a or diag_b:
+				image.set_pixel(x, y, color)
+	return ImageTexture.create_from_image(image)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key := event as InputEventKey
@@ -508,6 +582,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 			if _environment_popup != null and _environment_popup.visible:
 				_set_environment_popup_visible(false)
+				get_viewport().set_input_as_handled()
+				return
+			if _settings_popup != null and _settings_popup.visible:
+				_set_settings_popup_visible(false)
 				get_viewport().set_input_as_handled()
 
 
@@ -526,6 +604,7 @@ func _set_camera_popup_visible(active: bool) -> void:
 		active = false
 	if active:
 		_set_environment_popup_visible(false)
+		_set_settings_popup_visible(false)
 	_camera_popup.visible = active
 	if _camera_toggle_button != null:
 		_camera_toggle_button.set_pressed_no_signal(active)
@@ -582,6 +661,7 @@ func _set_environment_popup_visible(active: bool) -> void:
 		return
 	if active:
 		_set_camera_popup_visible(false)
+		_set_settings_popup_visible(false)
 	_environment_popup.visible = active
 	if _environment_toggle_button != null:
 		_environment_toggle_button.set_pressed_no_signal(active)
@@ -651,6 +731,153 @@ func _refresh_environment_popup_state() -> void:
 				btn.disabled = busy or _environment_workspace == null or not _environment_workspace.can_export()
 
 
+func _on_settings_toggle_toggled(pressed: bool) -> void:
+	_set_settings_popup_visible(pressed)
+
+
+func _on_settings_popup_close_pressed() -> void:
+	_set_settings_popup_visible(false)
+
+
+func _set_settings_popup_visible(active: bool) -> void:
+	if _settings_popup == null:
+		return
+	if active:
+		_set_camera_popup_visible(false)
+		_set_environment_popup_visible(false)
+	_sync_settings_popup_state()
+	_settings_popup.visible = active
+	if _settings_toggle_button != null:
+		_settings_toggle_button.set_pressed_no_signal(active)
+
+
+func _sync_settings_popup_state() -> void:
+	if _settings_resource_dir_edit != null:
+		_settings_resource_dir_edit.text = _resource_root_dir
+	if _settings_recursive_toggle != null:
+		_settings_recursive_toggle.set_pressed_no_signal(_resource_recursive)
+
+
+func _on_settings_browse_resource_dir_pressed() -> void:
+	var on_pick := func(path: String) -> void:
+		if _settings_resource_dir_edit != null:
+			_settings_resource_dir_edit.text = path
+		_apply_resource_settings(true)
+	_open_dir_dialog("Select resource directory", on_pick, _preferred_resource_root_dir())
+
+
+func _on_settings_apply_resource_dir_pressed() -> void:
+	_apply_resource_settings(true)
+
+
+func _on_settings_resource_dir_submitted(_text: String) -> void:
+	_apply_resource_settings(true)
+
+
+func _on_settings_recursive_toggled(pressed: bool) -> void:
+	if _resource_recursive == pressed:
+		return
+	_resource_recursive = pressed
+	_save_resource_state()
+	if not _resource_root_dir.is_empty():
+		_scan_resource_root(true)
+
+
+func _apply_resource_settings(scan: bool, persist: bool = true) -> Error:
+	var path := _resource_root_dir
+	if _settings_resource_dir_edit != null:
+		path = _settings_resource_dir_edit.text
+	if _settings_recursive_toggle != null:
+		_resource_recursive = _settings_recursive_toggle.button_pressed
+	return _set_resource_root_dir(path, persist, scan)
+
+
+func _ensure_resource_index() -> void:
+	if _resource_index == null:
+		_resource_index = NovaResourceIndex.new()
+
+
+func get_resource_index() -> RefCounted:
+	_ensure_resource_index()
+	return _resource_index
+
+
+func get_resource_root_dir() -> String:
+	return _resource_root_dir
+
+
+func is_resource_recursive() -> bool:
+	return _resource_recursive
+
+
+func set_resource_root_dir(path: String) -> void:
+	_set_resource_root_dir(path, true, true)
+
+
+func _set_resource_root_dir(path: String, persist: bool, scan: bool) -> Error:
+	_ensure_resource_index()
+	var previous := _resource_root_dir
+	_resource_root_dir = path.strip_edges()
+	if persist:
+		_save_resource_state()
+	if _resource_root_dir.is_empty():
+		_resource_index.clear()
+		_sync_settings_popup_state()
+		return OK
+	if scan:
+		return _scan_resource_root(true)
+	if previous != _resource_root_dir:
+		_resource_index.clear()
+	_sync_settings_popup_state()
+	return OK
+
+
+func _scan_resource_root(show_message: bool) -> Error:
+	_ensure_resource_index()
+	if _resource_root_dir.is_empty():
+		_resource_index.clear()
+		return OK
+	var err: Error = _resource_index.scan(_resource_root_dir, _resource_recursive)
+	if err == OK:
+		if show_message:
+			show_status_message("Resource directory indexed.", 4.0)
+	else:
+		var detail := ""
+		if _resource_index.has_method("get_last_error"):
+			detail = String(_resource_index.get_last_error())
+		if show_message:
+			show_status_message("Resource scan failed." if detail.is_empty() else detail, 6.0)
+	_sync_settings_popup_state()
+	return err
+
+
+func _load_resource_state() -> void:
+	var config := ConfigFile.new()
+	if config.load(STATE_CONFIG_PATH) != OK:
+		return
+	_resource_root_dir = String(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, ""))
+	_resource_recursive = bool(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, true))
+
+
+func _save_resource_state() -> void:
+	var config := ConfigFile.new()
+	config.load(STATE_CONFIG_PATH)
+	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, _resource_root_dir)
+	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, _resource_recursive)
+	config.save(STATE_CONFIG_PATH)
+
+
+func _preferred_resource_root_dir() -> String:
+	if not _resource_root_dir.is_empty():
+		return _resource_root_dir
+	if editor != null:
+		if editor.has_current_project_dir():
+			return editor.get_current_project_dir()
+		if not editor.get_last_open_dir().is_empty():
+			return editor.get_last_open_dir()
+	return ""
+
+
 func _on_workspace_action_pressed(action_id: int) -> void:
 	_run_workspace_action(_get_active_workspace(), action_id)
 
@@ -678,12 +905,7 @@ func _run_workspace_action(workspace: Variant, action_id: int) -> void:
 		WorkspaceAction.OPEN:
 			if not workspace.can_open():
 				return
-			_open_file_dialog(
-				workspace.get_open_dialog_title(),
-				workspace.get_open_dialog_filters(),
-				open_trn,
-				workspace.get_open_dialog_dir()
-			)
+			_open_resource_browser(workspace, open_trn)
 		WorkspaceAction.SAVE:
 			_on_save_pressed(workspace)
 		WorkspaceAction.SAVE_AS:
@@ -694,6 +916,246 @@ func _run_workspace_action(workspace: Variant, action_id: int) -> void:
 			)
 		WorkspaceAction.EXPORT:
 			_on_export_pressed(workspace)
+
+
+func _open_resource_browser(workspace: Variant, on_pick: Callable) -> void:
+	if workspace == null:
+		return
+	var kind := String(workspace.get_open_resource_kind()).strip_edges()
+	if kind.is_empty():
+		_open_file_dialog(
+			workspace.get_open_dialog_title(),
+			workspace.get_open_dialog_filters(),
+			on_pick,
+			workspace.get_open_dialog_dir()
+		)
+		return
+	_ensure_resource_browser_dialog()
+	_resource_browser_kind = kind
+	_resource_browser_title = workspace.get_open_dialog_title()
+	_resource_browser_filters = workspace.get_open_dialog_filters()
+	_resource_browser_current_dir = workspace.get_open_dialog_dir()
+	_resource_browser_open_action = on_pick
+	_resource_browser_search.text = ""
+	_resource_browser_dialog.title = _resource_browser_title
+	_refresh_resource_browser_entries()
+	_refresh_resource_browser()
+	_resource_browser_dialog.popup_centered(Vector2i(760, 520))
+
+
+func _ensure_resource_browser_dialog() -> void:
+	if _resource_browser_dialog != null and is_instance_valid(_resource_browser_dialog):
+		return
+	_resource_browser_dialog = ConfirmationDialog.new()
+	_resource_browser_dialog.name = "ResourceBrowserDialog"
+	_resource_browser_dialog.min_size = Vector2i(760, 520)
+	_resource_browser_dialog.exclusive = true
+	add_child(_resource_browser_dialog)
+
+	var margin := MarginContainer.new()
+	margin.name = "ResourceBrowserMargin"
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	_resource_browser_dialog.add_child(margin)
+
+	var box := VBoxContainer.new()
+	box.name = "ResourceBrowserBox"
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_theme_constant_override("separation", 10)
+	margin.add_child(box)
+
+	var header := HBoxContainer.new()
+	header.name = "ResourceBrowserHeader"
+	header.add_theme_constant_override("separation", 8)
+	box.add_child(header)
+
+	_resource_browser_directory_label = Label.new()
+	_resource_browser_directory_label.name = "ResourceBrowserDirectoryLabel"
+	_resource_browser_directory_label.theme_type_variation = &"Muted"
+	_resource_browser_directory_label.clip_text = true
+	_resource_browser_directory_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(_resource_browser_directory_label)
+
+	_resource_browser_settings_button = Button.new()
+	_resource_browser_settings_button.name = "ResourceBrowserSettingsButton"
+	_resource_browser_settings_button.text = "Settings"
+	_resource_browser_settings_button.focus_mode = Control.FOCUS_NONE
+	_resource_browser_settings_button.pressed.connect(_on_resource_browser_settings_pressed)
+	header.add_child(_resource_browser_settings_button)
+
+	_resource_browser_search = LineEdit.new()
+	_resource_browser_search.name = "ResourceBrowserSearch"
+	_resource_browser_search.placeholder_text = "Search resources"
+	_resource_browser_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_resource_browser_search.text_changed.connect(func(_text: String) -> void:
+		_refresh_resource_browser()
+	)
+	box.add_child(_resource_browser_search)
+
+	_resource_browser_hint = Label.new()
+	_resource_browser_hint.name = "ResourceBrowserHint"
+	_resource_browser_hint.theme_type_variation = &"Muted"
+	_resource_browser_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_resource_browser_hint)
+
+	_resource_browser_list = ItemList.new()
+	_resource_browser_list.name = "ResourceBrowserList"
+	_resource_browser_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_resource_browser_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_resource_browser_list.item_selected.connect(_on_resource_browser_item_selected)
+	_resource_browser_list.item_activated.connect(_on_resource_browser_item_activated)
+	box.add_child(_resource_browser_list)
+
+	_resource_browser_browse_button = _resource_browser_dialog.add_button("Browse Files...", false, "browse")
+	_resource_browser_browse_button.name = "ResourceBrowserBrowseFilesButton"
+	_resource_browser_dialog.custom_action.connect(_on_resource_browser_custom_action)
+	_resource_browser_dialog.confirmed.connect(_on_resource_browser_confirmed)
+	_resource_browser_open_button = _resource_browser_dialog.get_ok_button()
+	_resource_browser_open_button.text = "Open"
+	_resource_browser_dialog.get_cancel_button().text = "Cancel"
+
+
+func _refresh_resource_browser_entries() -> void:
+	_resource_browser_entries = []
+	_ensure_resource_index()
+	if _resource_root_dir.is_empty():
+		_resource_index.clear()
+		return
+	if _resource_index.get_root_dir().is_empty():
+		_scan_resource_root(false)
+	if not _resource_index.get_root_dir().is_empty():
+		_resource_browser_entries = _resource_index.get_resource_files(_resource_browser_kind)
+
+
+func _refresh_resource_browser() -> void:
+	if _resource_browser_list == null:
+		return
+	_resource_browser_list.clear()
+	_resource_browser_visible_entries = []
+	var search := _resource_browser_search.text.strip_edges().to_lower() if _resource_browser_search != null else ""
+	for entry_value in _resource_browser_entries:
+		var entry := entry_value as Dictionary
+		var display_name := String(entry.get("display_name", ""))
+		var relative_path := String(entry.get("relative_path", ""))
+		var haystack := ("%s %s" % [display_name, relative_path]).to_lower()
+		if not search.is_empty() and not haystack.contains(search):
+			continue
+		_resource_browser_visible_entries.append(entry)
+		var text := "%s  %s" % [display_name, relative_path]
+		var current_path := _current_resource_path_for_browser()
+		if not current_path.is_empty() and _same_filesystem_path(String(entry.get("path", "")), current_path):
+			text += "  (open)"
+		var index := _resource_browser_list.add_item(text)
+		_resource_browser_list.set_item_metadata(index, entry)
+
+	var has_root := not _resource_root_dir.strip_edges().is_empty()
+	var has_entries := not _resource_browser_entries.is_empty()
+	var has_visible := not _resource_browser_visible_entries.is_empty()
+	if _resource_browser_directory_label != null:
+		_resource_browser_directory_label.text = _resource_root_dir if has_root else "No resource directory selected"
+	if _resource_browser_hint != null:
+		_resource_browser_hint.visible = not has_visible
+		if not has_root:
+			_resource_browser_hint.text = "No resource directory selected."
+		elif not has_entries:
+			_resource_browser_hint.text = "No %s resources found in %s." % [_resource_browser_kind_label(), _resource_root_dir]
+		else:
+			_resource_browser_hint.text = "No matching resources."
+	if _resource_browser_settings_button != null:
+		_resource_browser_settings_button.visible = not has_root or not has_entries
+	if _resource_browser_open_button != null:
+		_resource_browser_open_button.disabled = true
+
+
+func _resource_browser_kind_label() -> String:
+	match _resource_browser_kind:
+		"terrain":
+			return "terrain"
+		"environment":
+			return "environment"
+		"mission":
+			return "mission"
+		"model":
+			return "model"
+		_:
+			return "resource"
+
+
+func _current_resource_path_for_browser() -> String:
+	var workspace = _get_active_workspace()
+	if _environment_popup != null and _environment_popup.visible and _resource_browser_kind == "environment":
+		workspace = _environment_workspace
+	if workspace != null and workspace.has_method("get_current_resource_path"):
+		return workspace.get_current_resource_path()
+	return ""
+
+
+func _on_resource_browser_item_selected(_index: int) -> void:
+	if _resource_browser_open_button != null:
+		_resource_browser_open_button.disabled = false
+
+
+func _on_resource_browser_item_activated(index: int) -> void:
+	_resource_browser_list.select(index)
+	_open_selected_resource_browser_entry()
+
+
+func _on_resource_browser_confirmed() -> void:
+	_open_selected_resource_browser_entry()
+
+
+func _open_selected_resource_browser_entry() -> void:
+	if _resource_browser_list == null:
+		return
+	var selected := _resource_browser_list.get_selected_items()
+	if selected.size() == 0:
+		return
+	var entry := _resource_browser_list.get_item_metadata(selected[0]) as Dictionary
+	var path := String(entry.get("path", ""))
+	if path.is_empty():
+		return
+	if _resource_browser_open_action.is_valid():
+		_resource_browser_open_action.call(path)
+	_resource_browser_dialog.hide()
+
+
+func _on_resource_browser_custom_action(action: StringName) -> void:
+	if action == &"browse":
+		_on_resource_browser_browse_files_pressed()
+
+
+func _on_resource_browser_browse_files_pressed() -> void:
+	if _resource_browser_dialog != null:
+		_resource_browser_dialog.hide()
+	_open_file_dialog(
+		_resource_browser_title,
+		_resource_browser_filters,
+		_resource_browser_open_action,
+		_resource_browser_current_dir
+	)
+
+
+func _on_resource_browser_settings_pressed() -> void:
+	if _resource_browser_dialog != null:
+		_resource_browser_dialog.hide()
+	_set_settings_popup_visible(true)
+
+
+func _same_filesystem_path(a: String, b: String) -> bool:
+	if a.is_empty() or b.is_empty():
+		return false
+	var left := _globalized_path(a).replace("\\", "/").to_lower()
+	var right := _globalized_path(b).replace("\\", "/").to_lower()
+	return left == right
+
+
+func _globalized_path(path: String) -> String:
+	if path.begins_with("res://") or path.begins_with("user://"):
+		return ProjectSettings.globalize_path(path)
+	return path
 
 
 func _open_file_dialog(title: String, filters: PackedStringArray, on_pick: Callable, current_dir: String = "") -> void:

@@ -130,7 +130,7 @@ unique_name_in_owner = true
 layout_mode = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -88.0
+offset_left = -128.0
 offset_top = 12.0
 offset_right = -12.0
 offset_bottom = 48.0
@@ -153,6 +153,15 @@ layout_mode = 2
 focus_mode = 0
 toggle_mode = true
 tooltip_text = "Environment"
+flat = false
+
+[node name="SettingsToggleButton" type="Button" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/ViewportButtonRail"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+focus_mode = 0
+toggle_mode = true
+tooltip_text = "Settings"
 flat = false
 
 [node name="CameraPopup" type="PanelContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome"]
@@ -266,6 +275,86 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+
+[node name="SettingsPopup" type="PanelContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -444.0
+offset_top = 56.0
+offset_right = -12.0
+offset_bottom = 0.0
+grow_horizontal = 0
+
+[node name="SettingsPopupMargin" type="MarginContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/SettingsPopup"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="SettingsPopupBox" type="VBoxContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="SettingsPopupHeader" type="HBoxContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SettingsPopupTitle" type="Label" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsPopupHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Heading"
+text = "Settings"
+vertical_alignment = 1
+clip_text = true
+
+[node name="SettingsPopupClose" type="Button" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsPopupHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(34, 30)
+focus_mode = 0
+text = "X"
+tooltip_text = "Close settings"
+
+[node name="SettingsResourceLabel" type="Label" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "Resource Directory"
+
+[node name="SettingsResourceRow" type="HBoxContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SettingsResourceDirEdit" type="LineEdit" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsResourceRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Path to game or mod resources"
+
+[node name="SettingsBrowseResourceDirButton" type="Button" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsResourceRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Browse"
+
+[node name="SettingsRecursiveToggle" type="CheckBox" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
+text = "Search recursively"
+
+[node name="SettingsApplyResourceDirButton" type="Button" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+focus_mode = 0
+text = "Apply and Refresh"
+tooltip_text = "Refresh the resource browser index."
 
 [node name="AssetDock" parent="WorkstationLayout/BodyRow" instance=ExtResource("3_asset_dock")]
 unique_name_in_owner = true
