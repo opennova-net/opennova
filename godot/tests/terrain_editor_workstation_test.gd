@@ -43,6 +43,28 @@ func _has_label_text(root: Node, text: String) -> bool:
 	return false
 
 
+func _make_resource_fixture(name: String) -> String:
+	var root := ProjectSettings.globalize_path("user://%s_%d" % [name, Time.get_ticks_usec()])
+	DirAccess.make_dir_recursive_absolute(root.path_join("missions"))
+	DirAccess.make_dir_recursive_absolute(root.path_join("terrains"))
+	DirAccess.make_dir_recursive_absolute(root.path_join("env"))
+	DirAccess.make_dir_recursive_absolute(root.path_join("models"))
+	_write_fixture_file(root.path_join("missions/alpha.bms"), "bms")
+	_write_fixture_file(root.path_join("terrains/alpha.trn"), "trn")
+	_write_fixture_file(root.path_join("env/alpha.env"), "env")
+	_write_fixture_file(root.path_join("models/alpha.glb"), "glb")
+	_write_fixture_file(root.path_join("models/ignored.3di"), "3di")
+	return root
+
+
+func _write_fixture_file(path: String, text: String) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "Fixture file should be writable: %s" % path)
+	if file != null:
+		file.store_string(text)
+		file.close()
+
+
 func test_workstation_starts_with_two_domain_workspaces() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
@@ -74,6 +96,114 @@ func test_mission_placeholder_shows_no_document_actions() -> void:
 	assert_false(actions_host.visible, "Mission should not expose workspace document actions.")
 	assert_eq(actions_host.get_child_count(), 0, "Mission should not build document action buttons.")
 	assert_true(_has_label_text(inspector_host, "Coming soon"), "Mission should show a compact coming-soon placeholder.")
+
+
+func test_resource_index_lists_openable_resources_and_glb_models() -> void:
+	var root := _make_resource_fixture("resource_index_godot")
+	var index := NovaResourceIndex.new()
+
+	assert_eq(index.scan(root, true), OK, "Resource index should scan a filesystem directory.")
+	assert_eq(index.get_resource_files("mission").size(), 1, "BMS files should be indexed as mission resources.")
+	assert_eq(index.get_resource_files("terrain").size(), 1, "TRN files should be indexed as terrain resources.")
+	assert_eq(index.get_resource_files("environment").size(), 1, "ENV files should be indexed as environment resources.")
+	assert_eq(index.get_resource_files("model").size(), 1, "Only GLB files should be indexed as model resources.")
+	assert_eq(index.get_resource_files("all").size(), 4, "3DI files should not be indexed in this pass.")
+	assert_eq(String((index.get_resource_files("model")[0] as Dictionary).get("relative_path", "")), "models/alpha.glb", "Model entries should keep root-relative paths.")
+
+
+func test_settings_viewport_popup_edits_resource_directory() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var root := _make_resource_fixture("settings_resource_dir")
+	workstation._resource_recursive = true
+	assert_eq(workstation._set_resource_root_dir("", false, false), OK, "Test should start with no configured resource directory.")
+
+	var settings_button: Button = workstation.get_node("%SettingsToggleButton")
+	var environment_button: Button = workstation.get_node("%EnvironmentToggleButton")
+	assert_eq(settings_button.get_parent(), environment_button.get_parent(), "Settings should live in the viewport button rail.")
+	assert_true(environment_button.get_index() < settings_button.get_index(), "Settings should sit beside Camera and Environment.")
+
+	settings_button.toggled.emit(true)
+	await get_tree().process_frame
+
+	var popup: PanelContainer = workstation.get_node("%SettingsPopup")
+	var edit: LineEdit = workstation.get_node("%SettingsResourceDirEdit")
+	var recursive: CheckBox = workstation.get_node("%SettingsRecursiveToggle")
+	assert_true(popup.visible, "Settings button should open the viewport settings popup.")
+	assert_true(settings_button.button_pressed, "Settings button should stay pressed while open.")
+	assert_true(recursive.button_pressed, "Recursive scanning should default on.")
+
+	edit.text = root
+	recursive.button_pressed = false
+	workstation._apply_resource_settings(true, false)
+
+	assert_eq(workstation.get_resource_root_dir(), root, "Settings should apply the resource directory.")
+	assert_false(workstation.is_resource_recursive(), "Settings should apply the recursive toggle.")
+	assert_eq(workstation.get_resource_index().get_resource_files("terrain").size(), 0, "Non-recursive scan should not include nested terrain files.")
+
+
+func test_workspace_open_uses_resource_browser_with_browse_fallback() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var editor = autofree(TerrainEditorScript.new())
+	var root := _make_resource_fixture("resource_browser_terrain")
+	workstation.set_editor(editor)
+	workstation._resource_recursive = true
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should use the configured resource directory.")
+
+	var open_button := _find_button_by_text(workstation.get_node("%WorkspaceActionsHost"), "Open Terrain...")
+	assert_not_null(open_button, "Terrain workspace should expose Open Terrain.")
+	if open_button == null:
+		return
+	open_button.pressed.emit()
+
+	var dialog := workstation.find_child("ResourceBrowserDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Open should create the in-editor resource browser.")
+	if dialog == null:
+		return
+	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	var browse := dialog.find_child("ResourceBrowserBrowseFilesButton", true, false) as Button
+	var dir_label := dialog.find_child("ResourceBrowserDirectoryLabel", true, false) as Label
+	var settings_shortcut := dialog.find_child("ResourceBrowserSettingsButton", true, false) as Button
+	assert_true(dialog.visible, "Resource browser should open instead of going straight to native file browsing.")
+	assert_not_null(list, "Resource browser should include a list.")
+	assert_not_null(browse, "Resource browser should keep a native Browse Files fallback.")
+	assert_not_null(dir_label, "Resource browser should show the active resource directory.")
+	assert_not_null(settings_shortcut, "Resource browser should include a Settings shortcut node.")
+	if list != null:
+		assert_eq(list.item_count, 1, "Terrain browser should list TRN files from the resource directory.")
+		assert_string_contains(list.get_item_text(0), "alpha", "Resource rows should show the matching terrain.")
+	if dir_label != null:
+		assert_string_contains(dir_label.text, root, "Directory label should show the configured root.")
+	if settings_shortcut != null:
+		assert_false(settings_shortcut.visible, "Settings shortcut should hide when resources are available.")
+	assert_true(dialog.get_ok_button().disabled, "Open should stay disabled until a resource is selected.")
+
+
+func test_workspace_open_without_resource_dir_shows_empty_browser() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var editor = autofree(TerrainEditorScript.new())
+	workstation.set_editor(editor)
+	assert_eq(workstation._set_resource_root_dir("", false, false), OK, "Test should clear the resource directory without persisting it.")
+
+	var open_button := _find_button_by_text(workstation.get_node("%WorkspaceActionsHost"), "Open Terrain...")
+	assert_not_null(open_button, "Terrain workspace should expose Open Terrain.")
+	if open_button == null:
+		return
+	open_button.pressed.emit()
+
+	var dialog := workstation.find_child("ResourceBrowserDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Open should still create the resource browser without a root.")
+	if dialog == null:
+		return
+	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	var hint := dialog.find_child("ResourceBrowserHint", true, false) as Label
+	var settings_shortcut := dialog.find_child("ResourceBrowserSettingsButton", true, false) as Button
+	if list != null:
+		assert_eq(list.item_count, 0, "No resource directory should produce no rows.")
+	if hint != null:
+		assert_string_contains(hint.text, "No resource directory selected", "Empty state should name the missing resource directory.")
+	if settings_shortcut != null:
+		assert_true(settings_shortcut.visible, "Settings shortcut should be visible when no resource directory is configured.")
+	assert_true(dialog.get_ok_button().disabled, "Open should stay disabled without a selected resource.")
 
 
 func test_environment_sun_popup_exposes_env_document_controls() -> void:
@@ -110,6 +240,46 @@ func test_environment_sun_popup_exposes_env_document_controls() -> void:
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.ENVIRONMENT)
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "The old Environment workspace id should open the popup instead of changing workspaces.")
+
+
+func test_environment_open_uses_resource_browser() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
+	var root := _make_resource_fixture("resource_browser_environment")
+	environment_editor.create_default_environment(false)
+	workstation._environment_workspace.set_environment_editor(environment_editor)
+	workstation._resource_recursive = true
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index environment files.")
+
+	var sun_button: Button = workstation.get_node("%EnvironmentToggleButton")
+	sun_button.toggled.emit(true)
+	await get_tree().process_frame
+	var open_button := _find_button_by_text(workstation.get_node("%EnvironmentActionsHost"), "Open Environment...")
+	assert_not_null(open_button, "Environment popup should expose Open Environment.")
+	if open_button == null:
+		return
+	open_button.pressed.emit()
+
+	var dialog := workstation.find_child("ResourceBrowserDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Environment Open should use the shared resource browser.")
+	if dialog == null:
+		return
+	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	assert_not_null(list, "Environment resource browser should include a list.")
+	if list != null:
+		assert_eq(list.item_count, 1, "Environment browser should list ENV files from the resource directory.")
+		assert_string_contains(list.get_item_text(0), "alpha", "Environment resource rows should show the matching file.")
+
+
+func test_resource_settings_persist_in_editor_state() -> void:
+	var root := _make_resource_fixture("resource_settings_persist")
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	workstation._resource_recursive = true
+	assert_eq(workstation._set_resource_root_dir(root, true, true), OK, "Persisted resource directory should scan successfully.")
+
+	var next_workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	assert_eq(next_workstation.get_resource_root_dir(), root, "New workstation instances should load the persisted resource directory.")
+	assert_true(next_workstation.is_resource_recursive(), "Recursive setting should persist with its default value.")
 
 
 func test_camera_button_exposes_global_viewport_settings() -> void:

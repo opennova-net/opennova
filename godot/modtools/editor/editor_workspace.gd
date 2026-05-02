@@ -151,6 +151,14 @@ func get_open_dialog_dir() -> String:
 	return ""
 
 
+func get_open_resource_kind() -> String:
+	return ""
+
+
+func get_current_resource_path() -> String:
+	return ""
+
+
 func open_file(_path: String) -> Error:
 	return ERR_UNAVAILABLE
 

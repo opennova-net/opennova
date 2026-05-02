@@ -72,6 +72,16 @@ func get_open_dialog_dir() -> String:
 	return environment_editor.get_last_open_dir() if environment_editor else ""
 
 
+func get_open_resource_kind() -> String:
+	return "environment"
+
+
+func get_current_resource_path() -> String:
+	if environment_editor == null:
+		return ""
+	return String(environment_editor.current_path)
+
+
 func open_file(path: String) -> Error:
 	return environment_editor.open_env(path) if environment_editor else ERR_UNAVAILABLE
 

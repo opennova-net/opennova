@@ -65,6 +65,10 @@ func get_workspace_id() -> String:
 	return "mission"
 
 
+func get_open_resource_kind() -> String:
+	return "mission"
+
+
 func get_workspace_label() -> String:
 	return "Mission"
 

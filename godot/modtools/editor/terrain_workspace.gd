@@ -254,6 +254,16 @@ func get_open_dialog_dir() -> String:
 	return terrain_editor.get_last_open_dir() if terrain_editor else ""
 
 
+func get_open_resource_kind() -> String:
+	return "terrain"
+
+
+func get_current_resource_path() -> String:
+	if terrain_editor != null and terrain_editor.has_method("get_current_trn_path"):
+		return terrain_editor.get_current_trn_path()
+	return ""
+
+
 func open_file(path: String) -> Error:
 	if terrain_editor == null:
 		return ERR_UNAVAILABLE
