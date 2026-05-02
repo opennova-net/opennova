@@ -103,6 +103,101 @@ layout_mode = 2
 mouse_filter = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+clip_contents = true
+
+[node name="ViewportHost" type="Control" parent="WorkstationLayout/BodyRow/ViewportLane"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="ViewportChrome" type="Control" parent="WorkstationLayout/BodyRow/ViewportLane"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="EnvironmentToggleButton" type="Button" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome"]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -48.0
+offset_top = 12.0
+offset_right = -12.0
+offset_bottom = 48.0
+grow_horizontal = 0
+focus_mode = 0
+toggle_mode = true
+tooltip_text = "Environment"
+flat = false
+
+[node name="EnvironmentPopup" type="PanelContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(400, 0)
+layout_mode = 1
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -424.0
+offset_top = 56.0
+offset_right = -12.0
+offset_bottom = -12.0
+grow_horizontal = 0
+
+[node name="EnvironmentPopupMargin" type="MarginContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/EnvironmentPopup"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="EnvironmentPopupBox" type="VBoxContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/EnvironmentPopup/EnvironmentPopupMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="EnvironmentPopupHeader" type="HBoxContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="EnvironmentPopupTitle" type="Label" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Heading"
+text = "Environment"
+vertical_alignment = 1
+clip_text = true
+
+[node name="EnvironmentPopupClose" type="Button" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(34, 30)
+focus_mode = 0
+text = "X"
+tooltip_text = "Close environment editor"
+
+[node name="EnvironmentActionsHost" type="VBoxContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="EnvironmentInspectorHost" type="PanelContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
 
 [node name="AssetDock" parent="WorkstationLayout/BodyRow" instance=ExtResource("3_asset_dock")]
 unique_name_in_owner = true

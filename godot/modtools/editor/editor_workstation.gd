@@ -3,7 +3,7 @@ extends Control
 
 const TerrainWorkspaceAdapter = preload("res://modtools/editor/terrain_workspace.gd")
 const EnvironmentWorkspaceAdapter = preload("res://modtools/editor/environment_workspace.gd")
-const PlaceholderWorkspaceAdapter = preload("res://modtools/editor/placeholder_workspace.gd")
+const MissionWorkspaceAdapter = preload("res://modtools/editor/mission_workspace.gd")
 
 enum Workspace { TERRAIN, ENVIRONMENT, MISSION }
 
@@ -12,6 +12,8 @@ const WORKSPACE_LABELS := {
 	Workspace.ENVIRONMENT: "Environment",
 	Workspace.MISSION: "Mission",
 }
+
+const SELECTABLE_WORKSPACES := [Workspace.TERRAIN, Workspace.MISSION]
 
 enum PromptKind { NONE, UNSAVED, EXPORT, CDEP }
 
@@ -27,6 +29,13 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _mode_rail: VBoxContainer = %ModeRail
 @onready var _inspector_host: Control = %InspectorHost
 @onready var _viewport_lane: Control = %ViewportLane
+@onready var _viewport_host: Control = %ViewportHost
+@onready var _environment_toggle_button: Button = %EnvironmentToggleButton
+@onready var _environment_popup: PanelContainer = %EnvironmentPopup
+@onready var _environment_popup_title: Label = %EnvironmentPopupTitle
+@onready var _environment_popup_close: Button = %EnvironmentPopupClose
+@onready var _environment_actions_host: VBoxContainer = %EnvironmentActionsHost
+@onready var _environment_inspector_host: Control = %EnvironmentInspectorHost
 @onready var _asset_dock: Control = %AssetDock
 @onready var _status_bar: PanelContainer = %StatusBar
 @onready var _status_tool_label: Label = %StatusToolLabel
@@ -65,8 +74,11 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 var editor: Node
 var _active_workspace_id: int = Workspace.TERRAIN
 var _workspaces: Dictionary = {}
+var _environment_workspace
 var _workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
+var _environment_action_buttons: Dictionary = {}
+var _mounted_workspace_id: int = -1
 var _current_workflow_id: int = -1
 var _workflow_buttons: Dictionary = {}
 var _placeholder_workspace_id: int = -1
@@ -84,6 +96,7 @@ var _prompt_tertiary_action: Callable = Callable()
 func _ready() -> void:
 	_ensure_workspaces()
 	_build_workspace_rail()
+	_wire_environment_popup()
 	_wire_prompts()
 	_wire_tile_gizmo()
 	_project_label.clip_text = true
@@ -91,8 +104,17 @@ func _ready() -> void:
 	_status_camera_label.clip_text = true
 	_status_fps_label.clip_text = true
 	set_process(true)
+	_mount_active_workspace_viewport()
 	_refresh_workspace_surface()
 	sync_from_editor_state()
+
+
+func _exit_tree() -> void:
+	for workspace in _workspaces.values():
+		if workspace != null and workspace.has_method("release_viewport"):
+			workspace.release_viewport()
+	_clear_viewport_host()
+	_mounted_workspace_id = -1
 
 
 func set_editor(value: Node) -> void:
@@ -101,9 +123,13 @@ func set_editor(value: Node) -> void:
 	var terrain_workspace = _workspaces.get(Workspace.TERRAIN)
 	if terrain_workspace != null and terrain_workspace.has_method("set_terrain_editor"):
 		terrain_workspace.set_terrain_editor(value)
-	var environment_workspace = _workspaces.get(Workspace.ENVIRONMENT)
-	if environment_workspace != null and environment_workspace.has_method("set_environment_editor") and value != null and value.has_method("get_environment_editor"):
-		environment_workspace.set_environment_editor(value.get_environment_editor())
+	var mission_workspace = _workspaces.get(Workspace.MISSION)
+	if mission_workspace != null and mission_workspace.has_method("set_terrain_editor"):
+		mission_workspace.set_terrain_editor(value)
+	if _environment_workspace != null and _environment_workspace.has_method("set_environment_editor") and value != null and value.has_method("get_environment_editor"):
+		_environment_workspace.set_environment_editor(value.get_environment_editor())
+	_reset_environment_popup_content()
+	_remount_active_workspace_viewport()
 	_refresh_workspace_surface()
 	for child in _inspector_host.get_children():
 		if child.has_method("set_editor"):
@@ -120,6 +146,7 @@ func sync_from_editor_state() -> void:
 	_refresh_status()
 	_refresh_tile_gizmo()
 	_sync_export_progress()
+	_refresh_environment_popup_state()
 	var workspace = _get_active_workspace()
 	if workspace != null:
 		workspace.sync_asset_dock()
@@ -135,20 +162,19 @@ func _process(_delta: float) -> void:
 func _ensure_workspaces() -> void:
 	if _workspaces.is_empty():
 		_workspaces[Workspace.TERRAIN] = TerrainWorkspaceAdapter.new(editor)
+		_workspaces[Workspace.MISSION] = MissionWorkspaceAdapter.new(editor)
+	if _environment_workspace == null:
 		var environment_editor: Variant = editor.get_environment_editor() if editor != null and editor.has_method("get_environment_editor") else null
-		_workspaces[Workspace.ENVIRONMENT] = EnvironmentWorkspaceAdapter.new(environment_editor)
-		_workspaces[Workspace.MISSION] = PlaceholderWorkspaceAdapter.new(
-			"mission",
-			"Mission",
-			"Mission entity editing is planned; mission formats are not implemented yet."
-		)
+		_environment_workspace = EnvironmentWorkspaceAdapter.new(environment_editor)
 	for workspace in _workspaces.values():
 		if workspace != null and workspace.has_method("set_editor_shell"):
 			workspace.set_editor_shell(self)
+	if _environment_workspace != null and _environment_workspace.has_method("set_editor_shell"):
+		_environment_workspace.set_editor_shell(self)
 
 
 func _build_workspace_rail() -> void:
-	for workspace_id in Workspace.values():
+	for workspace_id in SELECTABLE_WORKSPACES:
 		var btn := Button.new()
 		btn.text = WORKSPACE_LABELS[workspace_id]
 		btn.toggle_mode = true
@@ -252,14 +278,20 @@ func _on_workspace_pressed(workspace_id: int) -> void:
 
 
 func set_active_workspace(workspace_id: int) -> void:
+	if workspace_id == Workspace.ENVIRONMENT:
+		_set_environment_popup_visible(true)
+		_refresh_workspace_buttons()
+		return
 	if not _workspaces.has(workspace_id) or workspace_id == _active_workspace_id:
 		_refresh_workspace_buttons()
 		return
 	var current_workspace = _get_active_workspace()
 	if current_workspace != null and current_workspace.has_method("deactivate"):
 		current_workspace.deactivate()
+	_unmount_workspace_viewport(_active_workspace_id, current_workspace)
 	_active_workspace_id = workspace_id
 	var next_workspace = _get_active_workspace()
+	_mount_active_workspace_viewport()
 	if next_workspace != null and next_workspace.has_method("activate"):
 		next_workspace.activate()
 	_refresh_workspace_surface()
@@ -274,6 +306,42 @@ func _get_active_workspace() -> Variant:
 	return _workspaces.get(_active_workspace_id)
 
 
+func _mount_active_workspace_viewport() -> void:
+	if _viewport_host == null:
+		return
+	_clear_viewport_host()
+	var workspace = _get_active_workspace()
+	if workspace == null:
+		_mounted_workspace_id = -1
+		return
+	if workspace.has_method("mount_viewport"):
+		workspace.mount_viewport(_viewport_host)
+	_mounted_workspace_id = _active_workspace_id
+
+
+func _unmount_workspace_viewport(workspace_id: int, workspace: Variant) -> void:
+	if _viewport_host == null:
+		return
+	if workspace != null and workspace.has_method("unmount_viewport"):
+		workspace.unmount_viewport(_viewport_host)
+	_clear_viewport_host()
+	if _mounted_workspace_id == workspace_id:
+		_mounted_workspace_id = -1
+
+
+func _remount_active_workspace_viewport() -> void:
+	var workspace = _get_active_workspace()
+	_unmount_workspace_viewport(_active_workspace_id, workspace)
+	_mount_active_workspace_viewport()
+
+
+func _clear_viewport_host() -> void:
+	if _viewport_host == null:
+		return
+	for child in _viewport_host.get_children():
+		_viewport_host.remove_child(child)
+
+
 func _is_terrain_workspace_active() -> bool:
 	return _active_workspace_id == Workspace.TERRAIN
 
@@ -282,6 +350,8 @@ func _any_workspace_busy() -> bool:
 	for workspace in _workspaces.values():
 		if workspace != null and workspace.has_method("is_busy") and workspace.is_busy():
 			return true
+	if _environment_workspace != null and _environment_workspace.has_method("is_busy") and _environment_workspace.is_busy():
+		return true
 	return false
 
 
@@ -364,8 +434,132 @@ func _wire_tile_gizmo() -> void:
 	_tile_gizmo_delete.pressed.connect(_on_tile_gizmo_delete_pressed)
 
 
+func _wire_environment_popup() -> void:
+	if _environment_popup != null:
+		_environment_popup.visible = false
+	if _environment_toggle_button != null and not _environment_toggle_button.toggled.is_connected(_on_environment_toggle_toggled):
+		_environment_toggle_button.icon = _build_sun_icon()
+		_environment_toggle_button.toggled.connect(_on_environment_toggle_toggled)
+	if _environment_popup_close != null and not _environment_popup_close.pressed.is_connected(_on_environment_popup_close_pressed):
+		_environment_popup_close.pressed.connect(_on_environment_popup_close_pressed)
+	_refresh_environment_popup_state()
+
+
+func _build_sun_icon() -> Texture2D:
+	var image := Image.create(20, 20, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.0, 0.0, 0.0, 0.0))
+	var color := Color(0.8941, 0.8941, 0.9059, 1.0)
+	var center := Vector2(9.5, 9.5)
+	for y in 20:
+		for x in 20:
+			var p := Vector2(float(x), float(y))
+			var d := p.distance_to(center)
+			var cardinal_ray := (absf(p.x - center.x) < 0.75 and (p.y < 4.0 or p.y > 15.0)) or (absf(p.y - center.y) < 0.75 and (p.x < 4.0 or p.x > 15.0))
+			var diag_a := absf((p.x - center.x) - (p.y - center.y)) < 0.75 and d > 6.2 and d < 9.5
+			var diag_b := absf((p.x - center.x) + (p.y - center.y)) < 0.75 and d > 6.2 and d < 9.5
+			if d <= 3.0 or (d >= 4.15 and d <= 5.1) or cardinal_ray or diag_a or diag_b:
+				image.set_pixel(x, y, color)
+	return ImageTexture.create_from_image(image)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _environment_popup != null and _environment_popup.visible and event is InputEventKey:
+		var key := event as InputEventKey
+		if key.pressed and not key.is_echo() and key.keycode == KEY_ESCAPE:
+			_set_environment_popup_visible(false)
+			get_viewport().set_input_as_handled()
+
+
+func _on_environment_toggle_toggled(pressed: bool) -> void:
+	_set_environment_popup_visible(pressed)
+
+
+func _on_environment_popup_close_pressed() -> void:
+	_set_environment_popup_visible(false)
+
+
+func _set_environment_popup_visible(active: bool) -> void:
+	if _environment_popup == null:
+		return
+	_environment_popup.visible = active
+	if _environment_toggle_button != null:
+		_environment_toggle_button.set_pressed_no_signal(active)
+	if active:
+		_ensure_environment_popup_content()
+	_refresh_environment_popup_state()
+
+
+func _reset_environment_popup_content() -> void:
+	_environment_action_buttons.clear()
+	if _environment_actions_host != null:
+		for child in _environment_actions_host.get_children():
+			_environment_actions_host.remove_child(child)
+			child.free()
+	if _environment_inspector_host != null:
+		for child in _environment_inspector_host.get_children():
+			_environment_inspector_host.remove_child(child)
+			child.free()
+
+
+func _ensure_environment_popup_content() -> void:
+	if _environment_workspace == null:
+		return
+	if _environment_actions_host != null and _environment_action_buttons.is_empty():
+		var action_defs := [
+			{"id": WorkspaceAction.NEW, "visible": _environment_workspace.has_new_action(), "label": _environment_workspace.get_new_action_label()},
+			{"id": WorkspaceAction.OPEN, "visible": _environment_workspace.has_open_action(), "label": _environment_workspace.get_open_action_label()},
+			{"id": WorkspaceAction.SAVE, "visible": _environment_workspace.has_save_action(), "label": _environment_workspace.get_save_action_label()},
+			{"id": WorkspaceAction.SAVE_AS, "visible": _environment_workspace.has_save_as_action(), "label": _environment_workspace.get_save_as_action_label()},
+			{"id": WorkspaceAction.EXPORT, "visible": _environment_workspace.has_export_action(), "label": _environment_workspace.get_export_action_label()},
+		]
+		for action_def in action_defs:
+			if not bool(action_def["visible"]):
+				continue
+			var btn := Button.new()
+			var action_id := int(action_def["id"])
+			btn.name = "Environment" + _workspace_action_button_name(action_id)
+			btn.text = String(action_def["label"])
+			btn.focus_mode = Control.FOCUS_NONE
+			btn.custom_minimum_size = Vector2(0, 32)
+			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			btn.pressed.connect(_on_environment_action_pressed.bind(action_id))
+			_environment_actions_host.add_child(btn)
+			_environment_action_buttons[action_id] = btn
+	if _environment_inspector_host != null and _environment_inspector_host.get_child_count() == 0:
+		_environment_workspace.build_inspector(_environment_inspector_host)
+
+
+func _refresh_environment_popup_state() -> void:
+	if _environment_popup_title != null:
+		_environment_popup_title.text = _environment_workspace.get_project_title() if _environment_workspace != null else "Environment"
+	var busy := _any_workspace_busy()
+	for action_id in _environment_action_buttons:
+		var btn := _environment_action_buttons[action_id] as Button
+		if btn == null:
+			continue
+		match int(action_id):
+			WorkspaceAction.NEW:
+				btn.disabled = busy or _environment_workspace == null or not _environment_workspace.can_new()
+			WorkspaceAction.OPEN:
+				btn.disabled = busy or _environment_workspace == null or not _environment_workspace.can_open()
+			WorkspaceAction.SAVE:
+				btn.disabled = busy or _environment_workspace == null or not _environment_workspace.can_save()
+			WorkspaceAction.SAVE_AS:
+				btn.disabled = busy or _environment_workspace == null or not _environment_workspace.can_save_as()
+			WorkspaceAction.EXPORT:
+				btn.disabled = busy or _environment_workspace == null or not _environment_workspace.can_export()
+
+
 func _on_workspace_action_pressed(action_id: int) -> void:
-	var workspace = _get_active_workspace()
+	_run_workspace_action(_get_active_workspace(), action_id)
+
+
+func _on_environment_action_pressed(action_id: int) -> void:
+	_run_workspace_action(_environment_workspace, action_id)
+	_refresh_environment_popup_state()
+
+
+func _run_workspace_action(workspace: Variant, action_id: int) -> void:
 	if workspace == null:
 		return
 	var open_trn := func(path: String) -> void:
@@ -390,15 +584,15 @@ func _on_workspace_action_pressed(action_id: int) -> void:
 				workspace.get_open_dialog_dir()
 			)
 		WorkspaceAction.SAVE:
-			_on_save_pressed()
+			_on_save_pressed(workspace)
 		WorkspaceAction.SAVE_AS:
 			_open_dir_dialog(
 				workspace.get_save_dialog_title(),
 				save_project_as,
-				_preferred_save_dir()
+				_preferred_save_dir(workspace)
 			)
 		WorkspaceAction.EXPORT:
-			_on_export_pressed()
+			_on_export_pressed(workspace)
 
 
 func _open_file_dialog(title: String, filters: PackedStringArray, on_pick: Callable, current_dir: String = "") -> void:
@@ -442,8 +636,9 @@ func _open_dir_dialog(title: String, on_pick: Callable, current_dir: String = ""
 	dialog.popup_centered()
 
 
-func _preferred_save_dir() -> String:
-	var workspace = _get_active_workspace()
+func _preferred_save_dir(workspace: Variant = null) -> String:
+	if workspace == null:
+		workspace = _get_active_workspace()
 	if workspace != null:
 		var dir: String = workspace.get_save_dialog_dir()
 		if not dir.is_empty():
@@ -455,8 +650,9 @@ func _preferred_save_dir() -> String:
 	return editor.get_last_save_dir()
 
 
-func _preferred_export_dir() -> String:
-	var workspace = _get_active_workspace()
+func _preferred_export_dir(workspace: Variant = null) -> String:
+	if workspace == null:
+		workspace = _get_active_workspace()
 	if workspace != null:
 		var dir: String = workspace.get_export_dialog_dir()
 		if not dir.is_empty():
@@ -470,8 +666,9 @@ func _preferred_export_dir() -> String:
 	return editor.get_last_save_dir()
 
 
-func _on_save_pressed() -> void:
-	var workspace = _get_active_workspace()
+func _on_save_pressed(workspace: Variant = null) -> void:
+	if workspace == null:
+		workspace = _get_active_workspace()
 	if workspace == null:
 		return
 	var err: Error = workspace.save_current()
@@ -479,20 +676,21 @@ func _on_save_pressed() -> void:
 		var save_project_as := func(dir_path: String) -> void:
 			workspace.save_as(dir_path)
 		_open_dir_dialog(
-			"Choose where to save your project",
+			workspace.get_save_dialog_title(),
 			save_project_as,
-			_preferred_save_dir()
+			_preferred_save_dir(workspace)
 		)
 	elif err != OK:
 		show_status_message("%s save is not available." % workspace.get_workspace_label(), 4.0)
 
 
-func _on_export_pressed() -> void:
-	var workspace = _get_active_workspace()
+func _on_export_pressed(workspace: Variant = null) -> void:
+	if workspace == null:
+		workspace = _get_active_workspace()
 	if workspace == null or not workspace.can_export():
 		return
 	var choose_export_dir := func(dir_path: String) -> void:
-		if _is_terrain_workspace_active():
+		if workspace == _get_active_workspace() and _is_terrain_workspace_active():
 			_show_export_flavor_dialog(dir_path)
 		else:
 			var err: Error = workspace.begin_export(dir_path, 0)
@@ -503,13 +701,14 @@ func _on_export_pressed() -> void:
 	_open_dir_dialog(
 		workspace.get_export_dialog_title(),
 		choose_export_dir,
-		_preferred_export_dir()
+		_preferred_export_dir(workspace)
 	)
 
 
 func _refresh_shell_state() -> void:
 	var busy := _any_workspace_busy()
 	_refresh_workspace_actions_state()
+	_refresh_environment_popup_state()
 	for button in _workflow_buttons.values():
 		var workflow_button := button as Button
 		if workflow_button:
@@ -618,7 +817,7 @@ func _refresh_status() -> void:
 		_status_tool_label.theme_type_variation = &""
 
 	_status_context_label.text = workspace.get_status_context()
-	if _is_terrain_workspace_active() and editor and editor.camera:
+	if (_is_terrain_workspace_active() or _active_workspace_id == Workspace.MISSION) and editor and editor.camera:
 		var pos: Vector3 = editor.camera.global_position
 		_status_camera_label.text = "%.0f, %.0f, %.0f" % [pos.x, pos.y, pos.z]
 	else:
