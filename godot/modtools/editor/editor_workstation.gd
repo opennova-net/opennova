@@ -4,6 +4,7 @@ extends Control
 const TerrainWorkspaceAdapter = preload("res://modtools/editor/terrain_workspace.gd")
 const EnvironmentWorkspaceAdapter = preload("res://modtools/editor/environment_workspace.gd")
 const MissionWorkspaceAdapter = preload("res://modtools/editor/mission_workspace.gd")
+const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
 
 enum Workspace { TERRAIN, ENVIRONMENT, MISSION }
 
@@ -30,6 +31,10 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _inspector_host: Control = %InspectorHost
 @onready var _viewport_lane: Control = %ViewportLane
 @onready var _viewport_host: Control = %ViewportHost
+@onready var _camera_toggle_button: Button = %CameraToggleButton
+@onready var _camera_popup: PanelContainer = %CameraPopup
+@onready var _camera_popup_close: Button = %CameraPopupClose
+@onready var _camera_settings_host: Control = %CameraSettingsHost
 @onready var _environment_toggle_button: Button = %EnvironmentToggleButton
 @onready var _environment_popup: PanelContainer = %EnvironmentPopup
 @onready var _environment_popup_title: Label = %EnvironmentPopupTitle
@@ -78,6 +83,7 @@ var _environment_workspace
 var _workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
 var _environment_action_buttons: Dictionary = {}
+var _camera_settings_panel: Control
 var _mounted_workspace_id: int = -1
 var _current_workflow_id: int = -1
 var _workflow_buttons: Dictionary = {}
@@ -96,6 +102,7 @@ var _prompt_tertiary_action: Callable = Callable()
 func _ready() -> void:
 	_ensure_workspaces()
 	_build_workspace_rail()
+	_wire_camera_popup()
 	_wire_environment_popup()
 	_wire_prompts()
 	_wire_tile_gizmo()
@@ -129,6 +136,7 @@ func set_editor(value: Node) -> void:
 	if _environment_workspace != null and _environment_workspace.has_method("set_environment_editor") and value != null and value.has_method("get_environment_editor"):
 		_environment_workspace.set_environment_editor(value.get_environment_editor())
 	_reset_environment_popup_content()
+	_sync_camera_popup_editor()
 	_remount_active_workspace_viewport()
 	_refresh_workspace_surface()
 	for child in _inspector_host.get_children():
@@ -146,6 +154,7 @@ func sync_from_editor_state() -> void:
 	_refresh_status()
 	_refresh_tile_gizmo()
 	_sync_export_progress()
+	_refresh_camera_popup_state()
 	_refresh_environment_popup_state()
 	var workspace = _get_active_workspace()
 	if workspace != null:
@@ -434,6 +443,17 @@ func _wire_tile_gizmo() -> void:
 	_tile_gizmo_delete.pressed.connect(_on_tile_gizmo_delete_pressed)
 
 
+func _wire_camera_popup() -> void:
+	if _camera_popup != null:
+		_camera_popup.visible = false
+	if _camera_toggle_button != null and not _camera_toggle_button.toggled.is_connected(_on_camera_toggle_toggled):
+		_camera_toggle_button.icon = _build_camera_icon()
+		_camera_toggle_button.toggled.connect(_on_camera_toggle_toggled)
+	if _camera_popup_close != null and not _camera_popup_close.pressed.is_connected(_on_camera_popup_close_pressed):
+		_camera_popup_close.pressed.connect(_on_camera_popup_close_pressed)
+	_refresh_camera_popup_state()
+
+
 func _wire_environment_popup() -> void:
 	if _environment_popup != null:
 		_environment_popup.visible = false
@@ -443,6 +463,22 @@ func _wire_environment_popup() -> void:
 	if _environment_popup_close != null and not _environment_popup_close.pressed.is_connected(_on_environment_popup_close_pressed):
 		_environment_popup_close.pressed.connect(_on_environment_popup_close_pressed)
 	_refresh_environment_popup_state()
+
+
+func _build_camera_icon() -> Texture2D:
+	var image := Image.create(20, 20, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.0, 0.0, 0.0, 0.0))
+	var color := Color(0.8941, 0.8941, 0.9059, 1.0)
+	var center := Vector2(9.5, 10.5)
+	for y in 20:
+		for x in 20:
+			var body := x >= 4 and x <= 14 and y >= 7 and y <= 14
+			var top := x >= 6 and x <= 11 and y >= 5 and y <= 7
+			var side := x >= 15 and x <= 17 and y >= 8 and y <= 12
+			var lens := Vector2(float(x), float(y)).distance_to(center)
+			if body or top or side or lens <= 2.2:
+				image.set_pixel(x, y, color)
+	return ImageTexture.create_from_image(image)
 
 
 func _build_sun_icon() -> Texture2D:
@@ -463,11 +499,74 @@ func _build_sun_icon() -> Texture2D:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _environment_popup != null and _environment_popup.visible and event is InputEventKey:
+	if event is InputEventKey:
 		var key := event as InputEventKey
 		if key.pressed and not key.is_echo() and key.keycode == KEY_ESCAPE:
-			_set_environment_popup_visible(false)
-			get_viewport().set_input_as_handled()
+			if _camera_popup != null and _camera_popup.visible:
+				_set_camera_popup_visible(false)
+				get_viewport().set_input_as_handled()
+				return
+			if _environment_popup != null and _environment_popup.visible:
+				_set_environment_popup_visible(false)
+				get_viewport().set_input_as_handled()
+
+
+func _on_camera_toggle_toggled(pressed: bool) -> void:
+	_set_camera_popup_visible(pressed)
+
+
+func _on_camera_popup_close_pressed() -> void:
+	_set_camera_popup_visible(false)
+
+
+func _set_camera_popup_visible(active: bool) -> void:
+	if _camera_popup == null:
+		return
+	if active and _get_editor_camera() == null:
+		active = false
+	if active:
+		_set_environment_popup_visible(false)
+	_camera_popup.visible = active
+	if _camera_toggle_button != null:
+		_camera_toggle_button.set_pressed_no_signal(active)
+	if active:
+		_ensure_camera_popup_content()
+	_refresh_camera_popup_state()
+
+
+func _ensure_camera_popup_content() -> void:
+	if _camera_settings_host == null:
+		return
+	if _camera_settings_panel == null:
+		_camera_settings_panel = CameraSettingsPanelScene.instantiate() as Control
+		_camera_settings_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_camera_settings_host.add_child(_camera_settings_panel)
+	_sync_camera_popup_editor()
+
+
+func _sync_camera_popup_editor() -> void:
+	if _camera_settings_panel != null and _camera_settings_panel.has_method("set_editor"):
+		_camera_settings_panel.set_editor(editor)
+
+
+func _refresh_camera_popup_state() -> void:
+	var has_camera := _get_editor_camera() != null
+	if _camera_toggle_button != null:
+		_camera_toggle_button.disabled = not has_camera
+		if not has_camera:
+			_camera_toggle_button.set_pressed_no_signal(false)
+	if _camera_popup != null and _camera_popup.visible and not has_camera:
+		_camera_popup.visible = false
+	if _camera_popup != null and _camera_popup.visible:
+		_ensure_camera_popup_content()
+		if _camera_settings_panel != null and _camera_settings_panel.has_method("sync_from_editor_state"):
+			_camera_settings_panel.sync_from_editor_state()
+
+
+func _get_editor_camera() -> Camera3D:
+	if editor == null:
+		return null
+	return editor.get("camera") as Camera3D
 
 
 func _on_environment_toggle_toggled(pressed: bool) -> void:
@@ -481,6 +580,8 @@ func _on_environment_popup_close_pressed() -> void:
 func _set_environment_popup_visible(active: bool) -> void:
 	if _environment_popup == null:
 		return
+	if active:
+		_set_camera_popup_visible(false)
 	_environment_popup.visible = active
 	if _environment_toggle_button != null:
 		_environment_toggle_button.set_pressed_no_signal(active)

@@ -125,20 +125,88 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-[node name="EnvironmentToggleButton" type="Button" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome"]
+[node name="ViewportButtonRail" type="HBoxContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome"]
 unique_name_in_owner = true
 layout_mode = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -48.0
+offset_left = -88.0
 offset_top = 12.0
 offset_right = -12.0
 offset_bottom = 48.0
 grow_horizontal = 0
+theme_override_constants/separation = 4
+
+[node name="CameraToggleButton" type="Button" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/ViewportButtonRail"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+focus_mode = 0
+toggle_mode = true
+tooltip_text = "Camera"
+flat = false
+
+[node name="EnvironmentToggleButton" type="Button" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/ViewportButtonRail"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
 focus_mode = 0
 toggle_mode = true
 tooltip_text = "Environment"
 flat = false
+
+[node name="CameraPopup" type="PanelContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(320, 0)
+layout_mode = 1
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -344.0
+offset_top = 56.0
+offset_right = -12.0
+offset_bottom = -12.0
+grow_horizontal = 0
+
+[node name="CameraPopupMargin" type="MarginContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/CameraPopup"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="CameraPopupBox" type="VBoxContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/CameraPopup/CameraPopupMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="CameraPopupHeader" type="HBoxContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/CameraPopup/CameraPopupMargin/CameraPopupBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="CameraPopupTitle" type="Label" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Heading"
+text = "Camera"
+vertical_alignment = 1
+clip_text = true
+
+[node name="CameraPopupClose" type="Button" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(34, 30)
+focus_mode = 0
+text = "X"
+tooltip_text = "Close camera settings"
+
+[node name="CameraSettingsHost" type="VBoxContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome/CameraPopup/CameraPopupMargin/CameraPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
 
 [node name="EnvironmentPopup" type="PanelContainer" parent="WorkstationLayout/BodyRow/ViewportLane/ViewportChrome"]
 unique_name_in_owner = true

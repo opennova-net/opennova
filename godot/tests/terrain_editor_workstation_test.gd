@@ -112,6 +112,76 @@ func test_environment_sun_popup_exposes_env_document_controls() -> void:
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "The old Environment workspace id should open the popup instead of changing workspaces.")
 
 
+func test_camera_button_exposes_global_viewport_settings() -> void:
+	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	await get_tree().process_frame
+	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+
+	var camera_button: Button = workstation.get_node("%CameraToggleButton")
+	var environment_button: Button = workstation.get_node("%EnvironmentToggleButton")
+	assert_eq(camera_button.get_parent(), environment_button.get_parent(), "Camera and environment should live in the same viewport button rail.")
+	assert_true(camera_button.get_index() < environment_button.get_index(), "Camera should sit immediately before Environment.")
+
+	camera_button.toggled.emit(true)
+	await get_tree().process_frame
+
+	var popup: PanelContainer = workstation.get_node("%CameraPopup")
+	var settings_host: Control = workstation.get_node("%CameraSettingsHost")
+	var settings_panel: Control = settings_host.get_child(0)
+	var fly_speed_spin: SpinBox = settings_panel.get_node("%FlySpeedSpin")
+	var near_plane_spin: SpinBox = settings_panel.get_node("%NearPlaneSpin")
+	var far_plane_spin: SpinBox = settings_panel.get_node("%FarPlaneSpin")
+	assert_true(popup.visible, "The camera button should show the camera popup.")
+	assert_true(camera_button.button_pressed, "The camera button should stay pressed while the popup is visible.")
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Opening camera settings should not switch workspaces.")
+
+	fly_speed_spin.value_changed.emit(72.0)
+	near_plane_spin.value_changed.emit(0.25)
+	far_plane_spin.value_changed.emit(2600.0)
+
+	assert_eq(editor.camera.fly_speed, 72.0, "Camera popup should update flight speed.")
+	assert_eq(editor.camera.near, 0.25, "Camera popup should update the near plane.")
+	assert_eq(editor.camera.far, 2600.0, "Camera popup should update the far plane.")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
+	camera_button.toggled.emit(true)
+	await get_tree().process_frame
+
+	assert_true(popup.visible, "Camera settings should remain available from Mission.")
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.MISSION, "Opening camera settings from Mission should not switch workspaces.")
+
+
+func test_viewport_popups_are_mutually_exclusive_and_escape_closes_active_popup() -> void:
+	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	await get_tree().process_frame
+	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
+	environment_editor.create_default_environment(false)
+	workstation._environment_workspace.set_environment_editor(environment_editor)
+
+	var camera_button: Button = workstation.get_node("%CameraToggleButton")
+	var environment_button: Button = workstation.get_node("%EnvironmentToggleButton")
+	var camera_popup: PanelContainer = workstation.get_node("%CameraPopup")
+	var environment_popup: PanelContainer = workstation.get_node("%EnvironmentPopup")
+
+	camera_button.toggled.emit(true)
+	await get_tree().process_frame
+	environment_button.toggled.emit(true)
+	await get_tree().process_frame
+
+	assert_false(camera_popup.visible, "Opening Environment should close Camera.")
+	assert_false(camera_button.button_pressed, "Camera button should release when its popup closes.")
+	assert_true(environment_popup.visible, "Environment should be visible after its button is pressed.")
+
+	var escape := InputEventKey.new()
+	escape.pressed = true
+	escape.keycode = KEY_ESCAPE
+	workstation._unhandled_input(escape)
+
+	assert_false(environment_popup.visible, "Escape should close the visible viewport popup.")
+	assert_false(environment_button.button_pressed, "Environment button should release after Escape closes the popup.")
+
+
 func test_terrain_workspace_exposes_project_save_and_export_actions() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
@@ -267,8 +337,9 @@ func test_asset_dock_uses_properties_tab_and_removes_old_toggles() -> void:
 	var dock = add_child_autofree(TerrainEditorAssetDockScene.instantiate())
 	var tabs: TabContainer = dock.get_node("%Tabs")
 
-	assert_eq(tabs.get_tab_count(), 2, "Asset dock should only expose Properties and Camera tabs.")
+	assert_eq(tabs.get_tab_count(), 1, "Asset dock should only expose Properties.")
 	assert_eq(tabs.get_tab_title(0), "Properties", "The first dock tab should be renamed to Properties.")
+	assert_null(dock.get_node_or_null("%CameraTab"), "Camera controls should move to the global viewport popup.")
 	assert_null(dock.get_node_or_null("Tabs/Document"), "The old Document tab should be removed.")
 	assert_null(dock.get_node_or_null("%ViewTab"), "The old View tab should be removed.")
 	assert_null(dock.get_node_or_null("%WaterVisibleToggle"), "The water-plane toggle should move out of the dock.")

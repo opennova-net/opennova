@@ -18,14 +18,10 @@ const SLOT_FRIENDLY_LABELS := {
 
 @onready var _tabs: TabContainer = %Tabs
 @onready var _terrain_properties_tab: Control = %TerrainPropertiesTab
-@onready var _camera_tab: Control = %CameraTab
 @onready var _assets_box: VBoxContainer = %AssetSectionsBox
 @onready var _terrain_name_edit: LineEdit = %TerrainNameEdit
 @onready var _detail_density_spin: SpinBox = %DetailDensitySpin
 @onready var _detail_density2_spin: SpinBox = %DetailDensity2Spin
-@onready var _fly_speed_spin: SpinBox = %FlySpeedSpin
-@onready var _near_plane_spin: SpinBox = %NearPlaneSpin
-@onready var _far_plane_spin: SpinBox = %FarPlaneSpin
 
 var editor: TerrainEditor
 var _syncing: bool = false
@@ -42,14 +38,10 @@ func _ready() -> void:
 	# which derives the new terrain name from the destination directory.
 	_detail_density_spin.value_changed.connect(_on_detail_density_changed)
 	_detail_density2_spin.value_changed.connect(_on_detail_density2_changed)
-	_fly_speed_spin.value_changed.connect(_on_fly_speed_changed)
-	_near_plane_spin.value_changed.connect(_on_near_plane_changed)
-	_far_plane_spin.value_changed.connect(_on_far_plane_changed)
 
 
 func _configure_tabs() -> void:
 	_tabs.set_tab_title(_tabs.get_tab_idx_from_control(_terrain_properties_tab), "Properties")
-	_tabs.set_tab_title(_tabs.get_tab_idx_from_control(_camera_tab), "Camera")
 
 
 func set_editor(value: TerrainEditor) -> void:
@@ -78,10 +70,6 @@ func _sync_from_editor() -> void:
 		_terrain_name_edit.text = editor.get_terrain_name_value()
 	_detail_density_spin.set_value_no_signal(editor.get_detail_density())
 	_detail_density2_spin.set_value_no_signal(editor.get_detail_density2())
-	if editor.camera:
-		_fly_speed_spin.set_value_no_signal(editor.camera.fly_speed)
-		_near_plane_spin.set_value_no_signal(editor.camera.near)
-		_far_plane_spin.set_value_no_signal(editor.camera.far)
 	_refresh_slot_cards()
 	_syncing = false
 
@@ -289,21 +277,3 @@ func _on_detail_density2_changed(value: float) -> void:
 	if _syncing or editor == null:
 		return
 	editor.set_detail_density2_value(int(value))
-
-
-func _on_fly_speed_changed(value: float) -> void:
-	if _syncing or editor == null or editor.camera == null:
-		return
-	editor.camera.fly_speed = value
-
-
-func _on_near_plane_changed(value: float) -> void:
-	if _syncing or editor == null or editor.camera == null:
-		return
-	editor.camera.near = value
-
-
-func _on_far_plane_changed(value: float) -> void:
-	if _syncing or editor == null or editor.camera == null:
-		return
-	editor.camera.far = value
