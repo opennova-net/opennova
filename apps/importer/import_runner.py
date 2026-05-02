@@ -53,7 +53,13 @@ def _export_glb(output_dir: str, name: str) -> None:
     """Export the current bpy scene to a glTF 2.0 binary (.glb) in output_dir."""
     import bpy
     glb_path = os.path.join(output_dir, name + ".glb")
-    bpy.ops.export_scene.gltf(filepath=glb_path, export_format="GLB")
+    has_animations = len(bpy.data.actions) > 0
+    bpy.ops.export_scene.gltf(
+        filepath=glb_path,
+        export_format="GLB",
+        export_animations=has_animations,
+        export_force_sampling=False,
+    )
     log.info("Wrote GLB: %s", glb_path)
 
 
