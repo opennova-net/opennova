@@ -1,6 +1,7 @@
 extends GutTest
 
 const TerrainEditorScript = preload("res://modtools/terrain/terrain_editor.gd")
+const TerrainEditorScene = preload("res://modtools/terrain/terrain_editor.tscn")
 const EditorWorkstationScene = preload("res://modtools/editor/editor_workstation.tscn")
 const EditorWorkstationScript = preload("res://modtools/editor/editor_workstation.gd")
 const TerrainWorkspaceScript = preload("res://modtools/editor/terrain_workspace.gd")
@@ -42,15 +43,14 @@ func _has_label_text(root: Node, text: String) -> bool:
 	return false
 
 
-func test_workstation_starts_with_three_domain_workspaces() -> void:
+func test_workstation_starts_with_two_domain_workspaces() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
 	var workspace_rail: HBoxContainer = workstation.get_node("%WorkspaceRail")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Terrain should remain the default workspace.")
-	assert_eq(workspace_rail.get_child_count(), 3, "The shell should expose Terrain, Environment, and Mission workspaces.")
+	assert_eq(workspace_rail.get_child_count(), 2, "The shell should expose Terrain and Mission workspaces.")
 	assert_eq((workspace_rail.get_child(0) as Button).text, "Terrain", "Terrain should be the first workspace.")
-	assert_eq((workspace_rail.get_child(1) as Button).text, "Environment", "Environment should have a reserved workspace.")
-	assert_eq((workspace_rail.get_child(2) as Button).text, "Mission", "Mission should have a reserved workspace.")
+	assert_eq((workspace_rail.get_child(1) as Button).text, "Mission", "Mission should have a reserved workspace.")
 
 
 func test_mission_placeholder_shows_no_document_actions() -> void:
@@ -76,32 +76,40 @@ func test_mission_placeholder_shows_no_document_actions() -> void:
 	assert_true(_has_label_text(inspector_host, "Coming soon"), "Mission should show a compact coming-soon placeholder.")
 
 
-func test_environment_workspace_exposes_env_document_controls() -> void:
+func test_environment_sun_popup_exposes_env_document_controls() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
 	environment_editor.create_default_environment(false)
-	workstation._workspaces[EditorWorkstationScript.Workspace.ENVIRONMENT].set_environment_editor(environment_editor)
+	workstation._environment_workspace.set_environment_editor(environment_editor)
 
-	workstation.set_active_workspace(EditorWorkstationScript.Workspace.ENVIRONMENT)
+	var sun_button: Button = workstation.get_node("%EnvironmentToggleButton")
+	sun_button.toggled.emit(true)
 	await get_tree().process_frame
 
-	var actions_host: VBoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	var popup: PanelContainer = workstation.get_node("%EnvironmentPopup")
+	var actions_host: VBoxContainer = workstation.get_node("%EnvironmentActionsHost")
 	var save_button := _find_button_by_text(actions_host, "Save Environment")
-	var inspector_host: Control = workstation.get_node("%InspectorHost")
+	var inspector_host: Control = workstation.get_node("%EnvironmentInspectorHost")
 	var inspector := inspector_host.get_child(inspector_host.get_child_count() - 1)
-	assert_eq(workstation.get_node("%ProjectLabel").text, "untitled", "Environment should own the shell title when active.")
-	assert_false(workstation.get_node("%AssetDock").visible, "Terrain properties should hide outside the environment workspace.")
-	assert_eq(_workspace_action_texts(actions_host), ["New Environment", "Open Environment...", "Save Environment", "Save Environment As..."], "Environment should own its document actions without a separate export.")
-	assert_not_null(save_button, "Environment should expose Save Environment.")
+	assert_true(popup.visible, "The sun button should show the environment popup.")
+	assert_true(sun_button.button_pressed, "The sun button should stay pressed while the popup is visible.")
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Opening environment should not switch the active workspace.")
+	assert_eq(workstation.get_node("%ProjectLabel").text, "Terrain", "Terrain should keep shell title ownership when no terrain editor is set.")
+	assert_eq(workstation.get_node("%EnvironmentPopupTitle").text, "untitled", "Environment should own the popup title.")
+	assert_eq(_workspace_action_texts(actions_host), ["New Environment", "Open Environment...", "Save Environment", "Save Environment As..."], "Environment popup should expose document actions without a separate export.")
+	assert_not_null(save_button, "Environment popup should expose Save Environment.")
 	assert_true(save_button.disabled, "Clean new environments should not enable Save until changed.")
 	assert_null(_find_button_by_text(actions_host, "Export Environment..."), "Environment should not advertise export separately from save.")
-	assert_true(inspector.get_script() == EnvironmentInspectorScript, "Environment should build its inspector instead of a placeholder.")
+	assert_true(inspector.get_script() == EnvironmentInspectorScript, "Environment popup should build its inspector instead of a placeholder.")
 
 	environment_editor.env_file.set_env_name("storm_test")
 	workstation.sync_from_editor_state()
 
-	assert_eq(workstation.get_node("%ProjectLabel").text, "storm_test*", "Environment edits should dirty the active document title.")
+	assert_eq(workstation.get_node("%EnvironmentPopupTitle").text, "storm_test*", "Environment edits should dirty the popup document title.")
 	assert_false(save_button.disabled, "Dirty environments should enable Save.")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.ENVIRONMENT)
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "The old Environment workspace id should open the popup instead of changing workspaces.")
 
 
 func test_terrain_workspace_exposes_project_save_and_export_actions() -> void:
@@ -133,6 +141,34 @@ func test_switching_workspaces_preserves_terrain_dirty_state() -> void:
 	assert_true(editor.is_dirty, "Switching placeholder domains should not reset terrain document state.")
 	assert_eq(workstation.get_node("%ProjectLabel").text, "untitled*", "Returning to Terrain should restore the terrain project title and dirty marker.")
 	assert_true(workstation.get_node("%AssetDock").visible, "Terrain properties should return when Terrain is active.")
+
+
+func test_workspace_switching_mounts_terrain_and_mission_viewports() -> void:
+	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	await get_tree().process_frame
+	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var host: Control = workstation.get_node("%ViewportHost")
+
+	assert_eq(host.get_child_count(), 1, "Terrain should own the viewport host by default.")
+	assert_eq(host.get_child(0).name, "TerrainViewport", "Terrain should mount through TerrainViewport.")
+	assert_true(editor.is_viewport_active(), "Terrain editor rendering should be active while Terrain owns the viewport.")
+	assert_true(editor.is_viewport_edit_input_active(), "Terrain should enable terrain edit input.")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
+	await get_tree().process_frame
+
+	assert_eq(host.get_child_count(), 1, "Mission should replace Terrain as the only viewport owner.")
+	assert_eq(host.get_child(0).name, "MissionViewport", "Mission should mount its read-only terrain viewport.")
+	assert_true(editor.is_viewport_active(), "Mission should keep the loaded terrain visible.")
+	assert_false(editor.is_viewport_edit_input_active(), "Mission should disable terrain brush and shortcut input.")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
+	await get_tree().process_frame
+
+	assert_eq(host.get_child_count(), 1, "Returning to Terrain should still leave one viewport owner.")
+	assert_eq(host.get_child(0).name, "TerrainViewport", "TerrainViewport should remount when Terrain becomes active again.")
+	assert_true(editor.is_viewport_active(), "Terrain editor rendering should reactivate when Terrain owns the viewport.")
+	assert_true(editor.is_viewport_edit_input_active(), "Terrain edit input should reactivate when Terrain owns the viewport.")
 
 
 func test_workstation_tracks_mode_from_editor_tool() -> void:
