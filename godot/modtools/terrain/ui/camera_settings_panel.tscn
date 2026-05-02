@@ -1,0 +1,71 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modtools/terrain/ui/camera_settings_panel.gd" id="1_panel"]
+
+[node name="CameraSettingsPanel" type="VBoxContainer"]
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+script = ExtResource("1_panel")
+
+[node name="FlySpeedRow" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="FlySpeedLabel" type="Label" parent="FlySpeedRow"]
+layout_mode = 2
+text = "Flight speed"
+
+[node name="FlySpeedSpin" type="SpinBox" parent="FlySpeedRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 5.0
+max_value = 2000.0
+step = 1.0
+value = 30.0
+
+[node name="FlySpeedHint" type="Label" parent="."]
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Right-click + scroll wheel adjusts speed while flying."
+autowrap_mode = 3
+
+[node name="VisibilityLabel" type="Label" parent="."]
+layout_mode = 2
+text = "Visibility range"
+
+[node name="NearPlaneRow" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="NearPlaneLabel" type="Label" parent="NearPlaneRow"]
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Near"
+
+[node name="NearPlaneSpin" type="SpinBox" parent="NearPlaneRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.01
+max_value = 100.0
+step = 0.01
+value = 0.5
+
+[node name="FarPlaneRow" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="FarPlaneLabel" type="Label" parent="FarPlaneRow"]
+layout_mode = 2
+theme_type_variation = &"Muted"
+text = "Far"
+
+[node name="FarPlaneSpin" type="SpinBox" parent="FarPlaneRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 100.0
+max_value = 1000000.0
+step = 100.0
+value = 1500.0
