@@ -54,6 +54,60 @@ func test_dvxi5_import_then_export_matches_fixture_bytes() -> void:
 	assert_eq(unexpected, [], "Export should not create extra terrain payload files.")
 
 
+func test_cptless_project_data_does_not_build_render_terrain() -> void:
+	DirAccess.make_dir_recursive_absolute(_output_dir())
+	var imported := NovaTerrainData.new()
+	imported.set_trn_path(_fixture_path("Dvxi5.trn"))
+
+	assert_eq(imported.load(), OK, "Fixture should load before saving a project-only TRN.")
+	imported.set_polydata_filename("")
+
+	var project_path := _output_dir().path_join("Cptless.trn")
+	assert_eq(ResourceSaver.save(imported, project_path), OK, "Project-only TRN should save without CPT polydata.")
+
+	var reopened := ResourceLoader.load(project_path, "NovaTerrainData", ResourceLoader.CACHE_MODE_IGNORE) as NovaTerrainData
+	assert_not_null(reopened, "Project-only TRN should reopen as NovaTerrainData.")
+	if reopened == null:
+		return
+	assert_true(reopened.is_loaded(), "Project-only TRN should report loaded even without CPT.")
+	assert_eq(reopened.get_tile_count(), 0, "Project-only TRN should not expose baked CPT tiles.")
+
+	var terrain: NovaTerrain = add_child_autofree(NovaTerrain.new())
+	terrain.set_terrain_data(reopened)
+	terrain.build()
+
+	assert_eq(terrain.get_patches_active(), 0, "CPT-less data should not create render patch instances.")
+
+
+func test_extensionless_tileinfo_filename_resolves_til_sidecar() -> void:
+	DirAccess.make_dir_recursive_absolute(_output_dir())
+
+	var source_tileinfo := NovaTerrainTileInfo.new()
+	var entry := NovaTerrainTileEntry.new()
+	entry.set_cell(2, 3)
+	entry.set_tile_index(7)
+	source_tileinfo.add_entry(entry)
+	assert_eq(ResourceSaver.save(source_tileinfo, _output_dir().path_join("Overlay.til")), OK, "Fixture .til should save before sidecar lookup.")
+
+	var data := NovaTerrainData.new()
+	data.set_trn_path(_output_dir().path_join("OverlayMap.trn"))
+	data.set_tileinfo_filename("Overlay")
+
+	var loaded := data.get_tileinfo_resource()
+	assert_not_null(loaded, "Extensionless tileinfo references should resolve to a .til sidecar.")
+	if loaded == null:
+		return
+	assert_eq(loaded.get_entry_count(), 1, "Resolved tileinfo should load saved entries.")
+	assert_eq(loaded.get_entry(0).get_tile_index(), 7, "Resolved tileinfo should preserve entry data.")
+
+	assert_eq(ResourceSaver.save(source_tileinfo, _output_dir().path_join("Overlay.V1.til")), OK, "Dotted sidecar fixture should save.")
+	data.set_tileinfo_filename("Overlay.V1")
+	loaded = data.get_tileinfo_resource()
+	assert_not_null(loaded, "Dotted tileinfo references should append .til without stripping the dotted stem.")
+	if loaded != null:
+		assert_eq(loaded.get_entry(0).get_tile_index(), 7, "Dotted sidecar lookup should preserve entry data.")
+
+
 func _assert_files_equal(expected_path: String, actual_path: String) -> void:
 	var expected := FileAccess.get_file_as_bytes(expected_path)
 	var actual := FileAccess.get_file_as_bytes(actual_path)

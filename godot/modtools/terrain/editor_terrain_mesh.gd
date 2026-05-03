@@ -153,10 +153,6 @@ func get_material() -> ShaderMaterial:
 	return _material
 
 
-func get_patch_step_size() -> float:
-	return SECTOR_SIZE / float(PATCH_VERTS - 1)
-
-
 func get_world_bounds() -> AABB:
 	return _bounds
 
@@ -224,9 +220,6 @@ func sample_world_height(world_x: float, world_z: float) -> float:
 		return -1000000.0
 	return _sample_source_height(source.x, source.y)
 
-
-func sample_height(world_x: float, world_z: float) -> float:
-	return sample_world_height(world_x, world_z)
 
 func _sector_source_offset(sector_id: int) -> Vector2:
 	var offset_x: float = 512.0 if sector_id == 3 or sector_id == 4 else 0.0

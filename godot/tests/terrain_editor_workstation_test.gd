@@ -489,6 +489,14 @@ func test_asset_dock_builds_preview_cards_for_shared_maps() -> void:
 	assert_true(dock._slot_previews.has("tilestrip"), "Asset dock should build a preview card for the tile atlas.")
 
 
+func test_asset_dock_uses_shared_slot_labels() -> void:
+	var dock = add_child_autofree(TerrainEditorAssetDockScene.instantiate())
+
+	assert_true(_has_label_text(dock, "Detail A"), "Asset dock should use shared detail slot labels.")
+	assert_true(_has_label_text(dock, "Shading 1 / near"), "Asset dock should use shared auxiliary slot labels.")
+	assert_true(_has_label_text(dock, "Tile atlas"), "Asset dock should use shared map-data slot labels.")
+
+
 func test_asset_dock_syncs_slot_filename_labels() -> void:
 	var dock = add_child_autofree(TerrainEditorAssetDockScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())

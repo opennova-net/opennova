@@ -1,7 +1,5 @@
 extends RefCounted
 
-const TerrainEditorBrushes = preload("res://modtools/terrain/terrain_editor_brushes.gd")
-
 const SLOT_ORDER := [
 	"detail_c1",
 	"detail_c2",
@@ -40,7 +38,7 @@ const DEFAULT_EXPORT_IMAGE_SIZE := 512
 
 const SLOT_DEFS := {
 	"detail_c1": {
-		"label": "Detail 1 (R)",
+		"label": "Detail A",
 		"dialog_title": "Load Detail Texture 1",
 		"trn_key": "detailmap_c1",
 		"uniform": "u_detail_c1",
@@ -52,7 +50,7 @@ const SLOT_DEFS := {
 		"paint_channel": 0,
 	},
 	"detail_c2": {
-		"label": "Detail 2 (G)",
+		"label": "Detail B",
 		"dialog_title": "Load Detail Texture 2",
 		"trn_key": "detailmap_c2",
 		"uniform": "u_detail_c2",
@@ -64,7 +62,7 @@ const SLOT_DEFS := {
 		"paint_channel": 1,
 	},
 	"detail_c3": {
-		"label": "Detail 3 (B)",
+		"label": "Detail C",
 		"dialog_title": "Load Detail Texture 3",
 		"trn_key": "detailmap_c3",
 		"uniform": "u_detail_c3",
@@ -76,7 +74,7 @@ const SLOT_DEFS := {
 		"paint_channel": 2,
 	},
 	"detailmap": {
-		"label": "Bump Layer 1 (near)",
+		"label": "Shading 1 / near",
 		"dialog_title": "Load Bump Layer 1 (near)",
 		"tooltip": "Layer-1 per-material bump response at close range. R=Detail 1 bump, G=Detail 2 bump, B=Detail 3 bump. Dot-producted with the blend map so each material gets its own lighting response.",
 		"trn_key": "detailmap",
@@ -88,7 +86,7 @@ const SLOT_DEFS := {
 		"previewable": true,
 	},
 	"detailmapdist": {
-		"label": "Bump Layer 1 (far)",
+		"label": "Shading 1 / far",
 		"dialog_title": "Load Bump Layer 1 (far)",
 		"tooltip": "Layer-1 per-material bump response at far distance. Crossfaded with the near map by camera distance (original game bakes this as deep-mipmap content).",
 		"trn_key": "detailmapdist",
@@ -100,7 +98,7 @@ const SLOT_DEFS := {
 		"previewable": true,
 	},
 	"detailmap2": {
-		"label": "Bump Layer 2 (near)",
+		"label": "Shading 2 / near",
 		"dialog_title": "Load Bump Layer 2 (near)",
 		"tooltip": "Second independent bump layer at close range. Same R/G/B = per-material packing as Layer 1. Applied as an additional lighting multiplier on top of Layer 1.",
 		"trn_key": "detailmap2",
@@ -112,7 +110,7 @@ const SLOT_DEFS := {
 		"previewable": true,
 	},
 	"detailmapdist2": {
-		"label": "Bump Layer 2 (far)",
+		"label": "Shading 2 / far",
 		"dialog_title": "Load Bump Layer 2 (far)",
 		"tooltip": "Layer-2 per-material bump response at far distance.",
 		"trn_key": "detailmapdist2",
@@ -124,7 +122,7 @@ const SLOT_DEFS := {
 		"previewable": true,
 	},
 	"charmap": {
-		"label": "Surface Types",
+		"label": "Surface types",
 		"dialog_title": "Load Surface Types",
 		"trn_key": "charmap",
 		"uniform": "u_charmap",
@@ -136,7 +134,7 @@ const SLOT_DEFS := {
 		"format": "pcx_paletted",
 	},
 	"foliagemap": {
-		"label": "Foliage Placement",
+		"label": "Foliage placement",
 		"dialog_title": "Load Foliage Placement",
 		"trn_key": "foliagemap",
 		"uniform": "u_foliagemap",
@@ -148,7 +146,7 @@ const SLOT_DEFS := {
 		"format": "pcx_paletted",
 	},
 	"tilestrip": {
-		"label": "Tile Atlas",
+		"label": "Tile atlas",
 		"dialog_title": "Load Tile Atlas",
 		"trn_key": "tilestrip",
 		"uniform": "u_tilestrip",
@@ -195,6 +193,10 @@ static func get_slot_label(slot_id: String) -> String:
 
 static func get_slot_dialog_title(slot_id: String) -> String:
 	return String(get_slot(slot_id).get("dialog_title", "Load Texture"))
+
+
+static func get_texture_file_filters() -> PackedStringArray:
+	return PackedStringArray(["%s ; %s" % [TEXTURE_FILE_FILTER, TEXTURE_FILE_FILTER_LABEL]])
 
 
 static func get_detail_slot_id(channel: int) -> String:

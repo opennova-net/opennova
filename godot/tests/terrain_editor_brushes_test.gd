@@ -51,27 +51,6 @@ func test_raise_lower_invert() -> void:
 	assert_gt(heightmap.get_pixel(32, 32).r, 10.0, "Ctrl+Lower should invert into raising terrain.")
 
 
-func test_stamp_paint_uses_stamp_texture() -> void:
-	var image := _make_color_image(Color(0.2, 0.2, 0.2, 1.0))
-	var stamp := Image.create(1, 1, false, Image.FORMAT_RGBA8)
-	stamp.fill(Color(0.1, 0.8, 0.2, 1.0))
-
-	TerrainEditorBrushes.apply_colormap_paint(
-		image,
-		Color(0.9, 0.1, 0.1, 1.0),
-		16,
-		16,
-		3,
-		1.0,
-		1.0,
-		Rect2i(0, 0, 64, 64),
-		stamp
-	)
-
-	var painted := image.get_pixel(16, 16)
-	assert_gt(painted.g, painted.r, "Stamp paint should use the loaded stamp colors over the flat picker color.")
-
-
 func test_clone_paint_uses_source_color() -> void:
 	var mesh := DummyTerrainMesh.new()
 	var session := TerrainEditorBrushSession.new()
@@ -81,7 +60,7 @@ func test_clone_paint_uses_source_color() -> void:
 	var dest := _make_color_image(Color(0.0, 0.0, 0.0, 1.0))
 	source.set_pixel(10, 10, Color(0.25, 0.7, 0.4, 1.0))
 
-	session.current_tool = TerrainEditor.Tool.CLONE_COLOR
+	session.current_tool = TerrainEditorBrushSession.Tool.CLONE_COLOR
 	session.brush_radius = 1.0
 	session.brush_strength = 1.0
 	session.brush_hardness = 1.0

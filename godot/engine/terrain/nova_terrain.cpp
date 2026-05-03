@@ -687,7 +687,10 @@ void NovaTerrain::build() {
 		return;
 	}
 
-	_build_terrain();
+	if (!_build_terrain()) {
+		UtilityFunctions::push_warning("NovaTerrain: no valid baked CPT data; skipping native mesh build");
+		return;
+	}
 	_build_quadtree();
 	_build_collision();
 
@@ -713,12 +716,24 @@ void NovaTerrain::build() {
 		" tiles, ", static_cast<int>(quad_nodes.size()), " quad nodes, pool=", PATCH_POOL_SIZE);
 }
 
-void NovaTerrain::_build_terrain() {
+bool NovaTerrain::_build_terrain() {
 	const auto& cpt = terrain_data->get_cpt();
 
-	if (cpt.tiles.empty() || cpt.depth_buffer.empty()) return;
+	if (cpt.tiles.empty() || cpt.depth_buffer.empty()) {
+		return false;
+	}
 
-	const int hm_size = 1024;
+	constexpr int hm_size = 1024;
+	constexpr size_t expected_depth_samples = static_cast<size_t>(hm_size) * static_cast<size_t>(hm_size);
+	if (cpt.depth_buffer.size() != expected_depth_samples) {
+		UtilityFunctions::push_warning(
+			"NovaTerrain: CPT depth buffer has ",
+			static_cast<int64_t>(cpt.depth_buffer.size()),
+			" samples; expected ",
+			static_cast<int64_t>(expected_depth_samples)
+		);
+		return false;
+	}
 	const float height_scale = 1.0f / 256.0f;
 
 	terrain_shader = _load_terrain_shader();
@@ -829,6 +844,7 @@ void NovaTerrain::_build_terrain() {
 
 	UtilityFunctions::print("NovaTerrain: ", total_verts, " verts, ", total_indices, " indices across ",
 		static_cast<int>(cpt.tiles.size()), " tiles");
+	return true;
 }
 
 void NovaTerrain::_build_quadtree() {

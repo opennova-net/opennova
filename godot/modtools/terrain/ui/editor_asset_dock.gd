@@ -3,19 +3,6 @@ extends PanelContainer
 
 const TerrainEditorSlots = preload("res://modtools/terrain/terrain_editor_slots.gd")
 
-const SLOT_FRIENDLY_LABELS := {
-	"detail_c1": "Detail A",
-	"detail_c2": "Detail B",
-	"detail_c3": "Detail C",
-	"detailmap": "Shading 1 / near",
-	"detailmapdist": "Shading 1 / far",
-	"detailmap2": "Shading 2 / near",
-	"detailmapdist2": "Shading 2 / far",
-	"charmap": "Surface types",
-	"foliagemap": "Foliage placement",
-	"tilestrip": "Tile atlas",
-}
-
 @onready var _tabs: TabContainer = %Tabs
 @onready var _terrain_properties_tab: Control = %TerrainPropertiesTab
 @onready var _assets_box: VBoxContainer = %AssetSectionsBox
@@ -157,7 +144,7 @@ func _build_slot_card(slot_id: String, meta: Dictionary) -> Control:
 	content.add_child(header)
 
 	var title_label := Label.new()
-	title_label.text = SLOT_FRIENDLY_LABELS.get(slot_id, String(meta.get("label", slot_id)))
+	title_label.text = TerrainEditorSlots.get_slot_label(slot_id)
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	if meta.has("tooltip"):
@@ -166,7 +153,7 @@ func _build_slot_card(slot_id: String, meta: Dictionary) -> Control:
 
 	var load_btn := Button.new()
 	load_btn.text = "Load"
-	load_btn.pressed.connect(_on_slot_load_pressed.bind(slot_id, String(meta.get("dialog_title", "Load texture"))))
+	load_btn.pressed.connect(_on_slot_load_pressed.bind(slot_id, TerrainEditorSlots.get_slot_dialog_title(slot_id)))
 	header.add_child(load_btn)
 
 	var reset_btn := Button.new()
@@ -237,7 +224,7 @@ func _on_slot_load_pressed(slot_id: String, dialog_title: String) -> void:
 		return
 	_open_file_dialog(
 		dialog_title,
-		PackedStringArray(["*.tga,*.pcx,*.png ; Texture files"]),
+		TerrainEditorSlots.get_texture_file_filters(),
 		func(path: String) -> void:
 			editor.load_texture_slot(slot_id, path)
 	)
