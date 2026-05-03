@@ -93,6 +93,28 @@ if(BUILD_SHARED_LIB)
         target_compile_definitions(${target} PRIVATE OPENNOVA_SHARED_EXPORTS)
         set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
     endforeach()
+
+    # Stage the built shared lib at the path blender/opennova/_native.py loads
+    # from, so pytest can import the FFI without package_addon.sh having run.
+    # blender/lib/**/*.{dll,so} are gitignored.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        set(_opennova_blender_lib_subdir "windows-x64")
+        set(_opennova_blender_lib_filename "opennova.dll")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(_opennova_blender_lib_subdir "linux-x64")
+        set(_opennova_blender_lib_filename "libopennova.so")
+    endif()
+
+    if(_opennova_blender_lib_subdir)
+        set(_opennova_blender_lib_dir
+            "${CMAKE_SOURCE_DIR}/blender/lib/${_opennova_blender_lib_subdir}")
+        add_custom_command(TARGET opennova_shared POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_opennova_blender_lib_dir}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:opennova_shared>"
+                "${_opennova_blender_lib_dir}/${_opennova_blender_lib_filename}"
+            VERBATIM)
+    endif()
 endif()
 
 # --------------------------------------------------------------------------
