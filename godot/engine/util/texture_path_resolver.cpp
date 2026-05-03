@@ -91,4 +91,42 @@ godot::String resolve_asset_path(const godot::String &dir, const godot::String &
 	return godot::String();
 }
 
+godot::String resolve_sidecar_path(const godot::String &dir, const godot::String &filename, const char *ext) {
+	if (filename.is_empty()) {
+		return godot::String();
+	}
+
+	const godot::String direct = dir.path_join(filename);
+	if (godot::FileAccess::file_exists(direct)) {
+		return direct;
+	}
+
+	const godot::String requested_ext = godot::String(ext).to_lower();
+	const godot::String file_dir = filename.get_base_dir();
+	const godot::String file_name = filename.get_file();
+	godot::String stem = file_name;
+	if (file_name.get_extension().to_lower() == requested_ext) {
+		stem = file_name.get_basename();
+	}
+	if (stem.is_empty()) {
+		stem = file_name;
+	}
+
+	const godot::String stem_lower = stem.to_lower();
+	const godot::String stem_upper = stem.to_upper();
+	const godot::String stems[] = {stem, stem_lower, stem_upper};
+	const godot::String exts[] = {requested_ext, requested_ext.to_upper()};
+	const godot::String search_dir = file_dir.is_empty() ? dir : dir.path_join(file_dir);
+	for (const godot::String &candidate_stem : stems) {
+		for (const godot::String &candidate_ext : exts) {
+			const godot::String candidate = search_dir.path_join(candidate_stem + godot::String(".") + candidate_ext);
+			if (godot::FileAccess::file_exists(candidate)) {
+				return candidate;
+			}
+		}
+	}
+
+	return godot::String();
+}
+
 } // namespace opennova

@@ -148,77 +148,10 @@ var _hover_hit := Vector3(-1.0, -1.0, -1.0)
 var _hover_hit_valid: bool = false
 var _active_sector_cell := Vector2i(-1, -1)
 
-var _stroke_last_hit: Vector3:
-	get:
-		return _brush_session._stroke_last_hit
-	set(value):
-		_brush_session._stroke_last_hit = value
-
-var _stroke_has_last_hit: bool:
-	get:
-		return _brush_session._stroke_has_last_hit
-	set(value):
-		_brush_session._stroke_has_last_hit = value
-
 var _export_job: NovaTerrainBuildJob
 var _export_output_dir: String = ""
 
-var _history:
-	get:
-		return _brush_session._history
-
-var _stroke_kind: int:
-	get:
-		return _brush_session._stroke_kind
-	set(value):
-		_brush_session._stroke_kind = value
-
-var _stroke_invert: bool:
-	get:
-		return _brush_session._stroke_invert
-	set(value):
-		_brush_session._stroke_invert = value
-
-var _paint_texture_image: Image:
-	get:
-		return _brush_session._paint_texture_image
-	set(value):
-		_brush_session._paint_texture_image = value
-
-var _paint_texture_filename: String:
-	get:
-		return _brush_session._paint_texture_filename
-	set(value):
-		_brush_session._paint_texture_filename = value
-
-var _clone_source_set: bool:
-	get:
-		return _brush_session._clone_source_set
-	set(value):
-		_brush_session._clone_source_set = value
-
-var _clone_source_world: Vector3:
-	get:
-		return _brush_session._clone_source_world
-	set(value):
-		_brush_session._clone_source_world = value
-
-var _clone_source_image: Image:
-	get:
-		return _brush_session._clone_source_image
-	set(value):
-		_brush_session._clone_source_image = value
-
-var _clone_offset_px: Vector2i:
-	get:
-		return _brush_session._clone_offset_px
-	set(value):
-		_brush_session._clone_offset_px = value
-
 var _clone_source_marker: MeshInstance3D
-
-# Diagnostic: trace height values through load/edit/export to compare with NovaTerrain.
-const _HEIGHT_DEBUG := false
 
 var _water_instance: MeshInstance3D
 var _water_plane_mesh: PlaneMesh
@@ -525,17 +458,17 @@ func _handle_viewport_input(event: InputEvent) -> void:
 			KEY_F: set_tool(Tool.FOLIAGE_PAINT)
 			KEY_G: set_tool(Tool.SURFACE_PAINT)
 			KEY_BRACKETLEFT:
-				set_brush_radius_value(maxf(1.0, brush_radius - 4.0))
+				set_brush_radius_value(maxf(TerrainEditorBrushSession.BRUSH_RADIUS_MIN, brush_radius - 4.0))
 			KEY_BRACKETRIGHT:
-				set_brush_radius_value(minf(128.0, brush_radius + 4.0))
+				set_brush_radius_value(minf(TerrainEditorBrushSession.BRUSH_RADIUS_MAX, brush_radius + 4.0))
 			KEY_SEMICOLON:
-				set_brush_strength_value(maxf(0.01, brush_strength - 0.05))
+				set_brush_strength_value(maxf(TerrainEditorBrushSession.BRUSH_STRENGTH_MIN, brush_strength - 0.05))
 			KEY_APOSTROPHE:
-				set_brush_strength_value(minf(5.0, brush_strength + 0.05))
+				set_brush_strength_value(minf(TerrainEditorBrushSession.BRUSH_STRENGTH_MAX, brush_strength + 0.05))
 			KEY_COMMA:
-				set_brush_hardness_value(maxf(0.0, brush_hardness - 0.05))
+				set_brush_hardness_value(maxf(TerrainEditorBrushSession.BRUSH_HARDNESS_MIN, brush_hardness - 0.05))
 			KEY_PERIOD:
-				set_brush_hardness_value(minf(1.0, brush_hardness + 0.05))
+				set_brush_hardness_value(minf(TerrainEditorBrushSession.BRUSH_HARDNESS_MAX, brush_hardness + 0.05))
 
 
 func _process(delta: float) -> void:
@@ -873,7 +806,7 @@ func get_paint_detail_channel() -> int:
 func set_brush_radius_value(value: float) -> void:
 	if is_export_running():
 		return
-	var next := clampf(value, 1.0, 128.0)
+	var next := clampf(value, TerrainEditorBrushSession.BRUSH_RADIUS_MIN, TerrainEditorBrushSession.BRUSH_RADIUS_MAX)
 	if is_equal_approx(brush_radius, next):
 		return
 	brush_radius = next
@@ -883,7 +816,7 @@ func set_brush_radius_value(value: float) -> void:
 func set_brush_strength_value(value: float) -> void:
 	if is_export_running():
 		return
-	var next := clampf(value, 0.01, 5.0)
+	var next := clampf(value, TerrainEditorBrushSession.BRUSH_STRENGTH_MIN, TerrainEditorBrushSession.BRUSH_STRENGTH_MAX)
 	if is_equal_approx(brush_strength, next):
 		return
 	brush_strength = next
@@ -893,7 +826,7 @@ func set_brush_strength_value(value: float) -> void:
 func set_brush_hardness_value(value: float) -> void:
 	if is_export_running():
 		return
-	var next := clampf(value, 0.0, 1.0)
+	var next := clampf(value, TerrainEditorBrushSession.BRUSH_HARDNESS_MIN, TerrainEditorBrushSession.BRUSH_HARDNESS_MAX)
 	if is_equal_approx(brush_hardness, next):
 		return
 	brush_hardness = next
@@ -1108,13 +1041,6 @@ func get_foliage_defs() -> Array[NovaTerrainFoliageDef]:
 
 func get_foliage_map() -> NovaTerrainFoliageMap:
 	return _document.foliage_map
-
-
-func get_foliage_preview_summary() -> Dictionary:
-	if _foliage_preview == null:
-		return {}
-	_sync_foliage_preview()
-	return _foliage_preview.get_preview_summary()
 
 
 func get_selected_foliage_def_index() -> int:
@@ -1347,31 +1273,6 @@ func reset_tileinfo() -> void:
 	_sync_hud_from_editor()
 
 
-func load_paint_texture(path: String) -> void:
-	if is_export_running():
-		return
-	if not _brush_session.load_paint_texture(path):
-		return
-	_update_hud()
-
-
-func clear_paint_texture() -> void:
-	_brush_session.clear_paint_texture()
-	_update_hud()
-
-
-func get_paint_texture() -> Image:
-	return _brush_session.get_paint_texture()
-
-
-func get_paint_texture_filename() -> String:
-	return _brush_session.get_paint_texture_filename()
-
-
-func has_paint_texture() -> bool:
-	return _brush_session.has_paint_texture()
-
-
 func _tile_cell_from_world(world_x: float, world_z: float) -> Vector2i:
 	return Vector2i(
 		int(floor(world_x / float(NovaTerrainTileInfo.CELL_WORLD_SIZE))),
@@ -1465,21 +1366,19 @@ func _sync_foliage_preview() -> void:
 
 func _apply_foliage_paint_stroke(delta: float) -> bool:
 	if _document.foliage_map == null or not _hover_hit_valid:
-		_stroke_has_last_hit = false
+		_brush_session.reset_stroke_tracking()
 		return false
 
 	var target_index := 0
 	if not Input.is_key_pressed(KEY_CTRL):
 		target_index = _document.get_selected_foliage_paint_index()
 		if target_index < 0:
-			_stroke_has_last_hit = false
+			_brush_session.reset_stroke_tracking()
 			return false
 
-	var start_hit: Vector3 = _stroke_last_hit if _stroke_has_last_hit else _hover_hit
+	var start_hit := _brush_session.get_stroke_start_hit(_hover_hit)
 	var end_hit := _hover_hit
-	var spacing := maxf(1.0, brush_radius * 0.25)
-	var distance := Vector2(end_hit.x - start_hit.x, end_hit.z - start_hit.z).length()
-	var dab_count: int = 1 if not _stroke_has_last_hit else maxi(1, int(ceil(distance / spacing)))
+	var dab_count := _brush_session.get_stroke_dab_count(start_hit, end_hit)
 	var map_width := maxi(_document.foliage_map.get_width(), 1)
 	var map_height := maxi(_document.foliage_map.get_height(), 1)
 	var radius_pixels := maxi(1, int(round(brush_radius * float(map_width) / float(HM_SIZE))))
@@ -1504,8 +1403,7 @@ func _apply_foliage_paint_stroke(delta: float) -> bool:
 			target_index
 		) or changed
 
-	_stroke_last_hit = end_hit
-	_stroke_has_last_hit = true
+	_brush_session.commit_stroke_hit(end_hit)
 	if changed:
 		_foliage_map_stroke_changed = true
 	return changed
@@ -1584,20 +1482,18 @@ func _sync_tile_overlay_preview() -> void:
 
 func _apply_surface_paint_stroke(_delta: float) -> bool:
 	if _document.surface_map_state.is_empty() or not _hover_hit_valid:
-		_stroke_has_last_hit = false
+		_brush_session.reset_stroke_tracking()
 		return false
 
 	var map_width := int(_document.surface_map_state.get("width", 0))
 	var map_height := int(_document.surface_map_state.get("height", 0))
 	if map_width <= 0 or map_height <= 0:
-		_stroke_has_last_hit = false
+		_brush_session.reset_stroke_tracking()
 		return false
 
-	var start_hit: Vector3 = _stroke_last_hit if _stroke_has_last_hit else _hover_hit
+	var start_hit := _brush_session.get_stroke_start_hit(_hover_hit)
 	var end_hit := _hover_hit
-	var spacing := maxf(1.0, brush_radius * 0.25)
-	var distance := Vector2(end_hit.x - start_hit.x, end_hit.z - start_hit.z).length()
-	var dab_count: int = 1 if not _stroke_has_last_hit else maxi(1, int(ceil(distance / spacing)))
+	var dab_count := _brush_session.get_stroke_dab_count(start_hit, end_hit)
 	var radius_pixels := maxi(1, int(round(brush_radius * float(map_width) / float(HM_SIZE))))
 	var target_index := _get_surface_paint_index(Input.is_key_pressed(KEY_CTRL))
 	var changed := false
@@ -1626,8 +1522,7 @@ func _apply_surface_paint_stroke(_delta: float) -> bool:
 		_document.restore_surface_map_history_state(_get_material(), _document.surface_map_state)
 		_surface_map_stroke_changed = true
 
-	_stroke_last_hit = end_hit
-	_stroke_has_last_hit = true
+	_brush_session.commit_stroke_hit(end_hit)
 	return changed
 
 
@@ -1702,7 +1597,7 @@ func _on_primary_start() -> void:
 		_surface_map_stroke_before = _document.capture_surface_map_history_state()
 		_surface_map_stroke_changed = false
 		brush_active = true
-		_stroke_has_last_hit = false
+		_brush_session.reset_stroke_tracking()
 		_apply_surface_paint_stroke(1.0 / 60.0)
 		return
 	if current_tool == Tool.FOLIAGE_PAINT:
@@ -1718,7 +1613,7 @@ func _on_primary_start() -> void:
 		_foliage_map_stroke_before = _document.capture_foliage_map_history_state()
 		_foliage_map_stroke_changed = false
 		brush_active = true
-		_stroke_has_last_hit = false
+		_brush_session.reset_stroke_tracking()
 		_apply_foliage_paint_stroke(1.0 / 60.0)
 		return
 	if current_tool == Tool.CLONE_COLOR:
@@ -1726,7 +1621,7 @@ func _on_primary_start() -> void:
 			_set_clone_source(_hover_hit)
 			_update_hud()
 			return
-		if not _clone_source_set or not _hover_hit_valid:
+		if not _brush_session.has_clone_source() or not _hover_hit_valid:
 			return
 		if not _brush_session.prepare_clone_drag(_hover_hit, terrain_mesh):
 			return
@@ -1743,7 +1638,7 @@ func _on_primary_start() -> void:
 func _on_primary_end() -> void:
 	if current_tool == Tool.SURFACE_PAINT:
 		brush_active = false
-		_stroke_has_last_hit = false
+		_brush_session.reset_stroke_tracking()
 		if _surface_map_stroke_changed:
 			var after_state := _document.capture_surface_map_history_state()
 			_push_surface_map_history(_surface_map_stroke_before, after_state)
@@ -1754,7 +1649,7 @@ func _on_primary_end() -> void:
 		return
 	if current_tool == Tool.FOLIAGE_PAINT:
 		brush_active = false
-		_stroke_has_last_hit = false
+		_brush_session.reset_stroke_tracking()
 		if _foliage_map_stroke_changed:
 			var after_state := _document.capture_foliage_map_history_state()
 			_push_foliage_map_history(_foliage_map_stroke_before, after_state)
@@ -1764,28 +1659,7 @@ func _on_primary_end() -> void:
 		_foliage_map_stroke_before = {}
 		_foliage_map_stroke_changed = false
 		return
-	var result := _brush_session.end_brush_drag(_source_image_for_kind(_stroke_kind))
-	if result.get("history_committed", false):
-		if _HEIGHT_DEBUG and result.get("history_kind", -1) == TerrainEditHistory.Kind.HEIGHTMAP:
-			_log_stroke_height_delta()
-
-
-func _log_stroke_height_delta() -> void:
-	if _history._undo_stack.is_empty():
-		return
-	var snap: Dictionary = _history._undo_stack.back()
-	var rect: Rect2i = snap["rect"]
-	var before: Image = snap["before"]
-	var after: Image = snap["after"]
-	if rect.size.x <= 0 or rect.size.y <= 0:
-		return
-	var lx := rect.size.x / 2
-	var ly := rect.size.y / 2
-	var bx := rect.position.x + lx
-	var by := rect.position.y + ly
-	var before_v: float = before.get_pixel(lx, ly).r
-	var after_v: float = after.get_pixel(lx, ly).r
-	print("[height-debug] STROKE at rect center atlas (%d,%d): before=%.4f after=%.4f delta=%.4f" % [bx, by, before_v, after_v, after_v - before_v])
+	_brush_session.end_brush_drag(_source_image_for_kind(_brush_session.get_stroke_kind()))
 
 
 func _raycast_terrain() -> Vector3:
@@ -1979,10 +1853,6 @@ func _apply_history_snapshot(snapshot: Dictionary, is_undo: bool) -> void:
 		_colormap_tex.update(_colormap_image)
 	if result["changed_heightmap"] or result["changed_blendmap"] or result["changed_colormap"]:
 		is_dirty = true
-
-
-func _history_kind_for_tool(tool: Tool) -> int:
-	return _brush_session.history_kind_for_tool(tool)
 
 
 func _source_image_for_kind(kind: int) -> Image:
@@ -2346,7 +2216,7 @@ func begin_export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO)
 	_export_job = job
 	_export_output_dir = output_dir
 	brush_active = false
-	_stroke_has_last_hit = false
+	_brush_session.reset_stroke_tracking()
 	_remember_export_dir(output_dir)
 
 	if workstation and workstation.has_method("on_export_started"):
@@ -2452,20 +2322,6 @@ func _build_heightmap_from_data() -> Image:
 
 func _build_heightmap_from_raw16(raw_bytes: PackedByteArray) -> Image:
 	return _document.build_heightmap_from_raw16(raw_bytes)
-
-
-func _log_image_stats(tag: String, image: Image) -> void:
-	var data := image.get_data()
-	var count := HM_SIZE * HM_SIZE
-	var lo := INF
-	var hi := -INF
-	var sum := 0.0
-	for i in count:
-		var v := data.decode_float(i * 4)
-		lo = minf(lo, v)
-		hi = maxf(hi, v)
-		sum += v
-	print("[height-debug] %s image stats: min=%.4f max=%.4f avg=%.4f" % [tag, lo, hi, sum / float(count)])
 
 
 func _set_heightmap_image(image: Image) -> void:

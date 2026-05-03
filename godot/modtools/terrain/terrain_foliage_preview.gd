@@ -10,7 +10,6 @@ extends Node3D
 # Same dispatcher class is used by the runtime scene (main_game.tscn); only
 # the samplers differ (runtime reads from NovaTerrainData directly).
 
-const INVALID_CELL := Vector2i(-9999, -9999)
 const INVALID_HEIGHT := -1000000.0
 
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
@@ -52,11 +51,8 @@ func set_preview_state(
 	camera: Camera3D,
 	foliage_map: NovaTerrainFoliageMap,
 	foliage_defs: Array,
-	selected_index: int,
-	focus_sector_cell: Vector2i = INVALID_CELL
+	selected_index: int
 ) -> void:
-	var _unused := focus_sector_cell  # retained in signature for API compat
-
 	var terrain_changed := _terrain_mesh != terrain_mesh
 	var map_changed := _foliage_map != foliage_map
 	var defs_changed := _defs_changed_raw(foliage_defs)
@@ -145,18 +141,3 @@ func rebuild_if_needed() -> void:
 		return
 	_last_camera_cell_key = key
 	_dispatcher.dispatch(_camera.global_position)
-
-
-func get_preview_summary() -> Dictionary:
-	if _dispatcher == null:
-		return {
-			"total_instances": 0,
-			"selected_instances": 0,
-			"center_cell": INVALID_CELL,
-		}
-	var total: int = _dispatcher.get_total_instances()
-	return {
-		"total_instances": total,
-		"selected_instances": total,
-		"center_cell": INVALID_CELL,
-	}

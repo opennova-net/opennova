@@ -64,16 +64,9 @@ static func apply_blend_paint(image: Image, channel: int, cx: int, cz: int, radi
 	)
 
 
-static func apply_colormap_paint(image: Image, color: Color, cx: int, cz: int, radius: int, strength: float, hardness: float, clip_rect: Rect2i, stamp_image: Image = null) -> void:
-	var stamp_w := 0
-	var stamp_h := 0
-	if stamp_image != null:
-		stamp_w = stamp_image.get_width()
-		stamp_h = stamp_image.get_height()
+static func apply_colormap_paint(image: Image, color: Color, cx: int, cz: int, radius: int, strength: float, hardness: float, clip_rect: Rect2i) -> void:
 	_for_each_brush_pixel(image, cx, cz, radius, hardness, clip_rect, func(x: int, z: int, falloff: float) -> void:
 		var target := color
-		if stamp_image != null and stamp_w > 0 and stamp_h > 0:
-			target = stamp_image.get_pixel(x % stamp_w, z % stamp_h)
 		var current := image.get_pixel(x, z)
 		var t := clampf(strength * falloff * falloff, 0.0, 1.0)
 		image.set_pixel(x, z, current.lerp(target, t))
@@ -103,46 +96,6 @@ static func sample_flatten_target(image: Image, world_x: float, world_z: float) 
 	var sample_x := clampi(int(world_x), 0, image.get_width() - 1)
 	var sample_z := clampi(int(world_z), 0, image.get_height() - 1)
 	return image.get_pixel(sample_x, sample_z).r
-
-
-static func generate_normal_map(source: Image, scale: float = 0.03125) -> Image:
-	var w := source.get_width()
-	var h := source.get_height()
-	var mask_x := w - 1
-	var mask_y := h - 1
-	var result := Image.create(w, h, false, Image.FORMAT_RGBA8)
-
-	for y in h:
-		for x in w:
-			var center := source.get_pixel(x, y).r
-
-			# Forward differences
-			var dx_fwd := (source.get_pixel((x + 1) & mask_x, y).r - center) * scale
-			var dy_fwd := (source.get_pixel(x, (y - 1) & mask_y).r - center) * scale
-
-			# Backward differences
-			var dx_bwd := (center - source.get_pixel((x - 1) & mask_x, y).r) * scale
-			var dy_bwd := (center - source.get_pixel(x, (y + 1) & mask_y).r) * scale
-
-			# Average forward and backward normals
-			var nx := -(dx_fwd + dx_bwd)
-			var ny := -(dy_fwd + dy_bwd)
-			var nz := 2.0
-
-			# Normalize
-			var length := sqrt(nx * nx + ny * ny + nz * nz)
-			if length > 0.0:
-				nx /= length
-				ny /= length
-				nz /= length
-
-			# Flip Y (matching original engine)
-			ny = -ny
-
-			# Encode [-1,1] -> [0,1]
-			result.set_pixel(x, y, Color((nx + 1.0) * 0.5, (ny + 1.0) * 0.5, (nz + 1.0) * 0.5, 1.0))
-
-	return result
 
 
 static func _for_each_brush_pixel(image: Image, cx: int, cz: int, radius: int, hardness: float, clip_rect: Rect2i, callback: Callable) -> void:

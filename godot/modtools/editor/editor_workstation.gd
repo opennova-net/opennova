@@ -13,17 +13,9 @@ const RESOURCE_STATE_SECTION := "resources"
 const RESOURCE_DIR_KEY := "resource_dir"
 const RESOURCE_RECURSIVE_KEY := "resource_recursive"
 
-const WORKSPACE_LABELS := {
-	Workspace.TERRAIN: "Terrain",
-	Workspace.ENVIRONMENT: "Environment",
-	Workspace.MISSION: "Mission",
-}
-
 const SELECTABLE_WORKSPACES := [Workspace.TERRAIN, Workspace.MISSION]
 
 enum PromptKind { NONE, UNSAVED, EXPORT, CDEP }
-
-signal workflow_changed(workflow_id: int)
 
 enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 
@@ -59,7 +51,6 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _status_context_label: Label = %StatusContextLabel
 @onready var _status_camera_label: Label = %StatusCameraLabel
 @onready var _status_fps_label: Label = %StatusFpsLabel
-@onready var _status_sep2: VSeparator = %StatusSep2
 @onready var _tile_gizmo: PanelContainer = %TileGizmo
 @onready var _tile_gizmo_label: Label = %TileGizmoLabel
 @onready var _tile_gizmo_done: Button = %TileGizmoDone
@@ -91,7 +82,7 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 var editor: Node
 var _active_workspace_id: int = Workspace.TERRAIN
 var _workspaces: Dictionary = {}
-var _environment_workspace
+var _environment_workspace: EnvironmentEditorWorkspace
 var _workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
 var _environment_action_buttons: Dictionary = {}
@@ -102,7 +93,7 @@ var _resource_recursive: bool = true
 var _mounted_workspace_id: int = -1
 var _current_workflow_id: int = -1
 var _workflow_buttons: Dictionary = {}
-var _placeholder_workspace_id: int = -1
+var _inspector_workspace_id: int = -1
 var _message_text: String = ""
 var _message_until: float = 0.0
 var _export_ui_active: bool = false
@@ -153,8 +144,7 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	for workspace in _workspaces.values():
-		if workspace != null and workspace.has_method("release_viewport"):
-			workspace.release_viewport()
+		(workspace as EditorWorkspace).release_viewport()
 	_clear_viewport_host()
 	_mounted_workspace_id = -1
 
@@ -162,13 +152,13 @@ func _exit_tree() -> void:
 func set_editor(value: Node) -> void:
 	editor = value
 	_ensure_workspaces()
-	var terrain_workspace = _workspaces.get(Workspace.TERRAIN)
-	if terrain_workspace != null and terrain_workspace.has_method("set_terrain_editor"):
+	var terrain_workspace := _get_workspace(Workspace.TERRAIN) as TerrainEditorWorkspace
+	if terrain_workspace != null:
 		terrain_workspace.set_terrain_editor(value)
-	var mission_workspace = _workspaces.get(Workspace.MISSION)
-	if mission_workspace != null and mission_workspace.has_method("set_terrain_editor"):
+	var mission_workspace := _get_workspace(Workspace.MISSION) as MissionEditorWorkspace
+	if mission_workspace != null:
 		mission_workspace.set_terrain_editor(value)
-	if _environment_workspace != null and _environment_workspace.has_method("set_environment_editor") and value != null and value.has_method("get_environment_editor"):
+	if _environment_workspace != null and value != null and value.has_method("get_environment_editor"):
 		_environment_workspace.set_environment_editor(value.get_environment_editor())
 	_reset_environment_popup_content()
 	_sync_camera_popup_editor()
@@ -191,7 +181,7 @@ func sync_from_editor_state() -> void:
 	_sync_export_progress()
 	_refresh_camera_popup_state()
 	_refresh_environment_popup_state()
-	var workspace = _get_active_workspace()
+	var workspace := _get_active_workspace()
 	if workspace != null:
 		workspace.sync_asset_dock()
 
@@ -211,16 +201,16 @@ func _ensure_workspaces() -> void:
 		var environment_editor: Variant = editor.get_environment_editor() if editor != null and editor.has_method("get_environment_editor") else null
 		_environment_workspace = EnvironmentWorkspaceAdapter.new(environment_editor)
 	for workspace in _workspaces.values():
-		if workspace != null and workspace.has_method("set_editor_shell"):
-			workspace.set_editor_shell(self)
-	if _environment_workspace != null and _environment_workspace.has_method("set_editor_shell"):
+		(workspace as EditorWorkspace).set_editor_shell(self)
+	if _environment_workspace != null:
 		_environment_workspace.set_editor_shell(self)
 
 
 func _build_workspace_rail() -> void:
 	for workspace_id in SELECTABLE_WORKSPACES:
+		var workspace := _get_workspace(workspace_id)
 		var btn := Button.new()
-		btn.text = WORKSPACE_LABELS[workspace_id]
+		btn.text = workspace.get_workspace_label() if workspace != null else "Workspace"
 		btn.toggle_mode = true
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.custom_minimum_size = Vector2(0, 36)
@@ -232,16 +222,7 @@ func _build_workspace_rail() -> void:
 	_refresh_workspace_buttons()
 
 
-func _rebuild_workspace_actions(workspace: Variant) -> void:
-	for child in _workspace_actions_host.get_children():
-		_workspace_actions_host.remove_child(child)
-		child.free()
-	_workspace_action_buttons.clear()
-
-	if workspace == null:
-		_workspace_actions_host.visible = false
-		return
-
+func _action_defs_for_workspace(workspace: EditorWorkspace) -> Array:
 	var action_defs := [
 		{"id": WorkspaceAction.NEW, "visible": workspace.has_new_action(), "label": workspace.get_new_action_label()},
 		{"id": WorkspaceAction.OPEN, "visible": workspace.has_open_action(), "label": workspace.get_open_action_label()},
@@ -249,21 +230,47 @@ func _rebuild_workspace_actions(workspace: Variant) -> void:
 		{"id": WorkspaceAction.SAVE_AS, "visible": workspace.has_save_as_action(), "label": workspace.get_save_as_action_label()},
 		{"id": WorkspaceAction.EXPORT, "visible": workspace.has_export_action(), "label": workspace.get_export_action_label()},
 	]
+	return action_defs
+
+
+func _rebuild_action_buttons(
+	workspace: EditorWorkspace,
+	host: VBoxContainer,
+	buttons: Dictionary,
+	on_pressed: Callable,
+	name_prefix: String = "",
+	min_height: float = 34.0
+) -> void:
+	for child in host.get_children():
+		host.remove_child(child)
+		child.free()
+	buttons.clear()
+
+	if workspace == null:
+		host.visible = false
+		return
+
+	var action_defs := _action_defs_for_workspace(workspace)
 	for action_def in action_defs:
 		if not bool(action_def["visible"]):
 			continue
 		var btn := Button.new()
 		var action_id := int(action_def["id"])
-		btn.name = _workspace_action_button_name(action_id)
+		btn.name = name_prefix + _workspace_action_button_name(action_id)
 		btn.text = String(action_def["label"])
 		btn.focus_mode = Control.FOCUS_NONE
-		btn.custom_minimum_size = Vector2(0, 34)
+		btn.custom_minimum_size = Vector2(0, min_height)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.pressed.connect(_on_workspace_action_pressed.bind(action_id))
-		_workspace_actions_host.add_child(btn)
-		_workspace_action_buttons[action_id] = btn
+		btn.pressed.connect(on_pressed.bind(action_id))
+		host.add_child(btn)
+		buttons[action_id] = btn
 
-	_workspace_actions_host.visible = not _workspace_action_buttons.is_empty()
+	host.visible = not buttons.is_empty()
+	_refresh_action_buttons_state(workspace, buttons)
+
+
+func _rebuild_workspace_actions(workspace: EditorWorkspace) -> void:
+	_rebuild_action_buttons(workspace, _workspace_actions_host, _workspace_action_buttons, Callable(self, "_on_workspace_action_pressed"))
 	_refresh_workspace_actions_state()
 
 
@@ -286,10 +293,14 @@ func _workspace_action_button_name(action_id: int) -> String:
 func _refresh_workspace_actions_state() -> void:
 	if _workspace_actions_host == null:
 		return
-	var workspace = _get_active_workspace()
+	var workspace := _get_active_workspace()
+	_refresh_action_buttons_state(workspace, _workspace_action_buttons)
+
+
+func _refresh_action_buttons_state(workspace: EditorWorkspace, buttons: Dictionary) -> void:
 	var busy := _any_workspace_busy()
-	for action_id in _workspace_action_buttons:
-		var btn := _workspace_action_buttons[action_id] as Button
+	for action_id in buttons:
+		var btn := buttons[action_id] as Button
 		if btn == null:
 			continue
 		match int(action_id):
@@ -329,14 +340,14 @@ func set_active_workspace(workspace_id: int) -> void:
 	if not _workspaces.has(workspace_id) or workspace_id == _active_workspace_id:
 		_refresh_workspace_buttons()
 		return
-	var current_workspace = _get_active_workspace()
-	if current_workspace != null and current_workspace.has_method("deactivate"):
+	var current_workspace := _get_active_workspace()
+	if current_workspace != null:
 		current_workspace.deactivate()
 	_unmount_workspace_viewport(_active_workspace_id, current_workspace)
 	_active_workspace_id = workspace_id
-	var next_workspace = _get_active_workspace()
+	var next_workspace := _get_active_workspace()
 	_mount_active_workspace_viewport()
-	if next_workspace != null and next_workspace.has_method("activate"):
+	if next_workspace != null:
 		next_workspace.activate()
 	_refresh_workspace_surface()
 	sync_from_editor_state()
@@ -346,27 +357,30 @@ func get_active_workspace_id() -> int:
 	return _active_workspace_id
 
 
-func _get_active_workspace() -> Variant:
-	return _workspaces.get(_active_workspace_id)
+func _get_workspace(workspace_id: int) -> EditorWorkspace:
+	return _workspaces.get(workspace_id) as EditorWorkspace
+
+
+func _get_active_workspace() -> EditorWorkspace:
+	return _get_workspace(_active_workspace_id)
 
 
 func _mount_active_workspace_viewport() -> void:
 	if _viewport_host == null:
 		return
 	_clear_viewport_host()
-	var workspace = _get_active_workspace()
+	var workspace := _get_active_workspace()
 	if workspace == null:
 		_mounted_workspace_id = -1
 		return
-	if workspace.has_method("mount_viewport"):
-		workspace.mount_viewport(_viewport_host)
+	workspace.mount_viewport(_viewport_host)
 	_mounted_workspace_id = _active_workspace_id
 
 
-func _unmount_workspace_viewport(workspace_id: int, workspace: Variant) -> void:
+func _unmount_workspace_viewport(workspace_id: int, workspace: EditorWorkspace) -> void:
 	if _viewport_host == null:
 		return
-	if workspace != null and workspace.has_method("unmount_viewport"):
+	if workspace != null:
 		workspace.unmount_viewport(_viewport_host)
 	_clear_viewport_host()
 	if _mounted_workspace_id == workspace_id:
@@ -374,7 +388,7 @@ func _unmount_workspace_viewport(workspace_id: int, workspace: Variant) -> void:
 
 
 func _remount_active_workspace_viewport() -> void:
-	var workspace = _get_active_workspace()
+	var workspace := _get_active_workspace()
 	_unmount_workspace_viewport(_active_workspace_id, workspace)
 	_mount_active_workspace_viewport()
 
@@ -392,9 +406,9 @@ func _is_terrain_workspace_active() -> bool:
 
 func _any_workspace_busy() -> bool:
 	for workspace in _workspaces.values():
-		if workspace != null and workspace.has_method("is_busy") and workspace.is_busy():
+		if (workspace as EditorWorkspace).is_busy():
 			return true
-	if _environment_workspace != null and _environment_workspace.has_method("is_busy") and _environment_workspace.is_busy():
+	if _environment_workspace != null and _environment_workspace.is_busy():
 		return true
 	return false
 
@@ -408,7 +422,7 @@ func _refresh_workspace_buttons() -> void:
 
 
 func _refresh_workspace_surface() -> void:
-	var workspace = _get_active_workspace()
+	var workspace := _get_active_workspace()
 	var workflows: Array = workspace.get_workflows() if workspace != null else []
 	var has_workflows: bool = not workflows.is_empty()
 	_rebuild_workspace_actions(workspace)
@@ -419,7 +433,7 @@ func _refresh_workspace_surface() -> void:
 		workspace.set_asset_dock(_asset_dock if _asset_dock.visible else null)
 	_rebuild_workflow_rail(workflows)
 	if has_workflows:
-		_placeholder_workspace_id = -1
+		_inspector_workspace_id = -1
 		_current_workflow_id = -1
 		_refresh_workflow_from_workspace()
 	else:
@@ -427,13 +441,13 @@ func _refresh_workspace_surface() -> void:
 	_refresh_workspace_buttons()
 
 
-func _show_workspace_inspector(workspace: Variant) -> void:
-	if _placeholder_workspace_id == _active_workspace_id:
+func _show_workspace_inspector(workspace: EditorWorkspace) -> void:
+	if _inspector_workspace_id == _active_workspace_id:
 		return
-	_placeholder_workspace_id = _active_workspace_id
+	_inspector_workspace_id = _active_workspace_id
 	for child in _inspector_host.get_children():
 		child.queue_free()
-	if workspace != null and workspace.has_method("build_inspector"):
+	if workspace != null:
 		workspace.build_inspector(_inspector_host)
 		if _inspector_host.get_child_count() > 0:
 			return
@@ -686,26 +700,14 @@ func _ensure_environment_popup_content() -> void:
 	if _environment_workspace == null:
 		return
 	if _environment_actions_host != null and _environment_action_buttons.is_empty():
-		var action_defs := [
-			{"id": WorkspaceAction.NEW, "visible": _environment_workspace.has_new_action(), "label": _environment_workspace.get_new_action_label()},
-			{"id": WorkspaceAction.OPEN, "visible": _environment_workspace.has_open_action(), "label": _environment_workspace.get_open_action_label()},
-			{"id": WorkspaceAction.SAVE, "visible": _environment_workspace.has_save_action(), "label": _environment_workspace.get_save_action_label()},
-			{"id": WorkspaceAction.SAVE_AS, "visible": _environment_workspace.has_save_as_action(), "label": _environment_workspace.get_save_as_action_label()},
-			{"id": WorkspaceAction.EXPORT, "visible": _environment_workspace.has_export_action(), "label": _environment_workspace.get_export_action_label()},
-		]
-		for action_def in action_defs:
-			if not bool(action_def["visible"]):
-				continue
-			var btn := Button.new()
-			var action_id := int(action_def["id"])
-			btn.name = "Environment" + _workspace_action_button_name(action_id)
-			btn.text = String(action_def["label"])
-			btn.focus_mode = Control.FOCUS_NONE
-			btn.custom_minimum_size = Vector2(0, 32)
-			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			btn.pressed.connect(_on_environment_action_pressed.bind(action_id))
-			_environment_actions_host.add_child(btn)
-			_environment_action_buttons[action_id] = btn
+		_rebuild_action_buttons(
+			_environment_workspace,
+			_environment_actions_host,
+			_environment_action_buttons,
+			Callable(self, "_on_environment_action_pressed"),
+			"Environment",
+			32.0
+		)
 	if _environment_inspector_host != null and _environment_inspector_host.get_child_count() == 0:
 		_environment_workspace.build_inspector(_environment_inspector_host)
 
@@ -713,22 +715,7 @@ func _ensure_environment_popup_content() -> void:
 func _refresh_environment_popup_state() -> void:
 	if _environment_popup_title != null:
 		_environment_popup_title.text = _environment_workspace.get_project_title() if _environment_workspace != null else "Environment"
-	var busy := _any_workspace_busy()
-	for action_id in _environment_action_buttons:
-		var btn := _environment_action_buttons[action_id] as Button
-		if btn == null:
-			continue
-		match int(action_id):
-			WorkspaceAction.NEW:
-				btn.disabled = busy or _environment_workspace == null or not _environment_workspace.can_new()
-			WorkspaceAction.OPEN:
-				btn.disabled = busy or _environment_workspace == null or not _environment_workspace.can_open()
-			WorkspaceAction.SAVE:
-				btn.disabled = busy or _environment_workspace == null or not _environment_workspace.can_save()
-			WorkspaceAction.SAVE_AS:
-				btn.disabled = busy or _environment_workspace == null or not _environment_workspace.can_save_as()
-			WorkspaceAction.EXPORT:
-				btn.disabled = busy or _environment_workspace == null or not _environment_workspace.can_export()
+	_refresh_action_buttons_state(_environment_workspace, _environment_action_buttons)
 
 
 func _on_settings_toggle_toggled(pressed: bool) -> void:
@@ -887,7 +874,7 @@ func _on_environment_action_pressed(action_id: int) -> void:
 	_refresh_environment_popup_state()
 
 
-func _run_workspace_action(workspace: Variant, action_id: int) -> void:
+func _run_workspace_action(workspace: EditorWorkspace, action_id: int) -> void:
 	if workspace == null:
 		return
 	var open_trn := func(path: String) -> void:
@@ -918,7 +905,7 @@ func _run_workspace_action(workspace: Variant, action_id: int) -> void:
 			_on_export_pressed(workspace)
 
 
-func _open_resource_browser(workspace: Variant, on_pick: Callable) -> void:
+func _open_resource_browser(workspace: EditorWorkspace, on_pick: Callable) -> void:
 	if workspace == null:
 		return
 	var kind := String(workspace.get_open_resource_kind()).strip_edges()
@@ -1085,10 +1072,10 @@ func _resource_browser_kind_label() -> String:
 
 
 func _current_resource_path_for_browser() -> String:
-	var workspace = _get_active_workspace()
+	var workspace := _get_active_workspace()
 	if _environment_popup != null and _environment_popup.visible and _resource_browser_kind == "environment":
 		workspace = _environment_workspace
-	if workspace != null and workspace.has_method("get_current_resource_path"):
+	if workspace != null:
 		return workspace.get_current_resource_path()
 	return ""
 
@@ -1199,7 +1186,7 @@ func _open_dir_dialog(title: String, on_pick: Callable, current_dir: String = ""
 	dialog.popup_centered()
 
 
-func _preferred_save_dir(workspace: Variant = null) -> String:
+func _preferred_save_dir(workspace: EditorWorkspace = null) -> String:
 	if workspace == null:
 		workspace = _get_active_workspace()
 	if workspace != null:
@@ -1213,7 +1200,7 @@ func _preferred_save_dir(workspace: Variant = null) -> String:
 	return editor.get_last_save_dir()
 
 
-func _preferred_export_dir(workspace: Variant = null) -> String:
+func _preferred_export_dir(workspace: EditorWorkspace = null) -> String:
 	if workspace == null:
 		workspace = _get_active_workspace()
 	if workspace != null:
@@ -1229,7 +1216,7 @@ func _preferred_export_dir(workspace: Variant = null) -> String:
 	return editor.get_last_save_dir()
 
 
-func _on_save_pressed(workspace: Variant = null) -> void:
+func _on_save_pressed(workspace: EditorWorkspace = null) -> void:
 	if workspace == null:
 		workspace = _get_active_workspace()
 	if workspace == null:
@@ -1247,7 +1234,7 @@ func _on_save_pressed(workspace: Variant = null) -> void:
 		show_status_message("%s save is not available." % workspace.get_workspace_label(), 4.0)
 
 
-func _on_export_pressed(workspace: Variant = null) -> void:
+func _on_export_pressed(workspace: EditorWorkspace = null) -> void:
 	if workspace == null:
 		workspace = _get_active_workspace()
 	if workspace == null or not workspace.can_export():
@@ -1306,7 +1293,7 @@ func _rebuild_workflow_rail(workflows: Array) -> void:
 
 
 func _refresh_workflow_from_workspace() -> void:
-	var workspace = _get_active_workspace()
+	var workspace := _get_active_workspace()
 	if workspace == null or workspace.get_workflows().is_empty():
 		return
 	_set_workflow(workspace.get_active_workflow_id(), false)
@@ -1317,7 +1304,7 @@ func _on_workflow_pressed(workflow_id: int) -> void:
 
 
 func _set_workflow(workflow_id: int, activate: bool) -> void:
-	var workspace = _get_active_workspace()
+	var workspace := _get_active_workspace()
 	if workspace == null or not _workflow_buttons.has(workflow_id):
 		return
 	if activate:
@@ -1329,10 +1316,9 @@ func _set_workflow(workflow_id: int, activate: bool) -> void:
 		var button: Button = _workflow_buttons[id]
 		button.set_pressed_no_signal(id == workflow_id)
 	_swap_workflow_inspector(workspace, workflow_id)
-	workflow_changed.emit(workflow_id)
 
 
-func _swap_workflow_inspector(workspace: Variant, workflow_id: int) -> void:
+func _swap_workflow_inspector(workspace: EditorWorkspace, workflow_id: int) -> void:
 	for child in _inspector_host.get_children():
 		child.queue_free()
 	if workspace != null:
@@ -1350,7 +1336,7 @@ func _swap_workflow_inspector(workspace: Variant, workflow_id: int) -> void:
 
 
 func _refresh_project_label() -> void:
-	var workspace = _get_active_workspace()
+	var workspace := _get_active_workspace()
 	if workspace == null:
 		_project_label.text = "OpenNova Terrain Editor"
 		return
@@ -1363,7 +1349,7 @@ func show_status_message(text: String, duration: float = 4.0) -> void:
 
 
 func _refresh_status() -> void:
-	var workspace = _get_active_workspace()
+	var workspace := _get_active_workspace()
 	if workspace == null:
 		_status_tool_label.text = ""
 		_status_context_label.text = ""
@@ -1518,10 +1504,6 @@ func _on_prompt_keep_editing() -> void:
 		editor.cancel_pending_action()
 
 
-func _on_prompt_leave_as_is() -> void:
-	pass
-
-
 func _show_export_flavor_dialog(dir_path: String) -> void:
 	_pending_export_dir = dir_path
 	_select_export_flavor(TerrainWorkspaceAdapter.ExportFlavor.DFX_JO)
@@ -1543,7 +1525,7 @@ func _show_export_flavor_dialog(dir_path: String) -> void:
 func _on_prompt_export_confirmed() -> void:
 	if editor == null or _pending_export_dir.is_empty():
 		return
-	var workspace = _get_active_workspace()
+	var workspace := _get_active_workspace()
 	if workspace == null:
 		return
 	var flavor := _current_export_flavor()
@@ -1675,7 +1657,7 @@ func on_export_completed(err: Error, message: String) -> void:
 
 
 func _sync_export_progress() -> void:
-	var workspace = _get_active_workspace()
+	var workspace := _get_active_workspace()
 	if workspace == null:
 		_set_export_ui_active(false)
 		return

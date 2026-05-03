@@ -13,6 +13,9 @@
 #include "nova_terrain_data.h"
 #include <terrain/quadtree.h>
 
+#include <cstdint>
+#include <vector>
+
 namespace godot {
 
 class NovaTerrainTileInfo;
@@ -76,7 +79,7 @@ private:
 	int lod_distribution[8] = {};
 	int debug_mode = 0; // 0=normal, 1=LOD colors, 2=normals
 
-	void _build_terrain();
+	bool _build_terrain();
 	void _build_quadtree();
 	void _build_collision();
 	void _load_textures();

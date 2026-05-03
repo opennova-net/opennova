@@ -114,32 +114,12 @@ func save_as(dir_path: String) -> Error:
 	return environment_editor.save_as(dir_path) if environment_editor else ERR_UNAVAILABLE
 
 
-func can_export() -> bool:
-	return environment_editor != null and environment_editor.env_file != null
-
-
-func has_export_action() -> bool:
-	return false
-
-
-func begin_export(dir_path: String, _flavor: int) -> Error:
-	return environment_editor.export_to_dir(dir_path) if environment_editor else ERR_UNAVAILABLE
-
-
 func get_save_dialog_title() -> String:
 	return "Choose where to save the environment"
 
 
 func get_save_dialog_dir() -> String:
 	return environment_editor.get_last_save_dir() if environment_editor else ""
-
-
-func get_export_dialog_title() -> String:
-	return "Choose where to export the environment"
-
-
-func get_export_dialog_dir() -> String:
-	return environment_editor.get_last_export_dir() if environment_editor else ""
 
 
 func build_inspector(host: Control) -> void:

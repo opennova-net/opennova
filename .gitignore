@@ -30,6 +30,7 @@ __pycache__/
 # Python tooling
 .venv/
 .pytest_cache/
+pytest-cache-files-*/
 *.egg-info/
 
 # CMake

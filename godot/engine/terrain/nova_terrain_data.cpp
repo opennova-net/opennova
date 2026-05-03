@@ -20,6 +20,7 @@
 #include <godot_cpp/classes/file_access.hpp>
 
 #include <algorithm>
+#include <cstring>
 #include <cmath>
 #include <sstream>
 
@@ -1073,7 +1074,7 @@ Ref<NovaTerrainTileInfo> NovaTerrainData::get_tileinfo_resource() const {
 		return Ref<NovaTerrainTileInfo>();
 	}
 
-	const String resolved = opennova::resolve_texture_path(trn_path.get_base_dir(), filename);
+	const String resolved = opennova::resolve_sidecar_path(trn_path.get_base_dir(), filename, "til");
 	const String lookup = resolved.is_empty() ? trn_path.get_base_dir().path_join(filename) : resolved;
 
 	if (tileinfo_resource_cache.is_valid() && tileinfo_resource_cache_path == lookup) {

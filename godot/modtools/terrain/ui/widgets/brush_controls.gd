@@ -5,12 +5,7 @@ signal radius_changed(value: float)
 signal strength_changed(value: float)
 signal hardness_changed(value: float)
 
-const RADIUS_MIN := 1.0
-const RADIUS_MAX := 128.0
-const STRENGTH_MIN := 0.01
-const STRENGTH_MAX := 5.0
-const HARDNESS_MIN := 0.0
-const HARDNESS_MAX := 1.0
+const TerrainEditorBrushSession = preload("res://modtools/terrain/terrain_editor_brush_session.gd")
 
 @onready var _radius_slider: HSlider = %RadiusSlider
 @onready var _radius_spin: SpinBox = %RadiusSpin
@@ -27,12 +22,28 @@ func get_radius_spin() -> SpinBox:
 
 
 func _ready() -> void:
+	_apply_limits()
 	_radius_slider.value_changed.connect(_on_radius_slider)
 	_radius_spin.value_changed.connect(_on_radius_spin)
 	_strength_slider.value_changed.connect(_on_strength_slider)
 	_strength_spin.value_changed.connect(_on_strength_spin)
 	_hardness_slider.value_changed.connect(_on_hardness_slider)
 	_hardness_spin.value_changed.connect(_on_hardness_spin)
+
+
+func _apply_limits() -> void:
+	_radius_slider.min_value = TerrainEditorBrushSession.BRUSH_RADIUS_MIN
+	_radius_slider.max_value = TerrainEditorBrushSession.BRUSH_RADIUS_MAX
+	_radius_spin.min_value = TerrainEditorBrushSession.BRUSH_RADIUS_MIN
+	_radius_spin.max_value = TerrainEditorBrushSession.BRUSH_RADIUS_MAX
+	_strength_slider.min_value = TerrainEditorBrushSession.BRUSH_STRENGTH_MIN
+	_strength_slider.max_value = TerrainEditorBrushSession.BRUSH_STRENGTH_MAX
+	_strength_spin.min_value = TerrainEditorBrushSession.BRUSH_STRENGTH_MIN
+	_strength_spin.max_value = TerrainEditorBrushSession.BRUSH_STRENGTH_MAX
+	_hardness_slider.min_value = TerrainEditorBrushSession.BRUSH_HARDNESS_MIN
+	_hardness_slider.max_value = TerrainEditorBrushSession.BRUSH_HARDNESS_MAX
+	_hardness_spin.min_value = TerrainEditorBrushSession.BRUSH_HARDNESS_MIN
+	_hardness_spin.max_value = TerrainEditorBrushSession.BRUSH_HARDNESS_MAX
 
 
 ## Update the visible values without emitting change signals.
