@@ -327,6 +327,47 @@ class TestImportRunner:
         assert items == []
 
 
+class TestImportDispatcher:
+    def test_spawn_pool_can_return_validation_failure(self, tmp_path: Path) -> None:
+        from apps.importer.dispatcher import ImportDispatcher
+
+        request = ImportRequest.for_loose(
+            threedi_path=str(tmp_path / "missing.3di"),
+            output_root=str(tmp_path),
+        )
+
+        with ImportDispatcher(max_workers=1) as dispatcher:
+            result = dispatcher.submit(request).result(timeout=30)
+
+        assert not result.ok
+        assert result.error == ".3di file does not exist."
+
+    def test_uses_spawn_context_for_queue_and_pool(self) -> None:
+        from apps.importer.dispatcher import ImportDispatcher
+
+        spawn_context = Mock()
+        log_queue = Mock()
+        spawn_context.Queue.return_value = log_queue
+
+        with patch("apps.importer.dispatcher.mp.get_context", return_value=spawn_context) as get_context, \
+             patch("apps.importer.dispatcher.logging.handlers.QueueListener") as listener_cls, \
+             patch("apps.importer.dispatcher.concurrent.futures.ProcessPoolExecutor") as executor_cls:
+            dispatcher = ImportDispatcher(max_workers=2)
+            try:
+                assert dispatcher.max_workers == 2
+                get_context.assert_called_once_with("spawn")
+                spawn_context.Queue.assert_called_once_with()
+
+                executor_cls.assert_called_once()
+                kwargs = executor_cls.call_args.kwargs
+                assert kwargs["initargs"] == (log_queue,)
+                assert kwargs["mp_context"] is spawn_context
+                assert kwargs["max_tasks_per_child"] == 1
+                listener_cls.return_value.start.assert_called_once_with()
+            finally:
+                dispatcher.close()
+
+
 class TestImporterAppHelpers:
     def test_collision_choice_can_skip_existing_outputs(self, tmp_path: Path) -> None:
         existing = tmp_path / "m16_1st"

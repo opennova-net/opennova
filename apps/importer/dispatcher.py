@@ -51,7 +51,8 @@ class ImportDispatcher:
 
     def __init__(self, max_workers: int | None = None) -> None:
         self._max_workers = max_workers if max_workers is not None else _default_max_workers()
-        self._log_queue: "mp.Queue" = mp.Queue()
+        self._mp_context = mp.get_context("spawn")
+        self._log_queue: "mp.Queue" = self._mp_context.Queue()
         self._listener = logging.handlers.QueueListener(
             self._log_queue,
             *logging.getLogger().handlers,
@@ -66,6 +67,7 @@ class ImportDispatcher:
             max_workers=self._max_workers,
             initializer=init_worker,
             initargs=(self._log_queue,),
+            mp_context=self._mp_context,
             max_tasks_per_child=1,
         )
         self._closed = False
