@@ -1,15 +1,23 @@
+"""In-process bpy tests for ``scene_builder``.
+
+These tests intentionally load ``bpy`` in the parent pytest process. The
+standalone ``bpy`` package corrupts subsequent subprocess imports once it's
+been loaded, so ``import bpy`` is deferred to inside each test function.
+That lets the dispatcher-based integration tests (which spawn workers) run
+first in the same pytest session without interference.
+"""
 from __future__ import annotations
-
-import bpy
-
-from apps.importer.scene_builder import _set_object_mode
 
 
 def test_bpy_dependency_is_blender_5() -> None:
+    import bpy
     assert (5, 0, 0) <= bpy.app.version < (6, 0, 0)
 
 
 def test_set_object_mode_uses_explicit_context() -> None:
+    import bpy
+    from apps.importer.scene_builder import _set_object_mode
+
     bpy.ops.wm.read_homefile(use_empty=True)
 
     armature_data = bpy.data.armatures.new("ContextArmature")

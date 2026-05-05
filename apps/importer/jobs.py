@@ -102,6 +102,36 @@ class ImportOptions:
 
 
 @dataclass(frozen=True)
+class ScanItem:
+    """One importable definition entry returned by a game-directory scan."""
+
+    name: str
+    type: str
+    source_model: str = ""
+    output_stem: str = ""
+
+    @classmethod
+    def from_mapping(cls, item: dict[str, str]) -> "ScanItem":
+        return cls(
+            name=str(item.get("name", "")),
+            type=str(item.get("type", "")),
+            source_model=str(item.get("source_model", "")),
+            output_stem=str(item.get("output_stem", "")),
+        )
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "name": self.name,
+            "type": self.type,
+            "source_model": self.source_model,
+            "output_stem": self.output_stem,
+        }
+
+    def __getitem__(self, key: str) -> str:
+        return self.to_dict()[key]
+
+
+@dataclass(frozen=True)
 class ImportRequest:
     mode: str
     output_root: str
@@ -120,6 +150,7 @@ class ImportRequest:
         item_name: str,
         item_type: str,
         output_root: str,
+        output_stem: str = "",
         options: ImportOptions | None = None,
     ) -> "ImportRequest":
         return cls(
@@ -128,6 +159,7 @@ class ImportRequest:
             item_name=item_name,
             item_type=item_type,
             output_root=output_root,
+            output_stem=output_stem,
             options=options or ImportOptions(),
         )
 
@@ -159,6 +191,10 @@ class ImportRequest:
         return self.item_name
 
     @property
+    def output_display_name(self) -> str:
+        return self.output_stem or self.display_name
+
+    @property
     def label(self) -> str:
         if self.mode == IMPORT_MODE_LOOSE:
             return f"loose {self.display_name}"
@@ -172,7 +208,7 @@ class ImportRequest:
     def likely_output_dir(self) -> str:
         if self.mode == IMPORT_MODE_LOOSE:
             return self.loose_output_dir
-        return str(Path(self.output_root) / self.display_name)
+        return str(Path(self.output_root) / self.output_display_name)
 
     def dedupe_key(self) -> tuple[object, ...]:
         return (
@@ -194,6 +230,9 @@ class ImportResult:
     message: str = ""
     output_path: str = ""
     error: str = ""
+    written_files: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    elapsed_seconds: float = 0.0
 
     @classmethod
     def success(
@@ -202,8 +241,19 @@ class ImportResult:
         *,
         message: str = "Import complete.",
         output_path: str = "",
+        written_files: list[str] | None = None,
+        warnings: list[str] | None = None,
+        elapsed_seconds: float = 0.0,
     ) -> "ImportResult":
-        return cls(request=request, ok=True, message=message, output_path=output_path)
+        return cls(
+            request=request,
+            ok=True,
+            message=message,
+            output_path=output_path,
+            written_files=written_files or [],
+            warnings=warnings or [],
+            elapsed_seconds=elapsed_seconds,
+        )
 
     @classmethod
     def failure(
@@ -213,6 +263,9 @@ class ImportResult:
         error: str,
         message: str = "Import failed.",
         output_path: str = "",
+        written_files: list[str] | None = None,
+        warnings: list[str] | None = None,
+        elapsed_seconds: float = 0.0,
     ) -> "ImportResult":
         return cls(
             request=request,
@@ -220,6 +273,9 @@ class ImportResult:
             message=message,
             output_path=output_path,
             error=error,
+            written_files=written_files or [],
+            warnings=warnings or [],
+            elapsed_seconds=elapsed_seconds,
         )
 
 
@@ -257,11 +313,20 @@ class ImportJob:
         self.result = None
         self.error = ""
 
+    @property
+    def elapsed_seconds(self) -> float:
+        if self.result and self.result.elapsed_seconds:
+            return self.result.elapsed_seconds
+        if self.started_at is None:
+            return 0.0
+        end = self.finished_at or time.time()
+        return max(0.0, end - self.started_at)
+
 
 @dataclass
 class ScanResult:
     ok: bool
-    items: list[dict[str, str]] = field(default_factory=list)
+    items: list[ScanItem] = field(default_factory=list)
     error: str = ""
 
 

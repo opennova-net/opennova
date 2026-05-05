@@ -126,7 +126,8 @@ def cmd_import_loose(args: argparse.Namespace) -> int:
 
 
 def cmd_export_all(args: argparse.Namespace) -> int:
-    from apps.importer.import_runner import execute_import_request, scan_directory_result
+    from apps.importer.dispatcher import ImportDispatcher
+    from apps.importer.import_runner import scan_directory_result
 
     scan = scan_directory_result(args.dir)
     if not scan.ok:
@@ -141,23 +142,33 @@ def cmd_export_all(args: argparse.Namespace) -> int:
         return 1
 
     options = options_from_args(args)
-    success = 0
-    failed = 0
-    for item in sorted(items, key=lambda x: (x["type"], x["name"].casefold())):
-        request = ImportRequest.for_definition(
+    requests = [
+        ImportRequest.for_definition(
             base_dir=args.dir,
             item_name=item["name"],
             item_type=item["type"],
             output_root=args.output,
+            output_stem=item["output_stem"],
             options=options,
         )
-        log.info("Importing %s -> %s", request.label, args.output)
-        result = execute_import_request(request)
-        if result.ok:
-            success += 1
-        else:
-            failed += 1
-            log.error("  FAILED: %s", result.error)
+        for item in sorted(items, key=lambda x: (x["type"], x["name"].casefold()))
+    ]
+
+    success = 0
+    failed = 0
+    with ImportDispatcher() as dispatcher:
+        log.info(
+            "Dispatching %d jobs across %d worker(s)...",
+            len(requests),
+            dispatcher.max_workers,
+        )
+        for result in dispatcher.submit_batch(requests):
+            if result.ok:
+                success += 1
+                log.info("Done: %s", result.request.label)
+            else:
+                failed += 1
+                log.error("FAILED: %s: %s", result.request.label, result.error)
 
     print(f"\nDone: {success} succeeded, {failed} failed.")
     return 0 if failed == 0 else 1

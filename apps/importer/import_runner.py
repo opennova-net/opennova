@@ -15,6 +15,7 @@ from .jobs import (
     ImportRequest,
     ImportResult,
     ScanResult,
+    ScanItem,
     validate_import_request,
 )
 
@@ -67,7 +68,8 @@ def _export_fbx(output_dir: str, name: str) -> None:
     """Export the current bpy scene to FBX in output_dir."""
     import bpy
     fbx_path = os.path.join(output_dir, name + ".fbx")
-    bpy.ops.export_scene.fbx(filepath=fbx_path)
+    has_animations = len(bpy.data.actions) > 0
+    bpy.ops.export_scene.fbx(filepath=fbx_path, bake_anim=has_animations)
     log.info("Wrote FBX: %s", fbx_path)
 
 
@@ -276,7 +278,7 @@ def run_import(
         )
     except Exception as exc:
         log.error("import failed: %s", exc, exc_info=True)
-        return False
+        raise
 
 
 def _write_3dp_from_ir(ir, tdp_path: str, bullet_lod_index: int = -1) -> None:
@@ -330,9 +332,6 @@ def run_loose_import(
     from .scene_builder import BlenderSceneBuilder
 
     os.makedirs(output_dir, exist_ok=True)
-    if reset_scene:
-        from . import bpy_session
-        bpy_session.new_scene()
 
     base_dir = asset_base_dir or str(Path(threedi_path).parent)
     name = output_stem or Path(threedi_path).stem
@@ -354,6 +353,7 @@ def run_loose_import(
                 )
     except Exception as exc:
         log.error("run_loose_import failed: %s", exc, exc_info=True)
+        raise
     finally:
         free_model_ir(ir)
 
@@ -370,70 +370,59 @@ def run_loose_import(
     return bool(result)
 
 
-def execute_import_request(
-    request: ImportRequest,
-    *,
-    init_blender: bool = True,
-    reset_scene: bool = True,
-) -> ImportResult:
-    """Run one shared import request for the GUI or CLI."""
-    errors = validate_import_request(request)
-    if errors:
-        return ImportResult.failure(request, error=" ".join(errors))
+_default_dispatcher = None
 
-    output_path = request.output_root
-    try:
-        if init_blender:
-            from . import bpy_session
-            bpy_session.init_headless()
-        if reset_scene:
-            from . import bpy_session
-            bpy_session.new_scene()
 
-        if request.mode == IMPORT_MODE_DEF:
-            ok = run_import(
-                base_dir=request.base_dir,
-                item_name=request.item_name,
-                item_type=request.item_type,
-                output_dir=request.output_root,
-                **request.options.as_def_kwargs(),
-            )
-        elif request.mode == IMPORT_MODE_LOOSE:
-            output_path = request.loose_output_dir
-            ok = run_loose_import(
-                threedi_path=request.threedi_path,
-                output_dir=output_path,
-                output_stem=request.display_name,
-                asset_base_dir=request.base_dir or None,
-                reset_scene=False,
-                **request.options.as_loose_kwargs(),
-            )
-        else:
-            return ImportResult.failure(
-                request,
-                error=f"Unknown import mode: {request.mode}",
-            )
-    except Exception as exc:
-        log.error("execute_import_request failed: %s", exc, exc_info=True)
-        return ImportResult.failure(request, error=str(exc), output_path=output_path)
+def _get_default_dispatcher():
+    """Lazy-init a 1-worker dispatcher for synchronous single-item callers."""
+    global _default_dispatcher
+    if _default_dispatcher is None:
+        import atexit
+        from .dispatcher import ImportDispatcher
+        _default_dispatcher = ImportDispatcher(max_workers=1)
+        atexit.register(_default_dispatcher.close)
+    return _default_dispatcher
 
-    if ok:
-        return ImportResult.success(
-            request,
-            message=f"Imported {request.label}.",
-            output_path=output_path,
-        )
-    return ImportResult.failure(
-        request,
-        error="import returned False",
-        output_path=output_path,
+
+def execute_import_request(request: ImportRequest) -> ImportResult:
+    """Run one import request and block until it finishes.
+
+    Dispatches to a process pool so the import runs in a fresh subprocess.
+    For batch work that benefits from concurrency, construct your own
+    ``ImportDispatcher`` and use ``submit_batch`` directly.
+    """
+    return _get_default_dispatcher().submit(request).result()
+
+
+def resolve_definition_output_stem(base_dir: str, item_name: str, item_type: str) -> str:
+    """Return the output directory/file stem for a definition import."""
+    _setup_blender_package()
+
+    from pathlib import Path
+    from blender.opennova.definitions import (  # type: ignore[import]
+        ensure_extension,
+        process_def_files,
     )
+    from blender.opennova.asset_resolver import AssetResolver  # type: ignore[import]
+
+    with AssetResolver(base_dir) as resolver:
+        weapons, item_defs = process_def_files(resolver)
+        if item_type == "weapon":
+            target = next((weapon for weapon in weapons if weapon.name == item_name), None)
+            if target and target.graphic1.main:
+                return Path(ensure_extension(target.graphic1.main, ".3di")).stem
+        elif item_type == "item":
+            target = next((item for item in item_defs if item.name == item_name), None)
+            if target and target.graphic_us:
+                return Path(ensure_extension(target.graphic_us, ".3di")).stem
+    return ""
 
 
 def scan_directory_result(base_dir: str) -> ScanResult:
     """Scan a game directory and return available weapons and items.
 
-    Returns ScanResult with items shaped as {"name": str, "type": "weapon"|"item"}.
+    Returns ScanResult with typed items shaped like:
+    {"name": str, "type": "weapon"|"item", "source_model": str, "output_stem": str}.
     """
     _setup_blender_package()
 
@@ -447,14 +436,30 @@ def scan_directory_result(base_dir: str) -> ScanResult:
     from blender.opennova import definitions as defs  # type: ignore[import]
     from blender.opennova import asset_resolver as ar  # type: ignore[import]
 
-    items = []
+    items: list[ScanItem] = []
     try:
         with ar.AssetResolver(base_dir) as resolver:
             weapons, item_defs = defs.process_def_files(resolver)
             for w in weapons:
-                items.append({"name": w.name, "type": "weapon"})
+                source_model = defs.ensure_extension(w.graphic1.main, ".3di")
+                items.append(
+                    ScanItem(
+                        name=w.name,
+                        type="weapon",
+                        source_model=source_model,
+                        output_stem=Path(source_model).stem,
+                    )
+                )
             for it in item_defs:
-                items.append({"name": it.name, "type": "item"})
+                source_model = defs.ensure_extension(it.graphic_us, ".3di")
+                items.append(
+                    ScanItem(
+                        name=it.name,
+                        type="item",
+                        source_model=source_model,
+                        output_stem=Path(source_model).stem,
+                    )
+                )
     except Exception as exc:
         log.error("scan_directory failed: %s", exc, exc_info=True)
         return ScanResult(ok=False, error=str(exc))
@@ -462,6 +467,6 @@ def scan_directory_result(base_dir: str) -> ScanResult:
     return ScanResult(ok=True, items=items)
 
 
-def scan_directory(base_dir: str) -> list[dict]:
+def scan_directory(base_dir: str) -> list[dict[str, str]]:
     """Compatibility wrapper returning only scanned items."""
-    return scan_directory_result(base_dir).items
+    return [item.to_dict() for item in scan_directory_result(base_dir).items]

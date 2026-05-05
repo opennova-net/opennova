@@ -51,25 +51,12 @@ def _expected_files(options: ImportOptions, stem: str) -> set[str]:
     return expected
 
 
-@pytest.fixture(scope="module")
-def _bpy_initialized() -> None:
-    from apps.importer import bpy_session
-    bpy_session.init_headless()
-
-
-@pytest.fixture
-def _reset_scene(_bpy_initialized: None) -> None:
-    from apps.importer import bpy_session
-    bpy_session.new_scene()
-
-
 @pytest.mark.parametrize("threedi_path", FIXTURES, ids=lambda p: p.stem)
 @pytest.mark.parametrize("preset_name", list(OPTION_PRESETS), ids=str)
 def test_loose_import_produces_expected_outputs(
     threedi_path: Path,
     preset_name: str,
     tmp_path: Path,
-    _reset_scene: None,
 ) -> None:
     if not threedi_path.is_file():
         pytest.fail(f"Fixture missing (LFS not pulled?): {threedi_path}")
@@ -81,7 +68,7 @@ def test_loose_import_produces_expected_outputs(
         options=options,
     )
 
-    result = execute_import_request(request, init_blender=False, reset_scene=False)
+    result = execute_import_request(request)
 
     assert result.ok, f"import failed: {result.error}"
 
@@ -111,3 +98,35 @@ def test_loose_import_produces_expected_outputs(
     for name in expected:
         path = output_dir / name
         assert path.stat().st_size > 0, f"empty output {path}"
+
+
+def test_consecutive_imports_in_one_session_both_write_glb(
+    tmp_path: Path,
+) -> None:
+    """Run two imports back-to-back in one process and assert both write GLB.
+
+    With process isolation each call to ``execute_import_request`` spawns a
+    fresh worker, so cross-import bpy state degradation cannot occur.
+    """
+    available = [p for p in FIXTURES if p.is_file()]
+    if len(available) < 2:
+        pytest.skip("need at least two fixtures (LFS not pulled?)")
+
+    options = ImportOptions(
+        write_blend=False, write_3dp=False, write_ase=False, write_glb=True,
+    )
+
+    for index, threedi_path in enumerate(available[:2]):
+        out_root = tmp_path / f"run_{index}"
+        out_root.mkdir()
+        request = ImportRequest.for_loose(
+            threedi_path=str(threedi_path),
+            output_root=str(out_root),
+            options=options,
+        )
+        result = execute_import_request(request)
+        assert result.ok, f"run {index} ({threedi_path.stem}) failed: {result.error}"
+
+        glb_path = Path(result.output_path) / f"{threedi_path.stem}.glb"
+        assert glb_path.is_file(), f"run {index}: expected {glb_path}"
+        assert glb_path.stat().st_size > 0, f"run {index}: empty {glb_path}"

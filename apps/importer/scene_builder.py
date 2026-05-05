@@ -876,7 +876,7 @@ class BlenderSceneBuilder:
                 nla_frame_offset += frame_count
 
                 print(f"[ANIM] Created action '{action.name}' "
-                      f"({frame_count} frames) → NLA track")
+                      f"({frame_count} frames) -> NLA track")
             except Exception as e:
                 print(f"[ANIM] Failed to build action '{anim_meta.animation_name}': {e}")
                 traceback.print_exc()

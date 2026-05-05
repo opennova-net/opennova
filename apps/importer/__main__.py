@@ -2,11 +2,19 @@
 import logging
 import os
 import sys
+from pathlib import Path
 
 # Set up file logging before any other imports so all downstream loggers
 # (import_runner, scene_builder, bpy_session, etc.) inherit this handler.
-_log_path = os.path.join(os.path.dirname(os.path.abspath(sys.executable
-    if getattr(sys, 'frozen', False) else __file__)), "onimport.log")
+def _log_dir() -> Path:
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return Path(appdata) / "OpenNova"
+    return Path.home() / ".opennova"
+
+
+_log_dir().mkdir(parents=True, exist_ok=True)
+_log_path = str(_log_dir() / "onimport.log")
 _file_handler = logging.FileHandler(_log_path, mode="w", encoding="utf-8")
 _file_handler.setLevel(logging.DEBUG)
 _console_handler = logging.StreamHandler(sys.stdout)

@@ -7,16 +7,17 @@ from unittest.mock import Mock, patch
 
 from apps.importer.cli import build_parser, options_from_args
 from apps.importer.import_runner import (
-    execute_import_request,
     scan_directory,
     scan_directory_result,
 )
 from apps.importer.jobs import (
     JOB_ERROR,
     JOB_PENDING,
+    JOB_RUNNING,
     ImportJob,
     ImportOptions,
     ImportRequest,
+    ScanItem,
     has_active_duplicate,
     validate_import_request,
 )
@@ -177,6 +178,27 @@ class TestImportRequestValidation:
         assert definition.likely_output_dir == str(ROOT / "M16")
         assert loose.likely_output_dir == str(ROOT / "Shed")
 
+    def test_definition_request_uses_scanned_output_stem_when_available(self) -> None:
+        request = ImportRequest.for_definition(
+            base_dir=str(FIXTURE_DEF_DIR),
+            item_name="WPN_M16",
+            item_type="weapon",
+            output_root=str(ROOT),
+            output_stem="m16_1st",
+        )
+        assert request.likely_output_dir == str(ROOT / "m16_1st")
+
+    def test_scan_item_is_typed_and_mapping_compatible(self) -> None:
+        item = ScanItem.from_mapping({
+            "name": "WPN_M16",
+            "type": "weapon",
+            "source_model": "m16_1st.3di",
+            "output_stem": "m16_1st",
+        })
+        assert item.name == "WPN_M16"
+        assert item["type"] == "weapon"
+        assert item.to_dict()["output_stem"] == "m16_1st"
+
 
 class TestImportRunner:
     def test_execute_definition_request_dispatches_shared_options(self) -> None:
@@ -192,10 +214,18 @@ class TestImportRunner:
                 write_glb=True,
             ),
         )
-        with patch("apps.importer.import_runner.run_import", return_value=True) as run_import:
-            result = execute_import_request(request, init_blender=False, reset_scene=False)
+        # Call run_one directly (in-process) so the mock applies. The
+        # production execute_import_request dispatches via subprocess where
+        # parent-process mocks don't reach.
+        from apps.importer.worker import run_one
+        with patch("apps.importer.import_runner.resolve_definition_output_stem", return_value="m16_1st"), \
+             patch("apps.importer.import_runner.run_import", return_value=True) as run_import, \
+             patch("apps.importer.bpy_session.init_headless"):
+            result = run_one(request)
 
         assert result.ok
+        assert result.output_path == str(ROOT / "m16_1st")
+        assert result.elapsed_seconds >= 0
         run_import.assert_called_once()
         kwargs = run_import.call_args.kwargs
         assert kwargs["item_name"] == "M16"
@@ -210,8 +240,10 @@ class TestImportRunner:
             threedi_path=str(FIXTURE_3DI),
             output_root=str(output_root),
         )
-        with patch("apps.importer.import_runner.run_loose_import", return_value=True) as run_loose:
-            result = execute_import_request(request, init_blender=False, reset_scene=False)
+        from apps.importer.worker import run_one
+        with patch("apps.importer.import_runner.run_loose_import", return_value=True) as run_loose, \
+             patch("apps.importer.bpy_session.init_headless"):
+            result = run_one(request)
 
         assert result.ok
         assert result.output_path == str(output_root / "Shed")
@@ -293,3 +325,51 @@ class TestImportRunner:
         assert not result.ok
         assert result.error == "Game directory does not exist."
         assert items == []
+
+
+class TestImporterAppHelpers:
+    def test_collision_choice_can_skip_existing_outputs(self, tmp_path: Path) -> None:
+        existing = tmp_path / "m16_1st"
+        existing.mkdir()
+        existing_request = ImportRequest.for_definition(
+            base_dir=str(FIXTURE_DEF_DIR),
+            item_name="WPN_M16",
+            item_type="weapon",
+            output_root=str(tmp_path),
+            output_stem="m16_1st",
+        )
+        new_request = ImportRequest.for_definition(
+            base_dir=str(FIXTURE_DEF_DIR),
+            item_name="WPN_AK47",
+            item_type="weapon",
+            output_root=str(tmp_path),
+            output_stem="ak47_1st",
+        )
+        app = object.__new__(ImporterApp)
+
+        with patch("apps.importer.ui.app.messagebox.askyesnocancel", return_value=False):
+            choice = app._resolve_output_collisions([existing_request, new_request])
+
+        assert not choice.canceled
+        assert choice.skipped_count == 1
+        assert choice.requests == [new_request]
+
+    def test_action_hint_prefers_missing_output_format(self) -> None:
+        app = object.__new__(ImporterApp)
+        assert app._action_hint(
+            has_game_dir=True,
+            has_output=True,
+            has_output_file=False,
+            selected_count=1,
+            has_visible_items=True,
+        ) == "Select at least one file type to write."
+
+    def test_running_job_elapsed_time_is_available(self) -> None:
+        request = ImportRequest.for_loose(
+            threedi_path=str(FIXTURE_3DI),
+            output_root=str(ROOT),
+        )
+        job = ImportJob(request=request)
+        job.mark_running()
+        assert job.status == JOB_RUNNING
+        assert job.elapsed_seconds >= 0
