@@ -94,25 +94,25 @@ if(BUILD_SHARED_LIB)
         set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
     endforeach()
 
-    # Stage the built shared lib at the path blender/opennova/_native.py loads
-    # from, so pytest can import the FFI without package_addon.sh having run.
-    # blender/lib/**/*.{dll,so} are gitignored.
+    # Stage the built shared lib next to pyopennova/_native.py so pytest can
+    # import the FFI without package_addon.sh having run.
+    # pyopennova/lib/**/*.{dll,so} are gitignored.
     if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-        set(_opennova_blender_lib_subdir "windows-x64")
-        set(_opennova_blender_lib_filename "opennova.dll")
+        set(_opennova_pkg_lib_subdir "windows-x64")
+        set(_opennova_pkg_lib_filename "opennova.dll")
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        set(_opennova_blender_lib_subdir "linux-x64")
-        set(_opennova_blender_lib_filename "libopennova.so")
+        set(_opennova_pkg_lib_subdir "linux-x64")
+        set(_opennova_pkg_lib_filename "libopennova.so")
     endif()
 
-    if(_opennova_blender_lib_subdir)
-        set(_opennova_blender_lib_dir
-            "${CMAKE_SOURCE_DIR}/blender/lib/${_opennova_blender_lib_subdir}")
+    if(_opennova_pkg_lib_subdir)
+        set(_opennova_pkg_lib_dir
+            "${CMAKE_SOURCE_DIR}/pyopennova/lib/${_opennova_pkg_lib_subdir}")
         add_custom_command(TARGET opennova_shared POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${_opennova_blender_lib_dir}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_opennova_pkg_lib_dir}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE:opennova_shared>"
-                "${_opennova_blender_lib_dir}/${_opennova_blender_lib_filename}"
+                "${_opennova_pkg_lib_dir}/${_opennova_pkg_lib_filename}"
             VERBATIM)
     endif()
 endif()
@@ -145,7 +145,7 @@ if(OPENNOVA_ENABLE_PYTHON_TESTS)
     set(OPENNOVA_PYTEST_COMMAND
         ${CMAKE_COMMAND} -E env
         "UV_CACHE_DIR=${OPENNOVA_UV_CACHE_DIR}"
-        ${UV_EXECUTABLE} run --frozen pytest
+        ${UV_EXECUTABLE} run --frozen --group blender pytest
     )
 
     add_test(

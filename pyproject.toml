@@ -1,12 +1,10 @@
 [project]
 name = "opennova-tools"
-version = "0.1.1"
-description = "Standalone OpenNova tools (importer)"
+version = "0.1.6"
+description = "OpenNova format parsers and DCC integrations (Blender + 3ds Max)"
 readme = "README.md"
-requires-python = ">=3.11,<3.12"
-dependencies = [
-    "bpy>=5.0,<6.0",
-]
+requires-python = ">=3.7"
+dependencies = []
 
 [project.scripts]
 onimport = "apps.importer.__main__:main"
@@ -16,6 +14,21 @@ dev = [
     "pytest>=8",
     "pyinstaller>=6",
 ]
+# bpy lives in a uv-only dependency group rather than project
+# optional-dependencies so it doesn't constrain `requires-python` for
+# Max's bundled Python (3.7 / 3.9 / 3.11 across versions). The marker
+# scopes the dep to Python 3.11 (the only range bpy 5.x supports), so
+# uv can resolve cleanly even with our wider 3.7+ project bound. Pull
+# bpy in with `uv sync --group blender` for the headless Blender flow.
+blender = [
+    "bpy>=5.0,<6.0; python_version >= '3.11' and python_version < '3.12'",
+]
+
+# Pin uv's resolution to Python 3.11 for the dev environment. This keeps
+# the lockfile sane while we ship a wider `requires-python` for end-user
+# installs into Max's 3.7/3.9 bundled Python.
+[tool.uv]
+environments = ["python_version == '3.11'"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -25,4 +38,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["apps*"]
+include = ["apps*", "pyopennova*", "opennova_max*"]

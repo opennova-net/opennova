@@ -274,11 +274,11 @@ class TestImportRunner:
         from apps.importer.import_runner import run_loose_import
 
         fake_ir = object()
-        threedi_module = types.ModuleType("blender.opennova.threedi_ffi")
+        threedi_module = types.ModuleType("pyopennova.threedi_ffi")
         threedi_module.read_model_ir = Mock(return_value=fake_ir)
         threedi_module.free_model_ir = Mock()
 
-        asset_module = types.ModuleType("blender.opennova.asset_resolver")
+        asset_module = types.ModuleType("pyopennova.asset_resolver")
 
         class FakeResolver:
             def __init__(self, _base_dir: str) -> None:
@@ -299,23 +299,25 @@ class TestImportRunner:
         scene_module.BlenderSceneBuilder = Mock(return_value=builder)
 
         modules = {
-            "blender.opennova.threedi_ffi": threedi_module,
-            "blender.opennova.asset_resolver": asset_module,
+            "pyopennova.threedi_ffi": threedi_module,
+            "pyopennova.asset_resolver": asset_module,
             "apps.importer.scene_builder": scene_module,
         }
         with patch.dict(sys.modules, modules):
             with patch("apps.importer.import_runner._setup_blender_package"):
-                with patch("apps.importer.import_runner._write_3dp_from_ir"):
-                    with patch("apps.importer.import_runner._export_ase"):
-                        with patch("apps.importer.import_runner._save_blend_scene") as save_blend:
-                            ok = run_loose_import(
-                                threedi_path=str(FIXTURE_3DI),
-                                output_dir=str(ROOT),
-                                write_blend=False,
-                                reset_scene=False,
-                            )
+                with patch("apps.importer.import_runner._write_host_neutral_outputs") as shared:
+                    with patch("apps.importer.import_runner._save_blend_scene") as save_blend:
+                        ok = run_loose_import(
+                            threedi_path=str(FIXTURE_3DI),
+                            output_dir=str(ROOT),
+                            write_blend=False,
+                            reset_scene=False,
+                        )
 
         assert ok
+        shared.assert_called_once()
+        assert shared.call_args.kwargs["write_ase"] is True
+        assert shared.call_args.kwargs["write_3dp"] is True
         save_blend.assert_not_called()
 
     def test_scan_failure_is_not_empty_success(self) -> None:

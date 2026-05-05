@@ -43,10 +43,10 @@ Write-Host "=== Installing uv ==="
 # Install project dependencies via uv (invoked through the same Python)
 # ---------------------------------------------------------------------------
 Write-Host "=== Installing project dependencies ==="
-& $PY -m uv sync --frozen --python $PY --group dev
+& $PY -m uv sync --frozen --python $PY --group dev --group blender
 
 Write-Host "=== Checking bpy version ==="
-& $PY -m uv run --frozen --group dev python -c "import bpy; v = bpy.app.version; assert (5, 0, 0) <= v < (6, 0, 0), f'Expected bpy 5.x, got {bpy.app.version_string}'; print(f'Using bpy {bpy.app.version_string}')"
+& $PY -m uv run --frozen --group dev --group blender python -c "import bpy; v = bpy.app.version; assert (5, 0, 0) <= v < (6, 0, 0), f'Expected bpy 5.x, got {bpy.app.version_string}'; print(f'Using bpy {bpy.app.version_string}')"
 
 # ---------------------------------------------------------------------------
 # Build opennova.dll (needed by the FFI layer at runtime)
@@ -64,7 +64,7 @@ Copy-Item build-pkg\Release\opennova.dll blender\lib\windows-x64\opennova.dll
 Write-Host "=== Building onimport.exe ==="
 $distPath = "$ROOT\dist"
 $ExeName = "onimport-v$Version"
-& $PY -m uv run --frozen --group dev python -m PyInstaller apps\importer\__main__.py `
+& $PY -m uv run --frozen --group dev --group blender python -m PyInstaller apps\importer\__main__.py `
     --name $ExeName `
     --onefile `
     --collect-all bpy `

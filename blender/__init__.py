@@ -17,6 +17,14 @@ bl_info = {
 }
 
 import os
+import sys
+
+# Make the vendored pyopennova package importable when this addon is installed
+# as a zipped extension (package_addon.sh stages pyopennova/ alongside this file).
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
 import bpy
 import importlib
 from bpy.props import (

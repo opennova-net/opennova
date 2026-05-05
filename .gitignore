@@ -47,10 +47,10 @@ Testing/Temporary/
 # Runtime logs
 *.log
 
-# Blender addon native libs and wheels (built/downloaded artifacts)
-blender/lib/**/*.so
-blender/lib/**/*.dll
-blender/lib/**/*.dylib
+# Native libs and wheels (built/downloaded artifacts)
+pyopennova/lib/**/*.so
+pyopennova/lib/**/*.dll
+pyopennova/lib/**/*.dylib
 blender/wheels/
 
 # Shared library build directories

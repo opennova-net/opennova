@@ -4,6 +4,8 @@ Uses a stub `blender` package so we can import individual submodules without
 executing blender/__init__.py (which registers Blender operators and would fail
 outside a running Blender instance).
 """
+from __future__ import annotations
+
 import os
 import sys
 import types
@@ -39,15 +41,6 @@ def _setup_blender_package() -> None:
         pkg.__spec__ = None
         sys.modules["blender"] = pkg
         log.debug("Registered stub blender package at %s", blender_dir)
-
-
-def _export_ase(output_dir: str, name: str) -> None:
-    """Export the current bpy scene to an ASE file in output_dir."""
-    import bpy
-    from blender.ase_exporter import AseExporter  # type: ignore[import]
-    ase_path = os.path.join(output_dir, name + ".ase")
-    AseExporter().export_scene(bpy.context.scene, ase_path)
-    log.info("Wrote ASE: %s", ase_path)
 
 
 def _export_glb(output_dir: str, name: str) -> None:
@@ -110,122 +103,95 @@ def _import_basic_model(
     write_fbx: bool = False,
 ) -> bool:
     """Import a single weapon/item via the C IR pipeline and write selected outputs."""
-    from pathlib import Path
-    from blender.opennova.definitions import (  # type: ignore[import]
-        process_def_files, ensure_extension, build_animation_context,
-    )
-    from blender.opennova.threedi_ffi import read_model_ir, free_model_ir  # type: ignore[import]
-    from blender.opennova.bad_ffi import parse_bad, free_bad  # type: ignore[import]
-    from blender.opennova.asset_resolver import AssetResolver  # type: ignore[import]
+    from pyopennova.threedi_ffi import read_model_ir, free_model_ir
+    from pyopennova.bad_ffi import parse_bad, free_bad
+    from pyopennova.asset_resolver import AssetResolver
+    from .resource_plan import resolve_definition_import
     from .scene_builder import BlenderSceneBuilder
 
     with AssetResolver(base_dir) as resolver:
-        weapons, items = process_def_files(resolver=resolver)
-
-        target_context = None
-        if item_type == "weapon":
-            target_context = next((w for w in weapons if w.name == item_name), None)
-        else:
-            target_context = next((i for i in items if i.name == item_name), None)
-
-        if not target_context:
+        plan = resolve_definition_import(
+            base_dir=base_dir,
+            item_name=item_name,
+            item_type=item_type,
+            resolver=resolver,
+            import_arms=import_arms,
+            import_animations=import_animations,
+            output_name=output_name,
+        )
+        if plan is None:
             log.error("Could not find %s '%s' in definitions", item_type, item_name)
             return False
 
-        models_to_import = []
-        if item_type == "weapon":
-            main_file = target_context.graphic1.main
-        else:
-            main_file = target_context.graphic_us
-
-        if main_file:
-            main_file = ensure_extension(main_file, ".3di")
-            models_to_import.append(("main", main_file))
-
-        if item_type == "weapon" and import_arms and target_context.graphic1.arms:
-            arms_file = ensure_extension(target_context.graphic1.arms, ".3di")
-            models_to_import.append(("arms", arms_file))
-
-        if not models_to_import:
-            log.error("No model files specified for %s", item_name)
-            return False
-
-        graphic_name = Path(main_file).stem if main_file else item_name
-        export_name = output_name if output_name else graphic_name
-
         bad_file = None
-        anim_ctx = None
-        anim_field = target_context.anim_adm if item_type == "weapon" else target_context.anim_def
-        if anim_field:
+        if plan.reset_bad_path:
             try:
-                anim_ctx = build_animation_context(anim_field, resolver=resolver)
-                if anim_ctx and anim_ctx.reset_animation:
-                    bad_file = parse_bad(anim_ctx.reset_animation.bad_filepath)
+                bad_file = parse_bad(plan.reset_bad_path)
             except Exception as e:
                 log.warning("Could not load BAD file: %s", e)
 
         success_count = 0
         main_builder = None
+        main_ir = None
 
-        for model_type, model_file in models_to_import:
-            model_path = resolver.resolve(model_file)
-            if model_path is None:
-                raise FileNotFoundError(f"Model file not found: {Path(base_dir) / model_file}")
+        try:
+            for model in plan.models:
+                ir = read_model_ir(model.path)
+                try:
+                    if model.role == "main":
+                        main_ir = ir
+                        ctx = plan.animation_context if import_animations else None
+                        main_builder = BlenderSceneBuilder(ir, bad_file=bad_file,
+                                                           anim_context=ctx, resolver=resolver,
+                                                           import_collisions=import_collisions,
+                                                           import_occlusion=import_occlusion,
+                                                           import_lights=import_lights)
+                        log.debug("[CKPT] build_basic_scene start (%s)", plan.scene_name)
+                        for _h in log.root.handlers: _h.flush()
+                        result = main_builder.build_basic_scene(plan.scene_name)
+                        log.debug("[CKPT] build_basic_scene done (%s)", plan.scene_name)
+                        for _h in log.root.handlers: _h.flush()
+                        if result:
+                            success_count += 1
+                    else:
+                        if main_builder is None:
+                            continue
+                        secondary = BlenderSceneBuilder(ir, bad_file=bad_file,
+                                                        resolver=resolver,
+                                                        import_collisions=import_collisions,
+                                                        import_occlusion=import_occlusion,
+                                                        import_lights=import_lights)
+                        if secondary.merge_with_existing_scene(main_builder):
+                            success_count += 1
+                finally:
+                    if model.role != "main":
+                        free_model_ir(ir)
 
-            ir = None
-            try:
-                ir = read_model_ir(str(model_path))
-
-                if model_type == "main":
-                    ctx = anim_ctx if import_animations else None
-                    main_builder = BlenderSceneBuilder(ir, bad_file=bad_file,
-                                                       anim_context=ctx, resolver=resolver,
-                                                       import_collisions=import_collisions,
-                                                       import_occlusion=import_occlusion,
-                                                       import_lights=import_lights)
-                    log.debug("[CKPT] build_basic_scene start (%s)", item_name)
-                    for _h in log.root.handlers: _h.flush()
-                    result = main_builder.build_basic_scene(item_name)
-                    log.debug("[CKPT] build_basic_scene done (%s)", item_name)
-                    for _h in log.root.handlers: _h.flush()
-                    if result:
-                        success_count += 1
-                        if output_dir:
-                            project_dir = os.path.join(output_dir, export_name)
-                            os.makedirs(project_dir, exist_ok=True)
-                            if write_3dp:
-                                _write_3dp_from_ir(
-                                    ir,
-                                    os.path.join(project_dir, export_name + ".3dp"),
-                                    bullet_lod_index=main_builder.bullet_lod_index,
-                                )
-                else:
-                    if main_builder is None:
-                        continue
-                    secondary = BlenderSceneBuilder(ir, bad_file=bad_file,
-                                                    resolver=resolver,
-                                                    import_collisions=import_collisions,
-                                                    import_occlusion=import_occlusion,
-                                                    import_lights=import_lights)
-                    if secondary.merge_with_existing_scene(main_builder):
-                        success_count += 1
-            finally:
-                if ir is not None:
-                    free_model_ir(ir)
-
-        if bad_file is not None:
-            free_bad(bad_file)
-
-        if success_count > 0 and output_dir:
-            project_dir = os.path.join(output_dir, export_name)
-            if write_ase:
-                _export_ase(project_dir, export_name)
-            if write_glb:
-                _export_glb(project_dir, export_name)
-            if write_fbx:
-                _export_fbx(project_dir, export_name)
-            if write_blend:
-                _save_blend_scene(project_dir, export_name, checkpoint=True)
+            if success_count > 0 and output_dir and main_ir is not None and main_builder is not None:
+                project_dir = os.path.join(output_dir, plan.export_name)
+                _write_host_neutral_outputs(
+                    main_ir,
+                    project_dir,
+                    plan.export_name,
+                    write_ase=write_ase,
+                    write_3dp=write_3dp,
+                    import_collisions=import_collisions,
+                    import_occlusion=import_occlusion,
+                    import_lights=import_lights,
+                    bad_file=bad_file,
+                    bullet_lod_index=main_builder.bullet_lod_index,
+                )
+                if write_glb:
+                    _export_glb(project_dir, plan.export_name)
+                if write_fbx:
+                    _export_fbx(project_dir, plan.export_name)
+                if write_blend:
+                    _save_blend_scene(project_dir, plan.export_name, checkpoint=True)
+        finally:
+            if main_ir is not None:
+                free_model_ir(main_ir)
+            if bad_file is not None:
+                free_bad(bad_file)
 
         return success_count > 0
 
@@ -281,25 +247,33 @@ def run_import(
         raise
 
 
-def _write_3dp_from_ir(ir, tdp_path: str, bullet_lod_index: int = -1) -> None:
-    """Write .3dp and .3da project files from the C IR using the native tdp library."""
-    from blender.opennova.tdp_ffi import tdp_from_ir, write_tdp, write_3da, free_tdp, TDP_MAX_LODS  # type: ignore[import]
-    proj = tdp_from_ir(ir)
-    try:
-        if 0 <= bullet_lod_index < TDP_MAX_LODS:
-            lod_slot = proj.lods[bullet_lod_index]
-            name = ir.name.decode("utf-8", errors="replace").rstrip("\x00")
-            lod_slot.scene_file = f"{name}_bullet.ase".encode("utf-8")[:63]
-            lod_slot.attributes = proj.lods[0].attributes
-            lod_slot.render_function = proj.lods[0].render_function
-            proj.poly_collision_lod = bullet_lod_index
-        write_tdp(tdp_path, proj)
-        tda_path = tdp_path.replace(".3dp", ".3da")
-        write_3da(tda_path, proj)
-    finally:
-        free_tdp(proj)
-    log.info("Wrote 3DP: %s", tdp_path)
-    log.info("Wrote 3DA: %s", tda_path)
+def _write_host_neutral_outputs(
+    ir,
+    output_dir: str,
+    name: str,
+    *,
+    write_ase: bool,
+    write_3dp: bool,
+    import_collisions: bool,
+    import_occlusion: bool,
+    import_lights: bool,
+    bad_file=None,
+    bullet_lod_index: int | None = None,
+) -> list[str]:
+    from pyopennova.host_outputs import write_host_neutral_outputs
+
+    return write_host_neutral_outputs(
+        ir,
+        output_dir,
+        name,
+        write_ase=write_ase,
+        write_3dp=write_3dp,
+        include_collisions=import_collisions,
+        include_occlusion=import_occlusion,
+        include_lights=import_lights,
+        bad_file=bad_file,
+        bullet_lod_index=bullet_lod_index,
+    )
 
 
 def run_loose_import(
@@ -327,8 +301,8 @@ def run_loose_import(
     _setup_blender_package()
 
     from pathlib import Path
-    from blender.opennova.threedi_ffi import read_model_ir, free_model_ir  # type: ignore[import]
-    from blender.opennova.asset_resolver import AssetResolver  # type: ignore[import]
+    from pyopennova.threedi_ffi import read_model_ir, free_model_ir
+    from pyopennova.asset_resolver import AssetResolver
     from .scene_builder import BlenderSceneBuilder
 
     os.makedirs(output_dir, exist_ok=True)
@@ -345,10 +319,16 @@ def run_loose_import(
                                           import_occlusion=import_occlusion,
                                           import_lights=import_lights)
             result = builder.build_basic_scene(name)
-            if result and write_3dp:
-                _write_3dp_from_ir(
+            if result:
+                _write_host_neutral_outputs(
                     ir,
-                    os.path.join(output_dir, name + ".3dp"),
+                    output_dir,
+                    name,
+                    write_ase=write_ase,
+                    write_3dp=write_3dp,
+                    import_collisions=import_collisions,
+                    import_occlusion=import_occlusion,
+                    import_lights=import_lights,
                     bullet_lod_index=builder.bullet_lod_index,
                 )
     except Exception as exc:
@@ -358,8 +338,6 @@ def run_loose_import(
         free_model_ir(ir)
 
     if result:
-        if write_ase:
-            _export_ase(output_dir, name)
         if write_glb:
             _export_glb(output_dir, name)
         if write_fbx:
@@ -398,24 +376,9 @@ def resolve_definition_output_stem(base_dir: str, item_name: str, item_type: str
     """Return the output directory/file stem for a definition import."""
     _setup_blender_package()
 
-    from pathlib import Path
-    from blender.opennova.definitions import (  # type: ignore[import]
-        ensure_extension,
-        process_def_files,
-    )
-    from blender.opennova.asset_resolver import AssetResolver  # type: ignore[import]
+    from .resource_plan import resolve_definition_output_stem as _resolve
 
-    with AssetResolver(base_dir) as resolver:
-        weapons, item_defs = process_def_files(resolver)
-        if item_type == "weapon":
-            target = next((weapon for weapon in weapons if weapon.name == item_name), None)
-            if target and target.graphic1.main:
-                return Path(ensure_extension(target.graphic1.main, ".3di")).stem
-        elif item_type == "item":
-            target = next((item for item in item_defs if item.name == item_name), None)
-            if target and target.graphic_us:
-                return Path(ensure_extension(target.graphic_us, ".3di")).stem
-    return ""
+    return _resolve(base_dir, item_name, item_type)
 
 
 def scan_directory_result(base_dir: str) -> ScanResult:
@@ -433,8 +396,8 @@ def scan_directory_result(base_dir: str) -> ScanResult:
     if not Path(base_dir).is_dir():
         return ScanResult(ok=False, error="Game directory does not exist.")
 
-    from blender.opennova import definitions as defs  # type: ignore[import]
-    from blender.opennova import asset_resolver as ar  # type: ignore[import]
+    from pyopennova import definitions as defs
+    from pyopennova import asset_resolver as ar
 
     items: list[ScanItem] = []
     try:

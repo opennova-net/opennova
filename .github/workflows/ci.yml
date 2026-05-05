@@ -176,6 +176,36 @@ jobs:
           name: opennova_importer
           path: dist/onimport.exe
 
+  package-max-mzp:
+    runs-on: windows-latest
+    needs: [test, godot-tests]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Pull Git LFS assets
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull
+          git lfs fsck --objects
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Package 3ds Max MZP
+        shell: pwsh
+        run: scripts/package_max_mzp.ps1
+
+      - name: Upload 3ds Max MZP
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova_max
+          path: dist/opennova_max-v*.mzp
+
   package-godot:
     runs-on: windows-latest
     needs: [test, godot-tests]

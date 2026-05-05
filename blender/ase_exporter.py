@@ -19,7 +19,7 @@ import math
 import os
 import traceback
 from mathutils import Vector
-from .opennova import ase_ffi
+from pyopennova import ase_ffi
 
 
 class MaterialKeeper:

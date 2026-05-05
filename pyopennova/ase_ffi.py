@@ -211,6 +211,22 @@ def write_file(filepath: str, doc: AseDocument):
         raise RuntimeError(f"ase_write failed for {filepath!r}")
 
 
+def parse_file(filepath: str) -> AseDocument:
+    """Parse an ASE file into an AseDocument.
+
+    The caller owns the returned document and must call ``free_document``.
+    """
+    _bind()
+    lib = load_lib()
+    if isinstance(filepath, str):
+        filepath = filepath.encode("utf-8")
+    doc = AseDocument()
+    rc = lib.ase_parse(filepath, ctypes.byref(doc))
+    if rc != 0:
+        raise RuntimeError(f"ase_parse failed for {filepath!r}")
+    return doc
+
+
 def free_document(doc: AseDocument):
     """Free all C-side allocations inside a Document."""
     _bind()

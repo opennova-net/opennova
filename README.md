@@ -23,6 +23,7 @@ Pre-built binaries are available on the [Releases](../../releases) page:
 - **`onimport.exe`**: standalone Windows importer. Use this to convert models etc to modern formats like .glb, .blend and .fbx. Also exports files
 compat. with NovaLogic's original tools (ie: OED).
 - **`opennova_blender.zip`**: Blender 5.x addon with pre-built native libraries for Windows and Linux.
+- **`opennova_max-v<version>.mzp`**: 3ds Max importer plugin. Drag into 3ds Max, restart Max, then open `OpenNova > Importer...`.
 - **`opennova-modtools-windows.zip`**: standalone OpenNova Editor (ONED) for Windows. The open source NILE.
 - **`opennova-runtime-windows.zip`**: "game" runtime.
 
@@ -40,7 +41,7 @@ Imported scenes include meshes, materials, textures, LODs, skeletal armatures, c
 
 ### Running from source
 
-Requires Python 3.11, uv, and bpy 5.x. Build the shared library (see [Building](#building)) and copy `build/Release/opennova.dll` into `blender/lib/windows-x64/`, then `uv sync && uv run onimport`.
+Requires Python 3.11, uv, and bpy 5.x. Build the shared library (see [Building](#building)) and copy `build/Release/opennova.dll` into `pyopennova/lib/windows-x64/`, then `uv sync && uv run onimport`.
 
 ## Blender Addon
 
@@ -135,6 +136,14 @@ Builds `onimport.exe` for Windows using PyInstaller. Requires Python 3.11.
 
 ```powershell
 scripts/package_importer_windows.ps1
+```
+
+### Package 3ds Max Plugin
+
+Builds `opennova_max-v<version>.mzp` for Windows. Requires CMake and Python, but does not require 3ds Max.
+
+```powershell
+scripts/package_max_mzp.ps1
 ```
 
 ### Build the GDExtension

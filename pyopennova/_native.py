@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 def _lib_path() -> str:
-    addon_dir = Path(__file__).resolve().parent.parent
+    pkg_dir = Path(__file__).resolve().parent
     system = platform.system()
 
     if system == "Windows":
@@ -23,7 +23,7 @@ def _lib_path() -> str:
     else:
         raise OSError(f"Unsupported platform: {system} (only Windows and Linux are supported)")
 
-    path = addon_dir / "lib" / sub / name
+    path = pkg_dir / "lib" / sub / name
     if not path.is_file():
         raise FileNotFoundError(
             f"Native library not found at {path}. "

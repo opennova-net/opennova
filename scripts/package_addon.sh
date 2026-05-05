@@ -9,6 +9,7 @@ if [ -n "${BASH_VERSION:-}" ]; then set -o pipefail; fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BLENDER_DIR="$ROOT_DIR/blender"
+PYOPENNOVA_DIR="$ROOT_DIR/pyopennova"
 DIST_DIR="$ROOT_DIR/dist"
 VERSION=""
 
@@ -37,9 +38,9 @@ cmake -S "$ROOT_DIR" -B "$BUILD_LINUX" \
 cmake --build "$BUILD_LINUX" --target opennova_shared --config Release \
     -j"$(nproc 2>/dev/null || echo 4)"
 
-mkdir -p "$BLENDER_DIR/lib/linux-x64"
-cp "$BUILD_LINUX/libopennova.so" "$BLENDER_DIR/lib/linux-x64/libopennova.so"
-echo "  -> blender/lib/linux-x64/libopennova.so"
+mkdir -p "$PYOPENNOVA_DIR/lib/linux-x64"
+cp "$BUILD_LINUX/libopennova.so" "$PYOPENNOVA_DIR/lib/linux-x64/libopennova.so"
+echo "  -> pyopennova/lib/linux-x64/libopennova.so"
 
 # ---------------------------------------------------------------------------
 # 2. Build Windows DLL via MinGW cross-compile
@@ -56,9 +57,9 @@ cmake -S "$ROOT_DIR" -B "$BUILD_WIN64" \
 cmake --build "$BUILD_WIN64" --target opennova_shared --config Release \
     -j"$(nproc 2>/dev/null || echo 4)"
 
-mkdir -p "$BLENDER_DIR/lib/windows-x64"
-cp "$BUILD_WIN64/libopennova.dll" "$BLENDER_DIR/lib/windows-x64/opennova.dll"
-echo "  -> blender/lib/windows-x64/opennova.dll"
+mkdir -p "$PYOPENNOVA_DIR/lib/windows-x64"
+cp "$BUILD_WIN64/libopennova.dll" "$PYOPENNOVA_DIR/lib/windows-x64/opennova.dll"
+echo "  -> pyopennova/lib/windows-x64/opennova.dll"
 
 # ---------------------------------------------------------------------------
 # 3. Update manifest version if requested
@@ -80,6 +81,13 @@ fi
 ZIP_NAME="opennova_blender-v${VERSION}.zip"
 
 echo "=== Packaging $ZIP_NAME ==="
+# Stage pyopennova inside the addon dir so the zipped addon is self-contained.
+# Removed at the end so the working tree stays clean.
+VENDORED_PYOPENNOVA="$BLENDER_DIR/pyopennova"
+rm -rf "$VENDORED_PYOPENNOVA"
+cp -r "$PYOPENNOVA_DIR" "$VENDORED_PYOPENNOVA"
+trap 'rm -rf "$VENDORED_PYOPENNOVA"' EXIT
+
 (cd "$BLENDER_DIR" && zip -r "$DIST_DIR/$ZIP_NAME" . \
     -x "__pycache__/*" "*.pyc" "__pycache__" "**/__pycache__/*")
 

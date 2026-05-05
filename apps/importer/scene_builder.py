@@ -16,6 +16,10 @@ from blender.math_utils import (
     compute_polyhedron_controlled,
 )
 from blender.mesh_primitives import create_cube_mesh, create_direction_arrow_mesh
+from pyopennova.mesh_utils import (
+    compute_smoothing_groups as _compute_smoothing_groups,
+    mtrx_to_center_rotation as _mtrx_to_center_rotation_raw,
+)
 
 
 class OcclusionType(enum.IntEnum):
@@ -49,141 +53,17 @@ _OCCLUSION_COLORS = {
 
 
 def _mtrx_to_center_rotation(mat_data):
-    """Convert MTRX 4x4 matrix → Blender 3x3 rotation for a center point.
+    """Convert MTRX 16-float buffer to a Blender 4x4 rotation matrix.
 
-    Inverts build_matrix_from_axis (export_3di.cpp) + ASE parser swizzle chain.
-    Returns a 4x4 Matrix or None if the matrix contains NaN (zero-axis sentinel).
+    Wraps the host-agnostic 3x3 rotation from
+    ``pyopennova.mesh_utils.mtrx_to_center_rotation`` in a mathutils
+    Matrix and extends to 4x4 (identity translation row). Returns
+    ``None`` if the source matrix contains NaN (zero-axis sentinel).
     """
-    m = [mat_data[i] for i in range(16)]
-    if any(math.isnan(v) for v in m):
+    rot = _mtrx_to_center_rotation_raw(mat_data)
+    if rot is None:
         return None
-    ax0 = (m[10], -m[2],  m[6])
-    ax1 = (-m[8],  m[0], -m[4])
-    ax2 = (m[9],  -m[1],  m[5])
-    return Matrix([
-        [ ax1[1], -ax0[1],  ax2[1]],
-        [-ax1[0],  ax0[0], -ax2[0]],
-        [ ax1[2], -ax0[2],  ax2[2]],
-    ]).to_4x4()
-
-
-def _compute_smoothing_groups(faces, normals, epsilon=1e-4):
-    """Compute smoothing group bitmasks from per-loop normals.
-
-    Compares normals at shared edges to classify them as smooth or sharp,
-    then flood-fills connected smooth regions.  Uses greedy graph coloring
-    on the component adjacency graph so that adjacent components never
-    share a smoothing-group bit (prevents false smoothing from bit
-    collisions).
-    """
-    from collections import defaultdict, deque
-
-    # Build edge → face adjacency
-    edge_faces = defaultdict(list)
-    for fi, (v0, v1, v2) in enumerate(faces):
-        for a, b in ((v0, v1), (v1, v2), (v2, v0)):
-            edge_faces[(min(a, b), max(a, b))].append(fi)
-
-    # Classify edges as smooth or sharp by comparing per-loop normals
-    eps_sq = epsilon * epsilon
-    smooth_adj = defaultdict(set)
-    for (ea, eb), flist in edge_faces.items():
-        if len(flist) != 2:
-            continue
-        fi_a, fi_b = flist[0], flist[1]
-        fa, fb = faces[fi_a], faces[fi_b]
-        smooth = True
-        for sv in (ea, eb):
-            na = normals[fi_a * 3 + list(fa).index(sv)]
-            nb = normals[fi_b * 3 + list(fb).index(sv)]
-            dx = na[0] - nb[0]
-            dy = na[1] - nb[1]
-            dz = na[2] - nb[2]
-            if dx * dx + dy * dy + dz * dz > eps_sq:
-                smooth = False
-                break
-        if smooth:
-            smooth_adj[fi_a].add(fi_b)
-            smooth_adj[fi_b].add(fi_a)
-
-    # Flood-fill smooth-connected components
-    comp = [-1] * len(faces)
-    cid = 0
-    for fi in range(len(faces)):
-        if comp[fi] >= 0:
-            continue
-        queue = deque([fi])
-        while queue:
-            f = queue.popleft()
-            if comp[f] >= 0:
-                continue
-            comp[f] = cid
-            for adj in smooth_adj.get(f, ()):
-                if comp[adj] < 0:
-                    queue.append(adj)
-        cid += 1
-
-    # Detect flat components: all per-loop normals within the component
-    # are identical.  Flat components get SG=0 (no smoothing) because the
-    # original model likely used SG=0 for co-planar faces — smoothing has
-    # no effect on normals there, but SG=0 gives per-face tangent/bitangent
-    # in compute_smoothed_vectors, which matters for vertex dedup.
-    comp_varies = [False] * cid
-    comp_ref = [None] * cid
-    for fi in range(len(faces)):
-        c = comp[fi]
-        if c < 0 or comp_varies[c]:
-            continue
-        for j in range(3):
-            n = normals[fi * 3 + j]
-            if comp_ref[c] is None:
-                comp_ref[c] = n
-            else:
-                ref = comp_ref[c]
-                dx = n[0] - ref[0]
-                dy = n[1] - ref[1]
-                dz = n[2] - ref[2]
-                if dx * dx + dy * dy + dz * dz > eps_sq:
-                    comp_varies[c] = True
-                    break
-    flat_comps = set(c for c in range(cid) if not comp_varies[c])
-
-    # Build component adjacency graph (sharp edges between components)
-    comp_adj = defaultdict(set)
-    for (ea, eb), flist in edge_faces.items():
-        if len(flist) != 2:
-            continue
-        fi_a, fi_b = flist[0], flist[1]
-        ca, cb = comp[fi_a], comp[fi_b]
-        if ca != cb and ca >= 0 and cb >= 0:
-            comp_adj[ca].add(cb)
-            comp_adj[cb].add(ca)
-
-    # Greedy graph coloring: assign each component a bit such that no
-    # two adjacent components share the same bit (up to 31 distinct bits).
-    comp_color = {}
-    for c in range(cid):
-        if c in flat_comps:
-            comp_color[c] = -1  # will map to SG=0
-            continue
-        used = set()
-        for neighbor in comp_adj.get(c, ()):
-            if neighbor in comp_color and comp_color[neighbor] >= 0:
-                used.add(comp_color[neighbor])
-        color = 0
-        while color in used:
-            color += 1
-        comp_color[c] = color
-
-    result = []
-    for fi in range(len(faces)):
-        c = comp[fi]
-        if c < 0:
-            result.append(0)
-        else:
-            color = comp_color.get(c, 0)
-            result.append(0 if color < 0 else (1 << (color % 31)))
-    return result
+    return Matrix(rot).to_4x4()
 
 
 def _build_occlusion_name(type_code: int, parent_subobject: int,
@@ -292,6 +172,12 @@ def _ensure_object_mode() -> None:
     active = getattr(bpy.context, "active_object", None)
     if active and getattr(active, "mode", "OBJECT") != "OBJECT":
         _set_object_mode(active, "OBJECT")
+
+
+def _blender_prop_value(value):
+    if isinstance(value, tuple):
+        return list(value)
+    return value
 
 
 class BlenderSceneBuilder:
@@ -761,7 +647,9 @@ class BlenderSceneBuilder:
 
     def _bad_channel_to_blender_quat(self, rq) -> Quaternion:
         """Convert BAD channel quaternion sample (xyzw) to Blender (wxyz) in Z-up."""
-        q = Quaternion((rq.w, rq.x, -rq.z, rq.y))
+        from pyopennova.animation_build import bad_channel_to_zup_quat
+
+        q = Quaternion(bad_channel_to_zup_quat(rq))
         return self._normalize_quat(q)
 
     @staticmethod
@@ -821,7 +709,7 @@ class BlenderSceneBuilder:
     def build_animations_from_context(self, anim_context):
         """Build Blender Actions from AnimationContext and push to NLA tracks."""
         import traceback
-        from blender.opennova.bad_ffi import parse_bad, free_bad
+        from pyopennova.bad_ffi import parse_bad, free_bad
 
         if not self.armature_object:
             print("[ANIM] No armature object, skipping animations")
@@ -902,10 +790,6 @@ class BlenderSceneBuilder:
         Quaternions and translations are converted from Y-up to Blender Z-up.
         Blender pose values are rest-relative (delta from rest pose).
         """
-        frame_count = bad_file.frame_count if bad_file.frame_count > 0 else 0
-
-        is_translated = (bad_file.flags & 0x02) != 0
-
         action = bpy.data.actions.new(name=anim_name)
 
         # Blender 4.5+ action slot system: create a slot bound to the armature
@@ -927,7 +811,27 @@ class BlenderSceneBuilder:
         skeleton_bone_count = len(bone_infos)
         bone_count = min(bad_file.num_bones, skeleton_bone_count)
 
+        from pyopennova.animation_build import sample_bad_clip
+
+        world_rot_corrections = []
+        for q in self._world_rot_corrections[:bone_count]:
+            world_rot_corrections.append((q.w, q.x, q.y, q.z))
+
+        sampled_clip = sample_bad_clip(
+            bad_file,
+            bone_infos[:bone_count],
+            animation_name=anim_name,
+            world_rot_corrections=world_rot_corrections,
+        )
+        frame_count = sampled_clip.frame_count
+        is_translated = (sampled_clip.flags & 0x02) != 0
+
         if frame_count == 0 or bone_count == 0:
+            if hasattr(action, 'slots'):
+                ad = armature_obj.animation_data
+                ad.action = old_action
+                if old_slot is not None:
+                    ad.action_slot = old_slot
             return action
 
         # Set pose bones to quaternion mode
@@ -968,9 +872,8 @@ class BlenderSceneBuilder:
                 for fc in bone_pos_fcurves[bone_idx]:
                     fc.keyframe_points.add(frame_count)
 
-        # Build rest origin vectors and parent indices from bone_infos
+        # Build rest origin vectors from bone_infos
         rest_origins = [Vector(bone_infos[i][2]) for i in range(bone_count)]
-        parent_indices = [bone_infos[i][1] for i in range(bone_count)]
 
         # Blender rest transforms (read back from armature after edit mode)
         # Used to convert animation values from absolute-local to rest-relative
@@ -978,63 +881,19 @@ class BlenderSceneBuilder:
         rest_local_inv_mats = self._rest_local_inv_mats
 
         # Frame-by-frame animation
-        world_rots = [Quaternion((1, 0, 0, 0))] * bone_count
-        world_positions = [Vector((0, 0, 0))] * bone_count
         prev_local_rots = [Quaternion((1, 0, 0, 0))] * bone_count
 
-        for frame_idx in range(frame_count):
-            # First pass: compute world transforms
-            for bone_idx in range(bone_count):
-                # Blender quaternion order: (w, x, y, z)
-                rot_q = Quaternion((1, 0, 0, 0))
-                if bone_idx < bad_file.num_channels:
-                    channel = bad_file.channels[bone_idx]
-                    if frame_idx < channel.frame_count:
-                        rot_q = self._bad_channel_to_blender_quat(
-                            channel.rotations[frame_idx]
-                        )
-                        if bone_idx < len(self._world_rot_corrections):
-                            rot_q = rot_q @ self._world_rot_corrections[bone_idx]
-                            rot_q = self._normalize_quat(rot_q)
-
-                # adm_transform_position is identity, so convert Y-up to Z-up directly
-                translation = Vector((0, 0, 0))
-                if is_translated:
-                    stride = bad_file.num_bones
-                    idx = frame_idx * stride + bone_idx
-                    if idx < bad_file.num_translations:
-                        tl = bad_file.translations[idx]
-                        translation = Vector((tl[0], -tl[2], tl[1]))
-
-                parent_idx = parent_indices[bone_idx]
-
-                if parent_idx < 0 or parent_idx >= bone_count:
-                    # Root bone: world_pos = rest.origin + translation
-                    world_rots[bone_idx] = rot_q
-                    world_pos = rest_origins[bone_idx] + translation
-                    world_positions[bone_idx] = world_pos
-                else:
-                    # Child: world_pos = parent_world.xform(rest.origin) + translation
-                    world_rots[bone_idx] = rot_q
-                    parent_rot_mat = world_rots[parent_idx].to_matrix()
-                    world_pos = world_positions[parent_idx] + parent_rot_mat @ rest_origins[bone_idx] + translation
-                    world_positions[bone_idx] = world_pos
-
+        for sampled_frame in sampled_clip.frames:
+            frame_idx = sampled_frame.frame_index
             # Second pass: compute local transforms and insert keyframes.
             # Blender pose values are relative to the bone's rest pose.
             # Convert from absolute-local to rest-relative:
             #   pose_rot = rest_rot.inverted() @ local_rot
             #   pose_pos = rest_rot_3x3.inverted() @ (local_pos - rest_origin)
-            bl_frame = frame_idx + 1
+            bl_frame = sampled_frame.frame
 
-            for bone_idx in range(bone_count):
-                parent_idx = parent_indices[bone_idx]
-
-                # local_rot = parent_world_rot.inverse() * world_rot (or world_rot for roots)
-                if parent_idx < 0 or parent_idx >= bone_count:
-                    local_rot = world_rots[bone_idx]
-                else:
-                    local_rot = world_rots[parent_idx].inverted() @ world_rots[bone_idx]
+            for bone_idx, sampled_bone in enumerate(sampled_frame.bones[:bone_count]):
+                local_rot = Quaternion(sampled_bone.local_rotation)
 
                 # Convert to Blender rest-relative space
                 rest_quat = rest_local_quats[bone_idx]
@@ -1064,14 +923,7 @@ class BlenderSceneBuilder:
 
                 # Insert position keyframes if translated
                 if bone_pos_fcurves[bone_idx]:
-                    if parent_idx < 0 or parent_idx >= bone_count:
-                        # Root: local_t = world_transform
-                        local_pos = world_positions[bone_idx]
-                    else:
-                        # Child: local_t = parent_world.affine_inverse() * world_transform
-                        parent_rot_mat = world_rots[parent_idx].to_matrix()
-                        parent_inv_rot = parent_rot_mat.inverted()
-                        local_pos = parent_inv_rot @ (world_positions[bone_idx] - world_positions[parent_idx])
+                    local_pos = Vector(sampled_bone.local_position)
 
                     # Blender pose bone location is in rest-local space:
                     # final_pos = rest_origin + rest_rot @ pose_location
@@ -1101,13 +953,9 @@ class BlenderSceneBuilder:
             fc_rmy.keyframe_points.add(rm_count)
             fc_rmz.keyframe_points.add(rm_count)
 
-            rm_pos = Vector((0, 0, 0))
-            for i in range(rm_count):
-                evt = bad_file.events[i]
-                vx, vy, vz = evt.velocity[0], evt.velocity[1], evt.velocity[2]
-                rm_pos = rm_pos + Vector((vx, -vz, vy))
-
-                bl_frame = i + 1
+            for i, sampled_frame in enumerate(sampled_clip.frames[:rm_count]):
+                rm_pos = Vector(sampled_frame.root_motion_position)
+                bl_frame = sampled_frame.frame
                 fc_rmx.keyframe_points[i].co = (bl_frame, rm_pos.x)
                 fc_rmy.keyframe_points[i].co = (bl_frame, rm_pos.y)
                 fc_rmz.keyframe_points[i].co = (bl_frame, rm_pos.z)
@@ -1814,7 +1662,10 @@ class BlenderSceneBuilder:
         return name if name else None
 
     def _create_material(self, ir_mat):
-        mat = bpy.data.materials.new(f"Material_{ir_mat.index}")
+        from pyopennova.materials import describe_material, material_user_props
+
+        desc = describe_material(ir_mat, resolver=self.resolver, ctrl_resolver=self._resolve_ctrl_reg)
+        mat = bpy.data.materials.new(f"Material_{desc.index}")
         mat.use_nodes = True
         mat.node_tree.nodes.clear()
 
@@ -1833,47 +1684,22 @@ class BlenderSceneBuilder:
         elif "Specular" in bsdf.inputs:
             bsdf.inputs["Specular"].default_value = 0.0
 
-        shader = ir_mat.shader_name.decode("utf-8", errors="replace").rstrip("\x00")
-        if shader:
-            mat.name = f"{mat.name}_{shader}"
-            mat["opennova_shader"] = shader
-
-        # Store original name before Blender mangles duplicates with .NNN suffixes
-        mat["ase_material_name"] = mat.name
-
-        # Store all IR texture names as custom properties for round-trip export.
-        # IR texture slots:
-        #   1 = DIFFUSE  -> exported as MAP_DIFFUSE
-        #   2 = DETAIL   -> lightmap/overlay, NOT exported (causes df4oed crash)
-        #   3 = NORMAL   -> stored but not exported to ASE
-        # NOTE: We do NOT export slot 2 as MAP_OPACITY because:
-        # 1. These are lightmaps, not alpha masks
-        # 2. MAP_OPACITY triggers a crash in df4oed's material preview (sub_403750)
-        for t_idx in range(ir_mat.texture_count):
-            tex = ir_mat.textures[t_idx]
-            tex_name = tex.name.decode("utf-8", errors="replace").rstrip("\x00").strip()
-            if not tex_name:
-                continue
-            if tex.slot == 1 or (t_idx == 0 and "ase_diffuse_bitmap" not in mat):
-                mat["ase_diffuse_bitmap"] = tex_name
-            elif tex.slot == 2:
-                mat["ase_detail_bitmap"] = tex_name
-            elif tex.slot == 3:
-                mat["ase_normal_bitmap"] = tex_name
-                mat["ase_normal_type"] = int(tex.type)  # 0=diffuse, 4=MDT, 5=TGA alpha
+        mat.name = desc.name
+        for key, value in material_user_props(desc).items():
+            mat[key] = _blender_prop_value(value)
 
         # Default diffuse matching 3ds Max Standard material (0.588)
         mat.diffuse_color = (0.588, 0.588, 0.588, 1.0)
 
-        if ir_mat.flags & 0x04:  # TWO_SIDED
+        if desc.two_sided:
             mat.use_backface_culling = False
 
         # Find and load diffuse texture for Blender viewport display
         tex_node = None
-        diffuse_bitmap = mat.get("ase_diffuse_bitmap", "")
+        diffuse_bitmap = desc.diffuse.name
         if diffuse_bitmap:
-            tex_path = self._resolve_texture(diffuse_bitmap)
-            print(f"[TEX] mat={ir_mat.index} diffuse={diffuse_bitmap!r} -> {tex_path}")
+            tex_path = desc.diffuse.path
+            print(f"[TEX] mat={desc.index} diffuse={diffuse_bitmap!r} -> {tex_path}")
             if tex_path:
                 tex_node = mat.node_tree.nodes.new("ShaderNodeTexImage")
                 tex_node.name = f"Diffuse_{diffuse_bitmap}"
@@ -1887,33 +1713,31 @@ class BlenderSceneBuilder:
                     print(f"[TEX] Loaded image: {img.name} size={img.size[0]}x{img.size[1]} channels={img.channels}")
                     mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Base Color"])
 
-                    if ir_mat.flags & 0x01:  # ALPHA_TEST
+                    if desc.alpha_test:
                         mat.node_tree.links.new(tex_node.outputs["Alpha"], bsdf.inputs["Alpha"])
                         mat.blend_method = "CLIP"
                 except Exception as e:
                     print(f"Failed to load texture {tex_path}: {e}")
 
         # Blend mode (overrides CLIP for true alpha-blend materials)
-        if ir_mat.blend_mode == 1:  # ALPHA
+        if desc.blend_mode == 1:  # ALPHA
             mat.blend_method = "BLEND"
             mat.show_transparent_back = False
             if tex_node:
                 mat.node_tree.links.new(tex_node.outputs["Alpha"], bsdf.inputs["Alpha"])
-        elif ir_mat.blend_mode == 2:  # ADDITIVE
+        elif desc.blend_mode == 2:  # ADDITIVE
             mat.blend_method = "BLEND"
             if "Emission Strength" in bsdf.inputs:
                 bsdf.inputs["Emission Strength"].default_value = 1.0
             if tex_node and "Emission Color" in bsdf.inputs:
                 mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Emission Color"])
 
-        mat["blend_mode"] = ir_mat.blend_mode
-
         # Detail/lightmap texture (slot 2): create MixRGB Multiply node.
         # This gives visual representation in Blender (diffuse * detail) and
         # an exportable node structure (exporter detects MixRGB Multiply → 2 textures).
-        detail_bitmap = mat.get("ase_detail_bitmap", "")
+        detail_bitmap = desc.detail.name
         if detail_bitmap and tex_node:
-            detail_path = self._resolve_texture(detail_bitmap)
+            detail_path = desc.detail.path
             if detail_path:
                 try:
                     detail_tex = mat.node_tree.nodes.new("ShaderNodeTexImage")
@@ -1938,7 +1762,7 @@ class BlenderSceneBuilder:
                     mat.node_tree.links.new(tex_node.outputs["Color"], mix_node.inputs["Color1"])
                     mat.node_tree.links.new(detail_tex.outputs["Color"], mix_node.inputs["Color2"])
                     mat.node_tree.links.new(mix_node.outputs["Color"], bsdf.inputs["Base Color"])
-                    print(f"[TEX] mat={ir_mat.index} detail={detail_bitmap!r} -> MixRGB Multiply")
+                    print(f"[TEX] mat={desc.index} detail={detail_bitmap!r} -> MixRGB Multiply")
                 except Exception as e:
                     print(f"Failed to load detail texture {detail_path}: {e}")
 
@@ -1949,11 +1773,11 @@ class BlenderSceneBuilder:
         #   - Type 5 (NORMAL_TGA): TGA alpha channel contains height data
         #   - Stage1:alpha: diffuse texture alpha = height map (DOT3 shaders)
         # Use ShaderNodeBump (height→normal) instead of ShaderNodeNormalMap.
-        normal_bitmap = mat.get("ase_normal_bitmap", "")
-        normal_type = mat.get("ase_normal_type", 0)
+        normal_bitmap = desc.normal.name
+        normal_type = desc.normal.type
         bump_wired = False
         if normal_bitmap and normal_type != 4:  # Skip MDT — Blender can't load
-            tex_path = self._resolve_texture(normal_bitmap)
+            tex_path = desc.normal.path
             if tex_path:
                 try:
                     normal_tex = mat.node_tree.nodes.new("ShaderNodeTexImage")
@@ -1978,26 +1802,25 @@ class BlenderSceneBuilder:
         # Fallback: for bump shaders with no separate bump texture,
         # the diffuse texture's alpha channel IS the height map.
         # Shader types 1-6 (DOT3, PHONGT, BUMP) all use diffuse alpha as bump.
-        _bump_shaders = ("DOT3", "PHONGT", "BUMP")
-        if not bump_wired and tex_node and any(s in shader for s in _bump_shaders):
+        if not bump_wired and tex_node and desc.bump_shader:
             bump_node = mat.node_tree.nodes.new("ShaderNodeBump")
             mat.node_tree.links.new(tex_node.outputs["Alpha"], bump_node.inputs["Height"])
             mat.node_tree.links.new(bump_node.outputs["Normal"], bsdf.inputs["Normal"])
 
         # Handle EMISSIVE flag / emissive_type
-        if ir_mat.flags & 0x08:
+        if desc.emissive:
             if "Emission Strength" in bsdf.inputs:
                 bsdf.inputs["Emission Strength"].default_value = 1.0
 
         # Glass / reflection
-        if ir_mat.is_glass:
+        if desc.glass:
             if "Transmission Weight" in bsdf.inputs:
                 bsdf.inputs["Transmission Weight"].default_value = 0.5
             elif "Transmission" in bsdf.inputs:
                 bsdf.inputs["Transmission"].default_value = 0.5
             if "IOR" in bsdf.inputs:
                 bsdf.inputs["IOR"].default_value = 1.45
-            rc = ir_mat.reflect_color
+            rc = desc.reflect_color
             if rc[0] != 0.0 or rc[1] != 0.0 or rc[2] != 0.0:
                 mat["reflect_color"] = [rc[0], rc[1], rc[2], rc[3]]
 
@@ -2005,8 +1828,8 @@ class BlenderSceneBuilder:
         # when shader_type selects a bump+specular or phong+specular mode.
         # The gsys_phong lookup uses fixed exponents (pow 4/16/64).
         # Map specular_intensity to both Specular IOR Level and Roughness.
-        if ir_mat.specular_intensity > 0:
-            spec = min(ir_mat.specular_intensity / 255.0, 1.0)
+        if desc.specular_strength > 0:
+            spec = desc.specular_strength
             if "Specular IOR Level" in bsdf.inputs:
                 bsdf.inputs["Specular IOR Level"].default_value = spec
             elif "Specular" in bsdf.inputs:
@@ -2018,8 +1841,7 @@ class BlenderSceneBuilder:
 
         # Phong shader minimum specular for round-trip fidelity.
         # Without this, the exporter can't detect Phong (specular=0 → DOT3 path).
-        _phong_shaders = ("PHONGT", "PHONGO", "BUMPPHONG", "ENVPHONG")
-        if any(s in shader for s in _phong_shaders):
+        if desc.phong_shader:
             spec_key = "Specular IOR Level" if "Specular IOR Level" in bsdf.inputs else "Specular"
             if spec_key in bsdf.inputs and bsdf.inputs[spec_key].default_value == 0:
                 bsdf.inputs[spec_key].default_value = 0.3
@@ -2027,19 +1849,15 @@ class BlenderSceneBuilder:
                 bsdf.inputs["Roughness"].default_value = 0.5
 
         # Luminosity — drives emission in the engine
-        if ir_mat.luminosity > 0:
-            lum = min(ir_mat.luminosity / 255.0, 1.0)
+        if desc.luminosity_strength > 0.0:
+            lum = desc.luminosity_strength
             if "Emission Strength" in bsdf.inputs:
                 bsdf.inputs["Emission Strength"].default_value = lum
 
         # UV tiling (apply Mapping node if tiling != 0 and != 1)
-        u_tile = ir_mat.u_tiling
-        v_tile = ir_mat.v_tiling
-        if (u_tile != 0.0 and u_tile != 1.0) or (v_tile != 0.0 and v_tile != 1.0):
-            if u_tile == 0.0:
-                u_tile = 1.0
-            if v_tile == 0.0:
-                v_tile = 1.0
+        if desc.has_custom_tiling:
+            u_tile = desc.effective_u_tiling
+            v_tile = desc.effective_v_tiling
             uv_node = mat.node_tree.nodes.new("ShaderNodeUVMap")
             mapping = mat.node_tree.nodes.new("ShaderNodeMapping")
             mapping.inputs["Scale"].default_value = (u_tile, v_tile, 1.0)
@@ -2048,62 +1866,6 @@ class BlenderSceneBuilder:
             for node in mat.node_tree.nodes:
                 if node.type == "TEX_IMAGE":
                     mat.node_tree.links.new(mapping.outputs["Vector"], node.inputs["Vector"])
-
-        # Store shader animation parameters as custom properties for round-trip
-        if ir_mat.u_params.style != 0:
-            mat["uv_u_style"] = int(ir_mat.u_params.style)
-            mat["uv_u_rate"] = ir_mat.u_params.gen_rate
-            mat["uv_u_phase"] = ir_mat.u_params.phase
-            mat["uv_u_start"] = ir_mat.u_params.start
-            mat["uv_u_end"] = ir_mat.u_params.end
-        if ir_mat.v_params.style != 0:
-            mat["uv_v_style"] = int(ir_mat.v_params.style)
-            mat["uv_v_rate"] = ir_mat.v_params.gen_rate
-            mat["uv_v_phase"] = ir_mat.v_params.phase
-            mat["uv_v_start"] = ir_mat.v_params.start
-            mat["uv_v_end"] = ir_mat.v_params.end
-        if ir_mat.alpha_gen.style != 0:
-            mat["alpha_gen_style"] = int(ir_mat.alpha_gen.style)
-            mat["alpha_gen_rate"] = ir_mat.alpha_gen.rate
-            mat["alpha_gen_phase"] = ir_mat.alpha_gen.phase
-            mat["alpha_gen_start"] = int(ir_mat.alpha_gen.start)
-            mat["alpha_gen_end"] = int(ir_mat.alpha_gen.end)
-        if ir_mat.rgb_gen.style != 0:
-            mat["rgb_gen_style"] = int(ir_mat.rgb_gen.style)
-            mat["rgb_gen_rate"] = ir_mat.rgb_gen.rate
-            mat["rgb_gen_phase"] = ir_mat.rgb_gen.phase
-            sc = ir_mat.rgb_gen.start_color
-            ec = ir_mat.rgb_gen.end_color
-            mat["rgb_gen_start_color"] = [sc[0], sc[1], sc[2], sc[3]]
-            mat["rgb_gen_end_color"] = [ec[0], ec[1], ec[2], ec[3]]
-        if ir_mat.animation.num_frames > 0:
-            mat["tex_anim_frames"] = int(ir_mat.animation.num_frames)
-            mat["tex_anim_type"] = int(ir_mat.animation.animation_type)
-            mat["tex_anim_time"] = int(ir_mat.animation.cycle_frame_time)
-        if ir_mat.alpha_threshold > 0:
-            mat["alpha_threshold"] = ir_mat.alpha_threshold
-
-        # Store emissive_type for round-trip (0=none, 2=full)
-        if ir_mat.emissive_type != 0:
-            mat["emissive_type"] = int(ir_mat.emissive_type)
-
-        # Store control register names for round-trip (resolved from IR indices)
-        if ir_mat.rgb_gen.style > 0x70 and ir_mat.rgb_gen.reg >= 0:
-            creg = self._resolve_ctrl_reg(ir_mat.rgb_gen.reg)
-            if creg:
-                mat["rgb_gen_ctrlreg"] = creg
-        if ir_mat.alpha_gen.style > 0x70 and ir_mat.alpha_gen.reg >= 0:
-            creg = self._resolve_ctrl_reg(ir_mat.alpha_gen.reg)
-            if creg:
-                mat["alpha_gen_ctrlreg"] = creg
-        if ir_mat.u_params.style > 0x70 and ir_mat.u_params.reg >= 0:
-            creg = self._resolve_ctrl_reg(ir_mat.u_params.reg)
-            if creg:
-                mat["uv_u_ctrlreg"] = creg
-        if ir_mat.v_params.style > 0x70 and ir_mat.v_params.reg >= 0:
-            creg = self._resolve_ctrl_reg(ir_mat.v_params.reg)
-            if creg:
-                mat["uv_v_ctrlreg"] = creg
 
         return mat
 

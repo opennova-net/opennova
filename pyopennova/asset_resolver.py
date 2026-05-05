@@ -11,6 +11,7 @@ assets are written to a temporary directory.
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -67,6 +68,9 @@ class AssetResolver:
 
         # Track already-extracted temp files: lowercase name -> temp Path
         self._extracted: dict[str, Path] = {}
+
+        # Track texture files copied to temp with a DCC-loadable extension.
+        self._texture_paths: dict[str, Path] = {}
 
     def __enter__(self):
         return self
@@ -188,7 +192,53 @@ class AssetResolver:
         for candidate in candidates:
             result = self.resolve(candidate)
             if result is not None:
-                return result
+                return self._ensure_texture_extension(result)
 
         return None
 
+    def _ensure_texture_extension(self, path: str) -> str:
+        """Return a path whose extension matches the bitmap payload.
+
+        Some game assets are DDS files with a .TGA name. DCC bitmap loaders
+        often pick the decoder from the extension, so materialize a temp copy
+        with the detected extension while preserving the original source file.
+        """
+        source = Path(path)
+        detected_ext = _detect_bitmap_extension(source)
+        if detected_ext is None or source.suffix.lower() == detected_ext:
+            return str(source)
+
+        key = f"{str(source).lower()}|{detected_ext}"
+        cached = self._texture_paths.get(key)
+        if cached is not None and cached.is_file():
+            return str(cached)
+
+        dest = self._tmp_path / f"{source.stem}{detected_ext}"
+        if dest.exists() and dest.resolve() != source.resolve():
+            dest = self._tmp_path / f"{source.stem}_{abs(hash(key)) & 0xFFFFFFFF:08x}{detected_ext}"
+        try:
+            shutil.copyfile(source, dest)
+        except OSError:
+            return str(source)
+        self._texture_paths[key] = dest
+        return str(dest)
+
+
+def _detect_bitmap_extension(path: Path) -> str | None:
+    try:
+        with open(path, "rb") as f:
+            header = f.read(16)
+    except OSError:
+        return None
+
+    if header.startswith(b"DDS "):
+        return ".dds"
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if header.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if header.startswith(b"BM"):
+        return ".bmp"
+    if header.startswith(b"II*\x00") or header.startswith(b"MM\x00*"):
+        return ".tif"
+    return None
