@@ -2,7 +2,7 @@
 
 Open-source toolchain and runtime for NovaLogic's Joint Operations (JO) and newer games. Extract and edit assets with the importer, Blender addon, and OpenNova Editor (ONED). Load them in a C++ reimplementation of the game engine, hosted in Godot.
 
-![OpenNova screenshot](https://snaps.screensnapr.io/362fded)
+![OpenNova screenshot](https://i.imgur.com/MNtveOj.jpeg)
 
 ## Architecture
 
