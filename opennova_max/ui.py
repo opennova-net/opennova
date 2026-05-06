@@ -45,11 +45,6 @@ def register_menu() -> bool:
 def build_menu_script() -> str:
     """Return the MaxScript launcher/menu registration script."""
     return r'''
-macroScript OpenNovaImporter category:"OpenNova" toolTip:"OpenNova Importer"
-(
-    on execute do python.execute "import opennova_max.ui as ui; ui.show_importer()"
-)
-
 try
 (
     if menuMan.registerMenuContext 0x5cb72810 then

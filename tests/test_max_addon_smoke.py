@@ -44,19 +44,24 @@ def test_max_mzp_package_script_smokes_startup_and_animation_modules():
     package_script = (ROOT / "scripts" / "package_max_mzp.ps1").read_text(encoding="utf-8")
 
     assert "traceback.print_exc()" in package_script
+    assert "Contents/macroscripts/OpenNovaImporter.mcr" in package_script
+    assert "OpenNovaImporterMacro" in package_script
+    assert "opennova_max\\maxscript\\OpenNovaImporter.mcr" in package_script
     assert "opennova_max\\animation.py" in package_script
     assert "opennova_max\\ui.py" in package_script
     assert "pyopennova\\animation_build.py" in package_script
     assert "import opennova_max.animation" in package_script
     assert "import opennova_max.ui" in package_script
     assert "import pyopennova.animation_build" in package_script
-    assert 'macroScript OpenNovaImporter category:"OpenNova"' in package_script
     assert 'menuMan.createActionItem "OpenNovaImporter" "OpenNova"' in package_script
+    assert "Menu registration should not dynamically define the OpenNova macro" in package_script
 
 
 def test_max_editable_startup_installer_registers_menu_on_launch():
     startup_installer = (ROOT / "scripts" / "install_max_editable_startup.ps1").read_text(encoding="utf-8")
 
+    assert "OpenNova-OpenNovaImporter.mcr" in startup_installer
+    assert "opennova_max\\maxscript\\OpenNovaImporter.mcr" in startup_installer
     assert "opennova_max_editable_startup.ms" in startup_installer
     assert "opennova_max_editable_startup.py" in startup_installer
     assert "python.executeFile" in startup_installer
@@ -82,10 +87,10 @@ def test_max_version_resolution_prefers_source_over_stale_metadata(monkeypatch):
     from opennova_max import version
 
     monkeypatch.setattr(version, "_packaged_version", lambda: "")
-    monkeypatch.setattr(version, "_source_version", lambda: "0.1.5")
-    monkeypatch.setattr(version, "_metadata_version", lambda: "0.1.4")
+    monkeypatch.setattr(version, "_source_version", lambda: "0.1.7")
+    monkeypatch.setattr(version, "_metadata_version", lambda: "0.1.6")
 
-    assert version.get_version() == "0.1.5"
+    assert version.get_version() == "0.1.7"
 
 
 def test_max_version_resolution_uses_source_fallback(monkeypatch):
@@ -743,9 +748,11 @@ def test_max_qt_ui_helpers_and_menu_script_are_ci_safe():
     from opennova_max import ui
 
     menu_script = ui.build_menu_script()
+    macro_script = (ROOT / "opennova_max" / "maxscript" / "OpenNovaImporter.mcr").read_text(encoding="utf-8")
 
-    assert 'macroScript OpenNovaImporter category:"OpenNova"' in menu_script
-    assert 'ui.show_importer()' in menu_script
+    assert 'macroScript OpenNovaImporter category:"OpenNova"' in macro_script
+    assert 'ui.show_importer()' in macro_script
+    assert "macroScript OpenNovaImporter" not in menu_script
     assert "menuMan.registerMenuContext" in menu_script
     assert 'menuMan.createSubMenuItem "OpenNova"' in menu_script
     assert 'menuMan.createActionItem "OpenNovaImporter" "OpenNova"' in menu_script

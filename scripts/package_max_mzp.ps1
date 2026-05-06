@@ -142,6 +142,7 @@ $BundleRoot = Join-Path $STAGE_ROOT $BundleName
 $ContentsRoot = Join-Path $BundleRoot "Contents"
 $PythonRoot = Join-Path $ContentsRoot "python"
 $StartupRoot = Join-Path $ContentsRoot "startup"
+$MacroRoot = Join-Path $ContentsRoot "macroscripts"
 
 Write-Host "=== OpenNova Max version: $Version ==="
 
@@ -155,6 +156,7 @@ Write-Host "=== Staging $BundleName ==="
 Remove-TreeIfExists $BUILD_ROOT
 Ensure-Dir $PythonRoot
 Ensure-Dir $StartupRoot
+Ensure-Dir $MacroRoot
 Ensure-Dir $DIST
 
 Copy-PackageDir (Join-Path $ROOT "opennova_max") (Join-Path $PythonRoot "opennova_max")
@@ -174,6 +176,7 @@ Ensure-Dir (Join-Path $PythonRoot "apps\importer")
 Copy-PackageFile (Join-Path $ROOT "apps\importer\__init__.py") (Join-Path $PythonRoot "apps\importer\__init__.py")
 Copy-PackageFile (Join-Path $ROOT "apps\importer\jobs.py") (Join-Path $PythonRoot "apps\importer\jobs.py")
 Copy-PackageFile (Join-Path $ROOT "apps\importer\resource_plan.py") (Join-Path $PythonRoot "apps\importer\resource_plan.py")
+Copy-PackageFile (Join-Path $ROOT "opennova_max\maxscript\OpenNovaImporter.mcr") (Join-Path $MacroRoot "OpenNovaImporter.mcr")
 
 $PackageContents = @"
 <?xml version="1.0" encoding="utf-8"?>
@@ -186,6 +189,10 @@ $PackageContents = @"
     AppVersion="$Version"
     UpgradeCode="{5CB72810-3C5F-48B6-9D11-5F661E76BEBB}">
     <CompanyDetails Name="OpenNova" />
+    <Components Description="macroscripts parts">
+        <RuntimeRequirements OS="Win64" Platform="3ds Max" SeriesMin="$SeriesMin" SeriesMax="$SeriesMax" />
+        <ComponentEntry AppName="OpenNovaImporterMacro" Version="$Version" ModuleName="./Contents/macroscripts/OpenNovaImporter.mcr" />
+    </Components>
     <Components Description="post-start-up scripts parts">
         <RuntimeRequirements OS="Win64" Platform="3ds Max" SeriesMin="$SeriesMin" SeriesMax="$SeriesMax" />
         <ComponentEntry AppName="OpenNovaMaxStartup" Version="$Version" ModuleName="./Contents/startup/opennova_max_startup.ms" />
@@ -360,6 +367,7 @@ $RequiredStageFiles = @(
     (Join-Path $STAGE_ROOT "install.ds"),
     (Join-Path $STAGE_ROOT "install.py"),
     (Join-Path $BundleRoot "PackageContents.xml"),
+    (Join-Path $MacroRoot "OpenNovaImporter.mcr"),
     (Join-Path $StartupRoot "opennova_max_startup.ms"),
     (Join-Path $StartupRoot "opennova_max_startup.py"),
     (Join-Path $PythonRoot "opennova_max\__init__.py"),
@@ -396,12 +404,14 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::ExtractToDirectory($MzpPath, $VALIDATE_ROOT)
 
 $ExpandedBundle = Join-Path $VALIDATE_ROOT $BundleName
+$ExpandedMacroRoot = Join-Path $ExpandedBundle "Contents\macroscripts"
 $ExpandedPython = Join-Path $ExpandedBundle "Contents\python"
 Assert-File (Join-Path $VALIDATE_ROOT "mzp.run")
 Assert-File (Join-Path $VALIDATE_ROOT "install.ms")
 Assert-File (Join-Path $VALIDATE_ROOT "install.ds")
 Assert-File (Join-Path $VALIDATE_ROOT "install.py")
 Assert-File (Join-Path $ExpandedBundle "PackageContents.xml")
+Assert-File (Join-Path $ExpandedMacroRoot "OpenNovaImporter.mcr")
 Assert-Dir (Join-Path $ExpandedPython "opennova_max")
 Assert-Dir (Join-Path $ExpandedPython "pyopennova")
 Assert-File (Join-Path $ExpandedPython "opennova_max\_packaged_version.py")
@@ -452,10 +462,10 @@ if opennova_max.qt_ui.dialog_title(expected_version) != f"OpenNova Importer v{ex
     raise RuntimeError("Qt UI helper returned an unexpected dialog title")
 
 menu_script = opennova_max.ui.build_menu_script()
-if 'macroScript OpenNovaImporter category:"OpenNova"' not in menu_script:
-    raise RuntimeError("Max menu macro is missing from packaged UI script")
 if 'menuMan.createActionItem "OpenNovaImporter" "OpenNova"' not in menu_script:
     raise RuntimeError("Max menu action item is missing from packaged UI script")
+if 'macroScript OpenNovaImporter' in menu_script:
+    raise RuntimeError("Menu registration should not dynamically define the OpenNova macro")
 
 native_path = Path(_lib_path())
 if not native_path.is_file():

@@ -8,6 +8,7 @@ param(
     [string]$MaxVersion = "2022",
     [string]$Language = "ENU",
     [string]$StartupDir = "",
+    [string]$UserMacroDir = "",
     [switch]$Uninstall
 )
 
@@ -19,12 +20,21 @@ if (-not $StartupDir) {
     }
     $StartupDir = Join-Path $env:LOCALAPPDATA "Autodesk\3dsMax\$MaxVersion - 64bit\$Language\scripts\startup"
 }
+if (-not $UserMacroDir) {
+    if (-not $env:LOCALAPPDATA) {
+        throw "LOCALAPPDATA is not set; cannot locate the 3ds Max user macro directory."
+    }
+    $UserMacroDir = Join-Path $env:LOCALAPPDATA "Autodesk\3dsMax\$MaxVersion - 64bit\$Language\usermacros"
+}
 
+$ROOT = (Resolve-Path "$PSScriptRoot\..").Path
+$MacroSourcePath = Join-Path $ROOT "opennova_max\maxscript\OpenNovaImporter.mcr"
+$MacroPath = Join-Path $UserMacroDir "OpenNova-OpenNovaImporter.mcr"
 $StartupMsPath = Join-Path $StartupDir "opennova_max_editable_startup.ms"
 $StartupPyPath = Join-Path $StartupDir "opennova_max_editable_startup.py"
 
 if ($Uninstall) {
-    foreach ($path in @($StartupMsPath, $StartupPyPath)) {
+    foreach ($path in @($MacroPath, $StartupMsPath, $StartupPyPath)) {
         if (Test-Path -LiteralPath $path) {
             Remove-Item -LiteralPath $path -Force
         }
@@ -34,6 +44,11 @@ if ($Uninstall) {
 }
 
 New-Item -ItemType Directory -Force -Path $StartupDir | Out-Null
+New-Item -ItemType Directory -Force -Path $UserMacroDir | Out-Null
+if (-not (Test-Path -LiteralPath $MacroSourcePath -PathType Leaf)) {
+    throw "OpenNova macro source missing: $MacroSourcePath"
+}
+Copy-Item -LiteralPath $MacroSourcePath -Destination $MacroPath -Force
 
 $StartupMs = @'
 (
@@ -69,6 +84,7 @@ Set-Content -LiteralPath $StartupMsPath -Value $StartupMs -Encoding ASCII
 Set-Content -LiteralPath $StartupPyPath -Value $StartupPy -Encoding UTF8
 
 Write-Host "Installed OpenNova editable startup hook:"
+Write-Host "  $MacroPath"
 Write-Host "  $StartupMsPath"
 Write-Host "  $StartupPyPath"
 Write-Host "Restart 3ds Max to register OpenNova > Importer..."
