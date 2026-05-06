@@ -142,7 +142,7 @@ def create_mesh_node(
 
 def _build_max_mesh(rt, fm: FlatMesh, material_dict: dict[int, Any]) -> Any:
     """Build one editable mesh node from a FlatMesh in the active scene."""
-    from .materials import create_multimaterial
+    from .materials import _max_material_id, create_multimaterial
 
     verts_p3 = [rt.Point3(v[0], v[1], v[2]) for v in fm.vertices]
     faces_p3 = [rt.Point3(f[0] + 1, f[1] + 1, f[2] + 1) for f in fm.faces]
@@ -150,10 +150,13 @@ def _build_max_mesh(rt, fm: FlatMesh, material_dict: dict[int, Any]) -> Any:
     mesh = rt.mesh(vertices=verts_p3, faces=faces_p3)
     mesh.name = fm.name
 
-    mat_slot_lookup = {gid: idx + 1 for idx, gid in enumerate(fm.material_id_set)}
-    for fi, gid in enumerate(fm.face_material_ids):
-        slot = mat_slot_lookup.get(gid, 1)
-        rt.setFaceMatID(mesh, fi + 1, slot)
+    source_face_material_ids = _source_face_material_ids(fm)
+    max_face_material_ids = [
+        _max_material_id(gid) if len(fm.material_id_set) > 1 else 1
+        for gid in source_face_material_ids
+    ]
+    for fi, max_mat_id in enumerate(max_face_material_ids):
+        rt.setFaceMatID(mesh, fi + 1, max_mat_id)
 
     for fi, sg in enumerate(fm.smoothing_groups):
         rt.setFaceSmoothGroup(mesh, fi + 1, int(sg))
@@ -175,7 +178,28 @@ def _build_max_mesh(rt, fm: FlatMesh, material_dict: dict[int, Any]) -> Any:
     if material is not None:
         mesh.material = material
 
+    _set_user_prop(rt, mesh, "opennova_material_ids", _csv_ints(fm.material_id_set))
+    _set_user_prop(rt, mesh, "opennova_max_material_ids", _csv_ints(_max_material_id(v) for v in fm.material_id_set))
+    _set_user_prop(rt, mesh, "opennova_source_face_material_ids", _csv_ints(source_face_material_ids))
+    _set_user_prop(rt, mesh, "opennova_face_material_ids", _csv_ints(max_face_material_ids))
+    _set_user_prop(
+        rt,
+        mesh,
+        "opennova_face_material_id_mode",
+        "global" if len(fm.material_id_set) > 1 else "single",
+    )
     return mesh
+
+
+def _source_face_material_ids(fm: FlatMesh) -> list[int]:
+    fallback = int(fm.material_id_set[0]) if fm.material_id_set else 0
+    out: list[int] = []
+    for fi in range(len(fm.faces)):
+        if fi < len(fm.face_material_ids):
+            out.append(int(fm.face_material_ids[fi]))
+        else:
+            out.append(fallback)
+    return out
 
 
 def _write_map_channel(rt, mesh, channel: int, uvs, face_count: int) -> None:
@@ -228,6 +252,10 @@ def _set_user_prop(rt, obj, key: str, value) -> None:
         rt.setUserProp(obj, key, value)
     except Exception:
         pass
+
+
+def _csv_ints(values: Iterable[int]) -> str:
+    return ",".join(str(int(v)) for v in values)
 
 
 def set_parent_and_local_position(

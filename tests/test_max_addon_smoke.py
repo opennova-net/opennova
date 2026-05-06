@@ -20,6 +20,148 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_3DI = ROOT / "fixtures" / "threedi" / "3di3" / "Shed.3di"
 
 
+class _FakeOneBasedList:
+    def __init__(self, size: int):
+        self.values = [None] * int(size)
+
+    def __setitem__(self, index: int, value):
+        idx = int(index)
+        if 1 <= idx <= len(self.values):
+            self.values[idx - 1] = value
+            return
+        if 0 <= idx < len(self.values):
+            self.values[idx] = value
+            return
+        raise IndexError(idx)
+
+
+class _FakeZeroBasedList:
+    def __init__(self, size: int, initial=None):
+        if initial is None:
+            self.values = [None] * int(size)
+        else:
+            self.values = list(initial)
+
+    def __setitem__(self, index: int, value):
+        idx = int(index)
+        if 0 <= idx < len(self.values):
+            self.values[idx] = value
+            return
+        raise IndexError(idx)
+
+
+class _FakeMaxMaterial:
+    def __init__(self, name: str):
+        self.name = name
+        self.user_props = {}
+
+
+class _FakeMaxMultiMaterial:
+    def __init__(self, numsubs: int):
+        self.name = ""
+        self.numsubs = int(numsubs)
+        self.materialList = _FakeOneBasedList(numsubs)
+        self.materialIDList = _FakeZeroBasedList(
+            numsubs,
+            initial=range(1, int(numsubs) + 1),
+        )
+        self.user_props = {}
+
+
+class _FakeMaxMesh:
+    def __init__(self, vertices=None, faces=None):
+        self.name = ""
+        self.vertices = list(vertices or [])
+        self.faces = list(faces or [])
+        self.face_mat_ids = {}
+        self.smoothing_groups = {}
+        self.user_props = {}
+        self.modifiers = []
+
+
+class _FakeSkin:
+    def __init__(self):
+        self.bones = []
+        self.weights = {}
+
+
+class _FakeSkinOps:
+    def addBone(self, skin, bone, bone_id):
+        skin.bones.append((bone, int(bone_id)))
+
+    def ReplaceVertexWeights(self, skin, vertex_index, bone_indices, weights):
+        skin.weights[int(vertex_index)] = (list(bone_indices), list(weights))
+
+
+class _FakeMeshOps:
+    def getNumMaps(self, _mesh):
+        return 0
+
+    def setNumMaps(self, _mesh, _count, keep=True):
+        return None
+
+    def setMapSupport(self, _mesh, _channel, _enabled):
+        return None
+
+    def setNumMapVerts(self, _mesh, _channel, _count):
+        return None
+
+    def setMapVert(self, _mesh, _channel, _index, _value):
+        return None
+
+    def setNumMapFaces(self, _mesh, _channel, _count):
+        return None
+
+    def setMapFace(self, _mesh, _channel, _index, _value):
+        return None
+
+
+class _FakeMaxRuntime:
+    def __init__(self):
+        self.skinOps = _FakeSkinOps()
+        self.meshop = _FakeMeshOps()
+
+    def Point3(self, x, y, z):
+        return (float(x), float(y), float(z))
+
+    def mesh(self, *, vertices, faces):
+        return _FakeMaxMesh(vertices, faces)
+
+    def MultiMaterial(self, numsubs: int):
+        return _FakeMaxMultiMaterial(numsubs)
+
+    def multimaterial(self, numsubs: int):
+        return _FakeMaxMultiMaterial(numsubs)
+
+    def setSubMtl(self, multi, slot, mat):
+        multi.materialList.__setitem__(slot, mat)
+
+    def setUserProp(self, obj, key: str, value):
+        obj.user_props[key] = value
+
+    def getUserProp(self, obj, key: str):
+        return obj.user_props.get(key)
+
+    def setFaceMatID(self, mesh, face_index, material_id):
+        mesh.face_mat_ids[int(face_index)] = int(material_id)
+
+    def setFaceSmoothGroup(self, mesh, face_index, smoothing_group):
+        mesh.smoothing_groups[int(face_index)] = int(smoothing_group)
+
+    def getNumFaces(self, mesh):
+        return len(mesh.faces)
+
+    def Skin(self):
+        return _FakeSkin()
+
+    def addModifier(self, mesh, modifier):
+        mesh.modifiers.append(modifier)
+        mesh.face_mat_ids = {idx: 1 for idx in range(1, len(mesh.faces) + 1)}
+
+    def Array(self, *values):
+        return list(values)
+
+
 def test_addon_package_imports_without_pymxs():
     import opennova_max
     import opennova_max.animation
@@ -491,6 +633,94 @@ def test_skin_weight_remap_uses_explicit_skin_bone_ids():
 
     assert bone_indices == [3, 9]
     assert weights == [0.5, 0.25]
+
+
+def test_max_multimaterial_uses_global_material_ids(monkeypatch):
+    from opennova_max import materials
+
+    rt = _FakeMaxRuntime()
+    mat0 = _FakeMaxMaterial("Material_0")
+    mat2 = _FakeMaxMaterial("Material_2")
+    monkeypatch.setattr(materials, "_rt", lambda: rt)
+
+    multi = materials.create_multimaterial("mesh_mats", [2, 0], {0: mat0, 2: mat2})
+
+    assert multi.materialList.values == [mat2, mat0]
+    assert multi.materialIDList.values == [3, 1]
+    assert multi.user_props["opennova_material_ids"] == "2,0"
+    assert multi.user_props["opennova_max_material_ids"] == "3,1"
+    assert mat2.user_props["opennova_max_material_id"] == 3
+    assert mat0.user_props["opennova_max_material_id"] == 1
+
+
+def test_max_mesh_writes_global_face_material_ids(monkeypatch):
+    from pyopennova.mesh_build import FlatMesh
+    from opennova_max import materials
+    from opennova_max.mesh import _build_max_mesh
+
+    rt = _FakeMaxRuntime()
+    monkeypatch.setattr(materials, "_rt", lambda: rt)
+    fm = FlatMesh(
+        name="01 Mesh0",
+        part_index=0,
+        vertices=[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        faces=[(0, 1, 2), (0, 2, 1), (1, 0, 2)],
+        face_material_ids=[0, 1, 4],
+        smoothing_groups=[1, 1, 1],
+        material_id_set=[0, 1, 4],
+    )
+
+    mesh = _build_max_mesh(
+        rt,
+        fm,
+        {
+            0: _FakeMaxMaterial("Material_0"),
+            1: _FakeMaxMaterial("Material_1"),
+            4: _FakeMaxMaterial("Material_4"),
+        },
+    )
+
+    assert [mesh.face_mat_ids[i] for i in (1, 2, 3)] == [1, 2, 5]
+    assert mesh.material.materialIDList.values == [1, 2, 5]
+    assert mesh.user_props["opennova_material_ids"] == "0,1,4"
+    assert mesh.user_props["opennova_max_material_ids"] == "1,2,5"
+    assert mesh.user_props["opennova_source_face_material_ids"] == "0,1,4"
+    assert mesh.user_props["opennova_face_material_ids"] == "1,2,5"
+    assert mesh.user_props["opennova_face_material_id_mode"] == "global"
+
+
+def test_max_skin_binding_restores_face_material_ids(monkeypatch):
+    from opennova_max import scene_builder
+    from opennova_max.scene_builder import MaxSceneBuilder
+
+    rt = _FakeMaxRuntime()
+    monkeypatch.setattr(scene_builder, "_rt", lambda: rt)
+    mesh = _FakeMaxMesh(
+        vertices=[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        faces=[(0, 1, 2), (0, 2, 1), (1, 0, 2)],
+    )
+    mesh.name = "01 Mesh0"
+    mesh.user_props["opennova_face_material_ids"] = "1,2,5"
+    mesh.face_mat_ids = {1: 1, 2: 2, 3: 5}
+
+    builder = object.__new__(MaxSceneBuilder)
+    builder.armature_object = object()
+    builder.bone_nodes = [object(), object()]
+    builder._bone_infos = [("BN01", -1, (0.0, 0.0, 0.0)), ("BN02", 0, (1.0, 0.0, 0.0))]
+    builder.mesh_objects = [mesh]
+    builder._mesh_bone_data = {
+        mesh.name: [
+            [(0, 1.0)],
+            [(1, 1.0)],
+            [(0, 0.5), (1, 0.5)],
+        ],
+    }
+
+    builder.bind_meshes_to_armature()
+
+    assert [mesh.face_mat_ids[i] for i in (1, 2, 3)] == [1, 2, 5]
+    assert mesh.user_props["opennova_skin_material_faces_restored"] == 3
+    assert mesh.user_props["opennova_skin_bound_vertices"] == 3
 
 
 def test_parented_local_position_to_world_adds_parent_translation():

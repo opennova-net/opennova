@@ -636,8 +636,11 @@ class MaxSceneBuilder:
                             rt.Array(*weights),
                         )
                         bound_vertices += 1
+                restored_faces = _restore_face_material_ids(rt, mesh_obj)
                 _set_user_prop(rt, mesh_obj, "opennova_skin_bone_count", len(bone_id_by_source))
                 _set_user_prop(rt, mesh_obj, "opennova_skin_bound_vertices", bound_vertices)
+                if restored_faces:
+                    _set_user_prop(rt, mesh_obj, "opennova_skin_material_faces_restored", restored_faces)
             except Exception as exc:
                 _set_user_prop(rt, mesh_obj, "opennova_skin_warning", str(exc))
         self._mesh_bone_data.clear()
@@ -1101,3 +1104,44 @@ def _remap_skin_weight_entries(entries, bone_id_by_source: dict[int, int]) -> tu
             bone_indices.append(skin_bone_id)
             weights.append(float(weight))
     return bone_indices, weights
+
+
+def _restore_face_material_ids(rt, mesh_obj) -> int:
+    face_material_ids = _read_int_user_prop_list(rt, mesh_obj, "opennova_face_material_ids")
+    if not face_material_ids:
+        return 0
+    try:
+        face_count = int(rt.getNumFaces(mesh_obj))
+    except Exception:
+        face_count = len(face_material_ids)
+
+    restored = 0
+    for fi, material_id in enumerate(face_material_ids[:face_count], start=1):
+        try:
+            rt.setFaceMatID(mesh_obj, fi, int(material_id))
+            restored += 1
+        except Exception:
+            pass
+    return restored
+
+
+def _read_int_user_prop_list(rt, obj, key: str) -> list[int]:
+    try:
+        raw = rt.getUserProp(obj, key)
+    except Exception:
+        raw = None
+    if raw in (None, ""):
+        return []
+    if isinstance(raw, (tuple, list)):
+        items = raw
+    else:
+        items = str(raw).split(",")
+    out = []
+    for item in items:
+        try:
+            text = str(item).strip()
+            if text:
+                out.append(int(text))
+        except Exception:
+            pass
+    return out

@@ -165,10 +165,13 @@ def create_multimaterial(name: str, material_ids: list[int], material_dict: dict
     _try_set(multi, "numsubs", len(material_ids))
     _set_user_prop(rt, multi, "opennova_submaterial_count", len(material_ids))
     _set_user_prop(rt, multi, "opennova_material_ids", ",".join(str(int(v)) for v in material_ids))
+    _set_user_prop(rt, multi, "opennova_max_material_ids", ",".join(str(_max_material_id(v)) for v in material_ids))
     for slot, mat_id in enumerate(material_ids, start=1):
         mat = material_dict.get(mat_id)
         if mat is None:
             continue
+        max_material_id = _max_material_id(mat_id)
+        _set_user_prop(rt, mat, "opennova_max_material_id", max_material_id)
         assigned = False
         for setter in (
             lambda: rt.setSubMtl(multi, slot, mat),
@@ -185,8 +188,8 @@ def create_multimaterial(name: str, material_ids: list[int], material_dict: dict
             log.debug("Could not assign MultiMaterial slot %s", slot)
 
         for setter in (
-            lambda: multi.materialIDList.__setitem__(slot, slot),
-            lambda: multi.materialIDList.__setitem__(slot - 1, slot),
+            lambda: multi.materialIDList.__setitem__(slot - 1, max_material_id),
+            lambda: multi.materialIDList.__setitem__(slot, max_material_id),
         ):
             try:
                 setter()
@@ -194,6 +197,11 @@ def create_multimaterial(name: str, material_ids: list[int], material_dict: dict
             except Exception:
                 pass
     return multi
+
+
+def _max_material_id(material_id: int) -> int:
+    """Return the 1-based Max face/material id for a 0-based IR material id."""
+    return max(1, int(material_id) + 1)
 
 
 def collect_texture_diagnostics(mat_ir, resolver=None) -> dict[str, Any]:
