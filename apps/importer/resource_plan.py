@@ -51,6 +51,7 @@ def resolve_definition_import(
         build_animation_context,
         ensure_extension,
         process_def_files,
+        resolve_reset_bad_path,
     )
 
     del base_dir  # kept for call-site symmetry with older runner code
@@ -100,19 +101,24 @@ def resolve_definition_import(
 
     anim_ctx = None
     reset_bad_path = None
-    if import_animations:
-        anim_field = (
-            target_context.anim_adm
-            if item_type == "weapon"
-            else target_context.anim_def
-        )
-        if anim_field:
+    anim_field = (
+        target_context.anim_adm
+        if item_type == "weapon"
+        else target_context.anim_def
+    )
+    if anim_field:
+        if import_animations:
             try:
                 anim_ctx = build_animation_context(anim_field, resolver=resolver)
                 if anim_ctx and anim_ctx.reset_animation:
                     reset_bad_path = str(anim_ctx.reset_animation.bad_filepath)
             except Exception as exc:
                 log.warning("Could not load BAD file: %s", exc)
+        else:
+            try:
+                reset_bad_path = resolve_reset_bad_path(anim_field, resolver=resolver)
+            except Exception as exc:
+                log.warning("Could not resolve reset BAD file: %s", exc)
 
     return DefinitionImportPlan(
         item_name=item_name,

@@ -11,6 +11,7 @@ from __future__ import annotations
 import shutil
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -304,6 +305,58 @@ def test_max_scene_builder_build_basic_scene_returns_false_for_zero_lod_ir():
 
     builder = MaxSceneBuilder(FakeIR(), resolver=None)
     assert builder.build_basic_scene("anything") is False
+
+
+def test_max_scene_builder_uses_bad_skeleton_without_animation_context(monkeypatch):
+    from opennova_max import mesh, scene_builder
+    from opennova_max.scene_builder import MaxSceneBuilder
+
+    class FakeIR:
+        lod_count = 1
+        material_count = 0
+        mesh_type = 3
+
+    calls = []
+    builder = MaxSceneBuilder(
+        FakeIR(),
+        bad_file=object(),
+        anim_context=None,
+        resolver=None,
+        import_collisions=False,
+        import_occlusion=False,
+        import_lights=False,
+    )
+
+    monkeypatch.setattr(mesh, "build_part_hierarchy", lambda *args, **kwargs: ("root", {0: "part"}))
+    monkeypatch.setattr(mesh, "build_lod_meshes", lambda *args, **kwargs: [SimpleNamespace(name="01 Mesh0")])
+    monkeypatch.setattr(MaxSceneBuilder, "_store_material_diagnostics", lambda self, root: None)
+    monkeypatch.setattr(MaxSceneBuilder, "_build_additional_lods", lambda self, name: None)
+    monkeypatch.setattr(MaxSceneBuilder, "create_scene_markers", lambda self: None)
+    monkeypatch.setattr(MaxSceneBuilder, "create_user_points", lambda self: None)
+    monkeypatch.setattr(
+        MaxSceneBuilder,
+        "build_armature_from_bad",
+        lambda self, bad_file, name: calls.append(("bad", bad_file, name)),
+    )
+    monkeypatch.setattr(
+        MaxSceneBuilder,
+        "bind_meshes_to_armature",
+        lambda self: calls.append(("bind",)),
+    )
+    monkeypatch.setattr(
+        MaxSceneBuilder,
+        "build_armature_from_parts",
+        lambda self, name: calls.append(("parts", name)),
+    )
+    monkeypatch.setattr(
+        MaxSceneBuilder,
+        "build_animations_from_context",
+        lambda self, ctx: calls.append(("anim", ctx)),
+    )
+
+    assert builder.build_basic_scene("WPN") is True
+
+    assert calls == [("bad", builder.bad_file, "WPN"), ("bind",)]
 
 
 def test_bad_transform_helpers_match_on3diimporter_row_order():
@@ -730,6 +783,54 @@ def test_max_skin_binding_restores_face_material_ids(monkeypatch):
     assert [mesh.face_mat_ids[i] for i in (1, 2, 3)] == [1, 2, 5]
     assert mesh.user_props["opennova_skin_material_faces_restored"] == 3
     assert mesh.user_props["opennova_skin_bound_vertices"] == 3
+
+
+def test_max_secondary_merge_builds_its_own_materials(monkeypatch):
+    from opennova_max import materials, mesh
+    from opennova_max.scene_builder import MaxSceneBuilder
+
+    class FakeIR:
+        material_count = 2
+        materials = ("arms_mat_0", "arms_mat_1")
+
+    main_materials = {0: "weapon_mat_0"}
+    main_builder = SimpleNamespace(
+        root_object="root",
+        part_nodes={0: "part"},
+        material_dict=main_materials,
+        armature_object="armature",
+        root_motion_node="root_motion",
+        bone_nodes=["bone"],
+        _bone_infos=[("BN01", -1, (0.0, 0.0, 0.0))],
+    )
+    created = []
+    mesh_material_dicts = []
+    bind_calls = []
+
+    def fake_create_material(mat_ir, *, resolver=None, ctrl_resolver=None):
+        created.append((mat_ir, resolver, ctrl_resolver))
+        return f"created_{mat_ir}"
+
+    def fake_build_lod_meshes(*args, **kwargs):
+        mesh_material_dicts.append(kwargs["material_dict"])
+        return [SimpleNamespace(name="arms_mesh")]
+
+    monkeypatch.setattr(materials, "create_material", fake_create_material)
+    monkeypatch.setattr(mesh, "build_lod_meshes", fake_build_lod_meshes)
+    monkeypatch.setattr(MaxSceneBuilder, "bind_meshes_to_armature", lambda self: bind_calls.append(self.mesh_objects))
+
+    builder = MaxSceneBuilder(FakeIR(), resolver="resolver")
+
+    assert builder.merge_with_existing_scene(main_builder) is True
+
+    assert builder.material_dict == {
+        0: "created_arms_mat_0",
+        1: "created_arms_mat_1",
+    }
+    assert builder.material_dict is not main_materials
+    assert mesh_material_dicts == [builder.material_dict]
+    assert [call[0] for call in created] == ["arms_mat_0", "arms_mat_1"]
+    assert bind_calls == [[builder.mesh_objects[0]]]
 
 
 def test_parented_local_position_to_world_adds_parent_translation():
@@ -1298,6 +1399,227 @@ def test_max_native_batch_request_can_disable_max_output():
 
     assert result.ok
     assert run_loose.call_args.kwargs["write_max"] is False
+
+
+def test_definition_plan_resolves_reset_bad_when_animation_import_is_disabled(monkeypatch):
+    from apps.importer import resource_plan
+    from pyopennova import definitions
+
+    class FakeResolver:
+        def resolve(self, name: str):
+            if name.lower().endswith(".3di"):
+                return f"C:/game/{name}"
+            return None
+
+    monkeypatch.setattr(
+        definitions,
+        "process_def_files",
+        lambda resolver: (
+            [
+                definitions.WeaponContext(
+                    name="WPN_TEST",
+                    graphic1=definitions.Graphic1(main="wpn_test", arms=None),
+                    anim_adm="wpn_test.adm",
+                )
+            ],
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        definitions,
+        "build_animation_context",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("animation context should not load")),
+    )
+    monkeypatch.setattr(definitions, "resolve_reset_bad_path", lambda adm_field, resolver: "C:/game/wpn_rst.bad")
+
+    plan = resource_plan.resolve_definition_import(
+        base_dir="C:/game",
+        item_name="WPN_TEST",
+        item_type="weapon",
+        resolver=FakeResolver(),
+        import_animations=False,
+    )
+
+    assert plan is not None
+    assert plan.animation_context is None
+    assert plan.reset_bad_path == "C:/game/wpn_rst.bad"
+
+
+def test_resolve_reset_bad_path_reads_only_adm_reset(monkeypatch):
+    from pyopennova import definitions
+
+    class FakeEntry:
+        def __init__(self, key: str, value: str):
+            self.key = key.encode("utf-8")
+            self.value = value.encode("utf-8")
+
+    class FakeAdm:
+        count = 2
+        entries = (
+            FakeEntry("anim_reset", "WPN_RST"),
+            FakeEntry("anim_fire", "WPN_FIRE"),
+        )
+
+    class FakeResolver:
+        def __init__(self):
+            self.requests = []
+
+        def resolve(self, name: str):
+            self.requests.append(name)
+            return {
+                "WPN.adm": "C:/game/WPN.adm",
+                "WPN_RST.bad": "C:/game/WPN_RST.bad",
+            }.get(name)
+
+    freed = []
+    resolver = FakeResolver()
+    fake_adm = FakeAdm()
+    monkeypatch.setattr(definitions, "parse_adm", lambda path: fake_adm)
+    monkeypatch.setattr(definitions, "free_adm", lambda adm: freed.append(adm))
+    monkeypatch.setattr(
+        definitions,
+        "parse_bad",
+        lambda path: (_ for _ in ()).throw(AssertionError("reset path resolution should not parse BAD")),
+    )
+
+    assert definitions.resolve_reset_bad_path("WPN", resolver=resolver) == "C:/game/WPN_RST.bad"
+    assert resolver.requests == ["WPN.adm", "WPN_RST.bad"]
+    assert freed == [fake_adm]
+
+
+def test_max_definition_import_binds_reset_bad_without_animation_context(tmp_path: Path):
+    from opennova_max import import_runner
+
+    bad_file = object()
+    main_ir = object()
+    built = []
+
+    class FakeBuilder:
+        def __init__(self, ir, **kwargs):
+            self.ir = ir
+            self.kwargs = kwargs
+            self.bad_file = kwargs.get("bad_file")
+            self.apply_called = False
+            built.append(self)
+
+        def build_basic_scene(self, name: str):
+            self.name = name
+            return True
+
+        def apply_animations(self):
+            self.apply_called = True
+            return True
+
+    plan = SimpleNamespace(
+        export_name="WPN_TEST",
+        scene_name="WPN_TEST",
+        reset_bad_path="C:/game/WPN_RST.bad",
+        animation_context=object(),
+        models=(SimpleNamespace(role="main", path="C:/game/WPN.3di"),),
+    )
+
+    with patch("apps.importer.resource_plan.resolve_definition_import", return_value=plan):
+        with patch("pyopennova.bad_ffi.parse_bad", return_value=bad_file) as parse_bad:
+            with patch("pyopennova.bad_ffi.free_bad") as free_bad:
+                with patch("pyopennova.threedi_ffi.read_model_ir", return_value=main_ir):
+                    with patch("pyopennova.threedi_ffi.free_model_ir") as free_ir:
+                        with patch("opennova_max.scene_builder.MaxSceneBuilder", FakeBuilder):
+                            with patch("opennova_max.output_writers.write_outputs", return_value=["out.max"]):
+                                written, project_dir = import_runner._run_definition_import_impl(
+                                    base_dir=str(tmp_path),
+                                    item_name="WPN_TEST",
+                                    item_type="weapon",
+                                    output_dir=str(tmp_path / "out"),
+                                    output_stem="",
+                                    import_arms=False,
+                                    import_animations=False,
+                                    import_collisions=False,
+                                    import_occlusion=False,
+                                    import_lights=False,
+                                    write_ase=False,
+                                    write_3dp=False,
+                                    write_max=True,
+                                    reset_scene=False,
+                                )
+
+    assert written == ["out.max"]
+    assert project_dir == str(tmp_path / "out" / "WPN_TEST")
+    assert built[0].bad_file is bad_file
+    assert built[0].kwargs["anim_context"] is None
+    assert built[0].apply_called is False
+    parse_bad.assert_called_once_with("C:/game/WPN_RST.bad")
+    free_bad.assert_called_once_with(bad_file)
+    free_ir.assert_called_once_with(main_ir)
+
+
+def test_max_definition_import_applies_animations_after_secondary_merge(tmp_path: Path):
+    from opennova_max import import_runner
+
+    events = []
+    bad_file = object()
+    main_ir = "main_ir"
+    arms_ir = "arms_ir"
+    anim_context = object()
+
+    class FakeBuilder:
+        def __init__(self, ir, **kwargs):
+            self.ir = ir
+            self.kwargs = kwargs
+            self.bad_file = kwargs.get("bad_file")
+
+        def build_basic_scene(self, name: str):
+            events.append(("build", self.ir, name))
+            return True
+
+        def merge_with_existing_scene(self, main_builder):
+            events.append(("merge", self.ir, main_builder.ir))
+            return True
+
+        def apply_animations(self):
+            events.append(("apply", self.ir))
+            return True
+
+    plan = SimpleNamespace(
+        export_name="WPN_TEST",
+        scene_name="WPN_TEST",
+        reset_bad_path="C:/game/WPN_RST.bad",
+        animation_context=anim_context,
+        models=(
+            SimpleNamespace(role="main", path="C:/game/WPN.3di"),
+            SimpleNamespace(role="arms", path="C:/game/WPN_ARMS.3di"),
+        ),
+    )
+
+    with patch("apps.importer.resource_plan.resolve_definition_import", return_value=plan):
+        with patch("pyopennova.bad_ffi.parse_bad", return_value=bad_file):
+            with patch("pyopennova.bad_ffi.free_bad"):
+                with patch("pyopennova.threedi_ffi.read_model_ir", side_effect=[main_ir, arms_ir]):
+                    with patch("pyopennova.threedi_ffi.free_model_ir"):
+                        with patch("opennova_max.scene_builder.MaxSceneBuilder", FakeBuilder):
+                            with patch("opennova_max.output_writers.write_outputs", return_value=["out.max"]):
+                                written, _project_dir = import_runner._run_definition_import_impl(
+                                    base_dir=str(tmp_path),
+                                    item_name="WPN_TEST",
+                                    item_type="weapon",
+                                    output_dir=str(tmp_path / "out"),
+                                    output_stem="",
+                                    import_arms=True,
+                                    import_animations=True,
+                                    import_collisions=False,
+                                    import_occlusion=False,
+                                    import_lights=False,
+                                    write_ase=False,
+                                    write_3dp=False,
+                                    write_max=True,
+                                    reset_scene=False,
+                                )
+
+    assert written == ["out.max"]
+    assert events == [
+        ("build", main_ir, "WPN_TEST"),
+        ("merge", arms_ir, main_ir),
+        ("apply", main_ir),
+    ]
 
 
 def test_max_output_writer_can_save_max_only(tmp_path: Path):

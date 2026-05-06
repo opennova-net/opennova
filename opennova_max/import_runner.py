@@ -268,6 +268,8 @@ def _run_definition_import_impl(
                         free_model_ir(ir)
 
             if main_builder is not None and main_ir is not None:
+                if import_animations:
+                    main_builder.apply_animations()
                 written.extend(write_outputs(
                     main_ir,
                     project_dir,

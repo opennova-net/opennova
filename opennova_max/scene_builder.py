@@ -98,22 +98,36 @@ class MaxSceneBuilder:
         if self.import_lights:
             self.create_scene_lights()
 
-        if self.bad_file and self.anim_context:
+        if self.bad_file:
             self.build_armature_from_bad(self.bad_file, name)
             self.bind_meshes_to_armature()
-            self.build_animations_from_context(self.anim_context)
+            # Animation keying is applied after all merged meshes have been
+            # bound, so Skin captures the reset pose for the whole import.
         elif int(getattr(self.ir, "mesh_type", 0)) == 3:
             self.build_armature_from_parts(name)
             self.bind_meshes_to_armature()
 
         return bool(self.mesh_objects)
 
+    def apply_animations(self) -> bool:
+        if not (self.bad_file and self.anim_context and self.armature_object):
+            return False
+        self.build_animations_from_context(self.anim_context)
+        return True
+
     def merge_with_existing_scene(self, main_builder) -> bool:
+        from .materials import create_material
         from .mesh import build_lod_meshes
 
         self.root_object = main_builder.root_object
         self.part_nodes = main_builder.part_nodes
-        self.material_dict = main_builder.material_dict
+        self.material_dict = {}
+        for i in range(int(self.ir.material_count)):
+            self.material_dict[i] = create_material(
+                self.ir.materials[i],
+                resolver=self.resolver,
+                ctrl_resolver=self._resolve_ctrl_reg,
+            )
         self.armature_object = main_builder.armature_object
         self.root_motion_node = main_builder.root_motion_node
         self.bone_nodes = main_builder.bone_nodes
