@@ -7,12 +7,16 @@ batch/output path instead of each host maintaining its own ASE export logic.
 from __future__ import annotations
 
 import ctypes
-import enum
 import math
 import os
 from typing import Any, Sequence
 
 from pyopennova import ase_ffi, coords
+from pyopennova.scene_naming import (
+    build_occlusion_name as _build_occlusion_name,
+    build_volume_name as _build_volume_name,
+    format_duplicate_suffix as _format_duplicate_suffix,
+)
 from pyopennova.materials import ase_texture_names, describe_material
 from pyopennova.mesh_build import flatten_lod
 from pyopennova.mesh_primitives import cube_mesh
@@ -1009,74 +1013,3 @@ def _fit_texture_name(used: dict[str, str], name: str) -> str:
                 break
     used[key] = name.lower()
     return candidate
-
-
-class _CollisionType(enum.IntEnum):
-    CB = 1; CS = 2; CC = 3; CL = 4; CV = 5; CA = 6
-    VC = 7; BB = 8; CD = 9; CT = 10; CM = 11; VK = 12
-    CF = 13; LP = 14; CP = 19
-
-
-class _OcclusionType(enum.IntEnum):
-    OB = 0
-    OS = 1
-    OP = 2
-    OP2 = 3
-
-
-_OCCLUSION_PREFIXES = {
-    _OcclusionType.OB: "OB",
-    _OcclusionType.OS: "OS",
-    _OcclusionType.OP: "OP",
-    _OcclusionType.OP2: "OP",
-}
-
-
-def _build_occlusion_name(type_code: int, parent_subobject: int, connecting_subobject: int) -> str:
-    display_index = parent_subobject if parent_subobject >= 0 else 0
-    try:
-        prefix = _OCCLUSION_PREFIXES[_OcclusionType(type_code)]
-    except ValueError:
-        prefix = "OX"
-    name = f"{prefix}{display_index + 1:02d}"
-    if (type_code == 2 or type_code == 3) and connecting_subobject >= 0:
-        name += f"-{connecting_subobject + 1:02d}"
-    return name
-
-
-def _blinkbox_enabled_suffix(flags: int) -> str:
-    enabled = (~flags) & 0x3E
-    if enabled == 0:
-        return ""
-    out = ""
-    if enabled & (1 << 1): out += "V"
-    if enabled & (1 << 2): out += "S"
-    if enabled & (1 << 3): out += "W"
-    if enabled & (1 << 4): out += "L"
-    if enabled & (1 << 5): out += "O"
-    return out
-
-
-def _format_duplicate_suffix(occurrence: int) -> str:
-    if occurrence <= 1:
-        return ""
-    index = occurrence - 1
-    out = ""
-    while index > 0:
-        index -= 1
-        out = chr(ord("a") + (index % 26)) + out
-        index //= 26
-    return out
-
-
-def _build_volume_name(type_code: int, flags: int, index: int, occurrence: int) -> str:
-    try:
-        base = _CollisionType(type_code).name
-    except ValueError:
-        base = "CX"
-    if type_code == 8:
-        suffix = _blinkbox_enabled_suffix(flags)
-        if suffix:
-            base += suffix
-    display_index = index if index >= 0 else 0
-    return f"{base}{display_index + 1:02d}{_format_duplicate_suffix(occurrence)}"

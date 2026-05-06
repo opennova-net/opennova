@@ -104,6 +104,24 @@ def can_import_batch(
     return bool(visible_count > 0 and output_root.strip() and writes_any_output(write_ase, write_3dp, write_max))
 
 
+def _dialog_alive(dialog) -> bool:
+    """Return True iff ``dialog`` still has a live underlying C++ widget.
+
+    Max can tear down the parent main window across workspace switches /
+    interpreter reloads, leaving the cached Python wrapper dangling. Calling
+    a cheap method like ``objectName()`` raises ``RuntimeError`` ("Internal
+    C++ object already deleted") in that case. Portable across PySide2 and
+    PySide6 with no ``shiboken`` import.
+    """
+    if dialog is None:
+        return False
+    try:
+        dialog.objectName()
+        return True
+    except RuntimeError:
+        return False
+
+
 def show_importer_dialog() -> bool:
     """Show the Qt importer dialog."""
     if not is_available():
@@ -114,7 +132,7 @@ def show_importer_dialog() -> bool:
         app = QtWidgets.QApplication([])
 
     global _DIALOG
-    if _DIALOG is None:
+    if not _dialog_alive(_DIALOG):
         _DIALOG = OpenNovaImporterDialog(parent=_max_parent())
     _DIALOG.show()
     _DIALOG.raise_()
@@ -649,7 +667,12 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
                 from . import ui as ui_helpers
 
                 completed = 0
-                for item in items:
+                total = len(items)
+                for index, item in enumerate(items, start=1):
+                    self._set_status(
+                        f"Importing {index}/{total}: {item.type} {item.name}..."
+                    )
+                    QtWidgets.QApplication.processEvents()
                     if ui_helpers._run_definition_item(
                         item,
                         self.game_dir_edit.text(),
@@ -665,7 +688,7 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
                     ):
                         completed += 1
                 self._set_status(
-                    f"Filtered batch complete: {completed}/{len(items)} resources -> {Path(self.output_root_edit.text().strip())}"
+                    f"Filtered batch complete: {completed}/{total} resources -> {Path(self.output_root_edit.text().strip())}"
                 )
 
             self._run_busy("Running filtered batch import...", run)
