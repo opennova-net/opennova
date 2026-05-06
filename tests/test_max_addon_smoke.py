@@ -195,6 +195,15 @@ def test_max_mzp_package_script_smokes_startup_and_animation_modules():
     assert "import opennova_max.animation" in package_script
     assert "import opennova_max.ui" in package_script
     assert "import pyopennova.animation_build" in package_script
+    assert "OpenNovaMax-*.bundle" in package_script
+    assert "_cleanup_existing_bundles(root, destination)" in package_script
+    assert "Removed old OpenNova Max bundles:" in package_script
+    assert "Disabled locked old OpenNova Max bundles for next restart:" in package_script
+    assert "PackageContents.xml.disabled-by-opennova-upgrade" in package_script
+    assert "No old OpenNova Max bundles were found." in package_script
+    assert "OpenNovaMax-0.0.1.bundle" in package_script
+    assert "OpenNovaMax-locked.bundle" in package_script
+    assert "UnrelatedPlugin.bundle" in package_script
     assert 'menuMan.createActionItem "OpenNovaImporter" "OpenNova"' in package_script
     assert "Menu registration should not dynamically define the OpenNova macro" in package_script
 

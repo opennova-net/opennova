@@ -330,6 +330,53 @@ def _message(text: str) -> None:
         pass
 
 
+def _is_opennova_bundle(path: Path) -> bool:
+    return (
+        path.is_dir()
+        and path.name.startswith("OpenNovaMax-")
+        and path.name.endswith(".bundle")
+    )
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    return os.path.normcase(os.path.abspath(str(left))) == os.path.normcase(
+        os.path.abspath(str(right))
+    )
+
+
+def _disable_bundle(path: Path) -> bool:
+    package_contents = path / "PackageContents.xml"
+    if not package_contents.exists():
+        return True
+    disabled = path / "PackageContents.xml.disabled-by-opennova-upgrade"
+    if disabled.exists():
+        disabled.unlink()
+    package_contents.rename(disabled)
+    return True
+
+
+def _cleanup_existing_bundles(root: Path, destination: Path):
+    removed = []
+    disabled = []
+    failed = []
+    for candidate in root.glob("OpenNovaMax-*.bundle"):
+        if not _is_opennova_bundle(candidate):
+            continue
+        if _same_path(candidate, destination):
+            continue
+        try:
+            shutil.rmtree(str(candidate))
+        except Exception:
+            try:
+                if _disable_bundle(candidate):
+                    disabled.append(candidate)
+            except Exception as disable_exc:
+                failed.append((candidate, disable_exc))
+        else:
+            removed.append(candidate)
+    return removed, disabled, failed
+
+
 def install() -> Path:
     installer_dir = Path(__file__).resolve().parent
     source = installer_dir / BUNDLE_NAME
@@ -343,18 +390,38 @@ def install() -> Path:
     if destination.exists():
         shutil.rmtree(str(destination))
     shutil.copytree(str(source), str(destination))
-    return destination
+    removed, disabled, failed = _cleanup_existing_bundles(root, destination)
+    return destination, removed, disabled, failed
 
 
 if __name__ == "__main__":
     try:
-        installed = install()
+        installed, removed, disabled, failed = install()
     except Exception as exc:
         _message(f"OpenNova Max {VERSION} install failed:\n{exc}")
         raise
     else:
+        cleanup_parts = []
+        if removed:
+            cleanup_parts.append(
+                "Removed old OpenNova Max bundles:\n"
+                + "\n".join(f"- {path.name}" for path in removed)
+            )
+        if disabled:
+            cleanup_parts.append(
+                "Disabled locked old OpenNova Max bundles for next restart:\n"
+                + "\n".join(f"- {path.name}" for path in disabled)
+            )
+        if failed:
+            cleanup_parts.append(
+                "Could not remove or disable these old OpenNova Max bundles:\n"
+                + "\n".join(f"- {path.name}: {exc}" for path, exc in failed)
+                + "\nClose 3ds Max and install this MZP again."
+            )
+        cleanup = "\n\n".join(cleanup_parts) if cleanup_parts else "No old OpenNova Max bundles were found."
         _message(
             f"OpenNova Max {VERSION} installed to:\n{installed}\n\n"
+            f"{cleanup}\n\n"
             "Restart 3ds Max to use this version."
         )
 "@
@@ -424,8 +491,59 @@ Assert-File (Join-Path $ExpandedPython "pyopennova\lib\windows-x64\opennova.dll"
 Assert-File (Join-Path $ExpandedPython "apps\importer\resource_plan.py")
 Assert-File (Join-Path $ExpandedPython "apps\importer\jobs.py")
 
-Write-Host "=== Running staged Python smoke check ==="
 $PY = Resolve-Python
+
+Write-Host "=== Running installer cleanup smoke check ==="
+$InstallSmokeRoot = Join-Path $VALIDATE_ROOT "install-smoke\ApplicationPlugins"
+Ensure-Dir (Join-Path $InstallSmokeRoot "OpenNovaMax-0.0.1.bundle")
+Ensure-Dir (Join-Path $InstallSmokeRoot "OpenNovaMax-9.9.9.bundle")
+$LockedSmokeBundle = Join-Path $InstallSmokeRoot "OpenNovaMax-locked.bundle"
+Ensure-Dir $LockedSmokeBundle
+Set-Content -LiteralPath (Join-Path $LockedSmokeBundle "PackageContents.xml") -Value "<ApplicationPackage />" -Encoding ASCII
+$LockedSmokeFile = Join-Path $LockedSmokeBundle "locked.dll"
+Set-Content -LiteralPath $LockedSmokeFile -Value "locked" -Encoding ASCII
+Ensure-Dir (Join-Path $InstallSmokeRoot "UnrelatedPlugin.bundle")
+$oldInstallRoot = $env:OPENNOVA_MAX_INSTALL_ROOT
+$lockStream = $null
+$pushedInstallSmokeLocation = $false
+try {
+    $lockStream = [System.IO.File]::Open(
+        $LockedSmokeFile,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::ReadWrite,
+        [System.IO.FileShare]::None
+    )
+    $env:OPENNOVA_MAX_INSTALL_ROOT = $InstallSmokeRoot
+    Push-Location $VALIDATE_ROOT
+    $pushedInstallSmokeLocation = $true
+    & $PY (Join-Path $VALIDATE_ROOT "install.py")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Installer cleanup smoke check failed with exit code $LASTEXITCODE"
+    }
+}
+finally {
+    if ($pushedInstallSmokeLocation) {
+        Pop-Location
+    }
+    if ($lockStream) {
+        $lockStream.Dispose()
+    }
+    $env:OPENNOVA_MAX_INSTALL_ROOT = $oldInstallRoot
+}
+Assert-Dir (Join-Path $InstallSmokeRoot $BundleName)
+if (Test-Path -LiteralPath (Join-Path $InstallSmokeRoot "OpenNovaMax-0.0.1.bundle")) {
+    throw "Installer did not remove stale OpenNovaMax-0.0.1.bundle"
+}
+if (Test-Path -LiteralPath (Join-Path $InstallSmokeRoot "OpenNovaMax-9.9.9.bundle")) {
+    throw "Installer did not remove stale OpenNovaMax-9.9.9.bundle"
+}
+Assert-Dir $LockedSmokeBundle
+if (Test-Path -LiteralPath (Join-Path $LockedSmokeBundle "PackageContents.xml")) {
+    throw "Installer did not disable locked OpenNovaMax-locked.bundle"
+}
+Assert-Dir (Join-Path $InstallSmokeRoot "UnrelatedPlugin.bundle")
+
+Write-Host "=== Running staged Python smoke check ==="
 $SmokeFixture = Join-Path $ROOT "fixtures\threedi\3di3\Shed.3di"
 Assert-File $SmokeFixture
 
