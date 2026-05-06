@@ -813,8 +813,8 @@ def test_max_secondary_merge_builds_its_own_materials(monkeypatch):
     mesh_material_dicts = []
     bind_calls = []
 
-    def fake_create_material(mat_ir, *, resolver=None, ctrl_resolver=None):
-        created.append((mat_ir, resolver, ctrl_resolver))
+    def fake_create_material(mat_ir, *, resolver=None, ctrl_resolver=None, source_format=None):
+        created.append((mat_ir, resolver, ctrl_resolver, source_format))
         return f"created_{mat_ir}"
 
     def fake_build_lod_meshes(*args, **kwargs):

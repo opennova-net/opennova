@@ -27,10 +27,15 @@ def _rt():
     return pymxs.runtime
 
 
-def create_material(mat_ir, resolver=None, ctrl_resolver=None) -> Any:
+def create_material(mat_ir, resolver=None, ctrl_resolver=None, source_format=None) -> Any:
     """Create a Max StandardMaterial matching one IR material."""
     rt = _rt()
-    desc = describe_material(mat_ir, resolver=resolver, ctrl_resolver=ctrl_resolver)
+    desc = describe_material(
+        mat_ir,
+        resolver=resolver,
+        ctrl_resolver=ctrl_resolver,
+        source_format=source_format,
+    )
 
     mat = rt.StandardMaterial(name=desc.name)
     fallback_color = rt.color(150, 150, 150)
@@ -117,9 +122,9 @@ def create_material(mat_ir, resolver=None, ctrl_resolver=None) -> Any:
     return mat
 
 
-def create_diffuse_material(mat_ir, resolver=None) -> Any:
+def create_diffuse_material(mat_ir, resolver=None, source_format=None) -> Any:
     """Backward-compatible wrapper used by older smoke tests."""
-    return create_material(mat_ir, resolver=resolver)
+    return create_material(mat_ir, resolver=resolver, source_format=source_format)
 
 
 def create_marker_material(name: str, color_rgb: tuple[float, float, float], alpha: float = 1.0) -> Any:
@@ -196,9 +201,9 @@ def _max_material_id(material_id: int) -> int:
     return max(1, int(material_id) + 1)
 
 
-def collect_texture_diagnostics(mat_ir, resolver=None) -> dict[str, Any]:
+def collect_texture_diagnostics(mat_ir, resolver=None, source_format=None) -> dict[str, Any]:
     """Return resolved texture names/paths without touching Max material APIs."""
-    desc = describe_material(mat_ir, resolver=resolver)
+    desc = describe_material(mat_ir, resolver=resolver, source_format=source_format)
     return {
         "diffuse_name": desc.diffuse.name,
         "diffuse_path": desc.diffuse.path,

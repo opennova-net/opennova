@@ -64,6 +64,7 @@ class MaxSceneBuilder:
                 self.ir.materials[i],
                 resolver=self.resolver,
                 ctrl_resolver=self._resolve_ctrl_reg,
+                source_format=getattr(self.ir, "source_format", None),
             )
 
         material_names = self._material_names_manifest()
@@ -127,6 +128,7 @@ class MaxSceneBuilder:
                 self.ir.materials[i],
                 resolver=self.resolver,
                 ctrl_resolver=self._resolve_ctrl_reg,
+                source_format=getattr(self.ir, "source_format", None),
             )
         self.armature_object = main_builder.armature_object
         self.root_motion_node = main_builder.root_motion_node

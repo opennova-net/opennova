@@ -1557,7 +1557,12 @@ class BlenderSceneBuilder:
     def _create_material(self, ir_mat):
         from pyopennova.materials import describe_material, material_user_props
 
-        desc = describe_material(ir_mat, resolver=self.resolver, ctrl_resolver=self._resolve_ctrl_reg)
+        desc = describe_material(
+            ir_mat,
+            resolver=self.resolver,
+            ctrl_resolver=self._resolve_ctrl_reg,
+            source_format=getattr(self.ir, "source_format", None),
+        )
         mat = bpy.data.materials.new(f"Material_{desc.index}")
         mat.use_nodes = True
         mat.node_tree.nodes.clear()

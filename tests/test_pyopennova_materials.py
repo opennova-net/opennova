@@ -116,6 +116,44 @@ def test_describe_material_interprets_texture_slots_and_paths(tmp_path: Path):
     assert desc.effective_v_tiling == 1.0
 
 
+def test_describe_materials_passes_source_format_to_texture_resolver(tmp_path: Path):
+    diffuse = tmp_path / "Diffuse.dds"
+    diffuse.write_bytes(b"DDS data")
+    mat = FakeMaterial([
+        FakeTexture("Diffuse.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE, tex_type=0, flags=2),
+    ])
+
+    class FakeIR:
+        source_format = 1
+        material_count = 1
+        materials = [mat]
+
+    class RecordingResolver:
+        def __init__(self):
+            self.calls = []
+
+        def resolve_texture(self, name: str, **kwargs):
+            self.calls.append((name, kwargs))
+            return str(diffuse)
+
+    resolver = RecordingResolver()
+    desc = materials.describe_materials(FakeIR(), resolver=resolver)[0]
+
+    assert desc.diffuse.path == str(diffuse)
+    assert resolver.calls == [
+        (
+            "Diffuse.tga",
+            {
+                "strategy": None,
+                "source_format": 1,
+                "slot": materials.THREEDI_IR_TEX_SLOT_DIFFUSE,
+                "tex_type": 0,
+                "flags": 2,
+            },
+        )
+    ]
+
+
 def test_material_user_props_and_diagnostics_use_descriptor_data(tmp_path: Path):
     diffuse = tmp_path / "Diffuse.tga"
     diffuse.write_bytes(b"tga data")

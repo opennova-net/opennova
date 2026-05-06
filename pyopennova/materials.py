@@ -112,14 +112,26 @@ class MaterialDescriptor:
     tex_anim: TexAnimDescriptor = field(default_factory=TexAnimDescriptor)
 
 
-def describe_material(ir_mat, resolver=None, ctrl_resolver=None) -> MaterialDescriptor:
+def describe_material(
+    ir_mat,
+    resolver=None,
+    ctrl_resolver=None,
+    *,
+    source_format: int | None = None,
+    texture_strategy: str | None = None,
+) -> MaterialDescriptor:
     """Interpret one ``ThreediIRMaterial`` into host-neutral material data."""
 
     index = _int_attr(ir_mat, "index", 0)
     shader = _decode(_attr(ir_mat, "shader_name", b"")).strip() or "FF_ST_OP"
     name = "Material_%d_%s" % (index, shader)
     flags = _int_attr(ir_mat, "flags", 0)
-    diffuse, detail, normal = _texture_descriptors(ir_mat, resolver)
+    diffuse, detail, normal = _texture_descriptors(
+        ir_mat,
+        resolver,
+        source_format=source_format,
+        texture_strategy=texture_strategy,
+    )
 
     specular_intensity = _int_attr(ir_mat, "specular_intensity", 0)
     specular_strength = min(float(specular_intensity) / 255.0, 1.0) if specular_intensity > 0 else 0.0
@@ -196,8 +208,16 @@ def describe_materials(ir, resolver=None, ctrl_resolver=None) -> List[MaterialDe
     """Interpret all materials in a model IR."""
 
     out = []
+    source_format = _int_attr(ir, "source_format", 0)
     for i in range(_int_attr(ir, "material_count", 0)):
-        out.append(describe_material(ir.materials[i], resolver=resolver, ctrl_resolver=ctrl_resolver))
+        out.append(
+            describe_material(
+                ir.materials[i],
+                resolver=resolver,
+                ctrl_resolver=ctrl_resolver,
+                source_format=source_format,
+            )
+        )
     return out
 
 
@@ -292,7 +312,13 @@ def ase_texture_names(desc: MaterialDescriptor, used_names: Dict[str, str]) -> T
     )
 
 
-def _texture_descriptors(ir_mat, resolver) -> Tuple[TextureDescriptor, TextureDescriptor, TextureDescriptor]:
+def _texture_descriptors(
+    ir_mat,
+    resolver,
+    *,
+    source_format: int | None = None,
+    texture_strategy: str | None = None,
+) -> Tuple[TextureDescriptor, TextureDescriptor, TextureDescriptor]:
     diffuse = TextureDescriptor("diffuse")
     detail = TextureDescriptor("detail")
     normal = TextureDescriptor("normal")
@@ -311,7 +337,15 @@ def _texture_descriptors(ir_mat, resolver) -> Tuple[TextureDescriptor, TextureDe
         desc = TextureDescriptor(
             role=_texture_role(slot, t_idx, bool(diffuse.name)),
             name=tex_name,
-            path=_resolve_texture(tex_name, resolver),
+            path=_resolve_texture(
+                tex_name,
+                resolver,
+                source_format=source_format,
+                texture_strategy=texture_strategy,
+                slot=slot,
+                tex_type=_int_attr(tex, "type", 0),
+                flags=_int_attr(tex, "flags", 0),
+            ),
             slot=slot,
             type=_int_attr(tex, "type", 0),
             flags=_int_attr(tex, "flags", 0),
@@ -431,11 +465,29 @@ def _resolve_ctrl(style: int, reg: int, ctrl_resolver) -> str:
     return str(value) if value else ""
 
 
-def _resolve_texture(texture_name: str, resolver) -> Optional[str]:
+def _resolve_texture(
+    texture_name: str,
+    resolver,
+    *,
+    source_format: int | None = None,
+    texture_strategy: str | None = None,
+    slot: int = 0,
+    tex_type: int = 0,
+    flags: int = 0,
+) -> Optional[str]:
     if not texture_name:
         return None
     if resolver is not None:
         try:
+            resolved = resolver.resolve_texture(
+                texture_name,
+                strategy=texture_strategy,
+                source_format=source_format,
+                slot=slot,
+                tex_type=tex_type,
+                flags=flags,
+            )
+        except TypeError:
             resolved = resolver.resolve_texture(texture_name)
         except Exception:
             resolved = None

@@ -25,6 +25,13 @@ _SCR_VERSION_KEYS = {
     2: SCR_KEY_SHADERS,
 }
 
+TEXTURE_STRATEGY_GENERIC = "generic"
+TEXTURE_STRATEGY_3DI3_DF4OED = "3di3_df4oed"
+
+THREEDI_IR_SOURCE_3DI3 = 1
+
+_TEXTURE_EXTS = (".dds", ".tga", ".png", ".mdt", ".pcx")
+
 
 class AssetResolver:
     """Context manager that resolves asset filenames to filesystem paths.
@@ -160,34 +167,28 @@ class AssetResolver:
 
         return None
 
-    def resolve_texture(self, texture_name: str) -> str | None:
+    def resolve_texture(
+        self,
+        texture_name: str,
+        *,
+        strategy: str | None = None,
+        source_format: int | None = None,
+        slot: int | None = None,
+        tex_type: int | None = None,
+        flags: int | None = None,
+        role: str | None = None,
+    ) -> str | None:
         """Resolve a texture name with extension fallback.
 
-        Strips known extensions, then tries candidates in priority order:
-        original name, .dds, .tga, .png, .mdt.
+        The returned path is for host/DCC loading. The authored texture name
+        remains owned by the material IR.
         """
         if not texture_name:
             return None
 
-        _EXTS = (".dds", ".tga", ".png", ".mdt")
-
-        # Strip all known extensions to get base name
-        base = texture_name
-        stripped = True
-        while stripped:
-            stripped = False
-            for ext in _EXTS:
-                if base.lower().endswith(ext):
-                    base = base[: len(base) - len(ext)]
-                    stripped = True
-                    break
-
-        # Build ordered candidate list
-        candidates = [texture_name]
-        for ext in _EXTS:
-            c = base + ext
-            if c.lower() != texture_name.lower():
-                candidates.append(c)
+        _ = (slot, tex_type, flags, role)  # Reserved for slot-specific flavor rules.
+        strategy_name = _texture_strategy(strategy, source_format)
+        candidates = _texture_candidates(texture_name, strategy_name)
 
         for candidate in candidates:
             result = self.resolve(candidate)
@@ -242,3 +243,71 @@ def _detect_bitmap_extension(path: Path) -> str | None:
     if header.startswith(b"II*\x00") or header.startswith(b"MM\x00*"):
         return ".tif"
     return None
+
+
+def _texture_strategy(strategy: str | None, source_format: int | None) -> str:
+    if strategy:
+        value = strategy.lower()
+        if value in {"3di3", "df4oed", TEXTURE_STRATEGY_3DI3_DF4OED}:
+            return TEXTURE_STRATEGY_3DI3_DF4OED
+        return TEXTURE_STRATEGY_GENERIC
+    if source_format == THREEDI_IR_SOURCE_3DI3:
+        return TEXTURE_STRATEGY_3DI3_DF4OED
+    return TEXTURE_STRATEGY_GENERIC
+
+
+def _texture_candidates(texture_name: str, strategy: str) -> list[str]:
+    base, ext = _strip_known_texture_extensions(texture_name)
+    if strategy == TEXTURE_STRATEGY_3DI3_DF4OED:
+        return _dedupe_texture_candidates(_df4oed_texture_candidates(texture_name, base, ext))
+    return _dedupe_texture_candidates(_generic_texture_candidates(texture_name, base))
+
+
+def _strip_known_texture_extensions(texture_name: str) -> tuple[str, str]:
+    base = texture_name
+    ext = ""
+    stripped = True
+    while stripped:
+        stripped = False
+        lower = base.lower()
+        for candidate_ext in _TEXTURE_EXTS:
+            if lower.endswith(candidate_ext):
+                base = base[: len(base) - len(candidate_ext)]
+                ext = candidate_ext
+                stripped = True
+                break
+    return base, ext
+
+
+def _generic_texture_candidates(texture_name: str, base: str) -> list[str]:
+    candidates = [texture_name]
+    for ext in (".dds", ".tga", ".png", ".mdt"):
+        candidate = base + ext
+        if candidate.lower() != texture_name.lower():
+            candidates.append(candidate)
+    return candidates
+
+
+def _df4oed_texture_candidates(texture_name: str, base: str, ext: str) -> list[str]:
+    if ext == ".mdt":
+        return [texture_name, base + ".mdt"]
+    if ext == ".dds":
+        return [texture_name, base + ".dds"]
+
+    candidates = [base + ".dds", texture_name]
+    if ext == ".pcx":
+        candidates.append(base + ".pcx")
+    else:
+        candidates.extend([base + ".tga", base + ".pcx", base + ".png", base + ".mdt"])
+    return candidates
+
+
+def _dedupe_texture_candidates(candidates: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = candidate.lower()
+        if candidate and key not in seen:
+            seen.add(key)
+            out.append(candidate)
+    return out
