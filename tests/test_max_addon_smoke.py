@@ -697,7 +697,7 @@ def test_skin_weight_remap_uses_explicit_skin_bone_ids():
     assert weights == [0.5, 0.25]
 
 
-def test_max_multimaterial_uses_global_material_ids(monkeypatch):
+def test_max_multimaterial_slots_match_global_material_ids(monkeypatch):
     from opennova_max import materials
 
     rt = _FakeMaxRuntime()
@@ -707,8 +707,10 @@ def test_max_multimaterial_uses_global_material_ids(monkeypatch):
 
     multi = materials.create_multimaterial("mesh_mats", [2, 0], {0: mat0, 2: mat2})
 
-    assert multi.materialList.values == [mat2, mat0]
-    assert multi.materialIDList.values == [3, 1]
+    assert multi.numsubs == 3
+    assert multi.materialList.values == [mat0, None, mat2]
+    assert multi.materialIDList.values == [1, 2, 3]
+    assert multi.user_props["opennova_submaterial_count"] == 3
     assert multi.user_props["opennova_material_ids"] == "2,0"
     assert multi.user_props["opennova_max_material_ids"] == "3,1"
     assert mat2.user_props["opennova_max_material_id"] == 3
@@ -727,27 +729,31 @@ def test_max_mesh_writes_global_face_material_ids(monkeypatch):
         part_index=0,
         vertices=[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
         faces=[(0, 1, 2), (0, 2, 1), (1, 0, 2)],
-        face_material_ids=[0, 1, 4],
+        face_material_ids=[1, 2, 0],
         smoothing_groups=[1, 1, 1],
-        material_id_set=[0, 1, 4],
+        material_id_set=[1, 2, 0],
     )
+    mat0 = _FakeMaxMaterial("Material_0")
+    mat1 = _FakeMaxMaterial("Material_1")
+    mat2 = _FakeMaxMaterial("Material_2")
 
     mesh = _build_max_mesh(
         rt,
         fm,
         {
-            0: _FakeMaxMaterial("Material_0"),
-            1: _FakeMaxMaterial("Material_1"),
-            4: _FakeMaxMaterial("Material_4"),
+            0: mat0,
+            1: mat1,
+            2: mat2,
         },
     )
 
-    assert [mesh.face_mat_ids[i] for i in (1, 2, 3)] == [1, 2, 5]
-    assert mesh.material.materialIDList.values == [1, 2, 5]
-    assert mesh.user_props["opennova_material_ids"] == "0,1,4"
-    assert mesh.user_props["opennova_max_material_ids"] == "1,2,5"
-    assert mesh.user_props["opennova_source_face_material_ids"] == "0,1,4"
-    assert mesh.user_props["opennova_face_material_ids"] == "1,2,5"
+    assert [mesh.face_mat_ids[i] for i in (1, 2, 3)] == [2, 3, 1]
+    assert mesh.material.materialList.values == [mat0, mat1, mat2]
+    assert mesh.material.materialIDList.values == [1, 2, 3]
+    assert mesh.user_props["opennova_material_ids"] == "1,2,0"
+    assert mesh.user_props["opennova_max_material_ids"] == "2,3,1"
+    assert mesh.user_props["opennova_source_face_material_ids"] == "1,2,0"
+    assert mesh.user_props["opennova_face_material_ids"] == "2,3,1"
     assert mesh.user_props["opennova_face_material_id_mode"] == "global"
 
 
@@ -1134,6 +1140,38 @@ def test_max_qt_ui_helpers_and_menu_script_are_ci_safe():
         ScanItem(name="M16A2", type="weapon", source_model="m16_1st.3di", output_stem="m16_1st")
     ) == "[weapon] M16A2 -> m16_1st"
     assert ui._scan_definitions("") == (False, [], "Game directory is required.")
+
+
+def test_max_qt_preferences_round_trip_and_dialog_paths(tmp_path: Path, monkeypatch):
+    from opennova_max import preferences, qt_ui
+
+    settings = tmp_path / "settings.json"
+    monkeypatch.setenv(preferences.SETTINGS_ENV_VAR, str(settings))
+
+    assert preferences.load_preferences() == {
+        "last_resource_dir": "",
+        "last_output_dir": "",
+        "last_loose_file_dir": "",
+    }
+
+    assert preferences.save_preferences({
+        "last_resource_dir": " C:/game ",
+        "last_output_dir": "C:/out",
+        "last_loose_file_dir": "C:/loose",
+        "unknown": "ignored",
+    })
+    assert preferences.load_preferences() == {
+        "last_resource_dir": "C:/game",
+        "last_output_dir": "C:/out",
+        "last_loose_file_dir": "C:/loose",
+    }
+    assert qt_ui.dialog_paths_from_preferences(preferences.load_preferences()) == {
+        "game_dir": "C:/game",
+        "asset_dir": "C:/game",
+        "output_root": "C:/out",
+        "loose_output": "C:/out",
+        "loose_file_dir": "C:/loose",
+    }
 
 
 def test_show_importer_uses_qt_dialog(monkeypatch):

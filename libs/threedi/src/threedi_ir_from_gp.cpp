@@ -11,22 +11,105 @@
 // Triangulation helpers
 // ============================================================================
 
+static float dot3(const float a[3], const float b[3]) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+static int gp_triangle_opposes_authored_normals(const ThreediGpRVert *rverts,
+                                                size_t rvert_count,
+                                                int32_t first_vertex,
+                                                uint16_t a,
+                                                uint16_t b,
+                                                uint16_t c) {
+    int64_t ia = (int64_t)first_vertex + (int64_t)a;
+    int64_t ib = (int64_t)first_vertex + (int64_t)b;
+    int64_t ic = (int64_t)first_vertex + (int64_t)c;
+    if (ia < 0 || ib < 0 || ic < 0 ||
+        (size_t)ia >= rvert_count || (size_t)ib >= rvert_count || (size_t)ic >= rvert_count) {
+        return 0;
+    }
+
+    const ThreediGpRVert *va = &rverts[ia];
+    const ThreediGpRVert *vb = &rverts[ib];
+    const ThreediGpRVert *vc = &rverts[ic];
+    if (!va->has_normal && !vb->has_normal && !vc->has_normal) {
+        return 0;
+    }
+
+    float e1[3] = {
+        vb->position[0] - va->position[0],
+        vb->position[1] - va->position[1],
+        vb->position[2] - va->position[2],
+    };
+    float e2[3] = {
+        vc->position[0] - va->position[0],
+        vc->position[1] - va->position[1],
+        vc->position[2] - va->position[2],
+    };
+    float geom[3] = {
+        e1[1] * e2[2] - e1[2] * e2[1],
+        e1[2] * e2[0] - e1[0] * e2[2],
+        e1[0] * e2[1] - e1[1] * e2[0],
+    };
+    float normal[3] = {
+        va->normal[0] + vb->normal[0] + vc->normal[0],
+        va->normal[1] + vb->normal[1] + vc->normal[1],
+        va->normal[2] + vb->normal[2] + vc->normal[2],
+    };
+
+    float geom_len2 = dot3(geom, geom);
+    float normal_len2 = dot3(normal, normal);
+    if (geom_len2 <= 1.0e-12f || normal_len2 <= 1.0e-8f) {
+        return 0;
+    }
+
+    float d = dot3(geom, normal);
+    return d < 0.0f && (d * d) > (geom_len2 * normal_len2 * 1.0e-4f);
+}
+
+static void emit_normalized_gp_triangle(const ThreediGpRVert *rverts,
+                                        size_t rvert_count,
+                                        int32_t first_vertex,
+                                        uint16_t a,
+                                        uint16_t b,
+                                        uint16_t c,
+                                        uint16_t *out,
+                                        size_t *out_count) {
+    if (gp_triangle_opposes_authored_normals(rverts, rvert_count, first_vertex, a, b, c)) {
+        uint16_t tmp = b;
+        b = c;
+        c = tmp;
+    }
+
+    out[(*out_count)++] = a;
+    out[(*out_count)++] = b;
+    out[(*out_count)++] = c;
+}
+
 // Triangulate a triangle list (already triangles, just copy)
 static size_t triangulate_list(const uint16_t *indices, size_t count,
-                               int32_t first_vertex, uint16_t *out) {
+                               int32_t first_vertex,
+                               const ThreediGpRVert *rverts,
+                               size_t rvert_count,
+                               uint16_t *out) {
     size_t tri_count = count / 3;
+    size_t out_count = 0;
     for (size_t i = 0; i < tri_count; ++i) {
-        out[i * 3 + 0] = indices[i * 3 + 0];
-        out[i * 3 + 1] = indices[i * 3 + 1];
-        out[i * 3 + 2] = indices[i * 3 + 2];
+        emit_normalized_gp_triangle(rverts, rvert_count, first_vertex,
+                                    indices[i * 3 + 0],
+                                    indices[i * 3 + 1],
+                                    indices[i * 3 + 2],
+                                    out, &out_count);
     }
-    (void)first_vertex;
-    return tri_count * 3;
+    return out_count;
 }
 
 // Triangulate a triangle strip
 static size_t triangulate_strip(const uint16_t *indices, size_t count,
-                                int32_t first_vertex, uint16_t *out) {
+                                int32_t first_vertex,
+                                const ThreediGpRVert *rverts,
+                                size_t rvert_count,
+                                uint16_t *out) {
     if (count < 3) return 0;
 
     size_t out_count = 0;
@@ -44,18 +127,15 @@ static size_t triangulate_strip(const uint16_t *indices, size_t count,
         }
 
         if (flip) {
-            out[out_count++] = a;
-            out[out_count++] = c;
-            out[out_count++] = b;
+            emit_normalized_gp_triangle(rverts, rvert_count, first_vertex,
+                                        a, c, b, out, &out_count);
         } else {
-            out[out_count++] = a;
-            out[out_count++] = b;
-            out[out_count++] = c;
+            emit_normalized_gp_triangle(rverts, rvert_count, first_vertex,
+                                        a, b, c, out, &out_count);
         }
         flip = !flip;
     }
 
-    (void)first_vertex;
     return out_count;
 }
 
@@ -305,10 +385,14 @@ static int convert_lod(const ThreediGpFile *gp, size_t lod_idx, ThreediIRLod *ds
 
             if (sp->topology == 0) {
                 tri_indices = triangulate_list(sp->indices, sp->index_count,
-                                               sp->first_vertex, out_indices);
+                                               sp->first_vertex,
+                                               gp->rverts, gp->rvert_count,
+                                               out_indices);
             } else {
                 tri_indices = triangulate_strip(sp->indices, sp->index_count,
-                                                sp->first_vertex, out_indices);
+                                                sp->first_vertex,
+                                                gp->rverts, gp->rvert_count,
+                                                out_indices);
             }
 
             dp->index_offset = (uint32_t)index_offset;

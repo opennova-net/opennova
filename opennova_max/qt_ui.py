@@ -82,6 +82,19 @@ def _loose_path_strings(value) -> list[str]:
     return [str(path).strip() for path in raw_paths if str(path).strip()]
 
 
+def dialog_paths_from_preferences(prefs: dict) -> dict[str, str]:
+    resource_dir = str(prefs.get("last_resource_dir") or "").strip()
+    output_dir = str(prefs.get("last_output_dir") or "").strip()
+    loose_file_dir = str(prefs.get("last_loose_file_dir") or "").strip()
+    return {
+        "game_dir": resource_dir,
+        "asset_dir": resource_dir,
+        "output_root": output_dir,
+        "loose_output": output_dir,
+        "loose_file_dir": loose_file_dir,
+    }
+
+
 def can_import_definition(
     *,
     has_selection: bool,
@@ -174,6 +187,7 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
             self._loose_paths = []
             self._updating_loose_file_edit = False
             self._busy = False
+            self._last_loose_file_dir = ""
             self._version = get_version()
             self.setWindowTitle(dialog_title(self._version))
             self.setMinimumSize(900, 620)
@@ -181,6 +195,7 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
             self._build_ui()
             self._apply_style()
             self._connect_signals()
+            self._apply_saved_preferences()
 
             from . import ui as ui_helpers
 
@@ -501,10 +516,10 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
             return self.options_panel
 
         def _connect_signals(self) -> None:
-            self.browse_game_button.clicked.connect(lambda: self._browse_directory(self.game_dir_edit))
-            self.browse_output_button.clicked.connect(lambda: self._browse_directory(self.output_root_edit))
-            self.browse_asset_button.clicked.connect(lambda: self._browse_directory(self.asset_dir_edit))
-            self.browse_loose_output_button.clicked.connect(lambda: self._browse_directory(self.loose_output_edit))
+            self.browse_game_button.clicked.connect(lambda: self._browse_directory(self.game_dir_edit, "resource"))
+            self.browse_output_button.clicked.connect(lambda: self._browse_directory(self.output_root_edit, "output"))
+            self.browse_asset_button.clicked.connect(lambda: self._browse_directory(self.asset_dir_edit, "resource"))
+            self.browse_loose_output_button.clicked.connect(lambda: self._browse_directory(self.loose_output_edit, "output"))
             self.browse_loose_button.clicked.connect(self._browse_loose_file)
             self.scan_button.clicked.connect(self._scan_definitions)
             self.type_combo.currentTextChanged.connect(lambda _value: self._apply_filters("Showing"))
@@ -526,22 +541,42 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
             for check in (self.ase_check, self.project_check, self.max_check):
                 check.toggled.connect(lambda _value: self._update_actions())
 
-        def _browse_directory(self, target) -> None:
+        def _apply_saved_preferences(self) -> None:
+            from .preferences import load_preferences
+
+            paths = dialog_paths_from_preferences(load_preferences())
+            if paths["game_dir"]:
+                self.game_dir_edit.setText(paths["game_dir"])
+            if paths["asset_dir"]:
+                self.asset_dir_edit.setText(paths["asset_dir"])
+            if paths["output_root"]:
+                self.output_root_edit.setText(paths["output_root"])
+            if paths["loose_output"]:
+                self.loose_output_edit.setText(paths["loose_output"])
+            self._last_loose_file_dir = paths["loose_file_dir"]
+
+        def _browse_directory(self, target, preference_kind: str) -> None:
             picked = QtWidgets.QFileDialog.getExistingDirectory(self, "Select directory", target.text())
             if picked:
                 target.setText(picked)
+                if preference_kind == "resource":
+                    self._remember_preferences(resource_dir=picked)
+                elif preference_kind == "output":
+                    self._remember_preferences(output_dir=picked)
 
         def _browse_loose_file(self) -> None:
             picked, _selected_filter = QtWidgets.QFileDialog.getOpenFileNames(
                 self,
                 "Select .3di file(s)",
-                self.loose_file_edit.text(),
+                self._loose_file_initial_dir(),
                 "3DI (*.3di);;All files (*.*)",
             )
             if picked:
                 self._set_loose_paths(picked)
+                self._last_loose_file_dir = str(Path(picked[0]).parent)
                 if not self.asset_dir_edit.text().strip():
                     self.asset_dir_edit.setText(str(Path(picked[0]).parent))
+                self._remember_current_loose_paths()
 
         def _set_loose_paths(self, paths) -> None:
             self._loose_paths = _loose_path_strings(paths)
@@ -561,11 +596,58 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
         def _selected_loose_paths(self) -> list[str]:
             return self._loose_paths or _loose_path_strings(self.loose_file_edit.text())
 
+        def _loose_file_initial_dir(self) -> str:
+            for candidate in (
+                self._last_loose_file_dir,
+                self.asset_dir_edit.text(),
+                self.game_dir_edit.text(),
+            ):
+                if str(candidate).strip():
+                    return str(candidate).strip()
+            return self.loose_file_edit.text()
+
+        def _remember_preferences(
+            self,
+            *,
+            resource_dir: str | None = None,
+            output_dir: str | None = None,
+            loose_file_dir: str | None = None,
+        ) -> None:
+            from .preferences import load_preferences, save_preferences
+
+            prefs = load_preferences()
+            if resource_dir is not None and resource_dir.strip():
+                prefs["last_resource_dir"] = resource_dir.strip()
+            if output_dir is not None and output_dir.strip():
+                prefs["last_output_dir"] = output_dir.strip()
+            if loose_file_dir is not None and loose_file_dir.strip():
+                prefs["last_loose_file_dir"] = loose_file_dir.strip()
+            save_preferences(prefs)
+
+        def _remember_current_definition_paths(self) -> None:
+            self._remember_preferences(
+                resource_dir=self.game_dir_edit.text(),
+                output_dir=self.output_root_edit.text(),
+            )
+
+        def _remember_current_loose_paths(self) -> None:
+            loose_paths = self._selected_loose_paths()
+            loose_file_dir = self._last_loose_file_dir
+            if loose_paths:
+                loose_file_dir = str(Path(loose_paths[0]).parent)
+                self._last_loose_file_dir = loose_file_dir
+            self._remember_preferences(
+                resource_dir=self.asset_dir_edit.text(),
+                output_dir=self.loose_output_edit.text(),
+                loose_file_dir=loose_file_dir,
+            )
+
         def _scan_definitions(self) -> None:
             game_dir = self.game_dir_edit.text().strip()
             if not game_dir:
                 self._set_status("Game directory is required.")
                 return
+            self._remember_current_definition_paths()
 
             def run():
                 from . import ui as ui_helpers
@@ -637,6 +719,7 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
             if item is None:
                 self._set_status("Select a resource first.")
                 return
+            self._remember_current_definition_paths()
 
             def run():
                 from . import ui as ui_helpers
@@ -662,6 +745,7 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
             if not items:
                 self._set_status("No resources match the current filters.")
                 return
+            self._remember_current_definition_paths()
 
             def run():
                 from . import ui as ui_helpers
@@ -694,6 +778,8 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
             self._run_busy("Running filtered batch import...", run)
 
         def _import_loose(self) -> None:
+            self._remember_current_loose_paths()
+
             def run():
                 from . import ui as ui_helpers
 

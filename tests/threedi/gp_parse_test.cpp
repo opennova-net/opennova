@@ -29,6 +29,91 @@ static int is_gp_file(const char *path) {
            memcmp(magic, "GPP", 3) == 0;
 }
 
+static float dot3(const float a[3], const float b[3]) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+static int ir_triangle_opposes_authored_normals(const ThreediIRLod *lod,
+                                                uint32_t vertex_offset,
+                                                uint16_t a,
+                                                uint16_t b,
+                                                uint16_t c) {
+    uint32_t ia = vertex_offset + a;
+    uint32_t ib = vertex_offset + b;
+    uint32_t ic = vertex_offset + c;
+    if ((size_t)ia >= lod->vertex_count ||
+        (size_t)ib >= lod->vertex_count ||
+        (size_t)ic >= lod->vertex_count) {
+        return 0;
+    }
+
+    const ThreediIRVertex *va = &lod->vertices[ia];
+    const ThreediIRVertex *vb = &lod->vertices[ib];
+    const ThreediIRVertex *vc = &lod->vertices[ic];
+
+    float e1[3] = {
+        vb->position[0] - va->position[0],
+        vb->position[1] - va->position[1],
+        vb->position[2] - va->position[2],
+    };
+    float e2[3] = {
+        vc->position[0] - va->position[0],
+        vc->position[1] - va->position[1],
+        vc->position[2] - va->position[2],
+    };
+    float geom[3] = {
+        e1[1] * e2[2] - e1[2] * e2[1],
+        e1[2] * e2[0] - e1[0] * e2[2],
+        e1[0] * e2[1] - e1[1] * e2[0],
+    };
+    float normal[3] = {
+        va->normal[0] + vb->normal[0] + vc->normal[0],
+        va->normal[1] + vb->normal[1] + vc->normal[1],
+        va->normal[2] + vb->normal[2] + vc->normal[2],
+    };
+
+    float geom_len2 = dot3(geom, geom);
+    float normal_len2 = dot3(normal, normal);
+    if (geom_len2 <= 1.0e-12f || normal_len2 <= 1.0e-8f) {
+        return 0;
+    }
+
+    float d = dot3(geom, normal);
+    return d < 0.0f && (d * d) > (geom_len2 * normal_len2 * 1.0e-4f);
+}
+
+static int verify_gp_ir_triangle_winding(const ThreediModelIR *ir, const char *path) {
+    for (size_t lod_idx = 0; lod_idx < ir->lod_count; ++lod_idx) {
+        const ThreediIRLod *lod = &ir->lods[lod_idx];
+        for (size_t prim_idx = 0; prim_idx < lod->primitive_count; ++prim_idx) {
+            const ThreediIRPrimitive *prim = &lod->primitives[prim_idx];
+            if (prim->topology != THREEDI_IR_TOPOLOGY_TRIANGLES) {
+                fprintf(stderr, "GP IR primitive is not triangulated in %s\n", path);
+                return 0;
+            }
+            for (uint32_t i = 0; i + 2 < prim->index_count; i += 3) {
+                size_t idx = (size_t)prim->index_offset + i;
+                if (idx + 2 >= lod->index_count) {
+                    fprintf(stderr, "Out-of-range GP IR index span in %s\n", path);
+                    return 0;
+                }
+                if (ir_triangle_opposes_authored_normals(
+                        lod,
+                        prim->vertex_offset,
+                        lod->indices[idx + 0],
+                        lod->indices[idx + 1],
+                        lod->indices[idx + 2])) {
+                    fprintf(stderr,
+                            "Reversed GP IR triangle in %s (lod=%zu prim=%zu tri=%u)\n",
+                            path, lod_idx, prim_idx, i / 3);
+                    return 0;
+                }
+            }
+        }
+    }
+    return 1;
+}
+
 static int test_gp_parse(const char *path) {
     ThreediGpFile gp;
     threedi_gp_init(&gp);
@@ -95,6 +180,12 @@ static int test_gp_parse(const char *path) {
     // Verify IR has expected data
     if (ir.lod_count == 0) {
         fprintf(stderr, "No LODs in IR for %s\n", path);
+        threedi_ir_free(&ir);
+        threedi_gp_free(&gp);
+        return 0;
+    }
+
+    if (!verify_gp_ir_triangle_winding(&ir, path)) {
         threedi_ir_free(&ir);
         threedi_gp_free(&gp);
         return 0;

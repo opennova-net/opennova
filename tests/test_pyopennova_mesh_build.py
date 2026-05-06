@@ -224,9 +224,10 @@ def test_smoothing_groups_returned_per_face():
     assert len(fm.smoothing_groups) == len(fm.faces)
 
 
-def test_vertex_dedup_collapses_overlapping_positions():
-    # Two triangles share an edge (verts 1, 2). After dedup, the second
-    # triangle reuses indices for those shared verts.
+def test_static_mesh_collapses_overlapping_positions():
+    # Static/basic assets keep the legacy position-dedup behavior. UV seams are
+    # represented by per-face map vertices in the DCC writer, while skinned
+    # meshes preserve source vertices for weight parity.
     lod = FakeLod(
         parts=[FakePart(parent_index=-1)],
         primitives=[FakePrim(
@@ -235,16 +236,15 @@ def test_vertex_dedup_collapses_overlapping_positions():
         )],
         vertices=[
             FakeVertex(position=(0.0, 0.0, 0.0)),  # 0
-            FakeVertex(position=(1.0, 0.0, 0.0)),  # 1 (shared)
-            FakeVertex(position=(0.0, 1.0, 0.0)),  # 2 (shared)
+            FakeVertex(position=(1.0, 0.0, 0.0), uv0=(0.0, 0.0)),  # 1
+            FakeVertex(position=(0.0, 1.0, 0.0), uv0=(0.0, 1.0)),  # 2
             FakeVertex(position=(1.0, 1.0, 0.0)),  # 3
-            FakeVertex(position=(1.0, 0.0, 0.0)),  # duplicate of 1
-            FakeVertex(position=(0.0, 1.0, 0.0)),  # duplicate of 2
+            FakeVertex(position=(1.0, 0.0, 0.0), uv0=(1.0, 0.0)),  # duplicate position of 1
+            FakeVertex(position=(0.0, 1.0, 0.0), uv0=(1.0, 1.0)),  # duplicate position of 2
         ],
         indices=[0, 1, 2, 3, 4, 5],
     )
     fm = flatten_lod(FakeIR(lods=[lod]), 0)[0]
-    # The 6-source-vertex layout collapses to 4 unique positions.
     assert len(fm.vertices) == 4
     assert len(fm.faces) == 2
 

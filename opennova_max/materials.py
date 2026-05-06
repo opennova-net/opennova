@@ -152,21 +152,23 @@ def create_multimaterial(name: str, material_ids: list[int], material_dict: dict
     if len(material_ids) == 1:
         return material_dict.get(material_ids[0])
 
+    max_material_ids = [_max_material_id(v) for v in material_ids]
+    numsubs = max(max_material_ids) if max_material_ids else 0
     try:
-        multi = rt.MultiMaterial(numsubs=len(material_ids))
+        multi = rt.MultiMaterial(numsubs=numsubs)
     except Exception:
         try:
-            multi = rt.multimaterial(numsubs=len(material_ids))
+            multi = rt.multimaterial(numsubs=numsubs)
         except Exception:
             log.warning("Could not create MultiMaterial; falling back to first material")
             return material_dict.get(material_ids[0])
 
     multi.name = name
-    _try_set(multi, "numsubs", len(material_ids))
-    _set_user_prop(rt, multi, "opennova_submaterial_count", len(material_ids))
+    _try_set(multi, "numsubs", numsubs)
+    _set_user_prop(rt, multi, "opennova_submaterial_count", numsubs)
     _set_user_prop(rt, multi, "opennova_material_ids", ",".join(str(int(v)) for v in material_ids))
-    _set_user_prop(rt, multi, "opennova_max_material_ids", ",".join(str(_max_material_id(v)) for v in material_ids))
-    for slot, mat_id in enumerate(material_ids, start=1):
+    _set_user_prop(rt, multi, "opennova_max_material_ids", ",".join(str(v) for v in max_material_ids))
+    for mat_id in material_ids:
         mat = material_dict.get(mat_id)
         if mat is None:
             continue
@@ -174,9 +176,9 @@ def create_multimaterial(name: str, material_ids: list[int], material_dict: dict
         _set_user_prop(rt, mat, "opennova_max_material_id", max_material_id)
         assigned = False
         for setter in (
-            lambda: rt.setSubMtl(multi, slot, mat),
-            lambda: multi.materialList.__setitem__(slot, mat),
-            lambda: multi.materialList.__setitem__(slot - 1, mat),
+            lambda: rt.setSubMtl(multi, max_material_id, mat),
+            lambda: multi.materialList.__setitem__(max_material_id, mat),
+            lambda: multi.materialList.__setitem__(max_material_id - 1, mat),
         ):
             try:
                 setter()
@@ -185,17 +187,7 @@ def create_multimaterial(name: str, material_ids: list[int], material_dict: dict
             except Exception:
                 pass
         if not assigned:
-            log.debug("Could not assign MultiMaterial slot %s", slot)
-
-        for setter in (
-            lambda: multi.materialIDList.__setitem__(slot - 1, max_material_id),
-            lambda: multi.materialIDList.__setitem__(slot, max_material_id),
-        ):
-            try:
-                setter()
-                break
-            except Exception:
-                pass
+            log.debug("Could not assign MultiMaterial slot %s", max_material_id)
     return multi
 
 

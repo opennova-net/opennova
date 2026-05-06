@@ -116,7 +116,7 @@ def _flatten_part(
     """Build a FlatMesh for a single part (all primitives merged)."""
     fm = FlatMesh(name=f"{part_idx + 1:02d} Mesh0", part_index=part_idx)
 
-    vert_map: dict[tuple[float, float, float], int] = {}
+    vert_map: dict[tuple, int] = {}
     mat_id_set: "OrderedDict[int, None]" = OrderedDict()
 
     def _add_vert(pos: Vec3, bone_entries: list[tuple[int, float]], source_index: int) -> int:
