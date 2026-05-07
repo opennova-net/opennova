@@ -289,7 +289,7 @@ typedef struct ThreediGpMaterialLookup {
     uint8_t seq_index;          // 0x24: Sequential index (0,1,2...)
     uint8_t pad_25;             // 0x25: Zero padding
     uint8_t flags_26;           // 0x26: Unknown flags
-    uint8_t slot_type;          // 0x27: Texture slot type (0x02=diffuse, 0x04=lightmap)
+    uint8_t slot_type;          // 0x27: Texture slot type (0x02=diffuse, 0x04=detail/overlay)
     uint16_t tex_width;         // 0x28: Texture width (encoded)
     uint16_t tex_height;        // 0x2A: Texture height (encoded)
     uint32_t runtime_2C;        // 0x2C: Runtime-only (zeroed on load)

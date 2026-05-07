@@ -16,6 +16,10 @@ THREEDI_IR_TEX_SLOT_DETAIL = 2
 THREEDI_IR_TEX_SLOT_NORMAL = 3
 THREEDI_IR_TEX_SLOT_NORMAL_B = 4
 
+THREEDI_IR_SOURCE_GPM = 2
+THREEDI_IR_SOURCE_GPS = 3
+THREEDI_IR_SOURCE_GPP = 4
+
 THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST = 0x01
 THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT = 0x02
 THREEDI_IR_MATERIAL_FLAG_TWO_SIDED = 0x04
@@ -442,7 +446,7 @@ def _texture_descriptors(
         slot = _int_attr(tex, "slot", 0)
         tex_type = _int_attr(tex, "type", 0)
         flags = _int_attr(tex, "flags", 0)
-        role = _texture_role(shader, slot, tex_type, t_idx, bool(diffuse.name))
+        role = _texture_role(shader, slot, tex_type, t_idx, bool(diffuse.name), source_format)
         desc = TextureDescriptor(
             role=role,
             name=tex_name,
@@ -475,12 +479,19 @@ def _texture_descriptors(
     return diffuse, detail, normal, secondary_normal, tuple(all_textures)
 
 
-def _texture_role(shader: str, slot: int, tex_type: int, texture_index: int, has_diffuse: bool) -> str:
+def _texture_role(
+    shader: str,
+    slot: int,
+    tex_type: int,
+    texture_index: int,
+    has_diffuse: bool,
+    source_format: int | None = None,
+) -> str:
     shader_key = (shader or "").upper()
     if slot == THREEDI_IR_TEX_SLOT_DIFFUSE:
         return "diffuse"
     if slot == THREEDI_IR_TEX_SLOT_DETAIL:
-        return "detail" if _shader_supports_detail(shader_key) else "unknown"
+        return "detail" if _shader_supports_detail(shader_key) or _is_gp_source(source_format) else "unknown"
     if slot == THREEDI_IR_TEX_SLOT_NORMAL:
         return "normal" if _shader_supports_bump(shader_key) or tex_type in (NORMAL_TYPE_MDT, NORMAL_TYPE_TGA_ALPHA) else "unknown"
     if slot == THREEDI_IR_TEX_SLOT_NORMAL_B:
@@ -502,6 +513,10 @@ def _shader_supports_detail(shader: str) -> bool:
         or "DIFF2" in shader
         or "T2" in shader
     )
+
+
+def _is_gp_source(source_format: int | None) -> bool:
+    return source_format in (THREEDI_IR_SOURCE_GPM, THREEDI_IR_SOURCE_GPS, THREEDI_IR_SOURCE_GPP)
 
 
 def _shader_supports_bump(shader: str) -> bool:

@@ -464,22 +464,17 @@ static int convert_materials(const ThreediGpFile *gp, ThreediModelIR *ir) {
             dm->texture_count = 1;
         }
 
-        // Check material lookup table for additional texture slots (e.g. lightmap)
+        // Check material lookup table for additional texture slots (e.g. detail/overlay)
         if (lookup_idx < gp->material_lookup_count) {
             const ThreediGpMaterialLookup *ml = &gp->material_lookups[lookup_idx];
-            // If the lookup points to a different texture (lightmap/occmap), add as second slot
-            if (ml->slot_type == 0x04 && ml->texture_name[0] != '\0') {
-                // This is a lightmap entry — the primary diffuse is already set from material name
-                // Look for a diffuse entry that might be adjacent
-            }
             // Scan all lookups for entries referencing this material's render_lookup
-            // to find multi-texture combos (diffuse + lightmap)
+            // to find multi-texture combos (diffuse + detail/overlay)
             for (size_t li = 0; li < gp->material_lookup_count; ++li) {
                 const ThreediGpMaterialLookup *entry = &gp->material_lookups[li];
                 // Skip if same as primary or no name
                 if (entry->texture_name[0] == '\0') continue;
                 if (li == lookup_idx) continue;
-                // Check if this entry's seq_index matches and is a lightmap for same material
+                // Check if this entry's seq_index matches and is a detail entry for same material
                 if (entry->slot_type == 0x04 && entry->seq_index == ml->seq_index + 1 &&
                     dm->texture_count < THREEDI_IR_MAX_MATERIAL_TEXTURES) {
                     memcpy(dm->textures[dm->texture_count].name, entry->texture_name,

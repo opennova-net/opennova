@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import hashlib
 from pathlib import Path
 
 from .bfc1_ffi import is_bfc1, decompress as bfc1_decompress
@@ -215,12 +216,20 @@ class AssetResolver:
             return str(cached)
 
         dest = self._tmp_path / f"{source.stem}{detected_ext}"
-        if dest.exists() and dest.resolve() != source.resolve():
-            dest = self._tmp_path / f"{source.stem}_{abs(hash(key)) & 0xFFFFFFFF:08x}{detected_ext}"
-        try:
-            shutil.copyfile(source, dest)
-        except OSError:
+        if dest.exists() and not _same_path(dest, source):
+            dest = self._tmp_path / f"{source.stem}_{_stable_path_hash(key)}{detected_ext}"
+        copied = _copy_texture_payload(source, dest)
+        if copied is None:
+            for root in _texture_cache_roots(self.base_dir):
+                copied = _copy_texture_payload(
+                    source,
+                    root / f"{source.stem}_{_stable_path_hash(key)}{detected_ext}",
+                )
+                if copied is not None:
+                    break
+        if copied is None:
             return str(source)
+        dest = copied
         self._texture_paths[key] = dest
         return str(dest)
 
@@ -243,6 +252,38 @@ def _detect_bitmap_extension(path: Path) -> str | None:
     if header.startswith(b"II*\x00") or header.startswith(b"MM\x00*"):
         return ".tif"
     return None
+
+
+def _copy_texture_payload(source: Path, dest: Path) -> Path | None:
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, dest)
+        return dest
+    except OSError:
+        return None
+
+
+def _texture_cache_roots(base_dir: Path) -> list[Path]:
+    roots: list[Path] = []
+    override = os.environ.get("OPENNOVA_TEXTURE_CACHE_DIR", "").strip()
+    if override:
+        roots.append(Path(override))
+    local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
+    if local_appdata:
+        roots.append(Path(local_appdata) / "OpenNova" / "texture-cache")
+    roots.append(base_dir / ".opennova_texture_cache")
+    return roots
+
+
+def _stable_path_hash(value: str) -> str:
+    return hashlib.sha1(value.encode("utf-8", errors="replace")).hexdigest()[:8]
+
+
+def _same_path(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return False
 
 
 def _texture_strategy(strategy: str | None, source_format: int | None) -> str:

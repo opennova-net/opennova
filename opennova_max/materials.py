@@ -55,15 +55,17 @@ def create_material(mat_ir, resolver=None, ctrl_resolver=None, source_format=Non
 
     if desc.diffuse.path is not None:
         bm = _create_bitmap_texture(rt, f"{desc.name}_diffuse", desc.diffuse.path, desc)
-        _try_set(mat, "diffuseMap", bm)
-        _try_set(mat, "diffuseMapEnable", True)
+        assigned = _assign_texture_map(rt, mat, "diffuseMap", "diffuseMapEnable", 2, bm)
         _set_user_prop(rt, mat, "opennova_has_diffuse_map", 1)
+        _set_user_prop(rt, mat, "opennova_diffuse_bitmap_assigned", 1 if assigned else 0)
+        _set_user_prop(rt, mat, "opennova_diffuse_bitmap_filename", _bitmap_filename(bm))
         try:
             rt.showTextureMap(mat, bm, True)
         except Exception:
             pass
     elif desc.diffuse.name:
         _set_user_prop(rt, mat, "opennova_has_diffuse_map", 0)
+        _set_user_prop(rt, mat, "opennova_diffuse_bitmap_assigned", 0)
 
     if desc.alpha_test:
         _try_set(mat, "opacity", 100.0)
@@ -73,8 +75,7 @@ def create_material(mat_ir, resolver=None, ctrl_resolver=None, source_format=Non
         if desc.diffuse.path is not None:
             try:
                 op = _create_bitmap_texture(rt, f"{desc.name}_opacity", desc.diffuse.path, desc)
-                _try_set(mat, "opacityMap", op)
-                _try_set(mat, "opacityMapEnable", True)
+                _assign_texture_map(rt, mat, "opacityMap", "opacityMapEnable", 7, op)
                 _set_user_prop(rt, mat, "opennova_has_opacity_map", 1)
             except Exception:
                 _set_user_prop(rt, mat, "opennova_has_opacity_map", 0)
@@ -113,17 +114,16 @@ def create_material(mat_ir, resolver=None, ctrl_resolver=None, source_format=Non
             bump_tex = desc.normal if desc.normal.name else desc.secondary_normal
             bump_path = bump_tex.path
             bump_name = bump_tex.role
-        else:
-            bump_path = desc.diffuse.path
-            bump_name = "diffuse_alpha"
-        if bump_path is not None and _is_max_bitmap_texture(bump_path):
-            normal_bm = _create_bitmap_texture(rt, f"{desc.name}_{bump_name}_bump", bump_path, desc)
-            _try_set(mat, "bumpMap", normal_bm)
-            _try_set(mat, "bumpMapEnable", True)
-            _try_set(mat, "bumpMapAmount", 30.0)
-            _set_user_prop(rt, mat, "opennova_has_normal_map", 1)
+            if bump_path is not None and _is_max_bitmap_texture(bump_path):
+                normal_bm = _create_bitmap_texture(rt, f"{desc.name}_{bump_name}_bump", bump_path, desc)
+                _assign_texture_map(rt, mat, "bumpMap", "bumpMapEnable", 9, normal_bm)
+                _try_set(mat, "bumpMapAmount", 30.0)
+                _set_user_prop(rt, mat, "opennova_has_normal_map", 1)
+            else:
+                _set_user_prop(rt, mat, "opennova_has_normal_map", 0)
         else:
             _set_user_prop(rt, mat, "opennova_has_normal_map", 0)
+            _set_user_prop(rt, mat, "opennova_bump_map_mode", "metadata_only")
 
     return mat
 
@@ -249,8 +249,13 @@ def _byte(value: float) -> int:
 
 
 def _create_bitmap_texture(rt, name: str, path: str, desc=None):
-    bm = rt.BitmapTexture(filename=path)
-    bm.name = name
+    try:
+        bm = rt.BitmapTexture(filename=path)
+    except Exception:
+        bm = rt.BitmapTexture()
+    _try_set(bm, "filename", path)
+    _try_set(bm, "fileName", path)
+    _try_set(bm, "name", name)
     if desc is not None and getattr(desc, "has_custom_tiling", False):
         try:
             _try_set(bm.coords, "U_Tiling", desc.effective_u_tiling)
@@ -260,6 +265,39 @@ def _create_bitmap_texture(rt, name: str, path: str, desc=None):
         except Exception:
             pass
     return bm
+
+
+def _bitmap_filename(bitmap) -> str:
+    for attr in ("filename", "fileName"):
+        try:
+            value = getattr(bitmap, attr)
+        except Exception:
+            value = None
+        if value:
+            return str(value)
+    return ""
+
+
+def _assign_texture_map(rt, mat, map_attr: str, enable_attr: str, map_slot: int, bitmap) -> bool:
+    assigned = _try_set(mat, map_attr, bitmap)
+    assigned = _try_set_indexed(getattr(mat, "maps", None), map_slot, bitmap) or assigned
+    assigned = _try_set_indexed(getattr(mat, "maps", None), map_slot - 1, bitmap) or assigned
+    if not assigned:
+        try:
+            rt.setProperty(mat, map_attr, bitmap)
+            assigned = True
+        except Exception:
+            pass
+
+    enabled = _try_set(mat, enable_attr, True)
+    enabled = _try_set_indexed(getattr(mat, "mapEnables", None), map_slot, True) or enabled
+    enabled = _try_set_indexed(getattr(mat, "mapEnables", None), map_slot - 1, True) or enabled
+    if not enabled:
+        try:
+            rt.setProperty(mat, enable_attr, True)
+        except Exception:
+            pass
+    return assigned
 
 
 def _store_texture_resolution(rt, mat, slot: str, texture_name: str, path: str | None) -> None:
@@ -302,11 +340,27 @@ def _resolve_texture(texture_name: str, resolver) -> str | None:
     return None
 
 
-def _try_set(obj, attr: str, value) -> None:
+def _try_set(obj, attr: str, value) -> bool:
     try:
         setattr(obj, attr, value)
+        return True
+    except Exception:
+        return False
+
+
+def _try_set_indexed(seq, index: int, value) -> bool:
+    if seq is None or index < 0:
+        return False
+    try:
+        seq[index] = value
+        return True
     except Exception:
         pass
+    try:
+        seq.__setitem__(index, value)
+        return True
+    except Exception:
+        return False
 
 
 def _set_user_prop(rt, obj, key: str, value) -> None:

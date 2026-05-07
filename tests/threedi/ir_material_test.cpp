@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "threedi/threedi_3di3.h"
+#include "threedi/threedi_gp.h"
 #include "threedi/threedi_ir.h"
 
 static int failures = 0;
@@ -97,7 +98,55 @@ static void test_3di3_material_ir_preserves_full_texture_table_and_fields() {
     threedi_ir_free(&ir);
 }
 
+static void test_gp_detail_material_preserves_phong_shader_and_detail_slot() {
+    ThreediGpFile gp;
+    ThreediGpRModel rmodel;
+    ThreediGpMaterial mat;
+    ThreediGpMaterialLookup lookups[2];
+    ThreediModelIR ir;
+    std::memset(&gp, 0, sizeof(gp));
+    std::memset(&rmodel, 0, sizeof(rmodel));
+    std::memset(&mat, 0, sizeof(mat));
+    std::memset(lookups, 0, sizeof(lookups));
+    std::memset(&ir, 0, sizeof(ir));
+
+    copy_name(gp.header.name, sizeof(gp.header.name), "GpDetail");
+    gp.header.mesh_type = THREEDI_GP_MESH_BASIC;
+    gp.rmodel_count = 1;
+    gp.rmodels = &rmodel;
+    gp.material_lookup_count = 2;
+    gp.material_lookups = lookups;
+
+    rmodel.material_count = 1;
+    rmodel.materials = &mat;
+
+    copy_name(mat.texture_name, sizeof(mat.texture_name), "Base.tga");
+    mat.render_lookup = 0;
+    mat.shader_flags = 2;
+
+    copy_name(lookups[0].texture_name, sizeof(lookups[0].texture_name), "Base.tga");
+    lookups[0].seq_index = 0;
+    lookups[0].slot_type = 0x02;
+
+    copy_name(lookups[1].texture_name, sizeof(lookups[1].texture_name), "Detail.tga");
+    lookups[1].seq_index = 1;
+    lookups[1].slot_type = 0x04;
+
+    expect_true("GP conversion succeeds", threedi_ir_from_gp(&gp, &ir) == 0);
+    expect_true("one GP material", ir.material_count == 1);
+
+    const ThreediIRMaterial *out = &ir.materials[0];
+    expect_true("GP shader type 2 stays phong", std::strcmp(out->shader_name, "VS_PHONGT") == 0);
+    expect_true("GP detail texture count", out->texture_count == 2);
+    expect_true("GP diffuse texture preserved", std::strcmp(out->textures[0].name, "Base.tga") == 0);
+    expect_true("GP detail texture preserved", std::strcmp(out->textures[1].name, "Detail.tga") == 0);
+    expect_true("GP detail texture slot", out->textures[1].slot == THREEDI_IR_TEX_SLOT_DETAIL);
+
+    threedi_ir_free(&ir);
+}
+
 int main(void) {
     test_3di3_material_ir_preserves_full_texture_table_and_fields();
+    test_gp_detail_material_preserves_phong_shader_and_detail_slot();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

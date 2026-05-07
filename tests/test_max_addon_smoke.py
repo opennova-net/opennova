@@ -1071,6 +1071,102 @@ def test_max_material_keeps_primary_diffuse_map_for_detail_materials(tmp_path: P
     assert mat.user_props["opennova_detail_map_mode"] == "metadata_only"
 
 
+def test_max_material_keeps_diffuse_alpha_bump_metadata_only(tmp_path: Path):
+    from opennova_max import materials
+
+    diffuse = tmp_path / "Roof.dds"
+    diffuse.write_bytes(b"DDS " + bytes(range(32)))
+
+    class FakeTexture:
+        slot = materials.THREEDI_IR_TEX_SLOT_DIFFUSE
+        name = b"Roof.tga"
+        type = 0
+
+    class FakeMaterialIR:
+        index = 6
+        shader_name = b"VS_PHONGT"
+        flags = 0
+        blend_mode = 0
+        luminosity = 0
+        texture_count = 1
+        textures = [FakeTexture()]
+
+    class FakeResolver:
+        def resolve_texture(self, name: str, **_kwargs) -> str | None:
+            if name.lower() == "roof.tga":
+                return str(diffuse)
+            return None
+
+    class FakeBitmap:
+        def __init__(self, filename: str = ""):
+            self.filename = filename
+            self.name = ""
+
+    class FakeRuntime:
+        def __init__(self):
+            self.bitmap_paths = []
+
+        def StandardMaterial(self, name: str = ""):
+            mat = type("FakeStandardMaterial", (), {})()
+            mat.name = name
+            mat.user_props = {}
+            return mat
+
+        def BitmapTexture(self, filename: str = ""):
+            self.bitmap_paths.append(filename)
+            return FakeBitmap(filename)
+
+        def color(self, r: int, g: int, b: int):
+            return (r, g, b)
+
+        def setUserProp(self, obj, key: str, value):
+            obj.user_props[key] = value
+
+        def showTextureMap(self, mat, bitmap, enabled: bool):
+            mat.texture_shown = (bitmap, enabled)
+
+    runtime = FakeRuntime()
+    with patch("opennova_max.materials._rt", return_value=runtime):
+        mat = materials.create_material(FakeMaterialIR(), resolver=FakeResolver())
+
+    assert mat.diffuseMap.filename == str(diffuse)
+    assert not hasattr(mat, "bumpMap")
+    assert runtime.bitmap_paths == [str(diffuse)]
+    assert mat.user_props["opennova_bump_mode"] == "diffuse_alpha"
+    assert mat.user_props["opennova_has_normal_map"] == 0
+    assert mat.user_props["opennova_bump_map_mode"] == "metadata_only"
+
+
+def test_max_texture_map_assignment_falls_back_to_indexed_slots():
+    from opennova_max import materials
+
+    class StrictMaterial:
+        def __init__(self):
+            object.__setattr__(self, "maps", {})
+            object.__setattr__(self, "mapEnables", {})
+
+        def __setattr__(self, name, value):
+            if name in {"diffuseMap", "diffuseMapEnable"}:
+                raise AttributeError(name)
+            object.__setattr__(self, name, value)
+
+    mat = StrictMaterial()
+    bitmap = object()
+
+    assigned = materials._assign_texture_map(
+        SimpleNamespace(setProperty=lambda *args: None),
+        mat,
+        "diffuseMap",
+        "diffuseMapEnable",
+        2,
+        bitmap,
+    )
+
+    assert assigned
+    assert mat.maps[2] is bitmap
+    assert mat.mapEnables[2] is True
+
+
 def test_calling_rt_outside_max_raises_descriptive_error():
     """The lazy pymxs accessor must explain why it failed when the
     user tries to run the addon outside Max."""

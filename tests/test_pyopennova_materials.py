@@ -227,6 +227,21 @@ def test_shader_aware_texture_roles_preserve_unknown_detail_slot():
     assert desc.unknown_textures[0].slot == materials.THREEDI_IR_TEX_SLOT_DETAIL
 
 
+def test_gp_source_detail_slot_is_detail_even_with_phong_shader():
+    mat = FakeMaterial(
+        [
+            FakeTexture("Diffuse.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE),
+            FakeTexture("Overlay.tga", materials.THREEDI_IR_TEX_SLOT_DETAIL),
+        ],
+        shader_name=b"VS_PHONGT",
+    )
+
+    desc = materials.describe_material(mat, source_format=materials.THREEDI_IR_SOURCE_GPM)
+
+    assert desc.detail.name == "Overlay.tga"
+    assert desc.unknown_textures == ()
+
+
 def test_slot_four_is_secondary_normal_for_bump_shaders(tmp_path: Path):
     secondary = tmp_path / "DetailN.tga"
     secondary.write_bytes(b"tga data")
