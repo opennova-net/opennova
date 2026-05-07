@@ -10,6 +10,7 @@ from pyopennova.materials import (
     THREEDI_IR_TEX_SLOT_DETAIL,
     THREEDI_IR_TEX_SLOT_DIFFUSE,
     THREEDI_IR_TEX_SLOT_NORMAL,
+    THREEDI_IR_TEX_SLOT_NORMAL_B,
     describe_material,
     material_user_props,
 )
@@ -103,10 +104,15 @@ def create_material(mat_ir, resolver=None, ctrl_resolver=None, source_format=Non
             _set_user_prop(rt, mat, "opennova_has_normal_map", 0)
             _set_user_prop(rt, mat, "opennova_normal_map_unsupported", "mdt")
 
+    if desc.secondary_normal.name:
+        _set_user_prop(rt, mat, "opennova_secondary_normal_texture_path", desc.secondary_normal.path or "")
+        _set_user_prop(rt, mat, "opennova_secondary_normal_type", desc.secondary_normal.type)
+
     if desc.bump_mode:
         if desc.bump_mode == "normal_texture":
-            bump_path = desc.normal.path
-            bump_name = "normal"
+            bump_tex = desc.normal if desc.normal.name else desc.secondary_normal
+            bump_path = bump_tex.path
+            bump_name = bump_tex.role
         else:
             bump_path = desc.diffuse.path
             bump_name = "diffuse_alpha"
@@ -215,6 +221,20 @@ def collect_texture_diagnostics(mat_ir, resolver=None, source_format=None) -> di
         "normal_path": desc.normal.path,
         "normal_missing": desc.normal.missing,
         "normal_type": desc.normal.type,
+        "secondary_normal_name": desc.secondary_normal.name,
+        "secondary_normal_path": desc.secondary_normal.path,
+        "secondary_normal_missing": desc.secondary_normal.missing,
+        "secondary_normal_type": desc.secondary_normal.type,
+        "unknown_textures": [
+            {
+                "index": tex.texture_index,
+                "name": tex.name,
+                "slot": tex.slot,
+                "type": tex.type,
+                "flags": tex.flags,
+            }
+            for tex in desc.unknown_textures
+        ],
     }
 
 

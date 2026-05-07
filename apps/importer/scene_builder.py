@@ -1671,11 +1671,12 @@ class BlenderSceneBuilder:
         #   - Type 5 (NORMAL_TGA): TGA alpha channel contains height data
         #   - Stage1:alpha: diffuse texture alpha = height map (DOT3 shaders)
         # Use ShaderNodeBump (height→normal) instead of ShaderNodeNormalMap.
-        normal_bitmap = desc.normal.name
-        normal_type = desc.normal.type
+        normal_desc = desc.normal if desc.normal.name else desc.secondary_normal
+        normal_bitmap = normal_desc.name
+        normal_type = normal_desc.type
         bump_wired = False
         if normal_bitmap and normal_type != 4:  # Skip MDT — Blender can't load
-            tex_path = desc.normal.path
+            tex_path = normal_desc.path
             if tex_path:
                 try:
                     normal_tex = mat.node_tree.nodes.new("ShaderNodeTexImage")

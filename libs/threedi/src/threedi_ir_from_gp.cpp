@@ -481,7 +481,7 @@ static int convert_materials(const ThreediGpFile *gp, ThreediModelIR *ir) {
                 if (li == lookup_idx) continue;
                 // Check if this entry's seq_index matches and is a lightmap for same material
                 if (entry->slot_type == 0x04 && entry->seq_index == ml->seq_index + 1 &&
-                    dm->texture_count < 8) {
+                    dm->texture_count < THREEDI_IR_MAX_MATERIAL_TEXTURES) {
                     memcpy(dm->textures[dm->texture_count].name, entry->texture_name,
                            sizeof(dm->textures[0].name) - 1);
                     dm->textures[dm->texture_count].slot = THREEDI_IR_TEX_SLOT_DETAIL;
@@ -495,7 +495,8 @@ static int convert_materials(const ThreediGpFile *gp, ThreediModelIR *ir) {
         // Types 1-6 use the diffuse texture's alpha channel as a bump map instead.
         // The engine derives the MDT filename from the diffuse texture at runtime.
         uint32_t shader_type = sm->shader_flags & 0xFF;
-        if (shader_type >= 8 && dm->texture_count > 0 && dm->texture_count < 8) {
+        if (shader_type >= 8 && dm->texture_count > 0 &&
+            dm->texture_count < THREEDI_IR_MAX_MATERIAL_TEXTURES) {
             const char *diffuse_name = (const char *)dm->textures[0].name;
             if (diffuse_name[0] != '\0') {
                 char mdt_base[13]; // max 12 chars + null so "%s.mdt" fits in 17

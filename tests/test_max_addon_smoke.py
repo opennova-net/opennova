@@ -879,7 +879,7 @@ def test_max_material_records_texture_resolution_diagnostics(tmp_path: Path):
 
     class FakeMaterialIR:
         index = 2
-        shader_name = b"FF_ST_OP"
+        shader_name = b"FF_MT_OP"
         flags = 0x01
         blend_mode = 0
         luminosity = 0
@@ -1009,7 +1009,7 @@ def test_max_material_keeps_primary_diffuse_map_for_detail_materials(tmp_path: P
 
     class FakeMaterialIR:
         index = 4
-        shader_name = b"FF_ST_OP"
+        shader_name = b"FF_MT_OP"
         flags = 0
         blend_mode = 0
         luminosity = 0

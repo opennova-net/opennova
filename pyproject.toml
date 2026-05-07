@@ -1,6 +1,6 @@
 [project]
 name = "opennova-tools"
-version = "0.1.23"
+version = "0.1.24"
 description = "OpenNova format parsers and DCC integrations (Blender + 3ds Max)"
 readme = "README.md"
 requires-python = ">=3.7"

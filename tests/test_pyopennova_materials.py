@@ -48,9 +48,9 @@ class FakeTexAnim:
 
 
 class FakeMaterial:
-    def __init__(self, texture_list):
+    def __init__(self, texture_list, shader_name: bytes = b"VS_DOT3"):
         self.index = 5
-        self.shader_name = b"VS_DOT3"
+        self.shader_name = shader_name
         self.texture_count = len(texture_list)
         self.textures = texture_list
         self.flags = (
@@ -88,18 +88,21 @@ def test_describe_material_interprets_texture_slots_and_paths(tmp_path: Path):
     normal = tmp_path / "Bump.tga"
     diffuse.write_bytes(b"DDS data")
     normal.write_bytes(b"tga data")
-    mat = FakeMaterial([
-        FakeTexture("Diffuse.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE),
-        FakeTexture("Light.tga", materials.THREEDI_IR_TEX_SLOT_DETAIL),
-        FakeTexture("Bump.tga", materials.THREEDI_IR_TEX_SLOT_NORMAL, tex_type=5),
-    ])
+    mat = FakeMaterial(
+        [
+            FakeTexture("Diffuse.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE),
+            FakeTexture("Light.tga", materials.THREEDI_IR_TEX_SLOT_DETAIL),
+            FakeTexture("Bump.tga", materials.THREEDI_IR_TEX_SLOT_NORMAL, tex_type=5),
+        ],
+        shader_name=b"VS_DOT3DIFF2",
+    )
 
     desc = materials.describe_material(
         mat,
         resolver=FakeResolver({"Diffuse.tga": diffuse, "Bump.tga": normal}),
     )
 
-    assert desc.name == "Material_5_VS_DOT3"
+    assert desc.name == "Material_5_VS_DOT3DIFF2"
     assert desc.diffuse.name == "Diffuse.tga"
     assert desc.diffuse.path == str(diffuse)
     assert desc.detail.name == "Light.tga"
@@ -149,6 +152,7 @@ def test_describe_materials_passes_source_format_to_texture_resolver(tmp_path: P
                 "slot": materials.THREEDI_IR_TEX_SLOT_DIFFUSE,
                 "tex_type": 0,
                 "flags": 2,
+                "role": "diffuse",
             },
         )
     ]
@@ -157,10 +161,13 @@ def test_describe_materials_passes_source_format_to_texture_resolver(tmp_path: P
 def test_material_user_props_and_diagnostics_use_descriptor_data(tmp_path: Path):
     diffuse = tmp_path / "Diffuse.tga"
     diffuse.write_bytes(b"tga data")
-    mat = FakeMaterial([
-        FakeTexture("Diffuse.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE),
-        FakeTexture("MissingDetail.tga", materials.THREEDI_IR_TEX_SLOT_DETAIL),
-    ])
+    mat = FakeMaterial(
+        [
+            FakeTexture("Diffuse.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE),
+            FakeTexture("MissingDetail.tga", materials.THREEDI_IR_TEX_SLOT_DETAIL),
+        ],
+        shader_name=b"FF_MT_OP",
+    )
     desc = materials.describe_material(mat, resolver=FakeResolver({"Diffuse.tga": diffuse}))
 
     props = materials.material_user_props(desc)
@@ -187,10 +194,13 @@ def test_explicit_diffuse_slot_overrides_first_texture_fallback():
 
 
 def test_ase_texture_names_match_legacy_extension_and_truncation_rules():
-    mat = FakeMaterial([
-        FakeTexture("VeryLongDiffuseName.png", materials.THREEDI_IR_TEX_SLOT_DIFFUSE),
-        FakeTexture("Overlay.pcx", materials.THREEDI_IR_TEX_SLOT_DETAIL),
-    ])
+    mat = FakeMaterial(
+        [
+            FakeTexture("VeryLongDiffuseName.png", materials.THREEDI_IR_TEX_SLOT_DIFFUSE),
+            FakeTexture("Overlay.pcx", materials.THREEDI_IR_TEX_SLOT_DETAIL),
+        ],
+        shader_name=b"FF_MT_OP",
+    )
     desc = materials.describe_material(mat)
 
     used = {}
@@ -198,3 +208,100 @@ def test_ase_texture_names_match_legacy_extension_and_truncation_rules():
 
     assert diffuse == "VeryLongDif.TGA"
     assert detail == "Overlay.PCX"
+
+
+def test_shader_aware_texture_roles_preserve_unknown_detail_slot():
+    mat = FakeMaterial(
+        [
+            FakeTexture("Diffuse.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE),
+            FakeTexture("Unexpected.tga", materials.THREEDI_IR_TEX_SLOT_DETAIL),
+        ],
+        shader_name=b"FF_ST_OP",
+    )
+
+    desc = materials.describe_material(mat)
+
+    assert desc.detail.name == ""
+    assert len(desc.unknown_textures) == 1
+    assert desc.unknown_textures[0].name == "Unexpected.tga"
+    assert desc.unknown_textures[0].slot == materials.THREEDI_IR_TEX_SLOT_DETAIL
+
+
+def test_slot_four_is_secondary_normal_for_bump_shaders(tmp_path: Path):
+    secondary = tmp_path / "DetailN.tga"
+    secondary.write_bytes(b"tga data")
+    mat = FakeMaterial(
+        [
+            FakeTexture("Diffuse.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE),
+            FakeTexture("DetailN.tga", materials.THREEDI_IR_TEX_SLOT_NORMAL_B, tex_type=5),
+        ],
+        shader_name=b"VS_DOT3DIFF2",
+    )
+
+    desc = materials.describe_material(
+        mat,
+        resolver=FakeResolver({"DetailN.tga": secondary}),
+    )
+
+    assert desc.normal.name == ""
+    assert desc.secondary_normal.name == "DetailN.tga"
+    assert desc.secondary_normal.role == "secondary_normal"
+    assert desc.bump_mode == "normal_texture"
+    assert desc.bump_uses_alpha
+    assert desc.unknown_textures == ()
+
+
+def test_material_texture_inventory_counts_shader_slot_type_roles():
+    descs = [
+        materials.describe_material(
+            FakeMaterial(
+                [
+                    FakeTexture("Base.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE),
+                    FakeTexture("Detail.tga", materials.THREEDI_IR_TEX_SLOT_DETAIL),
+                ],
+                shader_name=b"FF_MT_OP",
+            )
+        ),
+        materials.describe_material(
+            FakeMaterial(
+                [
+                    FakeTexture("Other.tga", materials.THREEDI_IR_TEX_SLOT_DETAIL),
+                ],
+                shader_name=b"FF_ST_OP",
+            )
+        ),
+    ]
+
+    inventory = materials.material_texture_inventory(descs)
+
+    assert {
+        "shader": "FF_MT_OP",
+        "role": "detail",
+        "slot": materials.THREEDI_IR_TEX_SLOT_DETAIL,
+        "type": 0,
+        "flags": 0,
+        "count": 1,
+    } in inventory
+    assert {
+        "shader": "FF_ST_OP",
+        "role": "unknown",
+        "slot": materials.THREEDI_IR_TEX_SLOT_DETAIL,
+        "type": 0,
+        "flags": 0,
+        "count": 1,
+    } in inventory
+
+
+def test_ctypes_material_layout_exposes_3di3_material_fields():
+    from pyopennova import threedi_ffi
+
+    mat = threedi_ffi.ThreediIRMaterial()
+
+    assert threedi_ffi.THREEDI_IR_MAX_MATERIAL_TEXTURES == 24
+    assert len(mat.textures) == 24
+    assert hasattr(mat, "material_flags")
+    assert hasattr(mat, "alpha_test_value_byte")
+    assert hasattr(mat, "rgb_gen2")
+    assert hasattr(mat, "reflect_color2")
+    assert hasattr(mat, "emissive_type2")
+    assert hasattr(mat, "glass_type2")

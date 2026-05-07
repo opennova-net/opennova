@@ -30,6 +30,7 @@
 #define THREEDI_TEX_SLOT_DIFFUSE  1  // Primary diffuse texture
 #define THREEDI_TEX_SLOT_DETAIL   2  // Secondary/detail texture
 #define THREEDI_TEX_SLOT_NORMAL   3  // Normal map texture
+#define THREEDI_TEX_SLOT_NORMAL_B 4  // Secondary normal map texture
 
 // Texture format types (type field in ThreediMaterialTexture)
 #define THREEDI_TEX_TYPE_DIFFUSE     0  // Standard diffuse texture
@@ -116,7 +117,7 @@ typedef struct ThreediRenderObject {
 // Material texture slot definition
 typedef struct ThreediMaterialTexture {
     char name[17];   // Texture filename (null-terminated)
-    uint8_t slot;    // Texture slot: THREEDI_TEX_SLOT_DIFFUSE/DETAIL/NORMAL
+    uint8_t slot;    // Texture slot: THREEDI_TEX_SLOT_DIFFUSE/DETAIL/NORMAL/NORMAL_B
     uint8_t type;    // Texture type: THREEDI_TEX_TYPE_DIFFUSE/NORMAL_MDT/NORMAL_TGA
     uint8_t flags;   // Texture flags: THREEDI_TEX_FLAG_ANIMATED/CLAMPED
     uint8_t frame;   // Animation frame index (0 for non-animated)

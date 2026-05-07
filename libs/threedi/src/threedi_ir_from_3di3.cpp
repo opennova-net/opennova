@@ -138,7 +138,9 @@ static int convert_materials(const Threedi3di3 *model, ThreediModelIR *ir) {
 
         // Convert texture slots
         dm->texture_count = sm->texture_count;
-        if (dm->texture_count > 8) dm->texture_count = 8;
+        if (dm->texture_count > THREEDI_IR_MAX_MATERIAL_TEXTURES) {
+            dm->texture_count = THREEDI_IR_MAX_MATERIAL_TEXTURES;
+        }
         for (size_t t = 0; t < dm->texture_count; ++t) {
             const ThreediMaterialTexture *st = &sm->textures[t];
             ThreediIRMaterialTexture *dt = &dm->textures[t];
@@ -149,7 +151,12 @@ static int convert_materials(const Threedi3di3 *model, ThreediModelIR *ir) {
             dt->frame = st->frame;
         }
 
-        // Convert flags
+        // Preserve raw 3DI3 material bytes, then derive compatibility fields.
+        dm->material_flags = sm->material_flags;
+        dm->alpha_test_value_byte = sm->alpha_test_value_byte;
+        dm->material_pad[0] = sm->pad[0];
+        dm->material_pad[1] = sm->pad[1];
+
         dm->flags = 0;
         if (sm->material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST)
             dm->flags |= THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST;
@@ -157,7 +164,8 @@ static int convert_materials(const Threedi3di3 *model, ThreediModelIR *ir) {
             dm->flags |= THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT;
         if (sm->material_flags & THREEDI_MATERIAL_FLAG_TWO_SIDED)
             dm->flags |= THREEDI_IR_MATERIAL_FLAG_TWO_SIDED;
-        if (sm->emissive_type == THREEDI_EMISSIVE_FULL)
+        if (sm->emissive_type == THREEDI_EMISSIVE_FULL ||
+            sm->emissive_type2 == THREEDI_EMISSIVE_FULL)
             dm->flags |= THREEDI_IR_MATERIAL_FLAG_EMISSIVE;
 
         dm->alpha_threshold = (float)sm->alpha_test_value_byte / 255.0f;
@@ -193,6 +201,13 @@ static int convert_materials(const Threedi3di3 *model, ThreediModelIR *ir) {
         memcpy(dm->rgb_gen.start_color, sm->rgb_gen.start_color, sizeof(float) * 4);
         memcpy(dm->rgb_gen.end_color, sm->rgb_gen.end_color, sizeof(float) * 4);
 
+        dm->rgb_gen2.style = sm->rgb_gen2.style;
+        dm->rgb_gen2.phase = sm->rgb_gen2.phase;
+        dm->rgb_gen2.reg = sm->rgb_gen2.reg;
+        dm->rgb_gen2.rate = sm->rgb_gen2.rate;
+        memcpy(dm->rgb_gen2.start_color, sm->rgb_gen2.start_color, sizeof(float) * 4);
+        memcpy(dm->rgb_gen2.end_color, sm->rgb_gen2.end_color, sizeof(float) * 4);
+
         // Copy texture animation
         dm->animation.num_frames = sm->animation.num_frames;
         dm->animation.animation_type = sm->animation.animation_type;
@@ -200,10 +215,13 @@ static int convert_materials(const Threedi3di3 *model, ThreediModelIR *ir) {
 
         // Copy reflection / glass
         memcpy(dm->reflect_color, sm->reflect_color, sizeof(float) * 4);
+        memcpy(dm->reflect_color2, sm->reflect_color2, sizeof(float) * 4);
         dm->is_glass = sm->is_glass;
 
         // Copy material properties
         dm->emissive_type = sm->emissive_type;
+        dm->emissive_type2 = sm->emissive_type2;
+        dm->glass_type2 = sm->glass_type2;
         dm->emissive_color = 0;  // 3DI3 doesn't have a raw emissive_color field
         dm->specular_intensity = 0;
         dm->luminosity = 0;

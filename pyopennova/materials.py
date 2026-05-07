@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 THREEDI_IR_TEX_SLOT_DIFFUSE = 1
 THREEDI_IR_TEX_SLOT_DETAIL = 2
 THREEDI_IR_TEX_SLOT_NORMAL = 3
+THREEDI_IR_TEX_SLOT_NORMAL_B = 4
 
 THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST = 0x01
 THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT = 0x02
@@ -33,6 +34,7 @@ class TextureDescriptor:
     role: str
     name: str = ""
     path: Optional[str] = None
+    texture_index: int = -1
     slot: int = 0
     type: int = 0
     flags: int = 0
@@ -80,7 +82,12 @@ class MaterialDescriptor:
     diffuse: TextureDescriptor = field(default_factory=lambda: TextureDescriptor("diffuse"))
     detail: TextureDescriptor = field(default_factory=lambda: TextureDescriptor("detail"))
     normal: TextureDescriptor = field(default_factory=lambda: TextureDescriptor("normal"))
+    secondary_normal: TextureDescriptor = field(default_factory=lambda: TextureDescriptor("secondary_normal"))
+    textures: Tuple[TextureDescriptor, ...] = ()
+    unknown_textures: Tuple[TextureDescriptor, ...] = ()
     flags: int = 0
+    material_flags: int = 0
+    alpha_test_value_byte: int = 0
     alpha_threshold: float = 0.0
     blend_mode: int = 0
     alpha_test: bool = False
@@ -88,8 +95,11 @@ class MaterialDescriptor:
     two_sided: bool = False
     emissive: bool = False
     emissive_type: int = 0
+    emissive_type2: int = 0
     glass: bool = False
+    glass_type2: int = 0
     reflect_color: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    reflect_color2: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     specular_intensity: int = 0
     specular_strength: float = 0.0
     viewport_specular: float = 0.0
@@ -109,6 +119,7 @@ class MaterialDescriptor:
     v_params: GeneratorDescriptor = field(default_factory=GeneratorDescriptor)
     alpha_gen: GeneratorDescriptor = field(default_factory=GeneratorDescriptor)
     rgb_gen: RgbGeneratorDescriptor = field(default_factory=RgbGeneratorDescriptor)
+    rgb_gen2: RgbGeneratorDescriptor = field(default_factory=RgbGeneratorDescriptor)
     tex_anim: TexAnimDescriptor = field(default_factory=TexAnimDescriptor)
 
 
@@ -126,12 +137,14 @@ def describe_material(
     shader = _decode(_attr(ir_mat, "shader_name", b"")).strip() or "FF_ST_OP"
     name = "Material_%d_%s" % (index, shader)
     flags = _int_attr(ir_mat, "flags", 0)
-    diffuse, detail, normal = _texture_descriptors(
+    diffuse, detail, normal, secondary_normal, all_textures = _texture_descriptors(
+        shader,
         ir_mat,
         resolver,
         source_format=source_format,
         texture_strategy=texture_strategy,
     )
+    unknown_textures = tuple(tex for tex in all_textures if tex.role == "unknown")
 
     specular_intensity = _int_attr(ir_mat, "specular_intensity", 0)
     specular_strength = min(float(specular_intensity) / 255.0, 1.0) if specular_intensity > 0 else 0.0
@@ -146,6 +159,13 @@ def describe_material(
     luminosity = _int_attr(ir_mat, "luminosity", 0)
     luminosity_strength = min(float(luminosity) / 255.0, 1.0) if luminosity > 0 else 0.0
     emissive_type = _int_attr(ir_mat, "emissive_type", 0)
+    emissive_type2 = _int_attr(ir_mat, "emissive_type2", 0)
+    material_flags = _int_attr(ir_mat, "material_flags", flags & 0xFF)
+    alpha_test_value_byte = _int_attr(
+        ir_mat,
+        "alpha_test_value_byte",
+        int(round(max(0.0, min(_float_attr(ir_mat, "alpha_threshold", 0.0), 1.0)) * 255.0)),
+    )
     u_tiling = _float_attr(ir_mat, "u_tiling", 0.0)
     v_tiling = _float_attr(ir_mat, "v_tiling", 0.0)
     effective_u_tiling = 1.0 if u_tiling == 0.0 else u_tiling
@@ -157,9 +177,10 @@ def describe_material(
 
     bump_mode = ""
     bump_uses_alpha = False
-    if normal.name and normal.path and normal.type != NORMAL_TYPE_MDT:
+    bump_texture = normal if normal.name else secondary_normal
+    if bump_texture.name and bump_texture.path and bump_texture.type != NORMAL_TYPE_MDT:
         bump_mode = "normal_texture"
-        bump_uses_alpha = normal.type == NORMAL_TYPE_TGA_ALPHA
+        bump_uses_alpha = bump_texture.type == NORMAL_TYPE_TGA_ALPHA
     elif bump_shader and diffuse.name and diffuse.path:
         bump_mode = "diffuse_alpha"
         bump_uses_alpha = True
@@ -171,16 +192,24 @@ def describe_material(
         diffuse=diffuse,
         detail=detail,
         normal=normal,
+        secondary_normal=secondary_normal,
+        textures=all_textures,
+        unknown_textures=unknown_textures,
         flags=flags,
+        material_flags=material_flags,
+        alpha_test_value_byte=alpha_test_value_byte,
         alpha_threshold=_float_attr(ir_mat, "alpha_threshold", 0.0),
         blend_mode=_int_attr(ir_mat, "blend_mode", 0),
         alpha_test=bool(flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST),
         alpha_inverted=bool(flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT),
         two_sided=bool(flags & THREEDI_IR_MATERIAL_FLAG_TWO_SIDED),
-        emissive=bool(flags & THREEDI_IR_MATERIAL_FLAG_EMISSIVE) or emissive_type != 0,
+        emissive=bool(flags & THREEDI_IR_MATERIAL_FLAG_EMISSIVE) or emissive_type != 0 or emissive_type2 != 0,
         emissive_type=emissive_type,
+        emissive_type2=emissive_type2,
         glass=bool(_int_attr(ir_mat, "is_glass", 0)),
+        glass_type2=_int_attr(ir_mat, "glass_type2", 0),
         reflect_color=_float4_attr(ir_mat, "reflect_color"),
+        reflect_color2=_float4_attr(ir_mat, "reflect_color2"),
         specular_intensity=specular_intensity,
         specular_strength=specular_strength,
         viewport_specular=viewport_specular,
@@ -200,6 +229,7 @@ def describe_material(
         v_params=_uv_params(_attr(ir_mat, "v_params", None), ctrl_resolver),
         alpha_gen=_alpha_gen(_attr(ir_mat, "alpha_gen", None), ctrl_resolver),
         rgb_gen=_rgb_gen(_attr(ir_mat, "rgb_gen", None), ctrl_resolver),
+        rgb_gen2=_rgb_gen(_attr(ir_mat, "rgb_gen2", None), ctrl_resolver),
         tex_anim=_tex_anim(_attr(ir_mat, "animation", None)),
     )
 
@@ -229,13 +259,21 @@ def material_user_props(desc: MaterialDescriptor) -> Dict[str, Any]:
         "opennova_material_index": desc.index,
         "opennova_shader": desc.shader,
         "blend_mode": desc.blend_mode,
+        "opennova_texture_count": len(desc.textures),
+        "opennova_material_flags_raw": desc.material_flags,
+        "opennova_alpha_test_byte": desc.alpha_test_value_byte,
     }
     _texture_props(props, "diffuse", desc.diffuse, "ase_diffuse_bitmap")
     _texture_props(props, "detail", desc.detail, "ase_detail_bitmap")
     _texture_props(props, "normal", desc.normal, "ase_normal_bitmap")
+    _texture_props(props, "secondary_normal", desc.secondary_normal, "ase_secondary_normal_bitmap")
+    for tex in desc.textures:
+        _indexed_texture_props(props, tex)
     if desc.normal.name:
         props["ase_normal_type"] = desc.normal.type
         props["opennova_normal_type"] = desc.normal.type
+    if desc.secondary_normal.name:
+        props["opennova_secondary_normal_type"] = desc.secondary_normal.type
     if desc.alpha_test:
         props["opennova_alpha_test"] = 1
         props["opennova_alpha_threshold"] = desc.alpha_threshold
@@ -243,8 +281,14 @@ def material_user_props(desc: MaterialDescriptor) -> Dict[str, Any]:
         props["alpha_threshold"] = desc.alpha_threshold
     if desc.emissive_type != 0:
         props["emissive_type"] = desc.emissive_type
+    if desc.emissive_type2 != 0:
+        props["emissive_type2"] = desc.emissive_type2
     if desc.glass:
         props["reflect_color"] = desc.reflect_color
+    if desc.glass_type2 != 0:
+        props["glass_type2"] = desc.glass_type2
+    if any(desc.reflect_color2):
+        props["reflect_color2"] = desc.reflect_color2
     if desc.u_params.style != 0:
         props.update(_generator_props("uv_u", desc.u_params))
     if desc.v_params.style != 0:
@@ -261,6 +305,16 @@ def material_user_props(desc: MaterialDescriptor) -> Dict[str, Any]:
         })
         if desc.rgb_gen.ctrlreg:
             props["rgb_gen_ctrlreg"] = desc.rgb_gen.ctrlreg
+    if desc.rgb_gen2.style != 0:
+        props.update({
+            "rgb_gen2_style": desc.rgb_gen2.style,
+            "rgb_gen2_rate": desc.rgb_gen2.rate,
+            "rgb_gen2_phase": desc.rgb_gen2.phase,
+            "rgb_gen2_start_color": desc.rgb_gen2.start_color,
+            "rgb_gen2_end_color": desc.rgb_gen2.end_color,
+        })
+        if desc.rgb_gen2.ctrlreg:
+            props["rgb_gen2_ctrlreg"] = desc.rgb_gen2.ctrlreg
     if desc.tex_anim.num_frames > 0:
         props["tex_anim_frames"] = desc.tex_anim.num_frames
         props["tex_anim_type"] = desc.tex_anim.animation_type
@@ -283,12 +337,31 @@ def material_diagnostics(descriptors: Iterable[MaterialDescriptor]) -> Dict[str,
     missing_detail: List[str] = []
     normal_paths: List[str] = []
     missing_normal: List[str] = []
+    secondary_normal_paths: List[str] = []
+    missing_secondary_normal: List[str] = []
+    unknown_textures: List[str] = []
     opacity_maps = 0
 
     for desc in descriptors:
         _collect_texture_diag(desc.index, desc.diffuse, diffuse_paths, missing_diffuse)
         _collect_texture_diag(desc.index, desc.detail, detail_paths, missing_detail)
         _collect_texture_diag(desc.index, desc.normal, normal_paths, missing_normal)
+        _collect_texture_diag(
+            desc.index,
+            desc.secondary_normal,
+            secondary_normal_paths,
+            missing_secondary_normal,
+        )
+        for tex in desc.unknown_textures:
+            unknown_textures.append(
+                "%d:%d:%d:%d:%s" % (
+                    desc.index,
+                    tex.texture_index,
+                    tex.slot,
+                    tex.type,
+                    tex.name,
+                )
+            )
         if desc.alpha_test and desc.diffuse.path:
             opacity_maps += 1
 
@@ -299,8 +372,32 @@ def material_diagnostics(descriptors: Iterable[MaterialDescriptor]) -> Dict[str,
         "missing_detail": missing_detail,
         "normal_paths": normal_paths,
         "missing_normal": missing_normal,
+        "secondary_normal_paths": secondary_normal_paths,
+        "missing_secondary_normal": missing_secondary_normal,
+        "unknown_textures": unknown_textures,
         "opacity_maps": opacity_maps,
     }
+
+
+def material_texture_inventory(descriptors: Iterable[MaterialDescriptor]) -> List[Dict[str, Any]]:
+    """Return counted shader/slot/type/role combinations for material audits."""
+
+    counts: Dict[Tuple[str, str, int, int, int], int] = {}
+    for desc in descriptors:
+        for tex in desc.textures:
+            key = (desc.shader, tex.role, tex.slot, tex.type, tex.flags)
+            counts[key] = counts.get(key, 0) + 1
+    return [
+        {
+            "shader": shader,
+            "role": role,
+            "slot": slot,
+            "type": tex_type,
+            "flags": flags,
+            "count": count,
+        }
+        for (shader, role, slot, tex_type, flags), count in sorted(counts.items())
+    ]
 
 
 def ase_texture_names(desc: MaterialDescriptor, used_names: Dict[str, str]) -> Tuple[str, str]:
@@ -313,15 +410,24 @@ def ase_texture_names(desc: MaterialDescriptor, used_names: Dict[str, str]) -> T
 
 
 def _texture_descriptors(
+    shader: str,
     ir_mat,
     resolver,
     *,
     source_format: int | None = None,
     texture_strategy: str | None = None,
-) -> Tuple[TextureDescriptor, TextureDescriptor, TextureDescriptor]:
+) -> Tuple[
+    TextureDescriptor,
+    TextureDescriptor,
+    TextureDescriptor,
+    TextureDescriptor,
+    Tuple[TextureDescriptor, ...],
+]:
     diffuse = TextureDescriptor("diffuse")
     detail = TextureDescriptor("detail")
     normal = TextureDescriptor("normal")
+    secondary_normal = TextureDescriptor("secondary_normal")
+    all_textures: List[TextureDescriptor] = []
 
     texture_count = _int_attr(ir_mat, "texture_count", 0)
     textures = _attr(ir_mat, "textures", [])
@@ -334,8 +440,11 @@ def _texture_descriptors(
         if not tex_name:
             continue
         slot = _int_attr(tex, "slot", 0)
+        tex_type = _int_attr(tex, "type", 0)
+        flags = _int_attr(tex, "flags", 0)
+        role = _texture_role(shader, slot, tex_type, t_idx, bool(diffuse.name))
         desc = TextureDescriptor(
-            role=_texture_role(slot, t_idx, bool(diffuse.name)),
+            role=role,
             name=tex_name,
             path=_resolve_texture(
                 tex_name,
@@ -343,32 +452,60 @@ def _texture_descriptors(
                 source_format=source_format,
                 texture_strategy=texture_strategy,
                 slot=slot,
-                tex_type=_int_attr(tex, "type", 0),
-                flags=_int_attr(tex, "flags", 0),
+                tex_type=tex_type,
+                flags=flags,
+                role=role,
             ),
+            texture_index=t_idx,
             slot=slot,
-            type=_int_attr(tex, "type", 0),
-            flags=_int_attr(tex, "flags", 0),
+            type=tex_type,
+            flags=flags,
             frame=_int_attr(tex, "frame", 0),
         )
+        all_textures.append(desc)
         if desc.role == "diffuse" and (slot == THREEDI_IR_TEX_SLOT_DIFFUSE or not diffuse.name):
             diffuse = desc
         elif desc.role == "detail":
             detail = desc
         elif desc.role == "normal":
             normal = desc
+        elif desc.role == "secondary_normal":
+            secondary_normal = desc
 
-    return diffuse, detail, normal
+    return diffuse, detail, normal, secondary_normal, tuple(all_textures)
 
 
-def _texture_role(slot: int, texture_index: int, has_diffuse: bool) -> str:
-    if slot == THREEDI_IR_TEX_SLOT_DIFFUSE or (texture_index == 0 and not has_diffuse):
+def _texture_role(shader: str, slot: int, tex_type: int, texture_index: int, has_diffuse: bool) -> str:
+    shader_key = (shader or "").upper()
+    if slot == THREEDI_IR_TEX_SLOT_DIFFUSE:
         return "diffuse"
     if slot == THREEDI_IR_TEX_SLOT_DETAIL:
-        return "detail"
+        return "detail" if _shader_supports_detail(shader_key) else "unknown"
     if slot == THREEDI_IR_TEX_SLOT_NORMAL:
-        return "normal"
+        return "normal" if _shader_supports_bump(shader_key) or tex_type in (NORMAL_TYPE_MDT, NORMAL_TYPE_TGA_ALPHA) else "unknown"
+    if slot == THREEDI_IR_TEX_SLOT_NORMAL_B:
+        return (
+            "secondary_normal"
+            if _shader_supports_bump(shader_key) or tex_type in (NORMAL_TYPE_MDT, NORMAL_TYPE_TGA_ALPHA)
+            else "unknown"
+        )
+    if texture_index == 0 and not has_diffuse:
+        return "diffuse"
     return "unknown"
+
+
+def _shader_supports_detail(shader: str) -> bool:
+    return (
+        shader.startswith("FF_MT")
+        or shader.startswith("FF_DT")
+        or shader.endswith("2")
+        or "DIFF2" in shader
+        or "T2" in shader
+    )
+
+
+def _shader_supports_bump(shader: str) -> bool:
+    return any(token in shader for token in ("DOT3", "PHONGT", "BUMP"))
 
 
 def _texture_props(props: Dict[str, Any], role: str, tex: TextureDescriptor, ase_prop: str) -> None:
@@ -378,6 +515,20 @@ def _texture_props(props: Dict[str, Any], role: str, tex: TextureDescriptor, ase
     if tex.name:
         props[ase_prop] = tex.name
         props["opennova_has_%s_map" % role] = 1 if tex.path else 0
+
+
+def _indexed_texture_props(props: Dict[str, Any], tex: TextureDescriptor) -> None:
+    if tex.texture_index < 0:
+        return
+    prefix = "opennova_texture_%02d" % tex.texture_index
+    props["%s_role" % prefix] = tex.role
+    props["%s_name" % prefix] = tex.name
+    props["%s_path" % prefix] = tex.path or ""
+    props["%s_slot" % prefix] = tex.slot
+    props["%s_type" % prefix] = tex.type
+    props["%s_flags" % prefix] = tex.flags
+    props["%s_frame" % prefix] = tex.frame
+    props["%s_missing" % prefix] = 1 if tex.missing else 0
 
 
 def _generator_props(prefix: str, gen: GeneratorDescriptor) -> Dict[str, Any]:
@@ -474,6 +625,7 @@ def _resolve_texture(
     slot: int = 0,
     tex_type: int = 0,
     flags: int = 0,
+    role: str | None = None,
 ) -> Optional[str]:
     if not texture_name:
         return None
@@ -486,6 +638,7 @@ def _resolve_texture(
                 slot=slot,
                 tex_type=tex_type,
                 flags=flags,
+                role=role,
             )
         except TypeError:
             resolved = resolver.resolve_texture(texture_name)

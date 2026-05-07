@@ -123,6 +123,7 @@ typedef enum ThreediIRBlendMode {
 #define THREEDI_IR_MATERIAL_FLAG_EMISSIVE      0x08u
 
 // Texture slot types
+#define THREEDI_IR_MAX_MATERIAL_TEXTURES 24
 #define THREEDI_IR_TEX_SLOT_DIFFUSE  1
 #define THREEDI_IR_TEX_SLOT_DETAIL   2
 #define THREEDI_IR_TEX_SLOT_NORMAL   3
@@ -175,8 +176,11 @@ typedef struct ThreediIRMaterial {
     int32_t index;                         // Material index
     char shader_name[33];                  // Shader tag
     uint32_t texture_count;                // Number of valid texture slots
-    ThreediIRMaterialTexture textures[8];  // Texture slots
+    ThreediIRMaterialTexture textures[THREEDI_IR_MAX_MATERIAL_TEXTURES];  // Raw 3DI3 texture entries
     uint32_t flags;                        // THREEDI_IR_MATERIAL_FLAG_*
+    uint8_t material_flags;                // Raw 3DI3 material_flags byte
+    uint8_t alpha_test_value_byte;         // Raw 3DI3 alpha-test byte
+    uint8_t material_pad[2];               // Reserved bytes as encoded in MTRL
     float alpha_threshold;                 // Alpha test threshold (0..1)
     ThreediIRBlendMode blend_mode;         // Blend mode (opaque/alpha/additive)
 
@@ -185,10 +189,12 @@ typedef struct ThreediIRMaterial {
     ThreediIRUvParams v_params;
     ThreediIRAlphaGen alpha_gen;
     ThreediIRRgbGen rgb_gen;
+    ThreediIRRgbGen rgb_gen2;
     ThreediIRTexAnim animation;
 
     // Reflection / glass
     float reflect_color[4];   // RGBA 0..1
+    float reflect_color2[4];  // RGBA 0..1, second 3DI3 reflection channel
     int is_glass;
 
     // Material properties
@@ -196,6 +202,9 @@ typedef struct ThreediIRMaterial {
     uint32_t luminosity;
     uint32_t emissive_color;   // Raw transparency/emissive value
     uint8_t emissive_type;     // 0=none, 2=full
+    uint8_t emissive_type2;    // Secondary 3DI3 emissive channel
+    uint8_t glass_type2;       // Secondary 3DI3 glass channel
+    uint8_t material_pad2;     // Struct alignment / reserved
 
     // Tiling
     float u_tiling;

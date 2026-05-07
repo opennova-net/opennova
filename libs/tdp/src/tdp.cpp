@@ -1132,7 +1132,9 @@ int tdp_from_ir(const ThreediModelIR *ir, TdpProject *out) {
             copy_str(dst->normal_tex[1], sizeof(dst->normal_tex[1]), "0");
 
             // Textures by slot
-            for (uint32_t t = 0; t < src->texture_count && t < 8; ++t) {
+            for (uint32_t t = 0;
+                 t < src->texture_count && t < THREEDI_IR_MAX_MATERIAL_TEXTURES;
+                 ++t) {
                 const ThreediIRMaterialTexture *tex = &src->textures[t];
                 if (!tex->name[0]) continue;
                 int clamped = (tex->flags >> 1) & 1;

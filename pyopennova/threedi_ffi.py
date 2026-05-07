@@ -31,6 +31,8 @@ THREEDI_IR_TOPOLOGY_STRIP     = 1
 THREEDI_IR_TEX_SLOT_DIFFUSE = 1
 THREEDI_IR_TEX_SLOT_DETAIL  = 2
 THREEDI_IR_TEX_SLOT_NORMAL  = 3
+THREEDI_IR_TEX_SLOT_NORMAL_B = 4
+THREEDI_IR_MAX_MATERIAL_TEXTURES = 24
 
 THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST   = 0x01
 THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT = 0x02
@@ -141,8 +143,11 @@ class ThreediIRMaterial(ctypes.Structure):
         ("index",         ctypes.c_int32),
         ("shader_name",   ctypes.c_char * 33),
         ("texture_count", ctypes.c_uint32),
-        ("textures",      ThreediIRMaterialTexture * 8),
+        ("textures",      ThreediIRMaterialTexture * THREEDI_IR_MAX_MATERIAL_TEXTURES),
         ("flags",         ctypes.c_uint32),
+        ("material_flags", ctypes.c_uint8),
+        ("alpha_test_value_byte", ctypes.c_uint8),
+        ("material_pad",  ctypes.c_uint8 * 2),
         ("alpha_threshold", ctypes.c_float),
         ("blend_mode",    ctypes.c_int),       # ThreediIRBlendMode enum
 
@@ -151,10 +156,12 @@ class ThreediIRMaterial(ctypes.Structure):
         ("v_params",  ThreediIRUvParams),
         ("alpha_gen", ThreediIRAlphaGen),
         ("rgb_gen",   ThreediIRRgbGen),
+        ("rgb_gen2",  ThreediIRRgbGen),
         ("animation", ThreediIRTexAnim),
 
         # Reflection / glass
         ("reflect_color", ctypes.c_float * 4),
+        ("reflect_color2", ctypes.c_float * 4),
         ("is_glass",      ctypes.c_int),
 
         # Material properties
@@ -162,6 +169,9 @@ class ThreediIRMaterial(ctypes.Structure):
         ("luminosity",         ctypes.c_uint32),
         ("emissive_color",     ctypes.c_uint32),
         ("emissive_type",      ctypes.c_uint8),
+        ("emissive_type2",     ctypes.c_uint8),
+        ("glass_type2",        ctypes.c_uint8),
+        ("material_pad2",      ctypes.c_uint8),
 
         # Tiling
         ("u_tiling", ctypes.c_float),
