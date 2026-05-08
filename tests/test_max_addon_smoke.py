@@ -1437,10 +1437,12 @@ def test_max_qt_ui_helpers_and_menu_script_are_ci_safe():
     ) == ("weapon", "M16A2", "m16_1st.3di", "m16_1st")
     assert qt_ui.can_import_loose("C:/asset.3di", "C:/out", True, False, False)
     assert qt_ui.can_import_loose(["C:/a.3di", "C:/b.3di"], "C:/out", True, False, False)
+    assert qt_ui.can_import_loose("C:/asset.3di", "C:/out", False, False, False, True)
     assert qt_ui.loose_paths_display(["C:/a.3di", "C:/b.3di"]) == "2 files selected"
     assert not qt_ui.can_import_loose("", "C:/out", True, False, False)
     assert not qt_ui.can_import_loose([], "C:/out", True, False, False)
     assert not qt_ui.can_import_loose("C:/asset.3di", "C:/out", False, False, False)
+    assert qt_ui.writes_any_output(False, False, False, True)
     assert qt_ui.can_import_definition(
         has_selection=True,
         output_root="C:/out",
@@ -1454,6 +1456,14 @@ def test_max_qt_ui_helpers_and_menu_script_are_ci_safe():
         write_ase=True,
         write_3dp=False,
         write_max=False,
+    )
+    assert qt_ui.can_import_batch(
+        visible_count=1,
+        output_root="C:/out",
+        write_ase=False,
+        write_3dp=False,
+        write_max=False,
+        copy_textures=True,
     )
     assert ui._format_scan_item(
         ScanItem(name="M16A2", type="weapon", source_model="m16_1st.3di", output_stem="m16_1st")
@@ -1605,6 +1615,7 @@ def test_max_ui_loose_single_import_uses_output_root(tmp_path: Path):
         write_ase=True,
         write_3dp=False,
         write_max=True,
+        copy_textures=True,
         reset_scene=True,
     )
     set_status.assert_called_once_with(f"Loose import complete -> {output_root / 'Shed'}")
@@ -1651,6 +1662,7 @@ def test_max_ui_loose_batch_uses_per_model_output_dirs(tmp_path: Path):
     assert all(request.write_ase is False for request in requests)
     assert all(request.write_3dp is True for request in requests)
     assert all(request.write_max is False for request in requests)
+    assert all(request.copy_textures is True for request in requests)
     set_status.assert_called_once_with(f"Loose batch complete: 2/2 files -> {output_root}")
 
 
@@ -1738,6 +1750,7 @@ def test_max_native_batch_request_uses_exact_loose_output_dir():
     assert result.output_path == str(ROOT / "out" / "Shed")
     assert run_loose.call_args.kwargs["output_dir"] == str(ROOT / "out" / "Shed")
     assert run_loose.call_args.kwargs["write_max"] is True
+    assert run_loose.call_args.kwargs["copy_textures"] is True
 
 
 def test_max_native_batch_request_can_disable_max_output():
@@ -1756,6 +1769,7 @@ def test_max_native_batch_request_can_disable_max_output():
 
     assert result.ok
     assert run_loose.call_args.kwargs["write_max"] is False
+    assert run_loose.call_args.kwargs["copy_textures"] is True
 
 
 def test_definition_plan_resolves_reset_bad_when_animation_import_is_disabled(monkeypatch):
@@ -1984,20 +1998,22 @@ def test_max_output_writer_can_save_max_only(tmp_path: Path):
 
     max_path = str(tmp_path / "Shed.max")
     with patch("opennova_max.output_writers.write_host_neutral_outputs") as shared:
-        with patch("opennova_max.output_writers.save_max_scene", return_value=max_path) as save:
-            written = output_writers.write_outputs(
-                object(),
-                str(tmp_path),
-                "Shed",
-                object(),
-                write_ase=False,
-                write_3dp=False,
-                write_max=True,
-            )
+        with patch("opennova_max.output_writers.copy_model_textures", return_value=[]) as copy_textures:
+            with patch("opennova_max.output_writers.save_max_scene", return_value=max_path) as save:
+                written = output_writers.write_outputs(
+                    object(),
+                    str(tmp_path),
+                    "Shed",
+                    object(),
+                    write_ase=False,
+                    write_3dp=False,
+                    write_max=True,
+                )
 
     assert written == [max_path]
     shared.assert_not_called()
     save.assert_called_once_with(str(tmp_path), "Shed")
+    copy_textures.assert_called_once()
 
 
 def test_max_output_writer_delegates_host_neutral_outputs(tmp_path: Path):
@@ -2020,16 +2036,17 @@ def test_max_output_writer_delegates_host_neutral_outputs(tmp_path: Path):
         "opennova_max.output_writers.write_host_neutral_outputs",
         return_value=[shared_path],
     ) as shared:
-        with patch("opennova_max.output_writers.save_max_scene", return_value=max_path):
-            written = output_writers.write_outputs(
-                ir,
-                str(tmp_path),
-                "Shed",
-                builder,
-                write_ase=True,
-                write_3dp=False,
-                write_max=True,
-            )
+        with patch("opennova_max.output_writers.copy_model_textures", return_value=[]) as copy_textures:
+            with patch("opennova_max.output_writers.save_max_scene", return_value=max_path):
+                written = output_writers.write_outputs(
+                    ir,
+                    str(tmp_path),
+                    "Shed",
+                    builder,
+                    write_ase=True,
+                    write_3dp=False,
+                    write_max=True,
+                )
 
     assert written == [shared_path, max_path]
     shared.assert_called_once_with(
@@ -2044,3 +2061,4 @@ def test_max_output_writer_delegates_host_neutral_outputs(tmp_path: Path):
         bad_file=bad_file,
         bullet_lod_index=4,
     )
+    copy_textures.assert_called_once_with(ir, str(tmp_path), resolver=None)

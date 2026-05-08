@@ -22,6 +22,7 @@ _OPTION_FIELDS = (
     "write_ase",
     "write_glb",
     "write_fbx",
+    "copy_textures",
 )
 
 
@@ -46,6 +47,7 @@ def _add_import_options(parser: argparse.ArgumentParser, *, include_def_only: bo
         write_ase=None,
         write_glb=None,
         write_fbx=None,
+        copy_textures=None,
     )
     if include_def_only:
         parser.add_argument("--no-animations", dest="import_animations", action="store_false",
@@ -71,6 +73,8 @@ def _add_import_options(parser: argparse.ArgumentParser, *, include_def_only: bo
                         help="Write .glb files")
     parser.add_argument("--fbx", dest="write_fbx", action="store_true",
                         help="Write .fbx files")
+    parser.add_argument("--no-textures", dest="copy_textures", action="store_false",
+                        help="Do not copy resolved textures into textures/")
 
 
 def cmd_scan(args: argparse.Namespace) -> int:

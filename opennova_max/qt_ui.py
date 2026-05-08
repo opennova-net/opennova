@@ -57,12 +57,28 @@ def resource_table_row(item) -> tuple[str, str, str, str]:
     )
 
 
-def writes_any_output(write_ase: bool, write_3dp: bool, write_max: bool) -> bool:
-    return bool(write_ase or write_3dp or write_max)
+def writes_any_output(
+    write_ase: bool,
+    write_3dp: bool,
+    write_max: bool,
+    copy_textures: bool = False,
+) -> bool:
+    return bool(write_ase or write_3dp or write_max or copy_textures)
 
 
-def can_import_loose(threedi_path, output_dir: str, write_ase: bool, write_3dp: bool, write_max: bool) -> bool:
-    return bool(_loose_path_strings(threedi_path) and output_dir.strip() and writes_any_output(write_ase, write_3dp, write_max))
+def can_import_loose(
+    threedi_path,
+    output_dir: str,
+    write_ase: bool,
+    write_3dp: bool,
+    write_max: bool,
+    copy_textures: bool = False,
+) -> bool:
+    return bool(
+        _loose_path_strings(threedi_path)
+        and output_dir.strip()
+        and writes_any_output(write_ase, write_3dp, write_max, copy_textures)
+    )
 
 
 def loose_paths_display(paths) -> str:
@@ -102,8 +118,13 @@ def can_import_definition(
     write_ase: bool,
     write_3dp: bool,
     write_max: bool,
+    copy_textures: bool = False,
 ) -> bool:
-    return bool(has_selection and output_root.strip() and writes_any_output(write_ase, write_3dp, write_max))
+    return bool(
+        has_selection
+        and output_root.strip()
+        and writes_any_output(write_ase, write_3dp, write_max, copy_textures)
+    )
 
 
 def can_import_batch(
@@ -113,8 +134,13 @@ def can_import_batch(
     write_ase: bool,
     write_3dp: bool,
     write_max: bool,
+    copy_textures: bool = False,
 ) -> bool:
-    return bool(visible_count > 0 and output_root.strip() and writes_any_output(write_ase, write_3dp, write_max))
+    return bool(
+        visible_count > 0
+        and output_root.strip()
+        and writes_any_output(write_ase, write_3dp, write_max, copy_textures)
+    )
 
 
 def _dialog_alive(dialog) -> bool:
@@ -508,7 +534,8 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
             self.ase_check = QtWidgets.QCheckBox("ASE")
             self.project_check = QtWidgets.QCheckBox("3DP/3DA")
             self.max_check = QtWidgets.QCheckBox("MAX")
-            for check in (self.ase_check, self.project_check, self.max_check):
+            self.textures_check = QtWidgets.QCheckBox("Textures")
+            for check in (self.ase_check, self.project_check, self.max_check, self.textures_check):
                 check.setChecked(True)
                 output_layout.addWidget(check)
             layout.addWidget(output_group)
@@ -538,7 +565,7 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
                 self.loose_output_edit,
             ):
                 edit.textChanged.connect(lambda _value: self._update_actions())
-            for check in (self.ase_check, self.project_check, self.max_check):
+            for check in (self.ase_check, self.project_check, self.max_check, self.textures_check):
                 check.toggled.connect(lambda _value: self._update_actions())
 
         def _apply_saved_preferences(self) -> None:
@@ -736,6 +763,7 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
                     write_ase=self.ase_check.isChecked(),
                     write_3dp=self.project_check.isChecked(),
                     write_max=self.max_check.isChecked(),
+                    copy_textures=self.textures_check.isChecked(),
                 )
 
             self._run_busy(f"Importing {item.type} {item.name}...", run)
@@ -769,6 +797,7 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
                         write_ase=self.ase_check.isChecked(),
                         write_3dp=self.project_check.isChecked(),
                         write_max=self.max_check.isChecked(),
+                        copy_textures=self.textures_check.isChecked(),
                     ):
                         completed += 1
                 self._set_status(
@@ -793,6 +822,7 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
                     self.ase_check.isChecked(),
                     self.project_check.isChecked(),
                     self.max_check.isChecked(),
+                    self.textures_check.isChecked(),
                 )
 
             self._run_busy("Importing loose .3di...", run)
@@ -820,6 +850,7 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
             write_ase = self.ase_check.isChecked()
             write_3dp = self.project_check.isChecked()
             write_max = self.max_check.isChecked()
+            copy_textures = self.textures_check.isChecked()
             self.scan_button.setEnabled(not self._busy and bool(self.game_dir_edit.text().strip()))
             self.import_selected_button.setEnabled(
                 not self._busy
@@ -829,6 +860,7 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
                     write_ase=write_ase,
                     write_3dp=write_3dp,
                     write_max=write_max,
+                    copy_textures=copy_textures,
                 )
             )
             self.import_batch_button.setEnabled(
@@ -839,6 +871,7 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
                     write_ase=write_ase,
                     write_3dp=write_3dp,
                     write_max=write_max,
+                    copy_textures=copy_textures,
                 )
             )
             self.import_loose_button.setEnabled(
@@ -849,6 +882,7 @@ if is_available():  # pragma: no cover - UI construction is local-Max validated
                     write_ase,
                     write_3dp,
                     write_max,
+                    copy_textures,
                 )
             )
 

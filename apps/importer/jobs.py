@@ -47,6 +47,7 @@ class ImportOptions:
     write_ase: bool = True
     write_glb: bool = False
     write_fbx: bool = False
+    copy_textures: bool = True
 
     def writes_any_output_file(self) -> bool:
         return any((
@@ -55,6 +56,7 @@ class ImportOptions:
             self.write_ase,
             self.write_glb,
             self.write_fbx,
+            self.copy_textures,
         ))
 
     def writes_any_export_format(self) -> bool:
@@ -72,6 +74,7 @@ class ImportOptions:
             "write_3dp": self.write_3dp,
             "write_glb": self.write_glb,
             "write_fbx": self.write_fbx,
+            "copy_textures": self.copy_textures,
         }
 
     def as_loose_kwargs(self) -> dict[str, bool]:
@@ -84,6 +87,7 @@ class ImportOptions:
             "write_3dp": self.write_3dp,
             "write_glb": self.write_glb,
             "write_fbx": self.write_fbx,
+            "copy_textures": self.copy_textures,
         }
 
     def dedupe_tuple(self) -> tuple[bool, ...]:
@@ -98,6 +102,7 @@ class ImportOptions:
             self.write_ase,
             self.write_glb,
             self.write_fbx,
+            self.copy_textures,
         )
 
 

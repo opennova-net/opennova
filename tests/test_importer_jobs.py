@@ -47,6 +47,7 @@ class TestImportOptions:
         assert options.write_ase
         assert not options.write_glb
         assert not options.write_fbx
+        assert options.copy_textures
 
     def test_cli_options_override_defaults(self) -> None:
         parser = build_parser()
@@ -73,10 +74,22 @@ class TestImportOptions:
         assert not options.write_3dp
         assert options.write_ase
         assert options.write_glb
+        assert options.copy_textures
+
+        args = parser.parse_args([
+            "import-loose",
+            "--file",
+            "model.3di",
+            "--output",
+            "out",
+            "--no-textures",
+        ])
+        assert not options_from_args(args).copy_textures
 
     def test_blender_only_preset_writes_only_blend(self) -> None:
         options = OPTION_PRESETS["Blender only"]
         assert options.write_blend
+        assert options.copy_textures
         assert options.writes_any_output_file()
         assert not options.writes_any_export_format()
         assert options.import_collisions
@@ -109,6 +122,7 @@ class TestImportOptions:
         }
         options = app._options_from_preferences()
         assert options.write_blend
+        assert options.copy_textures
         assert preset_name_for_options(options) == "Round-trip"
 
 
@@ -136,10 +150,30 @@ class TestImportRequestValidation:
                 write_ase=False,
                 write_glb=False,
                 write_fbx=False,
+                copy_textures=False,
             ),
         )
         errors = validate_import_request(request)
         assert "Select at least one file to write." in errors
+
+    def test_texture_only_request_counts_as_output_file(self) -> None:
+        request = ImportRequest.for_definition(
+            base_dir=str(FIXTURE_DEF_DIR),
+            item_name="M16",
+            item_type="weapon",
+            output_root=str(ROOT),
+            options=ImportOptions(
+                write_blend=False,
+                write_3dp=False,
+                write_ase=False,
+                write_glb=False,
+                write_fbx=False,
+                copy_textures=True,
+            ),
+        )
+        errors = validate_import_request(request)
+        assert "Select at least one file to write." not in errors
+        assert not request.options.writes_any_export_format()
 
     def test_loose_request_requires_3di_file(self) -> None:
         request = ImportRequest.for_loose(
@@ -233,6 +267,7 @@ class TestImportRunner:
         assert not kwargs["import_arms"]
         assert not kwargs["write_blend"]
         assert kwargs["write_glb"]
+        assert kwargs["copy_textures"]
 
     def test_execute_loose_request_uses_single_scene_reset_boundary(self) -> None:
         output_root = ROOT
@@ -252,6 +287,7 @@ class TestImportRunner:
         assert kwargs["output_dir"] == str(output_root / "Shed")
         assert not kwargs["reset_scene"]
         assert kwargs["write_blend"]
+        assert kwargs["copy_textures"]
 
     def test_run_import_passes_blend_choice_to_basic_model(self) -> None:
         from apps.importer.import_runner import run_import
@@ -306,18 +342,20 @@ class TestImportRunner:
         with patch.dict(sys.modules, modules):
             with patch("apps.importer.import_runner._setup_blender_package"):
                 with patch("apps.importer.import_runner._write_host_neutral_outputs") as shared:
-                    with patch("apps.importer.import_runner._save_blend_scene") as save_blend:
-                        ok = run_loose_import(
-                            threedi_path=str(FIXTURE_3DI),
-                            output_dir=str(ROOT),
-                            write_blend=False,
-                            reset_scene=False,
-                        )
+                    with patch("apps.importer.import_runner._copy_model_textures") as copy_textures:
+                        with patch("apps.importer.import_runner._save_blend_scene") as save_blend:
+                            ok = run_loose_import(
+                                threedi_path=str(FIXTURE_3DI),
+                                output_dir=str(ROOT),
+                                write_blend=False,
+                                reset_scene=False,
+                            )
 
         assert ok
         shared.assert_called_once()
         assert shared.call_args.kwargs["write_ase"] is True
         assert shared.call_args.kwargs["write_3dp"] is True
+        copy_textures.assert_called_once()
         save_blend.assert_not_called()
 
     def test_scan_failure_is_not_empty_success(self) -> None:

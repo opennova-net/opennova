@@ -223,6 +223,7 @@ class ImporterApp(tk.Tk):
         self._flag_write_ase = tk.BooleanVar(value=saved_options.write_ase)
         self._flag_write_glb = tk.BooleanVar(value=saved_options.write_glb)
         self._flag_write_fbx = tk.BooleanVar(value=saved_options.write_fbx)
+        self._flag_copy_textures = tk.BooleanVar(value=saved_options.copy_textures)
 
         top = ttk.Frame(self, padding=(8, 6))
         top.pack(fill=tk.X)
@@ -366,6 +367,11 @@ class ImporterApp(tk.Tk):
             variable=self._flag_write_glb,
         ).pack(anchor=tk.W)
         ttk.Checkbutton(format_lf, text="FBX (.fbx)", variable=self._flag_write_fbx).pack(anchor=tk.W)
+        ttk.Checkbutton(
+            format_lf,
+            text="Textures folder",
+            variable=self._flag_copy_textures,
+        ).pack(anchor=tk.W)
 
         queue_lf = ttk.LabelFrame(right, text="Queue", padding=6)
         queue_lf.pack(fill=tk.BOTH, expand=True)
@@ -482,6 +488,7 @@ class ImporterApp(tk.Tk):
             self._flag_write_ase,
             self._flag_write_glb,
             self._flag_write_fbx,
+            self._flag_copy_textures,
         )
         for var in option_vars:
             var.trace_add("write", lambda *_: self._on_options_changed())
@@ -712,6 +719,7 @@ class ImporterApp(tk.Tk):
             write_ase=self._flag_write_ase.get(),
             write_glb=self._flag_write_glb.get(),
             write_fbx=self._flag_write_fbx.get(),
+            copy_textures=self._flag_copy_textures.get(),
         )
 
     def _apply_selected_preset(self) -> None:
@@ -738,6 +746,7 @@ class ImporterApp(tk.Tk):
             self._flag_write_ase.set(options.write_ase)
             self._flag_write_glb.set(options.write_glb)
             self._flag_write_fbx.set(options.write_fbx)
+            self._flag_copy_textures.set(options.copy_textures)
         finally:
             self._applying_preset = False
         self._sync_preset_label(options)
@@ -1245,6 +1254,7 @@ class ImporterApp(tk.Tk):
                 ("ase", options.write_ase),
                 ("glb", options.write_glb),
                 ("fbx", options.write_fbx),
+                ("textures", options.copy_textures),
             )
             if value
         ]

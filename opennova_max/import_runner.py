@@ -26,6 +26,7 @@ class MaxImportRequest:
     write_ase: bool = True
     write_3dp: bool = True
     write_max: bool = True
+    copy_textures: bool = True
 
 
 @dataclass
@@ -50,6 +51,7 @@ def run_loose_import(
     write_ase: bool = True,
     write_3dp: bool = True,
     write_max: bool = True,
+    copy_textures: bool = True,
     reset_scene: bool = True,
 ) -> bool:
     """Import a standalone ``.3di`` and write selected outputs."""
@@ -64,6 +66,7 @@ def run_loose_import(
         write_ase=write_ase,
         write_3dp=write_3dp,
         write_max=write_max,
+        copy_textures=copy_textures,
         reset_scene=reset_scene,
     )
     return bool(written)
@@ -84,6 +87,7 @@ def run_import(
     write_ase: bool = True,
     write_3dp: bool = True,
     write_max: bool = True,
+    copy_textures: bool = True,
     reset_scene: bool = True,
 ) -> bool:
     """Import one DEF resource and write outputs under ``output_dir/<stem>``."""
@@ -101,6 +105,7 @@ def run_import(
         write_ase=write_ase,
         write_3dp=write_3dp,
         write_max=write_max,
+        copy_textures=copy_textures,
         reset_scene=reset_scene,
     )
     return bool(written)
@@ -142,15 +147,16 @@ def _run_loose_import_impl(
     write_ase: bool,
     write_3dp: bool,
     write_max: bool,
-    reset_scene: bool,
+    copy_textures: bool = True,
+    reset_scene: bool = True,
 ) -> list[str]:
     from pyopennova.asset_resolver import AssetResolver
     from pyopennova.threedi_ffi import free_model_ir, read_model_ir
     from .output_writers import reset_scene as _reset_scene, write_outputs
     from .scene_builder import MaxSceneBuilder
 
-    if not write_ase and not write_3dp and not write_max:
-        raise ValueError("Max imports require write_ase, write_3dp, and/or write_max.")
+    if not write_ase and not write_3dp and not write_max and not copy_textures:
+        raise ValueError("Max imports require ASE, 3DP/3DA, MAX, and/or textures output.")
     if reset_scene:
         _reset_scene()
     os.makedirs(output_dir, exist_ok=True)
@@ -177,6 +183,7 @@ def _run_loose_import_impl(
                 write_ase=write_ase,
                 write_3dp=write_3dp,
                 write_max=write_max,
+                copy_textures=copy_textures,
             )
     finally:
         free_model_ir(ir)
@@ -197,7 +204,8 @@ def _run_definition_import_impl(
     write_ase: bool,
     write_3dp: bool,
     write_max: bool,
-    reset_scene: bool,
+    copy_textures: bool = True,
+    reset_scene: bool = True,
 ) -> tuple[list[str], str]:
     from pyopennova.asset_resolver import AssetResolver
     from pyopennova.bad_ffi import free_bad, parse_bad
@@ -206,8 +214,8 @@ def _run_definition_import_impl(
     from .output_writers import reset_scene as _reset_scene, write_outputs
     from .scene_builder import MaxSceneBuilder
 
-    if not write_ase and not write_3dp and not write_max:
-        raise ValueError("Max imports require write_ase, write_3dp, and/or write_max.")
+    if not write_ase and not write_3dp and not write_max and not copy_textures:
+        raise ValueError("Max imports require ASE, 3DP/3DA, MAX, and/or textures output.")
     if reset_scene:
         _reset_scene()
 
@@ -262,7 +270,8 @@ def _run_definition_import_impl(
                             import_occlusion=import_occlusion,
                             import_lights=import_lights,
                         )
-                        secondary.merge_with_existing_scene(main_builder)
+                        if secondary.merge_with_existing_scene(main_builder) and copy_textures:
+                            _copy_model_textures(ir, project_dir, resolver)
                 finally:
                     if model.role != "main":
                         free_model_ir(ir)
@@ -278,6 +287,7 @@ def _run_definition_import_impl(
                     write_ase=write_ase,
                     write_3dp=write_3dp,
                     write_max=write_max,
+                    copy_textures=copy_textures,
                 ))
         finally:
             if main_ir is not None:
@@ -313,6 +323,7 @@ def _execute_to_files(request) -> tuple[list[str], str]:
             write_ase=getattr(options, "write_ase", getattr(request, "write_ase", True)),
             write_3dp=getattr(options, "write_3dp", getattr(request, "write_3dp", True)),
             write_max=getattr(options, "write_max", getattr(request, "write_max", True)),
+            copy_textures=getattr(options, "copy_textures", getattr(request, "copy_textures", True)),
             reset_scene=True,
         )
         return written, output_dir
@@ -336,8 +347,15 @@ def _execute_to_files(request) -> tuple[list[str], str]:
         write_ase=getattr(options, "write_ase", getattr(request, "write_ase", True)),
         write_3dp=getattr(options, "write_3dp", getattr(request, "write_3dp", True)),
         write_max=getattr(options, "write_max", getattr(request, "write_max", True)),
+        copy_textures=getattr(options, "copy_textures", getattr(request, "copy_textures", True)),
         reset_scene=True,
     )
+
+
+def _copy_model_textures(ir, output_dir: str, resolver=None) -> list[str]:
+    from pyopennova.texture_outputs import copy_model_textures
+
+    return copy_model_textures(ir, output_dir, resolver=resolver)
 
 
 def _success_result(request, *, output_path: str, written_files: list[str], elapsed_seconds: float):

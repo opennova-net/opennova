@@ -101,6 +101,7 @@ def _import_basic_model(
     write_3dp: bool = True,
     write_glb: bool = False,
     write_fbx: bool = False,
+    copy_textures: bool = True,
 ) -> bool:
     """Import a single weapon/item via the C IR pipeline and write selected outputs."""
     from pyopennova.threedi_ffi import read_model_ir, free_model_ir
@@ -133,6 +134,7 @@ def _import_basic_model(
         success_count = 0
         main_builder = None
         main_ir = None
+        project_dir = os.path.join(output_dir, plan.export_name) if output_dir else ""
 
         try:
             for model in plan.models:
@@ -163,12 +165,13 @@ def _import_basic_model(
                                                         import_lights=import_lights)
                         if secondary.merge_with_existing_scene(main_builder):
                             success_count += 1
+                            if copy_textures and project_dir:
+                                _copy_model_textures(ir, project_dir, resolver)
                 finally:
                     if model.role != "main":
                         free_model_ir(ir)
 
             if success_count > 0 and output_dir and main_ir is not None and main_builder is not None:
-                project_dir = os.path.join(output_dir, plan.export_name)
                 _write_host_neutral_outputs(
                     main_ir,
                     project_dir,
@@ -181,6 +184,8 @@ def _import_basic_model(
                     bad_file=bad_file,
                     bullet_lod_index=main_builder.bullet_lod_index,
                 )
+                if copy_textures:
+                    _copy_model_textures(main_ir, project_dir, resolver)
                 if write_glb:
                     _export_glb(project_dir, plan.export_name)
                 if write_fbx:
@@ -212,6 +217,7 @@ def run_import(
     write_3dp: bool = True,
     write_glb: bool = False,
     write_fbx: bool = False,
+    copy_textures: bool = True,
 ) -> bool:
     """Import a single weapon/item and produce selected output files.
 
@@ -241,6 +247,7 @@ def run_import(
             write_3dp=write_3dp,
             write_glb=write_glb,
             write_fbx=write_fbx,
+            copy_textures=copy_textures,
         )
     except Exception as exc:
         log.error("import failed: %s", exc, exc_info=True)
@@ -276,6 +283,12 @@ def _write_host_neutral_outputs(
     )
 
 
+def _copy_model_textures(ir, output_dir: str, resolver=None) -> list[str]:
+    from pyopennova.texture_outputs import copy_model_textures
+
+    return copy_model_textures(ir, output_dir, resolver=resolver)
+
+
 def run_loose_import(
     threedi_path: str,
     output_dir: str,
@@ -290,6 +303,7 @@ def run_loose_import(
     write_3dp: bool = True,
     write_glb: bool = False,
     write_fbx: bool = False,
+    copy_textures: bool = True,
     reset_scene: bool = True,
 ) -> bool:
     """Import a standalone .3di file (no DEF lookup required).
@@ -331,6 +345,8 @@ def run_loose_import(
                     import_lights=import_lights,
                     bullet_lod_index=builder.bullet_lod_index,
                 )
+                if copy_textures:
+                    _copy_model_textures(ir, output_dir, resolver)
     except Exception as exc:
         log.error("run_loose_import failed: %s", exc, exc_info=True)
         raise

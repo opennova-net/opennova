@@ -46,6 +46,7 @@ OPTION_PRESET_DEFS: tuple[OptionPreset, ...] = (
             write_ase=True,
             write_glb=False,
             write_fbx=False,
+            copy_textures=True,
         ),
     ),
     OptionPreset(
@@ -62,6 +63,7 @@ OPTION_PRESET_DEFS: tuple[OptionPreset, ...] = (
             write_ase=False,
             write_glb=False,
             write_fbx=False,
+            copy_textures=True,
         ),
     ),
     OptionPreset(
@@ -78,6 +80,7 @@ OPTION_PRESET_DEFS: tuple[OptionPreset, ...] = (
             write_ase=False,
             write_glb=True,
             write_fbx=False,
+            copy_textures=True,
         ),
     ),
     OptionPreset(
@@ -94,6 +97,7 @@ OPTION_PRESET_DEFS: tuple[OptionPreset, ...] = (
             write_ase=True,
             write_glb=True,
             write_fbx=True,
+            copy_textures=True,
         ),
     ),
 )

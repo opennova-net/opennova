@@ -126,14 +126,15 @@ def _run_loose_from_ui(
     write_ase: bool,
     write_3dp: bool,
     write_max: bool = True,
+    copy_textures: bool = True,
 ) -> bool:
     paths = _loose_paths(threedi_path)
     output_root = output_dir.strip()
     if not paths or not output_root:
         _set_status("Loose import requires a .3di path and output root.")
         return False
-    if not write_ase and not write_3dp and not write_max:
-        _set_status("Select ASE, 3DP/3DA, and/or MAX output.")
+    if not write_ase and not write_3dp and not write_max and not copy_textures:
+        _set_status("Select ASE, 3DP/3DA, MAX, and/or Textures output.")
         return False
     invalid = [str(path) for path in paths if path.suffix.casefold() != ".3di"]
     if invalid:
@@ -162,6 +163,7 @@ def _run_loose_from_ui(
             write_ase=bool(write_ase),
             write_3dp=bool(write_3dp),
             write_max=bool(write_max),
+            copy_textures=bool(copy_textures),
             reset_scene=True,
         )
         _set_status(f"Loose import {'complete' if ok else 'produced no geometry'} -> {model_output_dir}")
@@ -181,6 +183,7 @@ def _run_loose_from_ui(
             write_ase=bool(write_ase),
             write_3dp=bool(write_3dp),
             write_max=bool(write_max),
+            copy_textures=bool(copy_textures),
         )
         for path in paths
     ]
@@ -203,6 +206,7 @@ def _run_definition_item(
     write_ase: bool,
     write_3dp: bool,
     write_max: bool = True,
+    copy_textures: bool = True,
 ) -> bool:
     from .import_runner import run_import
 
@@ -212,8 +216,8 @@ def _run_definition_item(
     if not output_root.strip():
         _set_status("Definition import requires an output root.")
         return False
-    if not write_ase and not write_3dp and not write_max:
-        _set_status("Select ASE, 3DP/3DA, and/or MAX output.")
+    if not write_ase and not write_3dp and not write_max and not copy_textures:
+        _set_status("Select ASE, 3DP/3DA, MAX, and/or Textures output.")
         return False
 
     _set_status(f"Importing {item.type} {item.name}...")
@@ -231,6 +235,7 @@ def _run_definition_item(
         write_ase=bool(write_ase),
         write_3dp=bool(write_3dp),
         write_max=bool(write_max),
+        copy_textures=bool(copy_textures),
         reset_scene=True,
     )
     output_name = item.output_stem or item.name

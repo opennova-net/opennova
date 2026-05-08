@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 
 from pyopennova.host_outputs import write_host_neutral_outputs
+from pyopennova.texture_outputs import copy_model_textures
 
 
 def _rt():
@@ -52,10 +53,11 @@ def write_outputs(
     write_ase: bool = True,
     write_3dp: bool = True,
     write_max: bool = True,
+    copy_textures: bool = True,
 ) -> list[str]:
     """Write selected Max outputs and return the paths produced."""
     if ir is None:
-        raise ValueError("write_outputs requires a model IR for shared ASE/3DP writing")
+        raise ValueError("write_outputs requires a model IR")
     os.makedirs(output_dir, exist_ok=True)
     written: list[str] = []
 
@@ -75,6 +77,13 @@ def write_outputs(
 
     if write_max:
         written.append(save_max_scene(output_dir, name))
+
+    if copy_textures:
+        written.extend(copy_model_textures(
+            ir,
+            output_dir,
+            resolver=getattr(builder, "resolver", None),
+        ))
 
     return written
 

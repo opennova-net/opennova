@@ -122,4 +122,4 @@ def _written_files(output_path: str) -> list[str]:
     path = Path(output_path)
     if not path.is_dir():
         return []
-    return sorted(str(child) for child in path.iterdir() if child.is_file())
+    return sorted(str(child) for child in path.rglob("*") if child.is_file())
