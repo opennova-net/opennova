@@ -184,14 +184,33 @@ class IrAseWriter:
         return written
 
     def _write_doc(self, filepath: str, objects: list[dict[str, Any]], lights, *, skinned: bool) -> None:
-        mat_slots = math.ceil(int(self.ir.material_count) / SUBS_PER_SLOT) if int(self.ir.material_count) > 0 else 0
+        # Collect only the IR material indices that this file's objects
+        # actually reference, so OED doesn't see unused materials in per-LOD
+        # ASE outputs. Each LOD's _write_doc call therefore writes a slimmed
+        # Multi/Sub-Object containing only that LOD's materials.
+        material_count = int(self.ir.material_count)
+        used_global_ids: set[int] = set()
+        for spec in objects:
+            for mi in spec.get("material_id_set", []) or []:
+                gi = int(mi)
+                if 0 <= gi < material_count:
+                    used_global_ids.add(gi)
+            for mi in spec.get("face_material_ids", []) or []:
+                gi = int(mi)
+                if 0 <= gi < material_count:
+                    used_global_ids.add(gi)
+        sorted_ids = sorted(used_global_ids)
+        global_to_local = {gid: lid for lid, gid in enumerate(sorted_ids)}
+        local_count = len(sorted_ids)
+        mat_slots = math.ceil(local_count / SUBS_PER_SLOT) if local_count > 0 else 0
+
         doc = ase_ffi.create_document(len(objects), mat_slots, len(lights))
         doc.flags = 1 if skinned else 0
         doc.skinned_flags = 1 if skinned else 0
         try:
-            self._populate_materials(doc)
+            self._populate_materials(doc, sorted_ids)
             for idx, spec in enumerate(objects):
-                self._populate_object(doc.objects[idx], spec)
+                self._populate_object(doc.objects[idx], spec, global_to_local)
             for idx, light in enumerate(lights):
                 self._populate_light(doc.lights[idx], light)
             ase_ffi.write_file(filepath, doc)
@@ -722,28 +741,32 @@ class IrAseWriter:
             })
         return lights
 
-    def _populate_materials(self, doc) -> None:
-        if int(self.ir.material_count) <= 0:
+    def _populate_materials(self, doc, sorted_ids: list[int]) -> None:
+        # `sorted_ids` is the list of global IR material indices this file
+        # references, in stable global-index order. Local slot index = position
+        # in `sorted_ids`. Submaterial parents are sized to the slimmed count.
+        local_count = len(sorted_ids)
+        if local_count <= 0:
             return
         for slot_idx in range(int(doc.material_count)):
             start = slot_idx * SUBS_PER_SLOT
-            end = min(start + SUBS_PER_SLOT, int(self.ir.material_count))
+            end = min(start + SUBS_PER_SLOT, local_count)
             count = end - start
             parent = doc.materials[slot_idx]
             parent.name = f"Scene_Materials_{slot_idx}".encode("utf-8")[:31]
             ase_ffi.alloc_submaterials(parent, count)
-        for i in range(int(self.ir.material_count)):
-            ir_mat = self.ir.materials[i]
+        for local_idx, global_idx in enumerate(sorted_ids):
+            ir_mat = self.ir.materials[global_idx]
             desc = describe_material(
                 ir_mat,
                 source_format=getattr(self.ir, "source_format", None),
             )
-            slot_idx = i // SUBS_PER_SLOT
-            local_idx = i % SUBS_PER_SLOT
-            sub = doc.materials[slot_idx].submaterials[local_idx]
+            slot_idx = local_idx // SUBS_PER_SLOT
+            sub_idx = local_idx % SUBS_PER_SLOT
+            sub = doc.materials[slot_idx].submaterials[sub_idx]
             populate_ase_submaterial(sub, desc, used_tex_names=self._used_tex_names)
 
-    def _populate_object(self, ase_obj, spec: dict[str, Any]) -> None:
+    def _populate_object(self, ase_obj, spec: dict[str, Any], global_to_local: dict[int, int] | None = None) -> None:
         vertices = spec.get("vertices", [])
         faces = spec.get("faces", [])
         uvs = spec.get("uvs", [])
@@ -765,8 +788,14 @@ class IrAseWriter:
 
         mat_ids = spec.get("material_id_set", [])
         face_material_ids = spec.get("face_material_ids", [])
+        # When `global_to_local` is provided, remap face material ids and
+        # `material_ref` from the IR's global material index space into the
+        # per-file slimmed Multi/Sub-Object slot space (so OED doesn't see
+        # references into materials that aren't in this file's doc).
         if mat_ids:
             first = int(mat_ids[0])
+            if global_to_local is not None:
+                first = global_to_local.get(first, 0)
             ase_obj.material_ref = first // SUBS_PER_SLOT
 
         _copy_tm(ase_obj, spec.get("tm", _tm((0.0, 0.0, 0.0))))
@@ -785,7 +814,12 @@ class IrAseWriter:
             face.edge_visibility[1] = 1
             face.edge_visibility[2] = 1
             if i < len(face_material_ids):
-                face.material_id = int(face_material_ids[i]) % SUBS_PER_SLOT
+                global_mi = int(face_material_ids[i])
+                if global_to_local is not None:
+                    local_mi = global_to_local.get(global_mi, 0)
+                else:
+                    local_mi = global_mi
+                face.material_id = local_mi % SUBS_PER_SLOT
             else:
                 face.material_id = 0
             smoothing = spec.get("smoothing_groups", [])

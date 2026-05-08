@@ -311,7 +311,10 @@ def test_ase_writer_describes_gp_materials_with_ir_source_format(monkeypatch):
     )
 
     doc = FakeDoc()
-    writer._populate_materials(doc)
+    # Per-LOD ASE writer slims materials to only those referenced by the
+    # objects being written; pass the single-material sorted_ids that
+    # _write_doc would have computed for this fake IR.
+    writer._populate_materials(doc, [0])
 
     assert calls == [{"source_format": materials.THREEDI_IR_SOURCE_GPM}]
     sub = doc.materials[0].submaterials[0]

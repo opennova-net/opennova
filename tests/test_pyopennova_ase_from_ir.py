@@ -241,3 +241,78 @@ def test_populate_ase_submaterial_round_trips_via_user_props(tmp_path: Path):
     assert direct_sub.shading == rebuilt_sub.shading
     assert (direct_sub.extra_flags & 1) == (rebuilt_sub.extra_flags & 1)
     assert direct_sub.uv_u_tiling[0] == rebuilt_sub.uv_u_tiling[0]
+
+
+def test_lod_ase_files_only_contain_referenced_materials(monkeypatch):
+    """Each per-LOD ASE file should write only the materials that LOD's
+    objects reference. Without this filtering, OED reports unused materials
+    on every per-LOD ASE because the writer dumps the full ir.materials.
+    """
+    from pyopennova import ase_from_ir
+
+    # Build a fake IR with 4 materials. LOD 0 references materials [0, 1],
+    # LOD 1 references materials [2, 3]. Each _write_doc call should slim to
+    # exactly the LOD's segment.
+    class _FakeIR:
+        material_count = 4
+        materials = [
+            _FakeIRMat(shader_name=b"FF_ST_OP"),
+            _FakeIRMat(shader_name=b"FF_ST_OP"),
+            _FakeIRMat(shader_name=b"FF_ST_OP"),
+            _FakeIRMat(shader_name=b"FF_ST_OP"),
+        ]
+        source_format = 2  # GPM
+
+    populate_calls: list[list[int]] = []
+    object_calls: list[dict[int, int]] = []
+
+    def fake_populate_materials(self, doc, sorted_ids):
+        populate_calls.append(list(sorted_ids))
+
+    def fake_populate_object(self, ase_obj, spec, global_to_local=None):
+        object_calls.append(dict(global_to_local) if global_to_local else {})
+
+    monkeypatch.setattr(ase_from_ir.IrAseWriter, "_populate_materials", fake_populate_materials)
+    monkeypatch.setattr(ase_from_ir.IrAseWriter, "_populate_object", fake_populate_object)
+
+    class _FakeMatArr:
+        def __getitem__(self, _i):
+            return SimpleNamespace(name=b"", submaterials=[])
+
+    class _FakeDoc:
+        material_count = 0
+        objects = [SimpleNamespace(face_normals=None, face_normal_count=0)] * 8
+        object_count = 0
+        flags = 0
+        skinned_flags = 0
+        materials = _FakeMatArr()
+
+    monkeypatch.setattr(ase_from_ir.ase_ffi, "create_document", lambda *a, **k: _FakeDoc())
+    monkeypatch.setattr(ase_from_ir.ase_ffi, "write_file", lambda *a, **k: None)
+    monkeypatch.setattr(ase_from_ir.ase_ffi, "free_document", lambda *a, **k: None)
+
+    writer = ase_from_ir.IrAseWriter(
+        _FakeIR(),
+        include_collisions=False,
+        include_occlusion=False,
+        include_lights=False,
+        bad_file=None,
+    )
+
+    lod0_objects = [{
+        "material_id_set": [0, 1],
+        "face_material_ids": [0, 1, 0],
+    }]
+    lod1_objects = [{
+        "material_id_set": [2, 3],
+        "face_material_ids": [2, 3, 3],
+    }]
+
+    writer._write_doc("lod0.ase", lod0_objects, [], skinned=False)
+    writer._write_doc("lod1.ase", lod1_objects, [], skinned=False)
+
+    assert populate_calls[0] == [0, 1], "LOD 0 ASE file gets only materials 0 and 1"
+    assert populate_calls[1] == [2, 3], "LOD 1 ASE file gets only materials 2 and 3"
+    # Per-file global → local mapping is dense and stable.
+    assert object_calls[0] == {0: 0, 1: 1}
+    assert object_calls[1] == {2: 0, 3: 1}, "LOD 1 face material id 2 should remap to local slot 0"

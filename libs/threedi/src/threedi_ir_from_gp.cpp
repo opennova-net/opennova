@@ -714,6 +714,82 @@ static int convert_lights(const ThreediGpFile *gp, ThreediModelIR *ir) {
     return 0;
 }
 
+/* Collapse content-identical IR materials into a single canonical entry.
+ *
+ * After convert_materials concatenates each rmodel's per-LOD materials into
+ * one shared array, a typical NovaLogic asset shows the same material content
+ * repeated once per LOD (rmodels[0..3].materials[i] are often identical for a
+ * given i). The user-facing impact is bloated .3dp/.3da output and OED
+ * complaining about duplicate materials, since OED's stricmp dedup uses
+ * material names that include the IR index (Material_<index>_<shader>).
+ *
+ * Walk the materials in IR order, keep the first occurrence as canonical, and
+ * remap every primitive's material_index across every LOD onto canonical
+ * entries. The dedup key is the full ThreediIRMaterial struct minus three
+ * fields:
+ *   - index: changes by definition during dedup.
+ *   - surface_type / pattrib: assigned only on LOD 0's segment by
+ *     assign_surface_types; LOD 1+ duplicates carry the default 0x01 (Dirt).
+ *     Excluding them lets the LOD 0 canonical's collision data survive.
+ *
+ * Linear-scan O(n^2) is fine; n <= a few hundred for any real asset.
+ */
+static int dedupe_materials_by_content(ThreediModelIR *ir) {
+    if (!ir || ir->material_count == 0) return 0;
+
+    size_t n = ir->material_count;
+    int32_t *remap = (int32_t *)calloc(n, sizeof(int32_t));
+    if (!remap) return -1;
+
+    size_t unique = 0;
+    for (size_t i = 0; i < n; ++i) {
+        ThreediIRMaterial cur = ir->materials[i];
+        cur.index = 0;
+        cur.surface_type = 0;
+        cur.pattrib = 0;
+
+        size_t found = unique;  /* sentinel: not found */
+        for (size_t j = 0; j < unique; ++j) {
+            ThreediIRMaterial canon = ir->materials[j];
+            canon.index = 0;
+            canon.surface_type = 0;
+            canon.pattrib = 0;
+            if (memcmp(&cur, &canon, sizeof(ThreediIRMaterial)) == 0) {
+                found = j;
+                break;
+            }
+        }
+
+        if (found < unique) {
+            remap[i] = (int32_t)found;
+        } else {
+            if (unique != i) ir->materials[unique] = ir->materials[i];
+            ir->materials[unique].index = (int32_t)unique;
+            remap[i] = (int32_t)unique;
+            ++unique;
+        }
+    }
+
+    if (unique != n) {
+        memset(&ir->materials[unique], 0,
+               (n - unique) * sizeof(ThreediIRMaterial));
+        ir->material_count = unique;
+    }
+
+    for (size_t li = 0; li < ir->lod_count; ++li) {
+        ThreediIRLod *lod = &ir->lods[li];
+        for (size_t pi = 0; pi < lod->primitive_count; ++pi) {
+            int32_t old_idx = lod->primitives[pi].material_index;
+            if (old_idx >= 0 && (size_t)old_idx < n) {
+                lod->primitives[pi].material_index = remap[old_idx];
+            }
+        }
+    }
+
+    free(remap);
+    return 0;
+}
+
 int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
     if (!gp || !out) return -1;
 
@@ -763,6 +839,10 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
 
     // Assign collision surface types to materials
     assign_surface_types(gp, out);
+
+    // Collapse content-identical IR materials so .3dp/.3da and per-LOD ASE
+    // outputs don't list the same material once per LOD it appears in.
+    if (dedupe_materials_by_content(out) != 0) goto error;
 
     // Convert userpoints
     if (convert_userpoints(gp, out) != 0) goto error;

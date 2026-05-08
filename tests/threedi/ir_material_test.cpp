@@ -305,11 +305,105 @@ static void test_gp_multi_lod_material_offsets() {
     threedi_ir_free(&ir);
 }
 
+static void test_gp_multi_lod_dedupes_content_identical_materials() {
+    /* When LODs share content-identical materials (typical for NovaLogic
+       assets — every rmodel often defines the same material at the same
+       slot for LOD continuity), the GP converter concatenates them into
+       the IR materials array (one per rmodel) and then dedupes by content
+       so .3dp/.3da and per-LOD .ase outputs reference a single canonical
+       entry per unique material. */
+    ThreediGpFile gp;
+    ThreediGpRModel rmodels[2];
+    ThreediGpMaterial mats0[2];
+    ThreediGpMaterial mats1[2];
+    ThreediGpVariablePoly poly0;
+    ThreediGpVariablePoly poly1;
+    ThreediGpSubObject sub0;
+    ThreediGpSubObject sub1;
+    uint16_t indices0[3] = {0, 1, 2};
+    uint16_t indices1[3] = {0, 1, 2};
+    ThreediGpRVert rverts[3];
+    ThreediModelIR ir;
+
+    std::memset(&gp, 0, sizeof(gp));
+    std::memset(rmodels, 0, sizeof(rmodels));
+    std::memset(mats0, 0, sizeof(mats0));
+    std::memset(mats1, 0, sizeof(mats1));
+    std::memset(&poly0, 0, sizeof(poly0));
+    std::memset(&poly1, 0, sizeof(poly1));
+    std::memset(&sub0, 0, sizeof(sub0));
+    std::memset(&sub1, 0, sizeof(sub1));
+    std::memset(rverts, 0, sizeof(rverts));
+    std::memset(&ir, 0, sizeof(ir));
+
+    copy_name(gp.header.name, sizeof(gp.header.name), "DedupGp");
+    gp.header.mesh_type = THREEDI_GP_MESH_BASIC;
+    gp.rmodel_count = 2;
+    gp.rmodels = rmodels;
+    gp.rverts = rverts;
+    gp.rvert_count = 3;
+
+    /* Both rmodels define the SAME 2 materials at slots [0, 1]. */
+    rmodels[0].material_count = 2;
+    rmodels[0].materials = mats0;
+    rmodels[0].subobject_count = 1;
+    rmodels[0].subobjects = &sub0;
+    rmodels[0].poly_count = 1;
+    rmodels[0].polys = &poly0;
+    copy_name(mats0[0].texture_name, sizeof(mats0[0].texture_name), "MAT_X.tga");
+    mats0[0].render_lookup = 0xFFFFFF;
+    copy_name(mats0[1].texture_name, sizeof(mats0[1].texture_name), "MAT_Y.tga");
+    mats0[1].render_lookup = 0xFFFFFF;
+    poly0.material_index = 0;       /* LOD 0 prim uses MAT_X. */
+    poly0.subobject_index = 0;
+    poly0.first_vertex = 0;
+    poly0.indices = indices0;
+    poly0.index_count = 3;
+    poly0.topology = 0;
+
+    rmodels[1].material_count = 2;
+    rmodels[1].materials = mats1;
+    rmodels[1].subobject_count = 1;
+    rmodels[1].subobjects = &sub1;
+    rmodels[1].poly_count = 1;
+    rmodels[1].polys = &poly1;
+    copy_name(mats1[0].texture_name, sizeof(mats1[0].texture_name), "MAT_X.tga");
+    mats1[0].render_lookup = 0xFFFFFF;
+    copy_name(mats1[1].texture_name, sizeof(mats1[1].texture_name), "MAT_Y.tga");
+    mats1[1].render_lookup = 0xFFFFFF;
+    poly1.material_index = 1;       /* LOD 1 prim uses MAT_Y (rmodel-local). */
+    poly1.subobject_index = 0;
+    poly1.first_vertex = 0;
+    poly1.indices = indices1;
+    poly1.index_count = 3;
+    poly1.topology = 0;
+
+    expect_true("dedup conversion succeeds",
+                threedi_ir_from_gp(&gp, &ir) == 0);
+    /* Pre-dedup the IR would have 4 materials (2 per rmodel). After dedup,
+       it's 2 — MAT_X and MAT_Y. */
+    expect_true("dedup collapses identical materials to 2",
+                ir.material_count == 2);
+    expect_true("canonical 0 is MAT_X",
+                std::strcmp((const char *)ir.materials[0].textures[0].name, "MAT_X.tga") == 0);
+    expect_true("canonical 1 is MAT_Y",
+                std::strcmp((const char *)ir.materials[1].textures[0].name, "MAT_Y.tga") == 0);
+    /* LOD 0 prim referenced MAT_X (offset 0 + local 0 = global 0) → canonical 0. */
+    expect_true("LOD 0 prim 0 remapped to canonical MAT_X",
+                ir.lods[0].primitives[0].material_index == 0);
+    /* LOD 1 prim referenced MAT_Y (offset 2 + local 1 = global 3) → canonical 1. */
+    expect_true("LOD 1 prim 0 remapped to canonical MAT_Y",
+                ir.lods[1].primitives[0].material_index == 1);
+
+    threedi_ir_free(&ir);
+}
+
 int main(void) {
     test_3di3_material_ir_preserves_full_texture_table_and_fields();
     test_gp_detail_material_preserves_phong_shader_and_detail_slot();
     test_3di3_glass_shader_preserves_raw_blend_and_glass_flag();
     test_3di3_ff_st_ab_preserves_raw_blend();
     test_gp_multi_lod_material_offsets();
+    test_gp_multi_lod_dedupes_content_identical_materials();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
