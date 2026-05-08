@@ -267,7 +267,8 @@ static void synthesize_shader_name(const ThreediGpMaterial *sm,
 // Conversion
 // ============================================================================
 
-static int convert_lod(const ThreediGpFile *gp, size_t lod_idx, ThreediIRLod *dst) {
+static int convert_lod(const ThreediGpFile *gp, size_t lod_idx, ThreediIRLod *dst,
+                       size_t mat_offset) {
     if (lod_idx >= gp->rmodel_count) return -1;
     const ThreediGpRModel *rm = &gp->rmodels[lod_idx];
 
@@ -375,7 +376,12 @@ static int convert_lod(const ThreediGpFile *gp, size_t lod_idx, ThreediIRLod *ds
             const ThreediGpVariablePoly *sp = &rm->polys[p];
             ThreediIRPrimitive *dp = &dst->primitives[p];
 
-            dp->material_index = sp->material_index;
+            // Each GP rmodel has its own per-LOD materials array. After
+            // convert_materials concatenates all rmodels' materials into
+            // ir->materials in rmodel-order, primitive material_index must be
+            // offset by the start of this LOD's segment so it indexes into the
+            // right rmodel's contribution.
+            dp->material_index = (int32_t)(sp->material_index + (int64_t)mat_offset);
             dp->part_index = sp->subobject_index;
             dp->vertex_offset = (uint32_t)sp->first_vertex;
 
@@ -438,19 +444,32 @@ static int convert_lod(const ThreediGpFile *gp, size_t lod_idx, ThreediIRLod *ds
 
 static int convert_materials(const ThreediGpFile *gp, ThreediModelIR *ir) {
     if (gp->rmodel_count == 0) return 0;
-    const ThreediGpRModel *rm = &gp->rmodels[0];
 
-    ir->material_count = rm->material_count;
-    if (ir->material_count == 0) return 0;
+    /* Each GP rmodel has its own per-LOD materials array. Concatenate all
+       rmodels' materials into ir->materials in rmodel order; LOD primitives
+       receive a per-LOD material_index offset (see convert_lod) so they index
+       into the correct segment. Without this, LOD 1+ primitives reference
+       indices into LOD 0's materials and bind to the wrong textures. */
 
-    ir->materials = (ThreediIRMaterial *)calloc(ir->material_count, sizeof(ThreediIRMaterial));
+    size_t total = 0;
+    for (size_t li = 0; li < gp->rmodel_count; ++li) {
+        total += gp->rmodels[li].material_count;
+    }
+    ir->material_count = total;
+    if (total == 0) return 0;
+
+    ir->materials = (ThreediIRMaterial *)calloc(total, sizeof(ThreediIRMaterial));
     if (!ir->materials) return -1;
 
-    for (size_t i = 0; i < ir->material_count; ++i) {
-        const ThreediGpMaterial *sm = &rm->materials[i];
-        ThreediIRMaterial *dm = &ir->materials[i];
+    size_t out_idx = 0;
+    for (size_t li = 0; li < gp->rmodel_count; ++li) {
+        const ThreediGpRModel *rm = &gp->rmodels[li];
 
-        dm->index = (int32_t)i;
+    for (size_t i = 0; i < rm->material_count; ++i, ++out_idx) {
+        const ThreediGpMaterial *sm = &rm->materials[i];
+        ThreediIRMaterial *dm = &ir->materials[out_idx];
+
+        dm->index = (int32_t)out_idx;
 
         // Look up texture info from material lookup table via render_lookup index
         // render_lookup is 4 packed byte indices (one per LOD); byte[0] = primary LOD
@@ -515,16 +534,21 @@ static int convert_materials(const ThreediGpFile *gp, ThreediModelIR *ir) {
 
         // Convert GP flags to IR flags
         dm->flags = 0;
+        dm->material_flags = 0;
+        dm->alpha_test_value_byte = 0;
 
         // GP alpha blend -> ALPHA_TEST (engine uses clip-style alpha for GP _AB materials)
         if (dm->blend_mode == THREEDI_IR_BLEND_ALPHA) {
             dm->flags |= THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST;
+            dm->material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
             dm->alpha_threshold = 0.5f;
+            dm->alpha_test_value_byte = 128;
         }
 
         // GP render_attributes 0x2 = two-sided
         if ((sm->render_attributes & 0x2u) != 0) {
             dm->flags |= THREEDI_IR_MATERIAL_FLAG_TWO_SIDED;
+            dm->material_flags |= THREEDI_MATERIAL_FLAG_TWO_SIDED;
         }
 
         // GP emissive_color nonzero = emissive material
@@ -574,6 +598,7 @@ static int convert_materials(const ThreediGpFile *gp, ThreediModelIR *ir) {
         dm->animation.animation_type = 0;
         dm->animation.cycle_frame_time = 0;
     }
+    }  /* end per-rmodel loop */
 
     return 0;
 }
@@ -716,18 +741,24 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
             break;
     }
 
-    // Convert LODs
+    // Convert LODs. Each rmodel has its own material array; we concatenate
+    // them in convert_materials and offset each LOD's primitive material_index
+    // by the start of that LOD's segment.
     out->lod_count = gp->rmodel_count;
     if (out->lod_count > 0) {
         out->lods = (ThreediIRLod *)calloc(out->lod_count, sizeof(ThreediIRLod));
         if (!out->lods) goto error;
 
+        size_t mat_offset = 0;
         for (size_t i = 0; i < out->lod_count; ++i) {
-            if (convert_lod(gp, i, &out->lods[i]) != 0) goto error;
+            if (convert_lod(gp, i, &out->lods[i], mat_offset) != 0) goto error;
+            mat_offset += gp->rmodels[i].material_count;
         }
     }
 
-    // Convert materials (from first LOD)
+    // Convert materials: walks all rmodels and concatenates their per-LOD
+    // material arrays into out->materials (matching the offsets we used
+    // above for primitive material_index).
     if (convert_materials(gp, out) != 0) goto error;
 
     // Assign collision surface types to materials

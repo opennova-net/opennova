@@ -122,7 +122,8 @@ static void test_gp_detail_material_preserves_phong_shader_and_detail_slot() {
 
     copy_name(mat.texture_name, sizeof(mat.texture_name), "Base.tga");
     mat.render_lookup = 0;
-    mat.shader_flags = 2;
+    mat.render_attributes = 0x2;
+    mat.shader_flags = 0x200 | 2;
 
     copy_name(lookups[0].texture_name, sizeof(lookups[0].texture_name), "Base.tga");
     lookups[0].seq_index = 0;
@@ -141,6 +142,165 @@ static void test_gp_detail_material_preserves_phong_shader_and_detail_slot() {
     expect_true("GP diffuse texture preserved", std::strcmp(out->textures[0].name, "Base.tga") == 0);
     expect_true("GP detail texture preserved", std::strcmp(out->textures[1].name, "Detail.tga") == 0);
     expect_true("GP detail texture slot", out->textures[1].slot == THREEDI_IR_TEX_SLOT_DETAIL);
+    expect_true("GP material flags normalized",
+                out->material_flags == (THREEDI_MATERIAL_FLAG_ALPHA_TEST | THREEDI_MATERIAL_FLAG_TWO_SIDED));
+    expect_true("GP alpha test byte normalized", out->alpha_test_value_byte == 128);
+    expect_true("GP detail+phong is not glass", out->is_glass == 0);
+
+    threedi_ir_free(&ir);
+}
+
+static void test_3di3_glass_shader_preserves_raw_blend_and_glass_flag() {
+    /* Glass tags do NOT mutate IR blend_mode or is_glass — DCC consumers
+       (Python descriptor / Max / Blender) promote glass to alpha-blend via
+       the shared shader-tag table. The IR keeps raw source semantics. */
+    Threedi3di3 model;
+    ThreediMaterial mat;
+    ThreediModelIR ir;
+    std::memset(&model, 0, sizeof(model));
+    std::memset(&mat, 0, sizeof(mat));
+    std::memset(&ir, 0, sizeof(ir));
+
+    copy_name(model.header.name, sizeof(model.header.name), "GlassMat");
+    model.header.mesh_type = THREEDI_MESH_BASIC;
+    model.material_count = 1;
+    model.materials = &mat;
+
+    mat.index = 0;
+    copy_name(mat.shader_name, sizeof(mat.shader_name), "FFP_GLASS");
+    mat.material_flags = 0;
+    mat.is_glass = 1;
+
+    expect_true("FFP_GLASS conversion succeeds",
+                threedi_ir_from_3di3(&model, &ir) == 0);
+    expect_true("FFP_GLASS one material", ir.material_count == 1);
+
+    const ThreediIRMaterial *out = &ir.materials[0];
+    expect_true("FFP_GLASS shader name copied",
+                std::strcmp(out->shader_name, "FFP_GLASS") == 0);
+    expect_true("FFP_GLASS is_glass preserved", out->is_glass == 1);
+    expect_true("FFP_GLASS blend_mode stays raw OPAQUE",
+                out->blend_mode == THREEDI_IR_BLEND_OPAQUE);
+
+    threedi_ir_free(&ir);
+}
+
+static void test_3di3_ff_st_ab_preserves_raw_blend() {
+    /* FF_ST_AB has the "_AB" suffix, so blend_mode_from_shader_name detects
+       ALPHA without consulting the table. This locks that path. */
+    Threedi3di3 model;
+    ThreediMaterial mat;
+    ThreediModelIR ir;
+    std::memset(&model, 0, sizeof(model));
+    std::memset(&mat, 0, sizeof(mat));
+    std::memset(&ir, 0, sizeof(ir));
+
+    copy_name(model.header.name, sizeof(model.header.name), "AbMat");
+    model.header.mesh_type = THREEDI_MESH_BASIC;
+    model.material_count = 1;
+    model.materials = &mat;
+
+    mat.index = 0;
+    copy_name(mat.shader_name, sizeof(mat.shader_name), "FF_ST_AB");
+    mat.material_flags = 0;
+
+    expect_true("FF_ST_AB conversion succeeds",
+                threedi_ir_from_3di3(&model, &ir) == 0);
+
+    const ThreediIRMaterial *out = &ir.materials[0];
+    expect_true("FF_ST_AB blend_mode is ALPHA",
+                out->blend_mode == THREEDI_IR_BLEND_ALPHA);
+    expect_true("FF_ST_AB is_glass stays 0", out->is_glass == 0);
+
+    threedi_ir_free(&ir);
+}
+
+static void test_gp_multi_lod_material_offsets() {
+    /* Each GP rmodel has its own per-LOD materials array. The IR concatenates
+       all rmodels' materials in rmodel order; per-LOD primitive material_index
+       gets offset by the start of that LOD's segment so it indexes the right
+       rmodel's contribution. Without this fix, LOD 1+ primitives bind to
+       LOD 0's materials and produce wrong textures. */
+    ThreediGpFile gp;
+    ThreediGpRModel rmodels[2];
+    ThreediGpMaterial mats0[2];
+    ThreediGpMaterial mats1[1];
+    ThreediGpVariablePoly poly0;
+    ThreediGpVariablePoly poly1;
+    ThreediGpSubObject sub0;
+    ThreediGpSubObject sub1;
+    uint16_t indices0[3] = {0, 1, 2};
+    uint16_t indices1[3] = {0, 1, 2};
+    ThreediGpRVert rverts[3];
+    ThreediModelIR ir;
+
+    std::memset(&gp, 0, sizeof(gp));
+    std::memset(rmodels, 0, sizeof(rmodels));
+    std::memset(mats0, 0, sizeof(mats0));
+    std::memset(mats1, 0, sizeof(mats1));
+    std::memset(&poly0, 0, sizeof(poly0));
+    std::memset(&poly1, 0, sizeof(poly1));
+    std::memset(&sub0, 0, sizeof(sub0));
+    std::memset(&sub1, 0, sizeof(sub1));
+    std::memset(rverts, 0, sizeof(rverts));
+    std::memset(&ir, 0, sizeof(ir));
+
+    copy_name(gp.header.name, sizeof(gp.header.name), "MultiLodGp");
+    gp.header.mesh_type = THREEDI_GP_MESH_BASIC;
+    gp.rmodel_count = 2;
+    gp.rmodels = rmodels;
+    gp.rverts = rverts;
+    gp.rvert_count = 3;
+
+    /* LOD 0: 2 materials. */
+    rmodels[0].material_count = 2;
+    rmodels[0].materials = mats0;
+    rmodels[0].subobject_count = 1;
+    rmodels[0].subobjects = &sub0;
+    rmodels[0].poly_count = 1;
+    rmodels[0].polys = &poly0;
+    copy_name(mats0[0].texture_name, sizeof(mats0[0].texture_name), "MAT_A0.tga");
+    mats0[0].render_lookup = 0xFFFFFF;
+    copy_name(mats0[1].texture_name, sizeof(mats0[1].texture_name), "MAT_A1.tga");
+    mats0[1].render_lookup = 0xFFFFFF;
+    poly0.material_index = 1;       /* LOD 0 primitive uses MAT_A1. */
+    poly0.subobject_index = 0;
+    poly0.first_vertex = 0;
+    poly0.indices = indices0;
+    poly0.index_count = 3;
+    poly0.topology = 0;             /* triangle list */
+
+    /* LOD 1: 1 material. */
+    rmodels[1].material_count = 1;
+    rmodels[1].materials = mats1;
+    rmodels[1].subobject_count = 1;
+    rmodels[1].subobjects = &sub1;
+    rmodels[1].poly_count = 1;
+    rmodels[1].polys = &poly1;
+    copy_name(mats1[0].texture_name, sizeof(mats1[0].texture_name), "MAT_B0.tga");
+    mats1[0].render_lookup = 0xFFFFFF;
+    poly1.material_index = 0;       /* LOD 1 primitive uses MAT_B0 (rmodel-local idx 0). */
+    poly1.subobject_index = 0;
+    poly1.first_vertex = 0;
+    poly1.indices = indices1;
+    poly1.index_count = 3;
+    poly1.topology = 0;
+
+    expect_true("multi-LOD GP conversion succeeds",
+                threedi_ir_from_gp(&gp, &ir) == 0);
+    expect_true("multi-LOD material count is sum of rmodels",
+                ir.material_count == 3);
+    expect_true("LOD 0 material 0 -> MAT_A0",
+                std::strcmp((const char *)ir.materials[0].textures[0].name, "MAT_A0.tga") == 0);
+    expect_true("LOD 0 material 1 -> MAT_A1",
+                std::strcmp((const char *)ir.materials[1].textures[0].name, "MAT_A1.tga") == 0);
+    expect_true("LOD 1 material at offset -> MAT_B0",
+                std::strcmp((const char *)ir.materials[2].textures[0].name, "MAT_B0.tga") == 0);
+    /* Primitive material indices should reflect the per-LOD offset. */
+    expect_true("LOD 0 prim 0 material_index unchanged (offset 0)",
+                ir.lods[0].primitives[0].material_index == 1);
+    expect_true("LOD 1 prim 0 material_index offset by LOD 0 size",
+                ir.lods[1].primitives[0].material_index == 2);
 
     threedi_ir_free(&ir);
 }
@@ -148,5 +308,8 @@ static void test_gp_detail_material_preserves_phong_shader_and_detail_slot() {
 int main(void) {
     test_3di3_material_ir_preserves_full_texture_table_and_fields();
     test_gp_detail_material_preserves_phong_shader_and_detail_slot();
+    test_3di3_glass_shader_preserves_raw_blend_and_glass_flag();
+    test_3di3_ff_st_ab_preserves_raw_blend();
+    test_gp_multi_lod_material_offsets();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -25,10 +25,120 @@ THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT = 0x02
 THREEDI_IR_MATERIAL_FLAG_TWO_SIDED = 0x04
 THREEDI_IR_MATERIAL_FLAG_EMISSIVE = 0x08
 
+# The 3DI3 MTRL flag byte uses the same low bits as the normalized IR flags.
+THREEDI_MATERIAL_FLAG_ALPHA_TEST = THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST
+THREEDI_MATERIAL_FLAG_ALPHA_INVERT = THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT
+THREEDI_MATERIAL_FLAG_TWO_SIDED = THREEDI_IR_MATERIAL_FLAG_TWO_SIDED
+THREEDI_EMISSIVE_FULL = 2
+
+MATERIAL_BLEND_OPAQUE = "opaque"
+MATERIAL_BLEND_ALPHA = "alpha_blend"
+MATERIAL_BLEND_ADDITIVE = "additive"
+MATERIAL_BLEND_MULTIPLICATIVE = "multiplicative"
+
+MATERIAL_SHADER_UNKNOWN = "unknown"
+MATERIAL_SHADER_FIXED_FUNCTION = "fixed_function"
+MATERIAL_SHADER_PHONG = "phong"
+MATERIAL_SHADER_FLAG = "flag"
+MATERIAL_SHADER_DOT3 = "dot3"
+MATERIAL_SHADER_ENVIRONMENT = "environment"
+MATERIAL_SHADER_GLASS = "glass"
+
+MATERIAL_NORMAL_NONE = "none"
+MATERIAL_NORMAL_TANGENT = "tangent"
+MATERIAL_NORMAL_OBJECT = "object"
+
+_MAT_FLAG_EMISSIVE = 0x0001
+_MAT_FLAG_ALPHA = 0x0002
+_MAT_FLAG_DIFFUSE = 0x0004
+_MAT_FLAG_SECONDARY = 0x0008
+_MAT_FLAG_NORMAL_A = 0x0010
+_MAT_FLAG_NORMAL_B = 0x0020
+_MAT_FLAG_SPECIAL = 0x1000
+_MAT_FLAG_GLASS = 0x2000
+_MAT_FLAG_FILTER = 0x4000
+_MAT_FLAG_SMOOTH = 0x8000
+_MAT_FLAG_UI_TOGGLE = 0x10000
+_MAT_FLAG_LUMINANCE = 0x10000000
+
+_MATERIAL_INFO_FLAGS = {
+    "FF_ST_OP": _MAT_FLAG_DIFFUSE,
+    "FF_ST_OP#UV": _MAT_FLAG_DIFFUSE | _MAT_FLAG_UI_TOGGLE,
+    "FF_ST_AB": _MAT_FLAG_ALPHA | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SPECIAL,
+    "FF_ST_AB#UV": _MAT_FLAG_ALPHA | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SPECIAL | _MAT_FLAG_UI_TOGGLE,
+    "FF_ST_AD": _MAT_FLAG_DIFFUSE | _MAT_FLAG_SPECIAL,
+    "FF_ST_AD#UV": _MAT_FLAG_DIFFUSE | _MAT_FLAG_SPECIAL | _MAT_FLAG_UI_TOGGLE,
+    "FF_ST_OP_LUM": _MAT_FLAG_LUMINANCE | _MAT_FLAG_EMISSIVE | _MAT_FLAG_DIFFUSE,
+    "FF_ST_OP_LUM#UV": _MAT_FLAG_LUMINANCE | _MAT_FLAG_EMISSIVE | _MAT_FLAG_DIFFUSE | _MAT_FLAG_UI_TOGGLE,
+    "FF_ST_AB_LUM": _MAT_FLAG_LUMINANCE | _MAT_FLAG_ALPHA | _MAT_FLAG_EMISSIVE | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SPECIAL,
+    "FF_ST_AB_LUM#UV": _MAT_FLAG_LUMINANCE | _MAT_FLAG_ALPHA | _MAT_FLAG_EMISSIVE | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SPECIAL | _MAT_FLAG_UI_TOGGLE,
+    "FF_ST_AD_LUM": _MAT_FLAG_LUMINANCE | _MAT_FLAG_EMISSIVE | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SPECIAL,
+    "FF_ST_AD_LUM#UV": _MAT_FLAG_LUMINANCE | _MAT_FLAG_EMISSIVE | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SPECIAL | _MAT_FLAG_UI_TOGGLE,
+    "FF_MT_OP": _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY,
+    "FF_MT_OP#UV": _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY | _MAT_FLAG_UI_TOGGLE,
+    "FF_MT_AB": _MAT_FLAG_ALPHA | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY | _MAT_FLAG_SPECIAL,
+    "FF_MT_AB#UV": _MAT_FLAG_ALPHA | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY | _MAT_FLAG_SPECIAL | _MAT_FLAG_UI_TOGGLE,
+    "FF_MT_AD": _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY | _MAT_FLAG_SPECIAL,
+    "FF_MT_AD#UV": _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY | _MAT_FLAG_SPECIAL | _MAT_FLAG_UI_TOGGLE,
+    "FF_MT_OP_LUM": _MAT_FLAG_LUMINANCE | _MAT_FLAG_EMISSIVE | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY,
+    "FF_MT_OP_LUM#UV": _MAT_FLAG_LUMINANCE | _MAT_FLAG_EMISSIVE | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY | _MAT_FLAG_UI_TOGGLE,
+    "FF_MT_AB_LUM": _MAT_FLAG_LUMINANCE | _MAT_FLAG_ALPHA | _MAT_FLAG_EMISSIVE | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY | _MAT_FLAG_SPECIAL,
+    "FF_MT_AB_LUM#UV": _MAT_FLAG_LUMINANCE | _MAT_FLAG_ALPHA | _MAT_FLAG_EMISSIVE | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY | _MAT_FLAG_SPECIAL | _MAT_FLAG_UI_TOGGLE,
+    "FF_MT_AD_LUM": _MAT_FLAG_LUMINANCE | _MAT_FLAG_EMISSIVE | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY | _MAT_FLAG_SPECIAL,
+    "FF_MT_AD_LUM#UV": _MAT_FLAG_LUMINANCE | _MAT_FLAG_EMISSIVE | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY | _MAT_FLAG_SPECIAL | _MAT_FLAG_UI_TOGGLE,
+    "FFP_GLASS": _MAT_FLAG_GLASS | _MAT_FLAG_SMOOTH | _MAT_FLAG_SPECIAL,
+    "VS_DOT3DIFFOBJ": _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_PHONGO": _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_DOT3DIFF": _MAT_FLAG_SMOOTH | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_DOT3DIFF#UV": _MAT_FLAG_SMOOTH | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE | _MAT_FLAG_UI_TOGGLE,
+    "VS_PHONGT": _MAT_FLAG_SMOOTH | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_PHONGT#UV": _MAT_FLAG_SMOOTH | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE | _MAT_FLAG_UI_TOGGLE,
+    "VS_PHONGT_MDT": _MAT_FLAG_SMOOTH | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_DOT3DIFF2": _MAT_FLAG_SMOOTH | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY,
+    "VS_BMTXMIRRT": _MAT_FLAG_GLASS | _MAT_FLAG_SMOOTH | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_BUMPMIRRT": _MAT_FLAG_GLASS | _MAT_FLAG_SMOOTH | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_ENVPHONGT": _MAT_FLAG_GLASS | _MAT_FLAG_SMOOTH | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_SKBASIC": _MAT_FLAG_FILTER | _MAT_FLAG_DIFFUSE,
+    "VS_SKBASIC#UV": _MAT_FLAG_FILTER | _MAT_FLAG_DIFFUSE | _MAT_FLAG_UI_TOGGLE,
+    "VS_SKGLASS": _MAT_FLAG_GLASS | _MAT_FLAG_FILTER | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SPECIAL,
+    "VS_SKBUMPDIFFOBJ": _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_SKBUMPPHONGOBJ": _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_SKBUMPDIFFOBJ2": _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY,
+    "VS_SKBUMPDIFFT": _MAT_FLAG_GLASS | _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_SKBUMPPHONGT": _MAT_FLAG_GLASS | _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_SKBUMPDIFFT2": _MAT_FLAG_GLASS | _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY,
+    "VS_FLAG": _MAT_FLAG_DIFFUSE,
+}
+
 NORMAL_TYPE_MDT = 4
 NORMAL_TYPE_TGA_ALPHA = 5
 
 MAX_TEX_FILENAME = 15
+
+
+@dataclass(frozen=True)
+class MaterialShaderSemantics:
+    """Static shader-tag classification shared by DCC material builders."""
+
+    known_shader: bool = False
+    shader: str = ""
+    resolved_shader: str = ""
+    family: str = MATERIAL_SHADER_UNKNOWN
+    blend: str = MATERIAL_BLEND_OPAQUE
+    is_emissive: bool = False
+    is_luminance: bool = False
+    is_two_sided: bool = False
+    needs_normal_map: bool = False
+    is_glass: bool = False
+    uses_environment: bool = False
+    alpha_test: bool = False
+    alpha_test_invert: bool = False
+    alpha_test_value: float = 0.0
+    has_detail: bool = False
+    is_skinned: bool = False
+    uses_specular: bool = False
+    normal_uses_uv2: bool = False
+    normal_space: str = MATERIAL_NORMAL_NONE
 
 
 @dataclass(frozen=True)
@@ -78,6 +188,71 @@ class TexAnimDescriptor:
     cycle_frame_time: int = 0
 
 
+def classify_material_shader(
+    shader_name: str,
+    material_flags: int = 0,
+    emissive_type: int = 0,
+    is_glass: int | bool = 0,
+    alpha_test_value_byte: int = 0,
+) -> MaterialShaderSemantics:
+    """Classify a 3DI shader tag without parsing effect files."""
+
+    shader = _normalize_shader(shader_name)
+    flags = int(material_flags) & 0xFF
+    alpha_byte = max(0, min(int(alpha_test_value_byte), 255))
+    alpha_test = bool(flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST)
+    alpha_invert = bool(flags & THREEDI_MATERIAL_FLAG_ALPHA_INVERT)
+
+    resolved = shader
+    if resolved == "VS_LEAVESWIND":
+        resolved = "FF_ST_OP" if alpha_test else "FF_ST_AB"
+
+    info_flags = _MATERIAL_INFO_FLAGS.get(resolved, 0)
+    family = _shader_family_from_tag(resolved)
+    blend = _blend_from_tag(resolved, info_flags)
+    is_glass_semantic = (
+        bool(info_flags & _MAT_FLAG_GLASS)
+        or bool(is_glass)
+        or family == MATERIAL_SHADER_GLASS
+    )
+    if is_glass_semantic and blend == MATERIAL_BLEND_OPAQUE:
+        blend = MATERIAL_BLEND_ALPHA
+    if family == MATERIAL_SHADER_UNKNOWN and "WIND" in resolved:
+        family = MATERIAL_SHADER_FLAG
+
+    needs_normal = bool(info_flags & (_MAT_FLAG_NORMAL_A | _MAT_FLAG_NORMAL_B))
+    normal_space = _normal_space_for_tag(resolved, needs_normal)
+
+    return MaterialShaderSemantics(
+        known_shader=info_flags != 0,
+        shader=shader,
+        resolved_shader=resolved,
+        family=family,
+        blend=blend,
+        is_emissive=(
+            emissive_type == THREEDI_EMISSIVE_FULL
+            or bool(info_flags & _MAT_FLAG_EMISSIVE)
+        ),
+        is_luminance=bool(info_flags & _MAT_FLAG_LUMINANCE),
+        is_two_sided=bool(flags & THREEDI_MATERIAL_FLAG_TWO_SIDED),
+        needs_normal_map=needs_normal,
+        is_glass=is_glass_semantic,
+        uses_environment=family in (MATERIAL_SHADER_ENVIRONMENT, MATERIAL_SHADER_GLASS),
+        alpha_test=alpha_test,
+        alpha_test_invert=alpha_invert,
+        alpha_test_value=float(alpha_byte) / 255.0,
+        has_detail=bool(info_flags & _MAT_FLAG_SECONDARY),
+        is_skinned=resolved.startswith("VS_SK"),
+        uses_specular=family in (
+            MATERIAL_SHADER_PHONG,
+            MATERIAL_SHADER_ENVIRONMENT,
+            MATERIAL_SHADER_GLASS,
+        ),
+        normal_uses_uv2=bool(info_flags & _MAT_FLAG_NORMAL_B),
+        normal_space=normal_space,
+    )
+
+
 @dataclass(frozen=True)
 class MaterialDescriptor:
     index: int
@@ -91,9 +266,11 @@ class MaterialDescriptor:
     unknown_textures: Tuple[TextureDescriptor, ...] = ()
     flags: int = 0
     material_flags: int = 0
+    source_material_flags: int = 0
     alpha_test_value_byte: int = 0
     alpha_threshold: float = 0.0
     blend_mode: int = 0
+    renderer_blend: str = MATERIAL_BLEND_OPAQUE
     alpha_test: bool = False
     alpha_inverted: bool = False
     two_sided: bool = False
@@ -119,6 +296,17 @@ class MaterialDescriptor:
     bump_uses_alpha: bool = False
     phong_shader: bool = False
     bump_shader: bool = False
+    known_shader: bool = False
+    shader_family: str = MATERIAL_SHADER_UNKNOWN
+    resolved_shader: str = ""
+    needs_normal_map: bool = False
+    normal_space: str = MATERIAL_NORMAL_NONE
+    normal_uses_uv2: bool = False
+    has_detail_slot: bool = False
+    uses_specular: bool = False
+    uses_environment: bool = False
+    is_luminance: bool = False
+    is_skinned: bool = False
     u_params: GeneratorDescriptor = field(default_factory=GeneratorDescriptor)
     v_params: GeneratorDescriptor = field(default_factory=GeneratorDescriptor)
     alpha_gen: GeneratorDescriptor = field(default_factory=GeneratorDescriptor)
@@ -150,26 +338,38 @@ def describe_material(
     )
     unknown_textures = tuple(tex for tex in all_textures if tex.role == "unknown")
 
+    emissive_type = _int_attr(ir_mat, "emissive_type", 0)
+    emissive_type2 = _int_attr(ir_mat, "emissive_type2", 0)
+    is_glass_flag = _int_attr(ir_mat, "is_glass", 0)
+    source_material_flags = _int_attr(ir_mat, "material_flags", 0) & 0xFF
+    material_flags = source_material_flags | _material_flags_from_ir_flags(flags)
+    alpha_threshold = _float_attr(ir_mat, "alpha_threshold", 0.0)
+    alpha_test_value_byte = _effective_alpha_test_byte(ir_mat, alpha_threshold)
+    semantics = classify_material_shader(
+        shader,
+        material_flags=material_flags,
+        emissive_type=emissive_type,
+        is_glass=is_glass_flag,
+        alpha_test_value_byte=alpha_test_value_byte,
+    )
+
     specular_intensity = _int_attr(ir_mat, "specular_intensity", 0)
     specular_strength = min(float(specular_intensity) / 255.0, 1.0) if specular_intensity > 0 else 0.0
-    phong_shader = any(s in shader for s in ("PHONGT", "PHONGO", "BUMPPHONG", "ENVPHONG"))
-    bump_shader = any(s in shader for s in ("DOT3", "PHONGT", "BUMP"))
+    phong_shader = semantics.family in (
+        MATERIAL_SHADER_PHONG,
+        MATERIAL_SHADER_ENVIRONMENT,
+        MATERIAL_SHADER_GLASS,
+    )
+    bump_shader = semantics.needs_normal_map
+    descriptor_needs_normal = semantics.needs_normal_map or bool(normal.name or secondary_normal.name)
     viewport_specular = specular_strength
     viewport_roughness = 1.0 - specular_strength * 0.7 if specular_strength > 0.0 else 1.0
-    if phong_shader and viewport_specular <= 0.0:
+    if semantics.uses_specular and viewport_specular <= 0.0:
         viewport_specular = 0.3
         viewport_roughness = 0.5
 
     luminosity = _int_attr(ir_mat, "luminosity", 0)
     luminosity_strength = min(float(luminosity) / 255.0, 1.0) if luminosity > 0 else 0.0
-    emissive_type = _int_attr(ir_mat, "emissive_type", 0)
-    emissive_type2 = _int_attr(ir_mat, "emissive_type2", 0)
-    material_flags = _int_attr(ir_mat, "material_flags", flags & 0xFF)
-    alpha_test_value_byte = _int_attr(
-        ir_mat,
-        "alpha_test_value_byte",
-        int(round(max(0.0, min(_float_attr(ir_mat, "alpha_threshold", 0.0), 1.0)) * 255.0)),
-    )
     u_tiling = _float_attr(ir_mat, "u_tiling", 0.0)
     v_tiling = _float_attr(ir_mat, "v_tiling", 0.0)
     effective_u_tiling = 1.0 if u_tiling == 0.0 else u_tiling
@@ -185,9 +385,12 @@ def describe_material(
     if bump_texture.name and bump_texture.path and bump_texture.type != NORMAL_TYPE_MDT:
         bump_mode = "normal_texture"
         bump_uses_alpha = bump_texture.type == NORMAL_TYPE_TGA_ALPHA
-    elif bump_shader and diffuse.name and diffuse.path:
-        bump_mode = "diffuse_alpha"
-        bump_uses_alpha = True
+    # Phong/DOT3 shaders without a slot-3 texture stay flat-shaded. The previous
+    # diffuse-alpha fallback (height from diffuse alpha, mimicking gsys_phong)
+    # produced visible shading distortion on most assets because most VS_PHONGT
+    # textures don't actually encode height in alpha — they use it for opacity
+    # or leave it unused. Without a per-material flag in the IR to gate this,
+    # the safe default is no bump. A future revival could be opt-in.
 
     return MaterialDescriptor(
         index=index,
@@ -201,16 +404,24 @@ def describe_material(
         unknown_textures=unknown_textures,
         flags=flags,
         material_flags=material_flags,
+        source_material_flags=source_material_flags,
         alpha_test_value_byte=alpha_test_value_byte,
-        alpha_threshold=_float_attr(ir_mat, "alpha_threshold", 0.0),
+        alpha_threshold=alpha_threshold,
         blend_mode=_int_attr(ir_mat, "blend_mode", 0),
-        alpha_test=bool(flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST),
-        alpha_inverted=bool(flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT),
-        two_sided=bool(flags & THREEDI_IR_MATERIAL_FLAG_TWO_SIDED),
-        emissive=bool(flags & THREEDI_IR_MATERIAL_FLAG_EMISSIVE) or emissive_type != 0 or emissive_type2 != 0,
+        renderer_blend=semantics.blend,
+        alpha_test=semantics.alpha_test,
+        alpha_inverted=semantics.alpha_test_invert,
+        two_sided=semantics.is_two_sided,
+        emissive=(
+            bool(flags & THREEDI_IR_MATERIAL_FLAG_EMISSIVE)
+            or emissive_type != 0
+            or emissive_type2 != 0
+            or semantics.is_emissive
+            or semantics.is_luminance
+        ),
         emissive_type=emissive_type,
         emissive_type2=emissive_type2,
-        glass=bool(_int_attr(ir_mat, "is_glass", 0)),
+        glass=semantics.is_glass,
         glass_type2=_int_attr(ir_mat, "glass_type2", 0),
         reflect_color=_float4_attr(ir_mat, "reflect_color"),
         reflect_color2=_float4_attr(ir_mat, "reflect_color2"),
@@ -229,6 +440,17 @@ def describe_material(
         bump_uses_alpha=bump_uses_alpha,
         phong_shader=phong_shader,
         bump_shader=bump_shader,
+        known_shader=semantics.known_shader,
+        shader_family=semantics.family,
+        resolved_shader=semantics.resolved_shader,
+        needs_normal_map=descriptor_needs_normal,
+        normal_space=semantics.normal_space if descriptor_needs_normal else MATERIAL_NORMAL_NONE,
+        normal_uses_uv2=semantics.normal_uses_uv2,
+        has_detail_slot=semantics.has_detail or bool(detail.name),
+        uses_specular=semantics.uses_specular,
+        uses_environment=semantics.uses_environment,
+        is_luminance=semantics.is_luminance,
+        is_skinned=semantics.is_skinned,
         u_params=_uv_params(_attr(ir_mat, "u_params", None), ctrl_resolver),
         v_params=_uv_params(_attr(ir_mat, "v_params", None), ctrl_resolver),
         alpha_gen=_alpha_gen(_attr(ir_mat, "alpha_gen", None), ctrl_resolver),
@@ -255,6 +477,196 @@ def describe_materials(ir, resolver=None, ctrl_resolver=None) -> List[MaterialDe
     return out
 
 
+def descriptor_from_user_props(
+    props: Dict[str, Any],
+    *,
+    resolver=None,
+) -> MaterialDescriptor:
+    """Rebuild a MaterialDescriptor from a host-stored user-props dict.
+
+    Used by hosts that round-trip materials through a DCC scene (e.g. the
+    Blender ASE exporter, which reads the props ``BlenderSceneBuilder`` stored
+    via ``material_user_props`` during import). Fields the host did not store
+    fall back to defaults; ``classify_material_shader`` derives the semantic
+    signals from the shader tag.
+    """
+
+    def g(key: str, default: Any = None) -> Any:
+        return props.get(key, default)
+
+    def gi(key: str, default: int = 0) -> int:
+        try:
+            return int(g(key, default))
+        except (TypeError, ValueError):
+            return int(default)
+
+    def gf(key: str, default: float = 0.0) -> float:
+        try:
+            return float(g(key, default))
+        except (TypeError, ValueError):
+            return float(default)
+
+    def gs(key: str, default: str = "") -> str:
+        value = g(key, default)
+        return str(value) if value is not None else default
+
+    def gb(key: str, default: bool = False) -> bool:
+        return bool(g(key, default))
+
+    def texture(role: str) -> TextureDescriptor:
+        name = gs("opennova_%s_texture_name" % role)
+        path = gs("opennova_%s_texture_path" % role) or None
+        if path is not None and resolver is not None and not os.path.isfile(path):
+            try:
+                resolved = resolver.resolve_texture(name) if name else None
+            except Exception:
+                resolved = None
+            if resolved and os.path.isfile(str(resolved)):
+                path = str(resolved)
+        type_key = "opennova_%s_type" % role if role != "diffuse" else None
+        tex_type = gi(type_key, 0) if type_key else 0
+        return TextureDescriptor(
+            role=role,
+            name=name,
+            path=path,
+            type=tex_type,
+        )
+
+    diffuse = texture("diffuse")
+    detail = texture("detail")
+    normal = texture("normal")
+    secondary_normal = texture("secondary_normal")
+
+    # Indexed texture array (opennova_texture_NN_*).
+    indexed: Dict[int, Dict[str, Any]] = {}
+    prefix = "opennova_texture_"
+    for key in props:
+        if not key.startswith(prefix):
+            continue
+        rest = key[len(prefix):]
+        idx_str, _, field = rest.partition("_")
+        if not idx_str.isdigit() or not field:
+            continue
+        indexed.setdefault(int(idx_str), {})[field] = props[key]
+    textures: List[TextureDescriptor] = []
+    for idx in sorted(indexed):
+        entry = indexed[idx]
+        textures.append(
+            TextureDescriptor(
+                role=str(entry.get("role", "unknown")),
+                name=str(entry.get("name", "")),
+                path=str(entry.get("path", "")) or None,
+                texture_index=idx,
+                slot=int(entry.get("slot", 0) or 0),
+                type=int(entry.get("type", 0) or 0),
+                flags=int(entry.get("flags", 0) or 0),
+                frame=int(entry.get("frame", 0) or 0),
+            )
+        )
+
+    shader = gs("opennova_shader") or "FF_ST_OP"
+    index = gi("opennova_material_index", 0)
+    name = gs("ase_material_name") or "Material_%d_%s" % (index, shader)
+
+    material_flags = gi("opennova_material_flags", 0)
+    source_material_flags = gi("opennova_material_flags_raw", material_flags & 0xFF)
+    alpha_test_byte = gi("opennova_alpha_test_byte", 0)
+    alpha_threshold = gf("alpha_threshold", float(alpha_test_byte) / 255.0)
+
+    semantics = classify_material_shader(
+        shader,
+        material_flags=material_flags,
+        emissive_type=gi("emissive_type", 0),
+        is_glass=int(bool(g("reflect_color"))),
+        alpha_test_value_byte=alpha_test_byte,
+    )
+
+    renderer_blend = gs("opennova_renderer_blend") or semantics.blend
+    blend_mode = gi("blend_mode", 0)
+    bump_mode = gs("opennova_bump_mode")
+    bump_uses_alpha = gb("opennova_bump_uses_alpha", False)
+    has_custom_tiling = "uv_u_tiling" in props or "uv_v_tiling" in props
+    u_tiling = gf("uv_u_tiling", 0.0)
+    v_tiling = gf("uv_v_tiling", 0.0)
+    effective_u_tiling = u_tiling if u_tiling > 0.0 else 1.0
+    effective_v_tiling = v_tiling if v_tiling > 0.0 else 1.0
+
+    reflect = g("reflect_color")
+    reflect_color = (
+        tuple(float(v) for v in reflect)
+        if reflect and hasattr(reflect, "__iter__")
+        else (0.0, 0.0, 0.0, 0.0)
+    )
+    if len(reflect_color) < 4:
+        reflect_color = tuple(list(reflect_color) + [0.0] * (4 - len(reflect_color)))[:4]
+
+    reflect2 = g("reflect_color2")
+    reflect_color2 = (
+        tuple(float(v) for v in reflect2)
+        if reflect2 and hasattr(reflect2, "__iter__")
+        else (0.0, 0.0, 0.0, 0.0)
+    )
+    if len(reflect_color2) < 4:
+        reflect_color2 = tuple(list(reflect_color2) + [0.0] * (4 - len(reflect_color2)))[:4]
+
+    return MaterialDescriptor(
+        index=index,
+        shader=shader,
+        name=name,
+        diffuse=diffuse,
+        detail=detail,
+        normal=normal,
+        secondary_normal=secondary_normal,
+        textures=tuple(textures),
+        unknown_textures=tuple(t for t in textures if t.role == "unknown"),
+        flags=gi("opennova_material_flags", 0),
+        material_flags=material_flags,
+        source_material_flags=source_material_flags,
+        alpha_test_value_byte=alpha_test_byte,
+        alpha_threshold=alpha_threshold,
+        blend_mode=blend_mode,
+        renderer_blend=renderer_blend,
+        alpha_test=gb("opennova_alpha_test", semantics.alpha_test),
+        alpha_inverted=gb("opennova_alpha_inverted", semantics.alpha_test_invert),
+        two_sided=semantics.is_two_sided,
+        emissive=gi("emissive_type", 0) != 0
+        or gi("emissive_type2", 0) != 0
+        or semantics.is_emissive
+        or semantics.is_luminance,
+        emissive_type=gi("emissive_type", 0),
+        emissive_type2=gi("emissive_type2", 0),
+        glass=semantics.is_glass or bool(reflect),
+        glass_type2=gi("glass_type2", 0),
+        reflect_color=reflect_color,
+        reflect_color2=reflect_color2,
+        luminosity_strength=gf("luminosity_strength", 0.0),
+        u_tiling=u_tiling,
+        v_tiling=v_tiling,
+        effective_u_tiling=effective_u_tiling,
+        effective_v_tiling=effective_v_tiling,
+        has_custom_tiling=has_custom_tiling,
+        bump_mode=bump_mode,
+        bump_uses_alpha=bump_uses_alpha,
+        phong_shader=semantics.family in (
+            MATERIAL_SHADER_PHONG,
+            MATERIAL_SHADER_ENVIRONMENT,
+            MATERIAL_SHADER_GLASS,
+        ),
+        bump_shader=semantics.needs_normal_map,
+        known_shader=semantics.known_shader,
+        shader_family=semantics.family,
+        resolved_shader=semantics.resolved_shader,
+        needs_normal_map=semantics.needs_normal_map,
+        normal_space=semantics.normal_space,
+        normal_uses_uv2=semantics.normal_uses_uv2,
+        has_detail_slot=semantics.has_detail or bool(detail.name),
+        uses_specular=semantics.uses_specular,
+        uses_environment=semantics.uses_environment,
+        is_luminance=semantics.is_luminance,
+        is_skinned=semantics.is_skinned,
+    )
+
+
 def material_user_props(desc: MaterialDescriptor) -> Dict[str, Any]:
     """Return common custom/export properties for host material objects."""
 
@@ -262,10 +674,23 @@ def material_user_props(desc: MaterialDescriptor) -> Dict[str, Any]:
         "ase_material_name": desc.name,
         "opennova_material_index": desc.index,
         "opennova_shader": desc.shader,
+        "opennova_resolved_shader": desc.resolved_shader,
+        "opennova_known_shader": int(desc.known_shader),
+        "opennova_shader_family": desc.shader_family,
+        "opennova_renderer_blend": desc.renderer_blend,
         "blend_mode": desc.blend_mode,
         "opennova_texture_count": len(desc.textures),
-        "opennova_material_flags_raw": desc.material_flags,
+        "opennova_material_flags_raw": desc.source_material_flags,
+        "opennova_material_flags": desc.material_flags,
         "opennova_alpha_test_byte": desc.alpha_test_value_byte,
+        "opennova_needs_normal_map": int(desc.needs_normal_map),
+        "opennova_normal_space": desc.normal_space,
+        "opennova_normal_uses_uv2": int(desc.normal_uses_uv2),
+        "opennova_has_detail_slot": int(desc.has_detail_slot),
+        "opennova_uses_specular": int(desc.uses_specular),
+        "opennova_uses_environment": int(desc.uses_environment),
+        "opennova_is_luminance": int(desc.is_luminance),
+        "opennova_is_skinned": int(desc.is_skinned),
     }
     _texture_props(props, "diffuse", desc.diffuse, "ase_diffuse_bitmap")
     _texture_props(props, "detail", desc.detail, "ase_detail_bitmap")
@@ -413,6 +838,69 @@ def ase_texture_names(desc: MaterialDescriptor, used_names: Dict[str, str]) -> T
     )
 
 
+def _effective_alpha_test_byte(ir_mat, alpha_threshold: float) -> int:
+    threshold_byte = int(round(max(0.0, min(alpha_threshold, 1.0)) * 255.0))
+    raw_byte = _int_attr(ir_mat, "alpha_test_value_byte", -1)
+    if raw_byte <= 0 and threshold_byte > 0:
+        return threshold_byte
+    return max(0, min(raw_byte, 255))
+
+
+def _material_flags_from_ir_flags(flags: int) -> int:
+    out = 0
+    if flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST:
+        out |= THREEDI_MATERIAL_FLAG_ALPHA_TEST
+    if flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT:
+        out |= THREEDI_MATERIAL_FLAG_ALPHA_INVERT
+    if flags & THREEDI_IR_MATERIAL_FLAG_TWO_SIDED:
+        out |= THREEDI_MATERIAL_FLAG_TWO_SIDED
+    return out
+
+
+def _normalize_shader(shader_name: str) -> str:
+    return (_decode(shader_name).strip() or "FF_ST_OP").upper()
+
+
+def _shader_family_from_tag(tag: str) -> str:
+    if not tag:
+        return MATERIAL_SHADER_UNKNOWN
+    if tag == "FFP_GLASS":
+        return MATERIAL_SHADER_GLASS
+    if tag == "VS_FLAG" or "FLAG" in tag:
+        return MATERIAL_SHADER_FLAG
+    if tag in ("VS_BMTXMIRRT", "VS_BUMPMIRRT"):
+        return MATERIAL_SHADER_GLASS
+    if tag == "VS_ENVPHONGT":
+        return MATERIAL_SHADER_ENVIRONMENT
+    if "PHONG" in tag:
+        return MATERIAL_SHADER_PHONG
+    if "DOT3" in tag or "BUMPDIFF" in tag:
+        return MATERIAL_SHADER_DOT3
+    if tag == "VS_SKGLASS":
+        return MATERIAL_SHADER_GLASS
+    if tag in ("VS_SKBASIC", "VS_SKBASIC#UV"):
+        return MATERIAL_SHADER_FIXED_FUNCTION
+    if tag.startswith("FF_"):
+        return MATERIAL_SHADER_FIXED_FUNCTION
+    return MATERIAL_SHADER_UNKNOWN
+
+
+def _blend_from_tag(tag: str, info_flags: int) -> str:
+    if "_AD" in tag:
+        return MATERIAL_BLEND_ADDITIVE
+    if "_AB" in tag:
+        return MATERIAL_BLEND_ALPHA
+    if info_flags & _MAT_FLAG_ALPHA:
+        return MATERIAL_BLEND_ALPHA
+    return MATERIAL_BLEND_OPAQUE
+
+
+def _normal_space_for_tag(tag: str, has_normal_map: bool) -> str:
+    if not has_normal_map:
+        return MATERIAL_NORMAL_NONE
+    return MATERIAL_NORMAL_OBJECT if "OBJ" in tag else MATERIAL_NORMAL_TANGENT
+
+
 def _texture_descriptors(
     shader: str,
     ir_mat,
@@ -506,8 +994,10 @@ def _texture_role(
 
 
 def _shader_supports_detail(shader: str) -> bool:
+    semantics = classify_material_shader(shader)
     return (
-        shader.startswith("FF_MT")
+        semantics.has_detail
+        or shader.startswith("FF_MT")
         or shader.startswith("FF_DT")
         or shader.endswith("2")
         or "DIFF2" in shader
@@ -520,7 +1010,10 @@ def _is_gp_source(source_format: int | None) -> bool:
 
 
 def _shader_supports_bump(shader: str) -> bool:
-    return any(token in shader for token in ("DOT3", "PHONGT", "BUMP"))
+    semantics = classify_material_shader(shader)
+    return semantics.needs_normal_map or any(
+        token in shader for token in ("DOT3", "PHONGT_MDT", "BUMP")
+    )
 
 
 def _texture_props(props: Dict[str, Any], role: str, tex: TextureDescriptor, ase_prop: str) -> None:

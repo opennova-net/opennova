@@ -1071,7 +1071,14 @@ def test_max_material_keeps_primary_diffuse_map_for_detail_materials(tmp_path: P
     assert mat.user_props["opennova_detail_map_mode"] == "metadata_only"
 
 
-def test_max_material_keeps_diffuse_alpha_bump_metadata_only(tmp_path: Path):
+def test_max_phongt_no_slot3_no_bump(tmp_path: Path):
+    """VS_PHONGT with no slot-3 texture imports flat-shaded.
+
+    The previous diffuse-alpha bump fabrication produced visibly distorted
+    shading on materials whose DDS alpha was opacity / unused rather than
+    height. Until we have a per-material flag indicating that the alpha
+    channel actually contains height data, no bump is wired.
+    """
     from opennova_max import materials
 
     diffuse = tmp_path / "Roof.dds"
@@ -1130,11 +1137,227 @@ def test_max_material_keeps_diffuse_alpha_bump_metadata_only(tmp_path: Path):
         mat = materials.create_material(FakeMaterialIR(), resolver=FakeResolver())
 
     assert mat.diffuseMap.filename == str(diffuse)
-    assert not hasattr(mat, "bumpMap")
-    assert runtime.bitmap_paths == [str(diffuse)]
-    assert mat.user_props["opennova_bump_mode"] == "diffuse_alpha"
-    assert mat.user_props["opennova_has_normal_map"] == 0
-    assert mat.user_props["opennova_bump_map_mode"] == "metadata_only"
+    assert not hasattr(mat, "bumpMap"), "no bumpMap for VS_PHONGT diffuse-only"
+    assert mat.user_props.get("opennova_bump_map_mode") != "diffuse_alpha"
+    assert mat.user_props.get("opennova_has_normal_map", 0) == 0
+
+
+def test_max_material_applies_static_renderer_alpha_blend():
+    from opennova_max import materials
+
+    class FakeMaterialIR:
+        index = 2
+        shader_name = b"FF_ST_AB"
+        flags = 0
+        blend_mode = 0
+        luminosity = 0
+        texture_count = 0
+        textures = []
+
+    class FakeRuntime:
+        def StandardMaterial(self, name: str = ""):
+            mat = type("FakeStandardMaterial", (), {})()
+            mat.name = name
+            mat.user_props = {}
+            return mat
+
+        def color(self, r: int, g: int, b: int):
+            return (r, g, b)
+
+        def setUserProp(self, obj, key: str, value):
+            obj.user_props[key] = value
+
+    with patch("opennova_max.materials._rt", return_value=FakeRuntime()):
+        mat = materials.create_material(FakeMaterialIR())
+
+    assert mat.opacity == 70.0
+    assert mat.user_props["opennova_renderer_blend"] == "alpha_blend"
+
+
+def test_max_dot3_normal_uses_normal_slot_not_bump(tmp_path: Path):
+    """VS_DOT3DIFF with a non-MDT, non-TGA-alpha slot-3 texture wires the
+    tangent-space normal map into ``mat.normalMap`` (Max's dedicated slot),
+    not ``mat.bumpMap``."""
+    from opennova_max import materials
+
+    diffuse = tmp_path / "Tank.dds"
+    normal = tmp_path / "TankN.dds"
+    diffuse.write_bytes(b"DDS")
+    normal.write_bytes(b"DDS")
+
+    class FakeTextureDiffuse:
+        slot = materials.THREEDI_IR_TEX_SLOT_DIFFUSE
+        name = b"Tank.tga"
+        type = 0  # diffuse-color, not normal type
+
+    class FakeTextureNormal:
+        slot = materials.THREEDI_IR_TEX_SLOT_NORMAL
+        name = b"TankN.tga"
+        type = 0  # tangent-space normal (NOT MDT, NOT TGA-alpha)
+
+    class FakeMaterialIR:
+        index = 4
+        shader_name = b"VS_DOT3DIFF"
+        flags = 0
+        blend_mode = 0
+        luminosity = 0
+        texture_count = 2
+        textures = [FakeTextureDiffuse(), FakeTextureNormal()]
+
+    class FakeResolver:
+        def resolve_texture(self, name: str, **_kwargs) -> str | None:
+            mapping = {"tank.tga": str(diffuse), "tankn.tga": str(normal)}
+            return mapping.get(name.lower())
+
+    class FakeBitmap:
+        def __init__(self, filename: str = ""):
+            self.filename = filename
+            self.name = ""
+
+    class FakeRuntime:
+        def StandardMaterial(self, name: str = ""):
+            mat = type("FakeStandardMaterial", (), {})()
+            mat.name = name
+            mat.user_props = {}
+            return mat
+
+        def BitmapTexture(self, filename: str = ""):
+            return FakeBitmap(filename)
+
+        def color(self, r: int, g: int, b: int):
+            return (r, g, b)
+
+        def setUserProp(self, obj, key: str, value):
+            obj.user_props[key] = value
+
+        def showTextureMap(self, mat, bitmap, enabled: bool):
+            mat.texture_shown = (bitmap, enabled)
+
+    with patch("opennova_max.materials._rt", return_value=FakeRuntime()):
+        mat = materials.create_material(FakeMaterialIR(), resolver=FakeResolver())
+
+    assert hasattr(mat, "normalMap"), "DOT3 normal goes to mat.normalMap"
+    assert mat.normalMap.filename == str(normal)
+    assert getattr(mat, "normalMapEnable", None) is True
+    assert not hasattr(mat, "bumpMap"), "Tangent-space DOT3 should not touch bumpMap"
+    assert mat.user_props["opennova_bump_map_mode"] == "normal_dot3"
+    assert mat.user_props["opennova_has_normal_map"] == 1
+
+
+def test_max_alpha_test_honors_inverted_threshold():
+    """ALPHA_INVERT bit flips the alpha-test threshold (mirrors gsys clip-inv)."""
+    from opennova_max import materials
+    from pyopennova.materials import (
+        THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT,
+        THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST,
+        THREEDI_MATERIAL_FLAG_ALPHA_INVERT,
+        THREEDI_MATERIAL_FLAG_ALPHA_TEST,
+    )
+
+    class FakeMaterialIR:
+        index = 0
+        shader_name = b"FF_ST_AB"
+        flags = THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST | THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT
+        material_flags = THREEDI_MATERIAL_FLAG_ALPHA_TEST | THREEDI_MATERIAL_FLAG_ALPHA_INVERT
+        alpha_test_value_byte = 64
+        alpha_threshold = 64.0 / 255.0
+        blend_mode = 0
+        luminosity = 0
+        texture_count = 0
+        textures = []
+
+    class FakeRuntime:
+        def StandardMaterial(self, name: str = ""):
+            mat = type("FakeStandardMaterial", (), {})()
+            mat.name = name
+            mat.user_props = {}
+            return mat
+
+        def color(self, r: int, g: int, b: int):
+            return (r, g, b)
+
+        def setUserProp(self, obj, key: str, value):
+            obj.user_props[key] = value
+
+    with patch("opennova_max.materials._rt", return_value=FakeRuntime()):
+        mat = materials.create_material(FakeMaterialIR())
+
+    expected_threshold = 1.0 - 64.0 / 255.0
+    assert mat.opacity == pytest.approx(expected_threshold * 100.0, abs=0.01)
+    assert mat.opacityType == 2
+    assert mat.user_props["opennova_alpha_inverted"] == 1
+    assert mat.user_props["opennova_alpha_test"] == 1
+
+
+def test_max_detail_metadata_only(tmp_path: Path):
+    """FF_MT_OP with diffuse + detail keeps the plain diffuse Bitmap visible
+    and records the detail texture as user-prop metadata. A real CompositeMap
+    that multiplies detail over diffuse needs in-Max smoke testing before it
+    can be re-introduced."""
+    from opennova_max import materials
+
+    diffuse = tmp_path / "Wall.dds"
+    detail = tmp_path / "Detail.dds"
+    diffuse.write_bytes(b"DDS")
+    detail.write_bytes(b"DDS")
+
+    class FakeTextureDiffuse:
+        slot = materials.THREEDI_IR_TEX_SLOT_DIFFUSE
+        name = b"Wall.tga"
+        type = 0
+
+    class FakeTextureDetail:
+        slot = materials.THREEDI_IR_TEX_SLOT_DETAIL
+        name = b"Detail.tga"
+        type = 0
+
+    class FakeMaterialIR:
+        index = 1
+        shader_name = b"FF_MT_OP"
+        flags = 0
+        blend_mode = 0
+        luminosity = 0
+        texture_count = 2
+        textures = [FakeTextureDiffuse(), FakeTextureDetail()]
+
+    class FakeResolver:
+        def resolve_texture(self, name: str, **_kwargs) -> str | None:
+            mapping = {"wall.tga": str(diffuse), "detail.tga": str(detail)}
+            return mapping.get(name.lower())
+
+    class FakeBitmap:
+        def __init__(self, filename: str = ""):
+            self.filename = filename
+            self.name = ""
+
+    class FakeRuntime:
+        def StandardMaterial(self, name: str = ""):
+            mat = type("FakeStandardMaterial", (), {})()
+            mat.name = name
+            mat.user_props = {}
+            return mat
+
+        def BitmapTexture(self, filename: str = ""):
+            return FakeBitmap(filename)
+
+        def color(self, r: int, g: int, b: int):
+            return (r, g, b)
+
+        def setUserProp(self, obj, key: str, value):
+            obj.user_props[key] = value
+
+        def showTextureMap(self, mat, bitmap, enabled: bool):
+            mat.texture_shown = (bitmap, enabled)
+
+    with patch("opennova_max.materials._rt", return_value=FakeRuntime()):
+        mat = materials.create_material(FakeMaterialIR(), resolver=FakeResolver())
+
+    # Plain diffuse Bitmap stays in mat.diffuseMap so the viewport renders the
+    # diffuse layer. Detail is recorded as user-prop metadata only.
+    assert mat.diffuseMap.filename == str(diffuse)
+    assert mat.user_props["opennova_has_detail_map"] == 1
+    assert mat.user_props["opennova_detail_map_mode"] == "metadata_only"
+    assert mat.user_props["opennova_detail_texture_path"] == str(detail)
 
 
 def test_max_texture_map_assignment_falls_back_to_indexed_slots():

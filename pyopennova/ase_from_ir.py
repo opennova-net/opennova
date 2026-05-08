@@ -27,6 +27,97 @@ SUBS_PER_SLOT = 64
 MAX_TEX_FILENAME = 15
 
 
+# ---------------------------------------------------------------------------
+# Shared submaterial population
+# ---------------------------------------------------------------------------
+#
+# The IR ASE writer (`IrAseWriter._populate_materials`) and the Blender ASE
+# exporter both write the same ASE submaterial fields. This top-level helper
+# is the single place where IR/descriptor signals map onto the C ASE FFI
+# struct. Keeping it module-level ensures any future change to ASE field
+# semantics happens in one spot.
+#
+# AseMaterial fields available on the FFI side (see pyopennova/ase_ffi.py):
+#   maps[0]      — MAP_DIFFUSE bitmap name (or first layer of RGB-multiply
+#                  composite when maps[1] is also set)
+#   maps[1]      — second layer of RGB-multiply composite (detail texture)
+#   maps[2]      — MAP_OPACITY bitmap name (alpha test / clip)
+#   maps[3]      — reserved for future MAP_BUMP support; the C writer at
+#                  libs/ase/src/ase_writer.cpp does not emit it yet.
+#   extra_flags  — bit 0 = MATERIAL_TWOSIDED
+#   ambient/diffuse/specular[3], shine, shine_strength, transparency
+#   shading      — 0 Blinn, 1 Phong, 2 Metal, 3 Constant
+#   uv_u/v_offset[2], uv_u/v_tiling[2]
+#
+# Note: MATERIAL_SELFILLUM and MAP_BUMP are hardcoded / absent in the C ASE
+# writer today. Carrying selfillum and bump intent through to the ASE on disk
+# requires extending libs/ase (out of scope for this alignment pass). We still
+# capture the descriptor's intent in user-facing Max/Blender materials via
+# `opennova_max/materials.py` and `apps/importer/scene_builder.py` directly.
+
+
+def populate_ase_submaterial(sub, desc, *, used_tex_names: dict[str, str]) -> None:
+    """Write a single MaterialDescriptor into an allocated ASE submaterial.
+
+    Both the IR-side ASE writer and the Blender ASE exporter call this so that
+    the rules for translating descriptor signals into ASE submaterial bytes
+    live in exactly one place.
+
+    The caller is responsible for allocating ``sub`` (e.g. via
+    ``ase_ffi.alloc_submaterials``) and for mapping the IR/Blender material
+    index onto a slot via ``SUBS_PER_SLOT``. ``used_tex_names`` is the
+    legacy 15-character filename dedup map shared across the writer.
+    """
+    sub.name = desc.name.encode("utf-8")[:31]
+
+    diffuse, detail = ase_texture_names(desc, used_tex_names)
+    if diffuse:
+        sub.maps[0].value = diffuse.encode("utf-8")[:31]
+    if detail:
+        sub.maps[1].value = detail.encode("utf-8")[:31]
+
+    if desc.alpha_test and diffuse:
+        # MAP_OPACITY reuses the diffuse bitmap; the alpha channel acts as
+        # the cutoff mask, matching the engine's clip-style alpha test.
+        sub.maps[2].value = diffuse.encode("utf-8")[:31]
+
+    # UV tiling — descriptor exposes effective tiling that defaults to 1.0
+    # when the source format had no explicit value.
+    sub.uv_u_tiling[0] = float(desc.effective_u_tiling)
+    sub.uv_v_tiling[0] = float(desc.effective_v_tiling)
+    sub.uv_u_tiling[1] = float(desc.effective_u_tiling)
+    sub.uv_v_tiling[1] = float(desc.effective_v_tiling)
+
+    # Default Max-ish material colors. Glass tags push their reflect color
+    # into ambient so a downstream OED → 3DI compile can recover the channel.
+    if desc.glass and any(desc.reflect_color[:3]):
+        sub.ambient[0] = float(desc.reflect_color[0])
+        sub.ambient[1] = float(desc.reflect_color[1])
+        sub.ambient[2] = float(desc.reflect_color[2])
+    else:
+        sub.ambient[0] = sub.ambient[1] = sub.ambient[2] = 0.0588
+
+    sub.diffuse[0] = sub.diffuse[1] = sub.diffuse[2] = 0.5882
+    sub.specular[0] = sub.specular[1] = sub.specular[2] = 0.9
+    sub.shine = 0.1
+    sub.shine_strength = 0.0
+    sub.transparency = 0.0
+    sub.wiresize = 1.0
+
+    # MATERIAL_TWOSIDED: extra_flags bit 0. Drive from the descriptor's
+    # post-classification two_sided rather than the raw IR flag byte so the
+    # Blender path (which reconstructs descriptors from user props) agrees.
+    if desc.two_sided:
+        sub.extra_flags |= 1
+
+    # Phong shading mode for shaders that ran through gsys_phong / lit
+    # techniques in the original engine; everything else is Blinn.
+    if desc.phong_shader or desc.shader_family in ("phong", "environment", "glass"):
+        sub.shading = 1
+    else:
+        sub.shading = 0
+
+
 def write_ase_from_ir(
     ir,
     filepath: str,
@@ -643,34 +734,14 @@ class IrAseWriter:
             ase_ffi.alloc_submaterials(parent, count)
         for i in range(int(self.ir.material_count)):
             ir_mat = self.ir.materials[i]
-            desc = describe_material(ir_mat)
+            desc = describe_material(
+                ir_mat,
+                source_format=getattr(self.ir, "source_format", None),
+            )
             slot_idx = i // SUBS_PER_SLOT
             local_idx = i % SUBS_PER_SLOT
             sub = doc.materials[slot_idx].submaterials[local_idx]
-            shader = desc.shader
-            sub.name = desc.name.encode("utf-8")[:31]
-            diffuse, detail = ase_texture_names(desc, self._used_tex_names)
-            if diffuse:
-                sub.maps[0].value = diffuse.encode("utf-8")[:31]
-            if detail:
-                sub.maps[1].value = detail.encode("utf-8")[:31]
-            sub.uv_u_tiling[0] = 1.0
-            sub.uv_v_tiling[0] = 1.0
-            sub.uv_u_tiling[1] = 1.0
-            sub.uv_v_tiling[1] = 1.0
-            sub.diffuse[0] = sub.diffuse[1] = sub.diffuse[2] = 0.5882
-            sub.ambient[0] = sub.ambient[1] = sub.ambient[2] = 0.0588
-            sub.specular[0] = sub.specular[1] = sub.specular[2] = 0.9
-            sub.shine = 0.1
-            sub.shine_strength = 0.0
-            sub.transparency = 0.0
-            sub.wiresize = 1.0
-            if int(ir_mat.flags) & 0x04:
-                sub.extra_flags |= 1
-            if any(s in shader for s in ("PHONGT", "PHONGO", "BUMPPHONG", "ENVPHONG")):
-                sub.shading = 1
-            else:
-                sub.shading = 0
+            populate_ase_submaterial(sub, desc, used_tex_names=self._used_tex_names)
 
     def _populate_object(self, ase_obj, spec: dict[str, Any]) -> None:
         vertices = spec.get("vertices", [])

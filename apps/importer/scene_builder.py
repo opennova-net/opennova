@@ -1617,52 +1617,35 @@ class BlenderSceneBuilder:
                 except Exception as e:
                     print(f"Failed to load texture {tex_path}: {e}")
 
-        # Blend mode (overrides CLIP for true alpha-blend materials)
-        if desc.blend_mode == 1:  # ALPHA
+        # Blend mode (overrides CLIP for true alpha-blend materials).
+        # Drive from desc.renderer_blend so glass tags (FFP_GLASS, VS_BMTXMIRRT,
+        # etc.) and FF_*_AB shaders end up on the same path. Numeric blend_mode
+        # is a fallback only.
+        renderer_blend = desc.renderer_blend
+        is_alpha = renderer_blend == "alpha_blend" or desc.blend_mode == 1
+        is_additive = renderer_blend == "additive" or desc.blend_mode == 2
+        if is_alpha:
             mat.blend_method = "BLEND"
             mat.show_transparent_back = False
             if tex_node:
                 mat.node_tree.links.new(tex_node.outputs["Alpha"], bsdf.inputs["Alpha"])
-        elif desc.blend_mode == 2:  # ADDITIVE
+        elif is_additive:
             mat.blend_method = "BLEND"
             if "Emission Strength" in bsdf.inputs:
                 bsdf.inputs["Emission Strength"].default_value = 1.0
             if tex_node and "Emission Color" in bsdf.inputs:
                 mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Emission Color"])
 
-        # Detail/lightmap texture (slot 2): create MixRGB Multiply node.
-        # This gives visual representation in Blender (diffuse * detail) and
-        # an exportable node structure (exporter detects MixRGB Multiply → 2 textures).
-        detail_bitmap = desc.detail.name
-        if detail_bitmap and tex_node:
-            detail_path = desc.detail.path
-            if detail_path:
-                try:
-                    detail_tex = mat.node_tree.nodes.new("ShaderNodeTexImage")
-                    detail_tex.name = f"Detail_{detail_bitmap}"
-                    existing = bpy.data.images.get(os.path.basename(detail_path))
-                    if existing:
-                        detail_tex.image = existing
-                    else:
-                        detail_tex.image = bpy.data.images.load(detail_path)
-
-                    # Create MixRGB Multiply node: diffuse * detail → Base Color
-                    mix_node = mat.node_tree.nodes.new("ShaderNodeMixRGB")
-                    mix_node.blend_type = 'MULTIPLY'
-                    mix_node.inputs["Fac"].default_value = 1.0
-                    # Disconnect current diffuse → Base Color link
-                    for link in list(mat.node_tree.links):
-                        if (link.to_socket == bsdf.inputs["Base Color"]
-                                and link.from_node == tex_node):
-                            mat.node_tree.links.remove(link)
-                            break
-                    # Wire: diffuse → Color1, detail → Color2, Mix → Base Color
-                    mat.node_tree.links.new(tex_node.outputs["Color"], mix_node.inputs["Color1"])
-                    mat.node_tree.links.new(detail_tex.outputs["Color"], mix_node.inputs["Color2"])
-                    mat.node_tree.links.new(mix_node.outputs["Color"], bsdf.inputs["Base Color"])
-                    print(f"[TEX] mat={desc.index} detail={detail_bitmap!r} -> MixRGB Multiply")
-                except Exception as e:
-                    print(f"Failed to load detail texture {detail_path}: {e}")
+        # Detail/lightmap texture (slot 2): record metadata only. The diffuse
+        # Color → Base Color link stays so the viewport keeps showing the
+        # diffuse texture. A future revision will compose the detail layer via
+        # ShaderNodeMix (the modern A/B/Result API) once it is smoke-tested
+        # against Blender 5.x with real DDS textures and the right blend mode
+        # for FF_MT_* slot-1 overlays is verified.
+        if desc.detail.name:
+            mat["opennova_detail_texture_path"] = desc.detail.path or ""
+            mat["opennova_has_detail_map"] = 1 if desc.detail.path else 0
+            mat["opennova_detail_map_mode"] = "metadata_only"
 
         # Wire bump/normal map (slot 3)
         # NovaLogic's engine uses height-based bump mapping, NOT tangent-space
@@ -1675,7 +1658,8 @@ class BlenderSceneBuilder:
         normal_bitmap = normal_desc.name
         normal_type = normal_desc.type
         bump_wired = False
-        if normal_bitmap and normal_type != 4:  # Skip MDT — Blender can't load
+        from pyopennova.materials import NORMAL_TYPE_MDT, NORMAL_TYPE_TGA_ALPHA
+        if normal_bitmap and normal_type != NORMAL_TYPE_MDT:  # Skip MDT — Blender can't load
             tex_path = normal_desc.path
             if tex_path:
                 try:
@@ -1688,7 +1672,7 @@ class BlenderSceneBuilder:
                         normal_tex.image = bpy.data.images.load(tex_path)
                     normal_tex.image.colorspace_settings.name = "Non-Color"
                     bump_node = mat.node_tree.nodes.new("ShaderNodeBump")
-                    if normal_type == 5:
+                    if normal_type == NORMAL_TYPE_TGA_ALPHA:
                         # NORMAL_TGA: height data is in the alpha channel
                         mat.node_tree.links.new(normal_tex.outputs["Alpha"], bump_node.inputs["Height"])
                     else:
@@ -1698,13 +1682,11 @@ class BlenderSceneBuilder:
                 except Exception as e:
                     print(f"Failed to load bump map {tex_path}: {e}")
 
-        # Fallback: for bump shaders with no separate bump texture,
-        # the diffuse texture's alpha channel IS the height map.
-        # Shader types 1-6 (DOT3, PHONGT, BUMP) all use diffuse alpha as bump.
-        if not bump_wired and tex_node and desc.bump_shader:
-            bump_node = mat.node_tree.nodes.new("ShaderNodeBump")
-            mat.node_tree.links.new(tex_node.outputs["Alpha"], bump_node.inputs["Height"])
-            mat.node_tree.links.new(bump_node.outputs["Normal"], bsdf.inputs["Normal"])
+        # No fabricated bump from the diffuse alpha. Phong/DOT3 materials with
+        # no slot-3 texture import flat-shaded; the original engine's
+        # height-from-alpha gsys_phong path can be revived later behind an
+        # opt-in once we have a per-material flag indicating that the alpha
+        # channel actually contains height data.
 
         # Handle EMISSIVE flag / emissive_type
         if desc.emissive:

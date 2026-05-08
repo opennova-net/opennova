@@ -6,7 +6,10 @@ import os
 from typing import Any
 
 from pyopennova.materials import (
+    MATERIAL_BLEND_ADDITIVE,
+    MATERIAL_BLEND_ALPHA,
     NORMAL_TYPE_MDT,
+    NORMAL_TYPE_TGA_ALPHA,
     THREEDI_IR_TEX_SLOT_DETAIL,
     THREEDI_IR_TEX_SLOT_DIFFUSE,
     THREEDI_IR_TEX_SLOT_NORMAL,
@@ -43,7 +46,16 @@ def create_material(mat_ir, resolver=None, ctrl_resolver=None, source_format=Non
     _try_set(mat, "diffuse", fallback_color)
     _try_set(mat, "diffuseColor", fallback_color)
     _try_set(mat, "showInViewport", True)
-    _try_set(mat, "twoSided", desc.two_sided)
+    # Default to two-sided rendering. Many NovaLogic models (e.g. MWHERHS1) are
+    # authored with both inner and outer surfaces — for a tent-roof building, ~60
+    # outer slope tris with up-facing normals and ~72 inner slope tris with
+    # down-facing normals occupy roughly the same height range. Max's default
+    # back-face culling hides one half per camera angle, giving the user
+    # textured-from-below / black-from-above. Blender renders both because its
+    # `use_backface_culling` defaults to False. Mirror that behaviour here so
+    # both DCCs agree. desc.two_sided still controls whether the user sees the
+    # `opennova_two_sided` user prop.
+    _try_set(mat, "twoSided", True)
     _try_set(mat, "specularLevel", desc.viewport_specular * 100.0)
     _try_set(mat, "glossiness", max(0.0, min(1.0, 1.0 - desc.viewport_roughness)) * 100.0)
 
@@ -53,79 +65,148 @@ def create_material(mat_ir, resolver=None, ctrl_resolver=None, source_format=Non
     for key, value in material_user_props(desc).items():
         _set_user_prop(rt, mat, key, _prop_to_max_value(value))
 
-    if desc.diffuse.path is not None:
-        bm = _create_bitmap_texture(rt, f"{desc.name}_diffuse", desc.diffuse.path, desc)
-        assigned = _assign_texture_map(rt, mat, "diffuseMap", "diffuseMapEnable", 2, bm)
-        _set_user_prop(rt, mat, "opennova_has_diffuse_map", 1)
-        _set_user_prop(rt, mat, "opennova_diffuse_bitmap_assigned", 1 if assigned else 0)
-        _set_user_prop(rt, mat, "opennova_diffuse_bitmap_filename", _bitmap_filename(bm))
-        try:
-            rt.showTextureMap(mat, bm, True)
-        except Exception:
-            pass
-    elif desc.diffuse.name:
-        _set_user_prop(rt, mat, "opennova_has_diffuse_map", 0)
-        _set_user_prop(rt, mat, "opennova_diffuse_bitmap_assigned", 0)
+    diffuse_assigned = _wire_diffuse(rt, mat, desc)
 
-    if desc.alpha_test:
-        _try_set(mat, "opacity", 100.0)
-        _try_set(mat, "opacityType", 2)
-        _set_user_prop(rt, mat, "opennova_alpha_test", 1)
-        _set_user_prop(rt, mat, "opennova_alpha_threshold", desc.alpha_threshold)
-        if desc.diffuse.path is not None:
-            try:
-                op = _create_bitmap_texture(rt, f"{desc.name}_opacity", desc.diffuse.path, desc)
-                _assign_texture_map(rt, mat, "opacityMap", "opacityMapEnable", 7, op)
-                _set_user_prop(rt, mat, "opennova_has_opacity_map", 1)
-            except Exception:
-                _set_user_prop(rt, mat, "opennova_has_opacity_map", 0)
-                pass
-        else:
-            _set_user_prop(rt, mat, "opennova_has_opacity_map", 0)
+    _wire_alpha_test(rt, mat, desc)
 
-    if desc.blend_mode in (1, 2):
-        _try_set(mat, "opacity", 70.0 if desc.blend_mode == 1 else 100.0)
-    if desc.blend_mode == 2 or desc.emissive:
+    # Alpha-test materials use the precise threshold from the IR; renderer_blend
+    # opacity defaults (70 / 100) only apply when alpha-test isn't already set.
+    is_alpha_blend = desc.blend_mode == 1 or desc.renderer_blend == MATERIAL_BLEND_ALPHA
+    is_additive = desc.blend_mode == 2 or desc.renderer_blend == MATERIAL_BLEND_ADDITIVE
+    if is_alpha_blend or is_additive:
+        _set_user_prop(rt, mat, "opennova_renderer_blend", desc.renderer_blend)
+        if not desc.alpha_test:
+            _try_set(mat, "opacity", 70.0 if is_alpha_blend else 100.0)
+    if is_additive or desc.emissive:
         _try_set(mat, "selfIllumAmount", 100.0)
     if desc.luminosity_strength > 0.0:
         _try_set(mat, "selfIllumAmount", desc.luminosity_strength * 100.0)
 
-    if desc.detail.name:
-        _set_user_prop(rt, mat, "opennova_detail_texture_path", desc.detail.path or "")
-        if desc.detail.path is not None:
-            _set_user_prop(rt, mat, "opennova_has_detail_map", 1)
-            _set_user_prop(rt, mat, "opennova_detail_map_mode", "metadata_only")
-        else:
-            _set_user_prop(rt, mat, "opennova_has_detail_map", 0)
+    _wire_detail(rt, mat, desc)
+    _wire_normal_metadata(rt, mat, desc)
+    _wire_bump(rt, mat, desc)
 
+    return mat
+
+
+def _wire_diffuse(rt, mat, desc) -> bool:
+    """Wire the diffuse map slot. Returns True when a bitmap was assigned."""
+    if desc.diffuse.path is None:
+        if desc.diffuse.name:
+            _set_user_prop(rt, mat, "opennova_has_diffuse_map", 0)
+            _set_user_prop(rt, mat, "opennova_diffuse_bitmap_assigned", 0)
+        return False
+    bm = _create_bitmap_texture(rt, f"{desc.name}_diffuse", desc.diffuse.path, desc)
+    assigned = _assign_texture_map(rt, mat, "diffuseMap", "diffuseMapEnable", 2, bm)
+    _set_user_prop(rt, mat, "opennova_has_diffuse_map", 1)
+    _set_user_prop(rt, mat, "opennova_diffuse_bitmap_assigned", 1 if assigned else 0)
+    _set_user_prop(rt, mat, "opennova_diffuse_bitmap_filename", _bitmap_filename(bm))
+    try:
+        rt.showTextureMap(mat, bm, True)
+    except Exception:
+        pass
+    return True
+
+
+def _wire_alpha_test(rt, mat, desc) -> None:
+    """Drive opacity from desc.alpha_threshold + desc.alpha_inverted."""
+    if not desc.alpha_test:
+        return
+    threshold = desc.alpha_threshold if not desc.alpha_inverted else (1.0 - desc.alpha_threshold)
+    threshold = max(0.0, min(threshold, 1.0))
+    _try_set(mat, "opacity", threshold * 100.0)
+    _try_set(mat, "opacityType", 2)  # 2 = Cutoff (clip-style)
+    _set_user_prop(rt, mat, "opennova_alpha_test", 1)
+    _set_user_prop(rt, mat, "opennova_alpha_threshold", desc.alpha_threshold)
+    _set_user_prop(rt, mat, "opennova_alpha_inverted", 1 if desc.alpha_inverted else 0)
+    if desc.diffuse.path is not None:
+        try:
+            op = _create_bitmap_texture(rt, f"{desc.name}_opacity", desc.diffuse.path, desc)
+            _assign_texture_map(rt, mat, "opacityMap", "opacityMapEnable", 7, op)
+            _set_user_prop(rt, mat, "opennova_has_opacity_map", 1)
+        except Exception:
+            _set_user_prop(rt, mat, "opennova_has_opacity_map", 0)
+    else:
+        _set_user_prop(rt, mat, "opennova_has_opacity_map", 0)
+
+
+def _wire_detail(rt, mat, desc) -> None:
+    """Record detail texture metadata. The plain diffuse Bitmap from
+    _wire_diffuse stays as mat.diffuseMap so the viewport still shows the
+    diffuse layer. A real CompositeMap with the detail multiplied on top is
+    future work that needs in-Max smoke testing (rt.compositemap_addlayer
+    plus 1-based MaxScript indexing on mapList/blendMode).
+    """
+    if not desc.detail.name:
+        return
+    _set_user_prop(rt, mat, "opennova_detail_texture_path", desc.detail.path or "")
+    _set_user_prop(rt, mat, "opennova_has_detail_map", 1 if desc.detail.path else 0)
+    _set_user_prop(rt, mat, "opennova_detail_map_mode", "metadata_only")
+
+
+def _wire_normal_metadata(rt, mat, desc) -> None:
+    """Stash normal/secondary-normal texture metadata as user props."""
     if desc.normal.name:
         _set_user_prop(rt, mat, "opennova_normal_texture_path", desc.normal.path or "")
         _set_user_prop(rt, mat, "opennova_normal_type", desc.normal.type)
         if desc.normal.type == NORMAL_TYPE_MDT:
             _set_user_prop(rt, mat, "opennova_has_normal_map", 0)
             _set_user_prop(rt, mat, "opennova_normal_map_unsupported", "mdt")
-
     if desc.secondary_normal.name:
-        _set_user_prop(rt, mat, "opennova_secondary_normal_texture_path", desc.secondary_normal.path or "")
-        _set_user_prop(rt, mat, "opennova_secondary_normal_type", desc.secondary_normal.type)
+        _set_user_prop(
+            rt, mat, "opennova_secondary_normal_texture_path",
+            desc.secondary_normal.path or "",
+        )
+        _set_user_prop(
+            rt, mat, "opennova_secondary_normal_type", desc.secondary_normal.type,
+        )
 
-    if desc.bump_mode:
-        if desc.bump_mode == "normal_texture":
-            bump_tex = desc.normal if desc.normal.name else desc.secondary_normal
-            bump_path = bump_tex.path
-            bump_name = bump_tex.role
-            if bump_path is not None and _is_max_bitmap_texture(bump_path):
-                normal_bm = _create_bitmap_texture(rt, f"{desc.name}_{bump_name}_bump", bump_path, desc)
-                _assign_texture_map(rt, mat, "bumpMap", "bumpMapEnable", 9, normal_bm)
-                _try_set(mat, "bumpMapAmount", 30.0)
-                _set_user_prop(rt, mat, "opennova_has_normal_map", 1)
-            else:
-                _set_user_prop(rt, mat, "opennova_has_normal_map", 0)
-        else:
+
+def _wire_bump(rt, mat, desc) -> None:
+    """Wire normalMap (DOT3 tangent space) or bumpMap (height-based) per descriptor.
+
+    Two modes from the descriptor:
+      - normal_texture + non-MDT non-TGA-alpha type → tangent-space normal map
+        goes to mat.normalMap (Max's dedicated normal-map slot).
+      - normal_texture + TGA-alpha type → height-in-alpha bump goes to bumpMap
+        with monoOutput=2.
+
+    Phong/DOT3 materials without a slot-3 texture import flat-shaded. The
+    earlier diffuse_alpha fabrication produced visible shading distortion on
+    materials whose DDS alpha was opacity / unused rather than height.
+    """
+    if not desc.bump_mode:
+        return
+    if desc.bump_mode == "normal_texture":
+        bump_tex = desc.normal if desc.normal.name else desc.secondary_normal
+        bump_path = bump_tex.path
+        bump_role = bump_tex.role
+        if bump_path is None or not _is_max_bitmap_texture(bump_path):
             _set_user_prop(rt, mat, "opennova_has_normal_map", 0)
-            _set_user_prop(rt, mat, "opennova_bump_map_mode", "metadata_only")
-
-    return mat
+            return
+        bm = _create_bitmap_texture(rt, f"{desc.name}_{bump_role}_bump", bump_path, desc)
+        if bump_tex.type == NORMAL_TYPE_TGA_ALPHA:
+            _try_set(bm, "monoOutput", 2)
+            _assign_texture_map(rt, mat, "bumpMap", "bumpMapEnable", 9, bm)
+            _try_set(mat, "bumpMapAmount", 30.0)
+            _set_user_prop(rt, mat, "opennova_bump_map_mode", "tga_alpha")
+        else:
+            assigned = _assign_texture_map(
+                rt, mat, "normalMap", "normalMapEnable", 9, bm,
+            )
+            _try_set(mat, "normalMapEnable", True)
+            if not assigned:
+                # Older Max versions without the dedicated normalMap slot fall
+                # back to bumpMap so the user still sees something.
+                _assign_texture_map(rt, mat, "bumpMap", "bumpMapEnable", 9, bm)
+                _try_set(mat, "bumpMapAmount", 30.0)
+                _set_user_prop(rt, mat, "opennova_bump_map_mode", "normal_dot3_fallback_bump")
+            else:
+                _set_user_prop(rt, mat, "opennova_bump_map_mode", "normal_dot3")
+        _set_user_prop(rt, mat, "opennova_has_normal_map", 1)
+    else:
+        _set_user_prop(rt, mat, "opennova_has_normal_map", 0)
+        _set_user_prop(rt, mat, "opennova_bump_map_mode", "metadata_only")
 
 
 def create_diffuse_material(mat_ir, resolver=None, source_format=None) -> Any:

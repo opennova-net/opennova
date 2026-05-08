@@ -386,101 +386,115 @@ class AseExporter:
             parent.name = f"Scene_Materials_{slot_idx}".encode('utf-8')[:31]
             ase_ffi.alloc_submaterials(parent, count_in_slot)
 
+        # Shared ASE submaterial writer + descriptor reconstructor. Both the
+        # IR → ASE path (pyopennova/ase_from_ir.py) and this Blender → ASE
+        # path now go through populate_ase_submaterial so any change to ASE
+        # field semantics lives in exactly one place.
+        from pyopennova.ase_from_ir import populate_ase_submaterial
+        from pyopennova.materials import descriptor_from_user_props
+
+        used_tex_names: dict[str, str] = {}
+
         for i in range(total):
             material = self.material_keeper.get_material(i)
             slot_idx = i // self.SUBS_PER_SLOT
             local_idx = i % self.SUBS_PER_SLOT
             sub = doc.materials[slot_idx].submaterials[local_idx]
 
-            # Resolve diffuse bitmap
-            diffuse_bitmap = ""
-            diffuse_image = None
-            if material:
-                diffuse_bitmap = material.get("ase_diffuse_bitmap", "")
-            # Always get the image from the node tree regardless of whether
-            # ase_diffuse_bitmap provides the name — the stored name takes priority.
-            if material and material.use_nodes and material.node_tree:
-                found_name, found_image = self._find_bitmap_from_nodes(material)
-                if found_image:
-                    diffuse_image = found_image
-                if not diffuse_bitmap and found_name:
-                    diffuse_bitmap = found_name
+            props = self._collect_material_props(material, has_skinned, i)
+            desc = descriptor_from_user_props(props)
+            populate_ase_submaterial(sub, desc, used_tex_names=used_tex_names)
 
-            # Resolve detail bitmap from node tree (MixRGB Multiply)
-            detail_bitmap = ""
-            detail_image = None
-            if material and material.use_nodes and material.node_tree:
-                detail_bitmap, detail_image = self._find_detail_from_nodes(material)
-
-            # Fix texture extensions for df4oed compatibility
-            diffuse_bitmap = self._fix_tex_ext(diffuse_bitmap)
-            diffuse_bitmap = self._fit_texture_name(diffuse_bitmap)
-            if detail_bitmap:
-                detail_bitmap = self._fix_tex_ext(detail_bitmap)
-                detail_bitmap = self._fit_texture_name(detail_bitmap)
-
-            # Queue images for TGA export
-            if diffuse_bitmap and diffuse_image:
-                self._texture_queue[diffuse_bitmap] = diffuse_image
-            if detail_bitmap and detail_image:
-                self._texture_queue[detail_bitmap] = detail_image
-
-            if diffuse_bitmap:
-                encoded = diffuse_bitmap.encode('utf-8')[:31]
-                sub.maps[0].value = encoded
-            if detail_bitmap:
-                encoded = detail_bitmap.encode('utf-8')[:31]
-                sub.maps[1].value = encoded
-
-            sub.uv_u_tiling[0] = 1.0
-            sub.uv_v_tiling[0] = 1.0
-            if detail_bitmap:
-                sub.uv_u_tiling[1] = 1.0
-                sub.uv_v_tiling[1] = 1.0
-
-            # Use original shader code from 3DI import if available,
-            # otherwise derive from Blender material node tree
-            shader_code = material.get("opennova_shader", "") if material else ""
-            if not shader_code:
-                shader_code = self._derive_opennova_shader(material, has_skinned)
-
-            # Set submaterial name to include shader code for OED auto-detection.
-            # This name is critical: EnsureMaterialBucket uses stricmp on it
-            # to deduplicate faces into rendering buckets.
-            mat_name = f"Material_{i}_{shader_code}"
-            sub.name = mat_name.encode('utf-8')[:31]
-
-            # Set shading mode based on shader type
-            _phong_shaders = ("PHONGT", "PHONGO", "BUMPPHONG", "ENVPHONG")
-            if any(s in shader_code for s in _phong_shaders):
-                sub.shading = 1  # Phong
-            else:
-                sub.shading = 0  # Blinn
-
-            # Material properties (ambient, diffuse, specular, etc.)
+            # Blender-driven material colors override the shared writer's
+            # defaults so the .ase reflects what the artist set in Blender.
             if material:
                 diff = self._get_material_diffuse(material)
                 sub.diffuse[0], sub.diffuse[1], sub.diffuse[2] = diff
-                sub.ambient[0] = diff[0] * 0.1
-                sub.ambient[1] = diff[1] * 0.1
-                sub.ambient[2] = diff[2] * 0.1
+                if not (desc.glass and any(desc.reflect_color[:3])):
+                    sub.ambient[0] = diff[0] * 0.1
+                    sub.ambient[1] = diff[1] * 0.1
+                    sub.ambient[2] = diff[2] * 0.1
                 spec = self._get_material_specular(material)
                 sub.specular[0], sub.specular[1], sub.specular[2] = spec
                 sub.shine = self._get_material_shine(material)
-                sub.shine_strength = 0.0
                 sub.transparency = self._get_material_transparency(material)
-            else:
-                sub.diffuse[0] = sub.diffuse[1] = sub.diffuse[2] = 0.5882
-                sub.ambient[0] = sub.ambient[1] = sub.ambient[2] = 0.0588
-                sub.specular[0] = sub.specular[1] = sub.specular[2] = 0.9000
-                sub.shine = 0.1000
-                sub.shine_strength = 0.0
-                sub.transparency = 0.0
-            sub.wiresize = 1.0
 
-            print(f"ASE Export: Submaterial {i} -> shader={shader_code} "
-                  f"name={mat_name} shading={'Phong' if sub.shading == 1 else 'Blinn'}"
-                  f"{' detail=' + detail_bitmap if detail_bitmap else ''}")
+            print(
+                f"ASE Export: Submaterial {i} -> shader={desc.shader} "
+                f"name={desc.name} shading={'Phong' if sub.shading == 1 else 'Blinn'}"
+                f"{' detail=' + desc.detail.name if desc.detail.name else ''}"
+            )
+
+    def _collect_material_props(self, material, has_skinned: bool, index: int) -> dict:
+        """Build a user-props dict for descriptor_from_user_props.
+
+        Materials imported via the OpenNova importer carry the full opennova_*
+        / ase_* prop set (placed by ``BlenderSceneBuilder._create_material``
+        through ``material_user_props``). For materials authored or modified in
+        Blender, we fall back to scanning the node tree for diffuse/detail
+        bitmap names and deriving a shader code.
+        """
+        props: dict = {}
+        if material:
+            for key in material.keys():
+                if key.startswith("opennova_") or key.startswith("ase_"):
+                    props[key] = material[key]
+
+        diffuse_bitmap = props.get("ase_diffuse_bitmap", "") or props.get(
+            "opennova_diffuse_texture_name", ""
+        )
+        diffuse_image = None
+        if material and material.use_nodes and material.node_tree:
+            found_name, found_image = self._find_bitmap_from_nodes(material)
+            if found_image:
+                diffuse_image = found_image
+            if not diffuse_bitmap and found_name:
+                diffuse_bitmap = found_name
+
+        detail_bitmap = props.get("ase_detail_bitmap", "") or props.get(
+            "opennova_detail_texture_name", ""
+        )
+        detail_image = None
+        if material and material.use_nodes and material.node_tree:
+            node_detail_bitmap, node_detail_image = self._find_detail_from_nodes(material)
+            if node_detail_bitmap and not detail_bitmap:
+                detail_bitmap = node_detail_bitmap
+            if node_detail_image:
+                detail_image = node_detail_image
+
+        # Apply df4oed compatibility transforms to the names used in the .ase.
+        diffuse_bitmap = self._fit_texture_name(self._fix_tex_ext(diffuse_bitmap))
+        if detail_bitmap:
+            detail_bitmap = self._fit_texture_name(self._fix_tex_ext(detail_bitmap))
+
+        # Queue images for TGA export.
+        if diffuse_bitmap and diffuse_image:
+            self._texture_queue[diffuse_bitmap] = diffuse_image
+        if detail_bitmap and detail_image:
+            self._texture_queue[detail_bitmap] = detail_image
+
+        # Fill the descriptor's texture-name slots; the shared writer reads
+        # opennova_<role>_texture_name through descriptor_from_user_props.
+        props.setdefault("opennova_diffuse_texture_name", diffuse_bitmap or "")
+        if detail_bitmap:
+            props["opennova_detail_texture_name"] = detail_bitmap
+        # ASE bitmap aliases (kept for downstream consumers reading user props).
+        if diffuse_bitmap:
+            props.setdefault("ase_diffuse_bitmap", diffuse_bitmap)
+        if detail_bitmap:
+            props.setdefault("ase_detail_bitmap", detail_bitmap)
+
+        # Shader tag — original 3DI import shader if available, else derive.
+        shader_code = props.get("opennova_shader") or ""
+        if not shader_code:
+            shader_code = self._derive_opennova_shader(material, has_skinned)
+        props["opennova_shader"] = shader_code
+        props.setdefault("opennova_material_index", index)
+        # Synthesised name matches the importer's pattern so OED's bucket
+        # deduplication stays stable: "Material_<index>_<shader_code>".
+        props.setdefault("ase_material_name", f"Material_{index}_{shader_code}")
+
+        return props
 
     # -------------------------------------------------------------------
     # Geometry population
