@@ -26,6 +26,7 @@ func set_resource(value: CbinCreditsResource) -> void:
 	_resource = value
 	if _resource:
 		_resource.entries_structure_changed.connect(_schedule_reconcile)
+	_refresh_font_options()
 	_reconcile()
 
 func _schedule_reconcile() -> void:
@@ -41,15 +42,27 @@ func _do_deferred_reconcile() -> void:
 func _refresh_font_options() -> void:
 	_font_options = PackedStringArray()
 	var dir := DirAccess.open("res://assets/fonts")
-	if dir == null:
+	if dir != null:
+		dir.list_dir_begin()
+		var name := dir.get_next()
+		while not name.is_empty():
+			if not dir.current_is_dir() and name.get_extension().to_lower() == "fnt":
+				_append_font_option(name.get_basename())
+			name = dir.get_next()
+		dir.list_dir_end()
+	if _resource != null:
+		for i in range(_resource.get_entry_count()):
+			var entry := _resource.get_entry(i)
+			if entry is CbinTextEntry:
+				_append_font_option((entry as CbinTextEntry).get_font_name())
+
+func _append_font_option(name: String) -> void:
+	if name.is_empty():
 		return
-	dir.list_dir_begin()
-	var name := dir.get_next()
-	while not name.is_empty():
-		if not dir.current_is_dir() and name.get_extension().to_lower() == "fnt":
-			_font_options.append(name.get_basename())
-		name = dir.get_next()
-	dir.list_dir_end()
+	for existing in _font_options:
+		if existing == name:
+			return
+	_font_options.append(name)
 
 func _reconcile() -> void:
 	if _vbox == null:
@@ -74,6 +87,8 @@ func _reconcile() -> void:
 	if _resource == null:
 		_set_selected_entry(null, false)
 		return
+
+	_refresh_font_options()
 
 	# Clear selection if its entry was removed
 	if _selected_entry != null and not live.has(_selected_entry):

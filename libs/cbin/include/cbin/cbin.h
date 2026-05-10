@@ -76,6 +76,10 @@ struct Credits {
     float scroll_rate = 0.5f;
     int vertical_space = 14;
     int center_x = 400;
+    bool has_top_y = false;
+    int top_y = 0;
+    bool has_bottom_y = false;
+    int bottom_y = 0;
     std::map<std::string, std::string> env_extra;  // Any other ENV values
 
     // [TEXT] section - structured entries
@@ -92,6 +96,7 @@ struct Credits {
     // Get/set ENV value (handles type conversion)
     std::string get_env(const std::string& key) const;
     void set_env(const std::string& key, const std::string& value);
+    bool has_bhd_bounds() const;
 };
 
 // Legacy raw text entry (for backwards compatibility)

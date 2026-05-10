@@ -98,6 +98,12 @@ Variant KdaResourceFormatLoader::_load(const String &p_path, const String &p_ori
 	resource->set_scroll_rate(credits.scroll_rate);
 	resource->set_vertical_space(credits.vertical_space);
 	resource->set_center_x(credits.center_x);
+	if (credits.has_top_y) {
+		resource->set_top_y(credits.top_y);
+	}
+	if (credits.has_bottom_y) {
+		resource->set_bottom_y(credits.bottom_y);
+	}
 
 	// Track current state for applying to text entries.
 	// The CBIN format uses separate Color and Justify control codes that affect
@@ -116,12 +122,10 @@ Variant KdaResourceFormatLoader::_load(const String &p_path, const String &p_ori
 				// Apply current state.
 				text_entry->set_color(current_color);
 				text_entry->set_justify(current_justify);
-				// Load font by name from assets/fonts/ directory.
+				// Preserve the KDA font name even when the matching .fnt
+				// resource is not present in this Godot project.
 				if (!src.font.empty()) {
-					Ref<Resource> font_res = cbin_internal::find_font_by_name(String(src.font.c_str()));
-					if (font_res.is_valid()) {
-						text_entry->set_font(font_res);
-					}
+					text_entry->set_font_name(String(src.font.c_str()));
 				}
 				resource->add_entry(text_entry);
 				break;
@@ -187,6 +191,14 @@ Error KdaResourceFormatSaver::_save(const Ref<Resource> &p_resource, const Strin
 	credits.scroll_rate = cbin_resource->get_scroll_rate();
 	credits.vertical_space = cbin_resource->get_vertical_space();
 	credits.center_x = cbin_resource->get_center_x();
+	if (cbin_resource->has_top_y()) {
+		credits.has_top_y = true;
+		credits.top_y = cbin_resource->get_top_y();
+	}
+	if (cbin_resource->has_bottom_y()) {
+		credits.has_bottom_y = true;
+		credits.bottom_y = cbin_resource->get_bottom_y();
+	}
 
 	// Track current state - when a TextEntry has different state, emit control codes first.
 	// Default state matches what the loader starts with.

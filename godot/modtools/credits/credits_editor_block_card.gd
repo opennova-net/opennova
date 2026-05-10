@@ -175,11 +175,7 @@ func _on_font_selected(index: int) -> void:
 	if _suppress or not (_entry is CbinTextEntry):
 		return
 	var name := "" if index == 0 else _font_picker.get_item_text(index)
-	var font_path := "res://assets/fonts/" + name + ".fnt" if not name.is_empty() else ""
-	var font: Resource
-	if not font_path.is_empty() and ResourceLoader.exists(font_path):
-		font = ResourceLoader.load(font_path)
-	(_entry as CbinTextEntry).set_font(font)
+	(_entry as CbinTextEntry).set_font_name(name)
 
 func _on_text_color_changed(color: Color) -> void:
 	if _suppress or not (_entry is CbinTextEntry):

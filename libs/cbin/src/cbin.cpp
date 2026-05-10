@@ -104,6 +104,10 @@ std::string Credits::get_env(const std::string& key) const {
         return std::to_string(vertical_space);
     } else if (key == "center_x") {
         return std::to_string(center_x);
+    } else if (key == "top_y") {
+        return has_top_y ? std::to_string(top_y) : "";
+    } else if (key == "bottom_y") {
+        return has_bottom_y ? std::to_string(bottom_y) : "";
     }
     auto it = env_extra.find(key);
     return (it != env_extra.end()) ? it->second : "";
@@ -116,9 +120,23 @@ void Credits::set_env(const std::string& key, const std::string& value) {
         try { vertical_space = std::stoi(value); } catch (...) {}
     } else if (key == "center_x") {
         try { center_x = std::stoi(value); } catch (...) {}
+    } else if (key == "top_y") {
+        try {
+            top_y = std::stoi(value);
+            has_top_y = true;
+        } catch (...) {}
+    } else if (key == "bottom_y") {
+        try {
+            bottom_y = std::stoi(value);
+            has_bottom_y = true;
+        } catch (...) {}
     } else {
         env_extra[key] = value;
     }
+}
+
+bool Credits::has_bhd_bounds() const {
+    return has_top_y || has_bottom_y;
 }
 
 bool is_cbin(const uint8_t* data, size_t size) {
@@ -566,8 +584,18 @@ bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& erro
     add_env_element("scroll_rate", credits.scroll_rate);
     add_env_element_int("vertical_space", credits.vertical_space);
     add_env_element_int("center_x", credits.center_x);
+    if (credits.has_top_y) {
+        add_env_element_int("top_y", credits.top_y);
+    }
+    if (credits.has_bottom_y) {
+        add_env_element_int("bottom_y", credits.bottom_y);
+    }
 
     for (const auto& [key, value] : credits.env_extra) {
+        if (key == "scroll_rate" || key == "vertical_space" || key == "center_x" ||
+            key == "top_y" || key == "bottom_y") {
+            continue;
+        }
         Element e;
         e.name_idx = add_string(key);
         e.type = 1;  // Use type=1 for string env values

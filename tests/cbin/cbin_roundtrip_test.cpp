@@ -4,6 +4,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <string>
 #include <vector>
 
 #include "cbin/cbin.h"
@@ -13,6 +14,8 @@
 #endif
 
 static constexpr const char* kFixturePath = OPENNOVA_SOURCE_DIR "/fixtures/cbin/nlist.reference.kda";
+static constexpr const char* kJoxFixturePath = OPENNOVA_SOURCE_DIR "/fixtures/cbin/nlist.jox01.reference.kda";
+static constexpr const char* kBhdFixturePath = OPENNOVA_SOURCE_DIR "/fixtures/cbin/nlist.bhd.reference.kda";
 
 // Expected values from nlist.reference.kda
 static constexpr float kExpectedScrollRate = 0.5f;
@@ -167,6 +170,82 @@ int main() {
     } else {
         std::cout << "PASS: Internal roundtrip byte-identical!" << std::endl;
     }
+
+    auto check_additional_fixture = [&](const char* label, const char* path, bool require_byte_identical) {
+        std::cout << "\n=== Additional fixture: " << label << " ===" << std::endl;
+        std::vector<uint8_t> fixture;
+        if (!load_file(path, fixture)) {
+            std::cerr << "FAIL: Cannot load fixture: " << path << std::endl;
+            failures++;
+            return;
+        }
+
+        cbin::Credits parsed;
+        if (!cbin::decode_credits(fixture.data(), fixture.size(), parsed, error)) {
+            std::cerr << "FAIL: Decode failed for " << label << ": " << error << std::endl;
+            failures++;
+            return;
+        }
+        size_t text_with_font_count = 0;
+        for (const auto& entry : parsed.entries) {
+            if (entry.type == cbin::EntryType::Text && !entry.font.empty()) {
+                text_with_font_count++;
+            }
+        }
+        if (text_with_font_count == 0) {
+            std::cerr << "FAIL: " << label << " decoded without any text font names" << std::endl;
+            failures++;
+            return;
+        }
+        if (std::string(label).find("BHD") != std::string::npos) {
+            if (!parsed.has_bhd_bounds() || !parsed.has_top_y || parsed.top_y != 66 ||
+                !parsed.has_bottom_y || parsed.bottom_y != 588) {
+                std::cerr << "FAIL: " << label << " did not expose expected BHD bounds" << std::endl;
+                failures++;
+                return;
+            }
+        }
+
+        std::vector<uint8_t> encoded;
+        if (!cbin::encode(parsed, encoded, error)) {
+            std::cerr << "FAIL: Encode failed for " << label << ": " << error << std::endl;
+            failures++;
+            return;
+        }
+
+        if (require_byte_identical) {
+            if (encoded.size() != fixture.size() ||
+                std::memcmp(encoded.data(), fixture.data(), fixture.size()) != 0) {
+                std::cerr << "FAIL: " << label << " did not roundtrip byte-for-byte" << std::endl;
+                failures++;
+                return;
+            }
+            std::cout << "PASS: " << label << " byte-for-byte roundtrip" << std::endl;
+        } else {
+            cbin::Credits reparsed;
+            if (!cbin::decode_credits(encoded.data(), encoded.size(), reparsed, error)) {
+                std::cerr << "FAIL: Re-decode failed for " << label << ": " << error << std::endl;
+                failures++;
+                return;
+            }
+            size_t reparsed_text_with_font_count = 0;
+            for (const auto& entry : reparsed.entries) {
+                if (entry.type == cbin::EntryType::Text && !entry.font.empty()) {
+                    reparsed_text_with_font_count++;
+                }
+            }
+            if (reparsed_text_with_font_count != text_with_font_count) {
+                std::cerr << "FAIL: " << label << " font-name count changed after re-encode: "
+                          << text_with_font_count << " -> " << reparsed_text_with_font_count << std::endl;
+                failures++;
+                return;
+            }
+            std::cout << "PASS: " << label << " decode/encode/decode with font names" << std::endl;
+        }
+    };
+
+    check_additional_fixture("JOX01 nlist", kJoxFixturePath, true);
+    check_additional_fixture("BHD nlist", kBhdFixturePath, true);
 
     // ========================================
     // Summary

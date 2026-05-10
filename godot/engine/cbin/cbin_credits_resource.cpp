@@ -39,6 +39,9 @@ void CbinTextEntry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_font"), &CbinTextEntry::get_font);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "font", PROPERTY_HINT_RESOURCE_TYPE, "Resource"),
 	             "set_font", "get_font");
+	ClassDB::bind_method(D_METHOD("set_font_name", "name"), &CbinTextEntry::set_font_name);
+	ClassDB::bind_method(D_METHOD("get_font_name"), &CbinTextEntry::get_font_name);
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "font_name"), "set_font_name", "get_font_name");
 
 	ClassDB::bind_method(D_METHOD("set_color", "color"), &CbinTextEntry::set_color);
 	ClassDB::bind_method(D_METHOD("get_color"), &CbinTextEntry::get_color);
@@ -49,7 +52,6 @@ void CbinTextEntry::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "justify", PROPERTY_HINT_ENUM, "Left:-1,Center:0,Right:1"),
 	             "set_justify", "get_justify");
 
-	ClassDB::bind_method(D_METHOD("get_font_name"), &CbinTextEntry::get_font_name);
 }
 
 CbinTextEntry::CbinTextEntry() {}
@@ -66,11 +68,29 @@ String CbinTextEntry::get_text() const {
 
 void CbinTextEntry::set_font(const Ref<Resource> &p_font) {
 	font_ = p_font;
+	if (font_.is_valid()) {
+		String path = font_->get_path();
+		if (!path.is_empty()) {
+			font_name_ = path.get_file().get_basename();
+		}
+	} else {
+		font_name_ = String();
+	}
 	emit_changed();
 }
 
 Ref<Resource> CbinTextEntry::get_font() const {
 	return font_;
+}
+
+void CbinTextEntry::set_font_name(const String &p_name) {
+	font_name_ = p_name;
+	if (font_name_.is_empty()) {
+		font_ = Ref<Resource>();
+	} else {
+		font_ = cbin_internal::find_font_by_name(font_name_);
+	}
+	emit_changed();
 }
 
 void CbinTextEntry::set_color(const Color &p_color) {
@@ -92,13 +112,7 @@ CbinJustify CbinTextEntry::get_justify() const {
 }
 
 String CbinTextEntry::get_font_name() const {
-	if (font_.is_valid()) {
-		String path = font_->get_path();
-		if (!path.is_empty()) {
-			return path.get_file().get_basename();
-		}
-	}
-	return String();
+	return font_name_;
 }
 
 // ============================================================================
@@ -224,6 +238,22 @@ void CbinCreditsResource::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_center_x"), &CbinCreditsResource::get_center_x);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "center_x"), "set_center_x", "get_center_x");
 
+	ClassDB::bind_method(D_METHOD("set_has_top_y", "has_top_y"), &CbinCreditsResource::set_has_top_y);
+	ClassDB::bind_method(D_METHOD("has_top_y"), &CbinCreditsResource::has_top_y);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "has_top_y"), "set_has_top_y", "has_top_y");
+
+	ClassDB::bind_method(D_METHOD("set_top_y", "top_y"), &CbinCreditsResource::set_top_y);
+	ClassDB::bind_method(D_METHOD("get_top_y"), &CbinCreditsResource::get_top_y);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "top_y"), "set_top_y", "get_top_y");
+
+	ClassDB::bind_method(D_METHOD("set_has_bottom_y", "has_bottom_y"), &CbinCreditsResource::set_has_bottom_y);
+	ClassDB::bind_method(D_METHOD("has_bottom_y"), &CbinCreditsResource::has_bottom_y);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "has_bottom_y"), "set_has_bottom_y", "has_bottom_y");
+
+	ClassDB::bind_method(D_METHOD("set_bottom_y", "bottom_y"), &CbinCreditsResource::set_bottom_y);
+	ClassDB::bind_method(D_METHOD("get_bottom_y"), &CbinCreditsResource::get_bottom_y);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "bottom_y"), "set_bottom_y", "get_bottom_y");
+
 	// Entries array.
 	ClassDB::bind_method(D_METHOD("set_entries", "entries"), &CbinCreditsResource::set_entries);
 	ClassDB::bind_method(D_METHOD("get_entries"), &CbinCreditsResource::get_entries);
@@ -274,6 +304,44 @@ void CbinCreditsResource::set_center_x(int p_center) {
 
 int CbinCreditsResource::get_center_x() const {
 	return center_x_;
+}
+
+void CbinCreditsResource::set_has_top_y(bool p_has) {
+	has_top_y_ = p_has;
+	emit_changed();
+}
+
+bool CbinCreditsResource::has_top_y() const {
+	return has_top_y_;
+}
+
+void CbinCreditsResource::set_top_y(int p_top_y) {
+	top_y_ = p_top_y;
+	has_top_y_ = true;
+	emit_changed();
+}
+
+int CbinCreditsResource::get_top_y() const {
+	return top_y_;
+}
+
+void CbinCreditsResource::set_has_bottom_y(bool p_has) {
+	has_bottom_y_ = p_has;
+	emit_changed();
+}
+
+bool CbinCreditsResource::has_bottom_y() const {
+	return has_bottom_y_;
+}
+
+void CbinCreditsResource::set_bottom_y(int p_bottom_y) {
+	bottom_y_ = p_bottom_y;
+	has_bottom_y_ = true;
+	emit_changed();
+}
+
+int CbinCreditsResource::get_bottom_y() const {
+	return bottom_y_;
 }
 
 void CbinCreditsResource::set_entries(const TypedArray<CbinEntry> &p_entries) {
@@ -383,6 +451,12 @@ String CbinCreditsResource::to_text() const {
 	result += "scroll_rate=" + String::num(scroll_rate_, 2) + "\n";
 	result += "vertical_space=" + String::num_int64(vertical_space_) + "\n";
 	result += "center_x=" + String::num_int64(center_x_) + "\n";
+	if (has_top_y_) {
+		result += "top_y=" + String::num_int64(top_y_) + "\n";
+	}
+	if (has_bottom_y_) {
+		result += "bottom_y=" + String::num_int64(bottom_y_) + "\n";
+	}
 	result += "\n";
 	result += "[TEXT]\n";
 
@@ -447,6 +521,10 @@ bool CbinCreditsResource::from_text(const String &p_text) {
 	float parsed_scroll_rate = scroll_rate_;
 	int parsed_vertical_space = vertical_space_;
 	int parsed_center_x = center_x_;
+	bool parsed_has_top_y = has_top_y_;
+	int parsed_top_y = top_y_;
+	bool parsed_has_bottom_y = has_bottom_y_;
+	int parsed_bottom_y = bottom_y_;
 	Vector<Ref<CbinEntry>> parsed_entries;
 	bool parse_ok = true;
 
@@ -488,6 +566,12 @@ bool CbinCreditsResource::from_text(const String &p_text) {
 					parsed_vertical_space = value.to_int();
 				} else if (key == "center_x") {
 					parsed_center_x = value.to_int();
+				} else if (key == "top_y") {
+					parsed_top_y = value.to_int();
+					parsed_has_top_y = true;
+				} else if (key == "bottom_y") {
+					parsed_bottom_y = value.to_int();
+					parsed_has_bottom_y = true;
 				}
 			}
 			continue;
@@ -580,11 +664,7 @@ bool CbinCreditsResource::from_text(const String &p_text) {
 			String text = line.substr(0, bracket_start).strip_edges();
 			String font_name = line.substr(bracket_start + 1, bracket_end - bracket_start - 1);
 			entry->set_text(text);
-			// Load font resource.
-			Ref<Resource> font = cbin_internal::find_font_by_name(font_name);
-			if (font.is_valid()) {
-				entry->set_font(font);
-			}
+			entry->set_font_name(font_name);
 		} else {
 			entry->set_text(line);
 		}
@@ -607,6 +687,10 @@ bool CbinCreditsResource::from_text(const String &p_text) {
 	scroll_rate_ = parsed_scroll_rate;
 	vertical_space_ = parsed_vertical_space;
 	center_x_ = parsed_center_x;
+	has_top_y_ = parsed_has_top_y;
+	top_y_ = parsed_top_y;
+	has_bottom_y_ = parsed_has_bottom_y;
+	bottom_y_ = parsed_bottom_y;
 	entries_ = parsed_entries;
 
 	// Connect new entries so future mutations propagate.

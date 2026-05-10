@@ -54,6 +54,8 @@ public:
 
 	void set_font(const Ref<Resource> &p_font);
 	Ref<Resource> get_font() const;
+	void set_font_name(const String &p_name);
+	String get_font_name() const;
 
 	void set_color(const Color &p_color);
 	Color get_color() const;
@@ -61,12 +63,10 @@ public:
 	void set_justify(CbinJustify p_justify);
 	CbinJustify get_justify() const;
 
-	// Helper to get font name for serialization (extracts basename from path).
-	String get_font_name() const;
-
 private:
 	String text_;
 	Ref<Resource> font_;
+	String font_name_;
 	Color color_ = Color(1, 1, 1);
 	CbinJustify justify_ = CBIN_JUSTIFY_CENTER;
 };
@@ -155,6 +155,16 @@ public:
 	void set_center_x(int p_center);
 	int get_center_x() const;
 
+	void set_has_top_y(bool p_has);
+	bool has_top_y() const;
+	void set_top_y(int p_top_y);
+	int get_top_y() const;
+
+	void set_has_bottom_y(bool p_has);
+	bool has_bottom_y() const;
+	void set_bottom_y(int p_bottom_y);
+	int get_bottom_y() const;
+
 	// Entries (polymorphic array of CbinEntry subclasses).
 	void set_entries(const TypedArray<CbinEntry> &p_entries);
 	TypedArray<CbinEntry> get_entries() const;
@@ -174,6 +184,10 @@ private:
 	float scroll_rate_ = 0.5f;
 	int vertical_space_ = 14;
 	int center_x_ = 400;
+	bool has_top_y_ = false;
+	int top_y_ = 0;
+	bool has_bottom_y_ = false;
+	int bottom_y_ = 0;
 	Vector<Ref<CbinEntry>> entries_;
 
 	void _on_entry_changed();

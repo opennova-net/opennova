@@ -403,6 +403,31 @@ TEST(string_deduplication) {
     PASS();
 }
 
+// Test BHD-specific credit bounds roundtrip as explicit ENV fields.
+TEST(bhd_bounds_roundtrip) {
+    cbin::Credits credits;
+    credits.has_top_y = true;
+    credits.top_y = 66;
+    credits.has_bottom_y = true;
+    credits.bottom_y = 588;
+    credits.entries.push_back(cbin::Entry::make_text("Delta_Force_Black_Hawk_Down", "Serpen36"));
+
+    std::vector<uint8_t> encoded;
+    std::string error;
+    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+
+    cbin::Credits decoded;
+    EXPECT_TRUE(cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+
+    EXPECT_TRUE(decoded.has_bhd_bounds());
+    EXPECT_TRUE(decoded.has_top_y);
+    EXPECT_EQ(decoded.top_y, 66);
+    EXPECT_TRUE(decoded.has_bottom_y);
+    EXPECT_EQ(decoded.bottom_y, 588);
+
+    PASS();
+}
+
 // Test env_extra map
 TEST(env_extra_roundtrip) {
     cbin::Credits credits;
