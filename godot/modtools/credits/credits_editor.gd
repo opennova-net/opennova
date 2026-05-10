@@ -148,21 +148,8 @@ func _set_preview_resource(resource: CbinCreditsResource, reset_playback: bool) 
 func _refresh_warning(resource: CbinCreditsResource) -> void:
 	if _warning_bar == null:
 		return
-	if resource == null:
-		_warning_bar.visible = false
-		return
-	var missing := 0
-	for i in range(resource.get_entry_count()):
-		var e := resource.get_entry(i)
-		if e is CbinImageEntry:
-			var img_entry := e as CbinImageEntry
-			if img_entry.get_texture() == null and not img_entry.get_texture_path().is_empty():
-				missing += 1
-	if missing > 0:
-		_warning_bar.text = "%d image(s) missing - place them at res://assets/textures/" % missing
-		_warning_bar.visible = true
-	else:
-		_warning_bar.visible = false
+	_warning_bar.text = ""
+	_warning_bar.visible = false
 
 func _refresh_env_bar(resource: CbinCreditsResource) -> void:
 	if resource == null:

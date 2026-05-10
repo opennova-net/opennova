@@ -141,13 +141,24 @@ func test_editor_chrome_uses_compact_command_and_preview_controls() -> void:
 	var toolbar := editor.get_node_or_null("%EditorToolbar") as PanelContainer
 	assert_not_null(toolbar, "Credits editor should expose one defined top toolbar area.")
 	if toolbar != null:
-		assert_not_null(toolbar.get_node_or_null("ToolbarRow/ModeButtons/VisualButton"),
+		assert_lte(toolbar.offset_right, -128.0,
+			"credits toolbar should reserve right-side room for global viewport buttons.")
+		assert_true(toolbar.clip_contents,
+			"credits toolbar should clip its own contents before they reach global viewport buttons.")
+		var margin := toolbar.get_node_or_null("ToolbarMargin") as MarginContainer
+		assert_not_null(margin, "credits toolbar should have internal padding.")
+		if margin != null:
+			assert_gte(margin.get_theme_constant("margin_left"), 8,
+				"toolbar controls should not touch the left border.")
+			assert_gte(margin.get_theme_constant("margin_top"), 4,
+				"toolbar controls should not touch the top border.")
+		assert_not_null(toolbar.get_node_or_null("ToolbarMargin/ToolbarRow/ModeButtons/VisualButton"),
 			"toolbar should contain the visual/source mode buttons.")
-		assert_not_null(toolbar.get_node_or_null("ToolbarRow/ScrollRateSpin"),
+		assert_not_null(toolbar.get_node_or_null("ToolbarMargin/ToolbarRow/ScrollRateSpin"),
 			"toolbar should contain scroll rate controls.")
-		assert_not_null(toolbar.get_node_or_null("ToolbarRow/Play"),
+		assert_not_null(toolbar.get_node_or_null("ToolbarMargin/ToolbarRow/Play"),
 			"toolbar should contain preview playback controls.")
-		assert_not_null(toolbar.get_node_or_null("ToolbarRow/Speed"),
+		assert_not_null(toolbar.get_node_or_null("ToolbarMargin/ToolbarRow/Speed"),
 			"toolbar should contain preview speed controls.")
 
 	var add_row_frame := editor.get_node("HSplit/LeftPane/ContentStack/BlockListHost/AddRowFrame") as PanelContainer
@@ -155,6 +166,24 @@ func test_editor_chrome_uses_compact_command_and_preview_controls() -> void:
 		"The add command strip should use the flat panel theme.")
 	assert_null(editor.get_node_or_null("HSplit/RightPane/PreviewHost/Toolbar"),
 		"preview controls should live in the editor toolbar instead of inside the preview pane.")
+
+func test_missing_image_warning_is_not_shown_under_toolbar() -> void:
+	var editor = CreditsEditorScene.instantiate()
+	add_child_autofree(editor)
+	await get_tree().process_frame
+
+	var doc: CreditsEditorDocument = autofree(CreditsEditorDocument.new())
+	var image := CbinImageEntry.new()
+	image.set_texture_name("missing_credits_image.png")
+	doc.resource.add_entry(image)
+	editor.set_document(doc)
+	await get_tree().process_frame
+
+	var warning_bar := editor.get_node_or_null("%WarningBar") as Control
+	assert_not_null(warning_bar, "warning bar node may remain for compatibility.")
+	if warning_bar != null:
+		assert_false(warning_bar.visible,
+			"missing-image warning text should not appear under the credits toolbar.")
 
 func test_block_card_missing_image_name_commits_on_focus_loss() -> void:
 	var card = CreditsEditorBlockCardScene.instantiate()
