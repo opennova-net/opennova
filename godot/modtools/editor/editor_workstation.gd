@@ -4,16 +4,17 @@ extends Control
 const TerrainWorkspaceAdapter = preload("res://modtools/editor/terrain_workspace.gd")
 const EnvironmentWorkspaceAdapter = preload("res://modtools/editor/environment_workspace.gd")
 const MissionWorkspaceAdapter = preload("res://modtools/editor/mission_workspace.gd")
+const CreditsWorkspaceAdapter = preload("res://modtools/editor/credits_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
 
-enum Workspace { TERRAIN, ENVIRONMENT, MISSION }
+enum Workspace { TERRAIN, ENVIRONMENT, MISSION, CREDITS }
 
 const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const RESOURCE_STATE_SECTION := "resources"
 const RESOURCE_DIR_KEY := "resource_dir"
 const RESOURCE_RECURSIVE_KEY := "resource_recursive"
 
-const SELECTABLE_WORKSPACES := [Workspace.TERRAIN, Workspace.MISSION]
+const SELECTABLE_WORKSPACES := [Workspace.TERRAIN, Workspace.MISSION, Workspace.CREDITS]
 
 enum PromptKind { NONE, UNSAVED, EXPORT, CDEP }
 
@@ -197,6 +198,7 @@ func _ensure_workspaces() -> void:
 	if _workspaces.is_empty():
 		_workspaces[Workspace.TERRAIN] = TerrainWorkspaceAdapter.new(editor)
 		_workspaces[Workspace.MISSION] = MissionWorkspaceAdapter.new(editor)
+		_workspaces[Workspace.CREDITS] = CreditsWorkspaceAdapter.new()
 	if _environment_workspace == null:
 		var environment_editor: Variant = editor.get_environment_editor() if editor != null and editor.has_method("get_environment_editor") else null
 		_environment_workspace = EnvironmentWorkspaceAdapter.new(environment_editor)
@@ -324,6 +326,8 @@ func _workspace_tooltip(workspace_id: int) -> String:
 			return "Edit .env weather, lighting, atmosphere, and time of day."
 		Workspace.MISSION:
 			return "Reserved for mission entities, objectives, and triggers."
+		Workspace.CREDITS:
+			return "Edit *.kda credits files."
 		_:
 			return ""
 
@@ -1067,6 +1071,8 @@ func _resource_browser_kind_label() -> String:
 			return "mission"
 		"model":
 			return "model"
+		"credits":
+			return "credits"
 		_:
 			return "resource"
 

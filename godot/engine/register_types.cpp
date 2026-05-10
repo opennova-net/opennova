@@ -22,6 +22,9 @@
 #include "terrain/til_resource_format.h"
 #include "env/nova_env_keyframe.h"
 #include "env/env_file.h"
+#include "cbin/cbin_credits_resource.h"
+#include "cbin/kda_resource_format.h"
+#include "cbin/nova_credits_player.h"
 #include "util/nova_data_format.h"
 #include "util/nova_texture_format.h"
 #include "resource_index/nova_resource_index.h"
@@ -35,6 +38,8 @@ static Ref<ResourceFormatLoaderTIL> til_loader;
 static Ref<ResourceFormatSaverTIL> til_saver;
 static Ref<EnvFileLoader> env_loader;
 static Ref<EnvFileSaver> env_saver;
+static Ref<KdaResourceFormatLoader> kda_loader;
+static Ref<KdaResourceFormatSaver> kda_saver;
 static Ref<ResourceFormatLoaderNovaTexture> nova_tex_loader;
 
 void initialize_opennova_module(ModuleInitializationLevel p_level) {
@@ -61,6 +66,14 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvFile);
 	GDREGISTER_CLASS(EnvFileLoader);
 	GDREGISTER_CLASS(EnvFileSaver);
+	GDREGISTER_ABSTRACT_CLASS(CbinEntry);
+	GDREGISTER_CLASS(CbinTextEntry);
+	GDREGISTER_CLASS(CbinNewlineEntry);
+	GDREGISTER_CLASS(CbinImageEntry);
+	GDREGISTER_CLASS(CbinCreditsResource);
+	GDREGISTER_CLASS(KdaResourceFormatLoader);
+	GDREGISTER_CLASS(KdaResourceFormatSaver);
+	GDREGISTER_CLASS(NovaCreditsPlayer);
 	GDREGISTER_CLASS(NovaDataFile);
 	GDREGISTER_CLASS(ResourceFormatLoaderNovaTexture);
 	GDREGISTER_CLASS(NovaResourceIndex);
@@ -85,6 +98,12 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	env_saver.instantiate();
 	ResourceSaver::get_singleton()->add_resource_format_saver(env_saver);
+
+	kda_loader.instantiate();
+	ResourceLoader::get_singleton()->add_resource_format_loader(kda_loader);
+
+	kda_saver.instantiate();
+	ResourceSaver::get_singleton()->add_resource_format_saver(kda_saver);
 
 	nova_tex_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(nova_tex_loader);
@@ -115,6 +134,12 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	ResourceSaver::get_singleton()->remove_resource_format_saver(env_saver);
 	env_saver.unref();
+
+	ResourceLoader::get_singleton()->remove_resource_format_loader(kda_loader);
+	kda_loader.unref();
+
+	ResourceSaver::get_singleton()->remove_resource_format_saver(kda_saver);
+	kda_saver.unref();
 
 	ResourceLoader::get_singleton()->remove_resource_format_loader(nova_tex_loader);
 	nova_tex_loader.unref();

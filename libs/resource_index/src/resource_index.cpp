@@ -43,6 +43,9 @@ std::string kind_for_extension(const fs::path &path) {
 	if (extension == ".glb") {
 		return "model";
 	}
+	if (extension == ".kda") {
+		return "credits";
+	}
 	return "";
 }
 
@@ -62,6 +65,9 @@ std::string normalize_kind(const std::string &kind) {
 	}
 	if (key == "glb" || key == "packed_scene" || key == "scene") {
 		return "model";
+	}
+	if (key == "kda") {
+		return "credits";
 	}
 	return key;
 }
