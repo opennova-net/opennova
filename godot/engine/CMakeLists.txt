@@ -15,6 +15,7 @@ add_subdirectory(../../libs/ase opennova_ase)
 add_subdirectory(../../libs/tdp opennova_tdp)
 add_subdirectory(../../libs/oed opennova_oed)
 add_subdirectory(../../libs/renderer opennova_renderer)
+add_subdirectory(../../libs/cbin opennova_cbin)
 add_subdirectory(../../libs/terrain opennova_terrain)
 add_subdirectory(../../libs/resource_index opennova_resource_index)
 
@@ -36,6 +37,9 @@ add_library(${TARGET_NAME} SHARED
     terrain/trn_resource_format.cpp
     terrain/cpt_resource_format.cpp
     terrain/til_resource_format.cpp
+    cbin/cbin_credits_resource.cpp
+    cbin/kda_resource_format.cpp
+    cbin/nova_credits_player.cpp
     env/nova_env_keyframe.cpp
     env/env_file.cpp
     object/nova_object_data.cpp
@@ -59,6 +63,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_tpj
     opennova_trn
     opennova_cpt
+    opennova_cbin
     opennova_env
     opennova_threedi
     opennova_ase

@@ -14,6 +14,7 @@ add_subdirectory(libs/bad)
 add_subdirectory(libs/adm)
 add_subdirectory(libs/pff)
 add_subdirectory(libs/bfc1)
+add_subdirectory(libs/cbin)
 add_subdirectory(libs/def)
 add_subdirectory(libs/scr)
 add_subdirectory(libs/ase)
@@ -35,6 +36,7 @@ set(OPENNOVA_CORE_TARGETS
     opennova_threedi
     opennova_pff
     opennova_bfc1
+    opennova_cbin
     opennova_bad
     opennova_adm
     opennova_def

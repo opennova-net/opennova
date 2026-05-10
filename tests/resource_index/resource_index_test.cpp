@@ -39,6 +39,7 @@ int main() {
 	write_file(root / "models" / "tree.glb", "glb");
 	write_file(root / "models" / "tree.3di", "3di");
 	write_file(root / "models" / "source.ase", "ase");
+	write_file(root / "credits" / "finale.kda", "kda");
 
 	opennova::ResourceIndex index;
 	TEST_EXPECT(!index.scan((root / "missing").string(), true));
@@ -56,7 +57,7 @@ int main() {
 
 	TEST_EXPECT(index.scan(root.string(), true));
 	const std::vector<opennova::ResourceFileEntry> all_files = index.resource_files("*");
-	TEST_EXPECT(all_files.size() == 8);
+	TEST_EXPECT(all_files.size() == 9);
 	TEST_EXPECT(has_relative_path(all_files, "Alpha.TRN"));
 	TEST_EXPECT(has_relative_path(all_files, "missions/first.bms"));
 	TEST_EXPECT(has_relative_path(all_files, "object.3dp"));
@@ -64,6 +65,7 @@ int main() {
 	TEST_EXPECT(has_relative_path(all_files, "scene.ASE"));
 	TEST_EXPECT(has_relative_path(all_files, "models/tree.3di"));
 	TEST_EXPECT(has_relative_path(all_files, "models/source.ase"));
+	TEST_EXPECT(has_relative_path(all_files, "credits/finale.kda"));
 	TEST_EXPECT(!has_relative_path(all_files, "vehicle.glb"));
 	TEST_EXPECT(!has_relative_path(all_files, "models/tree.glb"));
 	TEST_EXPECT(index.resource_files("bms").size() == 1);
@@ -76,6 +78,9 @@ int main() {
 	TEST_EXPECT(index.resource_files("object_model").size() == 2);
 	TEST_EXPECT(index.resource_files("object_model")[0].display_name == "preview" ||
 	            index.resource_files("object_model")[0].display_name == "tree");
+	TEST_EXPECT(index.resource_files("credits").size() == 1);
+	TEST_EXPECT(index.resource_files("kda").size() == 1);
+	TEST_EXPECT(index.resource_files("credits")[0].display_name == "finale");
 
 	fs::remove_all(root);
 	return 0;

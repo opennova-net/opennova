@@ -49,6 +49,9 @@ std::string kind_for_extension(const fs::path &path) {
 	if (extension == ".ase") {
 		return "object_scene";
 	}
+	if (extension == ".kda") {
+		return "credits";
+	}
 	return "";
 }
 
@@ -74,6 +77,9 @@ std::string normalize_kind(const std::string &kind) {
 	}
 	if (key == "ase" || key == "scene") {
 		return "object_scene";
+	}
+	if (key == "kda") {
+		return "credits";
 	}
 	return key;
 }
