@@ -4,6 +4,8 @@ extends Control
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
 const PREVIEW_WHEEL_PIXELS := 48.0
 
+signal request_edit_font(font_name)
+
 enum Mode { VISUAL, SOURCE }
 
 @onready var _mode_buttons: HBoxContainer = %ModeButtons
@@ -23,11 +25,17 @@ enum Mode { VISUAL, SOURCE }
 @onready var _add_newline_button: Button = %AddNewlineButton
 @onready var _block_scroll: ScrollContainer = %BlockScroll
 @onready var _player: NovaCreditsPlayer = %Player
+@onready var _play_button: Button = %Play
+@onready var _pause_button: Button = %Pause
+@onready var _stop_button: Button = %Stop
+@onready var _speed_spin: SpinBox = %Speed
 
 var _document: CreditsEditorDocument
 var _mode: Mode = Mode.VISUAL
 var _suppress_env_signals := false
 var _sync_suppress := false
+var _preview_resource: CbinCreditsResource
+var _preview_paused := false
 
 func set_document(value: CreditsEditorDocument) -> void:
 	if _document == value:
@@ -42,7 +50,7 @@ func set_document(value: CreditsEditorDocument) -> void:
 		_on_resource_loaded(_document.resource)
 
 func flush_pending_edits() -> Error:
-	if _source_view_host != null and _source_view_host.has_method("apply_pending"):
+	if _mode == Mode.SOURCE and _source_view_host != null and _source_view_host.has_method("apply_pending"):
 		return _source_view_host.apply_pending()
 	return OK
 
@@ -56,6 +64,10 @@ func _ready() -> void:
 	_scroll_rate_spin.value_changed.connect(_on_scroll_rate_changed)
 	_vertical_space_spin.value_changed.connect(_on_vertical_space_changed)
 	_center_x_spin.value_changed.connect(_on_center_x_changed)
+	_play_button.pressed.connect(_on_play_pressed)
+	_pause_button.pressed.connect(_on_pause_pressed)
+	_stop_button.pressed.connect(_on_stop_pressed)
+	_speed_spin.value_changed.connect(func(v): _player.speed_scale = v)
 	_set_mode(Mode.VISUAL)
 	_add_text_button.pressed.connect(func(): _block_list.add_text())
 	_add_image_button.pressed.connect(func(): _block_list.add_image())
@@ -63,7 +75,11 @@ func _ready() -> void:
 	_block_scroll.get_v_scroll_bar().value_changed.connect(_on_block_scroll)
 	_player.scroll_offset_changed.connect(_on_player_scroll_offset_changed)
 	_player.gui_input.connect(_on_player_gui_input)
+	_player.started.connect(_refresh_preview_toolbar_state)
+	_player.finished.connect(_on_player_finished)
 	_block_list.selection_changed.connect(_on_block_list_selection_changed)
+	if _block_list.has_signal("request_edit_font"):
+		_block_list.connect("request_edit_font", Callable(self, "_on_block_list_request_edit_font"))
 	if _source_view_host.has_signal("pending_edits_changed"):
 		_source_view_host.pending_edits_changed.connect(_on_source_pending_edits_changed)
 	_player.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -72,13 +88,35 @@ func _ready() -> void:
 	_add_text_button.tooltip_text = "Insert a text entry after the selected card"
 	_add_image_button.tooltip_text = "Insert an image entry after the selected card"
 	_add_newline_button.tooltip_text = "Insert a blank line after the selected card"
+	_play_button.tooltip_text = "Play credits preview"
+	_pause_button.tooltip_text = "Pause credits preview"
+	_stop_button.tooltip_text = "Stop and show the first entries"
+	_speed_spin.tooltip_text = "Preview playback speed"
+	_refresh_preview_toolbar_state()
 
 func _set_mode(value: Mode) -> void:
+	if value == Mode.VISUAL and _mode == Mode.SOURCE:
+		var err := _apply_pending_source_for_visual_mode()
+		if err != OK:
+			_apply_mode_state()
+			return
 	_mode = value
+	if _mode == Mode.SOURCE and _source_view_host != null and _source_view_host.has_method("refresh_from_resource"):
+		_source_view_host.refresh_from_resource(true)
+	_apply_mode_state()
+
+func _apply_mode_state() -> void:
 	_block_list_host.visible = _mode == Mode.VISUAL
 	_source_view_host.visible = _mode == Mode.SOURCE
 	_visual_button.set_pressed_no_signal(_mode == Mode.VISUAL)
 	_source_button.set_pressed_no_signal(_mode == Mode.SOURCE)
+
+func _apply_pending_source_for_visual_mode() -> Error:
+	if _source_view_host == null or not _source_view_host.has_method("apply_pending"):
+		return OK
+	if _source_view_host.has_method("has_pending_edits") and not _source_view_host.has_pending_edits():
+		return OK
+	return _source_view_host.apply_pending()
 
 func _on_resource_loaded(resource: CbinCreditsResource) -> void:
 	_refresh_env_bar(resource)
@@ -87,8 +125,7 @@ func _on_resource_loaded(resource: CbinCreditsResource) -> void:
 		_block_list.set_resource(resource)
 	if _source_view_host and _source_view_host.has_method("set_resource"):
 		_source_view_host.set_resource(resource)
-	if _preview_host and _preview_host.has_method("set_resource"):
-		_preview_host.set_resource(resource)
+	_set_preview_resource(resource, true)
 
 func _on_resource_changed() -> void:
 	if _document == null:
@@ -99,8 +136,14 @@ func _on_resource_changed() -> void:
 		_block_list.set_resource(_document.resource)
 	if _source_view_host and _source_view_host.has_method("set_resource"):
 		_source_view_host.set_resource(_document.resource)
-	if _preview_host and _preview_host.has_method("set_resource"):
-		_preview_host.set_resource(_document.resource)
+	_set_preview_resource(_document.resource, false)
+
+func _set_preview_resource(resource: CbinCreditsResource, reset_playback: bool) -> void:
+	_preview_resource = resource
+	_player.credits_resource = resource
+	if reset_playback:
+		_preview_paused = false
+	_refresh_preview_toolbar_state()
 
 func _refresh_warning(resource: CbinCreditsResource) -> void:
 	if _warning_bar == null:
@@ -151,6 +194,39 @@ func _on_source_pending_edits_changed(has_pending_edits: bool) -> void:
 	_document.mark_dirty()
 	_document.state_changed.emit()
 
+func _on_player_finished() -> void:
+	_on_stop_pressed()
+
+func _on_play_pressed() -> void:
+	if _preview_resource == null:
+		return
+	if _preview_paused:
+		_player.resume()
+		_preview_paused = false
+	else:
+		_player.play()
+	_refresh_preview_toolbar_state()
+
+func _on_pause_pressed() -> void:
+	if not _player.is_playing():
+		return
+	_player.pause()
+	_preview_paused = true
+	_refresh_preview_toolbar_state()
+
+func _on_stop_pressed() -> void:
+	_player.stop()
+	_preview_paused = false
+	_player.set_scroll_offset(_player.get_size().y)
+	_refresh_preview_toolbar_state()
+
+func _refresh_preview_toolbar_state() -> void:
+	var has_resource := _preview_resource != null
+	_play_button.disabled = not has_resource
+	_pause_button.disabled = not _player.is_playing()
+	_stop_button.disabled = not has_resource
+	_play_button.text = "Resume" if _preview_paused else "Play"
+
 func _on_block_scroll(_value: float) -> void:
 	if _sync_suppress:
 		return
@@ -195,6 +271,10 @@ func _on_block_list_selection_changed(entry) -> void:
 	_sync_suppress = true
 	_player.set_scroll_offset(content_y + _player.get_size().y * 0.5)
 	_sync_suppress = false
+
+
+func _on_block_list_request_edit_font(font_name: String) -> void:
+	request_edit_font.emit(font_name)
 
 func _on_player_gui_input(event: InputEvent) -> void:
 	if _document == null or _document.resource == null:

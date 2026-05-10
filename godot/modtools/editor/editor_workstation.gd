@@ -5,11 +5,12 @@ const TerrainWorkspaceAdapter = preload("res://modtools/editor/terrain_workspace
 const EnvironmentWorkspaceAdapter = preload("res://modtools/editor/environment_workspace.gd")
 const ObjectWorkspaceAdapter = preload("res://modtools/object/object_workspace.gd")
 const MissionWorkspaceAdapter = preload("res://modtools/editor/mission_workspace.gd")
+const FontsWorkspaceAdapter = preload("res://modtools/editor/fonts_workspace.gd")
 const CreditsWorkspaceAdapter = preload("res://modtools/editor/credits_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
 const VegAssets = preload("res://engine/terrain/veg_assets.gd")
 
-enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS }
+enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS }
 
 # Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
 # shows the non-popup ones in order. The enum below stays only as stable id
@@ -183,6 +184,7 @@ func _workspace_defs() -> Array:
 		WorkspaceDef.make(Workspace.TERRAIN, TerrainWorkspaceAdapter),
 		WorkspaceDef.make(Workspace.OBJECT, ObjectWorkspaceAdapter),
 		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter),
+		WorkspaceDef.make(Workspace.FONTS, FontsWorkspaceAdapter),
 		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter),
 		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true),
 	]
@@ -344,6 +346,34 @@ func set_active_workspace(workspace_id: int) -> void:
 
 func get_active_workspace_id() -> int:
 	return _active_workspace_id
+
+
+func open_font_workspace(font_name: String) -> Error:
+	_ensure_workspaces()
+	var workspace := _get_workspace(Workspace.FONTS)
+	if workspace == null:
+		return ERR_UNAVAILABLE
+	var clean_name := font_name.strip_edges()
+	if clean_name.is_empty():
+		return ERR_INVALID_PARAMETER
+	var run_open := func() -> Error:
+		var err: Error = int(workspace.call("open_font_name", clean_name))
+		if err != OK:
+			show_status_message("Font not found: %s" % clean_name, 5.0)
+			return err
+		if _active_workspace_id != Workspace.FONTS:
+			set_active_workspace(Workspace.FONTS)
+		else:
+			_refresh_workspace_surface()
+			sync_from_editor_state()
+		show_status_message("Opened font %s." % clean_name, 3.0)
+		return OK
+	if workspace.has_unsaved_changes():
+		_prompt_unsaved_workspace_action(workspace, "open font", func() -> void:
+			run_open.call()
+		)
+		return OK
+	return run_open.call()
 
 
 func _get_workspace(workspace_id: int) -> EditorWorkspace:

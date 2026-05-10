@@ -135,6 +135,12 @@ target_include_directories(tdp_from_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 add_test(NAME tdp_from_3di COMMAND tdp_from_3di_test)
 
 # Terrain format library tests
+add_executable(fnt_roundtrip_test fnt/fnt_roundtrip_test.cpp)
+target_link_libraries(fnt_roundtrip_test PRIVATE opennova_fnt)
+target_include_directories(fnt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(fnt_roundtrip_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME fnt_roundtrip COMMAND fnt_roundtrip_test)
+
 add_executable(pcx_roundtrip_test pcx/pcx_roundtrip_test.cpp)
 target_link_libraries(pcx_roundtrip_test PRIVATE opennova_pcx)
 target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

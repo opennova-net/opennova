@@ -1,5 +1,7 @@
 #include "nova_credits_player.h"
 
+#include "fnt/nova_fnt_resource.h"
+
 #include <godot_cpp/classes/color_rect.hpp>
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
@@ -360,9 +362,6 @@ void NovaCreditsPlayer::_rebuild_content() {
 	content_->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	add_child(content_);
 
-	// Track current font (carried over from previous text entries if not specified).
-	Ref<Font> current_font;
-
 	// Current Y position for layout (scroll stream position).
 	float current_y = 0.0f;
 
@@ -399,16 +398,19 @@ void NovaCreditsPlayer::_rebuild_content() {
 			// Get color from entry.
 			label->set_modulate(text_entry->get_color());
 
-			// Try to load font from resource or use current font.
+			// Use only the font explicitly assigned to this text entry.
 			Ref<Resource> font_res = text_entry->get_font();
 			if (font_res.is_valid()) {
 				Ref<Font> font = font_res;
+				if (!font.is_valid()) {
+					Ref<NovaFntResource> nova_fnt = font_res;
+					if (nova_fnt.is_valid()) {
+						font = nova_fnt->to_font_file();
+					}
+				}
 				if (font.is_valid()) {
 					label->add_theme_font_override("font", font);
-					current_font = font;
 				}
-			} else if (current_font.is_valid()) {
-				label->add_theme_font_override("font", current_font);
 			}
 
 			label->set_name(String("Label_") + String::num_int64(++label_count));

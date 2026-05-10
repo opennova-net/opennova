@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(opennova_godot LANGUAGES CXX)
+project(opennova_godot LANGUAGES C CXX)
 
 add_subdirectory(../../third_party/godot-cpp godot-cpp)
 add_subdirectory(../../libs/pcx opennova_pcx)
+add_subdirectory(../../libs/fnt opennova_fnt)
 add_subdirectory(../../libs/foliage opennova_foliage)
 add_subdirectory(../../libs/til opennova_til)
 add_subdirectory(../../libs/tpj opennova_tpj)
@@ -49,6 +50,10 @@ add_library(${TARGET_NAME} SHARED
     util/pcx_texture_bridge.cpp
     util/texture_path_resolver.cpp
     resource_index/nova_resource_index.cpp
+    editor/opennova_editor_plugin.cpp
+    fnt/nova_fnt_resource.cpp
+    fnt/fnt_resource_format.cpp
+    fnt/fnt_import_plugin.cpp
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE
@@ -58,6 +63,7 @@ target_include_directories(${TARGET_NAME} PRIVATE
 target_link_libraries(${TARGET_NAME} PRIVATE
     godot-cpp
     opennova_pcx
+    opennova_fnt
     opennova_foliage
     opennova_til
     opennova_tpj

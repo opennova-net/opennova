@@ -3,6 +3,7 @@ project(opennova LANGUAGES C CXX)
 
 # Add libraries
 add_subdirectory(libs/pcx)
+add_subdirectory(libs/fnt)
 add_subdirectory(libs/foliage)
 add_subdirectory(libs/til)
 add_subdirectory(libs/tpj)
@@ -26,6 +27,7 @@ add_subdirectory(libs/resource_index)
 
 set(OPENNOVA_CORE_TARGETS
     opennova_pcx
+    opennova_fnt
     opennova_foliage
     opennova_til
     opennova_tpj

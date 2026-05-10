@@ -185,3 +185,65 @@ func test_save_current_flushes_pending_source_edits() -> void:
 	assert_eq((reloaded.get_entry(0) as CbinTextEntry).get_text(), "Saved source edit",
 		"saved file should contain pending source text.")
 	assert_eq(reloaded.get_vertical_space(), 21, "saved file should contain pending ENV values.")
+
+
+func test_visual_save_ignores_hidden_stale_source_text_and_preserves_entries() -> void:
+	var ws = autofree(CreditsWorkspaceScript.new())
+	var host := Control.new()
+	add_child_autofree(host)
+	ws.mount_viewport(host)
+	await get_tree().process_frame
+
+	var err = ws.open_file(_kda_path)
+	assert_eq(err, OK, "open_file should succeed.")
+	if err != OK:
+		return
+	await get_tree().process_frame
+
+	var original_count: int = ws._document.resource.get_entry_count()
+	assert_gt(original_count, 10, "fixture should have enough entries to prove save preservation.")
+	var deep_index := -1
+	var deep_entry: CbinTextEntry = null
+	for i in range(1, original_count):
+		var candidate := ws._document.resource.get_entry(i) as CbinTextEntry
+		if candidate != null:
+			deep_index = i
+			deep_entry = candidate
+			break
+	assert_not_null(deep_entry, "fixture should contain an unedited text entry for preservation check.")
+	if deep_entry == null:
+		return
+	var deep_text := deep_entry.get_text()
+
+	var editor: Control = ws._editor
+	var visual_button: Button = editor.get_node("%VisualButton")
+	visual_button.button_pressed = true
+	await get_tree().process_frame
+
+	var code_edit: CodeEdit = editor.get_node("HSplit/LeftPane/ContentStack/SourceViewHost/CodeEdit")
+	code_edit.text = MINIMAL_SOURCE
+
+	var first_entry := ws._document.resource.get_entry(0) as CbinTextEntry
+	assert_not_null(first_entry, "fixture first entry should be text for visual edit.")
+	if first_entry == null:
+		return
+	first_entry.set_text("Visual save sentinel")
+
+	err = ws.save_current()
+	assert_eq(err, OK, "visual-mode save should succeed without applying hidden source text.")
+	if err != OK:
+		return
+
+	var reloaded := ResourceLoader.load(_kda_path, "CbinCreditsResource",
+		ResourceLoader.CACHE_MODE_REPLACE) as CbinCreditsResource
+	assert_not_null(reloaded, "saved KDA should reload.")
+	if reloaded == null:
+		return
+	assert_eq(reloaded.get_entry_count(), original_count,
+		"visual-mode save should preserve unedited entries from the original KDA.")
+	if reloaded.get_entry_count() != original_count:
+		return
+	assert_eq((reloaded.get_entry(0) as CbinTextEntry).get_text(), "Visual save sentinel",
+		"visual edit should be saved.")
+	assert_eq((reloaded.get_entry(deep_index) as CbinTextEntry).get_text(), deep_text,
+		"unedited deep entry should survive visual save.")

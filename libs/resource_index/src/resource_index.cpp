@@ -52,6 +52,9 @@ std::string kind_for_extension(const fs::path &path) {
 	if (extension == ".kda") {
 		return "credits";
 	}
+	if (extension == ".fnt") {
+		return "font";
+	}
 	return "";
 }
 
@@ -80,6 +83,9 @@ std::string normalize_kind(const std::string &kind) {
 	}
 	if (key == "kda") {
 		return "credits";
+	}
+	if (key == "fnt" || key == "fonts") {
+		return "font";
 	}
 	return key;
 }

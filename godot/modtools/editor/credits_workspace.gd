@@ -57,6 +57,8 @@ func mount_viewport(host: Control) -> void:
 	if _editor.get_parent() == null:
 		host.add_child(_editor)
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
+	if _editor.has_signal("request_edit_font") and not _editor.is_connected("request_edit_font", Callable(self, "_on_editor_request_edit_font")):
+		_editor.connect("request_edit_font", Callable(self, "_on_editor_request_edit_font"))
 	_editor.set_document(_document)
 
 
@@ -73,6 +75,8 @@ func release_viewport() -> void:
 		_inspector_root = null
 	if _editor != null and _editor.get_parent() != null:
 		_editor.get_parent().remove_child(_editor)
+	if _editor != null and _editor.has_signal("request_edit_font") and _editor.is_connected("request_edit_font", Callable(self, "_on_editor_request_edit_font")):
+		_editor.disconnect("request_edit_font", Callable(self, "_on_editor_request_edit_font"))
 	if _editor != null:
 		_editor.free()
 		_editor = null
@@ -271,3 +275,11 @@ func get_save_dialog_title() -> String:
 
 func get_save_dialog_dir() -> String:
 	return _document.get_last_save_dir()
+
+
+func _on_editor_request_edit_font(font_name: String) -> void:
+	if editor_shell == null or not editor_shell.has_method("open_font_workspace"):
+		return
+	var err: Error = editor_shell.open_font_workspace(font_name)
+	if err != OK and editor_shell.has_method("show_status_message"):
+		editor_shell.show_status_message("Font not found: %s" % font_name, 5.0)

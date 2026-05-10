@@ -5,6 +5,7 @@ const BlockCardScene = preload("res://modtools/credits/credits_editor_block_card
 
 signal entries_reordered
 signal selection_changed(entry)
+signal request_edit_font(font_name)
 
 var _resource: CbinCreditsResource
 var _vbox: VBoxContainer
@@ -106,6 +107,7 @@ func _reconcile() -> void:
 			card.bind(entry, _font_options)
 			card.request_delete.connect(_on_card_delete)
 			card.request_select.connect(_on_card_select)
+			card.request_edit_font.connect(_on_card_request_edit_font)
 			_entry_to_card[entry] = card
 		if _vbox.get_child(i) != card:
 			_vbox.move_child(card, i)
@@ -154,6 +156,11 @@ func card_for_entry(entry: CbinEntry) -> CreditsEditorBlockCard:
 
 func _on_card_select(card: CreditsEditorBlockCard) -> void:
 	select_entry(card.get_entry())
+
+
+func _on_card_request_edit_font(font_name: String) -> void:
+	request_edit_font.emit(font_name)
+
 
 func _refresh_selection_visual() -> void:
 	for entry in _entry_to_card.keys():

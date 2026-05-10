@@ -119,6 +119,33 @@ func test_scrolling_image_advances_by_rendered_height() -> void:
 	assert_almost_eq(player.content_y_for_entry(1), expected_y, 1.0,
 		"entry after a scrolling image should start after the rendered image height plus spacing.")
 
+func test_text_entry_font_does_not_carry_to_next_default_font_entry() -> void:
+	var player := NovaCreditsPlayer.new()
+	add_child_autofree(player)
+	player.set_size(Vector2(640, 480))
+	await get_tree().process_frame
+
+	var res := CbinCreditsResource.new()
+	var explicit := CbinTextEntry.new()
+	explicit.set_text("Explicit font")
+	explicit.set_font_name("Serpen24")
+	res.add_entry(explicit)
+	var default_font := CbinTextEntry.new()
+	default_font.set_text("Default font")
+	res.add_entry(default_font)
+
+	player.set_credits_resource(res)
+	await get_tree().process_frame
+	player.rebuild()
+
+	var explicit_label := player.get_node("Content/Label_1") as Label
+	var default_label := player.get_node("Content/Label_2") as Label
+	assert_not_null(explicit_label)
+	assert_not_null(default_label)
+	assert_true(explicit_label.has_theme_font_override("font"), "entry with an explicit font receives a font override")
+	assert_false(default_label.has_theme_font_override("font"),
+		"entry without an explicit font should keep the default preview font")
+
 func test_player_scroll_during_playback_updates_list_selection() -> void:
 	var editor = CreditsEditorScene.instantiate()
 	add_child_autofree(editor)

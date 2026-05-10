@@ -7,6 +7,7 @@ const TEXTURE_EXTENSIONS := ["png", "pcx", "tga", "jpg", "jpeg", "bmp"]
 signal request_delete(card)
 signal request_drag(card)
 signal request_select(card)
+signal request_edit_font(font_name)
 
 @onready var _drag_handle: Label = %DragHandle
 @onready var _type_chip: Label = %TypeChip
@@ -16,6 +17,7 @@ signal request_select(card)
 @onready var _text_panel: Control = %TextPanel
 @onready var _text_edit: LineEdit = %TextEdit
 @onready var _font_picker: OptionButton = %FontPicker
+@onready var _font_edit_button: Button = %FontEditButton
 @onready var _color_picker_text: ColorPickerButton = %TextColorPicker
 @onready var _align_left: Button = %AlignLeft
 @onready var _align_center: Button = %AlignCenter
@@ -65,6 +67,8 @@ func _ready() -> void:
 	self.gui_input.connect(_on_panel_input)
 	_text_edit.text_changed.connect(_on_text_changed)
 	_font_picker.item_selected.connect(_on_font_selected)
+	if not _font_edit_button.pressed.is_connected(_on_font_edit_pressed):
+		_font_edit_button.pressed.connect(_on_font_edit_pressed)
 	_color_picker_text.color_changed.connect(_on_text_color_changed)
 	_align_left.pressed.connect(func(): _on_align(CbinEntry.CBIN_JUSTIFY_LEFT))
 	_align_center.pressed.connect(func(): _on_align(CbinEntry.CBIN_JUSTIFY_CENTER))
@@ -97,6 +101,7 @@ func _configure_affordances() -> void:
 	_image_mode_fixed.tooltip_text = "Image stays fixed and fades in/out"
 	_text_edit.tooltip_text = "Credits line text"
 	_font_picker.tooltip_text = "Font for this line"
+	_font_edit_button.tooltip_text = "Open this font in the Fonts workspace"
 	_color_picker_text.tooltip_text = "Text color"
 	_image_path_edit.tooltip_text = "Image filename under assets/textures"
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -124,6 +129,7 @@ func _refresh() -> void:
 		if _color_picker_text.color != entry_color:
 			_color_picker_text.color = entry_color
 		var entry_font: String = _entry.get_font_name()
+		_font_edit_button.disabled = entry_font.is_empty()
 		var current_font_idx := _font_picker.selected
 		var current_font := _font_picker.get_item_text(current_font_idx) if current_font_idx > 0 else ""
 		if current_font != entry_font:
@@ -187,6 +193,22 @@ func _on_font_selected(index: int) -> void:
 		return
 	var name := "" if index == 0 else _font_picker.get_item_text(index)
 	(_entry as CbinTextEntry).set_font_name(name)
+	_font_edit_button.disabled = name.is_empty()
+
+func _on_font_edit_pressed() -> void:
+	if not (_entry is CbinTextEntry):
+		return
+	var font_name := _selected_font_name()
+	if font_name.is_empty():
+		return
+	request_edit_font.emit(font_name)
+
+
+func _selected_font_name() -> String:
+	if _font_picker.selected > 0:
+		return _font_picker.get_item_text(_font_picker.selected).strip_edges()
+	return (_entry as CbinTextEntry).get_font_name().strip_edges()
+
 
 func _on_text_color_changed(color: Color) -> void:
 	if _suppress or not (_entry is CbinTextEntry):

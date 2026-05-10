@@ -10,39 +10,53 @@ signal pending_edits_changed(has_pending_edits)
 var _resource: CbinCreditsResource
 var _suppress := false
 var _refresh_pending := false
+var _refresh_force := false
 var _source_dirty := false
 var _last_applied_text := ""
 
 func set_resource(value: CbinCreditsResource) -> void:
 	if _resource == value:
+		refresh_from_resource(false)
 		return
-	if _resource and _resource.changed.is_connected(_refresh_text):
-		_resource.changed.disconnect(_refresh_text)
+	if _resource and _resource.changed.is_connected(_on_resource_changed):
+		_resource.changed.disconnect(_on_resource_changed)
 	_resource = value
 	if _resource:
-		_resource.changed.connect(_refresh_text)
-	_refresh_text()
+		_resource.changed.connect(_on_resource_changed)
+	refresh_from_resource(true)
 
 func _ready() -> void:
 	_apply_button.pressed.connect(_apply)
 	_code_edit.focus_exited.connect(_apply)
 	_code_edit.text_changed.connect(_on_text_changed)
 
-func _refresh_text() -> void:
+func has_pending_edits() -> bool:
+	if _resource == null or _code_edit == null:
+		return false
+	return _source_dirty or _code_edit.text != _last_applied_text
+
+func refresh_from_resource(force := false) -> void:
 	if _resource == null:
 		return
-	if _code_edit.has_focus():
+	if not force and visible and _code_edit.has_focus():
 		return
+	if force:
+		_refresh_force = true
 	if _refresh_pending:
 		return
 	_refresh_pending = true
 	call_deferred("_apply_refresh")
 
+func _on_resource_changed() -> void:
+	refresh_from_resource(false)
+
 func _apply_refresh() -> void:
 	_refresh_pending = false
+	var force := _refresh_force
+	_refresh_force = false
 	if _resource == null:
 		return
-	if _code_edit.has_focus():
+	if not force and visible and _code_edit.has_focus():
 		return
 	_suppress = true
 	_code_edit.text = _resource.to_text()
