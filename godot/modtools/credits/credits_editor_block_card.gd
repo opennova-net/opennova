@@ -25,6 +25,7 @@ signal request_select(card)
 @onready var _color_panel: Control = %ColorPanel
 @onready var _color_picker: ColorPickerButton = %ColorPicker
 @onready var _color_hex: Label = %ColorHex
+@onready var _spacer_panel: Control = %SpacerPanel
 
 # Image controls
 @onready var _image_panel: Control = %ImagePanel
@@ -39,7 +40,9 @@ signal request_select(card)
 
 var _entry: CbinEntry
 var _suppress := false
+var _selected := false
 var _selected_stylebox: StyleBoxFlat
+var _spacer_stylebox: StyleBoxFlat
 
 func bind(entry: CbinEntry, font_options: PackedStringArray) -> void:
 	if _entry and _entry.changed.is_connected(_refresh):
@@ -102,11 +105,17 @@ func _refresh() -> void:
 	if _entry == null:
 		return
 	_suppress = true
-	_text_panel.visible = _entry is CbinTextEntry
+	var is_text := _entry is CbinTextEntry
+	var is_newline := _entry is CbinNewlineEntry
+	var is_image := _entry is CbinImageEntry
+	_text_panel.visible = is_text
 	_color_panel.visible = false
-	_image_panel.visible = _entry is CbinImageEntry
+	_spacer_panel.visible = is_newline
+	_image_panel.visible = is_image
+	custom_minimum_size.y = 28.0 if is_newline else 0.0
+	_type_chip.theme_type_variation = &""
 
-	if _entry is CbinTextEntry:
+	if is_text:
 		_type_chip.text = "TEXT"
 		var entry_text: String = _entry.get_text()
 		if not _text_edit.has_focus() and _text_edit.text != entry_text:
@@ -120,9 +129,10 @@ func _refresh() -> void:
 		if current_font != entry_font:
 			_select_font_in_picker(entry_font)
 		_refresh_align_buttons(_entry.get_justify())
-	elif _entry is CbinNewlineEntry:
-		_type_chip.text = "NEWLINE"
-	elif _entry is CbinImageEntry:
+	elif is_newline:
+		_type_chip.text = "SPACE"
+		_type_chip.theme_type_variation = &"Muted"
+	elif is_image:
 		_type_chip.text = "IMAGE"
 		var entry_path: String = _entry.get_texture_path()
 		if not _image_path_edit.has_focus() and _image_path_edit.text != entry_path:
@@ -138,6 +148,7 @@ func _refresh() -> void:
 		var tex := _entry.get_texture() as Texture2D
 		if _image_thumb.texture != tex:
 			_image_thumb.texture = tex
+	_apply_panel_style()
 	_suppress = false
 
 func _populate_font_options(names: PackedStringArray) -> void:
@@ -311,9 +322,32 @@ func _ensure_selected_stylebox() -> StyleBoxFlat:
 		_selected_stylebox = sb
 	return _selected_stylebox
 
+func _ensure_spacer_stylebox() -> StyleBoxFlat:
+	if _spacer_stylebox == null:
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0.0863, 0.0941, 0.1098, 0.45)
+		sb.border_color = Color(0.1804, 0.2, 0.2314, 0.8)
+		sb.border_width_bottom = 1
+		sb.corner_radius_top_left = 3
+		sb.corner_radius_top_right = 3
+		sb.corner_radius_bottom_right = 3
+		sb.corner_radius_bottom_left = 3
+		sb.content_margin_left = 12
+		sb.content_margin_right = 12
+		sb.content_margin_top = 2
+		sb.content_margin_bottom = 2
+		_spacer_stylebox = sb
+	return _spacer_stylebox
+
 func set_selected(value: bool) -> void:
-	if value:
+	_selected = value
+	_apply_panel_style()
+
+func _apply_panel_style() -> void:
+	if _selected:
 		add_theme_stylebox_override("panel", _ensure_selected_stylebox())
+	elif _entry is CbinNewlineEntry:
+		add_theme_stylebox_override("panel", _ensure_spacer_stylebox())
 	else:
 		remove_theme_stylebox_override("panel")
 

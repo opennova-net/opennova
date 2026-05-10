@@ -75,6 +75,23 @@ unique_name_in_owner = true
 unique_name_in_owner = true
 text = "#FFFFFF"
 
+[node name="SpacerPanel" type="HBoxContainer" parent="Row"]
+unique_name_in_owner = true
+visible = false
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="SpacerLineLeft" type="HSeparator" parent="Row/SpacerPanel"]
+size_flags_horizontal = 3
+
+[node name="SpacerLabel" type="Label" parent="Row/SpacerPanel"]
+theme_type_variation = &"Muted"
+text = "blank line"
+vertical_alignment = 1
+
+[node name="SpacerLineRight" type="HSeparator" parent="Row/SpacerPanel"]
+size_flags_horizontal = 3
+
 [node name="ImagePanel" type="HBoxContainer" parent="Row"]
 unique_name_in_owner = true
 visible = false

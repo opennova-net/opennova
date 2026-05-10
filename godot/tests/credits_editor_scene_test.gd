@@ -62,6 +62,38 @@ func test_block_card_binds_text_entry() -> void:
 	card.bind(entry, PackedStringArray())
 	assert_eq(card.get_entry(), entry)
 
+func test_block_card_binds_newline_as_compact_spacer() -> void:
+	var card = CreditsEditorBlockCardScene.instantiate()
+	add_child_autofree(card)
+	await get_tree().process_frame
+
+	card.bind(CbinNewlineEntry.new(), PackedStringArray())
+	await get_tree().process_frame
+
+	var type_chip: Label = card.get_node("%TypeChip")
+	assert_eq(type_chip.text, "SPACE",
+		"Newline cards should read as compact spacing controls.")
+	assert_true(card.custom_minimum_size.y > 0.0 and card.custom_minimum_size.y <= 32.0,
+		"Newline cards should use a compact row height.")
+
+	var spacer_panel := card.get_node_or_null("Row/SpacerPanel") as Control
+	assert_not_null(spacer_panel, "Newline cards should expose a spacer panel.")
+	if spacer_panel == null:
+		return
+	assert_true(spacer_panel.visible,
+		"Spacer panel should be visible for newline entries.")
+
+func test_editor_chrome_uses_compact_command_and_preview_controls() -> void:
+	var editor = CreditsEditorScene.instantiate()
+	add_child_autofree(editor)
+	await get_tree().process_frame
+
+	var add_row_frame := editor.get_node("HSplit/LeftPane/ContentStack/BlockListHost/AddRowFrame") as PanelContainer
+	assert_eq(add_row_frame.theme_type_variation, &"FlatPanel",
+		"The add command strip should use the flat panel theme.")
+	assert_not_null(editor.get_node_or_null("HSplit/RightPane/PreviewHost/Toolbar/SpeedLabel"),
+		"Preview toolbar should label the playback speed control.")
+
 func test_block_card_missing_image_name_commits_on_focus_loss() -> void:
 	var card = CreditsEditorBlockCardScene.instantiate()
 	add_child_autofree(card)

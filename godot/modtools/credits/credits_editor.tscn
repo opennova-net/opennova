@@ -22,8 +22,10 @@ dragger_visibility = 0
 clip_contents = true
 size_flags_horizontal = 3
 size_flags_vertical = 3
+theme_override_constants/separation = 8
 
 [node name="ModeBar" type="HBoxContainer" parent="HSplit/LeftPane"]
+custom_minimum_size = Vector2(0, 34)
 size_flags_horizontal = 3
 theme_override_constants/separation = 8
 
@@ -49,6 +51,7 @@ size_flags_horizontal = 3
 theme_override_constants/separation = 6
 
 [node name="ScrollRateLabel" type="Label" parent="HSplit/LeftPane/EnvBar"]
+theme_type_variation = &"Muted"
 text = "Scroll rate"
 
 [node name="ScrollRateSpin" type="SpinBox" parent="HSplit/LeftPane/EnvBar"]
@@ -60,6 +63,7 @@ step = 0.05
 value = 0.5
 
 [node name="VerticalSpaceLabel" type="Label" parent="HSplit/LeftPane/EnvBar"]
+theme_type_variation = &"Muted"
 text = "Line spacing"
 
 [node name="VerticalSpaceSpin" type="SpinBox" parent="HSplit/LeftPane/EnvBar"]
@@ -71,6 +75,7 @@ step = 1
 value = 14
 
 [node name="CenterXLabel" type="Label" parent="HSplit/LeftPane/EnvBar"]
+theme_type_variation = &"Muted"
 text = "Center X"
 
 [node name="CenterXSpin" type="SpinBox" parent="HSplit/LeftPane/EnvBar"]
@@ -114,6 +119,7 @@ script = ExtResource("BlockList")
 
 [node name="AddRowFrame" type="PanelContainer" parent="HSplit/LeftPane/ContentStack/BlockListHost"]
 size_flags_horizontal = 3
+theme_type_variation = &"FlatPanel"
 
 [node name="AddRowMargin" type="MarginContainer" parent="HSplit/LeftPane/ContentStack/BlockListHost/AddRowFrame"]
 theme_override_constants/margin_left = 6
@@ -164,6 +170,7 @@ size_flags_vertical = 3
 clip_contents = true
 size_flags_horizontal = 3
 size_flags_vertical = 3
+theme_override_constants/separation = 8
 
 [node name="PreviewHost" type="VBoxContainer" parent="HSplit/RightPane"]
 unique_name_in_owner = true
@@ -186,6 +193,14 @@ text = "Pause"
 [node name="Stop" type="Button" parent="HSplit/RightPane/PreviewHost/Toolbar"]
 custom_minimum_size = Vector2(72, 0)
 text = "Stop"
+
+[node name="ToolbarSpacer" type="Control" parent="HSplit/RightPane/PreviewHost/Toolbar"]
+custom_minimum_size = Vector2(8, 0)
+
+[node name="SpeedLabel" type="Label" parent="HSplit/RightPane/PreviewHost/Toolbar"]
+theme_type_variation = &"Muted"
+text = "Speed"
+vertical_alignment = 1
 
 [node name="Speed" type="SpinBox" parent="HSplit/RightPane/PreviewHost/Toolbar"]
 custom_minimum_size = Vector2(86, 0)
