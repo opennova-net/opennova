@@ -89,6 +89,36 @@ func test_fixed_image_uses_logical_stream_y_for_sync() -> void:
 	player.set_scroll_offset(player.content_y_for_entry(1) + player.get_size().y * 0.5)
 	assert_eq(player.entry_index_at_scroll_center(), 1, "fixed image can be selected from the centered preview stream")
 
+func test_scrolling_image_advances_by_rendered_height() -> void:
+	var player := NovaCreditsPlayer.new()
+	add_child_autofree(player)
+	player.set_size(Vector2(640, 480))
+	await get_tree().process_frame
+
+	var texture := ResourceLoader.load("res://assets/textures/bink.tga") as Texture2D
+	assert_not_null(texture, "bink.tga fixture should be loadable for layout regression.")
+	if texture == null:
+		return
+
+	var res := CbinCreditsResource.new()
+	res.set_vertical_space(20)
+	var image := CbinImageEntry.new()
+	image.set_advances_y(true)
+	image.set_texture(texture)
+	image.set_texture_name("bink.tga")
+	res.add_entry(image)
+	var text := CbinTextEntry.new()
+	text.set_text("After image")
+	res.add_entry(text)
+
+	player.set_credits_resource(res)
+	await get_tree().process_frame
+	player.rebuild()
+
+	var expected_y := texture.get_size().y + res.get_vertical_space()
+	assert_almost_eq(player.content_y_for_entry(1), expected_y, 1.0,
+		"entry after a scrolling image should start after the rendered image height plus spacing.")
+
 func test_player_scroll_during_playback_updates_list_selection() -> void:
 	var editor = CreditsEditorScene.instantiate()
 	add_child_autofree(editor)

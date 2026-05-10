@@ -494,7 +494,7 @@ void NovaCreditsPlayer::_rebuild_content() {
 					content_->add_child(placeholder);
 					placeholder->set_position(Vector2(0, current_y));
 					position_control_horizontal(placeholder, pw, HORIZONTAL_ALIGNMENT_CENTER, text_area_left, text_area_right);
-					current_y += vertical_space;
+					current_y += ph + vertical_space;
 				} else {
 					add_child(placeholder);
 					move_child(placeholder, 0);
@@ -528,7 +528,7 @@ void NovaCreditsPlayer::_rebuild_content() {
 					content_->add_child(tex_rect);
 					tex_rect->set_position(Vector2(0, current_y));
 					position_control_horizontal(tex_rect, image_size.x, HORIZONTAL_ALIGNMENT_CENTER, text_area_left, text_area_right);
-					current_y += vertical_space;
+					current_y += image_size.y + vertical_space;
 				} else {
 					// ~F images: fixed overlay, vertically centered in viewport.
 					// display_x is X position, image is centered vertically.

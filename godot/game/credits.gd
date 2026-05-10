@@ -4,6 +4,8 @@ signal credits_done
 
 @onready var _player: NovaCreditsPlayer = %CreditsPlayer
 
+var _done := false
+
 
 func _ready() -> void:
 	_player.finished.connect(_on_finished)
@@ -24,4 +26,7 @@ func _skip() -> void:
 
 
 func _on_finished() -> void:
+	if _done:
+		return
+	_done = true
 	credits_done.emit()

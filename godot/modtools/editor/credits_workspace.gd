@@ -229,6 +229,12 @@ func open_file(path: String) -> Error:
 	return _document.open_kda(path)
 
 
+func flush_pending_edits() -> Error:
+	if _editor != null and _editor.has_method("flush_pending_edits"):
+		return _editor.flush_pending_edits()
+	return OK
+
+
 func can_save() -> bool:
 	return _document.is_dirty and not _document.current_path.is_empty()
 
@@ -246,10 +252,16 @@ func get_save_as_action_label() -> String:
 
 
 func save_current() -> Error:
+	var flush_err := flush_pending_edits()
+	if flush_err != OK:
+		return flush_err
 	return _document.save_current()
 
 
 func save_as(dir_path: String) -> Error:
+	var flush_err := flush_pending_edits()
+	if flush_err != OK:
+		return flush_err
 	return _document.save_as(dir_path)
 
 

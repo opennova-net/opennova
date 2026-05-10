@@ -3,6 +3,7 @@ extends GutTest
 const CreditsWorkspaceScript = preload("res://modtools/editor/credits_workspace.gd")
 const KDA_SOURCE_PATH := "res://assets/credits/nlist.kda"
 const TEMP_DIR := "user://test_credits_ws"
+const MINIMAL_SOURCE := "[ENV]\nscroll_rate=1.50\nvertical_space=21\ncenter_x=420\n\n[TEXT]\nSaved source edit\n"
 
 var _kda_path: String = ""
 
@@ -147,3 +148,40 @@ func test_can_save_false_on_fresh_true_after_dirty_with_path() -> void:
 
 	assert_true(ws.can_save(),
 		"can_save should be true when document is dirty and current_path is set.")
+
+
+func test_save_current_flushes_pending_source_edits() -> void:
+	var ws = autofree(CreditsWorkspaceScript.new())
+	var host := Control.new()
+	add_child_autofree(host)
+	ws.mount_viewport(host)
+	await get_tree().process_frame
+
+	var err = ws.open_file(_kda_path)
+	assert_eq(err, OK, "open_file should succeed.")
+	if err != OK:
+		return
+	await get_tree().process_frame
+
+	var editor: Control = ws._editor
+	var source_button: Button = editor.get_node("%SourceButton")
+	source_button.button_pressed = true
+	await get_tree().process_frame
+
+	var code_edit: CodeEdit = editor.get_node("HSplit/LeftPane/ContentStack/SourceViewHost/CodeEdit")
+	code_edit.text = MINIMAL_SOURCE
+
+	err = ws.save_current()
+	assert_eq(err, OK, "save_current should apply pending source text before saving.")
+	if err != OK:
+		return
+
+	var reloaded := ResourceLoader.load(_kda_path, "CbinCreditsResource",
+		ResourceLoader.CACHE_MODE_REPLACE) as CbinCreditsResource
+	assert_not_null(reloaded, "saved KDA should reload.")
+	if reloaded == null:
+		return
+	assert_eq(reloaded.get_entry_count(), 1, "pending source text should be saved.")
+	assert_eq((reloaded.get_entry(0) as CbinTextEntry).get_text(), "Saved source edit",
+		"saved file should contain pending source text.")
+	assert_eq(reloaded.get_vertical_space(), 21, "saved file should contain pending ENV values.")

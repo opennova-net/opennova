@@ -108,7 +108,8 @@ public:
 	void set_display_x(int p_x);
 	int get_display_x() const;
 
-	// For ~F format: display Y offset from viewport top
+	// For ~F format: display Y offset from viewport top.
+	// A value of 0 is preserved as the legacy auto-center sentinel.
 	void set_display_y(int p_y);
 	int get_display_y() const;
 
@@ -178,6 +179,7 @@ private:
 	void _on_entry_changed();
 	void _connect_entry(const Ref<CbinEntry> &p_entry);
 	void _disconnect_entry(const Ref<CbinEntry> &p_entry);
+	bool _contains_entry_ref(const Ref<CbinEntry> &p_entry) const;
 };
 
 }  // namespace godot

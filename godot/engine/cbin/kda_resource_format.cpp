@@ -60,6 +60,10 @@ String KdaResourceFormatLoader::_get_resource_type(const String &p_path) const {
 
 Variant KdaResourceFormatLoader::_load(const String &p_path, const String &p_original_path, bool p_use_sub_threads,
                                 int32_t p_cache_mode) const {
+	(void)p_original_path;
+	(void)p_use_sub_threads;
+	(void)p_cache_mode;
+
 	// Read file data.
 	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ);
 	if (!file.is_valid()) {
@@ -168,9 +172,6 @@ Variant KdaResourceFormatLoader::_load(const String &p_path, const String &p_ori
 			}
 		}
 	}
-
-	// Set resource path.
-	resource->set_path(p_original_path);
 
 	return resource;
 }

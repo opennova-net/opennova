@@ -3,6 +3,8 @@ extends GutTest
 const CreditsEditorScene = preload("res://modtools/credits/credits_editor.tscn")
 const CreditsEditorBlockCardScene = preload("res://modtools/credits/credits_editor_block_card.tscn")
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
+const MINIMAL_SOURCE := "[ENV]\nscroll_rate=1.25\nvertical_space=18\ncenter_x=360\n\n[TEXT]\nApplied from source\n"
+const MALFORMED_SOURCE := "[ENV]\nscroll_rate=1.25\n\n[TEXT]\n~Fbad\n"
 
 func test_block_card_scene_instantiates() -> void:
 	var card = CreditsEditorBlockCardScene.instantiate()
@@ -148,3 +150,53 @@ func test_preview_pause_resume_and_stop_show_first_entries() -> void:
 	await get_tree().process_frame
 	assert_false(player.is_playing(), "stop ends playback")
 	assert_almost_eq(player.get_scroll_offset(), player.get_size().y, 1.0, "stop returns preview to the first entries")
+
+
+func test_flush_pending_source_edits_applies_code_edit_to_resource() -> void:
+	var editor = CreditsEditorScene.instantiate()
+	add_child_autofree(editor)
+	await get_tree().process_frame
+
+	var doc: CreditsEditorDocument = autofree(CreditsEditorDocument.new())
+	editor.set_document(doc)
+	await get_tree().process_frame
+
+	var source: Button = editor.get_node("%SourceButton")
+	source.button_pressed = true
+	await get_tree().process_frame
+
+	var code_edit: CodeEdit = editor.get_node("HSplit/LeftPane/ContentStack/SourceViewHost/CodeEdit")
+	code_edit.text = MINIMAL_SOURCE
+
+	var err: int = editor.flush_pending_edits()
+	assert_eq(err, OK, "flush_pending_edits should apply valid source text.")
+	assert_eq(doc.resource.get_entry_count(), 1, "valid source should replace entries.")
+	assert_eq((doc.resource.get_entry(0) as CbinTextEntry).get_text(), "Applied from source",
+		"resource should contain the pending source text.")
+	assert_eq(doc.resource.get_vertical_space(), 18, "ENV values should be applied during source flush.")
+
+
+func test_flush_pending_source_parse_error_preserves_resource() -> void:
+	var editor = CreditsEditorScene.instantiate()
+	add_child_autofree(editor)
+	await get_tree().process_frame
+
+	var doc: CreditsEditorDocument = autofree(CreditsEditorDocument.new())
+	var entry := CbinTextEntry.new()
+	entry.set_text("Keep me")
+	doc.resource.add_entry(entry)
+	editor.set_document(doc)
+	await get_tree().process_frame
+
+	var source: Button = editor.get_node("%SourceButton")
+	source.button_pressed = true
+	await get_tree().process_frame
+
+	var code_edit: CodeEdit = editor.get_node("HSplit/LeftPane/ContentStack/SourceViewHost/CodeEdit")
+	code_edit.text = MALFORMED_SOURCE
+
+	var err: int = editor.flush_pending_edits()
+	assert_ne(err, OK, "flush_pending_edits should reject malformed source text.")
+	assert_eq(doc.resource.get_entry_count(), 1, "failed source flush should preserve entries.")
+	assert_eq((doc.resource.get_entry(0) as CbinTextEntry).get_text(), "Keep me",
+		"failed source flush should preserve the original entry.")

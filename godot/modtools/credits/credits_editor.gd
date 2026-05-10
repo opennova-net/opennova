@@ -41,6 +41,11 @@ func set_document(value: CreditsEditorDocument) -> void:
 		_document.resource_changed.connect(_on_resource_changed)
 		_on_resource_loaded(_document.resource)
 
+func flush_pending_edits() -> Error:
+	if _source_view_host != null and _source_view_host.has_method("apply_pending"):
+		return _source_view_host.apply_pending()
+	return OK
+
 func _ready() -> void:
 	var mode_group := ButtonGroup.new()
 	mode_group.allow_unpress = false
@@ -59,6 +64,8 @@ func _ready() -> void:
 	_player.scroll_offset_changed.connect(_on_player_scroll_offset_changed)
 	_player.gui_input.connect(_on_player_gui_input)
 	_block_list.selection_changed.connect(_on_block_list_selection_changed)
+	if _source_view_host.has_signal("pending_edits_changed"):
+		_source_view_host.pending_edits_changed.connect(_on_source_pending_edits_changed)
 	_player.mouse_filter = Control.MOUSE_FILTER_STOP
 	_visual_button.tooltip_text = "Edit credits as cards"
 	_source_button.tooltip_text = "Edit credits as text"
@@ -137,6 +144,12 @@ func _on_center_x_changed(value: float) -> void:
 	if _suppress_env_signals or _document == null or _document.resource == null:
 		return
 	_document.resource.set_center_x(int(value))
+
+func _on_source_pending_edits_changed(has_pending_edits: bool) -> void:
+	if not has_pending_edits or _document == null:
+		return
+	_document.mark_dirty()
+	_document.state_changed.emit()
 
 func _on_block_scroll(_value: float) -> void:
 	if _sync_suppress:

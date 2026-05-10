@@ -3,8 +3,10 @@
 #include "cbin/cbin.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <random>
 
 namespace cbin {
@@ -15,6 +17,13 @@ namespace {
 inline uint32_t rol32(uint32_t value, unsigned int count) {
     count &= 31;
     return (value << count) | (value >> (32 - count));
+}
+
+uint32_t read_le_u32(const uint8_t* data) {
+    return static_cast<uint32_t>(data[0]) |
+           (static_cast<uint32_t>(data[1]) << 8) |
+           (static_cast<uint32_t>(data[2]) << 16) |
+           (static_cast<uint32_t>(data[3]) << 24);
 }
 
 // Encode a buffer using ROL32 + XOR cipher
@@ -113,11 +122,13 @@ void Credits::set_env(const std::string& key, const std::string& value) {
 }
 
 bool is_cbin(const uint8_t* data, size_t size) {
+    if (data == nullptr) {
+        return false;
+    }
     if (size < sizeof(Header)) {
         return false;
     }
-    uint32_t magic;
-    std::memcpy(&magic, data, sizeof(magic));
+    uint32_t magic = read_le_u32(data);
     return magic == kMagic;
 }
 
@@ -137,8 +148,8 @@ bool is_cbin_file(const std::string& path) {
 bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string& error) {
     out = Credits{};
 
-    if (!is_cbin(data, size)) {
-        error = "Not a CBIN file (invalid magic)";
+    if (data == nullptr) {
+        error = "No CBIN data";
         return false;
     }
 
@@ -147,24 +158,36 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
         return false;
     }
 
+    if (!is_cbin(data, size)) {
+        error = "Not a CBIN file (invalid magic)";
+        return false;
+    }
+
     // Read header fields
-    uint32_t string_offset, blob_length, string_count, xor_key;
-    std::memcpy(&string_offset, data + 0x04, sizeof(string_offset));
-    std::memcpy(&blob_length, data + 0x08, sizeof(blob_length));
-    std::memcpy(&string_count, data + 0x0C, sizeof(string_count));
-    std::memcpy(&xor_key, data + 0x10, sizeof(xor_key));
+    uint32_t string_offset = read_le_u32(data + 0x04);
+    uint32_t blob_length = read_le_u32(data + 0x08);
+    uint32_t string_count = read_le_u32(data + 0x0C);
+    uint32_t xor_key = read_le_u32(data + 0x10);
 
     // Store XOR key for byte-for-byte roundtrip
     out.xor_key = xor_key;
 
     // Validate
-    if (string_offset + blob_length > size) {
-        error = "Invalid file size";
+    constexpr size_t kHeaderSize = 20;
+    if (string_offset < kHeaderSize) {
+        error = "Invalid CBIN string offset";
+        return false;
+    }
+    if (string_offset > size) {
+        error = "CBIN string offset is beyond file size";
+        return false;
+    }
+    if (blob_length > size - string_offset) {
+        error = "Invalid CBIN string blob length";
         return false;
     }
 
     // Decode the encoded region (starts at offset 0x14)
-    constexpr size_t kHeaderSize = 20;
     size_t encoded_length = string_offset + blob_length - kHeaderSize;
 
     std::vector<uint8_t> decoded(data + kHeaderSize, data + kHeaderSize + encoded_length);
@@ -172,13 +195,29 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
 
     // String table starts at (string_offset - kHeaderSize) within decoded buffer
     size_t string_table_offset = string_offset - kHeaderSize;
+    if (string_table_offset > decoded.size()) {
+        error = "CBIN string table offset is beyond decoded payload";
+        return false;
+    }
+    if (decoded.size() < sizeof(uint32_t)) {
+        error = "CBIN payload too small for label count";
+        return false;
+    }
 
     // Build string table
     std::vector<std::string> strings;
     size_t pos = string_table_offset;
-    while (pos < decoded.size() && strings.size() < string_count) {
+    while (strings.size() < string_count) {
+        if (pos >= decoded.size()) {
+            error = "CBIN string table is truncated";
+            return false;
+        }
         size_t end = pos;
         while (end < decoded.size() && decoded[end] != '\0') end++;
+        if (end >= decoded.size()) {
+            error = "CBIN string table is missing a terminator";
+            return false;
+        }
         if (end > pos) {
             strings.push_back(std::string(reinterpret_cast<char*>(decoded.data() + pos), end - pos));
         } else {
@@ -191,8 +230,7 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
     out.original_strings = strings;
 
     // Parse entry table structure
-    uint32_t label_count;
-    std::memcpy(&label_count, decoded.data(), sizeof(label_count));
+    uint32_t label_count = read_le_u32(decoded.data());
 
     struct LabelInfo {
         std::string name;
@@ -203,20 +241,31 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
     size_t offset = 4;
 
     // Read label headers
-    uint32_t total_elements = 0;
-    for (uint32_t i = 0; i < label_count && offset + 8 <= string_table_offset; i++) {
-        uint32_t str_idx, elem_count;
-        std::memcpy(&str_idx, decoded.data() + offset, sizeof(str_idx));
-        std::memcpy(&elem_count, decoded.data() + offset + 4, sizeof(elem_count));
+    size_t total_elements = 0;
+    for (uint32_t i = 0; i < label_count; i++) {
+        if (offset + 8 > string_table_offset) {
+            error = "CBIN label table is truncated";
+            return false;
+        }
+        uint32_t str_idx = read_le_u32(decoded.data() + offset);
+        uint32_t elem_count = read_le_u32(decoded.data() + offset + 4);
         offset += 8;
 
         LabelInfo label;
         if (str_idx > 0 && str_idx <= strings.size()) {
             label.name = strings[str_idx - 1];
+        } else {
+            error = "CBIN label string index is invalid";
+            return false;
         }
         label.element_count = elem_count;
         labels.push_back(label);
-        total_elements += elem_count + 1;
+        if (elem_count == std::numeric_limits<uint32_t>::max() ||
+            total_elements > std::numeric_limits<size_t>::max() - static_cast<size_t>(elem_count) - 1) {
+            error = "CBIN element count is too large";
+            return false;
+        }
+        total_elements += static_cast<size_t>(elem_count) + 1;
     }
 
     // Read element name entries (with type field)
@@ -225,37 +274,67 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
         uint32_t type;  // 0=terminator, 1=single value, 2=has extra value
     };
     std::vector<NameEntry> name_entries;
-    for (uint32_t i = 0; i < total_elements && offset + 8 <= string_table_offset; i++) {
+    for (size_t i = 0; i < total_elements; i++) {
+        if (offset + 8 > string_table_offset) {
+            error = "CBIN name table is truncated";
+            return false;
+        }
         NameEntry entry;
-        std::memcpy(&entry.str_idx, decoded.data() + offset, sizeof(entry.str_idx));
-        std::memcpy(&entry.type, decoded.data() + offset + 4, sizeof(entry.type));
+        entry.str_idx = read_le_u32(decoded.data() + offset);
+        entry.type = read_le_u32(decoded.data() + offset + 4);
         offset += 8;
+        if (entry.type > 2) {
+            error = "CBIN name entry type is invalid";
+            return false;
+        }
+        if (entry.type == 0) {
+            if (entry.str_idx != 0) {
+                error = "CBIN terminator entry is invalid";
+                return false;
+            }
+        } else if (entry.str_idx == 0 || entry.str_idx > strings.size()) {
+            error = "CBIN name string index is invalid";
+            return false;
+        }
         name_entries.push_back(entry);
     }
 
     // Read ALL value entries until string table
     std::vector<std::pair<uint32_t, uint32_t>> value_entries;
     while (offset + 8 <= string_table_offset) {
-        uint32_t value, flags;
-        std::memcpy(&value, decoded.data() + offset, sizeof(value));
-        std::memcpy(&flags, decoded.data() + offset + 4, sizeof(flags));
+        uint32_t value = read_le_u32(decoded.data() + offset);
+        uint32_t flags = read_le_u32(decoded.data() + offset + 4);
         offset += 8;
         value_entries.push_back({value, flags});
     }
+    if (offset != string_table_offset) {
+        error = "CBIN value table is truncated";
+        return false;
+    }
 
     // Helper to get string value from entry
-    auto get_value_string = [&](size_t idx) -> std::string {
-        if (idx >= value_entries.size()) return "";
+    auto get_value_string = [&](size_t idx, std::string& out_value) -> bool {
+        out_value.clear();
+        if (idx >= value_entries.size()) {
+            error = "CBIN value entry is missing";
+            return false;
+        }
         auto [val_raw, flags] = value_entries[idx];
-        if (val_raw == 0 && flags == 0) return "";
+        if (val_raw == 0 && flags == 0) return true;
         if ((flags & 4) && val_raw > 0 && val_raw <= strings.size()) {
-            return strings[val_raw - 1];
+            out_value = strings[val_raw - 1];
+            return true;
+        } else if (flags & 4) {
+            error = "CBIN value string index is invalid";
+            return false;
         } else if (flags & 2) {
             float fval;
             std::memcpy(&fval, &val_raw, sizeof(fval));
-            return std::to_string(fval);
+            out_value = std::to_string(fval);
+            return true;
         } else {
-            return std::to_string(val_raw);
+            out_value = std::to_string(val_raw);
+            return true;
         }
     };
 
@@ -274,7 +353,10 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
                 if (entry.str_idx > 0 && entry.str_idx <= strings.size()) {
                     name = strings[entry.str_idx - 1];
                 }
-                std::string value = get_value_string(value_idx++);
+                std::string value;
+                if (!get_value_string(value_idx++, value)) {
+                    return false;
+                }
                 if (!name.empty()) {
                     out.set_env(name, value);
                 }
@@ -289,13 +371,21 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
                 if (entry.type == 0) continue;
 
                 // Read main value
-                std::string main_value = (value_idx < value_entries.size()) ? get_value_string(value_idx++) : "";
+                std::string main_value;
+                if (!get_value_string(value_idx++, main_value)) {
+                    return false;
+                }
                 if (main_value.empty()) continue;
 
                 // For type=2, also read the font value (stored consecutively)
                 std::string font_value;
                 if (entry.type == 2 && value_idx < value_entries.size()) {
-                    font_value = get_value_string(value_idx++);
+                    if (!get_value_string(value_idx++, font_value)) {
+                        return false;
+                    }
+                } else if (entry.type == 2) {
+                    error = "CBIN text font value is missing";
+                    return false;
                 }
 
                 // Create Entry based on main value content
@@ -363,8 +453,16 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
             for (uint32_t j = 0; j <= label.element_count && name_idx < name_entries.size(); j++, name_idx++) {
                 auto& entry = name_entries[name_idx];
                 if (entry.type == 1) {
+                    if (value_idx >= value_entries.size()) {
+                        error = "CBIN value entry is missing";
+                        return false;
+                    }
                     value_idx++;
                 } else if (entry.type == 2) {
+                    if (value_idx + 1 >= value_entries.size()) {
+                        error = "CBIN value entry is missing";
+                        return false;
+                    }
                     value_idx += 2;  // Two consecutive values for type=2
                 }
             }

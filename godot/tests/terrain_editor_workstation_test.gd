@@ -172,15 +172,29 @@ func _write_fixture_file(path: String, text: String) -> void:
 		file.close()
 
 
-func test_workstation_starts_with_object_domain_workspace() -> void:
+func test_workstation_starts_with_domain_workspaces() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
 	var workspace_rail: HBoxContainer = workstation.get_node("%WorkspaceRail")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Terrain should remain the default workspace.")
-	assert_eq(workspace_rail.get_child_count(), 3, "The shell should expose Terrain, Object, and Mission workspaces.")
+	assert_eq(workspace_rail.get_child_count(), 4, "The shell should expose Terrain, Object, Mission, and Credits workspaces.")
 	assert_eq((workspace_rail.get_child(0) as Button).text, "Terrain", "Terrain should be the first workspace.")
 	assert_eq((workspace_rail.get_child(1) as Button).text, "Object", "Object should replace the old standalone OED workflow.")
 	assert_eq((workspace_rail.get_child(2) as Button).text, "Mission", "Mission should have a reserved workspace.")
+	assert_eq((workspace_rail.get_child(3) as Button).text, "Credits", "Credits should be available for .kda files.")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.CREDITS)
+	await get_tree().process_frame
+
+	var actions_host: VBoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.CREDITS,
+		"Credits should become the active workspace.")
+	assert_eq(workstation.get_node("%ProjectLabel").text, "untitled",
+		"Fresh Credits workspace should own the shell title while active.")
+	assert_true(_workspace_action_texts(actions_host).has("Open Credits..."),
+		"Credits should expose an open action.")
+	assert_true(_workspace_action_texts(actions_host).has("Save Credits As..."),
+		"Credits should expose save-as for a fresh resource.")
 
 
 func test_mission_placeholder_shows_no_document_actions() -> void:

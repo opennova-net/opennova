@@ -3,6 +3,7 @@
 // Format: "CBIN" magic + XOR-obfuscated payload decoded with ROL32 cipher.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <string>

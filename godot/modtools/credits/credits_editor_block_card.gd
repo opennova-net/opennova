@@ -74,6 +74,7 @@ func _ready() -> void:
 	_image_mode_fixed.pressed.connect(func(): _on_image_mode(false))
 	_image_x_spin.value_changed.connect(_on_image_x_changed)
 	_image_y_spin.value_changed.connect(_on_image_y_changed)
+	_wire_child_selection(self)
 
 func _wire_button_groups() -> void:
 	var align_group := ButtonGroup.new()
@@ -200,10 +201,14 @@ func _on_image_pick_pressed() -> void:
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	dialog.current_dir = "res://assets/textures/"
 	dialog.add_filter("*.pcx,*.png,*.jpg,*.jpeg,*.tga ; Image")
-	dialog.file_selected.connect(_on_image_pick_selected)
+	dialog.file_selected.connect(func(path: String) -> void:
+		_on_image_pick_selected(path)
+		dialog.queue_free()
+	)
+	dialog.canceled.connect(dialog.queue_free)
+	dialog.close_requested.connect(dialog.queue_free)
 	add_child(dialog)
 	dialog.popup_centered_ratio(0.6)
-	dialog.tree_exited.connect(dialog.queue_free)
 
 func _on_image_pick_selected(path: String) -> void:
 	var name := path.get_file()
@@ -322,7 +327,28 @@ func _on_panel_input(event: InputEvent) -> void:
 
 func _on_drag_handle_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		request_select.emit(self)
+		var preview := Label.new()
+		preview.text = _type_chip.text
+		force_drag({"card": self}, preview)
 		request_drag.emit(self)
+
+func _wire_child_selection(node: Node) -> void:
+	for child in node.get_children():
+		if child is Control and child != self and child != _drag_handle:
+			var control := child as Control
+			if not control.focus_entered.is_connected(_on_child_focus_entered):
+				control.focus_entered.connect(_on_child_focus_entered)
+			if not control.gui_input.is_connected(_on_child_control_input):
+				control.gui_input.connect(_on_child_control_input)
+		_wire_child_selection(child)
+
+func _on_child_focus_entered() -> void:
+	request_select.emit(self)
+
+func _on_child_control_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		request_select.emit(self)
 
 func _get_drag_data(_pos: Vector2) -> Variant:
 	var preview := Label.new()

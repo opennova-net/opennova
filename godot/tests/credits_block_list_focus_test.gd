@@ -92,3 +92,30 @@ func test_text_edit_caret_preserved_during_rapid_typing() -> void:
 	# LineEdit must not have been clobbered by _refresh.
 	assert_eq(text_edit.text, "abc", "user-typed text preserved")
 	assert_eq(text_edit.caret_column, 3, "caret stays at end of user input, not reset by refresh")
+
+func test_focusing_child_control_selects_card() -> void:
+	var list := CreditsEditorBlockListScene.new() as VBoxContainer
+	add_child_autofree(list)
+	await get_tree().process_frame
+
+	var res := CbinCreditsResource.new()
+	for label in ["First", "Second"]:
+		var entry := CbinTextEntry.new()
+		entry.set_text(label)
+		res.add_entry(entry)
+
+	list.set_resource(res)
+	await get_tree().process_frame
+
+	var second_entry := res.get_entry(1)
+	var card = list.card_for_entry(second_entry)
+	assert_not_null(card, "second card should exist")
+	if card == null:
+		return
+
+	var text_edit: LineEdit = card.get_node("%TextEdit")
+	text_edit.grab_focus()
+	await get_tree().process_frame
+
+	assert_eq(list._selected_entry, second_entry,
+		"focusing a child editor control should select its card.")

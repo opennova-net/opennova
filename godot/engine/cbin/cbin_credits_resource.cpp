@@ -281,10 +281,12 @@ void CbinCreditsResource::set_entries(const TypedArray<CbinEntry> &p_entries) {
 		_disconnect_entry(entries_[i]);
 	}
 	entries_.clear();
-	entries_.resize(p_entries.size());
 	for (int i = 0; i < p_entries.size(); ++i) {
 		Ref<CbinEntry> e = p_entries[i];
-		entries_.write[i] = e;
+		if (!e.is_valid() || _contains_entry_ref(e)) {
+			continue;
+		}
+		entries_.push_back(e);
 		_connect_entry(e);
 	}
 	emit_changed();
@@ -310,6 +312,9 @@ Ref<CbinEntry> CbinCreditsResource::get_entry(int p_index) const {
 }
 
 void CbinCreditsResource::add_entry(const Ref<CbinEntry> &p_entry) {
+	if (!p_entry.is_valid() || _contains_entry_ref(p_entry)) {
+		return;
+	}
 	_connect_entry(p_entry);
 	entries_.push_back(p_entry);
 	emit_changed();
@@ -318,6 +323,9 @@ void CbinCreditsResource::add_entry(const Ref<CbinEntry> &p_entry) {
 
 void CbinCreditsResource::insert_entry(int p_index, const Ref<CbinEntry> &p_entry) {
 	ERR_FAIL_INDEX(p_index, entries_.size() + 1);
+	if (!p_entry.is_valid() || _contains_entry_ref(p_entry)) {
+		return;
+	}
 	_connect_entry(p_entry);
 	entries_.insert(p_index, p_entry);
 	emit_changed();
@@ -633,6 +641,18 @@ void CbinCreditsResource::_disconnect_entry(const Ref<CbinEntry> &p_entry) {
 	if (p_entry->is_connected("changed", cb)) {
 		p_entry->disconnect("changed", cb);
 	}
+}
+
+bool CbinCreditsResource::_contains_entry_ref(const Ref<CbinEntry> &p_entry) const {
+	if (!p_entry.is_valid()) {
+		return false;
+	}
+	for (int i = 0; i < entries_.size(); ++i) {
+		if (entries_[i] == p_entry) {
+			return true;
+		}
+	}
+	return false;
 }
 
 }  // namespace godot
