@@ -7,7 +7,7 @@ from pyopennova.texture_outputs import copy_model_textures
 
 
 class FakeTexture:
-    def __init__(self, name: str, slot: int = materials.THREEDI_IR_TEX_SLOT_DIFFUSE):
+    def __init__(self, name: str, slot: int = materials.THREEDI_TEX_SLOT_DIFFUSE):
         self.name = name.encode("utf-8")
         self.slot = slot
         self.type = 0

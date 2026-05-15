@@ -1,4 +1,4 @@
-"""In-process bpy tests for ``scene_builder``.
+﻿"""In-process bpy tests for ``scene_builder``.
 
 These tests intentionally load ``bpy`` in the parent pytest process. The
 standalone ``bpy`` package corrupts subsequent subprocess imports once it's
@@ -16,7 +16,7 @@ def test_bpy_dependency_is_blender_5() -> None:
 
 def test_set_object_mode_uses_explicit_context() -> None:
     import bpy
-    from apps.importer.scene_builder import _set_object_mode
+    from opennova_blender.scene_builder import _set_object_mode
 
     bpy.ops.wm.read_homefile(use_empty=True)
 

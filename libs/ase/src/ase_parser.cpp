@@ -779,14 +779,11 @@ bool parse_file(const std::string& path, Document& out_doc, std::string& error) 
     return false;
   }
 
-  if (st.count_objects == 0) {
-    error = "No objects found in ASE";
-    return false;
-  }
-
   // Alloc doc structures.
   st.doc->object_count = st.count_objects;
-  st.doc->objects = new Object[st.doc->object_count]();
+  if (st.doc->object_count > 0) {
+    st.doc->objects = new Object[st.doc->object_count]();
+  }
   st.doc->light_count = st.count_lights;
   if (st.doc->light_count > 0) st.doc->lights = new Light[st.doc->light_count]();
 

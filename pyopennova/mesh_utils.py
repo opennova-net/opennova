@@ -18,15 +18,35 @@ def mtrx_to_center_rotation(mat_data: Sequence[float]) -> Mat3 | None:
 
     Inverts ``build_matrix_from_axis`` (export_3di.cpp) plus the ASE
     parser swizzle chain. Returns ``None`` if the matrix contains NaN
-    (zero-axis sentinel from the exporter). The 3x3 is row-major; the
-    Blender wrapper extends it to 4x4 with an identity translation row.
+    (zero-axis sentinel from the exporter). The returned 3x3 is consumed
+    by the ASE writer's ``_tm`` helper, which transposes it into the
+    ``TM_ROW0``/``TM_ROW1``/``TM_ROW2`` values ModSuperOED expects.
     """
     m = [mat_data[i] for i in range(16)]
     if any(math.isnan(v) for v in m):
         return None
-    ax0 = (m[10], -m[2],  m[6])
-    ax1 = (-m[8],  m[0], -m[4])
-    ax2 = (m[9],  -m[1],  m[5])
+
+    g00, g01, g02 = m[0], m[1], m[2]
+    g10, g11, g12 = m[4], m[5], m[6]
+    g20, g21, g22 = m[8], m[9], m[10]
+    c00 = g11 * g22 - g12 * g21
+    c01 = -(g10 * g22 - g12 * g20)
+    c02 = g10 * g21 - g11 * g20
+    c10 = -(g01 * g22 - g02 * g21)
+    c11 = g00 * g22 - g02 * g20
+    c12 = -(g00 * g21 - g01 * g20)
+    c20 = g01 * g12 - g02 * g11
+    c21 = -(g00 * g12 - g02 * g10)
+    c22 = g00 * g11 - g01 * g10
+    det = g00 * c00 + g01 * c01 + g02 * c02
+
+    m00, m01, m02 = c00 / det, c10 / det, c20 / det
+    m10, m11, m12 = c01 / det, c11 / det, c21 / det
+    m20, m21, m22 = c02 / det, c12 / det, c22 / det
+
+    ax0 = (m22, -m20, m21)
+    ax1 = (-m02, m00, -m01)
+    ax2 = (m12, -m10, m11)
     return (
         ( ax1[1], -ax0[1],  ax2[1]),
         (-ax1[0],  ax0[0], -ax2[0]),

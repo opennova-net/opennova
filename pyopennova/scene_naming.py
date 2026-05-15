@@ -1,7 +1,7 @@
 """Host-neutral OpenNova scene naming and visualization color tables.
 
-Shared by host scene builders (Blender, 3ds Max) and the IR-to-ASE writer
-in :mod:`pyopennova.ase_from_ir`. Adding a new collision/occlusion type or
+Shared by host scene builders (Blender, 3ds Max) and the 3DI3 model-to-ASE writer
+in :mod:`pyopennova.ase_from_3di3`. Adding a new collision/occlusion type or
 changing a name format is a one-file change here, not three.
 """
 from __future__ import annotations

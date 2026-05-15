@@ -1,11 +1,16 @@
-// 3DP project file parser/writer — pure C API.
+// 3DP project file parser/writer - pure C API.
 // Flat structs suitable for FFI (ctypes, etc.).
+//
+// Materials in TdpProject are TdpMaterial records shared by the 3DP/3DA
+// project readers, writers, and object exporter.
 
 #ifndef TDP_H
 #define TDP_H
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include "tdp/tdp_material.h"
 
 #ifdef _WIN32
 #  ifdef OPENNOVA_SHARED_EXPORTS
@@ -25,8 +30,7 @@
 extern "C" {
 #endif
 
-#define TDP_MAX_LODS        8
-#define TDP_MAX_ANIM_FRAMES 8
+#define TDP_MAX_LODS 8
 
 // AxisFunc: parameters for a part animation axis function.
 // Text format ordering: func_id  start  end  rate  phase  [ctrl_reg]
@@ -61,57 +65,6 @@ typedef struct TdpPartAnim {
     TdpAxisFunc trans_z;
 } TdpPartAnim;
 
-typedef struct TdpAnimFrame {
-    char path[32];
-    int32_t enabled;
-} TdpAnimFrame;
-
-typedef struct TdpMaterial {
-    char name[80];
-    char shader_tag[32];
-    int32_t rattrib;
-    int32_t pattrib;
-    int32_t ptype;
-    int32_t geofx;
-    float geofx_value;
-    int32_t alphatestvalue;
-    char diffuse_tex[2][32];
-    int32_t diffuse_flags[2];
-    char normal_tex[2][32];
-    int32_t normal_flags[2];
-    int32_t anim_frames;
-    int32_t anim_type;
-    int32_t anim_frametime;
-    char anim_ctrlreg[64];
-    TdpAnimFrame anim_diffuse[2][TDP_MAX_ANIM_FRAMES];
-    TdpAnimFrame anim_normal[2][TDP_MAX_ANIM_FRAMES];
-    int32_t reflect_rgb[3];
-    int32_t rgbgen_style;
-    float rgbgen_rate;
-    float rgbgen_phase;
-    int32_t rgbgen_srgb[3];
-    int32_t rgbgen_ergb[3];
-    char rgbgen_ctrlreg[64];
-    int32_t alphagen_style;
-    float alphagen_rate;
-    float alphagen_phase;
-    float alphagen_start;
-    float alphagen_end;
-    char alphagen_ctrlreg[64];
-    int32_t mapfunc_u_style;
-    float mapfunc_u_rate;
-    float mapfunc_u_phase;
-    float mapfunc_u_start;
-    float mapfunc_u_end;
-    char mapfunc_u_ctrlreg[64];
-    int32_t mapfunc_v_style;
-    float mapfunc_v_rate;
-    float mapfunc_v_phase;
-    float mapfunc_v_start;
-    float mapfunc_v_end;
-    char mapfunc_v_ctrlreg[64];
-} TdpMaterial;
-
 typedef struct TdpLight {
     char name[32];
     int32_t colorgen_style;
@@ -143,6 +96,16 @@ typedef struct TdpProject {
     TdpMaterial *materials;
     size_t material_count;
     TdpLod lods[TDP_MAX_LODS];
+
+    // Optional: control register table populated by readers when project
+    // generators reference ctrl-reg names. Allocated by parser; freed by
+    // tdp_free.
+    TdpControlRegister *ctrl_regs;
+    size_t ctrl_reg_count;
+
+    // 3DA `username` field — preserved through tdp_read_3da/tdp_write_3da
+    // round-trips.  Empty string falls back to writer default ("opennova").
+    char username[64];
 } TdpProject;
 
 // Initialize a TdpProject to zero state.
@@ -160,19 +123,20 @@ TDP_EXPORT int tdp_write(const char *path, const TdpProject *proj);
 // Write a .3da project file (legacy ModSuperOED format). Returns 0 on success, -1 on error.
 TDP_EXPORT int tdp_write_3da(const char *path, const TdpProject *proj);
 
+// Read a .3da project file (legacy ModSuperOED format). Populates the TDP
+// material array such that a subsequent tdp_write_3da on `out` produces
+// byte-identical output (modulo the timestamp comment).  Mirrors
+// df4oed.exe::sub_425730 token-driven dispatch.  Returns 0 on success, -1
+// on error.
+TDP_EXPORT int tdp_read_3da(const char *path, TdpProject *out);
+
 // Allocate (or reallocate) arrays so that Python/FFI callers can build
 // projects without manual malloc.  Each frees the old pointer first.
 TDP_EXPORT void tdp_alloc_materials(TdpProject *proj, size_t count);
+TDP_EXPORT void tdp_alloc_ctrl_regs(TdpProject *proj, size_t count);
 TDP_EXPORT void tdp_alloc_part_anims(TdpLod *lod, size_t count);
 TDP_EXPORT void tdp_alloc_lights(TdpLod *lod, size_t count);
 
-// Forward-declare the IR struct so we don't require threedi header.
-struct ThreediModelIR;
-
-// Populate a TdpProject from a ThreediModelIR.
-// Caller must call tdp_free() on `out` when done.
-// Returns 0 on success, -1 on error.
-TDP_EXPORT int tdp_from_ir(const struct ThreediModelIR *ir, TdpProject *out);
 
 #ifdef __cplusplus
 }

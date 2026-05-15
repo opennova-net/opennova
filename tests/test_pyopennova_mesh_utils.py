@@ -22,27 +22,59 @@ def test_mtrx_returns_none_when_any_value_is_nan():
 def test_mtrx_returns_3x3_tuple_for_finite_input():
     # Choose a matrix where every used field is finite. The function
     # only consumes m[0..2, 4..6, 8..10] - others are ignored.
-    mat = [float(i) for i in range(16)]
+    mat = [
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    ]
     out = mesh_utils.mtrx_to_center_rotation(mat)
     assert out is not None
     assert len(out) == 3
     assert all(len(row) == 3 for row in out)
 
 
-def test_mtrx_signs_match_legacy_formula():
-    # Mirror the original swizzle: ax0=(m10,-m2,m6), ax1=(-m8,m0,-m4),
-    # ax2=(m9,-m1,m5). Result row 0 = (ax1[1], -ax0[1], ax2[1]).
+def test_mtrx_inverts_then_applies_center_axis_swizzle():
+    # mtrx_to_center_rotation is the inverse of export_3di's true 3x3
+    # inversion plus the center-axis swizzle.
+    source = [
+        [2.0, 3.0, 5.0],
+        [7.0, 11.0, 13.0],
+        [17.0, 19.0, 23.0],
+    ]
+    det = (
+        source[0][0] * (source[1][1] * source[2][2] - source[1][2] * source[2][1])
+        - source[0][1] * (source[1][0] * source[2][2] - source[1][2] * source[2][0])
+        + source[0][2] * (source[1][0] * source[2][1] - source[1][1] * source[2][0])
+    )
+    inv = [
+        [
+            (source[1][1] * source[2][2] - source[1][2] * source[2][1]) / det,
+            -(source[0][1] * source[2][2] - source[0][2] * source[2][1]) / det,
+            (source[0][1] * source[1][2] - source[0][2] * source[1][1]) / det,
+        ],
+        [
+            -(source[1][0] * source[2][2] - source[1][2] * source[2][0]) / det,
+            (source[0][0] * source[2][2] - source[0][2] * source[2][0]) / det,
+            -(source[0][0] * source[1][2] - source[0][2] * source[1][0]) / det,
+        ],
+        [
+            (source[1][0] * source[2][1] - source[1][1] * source[2][0]) / det,
+            -(source[0][0] * source[2][1] - source[0][1] * source[2][0]) / det,
+            (source[0][0] * source[1][1] - source[0][1] * source[1][0]) / det,
+        ],
+    ]
     mat = [
-        1.0,  2.0,  3.0,  0.0,    # m[0..3]
-        4.0,  5.0,  6.0,  0.0,    # m[4..7]
-        7.0,  8.0,  9.0,  0.0,    # m[8..11]
-        0.0,  0.0,  0.0,  1.0,    # m[12..15]
+        inv[0][0], inv[0][1], inv[0][2], 0.0,
+        inv[1][0], inv[1][1], inv[1][2], 0.0,
+        inv[2][0], inv[2][1], inv[2][2], 0.0,
+        0.0, 0.0, 0.0, 1.0,
     ]
     out = mesh_utils.mtrx_to_center_rotation(mat)
     assert out is not None
-    ax0 = (mat[10], -mat[2],  mat[6])
-    ax1 = (-mat[8],  mat[0], -mat[4])
-    ax2 = (mat[9],  -mat[1],  mat[5])
+    ax0 = (source[2][2], -source[2][0], source[2][1])
+    ax1 = (-source[0][2], source[0][0], -source[0][1])
+    ax2 = (source[1][2], -source[1][0], source[1][1])
     expected = (
         ( ax1[1], -ax0[1],  ax2[1]),
         (-ax1[0],  ax0[0], -ax2[0]),

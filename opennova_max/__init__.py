@@ -33,25 +33,24 @@ def import_loose(threedi_path: str, asset_base_dir: str | None = None) -> bool:
     Returns ``True`` on success, ``False`` if the file produced no
     geometry. Raises on parse error.
     """
-    from pyopennova.threedi_ffi import read_model_ir, free_model_ir
+    from pyopennova.threedi_ffi import read_model, free_model_3di3
     from pyopennova.asset_resolver import AssetResolver
     from .scene_builder import MaxSceneBuilder
 
     base_dir = asset_base_dir or os.path.dirname(threedi_path)
     name = os.path.splitext(os.path.basename(threedi_path))[0]
 
-    ir = read_model_ir(threedi_path)
+    ir = read_model(threedi_path)
     try:
         with AssetResolver(base_dir) as resolver:
             builder = MaxSceneBuilder(ir, resolver=resolver)
             return builder.build_basic_scene(name)
     finally:
-        free_model_ir(ir)
+        free_model_3di3(ir)
 
 
+from .backend import MaxBackend  # noqa: E402
 from .import_runner import (  # noqa: E402
-    MaxImportRequest,
-    MaxImportResult,
     execute_import_request,
     run_batch,
     run_import,
@@ -62,8 +61,7 @@ from .version import __version__, get_version  # noqa: E402
 
 
 __all__ = [
-    "MaxImportRequest",
-    "MaxImportResult",
+    "MaxBackend",
     "__version__",
     "close_importer",
     "execute_import_request",

@@ -1,97 +1,75 @@
+// 3DP/3DA project parser and writer.
+//
+// TdpProject stores TdpMaterial records directly. 3DP is the native JO
+// project format; 3DA is retained for legacy project text round-trips.
+
 #include "tdp/tdp.h"
-#include "threedi/threedi_ir.h"
-#include "threedi/threedi_panm.h"
+#include "tdp_internal.h"
+#include "tdp/tdp_material.h"
+#include "threedi/threedi_material_class.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helper aliases â€” keep the shorter local names that pre-existed in this TU,
+// but route them to the shared inline helpers in tdp_internal.h.
 // ---------------------------------------------------------------------------
 
-static void copy_str(char *dst, size_t dst_size, const char *src) {
-    if (!src || !dst || dst_size == 0) return;
-    size_t len = std::strlen(src);
-    if (len >= dst_size) len = dst_size - 1;
-    std::memcpy(dst, src, len);
-    dst[len] = '\0';
+static inline void copy_str(char *dst, size_t dst_size, const char *src) {
+    tdp_copy_str(dst, dst_size, src);
+}
+static inline bool iequals(const char *a, const char *b) {
+    return tdp_iequals(a, b);
+}
+static inline int to_int(const char *s) { return tdp_to_int(s); }
+static inline float to_float(const char *s) { return tdp_to_float(s); }
+static inline int clamp_255(float v) { return tdp_clamp_255(v); }
+static inline float byte_to_unit(int v) { return tdp_byte_to_unit(v); }
+
+static inline int surface_type_to_ptype(uint8_t st) {
+    return tdp_surface_type_to_ptype(st);
+}
+static inline uint8_t ptype_to_surface_type(int ptype) {
+    return tdp_ptype_to_surface_type(ptype);
 }
 
-static bool iequals(const char *a, const char *b) {
-    for (;; ++a, ++b) {
-        if (std::tolower(static_cast<unsigned char>(*a)) !=
-            std::tolower(static_cast<unsigned char>(*b)))
-            return false;
-        if (*a == '\0') return true;
-    }
+// Texture-slot accessors â€” re-export the shared helpers under the
+// pre-existing short names used elsewhere in this file.
+static inline const TdpMaterialTexture *
+tdp_find_static_tex(const TdpMaterial *m, uint8_t slot) {
+    return tdp_material_find_static_tex(m, slot);
+}
+static inline TdpMaterialTexture *
+tdp_find_or_alloc_tex(TdpMaterial *m, uint8_t slot, uint8_t frame,
+                      bool animated) {
+    return tdp_material_find_or_alloc_tex(m, slot, frame, animated);
 }
 
-static int to_int(const char *s) {
-    if (!s || !*s) return 0;
-    return static_cast<int>(std::strtol(s, nullptr, 10));
+static int tdp_tex_clamped(const TdpMaterialTexture *t) {
+    return (t && (t->flags & 0x02u /*CLAMPED*/)) ? 1 : 0;
 }
 
-static float to_float(const char *s) {
-    if (!s || !*s) return 0.0f;
-    return std::strtof(s, nullptr);
+static void tdp_tex_set_clamped(TdpMaterialTexture *t, int clamped) {
+    if (!t) return;
+    if (clamped) t->flags |= 0x02u;
+    else         t->flags &= ~0x02u;
 }
 
-// ---------------------------------------------------------------------------
-// Tokenizer (ported from old project_parser.cpp)
-// ---------------------------------------------------------------------------
-
-#define MAX_TOKENS 30
-
-struct Tokens {
-    char buf[1024];
-    const char *toks[MAX_TOKENS];
-    int count;
-};
-
-static void tokenize(Tokens *t, const char *line) {
-    t->count = 0;
-    if (!line || !*line) return;
-
-    size_t n = std::strlen(line);
-    if (n >= sizeof(t->buf)) n = sizeof(t->buf) - 1;
-    for (size_t i = 0; i < n; ++i) {
-        char c = line[i];
-        if (c == '\r') c = '\0';
-        t->buf[i] = c;
-    }
-    // Zero from n onwards so the token scanner doesn't find garbage.
-    std::memset(t->buf + n, 0, sizeof(t->buf) - n);
-
-    bool in_quote = false;
-    for (size_t i = 0; t->buf[i]; ++i) {
-        if (!in_quote && t->buf[i] == ';') { t->buf[i] = '\0'; break; }
-        if (!in_quote && t->buf[i] == '/' && t->buf[i + 1] == '/') { t->buf[i] = '\0'; break; }
-        if (t->buf[i] == '"') {
-            in_quote = !in_quote;
-            t->buf[i] = '\0';
-        } else if (!in_quote && (t->buf[i] == ' ' || t->buf[i] == '\t' || t->buf[i] == ',')) {
-            t->buf[i] = '\0';
-        }
-    }
-
-    for (size_t i = 0; i < sizeof(t->buf) && t->count < MAX_TOKENS;) {
-        while (i < sizeof(t->buf) && t->buf[i] == '\0') ++i;
-        if (i >= sizeof(t->buf) || !t->buf[i]) break;
-        t->toks[t->count++] = &t->buf[i];
-        while (i < sizeof(t->buf) && t->buf[i]) ++i;
-    }
-}
-
-static const char *tok_at(const Tokens *t, int idx) {
-    if (idx < 0 || idx >= t->count) return "";
-    return t->toks[idx];
+// Tokenizer alias â€” local short name routes to TdpTokens.
+typedef TdpTokens Tokens;
+static inline void tokenize(Tokens *t, const char *line) { tdp_tokenize(t, line); }
+static inline const char *tok_at(const Tokens *t, int idx) { return tdp_tok_at(t, idx); }
+static inline void extract_quoted(const char *line, char *dst, size_t dst_size) {
+    tdp_extract_quoted(line, dst, dst_size);
 }
 
 // ---------------------------------------------------------------------------
-// Init / Free
+// Init / Free / Allocators
 // ---------------------------------------------------------------------------
 
 void tdp_init(TdpProject *proj) {
@@ -104,6 +82,9 @@ void tdp_free(TdpProject *proj) {
     std::free(proj->materials);
     proj->materials = nullptr;
     proj->material_count = 0;
+    std::free(proj->ctrl_regs);
+    proj->ctrl_regs = nullptr;
+    proj->ctrl_reg_count = 0;
     for (int i = 0; i < TDP_MAX_LODS; ++i) {
         std::free(proj->lods[i].part_anims);
         proj->lods[i].part_anims = nullptr;
@@ -114,18 +95,27 @@ void tdp_free(TdpProject *proj) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Allocators (for FFI callers)
-// ---------------------------------------------------------------------------
-
 void tdp_alloc_materials(TdpProject *proj, size_t count) {
     if (!proj) return;
     std::free(proj->materials);
     proj->materials = nullptr;
     proj->material_count = 0;
     if (count > 0) {
-        proj->materials = static_cast<TdpMaterial *>(std::calloc(count, sizeof(TdpMaterial)));
+        proj->materials = static_cast<TdpMaterial *>(
+            std::calloc(count, sizeof(TdpMaterial)));
         if (proj->materials) proj->material_count = count;
+    }
+}
+
+void tdp_alloc_ctrl_regs(TdpProject *proj, size_t count) {
+    if (!proj) return;
+    std::free(proj->ctrl_regs);
+    proj->ctrl_regs = nullptr;
+    proj->ctrl_reg_count = 0;
+    if (count > 0) {
+        proj->ctrl_regs = static_cast<TdpControlRegister *>(
+            std::calloc(count, sizeof(TdpControlRegister)));
+        if (proj->ctrl_regs) proj->ctrl_reg_count = count;
     }
 }
 
@@ -152,7 +142,7 @@ void tdp_alloc_lights(TdpLod *lod, size_t count) {
 }
 
 // ---------------------------------------------------------------------------
-// Parser
+// Parser internals
 // ---------------------------------------------------------------------------
 
 enum ParseState {
@@ -168,16 +158,8 @@ enum ParseState {
     ST_SKIP
 };
 
-static TdpMaterial *ensure_material(TdpProject *proj, size_t idx) {
-    if (idx >= proj->material_count) {
-        size_t new_count = idx + 1;
-        proj->materials = static_cast<TdpMaterial *>(
-            std::realloc(proj->materials, new_count * sizeof(TdpMaterial)));
-        for (size_t i = proj->material_count; i < new_count; ++i)
-            std::memset(&proj->materials[i], 0, sizeof(TdpMaterial));
-        proj->material_count = new_count;
-    }
-    return &proj->materials[idx];
+static inline TdpMaterial *ensure_material(TdpProject *proj, size_t idx) {
+    return tdp_ensure_material(proj, idx);
 }
 
 static TdpPartAnim *ensure_part_anim(TdpLod *lod, size_t idx) {
@@ -213,17 +195,34 @@ static void load_axis(TdpAxisFunc *axis, const Tokens *t, int base) {
     copy_str(axis->ctrl_reg, sizeof(axis->ctrl_reg), tok_at(t, base + 5));
 }
 
-// Extract quoted string from raw line for name/path fields
-static void extract_quoted(const char *line, char *dst, size_t dst_size) {
-    const char *q0 = std::strchr(line, '"');
-    if (!q0) { dst[0] = '\0'; return; }
-    const char *q1 = std::strchr(q0 + 1, '"');
-    if (!q1 || q1 <= q0 + 1) { dst[0] = '\0'; return; }
-    size_t len = static_cast<size_t>(q1 - q0 - 1);
-    if (len >= dst_size) len = dst_size - 1;
-    std::memcpy(dst, q0 + 1, len);
-    dst[len] = '\0';
+// Re-derive classification from rattrib + already-set shader tag at end of
+// material parse.  Called after `}` closes a material block.
+static void finalize_material_classification(TdpMaterial *m,
+                                              uint32_t rattrib) {
+    classify_from_jo_shader_tag(m->shader_name,
+                                rattrib,
+                                m->material_flags,
+                                m->emissive_type,
+                                m->is_glass ? 1 : 0,
+                                &m->classification);
+    // Classification's blend_mode tracks the suffix from shader_name; use it
+    // as the 3DI3 model's blend_mode when not explicitly overridden.
+    switch (m->classification.blend_mode) {
+    case THREEDI_CLASS_BLEND_OPAQUE:   m->blend_mode = TDP_BLEND_OPAQUE; break;
+    case THREEDI_CLASS_BLEND_ALPHA:    m->blend_mode = TDP_BLEND_ALPHA;  break;
+    case THREEDI_CLASS_BLEND_ADDITIVE: m->blend_mode = TDP_BLEND_ADD;    break;
+    }
+    if (m->classification.alpha_test)
+        m->flags |= TDP_MATERIAL_FLAG_ALPHA_TEST;
+    if (m->classification.alpha_test_invert)
+        m->flags |= TDP_MATERIAL_FLAG_ALPHA_INVERT;
+    if (m->classification.two_sided)
+        m->flags |= TDP_MATERIAL_FLAG_TWO_SIDED;
 }
+
+// ---------------------------------------------------------------------------
+// 3DP Parser
+// ---------------------------------------------------------------------------
 
 int tdp_parse(const char *path, TdpProject *out) {
     tdp_init(out);
@@ -239,10 +238,10 @@ int tdp_parse(const char *path, TdpProject *out) {
     int current_lod = -1;
     int current_part = -1;
     int current_light = -1;
+    uint32_t current_rattrib = 0;  // Buffer rattrib per-material until material block closes
 
     char line[1024];
     while (std::fgets(line, sizeof(line), fp)) {
-        // Strip trailing newline
         size_t len = std::strlen(line);
         while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
             line[--len] = '\0';
@@ -254,6 +253,15 @@ int tdp_parse(const char *path, TdpProject *out) {
         const char *tag = t.toks[0];
 
         if (tag[0] == '}') {
+            // If closing a material block, finalize classification
+            if (stack_depth > 0 && state_stack[stack_depth - 1] == ST_MATERIAL) {
+                if (current_material >= 0 &&
+                    (size_t)current_material < out->material_count) {
+                    finalize_material_classification(
+                        &out->materials[current_material], current_rattrib);
+                }
+                current_rattrib = 0;
+            }
             if (stack_depth > 1) --stack_depth;
             continue;
         }
@@ -293,6 +301,7 @@ int tdp_parse(const char *path, TdpProject *out) {
                 current_material = to_int(tok_at(&t, 1));
                 if (current_material >= 0) {
                     ensure_material(out, static_cast<size_t>(current_material));
+                    current_rattrib = 0;
                     state_stack[stack_depth++] = ST_MATERIAL;
                 }
             }
@@ -300,6 +309,7 @@ int tdp_parse(const char *path, TdpProject *out) {
 
         case ST_MATERIAL: {
             TdpMaterial *mat = &out->materials[current_material];
+            mat->index = current_material;
             if (iequals(tag, "name")) {
                 if (t.count > 1 && tok_at(&t, 1)[0])
                     copy_str(mat->name, sizeof(mat->name), tok_at(&t, 1));
@@ -307,21 +317,25 @@ int tdp_parse(const char *path, TdpProject *out) {
                     extract_quoted(line, mat->name, sizeof(mat->name));
             } else if (iequals(tag, "shadertag")) {
                 if (t.count > 1 && tok_at(&t, 1)[0])
-                    copy_str(mat->shader_tag, sizeof(mat->shader_tag), tok_at(&t, 1));
+                    copy_str(mat->shader_name, sizeof(mat->shader_name), tok_at(&t, 1));
                 else
-                    extract_quoted(line, mat->shader_tag, sizeof(mat->shader_tag));
+                    extract_quoted(line, mat->shader_name, sizeof(mat->shader_name));
             } else if (iequals(tag, "rattrib")) {
-                mat->rattrib = to_int(tok_at(&t, 1));
+                current_rattrib = static_cast<uint32_t>(to_int(tok_at(&t, 1)));
             } else if (iequals(tag, "pattrib")) {
-                mat->pattrib = to_int(tok_at(&t, 1));
+                mat->pattrib = static_cast<uint32_t>(to_int(tok_at(&t, 1)));
             } else if (iequals(tag, "ptype")) {
-                mat->ptype = to_int(tok_at(&t, 1));
+                mat->surface_type = ptype_to_surface_type(to_int(tok_at(&t, 1)));
             } else if (iequals(tag, "geofx")) {
                 mat->geofx = to_int(tok_at(&t, 1));
             } else if (iequals(tag, "geofx_value")) {
                 mat->geofx_value = to_float(tok_at(&t, 1));
             } else if (iequals(tag, "alphatestvalue")) {
-                mat->alphatestvalue = to_int(tok_at(&t, 1));
+                int v = to_int(tok_at(&t, 1));
+                if (v < 0) v = 0;
+                if (v > 255) v = 255;
+                mat->alpha_test_value_byte = static_cast<uint8_t>(v);
+                mat->alpha_threshold = static_cast<float>(v) / 255.0f;
             } else if (iequals(tag, "diffusetex[0]") || iequals(tag, "diffusetex[1]") ||
                        iequals(tag, "normaltex[0]") || iequals(tag, "normaltex[1]")) {
                 bool is_normal = (tag[0] == 'n' || tag[0] == 'N');
@@ -346,20 +360,36 @@ int tdp_parse(const char *path, TdpProject *out) {
                     tex_path = qpath;
                 }
                 if (slot >= 0 && slot < 2) {
-                    if (is_normal) {
-                        copy_str(mat->normal_tex[slot], sizeof(mat->normal_tex[slot]), tex_path);
-                        mat->normal_flags[slot] = (flag_val & 1) | (mat->normal_flags[slot] & ~1);
-                    } else {
-                        copy_str(mat->diffuse_tex[slot], sizeof(mat->diffuse_tex[slot]), tex_path);
-                        mat->diffuse_flags[slot] = (flag_val & 1) | (mat->diffuse_flags[slot] & ~1);
+                    uint8_t ir_slot;
+                    if (is_normal)
+                        ir_slot = (slot == 0) ? TDP_TEX_SLOT_NORMAL
+                                              : TDP_TEX_SLOT_NORMAL_B;
+                    else
+                        ir_slot = (slot == 0) ? TDP_TEX_SLOT_DIFFUSE
+                                              : TDP_TEX_SLOT_DETAIL;
+                    // Treat "0" sentinel as empty path for non-normal slots
+                    bool sentinel = (tex_path[0] == '0' && tex_path[1] == '\0');
+                    if (!sentinel || is_normal) {
+                        TdpMaterialTexture *tex = tdp_find_or_alloc_tex(
+                            mat, ir_slot, /*frame=*/0, /*animated=*/false);
+                        if (tex) {
+                            if (sentinel) tex->name[0] = '\0';
+                            else copy_str(tex->name, sizeof(tex->name), tex_path);
+                            tdp_tex_set_clamped(tex, flag_val & 1);
+                        }
                     }
                 }
             } else if (iequals(tag, "anim_frames")) {
-                mat->anim_frames = to_int(tok_at(&t, 1));
+                int v = to_int(tok_at(&t, 1));
+                if (v < 0) v = 0;
+                if (v > 255) v = 255;
+                mat->animation.num_frames = static_cast<uint8_t>(v);
             } else if (iequals(tag, "anim_type")) {
-                mat->anim_type = to_int(tok_at(&t, 1));
+                int v = to_int(tok_at(&t, 1));
+                mat->animation.animation_type = static_cast<uint8_t>(v & 0xff);
             } else if (iequals(tag, "anim_frametime")) {
-                mat->anim_frametime = to_int(tok_at(&t, 1));
+                int v = to_int(tok_at(&t, 1));
+                mat->animation.cycle_frame_time = static_cast<int16_t>(v);
             } else if (iequals(tag, "anim_ctrlreg")) {
                 if (t.count > 1 && tok_at(&t, 1)[0])
                     copy_str(mat->anim_ctrlreg, sizeof(mat->anim_ctrlreg), tok_at(&t, 1));
@@ -367,12 +397,12 @@ int tdp_parse(const char *path, TdpProject *out) {
                     extract_quoted(line, mat->anim_ctrlreg, sizeof(mat->anim_ctrlreg));
             } else if (std::strstr(tag, "anim_diffusetex") || std::strstr(tag, "anim_normaltex") ||
                        std::strstr(tag, "anim_DIFFUSETEX") || std::strstr(tag, "anim_NORMALTEX")) {
-                // anim_diffusetex[0] or anim_normaltex[1] etc.
-                bool is_normal = (std::strstr(tag, "normal") != nullptr || std::strstr(tag, "NORMAL") != nullptr);
+                bool is_normal = (std::strstr(tag, "normal") != nullptr ||
+                                  std::strstr(tag, "NORMAL") != nullptr);
                 int tex_slot = (std::strstr(tag, "[1]") != nullptr) ? 1 : 0;
                 int frame = to_int(tok_at(&t, 1));
                 if (frame >= 0 && frame < TDP_MAX_ANIM_FRAMES) {
-                    TdpAnimFrame *dst = is_normal
+                    TdpAnimTexture *dst = is_normal
                         ? &mat->anim_normal[tex_slot][frame]
                         : &mat->anim_diffuse[tex_slot][frame];
                     const char *fpath = tok_at(&t, 2);
@@ -381,73 +411,92 @@ int tdp_parse(const char *path, TdpProject *out) {
                     dst->enabled = to_int(tok_at(&t, 3)) & 1;
                 }
             } else if (iequals(tag, "reflect_rgb")) {
-                mat->reflect_rgb[0] = to_int(tok_at(&t, 1));
-                mat->reflect_rgb[1] = to_int(tok_at(&t, 2));
-                mat->reflect_rgb[2] = to_int(tok_at(&t, 3));
+                int r = to_int(tok_at(&t, 1));
+                int g = to_int(tok_at(&t, 2));
+                int b = to_int(tok_at(&t, 3));
+                // 3DP stores plain RGB triplet; reflect_color is BGRA in TDP material data.
+                mat->reflect_color[0] = byte_to_unit(b);  // B
+                mat->reflect_color[1] = byte_to_unit(g);  // G
+                mat->reflect_color[2] = byte_to_unit(r);  // R
+                mat->reflect_color[3] = 0.0f;             // A
             } else if (iequals(tag, "rgbgen_style")) {
-                mat->rgbgen_style = to_int(tok_at(&t, 1));
+                int v = to_int(tok_at(&t, 1));
+                mat->rgb_gen.style = static_cast<uint8_t>(v & 0xff);
             } else if (iequals(tag, "rgbgen_rate")) {
-                mat->rgbgen_rate = to_float(tok_at(&t, 1));
+                mat->rgb_gen.rate = to_float(tok_at(&t, 1));
             } else if (iequals(tag, "rgbgen_phase")) {
-                mat->rgbgen_phase = to_float(tok_at(&t, 1));
+                mat->rgb_gen.phase = to_float(tok_at(&t, 1));
             } else if (iequals(tag, "rgbgen_srgb")) {
-                mat->rgbgen_srgb[0] = to_int(tok_at(&t, 1));
-                mat->rgbgen_srgb[1] = to_int(tok_at(&t, 2));
-                mat->rgbgen_srgb[2] = to_int(tok_at(&t, 3));
+                mat->rgb_gen.start_color[0] = byte_to_unit(to_int(tok_at(&t, 1)));
+                mat->rgb_gen.start_color[1] = byte_to_unit(to_int(tok_at(&t, 2)));
+                mat->rgb_gen.start_color[2] = byte_to_unit(to_int(tok_at(&t, 3)));
+                mat->rgb_gen.start_color[3] = 0.0f;
             } else if (iequals(tag, "rgbgen_ergb")) {
-                mat->rgbgen_ergb[0] = to_int(tok_at(&t, 1));
-                mat->rgbgen_ergb[1] = to_int(tok_at(&t, 2));
-                mat->rgbgen_ergb[2] = to_int(tok_at(&t, 3));
+                mat->rgb_gen.end_color[0] = byte_to_unit(to_int(tok_at(&t, 1)));
+                mat->rgb_gen.end_color[1] = byte_to_unit(to_int(tok_at(&t, 2)));
+                mat->rgb_gen.end_color[2] = byte_to_unit(to_int(tok_at(&t, 3)));
+                mat->rgb_gen.end_color[3] = 0.0f;
             } else if (iequals(tag, "rgbgen_ctrlreg")) {
+                char regname[32] = {};
                 if (t.count > 1 && tok_at(&t, 1)[0])
-                    copy_str(mat->rgbgen_ctrlreg, sizeof(mat->rgbgen_ctrlreg), tok_at(&t, 1));
+                    copy_str(regname, sizeof(regname), tok_at(&t, 1));
                 else
-                    extract_quoted(line, mat->rgbgen_ctrlreg, sizeof(mat->rgbgen_ctrlreg));
+                    extract_quoted(line, regname, sizeof(regname));
+                mat->rgb_gen.reg = tdp_ctrlreg_intern(out, regname);
             } else if (iequals(tag, "alphagen_style")) {
-                mat->alphagen_style = to_int(tok_at(&t, 1));
+                int v = to_int(tok_at(&t, 1));
+                mat->alpha_gen.style = static_cast<uint8_t>(v & 0xff);
             } else if (iequals(tag, "alphagen_rate")) {
-                mat->alphagen_rate = to_float(tok_at(&t, 1));
+                mat->alpha_gen.rate = to_float(tok_at(&t, 1));
             } else if (iequals(tag, "alphagen_phase")) {
-                mat->alphagen_phase = to_float(tok_at(&t, 1));
+                mat->alpha_gen.phase = to_float(tok_at(&t, 1));
             } else if (iequals(tag, "alphagen_start")) {
-                mat->alphagen_start = to_float(tok_at(&t, 1));
+                mat->alpha_gen.start = static_cast<int16_t>(to_int(tok_at(&t, 1)));
             } else if (iequals(tag, "alphagen_end")) {
-                mat->alphagen_end = to_float(tok_at(&t, 1));
+                mat->alpha_gen.end = static_cast<int16_t>(to_int(tok_at(&t, 1)));
             } else if (iequals(tag, "alphagen_ctrlreg")) {
+                char regname[32] = {};
                 if (t.count > 1 && tok_at(&t, 1)[0])
-                    copy_str(mat->alphagen_ctrlreg, sizeof(mat->alphagen_ctrlreg), tok_at(&t, 1));
+                    copy_str(regname, sizeof(regname), tok_at(&t, 1));
                 else
-                    extract_quoted(line, mat->alphagen_ctrlreg, sizeof(mat->alphagen_ctrlreg));
+                    extract_quoted(line, regname, sizeof(regname));
+                mat->alpha_gen.reg = tdp_ctrlreg_intern(out, regname);
             } else if (iequals(tag, "mapfunc_u_style")) {
-                mat->mapfunc_u_style = to_int(tok_at(&t, 1));
+                int v = to_int(tok_at(&t, 1));
+                mat->u_params.style = static_cast<uint8_t>(v & 0xff);
             } else if (iequals(tag, "mapfunc_u_rate")) {
-                mat->mapfunc_u_rate = to_float(tok_at(&t, 1));
+                mat->u_params.gen_rate = to_float(tok_at(&t, 1));
             } else if (iequals(tag, "mapfunc_u_phase")) {
-                mat->mapfunc_u_phase = to_float(tok_at(&t, 1));
+                mat->u_params.phase = to_float(tok_at(&t, 1));
             } else if (iequals(tag, "mapfunc_u_start")) {
-                mat->mapfunc_u_start = to_float(tok_at(&t, 1));
+                mat->u_params.start = to_float(tok_at(&t, 1));
             } else if (iequals(tag, "mapfunc_u_end")) {
-                mat->mapfunc_u_end = to_float(tok_at(&t, 1));
+                mat->u_params.end = to_float(tok_at(&t, 1));
             } else if (iequals(tag, "mapfunc_u_ctrlreg")) {
+                char regname[32] = {};
                 if (t.count > 1 && tok_at(&t, 1)[0])
-                    copy_str(mat->mapfunc_u_ctrlreg, sizeof(mat->mapfunc_u_ctrlreg), tok_at(&t, 1));
+                    copy_str(regname, sizeof(regname), tok_at(&t, 1));
                 else
-                    extract_quoted(line, mat->mapfunc_u_ctrlreg, sizeof(mat->mapfunc_u_ctrlreg));
+                    extract_quoted(line, regname, sizeof(regname));
+                mat->u_params.reg = tdp_ctrlreg_intern(out, regname);
             } else if (iequals(tag, "mapfunc_v_style")) {
-                mat->mapfunc_v_style = to_int(tok_at(&t, 1));
+                int v = to_int(tok_at(&t, 1));
+                mat->v_params.style = static_cast<uint8_t>(v & 0xff);
             } else if (iequals(tag, "mapfunc_v_rate")) {
-                mat->mapfunc_v_rate = to_float(tok_at(&t, 1));
+                mat->v_params.gen_rate = to_float(tok_at(&t, 1));
             } else if (iequals(tag, "mapfunc_v_phase")) {
-                mat->mapfunc_v_phase = to_float(tok_at(&t, 1));
+                mat->v_params.phase = to_float(tok_at(&t, 1));
             } else if (iequals(tag, "mapfunc_v_start")) {
-                mat->mapfunc_v_start = to_float(tok_at(&t, 1));
+                mat->v_params.start = to_float(tok_at(&t, 1));
             } else if (iequals(tag, "mapfunc_v_end")) {
-                mat->mapfunc_v_end = to_float(tok_at(&t, 1));
+                mat->v_params.end = to_float(tok_at(&t, 1));
             } else if (iequals(tag, "mapfunc_v_ctrlreg")) {
+                char regname[32] = {};
                 if (t.count > 1 && tok_at(&t, 1)[0])
-                    copy_str(mat->mapfunc_v_ctrlreg, sizeof(mat->mapfunc_v_ctrlreg), tok_at(&t, 1));
+                    copy_str(regname, sizeof(regname), tok_at(&t, 1));
                 else
-                    extract_quoted(line, mat->mapfunc_v_ctrlreg, sizeof(mat->mapfunc_v_ctrlreg));
+                    extract_quoted(line, regname, sizeof(regname));
+                mat->v_params.reg = tdp_ctrlreg_intern(out, regname);
             }
             break;
         }
@@ -598,7 +647,7 @@ int tdp_parse(const char *path, TdpProject *out) {
 }
 
 // ---------------------------------------------------------------------------
-// Writer
+// 3DP Writer
 // ---------------------------------------------------------------------------
 
 static void write_axis(FILE *fp, const char *label, const TdpAxisFunc *a) {
@@ -607,6 +656,25 @@ static void write_axis(FILE *fp, const char *label, const TdpAxisFunc *a) {
                  static_cast<double>(a->param2), static_cast<double>(a->param3),
                  static_cast<double>(a->param0), static_cast<double>(a->param1),
                  a->ctrl_reg);
+}
+
+// Compose the JO shader_tag the writer should emit.  The native shader_name
+// field is authoritative when present; classification is a fallback for
+// format-neutral callers that did not provide a concrete JO tag.
+static void writer_compose_shader_tag(const TdpMaterial *m,
+                                       char *out, size_t out_size) {
+    out[0] = '\0';
+    if (m->shader_name[0]) {
+        copy_str(out, out_size, m->shader_name);
+        return;
+    }
+    synthesize_jo_shader_tag(&m->classification, out, out_size);
+}
+
+// Compute the rattrib int the writer should emit, using the synthesizer.
+static uint32_t writer_compose_rattrib(const TdpMaterial *m) {
+    int has_anim = (m->animation.num_frames > 0) ? 1 : 0;
+    return synthesize_jo_rattrib(&m->classification, has_anim);
 }
 
 int tdp_write(const char *path, const TdpProject *proj) {
@@ -624,67 +692,199 @@ int tdp_write(const char *path, const TdpProject *proj) {
     std::fprintf(fp, "    nummaterials %zu\n", proj->material_count);
     for (size_t i = 0; i < proj->material_count; ++i) {
         const TdpMaterial *m = &proj->materials[i];
+
+        // Compose shader_tag + rattrib via synthesizers
+        char shader_tag[33];
+        writer_compose_shader_tag(m, shader_tag, sizeof(shader_tag));
+        uint32_t rattrib = writer_compose_rattrib(m);
+
+        // Texture lookups
+        const TdpMaterialTexture *d0 = tdp_find_static_tex(m, TDP_TEX_SLOT_DIFFUSE);
+        const TdpMaterialTexture *d1 = tdp_find_static_tex(m, TDP_TEX_SLOT_DETAIL);
+        const TdpMaterialTexture *n0 = tdp_find_static_tex(m, TDP_TEX_SLOT_NORMAL);
+        const TdpMaterialTexture *n1 = tdp_find_static_tex(m, TDP_TEX_SLOT_NORMAL_B);
+
+        const char *d0_path = d0 ? d0->name : "";
+        const char *d1_path = d1 ? d1->name : "";
+        // Normal slot defaults to "0" sentinel when missing (engine convention)
+        const char *n0_path = (n0 && n0->name[0]) ? n0->name : "0";
+        const char *n1_path = (n1 && n1->name[0]) ? n1->name : "0";
+
+        int d0_flag = tdp_tex_clamped(d0);
+        int d1_flag = tdp_tex_clamped(d1);
+        int n0_flag = tdp_tex_clamped(n0);
+        int n1_flag = tdp_tex_clamped(n1);
+
+        // Build anim_diffuse / anim_normal frame arrays from the material texture
+        // table.  The 3DI3 reader stores per-frame paths in textures[] with
+        // the ANIMATED flag bit set; the legacy 3DP encoding uses parallel
+        // anim_diffuse[][] / anim_normal[][] arrays.  Either source may be
+        // populated â€” readers from JO 3DI3 set textures[], writers from 3DP
+        // (round-trip) set anim_diffuse directly.  Merge both into local
+        // staging arrays for emission.
+        TdpAnimTexture anim_diff[2][TDP_MAX_ANIM_FRAMES];
+        TdpAnimTexture anim_norm[2][TDP_MAX_ANIM_FRAMES];
+        std::memcpy(anim_diff, m->anim_diffuse, sizeof(anim_diff));
+        std::memcpy(anim_norm, m->anim_normal,  sizeof(anim_norm));
+        for (uint32_t ti = 0;
+             ti < m->texture_count && ti < TDP_MAX_MATERIAL_TEXTURES;
+             ++ti) {
+            const TdpMaterialTexture *t = &m->textures[ti];
+            if (!(t->flags & 0x01u /*ANIMATED*/)) continue;
+            if (t->frame >= TDP_MAX_ANIM_FRAMES) continue;
+            int slot_idx = -1;
+            bool is_norm = false;
+            switch (t->slot) {
+            case TDP_TEX_SLOT_DIFFUSE:  slot_idx = 0; break;
+            case TDP_TEX_SLOT_DETAIL:   slot_idx = 1; break;
+            case TDP_TEX_SLOT_NORMAL:   slot_idx = 0; is_norm = true; break;
+            case TDP_TEX_SLOT_NORMAL_B: slot_idx = 1; is_norm = true; break;
+            default: continue;
+            }
+            TdpAnimTexture *dst = is_norm
+                ? &anim_norm[slot_idx][t->frame]
+                : &anim_diff[slot_idx][t->frame];
+            if (!dst->path[0]) {
+                copy_str(dst->path, sizeof(dst->path), t->name);
+                dst->enabled = (t->flags & 0x02u) ? 1 : 0;
+            }
+        }
+
+        // For animated materials with no static diffuse, the engine stores
+        // the first anim frame as the base diffuse path.  Mirror that here
+        // so 3DP fixtures with animated diffuse round-trip cleanly.
+        if (!d0_path[0] && anim_diff[0][0].path[0])
+            d0_path = anim_diff[0][0].path;
+        if (!d1_path[0] && anim_diff[1][0].path[0])
+            d1_path = anim_diff[1][0].path;
+
+        // Fill empty anim slots with the matching STATIC tex path (so
+        // OED's AppendTextureSlot @ 0x453300 collapses identical-name
+        // frames to one MTRL entry with that name) when there ARE
+        // animation frames AND the material has a non-zero static name
+        // for that slot. Otherwise fall back to the "0" sentinel.
+        //
+        // Without this fallback, materials with animated diffuse + static
+        // normal (e.g. Beret mat[1]) emit "0" anim_normaltex frames; OED
+        // then collapses to one MTRL entry literally named "0" instead of
+        // the static normaltex[0] value (e.g. "A_Beret.mdt"). Witnessed
+        // against ImportWorkspace_Parse3daToken @ 0x40927d (parses
+        // normaltex[0] into &mat->anim_textures) and WriteMTRL @ 0x4537e5
+        // (reads &slots[i].anim_textures back when not animated, or via
+        // AppendTextureSlot when animated).
+        auto static_path_or_zero = [](const char *p) -> const char * {
+            return (p && p[0] && std::strcmp(p, "0") != 0) ? p : "0";
+        };
+        if (m->animation.num_frames > 0) {
+            int n_anim_fill = m->animation.num_frames;
+            if (n_anim_fill > TDP_MAX_ANIM_FRAMES)
+                n_anim_fill = TDP_MAX_ANIM_FRAMES;
+            const char *diff_fallback[2] = {
+                static_path_or_zero(d0_path),
+                static_path_or_zero(d1_path),
+            };
+            const char *norm_fallback[2] = {
+                static_path_or_zero(n0_path),
+                static_path_or_zero(n1_path),
+            };
+            for (int s = 0; s < 2; ++s) {
+                for (int f = 0; f < n_anim_fill; ++f) {
+                    if (!anim_diff[s][f].path[0])
+                        copy_str(anim_diff[s][f].path,
+                                 sizeof(anim_diff[s][f].path),
+                                 diff_fallback[s]);
+                    if (!anim_norm[s][f].path[0])
+                        copy_str(anim_norm[s][f].path,
+                                 sizeof(anim_norm[s][f].path),
+                                 norm_fallback[s]);
+                }
+            }
+        }
+
+        // Reflect_color is BGRA float in TDP material data; emit as plain RGB ints (R G B)
+        int rr = clamp_255(m->reflect_color[2]);
+        int rg = clamp_255(m->reflect_color[1]);
+        int rb = clamp_255(m->reflect_color[0]);
+
+        // RGB gen colors: float 0..1 â†’ int 0..255
+        int sr = clamp_255(m->rgb_gen.start_color[0]);
+        int sg = clamp_255(m->rgb_gen.start_color[1]);
+        int sb = clamp_255(m->rgb_gen.start_color[2]);
+        int er = clamp_255(m->rgb_gen.end_color[0]);
+        int eg = clamp_255(m->rgb_gen.end_color[1]);
+        int eb = clamp_255(m->rgb_gen.end_color[2]);
+
+        // ctrl-reg names
+        const char *rgb_reg = tdp_ctrlreg_name(proj, m->rgb_gen.reg);
+        const char *alpha_reg = tdp_ctrlreg_name(proj, m->alpha_gen.reg);
+        const char *u_reg = tdp_ctrlreg_name(proj, m->u_params.reg);
+        const char *v_reg = tdp_ctrlreg_name(proj, m->v_params.reg);
+
         std::fprintf(fp, "    material %zu\n    {\n", i);
         std::fprintf(fp, "        name             \"%s\"\n", m->name);
-        std::fprintf(fp, "        shadertag        \"%s\"\n", m->shader_tag);
-        std::fprintf(fp, "        rattrib          %d\n", m->rattrib);
-        std::fprintf(fp, "        pattrib          %d\n", m->pattrib);
-        std::fprintf(fp, "        ptype            %d\n", m->ptype);
+        std::fprintf(fp, "        shadertag        \"%s\"\n", shader_tag);
+        std::fprintf(fp, "        rattrib          %u\n", rattrib);
+        std::fprintf(fp, "        pattrib          %u\n", m->pattrib);
+        std::fprintf(fp, "        ptype            %d\n", surface_type_to_ptype(m->surface_type));
         std::fprintf(fp, "        geofx            %d\n", m->geofx);
         std::fprintf(fp, "        geofx_value      %5.2f\n", static_cast<double>(m->geofx_value));
-        std::fprintf(fp, "        alphatestvalue   %d\n", m->alphatestvalue);
-        std::fprintf(fp, "        diffusetex[0]    \"%s\"  %d\n", m->diffuse_tex[0], m->diffuse_flags[0]);
-        std::fprintf(fp, "        diffusetex[1]    \"%s\"  %d\n", m->diffuse_tex[1], m->diffuse_flags[1]);
-        std::fprintf(fp, "        normaltex[0]     \"%s\"  %d\n", m->normal_tex[0], m->normal_flags[0]);
-        std::fprintf(fp, "        normaltex[1]     \"%s\"  %d\n", m->normal_tex[1], m->normal_flags[1]);
-        std::fprintf(fp, "        anim_frames      %d\n", m->anim_frames);
-        std::fprintf(fp, "        anim_type        %d\n", m->anim_type);
-        std::fprintf(fp, "        anim_frametime   %d\n", m->anim_frametime);
+        std::fprintf(fp, "        alphatestvalue   %d\n",
+                     static_cast<int>(m->alpha_test_value_byte));
+        std::fprintf(fp, "        diffusetex[0]    \"%s\"  %d\n", d0_path, d0_flag);
+        std::fprintf(fp, "        diffusetex[1]    \"%s\"  %d\n", d1_path, d1_flag);
+        std::fprintf(fp, "        normaltex[0]     \"%s\"  %d\n", n0_path, n0_flag);
+        std::fprintf(fp, "        normaltex[1]     \"%s\"  %d\n", n1_path, n1_flag);
+        std::fprintf(fp, "        anim_frames      %d\n",
+                     static_cast<int>(m->animation.num_frames));
+        std::fprintf(fp, "        anim_type        %d\n",
+                     static_cast<int>(m->animation.animation_type));
+        // For ctrl-reg-driven animation (type 1), cycle_frame_time is the
+        // register index, not a frame time â€” emit 0 as the engine does.
+        int frametime = (m->animation.animation_type == 1) ? 0
+                        : m->animation.cycle_frame_time;
+        std::fprintf(fp, "        anim_frametime   %d\n", frametime);
         std::fprintf(fp, "        anim_ctrlreg     \"%s\"\n", m->anim_ctrlreg);
 
-        // Write anim frames — engine always writes all 4 slots × all frames
-        // with specific format strings matching the engine binary output.
-        for (int f = 0; f < m->anim_frames && f < TDP_MAX_ANIM_FRAMES; ++f)
+        int n_anim = m->animation.num_frames;
+        if (n_anim > TDP_MAX_ANIM_FRAMES) n_anim = TDP_MAX_ANIM_FRAMES;
+        for (int f = 0; f < n_anim; ++f)
             std::fprintf(fp, "        anim_diffusetex[0] %d \"%s\"   %d\n",
-                         f, m->anim_diffuse[0][f].path, m->anim_diffuse[0][f].enabled);
-        for (int f = 0; f < m->anim_frames && f < TDP_MAX_ANIM_FRAMES; ++f)
+                         f, anim_diff[0][f].path, anim_diff[0][f].enabled);
+        for (int f = 0; f < n_anim; ++f)
             std::fprintf(fp, "        anim_diffusetex[1] %d \"%s\"  %d\n",
-                         f, m->anim_diffuse[1][f].path, m->anim_diffuse[1][f].enabled);
-        for (int f = 0; f < m->anim_frames && f < TDP_MAX_ANIM_FRAMES; ++f)
+                         f, anim_diff[1][f].path, anim_diff[1][f].enabled);
+        for (int f = 0; f < n_anim; ++f)
             std::fprintf(fp, "        anim_normaltex[0]  %d \"%s\"  %d\n",
-                         f, m->anim_normal[0][f].path, m->anim_normal[0][f].enabled);
-        for (int f = 0; f < m->anim_frames && f < TDP_MAX_ANIM_FRAMES; ++f)
+                         f, anim_norm[0][f].path, anim_norm[0][f].enabled);
+        for (int f = 0; f < n_anim; ++f)
             std::fprintf(fp, "        anim_normaltex[1]  %d \"%s\"  %d\n",
-                         f, m->anim_normal[1][f].path, m->anim_normal[1][f].enabled);
+                         f, anim_norm[1][f].path, anim_norm[1][f].enabled);
 
-        std::fprintf(fp, "        reflect_rgb    %d %d %d\n",
-                     m->reflect_rgb[0], m->reflect_rgb[1], m->reflect_rgb[2]);
-        std::fprintf(fp, "        rgbgen_style    %d\n", m->rgbgen_style);
-        std::fprintf(fp, "        rgbgen_rate     %f\n", static_cast<double>(m->rgbgen_rate));
-        std::fprintf(fp, "        rgbgen_phase    %f\n", static_cast<double>(m->rgbgen_phase));
-        std::fprintf(fp, "        rgbgen_srgb     %d %d %d\n",
-                     m->rgbgen_srgb[0], m->rgbgen_srgb[1], m->rgbgen_srgb[2]);
-        std::fprintf(fp, "        rgbgen_ergb     %d %d %d\n",
-                     m->rgbgen_ergb[0], m->rgbgen_ergb[1], m->rgbgen_ergb[2]);
-        std::fprintf(fp, "        rgbgen_ctrlreg  %s\n", m->rgbgen_ctrlreg);
-        std::fprintf(fp, "        alphagen_style   %d\n", m->alphagen_style);
-        std::fprintf(fp, "        alphagen_rate    %f\n", static_cast<double>(m->alphagen_rate));
-        std::fprintf(fp, "        alphagen_phase   %f\n", static_cast<double>(m->alphagen_phase));
-        std::fprintf(fp, "        alphagen_start   %i\n", static_cast<int>(m->alphagen_start));
-        std::fprintf(fp, "        alphagen_end     %i\n", static_cast<int>(m->alphagen_end));
-        std::fprintf(fp, "        alphagen_ctrlreg %s\n", m->alphagen_ctrlreg);
-        std::fprintf(fp, "        mapfunc_u_style   %d\n", m->mapfunc_u_style);
-        std::fprintf(fp, "        mapfunc_u_rate    %f\n", static_cast<double>(m->mapfunc_u_rate));
-        std::fprintf(fp, "        mapfunc_u_phase   %f\n", static_cast<double>(m->mapfunc_u_phase));
-        std::fprintf(fp, "        mapfunc_u_start   %f\n", static_cast<double>(m->mapfunc_u_start));
-        std::fprintf(fp, "        mapfunc_u_end     %f\n", static_cast<double>(m->mapfunc_u_end));
-        std::fprintf(fp, "        mapfunc_u_ctrlreg %s\n", m->mapfunc_u_ctrlreg);
-        std::fprintf(fp, "        mapfunc_v_style   %d\n", m->mapfunc_v_style);
-        std::fprintf(fp, "        mapfunc_v_rate    %f\n", static_cast<double>(m->mapfunc_v_rate));
-        std::fprintf(fp, "        mapfunc_v_phase   %f\n", static_cast<double>(m->mapfunc_v_phase));
-        std::fprintf(fp, "        mapfunc_v_start   %f\n", static_cast<double>(m->mapfunc_v_start));
-        std::fprintf(fp, "        mapfunc_v_end     %f\n", static_cast<double>(m->mapfunc_v_end));
-        std::fprintf(fp, "        mapfunc_v_ctrlreg %s\n", m->mapfunc_v_ctrlreg);
+        std::fprintf(fp, "        reflect_rgb    %d %d %d\n", rr, rg, rb);
+        std::fprintf(fp, "        rgbgen_style    %d\n", static_cast<int>(m->rgb_gen.style));
+        std::fprintf(fp, "        rgbgen_rate     %f\n", static_cast<double>(m->rgb_gen.rate));
+        std::fprintf(fp, "        rgbgen_phase    %f\n", static_cast<double>(m->rgb_gen.phase));
+        std::fprintf(fp, "        rgbgen_srgb     %d %d %d\n", sr, sg, sb);
+        std::fprintf(fp, "        rgbgen_ergb     %d %d %d\n", er, eg, eb);
+        std::fprintf(fp, "        rgbgen_ctrlreg  %s\n", rgb_reg);
+        std::fprintf(fp, "        alphagen_style   %d\n", static_cast<int>(m->alpha_gen.style));
+        std::fprintf(fp, "        alphagen_rate    %f\n", static_cast<double>(m->alpha_gen.rate));
+        std::fprintf(fp, "        alphagen_phase   %f\n", static_cast<double>(m->alpha_gen.phase));
+        std::fprintf(fp, "        alphagen_start   %i\n", static_cast<int>(m->alpha_gen.start));
+        std::fprintf(fp, "        alphagen_end     %i\n", static_cast<int>(m->alpha_gen.end));
+        std::fprintf(fp, "        alphagen_ctrlreg %s\n", alpha_reg);
+        std::fprintf(fp, "        mapfunc_u_style   %d\n", static_cast<int>(m->u_params.style));
+        std::fprintf(fp, "        mapfunc_u_rate    %f\n", static_cast<double>(m->u_params.gen_rate));
+        std::fprintf(fp, "        mapfunc_u_phase   %f\n", static_cast<double>(m->u_params.phase));
+        std::fprintf(fp, "        mapfunc_u_start   %f\n", static_cast<double>(m->u_params.start));
+        std::fprintf(fp, "        mapfunc_u_end     %f\n", static_cast<double>(m->u_params.end));
+        std::fprintf(fp, "        mapfunc_u_ctrlreg %s\n", u_reg);
+        std::fprintf(fp, "        mapfunc_v_style   %d\n", static_cast<int>(m->v_params.style));
+        std::fprintf(fp, "        mapfunc_v_rate    %f\n", static_cast<double>(m->v_params.gen_rate));
+        std::fprintf(fp, "        mapfunc_v_phase   %f\n", static_cast<double>(m->v_params.phase));
+        std::fprintf(fp, "        mapfunc_v_start   %f\n", static_cast<double>(m->v_params.start));
+        std::fprintf(fp, "        mapfunc_v_end     %f\n", static_cast<double>(m->v_params.end));
+        std::fprintf(fp, "        mapfunc_v_ctrlreg %s\n", v_reg);
         std::fprintf(fp, "    }\n");
     }
     std::fprintf(fp, "}\n\n");
@@ -701,7 +901,6 @@ int tdp_write(const char *path, const TdpProject *proj) {
         std::fprintf(fp, "    render_function  %s\n", lod->render_function[0] ? lod->render_function : "gnrc");
         std::fprintf(fp, "    threshold        %.3f\n", static_cast<double>(lod->threshold));
 
-        // Part animation
         std::fprintf(fp, "    partanimation\n    {\n");
         std::fprintf(fp, "        enablepartanim   %d\n", lod->part_anim_enabled);
         std::fprintf(fp, "        numpartanim      %zu\n", lod->part_anim_count);
@@ -730,7 +929,6 @@ int tdp_write(const char *path, const TdpProject *proj) {
         }
         std::fprintf(fp, "    }\n");
 
-        // Lights
         std::fprintf(fp, "    lightsources\n    {\n");
         std::fprintf(fp, "        numlights %zu\n", lod->light_count);
         for (size_t j = 0; j < lod->light_count; ++j) {
@@ -762,39 +960,53 @@ int tdp_write(const char *path, const TdpProject *proj) {
 // 3DA Writer (legacy ModSuperOED format)
 // ---------------------------------------------------------------------------
 
-// ptype → physical_attributes bitfield mapping (inverse of parser's lookup)
-static int ptype_to_physical_attributes(int ptype) {
-    switch (ptype) {
-        case 0: return 0x1;     // Metal
-        case 1: return 0x2;     // Wood
-        case 2: return 0x4;     // Stone
-        case 3: return 0x8;     // Foliage
-        case 4: return 0x200;   // Hard Metal
-        case 5: return 0x400;   // Cloth
-        case 6: return 0x800;   // Glass
-        case 7: return 0x10000; // Water
-        case 8: return 0x20000; // Flesh
-        case 9: return 0x40000; // Dirt
-        default: return 0x1;
-    }
-}
-
+// Per-label literal padding matching df4oed.exe::sub_421120 @ 0x4218f7â€¦0x421a9b.
+// OED's format strings hardcode the padding per field name; a quirk in OED is
+// that scalex/y/z_func have one extra space vs scale_func â€” preserved here.
 static void write_axis_3da(FILE *fp, const char *label, const TdpAxisFunc *a) {
-    std::fprintf(fp, "  %-16s%2i  %1.3f %1.3f %1.3f %1.3f %s\n",
-                 label, a->func_id,
+    const char *fmt = nullptr;
+    if (std::strcmp(label, "yaw_func") == 0)
+        fmt = "  yaw_func     %d %1.3f %1.3f %1.3f %1.3f %s\n";
+    else if (std::strcmp(label, "pitch_func") == 0)
+        fmt = "  pitch_func   %d %1.3f %1.3f %1.3f %1.3f %s\n";
+    else if (std::strcmp(label, "roll_func") == 0)
+        fmt = "  roll_func    %d %1.3f %1.3f %1.3f %1.3f %s\n";
+    else if (std::strcmp(label, "scale_func") == 0)
+        fmt = "  scale_func   %d %1.3f %1.3f %1.3f %1.3f %s\n";
+    else if (std::strcmp(label, "scalex_func") == 0)
+        fmt = "  scalex_func   %d %1.3f %1.3f %1.3f %1.3f %s\n";
+    else if (std::strcmp(label, "scaley_func") == 0)
+        fmt = "  scaley_func   %d %1.3f %1.3f %1.3f %1.3f %s\n";
+    else if (std::strcmp(label, "scalez_func") == 0)
+        fmt = "  scalez_func   %d %1.3f %1.3f %1.3f %1.3f %s\n";
+    else
+        fmt = "  %-13s%d %1.3f %1.3f %1.3f %1.3f %s\n";  // generic fallback
+    std::fprintf(fp, fmt,
+                 a->func_id,
                  static_cast<double>(a->param2), static_cast<double>(a->param3),
                  static_cast<double>(a->param0), static_cast<double>(a->param1),
                  a->ctrl_reg);
 }
 
 static bool has_detail_tex(const TdpMaterial *m) {
-    return m->diffuse_tex[1][0] && std::strcmp(m->diffuse_tex[1], "0") != 0;
+    const TdpMaterialTexture *d1 = tdp_find_static_tex(m, TDP_TEX_SLOT_DETAIL);
+    return d1 && d1->name[0] && std::strcmp(d1->name, "0") != 0;
 }
 
-static void write_3da_material(FILE *fp, const TdpMaterial *m, int idx, int multitex_flags) {
+// Byte-faithful with df4oed.exe::sub_421120 @ 0x421120 (BHD's GP OED 3DA writer).
+// Format strings, column padding, field order, and conditional-emission rules
+// mirror that function exactly so BHD's engine reads our output the same way
+// it reads OED's.
+static void write_3da_material(FILE *fp, const TdpProject *proj,
+                                const TdpMaterial *m, int idx,
+                                int multitex_flags) {
     // Pick texture slot based on multitex_flags: 1=primary, 2=detail
-    int slot = (multitex_flags == 2) ? 1 : 0;
-    const char *tex = m->diffuse_tex[slot];
+    const TdpMaterialTexture *tex_entry = nullptr;
+    if (multitex_flags == 2)
+        tex_entry = tdp_find_static_tex(m, TDP_TEX_SLOT_DETAIL);
+    else
+        tex_entry = tdp_find_static_tex(m, TDP_TEX_SLOT_DIFFUSE);
+    const char *tex = (tex_entry && tex_entry->name[0]) ? tex_entry->name : "";
 
     // Build green_texture path (append .pcx if no extension)
     char green_tex[64] = {};
@@ -807,66 +1019,156 @@ static void write_3da_material(FILE *fp, const TdpMaterial *m, int idx, int mult
         }
     }
 
+    // Classification-derived attributes
+    bool is_alpha_blend = (m->classification.blend_mode == THREEDI_CLASS_BLEND_ALPHA);
+    bool is_non_opaque  = (m->classification.blend_mode != THREEDI_CLASS_BLEND_OPAQUE);
+    int alpha_type = is_alpha_blend ? 2 : 0;
+    const char *alpha_texture = is_alpha_blend ? green_tex : "";
+    int blending_mode = is_non_opaque ? 1 : 0;
+
+    // use_alpha_pcx: 1 if classification.alpha_test set, else if alpha_test_value_byte > 0
+    int use_alpha_pcx = (m->classification.alpha_test || m->alpha_test_value_byte > 0) ? 1 : 0;
+
+    // render_attributes via synthesizer
+    int has_anim = (m->animation.num_frames > 0) ? 1 : 0;
+    uint32_t rattrib = synthesize_render_attributes(&m->classification, has_anim);
+
+    // shader_type via BHD synthesizer
+    uint32_t shader_type = synthesize_bhd_shader_type(&m->classification);
+
+    // color_type from TDP material data (default 2 if zero)
+    uint32_t color_type = m->color_type ? m->color_type : 2;
+
+    // Reflect color: TDP material data is BGRA float; OED writes plain RGB ints
+    int rr = clamp_255(m->reflect_color[2]);
+    int rg = clamp_255(m->reflect_color[1]);
+    int rb = clamp_255(m->reflect_color[0]);
+
+    // RGB gen colors
+    int sr = clamp_255(m->rgb_gen.start_color[0]);
+    int sg = clamp_255(m->rgb_gen.start_color[1]);
+    int sb = clamp_255(m->rgb_gen.start_color[2]);
+    int er = clamp_255(m->rgb_gen.end_color[0]);
+    int eg = clamp_255(m->rgb_gen.end_color[1]);
+    int eb = clamp_255(m->rgb_gen.end_color[2]);
+
+    // ctrl-reg names
+    const char *rgb_reg = tdp_ctrlreg_name(proj, m->rgb_gen.reg);
+    const char *alpha_reg = tdp_ctrlreg_name(proj, m->alpha_gen.reg);
+    const char *u_reg = tdp_ctrlreg_name(proj, m->u_params.reg);
+    const char *v_reg = tdp_ctrlreg_name(proj, m->v_params.reg);
+
     std::fprintf(fp, "begin material %d\n", idx);
     std::fprintf(fp, "  name \"%s\"\n", green_tex);
     std::fprintf(fp, "  description \"%s\"\n", m->name);
-    std::fprintf(fp, "  multitexture_flags %d\n", multitex_flags);
-    std::fprintf(fp, "  color_type 2\n");
-    std::fprintf(fp, "  blending_mode 1\n");
+
+    // Conditional fields
+    if (rattrib != 0)
+        std::fprintf(fp, "  render_attributes %u\n", rattrib);
+    if (multitex_flags != 0)
+        std::fprintf(fp, "  multitexture_flags %d\n", multitex_flags);
+    if (m->pattrib != 0)
+        std::fprintf(fp, "  physical_attributes %u\n", m->pattrib);
+
+    // Always emitted
+    std::fprintf(fp, "  color_type %u\n", color_type);
+
+    if (alpha_type != 0)
+        std::fprintf(fp, "  alpha_type %d\n", alpha_type);
+    if (blending_mode != 0)
+        std::fprintf(fp, "  blending_mode %d\n", blending_mode);
+
     std::fprintf(fp, "  green_texture \"%s\"\n", green_tex);
-    std::fprintf(fp, "  alpha_texture \"\"\n");
-    std::fprintf(fp, "  u_offset 0.000000\n");
-    std::fprintf(fp, "  v_offset 0.000000\n");
-    std::fprintf(fp, "  u_tiling 1.000000\n");
-    std::fprintf(fp, "  v_tiling 1.000000\n");
-    std::fprintf(fp, "  use_alpha_pcx %d\n", (m->alphatestvalue > 0) ? 1 : 0);
+    std::fprintf(fp, "  alpha_texture \"%s\"\n", alpha_texture);
 
-    // mapfunc fields
-    std::fprintf(fp, "  mapfunc_u_style %d\n", m->mapfunc_u_style);
-    std::fprintf(fp, "  mapfunc_u_rate %f\n", static_cast<double>(m->mapfunc_u_rate));
-    std::fprintf(fp, "  mapfunc_u_phase %f\n", static_cast<double>(m->mapfunc_u_phase));
-    std::fprintf(fp, "  mapfunc_u_start %f\n", static_cast<double>(m->mapfunc_u_start));
-    std::fprintf(fp, "  mapfunc_u_end %f\n", static_cast<double>(m->mapfunc_u_end));
-    std::fprintf(fp, "  mapfunc_u_ctrlreg %s\n", m->mapfunc_u_ctrlreg);
-    std::fprintf(fp, "  mapfunc_v_style %d\n", m->mapfunc_v_style);
-    std::fprintf(fp, "  mapfunc_v_rate %f\n", static_cast<double>(m->mapfunc_v_rate));
-    std::fprintf(fp, "  mapfunc_v_phase %f\n", static_cast<double>(m->mapfunc_v_phase));
-    std::fprintf(fp, "  mapfunc_v_start %f\n", static_cast<double>(m->mapfunc_v_start));
-    std::fprintf(fp, "  mapfunc_v_end %f\n", static_cast<double>(m->mapfunc_v_end));
-    std::fprintf(fp, "  mapfunc_v_ctrlreg %s\n", m->mapfunc_v_ctrlreg);
+    // Anim conditional â€” skip emission when zero
+    if (m->animation.num_frames != 0)
+        std::fprintf(fp, "  anim_frames %d\n", static_cast<int>(m->animation.num_frames));
+    if (m->animation.cycle_frame_time != 0 && m->animation.animation_type != 1)
+        std::fprintf(fp, "  anim_time %d\n",
+                     static_cast<int>(m->animation.cycle_frame_time));
+    if (m->anim_sequence != 0)
+        std::fprintf(fp, "  anim_sequence %u\n", m->anim_sequence);
 
-    // RGB gen — split into per-component fields
-    std::fprintf(fp, "  rgbgen_style %d\n", m->rgbgen_style);
-    std::fprintf(fp, "  rgbgen_rate %f\n", static_cast<double>(m->rgbgen_rate));
-    std::fprintf(fp, "  rgbgen_phase %f\n", static_cast<double>(m->rgbgen_phase));
-    std::fprintf(fp, "  rgbgen_sr %d\n", m->rgbgen_srgb[0]);
-    std::fprintf(fp, "  rgbgen_sg %d\n", m->rgbgen_srgb[1]);
-    std::fprintf(fp, "  rgbgen_sb %d\n", m->rgbgen_srgb[2]);
-    std::fprintf(fp, "  rgbgen_er %d\n", m->rgbgen_ergb[0]);
-    std::fprintf(fp, "  rgbgen_eg %d\n", m->rgbgen_ergb[1]);
-    std::fprintf(fp, "  rgbgen_eb %d\n", m->rgbgen_ergb[2]);
-    std::fprintf(fp, "  rgbgen_ctrlreg %s\n", m->rgbgen_ctrlreg);
+    // alpha_test
+    if (m->alpha_test_value_byte != 0)
+        std::fprintf(fp, "  alpha_test %d\n",
+                     static_cast<int>(m->alpha_test_value_byte));
 
-    // Alpha gen
-    std::fprintf(fp, "  alphagen_style %d\n", m->alphagen_style);
-    std::fprintf(fp, "  alphagen_rate %f\n", static_cast<double>(m->alphagen_rate));
-    std::fprintf(fp, "  alphagen_phase %f\n", static_cast<double>(m->alphagen_phase));
-    std::fprintf(fp, "  alphagen_start %i\n", static_cast<int>(m->alphagen_start));
-    std::fprintf(fp, "  alphagen_end %i\n", static_cast<int>(m->alphagen_end));
-    std::fprintf(fp, "  alphagen_ctrlreg %s\n", m->alphagen_ctrlreg);
+    // FFP material parameters (BHD-only, often zero from JO source)
+    if (m->color_green[0] || m->color_green[1] || m->color_green[2])
+        std::fprintf(fp, "  color_green %d %d %d\n",
+                     m->color_green[0], m->color_green[1], m->color_green[2]);
+    if (m->color_alpha[0] || m->color_alpha[1] || m->color_alpha[2])
+        std::fprintf(fp, "  color_alpha %d %d %d\n",
+                     m->color_alpha[0], m->color_alpha[1], m->color_alpha[2]);
+    if (m->luminosity != 0)
+        std::fprintf(fp, "  luminosity %u\n", m->luminosity);
+    if (m->transparency != 0)
+        std::fprintf(fp, "  transparency %u\n", m->transparency);
+    if (m->specular_intensity != 0)
+        std::fprintf(fp, "  specular_intensity %u\n", m->specular_intensity);
+    if (m->specular_sharpness != 0)
+        std::fprintf(fp, "  specular_sharpness %u\n", m->specular_sharpness);
 
-    // Reflect
-    std::fprintf(fp, "  reflect_r %d\n", m->reflect_rgb[0]);
-    std::fprintf(fp, "  reflect_g %d\n", m->reflect_rgb[1]);
-    std::fprintf(fp, "  reflect_b %d\n", m->reflect_rgb[2]);
-    std::fprintf(fp, "  reflect_type 0\n");
-    std::fprintf(fp, "  reflect_alpha 0\n");
-    std::fprintf(fp, "  actionplane_type 0\n");
-    std::fprintf(fp, "  projector_type 0\n");
-    std::fprintf(fp, "  projector_no_receive 0\n");
-    std::fprintf(fp, "  projector_yaw 0\n");
-    std::fprintf(fp, "  projector_pitch 0\n");
-    std::fprintf(fp, "  shader_type 0\n");
+    // UV transform â€” use TDP material fields, fall back to identity
+    float u_off = m->u_offset;
+    float v_off = m->v_offset;
+    float u_til = (m->u_tiling != 0.0f) ? m->u_tiling : 1.0f;
+    float v_til = (m->v_tiling != 0.0f) ? m->v_tiling : 1.0f;
+    std::fprintf(fp, "  u_offset %f\n", static_cast<double>(u_off));
+    std::fprintf(fp, "  v_offset %f\n", static_cast<double>(v_off));
+    std::fprintf(fp, "  u_tiling %f\n", static_cast<double>(u_til));
+    std::fprintf(fp, "  v_tiling %f\n", static_cast<double>(v_til));
+    std::fprintf(fp, "  use_alpha_pcx %d\n", use_alpha_pcx);
+
+    // mapfunc_u_*: OED order is style â†’ rate â†’ start â†’ end â†’ phase â†’ ctrlreg
+    std::fprintf(fp, "  mapfunc_u_style  %d\n", static_cast<int>(m->u_params.style));
+    std::fprintf(fp, "  mapfunc_u_rate   %f\n", static_cast<double>(m->u_params.gen_rate));
+    std::fprintf(fp, "  mapfunc_u_start  %f\n", static_cast<double>(m->u_params.start));
+    std::fprintf(fp, "  mapfunc_u_end    %f\n", static_cast<double>(m->u_params.end));
+    std::fprintf(fp, "  mapfunc_u_phase  %f\n", static_cast<double>(m->u_params.phase));
+    std::fprintf(fp, "  mapfunc_u_ctrlreg %s\n", u_reg);
+
+    std::fprintf(fp, "  mapfunc_v_style  %d\n", static_cast<int>(m->v_params.style));
+    std::fprintf(fp, "  mapfunc_v_rate   %f\n", static_cast<double>(m->v_params.gen_rate));
+    std::fprintf(fp, "  mapfunc_v_start  %f\n", static_cast<double>(m->v_params.start));
+    std::fprintf(fp, "  mapfunc_v_end    %f\n", static_cast<double>(m->v_params.end));
+    std::fprintf(fp, "  mapfunc_v_phase  %f\n", static_cast<double>(m->v_params.phase));
+    std::fprintf(fp, "  mapfunc_v_ctrlreg %s\n", v_reg);
+
+    // rgbgen
+    std::fprintf(fp, "  rgbgen_style  %d\n", static_cast<int>(m->rgb_gen.style));
+    std::fprintf(fp, "  rgbgen_rate   %f\n", static_cast<double>(m->rgb_gen.rate));
+    std::fprintf(fp, "  rgbgen_phase  %f\n", static_cast<double>(m->rgb_gen.phase));
+    std::fprintf(fp, "  rgbgen_sr     %d\n", sr);
+    std::fprintf(fp, "  rgbgen_sg     %d\n", sg);
+    std::fprintf(fp, "  rgbgen_sb     %d\n", sb);
+    std::fprintf(fp, "  rgbgen_er     %d\n", er);
+    std::fprintf(fp, "  rgbgen_eg     %d\n", eg);
+    std::fprintf(fp, "  rgbgen_eb     %d\n", eb);
+    std::fprintf(fp, "  rgbgen_ctrlreg %s\n", rgb_reg);
+
+    // alphagen: style â†’ rate â†’ start (i) â†’ end (i) â†’ phase â†’ ctrlreg
+    std::fprintf(fp, "  alphagen_style  %d\n", static_cast<int>(m->alpha_gen.style));
+    std::fprintf(fp, "  alphagen_rate   %f\n", static_cast<double>(m->alpha_gen.rate));
+    std::fprintf(fp, "  alphagen_start  %d\n", static_cast<int>(m->alpha_gen.start));
+    std::fprintf(fp, "  alphagen_end    %d\n", static_cast<int>(m->alpha_gen.end));
+    std::fprintf(fp, "  alphagen_phase  %f\n", static_cast<double>(m->alpha_gen.phase));
+    std::fprintf(fp, "  alphagen_ctrlreg %s\n", alpha_reg);
+
+    // Reflect / projector / shader
+    std::fprintf(fp, "  reflect_r    %d\n", rr);
+    std::fprintf(fp, "  reflect_g    %d\n", rg);
+    std::fprintf(fp, "  reflect_b    %d\n", rb);
+    std::fprintf(fp, "  reflect_type %u\n", m->reflect_type);
+    std::fprintf(fp, "  reflect_alpha %u\n", m->reflect_alpha);
+    std::fprintf(fp, "  actionplane_type     %u\n", m->actionplane_type);
+    std::fprintf(fp, "  projector_type       %u\n", m->projector_type);
+    std::fprintf(fp, "  projector_no_receive %u\n", m->projector_no_receive);
+    std::fprintf(fp, "  projector_yaw       %u\n", m->projector_yaw);
+    std::fprintf(fp, "  projector_pitch     %u\n", m->projector_pitch);
+    std::fprintf(fp, "  shader_type         %u\n", shader_type);
     std::fprintf(fp, "end material\n\n");
 }
 
@@ -884,35 +1186,51 @@ int tdp_write_3da(const char *path, const TdpProject *proj) {
             ++num_3da_materials;
     }
 
-    std::fprintf(fp, "/ 3DI metafile\n\n");
+    // Header timestamp
+    {
+        std::time_t now = std::time(nullptr);
+        std::tm local{};
+#ifdef _WIN32
+        localtime_s(&local, &now);
+#else
+        localtime_r(&now, &local);
+#endif
+        // df4oed emits ONE \n after the comment plus a blank line, i.e.
+        // two newlines after the comment line.  This produces an empty
+        // line at line 2 and an empty line at line 3 before the section.
+        std::fprintf(fp, "/ 3DI metafile, saved on %d/%d/%d, %d:%02d\n\n\n",
+                     local.tm_mon + 1, local.tm_mday, local.tm_year + 1900,
+                     local.tm_hour, local.tm_min);
+    }
 
-    // general_information
+    // general_information section
     std::fprintf(fp, "begin general_information\n");
-    std::fprintf(fp, "  3da_version 3\n");
-    std::fprintf(fp, "  3di_version %d\n", lod0->attributes);
-    std::fprintf(fp, "  username opennova\n");
-    std::fprintf(fp, "  attributes: 1\n");
+    std::fprintf(fp, "  3da_version %d\n", 3);
+    std::fprintf(fp, "  3di_version %d\n", 2);
+    std::fprintf(fp, "  username    %s\n",
+                 proj->username[0] ? proj->username : "opennova");
+    std::fprintf(fp, "  attributes: %d\n", lod0->attributes ? lod0->attributes : 1);
     std::fprintf(fp, "  render_function %s\n",
                  lod0->render_function[0] ? lod0->render_function : "gnrc");
     std::fprintf(fp, "  threshold %f\n", static_cast<double>(lod0->threshold));
     std::fprintf(fp, "  num_materials %d\n", num_3da_materials);
-    std::fprintf(fp, "  scale_factor 1.000000\n");
+    std::fprintf(fp, "  scale_factor %f\n", 1.0);
     std::fprintf(fp, "  diffuse_set  TRUE\n");
-    std::fprintf(fp, "  pm_enable 0\n");
-    std::fprintf(fp, "  pm_polythresh 0\n");
+    std::fprintf(fp, "  pm_enable     %d\n", 0);
+    std::fprintf(fp, "  pm_polythresh %d\n", 0);
     std::fprintf(fp, "  part_anim_enable %d\n", lod0->part_anim_enabled);
-    std::fprintf(fp, "  fakeskin_z 0\n");
+    std::fprintf(fp, "  fakeskin_z %d\n", 0);
     std::fprintf(fp, "  polycollision %d\n", proj->poly_collision_lod);
     std::fprintf(fp, "end general_information\n\n");
 
-    // Materials — split by texture slot
+    // Materials â€” split by texture slot
     int tda_mat_idx = 0;
     for (size_t i = 0; i < proj->material_count; ++i) {
         const TdpMaterial *m = &proj->materials[i];
-        write_3da_material(fp, m, tda_mat_idx, 1);
+        write_3da_material(fp, proj, m, tda_mat_idx, 1);
         ++tda_mat_idx;
         if (has_detail_tex(m)) {
-            write_3da_material(fp, m, tda_mat_idx, 2);
+            write_3da_material(fp, proj, m, tda_mat_idx, 2);
             ++tda_mat_idx;
         }
     }
@@ -921,16 +1239,16 @@ int tdp_write_3da(const char *path, const TdpProject *proj) {
     for (size_t p = 0; p < lod0->part_anim_count; ++p) {
         const TdpPartAnim *pa = &lod0->part_anims[p];
         std::fprintf(fp, "begin part_animation %zu\n", p);
-        std::fprintf(fp, "  rotate_type       %2i\n", pa->rotate_type);
-        std::fprintf(fp, "  scale_type        %2i\n", pa->scale_type);
-        std::fprintf(fp, "  transform_as      %2i\n", pa->transform_as);
-        std::fprintf(fp, "  yaw_rate           %1.3f\n", static_cast<double>(pa->yaw_rate));
-        std::fprintf(fp, "  pitch_rate         %1.3f\n", static_cast<double>(pa->pitch_rate));
-        std::fprintf(fp, "  roll_rate          %1.3f\n", static_cast<double>(pa->roll_rate));
+        std::fprintf(fp, "  rotate_type  %d\n", pa->rotate_type);
+        std::fprintf(fp, "  scale_type   %d\n", pa->scale_type);
+        std::fprintf(fp, "  transform_as %d\n", pa->transform_as);
+        std::fprintf(fp, "  yaw_rate     %f\n", static_cast<double>(pa->yaw_rate));
+        std::fprintf(fp, "  pitch_rate   %f\n", static_cast<double>(pa->pitch_rate));
+        std::fprintf(fp, "  roll_rate    %f\n", static_cast<double>(pa->roll_rate));
         write_axis_3da(fp, "yaw_func", &pa->yaw);
         write_axis_3da(fp, "pitch_func", &pa->pitch);
         write_axis_3da(fp, "roll_func", &pa->roll);
-        std::fprintf(fp, "  reverserotate     %2i\n", pa->reverse_rotate);
+        std::fprintf(fp, "  reverserotate    %d\n", pa->reverse_rotate);
         write_axis_3da(fp, "scale_func", &pa->scale);
         write_axis_3da(fp, "scalex_func", &pa->scale_x);
         write_axis_3da(fp, "scaley_func", &pa->scale_y);
@@ -955,408 +1273,5 @@ int tdp_write_3da(const char *path, const TdpProject *proj) {
     }
 
     std::fclose(fp);
-    return 0;
-}
-
-// ---------------------------------------------------------------------------
-// tdp_from_ir — populate TdpProject from ThreediModelIR
-// ---------------------------------------------------------------------------
-
-static void resolve_mat_ctrlreg(char *dst, size_t dst_size,
-                                 uint8_t style, int32_t reg,
-                                 const ThreediIRControlRegister *ctrl_regs,
-                                 size_t ctrl_reg_count) {
-    if (style > 0x70 && reg >= 0 && (size_t)reg < ctrl_reg_count && ctrl_regs) {
-        copy_str(dst, dst_size, ctrl_regs[reg].name);
-    }
-}
-
-static int surface_type_to_ptype(uint8_t st) {
-    switch (st) {
-        case 0x0E: return 0;  // Metal
-        case 0x0D: return 1;  // Wood
-        case 0x0C: return 2;  // Stone
-        case 0x11: return 3;  // Foliage
-        case 0x12: return 4;  // Hard Metal
-        case 0x10: return 5;  // Cloth
-        case 0x0F: return 6;  // Glass
-        case 0x07: return 7;  // Water
-        case 0x13: return 8;  // Flesh
-        case 0x01: return 9;  // Dirt
-        default:   return 9;
-    }
-}
-
-static int clamp_255(float v) {
-    int r = static_cast<int>(v * 255.0f);
-    if (r < 0) r = 0;
-    if (r > 255) r = 255;
-    return r;
-}
-
-static void ir_transform_to_axis(const ThreediIRTransform *xf, TdpAxisFunc *out,
-                                  bool is_rotation,
-                                  const ThreediIRControlRegister *ctrl_regs,
-                                  size_t ctrl_reg_count) {
-    std::memset(out, 0, sizeof(*out));
-    out->func_id = xf->control;
-    // Inverse of export_3di.cpp encoding:
-    // out.rate = clamp_s16_from_float(f.param0 * 256.0f)  =>  param0 = rate / 256.0
-    // out.control_param = clamp_u8_from_float(f.param1 * 256.0f)  =>  param1 = control_param / 256.0
-    // out.start = clamp_s16_from_float(f.param2 * scale)  =>  param2 = start / scale
-    // out.end = clamp_s16_from_float(f.param3 * scale)  =>  param3 = end / scale
-    out->param0 = xf->rate / 256.0f;
-    out->param1 = xf->control_param / 256.0f;
-    float scale = is_rotation ? (16384.0f / 360.0f) : 256.0f;
-    out->param2 = xf->start / scale;
-    out->param3 = xf->end / scale;
-
-    // Register-based control functions (codes 113-117, i.e. > 0x70):
-    // control_param is an index into the control register table, not a phase.
-    if (xf->control > 0x70 && ctrl_regs && xf->control_param < ctrl_reg_count) {
-        copy_str(out->ctrl_reg, sizeof(out->ctrl_reg),
-                 ctrl_regs[xf->control_param].name);
-        out->param1 = 0.0f;
-    }
-}
-
-// Populate a TdpLod's part_anims from an IR LOD's part_animations.
-// Returns 0 on success, -1 on allocation failure.
-static int populate_tdp_lod_panm(TdpLod *lod, const ThreediIRLod *ir_lod,
-                                  const ThreediModelIR *ir) {
-    // Part count from this LOD
-    size_t part_count = 0;
-    if (ir_lod->declared_part_count > 0)
-        part_count = (size_t)ir_lod->declared_part_count;
-    else
-        part_count = ir_lod->part_count;
-
-    // Check if any PANM entry has non-zero flags
-    bool has_panm = false;
-    for (size_t i = 0; i < ir_lod->part_animation_count; ++i) {
-        if (ir_lod->part_animations[i].flags != 0) { has_panm = true; break; }
-    }
-    size_t panm_count = part_count;
-    if (has_panm && ir_lod->part_animation_count > part_count)
-        panm_count = ir_lod->part_animation_count;
-    lod->part_anim_enabled = has_panm ? 1 : 0;
-
-    if (panm_count == 0) return 0;
-
-    lod->part_anims = static_cast<TdpPartAnim *>(
-        std::calloc(panm_count, sizeof(TdpPartAnim)));
-    if (!lod->part_anims) return -1;
-    lod->part_anim_count = panm_count;
-
-    if (has_panm) {
-        for (size_t i = 0; i < ir_lod->part_animation_count; ++i) {
-            const ThreediIRPartAnimation *src = &ir_lod->part_animations[i];
-            TdpPartAnim *dst = &lod->part_anims[i];
-            dst->transform_as = src->part_index;
-
-            uint32_t flags = src->flags;
-            dst->rotate_type = threedi_panm_rotation_type(flags);
-            dst->scale_type = threedi_panm_scale_type(flags);
-            dst->trans_type = threedi_panm_translate_type(flags);
-            dst->reverse_rotate = threedi_panm_rotation_reversed(flags);
-
-            const ThreediIRControlRegister *cregs = ir->control_registers;
-            size_t creg_count = ir->control_register_count;
-
-            if (dst->rotate_type == 2) {
-                ir_transform_to_axis(&src->rotation_x, &dst->yaw, true, cregs, creg_count);
-                ir_transform_to_axis(&src->rotation_y, &dst->pitch, true, cregs, creg_count);
-                ir_transform_to_axis(&src->rotation_z, &dst->roll, true, cregs, creg_count);
-            }
-
-            if (dst->scale_type == 1) {
-                ir_transform_to_axis(&src->scale_x, &dst->scale, false, cregs, creg_count);
-            } else if (dst->scale_type == 2) {
-                ir_transform_to_axis(&src->scale_x, &dst->scale_x, false, cregs, creg_count);
-                ir_transform_to_axis(&src->scale_y, &dst->scale_y, false, cregs, creg_count);
-                ir_transform_to_axis(&src->scale_z, &dst->scale_z, false, cregs, creg_count);
-            }
-
-            uint8_t tt = dst->trans_type;
-            if (tt == 1)
-                ir_transform_to_axis(&src->translation, &dst->trans_x, false, cregs, creg_count);
-            else if (tt == 2)
-                ir_transform_to_axis(&src->translation, &dst->trans_y, false, cregs, creg_count);
-            else if (tt == 3)
-                ir_transform_to_axis(&src->translation, &dst->trans_z, false, cregs, creg_count);
-        }
-        for (size_t i = ir_lod->part_animation_count; i < panm_count; ++i) {
-            lod->part_anims[i].transform_as = static_cast<int32_t>(i);
-        }
-    } else {
-        for (size_t i = 0; i < panm_count; ++i) {
-            lod->part_anims[i].transform_as = static_cast<int32_t>(i);
-        }
-    }
-    return 0;
-}
-
-int tdp_from_ir(const ThreediModelIR *ir, TdpProject *out) {
-    if (!ir || !out) return -1;
-    tdp_init(out);
-
-    // Materials
-    size_t num_mats = ir->material_count;
-    if (num_mats > 0) {
-        out->materials = static_cast<TdpMaterial *>(std::calloc(num_mats, sizeof(TdpMaterial)));
-        if (!out->materials) return -1;
-        out->material_count = num_mats;
-
-        for (size_t i = 0; i < num_mats; ++i) {
-            const ThreediIRMaterial *src = &ir->materials[i];
-            TdpMaterial *dst = &out->materials[i];
-
-            // Shader tag
-            const char *shader = src->shader_name;
-            if (!shader[0]) shader = "FF_ST_OP";
-            copy_str(dst->shader_tag, sizeof(dst->shader_tag), shader);
-
-            // Material name
-            char name_buf[80];
-            std::snprintf(name_buf, sizeof(name_buf), "Material_%zu_%s", i, dst->shader_tag);
-            copy_str(dst->name, sizeof(dst->name), name_buf);
-
-            // Surface type → ptype mapping
-            dst->ptype = surface_type_to_ptype(src->surface_type);
-
-            // Collision polygon attributes
-            dst->pattrib = src->pattrib;
-
-            // Default normal texture sentinel (OED stores "0" for empty slots)
-            copy_str(dst->normal_tex[0], sizeof(dst->normal_tex[0]), "0");
-            copy_str(dst->normal_tex[1], sizeof(dst->normal_tex[1]), "0");
-
-            // Textures by slot
-            for (uint32_t t = 0;
-                 t < src->texture_count && t < THREEDI_IR_MAX_MATERIAL_TEXTURES;
-                 ++t) {
-                const ThreediIRMaterialTexture *tex = &src->textures[t];
-                if (!tex->name[0]) continue;
-                int clamped = (tex->flags >> 1) & 1;
-
-                // Determine TDP slot index (0 or 1) and whether diffuse or normal
-                int slot_idx = -1;
-                bool is_normal = false;
-                switch (tex->slot) {
-                case THREEDI_IR_TEX_SLOT_DIFFUSE:  slot_idx = 0; break;
-                case THREEDI_IR_TEX_SLOT_DETAIL:   slot_idx = 1; break;
-                case THREEDI_IR_TEX_SLOT_NORMAL:   slot_idx = 0; is_normal = true; break;
-                case THREEDI_IR_TEX_SLOT_NORMAL_B: slot_idx = 1; is_normal = true; break;
-                default: continue;
-                }
-
-                if (tex->flags & 0x01 /*ANIMATED*/) {
-                    // Animated frame
-                    if (tex->frame < TDP_MAX_ANIM_FRAMES) {
-                        TdpAnimFrame *af = is_normal
-                            ? &dst->anim_normal[slot_idx][tex->frame]
-                            : &dst->anim_diffuse[slot_idx][tex->frame];
-                        copy_str(af->path, sizeof(af->path), tex->name);
-                        af->enabled = clamped;
-                        dst->anim_frames = std::max(dst->anim_frames, static_cast<int32_t>(tex->frame + 1));
-                    }
-                } else {
-                    // Static texture (frame 0)
-                    if (is_normal) {
-                        copy_str(dst->normal_tex[slot_idx], sizeof(dst->normal_tex[slot_idx]), tex->name);
-                        dst->normal_flags[slot_idx] = clamped;
-                    } else {
-                        copy_str(dst->diffuse_tex[slot_idx], sizeof(dst->diffuse_tex[slot_idx]), tex->name);
-                        dst->diffuse_flags[slot_idx] = clamped;
-                    }
-                }
-            }
-
-            // For animated materials, set diffuse_tex from anim frame 0
-            // (engine stores base diffuse separately from anim frames)
-            for (int s = 0; s < 2; ++s) {
-                if (!dst->diffuse_tex[s][0] && dst->anim_diffuse[s][0].path[0])
-                    copy_str(dst->diffuse_tex[s], sizeof(dst->diffuse_tex[s]),
-                             dst->anim_diffuse[s][0].path);
-            }
-
-            // Reflect color (float 0-1 -> int 0-255)
-            dst->reflect_rgb[0] = clamp_255(src->reflect_color[0]);
-            dst->reflect_rgb[1] = clamp_255(src->reflect_color[1]);
-            dst->reflect_rgb[2] = clamp_255(src->reflect_color[2]);
-
-            // Alpha test
-            dst->alphatestvalue = clamp_255(src->alpha_threshold);
-
-            // Animation params
-            dst->anim_frames = std::max(dst->anim_frames, static_cast<int32_t>(src->animation.num_frames));
-            dst->anim_type = src->animation.animation_type;
-            // For ctrl-reg-driven animation (type 1), cycle_frame_time is the
-            // register index, not a frame time — write 0 as the engine does.
-            dst->anim_frametime = (src->animation.animation_type == 1) ? 0
-                                : src->animation.cycle_frame_time;
-
-            // RGB gen
-            dst->rgbgen_style = src->rgb_gen.style;
-            dst->rgbgen_rate = src->rgb_gen.rate;
-            dst->rgbgen_phase = src->rgb_gen.phase;
-            dst->rgbgen_srgb[0] = clamp_255(src->rgb_gen.start_color[0]);
-            dst->rgbgen_srgb[1] = clamp_255(src->rgb_gen.start_color[1]);
-            dst->rgbgen_srgb[2] = clamp_255(src->rgb_gen.start_color[2]);
-            dst->rgbgen_ergb[0] = clamp_255(src->rgb_gen.end_color[0]);
-            dst->rgbgen_ergb[1] = clamp_255(src->rgb_gen.end_color[1]);
-            dst->rgbgen_ergb[2] = clamp_255(src->rgb_gen.end_color[2]);
-
-            // Alpha gen
-            dst->alphagen_style = src->alpha_gen.style;
-            dst->alphagen_rate = src->alpha_gen.rate;
-            dst->alphagen_phase = src->alpha_gen.phase;
-            dst->alphagen_start = static_cast<float>(src->alpha_gen.start);
-            dst->alphagen_end = static_cast<float>(src->alpha_gen.end);
-
-            // Map func U
-            dst->mapfunc_u_style = src->u_params.style;
-            dst->mapfunc_u_rate = src->u_params.gen_rate;
-            dst->mapfunc_u_phase = src->u_params.phase;
-            dst->mapfunc_u_start = src->u_params.start;
-            dst->mapfunc_u_end = src->u_params.end;
-
-            // Map func V
-            dst->mapfunc_v_style = src->v_params.style;
-            dst->mapfunc_v_rate = src->v_params.gen_rate;
-            dst->mapfunc_v_phase = src->v_params.phase;
-            dst->mapfunc_v_start = src->v_params.start;
-            dst->mapfunc_v_end = src->v_params.end;
-
-            // Resolve control register names from IR register indices
-            resolve_mat_ctrlreg(dst->rgbgen_ctrlreg, sizeof(dst->rgbgen_ctrlreg),
-                                src->rgb_gen.style, src->rgb_gen.reg,
-                                ir->control_registers, ir->control_register_count);
-            resolve_mat_ctrlreg(dst->alphagen_ctrlreg, sizeof(dst->alphagen_ctrlreg),
-                                src->alpha_gen.style, src->alpha_gen.reg,
-                                ir->control_registers, ir->control_register_count);
-            resolve_mat_ctrlreg(dst->mapfunc_u_ctrlreg, sizeof(dst->mapfunc_u_ctrlreg),
-                                src->u_params.style, src->u_params.reg,
-                                ir->control_registers, ir->control_register_count);
-            resolve_mat_ctrlreg(dst->mapfunc_v_ctrlreg, sizeof(dst->mapfunc_v_ctrlreg),
-                                src->v_params.style, src->v_params.reg,
-                                ir->control_registers, ir->control_register_count);
-
-            // Animation control register (type 1 = ctrl reg driven, cycle_frame_time is reg index)
-            if (src->animation.animation_type == 1 &&
-                src->animation.cycle_frame_time >= 0 &&
-                (size_t)src->animation.cycle_frame_time < ir->control_register_count &&
-                ir->control_registers) {
-                copy_str(dst->anim_ctrlreg, sizeof(dst->anim_ctrlreg),
-                         ir->control_registers[src->animation.cycle_frame_time].name);
-            }
-
-            // Fill empty anim texture slots with "0" sentinel (engine always
-            // writes all 4 slots × all frames)
-            if (dst->anim_frames > 0) {
-                for (int s = 0; s < 2; ++s) {
-                    for (int f = 0; f < dst->anim_frames && f < TDP_MAX_ANIM_FRAMES; ++f) {
-                        if (!dst->anim_diffuse[s][f].path[0])
-                            copy_str(dst->anim_diffuse[s][f].path, sizeof(dst->anim_diffuse[s][f].path), "0");
-                        if (!dst->anim_normal[s][f].path[0])
-                            copy_str(dst->anim_normal[s][f].path, sizeof(dst->anim_normal[s][f].path), "0");
-                    }
-                }
-            }
-
-            // rattrib: bit 0 = two-sided, bit 8 = animated, bit 10 = alpha test, bit 12 = alpha invert
-            if (src->flags & THREEDI_IR_MATERIAL_FLAG_TWO_SIDED)
-                dst->rattrib |= 0x1;
-            if (src->flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST)
-                dst->rattrib |= 0x400;
-            if (src->flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT)
-                dst->rattrib |= 0x1000;
-            if (dst->anim_frames > 0)
-                dst->rattrib |= 0x100;
-
-        }
-    }
-
-    // LOD 0
-    TdpLod *lod = &out->lods[0];
-    // Derive scene_file from IR model name (e.g. "dm1a1" → "dm1a1.ase")
-    if (ir->name[0]) {
-        char scene_name[64];
-        std::snprintf(scene_name, sizeof(scene_name), "%s.ase", ir->name);
-        copy_str(lod->scene_file, sizeof(lod->scene_file), scene_name);
-    } else {
-        copy_str(lod->scene_file, sizeof(lod->scene_file), "Untitled.ase");
-    }
-    // attributes maps to mesh type: 1=basic (GPM), 5=static/skinned (GPS/GPP)
-    lod->attributes = (ir->mesh_type == THREEDI_IR_MESH_BASIC) ? 1 : 5;
-    // render_function from IR (RMDL model_type), fallback to "gnrc"
-    if (ir->render_function[0]) {
-        copy_str(lod->render_function, sizeof(lod->render_function), ir->render_function);
-    } else {
-        copy_str(lod->render_function, sizeof(lod->render_function), "gnrc");
-    }
-    // LOD 0 threshold from IR
-    if (ir->lod_count > 0) {
-        lod->threshold = static_cast<float>(ir->lods[0].threshold);
-    }
-
-    // Part animations for LOD 0
-    if (ir->lod_count > 0) {
-        if (populate_tdp_lod_panm(lod, &ir->lods[0], ir) != 0) {
-            tdp_free(out); return -1;
-        }
-    }
-
-    // Lights from IR
-    if (ir->light_count > 0) {
-        lod->lights = static_cast<TdpLight *>(
-            std::calloc(ir->light_count, sizeof(TdpLight)));
-        if (!lod->lights) { tdp_free(out); return -1; }
-        lod->light_count = ir->light_count;
-
-        for (size_t i = 0; i < ir->light_count; ++i) {
-            const ThreediIRLight *src = &ir->lights[i];
-            TdpLight *dst = &lod->lights[i];
-            std::snprintf(dst->name, sizeof(dst->name), "LP%02d", src->part_index + 1);
-            dst->colorgen_style = src->style;
-            dst->colorgen_rate = static_cast<float>(src->rate) / 256.0f;
-            dst->colorgen_phase = static_cast<float>(src->phase) / 256.0f;
-
-            // For styles > 0x70, phase encodes a control register index
-            if (src->style > 0x70 && src->phase < ir->control_register_count && ir->control_registers) {
-                copy_str(dst->colorgen_ctrlreg, sizeof(dst->colorgen_ctrlreg),
-                         ir->control_registers[src->phase].name);
-            }
-            dst->colorgen_start[0] = clamp_255(src->color_start[0]);
-            dst->colorgen_start[1] = clamp_255(src->color_start[1]);
-            dst->colorgen_start[2] = clamp_255(src->color_start[2]);
-            dst->colorgen_end[0] = clamp_255(src->color_end[0]);
-            dst->colorgen_end[1] = clamp_255(src->color_end[1]);
-            dst->colorgen_end[2] = clamp_255(src->color_end[2]);
-            dst->disable_corona       = (src->flags & 0x01) ? 1 : 0;
-            dst->disable_lightterrain = (src->flags & 0x02) ? 1 : 0;
-            dst->disable_lightobjects = (src->flags & 0x04) ? 1 : 0;
-        }
-    }
-
-    // LODs 1+ — populate scene_file, attributes, render_function, threshold, PANM
-    for (size_t li = 1; li < ir->lod_count && li < TDP_MAX_LODS; ++li) {
-        TdpLod *extra = &out->lods[li];
-        if (ir->name[0]) {
-            char scene_buf[64];
-            std::snprintf(scene_buf, sizeof(scene_buf), "%s_lod%zu.ase",
-                          ir->name, li);
-            copy_str(extra->scene_file, sizeof(extra->scene_file), scene_buf);
-        }
-        extra->attributes = lod->attributes;
-        copy_str(extra->render_function, sizeof(extra->render_function),
-                 lod->render_function);
-        extra->threshold = static_cast<float>(ir->lods[li].threshold);
-
-        if (populate_tdp_lod_panm(extra, &ir->lods[li], ir) != 0) {
-            tdp_free(out); return -1;
-        }
-    }
-
     return 0;
 }

@@ -16,7 +16,7 @@ extern "C" {
  * binary. The 41 entries here describe how each shader tag uses its texture
  * stages and visual feature flags. Hosts (3ds Max, Blender, future Godot
  * scene builder) consult this table to know how to wire each material; the
- * IR converters do not consult it to mutate IR fields.
+ * Importers do not consult it to mutate material fields.
  *
  * The Python mirror lives at pyopennova/materials.py:_MATERIAL_INFO_FLAGS;
  * tests/test_shader_table_parity.py asserts the two stay in sync.

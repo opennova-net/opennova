@@ -57,7 +57,7 @@ def write_outputs(
 ) -> list[str]:
     """Write selected Max outputs and return the paths produced."""
     if ir is None:
-        raise ValueError("write_outputs requires a model IR")
+        raise ValueError("write_outputs requires a model data")
     os.makedirs(output_dir, exist_ok=True)
     written: list[str] = []
 
@@ -72,7 +72,7 @@ def write_outputs(
             include_occlusion=getattr(builder, "import_occlusion", True),
             include_lights=getattr(builder, "import_lights", True),
             bad_file=getattr(builder, "bad_file", None),
-            bullet_lod_index=getattr(builder, "bullet_lod_index", None),
+            collision_lod_index=None,
         ))
 
     if write_max:

@@ -11,6 +11,20 @@
 #include <math.h>
 #include "threedi/threedi.h"
 
+#ifdef _WIN32
+#  ifdef OPENNOVA_SHARED_EXPORTS
+#    define THREEDI_3DI3_EXPORT __declspec(dllexport)
+#  else
+#    define THREEDI_3DI3_EXPORT
+#  endif
+#else
+#  ifdef OPENNOVA_SHARED_EXPORTS
+#    define THREEDI_3DI3_EXPORT __attribute__((visibility("default")))
+#  else
+#    define THREEDI_3DI3_EXPORT
+#  endif
+#endif
+
 #if defined(_MSC_VER) && !defined(__cplusplus)
 // MSVC's C mode lacks _Static_assert; alias to C++ static_assert.
 #define _Static_assert static_assert
@@ -593,18 +607,34 @@ typedef struct Threedi3di3 {
 
 } Threedi3di3;
 
+typedef struct ThreediGpFile ThreediGpFile;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Parse a ThreediFile's chunk tree into typed geometry structures.
 // Returns 0 on success, -1 on parse/validation errors.
-int threedi_3di3_parse(const ThreediFile *file, Threedi3di3 *out_model);
+THREEDI_3DI3_EXPORT int threedi_3di3_parse(const ThreediFile *file, Threedi3di3 *out_model);
 
 // Convenience: read a file from disk and parse it into a Threedi3di3.
-int threedi_3di3_read(const char *path, Threedi3di3 *out_model);
+THREEDI_3DI3_EXPORT int threedi_3di3_read(const char *path, Threedi3di3 *out_model);
+
+// Convert a parsed legacy GP model (GPM/GPS/GPP) into the current typed 3DI3 model.
+THREEDI_3DI3_EXPORT int threedi_gp_to_3di3(const ThreediGpFile *gp, Threedi3di3 *out_model);
+
+// Convenience: auto-detect 3DI3 vs legacy GP model files and return Threedi3di3.
+THREEDI_3DI3_EXPORT int threedi_read_model_auto(const char *path, Threedi3di3 *out_model);
 
 // Convenience: write a previously-read model back to disk (round-trip).
-int threedi_3di3_write(const char *path, const Threedi3di3 *model);
+THREEDI_3DI3_EXPORT int threedi_3di3_write(const char *path, const Threedi3di3 *model);
 
 // Free allocations inside a Threedi3di3.
-void threedi_3di3_free(Threedi3di3 *model);
+THREEDI_3DI3_EXPORT void threedi_3di3_free(Threedi3di3 *model);
+
+#ifdef __cplusplus
+}
+#endif
 
 #pragma pack(pop)
 #endif // THREEDI_3DI3_H

@@ -1,4 +1,4 @@
-"""End-to-end importer integration tests.
+﻿"""End-to-end importer integration tests.
 
 Drives the same code path the GUI and CLI use (`execute_import_request`)
 against real fixture .3di files, then asserts the on-disk outputs match
@@ -6,12 +6,15 @@ the requested options.
 """
 from __future__ import annotations
 
+import importlib.metadata as metadata
+import sys
 from pathlib import Path
 
 import pytest
 
-from apps.importer.import_runner import execute_import_request
-from apps.importer.jobs import ImportOptions, ImportRequest
+from opennova_blender.dispatcher import ImportDispatcher
+from opennova_blender.import_runner import execute_import_request
+from opennova_jobs import ImportOptions, ImportRequest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,14 +28,23 @@ FIXTURES: list[Path] = [
 
 OPTION_PRESETS: dict[str, ImportOptions] = {
     "round_trip": ImportOptions(),
-    "all_formats": ImportOptions(write_glb=True, write_fbx=True),
-    "glb_only": ImportOptions(
-        write_blend=False, write_3dp=False, write_ase=False, write_glb=True,
-    ),
     "blend_only": ImportOptions(write_3dp=False, write_ase=False),
 }
 
-ALL_FORMAT_SUFFIXES = {".blend", ".3dp", ".3da", ".ase", ".glb", ".fbx"}
+ALL_FORMAT_SUFFIXES = {".blend", ".3dp", ".3da", ".ase"}
+
+
+def _installed_bpy_scripts_modules_path() -> Path:
+    try:
+        dist = metadata.distribution("bpy")
+    except metadata.PackageNotFoundError:
+        pytest.skip("bpy is not installed in this environment")
+
+    version_dir = ".".join(dist.version.split(".")[:2])
+    scripts_modules = Path(dist.locate_file(f"bpy/{version_dir}/scripts/modules"))
+    if not scripts_modules.is_dir():
+        pytest.skip(f"bpy scripts/modules path not found: {scripts_modules}")
+    return scripts_modules
 
 
 def _expected_files(options: ImportOptions, stem: str) -> set[str]:
@@ -44,11 +56,31 @@ def _expected_files(options: ImportOptions, stem: str) -> set[str]:
         expected.add(f"{stem}.3da")
     if options.write_ase:
         expected.add(f"{stem}.ase")
-    if options.write_glb:
-        expected.add(f"{stem}.glb")
-    if options.write_fbx:
-        expected.add(f"{stem}.fbx")
     return expected
+
+
+def test_import_worker_ignores_inherited_bpy_script_module_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Standalone bpy prepends script paths that spawned workers must ignore."""
+    monkeypatch.setattr(
+        sys,
+        "path",
+        [str(_installed_bpy_scripts_modules_path()), *sys.path],
+    )
+
+    request = ImportRequest.for_loose(
+        threedi_path=str(FIXTURE_DIR / "3di3" / "Shed.3di"),
+        output_root=str(tmp_path),
+        options=ImportOptions(write_3dp=False, write_ase=False, copy_textures=False),
+    )
+
+    with ImportDispatcher(max_workers=1) as dispatcher:
+        result = dispatcher.submit(request).result(timeout=60)
+
+    assert result.ok, result.error
+    assert (Path(result.output_path) / "Shed.blend").is_file()
 
 
 @pytest.mark.parametrize("threedi_path", FIXTURES, ids=lambda p: p.stem)
@@ -100,10 +132,10 @@ def test_loose_import_produces_expected_outputs(
         assert path.stat().st_size > 0, f"empty output {path}"
 
 
-def test_consecutive_imports_in_one_session_both_write_glb(
+def test_consecutive_imports_in_one_session_both_succeed(
     tmp_path: Path,
 ) -> None:
-    """Run two imports back-to-back in one process and assert both write GLB.
+    """Run two imports back-to-back in one process and assert both succeed.
 
     With process isolation each call to ``execute_import_request`` spawns a
     fresh worker, so cross-import bpy state degradation cannot occur.
@@ -112,9 +144,7 @@ def test_consecutive_imports_in_one_session_both_write_glb(
     if len(available) < 2:
         pytest.skip("need at least two fixtures (LFS not pulled?)")
 
-    options = ImportOptions(
-        write_blend=False, write_3dp=False, write_ase=False, write_glb=True,
-    )
+    options = ImportOptions()
 
     for index, threedi_path in enumerate(available[:2]):
         out_root = tmp_path / f"run_{index}"
@@ -127,6 +157,6 @@ def test_consecutive_imports_in_one_session_both_write_glb(
         result = execute_import_request(request)
         assert result.ok, f"run {index} ({threedi_path.stem}) failed: {result.error}"
 
-        glb_path = Path(result.output_path) / f"{threedi_path.stem}.glb"
-        assert glb_path.is_file(), f"run {index}: expected {glb_path}"
-        assert glb_path.stat().st_size > 0, f"run {index}: empty {glb_path}"
+        blend_path = Path(result.output_path) / f"{threedi_path.stem}.blend"
+        assert blend_path.is_file(), f"run {index}: expected {blend_path}"
+        assert blend_path.stat().st_size > 0, f"run {index}: empty {blend_path}"

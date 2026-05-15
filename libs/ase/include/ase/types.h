@@ -60,7 +60,7 @@ typedef struct ase_Object {
   int32_t color_face_count;            // 0xB8
   float tm_row[4][3];                  // 0xBC
   int32_t skinned;                     // 0xEC
-  // Pre-computed per-face-vertex normals from IR (bypasses smoothing group
+  // Pre-computed per-face-vertex normals from the source model (bypasses smoothing group
   // recomputation during roundtrip).  When non-NULL, face_normal_count ==
   // face_count and the array contains face_count*9 floats: for each face,
   // 3 vertices × (nx, ny, nz).  Stored in the ASE parser's swizzled

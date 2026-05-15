@@ -4,22 +4,15 @@ target_link_libraries(threedi_roundtrip_test PRIVATE opennova_threedi)
 target_include_directories(threedi_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_roundtrip COMMAND threedi_roundtrip_test)
 
-add_executable(threedi_ir_material_test threedi/ir_material_test.cpp)
-target_link_libraries(threedi_ir_material_test PRIVATE opennova_threedi)
-target_include_directories(threedi_ir_material_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME threedi_ir_material COMMAND threedi_ir_material_test)
+add_executable(threedi_material_class_test threedi/material_class_test.cpp)
+target_link_libraries(threedi_material_class_test PRIVATE opennova_threedi)
+target_include_directories(threedi_material_class_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_material_class COMMAND threedi_material_class_test)
 
-# GP format parsing test
-add_executable(threedi_gp_parse_test threedi/gp_parse_test.cpp)
-target_link_libraries(threedi_gp_parse_test PRIVATE opennova_threedi)
-target_include_directories(threedi_gp_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME threedi_gp_parse COMMAND threedi_gp_parse_test)
-
-# GP format roundtrip test
-add_executable(threedi_gp_roundtrip_test threedi/gp_roundtrip_test.cpp)
-target_link_libraries(threedi_gp_roundtrip_test PRIVATE opennova_threedi)
-target_include_directories(threedi_gp_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME threedi_gp_roundtrip COMMAND threedi_gp_roundtrip_test)
+add_executable(threedi_gp_auto_read_test threedi/gp_auto_read_test.cpp)
+target_link_libraries(threedi_gp_auto_read_test PRIVATE opennova_threedi)
+target_include_directories(threedi_gp_auto_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_gp_auto_read COMMAND threedi_gp_auto_read_test)
 
 # PANM unit tests
 foreach(test ctrl decode runtime wave)
@@ -102,15 +95,92 @@ target_link_libraries(tdp_roundtrip_test PRIVATE opennova_tdp opennova_threedi)
 target_include_directories(tdp_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tdp_roundtrip COMMAND tdp_roundtrip_test)
 
-add_executable(tdp_from_3di_test tdp/tdp_from_3di_test.cpp)
-target_link_libraries(tdp_from_3di_test PRIVATE opennova_tdp opennova_threedi)
-target_include_directories(tdp_from_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME tdp_from_3di COMMAND tdp_from_3di_test)
-
 add_executable(tdp_3da_write_test tdp/tdp_3da_write_test.cpp)
-target_link_libraries(tdp_3da_write_test PRIVATE opennova_tdp)
+target_link_libraries(tdp_3da_write_test PRIVATE opennova_tdp opennova_threedi)
 target_include_directories(tdp_3da_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tdp_3da_write COMMAND tdp_3da_write_test)
+
+add_executable(tdp_3da_read_test tdp/tdp_3da_read_test.cpp)
+target_link_libraries(tdp_3da_read_test PRIVATE opennova_tdp opennova_threedi)
+target_include_directories(tdp_3da_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tdp_3da_read COMMAND tdp_3da_read_test)
+
+# FlatMesh tests (Phase B)
+add_executable(flat_mesh_alloc_test object/flat_mesh_alloc_test.cpp)
+target_link_libraries(flat_mesh_alloc_test PRIVATE opennova_object)
+target_include_directories(flat_mesh_alloc_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME flat_mesh_alloc COMMAND flat_mesh_alloc_test)
+
+add_executable(ir_to_flat_mesh_test object/ir_to_flat_mesh_test.cpp object/synthetic_ir.cpp)
+target_link_libraries(ir_to_flat_mesh_test PRIVATE opennova_object opennova_threedi)
+target_include_directories(ir_to_flat_mesh_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ir_to_flat_mesh COMMAND ir_to_flat_mesh_test)
+
+add_executable(ir_to_flat_mesh_fixture_test object/ir_to_flat_mesh_fixture_test.cpp)
+target_link_libraries(ir_to_flat_mesh_fixture_test PRIVATE opennova_object opennova_threedi)
+target_include_directories(ir_to_flat_mesh_fixture_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ir_to_flat_mesh_fixture COMMAND ir_to_flat_mesh_fixture_test)
+
+add_executable(coords_test object/coords_test.cpp)
+target_link_libraries(coords_test PRIVATE opennova_object)
+target_include_directories(coords_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME coords_test COMMAND coords_test)
+
+add_executable(smoothing_groups_test object/smoothing_groups_test.cpp)
+target_link_libraries(smoothing_groups_test PRIVATE opennova_object)
+target_include_directories(smoothing_groups_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME smoothing_groups_test COMMAND smoothing_groups_test)
+
+add_executable(nlascexp_quirks_test object/nlascexp_quirks_test.cpp)
+target_link_libraries(nlascexp_quirks_test PRIVATE opennova_object)
+target_include_directories(nlascexp_quirks_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nlascexp_quirks_test COMMAND nlascexp_quirks_test)
+
+add_executable(ase_vec_test object/ase_vec_test.cpp)
+target_link_libraries(ase_vec_test PRIVATE opennova_object)
+target_include_directories(ase_vec_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ase_vec_test COMMAND ase_vec_test)
+
+add_executable(flat_mesh_to_ase_test object/flat_mesh_to_ase_test.cpp)
+target_link_libraries(flat_mesh_to_ase_test PRIVATE opennova_object opennova_ase opennova_threedi)
+target_include_directories(flat_mesh_to_ase_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME flat_mesh_to_ase COMMAND flat_mesh_to_ase_test)
+
+add_executable(material_list_to_ase_test object/material_list_to_ase_test.cpp)
+target_link_libraries(material_list_to_ase_test PRIVATE opennova_object opennova_ase opennova_threedi)
+target_include_directories(material_list_to_ase_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME material_list_to_ase COMMAND material_list_to_ase_test)
+
+add_executable(lights_to_ase_test object/lights_to_ase_test.cpp)
+target_link_libraries(lights_to_ase_test PRIVATE opennova_object opennova_ase opennova_threedi)
+target_include_directories(lights_to_ase_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME lights_to_ase COMMAND lights_to_ase_test)
+
+add_executable(write_ase_files_from_flat_meshes_test object/write_ase_files_from_flat_meshes_test.cpp)
+target_link_libraries(write_ase_files_from_flat_meshes_test PRIVATE opennova_object opennova_ase opennova_threedi)
+target_include_directories(write_ase_files_from_flat_meshes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME write_ase_files_from_flat_meshes COMMAND write_ase_files_from_flat_meshes_test)
+
+add_executable(bones_to_ase_with_bad_test object/bones_to_ase_with_bad_test.cpp)
+target_link_libraries(bones_to_ase_with_bad_test PRIVATE opennova_object opennova_ase opennova_bad opennova_threedi)
+target_include_directories(bones_to_ase_with_bad_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME bones_to_ase_with_bad COMMAND bones_to_ase_with_bad_test)
+
+add_executable(bake_project_export_test object/bake_project_export_test.cpp)
+target_link_libraries(bake_project_export_test PRIVATE opennova_object opennova_threedi)
+target_include_directories(bake_project_export_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+    # The native project bake path parses ASE and builds the full object IR in a
+    # single process; keep the test harness stack reserve aligned with Python and
+    # OED-style runners that already have a larger stack.
+    target_link_options(bake_project_export_test PRIVATE /STACK:8388608)
+endif()
+add_test(NAME bake_project_export COMMAND bake_project_export_test)
+
+add_executable(three_di_policy_test object/three_di_policy_test.cpp)
+target_link_libraries(three_di_policy_test PRIVATE opennova_object opennova_threedi)
+target_include_directories(three_di_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME three_di_policy COMMAND three_di_policy_test)
 
 # Terrain format library tests
 add_executable(pcx_roundtrip_test pcx/pcx_roundtrip_test.cpp)
@@ -181,14 +251,13 @@ target_include_directories(env_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(env_unit_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME env_unit COMMAND env_unit_test)
 
-# Terrain build foundation + parity tests ported from the canonical terrain reference.
-#   parametric_parity — byte-identical CPT output across Sample/Gradient/Checker64/Perlin fixtures
+# Terrain build foundation tests ported from the canonical terrain reference.
 #   crypto_roundtrip   — rotate_encrypt/decrypt round-trip
 #   depthmap_smooth    — 8-bit -> 16-bit smoothing formula parity
 #   tpm1_roundtrip     — .tml MeshData read/write
 #   cdep_read          — CDEP header parity against a known Dvxi5.cpt capture
 #   cdep_roundtrip     — CDEP encode/decode round-trip independent of the bake
-foreach(name parametric_parity depthmap_smooth tpm1_roundtrip)
+foreach(name depthmap_smooth tpm1_roundtrip)
     add_executable(${name}_test trngen/${name}_test.cpp)
     target_link_libraries(${name}_test PRIVATE opennova_terrain)
     target_include_directories(${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -199,10 +268,6 @@ add_executable(terrain_lighting_test trngen/terrain_lighting_test.cpp)
 target_link_libraries(terrain_lighting_test PRIVATE opennova_terrain)
 target_include_directories(terrain_lighting_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_lighting COMMAND terrain_lighting_test)
-
-# parametric_parity is a long byte-identical fixture parity run and remains
-# disabled until its CI stability/performance cost is addressed.
-set_tests_properties(parametric_parity PROPERTIES DISABLED TRUE)
 
 foreach(name crypto_roundtrip cdep_read cdep_roundtrip)
     add_executable(${name}_test trngen/${name}_test.cpp)

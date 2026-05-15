@@ -7,6 +7,11 @@ from typing import Any, Sequence
 from pyopennova import coords
 from pyopennova.mesh_primitives import cube_mesh
 from pyopennova.mesh_utils import mtrx_to_center_rotation
+from pyopennova.model_access import (
+    collision_volume_metadata,
+    light_color_rgb,
+    occlusion_access,
+)
 from pyopennova.polyhedron import compute_polyhedron_controlled
 from pyopennova.scene_naming import (
     CollisionType,
@@ -18,7 +23,7 @@ from pyopennova.scene_naming import (
 
 
 class MaxSceneBuilder:
-    """Build a Max scene from a parsed ``ThreediModelIR``."""
+    """Build a Max scene from a parsed ``Threedi3di3``."""
 
     def __init__(
         self,
@@ -42,8 +47,6 @@ class MaxSceneBuilder:
         self.root_object: Any | None = None
         self.part_nodes: dict[int, Any] = {}
         self.lod_roots: list[Any] = []
-        self.bullet_root: Any | None = None
-        self.bullet_lod_index: int = -1
         self.mesh_objects: list[Any] = []
         self.armature_object: Any | None = None
         self.root_motion_node: Any | None = None
@@ -52,7 +55,7 @@ class MaxSceneBuilder:
         self._mesh_bone_data: dict[str, Any] = {}
 
     def build_basic_scene(self, name: str) -> bool:
-        """Create the full Max scene for one model IR."""
+        """Create the full Max scene for one model data."""
         from .materials import create_material
         from .mesh import build_lod_meshes, build_part_hierarchy
 
@@ -93,9 +96,6 @@ class MaxSceneBuilder:
             self.create_occlusion_visualization()
         if self.import_collisions:
             self.create_collision_visualization()
-            self.bullet_lod_index = self.create_bullet_lod(name)
-        else:
-            self.bullet_lod_index = -1
         if self.import_lights:
             self.create_scene_lights()
 
@@ -238,10 +238,11 @@ class MaxSceneBuilder:
             except Exception:
                 light_obj = rt.Light()
             light_obj.name = light_name
+            rgb = light_color_rgb(light)
             _try_set(light_obj, "rgb", rt.color(
-                _byte(light.color_start[0]),
-                _byte(light.color_start[1]),
-                _byte(light.color_start[2]),
+                _byte(rgb[0]),
+                _byte(rgb[1]),
+                _byte(rgb[2]),
             ))
             _try_set(light_obj, "multiplier", 1.0)
             if float(light.attenuation_end) > 0.0:
@@ -259,7 +260,7 @@ class MaxSceneBuilder:
                 _set_user_prop(rt, light_obj, "colorgen_style", int(light.style))
                 _set_user_prop(rt, light_obj, "colorgen_rate", float(light.rate) / 256.0)
                 _set_user_prop(rt, light_obj, "colorgen_phase", float(light.phase) / 256.0)
-            ce = light.color_end
+            ce = light_color_rgb(light, "color_end")
             if ce[0] != 0.0 or ce[1] != 0.0 or ce[2] != 0.0:
                 _set_user_prop(rt, light_obj, "colorgen_end", f"{_byte(ce[0])},{_byte(ce[1])},{_byte(ce[2])}")
             if int(light.style) > 0x70:
@@ -288,9 +289,14 @@ class MaxSceneBuilder:
         lod0 = self.ir.lods[0]
         part_count = int(lod0.part_count)
         name_counters: dict[tuple[int, int], int] = {}
+        volume_owners, volume_plane_starts = collision_volume_metadata(coll.contents)
 
         for vol_idx in range(int(coll.contents.volume_count)):
             vol = coll.contents.volumes[vol_idx]
+            owner_idx = volume_owners[vol_idx] if vol_idx < len(volume_owners) else -1
+            plane_start = volume_plane_starts[vol_idx] if vol_idx < len(volume_plane_starts) else -1
+            object_idx = int(getattr(vol, "object_index", owner_idx))
+            part_idx = int(getattr(vol, "part_index", object_idx))
             try:
                 color = CollisionType(int(vol.type)).color
             except ValueError:
@@ -298,19 +304,19 @@ class MaxSceneBuilder:
 
             parent = self.root_object
             parent_pos = (0.0, 0.0, 0.0)
-            if 0 <= int(vol.object_index) < part_count:
-                parent = self.part_nodes.get(int(vol.object_index), self.root_object)
-                parent_pos = coords.render_space(lod0.parts[int(vol.object_index)].abs_position)
-            elif 0 <= int(vol.part_index) < part_count:
-                parent = self.part_nodes.get(int(vol.part_index), self.root_object)
-                parent_pos = coords.render_space(lod0.parts[int(vol.part_index)].abs_position)
+            if 0 <= object_idx < part_count:
+                parent = self.part_nodes.get(object_idx, self.root_object)
+                parent_pos = coords.render_space(lod0.parts[object_idx].abs_position)
+            elif 0 <= part_idx < part_count:
+                parent = self.part_nodes.get(part_idx, self.root_object)
+                parent_pos = coords.render_space(lod0.parts[part_idx].abs_position)
 
             world_min = coords.collision_space(vol.min)
             world_max = coords.collision_space(vol.max)
             world_center = _vec_scale(_vec_add(world_min, world_max), 0.5)
             local_center = _vec_sub(world_center, parent_pos)
 
-            name_index = int(vol.object_index) if int(vol.object_index) >= 0 else int(vol.part_index)
+            name_index = object_idx if object_idx >= 0 else part_idx
             name_key = name_index if name_index >= 0 else -1
             counter_key = (int(vol.type), name_key)
             name_counters[counter_key] = name_counters.get(counter_key, 0) + 1
@@ -321,11 +327,11 @@ class MaxSceneBuilder:
             halfspaces = []
             if (
                 int(vol.plane_count) > 0
-                and int(vol.plane_start) >= 0
-                and int(vol.plane_start) + int(vol.plane_count) <= int(coll.contents.plane_count)
+                and plane_start >= 0
+                and plane_start + int(vol.plane_count) <= int(coll.contents.plane_count)
             ):
                 for p_idx in range(int(vol.plane_count)):
-                    plane = coll.contents.planes[int(vol.plane_start) + p_idx]
+                    plane = coll.contents.planes[plane_start + p_idx]
                     n = coords.collision_space(plane.normal)
                     halfspaces.append((n[0], n[1], n[2], float(plane.distance)))
 
@@ -362,23 +368,29 @@ class MaxSceneBuilder:
                 self._create_colored_mesh(mesh_name, box_pts, box_faces, color, parent, local_center)
 
     def create_occlusion_visualization(self) -> None:
-        occ = self.ir.occlusion
-        if not occ or int(occ.contents.object_count) == 0 or int(self.ir.lod_count) == 0:
+        occ = occlusion_access(self.ir)
+        if occ is None or occ["object_count"] == 0 or int(self.ir.lod_count) == 0:
             return
         lod0 = self.ir.lods[0]
         occ_counters: dict[tuple[int, int, int], int] = {}
 
-        for i in range(int(occ.contents.object_count)):
-            occ_obj = occ.contents.objects[i]
-            if int(occ_obj.num_vertices) <= 0 or int(occ_obj.face_count) <= 0:
-                continue
-            vert_start = int(occ_obj.vertex_start)
-            face_start = int(occ_obj.face_start)
+        vertex_cursor = 0
+        face_cursor = 0
+        for i in range(occ["object_count"]):
+            occ_obj = occ["objects"][i]
             vert_count = int(occ_obj.num_vertices)
             face_count = int(occ_obj.face_count)
-            if vert_start + vert_count > int(occ.contents.vertex_count):
+            if vert_count <= 0 or face_count <= 0:
+                vertex_cursor += max(0, vert_count)
+                face_cursor += max(0, face_count)
                 continue
-            if face_start + face_count > int(occ.contents.face_count):
+            vert_start = int(getattr(occ_obj, "vertex_start", vertex_cursor))
+            face_start = int(getattr(occ_obj, "face_start", face_cursor))
+            vertex_cursor += max(0, vert_count)
+            face_cursor += max(0, face_count)
+            if vert_start + vert_count > occ["vertex_count"]:
+                continue
+            if face_start + face_count > occ["face_count"]:
                 continue
 
             occ_parent = int(occ_obj.parent_subobject_index)
@@ -388,13 +400,13 @@ class MaxSceneBuilder:
 
             vertices = []
             for j in range(vert_count):
-                v = occ.contents.vertices[vert_start + j]
+                v = occ["vertices"][vert_start + j]
                 vertices.append(_vec_sub(coords.render_space(v.position), part_abs))
 
             faces = []
             face_flags = []
             for j in range(face_count):
-                face = occ.contents.faces[face_start + j]
+                face = occ["faces"][face_start + j]
                 raw = int(face.raw_indices)
                 v1 = raw & 0xFF
                 v2 = (raw >> 8) & 0xFF
@@ -434,125 +446,6 @@ class MaxSceneBuilder:
                 smoothing_groups=face_flags,
                 alpha=0.25,
             )
-
-    def create_bullet_lod(self, name: str) -> int:
-        coll = self.ir.collision
-        if not coll:
-            return -1
-        obj_count = int(coll.contents.object_count)
-        face_count_total = int(coll.contents.face_count)
-        vert_count_total = int(coll.contents.vertex_count)
-        if obj_count == 0 or vert_count_total == 0:
-            return -1
-
-        from .materials import create_multimaterial
-        from .mesh import create_mesh_node, set_parent_and_local_position
-
-        rt = _rt()
-        bullet_lod_idx = int(self.ir.lod_count)
-        root = rt.Dummy()
-        root.name = f"{name}_BulletLOD"
-        _set_hidden(root, True)
-        _set_user_prop(rt, root, "_lod_index", bullet_lod_idx)
-        _set_user_prop(rt, root, "_material_names", self._material_names_manifest())
-        self.bullet_root = root
-
-        flag_to_mat = self._collision_material_lookup()
-        vert_ranges = []
-        face_ranges = []
-        v_off = 0
-        f_off = 0
-        for oi in range(obj_count):
-            obj = coll.contents.objects[oi]
-            nv = int(obj.num_vertices)
-            nf = int(obj.num_faces)
-            vert_ranges.append((v_off, nv))
-            face_ranges.append((f_off, nf))
-            v_off += nv
-            f_off += nf
-
-        bullet_parts: dict[int, Any] = {}
-        obj_positions = []
-        for oi in range(obj_count):
-            obj = coll.contents.objects[oi]
-            offset_pos = (
-                float(obj.offset[0]) / 65536.0,
-                float(obj.offset[1]) / 65536.0,
-                float(obj.offset[2]) / 65536.0,
-            )
-            obj_positions.append(offset_pos)
-            part_obj = rt.Dummy()
-            part_obj.name = f"PN{oi + 1:02d}"
-            _set_hidden(part_obj, True)
-            bullet_parts[oi] = part_obj
-
-        for oi in range(obj_count):
-            obj = coll.contents.objects[oi]
-            part_obj = bullet_parts[oi]
-            pi = int(obj.parent_subobject_index)
-            abs_pos = coords.collision_space(obj_positions[oi])
-            if pi >= 0 and pi < obj_count and pi != oi and pi in bullet_parts:
-                parent_abs = coords.collision_space(obj_positions[pi])
-                set_parent_and_local_position(part_obj, bullet_parts[pi], _vec_sub(abs_pos, parent_abs))
-            else:
-                set_parent_and_local_position(part_obj, root, abs_pos)
-
-        for oi in range(obj_count):
-            v_start, v_count = vert_ranges[oi]
-            f_start, f_count = face_ranges[oi]
-            part_pos = obj_positions[oi]
-            verts = []
-            for vi in range(v_count):
-                gvi = v_start + vi
-                if gvi >= vert_count_total:
-                    break
-                cv = coll.contents.vertices[gvi]
-                verts.append(coords.collision_space(_vec_sub(cv.position, part_pos)))
-
-            faces = []
-            face_mat_keys = []
-            for fi in range(f_count):
-                gfi = f_start + fi
-                if gfi >= face_count_total:
-                    break
-                cf = coll.contents.faces[gfi]
-                v0, v1, v2 = int(cf.vert_index[0]), int(cf.vert_index[1]), int(cf.vert_index[2])
-                if v0 < v_count and v1 < v_count and v2 < v_count:
-                    faces.append((v0, v1, v2))
-                    face_mat_keys.append((int(cf.material_flags), int(cf.poly_type)))
-
-            mesh = create_mesh_node(
-                f"{oi + 1:02d} Mesh0",
-                verts,
-                faces,
-                parent=bullet_parts[oi],
-                hidden=True,
-            )
-            _set_user_prop(rt, mesh, "_part_index", oi)
-            if face_mat_keys:
-                ordered_keys: list[tuple[int, int]] = []
-                for key in face_mat_keys:
-                    if key not in ordered_keys:
-                        ordered_keys.append(key)
-                temp_materials = {
-                    idx: flag_to_mat.get(key)
-                    for idx, key in enumerate(ordered_keys)
-                    if flag_to_mat.get(key) is not None
-                }
-                multi = create_multimaterial(
-                    f"{mesh.name}_CollisionMaterials",
-                    list(range(len(ordered_keys))),
-                    temp_materials,
-                )
-                if multi is not None:
-                    mesh.material = multi
-                slot_lookup = {key: idx + 1 for idx, key in enumerate(ordered_keys)}
-                for fi, key in enumerate(face_mat_keys):
-                    rt.setFaceMatID(mesh, fi + 1, slot_lookup.get(key, 1))
-
-        self._create_lod_centers_for_parts(0, bullet_parts, hidden=True, lod_override=coll)
-        self._create_bullet_attach_markers(coll, bullet_parts, root)
-        return bullet_lod_idx
 
     def build_armature_from_parts(self, name: str) -> None:
         if int(self.ir.lod_count) == 0:
@@ -759,52 +652,6 @@ class MaxSceneBuilder:
                 hidden=hidden,
             )
 
-    def _create_bullet_attach_markers(self, coll, bullet_parts, lod_root) -> None:
-        from .mesh import create_mesh_node, world_position
-
-        verts, faces = cube_mesh(0.012)
-        trans_count = int(coll.contents.translation_count)
-        child_parts = []
-        for oi in range(int(coll.contents.object_count)):
-            if oi == 0:
-                continue
-            obj = coll.contents.objects[oi]
-            pi = int(obj.parent_subobject_index)
-            if pi >= 0:
-                child_parts.append((oi, pi))
-
-        counters: dict[int, int] = {}
-        attach_specs = []
-        for child_oi, parent_oi in child_parts:
-            count = counters.get(parent_oi, 0)
-            counters[parent_oi] = count + 1
-            suffix = chr(ord("a") + (count % 26))
-            attach_specs.append((f"~{parent_oi + 1:02d}{suffix} attach", bullet_parts[child_oi]))
-
-        extra_needed = max(0, trans_count - len(attach_specs))
-        for extra_idx in range(extra_needed):
-            suffix = chr(ord("a") + (extra_idx % 26))
-            attach_specs.append((f"~99{suffix} attach", lod_root))
-
-        attach_specs.sort(key=lambda it: it[0].lower())
-        for ti, (attach_name, parent_part) in enumerate(attach_specs[:trans_count]):
-            trans = coll.contents.translations[ti]
-            eng_pos = (
-                float(trans.translation[0]) / 65536.0,
-                float(trans.translation[1]) / 65536.0,
-                float(trans.translation[2]) / 65536.0,
-            )
-            world_pos = coords.collision_space(eng_pos)
-            parent_abs = (0.0, 0.0, 0.0) if parent_part == lod_root else world_position(parent_part)
-            create_mesh_node(
-                attach_name,
-                verts,
-                faces,
-                parent=parent_part,
-                location=_vec_sub(world_pos, parent_abs),
-                hidden=True,
-            )
-
     def _create_colored_mesh(
         self,
         name: str,
@@ -830,32 +677,6 @@ class MaxSceneBuilder:
             location=location,
             smoothing_groups=smoothing_groups,
         )
-
-    def _collision_material_lookup(self) -> dict[tuple[int, int], Any]:
-        flag_to_mat = {}
-        for ir_idx, max_mat in self.material_dict.items():
-            ir_mat = self.ir.materials[ir_idx]
-            flags = int(ir_mat.flags)
-            pattrib = int(ir_mat.pattrib)
-            surface_type = int(ir_mat.surface_type)
-            rattrib = 0
-            if flags & 0x04:
-                rattrib |= 0x1
-            if flags & 0x01:
-                rattrib |= 0x400
-            if flags & 0x02:
-                rattrib |= 0x1000
-            mflags = 0
-            if rattrib & 1:
-                mflags |= 1
-            if pattrib & 0x100:
-                mflags |= 0x100
-            if pattrib & 0x2000:
-                mflags |= 0x800
-            if pattrib & 0x1000:
-                mflags |= 0x400
-            flag_to_mat.setdefault((mflags, surface_type), max_mat)
-        return flag_to_mat
 
     def _resolve_ctrl_reg(self, reg_index: int) -> str | None:
         if reg_index < 0 or reg_index >= int(self.ir.control_register_count):

@@ -15,58 +15,61 @@ def write_host_neutral_outputs(
     include_occlusion: bool = True,
     include_lights: bool = True,
     bad_file=None,
-    bullet_lod_index: int | None = None,
+    collision_lod_index: int | None = None,
 ) -> list[str]:
-    """Write host-neutral game outputs from a model IR.
+    """Write host-neutral game outputs from a 3DI3 model.
 
     This is the shared path for DCC hosts. Host-specific scene files such as
     ``.blend`` and ``.max`` remain in the host integrations.
     """
     if ir is None:
-        raise ValueError("write_host_neutral_outputs requires a model IR")
+        raise ValueError("write_host_neutral_outputs requires a 3DI3 model")
 
     os.makedirs(output_dir, exist_ok=True)
     written: list[str] = []
-    resolved_bullet_lod = _bullet_lod_index(ir, include_collisions, bullet_lod_index)
+    resolved_collision_lod = _collision_lod_index(
+        ir,
+        include_collisions,
+        collision_lod_index,
+    )
 
     if write_3dp:
-        from pyopennova.project_writer import write_3dp_from_ir
+        from pyopennova.project_writer import write_3dp_from_3di3
 
-        written.extend(write_3dp_from_ir(
+        written.extend(write_3dp_from_3di3(
             ir,
             os.path.join(output_dir, name + ".3dp"),
-            bullet_lod_index=resolved_bullet_lod,
+            collision_lod_index=resolved_collision_lod,
         ))
 
     if write_ase:
-        from pyopennova.ase_from_ir import write_ase_from_ir
+        from pyopennova.ase_writer_ffi import write_ase_files_from_3di3
 
-        written.extend(write_ase_from_ir(
+        written.extend(write_ase_files_from_3di3(
             ir,
             os.path.join(output_dir, name + ".ase"),
+            bad_file=bad_file,
             include_collisions=include_collisions,
             include_occlusion=include_occlusion,
             include_lights=include_lights,
-            bad_file=bad_file,
         ))
 
     return written
 
 
-def _bullet_lod_index(ir, include_collisions: bool, explicit: int | None) -> int:
+def _collision_lod_index(ir, include_collisions: bool, explicit: int | None) -> int | None:
+    """Resolve a project collision LOD without inventing an extra ASE slot."""
     if explicit is not None:
-        return int(explicit)
+        lod_idx = int(explicit)
+        if lod_idx < 0:
+            return None
+        lod_count = int(getattr(ir, "lod_count", 0))
+        if lod_idx >= lod_count:
+            raise ValueError(
+                f"collision_lod_index {lod_idx} is not an existing LOD "
+                f"for model with {lod_count} LOD(s)"
+            )
+        return lod_idx
     if not include_collisions:
-        return -1
-    coll = getattr(ir, "collision", None)
-    if not coll:
-        return -1
-    try:
-        contents = coll.contents
-    except ValueError:
-        return -1
-    if int(getattr(contents, "object_count", 0)) <= 0:
-        return -1
-    if int(getattr(contents, "vertex_count", 0)) <= 0:
-        return -1
-    return int(getattr(ir, "lod_count", 0))
+        return None
+    return None

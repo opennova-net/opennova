@@ -26,7 +26,7 @@ def build_part_hierarchy(
     hidden: bool = False,
     material_names: str = "",
 ) -> tuple[Any, dict[int, Any]]:
-    """Create one Dummy per LOD part, parented as in the IR."""
+    """Create one Dummy per LOD part, parented as in the 3DI3 model."""
     rt = _rt()
     lod = ir.lods[lod_index]
     num_parts = int(lod.part_count)

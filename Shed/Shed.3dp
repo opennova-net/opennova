@@ -1,0 +1,257 @@
+// 3DP Project File
+
+header
+{
+    version 1
+    poly_collision_lod 1
+}
+
+materials
+{
+    nummaterials 4
+    material 0
+    {
+        name             "Material_0_FF_ST_OP"
+        shadertag        "FF_ST_OP"
+        rattrib          0
+        pattrib          0
+        ptype            9
+        geofx            0
+        geofx_value       0.00
+        alphatestvalue   0
+        diffusetex[0]    "Jrubble1.tga"  0
+        diffusetex[1]    ""  0
+        normaltex[0]     "0"  0
+        normaltex[1]     "0"  0
+        anim_frames      0
+        anim_type        0
+        anim_frametime   0
+        anim_ctrlreg     ""
+        reflect_rgb    0 0 0
+        rgbgen_style    0
+        rgbgen_rate     0.000000
+        rgbgen_phase    0.000000
+        rgbgen_srgb     0 0 0
+        rgbgen_ergb     0 0 0
+        rgbgen_ctrlreg  
+        alphagen_style   0
+        alphagen_rate    0.000000
+        alphagen_phase   0.000000
+        alphagen_start   0
+        alphagen_end     0
+        alphagen_ctrlreg 
+        mapfunc_u_style   0
+        mapfunc_u_rate    0.000000
+        mapfunc_u_phase   0.000000
+        mapfunc_u_start   0.000000
+        mapfunc_u_end     0.000000
+        mapfunc_u_ctrlreg 
+        mapfunc_v_style   0
+        mapfunc_v_rate    0.000000
+        mapfunc_v_phase   0.000000
+        mapfunc_v_start   0.000000
+        mapfunc_v_end     0.000000
+        mapfunc_v_ctrlreg 
+    }
+    material 1
+    {
+        name             "Material_1_FF_ST_OP"
+        shadertag        "FF_ST_OP"
+        rattrib          0
+        pattrib          0
+        ptype            9
+        geofx            0
+        geofx_value       0.00
+        alphatestvalue   0
+        diffusetex[0]    "oceil1.tga"  0
+        diffusetex[1]    ""  0
+        normaltex[0]     "0"  0
+        normaltex[1]     "0"  0
+        anim_frames      0
+        anim_type        0
+        anim_frametime   0
+        anim_ctrlreg     ""
+        reflect_rgb    0 0 0
+        rgbgen_style    0
+        rgbgen_rate     0.000000
+        rgbgen_phase    0.000000
+        rgbgen_srgb     0 0 0
+        rgbgen_ergb     0 0 0
+        rgbgen_ctrlreg  
+        alphagen_style   0
+        alphagen_rate    0.000000
+        alphagen_phase   0.000000
+        alphagen_start   0
+        alphagen_end     0
+        alphagen_ctrlreg 
+        mapfunc_u_style   0
+        mapfunc_u_rate    0.000000
+        mapfunc_u_phase   0.000000
+        mapfunc_u_start   0.000000
+        mapfunc_u_end     0.000000
+        mapfunc_u_ctrlreg 
+        mapfunc_v_style   0
+        mapfunc_v_rate    0.000000
+        mapfunc_v_phase   0.000000
+        mapfunc_v_start   0.000000
+        mapfunc_v_end     0.000000
+        mapfunc_v_ctrlreg 
+    }
+    material 2
+    {
+        name             "Material_2_FF_ST_OP"
+        shadertag        "FF_ST_OP"
+        rattrib          0
+        pattrib          0
+        ptype            9
+        geofx            0
+        geofx_value       0.00
+        alphatestvalue   0
+        diffusetex[0]    "KBulb.tga"  0
+        diffusetex[1]    ""  0
+        normaltex[0]     "0"  0
+        normaltex[1]     "0"  0
+        anim_frames      0
+        anim_type        0
+        anim_frametime   0
+        anim_ctrlreg     ""
+        reflect_rgb    0 0 0
+        rgbgen_style    0
+        rgbgen_rate     0.000000
+        rgbgen_phase    0.000000
+        rgbgen_srgb     0 0 0
+        rgbgen_ergb     0 0 0
+        rgbgen_ctrlreg  
+        alphagen_style   0
+        alphagen_rate    0.000000
+        alphagen_phase   0.000000
+        alphagen_start   0
+        alphagen_end     0
+        alphagen_ctrlreg 
+        mapfunc_u_style   0
+        mapfunc_u_rate    0.000000
+        mapfunc_u_phase   0.000000
+        mapfunc_u_start   0.000000
+        mapfunc_u_end     0.000000
+        mapfunc_u_ctrlreg 
+        mapfunc_v_style   0
+        mapfunc_v_rate    0.000000
+        mapfunc_v_phase   0.000000
+        mapfunc_v_start   0.000000
+        mapfunc_v_end     0.000000
+        mapfunc_v_ctrlreg 
+    }
+    material 3
+    {
+        name             "Material_3_FF_ST_OP"
+        shadertag        "FF_ST_OP"
+        rattrib          0
+        pattrib          0
+        ptype            9
+        geofx            0
+        geofx_value       0.00
+        alphatestvalue   0
+        diffusetex[0]    "KBulb.tga"  0
+        diffusetex[1]    ""  0
+        normaltex[0]     "0"  0
+        normaltex[1]     "0"  0
+        anim_frames      0
+        anim_type        0
+        anim_frametime   0
+        anim_ctrlreg     ""
+        reflect_rgb    0 0 0
+        rgbgen_style    0
+        rgbgen_rate     0.000000
+        rgbgen_phase    0.000000
+        rgbgen_srgb     0 0 0
+        rgbgen_ergb     0 0 0
+        rgbgen_ctrlreg  
+        alphagen_style   0
+        alphagen_rate    0.000000
+        alphagen_phase   0.000000
+        alphagen_start   0
+        alphagen_end     0
+        alphagen_ctrlreg 
+        mapfunc_u_style   0
+        mapfunc_u_rate    0.000000
+        mapfunc_u_phase   0.000000
+        mapfunc_u_start   0.000000
+        mapfunc_u_end     0.000000
+        mapfunc_u_ctrlreg 
+        mapfunc_v_style   0
+        mapfunc_v_rate    0.000000
+        mapfunc_v_phase   0.000000
+        mapfunc_v_start   0.000000
+        mapfunc_v_end     0.000000
+        mapfunc_v_ctrlreg 
+    }
+}
+
+lod 0
+{
+    scenename        Shed.3di.ase
+    attributes       1
+    render_function  gnrc
+    threshold        0.000
+    partanimation
+    {
+        enablepartanim   0
+        numpartanim      1
+        subobject 0
+        {
+            rotate_type      0
+            scale_type       0
+            trans_type       0
+            transform_as     0
+            yaw_rate         0.000
+            pitch_rate       0.000
+            roll_rate        0.000
+            yaw_func         0  0.000 0.000 0.000 0.000 
+            pitch_func       0  0.000 0.000 0.000 0.000 
+            roll_func        0  0.000 0.000 0.000 0.000 
+            reverserotate    0
+            scale_func       0  0.000 0.000 0.000 0.000 
+            scalex_func      0  0.000 0.000 0.000 0.000 
+            scaley_func      0  0.000 0.000 0.000 0.000 
+            scalez_func      0  0.000 0.000 0.000 0.000 
+            transx_func      0  0.000 0.000 0.000 0.000 
+            transy_func      0  0.000 0.000 0.000 0.000 
+            transz_func      0  0.000 0.000 0.000 0.000 
+        }
+    }
+    lightsources
+    {
+        numlights 1
+        light  0
+        {
+            name                  "LP01"
+            colorgen_style        24
+            colorgen_rate         0.000000
+            colorgen_phase        0.000000
+            colorgen_start        255 246 222
+            colorgen_end          0 0 0
+            colorgen_ctrlreg      
+            disable_corona        0
+            disable_lightterrain  0
+            disable_lightobjects  0
+        }
+    }
+}
+
+lod 1
+{
+    scenename        Shed.3di_bullet.ase
+    attributes       1
+    render_function  gnrc
+    threshold        0.000
+    partanimation
+    {
+        enablepartanim   0
+        numpartanim      0
+    }
+    lightsources
+    {
+        numlights 0
+    }
+}
+

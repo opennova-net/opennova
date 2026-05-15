@@ -18,6 +18,12 @@ def _lib_path() -> str:
 
     if system == "Windows":
         sub, name = "windows-x64", "opennova.dll"
+        # Prefer the build output (fresh build) if available and newer.
+        build_path = pkg_dir.parent / "build" / "Debug" / name
+        if build_path.is_file():
+            pkg_path = pkg_dir / "lib" / sub / name
+            if not pkg_path.is_file() or build_path.stat().st_mtime > pkg_path.stat().st_mtime:
+                return str(build_path)
     elif system == "Linux":
         sub, name = "linux-x64", "libopennova.so"
     else:

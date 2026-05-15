@@ -9,7 +9,7 @@ Open-source toolchain and runtime for NovaLogic's Joint Operations (JO) and newe
 Three layers:
 
 - **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): terrain, environment, etc that writes the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.env`, …) directly.
-- **Core engine (`libs/`).** Format parsers, terrain LOD, foliage scatter, environment sampling. Also consumed by Python (`apps/importer/`) and Blender (`blender/`).
+- **Core engine (`libs/`).** Format parsers, terrain LOD, foliage scatter, environment sampling. Also consumed by Python (`apps/onimport/`) and Blender (`blender/`).
 - **Godot (`godot/engine/` + `godot/game/`).** GDExtension wrappers in `engine/` bind the core into Godot; `game/` is the runtime scene.
 
 All of this is pre-1.0 and under active development. Nothing here is production-ready. The asset pipeline (importer, Blender addon, and ONED) is the most exercised surface today; the Godot runtime loads exported scenes and runs the terrain and foliage systems; gameplay (player, missions, multiplayer) is still being built.
@@ -74,7 +74,7 @@ The authoring layer for JO assets: terrain, environments, and objects in one edi
 | Path | Contents |
 |------|----------|
 | `libs/` | C/C++ format libraries (`adm`, `ase`, `bad`, `bfc1`, `cpt`, `def`, `env`, `pcx`, `pff`, `scr`, `tdp`, `threedi`, `til`, `tpj`, `trn`) plus runtime subsystems (`terrain`, `foliage`, `runtime`). |
-| `apps/importer/` | Python importer + scene builder; backs `onimport.exe`. |
+| `apps/onimport/` | Python importer + scene builder; backs `onimport.exe`. |
 | `blender/` | Blender 5.x addon (export side of the pipeline). |
 | `godot/` | Godot 4.6.1 host. `engine/` (GDExtension bindings to `libs/`), `modtools/` (authoring), `game/` (runtime scene), `tests/` (GUT suite). |
 | `scripts/` | Build, test, and packaging scripts (sh + ps1). |

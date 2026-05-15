@@ -5,12 +5,14 @@ import types
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from apps.importer.cli import build_parser, options_from_args
-from apps.importer.import_runner import (
+import pytest
+
+from apps.onimport.cli import build_parser, options_from_args
+from opennova_blender.import_runner import (
     scan_directory,
     scan_directory_result,
 )
-from apps.importer.jobs import (
+from opennova_jobs import (
     JOB_ERROR,
     JOB_PENDING,
     JOB_RUNNING,
@@ -20,12 +22,6 @@ from apps.importer.jobs import (
     ScanItem,
     has_active_duplicate,
     validate_import_request,
-)
-from apps.importer.ui.app import (
-    CUSTOM_PRESET_LABEL,
-    OPTION_PRESETS,
-    ImporterApp,
-    preset_name_for_options,
 )
 
 
@@ -45,8 +41,7 @@ class TestImportOptions:
         assert options.write_blend
         assert options.write_3dp
         assert options.write_ase
-        assert not options.write_glb
-        assert not options.write_fbx
+        assert not options.write_max
         assert options.copy_textures
 
     def test_cli_options_override_defaults(self) -> None:
@@ -62,19 +57,16 @@ class TestImportOptions:
             "--output",
             "out",
             "--no-occlusion",
-            "--no-arms",
-            "--no-blend",
             "--no-3dp",
-            "--glb",
         ])
         options = options_from_args(args)
         assert not options.import_occlusion
-        assert not options.import_arms
-        assert not options.write_blend
         assert not options.write_3dp
         assert options.write_ase
-        assert options.write_glb
         assert options.copy_textures
+        # CLI always produces write_blend=False and write_max=False
+        assert not options.write_blend
+        assert not options.write_max
 
         args = parser.parse_args([
             "import-loose",
@@ -85,45 +77,6 @@ class TestImportOptions:
             "--no-textures",
         ])
         assert not options_from_args(args).copy_textures
-
-    def test_blender_only_preset_writes_only_blend(self) -> None:
-        options = OPTION_PRESETS["Blender only"]
-        assert options.write_blend
-        assert options.copy_textures
-        assert options.writes_any_output_file()
-        assert not options.writes_any_export_format()
-        assert options.import_collisions
-
-    def test_preset_name_matches_known_options(self) -> None:
-        assert preset_name_for_options(ImportOptions()) == "Round-trip"
-        assert (
-            preset_name_for_options(OPTION_PRESETS["Godot/runtime export"])
-            == "Godot/runtime export"
-        )
-
-    def test_preset_name_reports_custom_options(self) -> None:
-        options = ImportOptions(write_fbx=True)
-        assert preset_name_for_options(options) == CUSTOM_PRESET_LABEL
-
-    def test_legacy_preferences_default_missing_new_options(self) -> None:
-        app = object.__new__(ImporterApp)
-        app._prefs = {
-            "last_options": {
-                "import_animations": True,
-                "import_collisions": True,
-                "import_occlusion": True,
-                "import_lights": True,
-                "import_arms": True,
-                "write_3dp": True,
-                "write_ase": True,
-                "write_glb": False,
-                "write_fbx": False,
-            }
-        }
-        options = app._options_from_preferences()
-        assert options.write_blend
-        assert options.copy_textures
-        assert preset_name_for_options(options) == "Round-trip"
 
 
 class TestImportRequestValidation:
@@ -148,8 +101,7 @@ class TestImportRequestValidation:
                 write_blend=False,
                 write_3dp=False,
                 write_ase=False,
-                write_glb=False,
-                write_fbx=False,
+                write_max=False,
                 copy_textures=False,
             ),
         )
@@ -166,8 +118,7 @@ class TestImportRequestValidation:
                 write_blend=False,
                 write_3dp=False,
                 write_ase=False,
-                write_glb=False,
-                write_fbx=False,
+                write_max=False,
                 copy_textures=True,
             ),
         )
@@ -245,16 +196,16 @@ class TestImportRunner:
                 import_occlusion=False,
                 import_arms=False,
                 write_blend=False,
-                write_glb=True,
+                write_max=True,
             ),
         )
         # Call run_one directly (in-process) so the mock applies. The
         # production execute_import_request dispatches via subprocess where
         # parent-process mocks don't reach.
-        from apps.importer.worker import run_one
-        with patch("apps.importer.import_runner.resolve_definition_output_stem", return_value="m16_1st"), \
-             patch("apps.importer.import_runner.run_import", return_value=True) as run_import, \
-             patch("apps.importer.bpy_session.init_headless"):
+        from opennova_blender.worker import run_one
+        with patch("opennova_blender.import_runner.resolve_definition_output_stem", return_value="m16_1st"), \
+             patch("opennova_blender.import_runner.run_import", return_value=True) as run_import, \
+             patch("opennova_blender.bpy_session.init_headless"):
             result = run_one(request)
 
         assert result.ok
@@ -266,8 +217,9 @@ class TestImportRunner:
         assert not kwargs["import_occlusion"]
         assert not kwargs["import_arms"]
         assert not kwargs["write_blend"]
-        assert kwargs["write_glb"]
+        assert kwargs["write_max"]
         assert kwargs["copy_textures"]
+        assert kwargs["output_stem"] == "m16_1st"
 
     def test_execute_loose_request_uses_single_scene_reset_boundary(self) -> None:
         output_root = ROOT
@@ -275,9 +227,9 @@ class TestImportRunner:
             threedi_path=str(FIXTURE_3DI),
             output_root=str(output_root),
         )
-        from apps.importer.worker import run_one
-        with patch("apps.importer.import_runner.run_loose_import", return_value=True) as run_loose, \
-             patch("apps.importer.bpy_session.init_headless"):
+        from opennova_blender.worker import run_one
+        with patch("opennova_blender.import_runner.run_loose_import", return_value=True) as run_loose, \
+             patch("opennova_blender.bpy_session.init_headless"):
             result = run_one(request)
 
         assert result.ok
@@ -289,30 +241,31 @@ class TestImportRunner:
         assert kwargs["write_blend"]
         assert kwargs["copy_textures"]
 
-    def test_run_import_passes_blend_choice_to_basic_model(self) -> None:
-        from apps.importer.import_runner import run_import
+    def test_run_import_passes_blend_choice_and_output_stem_to_basic_model(self) -> None:
+        from opennova_blender.import_runner import run_import
 
-        with patch("apps.importer.import_runner._setup_blender_package"):
-            with patch("apps.importer.import_runner._import_basic_model", return_value=True) as basic:
-                ok = run_import(
-                    base_dir=str(FIXTURE_DEF_DIR),
-                    item_name="M16",
-                    item_type="weapon",
-                    output_dir=str(ROOT),
-                    write_blend=False,
-                )
+        with patch("opennova_blender.import_runner._import_basic_model", return_value=True) as basic:
+            ok = run_import(
+                base_dir=str(FIXTURE_DEF_DIR),
+                item_name="M16",
+                item_type="weapon",
+                output_dir=str(ROOT),
+                write_blend=False,
+                output_stem="custom_m16",
+            )
 
         assert ok
         basic.assert_called_once()
         assert not basic.call_args.kwargs["write_blend"]
+        assert basic.call_args.kwargs["output_name"] == "custom_m16"
 
     def test_run_loose_import_skips_blend_save_when_disabled(self) -> None:
-        from apps.importer.import_runner import run_loose_import
+        from opennova_blender.import_runner import run_loose_import
 
         fake_ir = object()
         threedi_module = types.ModuleType("pyopennova.threedi_ffi")
-        threedi_module.read_model_ir = Mock(return_value=fake_ir)
-        threedi_module.free_model_ir = Mock()
+        threedi_module.read_model = Mock(return_value=fake_ir)
+        threedi_module.free_model_3di3 = Mock()
 
         asset_module = types.ModuleType("pyopennova.asset_resolver")
 
@@ -328,28 +281,26 @@ class TestImportRunner:
 
         asset_module.AssetResolver = FakeResolver
 
-        scene_module = types.ModuleType("apps.importer.scene_builder")
+        scene_module = types.ModuleType("opennova_blender.scene_builder")
         builder = Mock()
         builder.build_basic_scene.return_value = True
-        builder.bullet_lod_index = -1
         scene_module.BlenderSceneBuilder = Mock(return_value=builder)
 
         modules = {
             "pyopennova.threedi_ffi": threedi_module,
             "pyopennova.asset_resolver": asset_module,
-            "apps.importer.scene_builder": scene_module,
+            "opennova_blender.scene_builder": scene_module,
         }
         with patch.dict(sys.modules, modules):
-            with patch("apps.importer.import_runner._setup_blender_package"):
-                with patch("apps.importer.import_runner._write_host_neutral_outputs") as shared:
-                    with patch("apps.importer.import_runner._copy_model_textures") as copy_textures:
-                        with patch("apps.importer.import_runner._save_blend_scene") as save_blend:
-                            ok = run_loose_import(
-                                threedi_path=str(FIXTURE_3DI),
-                                output_dir=str(ROOT),
-                                write_blend=False,
-                                reset_scene=False,
-                            )
+            with patch("opennova_blender.import_runner._write_host_neutral_outputs") as shared:
+                with patch("opennova_blender.import_runner._copy_model_textures") as copy_textures:
+                    with patch("opennova_blender.exports.save_blend_scene") as save_blend:
+                        ok = run_loose_import(
+                            threedi_path=str(FIXTURE_3DI),
+                            output_dir=str(ROOT),
+                            write_blend=False,
+                            reset_scene=False,
+                        )
 
         assert ok
         shared.assert_called_once()
@@ -369,7 +320,7 @@ class TestImportRunner:
 
 class TestImportDispatcher:
     def test_spawn_pool_can_return_validation_failure(self, tmp_path: Path) -> None:
-        from apps.importer.dispatcher import ImportDispatcher
+        from opennova_blender.dispatcher import ImportDispatcher
 
         request = ImportRequest.for_loose(
             threedi_path=str(tmp_path / "missing.3di"),
@@ -383,15 +334,15 @@ class TestImportDispatcher:
         assert result.error == ".3di file does not exist."
 
     def test_uses_spawn_context_for_queue_and_pool(self) -> None:
-        from apps.importer.dispatcher import ImportDispatcher
+        from opennova_blender.dispatcher import ImportDispatcher
 
         spawn_context = Mock()
         log_queue = Mock()
         spawn_context.Queue.return_value = log_queue
 
-        with patch("apps.importer.dispatcher.mp.get_context", return_value=spawn_context) as get_context, \
-             patch("apps.importer.dispatcher.logging.handlers.QueueListener") as listener_cls, \
-             patch("apps.importer.dispatcher.concurrent.futures.ProcessPoolExecutor") as executor_cls:
+        with patch("opennova_blender.dispatcher.mp.get_context", return_value=spawn_context) as get_context, \
+             patch("opennova_blender.dispatcher.logging.handlers.QueueListener") as listener_cls, \
+             patch("opennova_blender.dispatcher.concurrent.futures.ProcessPoolExecutor") as executor_cls:
             dispatcher = ImportDispatcher(max_workers=2)
             try:
                 assert dispatcher.max_workers == 2
@@ -408,49 +359,12 @@ class TestImportDispatcher:
                 dispatcher.close()
 
 
-class TestImporterAppHelpers:
-    def test_collision_choice_can_skip_existing_outputs(self, tmp_path: Path) -> None:
-        existing = tmp_path / "m16_1st"
-        existing.mkdir()
-        existing_request = ImportRequest.for_definition(
-            base_dir=str(FIXTURE_DEF_DIR),
-            item_name="WPN_M16",
-            item_type="weapon",
-            output_root=str(tmp_path),
-            output_stem="m16_1st",
-        )
-        new_request = ImportRequest.for_definition(
-            base_dir=str(FIXTURE_DEF_DIR),
-            item_name="WPN_AK47",
-            item_type="weapon",
-            output_root=str(tmp_path),
-            output_stem="ak47_1st",
-        )
-        app = object.__new__(ImporterApp)
+class TestPackageScripts:
+    def test_windows_importer_packages_native_dll_where_pyopennova_loads_it(self) -> None:
+        script = (ROOT / "scripts" / "package_importer_windows.ps1").read_text()
 
-        with patch("apps.importer.ui.app.messagebox.askyesnocancel", return_value=False):
-            choice = app._resolve_output_collisions([existing_request, new_request])
-
-        assert not choice.canceled
-        assert choice.skipped_count == 1
-        assert choice.requests == [new_request]
-
-    def test_action_hint_prefers_missing_output_format(self) -> None:
-        app = object.__new__(ImporterApp)
-        assert app._action_hint(
-            has_game_dir=True,
-            has_output=True,
-            has_output_file=False,
-            selected_count=1,
-            has_visible_items=True,
-        ) == "Select at least one file type to write."
-
-    def test_running_job_elapsed_time_is_available(self) -> None:
-        request = ImportRequest.for_loose(
-            threedi_path=str(FIXTURE_3DI),
-            output_root=str(ROOT),
-        )
-        job = ImportJob(request=request)
-        job.mark_running()
-        assert job.status == JOB_RUNNING
-        assert job.elapsed_seconds >= 0
+        assert '$NativeLibDir = "pyopennova\\lib\\windows-x64"' in script
+        assert '--add-binary "$NativeLibDir\\opennova.dll;$NativeLibDir"' in script
+        assert "from pyopennova._native import _lib_path, load_lib" in script
+        assert '& "$distPath\\$ExeName.exe" scan --dir fixtures/def' in script
+        assert 'blender\\lib\\windows-x64' not in script

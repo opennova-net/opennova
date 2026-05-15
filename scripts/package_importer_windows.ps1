@@ -55,8 +55,10 @@ Write-Host "=== Checking bpy version ==="
 Write-Host "=== Building opennova.dll ==="
 cmake -S . -B build-pkg -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIB=ON
 cmake --build build-pkg --target opennova_shared --config Release
-New-Item -ItemType Directory -Force -Path blender\lib\windows-x64 | Out-Null
-Copy-Item build-pkg\Release\opennova.dll blender\lib\windows-x64\opennova.dll
+$NativeLibDir = "pyopennova\lib\windows-x64"
+New-Item -ItemType Directory -Force -Path $NativeLibDir | Out-Null
+Copy-Item build-pkg\Release\opennova.dll "$NativeLibDir\opennova.dll"
+& $PY -m uv run --frozen --group dev --group blender python -c "from pyopennova._native import _lib_path, load_lib; print(_lib_path()); load_lib()"
 
 # ---------------------------------------------------------------------------
 # Build with PyInstaller (single-file exe)
@@ -64,15 +66,22 @@ Copy-Item build-pkg\Release\opennova.dll blender\lib\windows-x64\opennova.dll
 Write-Host "=== Building onimport.exe ==="
 $distPath = "$ROOT\dist"
 $ExeName = "onimport-v$Version"
-& $PY -m uv run --frozen --group dev --group blender python -m PyInstaller apps\importer\__main__.py `
+& $PY -m uv run --frozen --group dev --group blender python -m PyInstaller apps\onimport\__main__.py `
     --name $ExeName `
     --onefile `
     --collect-all bpy `
     --collect-all numpy `
-    --add-binary "blender\lib\windows-x64\opennova.dll;blender\lib\windows-x64" `
+    --collect-all PySide6 `
+    --add-binary "$NativeLibDir\opennova.dll;$NativeLibDir" `
     --distpath $distPath `
     --noconfirm `
     --clean
+
+Write-Host "=== Verifying packaged native DLL ==="
+& "$distPath\$ExeName.exe" scan --dir fixtures/def
+if ($LASTEXITCODE -ne 0) {
+    throw "Packaged scan verification failed with exit code $LASTEXITCODE"
+}
 
 Write-Host "=== Done ==="
 Write-Host "  -> dist\$ExeName.exe"

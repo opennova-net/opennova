@@ -2,7 +2,7 @@
 
 These tests run in-process against the real ``bpy`` standalone package (the
 same way ``test_scene_builder_blender_context.py`` does). They exercise the
-descriptor → Principled-BSDF mapping for the canonical shader-tag matrix:
+descriptor ? Principled-BSDF mapping for the canonical shader-tag matrix:
 
 - FF_ST_OP: opaque, diffuse only
 - FF_ST_AB with alpha-test: CLIP blend method
@@ -101,9 +101,9 @@ class _FakeResolver:
 
 
 def _make_builder(resolver=None):
-    """Construct a builder with a stub IR; load the deferred bpy import."""
+    """Construct a builder with a stub 3DI3 model; load the deferred bpy import."""
     import bpy
-    from apps.importer.scene_builder import BlenderSceneBuilder
+    from opennova_blender.scene_builder import BlenderSceneBuilder
 
     bpy.ops.wm.read_homefile(use_empty=True)
     ir = SimpleNamespace(source_format=0)
@@ -138,7 +138,7 @@ def test_ff_st_op_opaque(tmp_path: Path):
     ir_mat = _FakeIRMat(
         shader_name=b"FF_ST_OP",
         texture_count=1,
-        textures=[_FakeTexture("Wall.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE)],
+        textures=[_FakeTexture("Wall.tga", materials.THREEDI_TEX_SLOT_DIFFUSE)],
     )
     mat = builder._create_material(ir_mat)
 
@@ -157,17 +157,17 @@ def test_ff_st_ab_alpha_test_clips(tmp_path: Path):
 
     ir_mat = _FakeIRMat(
         shader_name=b"FF_ST_AB",
-        flags=materials.THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST,
+        flags=materials.THREEDI_MATERIAL_FLAG_ALPHA_TEST,
         material_flags=materials.THREEDI_MATERIAL_FLAG_ALPHA_TEST,
         alpha_test_value_byte=128,
         alpha_threshold=0.5,
         texture_count=1,
-        textures=[_FakeTexture("Bush.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE)],
+        textures=[_FakeTexture("Bush.tga", materials.THREEDI_TEX_SLOT_DIFFUSE)],
     )
     mat = builder._create_material(ir_mat)
 
     assert _link_exists(mat.node_tree, "Alpha", "Alpha")
-    # FF_ST_AB renderer_blend = "alpha_blend" → BLEND overrides CLIP.
+    # FF_ST_AB renderer_blend = "alpha_blend" ? BLEND overrides CLIP.
     assert mat.blend_method == "BLEND"
 
 
@@ -180,11 +180,11 @@ def test_ff_st_ab_no_alpha_test_blends(tmp_path: Path):
     ir_mat = _FakeIRMat(
         shader_name=b"FF_ST_AB",
         texture_count=1,
-        textures=[_FakeTexture("Glass.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE)],
+        textures=[_FakeTexture("Glass.tga", materials.THREEDI_TEX_SLOT_DIFFUSE)],
     )
     mat = builder._create_material(ir_mat)
 
-    # renderer_blend == alpha_blend even when no IR alpha-test bit is set.
+    # renderer_blend == alpha_blend even when no alpha-test bit is set.
     assert mat.blend_method == "BLEND"
 
 
@@ -200,7 +200,7 @@ def test_ffp_glass_uses_renderer_blend(tmp_path: Path):
         is_glass=1,
         blend_mode=0,
         texture_count=1,
-        textures=[_FakeTexture("Window.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE)],
+        textures=[_FakeTexture("Window.tga", materials.THREEDI_TEX_SLOT_DIFFUSE)],
     )
     mat = builder._create_material(ir_mat)
 
@@ -208,13 +208,13 @@ def test_ffp_glass_uses_renderer_blend(tmp_path: Path):
 
 
 def test_vs_phongt_diffuse_only_no_bump_node(tmp_path: Path):
-    """VS_PHONGT with no slot-3 imports flat-shaded — no fabricated bump.
+    """VS_PHONGT with no slot-3 imports flat-shaded � no fabricated bump.
 
     The previous diffuse-alpha bump path produced visible shading distortion
     on most VS_PHONGT-heavy assets (e.g. Armry01 BHD's 22 materials each got
     a strong bump from a non-height alpha channel). Until we have a flag
     indicating real height data, no ShaderNodeBump is wired and the diffuse
-    Color → Base Color link stays unencumbered.
+    Color ? Base Color link stays unencumbered.
     """
     diffuse = tmp_path / "Hull.png"
     diffuse.write_bytes(_minimal_png())
@@ -224,19 +224,19 @@ def test_vs_phongt_diffuse_only_no_bump_node(tmp_path: Path):
     ir_mat = _FakeIRMat(
         shader_name=b"VS_PHONGT",
         texture_count=1,
-        textures=[_FakeTexture("Hull.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE)],
+        textures=[_FakeTexture("Hull.tga", materials.THREEDI_TEX_SLOT_DIFFUSE)],
     )
     mat = builder._create_material(ir_mat)
 
     assert _get_node(mat.node_tree, "ShaderNodeBump") is None
-    # Diffuse Color → Base Color link is intact.
+    # Diffuse Color ? Base Color link is intact.
     assert _link_exists(mat.node_tree, "Color", "Base Color")
 
 
 def test_ff_mt_op_detail_records_metadata_only(tmp_path: Path):
-    """FF_MT_OP with diffuse + detail keeps the diffuse → Base Color link
+    """FF_MT_OP with diffuse + detail keeps the diffuse ? Base Color link
     intact and records the detail texture as a Blender custom property. The
-    MixRGB Multiply node tree the importer used to build is gone — it relied
+    MixRGB Multiply node tree the importer used to build is gone � it relied
     on the deprecated ShaderNodeMixRGB sockets and silently dropped the
     diffuse link in Blender 5.x, leaving the BSDF unlit. A real ShaderNodeMix
     composite is future work."""
@@ -251,8 +251,8 @@ def test_ff_mt_op_detail_records_metadata_only(tmp_path: Path):
         shader_name=b"FF_MT_OP",
         texture_count=2,
         textures=[
-            _FakeTexture("Wall.tga", materials.THREEDI_IR_TEX_SLOT_DIFFUSE),
-            _FakeTexture("Detail.tga", materials.THREEDI_IR_TEX_SLOT_DETAIL),
+            _FakeTexture("Wall.tga", materials.THREEDI_TEX_SLOT_DIFFUSE),
+            _FakeTexture("Detail.tga", materials.THREEDI_TEX_SLOT_DETAIL),
         ],
     )
     mat = builder._create_material(ir_mat)
@@ -261,7 +261,7 @@ def test_ff_mt_op_detail_records_metadata_only(tmp_path: Path):
     assert _get_node(mat.node_tree, "ShaderNodeMixRGB") is None
     assert _get_node(mat.node_tree, "ShaderNodeMix") is None
 
-    # Diffuse Color → BSDF Base Color link survives — viewport sees diffuse.
+    # Diffuse Color ? BSDF Base Color link survives � viewport sees diffuse.
     assert _link_exists(mat.node_tree, "Color", "Base Color")
 
     # Detail texture is recorded as metadata only.

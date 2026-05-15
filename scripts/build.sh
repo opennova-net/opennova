@@ -9,7 +9,7 @@ jobs="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 echo "Building opennova libraries and tests..."
 cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_SHARED_LIB=ON \
-    -DOPENNOVA_ENABLE_PYTHON_TESTS=ON
+    -DOPENNOVA_ENABLE_LEGACY_OED_TOOLS=OFF
 cmake --build "$root/build" --config Release -j "$jobs"
 
 echo "Running tests..."

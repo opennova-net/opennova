@@ -183,6 +183,51 @@ def test_addon_package_imports_without_pymxs():
     assert opennova_max.qt_ui.dialog_title("9.8.7") == "OpenNova Importer v9.8.7"
 
 
+def test_max_dcc_roundtrip_helper_imports_without_pymxs():
+    from pyopennova.legacy_tools import max_dcc_roundtrip
+
+    assert max_dcc_roundtrip.STOCK_FIXTURES == (
+        "akcrate",
+        "Armry01",
+        "Beret",
+        "mp5_1st",
+        "US01",
+    )
+    assert max_dcc_roundtrip.run_all is not None
+
+
+def test_max_dcc_batch_runner_scripts_are_present():
+    runner = ROOT / "scripts" / "max_dcc_roundtrip_runner.py"
+    wrapper = ROOT / "scripts" / "test_max_dcc.ps1"
+    pytest_harness = ROOT / "tests" / "test_max_dcc_roundtrip.py"
+
+    runner_text = runner.read_text(encoding="utf-8")
+    wrapper_text = wrapper.read_text(encoding="utf-8")
+    pytest_text = pytest_harness.read_text(encoding="utf-8")
+
+    assert "pyopennova.legacy_tools.max_dcc_roundtrip" in runner_text
+    assert "OPENNOVA_MAX_DCC_RESULT" in runner_text
+    assert '"successes": successes' in runner_text
+    assert "OPENNOVA_3DSMAXBATCH" in wrapper_text
+    assert "OPENNOVA_MAX_DCC_OUTPUT_ROOT" in wrapper_text
+    assert "$summary.failed -eq $false" in wrapper_text
+    assert "OPENNOVA_MAX_DCC_FIXTURES" in runner_text
+    assert "3dsmaxbatch.exe" in wrapper_text
+    assert "max_dcc_roundtrip_runner.py" in wrapper_text
+    assert "subprocess.run" in pytest_text
+    assert "pytest.importorskip(\"pymxs\"" not in pytest_text
+
+
+def test_max_dependency_group_is_for_local_harness_not_pymxs():
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert "pymxs is supplied by 3ds Max's bundled Python" in pyproject
+    assert "max = [" in pyproject
+
+    max_group = pyproject.split("max = [", 1)[1].split("]", 1)[0]
+    assert '"pytest>=8"' in max_group
+    assert "pymxs" not in max_group.lower()
+
+
 def test_max_mzp_package_script_smokes_startup_and_animation_modules():
     package_script = (ROOT / "scripts" / "package_max_mzp.ps1").read_text(encoding="utf-8")
 
@@ -295,7 +340,7 @@ def test_max_scene_builder_constructor_matches_blender_signature():
 
 
 def test_max_scene_builder_build_basic_scene_returns_false_for_zero_lod_ir():
-    """No LODs in the IR means nothing to build; constructor must not
+    """No LODs in the 3DI3 model means nothing to build; constructor must not
     require pymxs since this branch returns before any rt() call."""
     from opennova_max.scene_builder import MaxSceneBuilder
 
@@ -886,8 +931,8 @@ def test_max_material_records_texture_resolution_diagnostics(tmp_path: Path):
         alpha_threshold = 0.5
         texture_count = 2
         textures = [
-            FakeTexture(materials.THREEDI_IR_TEX_SLOT_DIFFUSE, diffuse.name),
-            FakeTexture(materials.THREEDI_IR_TEX_SLOT_DETAIL, "MissingDetail.tga"),
+            FakeTexture(materials.THREEDI_TEX_SLOT_DIFFUSE, diffuse.name),
+            FakeTexture(materials.THREEDI_TEX_SLOT_DETAIL, "MissingDetail.tga"),
         ]
 
     class FakeResolver:
@@ -944,7 +989,7 @@ def test_max_material_uses_normalized_bitmap_path_for_misnamed_dds(tmp_path: Pat
     source.write_bytes(b"DDS " + bytes(range(32)))
 
     class FakeTexture:
-        slot = materials.THREEDI_IR_TEX_SLOT_DIFFUSE
+        slot = materials.THREEDI_TEX_SLOT_DIFFUSE
         name = b"Diffuse.tga"
         type = 0
 
@@ -1015,8 +1060,8 @@ def test_max_material_keeps_primary_diffuse_map_for_detail_materials(tmp_path: P
         luminosity = 0
         texture_count = 2
         textures = [
-            FakeTexture(materials.THREEDI_IR_TEX_SLOT_DIFFUSE, diffuse.name),
-            FakeTexture(materials.THREEDI_IR_TEX_SLOT_DETAIL, detail.name),
+            FakeTexture(materials.THREEDI_TEX_SLOT_DIFFUSE, diffuse.name),
+            FakeTexture(materials.THREEDI_TEX_SLOT_DETAIL, detail.name),
         ]
 
     class FakeResolver:
@@ -1085,7 +1130,7 @@ def test_max_phongt_no_slot3_no_bump(tmp_path: Path):
     diffuse.write_bytes(b"DDS " + bytes(range(32)))
 
     class FakeTexture:
-        slot = materials.THREEDI_IR_TEX_SLOT_DIFFUSE
+        slot = materials.THREEDI_TEX_SLOT_DIFFUSE
         name = b"Roof.tga"
         type = 0
 
@@ -1186,12 +1231,12 @@ def test_max_dot3_normal_uses_normal_slot_not_bump(tmp_path: Path):
     normal.write_bytes(b"DDS")
 
     class FakeTextureDiffuse:
-        slot = materials.THREEDI_IR_TEX_SLOT_DIFFUSE
+        slot = materials.THREEDI_TEX_SLOT_DIFFUSE
         name = b"Tank.tga"
         type = 0  # diffuse-color, not normal type
 
     class FakeTextureNormal:
-        slot = materials.THREEDI_IR_TEX_SLOT_NORMAL
+        slot = materials.THREEDI_TEX_SLOT_NORMAL
         name = b"TankN.tga"
         type = 0  # tangent-space normal (NOT MDT, NOT TGA-alpha)
 
@@ -1248,8 +1293,8 @@ def test_max_alpha_test_honors_inverted_threshold():
     """ALPHA_INVERT bit flips the alpha-test threshold (mirrors gsys clip-inv)."""
     from opennova_max import materials
     from pyopennova.materials import (
-        THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT,
-        THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST,
+        THREEDI_MATERIAL_FLAG_ALPHA_INVERT,
+        THREEDI_MATERIAL_FLAG_ALPHA_TEST,
         THREEDI_MATERIAL_FLAG_ALPHA_INVERT,
         THREEDI_MATERIAL_FLAG_ALPHA_TEST,
     )
@@ -1257,7 +1302,7 @@ def test_max_alpha_test_honors_inverted_threshold():
     class FakeMaterialIR:
         index = 0
         shader_name = b"FF_ST_AB"
-        flags = THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST | THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT
+        flags = THREEDI_MATERIAL_FLAG_ALPHA_TEST | THREEDI_MATERIAL_FLAG_ALPHA_INVERT
         material_flags = THREEDI_MATERIAL_FLAG_ALPHA_TEST | THREEDI_MATERIAL_FLAG_ALPHA_INVERT
         alpha_test_value_byte = 64
         alpha_threshold = 64.0 / 255.0
@@ -1302,12 +1347,12 @@ def test_max_detail_metadata_only(tmp_path: Path):
     detail.write_bytes(b"DDS")
 
     class FakeTextureDiffuse:
-        slot = materials.THREEDI_IR_TEX_SLOT_DIFFUSE
+        slot = materials.THREEDI_TEX_SLOT_DIFFUSE
         name = b"Wall.tga"
         type = 0
 
     class FakeTextureDetail:
-        slot = materials.THREEDI_IR_TEX_SLOT_DETAIL
+        slot = materials.THREEDI_TEX_SLOT_DETAIL
         name = b"Detail.tga"
         type = 0
 
@@ -1408,7 +1453,7 @@ def test_calling_rt_outside_max_raises_descriptive_error():
 
 
 def test_max_qt_ui_helpers_and_menu_script_are_ci_safe():
-    from apps.importer.jobs import ScanItem
+    from opennova_jobs import ScanItem
     from opennova_max import qt_ui
     from opennova_max import ui
 
@@ -1468,7 +1513,6 @@ def test_max_qt_ui_helpers_and_menu_script_are_ci_safe():
     assert ui._format_scan_item(
         ScanItem(name="M16A2", type="weapon", source_model="m16_1st.3di", output_stem="m16_1st")
     ) == "[weapon] M16A2 -> m16_1st"
-    assert ui._scan_definitions("") == (False, [], "Game directory is required.")
 
 
 def test_max_qt_preferences_round_trip_and_dialog_paths(tmp_path: Path, monkeypatch):
@@ -1546,199 +1590,63 @@ def test_max_ui_resource_filters_type_and_search():
     assert ui._filtered_items(items, "all", "rifle fan") == []
 
 
-def test_max_ui_definition_and_loose_validation_statuses():
-    from opennova_max import ui
-
-    item = ui.DefinitionScanItem("M16A2 Rifle", "weapon", "m16_1st.3di", "m16_1st")
-    with patch("opennova_max.ui._set_status") as set_status:
-        ok = ui._run_definition_item(
-            item,
-            "",
-            "C:/out",
-            import_arms=True,
-            import_animations=True,
-            import_collisions=True,
-            import_occlusion=True,
-            import_lights=True,
-            write_ase=True,
-            write_3dp=True,
-            write_max=True,
-        )
-    assert not ok
-    set_status.assert_called_once_with("Definition import requires a game directory.")
-
-    with patch("opennova_max.ui._set_status") as set_status:
-        ok = ui._run_loose_from_ui(
-            "",
-            "",
-            "",
-            import_collisions=True,
-            import_occlusion=True,
-            import_lights=True,
-            write_ase=True,
-            write_3dp=True,
-            write_max=True,
-        )
-    assert not ok
-    set_status.assert_called_once_with("Loose import requires a .3di path and output root.")
-
-
-def test_max_ui_loose_single_import_uses_output_root(tmp_path: Path):
-    from opennova_max import ui
-
-    model = tmp_path / "Shed.3di"
-    asset_dir = tmp_path / "assets"
-    output_root = tmp_path / "out"
-    with patch("opennova_max.import_runner.run_loose_import", return_value=True) as run_loose:
-        with patch("opennova_max.ui._set_status") as set_status:
-            ok = ui._run_loose_from_ui(
-                str(model),
-                str(asset_dir),
-                str(output_root),
-                import_collisions=True,
-                import_occlusion=False,
-                import_lights=True,
-                write_ase=True,
-                write_3dp=False,
-                write_max=True,
-            )
-
-    assert ok
-    run_loose.assert_called_once_with(
-        str(model),
-        str(output_root / "Shed"),
-        output_stem="Shed",
-        asset_base_dir=str(asset_dir),
-        import_collisions=True,
-        import_occlusion=False,
-        import_lights=True,
-        write_ase=True,
-        write_3dp=False,
-        write_max=True,
-        copy_textures=True,
-        reset_scene=True,
-    )
-    set_status.assert_called_once_with(f"Loose import complete -> {output_root / 'Shed'}")
-
-
-def test_max_ui_loose_batch_uses_per_model_output_dirs(tmp_path: Path):
-    from opennova_max import ui
-
-    models = [tmp_path / "Shed.3di", tmp_path / "JetSki.3di"]
-    asset_dir = tmp_path / "assets"
-    output_root = tmp_path / "out"
-    result_type = type("Result", (), {})
-    results = [result_type(), result_type()]
-    results[0].ok = True
-    results[1].ok = True
-
-    with patch("opennova_max.import_runner.run_batch", return_value=results) as run_batch:
-        with patch("opennova_max.ui._set_status") as set_status:
-            ok = ui._run_loose_from_ui(
-                [str(path) for path in models],
-                str(asset_dir),
-                str(output_root),
-                import_collisions=False,
-                import_occlusion=True,
-                import_lights=False,
-                write_ase=False,
-                write_3dp=True,
-                write_max=False,
-            )
-
-    assert ok
-    run_batch.assert_called_once()
-    requests = run_batch.call_args.args[0]
-    assert [request.resource for request in requests] == [str(path) for path in models]
-    assert [request.output_dir for request in requests] == [
-        str(output_root / "Shed"),
-        str(output_root / "JetSki"),
-    ]
-    assert [request.output_stem for request in requests] == ["Shed", "JetSki"]
-    assert all(request.base_dir == str(asset_dir) for request in requests)
-    assert all(request.import_collisions is False for request in requests)
-    assert all(request.import_occlusion is True for request in requests)
-    assert all(request.import_lights is False for request in requests)
-    assert all(request.write_ase is False for request in requests)
-    assert all(request.write_3dp is True for request in requests)
-    assert all(request.write_max is False for request in requests)
-    assert all(request.copy_textures is True for request in requests)
-    set_status.assert_called_once_with(f"Loose batch complete: 2/2 files -> {output_root}")
-
-
-def test_max_ui_loose_batch_rejects_duplicate_output_stems(tmp_path: Path):
-    from opennova_max import ui
-
-    paths = [tmp_path / "Shed.3di", tmp_path / "nested" / "Shed.3di"]
-    with patch("opennova_max.import_runner.run_batch") as run_batch:
-        with patch("opennova_max.ui._set_status") as set_status:
-            ok = ui._run_loose_from_ui(
-                [str(path) for path in paths],
-                "",
-                str(tmp_path / "out"),
-                import_collisions=True,
-                import_occlusion=True,
-                import_lights=True,
-                write_ase=True,
-                write_3dp=True,
-                write_max=True,
-            )
-
-    assert not ok
-    run_batch.assert_not_called()
-    set_status.assert_called_once_with("Loose import has duplicate output names: Shed")
-
-
-def test_max_ui_loose_rejects_non_3di_paths(tmp_path: Path):
-    from opennova_max import ui
-
-    with patch("opennova_max.ui._set_status") as set_status:
-        ok = ui._run_loose_from_ui(
-            str(tmp_path / "Shed.txt"),
-            "",
-            str(tmp_path / "out"),
-            import_collisions=True,
-            import_occlusion=True,
-            import_lights=True,
-            write_ase=True,
-            write_3dp=True,
-            write_max=True,
-        )
-
-    assert not ok
-    set_status.assert_called_once_with(f"Loose imports require .3di files: {tmp_path / 'Shed.txt'}")
-
 
 def test_shared_host_neutral_writer_produces_outputs_without_max():
     if not FIXTURE_3DI.is_file():
         pytest.skip("fixture missing (LFS not pulled?)")
 
     from pyopennova.host_outputs import write_host_neutral_outputs
-    from pyopennova.threedi_ffi import free_model_ir, read_model_ir
+    from pyopennova.threedi_ffi import free_model_3di3, read_model_3di3
 
     out_dir = ROOT / f".tmp_test_host_outputs_{uuid.uuid4().hex}"
     out_dir.mkdir()
-    ir = read_model_ir(str(FIXTURE_3DI))
+    ir = read_model_3di3(str(FIXTURE_3DI))
     try:
         written = write_host_neutral_outputs(ir, str(out_dir), "Shed")
         names = {Path(path).name for path in written}
         assert "Shed.3dp" in names
         assert "Shed.3da" in names
         assert "Shed.ase" in names
-        assert "Shed_bullet.ase" in names
+        assert "Shed_bullet.ase" not in names
+        project_text = (out_dir / "Shed.3dp").read_text(encoding="utf-8", errors="replace")
+        assert "poly_collision_lod 0" in project_text
+        assert "_bullet.ase" not in project_text
         for path in written:
             assert Path(path).stat().st_size > 0
     finally:
-        free_model_ir(ir)
+        free_model_3di3(ir)
         shutil.rmtree(out_dir, ignore_errors=True)
 
 
-def test_max_native_batch_request_uses_exact_loose_output_dir():
-    from opennova_max.import_runner import MaxImportRequest, execute_import_request
+def test_max_scene_builder_has_no_hidden_bullet_lod_builder():
+    from opennova_max.scene_builder import MaxSceneBuilder
 
-    request = MaxImportRequest(
+    assert not hasattr(MaxSceneBuilder, "create_bullet_lod")
+    assert not hasattr(MaxSceneBuilder, "_create_bullet_attach_markers")
+
+
+def test_blender_scene_builder_source_has_no_hidden_bullet_lod_builder():
+    source = (ROOT / "opennova_blender" / "scene_builder.py").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert "def create_bullet_lod" not in source
+    assert "bullet_lod_index" not in source
+
+
+def test_max_native_batch_request_uses_exact_loose_output_dir():
+    from types import SimpleNamespace
+    from opennova_max.import_runner import execute_import_request
+
+    # Simulate the legacy MaxImportRequest field layout (duck-typed by execute_import_request).
+    request = SimpleNamespace(
+        mode="loose",
         resource=str(FIXTURE_3DI),
         output_dir=str(ROOT / "out" / "Shed"),
+        output_stem="",
+        base_dir="",
+        options=None,
     )
     with patch(
         "opennova_max.import_runner._run_loose_import_impl",
@@ -1754,12 +1662,19 @@ def test_max_native_batch_request_uses_exact_loose_output_dir():
 
 
 def test_max_native_batch_request_can_disable_max_output():
-    from opennova_max.import_runner import MaxImportRequest, execute_import_request
+    from types import SimpleNamespace
+    from opennova_max.import_runner import execute_import_request
 
-    request = MaxImportRequest(
+    # Simulate the legacy MaxImportRequest field layout with write_max=False.
+    request = SimpleNamespace(
+        mode="loose",
         resource=str(FIXTURE_3DI),
         output_dir=str(ROOT / "out" / "Shed"),
+        output_stem="",
+        base_dir="",
         write_max=False,
+        copy_textures=True,
+        options=None,
     )
     with patch(
         "opennova_max.import_runner._run_loose_import_impl",
@@ -1773,7 +1688,7 @@ def test_max_native_batch_request_can_disable_max_output():
 
 
 def test_definition_plan_resolves_reset_bad_when_animation_import_is_disabled(monkeypatch):
-    from apps.importer import resource_plan
+    from pyopennova import resource_plan
     from pyopennova import definitions
 
     class FakeResolver:
@@ -1889,11 +1804,11 @@ def test_max_definition_import_binds_reset_bad_without_animation_context(tmp_pat
         models=(SimpleNamespace(role="main", path="C:/game/WPN.3di"),),
     )
 
-    with patch("apps.importer.resource_plan.resolve_definition_import", return_value=plan):
+    with patch("pyopennova.resource_plan.resolve_definition_import", return_value=plan):
         with patch("pyopennova.bad_ffi.parse_bad", return_value=bad_file) as parse_bad:
             with patch("pyopennova.bad_ffi.free_bad") as free_bad:
-                with patch("pyopennova.threedi_ffi.read_model_ir", return_value=main_ir):
-                    with patch("pyopennova.threedi_ffi.free_model_ir") as free_ir:
+                with patch("pyopennova.threedi_ffi.read_model", return_value=main_ir):
+                    with patch("pyopennova.threedi_ffi.free_model_3di3") as free_ir:
                         with patch("opennova_max.scene_builder.MaxSceneBuilder", FakeBuilder):
                             with patch("opennova_max.output_writers.write_outputs", return_value=["out.max"]):
                                 written, project_dir = import_runner._run_definition_import_impl(
@@ -1919,6 +1834,62 @@ def test_max_definition_import_binds_reset_bad_without_animation_context(tmp_pat
     assert built[0].kwargs["anim_context"] is None
     assert built[0].apply_called is False
     parse_bad.assert_called_once_with("C:/game/WPN_RST.bad")
+    free_bad.assert_called_once_with(bad_file)
+    free_ir.assert_called_once_with(main_ir)
+
+
+def test_max_definition_import_returns_empty_when_main_scene_build_fails(tmp_path: Path):
+    from opennova_max import import_runner
+
+    bad_file = object()
+    main_ir = object()
+
+    class FakeBuilder:
+        def __init__(self, ir, **kwargs):
+            self.ir = ir
+            self.kwargs = kwargs
+
+        def build_basic_scene(self, name: str):
+            return False
+
+        def apply_animations(self):
+            raise AssertionError("animations should not be applied after build failure")
+
+    plan = SimpleNamespace(
+        export_name="WPN_TEST",
+        scene_name="WPN_TEST",
+        reset_bad_path="C:/game/WPN_RST.bad",
+        animation_context=object(),
+        models=(SimpleNamespace(role="main", path="C:/game/WPN.3di"),),
+    )
+
+    with patch("pyopennova.resource_plan.resolve_definition_import", return_value=plan):
+        with patch("pyopennova.bad_ffi.parse_bad", return_value=bad_file):
+            with patch("pyopennova.bad_ffi.free_bad") as free_bad:
+                with patch("pyopennova.threedi_ffi.read_model", return_value=main_ir):
+                    with patch("pyopennova.threedi_ffi.free_model_3di3") as free_ir:
+                        with patch("opennova_max.scene_builder.MaxSceneBuilder", FakeBuilder):
+                            with patch("opennova_max.output_writers.write_outputs") as write_outputs:
+                                written, project_dir = import_runner._run_definition_import_impl(
+                                    base_dir=str(tmp_path),
+                                    item_name="WPN_TEST",
+                                    item_type="weapon",
+                                    output_dir=str(tmp_path / "out"),
+                                    output_stem="",
+                                    import_arms=False,
+                                    import_animations=True,
+                                    import_collisions=False,
+                                    import_occlusion=False,
+                                    import_lights=False,
+                                    write_ase=False,
+                                    write_3dp=False,
+                                    write_max=True,
+                                    reset_scene=False,
+                                )
+
+    assert written == []
+    assert project_dir == str(tmp_path / "out" / "WPN_TEST")
+    write_outputs.assert_not_called()
     free_bad.assert_called_once_with(bad_file)
     free_ir.assert_called_once_with(main_ir)
 
@@ -1961,11 +1932,11 @@ def test_max_definition_import_applies_animations_after_secondary_merge(tmp_path
         ),
     )
 
-    with patch("apps.importer.resource_plan.resolve_definition_import", return_value=plan):
+    with patch("pyopennova.resource_plan.resolve_definition_import", return_value=plan):
         with patch("pyopennova.bad_ffi.parse_bad", return_value=bad_file):
             with patch("pyopennova.bad_ffi.free_bad"):
-                with patch("pyopennova.threedi_ffi.read_model_ir", side_effect=[main_ir, arms_ir]):
-                    with patch("pyopennova.threedi_ffi.free_model_ir"):
+                with patch("pyopennova.threedi_ffi.read_model", side_effect=[main_ir, arms_ir]):
+                    with patch("pyopennova.threedi_ffi.free_model_3di3"):
                         with patch("opennova_max.scene_builder.MaxSceneBuilder", FakeBuilder):
                             with patch("opennova_max.output_writers.write_outputs", return_value=["out.max"]):
                                 written, _project_dir = import_runner._run_definition_import_impl(
@@ -2028,7 +1999,6 @@ def test_max_output_writer_delegates_host_neutral_outputs(tmp_path: Path):
         "import_collisions": False,
         "import_occlusion": True,
         "import_lights": False,
-        "bullet_lod_index": 4,
         "bad_file": bad_file,
     })()
 
@@ -2059,6 +2029,6 @@ def test_max_output_writer_delegates_host_neutral_outputs(tmp_path: Path):
         include_occlusion=True,
         include_lights=False,
         bad_file=bad_file,
-        bullet_lod_index=4,
+        collision_lod_index=None,
     )
     copy_textures.assert_called_once_with(ir, str(tmp_path), resolver=None)

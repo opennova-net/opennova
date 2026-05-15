@@ -94,10 +94,10 @@ typedef struct ThreediControlFuncInfo {
 } ThreediControlFuncInfo;
 
 // Lookup control function metadata. Returns NULL if the code is unknown.
-const ThreediControlFuncInfo *threedi_control_func_info(uint8_t code);
+THREEDI_EXPORT const ThreediControlFuncInfo *threedi_control_func_info(uint8_t code);
 
 // Resolve a control register name by index. Returns NULL if out of range or missing.
-const char *threedi_ctrl_reg_name(const ThreediCtrl *ctrl, uint8_t idx);
+THREEDI_EXPORT const char *threedi_ctrl_reg_name(const ThreediCtrl *ctrl, uint8_t idx);
 
 typedef struct ThreediTransformDecoded {
     uint8_t control;
@@ -113,10 +113,10 @@ typedef struct ThreediTransformDecoded {
 
 // Decode a packed transform into human units and resolved names.
 // Returns 0 on success, -1 on invalid args.
-int threedi_decode_transform(const ThreediTransform *t,
-                             int is_rotation,
-                             const ThreediCtrl *ctrl,
-                             ThreediTransformDecoded *out);
+THREEDI_EXPORT int threedi_decode_transform(const ThreediTransform *t,
+                                            int is_rotation,
+                                            const ThreediCtrl *ctrl,
+                                            ThreediTransformDecoded *out);
 
 typedef struct ThreediPanmDecoded {
     const ThreediPartAnimation *raw;
@@ -131,24 +131,24 @@ typedef struct ThreediPanmDecoded {
 
 // Decode a PANM entry into human units and resolved names.
 // Returns 0 on success, -1 on invalid args.
-int threedi_decode_panm(const ThreediPartAnimation *p,
-                        const ThreediCtrl *ctrl,
-                        ThreediPanmDecoded *out);
+THREEDI_EXPORT int threedi_decode_panm(const ThreediPartAnimation *p,
+                                       const ThreediCtrl *ctrl,
+                                       ThreediPanmDecoded *out);
 
 // Formatters for debugging/CLI output. Buffers are null-terminated.
-const char *threedi_translate_axis_label(uint8_t translate_type); // "none"/"X"/"Y"/"Z"/"?"
-void threedi_format_transform(const ThreediTransformDecoded *t, char *buf, size_t buf_sz);
-void threedi_format_panm(const ThreediPartAnimation *p,
-                         const ThreediCtrl *ctrl,
-                         char *buf,
-                         size_t buf_sz);
+THREEDI_EXPORT const char *threedi_translate_axis_label(uint8_t translate_type); // "none"/"X"/"Y"/"Z"/"?"
+THREEDI_EXPORT void threedi_format_transform(const ThreediTransformDecoded *t, char *buf, size_t buf_sz);
+THREEDI_EXPORT void threedi_format_panm(const ThreediPartAnimation *p,
+                                        const ThreediCtrl *ctrl,
+                                        char *buf,
+                                        size_t buf_sz);
 
 // Waveform table (matches sub_4350B0 in the original tool).
 // The table has 11 contiguous 256-byte bands (0..2815). It is built deterministically
 // with the MSVC rand LCG seeded to 1 and contains the precomputed waves used by
 // PANM_SampleTrack.
 #define THREEDI_PANM_WAVE_TABLE_SIZE 2816
-const uint8_t *threedi_panm_wave_table(void);
+THREEDI_EXPORT const uint8_t *threedi_panm_wave_table(void);
 
 #ifdef __cplusplus
 }

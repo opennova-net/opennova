@@ -18,6 +18,7 @@ add_subdirectory(libs/def)
 add_subdirectory(libs/scr)
 add_subdirectory(libs/ase)
 add_subdirectory(libs/tdp)
+add_subdirectory(libs/object)
 add_subdirectory(libs/terrain)
 add_subdirectory(libs/resource_index)
 
@@ -39,6 +40,7 @@ set(OPENNOVA_CORE_TARGETS
     opennova_scr
     opennova_ase
     opennova_tdp
+    opennova_object
     opennova_resource_index
 )
 
@@ -130,35 +132,35 @@ if(BUILD_TOOLS)
     target_link_libraries(survey_3di3 PRIVATE opennova_threedi m)
 endif()
 
+option(OPENNOVA_ENABLE_LEGACY_OED_TOOLS "Build Windows-only legacy OED automation tools" OFF)
+
+if(OPENNOVA_ENABLE_LEGACY_OED_TOOLS)
+    add_subdirectory(tools/legacy_oed/modsuperoed)
+endif()
+
 # Enable testing
 enable_testing()
 add_subdirectory(tests)
 
-option(OPENNOVA_ENABLE_PYTHON_TESTS "Add Python pytest suite to CTest" OFF)
-
-if(OPENNOVA_ENABLE_PYTHON_TESTS)
-    find_program(UV_EXECUTABLE NAMES uv)
-    if(NOT UV_EXECUTABLE)
-        message(FATAL_ERROR "OPENNOVA_ENABLE_PYTHON_TESTS requires uv on PATH")
-    endif()
-    set(OPENNOVA_UV_CACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/uv-cache")
-    set(OPENNOVA_PYTEST_COMMAND
-        ${CMAKE_COMMAND} -E env
-        "UV_CACHE_DIR=${OPENNOVA_UV_CACHE_DIR}"
-        ${UV_EXECUTABLE} run --frozen --group blender pytest
-    )
-
-    add_test(
-        NAME opennova_python_pytest
-        COMMAND ${OPENNOVA_PYTEST_COMMAND}
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    )
-
-    add_custom_target(opennova_python_tests
-        COMMAND
-            ${CMAKE_COMMAND} -E chdir
-            "${CMAKE_SOURCE_DIR}"
-            ${OPENNOVA_PYTEST_COMMAND}
-        USES_TERMINAL
-    )
+find_program(UV_EXECUTABLE NAMES uv)
+if(NOT UV_EXECUTABLE)
+    message(FATAL_ERROR "uv is required to register the Python pytest suite")
 endif()
+set(OPENNOVA_PYTEST_COMMAND
+    ${UV_EXECUTABLE} run --frozen --group blender pytest
+    -p no:cacheprovider
+)
+
+add_test(
+    NAME opennova_python_pytest
+    COMMAND ${OPENNOVA_PYTEST_COMMAND}
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+
+add_custom_target(opennova_python_tests
+    COMMAND
+        ${CMAKE_COMMAND} -E chdir
+        "${CMAKE_SOURCE_DIR}"
+        ${OPENNOVA_PYTEST_COMMAND}
+    USES_TERMINAL
+)

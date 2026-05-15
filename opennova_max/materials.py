@@ -10,10 +10,10 @@ from pyopennova.materials import (
     MATERIAL_BLEND_ALPHA,
     NORMAL_TYPE_MDT,
     NORMAL_TYPE_TGA_ALPHA,
-    THREEDI_IR_TEX_SLOT_DETAIL,
-    THREEDI_IR_TEX_SLOT_DIFFUSE,
-    THREEDI_IR_TEX_SLOT_NORMAL,
-    THREEDI_IR_TEX_SLOT_NORMAL_B,
+    THREEDI_TEX_SLOT_DETAIL,
+    THREEDI_TEX_SLOT_DIFFUSE,
+    THREEDI_TEX_SLOT_NORMAL,
+    THREEDI_TEX_SLOT_NORMAL_B,
     describe_material,
     material_user_props,
 )
@@ -32,7 +32,7 @@ def _rt():
 
 
 def create_material(mat_ir, resolver=None, ctrl_resolver=None, source_format=None) -> Any:
-    """Create a Max StandardMaterial matching one IR material."""
+    """Create a Max StandardMaterial matching one 3DI3 material."""
     rt = _rt()
     desc = describe_material(
         mat_ir,
@@ -69,7 +69,7 @@ def create_material(mat_ir, resolver=None, ctrl_resolver=None, source_format=Non
 
     _wire_alpha_test(rt, mat, desc)
 
-    # Alpha-test materials use the precise threshold from the IR; renderer_blend
+    # Alpha-test materials use the precise threshold from the 3DI3 model; renderer_blend
     # opacity defaults (70 / 100) only apply when alpha-test isn't already set.
     is_alpha_blend = desc.blend_mode == 1 or desc.renderer_blend == MATERIAL_BLEND_ALPHA
     is_additive = desc.blend_mode == 2 or desc.renderer_blend == MATERIAL_BLEND_ADDITIVE
@@ -284,7 +284,7 @@ def create_multimaterial(name: str, material_ids: list[int], material_dict: dict
 
 
 def _max_material_id(material_id: int) -> int:
-    """Return the 1-based Max face/material id for a 0-based IR material id."""
+    """Return the 1-based Max face/material id for a 0-based 3DI3 material id."""
     return max(1, int(material_id) + 1)
 
 

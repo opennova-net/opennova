@@ -1,14 +1,14 @@
 # OpenNova 3ds Max addon
 
-Imports NovaLogic `.3di` assets into 3ds Max using the same parsed IR and
+Imports NovaLogic `.3di` assets into 3ds Max using the same parsed 3DI3 model and
 coordinate-space helpers as the Blender importer. The Max builder creates the
 full scene categories expected by the Blender path: LOD 0 meshes, additional
-LODs, BulletLOD, center/attach/user markers, lights, collision helpers,
+LODs, center/attach/user markers, lights, collision helpers,
 occlusion helpers, and skinned skeleton/weights where available.
 
 Outputs are intentionally shared where the format is host-neutral:
 
-- `.ase` is written through `pyopennova.ase_from_ir`, which uses the same native
+- `.ase` is written through `pyopennova.ase_from_3di3`, which uses the same native
   `pyopennova.ase_ffi` writer instead of Max's native ASE exporter.
 - `.3dp` and `.3da` are written through `pyopennova.project_writer`.
 - `.max` is saved from the active 3ds Max scene next to those outputs by
@@ -94,12 +94,10 @@ expect `3dsmaxbatch.exe`.
 
 ## Local validation
 
-The Python suite skips Max by default. To validate against a local Max install:
+The always-on Python suite validates the batch listener logic. Run an
+interactive Max import manually when you need to validate a local Autodesk
+install:
 
 ```powershell
-$env:OPENNOVA_RUN_MAX_LOCAL = "1"
-uv run pytest tests/test_max_local_batch.py -s
+3dsmaxbatch.exe path\to\validation_script.py -v 3
 ```
-
-Set `OPENNOVA_3DSMAXBATCH` to override the executable path. The default is
-`C:\Program Files\Autodesk\3ds Max 2022\3dsmaxbatch.exe`.

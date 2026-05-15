@@ -1,4 +1,4 @@
-"""Host-neutral material interpretation for OpenNova model IR data.
+"""Host-neutral material interpretation for OpenNova 3DI3 model data.
 
 This module intentionally contains no Blender or PyMXS imports.  DCC hosts use
 the descriptors here to build their own native material objects while sharing
@@ -11,24 +11,17 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
-THREEDI_IR_TEX_SLOT_DIFFUSE = 1
-THREEDI_IR_TEX_SLOT_DETAIL = 2
-THREEDI_IR_TEX_SLOT_NORMAL = 3
-THREEDI_IR_TEX_SLOT_NORMAL_B = 4
+THREEDI_TEX_SLOT_DIFFUSE = 1
+THREEDI_TEX_SLOT_DETAIL = 2
+THREEDI_TEX_SLOT_NORMAL = 3
+THREEDI_TEX_SLOT_NORMAL_B = 4
 
-THREEDI_IR_SOURCE_GPM = 2
-THREEDI_IR_SOURCE_GPS = 3
-THREEDI_IR_SOURCE_GPP = 4
+THREEDI_MATERIAL_FLAG_ALPHA_TEST = 0x01
+THREEDI_MATERIAL_FLAG_ALPHA_INVERT = 0x02
+THREEDI_MATERIAL_FLAG_TWO_SIDED = 0x04
+THREEDI_MATERIAL_FLAG_EMISSIVE = 0x08
 
-THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST = 0x01
-THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT = 0x02
-THREEDI_IR_MATERIAL_FLAG_TWO_SIDED = 0x04
-THREEDI_IR_MATERIAL_FLAG_EMISSIVE = 0x08
-
-# The 3DI3 MTRL flag byte uses the same low bits as the normalized IR flags.
-THREEDI_MATERIAL_FLAG_ALPHA_TEST = THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST
-THREEDI_MATERIAL_FLAG_ALPHA_INVERT = THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT
-THREEDI_MATERIAL_FLAG_TWO_SIDED = THREEDI_IR_MATERIAL_FLAG_TWO_SIDED
+# The 3DI3 MTRL flag byte uses the same low bits as the normalized material flags.
 THREEDI_EMISSIVE_FULL = 2
 
 MATERIAL_BLEND_OPAQUE = "opaque"
@@ -104,9 +97,9 @@ _MATERIAL_INFO_FLAGS = {
     "VS_SKBUMPDIFFOBJ": _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
     "VS_SKBUMPPHONGOBJ": _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
     "VS_SKBUMPDIFFOBJ2": _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY,
-    "VS_SKBUMPDIFFT": _MAT_FLAG_GLASS | _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
-    "VS_SKBUMPPHONGT": _MAT_FLAG_GLASS | _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
-    "VS_SKBUMPDIFFT2": _MAT_FLAG_GLASS | _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY,
+    "VS_SKBUMPDIFFT": _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_SKBUMPPHONGT": _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE,
+    "VS_SKBUMPDIFFT2": _MAT_FLAG_FILTER | _MAT_FLAG_NORMAL_A | _MAT_FLAG_DIFFUSE | _MAT_FLAG_SECONDARY,
     "VS_FLAG": _MAT_FLAG_DIFFUSE,
 }
 
@@ -291,6 +284,12 @@ class MaterialDescriptor:
     v_tiling: float = 0.0
     effective_u_tiling: float = 1.0
     effective_v_tiling: float = 1.0
+    # Channel-1 (uv1) tiling. The model's MTRL chunk doesn't store this directly,
+    # but it's recoverable from per-vertex (uv0, uv1) ratios because OED's
+    # WriteRDTA emits uv1 = (uv0 - 0.5) * tiling + 0.5 (see WriteRDTA @
+    # 0x459a04 in ModSuperOed.exe). Set 1.0 when no transform should apply.
+    effective_u1_tiling: float = 1.0
+    effective_v1_tiling: float = 1.0
     has_custom_tiling: bool = False
     bump_mode: str = ""
     bump_uses_alpha: bool = False
@@ -315,6 +314,77 @@ class MaterialDescriptor:
     tex_anim: TexAnimDescriptor = field(default_factory=TexAnimDescriptor)
 
 
+def derive_uv1_tilings(ir) -> Dict[int, Tuple[float, float]]:
+    """Back-calculate per-material (uv1_u_tiling, uv1_v_tiling) from per-vertex
+    (uv0, uv1) ratios across all LODs.
+
+    The model's MTRL chunk stores no uv1 tiling, but the per-vertex uv1 carries
+    the transform OED's WriteRDTA applied at bake time:
+        uv1 = (uv0 - 0.5) * tiling + 0.5    (see WriteRDTA @ 0x459a04)
+    so   tiling = (uv1 - 0.5) / (uv0 - 0.5).
+    Robust to the (uv0 == 0.5) edge by skipping near-pivot samples and taking
+    the median. Returns 1.0 (identity transform) when no usable samples exist.
+    """
+    EPS = 1e-4
+    out: Dict[int, Tuple[float, float]] = {}
+    mat_count = int(getattr(ir, "material_count", 0))
+    for mat_idx in range(mat_count):
+        u_ratios: list[float] = []
+        v_ratios: list[float] = []
+        for lod_i in range(int(getattr(ir, "lod_count", 0))):
+            lod = ir.lods[lod_i]
+            primitive_part_indices = _primitive_part_indices(lod)
+            for prim_i in range(int(getattr(lod, "primitive_count", 0))):
+                p = lod.primitives[prim_i]
+                if int(p.material_index) != mat_idx:
+                    continue
+                vstart = int(p.vertex_offset)
+                vcount = int(p.vertex_count)
+                for vi in range(vstart, vstart + vcount):
+                    v = lod.vertices[vi]
+                    u0 = float(v.uv0[0]) - 0.5
+                    u1 = float(v.uv1[0]) - 0.5
+                    v0 = float(v.uv0[1]) - 0.5
+                    v1 = float(v.uv1[1]) - 0.5
+                    if abs(u0) > EPS:
+                        u_ratios.append(u1 / u0)
+                    if abs(v0) > EPS:
+                        v_ratios.append(v1 / v0)
+        u_tiling = _median(u_ratios) if u_ratios else 1.0
+        v_tiling = _median(v_ratios) if v_ratios else 1.0
+        out[mat_idx] = (u_tiling, v_tiling)
+    return out
+
+
+def _primitive_part_indices(lod) -> list[int]:
+    count = int(getattr(lod, "primitive_count", 0))
+    out = [-1] * count
+    parts = getattr(lod, "parts", None)
+    part_count = int(getattr(lod, "part_count", 0))
+    cursor = 0
+    for part_idx in range(part_count):
+        part = parts[part_idx]
+        prim_count = int(getattr(part, "primitive_count", 0))
+        if prim_count <= 0:
+            prim_count = int(getattr(part, "num_strips", 0)) + int(getattr(part, "num_alpha_strips", 0))
+        for _ in range(max(0, prim_count)):
+            if cursor >= count:
+                return out
+            out[cursor] = part_idx
+            cursor += 1
+    return out
+
+
+def _median(values: list[float]) -> float:
+    s = sorted(values)
+    n = len(s)
+    if n == 0:
+        return 1.0
+    if n % 2 == 1:
+        return s[n // 2]
+    return 0.5 * (s[n // 2 - 1] + s[n // 2])
+
+
 def describe_material(
     ir_mat,
     resolver=None,
@@ -322,8 +392,14 @@ def describe_material(
     *,
     source_format: int | None = None,
     texture_strategy: str | None = None,
+    uv1_tiling_override: Tuple[float, float] | None = None,
 ) -> MaterialDescriptor:
-    """Interpret one ``ThreediIRMaterial`` into host-neutral material data."""
+    """Interpret one ``TdpMaterial`` into host-neutral material data.
+
+    ``uv1_tiling_override`` (when provided) sets the channel-1 tiling that the
+    model's MTRL chunk doesn't natively carry. Compute it once per 3DI3 model via
+    ``derive_uv1_tilings(ir)`` and pass the per-material entry in.
+    """
 
     index = _int_attr(ir_mat, "index", 0)
     shader = _decode(_attr(ir_mat, "shader_name", b"")).strip() or "FF_ST_OP"
@@ -378,6 +454,14 @@ def describe_material(
         (u_tiling != 0.0 and u_tiling != 1.0)
         or (v_tiling != 0.0 and v_tiling != 1.0)
     )
+    if uv1_tiling_override is not None:
+        effective_u1_tiling = float(uv1_tiling_override[0])
+        effective_v1_tiling = float(uv1_tiling_override[1])
+    else:
+        # MTRL doesn't carry uv1 tiling natively; default to identity (1.0)
+        # which matches OED's "skip transform" path when uv1_u_tiling == 0.0.
+        effective_u1_tiling = 1.0
+        effective_v1_tiling = 1.0
 
     bump_mode = ""
     bump_uses_alpha = False
@@ -389,8 +473,8 @@ def describe_material(
     # diffuse-alpha fallback (height from diffuse alpha, mimicking gsys_phong)
     # produced visible shading distortion on most assets because most VS_PHONGT
     # textures don't actually encode height in alpha — they use it for opacity
-    # or leave it unused. Without a per-material flag in the IR to gate this,
-    # the safe default is no bump. A future revival could be opt-in.
+    # or leave it unused. Without a per-material flag in the 3DI3 model to gate this,
+    # the safe default is no bump unless the model carries that signal.
 
     return MaterialDescriptor(
         index=index,
@@ -413,7 +497,7 @@ def describe_material(
         alpha_inverted=semantics.alpha_test_invert,
         two_sided=semantics.is_two_sided,
         emissive=(
-            bool(flags & THREEDI_IR_MATERIAL_FLAG_EMISSIVE)
+            bool(flags & THREEDI_MATERIAL_FLAG_EMISSIVE)
             or emissive_type != 0
             or emissive_type2 != 0
             or semantics.is_emissive
@@ -435,6 +519,8 @@ def describe_material(
         v_tiling=v_tiling,
         effective_u_tiling=effective_u_tiling,
         effective_v_tiling=effective_v_tiling,
+        effective_u1_tiling=effective_u1_tiling,
+        effective_v1_tiling=effective_v1_tiling,
         has_custom_tiling=has_custom_tiling,
         bump_mode=bump_mode,
         bump_uses_alpha=bump_uses_alpha,
@@ -461,7 +547,7 @@ def describe_material(
 
 
 def describe_materials(ir, resolver=None, ctrl_resolver=None) -> List[MaterialDescriptor]:
-    """Interpret all materials in a model IR."""
+    """Interpret all materials in a model data."""
 
     out = []
     source_format = _int_attr(ir, "source_format", 0)
@@ -644,6 +730,8 @@ def descriptor_from_user_props(
         v_tiling=v_tiling,
         effective_u_tiling=effective_u_tiling,
         effective_v_tiling=effective_v_tiling,
+        effective_u1_tiling=gf("opennova_uv1_u_tiling", 1.0),
+        effective_v1_tiling=gf("opennova_uv1_v_tiling", 1.0),
         has_custom_tiling=has_custom_tiling,
         bump_mode=bump_mode,
         bump_uses_alpha=bump_uses_alpha,
@@ -848,11 +936,11 @@ def _effective_alpha_test_byte(ir_mat, alpha_threshold: float) -> int:
 
 def _material_flags_from_ir_flags(flags: int) -> int:
     out = 0
-    if flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST:
+    if flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST:
         out |= THREEDI_MATERIAL_FLAG_ALPHA_TEST
-    if flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT:
+    if flags & THREEDI_MATERIAL_FLAG_ALPHA_INVERT:
         out |= THREEDI_MATERIAL_FLAG_ALPHA_INVERT
-    if flags & THREEDI_IR_MATERIAL_FLAG_TWO_SIDED:
+    if flags & THREEDI_MATERIAL_FLAG_TWO_SIDED:
         out |= THREEDI_MATERIAL_FLAG_TWO_SIDED
     return out
 
@@ -955,7 +1043,7 @@ def _texture_descriptors(
             frame=_int_attr(tex, "frame", 0),
         )
         all_textures.append(desc)
-        if desc.role == "diffuse" and (slot == THREEDI_IR_TEX_SLOT_DIFFUSE or not diffuse.name):
+        if desc.role == "diffuse" and (slot == THREEDI_TEX_SLOT_DIFFUSE or not diffuse.name):
             diffuse = desc
         elif desc.role == "detail":
             detail = desc
@@ -976,13 +1064,13 @@ def _texture_role(
     source_format: int | None = None,
 ) -> str:
     shader_key = (shader or "").upper()
-    if slot == THREEDI_IR_TEX_SLOT_DIFFUSE:
+    if slot == THREEDI_TEX_SLOT_DIFFUSE:
         return "diffuse"
-    if slot == THREEDI_IR_TEX_SLOT_DETAIL:
-        return "detail" if _shader_supports_detail(shader_key) or _is_gp_source(source_format) else "unknown"
-    if slot == THREEDI_IR_TEX_SLOT_NORMAL:
+    if slot == THREEDI_TEX_SLOT_DETAIL:
+        return "detail" if _shader_supports_detail(shader_key) else "unknown"
+    if slot == THREEDI_TEX_SLOT_NORMAL:
         return "normal" if _shader_supports_bump(shader_key) or tex_type in (NORMAL_TYPE_MDT, NORMAL_TYPE_TGA_ALPHA) else "unknown"
-    if slot == THREEDI_IR_TEX_SLOT_NORMAL_B:
+    if slot == THREEDI_TEX_SLOT_NORMAL_B:
         return (
             "secondary_normal"
             if _shader_supports_bump(shader_key) or tex_type in (NORMAL_TYPE_MDT, NORMAL_TYPE_TGA_ALPHA)
@@ -1003,10 +1091,6 @@ def _shader_supports_detail(shader: str) -> bool:
         or "DIFF2" in shader
         or "T2" in shader
     )
-
-
-def _is_gp_source(source_format: int | None) -> bool:
-    return source_format in (THREEDI_IR_SOURCE_GPM, THREEDI_IR_SOURCE_GPS, THREEDI_IR_SOURCE_GPP)
 
 
 def _shader_supports_bump(shader: str) -> bool:
@@ -1204,7 +1288,7 @@ def _fix_tex_ext(name: str) -> str:
     name = os.path.basename(name)
     root, ext = os.path.splitext(name)
     if ext.upper() in (".TGA", ".PCX", ".MDT"):
-        return root + ext.upper()
+        return root + ext
     return root + ".TGA"
 
 

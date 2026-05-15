@@ -29,7 +29,7 @@ _SCR_VERSION_KEYS = {
 TEXTURE_STRATEGY_GENERIC = "generic"
 TEXTURE_STRATEGY_3DI3_DF4OED = "3di3_df4oed"
 
-THREEDI_IR_SOURCE_3DI3 = 1
+THREEDI_SOURCE_3DI3 = 1
 
 _TEXTURE_EXTS = (".dds", ".tga", ".png", ".mdt", ".pcx")
 
@@ -182,7 +182,7 @@ class AssetResolver:
         """Resolve a texture name with extension fallback.
 
         The returned path is for host/DCC loading. The authored texture name
-        remains owned by the material IR.
+        remains owned by the material descriptor.
         """
         if not texture_name:
             return None
@@ -292,7 +292,7 @@ def _texture_strategy(strategy: str | None, source_format: int | None) -> str:
         if value in {"3di3", "df4oed", TEXTURE_STRATEGY_3DI3_DF4OED}:
             return TEXTURE_STRATEGY_3DI3_DF4OED
         return TEXTURE_STRATEGY_GENERIC
-    if source_format == THREEDI_IR_SOURCE_3DI3:
+    if source_format == THREEDI_SOURCE_3DI3:
         return TEXTURE_STRATEGY_3DI3_DF4OED
     return TEXTURE_STRATEGY_GENERIC
 

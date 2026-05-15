@@ -1,15 +1,15 @@
 add_library(opennova_threedi STATIC
     src/threedi.cpp
     src/threedi_3di3.cpp
+    src/threedi_gp.cpp
+    src/threedi_gp_to_3di3.cpp
     src/threedi_panm.cpp
     src/threedi_panm_runtime.cpp
     src/threedi_panm_wave.cpp
     src/threedi_panm_matrices.cpp
-    src/threedi_ir.cpp
-    src/threedi_ir_from_3di3.cpp
-    src/threedi_gp.cpp
-    src/threedi_ir_from_gp.cpp
     src/threedi_shader_tags.c
+    src/threedi_bhd_shader.c
+    src/threedi_material_class.c
 )
 
 target_include_directories(opennova_threedi

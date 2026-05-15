@@ -333,11 +333,11 @@ static int parse_material_lookup(GpReader *r, ThreediGpMaterialLookup **out, siz
     for (uint32_t i = 0; i < count; ++i) {
         ThreediGpMaterialLookup *ml = &(*out)[i];
         gp_read_string(r, ml->texture_name, sizeof(ml->texture_name), 16);
-        ml->unk_10 = gp_u32(r);
-        ml->unk_14 = gp_u32(r);
-        ml->unk_18 = gp_u32(r);
-        ml->unk_1C = gp_u32(r);
-        ml->unk_20 = gp_u32(r);
+        ml->pad_lookup_10 = gp_u32(r);
+        ml->pad_lookup_14 = gp_u32(r);
+        ml->pad_lookup_18 = gp_u32(r);
+        ml->pad_lookup_1C = gp_u32(r);
+        ml->pad_lookup_20 = gp_u32(r);
         ml->seq_index = gp_u8(r);
         ml->pad_25 = gp_u8(r);
         ml->flags_26 = gp_u8(r);
@@ -346,8 +346,8 @@ static int parse_material_lookup(GpReader *r, ThreediGpMaterialLookup **out, siz
         ml->tex_height = gp_u16(r);
         ml->runtime_2C = gp_u32(r);
         ml->runtime_30 = gp_u32(r);
-        ml->unk_34 = gp_u32(r);
-        ml->unk_38 = gp_u32(r);
+        ml->pad_lookup_34 = gp_u32(r);
+        ml->pad_lookup_38 = gp_u32(r);
     }
     return r->ok ? 0 : -1;
 }
@@ -363,7 +363,7 @@ static int parse_collision(GpReader *r, ThreediGpCollision **out) {
 
     col->is_skinned = gp_u32(r);
     col->data_size = gp_u32(r);
-    gp_u32(r); // unk08
+    col->pad_collision_08 = gp_u32(r);  // +0x08: Always zero on disk; see struct comment
 
     // mid/min/max (9 floats)
     for (int i = 0; i < 3; ++i) col->mid[i] = gp_f32(r);
@@ -384,9 +384,14 @@ static int parse_collision(GpReader *r, ThreediGpCollision **out) {
     GP_ASSERT_ZERO(r, "collision.plane_ptr");
     col->volume_count = gp_i32(r);
 
-    // 9 trailing runtime pointers
+    // 9 trailing runtime-pointer slots in the 136-byte collision header.
+    // Always zero on disk; dfvas::load_gpm_model @ 0x50fb30 populates them
+    // at runtime with offsets into the loaded data buffer (header[13/15/17/19/...]
+    // are set to data_base + various per-sub-array byte offsets).  Round-tripped
+    // via col->raw_header[136] — no IR storage needed.
+    // See notes/gp-corpus-probe-collision-header-phase-3.md.
     for (int _i = 0; _i < 9; ++_i) {
-        GP_ASSERT_ZERO(r, "collision.trailing_ptr");
+        GP_ASSERT_ZERO(r, "collision.runtime_ptr_slot");
     }
 
     if (!r->ok) {
@@ -452,7 +457,7 @@ static int parse_collision(GpReader *r, ThreediGpCollision **out) {
             f->surface_flags = gp_i32(&br);
             f->surface_type = gp_u8(&br);
             f->pad = gp_u8(&br);
-            f->reserved = gp_i16(&br);
+            f->pad_face_2A = gp_i16(&br);
         }
     }
 
@@ -477,7 +482,9 @@ static int parse_collision(GpReader *r, ThreediGpCollision **out) {
                         i, obj->vertex_ptr, obj->face_ptr, obj->normal_ptr, obj->volume_ptr);
             }
             obj->parent_subobject = gp_i32(&br);
-            for (int j = 0; j < 3; ++j) obj->reserved[j] = gp_i32(&br);
+            obj->pad_object_28 = gp_i32(&br);
+            obj->pad_object_2C = gp_i32(&br);
+            obj->pad_object_30 = gp_i32(&br);
             for (int j = 0; j < 3; ++j) obj->translation[j] = gp_i32(&br);
             obj->bbox_min_x = gp_i32(&br);
             obj->bbox_max_x = gp_i32(&br);
@@ -489,7 +496,10 @@ static int parse_collision(GpReader *r, ThreediGpCollision **out) {
             obj->bounding_sphere_radius = gp_i32(&br);
             obj->bounding_cylinder_radius = gp_i32(&br);
             obj->bbox_height = gp_i32(&br);
-            for (int j = 0; j < 4; ++j) obj->reserved2[j] = gp_i32(&br);
+            obj->pad_object_70 = gp_i32(&br);
+            obj->pad_object_74 = gp_i32(&br);
+            obj->pad_object_78 = gp_i32(&br);
+            obj->pad_object_7C = gp_i32(&br);
         }
     }
 
@@ -531,7 +541,7 @@ static int parse_collision(GpReader *r, ThreediGpCollision **out) {
             vol->min_z = gp_i32(&br);
             vol->max_z = gp_i32(&br);
             for (int j = 0; j < 3; ++j) vol->extent[j] = gp_i32(&br);
-            vol->reserved1 = gp_i32(&br);
+            vol->pad_volume_2C = gp_i32(&br);
             vol->bbox_min_x = gp_i32(&br);
             vol->bbox_max_x = gp_i32(&br);
             vol->bbox_min_y = gp_i32(&br);
@@ -545,7 +555,10 @@ static int parse_collision(GpReader *r, ThreediGpCollision **out) {
                         vol->plane_ptr, br.pos - 4);
                 free(col); return -1;
             }
-            for (int j = 0; j < 4; ++j) vol->reserved2[j] = gp_i32(&br);
+            vol->pad_volume_50 = gp_i32(&br);
+            vol->pad_volume_54 = gp_i32(&br);
+            vol->pad_volume_58 = gp_i32(&br);
+            vol->pad_volume_5C = gp_i32(&br);
         }
     }
 
@@ -588,11 +601,11 @@ static int parse_rverts(GpReader *r, ThreediGpMeshType mesh_type, int count,
             rv->packed_color = gp_u32(r);
             rv->has_normal = 1;
         } else if (mesh_type == THREEDI_GP_MESH_STATIC) {
-            // GPS: normal(3f) + extra(1f) + packed_color
+            // GPS: normal(3f) + normal_w(1f) + packed_color — 4-component normal vector
             rv->normal[0] = gp_f32(r);
             rv->normal[1] = gp_f32(r);
             rv->normal[2] = gp_f32(r);
-            gp_f32(r); // extra float (tangent sign / padding)
+            rv->normal_w = gp_f32(r); // 4th component of GPS 4-float normal vector
             rv->packed_color = gp_u32(r);
             rv->has_normal = 1;
         } else {
@@ -636,19 +649,23 @@ static int parse_rmodel(GpReader *r, ThreediGpMeshType mesh_type, ThreediGpRMode
     uint32_t strip_triplet_count = gp_u32(r);
     GP_ASSERT_ZERO(r, "rmodel.strip_triplet_ptr");
 
-    // Section 0x20-0x4C (12 u32s): 3 have data in 15/1092 files, rest always zero
-    out->unk_20 = gp_u32(r);   // 0x20: Q16.16 on skinned/flag models
-    gp_u32(r);                  // 0x24: zero
-    out->unk_28 = gp_u32(r);   // 0x28: small int (3) on some models
-    gp_u32(r);                  // 0x2C: zero
-    gp_u32(r);                  // 0x30: zero
-    gp_u32(r);                  // 0x34: zero
-    out->unk_38 = gp_u32(r);   // 0x38: Q16.16 on flag models
-    gp_u32(r);                  // 0x3C: zero
-    gp_u32(r);                  // 0x40: zero
-    gp_u32(r);                  // 0x44: zero
-    out->unk_48 = gp_u32(r);   // 0x48: zero in corpus
-    out->unk_4C = gp_u32(r);   // 0x4C: zero in corpus
+    // Section 0x20-0x4C (12 u32s, Phase 1 + Phase 4 Task 1 named).
+    // dfvas::load_rmodel_resource @ 0x510650 does NOT read these fields —
+    // LOD-selection / rendering path consumes them separately.
+    // Corpus evidence: 639 BHD GPM files (AS_ASSETS), 1598 rmodels.
+    // See notes/gp-corpus-probe-rmodel-discards-phase-4.md.
+    out->lod_dist_threshold_q16  = gp_u32(r); // 0x20
+    out->pad_lod_24              = gp_u32(r); // 0x24: zero in 1598/1598 rmodels
+    out->lod_anim_lod_count      = gp_u32(r); // 0x28
+    out->pad_lod_2C              = gp_u32(r); // 0x2C: zero in 1598/1598 rmodels
+    out->pad_lod_30              = gp_u32(r); // 0x30: zero in 1598/1598 rmodels
+    out->pad_lod_34              = gp_u32(r); // 0x34: zero in 1598/1598 rmodels
+    out->lod_secondary_dist_q16  = gp_u32(r); // 0x38
+    out->pad_lod_3C              = gp_u32(r); // 0x3C: zero in 1598/1598 rmodels
+    out->pad_lod_40              = gp_u32(r); // 0x40: zero in 1598/1598 rmodels
+    out->pad_lod_44              = gp_u32(r); // 0x44: zero in 1598/1598 rmodels
+    out->pad_lod_48              = gp_u32(r); // 0x48: zero in 1598/1598 rmodels
+    out->pad_lod_4C              = gp_u32(r); // 0x4C: zero in 1598/1598 rmodels
 
     out->flags = gp_u32(r); // flags at 0x50
     GP_ASSERT_ZERO(r, "rmodel.zero54");
@@ -658,8 +675,16 @@ static int parse_rmodel(GpReader *r, ThreediGpMeshType mesh_type, ThreediGpRMode
     GP_ASSERT_ZERO(r, "rmodel.zero64");
     out->extra_xform_count = gp_u32(r);
 
-    // 0x6C-0x84: always zero in corpus (7 u32s)
-    for (int i = 0; i < 7; ++i) gp_u32(r);
+    // 0x6C-0x84: 7 dwords always zero in 1598/1598 rmodels (639 corpus files).
+    // Promoted to named pad fields (Phase 4 Task 1).
+    // See notes/gp-corpus-probe-rmodel-discards-phase-4.md.
+    out->pad_lod_6C = gp_u32(r);
+    out->pad_lod_70 = gp_u32(r);
+    out->pad_lod_74 = gp_u32(r);
+    out->pad_lod_78 = gp_u32(r);
+    out->pad_lod_7C = gp_u32(r);
+    out->pad_lod_80 = gp_u32(r);
+    out->pad_lod_84 = gp_u32(r);
 
     if (!r->ok) return -1;
     if (gp_remaining(r) < data_size) return -1;
@@ -697,14 +722,14 @@ static int parse_rmodel(GpReader *r, ThreediGpMeshType mesh_type, ThreediGpRMode
 
         for (uint32_t i = 0; i < subobject_count; ++i) {
             ThreediGpSubObject *sub = &out->subobjects[i];
-            sub->unk_00 = gp_u32(&rbr);
-            if (sub->unk_00 != 0) {
-                fprintf(stderr, "[threedi_gp] expected zero for subobject.unk_00, got 0x%08X at pos=%zu\n",
-                        sub->unk_00, rbr.pos - 4);
+            sub->pad_runtime_submesh_ptr = gp_u32(&rbr);
+            if (sub->pad_runtime_submesh_ptr != 0) {
+                fprintf(stderr, "[threedi_gp] expected zero for subobject.pad_runtime_submesh_ptr, got 0x%08X at pos=%zu\n",
+                        sub->pad_runtime_submesh_ptr, rbr.pos - 4);
                 return -1;
             }
             sub->batch_count = gp_i32(&rbr);
-            sub->unk_08 = gp_u32(&rbr);
+            sub->pad_subobject_08 = gp_u32(&rbr);
             sub->parent = gp_i32(&rbr);
             sub->rel[0] = gp_f32(&rbr);
             sub->rel[1] = gp_f32(&rbr);
@@ -751,17 +776,27 @@ static int parse_rmodel(GpReader *r, ThreediGpMeshType mesh_type, ThreediGpRMode
                     batches[idx].opaque_count = gp_u32(&rbr);
                     GP_ASSERT_ZERO(&rbr, "local_batch.transparent_ptr");
                     batches[idx].transparent_count = gp_u32(&rbr);
-                    gp_u32(&rbr); // reserved10
-                    gp_u32(&rbr); // reserved14
-                    gp_u32(&rbr); // reserved18
-                    gp_u32(&rbr); // reserved1C
+                    gp_u32(&rbr); // pad_batch_10
+                    gp_u32(&rbr); // pad_batch_14
+                    gp_u32(&rbr); // pad_batch_18
+                    gp_u32(&rbr); // pad_batch_1C
                 }
             }
         }
     } else {
         GP_ASSERT_ZERO(&rbr, "global_batch.shared_ptr");
         uint32_t total_batch = gp_u32(&rbr);
-        gp_skip(&rbr, 20);
+        // 20-byte RModel-level metadata block in the global_batch (flags & 1)
+        // path.  Sits once per RModel immediately after total_batch.
+        // dfvas::load_rmodel_resource @ 0x510650 reads these bytes from disk.
+        // All 5 dwords are always zero across the full corpus (see
+        // notes/gp-corpus-probe-global-batch-metadata-phase-4.md).
+        // Phase 4 Task 3: promoted from gp_skip to named pad fields.
+        out->pad_global_batch_00 = gp_u32(&rbr);
+        out->pad_global_batch_04 = gp_u32(&rbr);
+        out->pad_global_batch_08 = gp_u32(&rbr);
+        out->pad_global_batch_0C = gp_u32(&rbr);
+        out->pad_global_batch_10 = gp_u32(&rbr);
         batch_count = total_batch;
         if (batch_count > 0) {
             batches = (BatchEntry *)calloc(batch_count, sizeof(BatchEntry));
@@ -771,10 +806,10 @@ static int parse_rmodel(GpReader *r, ThreediGpMeshType mesh_type, ThreediGpRMode
                 batches[i].opaque_count = gp_u32(&rbr);
                 GP_ASSERT_ZERO(&rbr, "global_batch.transparent_ptr");
                 batches[i].transparent_count = gp_u32(&rbr);
-                gp_u32(&rbr); // reserved10
-                gp_u32(&rbr); // reserved14
-                gp_u32(&rbr); // reserved18
-                gp_u32(&rbr); // reserved1C
+                gp_u32(&rbr); // pad_batch_10
+                gp_u32(&rbr); // pad_batch_14
+                gp_u32(&rbr); // pad_batch_18
+                gp_u32(&rbr); // pad_batch_1C
             }
         }
     }
@@ -852,11 +887,20 @@ static int parse_rmodel(GpReader *r, ThreediGpMeshType mesh_type, ThreediGpRMode
                     poly->first_vertex = gp_i32(&rbr);
                     poly->max_vertex_index = gp_i32(&rbr);
 
-                    // Global batch: 16 bytes bone_table + 7 padding + 1 length byte
+                    // Bone-info sub-record: 16 bytes bone_table + 7 alignment
+                    // bytes + 1 byte bone_table_length = 24 bytes total.
+                    // dfvas::load_rmodel_resource @ 0x510aa6 allocates global-batch
+                    // polys at stride 88 + 2*index_count*sizeof(u16); the 24 bytes
+                    // here are the bone-info sub-record within that 88-byte prefix.
+                    // Corpus probe: 788/788 global_batch polys across 639 files show
+                    // all 7 pad bytes as zero.  See
+                    // notes/gp-corpus-probe-bone-info-gap-phase-4.md.
                     for (int i = 0; i < 16; ++i) {
                         poly->bone_table[i] = gp_u8(&rbr);
                     }
-                    gp_skip(&rbr, 7);
+                    for (int i = 0; i < 7; ++i) {
+                        poly->pad_bone_info_align[i] = gp_u8(&rbr);
+                    }
                     poly->bone_table_length = (int32_t)gp_u8(&rbr);
 
                     if (indices_tag != 0x72646441 || triangle_count != 0 ||
@@ -903,8 +947,8 @@ static int parse_rmodel(GpReader *r, ThreediGpMeshType mesh_type, ThreediGpRMode
             mat->specular_sharpness = gp_u32(&rbr);
             mat->shader_flags = gp_u32(&rbr);
             mat->tex_addressing_mode = gp_u32(&rbr);
-            mat->reserved_40 = gp_u32(&rbr);
-            mat->reserved_44 = gp_u32(&rbr);
+            mat->pad_disk_uvoffset_u = gp_u32(&rbr);
+            mat->pad_disk_uvoffset_v = gp_u32(&rbr);
             mat->u_tiling = gp_f32(&rbr);
             mat->v_tiling = gp_f32(&rbr);
             // mapfunc_u (8 bytes)
@@ -932,10 +976,10 @@ static int parse_rmodel(GpReader *r, ThreediGpMeshType mesh_type, ThreediGpRMode
             mat->alphagen.rate = gp_i16(&rbr);
             mat->alphagen.start = gp_i16(&rbr);
             mat->alphagen.end = gp_i16(&rbr);
-            // tail (36 bytes): runtime_ptr, reflect, actionplane, projector
+            // tail (36 bytes): pad_runtime_ptr, reflect, actionplane, projector
             const uint8_t *tail_data = gp_span(&rbr, 36);
             if (tail_data) {
-                memcpy(&mat->runtime_ptr, tail_data, 4);
+                memcpy(&mat->pad_runtime_ptr, tail_data, 4);
                 memcpy(&mat->reflect_r, tail_data + 4, 4);
                 memcpy(&mat->reflect_g, tail_data + 8, 4);
                 memcpy(&mat->reflect_b, tail_data + 12, 4);
@@ -1003,7 +1047,10 @@ static int parse_rmodel(GpReader *r, ThreediGpMeshType mesh_type, ThreediGpRMode
             ep->vp1.topology = gp_i32(&rbr);
             ep->vp1.first_vertex = gp_i32(&rbr);
             ep->vp1.vertex_count = gp_i32(&rbr);
-            for (int j = 0; j < 4; ++j) ep->vp1_reserved[j] = gp_u32(&rbr);
+            ep->vp1_pad_18 = gp_u32(&rbr);
+            ep->vp1_pad_1C = gp_u32(&rbr);
+            ep->vp1_pad_20 = gp_u32(&rbr);
+            ep->vp1_pad_24 = gp_u32(&rbr);
 
             // VariablePoly2 (48 bytes): header(24) + bbox(24)
             ep->vp2.material_index = gp_i32(&rbr);
@@ -1090,20 +1137,20 @@ static int parse_light_info(GpReader *r, ThreediGpFile *gp) {
     uint32_t light_count = gp_u32(r);
     if (!r->ok) return -1;
 
-    /* Read inner header tail: runtime pointer + 4 reserved u32s (all zero on disk) */
+    /* Read inner header tail: runtime pointer + 4 pad dwords (all zero on disk) */
     gp->light_entries_ptr = gp_u32(r);
-    gp->light_reserved_2C = gp_u32(r);
-    gp->light_reserved_30 = gp_u32(r);
-    gp->light_reserved_34 = gp_u32(r);
-    gp->light_reserved_38 = gp_u32(r);
+    gp->pad_light_2C = gp_u32(r);
+    gp->pad_light_30 = gp_u32(r);
+    gp->pad_light_34 = gp_u32(r);
+    gp->pad_light_38 = gp_u32(r);
     if (!r->ok) return -1;
 
     /* Assert these are always zero on disk (from IDA analysis) */
     assert(gp->light_entries_ptr == 0 && "light_entries_ptr should be zero on disk");
-    assert(gp->light_reserved_2C == 0 && "light_reserved_2C should be zero");
-    assert(gp->light_reserved_30 == 0 && "light_reserved_30 should be zero");
-    assert(gp->light_reserved_34 == 0 && "light_reserved_34 should be zero");
-    assert(gp->light_reserved_38 == 0 && "light_reserved_38 should be zero");
+    assert(gp->pad_light_2C == 0 && "pad_light_2C should be zero on disk");
+    assert(gp->pad_light_30 == 0 && "pad_light_30 should be zero on disk");
+    assert(gp->pad_light_34 == 0 && "pad_light_34 should be zero on disk");
+    assert(gp->pad_light_38 == 0 && "pad_light_38 should be zero on disk");
 
     /* Validate: payload should be 60 + 48 * light_count */
     size_t expected = 60 + (size_t)light_count * 48;
@@ -1159,10 +1206,10 @@ static int parse_light_info(GpReader *r, ThreediGpFile *gp) {
         /* Bytes 32-35: part_index */
         l->part_index = gp_i32(r);
 
-        /* Bytes 36-47: unknown fields */
-        l->unk_36 = gp_u32(r);
-        l->unk_40 = gp_u32(r);
-        l->unk_44 = gp_u32(r);
+        /* Bytes 36-47: padding (always zero; loader @ 0x50c08b does not read) */
+        l->pad_light_entry_24 = gp_u32(r);
+        l->pad_light_entry_28 = gp_u32(r);
+        l->pad_light_entry_2C = gp_u32(r);
     }
 
     if (!r->ok) {
@@ -1170,8 +1217,22 @@ static int parse_light_info(GpReader *r, ThreediGpFile *gp) {
         return -1;
     }
 
-    /* Skip any remaining payload bytes */
+    /* Per Phase 2 Task 5 corpus probe (notes/gp-corpus-probe-light-payload-tail-phase-2.md),
+     * payload_size == 60 + 48*light_count in all 33/33 AS_ASSETS fixtures that carry
+     * a light section.  The skip below is unreachable in valid input but kept as a
+     * safety net against corrupt or truncated files.  Surface a warning if the
+     * invariant is violated so future fixtures with trailing bytes are not silently
+     * dropped. */
     size_t consumed = r->pos - inner_start;
+    size_t expected_consumed = 60 + (size_t)light_count * 48;
+    if (consumed != expected_consumed || consumed != payload_size) {
+        fprintf(stderr,
+                "[threedi_gp] light payload size mismatch: payload_size=%u "
+                "consumed=%zu expected=%zu light_count=%u. "
+                "Phase 2 corpus probe expected exact match — "
+                "see notes/gp-corpus-probe-light-payload-tail-phase-2.md.\n",
+                payload_size, consumed, expected_consumed, light_count);
+    }
     if (consumed < payload_size) gp_skip(r, payload_size - consumed);
 
     gp->lights = lights;
@@ -1190,8 +1251,8 @@ static int parse_vstream(GpReader *r, int rverts_count, ThreediGpVStream **out) 
         free(vs); return -1;
     }
     vs->data_size = gp_u32(r);
-    vs->unk_08 = gp_u32(r);
-    vs->unk_0C = gp_u32(r);
+    vs->pad_vstream_08 = gp_u32(r);
+    vs->pad_vstream_0C = gp_u32(r);
     if (!r->ok) { free(vs); return -1; }
 
     uint32_t actual_size = (vs->data_size == 0) ? (uint32_t)(rverts_count * 24) : vs->data_size;
@@ -1261,10 +1322,11 @@ static int parse_occlusion(GpReader *r, int count, ThreediGpOcclusion **out) {
         obj->num_faces = (int32_t)gp_u32(r);
         obj->face_ptr = gp_u32(r);
 
-        // 0x2C-0x3B: reserved (16 bytes = 4 int32s)
-        for (int j = 0; j < 4; ++j) {
-            obj->reserved[j] = gp_i32(r);
-        }
+        // 0x2C-0x3B: always-zero pad (see struct comment)
+        obj->pad_occ_obj_2C = gp_i32(r);
+        obj->pad_occ_obj_30 = gp_i32(r);
+        obj->pad_occ_obj_34 = gp_i32(r);
+        obj->pad_occ_obj_38 = gp_i32(r);
 
         total_verts += (size_t)obj->num_vertices;
         total_planes += (size_t)obj->num_planes;
@@ -1582,11 +1644,11 @@ static int write_material_lookup(GpWriter *w, const ThreediGpFile *gp) {
     for (size_t i = 0; i < gp->material_lookup_count; ++i) {
         const ThreediGpMaterialLookup *ml = &gp->material_lookups[i];
         if (gp_write_padded(w, ml->texture_name, 16) != 0) return -1;
-        if (gp_write_u32(w, ml->unk_10) != 0) return -1;
-        if (gp_write_u32(w, ml->unk_14) != 0) return -1;
-        if (gp_write_u32(w, ml->unk_18) != 0) return -1;
-        if (gp_write_u32(w, ml->unk_1C) != 0) return -1;
-        if (gp_write_u32(w, ml->unk_20) != 0) return -1;
+        if (gp_write_u32(w, ml->pad_lookup_10) != 0) return -1;
+        if (gp_write_u32(w, ml->pad_lookup_14) != 0) return -1;
+        if (gp_write_u32(w, ml->pad_lookup_18) != 0) return -1;
+        if (gp_write_u32(w, ml->pad_lookup_1C) != 0) return -1;
+        if (gp_write_u32(w, ml->pad_lookup_20) != 0) return -1;
         if (gp_write_u8(w, ml->seq_index) != 0) return -1;
         if (gp_write_u8(w, ml->pad_25) != 0) return -1;
         if (gp_write_u8(w, ml->flags_26) != 0) return -1;
@@ -1595,8 +1657,8 @@ static int write_material_lookup(GpWriter *w, const ThreediGpFile *gp) {
         if (gp_write_u16(w, ml->tex_height) != 0) return -1;
         if (gp_write_u32(w, ml->runtime_2C) != 0) return -1;
         if (gp_write_u32(w, ml->runtime_30) != 0) return -1;
-        if (gp_write_u32(w, ml->unk_34) != 0) return -1;
-        if (gp_write_u32(w, ml->unk_38) != 0) return -1;
+        if (gp_write_u32(w, ml->pad_lookup_34) != 0) return -1;
+        if (gp_write_u32(w, ml->pad_lookup_38) != 0) return -1;
     }
     return 0;
 }
@@ -1651,7 +1713,7 @@ static int write_collision(GpWriter *w, const ThreediGpFile *gp) {
         if (gp_write_i32(w, f->surface_flags) != 0) return -1;
         if (gp_write_u8(w, f->surface_type) != 0) return -1;
         if (gp_write_u8(w, f->pad) != 0) return -1;
-        if (gp_write_i16(w, f->reserved) != 0) return -1;
+        if (gp_write_i16(w, f->pad_face_2A) != 0) return -1;
     }
 
     // Objects (128 bytes each)
@@ -1667,9 +1729,9 @@ static int write_collision(GpWriter *w, const ThreediGpFile *gp) {
         if (gp_write_i32(w, obj->volume_count) != 0) return -1;
         if (gp_write_u32(w, obj->volume_ptr) != 0) return -1;
         if (gp_write_i32(w, obj->parent_subobject) != 0) return -1;
-        for (int j = 0; j < 3; ++j) {
-            if (gp_write_i32(w, obj->reserved[j]) != 0) return -1;
-        }
+        if (gp_write_i32(w, obj->pad_object_28) != 0) return -1;
+        if (gp_write_i32(w, obj->pad_object_2C) != 0) return -1;
+        if (gp_write_i32(w, obj->pad_object_30) != 0) return -1;
         for (int j = 0; j < 3; ++j) {
             if (gp_write_i32(w, obj->translation[j]) != 0) return -1;
         }
@@ -1685,9 +1747,10 @@ static int write_collision(GpWriter *w, const ThreediGpFile *gp) {
         if (gp_write_i32(w, obj->bounding_sphere_radius) != 0) return -1;
         if (gp_write_i32(w, obj->bounding_cylinder_radius) != 0) return -1;
         if (gp_write_i32(w, obj->bbox_height) != 0) return -1;
-        for (int j = 0; j < 4; ++j) {
-            if (gp_write_i32(w, obj->reserved2[j]) != 0) return -1;
-        }
+        if (gp_write_i32(w, obj->pad_object_70) != 0) return -1;
+        if (gp_write_i32(w, obj->pad_object_74) != 0) return -1;
+        if (gp_write_i32(w, obj->pad_object_78) != 0) return -1;
+        if (gp_write_i32(w, obj->pad_object_7C) != 0) return -1;
     }
 
     // Translations (12 bytes each)
@@ -1719,7 +1782,7 @@ static int write_collision(GpWriter *w, const ThreediGpFile *gp) {
         for (int j = 0; j < 3; ++j) {
             if (gp_write_i32(w, vol->extent[j]) != 0) return -1;
         }
-        if (gp_write_i32(w, vol->reserved1) != 0) return -1;
+        if (gp_write_i32(w, vol->pad_volume_2C) != 0) return -1;
         if (gp_write_i32(w, vol->bbox_min_x) != 0) return -1;
         if (gp_write_i32(w, vol->bbox_max_x) != 0) return -1;
         if (gp_write_i32(w, vol->bbox_min_y) != 0) return -1;
@@ -1728,9 +1791,10 @@ static int write_collision(GpWriter *w, const ThreediGpFile *gp) {
         if (gp_write_i32(w, vol->bbox_max_z) != 0) return -1;
         if (gp_write_i32(w, vol->plane_count) != 0) return -1;
         if (gp_write_u32(w, vol->plane_ptr) != 0) return -1;
-        for (int j = 0; j < 4; ++j) {
-            if (gp_write_i32(w, vol->reserved2[j]) != 0) return -1;
-        }
+        if (gp_write_i32(w, vol->pad_volume_50) != 0) return -1;
+        if (gp_write_i32(w, vol->pad_volume_54) != 0) return -1;
+        if (gp_write_i32(w, vol->pad_volume_58) != 0) return -1;
+        if (gp_write_i32(w, vol->pad_volume_5C) != 0) return -1;
     }
 
     return 0;
@@ -1754,11 +1818,11 @@ static int write_rverts(GpWriter *w, const ThreediGpFile *gp) {
             if (gp_write_f32(w, rv->normal[2]) != 0) return -1;
             if (gp_write_u32(w, rv->packed_color) != 0) return -1;
         } else if (mesh_type == THREEDI_GP_MESH_STATIC) {
-            // GPS: normal(3f) + extra(1f) + packed_color
+            // GPS: normal(3f) + normal_w(1f) + packed_color — 4-component normal vector
             if (gp_write_f32(w, rv->normal[0]) != 0) return -1;
             if (gp_write_f32(w, rv->normal[1]) != 0) return -1;
             if (gp_write_f32(w, rv->normal[2]) != 0) return -1;
-            if (gp_write_f32(w, 0.0f) != 0) return -1; // Extra float (tangent sign / padding)
+            if (gp_write_f32(w, rv->normal_w) != 0) return -1; // 4th component of GPS 4-float normal
             if (gp_write_u32(w, rv->packed_color) != 0) return -1;
         } else {
             // GPP: weights(3f) + indices(4u8) + normal(3f) + packed_color
@@ -1818,9 +1882,9 @@ static int write_rmodel_blob(GpWriter *w, const ThreediGpRModel *rm, int local_b
     // Subobjects (72 bytes each)
     for (size_t i = 0; i < rm->subobject_count; ++i) {
         const ThreediGpSubObject *sub = &rm->subobjects[i];
-        if (gp_write_u32(w, sub->unk_00) != 0) return -1;
+        if (gp_write_u32(w, sub->pad_runtime_submesh_ptr) != 0) return -1;
         if (gp_write_i32(w, sub->batch_count) != 0) return -1;
-        if (gp_write_u32(w, sub->unk_08) != 0) return -1;
+        if (gp_write_u32(w, sub->pad_subobject_08) != 0) return -1;
         if (gp_write_i32(w, sub->parent) != 0) return -1;
         for (int j = 0; j < 3; ++j) {
             if (gp_write_f32(w, sub->rel[j]) != 0) return -1;
@@ -1862,10 +1926,10 @@ static int write_rmodel_blob(GpWriter *w, const ThreediGpRModel *rm, int local_b
                 if (gp_write_u32(w, opaque_count) != 0) return -1;
                 if (gp_write_u32(w, 0) != 0) return -1; // transparent_ptr (runtime)
                 if (gp_write_u32(w, transparent_count) != 0) return -1;
-                if (gp_write_u32(w, 0) != 0) return -1; // reserved
-                if (gp_write_u32(w, 0) != 0) return -1;
-                if (gp_write_u32(w, 0) != 0) return -1;
-                if (gp_write_u32(w, 0) != 0) return -1;
+                if (gp_write_u32(w, 0) != 0) return -1; // pad_batch_10
+                if (gp_write_u32(w, 0) != 0) return -1; // pad_batch_14
+                if (gp_write_u32(w, 0) != 0) return -1; // pad_batch_18
+                if (gp_write_u32(w, 0) != 0) return -1; // pad_batch_1C
 
                 // Write polys for this batch
                 for (size_t pi = start_poly; pi < poly_idx; ++pi) {
@@ -1888,23 +1952,28 @@ static int write_rmodel_blob(GpWriter *w, const ThreediGpRModel *rm, int local_b
         }
     } else {
         // Global batch mode
-        // First write shared batch header (28 bytes)
-        if (gp_write_u32(w, 0) != 0) return -1; // shared_ptr
+        // First write shared batch header (28 bytes: 4 shared_ptr + 4 total_batch + 20 pad)
+        if (gp_write_u32(w, 0) != 0) return -1; // shared_ptr (runtime, always zero on disk)
         uint32_t total_batch = 1; // Simplified: one batch
         if (gp_write_u32(w, total_batch) != 0) return -1;
-        for (int i = 0; i < 5; ++i) {
-            if (gp_write_u32(w, 0) != 0) return -1;
-        }
+        // 20-byte RModel-level metadata block (pad_global_batch_00..10).
+        // Corpus-validated all-zero; stored in IR for roundtrip fidelity.
+        // Phase 4 Task 3.
+        if (gp_write_u32(w, rm->pad_global_batch_00) != 0) return -1;
+        if (gp_write_u32(w, rm->pad_global_batch_04) != 0) return -1;
+        if (gp_write_u32(w, rm->pad_global_batch_08) != 0) return -1;
+        if (gp_write_u32(w, rm->pad_global_batch_0C) != 0) return -1;
+        if (gp_write_u32(w, rm->pad_global_batch_10) != 0) return -1;
 
         // Write single batch with all polys
         if (gp_write_u32(w, 0) != 0) return -1; // opaque_ptr
         if (gp_write_u32(w, (uint32_t)rm->poly_count) != 0) return -1;
         if (gp_write_u32(w, 0) != 0) return -1; // transparent_ptr
         if (gp_write_u32(w, 0) != 0) return -1; // transparent_count
-        if (gp_write_u32(w, 0) != 0) return -1;
-        if (gp_write_u32(w, 0) != 0) return -1;
-        if (gp_write_u32(w, 0) != 0) return -1;
-        if (gp_write_u32(w, 0) != 0) return -1;
+        if (gp_write_u32(w, 0) != 0) return -1; // pad_batch_10
+        if (gp_write_u32(w, 0) != 0) return -1; // pad_batch_14
+        if (gp_write_u32(w, 0) != 0) return -1; // pad_batch_18
+        if (gp_write_u32(w, 0) != 0) return -1; // pad_batch_1C
 
         // Write all polys
         for (size_t pi = 0; pi < rm->poly_count; ++pi) {
@@ -1916,11 +1985,11 @@ static int write_rmodel_blob(GpWriter *w, const ThreediGpRModel *rm, int local_b
             if (gp_write_i32(w, p->topology) != 0) return -1;
             if (gp_write_i32(w, p->first_vertex) != 0) return -1;
             if (gp_write_i32(w, p->max_vertex_index) != 0) return -1;
-            // Bone table (16 bytes) + padding (7) + length (1) = 24 bytes
+            // Bone table (16 bytes) + alignment (7) + length (1) = 24 bytes.
+            // pad_bone_info_align[7]: always zero in 788/788 corpus polys;
+            // write from IR so round-trip preserves any future non-zero fixture.
             if (gp_write_bytes(w, p->bone_table, 16) != 0) return -1;
-            for (int i = 0; i < 7; ++i) {
-                if (gp_write_u8(w, 0) != 0) return -1;
-            }
+            if (gp_write_bytes(w, p->pad_bone_info_align, 7) != 0) return -1;
             if (gp_write_u8(w, (uint8_t)p->bone_table_length) != 0) return -1;
             // Indices
             for (size_t ii = 0; ii < p->index_count; ++ii) {
@@ -1945,8 +2014,8 @@ static int write_rmodel_blob(GpWriter *w, const ThreediGpRModel *rm, int local_b
         if (gp_write_u32(w, mat->specular_sharpness) != 0) return -1;
         if (gp_write_u32(w, mat->shader_flags) != 0) return -1;
         if (gp_write_u32(w, mat->tex_addressing_mode) != 0) return -1;
-        if (gp_write_u32(w, mat->reserved_40) != 0) return -1;
-        if (gp_write_u32(w, mat->reserved_44) != 0) return -1;
+        if (gp_write_u32(w, mat->pad_disk_uvoffset_u) != 0) return -1;
+        if (gp_write_u32(w, mat->pad_disk_uvoffset_v) != 0) return -1;
         if (gp_write_f32(w, mat->u_tiling) != 0) return -1;
         if (gp_write_f32(w, mat->v_tiling) != 0) return -1;
         if (write_material_transform(w, &mat->mapfunc_u) != 0) return -1;
@@ -1955,7 +2024,7 @@ static int write_rmodel_blob(GpWriter *w, const ThreediGpRModel *rm, int local_b
         if (gp_write_u32(w, mat->emissive_color) != 0) return -1;
         if (write_material_transform(w, &mat->alphagen) != 0) return -1;
         // Tail (36 bytes)
-        if (gp_write_u32(w, mat->runtime_ptr) != 0) return -1;
+        if (gp_write_u32(w, mat->pad_runtime_ptr) != 0) return -1;
         if (gp_write_f32(w, mat->reflect_r) != 0) return -1;
         if (gp_write_f32(w, mat->reflect_g) != 0) return -1;
         if (gp_write_f32(w, mat->reflect_b) != 0) return -1;
@@ -2005,9 +2074,10 @@ static int write_rmodel_blob(GpWriter *w, const ThreediGpRModel *rm, int local_b
         if (gp_write_i32(w, ep->vp1.topology) != 0) return -1;
         if (gp_write_i32(w, ep->vp1.first_vertex) != 0) return -1;
         if (gp_write_i32(w, ep->vp1.vertex_count) != 0) return -1;
-        for (int j = 0; j < 4; ++j) {
-            if (gp_write_u32(w, ep->vp1_reserved[j]) != 0) return -1;
-        }
+        if (gp_write_u32(w, ep->vp1_pad_18) != 0) return -1;
+        if (gp_write_u32(w, ep->vp1_pad_1C) != 0) return -1;
+        if (gp_write_u32(w, ep->vp1_pad_20) != 0) return -1;
+        if (gp_write_u32(w, ep->vp1_pad_24) != 0) return -1;
         // VariablePoly2 (48 bytes)
         if (gp_write_i32(w, ep->vp2.material_index) != 0) return -1;
         if (gp_write_u32(w, ep->vp2.indices_tag) != 0) return -1;
@@ -2123,10 +2193,10 @@ static int write_light_info(GpWriter *w, const ThreediGpFile *gp) {
     // Light count + inner header tail (4 + 5*4 = 24 bytes)
     if (gp_write_u32(w, (uint32_t)gp->light_count) != 0) return -1;
     if (gp_write_u32(w, gp->light_entries_ptr) != 0) return -1;
-    if (gp_write_u32(w, gp->light_reserved_2C) != 0) return -1;
-    if (gp_write_u32(w, gp->light_reserved_30) != 0) return -1;
-    if (gp_write_u32(w, gp->light_reserved_34) != 0) return -1;
-    if (gp_write_u32(w, gp->light_reserved_38) != 0) return -1;
+    if (gp_write_u32(w, gp->pad_light_2C) != 0) return -1;
+    if (gp_write_u32(w, gp->pad_light_30) != 0) return -1;
+    if (gp_write_u32(w, gp->pad_light_34) != 0) return -1;
+    if (gp_write_u32(w, gp->pad_light_38) != 0) return -1;
 
     // Lights (48 bytes each)
     for (size_t i = 0; i < gp->light_count; ++i) {
@@ -2153,10 +2223,10 @@ static int write_light_info(GpWriter *w, const ThreediGpFile *gp) {
         if (gp_write_f32(w, l->attenuation_end) != 0) return -1;
         // part_index
         if (gp_write_i32(w, l->part_index) != 0) return -1;
-        // tail (12 bytes)
-        if (gp_write_u32(w, l->unk_36) != 0) return -1;
-        if (gp_write_u32(w, l->unk_40) != 0) return -1;
-        if (gp_write_u32(w, l->unk_44) != 0) return -1;
+        // tail pad (12 bytes, always zero)
+        if (gp_write_u32(w, l->pad_light_entry_24) != 0) return -1;
+        if (gp_write_u32(w, l->pad_light_entry_28) != 0) return -1;
+        if (gp_write_u32(w, l->pad_light_entry_2C) != 0) return -1;
     }
 
     return 0;
@@ -2169,8 +2239,8 @@ static int write_vstream(GpWriter *w, const ThreediGpFile *gp) {
 
     if (gp_write_u32(w, vs->buffer_ptr) != 0) return -1;
     if (gp_write_u32(w, vs->data_size) != 0) return -1;
-    if (gp_write_u32(w, vs->unk_08) != 0) return -1;
-    if (gp_write_u32(w, vs->unk_0C) != 0) return -1;
+    if (gp_write_u32(w, vs->pad_vstream_08) != 0) return -1;
+    if (gp_write_u32(w, vs->pad_vstream_0C) != 0) return -1;
     if (gp_write_bytes(w, vs->data, vs->data_len) != 0) return -1;
 
     return 0;
@@ -2199,9 +2269,10 @@ static int write_occlusion(GpWriter *w, const ThreediGpFile *gp) {
         if (gp_write_u32(w, obj->plane_ptr) != 0) return -1;
         if (gp_write_i32(w, obj->num_faces) != 0) return -1;
         if (gp_write_u32(w, obj->face_ptr) != 0) return -1;
-        for (int j = 0; j < 4; ++j) {
-            if (gp_write_i32(w, obj->reserved[j]) != 0) return -1;
-        }
+        if (gp_write_i32(w, obj->pad_occ_obj_2C) != 0) return -1;
+        if (gp_write_i32(w, obj->pad_occ_obj_30) != 0) return -1;
+        if (gp_write_i32(w, obj->pad_occ_obj_34) != 0) return -1;
+        if (gp_write_i32(w, obj->pad_occ_obj_38) != 0) return -1;
     }
 
     // Write per-object payload

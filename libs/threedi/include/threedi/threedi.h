@@ -11,6 +11,20 @@
 extern "C" {
 #endif
 
+#ifdef _WIN32
+#  ifdef OPENNOVA_SHARED_EXPORTS
+#    define THREEDI_EXPORT __declspec(dllexport)
+#  else
+#    define THREEDI_EXPORT
+#  endif
+#else
+#  ifdef OPENNOVA_SHARED_EXPORTS
+#    define THREEDI_EXPORT __attribute__((visibility("default")))
+#  else
+#    define THREEDI_EXPORT
+#  endif
+#endif
+
 typedef struct ThreediChunk {
     char id[5];                // FourCC, null-terminated.
     int is_parent;             // Non-zero if the chunk has children.
@@ -30,17 +44,17 @@ typedef struct ThreediFile {
 } ThreediFile;
 
 // Utility/version info.
-const char *threedi_version(void);
-int threedi_smoke_self_check(void);
+THREEDI_EXPORT const char *threedi_version(void);
+THREEDI_EXPORT int threedi_smoke_self_check(void);
 
 // Load a 3DI file from disk into a chunk tree. Returns 0 on success.
-int threedi_read_file(const char *path, ThreediFile *out_file);
+THREEDI_EXPORT int threedi_read_file(const char *path, ThreediFile *out_file);
 
 // Write a previously-read 3DI chunk tree back to disk.
-int threedi_write_file(const char *path, const ThreediFile *file);
+THREEDI_EXPORT int threedi_write_file(const char *path, const ThreediFile *file);
 
 // Recursively free a ThreediFile and its chunks.
-void threedi_free_file(ThreediFile *file);
+THREEDI_EXPORT void threedi_free_file(ThreediFile *file);
 
 #ifdef __cplusplus
 }

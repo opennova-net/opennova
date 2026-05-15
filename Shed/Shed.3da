@@ -1,0 +1,262 @@
+/ 3DI metafile
+
+begin general_information
+  3da_version 3
+  3di_version 1
+  username opennova
+  attributes: 1
+  render_function gnrc
+  threshold 0.000000
+  num_materials 4
+  scale_factor 1.000000
+  diffuse_set  TRUE
+  pm_enable 0
+  pm_polythresh 0
+  part_anim_enable 0
+  fakeskin_z 0
+  polycollision 1
+end general_information
+
+begin material 0
+  name "Jrubble1.tga"
+  description "Material_0_FF_ST_OP"
+  multitexture_flags 1
+  color_type 2
+  blending_mode 1
+  green_texture "Jrubble1.tga"
+  alpha_texture ""
+  u_offset 0.000000
+  v_offset 0.000000
+  u_tiling 1.000000
+  v_tiling 1.000000
+  use_alpha_pcx 0
+  mapfunc_u_style 0
+  mapfunc_u_rate 0.000000
+  mapfunc_u_phase 0.000000
+  mapfunc_u_start 0.000000
+  mapfunc_u_end 0.000000
+  mapfunc_u_ctrlreg 
+  mapfunc_v_style 0
+  mapfunc_v_rate 0.000000
+  mapfunc_v_phase 0.000000
+  mapfunc_v_start 0.000000
+  mapfunc_v_end 0.000000
+  mapfunc_v_ctrlreg 
+  rgbgen_style 0
+  rgbgen_rate 0.000000
+  rgbgen_phase 0.000000
+  rgbgen_sr 0
+  rgbgen_sg 0
+  rgbgen_sb 0
+  rgbgen_er 0
+  rgbgen_eg 0
+  rgbgen_eb 0
+  rgbgen_ctrlreg 
+  alphagen_style 0
+  alphagen_rate 0.000000
+  alphagen_phase 0.000000
+  alphagen_start 0
+  alphagen_end 0
+  alphagen_ctrlreg 
+  reflect_r 0
+  reflect_g 0
+  reflect_b 0
+  reflect_type 0
+  reflect_alpha 0
+  actionplane_type 0
+  projector_type 0
+  projector_no_receive 0
+  projector_yaw 0
+  projector_pitch 0
+  shader_type 0
+end material
+
+begin material 1
+  name "oceil1.tga"
+  description "Material_1_FF_ST_OP"
+  multitexture_flags 1
+  color_type 2
+  blending_mode 1
+  green_texture "oceil1.tga"
+  alpha_texture ""
+  u_offset 0.000000
+  v_offset 0.000000
+  u_tiling 1.000000
+  v_tiling 1.000000
+  use_alpha_pcx 0
+  mapfunc_u_style 0
+  mapfunc_u_rate 0.000000
+  mapfunc_u_phase 0.000000
+  mapfunc_u_start 0.000000
+  mapfunc_u_end 0.000000
+  mapfunc_u_ctrlreg 
+  mapfunc_v_style 0
+  mapfunc_v_rate 0.000000
+  mapfunc_v_phase 0.000000
+  mapfunc_v_start 0.000000
+  mapfunc_v_end 0.000000
+  mapfunc_v_ctrlreg 
+  rgbgen_style 0
+  rgbgen_rate 0.000000
+  rgbgen_phase 0.000000
+  rgbgen_sr 0
+  rgbgen_sg 0
+  rgbgen_sb 0
+  rgbgen_er 0
+  rgbgen_eg 0
+  rgbgen_eb 0
+  rgbgen_ctrlreg 
+  alphagen_style 0
+  alphagen_rate 0.000000
+  alphagen_phase 0.000000
+  alphagen_start 0
+  alphagen_end 0
+  alphagen_ctrlreg 
+  reflect_r 0
+  reflect_g 0
+  reflect_b 0
+  reflect_type 0
+  reflect_alpha 0
+  actionplane_type 0
+  projector_type 0
+  projector_no_receive 0
+  projector_yaw 0
+  projector_pitch 0
+  shader_type 0
+end material
+
+begin material 2
+  name "KBulb.tga"
+  description "Material_2_FF_ST_OP"
+  multitexture_flags 1
+  color_type 2
+  blending_mode 1
+  green_texture "KBulb.tga"
+  alpha_texture ""
+  u_offset 0.000000
+  v_offset 0.000000
+  u_tiling 1.000000
+  v_tiling 1.000000
+  use_alpha_pcx 0
+  mapfunc_u_style 0
+  mapfunc_u_rate 0.000000
+  mapfunc_u_phase 0.000000
+  mapfunc_u_start 0.000000
+  mapfunc_u_end 0.000000
+  mapfunc_u_ctrlreg 
+  mapfunc_v_style 0
+  mapfunc_v_rate 0.000000
+  mapfunc_v_phase 0.000000
+  mapfunc_v_start 0.000000
+  mapfunc_v_end 0.000000
+  mapfunc_v_ctrlreg 
+  rgbgen_style 0
+  rgbgen_rate 0.000000
+  rgbgen_phase 0.000000
+  rgbgen_sr 0
+  rgbgen_sg 0
+  rgbgen_sb 0
+  rgbgen_er 0
+  rgbgen_eg 0
+  rgbgen_eb 0
+  rgbgen_ctrlreg 
+  alphagen_style 0
+  alphagen_rate 0.000000
+  alphagen_phase 0.000000
+  alphagen_start 0
+  alphagen_end 0
+  alphagen_ctrlreg 
+  reflect_r 0
+  reflect_g 0
+  reflect_b 0
+  reflect_type 0
+  reflect_alpha 0
+  actionplane_type 0
+  projector_type 0
+  projector_no_receive 0
+  projector_yaw 0
+  projector_pitch 0
+  shader_type 0
+end material
+
+begin material 3
+  name "KBulb.tga"
+  description "Material_3_FF_ST_OP"
+  multitexture_flags 1
+  color_type 2
+  blending_mode 1
+  green_texture "KBulb.tga"
+  alpha_texture ""
+  u_offset 0.000000
+  v_offset 0.000000
+  u_tiling 1.000000
+  v_tiling 1.000000
+  use_alpha_pcx 0
+  mapfunc_u_style 0
+  mapfunc_u_rate 0.000000
+  mapfunc_u_phase 0.000000
+  mapfunc_u_start 0.000000
+  mapfunc_u_end 0.000000
+  mapfunc_u_ctrlreg 
+  mapfunc_v_style 0
+  mapfunc_v_rate 0.000000
+  mapfunc_v_phase 0.000000
+  mapfunc_v_start 0.000000
+  mapfunc_v_end 0.000000
+  mapfunc_v_ctrlreg 
+  rgbgen_style 0
+  rgbgen_rate 0.000000
+  rgbgen_phase 0.000000
+  rgbgen_sr 0
+  rgbgen_sg 0
+  rgbgen_sb 0
+  rgbgen_er 0
+  rgbgen_eg 0
+  rgbgen_eb 0
+  rgbgen_ctrlreg 
+  alphagen_style 0
+  alphagen_rate 0.000000
+  alphagen_phase 0.000000
+  alphagen_start 0
+  alphagen_end 0
+  alphagen_ctrlreg 
+  reflect_r 0
+  reflect_g 0
+  reflect_b 0
+  reflect_type 0
+  reflect_alpha 0
+  actionplane_type 0
+  projector_type 0
+  projector_no_receive 0
+  projector_yaw 0
+  projector_pitch 0
+  shader_type 0
+end material
+
+begin part_animation 0
+  rotate_type        0
+  scale_type         0
+  transform_as       0
+  yaw_rate           0.000
+  pitch_rate         0.000
+  roll_rate          0.000
+  yaw_func         0  0.000 0.000 0.000 0.000 
+  pitch_func       0  0.000 0.000 0.000 0.000 
+  roll_func        0  0.000 0.000 0.000 0.000 
+  reverserotate      0
+  scale_func       0  0.000 0.000 0.000 0.000 
+  scalex_func      0  0.000 0.000 0.000 0.000 
+  scaley_func      0  0.000 0.000 0.000 0.000 
+  scalez_func      0  0.000 0.000 0.000 0.000 
+end part_animation
+
+begin light 0
+  name "LP01"
+  colorgen_style 24
+  colorgen_rate 0.000000
+  colorgen_phase 0.000000
+  colorgen_start 255 246 222
+  colorgen_end 0 0 0
+  colorgen_ctrlreg 
+end
+

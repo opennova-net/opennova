@@ -3,40 +3,9 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional
 
-
-@dataclass(frozen=True)
-class MaxImportRequest:
-    """Small Max-native request object for batch imports."""
-
-    resource: str
-    output_dir: str
-    mode: str = "loose"
-    base_dir: str = ""
-    item_type: str = ""
-    output_stem: str = ""
-    import_arms: bool = True
-    import_animations: bool = True
-    import_collisions: bool = True
-    import_occlusion: bool = True
-    import_lights: bool = True
-    write_ase: bool = True
-    write_3dp: bool = True
-    write_max: bool = True
-    copy_textures: bool = True
-
-
-@dataclass
-class MaxImportResult:
-    request: object
-    ok: bool
-    output_path: str = ""
-    written_files: list[str] = field(default_factory=list)
-    error: str = ""
-    elapsed_seconds: float = 0.0
 
 
 def run_loose_import(
@@ -112,7 +81,7 @@ def run_import(
 
 
 def execute_import_request(request) -> object:
-    """Run one shared ImportRequest or MaxImportRequest sequentially in Max."""
+    """Run one shared ImportRequest sequentially in Max."""
     start = time.time()
     try:
         written, output_path = _execute_to_files(request)
@@ -151,7 +120,7 @@ def _run_loose_import_impl(
     reset_scene: bool = True,
 ) -> list[str]:
     from pyopennova.asset_resolver import AssetResolver
-    from pyopennova.threedi_ffi import free_model_ir, read_model_ir
+    from pyopennova.threedi_ffi import free_model_3di3, read_model
     from .output_writers import reset_scene as _reset_scene, write_outputs
     from .scene_builder import MaxSceneBuilder
 
@@ -163,7 +132,7 @@ def _run_loose_import_impl(
 
     base_dir = asset_base_dir or str(Path(threedi_path).parent)
     name = output_stem or Path(threedi_path).stem
-    ir = read_model_ir(threedi_path)
+    ir = read_model(threedi_path)
     try:
         with AssetResolver(base_dir) as resolver:
             builder = MaxSceneBuilder(
@@ -186,7 +155,7 @@ def _run_loose_import_impl(
                 copy_textures=copy_textures,
             )
     finally:
-        free_model_ir(ir)
+        free_model_3di3(ir)
 
 
 def _run_definition_import_impl(
@@ -209,8 +178,8 @@ def _run_definition_import_impl(
 ) -> tuple[list[str], str]:
     from pyopennova.asset_resolver import AssetResolver
     from pyopennova.bad_ffi import free_bad, parse_bad
-    from pyopennova.threedi_ffi import free_model_ir, read_model_ir
-    from apps.importer.resource_plan import resolve_definition_import
+    from pyopennova.threedi_ffi import free_model_3di3, read_model
+    from pyopennova.resource_plan import resolve_definition_import
     from .output_writers import reset_scene as _reset_scene, write_outputs
     from .scene_builder import MaxSceneBuilder
 
@@ -245,9 +214,10 @@ def _run_definition_import_impl(
         written: list[str] = []
         main_builder = None
         main_ir = None
+        main_built = False
         try:
             for model in plan.models:
-                ir = read_model_ir(model.path)
+                ir = read_model(model.path)
                 try:
                     if model.role == "main":
                         main_ir = ir
@@ -260,8 +230,8 @@ def _run_definition_import_impl(
                             import_occlusion=import_occlusion,
                             import_lights=import_lights,
                         )
-                        main_builder.build_basic_scene(plan.scene_name)
-                    elif main_builder is not None:
+                        main_built = bool(main_builder.build_basic_scene(plan.scene_name))
+                    elif main_builder is not None and main_built:
                         secondary = MaxSceneBuilder(
                             ir,
                             bad_file=bad_file,
@@ -274,9 +244,9 @@ def _run_definition_import_impl(
                             _copy_model_textures(ir, project_dir, resolver)
                 finally:
                     if model.role != "main":
-                        free_model_ir(ir)
+                        free_model_3di3(ir)
 
-            if main_builder is not None and main_ir is not None:
+            if main_built and main_builder is not None and main_ir is not None:
                 if import_animations:
                     main_builder.apply_animations()
                 written.extend(write_outputs(
@@ -291,7 +261,7 @@ def _run_definition_import_impl(
                 ))
         finally:
             if main_ir is not None:
-                free_model_ir(main_ir)
+                free_model_3di3(main_ir)
             if bad_file is not None:
                 free_bad(bad_file)
 
@@ -359,38 +329,21 @@ def _copy_model_textures(ir, output_dir: str, resolver=None) -> list[str]:
 
 
 def _success_result(request, *, output_path: str, written_files: list[str], elapsed_seconds: float):
-    try:
-        from apps.importer.jobs import ImportResult
+    from opennova_jobs import ImportResult
 
-        return ImportResult.success(
-            request,
-            output_path=output_path,
-            written_files=written_files,
-            elapsed_seconds=elapsed_seconds,
-        )
-    except Exception:
-        return MaxImportResult(
-            request=request,
-            ok=True,
-            output_path=output_path,
-            written_files=written_files,
-            elapsed_seconds=elapsed_seconds,
-        )
+    return ImportResult.success(
+        request,
+        output_path=output_path,
+        written_files=written_files,
+        elapsed_seconds=elapsed_seconds,
+    )
 
 
 def _failure_result(request, *, error: str, elapsed_seconds: float):
-    try:
-        from apps.importer.jobs import ImportResult
+    from opennova_jobs import ImportResult
 
-        return ImportResult.failure(
-            request,
-            error=error,
-            elapsed_seconds=elapsed_seconds,
-        )
-    except Exception:
-        return MaxImportResult(
-            request=request,
-            ok=False,
-            error=error,
-            elapsed_seconds=elapsed_seconds,
-        )
+    return ImportResult.failure(
+        request,
+        error=error,
+        elapsed_seconds=elapsed_seconds,
+    )

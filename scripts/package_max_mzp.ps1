@@ -4,7 +4,7 @@
 #   dist\opennova_max-v<version>.mzp   (version read from pyproject.toml)
 #
 # This script is the CI-facing entrypoint for the Max plugin. It does not
-# require 3ds Max or 3dsmaxbatch.exe; local Max validation remains optional.
+# require 3ds Max or 3dsmaxbatch.exe to assemble the package.
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\package_max_mzp.ps1
@@ -161,6 +161,8 @@ Ensure-Dir $DIST
 
 Copy-PackageDir (Join-Path $ROOT "opennova_max") (Join-Path $PythonRoot "opennova_max")
 Copy-PackageDir (Join-Path $ROOT "pyopennova") (Join-Path $PythonRoot "pyopennova")
+Copy-PackageDir (Join-Path $ROOT "opennova_jobs") (Join-Path $PythonRoot "opennova_jobs")
+Copy-PackageDir (Join-Path $ROOT "opennova_qt_ui") (Join-Path $PythonRoot "opennova_qt_ui")
 Set-Content -LiteralPath (Join-Path $PythonRoot "opennova_max\_packaged_version.py") `
     -Value "VERSION = `"$Version`"" `
     -Encoding ASCII
@@ -170,12 +172,6 @@ Remove-TreeIfExists $StagedPyLib
 Ensure-Dir (Join-Path $StagedPyLib "windows-x64")
 Copy-PackageFile $NativeDll (Join-Path $StagedPyLib "windows-x64\opennova.dll")
 
-Ensure-Dir (Join-Path $PythonRoot "apps")
-Copy-PackageFile (Join-Path $ROOT "apps\__init__.py") (Join-Path $PythonRoot "apps\__init__.py")
-Ensure-Dir (Join-Path $PythonRoot "apps\importer")
-Copy-PackageFile (Join-Path $ROOT "apps\importer\__init__.py") (Join-Path $PythonRoot "apps\importer\__init__.py")
-Copy-PackageFile (Join-Path $ROOT "apps\importer\jobs.py") (Join-Path $PythonRoot "apps\importer\jobs.py")
-Copy-PackageFile (Join-Path $ROOT "apps\importer\resource_plan.py") (Join-Path $PythonRoot "apps\importer\resource_plan.py")
 Copy-PackageFile (Join-Path $ROOT "opennova_max\maxscript\OpenNovaImporter.mcr") (Join-Path $MacroRoot "OpenNovaImporter.mcr")
 
 $PackageContents = @"
@@ -440,14 +436,21 @@ $RequiredStageFiles = @(
     (Join-Path $PythonRoot "opennova_max\__init__.py"),
     (Join-Path $PythonRoot "opennova_max\_packaged_version.py"),
     (Join-Path $PythonRoot "opennova_max\animation.py"),
+    (Join-Path $PythonRoot "opennova_max\backend.py"),
     (Join-Path $PythonRoot "opennova_max\qt_ui.py"),
     (Join-Path $PythonRoot "opennova_max\ui.py"),
     (Join-Path $PythonRoot "opennova_max\version.py"),
     (Join-Path $PythonRoot "pyopennova\__init__.py"),
     (Join-Path $PythonRoot "pyopennova\animation_build.py"),
+    (Join-Path $PythonRoot "pyopennova\resource_plan.py"),
+    (Join-Path $PythonRoot "pyopennova\scan.py"),
     (Join-Path $PythonRoot "pyopennova\lib\windows-x64\opennova.dll"),
-    (Join-Path $PythonRoot "apps\importer\resource_plan.py"),
-    (Join-Path $PythonRoot "apps\importer\jobs.py")
+    (Join-Path $PythonRoot "opennova_jobs\__init__.py"),
+    (Join-Path $PythonRoot "opennova_qt_ui\__init__.py"),
+    (Join-Path $PythonRoot "opennova_qt_ui\backend.py"),
+    (Join-Path $PythonRoot "opennova_qt_ui\dialog.py"),
+    (Join-Path $PythonRoot "opennova_qt_ui\filtering.py"),
+    (Join-Path $PythonRoot "opennova_qt_ui\preferences.py")
 )
 foreach ($path in $RequiredStageFiles) {
     Assert-File $path
@@ -481,15 +484,22 @@ Assert-File (Join-Path $ExpandedBundle "PackageContents.xml")
 Assert-File (Join-Path $ExpandedMacroRoot "OpenNovaImporter.mcr")
 Assert-Dir (Join-Path $ExpandedPython "opennova_max")
 Assert-Dir (Join-Path $ExpandedPython "pyopennova")
+Assert-Dir (Join-Path $ExpandedPython "opennova_jobs")
+Assert-Dir (Join-Path $ExpandedPython "opennova_qt_ui")
 Assert-File (Join-Path $ExpandedPython "opennova_max\_packaged_version.py")
 Assert-File (Join-Path $ExpandedPython "opennova_max\animation.py")
+Assert-File (Join-Path $ExpandedPython "opennova_max\backend.py")
 Assert-File (Join-Path $ExpandedPython "opennova_max\qt_ui.py")
 Assert-File (Join-Path $ExpandedPython "opennova_max\ui.py")
 Assert-File (Join-Path $ExpandedPython "opennova_max\version.py")
 Assert-File (Join-Path $ExpandedPython "pyopennova\animation_build.py")
+Assert-File (Join-Path $ExpandedPython "pyopennova\resource_plan.py")
+Assert-File (Join-Path $ExpandedPython "pyopennova\scan.py")
 Assert-File (Join-Path $ExpandedPython "pyopennova\lib\windows-x64\opennova.dll")
-Assert-File (Join-Path $ExpandedPython "apps\importer\resource_plan.py")
-Assert-File (Join-Path $ExpandedPython "apps\importer\jobs.py")
+Assert-File (Join-Path $ExpandedPython "opennova_qt_ui\backend.py")
+Assert-File (Join-Path $ExpandedPython "opennova_qt_ui\dialog.py")
+Assert-File (Join-Path $ExpandedPython "opennova_qt_ui\filtering.py")
+Assert-File (Join-Path $ExpandedPython "opennova_qt_ui\preferences.py")
 
 $PY = Resolve-Python
 
@@ -559,14 +569,37 @@ sys.path.insert(0, str(python_root))
 
 import opennova_max
 import opennova_max.animation
+import opennova_max.backend
 import opennova_max.qt_ui
 import opennova_max.ui
+import opennova_jobs
+import opennova_qt_ui
+import opennova_qt_ui.backend
+import opennova_qt_ui.filtering
+import opennova_qt_ui.preferences
 import pyopennova
 import pyopennova.animation_build
+import pyopennova.resource_plan
+import pyopennova.scan
 from pyopennova._native import _lib_path, load_lib
-from pyopennova.threedi_ffi import free_model_ir, read_model_ir
+from pyopennova.threedi_ffi import free_model_3di3, read_model_3di3
 
-for module in (opennova_max, opennova_max.animation, opennova_max.qt_ui, opennova_max.ui, pyopennova, pyopennova.animation_build):
+for module in (
+    opennova_max,
+    opennova_max.animation,
+    opennova_max.backend,
+    opennova_max.qt_ui,
+    opennova_max.ui,
+    opennova_jobs,
+    opennova_qt_ui,
+    opennova_qt_ui.backend,
+    opennova_qt_ui.filtering,
+    opennova_qt_ui.preferences,
+    pyopennova,
+    pyopennova.animation_build,
+    pyopennova.resource_plan,
+    pyopennova.scan,
+):
     module_file = Path(module.__file__).resolve()
     if not str(module_file).lower().startswith(str(python_root).lower()):
         raise RuntimeError(f"{module.__name__} imported from wrong path: {module_file}")
@@ -590,12 +623,12 @@ if not native_path.is_file():
     raise RuntimeError(f"Native DLL missing: {native_path}")
 load_lib()
 
-ir = read_model_ir(fixture)
+model = read_model_3di3(fixture)
 try:
-    if int(ir.lod_count) <= 0:
+    if int(model.lod_count) <= 0:
         raise RuntimeError("Smoke fixture produced zero LODs")
 finally:
-    free_model_ir(ir)
+    free_model_3di3(model)
 
 print(f"OpenNova Max package smoke check OK: {native_path}")
 '@
