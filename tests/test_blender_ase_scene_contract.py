@@ -74,3 +74,14 @@ def test_blender_exporter_source_does_not_auto_emit_lod_files() -> None:
     assert "_find_lod_roots" not in source
     assert "_find_lod0_root" not in source
     assert "_lod{" not in source
+
+
+def test_blender_export_menu_has_separate_ase_and_animation_entries() -> None:
+    source = _read("blender/__init__.py")
+
+    assert 'bl_idname = "export_scene.novalogic_ase"' in source
+    assert 'bl_idname = "export_scene.novalogic_anims"' in source
+    assert 'text="Novalogic ASE (.ase)"' in source
+    assert 'text="Novalogic Anims (.adm + .bad)"' in source
+    assert source.count("self.layout.operator(EXPORT_OT_novalogic_ase.bl_idname") == 1
+    assert source.count("self.layout.operator(EXPORT_OT_novalogic_anims.bl_idname") == 1
