@@ -53,6 +53,12 @@ class MaxSceneBuilder:
         self.bone_nodes: list[Any] = []
         self._bone_infos: list[tuple[str, int, tuple[float, float, float]]] = []
         self._mesh_bone_data: dict[str, Any] = {}
+        try:
+            from pyopennova.materials import derive_uv1_tilings
+
+            self._uv1_tilings = derive_uv1_tilings(ir)
+        except Exception:
+            self._uv1_tilings = {}
 
     def build_basic_scene(self, name: str) -> bool:
         """Create the full Max scene for one model data."""
@@ -68,6 +74,9 @@ class MaxSceneBuilder:
                 resolver=self.resolver,
                 ctrl_resolver=self._resolve_ctrl_reg,
                 source_format=getattr(self.ir, "source_format", None),
+                uv1_tiling_override=self._uv1_tilings.get(
+                    _material_index(self.ir.materials[i], i)
+                ),
             )
 
         material_names = self._material_names_manifest()
@@ -129,6 +138,9 @@ class MaxSceneBuilder:
                 resolver=self.resolver,
                 ctrl_resolver=self._resolve_ctrl_reg,
                 source_format=getattr(self.ir, "source_format", None),
+                uv1_tiling_override=self._uv1_tilings.get(
+                    _material_index(self.ir.materials[i], i)
+                ),
             )
         self.armature_object = main_builder.armature_object
         self.root_motion_node = main_builder.root_motion_node
@@ -344,7 +356,15 @@ class MaxSceneBuilder:
                 )
             if vertices is not None and faces is not None and len(vertices) >= 4:
                 local_vertices = [_vec_sub(v, world_center) for v in vertices]
-                self._create_colored_mesh(mesh_name, local_vertices, faces, color, parent, local_center)
+                self._create_colored_mesh(
+                    mesh_name,
+                    local_vertices,
+                    faces,
+                    color,
+                    parent,
+                    local_center,
+                    smoothing_groups=[1] * _triangulated_face_count(faces),
+                )
             else:
                 half = (
                     abs((world_max[0] - world_min[0]) * 0.5),
@@ -365,7 +385,15 @@ class MaxSceneBuilder:
                     (0, 4, 6, 2),
                     (1, 3, 7, 5),
                 ]
-                self._create_colored_mesh(mesh_name, box_pts, box_faces, color, parent, local_center)
+                self._create_colored_mesh(
+                    mesh_name,
+                    box_pts,
+                    box_faces,
+                    color,
+                    parent,
+                    local_center,
+                    smoothing_groups=[1] * _triangulated_face_count(box_faces),
+                )
 
     def create_occlusion_visualization(self) -> None:
         occ = occlusion_access(self.ir)
@@ -621,7 +649,7 @@ class MaxSceneBuilder:
                     if rot is not None:
                         _apply_local_rotation_matrix(center, rot)
                 else:
-                    _set_user_prop(_rt(), center, "opennova_zero_axis", True)
+                    _apply_zero_axis_matrix(center)
 
     def _create_attach_markers(
         self,
@@ -722,8 +750,22 @@ def _decode(value) -> str:
     return str(value).rstrip("\x00")
 
 
+def _material_index(material, fallback: int) -> int:
+    try:
+        return int(getattr(material, "index"))
+    except Exception:
+        return int(fallback)
+
+
 def _byte(value: float) -> int:
     return max(0, min(255, int(float(value) * 255.0)))
+
+
+def _triangulated_face_count(faces) -> int:
+    count = 0
+    for face in faces:
+        count += max(0, len(face) - 2)
+    return count
 
 
 def _try_set(obj, attr: str, value) -> None:
@@ -814,6 +856,20 @@ def _apply_local_rotation_matrix(node, rot: Sequence[Sequence[float]]) -> None:
             ",".join(str(float(rot[row][col])) for col in range(3))
             for row in range(3)
         ))
+
+
+def _apply_zero_axis_matrix(node) -> None:
+    rt = _rt()
+    try:
+        pos = node.position
+        node.transform = rt.Matrix3(
+            rt.Point3(0.0, 0.0, 0.0),
+            rt.Point3(0.0, 0.0, 0.0),
+            rt.Point3(0.0, 0.0, 0.0),
+            pos,
+        )
+    except Exception:
+        _set_user_prop(rt, node, "opennova_zero_axis", True)
 
 
 def _create_bone_or_dummy(name: str, position: Sequence[float]):
@@ -937,7 +993,7 @@ def _remap_skin_weight_entries(entries, bone_id_by_source: dict[int, int]) -> tu
     weights = []
     for bone_idx, weight in entries:
         skin_bone_id = bone_id_by_source.get(int(bone_idx))
-        if skin_bone_id is not None and float(weight) > 0.001:
+        if skin_bone_id is not None and float(weight) > 0.0:
             bone_indices.append(skin_bone_id)
             weights.append(float(weight))
     return bone_indices, weights

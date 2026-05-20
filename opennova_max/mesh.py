@@ -85,6 +85,7 @@ def build_lod_meshes(
         lod_index,
         include_empty_parts=include_empty_parts,
         track_bone_data=track_bone_data,
+        preserve_source_indexing=True,
     )
     rt = _rt()
 
@@ -135,7 +136,7 @@ def create_mesh_node(
             rt.setFaceSmoothGroup(mesh, fi + 1, int(sg))
     elif tri_faces:
         for fi in range(len(tri_faces)):
-            rt.setFaceSmoothGroup(mesh, fi + 1, 1)
+            rt.setFaceSmoothGroup(mesh, fi + 1, 0)
     _set_hidden(mesh, hidden)
     return mesh
 
@@ -160,6 +161,8 @@ def _build_max_mesh(rt, fm: FlatMesh, material_dict: dict[int, Any]) -> Any:
 
     for fi, sg in enumerate(fm.smoothing_groups):
         rt.setFaceSmoothGroup(mesh, fi + 1, int(sg))
+
+    _apply_vertex_normals(rt, mesh, fm)
 
     if fm.face_uvs0:
         _write_map_channel(rt, mesh, 1, fm.face_uvs0, len(fm.faces))
@@ -189,6 +192,86 @@ def _build_max_mesh(rt, fm: FlatMesh, material_dict: dict[int, Any]) -> Any:
         "global" if len(fm.material_id_set) > 1 else "single",
     )
     return mesh
+
+
+def _apply_vertex_normals(rt, mesh: Any, fm: FlatMesh) -> None:
+    source_normals = _source_vertex_normals(fm)
+    for vi, normal in enumerate(source_normals, start=1):
+        if normal is None:
+            continue
+        try:
+            rt.setNormal(mesh, vi, rt.Point3(normal[0], normal[1], normal[2]))
+        except Exception:
+            pass
+    _apply_explicit_vertex_normals(rt, mesh, fm, source_normals)
+    try:
+        rt.update(mesh)
+    except Exception:
+        pass
+
+
+def _apply_explicit_vertex_normals(
+    rt,
+    mesh: Any,
+    fm: FlatMesh,
+    source_normals: list[tuple[float, float, float] | None],
+) -> None:
+    if not any(normal is not None for normal in source_normals):
+        return
+    try:
+        normal_mod = rt.Edit_Normals()
+        rt.addModifier(mesh, normal_mod)
+    except Exception:
+        return
+    try:
+        rt.select(mesh)
+        rt.execute("max modify mode")
+        rt.modPanel.setCurrentObject(normal_mod)
+        rt.update(mesh)
+    except Exception:
+        pass
+    try:
+        normal_mod.MakeExplicit(node=mesh)
+    except Exception:
+        pass
+    for fi, face in enumerate(fm.faces, start=1):
+        for corner, vertex_index in enumerate(face, start=1):
+            vi = int(vertex_index)
+            if vi < 0 or vi >= len(source_normals):
+                continue
+            normal = source_normals[vi]
+            if normal is None:
+                continue
+            try:
+                normal_id = int(normal_mod.GetNormalID(fi, corner, node=mesh))
+            except Exception:
+                continue
+            try:
+                normal_mod.SetNormal(normal_id, rt.Point3(normal[0], normal[1], normal[2]), node=mesh)
+            except Exception:
+                pass
+            try:
+                normal_mod.SetNormalExplicit(normal_id, explicit=True, node=mesh)
+            except Exception:
+                pass
+            try:
+                normal_mod.SetFaceNormalSpecified(fi, corner, specified=True, node=mesh)
+            except Exception:
+                pass
+
+
+def _source_vertex_normals(fm: FlatMesh) -> list[tuple[float, float, float] | None]:
+    normals: list[tuple[float, float, float] | None] = [None] * len(fm.vertices)
+    if not fm.face_normals or len(fm.face_normals) < len(fm.faces) * 3:
+        return normals
+    for fi, face in enumerate(fm.faces):
+        for ci, vertex_index in enumerate(face):
+            vi = int(vertex_index)
+            if vi < 0 or vi >= len(normals) or normals[vi] is not None:
+                continue
+            n = fm.face_normals[fi * 3 + ci]
+            normals[vi] = (float(n[0]), float(n[1]), float(n[2]))
+    return normals
 
 
 def _source_face_material_ids(fm: FlatMesh) -> list[int]:

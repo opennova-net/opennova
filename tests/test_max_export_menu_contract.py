@@ -4,6 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -154,9 +156,23 @@ def test_max_material_keeper_matches_rewrapped_material_proxy_by_name() -> None:
     from opennova_max.ase_scene_exporter import MaterialKeeper
 
     keeper = MaterialKeeper()
-    keeper.add_material(SimpleNamespace(name="Concrete"))
+    keeper.add_material(SimpleNamespace(name="Material_3_FF_ST_OP"))
 
-    assert keeper.get_global_index(SimpleNamespace(name="Concrete")) == 0
+    assert keeper.get_global_index(SimpleNamespace(name="Material_3_FF_ST_OP")) == 0
+
+
+def test_max_material_keeper_ignores_placeholder_slots_and_sorts_by_source_index() -> None:
+    from opennova_max.ase_scene_exporter import MaterialKeeper
+
+    keeper = MaterialKeeper()
+    keeper.add_material(SimpleNamespace(name="Material_12_FF_ST_OP"))
+    keeper.add_material(SimpleNamespace(name="Material #3"))
+    keeper.add_material(SimpleNamespace(name="Material_2_FF_MT_OP"))
+    keeper.sort_by_source_index()
+
+    assert keeper.count() == 2
+    assert keeper.get_material(0).name == "Material_2_FF_MT_OP"
+    assert keeper.get_material(1).name == "Material_12_FF_ST_OP"
 
 
 def test_max_ase_material_ref_falls_back_when_material_proxy_is_not_indexed() -> None:
@@ -176,6 +192,24 @@ def test_max_ase_material_ref_falls_back_when_material_proxy_is_not_indexed() ->
     assert exporter._material_ref(node) == 0
 
 
+def test_max_ase_material_ref_omits_helper_viewport_materials() -> None:
+    from opennova_max import ase_scene_exporter
+
+    class MissingMaterialKeeper:
+        def count(self):
+            return 1
+
+        def get_global_index(self, _material):
+            raise KeyError("helper material")
+
+    exporter = ase_scene_exporter.AseSceneExporter(SimpleNamespace())
+    exporter.material_keeper = MissingMaterialKeeper()
+    exporter._is_helper_mesh = lambda _node: True
+    node = SimpleNamespace(material=SimpleNamespace(name="center_magenta"), name="_01 center")
+
+    assert exporter._material_ref(node) == -1
+
+
 def test_max_light_color_tuple_accepts_rgb_properties_without_indexing() -> None:
     from opennova_max.ase_scene_exporter import _color_tuple
 
@@ -192,6 +226,532 @@ def test_max_light_color_tuple_accepts_rgb_properties_without_indexing() -> None
         64.0 / 255.0,
         1.0,
     )
+
+
+def test_max_ase_omni_light_uses_identity_tm_row2() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    class FakeRuntime:
+        def classOf(self, _obj):
+            return "OmniLight"
+
+    exporter = AseSceneExporter(FakeRuntime())
+    ase_light = SimpleNamespace(
+        name=b"",
+        type=-1,
+        pos=[0.0, 0.0, 0.0],
+        color=[0.0, 0.0, 0.0],
+        tm_row2=[0.0, 0.0, 0.0],
+    )
+    node = SimpleNamespace(
+        name="LP02",
+        transform=SimpleNamespace(
+            row1=(1.0, 0.0, 0.0),
+            row2=(0.0, 1.0, 0.0),
+            row3=(0.0, 0.0, 1.0),
+            position=(-0.1757, -3.903, 1.2802),
+        ),
+        rgb=SimpleNamespace(r=255, g=255, b=255),
+        useFarAtten=False,
+    )
+
+    exporter._populate_light(ase_light, node)
+
+    assert ase_light.type == 0
+    assert ase_light.tm_row2 == [0.0, 0.0, 1.0]
+
+
+def test_max_ase_y_keeps_render_space_y() -> None:
+    from opennova_max.ase_scene_exporter import _ase_y
+
+    assert _ase_y(-0.325) == -0.325
+    assert _ase_y(0.325) == 0.325
+    assert str(_ase_y(0.0)) == "-0.0"
+
+
+def test_max_ase_normals_defer_to_shared_writer_without_explicit_modifier() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    exporter = AseSceneExporter(SimpleNamespace())
+    ase_obj = SimpleNamespace(
+        face_normal_count=0,
+        face_normals=None,
+        verts=[
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.5,
+            0.0,
+            0.0,
+            1.55,
+            0.0,
+        ],
+    )
+
+    exporter._populate_face_normals(
+        ase_obj,
+        tri=SimpleNamespace(),
+        face_count=1,
+        node=SimpleNamespace(modifiers=[]),
+    )
+
+    assert ase_obj.face_normal_count == 0
+    assert ase_obj.face_normals is None
+
+
+def test_max_ase_degenerate_faces_zero_explicit_normals() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    class FakeMeshOps:
+        def getFace(self, _tri, _face_index):
+            return SimpleNamespace(x=1, y=2, z=3)
+
+        def getVert(self, _tri, index):
+            return {
+                1: SimpleNamespace(x=0.0, y=0.0, z=0.0),
+                2: SimpleNamespace(x=0.0, y=1.5, z=0.0),
+                3: SimpleNamespace(x=0.0, y=1.55, z=0.00000001),
+            }[int(index)]
+
+        def getFaceRNormals(self, _tri, _face_index):
+            return []
+
+    exporter = AseSceneExporter(SimpleNamespace(meshop=FakeMeshOps()))
+    exporter._collect_edit_normals = lambda _node, _face_count: [
+        (1.0, 0.00001, 0.0),
+        (1.0, 0.00001, 0.0),
+        (1.0, 0.00001, 0.0),
+    ]
+    ase_obj = SimpleNamespace(
+        face_normal_count=0,
+        face_normals=None,
+        verts=[
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.5,
+            0.0,
+            0.0,
+            1.55,
+            0.0,
+        ],
+    )
+
+    exporter._populate_face_normals(
+        ase_obj,
+        tri=SimpleNamespace(),
+        face_count=1,
+        node=SimpleNamespace(modifiers=[]),
+    )
+
+    assert ase_obj.face_normal_count == 1
+    assert [ase_obj.face_normals[i] for i in range(9)] == [0.0] * 9
+
+
+def test_max_ase_tiny_valid_faces_keep_fallback_explicit_normals() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    class FakeMeshOps:
+        def getFace(self, _tri, _face_index):
+            return SimpleNamespace(x=1, y=2, z=3)
+
+        def getVert(self, _tri, index):
+            return {
+                1: SimpleNamespace(x=0.82690001, y=0.13900000, z=-0.72210002),
+                2: SimpleNamespace(x=0.82690001, y=0.14010000, z=-0.72420001),
+                3: SimpleNamespace(x=0.82690001, y=0.13720000, z=-0.71860003),
+            }[int(index)]
+
+        def getFaceRNormals(self, _tri, _face_index):
+            return []
+
+    exporter = AseSceneExporter(SimpleNamespace(meshop=FakeMeshOps()))
+    exporter._collect_edit_normals = lambda _node, _face_count: [
+        (1.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+    ]
+    ase_obj = SimpleNamespace(
+        face_normal_count=0,
+        face_normals=None,
+        verts=[
+            0.82690001,
+            0.13900000,
+            -0.72210002,
+            0.82690001,
+            0.14010000,
+            -0.72420001,
+            0.82690001,
+            0.13720000,
+            -0.71860003,
+        ],
+    )
+
+    exporter._populate_face_normals(
+        ase_obj,
+        tri=SimpleNamespace(),
+        face_count=1,
+        node=SimpleNamespace(modifiers=[]),
+    )
+
+    assert ase_obj.face_normal_count == 1
+    assert [ase_obj.face_normals[i] for i in range(9)] == [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+    ]
+
+
+def test_max_ase_degenerate_faces_zero_runtime_fallback_normals() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    class FakeMeshOps:
+        def getFace(self, _tri, _face_index):
+            return SimpleNamespace(x=1, y=2, z=3)
+
+        def getVert(self, _tri, index):
+            return {
+                1: SimpleNamespace(x=0.0, y=0.0, z=0.0),
+                2: SimpleNamespace(x=0.0, y=1.5, z=0.0),
+                3: SimpleNamespace(x=0.0, y=1.55, z=0.0),
+            }[int(index)]
+
+        def getFaceRNormals(self, _tri, _face_index):
+            return []
+
+    class FakeRuntime:
+        meshop = FakeMeshOps()
+
+        def getNormal(self, _tri, _vert_idx):
+            return SimpleNamespace(x=1.0, y=0.0, z=0.0)
+
+    exporter = AseSceneExporter(FakeRuntime())
+    exporter._collect_edit_normals = lambda _node, _face_count: [
+        None,
+        None,
+        None,
+        (0.0, 0.0, 1.0),
+    ]
+    ase_obj = SimpleNamespace(
+        face_normal_count=0,
+        face_normals=None,
+        verts=[
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.5,
+            0.0,
+            0.0,
+            1.55,
+            0.0,
+        ],
+    )
+
+    exporter._populate_face_normals(
+        ase_obj,
+        tri=SimpleNamespace(),
+        face_count=1,
+        node=SimpleNamespace(modifiers=[]),
+    )
+
+    assert ase_obj.face_normal_count == 1
+    assert [ase_obj.face_normals[i] for i in range(9)] == [0.0] * 9
+
+
+def test_max_ase_degenerate_faces_zero_only_runtime_fallback_corner() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    class FakeMeshOps:
+        def getFace(self, _tri, _face_index):
+            return SimpleNamespace(x=1, y=2, z=3)
+
+        def getVert(self, _tri, index):
+            return {
+                1: SimpleNamespace(x=0.0, y=0.0, z=0.0),
+                2: SimpleNamespace(x=0.0, y=1.5, z=0.0),
+                3: SimpleNamespace(x=0.0, y=1.55, z=0.0),
+            }[int(index)]
+
+        def getFaceRNormals(self, _tri, _face_index):
+            return []
+
+    class FakeRuntime:
+        meshop = FakeMeshOps()
+
+        def getNormal(self, _tri, _vert_idx):
+            return SimpleNamespace(x=1.0, y=0.0, z=0.0)
+
+    exporter = AseSceneExporter(FakeRuntime())
+    exporter._collect_edit_normals = lambda _node, _face_count: [
+        (0.237144053, -0.720543921, -0.65159744),
+        (0.0840115473, -0.969404936, -0.230643168),
+        None,
+    ]
+    ase_obj = SimpleNamespace(
+        face_normal_count=0,
+        face_normals=None,
+        verts=[
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.5,
+            0.0,
+            0.0,
+            1.55,
+            0.0,
+        ],
+    )
+
+    exporter._populate_face_normals(
+        ase_obj,
+        tri=SimpleNamespace(),
+        face_count=1,
+        node=SimpleNamespace(modifiers=[]),
+    )
+
+    assert ase_obj.face_normal_count == 1
+    assert [ase_obj.face_normals[i] for i in range(9)] == [
+        pytest.approx(0.237144053),
+        pytest.approx(-0.720543921),
+        pytest.approx(-0.65159744),
+        pytest.approx(0.0840115473),
+        pytest.approx(-0.969404936),
+        pytest.approx(-0.230643168),
+        0.0,
+        0.0,
+        0.0,
+    ]
+
+
+def test_max_ase_degenerate_faces_keep_authored_explicit_normals() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    class FakeMeshOps:
+        def getFace(self, _tri, _face_index):
+            return SimpleNamespace(x=1, y=2, z=3)
+
+        def getVert(self, _tri, index):
+            return {
+                1: SimpleNamespace(x=0.0, y=0.0, z=0.0),
+                2: SimpleNamespace(x=0.0, y=0.0, z=0.0),
+                3: SimpleNamespace(x=1.0, y=0.0, z=0.0),
+            }[int(index)]
+
+        def getFaceRNormals(self, _tri, _face_index):
+            return []
+
+    exporter = AseSceneExporter(SimpleNamespace(meshop=FakeMeshOps()))
+    exporter._collect_edit_normals = lambda _node, _face_count: [
+        (-1.0, 0.0, 0.0),
+        (-1.0, 0.0, 0.0),
+        (-1.0, 0.0, 0.0),
+    ]
+    ase_obj = SimpleNamespace(
+        face_normal_count=0,
+        face_normals=None,
+        verts=[
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+        ],
+    )
+
+    exporter._populate_face_normals(
+        ase_obj,
+        tri=SimpleNamespace(),
+        face_count=1,
+        node=SimpleNamespace(modifiers=[]),
+    )
+
+    assert ase_obj.face_normal_count == 1
+    assert [ase_obj.face_normals[i] for i in range(9)] == [
+        -1.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+    ]
+
+
+def test_max_ase_weight_slots_default_to_minus_one() -> None:
+    from opennova_max.ase_scene_exporter import _write_weight_slots
+
+    out = SimpleNamespace(bone_index=[0, 0, 0, 0], weight=[9.0, 9.0, 9.0, 9.0])
+
+    _write_weight_slots(out, [(2, 0.75), (4, 0.25)])
+
+    assert out.bone_index == [2, 4, -1, -1]
+    assert out.weight == [0.75, 0.25, 0.0, 0.0]
+
+
+def test_max_ase_collects_tiny_skin_weights() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    class FakeSkinOps:
+        def GetNumberBones(self, _skin):
+            return 2
+
+        def GetBoneName(self, _skin, slot, _name_flag):
+            return {1: "BN12", 2: "BN18"}[int(slot)]
+
+        def GetVertexWeightCount(self, _skin, _vertex_index):
+            return 2
+
+        def GetVertexWeightBoneID(self, _skin, _vertex_index, weight_index):
+            return int(weight_index)
+
+        def GetVertexWeight(self, _skin, _vertex_index, weight_index):
+            return {1: 0.0007, 2: 0.9993}[int(weight_index)]
+
+    skin = object()
+    exporter = AseSceneExporter(SimpleNamespace(skinOps=FakeSkinOps()))
+    exporter._skin_modifier = lambda _node: skin
+
+    assert exporter._collect_weight_data(SimpleNamespace(), 1) == [[(11, 0.0007), (17, 0.9993)]]
+
+
+def test_max_ase_material_descriptor_uses_native_two_sided_flag() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    exporter = AseSceneExporter(SimpleNamespace())
+
+    one_sided = exporter._collect_material_descriptor(
+        SimpleNamespace(name="Material_0_FF_ST_OP", opacity=100.0, twoSided=False),
+        0,
+    )
+    two_sided = exporter._collect_material_descriptor(
+        SimpleNamespace(name="Material_1_FF_ST_OP", opacity=100.0, twoSided=True),
+        1,
+    )
+
+    assert not one_sided.two_sided
+    assert two_sided.two_sided
+
+
+def test_max_ase_glass_descriptor_uses_native_ambient_reflect_color() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    exporter = AseSceneExporter(SimpleNamespace())
+
+    desc = exporter._collect_material_descriptor(
+        SimpleNamespace(
+            name="Material_12_FFP_GLASS",
+            opacity=100.0,
+            twoSided=False,
+            ambient=SimpleNamespace(r=128, g=128, b=128),
+        ),
+        12,
+    )
+
+    assert desc.glass
+    assert desc.reflect_color[:3] == (128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0)
+
+
+def test_max_center_marker_transform_is_transposed_for_ase_rows() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    exporter = AseSceneExporter(SimpleNamespace())
+    node = SimpleNamespace(
+        name="_02 center",
+        transform=SimpleNamespace(
+            row1=(1.0, 2.0, 3.0),
+            row2=(4.0, 5.0, 6.0),
+            row3=(7.0, 8.0, 9.0),
+            position=(10.0, 11.0, 12.0),
+        ),
+    )
+
+    matrix = exporter._node_tm_for_export(node)
+
+    assert matrix.row1 == (1.0, 4.0, 7.0)
+    assert matrix.row2 == (2.0, 5.0, 8.0)
+    assert matrix.row3 == (3.0, 6.0, 9.0)
+    assert matrix.position == (10.0, 11.0, 12.0)
+
+
+def test_max_marker_vertices_ignore_marker_rotation() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    class MeshOps:
+        def getVert(self, mesh, _index):
+            return mesh.vert
+
+    exporter = AseSceneExporter(SimpleNamespace(meshop=MeshOps()))
+    node = SimpleNamespace(
+        name="_02 center",
+        vert=(1.0, 2.0, 3.0),
+        transform=SimpleNamespace(position=(10.0, 20.0, 30.0)),
+    )
+    rotated_snapshot = SimpleNamespace(vert=(99.0, 99.0, 99.0))
+
+    assert exporter._vertex_world_for_export(node, rotated_snapshot, 0) == (
+        9.9925,
+        19.9925,
+        29.9925,
+    )
+
+
+def test_max_bone_marker_mesh_matches_direct_writer_shape() -> None:
+    from opennova_max.ase_scene_exporter import _bone_marker_mesh
+
+    verts, faces = _bone_marker_mesh((1.0, 2.0, 3.0))
+
+    assert len(verts) == 9
+    assert len(faces) == 14
+    assert verts[0] == (1.01, 2.01, 3.01)
+    assert verts[8] == (1.0, 2.0, 3.0)
+    assert faces[0] == (8, 0, 1)
+    assert faces[-1] == (4, 6, 7)
+
+
+def test_max_helper_meshes_exclude_bone_nodes() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    exporter = AseSceneExporter(SimpleNamespace())
+    exporter._is_geometry = lambda _node: True
+    exporter._is_visible = lambda _node: True
+    exporter._is_render_mesh = lambda _node: False
+    helper = SimpleNamespace(name="CB01-colonly", handle=2)
+    bone = SimpleNamespace(name="BN01", handle=1)
+
+    assert exporter._ordered_helper_meshes([bone, helper]) == [helper]
+
+
+def test_max_helper_mesh_order_uses_scene_handle_not_runtime_listing_order() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    bbl = SimpleNamespace(name="BBL02-colonly", handle=30)
+    cb = SimpleNamespace(name="CB01-colonly", handle=20)
+
+    ordered = [
+        node.name
+        for _index, node in sorted(
+            [(0, bbl), (1, cb)],
+            key=lambda item: AseSceneExporter._mesh_sort_key(item[1], item[0]),
+        )
+    ]
+
+    assert ordered == ["CB01-colonly", "BBL02-colonly"]
 
 
 def test_max_anim_export_plan_uses_current_timeline_range() -> None:

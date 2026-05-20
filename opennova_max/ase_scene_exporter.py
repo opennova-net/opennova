@@ -20,6 +20,27 @@ from pyopennova.materials import (
 Vec3 = Tuple[float, float, float]
 
 
+BONE_VERTS: Tuple[Vec3, ...] = (
+    (0.01, 0.01, 0.01),
+    (0.01, -0.01, 0.01),
+    (-0.01, -0.01, 0.01),
+    (-0.01, 0.01, 0.01),
+    (0.001, 0.001, 0.10),
+    (0.001, -0.001, 0.10),
+    (-0.001, -0.001, 0.10),
+    (-0.001, 0.001, 0.10),
+    (0.0, 0.0, 0.0),
+)
+BONE_FACES: Tuple[Tuple[int, int, int], ...] = (
+    (8, 0, 1), (8, 1, 2), (8, 2, 3), (8, 3, 0),
+    (0, 1, 5), (0, 5, 4),
+    (1, 2, 6), (1, 6, 5),
+    (2, 3, 7), (2, 7, 6),
+    (3, 0, 4), (3, 4, 7),
+    (4, 5, 6), (4, 6, 7),
+)
+
+
 class MaterialKeeper:
     """Track Max scene materials and assign stable ASE submaterial IDs."""
 
@@ -33,11 +54,16 @@ class MaterialKeeper:
     def add_material(self, material: Any) -> None:
         if material is None:
             return
+        if _source_material_index(material) is None:
+            return
         key = id(material)
         if key in self._index_by_id:
             return
+        stable_keys = _material_identity_keys(material)
+        if any(stable_key in self._index_by_key for stable_key in stable_keys):
+            return
         self._index_by_id[key] = len(self._materials)
-        for stable_key in _material_identity_keys(material):
+        for stable_key in stable_keys:
             self._index_by_key.setdefault(stable_key, len(self._materials))
         self._materials.append(material)
 
@@ -49,6 +75,15 @@ class MaterialKeeper:
                 self.add_material(mat)
         else:
             self.add_material(material)
+
+    def sort_by_source_index(self) -> None:
+        self._materials.sort(key=_source_material_sort_key)
+        self._index_by_id = {}
+        self._index_by_key = {}
+        for index, material in enumerate(self._materials):
+            self._index_by_id[id(material)] = index
+            for stable_key in _material_identity_keys(material):
+                self._index_by_key.setdefault(stable_key, index)
 
     def get_global_index(self, material: Any) -> int:
         key = id(material)
@@ -144,6 +179,7 @@ class AseSceneExporter:
     def _collect_materials(self, render_meshes: Sequence[Any]) -> None:
         for node in render_meshes:
             self.material_keeper.add_object_materials(getattr(node, "material", None))
+        self.material_keeper.sort_by_source_index()
 
     def _populate_materials(self, doc: Any) -> None:
         for parent_idx in range(doc.material_count):
@@ -151,7 +187,7 @@ class AseSceneExporter:
             start = parent_idx * self.SUBS_PER_SLOT
             end = min(start + self.SUBS_PER_SLOT, self.material_keeper.count())
             count = max(0, end - start)
-            parent.name = ("Multi/Sub-Object #%d" % (parent_idx + 1)).encode("utf-8")[:31]
+            parent.name = ("Scene_Materials_%d" % parent_idx).encode("utf-8")[:31]
             parent.has_submaterials = 1
             parent.submaterial_count = count
             ase_ffi.alloc_submaterials(parent, count)
@@ -169,18 +205,36 @@ class AseSceneExporter:
         shader = _shader_from_material_name(name) or self._derive_shader(material)
         mat_name = name if name.startswith("Material_") else "Material_%d_%s" % (index, shader)
         diffuse_name = self._fit_texture_name(self._fix_tex_ext(_diffuse_bitmap_name(material)))
+        detail_name = self._fit_texture_name(self._fix_tex_ext(_detail_bitmap_name(material)))
+        u_tile, v_tile = _bitmap_tiling(_diffuse_bitmap(material))
+        u1_tile, v1_tile = _bitmap_tiling(_detail_bitmap(material))
         alpha_threshold = 0.0
         renderer_blend = MATERIAL_BLEND_OPAQUE
+        semantics = classify_material_shader(
+            shader,
+            alpha_test_value_byte=int(round(alpha_threshold * 255.0)),
+        )
+        glass = semantics.is_glass
+        reflect_color = (0.0, 0.0, 0.0, 0.0)
+        if glass:
+            ambient_value = None
+            for attr in ("ambient", "ambientColor"):
+                try:
+                    ambient_value = getattr(material, attr)
+                except Exception:
+                    ambient_value = None
+                if ambient_value is not None:
+                    break
+            if ambient_value is not None:
+                ambient = _color_tuple(ambient_value)
+                if any(ambient):
+                    reflect_color = (ambient[0], ambient[1], ambient[2], 0.0)
         try:
             opacity = float(getattr(material, "opacity"))
         except Exception:
             opacity = 100.0
         if opacity < 99.0:
             renderer_blend = MATERIAL_BLEND_ALPHA
-        semantics = classify_material_shader(
-            shader,
-            alpha_test_value_byte=int(round(alpha_threshold * 255.0)),
-        )
         if renderer_blend == MATERIAL_BLEND_OPAQUE:
             renderer_blend = semantics.blend
         return MaterialDescriptor(
@@ -188,13 +242,13 @@ class AseSceneExporter:
             shader=shader,
             name=mat_name,
             diffuse=TextureDescriptor("diffuse", diffuse_name),
-            detail=TextureDescriptor("detail", ""),
+            detail=TextureDescriptor("detail", detail_name),
             flags=0,
             alpha_threshold=alpha_threshold,
             renderer_blend=renderer_blend,
             alpha_test=semantics.alpha_test,
             alpha_inverted=semantics.alpha_test_invert,
-            two_sided=semantics.is_two_sided,
+            two_sided=semantics.is_two_sided or _bool_attr(material, ("twoSided", "two_sided"), False),
             emissive=semantics.is_emissive or semantics.is_luminance,
             phong_shader=semantics.uses_specular,
             bump_shader=semantics.needs_normal_map,
@@ -204,11 +258,20 @@ class AseSceneExporter:
             needs_normal_map=semantics.needs_normal_map,
             normal_space=semantics.normal_space,
             normal_uses_uv2=semantics.normal_uses_uv2,
-            has_detail_slot=semantics.has_detail,
+            has_detail_slot=semantics.has_detail or bool(detail_name),
             uses_specular=semantics.uses_specular,
             uses_environment=semantics.uses_environment,
+            glass=glass,
+            reflect_color=reflect_color,
             is_luminance=semantics.is_luminance,
             is_skinned=semantics.is_skinned,
+            u_tiling=0.0 if (u_tile == 1.0 and v_tile == 1.0) else u_tile,
+            v_tiling=0.0 if (u_tile == 1.0 and v_tile == 1.0) else v_tile,
+            effective_u_tiling=u_tile,
+            effective_v_tiling=v_tile,
+            effective_u1_tiling=u1_tile,
+            effective_v1_tiling=v1_tile,
+            has_custom_tiling=(abs(u_tile - 1.0) > 1e-6 or abs(v_tile - 1.0) > 1e-6),
         )
 
     def _derive_shader(self, material: Any) -> str:
@@ -220,6 +283,25 @@ class AseSceneExporter:
         except Exception:
             pass
         return "FF_ST_OP"
+
+    def _node_tm_for_export(self, node: Any) -> Any:
+        matrix = _node_transform(node)
+        name = _clean_duplicate_suffix(str(getattr(node, "name", "")))
+        if _is_center_marker_name(name):
+            return _transpose_matrix3(matrix)
+        return matrix
+
+    def _vertex_world_for_export(self, node: Any, tri: Any, zero_based_index: int) -> Vec3:
+        name = _clean_duplicate_suffix(str(getattr(node, "name", "")))
+        marker_vertices = _marker_local_vertices(name)
+        if marker_vertices and zero_based_index < len(marker_vertices):
+            try:
+                local = marker_vertices[zero_based_index]
+                origin = _world_position(node)
+                return (origin[0] + local[0], origin[1] + local[1], origin[2] + local[2])
+            except Exception:
+                pass
+        return _point_tuple(self.rt.meshop.getVert(tri, zero_based_index + 1))
 
     def _populate_geometry(self, ase_obj: Any, node: Any) -> None:
         tri = self._snapshot_mesh(node)
@@ -238,11 +320,10 @@ class AseSceneExporter:
         ase_obj.node_id = self._node_id_from_name(str(getattr(node, "name", "")))
         ase_obj.skinned = 1 if weights else 0
         ase_obj.material_ref = self._material_ref(node)
-        self._set_object_tm(ase_obj, _node_transform(node))
+        self._set_object_tm(ase_obj, self._node_tm_for_export(node))
 
         for i in range(vert_count):
-            point = rt.meshop.getVert(tri, i + 1)
-            world = _transform_point(_node_transform(node), _point_tuple(point))
+            world = self._vertex_world_for_export(node, tri, i)
             ase_obj.verts[i * 3 + 0] = world[0] * self.scale
             ase_obj.verts[i * 3 + 1] = _ase_y(world[1] * self.scale)
             ase_obj.verts[i * 3 + 2] = world[2] * self.scale
@@ -268,11 +349,9 @@ class AseSceneExporter:
                 out.uv[0], out.uv[1], out.uv[2] = uv_face_indices[fi]
 
         for i, entries in enumerate(weights):
-            for slot, (bone_idx, weight) in enumerate(entries[:4]):
-                ase_obj.weights[i].bone_index[slot] = int(bone_idx)
-                ase_obj.weights[i].weight[slot] = float(weight)
+            _write_weight_slots(ase_obj.weights[i], entries)
 
-        self._populate_face_normals(ase_obj, tri, face_count)
+        self._populate_face_normals(ase_obj, tri, face_count, node)
 
     def _populate_part_dummy_object(self, ase_obj: Any, node: Any) -> None:
         half = 0.0005
@@ -316,7 +395,9 @@ class AseSceneExporter:
             face.edge_visibility[2] = 1
 
     def _populate_bone_object(self, ase_obj: Any, node: Any) -> None:
-        self._populate_part_dummy_object(ase_obj, node)
+        origin = _world_position(node)
+        verts, faces = _bone_marker_mesh(origin)
+        ase_ffi.alloc_object(ase_obj, len(verts), 0, len(faces), 0, 0)
         bone_name = self._bone_export_name(str(getattr(node, "name", "")))
         ase_obj.name = self.fixup_name(bone_name).encode("utf-8")[:63]
         parent = getattr(node, "parent", None)
@@ -325,6 +406,21 @@ class AseSceneExporter:
         else:
             ase_obj.parent_name = b""
         ase_obj.node_id = self._node_id_from_name(bone_name)
+        ase_obj.material_ref = -1
+        ase_obj.skinned = 0
+        self._set_object_tm(ase_obj, _IdentityMatrix(origin))
+        for i, vert in enumerate(verts):
+            ase_obj.verts[i * 3 + 0] = vert[0] * self.scale
+            ase_obj.verts[i * 3 + 1] = _ase_y(vert[1] * self.scale)
+            ase_obj.verts[i * 3 + 2] = vert[2] * self.scale
+        for i, face_indices in enumerate(faces):
+            face = ase_obj.faces[i]
+            face.vert[0], face.vert[1], face.vert[2] = face_indices
+            face.smoothing_mask = 0
+            face.material_id = 0
+            face.edge_visibility[0] = 1
+            face.edge_visibility[1] = 1
+            face.edge_visibility[2] = 1
 
     def _populate_light(self, ase_light: Any, node: Any) -> None:
         ase_light.name = self.fixup_name(str(getattr(node, "name", ""))).encode("utf-8")[:63]
@@ -345,11 +441,15 @@ class AseSceneExporter:
         ase_light.near_atten_end = 0.0
         ase_light.hotspot = float(getattr(node, "hotspot", 0.0) or 0.0)
         ase_light.falloff = float(getattr(node, "falloff", 0.0) or 0.0)
-        direction = _matrix_row(_node_transform(node), 2)
-        direction = _normalize(direction) or (0.0, 0.0, -1.0)
-        ase_light.tm_row2[0] = _positive_zero(-direction[0])
-        ase_light.tm_row2[1] = _positive_zero(-direction[1])
-        ase_light.tm_row2[2] = _positive_zero(-direction[2])
+        if ase_light.type == 0:
+            direction = (0.0, 0.0, 1.0)
+        else:
+            direction = _matrix_row(_node_transform(node), 2)
+            direction = _normalize(direction) or (0.0, 0.0, -1.0)
+            direction = (-direction[0], -direction[1], -direction[2])
+        ase_light.tm_row2[0] = _positive_zero(direction[0])
+        ase_light.tm_row2[1] = _positive_zero(direction[1])
+        ase_light.tm_row2[2] = _positive_zero(direction[2])
 
     def _collect_uv_data(self, tri: Any, face_count: int) -> Tuple[List[Tuple[float, float]], List[Tuple[int, int, int]]]:
         rt = self.rt
@@ -410,7 +510,7 @@ class AseSceneExporter:
                     weight = float(rt.skinOps.GetVertexWeight(skin, vi, wi))
                 except Exception:
                     continue
-                if weight > 0.001:
+                if weight > 0.0:
                     pairs.append((slot_to_index.get(bone_id, bone_id - 1), weight))
             pairs.sort(key=lambda item: item[0])
             if pairs:
@@ -418,23 +518,54 @@ class AseSceneExporter:
             out.append(pairs[:4])
         return out if any_weights else []
 
-    def _populate_face_normals(self, ase_obj: Any, tri: Any, face_count: int) -> None:
+    def _populate_face_normals(self, ase_obj: Any, tri: Any, face_count: int, node: Any) -> None:
         import ctypes
 
         rt = self.rt
+        explicit_normals = self._collect_edit_normals(node, face_count)
+        if not any(vec is not None for vec in explicit_normals):
+            return
         normals = (ctypes.c_float * (face_count * 9))()
         for fi in range(face_count):
+            geometry_normal: Optional[Vec3] = (0.0, 0.0, 1.0)
             try:
                 face = rt.meshop.getFace(tri, fi + 1)
                 indices = [int(face.x), int(face.y), int(face.z)]
             except Exception:
+                face = None
                 indices = [1, 1, 1]
-            for ci, vert_idx in enumerate(indices):
+            if face is not None:
                 try:
-                    normal = rt.getNormal(tri, vert_idx)
-                    vec = _normalize(_point_tuple(normal)) or (0.0, 0.0, 1.0)
+                    geometry_normal = _face_export_geometry_normal(
+                        ase_obj,
+                        [idx - 1 for idx in indices],
+                    )
                 except Exception:
-                    vec = (0.0, 0.0, 1.0)
+                    try:
+                        geometry_normal = _face_geometry_normal(rt, tri, face)
+                    except Exception:
+                        geometry_normal = (0.0, 0.0, 1.0)
+            render_normals = _face_render_normals(rt, tri, fi + 1)
+            selected_normals: List[Vec3] = []
+            for ci, vert_idx in enumerate(indices):
+                explicit_index = fi * 3 + ci
+                if explicit_index < len(explicit_normals) and explicit_normals[explicit_index] is not None:
+                    vec = explicit_normals[explicit_index]
+                elif ci < len(render_normals):
+                    vec = render_normals[ci]
+                else:
+                    try:
+                        normal = rt.getNormal(tri, vert_idx)
+                        vec = _normalize(_point_tuple(normal)) or (0.0, 0.0, 1.0)
+                    except Exception:
+                        vec = (0.0, 0.0, 1.0)
+                selected_normals.append(vec)
+            if geometry_normal is None:
+                selected_normals = [
+                    (0.0, 0.0, 0.0) if _vec_close(vec, (1.0, 0.0, 0.0)) else vec
+                    for vec in selected_normals
+                ]
+            for ci, vec in enumerate(selected_normals):
                 base = fi * 9 + ci * 3
                 normals[base + 0] = vec[0]
                 normals[base + 1] = _ase_y(vec[1])
@@ -442,6 +573,42 @@ class AseSceneExporter:
         ase_obj.face_normal_count = face_count
         ase_obj.face_normals = ctypes.cast(normals, ctypes.POINTER(ctypes.c_float))
         self._face_normal_arrays.append(normals)
+
+    def _collect_edit_normals(self, node: Any, face_count: int) -> List[Optional[Vec3]]:
+        normal_mod = _edit_normals_modifier(self.rt, node)
+        if normal_mod is None:
+            return []
+        try:
+            self.rt.select(node)
+            self.rt.execute("max modify mode")
+            self.rt.modPanel.setCurrentObject(normal_mod)
+            self.rt.update(node)
+        except Exception:
+            pass
+        try:
+            if int(normal_mod.GetNumFaces(node=node)) < face_count:
+                return []
+        except Exception:
+            try:
+                if int(normal_mod.GetNumFaces()) < face_count:
+                    return []
+            except Exception:
+                return []
+        out: List[Optional[Vec3]] = []
+        for fi in range(1, face_count + 1):
+            for corner in range(1, 4):
+                try:
+                    normal_id = int(normal_mod.GetNormalID(fi, corner, node=node))
+                    normal = normal_mod.GetNormal(normal_id, node=node)
+                except Exception:
+                    try:
+                        normal_id = int(normal_mod.GetNormalID(fi, corner))
+                        normal = normal_mod.GetNormal(normal_id)
+                    except Exception:
+                        out.append(None)
+                        continue
+                out.append(_normalize(_point_tuple(normal)))
+        return out
 
     def _snapshot_mesh(self, node: Any) -> Any:
         try:
@@ -470,7 +637,7 @@ class AseSceneExporter:
         try:
             return self.material_keeper.get_global_index(material) // self.SUBS_PER_SLOT
         except KeyError:
-            return 0
+            return -1 if self._is_helper_mesh(node) else 0
 
     def _slot_material_ids(self, node: Any) -> Dict[int, int]:
         material = getattr(node, "material", None)
@@ -507,6 +674,7 @@ class AseSceneExporter:
             (idx, node)
             for idx, node in enumerate(nodes)
             if self._is_geometry(node) and self._is_visible(node) and not self._is_render_mesh(node)
+            and not self._bone_export_name(str(getattr(node, "name", ""))).startswith("BN")
         ]
         return [node for _, node in sorted(meshes, key=lambda item: self._mesh_sort_key(item[1], item[0]))]
 
@@ -572,7 +740,7 @@ class AseSceneExporter:
         if group == 4:
             return (group, _userpoint_sort_key(name), scene_index)
         if group in (3, 5, 6):
-            return (group, scene_index, name)
+            return (group, _scene_order_key(node, scene_index), name)
         return (group, _leading_number_key(name), name)
 
     @staticmethod
@@ -697,7 +865,12 @@ def _scene_nodes(rt: Any) -> List[Any]:
 
 
 def _is_multi_material(material: Any) -> bool:
-    return hasattr(material, "materialList") or hasattr(material, "numsubs")
+    if not hasattr(material, "materialList"):
+        return False
+    try:
+        return int(getattr(material, "numsubs")) > 0
+    except Exception:
+        return False
 
 
 def _material_identity_keys(material: Any) -> List[Tuple[str, str]]:
@@ -723,6 +896,25 @@ def _material_identity_keys(material: Any) -> List[Tuple[str, str]]:
     return keys
 
 
+def _source_material_index(material: Any) -> Optional[int]:
+    try:
+        name = _clean_duplicate_suffix(str(getattr(material, "name", "") or ""))
+    except Exception:
+        return None
+    match = re.match(r"^Material_(\d+)_.+$", name)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _source_material_sort_key(material: Any) -> int:
+    index = _source_material_index(material)
+    return index if index is not None else 999999
+
+
 def _multi_material_entries(material: Any) -> List[Any]:
     return [mat for _mat_id, mat in _multi_material_id_entries(material)]
 
@@ -745,7 +937,7 @@ def _multi_material_id_entries(material: Any) -> List[Tuple[int, Any]]:
 def _seq_get(seq: Any, one_based_index: int) -> Any:
     if seq is None:
         return None
-    for idx in (one_based_index, one_based_index - 1):
+    for idx in (one_based_index - 1, one_based_index):
         try:
             return seq[idx]
         except Exception:
@@ -767,15 +959,51 @@ def _modifiers(node: Any) -> Iterable[Any]:
         return ()
 
 
+def _edit_normals_modifier(rt: Any, node: Any) -> Any:
+    for mod in _modifiers(node):
+        class_name = _class_name(rt, mod).lower().replace(" ", "_")
+        if "edit_normals" in class_name:
+            return mod
+    return None
+
+
 def _diffuse_bitmap_name(material: Any) -> str:
+    return _bitmap_filename(_diffuse_bitmap(material))
+
+
+def _detail_bitmap_name(material: Any) -> str:
+    return _bitmap_filename(_detail_bitmap(material))
+
+
+def _diffuse_bitmap(material: Any) -> Any:
+    return _material_bitmap(material, ("diffuseMap", "map1"), (2, 1))
+
+
+def _detail_bitmap(material: Any) -> Any:
+    return _material_bitmap(material, ("detailMap", "selfIllumMap"), (5,))
+
+
+def _material_bitmap(material: Any, attrs: Sequence[str], map_slots: Sequence[int]) -> Any:
     bitmap = None
-    for attr in ("diffuseMap", "map1"):
+    for attr in attrs:
         try:
-            bitmap = getattr(material, attr)
-            if bitmap:
+            candidate = getattr(material, attr)
+            if candidate:
+                bitmap = candidate
                 break
         except Exception:
             pass
+    if bitmap is not None:
+        return bitmap
+    maps = getattr(material, "maps", None)
+    for slot in map_slots:
+        bitmap = _seq_get(maps, slot)
+        if bitmap:
+            return bitmap
+    return None
+
+
+def _bitmap_filename(bitmap: Any) -> str:
     if bitmap is None:
         return ""
     for attr in ("filename", "fileName", "Filename"):
@@ -786,6 +1014,35 @@ def _diffuse_bitmap_name(material: Any) -> str:
         except Exception:
             pass
     return ""
+
+
+def _bitmap_tiling(bitmap: Any) -> Tuple[float, float]:
+    coords = getattr(bitmap, "coords", None)
+    if coords is None:
+        return (1.0, 1.0)
+    return (
+        _float_attr(coords, ("U_Tiling", "u_tiling"), 1.0),
+        _float_attr(coords, ("V_Tiling", "v_tiling"), 1.0),
+    )
+
+
+def _float_attr(obj: Any, names: Sequence[str], default: float) -> float:
+    for name in names:
+        try:
+            value = getattr(obj, name)
+            return float(value)
+        except Exception:
+            pass
+    return float(default)
+
+
+def _bool_attr(obj: Any, names: Sequence[str], default: bool) -> bool:
+    for name in names:
+        try:
+            return bool(getattr(obj, name))
+        except Exception:
+            pass
+    return bool(default)
 
 
 def _shader_from_material_name(name: str) -> str:
@@ -849,6 +1106,18 @@ def _matrix_row(matrix: Any, row_index: int) -> Vec3:
     return (1.0, 0.0, 0.0) if row_index == 0 else (0.0, 1.0, 0.0) if row_index == 1 else (0.0, 0.0, 1.0)
 
 
+def _transpose_matrix3(matrix: Any) -> Any:
+    rows = [_matrix_row(matrix, 0), _matrix_row(matrix, 1), _matrix_row(matrix, 2)]
+    return _MatrixRows(
+        (
+            (rows[0][0], rows[1][0], rows[2][0]),
+            (rows[0][1], rows[1][1], rows[2][1]),
+            (rows[0][2], rows[1][2], rows[2][2]),
+        ),
+        _matrix_position(matrix),
+    )
+
+
 def _transform_point(matrix: Any, point: Vec3) -> Vec3:
     rows = [_matrix_row(matrix, 0), _matrix_row(matrix, 1), _matrix_row(matrix, 2)]
     pos = _matrix_position(matrix)
@@ -895,15 +1164,99 @@ def _color_value_tuple(value: Any) -> Vec3:
         return (1.0, 1.0, 1.0)
 
 
-def _normalize(value: Vec3) -> Optional[Vec3]:
+def _normalize(value: Vec3, tolerance: float = 1e-8) -> Optional[Vec3]:
     length = math.sqrt(value[0] * value[0] + value[1] * value[1] + value[2] * value[2])
-    if length <= 1e-8:
+    if length <= tolerance:
         return None
     return (value[0] / length, value[1] / length, value[2] / length)
 
 
+def _face_render_normals(rt: Any, tri: Any, face_index: int) -> List[Vec3]:
+    try:
+        values = rt.meshop.getFaceRNormals(tri, face_index)
+    except Exception:
+        return []
+    out: List[Vec3] = []
+    for value in values:
+        vec = _normalize(_point_tuple(value))
+        if vec is not None:
+            out.append(vec)
+    return out
+
+
+def _face_geometry_normal(rt: Any, tri: Any, face: Any) -> Optional[Vec3]:
+    vertices = [
+        _point_tuple(rt.meshop.getVert(tri, int(face.x))),
+        _point_tuple(rt.meshop.getVert(tri, int(face.y))),
+        _point_tuple(rt.meshop.getVert(tri, int(face.z))),
+    ]
+    edge_a = _vec_sub(vertices[1], vertices[0])
+    edge_b = _vec_sub(vertices[2], vertices[0])
+    return _normalize(_vec_cross(edge_a, edge_b), tolerance=1e-12)
+
+
+def _face_export_geometry_normal(ase_obj: Any, indices: Sequence[int]) -> Optional[Vec3]:
+    vertices = []
+    for index in indices:
+        base = int(index) * 3
+        vertices.append(
+            (
+                float(ase_obj.verts[base + 0]),
+                float(ase_obj.verts[base + 1]),
+                float(ase_obj.verts[base + 2]),
+            )
+        )
+    edge_a = _vec_sub(vertices[1], vertices[0])
+    edge_b = _vec_sub(vertices[2], vertices[0])
+    return _normalize(_vec_cross(edge_a, edge_b), tolerance=1e-12)
+
+
+def _vec_sub(a: Vec3, b: Vec3) -> Vec3:
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _vec_cross(a: Vec3, b: Vec3) -> Vec3:
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+
+
+def _vec_close(a: Vec3, b: Vec3, tolerance: float = 1e-4) -> bool:
+    return (
+        abs(a[0] - b[0]) <= tolerance
+        and abs(a[1] - b[1]) <= tolerance
+        and abs(a[2] - b[2]) <= tolerance
+    )
+
+
+def _write_weight_slots(out_weight: Any, entries: Sequence[Tuple[int, float]]) -> None:
+    for slot in range(4):
+        out_weight.bone_index[slot] = -1
+        out_weight.weight[slot] = 0.0
+    for slot, (bone_idx, weight) in enumerate(entries[:4]):
+        out_weight.bone_index[slot] = int(bone_idx)
+        out_weight.weight[slot] = float(weight)
+
+
+def _bone_marker_mesh(origin: Vec3) -> Tuple[List[Vec3], Tuple[Tuple[int, int, int], ...]]:
+    return (
+        [
+            (
+                float(origin[0]) + vert[0],
+                float(origin[1]) + vert[1],
+                float(origin[2]) + vert[2],
+            )
+            for vert in BONE_VERTS
+        ],
+        BONE_FACES,
+    )
+
+
 def _ase_y(value: float) -> float:
-    return -float(value)
+    value = float(value)
+    return -0.0 if value == 0.0 else value
 
 
 def _positive_zero(value: float) -> float:
@@ -939,6 +1292,44 @@ def _userpoint_sort_key(name: str) -> Tuple[Any, ...]:
     return (-part_index, type_code, label)
 
 
+def _is_center_marker_name(name: str) -> bool:
+    return re.match(r"^_\d{2} center$", name) is not None
+
+
+def _marker_local_vertices(name: str) -> Tuple[Vec3, ...]:
+    group = _mesh_group(name)
+    if group in (2, 4):
+        return _cube_vertices(0.015)
+    if group == 3:
+        return _cube_vertices(0.012)
+    return ()
+
+
+def _cube_vertices(size: float) -> Tuple[Vec3, ...]:
+    half = float(size) * 0.5
+    return (
+        (-half, -half, -half),
+        (half, -half, -half),
+        (half, half, -half),
+        (-half, half, -half),
+        (-half, -half, half),
+        (half, -half, half),
+        (half, half, half),
+        (-half, half, half),
+    )
+
+
+def _scene_order_key(node: Any, fallback: int) -> int:
+    for attr in ("handle", "inodeHandle"):
+        try:
+            value = getattr(node, attr)
+            if value is not None:
+                return int(value)
+        except Exception:
+            pass
+    return int(fallback)
+
+
 def _mesh_group(name: str) -> int:
     if re.match(r"^\d{2} Mesh\d+$", name):
         return 0
@@ -967,4 +1358,12 @@ class _IdentityMatrix:
         self.row1 = (1.0, 0.0, 0.0)
         self.row2 = (0.0, 1.0, 0.0)
         self.row3 = (0.0, 0.0, 1.0)
+        self.position = position
+
+
+class _MatrixRows:
+    def __init__(self, rows: Sequence[Vec3], position: Vec3) -> None:
+        self.row1 = rows[0]
+        self.row2 = rows[1]
+        self.row3 = rows[2]
         self.position = position

@@ -760,8 +760,8 @@ def test_skin_weight_remap_uses_explicit_skin_bone_ids():
         {0: 3, 1: 7, 2: 9},
     )
 
-    assert bone_indices == [3, 9]
-    assert weights == [0.5, 0.25]
+    assert bone_indices == [3, 9, 7]
+    assert weights == [0.5, 0.25, 0.0001]
 
 
 def test_max_multimaterial_slots_match_global_material_ids(monkeypatch):
@@ -880,8 +880,15 @@ def test_max_secondary_merge_builds_its_own_materials(monkeypatch):
     mesh_material_dicts = []
     bind_calls = []
 
-    def fake_create_material(mat_ir, *, resolver=None, ctrl_resolver=None, source_format=None):
-        created.append((mat_ir, resolver, ctrl_resolver, source_format))
+    def fake_create_material(
+        mat_ir,
+        *,
+        resolver=None,
+        ctrl_resolver=None,
+        source_format=None,
+        uv1_tiling_override=None,
+    ):
+        created.append((mat_ir, resolver, ctrl_resolver, source_format, uv1_tiling_override))
         return f"created_{mat_ir}"
 
     def fake_build_lod_meshes(*args, **kwargs):
@@ -904,6 +911,50 @@ def test_max_secondary_merge_builds_its_own_materials(monkeypatch):
     assert mesh_material_dicts == [builder.material_dict]
     assert [call[0] for call in created] == ["arms_mat_0", "arms_mat_1"]
     assert bind_calls == [[builder.mesh_objects[0]]]
+
+
+def test_max_scene_builder_passes_derived_uv1_tiling_to_materials(monkeypatch):
+    from pyopennova import materials as shared_materials
+    from opennova_max import materials, mesh
+    from opennova_max.scene_builder import MaxSceneBuilder
+
+    class FakeMaterial:
+        index = 7
+        shader_name = b"FF_MT_OP"
+
+    class FakeIR:
+        material_count = 1
+        materials = [FakeMaterial()]
+        lod_count = 1
+
+    created = []
+
+    def fake_create_material(
+        mat_ir,
+        *,
+        resolver=None,
+        ctrl_resolver=None,
+        source_format=None,
+        uv1_tiling_override=None,
+    ):
+        created.append((mat_ir, uv1_tiling_override))
+        return "mat"
+
+    monkeypatch.setattr(shared_materials, "derive_uv1_tilings", lambda ir: {7: (2.0, 6.0)})
+    monkeypatch.setattr(materials, "create_material", fake_create_material)
+    monkeypatch.setattr(mesh, "build_part_hierarchy", lambda *args, **kwargs: ("root", {}))
+    monkeypatch.setattr(mesh, "build_lod_meshes", lambda *args, **kwargs: [SimpleNamespace(name="mesh")])
+    monkeypatch.setattr(MaxSceneBuilder, "_store_material_diagnostics", lambda self, root: None)
+    monkeypatch.setattr(MaxSceneBuilder, "create_scene_markers", lambda self: None)
+    monkeypatch.setattr(MaxSceneBuilder, "create_user_points", lambda self: None)
+    monkeypatch.setattr(MaxSceneBuilder, "create_occlusion_visualization", lambda self: None)
+    monkeypatch.setattr(MaxSceneBuilder, "create_collision_visualization", lambda self: None)
+    monkeypatch.setattr(MaxSceneBuilder, "create_scene_lights", lambda self: None)
+
+    builder = MaxSceneBuilder(FakeIR())
+
+    assert builder.build_basic_scene("fixture") is True
+    assert created == [(FakeIR.materials[0], (2.0, 6.0))]
 
 
 def test_parented_local_position_to_world_adds_parent_translation():
@@ -930,6 +981,165 @@ def test_parented_local_position_to_world_adds_parent_translation():
         2.0,
         3.0,
     )
+
+
+def test_max_build_lod_meshes_preserves_source_vertex_indexing(monkeypatch):
+    from opennova_max import mesh
+
+    calls = []
+    fm = SimpleNamespace(part_index=0, name="01 Mesh0", vertex_bone_data=[])
+
+    def fake_flatten_lod(ir, lod_index, **kwargs):
+        calls.append((ir, lod_index, kwargs))
+        return [fm]
+
+    node = SimpleNamespace(name="01 Mesh0")
+    monkeypatch.setattr(mesh, "flatten_lod", fake_flatten_lod)
+    monkeypatch.setattr(mesh, "_rt", lambda: SimpleNamespace())
+    monkeypatch.setattr(mesh, "_build_max_mesh", lambda rt, flat_mesh, materials: node)
+    monkeypatch.setattr(mesh, "set_parent_and_local_position", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mesh, "_set_hidden", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mesh, "_set_user_prop", lambda *_args, **_kwargs: None)
+
+    out = mesh.build_lod_meshes(
+        "ir",
+        0,
+        part_nodes={0: "part"},
+        material_dict={},
+        include_empty_parts=True,
+        track_bone_data=True,
+    )
+
+    assert out == [node]
+    assert calls == [
+        (
+            "ir",
+            0,
+            {
+                "include_empty_parts": True,
+                "track_bone_data": True,
+                "preserve_source_indexing": True,
+            },
+        )
+    ]
+
+
+def test_max_create_mesh_node_defaults_helper_faces_to_flat_smoothing(monkeypatch):
+    from opennova_max import mesh
+
+    rt = _FakeMaxRuntime()
+    monkeypatch.setattr(mesh, "_rt", lambda: rt)
+
+    node = mesh.create_mesh_node(
+        "helper",
+        [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        [(0, 1, 2)],
+    )
+
+    assert node.smoothing_groups[1] == 0
+
+
+def test_max_source_vertex_normals_take_first_authored_corner_normal():
+    from opennova_max.mesh import _source_vertex_normals
+
+    fm = SimpleNamespace(
+        vertices=[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        faces=[(0, 1, 2), (0, 2, 1)],
+        face_normals=[
+            (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, 0.0, 1.0),
+            (-1.0, 0.0, 0.0),
+            (0.0, -1.0, 0.0),
+            (0.0, 0.0, -1.0),
+        ],
+    )
+
+    assert _source_vertex_normals(fm) == [
+        (1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, 0.0, 1.0),
+    ]
+
+
+def test_max_explicit_vertex_normals_are_written_to_edit_normals_modifier():
+    from opennova_max.mesh import _apply_explicit_vertex_normals
+
+    class FakeEditNormals:
+        def __init__(self):
+            self.calls = []
+
+        def MakeExplicit(self, **kwargs):
+            self.calls.append(("MakeExplicit", kwargs["node"]))
+
+        def GetNormalID(self, face, corner, **kwargs):
+            self.calls.append(("GetNormalID", face, corner, kwargs["node"]))
+            return face * 10 + corner
+
+        def SetNormal(self, normal_id, value, **kwargs):
+            self.calls.append(("SetNormal", normal_id, value, kwargs["node"]))
+
+        def SetNormalExplicit(self, normal_id, **kwargs):
+            self.calls.append(("SetNormalExplicit", normal_id, kwargs["explicit"], kwargs["node"]))
+
+        def SetFaceNormalSpecified(self, face, corner, **kwargs):
+            self.calls.append(("SetFaceNormalSpecified", face, corner, kwargs["specified"], kwargs["node"]))
+
+    class FakeRuntime:
+        def __init__(self):
+            self.modifier = FakeEditNormals()
+            self.added = []
+
+        def Edit_Normals(self):
+            return self.modifier
+
+        def addModifier(self, node, modifier):
+            self.added.append((node, modifier))
+
+        def Point3(self, x, y, z):
+            return (x, y, z)
+
+    rt = FakeRuntime()
+    node = object()
+    fm = SimpleNamespace(faces=[(0, 1, 2)])
+
+    _apply_explicit_vertex_normals(
+        rt,
+        node,
+        fm,
+        [(1.0, 0.0, 0.0), None, (0.0, 0.0, 1.0)],
+    )
+
+    assert rt.added == [(node, rt.modifier)]
+    assert ("SetNormal", 11, (1.0, 0.0, 0.0), node) in rt.modifier.calls
+    assert ("SetNormal", 13, (0.0, 0.0, 1.0), node) in rt.modifier.calls
+    assert ("SetNormalExplicit", 11, True, node) in rt.modifier.calls
+    assert ("SetFaceNormalSpecified", 1, 3, True, node) in rt.modifier.calls
+
+
+def test_max_zero_axis_center_uses_native_zero_matrix(monkeypatch):
+    from opennova_max import scene_builder
+
+    class FakeRuntime:
+        def Point3(self, x, y, z):
+            return (x, y, z)
+
+        def Matrix3(self, row1, row2, row3, position):
+            return SimpleNamespace(row1=row1, row2=row2, row3=row3, position=position)
+
+        def setUserProp(self, obj, key, value):
+            obj.user_props[key] = value
+
+    node = SimpleNamespace(position=(1.0, 2.0, 3.0), user_props={})
+    monkeypatch.setattr(scene_builder, "_rt", lambda: FakeRuntime())
+
+    scene_builder._apply_zero_axis_matrix(node)
+
+    assert node.transform.row1 == (0.0, 0.0, 0.0)
+    assert node.transform.row2 == (0.0, 0.0, 0.0)
+    assert node.transform.row3 == (0.0, 0.0, 0.0)
+    assert node.transform.position == (1.0, 2.0, 3.0)
+    assert node.user_props == {}
 
 
 def test_max_material_records_texture_resolution_diagnostics(tmp_path: Path):
@@ -967,6 +1177,8 @@ def test_max_material_records_texture_resolution_diagnostics(tmp_path: Path):
         def __init__(self, filename: str = ""):
             self.filename = filename
             self.name = ""
+            self.coords = SimpleNamespace()
+            self.coords = SimpleNamespace()
 
     class FakeRuntime:
         def StandardMaterial(self, name: str = ""):
@@ -1130,12 +1342,11 @@ def test_max_material_keeps_primary_diffuse_map_for_detail_materials(tmp_path: P
     assert mat.diffuseMap.filename == str(diffuse)
     assert mat.diffuseMapEnable is True
     assert mat.texture_shown == (mat.diffuseMap, True)
-    assert runtime.bitmap_paths == [str(diffuse)]
+    assert mat.selfIllumMap.filename == str(detail)
+    assert mat.selfIllumMapEnable is True
+    assert runtime.bitmap_paths == [str(diffuse), str(detail)]
     assert mat.user_props["opennova_has_diffuse_map"] == 1
-    assert mat.user_props["opennova_detail_texture_path"] == str(detail)
-    assert mat.user_props["opennova_detail_texture_missing"] == 0
-    assert mat.user_props["opennova_has_detail_map"] == 1
-    assert mat.user_props["opennova_detail_map_mode"] == "metadata_only"
+    assert "opennova_detail_map_mode" not in mat.user_props
 
 
 def test_max_phongt_no_slot3_no_bump(tmp_path: Path):
@@ -1356,11 +1567,9 @@ def test_max_alpha_test_honors_inverted_threshold():
     assert mat.user_props["opennova_alpha_test"] == 1
 
 
-def test_max_detail_metadata_only(tmp_path: Path):
-    """FF_MT_OP with diffuse + detail keeps the plain diffuse Bitmap visible
-    and records the detail texture as user-prop metadata. A real CompositeMap
-    that multiplies detail over diffuse needs in-Max smoke testing before it
-    can be re-introduced."""
+def test_max_detail_uses_native_secondary_map_slot(tmp_path: Path):
+    """FF_MT_OP with diffuse + detail keeps diffuse visible and stores detail
+    in a native material slot the current-scene ASE exporter can inspect."""
     from opennova_max import materials
 
     diffuse = tmp_path / "Wall.dds"
@@ -1396,6 +1605,7 @@ def test_max_detail_metadata_only(tmp_path: Path):
         def __init__(self, filename: str = ""):
             self.filename = filename
             self.name = ""
+            self.coords = SimpleNamespace()
 
     class FakeRuntime:
         def StandardMaterial(self, name: str = ""):
@@ -1417,14 +1627,17 @@ def test_max_detail_metadata_only(tmp_path: Path):
             mat.texture_shown = (bitmap, enabled)
 
     with patch("opennova_max.materials._rt", return_value=FakeRuntime()):
-        mat = materials.create_material(FakeMaterialIR(), resolver=FakeResolver())
+        mat = materials.create_material(
+            FakeMaterialIR(),
+            resolver=FakeResolver(),
+            uv1_tiling_override=(2.0, 6.0),
+        )
 
-    # Plain diffuse Bitmap stays in mat.diffuseMap so the viewport renders the
-    # diffuse layer. Detail is recorded as user-prop metadata only.
     assert mat.diffuseMap.filename == str(diffuse)
-    assert mat.user_props["opennova_has_detail_map"] == 1
-    assert mat.user_props["opennova_detail_map_mode"] == "metadata_only"
-    assert mat.user_props["opennova_detail_texture_path"] == str(detail)
+    assert mat.selfIllumMap.filename == str(detail)
+    assert mat.selfIllumMap.coords.U_Tiling == 2.0
+    assert mat.selfIllumMap.coords.V_Tiling == 6.0
+    assert "opennova_detail_map_mode" not in mat.user_props
 
 
 def test_max_texture_map_assignment_falls_back_to_indexed_slots():

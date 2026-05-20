@@ -31,7 +31,13 @@ def _rt():
     return pymxs.runtime
 
 
-def create_material(mat_ir, resolver=None, ctrl_resolver=None, source_format=None) -> Any:
+def create_material(
+    mat_ir,
+    resolver=None,
+    ctrl_resolver=None,
+    source_format=None,
+    uv1_tiling_override=None,
+) -> Any:
     """Create a Max StandardMaterial matching one 3DI3 material."""
     rt = _rt()
     desc = describe_material(
@@ -39,6 +45,7 @@ def create_material(mat_ir, resolver=None, ctrl_resolver=None, source_format=Non
         resolver=resolver,
         ctrl_resolver=ctrl_resolver,
         source_format=source_format,
+        uv1_tiling_override=uv1_tiling_override,
     )
 
     mat = rt.StandardMaterial(name=desc.name)
@@ -46,16 +53,15 @@ def create_material(mat_ir, resolver=None, ctrl_resolver=None, source_format=Non
     _try_set(mat, "diffuse", fallback_color)
     _try_set(mat, "diffuseColor", fallback_color)
     _try_set(mat, "showInViewport", True)
-    # Default to two-sided rendering. Many NovaLogic models (e.g. MWHERHS1) are
-    # authored with both inner and outer surfaces — for a tent-roof building, ~60
-    # outer slope tris with up-facing normals and ~72 inner slope tris with
-    # down-facing normals occupy roughly the same height range. Max's default
-    # back-face culling hides one half per camera angle, giving the user
-    # textured-from-below / black-from-above. Blender renders both because its
-    # `use_backface_culling` defaults to False. Mirror that behaviour here so
-    # both DCCs agree. desc.two_sided still controls whether the user sees the
-    # `opennova_two_sided` user prop.
-    _try_set(mat, "twoSided", True)
+    _try_set(mat, "twoSided", bool(desc.two_sided))
+    if desc.glass and any(desc.reflect_color[:3]):
+        reflect_color = rt.color(
+            _byte(desc.reflect_color[0]),
+            _byte(desc.reflect_color[1]),
+            _byte(desc.reflect_color[2]),
+        )
+        _try_set(mat, "ambient", reflect_color)
+        _try_set(mat, "ambientColor", reflect_color)
     _try_set(mat, "specularLevel", desc.viewport_specular * 100.0)
     _try_set(mat, "glossiness", max(0.0, min(1.0, 1.0 - desc.viewport_roughness)) * 100.0)
 
@@ -91,12 +97,10 @@ def create_material(mat_ir, resolver=None, ctrl_resolver=None, source_format=Non
 
 def _wire_diffuse(rt, mat, desc) -> bool:
     """Wire the diffuse map slot. Returns True when a bitmap was assigned."""
-    if desc.diffuse.path is None:
-        if desc.diffuse.name:
-            _set_user_prop(rt, mat, "opennova_has_diffuse_map", 0)
-            _set_user_prop(rt, mat, "opennova_diffuse_bitmap_assigned", 0)
+    bitmap_path = desc.diffuse.path or desc.diffuse.name
+    if not bitmap_path:
         return False
-    bm = _create_bitmap_texture(rt, f"{desc.name}_diffuse", desc.diffuse.path, desc)
+    bm = _create_bitmap_texture(rt, f"{desc.name}_diffuse", bitmap_path, desc)
     assigned = _assign_texture_map(rt, mat, "diffuseMap", "diffuseMapEnable", 2, bm)
     _set_user_prop(rt, mat, "opennova_has_diffuse_map", 1)
     _set_user_prop(rt, mat, "opennova_diffuse_bitmap_assigned", 1 if assigned else 0)
@@ -131,17 +135,18 @@ def _wire_alpha_test(rt, mat, desc) -> None:
 
 
 def _wire_detail(rt, mat, desc) -> None:
-    """Record detail texture metadata. The plain diffuse Bitmap from
-    _wire_diffuse stays as mat.diffuseMap so the viewport still shows the
-    diffuse layer. A real CompositeMap with the detail multiplied on top is
-    future work that needs in-Max smoke testing (rt.compositemap_addlayer
-    plus 1-based MaxScript indexing on mapList/blendMode).
+    """Attach detail texture data to a native Max map slot.
+
+    The current-scene ASE exporter reads this native slot back and emits the
+    OED-compatible RGB Multiply diffuse/detail pair. This avoids relying on
+    importer-authored user props.
     """
-    if not desc.detail.name:
+    detail_path = desc.detail.path or desc.detail.name
+    if not detail_path:
         return
-    _set_user_prop(rt, mat, "opennova_detail_texture_path", desc.detail.path or "")
-    _set_user_prop(rt, mat, "opennova_has_detail_map", 1 if desc.detail.path else 0)
-    _set_user_prop(rt, mat, "opennova_detail_map_mode", "metadata_only")
+    detail = _create_bitmap_texture(rt, f"{desc.name}_detail", detail_path, desc)
+    _set_bitmap_tiling(detail, desc.effective_u1_tiling, desc.effective_v1_tiling)
+    _assign_texture_map(rt, mat, "selfIllumMap", "selfIllumMapEnable", 5, detail)
 
 
 def _wire_normal_metadata(rt, mat, desc) -> None:
@@ -346,6 +351,16 @@ def _create_bitmap_texture(rt, name: str, path: str, desc=None):
         except Exception:
             pass
     return bm
+
+
+def _set_bitmap_tiling(bitmap, u_tiling: float, v_tiling: float) -> None:
+    try:
+        _try_set(bitmap.coords, "U_Tiling", u_tiling)
+        _try_set(bitmap.coords, "V_Tiling", v_tiling)
+        _try_set(bitmap.coords, "u_tiling", u_tiling)
+        _try_set(bitmap.coords, "v_tiling", v_tiling)
+    except Exception:
+        pass
 
 
 def _bitmap_filename(bitmap) -> str:
