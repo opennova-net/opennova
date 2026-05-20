@@ -56,7 +56,7 @@ from .import_runner import (  # noqa: E402
     run_import,
     run_loose_import,
 )
-from .ui import close_importer, register_menu, show_importer  # noqa: E402
+from .ui import close_importer, export_anims, export_ase, register_menu, show_importer  # noqa: E402
 from .version import __version__, get_version  # noqa: E402
 
 
@@ -65,6 +65,8 @@ __all__ = [
     "__version__",
     "close_importer",
     "execute_import_request",
+    "export_anims",
+    "export_ase",
     "get_version",
     "import_loose",
     "register_menu",

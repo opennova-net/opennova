@@ -19,7 +19,9 @@ Outputs are intentionally shared where the format is host-neutral:
 Download `opennova_max-v<version>.mzp` from a release and drag it into 3ds Max.
 The installer copies a versioned bundle into the user ApplicationPlugins
 directory. Restart 3ds Max after install or update, then open the importer from
-`OpenNova > Importer...`.
+`OpenNova > Importer...`. Export commands are available from the `OpenNova`
+menu, and are also added to `File > Export` when the active Max menu preset lets
+the plugin extend that submenu.
 
 Build the MZP from source without 3ds Max:
 
@@ -63,6 +65,26 @@ Open the importer from the main menu:
 ```text
 OpenNova > Importer...
 ```
+
+Export the visible/current scene from the OpenNova menu:
+
+```text
+OpenNova > Novalogic ASE (.ase)
+OpenNova > Novalogic Anims (.adm + .bad)
+```
+
+The same commands are added to the standard export menu when available:
+
+```text
+File > Export > Novalogic ASE (.ase)
+File > Export > Novalogic Anims (.adm + .bad)
+```
+
+The ASE exporter translates visible Max scene objects that follow the NovaLogic
+scene naming convention. Export one LOD at a time by hiding other LOD roots or
+objects before running the command. The animation exporter writes one reset BAD
+from the current timeline start plus one playable BAD for the full current
+timeline range, with an ADM file referencing both.
 
 The UI is a resizable Qt dialog that uses the same PySide binding bundled with
 3ds Max. The listener command opens the same dialog and is useful for

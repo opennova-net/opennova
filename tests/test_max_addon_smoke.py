@@ -166,6 +166,8 @@ class _FakeMaxRuntime:
 def test_addon_package_imports_without_pymxs():
     import opennova_max
     import opennova_max.animation
+    import opennova_max.anim_exporter
+    import opennova_max.ase_scene_exporter
     import opennova_max.scene_builder
     import opennova_max.mesh
     import opennova_max.materials
@@ -178,6 +180,8 @@ def test_addon_package_imports_without_pymxs():
     assert opennova_max.run_loose_import is not None
     assert opennova_max.run_batch is not None
     assert opennova_max.show_importer is not None
+    assert opennova_max.export_ase is not None
+    assert opennova_max.export_anims is not None
     assert opennova_max.get_version() != ""
     assert opennova_max.scene_builder.MaxSceneBuilder is not None
     assert opennova_max.qt_ui.dialog_title("9.8.7") == "OpenNova Importer v9.8.7"
@@ -230,8 +234,11 @@ def test_max_dependency_group_is_for_local_harness_not_pymxs():
 
 def test_max_mzp_package_script_smokes_startup_and_animation_modules():
     package_script = (ROOT / "scripts" / "package_max_mzp.ps1").read_text(encoding="utf-8")
+    cmake_lists = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
 
     assert "traceback.print_exc()" in package_script
+    assert "option(OPENNOVA_STAGE_PYTHON_LIB" in cmake_lists
+    assert "-DOPENNOVA_STAGE_PYTHON_LIB=OFF" in package_script
     assert "Contents/macroscripts/OpenNovaImporter.mcr" in package_script
     assert "OpenNovaImporterMacro" in package_script
     assert "opennova_max\\maxscript\\OpenNovaImporter.mcr" in package_script
@@ -241,6 +248,10 @@ def test_max_mzp_package_script_smokes_startup_and_animation_modules():
     assert "import opennova_max.animation" in package_script
     assert "import opennova_max.ui" in package_script
     assert "import pyopennova.animation_build" in package_script
+    assert "fileIn macroPath" in package_script
+    assert "..\\macroscripts\\OpenNovaImporter.mcr" in package_script
+    assert 'module_file = Path(getattr(opennova_max, "__file__", "")).resolve()' in package_script
+    assert "loaded from {module_file.parent}" in package_script
     assert "OpenNovaMax-*.bundle" in package_script
     assert "_cleanup_existing_bundles(root, destination)" in package_script
     assert "Removed old OpenNova Max bundles:" in package_script
@@ -251,16 +262,27 @@ def test_max_mzp_package_script_smokes_startup_and_animation_modules():
     assert "OpenNovaMax-locked.bundle" in package_script
     assert "UnrelatedPlugin.bundle" in package_script
     assert 'menuMan.createActionItem "OpenNovaImporter" "OpenNova"' in package_script
+    assert "maxOps.GetICuiMenuMgr" in package_script
+    assert "#cuiRegisterMenus" in package_script
+    assert "OpenNovaExportAse`OpenNova" in package_script
     assert "Menu registration should not dynamically define the OpenNova macro" in package_script
 
 
 def test_max_editable_startup_installer_registers_menu_on_launch():
     startup_installer = (ROOT / "scripts" / "install_max_editable_startup.ps1").read_text(encoding="utf-8")
 
+    assert "[switch]$DisableInstalledBundles" in startup_installer
     assert "OpenNova-OpenNovaImporter.mcr" in startup_installer
     assert "opennova_max\\maxscript\\OpenNovaImporter.mcr" in startup_installer
+    assert "OpenNovaExportAse" in startup_installer
+    assert "OpenNovaExportAnims" in startup_installer
+    assert "OpenNovaMax-*.bundle" in startup_installer
+    assert "PackageContents.xml.disabled-by-opennova-editable" in startup_installer
+    assert "Disabled OpenNova Max bundles for editable testing:" in startup_installer
     assert "opennova_max_editable_startup.ms" in startup_installer
     assert "opennova_max_editable_startup.py" in startup_installer
+    assert "fileIn macroPath" in startup_installer
+    assert "OpenNova editable macro load failed:" in startup_installer
     assert "python.executeFile" in startup_installer
     assert "opennova_max.register_menu()" in startup_installer
     assert "OpenNova Max {loaded_version} loaded from editable install" in startup_installer
@@ -1461,12 +1483,37 @@ def test_max_qt_ui_helpers_and_menu_script_are_ci_safe():
     macro_script = (ROOT / "opennova_max" / "maxscript" / "OpenNovaImporter.mcr").read_text(encoding="utf-8")
 
     assert 'macroScript OpenNovaImporter category:"OpenNova"' in macro_script
+    assert 'macroScript OpenNovaExportAse category:"OpenNova"' in macro_script
+    assert 'macroScript OpenNovaExportAnims category:"OpenNova"' in macro_script
     assert 'ui.show_importer()' in macro_script
+    assert 'ui.export_ase()' in macro_script
+    assert 'ui.export_anims()' in macro_script
     assert "macroScript OpenNovaImporter" not in menu_script
+    assert "macroScript OpenNovaExportAse" not in menu_script
+    assert "macroScript OpenNovaExportAnims" not in menu_script
     assert "menuMan.registerMenuContext" in menu_script
     assert 'menuMan.createSubMenuItem "OpenNova"' in menu_script
     assert 'menuMan.createActionItem "OpenNovaImporter" "OpenNova"' in menu_script
+    assert 'menuMan.createActionItem "OpenNovaExportAse" "OpenNova"' in menu_script
+    assert 'menuMan.createActionItem "OpenNovaExportAnims" "OpenNova"' in menu_script
     assert 'importItem.setTitle "Importer..."' in menu_script
+    assert 'aseItem.setTitle "Novalogic ASE (.ase)"' in menu_script
+    assert 'animItem.setTitle "Novalogic Anims (.adm + .bad)"' in menu_script
+    assert 'aseOpenNovaItem.setTitle "Novalogic ASE (.ase)"' in menu_script
+    assert 'animOpenNovaItem.setTitle "Novalogic Anims (.adm + .bad)"' in menu_script
+    assert "maxOps.GetICuiMenuMgr" in menu_script
+    assert "#cuiRegisterMenus" in menu_script
+    assert "OpenNovaExportAse`OpenNova" in menu_script
+    assert "OpenNovaExportAnims`OpenNova" in menu_script
+    assert "openNovaCreateModernAction openNovaMenu OPENNOVA_ASE_ACTION_GUID" in menu_script
+    assert "openNovaCreateModernAction openNovaMenu OPENNOVA_ANIM_ACTION_GUID" in menu_script
+    assert "OpenNova modern menu registration failed:" in menu_script
+    assert "OpenNova modern menu refresh failed:" in menu_script
+    assert "OpenNova menu action missing:" in menu_script
+    assert "openNovaRemoveLegacyMenu mainMenuBar \"OpenNova\"" in menu_script
+    assert "openNovaBuildLegacyOpenNovaMenu mainMenuBar" in menu_script
+    assert "OpenNova legacy menu registration context already exists; rebuilding menu." in menu_script
+    assert "if menuMan.registerMenuContext 0x5cb72810 then" not in menu_script
     assert "OpenNovaImporterRollout" not in menu_script
     assert qt_ui.dialog_title("9.8.7") == "OpenNova Importer v9.8.7"
     assert qt_ui.DEFAULT_SCENE_OPTIONS == {

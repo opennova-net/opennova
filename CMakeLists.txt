@@ -107,7 +107,11 @@ if(BUILD_SHARED_LIB)
         set(_opennova_pkg_lib_filename "libopennova.so")
     endif()
 
-    if(_opennova_pkg_lib_subdir)
+    option(OPENNOVA_STAGE_PYTHON_LIB
+        "Copy the built shared library into pyopennova/lib for local Python tests"
+        ON)
+
+    if(_opennova_pkg_lib_subdir AND OPENNOVA_STAGE_PYTHON_LIB)
         set(_opennova_pkg_lib_dir
             "${CMAKE_SOURCE_DIR}/pyopennova/lib/${_opennova_pkg_lib_subdir}")
         add_custom_command(TARGET opennova_shared POST_BUILD

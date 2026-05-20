@@ -309,7 +309,7 @@ wheels = [
 
 [[package]]
 name = "opennova-tools"
-version = "0.1.48"
+version = "0.1.54"
 source = { editable = "." }
 
 [package.dev-dependencies]

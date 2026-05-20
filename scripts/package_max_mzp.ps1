@@ -147,7 +147,7 @@ $MacroRoot = Join-Path $ContentsRoot "macroscripts"
 Write-Host "=== OpenNova Max version: $Version ==="
 
 Write-Host "=== Building opennova.dll ==="
-cmake -S $ROOT -B $NATIVE_BUILD -DCMAKE_BUILD_TYPE=$Configuration -DBUILD_SHARED_LIB=ON
+cmake -S $ROOT -B $NATIVE_BUILD -DCMAKE_BUILD_TYPE=$Configuration -DBUILD_SHARED_LIB=ON -DOPENNOVA_STAGE_PYTHON_LIB=OFF
 cmake --build $NATIVE_BUILD --target opennova_shared --config $Configuration
 $NativeDll = Find-NativeDll
 Write-Host "Using native DLL: $NativeDll"
@@ -200,6 +200,15 @@ Set-Content -LiteralPath (Join-Path $BundleRoot "PackageContents.xml") -Value $P
 $StartupMs = @'
 (
     local startupDir = getFilenamePath (getSourceFileName())
+    local macroPath = pathConfig.normalizePath (startupDir + "..\macroscripts\OpenNovaImporter.mcr")
+    try
+    (
+        fileIn macroPath
+    )
+    catch
+    (
+        print ("OpenNova package macro load failed: " + getCurrentException())
+    )
     python.executeFile (startupDir + "opennova_max_startup.py")
 )
 '@
@@ -239,7 +248,9 @@ def startup() -> None:
 
         loaded_version = opennova_max.get_version()
         opennova_max.register_menu()
-        print(f"OpenNova Max {loaded_version} loaded from {contents_dir.parent}")
+        module_file = Path(getattr(opennova_max, "__file__", "")).resolve()
+        print(f"OpenNova Max {loaded_version} loaded from {module_file.parent}")
+        print(f"OpenNova Max bundle root: {contents_dir.parent}")
     except BaseException as exc:
         print(f"OpenNova Max {VERSION} failed to load: {exc}")
         traceback.print_exc()
@@ -436,6 +447,8 @@ $RequiredStageFiles = @(
     (Join-Path $PythonRoot "opennova_max\__init__.py"),
     (Join-Path $PythonRoot "opennova_max\_packaged_version.py"),
     (Join-Path $PythonRoot "opennova_max\animation.py"),
+    (Join-Path $PythonRoot "opennova_max\anim_exporter.py"),
+    (Join-Path $PythonRoot "opennova_max\ase_scene_exporter.py"),
     (Join-Path $PythonRoot "opennova_max\backend.py"),
     (Join-Path $PythonRoot "opennova_max\qt_ui.py"),
     (Join-Path $PythonRoot "opennova_max\ui.py"),
@@ -488,6 +501,8 @@ Assert-Dir (Join-Path $ExpandedPython "opennova_jobs")
 Assert-Dir (Join-Path $ExpandedPython "opennova_qt_ui")
 Assert-File (Join-Path $ExpandedPython "opennova_max\_packaged_version.py")
 Assert-File (Join-Path $ExpandedPython "opennova_max\animation.py")
+Assert-File (Join-Path $ExpandedPython "opennova_max\anim_exporter.py")
+Assert-File (Join-Path $ExpandedPython "opennova_max\ase_scene_exporter.py")
 Assert-File (Join-Path $ExpandedPython "opennova_max\backend.py")
 Assert-File (Join-Path $ExpandedPython "opennova_max\qt_ui.py")
 Assert-File (Join-Path $ExpandedPython "opennova_max\ui.py")
@@ -569,6 +584,8 @@ sys.path.insert(0, str(python_root))
 
 import opennova_max
 import opennova_max.animation
+import opennova_max.anim_exporter
+import opennova_max.ase_scene_exporter
 import opennova_max.backend
 import opennova_max.qt_ui
 import opennova_max.ui
@@ -587,6 +604,8 @@ from pyopennova.threedi_ffi import free_model_3di3, read_model_3di3
 for module in (
     opennova_max,
     opennova_max.animation,
+    opennova_max.anim_exporter,
+    opennova_max.ase_scene_exporter,
     opennova_max.backend,
     opennova_max.qt_ui,
     opennova_max.ui,
@@ -615,8 +634,26 @@ if opennova_max.qt_ui.dialog_title(expected_version) != f"OpenNova Importer v{ex
 menu_script = opennova_max.ui.build_menu_script()
 if 'menuMan.createActionItem "OpenNovaImporter" "OpenNova"' not in menu_script:
     raise RuntimeError("Max menu action item is missing from packaged UI script")
+if 'menuMan.createActionItem "OpenNovaExportAse" "OpenNova"' not in menu_script:
+    raise RuntimeError("Max ASE export menu action item is missing from packaged UI script")
+if 'menuMan.createActionItem "OpenNovaExportAnims" "OpenNova"' not in menu_script:
+    raise RuntimeError("Max animation export menu action item is missing from packaged UI script")
+if 'Novalogic ASE (.ase)' not in menu_script:
+    raise RuntimeError("Max ASE export menu label is missing from packaged UI script")
+if 'Novalogic Anims (.adm + .bad)' not in menu_script:
+    raise RuntimeError("Max animation export menu label is missing from packaged UI script")
+if 'maxOps.GetICuiMenuMgr' not in menu_script:
+    raise RuntimeError("Max 2025+ menu manager registration is missing from packaged UI script")
+if '#cuiRegisterMenus' not in menu_script:
+    raise RuntimeError("Max 2025+ menu callback registration is missing from packaged UI script")
+if 'OpenNovaExportAse`OpenNova' not in menu_script:
+    raise RuntimeError("Max 2025+ ASE export action id is missing from packaged UI script")
+if 'OpenNovaExportAnims`OpenNova' not in menu_script:
+    raise RuntimeError("Max 2025+ animation export action id is missing from packaged UI script")
 if 'macroScript OpenNovaImporter' in menu_script:
     raise RuntimeError("Menu registration should not dynamically define the OpenNova macro")
+if 'macroScript OpenNovaExportAse' in menu_script or 'macroScript OpenNovaExportAnims' in menu_script:
+    raise RuntimeError("Menu registration should not dynamically define OpenNova export macros")
 
 native_path = Path(_lib_path())
 if not native_path.is_file():

@@ -23,7 +23,7 @@ Pre-built binaries are available on the [Releases](../../releases) page:
 - **`onimport.exe`**: standalone Windows importer. Use this to convert models etc to modern formats like .glb, .blend and .fbx. Also exports files
 compat. with NovaLogic's original tools (ie: OED).
 - **`opennova_blender.zip`**: Blender 5.x addon with pre-built native libraries for Windows and Linux.
-- **`opennova_max-v<version>.mzp`**: 3ds Max importer plugin. Drag into 3ds Max, restart Max, then open `OpenNova > Importer...`.
+- **`opennova_max-v<version>.mzp`**: 3ds Max importer/export plugin. Drag into 3ds Max, restart Max, then use the `OpenNova` menu for import and export; export commands are also added to `File > Export` when Max exposes that submenu to plugins.
 - **`opennova-modtools-windows.zip`**: standalone OpenNova Editor (ONED) for Windows. The open source NILE.
 - **`opennova-runtime-windows.zip`**: "game" runtime.
 
