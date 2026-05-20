@@ -51,7 +51,7 @@ A Blender 5.x addon for the export side of the asset pipeline. Install via the z
 
 `File > Export > Novalogic ASE (.ase)`
 
-Exports the current scene to NovaLogic's ASCII Scene Export format. Supports multi-LOD scenes, BulletLOD collision meshes, bone weights for skinned models, vertex normals, texture coordinates, and diffuse texture export as TGA. Configurable float precision and scale.
+Exports the current visible scene or LOD to NovaLogic's ASCII Scene Export format. Supports bone weights for skinned models, vertex normals, texture coordinates, lights, and texture export as TGA. Configurable float precision and scale.
 
 ### Animation Export
 

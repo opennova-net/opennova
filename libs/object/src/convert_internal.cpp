@@ -1594,8 +1594,8 @@ bool convert_to_internal(const ase::Document& doc,
   // For non-skinned docs, map center i>=1 to nearest attach point; write
   // attachIndex to subobject i.
   //
-  // Importer-generated BulletLOD ASE for skinned meshes can be parsed as
-  // non-skinned docs but still carry explicit parent intent in attach objects:
+  // Legacy collision-only ASE for skinned meshes can be parsed as non-skinned
+  // docs but still carry explicit parent intent in attach objects:
   //   attach name "~NNx" encodes parent subobject NN-1
   //   attach parent object name "MM..." encodes child subobject MM-1
   // Prefer this deterministic mapping first when the project forces skinned,

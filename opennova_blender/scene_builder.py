@@ -46,6 +46,46 @@ def _mtrx_to_center_rotation(mat_data):
     return Matrix(rot).to_4x4()
 
 
+def _userpoint_local_matrix(up, translation: Vector) -> Matrix:
+    """Build the exact local transform used by the host-neutral ASE writer."""
+    zx = int(up.rot_y) / 65536.0
+    zy = -(int(up.rot_x) / 65536.0)
+    zz = int(up.rot_z) / 65536.0
+    z_len = math.sqrt(zx * zx + zy * zy + zz * zz)
+    if z_len > 1.0e-12:
+        zx, zy, zz = zx / z_len, zy / z_len, zz / z_len
+    else:
+        zx, zy, zz = 0.0, 0.0, 1.0
+
+    upx, upy, upz = 0.0, 0.0, 1.0
+    if abs(zx * upx + zy * upy + zz * upz) > 0.999:
+        upx, upy, upz = 0.0, 1.0, 0.0
+
+    xx = upy * zz - upz * zy
+    xy = upz * zx - upx * zz
+    xz = upx * zy - upy * zx
+    x_len = math.sqrt(xx * xx + xy * xy + xz * xz)
+    if x_len > 1.0e-12:
+        xx, xy, xz = xx / x_len, xy / x_len, xz / x_len
+
+    yx = zy * xz - zz * xy
+    yy = zz * xx - zx * xz
+    yz = zx * xy - zy * xx
+    y_len = math.sqrt(yx * yx + yy * yy + yz * yz)
+    if y_len > 1.0e-12:
+        yx, yy, yz = yx / y_len, yy / y_len, yz / y_len
+
+    # AseExporter transposes Blender's matrix into TM rows, so store the
+    # direct-writer TM rows as Blender matrix columns.
+    basis = Matrix((
+        (xx, yx, zx, 0.0),
+        (xy, yy, zy, 0.0),
+        (xz, yz, zz, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
+    ))
+    return Matrix.Translation(translation) @ basis
+
+
 def _set_object_mode(obj, mode: str) -> None:
     """Set Blender mode with an explicit Blender 5 operator context."""
     if obj is None:
@@ -71,12 +111,6 @@ def _ensure_object_mode() -> None:
         _set_object_mode(active, "OBJECT")
 
 
-def _blender_prop_value(value):
-    if isinstance(value, tuple):
-        return list(value)
-    return value
-
-
 class BlenderSceneBuilder:
     """Build a Blender scene from a Threedi3di3 + optional BadFile.
 
@@ -98,7 +132,7 @@ class BlenderSceneBuilder:
 
         # Runtime state
         self.part_nodes: dict[int, object] = {}   # index -> Empty object
-        self.mesh_objects: list[object] = []       # mesh objects with _part_index
+        self.mesh_objects: list[object] = []
         self.material_dict: dict[int, object] = {}
         self.root_object = None
         self.armature_object = None
@@ -107,6 +141,11 @@ class BlenderSceneBuilder:
         self._world_rot_corrections = []           # BAD world rot -> Blender rest world rot
         self._rest_local_quats = []                # Blender local rest quaternions
         self._rest_local_inv_mats = []             # Blender local rest inverse 3x3 matrices
+        try:
+            from pyopennova.materials import derive_uv1_tilings
+            self._uv1_tilings = derive_uv1_tilings(ir)
+        except Exception:
+            self._uv1_tilings = {}
 
     def build_basic_scene(self, name: str):
         _ensure_object_mode()
@@ -505,13 +544,6 @@ class BlenderSceneBuilder:
                         vg = mesh_obj.vertex_groups.get(bone_name)
                         if vg is None:
                             vg = mesh_obj.vertex_groups.new(name=bone_name)
-                        # Some bpy builds do not allow id-properties on
-                        # VertexGroup.  Keep this best-effort so binding
-                        # never aborts and skin weights are still exported.
-                        try:
-                            vg["opennova_bone_index"] = int(bone_idx)
-                        except Exception:
-                            pass
                         bone_vgroups[bone_idx] = vg
 
                     bone_vgroups[bone_idx].add([vert_idx], weight, 'REPLACE')
@@ -901,7 +933,6 @@ class BlenderSceneBuilder:
         root.empty_display_type = 'PLAIN_AXES'
         root.empty_display_size = 0.1
         bpy.context.collection.objects.link(root)
-        root["_lod_index"] = 0
         self.root_object = root
 
         for i in range(num_parts):
@@ -912,25 +943,20 @@ class BlenderSceneBuilder:
             bpy.context.collection.objects.link(part_obj)
             self.part_nodes[i] = part_obj
 
+        abs_positions = [
+            render_space(Vector(lod0.parts[i].abs_position))
+            for i in range(num_parts)
+        ]
+
         # Parent and position parts
         for i in range(num_parts):
             part = lod0.parts[i]
             part_obj = self.part_nodes[i]
 
-            abs_pos = render_space(Vector(part.abs_position))
-            rel_pos = render_space(Vector(part.rel_position))
+            abs_pos = abs_positions[i]
 
-            parent = root
-            if (part.parent_index >= 0 and
-                part.parent_index < num_parts and
-                part.parent_index != i):
-                parent = self.part_nodes[part.parent_index]
-
-            part_obj.parent = parent
-            if parent == root:
-                part_obj.location = abs_pos
-            else:
-                part_obj.location = rel_pos
+            part_obj.parent = root
+            part_obj.location = abs_pos
 
         return root
 
@@ -952,11 +978,11 @@ class BlenderSceneBuilder:
         """Create meshes for a single LOD level.
 
         Uses ``pyopennova.mesh_build.flatten_lod`` to produce per-part
-        ``FlatMesh`` data (host-agnostic strip-walking, vertex dedup,
+        ``FlatMesh`` data (host-agnostic strip-walking, source vertex indexing,
         UV V-flip, render_space transforms, smoothing groups), then
         wraps each FlatMesh in a ``bpy.types.Mesh``.  Material creation,
-        slot mapping, parenting to ``part_nodes``, custom properties,
-        and bone-data tracking stay here (bpy-specific work).
+        slot mapping, parenting to ``part_nodes``, and bone-data tracking
+        stay here (bpy-specific work).
 
         Pre-Phase-I this function did its own strip-walking (~240 LOC);
         ``opennova_max/mesh.py:build_lod_meshes`` was already using
@@ -981,9 +1007,50 @@ class BlenderSceneBuilder:
             lod_index,
             include_empty_parts=True,
             track_bone_data=track_bone_data and is_skinned,
+            preserve_source_indexing=True,
         )
+        cpp_face_normals: dict[int, list[tuple[float, float, float]]] = {}
+        cpp_vertices: dict[int, list[tuple[float, float, float]]] = {}
+        try:
+            from pyopennova.flat_mesh_ffi import flat_meshes_from_3di3, free_array
+
+            cpp_arr = flat_meshes_from_3di3(
+                self.ir,
+                lod_index,
+                include_empty_parts=True,
+                track_bone_data=track_bone_data and is_skinned,
+                preserve_source_indexing=True,
+            )
+            try:
+                for ci in range(int(cpp_arr.count)):
+                    cfm = cpp_arr.meshes[ci]
+                    part_index = int(cfm.part_index)
+                    vertex_count = int(cfm.vertex_count)
+                    if vertex_count > 0 and cfm.vertices:
+                        cpp_vertices[part_index] = [
+                            (
+                                float(cfm.vertices[vi].x),
+                                float(cfm.vertices[vi].y),
+                                float(cfm.vertices[vi].z),
+                            )
+                            for vi in range(vertex_count)
+                        ]
+                    face_count = int(cfm.face_count)
+                    if face_count <= 0 or not cfm.corners:
+                        continue
+                    normals = []
+                    for corner_idx in range(face_count * 3):
+                        corner = cfm.corners[corner_idx]
+                        normals.append((float(corner.nx), float(corner.ny), float(corner.nz)))
+                    cpp_face_normals[part_index] = normals
+            finally:
+                free_array(cpp_arr)
+        except Exception:
+            cpp_face_normals = {}
+            cpp_vertices = {}
 
         mesh_objects = []
+        bpy.context.view_layer.update()
         for fm in flat_meshes:
             part_idx = int(fm.part_index)
             if part_idx not in part_nodes:
@@ -999,11 +1066,13 @@ class BlenderSceneBuilder:
                 mesh_obj = bpy.data.objects.new(mesh_name, mesh_data)
                 bpy.context.collection.objects.link(mesh_obj)
                 mesh_obj.parent = part_nodes[part_idx]
-                mesh_obj["_part_index"] = part_idx
                 mesh_objects.append(mesh_obj)
                 continue
 
-            verts = [tuple(v) for v in fm.vertices]
+            verts = cpp_vertices.get(part_idx)
+            uses_cpp_vertices = bool(verts and len(verts) == len(fm.vertices))
+            if not uses_cpp_vertices:
+                verts = [tuple(v) for v in fm.vertices]
             faces = [tuple(f) for f in fm.faces]
             mesh_data.from_pydata(verts, [], faces)
             mesh_data.update()
@@ -1018,8 +1087,12 @@ class BlenderSceneBuilder:
 
             # Per-loop normals (face_normals is 3 entries per face,
             # already render_space-transformed by flatten_lod).
-            if fm.face_normals and len(fm.face_normals) == len(mesh_data.loops):
-                mesh_data.normals_split_custom_set([tuple(n) for n in fm.face_normals])
+            face_normals = cpp_face_normals.get(part_idx, fm.face_normals)
+            if face_normals and len(face_normals) == len(mesh_data.loops):
+                mesh_data.normals_split_custom_set([tuple(n) for n in face_normals])
+                normal_attr = mesh_data.attributes.new("ase_corner_normals", "FLOAT_VECTOR", "CORNER")
+                for loop_idx, normal in enumerate(face_normals):
+                    normal_attr.data[loop_idx].vector = tuple(normal)
 
             # UV channels (per-corner, 3 entries per face, V-flipped by flatten_lod).
             if fm.face_uvs0:
@@ -1055,7 +1128,12 @@ class BlenderSceneBuilder:
             mesh_obj = bpy.data.objects.new(mesh_name, mesh_data)
             bpy.context.collection.objects.link(mesh_obj)
             mesh_obj.parent = part_nodes[part_idx]
-            mesh_obj["_part_index"] = part_idx
+            if uses_cpp_vertices:
+                # Native flat vertices are already in render/world space.
+                # Keep display/export geometry at identity while retaining PN
+                # parenting for scene organization and ASE NODE_PARENT.
+                mesh_obj.matrix_parent_inverse = part_nodes[part_idx].matrix_world.inverted()
+                mesh_obj.matrix_world = Matrix.Identity(4)
             if track_bone_data:
                 self._mesh_bone_data[mesh_obj.name] = fm.vertex_bone_data
 
@@ -1067,20 +1145,6 @@ class BlenderSceneBuilder:
         """Import LODs 1+ as separate root hierarchies, hidden by default."""
         if self.ir.lod_count <= 1:
             return
-
-        # Build material name manifest for _material_names property
-        mat_names = []
-        for i in range(int(self.ir.material_count)):
-            mat = self.ir.materials[i]
-            shader = mat.shader_name.decode("utf-8", errors="replace").rstrip("\x00")
-            if not shader:
-                shader = "FF_ST_OP"
-            mat_names.append(f"Material_{i}_{shader}")
-        mat_names_str = ";".join(mat_names)
-
-        # Store on LOD 0 root too
-        if self.root_object:
-            self.root_object["_material_names"] = mat_names_str
 
         for lod_idx in range(1, int(self.ir.lod_count)):
             lod = self.ir.lods[lod_idx]
@@ -1094,8 +1158,6 @@ class BlenderSceneBuilder:
             lod_root.empty_display_type = 'PLAIN_AXES'
             lod_root.empty_display_size = 0.1
             bpy.context.collection.objects.link(lod_root)
-            lod_root["_lod_index"] = lod_idx
-            lod_root["_material_names"] = mat_names_str
             lod_root.hide_viewport = True
 
             # Build part hierarchy for this LOD
@@ -1108,24 +1170,19 @@ class BlenderSceneBuilder:
                 bpy.context.collection.objects.link(part_obj)
                 lod_part_nodes[i] = part_obj
 
+            abs_positions = [
+                render_space(Vector(lod.parts[i].abs_position))
+                for i in range(num_parts)
+            ]
+
             for i in range(num_parts):
                 part = lod.parts[i]
                 part_obj = lod_part_nodes[i]
 
-                abs_pos = render_space(Vector(part.abs_position))
-                rel_pos = render_space(Vector(part.rel_position))
+                abs_pos = abs_positions[i]
 
-                parent = lod_root
-                if (part.parent_index >= 0 and
-                    part.parent_index < num_parts and
-                    part.parent_index != i):
-                    parent = lod_part_nodes[part.parent_index]
-
-                part_obj.parent = parent
-                if parent == lod_root:
-                    part_obj.location = abs_pos
-                else:
-                    part_obj.location = rel_pos
+                part_obj.parent = lod_root
+                part_obj.location = abs_pos
 
             # Create meshes for this LOD (shared material_dict)
             lod_meshes = self._create_meshes_for_lod(
@@ -1150,11 +1207,12 @@ class BlenderSceneBuilder:
                     if mi != 0xFF and mi < int(self.ir.matrix_count):
                         rot = _mtrx_to_center_rotation(self.ir.matrices[mi].m)
                         if rot is not None:
-                            center_obj.matrix_local = rot
+                            center_obj.matrix_basis = Matrix.Identity(4)
+                            center_obj.matrix_parent_inverse = rot
+                        else:
+                            center_obj.scale = (0.0, 0.0, 0.0)
                     else:
-                        # Preserve "no matrix" centers so export can emit a
-                        # PANM matrix index of 0xFF.
-                        center_obj["opennova_zero_axis"] = True
+                        center_obj.scale = (0.0, 0.0, 0.0)
 
             # Create attach point markers (~XXx attach) for child parts
             pi_counter: dict[int, int] = {}
@@ -1190,13 +1248,14 @@ class BlenderSceneBuilder:
         return name if name else None
 
     def _create_material(self, ir_mat):
-        from pyopennova.materials import describe_material, material_user_props
+        from pyopennova.materials import describe_material
 
         desc = describe_material(
             ir_mat,
             resolver=self.resolver,
             ctrl_resolver=self._resolve_ctrl_reg,
             source_format=getattr(self.ir, "source_format", None),
+            uv1_tiling_override=self._uv1_tilings.get(int(getattr(ir_mat, "index", 0))),
         )
         mat = bpy.data.materials.new(f"Material_{desc.index}")
         mat.use_nodes = True
@@ -1218,14 +1277,27 @@ class BlenderSceneBuilder:
             bsdf.inputs["Specular"].default_value = 0.0
 
         mat.name = desc.name
-        for key, value in material_user_props(desc).items():
-            mat[key] = _blender_prop_value(value)
-
         # Default diffuse matching 3ds Max Standard material (0.588)
         mat.diffuse_color = (0.588, 0.588, 0.588, 1.0)
 
-        if desc.two_sided:
-            mat.use_backface_culling = False
+        mat.use_backface_culling = not desc.two_sided
+
+        def _assign_image(node, tex_desc, tex_path):
+            if tex_path:
+                existing = bpy.data.images.get(os.path.basename(tex_path))
+                if existing:
+                    node.image = existing
+                else:
+                    node.image = bpy.data.images.load(tex_path)
+                return node.image
+
+            existing = bpy.data.images.get(tex_desc.name)
+            if existing:
+                node.image = existing
+            else:
+                node.image = bpy.data.images.new(tex_desc.name, width=1, height=1, alpha=True)
+                node.image.filepath = tex_desc.name
+            return node.image
 
         # Find and load diffuse texture for Blender viewport display
         tex_node = None
@@ -1233,24 +1305,18 @@ class BlenderSceneBuilder:
         if diffuse_bitmap:
             tex_path = desc.diffuse.path
             print(f"[TEX] mat={desc.index} diffuse={diffuse_bitmap!r} -> {tex_path}")
-            if tex_path:
-                tex_node = mat.node_tree.nodes.new("ShaderNodeTexImage")
-                tex_node.name = f"Diffuse_{diffuse_bitmap}"
-                try:
-                    existing = bpy.data.images.get(os.path.basename(tex_path))
-                    if existing:
-                        tex_node.image = existing
-                    else:
-                        tex_node.image = bpy.data.images.load(tex_path)
-                    img = tex_node.image
-                    print(f"[TEX] Loaded image: {img.name} size={img.size[0]}x{img.size[1]} channels={img.channels}")
-                    mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Base Color"])
+            tex_node = mat.node_tree.nodes.new("ShaderNodeTexImage")
+            tex_node.name = f"Diffuse_{diffuse_bitmap}"
+            try:
+                img = _assign_image(tex_node, desc.diffuse, tex_path)
+                print(f"[TEX] Image: {img.name} size={img.size[0]}x{img.size[1]} channels={img.channels}")
+                mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Base Color"])
 
-                    if desc.alpha_test:
-                        mat.node_tree.links.new(tex_node.outputs["Alpha"], bsdf.inputs["Alpha"])
-                        mat.blend_method = "CLIP"
-                except Exception as e:
-                    print(f"Failed to load texture {tex_path}: {e}")
+                if desc.alpha_test:
+                    mat.node_tree.links.new(tex_node.outputs["Alpha"], bsdf.inputs["Alpha"])
+                    mat.blend_method = "CLIP"
+            except Exception as e:
+                print(f"Failed to load texture {tex_path or diffuse_bitmap}: {e}")
 
         # Blend mode (overrides CLIP for true alpha-blend materials).
         # Drive from desc.renderer_blend so glass tags (FFP_GLASS, VS_BMTXMIRRT,
@@ -1271,16 +1337,33 @@ class BlenderSceneBuilder:
             if tex_node and "Emission Color" in bsdf.inputs:
                 mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Emission Color"])
 
-        # Detail/lightmap texture (slot 2): record metadata only. The diffuse
-        # Color → Base Color link stays so the viewport keeps showing the
-        # diffuse texture. A future revision will compose the detail layer via
-        # ShaderNodeMix (the modern A/B/Result API) once it is smoke-tested
-        # against Blender 5.x with real DDS textures and the right blend mode
-        # for FF_MT_* slot-1 overlays is verified.
+        # Detail/lightmap texture (slot 2): add a named detail image node.
+        # Diffuse Color -> Base Color stays linked for viewport display.
+        # The ASE exporter discovers detail from scene state rather than metadata.
         if desc.detail.name:
-            mat["opennova_detail_texture_path"] = desc.detail.path or ""
-            mat["opennova_has_detail_map"] = 1 if desc.detail.path else 0
-            mat["opennova_detail_map_mode"] = "metadata_only"
+            tex_path = desc.detail.path
+            try:
+                detail_node = mat.node_tree.nodes.new("ShaderNodeTexImage")
+                detail_node.name = f"Detail_{desc.detail.name}"
+                detail_node.label = f"Detail {desc.detail.name}"
+                _assign_image(detail_node, desc.detail, tex_path)
+                if (abs(desc.effective_u1_tiling - 1.0) > 1e-6 or
+                        abs(desc.effective_v1_tiling - 1.0) > 1e-6):
+                    uv_node = mat.node_tree.nodes.new("ShaderNodeUVMap")
+                    uv_node.name = "Detail_UVMap"
+                    uv_node.label = "Detail UVMap"
+                    mapping = mat.node_tree.nodes.new("ShaderNodeMapping")
+                    mapping.name = "Detail_UV_Tiling"
+                    mapping.label = "Detail UV Tiling"
+                    mapping.inputs["Scale"].default_value = (
+                        desc.effective_u1_tiling,
+                        desc.effective_v1_tiling,
+                        1.0,
+                    )
+                    mat.node_tree.links.new(uv_node.outputs["UV"], mapping.inputs["Vector"])
+                    mat.node_tree.links.new(mapping.outputs["Vector"], detail_node.inputs["Vector"])
+            except Exception as e:
+                print(f"Failed to load detail texture {tex_path or desc.detail.name}: {e}")
 
         # Wire bump/normal map (slot 3)
         # NovaLogic's engine uses height-based bump mapping, NOT tangent-space
@@ -1337,7 +1420,7 @@ class BlenderSceneBuilder:
                 bsdf.inputs["IOR"].default_value = 1.45
             rc = desc.reflect_color
             if rc[0] != 0.0 or rc[1] != 0.0 or rc[2] != 0.0:
-                mat["reflect_color"] = [rc[0], rc[1], rc[2], rc[3]]
+                mat.diffuse_color = (rc[0], rc[1], rc[2], rc[3] if rc[3] else 1.0)
 
         # Specular intensity — in the NovaLogic engine, specular is only active
         # when shader_type selects a bump+specular or phong+specular mode.
@@ -1380,6 +1463,9 @@ class BlenderSceneBuilder:
             # Wire mapping output to all existing texture image nodes
             for node in mat.node_tree.nodes:
                 if node.type == "TEX_IMAGE":
+                    marker = f"{node.name} {getattr(node, 'label', '')}".lower()
+                    if "detail" in marker:
+                        continue
                     mat.node_tree.links.new(mapping.outputs["Vector"], node.inputs["Vector"])
 
         return mat
@@ -1427,19 +1513,19 @@ class BlenderSceneBuilder:
             bpy.context.collection.objects.link(center_obj)
             center_obj.parent = part_node
 
-            # Apply rotation from MTRX if available (preserves center axis
-            # through the Blender → ASE → convert_internal roundtrip).
+            # Apply rotation from MTRX if available.
             if (i < int(lod0.part_animation_count) and
                     int(self.ir.matrix_count) > 0):
                 mi = lod0.part_animations[i].matrix_index
                 if mi != 0xFF and mi < int(self.ir.matrix_count):
                     rot = _mtrx_to_center_rotation(self.ir.matrices[mi].m)
                     if rot is not None:
-                        center_obj.matrix_local = rot
+                        center_obj.matrix_basis = Matrix.Identity(4)
+                        center_obj.matrix_parent_inverse = rot
+                    else:
+                        center_obj.scale = (0.0, 0.0, 0.0)
                 else:
-                    # Preserve "no matrix" centers so export can emit a
-                    # PANM matrix index of 0xFF.
-                    center_obj["opennova_zero_axis"] = True
+                    center_obj.scale = (0.0, 0.0, 0.0)
 
         # Create tilde attachment point objects (~01a, ~01b, etc.)
         num_parts = int(lod0.part_count)
@@ -1507,35 +1593,12 @@ class BlenderSceneBuilder:
                 parent_node = self.part_nodes[up.part_index]
                 up_pos = up_pos - Vector(parent_node.matrix_world.translation)
 
-            marker_obj.location = up_pos
-
-            # Direction: same coordinate mapping as position.
-            raw_dir = Vector(up.direction)
-            z_axis = Vector((raw_dir[0], -raw_dir[2], raw_dir[1])).normalized()
-            if z_axis.length_squared > 1e-6:
-                # Construct orthonormal basis from Z-axis direction
-                world_up = Vector((0.0, 0.0, 1.0))
-                if abs(z_axis.dot(world_up)) > 0.999:
-                    world_up = Vector((0.0, 1.0, 0.0))
-                x_axis = world_up.cross(z_axis).normalized()
-                y_axis = z_axis.cross(x_axis).normalized()
-                rot_mat = Matrix((
-                    (x_axis.x, y_axis.x, z_axis.x),
-                    (x_axis.y, y_axis.y, z_axis.y),
-                    (x_axis.z, y_axis.z, z_axis.z),
-                )).to_3x3()
-                marker_obj.rotation_euler = rot_mat.to_euler()
-
             parent_node = self.root_object
             if up.part_index >= 0 and up.part_index < len(self.part_nodes):
                 parent_node = self.part_nodes[up.part_index]
             marker_obj.parent = parent_node
-
-            marker_obj["nl_ase_name"] = marker_name  # original before Blender dedup
-            marker_obj["nl_raw_position"] = tuple(up.position)
-            marker_obj["nl_raw_direction"] = tuple(up.direction)
-            marker_obj["nl_parent_index"] = int(up.part_index)
-            marker_obj["nl_type_code"] = int(up.type_code)
+            marker_obj.matrix_basis = Matrix.Identity(4)
+            marker_obj.matrix_parent_inverse = _userpoint_local_matrix(up, up_pos)
 
     def create_scene_lights(self):
         """Create light objects from the 3DI3 model's light data."""
@@ -1544,7 +1607,8 @@ class BlenderSceneBuilder:
             light_idx = light.part_index if light.part_index >= 0 else i
             light_name = f"LP{light_idx + 1:02d}"
 
-            light_data = bpy.data.lights.new(name=f"{light_name}_data", type="POINT")
+            light_kind = "SPOT" if light.light_type != 0 or light.falloff > 0 else "POINT"
+            light_data = bpy.data.lights.new(name=f"{light_name}_data", type=light_kind)
             light_obj = bpy.data.objects.new(light_name, light_data)
 
             light_data.color = light_color_rgb(light)
@@ -1559,17 +1623,13 @@ class BlenderSceneBuilder:
             # Convert position to Blender space
             light_obj.location = render_space(Vector(light.offset))
 
-            # Store light fields as custom properties for round-trip export
-            if light.attenuation_start > 0:
-                light_obj["atten_start"] = float(light.attenuation_start)
-            if light.falloff > 0:
-                light_obj["falloff"] = float(light.falloff)
             rot_bl = render_space(Vector((light.rotation[0],
                                         light.rotation[1],
                                         light.rotation[2])))
-            light_obj["tm_row2"] = [rot_bl.x, rot_bl.y, rot_bl.z]
-            if light.light_type != 0:
-                light_obj["light_type"] = int(light.light_type)
+            if rot_bl.length_squared > 1e-8:
+                light_obj.rotation_euler = rot_bl.normalized().to_track_quat("-Z", "Y").to_euler()
+            if light_kind == "SPOT":
+                light_data.spot_size = math.radians(float(light.falloff) * 2.0)
 
             # Store light colorgen fields as custom properties for 3dp round-trip
             if light.style != 0:

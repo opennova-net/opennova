@@ -285,12 +285,22 @@ int object_ir_to_flat_meshes_v2(const Threedi3di3* ir, int lod_index,
                     per_vert.push_back({fm->part_index, 1.0f});
                 }
 
-                // Sort by bone_index ascending (mirrors Python _pack_weights line 1029:
-                // clean.sort(key=lambda item: item[0])).
+                // Blender and Max skin modifiers cannot represent duplicate
+                // influences for the same bone. Merge duplicates here so the
+                // direct ASE path matches what a DCC scene can faithfully store.
                 std::sort(per_vert.begin(), per_vert.end(),
                           [](const InflEntry& a, const InflEntry& b) {
                               return a.bone_index < b.bone_index;
                           });
+                std::vector<InflEntry> merged;
+                for (const InflEntry& e : per_vert) {
+                    if (!merged.empty() && merged.back().bone_index == e.bone_index) {
+                        merged.back().weight += e.weight;
+                    } else {
+                        merged.push_back(e);
+                    }
+                }
+                per_vert.swap(merged);
 
                 // Cap at 4 (Python _pack_weights[:4]).
                 if ((int)per_vert.size() > 4) per_vert.resize(4);

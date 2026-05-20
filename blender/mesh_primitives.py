@@ -10,7 +10,11 @@ from pyopennova.mesh_primitives import cube_mesh, direction_arrow_mesh
 
 def create_cube_mesh(mesh_data, size):
     """Fill ``mesh_data`` with an origin-centred cube of edge length ``size``."""
-    verts, faces = cube_mesh(size)
+    verts, quads = cube_mesh(size)
+    faces = []
+    for q0, q1, q2, q3 in quads:
+        faces.append((q0, q1, q2))
+        faces.append((q0, q2, q3))
     mesh_data.from_pydata(verts, [], faces)
     mesh_data.update()
 

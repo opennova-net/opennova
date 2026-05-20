@@ -957,7 +957,7 @@ static void build_collision_model(const LodBucketWorkspace &workspace,
   }
 
   // BPLN/BVOL from collisions (non-occlusion).
-  // Collision volume (-colonly) meshes live on LOD0, not the BulletLOD.
+  // Collision volume (-colonly) meshes live on LOD0.
   // Use LOD0's collision data when available.
   const auto &bpln_lod = lod0_workspace ? lod0_workspace->lod : lod;
   std::vector<ThreediBoundingPlane> planes;

@@ -9,7 +9,7 @@ descriptor ? Principled-BSDF mapping for the canonical shader-tag matrix:
 - FF_ST_AB without alpha-test: BLEND blend method (renderer_blend path)
 - FFP_GLASS: BLEND via renderer_blend (not numeric blend_mode)
 - VS_PHONGT diffuse-only: ShaderNodeBump from diffuse alpha
-- FF_MT_OP with diffuse + detail: MixRGB Multiply node tree
+- FF_MT_OP with diffuse + detail: visible detail image node
 """
 from __future__ import annotations
 
@@ -233,13 +233,9 @@ def test_vs_phongt_diffuse_only_no_bump_node(tmp_path: Path):
     assert _link_exists(mat.node_tree, "Color", "Base Color")
 
 
-def test_ff_mt_op_detail_records_metadata_only(tmp_path: Path):
-    """FF_MT_OP with diffuse + detail keeps the diffuse ? Base Color link
-    intact and records the detail texture as a Blender custom property. The
-    MixRGB Multiply node tree the importer used to build is gone � it relied
-    on the deprecated ShaderNodeMixRGB sockets and silently dropped the
-    diffuse link in Blender 5.x, leaving the BSDF unlit. A real ShaderNodeMix
-    composite is future work."""
+def test_ff_mt_op_detail_creates_visible_detail_image_node(tmp_path: Path):
+    """FF_MT_OP with diffuse + detail keeps the diffuse image visible while
+    making the detail texture discoverable from Blender scene state."""
     diffuse = tmp_path / "Wall.png"
     detail = tmp_path / "Detail.png"
     diffuse.write_bytes(_minimal_png())
@@ -261,13 +257,27 @@ def test_ff_mt_op_detail_records_metadata_only(tmp_path: Path):
     assert _get_node(mat.node_tree, "ShaderNodeMixRGB") is None
     assert _get_node(mat.node_tree, "ShaderNodeMix") is None
 
-    # Diffuse Color ? BSDF Base Color link survives � viewport sees diffuse.
+    # Diffuse Color -> BSDF Base Color link survives; viewport sees diffuse.
     assert _link_exists(mat.node_tree, "Color", "Base Color")
 
-    # Detail texture is recorded as metadata only.
-    assert mat["opennova_detail_map_mode"] == "metadata_only"
-    assert mat["opennova_has_detail_map"] == 1
-    assert mat["opennova_detail_texture_path"].endswith("Detail.png")
+    detail_nodes = [
+        node for node in mat.node_tree.nodes
+        if node.bl_idname == "ShaderNodeTexImage" and node.name.startswith("Detail_")
+    ]
+    assert len(detail_nodes) == 1
+    assert detail_nodes[0].image is not None
+    assert detail_nodes[0].image.filepath.endswith("Detail.png")
+
+    assert "opennova_detail_map_mode" not in mat.keys()
+    assert "opennova_has_detail_map" not in mat.keys()
+    assert "opennova_detail_texture_path" not in mat.keys()
+
+    from blender.ase_exporter import AseExporter
+
+    detail_path, detail_image = AseExporter()._find_detail_from_nodes(mat)
+
+    assert detail_path.endswith("Detail.png")
+    assert detail_image == detail_nodes[0].image
 
 
 # ---------------------------------------------------------------------------

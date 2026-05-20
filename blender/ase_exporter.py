@@ -17,6 +17,7 @@ import bpy
 import bmesh
 import math
 import os
+import re
 import traceback
 from mathutils import Vector
 from pyopennova import ase_ffi
@@ -34,6 +35,10 @@ class MaterialKeeper:
         self.materials = []
         self.material_map = {}
         self.object_material_map = {}
+
+    @staticmethod
+    def _is_source_material(material):
+        return MaterialKeeper._ir_index(material) != 999999
 
     @staticmethod
     def _ir_index(material):
@@ -57,6 +62,8 @@ class MaterialKeeper:
         """Register a material if it's not already present. Returns material index."""
         if material is None:
             return -1
+        if not self._is_source_material(material):
+            return -1
         if material in self.material_map:
             return self.material_map[material]
         idx = len(self.materials)
@@ -76,7 +83,7 @@ class MaterialKeeper:
 
         first_idx = -1
         for mat in obj.data.materials:
-            if mat is not None:
+            if mat is not None and self._is_source_material(mat):
                 idx = self.add_material(mat)
                 if first_idx == -1:
                     first_idx = idx
@@ -148,38 +155,157 @@ class AseExporter:
                 setattr(self, key, value)
 
     @staticmethod
-    def _is_descendant_of(obj, root):
-        """Check if obj is a descendant of root (or is root itself)."""
-        cur = obj
-        while cur is not None:
-            if cur == root:
-                return True
-            cur = cur.parent
-        return False
+    def _is_visible(obj):
+        visible_get = getattr(obj, "visible_get", None)
+        if callable(visible_get):
+            try:
+                if not visible_get():
+                    return False
+            except TypeError:
+                pass
+        current = obj
+        while current is not None:
+            if getattr(current, "hide_viewport", False):
+                return False
+            hidden_get = getattr(current, "hide_get", None)
+            if callable(hidden_get):
+                try:
+                    if hidden_get():
+                        return False
+                except TypeError:
+                    pass
+            current = getattr(current, "parent", None)
+        return True
+
+    @classmethod
+    def _is_part_dummy(cls, obj):
+        name = cls._clean_blender_duplicate_suffix(obj.name)
+        return obj.type == 'EMPTY' and re.match(r"^PN\d{2}$", name) is not None
+
+    @classmethod
+    def _is_render_mesh(cls, obj):
+        name = cls._clean_blender_duplicate_suffix(obj.name)
+        return obj.type == 'MESH' and re.match(r"^\d{2} Mesh\d+$", name) is not None
+
+    @classmethod
+    def _is_helper_mesh(cls, obj):
+        return obj.type == 'MESH' and not cls._is_render_mesh(obj)
+
+    @classmethod
+    def _visible_meshes(cls, scene):
+        return [o for o in scene.objects if o.type == 'MESH' and cls._is_visible(o)]
+
+    @classmethod
+    def _part_dummy_objects(cls, scene):
+        return sorted(
+            [o for o in scene.objects if cls._is_part_dummy(o) and cls._is_visible(o)],
+            key=cls._part_dummy_sort_key,
+        )
+
+    @classmethod
+    def _ordered_mesh_objects(cls, scene):
+        meshes = [
+            (idx, obj)
+            for idx, obj in enumerate(scene.objects)
+            if obj.type == 'MESH' and cls._is_visible(obj)
+        ]
+        return [
+            obj for _, obj in sorted(
+                meshes,
+                key=lambda item: cls._mesh_sort_key(item[1], item[0]),
+            )
+        ]
+
+    @classmethod
+    def _ordered_render_meshes(cls, scene):
+        return [o for o in cls._ordered_mesh_objects(scene) if cls._is_render_mesh(o)]
+
+    @classmethod
+    def _ordered_helper_meshes(cls, scene):
+        return [o for o in cls._ordered_mesh_objects(scene) if cls._is_helper_mesh(o)]
+
+    @classmethod
+    def _part_dummy_sort_key(cls, obj):
+        name = cls._clean_blender_duplicate_suffix(obj.name)
+        return cls._leading_number_key(name), name
+
+    @classmethod
+    def _mesh_sort_key(cls, obj, scene_index=0):
+        name = cls._clean_blender_duplicate_suffix(obj.name)
+        group = cls._mesh_group(name)
+        if group == 4:
+            return (group, cls._userpoint_sort_key(name), scene_index)
+        if group in (3, 5, 6):
+            return (group, scene_index, name)
+        return (group, cls._leading_number_key(name), name)
 
     @staticmethod
-    def _find_lod_roots(scene):
-        """Find additional LOD root empties (those with _lod_index > 0)."""
-        roots = []
-        for obj in scene.objects:
-            if obj.type == 'EMPTY' and "_lod_index" in obj and obj["_lod_index"] > 0:
-                roots.append(obj)
-        roots.sort(key=lambda o: o["_lod_index"])
-        return roots
+    def _leading_number_key(name):
+        match = re.search(r"\d+", name)
+        return int(match.group(0)) if match else 999999
 
     @staticmethod
-    def _find_lod0_root(scene):
-        """Find the LOD 0 root empty (the one with _lod_index == 0)."""
-        for obj in scene.objects:
-            if obj.type == 'EMPTY' and "_lod_index" in obj and obj["_lod_index"] == 0:
-                return obj
-        return None
+    def _userpoint_sort_key(name):
+        match = re.match(r"^(UP(.|$)|USR)(\d{2})(?:\s+(.*))?$", name)
+        if not match:
+            return (0, 0, name.casefold())
+        prefix = match.group(1)
+        type_code = 0
+        if prefix.startswith("UP") and len(prefix) >= 3:
+            type_code = ord(prefix[2])
+        part_index = int(match.group(3)) - 1
+        label = (match.group(4) or "").casefold()
+        return (-part_index, type_code, label)
+
+    @staticmethod
+    def _mesh_group(name):
+        if re.match(r"^\d{2} Mesh\d+$", name):
+            return 0
+        if re.match(r"^_\d{2} center$", name):
+            return 2
+        if name.startswith("~") and " attach" in name:
+            return 3
+        if name.startswith("UP") or name.startswith("USR"):
+            return 4
+        if "-colonly" in name:
+            return 5
+        if "-occonly" in name:
+            return 6
+        return 9
+
+    @classmethod
+    def _is_unrotated_marker_mesh(cls, obj):
+        name = cls._clean_blender_duplicate_suffix(obj.name)
+        return (
+            re.match(r"^_\d{2} center$", name) is not None
+            or (name.startswith("~") and " attach" in name)
+            or name.startswith("UP")
+            or name.startswith("USR")
+        )
+
+    @classmethod
+    def _uses_absolute_render_mesh_vertices(cls, obj):
+        return (
+            cls._is_render_mesh(obj)
+            and obj.parent is not None
+            and cls._is_part_dummy(obj.parent)
+            and cls._matrix_is_identity(obj.matrix_world)
+        )
+
+    @staticmethod
+    def _matrix_is_identity(matrix, tolerance=1e-8):
+        for r in range(4):
+            for c in range(4):
+                expected = 1.0 if r == c else 0.0
+                if abs(matrix[r][c] - expected) > tolerance:
+                    return False
+        return True
 
     def export_scene(self, scene, filepath):
         """Export scene to ASE file via native C writer.
 
-        Exports LOD 0 to the primary filepath, then exports any additional
-        LOD roots (with _lod_index > 0) to {stem}_lod{N}.ase files.
+        Exports the currently visible/exportable scene to the primary filepath.
+        Export one LOD at a time by hiding or excluding other LOD scene roots.
         """
         self.scene = scene
 
@@ -194,36 +320,30 @@ class AseExporter:
                 print(f"ASE Export: Creating directory {output_dir}")
                 os.makedirs(output_dir, exist_ok=True)
 
-            # Phase 1: Preprocess (count objects, register materials from ALL LODs)
+            # Phase 1: Preprocess visible exportable objects and materials.
             print(f"ASE Export: Preprocessing scene")
             self.preprocess_scene()
             print(f"ASE Export: Found {self.total_node_count} exportable objects")
 
-            # Identify LOD 0 root to filter meshes
-            lod0_root = self._find_lod0_root(scene)
-            lod_extra_roots = self._find_lod_roots(scene)
+            # Phase 2: Count entities for C document allocation.
+            render_mesh_objects = self._ordered_render_meshes(scene)
+            part_dummy_objects = self._part_dummy_objects(scene)
+            helper_mesh_objects = self._ordered_helper_meshes(scene)
+            mesh_objects = render_mesh_objects + helper_mesh_objects
 
-            # Phase 2: Count entities for C document allocation (LOD 0 only)
-            all_mesh_objects = [o for o in scene.objects if o.type == 'MESH']
-            if lod0_root and lod_extra_roots:
-                # Filter to only LOD 0 meshes (descendants of lod0_root)
-                mesh_objects = [o for o in all_mesh_objects
-                                if self._is_descendant_of(o, lod0_root)]
-            else:
-                mesh_objects = all_mesh_objects
-
-            light_objects = [o for o in scene.objects if o.type == 'LIGHT']
+            light_objects = [o for o in scene.objects if o.type == 'LIGHT' and self._is_visible(o)]
             bone_list = []
             for o in scene.objects:
-                if o.type == 'ARMATURE' and o.pose:
+                if o.type == 'ARMATURE' and o.pose and self._is_visible(o):
                     for bone in sorted(o.pose.bones, key=lambda b: b.name):
                         bone_list.append((o, bone))
 
-            total_objects = len(mesh_objects) + len(bone_list)
+            total_objects = len(render_mesh_objects) + len(part_dummy_objects) + len(helper_mesh_objects) + len(bone_list)
             total_materials = self.material_keeper.count() if self.include_materials else 0
             total_lights = len(light_objects)
 
-            print(f"ASE Export: {total_objects} objects ({len(mesh_objects)} meshes, "
+            print(f"ASE Export: {total_objects} objects ({len(render_mesh_objects)} render meshes, "
+                  f"{len(part_dummy_objects)} PN dummies, {len(helper_mesh_objects)} helpers, "
                   f"{len(bone_list)} bones), {total_materials} materials, {total_lights} lights")
 
             # Phase 3: Create and populate C document
@@ -250,8 +370,18 @@ class AseExporter:
                 self._populate_bone_object(doc.objects[obj_idx], arm_obj, bone)
                 obj_idx += 1
 
-            for mesh_obj in mesh_objects:
+            for mesh_obj in render_mesh_objects:
                 print(f"ASE Export: Populating geometry '{mesh_obj.name}'")
+                self._populate_geometry(doc.objects[obj_idx], mesh_obj)
+                obj_idx += 1
+
+            for part_obj in part_dummy_objects:
+                print(f"ASE Export: Populating PN dummy '{part_obj.name}'")
+                self._populate_part_dummy_object(doc.objects[obj_idx], part_obj)
+                obj_idx += 1
+
+            for mesh_obj in helper_mesh_objects:
+                print(f"ASE Export: Populating helper geometry '{mesh_obj.name}'")
                 self._populate_geometry(doc.objects[obj_idx], mesh_obj)
                 obj_idx += 1
 
@@ -271,48 +401,7 @@ class AseExporter:
             if self.export_textures and self._texture_queue:
                 self._save_textures(output_dir or '.')
 
-            print(f"ASE Export: LOD 0 export completed successfully")
-
-            # Phase 6: Export additional LODs to separate ASE files
-            for lod_root in lod_extra_roots:
-                lod_idx = lod_root["_lod_index"]
-                stem, ext = os.path.splitext(filepath)
-                is_bullet = lod_root.name.endswith("_BulletLOD")
-                lod_filepath = f"{stem}_bullet{ext}" if is_bullet else f"{stem}_lod{lod_idx}{ext}"
-
-                lod_mesh_objects = [o for o in all_mesh_objects
-                                    if self._is_descendant_of(o, lod_root)]
-                if not lod_mesh_objects:
-                    print(f"ASE Export: LOD {lod_idx} has no meshes, skipping")
-                    continue
-
-                print(f"ASE Export: Exporting LOD {lod_idx} ({len(lod_mesh_objects)} meshes) "
-                      f"to {lod_filepath}")
-
-                lod_total = len(lod_mesh_objects)
-                lod_doc_mats = math.ceil(total_materials / self.SUBS_PER_SLOT) if total_materials > 0 else 0
-                lod_doc = ase_ffi.create_document(lod_total, lod_doc_mats, 0)
-                # Bullet collision LODs must be exported as non-skinned.
-                # OED's ConvertToInternalSkinned path ignores "~attach" markers
-                # and derives attach points from digit/node-id objects, which
-                # corrupts CXLT/COBJ for collision-only data (e.g. US01).
-                lod_has_skinned = has_skinned and not is_bullet
-                lod_doc.flags = 1 if lod_has_skinned else 0
-                lod_doc.skinned_flags = 1 if lod_has_skinned else 0
-
-                if self.include_materials:
-                    self._populate_materials(lod_doc)
-
-                for li, mesh_obj in enumerate(lod_mesh_objects):
-                    self._populate_geometry(lod_doc.objects[li], mesh_obj)
-
-                ase_ffi.write_file(lod_filepath, lod_doc)
-                for li2 in range(lod_doc.object_count):
-                    lod_doc.objects[li2].face_normals = None
-                    lod_doc.objects[li2].face_normal_count = 0
-                ase_ffi.free_document(lod_doc)
-
-                print(f"ASE Export: LOD {lod_idx} export completed")
+            print("ASE Export: Scene export completed successfully")
 
             return True
 
@@ -339,10 +428,11 @@ class AseExporter:
 
     def preprocess_scene(self):
         """Count nodes and prepare materials"""
+        self.material_keeper = MaterialKeeper()
         self.total_node_count = 0
 
         for obj in self.scene.objects:
-            if self.is_exportable_object(obj):
+            if self.is_exportable_object(obj) and self._is_visible(obj):
                 self.total_node_count += 1
 
                 # Register object materials
@@ -386,12 +476,7 @@ class AseExporter:
             parent.name = f"Scene_Materials_{slot_idx}".encode('utf-8')[:31]
             ase_ffi.alloc_submaterials(parent, count_in_slot)
 
-        # Shared ASE submaterial writer + descriptor reconstructor. Both the
-        # IR → ASE path (pyopennova/ase_from_ir.py) and this Blender → ASE
-        # path now go through populate_ase_submaterial so any change to ASE
-        # field semantics lives in exactly one place.
-        from pyopennova.ase_from_ir import populate_ase_submaterial
-        from pyopennova.materials import descriptor_from_user_props
+        from pyopennova.ase_material_writer import populate_ase_submaterial
 
         used_tex_names: dict[str, str] = {}
 
@@ -401,13 +486,12 @@ class AseExporter:
             local_idx = i % self.SUBS_PER_SLOT
             sub = doc.materials[slot_idx].submaterials[local_idx]
 
-            props = self._collect_material_props(material, has_skinned, i)
-            desc = descriptor_from_user_props(props)
+            desc = self._collect_material_descriptor(material, has_skinned, i)
             populate_ase_submaterial(sub, desc, used_tex_names=used_tex_names)
 
             # Blender-driven material colors override the shared writer's
             # defaults so the .ase reflects what the artist set in Blender.
-            if material:
+            if material and not MaterialKeeper._is_source_material(material):
                 diff = self._get_material_diffuse(material)
                 sub.diffuse[0], sub.diffuse[1], sub.diffuse[2] = diff
                 if not (desc.glass and any(desc.reflect_color[:3])):
@@ -425,24 +509,18 @@ class AseExporter:
                 f"{' detail=' + desc.detail.name if desc.detail.name else ''}"
             )
 
-    def _collect_material_props(self, material, has_skinned: bool, index: int) -> dict:
-        """Build a user-props dict for descriptor_from_user_props.
-
-        Materials imported via the OpenNova importer carry the full opennova_*
-        / ase_* prop set (placed by ``BlenderSceneBuilder._create_material``
-        through ``material_user_props``). For materials authored or modified in
-        Blender, we fall back to scanning the node tree for diffuse/detail
-        bitmap names and deriving a shader code.
-        """
-        props: dict = {}
-        if material:
-            for key in material.keys():
-                if key.startswith("opennova_") or key.startswith("ase_"):
-                    props[key] = material[key]
-
-        diffuse_bitmap = props.get("ase_diffuse_bitmap", "") or props.get(
-            "opennova_diffuse_texture_name", ""
+    def _collect_material_descriptor(self, material, has_skinned: bool, index: int):
+        """Build a descriptor from visible Blender material state."""
+        from pyopennova.materials import (
+            MATERIAL_BLEND_ALPHA,
+            MATERIAL_BLEND_OPAQUE,
+            MaterialDescriptor,
+            TextureDescriptor,
+            THREEDI_MATERIAL_FLAG_ALPHA_TEST,
+            classify_material_shader,
         )
+
+        diffuse_bitmap = ""
         diffuse_image = None
         if material and material.use_nodes and material.node_tree:
             found_name, found_image = self._find_bitmap_from_nodes(material)
@@ -451,9 +529,7 @@ class AseExporter:
             if not diffuse_bitmap and found_name:
                 diffuse_bitmap = found_name
 
-        detail_bitmap = props.get("ase_detail_bitmap", "") or props.get(
-            "opennova_detail_texture_name", ""
-        )
+        detail_bitmap = ""
         detail_image = None
         if material and material.use_nodes and material.node_tree:
             node_detail_bitmap, node_detail_image = self._find_detail_from_nodes(material)
@@ -473,28 +549,131 @@ class AseExporter:
         if detail_bitmap and detail_image:
             self._texture_queue[detail_bitmap] = detail_image
 
-        # Fill the descriptor's texture-name slots; the shared writer reads
-        # opennova_<role>_texture_name through descriptor_from_user_props.
-        props.setdefault("opennova_diffuse_texture_name", diffuse_bitmap or "")
-        if detail_bitmap:
-            props["opennova_detail_texture_name"] = detail_bitmap
-        # ASE bitmap aliases (kept for downstream consumers reading user props).
-        if diffuse_bitmap:
-            props.setdefault("ase_diffuse_bitmap", diffuse_bitmap)
-        if detail_bitmap:
-            props.setdefault("ase_detail_bitmap", detail_bitmap)
-
-        # Shader tag — original 3DI import shader if available, else derive.
-        shader_code = props.get("opennova_shader") or ""
+        shader_code = self._shader_from_material_name(material)
         if not shader_code:
             shader_code = self._derive_opennova_shader(material, has_skinned)
-        props["opennova_shader"] = shader_code
-        props.setdefault("opennova_material_index", index)
-        # Synthesised name matches the importer's pattern so OED's bucket
-        # deduplication stays stable: "Material_<index>_<shader_code>".
-        props.setdefault("ase_material_name", f"Material_{index}_{shader_code}")
 
-        return props
+        material_flags = 0
+        alpha_threshold = 0.0
+        renderer_blend = MATERIAL_BLEND_OPAQUE
+        if material:
+            blend_method = getattr(material, "blend_method", "OPAQUE")
+            if blend_method == "CLIP":
+                material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST
+                alpha_threshold = float(getattr(material, "alpha_threshold", 0.5))
+            elif blend_method not in ("OPAQUE", None):
+                renderer_blend = MATERIAL_BLEND_ALPHA
+
+        semantics = classify_material_shader(
+            shader_code,
+            material_flags=material_flags,
+            alpha_test_value_byte=int(round(alpha_threshold * 255.0)),
+        )
+        if renderer_blend == MATERIAL_BLEND_OPAQUE:
+            renderer_blend = semantics.blend
+
+        u_tile, v_tile, has_custom_tiling = self._collect_uv_tiling(material)
+        u1_tile, v1_tile = self._collect_detail_uv_tiling(material)
+        reflect_color = (0.0, 0.0, 0.0, 0.0)
+        if material and semantics.is_glass:
+            diff = tuple(float(v) for v in material.diffuse_color[:4])
+            if any(abs(diff[i] - 0.588) > 1e-4 for i in range(3)):
+                reflect_color = diff
+
+        return MaterialDescriptor(
+            index=index,
+            shader=shader_code,
+            name=self._material_export_name(material, index, shader_code),
+            diffuse=TextureDescriptor("diffuse", diffuse_bitmap or ""),
+            detail=TextureDescriptor("detail", detail_bitmap or ""),
+            material_flags=material_flags,
+            source_material_flags=material_flags,
+            alpha_test_value_byte=int(round(alpha_threshold * 255.0)),
+            alpha_threshold=alpha_threshold,
+            renderer_blend=renderer_blend,
+            alpha_test=bool(material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST),
+            two_sided=bool(material and not getattr(material, "use_backface_culling", True)),
+            emissive=semantics.is_emissive,
+            glass=semantics.is_glass,
+            reflect_color=reflect_color,
+            has_detail_slot=semantics.has_detail or bool(detail_bitmap),
+            phong_shader=semantics.family in ("phong", "environment", "glass"),
+            known_shader=semantics.known_shader,
+            shader_family=semantics.family,
+            resolved_shader=semantics.resolved_shader,
+            needs_normal_map=semantics.needs_normal_map,
+            normal_space=semantics.normal_space,
+            normal_uses_uv2=semantics.normal_uses_uv2,
+            uses_specular=semantics.uses_specular,
+            uses_environment=semantics.uses_environment,
+            is_luminance=semantics.is_luminance,
+            is_skinned=semantics.is_skinned,
+            u_tiling=0.0 if (u_tile == 1.0 and v_tile == 1.0) else u_tile,
+            v_tiling=0.0 if (u_tile == 1.0 and v_tile == 1.0) else v_tile,
+            effective_u_tiling=u_tile,
+            effective_v_tiling=v_tile,
+            effective_u1_tiling=u1_tile,
+            effective_v1_tiling=v1_tile,
+            has_custom_tiling=has_custom_tiling,
+        )
+
+    @staticmethod
+    def _collect_uv_tiling(material):
+        """Read diffuse UV tiling from Blender Mapping nodes."""
+        if not material or not material.use_nodes or not material.node_tree:
+            return 1.0, 1.0, False
+
+        for node in material.node_tree.nodes:
+            if node.type != 'MAPPING':
+                continue
+            marker = f"{node.name} {getattr(node, 'label', '')}".lower()
+            if "detail" in marker:
+                continue
+            scale_input = node.inputs.get("Scale")
+            if not scale_input:
+                continue
+            value = scale_input.default_value
+            u_tile = float(value[0])
+            v_tile = float(value[1])
+            has_custom = abs(u_tile - 1.0) > 1e-6 or abs(v_tile - 1.0) > 1e-6
+            return u_tile, v_tile, has_custom
+
+        return 1.0, 1.0, False
+
+    @staticmethod
+    def _collect_detail_uv_tiling(material):
+        """Read detail/lightmap UV tiling from the detail Mapping node."""
+        if not material or not material.use_nodes or not material.node_tree:
+            return 1.0, 1.0
+
+        for node in material.node_tree.nodes:
+            if node.type != 'MAPPING':
+                continue
+            marker = f"{node.name} {getattr(node, 'label', '')}".lower()
+            if "detail" not in marker:
+                continue
+            scale_input = node.inputs.get("Scale")
+            if not scale_input:
+                continue
+            value = scale_input.default_value
+            return float(value[0]), float(value[1])
+
+        for node in material.node_tree.nodes:
+            if node.type != 'TEX_IMAGE' or not node.image:
+                continue
+            marker = f"{node.name} {getattr(node, 'label', '')}".lower()
+            if "detail" not in marker:
+                continue
+            vector_input = node.inputs.get("Vector")
+            if vector_input and vector_input.is_linked:
+                from_node = vector_input.links[0].from_node
+                if from_node.type == 'MAPPING':
+                    scale_input = from_node.inputs.get("Scale")
+                    if scale_input:
+                        value = scale_input.default_value
+                        return float(value[0]), float(value[1])
+
+        return 1.0, 1.0
 
     # -------------------------------------------------------------------
     # Geometry population
@@ -528,12 +707,10 @@ class AseExporter:
             ase_ffi.alloc_object(ase_obj, vert_count, uv_count, face_count,
                                 color_count, weight_count)
 
-            # Metadata — prefer nl_ase_name (preserves original pre-dedup name)
-            raw_name = obj.get("nl_ase_name", obj.name)
-            export_name = self._export_name(raw_name)
+            export_name = self._export_name(obj.name)
             ase_obj.name = self.fixup_name(export_name).encode('utf-8')[:63]
             if obj.parent:
-                parent_name = self._export_name(obj.parent.get("nl_ase_name", obj.parent.name))
+                parent_name = self._export_name(obj.parent.name)
                 ase_obj.parent_name = self.fixup_name(parent_name).encode('utf-8')[:63]
             ase_obj.node_id = -1
             if obj.name.startswith("BN") and len(obj.name) >= 4 and obj.name[2:4].isdigit():
@@ -547,38 +724,55 @@ class AseExporter:
             # Compute which Multi/Sub-Object slot this object references.
             # material_ref selects the top-level slot; face.material_id selects
             # the submaterial within it.
-            if obj.data.materials and obj.data.materials[0] is not None:
+            if (obj.data.materials and obj.data.materials[0] is not None
+                    and MaterialKeeper._is_source_material(obj.data.materials[0])):
                 global_idx = self.material_keeper.get_global_index(obj.data.materials[0])
                 ase_obj.material_ref = global_idx // self.SUBS_PER_SLOT
+            elif self._is_helper_mesh(obj):
+                ase_obj.material_ref = -1
             else:
                 ase_obj.material_ref = 0
 
             # Build per-slot material_id lookup for multi-material meshes
             _slot_mat_ids = []
             for slot_mat in obj.data.materials:
-                if slot_mat is not None:
+                if slot_mat is not None and MaterialKeeper._is_source_material(slot_mat):
                     _slot_mat_ids.append(
                         self.material_keeper.get_global_index(slot_mat) % self.SUBS_PER_SLOT)
                 else:
                     _slot_mat_ids.append(0)
-            # Legacy OED keeps certain center markers as "no matrix" (all-zero
-            # axis rows), which maps to PANM matrix index 0xFF.
-            if bool(obj.get("opennova_zero_axis", False)):
-                for r in range(3):
-                    for c in range(3):
-                        ase_obj.tm_row[r][c] = 0.0
-                ase_obj.tm_row[3][0] = obj.matrix_world.translation.x * self.scale
-                ase_obj.tm_row[3][1] = obj.matrix_world.translation.y * self.scale
-                ase_obj.tm_row[3][2] = obj.matrix_world.translation.z * self.scale
-            else:
-                self._set_object_tm(ase_obj, obj.matrix_world)
+            tm_matrix = (
+                obj.parent.matrix_world
+                if self._uses_absolute_render_mesh_vertices(obj)
+                else obj.matrix_world
+            )
+            self._set_object_tm(ase_obj, tm_matrix)
+            clean_name = self._clean_blender_duplicate_suffix(obj.name)
+            if clean_name.startswith("UP") or clean_name.startswith("USR"):
+                if (
+                    ase_obj.tm_row[0][2] == 0.0
+                    and ase_obj.tm_row[0][1] == 0.0
+                    and ase_obj.tm_row[0][0] > 0.999999
+                ):
+                    ase_obj.tm_row[0][2] = -0.0
+                if (
+                    ase_obj.tm_row[2][1] == 0.0
+                    and ase_obj.tm_row[2][0] == 0.0
+                    and ase_obj.tm_row[2][2] > 0.999999
+                ):
+                    ase_obj.tm_row[2][1] = -0.0
 
             # Vertices (world-space, scaled)
             transform = obj.matrix_world
+            marker_verts_are_unrotated = self._is_unrotated_marker_mesh(obj)
+            marker_origin = transform.translation
             for i, v in enumerate(temp_mesh.vertices):
-                co = transform @ v.co
+                if marker_verts_are_unrotated:
+                    co = marker_origin + v.co
+                else:
+                    co = transform @ v.co
                 ase_obj.verts[i * 3] = co.x * self.scale
-                ase_obj.verts[i * 3 + 1] = co.y * self.scale
+                ase_obj.verts[i * 3 + 1] = self._ase_y(co.y * self.scale)
                 ase_obj.verts[i * 3 + 2] = co.z * self.scale
 
             # Faces
@@ -677,6 +871,13 @@ class AseExporter:
         if face_count == 0:
             return
 
+        normal_attr = (temp_mesh.attributes.get('ase_corner_normals')
+                       if hasattr(temp_mesh, 'attributes') else None)
+        if normal_attr and normal_attr.domain == 'CORNER':
+            self._populate_face_normals_from_attribute(
+                ase_obj, temp_mesh, neg_scale, world_matrix, normal_attr)
+            return
+
         # Check if custom split normals are available
         has_custom = hasattr(temp_mesh, 'has_custom_normals') and temp_mesh.has_custom_normals
         if not has_custom:
@@ -714,8 +915,50 @@ class AseExporter:
             self._face_normal_arrays = []
         self._face_normal_arrays.append(normals_array)
 
+    def _populate_face_normals_from_attribute(
+        self, ase_obj, temp_mesh, neg_scale, world_matrix, normal_attr
+    ):
+        face_count = len(temp_mesh.loop_triangles)
+        FloatArray = ctypes.c_float * (face_count * 9)
+        normals_array = FloatArray()
+
+        rot = world_matrix.to_3x3().normalized()
+        identity_rot = all(
+            abs(rot[r][c] - (1.0 if r == c else 0.0)) <= 1e-8
+            for r in range(3)
+            for c in range(3)
+        )
+
+        for i, tri in enumerate(temp_mesh.loop_triangles):
+            loops = list(reversed(tri.loops)) if neg_scale else list(tri.loops)
+
+            for j, loop_idx in enumerate(loops):
+                vec = normal_attr.data[loop_idx].vector
+                if identity_rot:
+                    x = float(vec[0])
+                    y = self._ase_y(float(vec[1]))
+                    z = float(vec[2])
+                else:
+                    n = rot @ Vector((vec[0], vec[1], vec[2]))
+                    if n.length_squared > 1e-12:
+                        n.normalize()
+                    x = float(n.x)
+                    y = self._ase_y(float(n.y))
+                    z = float(n.z)
+
+                base = i * 9 + j * 3
+                normals_array[base + 0] = x
+                normals_array[base + 1] = y
+                normals_array[base + 2] = z
+
+        ase_obj.face_normal_count = face_count
+        ase_obj.face_normals = ctypes.cast(normals_array, ctypes.POINTER(ctypes.c_float))
+        if not hasattr(self, '_face_normal_arrays'):
+            self._face_normal_arrays = []
+        self._face_normal_arrays.append(normals_array)
+
     def _collect_uv_data(self, temp_mesh, neg_scale):
-        """Collect deduplicated UV coordinates and per-face UV indices.
+        """Collect per-face-corner UV coordinates and per-face UV indices.
 
         Returns (uv_coords, uv_face_indices) where uv_coords is a list of
         (u, v) tuples and uv_face_indices is a list of (t0, t1, t2)
@@ -730,23 +973,16 @@ class AseExporter:
 
         uv_coords = []
         uv_faces = []
-        uv_map = {}
 
         for tri in temp_mesh.loop_triangles:
             face_uvs = []
             # Reverse loop order for negative scale to match winding reversal
             loops = list(reversed(tri.loops)) if neg_scale else list(tri.loops)
-            verts = list(reversed(tri.vertices)) if neg_scale else list(tri.vertices)
-            for loop_index, vert_index in zip(loops, verts):
+            for loop_index in loops:
                 uv = uv_layer.data[loop_index].uv
-                key = (vert_index, round(uv.x, 6), round(uv.y, 6))
-                if key not in uv_map:
-                    uv_map[key] = len(uv_coords)
-                    # No V-flip: ASE format uses 3ds Max convention (V=0 at bottom),
-                    # which matches Blender's convention. OED handles any V-flip
-                    # internally during ASE→3DI import.
-                    uv_coords.append((uv.x, uv.y))
-                face_uvs.append(uv_map[key])
+                # Match direct IR -> ASE: one TVERT per face corner.
+                face_uvs.append(len(uv_coords))
+                uv_coords.append((uv.x, uv.y))
 
             uv_faces.append(tuple(face_uvs))
 
@@ -827,14 +1063,7 @@ class AseExporter:
             # Preferred mapping: armature BN## names.
             if group.name in bone_number_map:
                 return bone_number_map[group.name]
-            # Fallback for synthetic/renamed rigs: explicit index cached
-            # when binding mesh weights.
-            idx = None
-            if hasattr(group, "get"):
-                idx = group.get("opennova_bone_index", None)
-            if isinstance(idx, (int, float)):
-                return int(idx)
-            # Last fallback: parse BN## directly from group name.
+            # Fallback: parse BN## directly from group name.
             if group.name.startswith("BN") and len(group.name) >= 4:
                 try:
                     return int(group.name[2:4]) - 1
@@ -879,6 +1108,56 @@ class AseExporter:
         return result
 
     # -------------------------------------------------------------------
+    # PN dummy population
+    # -------------------------------------------------------------------
+
+    def _populate_part_dummy_object(self, ase_obj, obj):
+        """Fill a PN## dummy cube from a Blender part Empty."""
+        half = 0.0005
+        verts = [
+            (-half, -half, -half),
+            ( half, -half, -half),
+            ( half,  half, -half),
+            (-half,  half, -half),
+            (-half, -half,  half),
+            ( half, -half,  half),
+            ( half,  half,  half),
+            (-half,  half,  half),
+        ]
+        faces = [
+            (0, 1, 2), (0, 2, 3),
+            (4, 7, 6), (4, 6, 5),
+            (0, 4, 5), (0, 5, 1),
+            (2, 6, 7), (2, 7, 3),
+            (1, 5, 6), (1, 6, 2),
+            (0, 3, 7), (0, 7, 4),
+        ]
+
+        ase_ffi.alloc_object(ase_obj, len(verts), 0, len(faces), 0, 0)
+        export_name = self._clean_blender_duplicate_suffix(obj.name)
+        ase_obj.name = self.fixup_name(export_name).encode('utf-8')[:63]
+        ase_obj.parent_name = b""
+        ase_obj.node_id = -1
+        ase_obj.material_ref = -1
+        ase_obj.skinned = 0
+        self._set_object_tm(ase_obj, obj.matrix_world)
+
+        origin = obj.matrix_world.translation
+        for i, v in enumerate(verts):
+            ase_obj.verts[i * 3] = (origin.x + v[0]) * self.scale
+            ase_obj.verts[i * 3 + 1] = self._ase_y((origin.y + v[1]) * self.scale)
+            ase_obj.verts[i * 3 + 2] = (origin.z + v[2]) * self.scale
+
+        for i, (a, b, c) in enumerate(faces):
+            face = ase_obj.faces[i]
+            face.vert[0], face.vert[1], face.vert[2] = a, b, c
+            face.smoothing_mask = 0
+            face.material_id = 0
+            face.edge_visibility[0] = 1
+            face.edge_visibility[1] = 1
+            face.edge_visibility[2] = 1
+
+    # -------------------------------------------------------------------
     # Bone object population
     # -------------------------------------------------------------------
 
@@ -888,9 +1167,9 @@ class AseExporter:
         if pose_bone.parent:
             parent_name = self._bone_export_name(pose_bone.parent.name)
         else:
-            parent_name = armature_obj.name
+            parent_name = ""
 
-        matrix_world = armature_obj.matrix_world @ pose_bone.matrix
+        origin = self._bone_export_origin(armature_obj, pose_bone, bone_name)
 
         # Bone mesh geometry (9 verts, 14 faces)
         base = 0.01
@@ -899,15 +1178,15 @@ class AseExporter:
         tip_z = 0.10
 
         verts_local = [
-            Vector(( base,  base, base_z)),
-            Vector(( base, -base, base_z)),
-            Vector((-base, -base, base_z)),
-            Vector((-base,  base, base_z)),
-            Vector(( tip,  tip,  tip_z)),
-            Vector(( tip, -tip,  tip_z)),
-            Vector((-tip, -tip,  tip_z)),
-            Vector((-tip,  tip,  tip_z)),
-            Vector((0.0, 0.0, 0.0)),
+            ( base,  base, base_z),
+            ( base, -base, base_z),
+            (-base, -base, base_z),
+            (-base,  base, base_z),
+            ( tip,  tip,  tip_z),
+            ( tip, -tip,  tip_z),
+            (-tip, -tip,  tip_z),
+            (-tip,  tip,  tip_z),
+            (0.0, 0.0, 0.0),
         ]
 
         face_indices = [
@@ -929,14 +1208,13 @@ class AseExporter:
             ase_obj.node_id = int(bone_name[2:4]) - 1
         ase_obj.material_ref = -1
 
-        self._set_object_tm(ase_obj, matrix_world)
+        self._set_identity_tm(ase_obj, origin)
 
-        # Vertices (world-space)
+        # Direct 3DI ASE uses an unrotated marker mesh offset by bone origin.
         for i, v in enumerate(verts_local):
-            w = matrix_world @ v
-            ase_obj.verts[i * 3] = w.x * self.scale
-            ase_obj.verts[i * 3 + 1] = w.y * self.scale
-            ase_obj.verts[i * 3 + 2] = w.z * self.scale
+            ase_obj.verts[i * 3] = (origin.x + v[0]) * self.scale
+            ase_obj.verts[i * 3 + 1] = (origin.y + v[1]) * self.scale
+            ase_obj.verts[i * 3 + 2] = (origin.z + v[2]) * self.scale
 
         # Faces
         for i, (a, b, c) in enumerate(face_indices):
@@ -955,15 +1233,18 @@ class AseExporter:
     def _populate_light(self, ase_light, obj):
         """Fill an AseLight from a Blender light object."""
         ase_light.name = self.fixup_name(obj.name).encode('utf-8')[:63]
-        ase_light.type = obj.get("light_type", 0)
+        light_data = obj.data
+        ase_light.type = 1 if getattr(light_data, "type", "POINT") == "SPOT" else 0
 
-        # Position from world matrix
-        pos = obj.matrix_world.translation
+        # The direct 3DI path emits light offsets by adding the local light
+        # position to the part origin.  Match that scene contract instead of
+        # asking Blender to compose the full child matrix, which can introduce
+        # small transform drift and would rotate local offsets under PN nodes.
+        pos = self._light_export_position(obj)
         ase_light.pos[0] = pos.x * self.scale
-        ase_light.pos[1] = pos.y * self.scale
+        ase_light.pos[1] = self._ase_y(pos.y * self.scale)
         ase_light.pos[2] = pos.z * self.scale
 
-        light_data = obj.data
         ase_light.color[0] = light_data.color[0]
         ase_light.color[1] = light_data.color[1]
         ase_light.color[2] = light_data.color[2]
@@ -973,22 +1254,33 @@ class AseExporter:
         if hasattr(light_data, 'use_custom_distance') and light_data.use_custom_distance:
             ase_light.atten_end = light_data.cutoff_distance
 
-        # Near attenuation start (from custom property, round-tripped from 3di)
-        ase_light.near_atten_start = obj.get("atten_start", 0.0)
-
-        # Falloff angle (from custom property, round-tripped from 3di)
-        ase_light.falloff = obj.get("falloff", 0.0)
-
-        # tm_row2: light direction (from custom property, or default Z-up)
-        if "tm_row2" in obj:
-            row2 = obj["tm_row2"]
-            ase_light.tm_row2[0] = -row2[0]
-            ase_light.tm_row2[1] = -row2[1]
-            ase_light.tm_row2[2] = -row2[2]
+        ase_light.near_atten_start = 0.0
+        if getattr(light_data, "type", "POINT") == "SPOT":
+            ase_light.falloff = math.degrees(float(light_data.spot_size)) * 0.5
         else:
-            ase_light.tm_row2[0] = 0.0
-            ase_light.tm_row2[1] = 0.0
-            ase_light.tm_row2[2] = 1.0
+            ase_light.falloff = 0.0
+
+        direction = obj.matrix_world.to_3x3() @ Vector((0.0, 0.0, -1.0))
+        if direction.length_squared <= 1e-8:
+            direction = Vector((0.0, 0.0, -1.0))
+        direction.normalize()
+        ase_light.tm_row2[0] = self._positive_zero(-direction.x)
+        ase_light.tm_row2[1] = self._positive_zero(-direction.y)
+        ase_light.tm_row2[2] = self._positive_zero(-direction.z)
+
+    @staticmethod
+    def _light_export_position(obj):
+        parent = obj.parent
+        if parent is None:
+            return obj.matrix_world.translation
+
+        parent_pos = parent.matrix_world.translation
+        local_pos = obj.location
+        return Vector((
+            AseExporter._zero_tiny_parent_offset(parent_pos.x) + local_pos.x,
+            AseExporter._zero_tiny_parent_offset(parent_pos.y) + local_pos.y,
+            AseExporter._zero_tiny_parent_offset(parent_pos.z) + local_pos.z,
+        ))
 
     # -------------------------------------------------------------------
     # Transform helpers
@@ -1001,8 +1293,52 @@ class AseExporter:
             for c in range(3):
                 ase_obj.tm_row[r][c] = rot[r][c]
         ase_obj.tm_row[3][0] = matrix.translation.x * self.scale
-        ase_obj.tm_row[3][1] = matrix.translation.y * self.scale
+        ase_obj.tm_row[3][1] = self._ase_y(matrix.translation.y * self.scale)
         ase_obj.tm_row[3][2] = matrix.translation.z * self.scale
+
+    def _set_identity_tm(self, ase_obj, origin):
+        """Set an identity transform row table at origin."""
+        ase_obj.tm_row[0][0] = 1.0
+        ase_obj.tm_row[0][1] = 0.0
+        ase_obj.tm_row[0][2] = 0.0
+        ase_obj.tm_row[1][0] = 0.0
+        ase_obj.tm_row[1][1] = 1.0
+        ase_obj.tm_row[1][2] = 0.0
+        ase_obj.tm_row[2][0] = 0.0
+        ase_obj.tm_row[2][1] = 0.0
+        ase_obj.tm_row[2][2] = 1.0
+        ase_obj.tm_row[3][0] = origin.x * self.scale
+        ase_obj.tm_row[3][1] = self._ase_y(origin.y * self.scale)
+        ase_obj.tm_row[3][2] = origin.z * self.scale
+
+    def _bone_export_origin(self, armature_obj, pose_bone, bone_name):
+        if "root_motion" not in armature_obj.pose.bones:
+            pn_name = self._part_name_for_bone(bone_name)
+            if pn_name:
+                part_obj = bpy.data.objects.get(pn_name)
+                if part_obj is not None and self._is_visible(part_obj):
+                    return part_obj.matrix_world.translation
+
+        rest_matrix_world = armature_obj.matrix_world @ pose_bone.bone.matrix_local
+        return rest_matrix_world.translation
+
+    @staticmethod
+    def _part_name_for_bone(bone_name):
+        if bone_name.startswith("BN") and len(bone_name) >= 4 and bone_name[2:4].isdigit():
+            return f"PN{bone_name[2:4]}"
+        return None
+
+    @staticmethod
+    def _ase_y(value):
+        return -0.0 if value == 0.0 else value
+
+    @staticmethod
+    def _positive_zero(value):
+        return 0.0 if value == 0.0 else value
+
+    @staticmethod
+    def _zero_tiny_parent_offset(value):
+        return 0.0 if abs(value) <= 1.0e-7 else value
 
     # -------------------------------------------------------------------
     # Mesh preparation (unchanged from original)
@@ -1015,9 +1351,12 @@ class AseExporter:
         """
         mesh = obj.data
 
-        depsgraph = bpy.context.evaluated_depsgraph_get()
-        obj_eval = obj.evaluated_get(depsgraph)
-        mesh_eval = obj_eval.data
+        if self._has_armature_modifier(obj):
+            mesh_eval = mesh
+        else:
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            obj_eval = obj.evaluated_get(depsgraph)
+            mesh_eval = obj_eval.data
 
         bm = None
         if all(len(poly.vertices) == 3 for poly in mesh_eval.polygons):
@@ -1039,6 +1378,10 @@ class AseExporter:
 
         return mesh_eval, bm, temp_mesh, neg_scale, orig_edge_keys
 
+    @staticmethod
+    def _has_armature_modifier(obj):
+        return any(getattr(mod, "type", None) == 'ARMATURE' for mod in obj.modifiers)
+
     def _ensure_split_normals(self, mesh):
         """Ensure split normals are available across Blender versions."""
         if hasattr(mesh, "calc_normals_split"):
@@ -1059,6 +1402,7 @@ class AseExporter:
         so that df4oed's classification loop recognises the first digit character and
         assigns them to the correct numbered group.
         """
+        name = self._clean_blender_duplicate_suffix(name)
         if name.startswith("PN") and len(name) >= 4 and name[2:4].isdigit():
             return name[2:]  # "PN01" -> "01", "PN40" -> "40"
         return name
@@ -1096,10 +1440,9 @@ class AseExporter:
             return name
         name = os.path.basename(name)
         root, ext = os.path.splitext(name)
-        ext_upper = ext.upper()
-        if ext_upper in ('.TGA', '.PCX', '.MDT'):
-            return root + ext_upper
-        return root + '.TGA'
+        if ext.upper() in ('.TGA', '.PCX', '.MDT'):
+            return root + ext
+        return root + '.tga'
 
     def _fit_texture_name(self, name):
         """Shorten a texture filename to fit OED's 15-char limit.
@@ -1184,6 +1527,35 @@ class AseExporter:
                 path = bpy.path.abspath(path)
             return path, image
         return "", None
+
+    @staticmethod
+    def _clean_blender_duplicate_suffix(name: str) -> str:
+        if len(name) > 4 and name[-4] == "." and name[-3:].isdigit():
+            return name[:-4]
+        return name
+
+    def _shader_from_material_name(self, material):
+        if not material:
+            return ""
+        name = self._clean_blender_duplicate_suffix(material.name)
+        if not name.startswith("Material_"):
+            return ""
+        rest = name[len("Material_"):]
+        parts = rest.split("_", 1)
+        if len(parts) != 2:
+            return ""
+        try:
+            int(parts[0])
+        except ValueError:
+            return ""
+        return parts[1] or ""
+
+    def _material_export_name(self, material, index: int, shader_code: str) -> str:
+        if material:
+            name = self._clean_blender_duplicate_suffix(material.name)
+            if name.startswith("Material_"):
+                return name
+        return f"Material_{index}_{shader_code}"
 
     def _derive_opennova_shader(self, material, is_skinned):
         """Derive OED shader code from Blender material's node tree.
@@ -1291,11 +1663,11 @@ class AseExporter:
                 bsdf = node
                 break
         if not bsdf:
-            return False
+            return self._find_named_detail_image(material) is not None
 
         base_color = bsdf.inputs.get("Base Color")
         if not base_color or not base_color.is_linked:
-            return False
+            return self._find_named_detail_image(material) is not None
 
         from_node = base_color.links[0].from_node
         # ShaderNodeMixRGB (Blender 3.x) or ShaderNodeMix (Blender 4.x)
@@ -1304,10 +1676,28 @@ class AseExporter:
         if from_node.type == 'MIX' and hasattr(from_node, 'data_type'):
             if from_node.data_type == 'RGBA' and from_node.blend_type == 'MULTIPLY':
                 return True
-        return False
+        return self._find_named_detail_image(material) is not None
+
+    @staticmethod
+    def _find_named_detail_image(material):
+        for node in material.node_tree.nodes:
+            if node.type != 'TEX_IMAGE' or not node.image:
+                continue
+            label = getattr(node, "label", "") or ""
+            marker = f"{node.name} {label}".lower()
+            if "detail" in marker:
+                return node.image
+        return None
+
+    @staticmethod
+    def _image_path(image):
+        path = image.filepath or image.filepath_raw or image.name or ""
+        if path:
+            path = bpy.path.abspath(path)
+        return path
 
     def _find_detail_from_nodes(self, material):
-        """Extract detail/lightmap texture from a MixRGB Multiply node tree.
+        """Extract detail/lightmap texture from Blender material nodes.
 
         Returns (path_string, bpy.types.Image or None).
         """
@@ -1324,6 +1714,9 @@ class AseExporter:
 
         base_color = bsdf.inputs.get("Base Color")
         if not base_color or not base_color.is_linked:
+            image = self._find_named_detail_image(material)
+            if image:
+                return self._image_path(image), image
             return "", None
 
         mix_node = base_color.links[0].from_node
@@ -1336,6 +1729,9 @@ class AseExporter:
             is_multiply = True
 
         if not is_multiply:
+            image = self._find_named_detail_image(material)
+            if image:
+                return self._image_path(image), image
             return "", None
 
         # The second input of MixRGB is the detail/lightmap texture.
@@ -1348,16 +1744,19 @@ class AseExporter:
             detail_input = mix_node.inputs.get("B")
 
         if not detail_input or not detail_input.is_linked:
+            image = self._find_named_detail_image(material)
+            if image:
+                return self._image_path(image), image
             return "", None
 
         tex_node = detail_input.links[0].from_node
         if tex_node.type == 'TEX_IMAGE' and tex_node.image:
             image = tex_node.image
-            path = image.filepath or image.filepath_raw or image.name or ""
-            if path:
-                path = bpy.path.abspath(path)
-            return path, image
+            return self._image_path(image), image
 
+        image = self._find_named_detail_image(material)
+        if image:
+            return self._image_path(image), image
         return "", None
 
     def _get_material_diffuse(self, material):

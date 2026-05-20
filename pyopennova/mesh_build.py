@@ -178,7 +178,10 @@ def _flatten_part(
             entries.append((skel_idx, weight))
         if not entries:
             entries.append((part_idx, 1.0))
-        return entries
+        merged: dict[int, float] = {}
+        for bone_idx, weight in entries:
+            merged[bone_idx] = merged.get(bone_idx, 0.0) + weight
+        return sorted(merged.items(), key=lambda item: item[0])[:4]
 
     for prim_idx in prim_indices:
         prim = lod.primitives[prim_idx]
