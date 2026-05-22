@@ -177,7 +177,7 @@ int WINAPI detour_message_box_a(HWND hwnd, LPCSTR text, LPCSTR caption, UINT typ
     log_line("MessageBoxA caption=\"%s\" text=\"%s\" type=0x%08lx",
              caption ? caption : "", text ? text : "", static_cast<unsigned long>(type));
     if (is_unused_material_prompt(text)) {
-        log_line("HOOK_ERROR unused-material prompt detected; dismissing with IDNO to unblock headless run");
+        log_line("HOOK_DISMISSED unused-material prompt detected; dismissing with IDNO to unblock headless run");
         return IDNO;
     }
     return g_orig_message_box_a ? g_orig_message_box_a(hwnd, text, caption, type) : IDOK;
@@ -249,6 +249,10 @@ DWORD env_dword(const char *name, DWORD fallback) {
 }
 
 void apply_overrides_from_cmdline() {
+    bool import_delay_from_cmdline = false;
+    bool export_delay_from_cmdline = false;
+    bool timeout_from_cmdline = false;
+
     int argc = 0;
     LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv) {
@@ -273,14 +277,17 @@ void apply_overrides_from_cmdline() {
                 g_import_delay_ms =
                     std::strtoul(arg.c_str() + std::strlen("--oed-import-delay-ms="),
                                  nullptr, 10);
+                import_delay_from_cmdline = true;
             } else if (starts("--oed-export-delay-ms=")) {
                 g_export_delay_ms =
                     std::strtoul(arg.c_str() + std::strlen("--oed-export-delay-ms="),
                                  nullptr, 10);
+                export_delay_from_cmdline = true;
             } else if (starts("--oed-timeout-ms=")) {
                 g_timeout_ms =
                     std::strtoul(arg.c_str() + std::strlen("--oed-timeout-ms="),
                                  nullptr, 10);
+                timeout_from_cmdline = true;
             }
         }
         LocalFree(argv);
@@ -306,9 +313,15 @@ void apply_overrides_from_cmdline() {
         }
     }
 
-    g_import_delay_ms = env_dword("OED_IMPORT_DELAY_MS", g_import_delay_ms);
-    g_export_delay_ms = env_dword("OED_EXPORT_DELAY_MS", g_export_delay_ms);
-    g_timeout_ms = env_dword("OED_TIMEOUT_MS", g_timeout_ms);
+    if (!import_delay_from_cmdline) {
+        g_import_delay_ms = env_dword("OED_IMPORT_DELAY_MS", g_import_delay_ms);
+    }
+    if (!export_delay_from_cmdline) {
+        g_export_delay_ms = env_dword("OED_EXPORT_DELAY_MS", g_export_delay_ms);
+    }
+    if (!timeout_from_cmdline) {
+        g_timeout_ms = env_dword("OED_TIMEOUT_MS", g_timeout_ms);
+    }
     default_export_path();
     build_export_title();
 }
@@ -548,7 +561,7 @@ int __fastcall detour_doc_open(void *self, void *, const char *path) {
     }
     const int rc = g_orig_doc_open ? g_orig_doc_open(self, path) : 0;
     log_line("OnOpenDocument returned %d", rc);
-    if (rc && g_export_path[0]) {
+    if (rc && g_export_path[0] && g_auto_load_done.load()) {
         arm_auto_export();
     }
     return rc;

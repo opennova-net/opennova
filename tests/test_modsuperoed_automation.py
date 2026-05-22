@@ -237,6 +237,74 @@ def test_export_3di_rejects_hook_errors(
         )
 
 
+def test_export_3di_accepts_dismissed_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apps import modsuperoed
+
+    paths = _make_paths(tmp_path)
+    _make_tool_artifacts(paths)
+    project = _write_file(tmp_path / "source" / "CharModel.3dp", b"project")
+    output = tmp_path / "out" / "CharModel.3di"
+
+    def fake_run(args, cwd, text, capture_output, timeout, check):
+        cfg_path = Path(args[1])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"3di")
+        (cfg_path.parent / "logs" / "oed_hook.log").write_text(
+            "HOOK_DISMISSED unused-material prompt detected; dismissing with IDNO\n"
+            "ExitProcess(0)\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(modsuperoed.subprocess, "run", fake_run)
+
+    result = modsuperoed.export_3di(
+        project,
+        output,
+        paths=paths,
+        work_dir=tmp_path / "work",
+        require_hash=False,
+    )
+
+    assert result.returncode == 0
+    assert output.read_bytes() == b"3di"
+
+
+def test_export_3di_unlinks_stale_output_before_subprocess(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apps import modsuperoed
+
+    paths = _make_paths(tmp_path)
+    _make_tool_artifacts(paths)
+    project = _write_file(tmp_path / "source" / "CharModel.3dp", b"project")
+    output = _write_file(tmp_path / "out" / "CharModel.3di", b"stale")
+
+    def fake_run(args, cwd, text, capture_output, timeout, check):
+        cfg_path = Path(args[1])
+        assert not output.exists(), "stale output should have been unlinked before subprocess"
+        (cfg_path.parent / "logs" / "oed_hook.log").write_text(
+            "ExitProcess(0)\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(modsuperoed.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="did not produce"):
+        modsuperoed.export_3di(
+            project,
+            output,
+            paths=paths,
+            work_dir=tmp_path / "work",
+            require_hash=False,
+        )
+
+
 def test_export_3di_requires_clean_hook_exit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

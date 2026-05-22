@@ -153,6 +153,8 @@ def export_3di(
     )
     cfg_path.write_text("\n".join(cfg_lines) + "\n", encoding="utf-8")
 
+    output.unlink(missing_ok=True)
+
     completed = subprocess.run(
         [str(paths.injector), str(cfg_path)],
         cwd=str(run_dir),
