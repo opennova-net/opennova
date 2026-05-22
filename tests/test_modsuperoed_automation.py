@@ -372,6 +372,7 @@ def test_export_3di_requires_nonempty_output(
 @pytest.mark.skipif(not sys.platform.startswith("win"), reason="ModSuperOED is Windows-only")
 def test_external_modsuperoed_smoke(tmp_path: Path) -> None:
     from apps import modsuperoed
+    from blender.opennova.threedi_compare_ffi import compare_3di3_chunks
 
     tool_dir_env = os.environ.get("OPENNOVA_MODSUPEROED_DIR")
     if not tool_dir_env:
@@ -410,5 +411,5 @@ def test_external_modsuperoed_smoke(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert output.is_file()
     assert output.stat().st_size > 0
-    assert output.stat().st_size == expected.stat().st_size
+    compare_3di3_chunks(expected, output, "GHDR,USRP,INFO,CTRL,MTRL,OCCL,LGHT,MTRX,RDTA")
     assert "ExitProcess(0)" in result.log_path.read_text(encoding="utf-8", errors="replace")
