@@ -77,6 +77,12 @@ jobs:
           cmake -S . -B build-modsuperoed -A Win32
           cmake --build build-modsuperoed --config Release --target modsuperoed_injector modsuperoed_hook
 
+      - name: Build native comparator library
+        shell: pwsh
+        run: |
+          cmake -S . -B build -A x64 -DBUILD_SHARED_LIB=ON -DOPENNOVA_ENABLE_MODSUPEROED_TOOLS=OFF
+          cmake --build build --config Release --target opennova_shared
+
       - name: Run ModSuperOED smoke
         shell: pwsh
         env:

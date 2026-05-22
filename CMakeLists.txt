@@ -117,19 +117,6 @@ if(BUILD_SHARED_LIB)
     endif()
 endif()
 
-# --------------------------------------------------------------------------
-# Development tools (3di_dump, etc.)
-# --------------------------------------------------------------------------
-option(BUILD_TOOLS "Build development tools" OFF)
-
-if(BUILD_TOOLS)
-    add_executable(3di_dump tools/3di_dump.cpp)
-    target_link_libraries(3di_dump PRIVATE opennova_threedi m)
-
-    add_executable(survey_3di3 tools/survey_3di3.cpp)
-    target_link_libraries(survey_3di3 PRIVATE opennova_threedi m)
-endif()
-
 option(OPENNOVA_ENABLE_MODSUPEROED_TOOLS "Build Windows x86 ModSuperOED automation tools when supported" ON)
 
 if(OPENNOVA_ENABLE_MODSUPEROED_TOOLS)

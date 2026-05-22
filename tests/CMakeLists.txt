@@ -4,6 +4,11 @@ target_link_libraries(threedi_roundtrip_test PRIVATE opennova_threedi)
 target_include_directories(threedi_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_roundtrip COMMAND threedi_roundtrip_test)
 
+add_executable(threedi_compare_test threedi/compare_test.cpp)
+target_link_libraries(threedi_compare_test PRIVATE opennova_threedi)
+target_include_directories(threedi_compare_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_compare COMMAND threedi_compare_test)
+
 # GP format parsing test
 add_executable(threedi_gp_parse_test threedi/gp_parse_test.cpp)
 target_link_libraries(threedi_gp_parse_test PRIVATE opennova_threedi)
