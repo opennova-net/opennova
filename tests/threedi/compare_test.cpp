@@ -382,6 +382,19 @@ static int compare_self_succeeds_for_explicit_top_level_chunks_through_rdta(void
     return expect_true(rc == 0, "self compare should match explicit top-level chunks through RDTA");
 }
 
+static int compare_self_succeeds_for_explicit_top_level_chunks_through_cdta(void)
+{
+    char report[512];
+    memset(report, 0, sizeof(report));
+    const std::string path = fixture_path("Shed.3di");
+    int rc = threedi_3di3_compare_file_chunks(path.c_str(),
+                                              path.c_str(),
+                                              "GHDR,USRP,INFO,CTRL,MTRL,OCCL,LGHT,MTRX,RDTA,CDTA",
+                                              report,
+                                              sizeof(report));
+    return expect_true(rc == 0, "self compare should match explicit top-level chunks through CDTA");
+}
+
 static int empty_chunk_list_is_invalid(void)
 {
     char report[512];
@@ -640,6 +653,82 @@ static int changed_rdta_child_payload_reports_mismatch(void)
                        "RDTA child mismatch report should include byte detail");
 }
 
+static int changed_cdta_child_payload_reports_mismatch(const char child_id[4])
+{
+    char report[512];
+    memset(report, 0, sizeof(report));
+    const std::string expected = fixture_path("Shed.3di");
+    char name[128];
+    snprintf(name, sizeof(name), "opennova_compare_changed_cdta_%.4s.3di", child_id);
+    const std::string actual = temp_path(name);
+    if (!write_modified_chunk_copy(expected, actual, child_id)) {
+        return 0;
+    }
+
+    int rc = threedi_3di3_compare_file_chunks(expected.c_str(),
+                                              actual.c_str(),
+                                              "CDTA",
+                                              report,
+                                              sizeof(report));
+    remove(actual.c_str());
+    char child_message[96];
+    snprintf(child_message, sizeof(child_message), "CDTA mismatch report should name child %.4s", child_id);
+    const std::string child_text(child_id, child_id + 4);
+    return expect_true(rc == 1, "changed CDTA child should mismatch")
+        && expect_true(strstr(report, "CDTA") != NULL,
+                       "CDTA mismatch report should name the parent chunk")
+        && expect_true(strstr(report, child_text.c_str()) != NULL,
+                       child_message)
+        && expect_true(strstr(report, "byte") != NULL,
+                       "CDTA child mismatch report should include byte detail");
+}
+
+static int changed_cdta_cfac_padding_matches(void)
+{
+    char report[512];
+    memset(report, 0, sizeof(report));
+    const std::string expected = fixture_path("Shed.3di");
+    const std::string actual = temp_path("opennova_compare_changed_cdta_cfac_padding.3di");
+    size_t cfac_payload_offset = 0;
+    if (!first_chunk_payload_offset(expected, "CFAC", &cfac_payload_offset) ||
+        !write_modified_byte_copy(expected, actual, cfac_payload_offset + 8u + 42u)) {
+        return 0;
+    }
+
+    int rc = threedi_3di3_compare_file_chunks(expected.c_str(),
+                                              actual.c_str(),
+                                              "CDTA",
+                                              report,
+                                              sizeof(report));
+    remove(actual.c_str());
+    return expect_true(rc == 0, "changed CFAC padding byte should match CDTA");
+}
+
+static int changed_cdta_cfac_poly_type_reports_mismatch(void)
+{
+    char report[512];
+    memset(report, 0, sizeof(report));
+    const std::string expected = fixture_path("Shed.3di");
+    const std::string actual = temp_path("opennova_compare_changed_cdta_cfac_poly_type.3di");
+    size_t cfac_payload_offset = 0;
+    if (!first_chunk_payload_offset(expected, "CFAC", &cfac_payload_offset) ||
+        !write_modified_byte_copy(expected, actual, cfac_payload_offset + 8u + 40u)) {
+        return 0;
+    }
+
+    int rc = threedi_3di3_compare_file_chunks(expected.c_str(),
+                                              actual.c_str(),
+                                              "CDTA",
+                                              report,
+                                              sizeof(report));
+    remove(actual.c_str());
+    return expect_true(rc == 1, "changed CFAC poly_type should mismatch CDTA")
+        && expect_true(strstr(report, "CFAC") != NULL,
+                       "CFAC poly_type mismatch report should name the chunk")
+        && expect_true(strstr(report, "byte") != NULL,
+                       "CFAC poly_type mismatch report should include byte detail");
+}
+
 static int changed_rdta_vert_normal_within_tolerance_matches(void)
 {
     char report[512];
@@ -743,6 +832,7 @@ int main(void)
     ok &= compare_self_succeeds_for_explicit_ghdr_usrp_info_ctrl_mtrl_occl_and_lght();
     ok &= compare_self_succeeds_for_explicit_ghdr_usrp_info_ctrl_mtrl_occl_lght_and_mtrx();
     ok &= compare_self_succeeds_for_explicit_top_level_chunks_through_rdta();
+    ok &= compare_self_succeeds_for_explicit_top_level_chunks_through_cdta();
     ok &= empty_chunk_list_is_invalid();
     ok &= null_chunk_list_is_invalid();
     ok &= requested_chunk_must_exist_in_expected();
@@ -755,6 +845,16 @@ int main(void)
     ok &= changed_lght_payload_reports_mismatch();
     ok &= changed_mtrx_payload_reports_mismatch();
     ok &= changed_rdta_child_payload_reports_mismatch();
+    ok &= changed_cdta_child_payload_reports_mismatch("CMDL");
+    ok &= changed_cdta_child_payload_reports_mismatch("CVRT");
+    ok &= changed_cdta_child_payload_reports_mismatch("CNRM");
+    ok &= changed_cdta_child_payload_reports_mismatch("CFAC");
+    ok &= changed_cdta_child_payload_reports_mismatch("BPLN");
+    ok &= changed_cdta_child_payload_reports_mismatch("BVOL");
+    ok &= changed_cdta_child_payload_reports_mismatch("COBJ");
+    ok &= changed_cdta_child_payload_reports_mismatch("CXLT");
+    ok &= changed_cdta_cfac_padding_matches();
+    ok &= changed_cdta_cfac_poly_type_reports_mismatch();
     ok &= changed_rdta_vert_normal_within_tolerance_matches();
     ok &= changed_rdta_vert_normal_beyond_tolerance_reports_mismatch();
     ok &= changed_rdta_vert_non_normal_byte_reports_mismatch();

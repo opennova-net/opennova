@@ -211,6 +211,53 @@ static bool compare_vert_payload(const ThreediChunk *expected,
     return true;
 }
 
+static bool compare_cfac_payload(const ThreediChunk *expected,
+                                 const ThreediChunk *actual,
+                                 const std::string &path,
+                                 char *report,
+                                 size_t report_size)
+{
+    if (expected->data_len < 8u) {
+        set_report(report,
+                   report_size,
+                   "%s invalid CFAC layout: payload length %zu is smaller than header",
+                   path.c_str(),
+                   expected->data_len);
+        return false;
+    }
+    if (!compare_payload_byte_range(expected->data, actual->data, 0u, 8u, path, report, report_size)) {
+        return false;
+    }
+
+    uint32_t count = read_u32_le(expected->data);
+    uint32_t record_size = read_u32_le(expected->data + 4);
+    size_t expected_len = 8u + (size_t)count * (size_t)record_size;
+    if (record_size != 44u || expected->data_len != expected_len) {
+        set_report(report,
+                   report_size,
+                   "%s invalid CFAC layout: count %u record size %u payload length %zu",
+                   path.c_str(),
+                   count,
+                   record_size,
+                   expected->data_len);
+        return false;
+    }
+
+    for (uint32_t face_index = 0; face_index < count; ++face_index) {
+        size_t record_offset = 8u + (size_t)face_index * (size_t)record_size;
+        if (!compare_payload_byte_range(expected->data,
+                                        actual->data,
+                                        record_offset,
+                                        record_offset + 41u,
+                                        path,
+                                        report,
+                                        report_size)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void collect_chunk_occurrences(const ThreediChunk *chunk,
                                       const std::string &path,
                                       const std::string &id,
@@ -319,6 +366,9 @@ static bool compare_chunk_tree(const ThreediChunk *expected,
         if (!same) {
             if (memcmp(expected->id, "VERT", 4) == 0) {
                 return compare_vert_payload(expected, actual, path, report, report_size);
+            }
+            if (memcmp(expected->id, "CFAC", 4) == 0) {
+                return compare_cfac_payload(expected, actual, path, report, report_size);
             }
             return compare_payload_byte_range(expected->data,
                                               actual->data,

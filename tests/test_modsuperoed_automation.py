@@ -409,5 +409,5 @@ def test_external_modsuperoed_smoke(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert output.is_file()
     assert output.stat().st_size > 0
-    compare_3di3_chunks(expected, output, "GHDR,USRP,INFO,CTRL,MTRL,OCCL,LGHT,MTRX,RDTA")
+    compare_3di3_chunks(expected, output, "GHDR,USRP,INFO,CTRL,MTRL,OCCL,LGHT,MTRX,RDTA,CDTA")
     assert "ExitProcess(0)" in result.log_path.read_text(encoding="utf-8", errors="replace")
