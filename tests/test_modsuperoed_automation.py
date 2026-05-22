@@ -402,8 +402,6 @@ def test_external_modsuperoed_smoke(tmp_path: Path) -> None:
         output,
         paths=paths,
         work_dir=tmp_path / "modsuperoed-work",
-        import_delay_ms=1000,
-        export_delay_ms=1000,
         timeout_s=120,
         output_title="CharModel",
     )
