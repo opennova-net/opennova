@@ -18,6 +18,7 @@ constexpr const char *kExpectedExeSha256 =
 
 struct Config {
     std::string target_dir;
+    std::string exe_path;
     std::string proj_path;
     std::string out_path;
     std::string out_title;
@@ -82,6 +83,8 @@ bool read_config(const std::string &path, Config &cfg, std::string &error) {
         trim(val);
         if (key == "dir" || key == "target") {
             cfg.target_dir = val;
+        } else if (key == "exe") {
+            cfg.exe_path = val;
         } else if (key == "proj" || key == "3dp") {
             cfg.proj_path = val;
         } else if (key == "out" || key == "3di") {
@@ -289,7 +292,9 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    const std::string exe = cfg.target_dir + "\\ModSuperOed.exe";
+    const std::string exe = !cfg.exe_path.empty()
+        ? cfg.exe_path
+        : (cfg.target_dir + "\\ModSuperOed.exe");
     const std::string dll = base_dir + "\\modsuperoed_hook.dll";
     if (!file_exists(dll)) {
         std::fprintf(stderr, "hook DLL not found: %s\n", dll.c_str());

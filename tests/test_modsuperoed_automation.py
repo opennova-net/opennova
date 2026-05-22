@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -367,6 +368,105 @@ def test_export_3di_requires_nonempty_output(
             work_dir=tmp_path / "work",
             require_hash=False,
         )
+
+
+def test_export_3di_emits_exe_line_when_paths_exe_set(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apps import modsuperoed
+
+    paths = _make_paths(tmp_path)
+    _make_tool_artifacts(paths)
+    custom_dir = tmp_path / "elsewhere"
+    custom_dir.mkdir()
+    custom_exe = custom_dir / "RealModSuperOed.exe"
+    shutil.copy2(paths.tool_dir / "ModSuperOed.exe", custom_exe)
+
+    paths_with_exe = modsuperoed.ModSuperOEDPaths(
+        tool_dir=paths.tool_dir,
+        injector=paths.injector,
+        hook_dll=paths.hook_dll,
+        exe=custom_exe,
+    )
+    project = _write_file(tmp_path / "source" / "CharModel.3dp", b"project")
+    output = tmp_path / "out" / "CharModel.3di"
+    captured: dict[str, str] = {}
+
+    def fake_run(args, cwd, text, capture_output, timeout, check):
+        cfg_path = Path(args[1])
+        captured["cfg_text"] = cfg_path.read_text(encoding="utf-8")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"3di")
+        (cfg_path.parent / "logs" / "oed_hook.log").write_text("ExitProcess(0)\n", encoding="utf-8")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(modsuperoed.subprocess, "run", fake_run)
+
+    modsuperoed.export_3di(
+        project,
+        output,
+        paths=paths_with_exe,
+        work_dir=tmp_path / "work",
+        require_hash=False,
+    )
+
+    assert f"exe={custom_exe.resolve()}" in captured["cfg_text"]
+
+
+def test_export_3di_omits_exe_line_when_paths_exe_unset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apps import modsuperoed
+
+    paths = _make_paths(tmp_path)
+    _make_tool_artifacts(paths)
+    project = _write_file(tmp_path / "source" / "CharModel.3dp", b"project")
+    output = tmp_path / "out" / "CharModel.3di"
+    captured: dict[str, str] = {}
+
+    def fake_run(args, cwd, text, capture_output, timeout, check):
+        cfg_path = Path(args[1])
+        captured["cfg_text"] = cfg_path.read_text(encoding="utf-8")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"3di")
+        (cfg_path.parent / "logs" / "oed_hook.log").write_text("ExitProcess(0)\n", encoding="utf-8")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(modsuperoed.subprocess, "run", fake_run)
+
+    modsuperoed.export_3di(
+        project,
+        output,
+        paths=paths,
+        work_dir=tmp_path / "work",
+        require_hash=False,
+    )
+
+    cfg_text = captured["cfg_text"]
+    assert all(not line.startswith("exe=") for line in cfg_text.splitlines())
+
+
+def test_verify_tool_uses_custom_exe_when_set(tmp_path: Path) -> None:
+    from apps import modsuperoed
+
+    paths = _make_paths(tmp_path)
+    _make_tool_artifacts(paths)
+    custom_dir = tmp_path / "elsewhere"
+    custom_dir.mkdir()
+    custom_exe = custom_dir / "RealModSuperOed.exe"
+    shutil.copy2(paths.tool_dir / "ModSuperOed.exe", custom_exe)
+    (paths.tool_dir / "ModSuperOed.exe").unlink()
+
+    paths_with_exe = modsuperoed.ModSuperOEDPaths(
+        tool_dir=paths.tool_dir,
+        injector=paths.injector,
+        hook_dll=paths.hook_dll,
+        exe=custom_exe,
+    )
+
+    modsuperoed.verify_tool(paths_with_exe, require_hash=False)
 
 
 @pytest.mark.skipif(not sys.platform.startswith("win"), reason="ModSuperOED is Windows-only")

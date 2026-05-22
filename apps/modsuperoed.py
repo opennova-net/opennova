@@ -19,6 +19,10 @@ class ModSuperOEDPaths:
     tool_dir: Path
     injector: Path
     hook_dll: Path
+    exe: Path | None = None
+
+    def resolved_exe(self) -> Path:
+        return self.exe if self.exe is not None else self.tool_dir / "ModSuperOed.exe"
 
 
 @dataclass(frozen=True)
@@ -75,7 +79,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def verify_tool(paths: ModSuperOEDPaths, *, require_hash: bool = True) -> None:
-    exe = paths.tool_dir / "ModSuperOed.exe"
+    exe = paths.resolved_exe()
     missing = [path for path in (exe, paths.injector, paths.hook_dll) if not path.is_file()]
     if missing:
         raise FileNotFoundError(
@@ -141,6 +145,8 @@ def export_3di(
         f"proj={project}",
         f"out={output}",
     ]
+    if paths.exe is not None:
+        cfg_lines.append(f"exe={paths.exe.resolve()}")
     if output_title:
         cfg_lines.append(f"title={output_title}")
     cfg_lines.extend(

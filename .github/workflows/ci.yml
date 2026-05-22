@@ -87,7 +87,8 @@ jobs:
         shell: pwsh
         env:
           OPENNOVA_MODSUPEROED_DIR: ${{ github.workspace }}\third_party\modsuperoed
-        run: uv run pytest tests/test_modsuperoed_automation.py::test_external_modsuperoed_smoke -q
+        run: |
+          uv run pytest tests/test_modsuperoed_automation.py::test_external_modsuperoed_smoke tests/test_ase_3dp_produces_correct_3di_via_original_oed_tool.py -q
 
   godot-tests:
     strategy:
