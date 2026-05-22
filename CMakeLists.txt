@@ -119,17 +119,16 @@ if(BUILD_SHARED_LIB)
     endif()
 endif()
 
-# --------------------------------------------------------------------------
-# Development tools (3di_dump, etc.)
-# --------------------------------------------------------------------------
-option(BUILD_TOOLS "Build development tools" OFF)
+option(OPENNOVA_ENABLE_MODSUPEROED_TOOLS "Build Windows x86 ModSuperOED automation tools when supported" ON)
 
-if(BUILD_TOOLS)
-    add_executable(3di_dump tools/3di_dump.cpp)
-    target_link_libraries(3di_dump PRIVATE opennova_threedi m)
-
-    add_executable(survey_3di3 tools/survey_3di3.cpp)
-    target_link_libraries(survey_3di3 PRIVATE opennova_threedi m)
+if(OPENNOVA_ENABLE_MODSUPEROED_TOOLS)
+    if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+        add_subdirectory(tools/modsuperoed)
+    elseif(WIN32)
+        message(STATUS "Skipping ModSuperOED automation tools: a 32-bit Windows toolchain is required")
+    else()
+        message(STATUS "Skipping ModSuperOED automation tools: Windows is required")
+    endif()
 endif()
 
 # Enable testing
