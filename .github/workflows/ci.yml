@@ -38,6 +38,51 @@ jobs:
         shell: bash
         run: scripts/build.sh
 
+  modsuperoed-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Pull Git LFS assets
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull
+          git lfs fsck --objects
+
+      - name: Validate ModSuperOED fixture pack
+        shell: bash
+        run: |
+          git -C third_party/modsuperoed lfs install --local
+          git -C third_party/modsuperoed lfs pull
+          git -C third_party/modsuperoed lfs fsck --objects
+          test -f third_party/modsuperoed/ModSuperOed.exe
+          test -f third_party/modsuperoed/CharModel.3dp
+          test -f third_party/modsuperoed/CharModel.3di
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        shell: bash
+        run: python -m pip install --upgrade uv
+
+      - name: Build ModSuperOED hook
+        shell: pwsh
+        run: |
+          cmake -S . -B build-modsuperoed -A Win32
+          cmake --build build-modsuperoed --config Release --target modsuperoed_injector modsuperoed_hook
+
+      - name: Run ModSuperOED smoke
+        shell: pwsh
+        env:
+          OPENNOVA_MODSUPEROED_DIR: ${{ github.workspace }}\third_party\modsuperoed
+        run: uv run pytest tests/test_modsuperoed_automation.py::test_external_modsuperoed_smoke -q
+
   godot-tests:
     strategy:
       fail-fast: false

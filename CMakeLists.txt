@@ -130,6 +130,18 @@ if(BUILD_TOOLS)
     target_link_libraries(survey_3di3 PRIVATE opennova_threedi m)
 endif()
 
+option(OPENNOVA_ENABLE_MODSUPEROED_TOOLS "Build Windows x86 ModSuperOED automation tools when supported" ON)
+
+if(OPENNOVA_ENABLE_MODSUPEROED_TOOLS)
+    if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+        add_subdirectory(tools/modsuperoed)
+    elseif(WIN32)
+        message(STATUS "Skipping ModSuperOED automation tools: a 32-bit Windows toolchain is required")
+    else()
+        message(STATUS "Skipping ModSuperOED automation tools: Windows is required")
+    endif()
+endif()
+
 # Enable testing
 enable_testing()
 add_subdirectory(tests)

@@ -121,6 +121,25 @@ cmake --build build --config Release
 ctest --test-dir build --build-config Release
 ```
 
+### Build ModSuperOED Automation Tools
+
+Headless driver for NovaLogic's ModSuperOED, used for batch `.3di` export
+without GUI interaction. The hook DLL and injector build by default when CMake
+is configured with a 32-bit Windows toolchain; other toolchains skip them with
+a status message. The fixture pack (ModSuperOed.exe and the CharModel
+reference files) lives under `third_party/modsuperoed` as a Git LFS submodule,
+so a fresh clone needs the submodule initialised and its LFS objects pulled.
+
+```powershell
+git submodule update --init --recursive third_party/modsuperoed
+git -C third_party/modsuperoed lfs install --local
+git -C third_party/modsuperoed lfs pull
+cmake -S . -B build-modsuperoed -A Win32
+cmake --build build-modsuperoed --config Release --target modsuperoed_injector modsuperoed_hook
+$env:OPENNOVA_MODSUPEROED_DIR = "$PWD\third_party\modsuperoed"
+uv run --frozen pytest tests/test_modsuperoed_automation.py::test_external_modsuperoed_smoke -q
+```
+
 ### Package Blender Addon
 
 Builds native libraries for Linux and Windows (via MinGW cross-compile), then packages the addon as a zip.
