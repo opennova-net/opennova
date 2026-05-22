@@ -121,6 +121,19 @@ cmake --build build --config Release
 ctest --test-dir build --build-config Release
 ```
 
+### Build ModSuperOED Automation Tools
+
+The ModSuperOED hook/injector are built by default when CMake is configured with
+a 32-bit Windows toolchain. Other toolchains skip them with a status message.
+They require an external ModSuperOED install; the repo does not vendor the tool.
+
+```powershell
+cmake -S . -B build-modsuperoed -A Win32
+cmake --build build-modsuperoed --config Release --target modsuperoed_injector modsuperoed_hook
+$env:OPENNOVA_MODSUPEROED_DIR = "$PWD\third_party\modsuperoed"
+uv run pytest tests/test_modsuperoed_automation.py::test_external_modsuperoed_smoke -q
+```
+
 ### Package Blender Addon
 
 Builds native libraries for Linux and Windows (via MinGW cross-compile), then packages the addon as a zip.
