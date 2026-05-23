@@ -87,8 +87,17 @@ jobs:
         shell: pwsh
         env:
           OPENNOVA_MODSUPEROED_DIR: ${{ github.workspace }}\third_party\modsuperoed
+          OPENNOVA_ROUNDTRIP_ARTIFACT_DIR: ${{ github.workspace }}\oed-roundtrip-artifacts
         run: |
           uv run pytest tests/test_modsuperoed_automation.py::test_external_modsuperoed_smoke tests/test_ase_3dp_produces_correct_3di_via_original_oed_tool.py -q
+
+      - name: Upload OED roundtrip artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oed-roundtrip-artifacts
+          path: oed-roundtrip-artifacts
+          if-no-files-found: ignore
 
   godot-tests:
     strategy:

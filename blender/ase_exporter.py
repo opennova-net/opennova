@@ -137,6 +137,8 @@ class AseExporter:
         self.scene = None
         self._texture_queue = {}  # bitmap_filename -> bpy.types.Image
         self._used_tex_names = {}  # lowercase short name -> original short name (dedup)
+        self._render_mesh_export_index = 0
+        self._render_mesh_name_map = {}
 
         # Node processing
         self.total_node_count = 0
@@ -182,6 +184,8 @@ class AseExporter:
         LOD roots (with _lod_index > 0) to {stem}_lod{N}.ase files.
         """
         self.scene = scene
+        self._render_mesh_export_index = 0
+        self._render_mesh_name_map = {}
 
         print(f"ASE Export: Starting export to {filepath}")
 
@@ -516,7 +520,7 @@ class AseExporter:
 
             # Metadata — prefer nl_ase_name (preserves original pre-dedup name)
             raw_name = obj.get("nl_ase_name", obj.name)
-            export_name = self._export_name(raw_name)
+            export_name = self._render_mesh_export_name(raw_name)
             ase_obj.name = self.fixup_name(export_name).encode('utf-8')[:63]
             if obj.parent:
                 parent_name = self._export_name(obj.parent.get("nl_ase_name", obj.parent.name))
@@ -1048,6 +1052,20 @@ class AseExporter:
         if name.startswith("PN") and len(name) >= 4 and name[2:4].isdigit():
             return name[2:]  # "PN01" -> "01", "PN40" -> "40"
         return name
+
+    def _render_mesh_export_name(self, name):
+        """Return an OED-mappable GEOMOBJECT name for render meshes."""
+        export_name = self._export_name(name)
+        if export_name[:1].isdigit():
+            return export_name
+        if name in self._render_mesh_name_map:
+            return self._render_mesh_name_map[name]
+
+        self._render_mesh_export_index += 1
+        stem = export_name or "Mesh"
+        safe_name = f"{self._render_mesh_export_index:02d}_{stem}"
+        self._render_mesh_name_map[name] = safe_name
+        return safe_name
 
     def _bone_export_name(self, name):
         """Trim bone names like 'BN01 Hips' to 'BN01' for export."""

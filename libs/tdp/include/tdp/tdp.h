@@ -168,11 +168,17 @@ TDP_EXPORT void tdp_alloc_lights(TdpLod *lod, size_t count);
 
 // Forward-declare the IR struct so we don't require threedi header.
 struct ThreediModelIR;
+struct Threedi3di3;
 
 // Populate a TdpProject from a ThreediModelIR.
 // Caller must call tdp_free() on `out` when done.
 // Returns 0 on success, -1 on error.
 TDP_EXPORT int tdp_from_ir(const struct ThreediModelIR *ir, TdpProject *out);
+
+// Populate a TdpProject from the canonical typed 3DI3 model.
+// Caller must call tdp_free() on `out` when done.
+// Returns 0 on success, -1 on error.
+TDP_EXPORT int tdp_from_3di3(const struct Threedi3di3 *model, TdpProject *out);
 
 #ifdef __cplusplus
 }

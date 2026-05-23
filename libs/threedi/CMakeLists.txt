@@ -1,7 +1,10 @@
 add_library(opennova_threedi STATIC
     src/threedi.cpp
     src/threedi_3di3.cpp
+    src/threedi_bhd_shader.c
     src/threedi_compare.cpp
+    src/threedi_gp_to_3di3.cpp
+    src/threedi_material_class.c
     src/threedi_panm.cpp
     src/threedi_panm_runtime.cpp
     src/threedi_panm_wave.cpp

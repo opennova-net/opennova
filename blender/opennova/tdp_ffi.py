@@ -8,6 +8,7 @@ import ctypes
 
 from ._native import load_lib
 from .threedi_ffi import ThreediModelIR
+from .threedi_3di3_ffi import Threedi3di3
 
 TDP_MAX_LODS = 8
 TDP_MAX_ANIM_FRAMES = 8
@@ -168,6 +169,8 @@ def _bind():
     lib.tdp_write_3da.argtypes = [ctypes.c_char_p, ctypes.POINTER(TdpProject)]
     lib.tdp_from_ir.restype = ctypes.c_int
     lib.tdp_from_ir.argtypes = [ctypes.POINTER(ThreediModelIR), ctypes.POINTER(TdpProject)]
+    lib.tdp_from_3di3.restype = ctypes.c_int
+    lib.tdp_from_3di3.argtypes = [ctypes.POINTER(Threedi3di3), ctypes.POINTER(TdpProject)]
     lib.tdp_alloc_materials.restype = None
     lib.tdp_alloc_materials.argtypes = [ctypes.POINTER(TdpProject), ctypes.c_size_t]
     lib.tdp_alloc_part_anims.restype = None
@@ -220,6 +223,17 @@ def tdp_from_ir(ir) -> TdpProject:
     rc = lib.tdp_from_ir(ctypes.byref(ir), ctypes.byref(proj))
     if rc != 0:
         raise RuntimeError("tdp_from_ir failed")
+    return proj
+
+
+def tdp_from_3di3(model) -> TdpProject:
+    """Populate a TdpProject from a canonical Threedi3di3 model."""
+    _bind()
+    lib = load_lib()
+    proj = TdpProject()
+    rc = lib.tdp_from_3di3(ctypes.byref(model), ctypes.byref(proj))
+    if rc != 0:
+        raise RuntimeError("tdp_from_3di3 failed")
     return proj
 
 

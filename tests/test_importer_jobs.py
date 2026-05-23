@@ -274,7 +274,10 @@ class TestImportRunner:
         from apps.importer.import_runner import run_loose_import
 
         fake_ir = object()
+        fake_model = object()
         threedi_module = types.ModuleType("blender.opennova.threedi_ffi")
+        threedi_module.read_model_auto = Mock(return_value=fake_model)
+        threedi_module.free_model_3di3 = Mock()
         threedi_module.read_model_ir = Mock(return_value=fake_ir)
         threedi_module.free_model_ir = Mock()
 
@@ -305,7 +308,7 @@ class TestImportRunner:
         }
         with patch.dict(sys.modules, modules):
             with patch("apps.importer.import_runner._setup_blender_package"):
-                with patch("apps.importer.import_runner._write_3dp_from_ir"):
+                with patch("apps.importer.import_runner._write_3dp_from_3di3"):
                     with patch("apps.importer.import_runner._export_ase"):
                         with patch("apps.importer.import_runner._save_blend_scene") as save_blend:
                             ok = run_loose_import(

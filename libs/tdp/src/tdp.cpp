@@ -602,7 +602,7 @@ int tdp_parse(const char *path, TdpProject *out) {
 // ---------------------------------------------------------------------------
 
 static void write_axis(FILE *fp, const char *label, const TdpAxisFunc *a) {
-    std::fprintf(fp, "            %-16s%2i  %1.3f %1.3f %1.3f %1.3f %s\n",
+    std::fprintf(fp, "            %-16s%2i  %1.9f %1.9f %1.9f %1.9f %s\n",
                  label, a->func_id,
                  static_cast<double>(a->param2), static_cast<double>(a->param3),
                  static_cast<double>(a->param0), static_cast<double>(a->param1),
@@ -780,7 +780,7 @@ static int ptype_to_physical_attributes(int ptype) {
 }
 
 static void write_axis_3da(FILE *fp, const char *label, const TdpAxisFunc *a) {
-    std::fprintf(fp, "  %-16s%2i  %1.3f %1.3f %1.3f %1.3f %s\n",
+    std::fprintf(fp, "  %-16s%2i  %1.9f %1.9f %1.9f %1.9f %s\n",
                  label, a->func_id,
                  static_cast<double>(a->param2), static_cast<double>(a->param3),
                  static_cast<double>(a->param0), static_cast<double>(a->param1),
@@ -1357,4 +1357,20 @@ int tdp_from_ir(const ThreediModelIR *ir, TdpProject *out) {
     }
 
     return 0;
+}
+
+int tdp_from_3di3(const Threedi3di3 *model, TdpProject *out) {
+    if (!model || !out) return -1;
+
+    ThreediModelIR ir;
+    threedi_ir_init(&ir);
+    int rc = threedi_ir_from_3di3(model, &ir);
+    if (rc != 0) {
+        threedi_ir_free(&ir);
+        return -1;
+    }
+
+    rc = tdp_from_ir(&ir, out);
+    threedi_ir_free(&ir);
+    return rc;
 }

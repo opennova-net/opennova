@@ -114,7 +114,12 @@ def _import_basic_model(
     from blender.opennova.definitions import (  # type: ignore[import]
         process_def_files, ensure_extension, build_animation_context,
     )
-    from blender.opennova.threedi_ffi import read_model_ir, free_model_ir  # type: ignore[import]
+    from blender.opennova.threedi_ffi import (  # type: ignore[import]
+        free_model_3di3,
+        free_model_ir,
+        read_model_auto,
+        read_model_ir,
+    )
     from blender.opennova.bad_ffi import parse_bad, free_bad  # type: ignore[import]
     from blender.opennova.asset_resolver import AssetResolver  # type: ignore[import]
     from .scene_builder import BlenderSceneBuilder
@@ -172,8 +177,10 @@ def _import_basic_model(
             if model_path is None:
                 raise FileNotFoundError(f"Model file not found: {Path(base_dir) / model_file}")
 
+            model_3di3 = None
             ir = None
             try:
+                model_3di3 = read_model_auto(str(model_path))
                 ir = read_model_ir(str(model_path))
 
                 if model_type == "main":
@@ -194,8 +201,8 @@ def _import_basic_model(
                             project_dir = os.path.join(output_dir, export_name)
                             os.makedirs(project_dir, exist_ok=True)
                             if write_3dp:
-                                _write_3dp_from_ir(
-                                    ir,
+                                _write_3dp_from_3di3(
+                                    model_3di3,
                                     os.path.join(project_dir, export_name + ".3dp"),
                                     bullet_lod_index=main_builder.bullet_lod_index,
                                 )
@@ -212,6 +219,8 @@ def _import_basic_model(
             finally:
                 if ir is not None:
                     free_model_ir(ir)
+                if model_3di3 is not None:
+                    free_model_3di3(model_3di3)
 
         if bad_file is not None:
             free_bad(bad_file)
@@ -302,6 +311,18 @@ def _write_3dp_from_ir(ir, tdp_path: str, bullet_lod_index: int = -1) -> None:
     log.info("Wrote 3DA: %s", tda_path)
 
 
+def _write_3dp_from_3di3(model, tdp_path: str, bullet_lod_index: int = -1) -> None:
+    """Write .3dp and .3da project files from the canonical typed 3DI3 model."""
+    from blender.opennova.project_writer import write_3dp_from_3di3  # type: ignore[import]
+
+    collision_lod_index = bullet_lod_index if bullet_lod_index >= 0 else None
+    write_3dp_from_3di3(
+        model,
+        tdp_path,
+        collision_lod_index=collision_lod_index,
+    )
+
+
 def run_loose_import(
     threedi_path: str,
     output_dir: str,
@@ -327,7 +348,12 @@ def run_loose_import(
     _setup_blender_package()
 
     from pathlib import Path
-    from blender.opennova.threedi_ffi import read_model_ir, free_model_ir  # type: ignore[import]
+    from blender.opennova.threedi_ffi import (  # type: ignore[import]
+        free_model_3di3,
+        free_model_ir,
+        read_model_auto,
+        read_model_ir,
+    )
     from blender.opennova.asset_resolver import AssetResolver  # type: ignore[import]
     from .scene_builder import BlenderSceneBuilder
 
@@ -336,6 +362,7 @@ def run_loose_import(
     base_dir = asset_base_dir or str(Path(threedi_path).parent)
     name = output_stem or Path(threedi_path).stem
 
+    model_3di3 = read_model_auto(threedi_path)
     ir = read_model_ir(threedi_path)
     result = False
     try:
@@ -346,8 +373,8 @@ def run_loose_import(
                                           import_lights=import_lights)
             result = builder.build_basic_scene(name)
             if result and write_3dp:
-                _write_3dp_from_ir(
-                    ir,
+                _write_3dp_from_3di3(
+                    model_3di3,
                     os.path.join(output_dir, name + ".3dp"),
                     bullet_lod_index=builder.bullet_lod_index,
                 )
@@ -356,6 +383,7 @@ def run_loose_import(
         raise
     finally:
         free_model_ir(ir)
+        free_model_3di3(model_3di3)
 
     if result:
         if write_ase:
