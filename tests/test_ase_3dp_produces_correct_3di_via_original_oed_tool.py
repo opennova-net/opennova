@@ -49,18 +49,16 @@ def test_ase_3dp_produces_correct_3di_via_original_oed_tool(
         validate_geometry_chunks,
     )
 
-    tool_dir_env = os.environ.get("OPENNOVA_MODSUPEROED_DIR")
-    if not tool_dir_env:
-        pytest.skip("OPENNOVA_MODSUPEROED_DIR is not set")
-    tool_dir = Path(tool_dir_env)
-
     source_3di = STOCK_JO / source_name
-    paths_template = modsuperoed.resolve_paths(tool_dir=tool_dir, repo_root=ROOT)
+    paths_template = modsuperoed.resolve_paths(repo_root=ROOT)
+    tool_dir = paths_template.tool_dir
     exe_path = tool_dir / "ModSuperOed.exe"
     required = [source_3di, exe_path, paths_template.injector, paths_template.hook_dll]
     missing = [p for p in required if not p.is_file()]
     if missing:
-        pytest.skip("missing roundtrip artifacts: " + ", ".join(str(p) for p in missing))
+        raise FileNotFoundError(
+            "missing roundtrip artifacts: " + ", ".join(str(p) for p in missing)
+        )
 
     stem = source_3di.stem
 

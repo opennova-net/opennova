@@ -38,67 +38,6 @@ jobs:
         shell: bash
         run: scripts/build.sh
 
-  modsuperoed-smoke:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-          submodules: recursive
-
-      - name: Pull Git LFS assets
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull
-          git lfs fsck --objects
-
-      - name: Validate ModSuperOED fixture pack
-        shell: bash
-        run: |
-          git -C third_party/modsuperoed lfs install --local
-          git -C third_party/modsuperoed lfs pull
-          git -C third_party/modsuperoed lfs fsck --objects
-          test -f third_party/modsuperoed/ModSuperOed.exe
-          test -f third_party/modsuperoed/CharModel.3dp
-          test -f third_party/modsuperoed/CharModel.3di
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install uv
-        shell: bash
-        run: python -m pip install --upgrade uv
-
-      - name: Build ModSuperOED hook
-        shell: pwsh
-        run: |
-          cmake -S . -B build-modsuperoed -A Win32
-          cmake --build build-modsuperoed --config Release --target modsuperoed_injector modsuperoed_hook
-
-      - name: Build native comparator library
-        shell: pwsh
-        run: |
-          cmake -S . -B build -A x64 -DBUILD_SHARED_LIB=ON -DOPENNOVA_ENABLE_MODSUPEROED_TOOLS=OFF
-          cmake --build build --config Release --target opennova_shared
-
-      - name: Run ModSuperOED smoke
-        shell: pwsh
-        env:
-          OPENNOVA_MODSUPEROED_DIR: ${{ github.workspace }}\third_party\modsuperoed
-          OPENNOVA_ROUNDTRIP_ARTIFACT_DIR: ${{ github.workspace }}\oed-roundtrip-artifacts
-        run: |
-          uv run pytest tests/test_modsuperoed_automation.py::test_external_modsuperoed_smoke tests/test_ase_3dp_produces_correct_3di_via_original_oed_tool.py -q
-
-      - name: Upload OED roundtrip artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: oed-roundtrip-artifacts
-          path: oed-roundtrip-artifacts
-          if-no-files-found: ignore
-
   godot-tests:
     strategy:
       fail-fast: false

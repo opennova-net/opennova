@@ -23,14 +23,38 @@ FIXTURES: list[Path] = [
     FIXTURE_DIR / "mp5_1st.3di",
 ]
 
-OPTION_PRESETS: dict[str, ImportOptions] = {
-    "round_trip": ImportOptions(),
-    "all_formats": ImportOptions(write_glb=True, write_fbx=True),
-    "glb_only": ImportOptions(
-        write_blend=False, write_3dp=False, write_ase=False, write_glb=True,
+SOURCE_ONLY_OPTIONS = ImportOptions(
+    write_blend=False,
+    write_3dp=True,
+    write_ase=True,
+    write_glb=False,
+    write_fbx=False,
+)
+
+OPTION_PRESETS = [
+    pytest.param("source_only", SOURCE_ONLY_OPTIONS, id="source_only"),
+    pytest.param("round_trip", ImportOptions(), id="round_trip"),
+    pytest.param(
+        "all_formats",
+        ImportOptions(write_glb=True, write_fbx=True),
+        id="all_formats",
     ),
-    "blend_only": ImportOptions(write_3dp=False, write_ase=False),
-}
+    pytest.param(
+        "glb_only",
+        ImportOptions(
+            write_blend=False,
+            write_3dp=False,
+            write_ase=False,
+            write_glb=True,
+        ),
+        id="glb_only",
+    ),
+    pytest.param(
+        "blend_only",
+        ImportOptions(write_3dp=False, write_ase=False),
+        id="blend_only",
+    ),
+]
 
 ALL_FORMAT_SUFFIXES = {".blend", ".3dp", ".3da", ".ase", ".glb", ".fbx"}
 
@@ -52,16 +76,16 @@ def _expected_files(options: ImportOptions, stem: str) -> set[str]:
 
 
 @pytest.mark.parametrize("threedi_path", FIXTURES, ids=lambda p: p.stem)
-@pytest.mark.parametrize("preset_name", list(OPTION_PRESETS), ids=str)
+@pytest.mark.parametrize("preset_name,options", OPTION_PRESETS)
 def test_loose_import_produces_expected_outputs(
     threedi_path: Path,
     preset_name: str,
+    options: ImportOptions,
     tmp_path: Path,
 ) -> None:
     if not threedi_path.is_file():
         pytest.fail(f"Fixture missing (LFS not pulled?): {threedi_path}")
 
-    options = OPTION_PRESETS[preset_name]
     request = ImportRequest.for_loose(
         threedi_path=str(threedi_path),
         output_root=str(tmp_path),

@@ -59,7 +59,7 @@ def resolve_paths(
     root = Path(repo_root) if repo_root is not None else _repo_root()
     tool_value = tool_dir if tool_dir is not None else os.environ.get("OPENNOVA_MODSUPEROED_DIR")
     if not tool_value:
-        raise RuntimeError("Set OPENNOVA_MODSUPEROED_DIR or pass tool_dir.")
+        tool_value = root / "third_party" / "modsuperoed"
 
     build_root = Path(build_dir) if build_dir is not None else _default_build_dir(root)
     native_dir = _native_dir(build_root)

@@ -200,10 +200,6 @@ target_link_libraries(terrain_lighting_test PRIVATE opennova_terrain)
 target_include_directories(terrain_lighting_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_lighting COMMAND terrain_lighting_test)
 
-# parametric_parity is a long byte-identical fixture parity run and remains
-# disabled until its CI stability/performance cost is addressed.
-set_tests_properties(parametric_parity PROPERTIES DISABLED TRUE)
-
 foreach(name crypto_roundtrip cdep_read cdep_roundtrip)
     add_executable(${name}_test trngen/${name}_test.cpp)
     target_link_libraries(${name}_test PRIVATE opennova_cpt)

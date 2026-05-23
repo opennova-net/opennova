@@ -80,6 +80,14 @@ def test_resolve_paths_uses_environment_tool_dir(
     assert paths.tool_dir == tool_dir
 
 
+def test_resolve_paths_defaults_to_repo_fixture_pack(tmp_path: Path) -> None:
+    from apps import modsuperoed
+
+    paths = modsuperoed.resolve_paths(repo_root=tmp_path)
+
+    assert paths.tool_dir == tmp_path / "third_party" / "modsuperoed"
+
+
 def test_verify_tool_reports_missing_artifacts(tmp_path: Path) -> None:
     from apps import modsuperoed
 
@@ -474,12 +482,8 @@ def test_external_modsuperoed_smoke(tmp_path: Path) -> None:
     from apps import modsuperoed
     from blender.opennova.threedi_compare_ffi import compare_3di3_chunks
 
-    tool_dir_env = os.environ.get("OPENNOVA_MODSUPEROED_DIR")
-    if not tool_dir_env:
-        pytest.skip("OPENNOVA_MODSUPEROED_DIR is not set")
-
-    tool_dir = Path(tool_dir_env)
-    paths = modsuperoed.resolve_paths(tool_dir=tool_dir, repo_root=ROOT)
+    paths = modsuperoed.resolve_paths(repo_root=ROOT)
+    tool_dir = paths.tool_dir
     project = tool_dir / "CharModel.3dp"
     expected = tool_dir / "CharModel.3di"
     missing = [
@@ -494,7 +498,10 @@ def test_external_modsuperoed_smoke(tmp_path: Path) -> None:
         if not path.is_file()
     ]
     if missing:
-        pytest.skip("ModSuperOED smoke artifacts missing: " + ", ".join(str(path) for path in missing))
+        raise FileNotFoundError(
+            "ModSuperOED smoke artifacts missing: "
+            + ", ".join(str(path) for path in missing)
+        )
 
     output = tmp_path / "CharModel.3di"
     result = modsuperoed.export_3di(
