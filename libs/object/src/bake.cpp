@@ -77,123 +77,32 @@ static std::vector<std::string> resolve_project_ase_paths(
     return paths;
 }
 
-static const TdpMaterialTexture *find_tex(
-    const TdpMaterial &material,
-    uint8_t slot,
-    uint8_t frame = 0,
-    bool animated = false) {
-    for (uint32_t i = 0;
-         i < material.texture_count && i < TDP_MAX_MATERIAL_TEXTURES;
-         ++i) {
-        const TdpMaterialTexture &tex = material.textures[i];
-        if (tex.slot != slot) {
-            continue;
-        }
-        const bool tex_animated = (tex.flags & 0x01u) != 0;
-        if (tex_animated != animated) {
-            continue;
-        }
-        if (tex.frame == frame) {
-            return &tex;
-        }
-    }
-    return nullptr;
-}
-
-static int tex_clamped(const TdpMaterialTexture *tex) {
-    return tex && (tex->flags & 0x02u) ? 1 : 0;
-}
-
-static int clamp_255(float value) {
-    if (value < 0.0f) {
-        return 0;
-    }
-    if (value > 1.0f) {
-        return 255;
-    }
-    return static_cast<int>(std::lround(static_cast<double>(value) * 255.0));
-}
-
-static const char *ctrlreg_name(const TdpProject *project, int32_t index) {
-    if (!project || index < 0 ||
-        static_cast<size_t>(index) >= project->ctrl_reg_count ||
-        !project->ctrl_regs) {
-        return "";
-    }
-    return project->ctrl_regs[index].name;
-}
-
-static int surface_type_to_ptype(uint8_t surface_type) {
-    switch (surface_type) {
-    case 0x0E: return 0;  // Generic
-    case 0x0D: return 1;  // Dirt
-    case 0x0C: return 2;  // Grass
-    case 0x11: return 3;  // Snow
-    case 0x12: return 4;  // Cement
-    case 0x10: return 5;  // Sand
-    case 0x0F: return 6;  // PackedDirt
-    case 0x07: return 7;  // Water
-    case 0x13: return 8;  // Railroad
-    case 0x01: return 9;  // Mud
-    default: return 9;
-    }
-}
-
-static uint32_t compose_rattrib(const TdpMaterial &material) {
-    const int has_anim = material.animation.num_frames > 0 ? 1 : 0;
-    return synthesize_jo_rattrib(&material.classification, has_anim);
-}
-
-static std::string compose_shader_tag(const TdpMaterial &material) {
-    if (material.shader_name[0] != '\0') {
-        return fixed_string(material.shader_name);
-    }
-    char tag[33]{};
-    synthesize_jo_shader_tag(&material.classification, tag, sizeof(tag));
-    if (tag[0] != '\0') {
-        return std::string(tag);
-    }
-    return {};
-}
-
-static void convert_material(const TdpProject *project,
-                             const TdpMaterial &src,
+static void convert_material(const TdpMaterial &src,
                              opennova::object::project::Material &dst) {
     dst.name = fixed_string(src.name);
-    dst.shader_tag = compose_shader_tag(src);
-    dst.rattrib = static_cast<int>(compose_rattrib(src));
+    dst.shader_tag = fixed_string(src.shader_tag);
+    dst.rattrib = static_cast<int>(src.rattrib);
     dst.pattrib = static_cast<int>(src.pattrib);
-    dst.ptype = surface_type_to_ptype(src.surface_type);
+    dst.ptype = static_cast<int>(src.ptype);
     dst.geofx = src.geofx;
     dst.geofx_value = src.geofx_value;
-    dst.alphatestvalue = src.alpha_test_value_byte;
+    dst.alphatestvalue = src.alphatestvalue;
 
-    const TdpMaterialTexture *d0 =
-        find_tex(src, TDP_TEX_SLOT_DIFFUSE);
-    const TdpMaterialTexture *d1 =
-        find_tex(src, TDP_TEX_SLOT_DETAIL);
-    const TdpMaterialTexture *n0 =
-        find_tex(src, TDP_TEX_SLOT_NORMAL);
-    const TdpMaterialTexture *n1 =
-        find_tex(src, TDP_TEX_SLOT_NORMAL_B);
+    for (int channel = 0; channel < 2; ++channel) {
+        dst.diffuse_tex[channel] = fixed_string(src.diffuse_tex[channel]);
+        dst.diffuse_flags[channel] = src.diffuse_flags[channel];
+        dst.normal_tex[channel] = src.normal_tex[channel][0]
+            ? fixed_string(src.normal_tex[channel])
+            : "0";
+        dst.normal_flags[channel] = src.normal_flags[channel];
+    }
 
-    dst.diffuse_tex[0] = d0 ? fixed_string(d0->name) : "";
-    dst.diffuse_tex[1] = d1 ? fixed_string(d1->name) : "";
-    dst.diffuse_flags[0] = tex_clamped(d0);
-    dst.diffuse_flags[1] = tex_clamped(d1);
-    dst.normal_tex[0] = n0 && n0->name[0] ? fixed_string(n0->name) : "0";
-    dst.normal_tex[1] = n1 && n1->name[0] ? fixed_string(n1->name) : "0";
-    dst.normal_flags[0] = tex_clamped(n0);
-    dst.normal_flags[1] = tex_clamped(n1);
-
-    dst.anim_frames = src.animation.num_frames;
-    dst.anim_type = src.animation.animation_type;
-    dst.anim_frametime =
-        src.animation.animation_type == 1 ? 0 : src.animation.cycle_frame_time;
+    dst.anim_frames = src.anim_frames;
+    dst.anim_type = src.anim_type;
+    dst.anim_frametime = src.anim_frametime;
     dst.anim_ctrlreg = fixed_string(src.anim_ctrlreg);
 
-    const int frame_count =
-        std::min<int>(src.animation.num_frames, TDP_MAX_ANIM_FRAMES);
+    const int frame_count = std::min<int>(src.anim_frames, TDP_MAX_ANIM_FRAMES);
     for (int channel = 0; channel < 2; ++channel) {
         for (int frame = 0; frame < frame_count; ++frame) {
             const auto &ad = src.anim_diffuse[channel][frame];
@@ -204,34 +113,7 @@ static void convert_material(const TdpProject *project,
             dst.anim_normal[channel][frame].enabled = an.enabled;
         }
     }
-    for (uint32_t ti = 0;
-         ti < src.texture_count && ti < TDP_MAX_MATERIAL_TEXTURES;
-         ++ti) {
-        const TdpMaterialTexture &tex = src.textures[ti];
-        if ((tex.flags & 0x01u) == 0 ||
-            tex.frame >= TDP_MAX_ANIM_FRAMES) {
-            continue;
-        }
-        int channel = -1;
-        bool normal = false;
-        switch (tex.slot) {
-        case TDP_TEX_SLOT_DIFFUSE: channel = 0; break;
-        case TDP_TEX_SLOT_DETAIL: channel = 1; break;
-        case TDP_TEX_SLOT_NORMAL: channel = 0; normal = true; break;
-        case TDP_TEX_SLOT_NORMAL_B: channel = 1; normal = true; break;
-        default: break;
-        }
-        if (channel < 0) {
-            continue;
-        }
-        auto &slot = normal
-            ? dst.anim_normal[channel][tex.frame]
-            : dst.anim_diffuse[channel][tex.frame];
-        if (slot.path.empty()) {
-            slot.path = fixed_string(tex.name);
-            slot.enabled = tex_clamped(&tex);
-        }
-    }
+
     if (dst.diffuse_tex[0].empty() && !dst.anim_diffuse[0][0].path.empty()) {
         dst.diffuse_tex[0] = dst.anim_diffuse[0][0].path;
     }
@@ -249,35 +131,33 @@ static void convert_material(const TdpProject *project,
         }
     }
 
-    dst.reflect_rgb[0] = clamp_255(src.reflect_color[2]);
-    dst.reflect_rgb[1] = clamp_255(src.reflect_color[1]);
-    dst.reflect_rgb[2] = clamp_255(src.reflect_color[0]);
-    dst.rgbgen_style = src.rgb_gen.style;
-    dst.rgbgen_rate = src.rgb_gen.rate;
-    dst.rgbgen_phase = src.rgb_gen.phase;
     for (int i = 0; i < 3; ++i) {
-        dst.rgbgen_srgb[i] = clamp_255(src.rgb_gen.start_color[i]);
-        dst.rgbgen_ergb[i] = clamp_255(src.rgb_gen.end_color[i]);
+        dst.reflect_rgb[i] = src.reflect_rgb[i];
+        dst.rgbgen_srgb[i] = src.rgbgen_srgb[i];
+        dst.rgbgen_ergb[i] = src.rgbgen_ergb[i];
     }
-    dst.rgbgen_ctrlreg = ctrlreg_name(project, src.rgb_gen.reg);
-    dst.alphagen_style = src.alpha_gen.style;
-    dst.alphagen_rate = src.alpha_gen.rate;
-    dst.alphagen_phase = src.alpha_gen.phase;
-    dst.alphagen_start = static_cast<float>(src.alpha_gen.start);
-    dst.alphagen_end = static_cast<float>(src.alpha_gen.end);
-    dst.alphagen_ctrlreg = ctrlreg_name(project, src.alpha_gen.reg);
-    dst.mapfunc_u_style = src.u_params.style;
-    dst.mapfunc_u_rate = src.u_params.gen_rate;
-    dst.mapfunc_u_phase = src.u_params.phase;
-    dst.mapfunc_u_start = src.u_params.start;
-    dst.mapfunc_u_end = src.u_params.end;
-    dst.mapfunc_u_ctrlreg = ctrlreg_name(project, src.u_params.reg);
-    dst.mapfunc_v_style = src.v_params.style;
-    dst.mapfunc_v_rate = src.v_params.gen_rate;
-    dst.mapfunc_v_phase = src.v_params.phase;
-    dst.mapfunc_v_start = src.v_params.start;
-    dst.mapfunc_v_end = src.v_params.end;
-    dst.mapfunc_v_ctrlreg = ctrlreg_name(project, src.v_params.reg);
+    dst.rgbgen_style = src.rgbgen_style;
+    dst.rgbgen_rate = src.rgbgen_rate;
+    dst.rgbgen_phase = src.rgbgen_phase;
+    dst.rgbgen_ctrlreg = fixed_string(src.rgbgen_ctrlreg);
+    dst.alphagen_style = src.alphagen_style;
+    dst.alphagen_rate = src.alphagen_rate;
+    dst.alphagen_phase = src.alphagen_phase;
+    dst.alphagen_start = src.alphagen_start;
+    dst.alphagen_end = src.alphagen_end;
+    dst.alphagen_ctrlreg = fixed_string(src.alphagen_ctrlreg);
+    dst.mapfunc_u_style = src.mapfunc_u_style;
+    dst.mapfunc_u_rate = src.mapfunc_u_rate;
+    dst.mapfunc_u_phase = src.mapfunc_u_phase;
+    dst.mapfunc_u_start = src.mapfunc_u_start;
+    dst.mapfunc_u_end = src.mapfunc_u_end;
+    dst.mapfunc_u_ctrlreg = fixed_string(src.mapfunc_u_ctrlreg);
+    dst.mapfunc_v_style = src.mapfunc_v_style;
+    dst.mapfunc_v_rate = src.mapfunc_v_rate;
+    dst.mapfunc_v_phase = src.mapfunc_v_phase;
+    dst.mapfunc_v_start = src.mapfunc_v_start;
+    dst.mapfunc_v_end = src.mapfunc_v_end;
+    dst.mapfunc_v_ctrlreg = fixed_string(src.mapfunc_v_ctrlreg);
 }
 
 // Convert a TdpAxisFunc → project::AxisFunc
@@ -325,7 +205,7 @@ opennova::object::project::Project convert_project(const TdpProject *tdp) {
     // Materials
     proj.materials.resize(tdp->material_count);
     for (size_t i = 0; i < tdp->material_count; ++i) {
-        convert_material(tdp, tdp->materials[i], proj.materials[i]);
+        convert_material(tdp->materials[i], proj.materials[i]);
     }
 
     // LODs
@@ -434,8 +314,9 @@ void free_session_states(std::vector<opennova::object::InternalState> &states) {
 BakeStatus parse_and_convert_ase(const char **ase_paths,
                                 int ase_count,
                                 const opennova::object::project::Project &proj,
-                                std::vector<opennova::object::InternalState> &states) {
-    states.assign(static_cast<size_t>(ase_count), {});
+    std::vector<opennova::object::InternalState> &states) {
+    states.clear();
+    states.resize(static_cast<size_t>(ase_count));
     for (int i = 0; i < ase_count; ++i) {
         if (!ase_paths[i]) {
             free_session_states(states);

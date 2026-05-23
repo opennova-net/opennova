@@ -112,6 +112,13 @@ target_link_libraries(tdp_3da_write_test PRIVATE opennova_tdp)
 target_include_directories(tdp_3da_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tdp_3da_write COMMAND tdp_3da_write_test)
 
+# Native object bake: stock 3DI -> generated ASE/3DP -> OpenNova bake -> 3DI.
+add_executable(object_bake_roundtrip_test object/object_bake_roundtrip_test.cpp)
+target_link_libraries(object_bake_roundtrip_test
+    PRIVATE opennova_object opennova_threedi opennova_tdp)
+target_include_directories(object_bake_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME object_bake_roundtrip COMMAND object_bake_roundtrip_test)
+
 # Terrain format library tests
 add_executable(pcx_roundtrip_test pcx/pcx_roundtrip_test.cpp)
 target_link_libraries(pcx_roundtrip_test PRIVATE opennova_pcx)

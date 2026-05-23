@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -614,7 +615,7 @@ void populate_part_anim_from_project(const project::Project* proj, LodBucketWork
 }
 
 void apply_material_table_from_project(const project::Project* proj, MaterialTable& table) {
-  MaterialTable previous = table;
+  auto previous = std::make_unique<MaterialTable>(table);
   seed_material_table_from_project(proj, table);
   if (!proj) return;
   const size_t project_count = std::min(proj->materials.size(), std::size(table.slots));
@@ -625,9 +626,9 @@ void apply_material_table_from_project(const project::Project* proj, MaterialTab
   // rdta.cpp:1865 sees uv1_u_tiling == 0 and skips the (uv-0.5)*tiling+0.5
   // transform, copying uv0 to uv1 verbatim — which diverges from OED's bake
   // of the same regenerated source for FF_MT_OP / multi-stage materials.
-  for (uint32_t i = 0; i < static_cast<uint32_t>(project_count) && i < previous.count; ++i) {
+  for (uint32_t i = 0; i < static_cast<uint32_t>(project_count) && i < previous->count; ++i) {
     auto& dst = table.slots[i];
-    const auto& prev = previous.slots[i];
+    const auto& prev = previous->slots[i];
     if (prev.uv0_u_tiling != 0.0f && dst.uv0_u_tiling != prev.uv0_u_tiling) {
       dst.uv0_u_tiling = prev.uv0_u_tiling;
     }
@@ -637,11 +638,11 @@ void apply_material_table_from_project(const project::Project* proj, MaterialTab
     if (prev.uv1_u_tiling != 0.0f) dst.uv1_u_tiling = prev.uv1_u_tiling;
     if (prev.uv1_v_tiling != 0.0f) dst.uv1_v_tiling = prev.uv1_v_tiling;
   }
-  if (previous.count <= project_count) return;
+  if (previous->count <= project_count) return;
   const uint32_t max_count = static_cast<uint32_t>(std::size(table.slots));
-  const uint32_t preserved_count = std::min(previous.count, max_count);
+  const uint32_t preserved_count = std::min(previous->count, max_count);
   for (uint32_t i = static_cast<uint32_t>(project_count); i < preserved_count; ++i) {
-    table.slots[i] = previous.slots[i];
+    table.slots[i] = previous->slots[i];
   }
   table.count = preserved_count;
 }

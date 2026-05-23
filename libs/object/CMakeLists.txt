@@ -1,6 +1,7 @@
 add_library(opennova_object STATIC
     src/flat_mesh.cpp
     src/ir_to_flat_mesh.cpp
+    src/convert_internal.cpp
     src/coords.cpp
     src/smoothing_groups.cpp
     src/three_di_policy.cpp
@@ -14,6 +15,11 @@ add_library(opennova_object STATIC
     src/polyhedron.cpp
     src/collision_to_ase.cpp
     src/occlusion_to_ase.cpp
+    src/material_utils.cpp
+    src/rdta.cpp
+    src/export_3di.cpp
+    src/bake.cpp
+    src/x87_math.cpp
     src/write_ase_files.cpp
     src/write_ase_files_from_flat_meshes.cpp
 )
