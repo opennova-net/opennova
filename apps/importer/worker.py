@@ -19,7 +19,7 @@ import multiprocessing as mp
 import time
 from pathlib import Path
 
-from .jobs import (
+from opennova_jobs import (
     IMPORT_MODE_DEF,
     IMPORT_MODE_LOOSE,
     ImportRequest,

@@ -9,7 +9,7 @@ Open-source toolchain and runtime for NovaLogic's Joint Operations (JO) and newe
 Three layers:
 
 - **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): terrain, environment, etc that writes the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.env`, …) directly.
-- **Core engine (`libs/`).** Format parsers, terrain LOD, foliage scatter, environment sampling. Also consumed by Python (`apps/importer/`) and Blender (`blender/`).
+- **Core engine (`libs/`).** Format parsers, terrain LOD, foliage scatter, environment sampling. Also consumed by Python (`opennova_blender/`, `apps/importer/`) and Blender (`blender/`).
 - **Godot (`godot/engine/` + `godot/game/`).** GDExtension wrappers in `engine/` bind the core into Godot; `game/` is the runtime scene.
 
 All of this is pre-1.0 and under active development. Nothing here is production-ready. The asset pipeline (importer, Blender addon, and ONED) is the most exercised surface today; the Godot runtime loads exported scenes and runs the terrain and foliage systems; gameplay (player, missions, multiplayer) is still being built.
@@ -40,7 +40,7 @@ Imported scenes include meshes, materials, textures, LODs, skeletal armatures, c
 
 ### Running from source
 
-Requires Python 3.11, uv, and bpy 5.x. Build the shared library (see [Building](#building)) and copy `build/Release/opennova.dll` into `blender/lib/windows-x64/`, then `uv sync && uv run onimport`.
+Requires Python 3.11, uv, bpy 5.0.0, and PySide6. Build the shared library (see [Building](#building)) and copy `build/Release/opennova.dll` into `blender/lib/windows-x64/`, then `uv sync && uv run onimport`.
 
 ## Blender Addon
 
@@ -50,7 +50,7 @@ A Blender 5.x addon for the export side of the asset pipeline. Install via the z
 
 `File > Export > Novalogic ASE (.ase)`
 
-Exports the current scene to NovaLogic's ASCII Scene Export format. Supports multi-LOD scenes, BulletLOD collision meshes, bone weights for skinned models, vertex normals, texture coordinates, and diffuse texture export as TGA. Configurable float precision and scale.
+Exports the current scene to NovaLogic's ASCII Scene Export format. Supports multi-LOD scenes, bone weights for skinned models, vertex normals, texture coordinates, and diffuse texture export as TGA. Configurable float precision and scale.
 
 ### Animation Export
 
@@ -73,7 +73,10 @@ The authoring layer for JO assets: terrain, environments, and objects in one edi
 | Path | Contents |
 |------|----------|
 | `libs/` | C/C++ format libraries (`adm`, `ase`, `bad`, `bfc1`, `cpt`, `def`, `env`, `pcx`, `pff`, `scr`, `tdp`, `threedi`, `til`, `tpj`, `trn`) plus runtime subsystems (`terrain`, `foliage`, `runtime`). |
-| `apps/importer/` | Python importer + scene builder; backs `onimport.exe`. |
+| `apps/importer/` | `onimport` launcher and CLI compatibility shell. |
+| `opennova_jobs/` | Host-neutral import request/result/job models and validation. |
+| `opennova_qt_ui/` | Host-agnostic PySide6 importer dialog and pure UI helpers. |
+| `opennova_blender/` | Standalone Blender-backed importer backend for the Qt UI. |
 | `blender/` | Blender 5.x addon (export side of the pipeline). |
 | `godot/` | Godot 4.6.1 host. `engine/` (GDExtension bindings to `libs/`), `modtools/` (authoring), `game/` (runtime scene), `tests/` (GUT suite). |
 | `scripts/` | Build, test, and packaging scripts (sh + ps1). |

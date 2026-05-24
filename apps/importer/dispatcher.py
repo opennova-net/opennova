@@ -19,7 +19,7 @@ import os
 from concurrent.futures.process import BrokenProcessPool
 from typing import Iterable, Iterator
 
-from .jobs import ImportRequest, ImportResult
+from opennova_jobs import ImportRequest, ImportResult
 from .worker import init_worker, run_one
 
 

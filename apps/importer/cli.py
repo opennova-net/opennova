@@ -5,7 +5,7 @@ import argparse
 import logging
 import sys
 
-from apps.importer.jobs import ImportOptions, ImportRequest
+from opennova_jobs import ImportOptions, ImportRequest
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)

@@ -31,7 +31,7 @@ def main():
     args = sys.argv[1:]
     if not args or args[0] == "gui":
         log.info("Loading OpenNova Importer... (log: %s)", _log_path)
-        from apps.importer.ui.app import run_gui
+        from apps.importer.ui.qt_app import run_gui
         run_gui()
     else:
         log.debug("Starting OpenNova Importer CLI (log: %s)", _log_path)

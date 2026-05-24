@@ -9,7 +9,7 @@ import sys
 import types
 import logging
 
-from .jobs import (
+from opennova_jobs import (
     IMPORT_MODE_DEF,
     IMPORT_MODE_LOOSE,
     ImportRequest,
@@ -197,7 +197,6 @@ def _import_basic_model(
                                 _write_3dp_from_ir(
                                     ir,
                                     os.path.join(project_dir, export_name + ".3dp"),
-                                    bullet_lod_index=main_builder.bullet_lod_index,
                                 )
                 else:
                     if main_builder is None:
@@ -281,18 +280,11 @@ def run_import(
         raise
 
 
-def _write_3dp_from_ir(ir, tdp_path: str, bullet_lod_index: int = -1) -> None:
+def _write_3dp_from_ir(ir, tdp_path: str) -> None:
     """Write .3dp and .3da project files from the C IR using the native tdp library."""
-    from blender.opennova.tdp_ffi import tdp_from_ir, write_tdp, write_3da, free_tdp, TDP_MAX_LODS  # type: ignore[import]
+    from blender.opennova.tdp_ffi import tdp_from_ir, write_tdp, write_3da, free_tdp  # type: ignore[import]
     proj = tdp_from_ir(ir)
     try:
-        if 0 <= bullet_lod_index < TDP_MAX_LODS:
-            lod_slot = proj.lods[bullet_lod_index]
-            name = ir.name.decode("utf-8", errors="replace").rstrip("\x00")
-            lod_slot.scene_file = f"{name}_bullet.ase".encode("utf-8")[:63]
-            lod_slot.attributes = proj.lods[0].attributes
-            lod_slot.render_function = proj.lods[0].render_function
-            proj.poly_collision_lod = bullet_lod_index
         write_tdp(tdp_path, proj)
         tda_path = tdp_path.replace(".3dp", ".3da")
         write_3da(tda_path, proj)
@@ -349,7 +341,6 @@ def run_loose_import(
                 _write_3dp_from_ir(
                     ir,
                     os.path.join(output_dir, name + ".3dp"),
-                    bullet_lod_index=builder.bullet_lod_index,
                 )
     except Exception as exc:
         log.error("run_loose_import failed: %s", exc, exc_info=True)
