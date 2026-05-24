@@ -39,8 +39,9 @@ class TestImportOptions:
         assert options.write_blend
         assert options.write_3dp
         assert options.write_ase
-        assert not options.write_glb
-        assert not options.write_fbx
+        assert not options.write_max
+        assert not hasattr(options, "write_glb")
+        assert not hasattr(options, "write_fbx")
 
     def test_cli_options_override_defaults(self) -> None:
         parser = build_parser()
@@ -58,7 +59,7 @@ class TestImportOptions:
             "--no-arms",
             "--no-blend",
             "--no-3dp",
-            "--glb",
+            "--max",
         ])
         options = options_from_args(args)
         assert not options.import_occlusion
@@ -66,22 +67,28 @@ class TestImportOptions:
         assert not options.write_blend
         assert not options.write_3dp
         assert options.write_ase
-        assert options.write_glb
+        assert options.write_max
 
     def test_blender_only_options_write_only_blend(self) -> None:
         options = ImportOptions(write_3dp=False, write_ase=False)
         assert options.write_blend
         assert options.writes_any_output_file()
-        assert not options.writes_any_export_format()
+        assert options.writes_any_export_format()
         assert options.import_collisions
 
-    def test_runtime_export_options_write_glb_and_project_metadata(self) -> None:
-        options = ImportOptions(write_blend=False, write_ase=False, write_glb=True)
+    def test_max_only_options_are_a_native_scene_export(self) -> None:
+        options = ImportOptions(write_blend=False, write_3dp=False, write_ase=False, write_max=True)
         assert not options.write_blend
-        assert options.write_3dp
+        assert not options.write_3dp
         assert not options.write_ase
-        assert options.write_glb
+        assert options.write_max
         assert options.writes_any_export_format()
+        assert options.ase_export_owner() == ""
+
+    def test_ase_export_owner_prefers_blender_over_max(self) -> None:
+        assert ImportOptions(write_ase=True, write_blend=True, write_max=True).ase_export_owner() == "blender"
+        assert ImportOptions(write_ase=True, write_blend=False, write_max=True).ase_export_owner() == "max"
+        assert ImportOptions(write_ase=False, write_blend=True, write_max=True).ase_export_owner() == ""
 
 
 class TestImportRequestValidation:
@@ -106,12 +113,33 @@ class TestImportRequestValidation:
                 write_blend=False,
                 write_3dp=False,
                 write_ase=False,
-                write_glb=False,
-                write_fbx=False,
+                write_max=False,
             ),
         )
         errors = validate_import_request(request)
         assert "Select at least one file to write." in errors
+
+    def test_ase_requires_dcc_scene_output(self) -> None:
+        request = ImportRequest.for_definition(
+            base_dir=str(FIXTURE_DEF_DIR),
+            item_name="M16",
+            item_type="weapon",
+            output_root=str(ROOT),
+            options=ImportOptions(write_blend=False, write_max=False, write_3dp=True, write_ase=True),
+        )
+        errors = validate_import_request(request)
+        assert "ASE export requires .blend or .max output." in errors
+
+    def test_ase_with_max_output_is_valid(self) -> None:
+        request = ImportRequest.for_definition(
+            base_dir=str(FIXTURE_DEF_DIR),
+            item_name="M16",
+            item_type="weapon",
+            output_root=str(ROOT),
+            options=ImportOptions(write_blend=False, write_max=True, write_3dp=False, write_ase=True),
+        )
+        errors = validate_import_request(request)
+        assert "ASE export requires .blend or .max output." not in errors
 
     def test_loose_request_requires_3di_file(self) -> None:
         request = ImportRequest.for_loose(
@@ -183,7 +211,8 @@ class TestImportRunner:
                 import_occlusion=False,
                 import_arms=False,
                 write_blend=False,
-                write_glb=True,
+                write_max=False,
+                write_ase=False,
             ),
         )
         # Call run_one directly (in-process) so the mock applies. The
@@ -204,7 +233,22 @@ class TestImportRunner:
         assert not kwargs["import_occlusion"]
         assert not kwargs["import_arms"]
         assert not kwargs["write_blend"]
-        assert kwargs["write_glb"]
+        assert "write_max" not in kwargs
+
+    def test_blender_worker_rejects_raw_max_output(self) -> None:
+        request = ImportRequest.for_definition(
+            base_dir=str(FIXTURE_DEF_DIR),
+            item_name="M16",
+            item_type="weapon",
+            output_root=str(ROOT),
+            options=ImportOptions(write_blend=False, write_3dp=False, write_ase=False, write_max=True),
+        )
+        from apps.importer.worker import run_one
+
+        result = run_one(request)
+
+        assert not result.ok
+        assert ".max output must be routed through the standalone backend" in result.error
 
     def test_execute_loose_request_uses_single_scene_reset_boundary(self) -> None:
         output_root = ROOT

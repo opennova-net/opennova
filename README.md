@@ -20,8 +20,7 @@ Pre-JO NovaLogic titles may sort of work by chance, but are not officially suppo
 
 Pre-built binaries are available on the [Releases](../../releases) page:
 
-- **`onimport.exe`**: standalone Windows importer. Use this to convert models etc to modern formats like .glb, .blend and .fbx. Also exports files
-compat. with NovaLogic's original tools (ie: OED).
+- **`onimport.exe`**: standalone Windows importer. Use this to convert models to `.blend`, `.ase`, `.max`, and NovaLogic-compatible project files for tools like OED.
 - **`opennova_blender.zip`**: Blender 5.x addon with pre-built native libraries for Windows and Linux.
 - **`opennova-modtools-windows.zip`**: standalone OpenNova Editor (ONED) for Windows. The open source NILE.
 - **`opennova-runtime-windows.zip`**: "game" runtime.
@@ -33,8 +32,8 @@ Extract models from game files. Reads directly from PFF archives with automatic 
 Each import can write one or more selected output files:
 - `.blend` - Blender project with the full scene hierarchy
 - `.ase` - 3DS Max ASCII Scene Export
+- `.max` - 3ds Max scene, when the external Max backend is available
 - `.3dp` / `.3da` - Project metadata for round-trip editing
-- `.glb` / `.fbx` - Optional runtime/interchange exports
 
 Imported scenes include meshes, materials, textures, LODs, skeletal armatures, collision volumes, occlusion geometry, lights, and user points.
 
@@ -77,6 +76,7 @@ The authoring layer for JO assets: terrain, environments, and objects in one edi
 | `opennova_jobs/` | Host-neutral import request/result/job models and validation. |
 | `opennova_qt_ui/` | Host-agnostic PySide6 importer dialog and pure UI helpers. |
 | `opennova_blender/` | Standalone Blender-backed importer backend for the Qt UI. |
+| `opennova_max/` | External 3ds Max batch helpers and Max-side export hooks. |
 | `blender/` | Blender 5.x addon (export side of the pipeline). |
 | `godot/` | Godot 4.6.1 host. `engine/` (GDExtension bindings to `libs/`), `modtools/` (authoring), `game/` (runtime scene), `tests/` (GUT suite). |
 | `scripts/` | Build, test, and packaging scripts (sh + ps1). |
