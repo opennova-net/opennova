@@ -10,7 +10,7 @@ from apps.importer.import_runner import (
     scan_directory,
     scan_directory_result,
 )
-from apps.importer.jobs import (
+from opennova_jobs import (
     JOB_ERROR,
     JOB_PENDING,
     JOB_RUNNING,
@@ -20,12 +20,6 @@ from apps.importer.jobs import (
     ScanItem,
     has_active_duplicate,
     validate_import_request,
-)
-from apps.importer.ui.app import (
-    CUSTOM_PRESET_LABEL,
-    OPTION_PRESETS,
-    ImporterApp,
-    preset_name_for_options,
 )
 
 
@@ -74,42 +68,20 @@ class TestImportOptions:
         assert options.write_ase
         assert options.write_glb
 
-    def test_blender_only_preset_writes_only_blend(self) -> None:
-        options = OPTION_PRESETS["Blender only"]
+    def test_blender_only_options_write_only_blend(self) -> None:
+        options = ImportOptions(write_3dp=False, write_ase=False)
         assert options.write_blend
         assert options.writes_any_output_file()
         assert not options.writes_any_export_format()
         assert options.import_collisions
 
-    def test_preset_name_matches_known_options(self) -> None:
-        assert preset_name_for_options(ImportOptions()) == "Round-trip"
-        assert (
-            preset_name_for_options(OPTION_PRESETS["Godot/runtime export"])
-            == "Godot/runtime export"
-        )
-
-    def test_preset_name_reports_custom_options(self) -> None:
-        options = ImportOptions(write_fbx=True)
-        assert preset_name_for_options(options) == CUSTOM_PRESET_LABEL
-
-    def test_legacy_preferences_default_missing_new_options(self) -> None:
-        app = object.__new__(ImporterApp)
-        app._prefs = {
-            "last_options": {
-                "import_animations": True,
-                "import_collisions": True,
-                "import_occlusion": True,
-                "import_lights": True,
-                "import_arms": True,
-                "write_3dp": True,
-                "write_ase": True,
-                "write_glb": False,
-                "write_fbx": False,
-            }
-        }
-        options = app._options_from_preferences()
-        assert options.write_blend
-        assert preset_name_for_options(options) == "Round-trip"
+    def test_runtime_export_options_write_glb_and_project_metadata(self) -> None:
+        options = ImportOptions(write_blend=False, write_ase=False, write_glb=True)
+        assert not options.write_blend
+        assert options.write_3dp
+        assert not options.write_ase
+        assert options.write_glb
+        assert options.writes_any_export_format()
 
 
 class TestImportRequestValidation:
@@ -295,7 +267,6 @@ class TestImportRunner:
         scene_module = types.ModuleType("apps.importer.scene_builder")
         builder = Mock()
         builder.build_basic_scene.return_value = True
-        builder.bullet_lod_index = -1
         scene_module.BlenderSceneBuilder = Mock(return_value=builder)
 
         modules = {
@@ -305,7 +276,7 @@ class TestImportRunner:
         }
         with patch.dict(sys.modules, modules):
             with patch("apps.importer.import_runner._setup_blender_package"):
-                with patch("apps.importer.import_runner._write_3dp_from_ir"):
+                with patch("apps.importer.import_runner._write_3dp_from_ir") as write_3dp:
                     with patch("apps.importer.import_runner._export_ase"):
                         with patch("apps.importer.import_runner._save_blend_scene") as save_blend:
                             ok = run_loose_import(
@@ -316,7 +287,14 @@ class TestImportRunner:
                             )
 
         assert ok
+        write_3dp.assert_called_once_with(fake_ir, str(ROOT / "Shed.3dp"))
         save_blend.assert_not_called()
+
+    def test_project_writer_has_no_bullet_lod_override_parameter(self) -> None:
+        import inspect
+        from apps.importer.import_runner import _write_3dp_from_ir
+
+        assert "bullet_lod_index" not in inspect.signature(_write_3dp_from_ir).parameters
 
     def test_scan_failure_is_not_empty_success(self) -> None:
         missing = str(ROOT / ".scratch" / "__missing_scan_dir__")
@@ -368,43 +346,7 @@ class TestImportDispatcher:
                 dispatcher.close()
 
 
-class TestImporterAppHelpers:
-    def test_collision_choice_can_skip_existing_outputs(self, tmp_path: Path) -> None:
-        existing = tmp_path / "m16_1st"
-        existing.mkdir()
-        existing_request = ImportRequest.for_definition(
-            base_dir=str(FIXTURE_DEF_DIR),
-            item_name="WPN_M16",
-            item_type="weapon",
-            output_root=str(tmp_path),
-            output_stem="m16_1st",
-        )
-        new_request = ImportRequest.for_definition(
-            base_dir=str(FIXTURE_DEF_DIR),
-            item_name="WPN_AK47",
-            item_type="weapon",
-            output_root=str(tmp_path),
-            output_stem="ak47_1st",
-        )
-        app = object.__new__(ImporterApp)
-
-        with patch("apps.importer.ui.app.messagebox.askyesnocancel", return_value=False):
-            choice = app._resolve_output_collisions([existing_request, new_request])
-
-        assert not choice.canceled
-        assert choice.skipped_count == 1
-        assert choice.requests == [new_request]
-
-    def test_action_hint_prefers_missing_output_format(self) -> None:
-        app = object.__new__(ImporterApp)
-        assert app._action_hint(
-            has_game_dir=True,
-            has_output=True,
-            has_output_file=False,
-            selected_count=1,
-            has_visible_items=True,
-        ) == "Select at least one file type to write."
-
+class TestImporterHelpers:
     def test_running_job_elapsed_time_is_available(self) -> None:
         request = ImportRequest.for_loose(
             threedi_path=str(FIXTURE_3DI),

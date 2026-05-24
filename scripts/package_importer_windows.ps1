@@ -46,7 +46,7 @@ Write-Host "=== Installing project dependencies ==="
 & $PY -m uv sync --frozen --python $PY --group dev
 
 Write-Host "=== Checking bpy version ==="
-& $PY -m uv run --frozen --group dev python -c "import bpy; v = bpy.app.version; assert (5, 0, 0) <= v < (6, 0, 0), f'Expected bpy 5.x, got {bpy.app.version_string}'; print(f'Using bpy {bpy.app.version_string}')"
+& $PY -m uv run --frozen --group dev python -c "import bpy; v = bpy.app.version; assert v[:3] == (5, 0, 0), f'Expected bpy 5.0.0, got {bpy.app.version_string}'; print(f'Using bpy {bpy.app.version_string}')"
 
 # ---------------------------------------------------------------------------
 # Build opennova.dll (needed by the FFI layer at runtime)
@@ -69,6 +69,8 @@ $ExeName = "onimport-v$Version"
     --onefile `
     --collect-all bpy `
     --collect-all numpy `
+    --collect-all PySide6 `
+    --collect-all shiboken6 `
     --add-binary "blender\lib\windows-x64\opennova.dll;blender\lib\windows-x64" `
     --distpath $distPath `
     --noconfirm `

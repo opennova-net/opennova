@@ -277,8 +277,7 @@ class AseExporter:
             for lod_root in lod_extra_roots:
                 lod_idx = lod_root["_lod_index"]
                 stem, ext = os.path.splitext(filepath)
-                is_bullet = lod_root.name.endswith("_BulletLOD")
-                lod_filepath = f"{stem}_bullet{ext}" if is_bullet else f"{stem}_lod{lod_idx}{ext}"
+                lod_filepath = f"{stem}_lod{lod_idx}{ext}"
 
                 lod_mesh_objects = [o for o in all_mesh_objects
                                     if self._is_descendant_of(o, lod_root)]
@@ -292,11 +291,7 @@ class AseExporter:
                 lod_total = len(lod_mesh_objects)
                 lod_doc_mats = math.ceil(total_materials / self.SUBS_PER_SLOT) if total_materials > 0 else 0
                 lod_doc = ase_ffi.create_document(lod_total, lod_doc_mats, 0)
-                # Bullet collision LODs must be exported as non-skinned.
-                # OED's ConvertToInternalSkinned path ignores "~attach" markers
-                # and derives attach points from digit/node-id objects, which
-                # corrupts CXLT/COBJ for collision-only data (e.g. US01).
-                lod_has_skinned = has_skinned and not is_bullet
+                lod_has_skinned = has_skinned
                 lod_doc.flags = 1 if lod_has_skinned else 0
                 lod_doc.skinned_flags = 1 if lod_has_skinned else 0
 

@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from apps.importer.import_runner import execute_import_request
-from apps.importer.jobs import ImportOptions, ImportRequest
+from opennova_jobs import ImportOptions, ImportRequest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +23,7 @@ FIXTURES: list[Path] = [
     FIXTURE_DIR / "mp5_1st.3di",
 ]
 
-OPTION_PRESETS: dict[str, ImportOptions] = {
+OPTION_CASES: dict[str, ImportOptions] = {
     "round_trip": ImportOptions(),
     "all_formats": ImportOptions(write_glb=True, write_fbx=True),
     "glb_only": ImportOptions(
@@ -52,16 +52,16 @@ def _expected_files(options: ImportOptions, stem: str) -> set[str]:
 
 
 @pytest.mark.parametrize("threedi_path", FIXTURES, ids=lambda p: p.stem)
-@pytest.mark.parametrize("preset_name", list(OPTION_PRESETS), ids=str)
+@pytest.mark.parametrize("option_case", list(OPTION_CASES), ids=str)
 def test_loose_import_produces_expected_outputs(
     threedi_path: Path,
-    preset_name: str,
+    option_case: str,
     tmp_path: Path,
 ) -> None:
     if not threedi_path.is_file():
         pytest.fail(f"Fixture missing (LFS not pulled?): {threedi_path}")
 
-    options = OPTION_PRESETS[preset_name]
+    options = OPTION_CASES[option_case]
     request = ImportRequest.for_loose(
         threedi_path=str(threedi_path),
         output_root=str(tmp_path),
@@ -81,7 +81,7 @@ def test_loose_import_produces_expected_outputs(
 
     missing = expected - actual
     assert not missing, (
-        f"missing outputs for {stem} ({preset_name}): {sorted(missing)}; "
+        f"missing outputs for {stem} ({option_case}): {sorted(missing)}; "
         f"got {sorted(actual)}"
     )
 
@@ -92,7 +92,12 @@ def test_loose_import_produces_expected_outputs(
         and Path(name).suffix not in expected_suffixes
     }
     assert not leaked, (
-        f"unexpected outputs for {stem} ({preset_name}): {sorted(leaked)}"
+        f"unexpected outputs for {stem} ({option_case}): {sorted(leaked)}"
+    )
+    bullet_lod_outputs = {name for name in actual if name.lower().endswith("_bullet.ase")}
+    assert not bullet_lod_outputs, (
+        f"unexpected BulletLOD ASE outputs for {stem} ({option_case}): "
+        f"{sorted(bullet_lod_outputs)}"
     )
 
     for name in expected:
