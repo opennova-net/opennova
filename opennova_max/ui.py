@@ -12,25 +12,224 @@ def export_ase():
 def build_menu_script():
     # type: () -> str
     return r'''
-try (
-    local mainMenu = menuMan.getMainMenuBar()
-    local exportMenu = undefined
-    for i = 1 to mainMenu.numItems do (
-        local item = mainMenu.getItem i
-        if item != undefined and item.getTitle() == "Export" do exportMenu = item.getSubMenu()
+global openNovaRegisterModernMenus
+
+global OPENNOVA_FILE_ASE_ACTION_GUID = "5CB72814-7B1D-4E71-9E31-0F5C4F4E4D01"
+
+fn openNovaMenuItemTitle item =
+(
+    try (item.getTitle()) catch("")
+)
+
+fn openNovaFindSubMenu menu titles =
+(
+    if menu == undefined do return undefined
+    for i = 1 to menu.numItems() do
+    (
+        local item = menu.getItem i
+        if item != undefined do
+        (
+            local title = openNovaMenuItemTitle item
+            for wanted in titles do
+            (
+                if title == wanted do return item.getSubMenu()
+            )
+            local childMenu = undefined
+            try (childMenu = item.getSubMenu()) catch()
+            if childMenu != undefined do
+            (
+                local found = openNovaFindSubMenu childMenu titles
+                if found != undefined do return found
+            )
+        )
     )
-    if exportMenu == undefined do (
-        exportMenu = menuMan.createMenu "Export"
-        local exportMenuItem = menuMan.createSubMenuItem "Export" exportMenu
-        mainMenu.addItem exportMenuItem -1
+    undefined
+)
+
+fn openNovaModernTitleMatches title titles =
+(
+    if title == undefined do return false
+    local normalizedTitle = substituteString title "&" ""
+    for wanted in titles do
+    (
+        if title == wanted do return true
+        if normalizedTitle == (substituteString wanted "&" "") do return true
+    )
+    false
+)
+
+fn openNovaFindModernMenuByTitle menu titles =
+(
+    if menu == undefined do return undefined
+    try
+    (
+        for item in menu.menuItems do
+        (
+            local childMenu = undefined
+            try
+            (
+                if item.isSubMenu do childMenu = item.subMenu
+            )
+            catch()
+            if childMenu != undefined do
+            (
+                if openNovaModernTitleMatches childMenu.title titles do return childMenu
+                local found = openNovaFindModernMenuByTitle childMenu titles
+                if found != undefined do return found
+            )
+        )
+    )
+    catch()
+    undefined
+)
+
+fn openNovaCreateModernAction menu itemGuid actionId title =
+(
+    if menu == undefined do return undefined
+    try (menu.DeleteItem itemGuid) catch()
+    try
+    (
+        menu.CreateAction itemGuid 647394 actionId title:title
+    )
+    catch
+    (
+        print ("OpenNova modern menu action registration failed for " + actionId + ": " + getCurrentException())
+        undefined
+    )
+)
+
+fn openNovaRemoveLegacyMenuItemByTitle menu title =
+(
+    if menu == undefined do return false
+    local removed = false
+    for i = menu.numItems() to 1 by -1 do
+    (
+        local item = menu.getItem i
+        if item != undefined do
+        (
+            local itemTitle = openNovaMenuItemTitle item
+            if itemTitle == title do
+            (
+                try
+                (
+                    menu.removeItemByPosition i
+                    removed = true
+                )
+                catch
+                (
+                    try
+                    (
+                        menu.removeItem item
+                        removed = true
+                    )
+                    catch()
+                )
+            )
+        )
+    )
+    removed
+)
+
+fn openNovaLogLegacyAction macroName item =
+(
+    if item != undefined then
+    (
+        print ("OpenNova menu action available: " + macroName + "`OpenNova")
+    )
+    else
+    (
+        print ("OpenNova menu action missing: " + macroName + "`OpenNova")
+    )
+)
+
+fn openNovaRegisterModernMenus =
+(
+    local menuMgr = callbacks.notificationParam()
+    if menuMgr == undefined do return false
+    local mainMenuBar = menuMgr.mainMenuBar
+    if mainMenuBar == undefined do return false
+
+    local fileMenu = undefined
+    try (fileMenu = menuMgr.GetMenuById "eed3eaef-ea24-4342-aacc-9dfd87f9a4f4") catch()
+    if fileMenu == undefined do fileMenu = openNovaFindModernMenuByTitle mainMenuBar #("&File", "File")
+
+    local exportMenu = undefined
+    if fileMenu != undefined do
+    (
+        exportMenu = openNovaFindModernMenuByTitle fileMenu #("&Export", "Export", "&Export...", "Export...")
+        if exportMenu == undefined do exportMenu = fileMenu
+    )
+    if exportMenu != undefined do
+    (
+        openNovaCreateModernAction exportMenu OPENNOVA_FILE_ASE_ACTION_GUID "OpenNovaExportAse`OpenNova" "Novalogic ASE (.ase)"
+    )
+    true
+)
+
+try
+(
+    local iCuiMenuMgr = maxOps.GetICuiMenuMgr()
+    if iCuiMenuMgr != undefined do
+    (
+        callbacks.removeScripts id:#OpenNovaMaxMenus
+        callbacks.addScript #cuiRegisterMenus openNovaRegisterModernMenus id:#OpenNovaMaxMenus
+        try
+        (
+            iCuiMenuMgr.LoadConfiguration (iCuiMenuMgr.GetCurrentConfiguration())
+        )
+        catch
+        (
+            print ("OpenNova modern menu refresh failed: " + getCurrentException())
+        )
+    )
+)
+catch
+(
+    print ("OpenNova modern menu registration failed: " + getCurrentException())
+)
+
+try
+(
+    local exportContextRegistered = false
+    try (exportContextRegistered = menuMan.registerMenuContext 0x5cb72811) catch()
+    if not exportContextRegistered do
+    (
+        print "OpenNova legacy File > Export registration context already exists; rebuilding menu entries."
     )
 
-    local aseItem = menuMan.createActionItem "OpenNovaExportAse" "OpenNova"
-    aseItem.setTitle "Novalogic ASE (.ase)"
-    exportMenu.addItem aseItem -1
-    menuMan.updateMenuBar()
-) catch (
-    format "OpenNova export menu registration failed: %\n" (getCurrentException())
+    local mainMenuBar = menuMan.getMainMenuBar()
+    openNovaRemoveLegacyMenuItemByTitle mainMenuBar "OpenNova"
+
+    local fileMenu = menuMan.findMenu "&File"
+    if fileMenu == undefined do fileMenu = menuMan.findMenu "File"
+    local exportMenu = undefined
+    if fileMenu != undefined do
+    (
+        exportMenu = openNovaFindSubMenu fileMenu #("&Export", "Export", "&Export...", "Export...")
+        if exportMenu == undefined do exportMenu = fileMenu
+    )
+    if exportMenu != undefined do
+    (
+        openNovaRemoveLegacyMenuItemByTitle exportMenu "Novalogic ASE (.ase)"
+
+        local aseItem = menuMan.createActionItem "OpenNovaExportAse" "OpenNova"
+        openNovaLogLegacyAction "OpenNovaExportAse" aseItem
+        if aseItem != undefined then
+        (
+            try
+            (
+                aseItem.setTitle "Novalogic ASE (.ase)"
+                aseItem.setUseCustomTitle true
+            )
+            catch()
+            exportMenu.addItem aseItem -1
+        )
+        menuMan.updateMenuBar()
+    )
+)
+catch
+(
+    print ("OpenNova File > Export menu registration failed: " + getCurrentException())
 )
 '''.strip()
 

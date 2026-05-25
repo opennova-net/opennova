@@ -101,6 +101,25 @@ class MaterialKeeper:
         return self._materials[index]
 
 
+class _SceneStateGuard:
+    """Best-effort guard for live 3ds Max UI state touched during export."""
+
+    def __init__(self, rt: Any) -> None:
+        self.rt = rt
+        self._selection: Optional[List[Any]] = None
+        self._command_panel_mode: Any = None
+
+    def __enter__(self) -> "_SceneStateGuard":
+        self._selection = _capture_selection(self.rt)
+        self._command_panel_mode = _capture_command_panel_mode(self.rt)
+        return self
+
+    def __exit__(self, _exc_type: Any, _exc: Any, _traceback: Any) -> bool:
+        _restore_command_panel_mode(self.rt, self._command_panel_mode)
+        _restore_selection(self.rt, self._selection)
+        return False
+
+
 class AseSceneExporter:
     """Translate visible 3ds Max scene state to an ASE document."""
 
@@ -117,6 +136,10 @@ class AseSceneExporter:
         self._face_normal_arrays: List[Any] = []
 
     def export_scene(self, filepath: str) -> bool:
+        with _SceneStateGuard(self.rt):
+            return self._export_scene(filepath)
+
+    def _export_scene(self, filepath: str) -> bool:
         if not filepath:
             raise ValueError("No output filepath specified")
         output_dir = os.path.dirname(filepath)
@@ -579,21 +602,10 @@ class AseSceneExporter:
         if normal_mod is None:
             return []
         try:
-            self.rt.select(node)
-            self.rt.execute("max modify mode")
-            self.rt.modPanel.setCurrentObject(normal_mod)
-            self.rt.update(node)
-        except Exception:
-            pass
-        try:
             if int(normal_mod.GetNumFaces(node=node)) < face_count:
                 return []
         except Exception:
-            try:
-                if int(normal_mod.GetNumFaces()) < face_count:
-                    return []
-            except Exception:
-                return []
+            return []
         out: List[Optional[Vec3]] = []
         for fi in range(1, face_count + 1):
             for corner in range(1, 4):
@@ -601,12 +613,8 @@ class AseSceneExporter:
                     normal_id = int(normal_mod.GetNormalID(fi, corner, node=node))
                     normal = normal_mod.GetNormal(normal_id, node=node)
                 except Exception:
-                    try:
-                        normal_id = int(normal_mod.GetNormalID(fi, corner))
-                        normal = normal_mod.GetNormal(normal_id)
-                    except Exception:
-                        out.append(None)
-                        continue
+                    out.append(None)
+                    continue
                 out.append(_normalize(_point_tuple(normal)))
         return out
 
@@ -862,6 +870,64 @@ def _scene_nodes(rt: Any) -> List[Any]:
         return list(rt.objects)
     except Exception:
         return []
+
+
+def _capture_selection(rt: Any) -> Optional[List[Any]]:
+    try:
+        return list(rt.selection)
+    except Exception:
+        return None
+
+
+def _restore_selection(rt: Any, selection: Optional[Sequence[Any]]) -> None:
+    if selection is None:
+        return
+    if selection:
+        try:
+            rt.select(list(selection))
+            return
+        except Exception:
+            pass
+        try:
+            array = rt.Array(*selection)
+            rt.select(array)
+            return
+        except Exception:
+            pass
+    try:
+        rt.clearSelection()
+        return
+    except Exception:
+        pass
+    try:
+        rt.execute("clearSelection()")
+    except Exception:
+        pass
+
+
+def _capture_command_panel_mode(rt: Any) -> Any:
+    try:
+        return rt.getCommandPanelTaskMode()
+    except Exception:
+        pass
+    try:
+        return rt.execute("getCommandPanelTaskMode()")
+    except Exception:
+        return None
+
+
+def _restore_command_panel_mode(rt: Any, mode: Any) -> None:
+    if mode is None:
+        return
+    try:
+        rt.setCommandPanelTaskMode(mode)
+        return
+    except Exception:
+        pass
+    try:
+        rt.execute("setCommandPanelTaskMode %s" % mode)
+    except Exception:
+        pass
 
 
 def _is_multi_material(material: Any) -> bool:

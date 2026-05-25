@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,12 @@ def test_max_file_export_menu_registers_ase_only() -> None:
 
     menu_script = ui.build_menu_script()
 
+    assert "maxOps.GetICuiMenuMgr()" in menu_script
+    assert "#cuiRegisterMenus" in menu_script
+    assert 'menuMgr.GetMenuById "eed3eaef-ea24-4342-aacc-9dfd87f9a4f4"' in menu_script
+    assert 'openNovaFindModernMenuByTitle fileMenu #("&Export", "Export", "&Export...", "Export...")' in menu_script
+    assert 'OpenNovaExportAse`OpenNova' in menu_script
+    assert 'menuMan.findMenu "&File"' in menu_script
     assert "OpenNovaImporter" not in menu_script
     assert 'menuMan.createActionItem "OpenNovaExportAse" "OpenNova"' in menu_script
     assert 'aseItem.setTitle "Novalogic ASE (.ase)"' in menu_script
@@ -82,3 +89,127 @@ def test_max_ase_exporter_does_not_auto_emit_lod_or_bullet_files() -> None:
     ]
     for needle in forbidden:
         assert needle not in source
+
+
+def test_max_ase_edit_normals_read_does_not_touch_live_modify_panel() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    unsafe_calls = []
+    node = SimpleNamespace()
+
+    class FakeRuntime:
+        def select(self, _node):
+            unsafe_calls.append("select")
+
+        def execute(self, command):
+            unsafe_calls.append(command)
+
+        class modPanel:
+            @staticmethod
+            def setCurrentObject(_mod):
+                unsafe_calls.append("modPanel.setCurrentObject")
+
+        def update(self, _node):
+            unsafe_calls.append("update")
+
+    class Edit_Normals:
+        def GetNumFaces(self, *, node):
+            return 1
+
+        def GetNormalID(self, face, corner, *, node):
+            assert face == 1
+            assert node is not None
+            return corner
+
+        def GetNormal(self, normal_id, *, node):
+            assert node is not None
+            return SimpleNamespace(x=float(normal_id), y=0.0, z=0.0)
+
+    exporter = AseSceneExporter(FakeRuntime())
+    exporter._skin_modifier = lambda _node: None
+
+    normals = exporter._collect_edit_normals(
+        SimpleNamespace(modifiers=[Edit_Normals()]),
+        face_count=1,
+    )
+
+    assert normals == [(1.0, 0.0, 0.0)] * 3
+    assert unsafe_calls == []
+
+
+def test_max_ase_edit_normals_failure_skips_without_touching_live_modify_panel() -> None:
+    from opennova_max.ase_scene_exporter import AseSceneExporter
+
+    unsafe_calls = []
+
+    class FakeRuntime:
+        def select(self, _node):
+            unsafe_calls.append("select")
+
+        def execute(self, command):
+            unsafe_calls.append(command)
+
+        class modPanel:
+            @staticmethod
+            def setCurrentObject(_mod):
+                unsafe_calls.append("modPanel.setCurrentObject")
+
+        def update(self, _node):
+            unsafe_calls.append("update")
+
+    class Edit_Normals:
+        def GetNumFaces(self, *, node):
+            raise RuntimeError("requires modifier panel")
+
+    exporter = AseSceneExporter(FakeRuntime())
+
+    assert exporter._collect_edit_normals(
+        SimpleNamespace(modifiers=[Edit_Normals()]),
+        face_count=1,
+    ) == []
+    assert unsafe_calls == []
+
+
+def test_max_ase_scene_state_guard_restores_selection_and_command_panel() -> None:
+    from opennova_max.ase_scene_exporter import _SceneStateGuard
+
+    original_selection = [SimpleNamespace(name="A"), SimpleNamespace(name="B")]
+    replacement_selection = [SimpleNamespace(name="C")]
+    calls = []
+
+    class FakeRuntime:
+        def __init__(self):
+            self.selection = list(original_selection)
+            self.mode = "#modify"
+
+        def getCommandPanelTaskMode(self):
+            return self.mode
+
+        def setCommandPanelTaskMode(self, mode):
+            calls.append(("mode", mode))
+            self.mode = mode
+
+        def select(self, selection):
+            calls.append(("select", selection))
+            self.selection = list(selection)
+
+        def clearSelection(self):
+            calls.append(("clearSelection",))
+            self.selection = []
+
+    rt = FakeRuntime()
+
+    with _SceneStateGuard(rt):
+        rt.selection = list(replacement_selection)
+        rt.mode = "#create"
+
+    assert rt.selection == original_selection
+    assert rt.mode == "#modify"
+    assert ("mode", "#modify") in calls
+    assert ("select", original_selection) in calls
+
+
+def test_max_ase_export_scene_runs_under_scene_state_guard() -> None:
+    source = _read("opennova_max/ase_scene_exporter.py")
+
+    assert "with _SceneStateGuard(self.rt):" in source

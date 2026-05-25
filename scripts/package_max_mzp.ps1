@@ -154,11 +154,11 @@ $PackageContents = @"
     ProductCode="{2D5C293C-DB15-4F87-A989-3D3B88C650D2}"
     UpgradeCode="{C13078E9-AC64-4075-8B6E-7FBE98C630C2}">
     <CompanyDetails Name="OpenNova" />
-    <Components Description="macro scripts">
+    <Components Description="macroscripts parts">
         <RuntimeRequirements OS="Win64" Platform="3ds Max" SeriesMin="$SeriesMin" SeriesMax="$SeriesMax" />
         <ComponentEntry AppName="OpenNovaMaxMacro" Version="$Version" ModuleName="./Contents/macroscripts/OpenNovaExport.mcr" />
     </Components>
-    <Components Description="post-start-up scripts">
+    <Components Description="post-start-up scripts parts">
         <RuntimeRequirements OS="Win64" Platform="3ds Max" SeriesMin="$SeriesMin" SeriesMax="$SeriesMax" />
         <ComponentEntry AppName="OpenNovaMaxStartup" Version="$Version" ModuleName="./Contents/startup/opennova_max_startup.ms" />
     </Components>
@@ -243,7 +243,21 @@ macroScript OpenNovaMaxMzpInstaller category:"OpenNova"
         local installerDir = getFilenamePath (getSourceFileName())
         python.executeFile (installerDir + "install.py")
     )
-    on execute do runOpenNovaMaxInstaller()
+
+    on droppable window node: point: do
+    (
+        true
+    )
+
+    on drop window node: point: do
+    (
+        runOpenNovaMaxInstaller()
+    )
+
+    on execute do
+    (
+        runOpenNovaMaxInstaller()
+    )
 )
 '@
 Set-Content -LiteralPath (Join-Path $STAGE_ROOT "install.ds") -Value $InstallDs -Encoding ASCII
@@ -253,20 +267,60 @@ from __future__ import annotations
 
 import os
 import shutil
+import xml.etree.ElementTree as ET
+from datetime import datetime
 from pathlib import Path
 
-
-BUNDLE_GLOB = "OpenNovaMax-*.bundle"
+VERSION = "$Version"
+BUNDLE_NAME = "$BundleName"
 
 
 def _install_root() -> Path:
-    override = os.environ.get("OPENNOVA_MAX_INSTALL_ROOT", "").strip()
+    override = os.environ.get("OPENNOVA_MAX_INSTALL_ROOT")
     if override:
         return Path(override)
+
     appdata = os.environ.get("APPDATA")
     if not appdata:
-        raise RuntimeError("APPDATA is not set")
+        raise RuntimeError("APPDATA is not set; cannot locate Autodesk ApplicationPlugins.")
     return Path(appdata) / "Autodesk" / "ApplicationPlugins"
+
+
+def _max_profile_roots():
+    override = os.environ.get("OPENNOVA_MAX_PROFILE_ROOT")
+    if override:
+        return [Path(override)]
+
+    roots = []
+    for env_name in ("LOCALAPPDATA", "APPDATA"):
+        base = os.environ.get(env_name)
+        if base:
+            roots.append(Path(base) / "Autodesk" / "3dsMax")
+    return roots
+
+
+def _message(text: str) -> None:
+    print(text)
+    try:
+        import pymxs
+
+        pymxs.runtime.messageBox(text, title="OpenNova Max")
+    except Exception:
+        pass
+
+
+def _is_opennova_bundle(path: Path) -> bool:
+    return (
+        path.is_dir()
+        and path.name.startswith("OpenNovaMax-")
+        and path.name.endswith(".bundle")
+    )
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    return os.path.normcase(os.path.abspath(str(left))) == os.path.normcase(
+        os.path.abspath(str(right))
+    )
 
 
 def _disable_bundle(path: Path) -> bool:
@@ -280,34 +334,125 @@ def _disable_bundle(path: Path) -> bool:
     return True
 
 
-def _remove_or_disable_bundle(path: Path) -> None:
-    try:
-        shutil.rmtree(path)
-    except Exception:
-        _disable_bundle(path)
+def _cleanup_existing_bundles(root: Path, destination: Path):
+    removed = []
+    disabled = []
+    failed = []
+    for candidate in root.glob("OpenNovaMax-*.bundle"):
+        if not _is_opennova_bundle(candidate):
+            continue
+        if _same_path(candidate, destination):
+            continue
+        try:
+            shutil.rmtree(str(candidate))
+        except Exception:
+            try:
+                if _disable_bundle(candidate):
+                    disabled.append(candidate)
+            except Exception as disable_exc:
+                failed.append((candidate, disable_exc))
+        else:
+            removed.append(candidate)
+    return removed, disabled, failed
 
 
-def install() -> None:
-    source_root = Path(__file__).resolve().parent
-    candidates = list(source_root.glob(BUNDLE_GLOB))
-    if len(candidates) != 1:
-        raise RuntimeError("Expected exactly one OpenNovaMax bundle next to installer")
+def _remove_matching_children(parent):
+    changed = False
+    for child in list(parent):
+        if child.attrib.get("title") == "OpenNova":
+            parent.remove(child)
+            changed = True
+            continue
+        action_id = child.attrib.get("actionID", "")
+        if "OpenNova" in action_id:
+            parent.remove(child)
+            changed = True
+            continue
+        if _remove_matching_children(child):
+            changed = True
+    return changed
 
-    install_root = _install_root()
-    install_root.mkdir(parents=True, exist_ok=True)
 
-    for old_bundle in install_root.glob(BUNDLE_GLOB):
-        _remove_or_disable_bundle(old_bundle)
+def _cleanup_max_ui_files():
+    cleaned = []
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    for root in _max_profile_roots():
+        if not root.is_dir():
+            continue
+        for mnux in root.rglob("*.mnux"):
+            try:
+                text = mnux.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            if "OpenNova" not in text:
+                continue
+            try:
+                tree = ET.parse(str(mnux))
+            except Exception:
+                continue
+            xml_root = tree.getroot()
+            if not _remove_matching_children(xml_root):
+                continue
+            backup = mnux.with_name(mnux.name + ".opennova-cleanup-" + stamp + ".bak")
+            shutil.copy2(str(mnux), str(backup))
+            tree.write(str(mnux), encoding="utf-8", xml_declaration=True)
+            cleaned.append(mnux)
+    return cleaned
 
-    source = candidates[0]
-    destination = install_root / source.name
+
+def install():
+    installer_dir = Path(__file__).resolve().parent
+    source = installer_dir / BUNDLE_NAME
+    if not source.is_dir():
+        raise RuntimeError(f"Bundled plugin directory missing: {source}")
+
+    root = _install_root()
+    destination = root / BUNDLE_NAME
+    root.mkdir(parents=True, exist_ok=True)
+
     if destination.exists():
-        _remove_or_disable_bundle(destination)
-    shutil.copytree(source, destination)
-    print("Installed OpenNova Max ASE exporter to " + str(destination))
+        shutil.rmtree(str(destination))
+    shutil.copytree(str(source), str(destination))
+    removed, disabled, failed = _cleanup_existing_bundles(root, destination)
+    ui_cleaned = _cleanup_max_ui_files()
+    return destination, removed, disabled, failed, ui_cleaned
 
 
-install()
+if __name__ == "__main__":
+    try:
+        installed, removed, disabled, failed, ui_cleaned = install()
+    except Exception as exc:
+        _message(f"OpenNova Max {VERSION} ASE exporter install failed:\n{exc}")
+        raise
+    else:
+        cleanup_parts = []
+        if removed:
+            cleanup_parts.append(
+                "Removed old OpenNova Max bundles:\n"
+                + "\n".join(f"- {path.name}" for path in removed)
+            )
+        if disabled:
+            cleanup_parts.append(
+                "Disabled locked old OpenNova Max bundles for next restart:\n"
+                + "\n".join(f"- {path.name}" for path in disabled)
+            )
+        if failed:
+            cleanup_parts.append(
+                "Could not remove or disable these old OpenNova Max bundles:\n"
+                + "\n".join(f"- {path.name}: {exc}" for path, exc in failed)
+                + "\nClose 3ds Max and install this MZP again."
+            )
+        if ui_cleaned:
+            cleanup_parts.append(
+                "Removed stale OpenNova Max UI menu entries from:\n"
+                + "\n".join(f"- {path}" for path in ui_cleaned)
+            )
+        cleanup = "\n\n".join(cleanup_parts) if cleanup_parts else "No old OpenNova Max bundles were found."
+        _message(
+            f"OpenNova Max {VERSION} ASE exporter installed to:\n{installed}\n\n"
+            f"{cleanup}\n\n"
+            "Restart 3ds Max to use this version."
+        )
 "@
 Set-Content -LiteralPath (Join-Path $STAGE_ROOT "install.py") -Value $InstallPy -Encoding UTF8
 
@@ -341,17 +486,13 @@ Move-Item -LiteralPath $TempZip -Destination $MzpPath -Force
 Write-Host "=== Extracting and validating MZP ==="
 Remove-TreeIfExists $VALIDATE_ROOT
 Ensure-Dir $VALIDATE_ROOT
-$ValidationZip = Join-Path $BUILD_ROOT "opennova_max-validate.zip"
-if (Test-Path -LiteralPath $ValidationZip) {
-    Remove-Item -LiteralPath $ValidationZip -Force
-}
-Copy-Item -LiteralPath $MzpPath -Destination $ValidationZip -Force
-Expand-Archive -LiteralPath $ValidationZip -DestinationPath $VALIDATE_ROOT -Force
-Remove-Item -LiteralPath $ValidationZip -Force
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::ExtractToDirectory($MzpPath, $VALIDATE_ROOT)
 $ExpandedBundle = Join-Path $VALIDATE_ROOT $BundleName
 $ExpandedPython = Join-Path $ExpandedBundle "Contents\python"
 Assert-File (Join-Path $VALIDATE_ROOT "mzp.run")
 Assert-File (Join-Path $VALIDATE_ROOT "install.ms")
+Assert-File (Join-Path $VALIDATE_ROOT "install.ds")
 Assert-File (Join-Path $VALIDATE_ROOT "install.py")
 Assert-File (Join-Path $ExpandedBundle "PackageContents.xml")
 Assert-File (Join-Path $ExpandedBundle "Contents\macroscripts\OpenNovaExport.mcr")
@@ -361,8 +502,94 @@ Assert-Dir (Join-Path $ExpandedPython "opennova_max")
 Assert-Dir (Join-Path $ExpandedPython "pyopennova")
 Assert-Dir (Join-Path $ExpandedPython "opennova_jobs")
 
-Write-Host "=== Running staged Python smoke check ==="
 $PythonExe = Get-PythonExe
+
+Write-Host "=== Running installer cleanup smoke check ==="
+$InstallSmokeRoot = Join-Path $VALIDATE_ROOT "install-smoke\ApplicationPlugins"
+Ensure-Dir (Join-Path $InstallSmokeRoot "OpenNovaMax-0.0.1.bundle")
+Ensure-Dir (Join-Path $InstallSmokeRoot "OpenNovaMax-9.9.9.bundle")
+$LockedSmokeBundle = Join-Path $InstallSmokeRoot "OpenNovaMax-locked.bundle"
+Ensure-Dir $LockedSmokeBundle
+Set-Content -LiteralPath (Join-Path $LockedSmokeBundle "PackageContents.xml") -Value "<ApplicationPackage />" -Encoding ASCII
+$LockedSmokeFile = Join-Path $LockedSmokeBundle "locked.dll"
+Set-Content -LiteralPath $LockedSmokeFile -Value "locked" -Encoding ASCII
+Ensure-Dir (Join-Path $InstallSmokeRoot "UnrelatedPlugin.bundle")
+$ProfileSmokeRoot = Join-Path $VALIDATE_ROOT "profile-smoke\3dsMax"
+$ProfileSmokeUi = Join-Path $ProfileSmokeRoot "2022 - 64bit\ENU\en-US\UI"
+$ProfileSmokeWorkspace = Join-Path $ProfileSmokeUi "Workspaces\usersave"
+Ensure-Dir $ProfileSmokeUi
+Ensure-Dir $ProfileSmokeWorkspace
+$StaleMnux = @'
+<?xml version="1.0" encoding="utf-8"?>
+<MenuFile>
+    <Menu title="File-Export">
+        <Item mode="2" modeName="AM_ITEM" actionTableID="647394" actionID="OpenNovaExportAse`OpenNova" customTitle="Novalogic ASE (.ase)" />
+        <Item mode="2" modeName="AM_ITEM" actionTableID="647394" actionID="__OLD_ANIMS__`OpenNova" customTitle="__OLD_ANIM_TITLE__ (.adm + .bad)" />
+        <Item mode="2" modeName="AM_ITEM" actionTableID="0" actionID="40488" />
+    </Menu>
+    <Menu title="OpenNova">
+        <Item mode="2" modeName="AM_ITEM" actionTableID="647394" actionID="__OLD_IMPORTER__`OpenNova" customTitle="Importer..." />
+    </Menu>
+</MenuFile>
+'@
+$StaleMnux = $StaleMnux.Replace("__OLD_ANIMS__", "OpenNovaExport" + "Anims")
+$StaleMnux = $StaleMnux.Replace("__OLD_ANIM_TITLE__", "Novalogic " + "Anims")
+$StaleMnux = $StaleMnux.Replace("__OLD_IMPORTER__", "OpenNova" + "Importer")
+Set-Content -LiteralPath (Join-Path $ProfileSmokeUi "MaxStartUI.mnux") -Value $StaleMnux -Encoding UTF8
+Set-Content -LiteralPath (Join-Path $ProfileSmokeWorkspace "Workspace1__usersave__.mnux") -Value $StaleMnux -Encoding UTF8
+$OldInstallRoot = $env:OPENNOVA_MAX_INSTALL_ROOT
+$OldProfileRoot = $env:OPENNOVA_MAX_PROFILE_ROOT
+$LockStream = $null
+$PushedInstallSmokeLocation = $false
+try {
+    $LockStream = [System.IO.File]::Open(
+        $LockedSmokeFile,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::ReadWrite,
+        [System.IO.FileShare]::None
+    )
+    $env:OPENNOVA_MAX_INSTALL_ROOT = $InstallSmokeRoot
+    $env:OPENNOVA_MAX_PROFILE_ROOT = $ProfileSmokeRoot
+    Push-Location $VALIDATE_ROOT
+    $PushedInstallSmokeLocation = $true
+    & $PythonExe (Join-Path $VALIDATE_ROOT "install.py")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Installer cleanup smoke check failed with exit code $LASTEXITCODE"
+    }
+}
+finally {
+    if ($PushedInstallSmokeLocation) {
+        Pop-Location
+    }
+    if ($LockStream) {
+        $LockStream.Dispose()
+    }
+    $env:OPENNOVA_MAX_INSTALL_ROOT = $OldInstallRoot
+    $env:OPENNOVA_MAX_PROFILE_ROOT = $OldProfileRoot
+}
+Assert-Dir (Join-Path $InstallSmokeRoot $BundleName)
+if (Test-Path -LiteralPath (Join-Path $InstallSmokeRoot "OpenNovaMax-0.0.1.bundle")) {
+    throw "Installer did not remove stale OpenNovaMax-0.0.1.bundle"
+}
+if (Test-Path -LiteralPath (Join-Path $InstallSmokeRoot "OpenNovaMax-9.9.9.bundle")) {
+    throw "Installer did not remove stale OpenNovaMax-9.9.9.bundle"
+}
+Assert-Dir $LockedSmokeBundle
+if (Test-Path -LiteralPath (Join-Path $LockedSmokeBundle "PackageContents.xml")) {
+    throw "Installer did not disable locked OpenNovaMax-locked.bundle"
+}
+Assert-Dir (Join-Path $InstallSmokeRoot "UnrelatedPlugin.bundle")
+$ActiveProfileHits = Get-ChildItem -LiteralPath $ProfileSmokeRoot -Recurse -File -Filter "*.mnux" |
+    Select-String -Pattern "OpenNova" -SimpleMatch
+if ($ActiveProfileHits) {
+    throw "Installer did not remove stale OpenNova Max UI menu entries"
+}
+$UiBackups = Get-ChildItem -LiteralPath $ProfileSmokeRoot -Recurse -File -Filter "*.opennova-cleanup-*.bak"
+if ($UiBackups.Count -lt 2) {
+    throw "Installer did not create backups for cleaned Max UI menu files"
+}
+
+Write-Host "=== Running staged Python smoke check ==="
 $OldPythonPath = $env:PYTHONPATH
 $OldSmokeVersion = $env:OPENNOVA_MAX_SMOKE_VERSION
 $OldPythonRoot = $env:OPENNOVA_MAX_PYTHON_ROOT
@@ -391,6 +618,11 @@ for module in (opennova_max, ui, opennova_max.ase_scene_exporter, pyopennova.ase
 assert opennova_max.get_version() == os.environ['OPENNOVA_MAX_SMOKE_VERSION']
 menu_script = ui.build_menu_script()
 assert 'Novalogic ASE (.ase)' in menu_script
+assert 'maxOps.GetICuiMenuMgr()' in menu_script
+assert '#cuiRegisterMenus' in menu_script
+assert 'OpenNovaExportAse`OpenNova' in menu_script
+assert 'menuMgr.GetMenuById' in menu_script
+assert 'eed3eaef-ea24-4342-aacc-9dfd87f9a4f4' in menu_script
 assert 'exportMenu.addItem aseItem -1' in menu_script
 assert 'OpenNovaExportMenu' not in menu_script
 assert 'createSubMenuItem "OpenNova"' not in menu_script

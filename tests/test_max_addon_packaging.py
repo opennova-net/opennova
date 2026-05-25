@@ -24,10 +24,30 @@ def test_max_package_script_builds_ase_only_mzp() -> None:
         "opennova_max_startup.py",
         "mzp.run",
         "install.ms",
+        "install.ds",
         "install.py",
         "OpenNovaMax-*.bundle",
+        'Description="macroscripts parts"',
+        'Description="post-start-up scripts parts"',
+        'BUNDLE_NAME = "$BundleName"',
+        "OPENNOVA_MAX_INSTALL_ROOT",
+        "PackageContents.xml.disabled-by-opennova-upgrade",
+        "OpenNovaMax-locked.bundle",
+        "System.IO.Compression.ZipFile",
+        "on droppable window node: point: do",
+        "on drop window node: point: do",
+        "OPENNOVA_MAX_PROFILE_ROOT",
+        "_cleanup_max_ui_files",
+        "*.mnux",
+        ".opennova-cleanup-",
+        "Removed stale OpenNova Max UI menu entries",
         "register_menu()",
         "Novalogic ASE (.ase)",
+        "maxOps.GetICuiMenuMgr()",
+        "#cuiRegisterMenus",
+        "OpenNovaExportAse`OpenNova",
+        "menuMgr.GetMenuById",
+        "eed3eaef-ea24-4342-aacc-9dfd87f9a4f4",
     ]
     for needle in required:
         assert needle in script
@@ -37,6 +57,8 @@ def test_max_package_script_builds_ase_only_mzp() -> None:
         "OpenNovaExportAnims",
         "opennova_qt_ui",
         "Novalogic Anims",
+        'Description="macro scripts"',
+        'Description="post-start-up scripts"',
     ]
     for needle in forbidden:
         assert needle not in script
