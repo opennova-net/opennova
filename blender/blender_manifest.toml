@@ -2,7 +2,7 @@ schema_version = "1.0.0"
 
 id = "opennova_blender"
 version = "0.0.3"
-name = "OpenNova Blender Addon"
+name = "OpenNova Blender ASE Exporter"
 tagline = "Export Novalogic ASE files"
 maintainer = "Taylor Finnell <noreply@anthropic.com>"
 type = "add-on"

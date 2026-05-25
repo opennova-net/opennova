@@ -20,15 +20,17 @@ Pre-JO NovaLogic titles may sort of work by chance, but are not officially suppo
 
 Pre-built binaries are available on the [Releases](../../releases) page:
 
-- **`onimport.exe`**: standalone Windows importer. Use this to convert models to `.blend`, `.ase`, `.max`, and NovaLogic-compatible project files for tools like OED.
-- **`opennova_blender.zip`**: Blender 5.x addon with pre-built native libraries for Windows and Linux.
-- **`opennova_max-v<version>.mzp`**: 3ds Max plugin installer that adds NovaLogic ASE export.
-- **`opennova-modtools-windows.zip`**: standalone OpenNova Editor (ONED) for Windows. The open source NILE.
-- **`opennova-runtime-windows.zip`**: "game" runtime.
+| Asset | What it is for | Install and use |
+|---|---|---|
+| **`opennova-asset-importer-windows-v<version>.exe`** | Standalone Windows importer for converting models to `.blend`, `.ase`, `.max`, and NovaLogic-compatible project files for tools like OED. | Run the exe directly, point it at your game directory, and select what to export. |
+| **`opennova-blender-ase-exporter-v<version>.zip`** | Blender 5.x ASE exporter addon with pre-built native libraries for Windows and Linux. | Install from Blender with `Edit > Preferences > Add-ons > Install`, then use `File > Export > Novalogic ASE (.ase)`. |
+| **`opennova-3ds-max-ase-exporter-windows-v<version>.mzp`** | 3ds Max plugin installer that adds NovaLogic ASE export. | Run the MZP in 3ds Max, restart 3ds Max, then use `File > Export > Novalogic ASE (.ase)`. |
+| **`opennova-modding-editor-windows-v<version>.zip`** | Standalone OpenNova Editor (ONED) for authoring terrain, environment, tile, and related mod data. | Extract the zip, then run `opennova-modtools.exe`. |
+| **`opennova-game-runtime-windows-v<version>.zip`** | Godot-hosted OpenNova runtime for loading exported scenes and runtime systems. | Extract the zip, then run `opennova.exe`. |
 
-## Exporter (confusingly called the importer sometimes)
+## Asset Importer
 
-Extract models from game files. Reads directly from PFF archives with automatic decryption and decompression. Just launch `onimport.exe`, point it at your game directory, and select what to export.
+Extract models from game files. Reads directly from PFF archives with automatic decryption and decompression. Launch `opennova-asset-importer-windows-v<version>.exe`, point it at your game directory, and select what to export.
 
 Each import can write one or more selected output files:
 - `.blend` - Blender project with the full scene hierarchy
@@ -144,7 +146,7 @@ scripts/package_addon.sh
 
 ### Package Standalone Importer
 
-Builds `onimport.exe` for Windows using PyInstaller. Requires Python 3.11.
+Builds `dist/onimport-v<version>.exe` for Windows using PyInstaller. Requires Python 3.11.
 
 ```powershell
 scripts/package_importer_windows.ps1
@@ -169,7 +171,7 @@ Runs the GDScript suite under `godot/tests/` headless via GUT. Requires `GODOT_B
 
 ### Package Godot Exports
 
-Builds `opennova-runtime-windows.zip` and `opennova-modtools-windows.zip` via headless Godot export. Windows-only; requires MSVC and CMake.
+Builds `dist/opennova-runtime-windows-v<version>.zip` and `dist/opennova-modtools-windows-v<version>.zip` via headless Godot export. Windows-only; requires MSVC and CMake.
 
 ```powershell
 scripts/package_godot_windows.ps1

@@ -77,12 +77,14 @@ def test_ci_ships_blender_zip_and_max_mzp() -> None:
     assert "package-addon:" in ci
     assert "scripts/package_addon.sh" in ci
     assert "opennova_blender" in ci
-    assert "dist/*.zip" in ci
+    assert "dist/opennova_blender-v*.zip" in ci
 
     assert "package-max-mzp:" in ci
     assert "scripts/package_max_mzp.ps1" in ci
     assert "opennova_max" in ci
     assert "dist/opennova_max-v*.mzp" in ci
+    assert "validate-deliverables:" in ci
+    assert "dist/release-assets/*" in ci
 
 
 def test_release_ships_blender_zip_and_max_mzp() -> None:
@@ -93,4 +95,5 @@ def test_release_ships_blender_zip_and_max_mzp() -> None:
     assert "needs: [package-addon, package-max-mzp, package-importer, package-godot]" in release
     assert "dist/opennova_blender-v*.zip" in release
     assert "dist/opennova_max-v*.mzp" in release
-    assert "3ds Max plugin" in release
+    assert "scripts/validate_release_deliverables.py" in release
+    assert "dist/release-assets/*" in release
