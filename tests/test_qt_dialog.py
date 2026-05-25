@@ -18,8 +18,7 @@ pytest.importorskip("pytestqt")
 @dataclass
 class FakeBackend:
     supports_blend: bool = True
-    supports_glb: bool = True
-    supports_fbx: bool = True
+    supports_max: bool = False
     supports_parallel: bool = False
     scan_result: ScanResult = field(default_factory=lambda: ScanResult(ok=True, items=[]))
     execute_result: Callable[[ImportRequest], ImportResult] | None = None
@@ -32,8 +31,7 @@ class FakeBackend:
         return BackendCapabilities(
             name="Fake",
             supports_blend=self.supports_blend,
-            supports_glb=self.supports_glb,
-            supports_fbx=self.supports_fbx,
+            supports_max=self.supports_max,
             supports_parallel=self.supports_parallel,
         )
 
@@ -93,12 +91,41 @@ def test_capabilities_drive_output_options(qtbot):
     from opennova_qt_ui import OpenNovaImporterDialog
 
     dialog = OpenNovaImporterDialog(
-        backend=FakeBackend(supports_blend=True, supports_glb=False, supports_fbx=False)
+        backend=FakeBackend(supports_blend=True, supports_max=True)
     )
     qtbot.addWidget(dialog)
     assert dialog.blend_check is not None
-    assert dialog.glb_check is None
-    assert dialog.fbx_check is None
+    assert dialog.max_check is not None
+    assert not hasattr(dialog, "glb_check")
+    assert not hasattr(dialog, "fbx_check")
+
+
+def test_ase_without_native_scene_output_is_rejected(qtbot, tmp_path):
+    from opennova_qt_ui import OpenNovaImporterDialog
+
+    dialog = OpenNovaImporterDialog(backend=FakeBackend(supports_blend=True, supports_max=False))
+    qtbot.addWidget(dialog)
+
+    game_dir = tmp_path / "game"
+    output_dir = tmp_path / "out"
+    game_dir.mkdir()
+    output_dir.mkdir()
+    dialog.game_dir_edit.setText(str(game_dir))
+    dialog.output_root_edit.setText(str(output_dir))
+    dialog.blend_check.setChecked(False)
+    dialog.project_check.setChecked(True)
+    dialog.ase_check.setChecked(True)
+
+    request = ImportRequest.for_definition(
+        base_dir=str(game_dir),
+        item_name="M16A2",
+        item_type="weapon",
+        output_root=str(output_dir),
+        options=dialog._build_options(),
+    )
+    from opennova_jobs import validate_import_request
+
+    assert "ASE export requires .blend or .max output." in validate_import_request(request)
 
 
 def test_scan_button_populates_and_filters_table(qtbot, tmp_path):

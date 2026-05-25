@@ -111,23 +111,7 @@ def build_animation_context(
     Builds an AnimationContext by parsing an .adm file and then reading
     the corresponding BAD files via FFI to extract metadata (fps, frame count).
     """
-    if not adm_field:
-        return None
-
-    adm_name = ensure_extension(adm_field, ".adm")
-    adm_path = resolver.resolve(adm_name)
-    if not adm_path:
-        return None
-
-    adm = parse_adm(str(adm_path))
-    try:
-        # Build a list of (key, value) from the C AdmFile
-        entries = []
-        for i in range(adm.count):
-            e = adm.entries[i]
-            entries.append((e.key.decode("utf-8"), e.value.decode("utf-8")))
-    finally:
-        free_adm(adm)
+    entries = _adm_entries(adm_field, resolver=resolver)
 
     if not entries:
         return None
@@ -182,3 +166,36 @@ def build_animation_context(
             free_bad(bf)
 
     return AnimationContext(reset_animation=reset_meta, animations=anim_metas)
+
+
+def resolve_reset_bad_path(adm_field: str | None, resolver=None) -> str | None:
+    """Resolve only the reset BAD path from an ADM field."""
+    reset_entry = next(
+        ((k, v) for k, v in _adm_entries(adm_field, resolver=resolver) if k == "anim_reset"),
+        None,
+    )
+    if not reset_entry:
+        return None
+    reset_bad_name = ensure_extension(reset_entry[1], ".bad")
+    reset_bad_path = resolver.resolve(reset_bad_name)
+    return str(reset_bad_path) if reset_bad_path else None
+
+
+def _adm_entries(adm_field: str | None, resolver=None) -> list[tuple[str, str]]:
+    if not adm_field:
+        return []
+
+    adm_name = ensure_extension(adm_field, ".adm")
+    adm_path = resolver.resolve(adm_name)
+    if not adm_path:
+        return []
+
+    adm = parse_adm(str(adm_path))
+    try:
+        entries = []
+        for i in range(adm.count):
+            e = adm.entries[i]
+            entries.append((e.key.decode("utf-8"), e.value.decode("utf-8")))
+        return entries
+    finally:
+        free_adm(adm)

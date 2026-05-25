@@ -817,7 +817,7 @@ class BlenderSceneBuilder:
     def build_animations_from_context(self, anim_context):
         """Build Blender Actions from AnimationContext and push to NLA tracks."""
         import traceback
-        from blender.opennova.bad_ffi import parse_bad, free_bad
+        from pyopennova.bad_ffi import parse_bad, free_bad
 
         if not self.armature_object:
             print("[ANIM] No armature object, skipping animations")

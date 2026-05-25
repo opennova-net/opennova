@@ -422,16 +422,14 @@ if is_available():
             files_layout.setSpacing(6)
             caps = self._backend.capabilities()
             self.blend_check = QtWidgets.QCheckBox("Blender scene (.blend)") if caps.supports_blend else None
+            self.max_check = QtWidgets.QCheckBox("3ds Max scene (.max)") if caps.supports_max else None
             self.project_check = QtWidgets.QCheckBox("Project files (.3dp / .3da)")
             self.ase_check = QtWidgets.QCheckBox("ASE (.ase)")
-            self.glb_check = QtWidgets.QCheckBox("glTF 2.0 binary (.glb)") if caps.supports_glb else None
-            self.fbx_check = QtWidgets.QCheckBox("FBX (.fbx)") if caps.supports_fbx else None
             for check in (
                 self.blend_check,
+                self.max_check,
                 self.project_check,
                 self.ase_check,
-                self.glb_check,
-                self.fbx_check,
             ):
                 if check is not None:
                     files_layout.addWidget(check)
@@ -580,10 +578,9 @@ if is_available():
                     self.lights_check,
                     self.arms_check,
                     self.blend_check,
+                    self.max_check,
                     self.project_check,
                     self.ase_check,
-                    self.glb_check,
-                    self.fbx_check,
                 )
                 if check is not None
             ]
@@ -739,10 +736,9 @@ if is_available():
                 import_lights=self.lights_check.isChecked(),
                 import_arms=self.arms_check.isChecked(),
                 write_blend=self.blend_check is not None and self.blend_check.isChecked(),
+                write_max=self.max_check is not None and self.max_check.isChecked(),
                 write_3dp=self.project_check.isChecked(),
                 write_ase=self.ase_check.isChecked(),
-                write_glb=self.glb_check is not None and self.glb_check.isChecked(),
-                write_fbx=self.fbx_check is not None and self.fbx_check.isChecked(),
             )
 
         def _apply_options(self, options: ImportOptions) -> None:
@@ -755,12 +751,10 @@ if is_available():
                 self.arms_check.setChecked(options.import_arms)
                 if self.blend_check is not None:
                     self.blend_check.setChecked(options.write_blend)
+                if self.max_check is not None:
+                    self.max_check.setChecked(options.write_max)
                 self.project_check.setChecked(options.write_3dp)
                 self.ase_check.setChecked(options.write_ase)
-                if self.glb_check is not None:
-                    self.glb_check.setChecked(options.write_glb)
-                if self.fbx_check is not None:
-                    self.fbx_check.setChecked(options.write_fbx)
             finally:
                 self._applying_options = False
             self._update_action_states()
@@ -1101,10 +1095,9 @@ if is_available():
                 label
                 for label, value in (
                     ("blend", options.write_blend),
+                    ("max", options.write_max),
                     ("3dp", options.write_3dp),
                     ("ase", options.write_ase),
-                    ("glb", options.write_glb),
-                    ("fbx", options.write_fbx),
                 )
                 if value
             ]

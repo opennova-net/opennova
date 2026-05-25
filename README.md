@@ -20,9 +20,9 @@ Pre-JO NovaLogic titles may sort of work by chance, but are not officially suppo
 
 Pre-built binaries are available on the [Releases](../../releases) page:
 
-- **`onimport.exe`**: standalone Windows importer. Use this to convert models etc to modern formats like .glb, .blend and .fbx. Also exports files
-compat. with NovaLogic's original tools (ie: OED).
+- **`onimport.exe`**: standalone Windows importer. Use this to convert models to `.blend`, `.ase`, `.max`, and NovaLogic-compatible project files for tools like OED.
 - **`opennova_blender.zip`**: Blender 5.x addon with pre-built native libraries for Windows and Linux.
+- **`opennova_max-v<version>.mzp`**: 3ds Max plugin installer that adds NovaLogic ASE export.
 - **`opennova-modtools-windows.zip`**: standalone OpenNova Editor (ONED) for Windows. The open source NILE.
 - **`opennova-runtime-windows.zip`**: "game" runtime.
 
@@ -33,8 +33,8 @@ Extract models from game files. Reads directly from PFF archives with automatic 
 Each import can write one or more selected output files:
 - `.blend` - Blender project with the full scene hierarchy
 - `.ase` - 3DS Max ASCII Scene Export
+- `.max` - 3ds Max scene, when the external Max backend is available
 - `.3dp` / `.3da` - Project metadata for round-trip editing
-- `.glb` / `.fbx` - Optional runtime/interchange exports
 
 Imported scenes include meshes, materials, textures, LODs, skeletal armatures, collision volumes, occlusion geometry, lights, and user points.
 
@@ -42,27 +42,17 @@ Imported scenes include meshes, materials, textures, LODs, skeletal armatures, c
 
 Requires Python 3.11, uv, bpy 5.0.0, and PySide6. Build the shared library (see [Building](#building)) and copy `build/Release/opennova.dll` into `blender/lib/windows-x64/`, then `uv sync && uv run onimport`.
 
-## Blender Addon
+## DCC ASE Export Plugins
 
-A Blender 5.x addon for the export side of the asset pipeline. Install via the zip from [Releases](../../releases) or point Blender at the `blender/` directory for development.
-
-### ASE Export
+Blender and 3ds Max both expose the same author-facing export target:
 
 `File > Export > Novalogic ASE (.ase)`
 
+Install the Blender 5.x addon via the zip from [Releases](../../releases) or point Blender at the `blender/` directory for development. Install the 3ds Max plugin by running the MZP from [Releases](../../releases); it copies an Autodesk ApplicationPlugins bundle under your user profile.
+
+### ASE Export
+
 Exports the current scene to NovaLogic's ASCII Scene Export format. Supports multi-LOD scenes, bone weights for skinned models, vertex normals, texture coordinates, and diffuse texture export as TGA. Configurable float precision and scale.
-
-### Animation Export
-
-`File > Export > Novalogic Anims (.adm + .bad)`
-
-Exports armature NLA actions to NovaLogic's BAD (bone animation data) and ADM (animation definition) formats. Select which clips to include and configure per-clip flags: loop, root translation, and reset pose. Each clip writes a `.bad` file; the combined `.adm` maps action names to clips.
-
-### Mixamo FBX Import
-
-`File > Import > Mixamo FBX for Novalogic (.fbx)`
-
-Imports Mixamo FBX animations and retargets them onto a NovaLogic skeleton. Strips the `mixamorig:` prefix, optionally creates a root motion bone, and pushes each animation as an NLA strip ready for export.
 
 ## OpenNova Editor (ONED)
 
@@ -77,6 +67,7 @@ The authoring layer for JO assets: terrain, environments, and objects in one edi
 | `opennova_jobs/` | Host-neutral import request/result/job models and validation. |
 | `opennova_qt_ui/` | Host-agnostic PySide6 importer dialog and pure UI helpers. |
 | `opennova_blender/` | Standalone Blender-backed importer backend for the Qt UI. |
+| `opennova_max/` | External 3ds Max batch helpers and Max-side export hooks. |
 | `blender/` | Blender 5.x addon (export side of the pipeline). |
 | `godot/` | Godot 4.6.1 host. `engine/` (GDExtension bindings to `libs/`), `modtools/` (authoring), `game/` (runtime scene), `tests/` (GUT suite). |
 | `scripts/` | Build, test, and packaging scripts (sh + ps1). |

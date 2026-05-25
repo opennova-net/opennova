@@ -20,8 +20,7 @@ _OPTION_FIELDS = (
     "write_blend",
     "write_3dp",
     "write_ase",
-    "write_glb",
-    "write_fbx",
+    "write_max",
 )
 
 
@@ -44,8 +43,7 @@ def _add_import_options(parser: argparse.ArgumentParser, *, include_def_only: bo
         write_blend=None,
         write_3dp=None,
         write_ase=None,
-        write_glb=None,
-        write_fbx=None,
+        write_max=None,
     )
     if include_def_only:
         parser.add_argument("--no-animations", dest="import_animations", action="store_false",
@@ -67,10 +65,10 @@ def _add_import_options(parser: argparse.ArgumentParser, *, include_def_only: bo
                         help="Do not write .3dp/.3da project files")
     parser.add_argument("--no-ase", dest="write_ase", action="store_false",
                         help="Do not write .ase files")
-    parser.add_argument("--glb", dest="write_glb", action="store_true",
-                        help="Write .glb files")
-    parser.add_argument("--fbx", dest="write_fbx", action="store_true",
-                        help="Write .fbx files")
+    parser.add_argument("--max", dest="write_max", action="store_true",
+                        help="Write .max scene files via 3ds Max")
+    parser.add_argument("--no-max", dest="write_max", action="store_false",
+                        help="Do not write .max scene files")
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
@@ -90,7 +88,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 
 def cmd_import(args: argparse.Namespace) -> int:
-    from apps.importer.import_runner import execute_import_request
+    from opennova_blender import StandaloneBackend
 
     request = ImportRequest.for_definition(
         base_dir=args.dir,
@@ -99,7 +97,11 @@ def cmd_import(args: argparse.Namespace) -> int:
         output_root=args.output,
         options=options_from_args(args),
     )
-    result = execute_import_request(request)
+    backend = StandaloneBackend()
+    try:
+        result = backend.execute(request)
+    finally:
+        backend.shutdown()
     if not result.ok:
         log.error("%s failed: %s", request.label, result.error)
         return 1
@@ -108,7 +110,7 @@ def cmd_import(args: argparse.Namespace) -> int:
 
 
 def cmd_import_loose(args: argparse.Namespace) -> int:
-    from apps.importer.import_runner import execute_import_request
+    from opennova_blender import StandaloneBackend
 
     request = ImportRequest.for_loose(
         threedi_path=args.file,
@@ -117,7 +119,11 @@ def cmd_import_loose(args: argparse.Namespace) -> int:
         base_dir=args.asset_dir or "",
         options=options_from_args(args),
     )
-    result = execute_import_request(request)
+    backend = StandaloneBackend()
+    try:
+        result = backend.execute(request)
+    finally:
+        backend.shutdown()
     if not result.ok:
         log.error("%s failed: %s", request.label, result.error)
         return 1
@@ -126,8 +132,8 @@ def cmd_import_loose(args: argparse.Namespace) -> int:
 
 
 def cmd_export_all(args: argparse.Namespace) -> int:
-    from apps.importer.dispatcher import ImportDispatcher
     from apps.importer.import_runner import scan_directory_result
+    from opennova_blender import StandaloneBackend
 
     scan = scan_directory_result(args.dir)
     if not scan.ok:
@@ -156,19 +162,22 @@ def cmd_export_all(args: argparse.Namespace) -> int:
 
     success = 0
     failed = 0
-    with ImportDispatcher() as dispatcher:
+    backend = StandaloneBackend()
+    try:
         log.info(
-            "Dispatching %d jobs across %d worker(s)...",
+            "Dispatching %d jobs across %d Blender worker(s)...",
             len(requests),
-            dispatcher.max_workers,
+            backend.max_workers,
         )
-        for result in dispatcher.submit_batch(requests):
+        for result in backend.execute_batch(requests):
             if result.ok:
                 success += 1
                 log.info("Done: %s", result.request.label)
             else:
                 failed += 1
                 log.error("FAILED: %s: %s", result.request.label, result.error)
+    finally:
+        backend.shutdown()
 
     print(f"\nDone: {success} succeeded, {failed} failed.")
     return 0 if failed == 0 else 1

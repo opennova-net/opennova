@@ -25,14 +25,12 @@ FIXTURES: list[Path] = [
 
 OPTION_CASES: dict[str, ImportOptions] = {
     "round_trip": ImportOptions(),
-    "all_formats": ImportOptions(write_glb=True, write_fbx=True),
-    "glb_only": ImportOptions(
-        write_blend=False, write_3dp=False, write_ase=False, write_glb=True,
-    ),
+    "blend_and_ase": ImportOptions(write_3dp=False),
+    "game_project_only": ImportOptions(write_blend=False, write_3dp=True, write_ase=False),
     "blend_only": ImportOptions(write_3dp=False, write_ase=False),
 }
 
-ALL_FORMAT_SUFFIXES = {".blend", ".3dp", ".3da", ".ase", ".glb", ".fbx"}
+ALL_FORMAT_SUFFIXES = {".blend", ".3dp", ".3da", ".ase", ".max"}
 
 
 def _expected_files(options: ImportOptions, stem: str) -> set[str]:
@@ -44,10 +42,8 @@ def _expected_files(options: ImportOptions, stem: str) -> set[str]:
         expected.add(f"{stem}.3da")
     if options.write_ase:
         expected.add(f"{stem}.ase")
-    if options.write_glb:
-        expected.add(f"{stem}.glb")
-    if options.write_fbx:
-        expected.add(f"{stem}.fbx")
+    if options.write_max:
+        expected.add(f"{stem}.max")
     return expected
 
 
@@ -105,10 +101,10 @@ def test_loose_import_produces_expected_outputs(
         assert path.stat().st_size > 0, f"empty output {path}"
 
 
-def test_consecutive_imports_in_one_session_both_write_glb(
+def test_consecutive_imports_in_one_session_both_write_blend_and_ase(
     tmp_path: Path,
 ) -> None:
-    """Run two imports back-to-back in one process and assert both write GLB.
+    """Run two imports back-to-back in one process and assert both write DCC output.
 
     With process isolation each call to ``execute_import_request`` spawns a
     fresh worker, so cross-import bpy state degradation cannot occur.
@@ -117,9 +113,7 @@ def test_consecutive_imports_in_one_session_both_write_glb(
     if len(available) < 2:
         pytest.skip("need at least two fixtures (LFS not pulled?)")
 
-    options = ImportOptions(
-        write_blend=False, write_3dp=False, write_ase=False, write_glb=True,
-    )
+    options = ImportOptions(write_blend=True, write_3dp=False, write_ase=True)
 
     for index, threedi_path in enumerate(available[:2]):
         out_root = tmp_path / f"run_{index}"
@@ -132,6 +126,9 @@ def test_consecutive_imports_in_one_session_both_write_glb(
         result = execute_import_request(request)
         assert result.ok, f"run {index} ({threedi_path.stem}) failed: {result.error}"
 
-        glb_path = Path(result.output_path) / f"{threedi_path.stem}.glb"
-        assert glb_path.is_file(), f"run {index}: expected {glb_path}"
-        assert glb_path.stat().st_size > 0, f"run {index}: empty {glb_path}"
+        blend_path = Path(result.output_path) / f"{threedi_path.stem}.blend"
+        ase_path = Path(result.output_path) / f"{threedi_path.stem}.ase"
+        assert blend_path.is_file(), f"run {index}: expected {blend_path}"
+        assert blend_path.stat().st_size > 0, f"run {index}: empty {blend_path}"
+        assert ase_path.is_file(), f"run {index}: expected {ase_path}"
+        assert ase_path.stat().st_size > 0, f"run {index}: empty {ase_path}"

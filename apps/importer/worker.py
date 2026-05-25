@@ -43,6 +43,7 @@ def init_worker(log_queue: "mp.Queue") -> None:
 def run_one(request: ImportRequest) -> ImportResult:
     """Run a single import in this fresh subprocess and return the result."""
     started_at = time.monotonic()
+    output_path = request.likely_output_dir
     errors = validate_import_request(request)
     if errors:
         return ImportResult.failure(
@@ -50,8 +51,14 @@ def run_one(request: ImportRequest) -> ImportResult:
             error=" ".join(errors),
             elapsed_seconds=time.monotonic() - started_at,
         )
+    if request.options.write_max:
+        return ImportResult.failure(
+            request,
+            error=".max output must be routed through the standalone backend.",
+            output_path=output_path,
+            elapsed_seconds=time.monotonic() - started_at,
+        )
 
-    output_path = request.likely_output_dir
     try:
         from . import bpy_session
         bpy_session.init_headless()
