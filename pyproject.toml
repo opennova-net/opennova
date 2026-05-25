@@ -27,7 +27,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["apps*", "opennova_blender*", "opennova_jobs*", "opennova_max*", "opennova_qt_ui*"]
+include = ["apps*", "opennova_blender*", "opennova_jobs*", "opennova_max*", "opennova_qt_ui*", "pyopennova*"]
 
 [tool.setuptools.package-data]
 opennova_max = ["maxscript/*.mcr"]

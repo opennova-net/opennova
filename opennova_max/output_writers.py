@@ -1,8 +1,53 @@
-"""Small 3ds Max scene output helpers."""
+"""3ds Max scene output helpers."""
 from __future__ import annotations
 
 import os
 from typing import Any
+
+
+def write_outputs(
+    model,
+    output_dir: str,
+    output_name: str,
+    builder=None,
+    resolver=None,
+    *,
+    write_max: bool = True,
+    write_ase: bool = True,
+    write_3dp: bool = True,
+    copy_textures: bool = True,
+) -> list[str]:
+    """Write selected outputs for the current Max scene.
+
+    ``.ase`` is intentionally written through the Max current-scene exporter,
+    not through the host-neutral IR ASE writer. That keeps Max/Blender parity
+    tied to what each DCC plugin actually exports.
+    """
+    del builder
+    os.makedirs(output_dir, exist_ok=True)
+    written: list[str] = []
+    if write_3dp:
+        written.extend(_write_project_outputs(model, output_dir, output_name))
+    if write_ase:
+        written.append(export_ase_scene(output_dir, output_name))
+    if write_max:
+        written.append(save_max_scene(output_dir, output_name))
+    if copy_textures and resolver is not None:
+        written.extend(_copy_texture_outputs(model, output_dir, resolver))
+    return written
+
+
+def _write_project_outputs(model, output_dir: str, output_name: str) -> list[str]:
+    from pyopennova.project_writer import write_3dp_from_3di3
+
+    tdp_path = os.path.join(output_dir, output_name + ".3dp")
+    return list(write_3dp_from_3di3(model, tdp_path))
+
+
+def _copy_texture_outputs(model, output_dir: str, resolver) -> list[str]:
+    from pyopennova.texture_outputs import copy_model_textures
+
+    return list(copy_model_textures(model, output_dir, resolver=resolver))
 
 
 def reset_scene():

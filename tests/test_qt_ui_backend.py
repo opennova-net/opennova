@@ -186,15 +186,25 @@ def test_standalone_backend_groups_max_batch_requests(tmp_path) -> None:
     assert len(max_runner.run_calls[0]) == 2
 
 
-def test_standalone_backend_hides_max_until_scene_import_is_enabled(monkeypatch) -> None:
+def test_standalone_backend_advertises_max_when_runner_and_import_are_available() -> None:
     from opennova_blender.backend import StandaloneBackend
-    import opennova_max.import_runner as import_runner
 
     backend = StandaloneBackend(
         blender_backend=_RecordingBlenderBackend(),
         max_runner=_RecordingMaxRunner(),
     )
-    assert backend.capabilities().supports_max is False
-
-    monkeypatch.setattr(import_runner, "SUPPORTS_SCENE_IMPORT", True)
     assert backend.capabilities().supports_max is True
+
+
+def test_standalone_backend_hides_max_when_runner_is_unavailable() -> None:
+    from opennova_blender.backend import StandaloneBackend
+
+    class MissingMaxRunner(_RecordingMaxRunner):
+        available = False
+
+    backend = StandaloneBackend(
+        blender_backend=_RecordingBlenderBackend(),
+        max_runner=MissingMaxRunner(),
+    )
+
+    assert backend.capabilities().supports_max is False
