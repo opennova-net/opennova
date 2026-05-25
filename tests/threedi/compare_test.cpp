@@ -704,6 +704,56 @@ static int changed_cdta_cfac_padding_matches(void)
     return expect_true(rc == 0, "changed CFAC padding byte should match CDTA");
 }
 
+static int changed_cdta_cfac_second_record_padding_matches(void)
+{
+    char report[512];
+    memset(report, 0, sizeof(report));
+    const std::string expected = fixture_path("Shed.3di");
+    const std::string actual = temp_path("opennova_compare_changed_cdta_cfac_second_record_padding.3di");
+    size_t cfac_payload_offset = 0;
+    if (!first_chunk_payload_offset(expected, "CFAC", &cfac_payload_offset) ||
+        !write_modified_byte_copy(expected, actual, cfac_payload_offset + 8u + 44u + 41u)) {
+        return 0;
+    }
+
+    int rc = threedi_3di3_compare_file_chunks(expected.c_str(),
+                                              actual.c_str(),
+                                              "CDTA",
+                                              report,
+                                              sizeof(report));
+    remove(actual.c_str());
+    return expect_true(rc == 0, "changed second CFAC record padding byte should match CDTA");
+}
+
+static int changed_cdta_cfac_plane_dist_reports_field(void)
+{
+    char report[512];
+    memset(report, 0, sizeof(report));
+    const std::string expected = fixture_path("Shed.3di");
+    const std::string actual = temp_path("opennova_compare_changed_cdta_cfac_plane_dist.3di");
+    size_t cfac_payload_offset = 0;
+    if (!first_chunk_payload_offset(expected, "CFAC", &cfac_payload_offset) ||
+        !write_modified_byte_copy(expected, actual, cfac_payload_offset + 8u + 8u)) {
+        return 0;
+    }
+
+    int rc = threedi_3di3_compare_file_chunks(expected.c_str(),
+                                              actual.c_str(),
+                                              "CDTA",
+                                              report,
+                                              sizeof(report));
+    remove(actual.c_str());
+    return expect_true(rc == 1, "changed CFAC plane_dist_fp16 should mismatch CDTA")
+        && expect_true(strstr(report, "CFAC") != NULL,
+                       "CFAC plane_dist_fp16 mismatch report should name the chunk")
+        && expect_true(strstr(report, "face 0") != NULL,
+                       "CFAC plane_dist_fp16 mismatch report should name the face")
+        && expect_true(strstr(report, "plane_dist_fp16") != NULL,
+                       "CFAC plane_dist_fp16 mismatch report should name the field")
+        && expect_true(strstr(report, "payload offset 16") != NULL,
+                       "CFAC plane_dist_fp16 mismatch report should include payload offset");
+}
+
 static int changed_cdta_cfac_poly_type_reports_mismatch(void)
 {
     char report[512];
@@ -725,8 +775,12 @@ static int changed_cdta_cfac_poly_type_reports_mismatch(void)
     return expect_true(rc == 1, "changed CFAC poly_type should mismatch CDTA")
         && expect_true(strstr(report, "CFAC") != NULL,
                        "CFAC poly_type mismatch report should name the chunk")
-        && expect_true(strstr(report, "byte") != NULL,
-                       "CFAC poly_type mismatch report should include byte detail");
+        && expect_true(strstr(report, "face 0") != NULL,
+                       "CFAC poly_type mismatch report should name the face")
+        && expect_true(strstr(report, "poly_type") != NULL,
+                       "CFAC poly_type mismatch report should name the field")
+        && expect_true(strstr(report, "payload offset 48") != NULL,
+                       "CFAC poly_type mismatch report should include payload offset");
 }
 
 static int changed_rdta_vert_normal_within_tolerance_matches(void)
@@ -854,6 +908,8 @@ int main(void)
     ok &= changed_cdta_child_payload_reports_mismatch("COBJ");
     ok &= changed_cdta_child_payload_reports_mismatch("CXLT");
     ok &= changed_cdta_cfac_padding_matches();
+    ok &= changed_cdta_cfac_second_record_padding_matches();
+    ok &= changed_cdta_cfac_plane_dist_reports_field();
     ok &= changed_cdta_cfac_poly_type_reports_mismatch();
     ok &= changed_rdta_vert_normal_within_tolerance_matches();
     ok &= changed_rdta_vert_normal_beyond_tolerance_reports_mismatch();

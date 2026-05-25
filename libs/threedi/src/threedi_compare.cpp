@@ -127,6 +127,88 @@ static bool compare_payload_byte_range(const uint8_t *expected,
     return true;
 }
 
+static const char *cfac_field_name(size_t field_offset)
+{
+    if (field_offset < 2u) {
+        return "vert_index[0]";
+    }
+    if (field_offset < 4u) {
+        return "vert_index[1]";
+    }
+    if (field_offset < 6u) {
+        return "vert_index[2]";
+    }
+    if (field_offset < 8u) {
+        return "normal_index";
+    }
+    if (field_offset < 12u) {
+        return "plane_dist_fp16";
+    }
+    if (field_offset < 16u) {
+        return "min_x_fp16";
+    }
+    if (field_offset < 20u) {
+        return "min_y_fp16";
+    }
+    if (field_offset < 24u) {
+        return "min_z_fp16";
+    }
+    if (field_offset < 28u) {
+        return "max_x_fp16";
+    }
+    if (field_offset < 32u) {
+        return "max_y_fp16";
+    }
+    if (field_offset < 36u) {
+        return "max_z_fp16";
+    }
+    if (field_offset < 40u) {
+        return "material_flags";
+    }
+    if (field_offset == 40u) {
+        return "poly_type";
+    }
+    if (field_offset == 41u) {
+        return "pad[0]";
+    }
+    if (field_offset == 42u) {
+        return "pad[1]";
+    }
+    if (field_offset == 43u) {
+        return "pad[2]";
+    }
+    return "unknown";
+}
+
+static bool compare_cfac_record_byte_range(const uint8_t *expected,
+                                           const uint8_t *actual,
+                                           size_t begin,
+                                           size_t end,
+                                           uint32_t face_index,
+                                           size_t record_offset,
+                                           const std::string &path,
+                                           char *report,
+                                           size_t report_size)
+{
+    for (size_t i = begin; i < end; ++i) {
+        if (expected[i] != actual[i]) {
+            size_t field_offset = i - record_offset;
+            set_report(report,
+                       report_size,
+                       "%s CFAC face %u %s byte mismatch at payload offset %zu (record offset %zu): expected 0x%02X actual 0x%02X",
+                       path.c_str(),
+                       face_index,
+                       cfac_field_name(field_offset),
+                       i,
+                       field_offset,
+                       (unsigned int)expected[i],
+                       (unsigned int)actual[i]);
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool compare_vert_payload(const ThreediChunk *expected,
                                  const ThreediChunk *actual,
                                  const std::string &path,
@@ -245,13 +327,15 @@ static bool compare_cfac_payload(const ThreediChunk *expected,
 
     for (uint32_t face_index = 0; face_index < count; ++face_index) {
         size_t record_offset = 8u + (size_t)face_index * (size_t)record_size;
-        if (!compare_payload_byte_range(expected->data,
-                                        actual->data,
-                                        record_offset,
-                                        record_offset + 41u,
-                                        path,
-                                        report,
-                                        report_size)) {
+        if (!compare_cfac_record_byte_range(expected->data,
+                                            actual->data,
+                                            record_offset,
+                                            record_offset + 41u,
+                                            face_index,
+                                            record_offset,
+                                            path,
+                                            report,
+                                            report_size)) {
             return false;
         }
     }
