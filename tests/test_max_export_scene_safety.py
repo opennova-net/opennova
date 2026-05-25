@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import textwrap
@@ -11,6 +10,22 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_scene_safety_runner_scrubs_qt_test_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setenv("QT_PLUGIN_PATH", str(tmp_path / "pyside-plugins"))
+
+    env = _scene_safety_runner_env(
+        result_path=tmp_path / "result.json",
+        output_dir=tmp_path / "out",
+    )
+
+    assert "QT_QPA_PLATFORM" not in env
+    assert "QT_PLUGIN_PATH" not in env
 
 
 def test_max_ase_export_preserves_skinned_scene_state(tmp_path: Path) -> None:
@@ -29,10 +44,7 @@ def test_max_ase_export_preserves_skinned_scene_state(tmp_path: Path) -> None:
     output_dir = tmp_path / "out"
     runner.write_text(_MAX_SCENE_SAFETY_RUNNER, encoding="utf-8")
 
-    env = os.environ.copy()
-    env["OPENNOVA_TEST_WORKTREE"] = str(ROOT)
-    env["OPENNOVA_TEST_RESULT"] = str(result_path)
-    env["OPENNOVA_TEST_OUTPUT"] = str(output_dir)
+    env = _scene_safety_runner_env(result_path=result_path, output_dir=output_dir)
 
     process = subprocess.run(
         [str(maxbatch), str(runner)],
@@ -54,6 +66,16 @@ def test_max_ase_export_preserves_skinned_scene_state(tmp_path: Path) -> None:
     result = json.loads(result_path.read_text(encoding="utf-8"))
     assert result["ok"], result.get("diff", result)
     assert (output_dir / "Bird1.ase").is_file()
+
+
+def _scene_safety_runner_env(*, result_path: Path, output_dir: Path) -> dict[str, str]:
+    from opennova_max.runner import _max_subprocess_env
+
+    env = _max_subprocess_env()
+    env["OPENNOVA_TEST_WORKTREE"] = str(ROOT)
+    env["OPENNOVA_TEST_RESULT"] = str(result_path)
+    env["OPENNOVA_TEST_OUTPUT"] = str(output_dir)
+    return env
 
 
 _MAX_SCENE_SAFETY_RUNNER = textwrap.dedent(

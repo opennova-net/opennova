@@ -21,6 +21,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["-p", "no:pytest-qt"]
 
 [build-system]
 requires = ["setuptools>=68"]

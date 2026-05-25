@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -8,11 +9,52 @@ import pytest
 
 from opennova_jobs import ImportRequest, ImportResult, ScanItem, ScanResult
 
+try:
+    from PySide6 import QtWidgets
+except ImportError as exc:
+    pytest.skip(f"PySide6 Qt widgets are unavailable: {exc}", allow_module_level=True)
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-pytest.importorskip("PySide6")
-pytest.importorskip("pytestqt")
+class _QtBot:
+    def __init__(self) -> None:
+        self._previous_qt_platform = os.environ.get("QT_QPA_PLATFORM")
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        self.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+        self.widgets: list[QtWidgets.QWidget] = []
+
+    def addWidget(self, widget: QtWidgets.QWidget) -> None:
+        self.widgets.append(widget)
+
+    def waitUntil(
+        self,
+        callback: Callable[[], bool],
+        *,
+        timeout: int = 1000,
+        interval: int = 10,
+    ) -> None:
+        deadline = time.monotonic() + (timeout / 1000)
+        while time.monotonic() < deadline:
+            self.app.processEvents()
+            if callback():
+                return
+            time.sleep(interval / 1000)
+        raise AssertionError("condition was not met before timeout")
+
+    def close(self) -> None:
+        for widget in reversed(self.widgets):
+            widget.close()
+        self.app.processEvents()
+        if self._previous_qt_platform is None:
+            os.environ.pop("QT_QPA_PLATFORM", None)
+        else:
+            os.environ["QT_QPA_PLATFORM"] = self._previous_qt_platform
+
+
+@pytest.fixture
+def qtbot() -> _QtBot:
+    bot = _QtBot()
+    yield bot
+    bot.close()
 
 
 @dataclass
