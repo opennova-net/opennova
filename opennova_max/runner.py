@@ -15,6 +15,12 @@ from .discovery import resolve_3dsmaxbatch
 
 ENV_BATCH_REQUEST = "OPENNOVA_MAX_BATCH_REQUEST"
 ENV_BATCH_RESULT = "OPENNOVA_MAX_BATCH_RESULT"
+QT_SUBPROCESS_ENV_KEYS = (
+    "QT_QPA_PLATFORM",
+    "QT_PLUGIN_PATH",
+    "QT_QPA_PLATFORM_PLUGIN_PATH",
+    "QT_DEBUG_PLUGINS",
+)
 
 
 class MaxBatchRunner:
@@ -60,7 +66,7 @@ class MaxBatchRunner:
             result_path = temp_path / "result.json"
             write_batch_request(request_path, request_list)
 
-            env = os.environ.copy()
+            env = _max_subprocess_env()
             env[ENV_BATCH_REQUEST] = str(request_path)
             env[ENV_BATCH_RESULT] = str(result_path)
             command = [str(exe), str(_batch_entry_path())]
@@ -106,6 +112,14 @@ def _batch_entry_path():
 def _repo_root():
     # type: () -> Path
     return Path(__file__).resolve().parents[1]
+
+
+def _max_subprocess_env():
+    # type: () -> dict
+    env = os.environ.copy()
+    for key in QT_SUBPROCESS_ENV_KEYS:
+        env.pop(key, None)
+    return env
 
 
 def _missing_3dsmaxbatch_result(request):

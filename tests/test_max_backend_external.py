@@ -117,6 +117,42 @@ def test_batch_runner_invokes_3dsmaxbatch_with_env_ipc(monkeypatch, tmp_path: Pa
     assert kwargs["timeout"] == 3
 
 
+def test_batch_runner_scrubs_qt_test_env_before_launch(monkeypatch, tmp_path: Path) -> None:
+    exe = tmp_path / "3dsmaxbatch.exe"
+    request = ImportRequest.for_loose(
+        threedi_path=str(tmp_path / "Shed.3di"),
+        output_root=str(tmp_path / "out"),
+        options=ImportOptions(write_blend=False, write_max=True, write_ase=True, write_3dp=False),
+    )
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setenv("QT_PLUGIN_PATH", str(tmp_path / "pyside-plugins"))
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        from opennova_max.batch import write_batch_results
+
+        write_batch_results(
+            Path(kwargs["env"]["OPENNOVA_MAX_BATCH_RESULT"]),
+            [ImportResult.success(request, output_path=str(tmp_path / "out" / "Shed"))],
+        )
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("opennova_max.runner.subprocess.run", fake_run)
+
+    from opennova_max.runner import MaxBatchRunner
+
+    runner = MaxBatchRunner(maxbatch_path=exe)
+    results = runner.run([request])
+
+    assert results[0].ok
+    env = calls[0][1]["env"]
+    assert "QT_QPA_PLATFORM" not in env
+    assert "QT_PLUGIN_PATH" not in env
+    assert "OPENNOVA_MAX_BATCH_REQUEST" in env
+    assert "OPENNOVA_MAX_BATCH_RESULT" in env
+
+
 def test_batch_runner_reports_missing_3dsmaxbatch(tmp_path: Path) -> None:
     request = ImportRequest.for_loose(
         threedi_path=str(tmp_path / "Shed.3di"),

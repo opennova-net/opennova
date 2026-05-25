@@ -17,6 +17,7 @@ import bpy
 import bmesh
 import math
 import os
+import re
 import traceback
 from mathutils import Vector
 from .opennova import ase_ffi
@@ -57,6 +58,8 @@ class MaterialKeeper:
         """Register a material if it's not already present. Returns material index."""
         if material is None:
             return -1
+        if not self._is_source_material(material):
+            return -1
         if material in self.material_map:
             return self.material_map[material]
         idx = len(self.materials)
@@ -76,13 +79,17 @@ class MaterialKeeper:
 
         first_idx = -1
         for mat in obj.data.materials:
-            if mat is not None:
+            if mat is not None and self._is_source_material(mat):
                 idx = self.add_material(mat)
                 if first_idx == -1:
                     first_idx = idx
 
         self.object_material_map[obj.name] = first_idx if first_idx >= 0 else -1
         return first_idx if first_idx >= 0 else -1
+
+    @staticmethod
+    def _is_source_material(material):
+        return MaterialKeeper._ir_index(material) != 999999
 
     def sort_by_ir_index(self):
         """Re-sort materials by their IR index and rebuild the index map."""
@@ -148,6 +155,10 @@ class AseExporter:
                 setattr(self, key, value)
 
     @staticmethod
+    def _clean_blender_duplicate_suffix(name):
+        return re.sub(r"\.\d{3}$", "", name)
+
+    @staticmethod
     def _is_descendant_of(obj, root):
         """Check if obj is a descendant of root (or is root itself)."""
         cur = obj
@@ -156,6 +167,20 @@ class AseExporter:
                 return True
             cur = cur.parent
         return False
+
+    @classmethod
+    def _is_part_dummy(cls, obj):
+        name = cls._clean_blender_duplicate_suffix(obj.name)
+        return obj.type == 'EMPTY' and re.match(r"^PN\d{2}$", name) is not None
+
+    @classmethod
+    def _is_render_mesh(cls, obj):
+        name = cls._clean_blender_duplicate_suffix(obj.name)
+        return obj.type == 'MESH' and re.match(r"^\d{2} Mesh\d+$", name) is not None
+
+    @classmethod
+    def _is_helper_mesh(cls, obj):
+        return obj.type == 'MESH' and not cls._is_render_mesh(obj)
 
     @staticmethod
     def _find_lod_roots(scene):
@@ -205,12 +230,19 @@ class AseExporter:
 
             # Phase 2: Count entities for C document allocation (LOD 0 only)
             all_mesh_objects = [o for o in scene.objects if o.type == 'MESH']
+            all_part_dummy_objects = [o for o in scene.objects if self._is_part_dummy(o)]
             if lod0_root and lod_extra_roots:
                 # Filter to only LOD 0 meshes (descendants of lod0_root)
                 mesh_objects = [o for o in all_mesh_objects
                                 if self._is_descendant_of(o, lod0_root)]
+                part_dummy_objects = [o for o in all_part_dummy_objects
+                                      if self._is_descendant_of(o, lod0_root)]
             else:
                 mesh_objects = all_mesh_objects
+                part_dummy_objects = all_part_dummy_objects
+
+            render_mesh_objects = [o for o in mesh_objects if self._is_render_mesh(o)]
+            helper_mesh_objects = [o for o in mesh_objects if self._is_helper_mesh(o)]
 
             light_objects = [o for o in scene.objects if o.type == 'LIGHT']
             bone_list = []
@@ -219,11 +251,17 @@ class AseExporter:
                     for bone in sorted(o.pose.bones, key=lambda b: b.name):
                         bone_list.append((o, bone))
 
-            total_objects = len(mesh_objects) + len(bone_list)
+            total_objects = (
+                len(render_mesh_objects)
+                + len(part_dummy_objects)
+                + len(helper_mesh_objects)
+                + len(bone_list)
+            )
             total_materials = self.material_keeper.count() if self.include_materials else 0
             total_lights = len(light_objects)
 
-            print(f"ASE Export: {total_objects} objects ({len(mesh_objects)} meshes, "
+            print(f"ASE Export: {total_objects} objects ({len(render_mesh_objects)} render meshes, "
+                  f"{len(part_dummy_objects)} PN dummies, {len(helper_mesh_objects)} helpers, "
                   f"{len(bone_list)} bones), {total_materials} materials, {total_lights} lights")
 
             # Phase 3: Create and populate C document
@@ -234,7 +272,7 @@ class AseExporter:
 
             has_skinned = any(
                 o.vertex_groups and any(m.type == 'ARMATURE' and m.object for m in o.modifiers)
-                for o in mesh_objects
+                for o in render_mesh_objects + helper_mesh_objects
             )
             doc.flags = 1 if has_skinned else 0
             doc.skinned_flags = 1 if has_skinned else 0
@@ -250,8 +288,18 @@ class AseExporter:
                 self._populate_bone_object(doc.objects[obj_idx], arm_obj, bone)
                 obj_idx += 1
 
-            for mesh_obj in mesh_objects:
+            for mesh_obj in render_mesh_objects:
                 print(f"ASE Export: Populating geometry '{mesh_obj.name}'")
+                self._populate_geometry(doc.objects[obj_idx], mesh_obj)
+                obj_idx += 1
+
+            for part_obj in part_dummy_objects:
+                print(f"ASE Export: Populating PN dummy '{part_obj.name}'")
+                self._populate_part_dummy_object(doc.objects[obj_idx], part_obj)
+                obj_idx += 1
+
+            for mesh_obj in helper_mesh_objects:
+                print(f"ASE Export: Populating helper geometry '{mesh_obj.name}'")
                 self._populate_geometry(doc.objects[obj_idx], mesh_obj)
                 obj_idx += 1
 
@@ -334,6 +382,7 @@ class AseExporter:
 
     def preprocess_scene(self):
         """Count nodes and prepare materials"""
+        self.material_keeper = MaterialKeeper()
         self.total_node_count = 0
 
         for obj in self.scene.objects:
@@ -528,16 +577,22 @@ class AseExporter:
             # Compute which Multi/Sub-Object slot this object references.
             # material_ref selects the top-level slot; face.material_id selects
             # the submaterial within it.
-            if obj.data.materials and obj.data.materials[0] is not None:
+            if (
+                obj.data.materials
+                and obj.data.materials[0] is not None
+                and MaterialKeeper._is_source_material(obj.data.materials[0])
+            ):
                 global_idx = self.material_keeper.get_global_index(obj.data.materials[0])
                 ase_obj.material_ref = global_idx // self.SUBS_PER_SLOT
+            elif self._is_helper_mesh(obj):
+                ase_obj.material_ref = -1
             else:
                 ase_obj.material_ref = 0
 
             # Build per-slot material_id lookup for multi-material meshes
             _slot_mat_ids = []
             for slot_mat in obj.data.materials:
-                if slot_mat is not None:
+                if slot_mat is not None and MaterialKeeper._is_source_material(slot_mat):
                     _slot_mat_ids.append(
                         self.material_keeper.get_global_index(slot_mat) % self.SUBS_PER_SLOT)
                 else:
@@ -858,6 +913,56 @@ class AseExporter:
         print(f"ASE Export: Collected weights for {len(result)} vertices "
               f"({weighted_count} with bone influences)")
         return result
+
+    # -------------------------------------------------------------------
+    # PN dummy population
+    # -------------------------------------------------------------------
+
+    def _populate_part_dummy_object(self, ase_obj, obj):
+        """Fill an ASE object for a PN## part Empty."""
+        half = 0.0005
+        verts = [
+            (-half, -half, -half),
+            (half, -half, -half),
+            (half, half, -half),
+            (-half, half, -half),
+            (-half, -half, half),
+            (half, -half, half),
+            (half, half, half),
+            (-half, half, half),
+        ]
+        faces = [
+            (0, 1, 2), (0, 2, 3),
+            (4, 7, 6), (4, 6, 5),
+            (0, 4, 5), (0, 5, 1),
+            (2, 6, 7), (2, 7, 3),
+            (1, 5, 6), (1, 6, 2),
+            (0, 3, 7), (0, 7, 4),
+        ]
+
+        ase_ffi.alloc_object(ase_obj, len(verts), 0, len(faces), 0, 0)
+        export_name = self._clean_blender_duplicate_suffix(obj.name)
+        ase_obj.name = self.fixup_name(export_name).encode('utf-8')[:63]
+        ase_obj.parent_name = b""
+        ase_obj.node_id = -1
+        ase_obj.material_ref = -1
+        ase_obj.skinned = 0
+        self._set_object_tm(ase_obj, obj.matrix_world)
+
+        origin = obj.matrix_world.translation
+        for i, vert in enumerate(verts):
+            ase_obj.verts[i * 3] = (origin.x + vert[0]) * self.scale
+            ase_obj.verts[i * 3 + 1] = (origin.y + vert[1]) * self.scale
+            ase_obj.verts[i * 3 + 2] = (origin.z + vert[2]) * self.scale
+
+        for i, (a, b, c) in enumerate(faces):
+            face = ase_obj.faces[i]
+            face.vert[0], face.vert[1], face.vert[2] = a, b, c
+            face.smoothing_mask = 0
+            face.material_id = 0
+            face.edge_visibility[0] = 1
+            face.edge_visibility[1] = 1
+            face.edge_visibility[2] = 1
 
     # -------------------------------------------------------------------
     # Bone object population
