@@ -22,6 +22,7 @@ Pre-built binaries are available on the [Releases](../../releases) page:
 
 - **`onimport.exe`**: standalone Windows importer. Use this to convert models to `.blend`, `.ase`, `.max`, and NovaLogic-compatible project files for tools like OED.
 - **`opennova_blender.zip`**: Blender 5.x addon with pre-built native libraries for Windows and Linux.
+- **`opennova_max-v<version>.mzp`**: 3ds Max plugin installer that adds NovaLogic ASE export.
 - **`opennova-modtools-windows.zip`**: standalone OpenNova Editor (ONED) for Windows. The open source NILE.
 - **`opennova-runtime-windows.zip`**: "game" runtime.
 
@@ -41,27 +42,17 @@ Imported scenes include meshes, materials, textures, LODs, skeletal armatures, c
 
 Requires Python 3.11, uv, bpy 5.0.0, and PySide6. Build the shared library (see [Building](#building)) and copy `build/Release/opennova.dll` into `blender/lib/windows-x64/`, then `uv sync && uv run onimport`.
 
-## Blender Addon
+## DCC ASE Export Plugins
 
-A Blender 5.x addon for the export side of the asset pipeline. Install via the zip from [Releases](../../releases) or point Blender at the `blender/` directory for development.
-
-### ASE Export
+Blender and 3ds Max both expose the same author-facing export target:
 
 `File > Export > Novalogic ASE (.ase)`
 
+Install the Blender 5.x addon via the zip from [Releases](../../releases) or point Blender at the `blender/` directory for development. Install the 3ds Max plugin by running the MZP from [Releases](../../releases); it copies an Autodesk ApplicationPlugins bundle under your user profile.
+
+### ASE Export
+
 Exports the current scene to NovaLogic's ASCII Scene Export format. Supports multi-LOD scenes, bone weights for skinned models, vertex normals, texture coordinates, and diffuse texture export as TGA. Configurable float precision and scale.
-
-### Animation Export
-
-`File > Export > Novalogic Anims (.adm + .bad)`
-
-Exports armature NLA actions to NovaLogic's BAD (bone animation data) and ADM (animation definition) formats. Select which clips to include and configure per-clip flags: loop, root translation, and reset pose. Each clip writes a `.bad` file; the combined `.adm` maps action names to clips.
-
-### Mixamo FBX Import
-
-`File > Import > Mixamo FBX for Novalogic (.fbx)`
-
-Imports Mixamo FBX animations and retargets them onto a NovaLogic skeleton. Strips the `mixamorig:` prefix, optionally creates a root motion bone, and pushes each animation as an NLA strip ready for export.
 
 ## OpenNova Editor (ONED)
 

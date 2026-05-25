@@ -290,11 +290,11 @@ class TestImportRunner:
         from apps.importer.import_runner import run_loose_import
 
         fake_ir = object()
-        threedi_module = types.ModuleType("blender.opennova.threedi_ffi")
+        threedi_module = types.ModuleType("pyopennova.threedi_ffi")
         threedi_module.read_model_ir = Mock(return_value=fake_ir)
         threedi_module.free_model_ir = Mock()
 
-        asset_module = types.ModuleType("blender.opennova.asset_resolver")
+        asset_module = types.ModuleType("pyopennova.asset_resolver")
 
         class FakeResolver:
             def __init__(self, _base_dir: str) -> None:
@@ -314,8 +314,8 @@ class TestImportRunner:
         scene_module.BlenderSceneBuilder = Mock(return_value=builder)
 
         modules = {
-            "blender.opennova.threedi_ffi": threedi_module,
-            "blender.opennova.asset_resolver": asset_module,
+            "pyopennova.threedi_ffi": threedi_module,
+            "pyopennova.asset_resolver": asset_module,
             "apps.importer.scene_builder": scene_module,
         }
         with patch.dict(sys.modules, modules):

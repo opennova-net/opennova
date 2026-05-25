@@ -1,4 +1,4 @@
-"""Thin wrapper over Blender-side importer modules for headless use.
+"""Thin wrapper over Blender scene construction modules for headless use.
 
 Uses a stub `blender` package so we can import individual submodules without
 executing blender/__init__.py (which registers Blender operators and would fail
@@ -86,12 +86,12 @@ def _import_basic_model(
 ) -> bool:
     """Import a single weapon/item via the C IR pipeline and write selected outputs."""
     from pathlib import Path
-    from blender.opennova.definitions import (  # type: ignore[import]
+    from pyopennova.definitions import (
         process_def_files, ensure_extension, build_animation_context,
     )
-    from blender.opennova.threedi_ffi import read_model_ir, free_model_ir  # type: ignore[import]
-    from blender.opennova.bad_ffi import parse_bad, free_bad  # type: ignore[import]
-    from blender.opennova.asset_resolver import AssetResolver  # type: ignore[import]
+    from pyopennova.threedi_ffi import read_model_ir, free_model_ir
+    from pyopennova.bad_ffi import parse_bad, free_bad
+    from pyopennova.asset_resolver import AssetResolver
     from .scene_builder import BlenderSceneBuilder
 
     with AssetResolver(base_dir) as resolver:
@@ -249,7 +249,7 @@ def run_import(
 
 def _write_3dp_from_ir(ir, tdp_path: str) -> None:
     """Write .3dp and .3da project files from the C IR using the native tdp library."""
-    from blender.opennova.tdp_ffi import tdp_from_ir, write_tdp, write_3da, free_tdp  # type: ignore[import]
+    from pyopennova.tdp_ffi import tdp_from_ir, write_tdp, write_3da, free_tdp
     proj = tdp_from_ir(ir)
     try:
         write_tdp(tdp_path, proj)
@@ -284,8 +284,8 @@ def run_loose_import(
     _setup_blender_package()
 
     from pathlib import Path
-    from blender.opennova.threedi_ffi import read_model_ir, free_model_ir  # type: ignore[import]
-    from blender.opennova.asset_resolver import AssetResolver  # type: ignore[import]
+    from pyopennova.threedi_ffi import read_model_ir, free_model_ir
+    from pyopennova.asset_resolver import AssetResolver
     from .scene_builder import BlenderSceneBuilder
 
     os.makedirs(output_dir, exist_ok=True)
@@ -351,11 +351,11 @@ def resolve_definition_output_stem(base_dir: str, item_name: str, item_type: str
     _setup_blender_package()
 
     from pathlib import Path
-    from blender.opennova.definitions import (  # type: ignore[import]
+    from pyopennova.definitions import (
         ensure_extension,
         process_def_files,
     )
-    from blender.opennova.asset_resolver import AssetResolver  # type: ignore[import]
+    from pyopennova.asset_resolver import AssetResolver
 
     with AssetResolver(base_dir) as resolver:
         weapons, item_defs = process_def_files(resolver)
@@ -385,8 +385,8 @@ def scan_directory_result(base_dir: str) -> ScanResult:
     if not Path(base_dir).is_dir():
         return ScanResult(ok=False, error="Game directory does not exist.")
 
-    from blender.opennova import definitions as defs  # type: ignore[import]
-    from blender.opennova import asset_resolver as ar  # type: ignore[import]
+    from pyopennova import asset_resolver as ar
+    from pyopennova import definitions as defs
 
     items: list[ScanItem] = []
     try:

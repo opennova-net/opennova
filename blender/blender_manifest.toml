@@ -3,11 +3,11 @@ schema_version = "1.0.0"
 id = "opennova_blender"
 version = "0.0.3"
 name = "OpenNova Blender Addon"
-tagline = "Export Novalogic ASE files and animations; import Mixamo FBX for animation workflow"
+tagline = "Export Novalogic ASE files"
 maintainer = "Taylor Finnell <noreply@anthropic.com>"
 type = "add-on"
 
-tags = ["Import-Export", "3D View", "Animation"]
+tags = ["Import-Export"]
 
 blender_version_min = "5.0.0"
 license = ["SPDX:GPL-2.0-or-later"]
@@ -17,4 +17,4 @@ platforms = ["windows-x64", "linux-x64"]
 wheels = []
 
 [permissions]
-files = "Import/export 3DI and ASE files"
+files = "Export Novalogic ASE files"

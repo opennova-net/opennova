@@ -27,7 +27,9 @@ def test_max_file_export_menu_registers_ase_only() -> None:
     assert "OpenNovaImporter" not in menu_script
     assert 'menuMan.createActionItem "OpenNovaExportAse" "OpenNova"' in menu_script
     assert 'aseItem.setTitle "Novalogic ASE (.ase)"' in menu_script
-    assert "OpenNovaExportMenu" in menu_script
+    assert "exportMenu.addItem aseItem -1" in menu_script
+    assert "OpenNovaExportMenu" not in menu_script
+    assert 'createSubMenuItem "OpenNova"' not in menu_script
     assert "Novalogic Anims" not in menu_script
 
 

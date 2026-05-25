@@ -25,13 +25,9 @@ try (
         mainMenu.addItem exportMenuItem -1
     )
 
-    local openNovaMenu = menuMan.createMenu "OpenNovaExportMenu"
     local aseItem = menuMan.createActionItem "OpenNovaExportAse" "OpenNova"
     aseItem.setTitle "Novalogic ASE (.ase)"
-    openNovaMenu.addItem aseItem -1
-
-    local openNovaItem = menuMan.createSubMenuItem "OpenNova" openNovaMenu
-    exportMenu.addItem openNovaItem -1
+    exportMenu.addItem aseItem -1
     menuMan.updateMenuBar()
 ) catch (
     format "OpenNova export menu registration failed: %\n" (getCurrentException())
