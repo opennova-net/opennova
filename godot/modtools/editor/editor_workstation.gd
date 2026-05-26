@@ -3,17 +3,19 @@ extends Control
 
 const TerrainWorkspaceAdapter = preload("res://modtools/editor/terrain_workspace.gd")
 const EnvironmentWorkspaceAdapter = preload("res://modtools/editor/environment_workspace.gd")
+const ObjectWorkspaceAdapter = preload("res://modtools/object/object_workspace.gd")
 const MissionWorkspaceAdapter = preload("res://modtools/editor/mission_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
+const VegAssets = preload("res://engine/terrain/veg_assets.gd")
 
-enum Workspace { TERRAIN, ENVIRONMENT, MISSION }
+enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION }
 
 const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const RESOURCE_STATE_SECTION := "resources"
 const RESOURCE_DIR_KEY := "resource_dir"
 const RESOURCE_RECURSIVE_KEY := "resource_recursive"
 
-const SELECTABLE_WORKSPACES := [Workspace.TERRAIN, Workspace.MISSION]
+const SELECTABLE_WORKSPACES := [Workspace.TERRAIN, Workspace.OBJECT, Workspace.MISSION]
 
 enum PromptKind { NONE, UNSAVED, EXPORT, CDEP }
 
@@ -196,6 +198,7 @@ func _process(_delta: float) -> void:
 func _ensure_workspaces() -> void:
 	if _workspaces.is_empty():
 		_workspaces[Workspace.TERRAIN] = TerrainWorkspaceAdapter.new(editor)
+		_workspaces[Workspace.OBJECT] = ObjectWorkspaceAdapter.new()
 		_workspaces[Workspace.MISSION] = MissionWorkspaceAdapter.new(editor)
 	if _environment_workspace == null:
 		var environment_editor: Variant = editor.get_environment_editor() if editor != null and editor.has_method("get_environment_editor") else null
@@ -322,6 +325,8 @@ func _workspace_tooltip(workspace_id: int) -> String:
 			return "Edit terrain sculpting, paint, foliage, tiles, and layout."
 		Workspace.ENVIRONMENT:
 			return "Edit .env weather, lighting, atmosphere, and time of day."
+		Workspace.OBJECT:
+			return "Edit object projects, materials, LODs, lights, and 3DI export."
 		Workspace.MISSION:
 			return "Reserved for mission entities, objectives, and triggers."
 		_:
@@ -809,8 +814,10 @@ func _set_resource_root_dir(path: String, persist: bool, scan: bool) -> Error:
 		_save_resource_state()
 	if _resource_root_dir.is_empty():
 		_resource_index.clear()
+		VegAssets.set_search_roots([])
 		_sync_settings_popup_state()
 		return OK
+	VegAssets.set_search_roots([_resource_root_dir])
 	if scan:
 		return _scan_resource_root(true)
 	if previous != _resource_root_dir:
@@ -1065,8 +1072,8 @@ func _resource_browser_kind_label() -> String:
 			return "environment"
 		"mission":
 			return "mission"
-		"model":
-			return "model"
+		"object", "object_project", "object_model", "object_scene":
+			return "object"
 		_:
 			return "resource"
 

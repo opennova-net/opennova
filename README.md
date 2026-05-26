@@ -36,7 +36,7 @@ Each import can write one or more selected output files:
 - `.blend` - Blender project with the full scene hierarchy
 - `.ase` - 3DS Max ASCII Scene Export
 - `.max` - 3ds Max scene, when the external Max backend is available
-- `.3dp` / `.3da` - Project metadata for round-trip editing
+- `.3dp` - Object project metadata for round-trip editing
 
 Imported scenes include meshes, materials, textures, LODs, skeletal armatures, collision volumes, occlusion geometry, lights, and user points.
 
@@ -86,7 +86,7 @@ Modular libraries for parsing and writing NovaLogic formats. All expose a C API 
 |---------|--------|-------------|
 | **threedi** | `.3di` | 3D models: geometry, materials, part animations, collision, occlusion. GP and 3DI3 formats. |
 | **ase** | `.ase` | ASCII Scene Export: read/write 3DS Max scene files. |
-| **tdp** | `.3dp`/`.3da` | Project files: material definitions, LOD settings, part animation metadata. |
+| **tdp** | `.3dp` | Project files: material definitions, LOD settings, part animation metadata. |
 | **bad** | `.bad` | Skeletal animation: bone hierarchies, quaternion keyframes, events. |
 | **adm** | `.adm` | Animation definitions: key/value metadata mapping actions to BAD files. |
 | **def** | `.def` | Game definitions: weapons, items, ammo, HUD configuration. |

@@ -77,27 +77,27 @@ typedef struct ThreediGpMaterialTransform {
 
 typedef struct ThreediGpMaterial {
     char texture_name[17];      // 0x00: Null-terminated (16 bytes on disk)
-    uint32_t render_attributes; // 0x10: 3DA: render_attributes
-    uint32_t physical_attributes; // 0x14: 3DA: physical_attributes (usually zero)
-    uint32_t use_alpha_pcx;     // 0x18: 3DA: use_alpha_pcx (usually zero)
-    uint32_t color_rgb[3];      // 0x1C: 3DA: color_rgb[0]=color_green (rgbgen start R,G,B)
+    uint32_t render_attributes; // 0x10: legacy render attributes
+    uint32_t physical_attributes; // 0x14: legacy physical attributes (usually zero)
+    uint32_t use_alpha_pcx;     // 0x18: legacy alpha PCX flag (usually zero)
+    uint32_t color_rgb[3];      // 0x1C: legacy color_rgb[0]=color_green (rgbgen start R,G,B)
                                 //        color_rgb[1]=color_alpha (rgbgen end R,G,B)
                                 //        color_rgb[2]=color_type (material color mode enum)
-    uint32_t render_lookup;     // 0x28: 3DA: poly152_index — material lookup table index
-    uint32_t luminosity;        // 0x2C: 3DA: luminosity
-    uint32_t specular_intensity; // 0x30: 3DA: specular_intensity
-    uint32_t specular_sharpness; // 0x34: 3DA: specular_sharpness (usually zero)
-    uint32_t shader_flags;      // 0x38: 3DA: shader_type — shader mode enum
+    uint32_t render_lookup;     // 0x28: legacy poly152_index — material lookup table index
+    uint32_t luminosity;        // 0x2C: legacy luminosity
+    uint32_t specular_intensity; // 0x30: legacy specular intensity
+    uint32_t specular_sharpness; // 0x34: legacy specular sharpness (usually zero)
+    uint32_t shader_flags;      // 0x38: legacy shader_type — shader mode enum
     uint32_t tex_addressing_mode; // 0x3C: Texture addressing mode
-    uint32_t reserved_40;       // 0x40: 3DA: u_offset (always zero on disk)
-    uint32_t reserved_44;       // 0x44: 3DA: v_offset (always zero on disk)
-    float u_tiling;             // 0x48: 3DA: u_tiling
-    float v_tiling;             // 0x4C: 3DA: v_tiling
-    ThreediGpMaterialTransform mapfunc_u;  // 0x50: 3DA: mapfunc_u (style/param/rate/start/end)
-    ThreediGpMaterialTransform mapfunc_v;  // 0x58: 3DA: mapfunc_v
-    ThreediGpMaterialTransform rgbgen;     // 0x60: 3DA: rgbgen
-    uint32_t emissive_color;    // 0x68: 3DA: transparency — emissive/transparency value
-    ThreediGpMaterialTransform alphagen;   // 0x6C: 3DA: alphagen
+    uint32_t reserved_40;       // 0x40: legacy u_offset (always zero on disk)
+    uint32_t reserved_44;       // 0x44: legacy v_offset (always zero on disk)
+    float u_tiling;             // 0x48: legacy u_tiling
+    float v_tiling;             // 0x4C: legacy v_tiling
+    ThreediGpMaterialTransform mapfunc_u;  // 0x50: legacy mapfunc_u (style/param/rate/start/end)
+    ThreediGpMaterialTransform mapfunc_v;  // 0x58: legacy mapfunc_v
+    ThreediGpMaterialTransform rgbgen;     // 0x60: legacy rgbgen
+    uint32_t emissive_color;    // 0x68: legacy transparency — emissive/transparency value
+    ThreediGpMaterialTransform alphagen;   // 0x6C: legacy alphagen
     // 0x74: 9 x u32 = 36 bytes, from IDA (0x421120). All zero in on-disk corpus.
     uint32_t runtime_ptr;       // 0x74: Runtime pointer (always 0 on disk)
     float reflect_r;            // 0x78: Reflection color red
@@ -223,7 +223,7 @@ typedef struct ThreediGpPartAnimation {
     ThreediGpAnimTransform rot_y;
     ThreediGpAnimTransform rot_z;
     ThreediGpAnimTransform translate;
-    // 3DA: rotate_type, scale_type, transform_as, yaw_rate, pitch_rate, roll_rate
+    // Legacy animation controls: rotate_type, scale_type, transform_as, yaw_rate, pitch_rate, roll_rate
     uint32_t rotate_type;       // Rotation interpolation type
     uint32_t scale_type;        // Scale interpolation type
     uint32_t transform_as;      // Transform mode

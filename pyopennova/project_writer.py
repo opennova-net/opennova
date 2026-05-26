@@ -14,8 +14,7 @@ def derive_poly_collision_lod(ir) -> int:
     is recoverable: OED's ``WriteCDTA @ 0x456050`` (in ModSuperOed.exe.i64)
     accumulates ``lod->subobjects[i].vertCount`` across the LOD selected by
     ``g_ActiveLod``, which is set from the .3dp's ``poly_collision_lod``
-    field (parsed at ``ImportWorkspace_Parse3daToken @ 0x408cf0`` /
-    ``0x408f53``). So the LOD whose vertex count equals
+    field (imported by the original OED workspace parser). So the LOD whose vertex count equals
     ``CDTA.CMDL`` counts identify the collision LOD.
 
     Heuristic:
@@ -94,8 +93,8 @@ def write_3dp_from_3di3(
     ir,
     tdp_path: str,
     collision_lod_index: int | None = None,
-) -> tuple[str, str]:
-    """Write sibling ``.3dp`` and ``.3da`` project files from a 3DI3 model.
+) -> tuple[str]:
+    """Write a ``.3dp`` object workspace project file from a 3DI3 model.
 
     ``collision_lod_index`` is an existing referenced LOD that supplies
     poly-collision geometry. Passing ``None`` triggers
@@ -107,7 +106,6 @@ def write_3dp_from_3di3(
         TDP_MAX_LODS,
         free_tdp,
         tdp_from_3di3,
-        write_3da,
         write_tdp,
     )
 
@@ -132,11 +130,8 @@ def write_3dp_from_3di3(
             proj.poly_collision_lod = lod_idx
 
         write_tdp(tdp_path, proj)
-        tda_path = os.path.splitext(tdp_path)[0] + ".3da"
-        write_3da(tda_path, proj)
     finally:
         free_tdp(proj)
 
     log.info("Wrote 3DP: %s", tdp_path)
-    log.info("Wrote 3DA: %s", tda_path)
-    return tdp_path, tda_path
+    return (tdp_path,)

@@ -80,6 +80,33 @@ target_link_libraries(resource_index_test PRIVATE opennova_resource_index)
 target_include_directories(resource_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index COMMAND resource_index_test)
 
+# OED object workspace/export tests
+add_executable(oed_build_model_test oed/build_model_test.cpp)
+target_link_libraries(oed_build_model_test PRIVATE opennova_oed opennova_threedi opennova_tdp opennova_ase)
+target_include_directories(oed_build_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME oed_build_model COMMAND oed_build_model_test)
+
+add_executable(oed_export_3di_test oed/export_3di_test.cpp)
+target_link_libraries(oed_export_3di_test PRIVATE opennova_oed opennova_threedi opennova_tdp opennova_ase)
+target_include_directories(oed_export_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME oed_export_3di COMMAND oed_export_3di_test)
+
+add_executable(oed_error_test oed/error_test.cpp)
+target_link_libraries(oed_error_test PRIVATE opennova_oed opennova_threedi opennova_tdp opennova_ase)
+target_include_directories(oed_error_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME oed_error COMMAND oed_error_test)
+
+# Object renderer/shader tests
+foreach(test light_runtime material_classify material_eval)
+    add_executable(renderer_${test}_test renderer/${test}_test.cpp)
+    target_link_libraries(renderer_${test}_test PRIVATE opennova_renderer opennova_threedi)
+    target_include_directories(renderer_${test}_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/libs/oed/include)
+    target_compile_features(renderer_${test}_test PRIVATE cxx_std_17)
+    add_test(NAME renderer_${test} COMMAND renderer_${test}_test)
+endforeach()
+
 # ASE tests
 add_executable(ase_smoke_test ase/ase_smoke_test.cpp)
 target_link_libraries(ase_smoke_test PRIVATE opennova_ase)
@@ -106,11 +133,6 @@ add_executable(tdp_from_3di_test tdp/tdp_from_3di_test.cpp)
 target_link_libraries(tdp_from_3di_test PRIVATE opennova_tdp opennova_threedi)
 target_include_directories(tdp_from_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tdp_from_3di COMMAND tdp_from_3di_test)
-
-add_executable(tdp_3da_write_test tdp/tdp_3da_write_test.cpp)
-target_link_libraries(tdp_3da_write_test PRIVATE opennova_tdp)
-target_include_directories(tdp_3da_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME tdp_3da_write COMMAND tdp_3da_write_test)
 
 # Terrain format library tests
 add_executable(pcx_roundtrip_test pcx/pcx_roundtrip_test.cpp)

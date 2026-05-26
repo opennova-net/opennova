@@ -4,6 +4,18 @@ extends RefCounted
 const SharedVegAssets := preload("res://engine/terrain/veg_assets.gd")
 
 
+static func set_search_roots(roots: Array) -> void:
+	SharedVegAssets.set_search_roots(roots)
+
+
+static func get_search_roots() -> Array:
+	return SharedVegAssets.get_search_roots()
+
+
+static func clear_cache() -> void:
+	SharedVegAssets.clear_cache()
+
+
 static func list_graphics(force_refresh: bool = false) -> Array:
 	return SharedVegAssets.list_graphics(force_refresh)
 

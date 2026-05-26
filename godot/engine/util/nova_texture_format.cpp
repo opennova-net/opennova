@@ -7,6 +7,18 @@
 
 using namespace godot;
 
+namespace {
+
+bool bytes_look_like_dds(const PackedByteArray &bytes) {
+	return bytes.size() >= 4 &&
+			bytes[0] == 'D' &&
+			bytes[1] == 'D' &&
+			bytes[2] == 'S' &&
+			bytes[3] == ' ';
+}
+
+} // namespace
+
 PackedStringArray ResourceFormatLoaderNovaTexture::_get_recognized_extensions() const {
 	PackedStringArray exts;
 	exts.push_back("tga");
@@ -44,8 +56,14 @@ Variant ResourceFormatLoaderNovaTexture::_load(const String &p_path, const Strin
 
 	if (ext == "pcx") {
 		img = opennova::decode_pcx_image(bytes.ptr(), bytes.size());
+	} else if (ext == "dds" && bytes_look_like_dds(bytes)) {
+		img.instantiate();
+		if (img->load(p_path) != OK)
+			return Variant();
 	} else {
 		// .tga, .dds, .mdt — all TGA format in NovaLogic assets
+		if (bytes.size() < 18)
+			return Variant();
 		img.instantiate();
 		if (img->load_tga_from_buffer(bytes) != OK)
 			return Variant();

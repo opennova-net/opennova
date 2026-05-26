@@ -62,7 +62,7 @@ def _add_import_options(parser: argparse.ArgumentParser, *, include_def_only: bo
     parser.add_argument("--no-blend", dest="write_blend", action="store_false",
                         help="Do not write .blend scene files")
     parser.add_argument("--no-3dp", dest="write_3dp", action="store_false",
-                        help="Do not write .3dp/.3da project files")
+                        help="Do not write .3dp object workspace files")
     parser.add_argument("--no-ase", dest="write_ase", action="store_false",
                         help="Do not write .ase files")
     parser.add_argument("--max", dest="write_max", action="store_true",

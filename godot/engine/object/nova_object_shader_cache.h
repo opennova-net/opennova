@@ -1,0 +1,42 @@
+#pragma once
+
+// Godot wrapper around libs/renderer shader classification and composition.
+
+#include <godot_cpp/classes/object.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/variant/string.hpp>
+
+#include <cstdint>
+#include <unordered_map>
+
+namespace godot {
+
+class NovaObjectShaderCache : public Object {
+	GDCLASS(NovaObjectShaderCache, Object)
+
+public:
+	static NovaObjectShaderCache *get_singleton();
+
+	NovaObjectShaderCache();
+	~NovaObjectShaderCache();
+
+	Ref<Shader> get_shader_for_key(int32_t key);
+
+	int32_t classify(const String &shader_tag,
+			int32_t material_flags,
+			int32_t emissive_type,
+			int32_t is_glass_flag,
+			int32_t alpha_test_byte);
+
+	int32_t family_for_key(int32_t key) const;
+	void clear();
+
+protected:
+	static void _bind_methods();
+
+private:
+	static NovaObjectShaderCache *singleton;
+	std::unordered_map<uint32_t, Ref<Shader>> cache;
+};
+
+} // namespace godot

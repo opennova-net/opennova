@@ -40,8 +40,14 @@ std::string kind_for_extension(const fs::path &path) {
 	if (extension == ".env") {
 		return "environment";
 	}
-	if (extension == ".glb") {
-		return "model";
+	if (extension == ".3dp") {
+		return "object_project";
+	}
+	if (extension == ".3di") {
+		return "object_model";
+	}
+	if (extension == ".ase") {
+		return "object_scene";
 	}
 	return "";
 }
@@ -60,10 +66,20 @@ std::string normalize_kind(const std::string &kind) {
 	if (key == "env") {
 		return "environment";
 	}
-	if (key == "glb" || key == "packed_scene" || key == "scene") {
-		return "model";
+	if (key == "3dp" || key == "tdp" || key == "object_workspace") {
+		return "object_project";
+	}
+	if (key == "3di") {
+		return "object_model";
+	}
+	if (key == "ase" || key == "scene") {
+		return "object_scene";
 	}
 	return key;
+}
+
+bool is_object_kind(const std::string &kind) {
+	return kind == "object_project" || kind == "object_model" || kind == "object_scene";
 }
 
 std::string display_name_from_path(const fs::path &path) {
@@ -167,7 +183,7 @@ std::vector<ResourceFileEntry> ResourceIndex::resource_files(const std::string &
 	}
 	std::vector<ResourceFileEntry> out;
 	for (const ResourceFileEntry &entry : impl_->files) {
-		if (entry.kind == filter) {
+		if (entry.kind == filter || (filter == "object" && is_object_kind(entry.kind))) {
 			out.push_back(entry);
 		}
 	}

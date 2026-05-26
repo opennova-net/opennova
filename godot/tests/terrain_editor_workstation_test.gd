@@ -49,11 +49,14 @@ func _make_resource_fixture(name: String) -> String:
 	DirAccess.make_dir_recursive_absolute(root.path_join("terrains"))
 	DirAccess.make_dir_recursive_absolute(root.path_join("env"))
 	DirAccess.make_dir_recursive_absolute(root.path_join("models"))
+	DirAccess.make_dir_recursive_absolute(root.path_join("objects"))
 	_write_fixture_file(root.path_join("missions/alpha.bms"), "bms")
 	_write_fixture_file(root.path_join("terrains/alpha.trn"), "trn")
 	_write_fixture_file(root.path_join("env/alpha.env"), "env")
 	_write_fixture_file(root.path_join("models/alpha.glb"), "glb")
-	_write_fixture_file(root.path_join("models/ignored.3di"), "3di")
+	_write_fixture_file(root.path_join("objects/alpha.3dp"), "3dp")
+	_write_fixture_file(root.path_join("objects/alpha.3di"), "3di")
+	_write_fixture_file(root.path_join("objects/alpha.ase"), "ase")
 	return root
 
 
@@ -65,14 +68,15 @@ func _write_fixture_file(path: String, text: String) -> void:
 		file.close()
 
 
-func test_workstation_starts_with_two_domain_workspaces() -> void:
+func test_workstation_starts_with_object_domain_workspace() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
 	var workspace_rail: HBoxContainer = workstation.get_node("%WorkspaceRail")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Terrain should remain the default workspace.")
-	assert_eq(workspace_rail.get_child_count(), 2, "The shell should expose Terrain and Mission workspaces.")
+	assert_eq(workspace_rail.get_child_count(), 3, "The shell should expose Terrain, Object, and Mission workspaces.")
 	assert_eq((workspace_rail.get_child(0) as Button).text, "Terrain", "Terrain should be the first workspace.")
-	assert_eq((workspace_rail.get_child(1) as Button).text, "Mission", "Mission should have a reserved workspace.")
+	assert_eq((workspace_rail.get_child(1) as Button).text, "Object", "Object should replace the old standalone OED workflow.")
+	assert_eq((workspace_rail.get_child(2) as Button).text, "Mission", "Mission should have a reserved workspace.")
 
 
 func test_mission_placeholder_shows_no_document_actions() -> void:
@@ -98,7 +102,7 @@ func test_mission_placeholder_shows_no_document_actions() -> void:
 	assert_true(_has_label_text(inspector_host, "Coming soon"), "Mission should show a compact coming-soon placeholder.")
 
 
-func test_resource_index_lists_openable_resources_and_glb_models() -> void:
+func test_resource_index_lists_object_resources_without_glb_models() -> void:
 	var root := _make_resource_fixture("resource_index_godot")
 	var index := NovaResourceIndex.new()
 
@@ -106,9 +110,12 @@ func test_resource_index_lists_openable_resources_and_glb_models() -> void:
 	assert_eq(index.get_resource_files("mission").size(), 1, "BMS files should be indexed as mission resources.")
 	assert_eq(index.get_resource_files("terrain").size(), 1, "TRN files should be indexed as terrain resources.")
 	assert_eq(index.get_resource_files("environment").size(), 1, "ENV files should be indexed as environment resources.")
-	assert_eq(index.get_resource_files("model").size(), 1, "Only GLB files should be indexed as model resources.")
-	assert_eq(index.get_resource_files("all").size(), 4, "3DI files should not be indexed in this pass.")
-	assert_eq(String((index.get_resource_files("model")[0] as Dictionary).get("relative_path", "")), "models/alpha.glb", "Model entries should keep root-relative paths.")
+	assert_eq(index.get_resource_files("object_project").size(), 1, "3DP files should be indexed as object workspaces.")
+	assert_eq(index.get_resource_files("object_model").size(), 1, "3DI files should be indexed as object model resources.")
+	assert_eq(index.get_resource_files("object_scene").size(), 1, "ASE files should be indexed as importable object scenes.")
+	assert_eq(index.get_resource_files("glb").size(), 0, "GLB files should no longer be indexed.")
+	assert_eq(index.get_resource_files("all").size(), 6, "All openable resources should exclude GLB.")
+	assert_eq(String((index.get_resource_files("object_model")[0] as Dictionary).get("relative_path", "")), "objects/alpha.3di", "Object model entries should keep root-relative paths.")
 
 
 func test_settings_viewport_popup_edits_resource_directory() -> void:
