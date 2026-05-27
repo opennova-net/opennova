@@ -822,6 +822,7 @@ func test_object_lods_inspector_edits_scene_and_project_settings() -> void:
 	render_function.text_submitted.emit("clod")
 	poly_lod.value = 0
 	poly_lod.value_changed.emit(0.0)
+	await get_tree().process_frame
 
 	assert_true(workspace.object_editor.is_dirty, "Editing LOD/project settings should mark the object dirty.")
 	var lod: Dictionary = data.get_project_lods()[0]
@@ -1164,17 +1165,19 @@ func test_object_lights_inspector_populates_edits_and_exports() -> void:
 	var data: NovaObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_light_count(), 0, "Fixture should expose object lights.")
 	workspace.object_editor.mark_clean()
-	var host = add_child_autofree(Control.new())
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, host)
-	var list := _find_node_by_name(host, "ObjectLightsList") as ItemList
-	var start_color := _find_node_by_name(host, "LightStartColor") as ColorPickerButton
-	var end_color := _find_node_by_name(host, "LightEndColor") as ColorPickerButton
-	var attenuation_start := _find_node_by_name(host, "LightAttenuationStart") as SpinBox
-	var style := _find_node_by_name(host, "LightStyle") as SpinBox
-	var disable_corona := _find_node_by_name(host, "LightDisableCorona") as CheckBox
-	var disable_terrain := _find_node_by_name(host, "LightDisableTerrain") as CheckBox
-	var disable_objects := _find_node_by_name(host, "LightDisableObjects") as CheckBox
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_host)
+	var list := _find_node_by_name(list_host, "ObjectLightsList") as ItemList
+	var start_color := _find_node_by_name(detail_host, "LightStartColor") as ColorPickerButton
+	var end_color := _find_node_by_name(detail_host, "LightEndColor") as ColorPickerButton
+	var attenuation_start := _find_node_by_name(detail_host, "LightAttenuationStart") as SpinBox
+	var style := _find_node_by_name(detail_host, "LightStyle") as SpinBox
+	var disable_corona := _find_node_by_name(detail_host, "LightDisableCorona") as CheckBox
+	var disable_terrain := _find_node_by_name(detail_host, "LightDisableTerrain") as CheckBox
+	var disable_objects := _find_node_by_name(detail_host, "LightDisableObjects") as CheckBox
 	assert_not_null(list, "Light inspector should expose a stable list node.")
 	assert_not_null(start_color)
 	assert_not_null(end_color)
@@ -1186,8 +1189,6 @@ func test_object_lights_inspector_populates_edits_and_exports() -> void:
 	if list == null or start_color == null or end_color == null or attenuation_start == null or style == null or disable_corona == null or disable_terrain == null or disable_objects == null:
 		return
 
-	list.select(0)
-	list.item_selected.emit(0)
 	var original: Dictionary = data.get_light_info(0)
 	assert_true(start_color.color.is_equal_approx(original.get("color_start", Color.WHITE)))
 	assert_true(end_color.color.is_equal_approx(original.get("color_end", Color.WHITE)))
@@ -1206,6 +1207,7 @@ func test_object_lights_inspector_populates_edits_and_exports() -> void:
 	disable_terrain.toggled.emit(true)
 	disable_objects.button_pressed = true
 	disable_objects.toggled.emit(true)
+	await get_tree().process_frame
 
 	assert_true(workspace.object_editor.is_dirty, "Editing a light should mark the object dirty.")
 	var updated: Dictionary = data.get_light_info(0)
@@ -1229,20 +1231,43 @@ func test_object_lights_inspector_populates_edits_and_exports() -> void:
 	assert_true(bool(reopened_info.get("disable_lightobjects", false)))
 
 
+func test_object_lights_editor_uses_left_list_and_right_detail_dock() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_gt(workspace.object_editor.object_data.get_light_count(), 0, "Fixture should expose object lights.")
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
+
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_host)
+	var list := _find_node_by_name(list_host, "ObjectLightsList") as ItemList
+	var detail := _find_node_by_name(detail_host, "LightDetailPanel") as Control
+	assert_not_null(list, "Light left pane should expose the light list.")
+	assert_not_null(detail, "Light right dock should expose the selected light detail editor.")
+	assert_null(_find_node_by_name(list_host, "LightStartColor"), "Light color editing should move out of the left pane.")
+	assert_null(_find_node_by_name(list_host, "LightAttenuationStart"), "Light attenuation editing should move out of the left pane.")
+	assert_not_null(_find_node_by_name(detail_host, "LightStartColor"), "Light color editing should live in the right dock.")
+	assert_not_null(_find_node_by_name(detail_host, "LightAttenuationStart"), "Light attenuation editing should live in the right dock.")
+	assert_not_null(_find_node_by_name(detail_host, "LightPositiveFlags"), "Light output toggles should live in the right dock.")
+
+
 func test_object_lights_inspector_uses_positive_oed_toggles() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var data: NovaObjectData = workspace.object_editor.object_data
 	workspace.object_editor.mark_clean()
-	var host = add_child_autofree(Control.new())
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, host)
-	var list := _find_node_by_name(host, "ObjectLightsList") as ItemList
-	var flags := _find_node_by_name(host, "LightPositiveFlags") as VBoxContainer
-	var draw_corona := _find_node_by_name(host, "LightDrawCorona") as CheckBox
-	var light_terrain := _find_node_by_name(host, "LightTerrain") as CheckBox
-	var light_objects := _find_node_by_name(host, "LightObjects") as CheckBox
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_host)
+	var list := _find_node_by_name(list_host, "ObjectLightsList") as ItemList
+	var flags := _find_node_by_name(detail_host, "LightPositiveFlags") as VBoxContainer
+	var draw_corona := _find_node_by_name(detail_host, "LightDrawCorona") as CheckBox
+	var light_terrain := _find_node_by_name(detail_host, "LightTerrain") as CheckBox
+	var light_objects := _find_node_by_name(detail_host, "LightObjects") as CheckBox
 	assert_not_null(list)
 	assert_not_null(flags, "Positive OED light toggles should be stacked for the side panel.")
 	assert_not_null(draw_corona)
@@ -1251,8 +1276,6 @@ func test_object_lights_inspector_uses_positive_oed_toggles() -> void:
 	if list == null or draw_corona == null or light_terrain == null or light_objects == null:
 		return
 
-	list.select(0)
-	list.item_selected.emit(0)
 	assert_eq(draw_corona.text, "Draw corona")
 	assert_eq(light_terrain.text, "Light terrain")
 	assert_eq(light_objects.text, "Light objects")
@@ -1275,6 +1298,7 @@ func test_object_lights_inspector_uses_positive_oed_toggles() -> void:
 	light_terrain.toggled.emit(true)
 	light_objects.button_pressed = true
 	light_objects.toggled.emit(true)
+	await get_tree().process_frame
 
 	var enabled: Dictionary = data.get_light_info(0)
 	assert_false(bool(enabled.get("disable_corona", true)))
@@ -1287,16 +1311,18 @@ func test_object_materials_inspector_populates_material_slots() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var host = add_child_autofree(Control.new())
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, host)
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
 
-	assert_not_null(_find_node_by_name(host, "MaterialsList"), "Materials inspector should expose the material list.")
-	assert_not_null(_find_node_by_name(host, "ShaderTagOption"), "Materials inspector should expose shader tag selection.")
-	var slot1_name := _find_node_by_name(host, "TextureSlot1Name") as LineEdit
-	var slot1_status := _find_node_by_name(host, "TextureSlot1Status") as Label
-	var slot2_name := _find_node_by_name(host, "TextureSlot2Name") as LineEdit
-	var slot2_status := _find_node_by_name(host, "TextureSlot2Status") as Label
+	assert_not_null(_find_node_by_name(list_host, "MaterialsList"), "Materials inspector should expose the material list.")
+	assert_not_null(_find_node_by_name(detail_host, "ShaderTagOption"), "Materials inspector should expose shader tag selection.")
+	var slot1_name := _find_node_by_name(detail_host, "TextureSlot1Name") as LineEdit
+	var slot1_status := _find_node_by_name(detail_host, "TextureSlot1Status") as Label
+	var slot2_name := _find_node_by_name(detail_host, "TextureSlot2Name") as LineEdit
+	var slot2_status := _find_node_by_name(detail_host, "TextureSlot2Status") as Label
 	assert_not_null(slot1_name)
 	assert_not_null(slot1_status)
 	assert_not_null(slot2_name)
@@ -1306,22 +1332,49 @@ func test_object_materials_inspector_populates_material_slots() -> void:
 	assert_string_contains(slot1_status.text.to_lower(), "karm1_o.tga")
 	assert_eq(slot2_name.text, "KRE_1_O.tga", "Slot 2 should show the detail texture name from the 3DI.")
 	assert_string_contains(slot2_status.text, "Resolved")
-	assert_not_null(_find_node_by_name(host, "TextureAnimationSection"), "Materials inspector should expose texture animation controls.")
+	assert_not_null(_find_node_by_name(detail_host, "TextureAnimationSection"), "Materials inspector should expose texture animation controls.")
+
+
+func test_object_materials_editor_uses_left_list_and_right_detail_dock() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
+
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+	var list := _find_node_by_name(list_host, "MaterialsList") as ItemList
+	var copy_button := _find_node_by_name(list_host, "MaterialCopyButton") as Button
+	var paste_button := _find_node_by_name(list_host, "MaterialPasteButton") as Button
+	var detail := _find_node_by_name(detail_host, "MaterialDetailPanel") as Control
+	assert_not_null(list, "Materials left pane should expose the material list.")
+	assert_not_null(copy_button, "Materials left pane should expose Copy.")
+	assert_not_null(paste_button, "Materials left pane should expose Paste.")
+	assert_not_null(detail, "Materials right dock should expose the selected material detail editor.")
+	assert_null(_find_node_by_name(list_host, "ShaderTagPicker"), "Shader editing should move out of the left pane.")
+	assert_null(_find_node_by_name(list_host, "TextureSlot1Widget"), "Texture slot editing should move out of the left pane.")
+	assert_not_null(_find_node_by_name(detail_host, "ShaderTagPicker"), "Shader editing should live in the right dock.")
+	assert_not_null(_find_node_by_name(detail_host, "TextureSlot1Widget"), "Texture slot editing should live in the right dock.")
+	assert_not_null(_find_node_by_name(detail_host, "TextureAnimationSection"), "Texture animation controls should live in the right dock.")
 
 
 func test_object_materials_inspector_edits_texture_slot_and_marks_dirty() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var host = add_child_autofree(Control.new())
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, host)
-	var slot1_name := _find_node_by_name(host, "TextureSlot1Name") as LineEdit
-	var slot1_status := _find_node_by_name(host, "TextureSlot1Status") as Label
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+	var slot1_name := _find_node_by_name(detail_host, "TextureSlot1Name") as LineEdit
+	var slot1_status := _find_node_by_name(detail_host, "TextureSlot1Status") as Label
 	assert_not_null(slot1_name)
 	assert_not_null(slot1_status)
 
 	slot1_name.text = "KArm1_O.TGA"
 	slot1_name.text_submitted.emit("KArm1_O.TGA")
+	await get_tree().process_frame
 
 	assert_true(workspace.object_editor.is_dirty, "Editing a material texture slot should mark the object dirty.")
 	var material: Dictionary = workspace.object_editor.object_data.get_materials()[0]
@@ -1335,12 +1388,14 @@ func test_object_materials_inspector_gates_slots_from_shader_flags() -> void:
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_eq(workspace.object_editor.object_data.set_material_shader(0, "FF_ST_OP"), OK)
-	var host = add_child_autofree(Control.new())
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, host)
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
 
-	var slot2_name := _find_node_by_name(host, "TextureSlot2Name") as LineEdit
-	var slot2_status := _find_node_by_name(host, "TextureSlot2Status") as Label
+	var slot2_name := _find_node_by_name(detail_host, "TextureSlot2Name") as LineEdit
+	var slot2_status := _find_node_by_name(detail_host, "TextureSlot2Status") as Label
 	assert_not_null(slot2_name)
 	assert_not_null(slot2_status)
 	assert_false(slot2_name.editable, "Detail slot should be disabled when the shader does not support a secondary texture.")
@@ -1352,16 +1407,19 @@ func test_object_materials_inspector_edits_uv_generators() -> void:
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_eq(workspace.object_editor.object_data.set_material_shader(0, "FF_ST_OP#UV"), OK)
-	var host = add_child_autofree(Control.new())
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, host)
-	var u_section := _find_node_by_name(host, "UGeneratorSection") as Control
-	var u_style := _find_node_by_name(host, "UGeneratorStyle") as SpinBox
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+	var u_section := _find_node_by_name(detail_host, "UGeneratorSection") as Control
+	var u_style := _find_node_by_name(detail_host, "UGeneratorStyle") as SpinBox
 	assert_not_null(u_section)
 	assert_not_null(u_style)
 	assert_true(u_section.visible, "UV generator controls should be visible for #UV shaders.")
 
 	u_style.value = 2
 	u_style.value_changed.emit(2.0)
+	await get_tree().process_frame
 
 	assert_true(workspace.object_editor.is_dirty, "Editing a generator should mark the object dirty.")
 	var material: Dictionary = workspace.object_editor.object_data.get_materials()[0]
@@ -1375,20 +1433,24 @@ func test_object_materials_inspector_uses_compact_layout_and_named_generator_con
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_eq(workspace.object_editor.object_data.set_material_shader(0, "FF_ST_OP#UV"), OK)
 	workspace.object_editor.mark_clean()
-	var host = add_child_autofree(Control.new())
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, host)
-	var list_panel := _find_node_by_name(host, "MaterialListPanel") as Control
-	var detail := _find_node_by_name(host, "MaterialDetailPanel") as Control
-	var shader_picker := _find_node_by_name(host, "ShaderTagPicker") as OptionButton
-	var slot1_clear := _find_node_by_name(host, "TextureSlot1Clear") as Button
-	var slot1_options := _find_node_by_name(host, "TextureSlot1OptionsRow") as Control
-	var u_style := _find_node_by_name(host, "UGeneratorStyleOption") as OptionButton
-	var u_reg := _find_node_by_name(host, "UGeneratorControlReg") as OptionButton
-	assert_null(_find_node_by_name(host, "MaterialInspectorSplit"), "Materials inspector should not use a horizontal split inside the side panel.")
-	assert_null(_find_node_by_name(host, "MaterialDetailScroll"), "Materials inspector should rely on the side panel's existing scroll area.")
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+	var list_panel := _find_node_by_name(list_host, "MaterialListPanel") as Control
+	var detail := _find_node_by_name(detail_host, "MaterialDetailPanel") as Control
+	var shader_picker := _find_node_by_name(detail_host, "ShaderTagPicker") as OptionButton
+	var slot1_clear := _find_node_by_name(detail_host, "TextureSlot1Clear") as Button
+	var slot1_options := _find_node_by_name(detail_host, "TextureSlot1OptionsRow") as Control
+	var u_style := _find_node_by_name(detail_host, "UGeneratorStyleOption") as OptionButton
+	var u_reg := _find_node_by_name(detail_host, "UGeneratorControlReg") as OptionButton
+	assert_null(_find_node_by_name(list_host, "MaterialInspectorSplit"), "Materials inspector should not use a horizontal split inside the side panel.")
+	assert_null(_find_node_by_name(detail_host, "MaterialDetailScroll"), "Materials inspector should rely on the side panel's existing scroll area.")
 	assert_not_null(list_panel, "Materials inspector should expose a compact list panel.")
 	assert_not_null(detail, "Materials inspector should expose a stable detail panel.")
+	assert_null(_find_node_by_name(list_host, "ShaderTagPicker"), "Shader editing should not live in the left list pane.")
+	assert_null(_find_node_by_name(list_host, "TextureSlot1Widget"), "Texture slots should not live in the left list pane.")
 	assert_not_null(shader_picker, "Materials inspector should use the shader tag picker.")
 	assert_not_null(slot1_clear, "Texture slot controls should expose a clear button.")
 	assert_not_null(slot1_options, "Texture slot options should be on a second compact row.")
@@ -1403,6 +1465,7 @@ func test_object_materials_inspector_uses_compact_layout_and_named_generator_con
 	assert_true(slide_index >= 0, "Generator style picker should expose OED style 16 as a named option.")
 	u_style.select(slide_index)
 	u_style.item_selected.emit(slide_index)
+	await get_tree().process_frame
 
 	var material: Dictionary = workspace.object_editor.object_data.get_materials()[0]
 	var u_params: Dictionary = material.get("u_params", {})
@@ -1415,12 +1478,14 @@ func test_object_materials_inspector_copies_and_pastes_settings() -> void:
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_material_count(), 1, "Copy/paste test needs at least two materials.")
-	var host = add_child_autofree(Control.new())
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, host)
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
 
-	var list := _find_node_by_name(host, "MaterialsList") as ItemList
-	var copy_button := _find_node_by_name(host, "MaterialCopyButton") as Button
-	var paste_button := _find_node_by_name(host, "MaterialPasteButton") as Button
+	var list := _find_node_by_name(list_host, "MaterialsList") as ItemList
+	var copy_button := _find_node_by_name(list_host, "MaterialCopyButton") as Button
+	var paste_button := _find_node_by_name(list_host, "MaterialPasteButton") as Button
 	assert_not_null(list)
 	assert_not_null(copy_button)
 	assert_not_null(paste_button)

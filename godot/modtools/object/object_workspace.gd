@@ -106,6 +106,11 @@ var _asset_dock_host: Control
 var _object_detail_dock: Control
 var _material_clipboard: Dictionary = {}
 var _export_update_mask: int = OED_UPDATE_NONE
+var _material_selected_index := 0
+var _materials_list: ItemList
+var _material_paste_button: Button
+var _light_selected_index := 0
+var _lights_list: ItemList
 var _part_anim_lod_index := 0
 var _part_anim_selected_index := 0
 var _part_anim_list: ItemList
@@ -406,8 +411,12 @@ func _sync_shell() -> void:
 		if _preview.object_data != object_editor.object_data:
 			_preview.set_object_data(object_editor.object_data)
 		_apply_environment_to_preview()
-	if _part_anim_list != null:
+	if _active_workflow_id == Workflow.PARTS and _part_anim_list != null:
 		_refresh_part_anim_list(_part_anim_selected_index, false)
+	elif _active_workflow_id == Workflow.MATERIALS and _materials_list != null:
+		_refresh_materials_left_list()
+	elif _active_workflow_id == Workflow.LIGHTS and _lights_list != null:
+		_refresh_lights_left_list()
 	elif _active_workflow_id != Workflow.PARTS:
 		_rebuild_object_detail_dock()
 	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
@@ -684,43 +693,96 @@ func _build_lods_inspector(host: Control) -> void:
 		sync.call(-1)
 
 
-func _build_materials_inspector(host: Control) -> void:
-	var box := _make_inspector_box(host)
+func _build_materials_inspector(host: Control, detail_only: bool = false) -> void:
+	var box: VBoxContainer
+	if detail_only:
+		box = host as VBoxContainer
+	else:
+		box = _make_inspector_box(host)
+	if box == null:
+		return
 	var materials := object_editor.object_data.get_materials() if object_editor and object_editor.object_data else []
 	var shader_catalog := _shader_catalog()
-
-	var list_panel := VBoxContainer.new()
-	list_panel.name = "MaterialListPanel"
-	list_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(list_panel)
 
 	var detail_box := VBoxContainer.new()
 	detail_box.name = "MaterialDetailPanel"
 	detail_box.add_theme_constant_override("separation", 8)
 	detail_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	if not detail_only:
+		_part_anim_list = null
+		_lights_list = null
+		var list_panel := VBoxContainer.new()
+		list_panel.name = "MaterialListPanel"
+		list_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		box.add_child(list_panel)
+
+		var summary := Label.new()
+		summary.name = "MaterialListSummary"
+		summary.theme_type_variation = &"Muted"
+		summary.text = "%d materials" % materials.size()
+		list_panel.add_child(summary)
+
+		var list := ItemList.new()
+		list.name = "MaterialsList"
+		list.custom_minimum_size = Vector2(0, 360)
+		list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		_refresh_materials_list(list, materials)
+		list_panel.add_child(list)
+		_materials_list = list
+
+		var material_toolbar := HBoxContainer.new()
+		material_toolbar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		list_panel.add_child(material_toolbar)
+
+		var copy_button := Button.new()
+		copy_button.name = "MaterialCopyButton"
+		copy_button.text = "Copy"
+		material_toolbar.add_child(copy_button)
+
+		var paste_button := Button.new()
+		paste_button.name = "MaterialPasteButton"
+		paste_button.text = "Paste"
+		paste_button.disabled = _material_clipboard.is_empty()
+		material_toolbar.add_child(paste_button)
+		_material_paste_button = paste_button
+
+		if materials.is_empty():
+			_material_selected_index = -1
+		else:
+			_material_selected_index = clampi(_material_selected_index, 0, materials.size() - 1)
+			list.select(_material_selected_index)
+
+		list.item_selected.connect(func(index: int) -> void:
+			_material_selected_index = index
+			_rebuild_object_detail_dock()
+		)
+		copy_button.pressed.connect(func() -> void:
+			var current_materials := object_editor.object_data.get_materials() if object_editor and object_editor.object_data else []
+			if _material_selected_index >= 0 and _material_selected_index < current_materials.size():
+				_material_clipboard = (current_materials[_material_selected_index] as Dictionary).duplicate(true)
+				paste_button.disabled = false
+		)
+		paste_button.pressed.connect(func() -> void:
+			if _material_selected_index < 0 or _material_clipboard.is_empty() or object_editor == null or object_editor.object_data == null:
+				return
+			_paste_material_settings(_material_selected_index, _material_clipboard)
+			_refresh_materials_left_list()
+			_rebuild_object_detail_dock()
+		)
+		return
+
 	box.add_child(detail_box)
-
-	var list := ItemList.new()
-	list.name = "MaterialsList"
-	list.custom_minimum_size = Vector2(0, 132)
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_refresh_materials_list(list, materials)
-	list_panel.add_child(list)
-
-	var material_toolbar := HBoxContainer.new()
-	material_toolbar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list_panel.add_child(material_toolbar)
-
-	var copy_button := Button.new()
-	copy_button.name = "MaterialCopyButton"
-	copy_button.text = "Copy"
-	material_toolbar.add_child(copy_button)
-
-	var paste_button := Button.new()
-	paste_button.name = "MaterialPasteButton"
-	paste_button.text = "Paste"
-	paste_button.disabled = _material_clipboard.is_empty()
-	material_toolbar.add_child(paste_button)
+	if materials.is_empty():
+		var empty := Label.new()
+		empty.name = "MaterialDetailEmpty"
+		empty.theme_type_variation = &"Muted"
+		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		empty.text = "Select a material."
+		detail_box.add_child(empty)
+		return
+	_material_selected_index = clampi(_material_selected_index, 0, materials.size() - 1)
 
 	var shader_label := Label.new()
 	shader_label.text = "Shader"
@@ -839,14 +901,13 @@ func _build_materials_inspector(host: Control) -> void:
 	texture_dialog.min_size = Vector2i(760, 520)
 	host.add_child(texture_dialog)
 
-	var selected := {"index": -1}
+	var selected := {"index": _material_selected_index}
 	var syncing := {"value": false}
 	var pending_slot := {"slot": -1}
 
 	var refresh_materials := func() -> void:
 		materials = object_editor.object_data.get_materials() if object_editor and object_editor.object_data else []
-		_refresh_materials_list(list, materials)
-		paste_button.disabled = _material_clipboard.is_empty()
+		_refresh_materials_left_list()
 
 	var sync_fields := func(index: int) -> void:
 		syncing["value"] = true
@@ -907,9 +968,12 @@ func _build_materials_inspector(host: Control) -> void:
 
 	var resync_selected := func() -> void:
 		var current_index := int(selected.get("index", -1))
+		if current_index >= materials.size():
+			current_index = materials.size() - 1
+		_material_selected_index = current_index
+		selected["index"] = current_index
 		refresh_materials.call()
 		if current_index >= 0 and current_index < materials.size():
-			list.select(current_index)
 			sync_fields.call(current_index)
 
 	var apply_slot_name := func(slot: int, value: String) -> void:
@@ -966,20 +1030,6 @@ func _build_materials_inspector(host: Control) -> void:
 		if status != null:
 			status.text = message
 
-	list.item_selected.connect(sync_fields)
-	copy_button.pressed.connect(func() -> void:
-		var current_index := int(selected.get("index", -1))
-		if current_index >= 0 and current_index < materials.size():
-			_material_clipboard = (materials[current_index] as Dictionary).duplicate(true)
-			paste_button.disabled = false
-	)
-	paste_button.pressed.connect(func() -> void:
-		var current_index := int(selected.get("index", -1))
-		if current_index < 0 or _material_clipboard.is_empty() or object_editor == null or object_editor.object_data == null:
-			return
-		_paste_material_settings(current_index, _material_clipboard)
-		resync_selected.call()
-	)
 	shader_option.value_changed.connect(func(tag: String) -> void:
 		if syncing["value"] or selected["index"] < 0:
 			return
@@ -1127,8 +1177,7 @@ func _build_materials_inspector(host: Control) -> void:
 		resync_selected.call()
 	)
 	if not materials.is_empty():
-		list.select(0)
-		sync_fields.call(0)
+		sync_fields.call(_material_selected_index)
 
 
 func _paste_material_settings(target_index: int, material: Dictionary) -> void:
@@ -1167,6 +1216,21 @@ func _refresh_materials_list(list: ItemList, materials: Array) -> void:
 		list.add_item("%02d  %s" % [int(material.get("index", 0)), String(material.get("shader", ""))])
 	if selected_index >= 0 and selected_index < materials.size():
 		list.select(selected_index)
+
+
+func _refresh_materials_left_list() -> void:
+	if _materials_list == null or not is_instance_valid(_materials_list):
+		return
+	var materials := object_editor.object_data.get_materials() if object_editor and object_editor.object_data else []
+	if materials.is_empty():
+		_material_selected_index = -1
+	else:
+		_material_selected_index = clampi(_material_selected_index, 0, materials.size() - 1)
+	_refresh_materials_list(_materials_list, materials)
+	if _material_selected_index >= 0 and _material_selected_index < materials.size():
+		_materials_list.select(_material_selected_index)
+	if _material_paste_button != null and is_instance_valid(_material_paste_button):
+		_material_paste_button.disabled = _material_clipboard.is_empty()
 
 
 func _populate_shader_tags(option: OptionButton, current: String, shader_catalog: Array) -> void:
@@ -1923,9 +1987,9 @@ func _rebuild_object_detail_dock() -> void:
 		Workflow.PARTS:
 			_build_part_anim_detail_dock(box)
 		Workflow.MATERIALS:
-			_build_object_detail_placeholder(box, "Materials", "Select a material in the left pane to edit shader and texture details.")
+			_build_materials_inspector(box, true)
 		Workflow.LIGHTS:
-			_build_object_detail_placeholder(box, "Lights", "Select a light in the left pane to edit color, falloff, and output flags.")
+			_build_lights_inspector(box, true)
 		Workflow.LODS:
 			_build_object_detail_placeholder(box, "LODs", "Select a LOD in the left pane to edit scene bindings and thresholds.")
 		_:
@@ -2284,42 +2348,139 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 	translation_speed.value_changed.connect(func(_value: float) -> void: set_translation_values.call())
 
 
-func _build_lights_inspector(host: Control) -> void:
-	var box := _make_inspector_box(host)
-	var lights := object_editor.object_data.get_lights() if object_editor and object_editor.object_data else []
-	var list := ItemList.new()
-	list.name = "ObjectLightsList"
-	list.custom_minimum_size = Vector2(0, 160)
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+func _refresh_lights_list(list: ItemList, lights: Array) -> void:
+	list.clear()
 	for light in lights:
 		list.add_item("%02d  part %d" % [int(light.get("index", 0)), int(light.get("part_index", 0))])
-	box.add_child(list)
 
-	var selected := {"index": -1}
+
+func _refresh_lights_left_list() -> void:
+	if _lights_list == null or not is_instance_valid(_lights_list):
+		return
+	var lights := object_editor.object_data.get_lights() if object_editor and object_editor.object_data else []
+	if lights.is_empty():
+		_light_selected_index = -1
+	else:
+		_light_selected_index = clampi(_light_selected_index, 0, lights.size() - 1)
+	_refresh_lights_list(_lights_list, lights)
+	if _light_selected_index >= 0 and _light_selected_index < lights.size():
+		_lights_list.select(_light_selected_index)
+
+
+func _build_lights_inspector(host: Control, detail_only: bool = false) -> void:
+	var box: VBoxContainer
+	if detail_only:
+		box = host as VBoxContainer
+	else:
+		box = _make_inspector_box(host)
+	if box == null:
+		return
+	var lights := object_editor.object_data.get_lights() if object_editor and object_editor.object_data else []
+
+	if not detail_only:
+		_part_anim_list = null
+		_materials_list = null
+		_material_paste_button = null
+
+		var list_panel := VBoxContainer.new()
+		list_panel.name = "LightListPanel"
+		list_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		box.add_child(list_panel)
+
+		var summary := Label.new()
+		summary.name = "LightListSummary"
+		summary.theme_type_variation = &"Muted"
+		summary.text = "%d lights" % lights.size()
+		list_panel.add_child(summary)
+
+		var list := ItemList.new()
+		list.name = "ObjectLightsList"
+		list.custom_minimum_size = Vector2(0, 360)
+		list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		_refresh_lights_list(list, lights)
+		list_panel.add_child(list)
+		_lights_list = list
+
+		if lights.is_empty():
+			_light_selected_index = -1
+		else:
+			_light_selected_index = clampi(_light_selected_index, 0, lights.size() - 1)
+			list.select(_light_selected_index)
+
+		list.item_selected.connect(func(index: int) -> void:
+			_light_selected_index = index
+			_rebuild_object_detail_dock()
+		)
+		return
+
+	var detail_box := VBoxContainer.new()
+	detail_box.name = "LightDetailPanel"
+	detail_box.add_theme_constant_override("separation", 8)
+	detail_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(detail_box)
+
+	if lights.is_empty():
+		var empty := Label.new()
+		empty.name = "LightDetailEmpty"
+		empty.theme_type_variation = &"Muted"
+		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		empty.text = "Select a light."
+		detail_box.add_child(empty)
+		return
+
+	_light_selected_index = clampi(_light_selected_index, 0, lights.size() - 1)
+
+	var selected := {"index": _light_selected_index}
 	var syncing := {"value": false}
 
+	var color_heading := Label.new()
+	color_heading.theme_type_variation = &"Heading"
+	color_heading.text = "Color"
+	detail_box.add_child(color_heading)
+
+	var start_color_row := _add_detail_field(detail_box, "Start color")
 	var start_color := ColorPickerButton.new()
 	start_color.name = "LightStartColor"
 	start_color.custom_minimum_size = Vector2(0, 34)
-	box.add_child(start_color)
+	start_color.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	start_color_row.add_child(start_color)
 
+	var end_color_row := _add_detail_field(detail_box, "End color")
 	var end_color := ColorPickerButton.new()
 	end_color.name = "LightEndColor"
 	end_color.custom_minimum_size = Vector2(0, 34)
-	box.add_child(end_color)
+	end_color.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	end_color_row.add_child(end_color)
 
-	var attenuation_start := _add_spin_row(box, "LightAttenuationStart", "Atten start", 0, 100000, 0.1)
-	var attenuation_end := _add_spin_row(box, "LightAttenuationEnd", "Atten end", 0, 100000, 0.1)
-	var falloff := _add_spin_row(box, "LightFalloff", "Falloff", 0, 255, 1)
-	var style := _add_spin_row(box, "LightStyle", "Style", 0, 255, 1)
-	var phase := _add_spin_row(box, "LightPhase", "Phase", 0, 255, 1)
-	var rate := _add_spin_row(box, "LightRate", "Rate", 0, 65535, 1)
+	var falloff_heading := Label.new()
+	falloff_heading.theme_type_variation = &"Heading"
+	falloff_heading.text = "Falloff"
+	detail_box.add_child(falloff_heading)
+
+	var attenuation_start := _add_detail_spin_row(detail_box, "LightAttenuationStart", "Atten start", 0, 100000, 0.1)
+	var attenuation_end := _add_detail_spin_row(detail_box, "LightAttenuationEnd", "Atten end", 0, 100000, 0.1)
+	var falloff := _add_detail_spin_row(detail_box, "LightFalloff", "Falloff", 0, 255, 1)
+
+	var animation_heading := Label.new()
+	animation_heading.theme_type_variation = &"Heading"
+	animation_heading.text = "Animation"
+	detail_box.add_child(animation_heading)
+
+	var style := _add_detail_spin_row(detail_box, "LightStyle", "Style", 0, 255, 1)
+	var phase := _add_detail_spin_row(detail_box, "LightPhase", "Phase", 0, 255, 1)
+	var rate := _add_detail_spin_row(detail_box, "LightRate", "Rate", 0, 65535, 1)
+
+	var output_heading := Label.new()
+	output_heading.theme_type_variation = &"Heading"
+	output_heading.text = "Output"
+	detail_box.add_child(output_heading)
 
 	var positive_flags_row := VBoxContainer.new()
 	positive_flags_row.name = "LightPositiveFlags"
 	positive_flags_row.add_theme_constant_override("separation", 2)
 	positive_flags_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(positive_flags_row)
+	detail_box.add_child(positive_flags_row)
 	var draw_corona := CheckBox.new()
 	draw_corona.name = "LightDrawCorona"
 	draw_corona.text = "Draw corona"
@@ -2337,7 +2498,7 @@ func _build_lights_inspector(host: Control) -> void:
 	flags_row.name = "LightDisableRawRow"
 	flags_row.visible = false
 	flags_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(flags_row)
+	detail_box.add_child(flags_row)
 	var disable_corona := CheckBox.new()
 	disable_corona.name = "LightDisableCorona"
 	disable_corona.text = "No corona"
@@ -2352,6 +2513,8 @@ func _build_lights_inspector(host: Control) -> void:
 	flags_row.add_child(disable_objects)
 
 	var light_info := func(index: int) -> Dictionary:
+		if object_editor == null or object_editor.object_data == null:
+			return {}
 		if object_editor.object_data.has_method("get_light_info"):
 			return object_editor.object_data.get_light_info(index)
 		return lights[index] if index >= 0 and index < lights.size() else {}
@@ -2359,14 +2522,19 @@ func _build_lights_inspector(host: Control) -> void:
 	var set_field := func(key: String, value: Variant) -> void:
 		if syncing["value"] or selected["index"] < 0:
 			return
+		_light_selected_index = int(selected["index"])
 		if object_editor.object_data.has_method("set_light_field"):
 			object_editor.object_data.set_light_field(selected["index"], key, value)
 		elif key == "color_start" or key == "color_end":
 			object_editor.object_data.set_light_colors(selected["index"], start_color.color, end_color.color)
+		_refresh_lights_left_list()
 
 	var sync := func(index: int) -> void:
 		syncing["value"] = true
 		selected["index"] = index
+		if index < 0 or index >= lights.size():
+			syncing["value"] = false
+			return
 		var info: Dictionary = light_info.call(index)
 		start_color.color = info.get("color_start", Color.WHITE)
 		end_color.color = info.get("color_end", Color.WHITE)
@@ -2387,9 +2555,6 @@ func _build_lights_inspector(host: Control) -> void:
 		disable_objects.button_pressed = objects_disabled
 		syncing["value"] = false
 
-	list.item_selected.connect(func(index: int) -> void:
-		sync.call(index)
-	)
 	start_color.color_changed.connect(func(color: Color) -> void: set_field.call("color_start", color))
 	end_color.color_changed.connect(func(color: Color) -> void: set_field.call("color_end", color))
 	attenuation_start.value_changed.connect(func(value: float) -> void: set_field.call("atten_start", value))
@@ -2405,8 +2570,7 @@ func _build_lights_inspector(host: Control) -> void:
 	disable_terrain.toggled.connect(func(value: bool) -> void: set_field.call("disable_lightterrain", value))
 	disable_objects.toggled.connect(func(value: bool) -> void: set_field.call("disable_lightobjects", value))
 	if not lights.is_empty():
-		list.select(0)
-		sync.call(0)
+		sync.call(_light_selected_index)
 
 
 func _make_inspector_box(host: Control) -> VBoxContainer:
