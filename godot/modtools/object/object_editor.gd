@@ -67,13 +67,13 @@ func save_as(dir_path: String) -> Error:
 	return err
 
 
-func export_to_dir(dir_path: String) -> Error:
+func export_to_dir(dir_path: String, update_mask: int = 0) -> Error:
 	if dir_path.is_empty() or object_data == null:
 		return ERR_INVALID_PARAMETER
 	var mkdir_err := DirAccess.make_dir_recursive_absolute(dir_path)
 	if mkdir_err != OK:
 		return mkdir_err
-	var err := object_data.export_3di_to_dir(dir_path)
+	var err := object_data.export_3di_to_dir(dir_path, update_mask)
 	if err == OK:
 		remember_export_dir(dir_path)
 	return err

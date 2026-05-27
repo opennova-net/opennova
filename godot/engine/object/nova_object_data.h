@@ -40,6 +40,7 @@ private:
 	bool has_ir = false;
 	bool has_source_model = false;
 	bool has_source_project = false;
+	uint8_t oed_dirty_mask = 0;
 
 	String source_path;
 	String source_dir;
@@ -50,13 +51,16 @@ private:
 	void _clear_oed_session();
 	void _clear_source_model();
 	void _clear_source_project();
-	void _notify_object_changed();
+	void _mark_oed_dirty(uint8_t p_update_mask);
+	void _clear_oed_dirty(uint8_t p_update_mask);
+	uint8_t _normalize_oed_update_mask(int p_update_mask) const;
+	void _notify_object_changed(uint8_t p_update_mask = 0);
 	Error _open_3di(const String &p_path);
 	Error _open_3dp(const String &p_path);
 	Error _open_ase(const String &p_path);
-	Error _build_ir_from_project_session(const char *p_model_name);
-	Error _rebuild_oed_session_from_project();
-	Error _export_project_backed_3di(const String &p_path);
+	Error _build_ir_from_project_session(const char *p_model_name, uint8_t p_dirty_mask = 0);
+	Error _rebuild_oed_session_from_project(uint8_t p_dirty_mask = 0);
+	Error _export_project_backed_3di(const String &p_path, uint8_t p_update_mask);
 	Error _export_patched_3di(const String &p_path);
 	Error _apply_ir_to_source_model();
 	TdpProject _build_project_from_ir() const;
@@ -67,12 +71,20 @@ protected:
 	static void _bind_methods();
 
 public:
+	enum {
+		UPDATE_NONE = 0,
+		UPDATE_MTRL = OED_UPDATE_MTRL,
+		UPDATE_LGHT = OED_UPDATE_LGHT,
+		UPDATE_PANM = OED_UPDATE_PANM,
+		UPDATE_ALL = OED_UPDATE_ALL,
+	};
+
 	NovaObjectData();
 	~NovaObjectData();
 
 	Error open_file(const String &p_path);
 	Error save_project_to_dir(const String &p_dir_path);
-	Error export_3di_to_dir(const String &p_dir_path);
+	Error export_3di_to_dir(const String &p_dir_path, int p_update_mask = 0);
 	void reset_empty(const String &p_name = "untitled");
 	Error set_lod_scene(int p_lod_index, const String &p_path);
 
@@ -84,6 +96,7 @@ public:
 	String get_object_name() const;
 	String get_source_kind() const;
 	String get_last_error() const;
+	int get_oed_dirty_mask() const;
 	Dictionary get_summary() const;
 	Array get_project_lods() const;
 	bool set_lod_field(int p_lod_index, const String &p_key, const Variant &p_value);

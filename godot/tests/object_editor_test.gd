@@ -13,6 +13,11 @@ const ARMRY_FIXTURE := "res://../fixtures/3dp/armry01/Armry01.3di"
 const ARMRY_TEXTURE_FIXTURE := "res://../fixtures/3dp/armry01/KArm1_O.TGA"
 const US01_PROJECT_FIXTURE := "res://../fixtures/3dp/US01_onimport/US01.3dp"
 const OUTPUT_DIR_NAME := "object_editor_export_test"
+const OED_UPDATE_NONE := 0
+const OED_UPDATE_MTRL := 1
+const OED_UPDATE_LGHT := 2
+const OED_UPDATE_PANM := 4
+const OED_UPDATE_ALL := OED_UPDATE_MTRL | OED_UPDATE_LGHT | OED_UPDATE_PANM
 
 
 func before_each() -> void:
@@ -169,6 +174,35 @@ func test_object_data_open_3dp_render_signature_matches_exported_3di() -> void:
 	assert_eq(reopened.open_file(export_dir.path_join("US01.3di")), OK)
 
 	assert_eq(_object_render_signature(live), _object_render_signature(reopened), "Live 3DP preview data should match the exported/reopened 3DI render data.")
+
+
+func test_object_data_tracks_oed_dirty_mask_for_component_edits() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_eq(_oed_dirty_mask(data), OED_UPDATE_NONE, "Opening an object should not mark any OED update chunks dirty.")
+
+	assert_eq(data.set_material_shader(0, "FF_ST_OP"), OK)
+	assert_eq(_oed_dirty_mask(data), OED_UPDATE_MTRL, "Material edits should mark only MTRL dirty.")
+
+	assert_true(data.set_light_field(0, "atten_start", 3.5))
+	assert_eq(_oed_dirty_mask(data), OED_UPDATE_MTRL | OED_UPDATE_LGHT, "Light edits should OR in LGHT.")
+
+	assert_true(data.set_part_anim_field(0, 0, "transform_as", 2))
+	assert_eq(_oed_dirty_mask(data), OED_UPDATE_ALL, "Part animation edits should OR in PANM.")
+
+
+func test_object_data_masked_export_clears_exported_oed_dirty_bits() -> void:
+	var data := _open_us01_project_data()
+	assert_eq(_oed_dirty_mask(data), OED_UPDATE_NONE)
+	assert_eq(data.set_material_shader(0, "FF_ST_OP"), OK)
+	assert_eq(_oed_dirty_mask(data), OED_UPDATE_MTRL)
+
+	var export_dir := _output_dir().path_join("masked_us01_export")
+	assert_eq(DirAccess.make_dir_recursive_absolute(export_dir), OK)
+	assert_eq(data.call("export_3di_to_dir", export_dir, OED_UPDATE_MTRL), OK)
+
+	assert_true(FileAccess.file_exists(export_dir.path_join("US01.3di")), "Masked project export should still write a 3DI.")
+	assert_eq(_oed_dirty_mask(data), OED_UPDATE_NONE, "Successful masked export should clear the exported dirty bit.")
 
 
 func test_object_data_loads_material_textures_from_source_dir() -> void:
@@ -511,6 +545,34 @@ func test_object_workspace_new_adds_lod_scene_and_exports_project() -> void:
 	var export_dir := _output_dir().path_join("new_export")
 	assert_eq(workspace.begin_export(export_dir, 0), OK)
 	assert_true(FileAccess.file_exists(export_dir.path_join("Bird1.3di")))
+
+
+func test_object_workspace_export_mask_controls_follow_oed_dirty_mask() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(US01_PROJECT_FIXTURE)), OK)
+	var data: NovaObjectData = workspace.object_editor.object_data
+	assert_eq(data.set_material_shader(0, "FF_ST_OP"), OK)
+
+	var host = add_child_autofree(Control.new())
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, host)
+	var mtrl := _find_node_by_name(host, "ObjectExportMtrlCheck") as CheckBox
+	var lght := _find_node_by_name(host, "ObjectExportLghtCheck") as CheckBox
+	var panm := _find_node_by_name(host, "ObjectExportPanmCheck") as CheckBox
+	assert_not_null(mtrl)
+	assert_not_null(lght)
+	assert_not_null(panm)
+	if mtrl == null or lght == null or panm == null:
+		return
+
+	assert_true(mtrl.button_pressed, "MTRL export toggle should default from the dirty mask.")
+	assert_false(lght.button_pressed, "LGHT export toggle should stay off when only materials are dirty.")
+	assert_false(panm.button_pressed, "PANM export toggle should stay off when only materials are dirty.")
+
+	var export_dir := _output_dir().path_join("workspace_masked_export")
+	assert_eq(workspace.begin_export(export_dir, 0), OK)
+	assert_true(FileAccess.file_exists(export_dir.path_join("US01.3di")))
+	assert_eq(_oed_dirty_mask(data), OED_UPDATE_NONE, "Workspace export should clear the selected dirty mask.")
 
 
 func test_object_lods_inspector_exposes_scene_and_project_settings() -> void:
@@ -976,6 +1038,12 @@ func _open_us01_project_data() -> NovaObjectData:
 	var data := NovaObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(US01_PROJECT_FIXTURE)), OK)
 	return data
+
+
+func _oed_dirty_mask(data: NovaObjectData) -> int:
+	if data == null or not data.has_method("get_oed_dirty_mask"):
+		return -1
+	return int(data.call("get_oed_dirty_mask"))
 
 
 func _object_render_signature(data: NovaObjectData) -> Dictionary:

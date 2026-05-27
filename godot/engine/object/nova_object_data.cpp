@@ -720,7 +720,7 @@ NovaObjectData::~NovaObjectData() {
 void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("open_file", "path"), &NovaObjectData::open_file);
 	ClassDB::bind_method(D_METHOD("save_project_to_dir", "dir_path"), &NovaObjectData::save_project_to_dir);
-	ClassDB::bind_method(D_METHOD("export_3di_to_dir", "dir_path"), &NovaObjectData::export_3di_to_dir);
+	ClassDB::bind_method(D_METHOD("export_3di_to_dir", "dir_path", "update_mask"), &NovaObjectData::export_3di_to_dir, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("reset_empty", "name"), &NovaObjectData::reset_empty, DEFVAL("untitled"));
 	ClassDB::bind_method(D_METHOD("set_lod_scene", "lod_index", "path"), &NovaObjectData::set_lod_scene);
 	ClassDB::bind_method(D_METHOD("has_document"), &NovaObjectData::has_document);
@@ -731,6 +731,7 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_object_name"), &NovaObjectData::get_object_name);
 	ClassDB::bind_method(D_METHOD("get_source_kind"), &NovaObjectData::get_source_kind);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaObjectData::get_last_error);
+	ClassDB::bind_method(D_METHOD("get_oed_dirty_mask"), &NovaObjectData::get_oed_dirty_mask);
 	ClassDB::bind_method(D_METHOD("get_summary"), &NovaObjectData::get_summary);
 	ClassDB::bind_method(D_METHOD("get_project_lods"), &NovaObjectData::get_project_lods);
 	ClassDB::bind_method(D_METHOD("set_lod_field", "lod_index", "key", "value"), &NovaObjectData::set_lod_field);
@@ -777,6 +778,12 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_light_colors", "light_index", "start", "end"), &NovaObjectData::set_light_colors);
 	ClassDB::bind_method(D_METHOD("set_part_animation_flags", "lod_index", "anim_index", "flags"), &NovaObjectData::set_part_animation_flags);
 
+	BIND_CONSTANT(UPDATE_NONE);
+	BIND_CONSTANT(UPDATE_MTRL);
+	BIND_CONSTANT(UPDATE_LGHT);
+	BIND_CONSTANT(UPDATE_PANM);
+	BIND_CONSTANT(UPDATE_ALL);
+
 	ADD_SIGNAL(MethodInfo("object_changed"));
 }
 
@@ -815,9 +822,35 @@ void NovaObjectData::_clear() {
 	source_dir = String();
 	object_name = "untitled";
 	last_error = String();
+	oed_dirty_mask = UPDATE_NONE;
 }
 
-void NovaObjectData::_notify_object_changed() {
+void NovaObjectData::_mark_oed_dirty(uint8_t p_update_mask) {
+	oed_dirty_mask |= (p_update_mask & UPDATE_ALL);
+}
+
+void NovaObjectData::_clear_oed_dirty(uint8_t p_update_mask) {
+	const uint8_t update_mask = p_update_mask & UPDATE_ALL;
+	if (update_mask == UPDATE_NONE || update_mask == UPDATE_ALL) {
+		oed_dirty_mask = UPDATE_NONE;
+		return;
+	}
+	oed_dirty_mask &= static_cast<uint8_t>(~update_mask) & UPDATE_ALL;
+}
+
+uint8_t NovaObjectData::_normalize_oed_update_mask(int p_update_mask) const {
+	uint8_t update_mask = static_cast<uint8_t>(p_update_mask) & UPDATE_ALL;
+	if (update_mask == UPDATE_NONE) {
+		update_mask = oed_dirty_mask & UPDATE_ALL;
+	}
+	if (update_mask == UPDATE_NONE) {
+		update_mask = UPDATE_ALL;
+	}
+	return update_mask;
+}
+
+void NovaObjectData::_notify_object_changed(uint8_t p_update_mask) {
+	_mark_oed_dirty(p_update_mask);
 	emit_signal("object_changed");
 	emit_changed();
 }
@@ -876,7 +909,7 @@ Error NovaObjectData::set_lod_scene(int p_lod_index, const String &p_path) {
 		source_path = p_path;
 	}
 
-	return _rebuild_oed_session_from_project();
+	return _rebuild_oed_session_from_project(UPDATE_ALL);
 }
 
 Error NovaObjectData::open_file(const String &p_path) {
@@ -982,7 +1015,7 @@ Error NovaObjectData::_open_ase(const String &p_path) {
 	return _build_ir_from_project_session(nullptr);
 }
 
-Error NovaObjectData::_build_ir_from_project_session(const char *p_model_name) {
+Error NovaObjectData::_build_ir_from_project_session(const char *p_model_name, uint8_t p_dirty_mask) {
 	Threedi3di3 built_model = {};
 	const OedStatus build_rc = oed_session_build_model(
 			oed_session, &source_project, static_cast<uint8_t>(OED_UPDATE_ALL), p_model_name, &built_model);
@@ -1003,11 +1036,11 @@ Error NovaObjectData::_build_ir_from_project_session(const char *p_model_name) {
 	}
 	threedi_3di3_free(&built_model);
 	has_ir = true;
-	_notify_object_changed();
+	_notify_object_changed(p_dirty_mask);
 	return OK;
 }
 
-Error NovaObjectData::_rebuild_oed_session_from_project() {
+Error NovaObjectData::_rebuild_oed_session_from_project(uint8_t p_dirty_mask) {
 	if (!has_source_project) {
 		last_error = "Object has no source project";
 		return ERR_UNCONFIGURED;
@@ -1039,7 +1072,7 @@ Error NovaObjectData::_rebuild_oed_session_from_project() {
 	_clear_oed_session();
 	oed_session = next_session;
 	source_kind = SourceKind::Project;
-	return _build_ir_from_project_session(nullptr);
+	return _build_ir_from_project_session(nullptr, p_dirty_mask);
 }
 
 TdpProject NovaObjectData::_build_project_from_ir() const {
@@ -1078,18 +1111,23 @@ Error NovaObjectData::save_project_to_dir(const String &p_dir_path) {
 	return OK;
 }
 
-Error NovaObjectData::export_3di_to_dir(const String &p_dir_path) {
+Error NovaObjectData::export_3di_to_dir(const String &p_dir_path, int p_update_mask) {
 	if (!has_ir || p_dir_path.is_empty()) {
 		return ERR_INVALID_PARAMETER;
 	}
 	const String output_path = p_dir_path.path_join(_export_basename() + ".3di");
 	if (source_kind == SourceKind::Threedi && has_source_model) {
-		return _export_patched_3di(output_path);
+		const Error err = _export_patched_3di(output_path);
+		if (err == OK) {
+			_clear_oed_dirty(UPDATE_ALL);
+		}
+		return err;
 	}
-	return _export_project_backed_3di(output_path);
+	const uint8_t update_mask = _normalize_oed_update_mask(p_update_mask);
+	return _export_project_backed_3di(output_path, update_mask);
 }
 
-Error NovaObjectData::_export_project_backed_3di(const String &p_path) {
+Error NovaObjectData::_export_project_backed_3di(const String &p_path, uint8_t p_update_mask) {
 	if (oed_session == nullptr) {
 		last_error = "Object has no OED geometry session";
 		return ERR_UNCONFIGURED;
@@ -1100,13 +1138,14 @@ Error NovaObjectData::_export_project_backed_3di(const String &p_path) {
 	OedExportRequest request = {};
 	request.project = &export_project;
 	request.output_path = native_path.c_str();
-	request.update_mask = static_cast<uint8_t>(OED_UPDATE_ALL);
+	request.update_mask = p_update_mask;
 	const OedStatus rc = oed_session_export(oed_session, &request);
 	tdp_free(&export_project);
 	if (rc != OED_STATUS_OK) {
 		last_error = oed_error_detail(oed_session, "Failed to export 3DI");
 		return ERR_FILE_CANT_WRITE;
 	}
+	_clear_oed_dirty(p_update_mask);
 	return OK;
 }
 
@@ -1233,6 +1272,10 @@ String NovaObjectData::get_last_error() const {
 	return last_error;
 }
 
+int NovaObjectData::get_oed_dirty_mask() const {
+	return static_cast<int>(oed_dirty_mask & UPDATE_ALL);
+}
+
 Dictionary NovaObjectData::get_summary() const {
 	Dictionary result;
 	result["name"] = object_name;
@@ -1243,6 +1286,7 @@ Dictionary NovaObjectData::get_summary() const {
 	result["userpoint_count"] = static_cast<int64_t>(has_ir ? ir.userpoint_count : 0);
 	result["project_lod_count"] = static_cast<int64_t>(has_source_project ? project_lod_count(source_project) : 0);
 	result["poly_collision_lod"] = static_cast<int64_t>(has_source_project ? source_project.poly_collision_lod : 0);
+	result["oed_dirty_mask"] = static_cast<int64_t>(get_oed_dirty_mask());
 	result["can_save_project"] = can_save_project();
 	result["can_export_3di"] = can_export_3di();
 	return result;
@@ -1291,9 +1335,9 @@ bool NovaObjectData::set_lod_field(int p_lod_index, const String &p_key, const V
 	}
 
 	if (oed_session != nullptr) {
-		return _build_ir_from_project_session(nullptr) == OK;
+		return _build_ir_from_project_session(nullptr, UPDATE_ALL) == OK;
 	}
-	_notify_object_changed();
+	_notify_object_changed(UPDATE_ALL);
 	return true;
 }
 
@@ -1307,7 +1351,7 @@ bool NovaObjectData::set_project_field(const String &p_key, const Variant &p_val
 		has_source_project = true;
 	}
 	source_project.poly_collision_lod = std::clamp(static_cast<int32_t>(p_value), 0, TDP_MAX_LODS - 1);
-	_notify_object_changed();
+	_notify_object_changed(UPDATE_ALL);
 	return true;
 }
 
@@ -1456,87 +1500,87 @@ bool NovaObjectData::set_material_field(int p_index, const String &p_key, const 
 
 	if (key == "shader_tag" || key == "name") {
 		copy_cstr(mat.shader_name, sizeof(mat.shader_name), to_utf8(String(p_value)).c_str());
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "alpha_test") {
 		mat.alpha_threshold = std::clamp(static_cast<float>(static_cast<int>(p_value)) / 255.0f, 0.0f, 1.0f);
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "alpha_test_enabled") {
 		set_flag(THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST);
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "alpha_invert") {
 		set_flag(THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT);
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "two_sided") {
 		set_flag(THREEDI_IR_MATERIAL_FLAG_TWO_SIDED);
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "is_glass") {
 		mat.is_glass = static_cast<bool>(p_value) ? 1 : 0;
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "emissive") {
 		mat.emissive_type = static_cast<bool>(p_value) ? 2 : 0;
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "diffuse_a") {
 		set_ir_texture_slot(mat, THREEDI_IR_TEX_SLOT_DIFFUSE, 0, p_value, 0);
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "detail_a") {
 		set_ir_texture_slot(mat, THREEDI_IR_TEX_SLOT_DETAIL, 0, p_value, 0);
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "normal_a") {
 		set_ir_texture_slot(mat, THREEDI_IR_TEX_SLOT_NORMAL, 0, p_value, 0);
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "reflect_color") {
 		set_color(mat.reflect_color);
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
-	if (key == "rgb_gen_style") { mat.rgb_gen.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(); return true; }
-	if (key == "rgb_gen_rate") { mat.rgb_gen.rate = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "rgb_gen_phase") { mat.rgb_gen.phase = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "rgb_gen_start_color") { set_color(mat.rgb_gen.start_color); _notify_object_changed(); return true; }
-	if (key == "rgb_gen_end_color") { set_color(mat.rgb_gen.end_color); _notify_object_changed(); return true; }
-	if (key == "rgb_gen_reg") { mat.rgb_gen.reg = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(); return true; }
-	if (key == "rgb_gen_reg_name") { if (!resolve_reg(String(p_value), mat.rgb_gen.reg)) return false; _notify_object_changed(); return true; }
-	if (key == "alpha_gen_style") { mat.alpha_gen.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(); return true; }
-	if (key == "alpha_gen_rate") { mat.alpha_gen.rate = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "alpha_gen_phase") { mat.alpha_gen.phase = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "alpha_gen_start") { mat.alpha_gen.start = static_cast<int16_t>(std::clamp(static_cast<int>(p_value), -32768, 32767)); _notify_object_changed(); return true; }
-	if (key == "alpha_gen_end") { mat.alpha_gen.end = static_cast<int16_t>(std::clamp(static_cast<int>(p_value), -32768, 32767)); _notify_object_changed(); return true; }
-	if (key == "alpha_gen_reg") { mat.alpha_gen.reg = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(); return true; }
-	if (key == "alpha_gen_reg_name") { if (!resolve_reg(String(p_value), mat.alpha_gen.reg)) return false; _notify_object_changed(); return true; }
-	if (key == "uv_u_style") { mat.u_params.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(); return true; }
-	if (key == "uv_u_rate") { mat.u_params.gen_rate = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "uv_u_phase") { mat.u_params.phase = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "uv_u_start") { mat.u_params.start = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "uv_u_end") { mat.u_params.end = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "uv_u_reg") { mat.u_params.reg = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(); return true; }
-	if (key == "uv_u_reg_name") { if (!resolve_reg(String(p_value), mat.u_params.reg)) return false; _notify_object_changed(); return true; }
-	if (key == "uv_v_style") { mat.v_params.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(); return true; }
-	if (key == "uv_v_rate") { mat.v_params.gen_rate = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "uv_v_phase") { mat.v_params.phase = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "uv_v_start") { mat.v_params.start = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "uv_v_end") { mat.v_params.end = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "uv_v_reg") { mat.v_params.reg = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(); return true; }
-	if (key == "uv_v_reg_name") { if (!resolve_reg(String(p_value), mat.v_params.reg)) return false; _notify_object_changed(); return true; }
+	if (key == "rgb_gen_style") { mat.rgb_gen.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "rgb_gen_rate") { mat.rgb_gen.rate = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "rgb_gen_phase") { mat.rgb_gen.phase = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "rgb_gen_start_color") { set_color(mat.rgb_gen.start_color); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "rgb_gen_end_color") { set_color(mat.rgb_gen.end_color); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "rgb_gen_reg") { mat.rgb_gen.reg = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "rgb_gen_reg_name") { if (!resolve_reg(String(p_value), mat.rgb_gen.reg)) return false; _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "alpha_gen_style") { mat.alpha_gen.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "alpha_gen_rate") { mat.alpha_gen.rate = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "alpha_gen_phase") { mat.alpha_gen.phase = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "alpha_gen_start") { mat.alpha_gen.start = static_cast<int16_t>(std::clamp(static_cast<int>(p_value), -32768, 32767)); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "alpha_gen_end") { mat.alpha_gen.end = static_cast<int16_t>(std::clamp(static_cast<int>(p_value), -32768, 32767)); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "alpha_gen_reg") { mat.alpha_gen.reg = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "alpha_gen_reg_name") { if (!resolve_reg(String(p_value), mat.alpha_gen.reg)) return false; _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_u_style") { mat.u_params.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_u_rate") { mat.u_params.gen_rate = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_u_phase") { mat.u_params.phase = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_u_start") { mat.u_params.start = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_u_end") { mat.u_params.end = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_u_reg") { mat.u_params.reg = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_u_reg_name") { if (!resolve_reg(String(p_value), mat.u_params.reg)) return false; _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_v_style") { mat.v_params.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_v_rate") { mat.v_params.gen_rate = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_v_phase") { mat.v_params.phase = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_v_start") { mat.v_params.start = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_v_end") { mat.v_params.end = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_v_reg") { mat.v_params.reg = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "uv_v_reg_name") { if (!resolve_reg(String(p_value), mat.v_params.reg)) return false; _notify_object_changed(UPDATE_MTRL); return true; }
 	return false;
 }
 
@@ -1581,7 +1625,7 @@ bool NovaObjectData::set_material_anim_frame(int p_index, int p_slot, int p_fram
 		return false;
 	}
 	set_ir_texture_slot(mat, p_slot, p_frame_idx, p_path, THREEDI_TEX_FLAG_ANIMATED);
-	_notify_object_changed();
+	_notify_object_changed(UPDATE_MTRL);
 	return true;
 }
 
@@ -1726,17 +1770,17 @@ bool NovaObjectData::set_light_field(int p_index, const String &p_key, const Var
 		light.offset[0] = -v.x;
 		light.offset[1] = v.y;
 		light.offset[2] = v.z;
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_LGHT);
 		return true;
 	}
-	if (key == "atten_start") { light.attenuation_start = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "atten_end") { light.attenuation_end = static_cast<float>(p_value); _notify_object_changed(); return true; }
+	if (key == "atten_start") { light.attenuation_start = static_cast<float>(p_value); _notify_object_changed(UPDATE_LGHT); return true; }
+	if (key == "atten_end") { light.attenuation_end = static_cast<float>(p_value); _notify_object_changed(UPDATE_LGHT); return true; }
 	if (key == "color_start") {
 		const Color c = p_value;
 		light.color_start[0] = c.r;
 		light.color_start[1] = c.g;
 		light.color_start[2] = c.b;
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_LGHT);
 		return true;
 	}
 	if (key == "color_end") {
@@ -1744,18 +1788,18 @@ bool NovaObjectData::set_light_field(int p_index, const String &p_key, const Var
 		light.color_end[0] = c.r;
 		light.color_end[1] = c.g;
 		light.color_end[2] = c.b;
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_LGHT);
 		return true;
 	}
-	if (key == "falloff_deg") { light.falloff = static_cast<float>(p_value); _notify_object_changed(); return true; }
-	if (key == "subobject") { light.part_index = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(); return true; }
-	if (key == "disable_corona") { set_flag(0x01); _notify_object_changed(); return true; }
-	if (key == "disable_lightterrain") { set_flag(0x02); _notify_object_changed(); return true; }
-	if (key == "disable_lightobjects") { set_flag(0x04); _notify_object_changed(); return true; }
-	if (key == "colorgen_style") { light.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(); return true; }
-	if (key == "colorgen_phase") { light.phase = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(); return true; }
-	if (key == "colorgen_rate") { light.rate = static_cast<uint16_t>(std::clamp(static_cast<int>(p_value), 0, 65535)); _notify_object_changed(); return true; }
-	if (key == "light_type") { light.light_type = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(); return true; }
+	if (key == "falloff_deg") { light.falloff = static_cast<float>(p_value); _notify_object_changed(UPDATE_LGHT); return true; }
+	if (key == "subobject") { light.part_index = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(UPDATE_LGHT); return true; }
+	if (key == "disable_corona") { set_flag(0x01); _notify_object_changed(UPDATE_LGHT); return true; }
+	if (key == "disable_lightterrain") { set_flag(0x02); _notify_object_changed(UPDATE_LGHT); return true; }
+	if (key == "disable_lightobjects") { set_flag(0x04); _notify_object_changed(UPDATE_LGHT); return true; }
+	if (key == "colorgen_style") { light.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_LGHT); return true; }
+	if (key == "colorgen_phase") { light.phase = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_LGHT); return true; }
+	if (key == "colorgen_rate") { light.rate = static_cast<uint16_t>(std::clamp(static_cast<int>(p_value), 0, 65535)); _notify_object_changed(UPDATE_LGHT); return true; }
+	if (key == "light_type") { light.light_type = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_LGHT); return true; }
 	return false;
 }
 
@@ -1837,12 +1881,12 @@ bool NovaObjectData::set_part_anim_field(int p_lod_index, int p_anim_index, cons
 	const String key = p_key;
 	if (key == "transform_as") {
 		anim.part_index = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255));
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_PANM);
 		return true;
 	}
 	if (key == "parent_subobject") {
 		anim.parent_part = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255));
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_PANM);
 		return true;
 	}
 	if (key == "scale_type" || key == "rotation_type" || key == "translate_type" || key == "rotation_reversed") {
@@ -1863,7 +1907,7 @@ bool NovaObjectData::set_part_anim_field(int p_lod_index, int p_anim_index, cons
 				(static_cast<uint32_t>(rotation_type) << 8) |
 				(static_cast<uint32_t>(rotation_reversed) << 16) |
 				(static_cast<uint32_t>(translate_type) << 24);
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_PANM);
 		return true;
 	}
 	return false;
@@ -2206,7 +2250,7 @@ Error NovaObjectData::set_material_shader(int p_material_index, const String &p_
 	}
 	copy_cstr(ir.materials[p_material_index].shader_name, sizeof(ir.materials[p_material_index].shader_name),
 			to_utf8(p_shader_name).c_str());
-	_notify_object_changed();
+	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
 
@@ -2226,7 +2270,7 @@ Error NovaObjectData::set_material_texture(int p_material_index, int p_texture_i
 	if (material.textures[p_texture_index].slot == 0) {
 		material.textures[p_texture_index].slot = THREEDI_IR_TEX_SLOT_DIFFUSE;
 	}
-	_notify_object_changed();
+	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
 
@@ -2271,7 +2315,7 @@ Error NovaObjectData::set_material_texture_slot(int p_material_index, int p_slot
 	} else {
 		texture.type = 0;
 	}
-	_notify_object_changed();
+	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
 
@@ -2292,7 +2336,7 @@ Error NovaObjectData::set_material_texture_slot_options(int p_material_index, in
 		texture.flags = static_cast<uint8_t>(std::clamp(p_flags, 0, 255));
 		texture.frame = static_cast<uint8_t>(std::clamp(p_frame, 0, 255));
 		texture.type = static_cast<uint8_t>(std::clamp(p_type, 0, 255));
-		_notify_object_changed();
+		_notify_object_changed(UPDATE_MTRL);
 		return OK;
 	}
 
@@ -2305,7 +2349,7 @@ Error NovaObjectData::set_material_alpha_threshold(int p_material_index, float p
 	}
 	ir.materials[p_material_index].alpha_threshold = std::clamp(p_alpha_threshold, 0.0f, 1.0f);
 	ir.materials[p_material_index].flags |= THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST;
-	_notify_object_changed();
+	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
 
@@ -2321,7 +2365,7 @@ Error NovaObjectData::set_material_uv_generator(int p_material_index, const Stri
 	} else {
 		return ERR_INVALID_PARAMETER;
 	}
-	_notify_object_changed();
+	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
 
@@ -2330,7 +2374,7 @@ Error NovaObjectData::set_material_rgb_generator(int p_material_index, const Dic
 		return ERR_INVALID_PARAMETER;
 	}
 	apply_rgb_gen(ir.materials[p_material_index].rgb_gen, p_params);
-	_notify_object_changed();
+	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
 
@@ -2339,7 +2383,7 @@ Error NovaObjectData::set_material_alpha_generator(int p_material_index, const D
 		return ERR_INVALID_PARAMETER;
 	}
 	apply_alpha_gen(ir.materials[p_material_index].alpha_gen, p_params);
-	_notify_object_changed();
+	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
 
@@ -2351,7 +2395,7 @@ Error NovaObjectData::set_material_texture_animation(int p_material_index, const
 	animation.num_frames = static_cast<uint8_t>(std::clamp(dict_int(p_params, "num_frames", animation.num_frames), 0, 255));
 	animation.animation_type = static_cast<uint8_t>(std::clamp(dict_int(p_params, "animation_type", animation.animation_type), 0, 255));
 	animation.cycle_frame_time = static_cast<int16_t>(std::clamp(dict_int(p_params, "cycle_frame_time", animation.cycle_frame_time), -32768, 32767));
-	_notify_object_changed();
+	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
 
@@ -2366,7 +2410,7 @@ Error NovaObjectData::set_light_colors(int p_light_index, const Color &p_start, 
 	light.color_end[0] = p_end.r;
 	light.color_end[1] = p_end.g;
 	light.color_end[2] = p_end.b;
-	_notify_object_changed();
+	_notify_object_changed(UPDATE_LGHT);
 	return OK;
 }
 
@@ -2379,6 +2423,6 @@ Error NovaObjectData::set_part_animation_flags(int p_lod_index, int p_anim_index
 		return ERR_INVALID_PARAMETER;
 	}
 	lod.part_animations[p_anim_index].flags = static_cast<uint32_t>(p_flags);
-	_notify_object_changed();
+	_notify_object_changed(UPDATE_PANM);
 	return OK;
 }

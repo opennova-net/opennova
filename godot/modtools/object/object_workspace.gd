@@ -20,11 +20,17 @@ const TEXTURE_SLOTS := [
 	{"slot": 3, "label": "Normal A"},
 	{"slot": 4, "label": "Normal B"},
 ]
+const OED_UPDATE_NONE := 0
+const OED_UPDATE_MTRL := 1
+const OED_UPDATE_LGHT := 2
+const OED_UPDATE_PANM := 4
+const OED_UPDATE_ALL := OED_UPDATE_MTRL | OED_UPDATE_LGHT | OED_UPDATE_PANM
 
 var object_editor: ObjectEditor
 var _active_workflow_id: int = Workflow.PREVIEW
 var _preview: ObjectPreview
 var _material_clipboard: Dictionary = {}
+var _export_update_mask: int = OED_UPDATE_NONE
 
 
 func set_editor_shell(value: Node) -> void:
@@ -229,7 +235,12 @@ func get_export_action_label() -> String:
 
 
 func begin_export(dir_path: String, _flavor: int) -> Error:
-	return object_editor.export_to_dir(dir_path) if object_editor else ERR_UNAVAILABLE
+	if object_editor == null:
+		return ERR_UNAVAILABLE
+	var err := object_editor.export_to_dir(dir_path, _selected_export_update_mask())
+	if err == OK:
+		_sync_export_update_mask_from_dirty()
+	return err
 
 
 func get_save_dialog_title() -> String:
@@ -261,9 +272,11 @@ func _ensure_object_editor() -> void:
 		editor_shell.add_child(object_editor)
 	object_editor.create_empty_object(false)
 	object_editor.state_changed.connect(_sync_shell)
+	_sync_export_update_mask_from_dirty()
 
 
 func _sync_shell() -> void:
+	_sync_export_update_mask_from_dirty()
 	if _preview != null and object_editor != null:
 		_preview.set_object_data(object_editor.object_data)
 	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
@@ -315,6 +328,8 @@ func _build_preview_inspector(host: Control) -> void:
 			_preview.set_wireframe(pressed)
 	)
 
+	_build_export_mask_controls(box)
+
 	var ctrl_regs: Array = object_editor.object_data.get_control_registers() if object_editor and object_editor.object_data and object_editor.object_data.has_method("get_control_registers") else []
 	if not ctrl_regs.is_empty() and _preview != null:
 		var ctrl_label := Label.new()
@@ -342,6 +357,57 @@ func _build_preview_inspector(host: Control) -> void:
 				if _preview != null:
 					_preview.set_ctrl_value(name, int(value))
 			)
+
+
+func _build_export_mask_controls(box: VBoxContainer) -> void:
+	if object_editor == null or object_editor.object_data == null or not object_editor.object_data.can_export_3di():
+		return
+	_sync_export_update_mask_from_dirty()
+	var label := Label.new()
+	label.text = "Export chunks"
+	box.add_child(label)
+
+	var row := HBoxContainer.new()
+	row.name = "ObjectExportMaskControls"
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(row)
+
+	_add_export_mask_check(row, "ObjectExportMtrlCheck", "MTRL", OED_UPDATE_MTRL)
+	_add_export_mask_check(row, "ObjectExportLghtCheck", "LGHT", OED_UPDATE_LGHT)
+	_add_export_mask_check(row, "ObjectExportPanmCheck", "PANM", OED_UPDATE_PANM)
+
+
+func _add_export_mask_check(parent: HBoxContainer, node_name: String, label: String, bit: int) -> CheckBox:
+	var check := CheckBox.new()
+	check.name = node_name
+	check.text = label
+	check.button_pressed = (_export_update_mask & bit) != 0
+	parent.add_child(check)
+	check.toggled.connect(func(pressed: bool) -> void:
+		if pressed:
+			_export_update_mask |= bit
+		else:
+			_export_update_mask &= ~bit
+	)
+	return check
+
+
+func _sync_export_update_mask_from_dirty() -> void:
+	var dirty_mask := _get_oed_dirty_mask()
+	_export_update_mask = dirty_mask if dirty_mask != OED_UPDATE_NONE else OED_UPDATE_ALL
+
+
+func _selected_export_update_mask() -> int:
+	var mask := _export_update_mask & OED_UPDATE_ALL
+	return OED_UPDATE_ALL if mask == OED_UPDATE_NONE else mask
+
+
+func _get_oed_dirty_mask() -> int:
+	if object_editor == null or object_editor.object_data == null:
+		return OED_UPDATE_NONE
+	if not object_editor.object_data.has_method("get_oed_dirty_mask"):
+		return OED_UPDATE_NONE
+	return int(object_editor.object_data.get_oed_dirty_mask()) & OED_UPDATE_ALL
 
 
 func _build_lods_inspector(host: Control) -> void:
