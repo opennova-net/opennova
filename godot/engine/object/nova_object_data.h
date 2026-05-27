@@ -41,6 +41,7 @@ private:
 	bool has_source_model = false;
 	bool has_source_project = false;
 	uint8_t oed_dirty_mask = 0;
+	uint8_t last_oed_update_mask = 0;
 
 	String source_path;
 	String source_dir;
@@ -97,6 +98,7 @@ public:
 	String get_source_kind() const;
 	String get_last_error() const;
 	int get_oed_dirty_mask() const;
+	int get_last_oed_update_mask() const;
 	Dictionary get_summary() const;
 	Array get_project_lods() const;
 	bool set_lod_field(int p_lod_index, const String &p_key, const Variant &p_value);
@@ -124,8 +126,18 @@ public:
 	Dictionary get_user_point_info(int p_index) const;
 	int get_part_anim_count(int p_lod_index) const;
 	Array get_part_animations(int p_lod_index) const;
+	Array get_part_anim_editor_entries(int p_lod_index) const;
+	int add_part_anim(int p_lod_index, int p_part_index);
+	int duplicate_part_anim(int p_lod_index, int p_anim_index);
+	bool delete_part_anim(int p_lod_index, int p_anim_index);
+	bool set_part_anim_target(int p_lod_index, int p_anim_index, int p_part_index, int p_parent_part);
+	bool set_part_anim_channel_enabled(int p_lod_index, int p_anim_index, const String &p_channel, bool p_enabled);
+	bool set_part_anim_channel_mode(int p_lod_index, int p_anim_index, const String &p_channel, const String &p_axis, const String &p_mode, int p_control_register);
+	bool set_part_anim_channel_values(int p_lod_index, int p_anim_index, const String &p_channel, const String &p_axis, double p_from_value, double p_to_value, double p_speed);
+	bool set_part_anim_rotation_reversed(int p_lod_index, int p_anim_index, bool p_reversed);
 	Dictionary get_part_anim_info(int p_lod_index, int p_anim_index) const;
 	bool set_part_anim_field(int p_lod_index, int p_anim_index, const String &p_key, const Variant &p_value);
+	bool set_part_anim_track_field(int p_lod_index, int p_anim_index, const String &p_track, const String &p_key, const Variant &p_value);
 	Dictionary get_render_lod_info(int p_lod_index) const;
 	Array build_lod_submeshes(int p_lod_index) const;
 	Dictionary eval_material_runtime(int p_index, int p_time_ms, const Dictionary &p_ctrl_values) const;

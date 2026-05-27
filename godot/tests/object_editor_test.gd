@@ -4,6 +4,7 @@ const ObjectEditorScript = preload("res://modtools/object/object_editor.gd")
 const ObjectPreviewScript = preload("res://modtools/object/object_preview.gd")
 const ObjectWorkspaceScript = preload("res://modtools/object/object_workspace.gd")
 const FlyCameraScript = preload("res://engine/fly_camera.gd")
+const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd")
 
 const BIRD_FIXTURE := "res://../fixtures/3dp/Bird1/Bird1.3di"
 const BIRD_PROJECT_FIXTURE := "res://../fixtures/3dp/Bird1/Bird1.3dp"
@@ -12,12 +13,25 @@ const DVAN_FIXTURE := "res://../fixtures/3dp/dapche2/dapche2.3di"
 const ARMRY_FIXTURE := "res://../fixtures/3dp/armry01/Armry01.3di"
 const ARMRY_TEXTURE_FIXTURE := "res://../fixtures/3dp/armry01/KArm1_O.TGA"
 const US01_PROJECT_FIXTURE := "res://../fixtures/3dp/US01_onimport/US01.3dp"
+const FULL_00_ENV := "res://game/assets/environments/Full_00/full_00.env"
 const OUTPUT_DIR_NAME := "object_editor_export_test"
 const OED_UPDATE_NONE := 0
 const OED_UPDATE_MTRL := 1
 const OED_UPDATE_LGHT := 2
 const OED_UPDATE_PANM := 4
 const OED_UPDATE_ALL := OED_UPDATE_MTRL | OED_UPDATE_LGHT | OED_UPDATE_PANM
+
+
+class ObjectWorkspaceShellDouble:
+	extends Node
+
+	var environment_dialog_requested := false
+
+	func sync_from_editor_state() -> void:
+		pass
+
+	func show_environment_dialog() -> void:
+		environment_dialog_requested = true
 
 
 func before_each() -> void:
@@ -159,7 +173,7 @@ func test_object_data_open_3dp_preserves_material_indices_for_live_preview() -> 
 
 	var preview = add_child_autofree(ObjectPreviewScript.new())
 	preview.set_object_data(data)
-	var material_defs: Dictionary = preview._material_defs
+	var material_defs: Dictionary = preview.get_object_model().get_material_defs()
 	assert_eq(_texture_name_for_slot(material_defs.get(0, {}), 1).to_lower(), "aus1_vsg.tga", "Preview material 0 should keep US01's vest material instead of being overwritten by material 04.")
 	assert_eq(_texture_name_for_slot(material_defs.get(4, {}), 1).to_lower(), "aus1_hg1.tga", "Preview material 4 should keep US01's final material.")
 
@@ -187,8 +201,108 @@ func test_object_data_tracks_oed_dirty_mask_for_component_edits() -> void:
 	assert_true(data.set_light_field(0, "atten_start", 3.5))
 	assert_eq(_oed_dirty_mask(data), OED_UPDATE_MTRL | OED_UPDATE_LGHT, "Light edits should OR in LGHT.")
 
-	assert_true(data.set_part_anim_field(0, 0, "transform_as", 2))
+	assert_true(data.set_part_anim_target(0, 0, 2, 0))
 	assert_eq(_oed_dirty_mask(data), OED_UPDATE_ALL, "Part animation edits should OR in PANM.")
+
+
+func test_object_data_exposes_and_edits_semantic_part_anim_channels() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_eq(_oed_dirty_mask(data), OED_UPDATE_NONE)
+	assert_true(data.has_method("get_part_anim_editor_entries"), "Object data should expose semantic PANM editor entries.")
+	assert_true(data.has_method("set_part_anim_channel_enabled"), "Object data should expose semantic PANM channel toggles.")
+	assert_true(data.has_method("set_part_anim_channel_mode"), "Object data should expose semantic PANM channel modes.")
+	assert_true(data.has_method("set_part_anim_channel_values"), "Object data should expose semantic PANM channel values.")
+	if not data.has_method("get_part_anim_editor_entries"):
+		return
+
+	var original: Array = data.get_part_anim_editor_entries(0)
+	assert_gt(original.size(), 0)
+	var entry: Dictionary = original[0]
+	assert_true(entry.has("target_part"))
+	assert_true(entry.has("parent_part"))
+	assert_true(entry.get("rotation") is Dictionary)
+	assert_true(entry.get("scale") is Dictionary)
+	assert_true(entry.get("translation") is Dictionary)
+
+	assert_true(data.set_part_anim_channel_enabled(0, 0, "rotation", true))
+	assert_true(data.set_part_anim_channel_mode(0, 0, "rotation", "x", "slide", -1))
+	assert_true(data.set_part_anim_channel_values(0, 0, "rotation", "x", 0.0, 90.0, 1.0))
+	assert_eq(_oed_dirty_mask(data), OED_UPDATE_PANM, "Part animation semantic edits should mark only PANM dirty.")
+
+	var updated: Array = data.get_part_anim_editor_entries(0)
+	var rotation: Dictionary = (updated[0] as Dictionary).get("rotation", {})
+	var x_axis: Dictionary = rotation.get("x", {})
+	assert_true(bool(rotation.get("enabled", false)))
+	assert_eq(String(x_axis.get("mode", "")), "slide")
+	assert_almost_eq(float(x_axis.get("from_value", -1.0)), 0.0, 0.001)
+	assert_almost_eq(float(x_axis.get("to_value", -1.0)), 90.0, 0.01)
+	assert_almost_eq(float(x_axis.get("speed", -1.0)), 1.0, 0.001)
+
+
+func test_object_data_adds_duplicates_and_deletes_part_anim_entries() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_true(data.has_method("add_part_anim"), "Object data should expose PANM entry creation.")
+	assert_true(data.has_method("duplicate_part_anim"), "Object data should expose PANM entry duplication.")
+	assert_true(data.has_method("delete_part_anim"), "Object data should expose PANM entry deletion.")
+	if not data.has_method("add_part_anim") or not data.has_method("duplicate_part_anim") or not data.has_method("delete_part_anim"):
+		return
+
+	var original_count := data.get_part_anim_count(0)
+	var added_index := int(data.call("add_part_anim", 0, 3))
+	assert_eq(added_index, original_count)
+	assert_eq(data.get_part_anim_count(0), original_count + 1)
+	assert_eq(_oed_dirty_mask(data), OED_UPDATE_PANM, "Adding a PANM entry should mark only PANM dirty.")
+	var added: Dictionary = data.get_part_anim_editor_entries(0)[added_index]
+	assert_eq(int(added.get("target_part", -1)), 3)
+	assert_eq(int(added.get("parent_part", -1)), 0)
+	assert_false(bool((added.get("rotation", {}) as Dictionary).get("enabled", true)))
+
+	assert_true(data.set_part_anim_channel_enabled(0, added_index, "rotation", true))
+	assert_true(data.set_part_anim_channel_mode(0, added_index, "rotation", "x", "slide", -1))
+	assert_true(data.set_part_anim_channel_values(0, added_index, "rotation", "x", 0.0, 90.0, 1.0))
+	var duplicate_index := int(data.call("duplicate_part_anim", 0, added_index))
+	assert_eq(duplicate_index, added_index + 1)
+	assert_eq(data.get_part_anim_count(0), original_count + 2)
+	var duplicated: Dictionary = data.get_part_anim_editor_entries(0)[duplicate_index]
+	var duplicated_rotation: Dictionary = duplicated.get("rotation", {})
+	var duplicated_x: Dictionary = duplicated_rotation.get("x", {})
+	assert_eq(int(duplicated.get("target_part", -1)), 3)
+	assert_eq(String(duplicated_x.get("mode", "")), "slide")
+	assert_almost_eq(float(duplicated_x.get("to_value", 0.0)), 90.0, 0.01)
+
+	assert_true(bool(data.call("delete_part_anim", 0, added_index)))
+	assert_eq(data.get_part_anim_count(0), original_count + 1)
+	var shifted_duplicate: Dictionary = data.get_part_anim_editor_entries(0)[added_index]
+	var shifted_x: Dictionary = (shifted_duplicate.get("rotation", {}) as Dictionary).get("x", {})
+	assert_eq(int(shifted_duplicate.get("target_part", -1)), 3)
+	assert_eq(String(shifted_x.get("mode", "")), "slide")
+	assert_true(bool(data.call("delete_part_anim", 0, added_index)))
+	assert_eq(data.get_part_anim_count(0), original_count)
+
+
+func test_object_data_part_anim_target_preserves_matrix_binding() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
+	var lod_info: Dictionary = data.get_render_lod_info(0)
+	var part_count := int(lod_info.get("part_count", lod_info.get("render_object_count", 0)))
+	assert_gt(part_count, 1, "Fixture should expose multiple parts for target reassignment.")
+	var original: Dictionary = data.get_part_animations(0)[0]
+	var original_target := int(original.get("part_index", 0))
+	var next_target := (original_target + 1) % part_count
+	var original_parent := int(original.get("parent_part", 0))
+	var original_matrix := int(original.get("matrix_index", -1))
+	var original_bind := int(original.get("bind_matrix_index", -1))
+
+	assert_true(data.set_part_anim_target(0, 0, next_target, original_parent))
+
+	var updated: Dictionary = data.get_part_animations(0)[0]
+	assert_eq(int(updated.get("part_index", -1)), next_target, "Target part should change.")
+	assert_eq(int(updated.get("parent_part", -1)), original_parent, "Parent part should be preserved when unchanged.")
+	assert_eq(int(updated.get("matrix_index", -1)), original_matrix, "Changing the target part should not rebind the PANM matrix index.")
+	assert_eq(int(updated.get("bind_matrix_index", -1)), original_bind, "Changing the target part should not rebind the PANM bind matrix index.")
 
 
 func test_object_data_masked_export_clears_exported_oed_dirty_bits() -> void:
@@ -313,6 +427,21 @@ func test_object_data_export_failure_includes_native_oed_detail() -> void:
 	assert_string_contains(data.get_last_error(), "baseline 3DI", "Export failures should expose native OED details.")
 
 
+func test_nova_object_model_builds_runtime_scene_without_editor_viewport() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var model = add_child_autofree(NovaObjectModelScript.new())
+	model.set_object_data(data)
+	await get_tree().process_frame
+
+	assert_null(_find_node_by_type(model, "Camera3D"), "Object model should not own editor camera nodes.")
+	assert_null(_find_node_by_name(model, "ObjectGrid"), "Object model should not own editor grid nodes.")
+	assert_true(_find_node_by_type(model, "MeshInstance3D") != null, "Object model should build visible mesh instances.")
+	assert_gt(model.get_model_bounds().size.length(), 0.0, "Object model should expose stable local bounds.")
+	assert_gt(model.get_surface_materials().size(), 0, "Object model should expose preview shader materials.")
+	assert_gt(model.get_surface_material_indices().size(), 0, "Object model should expose material lookup indices.")
+
+
 func test_object_preview_uses_internal_viewport_without_godot_lights() -> void:
 	var data := NovaObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(BIRD_FIXTURE)), OK)
@@ -323,10 +452,33 @@ func test_object_preview_uses_internal_viewport_without_godot_lights() -> void:
 	assert_null(_find_node_by_type(preview, "DirectionalLight3D"), "Object preview should not use Godot directional lights.")
 	assert_null(_find_node_by_type(preview, "OmniLight3D"), "Object preview should not use Godot omni lights.")
 	assert_true(_find_node_by_type(preview, "MeshInstance3D") != null, "Object preview should build visible mesh instances.")
+	assert_not_null(preview.get_object_model(), "Object preview should delegate object rendering to NovaObjectModel.")
 	assert_not_null(_find_node_by_name(preview, "ObjectGrid"), "Object preview should include an authoring grid.")
+	assert_not_null(_find_node_by_name(preview, "ObjectAxisGizmo"), "Object preview should include an authoring axis gizmo.")
+	assert_not_null(_find_node_by_name(preview, "ObjectEnvironmentButton"), "Object preview should expose environment controls.")
 	var camera := _find_node_by_type(preview, "Camera3D") as Camera3D
 	assert_not_null(camera, "Object preview should create a camera.")
 	assert_eq(camera.get_script(), FlyCameraScript, "Object preview should use the shared fly camera controls.")
+
+
+func test_object_preview_ignores_rebinding_same_object_data() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var preview = add_child_autofree(ObjectPreviewScript.new())
+	preview.set_object_data(data)
+	await get_tree().process_frame
+	var model = preview.get_object_model()
+	var mesh_instance := _find_node_by_type(model, "MeshInstance3D") as MeshInstance3D
+	assert_not_null(mesh_instance, "Object preview should build a mesh instance before the rebind check.")
+	if mesh_instance == null:
+		return
+
+	preview.set_object_data(data)
+	await get_tree().process_frame
+
+	assert_true(is_instance_valid(mesh_instance), "Rebinding the same object data should not free preview nodes.")
+	if is_instance_valid(mesh_instance):
+		assert_not_null(mesh_instance.get_parent(), "Rebinding the same object data should not rebuild the model.")
 
 
 func test_object_preview_bounds_use_transformed_robj_meshes() -> void:
@@ -336,10 +488,11 @@ func test_object_preview_bounds_use_transformed_robj_meshes() -> void:
 	preview.set_object_data(data)
 	await get_tree().process_frame
 
-	var bounds: AABB = preview._compute_transformed_mesh_bounds()
+	var model = preview.get_object_model()
+	var bounds: AABB = model.get_model_bounds()
 	assert_gt(bounds.size.length(), 0.0, "Object preview should compute transformed mesh bounds.")
 	var checked := 0
-	for robj_node in preview._robj_nodes.values():
+	for robj_node in model.get_render_part_nodes().values():
 		var node := robj_node as Node3D
 		for child in node.get_children():
 			if child is MeshInstance3D:
@@ -349,7 +502,8 @@ func test_object_preview_bounds_use_transformed_robj_meshes() -> void:
 				var mesh_aabb := instance.mesh.get_aabb()
 				if mesh_aabb.size == Vector3.ZERO:
 					continue
-				assert_true(_aabb_encloses(bounds, instance.global_transform * mesh_aabb), "Preview bounds should include each transformed robj mesh.")
+				var local_aabb: AABB = model.global_transform.affine_inverse() * (instance.global_transform * mesh_aabb)
+				assert_true(_aabb_encloses(bounds, local_aabb), "Preview bounds should include each transformed robj mesh.")
 				checked += 1
 	assert_gt(checked, 0, "Fixture should create transformed preview mesh instances.")
 	var camera := _find_node_by_type(preview, "Camera3D") as Camera3D
@@ -377,6 +531,52 @@ func test_object_preview_applies_diffuse_material_textures() -> void:
 		assert_string_contains(shader_code, "cull_disabled", "Two-sided preview materials should disable culling.")
 	else:
 		assert_string_contains(shader_code, "cull_back", "One-sided preview materials should keep backface culling.")
+
+
+func test_object_preview_applies_environment_lighting_and_fog_uniforms() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var env := ResourceLoader.load(FULL_00_ENV) as EnvFile
+	assert_not_null(env, "Environment fixture should load through ResourceLoader.")
+	if env == null:
+		return
+	var preview = add_child_autofree(ObjectPreviewScript.new())
+	preview.set_environment(env, 1200.0)
+	preview.set_object_data(data)
+	await get_tree().process_frame
+
+	var material := _find_textured_shader_material(preview.get_object_model())
+	assert_not_null(material, "Environment uniforms should be written to object shader materials.")
+	if material == null:
+		return
+	var tod := env.interpolate_time_of_day(1200.0)
+	_assert_vector3_close(material.get_shader_parameter("u_dir_light_color"), tod.get("sun", Vector3.ZERO), 0.01, "Preview should use environment sun lighting.")
+	_assert_vector3_close(material.get_shader_parameter("u_fill_light_color"), tod.get("ground", Vector3.ZERO), 0.01, "Preview should use environment fill lighting.")
+	_assert_vector3_close(material.get_shader_parameter("u_fog_color"), tod.get("fog", Vector3.ZERO), 0.01, "Preview should use environment fog color.")
+	_assert_vector3_close(material.get_shader_parameter("u_dir_light_dir"), -env.compute_sun_direction(1200.0).normalized(), 0.01, "Preview should use environment sun direction.")
+	assert_true(bool(material.get_shader_parameter("u_fog_enabled")), "Loaded environments should enable object fog uniforms.")
+	assert_eq(int(material.get_shader_parameter("u_fog_type")), env.get_fog_type())
+	assert_true(float(material.get_shader_parameter("u_fog_end")) > 0.0, "Object fog should carry a positive fog end distance.")
+
+
+func test_object_workspace_environment_button_opens_environment_dialog() -> void:
+	var shell := ObjectWorkspaceShellDouble.new()
+	add_child_autofree(shell)
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(shell)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var viewport_host = add_child_autofree(Control.new())
+	workspace.mount_viewport(viewport_host)
+	await get_tree().process_frame
+
+	var button := _find_node_by_name(viewport_host, "ObjectEnvironmentButton") as Button
+	assert_not_null(button, "Object preview should expose the environment dialog button.")
+	if button == null:
+		return
+	button.pressed.emit()
+
+	assert_true(shell.environment_dialog_requested, "Object workspace should route preview environment requests to the editor shell.")
+	workspace.release_viewport()
 
 
 func test_object_data_builds_each_lod_with_consistent_mesh_arrays() -> void:
@@ -631,75 +831,330 @@ func test_object_lods_inspector_edits_scene_and_project_settings() -> void:
 	assert_eq(int(data.get_summary().get("poly_collision_lod", -1)), 0)
 
 
-func test_object_part_anims_inspector_populates_edits_and_exports() -> void:
+func test_object_part_anims_use_left_list_and_right_detail_dock() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var data: NovaObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
 	workspace.object_editor.mark_clean()
-	var host = add_child_autofree(Control.new())
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, host)
-	var list := _find_node_by_name(host, "PartAnimList") as ItemList
-	var lod_index := _find_node_by_name(host, "PartAnimLodIndex") as SpinBox
-	var transform_as := _find_node_by_name(host, "PartAnimTransformAs") as SpinBox
-	var parent := _find_node_by_name(host, "PartAnimParent") as SpinBox
-	var scale_type := _find_node_by_name(host, "PartAnimScaleType") as SpinBox
-	var rotation_type := _find_node_by_name(host, "PartAnimRotationType") as SpinBox
-	var translate_type := _find_node_by_name(host, "PartAnimTranslateType") as SpinBox
-	var reversed := _find_node_by_name(host, "PartAnimRotationReversed") as CheckBox
+	assert_true(workspace.uses_asset_dock(), "Object workspace should use the terrain-style right dock for detail editing.")
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
+
+	var list_pane := _find_node_by_name(list_host, "PartAnimListPane")
+	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
+	var lod_index := _find_node_by_name(list_host, "PartAnimLodIndex") as SpinBox
+	var add_button := _find_node_by_name(list_host, "PartAnimAddButton") as Button
+	var duplicate_button := _find_node_by_name(list_host, "PartAnimDuplicateButton") as Button
+	var delete_button := _find_node_by_name(list_host, "PartAnimDeleteButton") as Button
+	var detail_dock := _find_node_by_name(detail_host, "ObjectDetailDock")
+	var target_part := _find_node_by_name(detail_host, "PartAnimTargetPart") as OptionButton
+	var parent_part := _find_node_by_name(detail_host, "PartAnimParentPart") as OptionButton
 	assert_not_null(list, "Part animation inspector should expose a stable list node.")
 	assert_not_null(lod_index, "Part animation inspector should expose the editable LOD index.")
-	assert_not_null(transform_as)
-	assert_not_null(parent)
-	assert_not_null(scale_type)
-	assert_not_null(rotation_type)
-	assert_not_null(translate_type)
-	assert_not_null(reversed)
-	if list == null or lod_index == null or transform_as == null or parent == null or scale_type == null or rotation_type == null or translate_type == null or reversed == null:
+	assert_not_null(list_pane, "Part animation workflow should use the left inspector as a list pane.")
+	assert_not_null(add_button, "Part animation list pane should expose Add.")
+	assert_not_null(duplicate_button, "Part animation list pane should expose Duplicate.")
+	assert_not_null(delete_button, "Part animation list pane should expose Delete.")
+	assert_not_null(detail_dock, "Part animation workflow should mount details in the right dock.")
+	assert_not_null(target_part, "Right detail dock should expose semantic animated-part selection.")
+	assert_not_null(parent_part, "Right detail dock should expose semantic parent selection.")
+	assert_null(_find_node_by_name(detail_host, "PartAnimTransformAs"), "PANM detail UI should not expose raw transform_as.")
+	assert_null(_find_node_by_name(detail_host, "PartAnimScaleType"), "PANM detail UI should not expose raw scale type values.")
+	assert_null(_find_node_by_name(detail_host, "PartAnimTrack_rotation_xFunction"), "PANM detail UI should not expose raw track function fields.")
+	if list == null or lod_index == null or target_part == null or parent_part == null:
 		return
 
 	list.select(0)
 	list.item_selected.emit(0)
-	var original: Dictionary = data.get_part_anim_info(0, 0)
+	var original: Dictionary = data.get_part_anim_editor_entries(0)[0]
 	assert_eq(int(lod_index.value), 0)
-	assert_eq(int(transform_as.value), int(original.get("transform_as", 0)))
-	assert_eq(int(parent.value), int(original.get("parent_subobject", 0)))
+	assert_eq(target_part.get_selected_id(), int(original.get("target_part", 0)))
+	assert_eq(parent_part.get_selected_id(), int(original.get("parent_part", 0)))
 
-	transform_as.value = 2
-	transform_as.value_changed.emit(2.0)
-	parent.value = 1
-	parent.value_changed.emit(1.0)
-	scale_type.value = 4
-	scale_type.value_changed.emit(4.0)
-	rotation_type.value = 5
-	rotation_type.value_changed.emit(5.0)
-	translate_type.value = 6
-	translate_type.value_changed.emit(6.0)
-	reversed.button_pressed = true
-	reversed.toggled.emit(true)
+	var target_id := 1 if target_part.get_item_count() > 1 else 0
+	var parent_id := 0
+	var target_index := _option_index_by_id(target_part, target_id)
+	var parent_index := _option_index_by_id(parent_part, parent_id)
+	assert_true(target_index >= 0)
+	assert_true(parent_index >= 0)
+	target_part.select(target_index)
+	target_part.item_selected.emit(target_index)
+	parent_part.select(parent_index)
+	parent_part.item_selected.emit(parent_index)
+	await get_tree().process_frame
 
 	assert_true(workspace.object_editor.is_dirty, "Editing a part animation should mark the object dirty.")
-	var updated: Dictionary = data.get_part_anim_info(0, 0)
-	assert_eq(int(updated.get("transform_as", 0)), 2)
-	assert_eq(int(updated.get("parent_subobject", 0)), 1)
-	assert_eq(int(updated.get("scale_type", 0)), 4)
-	assert_eq(int(updated.get("rotation_type", 0)), 5)
-	assert_eq(int(updated.get("translate_type", 0)), 6)
-	assert_true(bool(updated.get("rotation_reversed", false)))
+	var updated: Dictionary = data.get_part_anim_editor_entries(0)[0]
+	assert_eq(int(updated.get("target_part", -1)), target_id)
+	assert_eq(int(updated.get("parent_part", -1)), parent_id)
 
 	var export_dir := _output_dir().path_join("part_anim_export")
 	assert_eq(workspace.begin_export(export_dir, 0), OK)
 	var reopened := NovaObjectData.new()
 	assert_eq(reopened.open_file(export_dir.path_join("Armry01.3di")), OK)
-	var reopened_info: Dictionary = reopened.get_part_anim_info(0, 0)
-	assert_eq(int(reopened_info.get("transform_as", 0)), 2)
-	assert_eq(int(reopened_info.get("parent_subobject", 0)), 1)
-	assert_eq(int(reopened_info.get("scale_type", 0)), 4)
-	assert_eq(int(reopened_info.get("rotation_type", 0)), 5)
-	assert_eq(int(reopened_info.get("translate_type", 0)), 6)
-	assert_true(bool(reopened_info.get("rotation_reversed", false)))
+	var reopened_info: Dictionary = reopened.get_part_anim_editor_entries(0)[0]
+	assert_eq(int(reopened_info.get("target_part", -1)), target_id)
+	assert_eq(int(reopened_info.get("parent_part", -1)), parent_id)
+
+
+func test_object_part_anims_left_actions_add_duplicate_and_delete_entries() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var data: NovaObjectData = workspace.object_editor.object_data
+	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
+	workspace.object_editor.mark_clean()
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
+
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
+	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
+	var add_button := _find_node_by_name(list_host, "PartAnimAddButton") as Button
+	var duplicate_button := _find_node_by_name(list_host, "PartAnimDuplicateButton") as Button
+	var delete_button := _find_node_by_name(list_host, "PartAnimDeleteButton") as Button
+	assert_not_null(list)
+	assert_not_null(add_button)
+	assert_not_null(duplicate_button)
+	assert_not_null(delete_button)
+	if list == null or add_button == null or duplicate_button == null or delete_button == null:
+		return
+
+	var original_count := data.get_part_anim_count(0)
+	list.select(0)
+	list.item_selected.emit(0)
+	add_button.pressed.emit()
+	assert_eq(data.get_part_anim_count(0), original_count + 1, "Add should create a PANM entry in the selected LOD.")
+	assert_true(list.is_selected(original_count), "Add should select the new PANM entry.")
+
+	duplicate_button.pressed.emit()
+	assert_eq(data.get_part_anim_count(0), original_count + 2, "Duplicate should append a copy of the selected PANM entry.")
+	assert_true(list.is_selected(original_count + 1), "Duplicate should select the copied PANM entry.")
+
+	delete_button.pressed.emit()
+	assert_eq(data.get_part_anim_count(0), original_count + 1, "Delete should remove the selected PANM entry.")
+	delete_button.pressed.emit()
+	assert_eq(data.get_part_anim_count(0), original_count, "Delete should be able to remove the added entry too.")
+	await get_tree().process_frame
+
+	assert_true(workspace.object_editor.is_dirty, "PANM list actions should mark the object dirty.")
+	assert_eq(_oed_dirty_mask(data), OED_UPDATE_PANM, "PANM list actions should mark only PANM dirty.")
+
+
+func test_object_part_anim_detail_dock_reflows_within_right_pane() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_gt(workspace.object_editor.object_data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(PanelContainer.new())
+	detail_host.custom_minimum_size = Vector2(360, 640)
+	detail_host.size = Vector2(360, 640)
+
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
+	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
+	assert_not_null(list)
+	if list == null:
+		return
+	list.select(0)
+	list.item_selected.emit(0)
+	await get_tree().process_frame
+
+	var detail_box := _find_node_by_name(detail_host, "ObjectDetailDockBox") as Control
+	assert_not_null(detail_box)
+	if detail_box == null:
+		return
+	var max_content_width := 340.0
+	assert_lt(detail_box.get_combined_minimum_size().x, max_content_width + 0.01, "PANM right pane content should not require horizontal clipping at the shared dock width.")
+
+	for control_name in [
+		"PartAnimTargetPart",
+		"PartAnimParentPart",
+		"PartAnimRotationMode",
+		"PartAnimRotationXFrom",
+		"PartAnimRotationXTo",
+		"PartAnimScaleMode",
+		"PartAnimTranslationAxis",
+		"PartAnimTranslationMode",
+	]:
+		var control := _find_node_by_name(detail_host, control_name) as Control
+		assert_not_null(control, "%s should exist in the PANM detail dock." % control_name)
+		if control == null:
+			continue
+		assert_lt(control.get_combined_minimum_size().x, max_content_width + 0.01, "%s should be allowed to fit inside the right pane." % control_name)
+		var label := _field_label_for_control(control)
+		assert_not_null(label, "%s should have an associated field label." % control_name)
+		if label != null:
+			assert_false(label.clip_text, "%s label should wrap instead of clipping." % control_name)
+			assert_true(label.autowrap_mode != TextServer.AUTOWRAP_OFF, "%s label should be configured to wrap." % control_name)
+
+
+func test_object_part_anim_value_edits_keep_preview_signal_safe() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_gt(workspace.object_editor.object_data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
+	var viewport_host = add_child_autofree(Control.new())
+	viewport_host.size = Vector2(640, 480)
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(PanelContainer.new())
+
+	workspace.mount_viewport(viewport_host)
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
+	await get_tree().process_frame
+	var preview = _find_node_by_name(viewport_host, "ObjectPreview")
+	assert_not_null(preview, "Object workspace should mount a live object preview.")
+	if preview == null:
+		return
+	var model = preview.call("get_object_model")
+	assert_not_null(model, "Object preview should expose the runtime model.")
+	var before_bounds: AABB = model.get_model_bounds()
+	assert_true(_aabb_is_finite(before_bounds), "Preview bounds should be finite before PANM edits.")
+
+	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
+	var rotation_x_to := _find_node_by_name(detail_host, "PartAnimRotationXTo") as SpinBox
+	assert_not_null(list)
+	assert_not_null(rotation_x_to)
+	if list == null or rotation_x_to == null:
+		return
+	list.select(0)
+	list.item_selected.emit(0)
+
+	rotation_x_to.value += 5.0
+	rotation_x_to.value_changed.emit(rotation_x_to.value)
+	await get_tree().process_frame
+
+	assert_true(is_instance_valid(rotation_x_to), "Editing PANM values should not free the active editor control during its signal.")
+	var after_bounds: AABB = model.get_model_bounds()
+	assert_true(_aabb_is_finite(after_bounds), "Preview bounds should remain finite after PANM value edits.")
+	assert_lt(after_bounds.size.length(), 10000.0, "PANM value edits should not explode preview bounds.")
+
+
+func test_object_part_anim_sine_translation_end_edit_does_not_rebuild_preview_nodes() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_gt(workspace.object_editor.object_data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
+	var viewport_host = add_child_autofree(Control.new())
+	viewport_host.size = Vector2(640, 480)
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(PanelContainer.new())
+
+	workspace.mount_viewport(viewport_host)
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
+	await get_tree().process_frame
+	var preview = _find_node_by_name(viewport_host, "ObjectPreview")
+	assert_not_null(preview, "Object workspace should mount a live object preview.")
+	if preview == null:
+		return
+	var model = preview.call("get_object_model")
+	assert_not_null(model, "Object preview should expose the runtime model.")
+	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
+	var translation_enabled := _find_node_by_name(detail_host, "PartAnimTranslationEnabled") as CheckBox
+	var translation_mode := _find_node_by_name(detail_host, "PartAnimTranslationMode") as OptionButton
+	var translation_to := _find_node_by_name(detail_host, "PartAnimTranslationTo") as SpinBox
+	assert_not_null(list)
+	assert_not_null(translation_enabled)
+	assert_not_null(translation_mode)
+	assert_not_null(translation_to)
+	if list == null or translation_enabled == null or translation_mode == null or translation_to == null:
+		return
+	list.select(0)
+	list.item_selected.emit(0)
+	translation_enabled.button_pressed = true
+	translation_enabled.toggled.emit(true)
+	var sine_index := _option_index_by_id(translation_mode, 50)
+	assert_true(sine_index >= 0, "Translation driver should expose Sine wave.")
+	if sine_index < 0:
+		return
+	translation_mode.select(sine_index)
+	translation_mode.item_selected.emit(sine_index)
+	await get_tree().process_frame
+
+	var before_node_ids := _render_node_instance_ids(model)
+	assert_gt(before_node_ids.size(), 0, "Preview should have render nodes before editing translation end.")
+	var before_bounds: AABB = model.get_model_bounds()
+	assert_true(_aabb_is_finite(before_bounds), "Preview bounds should be finite before sine translation edits.")
+
+	translation_to.value = clampf(translation_to.value + 1.0, translation_to.min_value, translation_to.max_value)
+	translation_to.value_changed.emit(translation_to.value)
+	await get_tree().process_frame
+
+	assert_true(is_instance_valid(translation_to), "Editing a sine translation end value should not free the active spinbox during its signal.")
+	assert_eq(_render_node_instance_ids(model), before_node_ids, "PANM value edits should update preview transforms without rebuilding render nodes.")
+	var after_bounds: AABB = model.get_model_bounds()
+	assert_true(_aabb_is_finite(after_bounds), "Preview bounds should remain finite after sine translation end edits.")
+	assert_lt(after_bounds.size.length(), 10000.0, "Sine translation end edits should not explode preview bounds.")
+	var updated: Dictionary = workspace.object_editor.object_data.get_part_anim_editor_entries(0)[0]
+	var translation: Dictionary = updated.get("translation", {})
+	var track: Dictionary = translation.get("track", {})
+	assert_eq(String(track.get("mode", "")), "sine_wave", "Translation driver should remain semantic sine wave after editing.")
+	assert_almost_eq(float(track.get("to_value", 0.0)), float(translation_to.value), 0.01)
+
+
+func test_object_part_anim_target_dropdown_preserves_preview_binding() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var data: NovaObjectData = workspace.object_editor.object_data
+	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
+	var lod_info: Dictionary = data.get_render_lod_info(0)
+	var part_count := int(lod_info.get("part_count", lod_info.get("render_object_count", 0)))
+	assert_gt(part_count, 1, "Fixture should expose multiple parts for target reassignment.")
+	var viewport_host = add_child_autofree(Control.new())
+	viewport_host.size = Vector2(640, 480)
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(PanelContainer.new())
+
+	workspace.mount_viewport(viewport_host)
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
+	await get_tree().process_frame
+	var preview = _find_node_by_name(viewport_host, "ObjectPreview")
+	assert_not_null(preview)
+	if preview == null:
+		return
+	var model = preview.call("get_object_model")
+	assert_not_null(model)
+	var before_bounds: AABB = model.get_model_bounds()
+	assert_true(_aabb_is_finite(before_bounds), "Preview bounds should be finite before target edits.")
+
+	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
+	var target_part := _find_node_by_name(detail_host, "PartAnimTargetPart") as OptionButton
+	assert_not_null(list)
+	assert_not_null(target_part)
+	if list == null or target_part == null:
+		return
+	list.select(0)
+	list.item_selected.emit(0)
+	var original: Dictionary = data.get_part_animations(0)[0]
+	var next_target := (int(original.get("part_index", 0)) + 1) % part_count
+	var original_matrix := int(original.get("matrix_index", -1))
+	var original_bind := int(original.get("bind_matrix_index", -1))
+	var target_index := _option_index_by_id(target_part, next_target)
+	assert_true(target_index >= 0, "Target dropdown should expose the next part.")
+	if target_index < 0:
+		return
+
+	target_part.select(target_index)
+	target_part.item_selected.emit(target_index)
+	await get_tree().process_frame
+
+	var updated: Dictionary = data.get_part_animations(0)[0]
+	assert_eq(int(updated.get("part_index", -1)), next_target, "Target dropdown should update the semantic target part.")
+	assert_eq(int(updated.get("matrix_index", -1)), original_matrix, "Target dropdown should preserve the PANM matrix binding.")
+	assert_eq(int(updated.get("bind_matrix_index", -1)), original_bind, "Target dropdown should preserve the PANM bind matrix binding.")
+	var after_bounds: AABB = model.get_model_bounds()
+	assert_true(_aabb_is_finite(after_bounds), "Preview bounds should remain finite after target edits.")
+	assert_lt(after_bounds.size.length(), 10000.0, "Target edits should not explode preview bounds.")
 
 
 func test_object_lights_inspector_populates_edits_and_exports() -> void:
@@ -987,48 +1442,83 @@ func test_object_materials_inspector_copies_and_pastes_settings() -> void:
 	assert_eq(String(target_info.get("diffuse_a", "")), String(source_info.get("diffuse_a", "")), "Pasted material should copy diffuse texture.")
 
 
-func test_object_part_anims_inspector_uses_named_type_options() -> void:
+func test_object_part_anim_detail_dock_edits_semantic_channels() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var data: NovaObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
 	workspace.object_editor.mark_clean()
-	var host = add_child_autofree(Control.new())
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, host)
-	var list := _find_node_by_name(host, "PartAnimList") as ItemList
-	var scale_option := _find_node_by_name(host, "PartAnimScaleTypeOption") as OptionButton
-	var rotation_option := _find_node_by_name(host, "PartAnimRotationTypeOption") as OptionButton
-	var translate_option := _find_node_by_name(host, "PartAnimTranslateTypeOption") as OptionButton
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
+	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
+	var rotation_enabled := _find_node_by_name(detail_host, "PartAnimRotationEnabled") as CheckBox
+	var rotation_mode := _find_node_by_name(detail_host, "PartAnimRotationMode") as OptionButton
+	var rotation_x_to := _find_node_by_name(detail_host, "PartAnimRotationXTo") as SpinBox
+	var rotation_speed := _find_node_by_name(detail_host, "PartAnimRotationSpeed") as SpinBox
+	var scale_enabled := _find_node_by_name(detail_host, "PartAnimScaleEnabled") as CheckBox
+	var scale_mode := _find_node_by_name(detail_host, "PartAnimScaleMode") as OptionButton
+	var translation_enabled := _find_node_by_name(detail_host, "PartAnimTranslationEnabled") as CheckBox
+	var translation_axis := _find_node_by_name(detail_host, "PartAnimTranslationAxis") as OptionButton
 	assert_not_null(list)
-	assert_not_null(scale_option)
-	assert_not_null(rotation_option)
-	assert_not_null(translate_option)
-	if list == null or scale_option == null or rotation_option == null or translate_option == null:
+	assert_not_null(rotation_enabled)
+	assert_not_null(rotation_mode)
+	assert_not_null(rotation_x_to)
+	assert_not_null(rotation_speed)
+	assert_not_null(scale_enabled)
+	assert_not_null(scale_mode)
+	assert_not_null(translation_enabled)
+	assert_not_null(translation_axis)
+	assert_null(_find_node_by_name(detail_host, "PartAnimRotationType"), "Semantic PANM UI should not expose raw rotation type values.")
+	assert_null(_find_node_by_name(detail_host, "PartAnimTranslateType"), "Semantic PANM UI should not expose raw translation type values.")
+	if list == null or rotation_enabled == null or rotation_mode == null or rotation_x_to == null or rotation_speed == null or scale_enabled == null or scale_mode == null or translation_enabled == null or translation_axis == null:
 		return
 
 	list.select(0)
 	list.item_selected.emit(0)
-	var scale_index := _option_index_by_id(scale_option, 2)
-	var rotation_index := _option_index_by_id(rotation_option, 2)
-	var translate_index := _option_index_by_id(translate_option, 3)
-	assert_true(scale_index >= 0, "Scale picker should expose the per-axis type.")
-	assert_true(rotation_index >= 0, "Rotation picker should expose the Euler type.")
-	assert_true(translate_index >= 0, "Translation picker should expose the Z axis type.")
+	rotation_enabled.button_pressed = true
+	rotation_enabled.toggled.emit(true)
+	var slide_index := _option_index_by_id(rotation_mode, 16)
+	assert_true(slide_index >= 0, "Rotation driver should expose Slide.")
+	rotation_mode.select(slide_index)
+	rotation_mode.item_selected.emit(slide_index)
+	rotation_x_to.value = 90.0
+	rotation_x_to.value_changed.emit(90.0)
+	rotation_speed.value = 1.0
+	rotation_speed.value_changed.emit(1.0)
 
-	scale_option.select(scale_index)
-	scale_option.item_selected.emit(scale_index)
-	rotation_option.select(rotation_index)
-	rotation_option.item_selected.emit(rotation_index)
-	translate_option.select(translate_index)
-	translate_option.item_selected.emit(translate_index)
+	scale_enabled.button_pressed = true
+	scale_enabled.toggled.emit(true)
+	var per_axis_index := _option_index_by_id(scale_mode, 2)
+	assert_true(per_axis_index >= 0, "Scale style should expose per-axis.")
+	scale_mode.select(per_axis_index)
+	scale_mode.item_selected.emit(per_axis_index)
 
-	var updated: Dictionary = data.get_part_anim_info(0, 0)
-	assert_eq(int(updated.get("scale_type", 0)), 2)
-	assert_eq(int(updated.get("rotation_type", 0)), 2)
-	assert_eq(int(updated.get("translate_type", 0)), 3)
-	assert_true(workspace.object_editor.is_dirty, "Editing named part animation type options should mark the object dirty.")
+	translation_enabled.button_pressed = true
+	translation_enabled.toggled.emit(true)
+	var z_index := _option_index_by_id(translation_axis, 3)
+	assert_true(z_index >= 0, "Translation direction should expose Z.")
+	translation_axis.select(z_index)
+	translation_axis.item_selected.emit(z_index)
+	await get_tree().process_frame
+
+	var updated: Dictionary = data.get_part_anim_editor_entries(0)[0]
+	var rotation: Dictionary = updated.get("rotation", {})
+	var rotation_x: Dictionary = rotation.get("x", {})
+	var scale: Dictionary = updated.get("scale", {})
+	var translation: Dictionary = updated.get("translation", {})
+	assert_true(bool(rotation.get("enabled", false)))
+	assert_eq(String(rotation_x.get("mode", "")), "slide")
+	assert_almost_eq(float(rotation_x.get("to_value", 0.0)), 90.0, 0.01)
+	assert_almost_eq(float(rotation_x.get("speed", 0.0)), 1.0, 0.001)
+	assert_true(bool(scale.get("enabled", false)))
+	assert_eq(String(scale.get("style", "")), "per_axis")
+	assert_true(bool(translation.get("enabled", false)))
+	assert_eq(String(translation.get("axis", "")), "z")
+	assert_true(workspace.object_editor.is_dirty, "Editing semantic part animation controls should mark the object dirty.")
 
 
 func _assert_mesh_arrays_consistent(mesh: ArrayMesh, lod_index: int) -> void:
@@ -1061,6 +1551,32 @@ func _aabb_encloses(outer: AABB, inner: AABB) -> bool:
 	)
 
 
+func _aabb_is_finite(bounds: AABB) -> bool:
+	return (
+		is_finite(bounds.position.x)
+		and is_finite(bounds.position.y)
+		and is_finite(bounds.position.z)
+		and is_finite(bounds.size.x)
+		and is_finite(bounds.size.y)
+		and is_finite(bounds.size.z)
+	)
+
+
+func _render_node_instance_ids(model) -> Dictionary:
+	var ids := {}
+	if model == null:
+		return ids
+	var nodes: Dictionary = model.get_render_part_nodes()
+	for key in nodes.keys():
+		var node := nodes[key] as Object
+		ids[key] = node.get_instance_id() if node != null else 0
+	return ids
+
+
+func _assert_vector3_close(actual: Vector3, expected: Vector3, epsilon: float, message: String) -> void:
+	assert_true(actual.distance_to(expected) <= epsilon, "%s expected %s got %s" % [message, str(expected), str(actual)])
+
+
 func _find_node_by_type(root: Node, type_name: String) -> Node:
 	if root.get_class() == type_name:
 		return root
@@ -1071,13 +1587,16 @@ func _find_node_by_type(root: Node, type_name: String) -> Node:
 	return null
 
 
-func _find_textured_preview_material_entry(preview: ObjectPreview) -> Dictionary:
-	for i in range(preview._surface_materials.size()):
-		var material := preview._surface_materials[i] as ShaderMaterial
+func _find_textured_preview_material_entry(preview) -> Dictionary:
+	var model = preview.call("get_object_model") if preview != null and preview.has_method("get_object_model") else null
+	var materials: Array = model.get_surface_materials() if model != null else preview._surface_materials
+	var material_indices: PackedInt32Array = model.get_surface_material_indices() if model != null else preview._surface_material_indices
+	for i in range(materials.size()):
+		var material := materials[i] as ShaderMaterial
 		if material != null and material.get_shader_parameter("u_diffuse") is Texture2D:
 			return {
 				"material": material,
-				"material_index": int(preview._surface_material_indices[i]),
+				"material_index": int(material_indices[i]),
 			}
 	return {}
 
@@ -1120,6 +1639,15 @@ func _option_index_by_id(option: OptionButton, item_id: int) -> int:
 		if option.get_item_id(i) == item_id:
 			return i
 	return -1
+
+
+func _field_label_for_control(control: Control) -> Label:
+	if control == null or control.get_parent() == null:
+		return null
+	for sibling in control.get_parent().get_children():
+		if sibling is Label:
+			return sibling as Label
+	return null
 
 
 func _max_triangle_edge(vertices: PackedVector3Array) -> float:

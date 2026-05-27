@@ -67,6 +67,11 @@ std::string compose_uniforms(ObjectShaderKey key) {
 	u += "uniform vec3 u_dir_light_dir = vec3(-0.4082, -0.8165, -0.4082);\n";
 	u += "uniform vec3 u_dir_light_color = vec3(0.85, 0.82, 0.75);\n";
 	u += "uniform vec3 u_fill_light_color = vec3(0.18, 0.20, 0.25);\n";
+	u += "uniform bool u_fog_enabled = false;\n";
+	u += "uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);\n";
+	u += "uniform float u_fog_start = 0.0;\n";
+	u += "uniform float u_fog_end = 1024.0;\n";
+	u += "uniform int u_fog_type = 0;\n";
 	u += "uniform float u_wind_amount = 0.5;\n";
 	u += "uniform float u_wind_phase = 0.0;\n";
 
@@ -127,6 +132,13 @@ std::string compose_uniforms(ObjectShaderKey key) {
 	u += "\tvec3 L = to_light / max(dist, 0.001);\n";
 	u += "\tfloat ndotl = max(dot(N, L), 0.0);\n";
 	u += "\treturn base_rgb * u_local_light_color * (u_local_light_intensity * ndotl * atten);\n";
+	u += "}\n\n";
+
+	u += "float obj_fog_visibility(float dist, float fog_start, float fog_end, int fog_type) {\n";
+	u += "\tfloat span = max(fog_end - fog_start, 0.001);\n";
+	u += "\tfloat t = clamp((dist - fog_start) / span, 0.0, 1.0);\n";
+	u += "\tif (fog_type == 3) t = smoothstep(0.0, 1.0, t);\n";
+	u += "\treturn 1.0 - t;\n";
 	u += "}\n\n";
 
 	return u;
@@ -262,6 +274,10 @@ std::string compose_fragment(ObjectShaderKey key) {
 	// brightened by local point lights).
 	f += "\tif (u_emissive < 0.5) lit += obj_local_light_contrib(base.rgb, surface_normal, v_world_pos);\n";
 	f += "\tif (u_emissive > 0.5) lit = base.rgb;\n";
+	f += "\tif (u_fog_enabled) {\n";
+	f += "\t\tfloat fog_visibility = obj_fog_visibility(distance(CAMERA_POSITION_WORLD, v_world_pos), u_fog_start, u_fog_end, u_fog_type);\n";
+	f += "\t\tlit = mix(u_fog_color, lit, fog_visibility);\n";
+	f += "\t}\n";
 	f += "\tALBEDO = max(lit, vec3(0.0));\n";
 	if (needs_alpha) {
 		f += "\tALPHA = clamp(alpha, 0.0, 1.0);\n";

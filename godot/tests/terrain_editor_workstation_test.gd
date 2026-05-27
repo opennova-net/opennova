@@ -43,6 +43,16 @@ func _has_label_text(root: Node, text: String) -> bool:
 	return false
 
 
+func _find_node_by_name(root: Node, node_name: String) -> Node:
+	if root.name == node_name:
+		return root
+	for child in root.get_children():
+		var found := _find_node_by_name(child, node_name)
+		if found != null:
+			return found
+	return null
+
+
 func _make_resource_fixture(name: String) -> String:
 	var root := ProjectSettings.globalize_path("user://%s_%d" % [name, Time.get_ticks_usec()])
 	DirAccess.make_dir_recursive_absolute(root.path_join("missions"))
@@ -388,6 +398,28 @@ func test_switching_workspaces_preserves_terrain_dirty_state() -> void:
 	assert_true(editor.is_dirty, "Switching placeholder domains should not reset terrain document state.")
 	assert_eq(workstation.get_node("%ProjectLabel").text, "untitled*", "Returning to Terrain should restore the terrain project title and dirty marker.")
 	assert_true(workstation.get_node("%AssetDock").visible, "Terrain properties should return when Terrain is active.")
+
+
+func test_workstation_mounts_workspace_specific_right_docks() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var editor = autofree(TerrainEditorScript.new())
+	workstation.set_editor(editor)
+
+	var dock: Control = workstation.get_node("%AssetDock")
+	assert_true(dock.visible, "Terrain should show the shared right dock host.")
+	assert_not_null(_find_node_by_name(dock, "TerrainAssetDock"), "Terrain should mount its asset dock inside the shared right dock host.")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
+
+	assert_true(dock.visible, "Object should reuse the same right dock host.")
+	assert_not_null(_find_node_by_name(dock, "ObjectDetailDock"), "Object should mount its detail dock inside the shared right dock host.")
+	assert_null(_find_node_by_name(dock, "TerrainAssetDock"), "Switching to Object should remove Terrain's dock content.")
+	assert_not_null(_find_node_by_name(workstation.get_node("%ViewportHost"), "ObjectPreview"), "Object preview should stay in the center viewport.")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
+
+	assert_false(dock.visible, "Mission should hide the right dock host.")
+	assert_eq(dock.get_child_count(), 0, "Workspaces without a right dock should leave the shared host empty.")
 
 
 func test_workspace_switching_mounts_terrain_and_mission_viewports() -> void:

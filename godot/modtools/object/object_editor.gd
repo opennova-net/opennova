@@ -115,7 +115,7 @@ func _set_object_data(next_data: NovaObjectData) -> void:
 		object_data.object_changed.disconnect(_on_object_data_changed)
 	object_data = next_data
 	if object_data != null and not object_data.object_changed.is_connected(_on_object_data_changed):
-		object_data.object_changed.connect(_on_object_data_changed)
+		object_data.object_changed.connect(_on_object_data_changed, CONNECT_DEFERRED)
 
 
 func _on_object_data_changed() -> void:

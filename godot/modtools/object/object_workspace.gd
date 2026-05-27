@@ -64,17 +64,70 @@ const PART_ANIM_TRANSLATE_OPTIONS := [
 	{"id": 2, "label": "Y axis"},
 	{"id": 3, "label": "Z axis"},
 ]
+const PART_ANIM_TRACK_DEFS := [
+	{"id": "rotation_x", "label": "Rotation X"},
+	{"id": "rotation_y", "label": "Rotation Y"},
+	{"id": "rotation_z", "label": "Rotation Z"},
+	{"id": "scale_x", "label": "Scale X"},
+	{"id": "scale_y", "label": "Scale Y"},
+	{"id": "scale_z", "label": "Scale Z"},
+	{"id": "translation", "label": "Translation"},
+]
+const PART_ANIM_MOTION_MODE_OPTIONS := [
+	{"id": 0, "label": "None", "mode": "none"},
+	{"id": 16, "label": "Slide", "mode": "slide"},
+	{"id": 17, "label": "Slide inverse", "mode": "slide_inverse"},
+	{"id": 24, "label": "Set", "mode": "set"},
+	{"id": 32, "label": "Rotate clockwise", "mode": "rotate_cw"},
+	{"id": 33, "label": "Rotate counter-clockwise", "mode": "rotate_ccw"},
+	{"id": 50, "label": "Sine wave", "mode": "sine_wave"},
+	{"id": 52, "label": "Saw wave", "mode": "saw_wave"},
+	{"id": 53, "label": "Inverse saw wave", "mode": "inverse_saw_wave"},
+	{"id": 113, "label": "Control register", "mode": "control_register"},
+	{"id": 114, "label": "Add control register", "mode": "control_register_add"},
+]
+const PART_ANIM_SCALE_STYLE_OPTIONS := [
+	{"id": 1, "label": "Uniform"},
+	{"id": 2, "label": "Per-axis"},
+]
+const PART_ANIM_TRANSLATION_AXIS_OPTIONS := [
+	{"id": 1, "label": "X"},
+	{"id": 2, "label": "Y"},
+	{"id": 3, "label": "Z"},
+]
+const PANM_TRANSLATION_VALUE_MIN := -128.0
+const PANM_TRANSLATION_VALUE_MAX := 127.99609375
 
 var object_editor: ObjectEditor
+var environment_editor
 var _active_workflow_id: int = Workflow.PREVIEW
 var _preview: ObjectPreview
+var _asset_dock_host: Control
+var _object_detail_dock: Control
 var _material_clipboard: Dictionary = {}
 var _export_update_mask: int = OED_UPDATE_NONE
+var _part_anim_lod_index := 0
+var _part_anim_selected_index := 0
+var _part_anim_list: ItemList
+var _part_anim_lod_spin: SpinBox
+var _part_anim_duplicate_button: Button
+var _part_anim_delete_button: Button
+var _part_anim_inspector_summary: Label
+var _part_anim_inspector_context: Label
 
 
 func set_editor_shell(value: Node) -> void:
 	super.set_editor_shell(value)
 	_ensure_object_editor()
+
+
+func set_environment_editor(value) -> void:
+	if environment_editor != null and environment_editor.has_signal("environment_changed") and environment_editor.environment_changed.is_connected(_on_environment_editor_changed):
+		environment_editor.environment_changed.disconnect(_on_environment_editor_changed)
+	environment_editor = value
+	if environment_editor != null and environment_editor.has_signal("environment_changed") and not environment_editor.environment_changed.is_connected(_on_environment_editor_changed):
+		environment_editor.environment_changed.connect(_on_environment_editor_changed)
+	_apply_environment_to_preview()
 
 
 func activate() -> void:
@@ -95,7 +148,10 @@ func mount_viewport(host: Control) -> void:
 		_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
 		_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		if not _preview.environment_button_pressed.is_connected(_on_preview_environment_button_pressed):
+			_preview.environment_button_pressed.connect(_on_preview_environment_button_pressed)
 		_preview.set_object_data(object_editor.object_data if object_editor else null)
+		_apply_environment_to_preview()
 	if _preview.get_parent() == null:
 		host.add_child(_preview)
 		_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -145,6 +201,33 @@ func get_status_context() -> String:
 	return object_editor.get_status_context() if object_editor else "No object loaded"
 
 
+func uses_asset_dock() -> bool:
+	return true
+
+
+func set_asset_dock(dock: Control) -> void:
+	if _object_detail_dock != null and _object_detail_dock.get_parent() != null:
+		_object_detail_dock.get_parent().remove_child(_object_detail_dock)
+	if dock == null:
+		if _object_detail_dock != null:
+			_object_detail_dock.free()
+			_object_detail_dock = null
+		_asset_dock_host = null
+		return
+	_asset_dock_host = dock
+	if _object_detail_dock == null:
+		_object_detail_dock = PanelContainer.new()
+		_object_detail_dock.name = "ObjectDetailDock"
+		_object_detail_dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_object_detail_dock.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_asset_dock_host.add_child(_object_detail_dock)
+	_rebuild_object_detail_dock()
+
+
+func sync_asset_dock() -> void:
+	_rebuild_object_detail_dock()
+
+
 func get_workflows() -> Array:
 	return WORKFLOW_DEFS
 
@@ -155,10 +238,12 @@ func get_active_workflow_id() -> int:
 
 func activate_workflow(workflow_id: int) -> void:
 	_active_workflow_id = workflow_id
+	_rebuild_object_detail_dock()
 
 
 func build_workflow_inspector(workflow_id: int, host: Control) -> void:
 	_ensure_object_editor()
+	_active_workflow_id = workflow_id
 	match workflow_id:
 		Workflow.MATERIALS:
 			_build_materials_inspector(host)
@@ -170,6 +255,7 @@ func build_workflow_inspector(workflow_id: int, host: Control) -> void:
 			_build_lods_inspector(host)
 		_:
 			_build_preview_inspector(host)
+	_rebuild_object_detail_dock()
 
 
 func has_unsaved_changes() -> bool:
@@ -317,9 +403,35 @@ func _ensure_object_editor() -> void:
 func _sync_shell() -> void:
 	_sync_export_update_mask_from_dirty()
 	if _preview != null and object_editor != null:
-		_preview.set_object_data(object_editor.object_data)
+		if _preview.object_data != object_editor.object_data:
+			_preview.set_object_data(object_editor.object_data)
+		_apply_environment_to_preview()
+	if _part_anim_list != null:
+		_refresh_part_anim_list(_part_anim_selected_index, false)
+	elif _active_workflow_id != Workflow.PARTS:
+		_rebuild_object_detail_dock()
 	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
 		editor_shell.sync_from_editor_state()
+
+
+func _on_environment_editor_changed(_env_file: EnvFile, _time_of_day: float) -> void:
+	_apply_environment_to_preview()
+
+
+func _apply_environment_to_preview() -> void:
+	if _preview == null:
+		return
+	var env_file: EnvFile = null
+	var preview_time := 1200.0
+	if environment_editor != null:
+		env_file = environment_editor.get("env_file") as EnvFile
+		preview_time = float(environment_editor.get("time_of_day"))
+	_preview.set_environment(env_file, preview_time)
+
+
+func _on_preview_environment_button_pressed() -> void:
+	if editor_shell != null and editor_shell.has_method("show_environment_dialog"):
+		editor_shell.show_environment_dialog()
 
 
 func _build_preview_inspector(host: Control) -> void:
@@ -1326,6 +1438,57 @@ func _add_ctrl_reg_row(parent: Control, node_name: String, label_text: String):
 	return picker
 
 
+func _add_detail_field(parent: Control, label_text: String) -> VBoxContainer:
+	var row := VBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("separation", 3)
+	parent.add_child(row)
+	var label := Label.new()
+	label.text = label_text
+	label.tooltip_text = label_text
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(label)
+	return row
+
+
+func _add_detail_spin_row(parent: Control, node_name: String, label_text: String, min_value: float, max_value: float, step: float) -> SpinBox:
+	var row := _add_detail_field(parent, label_text)
+	var spin := SpinBox.new()
+	spin.name = node_name
+	spin.min_value = min_value
+	spin.max_value = max_value
+	spin.step = step
+	spin.custom_minimum_size = Vector2(0, 32)
+	spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spin)
+	return spin
+
+
+func _add_detail_id_option_row(parent: Control, node_name: String, label_text: String, options: Array) -> OptionButton:
+	var row := _add_detail_field(parent, label_text)
+	var option := OptionButton.new()
+	option.name = node_name
+	option.fit_to_longest_item = false
+	option.custom_minimum_size = Vector2(0, 32)
+	option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(option)
+	_populate_id_option(option, options, 0)
+	return option
+
+
+func _add_detail_ctrl_reg_row(parent: Control, node_name: String, label_text: String):
+	var row := _add_detail_field(parent, label_text)
+	var picker = CtrlRegPickerScript.new()
+	picker.name = node_name
+	picker.fit_to_longest_item = false
+	picker.custom_minimum_size = Vector2(0, 32)
+	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(picker)
+	picker.setup(_control_registers(), -1)
+	return picker
+
+
 func _populate_id_option(option: OptionButton, options: Array, current_id: int) -> void:
 	if option == null:
 		return
@@ -1553,96 +1716,572 @@ func _object_folder_filename(path: String) -> String:
 	return selected.get_file()
 
 
+func _mode_name_for_id(mode_id: int) -> String:
+	for option in PART_ANIM_MOTION_MODE_OPTIONS:
+		if int(option.get("id", -1)) == mode_id:
+			return String(option.get("mode", "none"))
+	return "none"
+
+
+func _mode_id_for_name(mode_name: String) -> int:
+	for option in PART_ANIM_MOTION_MODE_OPTIONS:
+		if String(option.get("mode", "")) == mode_name:
+			return int(option.get("id", 0))
+	return 0
+
+
+func _axis_name_for_id(axis_id: int) -> String:
+	if axis_id == 2:
+		return "y"
+	if axis_id == 3:
+		return "z"
+	return "x"
+
+
+func _axis_id_for_name(axis_name: String) -> int:
+	if axis_name == "y":
+		return 2
+	if axis_name == "z":
+		return 3
+	return 1
+
+
+func _part_options_for_lod(lod_index: int) -> Array:
+	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	var options := []
+	var lod_info: Dictionary = data.get_render_lod_info(lod_index) if data != null and data.has_method("get_render_lod_info") else {}
+	var part_count := maxi(1, int(lod_info.get("part_count", lod_info.get("render_object_count", 1))))
+	for part_index in range(part_count):
+		options.append({"id": part_index, "label": "Part %02d" % part_index})
+	return options
+
+
+func _part_anim_entries() -> Array:
+	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	if data == null:
+		return []
+	if data.has_method("get_part_anim_editor_entries"):
+		return data.get_part_anim_editor_entries(_part_anim_lod_index)
+	var raw: Array = data.get_part_animations(_part_anim_lod_index)
+	for i in range(raw.size()):
+		var entry: Dictionary = raw[i]
+		entry["summary"] = "Part %02d" % int(entry.get("part_index", i))
+	return raw
+
+
+func _refresh_part_anim_list(preferred_index: int = -1, rebuild_detail: bool = true) -> void:
+	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	if data == null:
+		return
+	var summary: Dictionary = data.get_summary()
+	var lod_count := maxi(1, int(summary.get("lod_count", 1)))
+	_part_anim_lod_index = clampi(_part_anim_lod_index, 0, lod_count - 1)
+	if _part_anim_lod_spin != null:
+		_part_anim_lod_spin.max_value = lod_count - 1
+		_set_spin(_part_anim_lod_spin, _part_anim_lod_index)
+
+	var total_count := 0
+	for lod_index in range(lod_count):
+		total_count += data.get_part_anim_count(lod_index)
+	if _part_anim_inspector_summary != null:
+		_part_anim_inspector_summary.text = "%d part animations" % total_count
+	var entries := _part_anim_entries()
+	if preferred_index >= 0:
+		_part_anim_selected_index = preferred_index
+	_part_anim_selected_index = clampi(_part_anim_selected_index, 0, maxi(0, entries.size() - 1)) if not entries.is_empty() else -1
+	if _part_anim_inspector_context != null:
+		_part_anim_inspector_context.text = "LOD %d: %d entries" % [_part_anim_lod_index, entries.size()]
+	if _part_anim_duplicate_button != null:
+		_part_anim_duplicate_button.disabled = _part_anim_selected_index < 0
+	if _part_anim_delete_button != null:
+		_part_anim_delete_button.disabled = _part_anim_selected_index < 0
+	if _part_anim_list != null:
+		_part_anim_list.clear()
+		for anim in entries:
+			_part_anim_list.add_item(String((anim as Dictionary).get("summary", "Part animation")))
+		if _part_anim_selected_index >= 0:
+			_part_anim_list.select(_part_anim_selected_index)
+	if rebuild_detail:
+		_rebuild_object_detail_dock()
+
+
 func _build_part_anims_inspector(host: Control) -> void:
 	var box := _make_inspector_box(host)
+	box.name = "PartAnimListPane"
 	var data: NovaObjectData = object_editor.object_data if object_editor else null
 	var summary: Dictionary = data.get_summary() if data != null else {}
 	var lod_count := maxi(1, int(summary.get("lod_count", 1)))
-	var current_lod := {"index": 0}
-	var anims: Array = data.get_part_animations(0) if data != null else []
-	var lod_index := _add_spin_row(box, "PartAnimLodIndex", "LOD", 0, lod_count - 1, 1)
-	_set_spin(lod_index, 0)
-	var list := ItemList.new()
-	list.name = "PartAnimList"
-	list.custom_minimum_size = Vector2(0, 190)
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(list)
+	_part_anim_lod_index = clampi(_part_anim_lod_index, 0, lod_count - 1)
 
-	var selected := {"index": -1}
-	var syncing := {"value": false}
-	var transform_as := _add_spin_row(box, "PartAnimTransformAs", "Transform as", 0, 255, 1)
-	var parent := _add_spin_row(box, "PartAnimParent", "Parent", 0, 255, 1)
-	var scale_option := _add_id_option_row(box, "PartAnimScaleTypeOption", "Scale mode", PART_ANIM_SCALE_OPTIONS)
-	var scale_type := _add_spin_row(box, "PartAnimScaleType", "Scale", 0, 255, 1)
-	var rotation_option := _add_id_option_row(box, "PartAnimRotationTypeOption", "Rotation mode", PART_ANIM_ROTATION_OPTIONS)
-	var rotation_type := _add_spin_row(box, "PartAnimRotationType", "Rotation", 0, 255, 1)
-	var translate_option := _add_id_option_row(box, "PartAnimTranslateTypeOption", "Translate mode", PART_ANIM_TRANSLATE_OPTIONS)
-	var translate_type := _add_spin_row(box, "PartAnimTranslateType", "Translate", 0, 255, 1)
+	_part_anim_inspector_summary = Label.new()
+	_part_anim_inspector_summary.name = "PartAnimInspectorSummary"
+	_part_anim_inspector_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_part_anim_inspector_summary)
+
+	_part_anim_inspector_context = Label.new()
+	_part_anim_inspector_context.name = "PartAnimInspectorContext"
+	_part_anim_inspector_context.theme_type_variation = &"Muted"
+	_part_anim_inspector_context.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_part_anim_inspector_context)
+
+	_part_anim_lod_spin = _add_spin_row(box, "PartAnimLodIndex", "LOD", 0, lod_count - 1, 1)
+
+	var actions := HBoxContainer.new()
+	actions.name = "PartAnimActions"
+	actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(actions)
+
+	var add_button := Button.new()
+	add_button.name = "PartAnimAddButton"
+	add_button.text = "Add"
+	actions.add_child(add_button)
+
+	_part_anim_duplicate_button = Button.new()
+	_part_anim_duplicate_button.name = "PartAnimDuplicateButton"
+	_part_anim_duplicate_button.text = "Duplicate"
+	actions.add_child(_part_anim_duplicate_button)
+
+	_part_anim_delete_button = Button.new()
+	_part_anim_delete_button.name = "PartAnimDeleteButton"
+	_part_anim_delete_button.text = "Delete"
+	actions.add_child(_part_anim_delete_button)
+
+	_part_anim_list = ItemList.new()
+	_part_anim_list.name = "PartAnimList"
+	_part_anim_list.custom_minimum_size = Vector2(0, 360)
+	_part_anim_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_part_anim_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(_part_anim_list)
+
+	_part_anim_lod_spin.value_changed.connect(func(value: float) -> void:
+		_part_anim_lod_index = int(value)
+		_part_anim_selected_index = 0
+		_refresh_part_anim_list(0, true)
+	)
+	_part_anim_list.item_selected.connect(func(index: int) -> void:
+		var selection_changed := index != _part_anim_selected_index
+		_part_anim_selected_index = index
+		_refresh_part_anim_list(index, selection_changed)
+	)
+	add_button.pressed.connect(func() -> void:
+		if data == null or not data.has_method("add_part_anim"):
+			return
+		var target_index := 0
+		var entries := _part_anim_entries()
+		if _part_anim_selected_index >= 0 and _part_anim_selected_index < entries.size():
+			target_index = int((entries[_part_anim_selected_index] as Dictionary).get("target_part", 0))
+		var new_index := int(data.call("add_part_anim", _part_anim_lod_index, target_index))
+		if new_index >= 0:
+			_refresh_part_anim_list(new_index, true)
+	)
+	_part_anim_duplicate_button.pressed.connect(func() -> void:
+		if data == null or _part_anim_selected_index < 0 or not data.has_method("duplicate_part_anim"):
+			return
+		var new_index := int(data.call("duplicate_part_anim", _part_anim_lod_index, _part_anim_selected_index))
+		if new_index >= 0:
+			_refresh_part_anim_list(new_index, true)
+	)
+	_part_anim_delete_button.pressed.connect(func() -> void:
+		if data == null or _part_anim_selected_index < 0 or not data.has_method("delete_part_anim"):
+			return
+		var removed_index := _part_anim_selected_index
+		if bool(data.call("delete_part_anim", _part_anim_lod_index, removed_index)):
+			_refresh_part_anim_list(mini(removed_index, maxi(0, data.get_part_anim_count(_part_anim_lod_index) - 1)), true)
+	)
+	_refresh_part_anim_list(_part_anim_selected_index, true)
+
+
+func _rebuild_object_detail_dock() -> void:
+	if _object_detail_dock == null or not is_instance_valid(_object_detail_dock):
+		return
+	for child in _object_detail_dock.get_children():
+		_object_detail_dock.remove_child(child)
+		child.free()
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_object_detail_dock.add_child(margin)
+
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = 0
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_child(scroll)
+
+	var box := VBoxContainer.new()
+	box.name = "ObjectDetailDockBox"
+	box.add_theme_constant_override("separation", 10)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(box)
+
+	match _active_workflow_id:
+		Workflow.PARTS:
+			_build_part_anim_detail_dock(box)
+		Workflow.MATERIALS:
+			_build_object_detail_placeholder(box, "Materials", "Select a material in the left pane to edit shader and texture details.")
+		Workflow.LIGHTS:
+			_build_object_detail_placeholder(box, "Lights", "Select a light in the left pane to edit color, falloff, and output flags.")
+		Workflow.LODS:
+			_build_object_detail_placeholder(box, "LODs", "Select a LOD in the left pane to edit scene bindings and thresholds.")
+		_:
+			_build_object_detail_placeholder(box, "Object", "Preview controls are in the left pane. The center viewport stays reserved for the live object preview.")
+
+
+func _build_object_detail_placeholder(box: VBoxContainer, title: String, message: String) -> void:
+	var heading := Label.new()
+	heading.theme_type_variation = &"Heading"
+	heading.text = title
+	box.add_child(heading)
+
+	var body := Label.new()
+	body.theme_type_variation = &"Muted"
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.text = message
+	box.add_child(body)
+
+
+func _build_channel_card(parent: VBoxContainer, node_name: String) -> VBoxContainer:
+	var card := PanelContainer.new()
+	card.name = node_name
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(card)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	card.add_child(margin)
+
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_child(box)
+	return box
+
+
+func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
+	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	var heading := Label.new()
+	heading.theme_type_variation = &"Heading"
+	heading.text = "Part animation"
+	box.add_child(heading)
+
+	var entries := _part_anim_entries()
+	if data == null or entries.is_empty() or _part_anim_selected_index < 0:
+		var empty := Label.new()
+		empty.name = "PartAnimDetailsEmpty"
+		empty.theme_type_variation = &"Muted"
+		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		empty.text = "Select or add a part animation."
+		box.add_child(empty)
+		return
+
+	_part_anim_selected_index = clampi(_part_anim_selected_index, 0, entries.size() - 1)
+	var info: Dictionary = entries[_part_anim_selected_index]
+	var supported := bool(info.get("supported", true))
+
+	var selected_summary := Label.new()
+	selected_summary.name = "PartAnimSelectedSummary"
+	selected_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	selected_summary.theme_type_variation = &"Muted"
+	selected_summary.text = String(info.get("summary", "Part animation"))
+	box.add_child(selected_summary)
+
+	var unsupported_notice := Label.new()
+	unsupported_notice.name = "PartAnimUnsupportedNotice"
+	unsupported_notice.visible = not supported
+	unsupported_notice.theme_type_variation = &"Warn"
+	unsupported_notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	unsupported_notice.text = String(info.get("unsupported_reason", "Unsupported PANM mode"))
+	box.add_child(unsupported_notice)
+
+	var part_section := VBoxContainer.new()
+	part_section.name = "PartAnimTargetSection"
+	part_section.add_theme_constant_override("separation", 6)
+	part_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(part_section)
+
+	var part_options := _part_options_for_lod(_part_anim_lod_index)
+	var target_part := _add_detail_id_option_row(part_section, "PartAnimTargetPart", "Animated part", part_options)
+	var parent_part := _add_detail_id_option_row(part_section, "PartAnimParentPart", "Moves relative to", part_options)
+	_populate_id_option(target_part, part_options, int(info.get("target_part", 0)))
+	_populate_id_option(parent_part, part_options, int(info.get("parent_part", 0)))
+
+	var rotation: Dictionary = info.get("rotation", {})
+	var rotation_x: Dictionary = rotation.get("x", {})
+	var rotation_y: Dictionary = rotation.get("y", {})
+	var rotation_z: Dictionary = rotation.get("z", {})
+	var rotation_card := _build_channel_card(box, "PartAnimRotationCard")
+	var rotation_enabled := CheckBox.new()
+	rotation_enabled.name = "PartAnimRotationEnabled"
+	rotation_enabled.text = "Rotation"
+	rotation_enabled.button_pressed = bool(rotation.get("enabled", false))
+	rotation_enabled.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rotation_card.add_child(rotation_enabled)
+	var rotation_actions := HBoxContainer.new()
+	rotation_actions.name = "PartAnimRotationActions"
+	rotation_actions.add_theme_constant_override("separation", 6)
+	rotation_actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rotation_card.add_child(rotation_actions)
+	var add_rotation := Button.new()
+	add_rotation.name = "PartAnimAddRotationButton"
+	add_rotation.text = "Add"
+	add_rotation.custom_minimum_size = Vector2(0, 32)
+	add_rotation.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rotation_actions.add_child(add_rotation)
+	var remove_rotation := Button.new()
+	remove_rotation.name = "PartAnimRemoveRotationButton"
+	remove_rotation.text = "Remove"
+	remove_rotation.custom_minimum_size = Vector2(0, 32)
+	remove_rotation.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rotation_actions.add_child(remove_rotation)
+	var rotation_controls := VBoxContainer.new()
+	rotation_controls.name = "PartAnimRotationControls"
+	rotation_controls.add_theme_constant_override("separation", 4)
+	rotation_card.add_child(rotation_controls)
+	var rotation_mode := _add_detail_id_option_row(rotation_controls, "PartAnimRotationMode", "Driver", PART_ANIM_MOTION_MODE_OPTIONS)
+	var rotation_x_from := _add_detail_spin_row(rotation_controls, "PartAnimRotationXFrom", "Yaw start", -3600, 3600, 0.1)
+	var rotation_x_to := _add_detail_spin_row(rotation_controls, "PartAnimRotationXTo", "Yaw end", -3600, 3600, 0.1)
+	var rotation_y_from := _add_detail_spin_row(rotation_controls, "PartAnimRotationYFrom", "Pitch start", -3600, 3600, 0.1)
+	var rotation_y_to := _add_detail_spin_row(rotation_controls, "PartAnimRotationYTo", "Pitch end", -3600, 3600, 0.1)
+	var rotation_z_from := _add_detail_spin_row(rotation_controls, "PartAnimRotationZFrom", "Roll start", -3600, 3600, 0.1)
+	var rotation_z_to := _add_detail_spin_row(rotation_controls, "PartAnimRotationZTo", "Roll end", -3600, 3600, 0.1)
+	var rotation_speed := _add_detail_spin_row(rotation_controls, "PartAnimRotationSpeed", "Speed", -128, 128, 0.01)
 	var reversed := CheckBox.new()
 	reversed.name = "PartAnimRotationReversed"
-	reversed.text = "Reverse rotation"
-	box.add_child(reversed)
+	reversed.text = "Reverse rotation order"
+	reversed.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rotation_controls.add_child(reversed)
+	_populate_id_option(rotation_mode, PART_ANIM_MOTION_MODE_OPTIONS, _mode_id_for_name(String(rotation_x.get("mode", "none"))))
+	_set_spin(rotation_x_from, float(rotation_x.get("from_value", 0.0)))
+	_set_spin(rotation_x_to, float(rotation_x.get("to_value", 0.0)))
+	_set_spin(rotation_y_from, float(rotation_y.get("from_value", 0.0)))
+	_set_spin(rotation_y_to, float(rotation_y.get("to_value", 0.0)))
+	_set_spin(rotation_z_from, float(rotation_z.get("from_value", 0.0)))
+	_set_spin(rotation_z_to, float(rotation_z.get("to_value", 0.0)))
+	_set_spin(rotation_speed, float(rotation_x.get("speed", 0.0)))
+	reversed.button_pressed = bool(rotation.get("reversed", false))
 
-	var anim_info := func(index: int) -> Dictionary:
-		if data != null and data.has_method("get_part_anim_info"):
-			return data.get_part_anim_info(int(current_lod["index"]), index)
-		return anims[index] if index >= 0 and index < anims.size() else {}
+	var scale: Dictionary = info.get("scale", {})
+	var scale_x: Dictionary = scale.get("x", {})
+	var scale_card := _build_channel_card(box, "PartAnimScaleCard")
+	var scale_enabled := CheckBox.new()
+	scale_enabled.name = "PartAnimScaleEnabled"
+	scale_enabled.text = "Scale"
+	scale_enabled.button_pressed = bool(scale.get("enabled", false))
+	scale_enabled.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scale_card.add_child(scale_enabled)
+	var scale_actions := HBoxContainer.new()
+	scale_actions.name = "PartAnimScaleActions"
+	scale_actions.add_theme_constant_override("separation", 6)
+	scale_actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scale_card.add_child(scale_actions)
+	var add_scale := Button.new()
+	add_scale.name = "PartAnimAddScaleButton"
+	add_scale.text = "Add"
+	add_scale.custom_minimum_size = Vector2(0, 32)
+	add_scale.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scale_actions.add_child(add_scale)
+	var remove_scale := Button.new()
+	remove_scale.name = "PartAnimRemoveScaleButton"
+	remove_scale.text = "Remove"
+	remove_scale.custom_minimum_size = Vector2(0, 32)
+	remove_scale.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scale_actions.add_child(remove_scale)
+	var scale_controls := VBoxContainer.new()
+	scale_controls.name = "PartAnimScaleControls"
+	scale_controls.add_theme_constant_override("separation", 4)
+	scale_card.add_child(scale_controls)
+	var scale_mode := _add_detail_id_option_row(scale_controls, "PartAnimScaleMode", "Style", PART_ANIM_SCALE_STYLE_OPTIONS)
+	var scale_motion := _add_detail_id_option_row(scale_controls, "PartAnimScaleMotionMode", "Driver", PART_ANIM_MOTION_MODE_OPTIONS)
+	var scale_from := _add_detail_spin_row(scale_controls, "PartAnimScaleUniformFrom", "Start", -128, 128, 0.01)
+	var scale_to := _add_detail_spin_row(scale_controls, "PartAnimScaleUniformTo", "End", -128, 128, 0.01)
+	var scale_speed := _add_detail_spin_row(scale_controls, "PartAnimScaleSpeed", "Speed", -128, 128, 0.01)
+	_populate_id_option(scale_mode, PART_ANIM_SCALE_STYLE_OPTIONS, 2 if String(scale.get("style", "uniform")) == "per_axis" else 1)
+	_populate_id_option(scale_motion, PART_ANIM_MOTION_MODE_OPTIONS, _mode_id_for_name(String(scale_x.get("mode", "none"))))
+	_set_spin(scale_from, float(scale_x.get("from_value", 1.0)))
+	_set_spin(scale_to, float(scale_x.get("to_value", 1.0)))
+	_set_spin(scale_speed, float(scale_x.get("speed", 0.0)))
 
-	var set_field := func(key: String, value: Variant) -> void:
-		if syncing["value"] or selected["index"] < 0:
-			return
-		if data != null and data.has_method("set_part_anim_field"):
-			data.set_part_anim_field(int(current_lod["index"]), selected["index"], key, value)
-		elif data != null and key == "flags":
-			data.set_part_animation_flags(int(current_lod["index"]), selected["index"], int(value))
+	var translation: Dictionary = info.get("translation", {})
+	var translation_track: Dictionary = translation.get("track", {})
+	var translation_card := _build_channel_card(box, "PartAnimTranslationCard")
+	var translation_enabled := CheckBox.new()
+	translation_enabled.name = "PartAnimTranslationEnabled"
+	translation_enabled.text = "Translation"
+	translation_enabled.button_pressed = bool(translation.get("enabled", false))
+	translation_enabled.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	translation_card.add_child(translation_enabled)
+	var translation_actions := HBoxContainer.new()
+	translation_actions.name = "PartAnimTranslationActions"
+	translation_actions.add_theme_constant_override("separation", 6)
+	translation_actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	translation_card.add_child(translation_actions)
+	var add_translation := Button.new()
+	add_translation.name = "PartAnimAddTranslationButton"
+	add_translation.text = "Add"
+	add_translation.custom_minimum_size = Vector2(0, 32)
+	add_translation.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	translation_actions.add_child(add_translation)
+	var remove_translation := Button.new()
+	remove_translation.name = "PartAnimRemoveTranslationButton"
+	remove_translation.text = "Remove"
+	remove_translation.custom_minimum_size = Vector2(0, 32)
+	remove_translation.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	translation_actions.add_child(remove_translation)
+	var translation_controls := VBoxContainer.new()
+	translation_controls.name = "PartAnimTranslationControls"
+	translation_controls.add_theme_constant_override("separation", 4)
+	translation_card.add_child(translation_controls)
+	var translation_axis := _add_detail_id_option_row(translation_controls, "PartAnimTranslationAxis", "Direction", PART_ANIM_TRANSLATION_AXIS_OPTIONS)
+	var translation_mode := _add_detail_id_option_row(translation_controls, "PartAnimTranslationMode", "Driver", PART_ANIM_MOTION_MODE_OPTIONS)
+	var translation_register = _add_detail_ctrl_reg_row(translation_controls, "PartAnimTranslationRegister", "Control register")
+	var translation_from := _add_detail_spin_row(translation_controls, "PartAnimTranslationFrom", "Start", PANM_TRANSLATION_VALUE_MIN, PANM_TRANSLATION_VALUE_MAX, 0.01)
+	var translation_to := _add_detail_spin_row(translation_controls, "PartAnimTranslationTo", "End", PANM_TRANSLATION_VALUE_MIN, PANM_TRANSLATION_VALUE_MAX, 0.01)
+	var translation_speed := _add_detail_spin_row(translation_controls, "PartAnimTranslationSpeed", "Speed", -128, 128, 0.01)
+	_populate_id_option(translation_axis, PART_ANIM_TRANSLATION_AXIS_OPTIONS, _axis_id_for_name(String(translation.get("axis", "x"))))
+	_populate_id_option(translation_mode, PART_ANIM_MOTION_MODE_OPTIONS, _mode_id_for_name(String(translation_track.get("mode", "none"))))
+	if translation_register != null:
+		translation_register.setup(_control_registers(), int(translation_track.get("control_register", -1)))
+	_set_spin(translation_from, float(translation_track.get("from_value", 0.0)))
+	_set_spin(translation_to, float(translation_track.get("to_value", 0.0)))
+	_set_spin(translation_speed, float(translation_track.get("speed", 0.0)))
 
-	var sync := func(index: int) -> void:
-		syncing["value"] = true
-		selected["index"] = index
-		var info: Dictionary = anim_info.call(index)
-		transform_as.value = int(info.get("transform_as", info.get("part_index", 0)))
-		parent.value = int(info.get("parent_subobject", info.get("parent_part", 0)))
-		_populate_id_option(scale_option, PART_ANIM_SCALE_OPTIONS, int(info.get("scale_type", int(info.get("flags", 0)) & 0xFF)))
-		scale_type.value = int(info.get("scale_type", int(info.get("flags", 0)) & 0xFF))
-		_populate_id_option(rotation_option, PART_ANIM_ROTATION_OPTIONS, int(info.get("rotation_type", (int(info.get("flags", 0)) >> 8) & 0xFF)))
-		rotation_type.value = int(info.get("rotation_type", (int(info.get("flags", 0)) >> 8) & 0xFF))
-		_populate_id_option(translate_option, PART_ANIM_TRANSLATE_OPTIONS, int(info.get("translate_type", (int(info.get("flags", 0)) >> 24) & 0xFF)))
-		translate_type.value = int(info.get("translate_type", (int(info.get("flags", 0)) >> 24) & 0xFF))
-		reversed.button_pressed = bool(info.get("rotation_reversed", ((int(info.get("flags", 0)) >> 16) & 0xFF) != 0))
-		syncing["value"] = false
+	var update_visibility := func() -> void:
+		rotation_controls.visible = rotation_enabled.button_pressed and supported
+		add_rotation.visible = not rotation_enabled.button_pressed and supported
+		remove_rotation.visible = rotation_enabled.button_pressed and supported
+		scale_controls.visible = scale_enabled.button_pressed and supported
+		add_scale.visible = not scale_enabled.button_pressed and supported
+		remove_scale.visible = scale_enabled.button_pressed and supported
+		translation_controls.visible = translation_enabled.button_pressed and supported
+		add_translation.visible = not translation_enabled.button_pressed and supported
+		remove_translation.visible = translation_enabled.button_pressed and supported
+		if translation_register != null and translation_register.get_parent() != null:
+			translation_register.get_parent().visible = translation_mode.get_selected_id() == 113 or translation_mode.get_selected_id() == 114
+	update_visibility.call()
 
-	var refresh_list := func() -> void:
-		anims = data.get_part_animations(int(current_lod["index"])) if data != null else []
-		list.clear()
-		for anim in anims:
-			list.add_item("%02d  part %d  flags %d" % [
-				int(anim.get("index", 0)),
-				int(anim.get("part_index", 0)),
-				int(anim.get("flags", 0)),
-			])
-		if not anims.is_empty():
-			list.select(0)
-			sync.call(0)
-		else:
-			sync.call(-1)
+	var refresh_after_edit := func() -> void:
+		_refresh_part_anim_list(_part_anim_selected_index, false)
 
-	list.item_selected.connect(func(index: int) -> void:
-		sync.call(index)
+	target_part.item_selected.connect(func(_index: int) -> void:
+		if data != null and data.has_method("set_part_anim_target"):
+			data.set_part_anim_target(_part_anim_lod_index, _part_anim_selected_index, target_part.get_selected_id(), parent_part.get_selected_id())
+			refresh_after_edit.call()
 	)
-	lod_index.value_changed.connect(func(value: float) -> void:
-		current_lod["index"] = int(value)
-		refresh_list.call()
+	parent_part.item_selected.connect(func(_index: int) -> void:
+		if data != null and data.has_method("set_part_anim_target"):
+			data.set_part_anim_target(_part_anim_lod_index, _part_anim_selected_index, target_part.get_selected_id(), parent_part.get_selected_id())
+			refresh_after_edit.call()
 	)
-	transform_as.value_changed.connect(func(value: float) -> void: set_field.call("transform_as", int(value)))
-	parent.value_changed.connect(func(value: float) -> void: set_field.call("parent_subobject", int(value)))
-	scale_option.item_selected.connect(func(index: int) -> void: set_field.call("scale_type", scale_option.get_item_id(index)))
-	scale_type.value_changed.connect(func(value: float) -> void: set_field.call("scale_type", int(value)))
-	rotation_option.item_selected.connect(func(index: int) -> void: set_field.call("rotation_type", rotation_option.get_item_id(index)))
-	rotation_type.value_changed.connect(func(value: float) -> void: set_field.call("rotation_type", int(value)))
-	translate_option.item_selected.connect(func(index: int) -> void: set_field.call("translate_type", translate_option.get_item_id(index)))
-	translate_type.value_changed.connect(func(value: float) -> void: set_field.call("translate_type", int(value)))
-	reversed.toggled.connect(func(value: bool) -> void: set_field.call("rotation_reversed", value))
-	refresh_list.call()
+	rotation_enabled.toggled.connect(func(value: bool) -> void:
+		if data != null and data.has_method("set_part_anim_channel_enabled"):
+			data.set_part_anim_channel_enabled(_part_anim_lod_index, _part_anim_selected_index, "rotation", value)
+			refresh_after_edit.call()
+		update_visibility.call()
+	)
+	add_rotation.pressed.connect(func() -> void:
+		rotation_enabled.button_pressed = true
+		rotation_enabled.toggled.emit(true)
+	)
+	remove_rotation.pressed.connect(func() -> void:
+		rotation_enabled.button_pressed = false
+		rotation_enabled.toggled.emit(false)
+	)
+	rotation_mode.item_selected.connect(func(index: int) -> void:
+		if data != null and data.has_method("set_part_anim_channel_mode"):
+			data.set_part_anim_channel_mode(_part_anim_lod_index, _part_anim_selected_index, "rotation", "x", _mode_name_for_id(rotation_mode.get_item_id(index)), -1)
+			refresh_after_edit.call()
+	)
+	var set_rotation_values := func(axis: String, from_control: SpinBox, to_control: SpinBox) -> void:
+		if data != null and data.has_method("set_part_anim_channel_values"):
+			data.set_part_anim_channel_values(_part_anim_lod_index, _part_anim_selected_index, "rotation", axis, float(from_control.value), float(to_control.value), float(rotation_speed.value))
+			refresh_after_edit.call()
+	rotation_x_from.value_changed.connect(func(_value: float) -> void: set_rotation_values.call("x", rotation_x_from, rotation_x_to))
+	rotation_x_to.value_changed.connect(func(_value: float) -> void: set_rotation_values.call("x", rotation_x_from, rotation_x_to))
+	rotation_y_from.value_changed.connect(func(_value: float) -> void: set_rotation_values.call("y", rotation_y_from, rotation_y_to))
+	rotation_y_to.value_changed.connect(func(_value: float) -> void: set_rotation_values.call("y", rotation_y_from, rotation_y_to))
+	rotation_z_from.value_changed.connect(func(_value: float) -> void: set_rotation_values.call("z", rotation_z_from, rotation_z_to))
+	rotation_z_to.value_changed.connect(func(_value: float) -> void: set_rotation_values.call("z", rotation_z_from, rotation_z_to))
+	rotation_speed.value_changed.connect(func(_value: float) -> void:
+		set_rotation_values.call("x", rotation_x_from, rotation_x_to)
+		set_rotation_values.call("y", rotation_y_from, rotation_y_to)
+		set_rotation_values.call("z", rotation_z_from, rotation_z_to)
+	)
+	reversed.toggled.connect(func(value: bool) -> void:
+		if data != null and data.has_method("set_part_anim_rotation_reversed"):
+			data.set_part_anim_rotation_reversed(_part_anim_lod_index, _part_anim_selected_index, value)
+			refresh_after_edit.call()
+	)
+	scale_enabled.toggled.connect(func(value: bool) -> void:
+		if data != null and data.has_method("set_part_anim_channel_enabled"):
+			data.set_part_anim_channel_enabled(_part_anim_lod_index, _part_anim_selected_index, "scale", value)
+			refresh_after_edit.call()
+		update_visibility.call()
+	)
+	add_scale.pressed.connect(func() -> void:
+		scale_enabled.button_pressed = true
+		scale_enabled.toggled.emit(true)
+	)
+	remove_scale.pressed.connect(func() -> void:
+		scale_enabled.button_pressed = false
+		scale_enabled.toggled.emit(false)
+	)
+	var set_scale_values := func(axis: String) -> void:
+		if data != null and data.has_method("set_part_anim_channel_values"):
+			data.set_part_anim_channel_values(_part_anim_lod_index, _part_anim_selected_index, "scale", axis, float(scale_from.value), float(scale_to.value), float(scale_speed.value))
+			refresh_after_edit.call()
+	scale_mode.item_selected.connect(func(index: int) -> void:
+		set_scale_values.call("per_axis" if scale_mode.get_item_id(index) == 2 else "uniform")
+	)
+	scale_motion.item_selected.connect(func(index: int) -> void:
+		if data != null and data.has_method("set_part_anim_channel_mode"):
+			data.set_part_anim_channel_mode(_part_anim_lod_index, _part_anim_selected_index, "scale", "uniform", _mode_name_for_id(scale_motion.get_item_id(index)), -1)
+			refresh_after_edit.call()
+	)
+	scale_from.value_changed.connect(func(_value: float) -> void: set_scale_values.call("uniform"))
+	scale_to.value_changed.connect(func(_value: float) -> void: set_scale_values.call("uniform"))
+	scale_speed.value_changed.connect(func(_value: float) -> void: set_scale_values.call("uniform"))
+	translation_enabled.toggled.connect(func(value: bool) -> void:
+		if data != null and data.has_method("set_part_anim_channel_enabled"):
+			data.set_part_anim_channel_enabled(_part_anim_lod_index, _part_anim_selected_index, "translation", value)
+			refresh_after_edit.call()
+		update_visibility.call()
+	)
+	add_translation.pressed.connect(func() -> void:
+		translation_enabled.button_pressed = true
+		translation_enabled.toggled.emit(true)
+	)
+	remove_translation.pressed.connect(func() -> void:
+		translation_enabled.button_pressed = false
+		translation_enabled.toggled.emit(false)
+	)
+	var set_translation_values := func() -> void:
+		if data != null and data.has_method("set_part_anim_channel_values"):
+			data.set_part_anim_channel_values(_part_anim_lod_index, _part_anim_selected_index, "translation", _axis_name_for_id(translation_axis.get_selected_id()), float(translation_from.value), float(translation_to.value), float(translation_speed.value))
+			refresh_after_edit.call()
+	translation_axis.item_selected.connect(func(_index: int) -> void: set_translation_values.call())
+	translation_mode.item_selected.connect(func(index: int) -> void:
+		if data != null and data.has_method("set_part_anim_channel_mode"):
+			data.set_part_anim_channel_mode(_part_anim_lod_index, _part_anim_selected_index, "translation", _axis_name_for_id(translation_axis.get_selected_id()), _mode_name_for_id(translation_mode.get_item_id(index)), translation_register.selected if translation_register != null else -1)
+			refresh_after_edit.call()
+		update_visibility.call()
+	)
+	if translation_register != null:
+		translation_register.register_selected.connect(func(reg: int) -> void:
+			if data != null and data.has_method("set_part_anim_channel_mode"):
+				data.set_part_anim_channel_mode(_part_anim_lod_index, _part_anim_selected_index, "translation", _axis_name_for_id(translation_axis.get_selected_id()), _mode_name_for_id(translation_mode.get_selected_id()), reg)
+				refresh_after_edit.call()
+		)
+	translation_from.value_changed.connect(func(_value: float) -> void: set_translation_values.call())
+	translation_to.value_changed.connect(func(_value: float) -> void: set_translation_values.call())
+	translation_speed.value_changed.connect(func(_value: float) -> void: set_translation_values.call())
 
 
 func _build_lights_inspector(host: Control) -> void:

@@ -7,6 +7,7 @@ const ScatterInspectorScene = preload("res://modtools/terrain/ui/inspectors/scat
 const StampInspectorScene = preload("res://modtools/terrain/ui/inspectors/stamp_inspector.tscn")
 const LayoutInspectorScene = preload("res://modtools/terrain/ui/inspectors/layout_inspector.tscn")
 const TerrainViewportScript = preload("res://modtools/terrain/terrain_viewport.gd")
+const TerrainAssetDockScene = preload("res://modtools/terrain/ui/editor_asset_dock.tscn")
 
 enum Workflow { SCULPT, PAINT, SCATTER, STAMP, LAYOUT }
 enum ExportFlavor { BHD = 0, DFX_JO = 1 }
@@ -30,6 +31,7 @@ const INSPECTOR_SCENES := {
 }
 
 var terrain_editor: Node
+var _asset_dock_host: Control
 var _asset_dock: Control
 var _viewport: Control
 
@@ -151,8 +153,22 @@ func uses_asset_dock() -> bool:
 
 
 func set_asset_dock(dock: Control) -> void:
-	_asset_dock = dock
-	if _asset_dock != null and _asset_dock.has_method("set_editor"):
+	if _asset_dock != null and _asset_dock.get_parent() != null:
+		_asset_dock.get_parent().remove_child(_asset_dock)
+	if dock == null:
+		if _asset_dock != null:
+			_asset_dock.free()
+			_asset_dock = null
+		_asset_dock_host = null
+		return
+	_asset_dock_host = dock
+	if _asset_dock == null:
+		_asset_dock = TerrainAssetDockScene.instantiate()
+		_asset_dock.name = "TerrainAssetDock"
+		_asset_dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_asset_dock.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_asset_dock_host.add_child(_asset_dock)
+	if _asset_dock.has_method("set_editor"):
 		_asset_dock.set_editor(terrain_editor)
 
 

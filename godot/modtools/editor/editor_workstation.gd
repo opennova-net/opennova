@@ -88,6 +88,7 @@ var _environment_workspace: EnvironmentEditorWorkspace
 var _workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
 var _environment_action_buttons: Dictionary = {}
+var _asset_dock_workspace_id: int = -1
 var _camera_settings_panel: Control
 var _resource_index: RefCounted
 var _resource_root_dir: String = ""
@@ -160,8 +161,12 @@ func set_editor(value: Node) -> void:
 	var mission_workspace := _get_workspace(Workspace.MISSION) as MissionEditorWorkspace
 	if mission_workspace != null:
 		mission_workspace.set_terrain_editor(value)
-	if _environment_workspace != null and value != null and value.has_method("get_environment_editor"):
-		_environment_workspace.set_environment_editor(value.get_environment_editor())
+	var environment_editor: Variant = value.get_environment_editor() if value != null and value.has_method("get_environment_editor") else null
+	if _environment_workspace != null:
+		_environment_workspace.set_environment_editor(environment_editor)
+	var object_workspace := _get_workspace(Workspace.OBJECT)
+	if object_workspace != null and object_workspace.has_method("set_environment_editor"):
+		object_workspace.set_environment_editor(environment_editor)
 	_reset_environment_popup_content()
 	_sync_camera_popup_editor()
 	_remount_active_workspace_viewport()
@@ -200,11 +205,14 @@ func _ensure_workspaces() -> void:
 		_workspaces[Workspace.TERRAIN] = TerrainWorkspaceAdapter.new(editor)
 		_workspaces[Workspace.OBJECT] = ObjectWorkspaceAdapter.new()
 		_workspaces[Workspace.MISSION] = MissionWorkspaceAdapter.new(editor)
+	var environment_editor: Variant = editor.get_environment_editor() if editor != null and editor.has_method("get_environment_editor") else null
 	if _environment_workspace == null:
-		var environment_editor: Variant = editor.get_environment_editor() if editor != null and editor.has_method("get_environment_editor") else null
 		_environment_workspace = EnvironmentWorkspaceAdapter.new(environment_editor)
 	for workspace in _workspaces.values():
 		(workspace as EditorWorkspace).set_editor_shell(self)
+	var object_workspace := _get_workspace(Workspace.OBJECT)
+	if object_workspace != null and object_workspace.has_method("set_environment_editor"):
+		object_workspace.set_environment_editor(environment_editor)
 	if _environment_workspace != null:
 		_environment_workspace.set_editor_shell(self)
 
@@ -348,6 +356,7 @@ func set_active_workspace(workspace_id: int) -> void:
 	var current_workspace := _get_active_workspace()
 	if current_workspace != null:
 		current_workspace.deactivate()
+		current_workspace.set_asset_dock(null)
 	_unmount_workspace_viewport(_active_workspace_id, current_workspace)
 	_active_workspace_id = workspace_id
 	var next_workspace := _get_active_workspace()
@@ -433,9 +442,18 @@ func _refresh_workspace_surface() -> void:
 	_rebuild_workspace_actions(workspace)
 	_modes_label.visible = has_workflows
 	_mode_rail.visible = has_workflows
+	if _asset_dock_workspace_id != -1 and _asset_dock_workspace_id != _active_workspace_id:
+		var old_workspace := _get_workspace(_asset_dock_workspace_id)
+		if old_workspace != null:
+			old_workspace.set_asset_dock(null)
+		for child in _asset_dock.get_children():
+			_asset_dock.remove_child(child)
+			child.free()
+		_asset_dock_workspace_id = -1
 	_asset_dock.visible = workspace != null and workspace.uses_asset_dock()
 	if workspace != null:
 		workspace.set_asset_dock(_asset_dock if _asset_dock.visible else null)
+		_asset_dock_workspace_id = _active_workspace_id if _asset_dock.visible else -1
 	_rebuild_workflow_rail(workflows)
 	if has_workflows:
 		_inspector_workspace_id = -1
@@ -673,6 +691,10 @@ func _on_environment_toggle_toggled(pressed: bool) -> void:
 
 func _on_environment_popup_close_pressed() -> void:
 	_set_environment_popup_visible(false)
+
+
+func show_environment_dialog() -> void:
+	_set_environment_popup_visible(true)
 
 
 func _set_environment_popup_visible(active: bool) -> void:

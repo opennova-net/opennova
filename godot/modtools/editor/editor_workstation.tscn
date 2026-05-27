@@ -1,8 +1,7 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://modtools/editor/editor_workstation.gd" id="1_workstation"]
 [ext_resource type="Theme" uid="uid://brsq3gfp1bk2a" path="res://modtools/terrain/ui/theme/editor_theme.tres" id="2_theme"]
-[ext_resource type="PackedScene" path="res://modtools/terrain/ui/editor_asset_dock.tscn" id="3_asset_dock"]
 
 [sub_resource type="ButtonGroup" id="PromptFormatGroup"]
 
@@ -356,7 +355,7 @@ focus_mode = 0
 text = "Apply and Refresh"
 tooltip_text = "Refresh the resource browser index."
 
-[node name="AssetDock" parent="WorkstationLayout/BodyRow" instance=ExtResource("3_asset_dock")]
+[node name="AssetDock" type="PanelContainer" parent="WorkstationLayout/BodyRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(360, 0)
 layout_mode = 2
