@@ -3,6 +3,10 @@ extends "res://modtools/editor/editor_workspace.gd"
 
 const ObjectEditorScript = preload("res://modtools/object/object_editor.gd")
 const ObjectPreviewScript = preload("res://modtools/object/object_preview.gd")
+const ShaderTagPickerScript = preload("res://modtools/object/ui/widgets/shader_tag_picker.gd")
+const TextureSlotWidgetScript = preload("res://modtools/object/ui/widgets/texture_slot_widget.gd")
+const CtrlRegPickerScript = preload("res://modtools/object/ui/widgets/ctrl_reg_picker.gd")
+const AnimFramesDialogScript = preload("res://modtools/object/ui/dialogs/anim_frames_dialog.gd")
 
 enum Workflow { PREVIEW, MATERIALS, PARTS, LIGHTS, LODS }
 
@@ -25,6 +29,41 @@ const OED_UPDATE_MTRL := 1
 const OED_UPDATE_LGHT := 2
 const OED_UPDATE_PANM := 4
 const OED_UPDATE_ALL := OED_UPDATE_MTRL | OED_UPDATE_LGHT | OED_UPDATE_PANM
+const GENERATOR_STYLE_OPTIONS := [
+	{"id": 0, "label": "None"},
+	{"id": 16, "label": "Slide"},
+	{"id": 17, "label": "Slide inverse"},
+	{"id": 24, "label": "Set"},
+	{"id": 32, "label": "Rotate CW"},
+	{"id": 33, "label": "Rotate CCW"},
+	{"id": 49, "label": "Set wave sine"},
+	{"id": 50, "label": "Set wave square"},
+	{"id": 51, "label": "Set wave triangle"},
+	{"id": 52, "label": "Set wave saw"},
+	{"id": 65, "label": "Add wave sine"},
+	{"id": 81, "label": "Skew wave sine"},
+	{"id": 97, "label": "Multiply wave sine"},
+	{"id": 113, "label": "Control register set"},
+	{"id": 114, "label": "Control register add"},
+]
+const PART_ANIM_SCALE_OPTIONS := [
+	{"id": 0, "label": "None"},
+	{"id": 1, "label": "Uniform"},
+	{"id": 2, "label": "Per-axis"},
+]
+const PART_ANIM_ROTATION_OPTIONS := [
+	{"id": 0, "label": "None"},
+	{"id": 1, "label": "Spinner"},
+	{"id": 2, "label": "Euler"},
+	{"id": 3, "label": "Face camera"},
+	{"id": 4, "label": "Face camera XZ"},
+]
+const PART_ANIM_TRANSLATE_OPTIONS := [
+	{"id": 0, "label": "None"},
+	{"id": 1, "label": "X axis"},
+	{"id": 2, "label": "Y axis"},
+	{"id": 3, "label": "Z axis"},
+]
 
 var object_editor: ObjectEditor
 var _active_workflow_id: int = Workflow.PREVIEW
@@ -537,16 +576,28 @@ func _build_materials_inspector(host: Control) -> void:
 	var box := _make_inspector_box(host)
 	var materials := object_editor.object_data.get_materials() if object_editor and object_editor.object_data else []
 	var shader_catalog := _shader_catalog()
+
+	var list_panel := VBoxContainer.new()
+	list_panel.name = "MaterialListPanel"
+	list_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(list_panel)
+
+	var detail_box := VBoxContainer.new()
+	detail_box.name = "MaterialDetailPanel"
+	detail_box.add_theme_constant_override("separation", 8)
+	detail_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(detail_box)
+
 	var list := ItemList.new()
 	list.name = "MaterialsList"
-	list.custom_minimum_size = Vector2(0, 150)
+	list.custom_minimum_size = Vector2(0, 132)
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_refresh_materials_list(list, materials)
-	box.add_child(list)
+	list_panel.add_child(list)
 
 	var material_toolbar := HBoxContainer.new()
 	material_toolbar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(material_toolbar)
+	list_panel.add_child(material_toolbar)
 
 	var copy_button := Button.new()
 	copy_button.name = "MaterialCopyButton"
@@ -561,18 +612,22 @@ func _build_materials_inspector(host: Control) -> void:
 
 	var shader_label := Label.new()
 	shader_label.text = "Shader"
-	box.add_child(shader_label)
+	detail_box.add_child(shader_label)
 
-	var shader_option := OptionButton.new()
-	shader_option.name = "ShaderTagOption"
+	var shader_option = ShaderTagPickerScript.new()
+	shader_option.name = "ShaderTagPicker"
 	shader_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(shader_option)
+	detail_box.add_child(shader_option)
+	var shader_option_legacy := OptionButton.new()
+	shader_option_legacy.name = "ShaderTagOption"
+	shader_option_legacy.visible = false
+	detail_box.add_child(shader_option_legacy)
 
 	var shader_status := Label.new()
 	shader_status.name = "MaterialShaderStatus"
 	shader_status.clip_text = true
 	shader_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(shader_status)
+	detail_box.add_child(shader_status)
 
 	var slot_controls := {}
 	for slot_def in TEXTURE_SLOTS:
@@ -580,7 +635,7 @@ func _build_materials_inspector(host: Control) -> void:
 		var slot_box := VBoxContainer.new()
 		slot_box.name = "TextureSlot%dBox" % slot
 		slot_box.add_theme_constant_override("separation", 4)
-		box.add_child(slot_box)
+		detail_box.add_child(slot_box)
 
 		var label := Label.new()
 		label.text = String(slot_def.get("label", "Texture"))
@@ -591,36 +646,34 @@ func _build_materials_inspector(host: Control) -> void:
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		slot_box.add_child(row)
 
-		var texture_edit := LineEdit.new()
-		texture_edit.name = "TextureSlot%dName" % slot
-		texture_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		texture_edit.placeholder_text = "Filename in object folder"
-		row.add_child(texture_edit)
+		var texture_widget = TextureSlotWidgetScript.new()
+		texture_widget.name = "TextureSlot%dWidget" % slot
+		texture_widget.configure(slot)
+		texture_widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(texture_widget)
 
-		var browse := Button.new()
-		browse.name = "TextureSlot%dBrowse" % slot
-		browse.text = "..."
-		browse.tooltip_text = "Choose a texture from the object folder."
-		browse.custom_minimum_size = Vector2(34, 30)
-		row.add_child(browse)
+		var options_row := HBoxContainer.new()
+		options_row.name = "TextureSlot%dOptionsRow" % slot
+		options_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		slot_box.add_child(options_row)
 
 		var clamped := CheckBox.new()
 		clamped.name = "TextureSlot%dClamped" % slot
 		clamped.text = "Clamp"
-		row.add_child(clamped)
+		options_row.add_child(clamped)
 
 		var animated := CheckBox.new()
 		animated.name = "TextureSlot%dAnimated" % slot
 		animated.text = "Anim"
-		row.add_child(animated)
+		options_row.add_child(animated)
 
 		var frame := SpinBox.new()
 		frame.name = "TextureSlot%dFrame" % slot
 		frame.min_value = 0
 		frame.max_value = 255
 		frame.step = 1
-		frame.custom_minimum_size = Vector2(70, 30)
-		row.add_child(frame)
+		frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		options_row.add_child(frame)
 
 		var status := Label.new()
 		status.name = "TextureSlot%dStatus" % slot
@@ -630,9 +683,11 @@ func _build_materials_inspector(host: Control) -> void:
 
 		slot_controls[slot] = {
 			"box": slot_box,
-			"edit": texture_edit,
+			"widget": texture_widget,
+			"edit": texture_widget.line_edit,
 			"status": status,
-			"browse": browse,
+			"browse": texture_widget.browse_button,
+			"clear": texture_widget.clear_button,
 			"clamped": clamped,
 			"animated": animated,
 			"frame": frame,
@@ -640,7 +695,7 @@ func _build_materials_inspector(host: Control) -> void:
 
 	var alpha_label := Label.new()
 	alpha_label.text = "Alpha threshold"
-	box.add_child(alpha_label)
+	detail_box.add_child(alpha_label)
 
 	var alpha := SpinBox.new()
 	alpha.name = "AlphaThreshold"
@@ -648,9 +703,18 @@ func _build_materials_inspector(host: Control) -> void:
 	alpha.max_value = 1.0
 	alpha.step = 0.01
 	alpha.custom_minimum_size = Vector2(0, 34)
-	box.add_child(alpha)
+	detail_box.add_child(alpha)
 
-	var generator_controls := _build_generator_controls(box)
+	var generator_controls := _build_generator_controls(detail_box)
+
+	var edit_frames := Button.new()
+	edit_frames.name = "TextureAnimationFramesButton"
+	edit_frames.text = "Edit frames..."
+	detail_box.add_child(edit_frames)
+
+	var anim_frames_dialog = AnimFramesDialogScript.new()
+	anim_frames_dialog.name = "MaterialAnimFramesDialog"
+	host.add_child(anim_frames_dialog)
 
 	var texture_dialog := FileDialog.new()
 	texture_dialog.name = "ObjectTextureFileDialog"
@@ -679,7 +743,8 @@ func _build_materials_inspector(host: Control) -> void:
 			syncing["value"] = false
 			return
 		var material: Dictionary = materials[index]
-		_populate_shader_tags(shader_option, String(material.get("shader", "")), shader_catalog)
+		shader_option.setup(shader_catalog, String(material.get("shader", "")))
+		_populate_shader_tags(shader_option_legacy, String(material.get("shader", "")), shader_catalog)
 		var shader_info := _shader_info_for_material(material, shader_catalog)
 		shader_status.text = _shader_status_text(shader_info)
 		alpha.value = float(material.get("alpha_threshold", 0.0))
@@ -691,20 +756,28 @@ func _build_materials_inspector(host: Control) -> void:
 			var supported := _shader_supports_texture_slot(shader_info, slot)
 			var occupied := not String(texture_info.get("name", "")).is_empty()
 			var slot_box := controls.get("box") as Control
+			var texture_widget = controls.get("widget")
 			var edit := controls.get("edit") as LineEdit
 			var status := controls.get("status") as Label
 			var browse := controls.get("browse") as Button
+			var clear := controls.get("clear") as Button
 			var clamped := controls.get("clamped") as CheckBox
 			var animated := controls.get("animated") as CheckBox
 			var frame := controls.get("frame") as SpinBox
 			if slot_box != null:
 				slot_box.visible = supported or occupied
+			if texture_widget != null:
+				texture_widget.set_value(String(texture_info.get("name", "")))
+				texture_widget.set_slot_enabled(supported)
+				texture_widget.set_placeholder("Filename in object folder" if supported else "Unsupported by shader")
 			if edit != null:
 				edit.text = String(texture_info.get("name", ""))
 				edit.editable = supported
 				edit.placeholder_text = "Filename in object folder" if supported else "Unsupported by shader"
 			if browse != null:
 				browse.disabled = not supported
+			if clear != null:
+				clear.disabled = not supported or not occupied
 			var texture_flags := int(texture_info.get("flags", 0))
 			if clamped != null:
 				clamped.button_pressed = (texture_flags & 0x02) != 0
@@ -795,18 +868,31 @@ func _build_materials_inspector(host: Control) -> void:
 		_paste_material_settings(current_index, _material_clipboard)
 		resync_selected.call()
 	)
-	shader_option.item_selected.connect(func(index: int) -> void:
+	shader_option.value_changed.connect(func(tag: String) -> void:
 		if syncing["value"] or selected["index"] < 0:
 			return
-		object_editor.object_data.set_material_shader(selected["index"], shader_option.get_item_text(index))
+		object_editor.object_data.set_material_shader(selected["index"], tag)
 		resync_selected.call()
 	)
 
 	for slot_def in TEXTURE_SLOTS:
 		var slot := int(slot_def.get("slot", 0))
 		var controls: Dictionary = slot_controls.get(slot, {})
+		var texture_widget = controls.get("widget")
 		var edit := controls.get("edit") as LineEdit
-		var browse := controls.get("browse") as Button
+		if texture_widget != null:
+			texture_widget.value_changed.connect(func(slot_id: int, value: String) -> void:
+				apply_slot_name.call(slot_id, value)
+			)
+			texture_widget.browse_requested.connect(func(slot_id: int) -> void:
+				pending_slot["slot"] = slot_id
+				var source_dir := object_editor.object_data.get_source_dir() if object_editor and object_editor.object_data else ""
+				if source_dir.is_empty():
+					show_slot_message.call(slot_id, "Open an object before choosing a texture.")
+					return
+				texture_dialog.current_dir = source_dir
+				texture_dialog.popup_centered()
+			)
 		if edit != null:
 			edit.text_submitted.connect(func(value: String, slot_id: int = slot) -> void:
 				apply_slot_name.call(slot_id, value)
@@ -828,16 +914,6 @@ func _build_materials_inspector(host: Control) -> void:
 			frame.value_changed.connect(func(_value: float, slot_id: int = slot) -> void:
 				if not syncing["value"]:
 					apply_slot_options.call(slot_id)
-			)
-		if browse != null:
-			browse.pressed.connect(func(slot_id: int = slot) -> void:
-				pending_slot["slot"] = slot_id
-				var source_dir := object_editor.object_data.get_source_dir() if object_editor and object_editor.object_data else ""
-				if source_dir.is_empty():
-					show_slot_message.call(slot_id, "Open an object before choosing a texture.")
-					return
-				texture_dialog.current_dir = source_dir
-				texture_dialog.popup_centered()
 			)
 
 	texture_dialog.file_selected.connect(func(path: String) -> void:
@@ -862,10 +938,38 @@ func _build_materials_inspector(host: Control) -> void:
 			var spin := axis_controls.get(key) as SpinBox
 			if spin != null:
 				_connect_uv_generator_spin(spin, axis_id, String(key), generator_controls, apply_uv_generator)
+		var style_option := axis_controls.get("style_option") as OptionButton
+		if style_option != null:
+			style_option.item_selected.connect(func(index: int, selected_axis: String = axis_id, option: OptionButton = style_option) -> void:
+				var params := _uv_generator_params(generator_controls, selected_axis)
+				params["style"] = option.get_item_id(index)
+				apply_uv_generator.call(selected_axis, params)
+			)
+		var reg_picker = axis_controls.get("reg_picker")
+		if reg_picker != null:
+			reg_picker.register_selected.connect(func(reg: int, selected_axis: String = axis_id) -> void:
+				var params := _uv_generator_params(generator_controls, selected_axis)
+				params["reg"] = reg
+				apply_uv_generator.call(selected_axis, params)
+			)
 	for key in ["style", "phase", "reg", "rate"]:
 		var spin := generator_controls.get("rgb_%s" % key) as SpinBox
 		if spin != null:
 			_connect_rgb_generator_spin(spin, String(key), generator_controls, apply_rgb_generator)
+	var rgb_style_option := generator_controls.get("rgb_style_option") as OptionButton
+	if rgb_style_option != null:
+		rgb_style_option.item_selected.connect(func(index: int) -> void:
+			var params := _rgb_generator_params(generator_controls)
+			params["style"] = rgb_style_option.get_item_id(index)
+			apply_rgb_generator.call(params)
+		)
+	var rgb_reg_picker = generator_controls.get("rgb_reg_picker")
+	if rgb_reg_picker != null:
+		rgb_reg_picker.register_selected.connect(func(reg: int) -> void:
+			var params := _rgb_generator_params(generator_controls)
+			params["reg"] = reg
+			apply_rgb_generator.call(params)
+		)
 	var rgb_start := generator_controls.get("rgb_start_color") as ColorPickerButton
 	var rgb_end := generator_controls.get("rgb_end_color") as ColorPickerButton
 	if rgb_start != null:
@@ -880,10 +984,36 @@ func _build_materials_inspector(host: Control) -> void:
 		var spin := generator_controls.get("alpha_%s" % key) as SpinBox
 		if spin != null:
 			_connect_alpha_generator_spin(spin, String(key), generator_controls, apply_alpha_generator)
+	var alpha_style_option := generator_controls.get("alpha_style_option") as OptionButton
+	if alpha_style_option != null:
+		alpha_style_option.item_selected.connect(func(index: int) -> void:
+			var params := _alpha_generator_params(generator_controls)
+			params["style"] = alpha_style_option.get_item_id(index)
+			apply_alpha_generator.call(params)
+		)
+	var alpha_reg_picker = generator_controls.get("alpha_reg_picker")
+	if alpha_reg_picker != null:
+		alpha_reg_picker.register_selected.connect(func(reg: int) -> void:
+			var params := _alpha_generator_params(generator_controls)
+			params["reg"] = reg
+			apply_alpha_generator.call(params)
+		)
 	for key in ["frames", "type", "time"]:
 		var spin := generator_controls.get("anim_%s" % key) as SpinBox
 		if spin != null:
 			_connect_texture_animation_spin(spin, String(key), generator_controls, apply_texture_animation)
+	edit_frames.pressed.connect(func() -> void:
+		var current_index := int(selected.get("index", -1))
+		if current_index < 0 or current_index >= materials.size():
+			return
+		var material: Dictionary = materials[current_index]
+		var shader_info := _shader_info_for_material(material, shader_catalog)
+		anim_frames_dialog.setup(object_editor.object_data, current_index, shader_info)
+		anim_frames_dialog.popup_centered()
+	)
+	anim_frames_dialog.frame_changed.connect(func() -> void:
+		resync_selected.call()
+	)
 	if not materials.is_empty():
 		list.select(0)
 		sync_fields.call(0)
@@ -1064,8 +1194,10 @@ func _build_generator_controls(box: VBoxContainer) -> Dictionary:
 		section.add_child(header)
 		var axis_controls := {
 			"box": section,
+			"style_option": _add_id_option_row(section, "%sGeneratorStyleOption" % axis.to_upper(), "Style", GENERATOR_STYLE_OPTIONS),
 			"style": _add_spin_row(section, "%sGeneratorStyle" % axis.to_upper(), "Style", 0, 255, 1),
 			"phase": _add_spin_row(section, "%sGeneratorPhase" % axis.to_upper(), "Phase", -100000, 100000, 0.01),
+			"reg_picker": _add_ctrl_reg_row(section, "%sGeneratorControlReg" % axis.to_upper(), "Control reg"),
 			"reg": _add_spin_row(section, "%sGeneratorReg" % axis.to_upper(), "Control reg", -1, 255, 1),
 			"rate": _add_spin_row(section, "%sGeneratorRate" % axis.to_upper(), "Rate", -100000, 100000, 0.01),
 			"start": _add_spin_row(section, "%sGeneratorStart" % axis.to_upper(), "Start", -100000, 100000, 0.01),
@@ -1081,8 +1213,10 @@ func _build_generator_controls(box: VBoxContainer) -> Dictionary:
 	rgb_header.text = "RGB gen"
 	rgb_section.add_child(rgb_header)
 	controls["rgb_box"] = rgb_section
+	controls["rgb_style_option"] = _add_id_option_row(rgb_section, "RgbGeneratorStyleOption", "Style", GENERATOR_STYLE_OPTIONS)
 	controls["rgb_style"] = _add_spin_row(rgb_section, "RgbGeneratorStyle", "Style", 0, 255, 1)
 	controls["rgb_phase"] = _add_spin_row(rgb_section, "RgbGeneratorPhase", "Phase", -100000, 100000, 0.01)
+	controls["rgb_reg_picker"] = _add_ctrl_reg_row(rgb_section, "RgbGeneratorControlReg", "Control reg")
 	controls["rgb_reg"] = _add_spin_row(rgb_section, "RgbGeneratorReg", "Control reg", -1, 255, 1)
 	controls["rgb_rate"] = _add_spin_row(rgb_section, "RgbGeneratorRate", "Rate", -100000, 100000, 0.01)
 	controls["rgb_start_color"] = _add_color_row(rgb_section, "RgbGeneratorStartColor", "Start")
@@ -1096,8 +1230,10 @@ func _build_generator_controls(box: VBoxContainer) -> Dictionary:
 	alpha_header.text = "Alpha gen"
 	alpha_section.add_child(alpha_header)
 	controls["alpha_box"] = alpha_section
+	controls["alpha_style_option"] = _add_id_option_row(alpha_section, "AlphaGeneratorStyleOption", "Style", GENERATOR_STYLE_OPTIONS)
 	controls["alpha_style"] = _add_spin_row(alpha_section, "AlphaGeneratorStyle", "Style", 0, 255, 1)
 	controls["alpha_phase"] = _add_spin_row(alpha_section, "AlphaGeneratorPhase", "Phase", -100000, 100000, 0.01)
+	controls["alpha_reg_picker"] = _add_ctrl_reg_row(alpha_section, "AlphaGeneratorControlReg", "Control reg")
 	controls["alpha_reg"] = _add_spin_row(alpha_section, "AlphaGeneratorReg", "Control reg", -1, 255, 1)
 	controls["alpha_rate"] = _add_spin_row(alpha_section, "AlphaGeneratorRate", "Rate", -100000, 100000, 0.01)
 	controls["alpha_start"] = _add_spin_row(alpha_section, "AlphaGeneratorStart", "Start", -32768, 32767, 1)
@@ -1123,7 +1259,9 @@ func _add_spin_row(parent: Control, node_name: String, label_text: String, min_v
 	parent.add_child(row)
 	var label := Label.new()
 	label.text = label_text
-	label.custom_minimum_size = Vector2(90, 0)
+	label.tooltip_text = label_text
+	label.clip_text = true
+	label.custom_minimum_size = Vector2(76, 0)
 	row.add_child(label)
 	var spin := SpinBox.new()
 	spin.name = node_name
@@ -1141,13 +1279,82 @@ func _add_color_row(parent: Control, node_name: String, label_text: String) -> C
 	parent.add_child(row)
 	var label := Label.new()
 	label.text = label_text
-	label.custom_minimum_size = Vector2(90, 0)
+	label.tooltip_text = label_text
+	label.clip_text = true
+	label.custom_minimum_size = Vector2(76, 0)
 	row.add_child(label)
 	var picker := ColorPickerButton.new()
 	picker.name = node_name
 	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(picker)
 	return picker
+
+
+func _add_id_option_row(parent: Control, node_name: String, label_text: String, options: Array) -> OptionButton:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(row)
+	var label := Label.new()
+	label.text = label_text
+	label.tooltip_text = label_text
+	label.clip_text = true
+	label.custom_minimum_size = Vector2(76, 0)
+	row.add_child(label)
+	var option := OptionButton.new()
+	option.name = node_name
+	option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(option)
+	_populate_id_option(option, options, 0)
+	return option
+
+
+func _add_ctrl_reg_row(parent: Control, node_name: String, label_text: String):
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(row)
+	var label := Label.new()
+	label.text = label_text
+	label.tooltip_text = label_text
+	label.clip_text = true
+	label.custom_minimum_size = Vector2(76, 0)
+	row.add_child(label)
+	var picker = CtrlRegPickerScript.new()
+	picker.name = node_name
+	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(picker)
+	picker.setup(_control_registers(), -1)
+	return picker
+
+
+func _populate_id_option(option: OptionButton, options: Array, current_id: int) -> void:
+	if option == null:
+		return
+	option.clear()
+	var selected_index := 0
+	var matched := false
+	for item in options:
+		var item_id := int(item.get("id", 0))
+		option.add_item(String(item.get("label", str(item_id))), item_id)
+		var option_index := option.get_item_count() - 1
+		if item_id == current_id:
+			selected_index = option_index
+			matched = true
+	if not matched:
+		option.add_item("Custom %d" % current_id, current_id)
+		selected_index = option.get_item_count() - 1
+	option.select(selected_index)
+
+
+func _selected_option_id(option: OptionButton) -> int:
+	if option == null or option.selected < 0 or option.selected >= option.get_item_count():
+		return 0
+	return option.get_item_id(option.selected)
+
+
+func _control_registers() -> Array:
+	if object_editor != null and object_editor.object_data != null and object_editor.object_data.has_method("get_control_registers"):
+		return object_editor.object_data.get_control_registers()
+	return []
 
 
 func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader_info: Dictionary) -> void:
@@ -1162,8 +1369,12 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 	_set_section_visible_enabled(controls.get("v", {}).get("box"), uses_uv or has_uv_data, uses_uv)
 
 	var rgb_gen: Dictionary = material.get("rgb_gen", {})
+	_populate_id_option(controls.get("rgb_style_option") as OptionButton, GENERATOR_STYLE_OPTIONS, int(rgb_gen.get("style", 0)))
 	_set_spin(controls.get("rgb_style"), int(rgb_gen.get("style", 0)))
 	_set_spin(controls.get("rgb_phase"), float(rgb_gen.get("phase", 0.0)))
+	var rgb_reg_picker = controls.get("rgb_reg_picker")
+	if rgb_reg_picker != null:
+		rgb_reg_picker.setup(_control_registers(), int(rgb_gen.get("reg", -1)))
 	_set_spin(controls.get("rgb_reg"), int(rgb_gen.get("reg", -1)))
 	_set_spin(controls.get("rgb_rate"), float(rgb_gen.get("rate", 0.0)))
 	var rgb_start := controls.get("rgb_start_color") as ColorPickerButton
@@ -1177,8 +1388,12 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 	_set_section_visible_enabled(controls.get("rgb_box"), rgb_visible, rgb_enabled)
 
 	var alpha_gen: Dictionary = material.get("alpha_gen", {})
+	_populate_id_option(controls.get("alpha_style_option") as OptionButton, GENERATOR_STYLE_OPTIONS, int(alpha_gen.get("style", 0)))
 	_set_spin(controls.get("alpha_style"), int(alpha_gen.get("style", 0)))
 	_set_spin(controls.get("alpha_phase"), float(alpha_gen.get("phase", 0.0)))
+	var alpha_reg_picker = controls.get("alpha_reg_picker")
+	if alpha_reg_picker != null:
+		alpha_reg_picker.setup(_control_registers(), int(alpha_gen.get("reg", -1)))
 	_set_spin(controls.get("alpha_reg"), int(alpha_gen.get("reg", -1)))
 	_set_spin(controls.get("alpha_rate"), float(alpha_gen.get("rate", 0.0)))
 	_set_spin(controls.get("alpha_start"), int(alpha_gen.get("start", 0)))
@@ -1197,8 +1412,12 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 
 
 func _sync_uv_axis_controls(axis_controls: Dictionary, params: Dictionary) -> void:
+	_populate_id_option(axis_controls.get("style_option") as OptionButton, GENERATOR_STYLE_OPTIONS, int(params.get("style", 0)))
 	_set_spin(axis_controls.get("style"), int(params.get("style", 0)))
 	_set_spin(axis_controls.get("phase"), float(params.get("phase", 0.0)))
+	var reg_picker = axis_controls.get("reg_picker")
+	if reg_picker != null:
+		reg_picker.setup(_control_registers(), int(params.get("reg", -1)))
 	_set_spin(axis_controls.get("reg"), int(params.get("reg", -1)))
 	_set_spin(axis_controls.get("rate"), float(params.get("rate", 0.0)))
 	_set_spin(axis_controls.get("start"), float(params.get("start", 0.0)))
@@ -1353,8 +1572,11 @@ func _build_part_anims_inspector(host: Control) -> void:
 	var syncing := {"value": false}
 	var transform_as := _add_spin_row(box, "PartAnimTransformAs", "Transform as", 0, 255, 1)
 	var parent := _add_spin_row(box, "PartAnimParent", "Parent", 0, 255, 1)
+	var scale_option := _add_id_option_row(box, "PartAnimScaleTypeOption", "Scale mode", PART_ANIM_SCALE_OPTIONS)
 	var scale_type := _add_spin_row(box, "PartAnimScaleType", "Scale", 0, 255, 1)
+	var rotation_option := _add_id_option_row(box, "PartAnimRotationTypeOption", "Rotation mode", PART_ANIM_ROTATION_OPTIONS)
 	var rotation_type := _add_spin_row(box, "PartAnimRotationType", "Rotation", 0, 255, 1)
+	var translate_option := _add_id_option_row(box, "PartAnimTranslateTypeOption", "Translate mode", PART_ANIM_TRANSLATE_OPTIONS)
 	var translate_type := _add_spin_row(box, "PartAnimTranslateType", "Translate", 0, 255, 1)
 	var reversed := CheckBox.new()
 	reversed.name = "PartAnimRotationReversed"
@@ -1380,8 +1602,11 @@ func _build_part_anims_inspector(host: Control) -> void:
 		var info: Dictionary = anim_info.call(index)
 		transform_as.value = int(info.get("transform_as", info.get("part_index", 0)))
 		parent.value = int(info.get("parent_subobject", info.get("parent_part", 0)))
+		_populate_id_option(scale_option, PART_ANIM_SCALE_OPTIONS, int(info.get("scale_type", int(info.get("flags", 0)) & 0xFF)))
 		scale_type.value = int(info.get("scale_type", int(info.get("flags", 0)) & 0xFF))
+		_populate_id_option(rotation_option, PART_ANIM_ROTATION_OPTIONS, int(info.get("rotation_type", (int(info.get("flags", 0)) >> 8) & 0xFF)))
 		rotation_type.value = int(info.get("rotation_type", (int(info.get("flags", 0)) >> 8) & 0xFF))
+		_populate_id_option(translate_option, PART_ANIM_TRANSLATE_OPTIONS, int(info.get("translate_type", (int(info.get("flags", 0)) >> 24) & 0xFF)))
 		translate_type.value = int(info.get("translate_type", (int(info.get("flags", 0)) >> 24) & 0xFF))
 		reversed.button_pressed = bool(info.get("rotation_reversed", ((int(info.get("flags", 0)) >> 16) & 0xFF) != 0))
 		syncing["value"] = false
@@ -1410,8 +1635,11 @@ func _build_part_anims_inspector(host: Control) -> void:
 	)
 	transform_as.value_changed.connect(func(value: float) -> void: set_field.call("transform_as", int(value)))
 	parent.value_changed.connect(func(value: float) -> void: set_field.call("parent_subobject", int(value)))
+	scale_option.item_selected.connect(func(index: int) -> void: set_field.call("scale_type", scale_option.get_item_id(index)))
 	scale_type.value_changed.connect(func(value: float) -> void: set_field.call("scale_type", int(value)))
+	rotation_option.item_selected.connect(func(index: int) -> void: set_field.call("rotation_type", rotation_option.get_item_id(index)))
 	rotation_type.value_changed.connect(func(value: float) -> void: set_field.call("rotation_type", int(value)))
+	translate_option.item_selected.connect(func(index: int) -> void: set_field.call("translate_type", translate_option.get_item_id(index)))
 	translate_type.value_changed.connect(func(value: float) -> void: set_field.call("translate_type", int(value)))
 	reversed.toggled.connect(func(value: bool) -> void: set_field.call("rotation_reversed", value))
 	refresh_list.call()
@@ -1448,7 +1676,27 @@ func _build_lights_inspector(host: Control) -> void:
 	var phase := _add_spin_row(box, "LightPhase", "Phase", 0, 255, 1)
 	var rate := _add_spin_row(box, "LightRate", "Rate", 0, 65535, 1)
 
+	var positive_flags_row := VBoxContainer.new()
+	positive_flags_row.name = "LightPositiveFlags"
+	positive_flags_row.add_theme_constant_override("separation", 2)
+	positive_flags_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(positive_flags_row)
+	var draw_corona := CheckBox.new()
+	draw_corona.name = "LightDrawCorona"
+	draw_corona.text = "Draw corona"
+	positive_flags_row.add_child(draw_corona)
+	var light_terrain := CheckBox.new()
+	light_terrain.name = "LightTerrain"
+	light_terrain.text = "Light terrain"
+	positive_flags_row.add_child(light_terrain)
+	var light_objects := CheckBox.new()
+	light_objects.name = "LightObjects"
+	light_objects.text = "Light objects"
+	positive_flags_row.add_child(light_objects)
+
 	var flags_row := HBoxContainer.new()
+	flags_row.name = "LightDisableRawRow"
+	flags_row.visible = false
 	flags_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_child(flags_row)
 	var disable_corona := CheckBox.new()
@@ -1489,9 +1737,15 @@ func _build_lights_inspector(host: Control) -> void:
 		style.value = int(info.get("colorgen_style", info.get("style", 0)))
 		phase.value = int(info.get("colorgen_phase", info.get("phase", 0)))
 		rate.value = int(info.get("colorgen_rate", info.get("rate", 0)))
-		disable_corona.button_pressed = bool(info.get("disable_corona", (int(info.get("flags", 0)) & 0x01) != 0))
-		disable_terrain.button_pressed = bool(info.get("disable_lightterrain", (int(info.get("flags", 0)) & 0x02) != 0))
-		disable_objects.button_pressed = bool(info.get("disable_lightobjects", (int(info.get("flags", 0)) & 0x04) != 0))
+		var corona_disabled := bool(info.get("disable_corona", (int(info.get("flags", 0)) & 0x01) != 0))
+		var terrain_disabled := bool(info.get("disable_lightterrain", (int(info.get("flags", 0)) & 0x02) != 0))
+		var objects_disabled := bool(info.get("disable_lightobjects", (int(info.get("flags", 0)) & 0x04) != 0))
+		draw_corona.button_pressed = not corona_disabled
+		light_terrain.button_pressed = not terrain_disabled
+		light_objects.button_pressed = not objects_disabled
+		disable_corona.button_pressed = corona_disabled
+		disable_terrain.button_pressed = terrain_disabled
+		disable_objects.button_pressed = objects_disabled
 		syncing["value"] = false
 
 	list.item_selected.connect(func(index: int) -> void:
@@ -1505,6 +1759,9 @@ func _build_lights_inspector(host: Control) -> void:
 	style.value_changed.connect(func(value: float) -> void: set_field.call("colorgen_style", int(value)))
 	phase.value_changed.connect(func(value: float) -> void: set_field.call("colorgen_phase", int(value)))
 	rate.value_changed.connect(func(value: float) -> void: set_field.call("colorgen_rate", int(value)))
+	draw_corona.toggled.connect(func(value: bool) -> void: set_field.call("disable_corona", not value))
+	light_terrain.toggled.connect(func(value: bool) -> void: set_field.call("disable_lightterrain", not value))
+	light_objects.toggled.connect(func(value: bool) -> void: set_field.call("disable_lightobjects", not value))
 	disable_corona.toggled.connect(func(value: bool) -> void: set_field.call("disable_corona", value))
 	disable_terrain.toggled.connect(func(value: bool) -> void: set_field.call("disable_lightterrain", value))
 	disable_objects.toggled.connect(func(value: bool) -> void: set_field.call("disable_lightobjects", value))

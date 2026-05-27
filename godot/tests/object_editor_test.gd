@@ -774,6 +774,60 @@ func test_object_lights_inspector_populates_edits_and_exports() -> void:
 	assert_true(bool(reopened_info.get("disable_lightobjects", false)))
 
 
+func test_object_lights_inspector_uses_positive_oed_toggles() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var data: NovaObjectData = workspace.object_editor.object_data
+	workspace.object_editor.mark_clean()
+	var host = add_child_autofree(Control.new())
+
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, host)
+	var list := _find_node_by_name(host, "ObjectLightsList") as ItemList
+	var flags := _find_node_by_name(host, "LightPositiveFlags") as VBoxContainer
+	var draw_corona := _find_node_by_name(host, "LightDrawCorona") as CheckBox
+	var light_terrain := _find_node_by_name(host, "LightTerrain") as CheckBox
+	var light_objects := _find_node_by_name(host, "LightObjects") as CheckBox
+	assert_not_null(list)
+	assert_not_null(flags, "Positive OED light toggles should be stacked for the side panel.")
+	assert_not_null(draw_corona)
+	assert_not_null(light_terrain)
+	assert_not_null(light_objects)
+	if list == null or draw_corona == null or light_terrain == null or light_objects == null:
+		return
+
+	list.select(0)
+	list.item_selected.emit(0)
+	assert_eq(draw_corona.text, "Draw corona")
+	assert_eq(light_terrain.text, "Light terrain")
+	assert_eq(light_objects.text, "Light objects")
+
+	draw_corona.button_pressed = false
+	draw_corona.toggled.emit(false)
+	light_terrain.button_pressed = false
+	light_terrain.toggled.emit(false)
+	light_objects.button_pressed = false
+	light_objects.toggled.emit(false)
+
+	var disabled: Dictionary = data.get_light_info(0)
+	assert_true(bool(disabled.get("disable_corona", false)))
+	assert_true(bool(disabled.get("disable_lightterrain", false)))
+	assert_true(bool(disabled.get("disable_lightobjects", false)))
+
+	draw_corona.button_pressed = true
+	draw_corona.toggled.emit(true)
+	light_terrain.button_pressed = true
+	light_terrain.toggled.emit(true)
+	light_objects.button_pressed = true
+	light_objects.toggled.emit(true)
+
+	var enabled: Dictionary = data.get_light_info(0)
+	assert_false(bool(enabled.get("disable_corona", true)))
+	assert_false(bool(enabled.get("disable_lightterrain", true)))
+	assert_false(bool(enabled.get("disable_lightobjects", true)))
+	assert_true(workspace.object_editor.is_dirty, "Editing positive light toggles should mark the object dirty.")
+
+
 func test_object_materials_inspector_populates_material_slots() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
@@ -860,6 +914,47 @@ func test_object_materials_inspector_edits_uv_generators() -> void:
 	assert_eq(int(u_params.get("style", 0)), 2)
 
 
+func test_object_materials_inspector_uses_compact_layout_and_named_generator_controls() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_eq(workspace.object_editor.object_data.set_material_shader(0, "FF_ST_OP#UV"), OK)
+	workspace.object_editor.mark_clean()
+	var host = add_child_autofree(Control.new())
+
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, host)
+	var list_panel := _find_node_by_name(host, "MaterialListPanel") as Control
+	var detail := _find_node_by_name(host, "MaterialDetailPanel") as Control
+	var shader_picker := _find_node_by_name(host, "ShaderTagPicker") as OptionButton
+	var slot1_clear := _find_node_by_name(host, "TextureSlot1Clear") as Button
+	var slot1_options := _find_node_by_name(host, "TextureSlot1OptionsRow") as Control
+	var u_style := _find_node_by_name(host, "UGeneratorStyleOption") as OptionButton
+	var u_reg := _find_node_by_name(host, "UGeneratorControlReg") as OptionButton
+	assert_null(_find_node_by_name(host, "MaterialInspectorSplit"), "Materials inspector should not use a horizontal split inside the side panel.")
+	assert_null(_find_node_by_name(host, "MaterialDetailScroll"), "Materials inspector should rely on the side panel's existing scroll area.")
+	assert_not_null(list_panel, "Materials inspector should expose a compact list panel.")
+	assert_not_null(detail, "Materials inspector should expose a stable detail panel.")
+	assert_not_null(shader_picker, "Materials inspector should use the shader tag picker.")
+	assert_not_null(slot1_clear, "Texture slot controls should expose a clear button.")
+	assert_not_null(slot1_options, "Texture slot options should be on a second compact row.")
+	assert_not_null(u_style, "UV generator style should be a named option control.")
+	assert_not_null(u_reg, "UV generator register should be a named option control.")
+	if list_panel != null:
+		assert_eq(list_panel.custom_minimum_size.x, 0.0, "Material list panel should not force a wide side panel.")
+	if u_style == null:
+		return
+
+	var slide_index := _option_index_by_id(u_style, 16)
+	assert_true(slide_index >= 0, "Generator style picker should expose OED style 16 as a named option.")
+	u_style.select(slide_index)
+	u_style.item_selected.emit(slide_index)
+
+	var material: Dictionary = workspace.object_editor.object_data.get_materials()[0]
+	var u_params: Dictionary = material.get("u_params", {})
+	assert_eq(int(u_params.get("style", 0)), 16)
+	assert_true(workspace.object_editor.is_dirty, "Editing a named generator option should mark the object dirty.")
+
+
 func test_object_materials_inspector_copies_and_pastes_settings() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
@@ -890,6 +985,50 @@ func test_object_materials_inspector_copies_and_pastes_settings() -> void:
 	var target_info: Dictionary = workspace.object_editor.object_data.get_material_info(1)
 	assert_eq(String(target_info.get("shader_tag", "")), String(source_info.get("shader_tag", "")), "Pasted material should copy shader tag.")
 	assert_eq(String(target_info.get("diffuse_a", "")), String(source_info.get("diffuse_a", "")), "Pasted material should copy diffuse texture.")
+
+
+func test_object_part_anims_inspector_uses_named_type_options() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var data: NovaObjectData = workspace.object_editor.object_data
+	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
+	workspace.object_editor.mark_clean()
+	var host = add_child_autofree(Control.new())
+
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, host)
+	var list := _find_node_by_name(host, "PartAnimList") as ItemList
+	var scale_option := _find_node_by_name(host, "PartAnimScaleTypeOption") as OptionButton
+	var rotation_option := _find_node_by_name(host, "PartAnimRotationTypeOption") as OptionButton
+	var translate_option := _find_node_by_name(host, "PartAnimTranslateTypeOption") as OptionButton
+	assert_not_null(list)
+	assert_not_null(scale_option)
+	assert_not_null(rotation_option)
+	assert_not_null(translate_option)
+	if list == null or scale_option == null or rotation_option == null or translate_option == null:
+		return
+
+	list.select(0)
+	list.item_selected.emit(0)
+	var scale_index := _option_index_by_id(scale_option, 2)
+	var rotation_index := _option_index_by_id(rotation_option, 2)
+	var translate_index := _option_index_by_id(translate_option, 3)
+	assert_true(scale_index >= 0, "Scale picker should expose the per-axis type.")
+	assert_true(rotation_index >= 0, "Rotation picker should expose the Euler type.")
+	assert_true(translate_index >= 0, "Translation picker should expose the Z axis type.")
+
+	scale_option.select(scale_index)
+	scale_option.item_selected.emit(scale_index)
+	rotation_option.select(rotation_index)
+	rotation_option.item_selected.emit(rotation_index)
+	translate_option.select(translate_index)
+	translate_option.item_selected.emit(translate_index)
+
+	var updated: Dictionary = data.get_part_anim_info(0, 0)
+	assert_eq(int(updated.get("scale_type", 0)), 2)
+	assert_eq(int(updated.get("rotation_type", 0)), 2)
+	assert_eq(int(updated.get("translate_type", 0)), 3)
+	assert_true(workspace.object_editor.is_dirty, "Editing named part animation type options should mark the object dirty.")
 
 
 func _assert_mesh_arrays_consistent(mesh: ArrayMesh, lod_index: int) -> void:
@@ -972,6 +1111,15 @@ func _shader_catalog_entry(catalog: Array, shader_name: String) -> Dictionary:
 		if String(entry.get("name", "")) == shader_name:
 			return entry
 	return {}
+
+
+func _option_index_by_id(option: OptionButton, item_id: int) -> int:
+	if option == null:
+		return -1
+	for i in range(option.get_item_count()):
+		if option.get_item_id(i) == item_id:
+			return i
+	return -1
 
 
 func _max_triangle_edge(vertices: PackedVector3Array) -> float:

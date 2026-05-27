@@ -3,6 +3,7 @@
 #include "oed/oed.h"
 #include "tdp/tdp.h"
 
+#include <chrono>
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
@@ -78,15 +79,19 @@ int main() {
 		return 1;
 	}
 
-	const fs::path output_path = fs::temp_directory_path() / "opennova_oed_missing_dir" / "Bird1.3di";
-	fs::remove(output_path);
+	const std::string missing_dir_name = "opennova_oed_missing_dir_" +
+	                                     std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+	const fs::path output_path = fs::temp_directory_path() / missing_dir_name / "Bird1.3di";
 
 	OedExportRequest request = {};
 	request.project = &project;
 	request.output_path = output_path.string().c_str();
 	request.update_mask = static_cast<unsigned char>(OED_UPDATE_ALL);
 	const OedStatus export_rc = oed_session_export(session, &request);
-	const char *last_error = oed_session_last_error(session);
+	std::string last_error;
+	if (const char *message = oed_session_last_error(session)) {
+		last_error = message;
+	}
 	oed_session_destroy(session);
 	tdp_free(&project);
 
@@ -94,8 +99,8 @@ int main() {
 		std::fprintf(stderr, "expected export failure, got %d\n", static_cast<int>(export_rc));
 		return 1;
 	}
-	if (!contains(last_error, "Failed to copy baseline 3DI")) {
-		std::fprintf(stderr, "unexpected last error: %s\n", last_error ? last_error : "<null>");
+	if (!contains(last_error.c_str(), "Failed to copy baseline 3DI")) {
+		std::fprintf(stderr, "unexpected last error: %s\n", last_error.c_str());
 		return 1;
 	}
 
