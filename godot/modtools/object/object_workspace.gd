@@ -46,33 +46,6 @@ const GENERATOR_STYLE_OPTIONS := [
 	{"id": 113, "label": "Control register set"},
 	{"id": 114, "label": "Control register add"},
 ]
-const PART_ANIM_SCALE_OPTIONS := [
-	{"id": 0, "label": "None"},
-	{"id": 1, "label": "Uniform"},
-	{"id": 2, "label": "Per-axis"},
-]
-const PART_ANIM_ROTATION_OPTIONS := [
-	{"id": 0, "label": "None"},
-	{"id": 1, "label": "Spinner"},
-	{"id": 2, "label": "Euler"},
-	{"id": 3, "label": "Face camera"},
-	{"id": 4, "label": "Face camera XZ"},
-]
-const PART_ANIM_TRANSLATE_OPTIONS := [
-	{"id": 0, "label": "None"},
-	{"id": 1, "label": "X axis"},
-	{"id": 2, "label": "Y axis"},
-	{"id": 3, "label": "Z axis"},
-]
-const PART_ANIM_TRACK_DEFS := [
-	{"id": "rotation_x", "label": "Rotation X"},
-	{"id": "rotation_y", "label": "Rotation Y"},
-	{"id": "rotation_z", "label": "Rotation Z"},
-	{"id": "scale_x", "label": "Scale X"},
-	{"id": "scale_y", "label": "Scale Y"},
-	{"id": "scale_z", "label": "Scale Z"},
-	{"id": "translation", "label": "Translation"},
-]
 const PART_ANIM_MOTION_MODE_OPTIONS := [
 	{"id": 0, "label": "None", "mode": "none"},
 	{"id": 16, "label": "Slide", "mode": "slide"},
@@ -97,6 +70,24 @@ const PART_ANIM_TRANSLATION_AXIS_OPTIONS := [
 ]
 const PANM_TRANSLATION_VALUE_MIN := -128.0
 const PANM_TRANSLATION_VALUE_MAX := 127.99609375
+
+# Material "flags" bitfield.
+const MATERIAL_FLAG_ALPHA := 0x01
+# Texture-slot "flags" bitfield.
+const TEXTURE_FLAG_ANIMATED := 0x01
+const TEXTURE_FLAG_CLAMPED := 0x02
+# Light "flags" bitfield.
+const LIGHT_FLAG_DISABLE_CORONA := 0x01
+const LIGHT_FLAG_DISABLE_TERRAIN := 0x02
+const LIGHT_FLAG_DISABLE_OBJECTS := 0x04
+# Motion-mode IDs that bind a control register (see PART_ANIM_MOTION_MODE_OPTIONS / GENERATOR_STYLE_OPTIONS).
+const CONTROL_REGISTER_MODE_ID := 113
+const CONTROL_REGISTER_ADD_MODE_ID := 114
+# Maximum value of a 16-bit unsigned field (control registers, light rate).
+const U16_VALUE_MAX := 65535
+# Panel/detail container margin and inner card margin, in pixels.
+const PANEL_MARGIN := 10
+const CARD_MARGIN := 8
 
 var object_editor: ObjectEditor
 var environment_editor
@@ -497,7 +488,7 @@ func _build_preview_inspector(host: Control) -> void:
 			var slider := HSlider.new()
 			slider.name = "ControlRegisterSlider_%s" % reg_name.replace(" ", "_")
 			slider.min_value = 0
-			slider.max_value = 65535
+			slider.max_value = U16_VALUE_MAX
 			slider.step = 1
 			slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			row.add_child(slider)
@@ -909,7 +900,7 @@ func _build_materials_inspector(host: Control, detail_only: bool = false) -> voi
 		var shader_info := _shader_info_for_material(material, shader_catalog)
 		shader_status.text = _shader_status_text(shader_info)
 		alpha.value = float(material.get("alpha_threshold", 0.0))
-		alpha.editable = bool(shader_info.get("is_alpha", false)) or (int(material.get("flags", 0)) & 0x01) != 0
+		alpha.editable = bool(shader_info.get("is_alpha", false)) or (int(material.get("flags", 0)) & MATERIAL_FLAG_ALPHA) != 0
 		for slot_def in TEXTURE_SLOTS:
 			var slot := int(slot_def.get("slot", 0))
 			var controls: Dictionary = slot_controls.get(slot, {})
@@ -941,10 +932,10 @@ func _build_materials_inspector(host: Control, detail_only: bool = false) -> voi
 				clear.disabled = not supported or not occupied
 			var texture_flags := int(texture_info.get("flags", 0))
 			if clamped != null:
-				clamped.button_pressed = (texture_flags & 0x02) != 0
+				clamped.button_pressed = (texture_flags & TEXTURE_FLAG_CLAMPED) != 0
 				clamped.disabled = not supported or not occupied
 			if animated != null:
-				animated.button_pressed = (texture_flags & 0x01) != 0
+				animated.button_pressed = (texture_flags & TEXTURE_FLAG_ANIMATED) != 0
 				animated.disabled = not supported or not occupied
 			if frame != null:
 				frame.value = int(texture_info.get("frame", 0))
@@ -1992,10 +1983,10 @@ func _rebuild_object_detail_dock() -> void:
 		child.free()
 
 	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_top", 10)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_bottom", 10)
+	margin.add_theme_constant_override("margin_left", PANEL_MARGIN)
+	margin.add_theme_constant_override("margin_top", PANEL_MARGIN)
+	margin.add_theme_constant_override("margin_right", PANEL_MARGIN)
+	margin.add_theme_constant_override("margin_bottom", PANEL_MARGIN)
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_object_detail_dock.add_child(margin)
@@ -2028,10 +2019,10 @@ func _build_channel_card(parent: VBoxContainer, node_name: String) -> VBoxContai
 	parent.add_child(card)
 
 	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 8)
-	margin.add_theme_constant_override("margin_top", 8)
-	margin.add_theme_constant_override("margin_right", 8)
-	margin.add_theme_constant_override("margin_bottom", 8)
+	margin.add_theme_constant_override("margin_left", CARD_MARGIN)
+	margin.add_theme_constant_override("margin_top", CARD_MARGIN)
+	margin.add_theme_constant_override("margin_right", CARD_MARGIN)
+	margin.add_theme_constant_override("margin_bottom", CARD_MARGIN)
 	card.add_child(margin)
 
 	var box := VBoxContainer.new()
@@ -2240,7 +2231,7 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 		add_translation.visible = not translation_enabled.button_pressed and supported
 		remove_translation.visible = translation_enabled.button_pressed and supported
 		if translation_register != null and translation_register.get_parent() != null:
-			translation_register.get_parent().visible = translation_mode.get_selected_id() == 113 or translation_mode.get_selected_id() == 114
+			translation_register.get_parent().visible = translation_mode.get_selected_id() == CONTROL_REGISTER_MODE_ID or translation_mode.get_selected_id() == CONTROL_REGISTER_ADD_MODE_ID
 	update_visibility.call()
 
 	var refresh_after_edit := func() -> void:
@@ -2481,7 +2472,7 @@ func _build_lights_inspector(host: Control, detail_only: bool = false) -> void:
 
 	var style := _add_detail_spin_row(detail_box, "LightStyle", "Style", 0, 255, 1)
 	var phase := _add_detail_spin_row(detail_box, "LightPhase", "Phase", 0, 255, 1)
-	var rate := _add_detail_spin_row(detail_box, "LightRate", "Rate", 0, 65535, 1)
+	var rate := _add_detail_spin_row(detail_box, "LightRate", "Rate", 0, U16_VALUE_MAX, 1)
 
 	var output_heading := Label.new()
 	output_heading.theme_type_variation = &"Heading"
@@ -2556,9 +2547,9 @@ func _build_lights_inspector(host: Control, detail_only: bool = false) -> void:
 		style.value = int(info.get("colorgen_style", info.get("style", 0)))
 		phase.value = int(info.get("colorgen_phase", info.get("phase", 0)))
 		rate.value = int(info.get("colorgen_rate", info.get("rate", 0)))
-		var corona_disabled := bool(info.get("disable_corona", (int(info.get("flags", 0)) & 0x01) != 0))
-		var terrain_disabled := bool(info.get("disable_lightterrain", (int(info.get("flags", 0)) & 0x02) != 0))
-		var objects_disabled := bool(info.get("disable_lightobjects", (int(info.get("flags", 0)) & 0x04) != 0))
+		var corona_disabled := bool(info.get("disable_corona", (int(info.get("flags", 0)) & LIGHT_FLAG_DISABLE_CORONA) != 0))
+		var terrain_disabled := bool(info.get("disable_lightterrain", (int(info.get("flags", 0)) & LIGHT_FLAG_DISABLE_TERRAIN) != 0))
+		var objects_disabled := bool(info.get("disable_lightobjects", (int(info.get("flags", 0)) & LIGHT_FLAG_DISABLE_OBJECTS) != 0))
 		draw_corona.button_pressed = not corona_disabled
 		light_terrain.button_pressed = not terrain_disabled
 		light_objects.button_pressed = not objects_disabled
@@ -2587,10 +2578,10 @@ func _build_lights_inspector(host: Control, detail_only: bool = false) -> void:
 
 func _make_inspector_box(host: Control) -> VBoxContainer:
 	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_top", 10)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_bottom", 10)
+	margin.add_theme_constant_override("margin_left", PANEL_MARGIN)
+	margin.add_theme_constant_override("margin_top", PANEL_MARGIN)
+	margin.add_theme_constant_override("margin_right", PANEL_MARGIN)
+	margin.add_theme_constant_override("margin_bottom", PANEL_MARGIN)
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	host.add_child(margin)
