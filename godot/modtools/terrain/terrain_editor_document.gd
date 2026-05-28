@@ -1011,7 +1011,7 @@ func _compose_tileinfo_flags(flags: int, operation: String) -> int:
 	var base_flags := normalized_flags & TILEINFO_TRANSFORM_FLAG_MASK
 	var target_uvs: Array[Vector2] = []
 	for corner in TILEINFO_LOCAL_CORNERS:
-		target_uvs.append(_transform_tileinfo_uv(_apply_tileinfo_local_operation(corner, operation), base_flags))
+		target_uvs.append(NovaTerrainTileInfo.transform_local_uv(_apply_tileinfo_local_operation(corner, operation), base_flags))
 
 	for candidate in TILEINFO_COMPOSABLE_FLAG_CANDIDATES:
 		if _tileinfo_uvs_match(target_uvs, candidate):
@@ -1021,7 +1021,7 @@ func _compose_tileinfo_flags(flags: int, operation: String) -> int:
 
 func _tileinfo_uvs_match(target_uvs: Array[Vector2], candidate_flags: int) -> bool:
 	for i in TILEINFO_LOCAL_CORNERS.size():
-		var candidate_uv := _transform_tileinfo_uv(TILEINFO_LOCAL_CORNERS[i], candidate_flags)
+		var candidate_uv: Vector2 = NovaTerrainTileInfo.transform_local_uv(TILEINFO_LOCAL_CORNERS[i], candidate_flags)
 		if candidate_uv.distance_squared_to(target_uvs[i]) > 0.0001:
 			return false
 	return true
@@ -1037,17 +1037,6 @@ func _apply_tileinfo_local_operation(value: Vector2, operation: String) -> Vecto
 			return Vector2(value.x, 1.0 - value.y)
 		_:
 			return value
-
-
-func _transform_tileinfo_uv(value: Vector2, flags: int) -> Vector2:
-	var uv := value
-	if (flags & NovaTerrainTileInfo.FLAG_FLIP_X) != 0:
-		uv.x = 1.0 - uv.x
-	if (flags & NovaTerrainTileInfo.FLAG_FLIP_Y) != 0:
-		uv.y = 1.0 - uv.y
-	if (flags & NovaTerrainTileInfo.FLAG_ROTATE_90) != 0:
-		uv = Vector2(uv.y, 1.0 - uv.x)
-	return uv
 
 
 func _normalize_tileinfo_reference(value: String) -> String:

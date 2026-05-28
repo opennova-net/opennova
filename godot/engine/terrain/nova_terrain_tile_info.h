@@ -4,6 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 
 #include <til/til.h>
 
@@ -40,6 +41,11 @@ public:
 	void clear_entries();
 	int find_entry_index_at_cell(int cell_x, int cell_z) const;
 	PackedInt32Array get_entry_indices_at_cell(int cell_x, int cell_z) const;
+
+	// Runtime-shared tile-atlas UV flag transform (flip X, flip Y, rotate 90)
+	// shared with the renderer. opennova::til_transform_local_uv @ libs/til/til.h;
+	// engine jodemo.exe Terrain_DrawTileOverlays2D@0x5C79C0, sub_5C42B0@0x5C42B0.
+	static Vector2 transform_local_uv(Vector2 uv, int flags);
 
 	void copy_from_native(const opennova::TilFile &file);
 	opennova::TilFile to_native() const;
