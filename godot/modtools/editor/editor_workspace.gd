@@ -31,6 +31,10 @@ func release_viewport() -> void:
 	pass
 
 
+func get_viewport_camera() -> Camera3D:
+	return null
+
+
 func get_workspace_id() -> String:
 	return ""
 

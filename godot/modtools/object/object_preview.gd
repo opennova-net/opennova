@@ -1,8 +1,6 @@
 class_name ObjectPreview
 extends Control
 
-signal environment_button_pressed
-
 const FlyCameraScript = preload("res://engine/fly_camera.gd")
 const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd")
 const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
@@ -18,7 +16,6 @@ var _environment: NovaEnvironment
 var _camera: Camera3D
 var _grid_material: StandardMaterial3D
 var _axis_material: StandardMaterial3D
-var _environment_button: Button
 var _environment_file: EnvFile
 var _environment_time := 1200.0
 var _wireframe := false
@@ -108,7 +105,6 @@ func _build_viewport() -> void:
 	_axis_material.vertex_color_use_as_albedo = true
 	_axis_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_add_axis_gizmo()
-	_add_environment_button()
 	set_wireframe(_wireframe)
 	_refresh_preview_guides()
 
@@ -142,6 +138,10 @@ func set_active_lod(lod_index: int) -> void:
 
 func get_active_lod() -> int:
 	return _model.get_active_lod() if _model != null else 0
+
+
+func get_editor_camera() -> Camera3D:
+	return _camera
 
 
 func is_wireframe() -> bool:
@@ -299,25 +299,6 @@ func _add_axis_gizmo() -> void:
 	axis.mesh = mesh
 	axis.material_override = _axis_material
 	_guide_root.add_child(axis)
-
-
-func _add_environment_button() -> void:
-	_environment_button = Button.new()
-	_environment_button.name = "ObjectEnvironmentButton"
-	_environment_button.text = "Environment"
-	_environment_button.tooltip_text = "Open environment controls"
-	_environment_button.focus_mode = Control.FOCUS_NONE
-	_environment_button.custom_minimum_size = Vector2(116, 32)
-	_environment_button.anchor_left = 1.0
-	_environment_button.anchor_right = 1.0
-	_environment_button.offset_left = -132.0
-	_environment_button.offset_right = -12.0
-	_environment_button.offset_top = 12.0
-	_environment_button.offset_bottom = 44.0
-	_environment_button.pressed.connect(func() -> void:
-		environment_button_pressed.emit()
-	)
-	add_child(_environment_button)
 
 
 func _frame_bounds(bounds: AABB) -> void:

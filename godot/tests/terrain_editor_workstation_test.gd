@@ -53,6 +53,18 @@ func _find_node_by_name(root: Node, node_name: String) -> Node:
 	return null
 
 
+func _find_node_by_type(root: Node, type_name: String) -> Node:
+	if root == null:
+		return null
+	if root.is_class(type_name):
+		return root
+	for child in root.get_children():
+		var found := _find_node_by_type(child, type_name)
+		if found != null:
+			return found
+	return null
+
+
 func _make_resource_fixture(name: String) -> String:
 	var root := ProjectSettings.globalize_path("user://%s_%d" % [name, Time.get_ticks_usec()])
 	DirAccess.make_dir_recursive_absolute(root.path_join("missions"))
@@ -338,6 +350,62 @@ func test_camera_button_exposes_global_viewport_settings() -> void:
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.MISSION, "Opening camera settings from Mission should not switch workspaces.")
 
 
+func test_camera_button_targets_object_preview_camera_when_object_is_active() -> void:
+	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	await get_tree().process_frame
+	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var host: Control = workstation.get_node("%ViewportHost")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
+	await get_tree().process_frame
+
+	var preview := _find_node_by_name(host, "ObjectPreview")
+	var object_camera := _find_node_by_type(preview, "Camera3D") as Camera3D
+	var terrain_camera := editor.camera
+	assert_not_null(preview, "Object workspace should mount its preview in the shared viewport host.")
+	assert_not_null(object_camera, "Object preview should expose a fly camera for global camera settings.")
+	assert_not_null(terrain_camera, "Terrain editor should still keep its camera while Object is active.")
+	if object_camera == null or terrain_camera == null:
+		return
+	var original_terrain_speed: float = terrain_camera.fly_speed
+
+	var camera_button: Button = workstation.get_node("%CameraToggleButton")
+	camera_button.toggled.emit(true)
+	await get_tree().process_frame
+
+	var popup: PanelContainer = workstation.get_node("%CameraPopup")
+	var settings_host: Control = workstation.get_node("%CameraSettingsHost")
+	var settings_panel: Control = settings_host.get_child(0)
+	var fly_speed_spin: SpinBox = settings_panel.get_node("%FlySpeedSpin")
+	assert_true(popup.visible, "Camera settings should open while Object is active.")
+
+	fly_speed_spin.value_changed.emit(43.0)
+
+	assert_eq(object_camera.fly_speed, 43.0, "Global camera popup should edit the Object preview camera when Object is active.")
+	assert_eq(terrain_camera.fly_speed, original_terrain_speed, "Object camera edits should not mutate the inactive Terrain camera.")
+
+
+func test_object_workspace_uses_only_global_environment_viewport_button() -> void:
+	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	await get_tree().process_frame
+	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var host: Control = workstation.get_node("%ViewportHost")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
+	await get_tree().process_frame
+
+	var environment_button: Button = workstation.get_node("%EnvironmentToggleButton")
+	assert_not_null(environment_button, "Global environment button should stay available from Object.")
+	assert_null(_find_node_by_name(host, "ObjectEnvironmentButton"), "Object preview should not add a second environment button over the viewport.")
+
+	environment_button.toggled.emit(true)
+	await get_tree().process_frame
+
+	var popup: PanelContainer = workstation.get_node("%EnvironmentPopup")
+	assert_true(popup.visible, "Global environment button should open the shared environment popup from Object.")
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.OBJECT, "Opening global environment controls should not switch out of Object.")
+
+
 func test_viewport_popups_are_mutually_exclusive_and_escape_closes_active_popup() -> void:
 	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
 	await get_tree().process_frame
@@ -411,10 +479,39 @@ func test_workstation_mounts_workspace_specific_right_docks() -> void:
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
 
-	assert_true(dock.visible, "Object should reuse the same right dock host.")
-	assert_not_null(_find_node_by_name(dock, "ObjectDetailDock"), "Object should mount its detail dock inside the shared right dock host.")
+	assert_false(dock.visible, "Object Preview should hide the shared right dock host.")
+	assert_null(_find_node_by_name(dock, "ObjectDetailDock"), "Object Preview should not mount an empty detail dock.")
 	assert_null(_find_node_by_name(dock, "TerrainAssetDock"), "Switching to Object should remove Terrain's dock content.")
 	assert_not_null(_find_node_by_name(workstation.get_node("%ViewportHost"), "ObjectPreview"), "Object preview should stay in the center viewport.")
+
+	var materials_button := _find_button_by_text(workstation.get_node("%ModeRail"), "Materials")
+	assert_not_null(materials_button, "Object workspace should expose Materials mode.")
+	if materials_button != null:
+		materials_button.pressed.emit()
+	assert_true(dock.visible, "Object Materials should show the shared right dock host.")
+	assert_not_null(_find_node_by_name(dock, "ObjectDetailDock"), "Object Materials should mount its detail dock.")
+	assert_not_null(_find_node_by_name(dock, "MaterialDetailPanel"), "Object Materials should expose right-pane material details.")
+
+	var parts_button := _find_button_by_text(workstation.get_node("%ModeRail"), "Part Anims")
+	assert_not_null(parts_button, "Object workspace should expose Part Anims mode.")
+	if parts_button != null:
+		parts_button.pressed.emit()
+	assert_true(dock.visible, "Object Part anims should show the shared right dock host.")
+	assert_not_null(_find_node_by_name(dock, "PartAnimDetailsEmpty"), "Object Part anims should expose right-pane animation details.")
+
+	var lights_button := _find_button_by_text(workstation.get_node("%ModeRail"), "Lights")
+	assert_not_null(lights_button, "Object workspace should expose Lights mode.")
+	if lights_button != null:
+		lights_button.pressed.emit()
+	assert_true(dock.visible, "Object Lights should show the shared right dock host.")
+	assert_not_null(_find_node_by_name(dock, "LightDetailPanel"), "Object Lights should expose right-pane light details.")
+
+	var lods_button := _find_button_by_text(workstation.get_node("%ModeRail"), "LODs")
+	assert_not_null(lods_button, "Object workspace should expose LODs mode.")
+	if lods_button != null:
+		lods_button.pressed.emit()
+	assert_false(dock.visible, "Object LODs should hide the shared right dock host until they have a real detail editor.")
+	assert_null(_find_node_by_name(dock, "ObjectDetailDock"), "Object LODs should not mount placeholder right-pane content.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
 

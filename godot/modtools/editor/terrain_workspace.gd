@@ -90,6 +90,12 @@ func release_viewport() -> void:
 	_viewport = null
 
 
+func get_viewport_camera() -> Camera3D:
+	if terrain_editor != null and terrain_editor.has_method("get_editor_camera"):
+		return terrain_editor.get_editor_camera()
+	return null
+
+
 func get_workspace_id() -> String:
 	return "terrain"
 

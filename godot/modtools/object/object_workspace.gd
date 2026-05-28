@@ -153,8 +153,6 @@ func mount_viewport(host: Control) -> void:
 		_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
 		_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		if not _preview.environment_button_pressed.is_connected(_on_preview_environment_button_pressed):
-			_preview.environment_button_pressed.connect(_on_preview_environment_button_pressed)
 		_preview.set_object_data(object_editor.object_data if object_editor else null)
 		_apply_environment_to_preview()
 	if _preview.get_parent() == null:
@@ -174,6 +172,12 @@ func release_viewport() -> void:
 		_preview.get_parent().remove_child(_preview)
 	_preview.free()
 	_preview = null
+
+
+func get_viewport_camera() -> Camera3D:
+	if _preview != null and _preview.has_method("get_editor_camera"):
+		return _preview.get_editor_camera()
+	return null
 
 
 func get_workspace_id() -> String:
@@ -207,30 +211,19 @@ func get_status_context() -> String:
 
 
 func uses_asset_dock() -> bool:
-	return true
+	return _active_workflow_uses_detail_dock()
 
 
 func set_asset_dock(dock: Control) -> void:
-	if _object_detail_dock != null and _object_detail_dock.get_parent() != null:
-		_object_detail_dock.get_parent().remove_child(_object_detail_dock)
-	if dock == null:
-		if _object_detail_dock != null:
-			_object_detail_dock.free()
-			_object_detail_dock = null
-		_asset_dock_host = null
-		return
 	_asset_dock_host = dock
-	if _object_detail_dock == null:
-		_object_detail_dock = PanelContainer.new()
-		_object_detail_dock.name = "ObjectDetailDock"
-		_object_detail_dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_object_detail_dock.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_asset_dock_host.add_child(_object_detail_dock)
-	_rebuild_object_detail_dock()
+	if dock == null:
+		_free_object_detail_dock()
+		return
+	_sync_object_detail_dock_mount()
 
 
 func sync_asset_dock() -> void:
-	_rebuild_object_detail_dock()
+	_sync_object_detail_dock_mount()
 
 
 func get_workflows() -> Array:
@@ -243,7 +236,7 @@ func get_active_workflow_id() -> int:
 
 func activate_workflow(workflow_id: int) -> void:
 	_active_workflow_id = workflow_id
-	_rebuild_object_detail_dock()
+	_sync_object_detail_dock_mount()
 
 
 func build_workflow_inspector(workflow_id: int, host: Control) -> void:
@@ -260,7 +253,7 @@ func build_workflow_inspector(workflow_id: int, host: Control) -> void:
 			_build_lods_inspector(host)
 		_:
 			_build_preview_inspector(host)
-	_rebuild_object_detail_dock()
+	_sync_object_detail_dock_mount()
 
 
 func has_unsaved_changes() -> bool:
@@ -436,11 +429,6 @@ func _apply_environment_to_preview() -> void:
 		env_file = environment_editor.get("env_file") as EnvFile
 		preview_time = float(environment_editor.get("time_of_day"))
 	_preview.set_environment(env_file, preview_time)
-
-
-func _on_preview_environment_button_pressed() -> void:
-	if editor_shell != null and editor_shell.has_method("show_environment_dialog"):
-		editor_shell.show_environment_dialog()
 
 
 func _build_preview_inspector(host: Control) -> void:
@@ -1955,7 +1943,48 @@ func _build_part_anims_inspector(host: Control) -> void:
 	_refresh_part_anim_list(_part_anim_selected_index, true)
 
 
+func _active_workflow_uses_detail_dock() -> bool:
+	return _active_workflow_id == Workflow.MATERIALS or _active_workflow_id == Workflow.PARTS or _active_workflow_id == Workflow.LIGHTS
+
+
+func _free_object_detail_dock() -> void:
+	if _object_detail_dock == null:
+		return
+	if is_instance_valid(_object_detail_dock):
+		var parent := _object_detail_dock.get_parent()
+		if parent != null:
+			parent.remove_child(_object_detail_dock)
+		_object_detail_dock.free()
+	_object_detail_dock = null
+
+
+func _ensure_object_detail_dock() -> void:
+	if _asset_dock_host == null or not _active_workflow_uses_detail_dock():
+		return
+	if _object_detail_dock == null or not is_instance_valid(_object_detail_dock):
+		_object_detail_dock = PanelContainer.new()
+		_object_detail_dock.name = "ObjectDetailDock"
+		_object_detail_dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_object_detail_dock.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	if _object_detail_dock.get_parent() != _asset_dock_host:
+		var old_parent := _object_detail_dock.get_parent()
+		if old_parent != null:
+			old_parent.remove_child(_object_detail_dock)
+		_asset_dock_host.add_child(_object_detail_dock)
+
+
+func _sync_object_detail_dock_mount() -> void:
+	if not _active_workflow_uses_detail_dock():
+		_free_object_detail_dock()
+		return
+	_ensure_object_detail_dock()
+	_rebuild_object_detail_dock()
+
+
 func _rebuild_object_detail_dock() -> void:
+	if not _active_workflow_uses_detail_dock():
+		_free_object_detail_dock()
+		return
 	if _object_detail_dock == null or not is_instance_valid(_object_detail_dock):
 		return
 	for child in _object_detail_dock.get_children():
@@ -1990,23 +2019,6 @@ func _rebuild_object_detail_dock() -> void:
 			_build_materials_inspector(box, true)
 		Workflow.LIGHTS:
 			_build_lights_inspector(box, true)
-		Workflow.LODS:
-			_build_object_detail_placeholder(box, "LODs", "Select a LOD in the left pane to edit scene bindings and thresholds.")
-		_:
-			_build_object_detail_placeholder(box, "Object", "Preview controls are in the left pane. The center viewport stays reserved for the live object preview.")
-
-
-func _build_object_detail_placeholder(box: VBoxContainer, title: String, message: String) -> void:
-	var heading := Label.new()
-	heading.theme_type_variation = &"Heading"
-	heading.text = title
-	box.add_child(heading)
-
-	var body := Label.new()
-	body.theme_type_variation = &"Muted"
-	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	body.text = message
-	box.add_child(body)
 
 
 func _build_channel_card(parent: VBoxContainer, node_name: String) -> VBoxContainer:

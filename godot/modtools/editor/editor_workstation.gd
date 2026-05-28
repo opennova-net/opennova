@@ -442,18 +442,7 @@ func _refresh_workspace_surface() -> void:
 	_rebuild_workspace_actions(workspace)
 	_modes_label.visible = has_workflows
 	_mode_rail.visible = has_workflows
-	if _asset_dock_workspace_id != -1 and _asset_dock_workspace_id != _active_workspace_id:
-		var old_workspace := _get_workspace(_asset_dock_workspace_id)
-		if old_workspace != null:
-			old_workspace.set_asset_dock(null)
-		for child in _asset_dock.get_children():
-			_asset_dock.remove_child(child)
-			child.free()
-		_asset_dock_workspace_id = -1
-	_asset_dock.visible = workspace != null and workspace.uses_asset_dock()
-	if workspace != null:
-		workspace.set_asset_dock(_asset_dock if _asset_dock.visible else null)
-		_asset_dock_workspace_id = _active_workspace_id if _asset_dock.visible else -1
+	_sync_asset_dock_for_workspace(workspace)
 	_rebuild_workflow_rail(workflows)
 	if has_workflows:
 		_inspector_workspace_id = -1
@@ -462,6 +451,32 @@ func _refresh_workspace_surface() -> void:
 	else:
 		_show_workspace_inspector(workspace)
 	_refresh_workspace_buttons()
+
+
+func _sync_asset_dock_for_workspace(workspace: EditorWorkspace) -> void:
+	if _asset_dock_workspace_id != -1 and _asset_dock_workspace_id != _active_workspace_id:
+		var old_workspace := _get_workspace(_asset_dock_workspace_id)
+		if old_workspace != null:
+			old_workspace.set_asset_dock(null)
+		_clear_asset_dock_children()
+		_asset_dock_workspace_id = -1
+	var show_dock := workspace != null and workspace.uses_asset_dock()
+	if not show_dock:
+		if _asset_dock_workspace_id == _active_workspace_id and workspace != null:
+			workspace.set_asset_dock(null)
+		_clear_asset_dock_children()
+		_asset_dock.visible = false
+		_asset_dock_workspace_id = -1
+		return
+	_asset_dock.visible = true
+	workspace.set_asset_dock(_asset_dock)
+	_asset_dock_workspace_id = _active_workspace_id
+
+
+func _clear_asset_dock_children() -> void:
+	for child in _asset_dock.get_children():
+		_asset_dock.remove_child(child)
+		child.free()
 
 
 func _show_workspace_inspector(workspace: EditorWorkspace) -> void:
@@ -662,7 +677,7 @@ func _ensure_camera_popup_content() -> void:
 
 func _sync_camera_popup_editor() -> void:
 	if _camera_settings_panel != null and _camera_settings_panel.has_method("set_editor"):
-		_camera_settings_panel.set_editor(editor)
+		_camera_settings_panel.set_editor(self)
 
 
 func _refresh_camera_popup_state() -> void:
@@ -679,10 +694,21 @@ func _refresh_camera_popup_state() -> void:
 			_camera_settings_panel.sync_from_editor_state()
 
 
+func get_editor_camera() -> Camera3D:
+	var workspace := _get_active_workspace()
+	if workspace != null:
+		var workspace_camera := workspace.get_viewport_camera()
+		if workspace_camera != null:
+			return workspace_camera
+	if editor != null and editor.has_method("get_editor_camera"):
+		return editor.get_editor_camera()
+	if editor != null:
+		return editor.get("camera") as Camera3D
+	return null
+
+
 func _get_editor_camera() -> Camera3D:
-	if editor == null:
-		return null
-	return editor.get("camera") as Camera3D
+	return get_editor_camera()
 
 
 func _on_environment_toggle_toggled(pressed: bool) -> void:
@@ -1338,6 +1364,7 @@ func _set_workflow(workflow_id: int, activate: bool) -> void:
 		return
 	if activate:
 		workspace.activate_workflow(workflow_id)
+	_sync_asset_dock_for_workspace(workspace)
 	if workflow_id == _current_workflow_id:
 		return
 	_current_workflow_id = workflow_id

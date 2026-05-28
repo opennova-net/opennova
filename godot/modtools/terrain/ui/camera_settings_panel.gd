@@ -48,6 +48,8 @@ func _sync_from_editor() -> void:
 func _get_camera() -> Camera3D:
 	if editor == null:
 		return null
+	if editor.has_method("get_editor_camera"):
+		return editor.get_editor_camera()
 	return editor.get("camera") as Camera3D
 
 

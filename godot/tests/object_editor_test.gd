@@ -455,7 +455,7 @@ func test_object_preview_uses_internal_viewport_without_godot_lights() -> void:
 	assert_not_null(preview.get_object_model(), "Object preview should delegate object rendering to NovaObjectModel.")
 	assert_not_null(_find_node_by_name(preview, "ObjectGrid"), "Object preview should include an authoring grid.")
 	assert_not_null(_find_node_by_name(preview, "ObjectAxisGizmo"), "Object preview should include an authoring axis gizmo.")
-	assert_not_null(_find_node_by_name(preview, "ObjectEnvironmentButton"), "Object preview should expose environment controls.")
+	assert_null(_find_node_by_name(preview, "ObjectEnvironmentButton"), "Object preview should not duplicate the global environment button.")
 	var camera := _find_node_by_type(preview, "Camera3D") as Camera3D
 	assert_not_null(camera, "Object preview should create a camera.")
 	assert_eq(camera.get_script(), FlyCameraScript, "Object preview should use the shared fly camera controls.")
@@ -559,7 +559,7 @@ func test_object_preview_applies_environment_lighting_and_fog_uniforms() -> void
 	assert_true(float(material.get_shader_parameter("u_fog_end")) > 0.0, "Object fog should carry a positive fog end distance.")
 
 
-func test_object_workspace_environment_button_opens_environment_dialog() -> void:
+func test_object_workspace_viewport_uses_global_environment_button_only() -> void:
 	var shell := ObjectWorkspaceShellDouble.new()
 	add_child_autofree(shell)
 	var workspace = ObjectWorkspaceScript.new()
@@ -569,13 +569,7 @@ func test_object_workspace_environment_button_opens_environment_dialog() -> void
 	workspace.mount_viewport(viewport_host)
 	await get_tree().process_frame
 
-	var button := _find_node_by_name(viewport_host, "ObjectEnvironmentButton") as Button
-	assert_not_null(button, "Object preview should expose the environment dialog button.")
-	if button == null:
-		return
-	button.pressed.emit()
-
-	assert_true(shell.environment_dialog_requested, "Object workspace should route preview environment requests to the editor shell.")
+	assert_null(_find_node_by_name(viewport_host, "ObjectEnvironmentButton"), "Object workspace should leave environment controls to the global viewport rail.")
 	workspace.release_viewport()
 
 
@@ -682,6 +676,25 @@ func test_object_workspace_preview_inspector_exposes_runtime_controls() -> void:
 	assert_false(preview.is_playing(), "Preview inspector play toggle should update the preview.")
 	assert_true(preview.is_wireframe(), "Preview inspector wire toggle should update the preview.")
 	assert_eq(preview.get_animation_time_ms(), 0, "Preview inspector reset should rewind the preview.")
+
+
+func test_object_workspace_preview_and_lods_do_not_mount_empty_detail_dock() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var detail_host = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_host)
+
+	var preview_host = add_child_autofree(Control.new())
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, preview_host)
+
+	assert_null(_find_node_by_name(detail_host, "ObjectDetailDock"), "Preview should not reserve a right pane.")
+	assert_eq(detail_host.get_child_count(), 0, "Preview should leave the right-pane host empty.")
+
+	var lods_host = add_child_autofree(Control.new())
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LODS, lods_host)
+
+	assert_null(_find_node_by_name(detail_host, "ObjectDetailDock"), "LODs should keep their editor in the left pane until a real detail editor exists.")
 
 
 func test_object_workspace_new_creates_empty_saveable_project() -> void:
@@ -842,9 +855,10 @@ func test_object_part_anims_use_left_list_and_right_detail_dock() -> void:
 	var list_host = add_child_autofree(Control.new())
 	var detail_host = add_child_autofree(Control.new())
 
-	assert_true(workspace.uses_asset_dock(), "Object workspace should use the terrain-style right dock for detail editing.")
+	assert_false(workspace.uses_asset_dock(), "Object Preview should not reserve the terrain-style right dock.")
 	workspace.set_asset_dock(detail_host)
 	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
+	assert_true(workspace.uses_asset_dock(), "Object part animations should use the terrain-style right dock for detail editing.")
 
 	var list_pane := _find_node_by_name(list_host, "PartAnimListPane")
 	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
