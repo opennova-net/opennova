@@ -102,13 +102,13 @@ func build_main(host: Control) -> void:
 	var pending_replace := {"value": false}
 	add_button.pressed.connect(func() -> void:
 		pending_replace["value"] = false
-		scene_dialog.popup_centered(Vector2i(720, 480))
+		scene_dialog.popup_centered(Vector2i(760, 520))
 	)
 	replace_button.pressed.connect(func() -> void:
 		if selected["index"] < 0:
 			return
 		pending_replace["value"] = true
-		scene_dialog.popup_centered(Vector2i(720, 480))
+		scene_dialog.popup_centered(Vector2i(760, 520))
 	)
 	scene_dialog.file_selected.connect(func(path: String) -> void:
 		var lod_index: int = int(selected["index"]) if bool(pending_replace["value"]) else -1

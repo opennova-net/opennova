@@ -899,6 +899,13 @@ func _load_resource_state() -> void:
 		return
 	_resource_root_dir = String(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, ""))
 	_resource_recursive = bool(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, true))
+	# Drop a persisted root that no longer points at a real, sane resource
+	# directory (moved/deleted dirs, or stale temp/test paths that leaked into
+	# the shared state) so the resource browser shows a clean "no directory"
+	# state instead of a dead internal path.
+	if not _resource_root_dir.is_empty() and not _is_valid_resource_root(_resource_root_dir):
+		_resource_root_dir = ""
+		_save_resource_state()
 
 
 func _save_resource_state() -> void:
@@ -907,6 +914,19 @@ func _save_resource_state() -> void:
 	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, _resource_root_dir)
 	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, _resource_recursive)
 	config.save(STATE_CONFIG_PATH)
+
+
+func _is_valid_resource_root(path: String) -> bool:
+	var trimmed := path.strip_edges()
+	if trimmed.is_empty():
+		return false
+	if not DirAccess.dir_exists_absolute(trimmed):
+		return false
+	# A resource library is a real asset directory on disk, never inside the
+	# app's own user-data dir; reject such paths (e.g. leaked temp/test dirs).
+	if trimmed.begins_with(OS.get_user_data_dir()):
+		return false
+	return true
 
 
 func _preferred_resource_root_dir() -> String:

@@ -8,12 +8,15 @@ signal frame_changed()
 var _data: NovaObjectData
 var _material_index := -1
 var _shader_info := {}
+var _scroll: ScrollContainer
 var _content: VBoxContainer
 
 
 func _init() -> void:
 	title = "Animated frames"
-	min_size = Vector2i(560, 480)
+	# Width floor only; height follows the content (see _finish_layout) so the
+	# dialog hugs its rows instead of leaving a large empty gap.
+	min_size = Vector2i(520, 0)
 	get_ok_button().text = "Close"
 
 
@@ -25,13 +28,23 @@ func setup(data: NovaObjectData, material_index: int, shader_info: Dictionary) -
 
 
 func _rebuild() -> void:
-	if _content == null:
+	if _scroll == null:
+		_scroll = ScrollContainer.new()
+		_scroll.name = "AnimFramesScroll"
+		_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		add_child(_scroll)
 		_content = VBoxContainer.new()
 		_content.add_theme_constant_override("separation", 8)
-		add_child(_content)
+		_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_scroll.add_child(_content)
 	for child in _content.get_children():
 		_content.remove_child(child)
 		child.queue_free()
+
+	# Size to content once the rebuilt rows have reported their minimum sizes.
+	_finish_layout.call_deferred()
 
 	if _data == null or _material_index < 0:
 		_add_message("No material loaded.")
@@ -43,15 +56,24 @@ func _rebuild() -> void:
 		return
 
 	var summary := Label.new()
-	summary.text = "%d frames, type %d, frame time/register %d" % [
-		frame_count,
-		int(info.get("anim_type", 0)),
-		int(info.get("anim_frame_time", 0)),
-	]
+	summary.text = "%d animation frames" % frame_count
 	_content.add_child(summary)
 
 	for slot in _animated_slots():
 		_add_slot_section(slot, frame_count)
+
+
+func _finish_layout() -> void:
+	if _scroll == null or _content == null:
+		return
+	# Hug the content height, but cap to the viewport so long frame lists
+	# scroll rather than growing off-screen.
+	var content_h := int(_content.get_combined_minimum_size().y)
+	var max_h := 560
+	if is_inside_tree() and get_viewport() != null:
+		max_h = int(get_viewport().get_visible_rect().size.y * 0.85)
+	_scroll.custom_minimum_size = Vector2(0, clampi(content_h, 60, max_h))
+	reset_size()
 
 
 func _add_message(text: String) -> void:

@@ -14,6 +14,49 @@ const ScatterInspectorScene = preload("res://modtools/terrain/ui/inspectors/scat
 const SculptInspectorScene = preload("res://modtools/terrain/ui/inspectors/sculpt_inspector.tscn")
 const StampInspectorScene = preload("res://modtools/terrain/ui/inspectors/stamp_inspector.tscn")
 const QuadrantBoardScript = preload("res://modtools/terrain/ui/widgets/quadrant_board.gd")
+const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const FIXTURE_CACHE_DIR := "opennova_test"
+
+var _saved_state_config := PackedByteArray()
+var _had_state_config := false
+
+
+func before_each() -> void:
+	_had_state_config = FileAccess.file_exists(STATE_CONFIG_PATH)
+	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
+
+
+func after_each() -> void:
+	# Persistence tests write user://terrain_editor_state.cfg; restore it so they
+	# never leak a temp resource directory into the real editor's saved state.
+	if _had_state_config:
+		var f := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
+		if f != null:
+			f.store_buffer(_saved_state_config)
+			f.close()
+	elif FileAccess.file_exists(STATE_CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+
+
+func after_all() -> void:
+	_remove_dir_recursive(OS.get_cache_dir().path_join(FIXTURE_CACHE_DIR))
+
+
+func _remove_dir_recursive(path: String) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while entry != "":
+		var child := path.path_join(entry)
+		if dir.current_is_dir():
+			_remove_dir_recursive(child)
+		else:
+			DirAccess.remove_absolute(child)
+		entry = dir.get_next()
+	dir.list_dir_end()
+	DirAccess.remove_absolute(path)
 
 
 func _workspace_action_texts(host: Node) -> Array:
@@ -66,7 +109,10 @@ func _find_node_by_type(root: Node, type_name: String) -> Node:
 
 
 func _make_resource_fixture(name: String) -> String:
-	var root := ProjectSettings.globalize_path("user://%s_%d" % [name, Time.get_ticks_usec()])
+	# Build fixtures under the OS cache dir (not user://): a resource library
+	# never lives inside the app user-data dir, so this keeps fixtures out of the
+	# editor's real state and compatible with _is_valid_resource_root().
+	var root := OS.get_cache_dir().path_join(FIXTURE_CACHE_DIR).path_join("%s_%d" % [name, Time.get_ticks_usec()])
 	DirAccess.make_dir_recursive_absolute(root.path_join("missions"))
 	DirAccess.make_dir_recursive_absolute(root.path_join("terrains"))
 	DirAccess.make_dir_recursive_absolute(root.path_join("env"))
@@ -309,6 +355,21 @@ func test_resource_settings_persist_in_editor_state() -> void:
 	var next_workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	assert_eq(next_workstation.get_resource_root_dir(), root, "New workstation instances should load the persisted resource directory.")
 	assert_true(next_workstation.is_resource_recursive(), "Recursive setting should persist with its default value.")
+
+
+func test_resource_root_inside_user_data_is_rejected_on_load() -> void:
+	# A resource root that points inside the app user-data dir (e.g. a temp/test
+	# path that leaked into the persisted state) must not be adopted on load, so
+	# the resource browser shows a clean "no directory" state instead of a dead
+	# internal path.
+	var bogus := OS.get_user_data_dir().path_join("resource_settings_persist_bogus_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(bogus)
+	var w1 = add_child_autofree(EditorWorkstationScene.instantiate())
+	assert_eq(w1._set_resource_root_dir(bogus, true, false), OK, "Persisting the root should succeed.")
+
+	var w2 = add_child_autofree(EditorWorkstationScene.instantiate())
+	assert_eq(w2.get_resource_root_dir(), "", "A resource root inside the app user-data dir should be rejected on load.")
+	DirAccess.remove_absolute(bogus)
 
 
 func test_camera_button_exposes_global_viewport_settings() -> void:
