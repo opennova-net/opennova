@@ -1481,12 +1481,13 @@ func _sync_tile_overlay_preview() -> void:
 
 
 func _apply_surface_paint_stroke(_delta: float) -> bool:
-	if _document.surface_map_state.is_empty() or not _hover_hit_valid:
+	var surface_map: NovaTerrainSurfaceMap = _document.surface_map
+	if surface_map == null or not _hover_hit_valid:
 		_brush_session.reset_stroke_tracking()
 		return false
 
-	var map_width := int(_document.surface_map_state.get("width", 0))
-	var map_height := int(_document.surface_map_state.get("height", 0))
+	var map_width := surface_map.get_width()
+	var map_height := surface_map.get_height()
 	if map_width <= 0 or map_height <= 0:
 		_brush_session.reset_stroke_tracking()
 		return false
@@ -1504,12 +1505,11 @@ func _apply_surface_paint_stroke(_delta: float) -> bool:
 		var source := terrain_mesh.world_to_source_coords(dab_hit.x, dab_hit.z)
 		if source.x < 0.0 or source.y < 0.0:
 			continue
-		var center_x := TerrainEditorSurfacePaint.map_x_from_heightmap_x(source.x, map_width)
-		var center_y := TerrainEditorSurfacePaint.map_y_from_heightmap_y(source.y, map_height)
+		var center_x := surface_map.map_x_from_heightmap_x(source.x)
+		var center_y := surface_map.map_y_from_heightmap_y(source.y)
 		if center_x < 0 or center_y < 0 or center_x >= map_width or center_y >= map_height:
 			continue
-		changed = TerrainEditorSurfacePaint.paint_circle(
-			_document.surface_map_state,
+		changed = surface_map.paint_circle(
 			center_x,
 			center_y,
 			radius_pixels,
@@ -1519,7 +1519,7 @@ func _apply_surface_paint_stroke(_delta: float) -> bool:
 		) or changed
 
 	if changed:
-		_document.restore_surface_map_history_state(_get_material(), _document.surface_map_state)
+		_document.sync_surface_map_to_data(_get_material())
 		_surface_map_stroke_changed = true
 
 	_brush_session.commit_stroke_hit(end_hit)
@@ -1527,18 +1527,19 @@ func _apply_surface_paint_stroke(_delta: float) -> bool:
 
 
 func _eyedrop_surface_at_hover() -> bool:
-	if _document.surface_map_state.is_empty() or not _hover_hit_valid:
+	var surface_map: NovaTerrainSurfaceMap = _document.surface_map
+	if surface_map == null or not _hover_hit_valid:
 		return false
-	var map_width := int(_document.surface_map_state.get("width", 0))
-	var map_height := int(_document.surface_map_state.get("height", 0))
+	var map_width := surface_map.get_width()
+	var map_height := surface_map.get_height()
 	if map_width <= 0 or map_height <= 0:
 		return false
 	var source := terrain_mesh.world_to_source_coords(_hover_hit.x, _hover_hit.z)
 	if source.x < 0.0 or source.y < 0.0:
 		return false
-	var map_x := TerrainEditorSurfacePaint.map_x_from_heightmap_x(source.x, map_width)
-	var map_y := TerrainEditorSurfacePaint.map_y_from_heightmap_y(source.y, map_height)
-	selected_surface_index = TerrainEditorSurfacePaint.get_index(_document.surface_map_state, map_x, map_y)
+	var map_x := surface_map.map_x_from_heightmap_x(source.x)
+	var map_y := surface_map.map_y_from_heightmap_y(source.y)
+	selected_surface_index = surface_map.get_index(map_x, map_y)
 	_update_hud()
 	return true
 
@@ -1589,7 +1590,7 @@ func _on_primary_start() -> void:
 			_select_tileinfo_entry_at_hover()
 		return
 	if current_tool == Tool.SURFACE_PAINT:
-		if not _hover_hit_valid or _document.surface_map_state.is_empty():
+		if not _hover_hit_valid or _document.surface_map == null:
 			return
 		if Input.is_key_pressed(KEY_ALT):
 			_eyedrop_surface_at_hover()

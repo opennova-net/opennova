@@ -13,6 +13,7 @@
 #include "terrain/nova_terrain_build_job.h"
 #include "terrain/nova_terrain_foliage_def.h"
 #include "terrain/nova_terrain_foliage_map.h"
+#include "terrain/nova_terrain_surface_map.h"
 #include "terrain/nova_foliage_dispatcher.h"
 #include "terrain/nova_terrain_tile_entry.h"
 #include "terrain/nova_terrain_tile_info.h"
@@ -50,6 +51,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaTerrainBuildJob);
 	GDREGISTER_CLASS(NovaTerrainFoliageDef);
 	GDREGISTER_CLASS(NovaTerrainFoliageMap);
+	GDREGISTER_CLASS(NovaTerrainSurfaceMap);
 	GDREGISTER_CLASS(NovaFoliageDispatcher);
 	GDREGISTER_CLASS(NovaTerrainTileEntry);
 	GDREGISTER_CLASS(NovaTerrainTileInfo);

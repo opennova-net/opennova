@@ -28,6 +28,7 @@ add_library(${TARGET_NAME} SHARED
     terrain/nova_terrain_builder.cpp
     terrain/nova_terrain_foliage_def.cpp
     terrain/nova_terrain_foliage_map.cpp
+    terrain/nova_terrain_surface_map.cpp
     terrain/nova_foliage_dispatcher.cpp
     terrain/nova_terrain_tile_entry.cpp
     terrain/nova_terrain_tile_info.cpp

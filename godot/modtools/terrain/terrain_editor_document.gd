@@ -55,7 +55,7 @@ var tileinfo_state: String = TILEINFO_STATE_NONE
 var tileinfo_selected_index: int = -1
 var tile_stamp_tile_index: int = 0
 var tile_stamp_flags: int = 0
-var surface_map_state: Dictionary = {}
+var surface_map: NovaTerrainSurfaceMap = null
 var foliage_defs: Array[NovaTerrainFoliageDef] = []
 var foliage_map: NovaTerrainFoliageMap
 var selected_foliage_def_index: int = -1
@@ -72,7 +72,7 @@ func reset_trn_metadata() -> void:
 	tileinfo_source_path = ""
 	tileinfo_state = TILEINFO_STATE_NONE
 	tileinfo_selected_index = -1
-	surface_map_state = {}
+	surface_map = null
 	foliage_map = null
 	foliage_defs = []
 	selected_foliage_def_index = -1
@@ -103,7 +103,7 @@ func apply_default_visual_state(material: ShaderMaterial, sync_data: bool = true
 		for slot_id in ["charmap", "foliagemap"]:
 			data.reset_pcx_slot_default(slot_id, HM_SIZE, HM_SIZE)
 			TerrainEditorSlots.apply_slot_texture(material, data, slot_id, TerrainEditorSlots.get_slot_texture(data, slot_id))
-		surface_map_state = _clone_surface_map_state(data.get_pcx_slot_state("charmap"))
+		surface_map = _surface_map_from_slot(data.get_pcx_slot_state("charmap"))
 		foliage_map = data.get_foliage_map()
 	sync_material_from_data(material)
 
@@ -485,7 +485,9 @@ func get_foliage_map_preview_texture() -> Texture2D:
 
 
 func get_surface_palette_bytes() -> PackedByteArray:
-	return TerrainEditorSurfacePaint.get_palette_bytes(surface_map_state)
+	if surface_map == null:
+		return PackedByteArray()
+	return surface_map.get_palette_bytes()
 
 
 func get_foliage_def(index: int) -> NovaTerrainFoliageDef:
@@ -549,14 +551,20 @@ func restore_foliage_map_history_state(state: Dictionary) -> void:
 
 
 func capture_surface_map_history_state() -> Dictionary:
-	return _clone_surface_map_state(surface_map_state)
+	if surface_map == null:
+		return {}
+	return surface_map.to_dictionary().duplicate(true)
 
 
 func restore_surface_map_history_state(material: ShaderMaterial, state: Dictionary) -> void:
-	surface_map_state = _clone_surface_map_state(state)
-	if data == null or surface_map_state.is_empty():
+	surface_map = _surface_map_from_slot(state)
+	sync_surface_map_to_data(material)
+
+
+func sync_surface_map_to_data(material: ShaderMaterial) -> void:
+	if data == null or surface_map == null or surface_map.get_width() <= 0:
 		return
-	data.set_pcx_slot_state("charmap", surface_map_state)
+	data.set_pcx_slot_state("charmap", surface_map.to_dictionary())
 	if material != null:
 		material.set_shader_parameter("u_charmap", TerrainEditorSlots.get_slot_texture(data, "charmap"))
 
@@ -653,7 +661,7 @@ func capture_trn_resource(resource: NovaTerrainData) -> void:
 			texture_files[String(slot_id)] = filename
 	tileinfo_filename = _normalize_tileinfo_reference(String(resource.get_tileinfo_filename()))
 	_clear_tileinfo_resource()
-	surface_map_state = _clone_surface_map_state(resource.get_pcx_slot_state("charmap"))
+	surface_map = _surface_map_from_slot(resource.get_pcx_slot_state("charmap"))
 	foliage_defs = _clone_foliage_defs(resource.get_foliage_defs())
 	foliage_map = _clone_foliage_map(resource.get_foliage_map())
 	normalize_foliage_state_for_editor()
@@ -687,7 +695,7 @@ func apply_loaded_textures_from_data(material: ShaderMaterial) -> void:
 		var texture := TerrainEditorSlots.get_slot_texture(data, String(slot_id))
 		if texture != null or slot_id == "detailmap" or slot_id == "detailmap2" or slot_id == "detailmapdist2":
 			TerrainEditorSlots.apply_slot_texture(material, data, String(slot_id), texture)
-	surface_map_state = _clone_surface_map_state(data.get_pcx_slot_state("charmap"))
+	surface_map = _surface_map_from_slot(data.get_pcx_slot_state("charmap"))
 	sync_material_from_data(material)
 
 
@@ -704,7 +712,7 @@ func load_texture_slot(material: ShaderMaterial, slot_id: String, path: String) 
 			return false
 		material.set_shader_parameter(String(slot["uniform"]), TerrainEditorSlots.get_slot_texture(data, slot_id))
 		if slot_id == "charmap":
-			surface_map_state = _clone_surface_map_state(data.get_pcx_slot_state("charmap"))
+			surface_map = _surface_map_from_slot(data.get_pcx_slot_state("charmap"))
 		if slot_id == "foliagemap":
 			foliage_map = _clone_foliage_map(data.get_foliage_map())
 		texture_files[slot_id] = path.get_file()
@@ -727,7 +735,7 @@ func reset_texture_slot(material: ShaderMaterial, slot_id: String) -> void:
 		data.reset_pcx_slot_default(slot_id, HM_SIZE, HM_SIZE)
 		TerrainEditorSlots.apply_slot_texture(material, data, slot_id, TerrainEditorSlots.get_slot_texture(data, slot_id))
 		if slot_id == "charmap":
-			surface_map_state = _clone_surface_map_state(data.get_pcx_slot_state("charmap"))
+			surface_map = _surface_map_from_slot(data.get_pcx_slot_state("charmap"))
 		if slot_id == "foliagemap":
 			foliage_map = _clone_foliage_map(data.get_foliage_map())
 	else:
@@ -1108,8 +1116,12 @@ func _clone_foliage_map(source: NovaTerrainFoliageMap) -> NovaTerrainFoliageMap:
 	return copy
 
 
-func _clone_surface_map_state(state: Dictionary) -> Dictionary:
-	return state.duplicate(true)
+func _surface_map_from_slot(state: Dictionary) -> NovaTerrainSurfaceMap:
+	if state.is_empty():
+		return null
+	var map := NovaTerrainSurfaceMap.new()
+	map.load_from_dictionary(state)
+	return map
 
 
 func _assign_canonical_foliage_matches() -> void:
