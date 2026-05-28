@@ -11,7 +11,6 @@ const EnvironmentInspectorScript = preload("res://modtools/environment/environme
 const LayoutInspectorScene = preload("res://modtools/terrain/ui/inspectors/layout_inspector.tscn")
 const PaintInspectorScene = preload("res://modtools/terrain/ui/inspectors/paint_inspector.tscn")
 const ScatterInspectorScene = preload("res://modtools/terrain/ui/inspectors/scatter_inspector.tscn")
-const SculptInspectorScene = preload("res://modtools/terrain/ui/inspectors/sculpt_inspector.tscn")
 const StampInspectorScene = preload("res://modtools/terrain/ui/inspectors/stamp_inspector.tscn")
 const QuadrantBoardScript = preload("res://modtools/terrain/ui/widgets/quadrant_board.gd")
 const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
@@ -725,14 +724,12 @@ func test_asset_dock_uses_properties_tab_and_removes_old_toggles() -> void:
 
 func test_asset_dock_and_inspectors_do_not_poll_when_idle() -> void:
 	var dock = add_child_autofree(TerrainEditorAssetDockScene.instantiate())
-	var sculpt = add_child_autofree(SculptInspectorScene.instantiate())
 	var paint = add_child_autofree(PaintInspectorScene.instantiate())
 	var scatter = add_child_autofree(ScatterInspectorScene.instantiate())
 	var stamp = add_child_autofree(StampInspectorScene.instantiate())
 	var layout = add_child_autofree(LayoutInspectorScene.instantiate())
 
 	assert_false(dock.is_processing(), "Asset dock should sync from editor state changes instead of idle polling.")
-	assert_false(sculpt.is_processing(), "Sculpt inspector should sync from editor state changes instead of idle polling.")
 	assert_false(paint.is_processing(), "Paint inspector should sync from editor state changes instead of idle polling.")
 	assert_false(scatter.is_processing(), "Foliage inspector should sync from editor state changes instead of idle polling.")
 	assert_false(stamp.is_processing(), "Tile inspector should sync from editor state changes instead of idle polling.")
@@ -740,9 +737,11 @@ func test_asset_dock_and_inspectors_do_not_poll_when_idle() -> void:
 
 
 func test_sculpt_inspector_syncs_from_editor_ui_state_signal() -> void:
-	var inspector = add_child_autofree(SculptInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := SculptInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	editor.set_brush_radius_value(37.0)
 

@@ -1,7 +1,6 @@
 class_name TerrainEditorWorkspace
 extends EditorWorkspace
 
-const SculptInspectorScene = preload("res://modtools/terrain/ui/inspectors/sculpt_inspector.tscn")
 const PaintInspectorScene = preload("res://modtools/terrain/ui/inspectors/paint_inspector.tscn")
 const ScatterInspectorScene = preload("res://modtools/terrain/ui/inspectors/scatter_inspector.tscn")
 const StampInspectorScene = preload("res://modtools/terrain/ui/inspectors/stamp_inspector.tscn")
@@ -14,23 +13,13 @@ enum ExportFlavor { BHD = 0, DFX_JO = 1 }
 
 const DETAIL_LABELS := ["Detail A", "Detail B", "Detail C"]
 
-const WORKFLOW_DEFS := [
-	{"id": Workflow.SCULPT, "label": "Sculpt", "tooltip": "Raise, lower, smooth, and flatten the terrain."},
-	{"id": Workflow.PAINT, "label": "Paint", "tooltip": "Paint detail layers, color, clone, and surface types."},
-	{"id": Workflow.SCATTER, "label": "Foliage", "tooltip": "Manage and paint foliage placement."},
-	{"id": Workflow.STAMP, "label": "Tile", "tooltip": "Place and edit tiles."},
-	{"id": Workflow.LAYOUT, "label": "Layout", "tooltip": "Edit sectors, map size, origin, and water."},
-]
-
-const INSPECTOR_SCENES := {
-	Workflow.SCULPT: SculptInspectorScene,
-	Workflow.PAINT: PaintInspectorScene,
-	Workflow.SCATTER: ScatterInspectorScene,
-	Workflow.STAMP: StampInspectorScene,
-	Workflow.LAYOUT: LayoutInspectorScene,
-}
+# Workflow inspectors are declared as typed InspectorDef rows in
+# _build_inspector_defs(); Sculpt is code-first, the rest are still scene-backed
+# while the terrain port is in progress.
 
 var terrain_editor: Node
+var _inspectors: Dictionary = {}
+var _inspector_defs: Array = []
 var _asset_dock_host: Control
 var _asset_dock: Control
 var _viewport: Control
@@ -203,7 +192,31 @@ func sync_asset_dock() -> void:
 
 
 func get_workflows() -> Array:
-	return WORKFLOW_DEFS
+	if _inspector_defs.is_empty():
+		_inspector_defs = _build_inspector_defs()
+	var workflows: Array = []
+	for def in _inspector_defs:
+		workflows.append((def as InspectorDef).to_workflow_dict())
+	return workflows
+
+
+func _build_inspector_defs() -> Array:
+	return [
+		InspectorDef.make(Workflow.SCULPT, "Sculpt", "Raise, lower, smooth, and flatten the terrain.", SculptInspector),
+		InspectorDef.make_scene(Workflow.PAINT, "Paint", "Paint detail layers, color, clone, and surface types.", PaintInspectorScene),
+		InspectorDef.make_scene(Workflow.SCATTER, "Foliage", "Manage and paint foliage placement.", ScatterInspectorScene),
+		InspectorDef.make_scene(Workflow.STAMP, "Tile", "Place and edit tiles.", StampInspectorScene),
+		InspectorDef.make_scene(Workflow.LAYOUT, "Layout", "Edit sectors, map size, origin, and water.", LayoutInspectorScene),
+	]
+
+
+func _def_for(workflow_id: int) -> InspectorDef:
+	if _inspector_defs.is_empty():
+		_inspector_defs = _build_inspector_defs()
+	for def in _inspector_defs:
+		if (def as InspectorDef).id == workflow_id:
+			return def
+	return null
 
 
 func get_active_workflow_id() -> int:
@@ -220,12 +233,20 @@ func activate_workflow(workflow_id: int) -> void:
 
 
 func build_workflow_inspector(workflow_id: int, host: Control) -> void:
-	if not INSPECTOR_SCENES.has(workflow_id):
+	var def := _def_for(workflow_id)
+	if def == null:
 		return
-	var inspector: Node = INSPECTOR_SCENES[workflow_id].instantiate()
-	host.add_child(inspector)
-	if terrain_editor != null and inspector.has_method("set_editor"):
-		inspector.set_editor(terrain_editor)
+	if def.inspector_script != null:
+		if _inspectors.get(workflow_id) == null:
+			_inspectors[workflow_id] = def.inspector_script.new()
+		var code_inspector = _inspectors[workflow_id]
+		code_inspector.set_editor(terrain_editor)
+		code_inspector.build_main(host)
+	elif def.inspector_scene != null:
+		var inspector: Node = def.inspector_scene.instantiate()
+		host.add_child(inspector)
+		if terrain_editor != null and inspector.has_method("set_editor"):
+			inspector.set_editor(terrain_editor)
 
 
 func is_busy() -> bool:
