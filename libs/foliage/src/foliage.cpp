@@ -173,6 +173,22 @@ int foliage_remap_index(FoliageMap &map, uint8_t from_index, uint8_t to_index) {
 	return changed;
 }
 
+int foliage_remap_indices(FoliageMap &map, const std::array<uint8_t, 256> &lut) {
+	if (!foliage_has_size(map)) {
+		return 0;
+	}
+	int changed = 0;
+	for (uint8_t &value : map.indices) {
+		const uint8_t next = lut[value];
+		if (next == value) {
+			continue;
+		}
+		value = next;
+		++changed;
+	}
+	return changed;
+}
+
 int foliage_map_x_from_heightmap_x(float hm_x, int map_width, int hm_size) {
 	if (map_width <= 0 || hm_size <= 0) {
 		return -1;

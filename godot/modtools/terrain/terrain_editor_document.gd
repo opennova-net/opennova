@@ -1122,20 +1122,7 @@ func _assign_canonical_foliage_matches() -> void:
 func _remap_foliage_map_indices(remap: Dictionary) -> bool:
 	if foliage_map == null or remap.is_empty():
 		return false
-	var indices := foliage_map.get_indices()
-	var changed := false
-	for idx in range(indices.size()):
-		var painted_index := int(indices[idx])
-		if not remap.has(painted_index):
-			continue
-		var next_index := clampi(int(remap[painted_index]), 0, 255)
-		if next_index == painted_index:
-			continue
-		indices[idx] = next_index
-		changed = true
-	if changed:
-		foliage_map.set_indices(indices)
-	return changed
+	return foliage_map.remap_indices(remap) > 0
 
 
 func _clamp_foliage_selection() -> void:

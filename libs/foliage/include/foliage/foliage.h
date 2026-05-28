@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -61,6 +62,10 @@ bool foliage_paint_circle(FoliageMap &map,
                           uint8_t index);
 int foliage_count_index(const FoliageMap &map, uint8_t index);
 int foliage_remap_index(FoliageMap &map, uint8_t from_index, uint8_t to_index);
+// Single-pass remap of many indices at once via a 256-entry lookup table
+// (new = lut[old]). One read+write per cell, so {1->2, 2->3} maps original 1s
+// to 2 and original 2s to 3 without chaining 1->2->3. Returns cells changed.
+int foliage_remap_indices(FoliageMap &map, const std::array<uint8_t, 256> &lut);
 
 int foliage_map_x_from_heightmap_x(float hm_x, int map_width, int hm_size = FOLIAGE_HEIGHTMAP_SIZE);
 int foliage_map_y_from_heightmap_y(float hm_y, int map_height, int hm_size = FOLIAGE_HEIGHTMAP_SIZE);
