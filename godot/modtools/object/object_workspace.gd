@@ -7,6 +7,7 @@ const ShaderTagPickerScript = preload("res://modtools/object/ui/widgets/shader_t
 const TextureSlotWidgetScript = preload("res://modtools/object/ui/widgets/texture_slot_widget.gd")
 const CtrlRegPickerScript = preload("res://modtools/object/ui/widgets/ctrl_reg_picker.gd")
 const AnimFramesDialogScript = preload("res://modtools/object/ui/dialogs/anim_frames_dialog.gd")
+const PreviewInspectorScript = preload("res://modtools/object/ui/inspectors/preview_inspector.gd")
 
 enum Workflow { PREVIEW, MATERIALS, PARTS, LIGHTS, LODS }
 
@@ -92,6 +93,7 @@ var _active_workflow_id: int = Workflow.PREVIEW
 var _preview: ObjectPreview
 var _asset_dock_host: Control
 var _object_detail_dock: Control
+var _preview_inspector
 var _material_clipboard: Dictionary = {}
 var _export_update_mask: int = OED_UPDATE_NONE
 var _material_selected_index := 0
@@ -240,7 +242,7 @@ func build_workflow_inspector(workflow_id: int, host: Control) -> void:
 		Workflow.LODS:
 			_build_lods_inspector(host)
 		_:
-			_build_preview_inspector(host)
+			_preview_inspector.build_main(host)
 	_sync_object_detail_dock_mount()
 
 
@@ -371,10 +373,17 @@ func get_export_dialog_dir() -> String:
 
 
 func build_inspector(host: Control) -> void:
-	_build_preview_inspector(host)
+	_ensure_inspectors()
+	_preview_inspector.build_main(host)
+
+
+func _ensure_inspectors() -> void:
+	if _preview_inspector == null:
+		_preview_inspector = PreviewInspectorScript.new(self)
 
 
 func _ensure_object_editor() -> void:
+	_ensure_inspectors()
 	if object_editor != null:
 		return
 	object_editor = ObjectEditorScript.new()
@@ -417,115 +426,6 @@ func _apply_environment_to_preview() -> void:
 		env_file = environment_editor.get("env_file") as EnvFile
 		preview_time = float(environment_editor.get("time_of_day"))
 	_preview.set_environment(env_file, preview_time)
-
-
-func _build_preview_inspector(host: Control) -> void:
-	var box := _make_inspector_box(host)
-	var summary := object_editor.object_data.get_summary() if object_editor and object_editor.object_data else {}
-	for key in ["source_kind", "lod_count", "material_count", "light_count", "userpoint_count"]:
-		var row := Label.new()
-		row.text = "%s: %s" % [String(key).capitalize(), str(summary.get(key, ""))]
-		row.clip_text = true
-		box.add_child(row)
-
-	var playback := HBoxContainer.new()
-	playback.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(playback)
-
-	var play := Button.new()
-	play.name = "PreviewPlayButton"
-	play.toggle_mode = true
-	play.button_pressed = _preview == null or _preview.is_playing()
-	play.text = "Pause" if play.button_pressed else "Play"
-	playback.add_child(play)
-
-	var reset := Button.new()
-	reset.name = "PreviewResetButton"
-	reset.text = "Reset"
-	playback.add_child(reset)
-
-	var wire := CheckBox.new()
-	wire.name = "PreviewWireCheck"
-	wire.text = "Wire"
-	wire.button_pressed = _preview != null and _preview.is_wireframe()
-	playback.add_child(wire)
-
-	play.toggled.connect(func(pressed: bool) -> void:
-		if _preview != null:
-			_preview.set_playing(pressed)
-		play.text = "Pause" if pressed else "Play"
-	)
-	reset.pressed.connect(func() -> void:
-		if _preview != null:
-			_preview.reset_animation_time()
-	)
-	wire.toggled.connect(func(pressed: bool) -> void:
-		if _preview != null:
-			_preview.set_wireframe(pressed)
-	)
-
-	_build_export_mask_controls(box)
-
-	var ctrl_regs: Array = object_editor.object_data.get_control_registers() if object_editor and object_editor.object_data and object_editor.object_data.has_method("get_control_registers") else []
-	if not ctrl_regs.is_empty() and _preview != null:
-		var ctrl_label := Label.new()
-		ctrl_label.text = "Control registers"
-		box.add_child(ctrl_label)
-		for reg in ctrl_regs:
-			var reg_name := String((reg as Dictionary).get("name", ""))
-			if reg_name.is_empty():
-				continue
-			var row := HBoxContainer.new()
-			row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			box.add_child(row)
-			var label := Label.new()
-			label.text = reg_name
-			label.custom_minimum_size = Vector2(90, 0)
-			row.add_child(label)
-			var slider := HSlider.new()
-			slider.name = "ControlRegisterSlider_%s" % reg_name.replace(" ", "_")
-			slider.min_value = 0
-			slider.max_value = U16_VALUE_MAX
-			slider.step = 1
-			slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			row.add_child(slider)
-			slider.value_changed.connect(func(value: float, name: String = reg_name) -> void:
-				if _preview != null:
-					_preview.set_ctrl_value(name, int(value))
-			)
-
-
-func _build_export_mask_controls(box: VBoxContainer) -> void:
-	if object_editor == null or object_editor.object_data == null or not object_editor.object_data.can_export_3di():
-		return
-	_sync_export_update_mask_from_dirty()
-	var label := Label.new()
-	label.text = "Export chunks"
-	box.add_child(label)
-
-	var row := HBoxContainer.new()
-	row.name = "ObjectExportMaskControls"
-	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(row)
-
-	_add_export_mask_check(row, "ObjectExportMtrlCheck", "MTRL", OED_UPDATE_MTRL)
-	_add_export_mask_check(row, "ObjectExportLghtCheck", "LGHT", OED_UPDATE_LGHT)
-	_add_export_mask_check(row, "ObjectExportPanmCheck", "PANM", OED_UPDATE_PANM)
-
-
-func _add_export_mask_check(parent: HBoxContainer, node_name: String, label: String, bit: int) -> CheckBox:
-	var check := CheckBox.new()
-	check.name = node_name
-	check.text = label
-	check.button_pressed = (_export_update_mask & bit) != 0
-	parent.add_child(check)
-	check.toggled.connect(func(pressed: bool) -> void:
-		if pressed:
-			_export_update_mask |= bit
-		else:
-			_export_update_mask &= ~bit
-	)
-	return check
 
 
 func _sync_export_update_mask_from_dirty() -> void:
