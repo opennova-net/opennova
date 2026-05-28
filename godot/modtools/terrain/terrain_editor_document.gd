@@ -814,17 +814,19 @@ func build_heightmap_from_data() -> Image:
 
 
 func build_heightmap_from_raw16(raw_bytes: PackedByteArray) -> Image:
-	var image := Image.create(HM_SIZE, HM_SIZE, false, Image.FORMAT_RF)
-	for i in HM_SIZE * HM_SIZE:
-		var low := raw_bytes[i * 2]
-		var high := raw_bytes[i * 2 + 1]
-		var height := float(low | (high << 8)) / 256.0
-		image.set_pixel(i % HM_SIZE, i / HM_SIZE, Color(height, 0, 0, 1))
-	return image
+	if data != null:
+		var image: Image = data.heightmap_image_from_raw16(raw_bytes)
+		if image != null:
+			return image
+	return Image.create(HM_SIZE, HM_SIZE, false, Image.FORMAT_RF)
 
 
 func set_heightmap_image(image: Image) -> void:
 	heightmap_image = image
+	if data != null:
+		# NovaTerrainData owns the editable depth: hand it the same Image so brush
+		# edits (which mutate this object in place) keep get_depth_raw16 current.
+		data.set_heightmap_image(image)
 
 
 func set_colormap_image(material: ShaderMaterial, image: Image, sync_data: bool = true) -> void:
@@ -849,37 +851,29 @@ func sync_material_from_data(material: ShaderMaterial) -> void:
 	material.set_shader_parameter("u_detail_density", float(data.get_detail_density()))
 
 
-func image_to_raw16(image: Image, enforce_cdep: bool = false) -> PackedByteArray:
-	var raw := PackedByteArray()
-	raw.resize(HM_SIZE * HM_SIZE * 2)
+func cdep_ranges_valid(image: Image) -> bool:
+	# CDEP's 4-bit bits_per_delta field caps each 256-pixel horizontal block at
+	# a 32767-raw-unit range. The brush enforces this live, but this bake-time
+	# scan makes a corrupt CPT impossible regardless of how the heightmap got
+	# into this state. The raw16 conversion itself now lives in C++
+	# (NovaTerrainData.get_depth_raw16); this stays in GDScript as export policy.
+	if image == null:
+		return false
 	var pixels := image.get_data()
-	# When called for a CDEP export, scan first: CDEP's 4-bit bits_per_delta
-	# field caps each 256-pixel horizontal block at a 32767-raw-unit range.
-	# The brush enforces this live, but the bake-time scan makes corrupt CPTs
-	# impossible regardless of how the heightmap got into this state. On
-	# violation, return empty so the caller can fail the export cleanly
-	# instead of silently writing a desynced .cpt.
-	if enforce_cdep:
-		for z in HM_SIZE:
-			for bx in 4:
-				var x_lo := bx * 256
-				var lo := 65535
-				var hi := 0
-				for x in range(x_lo, x_lo + 256):
-					var idx := (z * HM_SIZE + x) * 4
-					var v := clampi(int(pixels.decode_float(idx) * 256.0), 0, 65535)
-					if v < lo: lo = v
-					if v > hi: hi = v
-				if hi - lo > 32767:
-					push_error("CDEP per-block range exceeded at row %d block %d (range=%d > 32767)" % [z, bx, hi - lo])
-					return PackedByteArray()
-	for i in HM_SIZE * HM_SIZE:
-		var height := pixels.decode_float(i * 4)
-		var value := clampi(int(height * 256.0), 0, 65535)
-		var output := i * 2
-		raw[output] = value & 0xFF
-		raw[output + 1] = (value >> 8) & 0xFF
-	return raw
+	for z in HM_SIZE:
+		for bx in 4:
+			var x_lo := bx * 256
+			var lo := 65535
+			var hi := 0
+			for x in range(x_lo, x_lo + 256):
+				var idx := (z * HM_SIZE + x) * 4
+				var v := clampi(int(pixels.decode_float(idx) * 256.0), 0, 65535)
+				if v < lo: lo = v
+				if v > hi: hi = v
+			if hi - lo > 32767:
+				push_error("CDEP per-block range exceeded at row %d block %d (range=%d > 32767)" % [z, bx, hi - lo])
+				return false
+	return true
 
 
 func get_terrain_name() -> String:

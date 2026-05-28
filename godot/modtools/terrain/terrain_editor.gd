@@ -2118,7 +2118,7 @@ func save_project(dir_path: String) -> Error:
 	if _data and String(_data.get_terrain_name()) != name:
 		_data.set_terrain_name(name)
 
-	var raw16 := _image_to_raw16(_heightmap_image)
+	var raw16 := _data.get_depth_raw16()
 	var depth_path := dir_path + "/" + name + "_depth.raw"
 	var depth_file: FileAccess = FileAccess.open(depth_path, FileAccess.WRITE)
 	if not depth_file:
@@ -2205,9 +2205,11 @@ func begin_export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO)
 	DirAccess.make_dir_recursive_absolute(output_dir)
 	var name := _get_terrain_name()
 	_auto_clamp_for_export_if_needed(flavor)
-	var raw16 := _image_to_raw16(_heightmap_image, flavor == ExportFlavor.DFX_JO)
-	if raw16.is_empty():
+	if flavor == ExportFlavor.DFX_JO and not _document.cdep_ranges_valid(_heightmap_image):
 		_notify_status("Export blocked: some areas are too steep for Joint Operations / DFX. Flatten them, or export for original Delta Force instead.")
+		return ERR_INVALID_DATA
+	var raw16 := _data.get_depth_raw16()
+	if raw16.is_empty():
 		return ERR_INVALID_DATA
 	var builder: NovaTerrainBuilder = NovaTerrainBuilder.new()
 	var job: NovaTerrainBuildJob = builder.begin_build_from_data(raw16, output_dir, name, "", flavor)
@@ -2232,9 +2234,11 @@ func export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO) -> Er
 
 	DirAccess.make_dir_recursive_absolute(output_dir)
 	_auto_clamp_for_export_if_needed(flavor)
-	var raw16 := _image_to_raw16(_heightmap_image, flavor == ExportFlavor.DFX_JO)
-	if raw16.is_empty():
+	if flavor == ExportFlavor.DFX_JO and not _document.cdep_ranges_valid(_heightmap_image):
 		_notify_status("Export blocked: some areas are too steep for Joint Operations / DFX. Flatten them, or export for original Delta Force instead.")
+		return ERR_INVALID_DATA
+	var raw16 := _data.get_depth_raw16()
+	if raw16.is_empty():
 		return ERR_INVALID_DATA
 	var builder: NovaTerrainBuilder = NovaTerrainBuilder.new()
 	var err := builder.build_from_data(raw16, output_dir, _get_terrain_name(), "", flavor)
@@ -2452,10 +2456,6 @@ func _get_material() -> ShaderMaterial:
 	if terrain_mesh == null:
 		return null
 	return terrain_mesh.get_material()
-
-
-func _image_to_raw16(image: Image, enforce_cdep: bool = false) -> PackedByteArray:
-	return _document.image_to_raw16(image, enforce_cdep)
 
 
 func _notification(what: int) -> void:

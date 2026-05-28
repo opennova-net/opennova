@@ -139,6 +139,9 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load"), &NovaTerrainData::load);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaTerrainData::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_depth_raw16"), &NovaTerrainData::get_depth_raw16);
+	ClassDB::bind_method(D_METHOD("set_heightmap_image", "image"), &NovaTerrainData::set_heightmap_image);
+	ClassDB::bind_method(D_METHOD("get_heightmap_image"), &NovaTerrainData::get_heightmap_image);
+	ClassDB::bind_method(D_METHOD("heightmap_image_from_raw16", "raw16"), &NovaTerrainData::heightmap_image_from_raw16);
 	ClassDB::bind_method(D_METHOD("get_height", "world_pos"), &NovaTerrainData::get_height);
 	ClassDB::bind_method(D_METHOD("get_height_world", "world_pos"), &NovaTerrainData::get_height_world);
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &NovaTerrainData::get_height_world_bilinear);
@@ -791,6 +794,31 @@ bool NovaTerrainData::is_loaded() const {
 
 PackedByteArray NovaTerrainData::get_depth_raw16() const {
 	PackedByteArray out;
+
+	// Prefer the live editable heightmap (FORMAT_RF, 1 float per cell). The
+	// conversion mirrors the former GDScript image_to_raw16 byte-for-byte:
+	// value = clamp(int(height * 256), 0, 65535), stored little-endian.
+	if (heightmap_image.is_valid()) {
+		const int w = heightmap_image->get_width();
+		const int h = heightmap_image->get_height();
+		const int64_t count = static_cast<int64_t>(w) * static_cast<int64_t>(h);
+		const PackedByteArray pixels = heightmap_image->get_data();
+		if (count > 0 && pixels.size() >= count * 4) {
+			out.resize(count * 2);
+			uint8_t *dst = out.ptrw();
+			const uint8_t *src = pixels.ptr();
+			for (int64_t i = 0; i < count; ++i) {
+				float f;
+				std::memcpy(&f, src + i * 4, sizeof(float));
+				int value = static_cast<int>(static_cast<double>(f) * 256.0);
+				value = std::clamp(value, 0, 65535);
+				dst[i * 2] = static_cast<uint8_t>(value & 0xFF);
+				dst[i * 2 + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+			}
+			return out;
+		}
+	}
+
 	if (cpt.depth_buffer.empty()) {
 		return out;
 	}
@@ -803,6 +831,34 @@ PackedByteArray NovaTerrainData::get_depth_raw16() const {
 		dst[i * 2u + 1u] = static_cast<uint8_t>((value >> 8u) & 0xFFu);
 	}
 	return out;
+}
+
+void NovaTerrainData::set_heightmap_image(const Ref<Image> &p_image) {
+	heightmap_image = p_image;
+}
+
+Ref<Image> NovaTerrainData::get_heightmap_image() const {
+	return heightmap_image;
+}
+
+Ref<Image> NovaTerrainData::heightmap_image_from_raw16(const PackedByteArray &p_raw16) const {
+	const int64_t pixel_count = p_raw16.size() / 2;
+	const int side = static_cast<int>(std::llround(std::sqrt(static_cast<double>(pixel_count))));
+	if (side <= 0 || static_cast<int64_t>(side) * side != pixel_count) {
+		return Ref<Image>();
+	}
+
+	PackedByteArray floats;
+	floats.resize(pixel_count * 4);
+	uint8_t *dst = floats.ptrw();
+	const uint8_t *src = p_raw16.ptr();
+	for (int64_t i = 0; i < pixel_count; ++i) {
+		const int low = src[i * 2];
+		const int high = src[i * 2 + 1];
+		const float height = static_cast<float>(static_cast<double>(low | (high << 8)) / 256.0);
+		std::memcpy(dst + i * 4, &height, sizeof(float));
+	}
+	return Image::create_from_data(side, side, false, Image::FORMAT_RF, floats);
 }
 
 float NovaTerrainData::get_height(const Vector3 &p_world_pos) const {

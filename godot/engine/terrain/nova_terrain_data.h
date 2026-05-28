@@ -76,6 +76,11 @@ private:
 	int foliagemap_width = 0;
 	int foliagemap_height = 0;
 	Ref<NovaTerrainFoliageMap> foliage_map_resource;
+	// Editable FORMAT_RF height buffer (1 float per cell = raw16_units / 256).
+	// The editor holds this same Image by reference and brush kernels mutate it
+	// in place, so NovaTerrainData stays the authoritative owner of the live
+	// depth and get_depth_raw16() reflects edits without a separate sync step.
+	Ref<Image> heightmap_image;
 	// Lazy-loaded on first call to get_tileinfo_resource(). Cached keyed by
 	// the source path so an edit to trn.tileinfo re-loads on next request.
 	mutable Ref<NovaTerrainTileInfo> tileinfo_resource_cache;
@@ -158,7 +163,14 @@ public:
 
 	Error load();
 	bool is_loaded() const;
+	// Returns the live depth as little-endian raw16 (value = clamp(height*256)).
+	// Reads the editable heightmap_image when present, else the loaded CPT.
 	PackedByteArray get_depth_raw16() const;
+	void set_heightmap_image(const Ref<Image> &p_image);
+	Ref<Image> get_heightmap_image() const;
+	// Build a FORMAT_RF height image (height = raw_u16_LE / 256) from a raw16
+	// depth buffer; the exact inverse of get_depth_raw16's conversion.
+	Ref<Image> heightmap_image_from_raw16(const PackedByteArray &p_raw16) const;
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;
