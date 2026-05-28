@@ -36,6 +36,9 @@ const MATERIAL_FLAG_ALPHA := 0x01
 # Texture-slot "flags" bitfield.
 const TEXTURE_FLAG_ANIMATED := 0x01
 const TEXTURE_FLAG_CLAMPED := 0x02
+# Generator style ids that bind a control register (see GENERATOR_STYLE_OPTIONS).
+const GENERATOR_STYLE_CONTROL_REG := 113
+const GENERATOR_STYLE_CONTROL_REG_ADD := 114
 
 var _material_selected_index := 0
 var _materials_list: ItemList
@@ -272,6 +275,10 @@ func _build_materials_inspector(host: Control, detail_only: bool = false) -> voi
 	var sync_fields := func(index: int) -> void:
 		syncing["value"] = true
 		selected["index"] = index
+		# Re-read fresh: this closure's captured `materials` is the build-time
+		# snapshot (GDScript lambdas capture locals by value), so after an edit
+		# resyncs the panel it would otherwise show stale generator/shader data.
+		materials = object_editor.object_data.get_materials() if object_editor and object_editor.object_data else materials
 		if index < 0 or index >= materials.size():
 			syncing["value"] = false
 			return
@@ -456,7 +463,7 @@ func _build_materials_inspector(host: Control, detail_only: bool = false) -> voi
 	for axis in ["u", "v"]:
 		var axis_id := String(axis)
 		var axis_controls: Dictionary = generator_controls.get(axis_id, {})
-		for key in ["style", "phase", "reg", "rate", "start", "end"]:
+		for key in ["phase", "rate", "start", "end"]:
 			var spin := axis_controls.get(key) as SpinBox
 			if spin != null:
 				_connect_uv_generator_spin(spin, axis_id, String(key), generator_controls, apply_uv_generator)
@@ -474,7 +481,7 @@ func _build_materials_inspector(host: Control, detail_only: bool = false) -> voi
 				params["reg"] = reg
 				apply_uv_generator.call(selected_axis, params)
 			)
-	for key in ["style", "phase", "reg", "rate"]:
+	for key in ["phase", "rate"]:
 		var spin := generator_controls.get("rgb_%s" % key) as SpinBox
 		if spin != null:
 			_connect_rgb_generator_spin(spin, String(key), generator_controls, apply_rgb_generator)
@@ -502,7 +509,7 @@ func _build_materials_inspector(host: Control, detail_only: bool = false) -> voi
 		rgb_end.color_changed.connect(func(_color: Color) -> void:
 			apply_rgb_generator.call(_rgb_generator_params(generator_controls))
 		)
-	for key in ["style", "phase", "reg", "rate", "start", "end"]:
+	for key in ["phase", "rate", "start", "end"]:
 		var spin := generator_controls.get("alpha_%s" % key) as SpinBox
 		if spin != null:
 			_connect_alpha_generator_spin(spin, String(key), generator_controls, apply_alpha_generator)
@@ -731,10 +738,8 @@ func _build_generator_controls(box: VBoxContainer) -> Dictionary:
 		var axis_controls := {
 			"box": section,
 			"style_option": _add_id_option_row(section, "%sGeneratorStyleOption" % axis.to_upper(), "Style", GENERATOR_STYLE_OPTIONS),
-			"style": _add_spin_row(section, "%sGeneratorStyle" % axis.to_upper(), "Style", 0, 255, 1),
 			"phase": _add_spin_row(section, "%sGeneratorPhase" % axis.to_upper(), "Phase", -100000, 100000, 0.01),
 			"reg_picker": _add_ctrl_reg_row(section, "%sGeneratorControlReg" % axis.to_upper(), "Control reg"),
-			"reg": _add_spin_row(section, "%sGeneratorReg" % axis.to_upper(), "Control reg", -1, 255, 1),
 			"rate": _add_spin_row(section, "%sGeneratorRate" % axis.to_upper(), "Rate", -100000, 100000, 0.01),
 			"start": _add_spin_row(section, "%sGeneratorStart" % axis.to_upper(), "Start", -100000, 100000, 0.01),
 			"end": _add_spin_row(section, "%sGeneratorEnd" % axis.to_upper(), "End", -100000, 100000, 0.01),
@@ -750,10 +755,8 @@ func _build_generator_controls(box: VBoxContainer) -> Dictionary:
 	rgb_section.add_child(rgb_header)
 	controls["rgb_box"] = rgb_section
 	controls["rgb_style_option"] = _add_id_option_row(rgb_section, "RgbGeneratorStyleOption", "Style", GENERATOR_STYLE_OPTIONS)
-	controls["rgb_style"] = _add_spin_row(rgb_section, "RgbGeneratorStyle", "Style", 0, 255, 1)
 	controls["rgb_phase"] = _add_spin_row(rgb_section, "RgbGeneratorPhase", "Phase", -100000, 100000, 0.01)
 	controls["rgb_reg_picker"] = _add_ctrl_reg_row(rgb_section, "RgbGeneratorControlReg", "Control reg")
-	controls["rgb_reg"] = _add_spin_row(rgb_section, "RgbGeneratorReg", "Control reg", -1, 255, 1)
 	controls["rgb_rate"] = _add_spin_row(rgb_section, "RgbGeneratorRate", "Rate", -100000, 100000, 0.01)
 	controls["rgb_start_color"] = _add_color_row(rgb_section, "RgbGeneratorStartColor", "Start")
 	controls["rgb_end_color"] = _add_color_row(rgb_section, "RgbGeneratorEndColor", "End")
@@ -767,10 +770,8 @@ func _build_generator_controls(box: VBoxContainer) -> Dictionary:
 	alpha_section.add_child(alpha_header)
 	controls["alpha_box"] = alpha_section
 	controls["alpha_style_option"] = _add_id_option_row(alpha_section, "AlphaGeneratorStyleOption", "Style", GENERATOR_STYLE_OPTIONS)
-	controls["alpha_style"] = _add_spin_row(alpha_section, "AlphaGeneratorStyle", "Style", 0, 255, 1)
 	controls["alpha_phase"] = _add_spin_row(alpha_section, "AlphaGeneratorPhase", "Phase", -100000, 100000, 0.01)
 	controls["alpha_reg_picker"] = _add_ctrl_reg_row(alpha_section, "AlphaGeneratorControlReg", "Control reg")
-	controls["alpha_reg"] = _add_spin_row(alpha_section, "AlphaGeneratorReg", "Control reg", -1, 255, 1)
 	controls["alpha_rate"] = _add_spin_row(alpha_section, "AlphaGeneratorRate", "Rate", -100000, 100000, 0.01)
 	controls["alpha_start"] = _add_spin_row(alpha_section, "AlphaGeneratorStart", "Start", -32768, 32767, 1)
 	controls["alpha_end"] = _add_spin_row(alpha_section, "AlphaGeneratorEnd", "End", -32768, 32767, 1)
@@ -801,13 +802,12 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 	_set_section_visible_enabled(controls.get("v", {}).get("box"), uses_uv or has_uv_data, uses_uv)
 
 	var rgb_gen: Dictionary = material.get("rgb_gen", {})
-	_populate_id_option(controls.get("rgb_style_option") as OptionButton, GENERATOR_STYLE_OPTIONS, int(rgb_gen.get("style", 0)))
-	_set_spin(controls.get("rgb_style"), int(rgb_gen.get("style", 0)))
+	var rgb_style := int(rgb_gen.get("style", 0))
+	_populate_id_option(controls.get("rgb_style_option") as OptionButton, GENERATOR_STYLE_OPTIONS, rgb_style)
 	_set_spin(controls.get("rgb_phase"), float(rgb_gen.get("phase", 0.0)))
 	var rgb_reg_picker = controls.get("rgb_reg_picker")
 	if rgb_reg_picker != null:
 		rgb_reg_picker.setup(_control_registers(), int(rgb_gen.get("reg", -1)))
-	_set_spin(controls.get("rgb_reg"), int(rgb_gen.get("reg", -1)))
 	_set_spin(controls.get("rgb_rate"), float(rgb_gen.get("rate", 0.0)))
 	var rgb_start := controls.get("rgb_start_color") as ColorPickerButton
 	var rgb_end := controls.get("rgb_end_color") as ColorPickerButton
@@ -815,23 +815,30 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 		rgb_start.color = rgb_gen.get("start_color", Color.WHITE)
 	if rgb_end != null:
 		rgb_end.color = rgb_gen.get("end_color", Color.WHITE)
+	_apply_generator_row_visibility(rgb_style, [
+		controls.get("rgb_phase"), controls.get("rgb_rate"),
+		controls.get("rgb_start_color"), controls.get("rgb_end_color"),
+	], rgb_reg_picker)
 	var rgb_enabled := bool(shader_info.get("is_luminance", false))
-	var rgb_visible := rgb_enabled or int(rgb_gen.get("style", 0)) > 0
+	var rgb_visible := rgb_enabled or rgb_style > 0
 	_set_section_visible_enabled(controls.get("rgb_box"), rgb_visible, rgb_enabled)
 
 	var alpha_gen: Dictionary = material.get("alpha_gen", {})
-	_populate_id_option(controls.get("alpha_style_option") as OptionButton, GENERATOR_STYLE_OPTIONS, int(alpha_gen.get("style", 0)))
-	_set_spin(controls.get("alpha_style"), int(alpha_gen.get("style", 0)))
+	var alpha_style := int(alpha_gen.get("style", 0))
+	_populate_id_option(controls.get("alpha_style_option") as OptionButton, GENERATOR_STYLE_OPTIONS, alpha_style)
 	_set_spin(controls.get("alpha_phase"), float(alpha_gen.get("phase", 0.0)))
 	var alpha_reg_picker = controls.get("alpha_reg_picker")
 	if alpha_reg_picker != null:
 		alpha_reg_picker.setup(_control_registers(), int(alpha_gen.get("reg", -1)))
-	_set_spin(controls.get("alpha_reg"), int(alpha_gen.get("reg", -1)))
 	_set_spin(controls.get("alpha_rate"), float(alpha_gen.get("rate", 0.0)))
 	_set_spin(controls.get("alpha_start"), int(alpha_gen.get("start", 0)))
 	_set_spin(controls.get("alpha_end"), int(alpha_gen.get("end", 0)))
+	_apply_generator_row_visibility(alpha_style, [
+		controls.get("alpha_phase"), controls.get("alpha_rate"),
+		controls.get("alpha_start"), controls.get("alpha_end"),
+	], alpha_reg_picker)
 	var alpha_enabled := bool(shader_info.get("is_alpha", false))
-	var alpha_visible := alpha_enabled or int(alpha_gen.get("style", 0)) > 0
+	var alpha_visible := alpha_enabled or alpha_style > 0
 	_set_section_visible_enabled(controls.get("alpha_box"), alpha_visible, alpha_enabled)
 
 	var animation: Dictionary = material.get("animation", {})
@@ -844,16 +851,19 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 
 
 func _sync_uv_axis_controls(axis_controls: Dictionary, params: Dictionary) -> void:
-	_populate_id_option(axis_controls.get("style_option") as OptionButton, GENERATOR_STYLE_OPTIONS, int(params.get("style", 0)))
-	_set_spin(axis_controls.get("style"), int(params.get("style", 0)))
+	var style := int(params.get("style", 0))
+	_populate_id_option(axis_controls.get("style_option") as OptionButton, GENERATOR_STYLE_OPTIONS, style)
 	_set_spin(axis_controls.get("phase"), float(params.get("phase", 0.0)))
 	var reg_picker = axis_controls.get("reg_picker")
 	if reg_picker != null:
 		reg_picker.setup(_control_registers(), int(params.get("reg", -1)))
-	_set_spin(axis_controls.get("reg"), int(params.get("reg", -1)))
 	_set_spin(axis_controls.get("rate"), float(params.get("rate", 0.0)))
 	_set_spin(axis_controls.get("start"), float(params.get("start", 0.0)))
 	_set_spin(axis_controls.get("end"), float(params.get("end", 0.0)))
+	_apply_generator_row_visibility(style, [
+		axis_controls.get("phase"), axis_controls.get("rate"),
+		axis_controls.get("start"), axis_controls.get("end"),
+	], reg_picker)
 
 
 func _set_section_visible_enabled(node, visible: bool, enabled: bool) -> void:
@@ -873,6 +883,31 @@ func _set_controls_enabled(node: Node, enabled: bool) -> void:
 		(node as Button).disabled = not enabled
 	for child in node.get_children():
 		_set_controls_enabled(child, enabled)
+
+
+func _reg_value(picker) -> int:
+	if picker != null and picker.has_method("get_selected_register"):
+		return int(picker.get_selected_register())
+	return -1
+
+
+func _set_row_visible(control, visible: bool) -> void:
+	if control == null:
+		return
+	var row := (control as Node).get_parent() as Control
+	if row != null:
+		row.visible = visible
+
+
+# A generator only shows its parameter rows when it has a style; the control
+# register row appears only for register-driven styles. Keeps the panel to the
+# few fields that actually apply.
+func _apply_generator_row_visibility(style: int, param_controls: Array, reg_picker) -> void:
+	var active := style != 0
+	var is_register := style == GENERATOR_STYLE_CONTROL_REG or style == GENERATOR_STYLE_CONTROL_REG_ADD
+	for control in param_controls:
+		_set_row_visible(control, active)
+	_set_row_visible(reg_picker, active and is_register)
 
 
 func _connect_uv_generator_spin(spin: SpinBox, axis: String, key: String, controls: Dictionary, apply: Callable) -> void:
@@ -925,9 +960,9 @@ func _connect_texture_animation_spin(spin: SpinBox, key: String, controls: Dicti
 func _uv_generator_params(controls: Dictionary, axis: String) -> Dictionary:
 	var axis_controls: Dictionary = controls.get(axis, {})
 	return {
-		"style": int((axis_controls.get("style") as SpinBox).value),
+		"style": _selected_option_id(axis_controls.get("style_option") as OptionButton),
 		"phase": float((axis_controls.get("phase") as SpinBox).value),
-		"reg": int((axis_controls.get("reg") as SpinBox).value),
+		"reg": _reg_value(axis_controls.get("reg_picker")),
 		"rate": float((axis_controls.get("rate") as SpinBox).value),
 		"start": float((axis_controls.get("start") as SpinBox).value),
 		"end": float((axis_controls.get("end") as SpinBox).value),
@@ -936,9 +971,9 @@ func _uv_generator_params(controls: Dictionary, axis: String) -> Dictionary:
 
 func _rgb_generator_params(controls: Dictionary) -> Dictionary:
 	return {
-		"style": int((controls.get("rgb_style") as SpinBox).value),
+		"style": _selected_option_id(controls.get("rgb_style_option") as OptionButton),
 		"phase": float((controls.get("rgb_phase") as SpinBox).value),
-		"reg": int((controls.get("rgb_reg") as SpinBox).value),
+		"reg": _reg_value(controls.get("rgb_reg_picker")),
 		"rate": float((controls.get("rgb_rate") as SpinBox).value),
 		"start_color": (controls.get("rgb_start_color") as ColorPickerButton).color,
 		"end_color": (controls.get("rgb_end_color") as ColorPickerButton).color,
@@ -947,9 +982,9 @@ func _rgb_generator_params(controls: Dictionary) -> Dictionary:
 
 func _alpha_generator_params(controls: Dictionary) -> Dictionary:
 	return {
-		"style": int((controls.get("alpha_style") as SpinBox).value),
+		"style": _selected_option_id(controls.get("alpha_style_option") as OptionButton),
 		"phase": float((controls.get("alpha_phase") as SpinBox).value),
-		"reg": int((controls.get("alpha_reg") as SpinBox).value),
+		"reg": _reg_value(controls.get("alpha_reg_picker")),
 		"rate": float((controls.get("alpha_rate") as SpinBox).value),
 		"start": int((controls.get("alpha_start") as SpinBox).value),
 		"end": int((controls.get("alpha_end") as SpinBox).value),

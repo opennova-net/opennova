@@ -1416,7 +1416,7 @@ func test_object_materials_inspector_gates_slots_from_shader_flags() -> void:
 	assert_string_contains(slot2_status.text, "Unsupported")
 
 
-func test_object_materials_inspector_edits_uv_generators() -> void:
+func test_object_materials_inspector_generator_rows_follow_style() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
@@ -1426,19 +1426,48 @@ func test_object_materials_inspector_edits_uv_generators() -> void:
 	workspace.set_asset_dock(detail_host)
 	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
 	var u_section := _find_node_by_name(detail_host, "UGeneratorSection") as Control
-	var u_style := _find_node_by_name(detail_host, "UGeneratorStyle") as SpinBox
+	var u_style := _find_node_by_name(detail_host, "UGeneratorStyleOption") as OptionButton
+	var u_rate := _find_node_by_name(detail_host, "UGeneratorRate") as SpinBox
+	var u_reg := _find_node_by_name(detail_host, "UGeneratorControlReg") as OptionButton
 	assert_not_null(u_section)
 	assert_not_null(u_style)
+	assert_not_null(u_rate)
+	assert_not_null(u_reg)
 	assert_true(u_section.visible, "UV generator controls should be visible for #UV shaders.")
 
-	u_style.value = 2
-	u_style.value_changed.emit(2.0)
-	await get_tree().process_frame
+	# The raw numeric twins are internal and must not be user-facing.
+	assert_null(_find_node_by_name(detail_host, "UGeneratorStyle"), "Raw generator style number should be gone from the UI.")
+	assert_null(_find_node_by_name(detail_host, "UGeneratorReg"), "Raw control-register number should be gone from the UI.")
 
+	# Style None -> the generator's parameter rows collapse away.
+	var none_index := _option_index_by_id(u_style, 0)
+	assert_true(none_index >= 0)
+	u_style.select(none_index)
+	u_style.item_selected.emit(none_index)
+	await get_tree().process_frame
+	assert_false((u_rate.get_parent() as Control).visible, "Param rows should hide when the generator style is None.")
+	assert_false((u_reg.get_parent() as Control).visible, "Control reg row should hide when the generator style is None.")
+
+	# A real style (Slide = 16) shows the params, but not the control-register row.
+	var slide_index := _option_index_by_id(u_style, 16)
+	assert_true(slide_index >= 0)
+	u_style.select(slide_index)
+	u_style.item_selected.emit(slide_index)
+	await get_tree().process_frame
+	assert_true((u_rate.get_parent() as Control).visible, "Param rows should show once a generator style is set.")
+	assert_false((u_reg.get_parent() as Control).visible, "Control reg row should stay hidden for non-register styles.")
 	assert_true(workspace.object_editor.is_dirty, "Editing a generator should mark the object dirty.")
 	var material: Dictionary = workspace.object_editor.object_data.get_materials()[0]
 	var u_params: Dictionary = material.get("u_params", {})
-	assert_eq(int(u_params.get("style", 0)), 2)
+	assert_eq(int(u_params.get("style", 0)), 16)
+
+	# A control-register style (113) reveals the control-register row.
+	var reg_index := _option_index_by_id(u_style, 113)
+	assert_true(reg_index >= 0)
+	u_style.select(reg_index)
+	u_style.item_selected.emit(reg_index)
+	await get_tree().process_frame
+	assert_true((u_reg.get_parent() as Control).visible, "Control reg row should appear for register-driven styles.")
 
 
 func test_object_materials_inspector_uses_compact_layout_and_named_generator_controls() -> void:
