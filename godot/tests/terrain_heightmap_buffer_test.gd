@@ -57,3 +57,26 @@ func test_set_heightmap_image_is_authoritative_for_depth() -> void:
 	var raw := data.get_depth_raw16()
 	assert_eq(raw.size(), 8, "Setting the height image should make depth available.")
 	assert_eq(int(raw[0]) | (int(raw[1]) << 8), 512, "height 2.0 -> raw16 512.")
+
+
+func test_colormap_and_blendmap_images_are_owned_by_data() -> void:
+	# Color/blend mirror the height buffer: NovaTerrainData owns the editable
+	# Image and shares it by reference, so brush edits stay visible through data.
+	var data := NovaTerrainData.new()
+	assert_null(data.get_colormap_image(), "Colormap image should start unset.")
+	assert_null(data.get_blendmap_image(), "Blendmap image should start unset.")
+
+	var color := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	color.fill(Color(0.25, 0.5, 0.75, 1.0))
+	var blend := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	blend.fill(Color(1.0, 0.0, 0.0, 1.0))
+	data.set_colormap_image(color)
+	data.set_blendmap_image(blend)
+
+	assert_eq(data.get_colormap_image(), color, "data should hold the same colormap Image it was given.")
+	assert_eq(data.get_blendmap_image(), blend, "data should hold the same blendmap Image it was given.")
+
+	# An in-place edit (what a brush does) is visible through data.
+	color.set_pixel(0, 0, Color(0.0, 1.0, 0.0, 1.0))
+	assert_eq(data.get_colormap_image().get_pixel(0, 0), Color(0.0, 1.0, 0.0, 1.0),
+		"Edits to the shared colormap Image should be visible through data.")

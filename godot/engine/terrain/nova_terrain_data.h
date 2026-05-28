@@ -81,6 +81,13 @@ private:
 	// in place, so NovaTerrainData stays the authoritative owner of the live
 	// depth and get_depth_raw16() reflects edits without a separate sync step.
 	Ref<Image> heightmap_image;
+	// Editable colormap / detail-blend buffers, owned and shared by reference
+	// with the editor exactly like heightmap_image. Distinct from `colormap`
+	// (the derived display/runtime Texture2D) and `colormap_cpu_image` (a lazy
+	// read cache); these are the paintable source-of-truth images that save
+	// reads back from.
+	Ref<Image> colormap_image;
+	Ref<Image> blendmap_image;
 	// Lazy-loaded on first call to get_tileinfo_resource(). Cached keyed by
 	// the source path so an edit to trn.tileinfo re-loads on next request.
 	mutable Ref<NovaTerrainTileInfo> tileinfo_resource_cache;
@@ -171,6 +178,10 @@ public:
 	// Build a FORMAT_RF height image (height = raw_u16_LE / 256) from a raw16
 	// depth buffer; the exact inverse of get_depth_raw16's conversion.
 	Ref<Image> heightmap_image_from_raw16(const PackedByteArray &p_raw16) const;
+	void set_colormap_image(const Ref<Image> &p_image);
+	Ref<Image> get_colormap_image() const;
+	void set_blendmap_image(const Ref<Image> &p_image);
+	Ref<Image> get_blendmap_image() const;
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;

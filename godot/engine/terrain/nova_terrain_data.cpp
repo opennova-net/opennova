@@ -142,6 +142,10 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_heightmap_image", "image"), &NovaTerrainData::set_heightmap_image);
 	ClassDB::bind_method(D_METHOD("get_heightmap_image"), &NovaTerrainData::get_heightmap_image);
 	ClassDB::bind_method(D_METHOD("heightmap_image_from_raw16", "raw16"), &NovaTerrainData::heightmap_image_from_raw16);
+	ClassDB::bind_method(D_METHOD("set_colormap_image", "image"), &NovaTerrainData::set_colormap_image);
+	ClassDB::bind_method(D_METHOD("get_colormap_image"), &NovaTerrainData::get_colormap_image);
+	ClassDB::bind_method(D_METHOD("set_blendmap_image", "image"), &NovaTerrainData::set_blendmap_image);
+	ClassDB::bind_method(D_METHOD("get_blendmap_image"), &NovaTerrainData::get_blendmap_image);
 	ClassDB::bind_method(D_METHOD("get_height", "world_pos"), &NovaTerrainData::get_height);
 	ClassDB::bind_method(D_METHOD("get_height_world", "world_pos"), &NovaTerrainData::get_height_world);
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &NovaTerrainData::get_height_world_bilinear);
@@ -839,6 +843,22 @@ void NovaTerrainData::set_heightmap_image(const Ref<Image> &p_image) {
 
 Ref<Image> NovaTerrainData::get_heightmap_image() const {
 	return heightmap_image;
+}
+
+void NovaTerrainData::set_colormap_image(const Ref<Image> &p_image) {
+	colormap_image = p_image;
+}
+
+Ref<Image> NovaTerrainData::get_colormap_image() const {
+	return colormap_image;
+}
+
+void NovaTerrainData::set_blendmap_image(const Ref<Image> &p_image) {
+	blendmap_image = p_image;
+}
+
+Ref<Image> NovaTerrainData::get_blendmap_image() const {
+	return blendmap_image;
 }
 
 Ref<Image> NovaTerrainData::heightmap_image_from_raw16(const PackedByteArray &p_raw16) const {

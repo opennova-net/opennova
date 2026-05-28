@@ -745,10 +745,19 @@ func reset_texture_slot(material: ShaderMaterial, slot_id: String) -> void:
 
 
 func save_texture_assets(material: ShaderMaterial, output_dir: String, terrain_name: String) -> Error:
-	var err := NovaTerrainBuilder.save_image_tga(colormap_image, output_dir + "/" + terrain_name + "_c.tga")
+	# Source the editable buffers from NovaTerrainData (their owner); fall back to
+	# the local refs if data is absent. They are the same Image objects.
+	var colormap_source := colormap_image
+	var blendmap_source := blendmap_image
+	if data != null:
+		if data.get_colormap_image() != null:
+			colormap_source = data.get_colormap_image()
+		if data.get_blendmap_image() != null:
+			blendmap_source = data.get_blendmap_image()
+	var err := NovaTerrainBuilder.save_image_tga(colormap_source, output_dir + "/" + terrain_name + "_c.tga")
 	if err != OK:
 		return err
-	err = NovaTerrainBuilder.save_image_tga(blendmap_image, output_dir + "/" + terrain_name + "_d1.tga")
+	err = NovaTerrainBuilder.save_image_tga(blendmap_source, output_dir + "/" + terrain_name + "_d1.tga")
 	if err != OK:
 		return err
 	normalize_foliage_state_for_editor()
@@ -834,6 +843,9 @@ func set_colormap_image(material: ShaderMaterial, image: Image, sync_data: bool 
 	colormap_tex = ImageTexture.create_from_image(colormap_image)
 	material.set_shader_parameter("u_colormap", colormap_tex)
 	if sync_data and data:
+		# NovaTerrainData owns the editable buffer (same Image object the brush
+		# mutates) plus the derived display/runtime Texture2D.
+		data.set_colormap_image(colormap_image)
 		data.set_colormap(colormap_tex)
 
 
@@ -842,6 +854,7 @@ func set_blendmap_image(material: ShaderMaterial, image: Image, sync_data: bool 
 	blendmap_tex = ImageTexture.create_from_image(blendmap_image)
 	material.set_shader_parameter("u_blendmap", blendmap_tex)
 	if sync_data and data:
+		data.set_blendmap_image(blendmap_image)
 		data.set_detailblendmap(blendmap_tex)
 
 
