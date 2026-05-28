@@ -3,10 +3,6 @@ extends "res://modtools/editor/editor_workspace.gd"
 
 const ObjectEditorScript = preload("res://modtools/object/object_editor.gd")
 const ObjectPreviewScript = preload("res://modtools/object/object_preview.gd")
-const ShaderTagPickerScript = preload("res://modtools/object/ui/widgets/shader_tag_picker.gd")
-const TextureSlotWidgetScript = preload("res://modtools/object/ui/widgets/texture_slot_widget.gd")
-const CtrlRegPickerScript = preload("res://modtools/object/ui/widgets/ctrl_reg_picker.gd")
-const AnimFramesDialogScript = preload("res://modtools/object/ui/dialogs/anim_frames_dialog.gd")
 const PreviewInspectorScript = preload("res://modtools/object/ui/inspectors/preview_inspector.gd")
 const LodsInspectorScript = preload("res://modtools/object/ui/inspectors/lods_inspector.gd")
 const LightsInspectorScript = preload("res://modtools/object/ui/inspectors/lights_inspector.gd")
@@ -388,56 +384,6 @@ func _get_oed_dirty_mask() -> int:
 	return int(object_editor.object_data.get_oed_dirty_mask()) & OED_UPDATE_ALL
 
 
-func _add_spin_row(parent: Control, node_name: String, label_text: String, min_value: float, max_value: float, step: float) -> SpinBox:
-	return ObjectUiHelpers.add_spin_row(parent, node_name, label_text, min_value, max_value, step)
-
-
-func _add_color_row(parent: Control, node_name: String, label_text: String) -> ColorPickerButton:
-	return ObjectUiHelpers.add_color_row(parent, node_name, label_text)
-
-
-func _add_id_option_row(parent: Control, node_name: String, label_text: String, options: Array) -> OptionButton:
-	return ObjectUiHelpers.add_id_option_row(parent, node_name, label_text, options)
-
-
-func _add_ctrl_reg_row(parent: Control, node_name: String, label_text: String):
-	return ObjectUiHelpers.add_ctrl_reg_row(parent, node_name, label_text, _control_registers())
-
-
-func _add_detail_field(parent: Control, label_text: String) -> VBoxContainer:
-	return ObjectUiHelpers.add_detail_field(parent, label_text)
-
-
-func _add_detail_spin_row(parent: Control, node_name: String, label_text: String, min_value: float, max_value: float, step: float) -> SpinBox:
-	return ObjectUiHelpers.add_detail_spin_row(parent, node_name, label_text, min_value, max_value, step)
-
-
-func _add_detail_id_option_row(parent: Control, node_name: String, label_text: String, options: Array) -> OptionButton:
-	return ObjectUiHelpers.add_detail_id_option_row(parent, node_name, label_text, options)
-
-
-func _add_detail_ctrl_reg_row(parent: Control, node_name: String, label_text: String):
-	return ObjectUiHelpers.add_detail_ctrl_reg_row(parent, node_name, label_text, _control_registers())
-
-
-func _populate_id_option(option: OptionButton, options: Array, current_id: int) -> void:
-	ObjectUiHelpers.populate_id_option(option, options, current_id)
-
-
-func _selected_option_id(option: OptionButton) -> int:
-	return ObjectUiHelpers.selected_option_id(option)
-
-
-func _control_registers() -> Array:
-	if object_editor != null and object_editor.object_data != null and object_editor.object_data.has_method("get_control_registers"):
-		return object_editor.object_data.get_control_registers()
-	return []
-
-
-func _set_spin(node, value: float) -> void:
-	ObjectUiHelpers.set_spin(node, value)
-
-
 func _active_workflow_uses_detail_dock() -> bool:
 	return _active_workflow_id == Workflow.MATERIALS or _active_workflow_id == Workflow.PARTS or _active_workflow_id == Workflow.LIGHTS
 
@@ -514,7 +460,3 @@ func _rebuild_object_detail_dock() -> void:
 			_materials_inspector.build_detail(box)
 		Workflow.LIGHTS:
 			_lights_inspector.build_detail(box)
-
-
-func _make_inspector_box(host: Control) -> VBoxContainer:
-	return ObjectUiHelpers.make_inspector_box(host)
