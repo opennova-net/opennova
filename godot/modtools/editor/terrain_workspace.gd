@@ -1,10 +1,6 @@
 class_name TerrainEditorWorkspace
 extends EditorWorkspace
 
-const PaintInspectorScene = preload("res://modtools/terrain/ui/inspectors/paint_inspector.tscn")
-const ScatterInspectorScene = preload("res://modtools/terrain/ui/inspectors/scatter_inspector.tscn")
-const StampInspectorScene = preload("res://modtools/terrain/ui/inspectors/stamp_inspector.tscn")
-const LayoutInspectorScene = preload("res://modtools/terrain/ui/inspectors/layout_inspector.tscn")
 const TerrainViewportScript = preload("res://modtools/terrain/terrain_viewport.gd")
 const TerrainAssetDockScene = preload("res://modtools/terrain/ui/editor_asset_dock.tscn")
 
@@ -203,10 +199,10 @@ func get_workflows() -> Array:
 func _build_inspector_defs() -> Array:
 	return [
 		InspectorDef.make(Workflow.SCULPT, "Sculpt", "Raise, lower, smooth, and flatten the terrain.", SculptInspector),
-		InspectorDef.make_scene(Workflow.PAINT, "Paint", "Paint detail layers, color, clone, and surface types.", PaintInspectorScene),
-		InspectorDef.make_scene(Workflow.SCATTER, "Foliage", "Manage and paint foliage placement.", ScatterInspectorScene),
-		InspectorDef.make_scene(Workflow.STAMP, "Tile", "Place and edit tiles.", StampInspectorScene),
-		InspectorDef.make_scene(Workflow.LAYOUT, "Layout", "Edit sectors, map size, origin, and water.", LayoutInspectorScene),
+		InspectorDef.make(Workflow.PAINT, "Paint", "Paint detail layers, color, clone, and surface types.", PaintInspector),
+		InspectorDef.make(Workflow.SCATTER, "Foliage", "Manage and paint foliage placement.", ScatterInspector),
+		InspectorDef.make(Workflow.STAMP, "Tile", "Place and edit tiles.", StampInspector),
+		InspectorDef.make(Workflow.LAYOUT, "Layout", "Edit sectors, map size, origin, and water.", LayoutInspector),
 	]
 
 
@@ -234,19 +230,13 @@ func activate_workflow(workflow_id: int) -> void:
 
 func build_workflow_inspector(workflow_id: int, host: Control) -> void:
 	var def := _def_for(workflow_id)
-	if def == null:
+	if def == null or def.inspector_script == null:
 		return
-	if def.inspector_script != null:
-		if _inspectors.get(workflow_id) == null:
-			_inspectors[workflow_id] = def.inspector_script.new()
-		var code_inspector = _inspectors[workflow_id]
-		code_inspector.set_editor(terrain_editor)
-		code_inspector.build_main(host)
-	elif def.inspector_scene != null:
-		var inspector: Node = def.inspector_scene.instantiate()
-		host.add_child(inspector)
-		if terrain_editor != null and inspector.has_method("set_editor"):
-			inspector.set_editor(terrain_editor)
+	if _inspectors.get(workflow_id) == null:
+		_inspectors[workflow_id] = def.inspector_script.new()
+	var code_inspector = _inspectors[workflow_id]
+	code_inspector.build_main(host)
+	code_inspector.set_editor(terrain_editor)
 
 
 func is_busy() -> bool:

@@ -8,10 +8,6 @@ const TerrainWorkspaceScript = preload("res://modtools/editor/terrain_workspace.
 const TerrainEditorAssetDockScene = preload("res://modtools/terrain/ui/editor_asset_dock.tscn")
 const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
 const EnvironmentInspectorScript = preload("res://modtools/environment/environment_inspector.gd")
-const LayoutInspectorScene = preload("res://modtools/terrain/ui/inspectors/layout_inspector.tscn")
-const PaintInspectorScene = preload("res://modtools/terrain/ui/inspectors/paint_inspector.tscn")
-const ScatterInspectorScene = preload("res://modtools/terrain/ui/inspectors/scatter_inspector.tscn")
-const StampInspectorScene = preload("res://modtools/terrain/ui/inspectors/stamp_inspector.tscn")
 const QuadrantBoardScript = preload("res://modtools/terrain/ui/widgets/quadrant_board.gd")
 const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const FIXTURE_CACHE_DIR := "opennova_test"
@@ -724,16 +720,8 @@ func test_asset_dock_uses_properties_tab_and_removes_old_toggles() -> void:
 
 func test_asset_dock_and_inspectors_do_not_poll_when_idle() -> void:
 	var dock = add_child_autofree(TerrainEditorAssetDockScene.instantiate())
-	var paint = add_child_autofree(PaintInspectorScene.instantiate())
-	var scatter = add_child_autofree(ScatterInspectorScene.instantiate())
-	var stamp = add_child_autofree(StampInspectorScene.instantiate())
-	var layout = add_child_autofree(LayoutInspectorScene.instantiate())
 
 	assert_false(dock.is_processing(), "Asset dock should sync from editor state changes instead of idle polling.")
-	assert_false(paint.is_processing(), "Paint inspector should sync from editor state changes instead of idle polling.")
-	assert_false(scatter.is_processing(), "Foliage inspector should sync from editor state changes instead of idle polling.")
-	assert_false(stamp.is_processing(), "Tile inspector should sync from editor state changes instead of idle polling.")
-	assert_false(layout.is_processing(), "Layout inspector should sync from editor state changes instead of idle polling.")
 
 
 func test_sculpt_inspector_syncs_from_editor_ui_state_signal() -> void:
@@ -773,42 +761,44 @@ func test_pressing_layout_mode_restores_edit_sectors_tool() -> void:
 
 
 func test_layout_inspector_is_trimmed_to_board_and_legend() -> void:
-	var inspector = add_child_autofree(LayoutInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := LayoutInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor.current_tool = TerrainEditorScript.Tool.PAINT_DETAIL
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 
 	assert_eq(editor.current_tool, TerrainEditorScript.Tool.EDIT_SECTORS, "Layout inspector should force sector editing when it becomes active.")
-	assert_null(inspector.get_node_or_null("Scroll/Box/Intro"), "Layout inspector should remove the extra intro copy.")
-	assert_null(inspector.get_node_or_null("%BrushPickerRow"), "Layout inspector should remove the old brush picker.")
-	assert_null(inspector.get_node_or_null("Scroll/Box/BoardSection/SizeRow/SizeSuffix"), "Layout inspector should remove the square suffix.")
-	assert_null(inspector.get_node_or_null("Scroll/Box/BoardSection/SizeHint"), "Layout inspector should remove the non-square helper copy.")
-	assert_true(inspector.get_node_or_null("%LegendGrid") != null, "Layout inspector should keep a passive legend.")
-	assert_true(inspector.get_node_or_null("%SectorOverlayToggle") != null, "Layout inspector should expose a sector overlay toggle under the map layout board.")
+	assert_not_null(inspector._legend_grid, "Layout inspector should keep a passive legend.")
+	assert_gt(inspector._legend_grid.get_child_count(), 0, "The legend should be populated with sector swatches.")
+	assert_not_null(inspector._sector_overlay_toggle, "Layout inspector should expose a sector overlay toggle under the map layout board.")
 
 
 func test_layout_inspector_sector_overlay_toggle_syncs_with_editor() -> void:
-	var inspector = add_child_autofree(LayoutInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := LayoutInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor.set_sector_overlay_visible(true)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 
-	var toggle: CheckBox = inspector.get_node("%SectorOverlayToggle")
-	assert_true(toggle.button_pressed, "Layout inspector should reflect the editor's current sector overlay visibility.")
+	assert_true(inspector._sector_overlay_toggle.button_pressed, "Layout inspector should reflect the editor's current sector overlay visibility.")
 
 	inspector._on_sector_overlay_toggled(false)
 	assert_false(editor.is_sector_overlay_visible(), "Toggling sector overlay off in Layout should update editor state.")
 
 
 func test_foliage_inspector_selection_updates_editor_selection() -> void:
-	var inspector = add_child_autofree(ScatterInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := ScatterInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor.add_foliage_def()
 	editor.add_foliage_def()
 	editor.current_tool = TerrainEditorScript.Tool.FOLIAGE_PAINT
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	inspector._on_list_selected(1)
 
@@ -817,16 +807,18 @@ func test_foliage_inspector_selection_updates_editor_selection() -> void:
 
 
 func test_foliage_inspector_reflects_editor_selection_and_add_remove() -> void:
-	var inspector = add_child_autofree(ScatterInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := ScatterInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor.add_foliage_def()
 	editor.add_foliage_def()
 	editor.current_tool = TerrainEditorScript.Tool.FOLIAGE_PAINT
 	editor.set_selected_foliage_def_index(1)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 
-	var list: ItemList = inspector.get_node("%FoliageList")
+	var list: ItemList = inspector._list
 	assert_true(list.is_selected(1), "The foliage inspector should highlight the editor's selected foliage def.")
 
 	inspector._on_add_pressed()
@@ -838,24 +830,24 @@ func test_foliage_inspector_reflects_editor_selection_and_add_remove() -> void:
 
 
 func test_stamp_inspector_removes_entry_list_and_apply_workflow() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
+	inspector.build_main(host)
 
-	assert_null(inspector.get_node_or_null("%EntriesList"), "Tile inspector should remove the placed-overlays list.")
-	assert_null(inspector.get_node_or_null("%ApplyButton"), "Tile inspector should remove the explicit Apply flow.")
-	assert_null(inspector.get_node_or_null("%FocusButton"), "Tile inspector should remove list-based camera focusing.")
-	assert_null(inspector.get_node_or_null("%DeleteButton"), "Tile inspector should remove list-based delete controls.")
-	assert_true(inspector.get_node_or_null("%SelectionDoneButton") != null, "Tile inspector should expose a direct exit action for selection mode.")
-	assert_true(inspector.get_node_or_null("%SelectionDeleteButton") != null, "Tile inspector should expose a direct delete action for the selected tile.")
+	assert_not_null(inspector._selection_done, "Tile inspector should expose a direct exit action for selection mode.")
+	assert_not_null(inspector._selection_delete, "Tile inspector should expose a direct delete action for the selected tile.")
 
 
 func test_stamp_inspector_atlas_click_replaces_selected_tile_immediately() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.new_tileinfo()
 	editor._document.set_tile_stamp_tile_index(2)
 	editor._document.stamp_tileinfo_cell(3, 4)
 	editor.select_tileinfo_entry(0)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	inspector._on_atlas_selected(5)
 
@@ -865,7 +857,8 @@ func test_stamp_inspector_atlas_click_replaces_selected_tile_immediately() -> vo
 
 
 func test_stamp_inspector_atlas_focus_follows_selected_tile() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.data = NovaTerrainData.new()
 	editor._document.new_tileinfo()
@@ -877,17 +870,19 @@ func test_stamp_inspector_atlas_focus_follows_selected_tile() -> void:
 	editor._document.stamp_tileinfo_cell(3, 4)
 	editor.select_tileinfo_entry(0)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	inspector.sync_from_editor()
 
-	var atlas_status: Label = inspector.get_node("%AtlasStatus")
-	var atlas_list: ItemList = inspector.get_node("%AtlasList")
+	var atlas_status: Label = inspector._atlas_status
+	var atlas_list: ItemList = inspector._atlas_list
 	assert_string_contains(atlas_status.text, "editing 002", "Atlas status should reflect the selected tile when replace-on-click is active.")
 	assert_true(atlas_list.is_selected(2), "Atlas selection should follow the selected tile while a placed tile is active.")
 
 
 func test_stamp_inspector_reuses_tile_preview_icons_until_atlas_changes() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.data = NovaTerrainData.new()
 	var strip_image := Image.create(256, 64, false, Image.FORMAT_RGBA8)
@@ -895,6 +890,7 @@ func test_stamp_inspector_reuses_tile_preview_icons_until_atlas_changes() -> voi
 	var tilestrip := ImageTexture.create_from_image(strip_image)
 	editor._document.data.set_tilestrip_tex(tilestrip)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	var cache_size: int = inspector._tile_icon_cache.size()
 	var first: Texture2D = inspector._build_icon(tilestrip, 2, 4)
@@ -905,13 +901,15 @@ func test_stamp_inspector_reuses_tile_preview_icons_until_atlas_changes() -> voi
 
 
 func test_stamp_inspector_flag_toggle_updates_selected_tile_immediately() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.new_tileinfo()
 	editor._document.set_tile_stamp_tile_index(2)
 	editor._document.stamp_tileinfo_cell(3, 4)
 	editor.select_tileinfo_entry(0)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	inspector._on_flip_x(true)
 
@@ -921,28 +919,32 @@ func test_stamp_inspector_flag_toggle_updates_selected_tile_immediately() -> voi
 
 
 func test_stamp_inspector_shows_quiet_empty_selection_state() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.new_tileinfo()
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 
-	var done_button: Button = inspector.get_node("%SelectionDoneButton")
-	var summary: Label = inspector.get_node("%SelectionSummary")
-	var delete_button: Button = inspector.get_node("%SelectionDeleteButton")
+	var done_button: Button = inspector._selection_done
+	var summary: Label = inspector._selection_summary
+	var delete_button: Button = inspector._selection_delete
 	assert_eq(summary.text, "No tile selected.", "Tile inspector should use a quiet empty-state until the user selects a placed tile.")
 	assert_true(done_button.disabled, "Done should stay disabled until a tile is selected.")
 	assert_true(delete_button.disabled, "Delete should stay disabled until a tile is selected.")
 
 
 func test_stamp_inspector_done_clears_selection() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.new_tileinfo()
 	editor._document.set_tile_stamp_tile_index(2)
 	editor._document.stamp_tileinfo_cell(3, 4)
 	editor.select_tileinfo_entry(0)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	inspector._on_selection_done_pressed()
 
