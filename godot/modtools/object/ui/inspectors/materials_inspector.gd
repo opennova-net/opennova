@@ -1,4 +1,4 @@
-extends "res://modtools/object/ui/inspectors/workflow_inspector.gd"
+extends ListDetailInspector
 
 ## Materials workflow: a left list of materials plus a right detail dock for
 ## the selected material's shader tag, texture slots, alpha, and UV/RGB/alpha/
@@ -40,32 +40,70 @@ const TEXTURE_FLAG_CLAMPED := 0x02
 const GENERATOR_STYLE_CONTROL_REG := 113
 const GENERATOR_STYLE_CONTROL_REG_ADD := 114
 
-var _material_selected_index := 0
-var _materials_list: ItemList
 var _material_paste_button: Button
 var _material_clipboard: Dictionary = {}
 
 
 func build_main(host: Control) -> void:
-	_build_materials_inspector(host, false)
+	var box := _make_inspector_box(host)
+	_build_list_panel(box)
+
+	var material_toolbar := HBoxContainer.new()
+	material_toolbar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_list_panel.add_child(material_toolbar)
+
+	var copy_button := Button.new()
+	copy_button.name = "MaterialCopyButton"
+	copy_button.text = "Copy"
+	material_toolbar.add_child(copy_button)
+
+	var paste_button := Button.new()
+	paste_button.name = "MaterialPasteButton"
+	paste_button.text = "Paste"
+	paste_button.disabled = _material_clipboard.is_empty()
+	material_toolbar.add_child(paste_button)
+	_material_paste_button = paste_button
+
+	copy_button.pressed.connect(func() -> void:
+		var current_materials := object_editor.object_data.get_materials() if object_editor and object_editor.object_data else []
+		if _selected_index >= 0 and _selected_index < current_materials.size():
+			_material_clipboard = (current_materials[_selected_index] as Dictionary).duplicate(true)
+			paste_button.disabled = false
+	)
+	paste_button.pressed.connect(func() -> void:
+		if _selected_index < 0 or _material_clipboard.is_empty() or object_editor == null or object_editor.object_data == null:
+			return
+		_paste_material_settings(_selected_index, _material_clipboard)
+		_refresh_materials_left_list()
+		_rebuild_detail_dock()
+	)
 
 
-func build_detail(box: VBoxContainer) -> void:
-	_build_materials_inspector(box, true)
+func _list_items() -> Array:
+	return object_editor.object_data.get_materials() if object_editor and object_editor.object_data else []
+
+
+func _list_item_text(item, _index: int) -> String:
+	return "%02d  %s" % [int(item.get("index", 0)), String(item.get("shader", ""))]
+
+
+func _list_summary_text(count: int) -> String:
+	return "%d materials" % count
+
+
+func _list_node_name() -> StringName:
+	return &"MaterialsList"
+
+
+func _list_panel_node_name() -> StringName:
+	return &"MaterialListPanel"
 
 
 func refresh() -> void:
 	_refresh_materials_left_list()
 
 
-func _build_materials_inspector(host: Control, detail_only: bool = false) -> void:
-	var box: VBoxContainer
-	if detail_only:
-		box = host as VBoxContainer
-	else:
-		box = _make_inspector_box(host)
-	if box == null:
-		return
+func build_detail(box: VBoxContainer) -> void:
 	var materials := object_editor.object_data.get_materials() if object_editor and object_editor.object_data else []
 	var shader_catalog := _shader_catalog()
 
@@ -73,79 +111,11 @@ func _build_materials_inspector(host: Control, detail_only: bool = false) -> voi
 	detail_box.name = "MaterialDetailPanel"
 	detail_box.add_theme_constant_override("separation", 8)
 	detail_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-	if not detail_only:
-		var list_panel := VBoxContainer.new()
-		list_panel.name = "MaterialListPanel"
-		list_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		box.add_child(list_panel)
-
-		var summary := Label.new()
-		summary.name = "MaterialListSummary"
-		summary.theme_type_variation = &"Muted"
-		summary.text = "%d materials" % materials.size()
-		list_panel.add_child(summary)
-
-		var list := ItemList.new()
-		list.name = "MaterialsList"
-		list.custom_minimum_size = Vector2(0, 360)
-		list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		_refresh_materials_list(list, materials)
-		list_panel.add_child(list)
-		_materials_list = list
-
-		var material_toolbar := HBoxContainer.new()
-		material_toolbar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		list_panel.add_child(material_toolbar)
-
-		var copy_button := Button.new()
-		copy_button.name = "MaterialCopyButton"
-		copy_button.text = "Copy"
-		material_toolbar.add_child(copy_button)
-
-		var paste_button := Button.new()
-		paste_button.name = "MaterialPasteButton"
-		paste_button.text = "Paste"
-		paste_button.disabled = _material_clipboard.is_empty()
-		material_toolbar.add_child(paste_button)
-		_material_paste_button = paste_button
-
-		if materials.is_empty():
-			_material_selected_index = -1
-		else:
-			_material_selected_index = clampi(_material_selected_index, 0, materials.size() - 1)
-			list.select(_material_selected_index)
-
-		list.item_selected.connect(func(index: int) -> void:
-			_material_selected_index = index
-			_rebuild_detail_dock()
-		)
-		copy_button.pressed.connect(func() -> void:
-			var current_materials := object_editor.object_data.get_materials() if object_editor and object_editor.object_data else []
-			if _material_selected_index >= 0 and _material_selected_index < current_materials.size():
-				_material_clipboard = (current_materials[_material_selected_index] as Dictionary).duplicate(true)
-				paste_button.disabled = false
-		)
-		paste_button.pressed.connect(func() -> void:
-			if _material_selected_index < 0 or _material_clipboard.is_empty() or object_editor == null or object_editor.object_data == null:
-				return
-			_paste_material_settings(_material_selected_index, _material_clipboard)
-			_refresh_materials_left_list()
-			_rebuild_detail_dock()
-		)
-		return
-
 	box.add_child(detail_box)
 	if materials.is_empty():
-		var empty := Label.new()
-		empty.name = "MaterialDetailEmpty"
-		empty.theme_type_variation = &"Muted"
-		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		empty.text = "Select a material."
-		detail_box.add_child(empty)
+		_add_empty_state(detail_box, "Select a material.", "MaterialDetailEmpty")
 		return
-	_material_selected_index = clampi(_material_selected_index, 0, materials.size() - 1)
+	_selected_index = clampi(_selected_index, 0, materials.size() - 1)
 
 	var shader_label := Label.new()
 	shader_label.text = "Shader"
@@ -251,7 +221,7 @@ func _build_materials_inspector(host: Control, detail_only: bool = false) -> voi
 
 	var anim_frames_dialog = AnimFramesDialogScript.new()
 	anim_frames_dialog.name = "MaterialAnimFramesDialog"
-	host.add_child(anim_frames_dialog)
+	box.add_child(anim_frames_dialog)
 
 	var texture_dialog := FileDialog.new()
 	texture_dialog.name = "ObjectTextureFileDialog"
@@ -262,9 +232,9 @@ func _build_materials_inspector(host: Control, detail_only: bool = false) -> voi
 		"*.jpg,*.JPG,*.jpeg,*.JPEG,*.bmp,*.BMP ; Image fallbacks",
 	])
 	texture_dialog.min_size = Vector2i(760, 520)
-	host.add_child(texture_dialog)
+	box.add_child(texture_dialog)
 
-	var selected := {"index": _material_selected_index}
+	var selected := {"index": _selected_index}
 	var syncing := {"value": false}
 	var pending_slot := {"slot": -1}
 
@@ -337,7 +307,7 @@ func _build_materials_inspector(host: Control, detail_only: bool = false) -> voi
 		var current_index := int(selected.get("index", -1))
 		if current_index >= materials.size():
 			current_index = materials.size() - 1
-		_material_selected_index = current_index
+		_selected_index = current_index
 		selected["index"] = current_index
 		refresh_materials.call()
 		if current_index >= 0 and current_index < materials.size():
@@ -544,7 +514,7 @@ func _build_materials_inspector(host: Control, detail_only: bool = false) -> voi
 		resync_selected.call()
 	)
 	if not materials.is_empty():
-		sync_fields.call(_material_selected_index)
+		sync_fields.call(_selected_index)
 
 
 func _paste_material_settings(target_index: int, material: Dictionary) -> void:
@@ -575,27 +545,8 @@ func _paste_material_settings(target_index: int, material: Dictionary) -> void:
 		object_editor.object_data.set_material_texture_animation(target_index, material.get("animation", {}))
 
 
-func _refresh_materials_list(list: ItemList, materials: Array) -> void:
-	var selected_items := list.get_selected_items()
-	var selected_index := int(selected_items[0]) if selected_items.size() > 0 else -1
-	list.clear()
-	for material in materials:
-		list.add_item("%02d  %s" % [int(material.get("index", 0)), String(material.get("shader", ""))])
-	if selected_index >= 0 and selected_index < materials.size():
-		list.select(selected_index)
-
-
 func _refresh_materials_left_list() -> void:
-	if _materials_list == null or not is_instance_valid(_materials_list):
-		return
-	var materials := object_editor.object_data.get_materials() if object_editor and object_editor.object_data else []
-	if materials.is_empty():
-		_material_selected_index = -1
-	else:
-		_material_selected_index = clampi(_material_selected_index, 0, materials.size() - 1)
-	_refresh_materials_list(_materials_list, materials)
-	if _material_selected_index >= 0 and _material_selected_index < materials.size():
-		_materials_list.select(_material_selected_index)
+	_refresh_list()
 	if _material_paste_button != null and is_instance_valid(_material_paste_button):
 		_material_paste_button.disabled = _material_clipboard.is_empty()
 

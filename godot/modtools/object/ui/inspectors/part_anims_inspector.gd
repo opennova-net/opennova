@@ -1,4 +1,4 @@
-extends "res://modtools/object/ui/inspectors/workflow_inspector.gd"
+extends ListDetailInspector
 
 ## Part Anims (PANM) workflow: a left list of part-animation entries for the
 ## selected LOD plus a right detail dock with rotation / scale / translation
@@ -231,19 +231,11 @@ func _build_part_anims_inspector(host: Control) -> void:
 
 func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 	var data: NovaObjectData = object_editor.object_data if object_editor else null
-	var heading := Label.new()
-	heading.theme_type_variation = &"Heading"
-	heading.text = "Part animation"
-	box.add_child(heading)
+	_add_section_heading(box, "Part animation")
 
 	var entries := _part_anim_entries()
 	if data == null or entries.is_empty() or _part_anim_selected_index < 0:
-		var empty := Label.new()
-		empty.name = "PartAnimDetailsEmpty"
-		empty.theme_type_variation = &"Muted"
-		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		empty.text = "Select or add a part animation."
-		box.add_child(empty)
+		_add_empty_state(box, "Select or add a part animation.", "PartAnimDetailsEmpty")
 		return
 
 	_part_anim_selected_index = clampi(_part_anim_selected_index, 0, entries.size() - 1)

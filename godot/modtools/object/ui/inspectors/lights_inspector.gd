@@ -1,4 +1,4 @@
-extends "res://modtools/object/ui/inspectors/workflow_inspector.gd"
+extends ListDetailInspector
 
 ## Lights workflow: a left list of object lights plus a right detail dock for
 ## the selected light's color, falloff, animation, and output flags.
@@ -8,75 +8,49 @@ const LIGHT_FLAG_DISABLE_CORONA := 0x01
 const LIGHT_FLAG_DISABLE_TERRAIN := 0x02
 const LIGHT_FLAG_DISABLE_OBJECTS := 0x04
 
-var _light_selected_index := 0
-var _lights_list: ItemList
+
+func _lights() -> Array:
+	return object_editor.object_data.get_lights() if object_editor and object_editor.object_data else []
 
 
-func build_main(host: Control) -> void:
-	var box := _make_inspector_box(host)
-	var lights := object_editor.object_data.get_lights() if object_editor and object_editor.object_data else []
-
-	var list_panel := VBoxContainer.new()
-	list_panel.name = "LightListPanel"
-	list_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(list_panel)
-
-	var summary := Label.new()
-	summary.name = "LightListSummary"
-	summary.theme_type_variation = &"Muted"
-	summary.text = "%d lights" % lights.size()
-	list_panel.add_child(summary)
-
-	var list := ItemList.new()
-	list.name = "ObjectLightsList"
-	list.custom_minimum_size = Vector2(0, 360)
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_refresh_lights_list(list, lights)
-	list_panel.add_child(list)
-	_lights_list = list
-
-	if lights.is_empty():
-		_light_selected_index = -1
-	else:
-		_light_selected_index = clampi(_light_selected_index, 0, lights.size() - 1)
-		list.select(_light_selected_index)
-
-	list.item_selected.connect(func(index: int) -> void:
-		_light_selected_index = index
-		_rebuild_detail_dock()
-	)
+func _list_items() -> Array:
+	return _lights()
 
 
-func build_detail(box: VBoxContainer) -> void:
-	if box == null:
-		return
-	var lights := object_editor.object_data.get_lights() if object_editor and object_editor.object_data else []
+func _list_item_text(item, _index: int) -> String:
+	return "%02d  part %d" % [int(item.get("index", 0)), int(item.get("part_index", 0))]
 
-	var detail_box := VBoxContainer.new()
-	detail_box.name = "LightDetailPanel"
-	detail_box.add_theme_constant_override("separation", 8)
-	detail_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(detail_box)
 
-	if lights.is_empty():
-		var empty := Label.new()
-		empty.name = "LightDetailEmpty"
-		empty.theme_type_variation = &"Muted"
-		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		empty.text = "Select a light."
-		detail_box.add_child(empty)
-		return
+func _list_summary_text(count: int) -> String:
+	return "%d lights" % count
 
-	_light_selected_index = clampi(_light_selected_index, 0, lights.size() - 1)
 
-	var selected := {"index": _light_selected_index}
+func _list_node_name() -> StringName:
+	return &"ObjectLightsList"
+
+
+func _list_panel_node_name() -> StringName:
+	return &"LightListPanel"
+
+
+func _detail_panel_node_name() -> StringName:
+	return &"LightDetailPanel"
+
+
+func _empty_detail_text() -> String:
+	return "Select a light."
+
+
+func _empty_detail_node_name() -> StringName:
+	return &"LightDetailEmpty"
+
+
+func _build_detail_fields(detail_box: VBoxContainer, _index: int) -> void:
+	var lights := _lights()
+	var selected := {"index": _selected_index}
 	var syncing := {"value": false}
 
-	var color_heading := Label.new()
-	color_heading.theme_type_variation = &"Heading"
-	color_heading.text = "Color"
-	detail_box.add_child(color_heading)
+	_add_section_heading(detail_box, "Color")
 
 	var start_color_row := _add_detail_field(detail_box, "Start color")
 	var start_color := ColorPickerButton.new()
@@ -92,28 +66,19 @@ func build_detail(box: VBoxContainer) -> void:
 	end_color.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	end_color_row.add_child(end_color)
 
-	var falloff_heading := Label.new()
-	falloff_heading.theme_type_variation = &"Heading"
-	falloff_heading.text = "Falloff"
-	detail_box.add_child(falloff_heading)
+	_add_section_heading(detail_box, "Falloff")
 
 	var attenuation_start := _add_detail_spin_row(detail_box, "LightAttenuationStart", "Atten start", 0, 100000, 0.1)
 	var attenuation_end := _add_detail_spin_row(detail_box, "LightAttenuationEnd", "Atten end", 0, 100000, 0.1)
 	var falloff := _add_detail_spin_row(detail_box, "LightFalloff", "Falloff", 0, 255, 1)
 
-	var animation_heading := Label.new()
-	animation_heading.theme_type_variation = &"Heading"
-	animation_heading.text = "Animation"
-	detail_box.add_child(animation_heading)
+	_add_section_heading(detail_box, "Animation")
 
 	var style := _add_detail_spin_row(detail_box, "LightStyle", "Style", 0, 255, 1)
 	var phase := _add_detail_spin_row(detail_box, "LightPhase", "Phase", 0, 255, 1)
 	var rate := _add_detail_spin_row(detail_box, "LightRate", "Rate", 0, ObjectEditorWorkspace.U16_VALUE_MAX, 1)
 
-	var output_heading := Label.new()
-	output_heading.theme_type_variation = &"Heading"
-	output_heading.text = "Output"
-	detail_box.add_child(output_heading)
+	_add_section_heading(detail_box, "Output")
 
 	var positive_flags_row := VBoxContainer.new()
 	positive_flags_row.name = "LightPositiveFlags"
@@ -161,12 +126,12 @@ func build_detail(box: VBoxContainer) -> void:
 	var set_field := func(key: String, value: Variant) -> void:
 		if syncing["value"] or selected["index"] < 0:
 			return
-		_light_selected_index = int(selected["index"])
+		_selected_index = int(selected["index"])
 		if object_editor.object_data.has_method("set_light_field"):
 			object_editor.object_data.set_light_field(selected["index"], key, value)
 		elif key == "color_start" or key == "color_end":
 			object_editor.object_data.set_light_colors(selected["index"], start_color.color, end_color.color)
-		_refresh_lights_left_list()
+		_refresh_list()
 
 	var sync := func(index: int) -> void:
 		syncing["value"] = true
@@ -208,28 +173,4 @@ func build_detail(box: VBoxContainer) -> void:
 	disable_corona.toggled.connect(func(value: bool) -> void: set_field.call("disable_corona", value))
 	disable_terrain.toggled.connect(func(value: bool) -> void: set_field.call("disable_lightterrain", value))
 	disable_objects.toggled.connect(func(value: bool) -> void: set_field.call("disable_lightobjects", value))
-	if not lights.is_empty():
-		sync.call(_light_selected_index)
-
-
-func refresh() -> void:
-	_refresh_lights_left_list()
-
-
-func _refresh_lights_list(list: ItemList, lights: Array) -> void:
-	list.clear()
-	for light in lights:
-		list.add_item("%02d  part %d" % [int(light.get("index", 0)), int(light.get("part_index", 0))])
-
-
-func _refresh_lights_left_list() -> void:
-	if _lights_list == null or not is_instance_valid(_lights_list):
-		return
-	var lights := object_editor.object_data.get_lights() if object_editor and object_editor.object_data else []
-	if lights.is_empty():
-		_light_selected_index = -1
-	else:
-		_light_selected_index = clampi(_light_selected_index, 0, lights.size() - 1)
-	_refresh_lights_list(_lights_list, lights)
-	if _light_selected_index >= 0 and _light_selected_index < lights.size():
-		_lights_list.select(_light_selected_index)
+	sync.call(_selected_index)

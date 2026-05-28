@@ -1,3 +1,4 @@
+class_name WorkflowInspector
 extends RefCounted
 
 ## Base class for the object editor's per-workflow inspectors.
@@ -108,3 +109,21 @@ func _build_channel_card(parent: VBoxContainer, node_name: String) -> VBoxContai
 
 func _make_inspector_box(host: Control) -> VBoxContainer:
 	return ObjectUiHelpers.make_inspector_box(host)
+
+
+# --- Capability hooks (read by the workspace coordinator / registry) ---
+func has_detail() -> bool:
+	return false
+
+
+# --- Label helpers (delegate to ObjectUiHelpers) ---
+func _add_section_heading(parent: Control, text: String) -> Label:
+	return ObjectUiHelpers.add_section_heading(parent, text)
+
+
+func _add_muted_label(parent: Control, text: String) -> Label:
+	return ObjectUiHelpers.add_muted_label(parent, text)
+
+
+func _add_empty_state(parent: Control, text: String, node_name := "") -> Label:
+	return ObjectUiHelpers.add_empty_state(parent, text, node_name)

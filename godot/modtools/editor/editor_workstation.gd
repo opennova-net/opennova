@@ -15,7 +15,9 @@ const RESOURCE_STATE_SECTION := "resources"
 const RESOURCE_DIR_KEY := "resource_dir"
 const RESOURCE_RECURSIVE_KEY := "resource_recursive"
 
-const SELECTABLE_WORKSPACES := [Workspace.TERRAIN, Workspace.OBJECT, Workspace.MISSION]
+# Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
+# shows the non-popup ones in order. The enum below stays only as stable id
+# constants and for the two genuine per-workspace branches (env popup, tile gizmo).
 
 enum PromptKind { NONE, UNSAVED, EXPORT, CDEP }
 
@@ -84,6 +86,7 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 var editor: Node
 var _active_workspace_id: int = Workspace.TERRAIN
 var _workspaces: Dictionary = {}
+var _workspace_defs_cache: Array = []
 var _environment_workspace: EnvironmentEditorWorkspace
 var _workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
@@ -155,18 +158,10 @@ func _exit_tree() -> void:
 func set_editor(value: Node) -> void:
 	editor = value
 	_ensure_workspaces()
-	var terrain_workspace := _get_workspace(Workspace.TERRAIN) as TerrainEditorWorkspace
-	if terrain_workspace != null:
-		terrain_workspace.set_terrain_editor(value)
-	var mission_workspace := _get_workspace(Workspace.MISSION) as MissionEditorWorkspace
-	if mission_workspace != null:
-		mission_workspace.set_terrain_editor(value)
-	var environment_editor: Variant = value.get_environment_editor() if value != null and value.has_method("get_environment_editor") else null
+	for workspace in _workspaces.values():
+		(workspace as EditorWorkspace).bind_to_editor(value)
 	if _environment_workspace != null:
-		_environment_workspace.set_environment_editor(environment_editor)
-	var object_workspace := _get_workspace(Workspace.OBJECT)
-	if object_workspace != null and object_workspace.has_method("set_environment_editor"):
-		object_workspace.set_environment_editor(environment_editor)
+		_environment_workspace.bind_to_editor(value)
 	_reset_environment_popup_content()
 	_sync_camera_popup_editor()
 	_remount_active_workspace_viewport()
@@ -200,36 +195,46 @@ func _process(_delta: float) -> void:
 	_refresh_tile_gizmo()
 
 
+func _workspace_defs() -> Array:
+	return [
+		WorkspaceDef.make(Workspace.TERRAIN, TerrainWorkspaceAdapter),
+		WorkspaceDef.make(Workspace.OBJECT, ObjectWorkspaceAdapter),
+		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter),
+		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true),
+	]
+
+
 func _ensure_workspaces() -> void:
-	if _workspaces.is_empty():
-		_workspaces[Workspace.TERRAIN] = TerrainWorkspaceAdapter.new(editor)
-		_workspaces[Workspace.OBJECT] = ObjectWorkspaceAdapter.new()
-		_workspaces[Workspace.MISSION] = MissionWorkspaceAdapter.new(editor)
-	var environment_editor: Variant = editor.get_environment_editor() if editor != null and editor.has_method("get_environment_editor") else null
-	if _environment_workspace == null:
-		_environment_workspace = EnvironmentWorkspaceAdapter.new(environment_editor)
-	for workspace in _workspaces.values():
-		(workspace as EditorWorkspace).set_editor_shell(self)
-	var object_workspace := _get_workspace(Workspace.OBJECT)
-	if object_workspace != null and object_workspace.has_method("set_environment_editor"):
-		object_workspace.set_environment_editor(environment_editor)
-	if _environment_workspace != null:
-		_environment_workspace.set_editor_shell(self)
+	if _workspace_defs_cache.is_empty():
+		_workspace_defs_cache = _workspace_defs()
+	for def_v in _workspace_defs_cache:
+		var def := def_v as WorkspaceDef
+		if def.popup:
+			if _environment_workspace == null:
+				_environment_workspace = def.adapter_script.new()
+				_environment_workspace.set_editor_shell(self)
+		elif not _workspaces.has(def.id):
+			var workspace: EditorWorkspace = def.adapter_script.new()
+			workspace.set_editor_shell(self)
+			_workspaces[def.id] = workspace
 
 
 func _build_workspace_rail() -> void:
-	for workspace_id in SELECTABLE_WORKSPACES:
-		var workspace := _get_workspace(workspace_id)
+	for def_v in _workspace_defs_cache:
+		var def := def_v as WorkspaceDef
+		if def.popup:
+			continue
+		var workspace := _get_workspace(def.id)
 		var btn := Button.new()
 		btn.text = workspace.get_workspace_label() if workspace != null else "Workspace"
 		btn.toggle_mode = true
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.custom_minimum_size = Vector2(0, 36)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.tooltip_text = _workspace_tooltip(workspace_id)
-		btn.pressed.connect(_on_workspace_pressed.bind(workspace_id))
+		btn.tooltip_text = workspace.get_workspace_tooltip() if workspace != null else ""
+		btn.pressed.connect(_on_workspace_pressed.bind(def.id))
 		_workspace_rail.add_child(btn)
-		_workspace_buttons[workspace_id] = btn
+		_workspace_buttons[def.id] = btn
 	_refresh_workspace_buttons()
 
 
@@ -325,20 +330,6 @@ func _refresh_action_buttons_state(workspace: EditorWorkspace, buttons: Dictiona
 				btn.disabled = busy or workspace == null or not workspace.can_save_as()
 			WorkspaceAction.EXPORT:
 				btn.disabled = busy or workspace == null or not workspace.can_export()
-
-
-func _workspace_tooltip(workspace_id: int) -> String:
-	match workspace_id:
-		Workspace.TERRAIN:
-			return "Edit terrain sculpting, paint, foliage, tiles, and layout."
-		Workspace.ENVIRONMENT:
-			return "Edit .env weather, lighting, atmosphere, and time of day."
-		Workspace.OBJECT:
-			return "Edit object projects, materials, LODs, lights, and 3DI export."
-		Workspace.MISSION:
-			return "Reserved for mission entities, objectives, and triggers."
-		_:
-			return ""
 
 
 func _on_workspace_pressed(workspace_id: int) -> void:
@@ -1315,7 +1306,7 @@ func _on_export_pressed(workspace: EditorWorkspace = null) -> void:
 	if workspace == null or not workspace.can_export():
 		return
 	var choose_export_dir := func(dir_path: String) -> void:
-		if workspace == _get_active_workspace() and _is_terrain_workspace_active():
+		if not workspace.get_export_flavors().is_empty():
 			_show_export_flavor_dialog(dir_path)
 		else:
 			var err: Error = workspace.begin_export(dir_path, 0)
@@ -1442,7 +1433,7 @@ func _refresh_status() -> void:
 		_status_tool_label.theme_type_variation = &""
 
 	_status_context_label.text = workspace.get_status_context()
-	if (_is_terrain_workspace_active() or _active_workspace_id == Workspace.MISSION) and editor and editor.camera:
+	if workspace != null and workspace.shows_camera_status() and editor and editor.camera:
 		var pos: Vector3 = editor.camera.global_position
 		_status_camera_label.text = "%.0f, %.0f, %.0f" % [pos.x, pos.y, pos.z]
 	else:

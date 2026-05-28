@@ -208,3 +208,27 @@ static func make_inspector_box(host: Control) -> VBoxContainer:
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(box)
 	return box
+
+
+static func add_section_heading(parent: Control, text: String) -> Label:
+	var label := Label.new()
+	label.theme_type_variation = &"Heading"
+	label.text = text
+	parent.add_child(label)
+	return label
+
+
+static func add_muted_label(parent: Control, text: String) -> Label:
+	var label := Label.new()
+	label.theme_type_variation = &"Muted"
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.text = text
+	parent.add_child(label)
+	return label
+
+
+static func add_empty_state(parent: Control, text: String, node_name := "") -> Label:
+	var label := add_muted_label(parent, text)
+	if not node_name.is_empty():
+		label.name = node_name
+	return label

@@ -1,4 +1,4 @@
-extends "res://modtools/object/ui/inspectors/workflow_inspector.gd"
+extends WorkflowInspector
 
 ## LODs workflow: bind ASE scenes to LODs and edit per-LOD threshold,
 ## attributes, and render function plus the project poly-collision LOD.

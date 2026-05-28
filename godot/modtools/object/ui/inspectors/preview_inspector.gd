@@ -1,4 +1,4 @@
-extends "res://modtools/object/ui/inspectors/workflow_inspector.gd"
+extends WorkflowInspector
 
 ## Preview workflow: object summary, playback controls, the export-chunk mask,
 ## and per-control-register sliders. The export mask itself is coordinator

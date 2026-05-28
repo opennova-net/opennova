@@ -1,0 +1,25 @@
+class_name InspectorDef
+extends Resource
+
+## Typed registry entry for one workflow inspector: a stable id, the UI label
+## and tooltip, and the inspector script to instantiate. Replaces the former
+## untyped WORKFLOW_DEFS dictionary table so a workspace declares its inspectors
+## as a list of these instead of dict literals with magic keys.
+
+@export var id: int = -1
+@export var label: String = ""
+@export var tooltip: String = ""
+@export var inspector_script: Script
+
+
+static func make(id_value: int, label_text: String, tooltip_text: String, script_ref: Script) -> InspectorDef:
+	var def := InspectorDef.new()
+	def.id = id_value
+	def.label = label_text
+	def.tooltip = tooltip_text
+	def.inspector_script = script_ref
+	return def
+
+
+func to_workflow_dict() -> Dictionary:
+	return {"id": id, "label": label, "tooltip": tooltip}

@@ -11,6 +11,29 @@ func set_editor_shell(value: Node) -> void:
 	editor_shell = value
 
 
+# --- Capability hooks: the shell reads these instead of switching on workspace
+# type. Defaults describe a plain main-rail workspace with no editor binding,
+# tooltip, camera readout, or export flavors. ---
+func bind_to_editor(_editor: Node) -> void:
+	pass
+
+
+func get_workspace_tooltip() -> String:
+	return ""
+
+
+func is_popup() -> bool:
+	return false
+
+
+func shows_camera_status() -> bool:
+	return false
+
+
+func get_export_flavors() -> Array:
+	return []
+
+
 func activate() -> void:
 	pass
 

@@ -1,5 +1,5 @@
 class_name TerrainEditorWorkspace
-extends "res://modtools/editor/editor_workspace.gd"
+extends EditorWorkspace
 
 const SculptInspectorScene = preload("res://modtools/terrain/ui/inspectors/sculpt_inspector.tscn")
 const PaintInspectorScene = preload("res://modtools/terrain/ui/inspectors/paint_inspector.tscn")
@@ -44,6 +44,25 @@ func set_terrain_editor(value: Node) -> void:
 	terrain_editor = value
 	if _viewport != null:
 		_viewport.set_terrain_editor(terrain_editor)
+
+
+func bind_to_editor(value: Node) -> void:
+	set_terrain_editor(value)
+
+
+func get_workspace_tooltip() -> String:
+	return "Edit terrain sculpting, paint, foliage, tiles, and layout."
+
+
+func shows_camera_status() -> bool:
+	return true
+
+
+func get_export_flavors() -> Array:
+	return [
+		{"id": ExportFlavor.BHD, "label": "BHD"},
+		{"id": ExportFlavor.DFX_JO, "label": "DFX / JO"},
+	]
 
 
 func activate() -> void:

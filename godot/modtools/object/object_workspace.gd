@@ -1,5 +1,5 @@
 class_name ObjectEditorWorkspace
-extends "res://modtools/editor/editor_workspace.gd"
+extends EditorWorkspace
 
 const ObjectEditorScript = preload("res://modtools/object/object_editor.gd")
 const ObjectPreviewScript = preload("res://modtools/object/object_preview.gd")
@@ -11,13 +11,7 @@ const PartAnimsInspectorScript = preload("res://modtools/object/ui/inspectors/pa
 
 enum Workflow { PREVIEW, MATERIALS, PARTS, LIGHTS, LODS }
 
-const WORKFLOW_DEFS := [
-	{"id": Workflow.PREVIEW, "label": "Preview", "tooltip": "View the object with fixed editor lighting."},
-	{"id": Workflow.MATERIALS, "label": "Materials", "tooltip": "Edit material shader tags, textures, and alpha."},
-	{"id": Workflow.PARTS, "label": "Part Anims", "tooltip": "Inspect and edit PANM part animation entries."},
-	{"id": Workflow.LIGHTS, "label": "Lights", "tooltip": "Inspect and edit object light colors."},
-	{"id": Workflow.LODS, "label": "LODs", "tooltip": "Bind ASE scenes and edit project LOD settings."},
-]
+# Workflow inspectors are declared as typed InspectorDef rows in _build_inspector_defs().
 
 const OED_UPDATE_NONE := 0
 const OED_UPDATE_MTRL := 1
@@ -33,11 +27,8 @@ var _active_workflow_id: int = Workflow.PREVIEW
 var _preview: ObjectPreview
 var _asset_dock_host: Control
 var _object_detail_dock: Control
-var _preview_inspector
-var _lods_inspector
-var _lights_inspector
-var _materials_inspector
-var _parts_inspector
+var _inspectors: Dictionary = {}
+var _inspector_defs: Array = []
 var _export_update_mask: int = OED_UPDATE_NONE
 
 
@@ -53,6 +44,15 @@ func set_environment_editor(value) -> void:
 	if environment_editor != null and environment_editor.has_signal("environment_changed") and not environment_editor.environment_changed.is_connected(_on_environment_editor_changed):
 		environment_editor.environment_changed.connect(_on_environment_editor_changed)
 	_apply_environment_to_preview()
+
+
+func bind_to_editor(value: Node) -> void:
+	var env = value.get_environment_editor() if value != null and value.has_method("get_environment_editor") else null
+	set_environment_editor(env)
+
+
+func get_workspace_tooltip() -> String:
+	return "Edit object projects, materials, LODs, lights, and 3DI export."
 
 
 func activate() -> void:
@@ -147,7 +147,12 @@ func sync_asset_dock() -> void:
 
 
 func get_workflows() -> Array:
-	return WORKFLOW_DEFS
+	if _inspector_defs.is_empty():
+		_inspector_defs = _build_inspector_defs()
+	var workflows: Array = []
+	for def in _inspector_defs:
+		workflows.append((def as InspectorDef).to_workflow_dict())
+	return workflows
 
 
 func get_active_workflow_id() -> int:
@@ -162,17 +167,9 @@ func activate_workflow(workflow_id: int) -> void:
 func build_workflow_inspector(workflow_id: int, host: Control) -> void:
 	_ensure_object_editor()
 	_active_workflow_id = workflow_id
-	match workflow_id:
-		Workflow.MATERIALS:
-			_materials_inspector.build_main(host)
-		Workflow.PARTS:
-			_parts_inspector.build_main(host)
-		Workflow.LIGHTS:
-			_lights_inspector.build_main(host)
-		Workflow.LODS:
-			_lods_inspector.build_main(host)
-		_:
-			_preview_inspector.build_main(host)
+	var inspector := _inspector_for(workflow_id)
+	if inspector != null:
+		inspector.build_main(host)
 	_sync_object_detail_dock_mount()
 
 
@@ -303,21 +300,36 @@ func get_export_dialog_dir() -> String:
 
 
 func build_inspector(host: Control) -> void:
-	_ensure_inspectors()
-	_preview_inspector.build_main(host)
+	var inspector := _inspector_for(Workflow.PREVIEW)
+	if inspector != null:
+		inspector.build_main(host)
+
+
+func _build_inspector_defs() -> Array:
+	return [
+		InspectorDef.make(Workflow.PREVIEW, "Preview", "View the object with fixed editor lighting.", PreviewInspectorScript),
+		InspectorDef.make(Workflow.MATERIALS, "Materials", "Edit material shader tags, textures, and alpha.", MaterialsInspectorScript),
+		InspectorDef.make(Workflow.PARTS, "Part Anims", "Inspect and edit PANM part animation entries.", PartAnimsInspectorScript),
+		InspectorDef.make(Workflow.LIGHTS, "Lights", "Inspect and edit object light colors.", LightsInspectorScript),
+		InspectorDef.make(Workflow.LODS, "LODs", "Bind ASE scenes and edit project LOD settings.", LodsInspectorScript),
+	]
 
 
 func _ensure_inspectors() -> void:
-	if _preview_inspector == null:
-		_preview_inspector = PreviewInspectorScript.new(self)
-	if _lods_inspector == null:
-		_lods_inspector = LodsInspectorScript.new(self)
-	if _lights_inspector == null:
-		_lights_inspector = LightsInspectorScript.new(self)
-	if _materials_inspector == null:
-		_materials_inspector = MaterialsInspectorScript.new(self)
-	if _parts_inspector == null:
-		_parts_inspector = PartAnimsInspectorScript.new(self)
+	if _inspector_defs.is_empty():
+		_inspector_defs = _build_inspector_defs()
+	for def in _inspector_defs:
+		var inspector_def := def as InspectorDef
+		if _inspectors.get(inspector_def.id) == null:
+			_inspectors[inspector_def.id] = inspector_def.inspector_script.new(self)
+
+
+func _inspector_for(workflow_id: int) -> WorkflowInspector:
+	_ensure_inspectors()
+	var inspector = _inspectors.get(workflow_id)
+	if inspector == null:
+		inspector = _inspectors.get(Workflow.PREVIEW)
+	return inspector
 
 
 func _ensure_object_editor() -> void:
@@ -339,13 +351,10 @@ func _sync_shell() -> void:
 		if _preview.object_data != object_editor.object_data:
 			_preview.set_object_data(object_editor.object_data)
 		_apply_environment_to_preview()
-	if _active_workflow_id == Workflow.PARTS:
-		_parts_inspector.refresh()
-	elif _active_workflow_id == Workflow.MATERIALS:
-		_materials_inspector.refresh()
-	elif _active_workflow_id == Workflow.LIGHTS:
-		_lights_inspector.refresh()
-	elif _active_workflow_id != Workflow.PARTS:
+	var active_inspector := _inspector_for(_active_workflow_id)
+	if active_inspector != null and active_inspector.has_detail():
+		active_inspector.refresh()
+	else:
 		_rebuild_object_detail_dock()
 	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
 		editor_shell.sync_from_editor_state()
@@ -385,7 +394,8 @@ func _get_oed_dirty_mask() -> int:
 
 
 func _active_workflow_uses_detail_dock() -> bool:
-	return _active_workflow_id == Workflow.MATERIALS or _active_workflow_id == Workflow.PARTS or _active_workflow_id == Workflow.LIGHTS
+	var inspector := _inspector_for(_active_workflow_id)
+	return inspector != null and inspector.has_detail()
 
 
 func _free_object_detail_dock() -> void:
@@ -453,10 +463,6 @@ func _rebuild_object_detail_dock() -> void:
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(box)
 
-	match _active_workflow_id:
-		Workflow.PARTS:
-			_parts_inspector.build_detail(box)
-		Workflow.MATERIALS:
-			_materials_inspector.build_detail(box)
-		Workflow.LIGHTS:
-			_lights_inspector.build_detail(box)
+	var inspector := _inspector_for(_active_workflow_id)
+	if inspector != null and inspector.has_detail():
+		inspector.build_detail(box)

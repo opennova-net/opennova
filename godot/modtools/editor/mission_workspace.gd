@@ -1,5 +1,5 @@
 class_name MissionEditorWorkspace
-extends "res://modtools/editor/editor_workspace.gd"
+extends EditorWorkspace
 
 const TerrainViewportScript = preload("res://modtools/terrain/terrain_viewport.gd")
 
@@ -15,6 +15,18 @@ func set_terrain_editor(value: Node) -> void:
 	terrain_editor = value
 	if _viewport != null:
 		_viewport.set_terrain_editor(terrain_editor)
+
+
+func bind_to_editor(value: Node) -> void:
+	set_terrain_editor(value)
+
+
+func get_workspace_tooltip() -> String:
+	return "Reserved for mission entities, objectives, and triggers."
+
+
+func shows_camera_status() -> bool:
+	return true
 
 
 func activate() -> void:
