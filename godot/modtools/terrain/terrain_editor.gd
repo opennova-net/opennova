@@ -2351,6 +2351,9 @@ func _sync_material_from_data() -> void:
 func _sync_sector_layout(reframe_camera: bool) -> void:
 	if not _data:
 		return
+	# The mesh forwards world->atlas coordinate queries to NovaTerrainData's C++
+	# kernel, so hand it the live data alongside the layout it draws.
+	terrain_mesh.set_terrain_data(_data)
 	terrain_mesh.set_sector_layout(
 		_data.get_sector_count(),
 		_data.get_sector_rows(),

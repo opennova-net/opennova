@@ -6,6 +6,7 @@
 
 #include <til/til_io.h>
 #include <terrain/cdep_constraint.h>
+#include <terrain/coords.h>
 #include <terrain/lighting.h>
 
 #include <godot_cpp/classes/image.hpp>
@@ -124,24 +125,40 @@ bool resolve_world_sample(const opennova::TrnConfig &trn,
                           float world_x,
                           float world_z,
                           TerrainWorldSample &out_sample) {
+	// Runtime world->source mapping (jodemo.exe Terrain_SampleHeightBilinear
+	// @0x5C6770 / Terrain_GetFoliageMapValue @0x5C65E0): & 0xF grid wrap, raw
+	// sector id, unclamped local offset. Delegates to the shared kernel so the
+	// editor brush paths (which add bounds-reject / id-clamp / local-clamp via
+	// coords_editor_options) and this sampler stay one implementation.
 	out_sample = TerrainWorldSample{};
-	out_sample.sector_sx = static_cast<int>(std::floor(world_x / 512.0f));
-	out_sample.sector_sz = static_cast<int>(std::floor(world_z / 512.0f));
+	opennova::terrain::SectorLayout layout;
+	layout.sector_grid = &trn.sector_grid[0][0];
+	layout.origin_x = trn.origin_x;
+	layout.origin_y = trn.origin_y;
+	const opennova::terrain::CoordsResult<float> r = opennova::terrain::coords_world_to_source<float>(
+	        layout, world_x, world_z, opennova::terrain::coords_runtime_options());
+	out_sample.sector_sx = r.sector_sx;
+	out_sample.sector_sz = r.sector_sz;
+	out_sample.sector_id = r.sector_id;
+	out_sample.source_x = r.source_x;
+	out_sample.source_z = r.source_z;
+	return r.valid;
+}
 
-	const int grid_x = out_sample.sector_sx - trn.origin_x;
-	const int grid_z = out_sample.sector_sz - trn.origin_y;
-	out_sample.sector_id = trn.sector_grid[grid_z & 0xF][grid_x & 0xF];
-	if (out_sample.sector_id <= 0) {
-		return false;
-	}
-
-	const float local_x = world_x - static_cast<float>(out_sample.sector_sx * 512);
-	const float local_z = world_z - static_cast<float>(out_sample.sector_sz * 512);
-	const float quadrant_x = (out_sample.sector_id == 3 || out_sample.sector_id == 4) ? 512.0f : 0.0f;
-	const float quadrant_z = (out_sample.sector_id == 2 || out_sample.sector_id == 4) ? 512.0f : 0.0f;
-	out_sample.source_x = quadrant_x + local_x;
-	out_sample.source_z = quadrant_z + local_z;
-	return true;
+// Builds the editor-mode sector layout from the GDScript-exposed members. The
+// authored extent is clamped to [1,16] to match EditorTerrainMesh.set_sector_layout
+// so the bounds-reject guard rejects exactly the cells the editor mesh does.
+// Caller must ensure grid has >= 256 entries.
+opennova::terrain::SectorLayout editor_layout_from(const godot::PackedInt32Array &grid,
+                                                   int origin_x, int origin_y,
+                                                   int sector_count, int sector_rows) {
+	opennova::terrain::SectorLayout layout;
+	layout.sector_grid = grid.ptr();
+	layout.origin_x = origin_x;
+	layout.origin_y = origin_y;
+	layout.sector_count = std::clamp(sector_count, 1, 16);
+	layout.sector_rows = std::clamp(sector_rows, 1, 16);
+	return layout;
 }
 
 } // namespace
@@ -188,6 +205,10 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_modulated_colormap_color_world", "world_x", "world_z", "light_color"),
 	                     &NovaTerrainData::get_modulated_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
+	ClassDB::bind_method(D_METHOD("world_to_source_coords", "world_x", "world_z"), &NovaTerrainData::world_to_source_coords);
+	ClassDB::bind_method(D_METHOD("world_to_cell_source_coords", "world_x", "world_z", "row", "col"),
+	                     &NovaTerrainData::world_to_cell_source_coords);
+	ClassDB::bind_method(D_METHOD("get_cell_atlas_rect", "row", "col"), &NovaTerrainData::get_cell_atlas_rect);
 	ClassDB::bind_method(D_METHOD("get_tile_count"), &NovaTerrainData::get_tile_count);
 	ClassDB::bind_method(D_METHOD("load_foliage_indices"), &NovaTerrainData::load_foliage_indices);
 	ClassDB::bind_method(D_METHOD("set_sector_grid", "value"), &NovaTerrainData::set_sector_grid);
@@ -1062,6 +1083,54 @@ Color NovaTerrainData::get_modulated_colormap_color_world(float world_x,
 	             static_cast<float>((modulated >> 8) & 0xFFu) / 255.0f,
 	             static_cast<float>(modulated & 0xFFu) / 255.0f,
 	             static_cast<float>((modulated >> 24) & 0xFFu) / 255.0f);
+}
+
+Vector2 NovaTerrainData::world_to_source_coords(double world_x, double world_z) const {
+	// Editor brush/eyedropper world->atlas mapping. Mirrors
+	// EditorTerrainMesh.world_to_source_coords: bounds-reject + clampi(id,0,4) +
+	// clampf(local, 0, 512-0.001), computed in double (GDScript float is 64-bit)
+	// then stored to a float32 Vector2 exactly as the GDScript original did.
+	// Returns the (-1,-1) sentinel for out-of-extent / empty cells.
+	if (sector_grid.size() < 256) {
+		return Vector2(-1.0f, -1.0f);
+	}
+	const opennova::terrain::SectorLayout layout =
+	        editor_layout_from(sector_grid, origin_x, origin_y, sector_count, sector_rows);
+	const opennova::terrain::CoordsResult<double> r = opennova::terrain::coords_world_to_source<double>(
+	        layout, world_x, world_z, opennova::terrain::coords_editor_options());
+	if (!r.valid) {
+		return Vector2(-1.0f, -1.0f);
+	}
+	return Vector2(static_cast<real_t>(r.source_x), static_cast<real_t>(r.source_z));
+}
+
+Vector2 NovaTerrainData::world_to_cell_source_coords(double world_x, double world_z, int row, int col) const {
+	// Explicit-cell variant with an UNCLAMPED local offset (the caller owns the
+	// cell choice). Mirrors EditorTerrainMesh.world_to_cell_source_coords; returns
+	// the (-1e9,-1e9) sentinel for an empty / out-of-extent cell.
+	if (sector_grid.size() < 256) {
+		return Vector2(-1e9f, -1e9f);
+	}
+	const opennova::terrain::SectorLayout layout =
+	        editor_layout_from(sector_grid, origin_x, origin_y, sector_count, sector_rows);
+	const opennova::terrain::CellCoordsResult<double> r =
+	        opennova::terrain::coords_world_to_cell_source<double>(layout, world_x, world_z, row, col);
+	if (!r.valid) {
+		return Vector2(-1e9f, -1e9f);
+	}
+	return Vector2(static_cast<real_t>(r.source_x), static_cast<real_t>(r.source_z));
+}
+
+Rect2i NovaTerrainData::get_cell_atlas_rect(int row, int col) const {
+	// 512x512 quadrant window into the 1024 atlas for a cell, or a zero rect for
+	// an empty / out-of-extent cell. Mirrors EditorTerrainMesh.get_cell_atlas_rect.
+	if (sector_grid.size() < 256) {
+		return Rect2i(0, 0, 0, 0);
+	}
+	const opennova::terrain::SectorLayout layout =
+	        editor_layout_from(sector_grid, origin_x, origin_y, sector_count, sector_rows);
+	const opennova::terrain::CoordsRect r = opennova::terrain::coords_cell_atlas_rect(layout, row, col);
+	return Rect2i(r.x, r.z, r.w, r.h);
 }
 
 int NovaTerrainData::get_tile_count() const {

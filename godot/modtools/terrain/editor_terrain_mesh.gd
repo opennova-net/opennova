@@ -17,6 +17,10 @@ var _origin_x: int = 0
 var _origin_y: int = 0
 var _sector_grid := PackedInt32Array()
 var _bounds := AABB()
+# Source-of-truth for world->atlas coordinate transforms. The math lives in C++
+# (NovaTerrainData / libs/terrain/coords.h); this node forwards to it so the
+# editor brush paths and the runtime samplers share one implementation.
+var _data: NovaTerrainData = null
 
 
 func _ready() -> void:
@@ -97,6 +101,10 @@ func set_sector_layout(sector_count: int, sector_rows: int, sector_grid: PackedI
 		_sector_grid[idx] = sector_grid[idx] if idx < sector_grid.size() else 0
 	_ensure_sector_instances(_sector_count * _sector_rows)
 	_update_sector_instances()
+
+
+func set_terrain_data(data: NovaTerrainData) -> void:
+	_data = data
 
 
 func _ensure_sector_instances(total: int) -> void:
@@ -184,18 +192,12 @@ func world_to_sector_cell(world_x: float, world_z: float) -> Vector2i:
 
 
 func world_to_source_coords(world_x: float, world_z: float) -> Vector2:
-	var cell := world_to_sector_cell(world_x, world_z)
-	if cell.x < 0:
+	# Forwards to the shared C++ kernel (editor-mode: bounds-reject, sector-id
+	# clamp, local clamp). Pre-load (no data) returns the (-1,-1) sentinel, which
+	# also matched the old all-empty placeholder grid.
+	if _data == null:
 		return Vector2(-1.0, -1.0)
-
-	var sector_id := get_sector_cell_value(cell.x, cell.y)
-	if sector_id <= 0:
-		return Vector2(-1.0, -1.0)
-
-	var cell_origin := get_sector_origin_world(cell.x, cell.y)
-	var local_x := clampf(world_x - cell_origin.x, 0.0, SECTOR_SIZE - 0.001)
-	var local_z := clampf(world_z - cell_origin.z, 0.0, SECTOR_SIZE - 0.001)
-	return _sector_source_offset(sector_id) + Vector2(local_x, local_z)
+	return _data.world_to_source_coords(world_x, world_z)
 
 
 func get_sector_origin_world(row: int, col: int) -> Vector3:
@@ -221,27 +223,17 @@ func sample_world_height(world_x: float, world_z: float) -> float:
 	return _sample_source_height(source.x, source.y)
 
 
-func _sector_source_offset(sector_id: int) -> Vector2:
-	var offset_x: float = 512.0 if sector_id == 3 or sector_id == 4 else 0.0
-	var offset_z: float = 512.0 if sector_id == 2 or sector_id == 4 else 0.0
-	return Vector2(offset_x, offset_z)
-
-
 func world_to_cell_source_coords(world_x: float, world_z: float, row: int, col: int) -> Vector2:
-	var sector_id := get_sector_cell_value(row, col)
-	if sector_id <= 0:
+	# Explicit-cell, unclamped-local variant. Forwards to the C++ kernel.
+	if _data == null:
 		return Vector2(-1e9, -1e9)
-	var cell_origin := get_sector_origin_world(row, col)
-	var offset := _sector_source_offset(sector_id)
-	return Vector2(offset.x + (world_x - cell_origin.x), offset.y + (world_z - cell_origin.z))
+	return _data.world_to_cell_source_coords(world_x, world_z, row, col)
 
 
 func get_cell_atlas_rect(row: int, col: int) -> Rect2i:
-	var sector_id := get_sector_cell_value(row, col)
-	if sector_id <= 0:
+	if _data == null:
 		return Rect2i(0, 0, 0, 0)
-	var offset := _sector_source_offset(sector_id)
-	return Rect2i(int(offset.x), int(offset.y), int(SECTOR_SIZE), int(SECTOR_SIZE))
+	return _data.get_cell_atlas_rect(row, col)
 
 
 func get_cells_overlapping_brush(world_x: float, world_z: float, radius_world: float) -> Array:

@@ -268,6 +268,15 @@ target_link_libraries(cdep_constraint_test PRIVATE opennova_terrain)
 target_include_directories(cdep_constraint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cdep_constraint COMMAND cdep_constraint_test)
 
+# Terrain world->source coordinate transform kernel (libs/terrain/coords).
+# Characterizes the runtime resolve_world_sample formula plus the editor-mode
+# guard divergences (bounds-reject, id-clamp, local-clamp) ported from
+# EditorTerrainMesh.world_to_source_coords / world_to_cell_source_coords.
+add_executable(coords_test trngen/coords_test.cpp)
+target_link_libraries(coords_test PRIVATE opennova_terrain)
+target_include_directories(coords_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME coords COMMAND coords_test)
+
 # Dvxi5 repro: exercises a post-clamp heightmap with block ranges at the
 # CDEP ceiling. Kept as a regression anchor for the fixed bake pipeline.
 add_executable(dvxi5_repro_test trngen/dvxi5_repro_test.cpp)

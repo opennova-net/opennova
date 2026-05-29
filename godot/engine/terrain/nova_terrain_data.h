@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 
 #include <cpt/cpt_io.h>
 #include <trn/trn_io.h>
@@ -204,6 +205,16 @@ public:
 	// Shared by runtime NovaFoliageDispatcher wiring and editor paint previews
 	// so the world->sector->source mapping lives in exactly one place.
 	int get_foliage_index_world(float world_x, float world_z) const;
+	// Editor world->atlas coordinate transforms (libs/terrain/coords.h). The
+	// editor-mode guards (bounds-reject, sector-id clamp to [0,4], local clamp to
+	// [0, 512-0.001]) reproduce EditorTerrainMesh's GDScript originals so the
+	// editor brush/eyedropper paths share the runtime sampler's implementation.
+	// world_to_source_coords returns Vector2(-1,-1) and world_to_cell_source_coords
+	// returns Vector2(-1e9,-1e9) for out-of-extent / empty cells (the sentinels the
+	// GDScript callers branch on); get_cell_atlas_rect returns a zero Rect2i.
+	Vector2 world_to_source_coords(double world_x, double world_z) const;
+	Vector2 world_to_cell_source_coords(double world_x, double world_z, int row, int col) const;
+	Rect2i get_cell_atlas_rect(int row, int col) const;
 	int get_tile_count() const;
 
 	// GDScript-facing accessors for foliage + sector grid
