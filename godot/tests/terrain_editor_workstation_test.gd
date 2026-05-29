@@ -16,6 +16,24 @@ var _saved_state_config := PackedByteArray()
 var _had_state_config := false
 
 
+# Minimal editor double for prompt routing tests: the workstation only needs the
+# three pending-action hooks, so this avoids set_editor()'s full workspace bind.
+class PromptEditorStub:
+	extends Node
+	var saved := false
+	var discarded := false
+	var cancelled := false
+
+	func confirm_pending_action_save() -> void:
+		saved = true
+
+	func confirm_pending_action_discard() -> void:
+		discarded = true
+
+	func cancel_pending_action() -> void:
+		cancelled = true
+
+
 func before_each() -> void:
 	_had_state_config = FileAccess.file_exists(STATE_CONFIG_PATH)
 	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
@@ -67,6 +85,19 @@ func _find_button_by_text(root: Node, text: String) -> Button:
 		return root as Button
 	for child in root.get_children():
 		var found := _find_button_by_text(child, text)
+		if found != null:
+			return found
+	return null
+
+
+# AcceptDialog/ConfirmationDialog keep their action buttons in an internal child
+# container, so a normal get_children() walk misses them; this variant includes
+# internal children for asserting custom dialog buttons (e.g. Discard).
+func _find_button_by_text_deep(root: Node, text: String) -> Button:
+	if root is Button and (root as Button).text == text:
+		return root as Button
+	for child in root.get_children(true):
+		var found := _find_button_by_text_deep(child, text)
 		if found != null:
 			return found
 	return null
@@ -632,55 +663,85 @@ func test_workstation_tracks_mode_from_editor_tool() -> void:
 	assert_eq(workstation._current_workflow_id, TerrainWorkspaceScript.Workflow.STAMP, "Workstation should switch to Tile mode when the editor tool becomes tile placement.")
 
 
-func test_prompt_unsaved_changes_updates_custom_copy() -> void:
+func test_unsaved_changes_opens_native_confirmation_dialog() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
 	workstation.prompt_unsaved_changes("quit")
 
-	var prompt_host: Control = workstation.get_node("%PromptHost")
-	var prompt_card: PanelContainer = workstation.get_node("%PromptCard")
-	var lead: Label = workstation.get_node("%PromptLead")
-	var info: Label = workstation.get_node("%PromptInfoLabel")
-	var info_panel: PanelContainer = workstation.get_node("%PromptInfoPanel")
-	var primary: Button = workstation.get_node("%PromptPrimaryButton")
-	var secondary: Button = workstation.get_node("%PromptSecondaryButton")
-	var tertiary: Button = workstation.get_node("%PromptTertiaryButton")
-	assert_true(prompt_host.visible, "Unsaved prompt should show the custom modal host.")
-	assert_true(prompt_card.visible, "Unsaved prompt should show the custom modal card.")
-	assert_eq(lead.text, "Save changes?", "Unsaved prompt should keep the lead short.")
-	assert_eq(info.text, "", "Unsaved prompt should no longer show a next-step callout.")
-	assert_false(info_panel.visible, "Unsaved prompt should hide the info panel when there is no extra copy.")
-	assert_eq(primary.text, "Save", "Unsaved prompt should keep save as the primary confirmation button.")
-	assert_eq(secondary.text, "Cancel", "Unsaved prompt should let the user stay in the editor explicitly.")
-	assert_eq(tertiary.text, "Discard", "Unsaved prompt should keep discard visible as a secondary destructive action.")
+	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Unsaved changes should open a native confirmation dialog.")
+	if dialog == null:
+		return
+	assert_true(dialog.visible, "Unsaved confirmation should be shown.")
+	assert_eq(dialog.dialog_text, "Save changes?", "Unsaved confirmation should ask the short question.")
+	assert_eq(dialog.get_ok_button().text, "Save", "Save should stay the primary confirmation.")
+	assert_eq(dialog.get_cancel_button().text, "Cancel", "Cancel should let the user keep editing.")
+	assert_not_null(_find_button_by_text_deep(dialog, "Discard"), "Discard should remain a destructive custom action.")
+	assert_null(workstation.get_node_or_null("%PromptHost"), "The hand-built prompt card should be gone.")
+	assert_eq(dialog.theme, workstation.theme, "The dialog should resolve the shell theme explicitly.")
 
 
-func test_export_flavor_dialog_updates_format_copy() -> void:
+func test_unsaved_dialog_cancel_keeps_editing() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var stub := PromptEditorStub.new()
+	autofree(stub)
+	workstation.editor = stub
+
+	workstation.prompt_unsaved_changes("quit")
+	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Unsaved changes should open a native confirmation dialog.")
+	if dialog == null:
+		return
+	dialog.canceled.emit()
+
+	assert_true(stub.cancelled, "Cancel/Escape should cancel the pending action (keep editing).")
+	assert_false(stub.discarded, "Cancel should not discard.")
+	assert_false(stub.saved, "Cancel should not save.")
+
+
+func test_unsaved_dialog_confirm_saves_and_discard_action_discards() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var stub := PromptEditorStub.new()
+	autofree(stub)
+	workstation.editor = stub
+
+	workstation.prompt_unsaved_changes("quit")
+	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Unsaved changes should open a native confirmation dialog.")
+	if dialog == null:
+		return
+
+	dialog.confirmed.emit()
+	assert_true(stub.saved, "Confirm should save the pending action.")
+	assert_false(stub.discarded, "Confirm should not discard.")
+
+	dialog.custom_action.emit(&"discard")
+	assert_true(stub.discarded, "The Discard custom action should discard the pending action.")
+
+
+func test_export_flavor_opens_native_dialog_with_format_toggles() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
 	workstation._show_export_flavor_dialog("C:/Exports/TestTerrain")
 
-	var prompt_host: Control = workstation.get_node("%PromptHost")
-	var prompt_card: PanelContainer = workstation.get_node("%PromptCard")
-	var lead: Label = workstation.get_node("%PromptLead")
-	var body: Label = workstation.get_node("%PromptBody")
-	var info: Label = workstation.get_node("%PromptInfoLabel")
-	var format_bhd: Button = workstation.get_node("%PromptFormatBHD")
-	var format_cdep: Button = workstation.get_node("%PromptFormatCDEP")
-	var primary: Button = workstation.get_node("%PromptPrimaryButton")
-	var secondary: Button = workstation.get_node("%PromptSecondaryButton")
-	assert_true(prompt_host.visible, "Export prompt should show the custom modal host.")
-	assert_true(prompt_card.visible, "Export prompt should show the custom modal card.")
-	assert_eq(lead.text, "Export", "Export prompt should keep the lead minimal.")
-	assert_eq(body.text, "", "Export prompt should not show extra body copy.")
-	assert_false(body.visible, "Export prompt should hide the body when there is no extra copy.")
-	assert_eq(info.text, "", "Export prompt should not show the folder path.")
-	assert_false(workstation.get_node("%PromptInfoPanel").visible, "Export prompt should not show a folder summary.")
-	assert_eq(format_bhd.text, "BHD", "Export choices should keep BHD simple.")
-	assert_eq(format_cdep.text, "JO/DFX", "Export choices should keep JO/DFX simple.")
-	assert_eq(primary.text, "Export", "Export prompt should keep Export as the primary action.")
-	assert_eq(secondary.text, "Cancel", "Export prompt should keep Cancel as the secondary action.")
-	assert_null(workstation.get_node_or_null("%PromptFormatLabel"), "Export prompt should no longer show a separate format label.")
+	var dialog = workstation.find_child("ExportFlavorDialog", true, false)
+	assert_not_null(dialog, "Export should open a native flavor dialog.")
+	if dialog == null:
+		return
+	assert_true(dialog.visible, "Export flavor dialog should be shown.")
+	assert_eq(dialog.get_ok_button().text, "Export", "Export should stay the primary action.")
+	assert_eq(dialog.get_cancel_button().text, "Cancel", "Cancel should stay the secondary action.")
+	var bhd := _find_button_by_text(dialog, "BHD")
+	var jodfx := _find_button_by_text(dialog, "JO/DFX")
+	assert_not_null(bhd, "Export should offer the BHD format.")
+	assert_not_null(jodfx, "Export should offer the JO/DFX format.")
+	if jodfx != null:
+		assert_true(jodfx.button_pressed, "JO/DFX should be the default export flavor.")
+	if bhd != null:
+		assert_false(bhd.button_pressed, "BHD should not be selected by default.")
+	assert_eq(dialog.get_flavor(), 1, "Default flavor should map to DFX_JO (1).")
+	assert_null(workstation.get_node_or_null("%PromptHost"), "The hand-built prompt card should be gone.")
+	assert_eq(dialog.theme, workstation.theme, "The dialog should resolve the shell theme explicitly.")
 
 
 func test_asset_dock_builds_preview_cards_for_shared_maps() -> void:
@@ -1021,19 +1082,27 @@ func test_corner_popovers_share_popover_panel_and_close_button() -> void:
 		assert_eq(close_button.focus_mode, Control.FOCUS_NONE, "%s should not steal focus." % close_name)
 
 
-func test_prompt_card_dismisses_on_escape() -> void:
+func test_cdep_violations_opens_native_dialog_and_flattens_on_confirm() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	workstation.prompt_unsaved_changes("quit")
+	var flattened := [false]
+	var fix := func() -> void:
+		flattened[0] = true
 
-	var prompt_host: Control = workstation.get_node("%PromptHost")
-	assert_true(prompt_host.visible, "Unsaved prompt should be visible before Escape.")
+	workstation.prompt_cdep_violations(3, fix)
 
-	var escape := InputEventKey.new()
-	escape.pressed = true
-	escape.keycode = KEY_ESCAPE
-	workstation._unhandled_input(escape)
+	var dialog := workstation.find_child("CdepFlattenDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "CDEP violations should open a native confirmation dialog.")
+	if dialog == null:
+		return
+	assert_true(dialog.visible, "CDEP confirmation should be shown.")
+	assert_eq(dialog.title, "Flatten before export?", "CDEP confirmation should ask whether to flatten.")
+	assert_string_contains(dialog.dialog_text, "3 areas exceed", "CDEP confirmation should report the violation count.")
+	assert_string_contains(dialog.dialog_text, "BHD exports are unaffected", "CDEP confirmation should note BHD is safe.")
+	assert_eq(dialog.get_ok_button().text, "Flatten automatically", "CDEP primary should flatten.")
+	assert_eq(dialog.get_cancel_button().text, "Leave as-is", "CDEP secondary should leave the terrain as-is.")
 
-	assert_false(prompt_host.visible, "Escape should dismiss the prompt the same way Cancel does, like the other dialogs.")
+	dialog.confirmed.emit()
+	assert_true(flattened[0], "Confirming CDEP should run the supplied fix callback.")
 
 
 func test_resource_browser_uses_theme_not_handcoded_styleboxes() -> void:

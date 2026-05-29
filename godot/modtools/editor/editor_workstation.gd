@@ -14,7 +14,6 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION }
 # shows the non-popup ones in order. The enum below stays only as stable id
 # constants and for the two genuine per-workspace branches (env popup, tile gizmo).
 
-enum PromptKind { NONE, UNSAVED, EXPORT, CDEP }
 
 enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 
@@ -65,20 +64,6 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _progress_message_label: Label = %ProgressMessageLabel
 @onready var _progress_bar: ProgressBar = %ProgressBar
 @onready var _progress_counts_label: Label = %ProgressCountsLabel
-@onready var _prompt_backdrop: ColorRect = %PromptBackdrop
-@onready var _prompt_host: CenterContainer = %PromptHost
-@onready var _prompt_card: PanelContainer = %PromptCard
-@onready var _prompt_eyebrow: Label = %PromptEyebrow
-@onready var _prompt_lead: Label = %PromptLead
-@onready var _prompt_body: Label = %PromptBody
-@onready var _prompt_info_panel: PanelContainer = %PromptInfoPanel
-@onready var _prompt_info_label: Label = %PromptInfoLabel
-@onready var _prompt_format_section: VBoxContainer = %PromptFormatSection
-@onready var _prompt_format_bhd: CheckButton = %PromptFormatBHD
-@onready var _prompt_format_cdep: CheckButton = %PromptFormatCDEP
-@onready var _prompt_secondary_button: Button = %PromptSecondaryButton
-@onready var _prompt_tertiary_button: Button = %PromptTertiaryButton
-@onready var _prompt_primary_button: Button = %PromptPrimaryButton
 
 var editor: Node
 var _active_workspace_id: int = Workspace.TERRAIN
@@ -101,10 +86,10 @@ var _message_until: float = 0.0
 var _export_ui_active: bool = false
 var _pending_export_dir: String = ""
 var _overlay_tween: Tween
-var _prompt_kind: int = PromptKind.NONE
-var _prompt_primary_action: Callable = Callable()
-var _prompt_secondary_action: Callable = Callable()
-var _prompt_tertiary_action: Callable = Callable()
+var _unsaved_dialog: ConfirmationDialog
+var _cdep_dialog: ConfirmationDialog
+var _export_dialog: ExportFlavorDialog
+var _cdep_fix_callback: Callable = Callable()
 var _resource_browser := EditorResourceBrowser.new()
 var _file_dialogs: FileDialogHelper
 
@@ -125,7 +110,6 @@ func _ready() -> void:
 	_wire_camera_popup()
 	_wire_environment_popup()
 	_wire_settings_popup()
-	_wire_prompts()
 	_wire_tile_gizmo()
 	_wire_splits()
 	_apply_window_min_size()
@@ -490,23 +474,6 @@ func _show_workspace_inspector(workspace: EditorWorkspace) -> void:
 	_inspector_host.add_child(label)
 
 
-func _wire_prompts() -> void:
-	_prompt_backdrop.visible = false
-	_prompt_host.visible = false
-	_prompt_card.visible = false
-	if not _prompt_format_bhd.toggled.is_connected(_on_prompt_format_bhd_toggled):
-		_prompt_format_bhd.toggled.connect(_on_prompt_format_bhd_toggled)
-	if not _prompt_format_cdep.toggled.is_connected(_on_prompt_format_cdep_toggled):
-		_prompt_format_cdep.toggled.connect(_on_prompt_format_cdep_toggled)
-	if not _prompt_secondary_button.pressed.is_connected(_on_prompt_secondary_pressed):
-		_prompt_secondary_button.pressed.connect(_on_prompt_secondary_pressed)
-	if not _prompt_tertiary_button.pressed.is_connected(_on_prompt_tertiary_pressed):
-		_prompt_tertiary_button.pressed.connect(_on_prompt_tertiary_pressed)
-	if not _prompt_primary_button.pressed.is_connected(_on_prompt_primary_pressed):
-		_prompt_primary_button.pressed.connect(_on_prompt_primary_pressed)
-	_reset_prompt_content()
-
-
 func _wire_tile_gizmo() -> void:
 	_tile_gizmo_done.pressed.connect(_on_tile_gizmo_done_pressed)
 	_tile_gizmo_rotate.pressed.connect(_on_tile_gizmo_rotate_pressed)
@@ -657,12 +624,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key := event as InputEventKey
 		if key.pressed and not key.is_echo() and key.keycode == KEY_ESCAPE:
-			if _prompt_host != null and _prompt_host.visible:
-				# Escape mirrors the prompt's secondary/cancel action so the modal
-				# dismisses like every other dialog and popover.
-				_on_prompt_secondary_pressed()
-				get_viewport().set_input_as_handled()
-				return
+			# The native confirm/export dialogs own their own Escape handling
+			# (they emit canceled and hide), so only the corner popovers need it
+			# routed here.
 			if _camera_popup != null and _camera_popup.visible:
 				_set_camera_popup_visible(false)
 				get_viewport().set_input_as_handled()
@@ -1272,19 +1236,8 @@ func _on_tile_gizmo_delete_pressed() -> void:
 
 
 func prompt_unsaved_changes(_action_name: String) -> void:
-	_set_prompt_state(
-		PromptKind.UNSAVED,
-		"",
-		"Save changes?",
-		"",
-		"",
-		false
-	)
-	_set_prompt_buttons("Cancel", "Discard", "Save")
-	_prompt_secondary_action = Callable(self, "_on_prompt_keep_editing")
-	_prompt_tertiary_action = Callable(self, "_on_prompt_discard_changes")
-	_prompt_primary_action = Callable(self, "_on_prompt_save_changes")
-	_set_prompt_visible(true)
+	_ensure_unsaved_dialog()
+	_unsaved_dialog.popup_centered()
 	show_status_message("Save or discard your changes to continue.", 6.0)
 
 
@@ -1301,20 +1254,10 @@ func prompt_save_directory_for_pending_action(_action_name: String) -> void:
 
 func prompt_cdep_violations(count: int, on_fix_callback: Callable) -> void:
 	var plural := "" if count == 1 else "s"
-	_set_prompt_state(
-		PromptKind.CDEP,
-		"",
-		"Flatten before export?",
-		"%d area%s exceed the JO/DFX limit." % [count, plural],
-		"BHD exports are unaffected.",
-		false
-	)
-	_set_prompt_buttons("Leave as-is", "", "Flatten automatically")
-	_prompt_secondary_action = Callable()
-	_prompt_primary_action = Callable(func() -> void:
-		on_fix_callback.call()
-	)
-	_set_prompt_visible(true)
+	_cdep_fix_callback = on_fix_callback
+	_ensure_cdep_dialog()
+	_cdep_dialog.dialog_text = "%d area%s exceed the JO/DFX limit.\nBHD exports are unaffected." % [count, plural]
+	_cdep_dialog.popup_centered()
 	show_status_message("%d area%s too steep for Joint Operations / DFX export." % [count, plural], 6.0)
 
 
@@ -1335,20 +1278,9 @@ func _on_prompt_keep_editing() -> void:
 
 func _show_export_flavor_dialog(dir_path: String) -> void:
 	_pending_export_dir = dir_path
-	_select_export_flavor(TerrainWorkspaceAdapter.ExportFlavor.DFX_JO)
-	_sync_export_prompt_copy()
-	_set_prompt_state(
-		PromptKind.EXPORT,
-		"",
-		"Export",
-		"",
-		"",
-		true
-	)
-	_set_prompt_buttons("Cancel", "", "Export")
-	_prompt_secondary_action = Callable(self, "_on_prompt_cancel")
-	_prompt_primary_action = Callable(self, "_on_prompt_export_confirmed")
-	_set_prompt_visible(true)
+	_ensure_export_dialog()
+	_export_dialog.select_flavor(ExportFlavorDialog.FLAVOR_DFX_JO)
+	_export_dialog.popup_centered()
 
 
 func _on_prompt_export_confirmed() -> void:
@@ -1357,117 +1289,81 @@ func _on_prompt_export_confirmed() -> void:
 	var workspace := _get_active_workspace()
 	if workspace == null:
 		return
-	var flavor := _current_export_flavor()
+	var flavor: int = _export_dialog.get_flavor() if _export_dialog != null else ExportFlavorDialog.FLAVOR_DFX_JO
 	var err: Error = workspace.begin_export(_pending_export_dir, flavor)
 	_pending_export_dir = ""
-	_set_prompt_visible(false)
 	if err != OK:
 		show_status_message("Export failed (error %d)" % err, 6.0)
 
 
 func _on_prompt_cancel() -> void:
 	_pending_export_dir = ""
-	_set_prompt_visible(false)
 
 
-func _on_prompt_primary_pressed() -> void:
-	if _prompt_primary_action.is_valid():
-		_prompt_primary_action.call()
-	_set_prompt_visible(false)
-
-
-func _on_prompt_secondary_pressed() -> void:
-	if _prompt_secondary_action.is_valid():
-		_prompt_secondary_action.call()
-	_set_prompt_visible(false)
-
-
-func _on_prompt_tertiary_pressed() -> void:
-	if _prompt_tertiary_action.is_valid():
-		_prompt_tertiary_action.call()
-	_set_prompt_visible(false)
-
-
-func _on_prompt_format_bhd_toggled(pressed: bool) -> void:
-	if not pressed:
+# The three confirms below are themed native dialogs (the editor theme styles
+# ConfirmationDialog/AcceptDialog/Window). Each is created once as a child of the
+# shell and given the shell theme explicitly, because an embedded Window does not
+# resolve the in-tree theme through the Control parent chain (same pattern as the
+# resource browser).
+func _ensure_unsaved_dialog() -> void:
+	if _unsaved_dialog != null and is_instance_valid(_unsaved_dialog):
 		return
-	_sync_export_prompt_copy()
+	_unsaved_dialog = ConfirmationDialog.new()
+	_unsaved_dialog.name = "UnsavedChangesDialog"
+	_unsaved_dialog.title = "Unsaved changes"
+	_unsaved_dialog.dialog_text = "Save changes?"
+	_unsaved_dialog.exclusive = true
+	if theme != null:
+		_unsaved_dialog.theme = theme
+	add_child(_unsaved_dialog)
+	_unsaved_dialog.get_ok_button().text = "Save"
+	_unsaved_dialog.get_cancel_button().text = "Cancel"
+	_unsaved_dialog.add_button("Discard", false, "discard")
+	# OK confirms (Save), Cancel/Escape keeps editing, the custom Discard button
+	# discards. Custom-action buttons do not auto-hide, so the handler hides it.
+	_unsaved_dialog.confirmed.connect(_on_prompt_save_changes)
+	_unsaved_dialog.canceled.connect(_on_prompt_keep_editing)
+	_unsaved_dialog.custom_action.connect(_on_unsaved_custom_action)
 
 
-func _on_prompt_format_cdep_toggled(pressed: bool) -> void:
-	if not pressed:
+func _on_unsaved_custom_action(action: StringName) -> void:
+	if action == &"discard":
+		if _unsaved_dialog != null:
+			_unsaved_dialog.hide()
+		_on_prompt_discard_changes()
+
+
+func _ensure_cdep_dialog() -> void:
+	if _cdep_dialog != null and is_instance_valid(_cdep_dialog):
 		return
-	_sync_export_prompt_copy()
+	_cdep_dialog = ConfirmationDialog.new()
+	_cdep_dialog.name = "CdepFlattenDialog"
+	_cdep_dialog.title = "Flatten before export?"
+	_cdep_dialog.exclusive = true
+	if theme != null:
+		_cdep_dialog.theme = theme
+	add_child(_cdep_dialog)
+	_cdep_dialog.get_ok_button().text = "Flatten automatically"
+	_cdep_dialog.get_cancel_button().text = "Leave as-is"
+	_cdep_dialog.confirmed.connect(_on_cdep_flatten_confirmed)
 
 
-func _sync_export_prompt_copy() -> void:
-	var flavor := _current_export_flavor()
-	_prompt_lead.text = "Export"
-	_prompt_body.text = ""
-	_prompt_info_label.text = ""
-	_prompt_format_section.visible = true
-	_prompt_info_panel.visible = false
-	_prompt_format_bhd.button_pressed = flavor == TerrainWorkspaceAdapter.ExportFlavor.BHD
-	_prompt_format_cdep.button_pressed = flavor == TerrainWorkspaceAdapter.ExportFlavor.DFX_JO
+func _on_cdep_flatten_confirmed() -> void:
+	if _cdep_fix_callback.is_valid():
+		_cdep_fix_callback.call()
 
 
-func _select_export_flavor(flavor: int) -> void:
-	_prompt_format_bhd.button_pressed = flavor == TerrainWorkspaceAdapter.ExportFlavor.BHD
-	_prompt_format_cdep.button_pressed = flavor == TerrainWorkspaceAdapter.ExportFlavor.DFX_JO
-
-
-func _current_export_flavor() -> int:
-	return TerrainWorkspaceAdapter.ExportFlavor.BHD if _prompt_format_bhd.button_pressed else TerrainWorkspaceAdapter.ExportFlavor.DFX_JO
-
-
-func _set_prompt_state(kind: int, eyebrow_text: String, lead_text: String, body_text: String, info_text: String, show_format_section: bool) -> void:
-	_prompt_kind = kind
-	_prompt_eyebrow.text = eyebrow_text
-	_prompt_eyebrow.visible = not eyebrow_text.strip_edges().is_empty()
-	_prompt_lead.text = lead_text
-	_prompt_body.text = body_text
-	_prompt_body.visible = not body_text.strip_edges().is_empty()
-	_prompt_info_label.text = info_text
-	_prompt_info_panel.visible = not info_text.strip_edges().is_empty()
-	_prompt_format_section.visible = show_format_section
-	_prompt_card.visible = true
-
-
-func _set_prompt_buttons(secondary_text: String, tertiary_text: String, primary_text: String) -> void:
-	_prompt_secondary_button.text = secondary_text
-	_prompt_secondary_button.visible = not secondary_text.is_empty()
-	_prompt_tertiary_button.text = tertiary_text
-	_prompt_tertiary_button.visible = not tertiary_text.is_empty()
-	_prompt_primary_button.text = primary_text
-	_prompt_primary_button.visible = not primary_text.is_empty()
-
-
-func _set_prompt_visible(active: bool) -> void:
-	_prompt_backdrop.visible = active
-	_prompt_host.visible = active
-	_prompt_card.visible = active
-	if active:
-		_prompt_primary_button.grab_focus()
-	else:
-		_prompt_kind = PromptKind.NONE
-		_prompt_primary_action = Callable()
-		_prompt_secondary_action = Callable()
-		_prompt_tertiary_action = Callable()
-		_reset_prompt_content()
-
-
-func _reset_prompt_content() -> void:
-	_prompt_eyebrow.text = "Prompt"
-	_prompt_eyebrow.visible = false
-	_prompt_lead.text = "Prompt title"
-	_prompt_body.text = "Prompt body"
-	_prompt_body.visible = false
-	_prompt_info_label.text = ""
-	_prompt_info_panel.visible = false
-	_prompt_format_section.visible = false
-	_prompt_secondary_button.visible = false
-	_prompt_tertiary_button.visible = false
-	_prompt_primary_button.visible = false
+func _ensure_export_dialog() -> void:
+	if _export_dialog != null and is_instance_valid(_export_dialog):
+		return
+	_export_dialog = ExportFlavorDialog.new()
+	_export_dialog.name = "ExportFlavorDialog"
+	_export_dialog.exclusive = true
+	if theme != null:
+		_export_dialog.theme = theme
+	add_child(_export_dialog)
+	_export_dialog.confirmed.connect(_on_prompt_export_confirmed)
+	_export_dialog.canceled.connect(_on_prompt_cancel)
 
 
 func on_export_started(_dir_path: String) -> void:
