@@ -1,0 +1,52 @@
+class_name FieldBinder
+extends RefCounted
+
+## Declarative inspector field binding. Each bind_*(control, getter, setter) pairs
+## a control with a getter(info_dict)->value (read from the model snapshot) and a
+## setter(value)->void (write to the model). The change signal is auto-wired and
+## guarded by an internal SyncGuard, so sync_from(info) can push fresh model
+## values into every control without echoing back through the setters. Replaces
+## the per-field "build control + guard.active check + connect lambda + manual
+## sync read-back" boilerplate. Setters route through the model (e.g.
+## NovaObjectData.set_light_field) unchanged.
+
+var _guard := SyncGuard.new()
+var _bindings: Array = []
+
+
+func bind_spin(spin: SpinBox, getter: Callable, setter: Callable) -> SpinBox:
+	_bindings.append(func(info): spin.value = getter.call(info))
+	spin.value_changed.connect(func(value: float):
+		if not _guard.active:
+			setter.call(value))
+	return spin
+
+
+func bind_checkbox(checkbox: CheckBox, getter: Callable, setter: Callable) -> CheckBox:
+	_bindings.append(func(info): checkbox.button_pressed = getter.call(info))
+	checkbox.toggled.connect(func(value: bool):
+		if not _guard.active:
+			setter.call(value))
+	return checkbox
+
+
+func bind_color(picker: ColorPickerButton, getter: Callable, setter: Callable) -> ColorPickerButton:
+	_bindings.append(func(info): picker.color = getter.call(info))
+	picker.color_changed.connect(func(value: Color):
+		if not _guard.active:
+			setter.call(value))
+	return picker
+
+
+func bind_line(line: LineEdit, getter: Callable, setter: Callable) -> LineEdit:
+	_bindings.append(func(info): line.text = getter.call(info))
+	line.text_submitted.connect(func(value: String):
+		if not _guard.active:
+			setter.call(value))
+	return line
+
+
+func sync_from(info: Dictionary) -> void:
+	_guard.run(func() -> void:
+		for apply in _bindings:
+			apply.call(info))
