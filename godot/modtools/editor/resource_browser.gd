@@ -81,20 +81,14 @@ func _ensure_dialog() -> void:
 	_dialog.exclusive = true
 	_host.add_child(_dialog)
 
-	var margin := MarginContainer.new()
-	margin.name = "ResourceBrowserMargin"
-	margin.add_theme_constant_override("margin_left", 14)
-	margin.add_theme_constant_override("margin_top", 12)
-	margin.add_theme_constant_override("margin_right", 14)
-	margin.add_theme_constant_override("margin_bottom", 12)
-	_dialog.add_child(margin)
-
+	# The dialog panel (editor_theme sbx_dialog_panel) owns the body inset, so the
+	# content VBox attaches directly to the dialog (no inner MarginContainer).
 	var box := VBoxContainer.new()
 	box.name = "ResourceBrowserBox"
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_theme_constant_override("separation", 10)
-	margin.add_child(box)
+	_dialog.add_child(box)
 
 	var header := HBoxContainer.new()
 	header.name = "ResourceBrowserHeader"
