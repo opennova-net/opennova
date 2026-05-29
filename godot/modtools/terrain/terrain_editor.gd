@@ -15,7 +15,6 @@ const DEFAULT_HEIGHT := 20.0
 const INVALID_HEIGHT := -1000000.0
 const INVALID_HIT := Vector3(INF, INF, INF)
 const EDITOR_MIN_WINDOW_SIZE := Vector2i(1366, 768)
-const TerrainEditorBrushes = preload("res://modtools/terrain/terrain_editor_brushes.gd")
 const TerrainEditorSlots = preload("res://modtools/terrain/terrain_editor_slots.gd")
 const TerrainEditorSurfacePaint = preload("res://modtools/terrain/terrain_editor_surface_paint.gd")
 const TerrainEditHistory = preload("res://modtools/terrain/terrain_edit_history.gd")
@@ -1629,7 +1628,7 @@ func _on_primary_start() -> void:
 	if current_tool == Tool.PAINT_COLORMAP and Input.is_key_pressed(KEY_ALT) and _hover_hit_valid:
 		var source := terrain_mesh.world_to_source_coords(_hover_hit.x, _hover_hit.z)
 		if source.x >= 0.0:
-			paint_color = TerrainEditorBrushes.sample_colormap(_colormap_image, source.x, source.y)
+			paint_color = _data.brush_sample_colormap(source.x, source.y)
 			_update_hud()
 		return
 	_brush_session.begin_brush_drag(_source_image_for_kind(_brush_session.history_kind_for_tool(current_tool)), Input.is_key_pressed(KEY_CTRL))
@@ -1778,7 +1777,7 @@ func _apply_brush_stroke(delta: float) -> void:
 			is_dirty = true
 			_mark_foliage_preview_dirty()
 		return
-	var result := _brush_session.apply_brush_stroke(delta, _hover_hit, _hover_hit_valid, terrain_mesh, _heightmap_image, _blendmap_image, _colormap_image, _data)
+	var result := _brush_session.apply_brush_stroke(delta, _hover_hit, _hover_hit_valid, terrain_mesh, _data)
 	if result["changed_heightmap"]:
 		terrain_mesh.set_heightmap(_heightmap_image)
 		_mark_tile_overlay_dirty()

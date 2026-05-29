@@ -284,6 +284,13 @@ target_link_libraries(brush_height_test PRIVATE opennova_terrain)
 target_include_directories(brush_height_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME brush_height COMMAND brush_height_test)
 
+# Colour/blend brush kernels (libs/terrain/brush) on RGBA8 buffers. Byte-parity
+# critical: pins Godot's FORMAT_RGBA8 quantization + the blend/lerp/clone math.
+add_executable(brush_color_test trngen/brush_color_test.cpp)
+target_link_libraries(brush_color_test PRIVATE opennova_terrain)
+target_include_directories(brush_color_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME brush_color COMMAND brush_color_test)
+
 # Dvxi5 repro: exercises a post-clamp heightmap with block ranges at the
 # CDEP ceiling. Kept as a regression anchor for the fixed bake pipeline.
 add_executable(dvxi5_repro_test trngen/dvxi5_repro_test.cpp)

@@ -53,13 +53,59 @@ static bool extract_heightmap_floats(const Ref<Image> &image, std::vector<float>
 	return true;
 }
 
-// Write CDEP-clamped floats back into the same Image object (FORMAT_RF) so the
-// editor's shared ref and get_depth_raw16() observe the change.
+// Write a mutated mip-0 buffer back into the SAME Image, PRESERVING its mipmap
+// state. The editor builds ImageTexture from these images and calls update(),
+// which rejects a mismatched mipmap flag; stripping mipmaps (set_data with
+// use_mipmaps=false on a mipmapped image) would freeze the live preview after
+// the first dab. When the image has mipmaps we overwrite only mip-0 and keep the
+// existing (now-stale) lower levels and the flag, exactly as the old set_pixel
+// path did; otherwise we write the flat mip-0 buffer.
+static void write_image_mip0_preserving_mipmaps(const Ref<Image> &image, int w, int h,
+                                                Image::Format format, const uint8_t *mip0, size_t mip0_bytes) {
+	if (image->has_mipmaps()) {
+		PackedByteArray pixels = image->get_data();
+		std::memcpy(pixels.ptrw(), mip0, mip0_bytes);
+		image->set_data(w, h, true, format, pixels);
+	} else {
+		PackedByteArray pixels;
+		pixels.resize(static_cast<int64_t>(mip0_bytes));
+		std::memcpy(pixels.ptrw(), mip0, mip0_bytes);
+		image->set_data(w, h, false, format, pixels);
+	}
+}
+
+// Write CDEP-clamped / brushed floats back into the same Image object (FORMAT_RF)
+// so the editor's shared ref and get_depth_raw16() observe the change.
 static void write_heightmap_floats(const Ref<Image> &image, const std::vector<float> &heights, int w, int h) {
-	PackedByteArray pixels;
-	pixels.resize(static_cast<int64_t>(w) * static_cast<int64_t>(h) * 4);
-	std::memcpy(pixels.ptrw(), heights.data(), heights.size() * sizeof(float));
-	image->set_data(w, h, false, Image::FORMAT_RF, pixels);
+	write_image_mip0_preserving_mipmaps(image, w, h, Image::FORMAT_RF,
+	                                    reinterpret_cast<const uint8_t *>(heights.data()),
+	                                    heights.size() * sizeof(float));
+}
+
+// RGBA8 byte buffer round-trip for the colour/blend brushes. The editable
+// colormap/blendmap are always FORMAT_RGBA8 (created via _create_color_image,
+// loaded via normalize_image), so the brush kernels read/write raw bytes.
+static bool extract_rgba8(const Ref<Image> &image, std::vector<uint8_t> &out, int &out_w, int &out_h) {
+	if (image.is_null() || image->get_format() != Image::FORMAT_RGBA8) {
+		return false;
+	}
+	out_w = image->get_width();
+	out_h = image->get_height();
+	const int64_t count = static_cast<int64_t>(out_w) * static_cast<int64_t>(out_h);
+	if (count <= 0) {
+		return false;
+	}
+	const PackedByteArray pixels = image->get_data();
+	if (pixels.size() < count * 4) {
+		return false;
+	}
+	out.resize(static_cast<size_t>(count) * 4);
+	std::memcpy(out.data(), pixels.ptr(), out.size());
+	return true;
+}
+
+static void write_rgba8(const Ref<Image> &image, const std::vector<uint8_t> &bytes, int w, int h) {
+	write_image_mip0_preserving_mipmaps(image, w, h, Image::FORMAT_RGBA8, bytes.data(), bytes.size());
 }
 
 static Ref<NovaTerrainFoliageDef> foliage_def_to_object(const opennova::FoliageDef &def) {
@@ -207,6 +253,14 @@ void NovaTerrainData::_bind_methods() {
 	                     &NovaTerrainData::brush_flatten);
 	ClassDB::bind_method(D_METHOD("brush_sample_flatten_target", "world_x", "world_z"),
 	                     &NovaTerrainData::brush_sample_flatten_target);
+	ClassDB::bind_method(D_METHOD("brush_blend_paint", "channel", "cx", "cz", "radius", "strength", "hardness", "clip"),
+	                     &NovaTerrainData::brush_blend_paint);
+	ClassDB::bind_method(D_METHOD("brush_colormap_paint", "color", "cx", "cz", "radius", "strength", "hardness", "clip"),
+	                     &NovaTerrainData::brush_colormap_paint);
+	ClassDB::bind_method(D_METHOD("brush_colormap_clone", "source", "src_cx", "src_cy", "dst_cx", "dst_cy", "radius", "strength", "hardness", "clip"),
+	                     &NovaTerrainData::brush_colormap_clone);
+	ClassDB::bind_method(D_METHOD("brush_sample_colormap", "world_x", "world_z"),
+	                     &NovaTerrainData::brush_sample_colormap);
 	ClassDB::bind_method(D_METHOD("get_height", "world_pos"), &NovaTerrainData::get_height);
 	ClassDB::bind_method(D_METHOD("get_height_world", "world_pos"), &NovaTerrainData::get_height_world);
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &NovaTerrainData::get_height_world_bilinear);
@@ -1024,6 +1078,73 @@ double NovaTerrainData::brush_sample_flatten_target(double world_x, double world
 	const int sx = std::clamp(static_cast<int>(world_x), 0, img_w - 1);
 	const int sz = std::clamp(static_cast<int>(world_z), 0, img_h - 1);
 	return static_cast<double>(heightmap_image->get_pixel(sx, sz).r);
+}
+
+// Colour / blend brushes (libs/terrain/brush.h). blend paints the editable
+// detail-blend buffer; colormap paint/clone the editable colour buffer. Each
+// pulls the RGBA8 bytes once, mutates the dab via the byte-parity kernel, and
+// writes back to the SAME Image (only when a pixel was touched).
+void NovaTerrainData::brush_blend_paint(int channel, int cx, int cz, int radius, double strength,
+                                        double hardness, const Rect2i &p_clip) {
+	std::vector<uint8_t> bytes;
+	int w = 0, h = 0;
+	if (!extract_rgba8(blendmap_image, bytes, w, h)) {
+		return;
+	}
+	const opennova::terrain::BrushRect clip{p_clip.position.x, p_clip.position.y, p_clip.size.x, p_clip.size.y};
+	if (opennova::terrain::brush_blend_paint(bytes.data(), w, h, channel, cx, cz, radius, strength, hardness, clip)) {
+		write_rgba8(blendmap_image, bytes, w, h);
+	}
+}
+
+void NovaTerrainData::brush_colormap_paint(const Color &color, int cx, int cz, int radius, double strength,
+                                           double hardness, const Rect2i &p_clip) {
+	std::vector<uint8_t> bytes;
+	int w = 0, h = 0;
+	if (!extract_rgba8(colormap_image, bytes, w, h)) {
+		return;
+	}
+	const opennova::terrain::BrushRect clip{p_clip.position.x, p_clip.position.y, p_clip.size.x, p_clip.size.y};
+	if (opennova::terrain::brush_colormap_paint(bytes.data(), w, h, color.r, color.g, color.b, color.a,
+	                                            cx, cz, radius, strength, hardness, clip)) {
+		write_rgba8(colormap_image, bytes, w, h);
+	}
+}
+
+void NovaTerrainData::brush_colormap_clone(const Ref<Image> &source, int src_cx, int src_cy, int dst_cx,
+                                           int dst_cy, int radius, double strength, double hardness,
+                                           const Rect2i &p_clip) {
+	std::vector<uint8_t> dst;
+	int w = 0, h = 0;
+	if (!extract_rgba8(colormap_image, dst, w, h)) {
+		return;
+	}
+	std::vector<uint8_t> src;
+	int sw = 0, sh = 0;
+	if (!extract_rgba8(source, src, sw, sh)) {
+		return;
+	}
+	const opennova::terrain::BrushRect clip{p_clip.position.x, p_clip.position.y, p_clip.size.x, p_clip.size.y};
+	if (opennova::terrain::brush_colormap_clone(dst.data(), w, h, src.data(), sw, sh, src_cx, src_cy,
+	                                            dst_cx, dst_cy, radius, strength, hardness, clip)) {
+		write_rgba8(colormap_image, dst, w, h);
+	}
+}
+
+Color NovaTerrainData::brush_sample_colormap(double world_x, double world_z) const {
+	// Mirrors TerrainEditorBrushes.sample_colormap: nearest-pixel get_pixel at
+	// int-truncated, edge-clamped coords (single pixel, so no full-buffer copy).
+	if (colormap_image.is_null() || colormap_image->get_format() != Image::FORMAT_RGBA8) {
+		return Color(0.0f, 0.0f, 0.0f, 1.0f);
+	}
+	const int img_w = colormap_image->get_width();
+	const int img_h = colormap_image->get_height();
+	if (img_w <= 0 || img_h <= 0) {
+		return Color(0.0f, 0.0f, 0.0f, 1.0f);
+	}
+	const int sx = std::clamp(static_cast<int>(world_x), 0, img_w - 1);
+	const int sz = std::clamp(static_cast<int>(world_z), 0, img_h - 1);
+	return colormap_image->get_pixel(sx, sz);
 }
 
 Ref<Image> NovaTerrainData::heightmap_image_from_raw16(const PackedByteArray &p_raw16) const {

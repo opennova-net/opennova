@@ -200,6 +200,12 @@ public:
 	void brush_smooth(int cx, int cz, int radius, double strength, double hardness, const Rect2i &p_clip);
 	void brush_flatten(int cx, int cz, int radius, double target_height, double strength, double hardness, const Rect2i &p_clip);
 	double brush_sample_flatten_target(double world_x, double world_z) const;
+	// Colour / blend brushes (byte-parity RGBA8). blend paints the editable
+	// detail-blend buffer; colormap paint/clone the editable colour buffer.
+	void brush_blend_paint(int channel, int cx, int cz, int radius, double strength, double hardness, const Rect2i &p_clip);
+	void brush_colormap_paint(const Color &color, int cx, int cz, int radius, double strength, double hardness, const Rect2i &p_clip);
+	void brush_colormap_clone(const Ref<Image> &source, int src_cx, int src_cy, int dst_cx, int dst_cy, int radius, double strength, double hardness, const Rect2i &p_clip);
+	Color brush_sample_colormap(double world_x, double world_z) const;
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;
