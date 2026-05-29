@@ -2,7 +2,21 @@
 
 Open-source toolchain and runtime for NovaLogic's Joint Operations (JO) and newer games. Extract and edit assets with the importer, Blender addon, and OpenNova Editor (ONED). Load them in a C++ reimplementation of the game engine, hosted in Godot.
 
-![OpenNova screenshot](https://i.imgur.com/MNtveOj.jpeg)
+## Screenshots
+
+<p align="center">
+  <a href="https://snaps.screensnapr.io/7d36e33">
+    <img src="https://snaps.screensnapr.io/7d36e33" alt="OpenNova editor overview" width="900">
+  </a>
+</p>
+
+| Editor overview | Terrain editing |
+|---|---|
+| [<img src="https://snaps.screensnapr.io/7d36e33" alt="OpenNova editor overview" width="420">](https://snaps.screensnapr.io/7d36e33) | [<img src="https://snaps.screensnapr.io/7d36e33" alt="Terrain editing in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) |
+| Object placement | Environment preview |
+| [<img src="https://snaps.screensnapr.io/7d36e33" alt="Object placement in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) | [<img src="https://snaps.screensnapr.io/7d36e33" alt="Environment preview in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) |
+| Asset import workflow | Runtime preview |
+| [<img src="https://snaps.screensnapr.io/7d36e33" alt="Asset import workflow in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) | [<img src="https://snaps.screensnapr.io/7d36e33" alt="Runtime preview in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) |
 
 ## Architecture
 
