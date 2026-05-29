@@ -136,10 +136,18 @@ func _populate_inspector() -> void:
 	if _document.resource == null:
 		meta_label.text = ""
 	else:
-		meta_label.text = "%d page(s)\n%d glyphs\nshadow %d" % [
-			_document.resource.get_page_count(),
-			_document.resource.get_glyph_count(),
-			_document.resource.get_shadow_offset(),
+		var res := _document.resource
+		var first := res.get_first_char()
+		var drawn := 0
+		for i in range(res.get_glyph_count()):
+			var r: Rect2i = res.get_glyph_rect(first + i)
+			if r.size.x > 0 and r.size.y > 0:
+				drawn += 1
+		meta_label.text = "%d page(s)\n%d glyphs (%d drawn)\nshadow %d" % [
+			res.get_page_count(),
+			res.get_glyph_count(),
+			drawn,
+			res.get_shadow_offset(),
 		]
 
 

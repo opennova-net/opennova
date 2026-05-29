@@ -64,6 +64,18 @@ func save_as(dir_path: String) -> Error:
 	return err
 
 
+func generate_from_font(font: Font, px_size: int, flags: int) -> Error:
+	var generated := FntRasterizer.rasterize(font, px_size, flags)
+	if generated == null:
+		return ERR_CANT_CREATE
+	_replace_resource(generated)
+	set_current_path("")
+	mark_dirty()
+	state_changed.emit()
+	resource_loaded.emit(resource)
+	return OK
+
+
 func _save_to(path: String) -> Error:
 	var err := ResourceSaver.save(resource, path)
 	if err == OK:
