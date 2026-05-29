@@ -103,27 +103,21 @@ var _prompt_kind: int = PromptKind.NONE
 var _prompt_primary_action: Callable = Callable()
 var _prompt_secondary_action: Callable = Callable()
 var _prompt_tertiary_action: Callable = Callable()
-var _resource_browser_dialog: ConfirmationDialog
-var _resource_browser_directory_label: Label
-var _resource_browser_settings_button: Button
-var _resource_browser_search: LineEdit
-var _resource_browser_hint: Label
-var _resource_browser_list: ItemList
-var _resource_browser_browse_button: Button
-var _resource_browser_open_button: Button
-var _resource_browser_kind: String = ""
-var _resource_browser_title: String = ""
-var _resource_browser_filters: PackedStringArray = PackedStringArray()
-var _resource_browser_current_dir: String = ""
-var _resource_browser_entries: Array = []
-var _resource_browser_visible_entries: Array = []
-var _resource_browser_open_action: Callable = Callable()
+var _resource_browser := EditorResourceBrowser.new()
 
 
 func _ready() -> void:
 	_ensure_workspaces()
 	_ensure_resource_index()
 	_load_resource_state()
+	_resource_browser.setup(
+		self,
+		_resource_library,
+		_open_file_dialog,
+		func() -> void: _set_settings_popup_visible(true),
+		_current_resource_path_for_browser,
+		func() -> void: _scan_resource_root(false)
+	)
 	_build_workspace_rail()
 	_wire_camera_popup()
 	_wire_environment_popup()
@@ -924,244 +918,20 @@ func _run_workspace_action(workspace: EditorWorkspace, action_id: int) -> void:
 
 
 func _open_resource_browser(workspace: EditorWorkspace, on_pick: Callable) -> void:
-	if workspace == null:
-		return
-	var kind := String(workspace.get_open_resource_kind()).strip_edges()
-	if kind.is_empty():
-		_open_file_dialog(
-			workspace.get_open_dialog_title(),
-			workspace.get_open_dialog_filters(),
-			on_pick,
-			workspace.get_open_dialog_dir()
-		)
-		return
-	_ensure_resource_browser_dialog()
-	_resource_browser_kind = kind
-	_resource_browser_title = workspace.get_open_dialog_title()
-	_resource_browser_filters = workspace.get_open_dialog_filters()
-	_resource_browser_current_dir = workspace.get_open_dialog_dir()
-	_resource_browser_open_action = on_pick
-	_resource_browser_search.text = ""
-	_resource_browser_dialog.title = _resource_browser_title
-	_refresh_resource_browser_entries()
-	_refresh_resource_browser()
-	_resource_browser_dialog.popup_centered(Vector2i(760, 520))
+	_resource_browser.open(workspace, on_pick)
 
 
-func _ensure_resource_browser_dialog() -> void:
-	if _resource_browser_dialog != null and is_instance_valid(_resource_browser_dialog):
-		return
-	_resource_browser_dialog = ConfirmationDialog.new()
-	_resource_browser_dialog.name = "ResourceBrowserDialog"
-	_resource_browser_dialog.min_size = Vector2i(760, 520)
-	_resource_browser_dialog.exclusive = true
-	add_child(_resource_browser_dialog)
-
-	var margin := MarginContainer.new()
-	margin.name = "ResourceBrowserMargin"
-	margin.add_theme_constant_override("margin_left", 14)
-	margin.add_theme_constant_override("margin_top", 12)
-	margin.add_theme_constant_override("margin_right", 14)
-	margin.add_theme_constant_override("margin_bottom", 12)
-	_resource_browser_dialog.add_child(margin)
-
-	var box := VBoxContainer.new()
-	box.name = "ResourceBrowserBox"
-	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	box.add_theme_constant_override("separation", 10)
-	margin.add_child(box)
-
-	var header := HBoxContainer.new()
-	header.name = "ResourceBrowserHeader"
-	header.add_theme_constant_override("separation", 8)
-	box.add_child(header)
-
-	_resource_browser_directory_label = Label.new()
-	_resource_browser_directory_label.name = "ResourceBrowserDirectoryLabel"
-	_resource_browser_directory_label.theme_type_variation = &"Muted"
-	_resource_browser_directory_label.clip_text = true
-	_resource_browser_directory_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(_resource_browser_directory_label)
-
-	_resource_browser_settings_button = Button.new()
-	_resource_browser_settings_button.name = "ResourceBrowserSettingsButton"
-	_resource_browser_settings_button.text = "Settings"
-	_resource_browser_settings_button.focus_mode = Control.FOCUS_NONE
-	_resource_browser_settings_button.pressed.connect(_on_resource_browser_settings_pressed)
-	header.add_child(_resource_browser_settings_button)
-
-	_resource_browser_search = LineEdit.new()
-	_resource_browser_search.name = "ResourceBrowserSearch"
-	_resource_browser_search.placeholder_text = "Search resources"
-	_resource_browser_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_resource_browser_search.text_changed.connect(func(_text: String) -> void:
-		_refresh_resource_browser()
-	)
-	box.add_child(_resource_browser_search)
-
-	_resource_browser_hint = Label.new()
-	_resource_browser_hint.name = "ResourceBrowserHint"
-	_resource_browser_hint.theme_type_variation = &"Muted"
-	_resource_browser_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	box.add_child(_resource_browser_hint)
-
-	_resource_browser_list = ItemList.new()
-	_resource_browser_list.name = "ResourceBrowserList"
-	_resource_browser_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_resource_browser_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_resource_browser_list.item_selected.connect(_on_resource_browser_item_selected)
-	_resource_browser_list.item_activated.connect(_on_resource_browser_item_activated)
-	box.add_child(_resource_browser_list)
-
-	_resource_browser_browse_button = _resource_browser_dialog.add_button("Browse Files...", false, "browse")
-	_resource_browser_browse_button.name = "ResourceBrowserBrowseFilesButton"
-	_resource_browser_dialog.custom_action.connect(_on_resource_browser_custom_action)
-	_resource_browser_dialog.confirmed.connect(_on_resource_browser_confirmed)
-	_resource_browser_open_button = _resource_browser_dialog.get_ok_button()
-	_resource_browser_open_button.text = "Open"
-	_resource_browser_dialog.get_cancel_button().text = "Cancel"
-
-
-func _refresh_resource_browser_entries() -> void:
-	_resource_browser_entries = []
-	var index := _resource_library.get_index()
-	if _resource_library.get_root_dir().is_empty():
-		index.clear()
-		return
-	if index.get_root_dir().is_empty():
-		_scan_resource_root(false)
-	if not index.get_root_dir().is_empty():
-		_resource_browser_entries = index.get_resource_files(_resource_browser_kind)
-
-
-func _refresh_resource_browser() -> void:
-	if _resource_browser_list == null:
-		return
-	_resource_browser_list.clear()
-	_resource_browser_visible_entries = []
-	var search := _resource_browser_search.text.strip_edges().to_lower() if _resource_browser_search != null else ""
-	for entry_value in _resource_browser_entries:
-		var entry := entry_value as Dictionary
-		var display_name := String(entry.get("display_name", ""))
-		var relative_path := String(entry.get("relative_path", ""))
-		var haystack := ("%s %s" % [display_name, relative_path]).to_lower()
-		if not search.is_empty() and not haystack.contains(search):
-			continue
-		_resource_browser_visible_entries.append(entry)
-		var text := "%s  %s" % [display_name, relative_path]
-		var current_path := _current_resource_path_for_browser()
-		if not current_path.is_empty() and _same_filesystem_path(String(entry.get("path", "")), current_path):
-			text += "  (open)"
-		var index := _resource_browser_list.add_item(text)
-		_resource_browser_list.set_item_metadata(index, entry)
-
-	var root := _resource_library.get_root_dir()
-	var has_root := not root.strip_edges().is_empty()
-	var has_entries := not _resource_browser_entries.is_empty()
-	var has_visible := not _resource_browser_visible_entries.is_empty()
-	if _resource_browser_directory_label != null:
-		_resource_browser_directory_label.text = root if has_root else "No resource directory selected"
-	if _resource_browser_hint != null:
-		_resource_browser_hint.visible = not has_visible
-		if not has_root:
-			_resource_browser_hint.text = "No resource directory selected."
-		elif not has_entries:
-			_resource_browser_hint.text = "No %s resources found in %s." % [_resource_browser_kind_label(), root]
-		else:
-			_resource_browser_hint.text = "No matching resources."
-	if _resource_browser_settings_button != null:
-		_resource_browser_settings_button.visible = not has_root or not has_entries
-	if _resource_browser_open_button != null:
-		_resource_browser_open_button.disabled = true
-
-
-func _resource_browser_kind_label() -> String:
-	match _resource_browser_kind:
-		"terrain":
-			return "terrain"
-		"environment":
-			return "environment"
-		"mission":
-			return "mission"
-		"object", "object_project", "object_model", "object_scene":
-			return "object"
-		_:
-			return "resource"
-
-
-func _current_resource_path_for_browser() -> String:
+# Resolves the active workspace's current resource path for the browser's
+# "(open)" marker; the environment popup retargets it to the environment
+# workspace. Stays on the shell (reads popup/workspace state) and is injected
+# into EditorResourceBrowser as a capability callable.
+func _current_resource_path_for_browser(kind: String) -> String:
 	var workspace := _get_active_workspace()
-	if _environment_popup != null and _environment_popup.visible and _resource_browser_kind == "environment":
+	if _environment_popup != null and _environment_popup.visible and kind == "environment":
 		workspace = _environment_workspace
 	if workspace != null:
 		return workspace.get_current_resource_path()
 	return ""
-
-
-func _on_resource_browser_item_selected(_index: int) -> void:
-	if _resource_browser_open_button != null:
-		_resource_browser_open_button.disabled = false
-
-
-func _on_resource_browser_item_activated(index: int) -> void:
-	_resource_browser_list.select(index)
-	_open_selected_resource_browser_entry()
-
-
-func _on_resource_browser_confirmed() -> void:
-	_open_selected_resource_browser_entry()
-
-
-func _open_selected_resource_browser_entry() -> void:
-	if _resource_browser_list == null:
-		return
-	var selected := _resource_browser_list.get_selected_items()
-	if selected.size() == 0:
-		return
-	var entry := _resource_browser_list.get_item_metadata(selected[0]) as Dictionary
-	var path := String(entry.get("path", ""))
-	if path.is_empty():
-		return
-	if _resource_browser_open_action.is_valid():
-		_resource_browser_open_action.call(path)
-	_resource_browser_dialog.hide()
-
-
-func _on_resource_browser_custom_action(action: StringName) -> void:
-	if action == &"browse":
-		_on_resource_browser_browse_files_pressed()
-
-
-func _on_resource_browser_browse_files_pressed() -> void:
-	if _resource_browser_dialog != null:
-		_resource_browser_dialog.hide()
-	_open_file_dialog(
-		_resource_browser_title,
-		_resource_browser_filters,
-		_resource_browser_open_action,
-		_resource_browser_current_dir
-	)
-
-
-func _on_resource_browser_settings_pressed() -> void:
-	if _resource_browser_dialog != null:
-		_resource_browser_dialog.hide()
-	_set_settings_popup_visible(true)
-
-
-func _same_filesystem_path(a: String, b: String) -> bool:
-	if a.is_empty() or b.is_empty():
-		return false
-	var left := _globalized_path(a).replace("\\", "/").to_lower()
-	var right := _globalized_path(b).replace("\\", "/").to_lower()
-	return left == right
-
-
-func _globalized_path(path: String) -> String:
-	if path.begins_with("res://") or path.begins_with("user://"):
-		return ProjectSettings.globalize_path(path)
-	return path
 
 
 func _open_file_dialog(title: String, filters: PackedStringArray, on_pick: Callable, current_dir: String = "") -> void:
