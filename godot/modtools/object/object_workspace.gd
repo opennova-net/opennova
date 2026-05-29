@@ -25,6 +25,7 @@ var object_editor: ObjectEditor
 var environment_editor
 var _active_workflow_id: int = Workflow.PREVIEW
 var _preview: ObjectPreview
+var _mount: ViewportMount
 var _asset_dock_host: Control
 var _object_detail_dock: Control
 var _inspectors: Dictionary = {}
@@ -59,34 +60,37 @@ func deactivate() -> void:
 	pass
 
 
+func _ensure_mount() -> ViewportMount:
+	if _mount == null:
+		_mount = ViewportMount.new(&"ObjectPreview", _create_preview)
+	return _mount
+
+
+# Factory for the shared ViewportMount: news the ObjectPreview and wires its
+# object data + environment once on creation. ViewportMount owns the name /
+# anchors / parenting lifecycle (matching terrain_workspace + mission_workspace).
+func _create_preview() -> Control:
+	_preview = ObjectPreviewScript.new()
+	_preview.set_object_data(object_editor.object_data if object_editor else null)
+	_apply_environment_to_preview()
+	return _preview
+
+
 func mount_viewport(host: Control) -> void:
 	if host == null:
 		return
 	_ensure_object_editor()
-	if _preview == null:
-		_preview = ObjectPreviewScript.new()
-		_preview.name = "ObjectPreview"
-		_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
-		_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		_preview.set_object_data(object_editor.object_data if object_editor else null)
-		_apply_environment_to_preview()
-	if _preview.get_parent() == null:
-		host.add_child(_preview)
-		_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_ensure_mount().mount(host)
 
 
 func unmount_viewport(_host: Control) -> void:
-	if _preview != null and _preview.get_parent() != null:
-		_preview.get_parent().remove_child(_preview)
+	if _mount != null:
+		_mount.unmount()
 
 
 func release_viewport() -> void:
-	if _preview == null:
-		return
-	if _preview.get_parent() != null:
-		_preview.get_parent().remove_child(_preview)
-	_preview.free()
+	if _mount != null:
+		_mount.release()
 	_preview = null
 
 
