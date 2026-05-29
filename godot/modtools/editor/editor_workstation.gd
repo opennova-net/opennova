@@ -356,24 +356,17 @@ func open_font_workspace(font_name: String) -> Error:
 	var clean_name := font_name.strip_edges()
 	if clean_name.is_empty():
 		return ERR_INVALID_PARAMETER
-	var run_open := func() -> Error:
-		var err: Error = int(workspace.call("open_font_name", clean_name))
-		if err != OK:
-			show_status_message("Font not found: %s" % clean_name, 5.0)
-			return err
-		if _active_workspace_id != Workspace.FONTS:
-			set_active_workspace(Workspace.FONTS)
-		else:
-			_refresh_workspace_surface()
-			sync_from_editor_state()
-		show_status_message("Opened font %s." % clean_name, 3.0)
-		return OK
-	if workspace.has_unsaved_changes():
-		_prompt_unsaved_workspace_action(workspace, "open font", func() -> void:
-			run_open.call()
-		)
-		return OK
-	return run_open.call()
+	var err: Error = int(workspace.call("open_font_name", clean_name))
+	if err != OK:
+		show_status_message("Font not found: %s" % clean_name, 5.0)
+		return err
+	if _active_workspace_id != Workspace.FONTS:
+		set_active_workspace(Workspace.FONTS)
+	else:
+		_refresh_workspace_surface()
+		sync_from_editor_state()
+	show_status_message("Opened font %s." % clean_name, 3.0)
+	return OK
 
 
 func _get_workspace(workspace_id: int) -> EditorWorkspace:
@@ -955,18 +948,13 @@ func _run_workspace_action(workspace: EditorWorkspace, action_id: int) -> void:
 			show_status_message("Save failed (error %d)" % err, 6.0)
 	match action_id:
 		WorkspaceAction.NEW:
-			if workspace.can_new():
-				var run_new := func() -> void:
-					workspace.new_current()
-				if _flush_workspace_or_status(workspace) and not _prompt_unsaved_workspace_action(workspace, "new", run_new):
-					run_new.call()
+			if workspace.can_new() and _flush_workspace_or_status(workspace):
+				workspace.new_current()
 		WorkspaceAction.OPEN:
 			if not workspace.can_open():
 				return
-			var run_open := func() -> void:
+			if _flush_workspace_or_status(workspace):
 				_open_resource_browser(workspace, open_trn)
-			if _flush_workspace_or_status(workspace) and not _prompt_unsaved_workspace_action(workspace, "open", run_open):
-				run_open.call()
 		WorkspaceAction.SAVE:
 			_on_save_pressed(workspace)
 		WorkspaceAction.SAVE_AS:
@@ -987,48 +975,6 @@ func _flush_workspace_or_status(workspace: EditorWorkspace) -> bool:
 	if err != OK:
 		show_status_message("Resolve source parse errors before continuing.", 6.0)
 		return false
-	return true
-
-
-func _prompt_unsaved_workspace_action(workspace: EditorWorkspace, action_name: String, action: Callable) -> bool:
-	if workspace == null or not workspace.has_unsaved_changes():
-		return false
-	_set_prompt_state(
-		PromptKind.UNSAVED,
-		"",
-		"Save changes?",
-		"",
-		"",
-		false
-	)
-	_set_prompt_buttons("Cancel", "Discard", "Save")
-	_prompt_secondary_action = Callable()
-	_prompt_tertiary_action = func() -> void:
-		if action.is_valid():
-			action.call()
-	_prompt_primary_action = func() -> void:
-		if not _flush_workspace_or_status(workspace):
-			return
-		if workspace.can_save():
-			var err := workspace.save_current()
-			if err != OK:
-				show_status_message("Save failed (error %d)" % err, 6.0)
-				return
-			if action.is_valid():
-				action.call()
-		elif workspace.can_save_as():
-			var save_then_run := func(dir_path: String) -> void:
-				var err := workspace.save_as(dir_path)
-				if err != OK:
-					show_status_message("Save failed (error %d)" % err, 6.0)
-					return
-				if action.is_valid():
-					action.call()
-			_open_dir_dialog(workspace.get_save_dialog_title(), save_then_run, _preferred_save_dir(workspace))
-		else:
-			show_status_message("%s save is not available." % workspace.get_workspace_label(), 4.0)
-	_set_prompt_visible(true)
-	show_status_message("Save or discard your changes to continue.", 6.0)
 	return true
 
 
