@@ -30,6 +30,7 @@ var _list: ItemList
 var _browse_button: Button
 var _open_button: Button
 var _title_label: Label
+var _dragging := false
 var _kind: String = ""
 var _title: String = ""
 var _filters: PackedStringArray = PackedStringArray()
@@ -100,6 +101,16 @@ func _make_header_panel() -> StyleBoxFlat:
 	return sb
 
 
+func _on_title_bar_input(event: InputEvent) -> void:
+	# Drag the borderless dialog by its custom header. Godot keeps routing motion
+	# to the control that received the press until release, so this stays smooth
+	# even if the cursor outruns the bar.
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		_dragging = event.pressed
+	elif event is InputEventMouseMotion and _dragging:
+		_dialog.position += Vector2i(event.relative)
+
+
 func _ensure_dialog() -> void:
 	if _dialog != null and is_instance_valid(_dialog):
 		return
@@ -124,18 +135,24 @@ func _ensure_dialog() -> void:
 	_dialog.add_child(box)
 
 	# Custom title bar (lighter, bottom-bordered) with the title + a close button,
-	# replacing the unstyled native one.
+	# replacing the unstyled native one. The bar doubles as a drag handle (see
+	# _on_title_bar_input) since a borderless window has no native title bar to grab.
 	var title_bar := PanelContainer.new()
 	title_bar.name = "ResourceBrowserTitleBar"
 	title_bar.add_theme_stylebox_override("panel", _make_header_panel())
+	title_bar.gui_input.connect(_on_title_bar_input)
 	box.add_child(title_bar)
 	var title_row := HBoxContainer.new()
 	title_row.add_theme_constant_override("separation", 8)
+	# Let drags fall through the row + label to the title bar; the close button
+	# keeps its own input so the X still works.
+	title_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title_bar.add_child(title_row)
 	_title_label = Label.new()
 	_title_label.name = "ResourceBrowserTitle"
 	_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title_row.add_child(_title_label)
 	var close_button := Button.new()
 	close_button.name = "ResourceBrowserClose"
