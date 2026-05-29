@@ -154,6 +154,35 @@ func card_for_entry(entry: CbinEntry) -> CreditsEditorBlockCard:
 		return null
 	return _entry_to_card.get(entry)
 
+# Keyboard helpers (driven from CreditsEditor._shortcut_input). Both return true
+# only when they acted, so the caller can decide whether to consume the event.
+func delete_selected() -> bool:
+	if _selected_entry == null:
+		return false
+	var card := card_for_entry(_selected_entry)
+	if card == null:
+		return false
+	_on_card_delete(card)
+	return true
+
+func move_selected(delta: int) -> bool:
+	if _resource == null or _selected_entry == null:
+		return false
+	var src_index := _index_of(_selected_entry)
+	if src_index < 0:
+		return false
+	# ±1 deltas map directly to a valid insert index after removal (verified against
+	# the same remove_entry/insert_entry shift semantics used by _drop_data).
+	var target_index := clampi(src_index + delta, 0, _resource.get_entry_count() - 1)
+	if target_index == src_index:
+		return false
+	var entry := _selected_entry
+	_resource.remove_entry(src_index)
+	_resource.insert_entry(target_index, entry)
+	_schedule_selection_emit()
+	entries_reordered.emit()
+	return true
+
 func _on_card_select(card: CreditsEditorBlockCard) -> void:
 	select_entry(card.get_entry())
 

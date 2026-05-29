@@ -4,6 +4,17 @@ extends PanelContainer
 const TEXTURE_BASE_PATH := "res://assets/textures"
 const TEXTURE_EXTENSIONS := ["png", "pcx", "tga", "jpg", "jpeg", "bmp"]
 
+# Per-type accent palette. The selection highlight (A1) reuses the same hues as the
+# type chips so a selected card reads as its type at a glance.
+const CHIP_TEXT_COLOR := Color(0.84, 0.55, 0.29, 1.0)
+const CHIP_IMAGE_COLOR := Color(0.45, 0.72, 0.88, 1.0)
+const SELECT_ACCENT_TEXT := CHIP_TEXT_COLOR
+const SELECT_ACCENT_IMAGE := CHIP_IMAGE_COLOR
+const SELECT_ACCENT_SPACE := Color(0.45, 0.48, 0.52, 1.0)
+const SPACER_FILL := Color(0.0863, 0.0941, 0.1098, 0.45)
+const SPACER_BORDER := Color(0.1804, 0.2, 0.2314, 0.8)
+const WARN_COLOR := Color(0.9176, 0.702, 0.0314, 1.0)  # matches theme "Warn"
+
 signal request_delete(card)
 signal request_drag(card)
 signal request_select(card)
@@ -23,10 +34,6 @@ signal request_edit_font(font_name)
 @onready var _align_center: Button = %AlignCenter
 @onready var _align_right: Button = %AlignRight
 
-# Color controls
-@onready var _color_panel: Control = %ColorPanel
-@onready var _color_picker: ColorPickerButton = %ColorPicker
-@onready var _color_hex: Label = %ColorHex
 @onready var _spacer_panel: Control = %SpacerPanel
 
 # Image controls
@@ -73,7 +80,6 @@ func _ready() -> void:
 	_align_left.pressed.connect(func(): _on_align(CbinEntry.CBIN_JUSTIFY_LEFT))
 	_align_center.pressed.connect(func(): _on_align(CbinEntry.CBIN_JUSTIFY_CENTER))
 	_align_right.pressed.connect(func(): _on_align(CbinEntry.CBIN_JUSTIFY_RIGHT))
-	_color_picker.color_changed.connect(_on_color_changed)
 	_image_path_edit.text_submitted.connect(_on_image_path_submitted)
 	_image_path_edit.focus_exited.connect(_apply_image_path_edit)
 	_image_pick_button.pressed.connect(_on_image_pick_pressed)
@@ -114,7 +120,6 @@ func _refresh() -> void:
 	var is_newline := _entry is CbinNewlineEntry
 	var is_image := _entry is CbinImageEntry
 	_text_panel.visible = is_text
-	_color_panel.visible = false
 	_spacer_panel.visible = is_newline
 	_image_panel.visible = is_image
 	custom_minimum_size.y = 28.0 if is_newline else 0.0
@@ -122,7 +127,7 @@ func _refresh() -> void:
 
 	if is_text:
 		_type_chip.text = "TEXT"
-		_type_chip.add_theme_color_override("font_color", Color(0.84, 0.55, 0.29, 1.0))
+		_type_chip.add_theme_color_override("font_color", CHIP_TEXT_COLOR)
 		var entry_text: String = _entry.get_text()
 		if not _text_edit.has_focus() and _text_edit.text != entry_text:
 			_text_edit.text = entry_text
@@ -142,7 +147,7 @@ func _refresh() -> void:
 		_type_chip.remove_theme_color_override("font_color")
 	elif is_image:
 		_type_chip.text = "IMAGE"
-		_type_chip.add_theme_color_override("font_color", Color(0.45, 0.72, 0.88, 1.0))
+		_type_chip.add_theme_color_override("font_color", CHIP_IMAGE_COLOR)
 		var entry_path: String = _entry.get_texture_path()
 		if not _image_path_edit.has_focus() and _image_path_edit.text != entry_path:
 			_image_path_edit.text = entry_path
@@ -157,6 +162,7 @@ func _refresh() -> void:
 		var tex := _entry.get_texture() as Texture2D
 		if _image_thumb.texture != tex:
 			_image_thumb.texture = tex
+		_update_image_missing_cue(entry_path, tex)
 	_apply_panel_style()
 	_suppress = false
 
@@ -224,9 +230,6 @@ func _on_align(justify: int) -> void:
 	(_entry as CbinTextEntry).set_justify(justify)
 	_refresh_align_buttons(justify)
 
-func _on_color_changed(color: Color) -> void:
-	pass  # Color entries are not edited as cards in this pass
-
 func _on_image_pick_pressed() -> void:
 	var dialog := FileDialog.new()
 	dialog.access = FileDialog.ACCESS_RESOURCES
@@ -264,6 +267,18 @@ func _apply_image_path(value: String) -> void:
 	var tex := _resolve_texture(image_name)
 	image_entry.set_texture(tex)
 	_image_thumb.texture = tex
+	_update_image_missing_cue(image_name, tex)
+
+# Flags an image row whose filename does not resolve to a texture: tints the path
+# field with the warning color and explains it in the thumbnail tooltip.
+func _update_image_missing_cue(image_name: String, tex: Texture2D) -> void:
+	var missing := tex == null and not image_name.strip_edges().is_empty()
+	if missing:
+		_image_path_edit.add_theme_color_override("font_color", WARN_COLOR)
+		_image_thumb.tooltip_text = "Image not found: %s" % image_name
+	else:
+		_image_path_edit.remove_theme_color_override("font_color")
+		_image_thumb.tooltip_text = ""
 
 func _normalized_image_name(value: String) -> String:
 	return value.strip_edges().get_file()
@@ -327,11 +342,19 @@ func _on_image_y_changed(value: float) -> void:
 		return
 	(_entry as CbinImageEntry).set_display_y(int(value))
 
+func _selection_accent() -> Color:
+	if _entry is CbinImageEntry:
+		return SELECT_ACCENT_IMAGE
+	elif _entry is CbinNewlineEntry:
+		return SELECT_ACCENT_SPACE
+	return SELECT_ACCENT_TEXT
+
 func _ensure_selected_stylebox() -> StyleBoxFlat:
 	if _selected_stylebox == null:
+		var accent := _selection_accent()
 		var sb := StyleBoxFlat.new()
-		sb.bg_color = Color(0.8392, 0.5529, 0.2902, 0.08)
-		sb.border_color = Color(0.8392, 0.5529, 0.2902, 1.0)
+		sb.bg_color = Color(accent.r, accent.g, accent.b, 0.08)
+		sb.border_color = accent
 		sb.border_width_left = 3
 		sb.border_width_top = 1
 		sb.border_width_right = 1
@@ -350,8 +373,8 @@ func _ensure_selected_stylebox() -> StyleBoxFlat:
 func _ensure_spacer_stylebox() -> StyleBoxFlat:
 	if _spacer_stylebox == null:
 		var sb := StyleBoxFlat.new()
-		sb.bg_color = Color(0.0863, 0.0941, 0.1098, 0.45)
-		sb.border_color = Color(0.1804, 0.2, 0.2314, 0.8)
+		sb.bg_color = SPACER_FILL
+		sb.border_color = SPACER_BORDER
 		sb.border_width_bottom = 1
 		sb.corner_radius_top_left = 3
 		sb.corner_radius_top_right = 3

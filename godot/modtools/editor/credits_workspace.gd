@@ -124,7 +124,7 @@ func _make_inspector() -> Control:
 
 	var missing_label := Label.new()
 	missing_label.name = "MissingLabel"
-	missing_label.add_theme_color_override("font_color", Color(0.95, 0.6, 0.3, 1))
+	missing_label.theme_type_variation = &"Warn"
 	missing_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(missing_label)
 

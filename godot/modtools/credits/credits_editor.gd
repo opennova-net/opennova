@@ -8,17 +8,13 @@ signal request_edit_font(font_name)
 
 enum Mode { VISUAL, SOURCE }
 
-@onready var _mode_buttons: HBoxContainer = %ModeButtons
 @onready var _visual_button: Button = %VisualButton
 @onready var _source_button: Button = %SourceButton
 @onready var _scroll_rate_spin: SpinBox = %ScrollRateSpin
 @onready var _vertical_space_spin: SpinBox = %VerticalSpaceSpin
 @onready var _center_x_spin: SpinBox = %CenterXSpin
-@onready var _content_stack: Control = %ContentStack
 @onready var _block_list_host: Control = %BlockListHost
 @onready var _source_view_host: Control = %SourceViewHost
-@onready var _preview_host: Control = %PreviewHost
-@onready var _warning_bar: Label = %WarningBar
 @onready var _block_list: Control = %BlockList
 @onready var _add_text_button: Button = %AddTextButton
 @onready var _add_image_button: Button = %AddImageButton
@@ -54,6 +50,33 @@ func flush_pending_edits() -> Error:
 	if _mode == Mode.SOURCE and _source_view_host != null and _source_view_host.has_method("apply_pending"):
 		return _source_view_host.apply_pending()
 	return OK
+
+# Visual-mode keyboard editing. Runs before viewport focus navigation, but after
+# _gui_input, so a focused text field still consumes its own keys; the focus-owner
+# guard keeps Delete/Alt+arrows inert while the user is typing in a card field.
+func _shortcut_input(event: InputEvent) -> void:
+	if _mode != Mode.VISUAL or _block_list == null:
+		return
+	if not (event is InputEventKey):
+		return
+	var key_event := event as InputEventKey
+	if not key_event.pressed or key_event.echo:
+		return
+	var focus_owner := get_viewport().gui_get_focus_owner()
+	if focus_owner is LineEdit or focus_owner is TextEdit or focus_owner is SpinBox:
+		return
+	var handled = false
+	match key_event.keycode:
+		KEY_DELETE:
+			handled = _block_list.delete_selected()
+		KEY_UP:
+			if key_event.alt_pressed:
+				handled = _block_list.move_selected(-1)
+		KEY_DOWN:
+			if key_event.alt_pressed:
+				handled = _block_list.move_selected(1)
+	if handled:
+		get_viewport().set_input_as_handled()
 
 func _ready() -> void:
 	var mode_group := ButtonGroup.new()
@@ -98,6 +121,7 @@ func _ready() -> void:
 	_center_x_spin.tooltip_text = "Horizontal center of the credits column, in game pixels"
 	_refresh_preview_toolbar_state()
 	_refresh_empty_hint()
+	_refresh_add_buttons_enabled()
 
 func _set_mode(value: Mode) -> void:
 	if value == Mode.VISUAL and _mode == Mode.SOURCE:
@@ -126,25 +150,25 @@ func _apply_pending_source_for_visual_mode() -> Error:
 
 func _on_resource_loaded(resource: CbinCreditsResource) -> void:
 	_refresh_env_bar(resource)
-	_refresh_warning(resource)
 	if _block_list and _block_list.has_method("set_resource"):
 		_block_list.set_resource(resource)
 	if _source_view_host and _source_view_host.has_method("set_resource"):
 		_source_view_host.set_resource(resource)
 	_set_preview_resource(resource, true)
 	_refresh_empty_hint()
+	_refresh_add_buttons_enabled()
 
 func _on_resource_changed() -> void:
 	if _document == null:
 		return
 	_refresh_env_bar(_document.resource)
-	_refresh_warning(_document.resource)
 	if _block_list and _block_list.has_method("set_resource"):
 		_block_list.set_resource(_document.resource)
 	if _source_view_host and _source_view_host.has_method("set_resource"):
 		_source_view_host.set_resource(_document.resource)
 	_set_preview_resource(_document.resource, false)
 	_refresh_empty_hint()
+	_refresh_add_buttons_enabled()
 
 func _set_preview_resource(resource: CbinCreditsResource, reset_playback: bool) -> void:
 	if _preview_resource != resource:
@@ -158,11 +182,11 @@ func _set_preview_resource(resource: CbinCreditsResource, reset_playback: bool) 
 		_preview_paused = false
 	_refresh_preview_toolbar_state()
 
-func _refresh_warning(resource: CbinCreditsResource) -> void:
-	if _warning_bar == null:
-		return
-	_warning_bar.text = ""
-	_warning_bar.visible = false
+func _refresh_add_buttons_enabled() -> void:
+	var has_resource := _document != null and _document.resource != null
+	_add_text_button.disabled = not has_resource
+	_add_image_button.disabled = not has_resource
+	_add_newline_button.disabled = not has_resource
 
 
 func _refresh_empty_hint() -> void:
@@ -235,6 +259,12 @@ func _refresh_preview_toolbar_state() -> void:
 	_stop_button.disabled = not has_resource
 	_play_button.text = "Resume" if _preview_paused else "Play"
 
+func _seek_player_to_entry(idx: int) -> void:
+	var content_y := _player.content_y_for_entry(idx)
+	_sync_suppress = true
+	_player.set_scroll_offset(content_y + _player.get_size().y * 0.5)
+	_sync_suppress = false
+
 func _on_block_scroll(_value: float) -> void:
 	if _sync_suppress:
 		return
@@ -246,10 +276,7 @@ func _on_block_scroll(_value: float) -> void:
 	var idx := _index_of_entry(centered)
 	if idx < 0:
 		return
-	var content_y := _player.content_y_for_entry(idx)
-	_sync_suppress = true
-	_player.set_scroll_offset(content_y + _player.get_size().y * 0.5)
-	_sync_suppress = false
+	_seek_player_to_entry(idx)
 
 func _on_player_scroll_offset_changed(_offset: float) -> void:
 	if _sync_suppress:
@@ -275,10 +302,7 @@ func _on_block_list_selection_changed(entry) -> void:
 	var idx := _index_of_entry(entry)
 	if idx < 0:
 		return
-	var content_y := _player.content_y_for_entry(idx)
-	_sync_suppress = true
-	_player.set_scroll_offset(content_y + _player.get_size().y * 0.5)
-	_sync_suppress = false
+	_seek_player_to_entry(idx)
 
 
 func _on_block_list_request_edit_font(font_name: String) -> void:

@@ -69,17 +69,6 @@ toggle_mode = true
 text = "R"
 tooltip_text = "Align right"
 
-[node name="ColorPanel" type="HBoxContainer" parent="Row"]
-unique_name_in_owner = true
-visible = false
-
-[node name="ColorPicker" type="ColorPickerButton" parent="Row/ColorPanel"]
-unique_name_in_owner = true
-
-[node name="ColorHex" type="Label" parent="Row/ColorPanel"]
-unique_name_in_owner = true
-text = "#FFFFFF"
-
 [node name="SpacerPanel" type="HBoxContainer" parent="Row"]
 unique_name_in_owner = true
 visible = false

@@ -3,6 +3,11 @@ extends VBoxContainer
 
 signal pending_edits_changed(has_pending_edits)
 
+# Status-line tints (kept as overrides, not a theme variation: the line cycles
+# through error/success/cleared states and there is no green theme variation).
+const STATUS_ERROR_COLOR := Color(0.95, 0.45, 0.35, 1.0)
+const STATUS_SUCCESS_COLOR := Color(0.55, 0.8, 0.55, 1.0)
+
 @onready var _code_edit: CodeEdit = $CodeEdit
 @onready var _status: Label = $StatusBar
 @onready var _apply_button: Button = $ApplyBar/ApplyButton
@@ -29,6 +34,7 @@ func _ready() -> void:
 	_apply_button.pressed.connect(_apply)
 	_code_edit.focus_exited.connect(_apply)
 	_code_edit.text_changed.connect(_on_text_changed)
+	_refresh_apply_enabled()
 
 func has_pending_edits() -> bool:
 	if _resource == null or _code_edit == null:
@@ -55,6 +61,7 @@ func _apply_refresh() -> void:
 	var force := _refresh_force
 	_refresh_force = false
 	if _resource == null:
+		_refresh_apply_enabled()
 		return
 	if not force and visible and _code_edit.has_focus():
 		return
@@ -65,6 +72,7 @@ func _apply_refresh() -> void:
 	pending_edits_changed.emit(false)
 	_suppress = false
 	_set_status("", false)
+	_refresh_apply_enabled()
 
 func _apply() -> void:
 	apply_pending()
@@ -81,6 +89,7 @@ func apply_pending() -> Error:
 		_source_dirty = false
 		_set_status("Applied", false)
 		pending_edits_changed.emit(false)
+		_refresh_apply_enabled()
 		return OK
 	else:
 		_set_status("Parse error - text not applied", true)
@@ -92,6 +101,14 @@ func _on_text_changed() -> void:
 	_source_dirty = true
 	pending_edits_changed.emit(true)
 	_set_status("", false)
+	_refresh_apply_enabled()
+
+# Enables Apply only when there is something to apply (a bound resource with
+# pending edits), so the button is a live affordance rather than always-on.
+func _refresh_apply_enabled() -> void:
+	if _apply_button == null:
+		return
+	_apply_button.disabled = not has_pending_edits()
 
 
 # Colors the status line: a calm success tint for applied text, a warning tint
@@ -103,6 +120,6 @@ func _set_status(text: String, is_error: bool) -> void:
 	if text.is_empty():
 		_status.remove_theme_color_override("font_color")
 	elif is_error:
-		_status.add_theme_color_override("font_color", Color(0.95, 0.45, 0.35, 1.0))
+		_status.add_theme_color_override("font_color", STATUS_ERROR_COLOR)
 	else:
-		_status.add_theme_color_override("font_color", Color(0.55, 0.8, 0.55, 1.0))
+		_status.add_theme_color_override("font_color", STATUS_SUCCESS_COLOR)
