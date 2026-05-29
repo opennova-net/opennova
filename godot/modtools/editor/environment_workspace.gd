@@ -26,10 +26,6 @@ func get_workspace_tooltip() -> String:
 	return "Edit .env weather, lighting, atmosphere, and time of day."
 
 
-func is_popup() -> bool:
-	return true
-
-
 func get_workspace_id() -> String:
 	return "environment"
 

@@ -12,10 +12,14 @@ extends RefCounted
 ## a stray signal after teardown is a no-op until build_main rebuilds.
 
 const ObjectUiHelpers = preload("res://modtools/object/ui/object_ui_helpers.gd")
+const _BrushControlsScene = preload("res://modtools/terrain/ui/widgets/brush_controls.tscn")
 
 var terrain_editor: TerrainEditor
 var _root: Control
 var _syncing: bool = false
+# The shared radius/strength/hardness widget, when a workflow paints with a
+# brush. Set by _attach_brush_controls(); null for non-brush workflows.
+var _brush: BrushControls
 
 
 func _init(editor: TerrainEditor = null) -> void:
@@ -23,12 +27,8 @@ func _init(editor: TerrainEditor = null) -> void:
 
 
 func set_editor(value: TerrainEditor) -> void:
-	var cb := Callable(self, "_on_editor_ui_state_changed")
-	if terrain_editor != null and terrain_editor.ui_state_changed.is_connected(cb):
-		terrain_editor.ui_state_changed.disconnect(cb)
+	SignalRebind.rebind(terrain_editor, value, &"ui_state_changed", Callable(self, "_on_editor_ui_state_changed"))
 	terrain_editor = value
-	if terrain_editor != null and not terrain_editor.ui_state_changed.is_connected(cb):
-		terrain_editor.ui_state_changed.connect(cb)
 	refresh()
 
 
@@ -78,3 +78,39 @@ func _add_spin_row(parent: Control, node_name: String, label_text: String, min_v
 
 func _add_id_option_row(parent: Control, node_name: String, label_text: String, options: Array) -> OptionButton:
 	return ObjectUiHelpers.add_id_option_row(parent, node_name, label_text, options)
+
+
+# --- Shared brush controls (sculpt / paint / scatter) ---
+# Instantiates the radius/strength/hardness widget under `parent`, wires its
+# signals to the editor, and stores it as _brush. Call from build_main();
+# pair with _sync_brush_values() in refresh().
+func _attach_brush_controls(parent: Control) -> BrushControls:
+	_brush = _BrushControlsScene.instantiate()
+	parent.add_child(_brush)
+	_brush.radius_changed.connect(_on_brush_radius)
+	_brush.strength_changed.connect(_on_brush_strength)
+	_brush.hardness_changed.connect(_on_brush_hardness)
+	return _brush
+
+
+func _sync_brush_values() -> void:
+	if _brush != null and terrain_editor != null:
+		_brush.set_values(terrain_editor.brush_radius, terrain_editor.brush_strength, terrain_editor.brush_hardness)
+
+
+func _on_brush_radius(v: float) -> void:
+	if _syncing or terrain_editor == null:
+		return
+	terrain_editor.set_brush_radius_value(v)
+
+
+func _on_brush_strength(v: float) -> void:
+	if _syncing or terrain_editor == null:
+		return
+	terrain_editor.set_brush_strength_value(v)
+
+
+func _on_brush_hardness(v: float) -> void:
+	if _syncing or terrain_editor == null:
+		return
+	terrain_editor.set_brush_hardness_value(v)

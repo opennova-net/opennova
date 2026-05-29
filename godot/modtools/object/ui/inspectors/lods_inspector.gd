@@ -10,7 +10,7 @@ func build_main(host: Control) -> void:
 	var summary: Dictionary = data.get_summary() if data != null else {}
 	var lods: Array = data.get_project_lods() if data != null and data.has_method("get_project_lods") else []
 	var selected := {"index": 0 if not lods.is_empty() else -1}
-	var syncing := {"value": false}
+	var binder := FieldBinder.new()
 
 	var list := ItemList.new()
 	list.name = "ObjectLodsList"
@@ -57,6 +57,20 @@ func build_main(host: Control) -> void:
 	render_function.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	render_row.add_child(render_function)
 
+	var set_field := func(key: String, value: Variant) -> void:
+		if data != null and int(selected["index"]) >= 0:
+			data.set_lod_field(int(selected["index"]), key, value)
+
+	binder.bind_spin(threshold,
+		func(info): return float(info.get("threshold", 0.0)),
+		func(value): set_field.call("threshold", value))
+	binder.bind_spin(attributes,
+		func(info): return float(info.get("attributes", 0)),
+		func(value): set_field.call("attributes", int(value)))
+	binder.bind_line(render_function,
+		func(info): return String(info.get("render_function", "")),
+		func(value): set_field.call("render_function", value))
+
 	var set_lod_controls_enabled := func(enabled: bool) -> void:
 		threshold.editable = enabled
 		attributes.editable = enabled
@@ -64,38 +78,17 @@ func build_main(host: Control) -> void:
 		replace_button.disabled = not enabled
 
 	var sync := func(index: int) -> void:
-		syncing["value"] = true
 		selected["index"] = index
-		if index >= 0 and index < lods.size():
-			var info := lods[index] as Dictionary
-			_set_spin(threshold, float(info.get("threshold", 0.0)))
-			_set_spin(attributes, int(info.get("attributes", 0)))
-			render_function.text = String(info.get("render_function", ""))
-			set_lod_controls_enabled.call(true)
-		else:
-			_set_spin(threshold, 0)
-			_set_spin(attributes, 0)
-			render_function.text = ""
-			set_lod_controls_enabled.call(false)
-		syncing["value"] = false
+		var valid := index >= 0 and index < lods.size()
+		var info: Dictionary = (lods[index] as Dictionary) if valid else {}
+		binder.sync_from(info)
+		set_lod_controls_enabled.call(valid)
 
 	list.item_selected.connect(func(index: int) -> void:
 		sync.call(index)
 	)
-	threshold.value_changed.connect(func(value: float) -> void:
-		if not syncing["value"] and data != null and selected["index"] >= 0:
-			data.set_lod_field(selected["index"], "threshold", value)
-	)
-	attributes.value_changed.connect(func(value: float) -> void:
-		if not syncing["value"] and data != null and selected["index"] >= 0:
-			data.set_lod_field(selected["index"], "attributes", int(value))
-	)
-	render_function.text_submitted.connect(func(value: String) -> void:
-		if not syncing["value"] and data != null and selected["index"] >= 0:
-			data.set_lod_field(selected["index"], "render_function", value)
-	)
 	poly_lod.value_changed.connect(func(value: float) -> void:
-		if not syncing["value"] and data != null:
+		if data != null:
 			data.set_project_field("poly_collision_lod", int(value))
 	)
 

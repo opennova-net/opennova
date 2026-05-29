@@ -111,11 +111,8 @@ func _export_basename() -> String:
 
 
 func _set_object_data(next_data: NovaObjectData) -> void:
-	if object_data != null and object_data.object_changed.is_connected(_on_object_data_changed):
-		object_data.object_changed.disconnect(_on_object_data_changed)
+	SignalRebind.rebind(object_data, next_data, &"object_changed", _on_object_data_changed, CONNECT_DEFERRED)
 	object_data = next_data
-	if object_data != null and not object_data.object_changed.is_connected(_on_object_data_changed):
-		object_data.object_changed.connect(_on_object_data_changed, CONNECT_DEFERRED)
 
 
 func _on_object_data_changed() -> void:

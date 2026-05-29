@@ -31,7 +31,7 @@ var _selection_delete: Button
 var _atlas_tile_count: int = 0
 var _cached_tilestrip_hash: int = -1
 var _tile_icon_cache: Dictionary = {}
-var _file_dialog: FileDialog
+var _file_dialog: FileDialogHelper
 
 
 func set_editor(value: TerrainEditor) -> void:
@@ -359,20 +359,10 @@ func _on_selection_delete_pressed() -> void:
 
 func _open_tileinfo_dialog() -> void:
 	if _file_dialog == null:
-		_file_dialog = FileDialog.new()
-		_file_dialog.use_native_dialog = true
-		_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
-		_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-		_file_dialog.min_size = Vector2i(760, 520)
-		_root.add_child(_file_dialog)
-	_file_dialog.title = "Load tile layout"
-	_file_dialog.filters = PackedStringArray(["*.til ; Terrain tile layout"])
-	if terrain_editor and not terrain_editor.get_last_open_dir().is_empty():
-		_file_dialog.current_dir = terrain_editor.get_last_open_dir()
-	for sig in _file_dialog.file_selected.get_connections():
-		_file_dialog.file_selected.disconnect(sig.callable)
-	_file_dialog.file_selected.connect(func(path: String) -> void:
-		if terrain_editor:
-			terrain_editor.load_tileinfo(path)
-	, CONNECT_ONE_SHOT)
-	_file_dialog.popup_centered()
+		_file_dialog = FileDialogHelper.new(_root)
+	var dir := terrain_editor.get_last_open_dir() if terrain_editor != null else ""
+	_file_dialog.open("Load tile layout", PackedStringArray(["*.til ; Terrain tile layout"]),
+		func(path: String) -> void:
+			if terrain_editor:
+				terrain_editor.load_tileinfo(path),
+		dir)

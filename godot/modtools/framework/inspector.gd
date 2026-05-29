@@ -67,6 +67,10 @@ func _add_color_row(parent: Control, node_name: String, label_text: String) -> C
 	return ObjectUiHelpers.add_color_row(parent, node_name, label_text)
 
 
+func _add_checkbox(parent: Control, node_name: String, text: String) -> CheckBox:
+	return ObjectUiHelpers.add_checkbox(parent, node_name, text)
+
+
 func _add_id_option_row(parent: Control, node_name: String, label_text: String, options: Array) -> OptionButton:
 	return ObjectUiHelpers.add_id_option_row(parent, node_name, label_text, options)
 

@@ -5,7 +5,6 @@ extends TerrainInspector
 ## shared brush controls. Code-first; built into the inspector host by the
 ## terrain workspace and synced from the editor's ui_state_changed signal.
 
-const BrushControlsScene = preload("res://modtools/terrain/ui/widgets/brush_controls.tscn")
 
 const SCULPT_TOOLS := [
 	TerrainEditor.Tool.RAISE,
@@ -21,7 +20,6 @@ const TOOL_DEFS := [
 ]
 
 var _tool_buttons: Dictionary = {}
-var _brush: BrushControls
 
 
 func set_editor(value: TerrainEditor) -> void:
@@ -56,11 +54,7 @@ func build_main(host: Control) -> void:
 
 	box.add_child(HSeparator.new())
 
-	_brush = BrushControlsScene.instantiate()
-	box.add_child(_brush)
-	_brush.radius_changed.connect(_on_brush_radius)
-	_brush.strength_changed.connect(_on_brush_strength)
-	_brush.hardness_changed.connect(_on_brush_hardness)
+	_attach_brush_controls(box)
 
 	refresh()
 
@@ -69,7 +63,7 @@ func refresh() -> void:
 	if not _ui_alive() or terrain_editor == null:
 		return
 	_syncing = true
-	_brush.set_values(terrain_editor.brush_radius, terrain_editor.brush_strength, terrain_editor.brush_hardness)
+	_sync_brush_values()
 	for tool in _tool_buttons:
 		(_tool_buttons[tool] as Button).set_pressed_no_signal(terrain_editor.current_tool == tool)
 	_syncing = false
@@ -81,19 +75,3 @@ func _on_tool_pressed(tool: int) -> void:
 	terrain_editor.set_tool(tool)
 
 
-func _on_brush_radius(v: float) -> void:
-	if _syncing or terrain_editor == null:
-		return
-	terrain_editor.set_brush_radius_value(v)
-
-
-func _on_brush_strength(v: float) -> void:
-	if _syncing or terrain_editor == null:
-		return
-	terrain_editor.set_brush_strength_value(v)
-
-
-func _on_brush_hardness(v: float) -> void:
-	if _syncing or terrain_editor == null:
-		return
-	terrain_editor.set_brush_hardness_value(v)

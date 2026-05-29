@@ -28,7 +28,6 @@ var _preview: ObjectPreview
 var _asset_dock_host: Control
 var _object_detail_dock: Control
 var _inspectors: Dictionary = {}
-var _inspector_defs: Array = []
 var _export_update_mask: int = OED_UPDATE_NONE
 
 
@@ -38,11 +37,8 @@ func set_editor_shell(value: Node) -> void:
 
 
 func set_environment_editor(value) -> void:
-	if environment_editor != null and environment_editor.has_signal("environment_changed") and environment_editor.environment_changed.is_connected(_on_environment_editor_changed):
-		environment_editor.environment_changed.disconnect(_on_environment_editor_changed)
+	SignalRebind.rebind(environment_editor, value, &"environment_changed", _on_environment_editor_changed)
 	environment_editor = value
-	if environment_editor != null and environment_editor.has_signal("environment_changed") and not environment_editor.environment_changed.is_connected(_on_environment_editor_changed):
-		environment_editor.environment_changed.connect(_on_environment_editor_changed)
 	_apply_environment_to_preview()
 
 
@@ -144,15 +140,6 @@ func set_asset_dock(dock: Control) -> void:
 
 func sync_asset_dock() -> void:
 	_sync_object_detail_dock_mount()
-
-
-func get_workflows() -> Array:
-	if _inspector_defs.is_empty():
-		_inspector_defs = _build_inspector_defs()
-	var workflows: Array = []
-	for def in _inspector_defs:
-		workflows.append((def as InspectorDef).to_workflow_dict())
-	return workflows
 
 
 func get_active_workflow_id() -> int:
@@ -316,9 +303,7 @@ func _build_inspector_defs() -> Array:
 
 
 func _ensure_inspectors() -> void:
-	if _inspector_defs.is_empty():
-		_inspector_defs = _build_inspector_defs()
-	for def in _inspector_defs:
+	for def in _ensure_inspector_defs():
 		var inspector_def := def as InspectorDef
 		if _inspectors.get(inspector_def.id) == null:
 			_inspectors[inspector_def.id] = inspector_def.inspector_script.new(self)

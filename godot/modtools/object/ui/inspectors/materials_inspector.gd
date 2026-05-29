@@ -164,15 +164,9 @@ func build_detail(box: VBoxContainer) -> void:
 		options_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		slot_box.add_child(options_row)
 
-		var clamped := CheckBox.new()
-		clamped.name = "TextureSlot%dClamped" % slot
-		clamped.text = "Clamp"
-		options_row.add_child(clamped)
+		var clamped := _add_checkbox(options_row, "TextureSlot%dClamped" % slot, "Clamp")
 
-		var animated := CheckBox.new()
-		animated.name = "TextureSlot%dAnimated" % slot
-		animated.text = "Anim"
-		options_row.add_child(animated)
+		var animated := _add_checkbox(options_row, "TextureSlot%dAnimated" % slot, "Anim")
 
 		var frame := SpinBox.new()
 		frame.name = "TextureSlot%dFrame" % slot
@@ -235,7 +229,7 @@ func build_detail(box: VBoxContainer) -> void:
 	box.add_child(texture_dialog)
 
 	var selected := {"index": _selected_index}
-	var syncing := {"value": false}
+	var guard := SyncGuard.new()
 	var pending_slot := {"slot": -1}
 
 	var refresh_materials := func() -> void:
@@ -243,14 +237,14 @@ func build_detail(box: VBoxContainer) -> void:
 		_refresh_materials_left_list()
 
 	var sync_fields := func(index: int) -> void:
-		syncing["value"] = true
+		guard.active = true
 		selected["index"] = index
 		# Re-read fresh: this closure's captured `materials` is the build-time
 		# snapshot (GDScript lambdas capture locals by value), so after an edit
 		# resyncs the panel it would otherwise show stale generator/shader data.
 		materials = object_editor.object_data.get_materials() if object_editor and object_editor.object_data else materials
 		if index < 0 or index >= materials.size():
-			syncing["value"] = false
+			guard.active = false
 			return
 		var material: Dictionary = materials[index]
 		shader_option.setup(shader_catalog, String(material.get("shader", "")))
@@ -301,7 +295,7 @@ func build_detail(box: VBoxContainer) -> void:
 			if status != null:
 				status.text = _describe_texture_status(index, texture_info, supported)
 		_sync_generator_controls(generator_controls, material, shader_info)
-		syncing["value"] = false
+		guard.active = false
 
 	var resync_selected := func() -> void:
 		var current_index := int(selected.get("index", -1))
@@ -338,25 +332,25 @@ func build_detail(box: VBoxContainer) -> void:
 		resync_selected.call()
 
 	var apply_uv_generator := func(axis: String, params: Dictionary) -> void:
-		if syncing["value"] or selected["index"] < 0:
+		if guard.active or selected["index"] < 0:
 			return
 		object_editor.object_data.set_material_uv_generator(selected["index"], axis, params)
 		resync_selected.call()
 
 	var apply_rgb_generator := func(params: Dictionary) -> void:
-		if syncing["value"] or selected["index"] < 0:
+		if guard.active or selected["index"] < 0:
 			return
 		object_editor.object_data.set_material_rgb_generator(selected["index"], params)
 		resync_selected.call()
 
 	var apply_alpha_generator := func(params: Dictionary) -> void:
-		if syncing["value"] or selected["index"] < 0:
+		if guard.active or selected["index"] < 0:
 			return
 		object_editor.object_data.set_material_alpha_generator(selected["index"], params)
 		resync_selected.call()
 
 	var apply_texture_animation := func(params: Dictionary) -> void:
-		if syncing["value"] or selected["index"] < 0:
+		if guard.active or selected["index"] < 0:
 			return
 		object_editor.object_data.set_material_texture_animation(selected["index"], params)
 		resync_selected.call()
@@ -368,7 +362,7 @@ func build_detail(box: VBoxContainer) -> void:
 			status.text = message
 
 	shader_option.value_changed.connect(func(tag: String) -> void:
-		if syncing["value"] or selected["index"] < 0:
+		if guard.active or selected["index"] < 0:
 			return
 		object_editor.object_data.set_material_shader(selected["index"], tag)
 		resync_selected.call()
@@ -401,17 +395,17 @@ func build_detail(box: VBoxContainer) -> void:
 		var frame := controls.get("frame") as SpinBox
 		if clamped != null:
 			clamped.toggled.connect(func(_pressed: bool, slot_id: int = slot) -> void:
-				if not syncing["value"]:
+				if not guard.active:
 					apply_slot_options.call(slot_id)
 			)
 		if animated != null:
 			animated.toggled.connect(func(_pressed: bool, slot_id: int = slot) -> void:
-				if not syncing["value"]:
+				if not guard.active:
 					apply_slot_options.call(slot_id)
 			)
 		if frame != null:
 			frame.value_changed.connect(func(_value: float, slot_id: int = slot) -> void:
-				if not syncing["value"]:
+				if not guard.active:
 					apply_slot_options.call(slot_id)
 			)
 
@@ -426,7 +420,7 @@ func build_detail(box: VBoxContainer) -> void:
 		apply_slot_name.call(slot, file_name)
 	)
 	alpha.value_changed.connect(func(value: float) -> void:
-		if not syncing["value"] and selected["index"] >= 0:
+		if not guard.active and selected["index"] >= 0:
 			object_editor.object_data.set_material_alpha_threshold(selected["index"], value)
 			resync_selected.call()
 	)

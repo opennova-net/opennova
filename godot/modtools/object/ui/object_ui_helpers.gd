@@ -33,6 +33,14 @@ static func add_spin_row(parent: Control, node_name: String, label_text: String,
 	return spin
 
 
+static func add_checkbox(parent: Control, node_name: String, text: String) -> CheckBox:
+	var checkbox := CheckBox.new()
+	checkbox.name = node_name
+	checkbox.text = text
+	parent.add_child(checkbox)
+	return checkbox
+
+
 static func add_color_row(parent: Control, node_name: String, label_text: String) -> ColorPickerButton:
 	var row := HBoxContainer.new()
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL

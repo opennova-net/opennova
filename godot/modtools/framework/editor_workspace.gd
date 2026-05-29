@@ -3,8 +3,56 @@ extends RefCounted
 
 # Generic editor shell contract. Domain adapters name their ported engine
 # equivalents, for example EnvironmentEditorWorkspace -> sub_53FA70/sub_53E3F0.
+#
+# ============================================================================
+# CONTRACT — what a workspace must / may implement
+# ============================================================================
+# The shell (EditorWorkstation) NEVER switches on workspace type; it reads the
+# hooks below. Every hook has a safe default here, so a workspace overrides only
+# the tiers it needs. Tiers:
+#
+#   Identity (required):
+#     get_workspace_id, get_workspace_label
+#     recommended: get_workspace_tooltip, get_status_tool, get_status_context,
+#     get_project_title
+#
+#   Lifecycle:
+#     bind_to_editor(editor)  — receive the domain editor/model
+#     activate / deactivate   — workspace gained / lost focus
+#
+#   Inspector — pick ONE style:
+#     single-pane    : build_inspector(host)
+#     multi-workflow : get_workflows + get_active_workflow_id +
+#                      activate_workflow + build_workflow_inspector(id, host)
+#
+#   Viewport (only if the workspace shows a 3D view):
+#     mount_viewport / unmount_viewport / release_viewport,
+#     get_viewport_camera, shows_camera_status
+#     (use framework/viewport_mount.gd for the create/reparent/free mechanics)
+#
+#   Document actions (implement the cluster you support; each is gated by a
+#   can_* hook so the shell shows the button only when available):
+#     new      : can_new / new_current
+#     open     : can_open / open_file + get_open_dialog_* + get_open_resource_kind
+#     save     : can_save / save_current, can_save_as / save_as + get_save_dialog_*
+#     export   : can_export / begin_export + get_export_flavors +
+#                get_export_dialog_* + get_export_progress_*
+#
+#   Edit:  can_undo / undo, can_redo / redo
+#   State: is_busy, has_unsaved_changes
+#   Asset dock: uses_asset_dock, set_asset_dock, sync_asset_dock
+#   Placement: set WorkspaceDef.popup=true for popup workspaces (Environment);
+#              shows_tile_gizmo() to opt into the in-world tile gizmo.
+#
+# To register a new workspace see WorkspaceDef; to add a workflow inspector see
+# InspectorDef. Minimal example adapter: editor/mission_workspace.gd.
 
 var editor_shell: Node
+
+# Cached workflow-inspector registry. Multi-workflow workspaces override
+# _build_inspector_defs(); the base lazy-builds and caches it here so the shell
+# and the subclass share one list. Single-pane workspaces leave it empty.
+var _inspector_defs: Array = []
 
 
 func set_editor_shell(value: Node) -> void:
@@ -22,11 +70,11 @@ func get_workspace_tooltip() -> String:
 	return ""
 
 
-func is_popup() -> bool:
+func shows_camera_status() -> bool:
 	return false
 
 
-func shows_camera_status() -> bool:
+func shows_tile_gizmo() -> bool:
 	return false
 
 
@@ -90,8 +138,28 @@ func sync_asset_dock() -> void:
 	pass
 
 
+# Returns the workspace's workflow inspectors as typed InspectorDef rows (the
+# shell reads .id/.label/.tooltip off them). Empty for single-pane workspaces.
 func get_workflows() -> Array:
+	return _ensure_inspector_defs()
+
+
+# Override in multi-workflow workspaces to declare InspectorDef.make(...) rows.
+func _build_inspector_defs() -> Array:
 	return []
+
+
+func _ensure_inspector_defs() -> Array:
+	if _inspector_defs.is_empty():
+		_inspector_defs = _build_inspector_defs()
+	return _inspector_defs
+
+
+func _def_for(workflow_id: int) -> InspectorDef:
+	for def in _ensure_inspector_defs():
+		if (def as InspectorDef).id == workflow_id:
+			return def
+	return null
 
 
 func get_active_workflow_id() -> int:

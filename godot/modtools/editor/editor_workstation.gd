@@ -405,10 +405,6 @@ func _clear_viewport_host() -> void:
 		_viewport_host.remove_child(child)
 
 
-func _is_terrain_workspace_active() -> bool:
-	return _active_workspace_id == Workspace.TERRAIN
-
-
 func _any_workspace_busy() -> bool:
 	for workspace in _workspaces.values():
 		if (workspace as EditorWorkspace).is_busy():
@@ -1344,15 +1340,18 @@ func _rebuild_workflow_rail(workflows: Array) -> void:
 	for child in _mode_rail.get_children():
 		child.queue_free()
 	_workflow_buttons.clear()
-	for workflow in workflows:
-		var workflow_id: int = int(workflow.get("id", -1))
+	for entry in workflows:
+		var def := entry as InspectorDef
+		if def == null:
+			continue
+		var workflow_id: int = def.id
 		var btn := Button.new()
-		btn.text = String(workflow.get("label", "Workflow"))
+		btn.text = def.label if not def.label.is_empty() else "Workflow"
 		btn.toggle_mode = true
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.custom_minimum_size = Vector2(0, 44)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.tooltip_text = String(workflow.get("tooltip", ""))
+		btn.tooltip_text = def.tooltip
 		btn.pressed.connect(_on_workflow_pressed.bind(workflow_id))
 		_mode_rail.add_child(btn)
 		_workflow_buttons[workflow_id] = btn
@@ -1446,7 +1445,8 @@ func _refresh_tile_gizmo() -> void:
 	if not is_node_ready() or _tile_gizmo == null or _viewport_lane == null or _tile_gizmo_label == null:
 		return
 	_tile_gizmo.visible = false
-	if not _is_terrain_workspace_active() or editor == null or _current_workflow_id != TerrainWorkspaceAdapter.Workflow.STAMP or not editor.has_selected_tileinfo_entry():
+	var active_workspace := _get_active_workspace()
+	if active_workspace == null or not active_workspace.shows_tile_gizmo() or editor == null or _current_workflow_id != TerrainWorkspaceAdapter.Workflow.STAMP or not editor.has_selected_tileinfo_entry():
 		return
 
 	var camera: Camera3D = editor.get_editor_camera()

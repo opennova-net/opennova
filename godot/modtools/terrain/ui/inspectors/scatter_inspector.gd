@@ -6,7 +6,6 @@ extends TerrainInspector
 ## shared brush controls. Code-first; built into the inspector host by the
 ## terrain workspace.
 
-const BrushControlsScene = preload("res://modtools/terrain/ui/widgets/brush_controls.tscn")
 const VegPickerScene = preload("res://modtools/terrain/ui/widgets/veg_picker.tscn")
 const FOLIAGE_DEFS_LIMIT := 4
 
@@ -23,7 +22,6 @@ var _color_lower: OptionButton
 var _color_upper: OptionButton
 var _shadow_toggle: CheckBox
 var _force_on_toggle: CheckBox
-var _brush: BrushControls
 var _graphic_preview: VegPreview
 var _picker: VegPicker
 
@@ -113,11 +111,7 @@ func build_main(host: Control) -> void:
 	_force_on_toggle.toggled.connect(_on_force_on_toggled)
 
 	box.add_child(HSeparator.new())
-	_brush = BrushControlsScene.instantiate()
-	box.add_child(_brush)
-	_brush.radius_changed.connect(_on_brush_radius)
-	_brush.strength_changed.connect(_on_brush_strength)
-	_brush.hardness_changed.connect(_on_brush_hardness)
+	_attach_brush_controls(box)
 
 	_populate_color_options(_color_lower)
 	_populate_color_options(_color_upper)
@@ -128,7 +122,7 @@ func refresh() -> void:
 	if not _ui_alive() or terrain_editor == null:
 		return
 	_syncing = true
-	_brush.set_values(terrain_editor.brush_radius, terrain_editor.brush_strength, terrain_editor.brush_hardness)
+	_sync_brush_values()
 	var defs := terrain_editor.get_foliage_defs()
 	_selected_index = clampi(terrain_editor.get_selected_foliage_def_index(), -1, defs.size() - 1)
 	_refresh_list(defs)
@@ -281,19 +275,3 @@ func _on_force_on_toggled(pressed: bool) -> void:
 	terrain_editor.set_foliage_def_field(_selected_index, "force_on", pressed)
 
 
-func _on_brush_radius(v: float) -> void:
-	if terrain_editor == null or _syncing:
-		return
-	terrain_editor.set_brush_radius_value(v)
-
-
-func _on_brush_strength(v: float) -> void:
-	if terrain_editor == null or _syncing:
-		return
-	terrain_editor.set_brush_strength_value(v)
-
-
-func _on_brush_hardness(v: float) -> void:
-	if terrain_editor == null or _syncing:
-		return
-	terrain_editor.set_brush_hardness_value(v)

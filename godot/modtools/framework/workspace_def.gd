@@ -6,6 +6,12 @@ extends Resource
 ## rather than the main workspace rail. Label, tooltip, and behavior stay
 ## self-described by the adapter, so this only captures what the shell needs to
 ## build and place the workspace.
+##
+## To add a workspace: (1) write an EditorWorkspace subclass implementing the
+## hook tiers documented in framework/editor_workspace.gd (CONTRACT); (2) add a
+## Workspace enum entry in editor/editor_workstation.gd; (3) append one
+## WorkspaceDef.make(Workspace.X, XWorkspaceAdapter[, is_popup]) row to
+## EditorWorkstation._workspace_defs(). No .tres resources, no shell type-switch.
 
 @export var id: int = -1
 @export var adapter_script: Script

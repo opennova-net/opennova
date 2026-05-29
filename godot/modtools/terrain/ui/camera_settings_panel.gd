@@ -17,12 +17,8 @@ func _ready() -> void:
 
 
 func set_editor(value: Node) -> void:
-	var callback := Callable(self, "_on_editor_ui_state_changed")
-	if editor != null and editor.has_signal("ui_state_changed") and editor.is_connected("ui_state_changed", callback):
-		editor.disconnect("ui_state_changed", callback)
+	SignalRebind.rebind(editor, value, &"ui_state_changed", Callable(self, "_on_editor_ui_state_changed"))
 	editor = value
-	if editor != null and editor.has_signal("ui_state_changed") and not editor.is_connected("ui_state_changed", callback):
-		editor.connect("ui_state_changed", callback)
 	_sync_from_editor()
 
 

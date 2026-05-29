@@ -15,7 +15,7 @@ var _syncing: bool = false
 var _slot_previews: Dictionary = {}
 var _slot_filename_labels: Dictionary = {}
 var _slot_state_labels: Dictionary = {}
-var _file_dialog: FileDialog
+var _file_dialog: FileDialogHelper
 
 
 func _ready() -> void:
@@ -32,12 +32,8 @@ func _configure_tabs() -> void:
 
 
 func set_editor(value: TerrainEditor) -> void:
-	var callback := Callable(self, "_on_editor_ui_state_changed")
-	if editor != null and editor.ui_state_changed.is_connected(callback):
-		editor.ui_state_changed.disconnect(callback)
+	SignalRebind.rebind(editor, value, &"ui_state_changed", Callable(self, "_on_editor_ui_state_changed"))
 	editor = value
-	if editor != null and not editor.ui_state_changed.is_connected(callback):
-		editor.ui_state_changed.connect(callback)
 	_sync_from_editor()
 
 
@@ -237,21 +233,9 @@ func _on_slot_reset_pressed(slot_id: String) -> void:
 
 func _open_file_dialog(title: String, filters: PackedStringArray, on_pick: Callable) -> void:
 	if _file_dialog == null:
-		_file_dialog = FileDialog.new()
-		_file_dialog.use_native_dialog = true
-		_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
-		_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-		_file_dialog.min_size = Vector2i(760, 520)
-		add_child(_file_dialog)
-
-	_file_dialog.title = title
-	_file_dialog.filters = filters
-	if editor and not editor.get_last_open_dir().is_empty():
-		_file_dialog.current_dir = editor.get_last_open_dir()
-	for sig in _file_dialog.file_selected.get_connections():
-		_file_dialog.file_selected.disconnect(sig.callable)
-	_file_dialog.file_selected.connect(on_pick, CONNECT_ONE_SHOT)
-	_file_dialog.popup_centered()
+		_file_dialog = FileDialogHelper.new(self)
+	var dir := editor.get_last_open_dir() if editor != null else ""
+	_file_dialog.open(title, filters, on_pick, dir)
 
 
 func _on_detail_density_changed(value: float) -> void:

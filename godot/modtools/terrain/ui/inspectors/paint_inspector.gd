@@ -6,7 +6,6 @@ extends TerrainInspector
 ## shared brush controls. Code-first; built into the inspector host by the
 ## terrain workspace.
 
-const BrushControlsScene = preload("res://modtools/terrain/ui/widgets/brush_controls.tscn")
 
 enum SubTool { DETAILS, COLOR, SURFACE }
 
@@ -28,7 +27,6 @@ var _clone_clear: Button
 var _surface_preset: OptionButton
 var _surface_index_spin: SpinBox
 var _surface_current: Label
-var _brush: BrushControls
 
 
 func build_main(host: Control) -> void:
@@ -115,8 +113,7 @@ func build_main(host: Control) -> void:
 	_surface_current = _add_muted_label(surface_panel, "")
 
 	box.add_child(HSeparator.new())
-	_brush = BrushControlsScene.instantiate()
-	box.add_child(_brush)
+	_attach_brush_controls(box)
 
 	_color_picker.color_changed.connect(_on_color_changed)
 	_color_picker.pressed.connect(_on_color_picker_pressed)
@@ -124,9 +121,6 @@ func build_main(host: Control) -> void:
 	_clone_clear.pressed.connect(_on_clone_clear_pressed)
 	_surface_preset.item_selected.connect(_on_surface_preset_selected)
 	_surface_index_spin.value_changed.connect(_on_surface_index_changed)
-	_brush.radius_changed.connect(_on_brush_radius)
-	_brush.strength_changed.connect(_on_brush_strength)
-	_brush.hardness_changed.connect(_on_brush_hardness)
 
 	_populate_surface_presets()
 	_show_sub(SubTool.COLOR)
@@ -154,7 +148,7 @@ func refresh() -> void:
 	if not _ui_alive() or terrain_editor == null:
 		return
 	_syncing = true
-	_brush.set_values(terrain_editor.brush_radius, terrain_editor.brush_strength, terrain_editor.brush_hardness)
+	_sync_brush_values()
 	var channel := terrain_editor.get_paint_detail_channel()
 	for i in _detail_channel_buttons.size():
 		_detail_channel_buttons[i].set_pressed_no_signal(i == channel and terrain_editor.current_tool == TerrainEditor.Tool.PAINT_DETAIL)
@@ -241,22 +235,6 @@ func _on_surface_index_changed(v: float) -> void:
 	terrain_editor.set_tool(TerrainEditor.Tool.SURFACE_PAINT)
 
 
-func _on_brush_radius(v: float) -> void:
-	if _syncing or terrain_editor == null:
-		return
-	terrain_editor.set_brush_radius_value(v)
-
-
-func _on_brush_strength(v: float) -> void:
-	if _syncing or terrain_editor == null:
-		return
-	terrain_editor.set_brush_strength_value(v)
-
-
-func _on_brush_hardness(v: float) -> void:
-	if _syncing or terrain_editor == null:
-		return
-	terrain_editor.set_brush_hardness_value(v)
 
 
 func _populate_surface_presets() -> void:
