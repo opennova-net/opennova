@@ -39,6 +39,7 @@ public:
 	bool paint_circle(int center_x, int center_y, int radius, double hardness, double strength, int index);
 	int count_index(int index) const;
 	int remap_index(int from_index, int to_index);
+	int remap_indices(const Dictionary &from_to);
 	int clear_index(int index);
 
 	PackedByteArray get_indices() const;

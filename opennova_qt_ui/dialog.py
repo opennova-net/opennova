@@ -423,7 +423,7 @@ if is_available():
             caps = self._backend.capabilities()
             self.blend_check = QtWidgets.QCheckBox("Blender scene (.blend)") if caps.supports_blend else None
             self.max_check = QtWidgets.QCheckBox("3ds Max scene (.max)") if caps.supports_max else None
-            self.project_check = QtWidgets.QCheckBox("Project files (.3dp / .3da)")
+            self.project_check = QtWidgets.QCheckBox("Object workspace (.3dp)")
             self.ase_check = QtWidgets.QCheckBox("ASE (.ase)")
             for check in (
                 self.blend_check,

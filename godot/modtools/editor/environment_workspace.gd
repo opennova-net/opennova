@@ -1,5 +1,5 @@
 class_name EnvironmentEditorWorkspace
-extends "res://modtools/editor/editor_workspace.gd"
+extends EditorWorkspace
 
 # Shell adapter for the EnvFile document. The IDA-backed format/TOD behavior is
 # in libs/env (sub_53FA70, sub_53E3F0, sub_53FCC0); this file stays UI-only.
@@ -15,6 +15,15 @@ func _init(value = null) -> void:
 
 func set_environment_editor(value) -> void:
 	environment_editor = value
+
+
+func bind_to_editor(value: Node) -> void:
+	var env = value.get_environment_editor() if value != null and value.has_method("get_environment_editor") else null
+	set_environment_editor(env)
+
+
+func get_workspace_tooltip() -> String:
+	return "Edit .env weather, lighting, atmosphere, and time of day."
 
 
 func get_workspace_id() -> String:

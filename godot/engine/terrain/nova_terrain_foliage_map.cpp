@@ -2,7 +2,10 @@
 
 #include "util/pcx_texture_bridge.h"
 
+#include <godot_cpp/variant/array.hpp>
+
 #include <algorithm>
+#include <array>
 #include <cstring>
 
 using namespace godot;
@@ -29,6 +32,7 @@ void NovaTerrainFoliageMap::_bind_methods() {
 	                     &NovaTerrainFoliageMap::paint_circle);
 	ClassDB::bind_method(D_METHOD("count_index", "index"), &NovaTerrainFoliageMap::count_index);
 	ClassDB::bind_method(D_METHOD("remap_index", "from_index", "to_index"), &NovaTerrainFoliageMap::remap_index);
+	ClassDB::bind_method(D_METHOD("remap_indices", "from_to"), &NovaTerrainFoliageMap::remap_indices);
 	ClassDB::bind_method(D_METHOD("clear_index", "index"), &NovaTerrainFoliageMap::clear_index);
 	ClassDB::bind_method(D_METHOD("get_indices"), &NovaTerrainFoliageMap::get_indices);
 	ClassDB::bind_method(D_METHOD("set_indices", "data"), &NovaTerrainFoliageMap::set_indices);
@@ -119,6 +123,26 @@ int NovaTerrainFoliageMap::remap_index(int from_index, int to_index) {
 			foliage_map,
 			static_cast<uint8_t>(std::clamp(from_index, 0, 255)),
 			static_cast<uint8_t>(std::clamp(to_index, 0, 255)));
+	if (changed > 0) {
+		_refresh_preview_texture();
+		emit_changed();
+	}
+	return changed;
+}
+
+int NovaTerrainFoliageMap::remap_indices(const Dictionary &from_to) {
+	std::array<uint8_t, 256> lut;
+	for (int i = 0; i < 256; ++i) {
+		lut[static_cast<size_t>(i)] = static_cast<uint8_t>(i);
+	}
+	const Array keys = from_to.keys();
+	for (int i = 0; i < keys.size(); ++i) {
+		const Variant key = keys[i];
+		const int from = std::clamp(static_cast<int>(key), 0, 255);
+		const int to = std::clamp(static_cast<int>(from_to[key]), 0, 255);
+		lut[static_cast<size_t>(from)] = static_cast<uint8_t>(to);
+	}
+	const int changed = opennova::foliage_remap_indices(foliage_map, lut);
 	if (changed > 0) {
 		_refresh_preview_texture();
 		emit_changed();

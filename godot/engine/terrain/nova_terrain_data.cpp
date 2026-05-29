@@ -5,6 +5,9 @@
 #include "nova_terrain_tile_info.h"
 
 #include <til/til_io.h>
+#include <terrain/brush.h>
+#include <terrain/cdep_constraint.h>
+#include <terrain/coords.h>
 #include <terrain/lighting.h>
 
 #include <godot_cpp/classes/image.hpp>
@@ -27,6 +30,83 @@
 using namespace godot;
 
 namespace {
+
+// Copy a FORMAT_RF heightmap image's floats out for a CDEP kernel pass. Returns
+// false (leaving out untouched) if the image is missing, the wrong format, or
+// too small. memcpy keeps it free of alignment / strict-aliasing concerns.
+static bool extract_heightmap_floats(const Ref<Image> &image, std::vector<float> &out, int &out_w, int &out_h) {
+	if (image.is_null() || image->get_format() != Image::FORMAT_RF) {
+		return false;
+	}
+	out_w = image->get_width();
+	out_h = image->get_height();
+	const int64_t count = static_cast<int64_t>(out_w) * static_cast<int64_t>(out_h);
+	if (count <= 0) {
+		return false;
+	}
+	const PackedByteArray pixels = image->get_data();
+	if (pixels.size() < count * 4) {
+		return false;
+	}
+	out.resize(static_cast<size_t>(count));
+	std::memcpy(out.data(), pixels.ptr(), static_cast<size_t>(count) * sizeof(float));
+	return true;
+}
+
+// Write a mutated mip-0 buffer back into the SAME Image, PRESERVING its mipmap
+// state. The editor builds ImageTexture from these images and calls update(),
+// which rejects a mismatched mipmap flag; stripping mipmaps (set_data with
+// use_mipmaps=false on a mipmapped image) would freeze the live preview after
+// the first dab. When the image has mipmaps we overwrite only mip-0 and keep the
+// existing (now-stale) lower levels and the flag, exactly as the old set_pixel
+// path did; otherwise we write the flat mip-0 buffer.
+static void write_image_mip0_preserving_mipmaps(const Ref<Image> &image, int w, int h,
+                                                Image::Format format, const uint8_t *mip0, size_t mip0_bytes) {
+	if (image->has_mipmaps()) {
+		PackedByteArray pixels = image->get_data();
+		std::memcpy(pixels.ptrw(), mip0, mip0_bytes);
+		image->set_data(w, h, true, format, pixels);
+	} else {
+		PackedByteArray pixels;
+		pixels.resize(static_cast<int64_t>(mip0_bytes));
+		std::memcpy(pixels.ptrw(), mip0, mip0_bytes);
+		image->set_data(w, h, false, format, pixels);
+	}
+}
+
+// Write CDEP-clamped / brushed floats back into the same Image object (FORMAT_RF)
+// so the editor's shared ref and get_depth_raw16() observe the change.
+static void write_heightmap_floats(const Ref<Image> &image, const std::vector<float> &heights, int w, int h) {
+	write_image_mip0_preserving_mipmaps(image, w, h, Image::FORMAT_RF,
+	                                    reinterpret_cast<const uint8_t *>(heights.data()),
+	                                    heights.size() * sizeof(float));
+}
+
+// RGBA8 byte buffer round-trip for the colour/blend brushes. The editable
+// colormap/blendmap are always FORMAT_RGBA8 (created via _create_color_image,
+// loaded via normalize_image), so the brush kernels read/write raw bytes.
+static bool extract_rgba8(const Ref<Image> &image, std::vector<uint8_t> &out, int &out_w, int &out_h) {
+	if (image.is_null() || image->get_format() != Image::FORMAT_RGBA8) {
+		return false;
+	}
+	out_w = image->get_width();
+	out_h = image->get_height();
+	const int64_t count = static_cast<int64_t>(out_w) * static_cast<int64_t>(out_h);
+	if (count <= 0) {
+		return false;
+	}
+	const PackedByteArray pixels = image->get_data();
+	if (pixels.size() < count * 4) {
+		return false;
+	}
+	out.resize(static_cast<size_t>(count) * 4);
+	std::memcpy(out.data(), pixels.ptr(), out.size());
+	return true;
+}
+
+static void write_rgba8(const Ref<Image> &image, const std::vector<uint8_t> &bytes, int w, int h) {
+	write_image_mip0_preserving_mipmaps(image, w, h, Image::FORMAT_RGBA8, bytes.data(), bytes.size());
+}
 
 static Ref<NovaTerrainFoliageDef> foliage_def_to_object(const opennova::FoliageDef &def) {
 	Ref<NovaTerrainFoliageDef> object;
@@ -92,24 +172,40 @@ bool resolve_world_sample(const opennova::TrnConfig &trn,
                           float world_x,
                           float world_z,
                           TerrainWorldSample &out_sample) {
+	// Runtime world->source mapping (jodemo.exe Terrain_SampleHeightBilinear
+	// @0x5C6770 / Terrain_GetFoliageMapValue @0x5C65E0): & 0xF grid wrap, raw
+	// sector id, unclamped local offset. Delegates to the shared kernel so the
+	// editor brush paths (which add bounds-reject / id-clamp / local-clamp via
+	// coords_editor_options) and this sampler stay one implementation.
 	out_sample = TerrainWorldSample{};
-	out_sample.sector_sx = static_cast<int>(std::floor(world_x / 512.0f));
-	out_sample.sector_sz = static_cast<int>(std::floor(world_z / 512.0f));
+	opennova::terrain::SectorLayout layout;
+	layout.sector_grid = &trn.sector_grid[0][0];
+	layout.origin_x = trn.origin_x;
+	layout.origin_y = trn.origin_y;
+	const opennova::terrain::CoordsResult<float> r = opennova::terrain::coords_world_to_source<float>(
+	        layout, world_x, world_z, opennova::terrain::coords_runtime_options());
+	out_sample.sector_sx = r.sector_sx;
+	out_sample.sector_sz = r.sector_sz;
+	out_sample.sector_id = r.sector_id;
+	out_sample.source_x = r.source_x;
+	out_sample.source_z = r.source_z;
+	return r.valid;
+}
 
-	const int grid_x = out_sample.sector_sx - trn.origin_x;
-	const int grid_z = out_sample.sector_sz - trn.origin_y;
-	out_sample.sector_id = trn.sector_grid[grid_z & 0xF][grid_x & 0xF];
-	if (out_sample.sector_id <= 0) {
-		return false;
-	}
-
-	const float local_x = world_x - static_cast<float>(out_sample.sector_sx * 512);
-	const float local_z = world_z - static_cast<float>(out_sample.sector_sz * 512);
-	const float quadrant_x = (out_sample.sector_id == 3 || out_sample.sector_id == 4) ? 512.0f : 0.0f;
-	const float quadrant_z = (out_sample.sector_id == 2 || out_sample.sector_id == 4) ? 512.0f : 0.0f;
-	out_sample.source_x = quadrant_x + local_x;
-	out_sample.source_z = quadrant_z + local_z;
-	return true;
+// Builds the editor-mode sector layout from the GDScript-exposed members. The
+// authored extent is clamped to [1,16] to match EditorTerrainMesh.set_sector_layout
+// so the bounds-reject guard rejects exactly the cells the editor mesh does.
+// Caller must ensure grid has >= 256 entries.
+opennova::terrain::SectorLayout editor_layout_from(const godot::PackedInt32Array &grid,
+                                                   int origin_x, int origin_y,
+                                                   int sector_count, int sector_rows) {
+	opennova::terrain::SectorLayout layout;
+	layout.sector_grid = grid.ptr();
+	layout.origin_x = origin_x;
+	layout.origin_y = origin_y;
+	layout.sector_count = std::clamp(sector_count, 1, 16);
+	layout.sector_rows = std::clamp(sector_rows, 1, 16);
+	return layout;
 }
 
 } // namespace
@@ -139,6 +235,32 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load"), &NovaTerrainData::load);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaTerrainData::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_depth_raw16"), &NovaTerrainData::get_depth_raw16);
+	ClassDB::bind_method(D_METHOD("set_heightmap_image", "image"), &NovaTerrainData::set_heightmap_image);
+	ClassDB::bind_method(D_METHOD("get_heightmap_image"), &NovaTerrainData::get_heightmap_image);
+	ClassDB::bind_method(D_METHOD("heightmap_image_from_raw16", "raw16"), &NovaTerrainData::heightmap_image_from_raw16);
+	ClassDB::bind_method(D_METHOD("set_colormap_image", "image"), &NovaTerrainData::set_colormap_image);
+	ClassDB::bind_method(D_METHOD("get_colormap_image"), &NovaTerrainData::get_colormap_image);
+	ClassDB::bind_method(D_METHOD("set_blendmap_image", "image"), &NovaTerrainData::set_blendmap_image);
+	ClassDB::bind_method(D_METHOD("get_blendmap_image"), &NovaTerrainData::get_blendmap_image);
+	ClassDB::bind_method(D_METHOD("cdep_clamp_blocks_in_rect", "rect"), &NovaTerrainData::cdep_clamp_blocks_in_rect);
+	ClassDB::bind_method(D_METHOD("cdep_count_violations"), &NovaTerrainData::cdep_count_violations);
+	ClassDB::bind_method(D_METHOD("cdep_clamp_all_violations"), &NovaTerrainData::cdep_clamp_all_violations);
+	ClassDB::bind_method(D_METHOD("brush_raise_lower", "cx", "cz", "radius", "amount", "hardness", "clip"),
+	                     &NovaTerrainData::brush_raise_lower);
+	ClassDB::bind_method(D_METHOD("brush_smooth", "cx", "cz", "radius", "strength", "hardness", "clip"),
+	                     &NovaTerrainData::brush_smooth);
+	ClassDB::bind_method(D_METHOD("brush_flatten", "cx", "cz", "radius", "target_height", "strength", "hardness", "clip"),
+	                     &NovaTerrainData::brush_flatten);
+	ClassDB::bind_method(D_METHOD("brush_sample_flatten_target", "world_x", "world_z"),
+	                     &NovaTerrainData::brush_sample_flatten_target);
+	ClassDB::bind_method(D_METHOD("brush_blend_paint", "channel", "cx", "cz", "radius", "strength", "hardness", "clip"),
+	                     &NovaTerrainData::brush_blend_paint);
+	ClassDB::bind_method(D_METHOD("brush_colormap_paint", "color", "cx", "cz", "radius", "strength", "hardness", "clip"),
+	                     &NovaTerrainData::brush_colormap_paint);
+	ClassDB::bind_method(D_METHOD("brush_colormap_clone", "source", "src_cx", "src_cy", "dst_cx", "dst_cy", "radius", "strength", "hardness", "clip"),
+	                     &NovaTerrainData::brush_colormap_clone);
+	ClassDB::bind_method(D_METHOD("brush_sample_colormap", "world_x", "world_z"),
+	                     &NovaTerrainData::brush_sample_colormap);
 	ClassDB::bind_method(D_METHOD("get_height", "world_pos"), &NovaTerrainData::get_height);
 	ClassDB::bind_method(D_METHOD("get_height_world", "world_pos"), &NovaTerrainData::get_height_world);
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &NovaTerrainData::get_height_world_bilinear);
@@ -146,6 +268,10 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_modulated_colormap_color_world", "world_x", "world_z", "light_color"),
 	                     &NovaTerrainData::get_modulated_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
+	ClassDB::bind_method(D_METHOD("world_to_source_coords", "world_x", "world_z"), &NovaTerrainData::world_to_source_coords);
+	ClassDB::bind_method(D_METHOD("world_to_cell_source_coords", "world_x", "world_z", "row", "col"),
+	                     &NovaTerrainData::world_to_cell_source_coords);
+	ClassDB::bind_method(D_METHOD("get_cell_atlas_rect", "row", "col"), &NovaTerrainData::get_cell_atlas_rect);
 	ClassDB::bind_method(D_METHOD("get_tile_count"), &NovaTerrainData::get_tile_count);
 	ClassDB::bind_method(D_METHOD("load_foliage_indices"), &NovaTerrainData::load_foliage_indices);
 	ClassDB::bind_method(D_METHOD("set_sector_grid", "value"), &NovaTerrainData::set_sector_grid);
@@ -791,6 +917,31 @@ bool NovaTerrainData::is_loaded() const {
 
 PackedByteArray NovaTerrainData::get_depth_raw16() const {
 	PackedByteArray out;
+
+	// Prefer the live editable heightmap (FORMAT_RF, 1 float per cell). The
+	// conversion mirrors the former GDScript image_to_raw16 byte-for-byte:
+	// value = clamp(int(height * 256), 0, 65535), stored little-endian.
+	if (heightmap_image.is_valid()) {
+		const int w = heightmap_image->get_width();
+		const int h = heightmap_image->get_height();
+		const int64_t count = static_cast<int64_t>(w) * static_cast<int64_t>(h);
+		const PackedByteArray pixels = heightmap_image->get_data();
+		if (count > 0 && pixels.size() >= count * 4) {
+			out.resize(count * 2);
+			uint8_t *dst = out.ptrw();
+			const uint8_t *src = pixels.ptr();
+			for (int64_t i = 0; i < count; ++i) {
+				float f;
+				std::memcpy(&f, src + i * 4, sizeof(float));
+				int value = static_cast<int>(static_cast<double>(f) * 256.0);
+				value = std::clamp(value, 0, 65535);
+				dst[i * 2] = static_cast<uint8_t>(value & 0xFF);
+				dst[i * 2 + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+			}
+			return out;
+		}
+	}
+
 	if (cpt.depth_buffer.empty()) {
 		return out;
 	}
@@ -803,6 +954,217 @@ PackedByteArray NovaTerrainData::get_depth_raw16() const {
 		dst[i * 2u + 1u] = static_cast<uint8_t>((value >> 8u) & 0xFFu);
 	}
 	return out;
+}
+
+void NovaTerrainData::set_heightmap_image(const Ref<Image> &p_image) {
+	heightmap_image = p_image;
+}
+
+Ref<Image> NovaTerrainData::get_heightmap_image() const {
+	return heightmap_image;
+}
+
+void NovaTerrainData::set_colormap_image(const Ref<Image> &p_image) {
+	colormap_image = p_image;
+}
+
+Ref<Image> NovaTerrainData::get_colormap_image() const {
+	return colormap_image;
+}
+
+void NovaTerrainData::set_blendmap_image(const Ref<Image> &p_image) {
+	blendmap_image = p_image;
+}
+
+Ref<Image> NovaTerrainData::get_blendmap_image() const {
+	return blendmap_image;
+}
+
+int NovaTerrainData::cdep_count_violations() const {
+	std::vector<float> heights;
+	int w = 0, h = 0;
+	if (!extract_heightmap_floats(heightmap_image, heights, w, h)) {
+		return 0;
+	}
+	return opennova::terrain::cdep_count_violations(heights.data(), w, h);
+}
+
+int NovaTerrainData::cdep_clamp_all_violations() {
+	std::vector<float> heights;
+	int w = 0, h = 0;
+	if (!extract_heightmap_floats(heightmap_image, heights, w, h)) {
+		return 0;
+	}
+	const int clamped = opennova::terrain::cdep_clamp_all_violations(heights.data(), w, h);
+	if (clamped > 0) {
+		write_heightmap_floats(heightmap_image, heights, w, h);
+	}
+	return clamped;
+}
+
+int NovaTerrainData::cdep_clamp_blocks_in_rect(const Rect2i &p_rect) {
+	std::vector<float> heights;
+	int w = 0, h = 0;
+	if (!extract_heightmap_floats(heightmap_image, heights, w, h)) {
+		return 0;
+	}
+	const opennova::terrain::CdepRect rect{
+		p_rect.position.x,
+		p_rect.position.y,
+		p_rect.position.x + p_rect.size.x,
+		p_rect.position.y + p_rect.size.y,
+	};
+	const int clamped = opennova::terrain::cdep_clamp_blocks_in_rect(heights.data(), w, h, rect);
+	if (clamped > 0) {
+		write_heightmap_floats(heightmap_image, heights, w, h);
+	}
+	return clamped;
+}
+
+// Height brushes (libs/terrain/brush.h). Each pulls the editable FORMAT_RF
+// heightmap once, mutates the dab via the shared kernel, and writes it back to
+// the SAME Image so the editor's shared ref and get_depth_raw16() stay current.
+// The brush session calls cdep_clamp_blocks_in_rect after each dab.
+void NovaTerrainData::brush_raise_lower(int cx, int cz, int radius, double amount, double hardness,
+                                        const Rect2i &p_clip) {
+	std::vector<float> heights;
+	int w = 0, h = 0;
+	if (!extract_heightmap_floats(heightmap_image, heights, w, h)) {
+		return;
+	}
+	const opennova::terrain::BrushRect clip{p_clip.position.x, p_clip.position.y, p_clip.size.x, p_clip.size.y};
+	if (opennova::terrain::brush_raise_lower(heights.data(), w, h, cx, cz, radius, amount, hardness, clip)) {
+		write_heightmap_floats(heightmap_image, heights, w, h);
+	}
+}
+
+void NovaTerrainData::brush_smooth(int cx, int cz, int radius, double strength, double hardness,
+                                   const Rect2i &p_clip) {
+	std::vector<float> heights;
+	int w = 0, h = 0;
+	if (!extract_heightmap_floats(heightmap_image, heights, w, h)) {
+		return;
+	}
+	const opennova::terrain::BrushRect clip{p_clip.position.x, p_clip.position.y, p_clip.size.x, p_clip.size.y};
+	if (opennova::terrain::brush_smooth(heights.data(), w, h, cx, cz, radius, strength, hardness, clip)) {
+		write_heightmap_floats(heightmap_image, heights, w, h);
+	}
+}
+
+void NovaTerrainData::brush_flatten(int cx, int cz, int radius, double target_height, double strength,
+                                    double hardness, const Rect2i &p_clip) {
+	std::vector<float> heights;
+	int w = 0, h = 0;
+	if (!extract_heightmap_floats(heightmap_image, heights, w, h)) {
+		return;
+	}
+	const opennova::terrain::BrushRect clip{p_clip.position.x, p_clip.position.y, p_clip.size.x, p_clip.size.y};
+	if (opennova::terrain::brush_flatten(heights.data(), w, h, cx, cz, radius, target_height, strength, hardness, clip)) {
+		write_heightmap_floats(heightmap_image, heights, w, h);
+	}
+}
+
+double NovaTerrainData::brush_sample_flatten_target(double world_x, double world_z) const {
+	// Mirrors TerrainEditorBrushes.sample_flatten_target: nearest-pixel sample of
+	// the editable heightmap at int(world)-truncated, edge-clamped coords.
+	if (heightmap_image.is_null() || heightmap_image->get_format() != Image::FORMAT_RF) {
+		return 0.0;
+	}
+	const int img_w = heightmap_image->get_width();
+	const int img_h = heightmap_image->get_height();
+	if (img_w <= 0 || img_h <= 0) {
+		return 0.0;
+	}
+	const int sx = std::clamp(static_cast<int>(world_x), 0, img_w - 1);
+	const int sz = std::clamp(static_cast<int>(world_z), 0, img_h - 1);
+	return static_cast<double>(heightmap_image->get_pixel(sx, sz).r);
+}
+
+// Colour / blend brushes (libs/terrain/brush.h). blend paints the editable
+// detail-blend buffer; colormap paint/clone the editable colour buffer. Each
+// pulls the RGBA8 bytes once, mutates the dab via the byte-parity kernel, and
+// writes back to the SAME Image (only when a pixel was touched).
+void NovaTerrainData::brush_blend_paint(int channel, int cx, int cz, int radius, double strength,
+                                        double hardness, const Rect2i &p_clip) {
+	std::vector<uint8_t> bytes;
+	int w = 0, h = 0;
+	if (!extract_rgba8(blendmap_image, bytes, w, h)) {
+		return;
+	}
+	const opennova::terrain::BrushRect clip{p_clip.position.x, p_clip.position.y, p_clip.size.x, p_clip.size.y};
+	if (opennova::terrain::brush_blend_paint(bytes.data(), w, h, channel, cx, cz, radius, strength, hardness, clip)) {
+		write_rgba8(blendmap_image, bytes, w, h);
+	}
+}
+
+void NovaTerrainData::brush_colormap_paint(const Color &color, int cx, int cz, int radius, double strength,
+                                           double hardness, const Rect2i &p_clip) {
+	std::vector<uint8_t> bytes;
+	int w = 0, h = 0;
+	if (!extract_rgba8(colormap_image, bytes, w, h)) {
+		return;
+	}
+	const opennova::terrain::BrushRect clip{p_clip.position.x, p_clip.position.y, p_clip.size.x, p_clip.size.y};
+	if (opennova::terrain::brush_colormap_paint(bytes.data(), w, h, color.r, color.g, color.b, color.a,
+	                                            cx, cz, radius, strength, hardness, clip)) {
+		write_rgba8(colormap_image, bytes, w, h);
+	}
+}
+
+void NovaTerrainData::brush_colormap_clone(const Ref<Image> &source, int src_cx, int src_cy, int dst_cx,
+                                           int dst_cy, int radius, double strength, double hardness,
+                                           const Rect2i &p_clip) {
+	std::vector<uint8_t> dst;
+	int w = 0, h = 0;
+	if (!extract_rgba8(colormap_image, dst, w, h)) {
+		return;
+	}
+	std::vector<uint8_t> src;
+	int sw = 0, sh = 0;
+	if (!extract_rgba8(source, src, sw, sh)) {
+		return;
+	}
+	const opennova::terrain::BrushRect clip{p_clip.position.x, p_clip.position.y, p_clip.size.x, p_clip.size.y};
+	if (opennova::terrain::brush_colormap_clone(dst.data(), w, h, src.data(), sw, sh, src_cx, src_cy,
+	                                            dst_cx, dst_cy, radius, strength, hardness, clip)) {
+		write_rgba8(colormap_image, dst, w, h);
+	}
+}
+
+Color NovaTerrainData::brush_sample_colormap(double world_x, double world_z) const {
+	// Mirrors TerrainEditorBrushes.sample_colormap: nearest-pixel get_pixel at
+	// int-truncated, edge-clamped coords (single pixel, so no full-buffer copy).
+	if (colormap_image.is_null() || colormap_image->get_format() != Image::FORMAT_RGBA8) {
+		return Color(0.0f, 0.0f, 0.0f, 1.0f);
+	}
+	const int img_w = colormap_image->get_width();
+	const int img_h = colormap_image->get_height();
+	if (img_w <= 0 || img_h <= 0) {
+		return Color(0.0f, 0.0f, 0.0f, 1.0f);
+	}
+	const int sx = std::clamp(static_cast<int>(world_x), 0, img_w - 1);
+	const int sz = std::clamp(static_cast<int>(world_z), 0, img_h - 1);
+	return colormap_image->get_pixel(sx, sz);
+}
+
+Ref<Image> NovaTerrainData::heightmap_image_from_raw16(const PackedByteArray &p_raw16) const {
+	const int64_t pixel_count = p_raw16.size() / 2;
+	const int side = static_cast<int>(std::llround(std::sqrt(static_cast<double>(pixel_count))));
+	if (side <= 0 || static_cast<int64_t>(side) * side != pixel_count) {
+		return Ref<Image>();
+	}
+
+	PackedByteArray floats;
+	floats.resize(pixel_count * 4);
+	uint8_t *dst = floats.ptrw();
+	const uint8_t *src = p_raw16.ptr();
+	for (int64_t i = 0; i < pixel_count; ++i) {
+		const int low = src[i * 2];
+		const int high = src[i * 2 + 1];
+		const float height = static_cast<float>(static_cast<double>(low | (high << 8)) / 256.0);
+		std::memcpy(dst + i * 4, &height, sizeof(float));
+	}
+	return Image::create_from_data(side, side, false, Image::FORMAT_RF, floats);
 }
 
 float NovaTerrainData::get_height(const Vector3 &p_world_pos) const {
@@ -910,6 +1272,54 @@ Color NovaTerrainData::get_modulated_colormap_color_world(float world_x,
 	             static_cast<float>((modulated >> 8) & 0xFFu) / 255.0f,
 	             static_cast<float>(modulated & 0xFFu) / 255.0f,
 	             static_cast<float>((modulated >> 24) & 0xFFu) / 255.0f);
+}
+
+Vector2 NovaTerrainData::world_to_source_coords(double world_x, double world_z) const {
+	// Editor brush/eyedropper world->atlas mapping. Mirrors
+	// EditorTerrainMesh.world_to_source_coords: bounds-reject + clampi(id,0,4) +
+	// clampf(local, 0, 512-0.001), computed in double (GDScript float is 64-bit)
+	// then stored to a float32 Vector2 exactly as the GDScript original did.
+	// Returns the (-1,-1) sentinel for out-of-extent / empty cells.
+	if (sector_grid.size() < 256) {
+		return Vector2(-1.0f, -1.0f);
+	}
+	const opennova::terrain::SectorLayout layout =
+	        editor_layout_from(sector_grid, origin_x, origin_y, sector_count, sector_rows);
+	const opennova::terrain::CoordsResult<double> r = opennova::terrain::coords_world_to_source<double>(
+	        layout, world_x, world_z, opennova::terrain::coords_editor_options());
+	if (!r.valid) {
+		return Vector2(-1.0f, -1.0f);
+	}
+	return Vector2(static_cast<real_t>(r.source_x), static_cast<real_t>(r.source_z));
+}
+
+Vector2 NovaTerrainData::world_to_cell_source_coords(double world_x, double world_z, int row, int col) const {
+	// Explicit-cell variant with an UNCLAMPED local offset (the caller owns the
+	// cell choice). Mirrors EditorTerrainMesh.world_to_cell_source_coords; returns
+	// the (-1e9,-1e9) sentinel for an empty / out-of-extent cell.
+	if (sector_grid.size() < 256) {
+		return Vector2(-1e9f, -1e9f);
+	}
+	const opennova::terrain::SectorLayout layout =
+	        editor_layout_from(sector_grid, origin_x, origin_y, sector_count, sector_rows);
+	const opennova::terrain::CellCoordsResult<double> r =
+	        opennova::terrain::coords_world_to_cell_source<double>(layout, world_x, world_z, row, col);
+	if (!r.valid) {
+		return Vector2(-1e9f, -1e9f);
+	}
+	return Vector2(static_cast<real_t>(r.source_x), static_cast<real_t>(r.source_z));
+}
+
+Rect2i NovaTerrainData::get_cell_atlas_rect(int row, int col) const {
+	// 512x512 quadrant window into the 1024 atlas for a cell, or a zero rect for
+	// an empty / out-of-extent cell. Mirrors EditorTerrainMesh.get_cell_atlas_rect.
+	if (sector_grid.size() < 256) {
+		return Rect2i(0, 0, 0, 0);
+	}
+	const opennova::terrain::SectorLayout layout =
+	        editor_layout_from(sector_grid, origin_x, origin_y, sector_count, sector_rows);
+	const opennova::terrain::CoordsRect r = opennova::terrain::coords_cell_atlas_rect(layout, row, col);
+	return Rect2i(r.x, r.z, r.w, r.h);
 }
 
 int NovaTerrainData::get_tile_count() const {

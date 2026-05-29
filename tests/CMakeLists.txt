@@ -80,6 +80,33 @@ target_link_libraries(resource_index_test PRIVATE opennova_resource_index)
 target_include_directories(resource_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index COMMAND resource_index_test)
 
+# OED object workspace/export tests
+add_executable(oed_build_model_test oed/build_model_test.cpp)
+target_link_libraries(oed_build_model_test PRIVATE opennova_oed opennova_threedi opennova_tdp opennova_ase)
+target_include_directories(oed_build_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME oed_build_model COMMAND oed_build_model_test)
+
+add_executable(oed_export_3di_test oed/export_3di_test.cpp)
+target_link_libraries(oed_export_3di_test PRIVATE opennova_oed opennova_threedi opennova_tdp opennova_ase)
+target_include_directories(oed_export_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME oed_export_3di COMMAND oed_export_3di_test)
+
+add_executable(oed_error_test oed/error_test.cpp)
+target_link_libraries(oed_error_test PRIVATE opennova_oed opennova_threedi opennova_tdp opennova_ase)
+target_include_directories(oed_error_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME oed_error COMMAND oed_error_test)
+
+# Object renderer/shader tests
+foreach(test light_runtime material_classify material_eval)
+    add_executable(renderer_${test}_test renderer/${test}_test.cpp)
+    target_link_libraries(renderer_${test}_test PRIVATE opennova_renderer opennova_threedi)
+    target_include_directories(renderer_${test}_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/libs/oed/include)
+    target_compile_features(renderer_${test}_test PRIVATE cxx_std_17)
+    add_test(NAME renderer_${test} COMMAND renderer_${test}_test)
+endforeach()
+
 # ASE tests
 add_executable(ase_smoke_test ase/ase_smoke_test.cpp)
 target_link_libraries(ase_smoke_test PRIVATE opennova_ase)
@@ -106,11 +133,6 @@ add_executable(tdp_from_3di_test tdp/tdp_from_3di_test.cpp)
 target_link_libraries(tdp_from_3di_test PRIVATE opennova_tdp opennova_threedi)
 target_include_directories(tdp_from_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tdp_from_3di COMMAND tdp_from_3di_test)
-
-add_executable(tdp_3da_write_test tdp/tdp_3da_write_test.cpp)
-target_link_libraries(tdp_3da_write_test PRIVATE opennova_tdp)
-target_include_directories(tdp_3da_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME tdp_3da_write COMMAND tdp_3da_write_test)
 
 # Terrain format library tests
 add_executable(pcx_roundtrip_test pcx/pcx_roundtrip_test.cpp)
@@ -142,6 +164,11 @@ add_executable(foliage_map_test foliage/foliage_map_test.cpp)
 target_link_libraries(foliage_map_test PRIVATE opennova_foliage)
 target_include_directories(foliage_map_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME foliage_map COMMAND foliage_map_test)
+
+add_executable(foliage_map_remap_indices_test foliage/foliage_map_remap_indices_test.cpp)
+target_link_libraries(foliage_map_remap_indices_test PRIVATE opennova_foliage)
+target_include_directories(foliage_map_remap_indices_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME foliage_map_remap_indices COMMAND foliage_map_remap_indices_test)
 
 # Foliage placement + dispatcher parity tests — exercise sub_5C0240 / sub_5C1940
 # invariants (deterministic PRNG, 21-cap, 4-quadrant walk, 128-LRU, 8-frame
@@ -233,6 +260,36 @@ add_executable(cdep_overflow_guard_test trngen/cdep_overflow_guard_test.cpp)
 target_link_libraries(cdep_overflow_guard_test PRIVATE opennova_terrain opennova_cpt)
 target_include_directories(cdep_overflow_guard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cdep_overflow_guard COMMAND cdep_overflow_guard_test)
+
+# CDEP per-block range constraint: the editor-side raw16 clamp/count kernel,
+# ported from terrain_editor_cdep_constraint.gd into libs/terrain.
+add_executable(cdep_constraint_test trngen/cdep_constraint_test.cpp)
+target_link_libraries(cdep_constraint_test PRIVATE opennova_terrain)
+target_include_directories(cdep_constraint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cdep_constraint COMMAND cdep_constraint_test)
+
+# Terrain world->source coordinate transform kernel (libs/terrain/coords).
+# Characterizes the runtime resolve_world_sample formula plus the editor-mode
+# guard divergences (bounds-reject, id-clamp, local-clamp) ported from
+# EditorTerrainMesh.world_to_source_coords / world_to_cell_source_coords.
+add_executable(coords_test trngen/coords_test.cpp)
+target_link_libraries(coords_test PRIVATE opennova_terrain)
+target_include_directories(coords_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME coords COMMAND coords_test)
+
+# Height brush kernels (libs/terrain/brush): raise/lower, smooth (two-pass),
+# flatten + the shared smoothstep falloff, ported from terrain_editor_brushes.gd.
+add_executable(brush_height_test trngen/brush_height_test.cpp)
+target_link_libraries(brush_height_test PRIVATE opennova_terrain)
+target_include_directories(brush_height_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME brush_height COMMAND brush_height_test)
+
+# Colour/blend brush kernels (libs/terrain/brush) on RGBA8 buffers. Byte-parity
+# critical: pins Godot's FORMAT_RGBA8 quantization + the blend/lerp/clone math.
+add_executable(brush_color_test trngen/brush_color_test.cpp)
+target_link_libraries(brush_color_test PRIVATE opennova_terrain)
+target_include_directories(brush_color_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME brush_color COMMAND brush_color_test)
 
 # Dvxi5 repro: exercises a post-clamp heightmap with block ranges at the
 # CDEP ceiling. Kept as a regression anchor for the fixed bake pipeline.

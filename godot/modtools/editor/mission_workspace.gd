@@ -1,24 +1,44 @@
 class_name MissionEditorWorkspace
-extends "res://modtools/editor/editor_workspace.gd"
+extends EditorWorkspace
 
 const TerrainViewportScript = preload("res://modtools/terrain/terrain_viewport.gd")
 
 var terrain_editor: Node
-var _viewport: Control
+var _mount: ViewportMount
 
 
 func _init(value: Node = null) -> void:
 	terrain_editor = value
 
 
+func _ensure_mount() -> ViewportMount:
+	if _mount == null:
+		_mount = ViewportMount.new(&"MissionViewport", func() -> Control: return TerrainViewportScript.new())
+	return _mount
+
+
 func set_terrain_editor(value: Node) -> void:
 	terrain_editor = value
-	if _viewport != null:
-		_viewport.set_terrain_editor(terrain_editor)
+	if _mount != null:
+		var viewport := _mount.get_viewport_node()
+		if viewport != null:
+			viewport.set_terrain_editor(terrain_editor)
+
+
+func bind_to_editor(value: Node) -> void:
+	set_terrain_editor(value)
+
+
+func get_workspace_tooltip() -> String:
+	return "Reserved for mission entities, objectives, and triggers."
+
+
+func shows_camera_status() -> bool:
+	return true
 
 
 func activate() -> void:
-	if terrain_editor != null and _viewport != null and _viewport.get_parent() != null:
+	if terrain_editor != null and _mount != null and _mount.is_mounted():
 		terrain_editor.set_viewport_active(true, false)
 
 
@@ -30,35 +50,30 @@ func deactivate() -> void:
 func mount_viewport(host: Control) -> void:
 	if host == null or terrain_editor == null:
 		return
-	if _viewport == null:
-		_viewport = TerrainViewportScript.new()
-		_viewport.name = "MissionViewport"
-		_viewport.set_anchors_preset(Control.PRESET_FULL_RECT)
-		_viewport.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_viewport.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_viewport.set_terrain_editor(terrain_editor)
-	_viewport.set_edit_input_enabled(false)
-	if _viewport.get_parent() == null:
-		host.add_child(_viewport)
-		_viewport.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var viewport := _ensure_mount().mount(host)
+	if viewport != null:
+		viewport.set_terrain_editor(terrain_editor)
+		viewport.set_edit_input_enabled(false)
 
 
 func unmount_viewport(_host: Control) -> void:
 	if terrain_editor != null:
 		terrain_editor.set_viewport_active(false, false)
-	if _viewport != null and _viewport.get_parent() != null:
-		_viewport.get_parent().remove_child(_viewport)
+	if _mount != null:
+		_mount.unmount()
 
 
 func release_viewport() -> void:
 	if terrain_editor != null:
 		terrain_editor.set_viewport_active(false, false)
-	if _viewport == null:
-		return
-	if _viewport.get_parent() != null:
-		_viewport.get_parent().remove_child(_viewport)
-	_viewport.free()
-	_viewport = null
+	if _mount != null:
+		_mount.release()
+
+
+func get_viewport_camera() -> Camera3D:
+	if terrain_editor != null and terrain_editor.has_method("get_editor_camera"):
+		return terrain_editor.get_editor_camera()
+	return null
 
 
 func get_workspace_id() -> String:

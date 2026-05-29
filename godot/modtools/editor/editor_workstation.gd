@@ -3,23 +3,23 @@ extends Control
 
 const TerrainWorkspaceAdapter = preload("res://modtools/editor/terrain_workspace.gd")
 const EnvironmentWorkspaceAdapter = preload("res://modtools/editor/environment_workspace.gd")
+const ObjectWorkspaceAdapter = preload("res://modtools/object/object_workspace.gd")
 const MissionWorkspaceAdapter = preload("res://modtools/editor/mission_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
+const VegAssets = preload("res://engine/terrain/veg_assets.gd")
 
-enum Workspace { TERRAIN, ENVIRONMENT, MISSION }
+enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION }
 
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
-const RESOURCE_STATE_SECTION := "resources"
-const RESOURCE_DIR_KEY := "resource_dir"
-const RESOURCE_RECURSIVE_KEY := "resource_recursive"
+# Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
+# shows the non-popup ones in order. The enum below stays only as stable id
+# constants and for the two genuine per-workspace branches (env popup, tile gizmo).
 
-const SELECTABLE_WORKSPACES := [Workspace.TERRAIN, Workspace.MISSION]
-
-enum PromptKind { NONE, UNSAVED, EXPORT, CDEP }
 
 enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 
 @onready var _project_label: Label = %ProjectLabel
+@onready var _body_row: SplitContainer = %BodyRow
+@onready var _center_right_split: SplitContainer = %CenterRightSplit
 @onready var _left_lane: PanelContainer = %LeftLane
 @onready var _workspace_rail: HBoxContainer = %WorkspaceRail
 @onready var _workspace_actions_host: VBoxContainer = %WorkspaceActionsHost
@@ -29,17 +29,17 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _viewport_lane: Control = %ViewportLane
 @onready var _viewport_host: Control = %ViewportHost
 @onready var _camera_toggle_button: Button = %CameraToggleButton
-@onready var _camera_popup: PanelContainer = %CameraPopup
+@onready var _camera_popup: PopoverPanel = %CameraPopup
 @onready var _camera_popup_close: Button = %CameraPopupClose
 @onready var _camera_settings_host: Control = %CameraSettingsHost
 @onready var _environment_toggle_button: Button = %EnvironmentToggleButton
-@onready var _environment_popup: PanelContainer = %EnvironmentPopup
+@onready var _environment_popup: PopoverPanel = %EnvironmentPopup
 @onready var _environment_popup_title: Label = %EnvironmentPopupTitle
 @onready var _environment_popup_close: Button = %EnvironmentPopupClose
 @onready var _environment_actions_host: VBoxContainer = %EnvironmentActionsHost
 @onready var _environment_inspector_host: Control = %EnvironmentInspectorHost
 @onready var _settings_toggle_button: Button = %SettingsToggleButton
-@onready var _settings_popup: PanelContainer = %SettingsPopup
+@onready var _settings_popup: PopoverPanel = %SettingsPopup
 @onready var _settings_popup_close: Button = %SettingsPopupClose
 @onready var _settings_resource_dir_edit: LineEdit = %SettingsResourceDirEdit
 @onready var _settings_browse_resource_dir_button: Button = %SettingsBrowseResourceDirButton
@@ -64,31 +64,18 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _progress_message_label: Label = %ProgressMessageLabel
 @onready var _progress_bar: ProgressBar = %ProgressBar
 @onready var _progress_counts_label: Label = %ProgressCountsLabel
-@onready var _prompt_backdrop: ColorRect = %PromptBackdrop
-@onready var _prompt_host: CenterContainer = %PromptHost
-@onready var _prompt_card: PanelContainer = %PromptCard
-@onready var _prompt_eyebrow: Label = %PromptEyebrow
-@onready var _prompt_lead: Label = %PromptLead
-@onready var _prompt_body: Label = %PromptBody
-@onready var _prompt_info_panel: PanelContainer = %PromptInfoPanel
-@onready var _prompt_info_label: Label = %PromptInfoLabel
-@onready var _prompt_format_section: VBoxContainer = %PromptFormatSection
-@onready var _prompt_format_bhd: CheckButton = %PromptFormatBHD
-@onready var _prompt_format_cdep: CheckButton = %PromptFormatCDEP
-@onready var _prompt_secondary_button: Button = %PromptSecondaryButton
-@onready var _prompt_tertiary_button: Button = %PromptTertiaryButton
-@onready var _prompt_primary_button: Button = %PromptPrimaryButton
 
 var editor: Node
 var _active_workspace_id: int = Workspace.TERRAIN
 var _workspaces: Dictionary = {}
+var _workspace_defs_cache: Array = []
 var _environment_workspace: EnvironmentEditorWorkspace
 var _workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
 var _environment_action_buttons: Dictionary = {}
+var _asset_dock_workspace_id: int = -1
 var _camera_settings_panel: Control
-var _resource_index: RefCounted
-var _resource_root_dir: String = ""
+var _resource_library := EditorResourceLibrary.new()
 var _resource_recursive: bool = true
 var _mounted_workspace_id: int = -1
 var _current_workflow_id: int = -1
@@ -99,47 +86,45 @@ var _message_until: float = 0.0
 var _export_ui_active: bool = false
 var _pending_export_dir: String = ""
 var _overlay_tween: Tween
-var _prompt_kind: int = PromptKind.NONE
-var _prompt_primary_action: Callable = Callable()
-var _prompt_secondary_action: Callable = Callable()
-var _prompt_tertiary_action: Callable = Callable()
-var _resource_browser_dialog: ConfirmationDialog
-var _resource_browser_directory_label: Label
-var _resource_browser_settings_button: Button
-var _resource_browser_search: LineEdit
-var _resource_browser_hint: Label
-var _resource_browser_list: ItemList
-var _resource_browser_browse_button: Button
-var _resource_browser_open_button: Button
-var _resource_browser_kind: String = ""
-var _resource_browser_title: String = ""
-var _resource_browser_filters: PackedStringArray = PackedStringArray()
-var _resource_browser_current_dir: String = ""
-var _resource_browser_entries: Array = []
-var _resource_browser_visible_entries: Array = []
-var _resource_browser_open_action: Callable = Callable()
+var _unsaved_dialog: ConfirmationDialog
+var _cdep_dialog: ConfirmationDialog
+var _export_dialog: ExportFlavorDialog
+var _cdep_fix_callback: Callable = Callable()
+var _resource_browser := EditorResourceBrowser.new()
+var _file_dialogs: FileDialogHelper
 
 
 func _ready() -> void:
 	_ensure_workspaces()
 	_ensure_resource_index()
 	_load_resource_state()
+	_resource_browser.setup(
+		self,
+		_resource_library,
+		_open_file_dialog,
+		func() -> void: _set_settings_popup_visible(true),
+		_current_resource_path_for_browser,
+		func() -> void: _scan_resource_root(false)
+	)
 	_build_workspace_rail()
 	_wire_camera_popup()
 	_wire_environment_popup()
 	_wire_settings_popup()
-	_wire_prompts()
 	_wire_tile_gizmo()
+	_wire_splits()
+	_apply_window_min_size()
 	_project_label.clip_text = true
 	_status_context_label.clip_text = true
 	_status_camera_label.clip_text = true
 	_status_fps_label.clip_text = true
 	set_process(true)
-	if not _resource_root_dir.is_empty():
+	if not _resource_library.get_root_dir().is_empty():
 		_scan_resource_root(false)
 	_mount_active_workspace_viewport()
 	_refresh_workspace_surface()
 	sync_from_editor_state()
+	# Split offsets land after the first container sort so clamp sees real sizes.
+	_apply_split_layout.call_deferred()
 
 
 func _exit_tree() -> void:
@@ -152,14 +137,10 @@ func _exit_tree() -> void:
 func set_editor(value: Node) -> void:
 	editor = value
 	_ensure_workspaces()
-	var terrain_workspace := _get_workspace(Workspace.TERRAIN) as TerrainEditorWorkspace
-	if terrain_workspace != null:
-		terrain_workspace.set_terrain_editor(value)
-	var mission_workspace := _get_workspace(Workspace.MISSION) as MissionEditorWorkspace
-	if mission_workspace != null:
-		mission_workspace.set_terrain_editor(value)
-	if _environment_workspace != null and value != null and value.has_method("get_environment_editor"):
-		_environment_workspace.set_environment_editor(value.get_environment_editor())
+	for workspace in _workspaces.values():
+		(workspace as EditorWorkspace).bind_to_editor(value)
+	if _environment_workspace != null:
+		_environment_workspace.bind_to_editor(value)
 	_reset_environment_popup_content()
 	_sync_camera_popup_editor()
 	_remount_active_workspace_viewport()
@@ -184,6 +165,9 @@ func sync_from_editor_state() -> void:
 	var workspace := _get_active_workspace()
 	if workspace != null:
 		workspace.sync_asset_dock()
+	# Re-apply the persisted dock widths so re-showing the right dock on a
+	# workspace switch restores its dragged size instead of the scene default.
+	_apply_split_layout()
 
 
 func _process(_delta: float) -> void:
@@ -193,32 +177,46 @@ func _process(_delta: float) -> void:
 	_refresh_tile_gizmo()
 
 
+func _workspace_defs() -> Array:
+	return [
+		WorkspaceDef.make(Workspace.TERRAIN, TerrainWorkspaceAdapter),
+		WorkspaceDef.make(Workspace.OBJECT, ObjectWorkspaceAdapter),
+		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter),
+		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true),
+	]
+
+
 func _ensure_workspaces() -> void:
-	if _workspaces.is_empty():
-		_workspaces[Workspace.TERRAIN] = TerrainWorkspaceAdapter.new(editor)
-		_workspaces[Workspace.MISSION] = MissionWorkspaceAdapter.new(editor)
-	if _environment_workspace == null:
-		var environment_editor: Variant = editor.get_environment_editor() if editor != null and editor.has_method("get_environment_editor") else null
-		_environment_workspace = EnvironmentWorkspaceAdapter.new(environment_editor)
-	for workspace in _workspaces.values():
-		(workspace as EditorWorkspace).set_editor_shell(self)
-	if _environment_workspace != null:
-		_environment_workspace.set_editor_shell(self)
+	if _workspace_defs_cache.is_empty():
+		_workspace_defs_cache = _workspace_defs()
+	for def_v in _workspace_defs_cache:
+		var def := def_v as WorkspaceDef
+		if def.popup:
+			if _environment_workspace == null:
+				_environment_workspace = def.adapter_script.new()
+				_environment_workspace.set_editor_shell(self)
+		elif not _workspaces.has(def.id):
+			var workspace: EditorWorkspace = def.adapter_script.new()
+			workspace.set_editor_shell(self)
+			_workspaces[def.id] = workspace
 
 
 func _build_workspace_rail() -> void:
-	for workspace_id in SELECTABLE_WORKSPACES:
-		var workspace := _get_workspace(workspace_id)
+	for def_v in _workspace_defs_cache:
+		var def := def_v as WorkspaceDef
+		if def.popup:
+			continue
+		var workspace := _get_workspace(def.id)
 		var btn := Button.new()
 		btn.text = workspace.get_workspace_label() if workspace != null else "Workspace"
 		btn.toggle_mode = true
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.custom_minimum_size = Vector2(0, 36)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.tooltip_text = _workspace_tooltip(workspace_id)
-		btn.pressed.connect(_on_workspace_pressed.bind(workspace_id))
+		btn.tooltip_text = workspace.get_workspace_tooltip() if workspace != null else ""
+		btn.pressed.connect(_on_workspace_pressed.bind(def.id))
 		_workspace_rail.add_child(btn)
-		_workspace_buttons[workspace_id] = btn
+		_workspace_buttons[def.id] = btn
 	_refresh_workspace_buttons()
 
 
@@ -316,18 +314,6 @@ func _refresh_action_buttons_state(workspace: EditorWorkspace, buttons: Dictiona
 				btn.disabled = busy or workspace == null or not workspace.can_export()
 
 
-func _workspace_tooltip(workspace_id: int) -> String:
-	match workspace_id:
-		Workspace.TERRAIN:
-			return "Edit terrain sculpting, paint, foliage, tiles, and layout."
-		Workspace.ENVIRONMENT:
-			return "Edit .env weather, lighting, atmosphere, and time of day."
-		Workspace.MISSION:
-			return "Reserved for mission entities, objectives, and triggers."
-		_:
-			return ""
-
-
 func _on_workspace_pressed(workspace_id: int) -> void:
 	set_active_workspace(workspace_id)
 
@@ -343,6 +329,7 @@ func set_active_workspace(workspace_id: int) -> void:
 	var current_workspace := _get_active_workspace()
 	if current_workspace != null:
 		current_workspace.deactivate()
+		current_workspace.set_asset_dock(null)
 	_unmount_workspace_viewport(_active_workspace_id, current_workspace)
 	_active_workspace_id = workspace_id
 	var next_workspace := _get_active_workspace()
@@ -400,10 +387,6 @@ func _clear_viewport_host() -> void:
 		_viewport_host.remove_child(child)
 
 
-func _is_terrain_workspace_active() -> bool:
-	return _active_workspace_id == Workspace.TERRAIN
-
-
 func _any_workspace_busy() -> bool:
 	for workspace in _workspaces.values():
 		if (workspace as EditorWorkspace).is_busy():
@@ -428,9 +411,7 @@ func _refresh_workspace_surface() -> void:
 	_rebuild_workspace_actions(workspace)
 	_modes_label.visible = has_workflows
 	_mode_rail.visible = has_workflows
-	_asset_dock.visible = workspace != null and workspace.uses_asset_dock()
-	if workspace != null:
-		workspace.set_asset_dock(_asset_dock if _asset_dock.visible else null)
+	_sync_asset_dock_for_workspace(workspace)
 	_rebuild_workflow_rail(workflows)
 	if has_workflows:
 		_inspector_workspace_id = -1
@@ -439,6 +420,32 @@ func _refresh_workspace_surface() -> void:
 	else:
 		_show_workspace_inspector(workspace)
 	_refresh_workspace_buttons()
+
+
+func _sync_asset_dock_for_workspace(workspace: EditorWorkspace) -> void:
+	if _asset_dock_workspace_id != -1 and _asset_dock_workspace_id != _active_workspace_id:
+		var old_workspace := _get_workspace(_asset_dock_workspace_id)
+		if old_workspace != null:
+			old_workspace.set_asset_dock(null)
+		_clear_asset_dock_children()
+		_asset_dock_workspace_id = -1
+	var show_dock := workspace != null and workspace.uses_asset_dock()
+	if not show_dock:
+		if _asset_dock_workspace_id == _active_workspace_id and workspace != null:
+			workspace.set_asset_dock(null)
+		_clear_asset_dock_children()
+		_asset_dock.visible = false
+		_asset_dock_workspace_id = -1
+		return
+	_asset_dock.visible = true
+	workspace.set_asset_dock(_asset_dock)
+	_asset_dock_workspace_id = _active_workspace_id
+
+
+func _clear_asset_dock_children() -> void:
+	for child in _asset_dock.get_children():
+		_asset_dock.remove_child(child)
+		child.free()
 
 
 func _show_workspace_inspector(workspace: EditorWorkspace) -> void:
@@ -467,23 +474,6 @@ func _show_workspace_inspector(workspace: EditorWorkspace) -> void:
 	_inspector_host.add_child(label)
 
 
-func _wire_prompts() -> void:
-	_prompt_backdrop.visible = false
-	_prompt_host.visible = false
-	_prompt_card.visible = false
-	if not _prompt_format_bhd.toggled.is_connected(_on_prompt_format_bhd_toggled):
-		_prompt_format_bhd.toggled.connect(_on_prompt_format_bhd_toggled)
-	if not _prompt_format_cdep.toggled.is_connected(_on_prompt_format_cdep_toggled):
-		_prompt_format_cdep.toggled.connect(_on_prompt_format_cdep_toggled)
-	if not _prompt_secondary_button.pressed.is_connected(_on_prompt_secondary_pressed):
-		_prompt_secondary_button.pressed.connect(_on_prompt_secondary_pressed)
-	if not _prompt_tertiary_button.pressed.is_connected(_on_prompt_tertiary_pressed):
-		_prompt_tertiary_button.pressed.connect(_on_prompt_tertiary_pressed)
-	if not _prompt_primary_button.pressed.is_connected(_on_prompt_primary_pressed):
-		_prompt_primary_button.pressed.connect(_on_prompt_primary_pressed)
-	_reset_prompt_content()
-
-
 func _wire_tile_gizmo() -> void:
 	_tile_gizmo_done.pressed.connect(_on_tile_gizmo_done_pressed)
 	_tile_gizmo_rotate.pressed.connect(_on_tile_gizmo_rotate_pressed)
@@ -492,36 +482,80 @@ func _wire_tile_gizmo() -> void:
 	_tile_gizmo_delete.pressed.connect(_on_tile_gizmo_delete_pressed)
 
 
+func _wire_splits() -> void:
+	if _body_row != null and not _body_row.drag_ended.is_connected(_save_split_layout):
+		_body_row.drag_ended.connect(_save_split_layout)
+	if _center_right_split != null and not _center_right_split.drag_ended.is_connected(_save_split_layout):
+		_center_right_split.drag_ended.connect(_save_split_layout)
+
+
+func _apply_window_min_size() -> void:
+	# The editor needs a usable floor; Godot has no project setting for this, so
+	# the window minimum is set at runtime. Only the editor shell does this, so
+	# the runtime game window is unaffected.
+	var window := get_window()
+	if window != null:
+		window.min_size = Vector2i(1024, 640)
+
+
+# Read-only: applies the persisted split offsets without ever writing the config,
+# so test instantiations never persist a layout. A side is only applied when it
+# was actually stored (has_left/has_right), leaving the scene default otherwise.
+# We set split_offset directly and let the container's resort keep children
+# within their minimum sizes; calling clamp_split_offset() explicitly throws
+# before the first sort (and when the dock is hidden), so it is avoided.
+func _apply_split_layout() -> void:
+	if _body_row == null or _center_right_split == null:
+		return
+	var state := _resource_library.load_layout_state()
+	if bool(state["has_left"]):
+		_body_row.split_offset = int(state["left"])
+	if bool(state["has_right"]):
+		_center_right_split.split_offset = int(state["right"])
+
+
+func _save_split_layout() -> void:
+	if _body_row == null or _center_right_split == null:
+		return
+	_resource_library.save_layout_state(_body_row.split_offset, _center_right_split.split_offset)
+
+
 func _wire_camera_popup() -> void:
 	if _camera_popup != null:
 		_camera_popup.visible = false
+		_camera_popup.apply_anchor(320.0)
+		_camera_popup.bind_close(_camera_popup_close)
+		if not _camera_popup.close_requested.is_connected(_on_camera_popup_close_pressed):
+			_camera_popup.close_requested.connect(_on_camera_popup_close_pressed)
 	if _camera_toggle_button != null and not _camera_toggle_button.toggled.is_connected(_on_camera_toggle_toggled):
 		_camera_toggle_button.icon = _build_camera_icon()
 		_camera_toggle_button.toggled.connect(_on_camera_toggle_toggled)
-	if _camera_popup_close != null and not _camera_popup_close.pressed.is_connected(_on_camera_popup_close_pressed):
-		_camera_popup_close.pressed.connect(_on_camera_popup_close_pressed)
 	_refresh_camera_popup_state()
 
 
 func _wire_environment_popup() -> void:
 	if _environment_popup != null:
 		_environment_popup.visible = false
+		_environment_popup.apply_anchor(400.0)
+		_environment_popup.bind_close(_environment_popup_close)
+		if not _environment_popup.close_requested.is_connected(_on_environment_popup_close_pressed):
+			_environment_popup.close_requested.connect(_on_environment_popup_close_pressed)
 	if _environment_toggle_button != null and not _environment_toggle_button.toggled.is_connected(_on_environment_toggle_toggled):
 		_environment_toggle_button.icon = _build_sun_icon()
 		_environment_toggle_button.toggled.connect(_on_environment_toggle_toggled)
-	if _environment_popup_close != null and not _environment_popup_close.pressed.is_connected(_on_environment_popup_close_pressed):
-		_environment_popup_close.pressed.connect(_on_environment_popup_close_pressed)
 	_refresh_environment_popup_state()
 
 
 func _wire_settings_popup() -> void:
 	if _settings_popup != null:
 		_settings_popup.visible = false
+		_settings_popup.apply_anchor(420.0)
+		_settings_popup.bind_close(_settings_popup_close)
+		if not _settings_popup.close_requested.is_connected(_on_settings_popup_close_pressed):
+			_settings_popup.close_requested.connect(_on_settings_popup_close_pressed)
 	if _settings_toggle_button != null and not _settings_toggle_button.toggled.is_connected(_on_settings_toggle_toggled):
 		_settings_toggle_button.icon = _build_settings_icon()
 		_settings_toggle_button.toggled.connect(_on_settings_toggle_toggled)
-	if _settings_popup_close != null and not _settings_popup_close.pressed.is_connected(_on_settings_popup_close_pressed):
-		_settings_popup_close.pressed.connect(_on_settings_popup_close_pressed)
 	if _settings_browse_resource_dir_button != null and not _settings_browse_resource_dir_button.pressed.is_connected(_on_settings_browse_resource_dir_pressed):
 		_settings_browse_resource_dir_button.pressed.connect(_on_settings_browse_resource_dir_pressed)
 	if _settings_apply_resource_dir_button != null and not _settings_apply_resource_dir_button.pressed.is_connected(_on_settings_apply_resource_dir_pressed):
@@ -590,6 +624,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key := event as InputEventKey
 		if key.pressed and not key.is_echo() and key.keycode == KEY_ESCAPE:
+			# The native confirm/export dialogs own their own Escape handling
+			# (they emit canceled and hide), so only the corner popovers need it
+			# routed here.
 			if _camera_popup != null and _camera_popup.visible:
 				_set_camera_popup_visible(false)
 				get_viewport().set_input_as_handled()
@@ -639,7 +676,7 @@ func _ensure_camera_popup_content() -> void:
 
 func _sync_camera_popup_editor() -> void:
 	if _camera_settings_panel != null and _camera_settings_panel.has_method("set_editor"):
-		_camera_settings_panel.set_editor(editor)
+		_camera_settings_panel.set_editor(self)
 
 
 func _refresh_camera_popup_state() -> void:
@@ -656,10 +693,21 @@ func _refresh_camera_popup_state() -> void:
 			_camera_settings_panel.sync_from_editor_state()
 
 
+func get_editor_camera() -> Camera3D:
+	var workspace := _get_active_workspace()
+	if workspace != null:
+		var workspace_camera := workspace.get_viewport_camera()
+		if workspace_camera != null:
+			return workspace_camera
+	if editor != null and editor.has_method("get_editor_camera"):
+		return editor.get_editor_camera()
+	if editor != null:
+		return editor.get("camera") as Camera3D
+	return null
+
+
 func _get_editor_camera() -> Camera3D:
-	if editor == null:
-		return null
-	return editor.get("camera") as Camera3D
+	return get_editor_camera()
 
 
 func _on_environment_toggle_toggled(pressed: bool) -> void:
@@ -668,6 +716,10 @@ func _on_environment_toggle_toggled(pressed: bool) -> void:
 
 func _on_environment_popup_close_pressed() -> void:
 	_set_environment_popup_visible(false)
+
+
+func show_environment_dialog() -> void:
+	_set_environment_popup_visible(true)
 
 
 func _set_environment_popup_visible(active: bool) -> void:
@@ -740,7 +792,7 @@ func _set_settings_popup_visible(active: bool) -> void:
 
 func _sync_settings_popup_state() -> void:
 	if _settings_resource_dir_edit != null:
-		_settings_resource_dir_edit.text = _resource_root_dir
+		_settings_resource_dir_edit.text = _resource_library.get_root_dir()
 	if _settings_recursive_toggle != null:
 		_settings_recursive_toggle.set_pressed_no_signal(_resource_recursive)
 
@@ -766,12 +818,12 @@ func _on_settings_recursive_toggled(pressed: bool) -> void:
 		return
 	_resource_recursive = pressed
 	_save_resource_state()
-	if not _resource_root_dir.is_empty():
+	if not _resource_library.get_root_dir().is_empty():
 		_scan_resource_root(true)
 
 
 func _apply_resource_settings(scan: bool, persist: bool = true) -> Error:
-	var path := _resource_root_dir
+	var path := _resource_library.get_root_dir()
 	if _settings_resource_dir_edit != null:
 		path = _settings_resource_dir_edit.text
 	if _settings_recursive_toggle != null:
@@ -780,17 +832,15 @@ func _apply_resource_settings(scan: bool, persist: bool = true) -> Error:
 
 
 func _ensure_resource_index() -> void:
-	if _resource_index == null:
-		_resource_index = NovaResourceIndex.new()
+	_resource_library.ensure_index()
 
 
 func get_resource_index() -> RefCounted:
-	_ensure_resource_index()
-	return _resource_index
+	return _resource_library.get_index()
 
 
 func get_resource_root_dir() -> String:
-	return _resource_root_dir
+	return _resource_library.get_root_dir()
 
 
 func is_resource_recursive() -> bool:
@@ -801,62 +851,48 @@ func set_resource_root_dir(path: String) -> void:
 	_set_resource_root_dir(path, true, true)
 
 
+# Thin forwarders over EditorResourceLibrary (editor/resource_library.gd): the
+# helper owns the index + root-dir state + persistence; the shell keeps the
+# recursive flag and applies the UI side effects the helper surfaces (VegAssets
+# search roots, status message, settings-popup sync).
 func _set_resource_root_dir(path: String, persist: bool, scan: bool) -> Error:
-	_ensure_resource_index()
-	var previous := _resource_root_dir
-	_resource_root_dir = path.strip_edges()
-	if persist:
-		_save_resource_state()
-	if _resource_root_dir.is_empty():
-		_resource_index.clear()
-		_sync_settings_popup_state()
-		return OK
-	if scan:
-		return _scan_resource_root(true)
-	if previous != _resource_root_dir:
-		_resource_index.clear()
+	var result := _resource_library.set_root_dir(path, _resource_recursive, persist, scan)
+	VegAssets.set_search_roots(result["search_roots"])
+	_show_resource_status(result)
 	_sync_settings_popup_state()
-	return OK
+	return int(result["err"])
 
 
 func _scan_resource_root(show_message: bool) -> Error:
-	_ensure_resource_index()
-	if _resource_root_dir.is_empty():
-		_resource_index.clear()
+	if _resource_library.get_root_dir().is_empty():
+		_resource_library.clear_index()
 		return OK
-	var err: Error = _resource_index.scan(_resource_root_dir, _resource_recursive)
-	if err == OK:
-		if show_message:
-			show_status_message("Resource directory indexed.", 4.0)
-	else:
-		var detail := ""
-		if _resource_index.has_method("get_last_error"):
-			detail = String(_resource_index.get_last_error())
-		if show_message:
-			show_status_message("Resource scan failed." if detail.is_empty() else detail, 6.0)
+	var result := _resource_library.scan_root(_resource_recursive)
+	if show_message:
+		_show_resource_status(result)
 	_sync_settings_popup_state()
-	return err
+	return int(result["err"])
+
+
+func _show_resource_status(result: Dictionary) -> void:
+	var status := String(result["status"])
+	if status.is_empty():
+		return
+	show_status_message(status, 4.0 if int(result["err"]) == OK else 6.0)
 
 
 func _load_resource_state() -> void:
-	var config := ConfigFile.new()
-	if config.load(STATE_CONFIG_PATH) != OK:
-		return
-	_resource_root_dir = String(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, ""))
-	_resource_recursive = bool(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, true))
+	_resource_recursive = bool(_resource_library.load_state()["recursive"])
 
 
 func _save_resource_state() -> void:
-	var config := ConfigFile.new()
-	config.load(STATE_CONFIG_PATH)
-	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, _resource_root_dir)
-	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, _resource_recursive)
-	config.save(STATE_CONFIG_PATH)
+	_resource_library.save_state(_resource_recursive)
 
 
 func _preferred_resource_root_dir() -> String:
-	if not _resource_root_dir.is_empty():
-		return _resource_root_dir
+	var root := _resource_library.get_root_dir()
+	if not root.is_empty():
+		return root
 	if editor != null:
 		if editor.has_current_project_dir():
 			return editor.get_current_project_dir()
@@ -906,284 +942,36 @@ func _run_workspace_action(workspace: EditorWorkspace, action_id: int) -> void:
 
 
 func _open_resource_browser(workspace: EditorWorkspace, on_pick: Callable) -> void:
-	if workspace == null:
-		return
-	var kind := String(workspace.get_open_resource_kind()).strip_edges()
-	if kind.is_empty():
-		_open_file_dialog(
-			workspace.get_open_dialog_title(),
-			workspace.get_open_dialog_filters(),
-			on_pick,
-			workspace.get_open_dialog_dir()
-		)
-		return
-	_ensure_resource_browser_dialog()
-	_resource_browser_kind = kind
-	_resource_browser_title = workspace.get_open_dialog_title()
-	_resource_browser_filters = workspace.get_open_dialog_filters()
-	_resource_browser_current_dir = workspace.get_open_dialog_dir()
-	_resource_browser_open_action = on_pick
-	_resource_browser_search.text = ""
-	_resource_browser_dialog.title = _resource_browser_title
-	_refresh_resource_browser_entries()
-	_refresh_resource_browser()
-	_resource_browser_dialog.popup_centered(Vector2i(760, 520))
+	_resource_browser.open(workspace, on_pick)
 
 
-func _ensure_resource_browser_dialog() -> void:
-	if _resource_browser_dialog != null and is_instance_valid(_resource_browser_dialog):
-		return
-	_resource_browser_dialog = ConfirmationDialog.new()
-	_resource_browser_dialog.name = "ResourceBrowserDialog"
-	_resource_browser_dialog.min_size = Vector2i(760, 520)
-	_resource_browser_dialog.exclusive = true
-	add_child(_resource_browser_dialog)
-
-	var margin := MarginContainer.new()
-	margin.name = "ResourceBrowserMargin"
-	margin.add_theme_constant_override("margin_left", 14)
-	margin.add_theme_constant_override("margin_top", 12)
-	margin.add_theme_constant_override("margin_right", 14)
-	margin.add_theme_constant_override("margin_bottom", 12)
-	_resource_browser_dialog.add_child(margin)
-
-	var box := VBoxContainer.new()
-	box.name = "ResourceBrowserBox"
-	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	box.add_theme_constant_override("separation", 10)
-	margin.add_child(box)
-
-	var header := HBoxContainer.new()
-	header.name = "ResourceBrowserHeader"
-	header.add_theme_constant_override("separation", 8)
-	box.add_child(header)
-
-	_resource_browser_directory_label = Label.new()
-	_resource_browser_directory_label.name = "ResourceBrowserDirectoryLabel"
-	_resource_browser_directory_label.theme_type_variation = &"Muted"
-	_resource_browser_directory_label.clip_text = true
-	_resource_browser_directory_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(_resource_browser_directory_label)
-
-	_resource_browser_settings_button = Button.new()
-	_resource_browser_settings_button.name = "ResourceBrowserSettingsButton"
-	_resource_browser_settings_button.text = "Settings"
-	_resource_browser_settings_button.focus_mode = Control.FOCUS_NONE
-	_resource_browser_settings_button.pressed.connect(_on_resource_browser_settings_pressed)
-	header.add_child(_resource_browser_settings_button)
-
-	_resource_browser_search = LineEdit.new()
-	_resource_browser_search.name = "ResourceBrowserSearch"
-	_resource_browser_search.placeholder_text = "Search resources"
-	_resource_browser_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_resource_browser_search.text_changed.connect(func(_text: String) -> void:
-		_refresh_resource_browser()
-	)
-	box.add_child(_resource_browser_search)
-
-	_resource_browser_hint = Label.new()
-	_resource_browser_hint.name = "ResourceBrowserHint"
-	_resource_browser_hint.theme_type_variation = &"Muted"
-	_resource_browser_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	box.add_child(_resource_browser_hint)
-
-	_resource_browser_list = ItemList.new()
-	_resource_browser_list.name = "ResourceBrowserList"
-	_resource_browser_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_resource_browser_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_resource_browser_list.item_selected.connect(_on_resource_browser_item_selected)
-	_resource_browser_list.item_activated.connect(_on_resource_browser_item_activated)
-	box.add_child(_resource_browser_list)
-
-	_resource_browser_browse_button = _resource_browser_dialog.add_button("Browse Files...", false, "browse")
-	_resource_browser_browse_button.name = "ResourceBrowserBrowseFilesButton"
-	_resource_browser_dialog.custom_action.connect(_on_resource_browser_custom_action)
-	_resource_browser_dialog.confirmed.connect(_on_resource_browser_confirmed)
-	_resource_browser_open_button = _resource_browser_dialog.get_ok_button()
-	_resource_browser_open_button.text = "Open"
-	_resource_browser_dialog.get_cancel_button().text = "Cancel"
-
-
-func _refresh_resource_browser_entries() -> void:
-	_resource_browser_entries = []
-	_ensure_resource_index()
-	if _resource_root_dir.is_empty():
-		_resource_index.clear()
-		return
-	if _resource_index.get_root_dir().is_empty():
-		_scan_resource_root(false)
-	if not _resource_index.get_root_dir().is_empty():
-		_resource_browser_entries = _resource_index.get_resource_files(_resource_browser_kind)
-
-
-func _refresh_resource_browser() -> void:
-	if _resource_browser_list == null:
-		return
-	_resource_browser_list.clear()
-	_resource_browser_visible_entries = []
-	var search := _resource_browser_search.text.strip_edges().to_lower() if _resource_browser_search != null else ""
-	for entry_value in _resource_browser_entries:
-		var entry := entry_value as Dictionary
-		var display_name := String(entry.get("display_name", ""))
-		var relative_path := String(entry.get("relative_path", ""))
-		var haystack := ("%s %s" % [display_name, relative_path]).to_lower()
-		if not search.is_empty() and not haystack.contains(search):
-			continue
-		_resource_browser_visible_entries.append(entry)
-		var text := "%s  %s" % [display_name, relative_path]
-		var current_path := _current_resource_path_for_browser()
-		if not current_path.is_empty() and _same_filesystem_path(String(entry.get("path", "")), current_path):
-			text += "  (open)"
-		var index := _resource_browser_list.add_item(text)
-		_resource_browser_list.set_item_metadata(index, entry)
-
-	var has_root := not _resource_root_dir.strip_edges().is_empty()
-	var has_entries := not _resource_browser_entries.is_empty()
-	var has_visible := not _resource_browser_visible_entries.is_empty()
-	if _resource_browser_directory_label != null:
-		_resource_browser_directory_label.text = _resource_root_dir if has_root else "No resource directory selected"
-	if _resource_browser_hint != null:
-		_resource_browser_hint.visible = not has_visible
-		if not has_root:
-			_resource_browser_hint.text = "No resource directory selected."
-		elif not has_entries:
-			_resource_browser_hint.text = "No %s resources found in %s." % [_resource_browser_kind_label(), _resource_root_dir]
-		else:
-			_resource_browser_hint.text = "No matching resources."
-	if _resource_browser_settings_button != null:
-		_resource_browser_settings_button.visible = not has_root or not has_entries
-	if _resource_browser_open_button != null:
-		_resource_browser_open_button.disabled = true
-
-
-func _resource_browser_kind_label() -> String:
-	match _resource_browser_kind:
-		"terrain":
-			return "terrain"
-		"environment":
-			return "environment"
-		"mission":
-			return "mission"
-		"model":
-			return "model"
-		_:
-			return "resource"
-
-
-func _current_resource_path_for_browser() -> String:
+# Resolves the active workspace's current resource path for the browser's
+# "(open)" marker; the environment popup retargets it to the environment
+# workspace. Stays on the shell (reads popup/workspace state) and is injected
+# into EditorResourceBrowser as a capability callable.
+func _current_resource_path_for_browser(kind: String) -> String:
 	var workspace := _get_active_workspace()
-	if _environment_popup != null and _environment_popup.visible and _resource_browser_kind == "environment":
+	if _environment_popup != null and _environment_popup.visible and kind == "environment":
 		workspace = _environment_workspace
 	if workspace != null:
 		return workspace.get_current_resource_path()
 	return ""
 
 
-func _on_resource_browser_item_selected(_index: int) -> void:
-	if _resource_browser_open_button != null:
-		_resource_browser_open_button.disabled = false
-
-
-func _on_resource_browser_item_activated(index: int) -> void:
-	_resource_browser_list.select(index)
-	_open_selected_resource_browser_entry()
-
-
-func _on_resource_browser_confirmed() -> void:
-	_open_selected_resource_browser_entry()
-
-
-func _open_selected_resource_browser_entry() -> void:
-	if _resource_browser_list == null:
-		return
-	var selected := _resource_browser_list.get_selected_items()
-	if selected.size() == 0:
-		return
-	var entry := _resource_browser_list.get_item_metadata(selected[0]) as Dictionary
-	var path := String(entry.get("path", ""))
-	if path.is_empty():
-		return
-	if _resource_browser_open_action.is_valid():
-		_resource_browser_open_action.call(path)
-	_resource_browser_dialog.hide()
-
-
-func _on_resource_browser_custom_action(action: StringName) -> void:
-	if action == &"browse":
-		_on_resource_browser_browse_files_pressed()
-
-
-func _on_resource_browser_browse_files_pressed() -> void:
-	if _resource_browser_dialog != null:
-		_resource_browser_dialog.hide()
-	_open_file_dialog(
-		_resource_browser_title,
-		_resource_browser_filters,
-		_resource_browser_open_action,
-		_resource_browser_current_dir
-	)
-
-
-func _on_resource_browser_settings_pressed() -> void:
-	if _resource_browser_dialog != null:
-		_resource_browser_dialog.hide()
-	_set_settings_popup_visible(true)
-
-
-func _same_filesystem_path(a: String, b: String) -> bool:
-	if a.is_empty() or b.is_empty():
-		return false
-	var left := _globalized_path(a).replace("\\", "/").to_lower()
-	var right := _globalized_path(b).replace("\\", "/").to_lower()
-	return left == right
-
-
-func _globalized_path(path: String) -> String:
-	if path.begins_with("res://") or path.begins_with("user://"):
-		return ProjectSettings.globalize_path(path)
-	return path
+# File and directory pickers share one cached native dialog (FileDialogHelper)
+# instead of building and freeing a new FileDialog per open.
+func _ensure_file_dialogs() -> FileDialogHelper:
+	if _file_dialogs == null:
+		_file_dialogs = FileDialogHelper.new(self)
+	return _file_dialogs
 
 
 func _open_file_dialog(title: String, filters: PackedStringArray, on_pick: Callable, current_dir: String = "") -> void:
-	var dialog := FileDialog.new()
-	dialog.use_native_dialog = true
-	dialog.access = FileDialog.ACCESS_FILESYSTEM
-	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	dialog.title = title
-	dialog.filters = filters
-	dialog.min_size = Vector2i(760, 520)
-	if not current_dir.is_empty():
-		dialog.current_dir = current_dir
-	add_child(dialog)
-	dialog.file_selected.connect(func(path: String) -> void:
-		on_pick.call(path)
-		dialog.queue_free()
-	)
-	dialog.canceled.connect(func() -> void:
-		dialog.queue_free()
-	)
-	dialog.popup_centered()
+	_ensure_file_dialogs().open(title, filters, on_pick, current_dir)
 
 
 func _open_dir_dialog(title: String, on_pick: Callable, current_dir: String = "") -> void:
-	var dialog := FileDialog.new()
-	dialog.use_native_dialog = true
-	dialog.access = FileDialog.ACCESS_FILESYSTEM
-	dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
-	dialog.title = title
-	dialog.min_size = Vector2i(760, 520)
-	if not current_dir.is_empty():
-		dialog.current_dir = current_dir
-	add_child(dialog)
-	dialog.dir_selected.connect(func(path: String) -> void:
-		on_pick.call(path)
-		dialog.queue_free()
-	)
-	dialog.canceled.connect(func() -> void:
-		dialog.queue_free()
-	)
-	dialog.popup_centered()
+	_ensure_file_dialogs().open_dir(title, on_pick, current_dir)
 
 
 func _preferred_save_dir(workspace: EditorWorkspace = null) -> String:
@@ -1240,7 +1028,7 @@ func _on_export_pressed(workspace: EditorWorkspace = null) -> void:
 	if workspace == null or not workspace.can_export():
 		return
 	var choose_export_dir := func(dir_path: String) -> void:
-		if workspace == _get_active_workspace() and _is_terrain_workspace_active():
+		if not workspace.get_export_flavors().is_empty():
 			_show_export_flavor_dialog(dir_path)
 		else:
 			var err: Error = workspace.begin_export(dir_path, 0)
@@ -1278,15 +1066,18 @@ func _rebuild_workflow_rail(workflows: Array) -> void:
 	for child in _mode_rail.get_children():
 		child.queue_free()
 	_workflow_buttons.clear()
-	for workflow in workflows:
-		var workflow_id: int = int(workflow.get("id", -1))
+	for entry in workflows:
+		var def := entry as InspectorDef
+		if def == null:
+			continue
+		var workflow_id: int = def.id
 		var btn := Button.new()
-		btn.text = String(workflow.get("label", "Workflow"))
+		btn.text = def.label if not def.label.is_empty() else "Workflow"
 		btn.toggle_mode = true
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.custom_minimum_size = Vector2(0, 44)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.tooltip_text = String(workflow.get("tooltip", ""))
+		btn.tooltip_text = def.tooltip
 		btn.pressed.connect(_on_workflow_pressed.bind(workflow_id))
 		_mode_rail.add_child(btn)
 		_workflow_buttons[workflow_id] = btn
@@ -1309,6 +1100,7 @@ func _set_workflow(workflow_id: int, activate: bool) -> void:
 		return
 	if activate:
 		workspace.activate_workflow(workflow_id)
+	_sync_asset_dock_for_workspace(workspace)
 	if workflow_id == _current_workflow_id:
 		return
 	_current_workflow_id = workflow_id
@@ -1366,7 +1158,7 @@ func _refresh_status() -> void:
 		_status_tool_label.theme_type_variation = &""
 
 	_status_context_label.text = workspace.get_status_context()
-	if (_is_terrain_workspace_active() or _active_workspace_id == Workspace.MISSION) and editor and editor.camera:
+	if workspace != null and workspace.shows_camera_status() and editor and editor.camera:
 		var pos: Vector3 = editor.camera.global_position
 		_status_camera_label.text = "%.0f, %.0f, %.0f" % [pos.x, pos.y, pos.z]
 	else:
@@ -1379,7 +1171,8 @@ func _refresh_tile_gizmo() -> void:
 	if not is_node_ready() or _tile_gizmo == null or _viewport_lane == null or _tile_gizmo_label == null:
 		return
 	_tile_gizmo.visible = false
-	if not _is_terrain_workspace_active() or editor == null or _current_workflow_id != TerrainWorkspaceAdapter.Workflow.STAMP or not editor.has_selected_tileinfo_entry():
+	var active_workspace := _get_active_workspace()
+	if active_workspace == null or not active_workspace.shows_tile_gizmo() or editor == null or _current_workflow_id != TerrainWorkspaceAdapter.Workflow.STAMP or not editor.has_selected_tileinfo_entry():
 		return
 
 	var camera: Camera3D = editor.get_editor_camera()
@@ -1443,19 +1236,8 @@ func _on_tile_gizmo_delete_pressed() -> void:
 
 
 func prompt_unsaved_changes(_action_name: String) -> void:
-	_set_prompt_state(
-		PromptKind.UNSAVED,
-		"",
-		"Save changes?",
-		"",
-		"",
-		false
-	)
-	_set_prompt_buttons("Cancel", "Discard", "Save")
-	_prompt_secondary_action = Callable(self, "_on_prompt_keep_editing")
-	_prompt_tertiary_action = Callable(self, "_on_prompt_discard_changes")
-	_prompt_primary_action = Callable(self, "_on_prompt_save_changes")
-	_set_prompt_visible(true)
+	_ensure_unsaved_dialog()
+	_unsaved_dialog.popup_centered()
 	show_status_message("Save or discard your changes to continue.", 6.0)
 
 
@@ -1472,20 +1254,10 @@ func prompt_save_directory_for_pending_action(_action_name: String) -> void:
 
 func prompt_cdep_violations(count: int, on_fix_callback: Callable) -> void:
 	var plural := "" if count == 1 else "s"
-	_set_prompt_state(
-		PromptKind.CDEP,
-		"",
-		"Flatten before export?",
-		"%d area%s exceed the JO/DFX limit." % [count, plural],
-		"BHD exports are unaffected.",
-		false
-	)
-	_set_prompt_buttons("Leave as-is", "", "Flatten automatically")
-	_prompt_secondary_action = Callable()
-	_prompt_primary_action = Callable(func() -> void:
-		on_fix_callback.call()
-	)
-	_set_prompt_visible(true)
+	_cdep_fix_callback = on_fix_callback
+	_ensure_cdep_dialog()
+	_cdep_dialog.dialog_text = "%d area%s exceed the JO/DFX limit.\nBHD exports are unaffected." % [count, plural]
+	_cdep_dialog.popup_centered()
 	show_status_message("%d area%s too steep for Joint Operations / DFX export." % [count, plural], 6.0)
 
 
@@ -1506,20 +1278,9 @@ func _on_prompt_keep_editing() -> void:
 
 func _show_export_flavor_dialog(dir_path: String) -> void:
 	_pending_export_dir = dir_path
-	_select_export_flavor(TerrainWorkspaceAdapter.ExportFlavor.DFX_JO)
-	_sync_export_prompt_copy()
-	_set_prompt_state(
-		PromptKind.EXPORT,
-		"",
-		"Export",
-		"",
-		"",
-		true
-	)
-	_set_prompt_buttons("Cancel", "", "Export")
-	_prompt_secondary_action = Callable(self, "_on_prompt_cancel")
-	_prompt_primary_action = Callable(self, "_on_prompt_export_confirmed")
-	_set_prompt_visible(true)
+	_ensure_export_dialog()
+	_export_dialog.select_flavor(ExportFlavorDialog.FLAVOR_DFX_JO)
+	_export_dialog.popup_centered()
 
 
 func _on_prompt_export_confirmed() -> void:
@@ -1528,117 +1289,81 @@ func _on_prompt_export_confirmed() -> void:
 	var workspace := _get_active_workspace()
 	if workspace == null:
 		return
-	var flavor := _current_export_flavor()
+	var flavor: int = _export_dialog.get_flavor() if _export_dialog != null else ExportFlavorDialog.FLAVOR_DFX_JO
 	var err: Error = workspace.begin_export(_pending_export_dir, flavor)
 	_pending_export_dir = ""
-	_set_prompt_visible(false)
 	if err != OK:
 		show_status_message("Export failed (error %d)" % err, 6.0)
 
 
 func _on_prompt_cancel() -> void:
 	_pending_export_dir = ""
-	_set_prompt_visible(false)
 
 
-func _on_prompt_primary_pressed() -> void:
-	if _prompt_primary_action.is_valid():
-		_prompt_primary_action.call()
-	_set_prompt_visible(false)
-
-
-func _on_prompt_secondary_pressed() -> void:
-	if _prompt_secondary_action.is_valid():
-		_prompt_secondary_action.call()
-	_set_prompt_visible(false)
-
-
-func _on_prompt_tertiary_pressed() -> void:
-	if _prompt_tertiary_action.is_valid():
-		_prompt_tertiary_action.call()
-	_set_prompt_visible(false)
-
-
-func _on_prompt_format_bhd_toggled(pressed: bool) -> void:
-	if not pressed:
+# The three confirms below are themed native dialogs (the editor theme styles
+# ConfirmationDialog/AcceptDialog/Window). Each is created once as a child of the
+# shell and given the shell theme explicitly, because an embedded Window does not
+# resolve the in-tree theme through the Control parent chain (same pattern as the
+# resource browser).
+func _ensure_unsaved_dialog() -> void:
+	if _unsaved_dialog != null and is_instance_valid(_unsaved_dialog):
 		return
-	_sync_export_prompt_copy()
+	_unsaved_dialog = ConfirmationDialog.new()
+	_unsaved_dialog.name = "UnsavedChangesDialog"
+	_unsaved_dialog.title = "Unsaved changes"
+	_unsaved_dialog.dialog_text = "Save changes?"
+	_unsaved_dialog.exclusive = true
+	if theme != null:
+		_unsaved_dialog.theme = theme
+	add_child(_unsaved_dialog)
+	_unsaved_dialog.get_ok_button().text = "Save"
+	_unsaved_dialog.get_cancel_button().text = "Cancel"
+	_unsaved_dialog.add_button("Discard", false, "discard")
+	# OK confirms (Save), Cancel/Escape keeps editing, the custom Discard button
+	# discards. Custom-action buttons do not auto-hide, so the handler hides it.
+	_unsaved_dialog.confirmed.connect(_on_prompt_save_changes)
+	_unsaved_dialog.canceled.connect(_on_prompt_keep_editing)
+	_unsaved_dialog.custom_action.connect(_on_unsaved_custom_action)
 
 
-func _on_prompt_format_cdep_toggled(pressed: bool) -> void:
-	if not pressed:
+func _on_unsaved_custom_action(action: StringName) -> void:
+	if action == &"discard":
+		if _unsaved_dialog != null:
+			_unsaved_dialog.hide()
+		_on_prompt_discard_changes()
+
+
+func _ensure_cdep_dialog() -> void:
+	if _cdep_dialog != null and is_instance_valid(_cdep_dialog):
 		return
-	_sync_export_prompt_copy()
+	_cdep_dialog = ConfirmationDialog.new()
+	_cdep_dialog.name = "CdepFlattenDialog"
+	_cdep_dialog.title = "Flatten before export?"
+	_cdep_dialog.exclusive = true
+	if theme != null:
+		_cdep_dialog.theme = theme
+	add_child(_cdep_dialog)
+	_cdep_dialog.get_ok_button().text = "Flatten automatically"
+	_cdep_dialog.get_cancel_button().text = "Leave as-is"
+	_cdep_dialog.confirmed.connect(_on_cdep_flatten_confirmed)
 
 
-func _sync_export_prompt_copy() -> void:
-	var flavor := _current_export_flavor()
-	_prompt_lead.text = "Export"
-	_prompt_body.text = ""
-	_prompt_info_label.text = ""
-	_prompt_format_section.visible = true
-	_prompt_info_panel.visible = false
-	_prompt_format_bhd.button_pressed = flavor == TerrainWorkspaceAdapter.ExportFlavor.BHD
-	_prompt_format_cdep.button_pressed = flavor == TerrainWorkspaceAdapter.ExportFlavor.DFX_JO
+func _on_cdep_flatten_confirmed() -> void:
+	if _cdep_fix_callback.is_valid():
+		_cdep_fix_callback.call()
 
 
-func _select_export_flavor(flavor: int) -> void:
-	_prompt_format_bhd.button_pressed = flavor == TerrainWorkspaceAdapter.ExportFlavor.BHD
-	_prompt_format_cdep.button_pressed = flavor == TerrainWorkspaceAdapter.ExportFlavor.DFX_JO
-
-
-func _current_export_flavor() -> int:
-	return TerrainWorkspaceAdapter.ExportFlavor.BHD if _prompt_format_bhd.button_pressed else TerrainWorkspaceAdapter.ExportFlavor.DFX_JO
-
-
-func _set_prompt_state(kind: int, eyebrow_text: String, lead_text: String, body_text: String, info_text: String, show_format_section: bool) -> void:
-	_prompt_kind = kind
-	_prompt_eyebrow.text = eyebrow_text
-	_prompt_eyebrow.visible = not eyebrow_text.strip_edges().is_empty()
-	_prompt_lead.text = lead_text
-	_prompt_body.text = body_text
-	_prompt_body.visible = not body_text.strip_edges().is_empty()
-	_prompt_info_label.text = info_text
-	_prompt_info_panel.visible = not info_text.strip_edges().is_empty()
-	_prompt_format_section.visible = show_format_section
-	_prompt_card.visible = true
-
-
-func _set_prompt_buttons(secondary_text: String, tertiary_text: String, primary_text: String) -> void:
-	_prompt_secondary_button.text = secondary_text
-	_prompt_secondary_button.visible = not secondary_text.is_empty()
-	_prompt_tertiary_button.text = tertiary_text
-	_prompt_tertiary_button.visible = not tertiary_text.is_empty()
-	_prompt_primary_button.text = primary_text
-	_prompt_primary_button.visible = not primary_text.is_empty()
-
-
-func _set_prompt_visible(active: bool) -> void:
-	_prompt_backdrop.visible = active
-	_prompt_host.visible = active
-	_prompt_card.visible = active
-	if active:
-		_prompt_primary_button.grab_focus()
-	else:
-		_prompt_kind = PromptKind.NONE
-		_prompt_primary_action = Callable()
-		_prompt_secondary_action = Callable()
-		_prompt_tertiary_action = Callable()
-		_reset_prompt_content()
-
-
-func _reset_prompt_content() -> void:
-	_prompt_eyebrow.text = "Prompt"
-	_prompt_eyebrow.visible = false
-	_prompt_lead.text = "Prompt title"
-	_prompt_body.text = "Prompt body"
-	_prompt_body.visible = false
-	_prompt_info_label.text = ""
-	_prompt_info_panel.visible = false
-	_prompt_format_section.visible = false
-	_prompt_secondary_button.visible = false
-	_prompt_tertiary_button.visible = false
-	_prompt_primary_button.visible = false
+func _ensure_export_dialog() -> void:
+	if _export_dialog != null and is_instance_valid(_export_dialog):
+		return
+	_export_dialog = ExportFlavorDialog.new()
+	_export_dialog.name = "ExportFlavorDialog"
+	_export_dialog.exclusive = true
+	if theme != null:
+		_export_dialog.theme = theme
+	add_child(_export_dialog)
+	_export_dialog.confirmed.connect(_on_prompt_export_confirmed)
+	_export_dialog.canceled.connect(_on_prompt_cancel)
 
 
 func on_export_started(_dir_path: String) -> void:

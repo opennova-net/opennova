@@ -248,17 +248,14 @@ def run_import(
 
 
 def _write_3dp_from_ir(ir, tdp_path: str) -> None:
-    """Write .3dp and .3da project files from the C IR using the native tdp library."""
-    from pyopennova.tdp_ffi import tdp_from_ir, write_tdp, write_3da, free_tdp
+    """Write a .3dp object workspace from the C IR using the native tdp library."""
+    from pyopennova.tdp_ffi import tdp_from_ir, write_tdp, free_tdp
     proj = tdp_from_ir(ir)
     try:
         write_tdp(tdp_path, proj)
-        tda_path = tdp_path.replace(".3dp", ".3da")
-        write_3da(tda_path, proj)
     finally:
         free_tdp(proj)
     log.info("Wrote 3DP: %s", tdp_path)
-    log.info("Wrote 3DA: %s", tda_path)
 
 
 def run_loose_import(

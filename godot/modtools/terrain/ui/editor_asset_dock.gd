@@ -15,7 +15,7 @@ var _syncing: bool = false
 var _slot_previews: Dictionary = {}
 var _slot_filename_labels: Dictionary = {}
 var _slot_state_labels: Dictionary = {}
-var _file_dialog: FileDialog
+var _file_dialog: FileDialogHelper
 
 
 func _ready() -> void:
@@ -32,12 +32,8 @@ func _configure_tabs() -> void:
 
 
 func set_editor(value: TerrainEditor) -> void:
-	var callback := Callable(self, "_on_editor_ui_state_changed")
-	if editor != null and editor.ui_state_changed.is_connected(callback):
-		editor.ui_state_changed.disconnect(callback)
+	SignalRebind.rebind(editor, value, &"ui_state_changed", Callable(self, "_on_editor_ui_state_changed"))
 	editor = value
-	if editor != null and not editor.ui_state_changed.is_connected(callback):
-		editor.ui_state_changed.connect(callback)
 	_sync_from_editor()
 
 
@@ -127,9 +123,10 @@ func _build_slot_card(slot_id: String, meta: Dictionary) -> Control:
 
 	if TerrainEditorSlots.is_previewable(slot_id):
 		var preview := TextureRect.new()
-		preview.custom_minimum_size = Vector2(84, 84)
+		preview.custom_minimum_size = Vector2(56, 56)
 		preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 		preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		preview.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		row.add_child(preview)
 		_slot_previews[slot_id] = preview
@@ -139,27 +136,34 @@ func _build_slot_card(slot_id: String, meta: Dictionary) -> Control:
 	content.add_theme_constant_override("separation", 4)
 	row.add_child(content)
 
-	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 6)
-	content.add_child(header)
-
+	# The title owns its own full-width row; the actions sit on a separate row
+	# below. At the ~360px dock width sharing one row squeezed the title into
+	# one-token-per-line wrapping and cramped the buttons.
 	var title_label := Label.new()
 	title_label.text = TerrainEditorSlots.get_slot_label(slot_id)
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	if meta.has("tooltip"):
 		title_label.tooltip_text = String(meta["tooltip"])
-	header.add_child(title_label)
+	content.add_child(title_label)
+
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 6)
+	content.add_child(actions)
+
+	var actions_spacer := Control.new()
+	actions_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	actions.add_child(actions_spacer)
 
 	var load_btn := Button.new()
 	load_btn.text = "Load"
 	load_btn.pressed.connect(_on_slot_load_pressed.bind(slot_id, TerrainEditorSlots.get_slot_dialog_title(slot_id)))
-	header.add_child(load_btn)
+	actions.add_child(load_btn)
 
 	var reset_btn := Button.new()
 	reset_btn.text = "Reset"
 	reset_btn.pressed.connect(_on_slot_reset_pressed.bind(slot_id))
-	header.add_child(reset_btn)
+	actions.add_child(reset_btn)
 
 	var filename_label := Label.new()
 	filename_label.text = "(none)"
@@ -237,21 +241,9 @@ func _on_slot_reset_pressed(slot_id: String) -> void:
 
 func _open_file_dialog(title: String, filters: PackedStringArray, on_pick: Callable) -> void:
 	if _file_dialog == null:
-		_file_dialog = FileDialog.new()
-		_file_dialog.use_native_dialog = true
-		_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
-		_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-		_file_dialog.min_size = Vector2i(760, 520)
-		add_child(_file_dialog)
-
-	_file_dialog.title = title
-	_file_dialog.filters = filters
-	if editor and not editor.get_last_open_dir().is_empty():
-		_file_dialog.current_dir = editor.get_last_open_dir()
-	for sig in _file_dialog.file_selected.get_connections():
-		_file_dialog.file_selected.disconnect(sig.callable)
-	_file_dialog.file_selected.connect(on_pick, CONNECT_ONE_SHOT)
-	_file_dialog.popup_centered()
+		_file_dialog = FileDialogHelper.new(self)
+	var dir := editor.get_last_open_dir() if editor != null else ""
+	_file_dialog.open(title, filters, on_pick, dir)
 
 
 func _on_detail_density_changed(value: float) -> void:

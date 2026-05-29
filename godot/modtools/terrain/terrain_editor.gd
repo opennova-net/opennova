@@ -15,13 +15,11 @@ const DEFAULT_HEIGHT := 20.0
 const INVALID_HEIGHT := -1000000.0
 const INVALID_HIT := Vector3(INF, INF, INF)
 const EDITOR_MIN_WINDOW_SIZE := Vector2i(1366, 768)
-const TerrainEditorBrushes = preload("res://modtools/terrain/terrain_editor_brushes.gd")
 const TerrainEditorSlots = preload("res://modtools/terrain/terrain_editor_slots.gd")
 const TerrainEditorSurfacePaint = preload("res://modtools/terrain/terrain_editor_surface_paint.gd")
 const TerrainEditHistory = preload("res://modtools/terrain/terrain_edit_history.gd")
 const TerrainEditorDocument = preload("res://modtools/terrain/terrain_editor_document.gd")
 const TerrainEditorBrushSession = preload("res://modtools/terrain/terrain_editor_brush_session.gd")
-const CDEPConstraint = preload("res://modtools/terrain/terrain_editor_cdep_constraint.gd")
 const TerrainFoliagePreview = preload("res://modtools/terrain/terrain_foliage_preview.gd")
 const TerrainTileOverlayPreview = preload("res://modtools/terrain/terrain_tile_overlay_preview.gd")
 const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
@@ -1481,12 +1479,13 @@ func _sync_tile_overlay_preview() -> void:
 
 
 func _apply_surface_paint_stroke(_delta: float) -> bool:
-	if _document.surface_map_state.is_empty() or not _hover_hit_valid:
+	var surface_map: NovaTerrainSurfaceMap = _document.surface_map
+	if surface_map == null or not _hover_hit_valid:
 		_brush_session.reset_stroke_tracking()
 		return false
 
-	var map_width := int(_document.surface_map_state.get("width", 0))
-	var map_height := int(_document.surface_map_state.get("height", 0))
+	var map_width := surface_map.get_width()
+	var map_height := surface_map.get_height()
 	if map_width <= 0 or map_height <= 0:
 		_brush_session.reset_stroke_tracking()
 		return false
@@ -1504,12 +1503,11 @@ func _apply_surface_paint_stroke(_delta: float) -> bool:
 		var source := terrain_mesh.world_to_source_coords(dab_hit.x, dab_hit.z)
 		if source.x < 0.0 or source.y < 0.0:
 			continue
-		var center_x := TerrainEditorSurfacePaint.map_x_from_heightmap_x(source.x, map_width)
-		var center_y := TerrainEditorSurfacePaint.map_y_from_heightmap_y(source.y, map_height)
+		var center_x := surface_map.map_x_from_heightmap_x(source.x)
+		var center_y := surface_map.map_y_from_heightmap_y(source.y)
 		if center_x < 0 or center_y < 0 or center_x >= map_width or center_y >= map_height:
 			continue
-		changed = TerrainEditorSurfacePaint.paint_circle(
-			_document.surface_map_state,
+		changed = surface_map.paint_circle(
 			center_x,
 			center_y,
 			radius_pixels,
@@ -1519,7 +1517,7 @@ func _apply_surface_paint_stroke(_delta: float) -> bool:
 		) or changed
 
 	if changed:
-		_document.restore_surface_map_history_state(_get_material(), _document.surface_map_state)
+		_document.sync_surface_map_to_data(_get_material())
 		_surface_map_stroke_changed = true
 
 	_brush_session.commit_stroke_hit(end_hit)
@@ -1527,18 +1525,19 @@ func _apply_surface_paint_stroke(_delta: float) -> bool:
 
 
 func _eyedrop_surface_at_hover() -> bool:
-	if _document.surface_map_state.is_empty() or not _hover_hit_valid:
+	var surface_map: NovaTerrainSurfaceMap = _document.surface_map
+	if surface_map == null or not _hover_hit_valid:
 		return false
-	var map_width := int(_document.surface_map_state.get("width", 0))
-	var map_height := int(_document.surface_map_state.get("height", 0))
+	var map_width := surface_map.get_width()
+	var map_height := surface_map.get_height()
 	if map_width <= 0 or map_height <= 0:
 		return false
 	var source := terrain_mesh.world_to_source_coords(_hover_hit.x, _hover_hit.z)
 	if source.x < 0.0 or source.y < 0.0:
 		return false
-	var map_x := TerrainEditorSurfacePaint.map_x_from_heightmap_x(source.x, map_width)
-	var map_y := TerrainEditorSurfacePaint.map_y_from_heightmap_y(source.y, map_height)
-	selected_surface_index = TerrainEditorSurfacePaint.get_index(_document.surface_map_state, map_x, map_y)
+	var map_x := surface_map.map_x_from_heightmap_x(source.x)
+	var map_y := surface_map.map_y_from_heightmap_y(source.y)
+	selected_surface_index = surface_map.get_index(map_x, map_y)
 	_update_hud()
 	return true
 
@@ -1589,7 +1588,7 @@ func _on_primary_start() -> void:
 			_select_tileinfo_entry_at_hover()
 		return
 	if current_tool == Tool.SURFACE_PAINT:
-		if not _hover_hit_valid or _document.surface_map_state.is_empty():
+		if not _hover_hit_valid or _document.surface_map == null:
 			return
 		if Input.is_key_pressed(KEY_ALT):
 			_eyedrop_surface_at_hover()
@@ -1629,7 +1628,7 @@ func _on_primary_start() -> void:
 	if current_tool == Tool.PAINT_COLORMAP and Input.is_key_pressed(KEY_ALT) and _hover_hit_valid:
 		var source := terrain_mesh.world_to_source_coords(_hover_hit.x, _hover_hit.z)
 		if source.x >= 0.0:
-			paint_color = TerrainEditorBrushes.sample_colormap(_colormap_image, source.x, source.y)
+			paint_color = _data.brush_sample_colormap(source.x, source.y)
 			_update_hud()
 		return
 	_brush_session.begin_brush_drag(_source_image_for_kind(_brush_session.history_kind_for_tool(current_tool)), Input.is_key_pressed(KEY_CTRL))
@@ -1778,7 +1777,7 @@ func _apply_brush_stroke(delta: float) -> void:
 			is_dirty = true
 			_mark_foliage_preview_dirty()
 		return
-	var result := _brush_session.apply_brush_stroke(delta, _hover_hit, _hover_hit_valid, terrain_mesh, _heightmap_image, _blendmap_image, _colormap_image)
+	var result := _brush_session.apply_brush_stroke(delta, _hover_hit, _hover_hit_valid, terrain_mesh, _data)
 	if result["changed_heightmap"]:
 		terrain_mesh.set_heightmap(_heightmap_image)
 		_mark_tile_overlay_dirty()
@@ -2117,7 +2116,7 @@ func save_project(dir_path: String) -> Error:
 	if _data and String(_data.get_terrain_name()) != name:
 		_data.set_terrain_name(name)
 
-	var raw16 := _image_to_raw16(_heightmap_image)
+	var raw16 := _data.get_depth_raw16()
 	var depth_path := dir_path + "/" + name + "_depth.raw"
 	var depth_file: FileAccess = FileAccess.open(depth_path, FileAccess.WRITE)
 	if not depth_file:
@@ -2155,9 +2154,9 @@ func save_project(dir_path: String) -> Error:
 # auto-clamp; otherwise the eventual DFX/JO export will fail at the bake
 # guard with a less actionable message.
 func _check_loaded_cdep_violations() -> void:
-	if not _heightmap_image:
+	if _data == null or not _heightmap_image:
 		return
-	var count := CDEPConstraint.count_violations(_heightmap_image)
+	var count := _data.cdep_count_violations()
 	if count == 0:
 		return
 	if workstation and workstation.has_method("prompt_cdep_violations"):
@@ -2167,9 +2166,9 @@ func _check_loaded_cdep_violations() -> void:
 
 
 func _auto_fix_cdep_violations() -> void:
-	if not _heightmap_image:
+	if _data == null or not _heightmap_image:
 		return
-	var clamped := CDEPConstraint.clamp_all_violations(_heightmap_image)
+	var clamped := _data.cdep_clamp_all_violations()
 	terrain_mesh.set_heightmap(_heightmap_image)
 	_mark_foliage_preview_dirty()
 	_mark_tile_overlay_dirty()
@@ -2185,9 +2184,9 @@ func _auto_fix_cdep_violations() -> void:
 func _auto_clamp_for_export_if_needed(flavor: int) -> void:
 	if flavor != ExportFlavor.DFX_JO:
 		return
-	if not _heightmap_image:
+	if _data == null or not _heightmap_image:
 		return
-	var clamped := CDEPConstraint.clamp_all_violations(_heightmap_image)
+	var clamped := _data.cdep_clamp_all_violations()
 	if clamped == 0:
 		return
 	terrain_mesh.set_heightmap(_heightmap_image)
@@ -2204,9 +2203,11 @@ func begin_export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO)
 	DirAccess.make_dir_recursive_absolute(output_dir)
 	var name := _get_terrain_name()
 	_auto_clamp_for_export_if_needed(flavor)
-	var raw16 := _image_to_raw16(_heightmap_image, flavor == ExportFlavor.DFX_JO)
-	if raw16.is_empty():
+	if flavor == ExportFlavor.DFX_JO and not _document.cdep_ranges_valid(_heightmap_image):
 		_notify_status("Export blocked: some areas are too steep for Joint Operations / DFX. Flatten them, or export for original Delta Force instead.")
+		return ERR_INVALID_DATA
+	var raw16 := _data.get_depth_raw16()
+	if raw16.is_empty():
 		return ERR_INVALID_DATA
 	var builder: NovaTerrainBuilder = NovaTerrainBuilder.new()
 	var job: NovaTerrainBuildJob = builder.begin_build_from_data(raw16, output_dir, name, "", flavor)
@@ -2231,9 +2232,11 @@ func export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO) -> Er
 
 	DirAccess.make_dir_recursive_absolute(output_dir)
 	_auto_clamp_for_export_if_needed(flavor)
-	var raw16 := _image_to_raw16(_heightmap_image, flavor == ExportFlavor.DFX_JO)
-	if raw16.is_empty():
+	if flavor == ExportFlavor.DFX_JO and not _document.cdep_ranges_valid(_heightmap_image):
 		_notify_status("Export blocked: some areas are too steep for Joint Operations / DFX. Flatten them, or export for original Delta Force instead.")
+		return ERR_INVALID_DATA
+	var raw16 := _data.get_depth_raw16()
+	if raw16.is_empty():
 		return ERR_INVALID_DATA
 	var builder: NovaTerrainBuilder = NovaTerrainBuilder.new()
 	var err := builder.build_from_data(raw16, output_dir, _get_terrain_name(), "", flavor)
@@ -2347,6 +2350,9 @@ func _sync_material_from_data() -> void:
 func _sync_sector_layout(reframe_camera: bool) -> void:
 	if not _data:
 		return
+	# The mesh forwards world->atlas coordinate queries to NovaTerrainData's C++
+	# kernel, so hand it the live data alongside the layout it draws.
+	terrain_mesh.set_terrain_data(_data)
 	terrain_mesh.set_sector_layout(
 		_data.get_sector_count(),
 		_data.get_sector_rows(),
@@ -2451,10 +2457,6 @@ func _get_material() -> ShaderMaterial:
 	if terrain_mesh == null:
 		return null
 	return terrain_mesh.get_material()
-
-
-func _image_to_raw16(image: Image, enforce_cdep: bool = false) -> PackedByteArray:
-	return _document.image_to_raw16(image, enforce_cdep)
 
 
 func _notification(what: int) -> void:

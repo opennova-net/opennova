@@ -8,12 +8,68 @@ const TerrainWorkspaceScript = preload("res://modtools/editor/terrain_workspace.
 const TerrainEditorAssetDockScene = preload("res://modtools/terrain/ui/editor_asset_dock.tscn")
 const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
 const EnvironmentInspectorScript = preload("res://modtools/environment/environment_inspector.gd")
-const LayoutInspectorScene = preload("res://modtools/terrain/ui/inspectors/layout_inspector.tscn")
-const PaintInspectorScene = preload("res://modtools/terrain/ui/inspectors/paint_inspector.tscn")
-const ScatterInspectorScene = preload("res://modtools/terrain/ui/inspectors/scatter_inspector.tscn")
-const SculptInspectorScene = preload("res://modtools/terrain/ui/inspectors/sculpt_inspector.tscn")
-const StampInspectorScene = preload("res://modtools/terrain/ui/inspectors/stamp_inspector.tscn")
 const QuadrantBoardScript = preload("res://modtools/terrain/ui/widgets/quadrant_board.gd")
+const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const FIXTURE_CACHE_DIR := "opennova_test"
+
+var _saved_state_config := PackedByteArray()
+var _had_state_config := false
+
+
+# Minimal editor double for prompt routing tests: the workstation only needs the
+# three pending-action hooks, so this avoids set_editor()'s full workspace bind.
+class PromptEditorStub:
+	extends Node
+	var saved := false
+	var discarded := false
+	var cancelled := false
+
+	func confirm_pending_action_save() -> void:
+		saved = true
+
+	func confirm_pending_action_discard() -> void:
+		discarded = true
+
+	func cancel_pending_action() -> void:
+		cancelled = true
+
+
+func before_each() -> void:
+	_had_state_config = FileAccess.file_exists(STATE_CONFIG_PATH)
+	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
+
+
+func after_each() -> void:
+	# Persistence tests write user://terrain_editor_state.cfg; restore it so they
+	# never leak a temp resource directory into the real editor's saved state.
+	if _had_state_config:
+		var f := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
+		if f != null:
+			f.store_buffer(_saved_state_config)
+			f.close()
+	elif FileAccess.file_exists(STATE_CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+
+
+func after_all() -> void:
+	_remove_dir_recursive(OS.get_cache_dir().path_join(FIXTURE_CACHE_DIR))
+
+
+func _remove_dir_recursive(path: String) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while entry != "":
+		var child := path.path_join(entry)
+		if dir.current_is_dir():
+			_remove_dir_recursive(child)
+		else:
+			DirAccess.remove_absolute(child)
+		entry = dir.get_next()
+	dir.list_dir_end()
+	DirAccess.remove_absolute(path)
 
 
 func _workspace_action_texts(host: Node) -> Array:
@@ -34,6 +90,19 @@ func _find_button_by_text(root: Node, text: String) -> Button:
 	return null
 
 
+# AcceptDialog/ConfirmationDialog keep their action buttons in an internal child
+# container, so a normal get_children() walk misses them; this variant includes
+# internal children for asserting custom dialog buttons (e.g. Discard).
+func _find_button_by_text_deep(root: Node, text: String) -> Button:
+	if root is Button and (root as Button).text == text:
+		return root as Button
+	for child in root.get_children(true):
+		var found := _find_button_by_text_deep(child, text)
+		if found != null:
+			return found
+	return null
+
+
 func _has_label_text(root: Node, text: String) -> bool:
 	if root is Label and (root as Label).text == text:
 		return true
@@ -43,17 +112,55 @@ func _has_label_text(root: Node, text: String) -> bool:
 	return false
 
 
+func _find_label_by_text(root: Node, text: String) -> Label:
+	if root is Label and (root as Label).text == text:
+		return root as Label
+	for child in root.get_children():
+		var found := _find_label_by_text(child, text)
+		if found != null:
+			return found
+	return null
+
+
+func _find_node_by_name(root: Node, node_name: String) -> Node:
+	if root.name == node_name:
+		return root
+	for child in root.get_children():
+		var found := _find_node_by_name(child, node_name)
+		if found != null:
+			return found
+	return null
+
+
+func _find_node_by_type(root: Node, type_name: String) -> Node:
+	if root == null:
+		return null
+	if root.is_class(type_name):
+		return root
+	for child in root.get_children():
+		var found := _find_node_by_type(child, type_name)
+		if found != null:
+			return found
+	return null
+
+
 func _make_resource_fixture(name: String) -> String:
-	var root := ProjectSettings.globalize_path("user://%s_%d" % [name, Time.get_ticks_usec()])
+	# Build fixtures under the OS cache dir (not user://): a resource library
+	# never lives inside the app user-data dir, so this keeps fixtures out of the
+	# editor's real state and compatible with _is_valid_resource_root().
+	var root := OS.get_cache_dir().path_join(FIXTURE_CACHE_DIR).path_join("%s_%d" % [name, Time.get_ticks_usec()])
 	DirAccess.make_dir_recursive_absolute(root.path_join("missions"))
 	DirAccess.make_dir_recursive_absolute(root.path_join("terrains"))
 	DirAccess.make_dir_recursive_absolute(root.path_join("env"))
 	DirAccess.make_dir_recursive_absolute(root.path_join("models"))
+	DirAccess.make_dir_recursive_absolute(root.path_join("objects"))
 	_write_fixture_file(root.path_join("missions/alpha.bms"), "bms")
 	_write_fixture_file(root.path_join("terrains/alpha.trn"), "trn")
 	_write_fixture_file(root.path_join("env/alpha.env"), "env")
 	_write_fixture_file(root.path_join("models/alpha.glb"), "glb")
-	_write_fixture_file(root.path_join("models/ignored.3di"), "3di")
+	_write_fixture_file(root.path_join("objects/alpha.3dp"), "3dp")
+	_write_fixture_file(root.path_join("objects/alpha.3di"), "3di")
+	_write_fixture_file(root.path_join("objects/alpha.ase"), "ase")
 	return root
 
 
@@ -65,14 +172,15 @@ func _write_fixture_file(path: String, text: String) -> void:
 		file.close()
 
 
-func test_workstation_starts_with_two_domain_workspaces() -> void:
+func test_workstation_starts_with_object_domain_workspace() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
 	var workspace_rail: HBoxContainer = workstation.get_node("%WorkspaceRail")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Terrain should remain the default workspace.")
-	assert_eq(workspace_rail.get_child_count(), 2, "The shell should expose Terrain and Mission workspaces.")
+	assert_eq(workspace_rail.get_child_count(), 3, "The shell should expose Terrain, Object, and Mission workspaces.")
 	assert_eq((workspace_rail.get_child(0) as Button).text, "Terrain", "Terrain should be the first workspace.")
-	assert_eq((workspace_rail.get_child(1) as Button).text, "Mission", "Mission should have a reserved workspace.")
+	assert_eq((workspace_rail.get_child(1) as Button).text, "Object", "Object should replace the old standalone OED workflow.")
+	assert_eq((workspace_rail.get_child(2) as Button).text, "Mission", "Mission should have a reserved workspace.")
 
 
 func test_mission_placeholder_shows_no_document_actions() -> void:
@@ -98,7 +206,7 @@ func test_mission_placeholder_shows_no_document_actions() -> void:
 	assert_true(_has_label_text(inspector_host, "Coming soon"), "Mission should show a compact coming-soon placeholder.")
 
 
-func test_resource_index_lists_openable_resources_and_glb_models() -> void:
+func test_resource_index_lists_object_resources_without_glb_models() -> void:
 	var root := _make_resource_fixture("resource_index_godot")
 	var index := NovaResourceIndex.new()
 
@@ -106,9 +214,12 @@ func test_resource_index_lists_openable_resources_and_glb_models() -> void:
 	assert_eq(index.get_resource_files("mission").size(), 1, "BMS files should be indexed as mission resources.")
 	assert_eq(index.get_resource_files("terrain").size(), 1, "TRN files should be indexed as terrain resources.")
 	assert_eq(index.get_resource_files("environment").size(), 1, "ENV files should be indexed as environment resources.")
-	assert_eq(index.get_resource_files("model").size(), 1, "Only GLB files should be indexed as model resources.")
-	assert_eq(index.get_resource_files("all").size(), 4, "3DI files should not be indexed in this pass.")
-	assert_eq(String((index.get_resource_files("model")[0] as Dictionary).get("relative_path", "")), "models/alpha.glb", "Model entries should keep root-relative paths.")
+	assert_eq(index.get_resource_files("object_project").size(), 1, "3DP files should be indexed as object workspaces.")
+	assert_eq(index.get_resource_files("object_model").size(), 1, "3DI files should be indexed as object model resources.")
+	assert_eq(index.get_resource_files("object_scene").size(), 1, "ASE files should be indexed as importable object scenes.")
+	assert_eq(index.get_resource_files("glb").size(), 0, "GLB files should no longer be indexed.")
+	assert_eq(index.get_resource_files("all").size(), 6, "All openable resources should exclude GLB.")
+	assert_eq(String((index.get_resource_files("object_model")[0] as Dictionary).get("relative_path", "")), "objects/alpha.3di", "Object model entries should keep root-relative paths.")
 
 
 func test_settings_viewport_popup_edits_resource_directory() -> void:
@@ -282,6 +393,21 @@ func test_resource_settings_persist_in_editor_state() -> void:
 	assert_true(next_workstation.is_resource_recursive(), "Recursive setting should persist with its default value.")
 
 
+func test_resource_root_inside_user_data_is_rejected_on_load() -> void:
+	# A resource root that points inside the app user-data dir (e.g. a temp/test
+	# path that leaked into the persisted state) must not be adopted on load, so
+	# the resource browser shows a clean "no directory" state instead of a dead
+	# internal path.
+	var bogus := OS.get_user_data_dir().path_join("resource_settings_persist_bogus_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(bogus)
+	var w1 = add_child_autofree(EditorWorkstationScene.instantiate())
+	assert_eq(w1._set_resource_root_dir(bogus, true, false), OK, "Persisting the root should succeed.")
+
+	var w2 = add_child_autofree(EditorWorkstationScene.instantiate())
+	assert_eq(w2.get_resource_root_dir(), "", "A resource root inside the app user-data dir should be rejected on load.")
+	DirAccess.remove_absolute(bogus)
+
+
 func test_camera_button_exposes_global_viewport_settings() -> void:
 	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
 	await get_tree().process_frame
@@ -319,6 +445,62 @@ func test_camera_button_exposes_global_viewport_settings() -> void:
 
 	assert_true(popup.visible, "Camera settings should remain available from Mission.")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.MISSION, "Opening camera settings from Mission should not switch workspaces.")
+
+
+func test_camera_button_targets_object_preview_camera_when_object_is_active() -> void:
+	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	await get_tree().process_frame
+	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var host: Control = workstation.get_node("%ViewportHost")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
+	await get_tree().process_frame
+
+	var preview := _find_node_by_name(host, "ObjectPreview")
+	var object_camera := _find_node_by_type(preview, "Camera3D") as Camera3D
+	var terrain_camera := editor.camera
+	assert_not_null(preview, "Object workspace should mount its preview in the shared viewport host.")
+	assert_not_null(object_camera, "Object preview should expose a fly camera for global camera settings.")
+	assert_not_null(terrain_camera, "Terrain editor should still keep its camera while Object is active.")
+	if object_camera == null or terrain_camera == null:
+		return
+	var original_terrain_speed: float = terrain_camera.fly_speed
+
+	var camera_button: Button = workstation.get_node("%CameraToggleButton")
+	camera_button.toggled.emit(true)
+	await get_tree().process_frame
+
+	var popup: PanelContainer = workstation.get_node("%CameraPopup")
+	var settings_host: Control = workstation.get_node("%CameraSettingsHost")
+	var settings_panel: Control = settings_host.get_child(0)
+	var fly_speed_spin: SpinBox = settings_panel.get_node("%FlySpeedSpin")
+	assert_true(popup.visible, "Camera settings should open while Object is active.")
+
+	fly_speed_spin.value_changed.emit(43.0)
+
+	assert_eq(object_camera.fly_speed, 43.0, "Global camera popup should edit the Object preview camera when Object is active.")
+	assert_eq(terrain_camera.fly_speed, original_terrain_speed, "Object camera edits should not mutate the inactive Terrain camera.")
+
+
+func test_object_workspace_uses_only_global_environment_viewport_button() -> void:
+	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	await get_tree().process_frame
+	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var host: Control = workstation.get_node("%ViewportHost")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
+	await get_tree().process_frame
+
+	var environment_button: Button = workstation.get_node("%EnvironmentToggleButton")
+	assert_not_null(environment_button, "Global environment button should stay available from Object.")
+	assert_null(_find_node_by_name(host, "ObjectEnvironmentButton"), "Object preview should not add a second environment button over the viewport.")
+
+	environment_button.toggled.emit(true)
+	await get_tree().process_frame
+
+	var popup: PanelContainer = workstation.get_node("%EnvironmentPopup")
+	assert_true(popup.visible, "Global environment button should open the shared environment popup from Object.")
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.OBJECT, "Opening global environment controls should not switch out of Object.")
 
 
 func test_viewport_popups_are_mutually_exclusive_and_escape_closes_active_popup() -> void:
@@ -383,6 +565,57 @@ func test_switching_workspaces_preserves_terrain_dirty_state() -> void:
 	assert_true(workstation.get_node("%AssetDock").visible, "Terrain properties should return when Terrain is active.")
 
 
+func test_workstation_mounts_workspace_specific_right_docks() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var editor = autofree(TerrainEditorScript.new())
+	workstation.set_editor(editor)
+
+	var dock: Control = workstation.get_node("%AssetDock")
+	assert_true(dock.visible, "Terrain should show the shared right dock host.")
+	assert_not_null(_find_node_by_name(dock, "TerrainAssetDock"), "Terrain should mount its asset dock inside the shared right dock host.")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
+
+	assert_false(dock.visible, "Object Preview should hide the shared right dock host.")
+	assert_null(_find_node_by_name(dock, "ObjectDetailDock"), "Object Preview should not mount an empty detail dock.")
+	assert_null(_find_node_by_name(dock, "TerrainAssetDock"), "Switching to Object should remove Terrain's dock content.")
+	assert_not_null(_find_node_by_name(workstation.get_node("%ViewportHost"), "ObjectPreview"), "Object preview should stay in the center viewport.")
+
+	var materials_button := _find_button_by_text(workstation.get_node("%ModeRail"), "Materials")
+	assert_not_null(materials_button, "Object workspace should expose Materials mode.")
+	if materials_button != null:
+		materials_button.pressed.emit()
+	assert_true(dock.visible, "Object Materials should show the shared right dock host.")
+	assert_not_null(_find_node_by_name(dock, "ObjectDetailDock"), "Object Materials should mount its detail dock.")
+	assert_not_null(_find_node_by_name(dock, "MaterialDetailPanel"), "Object Materials should expose right-pane material details.")
+
+	var parts_button := _find_button_by_text(workstation.get_node("%ModeRail"), "Part Anims")
+	assert_not_null(parts_button, "Object workspace should expose Part Anims mode.")
+	if parts_button != null:
+		parts_button.pressed.emit()
+	assert_true(dock.visible, "Object Part anims should show the shared right dock host.")
+	assert_not_null(_find_node_by_name(dock, "PartAnimDetailsEmpty"), "Object Part anims should expose right-pane animation details.")
+
+	var lights_button := _find_button_by_text(workstation.get_node("%ModeRail"), "Lights")
+	assert_not_null(lights_button, "Object workspace should expose Lights mode.")
+	if lights_button != null:
+		lights_button.pressed.emit()
+	assert_true(dock.visible, "Object Lights should show the shared right dock host.")
+	assert_not_null(_find_node_by_name(dock, "LightDetailPanel"), "Object Lights should expose right-pane light details.")
+
+	var lods_button := _find_button_by_text(workstation.get_node("%ModeRail"), "LODs")
+	assert_not_null(lods_button, "Object workspace should expose LODs mode.")
+	if lods_button != null:
+		lods_button.pressed.emit()
+	assert_false(dock.visible, "Object LODs should hide the shared right dock host until they have a real detail editor.")
+	assert_null(_find_node_by_name(dock, "ObjectDetailDock"), "Object LODs should not mount placeholder right-pane content.")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
+
+	assert_false(dock.visible, "Mission should hide the right dock host.")
+	assert_eq(dock.get_child_count(), 0, "Workspaces without a right dock should leave the shared host empty.")
+
+
 func test_workspace_switching_mounts_terrain_and_mission_viewports() -> void:
 	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
 	await get_tree().process_frame
@@ -430,55 +663,85 @@ func test_workstation_tracks_mode_from_editor_tool() -> void:
 	assert_eq(workstation._current_workflow_id, TerrainWorkspaceScript.Workflow.STAMP, "Workstation should switch to Tile mode when the editor tool becomes tile placement.")
 
 
-func test_prompt_unsaved_changes_updates_custom_copy() -> void:
+func test_unsaved_changes_opens_native_confirmation_dialog() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
 	workstation.prompt_unsaved_changes("quit")
 
-	var prompt_host: Control = workstation.get_node("%PromptHost")
-	var prompt_card: PanelContainer = workstation.get_node("%PromptCard")
-	var lead: Label = workstation.get_node("%PromptLead")
-	var info: Label = workstation.get_node("%PromptInfoLabel")
-	var info_panel: PanelContainer = workstation.get_node("%PromptInfoPanel")
-	var primary: Button = workstation.get_node("%PromptPrimaryButton")
-	var secondary: Button = workstation.get_node("%PromptSecondaryButton")
-	var tertiary: Button = workstation.get_node("%PromptTertiaryButton")
-	assert_true(prompt_host.visible, "Unsaved prompt should show the custom modal host.")
-	assert_true(prompt_card.visible, "Unsaved prompt should show the custom modal card.")
-	assert_eq(lead.text, "Save changes?", "Unsaved prompt should keep the lead short.")
-	assert_eq(info.text, "", "Unsaved prompt should no longer show a next-step callout.")
-	assert_false(info_panel.visible, "Unsaved prompt should hide the info panel when there is no extra copy.")
-	assert_eq(primary.text, "Save", "Unsaved prompt should keep save as the primary confirmation button.")
-	assert_eq(secondary.text, "Cancel", "Unsaved prompt should let the user stay in the editor explicitly.")
-	assert_eq(tertiary.text, "Discard", "Unsaved prompt should keep discard visible as a secondary destructive action.")
+	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Unsaved changes should open a native confirmation dialog.")
+	if dialog == null:
+		return
+	assert_true(dialog.visible, "Unsaved confirmation should be shown.")
+	assert_eq(dialog.dialog_text, "Save changes?", "Unsaved confirmation should ask the short question.")
+	assert_eq(dialog.get_ok_button().text, "Save", "Save should stay the primary confirmation.")
+	assert_eq(dialog.get_cancel_button().text, "Cancel", "Cancel should let the user keep editing.")
+	assert_not_null(_find_button_by_text_deep(dialog, "Discard"), "Discard should remain a destructive custom action.")
+	assert_null(workstation.get_node_or_null("%PromptHost"), "The hand-built prompt card should be gone.")
+	assert_eq(dialog.theme, workstation.theme, "The dialog should resolve the shell theme explicitly.")
 
 
-func test_export_flavor_dialog_updates_format_copy() -> void:
+func test_unsaved_dialog_cancel_keeps_editing() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var stub := PromptEditorStub.new()
+	autofree(stub)
+	workstation.editor = stub
+
+	workstation.prompt_unsaved_changes("quit")
+	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Unsaved changes should open a native confirmation dialog.")
+	if dialog == null:
+		return
+	dialog.canceled.emit()
+
+	assert_true(stub.cancelled, "Cancel/Escape should cancel the pending action (keep editing).")
+	assert_false(stub.discarded, "Cancel should not discard.")
+	assert_false(stub.saved, "Cancel should not save.")
+
+
+func test_unsaved_dialog_confirm_saves_and_discard_action_discards() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var stub := PromptEditorStub.new()
+	autofree(stub)
+	workstation.editor = stub
+
+	workstation.prompt_unsaved_changes("quit")
+	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Unsaved changes should open a native confirmation dialog.")
+	if dialog == null:
+		return
+
+	dialog.confirmed.emit()
+	assert_true(stub.saved, "Confirm should save the pending action.")
+	assert_false(stub.discarded, "Confirm should not discard.")
+
+	dialog.custom_action.emit(&"discard")
+	assert_true(stub.discarded, "The Discard custom action should discard the pending action.")
+
+
+func test_export_flavor_opens_native_dialog_with_format_toggles() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
 	workstation._show_export_flavor_dialog("C:/Exports/TestTerrain")
 
-	var prompt_host: Control = workstation.get_node("%PromptHost")
-	var prompt_card: PanelContainer = workstation.get_node("%PromptCard")
-	var lead: Label = workstation.get_node("%PromptLead")
-	var body: Label = workstation.get_node("%PromptBody")
-	var info: Label = workstation.get_node("%PromptInfoLabel")
-	var format_bhd: Button = workstation.get_node("%PromptFormatBHD")
-	var format_cdep: Button = workstation.get_node("%PromptFormatCDEP")
-	var primary: Button = workstation.get_node("%PromptPrimaryButton")
-	var secondary: Button = workstation.get_node("%PromptSecondaryButton")
-	assert_true(prompt_host.visible, "Export prompt should show the custom modal host.")
-	assert_true(prompt_card.visible, "Export prompt should show the custom modal card.")
-	assert_eq(lead.text, "Export", "Export prompt should keep the lead minimal.")
-	assert_eq(body.text, "", "Export prompt should not show extra body copy.")
-	assert_false(body.visible, "Export prompt should hide the body when there is no extra copy.")
-	assert_eq(info.text, "", "Export prompt should not show the folder path.")
-	assert_false(workstation.get_node("%PromptInfoPanel").visible, "Export prompt should not show a folder summary.")
-	assert_eq(format_bhd.text, "BHD", "Export choices should keep BHD simple.")
-	assert_eq(format_cdep.text, "JO/DFX", "Export choices should keep JO/DFX simple.")
-	assert_eq(primary.text, "Export", "Export prompt should keep Export as the primary action.")
-	assert_eq(secondary.text, "Cancel", "Export prompt should keep Cancel as the secondary action.")
-	assert_null(workstation.get_node_or_null("%PromptFormatLabel"), "Export prompt should no longer show a separate format label.")
+	var dialog = workstation.find_child("ExportFlavorDialog", true, false)
+	assert_not_null(dialog, "Export should open a native flavor dialog.")
+	if dialog == null:
+		return
+	assert_true(dialog.visible, "Export flavor dialog should be shown.")
+	assert_eq(dialog.get_ok_button().text, "Export", "Export should stay the primary action.")
+	assert_eq(dialog.get_cancel_button().text, "Cancel", "Cancel should stay the secondary action.")
+	var bhd := _find_button_by_text(dialog, "BHD")
+	var jodfx := _find_button_by_text(dialog, "JO/DFX")
+	assert_not_null(bhd, "Export should offer the BHD format.")
+	assert_not_null(jodfx, "Export should offer the JO/DFX format.")
+	if jodfx != null:
+		assert_true(jodfx.button_pressed, "JO/DFX should be the default export flavor.")
+	if bhd != null:
+		assert_false(bhd.button_pressed, "BHD should not be selected by default.")
+	assert_eq(dialog.get_flavor(), 1, "Default flavor should map to DFX_JO (1).")
+	assert_null(workstation.get_node_or_null("%PromptHost"), "The hand-built prompt card should be gone.")
+	assert_eq(dialog.theme, workstation.theme, "The dialog should resolve the shell theme explicitly.")
 
 
 func test_asset_dock_builds_preview_cards_for_shared_maps() -> void:
@@ -528,24 +791,36 @@ func test_asset_dock_uses_properties_tab_and_removes_old_toggles() -> void:
 
 func test_asset_dock_and_inspectors_do_not_poll_when_idle() -> void:
 	var dock = add_child_autofree(TerrainEditorAssetDockScene.instantiate())
-	var sculpt = add_child_autofree(SculptInspectorScene.instantiate())
-	var paint = add_child_autofree(PaintInspectorScene.instantiate())
-	var scatter = add_child_autofree(ScatterInspectorScene.instantiate())
-	var stamp = add_child_autofree(StampInspectorScene.instantiate())
-	var layout = add_child_autofree(LayoutInspectorScene.instantiate())
 
 	assert_false(dock.is_processing(), "Asset dock should sync from editor state changes instead of idle polling.")
-	assert_false(sculpt.is_processing(), "Sculpt inspector should sync from editor state changes instead of idle polling.")
-	assert_false(paint.is_processing(), "Paint inspector should sync from editor state changes instead of idle polling.")
-	assert_false(scatter.is_processing(), "Foliage inspector should sync from editor state changes instead of idle polling.")
-	assert_false(stamp.is_processing(), "Tile inspector should sync from editor state changes instead of idle polling.")
-	assert_false(layout.is_processing(), "Layout inspector should sync from editor state changes instead of idle polling.")
+
+
+func test_asset_dock_slot_card_title_does_not_share_row_with_buttons() -> void:
+	var dock = add_child_autofree(TerrainEditorAssetDockScene.instantiate())
+
+	# At the ~360px dock width the title and the Load/Reset buttons cannot share a
+	# horizontal row without squeezing the title into one-token-per-line wrapping.
+	# The title should own a full-width row so multi-word slot labels stay readable.
+	var title := _find_label_by_text(dock, "Shading 1 / near")
+	assert_not_null(title, "Slot card should expose the slot title label.")
+	if title == null:
+		return
+	var parent := title.get_parent()
+	assert_not_null(parent, "Slot title should be parented.")
+	var has_button_sibling := false
+	for sibling in parent.get_children():
+		if sibling is Button:
+			has_button_sibling = true
+			break
+	assert_false(has_button_sibling, "Slot title should sit on its own row, not share it with the Load/Reset buttons.")
 
 
 func test_sculpt_inspector_syncs_from_editor_ui_state_signal() -> void:
-	var inspector = add_child_autofree(SculptInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := SculptInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	editor.set_brush_radius_value(37.0)
 
@@ -577,42 +852,44 @@ func test_pressing_layout_mode_restores_edit_sectors_tool() -> void:
 
 
 func test_layout_inspector_is_trimmed_to_board_and_legend() -> void:
-	var inspector = add_child_autofree(LayoutInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := LayoutInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor.current_tool = TerrainEditorScript.Tool.PAINT_DETAIL
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 
 	assert_eq(editor.current_tool, TerrainEditorScript.Tool.EDIT_SECTORS, "Layout inspector should force sector editing when it becomes active.")
-	assert_null(inspector.get_node_or_null("Scroll/Box/Intro"), "Layout inspector should remove the extra intro copy.")
-	assert_null(inspector.get_node_or_null("%BrushPickerRow"), "Layout inspector should remove the old brush picker.")
-	assert_null(inspector.get_node_or_null("Scroll/Box/BoardSection/SizeRow/SizeSuffix"), "Layout inspector should remove the square suffix.")
-	assert_null(inspector.get_node_or_null("Scroll/Box/BoardSection/SizeHint"), "Layout inspector should remove the non-square helper copy.")
-	assert_true(inspector.get_node_or_null("%LegendGrid") != null, "Layout inspector should keep a passive legend.")
-	assert_true(inspector.get_node_or_null("%SectorOverlayToggle") != null, "Layout inspector should expose a sector overlay toggle under the map layout board.")
+	assert_not_null(inspector._legend_grid, "Layout inspector should keep a passive legend.")
+	assert_gt(inspector._legend_grid.get_child_count(), 0, "The legend should be populated with sector swatches.")
+	assert_not_null(inspector._sector_overlay_toggle, "Layout inspector should expose a sector overlay toggle under the map layout board.")
 
 
 func test_layout_inspector_sector_overlay_toggle_syncs_with_editor() -> void:
-	var inspector = add_child_autofree(LayoutInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := LayoutInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor.set_sector_overlay_visible(true)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 
-	var toggle: CheckBox = inspector.get_node("%SectorOverlayToggle")
-	assert_true(toggle.button_pressed, "Layout inspector should reflect the editor's current sector overlay visibility.")
+	assert_true(inspector._sector_overlay_toggle.button_pressed, "Layout inspector should reflect the editor's current sector overlay visibility.")
 
 	inspector._on_sector_overlay_toggled(false)
 	assert_false(editor.is_sector_overlay_visible(), "Toggling sector overlay off in Layout should update editor state.")
 
 
 func test_foliage_inspector_selection_updates_editor_selection() -> void:
-	var inspector = add_child_autofree(ScatterInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := ScatterInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor.add_foliage_def()
 	editor.add_foliage_def()
 	editor.current_tool = TerrainEditorScript.Tool.FOLIAGE_PAINT
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	inspector._on_list_selected(1)
 
@@ -621,16 +898,18 @@ func test_foliage_inspector_selection_updates_editor_selection() -> void:
 
 
 func test_foliage_inspector_reflects_editor_selection_and_add_remove() -> void:
-	var inspector = add_child_autofree(ScatterInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := ScatterInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor.add_foliage_def()
 	editor.add_foliage_def()
 	editor.current_tool = TerrainEditorScript.Tool.FOLIAGE_PAINT
 	editor.set_selected_foliage_def_index(1)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 
-	var list: ItemList = inspector.get_node("%FoliageList")
+	var list: ItemList = inspector._list
 	assert_true(list.is_selected(1), "The foliage inspector should highlight the editor's selected foliage def.")
 
 	inspector._on_add_pressed()
@@ -642,24 +921,24 @@ func test_foliage_inspector_reflects_editor_selection_and_add_remove() -> void:
 
 
 func test_stamp_inspector_removes_entry_list_and_apply_workflow() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
+	inspector.build_main(host)
 
-	assert_null(inspector.get_node_or_null("%EntriesList"), "Tile inspector should remove the placed-overlays list.")
-	assert_null(inspector.get_node_or_null("%ApplyButton"), "Tile inspector should remove the explicit Apply flow.")
-	assert_null(inspector.get_node_or_null("%FocusButton"), "Tile inspector should remove list-based camera focusing.")
-	assert_null(inspector.get_node_or_null("%DeleteButton"), "Tile inspector should remove list-based delete controls.")
-	assert_true(inspector.get_node_or_null("%SelectionDoneButton") != null, "Tile inspector should expose a direct exit action for selection mode.")
-	assert_true(inspector.get_node_or_null("%SelectionDeleteButton") != null, "Tile inspector should expose a direct delete action for the selected tile.")
+	assert_not_null(inspector._selection_done, "Tile inspector should expose a direct exit action for selection mode.")
+	assert_not_null(inspector._selection_delete, "Tile inspector should expose a direct delete action for the selected tile.")
 
 
 func test_stamp_inspector_atlas_click_replaces_selected_tile_immediately() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.new_tileinfo()
 	editor._document.set_tile_stamp_tile_index(2)
 	editor._document.stamp_tileinfo_cell(3, 4)
 	editor.select_tileinfo_entry(0)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	inspector._on_atlas_selected(5)
 
@@ -669,7 +948,8 @@ func test_stamp_inspector_atlas_click_replaces_selected_tile_immediately() -> vo
 
 
 func test_stamp_inspector_atlas_focus_follows_selected_tile() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.data = NovaTerrainData.new()
 	editor._document.new_tileinfo()
@@ -681,17 +961,19 @@ func test_stamp_inspector_atlas_focus_follows_selected_tile() -> void:
 	editor._document.stamp_tileinfo_cell(3, 4)
 	editor.select_tileinfo_entry(0)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	inspector.sync_from_editor()
 
-	var atlas_status: Label = inspector.get_node("%AtlasStatus")
-	var atlas_list: ItemList = inspector.get_node("%AtlasList")
+	var atlas_status: Label = inspector._atlas_status
+	var atlas_list: ItemList = inspector._atlas_list
 	assert_string_contains(atlas_status.text, "editing 002", "Atlas status should reflect the selected tile when replace-on-click is active.")
 	assert_true(atlas_list.is_selected(2), "Atlas selection should follow the selected tile while a placed tile is active.")
 
 
 func test_stamp_inspector_reuses_tile_preview_icons_until_atlas_changes() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.data = NovaTerrainData.new()
 	var strip_image := Image.create(256, 64, false, Image.FORMAT_RGBA8)
@@ -699,6 +981,7 @@ func test_stamp_inspector_reuses_tile_preview_icons_until_atlas_changes() -> voi
 	var tilestrip := ImageTexture.create_from_image(strip_image)
 	editor._document.data.set_tilestrip_tex(tilestrip)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	var cache_size: int = inspector._tile_icon_cache.size()
 	var first: Texture2D = inspector._build_icon(tilestrip, 2, 4)
@@ -709,13 +992,15 @@ func test_stamp_inspector_reuses_tile_preview_icons_until_atlas_changes() -> voi
 
 
 func test_stamp_inspector_flag_toggle_updates_selected_tile_immediately() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.new_tileinfo()
 	editor._document.set_tile_stamp_tile_index(2)
 	editor._document.stamp_tileinfo_cell(3, 4)
 	editor.select_tileinfo_entry(0)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	inspector._on_flip_x(true)
 
@@ -725,28 +1010,32 @@ func test_stamp_inspector_flag_toggle_updates_selected_tile_immediately() -> voi
 
 
 func test_stamp_inspector_shows_quiet_empty_selection_state() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.new_tileinfo()
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 
-	var done_button: Button = inspector.get_node("%SelectionDoneButton")
-	var summary: Label = inspector.get_node("%SelectionSummary")
-	var delete_button: Button = inspector.get_node("%SelectionDeleteButton")
+	var done_button: Button = inspector._selection_done
+	var summary: Label = inspector._selection_summary
+	var delete_button: Button = inspector._selection_delete
 	assert_eq(summary.text, "No tile selected.", "Tile inspector should use a quiet empty-state until the user selects a placed tile.")
 	assert_true(done_button.disabled, "Done should stay disabled until a tile is selected.")
 	assert_true(delete_button.disabled, "Delete should stay disabled until a tile is selected.")
 
 
 func test_stamp_inspector_done_clears_selection() -> void:
-	var inspector = add_child_autofree(StampInspectorScene.instantiate())
+	var host = add_child_autofree(Control.new())
+	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.new_tileinfo()
 	editor._document.set_tile_stamp_tile_index(2)
 	editor._document.stamp_tileinfo_cell(3, 4)
 	editor.select_tileinfo_entry(0)
 
+	inspector.build_main(host)
 	inspector.set_editor(editor)
 	inspector._on_selection_done_pressed()
 
@@ -776,3 +1065,195 @@ func test_quadrant_board_cycles_left_click_and_clears_right_click() -> void:
 
 	board._stamp_at(Vector2i(0, 0), MOUSE_BUTTON_RIGHT)
 	assert_eq(board.grid[0], 0, "Right-click should clear the cell to Empty.")
+
+
+# --- Phase 2: dialog / popover consistency ---
+
+func test_corner_popovers_share_popover_panel_and_close_button() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+
+	for popup_name in ["%CameraPopup", "%EnvironmentPopup", "%SettingsPopup"]:
+		var popup: Node = workstation.get_node(popup_name)
+		assert_true(popup is PopoverPanel, "%s should be a shared PopoverPanel." % popup_name)
+
+	for close_name in ["%CameraPopupClose", "%EnvironmentPopupClose", "%SettingsPopupClose"]:
+		var close_button := workstation.get_node(close_name) as Button
+		assert_eq(close_button.text, PopoverPanel.CLOSE_GLYPH, "%s should use the standard close glyph." % close_name)
+		assert_eq(close_button.focus_mode, Control.FOCUS_NONE, "%s should not steal focus." % close_name)
+
+
+func test_cdep_violations_opens_native_dialog_and_flattens_on_confirm() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var flattened := [false]
+	var fix := func() -> void:
+		flattened[0] = true
+
+	workstation.prompt_cdep_violations(3, fix)
+
+	var dialog := workstation.find_child("CdepFlattenDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "CDEP violations should open a native confirmation dialog.")
+	if dialog == null:
+		return
+	assert_true(dialog.visible, "CDEP confirmation should be shown.")
+	assert_eq(dialog.title, "Flatten before export?", "CDEP confirmation should ask whether to flatten.")
+	assert_string_contains(dialog.dialog_text, "3 areas exceed", "CDEP confirmation should report the violation count.")
+	assert_string_contains(dialog.dialog_text, "BHD exports are unaffected", "CDEP confirmation should note BHD is safe.")
+	assert_eq(dialog.get_ok_button().text, "Flatten automatically", "CDEP primary should flatten.")
+	assert_eq(dialog.get_cancel_button().text, "Leave as-is", "CDEP secondary should leave the terrain as-is.")
+
+	dialog.confirmed.emit()
+	assert_true(flattened[0], "Confirming CDEP should run the supplied fix callback.")
+
+
+func test_resource_browser_uses_theme_not_handcoded_styleboxes() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var editor = autofree(TerrainEditorScript.new())
+	var root := _make_resource_fixture("resource_browser_theme")
+	workstation.set_editor(editor)
+	workstation._resource_recursive = true
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index the configured resource directory.")
+
+	var open_button := _find_button_by_text(workstation.get_node("%WorkspaceActionsHost"), "Open Terrain...")
+	assert_not_null(open_button, "Terrain workspace should expose Open Terrain.")
+	if open_button == null:
+		return
+	open_button.pressed.emit()
+
+	var dialog := workstation.find_child("ResourceBrowserDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Open should create the resource browser.")
+	if dialog == null:
+		return
+	assert_false(dialog.borderless, "Resource browser should use the native themed window frame, not a borderless workaround.")
+	assert_false(dialog.has_theme_stylebox_override("panel"), "Resource browser should rely on the theme, not a hand-coded panel stylebox.")
+	assert_null(dialog.find_child("ResourceBrowserTitleBar", true, false), "Resource browser should drop its custom title bar in favor of the native one.")
+	assert_false(dialog.title.is_empty(), "The native dialog should carry the open title.")
+
+
+func test_popover_close_button_dismisses_via_shared_signal() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var settings_button: Button = workstation.get_node("%SettingsToggleButton")
+	settings_button.toggled.emit(true)
+	await get_tree().process_frame
+
+	var settings_popup := workstation.get_node("%SettingsPopup") as PopoverPanel
+	assert_true(settings_popup.visible, "Settings popover should open from its toolbar button.")
+	var close := workstation.get_node("%SettingsPopupClose") as Button
+	close.pressed.emit()
+
+	assert_false(settings_popup.visible, "Pressing the shared close button should dismiss the popover.")
+	assert_false(settings_button.button_pressed, "The toolbar toggle should release when the popover closes.")
+
+
+func test_file_and_dir_dialogs_share_one_native_dialog() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	workstation._open_file_dialog("Open file", PackedStringArray(), func(_p): pass)
+	workstation._open_dir_dialog("Open dir", func(_p): pass)
+
+	var dialogs := []
+	for child in workstation.get_children():
+		if child is FileDialog:
+			dialogs.append(child)
+	assert_eq(dialogs.size(), 1, "File and directory pickers should share one cached native dialog instead of one per open.")
+	if dialogs.size() == 1:
+		var dialog := dialogs[0] as FileDialog
+		assert_eq(dialog.file_mode, FileDialog.FILE_MODE_OPEN_DIR, "The shared dialog should switch to directory mode for _open_dir_dialog.")
+		dialog.hide()
+
+
+# --- Phase 1: resizable + responsive shell ---
+
+func test_body_row_uses_nested_hsplit_containers_for_resizable_docks() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+
+	var body: Node = workstation.get_node_or_null("WorkstationLayout/BodyRow")
+	assert_not_null(body, "Shell should keep a BodyRow row.")
+	assert_true(body is HSplitContainer, "BodyRow should be an HSplitContainer so the left dock can be dragged.")
+	var center_right: Node = workstation.get_node_or_null("%CenterRightSplit")
+	assert_true(center_right is HSplitContainer, "The viewport/right-dock split should be an HSplitContainer.")
+
+
+func test_shell_panels_still_resolve_by_unique_name_after_split_refactor() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+
+	var left: Node = workstation.get_node_or_null("%LeftLane")
+	var viewport_lane: Node = workstation.get_node_or_null("%ViewportLane")
+	var viewport_host: Node = workstation.get_node_or_null("%ViewportHost")
+	var dock: Node = workstation.get_node_or_null("%AssetDock")
+	assert_not_null(left, "%LeftLane should still resolve after the split refactor.")
+	assert_not_null(viewport_lane, "%ViewportLane should still resolve after the split refactor.")
+	assert_not_null(viewport_host, "%ViewportHost should still resolve after the split refactor.")
+	assert_not_null(dock, "%AssetDock should still resolve after the split refactor.")
+	if viewport_lane != null and viewport_host != null:
+		assert_true((viewport_lane as Node).is_ancestor_of(viewport_host), "ViewportHost should stay parented under ViewportLane.")
+
+
+func test_split_size_flags_route_window_growth_to_viewport() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+
+	var left := workstation.get_node("%LeftLane") as Control
+	var viewport_lane := workstation.get_node("%ViewportLane") as Control
+	var dock := workstation.get_node("%AssetDock") as Control
+	var center_right := workstation.get_node_or_null("%CenterRightSplit") as Control
+	assert_not_null(center_right, "Shell should wrap the viewport and right dock in a center/right split.")
+	if center_right == null:
+		return
+	assert_eq(left.size_flags_horizontal, Control.SIZE_FILL, "Left lane should keep its dragged width, not absorb window growth.")
+	assert_eq(center_right.size_flags_horizontal, Control.SIZE_EXPAND_FILL, "The center/right split should absorb body width on resize.")
+	assert_eq(viewport_lane.size_flags_horizontal, Control.SIZE_EXPAND_FILL, "The viewport should absorb resize within the center/right split.")
+	assert_eq(dock.size_flags_horizontal, Control.SIZE_FILL, "The asset dock should keep its dragged width.")
+
+
+func test_left_lane_and_asset_dock_have_smaller_minimum_floors() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+
+	var left := workstation.get_node("%LeftLane") as Control
+	var dock := workstation.get_node("%AssetDock") as Control
+	assert_eq(left.custom_minimum_size.x, 240.0, "Left lane should shrink to a 240px floor for small windows.")
+	assert_eq(dock.custom_minimum_size.x, 280.0, "Asset dock should shrink to a 280px floor for small windows.")
+
+
+func test_split_offsets_round_trip_through_layout_state() -> void:
+	if FileAccess.file_exists(STATE_CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+
+	var lib = EditorResourceLibrary.new()
+	var fresh = lib.load_layout_state()
+	assert_false(bool(fresh["has_left"]), "A fresh config should report an unset left split offset.")
+	assert_false(bool(fresh["has_right"]), "A fresh config should report an unset right split offset.")
+
+	lib.save_layout_state(123, -207)
+	var lib2 = EditorResourceLibrary.new()
+	var loaded = lib2.load_layout_state()
+	assert_true(bool(loaded["has_left"]), "Saved left split offset should be reported as present.")
+	assert_eq(int(loaded["left"]), 123, "Saved left split offset should round-trip through the layout state.")
+	assert_true(bool(loaded["has_right"]), "Saved right split offset should be reported as present.")
+	assert_eq(int(loaded["right"]), -207, "A negative right split offset should round-trip (offsets can be negative).")
+
+
+func test_split_layout_applies_persisted_offsets_on_load() -> void:
+	if FileAccess.file_exists(STATE_CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+
+	# Lay out a first shell, simulate the user dragging both dividers to valid
+	# (clamped) offsets, then persist them the way drag_ended would.
+	var first = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var first_body := first.get_node("%BodyRow") as SplitContainer
+	var first_right := first.get_node("%CenterRightSplit") as SplitContainer
+	first_body.split_offset = first_body.split_offset + 40
+	first_body.clamp_split_offset()
+	first_right.split_offset = first_right.split_offset - 30
+	first_right.clamp_split_offset()
+	var target_left: int = first_body.split_offset
+	var target_right: int = first_right.split_offset
+	first._save_split_layout()
+
+	# A fresh shell at the same size should restore those dragged widths.
+	var second = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var second_body := second.get_node("%BodyRow") as SplitContainer
+	var second_right := second.get_node("%CenterRightSplit") as SplitContainer
+	assert_eq(second_body.split_offset, target_left, "A new shell should restore the persisted left split offset.")
+	assert_eq(second_right.split_offset, target_right, "A new shell should restore the persisted right split offset.")

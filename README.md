@@ -2,7 +2,21 @@
 
 Open-source toolchain and runtime for NovaLogic's Joint Operations (JO) and newer games. Extract and edit assets with the importer, Blender addon, and OpenNova Editor (ONED). Load them in a C++ reimplementation of the game engine, hosted in Godot.
 
-![OpenNova screenshot](https://i.imgur.com/MNtveOj.jpeg)
+## Screenshots
+
+<p align="center">
+  <a href="https://snaps.screensnapr.io/7d36e33">
+    <img src="https://snaps.screensnapr.io/7d36e33" alt="OpenNova editor overview" width="900">
+  </a>
+</p>
+
+| Editor overview | Terrain editing |
+|---|---|
+| [<img src="https://snaps.screensnapr.io/7d36e33" alt="OpenNova editor overview" width="420">](https://snaps.screensnapr.io/7d36e33) | [<img src="https://snaps.screensnapr.io/7d36e33" alt="Terrain editing in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) |
+| Object placement | Environment preview |
+| [<img src="https://snaps.screensnapr.io/7d36e33" alt="Object placement in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) | [<img src="https://snaps.screensnapr.io/7d36e33" alt="Environment preview in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) |
+| Asset import workflow | Runtime preview |
+| [<img src="https://snaps.screensnapr.io/7d36e33" alt="Asset import workflow in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) | [<img src="https://snaps.screensnapr.io/7d36e33" alt="Runtime preview in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) |
 
 ## Architecture
 
@@ -36,7 +50,7 @@ Each import can write one or more selected output files:
 - `.blend` - Blender project with the full scene hierarchy
 - `.ase` - 3DS Max ASCII Scene Export
 - `.max` - 3ds Max scene, when the external Max backend is available
-- `.3dp` / `.3da` - Project metadata for round-trip editing
+- `.3dp` - Object project metadata for round-trip editing
 
 Imported scenes include meshes, materials, textures, LODs, skeletal armatures, collision volumes, occlusion geometry, lights, and user points.
 
@@ -86,7 +100,7 @@ Modular libraries for parsing and writing NovaLogic formats. All expose a C API 
 |---------|--------|-------------|
 | **threedi** | `.3di` | 3D models: geometry, materials, part animations, collision, occlusion. GP and 3DI3 formats. |
 | **ase** | `.ase` | ASCII Scene Export: read/write 3DS Max scene files. |
-| **tdp** | `.3dp`/`.3da` | Project files: material definitions, LOD settings, part animation metadata. |
+| **tdp** | `.3dp` | Project files: material definitions, LOD settings, part animation metadata. |
 | **bad** | `.bad` | Skeletal animation: bone hierarchies, quaternion keyframes, events. |
 | **adm** | `.adm` | Animation definitions: key/value metadata mapping actions to BAD files. |
 | **def** | `.def` | Game definitions: weapons, items, ammo, HUD configuration. |

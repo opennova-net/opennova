@@ -8,6 +8,8 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/rect2i.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 
 #include <cpt/cpt_io.h>
 #include <trn/trn_io.h>
@@ -76,6 +78,18 @@ private:
 	int foliagemap_width = 0;
 	int foliagemap_height = 0;
 	Ref<NovaTerrainFoliageMap> foliage_map_resource;
+	// Editable FORMAT_RF height buffer (1 float per cell = raw16_units / 256).
+	// The editor holds this same Image by reference and brush kernels mutate it
+	// in place, so NovaTerrainData stays the authoritative owner of the live
+	// depth and get_depth_raw16() reflects edits without a separate sync step.
+	Ref<Image> heightmap_image;
+	// Editable colormap / detail-blend buffers, owned and shared by reference
+	// with the editor exactly like heightmap_image. Distinct from `colormap`
+	// (the derived display/runtime Texture2D) and `colormap_cpu_image` (a lazy
+	// read cache); these are the paintable source-of-truth images that save
+	// reads back from.
+	Ref<Image> colormap_image;
+	Ref<Image> blendmap_image;
 	// Lazy-loaded on first call to get_tileinfo_resource(). Cached keyed by
 	// the source path so an edit to trn.tileinfo re-loads on next request.
 	mutable Ref<NovaTerrainTileInfo> tileinfo_resource_cache;
@@ -158,7 +172,40 @@ public:
 
 	Error load();
 	bool is_loaded() const;
+	// Returns the live depth as little-endian raw16 (value = clamp(height*256)).
+	// Reads the editable heightmap_image when present, else the loaded CPT.
 	PackedByteArray get_depth_raw16() const;
+	void set_heightmap_image(const Ref<Image> &p_image);
+	Ref<Image> get_heightmap_image() const;
+	// Build a FORMAT_RF height image (height = raw_u16_LE / 256) from a raw16
+	// depth buffer; the exact inverse of get_depth_raw16's conversion.
+	Ref<Image> heightmap_image_from_raw16(const PackedByteArray &p_raw16) const;
+	void set_colormap_image(const Ref<Image> &p_image);
+	Ref<Image> get_colormap_image() const;
+	void set_blendmap_image(const Ref<Image> &p_image);
+	Ref<Image> get_blendmap_image() const;
+	// CDEP per-block range enforcement on the editable heightmap (raw16 domain;
+	// see libs/terrain/cdep_constraint.h). These mutate the FORMAT_RF
+	// heightmap_image in place via get_data()/set_data(), so the editor's shared
+	// Image ref and get_depth_raw16() stay current without a separate sync.
+	// clamp_* return the number of blocks clamped; count returns the number of
+	// over-range blocks.
+	int cdep_clamp_blocks_in_rect(const Rect2i &p_rect);
+	int cdep_count_violations() const;
+	int cdep_clamp_all_violations();
+	// Height brushes (libs/terrain/brush.h). Mutate the editable FORMAT_RF
+	// heightmap in place (the editor's shared Image); cx/cz/radius/clip are atlas
+	// pixel coordinates. Math runs in double to match the GDScript originals.
+	void brush_raise_lower(int cx, int cz, int radius, double amount, double hardness, const Rect2i &p_clip);
+	void brush_smooth(int cx, int cz, int radius, double strength, double hardness, const Rect2i &p_clip);
+	void brush_flatten(int cx, int cz, int radius, double target_height, double strength, double hardness, const Rect2i &p_clip);
+	double brush_sample_flatten_target(double world_x, double world_z) const;
+	// Colour / blend brushes (byte-parity RGBA8). blend paints the editable
+	// detail-blend buffer; colormap paint/clone the editable colour buffer.
+	void brush_blend_paint(int channel, int cx, int cz, int radius, double strength, double hardness, const Rect2i &p_clip);
+	void brush_colormap_paint(const Color &color, int cx, int cz, int radius, double strength, double hardness, const Rect2i &p_clip);
+	void brush_colormap_clone(const Ref<Image> &source, int src_cx, int src_cy, int dst_cx, int dst_cy, int radius, double strength, double hardness, const Rect2i &p_clip);
+	Color brush_sample_colormap(double world_x, double world_z) const;
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;
@@ -171,6 +218,16 @@ public:
 	// Shared by runtime NovaFoliageDispatcher wiring and editor paint previews
 	// so the world->sector->source mapping lives in exactly one place.
 	int get_foliage_index_world(float world_x, float world_z) const;
+	// Editor world->atlas coordinate transforms (libs/terrain/coords.h). The
+	// editor-mode guards (bounds-reject, sector-id clamp to [0,4], local clamp to
+	// [0, 512-0.001]) reproduce EditorTerrainMesh's GDScript originals so the
+	// editor brush/eyedropper paths share the runtime sampler's implementation.
+	// world_to_source_coords returns Vector2(-1,-1) and world_to_cell_source_coords
+	// returns Vector2(-1e9,-1e9) for out-of-extent / empty cells (the sentinels the
+	// GDScript callers branch on); get_cell_atlas_rect returns a zero Rect2i.
+	Vector2 world_to_source_coords(double world_x, double world_z) const;
+	Vector2 world_to_cell_source_coords(double world_x, double world_z, int row, int col) const;
+	Rect2i get_cell_atlas_rect(int row, int col) const;
 	int get_tile_count() const;
 
 	// GDScript-facing accessors for foliage + sector grid

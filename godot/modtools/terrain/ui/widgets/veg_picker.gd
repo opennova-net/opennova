@@ -1,7 +1,7 @@
 class_name VegPicker
 extends Window
 
-## Popup that presents a grid of *veg*.glb previews. Emits `graphic_selected`
+## Popup that presents a grid of *veg*.3di previews. Emits `graphic_selected`
 ## with the chosen basename (no extension) when the user picks one.
 
 signal graphic_selected(basename: String)

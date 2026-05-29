@@ -138,7 +138,7 @@ def test_max_write_outputs_uses_scene_exporter_for_ase(monkeypatch, tmp_path: Pa
     assert written == [str(tmp_path / "out" / "Shed.ase")]
 
 
-def test_max_project_outputs_use_existing_tdp_pipeline(tmp_path: Path) -> None:
+def test_max_project_outputs_write_object_workspace_without_legacy_3da(tmp_path: Path) -> None:
     from opennova_max.output_writers import _write_project_outputs
     from pyopennova.threedi_ffi import free_model_3di3, read_model
 
@@ -148,6 +148,6 @@ def test_max_project_outputs_use_existing_tdp_pipeline(tmp_path: Path) -> None:
     finally:
         free_model_3di3(model)
 
-    assert written == [str(tmp_path / "Shed.3dp"), str(tmp_path / "Shed.3da")]
+    assert written == [str(tmp_path / "Shed.3dp")]
     assert (tmp_path / "Shed.3dp").is_file()
-    assert (tmp_path / "Shed.3da").is_file()
+    assert not (tmp_path / "Shed.3da").exists()

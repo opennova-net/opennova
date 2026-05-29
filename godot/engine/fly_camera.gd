@@ -105,6 +105,14 @@ func frame_bounds(center: Vector3, extent: float) -> void:
 	_pitch = -0.55
 	_update_orbit()
 
+
+func frame_bounds_custom(center: Vector3, radius: float, distance_scale: float = 1.35, max_distance: float = 1200.0, yaw: float = 0.0, pitch: float = -0.55) -> void:
+	_pivot = center
+	_distance = clampf(radius * distance_scale, 1.0, max_distance)
+	_yaw = yaw
+	_pitch = clampf(pitch, -PI * 0.49, PI * 0.49)
+	_update_orbit()
+
 func _process(delta: float) -> void:
 	if not _flying:
 		return

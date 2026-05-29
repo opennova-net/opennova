@@ -10,6 +10,11 @@ add_subdirectory(../../libs/tpj opennova_tpj)
 add_subdirectory(../../libs/trn opennova_trn)
 add_subdirectory(../../libs/cpt opennova_cpt)
 add_subdirectory(../../libs/env opennova_env)
+add_subdirectory(../../libs/threedi opennova_threedi)
+add_subdirectory(../../libs/ase opennova_ase)
+add_subdirectory(../../libs/tdp opennova_tdp)
+add_subdirectory(../../libs/oed opennova_oed)
+add_subdirectory(../../libs/renderer opennova_renderer)
 add_subdirectory(../../libs/terrain opennova_terrain)
 add_subdirectory(../../libs/resource_index opennova_resource_index)
 
@@ -23,6 +28,7 @@ add_library(${TARGET_NAME} SHARED
     terrain/nova_terrain_builder.cpp
     terrain/nova_terrain_foliage_def.cpp
     terrain/nova_terrain_foliage_map.cpp
+    terrain/nova_terrain_surface_map.cpp
     terrain/nova_foliage_dispatcher.cpp
     terrain/nova_terrain_tile_entry.cpp
     terrain/nova_terrain_tile_info.cpp
@@ -32,6 +38,8 @@ add_library(${TARGET_NAME} SHARED
     terrain/til_resource_format.cpp
     env/nova_env_keyframe.cpp
     env/env_file.cpp
+    object/nova_object_data.cpp
+    object/nova_object_shader_cache.cpp
     util/nova_data_format.cpp
     util/nova_texture_format.cpp
     util/pcx_texture_bridge.cpp
@@ -52,6 +60,11 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_trn
     opennova_cpt
     opennova_env
+    opennova_threedi
+    opennova_ase
+    opennova_tdp
+    opennova_oed
+    opennova_renderer
     opennova_terrain
     opennova_resource_index
 )
