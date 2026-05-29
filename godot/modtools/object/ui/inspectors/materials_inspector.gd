@@ -14,34 +14,25 @@ const TEXTURE_SLOTS := [
 	{"slot": 3, "label": "Normal A"},
 	{"slot": 4, "label": "Normal B"},
 ]
-const GENERATOR_STYLE_OPTIONS := [
-	{"id": 0, "label": "None"},
-	{"id": 16, "label": "Slide"},
-	{"id": 17, "label": "Slide inverse"},
-	{"id": 24, "label": "Set"},
-	{"id": 32, "label": "Rotate CW"},
-	{"id": 33, "label": "Rotate CCW"},
-	{"id": 49, "label": "Set wave sine"},
-	{"id": 50, "label": "Set wave square"},
-	{"id": 51, "label": "Set wave triangle"},
-	{"id": 52, "label": "Set wave saw"},
-	{"id": 65, "label": "Add wave sine"},
-	{"id": 81, "label": "Skew wave sine"},
-	{"id": 97, "label": "Multiply wave sine"},
-	{"id": 113, "label": "Control register set"},
-	{"id": 114, "label": "Control register add"},
-]
+# Generator style names come from the shared GeneratorStyleCatalog (the canonical
+# NovaLogic enum); the style id passes straight through to set_material_*_generator.
 # Material "flags" bitfield.
 const MATERIAL_FLAG_ALPHA := 0x01
 # Texture-slot "flags" bitfield.
 const TEXTURE_FLAG_ANIMATED := 0x01
 const TEXTURE_FLAG_CLAMPED := 0x02
-# Generator style ids that bind a control register (see GENERATOR_STYLE_OPTIONS).
-const GENERATOR_STYLE_CONTROL_REG := 113
-const GENERATOR_STYLE_CONTROL_REG_ADD := 114
 
 var _material_paste_button: Button
 var _material_clipboard: Dictionary = {}
+# Selecting a material re-syncs these already-built controls in place (via
+# _resync_detail) instead of rebuilding the whole detail dock, which was the
+# selection lag. _sync_detail_fields is the build-time sync_fields closure;
+# _detail_root guards against calling it after the dock was freed.
+var _sync_detail_fields: Callable = Callable()
+var _detail_root: Control = null
+# The shader catalog is a fixed table for the open object; cache it so it is not
+# re-fetched on every detail (re)build. Invalidated in refresh() on data change.
+var _shader_catalog_cache: Array = []
 
 
 func build_main(host: Control) -> void:
@@ -100,10 +91,23 @@ func _list_panel_node_name() -> StringName:
 
 
 func refresh() -> void:
+	_shader_catalog_cache = []
 	_refresh_materials_left_list()
 
 
+func _resync_detail(index: int) -> bool:
+	if not _sync_detail_fields.is_valid() or _detail_root == null or not is_instance_valid(_detail_root):
+		return false
+	_selected_index = index
+	_sync_detail_fields.call(index)
+	return true
+
+
 func build_detail(box: VBoxContainer) -> void:
+	# Invalidate the in-place resync seam before (re)building so a stale closure is
+	# never reused against freed nodes; it is re-armed at the end on success.
+	_sync_detail_fields = Callable()
+	_detail_root = null
 	var materials := object_editor.object_data.get_materials() if object_editor and object_editor.object_data else []
 	var shader_catalog := _shader_catalog()
 
@@ -509,6 +513,10 @@ func build_detail(box: VBoxContainer) -> void:
 	)
 	if not materials.is_empty():
 		sync_fields.call(_selected_index)
+		# Arm the in-place resync: subsequent list selections re-run sync_fields on
+		# these built controls instead of rebuilding the dock.
+		_sync_detail_fields = sync_fields
+		_detail_root = detail_box
 
 
 func _paste_material_settings(target_index: int, material: Dictionary) -> void:
@@ -611,10 +619,13 @@ func _describe_texture_status(material_index: int, texture_info: Dictionary, sup
 
 
 func _shader_catalog() -> Array:
+	if not _shader_catalog_cache.is_empty():
+		return _shader_catalog_cache
 	if object_editor != null and object_editor.object_data != null and object_editor.object_data.has_method("get_shader_catalog"):
 		var catalog: Array = object_editor.object_data.get_shader_catalog()
 		if not catalog.is_empty():
-			return catalog
+			_shader_catalog_cache = catalog
+			return _shader_catalog_cache
 	return []
 
 
@@ -682,7 +693,7 @@ func _build_generator_controls(box: VBoxContainer) -> Dictionary:
 		section.add_child(header)
 		var axis_controls := {
 			"box": section,
-			"style_option": _add_id_option_row(section, "%sGeneratorStyleOption" % axis.to_upper(), "Style", GENERATOR_STYLE_OPTIONS),
+			"style_option": _add_id_option_row(section, "%sGeneratorStyleOption" % axis.to_upper(), "Style", GeneratorStyleCatalog.options()),
 			"phase": _add_spin_row(section, "%sGeneratorPhase" % axis.to_upper(), "Phase", -100000, 100000, 0.01),
 			"reg_picker": _add_ctrl_reg_row(section, "%sGeneratorControlReg" % axis.to_upper(), "Control reg"),
 			"rate": _add_spin_row(section, "%sGeneratorRate" % axis.to_upper(), "Rate", -100000, 100000, 0.01),
@@ -699,7 +710,7 @@ func _build_generator_controls(box: VBoxContainer) -> Dictionary:
 	rgb_header.text = "RGB gen"
 	rgb_section.add_child(rgb_header)
 	controls["rgb_box"] = rgb_section
-	controls["rgb_style_option"] = _add_id_option_row(rgb_section, "RgbGeneratorStyleOption", "Style", GENERATOR_STYLE_OPTIONS)
+	controls["rgb_style_option"] = _add_id_option_row(rgb_section, "RgbGeneratorStyleOption", "Style", GeneratorStyleCatalog.options())
 	controls["rgb_phase"] = _add_spin_row(rgb_section, "RgbGeneratorPhase", "Phase", -100000, 100000, 0.01)
 	controls["rgb_reg_picker"] = _add_ctrl_reg_row(rgb_section, "RgbGeneratorControlReg", "Control reg")
 	controls["rgb_rate"] = _add_spin_row(rgb_section, "RgbGeneratorRate", "Rate", -100000, 100000, 0.01)
@@ -714,7 +725,7 @@ func _build_generator_controls(box: VBoxContainer) -> Dictionary:
 	alpha_header.text = "Alpha gen"
 	alpha_section.add_child(alpha_header)
 	controls["alpha_box"] = alpha_section
-	controls["alpha_style_option"] = _add_id_option_row(alpha_section, "AlphaGeneratorStyleOption", "Style", GENERATOR_STYLE_OPTIONS)
+	controls["alpha_style_option"] = _add_id_option_row(alpha_section, "AlphaGeneratorStyleOption", "Style", GeneratorStyleCatalog.options())
 	controls["alpha_phase"] = _add_spin_row(alpha_section, "AlphaGeneratorPhase", "Phase", -100000, 100000, 0.01)
 	controls["alpha_reg_picker"] = _add_ctrl_reg_row(alpha_section, "AlphaGeneratorControlReg", "Control reg")
 	controls["alpha_rate"] = _add_spin_row(alpha_section, "AlphaGeneratorRate", "Rate", -100000, 100000, 0.01)
@@ -748,7 +759,7 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 
 	var rgb_gen: Dictionary = material.get("rgb_gen", {})
 	var rgb_style := int(rgb_gen.get("style", 0))
-	_populate_id_option(controls.get("rgb_style_option") as OptionButton, GENERATOR_STYLE_OPTIONS, rgb_style)
+	_populate_id_option(controls.get("rgb_style_option") as OptionButton, GeneratorStyleCatalog.options(), rgb_style)
 	_set_spin(controls.get("rgb_phase"), float(rgb_gen.get("phase", 0.0)))
 	var rgb_reg_picker = controls.get("rgb_reg_picker")
 	if rgb_reg_picker != null:
@@ -770,7 +781,7 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 
 	var alpha_gen: Dictionary = material.get("alpha_gen", {})
 	var alpha_style := int(alpha_gen.get("style", 0))
-	_populate_id_option(controls.get("alpha_style_option") as OptionButton, GENERATOR_STYLE_OPTIONS, alpha_style)
+	_populate_id_option(controls.get("alpha_style_option") as OptionButton, GeneratorStyleCatalog.options(), alpha_style)
 	_set_spin(controls.get("alpha_phase"), float(alpha_gen.get("phase", 0.0)))
 	var alpha_reg_picker = controls.get("alpha_reg_picker")
 	if alpha_reg_picker != null:
@@ -797,7 +808,7 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 
 func _sync_uv_axis_controls(axis_controls: Dictionary, params: Dictionary) -> void:
 	var style := int(params.get("style", 0))
-	_populate_id_option(axis_controls.get("style_option") as OptionButton, GENERATOR_STYLE_OPTIONS, style)
+	_populate_id_option(axis_controls.get("style_option") as OptionButton, GeneratorStyleCatalog.options(), style)
 	_set_spin(axis_controls.get("phase"), float(params.get("phase", 0.0)))
 	var reg_picker = axis_controls.get("reg_picker")
 	if reg_picker != null:
@@ -849,7 +860,7 @@ func _set_row_visible(control, visible: bool) -> void:
 # few fields that actually apply.
 func _apply_generator_row_visibility(style: int, param_controls: Array, reg_picker) -> void:
 	var active := style != 0
-	var is_register := style == GENERATOR_STYLE_CONTROL_REG or style == GENERATOR_STYLE_CONTROL_REG_ADD
+	var is_register := GeneratorStyleCatalog.uses_register(style)
 	for control in param_controls:
 		_set_row_visible(control, active)
 	_set_row_visible(reg_picker, active and is_register)

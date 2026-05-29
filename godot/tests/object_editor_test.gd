@@ -884,6 +884,9 @@ func test_object_part_anims_use_left_list_and_right_detail_dock() -> void:
 	if list == null or lod_index == null or target_part == null or parent_part == null:
 		return
 
+	assert_true(target_part.disabled, "Animated part dropdown should be read-only; the left list conveys the target.")
+	assert_true(parent_part.disabled, "Moves-relative-to dropdown should be read-only.")
+
 	list.select(0)
 	list.item_selected.emit(0)
 	var original: Dictionary = data.get_part_anim_editor_entries(0)[0]
@@ -1188,7 +1191,7 @@ func test_object_lights_inspector_populates_edits_and_exports() -> void:
 	var start_color := _find_node_by_name(detail_host, "LightStartColor") as ColorPickerButton
 	var end_color := _find_node_by_name(detail_host, "LightEndColor") as ColorPickerButton
 	var attenuation_start := _find_node_by_name(detail_host, "LightAttenuationStart") as SpinBox
-	var style := _find_node_by_name(detail_host, "LightStyle") as SpinBox
+	var style := _find_node_by_name(detail_host, "LightStyle") as OptionButton
 	var disable_corona := _find_node_by_name(detail_host, "LightDisableCorona") as CheckBox
 	var disable_terrain := _find_node_by_name(detail_host, "LightDisableTerrain") as CheckBox
 	var disable_objects := _find_node_by_name(detail_host, "LightDisableObjects") as CheckBox
@@ -1213,8 +1216,10 @@ func test_object_lights_inspector_populates_edits_and_exports() -> void:
 	start_color.color_changed.emit(next_color)
 	attenuation_start.value = 3.5
 	attenuation_start.value_changed.emit(3.5)
-	style.value = 7
-	style.value_changed.emit(7.0)
+	var style_set_index := _option_index_by_id(style, 24)
+	assert_true(style_set_index >= 0, "Light style dropdown should offer the 'Set' generator style (id 24).")
+	style.select(style_set_index)
+	style.item_selected.emit(style_set_index)
 	disable_corona.button_pressed = true
 	disable_corona.toggled.emit(true)
 	disable_terrain.button_pressed = true
@@ -1227,7 +1232,7 @@ func test_object_lights_inspector_populates_edits_and_exports() -> void:
 	var updated: Dictionary = data.get_light_info(0)
 	assert_true((updated.get("color_start", Color.WHITE) as Color).is_equal_approx(next_color))
 	assert_true(is_equal_approx(float(updated.get("atten_start", 0.0)), 3.5))
-	assert_eq(int(updated.get("colorgen_style", 0)), 7)
+	assert_eq(int(updated.get("colorgen_style", 0)), 24)
 	assert_true(bool(updated.get("disable_corona", false)))
 	assert_true(bool(updated.get("disable_lightterrain", false)))
 	assert_true(bool(updated.get("disable_lightobjects", false)))
@@ -1239,10 +1244,40 @@ func test_object_lights_inspector_populates_edits_and_exports() -> void:
 	var reopened_info: Dictionary = reopened.get_light_info(0)
 	assert_true((reopened_info.get("color_start", Color.WHITE) as Color).is_equal_approx(next_color))
 	assert_true(is_equal_approx(float(reopened_info.get("atten_start", 0.0)), 3.5))
-	assert_eq(int(reopened_info.get("colorgen_style", 0)), 7)
+	assert_eq(int(reopened_info.get("colorgen_style", 0)), 24)
 	assert_true(bool(reopened_info.get("disable_corona", false)))
 	assert_true(bool(reopened_info.get("disable_lightterrain", false)))
 	assert_true(bool(reopened_info.get("disable_lightobjects", false)))
+
+
+func test_object_light_style_dropdown_names_every_style() -> void:
+	# Every light's colorgen_style must resolve to a real name in the Style dropdown,
+	# never the "Custom N" fallback (Armry01 uses style 55 = Set wave: smooth random).
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var data: NovaObjectData = workspace.object_editor.object_data
+	var light_count := data.get_light_count()
+	assert_gt(light_count, 0, "Fixture should expose object lights.")
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_host)
+
+	var list := _find_node_by_name(list_host, "ObjectLightsList") as ItemList
+	assert_not_null(list, "Light inspector should expose the light list.")
+	if list == null:
+		return
+	for i in range(light_count):
+		list.select(i)
+		list.item_selected.emit(i)
+		var style := _find_node_by_name(detail_host, "LightStyle") as OptionButton
+		assert_not_null(style, "Light %d should expose a Style dropdown." % i)
+		if style == null:
+			continue
+		var label := style.get_item_text(style.selected) if style.selected >= 0 else ""
+		var raw_style := int(data.get_light_info(i).get("colorgen_style", 0))
+		assert_false(label.begins_with("Custom"), "Light %d style %d should have a real name, not '%s'." % [i, raw_style, label])
 
 
 func test_object_lights_editor_uses_left_list_and_right_detail_dock() -> void:
@@ -1514,6 +1549,94 @@ func test_object_materials_inspector_uses_compact_layout_and_named_generator_con
 	var u_params: Dictionary = material.get("u_params", {})
 	assert_eq(int(u_params.get("style", 0)), 16)
 	assert_true(workspace.object_editor.is_dirty, "Editing a named generator option should mark the object dirty.")
+
+
+func test_object_materials_dock_survives_editor_state_sync_without_rebuild() -> void:
+	# Dragging time-of-day fans out an editor-state sync to the active workspace's
+	# asset dock. That transient sync must not tear down and rebuild the heavy
+	# Materials detail dock (the source of the TOD lag).
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+
+	var detail := _find_node_by_name(detail_host, "MaterialDetailPanel")
+	assert_not_null(detail, "Materials dock should build the detail panel.")
+	if detail == null:
+		return
+	var id := detail.get_instance_id()
+
+	# The workstation re-calls BOTH set_asset_dock (same host) and sync_asset_dock
+	# on every editor-state sync (e.g. each time-of-day drag step). Neither may
+	# rebuild the dock while the same object is open.
+	workspace.set_asset_dock(detail_host)
+	workspace.sync_asset_dock()
+	workspace.set_asset_dock(detail_host)
+
+	var after := _find_node_by_name(detail_host, "MaterialDetailPanel")
+	assert_not_null(after, "Materials detail dock should still exist after an editor-state sync.")
+	if after == null:
+		return
+	assert_eq(after.get_instance_id(), id, "Editor-state syncs (time-of-day drags) must not rebuild the Materials detail dock.")
+
+
+func test_object_materials_detail_rebuilds_when_object_changes() -> void:
+	# Opening/creating a different object must rebuild the detail so it stops
+	# showing the previous object's data (the re-mount no-rebuild guard must key on
+	# the object identity, not blindly skip).
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+
+	var panel_before := _find_node_by_name(detail_host, "MaterialDetailPanel")
+	assert_not_null(panel_before, "Materials dock should build the detail panel.")
+	if panel_before == null:
+		return
+	var id_before := panel_before.get_instance_id()
+
+	workspace.new_current()
+	workspace.sync_asset_dock()
+
+	var panel_after := _find_node_by_name(detail_host, "MaterialDetailPanel")
+	assert_not_null(panel_after, "Materials dock should still expose a detail panel for the new object.")
+	if panel_after == null:
+		return
+	assert_ne(panel_after.get_instance_id(), id_before, "Switching objects should rebuild the detail dock, not keep the previous object's controls.")
+
+
+func test_object_materials_selection_resyncs_without_rebuilding_detail_nodes() -> void:
+	# Selecting a different material must re-sync the existing detail controls in
+	# place, not free and rebuild the whole dock (the source of the selection lag).
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_gt(workspace.object_editor.object_data.get_material_count(), 1, "Selection test needs at least two materials.")
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+
+	var list := _find_node_by_name(list_host, "MaterialsList") as ItemList
+	var picker_before := _find_node_by_name(detail_host, "ShaderTagPicker")
+	assert_not_null(list, "Materials left pane should expose the material list.")
+	assert_not_null(picker_before, "Materials dock should build the shader tag picker.")
+	if list == null or picker_before == null:
+		return
+
+	list.select(1)
+	list.item_selected.emit(1)
+	await get_tree().process_frame
+
+	assert_true(is_instance_valid(picker_before), "Selecting a material should not free the existing detail controls.")
+	var picker_after := _find_node_by_name(detail_host, "ShaderTagPicker")
+	assert_eq(picker_after, picker_before, "Selecting a material should re-sync existing controls, not rebuild the detail dock.")
 
 
 func test_object_materials_inspector_copies_and_pastes_settings() -> void:

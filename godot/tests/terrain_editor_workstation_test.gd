@@ -81,6 +81,16 @@ func _has_label_text(root: Node, text: String) -> bool:
 	return false
 
 
+func _find_label_by_text(root: Node, text: String) -> Label:
+	if root is Label and (root as Label).text == text:
+		return root as Label
+	for child in root.get_children():
+		var found := _find_label_by_text(child, text)
+		if found != null:
+			return found
+	return null
+
+
 func _find_node_by_name(root: Node, node_name: String) -> Node:
 	if root.name == node_name:
 		return root
@@ -722,6 +732,26 @@ func test_asset_dock_and_inspectors_do_not_poll_when_idle() -> void:
 	var dock = add_child_autofree(TerrainEditorAssetDockScene.instantiate())
 
 	assert_false(dock.is_processing(), "Asset dock should sync from editor state changes instead of idle polling.")
+
+
+func test_asset_dock_slot_card_title_does_not_share_row_with_buttons() -> void:
+	var dock = add_child_autofree(TerrainEditorAssetDockScene.instantiate())
+
+	# At the ~360px dock width the title and the Load/Reset buttons cannot share a
+	# horizontal row without squeezing the title into one-token-per-line wrapping.
+	# The title should own a full-width row so multi-word slot labels stay readable.
+	var title := _find_label_by_text(dock, "Shading 1 / near")
+	assert_not_null(title, "Slot card should expose the slot title label.")
+	if title == null:
+		return
+	var parent := title.get_parent()
+	assert_not_null(parent, "Slot title should be parented.")
+	var has_button_sibling := false
+	for sibling in parent.get_children():
+		if sibling is Button:
+			has_button_sibling = true
+			break
+	assert_false(has_button_sibling, "Slot title should sit on its own row, not share it with the Load/Reset buttons.")
 
 
 func test_sculpt_inspector_syncs_from_editor_ui_state_signal() -> void:

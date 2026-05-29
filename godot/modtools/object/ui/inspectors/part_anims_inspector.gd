@@ -4,19 +4,24 @@ extends ListDetailInspector
 ## selected LOD plus a right detail dock with rotation / scale / translation
 ## channel cards for the selected entry.
 
-const PART_ANIM_MOTION_MODE_OPTIONS := [
-	{"id": 0, "label": "None", "mode": "none"},
-	{"id": 16, "label": "Slide", "mode": "slide"},
-	{"id": 17, "label": "Slide inverse", "mode": "slide_inverse"},
-	{"id": 24, "label": "Set", "mode": "set"},
-	{"id": 32, "label": "Rotate clockwise", "mode": "rotate_cw"},
-	{"id": 33, "label": "Rotate counter-clockwise", "mode": "rotate_ccw"},
-	{"id": 50, "label": "Sine wave", "mode": "sine_wave"},
-	{"id": 52, "label": "Saw wave", "mode": "saw_wave"},
-	{"id": 53, "label": "Inverse saw wave", "mode": "inverse_saw_wave"},
-	{"id": 113, "label": "Control register", "mode": "control_register"},
-	{"id": 114, "label": "Add control register", "mode": "control_register_add"},
-]
+# Part-animation drivers reuse the shared generator-style enum, but only the control
+# bytes the C++ panm mode API round-trips (panm_control_for_mode in
+# nova_object_data.cpp) are exposed. Friendly labels come from GeneratorStyleCatalog;
+# MOTION_MODE_KEYS maps each id to the mode string that C++ API expects.
+const MOTION_MODE_IDS := [0, 16, 17, 24, 32, 33, 50, 52, 53, 113, 114]
+const MOTION_MODE_KEYS := {
+	0: "none",
+	16: "slide",
+	17: "slide_inverse",
+	24: "set",
+	32: "rotate_cw",
+	33: "rotate_ccw",
+	50: "sine_wave",
+	52: "saw_wave",
+	53: "inverse_saw_wave",
+	113: "control_register",
+	114: "control_register_add",
+}
 const PART_ANIM_SCALE_STYLE_OPTIONS := [
 	{"id": 1, "label": "Uniform"},
 	{"id": 2, "label": "Per-axis"},
@@ -28,7 +33,7 @@ const PART_ANIM_TRANSLATION_AXIS_OPTIONS := [
 ]
 const PANM_TRANSLATION_VALUE_MIN := -128.0
 const PANM_TRANSLATION_VALUE_MAX := 127.99609375
-# Motion-mode IDs that bind a control register (see PART_ANIM_MOTION_MODE_OPTIONS).
+# Motion-mode IDs that bind a control register (see _motion_mode_options()).
 const CONTROL_REGISTER_MODE_ID := 113
 const CONTROL_REGISTER_ADD_MODE_ID := 114
 
@@ -54,17 +59,18 @@ func refresh() -> void:
 	_refresh_part_anim_list(_part_anim_selected_index, false)
 
 
+func _motion_mode_options() -> Array:
+	return GeneratorStyleCatalog.options_for_ids(MOTION_MODE_IDS)
+
+
 func _mode_name_for_id(mode_id: int) -> String:
-	for option in PART_ANIM_MOTION_MODE_OPTIONS:
-		if int(option.get("id", -1)) == mode_id:
-			return String(option.get("mode", "none"))
-	return "none"
+	return String(MOTION_MODE_KEYS.get(mode_id, "none"))
 
 
 func _mode_id_for_name(mode_name: String) -> int:
-	for option in PART_ANIM_MOTION_MODE_OPTIONS:
-		if String(option.get("mode", "")) == mode_name:
-			return int(option.get("id", 0))
+	for id in MOTION_MODE_KEYS:
+		if String(MOTION_MODE_KEYS[id]) == mode_name:
+			return int(id)
 	return 0
 
 
@@ -266,6 +272,10 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 	var part_options := _part_options_for_lod(_part_anim_lod_index)
 	var target_part := _add_detail_id_option_row(part_section, "PartAnimTargetPart", "Animated part", part_options)
 	var parent_part := _add_detail_id_option_row(part_section, "PartAnimParentPart", "Moves relative to", part_options)
+	# Read-only: the left-pane list selection already conveys which part this entry
+	# animates, so these are shown for context but not user-editable.
+	target_part.disabled = true
+	parent_part.disabled = true
 	_populate_id_option(target_part, part_options, int(info.get("target_part", 0)))
 	_populate_id_option(parent_part, part_options, int(info.get("parent_part", 0)))
 
@@ -301,7 +311,7 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 	rotation_controls.name = "PartAnimRotationControls"
 	rotation_controls.add_theme_constant_override("separation", 4)
 	rotation_card.add_child(rotation_controls)
-	var rotation_mode := _add_detail_id_option_row(rotation_controls, "PartAnimRotationMode", "Driver", PART_ANIM_MOTION_MODE_OPTIONS)
+	var rotation_mode := _add_detail_id_option_row(rotation_controls, "PartAnimRotationMode", "Driver", _motion_mode_options())
 	var rotation_x_from := _add_detail_spin_row(rotation_controls, "PartAnimRotationXFrom", "Yaw start", -3600, 3600, 0.1)
 	var rotation_x_to := _add_detail_spin_row(rotation_controls, "PartAnimRotationXTo", "Yaw end", -3600, 3600, 0.1)
 	var rotation_y_from := _add_detail_spin_row(rotation_controls, "PartAnimRotationYFrom", "Pitch start", -3600, 3600, 0.1)
@@ -314,7 +324,7 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 	reversed.text = "Reverse rotation order"
 	reversed.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rotation_controls.add_child(reversed)
-	_populate_id_option(rotation_mode, PART_ANIM_MOTION_MODE_OPTIONS, _mode_id_for_name(String(rotation_x.get("mode", "none"))))
+	_populate_id_option(rotation_mode, _motion_mode_options(), _mode_id_for_name(String(rotation_x.get("mode", "none"))))
 	_set_spin(rotation_x_from, float(rotation_x.get("from_value", 0.0)))
 	_set_spin(rotation_x_to, float(rotation_x.get("to_value", 0.0)))
 	_set_spin(rotation_y_from, float(rotation_y.get("from_value", 0.0)))
@@ -355,12 +365,12 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 	scale_controls.add_theme_constant_override("separation", 4)
 	scale_card.add_child(scale_controls)
 	var scale_mode := _add_detail_id_option_row(scale_controls, "PartAnimScaleMode", "Style", PART_ANIM_SCALE_STYLE_OPTIONS)
-	var scale_motion := _add_detail_id_option_row(scale_controls, "PartAnimScaleMotionMode", "Driver", PART_ANIM_MOTION_MODE_OPTIONS)
+	var scale_motion := _add_detail_id_option_row(scale_controls, "PartAnimScaleMotionMode", "Driver", _motion_mode_options())
 	var scale_from := _add_detail_spin_row(scale_controls, "PartAnimScaleUniformFrom", "Start", -128, 128, 0.01)
 	var scale_to := _add_detail_spin_row(scale_controls, "PartAnimScaleUniformTo", "End", -128, 128, 0.01)
 	var scale_speed := _add_detail_spin_row(scale_controls, "PartAnimScaleSpeed", "Speed", -128, 128, 0.01)
 	_populate_id_option(scale_mode, PART_ANIM_SCALE_STYLE_OPTIONS, 2 if String(scale.get("style", "uniform")) == "per_axis" else 1)
-	_populate_id_option(scale_motion, PART_ANIM_MOTION_MODE_OPTIONS, _mode_id_for_name(String(scale_x.get("mode", "none"))))
+	_populate_id_option(scale_motion, _motion_mode_options(), _mode_id_for_name(String(scale_x.get("mode", "none"))))
 	_set_spin(scale_from, float(scale_x.get("from_value", 1.0)))
 	_set_spin(scale_to, float(scale_x.get("to_value", 1.0)))
 	_set_spin(scale_speed, float(scale_x.get("speed", 0.0)))
@@ -396,13 +406,13 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 	translation_controls.add_theme_constant_override("separation", 4)
 	translation_card.add_child(translation_controls)
 	var translation_axis := _add_detail_id_option_row(translation_controls, "PartAnimTranslationAxis", "Direction", PART_ANIM_TRANSLATION_AXIS_OPTIONS)
-	var translation_mode := _add_detail_id_option_row(translation_controls, "PartAnimTranslationMode", "Driver", PART_ANIM_MOTION_MODE_OPTIONS)
+	var translation_mode := _add_detail_id_option_row(translation_controls, "PartAnimTranslationMode", "Driver", _motion_mode_options())
 	var translation_register = _add_detail_ctrl_reg_row(translation_controls, "PartAnimTranslationRegister", "Control register")
 	var translation_from := _add_detail_spin_row(translation_controls, "PartAnimTranslationFrom", "Start", PANM_TRANSLATION_VALUE_MIN, PANM_TRANSLATION_VALUE_MAX, 0.01)
 	var translation_to := _add_detail_spin_row(translation_controls, "PartAnimTranslationTo", "End", PANM_TRANSLATION_VALUE_MIN, PANM_TRANSLATION_VALUE_MAX, 0.01)
 	var translation_speed := _add_detail_spin_row(translation_controls, "PartAnimTranslationSpeed", "Speed", -128, 128, 0.01)
 	_populate_id_option(translation_axis, PART_ANIM_TRANSLATION_AXIS_OPTIONS, _axis_id_for_name(String(translation.get("axis", "x"))))
-	_populate_id_option(translation_mode, PART_ANIM_MOTION_MODE_OPTIONS, _mode_id_for_name(String(translation_track.get("mode", "none"))))
+	_populate_id_option(translation_mode, _motion_mode_options(), _mode_id_for_name(String(translation_track.get("mode", "none"))))
 	if translation_register != null:
 		translation_register.setup(_control_registers(), int(translation_track.get("control_register", -1)))
 	_set_spin(translation_from, float(translation_track.get("from_value", 0.0)))
@@ -426,6 +436,10 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 	var refresh_after_edit := func() -> void:
 		_refresh_part_anim_list(_part_anim_selected_index, false)
 
+	# These dropdowns are read-only (disabled) for the user, so item_selected is not
+	# reachable by clicking; the handlers stay as the programmatic data-binding seam
+	# (exercised by tests via item_selected.emit) and in case the controls are ever
+	# re-enabled.
 	target_part.item_selected.connect(func(_index: int) -> void:
 		if data != null and data.has_method("set_part_anim_target"):
 			data.set_part_anim_target(_part_anim_lod_index, _part_anim_selected_index, target_part.get_selected_id(), parent_part.get_selected_id())

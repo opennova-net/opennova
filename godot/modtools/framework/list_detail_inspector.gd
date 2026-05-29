@@ -21,6 +21,13 @@ func has_detail() -> bool:
 	return true
 
 
+func _resync_detail(_index: int) -> bool:
+	# Override to re-sync the already-built detail controls in place for the new
+	# selection (cheap), instead of tearing down and rebuilding the whole detail
+	# dock. Returning false (the default) falls back to a full rebuild.
+	return false
+
+
 # --- Overridable data / label hooks ---
 func _list_items() -> Array:
 	return []
@@ -113,7 +120,8 @@ func _build_list_panel(box: VBoxContainer) -> VBoxContainer:
 
 	_list.item_selected.connect(func(index: int) -> void:
 		_selected_index = index
-		_rebuild_detail_dock()
+		if not _resync_detail(index):
+			_rebuild_detail_dock()
 	)
 	return _list_panel
 

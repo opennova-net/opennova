@@ -123,9 +123,10 @@ func _build_slot_card(slot_id: String, meta: Dictionary) -> Control:
 
 	if TerrainEditorSlots.is_previewable(slot_id):
 		var preview := TextureRect.new()
-		preview.custom_minimum_size = Vector2(84, 84)
+		preview.custom_minimum_size = Vector2(56, 56)
 		preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 		preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		preview.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		row.add_child(preview)
 		_slot_previews[slot_id] = preview
@@ -135,27 +136,34 @@ func _build_slot_card(slot_id: String, meta: Dictionary) -> Control:
 	content.add_theme_constant_override("separation", 4)
 	row.add_child(content)
 
-	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 6)
-	content.add_child(header)
-
+	# The title owns its own full-width row; the actions sit on a separate row
+	# below. At the ~360px dock width sharing one row squeezed the title into
+	# one-token-per-line wrapping and cramped the buttons.
 	var title_label := Label.new()
 	title_label.text = TerrainEditorSlots.get_slot_label(slot_id)
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	if meta.has("tooltip"):
 		title_label.tooltip_text = String(meta["tooltip"])
-	header.add_child(title_label)
+	content.add_child(title_label)
+
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 6)
+	content.add_child(actions)
+
+	var actions_spacer := Control.new()
+	actions_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	actions.add_child(actions_spacer)
 
 	var load_btn := Button.new()
 	load_btn.text = "Load"
 	load_btn.pressed.connect(_on_slot_load_pressed.bind(slot_id, TerrainEditorSlots.get_slot_dialog_title(slot_id)))
-	header.add_child(load_btn)
+	actions.add_child(load_btn)
 
 	var reset_btn := Button.new()
 	reset_btn.text = "Reset"
 	reset_btn.pressed.connect(_on_slot_reset_pressed.bind(slot_id))
-	header.add_child(reset_btn)
+	actions.add_child(reset_btn)
 
 	var filename_label := Label.new()
 	filename_label.text = "(none)"

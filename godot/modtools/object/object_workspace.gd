@@ -28,6 +28,10 @@ var _preview: ObjectPreview
 var _mount: ViewportMount
 var _asset_dock_host: Control
 var _object_detail_dock: Control
+# The object_data instance the detail dock was last built for. A re-mount rebuilds
+# only when this changes (a different object was opened/created), so transient
+# editor-state syncs (time-of-day drags) and in-place value edits never rebuild.
+var _object_detail_dock_object_id: int = 0
 var _inspectors: Dictionary = {}
 var _export_update_mask: int = OED_UPDATE_NONE
 
@@ -135,15 +139,23 @@ func uses_asset_dock() -> bool:
 
 
 func set_asset_dock(dock: Control) -> void:
+	var host_changed := dock != _asset_dock_host
 	_asset_dock_host = dock
 	if dock == null:
 		_free_object_detail_dock()
 		return
-	_sync_object_detail_dock_mount()
+	# A genuine (re)host builds the dock; the shell re-calls set_asset_dock with the
+	# same host on every editor-state sync (e.g. each time-of-day drag step), and
+	# that must NOT tear down and rebuild the dock (that was the TOD lag). Object
+	# data changes refresh content through the inspector's refresh() via _sync_shell.
+	if host_changed:
+		_sync_object_detail_dock_mount()
+	else:
+		_ensure_object_detail_dock_mounted()
 
 
 func sync_asset_dock() -> void:
-	_sync_object_detail_dock_mount()
+	_ensure_object_detail_dock_mounted()
 
 
 func get_active_workflow_id() -> int:
@@ -388,6 +400,7 @@ func _active_workflow_uses_detail_dock() -> bool:
 
 
 func _free_object_detail_dock() -> void:
+	_object_detail_dock_object_id = 0
 	if _object_detail_dock == null:
 		return
 	if is_instance_valid(_object_detail_dock):
@@ -419,6 +432,22 @@ func _sync_object_detail_dock_mount() -> void:
 		return
 	_ensure_object_detail_dock()
 	_rebuild_object_detail_dock()
+
+
+func _ensure_object_detail_dock_mounted() -> void:
+	# Keep the detail dock parented for the active workflow without rebuilding it on
+	# routine re-mounts (every editor-state sync, e.g. a time-of-day drag). Rebuild
+	# only when it is empty or a different object was opened/created; workflow
+	# switches still rebuild via _sync_object_detail_dock_mount.
+	if not _active_workflow_uses_detail_dock():
+		_free_object_detail_dock()
+		return
+	_ensure_object_detail_dock()
+	if _object_detail_dock == null:
+		return
+	var current_object_id := object_editor.object_data.get_instance_id() if object_editor != null and object_editor.object_data != null else 0
+	if _object_detail_dock.get_child_count() == 0 or current_object_id != _object_detail_dock_object_id:
+		_rebuild_object_detail_dock()
 
 
 func _rebuild_object_detail_dock() -> void:
@@ -455,3 +484,4 @@ func _rebuild_object_detail_dock() -> void:
 	var inspector := _inspector_for(_active_workflow_id)
 	if inspector != null and inspector.has_detail():
 		inspector.build_detail(box)
+	_object_detail_dock_object_id = object_editor.object_data.get_instance_id() if object_editor != null and object_editor.object_data != null else 0

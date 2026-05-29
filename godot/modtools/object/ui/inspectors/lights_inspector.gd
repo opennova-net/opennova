@@ -8,6 +8,10 @@ const LIGHT_FLAG_DISABLE_CORONA := 0x01
 const LIGHT_FLAG_DISABLE_TERRAIN := 0x02
 const LIGHT_FLAG_DISABLE_OBJECTS := 0x04
 
+# Light color animates with the shared NovaLogic generator-style enum (see
+# GeneratorStyleCatalog). colorgen_style reuses the same byte as material RGB
+# generators; the canonical names live in the catalog.
+
 
 func _lights() -> Array:
 	return object_editor.object_data.get_lights() if object_editor and object_editor.object_data else []
@@ -74,7 +78,7 @@ func _build_detail_fields(detail_box: VBoxContainer, _index: int) -> void:
 
 	_add_section_heading(detail_box, "Animation")
 
-	var style := _add_detail_spin_row(detail_box, "LightStyle", "Style", 0, 255, 1)
+	var style := _add_detail_id_option_row(detail_box, "LightStyle", "Style", GeneratorStyleCatalog.options())
 	var phase := _add_detail_spin_row(detail_box, "LightPhase", "Phase", 0, 255, 1)
 	var rate := _add_detail_spin_row(detail_box, "LightRate", "Rate", 0, ObjectEditorWorkspace.U16_VALUE_MAX, 1)
 
@@ -137,9 +141,11 @@ func _build_detail_fields(detail_box: VBoxContainer, _index: int) -> void:
 	binder.bind_spin(falloff,
 		func(info): return float(info.get("falloff_deg", info.get("falloff", 0.0))),
 		func(value): set_field.call("falloff_deg", value))
-	binder.bind_spin(style,
-		func(info): return float(int(info.get("colorgen_style", info.get("style", 0)))),
-		func(value): set_field.call("colorgen_style", int(value)))
+	# Style is a labeled dropdown rather than a raw number, so it is wired manually
+	# (FieldBinder has no option helper) and populated in `sync` below. OptionButton
+	# does not emit item_selected on programmatic select(), so no guard is needed.
+	style.item_selected.connect(func(index: int) -> void:
+		set_field.call("colorgen_style", style.get_item_id(index)))
 	binder.bind_spin(phase,
 		func(info): return float(int(info.get("colorgen_phase", info.get("phase", 0)))),
 		func(value): set_field.call("colorgen_phase", int(value)))
@@ -169,6 +175,8 @@ func _build_detail_fields(detail_box: VBoxContainer, _index: int) -> void:
 		selected["index"] = index
 		if index < 0 or index >= lights.size():
 			return
-		binder.sync_from(light_info.call(index))
+		var info: Dictionary = light_info.call(index)
+		binder.sync_from(info)
+		_populate_id_option(style, GeneratorStyleCatalog.options(), int(info.get("colorgen_style", info.get("style", 0))))
 
 	sync.call(_selected_index)
