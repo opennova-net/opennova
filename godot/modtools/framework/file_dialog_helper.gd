@@ -27,15 +27,15 @@ func _ensure() -> FileDialog:
 		_dialog = FileDialog.new()
 		_dialog.use_native_dialog = true
 		_dialog.access = FileDialog.ACCESS_FILESYSTEM
-		_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 		_dialog.min_size = _DEFAULT_MIN_SIZE
 		_host.add_child(_dialog)
 	return _dialog
 
 
-## Configure the (cached) dialog for one pick and pop it. on_pick fires once.
+## Configure the (cached) dialog to pick a file and pop it. on_pick fires once.
 func open(title: String, filters: PackedStringArray, on_pick: Callable, current_dir: String = "") -> void:
 	var dialog := _ensure()
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	dialog.title = title
 	dialog.filters = filters
 	if not current_dir.is_empty():
@@ -43,6 +43,21 @@ func open(title: String, filters: PackedStringArray, on_pick: Callable, current_
 	for sig in dialog.file_selected.get_connections():
 		dialog.file_selected.disconnect(sig["callable"])
 	dialog.file_selected.connect(on_pick, CONNECT_ONE_SHOT)
+	dialog.popup_centered()
+
+
+## Configure the (cached) dialog to pick a directory and pop it. The same cached
+## dialog serves both file and directory picks; on_pick fires once.
+func open_dir(title: String, on_pick: Callable, current_dir: String = "") -> void:
+	var dialog := _ensure()
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	dialog.title = title
+	dialog.filters = PackedStringArray()
+	if not current_dir.is_empty():
+		dialog.current_dir = current_dir
+	for sig in dialog.dir_selected.get_connections():
+		dialog.dir_selected.disconnect(sig["callable"])
+	dialog.dir_selected.connect(on_pick, CONNECT_ONE_SHOT)
 	dialog.popup_centered()
 
 

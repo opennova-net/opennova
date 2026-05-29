@@ -106,7 +106,7 @@ func _build_list_panel(box: VBoxContainer) -> VBoxContainer:
 
 	_list = ItemList.new()
 	_list.name = _list_node_name()
-	_list.custom_minimum_size = Vector2(0, 360)
+	_list.custom_minimum_size = Vector2(0, 200)
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_populate_list(_list, items)

@@ -19,6 +19,8 @@ enum PromptKind { NONE, UNSAVED, EXPORT, CDEP }
 enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 
 @onready var _project_label: Label = %ProjectLabel
+@onready var _body_row: SplitContainer = %BodyRow
+@onready var _center_right_split: SplitContainer = %CenterRightSplit
 @onready var _left_lane: PanelContainer = %LeftLane
 @onready var _workspace_rail: HBoxContainer = %WorkspaceRail
 @onready var _workspace_actions_host: VBoxContainer = %WorkspaceActionsHost
@@ -28,17 +30,17 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _viewport_lane: Control = %ViewportLane
 @onready var _viewport_host: Control = %ViewportHost
 @onready var _camera_toggle_button: Button = %CameraToggleButton
-@onready var _camera_popup: PanelContainer = %CameraPopup
+@onready var _camera_popup: PopoverPanel = %CameraPopup
 @onready var _camera_popup_close: Button = %CameraPopupClose
 @onready var _camera_settings_host: Control = %CameraSettingsHost
 @onready var _environment_toggle_button: Button = %EnvironmentToggleButton
-@onready var _environment_popup: PanelContainer = %EnvironmentPopup
+@onready var _environment_popup: PopoverPanel = %EnvironmentPopup
 @onready var _environment_popup_title: Label = %EnvironmentPopupTitle
 @onready var _environment_popup_close: Button = %EnvironmentPopupClose
 @onready var _environment_actions_host: VBoxContainer = %EnvironmentActionsHost
 @onready var _environment_inspector_host: Control = %EnvironmentInspectorHost
 @onready var _settings_toggle_button: Button = %SettingsToggleButton
-@onready var _settings_popup: PanelContainer = %SettingsPopup
+@onready var _settings_popup: PopoverPanel = %SettingsPopup
 @onready var _settings_popup_close: Button = %SettingsPopupClose
 @onready var _settings_resource_dir_edit: LineEdit = %SettingsResourceDirEdit
 @onready var _settings_browse_resource_dir_button: Button = %SettingsBrowseResourceDirButton
@@ -104,6 +106,7 @@ var _prompt_primary_action: Callable = Callable()
 var _prompt_secondary_action: Callable = Callable()
 var _prompt_tertiary_action: Callable = Callable()
 var _resource_browser := EditorResourceBrowser.new()
+var _file_dialogs: FileDialogHelper
 
 
 func _ready() -> void:
@@ -124,6 +127,8 @@ func _ready() -> void:
 	_wire_settings_popup()
 	_wire_prompts()
 	_wire_tile_gizmo()
+	_wire_splits()
+	_apply_window_min_size()
 	_project_label.clip_text = true
 	_status_context_label.clip_text = true
 	_status_camera_label.clip_text = true
@@ -134,6 +139,8 @@ func _ready() -> void:
 	_mount_active_workspace_viewport()
 	_refresh_workspace_surface()
 	sync_from_editor_state()
+	# Split offsets land after the first container sort so clamp sees real sizes.
+	_apply_split_layout.call_deferred()
 
 
 func _exit_tree() -> void:
@@ -174,6 +181,9 @@ func sync_from_editor_state() -> void:
 	var workspace := _get_active_workspace()
 	if workspace != null:
 		workspace.sync_asset_dock()
+	# Re-apply the persisted dock widths so re-showing the right dock on a
+	# workspace switch restores its dragged size instead of the scene default.
+	_apply_split_layout()
 
 
 func _process(_delta: float) -> void:
@@ -505,36 +515,80 @@ func _wire_tile_gizmo() -> void:
 	_tile_gizmo_delete.pressed.connect(_on_tile_gizmo_delete_pressed)
 
 
+func _wire_splits() -> void:
+	if _body_row != null and not _body_row.drag_ended.is_connected(_save_split_layout):
+		_body_row.drag_ended.connect(_save_split_layout)
+	if _center_right_split != null and not _center_right_split.drag_ended.is_connected(_save_split_layout):
+		_center_right_split.drag_ended.connect(_save_split_layout)
+
+
+func _apply_window_min_size() -> void:
+	# The editor needs a usable floor; Godot has no project setting for this, so
+	# the window minimum is set at runtime. Only the editor shell does this, so
+	# the runtime game window is unaffected.
+	var window := get_window()
+	if window != null:
+		window.min_size = Vector2i(1024, 640)
+
+
+# Read-only: applies the persisted split offsets without ever writing the config,
+# so test instantiations never persist a layout. A side is only applied when it
+# was actually stored (has_left/has_right), leaving the scene default otherwise.
+# We set split_offset directly and let the container's resort keep children
+# within their minimum sizes; calling clamp_split_offset() explicitly throws
+# before the first sort (and when the dock is hidden), so it is avoided.
+func _apply_split_layout() -> void:
+	if _body_row == null or _center_right_split == null:
+		return
+	var state := _resource_library.load_layout_state()
+	if bool(state["has_left"]):
+		_body_row.split_offset = int(state["left"])
+	if bool(state["has_right"]):
+		_center_right_split.split_offset = int(state["right"])
+
+
+func _save_split_layout() -> void:
+	if _body_row == null or _center_right_split == null:
+		return
+	_resource_library.save_layout_state(_body_row.split_offset, _center_right_split.split_offset)
+
+
 func _wire_camera_popup() -> void:
 	if _camera_popup != null:
 		_camera_popup.visible = false
+		_camera_popup.apply_anchor(320.0)
+		_camera_popup.bind_close(_camera_popup_close)
+		if not _camera_popup.close_requested.is_connected(_on_camera_popup_close_pressed):
+			_camera_popup.close_requested.connect(_on_camera_popup_close_pressed)
 	if _camera_toggle_button != null and not _camera_toggle_button.toggled.is_connected(_on_camera_toggle_toggled):
 		_camera_toggle_button.icon = _build_camera_icon()
 		_camera_toggle_button.toggled.connect(_on_camera_toggle_toggled)
-	if _camera_popup_close != null and not _camera_popup_close.pressed.is_connected(_on_camera_popup_close_pressed):
-		_camera_popup_close.pressed.connect(_on_camera_popup_close_pressed)
 	_refresh_camera_popup_state()
 
 
 func _wire_environment_popup() -> void:
 	if _environment_popup != null:
 		_environment_popup.visible = false
+		_environment_popup.apply_anchor(400.0)
+		_environment_popup.bind_close(_environment_popup_close)
+		if not _environment_popup.close_requested.is_connected(_on_environment_popup_close_pressed):
+			_environment_popup.close_requested.connect(_on_environment_popup_close_pressed)
 	if _environment_toggle_button != null and not _environment_toggle_button.toggled.is_connected(_on_environment_toggle_toggled):
 		_environment_toggle_button.icon = _build_sun_icon()
 		_environment_toggle_button.toggled.connect(_on_environment_toggle_toggled)
-	if _environment_popup_close != null and not _environment_popup_close.pressed.is_connected(_on_environment_popup_close_pressed):
-		_environment_popup_close.pressed.connect(_on_environment_popup_close_pressed)
 	_refresh_environment_popup_state()
 
 
 func _wire_settings_popup() -> void:
 	if _settings_popup != null:
 		_settings_popup.visible = false
+		_settings_popup.apply_anchor(420.0)
+		_settings_popup.bind_close(_settings_popup_close)
+		if not _settings_popup.close_requested.is_connected(_on_settings_popup_close_pressed):
+			_settings_popup.close_requested.connect(_on_settings_popup_close_pressed)
 	if _settings_toggle_button != null and not _settings_toggle_button.toggled.is_connected(_on_settings_toggle_toggled):
 		_settings_toggle_button.icon = _build_settings_icon()
 		_settings_toggle_button.toggled.connect(_on_settings_toggle_toggled)
-	if _settings_popup_close != null and not _settings_popup_close.pressed.is_connected(_on_settings_popup_close_pressed):
-		_settings_popup_close.pressed.connect(_on_settings_popup_close_pressed)
 	if _settings_browse_resource_dir_button != null and not _settings_browse_resource_dir_button.pressed.is_connected(_on_settings_browse_resource_dir_pressed):
 		_settings_browse_resource_dir_button.pressed.connect(_on_settings_browse_resource_dir_pressed)
 	if _settings_apply_resource_dir_button != null and not _settings_apply_resource_dir_button.pressed.is_connected(_on_settings_apply_resource_dir_pressed):
@@ -603,6 +657,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key := event as InputEventKey
 		if key.pressed and not key.is_echo() and key.keycode == KEY_ESCAPE:
+			if _prompt_host != null and _prompt_host.visible:
+				# Escape mirrors the prompt's secondary/cancel action so the modal
+				# dismisses like every other dialog and popover.
+				_on_prompt_secondary_pressed()
+				get_viewport().set_input_as_handled()
+				return
 			if _camera_popup != null and _camera_popup.visible:
 				_set_camera_popup_visible(false)
 				get_viewport().set_input_as_handled()
@@ -934,45 +994,20 @@ func _current_resource_path_for_browser(kind: String) -> String:
 	return ""
 
 
+# File and directory pickers share one cached native dialog (FileDialogHelper)
+# instead of building and freeing a new FileDialog per open.
+func _ensure_file_dialogs() -> FileDialogHelper:
+	if _file_dialogs == null:
+		_file_dialogs = FileDialogHelper.new(self)
+	return _file_dialogs
+
+
 func _open_file_dialog(title: String, filters: PackedStringArray, on_pick: Callable, current_dir: String = "") -> void:
-	var dialog := FileDialog.new()
-	dialog.use_native_dialog = true
-	dialog.access = FileDialog.ACCESS_FILESYSTEM
-	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	dialog.title = title
-	dialog.filters = filters
-	dialog.min_size = Vector2i(760, 520)
-	if not current_dir.is_empty():
-		dialog.current_dir = current_dir
-	add_child(dialog)
-	dialog.file_selected.connect(func(path: String) -> void:
-		on_pick.call(path)
-		dialog.queue_free()
-	)
-	dialog.canceled.connect(func() -> void:
-		dialog.queue_free()
-	)
-	dialog.popup_centered()
+	_ensure_file_dialogs().open(title, filters, on_pick, current_dir)
 
 
 func _open_dir_dialog(title: String, on_pick: Callable, current_dir: String = "") -> void:
-	var dialog := FileDialog.new()
-	dialog.use_native_dialog = true
-	dialog.access = FileDialog.ACCESS_FILESYSTEM
-	dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
-	dialog.title = title
-	dialog.min_size = Vector2i(760, 520)
-	if not current_dir.is_empty():
-		dialog.current_dir = current_dir
-	add_child(dialog)
-	dialog.dir_selected.connect(func(path: String) -> void:
-		on_pick.call(path)
-		dialog.queue_free()
-	)
-	dialog.canceled.connect(func() -> void:
-		dialog.queue_free()
-	)
-	dialog.popup_centered()
+	_ensure_file_dialogs().open_dir(title, on_pick, current_dir)
 
 
 func _preferred_save_dir(workspace: EditorWorkspace = null) -> String:

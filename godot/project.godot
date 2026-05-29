@@ -21,6 +21,8 @@ run/main_scene.runtime_game="res://game/main_game.tscn"
 
 [display]
 
+window/size/viewport_width=1600
+window/size/viewport_height=900
 window/vsync/vsync_mode=0
 
 [editor_plugins]

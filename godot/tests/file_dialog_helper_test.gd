@@ -47,6 +47,49 @@ func test_open_rebinds_a_single_one_shot_callback() -> void:
 	helper.get_dialog().hide()
 
 
+func test_open_dir_creates_one_native_open_dir_dialog_under_host() -> void:
+	var host := Control.new()
+	add_child_autofree(host)
+	var helper = FileDialogHelperScript.new(host)
+	helper.open_dir("Pick a folder", func(_p): pass)
+	var dialog := helper.get_dialog()
+	assert_not_null(dialog, "open_dir() should create a FileDialog.")
+	assert_eq(dialog.get_parent(), host, "Dialog should be parented to the host.")
+	assert_eq(dialog.file_mode, FileDialog.FILE_MODE_OPEN_DIR, "Should be an open-directory dialog.")
+	assert_true(dialog.use_native_dialog, "Should prefer the native dialog.")
+	assert_eq(dialog.title, "Pick a folder", "Title should be applied.")
+	assert_eq(host.get_child_count(), 1, "Only one dialog should be parented to the host.")
+	dialog.hide()
+
+
+func test_open_then_open_dir_reuses_same_dialog_and_switches_mode() -> void:
+	var host := Control.new()
+	add_child_autofree(host)
+	var helper = FileDialogHelperScript.new(host)
+	helper.open("Pick a file", PackedStringArray(), func(_p): pass)
+	var first := helper.get_dialog()
+	assert_eq(first.file_mode, FileDialog.FILE_MODE_OPEN_FILE, "open() should set open-file mode.")
+	helper.open_dir("Pick a folder", func(_p): pass)
+	assert_eq(helper.get_dialog(), first, "open_dir() should reuse the cached dialog.")
+	assert_eq(host.get_child_count(), 1, "Only one dialog should ever be parented to the host.")
+	assert_eq(first.file_mode, FileDialog.FILE_MODE_OPEN_DIR, "The reused dialog should switch to directory mode.")
+	first.hide()
+
+
+func test_open_dir_rebinds_a_single_one_shot_callback() -> void:
+	var host := Control.new()
+	add_child_autofree(host)
+	var helper = FileDialogHelperScript.new(host)
+	var cb1 := func(_p): pass
+	var cb2 := func(_p): pass
+	helper.open_dir("t", cb1)
+	helper.open_dir("t", cb2)
+	var conns := helper.get_dialog().dir_selected.get_connections()
+	assert_eq(conns.size(), 1, "Only the latest directory callback should remain connected after a rebind.")
+	assert_eq(conns[0]["callable"], cb2, "The remaining connection should be the newest callback.")
+	helper.get_dialog().hide()
+
+
 func test_open_applies_current_dir_only_when_provided() -> void:
 	var host := Control.new()
 	add_child_autofree(host)

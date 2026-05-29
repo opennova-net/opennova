@@ -29,8 +29,6 @@ var _hint: Label
 var _list: ItemList
 var _browse_button: Button
 var _open_button: Button
-var _title_label: Label
-var _dragging := false
 var _kind: String = ""
 var _title: String = ""
 var _filters: PackedStringArray = PackedStringArray()
@@ -68,47 +66,10 @@ func open(workspace: EditorWorkspace, on_pick: Callable) -> void:
 	_current_dir = workspace.get_open_dialog_dir()
 	_open_action = on_pick
 	_search.text = ""
-	_title_label.text = _title
+	_dialog.title = _title
 	_refresh_entries()
 	_refresh()
 	_dialog.popup_centered(Vector2i(760, 520))
-
-
-func _make_dialog_panel() -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.1137, 0.1255, 0.1451, 1.0)
-	sb.border_color = Color(0.2353, 0.2549, 0.2863, 1.0)
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(6)
-	sb.content_margin_left = 14.0
-	sb.content_margin_right = 14.0
-	sb.content_margin_top = 12.0
-	sb.content_margin_bottom = 14.0
-	return sb
-
-
-func _make_header_panel() -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.1804, 0.2, 0.2314, 1.0)
-	sb.border_color = Color(0.2353, 0.2549, 0.2863, 1.0)
-	sb.border_width_bottom = 1
-	sb.corner_radius_top_left = 5
-	sb.corner_radius_top_right = 5
-	sb.content_margin_left = 12.0
-	sb.content_margin_right = 8.0
-	sb.content_margin_top = 8.0
-	sb.content_margin_bottom = 8.0
-	return sb
-
-
-func _on_title_bar_input(event: InputEvent) -> void:
-	# Drag the borderless dialog by its custom header. Godot keeps routing motion
-	# to the control that received the press until release, so this stays smooth
-	# even if the cursor outruns the bar.
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		_dragging = event.pressed
-	elif event is InputEventMouseMotion and _dragging:
-		_dialog.position += Vector2i(event.relative)
 
 
 func _ensure_dialog() -> void:
@@ -118,12 +79,12 @@ func _ensure_dialog() -> void:
 	_dialog.name = "ResourceBrowserDialog"
 	_dialog.min_size = Vector2i(760, 520)
 	_dialog.exclusive = true
-	# Godot's embedded-window title bar renders transparent over the viewport (it
-	# doesn't resolve the in-tree editor theme), so we go borderless and draw our
-	# own header. A bordered panel keeps the dialog readable against the dark
-	# viewport now that the native frame is gone.
-	_dialog.borderless = true
-	_dialog.add_theme_stylebox_override("panel", _make_dialog_panel())
+	# Use the native themed window frame (border + title bar come from the editor
+	# theme's Window/AcceptDialog styles). The embedded window is given the shell's
+	# theme explicitly so it resolves the dark styling even though it is a separate
+	# Window, replacing the old borderless + hand-coded-stylebox workaround.
+	if _host != null and _host.theme != null:
+		_dialog.theme = _host.theme
 	_host.add_child(_dialog)
 
 	# The dialog panel owns the body inset, so the content VBox attaches directly.
@@ -133,34 +94,6 @@ func _ensure_dialog() -> void:
 	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_theme_constant_override("separation", 10)
 	_dialog.add_child(box)
-
-	# Custom title bar (lighter, bottom-bordered) with the title + a close button,
-	# replacing the unstyled native one. The bar doubles as a drag handle (see
-	# _on_title_bar_input) since a borderless window has no native title bar to grab.
-	var title_bar := PanelContainer.new()
-	title_bar.name = "ResourceBrowserTitleBar"
-	title_bar.add_theme_stylebox_override("panel", _make_header_panel())
-	title_bar.gui_input.connect(_on_title_bar_input)
-	box.add_child(title_bar)
-	var title_row := HBoxContainer.new()
-	title_row.add_theme_constant_override("separation", 8)
-	# Let drags fall through the row + label to the title bar; the close button
-	# keeps its own input so the X still works.
-	title_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	title_bar.add_child(title_row)
-	_title_label = Label.new()
-	_title_label.name = "ResourceBrowserTitle"
-	_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	title_row.add_child(_title_label)
-	var close_button := Button.new()
-	close_button.name = "ResourceBrowserClose"
-	close_button.text = "✕"
-	close_button.flat = true
-	close_button.focus_mode = Control.FOCUS_NONE
-	close_button.pressed.connect(func() -> void: _dialog.hide())
-	title_row.add_child(close_button)
 
 	var header := HBoxContainer.new()
 	header.name = "ResourceBrowserHeader"

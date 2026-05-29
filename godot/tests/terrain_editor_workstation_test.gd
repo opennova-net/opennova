@@ -1004,3 +1004,187 @@ func test_quadrant_board_cycles_left_click_and_clears_right_click() -> void:
 
 	board._stamp_at(Vector2i(0, 0), MOUSE_BUTTON_RIGHT)
 	assert_eq(board.grid[0], 0, "Right-click should clear the cell to Empty.")
+
+
+# --- Phase 2: dialog / popover consistency ---
+
+func test_corner_popovers_share_popover_panel_and_close_button() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+
+	for popup_name in ["%CameraPopup", "%EnvironmentPopup", "%SettingsPopup"]:
+		var popup: Node = workstation.get_node(popup_name)
+		assert_true(popup is PopoverPanel, "%s should be a shared PopoverPanel." % popup_name)
+
+	for close_name in ["%CameraPopupClose", "%EnvironmentPopupClose", "%SettingsPopupClose"]:
+		var close_button := workstation.get_node(close_name) as Button
+		assert_eq(close_button.text, PopoverPanel.CLOSE_GLYPH, "%s should use the standard close glyph." % close_name)
+		assert_eq(close_button.focus_mode, Control.FOCUS_NONE, "%s should not steal focus." % close_name)
+
+
+func test_prompt_card_dismisses_on_escape() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	workstation.prompt_unsaved_changes("quit")
+
+	var prompt_host: Control = workstation.get_node("%PromptHost")
+	assert_true(prompt_host.visible, "Unsaved prompt should be visible before Escape.")
+
+	var escape := InputEventKey.new()
+	escape.pressed = true
+	escape.keycode = KEY_ESCAPE
+	workstation._unhandled_input(escape)
+
+	assert_false(prompt_host.visible, "Escape should dismiss the prompt the same way Cancel does, like the other dialogs.")
+
+
+func test_resource_browser_uses_theme_not_handcoded_styleboxes() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var editor = autofree(TerrainEditorScript.new())
+	var root := _make_resource_fixture("resource_browser_theme")
+	workstation.set_editor(editor)
+	workstation._resource_recursive = true
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index the configured resource directory.")
+
+	var open_button := _find_button_by_text(workstation.get_node("%WorkspaceActionsHost"), "Open Terrain...")
+	assert_not_null(open_button, "Terrain workspace should expose Open Terrain.")
+	if open_button == null:
+		return
+	open_button.pressed.emit()
+
+	var dialog := workstation.find_child("ResourceBrowserDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Open should create the resource browser.")
+	if dialog == null:
+		return
+	assert_false(dialog.borderless, "Resource browser should use the native themed window frame, not a borderless workaround.")
+	assert_false(dialog.has_theme_stylebox_override("panel"), "Resource browser should rely on the theme, not a hand-coded panel stylebox.")
+	assert_null(dialog.find_child("ResourceBrowserTitleBar", true, false), "Resource browser should drop its custom title bar in favor of the native one.")
+	assert_false(dialog.title.is_empty(), "The native dialog should carry the open title.")
+
+
+func test_popover_close_button_dismisses_via_shared_signal() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var settings_button: Button = workstation.get_node("%SettingsToggleButton")
+	settings_button.toggled.emit(true)
+	await get_tree().process_frame
+
+	var settings_popup := workstation.get_node("%SettingsPopup") as PopoverPanel
+	assert_true(settings_popup.visible, "Settings popover should open from its toolbar button.")
+	var close := workstation.get_node("%SettingsPopupClose") as Button
+	close.pressed.emit()
+
+	assert_false(settings_popup.visible, "Pressing the shared close button should dismiss the popover.")
+	assert_false(settings_button.button_pressed, "The toolbar toggle should release when the popover closes.")
+
+
+func test_file_and_dir_dialogs_share_one_native_dialog() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	workstation._open_file_dialog("Open file", PackedStringArray(), func(_p): pass)
+	workstation._open_dir_dialog("Open dir", func(_p): pass)
+
+	var dialogs := []
+	for child in workstation.get_children():
+		if child is FileDialog:
+			dialogs.append(child)
+	assert_eq(dialogs.size(), 1, "File and directory pickers should share one cached native dialog instead of one per open.")
+	if dialogs.size() == 1:
+		var dialog := dialogs[0] as FileDialog
+		assert_eq(dialog.file_mode, FileDialog.FILE_MODE_OPEN_DIR, "The shared dialog should switch to directory mode for _open_dir_dialog.")
+		dialog.hide()
+
+
+# --- Phase 1: resizable + responsive shell ---
+
+func test_body_row_uses_nested_hsplit_containers_for_resizable_docks() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+
+	var body: Node = workstation.get_node_or_null("WorkstationLayout/BodyRow")
+	assert_not_null(body, "Shell should keep a BodyRow row.")
+	assert_true(body is HSplitContainer, "BodyRow should be an HSplitContainer so the left dock can be dragged.")
+	var center_right: Node = workstation.get_node_or_null("%CenterRightSplit")
+	assert_true(center_right is HSplitContainer, "The viewport/right-dock split should be an HSplitContainer.")
+
+
+func test_shell_panels_still_resolve_by_unique_name_after_split_refactor() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+
+	var left: Node = workstation.get_node_or_null("%LeftLane")
+	var viewport_lane: Node = workstation.get_node_or_null("%ViewportLane")
+	var viewport_host: Node = workstation.get_node_or_null("%ViewportHost")
+	var dock: Node = workstation.get_node_or_null("%AssetDock")
+	assert_not_null(left, "%LeftLane should still resolve after the split refactor.")
+	assert_not_null(viewport_lane, "%ViewportLane should still resolve after the split refactor.")
+	assert_not_null(viewport_host, "%ViewportHost should still resolve after the split refactor.")
+	assert_not_null(dock, "%AssetDock should still resolve after the split refactor.")
+	if viewport_lane != null and viewport_host != null:
+		assert_true((viewport_lane as Node).is_ancestor_of(viewport_host), "ViewportHost should stay parented under ViewportLane.")
+
+
+func test_split_size_flags_route_window_growth_to_viewport() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+
+	var left := workstation.get_node("%LeftLane") as Control
+	var viewport_lane := workstation.get_node("%ViewportLane") as Control
+	var dock := workstation.get_node("%AssetDock") as Control
+	var center_right := workstation.get_node_or_null("%CenterRightSplit") as Control
+	assert_not_null(center_right, "Shell should wrap the viewport and right dock in a center/right split.")
+	if center_right == null:
+		return
+	assert_eq(left.size_flags_horizontal, Control.SIZE_FILL, "Left lane should keep its dragged width, not absorb window growth.")
+	assert_eq(center_right.size_flags_horizontal, Control.SIZE_EXPAND_FILL, "The center/right split should absorb body width on resize.")
+	assert_eq(viewport_lane.size_flags_horizontal, Control.SIZE_EXPAND_FILL, "The viewport should absorb resize within the center/right split.")
+	assert_eq(dock.size_flags_horizontal, Control.SIZE_FILL, "The asset dock should keep its dragged width.")
+
+
+func test_left_lane_and_asset_dock_have_smaller_minimum_floors() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+
+	var left := workstation.get_node("%LeftLane") as Control
+	var dock := workstation.get_node("%AssetDock") as Control
+	assert_eq(left.custom_minimum_size.x, 240.0, "Left lane should shrink to a 240px floor for small windows.")
+	assert_eq(dock.custom_minimum_size.x, 280.0, "Asset dock should shrink to a 280px floor for small windows.")
+
+
+func test_split_offsets_round_trip_through_layout_state() -> void:
+	if FileAccess.file_exists(STATE_CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+
+	var lib = EditorResourceLibrary.new()
+	var fresh = lib.load_layout_state()
+	assert_false(bool(fresh["has_left"]), "A fresh config should report an unset left split offset.")
+	assert_false(bool(fresh["has_right"]), "A fresh config should report an unset right split offset.")
+
+	lib.save_layout_state(123, -207)
+	var lib2 = EditorResourceLibrary.new()
+	var loaded = lib2.load_layout_state()
+	assert_true(bool(loaded["has_left"]), "Saved left split offset should be reported as present.")
+	assert_eq(int(loaded["left"]), 123, "Saved left split offset should round-trip through the layout state.")
+	assert_true(bool(loaded["has_right"]), "Saved right split offset should be reported as present.")
+	assert_eq(int(loaded["right"]), -207, "A negative right split offset should round-trip (offsets can be negative).")
+
+
+func test_split_layout_applies_persisted_offsets_on_load() -> void:
+	if FileAccess.file_exists(STATE_CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+
+	# Lay out a first shell, simulate the user dragging both dividers to valid
+	# (clamped) offsets, then persist them the way drag_ended would.
+	var first = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var first_body := first.get_node("%BodyRow") as SplitContainer
+	var first_right := first.get_node("%CenterRightSplit") as SplitContainer
+	first_body.split_offset = first_body.split_offset + 40
+	first_body.clamp_split_offset()
+	first_right.split_offset = first_right.split_offset - 30
+	first_right.clamp_split_offset()
+	var target_left: int = first_body.split_offset
+	var target_right: int = first_right.split_offset
+	first._save_split_layout()
+
+	# A fresh shell at the same size should restore those dragged widths.
+	var second = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var second_body := second.get_node("%BodyRow") as SplitContainer
+	var second_right := second.get_node("%CenterRightSplit") as SplitContainer
+	assert_eq(second_body.split_offset, target_left, "A new shell should restore the persisted left split offset.")
+	assert_eq(second_right.split_offset, target_right, "A new shell should restore the persisted right split offset.")

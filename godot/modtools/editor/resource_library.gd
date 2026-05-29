@@ -17,6 +17,9 @@ const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const RESOURCE_STATE_SECTION := "resources"
 const RESOURCE_DIR_KEY := "resource_dir"
 const RESOURCE_RECURSIVE_KEY := "resource_recursive"
+const LAYOUT_STATE_SECTION := "layout"
+const LEFT_SPLIT_KEY := "left_split_offset"
+const RIGHT_SPLIT_KEY := "right_split_offset"
 
 var _index: RefCounted
 var _root_dir: String = ""
@@ -100,6 +103,32 @@ func save_state(recursive: bool) -> void:
 	config.load(STATE_CONFIG_PATH)
 	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, _root_dir)
 	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, recursive)
+	config.save(STATE_CONFIG_PATH)
+
+
+# Persisted shell layout. Split offsets are stored alongside the resource state
+# in the same config. Presence is reported explicitly (has_left/has_right)
+# because a valid split offset can be negative, so no numeric value can stand in
+# for "unset"; when a side is absent the shell keeps the scene default.
+func load_layout_state() -> Dictionary:
+	var config := ConfigFile.new()
+	if config.load(STATE_CONFIG_PATH) != OK:
+		return {"has_left": false, "left": 0, "has_right": false, "right": 0}
+	return {
+		"has_left": config.has_section_key(LAYOUT_STATE_SECTION, LEFT_SPLIT_KEY),
+		"left": int(config.get_value(LAYOUT_STATE_SECTION, LEFT_SPLIT_KEY, 0)),
+		"has_right": config.has_section_key(LAYOUT_STATE_SECTION, RIGHT_SPLIT_KEY),
+		"right": int(config.get_value(LAYOUT_STATE_SECTION, RIGHT_SPLIT_KEY, 0)),
+	}
+
+
+# Merge the split offsets into the existing config (load-then-set-then-save) so
+# the resource section is preserved, mirroring save_state().
+func save_layout_state(left_offset: int, right_offset: int) -> void:
+	var config := ConfigFile.new()
+	config.load(STATE_CONFIG_PATH)
+	config.set_value(LAYOUT_STATE_SECTION, LEFT_SPLIT_KEY, left_offset)
+	config.set_value(LAYOUT_STATE_SECTION, RIGHT_SPLIT_KEY, right_offset)
 	config.save(STATE_CONFIG_PATH)
 
 

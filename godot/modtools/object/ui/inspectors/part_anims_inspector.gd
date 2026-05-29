@@ -192,7 +192,7 @@ func _build_part_anims_inspector(host: Control) -> void:
 
 	_part_anim_list = ItemList.new()
 	_part_anim_list.name = "PartAnimList"
-	_part_anim_list.custom_minimum_size = Vector2(0, 360)
+	_part_anim_list.custom_minimum_size = Vector2(0, 200)
 	_part_anim_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_part_anim_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_child(_part_anim_list)

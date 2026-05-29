@@ -2122,3 +2122,36 @@ func _cleanup_workspace_children() -> void:
 		if is_instance_valid(child):
 			remove_child(child)
 			child.free()
+
+
+# --- Phase 1: responsive list + scroll floors ---
+
+func test_object_lists_use_compact_list_floor() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_host)
+
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_host)
+	var lights_list := _find_node_by_name(list_host, "ObjectLightsList") as ItemList
+	assert_not_null(lights_list, "Lights inspector should expose its list.")
+	if lights_list != null:
+		assert_eq(lights_list.custom_minimum_size.y, 200.0, "Object lists should use a compact 200px floor so short windows aren't dominated by the list.")
+
+	var parts_host = add_child_autofree(Control.new())
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, parts_host)
+	var part_list := _find_node_by_name(parts_host, "PartAnimList") as ItemList
+	assert_not_null(part_list, "Part anims inspector should expose its list.")
+	if part_list != null:
+		assert_eq(part_list.custom_minimum_size.y, 200.0, "Part anim list should use the compact 200px floor.")
+
+
+func test_inspector_box_disables_horizontal_scroll() -> void:
+	var host = add_child_autofree(Control.new())
+	var box = ObjectUiHelpers.make_inspector_box(host)
+	var scroll := box.get_parent() as ScrollContainer
+	assert_not_null(scroll, "make_inspector_box should wrap content in a ScrollContainer.")
+	if scroll != null:
+		assert_eq(scroll.horizontal_scroll_mode, ScrollContainer.SCROLL_MODE_DISABLED, "Inspector content should reflow vertically, never scroll horizontally.")
