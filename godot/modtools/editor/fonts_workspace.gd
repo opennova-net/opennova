@@ -1,5 +1,5 @@
 class_name FontsEditorWorkspace
-extends "res://modtools/editor/editor_workspace.gd"
+extends EditorWorkspace
 
 const FntEditorDocument = preload("res://modtools/fonts/fnt_editor_document.gd")
 const FntEditorScript = preload("res://modtools/fonts/fnt_editor.gd")
@@ -19,6 +19,10 @@ func get_workspace_id() -> String:
 
 func get_workspace_label() -> String:
 	return "Fonts"
+
+
+func get_workspace_tooltip() -> String:
+	return "Edit Nova *.fnt bitmap fonts: glyphs, pages, and shadow offset."
 
 
 func get_project_title() -> String:

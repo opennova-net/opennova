@@ -1,5 +1,5 @@
 class_name CreditsEditorWorkspace
-extends "res://modtools/editor/editor_workspace.gd"
+extends EditorWorkspace
 
 # EditorWorkspace adapter for the Credits workspace.
 # Owns a CreditsEditorDocument and mounts a CreditsEditor scene into ONED's
@@ -23,6 +23,10 @@ func get_workspace_id() -> String:
 
 func get_workspace_label() -> String:
 	return "Credits"
+
+
+func get_workspace_tooltip() -> String:
+	return "Author *.kda rolling credits: text, images, fonts, and scroll timing."
 
 
 func get_project_title() -> String:
