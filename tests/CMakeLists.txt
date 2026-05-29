@@ -261,6 +261,13 @@ target_link_libraries(cdep_overflow_guard_test PRIVATE opennova_terrain opennova
 target_include_directories(cdep_overflow_guard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cdep_overflow_guard COMMAND cdep_overflow_guard_test)
 
+# CDEP per-block range constraint: the editor-side raw16 clamp/count kernel,
+# ported from terrain_editor_cdep_constraint.gd into libs/terrain.
+add_executable(cdep_constraint_test trngen/cdep_constraint_test.cpp)
+target_link_libraries(cdep_constraint_test PRIVATE opennova_terrain)
+target_include_directories(cdep_constraint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cdep_constraint COMMAND cdep_constraint_test)
+
 # Dvxi5 repro: exercises a post-clamp heightmap with block ranges at the
 # CDEP ceiling. Kept as a regression anchor for the fixed bake pipeline.
 add_executable(dvxi5_repro_test trngen/dvxi5_repro_test.cpp)

@@ -1,6 +1,7 @@
 add_library(opennova_terrain STATIC
     src/builder.cpp
     src/build_quadtree.cpp
+    src/cdep_constraint.cpp
     src/cpt_export.cpp
     src/depthmap.cpp
     src/lod.cpp
