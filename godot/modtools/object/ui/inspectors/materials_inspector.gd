@@ -716,6 +716,10 @@ func _build_generator_controls(box: VBoxContainer) -> Dictionary:
 	controls["rgb_rate"] = _add_spin_row(rgb_section, "RgbGeneratorRate", "Rate", -100000, 100000, 0.01)
 	controls["rgb_start_color"] = _add_color_row(rgb_section, "RgbGeneratorStartColor", "Start")
 	controls["rgb_end_color"] = _add_color_row(rgb_section, "RgbGeneratorEndColor", "End")
+	# RGB-gen colors are RGB-only: the .3di leaves their alpha byte 0 (unused), so hide the
+	# alpha control and show them opaque (display alpha forced in _sync_generator_controls).
+	(controls["rgb_start_color"] as ColorPickerButton).edit_alpha = false
+	(controls["rgb_end_color"] as ColorPickerButton).edit_alpha = false
 
 	var alpha_section := VBoxContainer.new()
 	alpha_section.name = "AlphaGeneratorSection"
@@ -768,9 +772,11 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 	var rgb_start := controls.get("rgb_start_color") as ColorPickerButton
 	var rgb_end := controls.get("rgb_end_color") as ColorPickerButton
 	if rgb_start != null:
-		rgb_start.color = rgb_gen.get("start_color", Color.WHITE)
+		var start_rgb: Color = rgb_gen.get("start_color", Color.WHITE)
+		rgb_start.color = Color(start_rgb.r, start_rgb.g, start_rgb.b, 1.0)
 	if rgb_end != null:
-		rgb_end.color = rgb_gen.get("end_color", Color.WHITE)
+		var end_rgb: Color = rgb_gen.get("end_color", Color.WHITE)
+		rgb_end.color = Color(end_rgb.r, end_rgb.g, end_rgb.b, 1.0)
 	_apply_generator_row_visibility(rgb_style, [
 		controls.get("rgb_phase"), controls.get("rgb_rate"),
 		controls.get("rgb_start_color"), controls.get("rgb_end_color"),
@@ -931,9 +937,16 @@ func _rgb_generator_params(controls: Dictionary) -> Dictionary:
 		"phase": float((controls.get("rgb_phase") as SpinBox).value),
 		"reg": _reg_value(controls.get("rgb_reg_picker")),
 		"rate": float((controls.get("rgb_rate") as SpinBox).value),
-		"start_color": (controls.get("rgb_start_color") as ColorPickerButton).color,
-		"end_color": (controls.get("rgb_end_color") as ColorPickerButton).color,
+		"start_color": _rgb_gen_color(controls.get("rgb_start_color")),
+		"end_color": _rgb_gen_color(controls.get("rgb_end_color")),
 	}
+
+
+func _rgb_gen_color(picker) -> Color:
+	# RGB-gen colors are RGB-only; submit alpha 0 to keep the .3di byte WriteMTRL writes
+	# (the picker displays them opaque, but the stored alpha byte stays the canonical 0).
+	var color := (picker as ColorPickerButton).color
+	return Color(color.r, color.g, color.b, 0.0)
 
 
 func _alpha_generator_params(controls: Dictionary) -> Dictionary:

@@ -1639,6 +1639,31 @@ func test_object_materials_selection_resyncs_without_rebuilding_detail_nodes() -
 	assert_eq(picker_after, picker_before, "Selecting a material should re-sync existing controls, not rebuild the detail dock.")
 
 
+func test_object_material_rgb_gen_colors_are_opaque_rgb_only() -> void:
+	# RGB-gen start/end colors are RGB-only; the .3di leaves their alpha byte 0, so the
+	# pickers must force opaque display (like lights) and disable alpha editing, else the
+	# swatches render transparent/checkerboarded and look wrong.
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_gt(workspace.object_editor.object_data.get_material_count(), 0, "Fixture should expose materials.")
+	var list_host = add_child_autofree(Control.new())
+	var detail_host = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+
+	var start_color := _find_node_by_name(detail_host, "RgbGeneratorStartColor") as ColorPickerButton
+	var end_color := _find_node_by_name(detail_host, "RgbGeneratorEndColor") as ColorPickerButton
+	assert_not_null(start_color, "Materials dock should expose the RGB-gen start color picker.")
+	assert_not_null(end_color, "Materials dock should expose the RGB-gen end color picker.")
+	if start_color == null or end_color == null:
+		return
+	assert_eq(start_color.color.a, 1.0, "RGB-gen start color should display opaque, not transparent.")
+	assert_eq(end_color.color.a, 1.0, "RGB-gen end color should display opaque, not transparent.")
+	assert_false(start_color.edit_alpha, "RGB-gen start color is RGB-only; alpha editing should be off.")
+	assert_false(end_color.edit_alpha, "RGB-gen end color is RGB-only; alpha editing should be off.")
+
+
 func test_object_materials_inspector_copies_and_pastes_settings() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
