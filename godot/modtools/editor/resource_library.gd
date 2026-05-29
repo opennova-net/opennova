@@ -1,0 +1,116 @@
+class_name EditorResourceLibrary
+extends RefCounted
+
+## Single home for the OpenNova Editor's resource index + configured root
+## directory, plus the persistence / scan / validation logic behind the
+## resource browser and the settings popup. Extracted from
+## editor_workstation.gd (B5-3a) so the shell is the thin UI layer over it.
+##
+## The shell keeps what stays a shell concern and forwards here:
+##   - the recursive flag (a plain shell member the tests write directly),
+##   - the settings-popup sync, status-bar messages, and VegAssets
+##     search-root registration.
+## Those side effects are surfaced through the return values below
+## ({err, search_roots, status}) so this helper never reaches back into the UI.
+
+const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const RESOURCE_STATE_SECTION := "resources"
+const RESOURCE_DIR_KEY := "resource_dir"
+const RESOURCE_RECURSIVE_KEY := "resource_recursive"
+
+var _index: RefCounted
+var _root_dir: String = ""
+
+
+func ensure_index() -> void:
+	if _index == null:
+		_index = NovaResourceIndex.new()
+
+
+func get_index() -> RefCounted:
+	ensure_index()
+	return _index
+
+
+func get_root_dir() -> String:
+	return _root_dir
+
+
+func clear_index() -> void:
+	ensure_index()
+	_index.clear()
+
+
+# Updates the configured root and (optionally) persists + scans it. Returns a
+# result the shell applies: `search_roots` is the VegAssets search-root list
+# (empty when the root is cleared) and `status` is a status-bar message to
+# show (empty = none).
+func set_root_dir(path: String, recursive: bool, persist: bool, scan: bool) -> Dictionary:
+	ensure_index()
+	var previous := _root_dir
+	_root_dir = path.strip_edges()
+	if persist:
+		save_state(recursive)
+	if _root_dir.is_empty():
+		_index.clear()
+		return {"err": OK, "search_roots": [], "status": ""}
+	if scan:
+		var result := scan_root(recursive)
+		return {"err": result["err"], "search_roots": [_root_dir], "status": result["status"]}
+	if previous != _root_dir:
+		_index.clear()
+	return {"err": OK, "search_roots": [_root_dir], "status": ""}
+
+
+# Scans the configured root into the index. Returns {err, status}; `status` is
+# the message the caller should surface (empty when there is nothing to say).
+func scan_root(recursive: bool) -> Dictionary:
+	ensure_index()
+	if _root_dir.is_empty():
+		_index.clear()
+		return {"err": OK, "status": ""}
+	var err: Error = _index.scan(_root_dir, recursive)
+	if err == OK:
+		return {"err": OK, "status": "Resource directory indexed."}
+	var detail := ""
+	if _index.has_method("get_last_error"):
+		detail = String(_index.get_last_error())
+	return {"err": err, "status": "Resource scan failed." if detail.is_empty() else detail}
+
+
+# Loads the persisted root + recursive flag. Drops a persisted root that no
+# longer points at a real, sane resource directory (moved/deleted dirs, or
+# stale temp/test paths that leaked into the shared state) so the browser shows
+# a clean "no directory" state instead of a dead internal path. Returns
+# {root_dir, recursive}; the caller stores `recursive` on the shell.
+func load_state() -> Dictionary:
+	var config := ConfigFile.new()
+	if config.load(STATE_CONFIG_PATH) != OK:
+		return {"root_dir": _root_dir, "recursive": true}
+	_root_dir = String(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, ""))
+	var recursive := bool(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, true))
+	if not _root_dir.is_empty() and not is_valid_root(_root_dir):
+		_root_dir = ""
+		save_state(recursive)
+	return {"root_dir": _root_dir, "recursive": recursive}
+
+
+func save_state(recursive: bool) -> void:
+	var config := ConfigFile.new()
+	config.load(STATE_CONFIG_PATH)
+	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, _root_dir)
+	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, recursive)
+	config.save(STATE_CONFIG_PATH)
+
+
+func is_valid_root(path: String) -> bool:
+	var trimmed := path.strip_edges()
+	if trimmed.is_empty():
+		return false
+	if not DirAccess.dir_exists_absolute(trimmed):
+		return false
+	# A resource library is a real asset directory on disk, never inside the
+	# app's own user-data dir; reject such paths (e.g. leaked temp/test dirs).
+	if trimmed.begins_with(OS.get_user_data_dir()):
+		return false
+	return true

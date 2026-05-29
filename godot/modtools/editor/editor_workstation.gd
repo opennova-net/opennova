@@ -10,11 +10,6 @@ const VegAssets = preload("res://engine/terrain/veg_assets.gd")
 
 enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION }
 
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
-const RESOURCE_STATE_SECTION := "resources"
-const RESOURCE_DIR_KEY := "resource_dir"
-const RESOURCE_RECURSIVE_KEY := "resource_recursive"
-
 # Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
 # shows the non-popup ones in order. The enum below stays only as stable id
 # constants and for the two genuine per-workspace branches (env popup, tile gizmo).
@@ -93,8 +88,7 @@ var _workspace_action_buttons: Dictionary = {}
 var _environment_action_buttons: Dictionary = {}
 var _asset_dock_workspace_id: int = -1
 var _camera_settings_panel: Control
-var _resource_index: RefCounted
-var _resource_root_dir: String = ""
+var _resource_library := EditorResourceLibrary.new()
 var _resource_recursive: bool = true
 var _mounted_workspace_id: int = -1
 var _current_workflow_id: int = -1
@@ -141,7 +135,7 @@ func _ready() -> void:
 	_status_camera_label.clip_text = true
 	_status_fps_label.clip_text = true
 	set_process(true)
-	if not _resource_root_dir.is_empty():
+	if not _resource_library.get_root_dir().is_empty():
 		_scan_resource_root(false)
 	_mount_active_workspace_viewport()
 	_refresh_workspace_surface()
@@ -780,7 +774,7 @@ func _set_settings_popup_visible(active: bool) -> void:
 
 func _sync_settings_popup_state() -> void:
 	if _settings_resource_dir_edit != null:
-		_settings_resource_dir_edit.text = _resource_root_dir
+		_settings_resource_dir_edit.text = _resource_library.get_root_dir()
 	if _settings_recursive_toggle != null:
 		_settings_recursive_toggle.set_pressed_no_signal(_resource_recursive)
 
@@ -806,12 +800,12 @@ func _on_settings_recursive_toggled(pressed: bool) -> void:
 		return
 	_resource_recursive = pressed
 	_save_resource_state()
-	if not _resource_root_dir.is_empty():
+	if not _resource_library.get_root_dir().is_empty():
 		_scan_resource_root(true)
 
 
 func _apply_resource_settings(scan: bool, persist: bool = true) -> Error:
-	var path := _resource_root_dir
+	var path := _resource_library.get_root_dir()
 	if _settings_resource_dir_edit != null:
 		path = _settings_resource_dir_edit.text
 	if _settings_recursive_toggle != null:
@@ -820,17 +814,15 @@ func _apply_resource_settings(scan: bool, persist: bool = true) -> Error:
 
 
 func _ensure_resource_index() -> void:
-	if _resource_index == null:
-		_resource_index = NovaResourceIndex.new()
+	_resource_library.ensure_index()
 
 
 func get_resource_index() -> RefCounted:
-	_ensure_resource_index()
-	return _resource_index
+	return _resource_library.get_index()
 
 
 func get_resource_root_dir() -> String:
-	return _resource_root_dir
+	return _resource_library.get_root_dir()
 
 
 func is_resource_recursive() -> bool:
@@ -841,84 +833,48 @@ func set_resource_root_dir(path: String) -> void:
 	_set_resource_root_dir(path, true, true)
 
 
+# Thin forwarders over EditorResourceLibrary (editor/resource_library.gd): the
+# helper owns the index + root-dir state + persistence; the shell keeps the
+# recursive flag and applies the UI side effects the helper surfaces (VegAssets
+# search roots, status message, settings-popup sync).
 func _set_resource_root_dir(path: String, persist: bool, scan: bool) -> Error:
-	_ensure_resource_index()
-	var previous := _resource_root_dir
-	_resource_root_dir = path.strip_edges()
-	if persist:
-		_save_resource_state()
-	if _resource_root_dir.is_empty():
-		_resource_index.clear()
-		VegAssets.set_search_roots([])
-		_sync_settings_popup_state()
-		return OK
-	VegAssets.set_search_roots([_resource_root_dir])
-	if scan:
-		return _scan_resource_root(true)
-	if previous != _resource_root_dir:
-		_resource_index.clear()
+	var result := _resource_library.set_root_dir(path, _resource_recursive, persist, scan)
+	VegAssets.set_search_roots(result["search_roots"])
+	_show_resource_status(result)
 	_sync_settings_popup_state()
-	return OK
+	return int(result["err"])
 
 
 func _scan_resource_root(show_message: bool) -> Error:
-	_ensure_resource_index()
-	if _resource_root_dir.is_empty():
-		_resource_index.clear()
+	if _resource_library.get_root_dir().is_empty():
+		_resource_library.clear_index()
 		return OK
-	var err: Error = _resource_index.scan(_resource_root_dir, _resource_recursive)
-	if err == OK:
-		if show_message:
-			show_status_message("Resource directory indexed.", 4.0)
-	else:
-		var detail := ""
-		if _resource_index.has_method("get_last_error"):
-			detail = String(_resource_index.get_last_error())
-		if show_message:
-			show_status_message("Resource scan failed." if detail.is_empty() else detail, 6.0)
+	var result := _resource_library.scan_root(_resource_recursive)
+	if show_message:
+		_show_resource_status(result)
 	_sync_settings_popup_state()
-	return err
+	return int(result["err"])
+
+
+func _show_resource_status(result: Dictionary) -> void:
+	var status := String(result["status"])
+	if status.is_empty():
+		return
+	show_status_message(status, 4.0 if int(result["err"]) == OK else 6.0)
 
 
 func _load_resource_state() -> void:
-	var config := ConfigFile.new()
-	if config.load(STATE_CONFIG_PATH) != OK:
-		return
-	_resource_root_dir = String(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, ""))
-	_resource_recursive = bool(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, true))
-	# Drop a persisted root that no longer points at a real, sane resource
-	# directory (moved/deleted dirs, or stale temp/test paths that leaked into
-	# the shared state) so the resource browser shows a clean "no directory"
-	# state instead of a dead internal path.
-	if not _resource_root_dir.is_empty() and not _is_valid_resource_root(_resource_root_dir):
-		_resource_root_dir = ""
-		_save_resource_state()
+	_resource_recursive = bool(_resource_library.load_state()["recursive"])
 
 
 func _save_resource_state() -> void:
-	var config := ConfigFile.new()
-	config.load(STATE_CONFIG_PATH)
-	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, _resource_root_dir)
-	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, _resource_recursive)
-	config.save(STATE_CONFIG_PATH)
-
-
-func _is_valid_resource_root(path: String) -> bool:
-	var trimmed := path.strip_edges()
-	if trimmed.is_empty():
-		return false
-	if not DirAccess.dir_exists_absolute(trimmed):
-		return false
-	# A resource library is a real asset directory on disk, never inside the
-	# app's own user-data dir; reject such paths (e.g. leaked temp/test dirs).
-	if trimmed.begins_with(OS.get_user_data_dir()):
-		return false
-	return true
+	_resource_library.save_state(_resource_recursive)
 
 
 func _preferred_resource_root_dir() -> String:
-	if not _resource_root_dir.is_empty():
-		return _resource_root_dir
+	var root := _resource_library.get_root_dir()
+	if not root.is_empty():
+		return root
 	if editor != null:
 		if editor.has_current_project_dir():
 			return editor.get_current_project_dir()
@@ -1069,14 +1025,14 @@ func _ensure_resource_browser_dialog() -> void:
 
 func _refresh_resource_browser_entries() -> void:
 	_resource_browser_entries = []
-	_ensure_resource_index()
-	if _resource_root_dir.is_empty():
-		_resource_index.clear()
+	var index := _resource_library.get_index()
+	if _resource_library.get_root_dir().is_empty():
+		index.clear()
 		return
-	if _resource_index.get_root_dir().is_empty():
+	if index.get_root_dir().is_empty():
 		_scan_resource_root(false)
-	if not _resource_index.get_root_dir().is_empty():
-		_resource_browser_entries = _resource_index.get_resource_files(_resource_browser_kind)
+	if not index.get_root_dir().is_empty():
+		_resource_browser_entries = index.get_resource_files(_resource_browser_kind)
 
 
 func _refresh_resource_browser() -> void:
@@ -1100,17 +1056,18 @@ func _refresh_resource_browser() -> void:
 		var index := _resource_browser_list.add_item(text)
 		_resource_browser_list.set_item_metadata(index, entry)
 
-	var has_root := not _resource_root_dir.strip_edges().is_empty()
+	var root := _resource_library.get_root_dir()
+	var has_root := not root.strip_edges().is_empty()
 	var has_entries := not _resource_browser_entries.is_empty()
 	var has_visible := not _resource_browser_visible_entries.is_empty()
 	if _resource_browser_directory_label != null:
-		_resource_browser_directory_label.text = _resource_root_dir if has_root else "No resource directory selected"
+		_resource_browser_directory_label.text = root if has_root else "No resource directory selected"
 	if _resource_browser_hint != null:
 		_resource_browser_hint.visible = not has_visible
 		if not has_root:
 			_resource_browser_hint.text = "No resource directory selected."
 		elif not has_entries:
-			_resource_browser_hint.text = "No %s resources found in %s." % [_resource_browser_kind_label(), _resource_root_dir]
+			_resource_browser_hint.text = "No %s resources found in %s." % [_resource_browser_kind_label(), root]
 		else:
 			_resource_browser_hint.text = "No matching resources."
 	if _resource_browser_settings_button != null:
