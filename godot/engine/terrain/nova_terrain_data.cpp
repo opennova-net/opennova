@@ -5,6 +5,7 @@
 #include "nova_terrain_tile_info.h"
 
 #include <til/til_io.h>
+#include <terrain/cdep_constraint.h>
 #include <terrain/lighting.h>
 
 #include <godot_cpp/classes/image.hpp>
@@ -27,6 +28,37 @@
 using namespace godot;
 
 namespace {
+
+// Copy a FORMAT_RF heightmap image's floats out for a CDEP kernel pass. Returns
+// false (leaving out untouched) if the image is missing, the wrong format, or
+// too small. memcpy keeps it free of alignment / strict-aliasing concerns.
+static bool extract_heightmap_floats(const Ref<Image> &image, std::vector<float> &out, int &out_w, int &out_h) {
+	if (image.is_null() || image->get_format() != Image::FORMAT_RF) {
+		return false;
+	}
+	out_w = image->get_width();
+	out_h = image->get_height();
+	const int64_t count = static_cast<int64_t>(out_w) * static_cast<int64_t>(out_h);
+	if (count <= 0) {
+		return false;
+	}
+	const PackedByteArray pixels = image->get_data();
+	if (pixels.size() < count * 4) {
+		return false;
+	}
+	out.resize(static_cast<size_t>(count));
+	std::memcpy(out.data(), pixels.ptr(), static_cast<size_t>(count) * sizeof(float));
+	return true;
+}
+
+// Write CDEP-clamped floats back into the same Image object (FORMAT_RF) so the
+// editor's shared ref and get_depth_raw16() observe the change.
+static void write_heightmap_floats(const Ref<Image> &image, const std::vector<float> &heights, int w, int h) {
+	PackedByteArray pixels;
+	pixels.resize(static_cast<int64_t>(w) * static_cast<int64_t>(h) * 4);
+	std::memcpy(pixels.ptrw(), heights.data(), heights.size() * sizeof(float));
+	image->set_data(w, h, false, Image::FORMAT_RF, pixels);
+}
 
 static Ref<NovaTerrainFoliageDef> foliage_def_to_object(const opennova::FoliageDef &def) {
 	Ref<NovaTerrainFoliageDef> object;
@@ -146,6 +178,9 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_colormap_image"), &NovaTerrainData::get_colormap_image);
 	ClassDB::bind_method(D_METHOD("set_blendmap_image", "image"), &NovaTerrainData::set_blendmap_image);
 	ClassDB::bind_method(D_METHOD("get_blendmap_image"), &NovaTerrainData::get_blendmap_image);
+	ClassDB::bind_method(D_METHOD("cdep_clamp_blocks_in_rect", "rect"), &NovaTerrainData::cdep_clamp_blocks_in_rect);
+	ClassDB::bind_method(D_METHOD("cdep_count_violations"), &NovaTerrainData::cdep_count_violations);
+	ClassDB::bind_method(D_METHOD("cdep_clamp_all_violations"), &NovaTerrainData::cdep_clamp_all_violations);
 	ClassDB::bind_method(D_METHOD("get_height", "world_pos"), &NovaTerrainData::get_height);
 	ClassDB::bind_method(D_METHOD("get_height_world", "world_pos"), &NovaTerrainData::get_height_world);
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &NovaTerrainData::get_height_world_bilinear);
@@ -859,6 +894,47 @@ void NovaTerrainData::set_blendmap_image(const Ref<Image> &p_image) {
 
 Ref<Image> NovaTerrainData::get_blendmap_image() const {
 	return blendmap_image;
+}
+
+int NovaTerrainData::cdep_count_violations() const {
+	std::vector<float> heights;
+	int w = 0, h = 0;
+	if (!extract_heightmap_floats(heightmap_image, heights, w, h)) {
+		return 0;
+	}
+	return opennova::terrain::cdep_count_violations(heights.data(), w, h);
+}
+
+int NovaTerrainData::cdep_clamp_all_violations() {
+	std::vector<float> heights;
+	int w = 0, h = 0;
+	if (!extract_heightmap_floats(heightmap_image, heights, w, h)) {
+		return 0;
+	}
+	const int clamped = opennova::terrain::cdep_clamp_all_violations(heights.data(), w, h);
+	if (clamped > 0) {
+		write_heightmap_floats(heightmap_image, heights, w, h);
+	}
+	return clamped;
+}
+
+int NovaTerrainData::cdep_clamp_blocks_in_rect(const Rect2i &p_rect) {
+	std::vector<float> heights;
+	int w = 0, h = 0;
+	if (!extract_heightmap_floats(heightmap_image, heights, w, h)) {
+		return 0;
+	}
+	const opennova::terrain::CdepRect rect{
+		p_rect.position.x,
+		p_rect.position.y,
+		p_rect.position.x + p_rect.size.x,
+		p_rect.position.y + p_rect.size.y,
+	};
+	const int clamped = opennova::terrain::cdep_clamp_blocks_in_rect(heights.data(), w, h, rect);
+	if (clamped > 0) {
+		write_heightmap_floats(heightmap_image, heights, w, h);
+	}
+	return clamped;
 }
 
 Ref<Image> NovaTerrainData::heightmap_image_from_raw16(const PackedByteArray &p_raw16) const {

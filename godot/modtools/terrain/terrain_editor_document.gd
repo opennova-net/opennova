@@ -866,26 +866,18 @@ func sync_material_from_data(material: ShaderMaterial) -> void:
 
 func cdep_ranges_valid(image: Image) -> bool:
 	# CDEP's 4-bit bits_per_delta field caps each 256-pixel horizontal block at
-	# a 32767-raw-unit range. The brush enforces this live, but this bake-time
-	# scan makes a corrupt CPT impossible regardless of how the heightmap got
-	# into this state. The raw16 conversion itself now lives in C++
-	# (NovaTerrainData.get_depth_raw16); this stays in GDScript as export policy.
+	# a 32767-raw-unit range. The brush enforces this live; this bake-time guard
+	# makes a corrupt CPT impossible regardless of how the heightmap got into
+	# this state. The raw16 range scan lives in C++ (NovaTerrainData ->
+	# libs/terrain/cdep_constraint); this stays GDScript as export policy.
 	if image == null:
 		return false
-	var pixels := image.get_data()
-	for z in HM_SIZE:
-		for bx in 4:
-			var x_lo := bx * 256
-			var lo := 65535
-			var hi := 0
-			for x in range(x_lo, x_lo + 256):
-				var idx := (z * HM_SIZE + x) * 4
-				var v := clampi(int(pixels.decode_float(idx) * 256.0), 0, 65535)
-				if v < lo: lo = v
-				if v > hi: hi = v
-			if hi - lo > 32767:
-				push_error("CDEP per-block range exceeded at row %d block %d (range=%d > 32767)" % [z, bx, hi - lo])
-				return false
+	if data == null:
+		return true
+	var violations := data.cdep_count_violations()
+	if violations > 0:
+		push_error("CDEP per-block range exceeded in %d block(s) (> 32767 raw units)" % violations)
+		return false
 	return true
 
 

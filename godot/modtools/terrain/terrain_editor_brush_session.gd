@@ -3,7 +3,6 @@ extends RefCounted
 
 const TerrainEditorBrushes = preload("res://modtools/terrain/terrain_editor_brushes.gd")
 const TerrainEditHistory = preload("res://modtools/terrain/terrain_edit_history.gd")
-const CDEPConstraint = preload("res://modtools/terrain/terrain_editor_cdep_constraint.gd")
 const HM_SIZE := 1024
 const BRUSH_RADIUS_MIN := 1.0
 const BRUSH_RADIUS_MAX := 128.0
@@ -121,7 +120,17 @@ func end_brush_drag(current_image: Image) -> Dictionary:
 	return result
 
 
-func apply_brush_stroke(delta: float, hover_hit: Vector3, hover_hit_valid: bool, terrain_mesh, heightmap_image: Image, blendmap_image: Image, colormap_image: Image) -> Dictionary:
+# Re-point the per-dab CDEP clamp at NovaTerrainData's C++ raw16 kernel:
+# data.cdep_clamp_blocks_in_rect mutates the shared heightmap_image in place.
+# data is null in unit tests that drive the session without a NovaTerrainData;
+# their strokes stay within the per-block range, so skipping the clamp there is
+# a no-op for what they assert.
+func _clamp_cdep(data, rect: Rect2i) -> void:
+	if data != null:
+		data.cdep_clamp_blocks_in_rect(rect)
+
+
+func apply_brush_stroke(delta: float, hover_hit: Vector3, hover_hit_valid: bool, terrain_mesh, heightmap_image: Image, blendmap_image: Image, colormap_image: Image, data = null) -> Dictionary:
 	var result := {
 		"changed_heightmap": false,
 		"changed_blendmap": false,
@@ -187,20 +196,20 @@ func apply_brush_stroke(delta: float, hover_hit: Vector3, hover_hit_valid: bool,
 			match effective_tool:
 				Tool.RAISE:
 					TerrainEditorBrushes.apply_raise_lower(heightmap_image, center_x, center_z, radius, brush_strength * dab_delta * 20.0, brush_hardness, clip_rect)
-					CDEPConstraint.clamp_blocks_in_rect(heightmap_image, height_dab_rect)
+					_clamp_cdep(data, height_dab_rect)
 					result["changed_heightmap"] = true
 				Tool.LOWER:
 					TerrainEditorBrushes.apply_raise_lower(heightmap_image, center_x, center_z, radius, -brush_strength * dab_delta * 20.0, brush_hardness, clip_rect)
-					CDEPConstraint.clamp_blocks_in_rect(heightmap_image, height_dab_rect)
+					_clamp_cdep(data, height_dab_rect)
 					result["changed_heightmap"] = true
 				Tool.SMOOTH:
 					TerrainEditorBrushes.apply_smooth(heightmap_image, center_x, center_z, radius, brush_strength * dab_delta * 5.0, brush_hardness, clip_rect)
-					CDEPConstraint.clamp_blocks_in_rect(heightmap_image, height_dab_rect)
+					_clamp_cdep(data, height_dab_rect)
 					result["changed_heightmap"] = true
 				Tool.FLATTEN:
 					if flatten_target_set:
 						TerrainEditorBrushes.apply_flatten(heightmap_image, center_x, center_z, radius, flatten_target_height, brush_strength * dab_delta * 5.0, brush_hardness, clip_rect)
-						CDEPConstraint.clamp_blocks_in_rect(heightmap_image, height_dab_rect)
+						_clamp_cdep(data, height_dab_rect)
 						result["changed_heightmap"] = true
 				Tool.PAINT_DETAIL:
 					TerrainEditorBrushes.apply_blend_paint(blendmap_image, paint_detail_channel, center_x, center_z, radius, brush_strength * dab_delta * 3.0, brush_hardness, clip_rect)

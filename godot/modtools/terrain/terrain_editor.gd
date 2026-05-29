@@ -21,7 +21,6 @@ const TerrainEditorSurfacePaint = preload("res://modtools/terrain/terrain_editor
 const TerrainEditHistory = preload("res://modtools/terrain/terrain_edit_history.gd")
 const TerrainEditorDocument = preload("res://modtools/terrain/terrain_editor_document.gd")
 const TerrainEditorBrushSession = preload("res://modtools/terrain/terrain_editor_brush_session.gd")
-const CDEPConstraint = preload("res://modtools/terrain/terrain_editor_cdep_constraint.gd")
 const TerrainFoliagePreview = preload("res://modtools/terrain/terrain_foliage_preview.gd")
 const TerrainTileOverlayPreview = preload("res://modtools/terrain/terrain_tile_overlay_preview.gd")
 const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
@@ -1779,7 +1778,7 @@ func _apply_brush_stroke(delta: float) -> void:
 			is_dirty = true
 			_mark_foliage_preview_dirty()
 		return
-	var result := _brush_session.apply_brush_stroke(delta, _hover_hit, _hover_hit_valid, terrain_mesh, _heightmap_image, _blendmap_image, _colormap_image)
+	var result := _brush_session.apply_brush_stroke(delta, _hover_hit, _hover_hit_valid, terrain_mesh, _heightmap_image, _blendmap_image, _colormap_image, _data)
 	if result["changed_heightmap"]:
 		terrain_mesh.set_heightmap(_heightmap_image)
 		_mark_tile_overlay_dirty()
@@ -2156,9 +2155,9 @@ func save_project(dir_path: String) -> Error:
 # auto-clamp; otherwise the eventual DFX/JO export will fail at the bake
 # guard with a less actionable message.
 func _check_loaded_cdep_violations() -> void:
-	if not _heightmap_image:
+	if _data == null or not _heightmap_image:
 		return
-	var count := CDEPConstraint.count_violations(_heightmap_image)
+	var count := _data.cdep_count_violations()
 	if count == 0:
 		return
 	if workstation and workstation.has_method("prompt_cdep_violations"):
@@ -2168,9 +2167,9 @@ func _check_loaded_cdep_violations() -> void:
 
 
 func _auto_fix_cdep_violations() -> void:
-	if not _heightmap_image:
+	if _data == null or not _heightmap_image:
 		return
-	var clamped := CDEPConstraint.clamp_all_violations(_heightmap_image)
+	var clamped := _data.cdep_clamp_all_violations()
 	terrain_mesh.set_heightmap(_heightmap_image)
 	_mark_foliage_preview_dirty()
 	_mark_tile_overlay_dirty()
@@ -2186,9 +2185,9 @@ func _auto_fix_cdep_violations() -> void:
 func _auto_clamp_for_export_if_needed(flavor: int) -> void:
 	if flavor != ExportFlavor.DFX_JO:
 		return
-	if not _heightmap_image:
+	if _data == null or not _heightmap_image:
 		return
-	var clamped := CDEPConstraint.clamp_all_violations(_heightmap_image)
+	var clamped := _data.cdep_clamp_all_violations()
 	if clamped == 0:
 		return
 	terrain_mesh.set_heightmap(_heightmap_image)

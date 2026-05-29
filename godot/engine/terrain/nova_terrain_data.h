@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/rect2i.hpp>
 
 #include <cpt/cpt_io.h>
 #include <trn/trn_io.h>
@@ -182,6 +183,15 @@ public:
 	Ref<Image> get_colormap_image() const;
 	void set_blendmap_image(const Ref<Image> &p_image);
 	Ref<Image> get_blendmap_image() const;
+	// CDEP per-block range enforcement on the editable heightmap (raw16 domain;
+	// see libs/terrain/cdep_constraint.h). These mutate the FORMAT_RF
+	// heightmap_image in place via get_data()/set_data(), so the editor's shared
+	// Image ref and get_depth_raw16() stay current without a separate sync.
+	// clamp_* return the number of blocks clamped; count returns the number of
+	// over-range blocks.
+	int cdep_clamp_blocks_in_rect(const Rect2i &p_rect);
+	int cdep_count_violations() const;
+	int cdep_clamp_all_violations();
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;
