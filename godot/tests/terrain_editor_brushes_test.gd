@@ -31,21 +31,26 @@ func test_raise_lower_invert() -> void:
 	var heightmap := _make_heightmap(10.0)
 	var blendmap := _make_color_image(Color(1.0, 0.0, 0.0, 1.0))
 	var colormap := _make_color_image(Color(0.0, 0.0, 0.0, 1.0))
+	# Height brushes now run through the C++ kernel on NovaTerrainData's owned
+	# heightmap; set_heightmap_image hands it the SAME Image the test asserts on.
+	var data := NovaTerrainData.new()
+	data.set_heightmap_image(heightmap)
 
 	session.current_tool = TerrainEditorBrushSession.Tool.RAISE
 	session.brush_radius = 4.0
 	session.brush_strength = 1.0
 	session.brush_hardness = 1.0
 	session.begin_brush_drag(heightmap, true)
-	var raise_result := session.apply_brush_stroke(1.0, Vector3(32, 0, 32), true, mesh, heightmap, blendmap, colormap)
+	var raise_result := session.apply_brush_stroke(1.0, Vector3(32, 0, 32), true, mesh, heightmap, blendmap, colormap, data)
 	session.end_brush_drag(heightmap)
 	assert_true(bool(raise_result["changed_heightmap"]), "Ctrl+Raise should edit the heightmap.")
 	assert_lt(heightmap.get_pixel(32, 32).r, 10.0, "Ctrl+Raise should invert into lowering terrain.")
 
 	heightmap = _make_heightmap(10.0)
+	data.set_heightmap_image(heightmap)
 	session.current_tool = TerrainEditorBrushSession.Tool.LOWER
 	session.begin_brush_drag(heightmap, true)
-	var lower_result := session.apply_brush_stroke(1.0, Vector3(32, 0, 32), true, mesh, heightmap, blendmap, colormap)
+	var lower_result := session.apply_brush_stroke(1.0, Vector3(32, 0, 32), true, mesh, heightmap, blendmap, colormap, data)
 	session.end_brush_drag(heightmap)
 	assert_true(bool(lower_result["changed_heightmap"]), "Ctrl+Lower should edit the heightmap.")
 	assert_gt(heightmap.get_pixel(32, 32).r, 10.0, "Ctrl+Lower should invert into raising terrain.")

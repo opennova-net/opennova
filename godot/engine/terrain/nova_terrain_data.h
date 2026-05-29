@@ -193,6 +193,13 @@ public:
 	int cdep_clamp_blocks_in_rect(const Rect2i &p_rect);
 	int cdep_count_violations() const;
 	int cdep_clamp_all_violations();
+	// Height brushes (libs/terrain/brush.h). Mutate the editable FORMAT_RF
+	// heightmap in place (the editor's shared Image); cx/cz/radius/clip are atlas
+	// pixel coordinates. Math runs in double to match the GDScript originals.
+	void brush_raise_lower(int cx, int cz, int radius, double amount, double hardness, const Rect2i &p_clip);
+	void brush_smooth(int cx, int cz, int radius, double strength, double hardness, const Rect2i &p_clip);
+	void brush_flatten(int cx, int cz, int radius, double target_height, double strength, double hardness, const Rect2i &p_clip);
+	double brush_sample_flatten_target(double world_x, double world_z) const;
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;

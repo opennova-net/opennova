@@ -1,4 +1,5 @@
 add_library(opennova_terrain STATIC
+    src/brush.cpp
     src/builder.cpp
     src/build_quadtree.cpp
     src/cdep_constraint.cpp

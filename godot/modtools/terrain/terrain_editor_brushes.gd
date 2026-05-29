@@ -1,42 +1,6 @@
 extends RefCounted
 
 
-static func apply_raise_lower(image: Image, cx: int, cz: int, radius: int, amount: float, hardness: float, clip_rect: Rect2i) -> void:
-	_for_each_brush_pixel(image, cx, cz, radius, hardness, clip_rect, func(x: int, z: int, falloff: float) -> void:
-		var weighted_falloff := falloff * falloff
-		var height := image.get_pixel(x, z).r
-		height = clampf(height + amount * weighted_falloff, 0.0, 255.996)
-		image.set_pixel(x, z, Color(height, 0, 0, 1))
-	)
-
-
-static func apply_smooth(image: Image, cx: int, cz: int, radius: int, strength: float, hardness: float, clip_rect: Rect2i) -> void:
-	var originals := {}
-	_for_each_brush_pixel(image, cx, cz, radius, hardness, clip_rect, func(x: int, z: int, _falloff: float) -> void:
-		originals[Vector2i(x, z)] = image.get_pixel(x, z).r
-	)
-	_for_each_brush_pixel(image, cx, cz, radius, hardness, clip_rect, func(x: int, z: int, falloff: float) -> void:
-		var sum := 0.0
-		var count := 0
-		for nz in range(maxi(z - 1, 0), mini(z + 2, image.get_height())):
-			for nx in range(maxi(x - 1, 0), mini(x + 2, image.get_width())):
-				var key := Vector2i(nx, nz)
-				sum += originals.get(key, image.get_pixel(nx, nz).r)
-				count += 1
-		var height: float = originals[Vector2i(x, z)]
-		var t := clampf(strength * falloff, 0.0, 1.0)
-		image.set_pixel(x, z, Color(lerpf(height, sum / float(count), t), 0, 0, 1))
-	)
-
-
-static func apply_flatten(image: Image, cx: int, cz: int, radius: int, target_height: float, strength: float, hardness: float, clip_rect: Rect2i) -> void:
-	_for_each_brush_pixel(image, cx, cz, radius, hardness, clip_rect, func(x: int, z: int, falloff: float) -> void:
-		var height := image.get_pixel(x, z).r
-		var t := clampf(strength * falloff, 0.0, 1.0)
-		image.set_pixel(x, z, Color(lerpf(height, target_height, t), 0, 0, 1))
-	)
-
-
 static func apply_blend_paint(image: Image, channel: int, cx: int, cz: int, radius: int, strength: float, hardness: float, clip_rect: Rect2i) -> void:
 	_for_each_brush_pixel(image, cx, cz, radius, hardness, clip_rect, func(x: int, z: int, falloff: float) -> void:
 		var weighted_falloff := falloff * falloff
@@ -90,12 +54,6 @@ static func sample_colormap(image: Image, world_x: float, world_z: float) -> Col
 	var sample_x := clampi(int(world_x), 0, image.get_width() - 1)
 	var sample_z := clampi(int(world_z), 0, image.get_height() - 1)
 	return image.get_pixel(sample_x, sample_z)
-
-
-static func sample_flatten_target(image: Image, world_x: float, world_z: float) -> float:
-	var sample_x := clampi(int(world_x), 0, image.get_width() - 1)
-	var sample_z := clampi(int(world_z), 0, image.get_height() - 1)
-	return image.get_pixel(sample_x, sample_z).r
 
 
 static func _for_each_brush_pixel(image: Image, cx: int, cz: int, radius: int, hardness: float, clip_rect: Rect2i, callback: Callable) -> void:

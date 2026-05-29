@@ -277,6 +277,13 @@ target_link_libraries(coords_test PRIVATE opennova_terrain)
 target_include_directories(coords_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME coords COMMAND coords_test)
 
+# Height brush kernels (libs/terrain/brush): raise/lower, smooth (two-pass),
+# flatten + the shared smoothstep falloff, ported from terrain_editor_brushes.gd.
+add_executable(brush_height_test trngen/brush_height_test.cpp)
+target_link_libraries(brush_height_test PRIVATE opennova_terrain)
+target_include_directories(brush_height_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME brush_height COMMAND brush_height_test)
+
 # Dvxi5 repro: exercises a post-clamp heightmap with block ranges at the
 # CDEP ceiling. Kept as a regression anchor for the fixed bake pipeline.
 add_executable(dvxi5_repro_test trngen/dvxi5_repro_test.cpp)

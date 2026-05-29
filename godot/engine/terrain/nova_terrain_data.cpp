@@ -5,6 +5,7 @@
 #include "nova_terrain_tile_info.h"
 
 #include <til/til_io.h>
+#include <terrain/brush.h>
 #include <terrain/cdep_constraint.h>
 #include <terrain/coords.h>
 #include <terrain/lighting.h>
@@ -198,6 +199,14 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("cdep_clamp_blocks_in_rect", "rect"), &NovaTerrainData::cdep_clamp_blocks_in_rect);
 	ClassDB::bind_method(D_METHOD("cdep_count_violations"), &NovaTerrainData::cdep_count_violations);
 	ClassDB::bind_method(D_METHOD("cdep_clamp_all_violations"), &NovaTerrainData::cdep_clamp_all_violations);
+	ClassDB::bind_method(D_METHOD("brush_raise_lower", "cx", "cz", "radius", "amount", "hardness", "clip"),
+	                     &NovaTerrainData::brush_raise_lower);
+	ClassDB::bind_method(D_METHOD("brush_smooth", "cx", "cz", "radius", "strength", "hardness", "clip"),
+	                     &NovaTerrainData::brush_smooth);
+	ClassDB::bind_method(D_METHOD("brush_flatten", "cx", "cz", "radius", "target_height", "strength", "hardness", "clip"),
+	                     &NovaTerrainData::brush_flatten);
+	ClassDB::bind_method(D_METHOD("brush_sample_flatten_target", "world_x", "world_z"),
+	                     &NovaTerrainData::brush_sample_flatten_target);
 	ClassDB::bind_method(D_METHOD("get_height", "world_pos"), &NovaTerrainData::get_height);
 	ClassDB::bind_method(D_METHOD("get_height_world", "world_pos"), &NovaTerrainData::get_height_world);
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &NovaTerrainData::get_height_world_bilinear);
@@ -956,6 +965,65 @@ int NovaTerrainData::cdep_clamp_blocks_in_rect(const Rect2i &p_rect) {
 		write_heightmap_floats(heightmap_image, heights, w, h);
 	}
 	return clamped;
+}
+
+// Height brushes (libs/terrain/brush.h). Each pulls the editable FORMAT_RF
+// heightmap once, mutates the dab via the shared kernel, and writes it back to
+// the SAME Image so the editor's shared ref and get_depth_raw16() stay current.
+// The brush session calls cdep_clamp_blocks_in_rect after each dab.
+void NovaTerrainData::brush_raise_lower(int cx, int cz, int radius, double amount, double hardness,
+                                        const Rect2i &p_clip) {
+	std::vector<float> heights;
+	int w = 0, h = 0;
+	if (!extract_heightmap_floats(heightmap_image, heights, w, h)) {
+		return;
+	}
+	const opennova::terrain::BrushRect clip{p_clip.position.x, p_clip.position.y, p_clip.size.x, p_clip.size.y};
+	if (opennova::terrain::brush_raise_lower(heights.data(), w, h, cx, cz, radius, amount, hardness, clip)) {
+		write_heightmap_floats(heightmap_image, heights, w, h);
+	}
+}
+
+void NovaTerrainData::brush_smooth(int cx, int cz, int radius, double strength, double hardness,
+                                   const Rect2i &p_clip) {
+	std::vector<float> heights;
+	int w = 0, h = 0;
+	if (!extract_heightmap_floats(heightmap_image, heights, w, h)) {
+		return;
+	}
+	const opennova::terrain::BrushRect clip{p_clip.position.x, p_clip.position.y, p_clip.size.x, p_clip.size.y};
+	if (opennova::terrain::brush_smooth(heights.data(), w, h, cx, cz, radius, strength, hardness, clip)) {
+		write_heightmap_floats(heightmap_image, heights, w, h);
+	}
+}
+
+void NovaTerrainData::brush_flatten(int cx, int cz, int radius, double target_height, double strength,
+                                    double hardness, const Rect2i &p_clip) {
+	std::vector<float> heights;
+	int w = 0, h = 0;
+	if (!extract_heightmap_floats(heightmap_image, heights, w, h)) {
+		return;
+	}
+	const opennova::terrain::BrushRect clip{p_clip.position.x, p_clip.position.y, p_clip.size.x, p_clip.size.y};
+	if (opennova::terrain::brush_flatten(heights.data(), w, h, cx, cz, radius, target_height, strength, hardness, clip)) {
+		write_heightmap_floats(heightmap_image, heights, w, h);
+	}
+}
+
+double NovaTerrainData::brush_sample_flatten_target(double world_x, double world_z) const {
+	// Mirrors TerrainEditorBrushes.sample_flatten_target: nearest-pixel sample of
+	// the editable heightmap at int(world)-truncated, edge-clamped coords.
+	if (heightmap_image.is_null() || heightmap_image->get_format() != Image::FORMAT_RF) {
+		return 0.0;
+	}
+	const int img_w = heightmap_image->get_width();
+	const int img_h = heightmap_image->get_height();
+	if (img_w <= 0 || img_h <= 0) {
+		return 0.0;
+	}
+	const int sx = std::clamp(static_cast<int>(world_x), 0, img_w - 1);
+	const int sz = std::clamp(static_cast<int>(world_z), 0, img_h - 1);
+	return static_cast<double>(heightmap_image->get_pixel(sx, sz).r);
 }
 
 Ref<Image> NovaTerrainData::heightmap_image_from_raw16(const PackedByteArray &p_raw16) const {
