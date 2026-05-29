@@ -1,8 +1,24 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://modtools/credits/credits_editor.gd" id="1"]
 [ext_resource type="Script" path="res://modtools/credits/credits_editor_block_list.gd" id="BlockList"]
 [ext_resource type="Script" path="res://modtools/credits/credits_editor_source_view.gd" id="SourceView"]
+
+[sub_resource type="StyleBoxFlat" id="PreviewScreen"]
+bg_color = Color(0.0314, 0.0353, 0.0471, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.1804, 0.2, 0.2314, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+content_margin_left = 3.0
+content_margin_top = 3.0
+content_margin_right = 3.0
+content_margin_bottom = 3.0
 
 [node name="CreditsEditor" type="Control"]
 anchors_preset = 15
@@ -202,8 +218,18 @@ size_flags_vertical = 3
 script = ExtResource("SourceView")
 
 [node name="ApplyBar" type="HBoxContainer" parent="HSplit/LeftPane/ContentStack/SourceViewHost"]
+theme_override_constants/separation = 8
+
+[node name="ApplyLabel" type="Label" parent="HSplit/LeftPane/ContentStack/SourceViewHost/ApplyBar"]
+theme_type_variation = &"Muted"
+text = "Raw credits source"
+vertical_alignment = 1
+
+[node name="ApplySpacer" type="Control" parent="HSplit/LeftPane/ContentStack/SourceViewHost/ApplyBar"]
+size_flags_horizontal = 3
 
 [node name="ApplyButton" type="Button" parent="HSplit/LeftPane/ContentStack/SourceViewHost/ApplyBar"]
+tooltip_text = "Parse the source text and rebuild the entry cards"
 text = "Apply"
 
 [node name="CodeEdit" type="CodeEdit" parent="HSplit/LeftPane/ContentStack/SourceViewHost"]
@@ -212,11 +238,47 @@ size_flags_vertical = 3
 
 [node name="StatusBar" type="Label" parent="HSplit/LeftPane/ContentStack/SourceViewHost"]
 
+[node name="EmptyHint" type="CenterContainer" parent="HSplit/LeftPane/ContentStack"]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="EmptyHintBox" type="VBoxContainer" parent="HSplit/LeftPane/ContentStack/EmptyHint"]
+theme_override_constants/separation = 4
+
+[node name="EmptyHintTitle" type="Label" parent="HSplit/LeftPane/ContentStack/EmptyHint/EmptyHintBox"]
+theme_type_variation = &"Heading"
+text = "No credits entries yet"
+horizontal_alignment = 1
+
+[node name="EmptyHintBody" type="Label" parent="HSplit/LeftPane/ContentStack/EmptyHint/EmptyHintBox"]
+theme_type_variation = &"Muted"
+text = "Add a line with + Text, + Image, or + Newline below,
+or switch to Source to paste raw credits text."
+horizontal_alignment = 1
+
 [node name="RightPane" type="VBoxContainer" parent="HSplit"]
 clip_contents = true
 size_flags_horizontal = 3
 size_flags_vertical = 3
+theme_override_constants/separation = 6
+
+[node name="PreviewHeader" type="HBoxContainer" parent="HSplit/RightPane"]
 theme_override_constants/separation = 8
+
+[node name="PreviewTitle" type="Label" parent="HSplit/RightPane/PreviewHeader"]
+theme_type_variation = &"Heading"
+text = "Preview"
+
+[node name="PreviewHint" type="Label" parent="HSplit/RightPane/PreviewHeader"]
+size_flags_horizontal = 3
+theme_type_variation = &"Muted"
+text = "Mouse wheel scrubs"
+horizontal_alignment = 2
+vertical_alignment = 1
 
 [node name="PreviewHost" type="VBoxContainer" parent="HSplit/RightPane"]
 unique_name_in_owner = true
@@ -224,7 +286,12 @@ clip_contents = true
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="Player" type="NovaCreditsPlayer" parent="HSplit/RightPane/PreviewHost"]
+[node name="PreviewScreen" type="PanelContainer" parent="HSplit/RightPane/PreviewHost"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("PreviewScreen")
+
+[node name="Player" type="NovaCreditsPlayer" parent="HSplit/RightPane/PreviewHost/PreviewScreen"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
 size_flags_vertical = 3

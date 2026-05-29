@@ -29,6 +29,7 @@ enum Mode { VISUAL, SOURCE }
 @onready var _pause_button: Button = %Pause
 @onready var _stop_button: Button = %Stop
 @onready var _speed_spin: SpinBox = %Speed
+@onready var _empty_hint: Control = %EmptyHint
 
 var _document: CreditsEditorDocument
 var _mode: Mode = Mode.VISUAL
@@ -92,7 +93,11 @@ func _ready() -> void:
 	_pause_button.tooltip_text = "Pause credits preview"
 	_stop_button.tooltip_text = "Stop and show the first entries"
 	_speed_spin.tooltip_text = "Preview playback speed"
+	_scroll_rate_spin.tooltip_text = "Pixels the credits scroll upward each frame"
+	_vertical_space_spin.tooltip_text = "Extra blank pixels between entries"
+	_center_x_spin.tooltip_text = "Horizontal center of the credits column, in game pixels"
 	_refresh_preview_toolbar_state()
+	_refresh_empty_hint()
 
 func _set_mode(value: Mode) -> void:
 	if value == Mode.VISUAL and _mode == Mode.SOURCE:
@@ -110,6 +115,7 @@ func _apply_mode_state() -> void:
 	_source_view_host.visible = _mode == Mode.SOURCE
 	_visual_button.set_pressed_no_signal(_mode == Mode.VISUAL)
 	_source_button.set_pressed_no_signal(_mode == Mode.SOURCE)
+	_refresh_empty_hint()
 
 func _apply_pending_source_for_visual_mode() -> Error:
 	if _source_view_host == null or not _source_view_host.has_method("apply_pending"):
@@ -126,6 +132,7 @@ func _on_resource_loaded(resource: CbinCreditsResource) -> void:
 	if _source_view_host and _source_view_host.has_method("set_resource"):
 		_source_view_host.set_resource(resource)
 	_set_preview_resource(resource, true)
+	_refresh_empty_hint()
 
 func _on_resource_changed() -> void:
 	if _document == null:
@@ -137,8 +144,14 @@ func _on_resource_changed() -> void:
 	if _source_view_host and _source_view_host.has_method("set_resource"):
 		_source_view_host.set_resource(_document.resource)
 	_set_preview_resource(_document.resource, false)
+	_refresh_empty_hint()
 
 func _set_preview_resource(resource: CbinCreditsResource, reset_playback: bool) -> void:
+	if _preview_resource != resource:
+		if _preview_resource != null and _preview_resource.entries_structure_changed.is_connected(_refresh_empty_hint):
+			_preview_resource.entries_structure_changed.disconnect(_refresh_empty_hint)
+		if resource != null and not resource.entries_structure_changed.is_connected(_refresh_empty_hint):
+			resource.entries_structure_changed.connect(_refresh_empty_hint)
 	_preview_resource = resource
 	_player.credits_resource = resource
 	if reset_playback:
@@ -150,6 +163,14 @@ func _refresh_warning(resource: CbinCreditsResource) -> void:
 		return
 	_warning_bar.text = ""
 	_warning_bar.visible = false
+
+
+func _refresh_empty_hint() -> void:
+	if _empty_hint == null:
+		return
+	var resource := _document.resource if _document != null else null
+	var is_empty := resource == null or resource.get_entry_count() == 0
+	_empty_hint.visible = is_empty and _mode == Mode.VISUAL
 
 func _refresh_env_bar(resource: CbinCreditsResource) -> void:
 	if resource == null:

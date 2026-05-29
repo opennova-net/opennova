@@ -64,7 +64,7 @@ func _apply_refresh() -> void:
 	_source_dirty = false
 	pending_edits_changed.emit(false)
 	_suppress = false
-	_status.text = ""
+	_set_status("", false)
 
 func _apply() -> void:
 	apply_pending()
@@ -79,11 +79,11 @@ func apply_pending() -> Error:
 	if ok:
 		_last_applied_text = source_text
 		_source_dirty = false
-		_status.text = "Applied"
+		_set_status("Applied", false)
 		pending_edits_changed.emit(false)
 		return OK
 	else:
-		_status.text = "Parse error - text not applied"
+		_set_status("Parse error - text not applied", true)
 		return ERR_PARSE_ERROR
 
 func _on_text_changed() -> void:
@@ -91,5 +91,18 @@ func _on_text_changed() -> void:
 		return
 	_source_dirty = true
 	pending_edits_changed.emit(true)
-	if _status != null:
-		_status.text = ""
+	_set_status("", false)
+
+
+# Colors the status line: a calm success tint for applied text, a warning tint
+# for parse failures, and the default color when cleared.
+func _set_status(text: String, is_error: bool) -> void:
+	if _status == null:
+		return
+	_status.text = text
+	if text.is_empty():
+		_status.remove_theme_color_override("font_color")
+	elif is_error:
+		_status.add_theme_color_override("font_color", Color(0.95, 0.45, 0.35, 1.0))
+	else:
+		_status.add_theme_color_override("font_color", Color(0.55, 0.8, 0.55, 1.0))

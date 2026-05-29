@@ -122,6 +122,7 @@ func _refresh() -> void:
 
 	if is_text:
 		_type_chip.text = "TEXT"
+		_type_chip.add_theme_color_override("font_color", Color(0.84, 0.55, 0.29, 1.0))
 		var entry_text: String = _entry.get_text()
 		if not _text_edit.has_focus() and _text_edit.text != entry_text:
 			_text_edit.text = entry_text
@@ -138,8 +139,10 @@ func _refresh() -> void:
 	elif is_newline:
 		_type_chip.text = "SPACE"
 		_type_chip.theme_type_variation = &"Muted"
+		_type_chip.remove_theme_color_override("font_color")
 	elif is_image:
 		_type_chip.text = "IMAGE"
+		_type_chip.add_theme_color_override("font_color", Color(0.45, 0.72, 0.88, 1.0))
 		var entry_path: String = _entry.get_texture_path()
 		if not _image_path_edit.has_focus() and _image_path_edit.text != entry_path:
 			_image_path_edit.text = entry_path
