@@ -23,7 +23,8 @@ func test_resource_root_resolves_only_top_level_files() -> void:
 	assert_eq(resources.set_root_dir(root), OK)
 
 	assert_eq(_norm(resources.resolve_file("alpha.trn")), _norm(root.path_join("Alpha.TRN")))
-	assert_eq(_norm(resources.resolve_file("terrains/alpha.trn")), _norm(root.path_join("Alpha.TRN")))
+	assert_eq(resources.resolve_file("terrains/alpha.trn"), "", "Resource names must be flat basenames, not nested paths.")
+	assert_string_contains(resources.get_last_error(), "flat filename", "Pathful lookups should explain the flat resource-root contract.")
 	assert_eq(resources.resolve_file("Dvxi5.trn"), "", "Nested files are not part of the flat resource root.")
 
 	var trns := resources.list_files(".trn")

@@ -277,7 +277,7 @@ func test_settings_viewport_popup_edits_resource_directory() -> void:
 	assert_eq(workstation.get_resource_index().get_resource_files("terrain").size(), 1, "Flat scans should include top-level terrain files.")
 
 
-func test_workspace_open_uses_resource_browser_with_browse_fallback() -> void:
+func test_workspace_open_uses_resource_browser_without_filesystem_escape() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
 	var root := _make_resource_fixture("resource_browser_terrain")
@@ -295,12 +295,11 @@ func test_workspace_open_uses_resource_browser_with_browse_fallback() -> void:
 	if dialog == null:
 		return
 	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
-	var browse := dialog.find_child("ResourceBrowserBrowseFilesButton", true, false) as Button
 	var dir_label := dialog.find_child("ResourceBrowserDirectoryLabel", true, false) as Label
 	var settings_shortcut := dialog.find_child("ResourceBrowserSettingsButton", true, false) as Button
 	assert_true(dialog.visible, "Resource browser should open instead of going straight to native file browsing.")
 	assert_not_null(list, "Resource browser should include a list.")
-	assert_not_null(browse, "Resource browser should keep a native Browse Files fallback.")
+	assert_null(dialog.find_child("ResourceBrowserBrowseFilesButton", true, false), "Resource browser must not expose a native filesystem escape hatch.")
 	assert_not_null(dir_label, "Resource browser should show the active resource directory.")
 	assert_not_null(settings_shortcut, "Resource browser should include a Settings shortcut node.")
 	if list != null:
@@ -396,6 +395,7 @@ func test_workspace_open_without_resource_dir_shows_empty_browser() -> void:
 	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
 	var hint := dialog.find_child("ResourceBrowserHint", true, false) as Label
 	var settings_shortcut := dialog.find_child("ResourceBrowserSettingsButton", true, false) as Button
+	assert_null(dialog.find_child("ResourceBrowserBrowseFilesButton", true, false), "Missing resource roots should be fixed through Settings, not arbitrary file browsing.")
 	if list != null:
 		assert_eq(list.item_count, 0, "No resource directory should produce no rows.")
 	if hint != null:

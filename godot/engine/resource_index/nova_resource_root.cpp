@@ -17,6 +17,10 @@ bool case_insensitive_less(const String &a, const String &b) {
 	return a.to_lower() < b.to_lower();
 }
 
+bool is_flat_filename(const String &name) {
+	return name.find("/") == -1 && name.find("\\") == -1;
+}
+
 } // namespace
 
 void NovaResourceRoot::_bind_methods() {
@@ -107,6 +111,10 @@ String NovaResourceRoot::resolve_file(const String &name) {
 	const String file = lookup_name(name);
 	if (file.is_empty()) {
 		last_error_ = "Resource filename is empty";
+		return String();
+	}
+	if (!is_flat_filename(name.strip_edges())) {
+		last_error_ = "Resource lookup requires a flat filename: " + name;
 		return String();
 	}
 	const String wanted = file.to_lower();
