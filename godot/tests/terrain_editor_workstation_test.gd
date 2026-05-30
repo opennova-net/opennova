@@ -155,6 +155,8 @@ func _make_resource_fixture(name: String) -> String:
 	DirAccess.make_dir_recursive_absolute(root.path_join("models"))
 	DirAccess.make_dir_recursive_absolute(root.path_join("objects"))
 	DirAccess.make_dir_recursive_absolute(root.path_join("fonts"))
+	DirAccess.make_dir_recursive_absolute(root.path_join("strings"))
+	DirAccess.make_dir_recursive_absolute(root.path_join("data"))
 	_write_fixture_file(root.path_join("missions/alpha.bms"), "bms")
 	_write_fixture_file(root.path_join("terrains/alpha.trn"), "trn")
 	_write_fixture_file(root.path_join("env/alpha.env"), "env")
@@ -163,6 +165,8 @@ func _make_resource_fixture(name: String) -> String:
 	_write_fixture_file(root.path_join("objects/alpha.3di"), "3di")
 	_write_fixture_file(root.path_join("objects/alpha.ase"), "ase")
 	_write_fixture_file(root.path_join("fonts/alpha.fnt"), "fnt")
+	_write_fixture_file(root.path_join("strings/alpha.bin"), "RTXTstrings")
+	_write_fixture_file(root.path_join("data/raw.bin"), "raw")
 	return root
 
 
@@ -241,9 +245,11 @@ func test_resource_index_lists_object_resources_without_glb_models() -> void:
 	assert_eq(index.get_resource_files("object_model").size(), 1, "3DI files should be indexed as object model resources.")
 	assert_eq(index.get_resource_files("object_scene").size(), 1, "ASE files should be indexed as importable object scenes.")
 	assert_eq(index.get_resource_files("font").size(), 1, "FNT files should be indexed as font resources.")
+	assert_eq(index.get_resource_files("strings").size(), 1, "RTXT BIN files should be indexed as strings resources.")
 	assert_eq(index.get_resource_files("glb").size(), 0, "GLB files should no longer be indexed.")
-	assert_eq(index.get_resource_files("all").size(), 7, "All openable resources should exclude GLB.")
+	assert_eq(index.get_resource_files("all").size(), 8, "All openable resources should exclude GLB and non-RTXT BIN blobs.")
 	assert_eq(String((index.get_resource_files("object_model")[0] as Dictionary).get("relative_path", "")), "objects/alpha.3di", "Object model entries should keep root-relative paths.")
+	assert_eq(String((index.get_resource_files("strings")[0] as Dictionary).get("relative_path", "")), "strings/alpha.bin", "Strings entries should keep root-relative paths.")
 
 
 func test_settings_viewport_popup_edits_resource_directory() -> void:
@@ -336,6 +342,31 @@ func test_fonts_workspace_open_uses_resource_browser() -> void:
 	if list != null:
 		assert_eq(list.item_count, 1, "Font browser should list FNT files from the resource directory.")
 		assert_string_contains(list.get_item_text(0), "alpha", "Font resource rows should show the matching file.")
+
+
+func test_strings_workspace_open_uses_resource_browser() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var root := _make_resource_fixture("resource_browser_strings")
+	workstation._resource_recursive = true
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index strings files.")
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
+	await get_tree().process_frame
+
+	var open_button := _find_button_by_text(workstation.get_node("%WorkspaceActionsHost"), "Open Strings...")
+	assert_not_null(open_button, "Strings workspace should expose Open Strings.")
+	if open_button == null:
+		return
+	open_button.pressed.emit()
+
+	var dialog := workstation.find_child("ResourceBrowserDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Strings Open should use the shared resource browser.")
+	if dialog == null:
+		return
+	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	assert_not_null(list, "Strings resource browser should include a list.")
+	if list != null:
+		assert_eq(list.item_count, 1, "Strings browser should list RTXT BIN files from the resource directory.")
+		assert_string_contains(list.get_item_text(0), "alpha", "Strings resource rows should show the matching file.")
 
 
 func test_workstation_opens_font_workspace_by_credits_font_name() -> void:

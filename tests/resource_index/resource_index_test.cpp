@@ -35,6 +35,8 @@ int main() {
 	write_file(root / "preview.3di", "3di");
 	write_file(root / "scene.ASE", "ase");
 	write_file(root / "vehicle.glb", "glb");
+	write_file(root / "Menus.BIN", "RTXTstrings");
+	write_file(root / "Scratch.bin", "DATA");
 	write_file(root / "missions" / "first.bms", "bms");
 	write_file(root / "models" / "tree.glb", "glb");
 	write_file(root / "models" / "tree.3di", "3di");
@@ -47,19 +49,21 @@ int main() {
 	TEST_EXPECT(!index.last_error().empty());
 
 	TEST_EXPECT(index.scan(root.string(), false));
-	TEST_EXPECT(index.resource_files("all").size() == 5);
+	TEST_EXPECT(index.resource_files("all").size() == 6);
 	TEST_EXPECT(index.resource_files("terrain").size() == 1);
 	TEST_EXPECT(index.resource_files("environment").size() == 1);
 	TEST_EXPECT(index.resource_files("mission").empty());
 	TEST_EXPECT(index.resource_files("object_project").size() == 1);
 	TEST_EXPECT(index.resource_files("object_model").size() == 1);
 	TEST_EXPECT(index.resource_files("object_scene").size() == 1);
+	TEST_EXPECT(index.resource_files("strings").size() == 1);
 	TEST_EXPECT(index.resource_files("glb").empty());
 
 	TEST_EXPECT(index.scan(root.string(), true));
 	const std::vector<opennova::ResourceFileEntry> all_files = index.resource_files("*");
-	TEST_EXPECT(all_files.size() == 10);
+	TEST_EXPECT(all_files.size() == 11);
 	TEST_EXPECT(has_relative_path(all_files, "Alpha.TRN"));
+	TEST_EXPECT(has_relative_path(all_files, "Menus.BIN"));
 	TEST_EXPECT(has_relative_path(all_files, "missions/first.bms"));
 	TEST_EXPECT(has_relative_path(all_files, "object.3dp"));
 	TEST_EXPECT(has_relative_path(all_files, "preview.3di"));
@@ -68,6 +72,7 @@ int main() {
 	TEST_EXPECT(has_relative_path(all_files, "models/source.ase"));
 	TEST_EXPECT(has_relative_path(all_files, "credits/finale.kda"));
 	TEST_EXPECT(has_relative_path(all_files, "fonts/Serpen24.fnt"));
+	TEST_EXPECT(!has_relative_path(all_files, "Scratch.bin"));
 	TEST_EXPECT(!has_relative_path(all_files, "vehicle.glb"));
 	TEST_EXPECT(!has_relative_path(all_files, "models/tree.glb"));
 	TEST_EXPECT(index.resource_files("bms").size() == 1);
@@ -86,6 +91,10 @@ int main() {
 	TEST_EXPECT(index.resource_files("font").size() == 1);
 	TEST_EXPECT(index.resource_files("fnt").size() == 1);
 	TEST_EXPECT(index.resource_files("font")[0].display_name == "Serpen24");
+	TEST_EXPECT(index.resource_files("strings").size() == 1);
+	TEST_EXPECT(index.resource_files("bin").size() == 1);
+	TEST_EXPECT(index.resource_files("rtxt").size() == 1);
+	TEST_EXPECT(index.resource_files("strings")[0].display_name == "Menus");
 
 	fs::remove_all(root);
 	return 0;

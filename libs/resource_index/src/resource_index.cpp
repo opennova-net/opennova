@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
 
 namespace fs = std::filesystem;
 
@@ -29,7 +30,21 @@ std::string trim_copy(const std::string &value) {
 	return value.substr(begin, end - begin);
 }
 
-std::string kind_for_extension(const fs::path &path) {
+bool has_rtxt_magic(const fs::path &path) {
+	std::ifstream file(path, std::ios::binary);
+	if (!file) {
+		return false;
+	}
+	char magic[4] = {};
+	file.read(magic, sizeof(magic));
+	return file.gcount() == sizeof(magic) &&
+	       magic[0] == 'R' &&
+	       magic[1] == 'T' &&
+	       magic[2] == 'X' &&
+	       magic[3] == 'T';
+}
+
+std::string kind_for_path(const fs::path &path) {
 	const std::string extension = to_lower_ascii(path.extension().string());
 	if (extension == ".bms") {
 		return "mission";
@@ -54,6 +69,9 @@ std::string kind_for_extension(const fs::path &path) {
 	}
 	if (extension == ".fnt") {
 		return "font";
+	}
+	if (extension == ".bin" && has_rtxt_magic(path)) {
+		return "strings";
 	}
 	return "";
 }
@@ -87,6 +105,9 @@ std::string normalize_kind(const std::string &kind) {
 	if (key == "fnt" || key == "fonts") {
 		return "font";
 	}
+	if (key == "bin" || key == "rtxt") {
+		return "strings";
+	}
 	return key;
 }
 
@@ -110,7 +131,7 @@ std::string relative_path_string(const fs::path &path, const fs::path &root) {
 
 ResourceFileEntry entry_from_path(const fs::path &path, const fs::path &root) {
 	ResourceFileEntry entry;
-	entry.kind = kind_for_extension(path);
+	entry.kind = kind_for_path(path);
 	entry.path = path.string();
 	entry.display_name = display_name_from_path(path);
 	entry.relative_path = relative_path_string(path, root);
@@ -154,7 +175,7 @@ bool ResourceIndex::scan(const std::string &root_dir, bool recursive) {
 			if (!entry.is_regular_file(ec)) {
 				continue;
 			}
-			const std::string kind = kind_for_extension(entry.path());
+			const std::string kind = kind_for_path(entry.path());
 			if (!kind.empty()) {
 				impl_->files.push_back(entry_from_path(entry.path(), root));
 			}
@@ -167,7 +188,7 @@ bool ResourceIndex::scan(const std::string &root_dir, bool recursive) {
 			if (!entry.is_regular_file(ec)) {
 				continue;
 			}
-			const std::string kind = kind_for_extension(entry.path());
+			const std::string kind = kind_for_path(entry.path());
 			if (!kind.empty()) {
 				impl_->files.push_back(entry_from_path(entry.path(), root));
 			}

@@ -215,7 +215,7 @@ func get_open_dialog_title() -> String:
 
 
 func get_open_dialog_filters() -> PackedStringArray:
-	return PackedStringArray(["*.bin ; Strings"])
+	return PackedStringArray(["*.bin,*.BIN ; Strings"])
 
 
 func get_open_dialog_dir() -> String:
