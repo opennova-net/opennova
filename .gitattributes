@@ -6,6 +6,7 @@ fixtures/** filter=lfs diff=lfs merge=lfs -text -eol
 assets/** filter=lfs diff=lfs merge=lfs -text -eol
 godot/assets/** filter=lfs diff=lfs merge=lfs -text -eol
 game/assets/** filter=lfs diff=lfs merge=lfs -text -eol
+screenshots/** filter=lfs diff=lfs merge=lfs -text -eol
 
 # Windows-style text configs that need CRLF preserved.
 *.env text eol=crlf whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
