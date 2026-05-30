@@ -19,6 +19,8 @@ var _axis_material: StandardMaterial3D
 var _environment_file: EnvFile
 var _environment_time := 1200.0
 var _wireframe := false
+var _grid_visible := true
+var _axes_visible := true
 var _has_framed := false
 
 var _material_defs: Dictionary = {}
@@ -154,6 +156,37 @@ func set_wireframe(value: bool) -> void:
 		_viewport.debug_draw = Viewport.DEBUG_DRAW_WIREFRAME if value else Viewport.DEBUG_DRAW_DISABLED
 
 
+func is_grid_visible() -> bool:
+	return _grid_visible
+
+
+func set_grid_visible(value: bool) -> void:
+	_grid_visible = value
+	_apply_guide_visibility()
+
+
+func is_axes_visible() -> bool:
+	return _axes_visible
+
+
+func set_axes_visible(value: bool) -> void:
+	_axes_visible = value
+	_apply_guide_visibility()
+
+
+# Apply the current grid/axes visibility to the live guide nodes. The grid is
+# rebuilt on bounds/LOD changes, so _add_grid/_add_axis_gizmo also seed visibility
+# at creation; this just updates whatever is mounted right now.
+func _apply_guide_visibility() -> void:
+	if _guide_root == null:
+		return
+	for child in _guide_root.get_children():
+		if child.name == "ObjectGrid":
+			child.visible = _grid_visible
+		elif child.name == "ObjectAxisGizmo":
+			child.visible = _axes_visible
+
+
 func set_ctrl_value(name: String, value: int) -> void:
 	if _model != null:
 		_model.set_ctrl_value(name, value)
@@ -254,6 +287,7 @@ func _add_grid(bounds: AABB) -> void:
 	grid.name = "ObjectGrid"
 	grid.mesh = grid_mesh
 	grid.material_override = _grid_material
+	grid.visible = _grid_visible
 	_guide_root.add_child(grid)
 
 
@@ -298,6 +332,7 @@ func _add_axis_gizmo() -> void:
 	axis.name = "ObjectAxisGizmo"
 	axis.mesh = mesh
 	axis.material_override = _axis_material
+	axis.visible = _axes_visible
 	_guide_root.add_child(axis)
 
 

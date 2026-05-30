@@ -382,6 +382,30 @@ focus_mode = 0
 text = "Apply and Refresh"
 tooltip_text = "Refresh the resource browser index."
 
+[node name="SettingsViewSection" type="VBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SettingsViewLabel" type="Label" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsViewSection"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "View"
+
+[node name="SettingsGridToggle" type="CheckBox" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsViewSection"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
+text = "Show grid"
+tooltip_text = "Show the reference grid in the 3D preview."
+
+[node name="SettingsAxesToggle" type="CheckBox" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsViewSection"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
+text = "Show axes"
+tooltip_text = "Show the origin axis gizmo in the 3D preview."
+
 [node name="AssetDock" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(280, 0)

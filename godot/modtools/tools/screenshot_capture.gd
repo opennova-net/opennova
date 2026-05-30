@@ -213,6 +213,11 @@ func _frame_object(ws: EditorWorkspace) -> void:
 	# Prefer the highest-detail LOD for the hero shot.
 	if preview.has_method("set_active_lod"):
 		preview.set_active_lod(0)
+	# Hide the editor-only guides (reference grid + origin axes) for a clean hero
+	# shot, via the workspace's first-class toggle interface (the same one the
+	# editor's View settings drive). This doesn't persist the user's preference.
+	ws.set_grid_visible(false)
+	ws.set_axes_visible(false)
 	var center := b.position + b.size * 0.5
 	var radius := maxf(b.size.length() * 0.5, 1.0)
 	cam.near = clampf(radius * 0.01, 0.02, 1.0)

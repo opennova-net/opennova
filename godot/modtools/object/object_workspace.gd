@@ -34,6 +34,10 @@ var _object_detail_dock: Control
 var _object_detail_dock_object_id: int = 0
 var _inspectors: Dictionary = {}
 var _export_update_mask: int = OED_UPDATE_NONE
+# Preview guide visibility, driven by the shell's View settings. Stored here so a
+# re-mounted preview (ViewportMount rebuilds it) inherits the current choice.
+var _grid_visible := true
+var _axes_visible := true
 
 
 func set_editor_shell(value: Node) -> void:
@@ -76,6 +80,8 @@ func _ensure_mount() -> ViewportMount:
 func _create_preview() -> Control:
 	_preview = ObjectPreviewScript.new()
 	_preview.set_object_data(object_editor.object_data if object_editor else null)
+	_preview.set_grid_visible(_grid_visible)
+	_preview.set_axes_visible(_axes_visible)
 	_apply_environment_to_preview()
 	return _preview
 
@@ -102,6 +108,22 @@ func get_viewport_camera() -> Camera3D:
 	if _preview != null and _preview.has_method("get_editor_camera"):
 		return _preview.get_editor_camera()
 	return null
+
+
+func shows_view_guides() -> bool:
+	return true
+
+
+func set_grid_visible(value: bool) -> void:
+	_grid_visible = value
+	if _preview != null:
+		_preview.set_grid_visible(value)
+
+
+func set_axes_visible(value: bool) -> void:
+	_axes_visible = value
+	if _preview != null:
+		_preview.set_axes_visible(value)
 
 
 func get_workspace_id() -> String:
