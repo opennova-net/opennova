@@ -258,6 +258,13 @@ func open_file(_path: String) -> Error:
 	return ERR_UNAVAILABLE
 
 
+# Workspaces with deferred/in-progress edits (e.g. a source text buffer not yet
+# committed to the document) override this to apply them before a save/export.
+# The default is a no-op for workspaces that commit edits immediately.
+func flush_pending_edits() -> Error:
+	return OK
+
+
 func can_save() -> bool:
 	return false
 

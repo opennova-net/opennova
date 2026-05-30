@@ -5,10 +5,12 @@ const TerrainWorkspaceAdapter = preload("res://modtools/editor/terrain_workspace
 const EnvironmentWorkspaceAdapter = preload("res://modtools/editor/environment_workspace.gd")
 const ObjectWorkspaceAdapter = preload("res://modtools/object/object_workspace.gd")
 const MissionWorkspaceAdapter = preload("res://modtools/editor/mission_workspace.gd")
+const FontsWorkspaceAdapter = preload("res://modtools/editor/fonts_workspace.gd")
+const CreditsWorkspaceAdapter = preload("res://modtools/editor/credits_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
 const VegAssets = preload("res://engine/terrain/veg_assets.gd")
 
-enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION }
+enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS }
 
 # Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
 # shows the non-popup ones in order. The enum below stays only as stable id
@@ -182,6 +184,8 @@ func _workspace_defs() -> Array:
 		WorkspaceDef.make(Workspace.TERRAIN, TerrainWorkspaceAdapter),
 		WorkspaceDef.make(Workspace.OBJECT, ObjectWorkspaceAdapter),
 		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter),
+		WorkspaceDef.make(Workspace.FONTS, FontsWorkspaceAdapter),
+		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter),
 		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true),
 	]
 
@@ -342,6 +346,27 @@ func set_active_workspace(workspace_id: int) -> void:
 
 func get_active_workspace_id() -> int:
 	return _active_workspace_id
+
+
+func open_font_workspace(font_name: String) -> Error:
+	_ensure_workspaces()
+	var workspace := _get_workspace(Workspace.FONTS)
+	if workspace == null:
+		return ERR_UNAVAILABLE
+	var clean_name := font_name.strip_edges()
+	if clean_name.is_empty():
+		return ERR_INVALID_PARAMETER
+	var err: Error = int(workspace.call("open_font_name", clean_name))
+	if err != OK:
+		show_status_message("Font not found: %s" % clean_name, 5.0)
+		return err
+	if _active_workspace_id != Workspace.FONTS:
+		set_active_workspace(Workspace.FONTS)
+	else:
+		_refresh_workspace_surface()
+		sync_from_editor_state()
+	show_status_message("Opened font %s." % clean_name, 3.0)
+	return OK
 
 
 func _get_workspace(workspace_id: int) -> EditorWorkspace:
@@ -923,22 +948,34 @@ func _run_workspace_action(workspace: EditorWorkspace, action_id: int) -> void:
 			show_status_message("Save failed (error %d)" % err, 6.0)
 	match action_id:
 		WorkspaceAction.NEW:
-			if workspace.can_new():
+			if workspace.can_new() and _flush_workspace_or_status(workspace):
 				workspace.new_current()
 		WorkspaceAction.OPEN:
 			if not workspace.can_open():
 				return
-			_open_resource_browser(workspace, open_trn)
+			if _flush_workspace_or_status(workspace):
+				_open_resource_browser(workspace, open_trn)
 		WorkspaceAction.SAVE:
 			_on_save_pressed(workspace)
 		WorkspaceAction.SAVE_AS:
-			_open_dir_dialog(
-				workspace.get_save_dialog_title(),
-				save_project_as,
-				_preferred_save_dir(workspace)
-			)
+			if _flush_workspace_or_status(workspace):
+				_open_dir_dialog(
+					workspace.get_save_dialog_title(),
+					save_project_as,
+					_preferred_save_dir(workspace)
+				)
 		WorkspaceAction.EXPORT:
 			_on_export_pressed(workspace)
+
+
+func _flush_workspace_or_status(workspace: EditorWorkspace) -> bool:
+	if workspace == null:
+		return false
+	var err := workspace.flush_pending_edits()
+	if err != OK:
+		show_status_message("Resolve source parse errors before continuing.", 6.0)
+		return false
+	return true
 
 
 func _open_resource_browser(workspace: EditorWorkspace, on_pick: Callable) -> void:
@@ -1010,6 +1047,9 @@ func _on_save_pressed(workspace: EditorWorkspace = null) -> void:
 	if workspace == null:
 		return
 	var err: Error = workspace.save_current()
+	if err == ERR_PARSE_ERROR:
+		show_status_message("Resolve source parse errors before saving.", 6.0)
+		return
 	if err == ERR_INVALID_PARAMETER:
 		var save_project_as := func(dir_path: String) -> void:
 			workspace.save_as(dir_path)

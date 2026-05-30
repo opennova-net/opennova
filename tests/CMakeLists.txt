@@ -135,6 +135,12 @@ target_include_directories(tdp_from_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 add_test(NAME tdp_from_3di COMMAND tdp_from_3di_test)
 
 # Terrain format library tests
+add_executable(fnt_roundtrip_test fnt/fnt_roundtrip_test.cpp)
+target_link_libraries(fnt_roundtrip_test PRIVATE opennova_fnt)
+target_include_directories(fnt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(fnt_roundtrip_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME fnt_roundtrip COMMAND fnt_roundtrip_test)
+
 add_executable(pcx_roundtrip_test pcx/pcx_roundtrip_test.cpp)
 target_link_libraries(pcx_roundtrip_test PRIVATE opennova_pcx)
 target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -302,3 +308,15 @@ if(MSVC)
     target_compile_options(dvxi5_repro_test PRIVATE /EHa)
 endif()
 add_test(NAME dvxi5_repro COMMAND dvxi5_repro_test)
+
+# CBIN tests
+add_executable(cbin_unit_test cbin/cbin_unit_test.cpp)
+target_link_libraries(cbin_unit_test PRIVATE opennova_cbin)
+target_include_directories(cbin_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cbin_unit COMMAND cbin_unit_test)
+
+add_executable(cbin_roundtrip_test cbin/cbin_roundtrip_test.cpp)
+target_link_libraries(cbin_roundtrip_test PRIVATE opennova_cbin)
+target_include_directories(cbin_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(cbin_roundtrip_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME cbin_roundtrip COMMAND cbin_roundtrip_test)

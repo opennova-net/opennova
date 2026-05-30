@@ -3,6 +3,7 @@ project(opennova LANGUAGES C CXX)
 
 # Add libraries
 add_subdirectory(libs/pcx)
+add_subdirectory(libs/fnt)
 add_subdirectory(libs/foliage)
 add_subdirectory(libs/til)
 add_subdirectory(libs/tpj)
@@ -14,6 +15,7 @@ add_subdirectory(libs/bad)
 add_subdirectory(libs/adm)
 add_subdirectory(libs/pff)
 add_subdirectory(libs/bfc1)
+add_subdirectory(libs/cbin)
 add_subdirectory(libs/def)
 add_subdirectory(libs/scr)
 add_subdirectory(libs/ase)
@@ -25,6 +27,7 @@ add_subdirectory(libs/resource_index)
 
 set(OPENNOVA_CORE_TARGETS
     opennova_pcx
+    opennova_fnt
     opennova_foliage
     opennova_til
     opennova_tpj
@@ -35,6 +38,7 @@ set(OPENNOVA_CORE_TARGETS
     opennova_threedi
     opennova_pff
     opennova_bfc1
+    opennova_cbin
     opennova_bad
     opennova_adm
     opennova_def

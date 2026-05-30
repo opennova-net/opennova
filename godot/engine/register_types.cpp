@@ -4,6 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
+#include <godot_cpp/classes/editor_plugin_registration.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/resource_saver.hpp>
 
@@ -25,6 +26,13 @@
 #include "env/env_file.h"
 #include "object/nova_object_data.h"
 #include "object/nova_object_shader_cache.h"
+#include "cbin/cbin_credits_resource.h"
+#include "cbin/kda_resource_format.h"
+#include "cbin/nova_credits_player.h"
+#include "fnt/nova_fnt_resource.h"
+#include "fnt/fnt_resource_format.h"
+#include "fnt/fnt_import_plugin.h"
+#include "editor/opennova_editor_plugin.h"
 #include "util/nova_data_format.h"
 #include "util/nova_texture_format.h"
 #include "resource_index/nova_resource_index.h"
@@ -38,9 +46,20 @@ static Ref<ResourceFormatLoaderTIL> til_loader;
 static Ref<ResourceFormatSaverTIL> til_saver;
 static Ref<EnvFileLoader> env_loader;
 static Ref<EnvFileSaver> env_saver;
+static Ref<KdaResourceFormatLoader> kda_loader;
+static Ref<KdaResourceFormatSaver> kda_saver;
+static Ref<ResourceFormatLoaderFNT> fnt_loader;
+static Ref<ResourceFormatSaverFNT> fnt_saver;
 static Ref<ResourceFormatLoaderNovaTexture> nova_tex_loader;
 
 void initialize_opennova_module(ModuleInitializationLevel p_level) {
+	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+		GDREGISTER_CLASS(NovaFntImportPlugin);
+		GDREGISTER_CLASS(OpenNovaEditorPlugin);
+		EditorPlugins::add_by_type<OpenNovaEditorPlugin>();
+		return;
+	}
+
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
@@ -67,6 +86,17 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvFileSaver);
 	GDREGISTER_CLASS(NovaObjectData);
 	GDREGISTER_CLASS(NovaObjectShaderCache);
+	GDREGISTER_ABSTRACT_CLASS(CbinEntry);
+	GDREGISTER_CLASS(CbinTextEntry);
+	GDREGISTER_CLASS(CbinNewlineEntry);
+	GDREGISTER_CLASS(CbinImageEntry);
+	GDREGISTER_CLASS(CbinCreditsResource);
+	GDREGISTER_CLASS(KdaResourceFormatLoader);
+	GDREGISTER_CLASS(KdaResourceFormatSaver);
+	GDREGISTER_CLASS(NovaCreditsPlayer);
+	GDREGISTER_CLASS(NovaFntResource);
+	GDREGISTER_CLASS(ResourceFormatLoaderFNT);
+	GDREGISTER_CLASS(ResourceFormatSaverFNT);
 	GDREGISTER_CLASS(NovaDataFile);
 	GDREGISTER_CLASS(ResourceFormatLoaderNovaTexture);
 	GDREGISTER_CLASS(NovaResourceIndex);
@@ -92,11 +122,28 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	env_saver.instantiate();
 	ResourceSaver::get_singleton()->add_resource_format_saver(env_saver);
 
+	kda_loader.instantiate();
+	ResourceLoader::get_singleton()->add_resource_format_loader(kda_loader);
+
+	kda_saver.instantiate();
+	ResourceSaver::get_singleton()->add_resource_format_saver(kda_saver);
+
+	fnt_loader.instantiate();
+	ResourceLoader::get_singleton()->add_resource_format_loader(fnt_loader);
+
+	fnt_saver.instantiate();
+	ResourceSaver::get_singleton()->add_resource_format_saver(fnt_saver);
+
 	nova_tex_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(nova_tex_loader, true);
 }
 
 void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
+	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+		EditorPlugins::remove_by_type<OpenNovaEditorPlugin>();
+		return;
+	}
+
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
@@ -121,6 +168,18 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	ResourceSaver::get_singleton()->remove_resource_format_saver(env_saver);
 	env_saver.unref();
+
+	ResourceLoader::get_singleton()->remove_resource_format_loader(kda_loader);
+	kda_loader.unref();
+
+	ResourceSaver::get_singleton()->remove_resource_format_saver(kda_saver);
+	kda_saver.unref();
+
+	ResourceLoader::get_singleton()->remove_resource_format_loader(fnt_loader);
+	fnt_loader.unref();
+
+	ResourceSaver::get_singleton()->remove_resource_format_saver(fnt_saver);
+	fnt_saver.unref();
 
 	ResourceLoader::get_singleton()->remove_resource_format_loader(nova_tex_loader);
 	nova_tex_loader.unref();

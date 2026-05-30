@@ -154,6 +154,7 @@ func _make_resource_fixture(name: String) -> String:
 	DirAccess.make_dir_recursive_absolute(root.path_join("env"))
 	DirAccess.make_dir_recursive_absolute(root.path_join("models"))
 	DirAccess.make_dir_recursive_absolute(root.path_join("objects"))
+	DirAccess.make_dir_recursive_absolute(root.path_join("fonts"))
 	_write_fixture_file(root.path_join("missions/alpha.bms"), "bms")
 	_write_fixture_file(root.path_join("terrains/alpha.trn"), "trn")
 	_write_fixture_file(root.path_join("env/alpha.env"), "env")
@@ -161,6 +162,7 @@ func _make_resource_fixture(name: String) -> String:
 	_write_fixture_file(root.path_join("objects/alpha.3dp"), "3dp")
 	_write_fixture_file(root.path_join("objects/alpha.3di"), "3di")
 	_write_fixture_file(root.path_join("objects/alpha.ase"), "ase")
+	_write_fixture_file(root.path_join("fonts/alpha.fnt"), "fnt")
 	return root
 
 
@@ -172,15 +174,30 @@ func _write_fixture_file(path: String, text: String) -> void:
 		file.close()
 
 
-func test_workstation_starts_with_object_domain_workspace() -> void:
+func test_workstation_starts_with_domain_workspaces() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
 	var workspace_rail: HBoxContainer = workstation.get_node("%WorkspaceRail")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Terrain should remain the default workspace.")
-	assert_eq(workspace_rail.get_child_count(), 3, "The shell should expose Terrain, Object, and Mission workspaces.")
+	assert_eq(workspace_rail.get_child_count(), 5, "The shell should expose Terrain, Object, Mission, Fonts, and Credits workspaces.")
 	assert_eq((workspace_rail.get_child(0) as Button).text, "Terrain", "Terrain should be the first workspace.")
 	assert_eq((workspace_rail.get_child(1) as Button).text, "Object", "Object should replace the old standalone OED workflow.")
 	assert_eq((workspace_rail.get_child(2) as Button).text, "Mission", "Mission should have a reserved workspace.")
+	assert_eq((workspace_rail.get_child(3) as Button).text, "Fonts", "Fonts should be available for .fnt files.")
+	assert_eq((workspace_rail.get_child(4) as Button).text, "Credits", "Credits should be available for .kda files.")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.CREDITS)
+	await get_tree().process_frame
+
+	var actions_host: VBoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.CREDITS,
+		"Credits should become the active workspace.")
+	assert_eq(workstation.get_node("%ProjectLabel").text, "untitled",
+		"Fresh Credits workspace should own the shell title while active.")
+	assert_true(_workspace_action_texts(actions_host).has("Open Credits..."),
+		"Credits should expose an open action.")
+	assert_true(_workspace_action_texts(actions_host).has("Save Credits As..."),
+		"Credits should expose save-as for a fresh resource.")
 
 
 func test_mission_placeholder_shows_no_document_actions() -> void:
@@ -217,8 +234,9 @@ func test_resource_index_lists_object_resources_without_glb_models() -> void:
 	assert_eq(index.get_resource_files("object_project").size(), 1, "3DP files should be indexed as object workspaces.")
 	assert_eq(index.get_resource_files("object_model").size(), 1, "3DI files should be indexed as object model resources.")
 	assert_eq(index.get_resource_files("object_scene").size(), 1, "ASE files should be indexed as importable object scenes.")
+	assert_eq(index.get_resource_files("font").size(), 1, "FNT files should be indexed as font resources.")
 	assert_eq(index.get_resource_files("glb").size(), 0, "GLB files should no longer be indexed.")
-	assert_eq(index.get_resource_files("all").size(), 6, "All openable resources should exclude GLB.")
+	assert_eq(index.get_resource_files("all").size(), 7, "All openable resources should exclude GLB.")
 	assert_eq(String((index.get_resource_files("object_model")[0] as Dictionary).get("relative_path", "")), "objects/alpha.3di", "Object model entries should keep root-relative paths.")
 
 
@@ -287,6 +305,43 @@ func test_workspace_open_uses_resource_browser_with_browse_fallback() -> void:
 	if settings_shortcut != null:
 		assert_false(settings_shortcut.visible, "Settings shortcut should hide when resources are available.")
 	assert_true(dialog.get_ok_button().disabled, "Open should stay disabled until a resource is selected.")
+
+
+func test_fonts_workspace_open_uses_resource_browser() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var root := _make_resource_fixture("resource_browser_fonts")
+	workstation._resource_recursive = true
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index font files.")
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.FONTS)
+	await get_tree().process_frame
+
+	var open_button := _find_button_by_text(workstation.get_node("%WorkspaceActionsHost"), "Open Font...")
+	assert_not_null(open_button, "Fonts workspace should expose Open Font.")
+	if open_button == null:
+		return
+	open_button.pressed.emit()
+
+	var dialog := workstation.find_child("ResourceBrowserDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Font Open should use the shared resource browser.")
+	if dialog == null:
+		return
+	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	assert_not_null(list, "Font resource browser should include a list.")
+	if list != null:
+		assert_eq(list.item_count, 1, "Font browser should list FNT files from the resource directory.")
+		assert_string_contains(list.get_item_text(0), "alpha", "Font resource rows should show the matching file.")
+
+
+func test_workstation_opens_font_workspace_by_credits_font_name() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+
+	assert_eq(workstation.open_font_workspace("Serpen24"), OK, "Credits integration should open a bundled Nova font by font name.")
+	await get_tree().process_frame
+
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.FONTS,
+		"Opening a credits font should switch to the Fonts workspace.")
+	assert_eq(workstation.get_node("%ProjectLabel").text, "Serpen24",
+		"The Fonts workspace title should show the opened font.")
 
 
 func test_workspace_open_without_resource_dir_shows_empty_browser() -> void:
