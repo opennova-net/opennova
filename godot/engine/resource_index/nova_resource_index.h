@@ -22,7 +22,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	Error scan(const String &path, bool recursive);
+	Error scan(const String &path);
 	void clear();
 	Array get_resource_files(const String &kind) const;
 	String get_root_dir() const;

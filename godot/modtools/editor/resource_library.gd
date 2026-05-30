@@ -7,11 +7,9 @@ extends RefCounted
 ## editor_workstation.gd (B5-3a) so the shell is the thin UI layer over it.
 ##
 ## The shell keeps what stays a shell concern and forwards here:
-##   - the recursive flag (a plain shell member the tests write directly),
-##   - the settings-popup sync, status-bar messages, and VegAssets
-##     search-root registration.
+##   - the settings-popup sync and status-bar messages.
 ## Those side effects are surfaced through the return values below
-## ({err, search_roots, status}) so this helper never reaches back into the UI.
+## ({err, status}) so this helper never reaches back into the UI.
 
 # Resource-dir config path/keys are shared with the runtime (game/main_game.gd)
 # via engine/resource_index/resource_dir_settings.gd so a directory picked in
@@ -30,6 +28,7 @@ const GRID_VISIBLE_KEY := "grid_visible"
 const AXES_VISIBLE_KEY := "axes_visible"
 
 var _index: RefCounted
+var _resource_root: NovaResourceRoot = NovaResourceRoot.new()
 var _root_dir: String = ""
 
 
@@ -47,40 +46,58 @@ func get_root_dir() -> String:
 	return _root_dir
 
 
+func get_resource_root() -> NovaResourceRoot:
+	return _resource_root
+
+
 func clear_index() -> void:
 	ensure_index()
 	_index.clear()
 
 
-# Updates the configured root and (optionally) persists + scans it. Returns a
-# result the shell applies: `search_roots` is the VegAssets search-root list
-# (empty when the root is cleared) and `status` is a status-bar message to
-# show (empty = none).
-func set_root_dir(path: String, recursive: bool, persist: bool, scan: bool) -> Dictionary:
+# Updates the configured flat root and (optionally) persists + scans it. Returns
+# a result the shell applies; `status` is a status-bar message to show (empty = none).
+func set_root_dir(path: String, persist: bool, scan: bool) -> Dictionary:
 	ensure_index()
 	var previous := _root_dir
 	_root_dir = path.strip_edges()
-	if persist:
-		save_state(recursive)
 	if _root_dir.is_empty():
 		_index.clear()
-		return {"err": OK, "search_roots": [], "status": ""}
+		_resource_root.clear()
+		if persist:
+			save_state()
+		return {"err": OK, "status": ""}
+	var root_err := _resource_root.set_root_dir(_root_dir)
+	if root_err != OK:
+		var root_error_message := _resource_root.get_last_error()
+		_root_dir = previous
+		if _root_dir.is_empty():
+			_resource_root.clear()
+		else:
+			_resource_root.set_root_dir(_root_dir)
+		_index.clear()
+		return {"err": root_err, "status": root_error_message}
+	if persist:
+		save_state()
 	if scan:
-		var result := scan_root(recursive)
-		return {"err": result["err"], "search_roots": [_root_dir], "status": result["status"]}
+		return scan_root()
 	if previous != _root_dir:
 		_index.clear()
-	return {"err": OK, "search_roots": [_root_dir], "status": ""}
+	return {"err": OK, "status": ""}
 
 
 # Scans the configured root into the index. Returns {err, status}; `status` is
 # the message the caller should surface (empty when there is nothing to say).
-func scan_root(recursive: bool) -> Dictionary:
+func scan_root() -> Dictionary:
 	ensure_index()
 	if _root_dir.is_empty():
 		_index.clear()
 		return {"err": OK, "status": ""}
-	var err: Error = _index.scan(_root_dir, recursive)
+	var root_err := _resource_root.set_root_dir(_root_dir)
+	if root_err != OK:
+		_index.clear()
+		return {"err": root_err, "status": _resource_root.get_last_error()}
+	var err: Error = _index.scan(_root_dir)
 	if err == OK:
 		return {"err": OK, "status": "Resource directory indexed."}
 	var detail := ""
@@ -89,20 +106,24 @@ func scan_root(recursive: bool) -> Dictionary:
 	return {"err": err, "status": "Resource scan failed." if detail.is_empty() else detail}
 
 
-# Loads the persisted root + recursive flag from the shared NovaResourceDirSettings.
+# Loads the persisted root from the shared NovaResourceDirSettings.
 # That helper drops a persisted root that no longer points at a real, sane resource
 # directory (moved/deleted dirs, or stale temp/test paths that leaked into the
 # shared state) so the browser shows a clean "no directory" state instead of a dead
-# internal path. Returns {root_dir, recursive}; the caller stores `recursive`.
+# internal path. Returns {root_dir}.
 func load_state() -> Dictionary:
 	# Resource-dir persistence lives in NovaResourceDirSettings (shared with the
 	# runtime); get_resource_dir() already drops stale/invalid paths.
 	_root_dir = ResourceDirSettings.get_resource_dir()
-	return {"root_dir": _root_dir, "recursive": ResourceDirSettings.get_recursive()}
+	if _root_dir.is_empty():
+		_resource_root.clear()
+	else:
+		_resource_root.set_root_dir(_root_dir)
+	return {"root_dir": _root_dir}
 
 
-func save_state(recursive: bool) -> void:
-	ResourceDirSettings.set_resource_dir(_root_dir, recursive)
+func save_state() -> void:
+	ResourceDirSettings.set_resource_dir(_root_dir)
 
 
 # Persisted shell layout. Split offsets are stored alongside the resource state

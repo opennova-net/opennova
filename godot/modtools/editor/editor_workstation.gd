@@ -9,7 +9,6 @@ const FontsWorkspaceAdapter = preload("res://modtools/editor/fonts_workspace.gd"
 const CreditsWorkspaceAdapter = preload("res://modtools/editor/credits_workspace.gd")
 const StringsWorkspaceAdapter = preload("res://modtools/strings/strings_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
-const VegAssets = preload("res://engine/terrain/veg_assets.gd")
 
 enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS }
 
@@ -47,7 +46,6 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _settings_resource_dir_edit: LineEdit = %SettingsResourceDirEdit
 @onready var _settings_browse_resource_dir_button: Button = %SettingsBrowseResourceDirButton
 @onready var _settings_apply_resource_dir_button: Button = %SettingsApplyResourceDirButton
-@onready var _settings_recursive_toggle: CheckBox = %SettingsRecursiveToggle
 @onready var _settings_view_section: VBoxContainer = %SettingsViewSection
 @onready var _settings_grid_toggle: CheckBox = %SettingsGridToggle
 @onready var _settings_axes_toggle: CheckBox = %SettingsAxesToggle
@@ -86,7 +84,6 @@ var _environment_action_buttons: Dictionary = {}
 var _asset_dock_workspace_id: int = -1
 var _camera_settings_panel: Control
 var _resource_library := EditorResourceLibrary.new()
-var _resource_recursive: bool = true
 # 3D-preview guide visibility, shared across guide-capable workspaces and pushed
 # to the active one. Loaded from / saved to the editor-state config.
 var _view_grid_visible: bool = true
@@ -662,8 +659,6 @@ func _wire_settings_popup() -> void:
 		_settings_apply_resource_dir_button.pressed.connect(_on_settings_apply_resource_dir_pressed)
 	if _settings_resource_dir_edit != null and not _settings_resource_dir_edit.text_submitted.is_connected(_on_settings_resource_dir_submitted):
 		_settings_resource_dir_edit.text_submitted.connect(_on_settings_resource_dir_submitted)
-	if _settings_recursive_toggle != null and not _settings_recursive_toggle.toggled.is_connected(_on_settings_recursive_toggled):
-		_settings_recursive_toggle.toggled.connect(_on_settings_recursive_toggled)
 	if _settings_grid_toggle != null and not _settings_grid_toggle.toggled.is_connected(_on_settings_grid_toggled):
 		_settings_grid_toggle.toggled.connect(_on_settings_grid_toggled)
 	if _settings_axes_toggle != null and not _settings_axes_toggle.toggled.is_connected(_on_settings_axes_toggled):
@@ -900,8 +895,6 @@ func _set_settings_popup_visible(active: bool) -> void:
 func _sync_settings_popup_state() -> void:
 	if _settings_resource_dir_edit != null:
 		_settings_resource_dir_edit.text = _resource_library.get_root_dir()
-	if _settings_recursive_toggle != null:
-		_settings_recursive_toggle.set_pressed_no_signal(_resource_recursive)
 	if _settings_grid_toggle != null:
 		_settings_grid_toggle.set_pressed_no_signal(_view_grid_visible)
 	if _settings_axes_toggle != null:
@@ -927,15 +920,6 @@ func _on_settings_apply_resource_dir_pressed() -> void:
 
 func _on_settings_resource_dir_submitted(_text: String) -> void:
 	_apply_resource_settings(true)
-
-
-func _on_settings_recursive_toggled(pressed: bool) -> void:
-	if _resource_recursive == pressed:
-		return
-	_resource_recursive = pressed
-	_save_resource_state()
-	if not _resource_library.get_root_dir().is_empty():
-		_scan_resource_root(true)
 
 
 func _on_settings_grid_toggled(pressed: bool) -> void:
@@ -969,8 +953,6 @@ func _apply_resource_settings(scan: bool, persist: bool = true) -> Error:
 	var path := _resource_library.get_root_dir()
 	if _settings_resource_dir_edit != null:
 		path = _settings_resource_dir_edit.text
-	if _settings_recursive_toggle != null:
-		_resource_recursive = _settings_recursive_toggle.button_pressed
 	return _set_resource_root_dir(path, persist, scan)
 
 
@@ -986,8 +968,8 @@ func get_resource_root_dir() -> String:
 	return _resource_library.get_root_dir()
 
 
-func is_resource_recursive() -> bool:
-	return _resource_recursive
+func get_resource_root() -> NovaResourceRoot:
+	return _resource_library.get_resource_root()
 
 
 func set_resource_root_dir(path: String) -> void:
@@ -995,12 +977,10 @@ func set_resource_root_dir(path: String) -> void:
 
 
 # Thin forwarders over EditorResourceLibrary (editor/resource_library.gd): the
-# helper owns the index + root-dir state + persistence; the shell keeps the
-# recursive flag and applies the UI side effects the helper surfaces (VegAssets
-# search roots, status message, settings-popup sync).
+# helper owns the index + root-dir state + persistence; the shell applies status
+# and settings-popup sync side effects.
 func _set_resource_root_dir(path: String, persist: bool, scan: bool) -> Error:
-	var result := _resource_library.set_root_dir(path, _resource_recursive, persist, scan)
-	VegAssets.set_search_roots(result["search_roots"])
+	var result := _resource_library.set_root_dir(path, persist, scan)
 	_show_resource_status(result)
 	_sync_settings_popup_state()
 	return int(result["err"])
@@ -1010,7 +990,7 @@ func _scan_resource_root(show_message: bool) -> Error:
 	if _resource_library.get_root_dir().is_empty():
 		_resource_library.clear_index()
 		return OK
-	var result := _resource_library.scan_root(_resource_recursive)
+	var result := _resource_library.scan_root()
 	if show_message:
 		_show_resource_status(result)
 	_sync_settings_popup_state()
@@ -1026,21 +1006,14 @@ func _show_resource_status(result: Dictionary) -> void:
 
 func _load_resource_state() -> void:
 	var state := _resource_library.load_state()
-	_resource_recursive = bool(state["recursive"])
 	var view := _resource_library.load_view_state()
 	_view_grid_visible = bool(view["grid"])
 	_view_axes_visible = bool(view["axes"])
-	# Push the persisted resource dir into VegAssets at startup so foliage .3di
-	# resolve on the first .trn open. This mirrors what the runtime does in
-	# NovaWorld.load_world() and what the manual dir-change path does in
-	# _set_resource_root_dir(); without it the editor renders white foliage (no veg
-	# model -> fallback BoxMesh -> no leaf texture) until the dir is re-picked.
-	var root := String(state["root_dir"])
-	VegAssets.set_search_roots([root] if not root.is_empty() else [])
+	_resource_library.set_root_dir(String(state["root_dir"]), false, false)
 
 
 func _save_resource_state() -> void:
-	_resource_library.save_state(_resource_recursive)
+	_resource_library.save_state()
 
 
 func _preferred_resource_root_dir() -> String:

@@ -24,7 +24,7 @@ public:
 	ResourceIndex(const ResourceIndex &) = delete;
 	ResourceIndex &operator=(const ResourceIndex &) = delete;
 
-	bool scan(const std::string &root_dir, bool recursive);
+	bool scan(const std::string &root_dir);
 	void clear();
 
 	std::vector<ResourceFileEntry> resource_files(const std::string &kind) const;

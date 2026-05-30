@@ -39,6 +39,7 @@
 #include "util/nova_paths.h"
 #include "util/nova_texture_format.h"
 #include "resource_index/nova_resource_index.h"
+#include "resource_index/nova_resource_root.h"
 
 using namespace godot;
 
@@ -109,6 +110,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaPaths);
 	GDREGISTER_CLASS(ResourceFormatLoaderNovaTexture);
 	GDREGISTER_CLASS(NovaResourceIndex);
+	GDREGISTER_CLASS(NovaResourceRoot);
 
 	trn_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(trn_loader);

@@ -3,7 +3,6 @@ extends EditorWorkspace
 
 const FntEditorDocument = preload("res://modtools/fonts/fnt_editor_document.gd")
 const FntEditorScript = preload("res://modtools/fonts/fnt_editor.gd")
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
 var _document: FntEditorDocument
 var _editor: Control
@@ -203,34 +202,21 @@ func open_file(path: String) -> Error:
 func open_font_name(font_name: String) -> Error:
 	if font_name.is_empty():
 		return ERR_INVALID_PARAMETER
-	var root := _resource_root_dir()
-	if root.is_empty():
+	var resources := _resource_root()
+	if resources == null or resources.get_root_dir().is_empty():
 		return ERR_DOES_NOT_EXIST
-	var exact := root.path_join("%s.fnt" % font_name)
-	if FileAccess.file_exists(exact):
-		return open_file(exact)
-	var dir := DirAccess.open(root)
-	if dir == null:
-		return ERR_DOES_NOT_EXIST
-	var lower := font_name.to_lower()
-	dir.list_dir_begin()
-	var filename := dir.get_next()
-	while not filename.is_empty():
-		if not dir.current_is_dir() and filename.get_extension().to_lower() == "fnt":
-			if filename.get_basename().to_lower() == lower:
-				dir.list_dir_end()
-				return open_file(root.path_join(filename))
-		filename = dir.get_next()
-	dir.list_dir_end()
-	return ERR_DOES_NOT_EXIST
+	var path := resources.resolve_file("%s.fnt" % font_name)
+	return open_file(path) if not path.is_empty() else ERR_DOES_NOT_EXIST
 
 
-func _resource_root_dir() -> String:
-	if editor_shell != null and editor_shell.has_method("get_resource_root_dir"):
-		var shell_root := String(editor_shell.get_resource_root_dir()).strip_edges()
-		if not shell_root.is_empty():
-			return shell_root
-	return ResourceDirSettings.get_resource_dir()
+func _resource_root() -> NovaResourceRoot:
+	if editor_shell != null and editor_shell.has_method("get_resource_root"):
+		return editor_shell.get_resource_root()
+	var dir := NovaResourceDirSettings.get_resource_dir()
+	if dir.is_empty():
+		return null
+	var resources := NovaResourceRoot.new()
+	return resources if resources.set_root_dir(dir) == OK else null
 
 
 func can_save() -> bool:

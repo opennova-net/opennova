@@ -25,6 +25,7 @@ signal load_failed(reason: String)
 var _dispatcher: NovaFoliageDispatcher
 var _tile_overlay: NovaTerrainTileOverlay
 var _terrain_data: NovaTerrainData
+var _resource_root: NovaResourceRoot
 var _loaded: bool = false
 
 
@@ -44,16 +45,21 @@ func load_world(dir: String = "") -> int:
 	if dir.is_empty():
 		load_failed.emit("no resource directory set")
 		return ERR_FILE_NOT_FOUND
-	var trn := NovaPaths.resolve_file(dir, terrain_file)
+	var resource_root := NovaResourceRoot.new()
+	var root_err := resource_root.set_root_dir(dir)
+	if root_err != OK:
+		load_failed.emit(resource_root.get_last_error())
+		return root_err
+	var trn := resource_root.resolve_file(terrain_file)
 	if trn.is_empty():
 		load_failed.emit("%s not found in %s" % [terrain_file, dir])
 		return ERR_FILE_NOT_FOUND
-	var env_path := NovaPaths.resolve_file(dir, env_file)
+	var env_path := resource_root.resolve_file(env_file)
 	if env_path.is_empty():
 		load_failed.emit("%s not found in %s" % [env_file, dir])
 		return ERR_FILE_NOT_FOUND
 
-	VegAssets.set_search_roots([dir])
+	_resource_root = resource_root
 	if not _load_environment(env_path):
 		load_failed.emit("failed to load %s" % env_path)
 		return ERR_CANT_OPEN
@@ -104,7 +110,7 @@ func _configure_foliage() -> void:
 	_dispatcher.cell_grid_radius = 8
 	var defs: Array = _terrain_data.get_foliage_defs()
 	_dispatcher.foliage_defs = defs
-	_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(defs)
+	_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_resource_root, defs)
 	if _tile_overlay != null:
 		# NovaTerrain composites the tile overlay into its own material; the scene
 		# TileOverlay node is only an authoring override provider here.
@@ -116,6 +122,10 @@ func _configure_foliage() -> void:
 
 func get_terrain_data() -> NovaTerrainData:
 	return _terrain_data
+
+
+func get_resource_root() -> NovaResourceRoot:
+	return _resource_root
 
 
 func is_loaded() -> bool:

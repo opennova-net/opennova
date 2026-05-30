@@ -151,7 +151,7 @@ ResourceIndex::~ResourceIndex() = default;
 ResourceIndex::ResourceIndex(ResourceIndex &&) noexcept = default;
 ResourceIndex &ResourceIndex::operator=(ResourceIndex &&) noexcept = default;
 
-bool ResourceIndex::scan(const std::string &root_dir, bool recursive) {
+bool ResourceIndex::scan(const std::string &root_dir) {
 	clear();
 	const std::string clean = trim_copy(root_dir);
 	if (clean.empty()) {
@@ -167,31 +167,16 @@ bool ResourceIndex::scan(const std::string &root_dir, bool recursive) {
 	}
 
 	impl_->root_dir = root.string();
-	if (recursive) {
-		for (const fs::directory_entry &entry : fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied, ec)) {
-			if (ec) {
-				break;
-			}
-			if (!entry.is_regular_file(ec)) {
-				continue;
-			}
-			const std::string kind = kind_for_path(entry.path());
-			if (!kind.empty()) {
-				impl_->files.push_back(entry_from_path(entry.path(), root));
-			}
+	for (const fs::directory_entry &entry : fs::directory_iterator(root, fs::directory_options::skip_permission_denied, ec)) {
+		if (ec) {
+			break;
 		}
-	} else {
-		for (const fs::directory_entry &entry : fs::directory_iterator(root, fs::directory_options::skip_permission_denied, ec)) {
-			if (ec) {
-				break;
-			}
-			if (!entry.is_regular_file(ec)) {
-				continue;
-			}
-			const std::string kind = kind_for_path(entry.path());
-			if (!kind.empty()) {
-				impl_->files.push_back(entry_from_path(entry.path(), root));
-			}
+		if (!entry.is_regular_file(ec)) {
+			continue;
+		}
+		const std::string kind = kind_for_path(entry.path());
+		if (!kind.empty()) {
+			impl_->files.push_back(entry_from_path(entry.path(), root));
 		}
 	}
 

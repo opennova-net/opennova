@@ -2,7 +2,6 @@ class_name CreditsEditorBlockCard
 extends PanelContainer
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const TEXTURE_EXTENSIONS := ["png", "pcx", "tga", "jpg", "jpeg", "bmp"]
 
 # Per-type accent palette. The selection highlight (A1) reuses the same hues as the
 # type chips so a selected card reads as its type at a glance.
@@ -52,15 +51,13 @@ var _suppress := false
 var _selected := false
 var _selected_stylebox: StyleBoxFlat
 var _spacer_stylebox: StyleBoxFlat
-var _resource_root_dir: String = ""
+var _resource_root: NovaResourceRoot
 
-func bind(entry: CbinEntry, font_options: PackedStringArray, resource_root_dir: String = "") -> void:
+func bind(entry: CbinEntry, font_options: PackedStringArray, resource_root: Variant = null) -> void:
 	if _entry and _entry.changed.is_connected(_refresh):
 		_entry.changed.disconnect(_refresh)
 	_entry = entry
-	_resource_root_dir = resource_root_dir.strip_edges()
-	if _resource_root_dir.is_empty():
-		_resource_root_dir = ResourceDirSettings.get_resource_dir()
+	_resource_root = _coerce_resource_root(resource_root)
 	if _entry:
 		_entry.changed.connect(_refresh)
 	_populate_font_options(font_options)
@@ -243,7 +240,7 @@ func _on_image_pick_pressed() -> void:
 	var dialog := FileDialog.new()
 	dialog.access = FileDialog.ACCESS_FILESYSTEM
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	dialog.current_dir = _resource_root_dir
+	dialog.current_dir = _resource_root.get_root_dir() if _resource_root != null else ""
 	dialog.add_filter("*.pcx,*.png,*.jpg,*.jpeg,*.tga ; Image")
 	dialog.file_selected.connect(func(path: String) -> void:
 		_on_image_pick_selected(path)
@@ -293,100 +290,25 @@ func _normalized_image_name(value: String) -> String:
 	return value.strip_edges().get_file()
 
 func _resolve_texture(image_name: String) -> Texture2D:
-	if image_name.is_empty():
+	if image_name.is_empty() or _resource_root == null:
 		return null
-	if _resource_root_dir.is_empty():
-		return null
-
-	var exact_path := _resource_root_dir.path_join(image_name)
-	var exact_texture := _load_texture_path(exact_path)
-	if exact_texture != null:
-		return exact_texture
-
-	var dir := DirAccess.open(_resource_root_dir)
-	if dir == null:
-		return null
-
-	var lower_name := image_name.to_lower()
-	var matched := _scan_texture_dir(dir, lower_name)
-	if not matched.is_empty():
-		var matched_texture := _load_texture_path(_resource_root_dir.path_join(matched))
-		if matched_texture != null:
-			return matched_texture
-
-	var basename := image_name.get_basename()
-	for ext in TEXTURE_EXTENSIONS:
-		var alt := ("%s.%s" % [basename, ext]).to_lower()
-		if alt == lower_name:
-			continue
-		matched = _scan_texture_dir(dir, alt)
-		if not matched.is_empty():
-			var alt_texture := _load_texture_path(_resource_root_dir.path_join(matched))
-			if alt_texture != null:
-				return alt_texture
-	return null
+	return _resource_root.load_texture(image_name)
 
 func _resolve_font(font_name: String) -> Resource:
-	if font_name.is_empty() or _resource_root_dir.is_empty():
+	if font_name.is_empty() or _resource_root == null:
 		return null
-	var exact_path := _resource_root_dir.path_join("%s.fnt" % font_name)
-	var exact_font := _load_font_path(exact_path)
-	if exact_font != null:
-		return exact_font
+	return _resource_root.load_font(font_name)
 
-	var dir := DirAccess.open(_resource_root_dir)
-	if dir == null:
+func _coerce_resource_root(value: Variant) -> NovaResourceRoot:
+	if value is NovaResourceRoot:
+		return value
+	var dir := String(value).strip_edges() if value != null else ""
+	if dir.is_empty():
+		dir = ResourceDirSettings.get_resource_dir()
+	if dir.is_empty():
 		return null
-	var lower_name := font_name.to_lower()
-	dir.list_dir_begin()
-	var filename := dir.get_next()
-	while not filename.is_empty():
-		if not dir.current_is_dir() and filename.get_extension().to_lower() == "fnt":
-			if filename.get_basename().to_lower() == lower_name:
-				dir.list_dir_end()
-				return _load_font_path(_resource_root_dir.path_join(filename))
-		filename = dir.get_next()
-	dir.list_dir_end()
-	return null
-
-func _load_font_path(path: String) -> Resource:
-	if path.is_empty() or not FileAccess.file_exists(path):
-		return null
-	if ResourceLoader.exists(path):
-		var loaded := ResourceLoader.load(path, "NovaFntResource", ResourceLoader.CACHE_MODE_IGNORE)
-		if loaded != null:
-			return loaded
-	var bytes := FileAccess.get_file_as_bytes(path)
-	if bytes.is_empty():
-		return null
-	var font := NovaFntResource.new()
-	if font.load_from_bytes(bytes) != OK:
-		return null
-	font.resource_path = path
-	return font
-
-func _load_texture_path(path: String) -> Texture2D:
-	if path.is_empty() or not FileAccess.file_exists(path):
-		return null
-	if ResourceLoader.exists(path):
-		var loaded := ResourceLoader.load(path) as Texture2D
-		if loaded != null:
-			return loaded
-	var image := Image.new()
-	if image.load(path) != OK:
-		return null
-	return ImageTexture.create_from_image(image)
-
-func _scan_texture_dir(dir: DirAccess, lower_name: String) -> String:
-	dir.list_dir_begin()
-	var filename := dir.get_next()
-	while not filename.is_empty():
-		if not dir.current_is_dir() and filename.to_lower() == lower_name:
-			dir.list_dir_end()
-			return filename
-		filename = dir.get_next()
-	dir.list_dir_end()
-	return ""
+	var resources := NovaResourceRoot.new()
+	return resources if resources.set_root_dir(dir) == OK else null
 
 func _on_image_mode(advances_y: bool) -> void:
 	if _suppress or not (_entry is CbinImageEntry):

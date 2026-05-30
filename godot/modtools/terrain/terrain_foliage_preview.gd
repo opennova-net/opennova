@@ -17,6 +17,7 @@ const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 var _terrain_mesh: EditorTerrainMesh
 var _camera: Camera3D
 var _terrain_data: NovaTerrainData
+var _resource_root: NovaResourceRoot
 var _foliage_map: NovaTerrainFoliageMap
 var _foliage_defs: Array[NovaTerrainFoliageDef] = []
 # Raw input array reference, retained to do element-wise change detection.
@@ -53,17 +54,20 @@ func set_preview_state(
 	foliage_map: NovaTerrainFoliageMap,
 	foliage_defs: Array,
 	selected_index: int,
-	terrain_data: NovaTerrainData = null
+	terrain_data: NovaTerrainData = null,
+	resource_root: NovaResourceRoot = null
 ) -> void:
 	var terrain_changed := _terrain_mesh != terrain_mesh
 	var data_changed := _terrain_data != terrain_data
+	var root_changed := _resource_root != resource_root
 	var map_changed := _foliage_map != foliage_map
-	var defs_changed := _defs_changed_raw(foliage_defs)
+	var defs_changed := _defs_changed_raw(foliage_defs) or root_changed
 	var sel_changed := _selected_index != selected_index
 
 	_terrain_mesh = terrain_mesh
 	_camera = camera
 	_terrain_data = terrain_data
+	_resource_root = resource_root
 	_foliage_map = foliage_map
 	_selected_index = selected_index
 
@@ -83,7 +87,7 @@ func set_preview_state(
 		_last_raw_foliage_defs = foliage_defs.duplicate()  # snapshot refs
 		if _dispatcher != null:
 			_dispatcher.foliage_defs = _foliage_defs
-			_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_foliage_defs)
+			_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_resource_root, _foliage_defs)
 		_pending_flush = true
 
 	if _dispatcher == null:

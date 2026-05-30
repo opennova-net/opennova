@@ -13,7 +13,7 @@ bool has_virtual_scheme(const String &path) {
 } // namespace
 
 void NovaResourceIndex::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("scan", "path", "recursive"), &NovaResourceIndex::scan);
+	ClassDB::bind_method(D_METHOD("scan", "path"), &NovaResourceIndex::scan);
 	ClassDB::bind_method(D_METHOD("clear"), &NovaResourceIndex::clear);
 	ClassDB::bind_method(D_METHOD("get_resource_files", "kind"), &NovaResourceIndex::get_resource_files);
 	ClassDB::bind_method(D_METHOD("get_root_dir"), &NovaResourceIndex::get_root_dir);
@@ -39,9 +39,9 @@ Dictionary NovaResourceIndex::file_entry_to_dictionary(const opennova::ResourceF
 	return out;
 }
 
-Error NovaResourceIndex::scan(const String &path, bool recursive) {
+Error NovaResourceIndex::scan(const String &path) {
 	const String native_path = to_native_path(path);
-	return index_.scan(native_path.utf8().get_data(), recursive) ? OK : ERR_CANT_OPEN;
+	return index_.scan(native_path.utf8().get_data()) ? OK : ERR_CANT_OPEN;
 }
 
 void NovaResourceIndex::clear() {

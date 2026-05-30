@@ -368,12 +368,6 @@ layout_mode = 2
 focus_mode = 0
 text = "Browse"
 
-[node name="SettingsRecursiveToggle" type="CheckBox" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
-unique_name_in_owner = true
-layout_mode = 2
-button_pressed = true
-text = "Search recursively"
-
 [node name="SettingsApplyResourceDirButton" type="Button" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 34)
@@ -568,4 +562,3 @@ layout_mode = 2
 [node name="ProgressCountsLabel" type="Label" parent="ProgressPanel/Margin/ProgressBox"]
 unique_name_in_owner = true
 layout_mode = 2
-

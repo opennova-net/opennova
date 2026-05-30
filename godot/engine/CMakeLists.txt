@@ -54,6 +54,7 @@ add_library(${TARGET_NAME} SHARED
     util/pcx_texture_bridge.cpp
     util/texture_path_resolver.cpp
     resource_index/nova_resource_index.cpp
+    resource_index/nova_resource_root.cpp
     editor/opennova_editor_plugin.cpp
     fnt/nova_fnt_resource.cpp
     fnt/fnt_resource_format.cpp

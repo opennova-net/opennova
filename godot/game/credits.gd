@@ -21,8 +21,11 @@ func _load_credits_from_resource_root() -> void:
 	var root := ResourceDirSettings.get_resource_dir()
 	if root.is_empty() or credits_file.strip_edges().is_empty():
 		return
-	var path := root.path_join(credits_file.strip_edges())
-	if not FileAccess.file_exists(path):
+	var resources := NovaResourceRoot.new()
+	if resources.set_root_dir(root) != OK:
+		return
+	var path := resources.resolve_file(credits_file.strip_edges())
+	if path.is_empty():
 		return
 	var resource := ResourceLoader.load(path, "CbinCreditsResource", ResourceLoader.CACHE_MODE_REPLACE) as CbinCreditsResource
 	if resource == null:
