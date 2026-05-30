@@ -46,6 +46,8 @@ class ImportOptions:
     write_blend: bool = True
     write_3dp: bool = True
     write_ase: bool = True
+    write_glb: bool = False
+    write_fbx: bool = False
     write_max: bool = False
 
     def writes_any_output_file(self) -> bool:
@@ -54,12 +56,23 @@ class ImportOptions:
                 self.write_blend,
                 self.write_3dp,
                 self.write_ase,
+                self.write_glb,
+                self.write_fbx,
                 self.write_max,
             )
         )
 
     def writes_any_export_format(self) -> bool:
-        return any((self.write_blend, self.write_3dp, self.write_ase, self.write_max))
+        return any(
+            (
+                self.write_blend,
+                self.write_3dp,
+                self.write_ase,
+                self.write_glb,
+                self.write_fbx,
+                self.write_max,
+            )
+        )
 
     def ase_export_owner(self) -> str:
         if not self.write_ase:
@@ -80,6 +93,8 @@ class ImportOptions:
             "write_blend": self.write_blend,
             "write_ase": self.write_ase,
             "write_3dp": self.write_3dp,
+            "write_glb": self.write_glb,
+            "write_fbx": self.write_fbx,
         }
 
     def as_loose_kwargs(self) -> dict[str, bool]:
@@ -90,6 +105,8 @@ class ImportOptions:
             "write_blend": self.write_blend,
             "write_ase": self.write_ase,
             "write_3dp": self.write_3dp,
+            "write_glb": self.write_glb,
+            "write_fbx": self.write_fbx,
         }
 
     def dedupe_tuple(self) -> tuple[bool, ...]:
@@ -102,6 +119,8 @@ class ImportOptions:
             self.write_blend,
             self.write_3dp,
             self.write_ase,
+            self.write_glb,
+            self.write_fbx,
             self.write_max,
         )
 
@@ -377,6 +396,8 @@ def validate_import_request(
         errors.append("Select at least one file to write.")
     if request.options.write_ase and not request.options.ase_export_owner():
         errors.append("ASE export requires .blend or .max output.")
+    if (request.options.write_glb or request.options.write_fbx) and not request.options.write_blend:
+        errors.append("GLB/FBX export requires .blend output.")
 
     return errors
 

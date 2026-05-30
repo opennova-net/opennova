@@ -40,8 +40,8 @@ class TestImportOptions:
         assert options.write_3dp
         assert options.write_ase
         assert not options.write_max
-        assert not hasattr(options, "write_glb")
-        assert not hasattr(options, "write_fbx")
+        assert not options.write_glb
+        assert not options.write_fbx
 
     def test_cli_options_override_defaults(self) -> None:
         parser = build_parser()
@@ -57,17 +57,20 @@ class TestImportOptions:
             "out",
             "--no-occlusion",
             "--no-arms",
-            "--no-blend",
             "--no-3dp",
             "--max",
+            "--glb",
+            "--fbx",
         ])
         options = options_from_args(args)
         assert not options.import_occlusion
         assert not options.import_arms
-        assert not options.write_blend
+        assert options.write_blend
         assert not options.write_3dp
         assert options.write_ase
         assert options.write_max
+        assert options.write_glb
+        assert options.write_fbx
 
     def test_blender_only_options_write_only_blend(self) -> None:
         options = ImportOptions(write_3dp=False, write_ase=False)
@@ -89,6 +92,26 @@ class TestImportOptions:
         assert ImportOptions(write_ase=True, write_blend=True, write_max=True).ase_export_owner() == "blender"
         assert ImportOptions(write_ase=True, write_blend=False, write_max=True).ase_export_owner() == "max"
         assert ImportOptions(write_ase=False, write_blend=True, write_max=True).ase_export_owner() == ""
+
+    def test_glb_and_fbx_require_blender_output(self) -> None:
+        request = ImportRequest.for_definition(
+            base_dir=str(FIXTURE_DEF_DIR),
+            item_name="M16",
+            item_type="weapon",
+            output_root=str(ROOT),
+            options=ImportOptions(
+                write_blend=False,
+                write_3dp=False,
+                write_ase=False,
+                write_max=False,
+                write_glb=True,
+                write_fbx=True,
+            ),
+        )
+
+        errors = validate_import_request(request)
+
+        assert "GLB/FBX export requires .blend output." in errors
 
 
 class TestImportRequestValidation:
@@ -210,9 +233,11 @@ class TestImportRunner:
             options=ImportOptions(
                 import_occlusion=False,
                 import_arms=False,
-                write_blend=False,
+                write_blend=True,
                 write_max=False,
                 write_ase=False,
+                write_glb=True,
+                write_fbx=True,
             ),
         )
         # Call run_one directly (in-process) so the mock applies. The
@@ -232,7 +257,9 @@ class TestImportRunner:
         assert kwargs["item_name"] == "M16"
         assert not kwargs["import_occlusion"]
         assert not kwargs["import_arms"]
-        assert not kwargs["write_blend"]
+        assert kwargs["write_blend"]
+        assert kwargs["write_glb"]
+        assert kwargs["write_fbx"]
         assert "write_max" not in kwargs
 
     def test_blender_worker_rejects_raw_max_output(self) -> None:
@@ -279,12 +306,16 @@ class TestImportRunner:
                     item_name="M16",
                     item_type="weapon",
                     output_dir=str(ROOT),
-                    write_blend=False,
+                    write_blend=True,
+                    write_glb=True,
+                    write_fbx=True,
                 )
 
         assert ok
         basic.assert_called_once()
-        assert not basic.call_args.kwargs["write_blend"]
+        assert basic.call_args.kwargs["write_blend"]
+        assert basic.call_args.kwargs["write_glb"]
+        assert basic.call_args.kwargs["write_fbx"]
 
     def test_run_loose_import_skips_blend_save_when_disabled(self) -> None:
         from apps.importer.import_runner import run_loose_import
@@ -333,6 +364,76 @@ class TestImportRunner:
         assert ok
         write_3dp.assert_called_once_with(fake_ir, str(ROOT / "Shed.3dp"))
         save_blend.assert_not_called()
+
+    def test_run_loose_import_exports_glb_and_fbx_from_blender_scene(self) -> None:
+        from apps.importer.import_runner import run_loose_import
+
+        fake_ir = object()
+        threedi_module = types.ModuleType("pyopennova.threedi_ffi")
+        threedi_module.read_model_ir = Mock(return_value=fake_ir)
+        threedi_module.free_model_ir = Mock()
+
+        asset_module = types.ModuleType("pyopennova.asset_resolver")
+
+        class FakeResolver:
+            def __init__(self, _base_dir: str) -> None:
+                pass
+
+            def __enter__(self) -> "FakeResolver":
+                return self
+
+            def __exit__(self, _exc_type: object, _exc: object, _tb: object) -> bool:
+                return False
+
+        asset_module.AssetResolver = FakeResolver
+
+        scene_module = types.ModuleType("apps.importer.scene_builder")
+        builder = Mock()
+        builder.build_basic_scene.return_value = True
+        scene_module.BlenderSceneBuilder = Mock(return_value=builder)
+
+        modules = {
+            "pyopennova.threedi_ffi": threedi_module,
+            "pyopennova.asset_resolver": asset_module,
+            "apps.importer.scene_builder": scene_module,
+        }
+        with patch.dict(sys.modules, modules):
+            with patch("apps.importer.import_runner._setup_blender_package"):
+                with patch("apps.importer.import_runner._write_3dp_from_ir"):
+                    with patch("apps.importer.import_runner._export_ase"):
+                        with patch("apps.importer.import_runner._export_glb") as export_glb:
+                            with patch("apps.importer.import_runner._export_fbx") as export_fbx:
+                                with patch("apps.importer.import_runner._save_blend_scene"):
+                                    ok = run_loose_import(
+                                        threedi_path=str(FIXTURE_3DI),
+                                        output_dir=str(ROOT),
+                                        write_glb=True,
+                                        write_fbx=True,
+                                        reset_scene=False,
+                                    )
+
+        assert ok
+        export_glb.assert_called_once_with(str(ROOT), "Shed")
+        export_fbx.assert_called_once_with(str(ROOT), "Shed")
+
+    def test_export_fbx_uses_nla_without_rebaking_all_actions(self) -> None:
+        from apps.importer.import_runner import _export_fbx
+
+        bpy_module = types.ModuleType("bpy")
+        bpy_module.data = Mock()
+        bpy_module.data.actions = [object()]
+        bpy_module.ops = Mock()
+
+        modules = {"bpy": bpy_module}
+        with patch.dict(sys.modules, modules):
+            _export_fbx(str(ROOT), "Shed")
+
+        bpy_module.ops.export_scene.fbx.assert_called_once()
+        kwargs = bpy_module.ops.export_scene.fbx.call_args.kwargs
+        assert kwargs["filepath"] == str(ROOT / "Shed.fbx")
+        assert kwargs["bake_anim"]
+        assert kwargs["bake_anim_use_nla_strips"]
+        assert not kwargs["bake_anim_use_all_actions"]
 
     def test_project_writer_has_no_bullet_lod_override_parameter(self) -> None:
         import inspect

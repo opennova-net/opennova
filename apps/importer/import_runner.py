@@ -50,6 +50,34 @@ def _export_ase(output_dir: str, name: str) -> None:
     log.info("Wrote ASE: %s", ase_path)
 
 
+def _export_glb(output_dir: str, name: str) -> None:
+    """Export the current bpy scene to a glTF 2.0 binary (.glb) in output_dir."""
+    import bpy
+    glb_path = os.path.join(output_dir, name + ".glb")
+    has_animations = len(bpy.data.actions) > 0
+    bpy.ops.export_scene.gltf(
+        filepath=glb_path,
+        export_format="GLB",
+        export_animations=has_animations,
+        export_force_sampling=False,
+    )
+    log.info("Wrote GLB: %s", glb_path)
+
+
+def _export_fbx(output_dir: str, name: str) -> None:
+    """Export the current bpy scene to FBX in output_dir."""
+    import bpy
+    fbx_path = os.path.join(output_dir, name + ".fbx")
+    has_animations = len(bpy.data.actions) > 0
+    bpy.ops.export_scene.fbx(
+        filepath=fbx_path,
+        bake_anim=has_animations,
+        bake_anim_use_nla_strips=has_animations,
+        bake_anim_use_all_actions=False,
+    )
+    log.info("Wrote FBX: %s", fbx_path)
+
+
 def _save_blend_scene(output_dir: str, name: str, *, checkpoint: bool = False) -> None:
     """Save the current bpy scene to a .blend file in output_dir."""
     import bpy
@@ -83,6 +111,8 @@ def _import_basic_model(
     write_blend: bool = True,
     write_ase: bool = True,
     write_3dp: bool = True,
+    write_glb: bool = False,
+    write_fbx: bool = False,
 ) -> bool:
     """Import a single weapon/item via the C IR pipeline and write selected outputs."""
     from pathlib import Path
@@ -194,6 +224,10 @@ def _import_basic_model(
             project_dir = os.path.join(output_dir, export_name)
             if write_ase:
                 _export_ase(project_dir, export_name)
+            if write_glb:
+                _export_glb(project_dir, export_name)
+            if write_fbx:
+                _export_fbx(project_dir, export_name)
             if write_blend:
                 _save_blend_scene(project_dir, export_name, checkpoint=True)
 
@@ -214,6 +248,8 @@ def run_import(
     write_blend: bool = True,
     write_ase: bool = True,
     write_3dp: bool = True,
+    write_glb: bool = False,
+    write_fbx: bool = False,
 ) -> bool:
     """Import a single weapon/item and produce selected output files.
 
@@ -241,6 +277,8 @@ def run_import(
             write_blend=write_blend,
             write_ase=write_ase,
             write_3dp=write_3dp,
+            write_glb=write_glb,
+            write_fbx=write_fbx,
         )
     except Exception as exc:
         log.error("import failed: %s", exc, exc_info=True)
@@ -270,6 +308,8 @@ def run_loose_import(
     write_blend: bool = True,
     write_ase: bool = True,
     write_3dp: bool = True,
+    write_glb: bool = False,
+    write_fbx: bool = False,
     reset_scene: bool = True,
 ) -> bool:
     """Import a standalone .3di file (no DEF lookup required).
@@ -313,6 +353,10 @@ def run_loose_import(
     if result:
         if write_ase:
             _export_ase(output_dir, name)
+        if write_glb:
+            _export_glb(output_dir, name)
+        if write_fbx:
+            _export_fbx(output_dir, name)
         if write_blend:
             _save_blend_scene(output_dir, name)
 
