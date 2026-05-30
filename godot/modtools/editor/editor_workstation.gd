@@ -976,7 +976,15 @@ func _show_resource_status(result: Dictionary) -> void:
 
 
 func _load_resource_state() -> void:
-	_resource_recursive = bool(_resource_library.load_state()["recursive"])
+	var state := _resource_library.load_state()
+	_resource_recursive = bool(state["recursive"])
+	# Push the persisted resource dir into VegAssets at startup so foliage .3di
+	# resolve on the first .trn open. This mirrors what the runtime does in
+	# NovaWorld.load_world() and what the manual dir-change path does in
+	# _set_resource_root_dir(); without it the editor renders white foliage (no veg
+	# model -> fallback BoxMesh -> no leaf texture) until the dir is re-picked.
+	var root := String(state["root_dir"])
+	VegAssets.set_search_roots([root] if not root.is_empty() else [])
 
 
 func _save_resource_state() -> void:

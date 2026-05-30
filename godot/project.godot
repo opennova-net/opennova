@@ -21,7 +21,7 @@ run/main_scene.runtime_game="res://game/main_game.tscn"
 
 [autoload]
 
-NovaStrings="*res://game/runtime/nova_strings.gd"
+NovaStrings="*res://engine/strings/nova_strings.gd"
 
 [display]
 
