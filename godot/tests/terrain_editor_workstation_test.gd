@@ -449,6 +449,33 @@ func test_resource_settings_persist_in_editor_state() -> void:
 	assert_true(next_workstation.is_resource_recursive(), "Recursive setting should persist with its default value.")
 
 
+func test_startup_applies_persisted_resource_dir_to_veg_search_roots() -> void:
+	# Regression: a fresh editor launch must push the PERSISTED resource dir into
+	# VegAssets on startup so foliage .3di resolve on the first .trn open. Before
+	# this, only the manual dir-change path (_set_resource_root_dir) set the search
+	# roots, so a relaunched editor rendered solid-white foliage (no veg model ->
+	# fallback BoxMesh -> no leaf texture -> foliage.gdshader leaf = vec4(1.0)) even
+	# though the dir was saved. The runtime (NovaWorld.load_world) never had this gap;
+	# this brings the editor's startup to parity with it.
+	var VegAssetsRef = preload("res://modtools/terrain/veg_assets.gd")
+	var root := _make_resource_fixture("veg_search_roots_startup")
+	# Persist the dir via one workstation (its _set_resource_root_dir also sets roots).
+	var w1 = add_child_autofree(EditorWorkstationScene.instantiate())
+	w1._resource_recursive = true
+	assert_eq(w1._set_resource_root_dir(root, true, false), OK, "Persisting the resource dir should succeed.")
+	# Clear the process-global search roots so the next assertion can ONLY pass if
+	# the fresh workstation re-applies them on _ready (not leftover from w1).
+	VegAssetsRef.set_search_roots([])
+	assert_eq(VegAssetsRef.get_search_roots().size(), 0, "precondition: search roots cleared before relaunch")
+	# A fresh workstation (_ready -> _load_resource_state) must set the roots itself.
+	add_child_autofree(EditorWorkstationScene.instantiate())
+	var roots: Array = VegAssetsRef.get_search_roots()
+	assert_eq(roots.size(), 1, "Editor startup should set one veg search root from the persisted dir.")
+	var got := String(roots[0]).rstrip("/").replace("\\", "/").to_lower()
+	var want := root.rstrip("/").replace("\\", "/").to_lower()
+	assert_eq(got, want, "The veg search root should be the persisted resource directory.")
+
+
 func test_resource_root_inside_user_data_is_rejected_on_load() -> void:
 	# A resource root that points inside the app user-data dir (e.g. a temp/test
 	# path that leaked into the persisted state) must not be adopted on load, so
