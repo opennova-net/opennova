@@ -49,6 +49,7 @@ add_library(${TARGET_NAME} SHARED
     rtxt/rtxt_string_file.cpp
     rtxt/rtxt_resource_format.cpp
     util/nova_data_format.cpp
+    util/nova_paths.cpp
     util/nova_texture_format.cpp
     util/pcx_texture_bridge.cpp
     util/texture_path_resolver.cpp

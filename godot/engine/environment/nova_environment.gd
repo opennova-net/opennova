@@ -132,6 +132,25 @@ func get_terrain_lighting_attenuation() -> Vector3:
 	return Vector3.ONE
 
 
+## Push the env-derived terrain lighting + fog uniforms onto a terrain
+## ShaderMaterial. terrain.gdshader (runtime) and terrain_editor.gdshader (editor
+## preview) share these uniforms via terrain_lighting.gdshaderinc, so both drive
+## them through here. Callers may override individual values afterwards (the
+## runtime layers NovaWeather-smoothed colors + the tile-overlay tint on top).
+func apply_terrain_uniforms(material: ShaderMaterial) -> void:
+	if material == null:
+		return
+	material.set_shader_parameter("u_sun_light", get_sun_light())
+	material.set_shader_parameter("u_fill_light", get_fill_light())
+	material.set_shader_parameter("u_sky_ambient", get_sky_ambient())
+	material.set_shader_parameter("u_sun_direction", get_sun_direction())
+	material.set_shader_parameter("u_terrain_tint", get_terrain_lighting_attenuation())
+	material.set_shader_parameter("u_fog_color", get_fog_color())
+	material.set_shader_parameter("u_fog_end", get_fog_level())
+	material.set_shader_parameter("u_fog_start", get_fog_start())
+	material.set_shader_parameter("u_fog_type", get_fog_type())
+
+
 func get_water_color() -> Vector3:
 	if environment_data == null:
 		return Vector3(0.408, 0.314, 0.224)
