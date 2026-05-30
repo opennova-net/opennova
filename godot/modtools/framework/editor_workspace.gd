@@ -78,6 +78,21 @@ func shows_tile_gizmo() -> bool:
 	return false
 
 
+# View guides (reference grid / origin axes) in a 3D preview. Workspaces with a
+# guide overlay override shows_view_guides() so the shell offers Show grid / Show
+# axes toggles, and the two setters to apply them; other workspaces stay silent.
+func shows_view_guides() -> bool:
+	return false
+
+
+func set_grid_visible(_value: bool) -> void:
+	pass
+
+
+func set_axes_visible(_value: bool) -> void:
+	pass
+
+
 func get_export_flavors() -> Array:
 	return []
 

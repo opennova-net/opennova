@@ -5,18 +5,16 @@ Open-source toolchain and runtime for NovaLogic's Joint Operations (JO) and newe
 ## Screenshots
 
 <p align="center">
-  <a href="https://snaps.screensnapr.io/7d36e33">
-    <img src="https://snaps.screensnapr.io/7d36e33" alt="OpenNova editor overview" width="900">
+  <a href="screenshots/overview.png">
+    <img src="screenshots/overview.png" alt="OpenNova editor overview" width="900">
   </a>
 </p>
 
-| Editor overview | Terrain editing |
+| Object editing | Font editing |
 |---|---|
-| [<img src="https://snaps.screensnapr.io/7d36e33" alt="OpenNova editor overview" width="420">](https://snaps.screensnapr.io/7d36e33) | [<img src="https://snaps.screensnapr.io/7d36e33" alt="Terrain editing in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) |
-| Object placement | Environment preview |
-| [<img src="https://snaps.screensnapr.io/7d36e33" alt="Object placement in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) | [<img src="https://snaps.screensnapr.io/7d36e33" alt="Environment preview in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) |
-| Asset import workflow | Runtime preview |
-| [<img src="https://snaps.screensnapr.io/7d36e33" alt="Asset import workflow in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) | [<img src="https://snaps.screensnapr.io/7d36e33" alt="Runtime preview in OpenNova" width="420">](https://snaps.screensnapr.io/7d36e33) |
+| [<img src="screenshots/object.png" alt="Object editing in OpenNova" width="420">](screenshots/object.png) | [<img src="screenshots/fonts.png" alt="Font editing in OpenNova" width="420">](screenshots/fonts.png) |
+| Credits editing | Strings editing |
+| [<img src="screenshots/credits.png" alt="Credits editing in OpenNova" width="420">](screenshots/credits.png) | [<img src="screenshots/strings.png" alt="Strings editing in OpenNova" width="420">](screenshots/strings.png) |
 
 ## Architecture
 

@@ -24,6 +24,10 @@ const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 const LAYOUT_STATE_SECTION := "layout"
 const LEFT_SPLIT_KEY := "left_split_offset"
 const RIGHT_SPLIT_KEY := "right_split_offset"
+# View options (3D preview guides), persisted in their own section.
+const VIEW_STATE_SECTION := "view"
+const GRID_VISIBLE_KEY := "grid_visible"
+const AXES_VISIBLE_KEY := "axes_visible"
 
 var _index: RefCounted
 var _root_dir: String = ""
@@ -124,6 +128,28 @@ func save_layout_state(left_offset: int, right_offset: int) -> void:
 	config.load(STATE_CONFIG_PATH)
 	config.set_value(LAYOUT_STATE_SECTION, LEFT_SPLIT_KEY, left_offset)
 	config.set_value(LAYOUT_STATE_SECTION, RIGHT_SPLIT_KEY, right_offset)
+	config.save(STATE_CONFIG_PATH)
+
+
+# Persisted 3D-preview guide visibility (grid / axes). Defaults to visible when
+# unset. Stored in the shared editor-state config alongside layout/resource state.
+func load_view_state() -> Dictionary:
+	var config := ConfigFile.new()
+	if config.load(STATE_CONFIG_PATH) != OK:
+		return {"grid": true, "axes": true}
+	return {
+		"grid": bool(config.get_value(VIEW_STATE_SECTION, GRID_VISIBLE_KEY, true)),
+		"axes": bool(config.get_value(VIEW_STATE_SECTION, AXES_VISIBLE_KEY, true)),
+	}
+
+
+# Merge the view options into the existing config (load-then-set-then-save) so the
+# resource/layout sections are preserved, mirroring save_layout_state().
+func save_view_state(grid_visible: bool, axes_visible: bool) -> void:
+	var config := ConfigFile.new()
+	config.load(STATE_CONFIG_PATH)
+	config.set_value(VIEW_STATE_SECTION, GRID_VISIBLE_KEY, grid_visible)
+	config.set_value(VIEW_STATE_SECTION, AXES_VISIBLE_KEY, axes_visible)
 	config.save(STATE_CONFIG_PATH)
 
 

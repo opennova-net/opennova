@@ -43,6 +43,7 @@ int main() {
 	write_file(root / "models" / "source.ase", "ase");
 	write_file(root / "credits" / "finale.kda", "kda");
 	write_file(root / "fonts" / "Serpen24.fnt", "fnt");
+	write_file(root / "strings" / "menu.bin", "bin");
 
 	opennova::ResourceIndex index;
 	TEST_EXPECT(!index.scan((root / "missing").string(), true));
