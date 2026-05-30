@@ -19,6 +19,10 @@ boot_splash/show_image=false
 config/icon="res://icon.svg"
 run/main_scene.runtime_game="res://game/main_game.tscn"
 
+[autoload]
+
+NovaStrings="*res://game/runtime/nova_strings.gd"
+
 [display]
 
 window/size/viewport_width=1600

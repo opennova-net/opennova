@@ -12,6 +12,7 @@ add_subdirectory(../../libs/trn opennova_trn)
 add_subdirectory(../../libs/cpt opennova_cpt)
 add_subdirectory(../../libs/env opennova_env)
 add_subdirectory(../../libs/threedi opennova_threedi)
+add_subdirectory(../../libs/rtxt opennova_rtxt)
 add_subdirectory(../../libs/ase opennova_ase)
 add_subdirectory(../../libs/tdp opennova_tdp)
 add_subdirectory(../../libs/oed opennova_oed)
@@ -45,6 +46,8 @@ add_library(${TARGET_NAME} SHARED
     env/env_file.cpp
     object/nova_object_data.cpp
     object/nova_object_shader_cache.cpp
+    rtxt/rtxt_string_file.cpp
+    rtxt/rtxt_resource_format.cpp
     util/nova_data_format.cpp
     util/nova_texture_format.cpp
     util/pcx_texture_bridge.cpp
@@ -72,6 +75,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_cbin
     opennova_env
     opennova_threedi
+    opennova_rtxt
     opennova_ase
     opennova_tdp
     opennova_oed
