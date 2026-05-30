@@ -108,9 +108,55 @@ static func load_mesh(graphic: String) -> Mesh:
 	if not submeshes.is_empty():
 		var first: Dictionary = submeshes[0]
 		mesh = first.get("mesh") as Mesh
+		# build_lod_submeshes leaves the surface material-less, so the foliage
+		# billboards render as solid white quads (no leaf texture, no alpha
+		# cutout). Attach the .3di's own diffuse so the alpha-cutout cross-quads
+		# read as vegetation. The dispatcher (_update_slot_material) pulls the
+		# albedo off this BaseMaterial3D into foliage.gdshader, and the veg-picker
+		# preview renders the mesh directly with it.
+		if mesh != null and mesh.get_surface_count() > 0:
+			var diffuse := _load_diffuse_texture(data, int(first.get("material_index", 0)))
+			if diffuse != null:
+				var mat := StandardMaterial3D.new()
+				mat.albedo_texture = diffuse
+				mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+				mat.alpha_scissor_threshold = 0.33
+				mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+				mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+				mesh.surface_set_material(0, mat)
 	if mesh != null:
 		_mesh_cache[basename] = mesh
 	return mesh
+
+
+## Load the diffuse (slot 1, falling back to detail slot 2) texture for a .3di
+## material, mirroring nova_object_model._load_texture_for_slot. Returns null if
+## the material has no resolvable texture.
+static func _load_diffuse_texture(data: NovaObjectData, material_index: int) -> Texture2D:
+	var material_defs := {}
+	for material in data.get_materials():
+		var mi := int(material.get("material_index", material.get("index", 0)))
+		material_defs[mi] = material
+		var ai := int(material.get("index", mi))
+		if not material_defs.has(ai):
+			material_defs[ai] = material
+
+	var material_def: Dictionary = material_defs.get(material_index, {})
+	if material_def.is_empty():
+		return null
+	var array_index := int(material_def.get("index", -1))
+	if array_index < 0:
+		return null
+	var textures: Array = material_def.get("textures", [])
+	for want_slot in [1, 2]:
+		for i in range(textures.size()):
+			var texture: Dictionary = textures[i]
+			if int(texture.get("slot", 0)) == want_slot:
+				var loaded: Texture2D = data.load_material_texture(array_index, i)
+				if loaded != null:
+					return loaded
+	return null
 
 
 static func _find_model_path(basename: String) -> String:

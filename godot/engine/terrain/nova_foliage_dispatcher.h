@@ -79,6 +79,13 @@ public:
 	void set_terrain_data(const Ref<NovaTerrainData> &p_data);
 	Ref<NovaTerrainData> get_terrain_data() const;
 
+	// Optional colormap-only source for ground-color tinting. The editor preview
+	// sets this (its NovaTerrainData) so foliage is tinted from the colormap while
+	// placement keeps using the live-sculpt Callable samplers (terrain_data left
+	// unset). Runtime ignores it because terrain_data already supplies the colormap.
+	void set_colormap_source(const Ref<NovaTerrainData> &p_data);
+	Ref<NovaTerrainData> get_colormap_source() const;
+
 	// Configuration ---------------------------------------------------------
 
 	// Coverage algorithm. ENGINE_CENTERS is the IDA-matched per-center path;
@@ -174,6 +181,7 @@ private:
 	Callable height_sampler_;
 	Callable foliage_sampler_;
 	Ref<NovaTerrainData> terrain_data_;
+	Ref<NovaTerrainData> colormap_source_;
 	int dispatch_algorithm_ = DISPATCH_ALGORITHM_ENGINE_CENTERS;
 	int render_algorithm_ = DISPATCH_ALGORITHM_ENGINE_CENTERS;
 	int cell_grid_radius_ = 8;

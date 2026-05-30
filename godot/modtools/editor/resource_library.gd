@@ -13,10 +13,14 @@ extends RefCounted
 ## Those side effects are surfaced through the return values below
 ## ({err, search_roots, status}) so this helper never reaches back into the UI.
 
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
-const RESOURCE_STATE_SECTION := "resources"
-const RESOURCE_DIR_KEY := "resource_dir"
-const RESOURCE_RECURSIVE_KEY := "resource_recursive"
+# Resource-dir config path/keys are shared with the runtime (game/main_game.gd)
+# via engine/resource_index/resource_dir_settings.gd so a directory picked in
+# either app is the same persisted value.
+const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
+const RESOURCE_STATE_SECTION := ResourceDirSettings.SECTION
+const RESOURCE_DIR_KEY := ResourceDirSettings.DIR_KEY
+const RESOURCE_RECURSIVE_KEY := ResourceDirSettings.RECURSIVE_KEY
 const LAYOUT_STATE_SECTION := "layout"
 const LEFT_SPLIT_KEY := "left_split_offset"
 const RIGHT_SPLIT_KEY := "right_split_offset"
