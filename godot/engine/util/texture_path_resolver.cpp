@@ -16,14 +16,13 @@ namespace opennova {
 
 namespace {
 
-// NovaLogic assets reference textures by name with inconsistent case and an
-// extension that may not match what is on disk (e.g. a .trn says "trntile10.tga"
-// while the file is "TRNTILE10.TGA"), so we must try multiple stem casings and
-// extensions. Godot's res:// paths are case-sensitive internally, hence the
-// permutations below — do NOT "simplify" this back to a single exact lookup.
+// NovaLogic assets reference textures by name with inconsistent case (e.g. a
+// .trn says "trntile10.tga" while the file is "TRNTILE10.TGA") and an extension
+// that may not match what is on disk, so we try the name + extension fallbacks.
+// Case is handled by the case-insensitive directory match (build_lowercase_dir_index),
+// so the extension list needs no upper-case variants.
 static constexpr const char *tex_ext_priority[] = {
-	"tga", "TGA", "dds", "DDS", "dds.tga", "DDS.TGA", "mdt", "MDT", "pcx", "PCX",
-	"png", "PNG", "jpg", "JPG", "jpeg", "JPEG", "bmp", "BMP"
+	"tga", "dds", "dds.tga", "mdt", "pcx", "png", "jpg", "jpeg", "bmp"
 };
 
 void append_unique(std::vector<godot::String> &items, const godot::String &value) {
@@ -46,16 +45,10 @@ std::vector<godot::String> texture_stems(const godot::String &filename) {
 	}
 
 	append_unique(stems, stem);
-	append_unique(stems, stem.to_lower());
-	append_unique(stems, stem.to_upper());
-
 	// NovaLogic outline/overlay textures append an "_O" suffix to the base name.
-	std::vector<godot::String> base_stems = stems;
-	for (const godot::String &base : base_stems) {
-		if (!base.to_lower().ends_with("_o")) {
-			append_unique(stems, base + godot::String("_O"));
-			append_unique(stems, base + godot::String("_o"));
-		}
+	// (Case is normalized by the directory match, so no _o/_O or stem-case dupes.)
+	if (!stem.to_lower().ends_with("_o")) {
+		append_unique(stems, stem + godot::String("_O"));
 	}
 	return stems;
 }
@@ -243,6 +236,19 @@ godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, con
 		}
 	}
 	return godot::Ref<godot::Texture2D>();
+}
+
+godot::String resolve_file_in_dir(const godot::String &dir, const godot::String &name) {
+	if (dir.is_empty() || name.is_empty()) {
+		return godot::String();
+	}
+	if (is_resource_dir(dir)) {
+		const godot::String path = dir.path_join(name);
+		return godot::ResourceLoader::get_singleton()->exists(path) ? path : godot::String();
+	}
+	const std::unordered_map<std::string, godot::String> index = build_lowercase_dir_index(dir);
+	auto it = index.find(std::string(name.to_lower().utf8().get_data()));
+	return it != index.end() ? dir.path_join(it->second) : godot::String();
 }
 
 godot::String resolve_sidecar_path(const godot::String &dir, const godot::String &filename, const char *ext) {

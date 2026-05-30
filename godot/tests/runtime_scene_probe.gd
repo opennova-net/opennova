@@ -1,10 +1,13 @@
 extends SceneTree
 
 # Headless validation of the main_game.tscn runtime pipeline. Loads the scene,
-# waits for NovaTerrainData, moves the camera onto a painted foliage point, then
-# verifies the runtime foliage dispatcher is using broad camera-grid coverage.
+# points the shared NovaWorld at an explicit resource dir (the repo terrain
+# fixture by default, or a dir passed via `-- <dir>`), waits for NovaTerrainData,
+# moves the camera onto a painted foliage point, then verifies the foliage
+# dispatcher is using broad camera-grid coverage. There is no runtime fallback;
+# the probe chooses the directory itself.
 #
-# Use: `godot --headless --path godot -s res://tests/runtime_scene_probe.gd`
+# Use: `godot --headless --path godot -s res://tests/runtime_scene_probe.gd -- <dir>`
 
 const INVALID_CELL := Vector2i(-9999, -9999)
 
@@ -14,6 +17,9 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	var args := OS.get_cmdline_user_args()
+	var dir := args[0] if args.size() >= 1 else ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5")
+
 	var packed := load("res://game/main_game.tscn") as PackedScene
 	if packed == null:
 		push_error("runtime_scene_probe: failed to load main_game.tscn")
@@ -22,6 +28,11 @@ func _run() -> void:
 
 	var scene := packed.instantiate()
 	root.add_child(scene)
+	# main_game._ready already ran load_world() (no-op headless without a config
+	# dir); drive the shared world loader directly at our chosen dir, no persist.
+	var world: NovaWorld = scene.get_node_or_null("World")
+	if world != null:
+		world.load_world(dir)
 
 	var terrain: NovaTerrain = null
 	var dispatcher: NovaFoliageDispatcher = null
@@ -31,11 +42,11 @@ func _run() -> void:
 
 	for _i in range(30):
 		await process_frame
-		terrain = scene.get_node_or_null("NovaTerrain")
-		dispatcher = scene.get_node_or_null("NovaTerrain/FoliageDispatcher")
-		overlay = scene.get_node_or_null("NovaTerrain/TileOverlay")
+		terrain = scene.get_node_or_null("World/NovaTerrain")
+		dispatcher = scene.get_node_or_null("World/NovaTerrain/FoliageDispatcher")
+		overlay = scene.get_node_or_null("World/NovaTerrain/TileOverlay")
 		camera = scene.get_node_or_null("Camera3D")
-		data = terrain.terrain_data if terrain != null else null
+		data = world.get_terrain_data() if world != null else null
 		if data != null and data.is_loaded():
 			break
 

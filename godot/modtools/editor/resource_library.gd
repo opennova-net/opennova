@@ -17,10 +17,10 @@ extends RefCounted
 # via engine/resource_index/resource_dir_settings.gd so a directory picked in
 # either app is the same persisted value.
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+# Layout state (split offsets) shares the same config file as the resource dir,
+# but lives in its own section; the resource-dir section is owned by
+# NovaResourceDirSettings (load_state/save_state delegate to it).
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
-const RESOURCE_STATE_SECTION := ResourceDirSettings.SECTION
-const RESOURCE_DIR_KEY := ResourceDirSettings.DIR_KEY
-const RESOURCE_RECURSIVE_KEY := ResourceDirSettings.RECURSIVE_KEY
 const LAYOUT_STATE_SECTION := "layout"
 const LEFT_SPLIT_KEY := "left_split_offset"
 const RIGHT_SPLIT_KEY := "right_split_offset"
@@ -85,29 +85,20 @@ func scan_root(recursive: bool) -> Dictionary:
 	return {"err": err, "status": "Resource scan failed." if detail.is_empty() else detail}
 
 
-# Loads the persisted root + recursive flag. Drops a persisted root that no
-# longer points at a real, sane resource directory (moved/deleted dirs, or
-# stale temp/test paths that leaked into the shared state) so the browser shows
-# a clean "no directory" state instead of a dead internal path. Returns
-# {root_dir, recursive}; the caller stores `recursive` on the shell.
+# Loads the persisted root + recursive flag from the shared NovaResourceDirSettings.
+# That helper drops a persisted root that no longer points at a real, sane resource
+# directory (moved/deleted dirs, or stale temp/test paths that leaked into the
+# shared state) so the browser shows a clean "no directory" state instead of a dead
+# internal path. Returns {root_dir, recursive}; the caller stores `recursive`.
 func load_state() -> Dictionary:
-	var config := ConfigFile.new()
-	if config.load(STATE_CONFIG_PATH) != OK:
-		return {"root_dir": _root_dir, "recursive": true}
-	_root_dir = String(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, ""))
-	var recursive := bool(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, true))
-	if not _root_dir.is_empty() and not is_valid_root(_root_dir):
-		_root_dir = ""
-		save_state(recursive)
-	return {"root_dir": _root_dir, "recursive": recursive}
+	# Resource-dir persistence lives in NovaResourceDirSettings (shared with the
+	# runtime); get_resource_dir() already drops stale/invalid paths.
+	_root_dir = ResourceDirSettings.get_resource_dir()
+	return {"root_dir": _root_dir, "recursive": ResourceDirSettings.get_recursive()}
 
 
 func save_state(recursive: bool) -> void:
-	var config := ConfigFile.new()
-	config.load(STATE_CONFIG_PATH)
-	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, _root_dir)
-	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, recursive)
-	config.save(STATE_CONFIG_PATH)
+	ResourceDirSettings.set_resource_dir(_root_dir, recursive)
 
 
 # Persisted shell layout. Split offsets are stored alongside the resource state
@@ -137,13 +128,4 @@ func save_layout_state(left_offset: int, right_offset: int) -> void:
 
 
 func is_valid_root(path: String) -> bool:
-	var trimmed := path.strip_edges()
-	if trimmed.is_empty():
-		return false
-	if not DirAccess.dir_exists_absolute(trimmed):
-		return false
-	# A resource library is a real asset directory on disk, never inside the
-	# app's own user-data dir; reject such paths (e.g. leaked temp/test dirs).
-	if trimmed.begins_with(OS.get_user_data_dir()):
-		return false
-	return true
+	return ResourceDirSettings.is_valid_root(path)

@@ -916,17 +916,8 @@ func _read_tga_bpp(path: String) -> int:
 
 
 func _resolve_existing_file(base_dir: String, filename: String) -> String:
-	if base_dir.is_empty() or filename.is_empty():
-		return ""
-	var direct := base_dir.path_join(filename)
-	if FileAccess.file_exists(direct):
-		return direct
-
-	var wanted := filename.to_lower()
-	for existing in DirAccess.get_files_at(base_dir):
-		if String(existing).to_lower() == wanted:
-			return base_dir.path_join(String(existing))
-	return ""
+	# Shared case-insensitive resolver — same primitive textures/models use.
+	return NovaPaths.resolve_file(base_dir, filename)
 
 
 func _clear_tileinfo_resource() -> void:

@@ -44,28 +44,17 @@ static func list_graphics(force_refresh: bool = false) -> Array:
 	var seen: Dictionary = {}
 	_model_path_cache.clear()
 	for prefix_value in _search_roots:
-		var prefix: String = String(prefix_value)
-		var dir := DirAccess.open(prefix)
-		if dir == null:
-			continue
-		dir.list_dir_begin()
-		var name := dir.get_next()
-		while name != "":
-			if not dir.current_is_dir():
-				var lower := name.to_lower()
-				if lower.ends_with(".3di") and lower.contains("veg"):
-					var basename := name.get_basename().to_lower()
-					if not seen.has(basename):
-						var model_path := prefix + name
-						seen[basename] = true
-						_model_path_cache[basename] = model_path
-						out.append({
-							"basename": basename,
-							"model_path": model_path,
-							"scene_path": model_path,
-						})
-			name = dir.get_next()
-		dir.list_dir_end()
+		for model_path in NovaPaths.list_files(String(prefix_value), ".3di"):
+			var basename := String(model_path).get_file().get_basename().to_lower()
+			if not basename.contains("veg") or seen.has(basename):
+				continue
+			seen[basename] = true
+			_model_path_cache[basename] = model_path
+			out.append({
+				"basename": basename,
+				"model_path": model_path,
+				"scene_path": model_path,
+			})
 	out.sort_custom(func(a, b): return String(a.basename) < String(b.basename))
 	_graphics_cache = out
 	_graphics_cache_valid = true
@@ -168,26 +157,10 @@ static func _find_model_path(basename: String) -> String:
 		return String(_model_path_cache[basename])
 
 	for prefix_value in _search_roots:
-		var prefix: String = String(prefix_value)
-		var lower_path := prefix + basename + ".3di"
-		if FileAccess.file_exists(lower_path):
-			_model_path_cache[basename] = lower_path
-			return lower_path
-
-		var dir := DirAccess.open(prefix)
-		if dir == null:
-			continue
-		dir.list_dir_begin()
-		var name := dir.get_next()
-		while name != "":
-			if not dir.current_is_dir() and name.to_lower().ends_with(".3di"):
-				if name.get_basename().to_lower() == basename:
-					var scene_path := prefix + name
-					_model_path_cache[basename] = scene_path
-					dir.list_dir_end()
-					return scene_path
-			name = dir.get_next()
-		dir.list_dir_end()
+		var resolved := NovaPaths.resolve_file(String(prefix_value), basename + ".3di")
+		if not resolved.is_empty():
+			_model_path_cache[basename] = resolved
+			return resolved
 	return ""
 
 
