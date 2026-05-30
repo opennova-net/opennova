@@ -20,6 +20,8 @@ _OPTION_FIELDS = (
     "write_blend",
     "write_3dp",
     "write_ase",
+    "write_glb",
+    "write_fbx",
     "write_max",
 )
 
@@ -43,6 +45,8 @@ def _add_import_options(parser: argparse.ArgumentParser, *, include_def_only: bo
         write_blend=None,
         write_3dp=None,
         write_ase=None,
+        write_glb=None,
+        write_fbx=None,
         write_max=None,
     )
     if include_def_only:
@@ -65,6 +69,10 @@ def _add_import_options(parser: argparse.ArgumentParser, *, include_def_only: bo
                         help="Do not write .3dp object workspace files")
     parser.add_argument("--no-ase", dest="write_ase", action="store_false",
                         help="Do not write .ase files")
+    parser.add_argument("--glb", dest="write_glb", action="store_true",
+                        help="Write .glb files via Blender")
+    parser.add_argument("--fbx", dest="write_fbx", action="store_true",
+                        help="Write .fbx files via Blender")
     parser.add_argument("--max", dest="write_max", action="store_true",
                         help="Write .max scene files via 3ds Max")
     parser.add_argument("--no-max", dest="write_max", action="store_false",

@@ -154,7 +154,7 @@ def _request_for_blender(request: ImportRequest):
     # type: (ImportRequest) -> ImportRequest | None
     options = request.options
     owns_ase = options.ase_export_owner() == "blender"
-    if not (options.write_blend or options.write_3dp or owns_ase):
+    if not (options.write_blend or options.write_3dp or owns_ase or options.write_glb or options.write_fbx):
         return None
     return _copy_request_with_options(
         request,
@@ -167,6 +167,8 @@ def _request_for_blender(request: ImportRequest):
             write_blend=options.write_blend,
             write_3dp=options.write_3dp,
             write_ase=owns_ase,
+            write_glb=options.write_glb,
+            write_fbx=options.write_fbx,
             write_max=False,
         ),
     )
@@ -189,6 +191,8 @@ def _request_for_max(request: ImportRequest):
             write_blend=False,
             write_3dp=False,
             write_ase=owns_ase,
+            write_glb=False,
+            write_fbx=False,
             write_max=options.write_max,
         ),
     )
