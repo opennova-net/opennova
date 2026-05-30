@@ -9,12 +9,20 @@ extends Node
 ## with the editor.
 ##
 ## Run via scripts/capture_screenshots.ps1, or directly:
+##   NOVA_RESOURCE_DIR=<asset-dir> \
 ##   Godot --path godot --resolution 1600x900 \
 ##         res://modtools/tools/screenshot_capture.tscn
+##
+## Assets are opened by name from one external resource directory (the same
+## resource-root model the runtime and editor use), NOT from bundled fixtures.
+## The directory is taken from $NOVA_RESOURCE_DIR, falling back to the editor's
+## persisted resource dir. It must hold Dvxi5.trn (with its sibling textures),
+## full_00.env, the font, credits, the strings table, and the object below.
 ##
 ## Must run with a real rendering window: --headless does not render, so the
 ## captured viewport texture would be blank.
 
+const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const EditorScene := preload("res://modtools/terrain/terrain_editor.tscn")
 
 const WINDOW_SIZE := Vector2i(1600, 900)
@@ -28,26 +36,30 @@ const SETTLE_FRAMES_3D := 48
 
 # repo-root /screenshots (res:// maps to godot/, so one level up is the repo root).
 const OUT_DIR := "res://../screenshots"
-# Object fixtures live at repo-root fixtures/, outside the Godot project tree.
-# US01 is a textured character whose textures sit alongside the .3dp, so the
-# preview renders correctly (unlike the older GP-format box models).
-const OBJECT_FIXTURE := "res://../fixtures/3dp/US01_onimport/US01.3dp"
-# A daylight environment so the 3D previews are lit and the sky dome renders.
-# Terrain and the object preview share this via the editor's environment_editor.
-const ENV_FIXTURE := "res://game/assets/environments/Full_00/full_00.env"
 
-# [workspace_id, fixture_path, out_filename]. Empty fixture = capture whatever the
-# workspace already shows (terrain is loaded for the overview shot first).
+# Asset names, resolved case-insensitively against the resource dir at runtime.
+# Dvxi5.trn / full_00.env are the runtime's hardcoded world files (NovaWorld).
+const TERRAIN_NAME := "Dvxi5.trn"
+const ENV_NAME := "full_00.env"
+const FONT_NAME := "Serpen36"  # bare basename; the fonts workspace appends .fnt
+const CREDITS_NAME := "nlist.kda"
+const STRINGS_NAME := "GAMETEXT.bin"
+# A textured object that frames well from the 3/4 vantage _frame_object() uses.
+const OBJECT_NAME := "MH53.3di"
+
+# [workspace_id, asset_name, out_filename]. The asset is resolved from the
+# resource dir and opened before the workspace is activated.
 var _shots: Array = [
-	[EditorWorkstation.Workspace.TERRAIN, "res://game/assets/terrains/Dvxi5/Dvxi5.trn", "overview.png"],
-	[EditorWorkstation.Workspace.OBJECT, OBJECT_FIXTURE, "object.png"],
-	[EditorWorkstation.Workspace.FONTS, "res://assets/fonts/Serpen36.fnt", "fonts.png"],
-	[EditorWorkstation.Workspace.CREDITS, "res://assets/credits/nlist.kda", "credits.png"],
-	[EditorWorkstation.Workspace.STRINGS, "res://fixtures/strings/menu.bin", "strings.png"],
+	[EditorWorkstation.Workspace.TERRAIN, TERRAIN_NAME, "overview.png"],
+	[EditorWorkstation.Workspace.OBJECT, OBJECT_NAME, "object.png"],
+	[EditorWorkstation.Workspace.FONTS, FONT_NAME, "fonts.png"],
+	[EditorWorkstation.Workspace.CREDITS, CREDITS_NAME, "credits.png"],
+	[EditorWorkstation.Workspace.STRINGS, STRINGS_NAME, "strings.png"],
 ]
 
 var _editor: TerrainEditor
 var _workstation: EditorWorkstation
+var _root := ""
 var _out_abs := ""
 
 
@@ -55,20 +67,42 @@ func _ready() -> void:
 	_out_abs = ProjectSettings.globalize_path(OUT_DIR)
 	DirAccess.make_dir_recursive_absolute(_out_abs)
 
+	# Resolve the resource dir: $NOVA_RESOURCE_DIR, else the editor's persisted
+	# dir. Everything (terrain, textures, foliage, env, font, credits, strings,
+	# object) is opened by name from this one root.
+	_root = OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
+	if _root.is_empty():
+		_root = ResourceDirSettings.get_resource_dir()
+	if not ResourceDirSettings.is_valid_root(_root):
+		push_error("[capture] no valid resource dir; set NOVA_RESOURCE_DIR")
+		get_tree().quit(1)
+		return
+	# Persist before instancing so the workstation seeds VegAssets + scans the
+	# root on its own _ready (the fonts/credits workspaces read it from there).
+	ResourceDirSettings.set_resource_dir(_root)
+	print("[capture] resource dir: ", _root)
+
 	_editor = EditorScene.instantiate()
 	add_child(_editor)
 	# Let the editor's _ready run (window config, new_terrain, workstation bind).
 	await get_tree().process_frame
 	_force_window_size()
 	_workstation = _editor.workstation
+	# Re-apply the root explicitly: re-seeds VegAssets search roots and rescans,
+	# so foliage .3di resolve from the dir regardless of _ready ordering.
+	_workstation.set_resource_root_dir(_root)
 
 	# Light the world: open an environment so the terrain shader gets sun/fog,
 	# the sky dome renders, and the object preview (shared environment_editor)
 	# is lit too. Without this the 3D views are flat grey on black.
 	if _editor.environment_editor != null:
-		var env_err: int = _editor.environment_editor.open_env(ENV_FIXTURE)
-		if env_err != OK:
-			push_error("[capture] open_env failed (%d): %s" % [env_err, ENV_FIXTURE])
+		var env_path := NovaPaths.resolve_file(_root, ENV_NAME)
+		if env_path.is_empty():
+			push_error("[capture] %s not found in %s" % [ENV_NAME, _root])
+		else:
+			var env_err: int = _editor.environment_editor.open_env(env_path)
+			if env_err != OK:
+				push_error("[capture] open_env failed (%d): %s" % [env_err, env_path])
 
 	await _run_all()
 
@@ -87,26 +121,32 @@ func _force_window_size() -> void:
 func _run_all() -> void:
 	for shot in _shots:
 		var ws_id: int = shot[0]
-		var fixture: String = shot[1]
+		var asset_name: String = shot[1]
 		var out_name: String = shot[2]
 		var is_3d: bool = ws_id == EditorWorkstation.Workspace.TERRAIN \
 			or ws_id == EditorWorkstation.Workspace.OBJECT
 
-		# Load the fixture BEFORE activating the workspace: set_active_workspace()
+		# Open the asset BEFORE activating the workspace: set_active_workspace()
 		# rebuilds the workflow inspectors, so opening first means they're built
 		# against already-loaded data (otherwise summaries render stale/empty).
 		var ws: EditorWorkspace = _workstation._workspaces.get(ws_id)
-		if not fixture.is_empty():
-			# Fixtures under repo-root (res://../...) live outside the Godot
-			# project, where res:// can't reach; hand the loader a real OS path.
-			if fixture.begins_with("res://../"):
-				fixture = ProjectSettings.globalize_path(fixture)
-			if ws == null:
-				push_error("[capture] no workspace for %s" % out_name)
+		if ws == null:
+			push_error("[capture] no workspace for %s" % out_name)
+		elif ws_id == EditorWorkstation.Workspace.FONTS:
+			# Fonts has a by-name opener that resolves <name>.fnt from the root.
+			var ferr: int = int(ws.call("open_font_name", asset_name))
+			if ferr != OK:
+				push_error("[capture] open_font_name failed (%d): %s" % [ferr, asset_name])
+		else:
+			# Resolve the asset case-insensitively against the resource dir and
+			# hand the workspace a real OS path (open_file accepts absolute paths).
+			var path := NovaPaths.resolve_file(_root, asset_name)
+			if path.is_empty():
+				push_error("[capture] %s not found in %s" % [asset_name, _root])
 			else:
-				var err: int = ws.open_file(fixture)
+				var err: int = ws.open_file(path)
 				if err != OK:
-					push_error("[capture] open_file failed (%d): %s" % [err, fixture])
+					push_error("[capture] open_file failed (%d): %s" % [err, path])
 
 		_workstation.set_active_workspace(ws_id)
 		# One frame for the viewport mount + activate() to take effect.
@@ -154,10 +194,6 @@ func _frame_terrain() -> void:
 	# foreground so we don't look down into the unlit skybox floor.
 	cam.position = Vector3(center.x + 450.0, 150.0, center.z + 450.0)
 	cam.look_at(Vector3(center.x, 90.0, center.z))
-	# Hide the foliage preview: in this non-interactive path it scatters as
-	# untextured white placeholder boxes, which just clutters the hero shot.
-	if _editor._foliage_preview != null:
-		_editor._foliage_preview.visible = false
 
 
 # Frame the loaded object from a clean 3/4 vantage outside its bounds. The
