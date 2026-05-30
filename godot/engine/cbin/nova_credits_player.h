@@ -75,8 +75,8 @@ private:
 	void _on_resource_changed();  // Connected to credits_resource_->changed signal.
 
 	Ref<CbinCreditsResource> credits_resource_;
-	String font_base_path_ = "res://assets/fonts/";
-	String texture_base_path_ = "res://assets/textures/";
+	String font_base_path_;
+	String texture_base_path_;
 
 	Control *content_ = nullptr;
 	float content_height_ = 0.0f;  // Total height of content for scroll bounds.

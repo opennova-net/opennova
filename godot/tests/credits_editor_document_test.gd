@@ -1,7 +1,7 @@
 extends GutTest
 
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
-const KDA_PATH := "res://assets/credits/nlist.kda"
+const KDA_PATH := "res://../fixtures/cbin/nlist.reference.kda"
 const TEMP_DIR := "user://test_credits_doc"
 
 

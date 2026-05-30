@@ -33,6 +33,7 @@ var _suppress_env_signals := false
 var _sync_suppress := false
 var _preview_resource: CbinCreditsResource
 var _preview_paused := false
+var _resource_root_dir: String = ""
 
 func set_document(value: CreditsEditorDocument) -> void:
 	if _document == value:
@@ -45,6 +46,11 @@ func set_document(value: CreditsEditorDocument) -> void:
 		_document.resource_loaded.connect(_on_resource_loaded)
 		_document.resource_changed.connect(_on_resource_changed)
 		_on_resource_loaded(_document.resource)
+
+func set_resource_root_dir(path: String) -> void:
+	_resource_root_dir = path.strip_edges()
+	if _block_list != null and _block_list.has_method("set_resource_root_dir"):
+		_block_list.set_resource_root_dir(_resource_root_dir)
 
 func flush_pending_edits() -> Error:
 	if _mode == Mode.SOURCE and _source_view_host != null and _source_view_host.has_method("apply_pending"):
@@ -102,6 +108,8 @@ func _ready() -> void:
 	_player.started.connect(_refresh_preview_toolbar_state)
 	_player.finished.connect(_on_player_finished)
 	_block_list.selection_changed.connect(_on_block_list_selection_changed)
+	if _block_list.has_method("set_resource_root_dir"):
+		_block_list.set_resource_root_dir(_resource_root_dir)
 	if _block_list.has_signal("request_edit_font"):
 		_block_list.connect("request_edit_font", Callable(self, "_on_block_list_request_edit_font"))
 	if _source_view_host.has_signal("pending_edits_changed"):

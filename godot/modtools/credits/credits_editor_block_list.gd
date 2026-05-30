@@ -2,6 +2,7 @@ class_name CreditsEditorBlockList
 extends VBoxContainer
 
 const BlockCardScene = preload("res://modtools/credits/credits_editor_block_card.tscn")
+const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
 signal entries_reordered
 signal selection_changed(entry)
@@ -14,10 +15,18 @@ var _entry_to_card: Dictionary = {}  # CbinEntry -> CreditsEditorBlockCard
 var _reconcile_pending: bool = false
 var _selected_entry: CbinEntry
 var _selection_emit_pending: bool = false
+var _resource_root_dir: String = ""
 
 func _ready() -> void:
 	_vbox = self
+	if _resource_root_dir.is_empty():
+		_resource_root_dir = ResourceDirSettings.get_resource_dir()
 	_refresh_font_options()
+
+func set_resource_root_dir(path: String) -> void:
+	_resource_root_dir = path.strip_edges()
+	_refresh_font_options()
+	_reconcile()
 
 func set_resource(value: CbinCreditsResource) -> void:
 	if _resource == value:
@@ -42,7 +51,7 @@ func _do_deferred_reconcile() -> void:
 
 func _refresh_font_options() -> void:
 	_font_options = PackedStringArray()
-	var dir := DirAccess.open("res://assets/fonts")
+	var dir := DirAccess.open(_resource_root_dir) if not _resource_root_dir.is_empty() else null
 	if dir != null:
 		dir.list_dir_begin()
 		var name := dir.get_next()
@@ -104,11 +113,11 @@ func _reconcile() -> void:
 		else:
 			card = BlockCardScene.instantiate() as CreditsEditorBlockCard
 			_vbox.add_child(card)
-			card.bind(entry, _font_options)
 			card.request_delete.connect(_on_card_delete)
 			card.request_select.connect(_on_card_select)
 			card.request_edit_font.connect(_on_card_request_edit_font)
 			_entry_to_card[entry] = card
+		card.bind(entry, _font_options, _resource_root_dir)
 		if _vbox.get_child(i) != card:
 			_vbox.move_child(card, i)
 

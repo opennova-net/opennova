@@ -7,6 +7,8 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <unordered_map>
+
 #include "cbin/cbin.h"
 
 namespace godot {
@@ -23,6 +25,10 @@ String underscore_to_space(const std::string &s) {
 std::string space_to_underscore(const String &s) {
 	String result = s.replace(" ", "_");
 	return result.utf8().get_data();
+}
+
+String normalized_base_dir(const String &path) {
+	return path.replace("\\", "/").get_base_dir();
 }
 
 // Convert Godot Color to CBIN color (RGB 24-bit).
@@ -60,7 +66,6 @@ String KdaResourceFormatLoader::_get_resource_type(const String &p_path) const {
 
 Variant KdaResourceFormatLoader::_load(const String &p_path, const String &p_original_path, bool p_use_sub_threads,
                                 int32_t p_cache_mode) const {
-	(void)p_original_path;
 	(void)p_use_sub_threads;
 	(void)p_cache_mode;
 
@@ -93,6 +98,34 @@ Variant KdaResourceFormatLoader::_load(const String &p_path, const String &p_ori
 	// Create CbinCreditsResource.
 	Ref<CbinCreditsResource> resource;
 	resource.instantiate();
+	String resource_dir = normalized_base_dir(p_path);
+	String original_dir = normalized_base_dir(p_original_path);
+	if (!original_dir.is_empty()) {
+		resource_dir = original_dir;
+	}
+
+	std::unordered_map<std::string, Ref<Resource>> font_cache;
+	std::unordered_map<std::string, Ref<Resource>> texture_cache;
+	auto find_font = [&](const String &font_name) -> Ref<Resource> {
+		std::string key(font_name.to_lower().utf8().get_data());
+		auto it = font_cache.find(key);
+		if (it != font_cache.end()) {
+			return it->second;
+		}
+		Ref<Resource> font = cbin_internal::find_font_by_name(font_name, resource_dir);
+		font_cache.emplace(key, font);
+		return font;
+	};
+	auto find_texture = [&](const String &texture_name) -> Ref<Resource> {
+		std::string key(texture_name.to_lower().utf8().get_data());
+		auto it = texture_cache.find(key);
+		if (it != texture_cache.end()) {
+			return it->second;
+		}
+		Ref<Resource> texture = cbin_internal::find_texture_by_name(texture_name, resource_dir);
+		texture_cache.emplace(key, texture);
+		return texture;
+	};
 
 	// Set ENV values.
 	resource->set_scroll_rate(credits.scroll_rate);
@@ -122,10 +155,13 @@ Variant KdaResourceFormatLoader::_load(const String &p_path, const String &p_ori
 				// Apply current state.
 				text_entry->set_color(current_color);
 				text_entry->set_justify(current_justify);
-				// Preserve the KDA font name even when the matching .fnt
-				// resource is not present in this Godot project.
 				if (!src.font.empty()) {
-					text_entry->set_font_name(String(src.font.c_str()));
+					String font_name(src.font.c_str());
+					text_entry->set_font_name(font_name);
+					Ref<Resource> font = find_font(font_name);
+					if (font.is_valid()) {
+						text_entry->set_font(font);
+					}
 				}
 				resource->add_entry(text_entry);
 				break;
@@ -147,12 +183,11 @@ Variant KdaResourceFormatLoader::_load(const String &p_path, const String &p_ori
 			case cbin::EntryType::Image: {
 				Ref<CbinImageEntry> image_entry;
 				image_entry.instantiate();
-				// Load texture by name from assets/textures/ directory.
 				if (!src.image_path.empty()) {
 					String texture_name = String(src.image_path.c_str());
 					// Always record the original name so placeholders can display it.
 					image_entry->set_texture_name(texture_name);
-					Ref<Resource> texture = cbin_internal::find_texture_by_name(texture_name, "res://assets/textures/");
+					Ref<Resource> texture = find_texture(texture_name);
 					if (texture.is_valid()) {
 						image_entry->set_texture(texture);
 					}

@@ -1,7 +1,7 @@
 extends SceneTree
 
 # Headless validation of the main_game.tscn runtime pipeline. Loads the scene,
-# points the shared NovaWorld at an explicit resource dir (the repo terrain
+# points the shared NovaWorld at an explicit resource dir (a synthesized one-root
 # fixture by default, or a dir passed via `-- <dir>`), waits for NovaTerrainData,
 # moves the camera onto a painted foliage point, then verifies the foliage
 # dispatcher is using broad camera-grid coverage. There is no runtime fallback;
@@ -18,7 +18,7 @@ func _initialize() -> void:
 
 func _run() -> void:
 	var args := OS.get_cmdline_user_args()
-	var dir := args[0] if args.size() >= 1 else ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5")
+	var dir := args[0] if args.size() >= 1 else _default_runtime_resource_root()
 
 	var packed := load("res://game/main_game.tscn") as PackedScene
 	if packed == null:
@@ -202,6 +202,46 @@ func _has_nonwhite_instance(dispatcher: NovaFoliageDispatcher) -> bool:
 			if absf(c.r - 1.0) > 0.02 or absf(c.g - 1.0) > 0.02 or absf(c.b - 1.0) > 0.02:
 				return true
 	return false
+
+
+func _default_runtime_resource_root() -> String:
+	var root := ProjectSettings.globalize_path("user://runtime_scene_probe_resource_root")
+	DirAccess.make_dir_recursive_absolute(root)
+	_copy_dir_files(ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"), root)
+	_copy_file(
+		ProjectSettings.globalize_path("res://../fixtures/env/full_00.env"),
+		root.path_join("full_00.env")
+	)
+	return root
+
+
+func _copy_dir_files(src_dir: String, dst_dir: String) -> void:
+	var dir := DirAccess.open(src_dir)
+	if dir == null:
+		push_error("runtime_scene_probe: cannot open fixture dir " + src_dir)
+		return
+	dir.list_dir_begin()
+	var filename := dir.get_next()
+	while not filename.is_empty():
+		if not dir.current_is_dir():
+			_copy_file(src_dir.path_join(filename), dst_dir.path_join(filename))
+		filename = dir.get_next()
+	dir.list_dir_end()
+
+
+func _copy_file(src_path: String, dst_path: String) -> void:
+	var src := FileAccess.open(src_path, FileAccess.READ)
+	if src == null:
+		push_error("runtime_scene_probe: cannot read fixture file " + src_path)
+		return
+	var dst := FileAccess.open(dst_path, FileAccess.WRITE)
+	if dst == null:
+		src.close()
+		push_error("runtime_scene_probe: cannot write fixture file " + dst_path)
+		return
+	dst.store_buffer(src.get_buffer(src.get_length()))
+	dst.close()
+	src.close()
 
 
 func _make_editor_style_dispatcher(data: NovaTerrainData) -> NovaFoliageDispatcher:
