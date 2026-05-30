@@ -1,10 +1,19 @@
 extends GutTest
 
-const FULL_00_ENV := "res://game/assets/environments/Full_00/full_00.env"
+# The env is not bundled with the project; it loads from an external directory
+# (the resource dir at runtime). The test fixture lives in repo-root fixtures/.
+const FULL_00_ENV_FIXTURE := "res://../fixtures/env/full_00.env"
 
 
-func test_full_00_env_loads_through_resource_loader() -> void:
-	var env := ResourceLoader.load(FULL_00_ENV) as EnvFile
+func _load_full_00() -> EnvFile:
+	var env := EnvFile.new()
+	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
+	env.load()
+	return env
+
+
+func test_full_00_env_loads_and_parses() -> void:
+	var env := _load_full_00()
 
 	assert_not_null(env, "FULL_00 should load as the shared EnvFile resource.")
 	if env == null:
@@ -23,7 +32,7 @@ func test_full_00_env_loads_through_resource_loader() -> void:
 
 
 func test_env_interpolation_and_export_round_trip() -> void:
-	var env := ResourceLoader.load(FULL_00_ENV) as EnvFile
+	var env := _load_full_00()
 	assert_not_null(env, "Fixture should load before interpolation.")
 	if env == null:
 		return

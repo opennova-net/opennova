@@ -1,9 +1,9 @@
 extends RefCounted
 
-const DEFAULT_SEARCH_ROOTS := [
-	"res://modtools/assets/models/",
-	"res://game/assets/models/",
-]
+# Vegetation .3di are not bundled (neither game/ nor modtools/ ship them) — both
+# the runtime and the editor set their search roots from a user-chosen resource
+# directory. Empty default == no models until a root is set.
+const DEFAULT_SEARCH_ROOTS: Array = []
 
 static var _mesh_cache: Dictionary = {}
 static var _model_path_cache: Dictionary = {}

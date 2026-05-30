@@ -5,29 +5,25 @@ extends Node3D
 # to shared C++ methods on NovaTerrainData (sub_5C6770 / sub_5C65E0 analogues)
 # so runtime and editor go through one set of engine-correct math.
 #
-# Assets (terrain + vegetation) are NOT shipped in the .pck — bundling .tga
-# imports them to compressed .ctex, which degrades the terrain vs the editor's
-# raw load. Instead the runtime loads them from the user's external asset
-# directory (the same one the editor's resource browser uses), raw and
-# uncompressed. A repo-local bundled copy is used as a dev/CI fallback only.
+# The engine ships no game data. All assets — terrain, vegetation, and the
+# environment — load from the user's external resource directory (the same one
+# the editor browses), raw and uncompressed. The shipped game prompts for that
+# directory at launch; dev/editor-play falls back to the repo test fixtures,
+# which are outside the exported .pck.
 
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
-# Bundled veg roots hold only textures, no .3di; the real vegetation models live
-# in the user's external asset directory.
-const DEFAULT_VEG_ROOTS := ["res://modtools/assets/models/", "res://game/assets/models/"]
-
-# The terrain this runtime loads, by name, from the chosen resource directory.
+# The terrain + environment this runtime loads, by name, from the resource dir.
 const TERRAIN_FILE := "Dvxi5.trn"
-# Dev/CI fallback — present in the repo but excluded from the runtime export.
-const BUNDLED_TRN := "res://game/assets/terrains/Dvxi5/Dvxi5.trn"
+const ENV_FILE := "full_00.env"
 
 @onready var _terrain: NovaTerrain = $NovaTerrain
 @onready var _camera: Camera3D = $Camera3D
 @onready var _dispatcher: NovaFoliageDispatcher = $NovaTerrain/FoliageDispatcher
 @onready var _tile_overlay: NovaTerrainTileOverlay = $NovaTerrain/TileOverlay
 @onready var _water: Node = get_node_or_null("NovaWater")
+@onready var _env: Node = get_node_or_null("NovaEnvironment")
 
 var _terrain_data: NovaTerrainData
 var _runtime_assets_configured: bool = false
@@ -50,6 +46,7 @@ func _resolve_and_load() -> void:
 	var trn := _resolve_trn_path(dir)
 	if not trn.is_empty():
 		_apply_veg_roots(dir)
+		_load_environment(dir)
 		_load_terrain(trn)
 		return
 	if DisplayServer.get_name() == "headless":
@@ -58,22 +55,47 @@ func _resolve_and_load() -> void:
 	_prompt_resource_dir()
 
 
+# Load the environment (lighting/sky/fog) from the resource dir, falling back to
+# the repo fixture for dev/editor-play. NovaEnvironment's setter reloads on assign.
+func _load_environment(dir: String) -> void:
+	if _env == null:
+		return
+	var env_path := ""
+	if not dir.is_empty():
+		var external := dir.path_join(ENV_FILE)
+		if FileAccess.file_exists(external):
+			env_path = external
+	if env_path.is_empty():
+		var fixture := ProjectSettings.globalize_path("res://../fixtures/env/" + ENV_FILE)
+		if FileAccess.file_exists(fixture):
+			env_path = fixture
+	if env_path.is_empty():
+		push_warning("main_game: no environment found (%s)" % ENV_FILE)
+		return
+	var env := EnvFile.new()
+	env.set_source_path(env_path)
+	if env.load() != OK:
+		push_warning("main_game: failed to load environment '%s'" % env_path)
+		return
+	_env.environment_data = env
+
+
 func _resolve_trn_path(dir: String) -> String:
 	if not dir.is_empty():
 		var external := dir.path_join(TERRAIN_FILE)
 		if FileAccess.file_exists(external):
 			return external
-	if FileAccess.file_exists(BUNDLED_TRN):
-		return BUNDLED_TRN
+	# Dev/editor-play fallback: the repo test fixtures. `res://../` is outside the
+	# exported .pck, so the shipped game has no fallback and requires a resource dir.
+	var fixture := ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5/" + TERRAIN_FILE)
+	if FileAccess.file_exists(fixture):
+		return fixture
 	return ""
 
 
 func _apply_veg_roots(dir: String) -> void:
-	var roots: Array = []
-	if not dir.is_empty():
-		roots.append(dir)
-	roots.append_array(DEFAULT_VEG_ROOTS)
-	VegAssets.set_search_roots(roots)
+	# Vegetation is loaded only from the resource directory — no bundled fallback.
+	VegAssets.set_search_roots([dir] if not dir.is_empty() else [])
 	_veg_roots_ready = true
 
 
@@ -121,16 +143,18 @@ func _on_resource_dir_selected(dir: String) -> void:
 	ResourceDirSettings.set_resource_dir(dir)
 	VegAssets.clear_cache()
 	_apply_veg_roots(dir)
+	_load_environment(dir)
 	_load_terrain(trn)
 
 
 func _on_resource_dir_canceled() -> void:
 	_cleanup_resource_picker()
-	# A directory is required; fall back to a bundled copy when one exists (dev),
+	# A directory is required; fall back to the repo fixtures when present (dev),
 	# otherwise re-prompt.
 	var trn := _resolve_trn_path("")
 	if not trn.is_empty():
 		_apply_veg_roots("")
+		_load_environment("")
 		_load_terrain(trn)
 	else:
 		_prompt_resource_dir()
