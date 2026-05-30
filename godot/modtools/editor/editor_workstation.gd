@@ -24,7 +24,7 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _body_row: SplitContainer = %BodyRow
 @onready var _center_right_split: SplitContainer = %CenterRightSplit
 @onready var _left_lane: PanelContainer = %LeftLane
-@onready var _workspace_rail: HBoxContainer = %WorkspaceRail
+@onready var _workspace_rail: VBoxContainer = %WorkspaceRail
 @onready var _workspace_actions_host: VBoxContainer = %WorkspaceActionsHost
 @onready var _modes_label: Label = %ModesLabel
 @onready var _mode_rail: VBoxContainer = %ModeRail
@@ -74,6 +74,10 @@ var _workspaces: Dictionary = {}
 var _workspace_defs_cache: Array = []
 var _environment_workspace: EnvironmentEditorWorkspace
 var _workspace_buttons: Dictionary = {}
+# Popup workspaces (Environment) keep their nav buttons here, separate from
+# _workspace_buttons, because they never become _active_workspace_id; their
+# pressed state mirrors popup visibility instead of the active-id refresh loop.
+var _popup_workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
 var _environment_action_buttons: Dictionary = {}
 var _asset_dock_workspace_id: int = -1
@@ -181,14 +185,16 @@ func _process(_delta: float) -> void:
 
 
 func _workspace_defs() -> Array:
+	# Categories group the nav list; array order is the within-category order and
+	# the order categories first appear (World, Interface, Atmosphere).
 	return [
-		WorkspaceDef.make(Workspace.TERRAIN, TerrainWorkspaceAdapter),
-		WorkspaceDef.make(Workspace.OBJECT, ObjectWorkspaceAdapter),
-		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter),
-		WorkspaceDef.make(Workspace.FONTS, FontsWorkspaceAdapter),
-		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter),
-		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter),
-		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true),
+		WorkspaceDef.make(Workspace.TERRAIN, TerrainWorkspaceAdapter, false, &"World"),
+		WorkspaceDef.make(Workspace.OBJECT, ObjectWorkspaceAdapter, false, &"World"),
+		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter, false, &"World"),
+		WorkspaceDef.make(Workspace.FONTS, FontsWorkspaceAdapter, false, &"Interface"),
+		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter, false, &"Interface"),
+		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter, false, &"Interface"),
+		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true, &"Atmosphere"),
 	]
 
 
@@ -207,23 +213,77 @@ func _ensure_workspaces() -> void:
 			_workspaces[def.id] = workspace
 
 
+# Build the vertical, category-grouped workspace nav. Each workspace is a
+# full-width row so labels never squash as more are added; the list lives in a
+# bounded ScrollContainer (see the scene) so growth scrolls instead of pushing
+# the inspector off-screen. The registry is static, so this runs once (unlike
+# _rebuild_workflow_rail, which rebuilds every refresh).
 func _build_workspace_rail() -> void:
+	var active_style := _make_workspace_active_stylebox()
+	# Bucket defs by category, preserving array order within each bucket and the
+	# order categories first appear in the registry.
+	var buckets: Dictionary = {}
+	var category_order: Array = []
 	for def_v in _workspace_defs_cache:
 		var def := def_v as WorkspaceDef
-		if def.popup:
-			continue
-		var workspace := _get_workspace(def.id)
-		var btn := Button.new()
-		btn.text = workspace.get_workspace_label() if workspace != null else "Workspace"
-		btn.toggle_mode = true
-		btn.focus_mode = Control.FOCUS_NONE
-		btn.custom_minimum_size = Vector2(0, 36)
-		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.tooltip_text = workspace.get_workspace_tooltip() if workspace != null else ""
-		btn.pressed.connect(_on_workspace_pressed.bind(def.id))
-		_workspace_rail.add_child(btn)
-		_workspace_buttons[def.id] = btn
+		if not buckets.has(def.category):
+			buckets[def.category] = []
+			category_order.append(def.category)
+		(buckets[def.category] as Array).append(def)
+	for category in category_order:
+		if String(category) != "":
+			var header := Label.new()
+			header.text = String(category)
+			header.theme_type_variation = &"Muted"
+			_workspace_rail.add_child(header)
+		for def_v in buckets[category]:
+			var def := def_v as WorkspaceDef
+			# Popup workspaces (Environment) are not in _workspaces; their single
+			# instance lives in _environment_workspace.
+			var workspace: EditorWorkspace = _environment_workspace if def.popup else _get_workspace(def.id)
+			var btn := Button.new()
+			btn.text = workspace.get_workspace_label() if workspace != null else "Workspace"
+			btn.tooltip_text = workspace.get_workspace_tooltip() if workspace != null else ""
+			btn.toggle_mode = true
+			btn.focus_mode = Control.FOCUS_NONE
+			btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			btn.clip_text = true
+			btn.custom_minimum_size = Vector2(0, 34)
+			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			# Faint accent fill so the active row reads as filled, not just outlined.
+			btn.add_theme_stylebox_override("pressed", active_style)
+			btn.add_theme_stylebox_override("hover_pressed", active_style)
+			# Icon hook point for the future icon pass (def.icon_id -> btn.icon).
+			if def.popup:
+				# A popup row toggles its panel rather than swapping the viewport.
+				btn.toggled.connect(_on_popup_workspace_toggled.bind(def.id))
+				_popup_workspace_buttons[def.id] = btn
+			else:
+				btn.pressed.connect(_on_workspace_pressed.bind(def.id))
+				_workspace_buttons[def.id] = btn
+			_workspace_rail.add_child(btn)
 	_refresh_workspace_buttons()
+
+
+# Local-only active-row emphasis (no editor_theme.tres change). The themed pressed
+# background is darker than normal, so in a tall uniform list a hovered inactive
+# row can read heavier than the active one; a faint accent fill fixes that.
+func _make_workspace_active_stylebox() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.8392, 0.5529, 0.2902, 0.22)
+	sb.border_color = Color(0.8392, 0.5529, 0.2902, 0.9)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(3)
+	sb.content_margin_left = 10.0
+	sb.content_margin_right = 10.0
+	sb.content_margin_top = 6.0
+	sb.content_margin_bottom = 6.0
+	return sb
+
+
+func _on_popup_workspace_toggled(workspace_id: int, pressed: bool) -> void:
+	if workspace_id == Workspace.ENVIRONMENT:
+		_set_environment_popup_visible(pressed)
 
 
 func _action_defs_for_workspace(workspace: EditorWorkspace) -> Array:
@@ -429,6 +489,10 @@ func _refresh_workspace_buttons() -> void:
 		var btn: Button = _workspace_buttons[workspace_id]
 		btn.set_pressed_no_signal(workspace_id == _active_workspace_id)
 		btn.disabled = busy
+	# Popup rows never become _active_workspace_id; their pressed state is driven
+	# by popup visibility in _set_environment_popup_visible, so only sync busy here.
+	for workspace_id in _popup_workspace_buttons:
+		(_popup_workspace_buttons[workspace_id] as Button).disabled = busy
 
 
 func _refresh_workspace_surface() -> void:
@@ -758,6 +822,9 @@ func _set_environment_popup_visible(active: bool) -> void:
 	_environment_popup.visible = active
 	if _environment_toggle_button != null:
 		_environment_toggle_button.set_pressed_no_signal(active)
+	# Keep the Environment nav row in sync with the in-viewport sun toggle.
+	if _popup_workspace_buttons.has(Workspace.ENVIRONMENT):
+		(_popup_workspace_buttons[Workspace.ENVIRONMENT] as Button).set_pressed_no_signal(active)
 	if active:
 		_ensure_environment_popup_content()
 	_refresh_environment_popup_state()
