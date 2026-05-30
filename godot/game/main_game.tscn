@@ -1,8 +1,6 @@
 [gd_scene format=3 uid="uid://dqiq0mn3kghyi"]
 
-[ext_resource type="NovaTerrainData" uid="uid://llim506ipe7g" path="res://game/assets/terrains/Dvxi5/Dvxi5.trn" id="1_h5ihh"]
 [ext_resource type="Script" uid="uid://bh7gceflcrkfx" path="res://engine/fly_camera.gd" id="2_io4ac"]
-[ext_resource type="NovaTerrainTileInfo" uid="uid://b2awmiuci06mx" path="res://game/assets/terrains/Dvxi5/00TRg.til" id="3_433cb"]
 [ext_resource type="PackedScene" path="res://engine/ui/fps_label.tscn" id="3_fps"]
 [ext_resource type="Script" uid="uid://u6bng4ck62r0" path="res://game/main_game.gd" id="4_main"]
 [ext_resource type="EnvFile" uid="uid://dcg6gvj6q5kw" path="res://game/assets/environments/Full_00/full_00.env" id="5_envfile"]
@@ -15,14 +13,12 @@
 script = ExtResource("4_main")
 
 [node name="NovaTerrain" type="NovaTerrain" parent="." unique_id=1162114807]
-terrain_data = ExtResource("1_h5ihh")
 environment_path = NodePath("../NovaEnvironment")
 weather_path = NodePath("../NovaWeather")
 
 [node name="FoliageDispatcher" type="NovaFoliageDispatcher" parent="NovaTerrain" unique_id=1787737906]
 
 [node name="TileOverlay" type="NovaTerrainTileOverlay" parent="NovaTerrain" unique_id=370783434]
-tile_info = ExtResource("3_433cb")
 
 [node name="Camera3D" type="Camera3D" parent="." unique_id=1908144657]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 71.472435, 0)
@@ -45,7 +41,6 @@ environment_path = NodePath("../NovaEnvironment")
 [node name="NovaWater" type="Node3D" parent="." unique_id=688076420]
 script = ExtResource("9_water")
 environment_path = NodePath("../NovaEnvironment")
-terrain_data = ExtResource("1_h5ihh")
 water_height = 10.5
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1222701923]
