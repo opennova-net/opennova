@@ -19,7 +19,7 @@ func _initialize() -> void:
 
 
 func _run() -> void:
-	var source_trn := "res://game/assets/terrains/Dvxi5/Dvxi5.trn"
+	var source_trn := ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5/Dvxi5.trn")
 	var output_dir := OS.get_user_data_dir() + "/trn_project_roundtrip_probe"
 	_cleanup_dir(output_dir)
 	DirAccess.make_dir_recursive_absolute(output_dir)
@@ -37,7 +37,7 @@ func _run() -> void:
 
 	print("\n[step 2] save as project (no CPT, no .tpj)")
 	var terrain_name := "Dvxi5"
-	var trn_dir := "res://game/assets/terrains/Dvxi5"
+	var trn_dir := ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5")
 	var pcx_slots := {"charmap": "_m.pcx", "foliagemap": "_f.pcx"}
 	for slot_id in pcx_slots.keys():
 		var slot_suffix := String(pcx_slots[slot_id])
