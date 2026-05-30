@@ -29,6 +29,14 @@ window/size/viewport_width=1600
 window/size/viewport_height=900
 window/vsync/vsync_mode=0
 
+[editor]
+
+; Godot 4.6.1's parallel asset importer can intermittently segfault on a cold
+; import (race in the multithreaded reimport path), leaving a half-populated
+; .godot/imported cache. Serialize imports: the first-import cost is one-time
+; and only affects the editor, not the running game. See PR #23 CI history.
+import/use_multiple_threads=false
+
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/gut/plugin.cfg")
