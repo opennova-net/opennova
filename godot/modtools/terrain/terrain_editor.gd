@@ -1357,7 +1357,8 @@ func _sync_foliage_preview() -> void:
 		camera,
 		_document.foliage_map,
 		_document.foliage_defs,
-		_document.selected_foliage_def_index
+		_document.selected_foliage_def_index,
+		_data
 	)
 	_foliage_preview.rebuild_if_needed()
 
