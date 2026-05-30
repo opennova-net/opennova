@@ -4,6 +4,8 @@ const CreditsEditorScene = preload("res://modtools/credits/credits_editor.tscn")
 const CreditsEditorBlockCardScene = preload("res://modtools/credits/credits_editor_block_card.tscn")
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
 const CreditsWorkspaceScript = preload("res://modtools/editor/credits_workspace.gd")
+const KDA_PATH := "res://../fixtures/cbin/nlist.reference.kda"
+const CREDITS_FIXTURE_DIR := "res://../fixtures/cbin"
 const MINIMAL_SOURCE := "[ENV]\nscroll_rate=1.25\nvertical_space=18\ncenter_x=360\n\n[TEXT]\nApplied from source\n"
 const MALFORMED_SOURCE := "[ENV]\nscroll_rate=1.25\n\n[TEXT]\n~Fbad\n"
 
@@ -51,8 +53,8 @@ func test_editor_binds_document_and_loads_kda() -> void:
 
 	var doc: CreditsEditorDocument = autofree(CreditsEditorDocument.new())
 	editor.set_document(doc)
-	var err: int = doc.open_kda("res://assets/credits/nlist.kda")
-	assert_eq(err, OK, "open_kda returns OK for the bundled fixture")
+	var err: int = doc.open_kda(KDA_PATH)
+	assert_eq(err, OK, "open_kda returns OK for the KDA fixture")
 	await get_tree().process_frame
 	assert_gt(doc.resource.get_entry_count(), 0, "fixture has entries")
 
@@ -191,7 +193,7 @@ func test_block_card_missing_image_name_commits_on_focus_loss() -> void:
 	await get_tree().process_frame
 
 	var entry := CbinImageEntry.new()
-	card.bind(entry, PackedStringArray())
+	card.bind(entry, PackedStringArray(), ProjectSettings.globalize_path(CREDITS_FIXTURE_DIR))
 	await get_tree().process_frame
 
 	var path_edit: LineEdit = card.get_node("%ImagePathEdit")
@@ -208,7 +210,7 @@ func test_block_card_image_path_uses_case_and_extension_fallback() -> void:
 	await get_tree().process_frame
 
 	var entry := CbinImageEntry.new()
-	card.bind(entry, PackedStringArray())
+	card.bind(entry, PackedStringArray(), ProjectSettings.globalize_path(CREDITS_FIXTURE_DIR))
 	await get_tree().process_frame
 
 	var path_edit: LineEdit = card.get_node("%ImagePathEdit")

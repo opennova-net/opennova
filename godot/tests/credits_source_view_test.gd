@@ -8,7 +8,7 @@ extends GutTest
 # DLL is rebuilt with the T21 changes (cbin_credits_resource.cpp > DLL mtime).
 # test_to_text_contains_required_headers is DLL-independent and should always pass.
 
-const KDA_PATH := "res://assets/credits/nlist.kda"
+const KDA_PATH := "res://../fixtures/cbin/nlist.reference.kda"
 
 # A minimal but complete KDA text usable on any DLL version.
 const MINIMAL_KDA := "[ENV]\nscroll_rate=1.0\n[TEXT]\nHello\nWorld\n"

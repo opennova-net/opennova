@@ -2002,6 +2002,7 @@ func _load_editor_state() -> void:
 
 func _save_editor_state() -> void:
 	var config := ConfigFile.new()
+	config.load("user://terrain_editor_state.cfg")
 	config.set_value("paths", "last_open_dir", _last_open_dir)
 	config.set_value("paths", "last_save_dir", _last_save_dir)
 	config.set_value("paths", "last_export_dir", _last_export_dir)

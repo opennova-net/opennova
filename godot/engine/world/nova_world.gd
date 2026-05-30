@@ -44,13 +44,19 @@ func load_world(dir: String = "") -> int:
 	if dir.is_empty():
 		load_failed.emit("no resource directory set")
 		return ERR_FILE_NOT_FOUND
-	var trn := dir.path_join(terrain_file)
-	if not FileAccess.file_exists(trn):
+	var trn := NovaPaths.resolve_file(dir, terrain_file)
+	if trn.is_empty():
 		load_failed.emit("%s not found in %s" % [terrain_file, dir])
+		return ERR_FILE_NOT_FOUND
+	var env_path := NovaPaths.resolve_file(dir, env_file)
+	if env_path.is_empty():
+		load_failed.emit("%s not found in %s" % [env_file, dir])
 		return ERR_FILE_NOT_FOUND
 
 	VegAssets.set_search_roots([dir])
-	_load_environment(dir)
+	if not _load_environment(env_path):
+		load_failed.emit("failed to load %s" % env_path)
+		return ERR_CANT_OPEN
 	if not _load_terrain(trn):
 		load_failed.emit("failed to load %s" % trn)
 		return ERR_CANT_OPEN
@@ -60,20 +66,17 @@ func load_world(dir: String = "") -> int:
 	return OK
 
 
-func _load_environment(dir: String) -> void:
+func _load_environment(env_path: String) -> bool:
 	if _env == null:
-		return
-	var env_path := dir.path_join(env_file)
-	if not FileAccess.file_exists(env_path):
-		push_warning("NovaWorld: environment '%s' not found" % env_path)
-		return
+		return true
 	var env := EnvFile.new()
 	env.set_source_path(env_path)
 	if env.load() != OK:
 		push_warning("NovaWorld: failed to load environment '%s'" % env_path)
-		return
+		return false
 	# NovaEnvironment's setter reloads + pushes shader globals on assignment.
 	_env.environment_data = env
+	return true
 
 
 func _load_terrain(trn_path: String) -> bool:

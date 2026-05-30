@@ -340,8 +340,12 @@ func test_fonts_workspace_open_uses_resource_browser() -> void:
 
 func test_workstation_opens_font_workspace_by_credits_font_name() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var root := ProjectSettings.globalize_path("res://../fixtures/fnt")
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK,
+		"Credits font integration should use the configured resource root.")
 
-	assert_eq(workstation.open_font_workspace("Serpen24"), OK, "Credits integration should open a bundled Nova font by font name.")
+	assert_eq(workstation.open_font_workspace("Serpen24"), OK,
+		"Credits integration should open a Nova font by name from the configured resource root.")
 	await get_tree().process_frame
 
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.FONTS,
@@ -452,6 +456,20 @@ func test_resource_settings_persist_in_editor_state() -> void:
 	var next_workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	assert_eq(next_workstation.get_resource_root_dir(), root, "New workstation instances should load the persisted resource directory.")
 	assert_true(next_workstation.is_resource_recursive(), "Recursive setting should persist with its default value.")
+
+
+func test_terrain_editor_path_state_preserves_resource_directory() -> void:
+	var root := _make_resource_fixture("resource_settings_path_preserve")
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	workstation._resource_recursive = true
+	assert_eq(workstation._set_resource_root_dir(root, true, true), OK, "Persisted resource directory should scan successfully.")
+
+	var editor = autofree(TerrainEditorScript.new())
+	editor._remember_open_path(root.path_join("terrains/alpha.trn"))
+
+	var next_workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	assert_eq(next_workstation.get_resource_root_dir(), root, "Saving terrain editor path state must preserve the shared resource directory.")
+	assert_true(next_workstation.is_resource_recursive(), "Saving terrain editor path state must preserve the recursive resource setting.")
 
 
 func test_startup_applies_persisted_resource_dir_to_veg_search_roots() -> void:

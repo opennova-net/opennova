@@ -61,6 +61,8 @@ func mount_viewport(host: Control) -> void:
 	if _editor.get_parent() == null:
 		host.add_child(_editor)
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
+	if _editor.has_method("set_resource_root_dir"):
+		_editor.set_resource_root_dir(_resource_root_dir())
 	if _editor.has_signal("request_edit_font") and not _editor.is_connected("request_edit_font", Callable(self, "_on_editor_request_edit_font")):
 		_editor.connect("request_edit_font", Callable(self, "_on_editor_request_edit_font"))
 	_editor.set_document(_document)
@@ -287,3 +289,9 @@ func _on_editor_request_edit_font(font_name: String) -> void:
 	var err: Error = editor_shell.open_font_workspace(font_name)
 	if err != OK and editor_shell.has_method("show_status_message"):
 		editor_shell.show_status_message("Font not found: %s" % font_name, 5.0)
+
+
+func _resource_root_dir() -> String:
+	if editor_shell != null and editor_shell.has_method("get_resource_root_dir"):
+		return String(editor_shell.get_resource_root_dir())
+	return ""
