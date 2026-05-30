@@ -151,7 +151,6 @@ jobs:
 
       - name: Prime Godot import cache
         shell: bash
-        continue-on-error: true
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64.exe"
@@ -159,7 +158,19 @@ jobs:
             GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
           fi
           bash scripts/bootstrap_godot.sh
-          "$GODOT_BIN" --headless --path godot --import
+          # The editor importer can still crash on a cold import; a half-baked
+          # cache makes the test run fail with confusing "missing resource"
+          # errors instead of a clear signal. Retry, and fail loudly if the
+          # import never completes (was previously masked by continue-on-error).
+          ok=0
+          for attempt in 1 2 3; do
+            if "$GODOT_BIN" --headless --path godot --import; then ok=1; break; fi
+            echo "::warning::Godot import attempt ${attempt} failed; retrying"
+          done
+          if [[ "$ok" != "1" ]]; then
+            echo "::error::Godot import did not complete after 3 attempts"
+            exit 1
+          fi
 
       - name: Run Godot tests
         shell: bash

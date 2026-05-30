@@ -179,12 +179,13 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 
 	var workspace_rail: HBoxContainer = workstation.get_node("%WorkspaceRail")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Terrain should remain the default workspace.")
-	assert_eq(workspace_rail.get_child_count(), 5, "The shell should expose Terrain, Object, Mission, Fonts, and Credits workspaces.")
+	assert_eq(workspace_rail.get_child_count(), 6, "The shell should expose Terrain, Object, Mission, Fonts, Credits, and Strings workspaces.")
 	assert_eq((workspace_rail.get_child(0) as Button).text, "Terrain", "Terrain should be the first workspace.")
 	assert_eq((workspace_rail.get_child(1) as Button).text, "Object", "Object should replace the old standalone OED workflow.")
 	assert_eq((workspace_rail.get_child(2) as Button).text, "Mission", "Mission should have a reserved workspace.")
 	assert_eq((workspace_rail.get_child(3) as Button).text, "Fonts", "Fonts should be available for .fnt files.")
 	assert_eq((workspace_rail.get_child(4) as Button).text, "Credits", "Credits should be available for .kda files.")
+	assert_eq((workspace_rail.get_child(5) as Button).text, "Strings", "Strings should have a first-class workspace.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.CREDITS)
 	await get_tree().process_frame

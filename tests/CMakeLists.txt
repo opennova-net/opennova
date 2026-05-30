@@ -74,6 +74,14 @@ target_link_libraries(scr_unit_test PRIVATE opennova_scr)
 target_include_directories(scr_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME scr_unit COMMAND scr_unit_test)
 
+# RTXT localized string table tests
+foreach(test roundtrip byte_equal lookup strip_hotkey empty)
+    add_executable(rtxt_${test}_test rtxt/${test}_test.cpp)
+    target_link_libraries(rtxt_${test}_test PRIVATE opennova_rtxt)
+    target_include_directories(rtxt_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtxt)
+    add_test(NAME rtxt_${test} COMMAND rtxt_${test}_test)
+endforeach()
+
 # Resource directory index tests
 add_executable(resource_index_test resource_index/resource_index_test.cpp)
 target_link_libraries(resource_index_test PRIVATE opennova_resource_index)

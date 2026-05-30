@@ -33,6 +33,8 @@
 #include "fnt/fnt_resource_format.h"
 #include "fnt/fnt_import_plugin.h"
 #include "editor/opennova_editor_plugin.h"
+#include "rtxt/rtxt_string_file.h"
+#include "rtxt/rtxt_resource_format.h"
 #include "util/nova_data_format.h"
 #include "util/nova_texture_format.h"
 #include "resource_index/nova_resource_index.h"
@@ -51,6 +53,8 @@ static Ref<KdaResourceFormatSaver> kda_saver;
 static Ref<ResourceFormatLoaderFNT> fnt_loader;
 static Ref<ResourceFormatSaverFNT> fnt_saver;
 static Ref<ResourceFormatLoaderNovaTexture> nova_tex_loader;
+static Ref<ResourceFormatLoaderRTXT> rtxt_loader;
+static Ref<ResourceFormatSaverRTXT> rtxt_saver;
 
 void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
@@ -97,6 +101,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaFntResource);
 	GDREGISTER_CLASS(ResourceFormatLoaderFNT);
 	GDREGISTER_CLASS(ResourceFormatSaverFNT);
+	GDREGISTER_CLASS(RtxtStringFile);
+	GDREGISTER_CLASS(ResourceFormatLoaderRTXT);
+	GDREGISTER_CLASS(ResourceFormatSaverRTXT);
 	GDREGISTER_CLASS(NovaDataFile);
 	GDREGISTER_CLASS(ResourceFormatLoaderNovaTexture);
 	GDREGISTER_CLASS(NovaResourceIndex);
@@ -136,6 +143,12 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	nova_tex_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(nova_tex_loader, true);
+
+	rtxt_loader.instantiate();
+	ResourceLoader::get_singleton()->add_resource_format_loader(rtxt_loader);
+
+	rtxt_saver.instantiate();
+	ResourceSaver::get_singleton()->add_resource_format_saver(rtxt_saver);
 }
 
 void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
@@ -183,6 +196,12 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	ResourceLoader::get_singleton()->remove_resource_format_loader(nova_tex_loader);
 	nova_tex_loader.unref();
+
+	ResourceLoader::get_singleton()->remove_resource_format_loader(rtxt_loader);
+	rtxt_loader.unref();
+
+	ResourceSaver::get_singleton()->remove_resource_format_saver(rtxt_saver);
+	rtxt_saver.unref();
 }
 
 extern "C" {

@@ -18,6 +18,7 @@ add_subdirectory(libs/bfc1)
 add_subdirectory(libs/cbin)
 add_subdirectory(libs/def)
 add_subdirectory(libs/scr)
+add_subdirectory(libs/rtxt)
 add_subdirectory(libs/ase)
 add_subdirectory(libs/tdp)
 add_subdirectory(libs/oed)
@@ -43,6 +44,7 @@ set(OPENNOVA_CORE_TARGETS
     opennova_adm
     opennova_def
     opennova_scr
+    opennova_rtxt
     opennova_ase
     opennova_tdp
     opennova_oed

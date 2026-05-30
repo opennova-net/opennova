@@ -7,10 +7,11 @@ const ObjectWorkspaceAdapter = preload("res://modtools/object/object_workspace.g
 const MissionWorkspaceAdapter = preload("res://modtools/editor/mission_workspace.gd")
 const FontsWorkspaceAdapter = preload("res://modtools/editor/fonts_workspace.gd")
 const CreditsWorkspaceAdapter = preload("res://modtools/editor/credits_workspace.gd")
+const StringsWorkspaceAdapter = preload("res://modtools/strings/strings_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
 const VegAssets = preload("res://engine/terrain/veg_assets.gd")
 
-enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS }
+enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS }
 
 # Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
 # shows the non-popup ones in order. The enum below stays only as stable id
@@ -186,6 +187,7 @@ func _workspace_defs() -> Array:
 		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter),
 		WorkspaceDef.make(Workspace.FONTS, FontsWorkspaceAdapter),
 		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter),
+		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter),
 		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true),
 	]
 
