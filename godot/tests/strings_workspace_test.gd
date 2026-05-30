@@ -9,9 +9,13 @@ const EditorWorkstationScript = preload("res://modtools/editor/editor_workstatio
 
 func test_strings_workspace_in_rail() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	var rail: HBoxContainer = workstation.get_node("%WorkspaceRail")
-	assert_eq(rail.get_child_count(), 6, "Strings should join the workspace rail.")
-	assert_eq((rail.get_child(5) as Button).text, "Strings", "Strings should be the last rail workspace.")
+	var rail: VBoxContainer = workstation.get_node("%WorkspaceRail")
+	var row_texts := []
+	for child in rail.get_children():
+		if child is Button:
+			row_texts.append((child as Button).text)
+	assert_true(row_texts.has("Strings"), "Strings should join the workspace nav.")
+	assert_eq(row_texts[5], "Strings", "Strings should be the last switchable workspace row.")
 
 
 func test_strings_workspace_mounts_self_contained_view() -> void:

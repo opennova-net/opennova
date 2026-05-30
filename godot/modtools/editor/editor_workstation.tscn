@@ -61,36 +61,53 @@ vertical_alignment = 1
 [node name="WorkspaceLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
 layout_mode = 2
 theme_type_variation = &"Heading"
-text = "Workspace"
+text = "Workspaces"
 
-[node name="WorkspaceRail" type="HBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+[node name="LeftSplit" type="VSplitContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+layout_mode = 2
+size_flags_vertical = 3
+split_offset = 100
+
+[node name="WorkspaceScroll" type="ScrollContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit"]
+custom_minimum_size = Vector2(0, 80)
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="WorkspaceRail" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/WorkspaceScroll"]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 4
 
-[node name="WorkspaceActionsHost" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+[node name="LowerLane" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="WorkspaceActionsHost" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/LowerLane"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="WorkspaceSeparator" type="HSeparator" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+[node name="WorkspaceSeparator" type="HSeparator" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/LowerLane"]
 layout_mode = 2
 
-[node name="ModesLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+[node name="ModesLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/LowerLane"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"Heading"
 text = "Workflows"
 
-[node name="ModeRail" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+[node name="ModeRail" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/LowerLane"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="InspectorSeparator" type="HSeparator" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+[node name="InspectorSeparator" type="HSeparator" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/LowerLane"]
 layout_mode = 2
 
-[node name="InspectorHost" type="PanelContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+[node name="InspectorHost" type="PanelContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/LowerLane"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3

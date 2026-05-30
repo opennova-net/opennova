@@ -177,15 +177,20 @@ func _write_fixture_file(path: String, text: String) -> void:
 func test_workstation_starts_with_domain_workspaces() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
-	var workspace_rail: HBoxContainer = workstation.get_node("%WorkspaceRail")
+	var workspace_rail: VBoxContainer = workstation.get_node("%WorkspaceRail")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Terrain should remain the default workspace.")
-	assert_eq(workspace_rail.get_child_count(), 6, "The shell should expose Terrain, Object, Mission, Fonts, Credits, and Strings workspaces.")
-	assert_eq((workspace_rail.get_child(0) as Button).text, "Terrain", "Terrain should be the first workspace.")
-	assert_eq((workspace_rail.get_child(1) as Button).text, "Object", "Object should replace the old standalone OED workflow.")
-	assert_eq((workspace_rail.get_child(2) as Button).text, "Mission", "Mission should have a reserved workspace.")
-	assert_eq((workspace_rail.get_child(3) as Button).text, "Fonts", "Fonts should be available for .fnt files.")
-	assert_eq((workspace_rail.get_child(4) as Button).text, "Credits", "Credits should be available for .kda files.")
-	assert_eq((workspace_rail.get_child(5) as Button).text, "Strings", "Strings should have a first-class workspace.")
+
+	var row_texts := []
+	for child in workspace_rail.get_children():
+		if child is Button:
+			row_texts.append((child as Button).text)
+	assert_eq(row_texts, ["Terrain", "Object", "Mission", "Fonts", "Credits", "Strings", "Environment"],
+		"The nav should list every workspace as a full-width row, with Environment promoted from the sun button.")
+
+	# Workspaces are grouped under category headers (Muted labels).
+	assert_true(_has_label_text(workspace_rail, "World"), "World should head the world-building workspaces.")
+	assert_true(_has_label_text(workspace_rail, "Interface"), "Interface should head the interface-asset workspaces.")
+	assert_true(_has_label_text(workspace_rail, "Atmosphere"), "Atmosphere should head the Environment workspace.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.CREDITS)
 	await get_tree().process_frame
