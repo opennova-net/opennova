@@ -109,7 +109,9 @@ bool run_fixture(const fs::path &root, const Fixture &fixture) {
 	request.update_mask = static_cast<unsigned char>(OED_UPDATE_ALL);
 	const OedStatus export_rc = oed_session_export(session, &request);
 	if (export_rc != OED_STATUS_OK) {
-		std::fprintf(stderr, "oed_session_export failed for %s (%d)\n", fixture.stem, static_cast<int>(export_rc));
+		const char *msg = oed_session_last_error(session);
+		std::fprintf(stderr, "oed_session_export failed for %s (%d): %s\n", fixture.stem,
+		             static_cast<int>(export_rc), msg ? msg : "(no detail)");
 		oed_session_destroy(session);
 		tdp_free(&project);
 		return false;

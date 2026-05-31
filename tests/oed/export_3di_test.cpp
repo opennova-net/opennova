@@ -96,10 +96,17 @@ bool export_fixture(const fs::path &fixture_dir, const char *stem, const fs::pat
 	request.output_path = generated_path.string().c_str();
 	request.update_mask = static_cast<unsigned char>(OED_UPDATE_ALL);
 	const OedStatus export_rc = oed_session_export(session, &request);
+	std::string export_err;
+	if (export_rc != OED_STATUS_OK) {
+		if (const char *msg = oed_session_last_error(session)) {
+			export_err = msg;
+		}
+	}
 	oed_session_destroy(session);
 	tdp_free(&project);
 	if (export_rc != OED_STATUS_OK) {
-		std::fprintf(stderr, "oed_session_export failed for %s (%d)\n", stem, static_cast<int>(export_rc));
+		std::fprintf(stderr, "oed_session_export failed for %s (%d): %s\n", stem,
+		             static_cast<int>(export_rc), export_err.empty() ? "(no detail)" : export_err.c_str());
 		return false;
 	}
 	return true;
