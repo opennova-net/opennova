@@ -95,6 +95,9 @@ func build_inspector(host: Control) -> void:
 	_inspector = MnuPropertyInspectorScript.new()
 	_inspector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_inspector.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	# Row commits funnel through the editor so the mutation + undo stay centralized
+	# (the inspector never touches the document directly).
+	_inspector.edit_requested.connect(_on_inspector_edit)
 	host.add_child(_inspector)
 	# Populate from the editor's current selection. Subsequent selection changes
 	# (user + document reloads, which re-select the first screen) reach the
@@ -115,6 +118,11 @@ func _on_widget_selected(id: int) -> void:
 	_selected_id = id
 	if _inspector != null and is_instance_valid(_inspector):
 		_inspector.show_widget(_document.resource, id)
+
+
+func _on_inspector_edit(edit: Dictionary) -> void:
+	if _editor != null:
+		_editor.apply_edit(edit)
 
 
 func _resource_root() -> NovaResourceRoot:
@@ -208,3 +216,24 @@ func get_save_dialog_title() -> String:
 
 func get_save_dialog_dir() -> String:
 	return _document.get_last_save_dir()
+
+
+# Undo lives in the editor (shared by inspector commits + future canvas gestures);
+# the shell drives it through these hooks. Delegated defensively so it is safe
+# before mount / after release.
+func can_undo() -> bool:
+	return _editor != null and _editor.has_method("can_undo") and _editor.can_undo()
+
+
+func can_redo() -> bool:
+	return _editor != null and _editor.has_method("can_redo") and _editor.can_redo()
+
+
+func undo() -> void:
+	if _editor != null and _editor.has_method("undo"):
+		_editor.undo()
+
+
+func redo() -> void:
+	if _editor != null and _editor.has_method("redo"):
+		_editor.redo()

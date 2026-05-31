@@ -1,9 +1,11 @@
 extends GutTest
 
-# M6 gate: the Menus ONED workspace. Covers the editor document lifecycle, the
-# widget tree, the read-only property inspector, the edit_mode preview canvas
-# (single-screen visibility + letterbox fit), the editor selection wiring, and
-# the workspace adapter (actions + inspector population).
+# M6 + M7 gate: the Menus ONED workspace. Covers the editor document lifecycle,
+# the widget tree, the editable property inspector, the edit_mode preview canvas
+# (single-screen visibility + letterbox fit), the editor selection wiring, the
+# workspace adapter (actions + inspector population), and M7 property editing
+# (inspector commits funneling through the editor, fine-grained undo/redo, save
+# round-trip, %VAR% color preservation).
 
 const MnuEditorDocumentScript = preload("res://modtools/mnu/mnu_editor_document.gd")
 const MnuWidgetTreeScript = preload("res://modtools/mnu/mnu_widget_tree.gd")
@@ -46,14 +48,41 @@ func _load_resource() -> NovaMnuDocument:
 	return doc
 
 
-# Concatenate every Label.text under a node (read-only inspector verification).
-func _collect_label_text(node: Node) -> String:
+# Concatenate text under a node from labels AND editable controls (LineEdit,
+# Button/CheckBox), so the editable inspector can be verified by content.
+func _collect_text(node: Node) -> String:
 	var out := ""
 	if node is Label:
 		out += (node as Label).text + "\n"
+	elif node is LineEdit:
+		out += (node as LineEdit).text + "\n"
+	elif node is Button:
+		out += (node as Button).text + "\n"
 	for child in node.get_children():
-		out += _collect_label_text(child)
+		out += _collect_text(child)
 	return out
+
+
+# Find the first CheckBox with the given label text (flag rows).
+func _find_check(node: Node, label: String) -> CheckBox:
+	if node is CheckBox and (node as CheckBox).text == label:
+		return node
+	for child in node.get_children():
+		var found := _find_check(child, label)
+		if found != null:
+			return found
+	return null
+
+
+# Find the first LineEdit under a node (the inspector's first editable field).
+func _first_line_edit(node: Node) -> LineEdit:
+	if node is LineEdit:
+		return node
+	for child in node.get_children():
+		var found := _first_line_edit(child)
+		if found != null:
+			return found
+	return null
 
 
 func _first_root_child(doc: NovaMnuDocument, index: int) -> int:
@@ -181,17 +210,20 @@ func test_property_inspector_shows_widget_and_screen() -> void:
 
 	inspector.show_widget(doc, _first_root_child(doc, 1))  # StartBtn
 	await get_tree().process_frame
-	var widget_text := _collect_label_text(inspector)
+	var widget_text := _collect_text(inspector)
 	assert_string_contains(widget_text, "StartBtn", "Inspector shows the widget name.")
 	assert_string_contains(widget_text, "btn_up.tga", "Inspector shows a texture slot.")
 
 	inspector.show_widget(doc, _first_root_child(doc, 2))  # SoundChk (CHECKED)
 	await get_tree().process_frame
-	assert_string_contains(_collect_label_text(inspector), "Checked", "Inspector decodes the Checked flag.")
+	var checked := _find_check(inspector, "Checked")
+	assert_not_null(checked, "Inspector shows a Checked flag toggle.")
+	if checked != null:
+		assert_true(checked.button_pressed, "The Checked flag toggle is on for a CHECKED widget.")
 
 	inspector.show_widget(doc, doc.get_screen_ids()[0])  # screen container
 	await get_tree().process_frame
-	var screen_text := _collect_label_text(inspector)
+	var screen_text := _collect_text(inspector)
 	assert_string_contains(screen_text, "Screen", "Screen heading shown for a screen id.")
 	assert_string_contains(screen_text, "MAIN", "Screen name shown.")
 	assert_string_contains(screen_text, "menutxt.BIN", "Screen text resource shown.")
@@ -274,13 +306,13 @@ func test_workspace_adapter_actions_and_inspector() -> void:
 	ws.build_inspector(inspector_host)
 	await get_tree().process_frame
 	assert_gt(inspector_host.get_child_count(), 0, "Adapter mounts the property inspector.")
-	assert_string_contains(_collect_label_text(inspector_host), "MAIN",
+	assert_string_contains(_collect_text(inspector_host), "MAIN",
 		"Inspector shows the default-selected first screen.")
 
 	var start_id := _first_root_child(ws._document.resource, 1)
 	ws._on_widget_selected(start_id)
 	await get_tree().process_frame
-	assert_string_contains(_collect_label_text(inspector_host), "StartBtn",
+	assert_string_contains(_collect_text(inspector_host), "StartBtn",
 		"Selecting a widget updates the right-dock inspector.")
 
 
@@ -421,12 +453,12 @@ func test_inspector_resyncs_to_first_screen_after_reload() -> void:
 	# Push a widget selection, then reload the document.
 	ws._on_widget_selected(_first_root_child(ws._document.resource, 1))
 	await get_tree().process_frame
-	assert_string_contains(_collect_label_text(inspector_host), "StartBtn", "Inspector shows the selection.")
+	assert_string_contains(_collect_text(inspector_host), "StartBtn", "Inspector shows the selection.")
 
 	assert_eq(ws._document.open_mnu(FIXTURE), OK)
 	await get_tree().process_frame
 	# The editor resets to the first screen on reload and pushes it to the inspector.
-	assert_string_contains(_collect_label_text(inspector_host), "MAIN",
+	assert_string_contains(_collect_text(inspector_host), "MAIN",
 		"Inspector resyncs to the first screen after a document reload.")
 
 
@@ -456,3 +488,184 @@ func _collect_color_rects(node: Node) -> Array:
 	for child in node.get_children():
 		out.append_array(_collect_color_rects(child))
 	return out
+
+
+# --- M7: property editing, undo/redo, save round-trip ---------------------------
+
+# An editor mounted on a fixture document, ready for apply_edit. Returns
+# [editor, editor_document].
+func _editor_with_fixture() -> Array:
+	var ed = MnuEditorScript.new()
+	add_child_autofree(ed)
+	ed.size = Vector2(640, 400)
+	await get_tree().process_frame
+	var editordoc = MnuEditorDocumentScript.new()
+	editordoc.open_mnu(FIXTURE)
+	ed.set_document(editordoc)
+	await get_tree().process_frame
+	return [ed, editordoc]
+
+
+func test_editor_apply_edit_pushes_undo_and_reverts() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var editordoc = pair[1]
+	var start_id := _first_root_child(editordoc.resource, 1)
+	ed.select_widget(start_id)
+	assert_false(ed.can_undo(), "No undo before any edit.")
+
+	ed.apply_edit({"target": "widget", "id": start_id, "prop": "name", "value": "PlayBtn"})
+	assert_eq(editordoc.resource.get_widget_name(start_id), "PlayBtn", "apply_edit mutates the document.")
+	assert_true(editordoc.is_dirty, "An applied edit dirties the document.")
+	assert_true(ed.can_undo(), "An applied edit can be undone.")
+	assert_false(ed.can_redo(), "Nothing to redo yet.")
+
+	ed.undo()
+	assert_eq(editordoc.resource.get_widget_name(start_id), "StartBtn", "Undo reverts the name.")
+	assert_true(ed.can_redo(), "Undo enables redo.")
+	assert_false(ed.can_undo(), "The only op was undone.")
+
+	ed.redo()
+	assert_eq(editordoc.resource.get_widget_name(start_id), "PlayBtn", "Redo re-applies the name.")
+	await get_tree().process_frame  # flush queue_free'd preview generations
+
+
+func test_editor_apply_edit_noop_when_unchanged() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var editordoc = pair[1]
+	var start_id := _first_root_child(editordoc.resource, 1)
+	var current: String = editordoc.resource.get_widget_name(start_id)
+	ed.apply_edit({"target": "widget", "id": start_id, "prop": "name", "value": current})
+	assert_false(ed.can_undo(), "Re-applying the current value records no undo op.")
+	assert_false(editordoc.is_dirty, "A no-op edit does not dirty the document.")
+
+
+func test_editor_rect_edit_round_trips_through_save() -> void:
+	var ws = autofree(MnuWorkspaceScript.new())
+	assert_eq(ws.open_file(FIXTURE), OK)
+	var host := Control.new()
+	host.size = Vector2(800, 480)
+	add_child_autofree(host)
+	ws.mount_viewport(host)
+	await get_tree().process_frame
+
+	var start_id := _first_root_child(ws._document.resource, 1)
+	ws._on_inspector_edit({"target": "widget", "id": start_id, "prop": "rect", "value": Rect2(12, 34, 100, 40)})
+	assert_eq(ws._document.resource.get_window_rect(start_id), Rect2(12, 34, 100, 40),
+		"A rect edit applies through the adapter -> editor.")
+
+	assert_eq(ws.save_as(TEMP_DIR), OK)
+	var reloaded = autofree(MnuEditorDocumentScript.new())
+	assert_eq(reloaded.open_mnu(ws._document.current_path), OK)
+	assert_eq(reloaded.resource.get_window_rect(_first_root_child(reloaded.resource, 1)), Rect2(12, 34, 100, 40),
+		"Edited rect survives save + reload.")
+	await get_tree().process_frame  # flush queue_free'd preview generations
+
+
+func test_inspector_emits_edit_requested_on_text_commit() -> void:
+	var doc := _load_resource()
+	var inspector = MnuPropertyInspectorScript.new()
+	add_child_autofree(inspector)
+	await get_tree().process_frame
+	var start_id := _first_root_child(doc, 1)
+	inspector.show_widget(doc, start_id)
+	await get_tree().process_frame
+
+	var captured: Array = []
+	inspector.edit_requested.connect(func(e: Dictionary) -> void: captured.append(e))
+
+	var name_edit := _first_line_edit(inspector)
+	assert_not_null(name_edit, "Inspector has an editable Name field.")
+	name_edit.text = "PlayBtn"
+	name_edit.text_submitted.emit("PlayBtn")
+
+	assert_eq(captured.size(), 1, "Committing the field emits one edit_requested.")
+	if captured.size() == 1:
+		var e: Dictionary = captured[0]
+		assert_eq(e.get("target"), "widget", "Edit targets the widget.")
+		assert_eq(e.get("id"), start_id, "Edit carries the widget id.")
+		assert_eq(e.get("prop"), "name", "Edit names the property.")
+		assert_eq(e.get("value"), "PlayBtn", "Edit carries the committed value.")
+
+
+func test_inspector_flag_toggle_emits_recomputed_mask() -> void:
+	var doc := _load_resource()
+	var inspector = MnuPropertyInspectorScript.new()
+	add_child_autofree(inspector)
+	await get_tree().process_frame
+	var chk_id := _first_root_child(doc, 2)  # SoundChk (CHECKED)
+	inspector.show_widget(doc, chk_id)
+	await get_tree().process_frame
+
+	var captured: Array = []
+	inspector.edit_requested.connect(func(e: Dictionary) -> void: captured.append(e))
+
+	var disabled := _find_check(inspector, "Disabled")
+	assert_not_null(disabled, "Inspector shows a Disabled flag toggle.")
+	if disabled != null:
+		disabled.button_pressed = true  # fires toggled -> emits a flags edit
+		assert_eq(captured.size(), 1, "Toggling a flag emits one edit_requested.")
+		if captured.size() == 1:
+			var e: Dictionary = captured[0]
+			assert_eq(e.get("prop"), "flags", "A flag toggle commits the flags property.")
+			var mask := int(e.get("value"))
+			assert_true((mask & NovaMnuDocument.FLAG_DISABLED) != 0, "The toggled flag is set in the mask.")
+			assert_true((mask & NovaMnuDocument.FLAG_CHECKED) != 0, "Existing flags are preserved in the mask.")
+
+
+func test_adapter_delegates_undo_redo() -> void:
+	var ws = autofree(MnuWorkspaceScript.new())
+	assert_false(ws.can_undo(), "No editor yet -> nothing to undo.")
+	assert_eq(ws.open_file(FIXTURE), OK)
+	var host := Control.new()
+	host.size = Vector2(800, 480)
+	add_child_autofree(host)
+	ws.mount_viewport(host)
+	await get_tree().process_frame
+
+	var start_id := _first_root_child(ws._document.resource, 1)
+	assert_false(ws.can_undo(), "Mounted but no edit -> nothing to undo.")
+	ws._on_inspector_edit({"target": "widget", "id": start_id, "prop": "name", "value": "PlayBtn"})
+	assert_true(ws.can_undo(), "An inspector edit is undoable through the adapter.")
+
+	ws.undo()
+	assert_eq(ws._document.resource.get_widget_name(start_id), "StartBtn", "Adapter undo reverts the edit.")
+	assert_true(ws.can_redo(), "Adapter exposes redo after an undo.")
+	ws.redo()
+	assert_eq(ws._document.resource.get_widget_name(start_id), "PlayBtn", "Adapter redo re-applies the edit.")
+	await get_tree().process_frame  # flush queue_free'd preview generations
+
+
+func test_editor_color_edit_preserves_variable_token() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var editordoc = pair[1]
+	var root_id: int = editordoc.resource.get_screen_root_id(editordoc.resource.get_screen_ids()[0])
+	ed.select_widget(root_id)
+
+	ed.apply_edit({"target": "widget", "id": root_id, "prop": "color",
+		"slot": NovaMnuDocument.COLOR_DEFAULT_FG, "value": "00FF00"})
+	assert_eq(editordoc.resource.get_widget_color(root_id, NovaMnuDocument.COLOR_DEFAULT_FG), "00FF00",
+		"A literal hex color applies.")
+
+	ed.apply_edit({"target": "widget", "id": root_id, "prop": "color",
+		"slot": NovaMnuDocument.COLOR_DEFAULT_FG, "value": "%CUSTOM_FG%"})
+	assert_eq(editordoc.resource.get_widget_color(root_id, NovaMnuDocument.COLOR_DEFAULT_FG), "%CUSTOM_FG%",
+		"A %VAR% token is stored verbatim (survives the round-trip).")
+	await get_tree().process_frame  # flush queue_free'd preview generations
+
+
+func test_editor_screen_property_edit_and_undo() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var editordoc = pair[1]
+	var screen_id: int = editordoc.resource.get_screen_ids()[0]
+	var before: int = editordoc.resource.get_screen_music_var(screen_id)
+	ed.select_widget(screen_id)
+
+	ed.apply_edit({"target": "screen", "id": screen_id, "prop": "music_var", "value": before + 5})
+	assert_eq(editordoc.resource.get_screen_music_var(screen_id), before + 5, "Screen music var edits apply.")
+	ed.undo()
+	assert_eq(editordoc.resource.get_screen_music_var(screen_id), before, "Undo restores the screen music var.")
+	await get_tree().process_frame  # flush queue_free'd preview generations
