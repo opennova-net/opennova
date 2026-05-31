@@ -2060,7 +2060,9 @@ func _uv_bounds_signature(uvs: PackedVector2Array) -> Dictionary:
 
 
 func _prepare_texture_variant_fixture(texture_filename: String) -> String:
-	var fixture_dir := _output_dir().path_join("texture_variant_" + texture_filename.replace(".", "_"))
+	# Unique per call so the texture resolver's per-directory cache is never reused
+	# across tests that recreate a same-named dir with different contents.
+	var fixture_dir := _output_dir().path_join("texture_variant_%s_%d" % [texture_filename.replace(".", "_"), Time.get_ticks_usec()])
 	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
 	_copy_file(ProjectSettings.globalize_path(ARMRY_FIXTURE), fixture_dir.path_join("Armry01.3di"))
 	_copy_file(ProjectSettings.globalize_path(ARMRY_TEXTURE_FIXTURE), fixture_dir.path_join(texture_filename))
@@ -2068,7 +2070,9 @@ func _prepare_texture_variant_fixture(texture_filename: String) -> String:
 
 
 func _prepare_real_dds_texture_fixture(texture_filename: String) -> String:
-	var fixture_dir := _output_dir().path_join("real_dds_" + texture_filename.replace(".", "_"))
+	# Unique per call (see _prepare_texture_variant_fixture): isolates the resolver's
+	# per-directory cache between tests that reuse a same-named fixture dir.
+	var fixture_dir := _output_dir().path_join("real_dds_%s_%d" % [texture_filename.replace(".", "_"), Time.get_ticks_usec()])
 	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
 	_copy_file(ProjectSettings.globalize_path(ARMRY_FIXTURE), fixture_dir.path_join("Armry01.3di"))
 	_write_test_dds(fixture_dir.path_join(texture_filename))

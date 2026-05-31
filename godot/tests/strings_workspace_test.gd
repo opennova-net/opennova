@@ -9,7 +9,7 @@ const EditorWorkstationScript = preload("res://modtools/editor/editor_workstatio
 
 func test_strings_workspace_in_rail() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	var rail: VBoxContainer = workstation.get_node("%WorkspaceRail")
+	var rail: BoxContainer = workstation.get_node("%WorkspaceRail")
 	var row_texts := []
 	for child in rail.get_children():
 		if child is Button:
@@ -41,7 +41,7 @@ func test_strings_workspace_exposes_document_actions() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
 	await get_tree().process_frame
 
-	var actions: VBoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	var actions: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
 	assert_not_null(_find_button_by_text(actions, "Open Strings..."), "Strings should expose an Open action.")
 	assert_not_null(_find_button_by_text(actions, "New Strings"), "Strings should expose a New action.")
 

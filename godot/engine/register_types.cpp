@@ -26,6 +26,8 @@
 #include "env/env_file.h"
 #include "object/nova_object_data.h"
 #include "object/nova_object_shader_cache.h"
+#include "object/nova_item_database.h"
+#include "mission/nova_mission_data.h"
 #include "cbin/cbin_credits_resource.h"
 #include "cbin/kda_resource_format.h"
 #include "cbin/nova_credits_player.h"
@@ -92,6 +94,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvFileSaver);
 	GDREGISTER_CLASS(NovaObjectData);
 	GDREGISTER_CLASS(NovaObjectShaderCache);
+	GDREGISTER_CLASS(NovaItemDatabase);
+	GDREGISTER_CLASS(NovaMissionData);
 	GDREGISTER_ABSTRACT_CLASS(CbinEntry);
 	GDREGISTER_CLASS(CbinTextEntry);
 	GDREGISTER_CLASS(CbinNewlineEntry);

@@ -72,6 +72,17 @@ foreach(test items weapons ammo hudpos)
     add_test(NAME def_parse_${test} COMMAND def_parse_${test}_test)
 endforeach()
 
+# Mission (BMS) tests
+add_executable(mission_bms_test mission/mission_bms_test.cpp)
+target_link_libraries(mission_bms_test PRIVATE opennova_mission)
+target_include_directories(mission_bms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_bms COMMAND mission_bms_test)
+
+add_executable(mission_c_abi_test mission/mission_c_abi_test.cpp)
+target_link_libraries(mission_c_abi_test PRIVATE opennova_mission)
+target_include_directories(mission_c_abi_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_c_abi COMMAND mission_c_abi_test)
+
 # PFF tests
 add_executable(pff_unit_test pff/pff_unit_test.cpp)
 target_link_libraries(pff_unit_test PRIVATE opennova_pff)

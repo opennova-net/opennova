@@ -36,6 +36,8 @@ jobs:
 
       - name: Build and test
         shell: bash
+        env:
+          BUILD_GODOT: "0"
         run: scripts/build.sh
 
   modsuperoed-smoke:
@@ -204,7 +206,6 @@ jobs:
 
   package-addon:
     runs-on: ubuntu-latest
-    needs: [test, godot-tests]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -231,7 +232,6 @@ jobs:
 
   package-max-mzp:
     runs-on: windows-latest
-    needs: [test, godot-tests]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -260,7 +260,6 @@ jobs:
 
   package-importer:
     runs-on: windows-latest
-    needs: [test, godot-tests]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -287,9 +286,11 @@ jobs:
           name: opennova_importer
           path: dist/onimport-v*.exe
 
-  package-godot:
+  package-godot-windows-editor:
     runs-on: windows-latest
-    needs: [test, godot-tests]
+    env:
+      GODOT_VERSION: 4.6.1-stable
+      GODOT_VERSION_PLAIN: 4.6.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -303,9 +304,21 @@ jobs:
           git lfs pull
           git lfs fsck --objects
 
-      - name: Package Godot exports
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Cache Godot export templates
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
+          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Package Godot Windows editor export
         shell: pwsh
-        run: scripts/package_godot_windows.ps1
+        run: scripts/package_godot_editor_windows.ps1
 
       - name: Upload opennova-modtools Windows zip
         uses: actions/upload-artifact@v4
@@ -313,15 +326,11 @@ jobs:
           name: opennova_modtools_windows
           path: dist/opennova-modtools-windows-v*.zip
 
-      - name: Upload opennova runtime Windows zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: opennova_runtime_windows
-          path: dist/opennova-runtime-windows-v*.zip
-
-  package-godot-macos:
-    runs-on: macos-latest
-    needs: [test, godot-tests]
+  package-godot-windows-runtime:
+    runs-on: windows-latest
+    env:
+      GODOT_VERSION: 4.6.1-stable
+      GODOT_VERSION_PLAIN: 4.6.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -335,15 +344,101 @@ jobs:
           git lfs pull
           git lfs fsck --objects
 
-      - name: Package Godot exports (macOS)
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Cache Godot export templates
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
+          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Package Godot Windows runtime export
+        shell: pwsh
+        run: scripts/package_godot_runtime_windows.ps1
+
+      - name: Upload opennova runtime Windows zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova_runtime_windows
+          path: dist/opennova-runtime-windows-v*.zip
+
+  package-godot-macos-editor:
+    runs-on: macos-latest
+    env:
+      GODOT_VERSION: 4.6.1-stable
+      GODOT_VERSION_PLAIN: 4.6.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Pull Git LFS assets
         shell: bash
-        run: scripts/package_godot_macos.sh
+        run: |
+          git lfs install --local
+          git lfs pull
+          git lfs fsck --objects
+
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Cache Godot export templates
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Application Support/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable
+          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Package Godot macOS editor export
+        shell: bash
+        run: scripts/package_godot_editor_macos.sh
 
       - name: Upload opennova-modtools macOS zip
         uses: actions/upload-artifact@v4
         with:
           name: opennova_modtools_macos
           path: dist/opennova-modtools-macos-v*.zip
+
+  package-godot-macos-runtime:
+    runs-on: macos-latest
+    env:
+      GODOT_VERSION: 4.6.1-stable
+      GODOT_VERSION_PLAIN: 4.6.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Pull Git LFS assets
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull
+          git lfs fsck --objects
+
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Cache Godot export templates
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Application Support/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable
+          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Package Godot macOS runtime export
+        shell: bash
+        run: scripts/package_godot_runtime_macos.sh
 
       - name: Upload opennova runtime macOS zip
         uses: actions/upload-artifact@v4
@@ -353,7 +448,7 @@ jobs:
 
   validate-deliverables:
     runs-on: ubuntu-latest
-    needs: [package-addon, package-max-mzp, package-importer, package-godot, package-godot-macos]
+    needs: [test, godot-tests, package-addon, package-max-mzp, package-importer, package-godot-windows-editor, package-godot-windows-runtime, package-godot-macos-editor, package-godot-macos-runtime]
     steps:
       - uses: actions/checkout@v4
 

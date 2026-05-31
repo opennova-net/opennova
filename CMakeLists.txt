@@ -25,6 +25,7 @@ add_subdirectory(libs/oed)
 add_subdirectory(libs/renderer)
 add_subdirectory(libs/terrain)
 add_subdirectory(libs/resource_index)
+add_subdirectory(libs/mission)
 
 set(OPENNOVA_CORE_TARGETS
     opennova_pcx
@@ -50,6 +51,7 @@ set(OPENNOVA_CORE_TARGETS
     opennova_oed
     opennova_renderer
     opennova_resource_index
+    opennova_mission
 )
 
 # --------------------------------------------------------------------------

@@ -9,13 +9,22 @@
 #   - Git submodules already initialised (third_party/godot-cpp)
 #
 # Usage:
-#   pwsh -File scripts\package_godot_windows.ps1
+#   pwsh -File scripts\package_godot_windows.ps1 [-Target all|editor|runtime]
+
+param(
+    [ValidateSet("all", "editor", "runtime")]
+    [string]$Target = "all"
+)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"  # keeps Invoke-WebRequest fast on large files
 
 $ROOT = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location $ROOT
+
+$PackageEditor = $Target -in @("all", "editor")
+$PackageRuntime = $Target -in @("all", "runtime")
+Write-Host "=== Godot package target: $Target ==="
 
 # Read Godot apps' component version from project.godot
 $projectGodot = Get-Content "$ROOT\godot\project.godot" -Raw
@@ -174,11 +183,15 @@ function Invoke-GodotExport {
     }
 }
 
-Write-Host "=== Exporting opennova-modtools.exe ==="
-Invoke-GodotExport -PresetName "OpenNova Mod Tools" -OutputPath $MODTOOLS_EXE
+if ($PackageEditor) {
+    Write-Host "=== Exporting opennova-modtools.exe ==="
+    Invoke-GodotExport -PresetName "OpenNova Mod Tools" -OutputPath $MODTOOLS_EXE
+}
 
-Write-Host "=== Exporting opennova.exe ==="
-Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
+if ($PackageRuntime) {
+    Write-Host "=== Exporting opennova.exe ==="
+    Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
+}
 
 function New-GodotAppZip {
     param(
@@ -212,14 +225,22 @@ function New-GodotAppZip {
     }
 }
 
-Write-Host "=== Packaging $(Split-Path $MODTOOLS_ZIP -Leaf) ==="
-New-GodotAppZip -PackageName "opennova-modtools" -ExePath $MODTOOLS_EXE -ZipPath $MODTOOLS_ZIP
+$ProducedZips = @()
 
-Write-Host "=== Packaging $(Split-Path $RUNTIME_ZIP -Leaf) ==="
-New-GodotAppZip -PackageName "opennova-runtime" -ExePath $RUNTIME_EXE -ZipPath $RUNTIME_ZIP
+if ($PackageEditor) {
+    Write-Host "=== Packaging $(Split-Path $MODTOOLS_ZIP -Leaf) ==="
+    New-GodotAppZip -PackageName "opennova-modtools" -ExePath $MODTOOLS_EXE -ZipPath $MODTOOLS_ZIP
+    $ProducedZips += $MODTOOLS_ZIP
+}
+
+if ($PackageRuntime) {
+    Write-Host "=== Packaging $(Split-Path $RUNTIME_ZIP -Leaf) ==="
+    New-GodotAppZip -PackageName "opennova-runtime" -ExePath $RUNTIME_EXE -ZipPath $RUNTIME_ZIP
+    $ProducedZips += $RUNTIME_ZIP
+}
 
 # ---------------------------------------------------------------------------
 # 5. Done
 # ---------------------------------------------------------------------------
 Write-Host "=== Done ==="
-Get-Item $RUNTIME_ZIP,$MODTOOLS_ZIP | Select-Object Name, Length
+Get-Item -LiteralPath $ProducedZips | Select-Object Name, Length
