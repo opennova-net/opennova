@@ -1,8 +1,11 @@
 """Entry point for `python -m apps.importer`."""
 import logging
+import multiprocessing
 import os
 import sys
 from pathlib import Path
+
+multiprocessing.freeze_support()
 
 # Set up file logging before any other imports so all downstream loggers
 # (import_runner, scene_builder, bpy_session, etc.) inherit this handler.
