@@ -73,6 +73,10 @@ bool NovaResourceRoot::is_valid_root(const String &path) {
 }
 
 Error NovaResourceRoot::set_root_dir(const String &path) {
+	// The resolver's per-session caches are keyed to the previous root; drop them so a
+	// new (or re-scanned) resource directory is read fresh. scan_root() in the editor
+	// routes through here too, so a rescan picks up on-disk edits.
+	opennova::clear_texture_resolver_caches();
 	const String clean = normalize_dir(path);
 	if (clean.is_empty()) {
 		root_dir_ = String();
@@ -100,6 +104,7 @@ String NovaResourceRoot::get_last_error() const {
 void NovaResourceRoot::clear() {
 	root_dir_ = String();
 	last_error_ = String();
+	opennova::clear_texture_resolver_caches();
 }
 
 String NovaResourceRoot::resolve_file(const String &name) {
