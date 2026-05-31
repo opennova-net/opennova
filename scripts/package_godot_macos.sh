@@ -13,8 +13,30 @@
 # Mirrors scripts/package_godot_windows.ps1. Requires a macOS host with cmake +
 # Xcode command line tools, and initialised submodules (third_party/godot-cpp).
 #
-# Usage: scripts/package_godot_macos.sh
+# Usage: scripts/package_godot_macos.sh [all|editor|runtime]
 set -euo pipefail
+
+TARGET="${1:-all}"
+case "$TARGET" in
+  all|editor|runtime) ;;
+  *)
+    echo "error: target must be one of: all, editor, runtime" >&2
+    exit 2
+    ;;
+esac
+if [[ "$#" -gt 1 ]]; then
+  echo "error: expected at most one target argument" >&2
+  exit 2
+fi
+
+PACKAGE_EDITOR=0
+PACKAGE_RUNTIME=0
+case "$TARGET" in
+  all) PACKAGE_EDITOR=1; PACKAGE_RUNTIME=1 ;;
+  editor) PACKAGE_EDITOR=1 ;;
+  runtime) PACKAGE_RUNTIME=1 ;;
+esac
+echo "=== Godot macOS package target: $TARGET ==="
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -155,8 +177,17 @@ RUNTIME_APP="$DIST/opennova.app"
 MODTOOLS_ZIP="$DIST/opennova-modtools-macos-v$VERSION.zip"
 RUNTIME_ZIP="$DIST/opennova-runtime-macos-v$VERSION.zip"
 
-export_app "OpenNova Mod Tools (macOS)" "$MODTOOLS_APP" "$MODTOOLS_ZIP"
-export_app "OpenNova Runtime (macOS)"   "$RUNTIME_APP"  "$RUNTIME_ZIP"
+PRODUCED_ZIPS=()
+
+if [[ "$PACKAGE_EDITOR" == "1" ]]; then
+  export_app "OpenNova Mod Tools (macOS)" "$MODTOOLS_APP" "$MODTOOLS_ZIP"
+  PRODUCED_ZIPS+=("$MODTOOLS_ZIP")
+fi
+
+if [[ "$PACKAGE_RUNTIME" == "1" ]]; then
+  export_app "OpenNova Runtime (macOS)" "$RUNTIME_APP" "$RUNTIME_ZIP"
+  PRODUCED_ZIPS+=("$RUNTIME_ZIP")
+fi
 
 echo "=== Done ==="
-ls -la "$RUNTIME_ZIP" "$MODTOOLS_ZIP"
+ls -la "${PRODUCED_ZIPS[@]}"
