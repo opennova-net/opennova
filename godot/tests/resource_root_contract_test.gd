@@ -32,6 +32,28 @@ func test_resource_root_resolves_only_top_level_files() -> void:
 	assert_eq(String(trns[0]).get_file(), "Alpha.TRN")
 
 
+func test_resource_root_reads_top_level_pff_entries() -> void:
+	var root := _make_flat_root("pff_entries")
+	_write_file(root.path_join("Alpha.TRN"), "loose trn")
+	_write_pff(root.path_join("aa_base.pff"), [
+		{"name": "Alpha.TRN", "bytes": "archived trn"},
+		{"name": "Bravo.env", "bytes": "archived env"},
+	])
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.set_root_dir(root), OK)
+
+	assert_true(resources.has_file("bravo.env"), "PFF entries should be mounted by flat filename.")
+	assert_eq(resources.read_file("Alpha.trn").get_string_from_utf8(), "loose trn", "Loose files should shadow archived entries.")
+	assert_eq(resources.read_file("Bravo.env").get_string_from_utf8(), "archived env")
+
+	var entries := resources.list_file_entries(".env")
+	assert_eq(entries.size(), 1)
+	assert_eq(String(entries[0].logical_name), "Bravo.env")
+	assert_eq(String(entries[0].source_type), "pff")
+	assert_eq(String(entries[0].archive_path).get_file(), "aa_base.pff")
+
+
 func after_each() -> void:
 	_remove_dir_recursive(OS.get_cache_dir().path_join("opennova_resource_root_contract"))
 
@@ -48,6 +70,39 @@ func _write_file(path: String, text: String) -> void:
 	if file != null:
 		file.store_string(text)
 		file.close()
+
+
+func _write_pff(path: String, entries: Array) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "PFF fixture should be writable: %s" % path)
+	if file == null:
+		return
+	var header_size := 20
+	var entry_size := 36
+	var payload_offset := header_size + entries.size() * entry_size
+	var next_payload_offset := payload_offset
+
+	file.store_32(header_size)
+	file.store_32(0x33464650)
+	file.store_32(entries.size())
+	file.store_32(entry_size)
+	file.store_32(header_size)
+
+	for entry in entries:
+		var bytes := String(entry.bytes).to_utf8_buffer()
+		file.store_32(0)
+		file.store_32(next_payload_offset)
+		file.store_32(bytes.size())
+		file.store_32(0)
+		var name_bytes := String(entry.name).to_utf8_buffer()
+		for i in range(16):
+			file.store_8(name_bytes[i] if i < name_bytes.size() else 0)
+		file.store_32(0)
+		next_payload_offset += bytes.size()
+
+	for entry in entries:
+		file.store_buffer(String(entry.bytes).to_utf8_buffer())
+	file.close()
 
 
 func _norm(path: String) -> String:

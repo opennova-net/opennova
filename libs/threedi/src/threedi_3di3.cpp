@@ -1566,6 +1566,21 @@ int threedi_3di3_read(const char *path, Threedi3di3 *out_model)
     return rc;
 }
 
+int threedi_3di3_read_memory(const uint8_t *data, size_t size, Threedi3di3 *out_model)
+{
+    if (!data || size == 0 || !out_model) {
+        return -1;
+    }
+    ThreediFile file = {0};
+    int rc = threedi_read_memory(data, size, &file);
+    if (rc != 0) {
+        return rc;
+    }
+    rc = threedi_3di3_parse(&file, out_model);
+    threedi_free_file(&file);
+    return rc;
+}
+
 typedef struct BufferBuilder {
     uint8_t *data;
     size_t len;

@@ -34,8 +34,11 @@ Dictionary NovaResourceIndex::file_entry_to_dictionary(const opennova::ResourceF
 	Dictionary out;
 	out["kind"] = String(entry.kind.c_str());
 	out["path"] = String(entry.path.c_str());
+	out["logical_name"] = String(entry.logical_name.c_str());
 	out["display_name"] = String(entry.display_name.c_str());
 	out["relative_path"] = String(entry.relative_path.c_str());
+	out["source_type"] = String(entry.source_type.c_str());
+	out["archive_path"] = String(entry.archive_path.c_str());
 	return out;
 }
 

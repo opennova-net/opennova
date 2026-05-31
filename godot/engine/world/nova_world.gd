@@ -61,21 +61,19 @@ func load_world(dir: String = "") -> int:
 	if root_err != OK:
 		load_failed.emit(resource_root.get_last_error())
 		return root_err
-	var trn := resource_root.resolve_file(terrain_file)
-	if trn.is_empty():
+	if not resource_root.has_file(terrain_file):
 		load_failed.emit("%s not found in %s" % [terrain_file, dir])
 		return ERR_FILE_NOT_FOUND
-	var env_path := resource_root.resolve_file(env_file)
-	if env_path.is_empty():
+	if not resource_root.has_file(env_file):
 		load_failed.emit("%s not found in %s" % [env_file, dir])
 		return ERR_FILE_NOT_FOUND
 
 	_resource_root = resource_root
-	if not _load_environment(env_path):
-		load_failed.emit("failed to load %s" % env_path)
+	if not _load_environment(env_file):
+		load_failed.emit("failed to load %s" % env_file)
 		return ERR_CANT_OPEN
-	if not _load_terrain(trn):
-		load_failed.emit("failed to load %s" % trn)
+	if not _load_terrain(terrain_file):
+		load_failed.emit("failed to load %s" % terrain_file)
 		return ERR_CANT_OPEN
 
 	_loaded = true
@@ -174,8 +172,7 @@ func _load_environment(env_path: String) -> bool:
 	if _env == null:
 		return true
 	var env := EnvFile.new()
-	env.set_source_path(env_path)
-	if env.load() != OK:
+	if env.load_from_resource_root(_resource_root, env_path) != OK:
 		push_warning("NovaWorld: failed to load environment '%s'" % env_path)
 		return false
 	# NovaEnvironment's setter reloads + pushes shader globals on assignment.
@@ -185,8 +182,7 @@ func _load_environment(env_path: String) -> bool:
 
 func _load_terrain(trn_path: String) -> bool:
 	var data := NovaTerrainData.new()
-	data.set_trn_path(trn_path)
-	if data.load() != OK:
+	if data.load_from_resource_root(_resource_root, trn_path) != OK:
 		return false
 	_terrain_data = data
 	_terrain.terrain_data = data

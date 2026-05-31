@@ -54,6 +54,7 @@ void EnvFile::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "source_path", PROPERTY_HINT_FILE, "*.env"), "set_source_path", "get_source_path");
 
 	ClassDB::bind_method(D_METHOD("load"), &EnvFile::load);
+	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &EnvFile::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &EnvFile::save_to_path);
 	ClassDB::bind_method(D_METHOD("reset_to_default"), &EnvFile::reset_to_default);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &EnvFile::is_loaded);
@@ -136,7 +137,7 @@ void EnvFile::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("environment_changed"));
 }
 
-void EnvFile::set_source_path(const String &p_path) { source_path = p_path; }
+void EnvFile::set_source_path(const String &p_path) { source_path = p_path; resource_root.unref(); }
 String EnvFile::get_source_path() const { return source_path; }
 
 #define IMPL_SET_GET(field, setter, getter, arg_type, ret_type) \
@@ -298,6 +299,11 @@ void EnvFile::_on_keyframe_changed() {
 void EnvFile::_load_sky_textures() {
 	sky_map1_tex.unref();
 	sky_map2_tex.unref();
+	if (resource_root.is_valid()) {
+		sky_map1_tex = resource_root->load_texture(sky_map1);
+		sky_map2_tex = resource_root->load_texture(sky_map2);
+		return;
+	}
 	if (source_path.is_empty()) {
 		return;
 	}
@@ -308,6 +314,7 @@ void EnvFile::_load_sky_textures() {
 
 Error EnvFile::load() {
 	loaded = false;
+	resource_root.unref();
 	if (source_path.is_empty()) {
 		return ERR_INVALID_PARAMETER;
 	}
@@ -329,6 +336,40 @@ Error EnvFile::load() {
 		return ERR_FILE_CANT_READ;
 	}
 
+	_sync_properties_from_env();
+	_load_sky_textures();
+	loaded = true;
+	_notify_environment_changed();
+	return OK;
+}
+
+Error EnvFile::load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name) {
+	loaded = false;
+	resource_root.unref();
+	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
+		return ERR_INVALID_PARAMETER;
+	}
+	const String file = p_name.get_file();
+	if (file.is_empty()) {
+		return ERR_INVALID_PARAMETER;
+	}
+	const PackedByteArray bytes = p_resource_root->read_file(file);
+	if (bytes.is_empty()) {
+		UtilityFunctions::printerr("[EnvFile] Cannot open mounted resource: ", file);
+		return ERR_FILE_CANT_READ;
+	}
+
+	std::string text(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
+	std::istringstream input(text);
+	std::string error;
+	env = opennova::env::Config();
+	if (!opennova::env::load_env(input, env, error)) {
+		UtilityFunctions::printerr("[EnvFile] ", error.c_str());
+		return ERR_FILE_CANT_READ;
+	}
+
+	source_path = file;
+	resource_root = p_resource_root;
 	_sync_properties_from_env();
 	_load_sky_textures();
 	loaded = true;

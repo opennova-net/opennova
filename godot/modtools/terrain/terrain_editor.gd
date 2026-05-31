@@ -2071,6 +2071,9 @@ func new_terrain() -> void:
 func open_trn(trn_path: String) -> Error:
 	if is_export_running():
 		return ERR_BUSY
+	var resources := get_resource_root()
+	if not FileAccess.file_exists(trn_path) and resources != null and resources.has_file(trn_path):
+		return _open_trn_from_resource_root(resources, trn_path)
 	_brush_session.clear_history()
 	clear_clone_source()
 	_data = NovaTerrainData.new()
@@ -2116,6 +2119,48 @@ func open_trn(trn_path: String) -> Error:
 	else:
 		_document.current_project_dir = ""
 	_remember_open_path(trn_path)
+
+	is_dirty = normalized or normalized_tileinfo
+	_mark_foliage_preview_dirty()
+	_update_hud()
+	_sync_hud_from_editor()
+	_check_loaded_cdep_violations()
+	return OK
+
+
+func _open_trn_from_resource_root(resources: NovaResourceRoot, trn_name: String) -> Error:
+	if resources == null:
+		return ERR_INVALID_PARAMETER
+	_brush_session.clear_history()
+	clear_clone_source()
+	_data = NovaTerrainData.new()
+	var err := _data.load_from_resource_root(resources, trn_name)
+	if err != OK:
+		return err
+
+	texture_files = {}
+	_apply_default_visual_state(false)
+
+	var depth_bytes := resources.read_file("%s_depth.raw" % _data.get_terrain_name())
+	if depth_bytes.size() == HM_SIZE * HM_SIZE * 2:
+		_set_heightmap_image(_build_heightmap_from_raw16(depth_bytes))
+	else:
+		_set_heightmap_image(_build_heightmap_from_data())
+
+	_apply_loaded_textures_from_data()
+	var normalized := _normalize_sector_layout_if_needed()
+	_sync_sector_layout(true)
+	_document.capture_trn_resource(_data)
+	var tileinfo := _data.get_tileinfo_resource()
+	if tileinfo != null:
+		_document.tileinfo_resource = tileinfo
+		_document.tileinfo_source_path = resources.get_root_dir().path_join(_data.get_tileinfo_filename())
+		_document.tileinfo_state = "explicit"
+		_document.tileinfo_selected_index = -1
+	var normalized_tileinfo := _normalize_loaded_tileinfo_if_needed()
+	_document.current_trn_path = trn_name.get_file()
+	_document.current_project_dir = ""
+	_remember_open_path(resources.get_root_dir().path_join(trn_name.get_file()))
 
 	is_dirty = normalized or normalized_tileinfo
 	_mark_foliage_preview_dirty()

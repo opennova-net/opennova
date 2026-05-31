@@ -53,24 +53,6 @@ std::vector<godot::String> texture_stems(const godot::String &filename) {
 	return stems;
 }
 
-// Candidate FILENAMES (not full paths) to try, in priority order: the requested
-// name as-is first, then every stem casing x extension.
-std::vector<godot::String> texture_candidate_filenames(const godot::String &filename) {
-	std::vector<godot::String> candidates;
-	const godot::String file = filename.get_file();
-	if (file.is_empty()) {
-		return candidates;
-	}
-
-	append_unique(candidates, file);
-	for (const godot::String &stem : texture_stems(filename)) {
-		for (const char *ext : tex_ext_priority) {
-			append_unique(candidates, stem + godot::String(".") + ext);
-		}
-	}
-	return candidates;
-}
-
 bool is_resource_dir(const godot::String &dir) {
 	return dir.begins_with("res://") || dir.begins_with("uid://");
 }
@@ -179,6 +161,24 @@ godot::Ref<godot::Texture2D> load_existing_texture_path(const godot::String &pat
 
 } // namespace
 
+// Candidate FILENAMES (not full paths) to try, in priority order: the requested
+// name as-is first, then every stem casing x extension.
+std::vector<godot::String> texture_candidate_filenames(const godot::String &filename) {
+	std::vector<godot::String> candidates;
+	const godot::String file = filename.get_file();
+	if (file.is_empty()) {
+		return candidates;
+	}
+
+	append_unique(candidates, file);
+	for (const godot::String &stem : texture_stems(filename)) {
+		for (const char *ext : tex_ext_priority) {
+			append_unique(candidates, stem + godot::String(".") + ext);
+		}
+	}
+	return candidates;
+}
+
 godot::String resolve_texture_path(const godot::String &dir, const godot::String &filename) {
 	if (filename.is_empty()) {
 		return godot::String();
@@ -268,6 +268,31 @@ godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, con
 			}
 		}
 	}
+	return godot::Ref<godot::Texture2D>();
+}
+
+godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filename, const godot::PackedByteArray &bytes) {
+	if (filename.is_empty() || bytes.is_empty()) {
+		return godot::Ref<godot::Texture2D>();
+	}
+
+	const godot::String ext = filename.get_extension().to_lower();
+	if (ext == "pcx") {
+		return texture_from_image(decode_pcx_image(bytes.ptr(), static_cast<size_t>(bytes.size())));
+	}
+
+	if ((ext == "tga" || ext == "mdt" || ext == "dds") && !bytes_look_like_dds(bytes)) {
+		if (bytes.size() < 18) {
+			return godot::Ref<godot::Texture2D>();
+		}
+		godot::Ref<godot::Image> image;
+		image.instantiate();
+		if (image->load_tga_from_buffer(bytes) != godot::OK) {
+			return godot::Ref<godot::Texture2D>();
+		}
+		return texture_from_image(image);
+	}
+
 	return godot::Ref<godot::Texture2D>();
 }
 
