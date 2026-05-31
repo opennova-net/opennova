@@ -10,11 +10,18 @@ extends Node3D
 
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
 signal world_loaded()
 signal load_failed(reason: String)
 
-# The terrain + environment loaded, by name, from the resource directory.
+# A mission (.bms) to boot into. When set, the mission's header selects the
+# terrain + environment (terrain_file/env_file below are ignored) and its placed
+# objects are populated into the world. Empty = load bare terrain + environment.
+@export var mission_file: String = ""
+
+# The terrain + environment loaded, by name, from the resource directory. Used
+# only when mission_file is empty.
 @export var terrain_file: String = "Dvxi5.trn"
 @export var env_file: String = "full_00.env"
 
@@ -27,6 +34,8 @@ var _tile_overlay: NovaTerrainTileOverlay
 var _terrain_data: NovaTerrainData
 var _resource_root: NovaResourceRoot
 var _loaded: bool = false
+var _loaded_mission: NovaMissionData
+var _mission_stats: Dictionary = {}
 
 
 func _ready() -> void:
@@ -40,6 +49,8 @@ func _ready() -> void:
 ## terrain (the caller decides whether to prompt). No fallbacks: the chosen
 ## directory is the only place looked.
 func load_world(dir: String = "") -> int:
+	if not mission_file.is_empty():
+		return load_mission(mission_file, dir)
 	if dir.is_empty():
 		dir = ResourceDirSettings.get_resource_dir()
 	if dir.is_empty():
@@ -70,6 +81,79 @@ func load_world(dir: String = "") -> int:
 	_loaded = true
 	world_loaded.emit()
 	return OK
+
+
+## Load a mission (.bms): its header selects the terrain + environment, which are
+## resolved from `dir` (or the persisted resource directory) and loaded through the
+## same path as load_world, then the mission's placed objects are populated into the
+## world. Returns OK, or the same error codes as load_world.
+func load_mission(bms_name: String, dir: String = "") -> int:
+	if dir.is_empty():
+		dir = ResourceDirSettings.get_resource_dir()
+	if dir.is_empty():
+		load_failed.emit("no resource directory set")
+		return ERR_FILE_NOT_FOUND
+	var resource_root := NovaResourceRoot.new()
+	var root_err := resource_root.set_root_dir(dir)
+	if root_err != OK:
+		load_failed.emit(resource_root.get_last_error())
+		return root_err
+
+	var bms_path := resource_root.resolve_file(bms_name)
+	if bms_path.is_empty():
+		load_failed.emit("%s not found in %s" % [bms_name, dir])
+		return ERR_FILE_NOT_FOUND
+	var mission := NovaMissionData.new()
+	if mission.open_file(bms_path) != OK:
+		load_failed.emit("failed to parse %s: %s" % [bms_name, mission.get_last_error()])
+		return ERR_CANT_OPEN
+
+	var trn := resource_root.resolve_file(mission.get_terrain_ref() + ".trn")
+	if trn.is_empty():
+		load_failed.emit("%s.trn (from %s) not found in %s" % [mission.get_terrain_ref(), bms_name, dir])
+		return ERR_FILE_NOT_FOUND
+	var env_path := resource_root.resolve_file(mission.get_environment_ref() + ".env")
+	if env_path.is_empty():
+		load_failed.emit("%s.env (from %s) not found in %s" % [mission.get_environment_ref(), bms_name, dir])
+		return ERR_FILE_NOT_FOUND
+
+	_resource_root = resource_root
+	if not _load_environment(env_path):
+		load_failed.emit("failed to load %s" % env_path)
+		return ERR_CANT_OPEN
+	if not _load_terrain(trn):
+		load_failed.emit("failed to load %s" % trn)
+		return ERR_CANT_OPEN
+
+	_loaded_mission = mission
+	_place_mission_objects(mission)
+	_loaded = true
+	world_loaded.emit()
+	return OK
+
+
+# Populate the world with the mission's placed objects under a MissionObjects node.
+# Shares the host-agnostic placer with the editor Mission workspace.
+func _place_mission_objects(mission: NovaMissionData) -> void:
+	if _resource_root == null or mission == null:
+		return
+	var placer := MissionObjectPlacer.new(_resource_root)
+	_mission_stats = placer.place(mission, self, { "environment_node": _env })
+	print("NovaWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
+		int(_mission_stats.get("placed", 0)),
+		int(_mission_stats.get("batched", 0)),
+		int(_mission_stats.get("animated", 0)),
+		int(_mission_stats.get("unresolved", 0)),
+		int(_mission_stats.get("markers", 0)),
+	])
+
+
+func get_loaded_mission() -> NovaMissionData:
+	return _loaded_mission
+
+
+func get_mission_stats() -> Dictionary:
+	return _mission_stats
 
 
 func _load_environment(env_path: String) -> bool:

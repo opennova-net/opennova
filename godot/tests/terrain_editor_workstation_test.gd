@@ -209,27 +209,26 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 		"Credits should expose save-as for a fresh resource.")
 
 
-func test_mission_placeholder_shows_no_document_actions() -> void:
+func test_mission_workspace_exposes_open_action_and_inspector() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
-	editor.is_dirty = true
 
 	workstation.set_editor(editor)
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
 
 	var actions_host: VBoxContainer = workstation.get_node("%WorkspaceActionsHost")
 	var inspector_host: Control = workstation.get_node("%InspectorHost")
-	assert_eq(workstation.get_node("%ProjectLabel").text, "Mission", "Placeholder workspaces should own the shell title while active.")
+	assert_eq(workstation.get_node("%ProjectLabel").text, "Mission", "An unloaded Mission workspace owns the shell title while active.")
 	assert_false(workstation.get_node("%AssetDock").visible, "Terrain properties should hide outside the terrain workspace.")
 	assert_null(workstation.get_node_or_null("%FileMenu"), "Global File menu should be removed.")
 	assert_null(workstation.get_node_or_null("%SaveButton"), "Global Save button should be removed.")
 	assert_null(workstation.get_node_or_null("%ExportButton"), "Global Export button should be removed.")
-	assert_null(workstation.get_node_or_null("WorkstationLayout/TopBar"), "The global top bar should be removed.")
-	assert_null(workstation.get_node_or_null("%UndoButton"), "Undo should not have a toolbar button; it stays on universal shortcuts.")
-	assert_null(workstation.get_node_or_null("%RedoButton"), "Redo should not have a toolbar button; it stays on universal shortcuts.")
-	assert_false(actions_host.visible, "Mission should not expose workspace document actions.")
-	assert_eq(actions_host.get_child_count(), 0, "Mission should not build document action buttons.")
-	assert_true(_has_label_text(inspector_host, "Coming soon"), "Mission should show a compact coming-soon placeholder.")
+	# Authoring is deferred, so the Mission workspace exposes exactly one document
+	# action — Open — and a read-only inspector instead of the old "Coming soon" stub.
+	assert_true(actions_host.visible, "Mission should expose its Open document action.")
+	assert_eq(_workspace_action_texts(actions_host), ["Open Mission..."], "Mission should expose only Open this phase.")
+	assert_true(_has_label_text(inspector_host, "Mission"), "Mission should show its read-only inspector panel.")
+	assert_false(_has_label_text(inspector_host, "Coming soon"), "The coming-soon stub should be gone.")
 
 
 func test_resource_index_lists_object_resources_without_glb_models() -> void:

@@ -629,6 +629,13 @@ func get_environment_editor():
 	return environment_editor
 
 
+# The shared NovaEnvironment node (EditorEnvironment under the world root). The
+# mission workspace hands it to placed objects so their lighting matches the
+# terrain preview, the same way the runtime passes its NovaEnvironment node.
+func get_environment_node() -> Node:
+	return _environment_node
+
+
 func get_terrain_world_root() -> Node3D:
 	return terrain_world_root
 
