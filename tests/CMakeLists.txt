@@ -21,6 +21,22 @@ target_link_libraries(threedi_gp_roundtrip_test PRIVATE opennova_threedi)
 target_include_directories(threedi_gp_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_gp_roundtrip COMMAND threedi_gp_roundtrip_test)
 
+# LW (Land Warrior) format detection test
+add_executable(threedi_lw_detect_test threedi/lw_detect_test.cpp)
+target_link_libraries(threedi_lw_detect_test PRIVATE opennova_threedi)
+target_include_directories(threedi_lw_detect_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_lw_detect COMMAND threedi_lw_detect_test)
+
+add_executable(threedi_lw_parse_test threedi/lw_parse_test.cpp)
+target_link_libraries(threedi_lw_parse_test PRIVATE opennova_threedi)
+target_include_directories(threedi_lw_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_lw_parse COMMAND threedi_lw_parse_test)
+
+add_executable(threedi_lw_ir_test threedi/lw_ir_test.cpp)
+target_link_libraries(threedi_lw_ir_test PRIVATE opennova_threedi)
+target_include_directories(threedi_lw_ir_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_lw_ir COMMAND threedi_lw_ir_test)
+
 # PANM unit tests
 foreach(test ctrl decode runtime wave)
     add_executable(threedi_panm_${test}_test threedi/panm_${test}_test.cpp)
