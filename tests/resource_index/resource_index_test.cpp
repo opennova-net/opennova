@@ -1,6 +1,9 @@
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <string>
+#include <vector>
 
 #include "common/test_expect.h"
 #include "resource_index/resource_index.h"
@@ -15,11 +18,73 @@ void write_file(const fs::path &path, const char *text) {
 	file << text;
 }
 
+void append_u32_le(std::vector<uint8_t> &bytes, uint32_t value) {
+	bytes.push_back(static_cast<uint8_t>(value & 0xffu));
+	bytes.push_back(static_cast<uint8_t>((value >> 8) & 0xffu));
+	bytes.push_back(static_cast<uint8_t>((value >> 16) & 0xffu));
+	bytes.push_back(static_cast<uint8_t>((value >> 24) & 0xffu));
+}
+
+struct PffFixtureEntry {
+	std::string name;
+	std::string bytes;
+};
+
+void write_pff(const fs::path &path, const std::vector<PffFixtureEntry> &entries) {
+	fs::create_directories(path.parent_path());
+
+	const uint32_t header_size = 20;
+	const uint32_t entry_size = 36;
+	const uint32_t table_offset = header_size;
+	const uint32_t payload_offset = header_size + static_cast<uint32_t>(entries.size()) * entry_size;
+	uint32_t next_payload_offset = payload_offset;
+
+	std::vector<uint8_t> bytes;
+	append_u32_le(bytes, header_size);
+	append_u32_le(bytes, 0x33464650u);
+	append_u32_le(bytes, static_cast<uint32_t>(entries.size()));
+	append_u32_le(bytes, entry_size);
+	append_u32_le(bytes, table_offset);
+
+	for (const PffFixtureEntry &entry : entries) {
+		append_u32_le(bytes, 0);
+		append_u32_le(bytes, next_payload_offset);
+		append_u32_le(bytes, static_cast<uint32_t>(entry.bytes.size()));
+		append_u32_le(bytes, 0);
+		for (size_t i = 0; i < 16; ++i) {
+			bytes.push_back(i < entry.name.size() ? static_cast<uint8_t>(entry.name[i]) : 0);
+		}
+		append_u32_le(bytes, 0);
+		next_payload_offset += static_cast<uint32_t>(entry.bytes.size());
+	}
+
+	for (const PffFixtureEntry &entry : entries) {
+		bytes.insert(bytes.end(), entry.bytes.begin(), entry.bytes.end());
+	}
+
+	std::ofstream file(path, std::ios::binary);
+	file.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+}
+
 bool has_relative_path(const std::vector<opennova::ResourceFileEntry> &entries,
                        const std::string &relative_path) {
 	return std::any_of(entries.begin(), entries.end(), [&](const opennova::ResourceFileEntry &entry) {
 		return entry.relative_path == relative_path;
 	});
+}
+
+const opennova::ResourceFileEntry *find_relative_path(const std::vector<opennova::ResourceFileEntry> &entries,
+                                                      const std::string &relative_path) {
+	for (const opennova::ResourceFileEntry &entry : entries) {
+		if (entry.relative_path == relative_path) {
+			return &entry;
+		}
+	}
+	return nullptr;
+}
+
+std::string as_string(const std::vector<uint8_t> &bytes) {
+	return std::string(bytes.begin(), bytes.end());
 }
 
 } // namespace
@@ -95,6 +160,50 @@ int main() {
 	TEST_EXPECT(index.resource_files("bin").size() == 1);
 	TEST_EXPECT(index.resource_files("rtxt").size() == 1);
 	TEST_EXPECT(index.resource_files("strings")[0].display_name == "Menus");
+
+	write_file(root / "bad.pff", "not a pff");
+	write_pff(root / "aa_base.pff", {
+		{"Alpha.TRN", "archived trn shadow"},
+		{"Archive.env", "env from aa"},
+		{"MenusP.BIN", "RTXTarchived strings"},
+	});
+	write_pff(root / "zz_patch.pff", {
+		{"Archive.env", "env from zz"},
+		{"Patch.3DI", "archived model"},
+	});
+	TEST_EXPECT(index.scan(root.string()));
+	const std::vector<opennova::ResourceFileEntry> mounted_files = index.resource_files("*");
+
+	std::vector<uint8_t> bytes;
+	TEST_EXPECT(index.read_file("alpha.trn", bytes));
+	TEST_EXPECT(as_string(bytes) == "trn");
+	TEST_EXPECT(index.read_file("Archive.env", bytes));
+	TEST_EXPECT(as_string(bytes) == "env from aa");
+	TEST_EXPECT(index.read_file("Patch.3di", bytes));
+	TEST_EXPECT(as_string(bytes) == "archived model");
+	TEST_EXPECT(!index.read_file("missing.trn", bytes));
+
+	TEST_EXPECT(mounted_files.size() == 12);
+	TEST_EXPECT(has_relative_path(mounted_files, "Archive.env"));
+	TEST_EXPECT(has_relative_path(mounted_files, "MenusP.BIN"));
+	TEST_EXPECT(has_relative_path(mounted_files, "Patch.3DI"));
+	TEST_EXPECT(index.resource_files("environment").size() == 2);
+	TEST_EXPECT(index.resource_files("strings").size() == 2);
+	TEST_EXPECT(index.resource_files("object_model").size() == 2);
+
+	const opennova::ResourceFileEntry *loose = find_relative_path(mounted_files, "Alpha.TRN");
+	TEST_EXPECT(loose != nullptr);
+	TEST_EXPECT(loose->source_type == "file");
+	TEST_EXPECT(!loose->path.empty());
+	TEST_EXPECT(loose->archive_path.empty());
+	TEST_EXPECT(loose->logical_name == "Alpha.TRN");
+
+	const opennova::ResourceFileEntry *archived = find_relative_path(mounted_files, "Archive.env");
+	TEST_EXPECT(archived != nullptr);
+	TEST_EXPECT(archived->source_type == "pff");
+	TEST_EXPECT(archived->path.empty());
+	TEST_EXPECT(fs::path(archived->archive_path).filename().string() == "aa_base.pff");
+	TEST_EXPECT(archived->logical_name == "Archive.env");
 
 	fs::remove_all(root);
 	return 0;

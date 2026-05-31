@@ -49,6 +49,24 @@ func open_env(path: String) -> Error:
 	return OK
 
 
+func open_env_from_resource_root(resources: NovaResourceRoot, name: String) -> Error:
+	if resources == null:
+		return ERR_INVALID_PARAMETER
+	var next_file := EnvFile.new()
+	var err := next_file.load_from_resource_root(resources, name)
+	if err != OK:
+		return err
+	_disconnect_env_file()
+	env_file = next_file
+	set_current_path(name.get_file())
+	remember_open_path(resources.get_root_dir().path_join(name.get_file()))
+	time_of_day = float(env_file.get_curtime())
+	mark_clean()
+	_connect_env_file()
+	_emit_all_changed()
+	return OK
+
+
 func save_current() -> Error:
 	if current_path.is_empty():
 		return ERR_INVALID_PARAMETER

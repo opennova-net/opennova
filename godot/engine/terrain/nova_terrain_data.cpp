@@ -233,6 +233,7 @@ void NovaTerrainData::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "trn_path", PROPERTY_HINT_FILE, "*.trn"), "set_trn_path", "get_trn_path");
 
 	ClassDB::bind_method(D_METHOD("load"), &NovaTerrainData::load);
+	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &NovaTerrainData::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaTerrainData::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_depth_raw16"), &NovaTerrainData::get_depth_raw16);
 	ClassDB::bind_method(D_METHOD("set_heightmap_image", "image"), &NovaTerrainData::set_heightmap_image);
@@ -470,12 +471,6 @@ void NovaTerrainData::_apply_foliage_map_to_slot(const opennova::FoliageMap &map
 }
 
 Error NovaTerrainData::import_pcx_slot(const String &slot_id, const String &path) {
-	PcxSlotRefs refs;
-	if (!_resolve_pcx_slot(slot_id, refs)) {
-		UtilityFunctions::push_error("import_pcx_slot: unknown slot '", slot_id, "'");
-		return ERR_INVALID_PARAMETER;
-	}
-
 	Ref<FileAccess> f = FileAccess::open(path, FileAccess::READ);
 	if (f.is_null()) {
 		UtilityFunctions::push_error("import_pcx_slot: cannot open ", path);
@@ -484,16 +479,26 @@ Error NovaTerrainData::import_pcx_slot(const String &slot_id, const String &path
 	PackedByteArray bytes = f->get_buffer(f->get_length());
 	f.unref();
 
+	return _import_pcx_slot_bytes(slot_id, path.get_file(), bytes);
+}
+
+Error NovaTerrainData::_import_pcx_slot_bytes(const String &slot_id, const String &filename, const PackedByteArray &bytes) {
+	PcxSlotRefs refs;
+	if (!_resolve_pcx_slot(slot_id, refs)) {
+		UtilityFunctions::push_error("import_pcx_slot: unknown slot '", slot_id, "'");
+		return ERR_INVALID_PARAMETER;
+	}
+
 	int w = 0, h = 0;
 	if (!opennova::decode_pcx_with_palette(bytes.ptr(), bytes.size(),
 	                                        *refs.indices, refs.palette, w, h)) {
-		UtilityFunctions::push_error("import_pcx_slot: decode failed for ", path);
+		UtilityFunctions::push_error("import_pcx_slot: decode failed for ", filename);
 		return ERR_FILE_CORRUPT;
 	}
 	*refs.width = w;
 	*refs.height = h;
 	*refs.tex = opennova::build_indexed_texture(*refs.indices, refs.palette, w, h);
-	*refs.trn_filename = path.get_file().utf8().get_data();
+	*refs.trn_filename = filename.get_file().utf8().get_data();
 	if (slot_id == "foliagemap") {
 		_sync_foliage_map_resource_from_slot();
 	}
@@ -796,6 +801,7 @@ Error NovaTerrainData::load() {
 	loaded = false;
 	cpt = opennova::CptFile();
 	trn = opennova::TrnConfig();
+	resource_root.unref();
 
 	if (trn_path.is_empty()) {
 		UtilityFunctions::printerr("NovaTerrainData: trn_path must be set before loading");
@@ -811,6 +817,38 @@ Error NovaTerrainData::load() {
 	std::string trn_content = trn_file->get_as_text().utf8().get_data();
 	trn_file.unref();
 
+	return _load_from_trn_text(trn_content, trn_path);
+}
+
+Error NovaTerrainData::load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name) {
+	loaded = false;
+	cpt = opennova::CptFile();
+	trn = opennova::TrnConfig();
+	resource_root.unref();
+
+	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
+		UtilityFunctions::printerr("NovaTerrainData: resource root must be configured before loading");
+		return ERR_INVALID_PARAMETER;
+	}
+	const String file = p_name.get_file();
+	if (file.is_empty()) {
+		UtilityFunctions::printerr("NovaTerrainData: resource filename is empty");
+		return ERR_INVALID_PARAMETER;
+	}
+	const PackedByteArray trn_bytes = p_resource_root->read_file(file);
+	if (trn_bytes.is_empty()) {
+		UtilityFunctions::printerr("NovaTerrainData: Cannot open TRN from resource root: ", file);
+		return ERR_FILE_CANT_READ;
+	}
+
+	trn_path = file;
+	resource_root = p_resource_root;
+	const std::string trn_content(reinterpret_cast<const char *>(trn_bytes.ptr()), static_cast<size_t>(trn_bytes.size()));
+	return _load_from_trn_text(trn_content, file);
+}
+
+Error NovaTerrainData::_load_from_trn_text(const std::string &trn_content, const String &source_label) {
+	(void)source_label;
 	std::string error;
 	std::istringstream trn_stream(trn_content);
 	if (!opennova::load_trn(trn_stream, trn, error)) {
@@ -840,9 +878,12 @@ Error NovaTerrainData::load() {
 	// Load textures from TRN filenames → Texture2D resources. Warn when a
 	// referenced texture fails to resolve (e.g. a raw .tga stripped from an
 	// exported PCK) so the failure is visible instead of silently untextured.
-	String trn_dir = trn_path.get_base_dir();
+	const bool use_resource_root = resource_root.is_valid() && !resource_root->get_root_dir().is_empty();
+	String trn_dir = use_resource_root ? resource_root->get_root_dir() : trn_path.get_base_dir();
 	auto load_tex = [&](const char *slot, const String &filename) -> Ref<Texture2D> {
-		Ref<Texture2D> tex = _load_texture_from_dir(trn_dir, filename);
+		Ref<Texture2D> tex = use_resource_root
+				? resource_root->load_texture(filename)
+				: _load_texture_from_dir(trn_dir, filename);
 		if (tex.is_null() && !filename.is_empty()) {
 			UtilityFunctions::push_warning("NovaTerrainData: ", slot, " texture '", filename,
 				"' did not resolve under ", trn_dir, " (terrain may render untextured)");
@@ -866,19 +907,46 @@ Error NovaTerrainData::load() {
 		String filename = (slot_id == "charmap")
 			? charmap_filename
 			: foliagemap_filename;
-		String resolved = opennova::resolve_texture_path(trn_dir, filename);
-		if (!resolved.is_empty()) {
-			Error err = import_pcx_slot(slot_id, resolved);
-			if (err != OK) {
-				UtilityFunctions::push_warning(
-					"NovaTerrainData: failed to import ", slot_id,
-					" from '", resolved, "' (error ", err, "); resetting slot to default");
+		if (use_resource_root) {
+			PackedByteArray bytes = resource_root->read_file(filename);
+			String mounted_filename = filename;
+			if (bytes.is_empty()) {
+				for (const String &candidate : opennova::texture_candidate_filenames(filename)) {
+					bytes = resource_root->read_file(candidate);
+					if (!bytes.is_empty()) {
+						mounted_filename = candidate;
+						break;
+					}
+				}
+			}
+			if (!bytes.is_empty()) {
+				Error err = _import_pcx_slot_bytes(slot_id, mounted_filename, bytes);
+				if (err != OK) {
+					UtilityFunctions::push_warning(
+						"NovaTerrainData: failed to import ", slot_id,
+						" from mounted resource '", mounted_filename, "' (error ", err, "); resetting slot to default");
+					reset_pcx_slot_default(slot_id, 1024, 1024);
+				}
+			} else {
+				if (!filename.is_empty())
+					UtilityFunctions::push_warning("NovaTerrainData: ", slot_id, " not found for '", filename, "' under ", trn_dir);
 				reset_pcx_slot_default(slot_id, 1024, 1024);
 			}
 		} else {
-			if (!filename.is_empty())
-				UtilityFunctions::push_warning("NovaTerrainData: ", slot_id, " not found for '", filename, "' under ", trn_dir);
-			reset_pcx_slot_default(slot_id, 1024, 1024);
+			String resolved = opennova::resolve_texture_path(trn_dir, filename);
+			if (!resolved.is_empty()) {
+				Error err = import_pcx_slot(slot_id, resolved);
+				if (err != OK) {
+					UtilityFunctions::push_warning(
+						"NovaTerrainData: failed to import ", slot_id,
+						" from '", resolved, "' (error ", err, "); resetting slot to default");
+					reset_pcx_slot_default(slot_id, 1024, 1024);
+				}
+			} else {
+				if (!filename.is_empty())
+					UtilityFunctions::push_warning("NovaTerrainData: ", slot_id, " not found for '", filename, "' under ", trn_dir);
+				reset_pcx_slot_default(slot_id, 1024, 1024);
+			}
 		}
 	}
 	tilestrip_tex = load_tex("tilestrip", tilestrip_filename);
@@ -898,16 +966,24 @@ Error NovaTerrainData::load() {
 		return OK;
 	}
 
-	String cpt_path = trn_dir.path_join(String(trn.polydata.c_str()));
-	Ref<FileAccess> cpt_file = FileAccess::open(cpt_path, FileAccess::READ);
-	if (cpt_file.is_null()) {
+	PackedByteArray cpt_bytes;
+	const String cpt_name = String(trn.polydata.c_str());
+	const String cpt_path = trn_dir.path_join(cpt_name);
+	if (use_resource_root) {
+		cpt_bytes = resource_root->read_file(cpt_name);
+	} else {
+		Ref<FileAccess> cpt_file = FileAccess::open(cpt_path, FileAccess::READ);
+		if (cpt_file.is_valid()) {
+			cpt_bytes = cpt_file->get_buffer(cpt_file->get_length());
+			cpt_file.unref();
+		}
+	}
+	if (cpt_bytes.is_empty()) {
 		loaded = true;
 		UtilityFunctions::push_warning("NovaTerrainData: CPT '", cpt_path,
 			"' missing; continuing without baked terrain (run Export to generate it)");
 		return OK;
 	}
-	PackedByteArray cpt_bytes = cpt_file->get_buffer(cpt_file->get_length());
-	cpt_file.unref();
 
 	if (!opennova::load_cpt(cpt_bytes.ptr(), cpt_bytes.size(), cpt, error)) {
 		UtilityFunctions::printerr("NovaTerrainData: CPT parse failed: ", error.c_str());
@@ -1490,29 +1566,43 @@ String NovaTerrainData::get_tileinfo_filename() const {
 
 Ref<NovaTerrainTileInfo> NovaTerrainData::get_tileinfo_resource() const {
 	const String filename = String(trn.tileinfo.c_str());
-	if (filename.is_empty() || trn_path.is_empty()) {
+	if (filename.is_empty() || (trn_path.is_empty() && resource_root.is_null())) {
 		tileinfo_resource_cache.unref();
 		tileinfo_resource_cache_path = String();
 		return Ref<NovaTerrainTileInfo>();
 	}
 
-	const String resolved = opennova::resolve_sidecar_path(trn_path.get_base_dir(), filename, "til");
-	const String lookup = resolved.is_empty() ? trn_path.get_base_dir().path_join(filename) : resolved;
+	const bool use_resource_root = resource_root.is_valid() && !resource_root->get_root_dir().is_empty();
+	const String resolved = use_resource_root ? String() : opennova::resolve_sidecar_path(trn_path.get_base_dir(), filename, "til");
+	const String lookup = use_resource_root
+			? resource_root->get_root_dir().path_join(filename)
+			: (resolved.is_empty() ? trn_path.get_base_dir().path_join(filename) : resolved);
 
 	if (tileinfo_resource_cache.is_valid() && tileinfo_resource_cache_path == lookup) {
 		return tileinfo_resource_cache;
 	}
 
-	Ref<FileAccess> file = FileAccess::open(lookup, FileAccess::READ);
-	if (file.is_null()) {
+	PackedByteArray bytes;
+	String lookup_name = filename;
+	if (use_resource_root) {
+		bytes = resource_root->read_file(lookup_name);
+		if (bytes.is_empty() && lookup_name.get_extension().to_lower() != "til") {
+			lookup_name = lookup_name.get_file() + String(".til");
+			bytes = resource_root->read_file(lookup_name);
+		}
+	} else {
+		Ref<FileAccess> file = FileAccess::open(lookup, FileAccess::READ);
+		if (file.is_valid()) {
+			bytes = file->get_buffer(file->get_length());
+			file.unref();
+		}
+	}
+	if (bytes.is_empty()) {
 		UtilityFunctions::push_warning("NovaTerrainData: tileinfo file not found at ", lookup);
 		tileinfo_resource_cache.unref();
 		tileinfo_resource_cache_path = String();
 		return Ref<NovaTerrainTileInfo>();
 	}
-
-	PackedByteArray bytes = file->get_buffer(file->get_length());
-	file.unref();
 
 	opennova::TilFile til;
 	std::string error;

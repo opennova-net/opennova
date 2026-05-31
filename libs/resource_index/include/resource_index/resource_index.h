@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -9,8 +10,11 @@ namespace opennova {
 struct ResourceFileEntry {
 	std::string kind;
 	std::string path;
+	std::string logical_name;
 	std::string display_name;
 	std::string relative_path;
+	std::string source_type;
+	std::string archive_path;
 };
 
 class ResourceIndex {
@@ -28,6 +32,7 @@ public:
 	void clear();
 
 	std::vector<ResourceFileEntry> resource_files(const std::string &kind) const;
+	bool read_file(const std::string &name, std::vector<uint8_t> &out) const;
 	const std::string &root_dir() const;
 	const std::string &last_error() const;
 

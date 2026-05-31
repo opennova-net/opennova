@@ -12,6 +12,7 @@ add_subdirectory(../../libs/trn opennova_trn)
 add_subdirectory(../../libs/cpt opennova_cpt)
 add_subdirectory(../../libs/env opennova_env)
 add_subdirectory(../../libs/threedi opennova_threedi)
+add_subdirectory(../../libs/pff opennova_pff)
 add_subdirectory(../../libs/rtxt opennova_rtxt)
 add_subdirectory(../../libs/ase opennova_ase)
 add_subdirectory(../../libs/tdp opennova_tdp)
@@ -81,6 +82,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_cbin
     opennova_env
     opennova_threedi
+    opennova_pff
     opennova_rtxt
     opennova_ase
     opennova_tdp

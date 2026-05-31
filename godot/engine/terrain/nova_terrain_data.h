@@ -14,7 +14,10 @@
 #include <cpt/cpt_io.h>
 #include <trn/trn_io.h>
 
+#include "resource_index/nova_resource_root.h"
+
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace godot {
@@ -66,6 +69,7 @@ private:
 	opennova::CptFile cpt;
 	opennova::TrnConfig trn;
 	bool loaded = false;
+	Ref<NovaResourceRoot> resource_root;
 
 	// Palette + indices for PCX-backed map data (hidden from GDScript;
 	// exposed only via high-level import/save/reset methods).
@@ -108,6 +112,8 @@ private:
 
 	struct PcxSlotRefs;
 	bool _resolve_pcx_slot(const String &slot_id, PcxSlotRefs &out);
+	Error _import_pcx_slot_bytes(const String &slot_id, const String &filename, const PackedByteArray &bytes);
+	Error _load_from_trn_text(const std::string &trn_content, const String &source_label);
 
 protected:
 	static void _bind_methods();
@@ -171,6 +177,7 @@ public:
 	double get_horizon() const;
 
 	Error load();
+	Error load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
 	bool is_loaded() const;
 	// Returns the live depth as little-endian raw16 (value = clamp(height*256)).
 	// Reads the editable heightmap_image when present, else the loaded CPT.
