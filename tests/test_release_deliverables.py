@@ -172,14 +172,19 @@ def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> Non
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 
     assert "validate-deliverables:" in workflow
-    assert "package-godot-editor:" in workflow
-    assert "package-godot-runtime:" in workflow
-    assert "package-godot-macos:" in workflow
+    assert "package-godot-windows-editor:" in workflow
+    assert "package-godot-windows-runtime:" in workflow
+    assert "package-godot-macos-editor:" in workflow
+    assert "package-godot-macos-runtime:" in workflow
     assert "package-godot:" not in workflow
+    assert "package-godot-editor:" not in workflow
+    assert "package-godot-runtime:" not in workflow
+    assert "package-godot-macos:" not in workflow
     assert "scripts/package_godot_editor_windows.ps1" in workflow
     assert "scripts/package_godot_runtime_windows.ps1" in workflow
-    assert "scripts/package_godot_macos.sh" in workflow
-    assert "needs: [package-addon, package-max-mzp, package-importer, package-godot-editor, package-godot-runtime, package-godot-macos]" in workflow
+    assert "scripts/package_godot_editor_macos.sh" in workflow
+    assert "scripts/package_godot_runtime_macos.sh" in workflow
+    assert "needs: [package-addon, package-max-mzp, package-importer, package-godot-windows-editor, package-godot-windows-runtime, package-godot-macos-editor, package-godot-macos-runtime]" in workflow
     assert "scripts/validate_release_deliverables.py --release-version 0.0.0-ci" in workflow
     assert "dist/onimport-v*.exe" in workflow
     assert "dist/opennova-modtools-windows-v*.zip" in workflow
@@ -192,24 +197,35 @@ def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> Non
 def test_release_splits_godot_editor_and_runtime_package_jobs() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
-    assert "package-godot-editor:" in workflow
-    assert "package-godot-runtime:" in workflow
-    assert "package-godot-macos:" in workflow
+    assert "package-godot-windows-editor:" in workflow
+    assert "package-godot-windows-runtime:" in workflow
+    assert "package-godot-macos-editor:" in workflow
+    assert "package-godot-macos-runtime:" in workflow
     assert "package-godot:" not in workflow
+    assert "package-godot-editor:" not in workflow
+    assert "package-godot-runtime:" not in workflow
+    assert "package-godot-macos:" not in workflow
     assert "scripts/package_godot_editor_windows.ps1" in workflow
     assert "scripts/package_godot_runtime_windows.ps1" in workflow
-    assert "scripts/package_godot_macos.sh" in workflow
-    assert "needs: [package-addon, package-max-mzp, package-importer, package-godot-editor, package-godot-runtime, package-godot-macos]" in workflow
+    assert "scripts/package_godot_editor_macos.sh" in workflow
+    assert "scripts/package_godot_runtime_macos.sh" in workflow
+    assert "needs: [package-addon, package-max-mzp, package-importer, package-godot-windows-editor, package-godot-windows-runtime, package-godot-macos-editor, package-godot-macos-runtime]" in workflow
 
 
 def test_godot_package_wrappers_target_editor_and_runtime() -> None:
-    editor = (ROOT / "scripts/package_godot_editor_windows.ps1").read_text(encoding="utf-8")
-    runtime = (ROOT / "scripts/package_godot_runtime_windows.ps1").read_text(encoding="utf-8")
-    shared = (ROOT / "scripts/package_godot_windows.ps1").read_text(encoding="utf-8")
+    windows_editor = (ROOT / "scripts/package_godot_editor_windows.ps1").read_text(encoding="utf-8")
+    windows_runtime = (ROOT / "scripts/package_godot_runtime_windows.ps1").read_text(encoding="utf-8")
+    windows_shared = (ROOT / "scripts/package_godot_windows.ps1").read_text(encoding="utf-8")
+    macos_editor = (ROOT / "scripts/package_godot_editor_macos.sh").read_text(encoding="utf-8")
+    macos_runtime = (ROOT / "scripts/package_godot_runtime_macos.sh").read_text(encoding="utf-8")
+    macos_shared = (ROOT / "scripts/package_godot_macos.sh").read_text(encoding="utf-8")
 
-    assert "-Target editor" in editor
-    assert "-Target runtime" in runtime
-    assert "[ValidateSet(\"all\", \"editor\", \"runtime\")]" in shared
+    assert "-Target editor" in windows_editor
+    assert "-Target runtime" in windows_runtime
+    assert "[ValidateSet(\"all\", \"editor\", \"runtime\")]" in windows_shared
+    assert "package_godot_macos.sh editor" in macos_editor
+    assert "package_godot_macos.sh runtime" in macos_runtime
+    assert "TARGET=\"${1:-all}\"" in macos_shared
 
 
 def test_readme_lists_public_asset_names_and_install_hints() -> None:
