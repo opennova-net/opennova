@@ -353,7 +353,7 @@ jobs:
 
   validate-deliverables:
     runs-on: ubuntu-latest
-    needs: [package-addon, package-max-mzp, package-importer, package-godot]
+    needs: [package-addon, package-max-mzp, package-importer, package-godot, package-godot-macos]
     steps:
       - uses: actions/checkout@v4
 
