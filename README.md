@@ -1,6 +1,8 @@
 # OpenNova
 
-Open-source toolchain and runtime for NovaLogic's Joint Operations (JO) and newer games. Extract and edit assets with the importer, Blender addon, and OpenNova Editor (ONED). Load them in a C++ reimplementation of the game engine, hosted in Godot.
+OpenNova is a faithful reimplementation of NovaLogic's game engine, aiming for feature and visual parity with the originals. The engine is data driven: it runs off the same asset data the games shipped, which is what made the NovaLogic engine so moddable. The portable core is C++; Godot is the chosen host for rendering, tooling, and the editor. Joint Operations (JO) is the first game we are bringing up.
+
+This repo is the full toolchain: extract and edit assets with the importer, the Blender and 3ds Max plugins, and the OpenNova Editor (ONED), then load them in the engine, hosted in Godot. See [GOALS.md](GOALS.md) for the full vision.
 
 ## Screenshots
 
@@ -39,6 +41,8 @@ Pre-built binaries are available on the [Releases](../../releases) page:
 | **`opennova-3ds-max-ase-exporter-windows-v<version>.mzp`** | 3ds Max plugin installer that adds NovaLogic ASE export. | Run the MZP in 3ds Max, restart 3ds Max, then use `File > Export > Novalogic ASE (.ase)`. |
 | **`opennova-modding-editor-windows-v<version>.zip`** | Standalone OpenNova Editor (ONED) for authoring terrain, environment, tile, and related mod data. | Extract the zip, then run `opennova-modtools.exe`. |
 | **`opennova-game-runtime-windows-v<version>.zip`** | Godot-hosted OpenNova runtime for loading exported scenes and runtime systems. | Extract the zip, then run `opennova.exe`. |
+| **`opennova-modding-editor-macos-v<version>.zip`** | The ONED editor as a universal macOS app (Apple Silicon and Intel). | Unzip, move the `.app` to Applications, then open it. The app is ad-hoc signed, not notarized: right-click then `Open` the first time, or run `xattr -dr com.apple.quarantine` on the `.app`. |
+| **`opennova-game-runtime-macos-v<version>.zip`** | The OpenNova runtime as a universal macOS app (Apple Silicon and Intel). | Unzip, move the `.app` to Applications, then open it. Clear Gatekeeper the same way as the editor app. |
 
 ## Asset Importer
 

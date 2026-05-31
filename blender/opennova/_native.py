@@ -20,8 +20,13 @@ def _lib_path() -> str:
         sub, name = "windows-x64", "opennova.dll"
     elif system == "Linux":
         sub, name = "linux-x64", "libopennova.so"
+    elif system == "Darwin":
+        sub = "macos-arm64" if platform.machine() == "arm64" else "macos-x64"
+        name = "libopennova.dylib"
     else:
-        raise OSError(f"Unsupported platform: {system} (only Windows and Linux are supported)")
+        raise OSError(
+            f"Unsupported platform: {system} (only Windows, Linux, and macOS are supported)"
+        )
 
     path = addon_dir / "lib" / sub / name
     if not path.is_file():
