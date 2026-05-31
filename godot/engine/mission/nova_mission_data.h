@@ -4,6 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include <mission/mission.h>
@@ -79,6 +80,11 @@ public:
 	// (same fields as get_entity, including its assigned "index"), or {} if no mission
 	// is loaded or the kind is invalid. Sets the dirty flag on success.
 	Dictionary add_entity(int kind, int item_id, const Vector3 &position, const Vector3 &rotation_deg);
+	// Remove the entity at (kind, index). The lib erases it from its kind's list, so
+	// every later entity of that kind shifts down by one index (callers holding indices
+	// must re-fetch). Markers also repair the waypoint paths that referenced them.
+	// Returns false if (kind, index) is out of range. Sets the dirty flag on success.
+	bool remove_entity(int kind, int index);
 	// Write the document back to disk. save_file() targets the path it was opened
 	// from; save_as() targets a new path and adopts it. Both clear the dirty flag and
 	// go through the byte-faithful writer in libs/mission. save_file() returns
@@ -86,6 +92,21 @@ public:
 	Error save_file();
 	Error save_as(const String &path);
 	bool is_modified() const;
+
+	// --- Snapshot / restore (undo/redo support) -------------------------------
+	// Serialize the whole document to a byte buffer through the same byte-faithful
+	// writer as save (write_bms_bytes), not the bytes it was opened from. The result
+	// is a valid .bms regardless of how the document was built, so callers (the
+	// editor's undo stack) hold re-serialized states, never raw input passed through.
+	// Returns an empty array when no mission is loaded. Non-const: write_bms_bytes
+	// syncs the header counts on the underlying document before serializing.
+	PackedByteArray snapshot();
+	// Replace the whole in-memory document by parsing `bytes` (load_bms_bytes). Used
+	// to restore an undo/redo snapshot without touching the filesystem. Leaves the
+	// dirty flag untouched: the editor owns its own dirty state and recomputes it.
+	// Returns false (and leaves the document empty: load_bms_bytes clears first) when
+	// the bytes fail to parse, so callers must not assume a valid document on false.
+	bool restore_snapshot(const PackedByteArray &bytes);
 };
 
 } // namespace godot

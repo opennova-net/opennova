@@ -31,6 +31,7 @@ var _pos_spins: Array = []  # [x, y, z]
 var _rot_spins: Array = []  # [pitch, yaw, roll]
 var _team_spin: SpinBox
 var _group_spin: SpinBox
+var _delete_button: Button
 
 # --- Place-object palette (persistent) ----------------------------------------
 var _place_box: VBoxContainer
@@ -121,11 +122,23 @@ func _build_edit_panel() -> void:
 
 	_animated_note = ObjectUiHelpers.add_muted_label(_edit_box, "Animated object.")
 
+	# Delete sits at the bottom of the edit panel as the one destructive action; the whole
+	# panel is hidden when nothing is selected, so the button only shows with a selection.
+	# Removing an entity is not saved to the .bms until Save Mission, so an accidental
+	# delete is recovered by reopening the mission rather than a modal confirm here.
+	_edit_box.add_child(HSeparator.new())
+	_delete_button = Button.new()
+	_delete_button.name = "MissionDeleteEntity"
+	_delete_button.text = "Delete object"
+	_delete_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_edit_box.add_child(_delete_button)
+
 	for axis in 3:
 		_pos_spins[axis].value_changed.connect(_on_position_axis.bind(axis))
 		_rot_spins[axis].value_changed.connect(_on_rotation_axis.bind(axis))
 	_team_spin.value_changed.connect(_on_team_changed)
 	_group_spin.value_changed.connect(_on_group_changed)
+	_delete_button.pressed.connect(_on_delete_pressed)
 
 
 func _refresh_edit_panel() -> void:
@@ -196,6 +209,14 @@ func _on_group_changed(value: float) -> void:
 	if _loading or _controller == null:
 		return
 	_controller.set_selected_group(int(value))
+
+
+func _on_delete_pressed() -> void:
+	if _controller == null:
+		return
+	# The controller removes the selected entity, re-bakes the world, and fires `changed`;
+	# _refresh_edit_panel then hides this panel (nothing is selected after a delete).
+	_controller.delete_selected()
 
 
 # --- Place-object palette (persistent) ----------------------------------------

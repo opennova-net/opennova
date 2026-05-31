@@ -60,6 +60,27 @@ var _place_item_id: int = 0
 # objects container; freed with the container).
 var _selection_box: MeshInstance3D
 
+# --- Authoring (Phase 5): undo / redo -----------------------------------------
+# Whole-document byte snapshots taken through the real serializer
+# (NovaMissionData.snapshot = write_bms_bytes) and restored via restore_snapshot
+# (load_bms_bytes). Each stack entry is a re-serialized, valid .bms — never the raw
+# bytes opened from disk — so the same machinery rewinds a from-scratch mission too.
+# Mirrors strings_editor.gd. UNDO_LIMIT caps memory; the oldest step is dropped first.
+const UNDO_LIMIT := 100
+var _undo_stack: Array[PackedByteArray] = []
+var _redo_stack: Array[PackedByteArray] = []
+# An open edit session (begin_edit .. commit_edit) coalesces a continuous gesture (a
+# terrain drag, or a run of inspector SpinBox edits) into one undo step: the pre-edit
+# snapshot is held here and pushed only if the bytes actually changed.
+var _pending_snapshot: PackedByteArray = PackedByteArray()
+var _editing: bool = false
+# The document bytes as opened / last saved. The dirty flag is exact: true iff the
+# current document differs from this, so undoing back to the original drops the `*`.
+var _clean_snapshot: PackedByteArray = PackedByteArray()
+# Guards undo/redo against re-entrancy (a restore -> rebake -> changed -> inspector
+# refresh must never re-enter another restore).
+var _restoring: bool = false
+
 
 func _init(p_terrain_editor: Node = null) -> void:
 	terrain_editor = p_terrain_editor
@@ -171,6 +192,11 @@ func open_mission(bms_path: String) -> Error:
 	_loaded_trn_path = trn_path
 	_last_open_dir = bms_path.get_base_dir()
 	_is_dirty = false
+	# Baseline for the exact dirty flag, and a fresh undo history for this document.
+	# The baseline is a re-serialization (not the raw file bytes) so it compares
+	# apples-to-apples with later snapshot()s.
+	_clean_snapshot = mission.snapshot()
+	_clear_history()
 	_last_status = _describe_load(mission, bms_path, env_note)
 	changed.emit()
 	return OK
@@ -187,6 +213,10 @@ func clear() -> void:
 	_loaded_trn_path = ""
 	_stats = {}
 	_is_dirty = false
+	# Drop the undo history and baseline: they describe a document that is no longer
+	# loaded, and restoring into a missing mission is meaningless.
+	_clean_snapshot = PackedByteArray()
+	_clear_history()
 	changed.emit()
 
 
@@ -211,10 +241,25 @@ func set_objects_visible(value: bool) -> void:
 		container.visible = value
 
 
+# Recompute the exact dirty flag and notify. Called after every mutation, undo, and
+# redo. Dirty is exact: true iff the current document differs from the opened / last-
+# saved bytes, so undoing all the way back to the original clears the `*`. The compare
+# is cheap (the document is already serialized for the undo snapshots).
 func mark_dirty() -> void:
-	if not _is_dirty:
-		_is_dirty = true
+	_recompute_dirty()
 	changed.emit()
+
+
+func _recompute_dirty() -> void:
+	if _mission == null:
+		_is_dirty = false
+		return
+	# Before a clean baseline exists (e.g. mid-open), fall back to the binding's coarse
+	# "modified since load" flag rather than reporting spuriously clean.
+	if _clean_snapshot.is_empty():
+		_is_dirty = _mission.is_modified()
+		return
+	_is_dirty = _mission.snapshot() != _clean_snapshot
 
 
 # --- Save ---------------------------------------------------------------------
@@ -229,6 +274,9 @@ func save_current() -> Error:
 		return ERR_INVALID_PARAMETER
 	var err := int(_mission.save_file())
 	if err == OK:
+		# The saved bytes are the new clean baseline; the undo history is kept so the user
+		# can still undo across the save.
+		_clean_snapshot = _mission.snapshot()
 		_is_dirty = false
 		_last_status = "Saved %s." % _current_path.get_file()
 		changed.emit()
@@ -253,12 +301,136 @@ func save_as(dir_path: String) -> Error:
 	if err == OK:
 		_current_path = path
 		_last_open_dir = dir_path
+		_clean_snapshot = _mission.snapshot()
 		_is_dirty = false
 		_last_status = "Saved %s." % filename
 		changed.emit()
 	else:
 		_last_status = "Could not save %s: %s" % [filename, _mission.get_last_error()]
 	return err as Error
+
+
+# --- Authoring (Phase 5): undo / redo -----------------------------------------
+# Whole-document byte snapshots, mirroring strings_editor.gd. A mutation snapshots the
+# pre-edit document, pushes it on the undo stack, and clears redo; undo/redo swap the
+# current state onto the opposite stack and restore the popped snapshot, then re-bake
+# the world to match. Continuous gestures (a drag, a run of inspector edits) are
+# bracketed by begin_edit/commit_edit so each becomes one step. Triggered by the
+# viewport Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y; also exposed for the workspace's framework
+# hooks. Selection is dropped on restore: structural edits reindex entities, so a stored
+# {kind, index} could bind to a different entity, and the re-bake resets selection anyway.
+
+func can_undo() -> bool:
+	return not _undo_stack.is_empty()
+
+
+func can_redo() -> bool:
+	return not _redo_stack.is_empty()
+
+
+# Open an edit session, capturing the pre-edit snapshot once. Inert if a session is
+# already open (so a run of axis edits coalesces) or no mission is loaded.
+func begin_edit() -> void:
+	if _editing or _mission == null:
+		return
+	_pending_snapshot = _mission.snapshot()
+	_editing = true
+
+
+# Close an edit session, pushing the held snapshot as one undo step only if the document
+# actually changed (a plain click, a same-value edit, or a programmatic refresh push
+# nothing). Clears redo on a real change.
+func commit_edit() -> void:
+	if not _editing:
+		return
+	_editing = false
+	var pending := _pending_snapshot
+	_pending_snapshot = PackedByteArray()
+	if pending.is_empty() or _mission == null:
+		return
+	if _mission.snapshot() != pending:
+		_undo_stack.append(pending)
+		_trim_undo()
+		_redo_stack.clear()
+
+
+func _flush_edit() -> void:
+	commit_edit()
+
+
+# Record one undo step from a snapshot captured BEFORE a mutation, clearing redo. Skips
+# the push when the document did not actually change, so a no-op edit adds no step.
+func _push_undo_step(before: PackedByteArray) -> void:
+	if before.is_empty() or _mission == null:
+		return
+	if _mission.snapshot() == before:
+		return
+	_undo_stack.append(before)
+	_trim_undo()
+	_redo_stack.clear()
+
+
+func _trim_undo() -> void:
+	while _undo_stack.size() > UNDO_LIMIT:
+		_undo_stack.pop_front()
+
+
+func _clear_history() -> void:
+	_undo_stack.clear()
+	_redo_stack.clear()
+	_pending_snapshot = PackedByteArray()
+	_editing = false
+
+
+func undo() -> void:
+	if _restoring:
+		return
+	# A keyboard undo can arrive mid-drag; cancel_drag abandons the visual gesture (so the
+	# re-bake does not free nodes a continuing drag still references) and commits any open
+	# edit session as its step before we rewind.
+	cancel_drag()
+	if _undo_stack.is_empty() or _mission == null:
+		return
+	_restoring = true
+	_redo_stack.append(_mission.snapshot())
+	_restore(_undo_stack.pop_back())
+	_restoring = false
+
+
+func redo() -> void:
+	if _restoring:
+		return
+	cancel_drag()
+	if _redo_stack.is_empty() or _mission == null:
+		return
+	_restoring = true
+	_undo_stack.append(_mission.snapshot())
+	_restore(_redo_stack.pop_back())
+	_restoring = false
+
+
+# Replace the document from a snapshot, then re-bake the world to match and recompute the
+# exact dirty flag. Emits changed once (via mark_dirty after the re-bake) so the inspector
+# refreshes against the restored world in a single pass.
+func _restore(snapshot: PackedByteArray) -> void:
+	if not _mission.restore_snapshot(snapshot):
+		# Self-produced snapshots always parse, so this is a defensive path: load_bms_bytes
+		# leaves the document empty on failure, so clear rather than re-bake against nothing.
+		_last_status = "Could not restore the previous mission state."
+		clear()
+		return
+	_rebake_objects()
+	mark_dirty()
+
+
+# Mark the current input event handled so a consumed Ctrl+Z / Ctrl+Y does not propagate
+# further (mirrors terrain_editor). No-op without a live viewport (headless tests).
+func _consume_viewport_key() -> void:
+	if terrain_editor == null or not terrain_editor.is_inside_tree():
+		return
+	var vp := terrain_editor.get_viewport()
+	if vp != null:
+		vp.set_input_as_handled()
 
 
 # --- Viewport authoring: select + terrain-plane drag --------------------------
@@ -291,8 +463,34 @@ func handle_viewport_input(event: InputEvent) -> void:
 			_on_left_release()
 	elif event is InputEventKey:
 		var key := event as InputEventKey
-		if key.pressed and key.keycode == KEY_ESCAPE and is_placement_armed():
+		# Ignore key-up and auto-repeat echoes (holding the key must not chain actions).
+		if not key.pressed or key.echo:
+			return
+		# Undo / redo: Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y. Claimed before the other shortcuts
+		# and gated by the same focus guard as Delete, so a focused SpinBox / LineEdit keeps
+		# its own text undo. Marked handled so the key does not propagate further. (Mirrors
+		# fnt_editor / terrain_editor, which also key off ctrl_pressed, not Cmd, on macOS.)
+		if key.ctrl_pressed and not _gui_focus_blocks_shortcut():
+			if key.keycode == KEY_Z and not key.shift_pressed:
+				undo()
+				_consume_viewport_key()
+				return
+			if (key.keycode == KEY_Z and key.shift_pressed) or key.keycode == KEY_Y:
+				redo()
+				_consume_viewport_key()
+				return
+		if key.keycode == KEY_ESCAPE and is_placement_armed():
 			disarm_placement()
+		elif (key.keycode == KEY_DELETE or key.keycode == KEY_BACKSPACE) and not key.ctrl_pressed and not _selected_ref.is_empty():
+			# Delete the selected entity, unless a GUI control owns the keyboard. The router
+			# feeds us via _unhandled_input, which only withholds keys a focused control
+			# actually consumes -- a SpinBox holding focus via its arrows, an ItemList, or a
+			# Button do NOT consume Delete/Backspace, so without this guard a stray Backspace
+			# while editing a coordinate field would silently delete the object. Mirrors the
+			# focus-owner guard in credits_editor / fnt_editor / terrain_editor. (Placement
+			# arming also clears the selection, so this and an armed tool stay exclusive.)
+			if not _gui_focus_blocks_shortcut():
+				delete_selected()
 	elif event is InputEventMouseMotion and _drag_active:
 		var motion := event as InputEventMouseMotion
 		# Defend against a missed button-up (e.g. the release landed on a different
@@ -310,9 +508,17 @@ func handle_viewport_input(event: InputEvent) -> void:
 func cancel_drag() -> void:
 	_drag_active = false
 	_drag_moved = false
+	# Close any open edit session. A drag is visual-only until _on_left_release commits
+	# it, so a cancelled drag leaves the document unchanged and this pushes nothing; an
+	# inspector edit session that happens to be open keeps its undo step (commit, not
+	# discard, so a workspace switch mid-edit does not silently drop the step).
+	commit_edit()
 
 
 func _on_left_press(mouse_pos: Vector2) -> void:
+	# Close any open inspector edit session as its own step before starting a new gesture,
+	# so SpinBox edits and a following drag never coalesce.
+	_flush_edit()
 	var ref := _pick_entity(mouse_pos)
 	if ref.is_empty():
 		_deselect()
@@ -320,6 +526,9 @@ func _on_left_press(mouse_pos: Vector2) -> void:
 	_select(int(ref["kind"]), int(ref["index"]))
 	_drag_active = true
 	_drag_moved = false
+	# Snapshot the pre-drag state; _on_left_release commits it as one step iff the entity
+	# actually moved.
+	begin_edit()
 
 
 func _on_drag(mouse_pos: Vector2) -> void:
@@ -337,6 +546,8 @@ func _on_left_release() -> void:
 		_commit_selected_transform()
 	_drag_active = false
 	_drag_moved = false
+	# Push the drag as one undo step (no-op for a plain click: the bytes are unchanged).
+	commit_edit()
 
 
 func _pick_entity(mouse_pos: Vector2) -> Dictionary:
@@ -453,6 +664,10 @@ func get_selected_rotation() -> Vector3:
 func set_selected_position(bms_pos: Vector3) -> void:
 	if _selected_ref.is_empty() or _mission == null:
 		return
+	# Open (or continue) one edit session so a run of axis edits on this entity coalesces
+	# into a single undo step; it is pushed by the next action's flush. begin_edit is inert
+	# if a session is already open, so X / Y / Z / pitch / yaw / roll share one step.
+	begin_edit()
 	# entity_transform places objects at bms_to_godot_position(pos) in container-local
 	# space (the drag path and get_selected_position both invert exactly that), so set
 	# the local origin directly. Routing through the container's world transform would
@@ -464,6 +679,7 @@ func set_selected_position(bms_pos: Vector3) -> void:
 func set_selected_rotation(rot_deg: Vector3) -> void:
 	if _selected_ref.is_empty() or _mission == null:
 		return
+	begin_edit()
 	# Unlike a drag (position only), this rebuilds the basis from the authored degrees
 	# and re-applies the full transform so the in-world object actually rotates. Round
 	# to whole degrees first: the format (and set_entity_transform) stores integer
@@ -490,7 +706,13 @@ func _set_selected_property(property: String, value: int) -> void:
 	# out-of-range value cannot silently wrap (the SpinBoxes already cap 0..255, but
 	# this method is public).
 	value = clampi(value, 0, 255)
+	# A property change is its own undo step: close any open transform session first, then
+	# capture the pre-edit state and record it only if the write actually changed the bytes
+	# (a same-value write is a no-op).
+	_flush_edit()
+	var before := _mission.snapshot()
 	if _mission.set_entity_property_int(int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value):
+		_push_undo_step(before)
 		mark_dirty()
 
 
@@ -533,6 +755,8 @@ func arm_placement(item_id: int) -> void:
 		return
 	if _kind_for_item_type(db.get_item_type(item_id)) == NovaMissionData.KIND_MARKER:
 		return
+	# Arming is a new action: close any open transform session as its own undo step first.
+	_flush_edit()
 	_place_item_id = item_id
 	_deselect()
 	changed.emit()
@@ -568,10 +792,15 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	var kind := _kind_for_item_type(db.get_item_type(item_id)) if db != null else NovaMissionData.KIND_ITEM
 	var local := container.global_transform.affine_inverse() * global_hit
 	var bms_pos := MissionObjectPlacer.godot_to_bms_position(local)
+	# Placing is its own undo step: close any open session, snapshot the pre-place state,
+	# then record it after the add succeeds.
+	_flush_edit()
+	var before := _mission.snapshot()
 	var record := _mission.add_entity(kind, item_id, bms_pos, Vector3.ZERO)
 	if record.is_empty():
 		_last_status = "Could not place item %d." % item_id
 		return false
+	_push_undo_step(before)
 	var new_index := int(record.get("index", -1))
 	_render_placed_entity(kind, new_index)
 	mark_dirty()
@@ -628,6 +857,75 @@ func _render_placed_entity(kind: int, index: int) -> void:
 	_pickable = _placer.pickable_records
 	for key in delta:
 		_stats[key] = int(_stats.get(key, 0)) + int(delta[key])
+
+
+# --- Authoring (Phase 4): delete + structural re-bake -------------------------
+# Deleting an entity is structural: the lib erases it from its kind's list, so every
+# later entity of that kind shifts down one index. The pickable index and MultiMesh
+# slot mapping were built from the old indices, so rather than patch them in place we
+# re-bake the whole MissionObjects container from the post-delete record — correct by
+# construction, and cheap because the retained placer keeps its model + batch caches.
+
+# Remove the currently-selected entity, then re-bake the world so it matches the new
+# record. Markers are never selectable (mesh-less), so this only ever deletes a
+# mesh-having entity. Returns false (a no-op) when nothing is selected or the lib
+# rejects the removal; clears the selection on success. Public so the inspector's
+# Delete button and the viewport Delete key share one path.
+func delete_selected() -> bool:
+	if _selected_ref.is_empty() or _mission == null:
+		return false
+	var kind := int(_selected_ref["kind"])
+	var index := int(_selected_ref["index"])
+	# Deleting is its own undo step: close any open session, snapshot the pre-delete state,
+	# then record it after the removal succeeds (a successful removal always changes the
+	# document, so this is never a no-op step).
+	_flush_edit()
+	var before := _mission.snapshot()
+	if not _mission.remove_entity(kind, index):
+		return false
+	_push_undo_step(before)
+	# Re-bake first (it resets the selection state and rebuilds stats), then dirty +
+	# emit once so the inspector refreshes against the post-delete world in a single pass.
+	_rebake_objects()
+	mark_dirty()
+	return true
+
+
+# Rebuild the entire MissionObjects container from the current mission state, reusing
+# the retained placer so its (expensive) model + batch caches survive the rebuild. The
+# container node identity is kept (place() clears and refills it), so _objects_container
+# still resolves. Drops the selection: its box and pickable records are freed with the
+# old container contents and the indices they carried may no longer be valid.
+func _rebake_objects() -> void:
+	if _placer == null or _mission == null:
+		return
+	if terrain_editor == null or not terrain_editor.has_method("get_terrain_world_root"):
+		return
+	var world_root: Node3D = terrain_editor.get_terrain_world_root()
+	if world_root == null:
+		return
+	_reset_selection_state()
+	var options: Dictionary = {}
+	var env_node := _environment_node()
+	if env_node != null:
+		options["environment_node"] = env_node
+	_stats = _placer.place(_mission, world_root, options)
+	_pickable = _placer.pickable_records
+
+
+# True when a GUI control that owns the keyboard currently has focus, so the viewport
+# Delete/Backspace shortcut must stay inert (the user is typing in / interacting with a
+# panel, not the 3D scene). Reaches the editor viewport through the bound terrain editor;
+# returns false when there is no live viewport (e.g. a headless test driving synthetic
+# events with no focused control), so the shortcut still fires there.
+func _gui_focus_blocks_shortcut() -> bool:
+	if terrain_editor == null or not terrain_editor.is_inside_tree():
+		return false
+	var vp := terrain_editor.get_viewport()
+	if vp == null:
+		return false
+	var fo := vp.gui_get_focus_owner()
+	return fo is LineEdit or fo is TextEdit or fo is SpinBox or fo is ItemList
 
 
 # --- Selection geometry helpers -----------------------------------------------

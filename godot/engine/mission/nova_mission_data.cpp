@@ -3,6 +3,8 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 using namespace godot;
 
@@ -42,9 +44,12 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_entity_transform", "kind", "index", "position", "rotation_deg"), &NovaMissionData::set_entity_transform);
 	ClassDB::bind_method(D_METHOD("set_entity_property_int", "kind", "index", "property", "value"), &NovaMissionData::set_entity_property_int);
 	ClassDB::bind_method(D_METHOD("add_entity", "kind", "item_id", "position", "rotation_deg"), &NovaMissionData::add_entity);
+	ClassDB::bind_method(D_METHOD("remove_entity", "kind", "index"), &NovaMissionData::remove_entity);
 	ClassDB::bind_method(D_METHOD("save_file"), &NovaMissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &NovaMissionData::save_as);
 	ClassDB::bind_method(D_METHOD("is_modified"), &NovaMissionData::is_modified);
+	ClassDB::bind_method(D_METHOD("snapshot"), &NovaMissionData::snapshot);
+	ClassDB::bind_method(D_METHOD("restore_snapshot", "bytes"), &NovaMissionData::restore_snapshot);
 
 	BIND_CONSTANT(KIND_MARKER);
 	BIND_CONSTANT(KIND_ITEM);
@@ -258,6 +263,17 @@ Dictionary NovaMissionData::add_entity(int kind, int item_id, const Vector3 &pos
 	return entity_to_dictionary(record);
 }
 
+bool NovaMissionData::remove_entity(int kind, int index) {
+	if (index < 0) {
+		return false;
+	}
+	if (!document.remove_entity(to_native_kind(kind), static_cast<size_t>(index))) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
 Error NovaMissionData::save_file() {
 	if (source_path.is_empty()) {
 		// No path yet: let the shell route to Save As (matches the editor save contract).
@@ -282,4 +298,29 @@ Error NovaMissionData::save_as(const String &path) {
 
 bool NovaMissionData::is_modified() const {
 	return modified;
+}
+
+PackedByteArray NovaMissionData::snapshot() {
+	PackedByteArray out;
+	std::vector<uint8_t> bytes;
+	// write_bms_bytes returns false when nothing is loaded; surface an empty array so
+	// the caller can skip pushing a meaningless snapshot.
+	if (!document.write_bms_bytes(bytes)) {
+		return out;
+	}
+	out.resize(static_cast<int64_t>(bytes.size()));
+	if (!bytes.empty()) {
+		std::memcpy(out.ptrw(), bytes.data(), bytes.size());
+	}
+	return out;
+}
+
+bool NovaMissionData::restore_snapshot(const PackedByteArray &bytes) {
+	// load_bms_bytes clears the document before parsing, so on failure we are left with
+	// an empty document; return the parse result and let the caller decide.
+	const bool ok = document.load_bms_bytes(bytes.ptr(), static_cast<size_t>(bytes.size()));
+	if (!ok) {
+		last_error = String(document.last_error().c_str());
+	}
+	return ok;
 }

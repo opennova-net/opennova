@@ -272,6 +272,30 @@ func _sync_shell_title() -> void:
 		editor_shell.sync_from_editor_state()
 
 
+# --- Undo / redo --------------------------------------------------------------
+# The base EditorWorkspace exposes these hooks; the controller owns the byte-snapshot
+# undo stack. The live trigger this phase is the viewport Ctrl+Z / Ctrl+Y (handled in
+# MissionController); implementing the hooks makes undo/redo reachable for tests and a
+# future shell toolbar with no shell change. Mirrors strings_workspace.gd.
+
+func can_undo() -> bool:
+	return _controller != null and _controller.can_undo()
+
+
+func can_redo() -> bool:
+	return _controller != null and _controller.can_redo()
+
+
+func undo() -> void:
+	if _controller != null:
+		_controller.undo()
+
+
+func redo() -> void:
+	if _controller != null:
+		_controller.redo()
+
+
 # --- Inspector ----------------------------------------------------------------
 
 func build_inspector(host: Control) -> void:

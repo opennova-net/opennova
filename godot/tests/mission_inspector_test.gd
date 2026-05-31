@@ -24,6 +24,7 @@ class FakeController:
 	var group_calls: int = 0
 	var pos_calls: int = 0
 	var rot_calls: int = 0
+	var delete_calls: int = 0
 	var last_team: int = 0
 	var last_group: int = 0
 	var last_pos: Vector3 = Vector3.ZERO
@@ -88,6 +89,13 @@ class FakeController:
 		entity["group"] = v
 		dirty = true
 		changed.emit()
+
+	func delete_selected() -> bool:
+		delete_calls += 1
+		entity = {}  # mirror the real controller clearing the selection after a delete
+		dirty = true
+		changed.emit()
+		return true
 
 	func is_dirty() -> bool:
 		return dirty
@@ -167,6 +175,28 @@ func test_editing_group_commits_once() -> void:
 	_spin(ctx.inspector, "MissionGroup").value = 9
 	assert_eq(ctx.fake.last_group, 9)
 	assert_eq(ctx.fake.group_calls, 1, "no echo re-commit")
+
+
+# --- Phase 4: delete the selected entity --------------------------------------
+
+func test_delete_button_hidden_without_a_selection() -> void:
+	var ctx := _make({})
+	assert_not_null(ctx.inspector._delete_button, "the Delete button is built up front")
+	assert_false(ctx.inspector._edit_box.visible, "the edit panel (which holds Delete) hides when nothing is selected")
+	assert_false(ctx.inspector._delete_button.is_visible_in_tree(), "so the Delete button is not shown")
+
+
+func test_delete_button_visible_with_a_selection() -> void:
+	var ctx := _make(_sample_entity())
+	assert_true(ctx.inspector._edit_box.visible, "the edit panel shows when an entity is selected")
+	assert_true(ctx.inspector._delete_button.is_visible_in_tree(), "and the Delete button is shown within it")
+
+
+func test_pressing_delete_button_deletes_through_the_controller() -> void:
+	var ctx := _make(_sample_entity())
+	ctx.inspector._delete_button.pressed.emit()  # simulate a click
+	assert_eq(ctx.fake.delete_calls, 1, "the Delete button removes the entity via the controller exactly once")
+	assert_false(ctx.inspector._edit_box.visible, "the panel hides after the delete clears the selection")
 
 
 # --- Phase 3: place-object palette --------------------------------------------
@@ -279,7 +309,7 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 		"get_mission", "get_stats", "get_selection_summary", "get_selected_entity",
 		"get_selected_position", "get_selected_rotation",
 		"set_selected_position", "set_selected_rotation", "set_selected_team",
-		"set_selected_group", "is_dirty",
+		"set_selected_group", "delete_selected", "is_dirty",
 		"get_placeable_items", "get_placement_item_id", "arm_placement", "disarm_placement",
 	]
 	for method in required:

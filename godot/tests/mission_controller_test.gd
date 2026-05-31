@@ -462,6 +462,168 @@ func test_place_entity_round_trips_under_an_offset_container() -> void:
 	assert_almost_eq(stored.z, expected.z, 0.05, "placed Z accounts for the container transform")
 
 
+# --- Authoring (Phase 4): delete the selected entity --------------------------
+# delete_selected removes the selected entity via the binding, then re-bakes the world
+# (which resets the selection). The headless dvxi5 fixture resolves no .3di, so nothing
+# renders, but the data path -- remove + count drop + deselect + dirty, all driven off
+# the retained placer -- is exactly what runs in the editor.
+
+func test_delete_selected_removes_clears_and_dirties() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	assert_false(controller.get_selection_summary().is_empty(), "precondition: a building is selected")
+
+	assert_true(controller.delete_selected(), "deleting the selected entity succeeds")
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before - 1, "the building count drops by one")
+	assert_true(controller.is_dirty(), "a delete dirties the mission")
+	assert_eq(controller.get_selection_summary(), {}, "the selection clears after the delete")
+
+
+func test_delete_selected_without_a_selection_is_inert() -> void:
+	var controller := _loaded_with_selection()
+	controller._deselect()
+	var mission := controller.get_mission()
+	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	assert_false(controller.delete_selected(), "delete with nothing selected is a no-op")
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before, "no entity is removed")
+
+
+func test_delete_selected_without_a_mission_is_inert() -> void:
+	var controller := MissionController.new(null)
+	assert_false(controller.delete_selected(), "no mission -> delete fails")
+	assert_false(controller.is_dirty(), "and nothing is dirtied")
+
+
+func test_delete_reuses_the_retained_placer() -> void:
+	# The re-bake must reuse the retained placer so its model + batch caches survive a
+	# delete; building a fresh placer would re-harvest every model. Pin the identity.
+	var controller := _loaded_with_selection()
+	var placer_before = controller._placer
+	assert_not_null(placer_before, "a placer is retained after open")
+	assert_true(controller.delete_selected())
+	assert_eq(controller._placer, placer_before, "the delete re-bakes through the same placer instance")
+
+
+func test_delete_key_deletes_via_the_viewport_path() -> void:
+	# The viewport input router forwards a Delete key; with an entity selected that must
+	# remove it -- the same controller path the inspector's Delete button uses.
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.keycode = KEY_DELETE
+	controller.handle_viewport_input(key)
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before - 1, "Delete removed the selected building")
+	assert_eq(controller.get_selection_summary(), {}, "and cleared the selection")
+
+
+func test_delete_key_with_no_selection_is_inert() -> void:
+	var controller := _loaded_with_selection()
+	controller._deselect()
+	var mission := controller.get_mission()
+	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.keycode = KEY_DELETE
+	controller.handle_viewport_input(key)
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before, "Delete with nothing selected removes nothing")
+
+
+func test_delete_key_while_armed_is_inert() -> void:
+	# Arming a placement tool clears the selection, so a Delete keystroke mid-placement must
+	# not destroy a phantom selection. This pins the arm->deselect coupling the Delete-key
+	# branch relies on: a regression where arm_placement stopped deselecting would otherwise
+	# let an armed Delete silently delete an entity, and nothing else would fail.
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	var buildings := mission.get_entities(NovaMissionData.KIND_BUILDING)
+	controller._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
+	assert_false(controller.get_selection_summary().is_empty(), "precondition: a building is selected")
+
+	controller.arm_placement(102001)  # Guard Tower (building)
+	assert_true(controller.is_placement_armed(), "the placement tool is armed")
+	assert_eq(controller.get_selection_summary(), {}, "arming cleared the selection")
+
+	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.keycode = KEY_DELETE
+	controller.handle_viewport_input(key)
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before, "Delete while armed removes nothing")
+	assert_true(controller.is_placement_armed(), "and the placement tool stays armed")
+
+
+func test_delete_key_is_suppressed_while_a_text_field_has_focus() -> void:
+	# A focused text field (e.g. mid-edit of a coordinate SpinBox) owns the keyboard, so a
+	# viewport Delete/Backspace must not destroy the selected entity behind the user's back.
+	# Mirrors the focus-owner guard the credits / font editors use on the same router path.
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+
+	var field := LineEdit.new()
+	add_child_autofree(field)
+	field.grab_focus()
+	if not field.has_focus():
+		pass_test("this headless build does not route GUI focus; the focus guard is exercised manually")
+		return
+
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.keycode = KEY_DELETE
+	controller.handle_viewport_input(key)
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before,
+		"Delete is inert while a text field has focus (the field, not the viewport, owns the key)")
+	assert_false(controller.get_selection_summary().is_empty(), "and the selection survives")
+
+
+func test_delete_rebakes_pickable_index_and_frees_the_selection_box() -> void:
+	# The render-side contract of the structural re-bake: deleting an entity rebuilds the
+	# whole container, so the pickable index is re-derived against the post-delete (shifted)
+	# record and the old selection box is freed with the container. Headless .3di does not
+	# resolve, so seed the placer's per-graphic batch cache with a dummy mesh (the placer
+	# test technique) to get REAL MultiMesh batches + pickable records to delete against.
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(2, 2, 2)
+	# 105004 is the committed static (no-anim_def) fixture item; its graphic is StaticCrate1.
+	controller._placer._static_batch_cache["StaticCrate1"] = [{
+		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
+	}]
+
+	# Place two instances so the survivor's index must shift down when the first is deleted.
+	assert_true(controller.place_entity_at_world(105004, Vector3(10, 0, -10)))
+	var first := controller.get_selection_summary()
+	var kind := int(first["kind"])
+	var first_index := int(first["index"])
+	assert_true(controller.place_entity_at_world(105004, Vector3(20, 0, -20)))
+	assert_eq(int(controller.get_selection_summary()["index"]), first_index + 1, "the two placements are consecutive")
+	assert_eq(controller._pickable.size(), 2, "both rendered placements are in the pickable index")
+
+	# Reselect the first, capture its (container-child) selection box, then delete it.
+	controller._select(kind, first_index)
+	var box = controller._selection_box
+	assert_true(is_instance_valid(box), "selecting a rendered entity builds a selection box")
+	var count_before := mission.get_entity_count(kind)
+
+	assert_true(controller.delete_selected())
+	assert_eq(mission.get_entity_count(kind), count_before - 1, "the entity is removed from its kind's list")
+	assert_true(box.is_queued_for_deletion(), "the old selection box is freed with the container on re-bake")
+
+	# The re-bake re-derived the pickable index from the post-delete record: a record for the
+	# survivor now sits at the deleted index (it shifted down), and none points past the list.
+	var found_survivor := false
+	for rec in controller._pickable:
+		var rk := int(rec["kind"])
+		assert_lt(int(rec["index"]), mission.get_entity_count(rk), "no pickable record points past its kind's list")
+		if rk == kind and int(rec["index"]) == first_index:
+			found_survivor = true
+	assert_true(found_survivor, "the surviving instance shifted into the deleted index and was re-harvested")
+
+
 func test_open_loads_then_reconcile_drops_on_terrain_swap() -> void:
 	var stub := StubTerrainEditor.new()
 	stub.resource_root = _dvxi5_root()
@@ -503,3 +665,229 @@ func test_failed_terrain_load_clears_prior_mission() -> void:
 	assert_eq(err, ERR_CANT_OPEN, "a terrain load failure surfaces as the open error")
 	assert_false(controller.is_loaded(), "a failed open clears the prior mission state")
 	assert_string_contains(controller.get_last_status(), "Could not load")
+
+
+# --- Authoring (Phase 5): undo / redo -----------------------------------------
+# Undo/redo are whole-document byte snapshots through the real serializer. Each edit
+# pushes the pre-edit state; undo/redo swap the current state onto the opposite stack,
+# restore the popped snapshot, and re-bake. Headless .3di does not resolve, so these
+# assert via the mission document, the selection summary, and the controller's stacks
+# (never rendered transforms), the same way the Phase 4 delete tests do. The re-bake on
+# restore runs through the retained placer over the stub world root.
+
+func test_undo_reverts_a_placement_and_deselects() -> void:
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	assert_false(controller.can_undo(), "a freshly opened mission has no undo history")
+
+	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "the placement landed")
+	assert_true(controller.can_undo(), "a placement is undoable")
+
+	controller.undo()
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before, "undo removes the placed entity")
+	assert_eq(controller.get_selection_summary(), {}, "undo drops the selection (indices may have shifted)")
+	assert_false(controller.can_undo(), "the only step was consumed")
+	assert_true(controller.can_redo(), "and is now redoable")
+
+
+func test_redo_replays_a_placement() -> void:
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	controller.place_entity_at_world(102001, Vector3(50, 10, -50))
+	controller.undo()
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before, "precondition: undone")
+
+	controller.redo()
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "redo re-applies the placement")
+	assert_true(controller.can_undo(), "the redone placement is undoable again")
+	assert_false(controller.can_redo(), "and the redo step is consumed")
+
+
+func test_undo_restores_a_deleted_entity() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	var buildings := mission.get_entities(NovaMissionData.KIND_BUILDING)
+	var before := buildings.size()
+	var deleted_item := int(buildings[0]["item_id"])
+	var deleted_pos: Vector3 = buildings[0]["position"]
+	controller._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
+
+	assert_true(controller.delete_selected())
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before - 1, "precondition: deleted")
+
+	controller.undo()
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before, "undo restores the deleted entity")
+	var restored := mission.get_entity(NovaMissionData.KIND_BUILDING, 0)
+	assert_eq(int(restored["item_id"]), deleted_item, "the restored entity is back at its original index")
+	var rp: Vector3 = restored["position"]
+	assert_almost_eq(rp.x, deleted_pos.x, 0.02, "with its original X")
+	assert_almost_eq(rp.z, deleted_pos.z, 0.02, "and its original Z")
+
+
+func test_undo_restores_a_moved_position() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	var kind := NovaMissionData.KIND_BUILDING
+	var index := int(mission.get_entities(kind)[0]["index"])
+	controller._select(kind, index)
+	var original: Vector3 = mission.get_entity(kind, index)["position"]
+
+	controller.set_selected_position(original + Vector3(10, 0, -5))
+	controller._flush_edit()  # close the transform session so it is on the undo stack
+	var moved: Vector3 = mission.get_entity(kind, index)["position"]
+	assert_almost_eq(moved.x, original.x + 10.0, 0.05, "precondition: the move applied")
+
+	controller.undo()
+	var restored: Vector3 = mission.get_entity(kind, index)["position"]
+	assert_almost_eq(restored.x, original.x, 0.05, "undo restores the original X")
+	assert_almost_eq(restored.z, original.z, 0.05, "undo restores the original Z")
+
+
+func test_multi_axis_edit_coalesces_to_one_step() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	var kind := NovaMissionData.KIND_BUILDING
+	var index := int(mission.get_entities(kind)[0]["index"])
+	controller._select(kind, index)
+	var p := controller.get_selected_position()
+
+	# A run of axis edits + a rotation on the same entity is one editing session.
+	controller.set_selected_position(Vector3(p.x + 1.0, p.y, p.z))
+	controller.set_selected_position(Vector3(p.x + 1.0, p.y + 2.0, p.z))
+	controller.set_selected_position(Vector3(p.x + 1.0, p.y + 2.0, p.z + 3.0))
+	controller.set_selected_rotation(Vector3(0, 45, 0))
+	assert_eq(controller._undo_stack.size(), 0, "the open session is not on the stack until it is flushed")
+
+	controller._flush_edit()
+	assert_eq(controller._undo_stack.size(), 1, "X/Y/Z and a rotation coalesce into a single undo step")
+
+	# One undo reverts the whole session.
+	controller.undo()
+	var after: Vector3 = mission.get_entity(kind, index)["position"]
+	assert_almost_eq(after.x, p.x, 0.05, "one undo reverts every coalesced axis")
+	assert_almost_eq(after.z, p.z, 0.05, "including Z")
+
+
+func test_an_edit_session_with_no_change_pushes_no_step() -> void:
+	# The contract the drag path and a plain click rely on: begin..commit with no change
+	# (a click that selects but does not move) adds nothing; a cancelled drag likewise.
+	var controller := _loaded_with_selection()
+	controller.begin_edit()
+	controller.commit_edit()
+	assert_eq(controller._undo_stack.size(), 0, "a session that changed nothing adds no undo step")
+	controller.begin_edit()
+	controller.cancel_drag()
+	assert_eq(controller._undo_stack.size(), 0, "a cancelled drag adds no undo step")
+
+
+func test_a_new_edit_clears_the_redo_stack() -> void:
+	var controller := _loaded_with_item_db()
+	controller.place_entity_at_world(102001, Vector3(10, 0, -10))
+	controller.undo()
+	assert_true(controller.can_redo(), "the undone placement is redoable")
+
+	# A fresh edit invalidates the redo history.
+	controller.place_entity_at_world(102001, Vector3(20, 0, -20))
+	assert_false(controller.can_redo(), "a new edit clears the redo stack")
+
+
+func test_undo_unwinds_edits_in_reverse_order_across_kinds() -> void:
+	var controller := _loaded_with_item_db()
+	var m := controller.get_mission()
+	var b0 := m.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var i0 := m.get_entity_count(NovaMissionData.KIND_ITEM)
+
+	controller.place_entity_at_world(102001, Vector3(10, 0, -10))  # building
+	controller.place_entity_at_world(101291, Vector3(20, 0, -20))  # vehicle -> item
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_ITEM), i0 + 1, "precondition: item placed")
+
+	controller.undo()
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_ITEM), i0, "first undo removes the most recent edit (the item)")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), b0 + 1, "and leaves the earlier building")
+
+	controller.undo()
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), b0, "second undo removes the building")
+
+
+func test_ctrl_z_and_ctrl_y_drive_undo_redo_via_the_viewport() -> void:
+	var controller := _loaded_with_item_db()
+	var m := controller.get_mission()
+	var before := m.get_entity_count(NovaMissionData.KIND_BUILDING)
+	controller.place_entity_at_world(102001, Vector3(10, 0, -10))
+
+	controller.handle_viewport_input(_ctrl_key(KEY_Z))
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before, "Ctrl+Z undid the placement")
+
+	controller.handle_viewport_input(_ctrl_key(KEY_Y))
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "Ctrl+Y redid the placement")
+
+	# Ctrl+Shift+Z is the other redo binding.
+	controller.handle_viewport_input(_ctrl_key(KEY_Z))
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before, "Ctrl+Z undid again")
+	controller.handle_viewport_input(_ctrl_key(KEY_Z, true))
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "Ctrl+Shift+Z redid the placement")
+
+
+func test_ctrl_z_is_suppressed_while_a_text_field_has_focus() -> void:
+	# A focused SpinBox / LineEdit keeps its own text undo, so a viewport Ctrl+Z must not
+	# reach the controller. Mirrors the Delete-key focus guard test above.
+	var controller := _loaded_with_item_db()
+	var m := controller.get_mission()
+	controller.place_entity_at_world(102001, Vector3(10, 0, -10))
+	var after_place := m.get_entity_count(NovaMissionData.KIND_BUILDING)
+
+	var field := LineEdit.new()
+	add_child_autofree(field)
+	field.grab_focus()
+	if not field.has_focus():
+		pass_test("this headless build does not route GUI focus; the focus guard is exercised manually")
+		return
+
+	controller.handle_viewport_input(_ctrl_key(KEY_Z))
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), after_place,
+		"Ctrl+Z is inert while a text field has focus")
+
+
+func test_open_clears_the_undo_history() -> void:
+	var controller := _loaded_with_item_db()
+	controller.place_entity_at_world(102001, Vector3(10, 0, -10))
+	assert_true(controller.can_undo(), "precondition: a placement is undoable")
+
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK, "re-opening the mission succeeds")
+	assert_false(controller.can_undo(), "re-opening clears the undo history")
+	assert_false(controller.can_redo(), "and the redo history")
+
+
+func test_undo_to_the_original_clears_the_dirty_flag() -> void:
+	var controller := _loaded_with_selection()
+	assert_false(controller.is_dirty(), "a freshly opened mission is clean")
+	var before := int(controller.get_selected_entity().get("team", 0))
+
+	controller.set_selected_team(before + 1)
+	assert_true(controller.is_dirty(), "an edit dirties the mission")
+
+	controller.undo()
+	assert_false(controller.is_dirty(), "undoing back to the opened bytes clears the dirty marker")
+
+
+func test_undo_and_redo_with_empty_history_are_inert() -> void:
+	var controller := _loaded_with_selection()
+	assert_false(controller.can_undo())
+	assert_false(controller.can_redo())
+	controller.undo()
+	controller.redo()
+	assert_false(controller.is_dirty(), "undo/redo with no history changes nothing")
+	assert_true(controller.is_loaded(), "and the mission is untouched")
+
+
+# Build a Ctrl(+Shift) key-down event for the undo/redo shortcut tests.
+func _ctrl_key(keycode: int, shift: bool = false) -> InputEventKey:
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.keycode = keycode
+	key.ctrl_pressed = true
+	key.shift_pressed = shift
+	return key

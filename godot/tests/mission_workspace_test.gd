@@ -45,3 +45,21 @@ func test_build_inspector_mounts_a_panel() -> void:
 	add_child_autofree(host)
 	ws.build_inspector(host)
 	assert_gt(host.get_child_count(), 0, "the mission inspector panel is mounted into the host")
+
+
+# --- Phase 5: undo / redo hooks -----------------------------------------------
+
+func test_undo_redo_hooks_delegate_to_the_controller() -> void:
+	var ws = MissionWorkspace.new()
+	assert_false(ws.can_undo(), "no history -> cannot undo")
+	assert_false(ws.can_redo(), "no history -> cannot redo")
+	# Safe no-ops with nothing loaded (the shell may probe / fire these any time).
+	ws.undo()
+	ws.redo()
+
+	# can_undo/can_redo read the controller's stacks: seeding them proves delegation
+	# without standing up a full mission load.
+	ws._controller._undo_stack.append(PackedByteArray([1]))
+	assert_true(ws.can_undo(), "can_undo reflects the controller's undo stack")
+	ws._controller._redo_stack.append(PackedByteArray([2]))
+	assert_true(ws.can_redo(), "can_redo reflects the controller's redo stack")

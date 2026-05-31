@@ -338,6 +338,64 @@ func test_item_database_enumeration_is_sorted_and_complete() -> void:
 	assert_true(sample.has("graphic") and sample.has("type"), "enumerated items carry graphic + type")
 
 
+# --- Authoring (Phase 4): remove an entity -----------------------------------
+# remove_entity erases an entity from its kind's list; every later entity of that kind
+# shifts down one index (std::vector::erase semantics, proven byte-faithful at the lib
+# level). The binding is the write side the editor's delete action drives.
+
+func test_remove_entity_drops_count_and_reindexes() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	assert_false(m.is_modified(), "a freshly opened mission is not modified")
+	var buildings := m.get_entities(NovaMissionData.KIND_BUILDING)
+	assert_gt(buildings.size(), 2, "need a few buildings to check reindexing")
+
+	# Capture the entity at index 1: after removing index 0 it must shift down to index 0,
+	# carrying its own data (so the removal is not just a truncation of the last element).
+	var was_at_1_item: int = int(buildings[1]["item_id"])
+	var was_at_1_pos: Vector3 = buildings[1]["position"]
+
+	assert_true(m.remove_entity(NovaMissionData.KIND_BUILDING, 0), "removing a valid entity succeeds")
+	assert_true(m.is_modified(), "a removal dirties the document")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), buildings.size() - 1, "the kind's count drops by one")
+
+	var new_first := m.get_entity(NovaMissionData.KIND_BUILDING, 0)
+	assert_eq(int(new_first["item_id"]), was_at_1_item, "the entity at index 1 shifted down into index 0")
+	var np: Vector3 = new_first["position"]
+	assert_almost_eq(np.x, was_at_1_pos.x, 0.02, "the shifted entity kept its X position")
+	assert_almost_eq(np.z, was_at_1_pos.z, 0.02, "the shifted entity kept its Z position")
+
+
+func test_remove_entity_persists_through_save_reload() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var before := m.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var other_kind_before := m.get_entity_count(NovaMissionData.KIND_ITEM)
+	assert_true(m.remove_entity(NovaMissionData.KIND_BUILDING, 0))
+
+	var tmp := _temp_bms_path()
+	assert_eq(m.save_as(tmp), OK, "the mission with a removed entity saves")
+	var reopened := NovaMissionData.new()
+	assert_eq(reopened.open_file(tmp), OK, "and reopens")
+	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_BUILDING), before - 1, "the removal survives save+reload")
+	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_ITEM), other_kind_before, "removing a building leaves the item list untouched")
+	DirAccess.remove_absolute(tmp)
+
+
+func test_remove_entity_rejects_out_of_range() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	assert_false(m.remove_entity(NovaMissionData.KIND_BUILDING, 999999), "an out-of-range index is rejected")
+	assert_false(m.remove_entity(NovaMissionData.KIND_BUILDING, -1), "a negative index is rejected")
+	assert_false(m.is_modified(), "a rejected removal does not dirty the document")
+
+
+func test_remove_entity_without_a_mission_is_rejected() -> void:
+	var m := NovaMissionData.new()  # never opened -> no document loaded
+	assert_false(m.remove_entity(NovaMissionData.KIND_BUILDING, 0), "removing from an unloaded mission fails")
+	assert_false(m.is_modified(), "a rejected removal does not dirty the document")
+
+
 func test_set_entity_property_int_preserves_other_fields_across_kinds() -> void:
 	# Buildings tend to carry all-zero AI fields, so a dropped field in the read-modify-
 	# write copy would read 0 == 0 and pass. Organics (and items) carry richer state, so
@@ -362,3 +420,71 @@ func test_set_entity_property_int_preserves_other_fields_across_kinds() -> void:
 	# The fixture is expected to place items and/or organics; flag if neither resolved so
 	# this guard never silently degrades to a no-op.
 	assert_gt(covered, 0, "the fixture provides at least one item or organic to exercise")
+
+
+# --- Authoring (Phase 5): snapshot / restore (undo/redo spine) ----------------
+# snapshot() serializes the whole document through the same byte-faithful writer as
+# save (write_bms_bytes), and restore_snapshot() re-parses it (load_bms_bytes). The
+# editor's undo stack holds these re-serialized states; restoring one rewinds the
+# whole document without touching the filesystem. The byte fidelity itself is proven
+# at the lib level (tests/mission/mission_bms_test.cpp); here we assert the GDScript
+# boundary: a snapshot round-trips, captures the live (not the on-disk) state, and
+# fails cleanly on garbage.
+
+func test_snapshot_restore_rewinds_a_mutation() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var before := m.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var clean := m.snapshot()
+	assert_false(clean.is_empty(), "a loaded mission snapshots to non-empty bytes")
+
+	# Mutate, then restore the pre-mutation snapshot: the added entity must be gone.
+	m.add_entity(NovaMissionData.KIND_BUILDING, 102001, Vector3(1, 2, 3), Vector3.ZERO)
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "the placement landed")
+	assert_true(m.restore_snapshot(clean), "restoring a valid snapshot succeeds")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before, "restore rewinds the placement")
+	assert_true(m.is_loaded(), "the document is still loaded after a restore")
+
+
+func test_snapshot_captures_the_live_state_not_the_file() -> void:
+	# The snapshot is a re-serialization of the current in-memory document, not the bytes
+	# opened from disk. So a snapshot taken after one edit, restored after a second edit,
+	# must land on the first-edit state (proving no raw-input passthrough).
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var index := int(m.get_entities(NovaMissionData.KIND_BUILDING)[0]["index"])
+	var rotation: Vector3 = m.get_entity(NovaMissionData.KIND_BUILDING, index)["rotation_deg"]
+
+	m.set_entity_transform(NovaMissionData.KIND_BUILDING, index, Vector3(10, 20, 30), rotation)
+	var after_first := m.snapshot()
+	m.set_entity_transform(NovaMissionData.KIND_BUILDING, index, Vector3(99, 88, 77), rotation)
+	assert_true(m.restore_snapshot(after_first), "restoring the first-edit snapshot succeeds")
+
+	var restored: Vector3 = m.get_entity(NovaMissionData.KIND_BUILDING, index)["position"]
+	assert_almost_eq(restored.x, 10.0, 0.02, "restore lands on the first edit's X, not the second")
+	assert_almost_eq(restored.y, 20.0, 0.02, "restore lands on the first edit's Y")
+	assert_almost_eq(restored.z, 30.0, 0.02, "restore lands on the first edit's Z")
+
+
+func test_restore_snapshot_leaves_the_dirty_flag_to_the_caller() -> void:
+	# The editor owns its own dirty state; restore must not clear modified (an undo can
+	# leave the document dirty relative to disk).
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var clean := m.snapshot()
+	m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
+	assert_true(m.is_modified(), "the placement set the dirty flag")
+	assert_true(m.restore_snapshot(clean), "restore succeeds")
+	assert_true(m.is_modified(), "restore does not touch the dirty flag (the caller recomputes it)")
+
+
+func test_snapshot_without_a_mission_is_empty() -> void:
+	var m := NovaMissionData.new()  # never opened -> nothing to serialize
+	assert_true(m.snapshot().is_empty(), "snapshot of an unloaded mission is an empty array")
+
+
+func test_restore_snapshot_of_garbage_returns_false() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var garbage := PackedByteArray([0, 1, 2, 3, 4, 5, 6, 7])
+	assert_false(m.restore_snapshot(garbage), "restoring unparseable bytes returns false")
