@@ -14,8 +14,13 @@ def _candidate_paths() -> list[Path]:
         subdir, name = "windows-x64", "opennova.dll"
     elif system == "Linux":
         subdir, name = "linux-x64", "libopennova.so"
+    elif system == "Darwin":
+        subdir = "macos-arm64" if platform.machine() == "arm64" else "macos-x64"
+        name = "libopennova.dylib"
     else:
-        raise OSError(f"Unsupported platform: {system} (only Windows and Linux are supported)")
+        raise OSError(
+            f"Unsupported platform: {system} (only Windows, Linux, and macOS are supported)"
+        )
 
     paths: list[Path] = []
     override = os.environ.get("OPENNOVA_NATIVE_LIBRARY", "").strip()
