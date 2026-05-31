@@ -14,6 +14,7 @@ script = ExtResource("4_main")
 
 [node name="World" type="Node3D" parent="."]
 script = ExtResource("10_world")
+mission_file = "00TRg.bms"
 
 [node name="NovaTerrain" type="NovaTerrain" parent="World" unique_id=1162114807]
 environment_path = NodePath("../NovaEnvironment")

@@ -629,6 +629,13 @@ func get_environment_editor():
 	return environment_editor
 
 
+# The shared NovaEnvironment node (EditorEnvironment under the world root). The
+# mission workspace hands it to placed objects so their lighting matches the
+# terrain preview, the same way the runtime passes its NovaEnvironment node.
+func get_environment_node() -> Node:
+	return _environment_node
+
+
 func get_terrain_world_root() -> Node3D:
 	return terrain_world_root
 
@@ -1660,8 +1667,25 @@ func _on_primary_end() -> void:
 	_brush_session.end_brush_drag(_source_image_for_kind(_brush_session.get_stroke_kind()))
 
 
+# Public: intersect a viewport-space mouse position with the terrain surface. Returns
+# a world-space point, or INVALID_HIT on a miss; pair with is_valid_terrain_hit().
+# Used by the Mission workspace to drag/place entities onto the ground.
+func raycast_terrain_at(mouse_pos: Vector2) -> Vector3:
+	if camera == null or terrain_mesh == null:
+		return INVALID_HIT
+	return _raycast_terrain_from(mouse_pos)
+
+
+func is_valid_terrain_hit(hit: Vector3) -> bool:
+	return hit != INVALID_HIT
+
+
 func _raycast_terrain() -> Vector3:
 	var mouse_pos := _viewport_mouse_position if _uses_workspace_viewport else get_viewport().get_mouse_position()
+	return _raycast_terrain_from(mouse_pos)
+
+
+func _raycast_terrain_from(mouse_pos: Vector2) -> Vector3:
 	var from := camera.project_ray_origin(mouse_pos)
 	var direction := camera.project_ray_normal(mouse_pos)
 	var bounds_hit := _intersect_ray_xz_bounds(from, direction)

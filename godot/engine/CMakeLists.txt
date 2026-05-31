@@ -20,6 +20,8 @@ add_subdirectory(../../libs/renderer opennova_renderer)
 add_subdirectory(../../libs/cbin opennova_cbin)
 add_subdirectory(../../libs/terrain opennova_terrain)
 add_subdirectory(../../libs/resource_index opennova_resource_index)
+add_subdirectory(../../libs/def opennova_def)
+add_subdirectory(../../libs/mission opennova_mission)
 
 set(TARGET_NAME "opennova")
 
@@ -46,6 +48,8 @@ add_library(${TARGET_NAME} SHARED
     env/env_file.cpp
     object/nova_object_data.cpp
     object/nova_object_shader_cache.cpp
+    object/nova_item_database.cpp
+    mission/nova_mission_data.cpp
     rtxt/rtxt_string_file.cpp
     rtxt/rtxt_resource_format.cpp
     util/nova_data_format.cpp
@@ -84,6 +88,8 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_renderer
     opennova_terrain
     opennova_resource_index
+    opennova_def
+    opennova_mission
 )
 
 # The bake worker thread in nova_terrain_build_job.cpp installs

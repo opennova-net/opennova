@@ -1,10 +1,10 @@
 class_name PopoverPanel
 extends PanelContainer
 
-## Shared component for the editor's toolbar-anchored, non-modal popovers
+## Shared component for the editor's top-bar anchored, non-modal popovers
 ## (camera / environment / settings). It unifies how the three popovers are
 ## placed and dismissed so they look and behave identically:
-##   - one top-right anchor formula (pinned below the viewport toolbar),
+##   - one top-right anchor formula (pinned below the shell top bar),
 ##   - one close affordance (standard glyph, no focus steal) that emits
 ##     close_requested,
 ##   - one open/close/is_open API.
@@ -19,8 +19,8 @@ const EDGE_MARGIN := 12.0
 const CLOSE_GLYPH := "✕"
 
 
-# Pin the popover to the top-right of the viewport, `min_width` wide, just below
-# the toolbar. Replaces the per-popover offset blocks so all three line up.
+# Pin the popover to the top-right of the workstation, `min_width` wide, just
+# below the top bar. Replaces the per-popover offset blocks so all three line up.
 func apply_anchor(min_width: float) -> void:
 	custom_minimum_size.x = min_width
 	anchor_left = 1.0

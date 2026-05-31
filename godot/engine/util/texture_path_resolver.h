@@ -23,4 +23,9 @@ godot::String resolve_sidecar_path(const godot::String &dir, const godot::String
 // caller (textures, models, scene files, sidecars) shares — no parallel scans.
 godot::String resolve_file_in_dir(const godot::String &dir, const godot::String &name);
 
+// Drop the per-session directory-index and decoded-texture caches. Call when the
+// resource directory changes or its on-disk contents may have changed. Main-thread
+// only (the resolver is never called off-thread).
+void clear_texture_resolver_caches();
+
 } // namespace opennova

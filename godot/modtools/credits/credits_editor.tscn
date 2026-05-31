@@ -30,7 +30,7 @@ script = ExtResource("1")
 unique_name_in_owner = true
 clip_contents = true
 anchor_right = 1.0
-offset_right = -152.0
+offset_right = 0.0
 offset_bottom = 50.0
 theme_type_variation = &"FlatPanel"
 

@@ -9,6 +9,9 @@ var edit_input_enabled: bool = true
 var _container: SubViewportContainer
 var _viewport: SubViewport
 var _input_router: Node
+# Optional non-terrain input consumer (e.g. the Mission workspace controller). Held
+# here so it survives a deferred _build_viewport, then forwarded to the router.
+var _input_target: Object
 
 
 func _ready() -> void:
@@ -50,6 +53,14 @@ func set_edit_input_enabled(value: bool) -> void:
 		terrain_editor.set_viewport_active(true, edit_input_enabled)
 
 
+# Route viewport input to a second consumer alongside (or instead of) terrain editing.
+# Pass null to detach. See TerrainViewportInputRouter.input_target.
+func set_input_target(value: Object) -> void:
+	_input_target = value
+	if _input_router != null:
+		_input_router.input_target = value
+
+
 func _build_viewport() -> void:
 	if _container != null:
 		return
@@ -71,6 +82,7 @@ func _build_viewport() -> void:
 	_input_router.name = "TerrainViewportInputRouter"
 	_input_router.terrain_editor = terrain_editor
 	_input_router.edit_input_enabled = edit_input_enabled
+	_input_router.input_target = _input_target
 	_viewport.add_child(_input_router)
 
 

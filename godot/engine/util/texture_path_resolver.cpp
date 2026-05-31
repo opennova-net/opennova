@@ -75,10 +75,18 @@ bool is_resource_dir(const godot::String &dir) {
 	return dir.begins_with("res://") || dir.begins_with("uid://");
 }
 
-// List an absolute/external directory ONCE into a lower-cased filename -> real
-// filename index, so callers probe in memory instead of re-enumerating the
-// directory per candidate.
-std::unordered_map<std::string, godot::String> build_lowercase_dir_index(const godot::String &dir) {
+// Per-session resolver caches (MAIN-THREAD ONLY; cleared on resource-dir change via
+// opennova::clear_texture_resolver_caches()). The original code re-enumerated the
+// whole asset directory on EVERY texture probe and re-decoded shared textures each
+// time; for a directory of thousands of files placing hundreds of objects that is the
+// dominant load cost. Keyed by dir / resolved-path so a different directory is a
+// separate entry.
+std::unordered_map<std::string, std::unordered_map<std::string, godot::String>> g_dir_index_cache;
+std::unordered_map<std::string, godot::Ref<godot::Texture2D>> g_texture_cache;
+
+// List an absolute/external directory into a lower-cased filename -> real filename
+// index. Called once per directory by get_lowercase_dir_index(), which caches it.
+std::unordered_map<std::string, godot::String> build_lowercase_dir_index_uncached(const godot::String &dir) {
 	std::unordered_map<std::string, godot::String> index;
 	godot::Ref<godot::DirAccess> dir_access = godot::DirAccess::open(dir);
 	if (dir_access.is_null()) {
@@ -94,6 +102,19 @@ std::unordered_map<std::string, godot::String> build_lowercase_dir_index(const g
 	}
 	dir_access->list_dir_end();
 	return index;
+}
+
+// Cached lower-cased filename index for `dir`: enumerate the directory once, then
+// reuse for every subsequent probe (callers do in-memory hash lookups instead of
+// re-listing the directory). Returns a const reference to avoid copying the map.
+const std::unordered_map<std::string, godot::String> &get_lowercase_dir_index(const godot::String &dir) {
+	const std::string key(dir.utf8().get_data());
+	auto it = g_dir_index_cache.find(key);
+	if (it != g_dir_index_cache.end()) {
+		return it->second;
+	}
+	auto inserted = g_dir_index_cache.emplace(key, build_lowercase_dir_index_uncached(dir));
+	return inserted.first->second;
 }
 
 bool bytes_look_like_dds(const godot::PackedByteArray &bytes) {
@@ -179,8 +200,8 @@ godot::String resolve_texture_path(const godot::String &dir, const godot::String
 		return godot::String();
 	}
 
-	// Absolute / external — single directory listing, in-memory case-insensitive match.
-	const std::unordered_map<std::string, godot::String> index = build_lowercase_dir_index(dir);
+	// Absolute / external — cached directory listing, in-memory case-insensitive match.
+	const std::unordered_map<std::string, godot::String> &index = get_lowercase_dir_index(dir);
 	if (index.empty()) {
 		return godot::String();
 	}
@@ -220,16 +241,28 @@ godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, con
 		return godot::Ref<godot::Texture2D>();
 	}
 
-	// Absolute/external original-asset path: ResourceLoader only handles res://,
-	// so decode the raw bytes ourselves. One directory listing, in-memory probe.
-	const std::unordered_map<std::string, godot::String> index = build_lowercase_dir_index(dir);
+	// Absolute/external original-asset path: ResourceLoader only handles res://, so
+	// decode the raw bytes ourselves. Cached directory listing + decoded-texture cache
+	// so a shared texture is enumerated/decoded/uploaded once, not per material.
+	const std::unordered_map<std::string, godot::String> &index = get_lowercase_dir_index(dir);
 	if (index.empty()) {
 		return godot::Ref<godot::Texture2D>();
 	}
 	for (const godot::String &file : candidates) {
 		auto it = index.find(std::string(file.to_lower().utf8().get_data()));
 		if (it != index.end()) {
-			godot::Ref<godot::Texture2D> tex = load_existing_texture_path(dir.path_join(it->second));
+			const godot::String resolved = dir.path_join(it->second);
+			const std::string tex_key(resolved.utf8().get_data());
+			auto cached = g_texture_cache.find(tex_key);
+			godot::Ref<godot::Texture2D> tex;
+			if (cached != g_texture_cache.end()) {
+				tex = cached->second;
+			} else {
+				tex = load_existing_texture_path(resolved);
+				// Cache the null too: a truncated/garbage file should not be re-read on
+				// every probe; the loop still falls through to the next candidate.
+				g_texture_cache.emplace(tex_key, tex);
+			}
 			if (tex.is_valid()) {
 				return tex;
 			}
@@ -246,7 +279,7 @@ godot::String resolve_file_in_dir(const godot::String &dir, const godot::String 
 		const godot::String path = dir.path_join(name);
 		return godot::ResourceLoader::get_singleton()->exists(path) ? path : godot::String();
 	}
-	const std::unordered_map<std::string, godot::String> index = build_lowercase_dir_index(dir);
+	const std::unordered_map<std::string, godot::String> &index = get_lowercase_dir_index(dir);
 	auto it = index.find(std::string(name.to_lower().utf8().get_data()));
 	return it != index.end() ? dir.path_join(it->second) : godot::String();
 }
@@ -287,6 +320,11 @@ godot::String resolve_sidecar_path(const godot::String &dir, const godot::String
 	}
 
 	return godot::String();
+}
+
+void clear_texture_resolver_caches() {
+	g_dir_index_cache.clear();
+	g_texture_cache.clear();
 }
 
 } // namespace opennova
