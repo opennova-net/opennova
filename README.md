@@ -1,6 +1,8 @@
 # OpenNova
 
-Open-source toolchain and runtime for NovaLogic's Joint Operations (JO) and newer games. Extract and edit assets with the importer, Blender addon, and OpenNova Editor (ONED). Load them in a C++ reimplementation of the game engine, hosted in Godot.
+OpenNova is a faithful reimplementation of NovaLogic's game engine, aiming for feature and visual parity with the originals. The engine is data driven: it runs off the same asset data the games shipped, which is what made the NovaLogic engine so moddable. The portable core is C++; Godot is the chosen host for rendering, tooling, and the editor. Joint Operations (JO) is the first game we are bringing up.
+
+This repo is the full toolchain: extract and edit assets with the importer, the Blender and 3ds Max plugins, and the OpenNova Editor (ONED), then load them in the engine, hosted in Godot. See [GOALS.md](GOALS.md) for the full vision.
 
 ## Screenshots
 

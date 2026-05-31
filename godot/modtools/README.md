@@ -6,6 +6,9 @@ kind of asset gets its own *workspace*, and every workspace reads and writes the
 game's canonical formats directly. Everything here is pre-1.0 and under active
 development.
 
+OpenNova reimplements the NovaLogic engine on a Godot host; ONED is where you author
+the data that engine runs. See [GOALS.md](../../GOALS.md) for the project vision.
+
 This folder holds the editor shell, the workspace framework, and one subfolder
 per workspace.
 
