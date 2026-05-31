@@ -186,9 +186,11 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 		std::string kind;
 		if (ext == ".bin") {
 			// RTXT strings tables and SCR0 music scripts need a content peek; only
-			// .bin candidates are read.
+			// .bin candidates are read. Use the raw (stored) bytes: the Vfs decodes
+			// SCR containers on read_file, which would strip the "SCR0" magic before
+			// we can classify it.
 			std::vector<uint8_t> bytes;
-			const bool ok = impl_->vfs.read_file(loc.logical_name, bytes);
+			const bool ok = impl_->vfs.read_file_raw(loc.logical_name, bytes);
 			kind = kind_for_name_and_magic(loc.logical_name, ok && has_rtxt_magic(bytes), ok && has_scr_magic(bytes));
 		} else {
 			kind = kind_for_name_and_magic(loc.logical_name, false, false);
@@ -204,7 +206,11 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 		entry.relative_path = loc.logical_name;
 		if (loc.source == VfsSource::LooseDir) {
 			entry.source_type = "file";
-			entry.path = (fs::path(loc.source_path) / loc.logical_name).string();
+			// generic_string() (not string()) so the joined path uses forward slashes on
+			// every platform. Godot paths are always '/'-separated and consumers compare
+			// these against String.path_join() output (also '/'); native '\' on Windows
+			// breaks those equality checks and yields non-portable object paths.
+			entry.path = (fs::path(loc.source_path) / loc.logical_name).generic_string();
 		} else {
 			entry.source_type = "pff";
 			entry.archive_path = loc.source_path;

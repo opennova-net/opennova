@@ -1758,7 +1758,10 @@ Array NovaObjectData::get_materials() const {
 			tex["type"] = mat.textures[t].type;
 			tex["flags"] = mat.textures[t].flags;
 			tex["frame"] = mat.textures[t].frame;
-			tex["resolved_path"] = opennova::resolve_texture_path(source_dir, from_native(mat.textures[t].name));
+			// Resolve through the resource root when mounted (so PFF-resident textures
+			// report a path) and fall back to the loose source dir otherwise. Reuses the
+			// same root-aware logic as the per-texture resolver below.
+			tex["resolved_path"] = resolve_material_texture_path(static_cast<int>(i), static_cast<int>(t));
 			textures.push_back(tex);
 		}
 		item["textures"] = textures;

@@ -81,6 +81,50 @@ func test_resource_root_mount_game_expansion_override() -> void:
 	assert_eq(resources.read_file("baseonly.trn").get_string_from_utf8(), "base trn")
 
 
+func test_resource_root_list_expansions() -> void:
+	var root := _make_flat_root("list_expansions")
+	# Two valid expansions (a subdir holding a matching <name>.pff) plus one incomplete
+	# subdir (no matching pff) that must be excluded.
+	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/jox01"))
+	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/jox02"))
+	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/incomplete"))
+	_write_pff(root.path_join("expansion/jox01/jox01.pff"), [{"name": "a.3di", "bytes": "x"}])
+	_write_pff(root.path_join("expansion/jox02/jox02.pff"), [{"name": "b.3di", "bytes": "y"}])
+	_write_file(root.path_join("expansion/incomplete/readme.txt"), "no pff here")
+
+	# list_expansions does not require the root to be mounted (the UI lists before mounting).
+	var expansions := NovaResourceRoot.new().list_expansions(root)
+	assert_eq(expansions.size(), 2, "Only subdirs with a matching <name>.pff are expansions.")
+	assert_true(expansions.has("jox01"))
+	assert_true(expansions.has("jox02"))
+	assert_false(expansions.has("incomplete"), "A subdir without <name>.pff is not an expansion.")
+
+	# A root with no expansion/ dir yields an empty list (the UI hides the control).
+	var base_only := _make_flat_root("list_expansions_base")
+	assert_eq(NovaResourceRoot.new().list_expansions(base_only).size(), 0)
+
+
+func test_resource_root_loads_dds_from_pff() -> void:
+	# A DDS that exists only inside a .pff has no filesystem path, so it must decode from
+	# the archived bytes (Godot 4.6 Image.load_dds_from_buffer). Round-trip a real image
+	# through Godot's own DDS encoder for a genuinely decodable fixture.
+	var image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.2, 0.4, 0.8, 1.0))
+	var dds := image.save_dds_to_buffer()
+	assert_gt(dds.size(), 4, "save_dds_to_buffer should produce DDS bytes.")
+
+	var root := _make_flat_root("dds_pff")
+	_write_pff(root.path_join("textures.pff"), [{"name": "swatch.dds", "bytes": dds}])
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.set_root_dir(root), OK)
+	var tex: Texture2D = resources.load_texture("swatch.dds")
+	assert_not_null(tex, "A DDS resident only inside a .pff should decode to a texture.")
+	if tex != null:
+		assert_eq(tex.get_width(), 4)
+		assert_eq(tex.get_height(), 4)
+
+
 func after_each() -> void:
 	_remove_dir_recursive(OS.get_cache_dir().path_join("opennova_resource_root_contract"))
 
@@ -116,7 +160,7 @@ func _write_pff(path: String, entries: Array) -> void:
 	file.store_32(header_size)
 
 	for entry in entries:
-		var bytes := String(entry.bytes).to_utf8_buffer()
+		var bytes := _entry_bytes(entry)
 		file.store_32(0)
 		file.store_32(next_payload_offset)
 		file.store_32(bytes.size())
@@ -128,8 +172,14 @@ func _write_pff(path: String, entries: Array) -> void:
 		next_payload_offset += bytes.size()
 
 	for entry in entries:
-		file.store_buffer(String(entry.bytes).to_utf8_buffer())
+		file.store_buffer(_entry_bytes(entry))
 	file.close()
+
+
+# A PFF entry payload is either a String (text fixtures) or a raw PackedByteArray (binary
+# fixtures such as a DDS); normalize to bytes so both forms work.
+func _entry_bytes(entry: Dictionary) -> PackedByteArray:
+	return entry.bytes if entry.bytes is PackedByteArray else String(entry.bytes).to_utf8_buffer()
 
 
 func _norm(path: String) -> String:
