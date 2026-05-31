@@ -44,6 +44,15 @@ func test_entity_transform_composes_basis_and_origin() -> void:
 	assert_true(xform.basis.is_equal_approx(expected_basis), "basis is the converted rotation")
 
 
+func test_godot_to_bms_position_inverts_bms_to_godot() -> void:
+	# The editor writes a dragged object's new ground point back through this inverse;
+	# it must exactly undo bms_to_godot_position for any mission-space point.
+	for v in [Vector3(5, -7, 11), Vector3(-1, 0, 4), Vector3(100, 50, -25), Vector3.ZERO]:
+		assert_true(
+			Placer.godot_to_bms_position(Placer.bms_to_godot_position(v)).is_equal_approx(v),
+			"godot_to_bms_position round-trips %s" % v)
+
+
 func test_place_handles_unresolvable_models_without_error() -> void:
 	var mission := NovaMissionData.new()
 	assert_eq(mission.open_file(_abs(BMS_PATH)), OK, "fixture BMS parses")

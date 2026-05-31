@@ -91,8 +91,50 @@ func test_open_mission_reports_missing_terrain() -> void:
 func test_mission_title_is_default_when_empty() -> void:
 	var controller := MissionController.new(null)
 	assert_eq(controller.get_mission_title(), "Mission", "no mission -> plain label")
-	assert_false(controller.is_dirty(), "read-only controller is never dirty")
+	assert_false(controller.is_dirty(), "a fresh controller with no edits is not dirty")
 	assert_eq(controller.get_stats().size(), 0, "no placement stats before a load")
+	assert_eq(controller.get_selection_summary(), {}, "nothing is selected before a load")
+
+
+# --- Authoring (Phase 1) ------------------------------------------------------
+
+func test_save_without_mission_is_unavailable() -> void:
+	# The save hooks must fail cleanly before anything is loaded (the shell may probe
+	# them); they must never touch disk in that state.
+	var controller := MissionController.new(null)
+	assert_eq(controller.save_current(), ERR_UNAVAILABLE, "save_current with no mission is unavailable")
+	assert_eq(controller.save_as("user://nope"), ERR_UNAVAILABLE, "save_as with no mission is unavailable")
+
+
+func test_handle_viewport_input_is_safe_without_a_mission() -> void:
+	# The controller is wired as the viewport input target; with no mission (or no
+	# terrain editor) every event must be an inert no-op, never a crash or a dirty.
+	var controller := MissionController.new(null)
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	controller.handle_viewport_input(press)
+	controller.cancel_drag()
+	assert_false(controller.is_dirty(), "input on an empty controller changes nothing")
+	assert_eq(controller.get_selection_summary(), {}, "nothing gets selected without a mission")
+
+
+func test_ray_aabb_entry_hits_and_misses() -> void:
+	# Unit-test the analytic picker math used for click selection (no scene needed).
+	var controller := MissionController.new(null)
+	var cube := AABB(Vector3(-1, -1, -1), Vector3(2, 2, 2))  # 2-unit cube at the origin
+
+	# Straight-on hit: enters the near face at z = -1, starting 10 units back.
+	var t_hit: float = controller._ray_aabb_entry(cube, Vector3(0, 0, -10), Vector3(0, 0, 1))
+	assert_almost_eq(t_hit, 9.0, 0.001, "ray entering the near face reports the entry distance")
+
+	# Off to the side in X: never crosses the cube.
+	assert_eq(controller._ray_aabb_entry(cube, Vector3(5, 5, -10), Vector3(0, 0, 1)), -1.0,
+		"a ray that misses returns -1")
+
+	# Pointing away from the box: behind the camera, not a hit.
+	assert_eq(controller._ray_aabb_entry(cube, Vector3(0, 0, -10), Vector3(0, 0, -1)), -1.0,
+		"a box entirely behind the ray is not a hit")
 
 
 func test_open_loads_then_reconcile_drops_on_terrain_swap() -> void:

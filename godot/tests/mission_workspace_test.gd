@@ -27,10 +27,15 @@ func test_defaults_without_an_editor() -> void:
 	assert_eq(ws.get_workspace_id(), "mission")
 	assert_eq(ws.get_workspace_label(), "Mission")
 	assert_eq(ws.get_project_title(), "Mission", "no mission loaded -> plain title")
-	assert_false(ws.has_unsaved_changes(), "read-only workspace never reports unsaved changes")
+	assert_false(ws.has_unsaved_changes(), "an unedited workspace reports no unsaved changes")
 	assert_false(ws.can_open(), "Open is gated on a bound terrain editor")
-	assert_false(ws.can_save(), "no Save action this phase")
-	assert_false(ws.can_save_as(), "no Save As action this phase")
+	# Visibility (button is created) is decoupled from enablement (can_save*). The shell
+	# only builds buttons on workspace switch, so Save / Save As must be visible up front
+	# and merely disabled until a mission is loaded / dirtied.
+	assert_true(ws.has_save_action(), "Save button is created up front")
+	assert_true(ws.has_save_as_action(), "Save As button is created up front")
+	assert_false(ws.can_save(), "Save is disabled until a dirty mission with a path")
+	assert_false(ws.can_save_as(), "Save As is disabled until a mission is loaded")
 	assert_true(ws.shows_camera_status())
 
 

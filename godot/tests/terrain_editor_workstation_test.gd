@@ -209,7 +209,7 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 		"Credits should expose save-as for a fresh resource.")
 
 
-func test_mission_workspace_exposes_open_action_and_inspector() -> void:
+func test_mission_workspace_exposes_document_actions_and_inspector() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
 
@@ -223,11 +223,13 @@ func test_mission_workspace_exposes_open_action_and_inspector() -> void:
 	assert_null(workstation.get_node_or_null("%FileMenu"), "Global File menu should be removed.")
 	assert_null(workstation.get_node_or_null("%SaveButton"), "Global Save button should be removed.")
 	assert_null(workstation.get_node_or_null("%ExportButton"), "Global Export button should be removed.")
-	# Authoring is deferred, so the Mission workspace exposes exactly one document
-	# action — Open — and a read-only inspector instead of the old "Coming soon" stub.
-	assert_true(actions_host.visible, "Mission should expose its Open document action.")
-	assert_eq(_workspace_action_texts(actions_host), ["Open Mission..."], "Mission should expose only Open this phase.")
-	assert_true(_has_label_text(inspector_host, "Mission"), "Mission should show its read-only inspector panel.")
+	# Authoring (Phase 1) lands Save / Save As alongside Open. The shell builds these
+	# buttons up front (before a mission is loaded); they sit disabled until there is a
+	# loaded / dirtied mission. The inspector replaces the old "Coming soon" stub.
+	assert_true(actions_host.visible, "Mission should expose its document actions.")
+	assert_eq(_workspace_action_texts(actions_host), ["Open Mission...", "Save Mission", "Save Mission As..."],
+		"Mission exposes Open + Save + Save As once authoring lands.")
+	assert_true(_has_label_text(inspector_host, "Mission"), "Mission should show its inspector panel.")
 	assert_false(_has_label_text(inspector_host, "Coming soon"), "The coming-soon stub should be gone.")
 
 

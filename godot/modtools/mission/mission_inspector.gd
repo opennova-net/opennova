@@ -47,6 +47,18 @@ func _rebuild() -> void:
 		_add_row("Designer", designer)
 
 	_add_separator()
+	_add_heading("Selection")
+	var selection: Dictionary = _controller.get_selection_summary() if _controller != null else {}
+	if selection.is_empty():
+		_add_body("Click an object to select it, then drag to move it onto the terrain. Save Mission to write changes.")
+	else:
+		_add_row("Entity", "%s #%d" % [_kind_label(int(selection.get("kind", -1))), int(selection.get("index", -1))])
+		var pos: Vector3 = selection.get("position", Vector3.ZERO)
+		_add_row("Position", "%.1f, %.1f, %.1f" % [pos.x, pos.y, pos.z])
+		if bool(selection.get("animated", false)):
+			_add_row("Type", "animated")
+
+	_add_separator()
 	_add_heading("World")
 	_add_row("Terrain", _nonempty(mission.get_terrain_ref(), "(none)"))
 	_add_row("Environment", _nonempty(mission.get_environment_ref(), "(none)"))
@@ -114,3 +126,17 @@ func _add_separator() -> void:
 func _nonempty(text: String, fallback: String) -> String:
 	var trimmed := text.strip_edges()
 	return trimmed if not trimmed.is_empty() else fallback
+
+
+func _kind_label(kind: int) -> String:
+	match kind:
+		NovaMissionData.KIND_ITEM:
+			return "Item"
+		NovaMissionData.KIND_BUILDING:
+			return "Building"
+		NovaMissionData.KIND_ORGANIC:
+			return "Organic"
+		NovaMissionData.KIND_MARKER:
+			return "Marker"
+		_:
+			return "Entity"

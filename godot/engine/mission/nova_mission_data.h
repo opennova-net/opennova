@@ -12,8 +12,9 @@ namespace godot {
 
 // Thin GDExtension wrapper over opennova::mission::MissionDocument (libs/mission).
 // Parses a NovaLogic .bms mission file and exposes its header (terrain/env refs,
-// metadata) and its placed entities as Godot dictionaries. Read-only for now;
-// mission authoring is a later phase.
+// metadata) and its placed entities as Godot dictionaries. The read surface is
+// loading + getters; the mutate surface (Phase 1 authoring) is set_entity_transform
+// + save, calling the already byte-faithful writer in libs/mission.
 class NovaMissionData : public RefCounted {
 	GDCLASS(NovaMissionData, RefCounted)
 
@@ -21,6 +22,9 @@ private:
 	opennova::mission::MissionDocument document;
 	String source_path;
 	String last_error;
+	// True once an in-memory mutation lands and before the next successful save/load.
+	// MissionDocument carries no dirty bit of its own, so the wrapper owns it.
+	bool modified = false;
 
 	Dictionary entity_to_dictionary(const opennova::mission::EntityRecord &record) const;
 
@@ -52,6 +56,19 @@ public:
 	// Array of dictionaries; see entity_to_dictionary() for the fields.
 	Array get_entities(int kind) const;
 	Array get_all_entities() const;
+
+	// --- Authoring (Phase 1) --------------------------------------------------
+	// Move an existing entity. `position` is mission-space (x, y, z); `rotation_deg`
+	// is (pitch, yaw, roll) in degrees, rounded to the int fields the format stores.
+	// Returns false if (kind, index) is out of range. Sets the dirty flag on success.
+	bool set_entity_transform(int kind, int index, const Vector3 &position, const Vector3 &rotation_deg);
+	// Write the document back to disk. save_file() targets the path it was opened
+	// from; save_as() targets a new path and adopts it. Both clear the dirty flag and
+	// go through the byte-faithful writer in libs/mission. save_file() returns
+	// ERR_INVALID_PARAMETER when there is no current path (shell then offers Save As).
+	Error save_file();
+	Error save_as(const String &path);
+	bool is_modified() const;
 };
 
 } // namespace godot

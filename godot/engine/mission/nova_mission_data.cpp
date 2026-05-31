@@ -2,6 +2,8 @@
 
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <cmath>
+
 using namespace godot;
 
 namespace {
@@ -36,6 +38,11 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entities", "kind"), &NovaMissionData::get_entities);
 	ClassDB::bind_method(D_METHOD("get_all_entities"), &NovaMissionData::get_all_entities);
 
+	ClassDB::bind_method(D_METHOD("set_entity_transform", "kind", "index", "position", "rotation_deg"), &NovaMissionData::set_entity_transform);
+	ClassDB::bind_method(D_METHOD("save_file"), &NovaMissionData::save_file);
+	ClassDB::bind_method(D_METHOD("save_as", "path"), &NovaMissionData::save_as);
+	ClassDB::bind_method(D_METHOD("is_modified"), &NovaMissionData::is_modified);
+
 	BIND_CONSTANT(KIND_MARKER);
 	BIND_CONSTANT(KIND_ITEM);
 	BIND_CONSTANT(KIND_BUILDING);
@@ -49,6 +56,7 @@ Error NovaMissionData::open_file(const String &path) {
 		last_error = String(document.last_error().c_str());
 		return ERR_CANT_OPEN;
 	}
+	modified = false;
 	return OK;
 }
 
@@ -156,4 +164,49 @@ Array NovaMissionData::get_all_entities() const {
 		}
 	}
 	return out;
+}
+
+bool NovaMissionData::set_entity_transform(int kind, int index, const Vector3 &position, const Vector3 &rotation_deg) {
+	if (index < 0) {
+		return false;
+	}
+	opennova::mission::EntityTransform transform;
+	transform.x = position.x;
+	transform.y = position.y;
+	transform.z = position.z;
+	// The format stores orientation as integer degrees; round rather than truncate.
+	transform.pitch = static_cast<int>(std::lround(rotation_deg.x));
+	transform.yaw = static_cast<int>(std::lround(rotation_deg.y));
+	transform.roll = static_cast<int>(std::lround(rotation_deg.z));
+	if (!document.set_entity_transform(to_native_kind(kind), static_cast<size_t>(index), transform)) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+Error NovaMissionData::save_file() {
+	if (source_path.is_empty()) {
+		// No path yet: let the shell route to Save As (matches the editor save contract).
+		return ERR_INVALID_PARAMETER;
+	}
+	return save_as(source_path);
+}
+
+Error NovaMissionData::save_as(const String &path) {
+	last_error = String();
+	if (path.is_empty()) {
+		return ERR_INVALID_PARAMETER;
+	}
+	if (!document.save_bms_file(path.utf8().get_data())) {
+		last_error = String(document.last_error().c_str());
+		return ERR_FILE_CANT_WRITE;
+	}
+	source_path = path;
+	modified = false;
+	return OK;
+}
+
+bool NovaMissionData::is_modified() const {
+	return modified;
 }

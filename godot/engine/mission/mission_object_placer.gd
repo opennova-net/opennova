@@ -37,6 +37,18 @@ const RENDER_LOD := 0
 var resource_root: NovaResourceRoot
 var item_db: NovaItemDatabase
 
+# When true, place() also records a per-entity pickable index in pickable_records
+# (used by the editor Mission workspace to select / move entities). Off for the
+# runtime, which never picks; the index work is then skipped entirely.
+var edit_mode: bool = false
+
+# Populated by place() when edit_mode. One record per (entity, static submesh batch)
+# or per animated entity. Static records carry { kind, index, graphic, slot, mm, mmi,
+# offset, mesh_aabb, animated=false } so the editor can ray-pick (mesh_aabb under the
+# instance transform) and move (rewrite mm instance `slot`). Animated records carry
+# { kind, index, graphic, node, animated=true } and move the node directly.
+var pickable_records: Array = []
+
 # graphic -> NovaObjectData (or null when unresolvable).
 var _object_data_cache: Dictionary = {}
 # graphic -> Array[{ mesh, material, offset, submesh }] harvested from a template.
@@ -72,6 +84,13 @@ static func entity_transform(position: Vector3, rotation_deg: Vector3) -> Transf
 	return Transform3D(Basis.from_euler(euler), bms_to_godot_position(position))
 
 
+# Inverse of bms_to_godot_position: a Godot-space point back to mission (BMS) space.
+# (x, z, -y) <- (x, y, z) inverts to (gx, -gz, gy). Used by the editor to write a
+# dragged object's new ground position back into the mission record.
+static func godot_to_bms_position(p: Vector3) -> Vector3:
+	return Vector3(p.x, -p.z, p.y)
+
+
 # --- Placement ----------------------------------------------------------------
 
 ## Place every renderable entity of `mission` under a fresh MissionObjects node
@@ -88,6 +107,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		"graphics": 0,
 		"batches": 0,
 	}
+	pickable_records = []
 	if mission == null or parent == null or resource_root == null:
 		return stats
 	_ensure_item_db()
@@ -97,7 +117,10 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 
 	# Bucket entities by graphic, split static vs animated.
 	var static_by_graphic: Dictionary = {}  # graphic -> Array[Transform3D]
-	var animated: Array = []  # [{ graphic, xform }]
+	# Parallel to static_by_graphic (same slot order); only filled in edit_mode so the
+	# pickable index can map a MultiMesh instance back to its mission entity.
+	var static_refs_by_graphic: Dictionary = {}  # graphic -> Array[{ kind, index }]
+	var animated: Array = []  # [{ graphic, xform, (kind, index in edit_mode) }]
 	for e in mission.get_all_entities():
 		var entity: Dictionary = e
 		if int(entity.get("kind", -1)) == NovaMissionData.KIND_MARKER:
@@ -112,11 +135,21 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			entity.get("position", Vector3.ZERO),
 			entity.get("rotation_deg", Vector3.ZERO))
 		if _is_animated(item_id):
-			animated.append({ "graphic": graphic, "xform": xform })
+			var a := { "graphic": graphic, "xform": xform }
+			if edit_mode:
+				a["kind"] = int(entity.get("kind", -1))
+				a["index"] = int(entity.get("index", -1))
+			animated.append(a)
 		else:
 			if not static_by_graphic.has(graphic):
 				static_by_graphic[graphic] = []
+				static_refs_by_graphic[graphic] = []
 			static_by_graphic[graphic].append(xform)
+			if edit_mode:
+				static_refs_by_graphic[graphic].append({
+					"kind": int(entity.get("kind", -1)),
+					"index": int(entity.get("index", -1)),
+				})
 
 	# Static: one MultiMeshInstance3D per (graphic, submesh).
 	for graphic in static_by_graphic.keys():
@@ -141,6 +174,8 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			mmi.name = "Batch_%s_%d" % [graphic, int(batch.get("submesh", 0))]
 			container.add_child(mmi)
 			stats.batches += 1
+			if edit_mode:
+				_record_static_batch(graphic, static_refs_by_graphic.get(graphic, []), mm, mmi, offset, batch["mesh"])
 		stats.batched += xforms.size()
 		stats.placed += xforms.size()
 
@@ -159,6 +194,16 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		# Drive the build explicitly (not via _ready) so it is independent of when
 		# place() runs relative to the main loop; matches the static template path.
 		model.set_object_data(data)
+		if edit_mode:
+			var ref := { "kind": int(a.get("kind", -1)), "index": int(a.get("index", -1)) }
+			model.set_meta("entity_ref", ref)
+			pickable_records.append({
+				"kind": ref["kind"],
+				"index": ref["index"],
+				"graphic": a["graphic"],
+				"node": model,
+				"animated": true,
+			})
 		stats.animated += 1
 		stats.placed += 1
 
@@ -166,6 +211,28 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 
 
 # --- Internals ----------------------------------------------------------------
+
+# Emit one pickable record per entity slot in a freshly-built static batch. Each
+# entity's slot `i` is consistent across every submesh batch of the same graphic
+# (instance_count == entity count), so moving entity i means rewriting instance i in
+# every batch that shares its graphic. mesh_aabb (under the instance transform) gives
+# the editor a tight pick volume without per-instance physics bodies.
+func _record_static_batch(graphic: String, refs: Array, mm: MultiMesh, mmi: MultiMeshInstance3D, offset: Transform3D, mesh: Mesh) -> void:
+	var mesh_aabb: AABB = mesh.get_aabb() if mesh != null else AABB()
+	for i in range(mm.instance_count):
+		var ref: Dictionary = refs[i] if i < refs.size() else {}
+		pickable_records.append({
+			"kind": int(ref.get("kind", -1)),
+			"index": int(ref.get("index", -1)),
+			"graphic": graphic,
+			"slot": i,
+			"mm": mm,
+			"mmi": mmi,
+			"offset": offset,
+			"mesh_aabb": mesh_aabb,
+			"animated": false,
+		})
+
 
 func _ensure_item_db() -> void:
 	if item_db != null or resource_root == null:

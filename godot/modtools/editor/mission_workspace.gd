@@ -23,6 +23,9 @@ var _mount: ViewportMount
 func _init(value: Node = null) -> void:
 	terrain_editor = value
 	_controller = MissionControllerScript.new(value)
+	# The controller fires `changed` on load / clear / select / dirty / save; refresh
+	# the shell title + action-button state (Save enables, `*` appears) on each.
+	_controller.changed.connect(_sync_shell_title)
 
 
 func _ensure_mount() -> ViewportMount:
@@ -98,6 +101,8 @@ func activate() -> void:
 
 func deactivate() -> void:
 	if _controller != null:
+		# End any half-finished drag before leaving so it cannot resume on a later hover.
+		_controller.cancel_drag()
 		_controller.set_objects_visible(false)
 	if terrain_editor != null:
 		terrain_editor.set_viewport_active(false, false)
@@ -109,10 +114,14 @@ func mount_viewport(host: Control) -> void:
 	var viewport := _ensure_mount().mount(host)
 	if viewport != null:
 		viewport.set_terrain_editor(terrain_editor)
+		# Terrain brush stays dormant; the controller handles picking / dragging via the
+		# router's separate input_target instead.
 		viewport.set_edit_input_enabled(false)
+		viewport.set_input_target(_controller)
 
 
 func unmount_viewport(_host: Control) -> void:
+	_detach_input_target()
 	if terrain_editor != null:
 		terrain_editor.set_viewport_active(false, false)
 	if _mount != null:
@@ -120,10 +129,21 @@ func unmount_viewport(_host: Control) -> void:
 
 
 func release_viewport() -> void:
+	_detach_input_target()
 	if terrain_editor != null:
 		terrain_editor.set_viewport_active(false, false)
 	if _mount != null:
 		_mount.release()
+
+
+func _detach_input_target() -> void:
+	if _controller != null:
+		_controller.cancel_drag()
+	if _mount == null:
+		return
+	var viewport := _mount.get_viewport_node()
+	if viewport != null and viewport.has_method("set_input_target"):
+		viewport.set_input_target(null)
 
 
 func get_viewport_camera() -> Camera3D:
@@ -173,9 +193,80 @@ func open_file(path: String) -> Error:
 
 
 func has_unsaved_changes() -> bool:
-	# Authoring is deferred, so a loaded mission is never dirty. When mission
-	# editing lands, this gates the shell's confirm-before-load-over.
+	# Gates the shell's confirm-before-load-over once that guard is generalized; today
+	# it tracks edits made by dragging entities (see MissionController).
 	return _controller != null and _controller.is_dirty()
+
+
+# --- Save ---------------------------------------------------------------------
+# The base EditorWorkspace exposes these hooks; implementing them lights up the Save /
+# Save As buttons and the `*` title marker with no shell changes. save_current() saves
+# in place; if there is no path it returns a non-OK and the shell routes to Save As.
+
+# The shell builds action buttons only on workspace switch (before a mission is open),
+# using has_save_action()/has_save_as_action() for visibility; it then refreshes only
+# the disabled state on each change. So visibility must NOT depend on a loaded mission
+# (else the button is never created), while enablement still does via can_save*().
+
+func has_save_action() -> bool:
+	return _controller != null
+
+
+func has_save_as_action() -> bool:
+	return _controller != null
+
+
+func can_save() -> bool:
+	return _controller != null and _controller.is_dirty() and not _controller.get_current_path().is_empty()
+
+
+func get_save_action_label() -> String:
+	return "Save Mission"
+
+
+func can_save_as() -> bool:
+	return _controller != null and _controller.is_loaded()
+
+
+func get_save_as_action_label() -> String:
+	return "Save Mission As..."
+
+
+func save_current() -> Error:
+	if _controller == null:
+		return ERR_UNAVAILABLE
+	var err := int(_controller.save_current())
+	_report_save_status(err)
+	return err as Error
+
+
+func save_as(dir_path: String) -> Error:
+	if _controller == null:
+		return ERR_UNAVAILABLE
+	var err := int(_controller.save_as(dir_path))
+	_report_save_status(err)
+	return err as Error
+
+
+func get_save_dialog_title() -> String:
+	return "Choose where to save the mission (.bms)"
+
+
+func get_save_dialog_dir() -> String:
+	return _controller.get_last_open_dir() if _controller != null else ""
+
+
+func _report_save_status(err: int) -> void:
+	if editor_shell == null or not editor_shell.has_method("show_status_message"):
+		return
+	var status: String = _controller.get_last_status() if _controller != null else ""
+	if not status.is_empty():
+		editor_shell.show_status_message(status, 4.0 if err == OK else 6.0)
+
+
+func _sync_shell_title() -> void:
+	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
+		editor_shell.sync_from_editor_state()
 
 
 # --- Inspector ----------------------------------------------------------------
