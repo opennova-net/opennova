@@ -78,3 +78,35 @@ required_entries = [
     "opennova.exe",
     "libopennova.windows.template_release.x86_64.dll",
 ]
+
+[[deliverables]]
+id = "modding-editor-macos"
+source = "opennova-modtools-macos-v{godot_version}.zip"
+public = "opennova-modding-editor-macos-{release_version}.zip"
+kind = "zip"
+platform = "macOS (universal: Apple Silicon and Intel)"
+title = "OpenNova Modding Editor (macOS)"
+purpose = "Standalone OpenNova Editor for authoring NovaLogic terrain, environment, tile, and related mod data."
+install = "Unzip, then move OpenNova Mod Tools.app to Applications. The app is ad-hoc signed, not notarized: right-click then Open the first time, or run xattr -dr com.apple.quarantine on the .app to clear Gatekeeper."
+use = "Open the .app to launch the editor."
+required_entries = [
+    "opennova-modtools.app/Contents/Info.plist",
+    "opennova-modtools.app/Contents/MacOS/OpenNova",
+    "opennova-modtools.app/Contents/Frameworks/libopennova.macos.template_release.universal.dylib",
+]
+
+[[deliverables]]
+id = "game-runtime-macos"
+source = "opennova-runtime-macos-v{godot_version}.zip"
+public = "opennova-game-runtime-macos-{release_version}.zip"
+kind = "zip"
+platform = "macOS (universal: Apple Silicon and Intel)"
+title = "OpenNova Game Runtime (macOS)"
+purpose = "Standalone Godot-hosted OpenNova runtime for loading exported scenes and runtime systems."
+install = "Unzip, then move OpenNova.app to Applications. The app is ad-hoc signed, not notarized: right-click then Open the first time, or run xattr -dr com.apple.quarantine on the .app to clear Gatekeeper."
+use = "Open the .app to launch the runtime."
+required_entries = [
+    "opennova.app/Contents/Info.plist",
+    "opennova.app/Contents/MacOS/OpenNova",
+    "opennova.app/Contents/Frameworks/libopennova.macos.template_release.universal.dylib",
+]

@@ -67,6 +67,22 @@ def _write_deliverable_fixtures(dist: Path) -> None:
             "libopennova.windows.template_release.x86_64.dll",
         ],
     )
+    _write_zip(
+        dist / "opennova-modtools-macos-v0.0.8.zip",
+        [
+            "opennova-modtools.app/Contents/Info.plist",
+            "opennova-modtools.app/Contents/MacOS/OpenNova",
+            "opennova-modtools.app/Contents/Frameworks/libopennova.macos.template_release.universal.dylib",
+        ],
+    )
+    _write_zip(
+        dist / "opennova-runtime-macos-v0.0.8.zip",
+        [
+            "opennova.app/Contents/Info.plist",
+            "opennova.app/Contents/MacOS/OpenNova",
+            "opennova.app/Contents/Frameworks/libopennova.macos.template_release.universal.dylib",
+        ],
+    )
 
 
 def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path) -> None:
@@ -90,7 +106,9 @@ def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path)
         "opennova-3ds-max-ase-exporter-windows-v0.0.8.mzp",
         "opennova-asset-importer-windows-v0.0.8.exe",
         "opennova-blender-ase-exporter-v0.0.8.zip",
+        "opennova-game-runtime-macos-v0.0.8.zip",
         "opennova-game-runtime-windows-v0.0.8.zip",
+        "opennova-modding-editor-macos-v0.0.8.zip",
         "opennova-modding-editor-windows-v0.0.8.zip",
     ]
     assert sorted(item.public_name for item in result.items) == public_names

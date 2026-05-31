@@ -84,8 +84,11 @@ int main() {
 	const fs::path output_path = fs::temp_directory_path() / missing_dir_name / "Bird1.3di";
 
 	OedExportRequest request = {};
+	// Keep the path string alive: output_path.string().c_str() dangles once the
+	// temporary std::string dies at the end of the statement.
+	const std::string output_path_str = output_path.string();
 	request.project = &project;
-	request.output_path = output_path.string().c_str();
+	request.output_path = output_path_str.c_str();
 	request.update_mask = static_cast<unsigned char>(OED_UPDATE_ALL);
 	const OedStatus export_rc = oed_session_export(session, &request);
 	std::string last_error;

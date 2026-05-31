@@ -92,14 +92,26 @@ bool export_fixture(const fs::path &fixture_dir, const char *stem, const fs::pat
 	}
 
 	OedExportRequest request = {};
+	// Keep the path string alive for the duration of the request: passing
+	// generated_path.string().c_str() directly dangles once the temporary
+	// std::string dies at the end of the statement (benign on MSVC, garbage
+	// on clang/macOS).
+	const std::string generated_path_str = generated_path.string();
 	request.project = &project;
-	request.output_path = generated_path.string().c_str();
+	request.output_path = generated_path_str.c_str();
 	request.update_mask = static_cast<unsigned char>(OED_UPDATE_ALL);
 	const OedStatus export_rc = oed_session_export(session, &request);
+	std::string export_err;
+	if (export_rc != OED_STATUS_OK) {
+		if (const char *msg = oed_session_last_error(session)) {
+			export_err = msg;
+		}
+	}
 	oed_session_destroy(session);
 	tdp_free(&project);
 	if (export_rc != OED_STATUS_OK) {
-		std::fprintf(stderr, "oed_session_export failed for %s (%d)\n", stem, static_cast<int>(export_rc));
+		std::fprintf(stderr, "oed_session_export failed for %s (%d): %s\n", stem,
+		             static_cast<int>(export_rc), export_err.empty() ? "(no detail)" : export_err.c_str());
 		return false;
 	}
 	return true;
