@@ -132,8 +132,8 @@ int threedi_ir_read(const char *path, ThreediModelIR *out) {
         return result;
     }
 
-    // Check for Land Warrior format ("3DI" + version 8/10). Must come after the
-    // "3DI3" check, since that magic also begins with "3DI".
+    // Check for supported Land Warrior format ("3DI" + version 10). Must come
+    // after the "3DI3" check, since that magic also begins with "3DI".
     ThreediLwVersion lw_ver = threedi_lw_detect(magic, 4);
     if (lw_ver != THREEDI_LW_VERSION_UNKNOWN) {
         ThreediLwFile lw;

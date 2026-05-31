@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "threedi/threedi_lw.h"
 #include "common/test_paths.h"
@@ -14,6 +15,27 @@ static int failures = 0;
 } while (0)
 
 static void check_face_ranges(const ThreediLwFile *m, const char *tag);
+
+static uint8_t *read_fixture_bytes(const char *root, const char *file, size_t *out_len) {
+    char path[4096];
+    snprintf(path, sizeof(path), "%s/fixtures/threedi/lw/%s", root, file);
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (len <= 0) { fclose(f); return NULL; }
+    uint8_t *buf = (uint8_t *)malloc((size_t)len + 1);
+    if (!buf) { fclose(f); return NULL; }
+    size_t got = fread(buf, 1, (size_t)len, f);
+    fclose(f);
+    if (got != (size_t)len) {
+        free(buf);
+        return NULL;
+    }
+    *out_len = (size_t)len;
+    return buf;
+}
 
 static void test_arblu(const char *root) {
     char path[4096];
@@ -46,6 +68,9 @@ static void test_arblu(const char *root) {
         CHECK(m.lods[0].surfaces != NULL, "ARBLU: surfaces null");
         if (m.lods[0].surfaces) {
             CHECK(m.lods[0].surfaces[0].material_index == 0, "ARBLU: surface0 material");
+        }
+        if (m.lods[0].subobjects) {
+            CHECK(m.lods[0].subobjects[0].normal_count == 1, "ARBLU: subobject[0].normal_count");
         }
         check_face_ranges(&m, "ARBLU: face index out of range");
     }
@@ -105,23 +130,54 @@ static void test_50cal(const char *root) {
         // Sub-objects: 3 parts partitioning verts/faces in order.
         CHECK(m.lods[0].subobjects != NULL, "50CAL: subobjects null");
         if (m.lods[0].subobjects) {
-            uint32_t sv = 0, sf = 0;
+            uint32_t sv = 0, sn = 0, sf = 0;
             for (uint32_t s = 0; s < m.lods[0].subobject_count; ++s) {
                 sv += m.lods[0].subobjects[s].vertex_count;
+                sn += m.lods[0].subobjects[s].normal_count;
                 sf += m.lods[0].subobjects[s].face_count;
             }
             CHECK(sv == m.lods[0].vertex_count, "50CAL: subobject verts sum != vertex_count");
+            CHECK(sn == m.lods[0].normal_count, "50CAL: subobject normals sum != normal_count");
             CHECK(sf == m.lods[0].faceref_count, "50CAL: subobject faces sum != faceref_count");
+            CHECK(m.lods[0].subobjects[0].normal_count == 88, "50CAL: subobject[0].normal_count");
+            CHECK(m.lods[0].subobjects[1].normal_count == 81, "50CAL: subobject[1].normal_count");
+            CHECK(m.lods[0].subobjects[2].normal_count == 18, "50CAL: subobject[2].normal_count");
             CHECK(m.lods[0].subobjects[2].parent == 1, "50CAL: subobject[2].parent != 1");
         }
     }
     threedi_lw_free(&m);
 }
 
+static void test_v8_is_unsupported(const char *root) {
+    char path[4096];
+    snprintf(path, sizeof(path), "%s/fixtures/threedi/lw/JPAN8.3DI", root);
+
+    ThreediLwFile m;
+    threedi_lw_init(&m);
+    CHECK(threedi_lw_read(path, &m) != 0, "JPAN8: v8 must be rejected as unsupported");
+    threedi_lw_free(&m);
+}
+
+static void test_rejects_trailing_bytes(const char *root) {
+    size_t len = 0;
+    uint8_t *buf = read_fixture_bytes(root, "ARBLU.3DI", &len);
+    CHECK(buf != NULL, "ARBLU trailing: read bytes");
+    if (!buf) return;
+    buf[len] = 0x7f;
+
+    ThreediLwFile m;
+    threedi_lw_init(&m);
+    CHECK(threedi_lw_parse(buf, len + 1, &m) != 0, "ARBLU trailing: parser accepted extra bytes");
+    threedi_lw_free(&m);
+    free(buf);
+}
+
 int main(void) {
     const char *root = test_paths_repo_root(__FILE__);
     test_arblu(root);
     test_50cal(root);
+    test_v8_is_unsupported(root);
+    test_rejects_trailing_bytes(root);
 
     if (failures) {
         printf("lw_parse test: %d failures\n", failures);

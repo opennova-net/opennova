@@ -1235,17 +1235,19 @@ Error NovaObjectData::open_file(const String &p_path) {
 Error NovaObjectData::_open_3di(const String &p_path) {
 	_clear();
 	const std::string native_path = to_native_path(p_path);
-	if (threedi_3di3_read(native_path.c_str(), &source_model) != 0) {
+	if (threedi_ir_read(native_path.c_str(), &ir) != 0) {
 		last_error = "Failed to read 3DI";
 		return ERR_FILE_CANT_READ;
 	}
-	has_source_model = true;
-	if (threedi_ir_from_3di3(&source_model, &ir) != 0) {
-		last_error = "Failed to convert 3DI to IR";
-		_clear();
-		return ERR_FILE_CORRUPT;
-	}
 	has_ir = true;
+	if (ir.source_format == THREEDI_IR_SOURCE_3DI3) {
+		if (threedi_3di3_read(native_path.c_str(), &source_model) != 0) {
+			last_error = "Failed to read 3DI source model";
+			_clear();
+			return ERR_FILE_CANT_READ;
+		}
+		has_source_model = true;
+	}
 	source_kind = SourceKind::Threedi;
 	source_path = p_path;
 	source_dir = p_path.get_base_dir();

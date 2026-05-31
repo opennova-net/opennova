@@ -1,6 +1,7 @@
 // LW .3di format detection test.
-// Verifies threedi_lw_detect distinguishes LW v8/v10 ("3DI"+version) from the
-// modern "3DI3" container and from GP formats, and rejects short/garbage input.
+// Verifies threedi_lw_detect distinguishes supported v10 and explicitly
+// unsupported v8 ("3DI"+version) from the modern "3DI3" container and from GP
+// formats, and rejects short/garbage input.
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>

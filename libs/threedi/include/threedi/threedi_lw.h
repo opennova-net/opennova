@@ -1,9 +1,9 @@
-// Land Warrior (LW) .3di format (versions 8 and 10) definitions and parser.
+// Land Warrior (LW) .3di format definitions and parser.
 // LW is the oldest .3di lineage: bare "3DI" magic + a numeric version byte,
 // predating the GP-era ("GPM"/"GPS"/"GPP") and modern "3DI3" formats.
 //
 // v10 layout reverse-engineered from Dflw.exe (see notes/3di-lw/lw-3di-format.md).
-// v8 layout follows Acruid/NovalogicTools File3di.cs.
+// v8 files are detected only so callers can reject them explicitly.
 
 #ifndef THREEDI_LW_H
 #define THREEDI_LW_H
@@ -52,10 +52,9 @@ typedef struct ThreediLwVertex {
     int16_t x, y, z, w;
 } ThreediLwVertex;
 
-// One triangle (v10 on-disk record is 80 bytes). Indices reference the LOD's
-// arrays. Empirically validated across 578,424 triangles in 1942 LODs:
-// vertex[] < vertex_count, normal[] < normal_count, surface_index < surface_count.
-// The per-face material comes via surfaces[surface_index].material_index.
+// One triangle (v10 on-disk record is 80 bytes). Vertex and normal indices are
+// local to the owning sub-object's contiguous vertex/normal runs. The per-face
+// material comes via surfaces[surface_index].material_index.
 typedef struct ThreediLwFace {
     int32_t u[3];            // +0x04/+0x08/+0x0C  (tu1..tu3)
     int32_t v[3];            // +0x10/+0x14/+0x18  (tv1..tv3)
@@ -65,12 +64,12 @@ typedef struct ThreediLwFace {
 } ThreediLwFace;
 
 // 120-byte sub-object record (LOD blob array [40]) — the rigid-part skeleton.
-// Sub-objects partition the LOD's vertices and faces IN ORDER: sub-object i owns
-// the next `vertex_count` vertices and `face_count` faces after its predecessor.
-// (Validated: sum of vertex_count == LOD vertex_count, sum of face_count == faceref_count.)
+// Sub-objects partition the LOD's vertices, normals, and faces IN ORDER:
+// sub-object i owns the next counted run after its predecessor.
 typedef struct ThreediLwSubObject {
     uint32_t vertex_count;   // +0x04 vertices owned (contiguous run)
     uint32_t face_count;     // +0x0C faces owned (contiguous run)
+    uint32_t normal_count;   // +0x1C normals owned (contiguous run)
     int32_t parent;          // +0x2C parent sub-object index (self/0 => root)
     int32_t pos[3];          // +0x3C/+0x40/+0x44 rest position (fixed-point, /256)
 } ThreediLwSubObject;
@@ -91,6 +90,7 @@ typedef struct ThreediLwSurface {
 // size equals the sum of count*stride across all arrays.
 typedef struct ThreediLwLod {
     uint32_t blob_size;        // LOD-header dword[5]
+    uint32_t flags;            // LOD-header dword[4]
 
     // array element counts (LOD-header dword indices in comments)
     uint32_t vertex_count;     // [32], 8-byte records

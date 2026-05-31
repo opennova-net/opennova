@@ -1,4 +1,4 @@
-// Land Warrior (LW) .3di parser (versions 8 and 10).
+// Land Warrior (LW) .3di parser. v10 is supported; v8 is detected and rejected.
 // See libs/threedi/include/threedi/threedi_lw.h and notes/3di-lw/lw-3di-format.md.
 
 #include "threedi/threedi_lw.h"
@@ -21,6 +21,18 @@ static void copy_name(char *dst, size_t dst_size, const uint8_t *src, size_t fie
     size_t i = 0;
     for (; i < n && src[i] != '\0'; ++i) dst[i] = (char)src[i];
     dst[i] = '\0';
+}
+
+static int checked_mul_size(size_t a, size_t b, size_t *out) {
+    if (a != 0 && b > SIZE_MAX / a) return -1;
+    *out = a * b;
+    return 0;
+}
+
+static int checked_add_size(size_t a, size_t b, size_t *out) {
+    if (b > SIZE_MAX - a) return -1;
+    *out = a + b;
+    return 0;
 }
 
 // v10 on-disk sizes (see notes/3di-lw/lw-3di-format.md §3).
@@ -79,8 +91,7 @@ static ThreediLwVertex *read_v10_vec4(const uint8_t *p, uint32_t count) {
 }
 
 // Read the 80-byte v10 face (triangle) records. The first 40 bytes follow the
-// v8 ModelFace layout; material_index sits at +0x4C in v10. Indices reference
-// the LOD's vertex/normal arrays.
+// older ModelFace layout; surface_index sits at +0x4C in v10.
 static ThreediLwFace *read_v10_faces(const uint8_t *p, uint32_t count) {
     if (count == 0) return NULL;
     ThreediLwFace *out = (ThreediLwFace *)calloc(count, sizeof(ThreediLwFace));
@@ -126,6 +137,7 @@ static ThreediLwSubObject *read_v10_subobjects(const uint8_t *p, uint32_t count)
         ThreediLwSubObject *s = &out[i];
         s->vertex_count = rd_u32(r + 0x04);
         s->face_count   = rd_u32(r + 0x0C);
+        s->normal_count = rd_u32(r + 0x1C);
         s->parent       = (int32_t)rd_u32(r + 0x2C);
         s->pos[0]       = (int32_t)rd_u32(r + 0x3C);
         s->pos[1]       = (int32_t)rd_u32(r + 0x40);
@@ -138,9 +150,10 @@ static ThreediLwSubObject *read_v10_subobjects(const uint8_t *p, uint32_t count)
 // *pos past the LOD and fills *lod. Returns 0 on success, -1 on error.
 static int parse_v10_lod(const uint8_t *data, size_t len, size_t *pos, ThreediLwLod *lod) {
     size_t p = *pos;
-    if (p + LW_V10_LOD_HEADER_SIZE > len) return -1;
+    if (p > len || LW_V10_LOD_HEADER_SIZE > len - p) return -1;
     const uint8_t *h = data + p;
 
+    lod->flags           = rd_u32(h + 0x10);  // dword[4]
     lod->blob_size       = rd_u32(h + 0x14);  // dword[5]
     lod->vertex_count    = rd_u32(h + 4 * 32);
     lod->normal_count    = rd_u32(h + 4 * 34);
@@ -152,31 +165,39 @@ static int parse_v10_lod(const uint8_t *data, size_t len, size_t *pos, ThreediLw
     lod->array8_count    = rd_u32(h + 4 * 46);
     lod->array80_count   = rd_u32(h + 4 * 48);
 
-    size_t blob = p + LW_V10_LOD_HEADER_SIZE;
-    if (blob + lod->blob_size > len) return -1;
+    size_t blob = 0;
+    if (checked_add_size(p, LW_V10_LOD_HEADER_SIZE, &blob) != 0) return -1;
+    if ((size_t)lod->blob_size > len - blob) return -1;
 
-    // Blob layout begins with vertices (offset 0) then normals (sub_47CF80).
-    size_t verts_bytes = (size_t)lod->vertex_count * 8;
-    size_t norms_bytes = (size_t)lod->normal_count * 8;
-    if (verts_bytes + norms_bytes > lod->blob_size) return -1;
+    size_t verts_bytes = 0, norms_bytes = 0, faces_bytes = 0, array12_bytes = 0;
+    size_t subobj_bytes = 0, triindex_bytes = 0, surface_bytes = 0, array8_bytes = 0, array80_bytes = 0;
+    if (checked_mul_size((size_t)lod->vertex_count, 8, &verts_bytes) != 0) return -1;
+    if (checked_mul_size((size_t)lod->normal_count, 8, &norms_bytes) != 0) return -1;
+    if (checked_mul_size((size_t)lod->faceref_count, LW_V10_FACE_SIZE, &faces_bytes) != 0) return -1;
+    if (checked_mul_size((size_t)lod->array12_count, 12, &array12_bytes) != 0) return -1;
+    if (checked_mul_size((size_t)lod->subobject_count, LW_V10_SUBOBJECT_SIZE, &subobj_bytes) != 0) return -1;
+    if (checked_mul_size((size_t)lod->triindex_count, 12, &triindex_bytes) != 0) return -1;
+    if (checked_mul_size((size_t)lod->surface_count, LW_V10_SURFACE_SIZE, &surface_bytes) != 0) return -1;
+    if (checked_mul_size((size_t)lod->array8_count, 8, &array8_bytes) != 0) return -1;
+    if (checked_mul_size((size_t)lod->array80_count, 80, &array80_bytes) != 0) return -1;
 
-    // Faces (80-byte triangles) follow vertices+normals in the blob.
-    size_t faces_bytes = (size_t)lod->faceref_count * LW_V10_FACE_SIZE;
-    if (verts_bytes + norms_bytes + faces_bytes > lod->blob_size) return -1;
-
-    // Surfaces are the LAST array in the blob (sub_47CF80 pointer accumulation).
-    size_t surf_bytes = (size_t)lod->surface_count * LW_V10_SURFACE_SIZE;
-    if (surf_bytes > lod->blob_size) return -1;
-
-    // Sub-objects follow faces + the 12-byte array in the blob.
-    size_t faces12_bytes = (size_t)lod->array12_count * 12;
-    size_t subobj_off = verts_bytes + norms_bytes + faces_bytes + faces12_bytes;
-    if (subobj_off + (size_t)lod->subobject_count * LW_V10_SUBOBJECT_SIZE > lod->blob_size) return -1;
+    size_t normals_off = verts_bytes;
+    size_t faces_off = 0, array12_off = 0, subobj_off = 0, triindex_off = 0;
+    size_t array8_off = 0, array80_off = 0, surface_off = 0, expected_blob = 0;
+    if (checked_add_size(normals_off, norms_bytes, &faces_off) != 0) return -1;
+    if (checked_add_size(faces_off, faces_bytes, &array12_off) != 0) return -1;
+    if (checked_add_size(array12_off, array12_bytes, &subobj_off) != 0) return -1;
+    if (checked_add_size(subobj_off, subobj_bytes, &triindex_off) != 0) return -1;
+    if (checked_add_size(triindex_off, triindex_bytes, &array8_off) != 0) return -1;
+    if (checked_add_size(array8_off, array8_bytes, &array80_off) != 0) return -1;
+    if (checked_add_size(array80_off, array80_bytes, &surface_off) != 0) return -1;
+    if (checked_add_size(surface_off, surface_bytes, &expected_blob) != 0) return -1;
+    if (expected_blob != (size_t)lod->blob_size) return -1;
 
     lod->vertices = read_v10_vec4(data + blob, lod->vertex_count);
-    lod->normals  = read_v10_vec4(data + blob + verts_bytes, lod->normal_count);
-    lod->faces    = read_v10_faces(data + blob + verts_bytes + norms_bytes, lod->faceref_count);
-    lod->surfaces = read_v10_surfaces(data + blob + lod->blob_size - surf_bytes, lod->surface_count);
+    lod->normals  = read_v10_vec4(data + blob + normals_off, lod->normal_count);
+    lod->faces    = read_v10_faces(data + blob + faces_off, lod->faceref_count);
+    lod->surfaces = read_v10_surfaces(data + blob + surface_off, lod->surface_count);
     lod->subobjects = read_v10_subobjects(data + blob + subobj_off, lod->subobject_count);
     if ((lod->vertex_count && !lod->vertices) ||
         (lod->normal_count && !lod->normals) ||
@@ -206,12 +227,17 @@ static int parse_v10(const uint8_t *data, size_t len, ThreediLwFile *out) {
     }
 
     uint32_t pre_count = rd_u32(data + 0x78);
-    size_t pos = LW_V10_HEADER_SIZE + (size_t)pre_count * LW_V10_PRE_RECORD;
-    if (pos + 4 > len) return -1;
+    size_t pre_bytes = 0;
+    if (checked_mul_size((size_t)pre_count, LW_V10_PRE_RECORD, &pre_bytes) != 0) return -1;
+    size_t pos = 0;
+    if (checked_add_size(LW_V10_HEADER_SIZE, pre_bytes, &pos) != 0) return -1;
+    if (pos > len || 4 > len - pos) return -1;
 
     out->material_count = rd_u32(data + pos);
     pos += 4;
-    if ((size_t)out->material_count * LW_V10_MATERIAL_SIZE > len - pos) return -1;
+    size_t material_bytes = 0;
+    if (checked_mul_size((size_t)out->material_count, LW_V10_MATERIAL_SIZE, &material_bytes) != 0) return -1;
+    if (material_bytes > len - pos) return -1;
 
     if (out->material_count) {
         out->materials = (ThreediLwMaterial *)calloc(out->material_count, sizeof(ThreediLwMaterial));
@@ -226,7 +252,7 @@ static int parse_v10(const uint8_t *data, size_t len, ThreediLwFile *out) {
             mat->tex_width  = rd_u16(rec + 0x2C);
             mat->tex_height = rd_u16(rec + 0x2E);
         }
-        pos += (size_t)out->material_count * LW_V10_MATERIAL_SIZE;
+        pos += material_bytes;
     }
 
     if (out->lod_count) {
@@ -237,6 +263,7 @@ static int parse_v10(const uint8_t *data, size_t len, ThreediLwFile *out) {
         }
     }
 
+    if (pos != len) return -1;
     return 0;
 }
 
@@ -244,11 +271,14 @@ int threedi_lw_parse(const uint8_t *data, size_t len, ThreediLwFile *out) {
     if (!data || !out) return -1;
     ThreediLwVersion ver = threedi_lw_detect(data, len);
     threedi_lw_init(out);
+    int rc = -1;
     switch (ver) {
-        case THREEDI_LW_VERSION_10: return parse_v10(data, len, out);
-        case THREEDI_LW_VERSION_8:  return -1;  // implemented in a later step
-        default:                    return -1;
+        case THREEDI_LW_VERSION_10: rc = parse_v10(data, len, out); break;
+        case THREEDI_LW_VERSION_8:  rc = -1; break;
+        default:                    rc = -1; break;
     }
+    if (rc != 0) threedi_lw_free(out);
+    return rc;
 }
 
 int threedi_lw_read(const char *path, ThreediLwFile *out) {

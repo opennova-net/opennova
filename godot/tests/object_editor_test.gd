@@ -12,6 +12,7 @@ const BIRD_ASE_FIXTURE := "res://../fixtures/3dp/Bird1/Bird1.ase"
 const DVAN_FIXTURE := "res://../fixtures/3dp/dapche2/dapche2.3di"
 const ARMRY_FIXTURE := "res://../fixtures/3dp/armry01/Armry01.3di"
 const ARMRY_TEXTURE_FIXTURE := "res://../fixtures/3dp/armry01/KArm1_O.TGA"
+const LW_ARBLU_FIXTURE := "res://../fixtures/threedi/lw/ARBLU.3DI"
 const US01_PROJECT_FIXTURE := "res://../fixtures/3dp/US01_onimport/US01.3dp"
 const FULL_00_ENV := "res://../fixtures/env/full_00.env"
 const OUTPUT_DIR_NAME := "object_editor_export_test"
@@ -53,6 +54,20 @@ func test_object_data_opens_3di_as_ir_document() -> void:
 	assert_gt(int(summary.get("lod_count", 0)), 0, "Opened 3DI should expose LODs.")
 	assert_gt(int(summary.get("material_count", 0)), 0, "Opened 3DI should expose materials.")
 	assert_false(data.get_lod_surfaces(0).is_empty(), "Opened 3DI should expose preview mesh surfaces.")
+
+
+func test_object_data_opens_lw_v10_3di_as_ir_document() -> void:
+	var data := NovaObjectData.new()
+
+	var err: Error = data.open_file(ProjectSettings.globalize_path(LW_ARBLU_FIXTURE))
+
+	assert_eq(err, OK, "LW v10 3DI fixtures should open through NovaObjectData.")
+	var summary := data.get_summary()
+	assert_eq(String(summary.get("source_kind", "")), "3di", "LW fixtures should remain 3DI source documents.")
+	assert_eq(int(summary.get("lod_count", 0)), 1, "LW fixture should expose its LOD.")
+	assert_eq(int(summary.get("material_count", 0)), 1, "LW fixture should expose its material.")
+	assert_false(data.can_export_3di(), "LW imports should not expose 3DI export.")
+	assert_false(data.get_lod_surfaces(0).is_empty(), "LW fixture should expose preview mesh surfaces.")
 
 
 func test_object_shader_catalog_exposes_oed_slot_flags() -> void:
