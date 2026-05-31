@@ -364,15 +364,22 @@ func _deselect() -> void:
 	changed.emit()
 
 
-# Move the selected entity so its origin sits at a world-space ground point: rewrite
-# every static MultiMesh instance (slot) of the entity, or the animated node, plus the
-# selection box. Rotation is kept; only the origin tracks the cursor.
+# Move the selected entity so its origin sits at a world-space ground point: keep the
+# current rotation, only the origin tracks the cursor.
 func _move_selected_to_world(global_hit: Vector3) -> void:
 	var container := _objects_container()
 	if container == null:
 		return
 	var local := container.global_transform.affine_inverse() * global_hit
-	_selected_xform = Transform3D(_selected_xform.basis, local)
+	_apply_selected_xform(Transform3D(_selected_xform.basis, local))
+
+
+# Write a new container-local transform onto the selection: rewrite every static
+# MultiMesh instance (slot) of the entity, or the animated node, plus the selection
+# box. Shared by the viewport drag and the inspector's numeric pos/rot edits so both
+# move the in-world object identically.
+func _apply_selected_xform(xform: Transform3D) -> void:
+	_selected_xform = xform
 	if _selected_node != null:
 		_selected_node.transform = _selected_xform
 	else:
@@ -390,15 +397,87 @@ func _commit_selected_transform() -> void:
 		mark_dirty()
 
 
+# --- Authoring (Phase 2): numeric / property edits from the inspector ---------
+# The inspector reads the selected entity's current values and pushes edits back
+# through these. Position / rotation reuse the Phase 1 render path (the object moves
+# in the viewport exactly as a drag would) then commit + dirty; team / group are not
+# visual, so they only write the record + dirty.
+
+# The full editable dictionary for the selected entity (see NovaMissionData entity
+# fields: position is mission-space, rotation_deg is authored degrees, plus team /
+# group), or {} when nothing is selected.
+func get_selected_entity() -> Dictionary:
+	if _selected_ref.is_empty():
+		return {}
+	return _find_entity(int(_selected_ref["kind"]), int(_selected_ref["index"]))
+
+
+# The live selected position in mission (BMS) space, tracking any uncommitted drag.
+func get_selected_position() -> Vector3:
+	if _selected_ref.is_empty():
+		return Vector3.ZERO
+	return MissionObjectPlacer.godot_to_bms_position(_selected_xform.origin)
+
+
+# The live selected rotation as authored (pitch, yaw, roll) degrees.
+func get_selected_rotation() -> Vector3:
+	if _selected_ref.is_empty():
+		return Vector3.ZERO
+	return _selected_rotation_deg
+
+
+func set_selected_position(bms_pos: Vector3) -> void:
+	if _selected_ref.is_empty() or _mission == null:
+		return
+	# entity_transform places objects at bms_to_godot_position(pos) in container-local
+	# space (the drag path and get_selected_position both invert exactly that), so set
+	# the local origin directly. Routing through the container's world transform would
+	# double-apply it and shift the object whenever the container is not at the origin.
+	_apply_selected_xform(Transform3D(_selected_xform.basis, MissionObjectPlacer.bms_to_godot_position(bms_pos)))
+	_commit_selected_transform()
+
+
+func set_selected_rotation(rot_deg: Vector3) -> void:
+	if _selected_ref.is_empty() or _mission == null:
+		return
+	# Unlike a drag (position only), this rebuilds the basis from the authored degrees
+	# and re-applies the full transform so the in-world object actually rotates. Round
+	# to whole degrees first: the format (and set_entity_transform) stores integer
+	# degrees, so keeping a fractional value would leave get_selected_rotation out of
+	# step with the persisted record on the next axis edit.
+	_selected_rotation_deg = rot_deg.round()
+	var basis := Basis.from_euler(MissionObjectPlacer.bms_to_godot_rotation(_selected_rotation_deg))
+	_apply_selected_xform(Transform3D(basis, _selected_xform.origin))
+	_commit_selected_transform()
+
+
+func set_selected_team(value: int) -> void:
+	_set_selected_property("team", value)
+
+
+func set_selected_group(value: int) -> void:
+	_set_selected_property("group", value)
+
+
+func _set_selected_property(property: String, value: int) -> void:
+	if _selected_ref.is_empty() or _mission == null:
+		return
+	# team / group are stored as uint8 by the format; clamp at this API boundary so an
+	# out-of-range value cannot silently wrap (the SpinBoxes already cap 0..255, but
+	# this method is public).
+	value = clampi(value, 0, 255)
+	if _mission.set_entity_property_int(int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value):
+		mark_dirty()
+
+
 # --- Selection geometry helpers -----------------------------------------------
 
 func _find_entity(kind: int, index: int) -> Dictionary:
 	if _mission == null:
 		return {}
-	for e in _mission.get_entities(kind):
-		if int((e as Dictionary).get("index", -1)) == index:
-			return e
-	return {}
+	# The entity dict's "index" equals its array position (to_record sets record.index =
+	# i), so a direct get_entity is equivalent to scanning get_entities, and O(1).
+	return _mission.get_entity(kind, index)
 
 
 func _record_world_aabb(rec: Dictionary) -> AABB:

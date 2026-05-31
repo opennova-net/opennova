@@ -55,6 +55,9 @@ public:
 	int get_entity_count(int kind) const;
 	// Array of dictionaries; see entity_to_dictionary() for the fields.
 	Array get_entities(int kind) const;
+	// One entity by (kind, index) as a dictionary (same fields as get_entities), or {}
+	// if out of range. O(1) — prefer this over scanning get_entities for a single hit.
+	Dictionary get_entity(int kind, int index) const;
 	Array get_all_entities() const;
 
 	// --- Authoring (Phase 1) --------------------------------------------------
@@ -62,6 +65,13 @@ public:
 	// is (pitch, yaw, roll) in degrees, rounded to the int fields the format stores.
 	// Returns false if (kind, index) is out of range. Sets the dirty flag on success.
 	bool set_entity_transform(int kind, int index, const Vector3 &position, const Vector3 &rotation_deg);
+	// Mutate a single editable scalar property ("team" or "group") on the entity at
+	// (kind, index). The underlying lib setter (set_entity_properties) replaces all
+	// 13 property fields at once, so this reads the entity's current properties,
+	// overwrites only the named one, then writes the lot back. Returns false if
+	// (kind, index) is out of range or `property` is not a known editable name. Sets
+	// the dirty flag on success.
+	bool set_entity_property_int(int kind, int index, const String &property, int value);
 	// Write the document back to disk. save_file() targets the path it was opened
 	// from; save_as() targets a new path and adopts it. Both clear the dirty flag and
 	// go through the byte-faithful writer in libs/mission. save_file() returns

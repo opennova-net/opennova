@@ -137,6 +137,96 @@ func test_ray_aabb_entry_hits_and_misses() -> void:
 		"a box entirely behind the ray is not a hit")
 
 
+# --- Authoring (Phase 2): numeric / property edits ----------------------------
+# The inspector pushes pos / rot / team / group edits through these controller setters.
+# Picking needs a camera + resolved render batch, neither of which the headless fixture
+# has, so the tests select via the private _select() seam (consistent with the
+# ray-vs-AABB test above) and assert against the data model, which is what the setters
+# actually write. The render index being empty is fine: the setters fall through their
+# zero-record loops harmlessly and still commit to the record.
+
+func _loaded_with_selection() -> MissionController:
+	var stub := StubTerrainEditor.new()
+	stub.resource_root = _dvxi5_root()
+	stub.world_root = Node3D.new()
+	add_child_autofree(stub.world_root)
+	add_child_autofree(stub)
+	var controller := MissionController.new(stub)
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK, "the fixture mission opens")
+	var buildings := controller.get_mission().get_entities(NovaMissionData.KIND_BUILDING)
+	assert_gt(buildings.size(), 0, "the fixture places buildings to select")
+	controller._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
+	return controller
+
+
+func test_selection_edits_without_a_selection_are_inert() -> void:
+	var controller := MissionController.new(null)
+	controller.set_selected_team(2)
+	controller.set_selected_group(3)
+	controller.set_selected_position(Vector3.ONE)
+	controller.set_selected_rotation(Vector3(0, 90, 0))
+	assert_false(controller.is_dirty(), "the setters do nothing without a selected entity")
+	assert_eq(controller.get_selected_entity(), {}, "and report no selection")
+	assert_eq(controller.get_selected_position(), Vector3.ZERO)
+
+
+func test_set_selected_team_marks_dirty_and_reads_back() -> void:
+	var controller := _loaded_with_selection()
+	var before := int(controller.get_selected_entity().get("team", 0))
+	controller.set_selected_team(before + 1)
+	assert_true(controller.is_dirty(), "a team edit dirties the mission")
+	assert_eq(int(controller.get_selected_entity()["team"]), before + 1, "the new team reads back")
+
+
+func test_set_selected_group_reads_back() -> void:
+	var controller := _loaded_with_selection()
+	controller.set_selected_group(7)
+	assert_true(controller.is_dirty())
+	assert_eq(int(controller.get_selected_entity()["group"]), 7, "the new group reads back")
+
+
+func test_set_selected_position_persists_to_record() -> void:
+	var controller := _loaded_with_selection()
+	var target := controller.get_selected_position() + Vector3(5.0, 0.0, -3.0)
+	controller.set_selected_position(target)
+	assert_true(controller.is_dirty())
+	var after: Vector3 = controller.get_selected_entity()["position"]
+	assert_almost_eq(after.x, target.x, 0.02, "edited X persists to the record")
+	assert_almost_eq(after.y, target.y, 0.02, "edited Y persists to the record")
+	assert_almost_eq(after.z, target.z, 0.02, "edited Z persists to the record")
+
+
+func test_set_selected_rotation_persists_to_record() -> void:
+	var controller := _loaded_with_selection()
+	controller.set_selected_rotation(Vector3(0, 90, 0))
+	assert_true(controller.is_dirty())
+	var rot: Vector3 = controller.get_selected_entity()["rotation_deg"]
+	assert_almost_eq(rot.y, 90.0, 0.5, "edited yaw persists (rounded to the format's integer degrees)")
+
+
+func test_set_selected_position_round_trips_under_an_offset_container() -> void:
+	# Regression: position editing must not route through the objects container's world
+	# transform. With the container parented under an offset/scaled world root, a numeric
+	# position edit must still write exactly the mission-space value it was given.
+	var stub := StubTerrainEditor.new()
+	stub.resource_root = _dvxi5_root()
+	stub.world_root = Node3D.new()
+	stub.world_root.transform = Transform3D(Basis().scaled(Vector3(2, 2, 2)), Vector3(1000, 50, -200))
+	add_child_autofree(stub.world_root)
+	add_child_autofree(stub)
+	var controller := MissionController.new(stub)
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
+	var buildings := controller.get_mission().get_entities(NovaMissionData.KIND_BUILDING)
+	controller._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
+
+	var target := Vector3(321.0, 12.0, -654.0)
+	controller.set_selected_position(target)
+	var after: Vector3 = controller.get_selected_entity()["position"]
+	assert_almost_eq(after.x, target.x, 0.02, "X is the value given, independent of the container transform")
+	assert_almost_eq(after.y, target.y, 0.02, "Y is the value given, independent of the container transform")
+	assert_almost_eq(after.z, target.z, 0.02, "Z is the value given, independent of the container transform")
+
+
 func test_open_loads_then_reconcile_drops_on_terrain_swap() -> void:
 	var stub := StubTerrainEditor.new()
 	stub.resource_root = _dvxi5_root()

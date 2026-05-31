@@ -36,9 +36,11 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_info"), &NovaMissionData::get_info);
 	ClassDB::bind_method(D_METHOD("get_entity_count", "kind"), &NovaMissionData::get_entity_count);
 	ClassDB::bind_method(D_METHOD("get_entities", "kind"), &NovaMissionData::get_entities);
+	ClassDB::bind_method(D_METHOD("get_entity", "kind", "index"), &NovaMissionData::get_entity);
 	ClassDB::bind_method(D_METHOD("get_all_entities"), &NovaMissionData::get_all_entities);
 
 	ClassDB::bind_method(D_METHOD("set_entity_transform", "kind", "index", "position", "rotation_deg"), &NovaMissionData::set_entity_transform);
+	ClassDB::bind_method(D_METHOD("set_entity_property_int", "kind", "index", "property", "value"), &NovaMissionData::set_entity_property_int);
 	ClassDB::bind_method(D_METHOD("save_file"), &NovaMissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &NovaMissionData::save_as);
 	ClassDB::bind_method(D_METHOD("is_modified"), &NovaMissionData::is_modified);
@@ -154,6 +156,17 @@ Array NovaMissionData::get_entities(int kind) const {
 	return out;
 }
 
+Dictionary NovaMissionData::get_entity(int kind, int index) const {
+	if (index < 0) {
+		return Dictionary();
+	}
+	opennova::mission::EntityRecord record;
+	if (!document.get_entity(to_native_kind(kind), static_cast<size_t>(index), record)) {
+		return Dictionary();
+	}
+	return entity_to_dictionary(record);
+}
+
 Array NovaMissionData::get_all_entities() const {
 	Array out;
 	const int kinds[] = { KIND_MARKER, KIND_ITEM, KIND_BUILDING, KIND_ORGANIC };
@@ -179,6 +192,48 @@ bool NovaMissionData::set_entity_transform(int kind, int index, const Vector3 &p
 	transform.yaw = static_cast<int>(std::lround(rotation_deg.y));
 	transform.roll = static_cast<int>(std::lround(rotation_deg.z));
 	if (!document.set_entity_transform(to_native_kind(kind), static_cast<size_t>(index), transform)) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+bool NovaMissionData::set_entity_property_int(int kind, int index, const String &property, int value) {
+	if (index < 0) {
+		return false;
+	}
+	const opennova::mission::EntityKind native_kind = to_native_kind(kind);
+	opennova::mission::EntityRecord record;
+	if (!document.get_entity(native_kind, static_cast<size_t>(index), record)) {
+		return false;
+	}
+	// set_entity_properties overwrites every field of EntityProperties, so seed it
+	// from the entity's current state and change only the requested one. This keeps
+	// the other twelve AI/waypoint properties intact.
+	opennova::mission::EntityProperties properties;
+	properties.group_id = record.group_id;
+	properties.waypoint_id = record.waypoint_id;
+	properties.wp_number = record.wp_number;
+	properties.team = record.team;
+	properties.ai_flags = record.ai_flags;
+	properties.perception = record.perception;
+	properties.accuracy = record.accuracy;
+	properties.alert_state = record.alert_state;
+	properties.min_engagement_distance = record.min_engagement_distance;
+	properties.max_engagement_distance = record.max_engagement_distance;
+	properties.max_attack_distance = record.max_attack_distance;
+	properties.spawn_count = record.spawn_count;
+	properties.max_simultaneous = record.max_simultaneous;
+
+	if (property == "team") {
+		properties.team = value;
+	} else if (property == "group") {
+		properties.group_id = value;
+	} else {
+		// Not a property the editor exposes yet; reject rather than silently no-op.
+		return false;
+	}
+	if (!document.set_entity_properties(native_kind, static_cast<size_t>(index), properties, nullptr)) {
 		return false;
 	}
 	modified = true;

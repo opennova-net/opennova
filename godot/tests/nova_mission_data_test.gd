@@ -44,6 +44,19 @@ func test_mission_data_parses_header_and_entities() -> void:
 	assert_eq(m.get_all_entities().size(), total, "get_all_entities aggregates every kind")
 
 
+func test_get_entity_matches_the_scanned_entry() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var first: Dictionary = m.get_entities(NovaMissionData.KIND_BUILDING)[0]
+	var index := int(first["index"])
+	var direct := m.get_entity(NovaMissionData.KIND_BUILDING, index)
+	assert_eq(int(direct.get("index", -1)), index, "get_entity returns the entity at that index")
+	assert_eq(direct.get("position"), first.get("position"), "with the same position as the scanned entry")
+	assert_eq(int(direct.get("item_id", -1)), int(first.get("item_id", -2)), "and the same item_id")
+	assert_eq(m.get_entity(NovaMissionData.KIND_BUILDING, 999999), {}, "an out-of-range index yields an empty dict")
+	assert_eq(m.get_entity(NovaMissionData.KIND_BUILDING, -1), {}, "a negative index yields an empty dict")
+
+
 func test_item_database_loads_and_handles_missing() -> void:
 	var db := NovaItemDatabase.new()
 	assert_eq(db.load(_items_abs()), OK, "items.def fixture should parse")
@@ -156,3 +169,114 @@ func test_save_file_without_path_is_invalid() -> void:
 	# return the no-path code (the editor shell then routes to Save As).
 	var m := NovaMissionData.new()
 	assert_eq(m.save_file(), ERR_INVALID_PARAMETER, "save_file with no path is ERR_INVALID_PARAMETER")
+
+
+# --- Authoring (Phase 2): edit team / group ----------------------------------
+# set_entity_property_int seeds the lib's all-fields property setter from the entity's
+# current state and changes only the named field, so editing team must leave group and
+# every other AI property untouched (the regression guard for the 13-field overwrite).
+
+# Fields the entity dictionary carries beyond team / group, asserted unchanged when
+# only one of team / group is edited.
+const _OTHER_PROPERTY_KEYS := [
+	"waypoint_id", "wp_number", "ai_flags", "perception", "accuracy", "alert_state",
+	"min_engagement_distance", "max_engagement_distance", "max_attack_distance",
+	"spawn_count", "max_simultaneous",
+]
+
+
+func _entity(m: NovaMissionData, kind: int, index: int) -> Dictionary:
+	for e in m.get_entities(kind):
+		if int((e as Dictionary)["index"]) == index:
+			return e
+	return {}
+
+
+func test_set_entity_property_int_team_preserves_other_fields() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var before: Dictionary = m.get_entities(NovaMissionData.KIND_BUILDING)[0]
+	var index := int(before["index"])
+
+	var new_team := int(before.get("team", 0)) + 1
+	assert_true(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, index, "team", new_team),
+		"editing team on a valid entity succeeds")
+	assert_true(m.is_modified(), "a property edit sets the modified flag")
+
+	var after := _entity(m, NovaMissionData.KIND_BUILDING, index)
+	assert_eq(int(after["team"]), new_team, "team takes the new value")
+	assert_eq(int(after["group"]), int(before["group"]), "group is left untouched by a team edit")
+	for key in _OTHER_PROPERTY_KEYS:
+		assert_eq(after[key], before[key], "%s is preserved through a team-only edit" % key)
+
+
+func test_set_entity_property_int_group_roundtrips() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var before: Dictionary = m.get_entities(NovaMissionData.KIND_BUILDING)[0]
+	var index := int(before["index"])
+
+	var new_group := int(before.get("group", 0)) + 3
+	assert_true(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, index, "group", new_group))
+	var after := _entity(m, NovaMissionData.KIND_BUILDING, index)
+	assert_eq(int(after["group"]), new_group, "group takes the new value")
+	assert_eq(int(after["team"]), int(before["team"]), "team is left untouched by a group edit")
+
+
+func test_set_entity_property_int_persists_through_save_reload() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var index := int(m.get_entities(NovaMissionData.KIND_BUILDING)[0]["index"])
+	assert_true(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, index, "team", 4))
+
+	var tmp := _temp_bms_path()
+	assert_eq(m.save_as(tmp), OK)
+	var reopened := NovaMissionData.new()
+	assert_eq(reopened.open_file(tmp), OK)
+	assert_eq(int(_entity(reopened, NovaMissionData.KIND_BUILDING, index)["team"]), 4,
+		"an edited team survives the byte-faithful save and reload")
+	DirAccess.remove_absolute(tmp)
+
+
+func test_set_entity_property_int_unknown_property_is_inert() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	assert_false(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, 0, "perception", 9),
+		"a property the editor does not expose is rejected")
+	assert_false(m.is_modified(), "a rejected property edit does not dirty the document")
+
+
+func test_set_entity_property_int_rejects_out_of_range() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	assert_false(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, 999999, "team", 1),
+		"an out-of-range index is rejected")
+	assert_false(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, -1, "team", 1),
+		"a negative index is rejected")
+	assert_false(m.is_modified(), "a rejected edit leaves the document clean")
+
+
+func test_set_entity_property_int_preserves_other_fields_across_kinds() -> void:
+	# Buildings tend to carry all-zero AI fields, so a dropped field in the read-modify-
+	# write copy would read 0 == 0 and pass. Organics (and items) carry richer state, so
+	# exercise every selectable kind that the fixture provides.
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var covered := 0
+	for kind in [NovaMissionData.KIND_ITEM, NovaMissionData.KIND_ORGANIC]:
+		var entities := m.get_entities(kind)
+		if entities.is_empty():
+			continue
+		covered += 1
+		var before: Dictionary = entities[0]
+		var index := int(before["index"])
+		assert_true(m.set_entity_property_int(kind, index, "group", int(before.get("group", 0)) + 1),
+			"editing group on kind %d succeeds" % kind)
+		var after := _entity(m, kind, index)
+		assert_eq(int(after["group"]), int(before["group"]) + 1, "group updates on kind %d" % kind)
+		assert_eq(int(after["team"]), int(before["team"]), "team untouched on kind %d" % kind)
+		for key in _OTHER_PROPERTY_KEYS:
+			assert_eq(after[key], before[key], "%s preserved on kind %d" % [key, kind])
+	# The fixture is expected to place items and/or organics; flag if neither resolved so
+	# this guard never silently degrades to a no-op.
+	assert_gt(covered, 0, "the fixture provides at least one item or organic to exercise")
