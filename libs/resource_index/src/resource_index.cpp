@@ -30,7 +30,7 @@ std::string trim_copy(const std::string &value) {
 	return value.substr(begin, end - begin);
 }
 
-bool has_rtxt_magic(const fs::path &path) {
+bool has_magic(const fs::path &path, const char (&want)[5]) {
 	std::ifstream file(path, std::ios::binary);
 	if (!file) {
 		return false;
@@ -38,10 +38,21 @@ bool has_rtxt_magic(const fs::path &path) {
 	char magic[4] = {};
 	file.read(magic, sizeof(magic));
 	return file.gcount() == sizeof(magic) &&
-	       magic[0] == 'R' &&
-	       magic[1] == 'T' &&
-	       magic[2] == 'X' &&
-	       magic[3] == 'T';
+	       magic[0] == want[0] &&
+	       magic[1] == want[1] &&
+	       magic[2] == want[2] &&
+	       magic[3] == want[3];
+}
+
+bool has_rtxt_magic(const fs::path &path) {
+	return has_magic(path, "RTXT");
+}
+
+// MUS bytecode is stored in an .bin wrapper whose first four bytes are "SCR0"
+// (the music script loader's SCR container). This disambiguates a music .bin
+// from a localized-strings .bin (RTXT magic) and a raw .bin (neither).
+bool has_scr_magic(const fs::path &path) {
+	return has_magic(path, "SCR0");
 }
 
 std::string kind_for_path(const fs::path &path) {
@@ -69,6 +80,12 @@ std::string kind_for_path(const fs::path &path) {
 	}
 	if (extension == ".fnt") {
 		return "font";
+	}
+	if (extension == ".sbf") {
+		return "sbf";
+	}
+	if (extension == ".bin" && has_scr_magic(path)) {
+		return "music_script";
 	}
 	if (extension == ".bin" && has_rtxt_magic(path)) {
 		return "strings";
@@ -108,11 +125,21 @@ std::string normalize_kind(const std::string &kind) {
 	if (key == "bin" || key == "rtxt") {
 		return "strings";
 	}
+	if (key == "mus") {
+		return "music_script";
+	}
+	// "sbf", "music_script", and the "music" umbrella pass through unchanged.
 	return key;
 }
 
 bool is_object_kind(const std::string &kind) {
 	return kind == "object_project" || kind == "object_model" || kind == "object_scene";
+}
+
+// The Music workspace browses .sbf banks and .bin (SCR0) scripts together under
+// one "music" umbrella kind, mirroring how "object" spans its sub-kinds.
+bool is_music_kind(const std::string &kind) {
+	return kind == "sbf" || kind == "music_script";
 }
 
 std::string display_name_from_path(const fs::path &path) {
@@ -201,7 +228,9 @@ std::vector<ResourceFileEntry> ResourceIndex::resource_files(const std::string &
 	}
 	std::vector<ResourceFileEntry> out;
 	for (const ResourceFileEntry &entry : impl_->files) {
-		if (entry.kind == filter || (filter == "object" && is_object_kind(entry.kind))) {
+		if (entry.kind == filter ||
+		    (filter == "object" && is_object_kind(entry.kind)) ||
+		    (filter == "music" && is_music_kind(entry.kind))) {
 			out.push_back(entry);
 		}
 	}

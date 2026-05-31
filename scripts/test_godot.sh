@@ -34,6 +34,7 @@ set +e
 "$GODOT_BIN" --headless --path "$root/godot" \
   -s addons/gut/gut_cmdln.gd \
   -gdir=res://tests \
+  -ginclude_subdirs \
   -gprefix= \
   -gsuffix=_test.gd \
   -gexit 2>&1 | tee "$log"

@@ -36,6 +36,8 @@ int main() {
 	write_file(root / "scene.ASE", "ase");
 	write_file(root / "vehicle.glb", "glb");
 	write_file(root / "Menus.BIN", "RTXTstrings");
+	write_file(root / "jo_gamemus.sbf", "SBF0");
+	write_file(root / "jo_gamemus.bin", "SCR0music");
 	write_file(root / "Scratch.bin", "DATA");
 	write_file(root / "first.bms", "bms");
 	write_file(root / "finale.kda", "kda");
@@ -54,9 +56,11 @@ int main() {
 
 	TEST_EXPECT(index.scan(root.string()));
 	const std::vector<opennova::ResourceFileEntry> all_files = index.resource_files("*");
-	TEST_EXPECT(all_files.size() == 9);
+	TEST_EXPECT(all_files.size() == 11);
 	TEST_EXPECT(has_relative_path(all_files, "Alpha.TRN"));
 	TEST_EXPECT(has_relative_path(all_files, "Menus.BIN"));
+	TEST_EXPECT(has_relative_path(all_files, "jo_gamemus.sbf"));
+	TEST_EXPECT(has_relative_path(all_files, "jo_gamemus.bin"));
 	TEST_EXPECT(has_relative_path(all_files, "first.bms"));
 	TEST_EXPECT(has_relative_path(all_files, "finale.kda"));
 	TEST_EXPECT(has_relative_path(all_files, "Serpen24.fnt"));
@@ -95,6 +99,10 @@ int main() {
 	TEST_EXPECT(index.resource_files("bin").size() == 1);
 	TEST_EXPECT(index.resource_files("rtxt").size() == 1);
 	TEST_EXPECT(index.resource_files("strings")[0].display_name == "Menus");
+	TEST_EXPECT(index.resource_files("sbf").size() == 1);
+	TEST_EXPECT(index.resource_files("music_script").size() == 1);
+	TEST_EXPECT(index.resource_files("mus").size() == 1);
+	TEST_EXPECT(index.resource_files("music").size() == 2);
 
 	fs::remove_all(root);
 	return 0;

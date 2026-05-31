@@ -42,6 +42,34 @@
 #include "util/nova_texture_format.h"
 #include "resource_index/nova_resource_index.h"
 #include "resource_index/nova_resource_root.h"
+#include "audio/nova_sbf_bank.h"
+#include "audio/nova_sbf_audio_stream.h"
+#include "audio/nova_sbf_audio_stream_playback.h"
+#include "audio/sbf_resource_format.h"
+#include "audio/nova_music_script.h"
+#include "audio/nova_music_director.h"
+#include "audio/mus_resource_format.h"
+#include "mnu/nova_mnu_document.h"
+#include "mnu/mns_stylesheet.h"
+#include "mnu/mnu_resource_format.h"
+#include "mnu/mns_resource_format.h"
+#include "mnu/nova_mnu_screen.h"
+#include "mnu/nova_mnu_label.h"
+#include "mnu/nova_mnu_button.h"
+#include "mnu/nova_mnu_checkbox.h"
+#include "mnu/nova_mnu_combo.h"
+#include "mnu/nova_mnu_edit.h"
+#include "mnu/nova_mnu_multiline_edit.h"
+#include "mnu/nova_mnu_goto.h"
+#include "mnu/nova_mnu_list.h"
+#include "mnu/nova_mnu_multi.h"
+#include "mnu/nova_mnu_spinlist.h"
+#include "mnu/nova_mnu_scroll.h"
+#include "mnu/nova_mnu_table.h"
+#include "mnu/nova_mnu_map.h"
+#include "mnu/nova_mnu_globe.h"
+#include "mnu/nova_mnu_marquee.h"
+#include "mnu/nova_mnu_menu.h"
 
 using namespace godot;
 
@@ -59,6 +87,14 @@ static Ref<ResourceFormatSaverFNT> fnt_saver;
 static Ref<ResourceFormatLoaderNovaTexture> nova_tex_loader;
 static Ref<ResourceFormatLoaderRTXT> rtxt_loader;
 static Ref<ResourceFormatSaverRTXT> rtxt_saver;
+static Ref<SbfResourceFormatLoader> sbf_loader;
+static Ref<SbfResourceFormatSaver> sbf_saver;
+static Ref<MusResourceFormatLoader> mus_loader;
+static Ref<MusResourceFormatSaver> mus_saver;
+static Ref<ResourceFormatLoaderMNU> mnu_loader;
+static Ref<ResourceFormatSaverMNU> mnu_saver;
+static Ref<ResourceFormatLoaderMNS> mns_loader;
+static Ref<ResourceFormatSaverMNS> mns_saver;
 
 void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
@@ -115,6 +151,38 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ResourceFormatLoaderNovaTexture);
 	GDREGISTER_CLASS(NovaResourceIndex);
 	GDREGISTER_CLASS(NovaResourceRoot);
+	GDREGISTER_CLASS(NovaSbfAudioStream);
+	GDREGISTER_CLASS(NovaSbfAudioStreamPlayback);
+	GDREGISTER_CLASS(NovaSbfBank);
+	GDREGISTER_CLASS(SbfResourceFormatLoader);
+	GDREGISTER_CLASS(SbfResourceFormatSaver);
+	GDREGISTER_CLASS(NovaMusicScript);
+	GDREGISTER_CLASS(NovaMusicDirector);
+	GDREGISTER_CLASS(MusResourceFormatLoader);
+	GDREGISTER_CLASS(MusResourceFormatSaver);
+	GDREGISTER_CLASS(NovaMnuDocument);
+	GDREGISTER_CLASS(MnsStyleSheet);
+	GDREGISTER_CLASS(ResourceFormatLoaderMNU);
+	GDREGISTER_CLASS(ResourceFormatSaverMNU);
+	GDREGISTER_CLASS(ResourceFormatLoaderMNS);
+	GDREGISTER_CLASS(ResourceFormatSaverMNS);
+	GDREGISTER_CLASS(NovaMnuScreen);
+	GDREGISTER_CLASS(NovaMnuLabel);
+	GDREGISTER_CLASS(NovaMnuButton);
+	GDREGISTER_CLASS(NovaMnuCheckBox);
+	GDREGISTER_CLASS(NovaMnuEdit);
+	GDREGISTER_CLASS(NovaMnuMultilineEdit);
+	GDREGISTER_CLASS(NovaMnuGoto);
+	GDREGISTER_CLASS(NovaMnuList);
+	GDREGISTER_CLASS(NovaMnuMulti);
+	GDREGISTER_CLASS(NovaMnuSpinList);
+	GDREGISTER_CLASS(NovaMnuScroll);
+	GDREGISTER_CLASS(NovaMnuCombo);
+	GDREGISTER_CLASS(NovaMnuTable);
+	GDREGISTER_CLASS(NovaMnuMap);
+	GDREGISTER_CLASS(NovaMnuGlobe);
+	GDREGISTER_CLASS(NovaMnuMarquee);
+	GDREGISTER_CLASS(NovaMnuMenu);
 
 	trn_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(trn_loader);
@@ -157,6 +225,30 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	rtxt_saver.instantiate();
 	ResourceSaver::get_singleton()->add_resource_format_saver(rtxt_saver);
+
+	sbf_loader.instantiate();
+	ResourceLoader::get_singleton()->add_resource_format_loader(sbf_loader);
+
+	sbf_saver.instantiate();
+	ResourceSaver::get_singleton()->add_resource_format_saver(sbf_saver);
+
+	mus_loader.instantiate();
+	ResourceLoader::get_singleton()->add_resource_format_loader(mus_loader);
+
+	mus_saver.instantiate();
+	ResourceSaver::get_singleton()->add_resource_format_saver(mus_saver);
+
+	mnu_loader.instantiate();
+	ResourceLoader::get_singleton()->add_resource_format_loader(mnu_loader);
+
+	mnu_saver.instantiate();
+	ResourceSaver::get_singleton()->add_resource_format_saver(mnu_saver);
+
+	mns_loader.instantiate();
+	ResourceLoader::get_singleton()->add_resource_format_loader(mns_loader);
+
+	mns_saver.instantiate();
+	ResourceSaver::get_singleton()->add_resource_format_saver(mns_saver);
 }
 
 void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
@@ -210,6 +302,30 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	ResourceSaver::get_singleton()->remove_resource_format_saver(rtxt_saver);
 	rtxt_saver.unref();
+
+	ResourceLoader::get_singleton()->remove_resource_format_loader(sbf_loader);
+	sbf_loader.unref();
+
+	ResourceSaver::get_singleton()->remove_resource_format_saver(sbf_saver);
+	sbf_saver.unref();
+
+	ResourceLoader::get_singleton()->remove_resource_format_loader(mus_loader);
+	mus_loader.unref();
+
+	ResourceSaver::get_singleton()->remove_resource_format_saver(mus_saver);
+	mus_saver.unref();
+
+	ResourceLoader::get_singleton()->remove_resource_format_loader(mnu_loader);
+	mnu_loader.unref();
+
+	ResourceSaver::get_singleton()->remove_resource_format_saver(mnu_saver);
+	mnu_saver.unref();
+
+	ResourceLoader::get_singleton()->remove_resource_format_loader(mns_loader);
+	mns_loader.unref();
+
+	ResourceSaver::get_singleton()->remove_resource_format_saver(mns_saver);
+	mns_saver.unref();
 }
 
 extern "C" {
