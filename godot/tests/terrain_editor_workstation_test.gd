@@ -187,12 +187,13 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 	for child in workspace_rail.get_children():
 		if child is Button:
 			row_texts.append((child as Button).text)
-	assert_eq(row_texts, ["Terrain", "Object", "Mission", "Fonts", "Credits", "Strings", "Environment"],
+	assert_eq(row_texts, ["Terrain", "Object", "Mission", "Fonts", "Credits", "Strings", "Music", "Environment"],
 		"The nav should list every workspace as a full-width row, with Environment promoted from the sun button.")
 
 	# Workspaces are grouped under category headers (Muted labels).
 	assert_true(_has_label_text(workspace_rail, "World"), "World should head the world-building workspaces.")
 	assert_true(_has_label_text(workspace_rail, "Interface"), "Interface should head the interface-asset workspaces.")
+	assert_true(_has_label_text(workspace_rail, "Audio"), "Audio should head the Music workspace.")
 	assert_true(_has_label_text(workspace_rail, "Atmosphere"), "Atmosphere should head the Environment workspace.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.CREDITS)
