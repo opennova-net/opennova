@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import re
 import zipfile
 
 import pytest
@@ -25,6 +26,16 @@ def _write_zip(path: Path, names: list[str]) -> None:
     with zipfile.ZipFile(path, "w") as archive:
         for name in names:
             archive.writestr(name, f"{name}\n")
+
+
+def _workflow_job(workflow: str, job_name: str) -> str:
+    match = re.search(
+        rf"^  {re.escape(job_name)}:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:|\Z)",
+        workflow,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None, f"job not found: {job_name}"
+    return match.group("body")
 
 
 def _write_deliverable_fixtures(dist: Path) -> None:
@@ -170,6 +181,21 @@ def test_release_workflow_validates_and_publishes_staged_assets() -> None:
 
 def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    package_jobs = [
+        "package-addon",
+        "package-max-mzp",
+        "package-importer",
+        "package-godot-windows-editor",
+        "package-godot-windows-runtime",
+        "package-godot-macos-editor",
+        "package-godot-macos-runtime",
+    ]
+    godot_package_jobs = [
+        "package-godot-windows-editor",
+        "package-godot-windows-runtime",
+        "package-godot-macos-editor",
+        "package-godot-macos-runtime",
+    ]
 
     assert "validate-deliverables:" in workflow
     assert "package-godot-windows-editor:" in workflow
@@ -184,7 +210,18 @@ def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> Non
     assert "scripts/package_godot_runtime_windows.ps1" in workflow
     assert "scripts/package_godot_editor_macos.sh" in workflow
     assert "scripts/package_godot_runtime_macos.sh" in workflow
-    assert "needs: [package-addon, package-max-mzp, package-importer, package-godot-windows-editor, package-godot-windows-runtime, package-godot-macos-editor, package-godot-macos-runtime]" in workflow
+    assert "BUILD_GODOT: \"0\"" in _workflow_job(workflow, "test")
+    for package_job in package_jobs:
+        assert "needs:" not in _workflow_job(workflow, package_job)
+    assert (
+        "needs: [test, godot-tests, package-addon, package-max-mzp, package-importer, "
+        "package-godot-windows-editor, package-godot-windows-runtime, "
+        "package-godot-macos-editor, package-godot-macos-runtime]"
+    ) in _workflow_job(workflow, "validate-deliverables")
+    for package_job in godot_package_jobs:
+        body = _workflow_job(workflow, package_job)
+        assert "Cache Godot binary" in body
+        assert "Cache Godot export templates" in body
     assert "scripts/validate_release_deliverables.py --release-version 0.0.0-ci" in workflow
     assert "dist/onimport-v*.exe" in workflow
     assert "dist/opennova-modtools-windows-v*.zip" in workflow
@@ -196,6 +233,21 @@ def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> Non
 
 def test_release_splits_godot_editor_and_runtime_package_jobs() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    package_jobs = [
+        "package-addon",
+        "package-max-mzp",
+        "package-importer",
+        "package-godot-windows-editor",
+        "package-godot-windows-runtime",
+        "package-godot-macos-editor",
+        "package-godot-macos-runtime",
+    ]
+    godot_package_jobs = [
+        "package-godot-windows-editor",
+        "package-godot-windows-runtime",
+        "package-godot-macos-editor",
+        "package-godot-macos-runtime",
+    ]
 
     assert "package-godot-windows-editor:" in workflow
     assert "package-godot-windows-runtime:" in workflow
@@ -209,7 +261,18 @@ def test_release_splits_godot_editor_and_runtime_package_jobs() -> None:
     assert "scripts/package_godot_runtime_windows.ps1" in workflow
     assert "scripts/package_godot_editor_macos.sh" in workflow
     assert "scripts/package_godot_runtime_macos.sh" in workflow
-    assert "needs: [package-addon, package-max-mzp, package-importer, package-godot-windows-editor, package-godot-windows-runtime, package-godot-macos-editor, package-godot-macos-runtime]" in workflow
+    assert "BUILD_GODOT: \"0\"" in _workflow_job(workflow, "test")
+    for package_job in package_jobs:
+        assert "needs:" not in _workflow_job(workflow, package_job)
+    assert (
+        "needs: [test, package-addon, package-max-mzp, package-importer, "
+        "package-godot-windows-editor, package-godot-windows-runtime, "
+        "package-godot-macos-editor, package-godot-macos-runtime]"
+    ) in _workflow_job(workflow, "release")
+    for package_job in godot_package_jobs:
+        body = _workflow_job(workflow, package_job)
+        assert "Cache Godot binary" in body
+        assert "Cache Godot export templates" in body
 
 
 def test_godot_package_wrappers_target_editor_and_runtime() -> None:
