@@ -198,13 +198,13 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 	for child in workspace_rail.get_children():
 		if child is Button:
 			row_texts.append((child as Button).text)
-	assert_eq(row_texts, ["Terrain", "Object", "Mission", "Fonts", "Credits", "Strings", "Environment"],
+	assert_eq(row_texts, ["Terrain", "Object", "Mission", "Fonts", "Credits", "Strings", "Menus", "Music", "Environment"],
 		"The nav should list every workspace as a full-width row, with Environment promoted from the sun button.")
 
 	assert_false(_has_label_text(workspace_rail, "World"), "Top-bar workspace groups should use separators, not inline category words.")
 	assert_false(_has_label_text(workspace_rail, "Interface"), "Top-bar workspace groups should not read like a sentence.")
 	assert_gte(_direct_child_count_of_type(workspace_rail, "VSeparator"), 2,
-		"Top-bar workspace groups should keep visual separation between World, Interface, and Atmosphere.")
+		"Top-bar workspace groups should keep visual separation between World, Interface, Audio, and Atmosphere.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.CREDITS)
 	await get_tree().process_frame

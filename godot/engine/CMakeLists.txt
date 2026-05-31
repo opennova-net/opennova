@@ -20,6 +20,12 @@ add_subdirectory(../../libs/renderer opennova_renderer)
 add_subdirectory(../../libs/cbin opennova_cbin)
 add_subdirectory(../../libs/terrain opennova_terrain)
 add_subdirectory(../../libs/resource_index opennova_resource_index)
+add_subdirectory(../../libs/sbf opennova_sbf)
+add_subdirectory(../../libs/scr opennova_scr)
+add_subdirectory(../../libs/mus opennova_mus)
+add_subdirectory(../../libs/mnu_xml opennova_mnu_xml)
+add_subdirectory(../../libs/mnu opennova_mnu)
+add_subdirectory(../../libs/mns opennova_mns)
 add_subdirectory(../../libs/def opennova_def)
 add_subdirectory(../../libs/mission opennova_mission)
 
@@ -63,6 +69,36 @@ add_library(${TARGET_NAME} SHARED
     fnt/nova_fnt_resource.cpp
     fnt/fnt_resource_format.cpp
     fnt/fnt_import_plugin.cpp
+    audio/nova_sbf_bank.cpp
+    audio/nova_sbf_audio_stream.cpp
+    audio/nova_sbf_audio_stream_playback.cpp
+    audio/sbf_resource_format.cpp
+    audio/nova_music_script.cpp
+    audio/nova_music_director.cpp
+    audio/mus_resource_format.cpp
+    mnu/nova_mnu_document.cpp
+    mnu/mns_stylesheet.cpp
+    mnu/mnu_resource_format.cpp
+    mnu/mns_resource_format.cpp
+    mnu/nova_mnu_screen.cpp
+    mnu/nova_mnu_label.cpp
+    mnu/nova_mnu_button.cpp
+    mnu/nova_mnu_checkbox.cpp
+    mnu/nova_mnu_widget_behavior.cpp
+    mnu/nova_mnu_edit.cpp
+    mnu/nova_mnu_multiline_edit.cpp
+    mnu/nova_mnu_goto.cpp
+    mnu/nova_mnu_list.cpp
+    mnu/nova_mnu_multi.cpp
+    mnu/nova_mnu_spinlist.cpp
+    mnu/nova_mnu_scroll.cpp
+    mnu/nova_mnu_combo.cpp
+    mnu/nova_mnu_table.cpp
+    mnu/nova_mnu_map.cpp
+    mnu/nova_mnu_globe.cpp
+    mnu/nova_mnu_marquee.cpp
+    mnu/nova_mnu_builder.cpp
+    mnu/nova_mnu_menu.cpp
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE
@@ -88,6 +124,12 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_renderer
     opennova_terrain
     opennova_resource_index
+    opennova_sbf
+    opennova_scr
+    opennova_mus
+    opennova_mnu_xml
+    opennova_mnu
+    opennova_mns
     opennova_def
     opennova_mission
 )
