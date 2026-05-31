@@ -205,6 +205,33 @@ int main() {
 	TEST_EXPECT(fs::path(archived->archive_path).filename().string() == "aa_base.pff");
 	TEST_EXPECT(archived->logical_name == "Archive.env");
 
+	// --- expansion override: scan(root, expansion) mounts loose expansion + L.pff + main.pff
+	// ahead of the base archives (matches the engine). ---
+	const fs::path game = fs::temp_directory_path() / "opennova_resource_index_exp";
+	fs::remove_all(game);
+	fs::create_directories(game / "expansion" / "jox01");
+	write_pff(game / "resource.pff", {{"shared.env", "base env"}, {"baseonly.trn", "base trn"}});
+	write_pff(game / "expansion" / "jox01" / "jox01.pff",
+	          {{"shared.env", "main env"}, {"exponly.3di", "exp model"}});
+	write_pff(game / "expansion" / "jox01" / "jox01L.pff", {{"shared.env", "local env"}});
+	write_file(game / "expansion" / "jox01" / "shared.env", "loose env");
+
+	opennova::ResourceIndex exp_index;
+	TEST_EXPECT(exp_index.scan(game.string(), "jox01"));
+	std::vector<uint8_t> eb;
+	TEST_EXPECT(exp_index.read_file("shared.env", eb));
+	TEST_EXPECT(as_string(eb) == "loose env");   // loose expansion file wins over all archives
+	TEST_EXPECT(exp_index.read_file("exponly.3di", eb));
+	TEST_EXPECT(as_string(eb) == "exp model");   // expansion archive content
+	TEST_EXPECT(exp_index.read_file("baseonly.trn", eb));
+	TEST_EXPECT(as_string(eb) == "base trn");    // base archive still reachable
+	exp_index.clear();
+	fs::remove_all(game);
+
+	// Release mounted .pff handles before deleting the directory: the VFS keeps archives
+	// open for the session (engine-faithful, fast reads), and Windows blocks deletion of
+	// open files.
+	index.clear();
 	fs::remove_all(root);
 	return 0;
 }

@@ -29,6 +29,7 @@ bool is_flat_filename(const String &name) {
 void NovaResourceRoot::_bind_methods() {
 	ClassDB::bind_static_method("NovaResourceRoot", D_METHOD("is_valid_root", "path"), &NovaResourceRoot::is_valid_root);
 	ClassDB::bind_method(D_METHOD("set_root_dir", "path"), &NovaResourceRoot::set_root_dir);
+	ClassDB::bind_method(D_METHOD("mount_game", "path", "expansion"), &NovaResourceRoot::mount_game, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("get_root_dir"), &NovaResourceRoot::get_root_dir);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaResourceRoot::get_last_error);
 	ClassDB::bind_method(D_METHOD("clear"), &NovaResourceRoot::clear);
@@ -91,6 +92,10 @@ bool NovaResourceRoot::is_valid_root(const String &path) {
 }
 
 Error NovaResourceRoot::set_root_dir(const String &path) {
+	return mount_game(path, String());
+}
+
+Error NovaResourceRoot::mount_game(const String &path, const String &expansion) {
 	// The resolver's per-session caches are keyed to the previous root; drop them so a
 	// new (or re-scanned) resource directory is read fresh. scan_root() in the editor
 	// routes through here too, so a rescan picks up on-disk edits.
@@ -107,7 +112,7 @@ Error NovaResourceRoot::set_root_dir(const String &path) {
 		return ERR_DOES_NOT_EXIST;
 	}
 	root_dir_ = clean;
-	if (!index_.scan(clean.utf8().get_data())) {
+	if (!index_.scan(clean.utf8().get_data(), expansion.utf8().get_data())) {
 		root_dir_ = String();
 		last_error_ = String(index_.last_error().c_str());
 		return ERR_CANT_OPEN;
