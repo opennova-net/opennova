@@ -29,6 +29,7 @@ private:
 	String current_screen_;
 	bool edit_mode_ = false;
 	bool build_on_ready_ = true;
+	int unresolved_asset_count_ = 0;
 
 	void apply_screen_visibility();
 
@@ -65,6 +66,11 @@ public:
 	void clear();
 	PackedStringArray get_screen_names() const;
 	bool show_screen(const String &p_name);
+
+	// Count of distinct concrete asset names (textures/fonts) that could not be
+	// resolved during the last build. The editor surfaces this; 0 means every
+	// referenced asset loaded (or there were none).
+	int get_unresolved_asset_count() const { return unresolved_asset_count_; }
 };
 
 } // namespace godot

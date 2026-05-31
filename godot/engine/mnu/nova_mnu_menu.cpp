@@ -73,6 +73,7 @@ void NovaMnuMenu::build() {
 			add_child(screen_node);
 		}
 	}
+	unresolved_asset_count_ = static_cast<int>(ctx.unresolved_assets.size());
 
 	// Default the visible screen to current_screen, else the first screen.
 	if (current_screen_.is_empty() && !doc.screens.empty()) {
@@ -148,6 +149,7 @@ void NovaMnuMenu::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear"), &NovaMnuMenu::clear);
 	ClassDB::bind_method(D_METHOD("get_screen_names"), &NovaMnuMenu::get_screen_names);
 	ClassDB::bind_method(D_METHOD("show_screen", "name"), &NovaMnuMenu::show_screen);
+	ClassDB::bind_method(D_METHOD("get_unresolved_asset_count"), &NovaMnuMenu::get_unresolved_asset_count);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "menu", PROPERTY_HINT_RESOURCE_TYPE, "NovaMnuDocument"),
 			"set_menu", "get_menu");
