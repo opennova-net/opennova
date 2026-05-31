@@ -165,10 +165,6 @@ jobs:
           # means unbounded jobs, which OOM/swap-thrashes the 3-core runner.
           cmake --build build-godot --config Release --target opennova -j 3
 
-      - name: Show built GDExtension binaries
-        shell: bash
-        run: ls -la godot/bin
-
       - name: Prime Godot import cache
         shell: bash
         run: |
