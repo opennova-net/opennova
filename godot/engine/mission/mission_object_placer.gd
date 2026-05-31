@@ -210,6 +210,84 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	return stats
 
 
+# --- Incremental placement (editor authoring) ---------------------------------
+
+## Render one freshly-added entity into an existing MissionObjects container without
+## rebuilding the whole world. Used by the editor when the user places a new object:
+## add_entity has already written the record, so this only turns that record into a
+## renderable. Reuses the model + batch caches, so repeated placement of the same
+## graphic costs no re-harvest. Unlike place(), each new static entity gets its own
+## single-instance MultiMesh (one extra draw group) rather than joining the shared
+## batch; a later save+reopen re-batches everything normally. Records the pickable
+## index for the new entity (this path is editor-only and always picks).
+## Returns a small delta stats dict: { placed, batched, animated, batches, unresolved }.
+func place_single(mission: NovaMissionData, container: Node3D, kind: int, index: int, env_node: Node = null) -> Dictionary:
+	var delta := { "placed": 0, "batched": 0, "animated": 0, "batches": 0, "unresolved": 0 }
+	if mission == null or container == null or resource_root == null:
+		return delta
+	_ensure_item_db()
+	var entity: Dictionary = mission.get_entity(kind, index)
+	if entity.is_empty():
+		return delta
+	var item_id := int(entity.get("item_id", 0))
+	var graphic := _graphic_for(item_id)
+	if graphic.is_empty():
+		delta.unresolved = 1
+		return delta
+	var xform := entity_transform(
+		entity.get("position", Vector3.ZERO),
+		entity.get("rotation_deg", Vector3.ZERO))
+
+	if _is_animated(item_id):
+		var data := _load_object_data(graphic)
+		if data == null:
+			delta.unresolved = 1
+			return delta
+		var model: Node3D = NovaObjectModelScript.new()
+		model.name = "Anim_%s_k%d_i%d" % [graphic, kind, index]
+		model.transform = xform
+		container.add_child(model)
+		if env_node != null and model.has_method("set_environment_node"):
+			model.set_environment_node(env_node)
+		model.set_object_data(data)
+		var ref := { "kind": kind, "index": index }
+		model.set_meta("entity_ref", ref)
+		pickable_records.append({
+			"kind": kind,
+			"index": index,
+			"graphic": graphic,
+			"node": model,
+			"animated": true,
+		})
+		delta.placed = 1
+		delta.animated = 1
+		return delta
+
+	var batches := _get_static_batches(graphic, env_node, container)
+	if batches.is_empty():
+		delta.unresolved = 1
+		return delta
+	var refs := [{ "kind": kind, "index": index }]
+	for batch in batches:
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = batch["mesh"]
+		mm.instance_count = 1
+		var offset: Transform3D = batch["offset"]
+		mm.set_instance_transform(0, xform * offset)
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		if batch["material"] != null:
+			mmi.material_override = batch["material"]
+		mmi.name = "Place_%s_k%d_i%d_s%d" % [graphic, kind, index, int(batch.get("submesh", 0))]
+		container.add_child(mmi)
+		delta.batches += 1
+		_record_static_batch(graphic, refs, mm, mmi, offset, batch["mesh"])
+	delta.placed = 1
+	delta.batched = 1
+	return delta
+
+
 # --- Internals ----------------------------------------------------------------
 
 # Emit one pickable record per entity slot in a freshly-built static batch. Each
@@ -243,6 +321,14 @@ func _ensure_item_db() -> void:
 	var db := NovaItemDatabase.new()
 	if db.load(path) == OK:
 		item_db = db
+
+
+# The items database (items.def), loaded on demand from the resource root. Used by the
+# editor to enumerate placeable items for the palette; returns null if items.def cannot
+# be resolved. Shares the same instance the placer resolves graphics through.
+func get_item_db() -> NovaItemDatabase:
+	_ensure_item_db()
+	return item_db
 
 
 func _graphic_for(item_id: int) -> String:

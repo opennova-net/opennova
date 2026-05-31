@@ -32,6 +32,9 @@ var _last_open_dir: String = ""
 var _is_dirty: bool = false
 var _stats: Dictionary = {}
 var _last_status: String = ""
+# The placer that built the current world, retained so place-new can render one entity
+# incrementally (reusing its model + batch caches) instead of rebuilding everything.
+var _placer  # MissionObjectPlacer (preloaded, no class_name)
 
 # --- Authoring (Phase 1) state ------------------------------------------------
 # Pickable index harvested from the placer (edit_mode): one record per (entity,
@@ -49,6 +52,10 @@ var _selected_rotation_deg: Vector3 = Vector3.ZERO
 # plain click only selects.
 var _drag_active: bool = false
 var _drag_moved: bool = false
+# Place-new ("placement mode"): the armed items.def item id (0 = not armed). While
+# armed, a left-click on the terrain places a new instance of this item instead of
+# selecting / dragging; right-click or Escape disarms. See arm_placement().
+var _place_item_id: int = 0
 # Translucent box marking the selection in the viewport (lazily built under the
 # objects container; freed with the container).
 var _selection_box: MeshInstance3D
@@ -172,6 +179,8 @@ func open_mission(bms_path: String) -> Error:
 func clear() -> void:
 	_reset_selection_state()
 	_pickable = []
+	_place_item_id = 0
+	_placer = null
 	_clear_objects()
 	_mission = null
 	_current_path = ""
@@ -263,12 +272,27 @@ func handle_viewport_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
+		# Right-click while armed cancels placement (a familiar "drop the tool" gesture)
+		# and does not fall through to selection.
+		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed and is_placement_armed():
+			disarm_placement()
+			return
 		if mb.button_index != MOUSE_BUTTON_LEFT:
 			return
 		if mb.pressed:
-			_on_left_press(mb.position)
+			# Armed: left-click places a new instance at the cursor instead of selecting.
+			# Stay armed so the user can place several; right-click / Escape / the Stop
+			# button disarms.
+			if is_placement_armed():
+				_place_armed_at(mb.position)
+			else:
+				_on_left_press(mb.position)
 		else:
 			_on_left_release()
+	elif event is InputEventKey:
+		var key := event as InputEventKey
+		if key.pressed and key.keycode == KEY_ESCAPE and is_placement_armed():
+			disarm_placement()
 	elif event is InputEventMouseMotion and _drag_active:
 		var motion := event as InputEventMouseMotion
 		# Defend against a missed button-up (e.g. the release landed on a different
@@ -470,6 +494,142 @@ func _set_selected_property(property: String, value: int) -> void:
 		mark_dirty()
 
 
+# --- Authoring (Phase 3): place new objects -----------------------------------
+# The inspector's palette arms an items.def item; a left-click on the terrain then
+# places a new instance there (add_entity + incremental render) and selects it, while
+# staying armed so several can be placed. Markers are excluded (no mesh; they belong
+# to the deferred waypoint editing).
+
+# The placeable items for the palette: every items.def entry that maps to a renderable
+# entity kind (markers excluded), as { id, display_name, type }, in the database's
+# stable display order. Empty until a mission (hence a resource root + items.def) is
+# loaded.
+func get_placeable_items() -> Array:
+	var db := _item_db()
+	if db == null:
+		return []
+	var out: Array = []
+	for item in db.get_items():
+		var entry: Dictionary = item
+		var type := int(entry.get("type", 0))
+		if _kind_for_item_type(type) == NovaMissionData.KIND_MARKER:
+			continue
+		out.append({
+			"id": int(entry.get("id", 0)),
+			"display_name": String(entry.get("display_name", "")),
+			"type": type,
+		})
+	return out
+
+
+# Arm placement for an items.def item id. A later terrain click places it. Rejects
+# unknown ids and marker-kind items (mesh-less). Drops any current selection so the
+# inspector shows the placement affordance rather than an edit panel.
+func arm_placement(item_id: int) -> void:
+	if _mission == null:
+		return
+	var db := _item_db()
+	if db == null or not db.has_item(item_id):
+		return
+	if _kind_for_item_type(db.get_item_type(item_id)) == NovaMissionData.KIND_MARKER:
+		return
+	_place_item_id = item_id
+	_deselect()
+	changed.emit()
+
+
+func disarm_placement() -> void:
+	if _place_item_id == 0:
+		return
+	_place_item_id = 0
+	changed.emit()
+
+
+func is_placement_armed() -> bool:
+	return _place_item_id != 0
+
+
+func get_placement_item_id() -> int:
+	return _place_item_id
+
+
+# Place a new instance of `item_id` at a world-space ground point, with zero rotation.
+# Derives the entity kind from the item's type, writes the record (add_entity), renders
+# it incrementally, dirties, and selects the new entity. Returns false (with a status)
+# if there is no mission / container or the lib rejects the add. Public so it is
+# directly testable without a camera + terrain raycast.
+func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
+	if _mission == null:
+		return false
+	var container := _objects_container()
+	if container == null:
+		return false
+	var db := _item_db()
+	var kind := _kind_for_item_type(db.get_item_type(item_id)) if db != null else NovaMissionData.KIND_ITEM
+	var local := container.global_transform.affine_inverse() * global_hit
+	var bms_pos := MissionObjectPlacer.godot_to_bms_position(local)
+	var record := _mission.add_entity(kind, item_id, bms_pos, Vector3.ZERO)
+	if record.is_empty():
+		_last_status = "Could not place item %d." % item_id
+		return false
+	var new_index := int(record.get("index", -1))
+	_render_placed_entity(kind, new_index)
+	mark_dirty()
+	_select(kind, new_index)
+	return true
+
+
+# Map an items.def item type to the BMS entity-list kind a new placement lands in.
+# Empirically 1:1 and deterministic across 185k entities in 114 shipping JO missions:
+#   Person                        -> Organic
+#   Building / Decoration / Foliage -> Building   (all three share the Building list)
+#   Marker                        -> Marker       (mesh-less; excluded from the palette)
+#   Vehicle / Object / Powerup / Unknown -> Item
+# Decoration and Foliage going to the Building list (not Item) is the non-obvious part
+# and is the dominant case in real data (foliage + decoration are ~55% of all entities).
+func _kind_for_item_type(type: int) -> int:
+	match type:
+		NovaItemDatabase.TYPE_PERSON:
+			return NovaMissionData.KIND_ORGANIC
+		NovaItemDatabase.TYPE_BUILDING, NovaItemDatabase.TYPE_DECORATION, NovaItemDatabase.TYPE_FOLIAGE:
+			return NovaMissionData.KIND_BUILDING
+		NovaItemDatabase.TYPE_MARKER:
+			return NovaMissionData.KIND_MARKER
+		_:
+			return NovaMissionData.KIND_ITEM
+
+
+func _item_db() -> NovaItemDatabase:
+	if _placer == null:
+		return null
+	return _placer.get_item_db()
+
+
+# Raycast the terrain under the cursor and place the armed item there. A miss (off the
+# terrain) is ignored so a stray click into the sky does nothing.
+func _place_armed_at(mouse_pos: Vector2) -> void:
+	if not terrain_editor.has_method("raycast_terrain_at"):
+		return
+	var hit: Vector3 = terrain_editor.raycast_terrain_at(mouse_pos)
+	if not terrain_editor.is_valid_terrain_hit(hit):
+		return
+	place_entity_at_world(_place_item_id, hit)
+
+
+# Render a just-added entity into the live container and fold its counts into the
+# displayed stats, reusing the retained placer's caches.
+func _render_placed_entity(kind: int, index: int) -> void:
+	if _placer == null:
+		return
+	var container := _objects_container()
+	if container == null:
+		return
+	var delta: Dictionary = _placer.place_single(_mission, container, kind, index, _environment_node())
+	_pickable = _placer.pickable_records
+	for key in delta:
+		_stats[key] = int(_stats.get(key, 0)) + int(delta[key])
+
+
 # --- Selection geometry helpers -----------------------------------------------
 
 func _find_entity(kind: int, index: int) -> Dictionary:
@@ -660,19 +820,21 @@ func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot) -
 	# drop any stale selection refs before re-harvesting the pickable index.
 	_reset_selection_state()
 	_pickable = []
+	_place_item_id = 0
+	_placer = null
 	if not terrain_editor.has_method("get_terrain_world_root"):
 		return
 	var world_root: Node3D = terrain_editor.get_terrain_world_root()
 	if world_root == null:
 		return
-	var placer := MissionObjectPlacer.new(resource_root)
-	placer.edit_mode = true
+	_placer = MissionObjectPlacer.new(resource_root)
+	_placer.edit_mode = true
 	var options: Dictionary = {}
 	var env_node := _environment_node()
 	if env_node != null:
 		options["environment_node"] = env_node
-	_stats = placer.place(mission, world_root, options)
-	_pickable = placer.pickable_records
+	_stats = _placer.place(mission, world_root, options)
+	_pickable = _placer.pickable_records
 
 
 func _environment_node() -> Node:

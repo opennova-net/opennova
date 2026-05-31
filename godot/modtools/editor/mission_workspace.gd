@@ -101,8 +101,10 @@ func activate() -> void:
 
 func deactivate() -> void:
 	if _controller != null:
-		# End any half-finished drag before leaving so it cannot resume on a later hover.
+		# End any half-finished drag and drop the placement tool before leaving, so a
+		# stray click after the user returns cannot resume either gesture.
 		_controller.cancel_drag()
+		_controller.disarm_placement()
 		_controller.set_objects_visible(false)
 	if terrain_editor != null:
 		terrain_editor.set_viewport_active(false, false)
@@ -139,6 +141,7 @@ func release_viewport() -> void:
 func _detach_input_target() -> void:
 	if _controller != null:
 		_controller.cancel_drag()
+		_controller.disarm_placement()
 	if _mount == null:
 		return
 	var viewport := _mount.get_viewport_node()

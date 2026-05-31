@@ -41,6 +41,7 @@ void NovaMissionData::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_entity_transform", "kind", "index", "position", "rotation_deg"), &NovaMissionData::set_entity_transform);
 	ClassDB::bind_method(D_METHOD("set_entity_property_int", "kind", "index", "property", "value"), &NovaMissionData::set_entity_property_int);
+	ClassDB::bind_method(D_METHOD("add_entity", "kind", "item_id", "position", "rotation_deg"), &NovaMissionData::add_entity);
 	ClassDB::bind_method(D_METHOD("save_file"), &NovaMissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &NovaMissionData::save_as);
 	ClassDB::bind_method(D_METHOD("is_modified"), &NovaMissionData::is_modified);
@@ -238,6 +239,23 @@ bool NovaMissionData::set_entity_property_int(int kind, int index, const String 
 	}
 	modified = true;
 	return true;
+}
+
+Dictionary NovaMissionData::add_entity(int kind, int item_id, const Vector3 &position, const Vector3 &rotation_deg) {
+	opennova::mission::EntityTransform transform;
+	transform.x = position.x;
+	transform.y = position.y;
+	transform.z = position.z;
+	// Same rounding contract as set_entity_transform: the format stores integer degrees.
+	transform.pitch = static_cast<int>(std::lround(rotation_deg.x));
+	transform.yaw = static_cast<int>(std::lround(rotation_deg.y));
+	transform.roll = static_cast<int>(std::lround(rotation_deg.z));
+	opennova::mission::EntityRecord record;
+	if (!document.add_entity(to_native_kind(kind), item_id, transform, &record)) {
+		return Dictionary();
+	}
+	modified = true;
+	return entity_to_dictionary(record);
 }
 
 Error NovaMissionData::save_file() {

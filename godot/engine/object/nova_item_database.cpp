@@ -2,6 +2,9 @@
 
 #include <def/def.h>
 
+#include <algorithm>
+#include <vector>
+
 using namespace godot;
 
 void NovaItemDatabase::_bind_methods() {
@@ -16,6 +19,8 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_item_type", "id"), &NovaItemDatabase::get_item_type);
 	ClassDB::bind_method(D_METHOD("get_display_name", "id"), &NovaItemDatabase::get_display_name);
 	ClassDB::bind_method(D_METHOD("get_item", "id"), &NovaItemDatabase::get_item);
+	ClassDB::bind_method(D_METHOD("get_item_ids"), &NovaItemDatabase::get_item_ids);
+	ClassDB::bind_method(D_METHOD("get_items"), &NovaItemDatabase::get_items);
 
 	BIND_CONSTANT(TYPE_UNKNOWN);
 	BIND_CONSTANT(TYPE_MARKER);
@@ -105,5 +110,48 @@ Dictionary NovaItemDatabase::get_item(int id) const {
 	out["display_name"] = it->second.display_name;
 	out["graphic"] = it->second.graphic;
 	out["anim_def"] = it->second.anim_def;
+	return out;
+}
+
+// The backing store is an unordered_map, so callers that enumerate get a stable
+// order only if we impose one. Sort by display name (case-insensitive, the order a
+// user scans a palette), breaking ties by id so the order is total and reproducible.
+std::vector<const NovaItemDatabase::Item *> NovaItemDatabase::sorted_items() const {
+	std::vector<const Item *> out;
+	out.reserve(items.size());
+	for (const auto &pair : items) {
+		out.push_back(&pair.second);
+	}
+	std::sort(out.begin(), out.end(), [](const Item *a, const Item *b) {
+		const int name_cmp = a->display_name.naturalnocasecmp_to(b->display_name);
+		if (name_cmp != 0) {
+			return name_cmp < 0;
+		}
+		return a->id < b->id;
+	});
+	return out;
+}
+
+PackedInt32Array NovaItemDatabase::get_item_ids() const {
+	PackedInt32Array out;
+	const std::vector<const Item *> sorted = sorted_items();
+	out.resize(static_cast<int>(sorted.size()));
+	for (size_t i = 0; i < sorted.size(); ++i) {
+		out.set(static_cast<int>(i), sorted[i]->id);
+	}
+	return out;
+}
+
+Array NovaItemDatabase::get_items() const {
+	Array out;
+	for (const Item *item : sorted_items()) {
+		Dictionary entry;
+		entry["id"] = item->id;
+		entry["type"] = item->type;
+		entry["display_name"] = item->display_name;
+		entry["graphic"] = item->graphic;
+		entry["anim_def"] = item->anim_def;
+		out.push_back(entry);
+	}
 	return out;
 }

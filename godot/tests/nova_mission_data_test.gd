@@ -256,6 +256,88 @@ func test_set_entity_property_int_rejects_out_of_range() -> void:
 	assert_false(m.is_modified(), "a rejected edit leaves the document clean")
 
 
+# --- Authoring (Phase 3): place a new entity + item enumeration --------------
+# add_entity appends a new record of a kind for an items.def id and returns it; the
+# binding is the write side the editor's place-object palette drives. NovaItemDatabase
+# enumeration (get_items / get_item_ids) is the read side that fills the palette.
+
+func test_add_entity_appends_and_returns_the_new_record() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var before := m.get_entity_count(NovaMissionData.KIND_BUILDING)
+	assert_false(m.is_modified(), "a freshly opened mission is not modified")
+
+	var pos := Vector3(111.0, 22.0, -33.0)
+	var record := m.add_entity(NovaMissionData.KIND_BUILDING, 102001, pos, Vector3.ZERO)
+	assert_false(record.is_empty(), "add_entity returns the new record")
+	assert_true(m.is_modified(), "adding an entity dirties the document")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "the kind's count grows by one")
+	assert_eq(int(record["index"]), before, "the new entity is appended at the end of its list")
+	assert_eq(int(record["item_id"]), 102001, "the record carries the placed item id")
+	assert_eq(int(record["kind"]), NovaMissionData.KIND_BUILDING, "the record carries the requested kind")
+
+	var fetched := m.get_entity(NovaMissionData.KIND_BUILDING, before)
+	assert_eq(int(fetched.get("item_id", -1)), 102001, "get_entity finds the appended entity")
+	var fp: Vector3 = fetched["position"]
+	assert_almost_eq(fp.x, pos.x, 0.02, "stored X matches what was placed")
+	assert_almost_eq(fp.y, pos.y, 0.02, "stored Y matches what was placed")
+	assert_almost_eq(fp.z, pos.z, 0.02, "stored Z matches what was placed")
+
+
+func test_add_entity_persists_through_save_reload() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var before := m.get_entity_count(NovaMissionData.KIND_ITEM)
+	var record := m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3(7.0, 8.0, 9.0), Vector3(0, 90, 0))
+	var new_index := int(record["index"])
+
+	var tmp := _temp_bms_path()
+	assert_eq(m.save_as(tmp), OK, "the mission with a new entity saves")
+	var reopened := NovaMissionData.new()
+	assert_eq(reopened.open_file(tmp), OK, "and reopens")
+	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_ITEM), before + 1, "the added entity survives save+reload")
+	var roundtripped := reopened.get_entity(NovaMissionData.KIND_ITEM, new_index)
+	assert_eq(int(roundtripped.get("item_id", -1)), 101291, "the placed item id round-trips")
+	var rot: Vector3 = roundtripped["rotation_deg"]
+	assert_almost_eq(rot.y, 90.0, 0.5, "the placed yaw round-trips (rounded to integer degrees)")
+	DirAccess.remove_absolute(tmp)
+
+
+func test_add_entity_without_a_mission_is_rejected() -> void:
+	var m := NovaMissionData.new()  # never opened -> no document loaded
+	assert_eq(m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO), {},
+		"adding to an unloaded mission returns an empty dict")
+	assert_false(m.is_modified(), "a rejected add does not dirty the document")
+
+
+func test_item_database_enumeration_is_sorted_and_complete() -> void:
+	var db := NovaItemDatabase.new()
+	assert_eq(db.load(_items_abs()), OK)
+	var items := db.get_items()
+	var ids := db.get_item_ids()
+	assert_eq(items.size(), db.get_count(), "get_items returns every item")
+	assert_eq(ids.size(), db.get_count(), "get_item_ids returns every id")
+
+	# Stable order: sorted with Godot's natural, case-insensitive comparator, matching
+	# NovaItemDatabase::sorted_items (so the assertion can actually catch a sort
+	# regression, not just lexicographic ordering that happens to coincide).
+	for i in range(1, items.size()):
+		var prev := String(items[i - 1]["display_name"])
+		var cur := String(items[i]["display_name"])
+		assert_true(prev.naturalnocasecmp_to(cur) <= 0,
+			"items are ordered by natural display name (%s <= %s)" % [prev, cur])
+
+	# get_item_ids() must enumerate in the same order as get_items().
+	for i in items.size():
+		assert_eq(int(ids[i]), int(items[i]["id"]), "get_item_ids matches get_items order at row %d" % i)
+
+	# Each enumerated entry matches the single-id getter.
+	var sample: Dictionary = items[0]
+	var direct := db.get_item(int(sample["id"]))
+	assert_eq(direct, sample, "an enumerated item matches get_item for its id")
+	assert_true(sample.has("graphic") and sample.has("type"), "enumerated items carry graphic + type")
+
+
 func test_set_entity_property_int_preserves_other_fields_across_kinds() -> void:
 	# Buildings tend to carry all-zero AI fields, so a dropped field in the read-modify-
 	# write copy would read 0 == 0 and pass. Organics (and items) carry richer state, so

@@ -72,6 +72,13 @@ public:
 	// (kind, index) is out of range or `property` is not a known editable name. Sets
 	// the dirty flag on success.
 	bool set_entity_property_int(int kind, int index, const String &property, int value);
+	// Place a new entity of `kind` for `item_id` (an items.def id) at `position`
+	// (mission-space x, y, z) with `rotation_deg` (pitch, yaw, roll), rounded to the
+	// int fields the format stores. The lib seeds the rest of the record with sane
+	// defaults (see make_default_entity). Returns the new entity as a dictionary
+	// (same fields as get_entity, including its assigned "index"), or {} if no mission
+	// is loaded or the kind is invalid. Sets the dirty flag on success.
+	Dictionary add_entity(int kind, int item_id, const Vector3 &position, const Vector3 &rotation_deg);
 	// Write the document back to disk. save_file() targets the path it was opened
 	// from; save_as() targets a new path and adopts it. Both clear the dirty flag and
 	// go through the byte-faithful writer in libs/mission. save_file() returns

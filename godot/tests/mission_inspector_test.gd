@@ -29,8 +29,15 @@ class FakeController:
 	var last_pos: Vector3 = Vector3.ZERO
 	var last_rot: Vector3 = Vector3.ZERO
 
+	# Phase 3 place-object palette state.
+	var mission_ref  # NovaMissionData or null; non-null makes the inspector show the panels
+	var placeable: Array = []
+	var armed_id: int = 0
+	var arm_calls: Array = []
+	var disarm_calls: int = 0
+
 	func get_mission():
-		return null
+		return mission_ref
 
 	func get_stats() -> Dictionary:
 		return {}
@@ -84,6 +91,22 @@ class FakeController:
 
 	func is_dirty() -> bool:
 		return dirty
+
+	func get_placeable_items() -> Array:
+		return placeable
+
+	func get_placement_item_id() -> int:
+		return armed_id
+
+	func arm_placement(id: int) -> void:
+		arm_calls.append(id)
+		armed_id = id
+		changed.emit()
+
+	func disarm_placement() -> void:
+		disarm_calls += 1
+		armed_id = 0
+		changed.emit()
 
 
 func _sample_entity() -> Dictionary:
@@ -146,6 +169,107 @@ func test_editing_group_commits_once() -> void:
 	assert_eq(ctx.fake.group_calls, 1, "no echo re-commit")
 
 
+# --- Phase 3: place-object palette --------------------------------------------
+
+func _palette_items() -> Array:
+	return [
+		{"id": 102001, "display_name": "Guard Tower", "type": NovaItemDatabase.TYPE_BUILDING},
+		{"id": 101291, "display_name": "Dune Buggy", "type": NovaItemDatabase.TYPE_VEHICLE},
+		{"id": 105311, "display_name": "Soldier", "type": NovaItemDatabase.TYPE_PERSON},
+	]
+
+
+func _palette_ctx() -> Dictionary:
+	var fake := FakeController.new()
+	fake.mission_ref = NovaMissionData.new()  # a stable non-null ref so the panels show
+	fake.placeable = _palette_items()
+	var inspector = MissionInspector.new()
+	add_child_autofree(inspector)
+	inspector.setup(fake)
+	return {"fake": fake, "inspector": inspector}
+
+
+func test_palette_is_hidden_without_a_mission() -> void:
+	var fake := FakeController.new()  # mission_ref left null
+	var inspector = MissionInspector.new()
+	add_child_autofree(inspector)
+	inspector.setup(fake)
+	assert_false(inspector._place_box.visible, "the palette hides when no mission is open")
+
+
+func test_palette_populates_rows_from_the_controller() -> void:
+	var ctx := _palette_ctx()
+	assert_true(ctx.inspector._place_box.visible, "the palette shows with a mission open")
+	assert_eq(ctx.inspector._place_list.item_count, 3, "every placeable item becomes a row")
+	assert_false(ctx.inspector._place_stop.visible, "Stop is hidden until something is armed")
+
+
+func test_selecting_a_palette_row_arms_that_item() -> void:
+	var ctx := _palette_ctx()
+	ctx.inspector._on_place_item_selected(0)  # simulate the user picking row 0
+	assert_eq(ctx.fake.arm_calls.size(), 1, "selecting a row arms exactly once")
+	assert_eq(int(ctx.fake.arm_calls[0]), int(ctx.inspector._place_row_ids[0]),
+		"the armed id is the one on the selected row")
+	assert_true(ctx.inspector._place_stop.visible, "the Stop button appears once armed")
+
+
+func test_stop_button_disarms() -> void:
+	var ctx := _palette_ctx()
+	ctx.fake.armed_id = 102001
+	ctx.inspector._refresh()  # reflect the armed state
+	assert_true(ctx.inspector._place_stop.visible)
+	ctx.inspector._on_place_stop()
+	assert_eq(ctx.fake.disarm_calls, 1, "the Stop button disarms placement")
+
+
+func test_palette_search_filters_rows() -> void:
+	var ctx := _palette_ctx()
+	ctx.inspector._on_place_search_changed("buggy")
+	assert_eq(ctx.inspector._place_list.item_count, 1, "the search narrows to matching names")
+	assert_eq(int(ctx.inspector._place_row_ids[0]), 101291, "and the surviving row is the match")
+	ctx.inspector._on_place_search_changed("")
+	assert_eq(ctx.inspector._place_list.item_count, 3, "clearing the search restores every row")
+
+
+func test_empty_palette_repopulates_when_the_item_db_arrives_late() -> void:
+	# Regression for the lifecycle dead-end: a mission can open before its items.def is
+	# resolvable (empty palette, "no item database" status). Once items become available,
+	# a later refresh must populate the palette WITHOUT the mission ref changing -- the
+	# user must not have to close and reopen the mission.
+	var fake := FakeController.new()
+	fake.mission_ref = NovaMissionData.new()
+	fake.placeable = []  # items.def not yet resolvable
+	var inspector = MissionInspector.new()
+	add_child_autofree(inspector)
+	inspector.setup(fake)
+	assert_eq(inspector._place_list.item_count, 0, "empty until the database resolves")
+
+	fake.placeable = _palette_items()  # the database becomes resolvable (same mission)
+	inspector._refresh()
+	assert_eq(inspector._place_list.item_count, 3, "the palette fills in without reopening the mission")
+
+
+func test_active_search_filter_survives_a_changed_echo() -> void:
+	# The palette's central contract (like the edit panel): the list is built once and
+	# NOT repopulated on the `changed` signal that fires on every edit / select / place.
+	# So a typed search filter and the filtered rows must survive a same-mission `changed`
+	# -- otherwise the search box would clear and the full list would snap back on every
+	# placed object. This pins that invariant.
+	var ctx := _palette_ctx()
+	# Simulate the user typing a filter: the LineEdit holds the text, and the text_changed
+	# handler narrows the list (setting .text alone does not emit text_changed in Godot).
+	ctx.inspector._place_search.text = "buggy"
+	ctx.inspector._on_place_search_changed("buggy")
+	assert_eq(ctx.inspector._place_list.item_count, 1, "precondition: filtered to one row")
+	ctx.inspector._on_place_item_selected(0)  # arms the surviving item; fires `changed`
+	ctx.fake.changed.emit()  # stand in for a later edit / placement on the same mission
+
+	assert_eq(ctx.inspector._place_search.text, "buggy", "the search text survives a same-mission `changed`")
+	assert_eq(ctx.inspector._place_list.item_count, 1, "the filtered rows survive; the list is not repopulated")
+	assert_eq(int(ctx.inspector._place_row_ids[0]), 101291, "and the surviving row is still the match")
+	assert_true(ctx.inspector._place_stop.visible, "still armed after the echo")
+
+
 func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 	# The tests above drive a FakeController; this asserts the REAL MissionController
 	# exposes the same surface, so a method the inspector calls that the controller does
@@ -156,6 +280,7 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 		"get_selected_position", "get_selected_rotation",
 		"set_selected_position", "set_selected_rotation", "set_selected_team",
 		"set_selected_group", "is_dirty",
+		"get_placeable_items", "get_placement_item_id", "arm_placement", "disarm_placement",
 	]
 	for method in required:
 		assert_true(controller.has_method(method),

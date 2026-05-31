@@ -2,10 +2,13 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include <unordered_map>
+#include <vector>
 
 namespace godot {
 
@@ -27,6 +30,10 @@ private:
 	std::unordered_map<int, Item> items;
 	String source_path;
 	String last_error;
+
+	// Items in a stable display order (by display name, then id), since the backing
+	// store is unordered. Shared by get_item_ids() / get_items().
+	std::vector<const Item *> sorted_items() const;
 
 protected:
 	static void _bind_methods();
@@ -58,6 +65,13 @@ public:
 	int get_item_type(int id) const;
 	String get_display_name(int id) const;
 	Dictionary get_item(int id) const;
+
+	// Enumeration for UI (e.g. the mission editor's place-object palette). Both are
+	// sorted deterministically by (display_name, id) so the list is stable across
+	// loads (the backing store is an unordered_map). get_items() returns the same
+	// per-item dictionaries as get_item(); get_item_ids() is just the ids.
+	PackedInt32Array get_item_ids() const;
+	Array get_items() const;
 };
 
 } // namespace godot

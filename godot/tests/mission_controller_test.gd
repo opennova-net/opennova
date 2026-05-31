@@ -9,6 +9,7 @@ extends GutTest
 # out-of-band (see the placer + nova_world paths).
 
 const MissionController := preload("res://modtools/mission/mission_controller.gd")
+const Placer := preload("res://engine/mission/mission_object_placer.gd")
 
 const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
 
@@ -28,6 +29,9 @@ class StubTerrainEditor:
 	var opened_trn: String = ""
 	var open_trn_result: Error = OK
 	var current_trn_path: String = ""
+	# Placement raycast seam (Phase 3): the controller grounds a placed object via these.
+	var terrain_hit: Vector3 = Vector3(64.0, 10.0, -64.0)
+	var terrain_hit_valid: bool = true
 
 	func get_resource_root() -> NovaResourceRoot:
 		return resource_root
@@ -44,6 +48,12 @@ class StubTerrainEditor:
 		if open_trn_result == OK:
 			current_trn_path = path
 		return open_trn_result
+
+	func raycast_terrain_at(_mouse: Vector2) -> Vector3:
+		return terrain_hit
+
+	func is_valid_terrain_hit(_hit: Vector3) -> bool:
+		return terrain_hit_valid
 
 
 # A resource root over the repo's real dvxi5 terrain fixture (the terrain the test
@@ -225,6 +235,231 @@ func test_set_selected_position_round_trips_under_an_offset_container() -> void:
 	assert_almost_eq(after.x, target.x, 0.02, "X is the value given, independent of the container transform")
 	assert_almost_eq(after.y, target.y, 0.02, "Y is the value given, independent of the container transform")
 	assert_almost_eq(after.z, target.z, 0.02, "Z is the value given, independent of the container transform")
+
+
+# --- Authoring (Phase 3): place new objects -----------------------------------
+# The palette arms an items.def item; a terrain click places a new instance. These
+# drive the data path (the headless fixture resolves no .3di, so nothing renders, but
+# add_entity still writes the record and the kind mapping still applies). The dvxi5
+# fixture dir has no items.def, so the item database is injected into the retained
+# placer (a white-box seam, like _select above) to give the palette + mapping data.
+
+const ITEMS_PATH := "res://../fixtures/def/items.def"
+
+
+func _loaded_with_item_db() -> MissionController:
+	var stub := StubTerrainEditor.new()
+	stub.resource_root = _dvxi5_root()
+	stub.world_root = Node3D.new()
+	add_child_autofree(stub.world_root)
+	add_child_autofree(stub)
+	var controller := MissionController.new(stub)
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK, "the fixture mission opens")
+	var db := NovaItemDatabase.new()
+	assert_eq(db.load(_abs(ITEMS_PATH)), OK, "the items.def fixture loads")
+	# The dvxi5 fixture dir carries no items.def, so the open left the placer's db null;
+	# inject the fixture db so the palette + kind mapping have real item types.
+	controller._placer.item_db = db
+	return controller
+
+
+func test_kind_for_item_type_matches_shipping_data() -> void:
+	# The empirically verified 1:1 mapping (185k entities across 114 JO missions). The
+	# non-obvious part is Decoration AND Foliage sharing the Building list with Building.
+	var c := MissionController.new(null)
+	assert_eq(c._kind_for_item_type(NovaItemDatabase.TYPE_PERSON), NovaMissionData.KIND_ORGANIC, "person -> organic")
+	assert_eq(c._kind_for_item_type(NovaItemDatabase.TYPE_BUILDING), NovaMissionData.KIND_BUILDING, "building -> building")
+	assert_eq(c._kind_for_item_type(NovaItemDatabase.TYPE_DECORATION), NovaMissionData.KIND_BUILDING, "decoration -> building")
+	assert_eq(c._kind_for_item_type(NovaItemDatabase.TYPE_FOLIAGE), NovaMissionData.KIND_BUILDING, "foliage -> building")
+	assert_eq(c._kind_for_item_type(NovaItemDatabase.TYPE_MARKER), NovaMissionData.KIND_MARKER, "marker -> marker")
+	for t in [NovaItemDatabase.TYPE_VEHICLE, NovaItemDatabase.TYPE_OBJECT, NovaItemDatabase.TYPE_POWERUP, NovaItemDatabase.TYPE_UNKNOWN]:
+		assert_eq(c._kind_for_item_type(t), NovaMissionData.KIND_ITEM, "type %d -> item" % t)
+
+
+func test_get_placeable_items_excludes_markers() -> void:
+	var controller := _loaded_with_item_db()
+	var items := controller.get_placeable_items()
+	assert_eq(items.size(), 12, "the 13-item fixture yields 12 placeable (its one marker is excluded)")
+	for it in items:
+		assert_ne(int(it["type"]), NovaItemDatabase.TYPE_MARKER, "no marker is offered for placement")
+		assert_true(it.has("id") and it.has("display_name"), "each palette entry has id + name")
+
+
+func test_open_mission_auto_resolves_items_db_for_the_palette() -> void:
+	# The production load path with NO injection: open_mission builds the placer, and the
+	# palette reaches items.def via _ensure_item_db -> resolve_file("items.def"). The
+	# dvxi5 fixture dir carries a copy of items.def for exactly this; a filename typo or
+	# resolution miss in that chain would leave the palette empty and fail here.
+	var stub := StubTerrainEditor.new()
+	stub.resource_root = _dvxi5_root()
+	stub.world_root = Node3D.new()
+	add_child_autofree(stub.world_root)
+	add_child_autofree(stub)
+	var controller := MissionController.new(stub)
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
+	# No db injection here: the items must come from the auto-resolve chain.
+	assert_eq(controller.get_placeable_items().size(), 12,
+		"items.def auto-resolves from the resource root (13 items, 1 marker excluded)")
+
+
+func test_arm_and_disarm_placement() -> void:
+	var controller := _loaded_with_item_db()
+	assert_false(controller.is_placement_armed(), "nothing is armed initially")
+	controller.arm_placement(102001)  # Guard Tower (building)
+	assert_true(controller.is_placement_armed(), "arming a known item enters placement mode")
+	assert_eq(controller.get_placement_item_id(), 102001, "the armed id is exposed")
+	controller.disarm_placement()
+	assert_false(controller.is_placement_armed(), "disarm leaves placement mode")
+
+
+func test_arm_rejects_unknown_and_marker_items() -> void:
+	var controller := _loaded_with_item_db()
+	controller.arm_placement(999999)  # not in items.def
+	assert_false(controller.is_placement_armed(), "an unknown id cannot be armed")
+	controller.arm_placement(100001)  # Marker Alpha (type marker, mesh-less)
+	assert_false(controller.is_placement_armed(), "a marker cannot be armed (no mesh)")
+
+
+func test_place_entity_routes_to_the_kind_its_type_maps_to() -> void:
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	var hit := Vector3(50.0, 10.0, -50.0)
+
+	# Building -> Building list.
+	var buildings := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	assert_true(controller.place_entity_at_world(102001, hit), "placing a building succeeds")
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), buildings + 1, "a building lands in the Building list")
+
+	# Foliage -> ALSO the Building list (the verified non-obvious case).
+	var b2 := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	assert_true(controller.place_entity_at_world(103001, hit), "placing foliage succeeds")
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), b2 + 1, "foliage lands in the Building list, not Item")
+
+	# Vehicle -> Item list.
+	var items := mission.get_entity_count(NovaMissionData.KIND_ITEM)
+	assert_true(controller.place_entity_at_world(101291, hit), "placing a vehicle succeeds")
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_ITEM), items + 1, "a vehicle lands in the Item list")
+
+	# Person -> Organic list.
+	var organics := mission.get_entity_count(NovaMissionData.KIND_ORGANIC)
+	assert_true(controller.place_entity_at_world(105311, hit), "placing a person succeeds")
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_ORGANIC), organics + 1, "a person lands in the Organic list")
+
+	assert_true(controller.is_dirty(), "placement dirties the mission")
+
+
+func test_place_entity_selects_the_new_entity_at_the_hit_point() -> void:
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var hit := Vector3(120.0, 5.0, -80.0)
+
+	assert_true(controller.place_entity_at_world(102001, hit))
+	var sel := controller.get_selection_summary()
+	assert_eq(int(sel.get("kind", -1)), NovaMissionData.KIND_BUILDING, "the new entity is selected")
+	assert_eq(int(sel.get("index", -1)), before, "and it is the just-appended (last) one")
+
+	# The stored mission-space position is the inverse of the world hit through the
+	# objects container (identity here), so it must equal godot_to_bms_position(hit).
+	var expected: Vector3 = Placer.godot_to_bms_position(hit)
+	var stored: Vector3 = controller.get_selected_entity()["position"]
+	assert_almost_eq(stored.x, expected.x, 0.05, "placed X maps back from the world hit")
+	assert_almost_eq(stored.y, expected.y, 0.05, "placed Y maps back from the world hit")
+	assert_almost_eq(stored.z, expected.z, 0.05, "placed Z maps back from the world hit")
+
+
+func test_place_entity_without_a_mission_is_inert() -> void:
+	var controller := MissionController.new(null)
+	assert_false(controller.place_entity_at_world(102001, Vector3.ONE), "no mission -> placement fails")
+	assert_false(controller.is_dirty(), "and nothing is dirtied")
+
+
+func test_armed_left_click_places_via_the_viewport_path() -> void:
+	# The viewport input router forwards a left-press; while armed that must place (not
+	# select/drag). Uses the real raycast seam on the stub terrain editor.
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	controller.arm_placement(102001)
+	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = Vector2(64, 64)
+	controller.handle_viewport_input(press)
+
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1,
+		"an armed left-click placed a new building")
+	assert_true(controller.is_placement_armed(), "placement stays armed so several can be placed")
+
+
+func test_right_click_disarms_placement() -> void:
+	var controller := _loaded_with_item_db()
+	controller.arm_placement(102001)
+	var rclick := InputEventMouseButton.new()
+	rclick.button_index = MOUSE_BUTTON_RIGHT
+	rclick.pressed = true
+	controller.handle_viewport_input(rclick)
+	assert_false(controller.is_placement_armed(), "a right-click drops the placement tool")
+
+
+func test_escape_disarms_placement() -> void:
+	var controller := _loaded_with_item_db()
+	controller.arm_placement(102001)
+	assert_true(controller.is_placement_armed())
+	var esc := InputEventKey.new()
+	esc.pressed = true
+	esc.keycode = KEY_ESCAPE
+	controller.handle_viewport_input(esc)
+	assert_false(controller.is_placement_armed(), "Escape drops the placement tool")
+
+
+func test_armed_click_off_terrain_places_nothing() -> void:
+	# An armed left-click that misses the terrain (an invalid raycast hit) must place
+	# nothing and stay armed, so a stray click into the sky cannot drop a garbage object.
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	controller.arm_placement(102001)
+	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	controller.terrain_editor.terrain_hit_valid = false  # the raycast now reports a miss
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = Vector2(64, 64)
+	controller.handle_viewport_input(press)
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before,
+		"an armed click off the terrain places nothing")
+	assert_true(controller.is_placement_armed(), "and the tool stays armed")
+
+
+func test_place_entity_round_trips_under_an_offset_container() -> void:
+	# Regression (the Phase 2 bug class): the world hit must be inverted through the
+	# objects container before being stored, so an offset/scaled world root must not leak
+	# into the stored mission-space position. The expected value is derived through the
+	# SAME container inverse the production path applies -- deriving it from the bare hit
+	# would pass even if the inverse were dropped, which is what makes this discriminating.
+	var stub := StubTerrainEditor.new()
+	stub.resource_root = _dvxi5_root()
+	stub.world_root = Node3D.new()
+	stub.world_root.transform = Transform3D(Basis().scaled(Vector3(2, 2, 2)), Vector3(1000, 50, -200))
+	add_child_autofree(stub.world_root)
+	add_child_autofree(stub)
+	var controller := MissionController.new(stub)
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
+	var db := NovaItemDatabase.new()
+	assert_eq(db.load(_abs(ITEMS_PATH)), OK)
+	controller._placer.item_db = db
+
+	var hit := Vector3(120.0, 5.0, -80.0)
+	assert_true(controller.place_entity_at_world(102001, hit))
+
+	var container: Node3D = stub.world_root.get_node("MissionObjects")
+	var local: Vector3 = container.global_transform.affine_inverse() * hit
+	var expected: Vector3 = Placer.godot_to_bms_position(local)
+	var stored: Vector3 = controller.get_selected_entity()["position"]
+	assert_almost_eq(stored.x, expected.x, 0.05, "placed X accounts for the container transform")
+	assert_almost_eq(stored.y, expected.y, 0.05, "placed Y accounts for the container transform")
+	assert_almost_eq(stored.z, expected.z, 0.05, "placed Z accounts for the container transform")
 
 
 func test_open_loads_then_reconcile_drops_on_terrain_swap() -> void:
