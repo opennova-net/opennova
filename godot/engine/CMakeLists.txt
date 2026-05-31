@@ -23,6 +23,9 @@ add_subdirectory(../../libs/resource_index opennova_resource_index)
 add_subdirectory(../../libs/sbf opennova_sbf)
 add_subdirectory(../../libs/scr opennova_scr)
 add_subdirectory(../../libs/mus opennova_mus)
+add_subdirectory(../../libs/mnu_xml opennova_mnu_xml)
+add_subdirectory(../../libs/mnu opennova_mnu)
+add_subdirectory(../../libs/mns opennova_mns)
 
 set(TARGET_NAME "opennova")
 
@@ -69,6 +72,13 @@ add_library(${TARGET_NAME} SHARED
     audio/nova_music_script.cpp
     audio/nova_music_director.cpp
     audio/mus_resource_format.cpp
+    mnu/nova_mnu_document.cpp
+    mnu/mns_stylesheet.cpp
+    mnu/mnu_resource_format.cpp
+    mnu/mns_resource_format.cpp
+    mnu/nova_mnu_screen.cpp
+    mnu/nova_mnu_builder.cpp
+    mnu/nova_mnu_menu.cpp
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE
@@ -97,6 +107,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_sbf
     opennova_scr
     opennova_mus
+    opennova_mnu_xml
+    opennova_mnu
+    opennova_mns
 )
 
 # The bake worker thread in nova_terrain_build_job.cpp installs
