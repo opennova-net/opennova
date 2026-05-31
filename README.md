@@ -12,11 +12,13 @@ This repo is the full toolchain: extract and edit assets with the importer, the 
   </a>
 </p>
 
-| Object editing | Font editing |
+| Asset importer | Object editing |
 |---|---|
-| [<img src="screenshots/object.png" alt="Object editing in OpenNova" width="420">](screenshots/object.png) | [<img src="screenshots/fonts.png" alt="Font editing in OpenNova" width="420">](screenshots/fonts.png) |
-| Credits editing | Strings editing |
-| [<img src="screenshots/credits.png" alt="Credits editing in OpenNova" width="420">](screenshots/credits.png) | [<img src="screenshots/strings.png" alt="Strings editing in OpenNova" width="420">](screenshots/strings.png) |
+| [<img src="screenshots/importer.png" alt="OpenNova asset importer" width="420">](screenshots/importer.png) | [<img src="screenshots/object.png" alt="Object editing in OpenNova" width="420">](screenshots/object.png) |
+| Font editing | Credits editing |
+| [<img src="screenshots/fonts.png" alt="Font editing in OpenNova" width="420">](screenshots/fonts.png) | [<img src="screenshots/credits.png" alt="Credits editing in OpenNova" width="420">](screenshots/credits.png) |
+| Strings editing | |
+| [<img src="screenshots/strings.png" alt="Strings editing in OpenNova" width="420">](screenshots/strings.png) | |
 
 ## Architecture
 
