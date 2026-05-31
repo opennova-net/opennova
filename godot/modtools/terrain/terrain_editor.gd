@@ -329,17 +329,8 @@ func _apply_environment_to_preview() -> void:
 		return
 	var material := _get_material()
 	if material:
-		material.set_shader_parameter("u_sun_light", _environment_node.get_sun_light())
-		material.set_shader_parameter("u_fill_light", _environment_node.get_fill_light())
-		material.set_shader_parameter("u_sky_ambient", _environment_node.get_sky_ambient())
-		material.set_shader_parameter("u_sun_direction", _environment_node.get_sun_direction())
-		material.set_shader_parameter("u_terrain_tint", _environment_node.get_terrain_lighting_attenuation())
-		material.set_shader_parameter("u_fog_color", _environment_node.get_fog_color())
-		var fog_end: float = _environment_node.get_fog_level()
-		var fog_start: float = _environment_node.get_fog_start() if _environment_node.has_method("get_fog_start") else 0.5
-		material.set_shader_parameter("u_fog_end", fog_end)
-		material.set_shader_parameter("u_fog_start", fog_start)
-		material.set_shader_parameter("u_fog_type", _environment_node.get_fog_type())
+		# Same env -> terrain-uniform push the runtime uses (NovaEnvironment owns it).
+		_environment_node.apply_terrain_uniforms(material)
 	if _water_material:
 		var water: Vector3 = _environment_node.get_water_color()
 		var alpha := 0.55
@@ -986,6 +977,12 @@ func get_editor_camera() -> Camera3D:
 	return camera
 
 
+func get_resource_root() -> NovaResourceRoot:
+	if workstation != null and workstation.has_method("get_resource_root"):
+		return workstation.get_resource_root()
+	return null
+
+
 func get_sector_cell(row: int, col: int) -> int:
 	if not _data:
 		return 0
@@ -1357,7 +1354,9 @@ func _sync_foliage_preview() -> void:
 		camera,
 		_document.foliage_map,
 		_document.foliage_defs,
-		_document.selected_foliage_def_index
+		_document.selected_foliage_def_index,
+		_data,
+		get_resource_root()
 	)
 	_foliage_preview.rebuild_if_needed()
 
@@ -2010,6 +2009,7 @@ func _load_editor_state() -> void:
 
 func _save_editor_state() -> void:
 	var config := ConfigFile.new()
+	config.load("user://terrain_editor_state.cfg")
 	config.set_value("paths", "last_open_dir", _last_open_dir)
 	config.set_value("paths", "last_save_dir", _last_save_dir)
 	config.set_value("paths", "last_export_dir", _last_export_dir)

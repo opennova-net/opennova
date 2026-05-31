@@ -1,6 +1,6 @@
 extends GutTest
 
-const FNT_PATH := "res://assets/fonts/Serpen24.fnt"
+const FNT_PATH := "res://../fixtures/fnt/Serpen24.fnt"
 const TEMP_FNT_PATH := "user://test_blank_font.fnt"
 
 

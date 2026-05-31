@@ -7,17 +7,17 @@ const SOURCE_OBJECT := "res://../fixtures/3dp/Bird1/Bird1.3di"
 
 func before_each() -> void:
 	_cleanup_dir(_fixture_root())
-	VegAssetsScript.set_search_roots([])
+	VegAssetsScript.clear_cache()
 
 
 func after_each() -> void:
-	VegAssetsScript.set_search_roots([])
+	VegAssetsScript.clear_cache()
 	_cleanup_dir(_fixture_root())
 
 
 func test_list_graphics_preserves_actual_model_path_case() -> void:
-	var root := _prepare_veg_fixture("Mveg6.3di")
-	var graphics := VegAssetsScript.list_graphics(true)
+	var resource_root := _prepare_veg_fixture("Mveg6.3di")
+	var graphics := VegAssetsScript.list_graphics(resource_root, true)
 	var mveg6_path := ""
 	for entry in graphics:
 		if String(entry.basename) == "mveg6":
@@ -26,28 +26,28 @@ func test_list_graphics_preserves_actual_model_path_case() -> void:
 
 	assert_eq(
 		mveg6_path,
-		root.path_join("Mveg6.3di"),
+		resource_root.get_root_dir().path_join("Mveg6.3di"),
 		"Vegetation asset lookup should retain the real file case for portable object paths."
 	)
 
 
 func test_list_graphics_cache_returns_caller_safe_copy() -> void:
-	_prepare_veg_fixture("Mveg6.3di")
-	var graphics := VegAssetsScript.list_graphics(true)
+	var resource_root := _prepare_veg_fixture("Mveg6.3di")
+	var graphics := VegAssetsScript.list_graphics(resource_root, true)
 	assert_gt(graphics.size(), 0, "Vegetation asset lookup should find configured .3di graphics.")
 
 	graphics.clear()
-	var cached_again := VegAssetsScript.list_graphics()
+	var cached_again := VegAssetsScript.list_graphics(resource_root)
 
 	assert_gt(cached_again.size(), 0, "Callers should not be able to mutate the shared vegetation graphics cache.")
 
 
 func test_resolve_slot_meshes_preserves_slots_and_loads_known_graphic() -> void:
-	_prepare_veg_fixture("Mveg6.3di")
+	var resource_root := _prepare_veg_fixture("Mveg6.3di")
 	var def := NovaTerrainFoliageDef.new()
 	def.graphic = "Mveg6.3di"
 
-	var meshes := VegAssetsScript.resolve_slot_meshes([null, def])
+	var meshes := VegAssetsScript.resolve_slot_meshes(resource_root, [null, def])
 
 	assert_eq(meshes.size(), 2, "Resolver should preserve the foliage slot array shape.")
 	assert_null(meshes[0], "Null foliage defs should remain null mesh slots.")
@@ -55,26 +55,27 @@ func test_resolve_slot_meshes_preserves_slots_and_loads_known_graphic() -> void:
 
 
 func test_modtools_veg_assets_class_forwards_to_shared_implementation() -> void:
-	_prepare_veg_fixture("Mveg6.3di")
-	var graphics := VegAssetsShim.list_graphics()
+	var resource_root := _prepare_veg_fixture("Mveg6.3di")
+	var graphics := VegAssetsShim.list_graphics(resource_root)
 
 	assert_gt(graphics.size(), 0, "The compatibility VegAssets class should expose shared asset listing.")
 	assert_true(
-		VegAssetsShim.load_mesh("Mveg6") is Mesh,
+		VegAssetsShim.load_mesh(resource_root, "Mveg6") is Mesh,
 		"The compatibility VegAssets class should expose shared mesh loading."
 	)
 
 
-func _prepare_veg_fixture(filename: String) -> String:
+func _prepare_veg_fixture(filename: String) -> NovaResourceRoot:
 	var root := _fixture_root()
 	assert_eq(DirAccess.make_dir_recursive_absolute(root), OK)
 	_copy_file(ProjectSettings.globalize_path(SOURCE_OBJECT), root.path_join(filename))
-	VegAssetsScript.set_search_roots([root])
-	return root
+	var resource_root := NovaResourceRoot.new()
+	assert_eq(resource_root.set_root_dir(root), OK)
+	return resource_root
 
 
 func _fixture_root() -> String:
-	return ProjectSettings.globalize_path("user://veg_assets_test")
+	return OS.get_cache_dir().path_join("opennova_veg_assets_test")
 
 
 func _copy_file(src: String, dst: String) -> void:

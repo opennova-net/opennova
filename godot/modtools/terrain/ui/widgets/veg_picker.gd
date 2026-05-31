@@ -14,6 +14,14 @@ const _PREVIEW_SIZE := Vector2(112, 112)
 @onready var _close_button: Button = %CloseButton
 
 var _populated: bool = false
+var _resource_root: NovaResourceRoot
+
+
+func set_resource_root(value: NovaResourceRoot) -> void:
+	if _resource_root == value:
+		return
+	_resource_root = value
+	_populated = false
 
 
 func _ready() -> void:
@@ -58,7 +66,7 @@ func _populate() -> void:
 	for child in _grid.get_children():
 		child.queue_free()
 
-	var graphics := VegAssets.list_graphics(true)
+	var graphics := VegAssets.list_graphics(_resource_root, true)
 	_empty_label.visible = graphics.is_empty()
 	_grid.visible = not graphics.is_empty()
 
@@ -92,6 +100,7 @@ func _make_cell(basename: String) -> Control:
 	preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(preview)
+	preview.set_resource_root(_resource_root)
 	preview.set_graphic(basename)
 
 	var label := Label.new()

@@ -72,6 +72,10 @@ func _remove_dir_recursive(path: String) -> void:
 	DirAccess.remove_absolute(path)
 
 
+func _norm_path(path: String) -> String:
+	return path.rstrip("/").replace("\\", "/").to_lower()
+
+
 func _workspace_action_texts(host: Node) -> Array:
 	var texts := []
 	for child in host.get_children():
@@ -149,20 +153,19 @@ func _make_resource_fixture(name: String) -> String:
 	# never lives inside the app user-data dir, so this keeps fixtures out of the
 	# editor's real state and compatible with _is_valid_resource_root().
 	var root := OS.get_cache_dir().path_join(FIXTURE_CACHE_DIR).path_join("%s_%d" % [name, Time.get_ticks_usec()])
-	DirAccess.make_dir_recursive_absolute(root.path_join("missions"))
-	DirAccess.make_dir_recursive_absolute(root.path_join("terrains"))
-	DirAccess.make_dir_recursive_absolute(root.path_join("env"))
-	DirAccess.make_dir_recursive_absolute(root.path_join("models"))
-	DirAccess.make_dir_recursive_absolute(root.path_join("objects"))
-	DirAccess.make_dir_recursive_absolute(root.path_join("fonts"))
-	_write_fixture_file(root.path_join("missions/alpha.bms"), "bms")
-	_write_fixture_file(root.path_join("terrains/alpha.trn"), "trn")
-	_write_fixture_file(root.path_join("env/alpha.env"), "env")
-	_write_fixture_file(root.path_join("models/alpha.glb"), "glb")
-	_write_fixture_file(root.path_join("objects/alpha.3dp"), "3dp")
-	_write_fixture_file(root.path_join("objects/alpha.3di"), "3di")
-	_write_fixture_file(root.path_join("objects/alpha.ase"), "ase")
-	_write_fixture_file(root.path_join("fonts/alpha.fnt"), "fnt")
+	DirAccess.make_dir_recursive_absolute(root)
+	DirAccess.make_dir_recursive_absolute(root.path_join("ignored"))
+	_write_fixture_file(root.path_join("alpha.bms"), "bms")
+	_write_fixture_file(root.path_join("alpha.trn"), "trn")
+	_write_fixture_file(root.path_join("alpha.env"), "env")
+	_write_fixture_file(root.path_join("alpha.glb"), "glb")
+	_write_fixture_file(root.path_join("alpha.3dp"), "3dp")
+	_write_fixture_file(root.path_join("alpha.3di"), "3di")
+	_write_fixture_file(root.path_join("alpha.ase"), "ase")
+	_write_fixture_file(root.path_join("alpha.fnt"), "fnt")
+	_write_fixture_file(root.path_join("alpha.bin"), "RTXTstrings")
+	_write_fixture_file(root.path_join("raw.bin"), "raw")
+	_write_fixture_file(root.path_join("ignored/nested.trn"), "nested")
 	return root
 
 
@@ -233,7 +236,7 @@ func test_resource_index_lists_object_resources_without_glb_models() -> void:
 	var root := _make_resource_fixture("resource_index_godot")
 	var index := NovaResourceIndex.new()
 
-	assert_eq(index.scan(root, true), OK, "Resource index should scan a filesystem directory.")
+	assert_eq(index.scan(root), OK, "Resource index should scan a filesystem directory.")
 	assert_eq(index.get_resource_files("mission").size(), 1, "BMS files should be indexed as mission resources.")
 	assert_eq(index.get_resource_files("terrain").size(), 1, "TRN files should be indexed as terrain resources.")
 	assert_eq(index.get_resource_files("environment").size(), 1, "ENV files should be indexed as environment resources.")
@@ -241,15 +244,16 @@ func test_resource_index_lists_object_resources_without_glb_models() -> void:
 	assert_eq(index.get_resource_files("object_model").size(), 1, "3DI files should be indexed as object model resources.")
 	assert_eq(index.get_resource_files("object_scene").size(), 1, "ASE files should be indexed as importable object scenes.")
 	assert_eq(index.get_resource_files("font").size(), 1, "FNT files should be indexed as font resources.")
+	assert_eq(index.get_resource_files("strings").size(), 1, "RTXT BIN files should be indexed as strings resources.")
 	assert_eq(index.get_resource_files("glb").size(), 0, "GLB files should no longer be indexed.")
-	assert_eq(index.get_resource_files("all").size(), 7, "All openable resources should exclude GLB.")
-	assert_eq(String((index.get_resource_files("object_model")[0] as Dictionary).get("relative_path", "")), "objects/alpha.3di", "Object model entries should keep root-relative paths.")
+	assert_eq(index.get_resource_files("all").size(), 8, "All openable resources should exclude GLB and non-RTXT BIN blobs.")
+	assert_eq(String((index.get_resource_files("object_model")[0] as Dictionary).get("relative_path", "")), "alpha.3di", "Object model entries should keep root-relative paths.")
+	assert_eq(String((index.get_resource_files("strings")[0] as Dictionary).get("relative_path", "")), "alpha.bin", "Strings entries should keep root-relative paths.")
 
 
 func test_settings_viewport_popup_edits_resource_directory() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var root := _make_resource_fixture("settings_resource_dir")
-	workstation._resource_recursive = true
 	assert_eq(workstation._set_resource_root_dir("", false, false), OK, "Test should start with no configured resource directory.")
 
 	var settings_button: Button = workstation.get_node("%SettingsToggleButton")
@@ -262,26 +266,22 @@ func test_settings_viewport_popup_edits_resource_directory() -> void:
 
 	var popup: PanelContainer = workstation.get_node("%SettingsPopup")
 	var edit: LineEdit = workstation.get_node("%SettingsResourceDirEdit")
-	var recursive: CheckBox = workstation.get_node("%SettingsRecursiveToggle")
 	assert_true(popup.visible, "Settings button should open the viewport settings popup.")
 	assert_true(settings_button.button_pressed, "Settings button should stay pressed while open.")
-	assert_true(recursive.button_pressed, "Recursive scanning should default on.")
+	assert_null(workstation.get_node_or_null("%SettingsRecursiveToggle"), "The resource root settings should not expose a recursive scan toggle.")
 
 	edit.text = root
-	recursive.button_pressed = false
 	workstation._apply_resource_settings(true, false)
 
 	assert_eq(workstation.get_resource_root_dir(), root, "Settings should apply the resource directory.")
-	assert_false(workstation.is_resource_recursive(), "Settings should apply the recursive toggle.")
-	assert_eq(workstation.get_resource_index().get_resource_files("terrain").size(), 0, "Non-recursive scan should not include nested terrain files.")
+	assert_eq(workstation.get_resource_index().get_resource_files("terrain").size(), 1, "Flat scans should include top-level terrain files.")
 
 
-func test_workspace_open_uses_resource_browser_with_browse_fallback() -> void:
+func test_workspace_open_uses_resource_browser_without_filesystem_escape() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
 	var root := _make_resource_fixture("resource_browser_terrain")
 	workstation.set_editor(editor)
-	workstation._resource_recursive = true
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should use the configured resource directory.")
 
 	var open_button := _find_button_by_text(workstation.get_node("%WorkspaceActionsHost"), "Open Terrain...")
@@ -295,12 +295,11 @@ func test_workspace_open_uses_resource_browser_with_browse_fallback() -> void:
 	if dialog == null:
 		return
 	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
-	var browse := dialog.find_child("ResourceBrowserBrowseFilesButton", true, false) as Button
 	var dir_label := dialog.find_child("ResourceBrowserDirectoryLabel", true, false) as Label
 	var settings_shortcut := dialog.find_child("ResourceBrowserSettingsButton", true, false) as Button
 	assert_true(dialog.visible, "Resource browser should open instead of going straight to native file browsing.")
 	assert_not_null(list, "Resource browser should include a list.")
-	assert_not_null(browse, "Resource browser should keep a native Browse Files fallback.")
+	assert_null(dialog.find_child("ResourceBrowserBrowseFilesButton", true, false), "Resource browser must not expose a native filesystem escape hatch.")
 	assert_not_null(dir_label, "Resource browser should show the active resource directory.")
 	assert_not_null(settings_shortcut, "Resource browser should include a Settings shortcut node.")
 	if list != null:
@@ -316,7 +315,6 @@ func test_workspace_open_uses_resource_browser_with_browse_fallback() -> void:
 func test_fonts_workspace_open_uses_resource_browser() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var root := _make_resource_fixture("resource_browser_fonts")
-	workstation._resource_recursive = true
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index font files.")
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.FONTS)
 	await get_tree().process_frame
@@ -338,10 +336,38 @@ func test_fonts_workspace_open_uses_resource_browser() -> void:
 		assert_string_contains(list.get_item_text(0), "alpha", "Font resource rows should show the matching file.")
 
 
+func test_strings_workspace_open_uses_resource_browser() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var root := _make_resource_fixture("resource_browser_strings")
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index strings files.")
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
+	await get_tree().process_frame
+
+	var open_button := _find_button_by_text(workstation.get_node("%WorkspaceActionsHost"), "Open Strings...")
+	assert_not_null(open_button, "Strings workspace should expose Open Strings.")
+	if open_button == null:
+		return
+	open_button.pressed.emit()
+
+	var dialog := workstation.find_child("ResourceBrowserDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Strings Open should use the shared resource browser.")
+	if dialog == null:
+		return
+	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	assert_not_null(list, "Strings resource browser should include a list.")
+	if list != null:
+		assert_eq(list.item_count, 1, "Strings browser should list RTXT BIN files from the resource directory.")
+		assert_string_contains(list.get_item_text(0), "alpha", "Strings resource rows should show the matching file.")
+
+
 func test_workstation_opens_font_workspace_by_credits_font_name() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var root := ProjectSettings.globalize_path("res://../fixtures/fnt")
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK,
+		"Credits font integration should use the configured resource root.")
 
-	assert_eq(workstation.open_font_workspace("Serpen24"), OK, "Credits integration should open a bundled Nova font by font name.")
+	assert_eq(workstation.open_font_workspace("Serpen24"), OK,
+		"Credits integration should open a Nova font by name from the configured resource root.")
 	await get_tree().process_frame
 
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.FONTS,
@@ -369,6 +395,7 @@ func test_workspace_open_without_resource_dir_shows_empty_browser() -> void:
 	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
 	var hint := dialog.find_child("ResourceBrowserHint", true, false) as Label
 	var settings_shortcut := dialog.find_child("ResourceBrowserSettingsButton", true, false) as Button
+	assert_null(dialog.find_child("ResourceBrowserBrowseFilesButton", true, false), "Missing resource roots should be fixed through Settings, not arbitrary file browsing.")
 	if list != null:
 		assert_eq(list.item_count, 0, "No resource directory should produce no rows.")
 	if hint != null:
@@ -420,7 +447,6 @@ func test_environment_open_uses_resource_browser() -> void:
 	var root := _make_resource_fixture("resource_browser_environment")
 	environment_editor.create_default_environment(false)
 	workstation._environment_workspace.set_environment_editor(environment_editor)
-	workstation._resource_recursive = true
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index environment files.")
 
 	var sun_button: Button = workstation.get_node("%EnvironmentToggleButton")
@@ -446,12 +472,37 @@ func test_environment_open_uses_resource_browser() -> void:
 func test_resource_settings_persist_in_editor_state() -> void:
 	var root := _make_resource_fixture("resource_settings_persist")
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	workstation._resource_recursive = true
 	assert_eq(workstation._set_resource_root_dir(root, true, true), OK, "Persisted resource directory should scan successfully.")
 
 	var next_workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	assert_eq(next_workstation.get_resource_root_dir(), root, "New workstation instances should load the persisted resource directory.")
-	assert_true(next_workstation.is_resource_recursive(), "Recursive setting should persist with its default value.")
+
+
+func test_terrain_editor_path_state_preserves_resource_directory() -> void:
+	var root := _make_resource_fixture("resource_settings_path_preserve")
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	assert_eq(workstation._set_resource_root_dir(root, true, true), OK, "Persisted resource directory should scan successfully.")
+
+	var editor = autofree(TerrainEditorScript.new())
+	editor._remember_open_path(root.path_join("alpha.trn"))
+
+	var next_workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	assert_eq(next_workstation.get_resource_root_dir(), root, "Saving terrain editor path state must preserve the shared resource directory.")
+
+
+func test_startup_applies_persisted_resource_dir_to_shared_resource_root() -> void:
+	# Regression: a fresh editor launch must push the PERSISTED resource dir into
+	# the shared resource-root object on startup so authoring tools resolve files
+	# through the same flat root that runtime loading uses.
+	var root := _make_resource_fixture("veg_search_roots_startup")
+	var w1 = add_child_autofree(EditorWorkstationScene.instantiate())
+	assert_eq(w1._set_resource_root_dir(root, true, false), OK, "Persisting the resource dir should succeed.")
+
+	var w2 = add_child_autofree(EditorWorkstationScene.instantiate())
+	var resource_root: NovaResourceRoot = w2.get_resource_root()
+	assert_eq(w2.get_resource_root_dir(), root, "Editor startup should load the persisted resource directory.")
+	assert_eq(_norm_path(resource_root.get_root_dir()), _norm_path(root), "The shared resource root should be the persisted directory.")
+	assert_eq(_norm_path(resource_root.resolve_file("alpha.3di")), _norm_path(root.path_join("alpha.3di")), "The startup resource root should resolve top-level files.")
 
 
 func test_resource_root_inside_user_data_is_rejected_on_load() -> void:
@@ -461,8 +512,7 @@ func test_resource_root_inside_user_data_is_rejected_on_load() -> void:
 	# internal path.
 	var bogus := OS.get_user_data_dir().path_join("resource_settings_persist_bogus_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(bogus)
-	var w1 = add_child_autofree(EditorWorkstationScene.instantiate())
-	assert_eq(w1._set_resource_root_dir(bogus, true, false), OK, "Persisting the root should succeed.")
+	NovaResourceDirSettings.set_resource_dir(bogus)
 
 	var w2 = add_child_autofree(EditorWorkstationScene.instantiate())
 	assert_eq(w2.get_resource_root_dir(), "", "A resource root inside the app user-data dir should be rejected on load.")
@@ -1171,7 +1221,6 @@ func test_resource_browser_uses_theme_not_handcoded_styleboxes() -> void:
 	var editor = autofree(TerrainEditorScript.new())
 	var root := _make_resource_fixture("resource_browser_theme")
 	workstation.set_editor(editor)
-	workstation._resource_recursive = true
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index the configured resource directory.")
 
 	var open_button := _find_button_by_text(workstation.get_node("%WorkspaceActionsHost"), "Open Terrain...")

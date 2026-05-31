@@ -2,6 +2,7 @@ class_name CreditsEditorBlockList
 extends VBoxContainer
 
 const BlockCardScene = preload("res://modtools/credits/credits_editor_block_card.tscn")
+const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
 signal entries_reordered
 signal selection_changed(entry)
@@ -14,10 +15,23 @@ var _entry_to_card: Dictionary = {}  # CbinEntry -> CreditsEditorBlockCard
 var _reconcile_pending: bool = false
 var _selected_entry: CbinEntry
 var _selection_emit_pending: bool = false
+var _resource_root: NovaResourceRoot
 
 func _ready() -> void:
 	_vbox = self
+	if _resource_root == null:
+		_resource_root = _coerce_resource_root("")
 	_refresh_font_options()
+
+func set_resource_root_dir(path: String) -> void:
+	_resource_root = _coerce_resource_root(path)
+	_refresh_font_options()
+	_reconcile()
+
+func set_resource_root(value: NovaResourceRoot) -> void:
+	_resource_root = value
+	_refresh_font_options()
+	_reconcile()
 
 func set_resource(value: CbinCreditsResource) -> void:
 	if _resource == value:
@@ -42,15 +56,9 @@ func _do_deferred_reconcile() -> void:
 
 func _refresh_font_options() -> void:
 	_font_options = PackedStringArray()
-	var dir := DirAccess.open("res://assets/fonts")
-	if dir != null:
-		dir.list_dir_begin()
-		var name := dir.get_next()
-		while not name.is_empty():
-			if not dir.current_is_dir() and name.get_extension().to_lower() == "fnt":
-				_append_font_option(name.get_basename())
-			name = dir.get_next()
-		dir.list_dir_end()
+	if _resource_root != null:
+		for path in _resource_root.list_files(".fnt"):
+			_append_font_option(String(path).get_file().get_basename())
 	if _resource != null:
 		for i in range(_resource.get_entry_count()):
 			var entry := _resource.get_entry(i)
@@ -64,6 +72,16 @@ func _append_font_option(name: String) -> void:
 		if existing == name:
 			return
 	_font_options.append(name)
+
+
+func _coerce_resource_root(path: String) -> NovaResourceRoot:
+	var dir := path.strip_edges()
+	if dir.is_empty():
+		dir = ResourceDirSettings.get_resource_dir()
+	if dir.is_empty():
+		return null
+	var resources := NovaResourceRoot.new()
+	return resources if resources.set_root_dir(dir) == OK else null
 
 func _reconcile() -> void:
 	if _vbox == null:
@@ -104,11 +122,11 @@ func _reconcile() -> void:
 		else:
 			card = BlockCardScene.instantiate() as CreditsEditorBlockCard
 			_vbox.add_child(card)
-			card.bind(entry, _font_options)
 			card.request_delete.connect(_on_card_delete)
 			card.request_select.connect(_on_card_select)
 			card.request_edit_font.connect(_on_card_request_edit_font)
 			_entry_to_card[entry] = card
+		card.bind(entry, _font_options, _resource_root)
 		if _vbox.get_child(i) != card:
 			_vbox.move_child(card, i)
 

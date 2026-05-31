@@ -191,7 +191,7 @@ Ref<CbinCreditsResource> NovaCreditsPlayer::get_credits_resource() const {
 
 void NovaCreditsPlayer::set_font_base_path(const String &p_path) {
 	font_base_path_ = p_path;
-	if (!font_base_path_.ends_with("/")) {
+	if (!font_base_path_.is_empty() && !font_base_path_.ends_with("/")) {
 		font_base_path_ += "/";
 	}
 }
@@ -202,7 +202,7 @@ String NovaCreditsPlayer::get_font_base_path() const {
 
 void NovaCreditsPlayer::set_texture_base_path(const String &p_path) {
 	texture_base_path_ = p_path;
-	if (!texture_base_path_.ends_with("/")) {
+	if (!texture_base_path_.is_empty() && !texture_base_path_.ends_with("/")) {
 		texture_base_path_ += "/";
 	}
 }

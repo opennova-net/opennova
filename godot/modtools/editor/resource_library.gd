@@ -7,21 +7,28 @@ extends RefCounted
 ## editor_workstation.gd (B5-3a) so the shell is the thin UI layer over it.
 ##
 ## The shell keeps what stays a shell concern and forwards here:
-##   - the recursive flag (a plain shell member the tests write directly),
-##   - the settings-popup sync, status-bar messages, and VegAssets
-##     search-root registration.
+##   - the settings-popup sync and status-bar messages.
 ## Those side effects are surfaced through the return values below
-## ({err, search_roots, status}) so this helper never reaches back into the UI.
+## ({err, status}) so this helper never reaches back into the UI.
 
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
-const RESOURCE_STATE_SECTION := "resources"
-const RESOURCE_DIR_KEY := "resource_dir"
-const RESOURCE_RECURSIVE_KEY := "resource_recursive"
+# Resource-dir config path/keys are shared with the runtime (game/main_game.gd)
+# via engine/resource_index/resource_dir_settings.gd so a directory picked in
+# either app is the same persisted value.
+const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+# Layout state (split offsets) shares the same config file as the resource dir,
+# but lives in its own section; the resource-dir section is owned by
+# NovaResourceDirSettings (load_state/save_state delegate to it).
+const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 const LAYOUT_STATE_SECTION := "layout"
 const LEFT_SPLIT_KEY := "left_split_offset"
 const RIGHT_SPLIT_KEY := "right_split_offset"
+# View options (3D preview guides), persisted in their own section.
+const VIEW_STATE_SECTION := "view"
+const GRID_VISIBLE_KEY := "grid_visible"
+const AXES_VISIBLE_KEY := "axes_visible"
 
 var _index: RefCounted
+var _resource_root: NovaResourceRoot = NovaResourceRoot.new()
 var _root_dir: String = ""
 
 
@@ -39,40 +46,58 @@ func get_root_dir() -> String:
 	return _root_dir
 
 
+func get_resource_root() -> NovaResourceRoot:
+	return _resource_root
+
+
 func clear_index() -> void:
 	ensure_index()
 	_index.clear()
 
 
-# Updates the configured root and (optionally) persists + scans it. Returns a
-# result the shell applies: `search_roots` is the VegAssets search-root list
-# (empty when the root is cleared) and `status` is a status-bar message to
-# show (empty = none).
-func set_root_dir(path: String, recursive: bool, persist: bool, scan: bool) -> Dictionary:
+# Updates the configured flat root and (optionally) persists + scans it. Returns
+# a result the shell applies; `status` is a status-bar message to show (empty = none).
+func set_root_dir(path: String, persist: bool, scan: bool) -> Dictionary:
 	ensure_index()
 	var previous := _root_dir
 	_root_dir = path.strip_edges()
-	if persist:
-		save_state(recursive)
 	if _root_dir.is_empty():
 		_index.clear()
-		return {"err": OK, "search_roots": [], "status": ""}
+		_resource_root.clear()
+		if persist:
+			save_state()
+		return {"err": OK, "status": ""}
+	var root_err := _resource_root.set_root_dir(_root_dir)
+	if root_err != OK:
+		var root_error_message := _resource_root.get_last_error()
+		_root_dir = previous
+		if _root_dir.is_empty():
+			_resource_root.clear()
+		else:
+			_resource_root.set_root_dir(_root_dir)
+		_index.clear()
+		return {"err": root_err, "status": root_error_message}
+	if persist:
+		save_state()
 	if scan:
-		var result := scan_root(recursive)
-		return {"err": result["err"], "search_roots": [_root_dir], "status": result["status"]}
+		return scan_root()
 	if previous != _root_dir:
 		_index.clear()
-	return {"err": OK, "search_roots": [_root_dir], "status": ""}
+	return {"err": OK, "status": ""}
 
 
 # Scans the configured root into the index. Returns {err, status}; `status` is
 # the message the caller should surface (empty when there is nothing to say).
-func scan_root(recursive: bool) -> Dictionary:
+func scan_root() -> Dictionary:
 	ensure_index()
 	if _root_dir.is_empty():
 		_index.clear()
 		return {"err": OK, "status": ""}
-	var err: Error = _index.scan(_root_dir, recursive)
+	var root_err := _resource_root.set_root_dir(_root_dir)
+	if root_err != OK:
+		_index.clear()
+		return {"err": root_err, "status": _resource_root.get_last_error()}
+	var err: Error = _index.scan(_root_dir)
 	if err == OK:
 		return {"err": OK, "status": "Resource directory indexed."}
 	var detail := ""
@@ -81,29 +106,24 @@ func scan_root(recursive: bool) -> Dictionary:
 	return {"err": err, "status": "Resource scan failed." if detail.is_empty() else detail}
 
 
-# Loads the persisted root + recursive flag. Drops a persisted root that no
-# longer points at a real, sane resource directory (moved/deleted dirs, or
-# stale temp/test paths that leaked into the shared state) so the browser shows
-# a clean "no directory" state instead of a dead internal path. Returns
-# {root_dir, recursive}; the caller stores `recursive` on the shell.
+# Loads the persisted root from the shared NovaResourceDirSettings.
+# That helper drops a persisted root that no longer points at a real, sane resource
+# directory (moved/deleted dirs, or stale temp/test paths that leaked into the
+# shared state) so the browser shows a clean "no directory" state instead of a dead
+# internal path. Returns {root_dir}.
 func load_state() -> Dictionary:
-	var config := ConfigFile.new()
-	if config.load(STATE_CONFIG_PATH) != OK:
-		return {"root_dir": _root_dir, "recursive": true}
-	_root_dir = String(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, ""))
-	var recursive := bool(config.get_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, true))
-	if not _root_dir.is_empty() and not is_valid_root(_root_dir):
-		_root_dir = ""
-		save_state(recursive)
-	return {"root_dir": _root_dir, "recursive": recursive}
+	# Resource-dir persistence lives in NovaResourceDirSettings (shared with the
+	# runtime); get_resource_dir() already drops stale/invalid paths.
+	_root_dir = ResourceDirSettings.get_resource_dir()
+	if _root_dir.is_empty():
+		_resource_root.clear()
+	else:
+		_resource_root.set_root_dir(_root_dir)
+	return {"root_dir": _root_dir}
 
 
-func save_state(recursive: bool) -> void:
-	var config := ConfigFile.new()
-	config.load(STATE_CONFIG_PATH)
-	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_DIR_KEY, _root_dir)
-	config.set_value(RESOURCE_STATE_SECTION, RESOURCE_RECURSIVE_KEY, recursive)
-	config.save(STATE_CONFIG_PATH)
+func save_state() -> void:
+	ResourceDirSettings.set_resource_dir(_root_dir)
 
 
 # Persisted shell layout. Split offsets are stored alongside the resource state
@@ -132,14 +152,27 @@ func save_layout_state(left_offset: int, right_offset: int) -> void:
 	config.save(STATE_CONFIG_PATH)
 
 
+# Persisted 3D-preview guide visibility (grid / axes). Defaults to visible when
+# unset. Stored in the shared editor-state config alongside layout/resource state.
+func load_view_state() -> Dictionary:
+	var config := ConfigFile.new()
+	if config.load(STATE_CONFIG_PATH) != OK:
+		return {"grid": true, "axes": true}
+	return {
+		"grid": bool(config.get_value(VIEW_STATE_SECTION, GRID_VISIBLE_KEY, true)),
+		"axes": bool(config.get_value(VIEW_STATE_SECTION, AXES_VISIBLE_KEY, true)),
+	}
+
+
+# Merge the view options into the existing config (load-then-set-then-save) so the
+# resource/layout sections are preserved, mirroring save_layout_state().
+func save_view_state(grid_visible: bool, axes_visible: bool) -> void:
+	var config := ConfigFile.new()
+	config.load(STATE_CONFIG_PATH)
+	config.set_value(VIEW_STATE_SECTION, GRID_VISIBLE_KEY, grid_visible)
+	config.set_value(VIEW_STATE_SECTION, AXES_VISIBLE_KEY, axes_visible)
+	config.save(STATE_CONFIG_PATH)
+
+
 func is_valid_root(path: String) -> bool:
-	var trimmed := path.strip_edges()
-	if trimmed.is_empty():
-		return false
-	if not DirAccess.dir_exists_absolute(trimmed):
-		return false
-	# A resource library is a real asset directory on disk, never inside the
-	# app's own user-data dir; reject such paths (e.g. leaked temp/test dirs).
-	if trimmed.begins_with(OS.get_user_data_dir()):
-		return false
-	return true
+	return ResourceDirSettings.is_valid_root(path)

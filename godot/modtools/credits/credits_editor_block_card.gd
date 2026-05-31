@@ -1,8 +1,7 @@
 class_name CreditsEditorBlockCard
 extends PanelContainer
 
-const TEXTURE_BASE_PATH := "res://assets/textures"
-const TEXTURE_EXTENSIONS := ["png", "pcx", "tga", "jpg", "jpeg", "bmp"]
+const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
 # Per-type accent palette. The selection highlight (A1) reuses the same hues as the
 # type chips so a selected card reads as its type at a glance.
@@ -52,11 +51,13 @@ var _suppress := false
 var _selected := false
 var _selected_stylebox: StyleBoxFlat
 var _spacer_stylebox: StyleBoxFlat
+var _resource_root: NovaResourceRoot
 
-func bind(entry: CbinEntry, font_options: PackedStringArray) -> void:
+func bind(entry: CbinEntry, font_options: PackedStringArray, resource_root: Variant = null) -> void:
 	if _entry and _entry.changed.is_connected(_refresh):
 		_entry.changed.disconnect(_refresh)
 	_entry = entry
+	_resource_root = _coerce_resource_root(resource_root)
 	if _entry:
 		_entry.changed.connect(_refresh)
 	_populate_font_options(font_options)
@@ -109,7 +110,7 @@ func _configure_affordances() -> void:
 	_font_picker.tooltip_text = "Font for this line"
 	_font_edit_button.tooltip_text = "Open this font in the Fonts workspace"
 	_color_picker_text.tooltip_text = "Text color"
-	_image_path_edit.tooltip_text = "Image filename under assets/textures"
+	_image_path_edit.tooltip_text = "Image filename in the resource directory"
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 
 func _refresh() -> void:
@@ -201,7 +202,12 @@ func _on_font_selected(index: int) -> void:
 	if _suppress or not (_entry is CbinTextEntry):
 		return
 	var name := "" if index == 0 else _font_picker.get_item_text(index)
-	(_entry as CbinTextEntry).set_font_name(name)
+	var text_entry := _entry as CbinTextEntry
+	text_entry.set_font_name(name)
+	if not name.is_empty():
+		var font := _resolve_font(name)
+		if font != null:
+			text_entry.set_font(font)
 	_font_edit_button.disabled = name.is_empty()
 
 func _on_font_edit_pressed() -> void:
@@ -232,9 +238,9 @@ func _on_align(justify: int) -> void:
 
 func _on_image_pick_pressed() -> void:
 	var dialog := FileDialog.new()
-	dialog.access = FileDialog.ACCESS_RESOURCES
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	dialog.current_dir = "res://assets/textures/"
+	dialog.current_dir = _resource_root.get_root_dir() if _resource_root != null else ""
 	dialog.add_filter("*.pcx,*.png,*.jpg,*.jpeg,*.tga ; Image")
 	dialog.file_selected.connect(func(path: String) -> void:
 		_on_image_pick_selected(path)
@@ -284,46 +290,25 @@ func _normalized_image_name(value: String) -> String:
 	return value.strip_edges().get_file()
 
 func _resolve_texture(image_name: String) -> Texture2D:
-	if image_name.is_empty():
+	if image_name.is_empty() or _resource_root == null:
 		return null
+	return _resource_root.load_texture(image_name)
 
-	var exact_path := TEXTURE_BASE_PATH.path_join(image_name)
-	if ResourceLoader.exists(exact_path):
-		return ResourceLoader.load(exact_path) as Texture2D
-
-	var dir := DirAccess.open(TEXTURE_BASE_PATH)
-	if dir == null:
+func _resolve_font(font_name: String) -> Resource:
+	if font_name.is_empty() or _resource_root == null:
 		return null
+	return _resource_root.load_font(font_name)
 
-	var lower_name := image_name.to_lower()
-	var matched := _scan_texture_dir(dir, lower_name)
-	if not matched.is_empty():
-		var matched_path := TEXTURE_BASE_PATH.path_join(matched)
-		if ResourceLoader.exists(matched_path):
-			return ResourceLoader.load(matched_path) as Texture2D
-
-	var basename := image_name.get_basename()
-	for ext in TEXTURE_EXTENSIONS:
-		var alt := ("%s.%s" % [basename, ext]).to_lower()
-		if alt == lower_name:
-			continue
-		matched = _scan_texture_dir(dir, alt)
-		if not matched.is_empty():
-			var alt_path := TEXTURE_BASE_PATH.path_join(matched)
-			if ResourceLoader.exists(alt_path):
-				return ResourceLoader.load(alt_path) as Texture2D
-	return null
-
-func _scan_texture_dir(dir: DirAccess, lower_name: String) -> String:
-	dir.list_dir_begin()
-	var filename := dir.get_next()
-	while not filename.is_empty():
-		if not dir.current_is_dir() and filename.to_lower() == lower_name:
-			dir.list_dir_end()
-			return filename
-		filename = dir.get_next()
-	dir.list_dir_end()
-	return ""
+func _coerce_resource_root(value: Variant) -> NovaResourceRoot:
+	if value is NovaResourceRoot:
+		return value
+	var dir := String(value).strip_edges() if value != null else ""
+	if dir.is_empty():
+		dir = ResourceDirSettings.get_resource_dir()
+	if dir.is_empty():
+		return null
+	var resources := NovaResourceRoot.new()
+	return resources if resources.set_root_dir(dir) == OK else null
 
 func _on_image_mode(advances_y: bool) -> void:
 	if _suppress or not (_entry is CbinImageEntry):

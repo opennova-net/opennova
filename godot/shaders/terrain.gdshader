@@ -1,30 +1,14 @@
 shader_type spatial;
 render_mode unshaded;
 
-uniform sampler2D u_colormap : source_color, filter_linear, repeat_disable;
-uniform sampler2D u_detail_c1 : source_color, filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_detail_c2 : source_color, filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_detail_c3 : source_color, filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_blendmap : filter_linear, repeat_disable;
-uniform sampler2D u_detailmap : filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_detailmapdist : filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_detailmap2 : filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_detailmapdist2 : filter_linear_mipmap, repeat_enable;
+// Shared terrain surface shading + fog (uniforms u_colormap/u_detail*/u_blendmap/
+// u_detailmap*/lighting/fog all live here): terrain_surface_color(), apply_terrain_fog().
+#include "res://shaders/terrain_lighting.gdshaderinc"
+
+// Runtime-only extras (the editor shader has its own brush/overlay set instead).
 uniform sampler2D u_tile_overlay : source_color, filter_linear, repeat_enable;
 uniform bool u_has_tile_overlay = false;
-uniform float u_detail_near_dist = 40.0;
-uniform float u_detail_far_dist = 80.0;
-uniform vec3 u_fill_light = vec3(0.3, 0.3, 0.35);
-uniform vec3 u_sun_light = vec3(0.8, 0.75, 0.65);
-uniform vec3 u_sky_ambient = vec3(0.4, 0.45, 0.55);
-uniform vec3 u_sun_direction = vec3(0.0, 0.70710678, 0.70710678);
-uniform vec3 u_terrain_tint = vec3(1.0, 1.0, 1.0);
 uniform vec3 u_tile_overlay_tint = vec3(1.0, 1.0, 1.0);
-uniform float u_detail_density = 128.0;
-uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
-uniform float u_fog_start = 0.0;
-uniform float u_fog_end = 1024.0;
-uniform int u_fog_type = 0;
 
 // Debug: 0=off, 1=LOD colors, 2=sector colors, 3=normals, 4=heightmap
 uniform int u_debug_mode = 0;
@@ -79,85 +63,16 @@ vec3 sector_color(float sx, float sz) {
 	return rgb + m;
 }
 
-float jointops_fog_factor(float dist, float fog_start, float fog_end, int fog_type) {
-	float safe_end = max(fog_end, 1.0);
-	if (fog_type == 0) {
-		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);
-	}
-
-	float start = fog_start;
-	if (fog_type == 2) {
-		start = safe_end * 0.5;
-	} else if (fog_type == 3) {
-		start = safe_end * 0.25;
-	}
-	float fog_range = max(safe_end - start, 1.0);
-	return clamp((safe_end - dist) / fog_range, 0.0, 1.0);
-}
-
 void fragment() {
-	// Sample textures
-	vec4 cm = texture(u_colormap, v_colormap_uv);
-	vec3 blend = texture(u_blendmap, v_colormap_uv).rgb;
-	vec3 c1 = texture(u_detail_c1, v_detail_uv).rgb;
-	vec3 c2 = texture(u_detail_c2, v_detail_uv).rgb;
-	vec3 c3 = texture(u_detail_c3, v_detail_uv).rgb;
+	vec3 result = terrain_surface_color(v_colormap_uv, v_detail_uv, v_world_pos, CAMERA_POSITION_WORLD);
 
-	// mul/mad: detail = c1*R + c2*G + c3*B
-	vec3 detail = c1 * blend.r + c2 * blend.g + c3 * blend.b;
-
-	// Distance-based detail normal crossfade (NovaLogic ps.1.4 near/far t1 selection).
-	// Thresholds are world-unit ports of the original 2,621,440 / 5,242,880 (16.16 fixed-point).
-	float cam_dist = length(v_world_pos - CAMERA_POSITION_WORLD);
-	float detail_range = max(u_detail_far_dist - u_detail_near_dist, 0.0001);
-	float fade = clamp((cam_dist - u_detail_near_dist) / detail_range, 0.0, 1.0);
-	vec3 nmap_near = texture(u_detailmap, v_detail_uv).rgb;
-	vec3 nmap_far = texture(u_detailmapdist, v_detail_uv).rgb;
-	vec3 nmap = mix(nmap_near, nmap_far, fade);
-
-	// dp3: dot(normalmap, blendweights) -> per-material normal response
-	float normal_factor = dot(nmap, blend) * 2.0;
-
-	// mad_d2: ambient = (alpha * combinedSun + fillLight) / 2
-	// combinedSun = sunLight * 0.707 + skyAmbient
-	// NovaLogic ps.1.4 dual-normal path reads colormap.alpha directly.
-	vec3 combined_sun = u_sun_light * 0.707 + u_sky_ambient;
-	vec3 ambient = (cm.a * combined_sun + u_fill_light) * 0.5;
-
-	// mul_x2: lit = ambient * colormap * 2
-	vec3 lit = ambient * cm.rgb * 2.0;
-
-	// mul_x2: lit *= normalFactor
-	lit *= normal_factor;
-
-	// Layer-2 normal pair: detailmap2 (near) + detailmapdist2 (far), mirror of layer 1.
-	// Game init (Jointops sub_60AAA0 LABEL_47) loads both unconditionally and bakes them
-	// into one mipmapped texture via sub_687270 (near = mip 0, far = deep mips).
-	// Pixel shader does a second dp3 against the blendmap — see ps.1.1 v23 dual-normal
-	// (gobj.dll.c:42829-42840): dp3(t1,t2) and dp3(t3,t2) both dot with t2 (blendmap).
-	vec3 nmap2_near = texture(u_detailmap2, v_detail_uv).rgb;
-	vec3 nmap2_far = texture(u_detailmapdist2, v_detail_uv).rgb;
-	vec3 nmap2 = mix(nmap2_near, nmap2_far, fade);
-	float normal_factor2 = dot(nmap2, blend) * 2.0;
-	lit *= normal_factor2;
-
-	// mul_x4: final = lit * detail * 4
-	vec3 result = lit * detail * 4.0;
-
-	// Apply terrain tint
-	result *= u_terrain_tint;
 	if (u_has_tile_overlay) {
 		vec2 tile_uv = fract(vec2(v_world_pos.x, -v_world_pos.z) * (1.0 / 1024.0));
 		vec4 tile = texture(u_tile_overlay, tile_uv);
 		result = mix(result, tile.rgb * u_tile_overlay_tint, tile.a);
 	}
 
-	// Jointops.exe Render_SetFogParams@0x0054B4B0 -> Render_ConfigureFog@0x005F9890.
-	{
-		float dist = length(v_world_pos - CAMERA_POSITION_WORLD);
-		float fog_factor = jointops_fog_factor(dist, u_fog_start, u_fog_end, u_fog_type);
-		result = mix(u_fog_color, result, fog_factor);
-	}
+	result = apply_terrain_fog(result, v_world_pos, CAMERA_POSITION_WORLD);
 
 	// Debug overlays — replace output with diagnostic color
 	if (u_debug_mode == 1) {

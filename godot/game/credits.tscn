@@ -1,7 +1,6 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=2 format=3]
 
 [ext_resource type="Script" path="res://game/credits.gd" id="1_script"]
-[ext_resource type="Resource" uid="uid://bhorayd243wro" path="res://assets/credits/nlist.kda" id="2_kda"]
 
 [node name="Credits" type="Control"]
 anchors_preset = 15
@@ -22,8 +21,5 @@ unique_name_in_owner = true
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-credits_resource = ExtResource("2_kda")
-font_base_path = "res://assets/fonts/"
-texture_base_path = "res://assets/textures/"
 autoplay = true
 mouse_filter = 2

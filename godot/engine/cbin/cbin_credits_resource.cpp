@@ -1,7 +1,5 @@
 #include "cbin_credits_resource.h"
 
-#include "cbin_asset_lookup.h"
-
 #include <cstdio>
 #include <godot_cpp/core/class_db.hpp>
 
@@ -85,11 +83,7 @@ Ref<Resource> CbinTextEntry::get_font() const {
 
 void CbinTextEntry::set_font_name(const String &p_name) {
 	font_name_ = p_name;
-	if (font_name_.is_empty()) {
-		font_ = Ref<Resource>();
-	} else {
-		font_ = cbin_internal::find_font_by_name(font_name_);
-	}
+	font_ = Ref<Resource>();
 	emit_changed();
 }
 
@@ -198,9 +192,6 @@ String CbinImageEntry::get_texture_path() const {
 	if (texture_.is_valid()) {
 		String path = texture_->get_path();
 		if (!path.is_empty()) {
-			// Extract relative path from full resource path.
-			// e.g., "res://assets/textures/logo.pcx" -> "textures/logo.pcx"
-			// or just return the filename depending on the CBIN format expectations.
 			return path.get_file();
 		}
 	}
@@ -613,13 +604,8 @@ bool CbinCreditsResource::from_text(const String &p_text) {
 			Ref<CbinImageEntry> entry;
 			entry.instantiate();
 			entry->set_advances_y(true);
-			// Load texture by path.
 			String texture_path = line.substr(2);
 			entry->set_texture_name(texture_path);
-			Ref<Resource> texture = cbin_internal::find_texture_by_name(texture_path);
-			if (texture.is_valid()) {
-				entry->set_texture(texture);
-			}
 			parsed_entries.push_back(entry);
 			continue;
 		}
@@ -640,13 +626,8 @@ bool CbinCreditsResource::from_text(const String &p_text) {
 			entry->set_advances_y(false);
 			entry->set_display_x(rest.substr(0, first_pipe).to_int());
 			entry->set_display_y(rest.substr(first_pipe + 1, second_pipe - first_pipe - 1).to_int());
-			// Load texture by path.
 			String texture_path = rest.substr(second_pipe + 1);
 			entry->set_texture_name(texture_path);
-			Ref<Resource> texture = cbin_internal::find_texture_by_name(texture_path);
-			if (texture.is_valid()) {
-				entry->set_texture(texture);
-			}
 			parsed_entries.push_back(entry);
 			continue;
 		}

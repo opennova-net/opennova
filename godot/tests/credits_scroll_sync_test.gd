@@ -2,7 +2,9 @@ extends GutTest
 
 const CreditsEditorScene = preload("res://modtools/credits/credits_editor.tscn")
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
-const KDA_SOURCE_PATH := "res://assets/credits/nlist.kda"
+const KDA_SOURCE_PATH := "res://../fixtures/cbin/nlist.reference.kda"
+const BINK_TEXTURE_PATH := "res://../fixtures/cbin/bink.tga"
+const FNT_PATH := "res://../fixtures/fnt/Serpen24.fnt"
 const TEMP_DIR := "user://test_credits_scroll_sync"
 
 var _kda_path: String = ""
@@ -95,7 +97,7 @@ func test_scrolling_image_advances_by_rendered_height() -> void:
 	player.set_size(Vector2(640, 480))
 	await get_tree().process_frame
 
-	var texture := ResourceLoader.load("res://assets/textures/bink.tga") as Texture2D
+	var texture := _load_texture_fixture(BINK_TEXTURE_PATH)
 	assert_not_null(texture, "bink.tga fixture should be loadable for layout regression.")
 	if texture == null:
 		return
@@ -128,7 +130,11 @@ func test_text_entry_font_does_not_carry_to_next_default_font_entry() -> void:
 	var res := CbinCreditsResource.new()
 	var explicit := CbinTextEntry.new()
 	explicit.set_text("Explicit font")
-	explicit.set_font_name("Serpen24")
+	var font := ResourceLoader.load(FNT_PATH, "NovaFntResource", ResourceLoader.CACHE_MODE_IGNORE) as NovaFntResource
+	assert_not_null(font, "Serpen24.fnt fixture should be loadable for font override regression.")
+	if font == null:
+		return
+	explicit.set_font(font)
 	res.add_entry(explicit)
 	var default_font := CbinTextEntry.new()
 	default_font.set_text("Default font")
@@ -145,6 +151,13 @@ func test_text_entry_font_does_not_carry_to_next_default_font_entry() -> void:
 	assert_true(explicit_label.has_theme_font_override("font"), "entry with an explicit font receives a font override")
 	assert_false(default_label.has_theme_font_override("font"),
 		"entry without an explicit font should keep the default preview font")
+
+func _load_texture_fixture(path: String) -> Texture2D:
+	var image := Image.new()
+	var err := image.load(ProjectSettings.globalize_path(path))
+	if err != OK:
+		return null
+	return ImageTexture.create_from_image(image)
 
 func test_player_scroll_during_playback_updates_list_selection() -> void:
 	var editor = CreditsEditorScene.instantiate()

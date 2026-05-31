@@ -178,6 +178,7 @@ func _refresh_detail(defs: Array) -> void:
 		return
 	var def = defs[_selected_index]
 	var graphic := String(def.graphic) if def and def.graphic else ""
+	_graphic_preview.set_resource_root(_resource_root())
 	_graphic_preview.set_graphic(graphic)
 	_graphic_name_label.text = graphic if not graphic.is_empty() else "(none)"
 	_match_color_option(_color_lower, int(def.color_lower))
@@ -235,9 +236,11 @@ func _on_graphic_button_pressed() -> void:
 
 func _ensure_picker() -> void:
 	if _picker != null and is_instance_valid(_picker):
+		_picker.set_resource_root(_resource_root())
 		return
 	_picker = VegPickerScene.instantiate()
 	_root.add_child(_picker)
+	_picker.set_resource_root(_resource_root())
 	_picker.graphic_selected.connect(_on_picker_graphic_selected)
 
 
@@ -249,6 +252,12 @@ func _commit_graphic(text: String) -> void:
 	if terrain_editor == null or _selected_index < 0 or _syncing:
 		return
 	terrain_editor.set_foliage_def_field(_selected_index, "graphic", text)
+
+
+func _resource_root() -> NovaResourceRoot:
+	if terrain_editor != null and terrain_editor.has_method("get_resource_root"):
+		return terrain_editor.get_resource_root()
+	return null
 
 
 func _on_color_lower_selected(idx: int) -> void:
@@ -273,5 +282,4 @@ func _on_force_on_toggled(pressed: bool) -> void:
 	if terrain_editor == null or _selected_index < 0 or _syncing:
 		return
 	terrain_editor.set_foliage_def_field(_selected_index, "force_on", pressed)
-
 

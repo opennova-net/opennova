@@ -13,7 +13,7 @@ const DVAN_FIXTURE := "res://../fixtures/3dp/dapche2/dapche2.3di"
 const ARMRY_FIXTURE := "res://../fixtures/3dp/armry01/Armry01.3di"
 const ARMRY_TEXTURE_FIXTURE := "res://../fixtures/3dp/armry01/KArm1_O.TGA"
 const US01_PROJECT_FIXTURE := "res://../fixtures/3dp/US01_onimport/US01.3dp"
-const FULL_00_ENV := "res://game/assets/environments/Full_00/full_00.env"
+const FULL_00_ENV := "res://../fixtures/env/full_00.env"
 const OUTPUT_DIR_NAME := "object_editor_export_test"
 const OED_UPDATE_NONE := 0
 const OED_UPDATE_MTRL := 1
@@ -536,8 +536,10 @@ func test_object_preview_applies_diffuse_material_textures() -> void:
 func test_object_preview_applies_environment_lighting_and_fog_uniforms() -> void:
 	var data := NovaObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var env := ResourceLoader.load(FULL_00_ENV) as EnvFile
-	assert_not_null(env, "Environment fixture should load through ResourceLoader.")
+	var env := EnvFile.new()
+	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV))
+	env.load()
+	assert_true(env.is_loaded(), "Environment fixture should load from the fixtures dir.")
 	if env == null:
 		return
 	var preview = add_child_autofree(ObjectPreviewScript.new())

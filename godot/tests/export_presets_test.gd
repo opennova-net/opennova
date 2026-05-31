@@ -1,9 +1,9 @@
 extends GutTest
 
 
-func test_export_presets_include_kda_and_fnt_files() -> void:
+func test_export_presets_do_not_bundle_resource_root_data() -> void:
 	var text := FileAccess.get_file_as_string("res://export_presets.cfg")
-	assert_string_contains(text, "include_filter=\"*.kda,*.KDA,*.fnt,*.FNT\"",
-		"Godot export presets should explicitly include raw credits and Nova font assets.")
-	assert_eq(text.count("include_filter=\"*.kda,*.KDA,*.fnt,*.FNT\""), 2,
-		"Both mod tools and runtime exports should include .kda and .fnt files.")
+	assert_eq(text.count("include_filter=\"\""), 2,
+		"Mod tools and runtime exports should not bundle original resource-root data.")
+	assert_false(text.contains("*.kda") or text.contains("*.fnt"),
+		"KDA and FNT files are loaded from the configured resource root, not exported in the app PCK.")

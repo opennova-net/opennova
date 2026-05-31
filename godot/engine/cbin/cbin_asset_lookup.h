@@ -1,129 +1,63 @@
 #ifndef OPENNOVA_CBIN_ASSET_LOOKUP_H
 #define OPENNOVA_CBIN_ASSET_LOOKUP_H
 
-#include <godot_cpp/classes/dir_access.hpp>
-#include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+
+#include "fnt/nova_fnt_resource.h"
+#include "util/texture_path_resolver.h"
 
 namespace godot {
 namespace cbin_internal {
 
-// Find font resource by name (case-insensitive).
-// Looks in res://assets/fonts/{name}.fnt
-inline Ref<Resource> find_font_by_name(const String &p_name) {
-	if (p_name.is_empty()) {
-		return Ref<Resource>();
-	}
-
-	// Try exact case first.
-	String path = "res://assets/fonts/" + p_name + ".fnt";
-	if (ResourceLoader::get_singleton()->exists(path)) {
-		return ResourceLoader::get_singleton()->load(path);
-	}
-
-	// Try case-insensitive search.
-	Ref<DirAccess> dir = DirAccess::open("res://assets/fonts");
-	if (!dir.is_valid()) {
-		return Ref<Resource>();
-	}
-
-	String lower_name = p_name.to_lower();
-	dir->list_dir_begin();
-	String filename = dir->get_next();
-	while (!filename.is_empty()) {
-		if (!dir->current_is_dir() && filename.get_extension().to_lower() == "fnt") {
-			if (filename.get_basename().to_lower() == lower_name) {
-				dir->list_dir_end();
-				path = "res://assets/fonts/" + filename;
-				return ResourceLoader::get_singleton()->load(path);
-			}
-		}
-		filename = dir->get_next();
-	}
-	dir->list_dir_end();
-	return Ref<Resource>();
-}
-
-// Find texture resource by name (case-insensitive).
-// Looks in p_base_path/{name} (defaults to res://assets/textures/)
-// When the exact filename is not found, also tries common image extensions
-// (.png, .pcx, .tga, .jpg, .bmp) for the same basename, so callers do not
-// need to know the on-disk format in advance.
-
 namespace {
 
-// Scan p_dir (already open) for a file whose name matches p_lower_name
-// case-insensitively. Returns the matched filename, or empty string.
-// Resets the directory listing on each call.
-inline String scan_dir_for_name(Ref<DirAccess> p_dir, const String &p_lower_name) {
-	p_dir->list_dir_begin();
-	String filename = p_dir->get_next();
-	while (!filename.is_empty()) {
-		if (!p_dir->current_is_dir() && filename.to_lower() == p_lower_name) {
-			p_dir->list_dir_end();
-			return filename;
-		}
-		filename = p_dir->get_next();
+inline Ref<Resource> load_font_path(const String &p_path) {
+	if (p_path.is_empty()) {
+		return Ref<Resource>();
 	}
-	p_dir->list_dir_end();
-	return String();
+
+	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ);
+	if (file.is_null()) {
+		return Ref<Resource>();
+	}
+
+	PackedByteArray bytes = file->get_buffer(file->get_length());
+	file->close();
+
+	Ref<NovaFntResource> font;
+	font.instantiate();
+	if (font->load_from_bytes(bytes) != OK) {
+		return Ref<Resource>();
+	}
+	return font;
 }
 
 }  // namespace
 
-inline Ref<Resource> find_texture_by_name(const String &p_name,
-                                           const String &p_base_path = "res://assets/textures/") {
-	if (p_name.is_empty()) {
+// Find a Nova .fnt by basename in a single resource root directory.
+inline Ref<Resource> find_font_by_name(const String &p_name, const String &p_base_dir) {
+	if (p_name.is_empty() || p_base_dir.is_empty()) {
 		return Ref<Resource>();
 	}
 
-	// Try exact path first.
-	String path = p_base_path + p_name;
-	if (ResourceLoader::get_singleton()->exists(path)) {
-		return ResourceLoader::get_singleton()->load(path);
+	const String file_name = p_name.get_extension().to_lower() == "fnt" ? p_name : p_name + String(".fnt");
+	const String direct_path = p_base_dir.path_join(file_name);
+	if (FileAccess::file_exists(direct_path)) {
+		return load_font_path(direct_path);
 	}
+	const String path = opennova::resolve_file_in_dir(p_base_dir, file_name);
+	return path.is_empty() ? Ref<Resource>() : load_font_path(path);
+}
 
-	// Open the directory for case-insensitive scanning.
-	String dir_path = p_base_path;
-	if (dir_path.ends_with("/")) {
-		dir_path = dir_path.substr(0, dir_path.length() - 1);
-	}
-
-	Ref<DirAccess> dir = DirAccess::open(dir_path);
-	if (!dir.is_valid()) {
+// Resolve an image by filename in a single resource root directory. Extension
+// and case fallbacks are delegated to the shared engine texture resolver.
+inline Ref<Resource> find_texture_by_name(const String &p_name, const String &p_base_dir) {
+	if (p_name.is_empty() || p_base_dir.is_empty()) {
 		return Ref<Resource>();
 	}
-
-	// Case-insensitive scan for the exact filename as given.
-	String lower_name = p_name.to_lower();
-	String matched = scan_dir_for_name(dir, lower_name);
-	if (!matched.is_empty()) {
-		String candidate = p_base_path + matched;
-		if (ResourceLoader::get_singleton()->exists(candidate)) {
-			return ResourceLoader::get_singleton()->load(candidate);
-		}
-	}
-
-	// Fallback: try common image extensions for the same basename.
-	// Useful when the .kda references "cr1.png" but the file on disk is "cr1.pcx"
-	// (or vice versa) — the format loader is the resolution layer.
-	static const char *kAltExts[] = {".png", ".pcx", ".tga", ".jpg", ".bmp"};
-	String base_name = p_name.get_basename();
-	for (const char *ext : kAltExts) {
-		String alt = (base_name + ext).to_lower();
-		if (alt == lower_name) {
-			continue;  // Already tried this one above.
-		}
-		matched = scan_dir_for_name(dir, alt);
-		if (!matched.is_empty()) {
-			String candidate = p_base_path + matched;
-			if (ResourceLoader::get_singleton()->exists(candidate)) {
-				return ResourceLoader::get_singleton()->load(candidate);
-			}
-		}
-	}
-
-	return Ref<Resource>();
+	return opennova::load_texture_from_dir(p_base_dir, p_name);
 }
 
 }  // namespace cbin_internal

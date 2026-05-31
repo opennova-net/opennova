@@ -2,14 +2,15 @@ class_name EditorResourceBrowser
 extends RefCounted
 
 ## The OpenNova Editor's in-editor resource picker: an indexed browser over the
-## configured resource directory (EditorResourceLibrary) with a native
-## "Browse Files..." fallback. Extracted from editor_workstation.gd (B5-3b).
+## configured resource directory (EditorResourceLibrary). Extracted from
+## editor_workstation.gd (B5-3b).
 ##
 ## The dialog is built as a child of the host shell so the shell's existing
 ## find_child("ResourceBrowserDialog") lookups (and the named sub-nodes) keep
 ## resolving. The capabilities the browser can't own itself are injected as
 ## Callables in setup() so it never reaches into the shell's internals:
-##   - open_file_dialog(title, filters, on_pick, current_dir): native fallback
+##   - open_file_dialog(title, filters, on_pick, current_dir): legacy fallback
+##     for workspaces that do not declare a resource kind
 ##   - open_settings(): raise the settings popup
 ##   - current_resource_path(kind) -> String: the active workspace's open file
 ##   - scan_root(): index the configured root (status/popup-sync stay on shell)
@@ -27,7 +28,6 @@ var _settings_button: Button
 var _search: LineEdit
 var _hint: Label
 var _list: ItemList
-var _browse_button: Button
 var _open_button: Button
 var _kind: String = ""
 var _title: String = ""
@@ -137,9 +137,6 @@ func _ensure_dialog() -> void:
 	_list.item_activated.connect(_on_item_activated)
 	box.add_child(_list)
 
-	_browse_button = _dialog.add_button("Browse Files...", false, "browse")
-	_browse_button.name = "ResourceBrowserBrowseFilesButton"
-	_dialog.custom_action.connect(_on_custom_action)
 	_dialog.confirmed.connect(_on_confirmed)
 	_open_button = _dialog.get_ok_button()
 	_open_button.text = "Open"
@@ -207,6 +204,8 @@ func _kind_label() -> String:
 			return "environment"
 		"mission":
 			return "mission"
+		"strings":
+			return "strings"
 		"object", "object_project", "object_model", "object_scene":
 			return "object"
 		_:
@@ -240,17 +239,6 @@ func _open_selected_entry() -> void:
 	if _open_action.is_valid():
 		_open_action.call(path)
 	_dialog.hide()
-
-
-func _on_custom_action(action: StringName) -> void:
-	if action == &"browse":
-		_on_browse_files_pressed()
-
-
-func _on_browse_files_pressed() -> void:
-	if _dialog != null:
-		_dialog.hide()
-	_open_file_dialog.call(_title, _filters, _open_action, _current_dir)
 
 
 func _on_settings_pressed() -> void:

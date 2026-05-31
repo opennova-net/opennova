@@ -1,7 +1,7 @@
 extends GutTest
 
 const CreditsWorkspaceScript = preload("res://modtools/editor/credits_workspace.gd")
-const KDA_SOURCE_PATH := "res://assets/credits/nlist.kda"
+const KDA_SOURCE_PATH := "res://../fixtures/cbin/nlist.reference.kda"
 const TEMP_DIR := "user://test_credits_inspector"
 
 var _kda_path: String = ""

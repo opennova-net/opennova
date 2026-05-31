@@ -779,7 +779,9 @@ void NovaTerrainData::_notify_terrain_changed() {
 }
 
 // ---------------------------------------------------------------------------
-// Texture loading helper — delegates to shared util/texture_loader.h
+// Texture loading helper — delegates to shared util/texture_path_resolver.h.
+// res:// textures load through ResourceLoader (imported .ctex / NovaTexture
+// loader), so they survive export; absolute paths decode raw bytes.
 // ---------------------------------------------------------------------------
 
 static Ref<Texture2D> _load_texture_from_dir(const String &dir, const String &filename) {
@@ -835,20 +837,30 @@ Error NovaTerrainData::load() {
 		}
 	}
 
-	// Load textures from TRN filenames → Texture2D resources
+	// Load textures from TRN filenames → Texture2D resources. Warn when a
+	// referenced texture fails to resolve (e.g. a raw .tga stripped from an
+	// exported PCK) so the failure is visible instead of silently untextured.
 	String trn_dir = trn_path.get_base_dir();
+	auto load_tex = [&](const char *slot, const String &filename) -> Ref<Texture2D> {
+		Ref<Texture2D> tex = _load_texture_from_dir(trn_dir, filename);
+		if (tex.is_null() && !filename.is_empty()) {
+			UtilityFunctions::push_warning("NovaTerrainData: ", slot, " texture '", filename,
+				"' did not resolve under ", trn_dir, " (terrain may render untextured)");
+		}
+		return tex;
+	};
 	const String charmap_filename = String(trn.charmap.c_str());
 	const String foliagemap_filename = String(trn.foliagemap.c_str());
 	const String tilestrip_filename = String(trn.tilestrip.c_str());
-	colormap = _load_texture_from_dir(trn_dir, String(trn.colormap.c_str()));
-	detailmap = _load_texture_from_dir(trn_dir, String(trn.detailmap.c_str()));
-	detailmap_c1 = _load_texture_from_dir(trn_dir, String(trn.detailmap_c1.c_str()));
-	detailmap_c2 = _load_texture_from_dir(trn_dir, String(trn.detailmap_c2.c_str()));
-	detailmap_c3 = _load_texture_from_dir(trn_dir, String(trn.detailmap_c3.c_str()));
-	detailmap2 = _load_texture_from_dir(trn_dir, String(trn.detailmap2.c_str()));
-	detailmapdist = _load_texture_from_dir(trn_dir, String(trn.detailmapdist.c_str()));
-	detailmapdist2 = _load_texture_from_dir(trn_dir, String(trn.detailmapdist2.c_str()));
-	detailblendmap = _load_texture_from_dir(trn_dir, String(trn.detailblendmap.c_str()));
+	colormap = load_tex("colormap", String(trn.colormap.c_str()));
+	detailmap = load_tex("detailmap", String(trn.detailmap.c_str()));
+	detailmap_c1 = load_tex("detailmap_c1", String(trn.detailmap_c1.c_str()));
+	detailmap_c2 = load_tex("detailmap_c2", String(trn.detailmap_c2.c_str()));
+	detailmap_c3 = load_tex("detailmap_c3", String(trn.detailmap_c3.c_str()));
+	detailmap2 = load_tex("detailmap2", String(trn.detailmap2.c_str()));
+	detailmapdist = load_tex("detailmapdist", String(trn.detailmapdist.c_str()));
+	detailmapdist2 = load_tex("detailmapdist2", String(trn.detailmapdist2.c_str()));
+	detailblendmap = load_tex("detailblendmap", String(trn.detailblendmap.c_str()));
 	for (const char* slot : {"charmap", "foliagemap"}) {
 		String slot_id(slot);
 		String filename = (slot_id == "charmap")
@@ -869,7 +881,7 @@ Error NovaTerrainData::load() {
 			reset_pcx_slot_default(slot_id, 1024, 1024);
 		}
 	}
-	tilestrip_tex = _load_texture_from_dir(trn_dir, tilestrip_filename);
+	tilestrip_tex = load_tex("tilestrip", tilestrip_filename);
 	trn.tilestrip = tilestrip_filename.utf8().get_data();
 	_invalidate_colormap_cpu_cache();
 

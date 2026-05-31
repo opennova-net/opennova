@@ -138,8 +138,33 @@ def test_capabilities_drive_output_options(qtbot):
     qtbot.addWidget(dialog)
     assert dialog.blend_check is not None
     assert dialog.max_check is not None
-    assert not hasattr(dialog, "glb_check")
-    assert not hasattr(dialog, "fbx_check")
+    assert dialog.glb_check is not None
+    assert dialog.fbx_check is not None
+
+
+def test_glb_and_fbx_checks_follow_blender_output(qtbot):
+    from opennova_qt_ui import OpenNovaImporterDialog
+
+    dialog = OpenNovaImporterDialog(backend=FakeBackend(supports_blend=True, supports_max=False))
+    qtbot.addWidget(dialog)
+
+    assert dialog.blend_check.isChecked()
+    assert dialog.glb_check.isEnabled()
+    assert dialog.fbx_check.isEnabled()
+
+    dialog.glb_check.setChecked(True)
+    dialog.fbx_check.setChecked(True)
+    dialog.blend_check.setChecked(False)
+
+    assert not dialog.glb_check.isChecked()
+    assert not dialog.fbx_check.isChecked()
+    assert not dialog.glb_check.isEnabled()
+    assert not dialog.fbx_check.isEnabled()
+
+    options = dialog._build_options()
+    assert not options.write_blend
+    assert not options.write_glb
+    assert not options.write_fbx
 
 
 def test_ase_without_native_scene_output_is_rejected(qtbot, tmp_path):
