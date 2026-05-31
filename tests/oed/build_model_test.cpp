@@ -104,8 +104,13 @@ bool run_fixture(const fs::path &root, const Fixture &fixture) {
 	}
 
 	OedExportRequest request = {};
+	// Keep the path string alive for the duration of the request: passing
+	// export_path.string().c_str() directly dangles once the temporary
+	// std::string dies at the end of the statement (benign on MSVC, garbage
+	// on clang/macOS).
+	const std::string export_path_str = export_path.string();
 	request.project = &project;
-	request.output_path = export_path.string().c_str();
+	request.output_path = export_path_str.c_str();
 	request.update_mask = static_cast<unsigned char>(OED_UPDATE_ALL);
 	const OedStatus export_rc = oed_session_export(session, &request);
 	if (export_rc != OED_STATUS_OK) {
