@@ -93,7 +93,7 @@ def test_release_ships_blender_zip_and_max_mzp() -> None:
     assert "package-addon:" in release
     assert "package-max-mzp:" in release
     assert (
-        "needs: [package-addon, package-max-mzp, package-importer, package-godot, package-godot-macos]"
+        "needs: [package-addon, package-max-mzp, package-importer, package-godot-windows-editor, package-godot-windows-runtime, package-godot-macos-editor, package-godot-macos-runtime]"
         in release
     )
     assert "dist/opennova_blender-v*.zip" in release
