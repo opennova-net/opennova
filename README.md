@@ -20,7 +20,7 @@ Open-source toolchain and runtime for NovaLogic's Joint Operations (JO) and newe
 
 Three layers:
 
-- **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): terrain, environment, etc that writes the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.env`, …) directly.
+- **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): workspaces for terrain, objects, fonts, credits, strings, and environment that write the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.3di`, `.fnt`, `.kda`, `.env`, …) directly.
 - **Core engine (`libs/`).** Format parsers, terrain LOD, foliage scatter, environment sampling. Also consumed by Python (`opennova_blender/`, `apps/importer/`) and Blender (`blender/`).
 - **Godot (`godot/engine/` + `godot/game/`).** GDExtension wrappers in `engine/` bind the core into Godot; `game/` is the runtime scene.
 
@@ -70,41 +70,68 @@ Exports the current scene to NovaLogic's ASCII Scene Export format. Supports mul
 
 ## OpenNova Editor (ONED)
 
-The authoring layer for JO assets: terrain, environments, and objects in one editor. Sculpt heightmaps, paint surface types, scatter foliage, and bake straight to the game's data formats (`.trn`, `.cpt`, `.til`, `.env`). The packaged build launches into the terrain editing scene (`godot/modtools/terrain/terrain_editor.tscn`).
+The authoring layer for JO assets, organized into workspaces grouped by purpose:
+
+- **World**: Terrain (sculpt, paint, foliage, tiles, layout), Object (`.3di` model projects), and Mission (planned).
+- **Interface**: Fonts (`.fnt` bitmap fonts), Credits (`.kda` rolling credits), and Strings (RTXT string tables).
+- **Atmosphere**: Environment (`.env` weather, lighting, and time of day), a popup that overlays the active 3D view.
+
+Each workspace reads and writes the game's canonical formats directly. The packaged build opens to the Terrain workspace by default. See [`godot/modtools/README.md`](godot/modtools/README.md) for per-workspace docs and the editor's code-first framework.
 
 ## Repo Layout
 
 | Path | Contents |
 |------|----------|
-| `libs/` | C/C++ format libraries (`adm`, `ase`, `bad`, `bfc1`, `cpt`, `def`, `env`, `pcx`, `pff`, `scr`, `tdp`, `threedi`, `til`, `tpj`, `trn`) plus runtime subsystems (`terrain`, `foliage`, `runtime`). |
+| `libs/` | C/C++ format libraries (`adm`, `ase`, `bad`, `bfc1`, `cbin`, `cpt`, `def`, `env`, `fnt`, `pcx`, `pff`, `rtxt`, `scr`, `tdp`, `threedi`, `til`, `tpj`, `trn`) plus runtime and support subsystems (`foliage`, `oed`, `renderer`, `resource_index`, `terrain`). |
 | `apps/importer/` | `onimport` launcher and CLI compatibility shell. |
 | `opennova_jobs/` | Host-neutral import request/result/job models and validation. |
 | `opennova_qt_ui/` | Host-agnostic PySide6 importer dialog and pure UI helpers. |
 | `opennova_blender/` | Standalone Blender-backed importer backend for the Qt UI. |
 | `opennova_max/` | External 3ds Max batch helpers and Max-side export hooks. |
 | `blender/` | Blender 5.x addon (export side of the pipeline). |
-| `godot/` | Godot 4.6.1 host. `engine/` (GDExtension bindings to `libs/`), `modtools/` (authoring), `game/` (runtime scene), `tests/` (GUT suite). |
+| `godot/` | Godot 4.6.1 host. `engine/` (GDExtension bindings to `libs/`), `modtools/` (the [OpenNova Editor](godot/modtools/README.md)), `game/` (runtime scene), `tests/` (GUT suite). |
 | `scripts/` | Build, test, and packaging scripts (sh + ps1). |
 | `tests/` | C++ test suite (ctest). Godot tests live under `godot/tests/`. |
-| `third_party/` | Vendored deps: godot-cpp, gut, minhook, imgui. |
+| `third_party/` | Vendored deps: godot-cpp, gut, modsuperoed. |
 
 **Conventions.** Format libraries use `opennova_<domain>` CMake target names and the `opennova` C++ namespace; C ABI exports stay flat and domain-prefixed for FFI stability. The shared library target is `opennova_shared`, which bundles the core statics into `opennova.dll` / `libopennova.so`. Blender custom properties owned by this project use `opennova_*` keys.
 
 ## C/C++ Libraries
 
-Modular libraries for parsing and writing NovaLogic formats. All expose a C API suitable for FFI.
+Modular libraries for the NovaLogic formats and runtime systems. The format parsers expose a flat, domain-prefixed C ABI for FFI; the runtime subsystems are portable C++ shared by the engine and editor.
+
+### Format parsers and codecs
 
 | Library | Format | Description |
 |---------|--------|-------------|
 | **threedi** | `.3di` | 3D models: geometry, materials, part animations, collision, occlusion. GP and 3DI3 formats. |
 | **ase** | `.ase` | ASCII Scene Export: read/write 3DS Max scene files. |
-| **tdp** | `.3dp` | Project files: material definitions, LOD settings, part animation metadata. |
+| **tdp** | `.3dp` | Object projects: material definitions, LOD settings, part-animation metadata. |
 | **bad** | `.bad` | Skeletal animation: bone hierarchies, quaternion keyframes, events. |
 | **adm** | `.adm` | Animation definitions: key/value metadata mapping actions to BAD files. |
 | **def** | `.def` | Game definitions: weapons, items, ammo, HUD configuration. |
-| **pff** | `.pff` | Archive containers: PFF3, PFF4, BHD variants. |
-| **bfc1** | | BFC1 decompression (zlib-based) |
-| **scr** | | SCR decryption (multiple keys for different game editions) |
+| **pff** | `.pff` | Archive containers: PFF3, PFF4, and BHD variants. |
+| **pcx** | `.pcx` | PCX (ZSoft Paintbrush) indexed images. |
+| **fnt** | `.fnt` | Bitmap fonts (FNT0): glyph pages, per-glyph metrics, shadow offset. |
+| **rtxt** | `.bin` | RTXT localized string tables (sectioned key/text entries). |
+| **env** | `.env` | Environment: fog, sky, lighting, water, and time-of-day keyframes. |
+| **trn** | `.trn` | Terrain runtime config: maps, foliage, sectors, water. |
+| **til** | `.til` | Tile-overlay placement list. |
+| **cpt** | `.cpt` | Compiled terrain mesh, collision and render (DPTH and CDEP flavors). |
+| **tpj** | `.tpj` | Editable terrain project: a terrain config plus editor lock coordinates and project metadata. |
+| **cbin** | `.kda` | Rolling credits: obfuscated text compiled to a CBIN blob. |
+| **scr** | | SCR decryption (multiple keys for different game editions). |
+| **bfc1** | | BFC1 decompression (zlib-based). |
+
+### Runtime and support subsystems
+
+| Library | Description |
+|---------|-------------|
+| **terrain** | Terrain core: heightmap sampling, normals, sector mesh geometry, LOD. |
+| **foliage** | Procedural foliage scatter from the foliage map, distance cull, dispatch. |
+| **renderer** | Material classification and per-vertex/object light evaluation shared by runtime and editor. |
+| **resource_index** | Indexes asset files under a root directory by kind, for the editor's Open dialogs. |
+| **oed** | OED export session: parse an ASE scene once, then export and re-export to `.3di`. |
 
 ## Building
 
