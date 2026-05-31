@@ -187,7 +187,7 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 	for child in workspace_rail.get_children():
 		if child is Button:
 			row_texts.append((child as Button).text)
-	assert_eq(row_texts, ["Terrain", "Object", "Mission", "Fonts", "Credits", "Strings", "Music", "Environment"],
+	assert_eq(row_texts, ["Terrain", "Object", "Mission", "Fonts", "Credits", "Strings", "Menus", "Music", "Environment"],
 		"The nav should list every workspace as a full-width row, with Environment promoted from the sun button.")
 
 	# Workspaces are grouped under category headers (Muted labels).
