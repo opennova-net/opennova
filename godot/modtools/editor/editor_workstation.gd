@@ -20,11 +20,12 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS 
 enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 
 @onready var _project_label: Label = %ProjectLabel
+@onready var _top_bar: PanelContainer = %TopBar
 @onready var _body_row: SplitContainer = %BodyRow
 @onready var _center_right_split: SplitContainer = %CenterRightSplit
 @onready var _left_lane: PanelContainer = %LeftLane
-@onready var _workspace_rail: VBoxContainer = %WorkspaceRail
-@onready var _workspace_actions_host: VBoxContainer = %WorkspaceActionsHost
+@onready var _workspace_rail: BoxContainer = %WorkspaceRail
+@onready var _workspace_actions_host: BoxContainer = %WorkspaceActionsHost
 @onready var _modes_label: Label = %ModesLabel
 @onready var _mode_rail: VBoxContainer = %ModeRail
 @onready var _inspector_host: Control = %InspectorHost
@@ -218,11 +219,9 @@ func _ensure_workspaces() -> void:
 			_workspaces[def.id] = workspace
 
 
-# Build the vertical, category-grouped workspace nav. Each workspace is a
-# full-width row so labels never squash as more are added; the list lives in a
-# bounded ScrollContainer (see the scene) so growth scrolls instead of pushing
-# the inspector off-screen. The registry is static, so this runs once (unlike
-# _rebuild_workflow_rail, which rebuilds every refresh).
+# Build the top-bar, category-grouped workspace nav. The horizontal rail lives in
+# a bounded ScrollContainer so workspace growth scrolls instead of competing with
+# document actions or the viewport.
 func _build_workspace_rail() -> void:
 	var active_style := _make_workspace_active_stylebox()
 	# Bucket defs by category, preserving array order within each bucket and the
@@ -240,6 +239,8 @@ func _build_workspace_rail() -> void:
 			var header := Label.new()
 			header.text = String(category)
 			header.theme_type_variation = &"Muted"
+			header.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			header.custom_minimum_size = Vector2(0, 34)
 			_workspace_rail.add_child(header)
 		for def_v in buckets[category]:
 			var def := def_v as WorkspaceDef
@@ -251,10 +252,10 @@ func _build_workspace_rail() -> void:
 			btn.tooltip_text = workspace.get_workspace_tooltip() if workspace != null else ""
 			btn.toggle_mode = true
 			btn.focus_mode = Control.FOCUS_NONE
-			btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
 			btn.clip_text = true
-			btn.custom_minimum_size = Vector2(0, 34)
-			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			btn.custom_minimum_size = Vector2(84, 34)
+			btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 			# Faint accent fill so the active row reads as filled, not just outlined.
 			btn.add_theme_stylebox_override("pressed", active_style)
 			btn.add_theme_stylebox_override("hover_pressed", active_style)
@@ -304,7 +305,7 @@ func _action_defs_for_workspace(workspace: EditorWorkspace) -> Array:
 
 func _rebuild_action_buttons(
 	workspace: EditorWorkspace,
-	host: VBoxContainer,
+	host: BoxContainer,
 	buttons: Dictionary,
 	on_pressed: Callable,
 	name_prefix: String = "",
@@ -328,8 +329,12 @@ func _rebuild_action_buttons(
 		btn.name = name_prefix + _workspace_action_button_name(action_id)
 		btn.text = String(action_def["label"])
 		btn.focus_mode = Control.FOCUS_NONE
-		btn.custom_minimum_size = Vector2(0, min_height)
-		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if host is HBoxContainer:
+			btn.custom_minimum_size = Vector2(96, min_height)
+			btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		else:
+			btn.custom_minimum_size = Vector2(0, min_height)
+			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.pressed.connect(on_pressed.bind(action_id))
 		host.add_child(btn)
 		buttons[action_id] = btn
@@ -1199,6 +1204,7 @@ func _refresh_shell_state() -> void:
 func _apply_busy_modulation(active: bool) -> void:
 	var alpha := 0.55 if active else 1.0
 	var color := Color(1.0, 1.0, 1.0, alpha)
+	_top_bar.modulate = color
 	_left_lane.modulate = color
 	_asset_dock.modulate = color
 	_status_bar.modulate = color

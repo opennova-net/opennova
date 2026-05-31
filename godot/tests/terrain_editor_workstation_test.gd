@@ -180,7 +180,10 @@ func _write_fixture_file(path: String, text: String) -> void:
 func test_workstation_starts_with_domain_workspaces() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
-	var workspace_rail: VBoxContainer = workstation.get_node("%WorkspaceRail")
+	var top_bar := workstation.get_node_or_null("%TopBar") as PanelContainer
+	assert_not_null(top_bar, "Shell should expose a top bar for global workspace controls.")
+	var workspace_rail: BoxContainer = workstation.get_node("%WorkspaceRail")
+	assert_true(top_bar.is_ancestor_of(workspace_rail), "Workspace navigation should live in the top bar.")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Terrain should remain the default workspace.")
 
 	var row_texts := []
@@ -198,7 +201,8 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.CREDITS)
 	await get_tree().process_frame
 
-	var actions_host: VBoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	var actions_host: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	assert_true(top_bar.is_ancestor_of(actions_host), "Workspace document actions should live in the top bar.")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.CREDITS,
 		"Credits should become the active workspace.")
 	assert_eq(workstation.get_node("%ProjectLabel").text, "untitled",
@@ -216,7 +220,7 @@ func test_mission_workspace_exposes_document_actions_and_inspector() -> void:
 	workstation.set_editor(editor)
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
 
-	var actions_host: VBoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	var actions_host: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
 	var inspector_host: Control = workstation.get_node("%InspectorHost")
 	assert_eq(workstation.get_node("%ProjectLabel").text, "Mission", "An unloaded Mission workspace owns the shell title while active.")
 	assert_false(workstation.get_node("%AssetDock").visible, "Terrain properties should hide outside the terrain workspace.")
@@ -257,9 +261,13 @@ func test_settings_viewport_popup_edits_resource_directory() -> void:
 	var root := _make_resource_fixture("settings_resource_dir")
 	assert_eq(workstation._set_resource_root_dir("", false, false), OK, "Test should start with no configured resource directory.")
 
+	var top_bar := workstation.get_node("%TopBar") as PanelContainer
+	var viewport_lane := workstation.get_node("%ViewportLane") as Control
 	var settings_button: Button = workstation.get_node("%SettingsToggleButton")
 	var environment_button: Button = workstation.get_node("%EnvironmentToggleButton")
-	assert_eq(settings_button.get_parent(), environment_button.get_parent(), "Settings should live in the viewport button rail.")
+	assert_eq(settings_button.get_parent(), environment_button.get_parent(), "Settings should live beside the other global top-bar controls.")
+	assert_true(top_bar.is_ancestor_of(settings_button), "Settings should live in the top bar, not over the viewport.")
+	assert_null(viewport_lane.find_child("ViewportButtonRail", true, false), "Viewport should not own the global button rail.")
 	assert_true(environment_button.get_index() < settings_button.get_index(), "Settings should sit beside Camera and Environment.")
 
 	settings_button.toggled.emit(true)
@@ -267,7 +275,7 @@ func test_settings_viewport_popup_edits_resource_directory() -> void:
 
 	var popup: PanelContainer = workstation.get_node("%SettingsPopup")
 	var edit: LineEdit = workstation.get_node("%SettingsResourceDirEdit")
-	assert_true(popup.visible, "Settings button should open the viewport settings popup.")
+	assert_true(popup.visible, "Settings button should open the top-bar settings popup.")
 	assert_true(settings_button.button_pressed, "Settings button should stay pressed while open.")
 	assert_null(workstation.get_node_or_null("%SettingsRecursiveToggle"), "The resource root settings should not expose a recursive scan toggle.")
 
@@ -525,9 +533,11 @@ func test_camera_button_exposes_global_viewport_settings() -> void:
 	await get_tree().process_frame
 	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
 
+	var top_bar := workstation.get_node("%TopBar") as PanelContainer
 	var camera_button: Button = workstation.get_node("%CameraToggleButton")
 	var environment_button: Button = workstation.get_node("%EnvironmentToggleButton")
-	assert_eq(camera_button.get_parent(), environment_button.get_parent(), "Camera and environment should live in the same viewport button rail.")
+	assert_eq(camera_button.get_parent(), environment_button.get_parent(), "Camera and environment should live in the same top-bar button rail.")
+	assert_true(top_bar.is_ancestor_of(camera_button), "Camera settings should be launched from the top bar.")
 	assert_true(camera_button.get_index() < environment_button.get_index(), "Camera should sit immediately before Environment.")
 
 	camera_button.toggled.emit(true)
@@ -642,7 +652,7 @@ func test_viewport_popups_are_mutually_exclusive_and_escape_closes_active_popup(
 	escape.keycode = KEY_ESCAPE
 	workstation._unhandled_input(escape)
 
-	assert_false(environment_popup.visible, "Escape should close the visible viewport popup.")
+	assert_false(environment_popup.visible, "Escape should close the visible top-bar popup.")
 	assert_false(environment_button.button_pressed, "Environment button should release after Escape closes the popup.")
 
 
@@ -653,7 +663,7 @@ func test_terrain_workspace_exposes_project_save_and_export_actions() -> void:
 
 	workstation.set_editor(editor)
 
-	var actions_host: VBoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	var actions_host: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
 	var save_button := _find_button_by_text(actions_host, "Save Project")
 	var export_button := _find_button_by_text(actions_host, "Export Terrain...")
 	assert_eq(_workspace_action_texts(actions_host), ["New Terrain", "Open Terrain...", "Save Project", "Save Project As...", "Export Terrain..."], "Terrain should expose project actions and a distinct export action.")
@@ -892,7 +902,7 @@ func test_asset_dock_uses_properties_tab_and_removes_old_toggles() -> void:
 
 	assert_eq(tabs.get_tab_count(), 1, "Asset dock should only expose Properties.")
 	assert_eq(tabs.get_tab_title(0), "Properties", "The first dock tab should be renamed to Properties.")
-	assert_null(dock.get_node_or_null("%CameraTab"), "Camera controls should move to the global viewport popup.")
+	assert_null(dock.get_node_or_null("%CameraTab"), "Camera controls should move to the global top-bar popup.")
 	assert_null(dock.get_node_or_null("Tabs/Document"), "The old Document tab should be removed.")
 	assert_null(dock.get_node_or_null("%ViewTab"), "The old View tab should be removed.")
 	assert_null(dock.get_node_or_null("%WaterVisibleToggle"), "The water-plane toggle should move out of the dock.")

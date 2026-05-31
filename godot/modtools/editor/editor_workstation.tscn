@@ -25,6 +25,91 @@ grow_vertical = 2
 mouse_filter = 2
 theme_override_constants/separation = 12
 
+[node name="TopBar" type="PanelContainer" parent="WorkstationLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="TopMargin" type="MarginContainer" parent="WorkstationLayout/TopBar"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 4
+
+[node name="TopRow" type="HBoxContainer" parent="WorkstationLayout/TopBar/TopMargin"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ProjectLabel" type="Label" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"Heading"
+text = "OpenNova Terrain Editor"
+vertical_alignment = 1
+clip_text = true
+
+[node name="TopProjectSeparator" type="VSeparator" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+layout_mode = 2
+
+[node name="WorkspaceScroll" type="ScrollContainer" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+size_flags_horizontal = 3
+vertical_scroll_mode = 0
+
+[node name="WorkspaceRail" type="HBoxContainer" parent="WorkstationLayout/TopBar/TopMargin/TopRow/WorkspaceScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="TopActionSeparator" type="VSeparator" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+layout_mode = 2
+
+[node name="WorkspaceActionsHost" type="HBoxContainer" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TopSpacer" type="Control" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="GlobalButtonRail" type="HBoxContainer" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="CameraToggleButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow/GlobalButtonRail"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+focus_mode = 0
+toggle_mode = true
+tooltip_text = "Camera"
+flat = false
+
+[node name="EnvironmentToggleButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow/GlobalButtonRail"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+focus_mode = 0
+toggle_mode = true
+tooltip_text = "Environment"
+flat = false
+
+[node name="SettingsToggleButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow/GlobalButtonRail"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+focus_mode = 0
+toggle_mode = true
+tooltip_text = "Settings"
+flat = false
+
 [node name="BodyRow" type="HSplitContainer" parent="WorkstationLayout"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -50,64 +135,21 @@ layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 10
 
-[node name="ProjectLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-theme_type_variation = &"Heading"
-text = "OpenNova Terrain Editor"
-vertical_alignment = 1
-
-[node name="WorkspaceLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
-layout_mode = 2
-theme_type_variation = &"Heading"
-text = "Workspaces"
-
-[node name="LeftSplit" type="VSplitContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
-layout_mode = 2
-size_flags_vertical = 3
-split_offset = 100
-
-[node name="WorkspaceScroll" type="ScrollContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit"]
-custom_minimum_size = Vector2(0, 80)
-layout_mode = 2
-size_flags_vertical = 3
-horizontal_scroll_mode = 0
-
-[node name="WorkspaceRail" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/WorkspaceScroll"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_constants/separation = 4
-
-[node name="LowerLane" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit"]
-layout_mode = 2
-size_flags_vertical = 3
-theme_override_constants/separation = 10
-
-[node name="WorkspaceActionsHost" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/LowerLane"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="WorkspaceSeparator" type="HSeparator" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/LowerLane"]
-layout_mode = 2
-
-[node name="ModesLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/LowerLane"]
+[node name="ModesLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"Heading"
 text = "Workflows"
 
-[node name="ModeRail" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/LowerLane"]
+[node name="ModeRail" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="InspectorSeparator" type="HSeparator" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/LowerLane"]
+[node name="InspectorSeparator" type="HSeparator" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
 layout_mode = 2
 
-[node name="InspectorHost" type="PanelContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox/LeftSplit/LowerLane"]
+[node name="InspectorHost" type="PanelContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -138,7 +180,7 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-[node name="ViewportChrome" type="Control" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane"]
+[node name="TopPopoverLayer" type="Control" parent="."]
 unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = 15
@@ -148,46 +190,7 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-[node name="ViewportButtonRail" type="HBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome"]
-unique_name_in_owner = true
-layout_mode = 1
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -128.0
-offset_top = 12.0
-offset_right = -12.0
-offset_bottom = 48.0
-grow_horizontal = 0
-theme_override_constants/separation = 4
-
-[node name="CameraToggleButton" type="Button" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/ViewportButtonRail"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(36, 36)
-layout_mode = 2
-focus_mode = 0
-toggle_mode = true
-tooltip_text = "Camera"
-flat = false
-
-[node name="EnvironmentToggleButton" type="Button" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/ViewportButtonRail"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(36, 36)
-layout_mode = 2
-focus_mode = 0
-toggle_mode = true
-tooltip_text = "Environment"
-flat = false
-
-[node name="SettingsToggleButton" type="Button" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/ViewportButtonRail"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(36, 36)
-layout_mode = 2
-focus_mode = 0
-toggle_mode = true
-tooltip_text = "Settings"
-flat = false
-
-[node name="CameraPopup" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome"]
+[node name="CameraPopup" type="PanelContainer" parent="TopPopoverLayer"]
 unique_name_in_owner = true
 visible = false
 custom_minimum_size = Vector2(320, 0)
@@ -202,24 +205,24 @@ offset_bottom = -12.0
 grow_horizontal = 0
 script = ExtResource("3_popover")
 
-[node name="CameraPopupMargin" type="MarginContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/CameraPopup"]
+[node name="CameraPopupMargin" type="MarginContainer" parent="TopPopoverLayer/CameraPopup"]
 layout_mode = 2
 theme_override_constants/margin_left = 12
 theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 12
 theme_override_constants/margin_bottom = 12
 
-[node name="CameraPopupBox" type="VBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/CameraPopup/CameraPopupMargin"]
+[node name="CameraPopupBox" type="VBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 10
 
-[node name="CameraPopupHeader" type="HBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/CameraPopup/CameraPopupMargin/CameraPopupBox"]
+[node name="CameraPopupHeader" type="HBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="CameraPopupTitle" type="Label" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupHeader"]
+[node name="CameraPopupTitle" type="Label" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupHeader"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_type_variation = &"Heading"
@@ -227,7 +230,7 @@ text = "Camera"
 vertical_alignment = 1
 clip_text = true
 
-[node name="CameraPopupClose" type="Button" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupHeader"]
+[node name="CameraPopupClose" type="Button" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupHeader"]
 unique_name_in_owner = true
 layout_mode = 2
 custom_minimum_size = Vector2(34, 30)
@@ -235,13 +238,13 @@ focus_mode = 0
 text = "X"
 tooltip_text = "Close camera settings"
 
-[node name="CameraSettingsHost" type="VBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/CameraPopup/CameraPopupMargin/CameraPopupBox"]
+[node name="CameraSettingsHost" type="VBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="EnvironmentPopup" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome"]
+[node name="EnvironmentPopup" type="PanelContainer" parent="TopPopoverLayer"]
 unique_name_in_owner = true
 visible = false
 custom_minimum_size = Vector2(400, 0)
@@ -256,24 +259,24 @@ offset_bottom = -12.0
 grow_horizontal = 0
 script = ExtResource("3_popover")
 
-[node name="EnvironmentPopupMargin" type="MarginContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/EnvironmentPopup"]
+[node name="EnvironmentPopupMargin" type="MarginContainer" parent="TopPopoverLayer/EnvironmentPopup"]
 layout_mode = 2
 theme_override_constants/margin_left = 12
 theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 12
 theme_override_constants/margin_bottom = 12
 
-[node name="EnvironmentPopupBox" type="VBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/EnvironmentPopup/EnvironmentPopupMargin"]
+[node name="EnvironmentPopupBox" type="VBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 10
 
-[node name="EnvironmentPopupHeader" type="HBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+[node name="EnvironmentPopupHeader" type="HBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="EnvironmentPopupTitle" type="Label" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupHeader"]
+[node name="EnvironmentPopupTitle" type="Label" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupHeader"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -282,7 +285,7 @@ text = "Environment"
 vertical_alignment = 1
 clip_text = true
 
-[node name="EnvironmentPopupClose" type="Button" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupHeader"]
+[node name="EnvironmentPopupClose" type="Button" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupHeader"]
 unique_name_in_owner = true
 layout_mode = 2
 custom_minimum_size = Vector2(34, 30)
@@ -290,18 +293,18 @@ focus_mode = 0
 text = "X"
 tooltip_text = "Close environment editor"
 
-[node name="EnvironmentActionsHost" type="VBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+[node name="EnvironmentActionsHost" type="VBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="EnvironmentInspectorHost" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+[node name="EnvironmentInspectorHost" type="PanelContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="SettingsPopup" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome"]
+[node name="SettingsPopup" type="PanelContainer" parent="TopPopoverLayer"]
 unique_name_in_owner = true
 visible = false
 custom_minimum_size = Vector2(420, 0)
@@ -315,23 +318,23 @@ offset_bottom = 0.0
 grow_horizontal = 0
 script = ExtResource("3_popover")
 
-[node name="SettingsPopupMargin" type="MarginContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup"]
+[node name="SettingsPopupMargin" type="MarginContainer" parent="TopPopoverLayer/SettingsPopup"]
 layout_mode = 2
 theme_override_constants/margin_left = 12
 theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 12
 theme_override_constants/margin_bottom = 12
 
-[node name="SettingsPopupBox" type="VBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin"]
+[node name="SettingsPopupBox" type="VBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 10
 
-[node name="SettingsPopupHeader" type="HBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+[node name="SettingsPopupHeader" type="HBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="SettingsPopupTitle" type="Label" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsPopupHeader"]
+[node name="SettingsPopupTitle" type="Label" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsPopupHeader"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_type_variation = &"Heading"
@@ -339,7 +342,7 @@ text = "Settings"
 vertical_alignment = 1
 clip_text = true
 
-[node name="SettingsPopupClose" type="Button" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsPopupHeader"]
+[node name="SettingsPopupClose" type="Button" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsPopupHeader"]
 unique_name_in_owner = true
 layout_mode = 2
 custom_minimum_size = Vector2(34, 30)
@@ -347,28 +350,28 @@ focus_mode = 0
 text = "X"
 tooltip_text = "Close settings"
 
-[node name="SettingsResourceLabel" type="Label" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+[node name="SettingsResourceLabel" type="Label" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
 layout_mode = 2
 theme_type_variation = &"Heading"
 text = "Resource Directory"
 
-[node name="SettingsResourceRow" type="HBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+[node name="SettingsResourceRow" type="HBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="SettingsResourceDirEdit" type="LineEdit" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsResourceRow"]
+[node name="SettingsResourceDirEdit" type="LineEdit" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsResourceRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Path to game or mod resources"
 
-[node name="SettingsBrowseResourceDirButton" type="Button" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsResourceRow"]
+[node name="SettingsBrowseResourceDirButton" type="Button" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsResourceRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 text = "Browse"
 
-[node name="SettingsApplyResourceDirButton" type="Button" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+[node name="SettingsApplyResourceDirButton" type="Button" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
@@ -376,24 +379,24 @@ focus_mode = 0
 text = "Apply and Refresh"
 tooltip_text = "Refresh the resource browser index."
 
-[node name="SettingsViewSection" type="VBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+[node name="SettingsViewSection" type="VBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="SettingsViewLabel" type="Label" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsViewSection"]
+[node name="SettingsViewLabel" type="Label" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsViewSection"]
 layout_mode = 2
 theme_type_variation = &"Heading"
 text = "View"
 
-[node name="SettingsGridToggle" type="CheckBox" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsViewSection"]
+[node name="SettingsGridToggle" type="CheckBox" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsViewSection"]
 unique_name_in_owner = true
 layout_mode = 2
 button_pressed = true
 text = "Show grid"
 tooltip_text = "Show the reference grid in the 3D preview."
 
-[node name="SettingsAxesToggle" type="CheckBox" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportChrome/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsViewSection"]
+[node name="SettingsAxesToggle" type="CheckBox" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsViewSection"]
 unique_name_in_owner = true
 layout_mode = 2
 button_pressed = true

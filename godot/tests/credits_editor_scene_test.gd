@@ -143,10 +143,10 @@ func test_editor_chrome_uses_compact_command_and_preview_controls() -> void:
 	var toolbar := editor.get_node_or_null("%EditorToolbar") as PanelContainer
 	assert_not_null(toolbar, "Credits editor should expose one defined top toolbar area.")
 	if toolbar != null:
-		assert_lte(toolbar.offset_right, -128.0,
-			"credits toolbar should reserve right-side room for global viewport buttons.")
+		assert_eq(toolbar.offset_right, 0.0,
+			"credits toolbar should use the full preview width now that global buttons live in the shell top bar.")
 		assert_true(toolbar.clip_contents,
-			"credits toolbar should clip its own contents before they reach global viewport buttons.")
+			"credits toolbar should clip its own contents before they overflow the preview edge.")
 		var margin := toolbar.get_node_or_null("ToolbarMargin") as MarginContainer
 		assert_not_null(margin, "credits toolbar should have internal padding.")
 		if margin != null:
