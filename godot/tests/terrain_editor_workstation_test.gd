@@ -226,6 +226,50 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 		"Credits should expose save-as for a fresh resource.")
 
 
+func test_workspace_ribbon_exposes_scroll_affordance_when_overflowing() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	workstation.set_size(Vector2(900, 600))
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var scroll := workstation.get_node("%WorkspaceScroll") as ScrollContainer
+	var left := workstation.get_node_or_null("%WorkspaceScrollLeftButton") as Button
+	var right := workstation.get_node_or_null("%WorkspaceScrollRightButton") as Button
+	assert_not_null(left, "Overflowing workspace ribbon should expose a left scroll arrow.")
+	assert_not_null(right, "Overflowing workspace ribbon should expose a right scroll arrow.")
+	if left == null or right == null:
+		return
+
+	assert_true(left.visible, "Overflow arrows should be visible when the workspace ribbon is clipped.")
+	assert_true(right.visible, "Overflow arrows should make hidden workspaces discoverable.")
+	assert_true(left.disabled, "Left arrow should start disabled at the beginning of the ribbon.")
+	assert_false(right.disabled, "Right arrow should be enabled when there are hidden workspaces to the right.")
+
+	var before := scroll.scroll_horizontal
+	right.pressed.emit()
+	await get_tree().process_frame
+
+	assert_gt(scroll.scroll_horizontal, before, "Right arrow should advance the workspace ribbon scroll position.")
+	assert_false(left.disabled, "Left arrow should enable after scrolling right.")
+
+
+func test_workspace_ribbon_hides_scroll_affordance_when_everything_fits() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	workstation.set_size(Vector2(2200, 900))
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var left := workstation.get_node_or_null("%WorkspaceScrollLeftButton") as Button
+	var right := workstation.get_node_or_null("%WorkspaceScrollRightButton") as Button
+	assert_not_null(left, "Workspace ribbon should include a left scroll arrow node.")
+	assert_not_null(right, "Workspace ribbon should include a right scroll arrow node.")
+	if left == null or right == null:
+		return
+
+	assert_false(left.visible, "Left overflow arrow should hide when all workspaces fit.")
+	assert_false(right.visible, "Right overflow arrow should hide when all workspaces fit.")
+
+
 func test_mission_workspace_exposes_document_actions_and_inspector() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())

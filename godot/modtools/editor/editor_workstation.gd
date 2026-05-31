@@ -24,6 +24,9 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _body_row: SplitContainer = %BodyRow
 @onready var _center_right_split: SplitContainer = %CenterRightSplit
 @onready var _left_lane: PanelContainer = %LeftLane
+@onready var _workspace_scroll: ScrollContainer = %WorkspaceScroll
+@onready var _workspace_scroll_left_button: Button = %WorkspaceScrollLeftButton
+@onready var _workspace_scroll_right_button: Button = %WorkspaceScrollRightButton
 @onready var _workspace_rail: BoxContainer = %WorkspaceRail
 @onready var _workspace_actions_host: BoxContainer = %WorkspaceActionsHost
 @onready var _modes_label: Label = %ModesLabel
@@ -119,6 +122,7 @@ func _ready() -> void:
 		func() -> void: _scan_resource_root(false)
 	)
 	_build_workspace_rail()
+	_wire_workspace_scroll_affordance()
 	_wire_camera_popup()
 	_wire_environment_popup()
 	_wire_settings_popup()
@@ -266,6 +270,72 @@ func _build_workspace_rail() -> void:
 				_workspace_buttons[def.id] = btn
 			_workspace_rail.add_child(btn)
 	_refresh_workspace_buttons()
+	_refresh_workspace_scroll_affordance.call_deferred()
+
+
+func _wire_workspace_scroll_affordance() -> void:
+	if _workspace_scroll_left_button != null:
+		_workspace_scroll_left_button.icon = _build_workspace_scroll_icon(-1)
+		if not _workspace_scroll_left_button.pressed.is_connected(_on_workspace_scroll_left_pressed):
+			_workspace_scroll_left_button.pressed.connect(_on_workspace_scroll_left_pressed)
+	if _workspace_scroll_right_button != null:
+		_workspace_scroll_right_button.icon = _build_workspace_scroll_icon(1)
+		if not _workspace_scroll_right_button.pressed.is_connected(_on_workspace_scroll_right_pressed):
+			_workspace_scroll_right_button.pressed.connect(_on_workspace_scroll_right_pressed)
+	if _workspace_scroll != null:
+		if not _workspace_scroll.resized.is_connected(_on_workspace_scroll_resized):
+			_workspace_scroll.resized.connect(_on_workspace_scroll_resized)
+		var h_scroll := _workspace_scroll.get_h_scroll_bar()
+		if h_scroll != null and not h_scroll.value_changed.is_connected(_on_workspace_scroll_value_changed):
+			h_scroll.value_changed.connect(_on_workspace_scroll_value_changed)
+	if _workspace_rail != null and not _workspace_rail.resized.is_connected(_on_workspace_scroll_resized):
+		_workspace_rail.resized.connect(_on_workspace_scroll_resized)
+	_refresh_workspace_scroll_affordance.call_deferred()
+
+
+func _on_workspace_scroll_left_pressed() -> void:
+	_scroll_workspace_ribbon(-1)
+
+
+func _on_workspace_scroll_right_pressed() -> void:
+	_scroll_workspace_ribbon(1)
+
+
+func _on_workspace_scroll_value_changed(_value: float) -> void:
+	_refresh_workspace_scroll_affordance()
+
+
+func _on_workspace_scroll_resized() -> void:
+	_refresh_workspace_scroll_affordance()
+
+
+func _scroll_workspace_ribbon(direction: int) -> void:
+	var max_scroll := _workspace_scroll_max()
+	var next_scroll := clampi(_workspace_scroll.scroll_horizontal + (direction * 112), 0, max_scroll)
+	_workspace_scroll.scroll_horizontal = next_scroll
+	_refresh_workspace_scroll_affordance()
+
+
+func _refresh_workspace_scroll_affordance() -> void:
+	if _workspace_scroll == null or _workspace_rail == null or _workspace_scroll_left_button == null or _workspace_scroll_right_button == null:
+		return
+	var max_scroll := _workspace_scroll_max()
+	var overflow := max_scroll > 1
+	if not overflow and _workspace_scroll.scroll_horizontal != 0:
+		_workspace_scroll.scroll_horizontal = 0
+	if overflow and _workspace_scroll.scroll_horizontal > max_scroll:
+		_workspace_scroll.scroll_horizontal = max_scroll
+	_workspace_scroll_left_button.visible = overflow
+	_workspace_scroll_right_button.visible = overflow
+	_workspace_scroll_left_button.disabled = not overflow or _workspace_scroll.scroll_horizontal <= 0
+	_workspace_scroll_right_button.disabled = not overflow or _workspace_scroll.scroll_horizontal >= max_scroll - 1
+
+
+func _workspace_scroll_max() -> int:
+	if _workspace_scroll == null or _workspace_rail == null:
+		return 0
+	var rail_width := _workspace_rail.get_combined_minimum_size().x
+	return maxi(0, int(ceilf(rail_width - _workspace_scroll.size.x)))
 
 
 # Local-only active-row emphasis (no editor_theme.tres change). The themed pressed
@@ -519,6 +589,7 @@ func _refresh_workspace_surface() -> void:
 	else:
 		_show_workspace_inspector(workspace)
 	_refresh_workspace_buttons()
+	_refresh_workspace_scroll_affordance.call_deferred()
 
 
 func _sync_asset_dock_for_workspace(workspace: EditorWorkspace) -> void:
@@ -718,6 +789,22 @@ func _build_settings_icon() -> Texture2D:
 			var diag_b := absf((p.x - center.x) + (p.y - center.y)) < 1.0 and d >= 6.0 and d <= 8.4
 			if hub or ring or tooth_horizontal or tooth_vertical or diag_a or diag_b:
 				image.set_pixel(x, y, color)
+	return ImageTexture.create_from_image(image)
+
+
+func _build_workspace_scroll_icon(direction: int) -> Texture2D:
+	var image := Image.create(20, 20, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.0, 0.0, 0.0, 0.0))
+	var color := Color(0.8941, 0.8941, 0.9059, 1.0)
+	for step in 7:
+		var top_x := 12 - step if direction < 0 else 7 + step
+		var lower_x := 6 + step if direction < 0 else 13 - step
+		var top_y := 5 + step
+		var lower_y := 10 + step
+		for dx in 2:
+			for dy in 2:
+				image.set_pixel(clampi(top_x + dx, 0, 19), clampi(top_y + dy, 0, 19), color)
+				image.set_pixel(clampi(lower_x + dx, 0, 19), clampi(lower_y + dy, 0, 19), color)
 	return ImageTexture.create_from_image(image)
 
 

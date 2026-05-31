@@ -54,7 +54,16 @@ clip_text = true
 [node name="TopProjectSeparator" type="VSeparator" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
 layout_mode = 2
 
+[node name="WorkspaceScrollLeftButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(30, 36)
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Scroll workspaces left"
+
 [node name="WorkspaceScroll" type="ScrollContainer" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
 size_flags_horizontal = 3
@@ -65,6 +74,14 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 4
+
+[node name="WorkspaceScrollRightButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(30, 36)
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Scroll workspaces right"
 
 [node name="TopActionSeparator" type="VSeparator" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
 layout_mode = 2
