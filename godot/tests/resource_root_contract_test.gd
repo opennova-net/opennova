@@ -54,6 +54,33 @@ func test_resource_root_reads_top_level_pff_entries() -> void:
 	assert_eq(String(entries[0].archive_path).get_file(), "aa_base.pff")
 
 
+func test_resource_root_mount_game_expansion_override() -> void:
+	var root := _make_flat_root("expansion")
+	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/jox01"))
+	_write_pff(root.path_join("resource.pff"), [
+		{"name": "shared.env", "bytes": "base env"},
+		{"name": "baseonly.trn", "bytes": "base trn"},
+	])
+	_write_pff(root.path_join("expansion/jox01/jox01.pff"), [
+		{"name": "shared.env", "bytes": "main env"},
+		{"name": "exponly.3di", "bytes": "exp model"},
+	])
+	_write_pff(root.path_join("expansion/jox01/jox01L.pff"), [
+		{"name": "shared.env", "bytes": "local env"},
+	])
+	_write_file(root.path_join("expansion/jox01/shared.env"), "loose env")
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_game(root, "jox01"), OK)
+	# Override chain (high -> low): loose expansion > {name}L.pff > {name}.pff > base archives.
+	assert_eq(resources.read_file("shared.env").get_string_from_utf8(), "loose env", "Loose expansion file wins over all archives.")
+	assert_eq(resources.read_file("exponly.3di").get_string_from_utf8(), "exp model", "Expansion archive beats base.")
+	assert_eq(resources.read_file("baseonly.trn").get_string_from_utf8(), "base trn", "Base archive still reachable.")
+	# A missing expansion falls back to base-game mounting (no error).
+	assert_eq(resources.mount_game(root, "doesnotexist"), OK)
+	assert_eq(resources.read_file("baseonly.trn").get_string_from_utf8(), "base trn")
+
+
 func after_each() -> void:
 	_remove_dir_recursive(OS.get_cache_dir().path_join("opennova_resource_root_contract"))
 

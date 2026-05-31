@@ -13,6 +13,9 @@ add_subdirectory(../../libs/cpt opennova_cpt)
 add_subdirectory(../../libs/env opennova_env)
 add_subdirectory(../../libs/threedi opennova_threedi)
 add_subdirectory(../../libs/pff opennova_pff)
+add_subdirectory(../../libs/scr opennova_scr)
+add_subdirectory(../../libs/bfc1 opennova_bfc1)
+add_subdirectory(../../libs/vfs opennova_vfs)
 add_subdirectory(../../libs/rtxt opennova_rtxt)
 add_subdirectory(../../libs/ase opennova_ase)
 add_subdirectory(../../libs/tdp opennova_tdp)
@@ -125,6 +128,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_oed
     opennova_renderer
     opennova_terrain
+    opennova_vfs
     opennova_resource_index
     opennova_sbf
     opennova_scr

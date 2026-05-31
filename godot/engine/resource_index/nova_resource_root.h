@@ -34,6 +34,9 @@ public:
 	static bool is_valid_root(const String &path);
 
 	Error set_root_dir(const String &path);
+	// Mount a game install the way the engine does. `expansion` (e.g. "jox01") layers the
+	// expansion's loose files + archives over the base game; empty mounts the base game.
+	Error mount_game(const String &path, const String &expansion = String());
 	String get_root_dir() const;
 	String get_last_error() const;
 	void clear();
