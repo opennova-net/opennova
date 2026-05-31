@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest]
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -93,7 +93,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest]
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     env:
       GODOT_VERSION: 4.6.1-stable
@@ -143,17 +143,35 @@ jobs:
             Expand-Archive -Path .godot-bin/godot.zip -DestinationPath .godot-bin -Force
           }
 
+      - name: Install Godot (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # macOS Godot ships as a .app bundle; the binary lives inside it.
+          if [ ! -x ".godot-bin/Godot.app/Contents/MacOS/Godot" ]; then
+            mkdir -p .godot-bin
+            curl -fL -o .godot-bin/godot.zip \
+              "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_macos.universal.zip"
+            unzip -o .godot-bin/godot.zip -d .godot-bin
+            chmod +x ".godot-bin/Godot.app/Contents/MacOS/Godot"
+          fi
+
       - name: Build GDExtension
         shell: bash
         run: |
           cmake -S godot/engine -B build-godot -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-godot --config Release --target opennova -j
+          # Bound parallelism: a bare -j on the macOS Unix Makefiles generator
+          # means unbounded jobs, which OOM/swap-thrashes the 3-core runner.
+          cmake --build build-godot --config Release --target opennova -j 3
 
       - name: Prime Godot import cache
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64.exe"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            GODOT_BIN="${PWD}/.godot-bin/Godot.app/Contents/MacOS/Godot"
           else
             GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
           fi
@@ -177,6 +195,8 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64.exe"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            export GODOT_BIN="${PWD}/.godot-bin/Godot.app/Contents/MacOS/Godot"
           else
             export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
           fi
@@ -319,9 +339,41 @@ jobs:
           name: opennova_runtime_windows
           path: dist/opennova-runtime-windows-v*.zip
 
+  package-godot-macos:
+    runs-on: macos-latest
+    needs: [test, godot-tests]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Pull Git LFS assets
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull
+          git lfs fsck --objects
+
+      - name: Package Godot exports (macOS)
+        shell: bash
+        run: scripts/package_godot_macos.sh
+
+      - name: Upload opennova-modtools macOS zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova_modtools_macos
+          path: dist/opennova-modtools-macos-v*.zip
+
+      - name: Upload opennova runtime macOS zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova_runtime_macos
+          path: dist/opennova-runtime-macos-v*.zip
+
   validate-deliverables:
     runs-on: ubuntu-latest
-    needs: [package-addon, package-max-mzp, package-importer, package-godot-editor, package-godot-runtime]
+    needs: [package-addon, package-max-mzp, package-importer, package-godot-editor, package-godot-runtime, package-godot-macos]
     steps:
       - uses: actions/checkout@v4
 

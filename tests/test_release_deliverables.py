@@ -67,6 +67,22 @@ def _write_deliverable_fixtures(dist: Path) -> None:
             "libopennova.windows.template_release.x86_64.dll",
         ],
     )
+    _write_zip(
+        dist / "opennova-modtools-macos-v0.0.8.zip",
+        [
+            "opennova-modtools.app/Contents/Info.plist",
+            "opennova-modtools.app/Contents/MacOS/OpenNova",
+            "opennova-modtools.app/Contents/Frameworks/libopennova.macos.template_release.universal.dylib",
+        ],
+    )
+    _write_zip(
+        dist / "opennova-runtime-macos-v0.0.8.zip",
+        [
+            "opennova.app/Contents/Info.plist",
+            "opennova.app/Contents/MacOS/OpenNova",
+            "opennova.app/Contents/Frameworks/libopennova.macos.template_release.universal.dylib",
+        ],
+    )
 
 
 def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path) -> None:
@@ -90,7 +106,9 @@ def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path)
         "opennova-3ds-max-ase-exporter-windows-v0.0.8.mzp",
         "opennova-asset-importer-windows-v0.0.8.exe",
         "opennova-blender-ase-exporter-v0.0.8.zip",
+        "opennova-game-runtime-macos-v0.0.8.zip",
         "opennova-game-runtime-windows-v0.0.8.zip",
+        "opennova-modding-editor-macos-v0.0.8.zip",
         "opennova-modding-editor-windows-v0.0.8.zip",
     ]
     assert sorted(item.public_name for item in result.items) == public_names
@@ -156,10 +174,12 @@ def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> Non
     assert "validate-deliverables:" in workflow
     assert "package-godot-editor:" in workflow
     assert "package-godot-runtime:" in workflow
+    assert "package-godot-macos:" in workflow
     assert "package-godot:" not in workflow
     assert "scripts/package_godot_editor_windows.ps1" in workflow
     assert "scripts/package_godot_runtime_windows.ps1" in workflow
-    assert "needs: [package-addon, package-max-mzp, package-importer, package-godot-editor, package-godot-runtime]" in workflow
+    assert "scripts/package_godot_macos.sh" in workflow
+    assert "needs: [package-addon, package-max-mzp, package-importer, package-godot-editor, package-godot-runtime, package-godot-macos]" in workflow
     assert "scripts/validate_release_deliverables.py --release-version 0.0.0-ci" in workflow
     assert "dist/onimport-v*.exe" in workflow
     assert "dist/opennova-modtools-windows-v*.zip" in workflow
@@ -174,10 +194,12 @@ def test_release_splits_godot_editor_and_runtime_package_jobs() -> None:
 
     assert "package-godot-editor:" in workflow
     assert "package-godot-runtime:" in workflow
+    assert "package-godot-macos:" in workflow
     assert "package-godot:" not in workflow
     assert "scripts/package_godot_editor_windows.ps1" in workflow
     assert "scripts/package_godot_runtime_windows.ps1" in workflow
-    assert "needs: [package-addon, package-max-mzp, package-importer, package-godot-editor, package-godot-runtime]" in workflow
+    assert "scripts/package_godot_macos.sh" in workflow
+    assert "needs: [package-addon, package-max-mzp, package-importer, package-godot-editor, package-godot-runtime, package-godot-macos]" in workflow
 
 
 def test_godot_package_wrappers_target_editor_and_runtime() -> None:

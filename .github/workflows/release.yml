@@ -172,9 +172,41 @@ jobs:
           name: opennova_runtime_windows
           path: dist/opennova-runtime-windows-v*.zip
 
+  package-godot-macos:
+    runs-on: macos-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Pull Git LFS assets
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull
+          git lfs fsck --objects
+
+      - name: Package Godot exports (macOS)
+        shell: bash
+        run: scripts/package_godot_macos.sh
+
+      - name: Upload opennova-modtools macOS zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova_modtools_macos
+          path: dist/opennova-modtools-macos-v*.zip
+
+      - name: Upload opennova runtime macOS zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova_runtime_macos
+          path: dist/opennova-runtime-macos-v*.zip
+
   release:
     runs-on: ubuntu-latest
-    needs: [package-addon, package-max-mzp, package-importer, package-godot-editor, package-godot-runtime]
+    needs: [package-addon, package-max-mzp, package-importer, package-godot-editor, package-godot-runtime, package-godot-macos]
     permissions:
       contents: write
     steps:

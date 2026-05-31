@@ -73,6 +73,15 @@ if(BUILD_SHARED_LIB)
         foreach(target IN LISTS OPENNOVA_CORE_TARGETS)
             target_link_options(opennova_shared PRIVATE "/WHOLEARCHIVE:${target}")
         endforeach()
+    elseif(APPLE)
+        # Apple's ld has no --whole-archive; force-load each static lib by path
+        # so otherwise-unreferenced symbols (e.g. threedi write/free) survive
+        # into the FFI dylib, matching the GNU --whole-archive behaviour below.
+        target_link_libraries(opennova_shared PRIVATE ${OPENNOVA_CORE_TARGETS})
+        foreach(target IN LISTS OPENNOVA_CORE_TARGETS)
+            target_link_options(opennova_shared PRIVATE
+                "LINKER:-force_load,$<TARGET_FILE:${target}>")
+        endforeach()
     else()
         target_link_libraries(opennova_shared
             PRIVATE -Wl,--whole-archive
@@ -113,6 +122,13 @@ if(BUILD_SHARED_LIB)
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         set(_opennova_blender_lib_subdir "linux-x64")
         set(_opennova_blender_lib_filename "libopennova.so")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+            set(_opennova_blender_lib_subdir "macos-arm64")
+        else()
+            set(_opennova_blender_lib_subdir "macos-x64")
+        endif()
+        set(_opennova_blender_lib_filename "libopennova.dylib")
     endif()
 
     if(_opennova_blender_lib_subdir)
