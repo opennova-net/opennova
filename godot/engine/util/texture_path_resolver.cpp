@@ -281,6 +281,19 @@ godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filena
 		return texture_from_image(decode_pcx_image(bytes.ptr(), static_cast<size_t>(bytes.size())));
 	}
 
+	// True DDS (DXT/BC payload): Godot 4.6 decodes it straight from the buffer, so a DDS
+	// that exists only inside a .pff (no filesystem path) still loads. Keyed on the magic,
+	// not the extension, so a mis-named entry still routes here. texture_from_image()
+	// decompresses the BC payload before generating mipmaps.
+	if (bytes_look_like_dds(bytes)) {
+		godot::Ref<godot::Image> image;
+		image.instantiate();
+		if (image->load_dds_from_buffer(bytes) != godot::OK) {
+			return godot::Ref<godot::Texture2D>();
+		}
+		return texture_from_image(image);
+	}
+
 	if ((ext == "tga" || ext == "mdt" || ext == "dds") && !bytes_look_like_dds(bytes)) {
 		if (bytes.size() < 18) {
 			return godot::Ref<godot::Texture2D>();

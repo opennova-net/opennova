@@ -37,6 +37,9 @@ public:
 	// Mount a game install the way the engine does. `expansion` (e.g. "jox01") layers the
 	// expansion's loose files + archives over the base game; empty mounts the base game.
 	Error mount_game(const String &path, const String &expansion = String());
+	// Expansion names discoverable under `<path>/expansion/` (each subdir with a matching
+	// <name>.pff). Independent of the currently mounted root, so the UI can list before mounting.
+	PackedStringArray list_expansions(const String &path) const;
 	String get_root_dir() const;
 	String get_last_error() const;
 	void clear();

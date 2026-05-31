@@ -170,7 +170,11 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 		entry.relative_path = loc.logical_name;
 		if (loc.source == VfsSource::LooseDir) {
 			entry.source_type = "file";
-			entry.path = (fs::path(loc.source_path) / loc.logical_name).string();
+			// generic_string() (not string()) so the joined path uses forward slashes on
+			// every platform. Godot paths are always '/'-separated and consumers compare
+			// these against String.path_join() output (also '/'); native '\' on Windows
+			// breaks those equality checks and yields non-portable object paths.
+			entry.path = (fs::path(loc.source_path) / loc.logical_name).generic_string();
 		} else {
 			entry.source_type = "pff";
 			entry.archive_path = loc.source_path;

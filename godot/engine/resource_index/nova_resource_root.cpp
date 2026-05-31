@@ -4,6 +4,8 @@
 #include "fnt/nova_fnt_resource.h"
 #include "util/texture_path_resolver.h"
 
+#include <vfs/vfs.h>
+
 #include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
@@ -30,6 +32,7 @@ void NovaResourceRoot::_bind_methods() {
 	ClassDB::bind_static_method("NovaResourceRoot", D_METHOD("is_valid_root", "path"), &NovaResourceRoot::is_valid_root);
 	ClassDB::bind_method(D_METHOD("set_root_dir", "path"), &NovaResourceRoot::set_root_dir);
 	ClassDB::bind_method(D_METHOD("mount_game", "path", "expansion"), &NovaResourceRoot::mount_game, DEFVAL(String()));
+	ClassDB::bind_method(D_METHOD("list_expansions", "path"), &NovaResourceRoot::list_expansions);
 	ClassDB::bind_method(D_METHOD("get_root_dir"), &NovaResourceRoot::get_root_dir);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaResourceRoot::get_last_error);
 	ClassDB::bind_method(D_METHOD("clear"), &NovaResourceRoot::clear);
@@ -119,6 +122,18 @@ Error NovaResourceRoot::mount_game(const String &path, const String &expansion) 
 	}
 	last_error_ = String();
 	return OK;
+}
+
+PackedStringArray NovaResourceRoot::list_expansions(const String &path) const {
+	PackedStringArray out;
+	const String clean = normalize_dir(path);
+	if (clean.is_empty()) {
+		return out;
+	}
+	for (const std::string &name : opennova::vfs_list_expansions(clean.utf8().get_data())) {
+		out.push_back(String(name.c_str()));
+	}
+	return out;
 }
 
 String NovaResourceRoot::get_root_dir() const {
