@@ -161,7 +161,9 @@ jobs:
         shell: bash
         run: |
           cmake -S godot/engine -B build-godot -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-godot --config Release --target opennova -j
+          # Bound parallelism: a bare -j on the macOS Unix Makefiles generator
+          # means unbounded jobs, which OOM/swap-thrashes the 3-core runner.
+          cmake --build build-godot --config Release --target opennova -j 3
 
       - name: Show built GDExtension binaries
         shell: bash
@@ -320,6 +322,38 @@ jobs:
         with:
           name: opennova_runtime_windows
           path: dist/opennova-runtime-windows-v*.zip
+
+  package-godot-macos:
+    runs-on: macos-latest
+    needs: [test, godot-tests]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Pull Git LFS assets
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull
+          git lfs fsck --objects
+
+      - name: Package Godot exports (macOS)
+        shell: bash
+        run: scripts/package_godot_macos.sh
+
+      - name: Upload opennova-modtools macOS zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova_modtools_macos
+          path: dist/opennova-modtools-macos-v*.zip
+
+      - name: Upload opennova runtime macOS zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova_runtime_macos
+          path: dist/opennova-runtime-macos-v*.zip
 
   validate-deliverables:
     runs-on: ubuntu-latest

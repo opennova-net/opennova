@@ -11,4 +11,4 @@ windows.release.x86_64 = "res://bin/libopennova.windows.template_release.x86_64.
 linux.debug.x86_64 = "res://bin/libopennova.linux.template_debug.x86_64.so"
 linux.release.x86_64 = "res://bin/libopennova.linux.template_release.x86_64.so"
 macos.debug = "res://bin/libopennova.macos.template_debug.arm64.dylib"
-macos.release = "res://bin/libopennova.macos.template_release.arm64.dylib"
+macos.release = "res://bin/libopennova.macos.template_release.universal.dylib"
