@@ -1,5 +1,8 @@
 #include "nova_mnu_builder.h"
 
+#include "nova_mnu_button.h"
+#include "nova_mnu_checkbox.h"
+#include "nova_mnu_label.h"
 #include "nova_mnu_screen.h"
 
 #include "fnt/nova_fnt_resource.h"
@@ -85,6 +88,44 @@ bool is_button_like(mnu::WindowType t) {
 	return t == mnu::WindowType::Button || t == mnu::WindowType::Radio ||
 			t == mnu::WindowType::CheckBox || t == mnu::WindowType::Combo ||
 			t == mnu::WindowType::SpinList || t == mnu::WindowType::Scroll;
+}
+
+// Hover/click sound split for a widget. The reference keys menu sounds by their
+// trigger string and routes MOUSE/OVER triggers to the hover slot and CLICK/
+// SELECT triggers to the click slot (mnu_import_plugin.cpp ~702-712). Triggers
+// are uppercased so they match the (uppercase) SBF bank entry names at playback.
+struct WidgetSounds {
+	String hover_trigger;
+	String hover_file;
+	String click_trigger;
+	String click_file;
+};
+
+WidgetSounds split_sounds(const std::vector<mnu::Sound> &sounds) {
+	WidgetSounds out;
+	for (const auto &s : sounds) {
+		const String trigger = to_gd(s.trigger).to_upper();
+		const String file = to_gd(s.file);
+		if (trigger.contains("MOUSE") || trigger.contains("OVER")) {
+			out.hover_trigger = trigger;
+			out.hover_file = file;
+		} else if (trigger.contains("CLICK") || trigger.contains("SELECT")) {
+			out.click_trigger = trigger;
+			out.click_file = file;
+		}
+	}
+	return out;
+}
+
+// Collapse an MNU <ACTION> into the widget's plain-data action list (verb +
+// window_state lowercased to match dispatch_action's comparisons).
+MnuActionData make_action(const mnu::Action &act) {
+	MnuActionData data;
+	data.type = to_gd(act.type).to_lower();
+	data.target = to_gd(act.target);
+	data.file = to_gd(act.file);
+	data.window_state = to_gd(act.state).to_lower();
+	return data;
 }
 
 // --- Stylesheet / color resolution -----------------------------------------
@@ -630,7 +671,7 @@ void add_outline(Control *node, const std::vector<mnu::Appearance> &apps) {
 
 Control *build_button(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font &font,
 		ButtonGroupMap &groups) {
-	TextureButton *btn = memnew(TextureButton);
+	NovaMnuButton *btn = memnew(NovaMnuButton);
 	btn->set_ignore_texture_size(true);
 	btn->set_stretch_mode(TextureButton::STRETCH_SCALE);
 	btn->set_focus_mode(Control::FOCUS_ALL);
@@ -669,13 +710,37 @@ Control *build_button(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Fon
 		}
 	}
 
+	// Interactivity wiring (M5): actions, sounds, hover/normal colours, and the
+	// back-pointer to the navigation controller. _ready() consumes these.
+	btn->set_menu(ctx.owner);
+	btn->set_edit_mode(ctx.edit_mode);
+	for (const auto &act : w.actions) {
+		btn->add_action(make_action(act));
+	}
+	const WidgetSounds snd = split_sounds(w.sounds);
+	btn->set_hover_sound(snd.hover_trigger, snd.hover_file);
+	btn->set_click_sound(snd.click_trigger, snd.click_file);
+	{
+		Color normal_c(1, 1, 1, 1);
+		const std::string fg = resolve_color(ctx, font.default_fg);
+		if (!fg.empty()) {
+			normal_c = parse_color(to_gd(fg));
+		}
+		const std::string mo = resolve_color(ctx, font.mouseover_fg);
+		const Color hover_c = mo.empty() ? normal_c : parse_color(to_gd(mo));
+		btn->set_font_colors(normal_c, hover_c);
+	}
+
 	if (ctx.edit_mode) {
 		btn->set_disabled(true); // inert while authoring
 	}
 
 	if (!w.string_data.value.empty()) {
-		Label *lbl = memnew(Label);
+		NovaMnuLabel *lbl = memnew(NovaMnuLabel);
 		lbl->set_name("Label");
+		if (iequals(w.string_data.type, "id")) {
+			lbl->set_string_id(to_gd(w.string_data.value));
+		}
 		lbl->set_anchors_preset(Control::PRESET_FULL_RECT);
 		lbl->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 		apply_label_font(ctx, lbl, font);
@@ -704,10 +769,12 @@ Control *build_button(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Fon
 }
 
 Control *build_checkbox(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font &font) {
-	TextureButton *check = memnew(TextureButton);
+	NovaMnuCheckBox *check = memnew(NovaMnuCheckBox);
 	check->set_toggle_mode(true);
 	check->set_ignore_texture_size(true);
-	check->set_stretch_mode(TextureButton::STRETCH_SCALE);
+	// Checkbox art is aspect-preserved (mnu_checkbox.gd _ready); buttons scale.
+	// Set here (not in _ready) so the edit_mode preview matches runtime.
+	check->set_stretch_mode(TextureButton::STRETCH_KEEP_ASPECT_CENTERED);
 	check->set_focus_mode(Control::FOCUS_ALL);
 
 	Ref<Texture2D> tex_normal = get_texture(ctx, w.appearances, "default");
@@ -730,13 +797,33 @@ Control *build_checkbox(MnuBuildContext &ctx, const mnu::Window &w, const mnu::F
 	if (w.checked) {
 		check->set_pressed(true);
 	}
+
+	// Interactivity wiring (M5): sounds, underline colour (font selected_fg),
+	// back-pointer to the navigation controller. _ready() consumes these.
+	check->set_menu(ctx.owner);
+	check->set_edit_mode(ctx.edit_mode);
+	const WidgetSounds snd = split_sounds(w.sounds);
+	check->set_hover_sound(snd.hover_trigger, snd.hover_file);
+	check->set_click_sound(snd.click_trigger, snd.click_file);
+	{
+		Color underline_c(1, 0, 0, 1);
+		const std::string sfg = resolve_color(ctx, font.selected_fg);
+		if (!sfg.empty()) {
+			underline_c = parse_color(to_gd(sfg));
+		}
+		check->set_underline_color(underline_c);
+	}
+
 	if (ctx.edit_mode) {
 		check->set_disabled(true);
 	}
 
 	if (!w.string_data.value.empty()) {
-		Label *lbl = memnew(Label);
+		NovaMnuLabel *lbl = memnew(NovaMnuLabel);
 		lbl->set_name("Label");
+		if (iequals(w.string_data.type, "id")) {
+			lbl->set_string_id(to_gd(w.string_data.value));
+		}
 		lbl->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 		apply_label_font(ctx, lbl, font);
 
@@ -805,8 +892,11 @@ Control *build_container(MnuBuildContext &ctx, const mnu::Window &w, const mnu::
 	}
 
 	if (!w.string_data.value.empty()) {
-		Label *lbl = memnew(Label);
+		NovaMnuLabel *lbl = memnew(NovaMnuLabel);
 		lbl->set_name("Label");
+		if (iequals(w.string_data.type, "id")) {
+			lbl->set_string_id(to_gd(w.string_data.value));
+		}
 		lbl->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 		apply_label_font(ctx, lbl, font);
 
@@ -972,9 +1062,23 @@ Control *mnu_build_screen(const mnu::Screen &screen, MnuBuildContext &ctx) {
 	screen_node->set_screen_name(to_gd(screen.name));
 	screen_node->set_music_var(screen.music_var);
 	screen_node->set_cursor_file(to_gd(screen.cursor_file));
+	screen_node->set_edit_mode(ctx.edit_mode);
 	screen_node->set_anchors_preset(Control::PRESET_FULL_RECT);
 	if (ctx.edit_mode) {
 		screen_node->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+	}
+
+	// Resolve the cursor art (MNU keeps a single cursor on the root window;
+	// Screen.cursor_file mirrors it) so the screen can apply it when shown.
+	std::string cursor_name = screen.cursor_file;
+	if (cursor_name.empty()) {
+		cursor_name = screen.root_window.cursor.file;
+	}
+	if (!cursor_name.empty()) {
+		Ref<Texture2D> cursor_tex = resolve_texture(ctx, cursor_name);
+		if (cursor_tex.is_valid()) {
+			screen_node->set_cursor_texture(cursor_tex);
+		}
 	}
 
 	NameTracker names;

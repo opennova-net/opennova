@@ -52,6 +52,9 @@
 #include "mnu/mnu_resource_format.h"
 #include "mnu/mns_resource_format.h"
 #include "mnu/nova_mnu_screen.h"
+#include "mnu/nova_mnu_label.h"
+#include "mnu/nova_mnu_button.h"
+#include "mnu/nova_mnu_checkbox.h"
 #include "mnu/nova_mnu_menu.h"
 
 using namespace godot;
@@ -148,6 +151,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ResourceFormatLoaderMNS);
 	GDREGISTER_CLASS(ResourceFormatSaverMNS);
 	GDREGISTER_CLASS(NovaMnuScreen);
+	GDREGISTER_CLASS(NovaMnuLabel);
+	GDREGISTER_CLASS(NovaMnuButton);
+	GDREGISTER_CLASS(NovaMnuCheckBox);
 	GDREGISTER_CLASS(NovaMnuMenu);
 
 	trn_loader.instantiate();

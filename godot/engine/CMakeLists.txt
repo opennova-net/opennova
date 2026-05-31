@@ -77,6 +77,9 @@ add_library(${TARGET_NAME} SHARED
     mnu/mnu_resource_format.cpp
     mnu/mns_resource_format.cpp
     mnu/nova_mnu_screen.cpp
+    mnu/nova_mnu_label.cpp
+    mnu/nova_mnu_button.cpp
+    mnu/nova_mnu_checkbox.cpp
     mnu/nova_mnu_builder.cpp
     mnu/nova_mnu_menu.cpp
 )
