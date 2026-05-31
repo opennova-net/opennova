@@ -235,13 +235,10 @@ func _build_workspace_rail() -> void:
 			category_order.append(def.category)
 		(buckets[def.category] as Array).append(def)
 	for category in category_order:
-		if String(category) != "":
-			var header := Label.new()
-			header.text = String(category)
-			header.theme_type_variation = &"Muted"
-			header.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-			header.custom_minimum_size = Vector2(0, 34)
-			_workspace_rail.add_child(header)
+		if _workspace_rail.get_child_count() > 0:
+			var separator := VSeparator.new()
+			separator.custom_minimum_size = Vector2(8, 34)
+			_workspace_rail.add_child(separator)
 		for def_v in buckets[category]:
 			var def := def_v as WorkspaceDef
 			# Popup workspaces (Environment) are not in _workspaces; their single
@@ -254,7 +251,7 @@ func _build_workspace_rail() -> void:
 			btn.focus_mode = Control.FOCUS_NONE
 			btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
 			btn.clip_text = true
-			btn.custom_minimum_size = Vector2(84, 34)
+			btn.custom_minimum_size = Vector2(96, 34)
 			btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 			# Faint accent fill so the active row reads as filled, not just outlined.
 			btn.add_theme_stylebox_override("pressed", active_style)
@@ -330,7 +327,7 @@ func _rebuild_action_buttons(
 		btn.text = String(action_def["label"])
 		btn.focus_mode = Control.FOCUS_NONE
 		if host is HBoxContainer:
-			btn.custom_minimum_size = Vector2(96, min_height)
+			btn.custom_minimum_size = Vector2(112, min_height)
 			btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		else:
 			btn.custom_minimum_size = Vector2(0, min_height)

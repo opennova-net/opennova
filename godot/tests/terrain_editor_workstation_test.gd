@@ -148,6 +148,14 @@ func _find_node_by_type(root: Node, type_name: String) -> Node:
 	return null
 
 
+func _direct_child_count_of_type(root: Node, type_name: String) -> int:
+	var count := 0
+	for child in root.get_children():
+		if child.is_class(type_name):
+			count += 1
+	return count
+
+
 func _make_resource_fixture(name: String) -> String:
 	# Build fixtures under the OS cache dir (not user://): a resource library
 	# never lives inside the app user-data dir, so this keeps fixtures out of the
@@ -193,16 +201,21 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 	assert_eq(row_texts, ["Terrain", "Object", "Mission", "Fonts", "Credits", "Strings", "Environment"],
 		"The nav should list every workspace as a full-width row, with Environment promoted from the sun button.")
 
-	# Workspaces are grouped under category headers (Muted labels).
-	assert_true(_has_label_text(workspace_rail, "World"), "World should head the world-building workspaces.")
-	assert_true(_has_label_text(workspace_rail, "Interface"), "Interface should head the interface-asset workspaces.")
-	assert_true(_has_label_text(workspace_rail, "Atmosphere"), "Atmosphere should head the Environment workspace.")
+	assert_false(_has_label_text(workspace_rail, "World"), "Top-bar workspace groups should use separators, not inline category words.")
+	assert_false(_has_label_text(workspace_rail, "Interface"), "Top-bar workspace groups should not read like a sentence.")
+	assert_gte(_direct_child_count_of_type(workspace_rail, "VSeparator"), 2,
+		"Top-bar workspace groups should keep visual separation between World, Interface, and Atmosphere.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.CREDITS)
 	await get_tree().process_frame
 
 	var actions_host: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
 	assert_true(top_bar.is_ancestor_of(actions_host), "Workspace document actions should live in the top bar.")
+	assert_null(top_bar.find_child("TopSpacer", true, false),
+		"Top bar should let the workspace scroller absorb empty width instead of inserting a gap between actions and global buttons.")
+	var global_buttons := workstation.get_node("%GlobalButtonRail") as BoxContainer
+	assert_true(actions_host.get_index() < global_buttons.get_index(),
+		"Document actions should sit immediately before the global icon buttons on the right.")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.CREDITS,
 		"Credits should become the active workspace.")
 	assert_eq(workstation.get_node("%ProjectLabel").text, "untitled",
