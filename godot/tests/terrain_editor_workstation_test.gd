@@ -270,6 +270,18 @@ func test_workspace_ribbon_hides_scroll_affordance_when_everything_fits() -> voi
 	assert_false(right.visible, "Right overflow arrow should hide when all workspaces fit.")
 
 
+func test_workspace_ribbon_does_not_force_top_bar_to_clip_at_mid_width() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	workstation.set_size(Vector2(1366, 768))
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var settings := workstation.get_node("%SettingsToggleButton") as Button
+	var shell_right: float = workstation.get_global_rect().end.x
+	assert_lte(settings.get_global_rect().end.x, shell_right + 0.5,
+		"The top bar should keep global controls visible by letting the workspace ribbon scroll first.")
+
+
 func test_mission_workspace_exposes_document_actions_and_inspector() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
