@@ -151,7 +151,7 @@ struct ServerAuth {
 	// `\x03 <name>\0 <LE16 value_len> <value>\0` inner shape.
 	std::vector<std::pair<std::string, std::string>> cu;
 
-	std::string scrk;     // Server-side Session CRypto Key (62 chars typ.)
+	std::string scrk;     // Server-side Session CRypto Key (61 chars; retail capture)
 	std::string na;       // echo client.na
 	uint32_t rip = 0;     // Reflected IP (client's remote IP)
 	uint32_t rpn = 0;     // Reflected Port Number

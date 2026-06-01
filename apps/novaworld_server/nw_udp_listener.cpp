@@ -52,21 +52,24 @@ uint32_t ip_to_le(const std::array<uint8_t, 4> &ip) {
 	     | (uint32_t(ip[3]) << 24);
 }
 
-// 62-char SCRK matching onnet's generate_scrk():
+// 61-char SCRK matching retail captures (notes/retail_capture_findings.md:36-37,62:
+// ClientAuth and ServerAuth SCRK are both 61 chars; "SCRK = 61-byte ASCII key"):
 //   chars = string.ascii_uppercase + string.digits  (36 char alphabet)
-//   length = 62
-// Retail's example value (notes/retail_capture_findings.md):
-//   "FZJK23NP67STBCXYGH01LM45QR89VWDFZJK23NP67STBCXYGH01LM45QR89VW"
-// — which happens to repeat a 30-char half twice; we don't replicate that
-// pattern explicitly (random is fine), only the length + alphabet.
+//   length = 61
+// Retail's example value:
+//   "FZJK23NP67STBCXYGH01LM45QR89VWDFZJK23NP67STBCXYGH01LM45QR89VW"  (61 chars)
+// — two 30-char halves joined by one char; we don't replicate that structure
+// explicitly (random is fine), only the length + alphabet. We previously emitted
+// 62, diverging from every capture.
+static constexpr int kDevScrkLength = 61;
 std::string make_dev_scrk() {
 	static constexpr char alphabet[] =
 		"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 	static thread_local std::mt19937 gen{std::random_device{}()};
 	std::uniform_int_distribution<int> pick(0, 35);
 	std::string out;
-	out.reserve(62);
-	for (int i = 0; i < 62; ++i) {
+	out.reserve(kDevScrkLength);
+	for (int i = 0; i < kDevScrkLength; ++i) {
 		out.push_back(alphabet[pick(gen)]);
 	}
 	return out;
