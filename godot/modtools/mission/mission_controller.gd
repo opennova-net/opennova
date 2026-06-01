@@ -18,6 +18,7 @@ extends RefCounted
 signal changed  # Mission loaded or cleared; the inspector rebuilds on this.
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const MissionWaypointOverlay := preload("res://engine/mission/mission_waypoint_overlay.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
 const OBJECTS_CONTAINER := "MissionObjects"
 
@@ -80,6 +81,34 @@ var _clean_snapshot: PackedByteArray = PackedByteArray()
 # Guards undo/redo against re-entrancy (a restore -> rebake -> changed -> inspector
 # refresh must never re-enter another restore).
 var _restoring: bool = false
+
+# --- Authoring (P7): waypoints ------------------------------------------------
+# Waypoints mode: while true the viewport selects / drags the active path's markers
+# instead of objects, and the inspector shows the waypoint panel. The two modes are
+# exclusive; switching clears the other's selection + any armed tool. Object editing
+# (P1-P5) is untouched in objects mode.
+var _waypoint_mode: bool = false
+# The waypoint path (0..127) the panel is focused on, or -1 when none is chosen. Persists
+# across re-bakes (undo/redo/edit), unlike the selection, so the user stays on their path.
+var _selected_path_index: int = -1
+# The selected marker as { path_index, marker_index }, or empty when none is selected.
+var _selected_marker: Dictionary = {}
+# Marker pickables harvested from the overlay (active path only): one per marker gizmo,
+# { path_index, marker_index, order, aabb (world) }. Parallels _pickable for objects.
+var _marker_pickable: Array = []
+# The in-world overlay drawing marker gizmos + path lines. Built under the objects
+# container (so it frees with it); the ref is dropped on every re-bake and lazily rebuilt.
+var _waypoint_overlay  # MissionWaypointOverlay (preloaded, no class_name)
+# Marker placement ("add marker" tool): while armed, a terrain click adds a marker to the
+# active path instead of selecting (mirrors object placement arming, but mode-scoped).
+var _marker_place_armed: bool = false
+# The active path marker id seeded into add_waypoint_marker when the mission carries no
+# marker to copy from (authoring waypoints from scratch). Reused from an existing marker
+# when one is present, so shipped data round-trips with its own id.
+const DEFAULT_MARKER_ITEM_ID := 100001
+# The live (container-local) position of a marker being dragged, written to the record on
+# release (the drag previews the gizmo only; the record is committed once, as one step).
+var _marker_drag_local: Vector3 = Vector3.ZERO
 
 
 func _init(p_terrain_editor: Node = null) -> void:
@@ -197,6 +226,13 @@ func open_mission(bms_path: String) -> Error:
 	# apples-to-apples with later snapshot()s.
 	_clean_snapshot = mission.snapshot()
 	_clear_history()
+	# Fresh document: drop any prior marker selection and focus a populated path (so the
+	# waypoint panel is not empty) only if the user is already in waypoints mode.
+	_selected_marker = {}
+	_marker_place_armed = false
+	_selected_path_index = _first_nonempty_path() if _waypoint_mode else -1
+	if _waypoint_mode:
+		_refresh_waypoint_overlay()
 	_last_status = _describe_load(mission, bms_path, env_note)
 	changed.emit()
 	return OK
@@ -206,6 +242,8 @@ func clear() -> void:
 	_reset_selection_state()
 	_pickable = []
 	_place_item_id = 0
+	_marker_place_armed = false
+	_selected_path_index = -1
 	_placer = null
 	_clear_objects()
 	_mission = null
@@ -444,23 +482,35 @@ func handle_viewport_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
-		# Right-click while armed cancels placement (a familiar "drop the tool" gesture)
-		# and does not fall through to selection.
-		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed and is_placement_armed():
-			disarm_placement()
-			return
+		# Right-click while armed cancels the placement tool (a familiar "drop the tool"
+		# gesture) and does not fall through to selection -- objects in objects mode, the
+		# add-marker tool in waypoints mode.
+		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+			if is_placement_armed():
+				disarm_placement()
+				return
+			if _marker_place_armed:
+				disarm_marker_placement()
+				return
 		if mb.button_index != MOUSE_BUTTON_LEFT:
 			return
 		if mb.pressed:
+			# Waypoints mode: left-click selects (or, when armed, adds) the active path's
+			# markers, and starts a marker drag -- never objects (the modes are exclusive).
+			if _waypoint_mode:
+				_on_marker_left_press(mb.position)
 			# Armed: left-click places a new instance at the cursor instead of selecting.
 			# Stay armed so the user can place several; right-click / Escape / the Stop
 			# button disarms.
-			if is_placement_armed():
+			elif is_placement_armed():
 				_place_armed_at(mb.position)
 			else:
 				_on_left_press(mb.position)
 		else:
-			_on_left_release()
+			if _waypoint_mode:
+				_on_marker_left_release()
+			else:
+				_on_left_release()
 	elif event is InputEventKey:
 		var key := event as InputEventKey
 		# Ignore key-up and auto-repeat echoes (holding the key must not chain actions).
@@ -479,18 +529,25 @@ func handle_viewport_input(event: InputEvent) -> void:
 				redo()
 				_consume_viewport_key()
 				return
-		if key.keycode == KEY_ESCAPE and is_placement_armed():
-			disarm_placement()
-		elif (key.keycode == KEY_DELETE or key.keycode == KEY_BACKSPACE) and not key.ctrl_pressed and not _selected_ref.is_empty():
-			# Delete the selected entity, unless a GUI control owns the keyboard. The router
+		if key.keycode == KEY_ESCAPE:
+			# Escape drops whichever placement tool is armed (object or add-marker).
+			if is_placement_armed():
+				disarm_placement()
+			elif _marker_place_armed:
+				disarm_marker_placement()
+		elif (key.keycode == KEY_DELETE or key.keycode == KEY_BACKSPACE) and not key.ctrl_pressed:
+			# Delete the current selection, unless a GUI control owns the keyboard. The router
 			# feeds us via _unhandled_input, which only withholds keys a focused control
 			# actually consumes -- a SpinBox holding focus via its arrows, an ItemList, or a
 			# Button do NOT consume Delete/Backspace, so without this guard a stray Backspace
-			# while editing a coordinate field would silently delete the object. Mirrors the
-			# focus-owner guard in credits_editor / fnt_editor / terrain_editor. (Placement
-			# arming also clears the selection, so this and an armed tool stay exclusive.)
+			# while editing a field would silently delete. Mirrors the focus-owner guard in
+			# credits_editor / fnt_editor / terrain_editor. Mode-scoped: a marker in waypoints
+			# mode, an object otherwise.
 			if not _gui_focus_blocks_shortcut():
-				delete_selected()
+				if _waypoint_mode and not _selected_marker.is_empty():
+					delete_selected_marker()
+				elif not _waypoint_mode and not _selected_ref.is_empty():
+					delete_selected()
 	elif event is InputEventMouseMotion and _drag_active:
 		var motion := event as InputEventMouseMotion
 		# Defend against a missed button-up (e.g. the release landed on a different
@@ -499,7 +556,11 @@ func handle_viewport_input(event: InputEvent) -> void:
 		if (motion.button_mask & MOUSE_BUTTON_MASK_LEFT) == 0:
 			cancel_drag()
 			return
-		_on_drag(motion.position)
+		# Drag the active mode's selection: a marker in waypoints mode, an object otherwise.
+		if _waypoint_mode:
+			_on_marker_drag(motion.position)
+		else:
+			_on_drag(motion.position)
 
 
 # End an in-progress drag without committing. The workspace calls this when it
@@ -508,11 +569,15 @@ func handle_viewport_input(event: InputEvent) -> void:
 func cancel_drag() -> void:
 	_drag_active = false
 	_drag_moved = false
-	# Close any open edit session. A drag is visual-only until _on_left_release commits
-	# it, so a cancelled drag leaves the document unchanged and this pushes nothing; an
-	# inspector edit session that happens to be open keeps its undo step (commit, not
-	# discard, so a workspace switch mid-edit does not silently drop the step).
+	# Close any open edit session. A drag is visual-only until release commits it, so a
+	# cancelled drag leaves the document unchanged and this pushes nothing; an inspector edit
+	# session that happens to be open keeps its undo step (commit, not discard, so a workspace
+	# switch mid-edit does not silently drop the step).
 	commit_edit()
+	# A cancelled marker drag previewed the gizmo but wrote no record; snap it back to the
+	# stored position.
+	if _waypoint_mode:
+		_refresh_waypoint_overlay()
 
 
 func _on_left_press(mouse_pos: Vector2) -> void:
@@ -692,23 +757,27 @@ func set_selected_rotation(rot_deg: Vector3) -> void:
 
 
 func set_selected_team(value: int) -> void:
-	_set_selected_property("team", value)
+	# team / group are stored as uint8 by the format; clamp at this API boundary so an
+	# out-of-range value cannot silently wrap (the SpinBoxes already cap 0..255, but
+	# these methods are public).
+	set_selected_property("team", clampi(value, 0, 255))
 
 
 func set_selected_group(value: int) -> void:
-	_set_selected_property("group", value)
+	set_selected_property("group", clampi(value, 0, 255))
 
 
-func _set_selected_property(property: String, value: int) -> void:
+# Generic per-entity scalar property edit from the inspector: team / group plus the
+# AI + waypoint fields the format carries (waypoint_id, wp_number, perception, accuracy,
+# alert_state, the engagement / attack distances, spawn_count, max_simultaneous,
+# ai_flags). `property` is the entity-dictionary key it edits. A property change is its
+# own undo step: close any open transform session first, then capture the pre-edit state
+# and record it only if the write actually changed the bytes (a same-value write is a
+# no-op). The value range is governed by the inspector's SpinBoxes and the format's field
+# widths, so this does not clamp; team / group clamp through their wrappers above.
+func set_selected_property(property: String, value: int) -> void:
 	if _selected_ref.is_empty() or _mission == null:
 		return
-	# team / group are stored as uint8 by the format; clamp at this API boundary so an
-	# out-of-range value cannot silently wrap (the SpinBoxes already cap 0..255, but
-	# this method is public).
-	value = clampi(value, 0, 255)
-	# A property change is its own undo step: close any open transform session first, then
-	# capture the pre-edit state and record it only if the write actually changed the bytes
-	# (a same-value write is a no-op).
 	_flush_edit()
 	var before := _mission.snapshot()
 	if _mission.set_entity_property_int(int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value):
@@ -911,6 +980,440 @@ func _rebake_objects() -> void:
 		options["environment_node"] = env_node
 	_stats = _placer.place(_mission, world_root, options)
 	_pickable = _placer.pickable_records
+	# The re-bake replaced the container (and the old overlay with it); rebuild the waypoint
+	# overlay against the new world when waypoints mode is active.
+	if _waypoint_mode:
+		_refresh_waypoint_overlay()
+
+
+# --- Authoring (P7): waypoint mode + marker selection -------------------------
+# Waypoints mode switches the viewport from object editing to authoring the active path's
+# markers, and the inspector to the waypoint panel. The two modes are exclusive: entering
+# either drops the other's selection and any armed placement tool. The chosen path persists
+# across re-bakes; the marker selection (like the object selection) does not. Marker
+# picking reuses the same analytic ray-vs-AABB as objects, over the overlay's gizmo AABBs.
+
+func set_waypoint_mode(enabled: bool) -> void:
+	if _waypoint_mode == enabled:
+		return
+	# A mode switch is a fresh context: close any open edit session as its own step first.
+	_flush_edit()
+	_waypoint_mode = enabled
+	# Exclusive selection: clear the object selection refs + its box, the marker selection,
+	# and any armed object placement, so only the active mode's clicks are live.
+	_selected_ref = {}
+	_selected_records = []
+	_selected_node = null
+	_hide_selection_box()
+	_selected_marker = {}
+	_place_item_id = 0
+	_marker_place_armed = false
+	if enabled and _selected_path_index < 0:
+		# Focus a populated path on entry so the panel is not empty.
+		_selected_path_index = _first_nonempty_path()
+	_refresh_waypoint_overlay()
+	if _waypoint_overlay != null and is_instance_valid(_waypoint_overlay):
+		_waypoint_overlay.visible = enabled
+	changed.emit()
+
+
+func is_waypoint_mode() -> bool:
+	return _waypoint_mode
+
+
+# Focus a waypoint path (0..127) in the panel + overlay. Drops the marker selection (a
+# different path's markers) and rebuilds the overlay so its gizmos / pickables follow.
+func select_waypoint_path(index: int) -> void:
+	if index == _selected_path_index:
+		return
+	_selected_path_index = index
+	# Drop the marker selection (it belonged to the previous path) AND tell the overlay to
+	# clear its highlight, so a marker index that also appears on the new path is not left
+	# lit. _refresh_waypoint_overlay then rebuilds against the new active path.
+	_selected_marker = {}
+	if _waypoint_overlay != null and is_instance_valid(_waypoint_overlay):
+		_waypoint_overlay.set_selected_marker(-1)
+	_refresh_waypoint_overlay()
+	changed.emit()
+
+
+func get_selected_waypoint_path_index() -> int:
+	return _selected_path_index
+
+
+# Focus the first empty waypoint path so the user can author into it. The path list only
+# shows populated paths (plus the active one), so on an all-empty mission no path is
+# selectable and "Add marker" would stay disabled forever; this is the "start a new route"
+# entry point. Returns the chosen path index, or -1 if all 128 are full (not reachable in
+# practice). Selecting it makes the (empty) path active, which the list then shows.
+func select_new_waypoint_path() -> int:
+	if _mission == null:
+		return -1
+	var idx := _first_empty_path()
+	if idx >= 0:
+		select_waypoint_path(idx)
+	return idx
+
+
+# Set the active path's flags from the three editor toggles (loop is the inverse of the
+# stored DoesNotLoop bit). One undo step: re-pass the path's current marker order with the
+# new flags through set_waypoint_path (a flag-only edit), then re-bake the overlay (team
+# colour / loop segment may change). Inert without an active path / mission.
+func set_waypoint_flags(loop: bool, blue: bool, red: bool) -> void:
+	if _mission == null or _selected_path_index < 0:
+		return
+	var path := _mission.get_waypoint_path(_selected_path_index)
+	if path.is_empty():
+		return
+	var flags := 0
+	if not loop:
+		flags |= NovaMissionData.WP_FLAG_DOES_NOT_LOOP
+	if blue:
+		flags |= NovaMissionData.WP_FLAG_BLUE_TEAM
+	if red:
+		flags |= NovaMissionData.WP_FLAG_RED_TEAM
+	var indices: PackedInt32Array = path.get("marker_indices", PackedInt32Array())
+	_flush_edit()
+	var before := _mission.snapshot()
+	if _mission.set_waypoint_path(_selected_path_index, indices, flags):
+		_push_undo_step(before)
+		_refresh_waypoint_overlay()
+		mark_dirty()
+
+
+func get_waypoint_summaries() -> Array:
+	return _mission.get_waypoint_summaries() if _mission != null else []
+
+
+# The active path as { index, flags, marker_count, marker_indices }, or {} when none is
+# chosen / no mission is loaded.
+func get_active_waypoint_path() -> Dictionary:
+	if _mission == null or _selected_path_index < 0:
+		return {}
+	return _mission.get_waypoint_path(_selected_path_index)
+
+
+# The selected marker enriched with its entity position for the inspector readout, or {}.
+func get_selected_marker() -> Dictionary:
+	if _selected_marker.is_empty() or _mission == null:
+		return {}
+	var marker_index := int(_selected_marker["marker_index"])
+	var entity := _mission.get_entity(NovaMissionData.KIND_MARKER, marker_index)
+	if entity.is_empty():
+		return {}
+	return {
+		"path_index": int(_selected_marker["path_index"]),
+		"marker_index": marker_index,
+		"position": entity.get("position", Vector3.ZERO),
+	}
+
+
+# The first waypoint path that has at least one marker, or -1 if every path is empty.
+func _first_nonempty_path() -> int:
+	if _mission == null:
+		return -1
+	for s in _mission.get_waypoint_summaries():
+		if int((s as Dictionary)["marker_count"]) > 0:
+			return int((s as Dictionary)["index"])
+	return -1
+
+
+# The first waypoint path with no markers, or -1 if all 128 are populated. Used by
+# select_new_waypoint_path to give from-scratch authoring an empty path to fill.
+func _first_empty_path() -> int:
+	if _mission == null:
+		return -1
+	for s in _mission.get_waypoint_summaries():
+		if int((s as Dictionary)["marker_count"]) == 0:
+			return int((s as Dictionary)["index"])
+	return -1
+
+
+# (Re)build the in-world overlay from the current mission + active path, and re-harvest the
+# marker pickable index. Creates the overlay node under the objects container on first use
+# (and after a re-bake freed it). The overlay reflects the controller's marker selection.
+func _refresh_waypoint_overlay() -> void:
+	if _mission == null:
+		return
+	var container := _objects_container()
+	if container == null:
+		return
+	if _waypoint_overlay == null or not is_instance_valid(_waypoint_overlay):
+		_waypoint_overlay = MissionWaypointOverlay.new()
+		_waypoint_overlay.name = "MissionWaypointOverlay"
+		_waypoint_overlay.visible = _waypoint_mode
+		container.add_child(_waypoint_overlay)
+	_waypoint_overlay.rebuild(_mission, _selected_path_index)
+	_marker_pickable = _waypoint_overlay.marker_pickables()
+	if not _selected_marker.is_empty():
+		_waypoint_overlay.set_selected_marker(int(_selected_marker["marker_index"]))
+
+
+# Select a marker on the active path by its KIND_MARKER entity index (the inspector's
+# ordered marker list drives this). Inert without an active path.
+func select_waypoint_marker(marker_index: int) -> void:
+	if _selected_path_index < 0:
+		return
+	_select_marker(_selected_path_index, marker_index)
+
+
+func _on_marker_left_press(mouse_pos: Vector2) -> void:
+	# Armed: a click adds a marker to the active path at the cursor instead of selecting.
+	if _marker_place_armed:
+		_place_marker_armed_at(mouse_pos)
+		return
+	# Close any open edit session as its own step before a new gesture (mirrors _on_left_press).
+	_flush_edit()
+	var ref := _pick_marker(mouse_pos)
+	if ref.is_empty():
+		_deselect_marker()
+		return
+	_select_marker(int(ref["path_index"]), int(ref["marker_index"]))
+	# Begin a drag: motion re-grounds the marker on the terrain, release writes the record as
+	# one undo step (a plain click selects without moving, like an object click).
+	_drag_active = true
+	_drag_moved = false
+	begin_edit()
+
+
+# Pick the nearest active-path marker under the cursor (ray-vs-AABB over the overlay's
+# gizmo AABBs), or {} on a miss. Mirrors _pick_entity but over _marker_pickable.
+func _pick_marker(mouse_pos: Vector2) -> Dictionary:
+	if terrain_editor == null or not terrain_editor.has_method("get_editor_camera"):
+		return {}
+	var camera: Camera3D = terrain_editor.get_editor_camera()
+	if camera == null:
+		return {}
+	var from := camera.project_ray_origin(mouse_pos)
+	var dir := camera.project_ray_normal(mouse_pos)
+	var best_t := INF
+	var best: Dictionary = {}
+	for rec in _marker_pickable:
+		var aabb: AABB = rec["aabb"]
+		if aabb.size == Vector3.ZERO:
+			continue
+		var t := _ray_aabb_entry(aabb, from, dir)
+		if t >= 0.0 and t < best_t:
+			best_t = t
+			best = { "path_index": int(rec["path_index"]), "marker_index": int(rec["marker_index"]) }
+	return best
+
+
+func _select_marker(path_index: int, marker_index: int) -> void:
+	_selected_marker = { "path_index": path_index, "marker_index": marker_index }
+	if _waypoint_overlay != null and is_instance_valid(_waypoint_overlay):
+		_waypoint_overlay.set_selected_marker(marker_index)
+	changed.emit()
+
+
+func _deselect_marker() -> void:
+	if _selected_marker.is_empty():
+		return
+	_selected_marker = {}
+	if _waypoint_overlay != null and is_instance_valid(_waypoint_overlay):
+		_waypoint_overlay.set_selected_marker(-1)
+	changed.emit()
+
+
+# --- Authoring (P7d): marker drag / add / reorder / delete --------------------
+# Marker editing reuses the object authoring spine: the terrain-regrounding drag, the
+# begin_edit/commit_edit undo bracketing, and the snapshot/_push_undo_step step model. A
+# drag previews the gizmo and commits the record once on release; add / delete are
+# structural (they change the marker list), so they re-bake; reorder / flags rewrite only
+# the path's reference list.
+
+# Re-ground the dragged marker on the terrain each motion: preview the gizmo only (the
+# record is written once, on release), so a drag is one undo step.
+func _on_marker_drag(mouse_pos: Vector2) -> void:
+	if _selected_marker.is_empty() or terrain_editor == null or not terrain_editor.has_method("raycast_terrain_at"):
+		return
+	var hit: Vector3 = terrain_editor.raycast_terrain_at(mouse_pos)
+	if not terrain_editor.is_valid_terrain_hit(hit):
+		return
+	var container := _objects_container()
+	if container == null:
+		return
+	_drag_moved = true
+	_marker_drag_local = container.global_transform.affine_inverse() * hit
+	if _waypoint_overlay != null and is_instance_valid(_waypoint_overlay):
+		_waypoint_overlay.preview_marker_position(int(_selected_marker["marker_index"]), _marker_drag_local)
+
+
+func _on_marker_left_release() -> void:
+	if _drag_active and _drag_moved and not _selected_marker.is_empty():
+		_commit_marker_drag()
+	_drag_active = false
+	_drag_moved = false
+	# Push the drag as one step (no-op for a plain click: nothing was written).
+	commit_edit()
+
+
+# Write the dragged marker's new position back to its KIND_MARKER record (keeping its
+# rotation), then re-snap the overlay to the committed value.
+func _commit_marker_drag() -> void:
+	if _selected_marker.is_empty() or _mission == null:
+		return
+	var marker_index := int(_selected_marker["marker_index"])
+	var bms_pos := MissionObjectPlacer.godot_to_bms_position(_marker_drag_local)
+	var entity := _mission.get_entity(NovaMissionData.KIND_MARKER, marker_index)
+	var rot: Vector3 = entity.get("rotation_deg", Vector3.ZERO)
+	if _mission.set_entity_transform(NovaMissionData.KIND_MARKER, marker_index, bms_pos, rot):
+		_refresh_waypoint_overlay()
+		mark_dirty()
+
+
+# --- Add marker (placement tool) ---------------------------------------------
+
+# Arm the "add marker" tool: a terrain click then adds a marker to the active path. Needs
+# an active path; drops any marker selection so the inspector shows the placement state.
+func arm_marker_placement() -> void:
+	if _mission == null or _selected_path_index < 0:
+		return
+	_flush_edit()
+	_marker_place_armed = true
+	_deselect_marker()
+	changed.emit()
+
+
+func disarm_marker_placement() -> void:
+	if not _marker_place_armed:
+		return
+	_marker_place_armed = false
+	changed.emit()
+
+
+func is_marker_placement_armed() -> bool:
+	return _marker_place_armed
+
+
+# Add a marker to the active path at a world-space ground point (append). One call both
+# creates the KIND_MARKER entity and links it into the path (the lib's add_waypoint_marker).
+# A new marker entity does not shift any object indices, so only the overlay is rebuilt.
+# Selects the new marker and dirties. Public so it is testable without a camera. Returns
+# false if there is no active path / container or the lib rejects the add.
+func add_marker_to_active_path_at_world(global_hit: Vector3) -> bool:
+	if _mission == null or _selected_path_index < 0:
+		return false
+	var container := _objects_container()
+	if container == null:
+		return false
+	var local := container.global_transform.affine_inverse() * global_hit
+	var bms_pos := MissionObjectPlacer.godot_to_bms_position(local)
+	_flush_edit()
+	var before := _mission.snapshot()
+	var result := _mission.add_waypoint_marker(_selected_path_index, _default_marker_item_id(), bms_pos, Vector3.ZERO, -1)
+	if result.is_empty():
+		_last_status = "Could not add a waypoint marker."
+		return false
+	_push_undo_step(before)
+	_refresh_waypoint_overlay()
+	var marker_index := int((result.get("marker", {}) as Dictionary).get("index", -1))
+	if marker_index >= 0:
+		_select_marker(_selected_path_index, marker_index)
+	mark_dirty()
+	return true
+
+
+# The item id to seed a new marker with: copy an existing marker's id so shipped data keeps
+# its own marker type; fall back to a plausible default when authoring from scratch.
+func _default_marker_item_id() -> int:
+	if _mission != null:
+		var markers := _mission.get_entities(NovaMissionData.KIND_MARKER)
+		if not markers.is_empty():
+			return int((markers[0] as Dictionary).get("item_id", DEFAULT_MARKER_ITEM_ID))
+	return DEFAULT_MARKER_ITEM_ID
+
+
+# Raycast the terrain under the cursor and add a marker there; a miss (off the terrain) is
+# ignored. Stays armed so several can be placed.
+func _place_marker_armed_at(mouse_pos: Vector2) -> void:
+	if terrain_editor == null or not terrain_editor.has_method("raycast_terrain_at"):
+		return
+	var hit: Vector3 = terrain_editor.raycast_terrain_at(mouse_pos)
+	if not terrain_editor.is_valid_terrain_hit(hit):
+		return
+	add_marker_to_active_path_at_world(hit)
+
+
+# --- Reorder / delete / clear -------------------------------------------------
+
+# Move the selected marker one step earlier (-1) or later (+1) along the active path. This
+# rewrites only the path's reference order (no marker entity changes), so it rebuilds just
+# the overlay. One undo step. Inert at the ends or without a marker selection.
+func move_selected_marker(delta: int) -> void:
+	if _mission == null or _selected_marker.is_empty() or _selected_path_index < 0:
+		return
+	var path := _mission.get_waypoint_path(_selected_path_index)
+	if path.is_empty():
+		return
+	var indices: PackedInt32Array = path.get("marker_indices", PackedInt32Array())
+	var marker_index := int(_selected_marker["marker_index"])
+	var pos := indices.find(marker_index)
+	if pos < 0:
+		return
+	var target := pos + delta
+	if target < 0 or target >= indices.size():
+		return
+	var tmp := indices[pos]
+	indices[pos] = indices[target]
+	indices[target] = tmp
+	_flush_edit()
+	var before := _mission.snapshot()
+	if _mission.set_waypoint_path(_selected_path_index, indices, int(path.get("flags", 0))):
+		_push_undo_step(before)
+		_refresh_waypoint_overlay()
+		mark_dirty()
+
+
+# Delete the selected marker entirely: remove_entity drops the KIND_MARKER entity and
+# repairs every path that referenced it (drops the index, decrements higher ones). Markers
+# reindex, so re-bake from the post-delete record. One undo step. Returns false if nothing
+# is selected or the lib rejects it; clears the marker selection on success.
+func delete_selected_marker() -> bool:
+	if _mission == null or _selected_marker.is_empty():
+		return false
+	var marker_index := int(_selected_marker["marker_index"])
+	_flush_edit()
+	var before := _mission.snapshot()
+	if not _mission.remove_entity(NovaMissionData.KIND_MARKER, marker_index):
+		return false
+	_push_undo_step(before)
+	_rebake_objects()
+	mark_dirty()
+	return true
+
+
+# Empty the active path AND delete its marker entities, so no orphaned markers are left
+# behind (the path's references alone would orphan the nodes). Removes markers in descending
+# index order so each removal stays valid; remove_entity repairs the path as it goes. One
+# undo step. Returns false when the path is already empty.
+func clear_active_path() -> bool:
+	if _mission == null or _selected_path_index < 0:
+		return false
+	var path := _mission.get_waypoint_path(_selected_path_index)
+	if path.is_empty():
+		return false
+	var indices: PackedInt32Array = path.get("marker_indices", PackedInt32Array())
+	if indices.is_empty():
+		return false
+	var descending: Array = []
+	for mi in indices:
+		descending.append(int(mi))
+	descending.sort()
+	descending.reverse()
+	_flush_edit()
+	var before := _mission.snapshot()
+	var removed := false
+	for mi in descending:
+		if _mission.remove_entity(NovaMissionData.KIND_MARKER, mi):
+			removed = true
+	if not removed:
+		return false
+	_push_undo_step(before)
+	_selected_marker = {}
+	_rebake_objects()
+	mark_dirty()
+	return true
 
 
 # True when a GUI control that owns the keyboard currently has focus, so the viewport
@@ -1077,6 +1580,11 @@ func _reset_selection_state() -> void:
 	_drag_active = false
 	_drag_moved = false
 	_selection_box = null
+	# Waypoint marker selection + overlay are tied to the container contents, so they reset
+	# with it; the chosen path (_selected_path_index) persists across re-bakes by design.
+	_selected_marker = {}
+	_marker_pickable = []
+	_waypoint_overlay = null
 
 
 # --- Internals ----------------------------------------------------------------

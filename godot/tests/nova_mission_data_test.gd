@@ -241,9 +241,65 @@ func test_set_entity_property_int_persists_through_save_reload() -> void:
 func test_set_entity_property_int_unknown_property_is_inert() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	assert_false(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, 0, "perception", 9),
-		"a property the editor does not expose is rejected")
+	assert_false(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, 0, "not_a_real_property", 9),
+		"a property the binding does not map is rejected")
 	assert_false(m.is_modified(), "a rejected property edit does not dirty the document")
+
+
+# The generalized setter exposes the AI + waypoint fields (not just team / group). Each
+# must write its own field and read back, leaving every other field untouched -- the same
+# read-modify-write contract the team test pins, extended across the full editable set.
+const _BEHAVIOR_PROPERTY_KEYS := [
+	"waypoint_id", "wp_number", "perception", "accuracy", "alert_state",
+	"min_engagement_distance", "max_engagement_distance", "max_attack_distance",
+	"spawn_count", "max_simultaneous", "ai_flags",
+]
+
+
+func _kind_with_entities(m: NovaMissionData) -> int:
+	# Prefer an organic (richest AI fields), then item, then building (the fixture always
+	# has buildings), so the round-trip exercises real non-zero state where it exists.
+	for kind in [NovaMissionData.KIND_ORGANIC, NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING]:
+		if m.get_entity_count(kind) > 0:
+			return kind
+	return NovaMissionData.KIND_BUILDING
+
+
+func test_set_entity_property_int_supports_behavior_fields() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var kind := _kind_with_entities(m)
+	for prop in _BEHAVIOR_PROPERTY_KEYS:
+		var before: Dictionary = m.get_entities(kind)[0]
+		var index := int(before["index"])
+		var target := int(before.get(prop, 0)) + 1
+		assert_true(m.set_entity_property_int(kind, index, prop, target),
+			"%s is an editable property" % prop)
+		var after := _entity(m, kind, index)
+		assert_eq(int(after[prop]), target, "%s takes its new value" % prop)
+		# Every OTHER editable field is preserved by this single-field write.
+		assert_eq(int(after["team"]), int(before["team"]), "team preserved through a %s edit" % prop)
+		assert_eq(int(after["group"]), int(before["group"]), "group preserved through a %s edit" % prop)
+		for other in _BEHAVIOR_PROPERTY_KEYS:
+			if other != prop:
+				assert_eq(int(after[other]), int(before[other]), "%s preserved through a %s edit" % [other, prop])
+
+
+func test_set_entity_property_int_behavior_field_persists_through_save_reload() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var kind := _kind_with_entities(m)
+	var index := int(m.get_entities(kind)[0]["index"])
+	assert_true(m.set_entity_property_int(kind, index, "waypoint_id", 5),
+		"a unit can be assigned to a waypoint path")
+
+	var tmp := _temp_bms_path()
+	assert_eq(m.save_as(tmp), OK)
+	var reopened := NovaMissionData.new()
+	assert_eq(reopened.open_file(tmp), OK)
+	assert_eq(int(_entity(reopened, kind, index)["waypoint_id"]), 5,
+		"the waypoint assignment survives the byte-faithful save and reload")
+	DirAccess.remove_absolute(tmp)
 
 
 func test_set_entity_property_int_rejects_out_of_range() -> void:
@@ -420,6 +476,114 @@ func test_set_entity_property_int_preserves_other_fields_across_kinds() -> void:
 	# The fixture is expected to place items and/or organics; flag if neither resolved so
 	# this guard never silently degrades to a no-op.
 	assert_gt(covered, 0, "the fixture provides at least one item or organic to exercise")
+
+
+# --- Waypoints (P7): paths + markers -----------------------------------------
+# A mission carries 128 fixed waypoint paths; a path is an ordered list of marker
+# indices (into the KIND_MARKER entity list) plus flags. The lib round-trips all of it;
+# these assert the GDScript boundary: summaries enumerate, add_waypoint_marker creates a
+# marker AND links it, set/clear rewrite the references, and it all survives save+reload.
+
+func _first_empty_waypoint_path(m: NovaMissionData) -> int:
+	for s in m.get_waypoint_summaries():
+		if int((s as Dictionary)["marker_count"]) == 0:
+			return int((s as Dictionary)["index"])
+	return -1
+
+
+func _any_marker_item_id(m: NovaMissionData) -> int:
+	# Reuse a real marker's item id when the fixture has markers; otherwise any id works
+	# (the lib stores it without validating against items.def).
+	var markers := m.get_entities(NovaMissionData.KIND_MARKER)
+	return int(markers[0]["item_id"]) if not markers.is_empty() else 100001
+
+
+func test_get_waypoint_summaries_enumerates_all_paths() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var summaries := m.get_waypoint_summaries()
+	assert_eq(summaries.size(), 128, "a mission has 128 fixed waypoint records")
+	for s in summaries:
+		assert_true((s as Dictionary).has("index") and (s as Dictionary).has("marker_count"),
+			"each summary carries index + marker_count")
+
+
+func test_add_waypoint_marker_creates_marker_and_links_it() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var path_index := _first_empty_waypoint_path(m)
+	assert_true(path_index >= 0, "the fixture has at least one empty waypoint path to author into")
+	var markers_before := m.get_entity_count(NovaMissionData.KIND_MARKER)
+	assert_false(m.is_modified(), "a freshly opened mission is not modified")
+
+	var result := m.add_waypoint_marker(path_index, _any_marker_item_id(m), Vector3(5, 1, -5), Vector3.ZERO, -1)
+	assert_false(result.is_empty(), "add_waypoint_marker returns the new marker + path")
+	assert_true(result.has("marker") and result.has("path"), "the result carries both halves")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_MARKER), markers_before + 1,
+		"one marker entity was created (no separate add_entity needed)")
+	assert_eq(int((result["path"] as Dictionary)["marker_count"]), 1, "the path now references one marker")
+	assert_true(m.is_modified(), "authoring a marker dirties the document")
+
+
+func test_add_waypoint_marker_round_trips_through_save_reload() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var path_index := _first_empty_waypoint_path(m)
+	assert_true(path_index >= 0)
+	m.add_waypoint_marker(path_index, _any_marker_item_id(m), Vector3(5, 1, -5), Vector3.ZERO, -1)
+
+	var tmp := _temp_bms_path()
+	assert_eq(m.save_as(tmp), OK)
+	var reopened := NovaMissionData.new()
+	assert_eq(reopened.open_file(tmp), OK)
+	assert_eq(int(reopened.get_waypoint_path(path_index)["marker_count"]), 1,
+		"the authored marker survives save+reload")
+	DirAccess.remove_absolute(tmp)
+
+
+func test_set_waypoint_path_reorders_and_flags() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var path_index := _first_empty_waypoint_path(m)
+	assert_true(path_index >= 0)
+	var mid := _any_marker_item_id(m)
+	m.add_waypoint_marker(path_index, mid, Vector3(1, 0, -1), Vector3.ZERO, -1)
+	var second := m.add_waypoint_marker(path_index, mid, Vector3(2, 0, -2), Vector3.ZERO, -1)
+	var indices: PackedInt32Array = (second["path"] as Dictionary)["marker_indices"]
+	assert_eq(indices.size(), 2, "the path has two markers to reorder")
+
+	var reversed := PackedInt32Array([indices[1], indices[0]])
+	assert_true(m.set_waypoint_path(path_index, reversed, NovaMissionData.WP_FLAG_DOES_NOT_LOOP),
+		"set_waypoint_path accepts a reordered list + flags")
+	var after := m.get_waypoint_path(path_index)
+	var after_indices: PackedInt32Array = after["marker_indices"]
+	assert_eq(after_indices[0], indices[1], "the order was reversed")
+	assert_eq(int(after["flags"]) & NovaMissionData.WP_FLAG_DOES_NOT_LOOP, NovaMissionData.WP_FLAG_DOES_NOT_LOOP,
+		"the DoesNotLoop flag was set")
+	assert_eq(int(after["marker_count"]), 2, "reorder does not change the marker count")
+
+
+func test_clear_waypoint_path_empties_it() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var path_index := _first_empty_waypoint_path(m)
+	assert_true(path_index >= 0)
+	m.add_waypoint_marker(path_index, _any_marker_item_id(m), Vector3(1, 0, -1), Vector3.ZERO, -1)
+	assert_eq(int(m.get_waypoint_path(path_index)["marker_count"]), 1, "precondition: the path has a marker")
+
+	assert_true(m.clear_waypoint_path(path_index), "clearing a path succeeds")
+	assert_eq(int(m.get_waypoint_path(path_index)["marker_count"]), 0, "the path is now empty")
+
+
+func test_waypoint_methods_reject_out_of_range_paths() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	assert_eq(m.get_waypoint_path(128), {}, "path index 128 is out of range (0..127)")
+	assert_eq(m.get_waypoint_path(-1), {}, "a negative path index is out of range")
+	assert_false(m.set_waypoint_path(128, PackedInt32Array(), 0), "set rejects an out-of-range path")
+	assert_false(m.clear_waypoint_path(-1), "clear rejects a negative path")
+	assert_eq(m.add_waypoint_marker(-1, _any_marker_item_id(m), Vector3.ZERO, Vector3.ZERO, -1), {},
+		"add_waypoint_marker rejects a negative path")
 
 
 # --- Authoring (Phase 5): snapshot / restore (undo/redo spine) ----------------

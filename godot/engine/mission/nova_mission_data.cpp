@@ -1,5 +1,6 @@
 #include "nova_mission_data.h"
 
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <cmath>
@@ -45,6 +46,14 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_entity_property_int", "kind", "index", "property", "value"), &NovaMissionData::set_entity_property_int);
 	ClassDB::bind_method(D_METHOD("add_entity", "kind", "item_id", "position", "rotation_deg"), &NovaMissionData::add_entity);
 	ClassDB::bind_method(D_METHOD("remove_entity", "kind", "index"), &NovaMissionData::remove_entity);
+
+	ClassDB::bind_method(D_METHOD("get_waypoint_summaries"), &NovaMissionData::get_waypoint_summaries);
+	ClassDB::bind_method(D_METHOD("get_waypoint_path", "index"), &NovaMissionData::get_waypoint_path);
+	ClassDB::bind_method(D_METHOD("get_waypoint_paths"), &NovaMissionData::get_waypoint_paths);
+	ClassDB::bind_method(D_METHOD("set_waypoint_path", "index", "marker_indices", "flags"), &NovaMissionData::set_waypoint_path);
+	ClassDB::bind_method(D_METHOD("clear_waypoint_path", "index"), &NovaMissionData::clear_waypoint_path);
+	ClassDB::bind_method(D_METHOD("add_waypoint_marker", "path_index", "marker_item_id", "position", "rotation_deg", "insert_index"), &NovaMissionData::add_waypoint_marker);
+
 	ClassDB::bind_method(D_METHOD("save_file"), &NovaMissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &NovaMissionData::save_as);
 	ClassDB::bind_method(D_METHOD("is_modified"), &NovaMissionData::is_modified);
@@ -55,6 +64,9 @@ void NovaMissionData::_bind_methods() {
 	BIND_CONSTANT(KIND_ITEM);
 	BIND_CONSTANT(KIND_BUILDING);
 	BIND_CONSTANT(KIND_ORGANIC);
+	BIND_CONSTANT(WP_FLAG_DOES_NOT_LOOP);
+	BIND_CONSTANT(WP_FLAG_BLUE_TEAM);
+	BIND_CONSTANT(WP_FLAG_RED_TEAM);
 }
 
 Error NovaMissionData::open_file(const String &path) {
@@ -231,12 +243,35 @@ bool NovaMissionData::set_entity_property_int(int kind, int index, const String 
 	properties.spawn_count = record.spawn_count;
 	properties.max_simultaneous = record.max_simultaneous;
 
+	// Each name matches the entity dictionary key it edits (group -> group_id). Any name
+	// not in this set is rejected rather than silently no-op'd.
 	if (property == "team") {
 		properties.team = value;
 	} else if (property == "group") {
 		properties.group_id = value;
+	} else if (property == "waypoint_id") {
+		properties.waypoint_id = value;
+	} else if (property == "wp_number") {
+		properties.wp_number = value;
+	} else if (property == "perception") {
+		properties.perception = value;
+	} else if (property == "accuracy") {
+		properties.accuracy = value;
+	} else if (property == "alert_state") {
+		properties.alert_state = value;
+	} else if (property == "min_engagement_distance") {
+		properties.min_engagement_distance = value;
+	} else if (property == "max_engagement_distance") {
+		properties.max_engagement_distance = value;
+	} else if (property == "max_attack_distance") {
+		properties.max_attack_distance = value;
+	} else if (property == "spawn_count") {
+		properties.spawn_count = value;
+	} else if (property == "max_simultaneous") {
+		properties.max_simultaneous = value;
+	} else if (property == "ai_flags") {
+		properties.ai_flags = value;
 	} else {
-		// Not a property the editor exposes yet; reject rather than silently no-op.
 		return false;
 	}
 	if (!document.set_entity_properties(native_kind, static_cast<size_t>(index), properties, nullptr)) {
@@ -272,6 +307,103 @@ bool NovaMissionData::remove_entity(int kind, int index) {
 	}
 	modified = true;
 	return true;
+}
+
+Dictionary NovaMissionData::waypoint_path_to_dictionary(const opennova::mission::WaypointPath &path) const {
+	Dictionary out;
+	out["index"] = static_cast<int>(path.index);
+	out["flags"] = path.flags;
+	out["marker_count"] = static_cast<int>(path.marker_indices.size());
+	PackedInt32Array indices;
+	indices.resize(static_cast<int64_t>(path.marker_indices.size()));
+	for (size_t i = 0; i < path.marker_indices.size(); ++i) {
+		indices.set(static_cast<int64_t>(i), path.marker_indices[i]);
+	}
+	out["marker_indices"] = indices;
+	return out;
+}
+
+Array NovaMissionData::get_waypoint_summaries() const {
+	Array out;
+	for (const opennova::mission::WaypointSummary &summary : document.waypoint_summaries()) {
+		Dictionary d;
+		d["index"] = static_cast<int>(summary.index);
+		d["flags"] = summary.flags;
+		d["marker_count"] = summary.marker_count;
+		out.push_back(d);
+	}
+	return out;
+}
+
+Dictionary NovaMissionData::get_waypoint_path(int index) const {
+	if (index < 0) {
+		return Dictionary();
+	}
+	opennova::mission::WaypointPath path;
+	if (!document.get_waypoint_path(static_cast<size_t>(index), path)) {
+		return Dictionary();
+	}
+	return waypoint_path_to_dictionary(path);
+}
+
+Array NovaMissionData::get_waypoint_paths() const {
+	Array out;
+	for (const opennova::mission::WaypointPath &path : document.waypoint_paths()) {
+		out.push_back(waypoint_path_to_dictionary(path));
+	}
+	return out;
+}
+
+bool NovaMissionData::set_waypoint_path(int index, const PackedInt32Array &marker_indices, int flags) {
+	if (index < 0) {
+		return false;
+	}
+	std::vector<int> indices;
+	indices.reserve(static_cast<size_t>(marker_indices.size()));
+	for (int64_t i = 0; i < marker_indices.size(); ++i) {
+		indices.push_back(marker_indices[i]);
+	}
+	if (!document.set_waypoint_path(static_cast<size_t>(index), indices, flags, nullptr)) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+bool NovaMissionData::clear_waypoint_path(int index) {
+	if (index < 0) {
+		return false;
+	}
+	if (!document.clear_waypoint_path(static_cast<size_t>(index), nullptr)) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+Dictionary NovaMissionData::add_waypoint_marker(int path_index, int marker_item_id, const Vector3 &position, const Vector3 &rotation_deg, int insert_index) {
+	if (path_index < 0) {
+		return Dictionary();
+	}
+	opennova::mission::EntityTransform transform;
+	transform.x = position.x;
+	transform.y = position.y;
+	transform.z = position.z;
+	// Same rounding contract as set_entity_transform / add_entity: integer degrees.
+	transform.pitch = static_cast<int>(std::lround(rotation_deg.x));
+	transform.yaw = static_cast<int>(std::lround(rotation_deg.y));
+	transform.roll = static_cast<int>(std::lround(rotation_deg.z));
+	opennova::mission::EntityRecord marker;
+	opennova::mission::WaypointPath path;
+	if (!document.add_waypoint_marker(static_cast<size_t>(path_index), marker_item_id, transform,
+				insert_index, &marker, &path)) {
+		return Dictionary();
+	}
+	modified = true;
+	Dictionary out;
+	out["marker"] = entity_to_dictionary(marker);
+	out["path"] = waypoint_path_to_dictionary(path);
+	return out;
 }
 
 Error NovaMissionData::save_file() {

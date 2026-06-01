@@ -195,6 +195,41 @@ func test_set_selected_group_reads_back() -> void:
 	assert_eq(int(controller.get_selected_entity()["group"]), 7, "the new group reads back")
 
 
+func test_set_selected_property_edits_a_behavior_field() -> void:
+	# The generic setter the Behavior panel drives: a non-team/group field writes and reads
+	# back, and (unlike team / group) is not clamped to a byte.
+	var controller := _loaded_with_selection()
+	controller.set_selected_property("waypoint_id", 6)
+	assert_true(controller.is_dirty(), "a behavior-field edit dirties the mission")
+	assert_eq(int(controller.get_selected_entity()["waypoint_id"]), 6, "the new waypoint_id reads back")
+
+	controller.set_selected_property("max_engagement_distance", 5000)
+	assert_eq(int(controller.get_selected_entity()["max_engagement_distance"]), 5000,
+		"an int32 behavior field is not clamped to 0..255")
+
+
+func test_set_selected_property_without_a_selection_is_inert() -> void:
+	var controller := MissionController.new(null)
+	controller.set_selected_property("waypoint_id", 3)
+	assert_false(controller.is_dirty(), "the generic setter does nothing without a selected entity")
+
+
+func test_set_selected_property_edit_is_undoable() -> void:
+	var controller := _loaded_with_selection()
+	var entity := controller.get_selected_entity()
+	var kind := int(entity["kind"])
+	var index := int(entity["index"])
+	var before := int(entity.get("waypoint_id", 0))
+	controller.set_selected_property("waypoint_id", before + 9)
+	assert_true(controller.can_undo(), "a behavior-field edit is its own undo step")
+	# Read from the record, not the selection: undo re-bakes and drops the selection.
+	assert_eq(int(controller.get_mission().get_entity(kind, index)["waypoint_id"]), before + 9,
+		"precondition: the edit applied to the record")
+	controller.undo()
+	assert_eq(int(controller.get_mission().get_entity(kind, index)["waypoint_id"]), before,
+		"undo restores the prior waypoint_id")
+
+
 func test_set_selected_position_persists_to_record() -> void:
 	var controller := _loaded_with_selection()
 	var target := controller.get_selected_position() + Vector3(5.0, 0.0, -3.0)
@@ -891,3 +926,361 @@ func _ctrl_key(keycode: int, shift: bool = false) -> InputEventKey:
 	key.ctrl_pressed = true
 	key.shift_pressed = shift
 	return key
+
+
+# --- Waypoints (P7b): mode + path + marker selection --------------------------
+# Waypoints mode switches the viewport to authoring the active path's markers. Picking
+# needs a camera the headless stub does not provide, so (like the object Phase 2 tests)
+# these drive the public mode/path API and the white-box marker-select seam, asserting
+# against the document + overlay rather than a rendered click. The overlay builds under the
+# MissionObjects container the open created, so its pickable index is real.
+
+func _first_empty_path(mission) -> int:
+	for s in mission.get_waypoint_summaries():
+		if int((s as Dictionary)["marker_count"]) == 0:
+			return int((s as Dictionary)["index"])
+	return -1
+
+
+func _marker_item_id(mission) -> int:
+	var markers: Array = mission.get_entities(NovaMissionData.KIND_MARKER)
+	return int(markers[0]["item_id"]) if not markers.is_empty() else 100001
+
+
+func test_set_waypoint_mode_enters_and_clears_object_selection() -> void:
+	var controller := _loaded_with_selection()  # an object is selected
+	assert_false(controller.get_selection_summary().is_empty(), "precondition: an object is selected")
+	controller.set_waypoint_mode(true)
+	assert_true(controller.is_waypoint_mode(), "the controller enters waypoint mode")
+	assert_eq(controller.get_selection_summary(), {}, "entering waypoint mode clears the object selection")
+	controller.set_waypoint_mode(false)
+	assert_false(controller.is_waypoint_mode(), "and exits back to objects mode")
+
+
+func test_set_waypoint_mode_focuses_a_populated_path() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	mission.add_waypoint_marker(_first_empty_path(mission), _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
+	controller.set_waypoint_mode(true)
+	var active := controller.get_active_waypoint_path()
+	assert_false(active.is_empty(), "entering waypoint mode focuses a path")
+	assert_gt(int(active["marker_count"]), 0, "and the focused path has markers")
+
+
+func test_select_waypoint_path_updates_active() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	controller.set_waypoint_mode(true)
+	var path := _first_empty_path(mission)
+	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(3, 0, -3), Vector3.ZERO, -1)
+	controller.select_waypoint_path(path)
+	assert_eq(controller.get_selected_waypoint_path_index(), path, "the chosen path becomes active")
+	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 1, "and its markers are reported")
+
+
+func test_get_waypoint_summaries_passthrough() -> void:
+	var controller := _loaded_with_selection()
+	assert_eq(controller.get_waypoint_summaries().size(), 128, "the controller surfaces all 128 waypoint records")
+	assert_eq(MissionController.new(null).get_waypoint_summaries(), [], "no mission -> empty summaries")
+
+
+func test_waypoint_overlay_harvests_a_pickable_per_active_marker() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	controller.set_waypoint_mode(true)
+	var path := _first_empty_path(mission)
+	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(2, 0, -2), Vector3.ZERO, -1)
+	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(4, 0, -4), Vector3.ZERO, -1)
+	controller.select_waypoint_path(path)
+	controller._refresh_waypoint_overlay()  # reflect the just-added markers
+	assert_eq(controller.get_selected_waypoint_path_index(), path)
+	assert_eq(controller._marker_pickable.size(), 2, "the overlay harvested one pickable per active-path marker")
+
+
+func test_select_marker_reports_position_and_deselect_clears() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	controller.set_waypoint_mode(true)
+	var path := _first_empty_path(mission)
+	var r := mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(7, 1, -7), Vector3.ZERO, -1)
+	controller.select_waypoint_path(path)
+	var marker_index := int((r["marker"] as Dictionary)["index"])
+	controller._select_marker(path, marker_index)
+	var sel := controller.get_selected_marker()
+	assert_eq(int(sel["marker_index"]), marker_index, "the selected marker is reported")
+	assert_almost_eq((sel["position"] as Vector3).x, 7.0, 0.05, "with its position")
+	controller._deselect_marker()
+	assert_eq(controller.get_selected_marker(), {}, "deselect clears the marker")
+
+
+func test_left_press_in_waypoint_mode_does_not_select_objects() -> void:
+	# A viewport click in waypoint mode must route to marker picking, never object selection.
+	# The headless stub has no camera, so the marker pick misses; the key assertion is that
+	# the object-selection path did not run.
+	var controller := _loaded_with_item_db()
+	controller.set_waypoint_mode(true)
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = Vector2(64, 64)
+	controller.handle_viewport_input(press)
+	assert_eq(controller.get_selection_summary(), {}, "a viewport click in waypoint mode selects no object")
+
+
+# --- Waypoints (P7c): path flags + ordered marker selection -------------------
+
+func test_set_waypoint_flags_sets_and_is_undoable() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	controller.set_waypoint_mode(true)
+	var path := _first_empty_path(mission)
+	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
+	controller.select_waypoint_path(path)
+
+	# A fresh path loops (DoesNotLoop clear) with no team. Turn loop off + flag it blue.
+	controller.set_waypoint_flags(false, true, false)
+	var after := controller.get_active_waypoint_path()
+	assert_eq(int(after["flags"]) & NovaMissionData.WP_FLAG_DOES_NOT_LOOP, NovaMissionData.WP_FLAG_DOES_NOT_LOOP,
+		"loop off sets the DoesNotLoop bit")
+	assert_eq(int(after["flags"]) & NovaMissionData.WP_FLAG_BLUE_TEAM, NovaMissionData.WP_FLAG_BLUE_TEAM,
+		"the blue team flag is set")
+	assert_true(controller.is_dirty(), "a flag edit dirties the mission")
+
+	controller.undo()
+	var reverted := controller.get_active_waypoint_path()
+	assert_eq(int(reverted["flags"]) & NovaMissionData.WP_FLAG_DOES_NOT_LOOP, 0,
+		"undo restores the looping flag (and leaves the marker in place)")
+
+
+func test_select_waypoint_marker_selects_on_the_active_path() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	controller.set_waypoint_mode(true)
+	var path := _first_empty_path(mission)
+	var r := mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(2, 0, -2), Vector3.ZERO, -1)
+	controller.select_waypoint_path(path)
+	var marker_index := int((r["marker"] as Dictionary)["index"])
+	controller.select_waypoint_marker(marker_index)
+	assert_eq(int(controller.get_selected_marker()["marker_index"]), marker_index,
+		"select_waypoint_marker selects the marker on the active path")
+
+
+# --- Waypoints (P7d): add / drag / reorder / delete / clear -------------------
+
+func _wp_ready() -> MissionController:
+	# A controller in waypoint mode focused on an empty path, ready to author into.
+	var controller := _loaded_with_selection()
+	controller.set_waypoint_mode(true)
+	controller.select_waypoint_path(_first_empty_path(controller.get_mission()))
+	return controller
+
+
+func test_arm_and_disarm_marker_placement() -> void:
+	var controller := _wp_ready()
+	assert_false(controller.is_marker_placement_armed(), "nothing armed initially")
+	controller.arm_marker_placement()
+	assert_true(controller.is_marker_placement_armed(), "the add-marker tool arms")
+	controller.disarm_marker_placement()
+	assert_false(controller.is_marker_placement_armed(), "and disarms")
+
+
+func test_add_marker_to_active_path_adds_selects_and_is_undoable() -> void:
+	var controller := _wp_ready()
+	var mission := controller.get_mission()
+	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	assert_true(controller.add_marker_to_active_path_at_world(Vector3(50, 10, -50)), "adding a marker succeeds")
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before + 1, "a marker entity was created")
+	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 1, "and linked into the active path")
+	assert_false(controller.get_selected_marker().is_empty(), "the new marker is selected")
+	assert_true(controller.is_dirty())
+	controller.undo()
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before, "undo removes the added marker")
+	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 0, "and unlinks it from the path")
+
+
+func test_armed_left_click_adds_a_marker_via_the_viewport() -> void:
+	var controller := _wp_ready()
+	var mission := controller.get_mission()
+	controller.arm_marker_placement()
+	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = Vector2(64, 64)
+	controller.handle_viewport_input(press)
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before + 1, "an armed click added a marker")
+	assert_true(controller.is_marker_placement_armed(), "and the tool stays armed for more")
+
+
+func test_armed_marker_click_off_terrain_adds_nothing() -> void:
+	var controller := _wp_ready()
+	var mission := controller.get_mission()
+	controller.arm_marker_placement()
+	controller.terrain_editor.terrain_hit_valid = false  # the raycast now misses
+	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = Vector2(64, 64)
+	controller.handle_viewport_input(press)
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before, "a click off the terrain adds no marker")
+
+
+func test_right_click_disarms_marker_placement() -> void:
+	var controller := _wp_ready()
+	controller.arm_marker_placement()
+	var rclick := InputEventMouseButton.new()
+	rclick.button_index = MOUSE_BUTTON_RIGHT
+	rclick.pressed = true
+	controller.handle_viewport_input(rclick)
+	assert_false(controller.is_marker_placement_armed(), "a right-click drops the add-marker tool")
+
+
+func test_move_selected_marker_reorders_and_is_undoable() -> void:
+	var controller := _wp_ready()
+	var mission := controller.get_mission()
+	var path := controller.get_selected_waypoint_path_index()
+	var a := mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
+	var b := mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(2, 0, -2), Vector3.ZERO, -1)
+	controller.select_waypoint_path(path)
+	var a_index := int((a["marker"] as Dictionary)["index"])
+	var b_index := int((b["marker"] as Dictionary)["index"])
+	controller.select_waypoint_marker(b_index)
+	controller.move_selected_marker(-1)  # move b ahead of a
+	var indices: PackedInt32Array = controller.get_active_waypoint_path()["marker_indices"]
+	assert_eq(indices[0], b_index, "b moved to the front of the path")
+	assert_eq(indices[1], a_index, "a is now second")
+	controller.undo()
+	var reverted: PackedInt32Array = controller.get_active_waypoint_path()["marker_indices"]
+	assert_eq(reverted[0], a_index, "undo restores the original order")
+
+
+func test_move_selected_marker_at_the_end_is_inert() -> void:
+	var controller := _wp_ready()
+	var mission := controller.get_mission()
+	var path := controller.get_selected_waypoint_path_index()
+	var a := mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
+	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(2, 0, -2), Vector3.ZERO, -1)
+	controller.select_waypoint_path(path)
+	controller.select_waypoint_marker(int((a["marker"] as Dictionary)["index"]))  # first marker
+	controller.move_selected_marker(-1)  # already first -> no move
+	assert_false(controller.can_undo(), "moving the first marker up adds no undo step")
+
+
+func test_delete_selected_marker_removes_repairs_and_is_undoable() -> void:
+	var controller := _wp_ready()
+	var mission := controller.get_mission()
+	var path := controller.get_selected_waypoint_path_index()
+	var a := mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
+	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(2, 0, -2), Vector3.ZERO, -1)
+	controller.select_waypoint_path(path)
+	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	controller.select_waypoint_marker(int((a["marker"] as Dictionary)["index"]))
+	assert_true(controller.delete_selected_marker(), "deleting the selected marker succeeds")
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before - 1, "the marker entity is removed")
+	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 1, "and dropped from the path (repaired)")
+	assert_eq(controller.get_selected_marker(), {}, "the marker selection clears")
+	controller.undo()
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before, "undo restores the deleted marker")
+	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 2, "and re-links it into the path")
+
+
+func test_clear_active_path_removes_markers_and_is_undoable() -> void:
+	var controller := _wp_ready()
+	var mission := controller.get_mission()
+	var path := controller.get_selected_waypoint_path_index()
+	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
+	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(2, 0, -2), Vector3.ZERO, -1)
+	controller.select_waypoint_path(path)
+	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	assert_true(controller.clear_active_path(), "clearing the path succeeds")
+	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 0, "the path is now empty")
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before - 2, "its markers are deleted (no orphans)")
+	controller.undo()
+	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 2, "undo restores the path's markers")
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before, "and the marker entities")
+
+
+func test_delete_key_deletes_marker_in_waypoint_mode() -> void:
+	var controller := _wp_ready()
+	var mission := controller.get_mission()
+	var path := controller.get_selected_waypoint_path_index()
+	var r := mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
+	controller.select_waypoint_path(path)
+	controller.select_waypoint_marker(int((r["marker"] as Dictionary)["index"]))
+	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.keycode = KEY_DELETE
+	controller.handle_viewport_input(key)
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before - 1, "Delete removed the selected marker")
+	assert_eq(controller.get_selected_marker(), {}, "and cleared the marker selection")
+
+
+func test_marker_drag_commits_the_new_position() -> void:
+	# Picking needs a camera the headless stub lacks, so white-box the drag: begin it, drag to
+	# the stub's terrain hit, release. The container is identity here, so the stored position
+	# is godot_to_bms_position(hit).
+	var controller := _wp_ready()
+	var mission := controller.get_mission()
+	var path := controller.get_selected_waypoint_path_index()
+	var r := mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
+	controller.select_waypoint_path(path)
+	var marker_index := int((r["marker"] as Dictionary)["index"])
+	controller.select_waypoint_marker(marker_index)
+
+	controller._drag_active = true
+	controller._drag_moved = false
+	controller.begin_edit()
+	controller._on_marker_drag(Vector2(10, 10))  # stub raycast -> terrain_hit
+	controller._on_marker_left_release()
+
+	var expected: Vector3 = Placer.godot_to_bms_position(controller.terrain_editor.terrain_hit)
+	var stored: Vector3 = mission.get_entity(NovaMissionData.KIND_MARKER, marker_index)["position"]
+	assert_almost_eq(stored.x, expected.x, 0.05, "the dragged marker's X is written to the record")
+	assert_almost_eq(stored.z, expected.z, 0.05, "and its Z")
+	assert_true(controller.is_dirty(), "a committed marker drag dirties the mission")
+	controller.undo()
+	var reverted: Vector3 = mission.get_entity(NovaMissionData.KIND_MARKER, marker_index)["position"]
+	assert_almost_eq(reverted.x, 1.0, 0.05, "undo restores the marker's original X")
+
+
+# --- Waypoints (P7 review fixes) ----------------------------------------------
+
+func test_select_new_waypoint_path_enables_from_scratch_authoring() -> void:
+	# Review fix: the path list only shows populated paths, so an all-empty mission needs an
+	# entry point to make an empty path active; otherwise Add marker is permanently disabled.
+	var controller := _loaded_with_selection()
+	controller.set_waypoint_mode(true)
+	var idx := controller.select_new_waypoint_path()
+	assert_true(idx >= 0, "an empty path is available to start a new route")
+	assert_eq(controller.get_selected_waypoint_path_index(), idx, "and it becomes the active path")
+	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 0, "the new path starts empty")
+	# Authoring into the freshly-focused path now works end to end.
+	assert_true(controller.add_marker_to_active_path_at_world(Vector3(10, 5, -10)),
+		"a marker can be added to the new path")
+	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 1, "and lands on it")
+
+
+func test_switching_paths_clears_a_shared_marker_highlight() -> void:
+	# Review fix: selecting a marker on path A then switching to path B that references the
+	# SAME marker index must not leave a stale overlay highlight. The controller drops the
+	# selection AND tells the overlay; the overlay no longer self-re-applies its cache.
+	var controller := _wp_ready()  # active = first empty path (A)
+	var mission := controller.get_mission()
+	var path_a := controller.get_selected_waypoint_path_index()
+	var r := mission.add_waypoint_marker(path_a, _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
+	var m := int((r["marker"] as Dictionary)["index"])
+	controller._refresh_waypoint_overlay()  # reflect the new marker on A (A is already active)
+	var path_b := controller._first_empty_path()
+	assert_true(path_b >= 0 and path_b != path_a, "need a distinct empty path for B")
+	# Loaded data can reference one marker from two paths (the editor never authors that).
+	mission.set_waypoint_path(path_b, PackedInt32Array([m]), 0)
+
+	controller.select_waypoint_marker(m)
+	assert_eq(controller._waypoint_overlay._selected_marker_index, m, "precondition: overlay highlights m on A")
+
+	controller.select_waypoint_path(path_b)  # B shares marker m
+	assert_eq(controller.get_selected_marker(), {}, "switching paths drops the marker selection")
+	assert_eq(controller._waypoint_overlay._selected_marker_index, -1,
+		"and the overlay clears its highlight (no stale bleed onto B's shared marker)")
