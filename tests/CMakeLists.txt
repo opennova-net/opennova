@@ -480,6 +480,14 @@ target_include_directories(mnu_compat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mnu_compat COMMAND mnu_compat_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Round-trip key-coverage: catches attributes/tags dropped at parse time, which
+# the idempotence sweep above cannot see (see ADR 0002). Reads fixtures/mnu/.
+add_executable(mnu_coverage_test mnu/mnu_coverage_test.cpp)
+target_link_libraries(mnu_coverage_test PRIVATE opennova_mnu)
+target_include_directories(mnu_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mnu_coverage COMMAND mnu_coverage_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(mns_parse_test mns/mns_parse_test.cpp)
 target_link_libraries(mns_parse_test PRIVATE opennova_mns)
 target_include_directories(mns_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

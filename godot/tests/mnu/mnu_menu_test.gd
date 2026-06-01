@@ -268,6 +268,221 @@ func test_music_changed_fires_on_screen_show() -> void:
 	assert_signal_emit_count(menu, "music_changed", 1, "no-music screen leaves the track alone")
 
 
+# --- URL action + MONOGRAM render -------------------------------------------
+
+
+func test_url_action_emits_url_requested() -> void:
+	# <ACTION type="URL"> (shipped splash "buy"/website buttons) routes to
+	# url_requested for the host to open externally; it is not intra-menu nav.
+	var menu := _build_menu()
+	watch_signals(menu)
+	var handled := menu.dispatch_action("url", "www.novalogic.com/buy", "", "")
+	assert_true(handled, "url action handled")
+	assert_signal_emitted_with_parameters(menu, "url_requested", ["www.novalogic.com/buy"])
+
+
+func test_monogram_renders_as_centered_overlay() -> void:
+	# A window FRAME with a MONOGRAM gets a centered "Monogram" overlay when the
+	# texture resolves. A synthetic menu + temp texture drive the resolved path.
+	var dir := OS.get_temp_dir().path_join("mnu_mono_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	_write_png(dir.path_join("border2.png"), 64, 64, Color(0.7, 0.7, 0.7, 1.0))
+	_write_png(dir.path_join("mono.png"), 16, 16, Color(1, 1, 1, 1))
+
+	var root := NovaResourceRoot.new()
+	if root.set_root_dir(dir) != OK:
+		pass_test("temp resource root unavailable: %s" % root.get_last_error())
+		return
+
+	var mnu_text := "<SCREEN><NAME>S</NAME>" + \
+		"<WINDOW type=\"window\" name=\"PANEL\">" + \
+		"<FRAME><STENCIL size=\"64\">border2.tga</STENCIL><MONOGRAM>mono.tga</MONOGRAM></FRAME>" + \
+		"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>200</RIGHT><BOTTOM>200</BOTTOM></POSITION>" + \
+		"</WINDOW></SCREEN>"
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "synthetic menu parses")
+
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.set_resource_root(root)
+	menu.menu = doc
+
+	var mono := menu.find_child("Monogram", true, false) as TextureRect
+	assert_not_null(mono, "MONOGRAM rendered as a centered Monogram overlay")
+	if mono != null:
+		assert_not_null(mono.texture, "monogram texture resolved")
+		assert_eq(mono.stretch_mode, TextureRect.STRETCH_KEEP_CENTERED, "centered, natural size")
+
+	DirAccess.remove_absolute(dir.path_join("border2.png"))
+	DirAccess.remove_absolute(dir.path_join("mono.png"))
+	DirAccess.remove_absolute(dir)
+
+
+# --- Keyboard hotkey router (Esc-to-back / Enter-to-accept) ------------------
+
+
+func test_hotkey_routes_escape_to_pop_button() -> void:
+	# A button carrying <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY> + pop_screen fires when
+	# Escape is routed: navigate MAIN->SUB, then VK_ESCAPE pops back to MAIN.
+	var mnu_text := "<SCREEN><NAME>MAIN</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<WINDOW type=\"button\" name=\"GO\"><ACTION type=\"screen\" target=\"SUB\"></ACTION></WINDOW>" + \
+		"</WINDOW></SCREEN>" + \
+		"<SCREEN><NAME>SUB</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<WINDOW type=\"button\" name=\"BACK\"><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>" + \
+		"<ACTION type=\"pop_screen\"></ACTION></WINDOW></WINDOW></SCREEN>"
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "two-screen menu parses")
+
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.menu = doc
+
+	assert_true(menu.navigate_to_screen("SUB"), "navigated MAIN -> SUB")
+	assert_eq(menu.current_screen, "SUB", "on SUB")
+	assert_true(menu.handle_hotkey("VK_ESCAPE"), "VK_ESCAPE routed to the BACK button")
+	assert_eq(menu.current_screen, "MAIN", "Esc popped back to MAIN")
+	assert_false(menu.handle_hotkey("VK_F12"), "unbound key not handled")
+
+
+func test_hotkey_router_inert_in_edit_mode() -> void:
+	var mnu_text := "<SCREEN><NAME>MAIN</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<WINDOW type=\"button\" name=\"BACK\"><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>" + \
+		"<ACTION type=\"pop_screen\"></ACTION></WINDOW></WINDOW></SCREEN>"
+	var doc := NovaMnuDocument.new()
+	doc.load_from_bytes(mnu_text.to_utf8_buffer())
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.set_edit_mode(true)
+	menu.menu = doc
+	assert_false(menu.handle_hotkey("VK_ESCAPE"), "router inert in edit_mode")
+
+
+func test_real_shipped_button_dispatches_its_action() -> void:
+	# Press the real jo_options BACK button (<ACTION type="pop_screen">) and assert
+	# the navigation verb dispatches - proving the verbs work on shipped content,
+	# not just the synthetic widgets.mnu.
+	var doc := NovaMnuDocument.new()
+	doc.load_from_bytes(FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_options.mnu"))
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.menu = doc
+	watch_signals(menu)
+	var back := menu.find_child("BACK", true, false)
+	assert_not_null(back, "real BACK button built")
+	assert_true(back is NovaMnuButton, "BACK is a NovaMnuButton")
+	(back as NovaMnuButton).emit_signal("pressed")
+	assert_signal_emitted_with_parameters(menu, "action_dispatched", ["pop_screen", ""])
+
+
+# --- Router hardening (visibility, no-op, real key adapter, aliases) ---------
+
+
+func _key(keycode: int, pressed := true, echo := false) -> InputEventKey:
+	var k := InputEventKey.new()
+	k.keycode = keycode
+	k.pressed = pressed
+	k.echo = echo
+	return k
+
+
+func _menu_from(bytes: PackedByteArray, edit_mode := false) -> NovaMnuMenu:
+	var doc := NovaMnuDocument.new()
+	doc.load_from_bytes(bytes)
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.set_edit_mode(edit_mode)
+	menu.menu = doc
+	return menu
+
+
+func _esc_back_menu_bytes() -> PackedByteArray:
+	return ("<SCREEN><NAME>MAIN</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<WINDOW type=\"button\" name=\"GO\"><ACTION type=\"screen\" target=\"SUB\"></ACTION></WINDOW>" + \
+		"</WINDOW></SCREEN>" + \
+		"<SCREEN><NAME>SUB</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<WINDOW type=\"button\" name=\"BACK\"><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>" + \
+		"<ACTION type=\"pop_screen\"></ACTION></WINDOW></WINDOW></SCREEN>").to_utf8_buffer()
+
+
+func test_unhandled_key_input_drives_router() -> void:
+	# Exercise the real keycode->VK adapter (not handle_hotkey directly).
+	var menu := _menu_from(_esc_back_menu_bytes())
+	menu.navigate_to_screen("SUB")
+	menu.handle_key_input(_key(KEY_ESCAPE))
+	assert_eq(menu.current_screen, "MAIN", "real KEY_ESCAPE routed to pop")
+	# Unmapped key, echo, and release are all inert.
+	menu.navigate_to_screen("SUB")
+	menu.handle_key_input(_key(KEY_A))
+	menu.handle_key_input(_key(KEY_ESCAPE, true, true))
+	menu.handle_key_input(_key(KEY_ESCAPE, false))
+	assert_eq(menu.current_screen, "SUB", "unmapped / echo / release ignored")
+
+
+func test_hotkey_skips_hidden_widget() -> void:
+	# A hidden widget sharing the hotkey must NOT fire; the visible target wins.
+	var bytes := ("<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<WINDOW type=\"button\" name=\"HIDDEN_BACK\" HIDDEN><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>" + \
+		"<ACTION type=\"screen\" target=\"WRONG\"></ACTION></WINDOW>" + \
+		"<WINDOW type=\"button\" name=\"VISIBLE_OK\"><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>" + \
+		"<ACTION type=\"screen\" target=\"RIGHT\"></ACTION></WINDOW></WINDOW></SCREEN>" + \
+		"<SCREEN><NAME>WRONG</NAME><WINDOW type=\"window\" name=\"ROOT\"></WINDOW></SCREEN>" + \
+		"<SCREEN><NAME>RIGHT</NAME><WINDOW type=\"window\" name=\"ROOT\"></WINDOW></SCREEN>").to_utf8_buffer()
+	var menu := _menu_from(bytes)
+	assert_true(menu.handle_hotkey("VK_ESCAPE"), "a visible hotkey target handled it")
+	assert_eq(menu.current_screen, "RIGHT", "hidden HIDDEN_BACK skipped; VISIBLE_OK fired")
+
+
+func test_hotkey_noop_button_does_not_consume() -> void:
+	# A hotkey on an actionless button must NOT report handled, so the key falls
+	# through (Esc-to-resume reaching the game behind a pause overlay).
+	var bytes := ("<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<WINDOW type=\"button\" name=\"NOOP\"><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY></WINDOW>" + \
+		"</WINDOW></SCREEN>").to_utf8_buffer()
+	var menu := _menu_from(bytes)
+	assert_false(menu.handle_hotkey("VK_ESCAPE"), "actionless button does not consume the key")
+
+
+func test_hotkey_enter_aliases() -> void:
+	# VK_RETURN / VK_ENTER are interchangeable, and numpad Enter maps to VK_RETURN.
+	var bytes := ("<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<WINDOW type=\"button\" name=\"OK\"><HOTKEY VIRTUAL>VK_ENTER</HOTKEY>" + \
+		"<ACTION type=\"screen\" target=\"NEXT\"></ACTION></WINDOW></WINDOW></SCREEN>" + \
+		"<SCREEN><NAME>NEXT</NAME><WINDOW type=\"window\" name=\"ROOT\"></WINDOW></SCREEN>").to_utf8_buffer()
+	var menu := _menu_from(bytes)
+	assert_true(menu.handle_hotkey("VK_RETURN"), "VK_RETURN matches a stored VK_ENTER")
+	assert_eq(menu.current_screen, "NEXT", "Enter accept navigated")
+	menu.show_screen("S")
+	menu.handle_key_input(_key(KEY_KP_ENTER))
+	assert_eq(menu.current_screen, "NEXT", "numpad Enter routed via VK_RETURN")
+
+
+func test_hotkey_router_inert_when_menu_hidden() -> void:
+	# A hidden menu kept in the tree must not route/consume keys.
+	var menu := _menu_from(_esc_back_menu_bytes())
+	menu.navigate_to_screen("SUB")
+	menu.visible = false
+	menu.handle_key_input(_key(KEY_ESCAPE))
+	assert_eq(menu.current_screen, "SUB", "hidden menu's key adapter is inert")
+
+
+func test_hotkey_toggles_checkbox() -> void:
+	# A hotkey on a checkbox flips it (a bare emit "pressed" would not toggle).
+	var bytes := ("<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<WINDOW type=\"checkbox\" name=\"CHK\" CHECKED><HOTKEY VIRTUAL>VK_RETURN</HOTKEY></WINDOW>" + \
+		"</WINDOW></SCREEN>").to_utf8_buffer()
+	var menu := _menu_from(bytes)
+	var chk := menu.find_child("CHK", true, false) as BaseButton
+	assert_not_null(chk, "checkbox built")
+	assert_true(chk.button_pressed, "starts checked")
+	assert_true(menu.handle_hotkey("VK_RETURN"), "checkbox hotkey handled")
+	assert_false(chk.button_pressed, "hotkey toggled the checkbox off")
+
+
 func test_checkbox_toggle_drives_underline() -> void:
 	var menu := _build_menu()
 	var chk := menu.find_child("SoundChk", true, false) as NovaMnuCheckBox

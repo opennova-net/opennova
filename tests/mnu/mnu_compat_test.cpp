@@ -92,33 +92,24 @@ static int try_menu(const char *path, bool required) {
 int main(void) {
   int fail = 0;
 
-  /* Required (committed under fixtures/mnu/). small / medium / large spread.
-     jo_mp.mnu carries a Table whose justify + selection-color ITEMS exposed (and
-     now guards against a regression of) the two-<ITEMS>-block round-trip bug in
-     the serializer; see write_window's Table ITEMS block in mnu.cpp. */
-  if (!try_menu("fixtures/mnu/jo_main.mnu", true)) ++fail;
-  if (!try_menu("fixtures/mnu/jo_loadout.mnu", true)) ++fail;
-  if (!try_menu("fixtures/mnu/jo_options.mnu", true)) ++fail;
-  if (!try_menu("fixtures/mnu/jo_mp.mnu", true)) ++fail;
-
-  /* Skip-if-absent (developer Desktop): the rest of the revx02 menu set, so a
-     local run sweeps the whole real menu corpus while CI runs only the
-     committed fixtures above. */
-  const char *dev[] = {
-      "C:/Users/taylor/Desktop/revx02/sp.mnu",
-      "C:/Users/taylor/Desktop/revx02/game.mnu",
-      "C:/Users/taylor/Desktop/revx02/player.mnu",
-      "C:/Users/taylor/Desktop/revx02/weapon.mnu",
-      "C:/Users/taylor/Desktop/revx02/color.mnu",
-      "C:/Users/taylor/Desktop/revx02/cmap.mnu",
-      "C:/Users/taylor/Desktop/revx02/stat.mnu",
-      "C:/Users/taylor/Desktop/revx02/death.mnu",
-      "C:/Users/taylor/Desktop/revx02/vehicle.mnu",
-      "C:/Users/taylor/Desktop/revx02/item_db.mnu",
-      "C:/Users/taylor/Desktop/revx02/splash.mnu",
-      "C:/Users/taylor/Desktop/revx02/PRE.MNU",
+  /* All 15 committed revx02 menus are required-pass; the fixed-point idempotence
+     proof now matches mnu_coverage's set (both run over fixtures/mnu/jo_*.mnu). */
+  const char *fixtures[] = {
+      "fixtures/mnu/jo_main.mnu",    "fixtures/mnu/jo_sp.mnu",
+      "fixtures/mnu/jo_mp.mnu",      "fixtures/mnu/jo_options.mnu",
+      "fixtures/mnu/jo_game.mnu",    "fixtures/mnu/jo_player.mnu",
+      "fixtures/mnu/jo_weapon.mnu",  "fixtures/mnu/jo_loadout.mnu",
+      "fixtures/mnu/jo_color.mnu",   "fixtures/mnu/jo_cmap.mnu",
+      "fixtures/mnu/jo_stat.mnu",    "fixtures/mnu/jo_death.mnu",
+      "fixtures/mnu/jo_vehicle.mnu", "fixtures/mnu/jo_item_db.mnu",
+      "fixtures/mnu/jo_splash.mnu",
   };
-  for (const char *p : dev) try_menu(p, false);
+  for (const char *p : fixtures)
+    if (!try_menu(p, true)) ++fail;
+
+  /* Developer-only: a menu not yet committed (e.g. PRE.MNU) still sweeps when
+     present on disk, without failing CI. */
+  try_menu("C:/Users/taylor/Desktop/revx02/PRE.MNU", false);
 
   if (fail > 0) {
     fprintf(stderr, "\n%d required MNU fixture(s) FAILED\n", fail);

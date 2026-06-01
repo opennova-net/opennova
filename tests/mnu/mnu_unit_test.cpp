@@ -423,6 +423,40 @@ bool test_window_types() {
   CHECK(mnu::parse_window_type("unknown_type") == mnu::WindowType::Unknown,
         "unknown type");
 
+  // Shipped-content aliases: pin the parse table so a rename can't silently route
+  // a real widget type to Unknown/placeholder (combobox/marquee_wnd appear in the
+  // committed fixtures; the rest are exercised by the full corpus).
+  CHECK(mnu::parse_window_type("combobox") == mnu::WindowType::Combo,
+        "combobox alias -> Combo");
+  CHECK(mnu::parse_window_type("marquee_wnd") == mnu::WindowType::Marquee,
+        "marquee_wnd -> Marquee");
+  CHECK(mnu::parse_window_type("multiline_edit") == mnu::WindowType::MultilineEdit,
+        "multiline_edit -> MultilineEdit");
+  CHECK(mnu::parse_window_type("multi") == mnu::WindowType::Multi, "multi type");
+  CHECK(mnu::parse_window_type("scroll") == mnu::WindowType::Scroll, "scroll type");
+  CHECK(mnu::parse_window_type("table") == mnu::WindowType::Table, "table type");
+  CHECK(mnu::parse_window_type("map") == mnu::WindowType::Map, "map type");
+  CHECK(mnu::parse_window_type("globe") == mnu::WindowType::Globe, "globe type");
+  CHECK(mnu::parse_window_type("goto") == mnu::WindowType::Goto, "goto type");
+
+  // Every type's serialized name must re-parse to the same type, locking the
+  // Combo->"combobox"->Combo style remaps.
+  const mnu::WindowType all[] = {
+      mnu::WindowType::Window,   mnu::WindowType::Static,
+      mnu::WindowType::Button,   mnu::WindowType::Edit,
+      mnu::WindowType::MultilineEdit, mnu::WindowType::List,
+      mnu::WindowType::CheckBox, mnu::WindowType::Radio,
+      mnu::WindowType::Combo,    mnu::WindowType::Scroll,
+      mnu::WindowType::Table,    mnu::WindowType::SpinList,
+      mnu::WindowType::Multi,    mnu::WindowType::Map,
+      mnu::WindowType::Globe,    mnu::WindowType::Label,
+      mnu::WindowType::Goto,     mnu::WindowType::Marquee,
+  };
+  for (mnu::WindowType t : all) {
+    CHECK(mnu::parse_window_type(mnu::window_type_name(t)) == t,
+          std::string("type name round-trips: ") + mnu::window_type_name(t));
+  }
+
   return true;
 }
 
@@ -975,6 +1009,105 @@ bool test_table_subst() {
   return true;
 }
 
+// Build a document entirely in code (no parse, no imported file) exercising every
+// round-trip-preserved field, then serialize -> parse and confirm each survived.
+// This is the "create from nothing + no raw passthrough" proof (ADR 0003): each
+// construct is typed data the model owns, so a from-scratch menu round-trips.
+bool test_create_from_scratch() {
+  mnu::Document doc;
+  mnu::Screen screen;
+  screen.name = "SCREEN";
+  mnu::Window &root = screen.root_window;
+  root.name = "ROOT";
+  root.type = mnu::WindowType::Window;
+
+  mnu::Window cb;  // checkbox rendered as a toggle button
+  cb.name = "GRID";
+  cb.type = mnu::WindowType::CheckBox;
+  cb.as_button = true;
+  root.children.push_back(cb);
+
+  mnu::Window ed;  // numeric edit with range + length constraints
+  ed.name = "MAXPLAYERS";
+  ed.type = mnu::WindowType::Edit;
+  ed.number = true;
+  ed.has_minval = true;
+  ed.minval = 1;
+  ed.has_maxval = true;
+  ed.maxval = 99;
+  ed.has_maxchar = true;
+  ed.maxchar = 2;
+  root.children.push_back(ed);
+
+  mnu::Window combo;  // combobox whose listbox carries SB_EDGE_PAD + item height
+  combo.name = "CLASS";
+  combo.type = mnu::WindowType::Combo;
+  combo.list_box.present = true;
+  combo.list_box.has_sb_edge_pad = true;
+  combo.list_box.sb_edge_pad = 21;
+  combo.list_box.min_item_height = 20;
+  root.children.push_back(combo);
+
+  mnu::Window table;  // table column body drawn by the host
+  table.name = "ROSTER";
+  table.type = mnu::WindowType::Table;
+  table.table_data.column.count = 1;
+  mnu::TableBody body;
+  body.column = 0;
+  body.custom_draw = true;
+  table.table_data.column.bodies.push_back(body);
+  root.children.push_back(table);
+
+  mnu::Window btn;  // button opening a URL in an external browser
+  btn.name = "PREORDER";
+  btn.type = mnu::WindowType::Button;
+  mnu::Action act;
+  act.type = "URL";
+  act.target = "www.novalogic.com";
+  act.external_browser = true;
+  btn.actions.push_back(act);
+  root.children.push_back(btn);
+
+  doc.screens.push_back(screen);
+
+  // Round-trip the from-scratch document.
+  const std::string text = mnu::serialize(doc, true, 2);
+  mnu::Document parsed;
+  std::string err;
+  CHECK(mnu::parse(text, parsed, err), "from-scratch doc failed to parse");
+  CHECK(parsed.screens.size() == 1, "expected one screen");
+  const mnu::Window &proot = parsed.screens[0].root_window;
+  CHECK(proot.children.size() == 5, "expected five child widgets");
+
+  const mnu::Window *pcb = nullptr, *ped = nullptr, *pcombo = nullptr,
+                    *ptable = nullptr, *pbtn = nullptr;
+  for (const auto &c : proot.children) {
+    if (c.name == "GRID") pcb = &c;
+    else if (c.name == "MAXPLAYERS") ped = &c;
+    else if (c.name == "CLASS") pcombo = &c;
+    else if (c.name == "ROSTER") ptable = &c;
+    else if (c.name == "PREORDER") pbtn = &c;
+  }
+  CHECK(pcb && pcb->as_button, "AS_BUTTON lost");
+  CHECK(ped && ped->number, "NUMBER lost");
+  CHECK(ped->has_minval && ped->minval == 1, "MINVAL lost");
+  CHECK(ped->has_maxval && ped->maxval == 99, "MAXVAL lost");
+  CHECK(ped->has_maxchar && ped->maxchar == 2, "MAXCHAR lost");
+  CHECK(pcombo && pcombo->list_box.has_sb_edge_pad &&
+            pcombo->list_box.sb_edge_pad == 21,
+        "SB_EDGE_PAD lost");
+  CHECK(pcombo->list_box.min_item_height == 20, "listbox MIN_ITEM_HEIGHT lost");
+  CHECK(ptable, "table widget lost");
+  bool custom = false;
+  for (const auto &b : ptable->table_data.column.bodies)
+    if (b.custom_draw) custom = true;
+  CHECK(custom, "CUSTOM_DRAW lost");
+  CHECK(pbtn && !pbtn->actions.empty() && pbtn->actions[0].external_browser,
+        "EXTERNAL_BROWSER lost");
+
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -1011,6 +1144,7 @@ int main() {
   RUN_TEST(test_table_scrollbar);
   RUN_TEST(test_table_items_colors);
   RUN_TEST(test_serialize_roundtrip);
+  RUN_TEST(test_create_from_scratch);
 
   if (failed > 0) {
     std::cerr << "\n" << failed << " test(s) FAILED\n";

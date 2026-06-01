@@ -76,6 +76,7 @@ struct Action {
   std::string state;  // "SHOW", "HIDE" (for window type)
   std::string file;   // Target .mnu file (for screen type)
   std::string target; // Screen name or window name
+  bool external_browser = false; // EXTERNAL_BROWSER flag (on type="URL")
 };
 
 // Text/string definition.
@@ -137,6 +138,11 @@ struct ListBox {
   Items items;  // Items with selection color
   int min_item_height = 0;  // Minimum height per item
   ListBoxScrollbar scrollbar;  // Custom scrollbar
+
+  // SB_EDGE_PAD attribute on the LIST_BOX element. Preserved for round-trip
+  // even though the runtime may ignore it (see ADR 0002). false = absent.
+  bool has_sb_edge_pad = false;
+  int sb_edge_pad = 0;
 };
 
 // Frame/border definition.
@@ -178,6 +184,7 @@ struct TableBody {
   bool bitmap_draw = false;      // BITMAP_DRAW flag - render images in this column
   std::string bitmap_flags;      // BITMAP_FLAGS (e.g., "STANDARD_TRANSPARENT")
   bool scale_bitmap = false;     // SCALE_BITMAP flag
+  bool custom_draw = false;      // CUSTOM_DRAW flag - host-drawn cell
 };
 
 // Value substitution for table cells (renders image based on value).
@@ -228,7 +235,18 @@ struct Window {
   bool draw_frame = false;  // Whether to draw inherited frame
   bool modal = false;       // MODAL - dialog window
   bool readonly = false;    // READONLY - for multiline_edit
+  bool as_button = false;   // AS_BUTTON - render a checkbox as a toggle button
   int group = 0;            // Radio button group ID
+
+  // Numeric edit-field constraints, preserved for round-trip even when the
+  // runtime does not enforce them (see ADR 0002). NUMBER is a bare flag.
+  bool number = false;      // NUMBER: numeric-only input
+  bool has_minval = false;
+  int minval = 0;           // MINVAL
+  bool has_maxval = false;
+  int maxval = 0;           // MAXVAL
+  bool has_maxchar = false;
+  int maxchar = 0;          // MAXCHAR
 
   Position position;
   std::vector<Appearance> appearances;

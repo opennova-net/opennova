@@ -1,6 +1,8 @@
 #include "nova_mnu_menu.h"
 
 #include "nova_mnu_builder.h"
+#include "nova_mnu_button.h"
+#include "nova_mnu_goto.h"
 #include "nova_mnu_screen.h"
 #include "resource_index/nova_resource_root.h"
 
@@ -8,12 +10,19 @@
 #include "audio/nova_sbf_audio_stream.h"
 
 #include <godot_cpp/classes/audio_stream_player.hpp>
+#include <godot_cpp/classes/base_button.hpp>
 #include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/classes/input_event_key.hpp>
+#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
 
 using namespace godot;
 
 void NovaMnuMenu::_ready() {
+	// Receive keyboard accelerators (Esc/Enter) for the hotkey router; the handler
+	// is inert in edit_mode, so enabling it unconditionally is safe for the editor
+	// preview that reuses this node.
+	set_process_unhandled_key_input(true);
 	if (build_on_ready_ && menu_.is_valid()) {
 		build();
 	}
@@ -266,6 +275,129 @@ bool NovaMnuMenu::handle_window_action(const String &p_target, const String &p_s
 	return true;
 }
 
+// Maps a Godot keycode to the JO virtual-key name used in <HOTKEY> elements. Only
+// the keys shipped menus actually bind are mapped (ESCAPE / ENTER); extend as new
+// hotkeys appear in real content.
+static String vk_name_for_keycode(Key p_keycode) {
+	switch (p_keycode) {
+		case Key::KEY_ESCAPE:
+			return "VK_ESCAPE";
+		case Key::KEY_ENTER:
+		case Key::KEY_KP_ENTER:
+			return "VK_RETURN";
+		default:
+			return String();
+	}
+}
+
+// VK_RETURN and VK_ENTER are interchangeable spellings in MNU content.
+static bool hotkey_matches(const String &p_stored, const String &p_pressed) {
+	if (p_stored == p_pressed) {
+		return true;
+	}
+	const bool stored_enter = p_stored == "VK_RETURN" || p_stored == "VK_ENTER";
+	const bool pressed_enter = p_pressed == "VK_RETURN" || p_pressed == "VK_ENTER";
+	return stored_enter && pressed_enter;
+}
+
+Node *NovaMnuMenu::find_hotkey_target(Node *p_node, const String &p_vk) const {
+	if (p_node == nullptr) {
+		return nullptr;
+	}
+	// A hidden Control (and its whole subtree) is unreachable by the keyboard, just
+	// as it is unclickable: skip it so a hidden BACK/cancel does not eat the key and
+	// the visible target wins (e.g. a closed modal's controls stay inert). Shipped
+	// menus rely on this -- jo_cmap/jo_game hide confirm dialogs that carry VK_ESCAPE.
+	Control *ctrl = Object::cast_to<Control>(p_node);
+	if (ctrl != nullptr && !ctrl->is_visible()) {
+		return nullptr;
+	}
+	if (p_node->has_meta("mnu_hotkey")) {
+		const String hk = p_node->get_meta("mnu_hotkey");
+		if (hotkey_matches(hk, p_vk)) {
+			return p_node;
+		}
+	}
+	for (int i = 0; i < p_node->get_child_count(); ++i) {
+		Node *found = find_hotkey_target(p_node->get_child(i), p_vk);
+		if (found != nullptr) {
+			return found;
+		}
+	}
+	return nullptr;
+}
+
+// Activates a hotkey target as a mouse click would. Returns true only when the
+// activation has a real effect worth consuming the key for (a dispatched MNU
+// action, a state toggle, or a Goto), so a hotkey on an actionless button leaves
+// the key free to propagate (e.g. Esc falling through to the in-game pause).
+bool NovaMnuMenu::trigger_hotkey_target(Node *p_target) {
+	BaseButton *button = Object::cast_to<BaseButton>(p_target);
+	if (button != nullptr) {
+		bool effect = false;
+		if (button->is_toggle_mode()) {
+			// Checkbox/radio: flip state so the "toggled" handler runs (a bare
+			// emit "pressed" does not toggle a NovaMnuCheckBox).
+			button->set_pressed(!button->is_pressed());
+			effect = true;
+		}
+		NovaMnuButton *nova = Object::cast_to<NovaMnuButton>(button);
+		if (nova != nullptr && nova->get_action_count() > 0) {
+			effect = true;
+		}
+		// Always emit so the button's own actions and any host-wired (name-keyed)
+		// handler run; `effect` only governs whether the key is consumed.
+		button->emit_signal("pressed");
+		return effect;
+	}
+	NovaMnuGoto *go = Object::cast_to<NovaMnuGoto>(p_target);
+	if (go != nullptr) {
+		go->trigger();
+		return true;
+	}
+	return false;
+}
+
+bool NovaMnuMenu::handle_hotkey(const String &p_vk) {
+	if (edit_mode_ || p_vk.is_empty()) {
+		return false;
+	}
+	NovaMnuScreen *screen = find_screen(current_screen_);
+	if (screen == nullptr) {
+		return false;
+	}
+	Node *target = find_hotkey_target(screen, p_vk);
+	if (target == nullptr) {
+		return false;
+	}
+	// Only report handled when the activation actually did something, so a matched
+	// but inert widget does not swallow the key from the host (e.g. Esc-to-resume).
+	return trigger_hotkey_target(target);
+}
+
+bool NovaMnuMenu::handle_key_input(const Ref<InputEventKey> &p_key) {
+	// A hidden/backgrounded menu kept in the tree (the menu front-end during
+	// gameplay) must not route or consume keys, else it steals Esc from the world.
+	if (edit_mode_ || !is_visible_in_tree()) {
+		return false;
+	}
+	if (p_key.is_null() || !p_key->is_pressed() || p_key->is_echo()) {
+		return false;
+	}
+	const String vk = vk_name_for_keycode(p_key->get_keycode());
+	if (vk.is_empty()) {
+		return false;
+	}
+	return handle_hotkey(vk);
+}
+
+void NovaMnuMenu::_unhandled_key_input(const Ref<InputEvent> &p_event) {
+	Ref<InputEventKey> key = p_event;
+	if (key.is_valid() && handle_key_input(key) && get_viewport() != nullptr) {
+		get_viewport()->set_input_as_handled();
+	}
+}
+
 bool NovaMnuMenu::dispatch_action(const String &p_type, const String &p_target,
 		const String &p_file, const String &p_window_state) {
 	emit_signal("action_dispatched", p_type, p_target);
@@ -285,6 +417,13 @@ bool NovaMnuMenu::dispatch_action(const String &p_type, const String &p_target,
 	}
 	if (type == "quit" || type == "quit_game") {
 		quit_game();
+		return true;
+	}
+	if (type == "url") {
+		// type="URL" actions (shipped menus' website/buy buttons) are host policy:
+		// the runtime opens them externally. EXTERNAL_BROWSER is preserved on the
+		// model for round-trip; the runtime always routes URLs to the host.
+		emit_signal("url_requested", p_target);
 		return true;
 	}
 	return false;
@@ -381,6 +520,8 @@ void NovaMnuMenu::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("handle_window_action", "target", "state"), &NovaMnuMenu::handle_window_action);
 	ClassDB::bind_method(D_METHOD("dispatch_action", "type", "target", "file", "window_state"),
 			&NovaMnuMenu::dispatch_action);
+	ClassDB::bind_method(D_METHOD("handle_hotkey", "vk"), &NovaMnuMenu::handle_hotkey);
+	ClassDB::bind_method(D_METHOD("handle_key_input", "key"), &NovaMnuMenu::handle_key_input);
 	ClassDB::bind_method(D_METHOD("clear_navigation_stack"), &NovaMnuMenu::clear_navigation_stack);
 	ClassDB::bind_method(D_METHOD("play_widget_sound", "trigger", "file"), &NovaMnuMenu::play_widget_sound);
 	ClassDB::bind_method(D_METHOD("notify_widget_value", "widget_name", "kind", "index", "value"),
@@ -405,6 +546,7 @@ void NovaMnuMenu::_bind_methods() {
 			PropertyInfo(Variant::STRING, "target_screen")));
 	ADD_SIGNAL(MethodInfo("music_changed", PropertyInfo(Variant::INT, "music_var")));
 	ADD_SIGNAL(MethodInfo("quit_requested"));
+	ADD_SIGNAL(MethodInfo("url_requested", PropertyInfo(Variant::STRING, "url")));
 	ADD_SIGNAL(MethodInfo("sound_requested", PropertyInfo(Variant::STRING, "file"),
 			PropertyInfo(Variant::STRING, "trigger")));
 	ADD_SIGNAL(MethodInfo("action_dispatched", PropertyInfo(Variant::STRING, "type"),

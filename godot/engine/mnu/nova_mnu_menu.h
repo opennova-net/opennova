@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/control.hpp>
+#include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/vector.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -17,6 +18,7 @@ namespace godot {
 class NovaMnuScreen;
 class NovaMusicDirector;
 class AudioStreamPlayer;
+class InputEventKey;
 
 // Runtime menu node: point it at a NovaMnuDocument and it builds the live widget
 // tree (one NovaMnuScreen child per screen). Assets resolve through an optional
@@ -61,6 +63,10 @@ private:
 
 	void apply_screen_visibility();
 	NovaMnuScreen *find_screen(const String &p_name) const;
+	// Pre-order search for a widget tagged meta "mnu_hotkey" matching p_vk
+	// (VK_RETURN/VK_ENTER treated as equivalent).
+	Node *find_hotkey_target(Node *p_node, const String &p_vk) const;
+	bool trigger_hotkey_target(Node *p_target);
 	bool has_screen(const String &p_name) const;
 	void on_screen_shown(const String &p_name);
 	void apply_music_for_screen(NovaMnuScreen *p_screen);
@@ -74,6 +80,12 @@ protected:
 
 public:
 	void _ready() override;
+	void _unhandled_key_input(const Ref<InputEvent> &p_event) override;
+	// Script-callable adapter behind _unhandled_key_input: maps a key event to its
+	// VK name and routes it (gated on edit_mode + visibility). Returns true if a
+	// hotkey handled it. Exposed so tests can drive the real adapter path (the
+	// engine virtual itself is not script-callable).
+	bool handle_key_input(const Ref<InputEventKey> &p_key);
 
 	// --- Properties ---
 	void set_menu(const Ref<NovaMnuDocument> &p_menu);
@@ -129,6 +141,10 @@ public:
 	void quit_game();
 	// Show/hide/toggle a named descendant window inside the current screen.
 	bool handle_window_action(const String &p_target, const String &p_state);
+	// Route a virtual-key hotkey (e.g. "VK_ESCAPE") to the matching widget in the
+	// current screen and fire its actions. Returns true if handled. Inert in
+	// edit_mode. Public so the input adapter and tests both reach it.
+	bool handle_hotkey(const String &p_vk);
 	// Route one widget action by its MNU verb (screen/window/pop/quit). Emits
 	// action_dispatched. Returns true if the action was handled.
 	bool dispatch_action(const String &p_type, const String &p_target,

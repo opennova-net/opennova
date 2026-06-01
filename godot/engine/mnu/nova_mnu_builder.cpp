@@ -513,6 +513,28 @@ void add_frame(MnuBuildContext &ctx, Control *parent, const mnu::Frame &frame) {
 	frame_rect->set_patch_margin(SIDE_BOTTOM, cell_h);
 	frame_rect->set_draw_center(false);
 	parent->add_child(frame_rect);
+
+	// MONOGRAM: a logo/watermark drawn centered on the framed panel. Placement is
+	// a heuristic (centered, natural size) pending an IDA pass on the real game's
+	// monogram positioning; rendering it beats leaving it parsed-but-invisible.
+	if (!frame.monogram.empty()) {
+		Ref<Image> mono_img = resolve_image(ctx, frame.monogram);
+		if (mono_img.is_valid()) {
+			if (mono_img->is_compressed()) {
+				mono_img->decompress();
+			}
+			Ref<ImageTexture> mono_tex = ImageTexture::create_from_image(mono_img);
+			if (mono_tex.is_valid()) {
+				TextureRect *mono = memnew(TextureRect);
+				mono->set_name("Monogram");
+				mono->set_texture(mono_tex);
+				mono->set_stretch_mode(TextureRect::STRETCH_KEEP_CENTERED);
+				mono->set_anchors_preset(Control::PRESET_FULL_RECT);
+				mono->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+				parent->add_child(mono);
+			}
+		}
+	}
 }
 
 // --- Text / label -----------------------------------------------------------
@@ -1776,6 +1798,12 @@ Control *build_window(MnuBuildContext &ctx, const mnu::Window &w, NameTracker &n
 	// widget (and read its rendered size for widgets whose document rect is sizeless).
 	if (widget_id >= 0) {
 		node->set_meta("mnu_widget_id", widget_id);
+	}
+	// Tag the hotkey (e.g. "VK_ESCAPE") so the menu's keyboard router can find this
+	// widget by its accelerator without per-type accessors. Buttons carry the bulk
+	// of shipped hotkeys (Esc=back / Enter=accept) yet had no hotkey path before.
+	if (!w.hotkey.empty()) {
+		node->set_meta("mnu_hotkey", to_gd(w.hotkey).to_upper());
 	}
 	apply_position(ctx, node, w);
 

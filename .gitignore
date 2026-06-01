@@ -72,6 +72,6 @@ godot/exports/
 .godot-bin/
 godot/addons/gut/
 
-docs/
+old_docs/
 CLAUDE.md
 .superpowers/

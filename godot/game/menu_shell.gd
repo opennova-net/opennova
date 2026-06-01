@@ -131,6 +131,7 @@ func _assemble_assets() -> void:
 	_menu.quit_requested.connect(_on_quit_requested)
 	_menu.widget_value_changed.connect(_on_widget_value_changed)
 	_menu.action_dispatched.connect(_on_action_dispatched)
+	_menu.url_requested.connect(_on_url_requested)
 
 
 # --- Menu loading + navigation ------------------------------------------------
@@ -235,6 +236,18 @@ func _on_widget_value_changed(widget_name: String, kind: String, _index: int, va
 
 func _on_action_dispatched(_type: String, _target: String) -> void:
 	pass  # informational; intra-menu actions are handled by the menu itself.
+
+
+func _on_url_requested(url: String) -> void:
+	# Shipped menus open website/marketing links (e.g. the splash PREORDER button)
+	# via <ACTION type="URL">. Hand them to the OS browser, adding a scheme if the
+	# authored link is bare (e.g. "www.novalogic.com/...").
+	if url.is_empty():
+		return
+	var target := url
+	if not (target.begins_with("http://") or target.begins_with("https://")):
+		target = "https://" + target
+	OS.shell_open(target)
 
 
 # --- Named-control handlers (host policy: launch / quit by control name) -------

@@ -157,6 +157,7 @@ Action parse_action(const mnu_xml::Node *action_node) {
   act.type = action_node->attr("type");
   act.state = action_node->attr("state");
   act.file = action_node->attr("file");
+  act.external_browser = action_node->attr_bool("external_browser");
 
   // Target can be in attribute OR text content.
   act.target = action_node->attr("target");
@@ -352,6 +353,12 @@ ListBox parse_listbox(const mnu_xml::Node *listbox_node) {
 
   listbox.present = true;
 
+  // SB_EDGE_PAD is an attribute on the LIST_BOX element itself (not a child).
+  if (listbox_node->has_attr("sb_edge_pad")) {
+    listbox.sb_edge_pad = parse_int(listbox_node->attr("sb_edge_pad"));
+    listbox.has_sb_edge_pad = true;
+  }
+
   for (const auto &child : listbox_node->children) {
     if (!child->is_element()) continue;
     std::string tag = mnu_xml::to_lower(child->tag);
@@ -363,14 +370,11 @@ ListBox parse_listbox(const mnu_xml::Node *listbox_node) {
     } else if (tag == "items") {
       listbox.items = parse_items(child.get());
     } else if (tag == "min_item_height") {
-      if (!child->text.empty()) {
-        try {
-          listbox.min_item_height = std::stoi(child->text);
-        } catch (const std::exception &e) {
-          fprintf(stderr, "[MNU] Failed to parse MIN_ITEM_HEIGHT: '%s' - %s\n",
-                  child->text.c_str(), e.what());
-        }
-      }
+      // The value is a child text node, so child->text (the element's own text)
+      // is empty here; read it via get_direct_text() like every other site. Using
+      // child->text silently dropped it (latent until a real combobox LIST_BOX
+      // with MIN_ITEM_HEIGHT exercised it; see ADR 0002).
+      listbox.min_item_height = parse_int(child->get_direct_text());
     } else if (tag == "scrollbar") {
       listbox.scrollbar = parse_listbox_scrollbar(child.get());
     }
@@ -443,6 +447,7 @@ TableBody parse_table_body(const mnu_xml::Node *node) {
   body.bitmap_draw = node->has_attr("bitmap_draw");
   body.bitmap_flags = node->attr("bitmap_flags");
   body.scale_bitmap = node->has_attr("scale_bitmap");
+  body.custom_draw = node->has_attr("custom_draw");
 
   return body;
 }
@@ -541,7 +546,23 @@ Window parse_window(const mnu_xml::Node *window_node) {
   win.draw_frame = window_node->attr_bool("draw_frame");
   win.modal = window_node->attr_bool("modal");
   win.readonly = window_node->attr_bool("readonly");
+  win.as_button = window_node->attr_bool("as_button");
   win.group = parse_int(window_node->attr("group"));
+
+  // Numeric edit-field constraints (preserved for round-trip; see ADR 0002).
+  win.number = window_node->attr_bool("number");
+  if (window_node->has_attr("minval")) {
+    win.minval = parse_int(window_node->attr("minval"));
+    win.has_minval = true;
+  }
+  if (window_node->has_attr("maxval")) {
+    win.maxval = parse_int(window_node->attr("maxval"));
+    win.has_maxval = true;
+  }
+  if (window_node->has_attr("maxchar")) {
+    win.maxchar = parse_int(window_node->attr("maxchar"));
+    win.has_maxchar = true;
+  }
 
   // Parse child elements.
   for (const auto &child : window_node->children) {
@@ -996,6 +1017,7 @@ void write_action(const Action &act, std::string &out, int depth, bool pretty,
   for (auto &c : state_upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
   attrs += attr_pair("state", state_upper);
   attrs += attr_pair("file", act.file);
+  if (act.external_browser) attrs += " EXTERNAL_BROWSER";
   // Don't write target as attribute - it goes in element content
 
   append_line(out, depth,
@@ -1203,7 +1225,11 @@ void write_listbox_scrollbar(const ListBoxScrollbar &sb, std::string &out,
 void write_listbox(const ListBox &lb, std::string &out, int depth,
                    bool pretty, int indent_size) {
   if (!lb.present) return;
-  append_line(out, depth, "<LIST_BOX>", pretty, indent_size);
+  std::string lb_attrs;
+  if (lb.has_sb_edge_pad) {
+    lb_attrs += " sb_edge_pad=\"" + std::to_string(lb.sb_edge_pad) + "\"";
+  }
+  append_line(out, depth, "<LIST_BOX" + lb_attrs + ">", pretty, indent_size);
   // Appearances (background/outline colors)
   for (const auto &app : lb.appearances) {
     write_appearance(app, out, depth + 1, pretty, indent_size);
@@ -1278,6 +1304,12 @@ void write_window(const Window &win, std::string &out, int depth, bool pretty,
   if (win.disabled) attrs += " disabled=\"true\"";
   // CHECKED is a bare attribute in original format
   if (win.checked) attrs += " CHECKED";
+  if (win.as_button) attrs += " AS_BUTTON";
+  // Numeric edit-field constraints (round-trip preservation; see ADR 0002).
+  if (win.number) attrs += " NUMBER";
+  if (win.has_minval) attrs += " MINVAL=\"" + std::to_string(win.minval) + "\"";
+  if (win.has_maxval) attrs += " MAXVAL=\"" + std::to_string(win.maxval) + "\"";
+  if (win.has_maxchar) attrs += " MAXCHAR=\"" + std::to_string(win.maxchar) + "\"";
 
   append_line(out, depth, "<WINDOW" + attrs + ">", pretty, indent_size);
 
@@ -1512,6 +1544,7 @@ void write_window(const Window &win, std::string &out, int depth, bool pretty,
         b_attrs += attr_pair("column", std::to_string(b.column));
         if (b.bitmap_draw) b_attrs += " BITMAP_DRAW";
         if (b.scale_bitmap) b_attrs += " SCALE_BITMAP";
+        if (b.custom_draw) b_attrs += " CUSTOM_DRAW";
         if (!b.bitmap_flags.empty()) b_attrs += attr_pair("BITMAP_FLAGS", b.bitmap_flags);
         append_line(out, depth + 2, "<BODY" + b_attrs + " ></BODY>", pretty, indent_size);
       }
@@ -1622,6 +1655,18 @@ void write_window(const Window &win, std::string &out, int depth, bool pretty,
 
       append_line(out, depth + 1, "</SCROLLBAR>", pretty, indent_size);
     }
+  }
+
+  // MIN_ITEM_HEIGHT for list-like widgets other than List/Table (e.g. combobox,
+  // spinlist, multi): they parse a direct <MIN_ITEM_HEIGHT> child into table_data
+  // but have no dedicated emit above, so it is lost on save without this (ADR 0002).
+  if (win.type != WindowType::List && win.type != WindowType::Table &&
+      win.table_data.min_item_height > 0) {
+    append_line(out, depth + 1,
+                "<MIN_ITEM_HEIGHT>" +
+                    std::to_string(win.table_data.min_item_height) +
+                    "</MIN_ITEM_HEIGHT>",
+                pretty, indent_size);
   }
 
   for (const auto &child : win.children) {
