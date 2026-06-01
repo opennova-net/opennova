@@ -81,6 +81,9 @@ std::string kind_for_path(const fs::path &path) {
 	if (extension == ".fnt") {
 		return "font";
 	}
+	if (extension == ".mnu") {
+		return "menu";
+	}
 	if (extension == ".sbf") {
 		return "sbf";
 	}
@@ -121,6 +124,9 @@ std::string normalize_kind(const std::string &kind) {
 	}
 	if (key == "fnt" || key == "fonts") {
 		return "font";
+	}
+	if (key == "mnu" || key == "menus") {
+		return "menu";
 	}
 	if (key == "bin" || key == "rtxt") {
 		return "strings";

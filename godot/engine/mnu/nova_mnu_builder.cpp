@@ -13,6 +13,7 @@
 #include "nova_mnu_map.h"
 #include "nova_mnu_marquee.h"
 #include "nova_mnu_multi.h"
+#include "nova_mnu_document.h"
 #include "nova_mnu_multiline_edit.h"
 #include "nova_mnu_screen.h"
 #include "nova_mnu_scroll.h"
@@ -1669,12 +1670,21 @@ Control *build_goto(MnuBuildContext &ctx, const mnu::Window &w) {
 }
 
 Control *build_window(MnuBuildContext &ctx, const mnu::Window &w, NameTracker &names,
-		const mnu::Font &inherited_font, const mnu::Frame &inherited_frame, ButtonGroupMap &groups);
+		const mnu::Font &inherited_font, const mnu::Frame &inherited_frame, ButtonGroupMap &groups,
+		int widget_id);
 
 void build_children(MnuBuildContext &ctx, Control *parent, const mnu::Window &w,
-		const mnu::Font &font, const mnu::Frame &frame, NameTracker &names, ButtonGroupMap &groups) {
-	for (const auto &child : w.children) {
-		Control *node = build_window(ctx, child, names, font, frame, groups);
+		const mnu::Font &font, const mnu::Frame &frame, NameTracker &names, ButtonGroupMap &groups,
+		int widget_id) {
+	// The document id-tree mirrors mnu::Document by child index, so child[i]'s stable
+	// id is get_child_ids(widget_id)[i]. -1 when no document is associated.
+	PackedInt32Array child_ids;
+	if (ctx.document != nullptr && widget_id >= 0) {
+		child_ids = ctx.document->get_child_ids(widget_id);
+	}
+	for (int i = 0; i < static_cast<int>(w.children.size()); ++i) {
+		const int child_id = i < child_ids.size() ? child_ids[i] : -1;
+		Control *node = build_window(ctx, w.children[i], names, font, frame, groups, child_id);
 		if (node) {
 			parent->add_child(node);
 		}
@@ -1682,7 +1692,8 @@ void build_children(MnuBuildContext &ctx, Control *parent, const mnu::Window &w,
 }
 
 Control *build_window(MnuBuildContext &ctx, const mnu::Window &w, NameTracker &names,
-		const mnu::Font &inherited_font, const mnu::Frame &inherited_frame, ButtonGroupMap &groups) {
+		const mnu::Font &inherited_font, const mnu::Frame &inherited_frame, ButtonGroupMap &groups,
+		int widget_id) {
 	// Merge fonts (child overrides parent), then pass down to descendants.
 	mnu::Font font = inherited_font;
 	if (!w.font.name.empty()) {
@@ -1761,6 +1772,11 @@ Control *build_window(MnuBuildContext &ctx, const mnu::Window &w, NameTracker &n
 	}
 
 	node->set_name(names.get_unique(to_gd(w.name)));
+	// Tag with the stable document id so the editor can map this Control back to its
+	// widget (and read its rendered size for widgets whose document rect is sizeless).
+	if (widget_id >= 0) {
+		node->set_meta("mnu_widget_id", widget_id);
+	}
 	apply_position(ctx, node, w);
 
 	if (w.hidden) {
@@ -1772,7 +1788,7 @@ Control *build_window(MnuBuildContext &ctx, const mnu::Window &w, NameTracker &n
 
 	// Own frame takes priority over inherited for child inheritance.
 	const mnu::Frame &frame_to_inherit = has_frame(w.frame) ? w.frame : inherited_frame;
-	build_children(ctx, node, w, font, frame_to_inherit, names, groups);
+	build_children(ctx, node, w, font, frame_to_inherit, names, groups, widget_id);
 
 	// Outline draws on top of children.
 	if ((w.type == mnu::WindowType::Window || w.type == mnu::WindowType::Static ||
@@ -1788,7 +1804,7 @@ Control *build_window(MnuBuildContext &ctx, const mnu::Window &w, NameTracker &n
 
 namespace godot {
 
-Control *mnu_build_screen(const mnu::Screen &screen, MnuBuildContext &ctx) {
+Control *mnu_build_screen(const mnu::Screen &screen, MnuBuildContext &ctx, int root_window_id) {
 	NovaMnuScreen *screen_node = memnew(NovaMnuScreen);
 	screen_node->set_name(to_gd(screen.name).is_empty() ? String("Screen") : to_gd(screen.name));
 	screen_node->set_screen_name(to_gd(screen.name));
@@ -1816,7 +1832,7 @@ Control *mnu_build_screen(const mnu::Screen &screen, MnuBuildContext &ctx) {
 	NameTracker names;
 	ButtonGroupMap groups;
 	Control *root = build_window(ctx, screen.root_window, names, screen.root_window.font,
-			screen.root_window.frame, groups);
+			screen.root_window.frame, groups, root_window_id);
 	if (root) {
 		screen_node->add_child(root);
 	}

@@ -327,13 +327,16 @@ func _canvas_with_pair() -> Array:
 	return [canvas, doc, a, b]
 
 
-func test_ids_in_marquee_selects_intersecting() -> void:
-	var doc := _load_doc()
+func test_marquee_collects_intersecting_widgets() -> void:
+	var pair = await _canvas_with_fixture()
+	var canvas = pair[0]
+	var doc: NovaMnuDocument = pair[1]
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
+	# Added after set_menu (no live Control), so these resolve via their document rects.
 	var win := doc.add_widget(root, NovaMnuDocument.TYPE_WINDOW, Rect2(100, 100, 200, 200))
 	var child := doc.add_widget(win, NovaMnuDocument.TYPE_STATIC, Rect2(10, 10, 50, 30))  # abs (110,110,50,30)
 	var far := doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON, Rect2(500, 400, 40, 20))
-	var hits := MnuCanvasScript._ids_in_marquee(doc, root, Rect2(90, 90, 150, 150))
+	var hits = canvas._marquee_ids(Rect2(90, 90, 150, 150))
 	assert_true(hits.has(win), "A window intersecting the box is selected.")
 	assert_true(hits.has(child), "A nested child intersecting the box is selected (absolute-rect math).")
 	assert_false(hits.has(far), "A widget outside the box is not selected.")
@@ -454,3 +457,157 @@ func test_group_move_carries_nested_child() -> void:
 		by_id[e["id"]] = e["rect"]
 	assert_eq(by_id[parent], Rect2(132, 116, 200, 150), "The parent shifts by the delta.")
 	assert_eq(by_id[child], Rect2(20, 20, 60, 30), "The selected child is carried (local rect unchanged).")
+
+
+# --- Phase 5: right-click "select under cursor" menu rows -----------------------
+
+func test_pick_menu_rows_orders_top_to_bottom_with_depth() -> void:
+	var doc := _load_doc()
+	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
+	var win := doc.add_widget(root, NovaMnuDocument.TYPE_WINDOW, Rect2(100, 100, 200, 200))
+	var child := doc.add_widget(win, NovaMnuDocument.TYPE_STATIC, Rect2(10, 10, 50, 30))
+	# A stack ordered as pick_stack_at returns it: topmost (deepest) first.
+	var stack := PackedInt32Array([child, win, root])
+	var rows := MnuCanvasScript._pick_menu_rows(doc, stack)
+	assert_eq(rows.size(), 3, "One row per stacked widget.")
+	assert_eq(int(rows[0]["id"]), child, "Order is preserved: the topmost (deepest) is first.")
+	assert_eq(int(rows[2]["id"]), root, "The background root window is last.")
+	assert_eq(int(rows[0]["depth"]), 2, "A grandchild of the root window is depth 2.")
+	assert_eq(int(rows[1]["depth"]), 1, "A child of the root window is depth 1.")
+	assert_eq(int(rows[2]["depth"]), 0, "The root window itself is depth 0.")
+	assert_true(String(rows[0]["label"]).contains("#%d" % child), "The label carries the stable id.")
+	# A screen id in the stack is excluded (only selectable widgets are listed).
+	var rows2 := MnuCanvasScript._pick_menu_rows(doc, PackedInt32Array([doc.get_screen_ids()[0], root]))
+	assert_eq(rows2.size(), 1, "Screen ids are skipped; only the root window remains.")
+
+
+# --- Partial-POSITION widgets: size sourced from the live render --------------------
+#
+# Shipped JO menus omit a widget's RIGHT/BOTTOM, so get_window_rect returns a sizeless
+# rect; the overlay must fill the missing size axis from the live preview Control (the
+# builder tags each Control with its document id) so the widget is pickable + outlined.
+
+const JO_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"
+
+
+func _load_jo() -> NovaMnuDocument:
+	var doc := NovaMnuDocument.new()
+	doc.load_from_bytes(FileAccess.get_file_as_bytes(JO_FIXTURE))
+	return doc
+
+
+# A canvas over jo_main sized to the derived design canvas (identity letterbox fit).
+# Two frames let any anchored windows resolve. Returns [canvas, doc].
+func _canvas_with_jo() -> Array:
+	var doc := _load_jo()
+	var canvas = MnuCanvasScript.new()
+	add_child_autofree(canvas)
+	canvas.size = Vector2(doc.get_menu_size())
+	await get_tree().process_frame
+	canvas.set_menu(doc, null, null)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	return [canvas, doc]
+
+
+func _find_named(doc: NovaMnuDocument, id: int, wname: String) -> int:
+	if doc.get_widget_name(id) == wname:
+		return id
+	for cid in doc.get_child_ids(id):
+		var f := _find_named(doc, cid, wname)
+		if f != -1:
+			return f
+	return -1
+
+
+func _jo_widget(doc: NovaMnuDocument, wname: String) -> int:
+	return _find_named(doc, doc.get_screen_root_id(doc.get_screen_ids()[0]), wname)
+
+
+func test_jo_bottomless_button_is_pickable() -> void:
+	var pair = await _canvas_with_jo()
+	var canvas = pair[0]
+	var doc: NovaMnuDocument = pair[1]
+	var sp := _jo_widget(doc, "SINGLE_PLAYER")
+	assert_gt(sp, 0, "Located the SINGLE_PLAYER button.")
+	# Precondition: the shipped button has no authored height (no <BOTTOM>).
+	assert_eq(doc.get_window_rect(sp).size.y, 0.0, "The document button rect is zero-height.")
+	# The overlay now sources the missing height from the live render (default button 24).
+	var r = canvas._abs_rect_of(sp)
+	assert_eq(r.size, Vector2(110, 24), "Width from the document (110), height from the live button (24).")
+	assert_eq(r.position, canvas._abs_offset_of(sp) + Vector2(40, 0), "Position stays document-derived.")
+	# It is pickable at its rendered center (previously a zero-size rect was skipped).
+	var center = canvas._board_to_canvas(r.position + r.size * 0.5)
+	assert_eq(canvas.pick_widget_at(center), sp, "The button is picked at its rendered center.")
+
+
+func test_jo_button_in_pick_stack_and_right_click_menu() -> void:
+	var pair = await _canvas_with_jo()
+	var canvas = pair[0]
+	var doc: NovaMnuDocument = pair[1]
+	var sp := _jo_widget(doc, "SINGLE_PLAYER")
+	var r = canvas._abs_rect_of(sp)
+	var center = canvas._board_to_canvas(r.position + r.size * 0.5)
+	var stack = canvas.pick_stack_at(center)
+	assert_true(stack.has(sp), "The button is in the hit-stack (right-click select-under-cursor).")
+	var rows := MnuCanvasScript._pick_menu_rows(doc, stack)
+	var found := false
+	for row in rows:
+		if int(row["id"]) == sp:
+			found = true
+	assert_true(found, "The button appears as a right-click menu row.")
+
+
+func test_jo_button_resizable_and_in_control_map() -> void:
+	var pair = await _canvas_with_jo()
+	var canvas = pair[0]
+	var doc: NovaMnuDocument = pair[1]
+	var sp := _jo_widget(doc, "SINGLE_PLAYER")
+	canvas.set_selected(sp)
+	assert_true(canvas._has_resizable_selection(), "A rendered-but-sizeless button is resizable.")
+	assert_true(canvas._id_to_control.has(sp), "The id->Control map includes the button.")
+	var c = canvas._id_to_control[sp]
+	assert_gt((c as Control).size.y, 0.0, "The mapped live Control has a non-zero rendered height.")
+
+
+func test_jo_button_drag_pins_concrete_size() -> void:
+	var pair = await _canvas_with_jo()
+	var canvas = pair[0]
+	var doc: NovaMnuDocument = pair[1]
+	var sp := _jo_widget(doc, "SINGLE_PLAYER")
+	var r = canvas._abs_rect_of(sp)
+	var center = canvas._board_to_canvas(r.position + r.size * 0.5)
+	watch_signals(canvas)
+	canvas._on_press(center)                       # plain pick + arm move
+	canvas._on_drag(center + Vector2(16, 0), true) # +16 x, Alt = no snap
+	canvas._on_release()
+	assert_signal_emit_count(canvas, "rect_committed", 1, "A drag commits exactly once.")
+	var local = get_signal_parameters(canvas, "rect_committed", 0)[1]
+	assert_eq(local.size.y, 24.0, "The commit pins a concrete height (from the live render).")
+
+
+func test_jo_full_rect_widget_unchanged() -> void:
+	var pair = await _canvas_with_jo()
+	var canvas = pair[0]
+	var doc: NovaMnuDocument = pair[1]
+	var ftr := _jo_widget(doc, "LOGO_SPLASH_FTR")  # has all four edges
+	assert_gt(ftr, 0, "Located LOGO_SPLASH_FTR.")
+	var dr := doc.get_window_rect(ftr)
+	assert_gt(dr.size.x, 0.0, "Precondition: a fully-sized widget.")
+	assert_gt(dr.size.y, 0.0, "Precondition: a fully-sized widget.")
+	assert_eq(canvas._abs_rect_of(ftr), Rect2(canvas._abs_offset_of(ftr) + dr.position, dr.size),
+		"A fully-sized widget keeps its exact document rect (the live size is not consulted).")
+
+
+func test_jo_bottomless_imageless_static_known_limitation() -> void:
+	# Image-less bottomless statics get no live height from the builder either, so the
+	# overlay leaves them zero-height (a documented limitation; fixing it would require
+	# fabricating a height and shifting text). Defensive: only assert when applicable.
+	var pair = await _canvas_with_jo()
+	var canvas = pair[0]
+	var doc: NovaMnuDocument = pair[1]
+	var v := _jo_widget(doc, "VERSION_EXP")
+	if v < 0 or doc.get_window_rect(v).size.y > 0.0 or canvas._live_size_of(v).y > 0.0:
+		pass_test("No bottomless image-less static to check in this fixture.")
+		return
+	assert_eq(canvas._abs_rect_of(v).size.y, 0.0, "A bottomless image-less static stays zero-height.")

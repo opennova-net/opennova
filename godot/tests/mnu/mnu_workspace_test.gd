@@ -14,6 +14,7 @@ const MnuPropertyInspectorScript = preload("res://modtools/mnu/mnu_property_insp
 const MnuEditorScript = preload("res://modtools/mnu/mnu_editor.gd")
 const MnuWorkspaceScript = preload("res://modtools/mnu/mnu_workspace.gd")
 const MnuUiHelpersScript = preload("res://modtools/mnu/mnu_ui_helpers.gd")
+const StringsWorkspaceScript = preload("res://modtools/strings/strings_workspace.gd")
 
 const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
 const TEMP_DIR := "user://test_mnu_workspace"
@@ -312,7 +313,8 @@ func test_workspace_adapter_actions_and_inspector() -> void:
 	assert_eq(ws.get_workspace_label(), "Menus", "Adapter labels itself for the rail.")
 	assert_eq(ws.get_open_dialog_filters(), PackedStringArray(["*.mnu,*.MNU ; Nova menus"]),
 		"Open dialog targets Nova .mnu files.")
-	assert_eq(ws.get_open_resource_kind(), "", "Empty kind -> native file dialog fallback.")
+	assert_eq(ws.get_open_resource_kind(), "menu",
+		"Open uses the indexed quick-open browser (kind 'menu'), not the native dialog.")
 
 	assert_eq(ws.open_file(FIXTURE), OK, "Adapter opens a .mnu file.")
 	assert_eq(ws.get_project_title(), "widgets", "Title shows the loaded basename.")
@@ -1337,3 +1339,80 @@ func test_adapter_routes_multi_selection_to_inspector() -> void:
 	await get_tree().process_frame
 	assert_string_contains(_collect_text(inspector_host), "2 widgets selected",
 		"A multi-selection routes to the inspector summary through the adapter.")
+
+
+# --- Phase 5: strings integration + cross-workspace jumps ------------------------
+
+# Stub shell capturing the cross-workspace jump calls the adapter makes.
+class _StubShell extends Node:
+	var strings_calls: Array = []
+	var font_calls: Array = []
+	func open_strings_workspace(path: String, key: String) -> int:
+		strings_calls.append([path, key])
+		return OK
+	func open_font_workspace(font: String) -> int:
+		font_calls.append(font)
+		return OK
+	func show_status_message(_text: String, _duration := 4.0) -> void:
+		pass
+
+
+# Stub editor exposing only the resolved-table path the adapter reads for the jump.
+class _StubEditor extends Control:
+	var path: String = ""
+	func get_text_resource_path() -> String:
+		return path
+	func get_text_resource():
+		return null
+
+
+func test_strings_open_table_focuses_key() -> void:
+	var ws = autofree(StringsWorkspaceScript.new())
+	ws._ensure_editor()
+	add_child_autofree(ws.strings_editor)
+	var sec: int = ws.strings_editor.add_section("default")
+	ws.strings_editor.add_entry("ALPHA", "Alpha", sec, Vector2i())
+	var idx: int = ws.strings_editor.add_entry("BRAVO", "Bravo", sec, Vector2i())
+	# Empty path = focus only (the table is already loaded in-memory here).
+	assert_eq(ws.open_strings_table("", "BRAVO"), OK, "Focusing an in-memory table returns OK.")
+	assert_eq(ws._search, "BRAVO", "The Strings table view is filtered to the key.")
+	assert_eq(ws.strings_editor.selected_index, idx, "The key's entry is selected.")
+
+
+func test_mnu_adapter_routes_string_jump_to_shell() -> void:
+	var ws = autofree(MnuWorkspaceScript.new())
+	var ed := _StubEditor.new()
+	ed.path = "C:/assets/menutxt.bin"
+	add_child_autofree(ed)
+	ws._editor = ed
+	var shell := _StubShell.new()
+	add_child_autofree(shell)
+	ws.editor_shell = shell
+	ws._on_string_jump("ALPHA")
+	assert_eq(shell.strings_calls.size(), 1, "The jump reaches the shell exactly once.")
+	if shell.strings_calls.size() == 1:
+		assert_eq(shell.strings_calls[0], ["C:/assets/menutxt.bin", "ALPHA"],
+			"The jump carries the resolved table path + the string id.")
+
+
+func test_mnu_adapter_string_jump_noops_without_table() -> void:
+	var ws = autofree(MnuWorkspaceScript.new())
+	var ed := _StubEditor.new()  # path stays empty -> no resolved table
+	add_child_autofree(ed)
+	ws._editor = ed
+	var shell := _StubShell.new()
+	add_child_autofree(shell)
+	ws.editor_shell = shell
+	ws._on_string_jump("ALPHA")
+	assert_eq(shell.strings_calls.size(), 0,
+		"With no resolved table, the jump no-ops (no shell call).")
+
+
+func test_mnu_adapter_routes_font_jump_to_shell() -> void:
+	var ws = autofree(MnuWorkspaceScript.new())
+	var shell := _StubShell.new()
+	add_child_autofree(shell)
+	ws.editor_shell = shell
+	ws._on_font_jump("Gunpl22b.fnt")
+	assert_eq(shell.font_calls, ["Gunpl22b.fnt"],
+		"The font jump reaches the shell with the font name.")

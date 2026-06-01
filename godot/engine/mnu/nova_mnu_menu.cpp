@@ -101,11 +101,20 @@ void NovaMnuMenu::build() {
 	ctx.stylesheet = stylesheet_.ptr();
 	ctx.text = text_resource_.ptr();
 	ctx.owner = this;
+	ctx.document = menu_.ptr();
 	ctx.edit_mode = edit_mode_;
 
 	const mnu::Document &doc = menu_->get_native();
+	// get_screen_ids()[i] aligns with doc.screens[i] (both built in the same order by
+	// rebuild_ids), so the i-th built screen's root window id is screen_ids[i]'s root.
+	const PackedInt32Array screen_ids = menu_->get_screen_ids();
+	int screen_index = 0;
 	for (const auto &screen : doc.screens) {
-		Control *screen_node = mnu_build_screen(screen, ctx);
+		const int root_window_id = screen_index < screen_ids.size()
+				? menu_->get_screen_root_id(screen_ids[screen_index])
+				: -1;
+		++screen_index;
+		Control *screen_node = mnu_build_screen(screen, ctx, root_window_id);
 		if (screen_node) {
 			// Add hidden so each screen's _ready does not apply its cursor while
 			// transiently visible; apply_screen_visibility() below then shows only

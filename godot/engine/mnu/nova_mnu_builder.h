@@ -13,6 +13,7 @@ class NovaResourceRoot;
 class MnsStyleSheet;
 class RtxtStringFile;
 class NovaMnuMenu;
+class NovaMnuDocument;
 
 // Shared inputs (and accumulated outputs) for building a live menu tree. The
 // asset resolvers are optional: when a root/stylesheet/text resource is null the
@@ -24,6 +25,10 @@ struct MnuBuildContext {
 	MnsStyleSheet *stylesheet = nullptr;
 	RtxtStringFile *text = nullptr;
 	NovaMnuMenu *owner = nullptr;
+	// Source document, used only to tag each built widget Control with its stable id
+	// (set_meta "mnu_widget_id") so the editor can map a Control back to a widget.
+	// Null in pure-runtime builds with no document association (tagging is skipped).
+	NovaMnuDocument *document = nullptr;
 	bool edit_mode = false;
 
 	// Distinct concrete asset names (textures/fonts, never %VAR% references) that
@@ -36,6 +41,8 @@ struct MnuBuildContext {
 // children, real textures/fonts/colors/strings resolved through ctx). Returns a
 // newly created Control the caller owns (parent it under the NovaMnuMenu). Never
 // returns null for a valid screen. ctx is mutated to record unresolved assets.
-Control *mnu_build_screen(const mnu::Screen &screen, MnuBuildContext &ctx);
+// root_window_id is the document id of the screen's root window (or -1 when no
+// document is associated); it threads the stable ids onto the built Controls.
+Control *mnu_build_screen(const mnu::Screen &screen, MnuBuildContext &ctx, int root_window_id);
 
 } // namespace godot

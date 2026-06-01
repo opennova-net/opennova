@@ -31,6 +31,11 @@ signal selection_changed(ids: PackedInt32Array)
 
 var _document   # MnuEditorDocument
 var _resource_root: NovaResourceRoot
+# The resolved RTXT string table for the open menu (first screen's text_rsrc) and
+# its absolute path, cached on each preview refresh. The inspector reuses these to
+# show resolved text, drive the string picker, and jump to the Strings workspace.
+var _text_resource: RtxtStringFile
+var _text_resource_path: String = ""
 var _tree        # MnuWidgetTree
 var _canvas      # MnuCanvas
 var _selected_id := -1
@@ -234,15 +239,20 @@ func _refresh_preview() -> void:
 	if _canvas == null:
 		return
 	var doc := _document_resource()
-	_canvas.set_menu(doc, _resource_root, _resolve_text_resource(doc))
+	_resolve_text_resource(doc)  # refresh the cached table + path
+	_canvas.set_menu(doc, _resource_root, _text_resource)
 
 
 # Best-effort: resolve the document's first non-empty screen text resource through
-# the shared resource root so the preview renders real strings. Silent on failure
+# the shared resource root so the preview renders real strings, caching both the
+# loaded table and its absolute path (the inspector reuses them for resolved-text
+# display, the string picker, and the "Edit in Strings" jump). Silent on failure
 # (the builder then shows string ids / stripped hotkeys).
-func _resolve_text_resource(doc: NovaMnuDocument) -> RtxtStringFile:
+func _resolve_text_resource(doc: NovaMnuDocument) -> void:
+	_text_resource = null
+	_text_resource_path = ""
 	if doc == null or _resource_root == null or _resource_root.get_root_dir().is_empty():
-		return null
+		return
 	for screen_id in doc.get_screen_ids():
 		var rsrc := doc.get_screen_text_rsrc(screen_id)
 		if rsrc.is_empty():
@@ -252,11 +262,20 @@ func _resolve_text_resource(doc: NovaMnuDocument) -> RtxtStringFile:
 			continue
 		var rtxt := RtxtStringFile.new()
 		if rtxt.load_from_path(path) == OK:
-			return rtxt
+			_text_resource = rtxt
+			_text_resource_path = path
+			return
 		# A resolvable-but-unreadable table should not abort resolution; a later
 		# screen may carry a loadable one.
 		continue
-	return null
+
+
+func get_text_resource() -> RtxtStringFile:
+	return _text_resource
+
+
+func get_text_resource_path() -> String:
+	return _text_resource_path
 
 
 func _on_tree_selected(id: int) -> void:

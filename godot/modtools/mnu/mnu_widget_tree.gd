@@ -77,6 +77,13 @@ func select_id(id: int) -> void:
 	if item == null:
 		return
 	_suppress_selection = true
+	# Expand any collapsed ancestors first: Godot keeps items under a collapsed
+	# parent hidden, so a deep canvas pick would otherwise select a row the user
+	# cannot see. Walking up to (but not past) the hidden root reveals it.
+	var ancestor := item.get_parent()
+	while ancestor != null:
+		ancestor.collapsed = false
+		ancestor = ancestor.get_parent()
 	item.select(0)
 	scroll_to_item(item)
 	_suppress_selection = false

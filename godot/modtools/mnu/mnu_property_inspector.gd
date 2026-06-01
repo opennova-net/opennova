@@ -17,9 +17,14 @@ extends MarginContainer
 #   slot: int (color/texture only), value: Variant}.
 
 signal edit_requested(edit: Dictionary)
+# Cross-workspace jump intents (handled by the workspace adapter via the shell): edit
+# the selected widget's string in the Strings workspace, or its font in Fonts.
+signal string_jump_requested(key: String)
+signal font_jump_requested(font: String)
 
 const MnuUiHelpersScript = preload("res://modtools/mnu/mnu_ui_helpers.gd")
 const MnuListEditorScript = preload("res://modtools/mnu/mnu_list_editor.gd")
+const MnuStringPickerScript = preload("res://modtools/mnu/mnu_string_picker.gd")
 
 # Position spins span negative coords (a widget can sit off the authoring board);
 # sizes never do.
@@ -33,6 +38,11 @@ var _selected_id := -1
 # node's editable rows (editing requires selecting one widget).
 var _multi_ids: PackedInt32Array = PackedInt32Array()
 var _box: VBoxContainer
+# The resolved string table for the open menu (passed by the workspace from the
+# editor). Null when none is loaded; the string-id helpers then stay hidden.
+var _text_resource: RtxtStringFile
+var _picker: MnuStringPicker
+var _picker_target_id := -1
 
 
 func _ready() -> void:
@@ -41,23 +51,25 @@ func _ready() -> void:
 	_rebuild()
 
 
-func show_widget(doc: NovaMnuDocument, id: int) -> void:
+func show_widget(doc: NovaMnuDocument, id: int, text_res: RtxtStringFile = null) -> void:
 	_document = doc
 	_selected_id = id
 	_multi_ids = PackedInt32Array()
+	_text_resource = text_res
 	if is_node_ready():
 		_rebuild()
 
 
 # Show a summary for a multi-selection (>1 widget). Zero or one id delegates to the
 # normal single-node view. The workspace routes the editor's selection_changed here.
-func show_selection(doc: NovaMnuDocument, ids: PackedInt32Array) -> void:
+func show_selection(doc: NovaMnuDocument, ids: PackedInt32Array, text_res: RtxtStringFile = null) -> void:
 	if ids.size() <= 1:
-		show_widget(doc, ids[0] if ids.size() == 1 else -1)
+		show_widget(doc, ids[0] if ids.size() == 1 else -1, text_res)
 		return
 	_document = doc
 	_selected_id = -1
 	_multi_ids = ids
+	_text_resource = text_res
 	if is_node_ready():
 		_rebuild()
 
@@ -114,6 +126,12 @@ func _build_screen_rows(id: int) -> void:
 
 	var rsrc_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Text resource", _document.get_screen_text_rsrc(id))
 	_wire_text(rsrc_edit, {"target": "screen", "id": id, "prop": "text_rsrc"})
+	# Make the string-table linkage explicit: does the named resource actually resolve?
+	if not _document.get_screen_text_rsrc(id).is_empty():
+		if _text_resource != null:
+			MnuUiHelpersScript.add_muted(_box, "loaded: %d strings" % _text_resource.get_entry_count())
+		else:
+			MnuUiHelpersScript.add_muted(_box, "not found (set the resource folder to resolve it)")
 
 	var cursor_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Cursor", _document.get_screen_cursor_file(id))
 	_wire_text(cursor_edit, {"target": "screen", "id": id, "prop": "cursor"})
@@ -139,12 +157,23 @@ func _build_widget_rows(id: int) -> void:
 
 	var text_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Text", _document.get_widget_text(id))
 	_wire_text(text_edit, {"target": "widget", "id": id, "prop": "text"})
-	var id_check := MnuUiHelpersScript.add_check_row(_box, "Text is a string id", _document.get_widget_string_type(id) == "id")
+	var is_id := _document.get_widget_string_type(id) == "id"
+	var id_check := MnuUiHelpersScript.add_check_row(_box, "Text is a string id", is_id)
 	id_check.toggled.connect(func(pressed: bool) -> void:
 		_emit({"target": "widget", "id": id, "prop": "string_type", "value": "id" if pressed else ""}))
+	# When the text is a string-table key, show what it resolves to and offer a picker
+	# plus a jump into the Strings workspace (only when a table is actually loaded).
+	if is_id:
+		_build_string_id_rows(id)
 
 	var font_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Font", _document.get_widget_font(id))
 	_wire_text(font_edit, {"target": "widget", "id": id, "prop": "font"})
+	if not _document.get_widget_font(id).is_empty():
+		var font_jump := Button.new()
+		font_jump.text = "Open in Fonts"
+		font_jump.tooltip_text = "Open this font in the Fonts workspace"
+		font_jump.pressed.connect(func() -> void: font_jump_requested.emit(font_edit.text))
+		_box.add_child(font_jump)
 
 	# Type-specific scalar template fields (M9). Authoring of the richer nested
 	# structures (table columns, combo/spinlist item lists) is a later milestone.
@@ -177,6 +206,54 @@ func _build_widget_rows(id: int) -> void:
 		_build_item_section(id)
 	elif wtype == NovaMnuDocument.TYPE_TABLE:
 		_build_table_section(id)
+
+
+# Shown under the Text field when the widget's text is a string-table key: the
+# resolved display text (or a not-found cue), a picker to choose a key from the
+# table, and a one-click jump to edit it in the Strings workspace. All gated on a
+# table actually being loaded (no resource root -> no table -> nothing extra, so the
+# behavior matches today's raw-key view).
+func _build_string_id_rows(id: int) -> void:
+	if _text_resource == null:
+		return
+	var key := _document.get_widget_text(id)
+	if _text_resource.has_string(key):
+		MnuUiHelpersScript.add_muted(_box, "= \"%s\"" % _text_resource.get_string(key))
+	else:
+		MnuUiHelpersScript.add_muted(_box, "No string id set" if key.is_empty() else "Not in string table")
+	var row := HBoxContainer.new()
+	_box.add_child(row)
+	var pick_btn := Button.new()
+	pick_btn.text = "Pick string..."
+	pick_btn.tooltip_text = "Choose a string id from the loaded table"
+	pick_btn.pressed.connect(func() -> void: _open_string_picker(id))
+	row.add_child(pick_btn)
+	var jump_btn := Button.new()
+	jump_btn.text = "Edit in Strings"
+	jump_btn.tooltip_text = "Open this string in the Strings workspace"
+	jump_btn.pressed.connect(func() -> void: string_jump_requested.emit(_document.get_widget_text(id)))
+	row.add_child(jump_btn)
+
+
+func _open_string_picker(id: int) -> void:
+	if _text_resource == null or _document == null or not _document.widget_exists(id):
+		return
+	if _picker == null or not is_instance_valid(_picker):
+		_picker = MnuStringPickerScript.new()
+		add_child(_picker)
+		_picker.picked.connect(_on_string_picked)
+	_picker_target_id = id
+	_picker.open_for(_text_resource, _document.get_widget_text(id))
+
+
+func _on_string_picked(key: String) -> void:
+	if _picker_target_id < 0 or _document == null or not _document.widget_exists(_picker_target_id):
+		return
+	# Commit through the normal edit path so it folds into the MNU undo stack. That
+	# edit applies silently (no re-selection), so rebuild here to refresh the resolved
+	# line + key field.
+	_emit({"target": "widget", "id": _picker_target_id, "prop": "text", "value": key})
+	_rebuild()
 
 
 # Color/texture sections show every populated slot as an editable row, then offer

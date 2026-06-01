@@ -103,6 +103,10 @@ func build_inspector(host: Control) -> void:
 	# Row commits funnel through the editor so the mutation + undo stay centralized
 	# (the inspector never touches the document directly).
 	_inspector.edit_requested.connect(_on_inspector_edit)
+	# Cross-workspace jumps: the inspector asks to edit a widget's string / font in the
+	# Strings / Fonts workspace; the adapter resolves the target and drives the shell.
+	_inspector.string_jump_requested.connect(_on_string_jump)
+	_inspector.font_jump_requested.connect(_on_font_jump)
 	host.add_child(_inspector)
 	# Populate from the editor's current selection. Subsequent selection changes
 	# (user + document reloads, which re-select the first screen) reach the
@@ -116,13 +120,13 @@ func _populate_inspector() -> void:
 		return
 	if _editor != null:
 		_selected_id = _editor.get_selected_id()
-	_inspector.show_widget(_document.resource, _selected_id)
+	_inspector.show_widget(_document.resource, _selected_id, _text_resource())
 
 
 func _on_widget_selected(id: int) -> void:
 	_selected_id = id
 	if _inspector != null and is_instance_valid(_inspector):
-		_inspector.show_widget(_document.resource, id)
+		_inspector.show_widget(_document.resource, id, _text_resource())
 
 
 # A multi-selection (>1 widget) drives the inspector's read-only summary view; the
@@ -131,12 +135,39 @@ func _on_selection_changed(ids: PackedInt32Array) -> void:
 	if ids.size() > 0:
 		_selected_id = ids[ids.size() - 1]
 	if _inspector != null and is_instance_valid(_inspector):
-		_inspector.show_selection(_document.resource, ids)
+		_inspector.show_selection(_document.resource, ids, _text_resource())
+
+
+# The string table the editor resolved for the open menu (null when none loaded), so
+# the inspector can show resolved text + drive the picker.
+func _text_resource() -> RtxtStringFile:
+	return _editor.get_text_resource() if _editor != null and is_instance_valid(_editor) else null
 
 
 func _on_inspector_edit(edit: Dictionary) -> void:
 	if _editor != null and is_instance_valid(_editor):
 		_editor.apply_edit(edit)
+
+
+# Jump to the Strings workspace focused on this widget's string id, opening the menu's
+# resolved text table. No-ops with a hint when no table is loaded (no resource root).
+func _on_string_jump(key: String) -> void:
+	if _editor == null or not is_instance_valid(_editor):
+		return
+	var path: String = _editor.get_text_resource_path()
+	if path.is_empty():
+		if editor_shell != null and editor_shell.has_method("show_status_message"):
+			editor_shell.show_status_message("No string table is loaded for this menu.", 4.0)
+		return
+	if editor_shell != null and editor_shell.has_method("open_strings_workspace"):
+		editor_shell.open_strings_workspace(path, key)
+
+
+# Jump to the Fonts workspace for this widget's font (reuses the shell's existing
+# open_font_workspace cross-jump).
+func _on_font_jump(font: String) -> void:
+	if editor_shell != null and editor_shell.has_method("open_font_workspace"):
+		editor_shell.open_font_workspace(font)
 
 
 # Sever the edit channel before an inspector is freed/replaced, so a deferred
@@ -145,6 +176,10 @@ func _on_inspector_edit(edit: Dictionary) -> void:
 func _disconnect_inspector(inspector: Control) -> void:
 	if inspector.edit_requested.is_connected(_on_inspector_edit):
 		inspector.edit_requested.disconnect(_on_inspector_edit)
+	if inspector.string_jump_requested.is_connected(_on_string_jump):
+		inspector.string_jump_requested.disconnect(_on_string_jump)
+	if inspector.font_jump_requested.is_connected(_on_font_jump):
+		inspector.font_jump_requested.disconnect(_on_font_jump)
 
 
 func _resource_root() -> NovaResourceRoot:
@@ -193,11 +228,11 @@ func get_open_dialog_dir() -> String:
 	return _document.get_last_open_dir()
 
 
-# Empty kind: the shell's resource browser falls back to a native *.mnu file
-# dialog. Indexed menu browsing is a future increment (the resource index has no
-# menu kind yet).
+# "menu" is the resource-index kind for *.mnu (see resource_index kind_for_path), so
+# Open uses the shared indexed quick-open browser like the other workspaces. When no
+# resource directory is configured the browser falls back to a native *.mnu dialog.
 func get_open_resource_kind() -> String:
-	return ""
+	return "menu"
 
 
 func get_current_resource_path() -> String:

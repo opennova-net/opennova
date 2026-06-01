@@ -513,6 +513,27 @@ func open_font_workspace(font_name: String) -> Error:
 	return OK
 
 
+# Cross-jump used by the Menus workspace's "Edit in Strings": open the menu's resolved
+# text table in the Strings workspace and focus the given key. Mirrors
+# open_font_workspace. table_path is an absolute path (already resolved by the caller).
+func open_strings_workspace(table_path: String, key: String) -> Error:
+	_ensure_workspaces()
+	var workspace := _get_workspace(Workspace.STRINGS)
+	if workspace == null:
+		return ERR_UNAVAILABLE
+	var err: Error = int(workspace.call("open_strings_table", table_path, key))
+	if err != OK:
+		show_status_message("Could not open string table: %s" % table_path.get_file(), 5.0)
+		return err
+	if _active_workspace_id != Workspace.STRINGS:
+		set_active_workspace(Workspace.STRINGS)
+	else:
+		_refresh_workspace_surface()
+		sync_from_editor_state()
+	show_status_message("Editing string %s." % (key if not key.is_empty() else table_path.get_file()), 3.0)
+	return OK
+
+
 func _get_workspace(workspace_id: int) -> EditorWorkspace:
 	return _workspaces.get(workspace_id) as EditorWorkspace
 

@@ -114,6 +114,18 @@ var _marquee_click_target := -1
 var _hover_id := -1
 var _show_all_bounds := true
 
+# Right-click "select under cursor" menu: lists every widget in the hit-stack
+# (depth-indented) so a nested / obscured widget is one click away, without the
+# invisible z-cycling. Built lazily and reused.
+var _pick_menu: PopupMenu
+
+# Maps a widget's stable document id to its live preview Control (tagged by the
+# builder with the "mnu_widget_id" meta). Rebuilt with the preview. Shipped menus
+# often omit a widget's RIGHT/BOTTOM, so the document rect is sizeless; the live
+# Control carries the real rendered size (texture / type default) the overlay needs
+# to pick + outline it. Positions are always authored, so only size is sourced here.
+var _id_to_control: Dictionary = {}
+
 # Z-cycle: successive clicks within CYCLE_TOL of the same point step through the
 # stack of overlapping widgets (top -> bottom) so an obscured widget is reachable.
 var _cycle_stack: PackedInt32Array = PackedInt32Array()
@@ -230,6 +242,7 @@ func _rebuild_preview() -> void:
 	_preview.menu = _document
 	if _preview.is_inside_tree():
 		_apply_screen_visibility()
+	_rebuild_control_map()
 
 
 func _apply_screen_visibility() -> void:
@@ -340,7 +353,44 @@ func _abs_rect_of(id: int) -> Rect2:
 	if _document == null or id < 0 or not _document.widget_exists(id) or _document.is_screen(id):
 		return Rect2()
 	var local := _document.get_window_rect(id)
-	return Rect2(_abs_offset_of(id) + local.position, local.size)
+	# Position is always authored; a missing RIGHT/BOTTOM leaves that size axis 0. Fill
+	# only the missing axis from the live Control's rendered size (doc size wins when
+	# present), so a sizeless-but-rendered widget (e.g. a shipped button) is pickable
+	# and outlined where it actually draws.
+	var sz := local.size
+	if sz.x <= 0.0 or sz.y <= 0.0:
+		var live := _live_size_of(id)
+		if sz.x <= 0.0 and live.x > 0.0:
+			sz.x = live.x
+		if sz.y <= 0.0 and live.y > 0.0:
+			sz.y = live.y
+	return Rect2(_abs_offset_of(id) + local.position, sz)
+
+
+# The rendered size (board units) of a widget's live preview Control, or zero when it
+# has none (no preview, or a widget added after the last build). Control.size is the
+# unscaled local size; only the preview root carries _eff_scale, so it is already in
+# board units.
+func _live_size_of(id: int) -> Vector2:
+	var c = _id_to_control.get(id)
+	if c != null and is_instance_valid(c):
+		return (c as Control).size
+	return Vector2.ZERO
+
+
+# Rebuild the id -> live Control map by walking the preview for builder-tagged nodes.
+# Called whenever the preview rebuilds; entries are validated on read.
+func _rebuild_control_map() -> void:
+	_id_to_control.clear()
+	if _preview != null:
+		_index_controls(_preview)
+
+
+func _index_controls(node: Node) -> void:
+	if node.has_meta("mnu_widget_id"):
+		_id_to_control[int(node.get_meta("mnu_widget_id"))] = node
+	for c in node.get_children():
+		_index_controls(c)
 
 
 func _visible_screen_id() -> int:
@@ -434,30 +484,93 @@ static func _walk_ids(doc: NovaMnuDocument, id: int, out: PackedInt32Array) -> v
 		_walk_ids(doc, child, out)
 
 
-# Pure/static: every selectable widget UNDER the screen root window whose ABSOLUTE rect
-# intersects board_rect (a board-space marquee). The root window itself is the screen
-# background, not a marquee target, so collection starts at its children (using the
-# root's own position as their absolute offset, matching _abs_rect_of). Nested widgets
-# accumulate ancestor offsets correctly. Unit-testable like _walk_ids / _snap_rect.
-static func _ids_in_marquee(doc: NovaMnuDocument, root_id: int, board_rect: Rect2) -> PackedInt32Array:
-	var out := PackedInt32Array()
-	if doc == null or root_id < 0 or not doc.widget_exists(root_id):
+# Every selectable widget UNDER the screen root window whose absolute rect (via
+# _abs_rect_of, so live-aware for sizeless-but-rendered widgets) intersects board_rect
+# (a board-space marquee). The root window itself is the screen background, not a
+# marquee target, so collection starts at its children; screens are excluded by
+# _abs_rect_of returning an empty rect.
+func _collect_marquee(id: int, board_rect: Rect2, out: PackedInt32Array) -> void:
+	if _document == null or not _document.widget_exists(id):
+		return
+	var my := _abs_rect_of(id)
+	if my.size.x > 0.0 and my.size.y > 0.0 and board_rect.intersects(my):
+		out.append(id)
+	for child in _document.get_child_ids(id):
+		_collect_marquee(child, board_rect, out)
+
+
+# Build the right-click "select under cursor" menu and pop it up. The stack is every
+# widget the point hits (top -> bottom); each is one click away, so a nested or
+# obscured widget needs no z-cycling. The chosen id routes through the normal pick
+# path (local state + widget_picked) so the editor syncs the tree + inspector.
+func _show_pick_menu(pos: Vector2) -> void:
+	if _document == null:
+		return
+	var stack := pick_stack_at(pos)
+	if stack.is_empty():
+		return
+	_ensure_pick_menu()
+	_pick_menu.clear()
+	var rows := _pick_menu_rows(_document, stack)
+	for i in range(rows.size()):
+		var row: Dictionary = rows[i]
+		_pick_menu.add_item("    ".repeat(int(row["depth"])) + String(row["label"]), i)
+		_pick_menu.set_item_metadata(i, int(row["id"]))
+	if _pick_menu.item_count == 0:
+		return
+	_pick_menu.reset_size()
+	_pick_menu.position = Vector2i(get_screen_position() + pos)
+	_pick_menu.popup()
+
+
+func _ensure_pick_menu() -> void:
+	if _pick_menu != null:
+		return
+	_pick_menu = PopupMenu.new()
+	_pick_menu.name = "PickMenu"
+	add_child(_pick_menu)
+	_pick_menu.index_pressed.connect(_on_pick_menu_index_pressed)
+
+
+func _on_pick_menu_index_pressed(index: int) -> void:
+	if _pick_menu == null:
+		return
+	var id := int(_pick_menu.get_item_metadata(index))
+	if not _is_widget(id):
+		return
+	# Mirror a plain pick: replace the selection locally, then announce it so the
+	# editor mirrors it to the tree + inspector (see _on_press).
+	_selected_id = id
+	_selection = PackedInt32Array([id])
+	queue_redraw()
+	widget_picked.emit(id)
+
+
+# Pure/static: one menu row per stacked id (same order as pick_stack_at: topmost
+# first), each with a caption-style label and its nesting depth (ancestor windows
+# below the screen) for an indent. Unit-testable like _walk_ids.
+static func _pick_menu_rows(doc: NovaMnuDocument, stack: PackedInt32Array) -> Array:
+	var out := []
+	if doc == null:
 		return out
-	var root_pos := doc.get_window_rect(root_id).position
-	for child in doc.get_child_ids(root_id):
-		_collect_marquee(doc, child, root_pos, board_rect, out)
+	for id in stack:
+		if not doc.widget_exists(id) or doc.is_screen(id):
+			continue
+		var type_name := doc.get_widget_type_name(doc.get_widget_type(id))
+		var wname := doc.get_widget_name(id)
+		var label := "(%s)  #%d" % [type_name, id] if wname.is_empty() else "%s (%s)  #%d" % [wname, type_name, id]
+		out.append({"id": id, "label": label, "depth": _depth_below_screen(doc, id)})
 	return out
 
 
-static func _collect_marquee(doc: NovaMnuDocument, id: int, abs_off: Vector2, board_rect: Rect2, out: PackedInt32Array) -> void:
-	if not doc.widget_exists(id):
-		return
-	var local := doc.get_window_rect(id)
-	var my := Rect2(abs_off + local.position, local.size)
-	if not doc.is_screen(id) and my.size.x > 0.0 and my.size.y > 0.0 and board_rect.intersects(my):
-		out.append(id)
-	for child in doc.get_child_ids(id):
-		_collect_marquee(doc, child, abs_off + local.position, board_rect, out)
+# Number of ancestor windows between id and its screen container (a root window = 0).
+static func _depth_below_screen(doc: NovaMnuDocument, id: int) -> int:
+	var d := 0
+	var p := doc.get_parent_id(id)
+	while p > 0 and doc.widget_exists(p) and not doc.is_screen(p):
+		d += 1
+		p = doc.get_parent_id(p)
+	return d
 
 
 # --- Resize handles -------------------------------------------------------------
@@ -498,7 +611,9 @@ func _has_resizable_selection() -> bool:
 		return false
 	if not _document.widget_exists(_selected_id) or _document.is_screen(_selected_id):
 		return false
-	var r := _document.get_window_rect(_selected_id)
+	# Use the rendered rect (live-aware), so a widget whose document rect omits its
+	# size still shows handles + is resizable (the drag then pins a concrete size).
+	var r := _abs_rect_of(_selected_id)
 	return r.size.x > 0.0 and r.size.y > 0.0
 
 
@@ -617,6 +732,12 @@ func _gui_input(event: InputEvent) -> void:
 					_on_press(mb.position, mb.shift_pressed or mb.ctrl_pressed)
 				else:
 					_on_release()
+				accept_event()
+			MOUSE_BUTTON_RIGHT:
+				# Right-click lists every widget under the cursor so a nested one is
+				# directly selectable (no z-cycling). Does not start a gesture.
+				if mb.pressed:
+					_show_pick_menu(mb.position)
 				accept_event()
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
@@ -839,13 +960,19 @@ func _build_group_edits() -> Array:
 	return edits
 
 
-# Instance wrapper: every selectable widget in the visible screen whose absolute rect
-# intersects a board-space marquee rect.
+# Every selectable widget in the visible screen whose absolute rect intersects a
+# board-space marquee rect. Walks from the visible screen's root window children.
 func _marquee_ids(board_rect: Rect2) -> PackedInt32Array:
+	var out := PackedInt32Array()
 	var screen_id := _visible_screen_id()
 	if _document == null or screen_id < 0:
-		return PackedInt32Array()
-	return _ids_in_marquee(_document, _document.get_screen_root_id(screen_id), board_rect)
+		return out
+	var root := _document.get_screen_root_id(screen_id)
+	if root < 0:
+		return out
+	for child in _document.get_child_ids(root):
+		_collect_marquee(child, board_rect, out)
+	return out
 
 
 func _has_selection_widget() -> bool:
