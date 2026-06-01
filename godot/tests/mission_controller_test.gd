@@ -1360,3 +1360,34 @@ func test_marker_gizmo_carries_a_route_order_label() -> void:
 	assert_not_null(label, "each marker gizmo carries a Label3D order number")
 	if label != null:
 		assert_eq(label.text, "3", "the label shows the 1-based route order")
+
+
+# --- Polish: trust / correctness micro-fixes (P3) -----------------------------
+
+func test_off_terrain_drag_reports_and_moves_nothing() -> void:
+	# A drag that only ever samples off the terrain leaves the object put, commits no undo
+	# step, and tells the user why (rather than silently doing nothing).
+	var controller := _loaded_with_selection()  # stub terrain hits are valid by default
+	assert_false(controller.is_dirty(), "precondition: a freshly opened mission is clean")
+	controller._drag_active = true
+	controller._drag_moved = false
+	controller._drag_off_terrain = false
+	controller.begin_edit()
+	controller.terrain_editor.terrain_hit_valid = false  # every raycast now misses
+	controller._on_drag(Vector2(5, 5))
+	controller._on_left_release()
+	assert_string_contains(controller.get_last_status(), "off the terrain", "the miss is explained")
+	assert_false(controller.is_dirty(), "an all-off-terrain drag changes nothing")
+
+
+func test_default_marker_item_id_reuses_an_existing_marker() -> void:
+	# Shipped data keeps its own marker type: a new marker copies an existing marker's id when
+	# the mission carries one. (The from-scratch DB-scan branch needs a marker-free mission,
+	# which the fixture is not, so it is covered by reading rather than asserted here.)
+	var controller := _loaded_with_item_db()
+	var id := controller._default_marker_item_id()
+	assert_gt(id, 0, "a new marker seeds a positive item id")
+	var markers := controller.get_mission().get_entities(NovaMissionData.KIND_MARKER)
+	if not markers.is_empty():
+		assert_eq(id, int((markers[0] as Dictionary)["item_id"]),
+			"an existing marker's id is reused so shipped data round-trips")

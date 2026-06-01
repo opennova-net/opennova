@@ -55,6 +55,10 @@ func rebuild(mission, active_path_index: int) -> void:
 	_ensure_built()
 	_marker_pickable = []
 	_gizmo_by_marker = {}
+	# Start every rebuild unselected; the controller re-applies its real marker selection
+	# right after (mission_controller._refresh_waypoint_overlay). This guarantees a path
+	# switch can never leave a stale highlight on a marker index the new path happens to share.
+	_selected_marker_index = -1
 	for child in _gizmos.get_children():
 		child.queue_free()
 	_line_mesh.clear_surfaces()

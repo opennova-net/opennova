@@ -58,6 +58,9 @@ var _selected_rotation_deg: Vector3 = Vector3.ZERO
 # plain click only selects.
 var _drag_active: bool = false
 var _drag_moved: bool = false
+# True when the most recent drag sample fell off the terrain. A drag that never lands a
+# valid hit moves nothing (and commits nothing); this lets the release explain why.
+var _drag_off_terrain: bool = false
 # Place-new ("placement mode"): the armed items.def item id (0 = not armed). While
 # armed, a left-click on the terrain places a new instance of this item instead of
 # selecting / dragging; right-click or Escape disarms. See arm_placement().
@@ -620,6 +623,7 @@ func handle_viewport_input(event: InputEvent) -> void:
 func cancel_drag() -> void:
 	_drag_active = false
 	_drag_moved = false
+	_drag_off_terrain = false
 	# Close any open edit session. A drag is visual-only until release commits it, so a
 	# cancelled drag leaves the document unchanged and this pushes nothing; an inspector edit
 	# session that happens to be open keeps its undo step (commit, not discard, so a workspace
@@ -642,6 +646,7 @@ func _on_left_press(mouse_pos: Vector2) -> void:
 	_select(int(ref["kind"]), int(ref["index"]))
 	_drag_active = true
 	_drag_moved = false
+	_drag_off_terrain = false
 	# Snapshot the pre-drag state; _on_left_release commits it as one step iff the entity
 	# actually moved.
 	begin_edit()
@@ -652,7 +657,11 @@ func _on_drag(mouse_pos: Vector2) -> void:
 		return
 	var hit: Vector3 = terrain_editor.raycast_terrain_at(mouse_pos)
 	if not terrain_editor.is_valid_terrain_hit(hit):
+		# Off the terrain: leave the object at its last valid spot and remember the miss so
+		# the release can explain a drag that never landed anywhere.
+		_drag_off_terrain = true
 		return
+	_drag_off_terrain = false
 	_drag_moved = true
 	_move_selected_to_world(hit)
 
@@ -660,8 +669,13 @@ func _on_drag(mouse_pos: Vector2) -> void:
 func _on_left_release() -> void:
 	if _drag_active and _drag_moved:
 		_commit_selected_transform()
+	elif _drag_active and _drag_off_terrain and not _drag_moved:
+		# A drag that only ever sampled off-terrain moved nothing; say so rather than leaving
+		# the user wondering why the object stayed put.
+		_report("Drag ended off the terrain; the object was not moved.")
 	_drag_active = false
 	_drag_moved = false
+	_drag_off_terrain = false
 	# Push the drag as one undo step (no-op for a plain click: the bytes are unchanged).
 	commit_edit()
 
@@ -693,10 +707,17 @@ func _select(kind: int, index: int) -> void:
 	_selected_node = null
 	for rec in _pickable:
 		if int(rec["kind"]) == kind and int(rec["index"]) == index:
+			# Skip records whose backing node was freed (e.g. a re-bake mid-flight): a stale
+			# ref would dangle through _apply_selected_xform. A dropped record just means no
+			# box / no drag handle for that slot, not a crash.
 			if bool(rec.get("animated", false)):
-				_selected_node = rec.get("node")
+				var node = rec.get("node")
+				if node != null and is_instance_valid(node):
+					_selected_node = node
 			else:
-				_selected_records.append(rec)
+				var mmi = rec.get("mmi")
+				if mmi != null and is_instance_valid(mmi):
+					_selected_records.append(rec)
 	var entity := _find_entity(kind, index)
 	_selected_rotation_deg = entity.get("rotation_deg", Vector3.ZERO)
 	_selected_xform = MissionObjectPlacer.entity_transform(
@@ -1245,6 +1266,7 @@ func _on_marker_left_press(mouse_pos: Vector2) -> void:
 	# one undo step (a plain click selects without moving, like an object click).
 	_drag_active = true
 	_drag_moved = false
+	_drag_off_terrain = false
 	begin_edit()
 
 
@@ -1301,10 +1323,12 @@ func _on_marker_drag(mouse_pos: Vector2) -> void:
 		return
 	var hit: Vector3 = terrain_editor.raycast_terrain_at(mouse_pos)
 	if not terrain_editor.is_valid_terrain_hit(hit):
+		_drag_off_terrain = true
 		return
 	var container := _objects_container()
 	if container == null:
 		return
+	_drag_off_terrain = false
 	_drag_moved = true
 	_marker_drag_local = container.global_transform.affine_inverse() * hit
 	if _waypoint_overlay != null and is_instance_valid(_waypoint_overlay):
@@ -1314,8 +1338,14 @@ func _on_marker_drag(mouse_pos: Vector2) -> void:
 func _on_marker_left_release() -> void:
 	if _drag_active and _drag_moved and not _selected_marker.is_empty():
 		_commit_marker_drag()
+	elif _drag_active and _drag_off_terrain and not _drag_moved:
+		# A marker dragged only over off-terrain space moved nothing; snap the previewed gizmo
+		# back to its stored position and say why.
+		_report("Drag ended off the terrain; the marker was not moved.")
+		_refresh_waypoint_overlay()
 	_drag_active = false
 	_drag_moved = false
+	_drag_off_terrain = false
 	# Push the drag as one step (no-op for a plain click: nothing was written).
 	commit_edit()
 
@@ -1386,13 +1416,21 @@ func add_marker_to_active_path_at_world(global_hit: Vector3) -> bool:
 	return true
 
 
-# The item id to seed a new marker with: copy an existing marker's id so shipped data keeps
-# its own marker type; fall back to a plausible default when authoring from scratch.
+# The item id to seed a new marker with. Prefer copying an existing marker's id so shipped
+# data keeps its own marker type. When authoring from scratch, use a marker-type id the
+# loaded database actually carries (so the marker resolves to a real model) rather than a
+# hardcoded id the database might not have; only then fall back to the plausible default.
 func _default_marker_item_id() -> int:
 	if _mission != null:
 		var markers := _mission.get_entities(NovaMissionData.KIND_MARKER)
 		if not markers.is_empty():
 			return int((markers[0] as Dictionary).get("item_id", DEFAULT_MARKER_ITEM_ID))
+	var db := _item_db()
+	if db != null:
+		for item in db.get_items():
+			var entry: Dictionary = item
+			if int(entry.get("type", -1)) == NovaItemDatabase.TYPE_MARKER:
+				return int(entry.get("id", DEFAULT_MARKER_ITEM_ID))
 	return DEFAULT_MARKER_ITEM_ID
 
 
@@ -1675,6 +1713,7 @@ func _reset_selection_state() -> void:
 	_selected_rotation_deg = Vector3.ZERO
 	_drag_active = false
 	_drag_moved = false
+	_drag_off_terrain = false
 	_selection_box = null
 	# Waypoint marker selection + overlay are tied to the container contents, so they reset
 	# with it; the chosen path (_selected_path_index) persists across re-bakes by design.
