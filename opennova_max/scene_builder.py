@@ -126,7 +126,9 @@ class MaxSceneBuilder:
         return bool(self.mesh_objects)
 
     def apply_animations(self) -> bool:
-        if not (self.bad_file and self.anim_context and self.armature_object):
+        if not (self.anim_context and self.armature_object):
+            return False
+        if not self.bad_file and getattr(self.anim_context, "kind", None) != "lw":
             return False
         self.build_animations_from_context(self.anim_context)
         return True

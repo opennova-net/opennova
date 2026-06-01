@@ -252,8 +252,28 @@ def _saf_runtime_frame(raw_header: bytes, records: tuple[LwSafBoneRecord, ...]) 
         out[dst + 1] = rec.raw[1]
         out[dst + 2] = rec.raw[2]
         out[dst + 3] = 0
-    out[60:88] = raw_header[:28].ljust(28, b"\x00")
+    values = struct.unpack_from("<13f", raw_header)
+    tail_values = [
+        _saf_tail_i16(values[5] * 85.333336),
+        _saf_tail_i16(values[8] * 85.333336),
+        _saf_tail_i16(values[6] * 85.333336),
+        _saf_tail_i16(values[9] * 85.333336),
+        _saf_tail_i16(values[7] * 85.333336),
+        _saf_tail_i16(values[10] * 85.333336),
+        _saf_tail_i16(values[3] * 1365.3334),
+        _saf_tail_i16(values[2] * -1365.3334),
+        _saf_tail_i16(values[4] * -1365.3334),
+    ]
+    if tail_values[4] > -30:
+        tail_values[4] = -30
+    out[60:78] = struct.pack("<9h", *tail_values)
+    out[78:88] = b"\x00" * 10
     return bytes(out)
+
+
+def _saf_tail_i16(value: float) -> int:
+    as_int = int(value)
+    return max(-32768, min(32767, as_int))
 
 
 def _ensure_ext(name: str, ext: str) -> str:

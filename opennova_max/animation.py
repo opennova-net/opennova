@@ -12,6 +12,7 @@ from pyopennova.animation_build import (
     SampledAnimationSet,
     SampledClip,
     mat_mul,
+    quat_to_matrix,
     quat_xyzw_to_matrix_rows,
     sample_animation_context,
     vec_add,
@@ -84,7 +85,12 @@ def apply_sampled_clips(
                     _assign_transforms_at_frame(
                         rt,
                         frame.frame,
-                        _frame_assignments(frame, bone_nodes, root_motion_node),
+                        _frame_assignments(
+                            frame,
+                            bone_nodes,
+                            root_motion_node,
+                            source_format=getattr(clip, "source_format", "bad"),
+                        ),
                     )
 
 
@@ -116,7 +122,13 @@ def max_rows_from_source_quat(q_xyzw: QuatXyzw) -> Mat3:
     return mat_mul(mat_mul(_MAX_GLOBAL_MATRIX_ROWS, bad_rows), _MAX_GLOBAL_CORRECTION_ROWS)
 
 
-def _frame_assignments(frame, bone_nodes: Sequence[object], root_motion_node=None):
+def _frame_assignments(
+    frame,
+    bone_nodes: Sequence[object],
+    root_motion_node=None,
+    *,
+    source_format: str = "bad",
+):
     assignments: list[tuple[object, Mat3, Vec3]] = []
     root_position = frame.max_root_motion_position
     if root_motion_node is not None:
@@ -124,7 +136,10 @@ def _frame_assignments(frame, bone_nodes: Sequence[object], root_motion_node=Non
     for sampled_bone in frame.bones:
         if sampled_bone.bone_index >= len(bone_nodes):
             continue
-        rows = max_rows_from_source_quat(sampled_bone.source_rotation_xyzw)
+        if source_format == "lw":
+            rows = quat_to_matrix(sampled_bone.world_rotation)
+        else:
+            rows = max_rows_from_source_quat(sampled_bone.source_rotation_xyzw)
         position = vec_add(sampled_bone.world_position, root_position)
         assignments.append((bone_nodes[sampled_bone.bone_index], rows, position))
     return assignments
@@ -139,7 +154,10 @@ def _apply_reset_pose(rt, reset_clip: SampledClip, bone_nodes: Sequence[object],
     for sampled_bone in reset_frame.bones:
         if sampled_bone.bone_index >= len(bone_nodes):
             continue
-        rows = max_rows_from_source_quat(sampled_bone.source_rotation_xyzw)
+        if getattr(reset_clip, "source_format", "bad") == "lw":
+            rows = quat_to_matrix(sampled_bone.world_rotation)
+        else:
+            rows = max_rows_from_source_quat(sampled_bone.source_rotation_xyzw)
         position = vec_add(sampled_bone.world_position, root_position)
         assignments.append((bone_nodes[sampled_bone.bone_index], rows, position))
     _assign_transforms_at_frame(rt, 0, assignments)
@@ -158,6 +176,7 @@ def build_clip_manifest(clips: Iterable[SampledClip]) -> str:
             "start_frame": int(clip.start_frame),
             "end_frame": int(clip.end_frame),
             "is_reset": bool(clip.is_reset),
+            "source_format": getattr(clip, "source_format", "bad"),
         }
         for clip in clips
     ]

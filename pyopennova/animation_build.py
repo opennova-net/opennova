@@ -6,6 +6,7 @@ intentionally uses only plain tuples and Python math so it can run in Blender,
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Sequence, Tuple
 
@@ -54,6 +55,7 @@ class SampledClip:
     end_frame: int
     is_reset: bool
     frames: tuple[SampledFrame, ...] = field(default_factory=tuple)
+    source_format: str = "bad"
 
 
 @dataclass(frozen=True)
@@ -176,7 +178,14 @@ def sample_animation_context(
     parse_bad: Callable[[str], object] | None = None,
     free_bad: Callable[[object], None] | None = None,
 ) -> SampledAnimationSet:
-    """Parse and sample reset + ADM-listed BAD clips, continuing on failures."""
+    """Sample an animation context into host-neutral clips."""
+
+    if getattr(anim_context, "kind", None) == "lw":
+        return sample_lw_animation_context(
+            anim_context,
+            bone_infos,
+            world_rot_corrections=world_rot_corrections,
+        )
 
     if parse_bad is None or free_bad is None:
         from pyopennova.bad_ffi import free_bad as _free_bad, parse_bad as _parse_bad
@@ -215,6 +224,128 @@ def sample_animation_context(
     return SampledAnimationSet(clips=tuple(clips), warnings=tuple(warnings))
 
 
+def sample_lw_animation_context(
+    anim_context,
+    bone_infos: Sequence[object],
+    *,
+    world_rot_corrections: Sequence[Quat] | None = None,
+) -> SampledAnimationSet:
+    """Sample Delta Force Land Warrior KSA slots listed by an ANM move table."""
+
+    ksa = getattr(anim_context, "ksa", None)
+    anm = getattr(anim_context, "anm", None)
+    if ksa is None or anm is None:
+        return SampledAnimationSet(clips=(), warnings=("LW animation context is missing KSA or ANM data",))
+
+    clips: list[SampledClip] = []
+    warnings: list[str] = []
+    frame_cursor = 1
+    for entry in getattr(anm, "entries", {}).values():
+        slot = getattr(ksa, "slots", {}).get(int(entry.slot))
+        if slot is None:
+            warnings.append(f"{entry.name}: missing KSA slot {entry.slot}")
+            continue
+        clip = sample_lw_ksa_slot(
+            slot,
+            bone_infos,
+            animation_name=str(entry.name),
+            bad_name=f"{getattr(anim_context, 'chr_name', '')}:{int(entry.slot)}",
+            start_frame=frame_cursor,
+            world_rot_corrections=world_rot_corrections,
+        )
+        clips.append(clip)
+        frame_cursor += max(clip.frame_count, 0)
+
+    return SampledAnimationSet(clips=tuple(clips), warnings=tuple(warnings))
+
+
+def sample_lw_ksa_slot(
+    slot,
+    bone_infos: Sequence[object],
+    *,
+    animation_name: str,
+    bad_name: str = "",
+    start_frame: int = 1,
+    world_rot_corrections: Sequence[Quat] | None = None,
+) -> SampledClip:
+    """Sample one LW KSA slot into the same IR used by BAD animation import."""
+
+    frame_count = max(0, int(getattr(slot, "frame_count", 0)))
+    frames_src = tuple(getattr(slot, "frames", ()) or ())
+    bone_count = min(15, len(bone_infos))
+    parent_indices = [_bone_parent(bone_infos[i], bone_count) for i in range(bone_count)]
+    bone_names = [_bone_name(bone_infos[i], i) for i in range(bone_count)]
+    rest_origins = [_bone_rest_origin(bone_infos[i]) for i in range(bone_count)]
+    corrections = _coerce_corrections(world_rot_corrections, bone_count)
+
+    frames: list[SampledFrame] = []
+    for frame_idx in range(min(frame_count, len(frames_src))):
+        frame_bytes = frames_src[frame_idx]
+        world_rots: list[Quat] = [IDENTITY_QUAT] * bone_count
+        world_positions: list[Vec3] = [ZERO_VEC3] * bone_count
+        source_rots: list[QuatXyzw] = [(0.0, 0.0, 0.0, 1.0)] * bone_count
+
+        for bone_idx in range(bone_count):
+            zup_q = _lw_frame_bone_quat(frame_bytes, bone_idx)
+            if corrections[bone_idx] != IDENTITY_QUAT:
+                zup_q = quat_normalize(quat_mul(zup_q, corrections[bone_idx]))
+            world_rots[bone_idx] = zup_q
+            source_rots[bone_idx] = (zup_q[1], zup_q[2], zup_q[3], zup_q[0])
+
+            parent_idx = parent_indices[bone_idx]
+            if parent_idx < 0 or parent_idx >= bone_count:
+                world_positions[bone_idx] = rest_origins[bone_idx]
+            else:
+                parent_rot = quat_to_matrix(world_rots[parent_idx])
+                world_positions[bone_idx] = vec_add(
+                    world_positions[parent_idx],
+                    mat_vec_mul(parent_rot, rest_origins[bone_idx]),
+                )
+
+        bone_frames: list[SampledBoneFrame] = []
+        for bone_idx in range(bone_count):
+            parent_idx = parent_indices[bone_idx]
+            if parent_idx < 0 or parent_idx >= bone_count:
+                local_rot = world_rots[bone_idx]
+                local_pos = world_positions[bone_idx]
+            else:
+                local_rot = quat_mul(quat_inv(world_rots[parent_idx]), world_rots[bone_idx])
+                local_pos = mat_vec_mul(
+                    mat_transpose(quat_to_matrix(world_rots[parent_idx])),
+                    vec_sub(world_positions[bone_idx], world_positions[parent_idx]),
+                )
+            bone_frames.append(SampledBoneFrame(
+                bone_index=bone_idx,
+                name=bone_names[bone_idx],
+                parent_index=parent_idx,
+                world_rotation=quat_normalize(world_rots[bone_idx]),
+                world_position=world_positions[bone_idx],
+                local_rotation=quat_normalize(local_rot),
+                local_position=local_pos,
+                source_rotation_xyzw=source_rots[bone_idx],
+            ))
+
+        frames.append(SampledFrame(
+            frame_index=frame_idx,
+            frame=start_frame + frame_idx,
+            bones=tuple(bone_frames),
+        ))
+
+    end_frame = start_frame + max(len(frames) - 1, 0)
+    return SampledClip(
+        name=animation_name,
+        bad_name=bad_name,
+        flags=0,
+        fps=30,
+        frame_count=len(frames),
+        start_frame=start_frame,
+        end_frame=end_frame,
+        is_reset=False,
+        frames=tuple(frames),
+        source_format="lw",
+    )
+
+
 def bad_channel_to_zup_quat(rq) -> Quat:
     """Convert a BAD channel quaternion (x, y, z, w) to Z-up wxyz."""
 
@@ -227,6 +358,46 @@ def quat_xyzw_to_matrix_rows(q: QuatXyzw) -> Mat3:
     x, y, z, w = (float(q[0]), float(q[1]), float(q[2]), float(q[3]))
     w, x, y, z = quat_normalize((w, x, y, z))
     return mat_transpose(quat_to_matrix((w, x, y, z)))
+
+
+def matrix_to_quat(m: Mat3) -> Quat:
+    """Convert a row-major 3x3 rotation matrix to a normalized wxyz quaternion."""
+
+    m00, m01, m02 = m[0]
+    m10, m11, m12 = m[1]
+    m20, m21, m22 = m[2]
+    trace = m00 + m11 + m22
+    if trace > 0.0:
+        s = math.sqrt(trace + 1.0) * 2.0
+        return quat_normalize((
+            0.25 * s,
+            (m21 - m12) / s,
+            (m02 - m20) / s,
+            (m10 - m01) / s,
+        ))
+    if m00 > m11 and m00 > m22:
+        s = math.sqrt(1.0 + m00 - m11 - m22) * 2.0
+        return quat_normalize((
+            (m21 - m12) / s,
+            0.25 * s,
+            (m01 + m10) / s,
+            (m02 + m20) / s,
+        ))
+    if m11 > m22:
+        s = math.sqrt(1.0 + m11 - m00 - m22) * 2.0
+        return quat_normalize((
+            (m02 - m20) / s,
+            (m01 + m10) / s,
+            0.25 * s,
+            (m12 + m21) / s,
+        ))
+    s = math.sqrt(1.0 + m22 - m00 - m11) * 2.0
+    return quat_normalize((
+        (m10 - m01) / s,
+        (m02 + m20) / s,
+        (m12 + m21) / s,
+        0.25 * s,
+    ))
 
 
 def quat_normalize(q: Quat) -> Quat:
@@ -309,6 +480,60 @@ def _iter_animation_metas(anim_context) -> Iterable[tuple[bool, object]]:
         yield True, reset
     for meta in getattr(anim_context, "animations", ()) or ():
         yield False, meta
+
+
+_RENDER_AXIS: Mat3 = (
+    (-1.0, 0.0, 0.0),
+    (0.0, 0.0, -1.0),
+    (0.0, 1.0, 0.0),
+)
+_RENDER_AXIS_INV = mat_transpose(_RENDER_AXIS)
+
+
+def _lw_frame_bone_quat(frame_bytes: bytes, bone_idx: int) -> Quat:
+    offset = bone_idx * 4
+    if offset + 2 >= len(frame_bytes):
+        return IDENTITY_QUAT
+    z_turn = _lw_angle(frame_bytes[offset])
+    y_turn = _lw_angle(frame_bytes[offset + 1])
+    x_turn = _lw_angle(frame_bytes[offset + 2])
+    engine_rows = mat_mul(mat_mul(_rot_z(z_turn), _rot_y(y_turn)), _rot_x(x_turn))
+    zup_rows = mat_mul(mat_mul(_RENDER_AXIS, engine_rows), _RENDER_AXIS_INV)
+    return matrix_to_quat(zup_rows)
+
+
+def _lw_angle(value: int) -> float:
+    return (int(value) & 0xFF) * (math.tau / 256.0)
+
+
+def _rot_x(angle: float) -> Mat3:
+    c = math.cos(angle)
+    s = math.sin(angle)
+    return (
+        (1.0, 0.0, 0.0),
+        (0.0, c, -s),
+        (0.0, s, c),
+    )
+
+
+def _rot_y(angle: float) -> Mat3:
+    c = math.cos(angle)
+    s = math.sin(angle)
+    return (
+        (c, 0.0, s),
+        (0.0, 1.0, 0.0),
+        (-s, 0.0, c),
+    )
+
+
+def _rot_z(angle: float) -> Mat3:
+    c = math.cos(angle)
+    s = math.sin(angle)
+    return (
+        (c, -s, 0.0),
+        (s, c, 0.0),
+        (0.0, 0.0, 1.0),
+    )
 
 
 def _channel_rotation(bad_file, bone_idx: int, frame_idx: int) -> tuple[QuatXyzw, Quat]:

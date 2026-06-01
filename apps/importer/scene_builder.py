@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from array import array
 import enum
 import math
 import os
 
 import bpy
 from mathutils import Vector, Matrix, Quaternion
+from pyopennova.pcx import PcxDecodeError, decode_pcx_rgb
 
 from blender.math_utils import (
     render_space,
@@ -46,6 +48,47 @@ _OCCLUSION_COLORS = {
     OcclusionType.OP: (1.0, 0.8, 0.2),
     OcclusionType.OP2: (1.0, 0.0, 0.6),
 }
+
+
+def _image_has_data(image) -> bool:
+    return bool(image and image.size[0] > 0 and image.size[1] > 0 and image.channels > 0)
+
+
+def _load_texture_image(tex_path: str):
+    name = os.path.basename(tex_path)
+    existing = bpy.data.images.get(name)
+    if _image_has_data(existing):
+        return existing
+    if existing:
+        bpy.data.images.remove(existing)
+
+    if os.path.splitext(tex_path)[1].lower() == ".pcx":
+        return _load_pcx_texture_image(tex_path, name)
+    return bpy.data.images.load(tex_path)
+
+
+def _load_pcx_texture_image(tex_path: str, name: str):
+    try:
+        with open(tex_path, "rb") as handle:
+            decoded = decode_pcx_rgb(handle.read())
+    except (OSError, PcxDecodeError) as exc:
+        raise RuntimeError(f"Cannot decode PCX texture {tex_path}: {exc}") from exc
+
+    image = bpy.data.images.new(name, decoded.width, decoded.height, alpha=True)
+    pixels = array("f")
+    pixels_extend = pixels.extend
+    for idx in range(0, len(decoded.rgb), 3):
+        pixels_extend((
+            decoded.rgb[idx + 0] / 255.0,
+            decoded.rgb[idx + 1] / 255.0,
+            decoded.rgb[idx + 2] / 255.0,
+            1.0,
+        ))
+    image.pixels.foreach_set(pixels)
+    image.filepath = tex_path
+    image["opennova_source_format"] = "PCX"
+    image.update()
+    return image
 
 
 def _mtrx_to_center_rotation(mat_data):
@@ -356,6 +399,7 @@ class BlenderSceneBuilder:
                 self.build_armature_from_parts(name)
                 self.bind_meshes_to_armature()
                 self._tag_lw_animation_context()
+                self.build_animations_from_context(self.anim_context)
             except Exception as e:
                 import traceback
                 traceback.print_exc()
@@ -468,8 +512,29 @@ class BlenderSceneBuilder:
 
         from pyopennova.mesh_build import build_skin_bone_remap
         self._skin_bone_remap = build_skin_bone_remap(lod0, part_count)
+        self._cache_rest_local_transforms(armature_obj, self._bone_infos)
 
         print(f"[ARMATURE] Created synthetic armature with {part_count} bones")
+
+    def _cache_rest_local_transforms(self, armature_obj, bone_infos) -> None:
+        """Cache Blender rest-local transforms for sampled action conversion."""
+        self._rest_local_quats = []
+        self._rest_local_inv_mats = []
+        for bname, _parent_idx, _rest_origin, *_unused in bone_infos:
+            pose_bone = armature_obj.pose.bones.get(bname)
+            if pose_bone is None:
+                self._rest_local_quats.append(Quaternion())
+                self._rest_local_inv_mats.append(Matrix.Identity(3))
+                continue
+
+            bone = pose_bone.bone
+            if bone.parent:
+                local_mat = bone.parent.matrix_local.inverted() @ bone.matrix_local
+            else:
+                local_mat = bone.matrix_local.copy()
+
+            self._rest_local_quats.append(local_mat.to_quaternion())
+            self._rest_local_inv_mats.append(local_mat.to_3x3().inverted())
 
     def build_armature_from_bad(self, bad_file, name: str):
         """Build a Blender Armature from BAD bone data.
@@ -858,11 +923,16 @@ class BlenderSceneBuilder:
     def build_animations_from_context(self, anim_context):
         """Build Blender Actions from AnimationContext and push to NLA tracks."""
         import traceback
-        from pyopennova.bad_ffi import parse_bad, free_bad
 
         if not self.armature_object:
             print("[ANIM] No armature object, skipping animations")
             return
+
+        if getattr(anim_context, "kind", None) == "lw":
+            self._build_sampled_animations_from_context(anim_context)
+            return
+
+        from pyopennova.bad_ffi import parse_bad, free_bad
 
         armature_obj = self.armature_object
 
@@ -931,6 +1001,158 @@ class BlenderSceneBuilder:
             if hasattr(reset_action, 'slots') and len(reset_action.slots) > 0:
                 armature_obj.animation_data.action_slot = reset_action.slots[0]
         bpy.context.scene.frame_set(1)
+
+    def _build_sampled_animations_from_context(self, anim_context) -> None:
+        """Build Blender Actions from host-neutral sampled animation clips."""
+        import traceback
+        from pyopennova.animation_build import sample_animation_context
+
+        armature_obj = self.armature_object
+        if not armature_obj:
+            return
+        if not armature_obj.animation_data:
+            armature_obj.animation_data_create()
+
+        sampled_set = sample_animation_context(anim_context, self._bone_infos)
+        for warning in sampled_set.warnings:
+            print(f"[ANIM] {warning}")
+
+        nla_frame_offset = 0
+        first_action = None
+        for clip in sampled_set.clips:
+            if int(clip.frame_count) <= 0:
+                continue
+            try:
+                action = self._build_action_from_sampled_clip(clip, armature_obj)
+                action.use_fake_user = True
+                action["source_format"] = getattr(clip, "source_format", "")
+                if clip.bad_name:
+                    action["bad_name"] = clip.bad_name
+                action["bad_flags"] = int(clip.flags)
+                if first_action is None:
+                    first_action = action
+
+                track = armature_obj.animation_data.nla_tracks.new()
+                track.name = action.name
+                strip = track.strips.new(action.name, int(nla_frame_offset + 1), action)
+                strip.name = action.name
+                strip.influence = 1.0
+
+                if hasattr(action, 'slots') and len(action.slots) > 0:
+                    slot = self._find_or_create_action_slot(action, armature_obj)
+                    if slot is not None:
+                        strip.action_slot = slot
+
+                frame_count = int(action.frame_range[1] - action.frame_range[0] + 1)
+                nla_frame_offset += frame_count
+                print(f"[ANIM] Created action '{action.name}' ({frame_count} frames) -> NLA track")
+            except Exception as exc:
+                print(f"[ANIM] Failed to build action '{clip.name}': {exc}")
+                traceback.print_exc()
+
+        if nla_frame_offset > 0:
+            bpy.context.scene.frame_start = 1
+            bpy.context.scene.frame_end = int(nla_frame_offset)
+        if first_action:
+            armature_obj.animation_data.action = first_action
+            if hasattr(first_action, 'slots') and len(first_action.slots) > 0:
+                armature_obj.animation_data.action_slot = first_action.slots[0]
+        bpy.context.scene.frame_set(1)
+
+    def _build_action_from_sampled_clip(self, clip, armature_obj):
+        frame_count = len(clip.frames)
+        action = bpy.data.actions.new(name=clip.name)
+
+        slot = None
+        if hasattr(action, 'slots'):
+            slot = self._find_or_create_action_slot(action, armature_obj)
+            ad = armature_obj.animation_data
+            old_action = ad.action
+            old_slot = getattr(ad, 'action_slot', None)
+            ad.action = action
+            ad.action_slot = slot
+
+        fcurves, slot = self._get_action_fcurves(action, armature_obj, slot)
+        bone_infos = self._bone_infos
+        bone_count = min(
+            len(bone_infos),
+            max((sampled.bone_index + 1 for sampled in clip.frames[0].bones), default=0),
+        )
+        if frame_count == 0 or bone_count == 0:
+            return action
+
+        pose_bones = armature_obj.pose.bones
+        for bone_idx in range(bone_count):
+            bname = bone_infos[bone_idx][0]
+            pb = pose_bones.get(bname)
+            if pb:
+                pb.rotation_mode = 'QUATERNION'
+
+        bone_rot_fcurves = []
+        for bone_idx in range(bone_count):
+            bname = bone_infos[bone_idx][0]
+            data_path_rot = f'pose.bones["{bname}"].rotation_quaternion'
+            bone_rot_fcurves.append((
+                fcurves.new(data_path=data_path_rot, index=0),
+                fcurves.new(data_path=data_path_rot, index=1),
+                fcurves.new(data_path=data_path_rot, index=2),
+                fcurves.new(data_path=data_path_rot, index=3),
+            ))
+
+        for bone_idx in range(bone_count):
+            for fc in bone_rot_fcurves[bone_idx]:
+                fc.keyframe_points.add(frame_count)
+
+        rest_local_quats = self._rest_local_quats or [Quaternion()] * bone_count
+        prev_local_rots = [Quaternion((1, 0, 0, 0))] * bone_count
+
+        for frame_idx, sampled_frame in enumerate(clip.frames):
+            by_index = {sampled_bone.bone_index: sampled_bone for sampled_bone in sampled_frame.bones}
+            bl_frame = frame_idx + 1
+            for bone_idx in range(bone_count):
+                sampled_bone = by_index.get(bone_idx)
+                if sampled_bone is None:
+                    pose_rot = Quaternion((1, 0, 0, 0))
+                else:
+                    local_rot = Quaternion(sampled_bone.local_rotation)
+                    rest_quat = (
+                        rest_local_quats[bone_idx]
+                        if bone_idx < len(rest_local_quats)
+                        else Quaternion((1, 0, 0, 0))
+                    )
+                    pose_rot = rest_quat.inverted() @ local_rot
+
+                if frame_idx == 0:
+                    prev_local_rots[bone_idx] = pose_rot
+                else:
+                    prev = prev_local_rots[bone_idx]
+                    if pose_rot.dot(prev) < 0:
+                        pose_rot = Quaternion((-pose_rot.w, -pose_rot.x, -pose_rot.y, -pose_rot.z))
+                    prev_local_rots[bone_idx] = pose_rot
+
+                fc_w, fc_x, fc_y, fc_z = bone_rot_fcurves[bone_idx]
+                fc_w.keyframe_points[frame_idx].co = (bl_frame, pose_rot.w)
+                fc_x.keyframe_points[frame_idx].co = (bl_frame, pose_rot.x)
+                fc_y.keyframe_points[frame_idx].co = (bl_frame, pose_rot.y)
+                fc_z.keyframe_points[frame_idx].co = (bl_frame, pose_rot.z)
+                fc_w.keyframe_points[frame_idx].interpolation = 'LINEAR'
+                fc_x.keyframe_points[frame_idx].interpolation = 'LINEAR'
+                fc_y.keyframe_points[frame_idx].interpolation = 'LINEAR'
+                fc_z.keyframe_points[frame_idx].interpolation = 'LINEAR'
+
+        for fc in fcurves:
+            fc.update()
+
+        action.frame_start = 1
+        action.frame_end = frame_count
+
+        if hasattr(action, 'slots'):
+            ad = armature_obj.animation_data
+            ad.action = old_action
+            if old_slot is not None:
+                ad.action_slot = old_slot
+
+        return action
 
 
     def _build_action_from_bad(self, bad_file, armature_obj, anim_name: str):
@@ -1676,11 +1898,7 @@ class BlenderSceneBuilder:
                 tex_node = mat.node_tree.nodes.new("ShaderNodeTexImage")
                 tex_node.name = f"Diffuse_{diffuse_bitmap}"
                 try:
-                    existing = bpy.data.images.get(os.path.basename(tex_path))
-                    if existing:
-                        tex_node.image = existing
-                    else:
-                        tex_node.image = bpy.data.images.load(tex_path)
+                    tex_node.image = _load_texture_image(tex_path)
                     img = tex_node.image
                     print(f"[TEX] Loaded image: {img.name} size={img.size[0]}x{img.size[1]} channels={img.channels}")
                     mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Base Color"])
@@ -1716,11 +1934,7 @@ class BlenderSceneBuilder:
                 try:
                     detail_tex = mat.node_tree.nodes.new("ShaderNodeTexImage")
                     detail_tex.name = f"Detail_{detail_bitmap}"
-                    existing = bpy.data.images.get(os.path.basename(detail_path))
-                    if existing:
-                        detail_tex.image = existing
-                    else:
-                        detail_tex.image = bpy.data.images.load(detail_path)
+                    detail_tex.image = _load_texture_image(detail_path)
 
                     # Create MixRGB Multiply node: diffuse * detail → Base Color
                     mix_node = mat.node_tree.nodes.new("ShaderNodeMixRGB")
@@ -1756,11 +1970,7 @@ class BlenderSceneBuilder:
                 try:
                     normal_tex = mat.node_tree.nodes.new("ShaderNodeTexImage")
                     normal_tex.name = f"Bump_{normal_bitmap}"
-                    existing = bpy.data.images.get(os.path.basename(tex_path))
-                    if existing:
-                        normal_tex.image = existing
-                    else:
-                        normal_tex.image = bpy.data.images.load(tex_path)
+                    normal_tex.image = _load_texture_image(tex_path)
                     normal_tex.image.colorspace_settings.name = "Non-Color"
                     bump_node = mat.node_tree.nodes.new("ShaderNodeBump")
                     if normal_type == 5:

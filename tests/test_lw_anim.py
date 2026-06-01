@@ -44,3 +44,12 @@ def test_player01_aca_and_saf_parse_source_slot_list() -> None:
     assert saf.frame_count == 31
     assert len(saf.frames) == 31
     assert len(saf.frames[0].bone_records) == 15
+
+
+def test_saf_runtime_tail_matches_game_loader_conversion() -> None:
+    saf = parse_saf(FIXTURE / "3WALK09A.SAF")
+
+    first_runtime = saf.frames[0].runtime_bytes
+
+    assert first_runtime[60:78].hex() == "90ff3a00d1fe280020ffd700000000000000"
+    assert first_runtime[78:88] == b"\x00" * 10
