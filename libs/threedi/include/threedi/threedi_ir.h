@@ -30,7 +30,6 @@ extern "C" {
 // Forward declarations
 struct Threedi3di3;
 struct ThreediGpFile;
-struct ThreediLwFile;
 
 // ============================================================================
 // Source Format
@@ -41,9 +40,7 @@ typedef enum ThreediIRSourceFormat {
     THREEDI_IR_SOURCE_3DI3 = 1,    // Modern 3DI3 format
     THREEDI_IR_SOURCE_GPM = 2,     // GP mesh format (basic)
     THREEDI_IR_SOURCE_GPS = 3,     // GP mesh format (static)
-    THREEDI_IR_SOURCE_GPP = 4,     // GP mesh format (skinned)
-    THREEDI_IR_SOURCE_LW = 5,      // Land Warrior .3di
-    THREEDI_IR_SOURCE_LW10 = 5     // Compatibility alias
+    THREEDI_IR_SOURCE_GPP = 4      // GP mesh format (skinned)
 } ThreediIRSourceFormat;
 
 typedef enum ThreediIRMeshType {
@@ -491,10 +488,6 @@ THREEDI_EXPORT int threedi_ir_from_3di3(const struct Threedi3di3 *model, Threedi
 // Convert GP (GPM/GPS/GPP) file to IR
 // Returns 0 on success, -1 on error
 THREEDI_EXPORT int threedi_ir_from_gp(const struct ThreediGpFile *gp, ThreediModelIR *out);
-
-// Convert Land Warrior .3di v10 to IR
-// Returns 0 on success, -1 on error
-THREEDI_EXPORT int threedi_ir_from_lw(const struct ThreediLwFile *lw, ThreediModelIR *out);
 
 // Read any 3DI file and produce IR (auto-detects format)
 // Returns 0 on success, -1 on error

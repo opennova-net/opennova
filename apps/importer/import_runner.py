@@ -108,7 +108,6 @@ def _import_basic_model(
     import_occlusion: bool = True,
     import_lights: bool = True,
     output_name: str = "",
-    item_id: int = 0,
     write_blend: bool = True,
     write_ase: bool = True,
     write_3dp: bool = True,
@@ -132,10 +131,7 @@ def _import_basic_model(
         if item_type == "weapon":
             target_context = next((w for w in weapons if w.name == item_name), None)
         else:
-            if item_id:
-                target_context = next((i for i in items if i.id == item_id), None)
-            else:
-                target_context = next((i for i in items if i.name == item_name), None)
+            target_context = next((i for i in items if i.name == item_name), None)
 
         if not target_context:
             log.error("Could not find %s '%s' in definitions", item_type, item_name)
@@ -167,16 +163,7 @@ def _import_basic_model(
         anim_field = target_context.anim_adm if item_type == "weapon" else target_context.anim_def
         if anim_field:
             try:
-                if item_type != "weapon" and getattr(target_context, "chr_file", None):
-                    from pyopennova.lw_anim import build_lw_animation_context
-
-                    anim_ctx = build_lw_animation_context(
-                        anim_field,
-                        target_context.chr_file,
-                        resolver=resolver,
-                    )
-                else:
-                    anim_ctx = build_animation_context(anim_field, resolver=resolver)
+                anim_ctx = build_animation_context(anim_field, resolver=resolver)
                 if anim_ctx and anim_ctx.reset_animation:
                     bad_file = parse_bad(anim_ctx.reset_animation.bad_filepath)
             except Exception as e:
@@ -263,7 +250,6 @@ def run_import(
     write_3dp: bool = True,
     write_glb: bool = False,
     write_fbx: bool = False,
-    item_id: int = 0,
 ) -> bool:
     """Import a single weapon/item and produce selected output files.
 
@@ -293,7 +279,6 @@ def run_import(
             write_3dp=write_3dp,
             write_glb=write_glb,
             write_fbx=write_fbx,
-            item_id=item_id,
         )
     except Exception as exc:
         log.error("import failed: %s", exc, exc_info=True)
@@ -402,12 +387,7 @@ def execute_import_request(request: ImportRequest) -> ImportResult:
     return _get_default_dispatcher().submit(request).result()
 
 
-def resolve_definition_output_stem(
-    base_dir: str,
-    item_name: str,
-    item_type: str,
-    item_id: int = 0,
-) -> str:
+def resolve_definition_output_stem(base_dir: str, item_name: str, item_type: str) -> str:
     """Return the output directory/file stem for a definition import."""
     _setup_blender_package()
 
@@ -425,10 +405,7 @@ def resolve_definition_output_stem(
             if target and target.graphic1.main:
                 return Path(ensure_extension(target.graphic1.main, ".3di")).stem
         elif item_type == "item":
-            if item_id:
-                target = next((item for item in item_defs if item.id == item_id), None)
-            else:
-                target = next((item for item in item_defs if item.name == item_name), None)
+            target = next((item for item in item_defs if item.name == item_name), None)
             if target and target.graphic_us:
                 return Path(ensure_extension(target.graphic_us, ".3di")).stem
     return ""
@@ -474,7 +451,6 @@ def scan_directory_result(base_dir: str) -> ScanResult:
                         type="item",
                         source_model=source_model,
                         output_stem=Path(source_model).stem,
-                        item_id=it.id,
                     )
                 )
     except Exception as exc:

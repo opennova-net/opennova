@@ -27,7 +27,6 @@ class DefinitionImportPlan:
     scene_name: str
     export_name: str
     models: Tuple[PlannedModel, ...]
-    item_id: int = 0
     animation_context: object = None
     reset_bad_path: Optional[str] = None
 
@@ -41,7 +40,6 @@ def resolve_definition_import(
     import_arms: bool = False,
     import_animations: bool = True,
     output_name: str = "",
-    item_id: int | None = None,
 ) -> Optional[DefinitionImportPlan]:
     """Resolve a weapon/item definition into concrete model and animation paths.
 
@@ -63,10 +61,7 @@ def resolve_definition_import(
     if item_type == "weapon":
         target_context = next((w for w in weapons if w.name == item_name), None)
     else:
-        if item_id is not None and item_id > 0:
-            target_context = next((i for i in items if i.id == item_id), None)
-        else:
-            target_context = next((i for i in items if i.name == item_name), None)
+        target_context = next((i for i in items if i.name == item_name), None)
 
     if target_context is None:
         return None
@@ -114,20 +109,8 @@ def resolve_definition_import(
     if anim_field:
         if import_animations:
             try:
-                if (
-                    item_type != "weapon"
-                    and getattr(target_context, "chr_file", None)
-                ):
-                    from pyopennova.lw_anim import build_lw_animation_context
-
-                    anim_ctx = build_lw_animation_context(
-                        anim_field,
-                        target_context.chr_file,
-                        resolver=resolver,
-                    )
-                else:
-                    anim_ctx = build_animation_context(anim_field, resolver=resolver)
-                if anim_ctx and getattr(anim_ctx, "reset_animation", None):
+                anim_ctx = build_animation_context(anim_field, resolver=resolver)
+                if anim_ctx and anim_ctx.reset_animation:
                     reset_bad_path = str(anim_ctx.reset_animation.bad_filepath)
             except Exception as exc:
                 log.warning("Could not load BAD file: %s", exc)
@@ -139,7 +122,6 @@ def resolve_definition_import(
 
     return DefinitionImportPlan(
         item_name=item_name,
-        item_id=int(getattr(target_context, "id", 0)),
         item_type=item_type,
         scene_name=item_name,
         export_name=export_name,

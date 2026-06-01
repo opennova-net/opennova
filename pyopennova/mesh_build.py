@@ -353,42 +353,6 @@ def primitive_part_indices(lod) -> list[int]:
     return _primitive_part_indices(lod)
 
 
-def build_skin_bone_remap(lod, animated_bone_count: int) -> list[int]:
-    """Map source skin bone indices to available animated bones.
-
-    Some skinned 3DI files contain render-only skeleton parts that are not
-    present in the matching BAD.  Vertices weighted to those parts should follow
-    the nearest animated parent, not an importer-created helper bone.
-    """
-    part_count = int(getattr(lod, "part_count", 0))
-    animated_count = max(0, int(animated_bone_count))
-    count = max(part_count, animated_count)
-    if count <= 0:
-        return []
-
-    remap: list[int] = []
-    for source_idx in range(count):
-        if source_idx < animated_count:
-            remap.append(source_idx)
-            continue
-        remap.append(_nearest_animated_parent(lod, source_idx, animated_count, part_count))
-    return remap
-
-
-def _nearest_animated_parent(lod, source_idx: int, animated_count: int, part_count: int) -> int:
-    if animated_count <= 0:
-        return source_idx
-    seen: set[int] = set()
-    current = source_idx
-    while 0 <= current < part_count and current not in seen:
-        seen.add(current)
-        parent = int(getattr(lod.parts[current], "parent_index", -1))
-        if 0 <= parent < animated_count:
-            return parent
-        current = parent
-    return 0
-
-
 def _primitive_part_indices(lod) -> list[int]:
     """Map each 3DI3 strip/primitive index to its owning render object."""
     count = int(getattr(lod, "primitive_count", 0))

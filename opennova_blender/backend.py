@@ -205,7 +205,6 @@ def _copy_request_with_options(request: ImportRequest, options: ImportOptions) -
         options=options,
         base_dir=request.base_dir,
         item_name=request.item_name,
-        item_id=request.item_id,
         item_type=request.item_type,
         threedi_path=request.threedi_path,
         output_stem=request.output_stem,

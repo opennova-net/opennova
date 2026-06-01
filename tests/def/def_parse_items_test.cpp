@@ -136,44 +136,6 @@ int main(void) {
     }
 
     def_free_items(&items);
-
-    snprintf(path, sizeof(path), "%s/fixtures/lw/dflw/badguy/ITEMS.DEF", repo_root);
-    memset(&items, 0, sizeof(items));
-    if (def_parse_items(path, &items) != 0) {
-        fprintf(stderr, "FAIL: def_parse_items failed for %s\n", path);
-        return 1;
-    }
-
-    const DefItemDef *badguy = NULL;
-    for (size_t i = 0; i < items.count; ++i) {
-        if (items.entries[i].id == 105130) {
-            badguy = &items.entries[i];
-            break;
-        }
-    }
-
-    if (!badguy) {
-        fprintf(stderr, "FAIL: could not find DFLW badguy item id 105130\n");
-        def_free_items(&items);
-        return 1;
-    }
-    if (strcmp(badguy->display_name, "Change me please!!!") != 0 ||
-        strcmp(badguy->graphic, "badguy") != 0 ||
-        strcmp(badguy->chr_file, "player01") != 0 ||
-        strcmp(badguy->anim_def, "enemy00") != 0 ||
-        badguy->type != 3) {
-        fprintf(stderr,
-                "FAIL: DFLW badguy mismatch name='%s' graphic='%s' chr_file='%s' anim_def='%s' type=%d\n",
-                badguy->display_name,
-                badguy->graphic,
-                badguy->chr_file,
-                badguy->anim_def,
-                badguy->type);
-        def_free_items(&items);
-        return 1;
-    }
-
-    def_free_items(&items);
     printf("PASS: items parsing OK\n");
     return 0;
 }

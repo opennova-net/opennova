@@ -15,11 +15,6 @@ target_link_libraries(threedi_gp_parse_test PRIVATE opennova_threedi)
 target_include_directories(threedi_gp_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_gp_parse COMMAND threedi_gp_parse_test)
 
-add_executable(threedi_lw_parse_test threedi/lw_parse_test.cpp)
-target_link_libraries(threedi_lw_parse_test PRIVATE opennova_threedi)
-target_include_directories(threedi_lw_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME threedi_lw_parse COMMAND threedi_lw_parse_test)
-
 # GP format roundtrip test
 add_executable(threedi_gp_roundtrip_test threedi/gp_roundtrip_test.cpp)
 target_link_libraries(threedi_gp_roundtrip_test PRIVATE opennova_threedi)

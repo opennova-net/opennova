@@ -89,10 +89,9 @@ def test_execute_definition_request_dispatches_real_runner(monkeypatch, tmp_path
     assert result.written_files == [str(tmp_path / "out" / "M16" / "M16.max")]
     assert calls == [
         {
-                "base_dir": str(tmp_path / "game"),
-                "item_name": "M16A2",
-                "item_id": 0,
-                "item_type": "weapon",
+            "base_dir": str(tmp_path / "game"),
+            "item_name": "M16A2",
+            "item_type": "weapon",
             "output_root": str(tmp_path / "out"),
             "output_stem": "M16",
             "import_arms": True,

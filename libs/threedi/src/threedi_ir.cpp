@@ -3,7 +3,6 @@
 #include "threedi/threedi_ir.h"
 #include "threedi/threedi_3di3.h"
 #include "threedi/threedi_gp.h"
-#include "threedi/threedi_lw.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,22 +128,6 @@ int threedi_ir_read(const char *path, ThreediModelIR *out) {
 
         int result = threedi_ir_from_gp(&gp, out);
         threedi_gp_free(&gp);
-        return result;
-    }
-
-    // Check for Land Warrior format ("3DI" + numeric version byte).
-    ThreediLwVersion lw_type = threedi_lw_detect(magic, 4);
-    if (lw_type != THREEDI_LW_VERSION_UNKNOWN) {
-        ThreediLwFile lw;
-        threedi_lw_init(&lw);
-
-        if (threedi_lw_read(path, &lw) != 0) {
-            threedi_lw_free(&lw);
-            return -1;
-        }
-
-        int result = threedi_ir_from_lw(&lw, out);
-        threedi_lw_free(&lw);
         return result;
     }
 

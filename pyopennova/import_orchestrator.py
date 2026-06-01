@@ -128,7 +128,6 @@ def execute_definition_import(
     import_occlusion: bool,
     import_lights: bool,
     output_stem: str,
-    item_id: int = 0,
 ) -> tuple[bool, list[str], str]:
     """Definition import: resolve a plan, walk its main/secondary models, write.
 
@@ -166,7 +165,6 @@ def execute_definition_import(
             import_arms=import_arms,
             import_animations=import_animations,
             output_name=output_stem,
-            item_id=item_id,
         )
         if plan is None:
             return False, [], ""

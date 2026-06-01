@@ -133,28 +133,25 @@ class ScanItem:
     type: str
     source_model: str = ""
     output_stem: str = ""
-    item_id: int = 0
 
     @classmethod
-    def from_mapping(cls, item: dict[str, object]) -> "ScanItem":
+    def from_mapping(cls, item: dict[str, str]) -> "ScanItem":
         return cls(
             name=str(item.get("name", "")),
             type=str(item.get("type", "")),
-            item_id=int(item.get("item_id", 0) or 0),
             source_model=str(item.get("source_model", "")),
             output_stem=str(item.get("output_stem", "")),
         )
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, str]:
         return {
             "name": self.name,
             "type": self.type,
-            "item_id": self.item_id,
             "source_model": self.source_model,
             "output_stem": self.output_stem,
         }
 
-    def __getitem__(self, key: str) -> object:
+    def __getitem__(self, key: str) -> str:
         return self.to_dict()[key]
 
 
@@ -165,7 +162,6 @@ class ImportRequest:
     options: ImportOptions = field(default_factory=ImportOptions)
     base_dir: str = ""
     item_name: str = ""
-    item_id: int = 0
     item_type: str = ""
     threedi_path: str = ""
     output_stem: str = ""
@@ -179,14 +175,12 @@ class ImportRequest:
         item_type: str,
         output_root: str,
         output_stem: str = "",
-        item_id: int = 0,
         options: ImportOptions | None = None,
     ) -> "ImportRequest":
         return cls(
             mode=IMPORT_MODE_DEF,
             base_dir=base_dir,
             item_name=item_name,
-            item_id=item_id,
             item_type=item_type,
             output_root=output_root,
             output_stem=output_stem,
@@ -246,7 +240,6 @@ class ImportRequest:
             _norm_path(self.base_dir),
             self.item_type,
             self.item_name.casefold(),
-            self.item_id,
             _norm_path(self.threedi_path),
             self.output_stem.casefold(),
             _norm_path(self.output_root),

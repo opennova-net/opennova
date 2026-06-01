@@ -18,28 +18,12 @@ from pathlib import Path
 
 from .bfc1_ffi import is_bfc1, decompress as bfc1_decompress
 from .pff_ffi import PffArchive
-from .scr_ffi import (
-    is_scr,
-    get_version,
-    decrypt,
-    SCR_KEY_DEFAULT,
-    SCR_KEY_JO_DFX2,
-    SCR_KEY_SHADERS,
-    SCR_KEY_DFLW,
-)
+from .scr_ffi import is_scr, get_version, decrypt, SCR_KEY_DEFAULT, SCR_KEY_JO_DFX2, SCR_KEY_SHADERS
 
 _SCR_VERSION_KEYS = {
     0: SCR_KEY_DEFAULT,
     1: SCR_KEY_JO_DFX2,
     2: SCR_KEY_SHADERS,
-}
-
-_DFLW_SENTINELS = {
-    "player01.ksa",
-    "player01.aca",
-    "enemy00.anm",
-    "badguy.3di",
-    "dflw.pff",
 }
 
 TEXTURE_STRATEGY_GENERIC = "generic"
@@ -65,9 +49,8 @@ class AssetResolver:
             path = resolver.resolve("weapon.def")
     """
 
-    def __init__(self, base_dir: str, *, game_profile: str = "auto"):
+    def __init__(self, base_dir: str):
         self.base_dir = Path(base_dir)
-        self.game_profile = game_profile
         self._tmp_path = Path(tempfile.mkdtemp(prefix="opennova_"))
 
         # Case-insensitive lookup for loose files: lowercase name -> actual Path
@@ -90,7 +73,6 @@ class AssetResolver:
                 self._archives.append(PffArchive(str(pff_path)))
             except RuntimeError:
                 pass  # skip archives that fail to open
-        self._scr_version_keys = self._select_scr_keys()
 
         # Track already-extracted temp files: lowercase name -> temp Path
         self._extracted: dict[str, Path] = {}
@@ -139,7 +121,7 @@ class AssetResolver:
         data = path.read_bytes()
         if len(data) >= 4 and is_scr(data[:4]):
             ver = get_version(data[:4])
-            scr_key = self._scr_version_keys.get(ver, SCR_KEY_DEFAULT)
+            scr_key = _SCR_VERSION_KEYS.get(ver, SCR_KEY_DEFAULT)
             data = decrypt(data, scr_key)
         if len(data) >= 8 and is_bfc1(data[:8]):
             data = bfc1_decompress(data)
@@ -174,7 +156,7 @@ class AssetResolver:
                 # Auto-decrypt SCR if needed
                 if len(data) >= 4 and is_scr(data[:4]):
                     ver = get_version(data[:4])
-                    scr_key = self._scr_version_keys.get(ver, SCR_KEY_DEFAULT)
+                    scr_key = _SCR_VERSION_KEYS.get(ver, SCR_KEY_DEFAULT)
                     data = decrypt(data, scr_key)
                 # Auto-decompress BFC1 if needed
                 if len(data) >= 8 and is_bfc1(data[:8]):
@@ -250,26 +232,6 @@ class AssetResolver:
         dest = copied
         self._texture_paths[key] = dest
         return str(dest)
-
-    def _select_scr_keys(self) -> dict[int, int]:
-        profile = (self.game_profile or "auto").lower()
-        keys = dict(_SCR_VERSION_KEYS)
-        if profile == "dflw" or (profile == "auto" and self._looks_like_dflw()):
-            keys[1] = SCR_KEY_DFLW
-        return keys
-
-    def _looks_like_dflw(self) -> bool:
-        loose_names = set(self._loose.keys())
-        if loose_names & _DFLW_SENTINELS:
-            return True
-        for arc in self._archives:
-            for name in _DFLW_SENTINELS:
-                try:
-                    if arc.find(name) is not None:
-                        return True
-                except Exception:
-                    continue
-        return False
 
 
 def _detect_bitmap_extension(path: Path) -> str | None:
