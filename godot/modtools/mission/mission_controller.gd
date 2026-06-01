@@ -16,6 +16,11 @@ extends RefCounted
 # re-import, the same convention as the placer and veg_assets.gd.
 
 signal changed  # Mission loaded or cleared; the inspector rebuilds on this.
+# Transient one-line status for an action the user just took (undo, delete, place, a
+# rejected edit). The workspace relays it to the shell status bar; open / save keep their
+# own relay (they poll get_last_status with bespoke durations), so this is for the actions
+# that fire outside a workspace hook (e.g. the viewport Ctrl+Z / Delete path).
+signal status_reported(message: String, is_error: bool)
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const MissionWaypointOverlay := preload("res://engine/mission/mission_waypoint_overlay.gd")
@@ -147,6 +152,40 @@ func get_stats() -> Dictionary:
 
 func get_last_status() -> String:
 	return _last_status
+
+
+# Set the transient status line and notify the workspace so it surfaces in the shell
+# status bar. `is_error` widens the on-screen duration. Distinct from open / save, which
+# set _last_status directly and are surfaced by the workspace's own poll after the call
+# returns; _report is for actions that also fire outside a workspace hook (the viewport
+# Ctrl+Z / Delete path), so they need to push their own status.
+func _report(message: String, is_error: bool = false) -> void:
+	_last_status = message
+	status_reported.emit(message, is_error)
+
+
+# The items.def display name for an entity, or "" when it can't be resolved (no item
+# database, unknown id, or blank name). Drives the inspector identity line and the
+# delete / place status messages so the user reads a model name, not just an index.
+func entity_display_name(kind: int, index: int) -> String:
+	var entity := _find_entity(kind, index)
+	if entity.is_empty():
+		return ""
+	var db := _item_db()
+	if db == null:
+		return ""
+	var item_id := int(entity.get("item_id", 0))
+	if not db.has_item(item_id):
+		return ""
+	return db.get_display_name(item_id).strip_edges()
+
+
+# The resolved model name of the current selection, or "" when nothing is selected /
+# unresolvable. The inspector pairs this with the kind + index for the identity line.
+func get_selected_display_name() -> String:
+	if _selected_ref.is_empty():
+		return ""
+	return entity_display_name(int(_selected_ref["kind"]), int(_selected_ref["index"]))
 
 
 # { kind, index, position (mission-space Vector3), animated } for the selected
@@ -427,38 +466,50 @@ func undo() -> void:
 	# re-bake does not free nodes a continuing drag still references) and commits any open
 	# edit session as its step before we rewind.
 	cancel_drag()
-	if _undo_stack.is_empty() or _mission == null:
+	if _mission == null:
+		return
+	if _undo_stack.is_empty():
+		_report("Nothing to undo.")
 		return
 	_restoring = true
 	_redo_stack.append(_mission.snapshot())
-	_restore(_undo_stack.pop_back())
+	var ok := _restore(_undo_stack.pop_back())
 	_restoring = false
+	if ok:
+		_report("Undid the last change.")
 
 
 func redo() -> void:
 	if _restoring:
 		return
 	cancel_drag()
-	if _redo_stack.is_empty() or _mission == null:
+	if _mission == null:
+		return
+	if _redo_stack.is_empty():
+		_report("Nothing to redo.")
 		return
 	_restoring = true
 	_undo_stack.append(_mission.snapshot())
-	_restore(_redo_stack.pop_back())
+	var ok := _restore(_redo_stack.pop_back())
 	_restoring = false
+	if ok:
+		_report("Redid the last change.")
 
 
 # Replace the document from a snapshot, then re-bake the world to match and recompute the
 # exact dirty flag. Emits changed once (via mark_dirty after the re-bake) so the inspector
 # refreshes against the restored world in a single pass.
-func _restore(snapshot: PackedByteArray) -> void:
+func _restore(snapshot: PackedByteArray) -> bool:
 	if not _mission.restore_snapshot(snapshot):
 		# Self-produced snapshots always parse, so this is a defensive path: load_bms_bytes
 		# leaves the document empty on failure, so clear rather than re-bake against nothing.
-		_last_status = "Could not restore the previous mission state."
+		# Surface it as an error (it is catastrophic: the mission is cleared to recover).
+		_report("Could not restore the mission. It was cleared to recover; reopen it to continue.", true)
 		clear()
-		return
+		return false
 	_rebake_objects()
 	mark_dirty()
+	return true
 
 
 # Mark the current input event handled so a consumed Ctrl+Z / Ctrl+Y does not propagate
@@ -759,12 +810,18 @@ func set_selected_rotation(rot_deg: Vector3) -> void:
 func set_selected_team(value: int) -> void:
 	# team / group are stored as uint8 by the format; clamp at this API boundary so an
 	# out-of-range value cannot silently wrap (the SpinBoxes already cap 0..255, but
-	# these methods are public).
-	set_selected_property("team", clampi(value, 0, 255))
+	# these methods are public). Surface the clamp so a corrected value is not a surprise.
+	var clamped := clampi(value, 0, 255)
+	if clamped != value:
+		_report("Team clamped to the 0 to 255 range.")
+	set_selected_property("team", clamped)
 
 
 func set_selected_group(value: int) -> void:
-	set_selected_property("group", clampi(value, 0, 255))
+	var clamped := clampi(value, 0, 255)
+	if clamped != value:
+		_report("Group clamped to the 0 to 255 range.")
+	set_selected_property("group", clamped)
 
 
 # Generic per-entity scalar property edit from the inspector: team / group plus the
@@ -780,9 +837,14 @@ func set_selected_property(property: String, value: int) -> void:
 		return
 	_flush_edit()
 	var before := _mission.snapshot()
+	# set_entity_property_int returns false only on rejection (bad index, unknown property,
+	# failed write) -- never on a benign same-value write -- so a false return is a real
+	# error worth surfacing rather than swallowing.
 	if _mission.set_entity_property_int(int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value):
 		_push_undo_step(before)
 		mark_dirty()
+	else:
+		_report("Could not set %s on the selected object." % property, true)
 
 
 # --- Authoring (Phase 3): place new objects -----------------------------------
@@ -859,6 +921,10 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 		return false
 	var db := _item_db()
 	var kind := _kind_for_item_type(db.get_item_type(item_id)) if db != null else NovaMissionData.KIND_ITEM
+	# A readable label for the status line: the model name when resolvable, else the raw id.
+	var item_name: String = db.get_display_name(item_id) if db != null and db.has_item(item_id) else ""
+	if item_name.is_empty():
+		item_name = "item %d" % item_id
 	var local := container.global_transform.affine_inverse() * global_hit
 	var bms_pos := MissionObjectPlacer.godot_to_bms_position(local)
 	# Placing is its own undo step: close any open session, snapshot the pre-place state,
@@ -867,13 +933,14 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	var before := _mission.snapshot()
 	var record := _mission.add_entity(kind, item_id, bms_pos, Vector3.ZERO)
 	if record.is_empty():
-		_last_status = "Could not place item %d." % item_id
+		_report("Could not place %s." % item_name, true)
 		return false
 	_push_undo_step(before)
 	var new_index := int(record.get("index", -1))
 	_render_placed_entity(kind, new_index)
 	mark_dirty()
 	_select(kind, new_index)
+	_report("Placed %s. Ctrl+Z to undo." % item_name)
 	return true
 
 
@@ -945,18 +1012,23 @@ func delete_selected() -> bool:
 		return false
 	var kind := int(_selected_ref["kind"])
 	var index := int(_selected_ref["index"])
+	# Capture a readable label before the removal: after the re-bake the selection (and its
+	# resolvable name) is gone.
+	var label := get_selected_display_name()
 	# Deleting is its own undo step: close any open session, snapshot the pre-delete state,
 	# then record it after the removal succeeds (a successful removal always changes the
 	# document, so this is never a no-op step).
 	_flush_edit()
 	var before := _mission.snapshot()
 	if not _mission.remove_entity(kind, index):
+		_report("Could not delete the selected object.", true)
 		return false
 	_push_undo_step(before)
 	# Re-bake first (it resets the selection state and rebuilds stats), then dirty +
 	# emit once so the inspector refreshes against the post-delete world in a single pass.
 	_rebake_objects()
 	mark_dirty()
+	_report("Deleted %s. Ctrl+Z to undo." % (label if not label.is_empty() else "object"))
 	return true
 
 
@@ -1548,19 +1620,43 @@ func _ensure_selection_box() -> MeshInstance3D:
 		return null
 	var mi := MeshInstance3D.new()
 	mi.name = "MissionSelectionBox"
-	var box_mesh := BoxMesh.new()
-	box_mesh.size = Vector3.ONE
-	mi.mesh = box_mesh
+	# A crisp wire-cube outline rather than a translucent filled box: it reads strongly at
+	# any object size and never obscures the object it brackets. Scaled to the selection's
+	# AABB by _update_selection_box.
+	mi.mesh = _build_selection_wire_mesh()
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(0.25, 0.9, 1.0, 0.18)
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.albedo_color = Color(0.3, 0.95, 1.0)
+	# Draw on top so a selected object behind terrain or another object is still findable.
+	mat.no_depth_test = true
 	mi.material_override = mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	container.add_child(mi)
 	_selection_box = mi
 	return mi
+
+
+# A unit wire cube (edges only, centred at the origin, spanning -0.5..0.5) as an
+# ImmediateMesh. _update_selection_box scales it to the selection's padded AABB; scaling a
+# line mesh keeps the edges crisp at any size.
+func _build_selection_wire_mesh() -> ImmediateMesh:
+	var mesh := ImmediateMesh.new()
+	var c := 0.5
+	var corners := [
+		Vector3(-c, -c, -c), Vector3(c, -c, -c), Vector3(c, -c, c), Vector3(-c, -c, c),
+		Vector3(-c, c, -c), Vector3(c, c, -c), Vector3(c, c, c), Vector3(-c, c, c),
+	]
+	var edges := [
+		[0, 1], [1, 2], [2, 3], [3, 0],  # bottom ring
+		[4, 5], [5, 6], [6, 7], [7, 4],  # top ring
+		[0, 4], [1, 5], [2, 6], [3, 7],  # verticals
+	]
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	for e in edges:
+		mesh.surface_add_vertex(corners[e[0]])
+		mesh.surface_add_vertex(corners[e[1]])
+	mesh.surface_end()
+	return mesh
 
 
 func _hide_selection_box() -> void:

@@ -94,7 +94,9 @@ func rebuild(mission, active_path_index: int) -> void:
 				if marker_index < 0 or marker_index >= markers.size():
 					continue
 				var pos: Vector3 = MissionObjectPlacer.bms_to_godot_position(markers[marker_index]["position"])
-				var giz := _make_gizmo(pos, acolor)
+				# Label the gizmo with its 1-based route order so the path reads in the
+				# viewport (matches the inspector's "1. marker #..." list).
+				var giz := _make_gizmo(pos, acolor, order + 1)
 				_gizmos.add_child(giz)
 				_gizmo_by_marker[marker_index] = giz
 				_marker_pickable.append({
@@ -136,7 +138,7 @@ func preview_marker_position(marker_index: int, world_pos: Vector3) -> void:
 		(_gizmo_by_marker[marker_index] as MeshInstance3D).position = world_pos
 
 
-func _make_gizmo(pos: Vector3, color: Color) -> MeshInstance3D:
+func _make_gizmo(pos: Vector3, color: Color, order: int) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	mi.mesh = _gizmo_mesh
 	mi.position = pos
@@ -146,6 +148,19 @@ func _make_gizmo(pos: Vector3, color: Color) -> MeshInstance3D:
 	mat.albedo_color = color
 	mi.material_override = mat
 	mi.set_meta("base_color", color)
+	# A constant-size, always-on-top route-order number floating above the cube. It is its
+	# own node (not the cube's material), so the selection re-tint never disturbs it.
+	var label := Label3D.new()
+	label.text = str(order)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.fixed_size = true
+	label.no_depth_test = true
+	label.font_size = 28
+	label.outline_size = 10
+	label.modulate = Color.WHITE
+	label.outline_modulate = Color(0.0, 0.0, 0.0, 0.85)
+	label.position = Vector3(0.0, MARKER_HALF + 0.6, 0.0)
+	mi.add_child(label)
 	return mi
 
 

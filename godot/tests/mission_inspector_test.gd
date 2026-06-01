@@ -19,6 +19,7 @@ class FakeController:
 	signal changed
 
 	var entity: Dictionary = {}
+	var display_name: String = ""  # resolved model name for the identity line
 	var dirty: bool = false
 	var team_calls: int = 0
 	var group_calls: int = 0
@@ -59,6 +60,9 @@ class FakeController:
 
 	func get_selected_entity() -> Dictionary:
 		return entity
+
+	func get_selected_display_name() -> String:
+		return display_name
 
 	func get_selected_position() -> Vector3:
 		return entity.get("position", Vector3.ZERO)
@@ -259,6 +263,23 @@ func test_edit_panel_shows_the_selected_values() -> void:
 	assert_eq(_spin(ctx.inspector, "MissionRotYaw").value, 45.0, "yaw reads from the entity")
 	assert_eq(_spin(ctx.inspector, "MissionTeam").value, 1.0, "team reads from the entity")
 	assert_eq(_spin(ctx.inspector, "MissionGroup").value, 2.0, "group reads from the entity")
+
+
+func test_identity_shows_resolved_model_name() -> void:
+	# With a resolved model name the identity heading reads the name and a muted kind + index
+	# subline appears beneath it.
+	var ctx := _make(_sample_entity())
+	ctx.fake.display_name = "Spec Ops Soldier"
+	ctx.inspector._refresh()  # re-read now that the name resolves
+	assert_eq(ctx.inspector._identity_label.text, "Spec Ops Soldier", "the heading shows the model name")
+	assert_true(ctx.inspector._identity_sub.visible, "the kind + index subline shows under the name")
+	assert_eq(ctx.inspector._identity_sub.text, "Organic #4", "the subline carries the kind and index")
+
+
+func test_identity_falls_back_to_kind_and_index_without_a_name() -> void:
+	var ctx := _make(_sample_entity())  # display_name left ""
+	assert_eq(ctx.inspector._identity_label.text, "Organic #4", "no resolved name -> kind + index heading")
+	assert_false(ctx.inspector._identity_sub.visible, "and no redundant subline")
 
 
 func test_editing_team_commits_exactly_once() -> void:

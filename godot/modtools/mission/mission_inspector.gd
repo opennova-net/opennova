@@ -25,7 +25,8 @@ var _box: VBoxContainer
 # handlers ignore the echo and do not re-commit (and re-emit) what they just read.
 var _loading: bool = false
 
-var _identity_label: Label
+var _identity_label: Label  # heading: the selected model's name (or kind + index)
+var _identity_sub: Label    # muted subline: kind + index, shown when a name resolved
 var _animated_note: Label
 var _pos_spins: Array = []  # [x, y, z]
 var _rot_spins: Array = []  # [pitch, yaw, roll]
@@ -143,8 +144,11 @@ func _build_edit_panel() -> void:
 	_edit_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root.add_child(_edit_box)
 
-	ObjectUiHelpers.add_section_heading(_edit_box, "Selected entity")
-	_identity_label = ObjectUiHelpers.add_muted_label(_edit_box, "")
+	# The identity line is the section heading: it reads the selected model's name (resolved
+	# from items.def) prominently, with a muted kind + index subline beneath, so the user
+	# sees "Humvee" rather than just "Item #42".
+	_identity_label = ObjectUiHelpers.add_section_heading(_edit_box, "Selected entity")
+	_identity_sub = ObjectUiHelpers.add_muted_label(_edit_box, "")
 
 	ObjectUiHelpers.add_section_heading(_edit_box, "Position")
 	_pos_spins = [
@@ -251,7 +255,15 @@ func _refresh_edit_panel() -> void:
 	# synchronously, and without the guard each repopulate would re-commit the value
 	# back into the model and loop.
 	_loading = true
-	_identity_label.text = "%s #%d" % [_kind_label(int(entity.get("kind", -1))), int(entity.get("index", -1))]
+	var kind_index := "%s #%d" % [_kind_label(int(entity.get("kind", -1))), int(entity.get("index", -1))]
+	var model_name: String = _controller.get_selected_display_name() if _controller != null else ""
+	if model_name.is_empty():
+		_identity_label.text = kind_index
+		_identity_sub.visible = false
+	else:
+		_identity_label.text = model_name
+		_identity_sub.text = kind_index
+		_identity_sub.visible = true
 	var pos: Vector3 = entity.get("position", Vector3.ZERO)
 	_pos_spins[0].value = pos.x
 	_pos_spins[1].value = pos.y
@@ -427,9 +439,13 @@ func _sync_place_affordance() -> void:
 	_place_syncing = false
 
 	if _placeable_cache.is_empty():
-		_place_status.text = "No item database (items.def) was found in the resource directory."
+		_place_status.text = "No item database (items.def) found. Set a resource directory in the Terrain workspace, then reopen the mission."
 	elif armed:
 		_place_status.text = "Placing %s. Click the terrain to place it; right-click or Esc to stop." % _placeable_names.get(armed_id, "item %d" % armed_id)
+	elif _place_list.item_count == 0 and not _place_search.text.strip_edges().is_empty():
+		# The search filtered everything out: say so, rather than leaving the generic prompt
+		# over an empty list (which reads like the mission has no items).
+		_place_status.text = "No items match \"%s\". Try a different search." % _place_search.text.strip_edges()
 	else:
 		_place_status.text = "Pick an item, then click the terrain to place it."
 
@@ -662,7 +678,7 @@ func _refresh_waypoint_panel() -> void:
 	_wp_syncing = false
 
 	if _wp_row_paths.is_empty():
-		_wp_status.text = "This mission has no waypoint paths yet."
+		_wp_status.text = "No waypoint paths yet. Click New path to start a route."
 	elif active < 0:
 		_wp_status.text = "Select a path to see its route, then click a marker in the viewport."
 	else:
@@ -715,7 +731,8 @@ func _refresh_waypoint_panel() -> void:
 		_wp_marker_label.text = "No marker selected."
 	else:
 		var p: Vector3 = marker.get("position", Vector3.ZERO)
-		_wp_marker_label.text = "Marker #%d  (%.1f, %.1f, %.1f)" % [int(marker["marker_index"]), p.x, p.y, p.z]
+		# Whole units, matching the marker list rows above (the format stores integers).
+		_wp_marker_label.text = "Marker #%d  (%.0f, %.0f, %.0f)" % [int(marker["marker_index"]), p.x, p.y, p.z]
 
 
 # A short "[loop, blue]"-style suffix describing a path's flags, or "" when none apply.

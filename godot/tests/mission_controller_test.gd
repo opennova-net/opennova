@@ -10,6 +10,7 @@ extends GutTest
 
 const MissionController := preload("res://modtools/mission/mission_controller.gd")
 const Placer := preload("res://engine/mission/mission_object_placer.gd")
+const WaypointOverlay := preload("res://engine/mission/mission_waypoint_overlay.gd")
 
 const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
 
@@ -1284,3 +1285,78 @@ func test_switching_paths_clears_a_shared_marker_highlight() -> void:
 	assert_eq(controller.get_selected_marker(), {}, "switching paths drops the marker selection")
 	assert_eq(controller._waypoint_overlay._selected_marker_index, -1,
 		"and the overlay clears its highlight (no stale bleed onto B's shared marker)")
+
+
+# --- Polish: action feedback + name resolution (P1 / P2) ----------------------
+
+# Seed the placer's per-graphic batch cache with a dummy mesh so StaticCrate1 (item 105004)
+# renders to a real MultiMesh under headless .3di, the same technique the delete test uses.
+func _seed_crate_batch(controller) -> void:
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3.ONE
+	controller._placer._static_batch_cache["StaticCrate1"] = [{
+		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
+	}]
+
+
+func test_place_and_delete_report_status_and_resolve_names() -> void:
+	var controller := _loaded_with_item_db()
+	_seed_crate_batch(controller)
+	var crate_name: String = controller._item_db().get_display_name(105004)
+	assert_false(crate_name.is_empty(), "precondition: the items.def fixture names item 105004")
+
+	assert_true(controller.place_entity_at_world(105004, Vector3(10, 0, -10)))
+	assert_eq(controller.get_selected_display_name(), crate_name, "the selection resolves its model name")
+	assert_string_contains(controller.get_last_status(), "Placed", "placing reports a status")
+	assert_string_contains(controller.get_last_status(), crate_name, "and names the placed model")
+
+	assert_true(controller.delete_selected())
+	assert_string_contains(controller.get_last_status(), "Deleted", "deleting reports a status")
+
+
+func test_display_name_is_empty_without_an_item_database() -> void:
+	# _loaded_with_selection opens over a dir with no items.def, so the placer carries no
+	# database and a name cannot resolve; the inspector then shows the kind + index instead.
+	var controller := _loaded_with_selection()
+	assert_eq(controller.get_selected_display_name(), "", "no item database -> no resolvable name")
+
+
+func test_undo_redo_report_status() -> void:
+	var controller := _loaded_with_item_db()
+	_seed_crate_batch(controller)
+	assert_true(controller.place_entity_at_world(105004, Vector3(5, 0, -5)))
+
+	controller.undo()
+	assert_string_contains(controller.get_last_status(), "Undid", "undo reports what happened")
+	controller.redo()
+	assert_string_contains(controller.get_last_status(), "Redid", "redo reports what happened")
+
+	controller.undo()  # back to the opened state
+	controller.undo()  # nothing left on the stack
+	assert_string_contains(controller.get_last_status(), "Nothing to undo", "an exhausted undo says so")
+
+
+func test_status_reported_signal_fires_on_an_action() -> void:
+	var controller := _loaded_with_item_db()
+	_seed_crate_batch(controller)
+	watch_signals(controller)
+	assert_true(controller.place_entity_at_world(105004, Vector3(1, 0, -1)))
+	assert_signal_emitted(controller, "status_reported", "placing emits status_reported for the shell to relay")
+
+
+func test_marker_gizmo_carries_a_route_order_label() -> void:
+	# Each in-world marker gizmo carries a 1-based route-order Label3D so the path reads in
+	# the viewport (matches the inspector's "1. marker #..." list).
+	var overlay = WaypointOverlay.new()
+	add_child_autofree(overlay)
+	overlay._ensure_built()
+	var giz = overlay._make_gizmo(Vector3.ZERO, Color.WHITE, 3)
+	add_child_autofree(giz)
+	var label: Label3D = null
+	for child in giz.get_children():
+		if child is Label3D:
+			label = child
+			break
+	assert_not_null(label, "each marker gizmo carries a Label3D order number")
+	if label != null:
+		assert_eq(label.text, "3", "the label shows the 1-based route order")
