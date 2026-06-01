@@ -324,6 +324,7 @@ class BlenderSceneBuilder:
         self._world_rot_corrections = []           # BAD world rot -> Blender rest world rot
         self._rest_local_quats = []                # Blender local rest quaternions
         self._rest_local_inv_mats = []             # Blender local rest inverse 3x3 matrices
+        self._skin_bone_remap = []                 # source skin bone -> armature bone index
 
     def build_basic_scene(self, name: str):
         _ensure_object_mode()
@@ -350,6 +351,15 @@ class BlenderSceneBuilder:
                 import traceback
                 traceback.print_exc()
                 print(f"Warning: failed to build animations: {e}")
+        elif getattr(self.anim_context, "kind", None) == "lw":
+            try:
+                self.build_armature_from_parts(name)
+                self.bind_meshes_to_armature()
+                self._tag_lw_animation_context()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"Warning: failed to build LW armature binding: {e}")
         elif int(self.ir.mesh_type) == 3:
             # Preserve skin weights for static skinned models that have no BAD.
             # This keeps ASE MESH_WEIGHTS data so OED re-export doesn't collapse
@@ -456,6 +466,9 @@ class BlenderSceneBuilder:
                 0.0,
             ))
 
+        from pyopennova.mesh_build import build_skin_bone_remap
+        self._skin_bone_remap = build_skin_bone_remap(lod0, part_count)
+
         print(f"[ARMATURE] Created synthetic armature with {part_count} bones")
 
     def build_armature_from_bad(self, bad_file, name: str):
@@ -537,6 +550,16 @@ class BlenderSceneBuilder:
             abs_rotations[i] = world_rot.transposed()
         # root_motion bone: identity
         abs_rotations[bone_count] = Matrix.Identity(3)
+
+        try:
+            from pyopennova.mesh_build import build_skin_bone_remap
+            lod0 = self.ir.lods[0] if int(self.ir.lod_count) > 0 else None
+            self._skin_bone_remap = (
+                build_skin_bone_remap(lod0, bone_count)
+                if lod0 is not None else list(range(bone_count))
+            )
+        except Exception:
+            self._skin_bone_remap = list(range(bone_count))
 
         # Accumulate world positions from parent-local offsets
         for i, (_bname, parent_idx, rest_origin, _local_rot, _bad_length) in enumerate(bone_infos):
@@ -711,6 +734,9 @@ class BlenderSceneBuilder:
             for vert_idx in range(min(vert_count, len(bone_data))):
                 entries = bone_data[vert_idx]
                 for bone_idx, weight in entries:
+                    bone_idx = self._remap_skin_bone_index(int(bone_idx))
+                    if bone_idx < 0:
+                        continue
                     if bone_idx < 0 or bone_idx >= len(bone_infos):
                         continue
                     if weight <= 0:
@@ -740,6 +766,21 @@ class BlenderSceneBuilder:
         self._mesh_bone_data.clear()
 
         print(f"[BIND] Bound {len(mesh_list)} meshes to armature")
+
+    def _remap_skin_bone_index(self, bone_idx: int) -> int:
+        if 0 <= bone_idx < len(self._skin_bone_remap):
+            return int(self._skin_bone_remap[bone_idx])
+        return bone_idx
+
+    def _tag_lw_animation_context(self) -> None:
+        if not self.armature_object or getattr(self.anim_context, "kind", None) != "lw":
+            return
+        self.armature_object["opennova_animation_format"] = "lw"
+        self.armature_object["opennova_lw_anim_def"] = getattr(self.anim_context, "anim_name", "")
+        self.armature_object["opennova_lw_chr_file"] = getattr(self.anim_context, "chr_name", "")
+        ksa = getattr(self.anim_context, "ksa", None)
+        if ksa is not None:
+            self.armature_object["opennova_lw_ksa_slots"] = len(getattr(ksa, "slots", {}))
 
     # Animation building (ported from adm_scene_builder.h)
 

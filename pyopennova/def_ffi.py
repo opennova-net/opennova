@@ -80,6 +80,7 @@ class DefItemDef(ctypes.Structure):
         ("sid", ctypes.c_char * 64),
         ("type", ctypes.c_int),
         ("graphic", ctypes.c_char * 128),
+        ("chr_file", ctypes.c_char * 128),
         ("anim_def", ctypes.c_char * 128),
         ("husk", ctypes.c_char * 128),
         ("hp", ctypes.c_int),

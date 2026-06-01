@@ -69,12 +69,14 @@ def run_one(request: ImportRequest) -> ImportResult:
                 request.base_dir,
                 request.item_name,
                 request.item_type,
+                request.item_id,
             )
             if output_stem:
                 output_path = str(Path(request.output_root) / output_stem)
             ok = run_import(
                 base_dir=request.base_dir,
                 item_name=request.item_name,
+                item_id=request.item_id,
                 item_type=request.item_type,
                 output_dir=request.output_root,
                 **request.options.as_def_kwargs(),

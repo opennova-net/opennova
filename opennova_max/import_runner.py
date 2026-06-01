@@ -84,6 +84,7 @@ def run_import(
     write_max: bool = True,
     write_ase: bool = True,
     write_3dp: bool = True,
+    item_id: int = 0,
 ) -> bool:
     """Import one DEF resource and write selected Max-owned outputs."""
     written, _output_path = _run_definition_import_impl(
@@ -100,6 +101,7 @@ def run_import(
         write_max=write_max,
         write_ase=write_ase,
         write_3dp=write_3dp,
+        item_id=item_id,
     )
     return bool(written)
 
@@ -125,6 +127,7 @@ def _execute_to_files(request: ImportRequest) -> tuple[list[str], str]:
     raw = _run_definition_import_impl(
         base_dir=request.base_dir,
         item_name=request.item_name,
+        item_id=request.item_id,
         item_type=request.item_type,
         output_root=request.output_root,
         output_stem=request.output_stem,
@@ -181,6 +184,7 @@ def _run_definition_import_impl(
     base_dir: str,
     item_name: str,
     item_type: str,
+    item_id: int = 0,
     output_root: str,
     output_stem: str,
     import_arms: bool,
@@ -196,6 +200,7 @@ def _run_definition_import_impl(
     built, written, project_dir = execute_definition_import(
         base_dir=base_dir,
         item_name=item_name,
+        item_id=item_id,
         item_type=item_type,
         output_dir=output_root,
         builder_factory=_build_max_scene_builder,
