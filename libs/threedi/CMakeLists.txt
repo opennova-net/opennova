@@ -12,6 +12,7 @@ add_library(opennova_threedi STATIC
     src/threedi_ir_from_gp.cpp
     src/threedi_lw.cpp
     src/threedi_ir_from_lw.cpp
+    src/threedi_lw_anim.cpp
 )
 
 target_include_directories(opennova_threedi

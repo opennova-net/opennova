@@ -350,6 +350,19 @@ class BlenderSceneBuilder:
                 import traceback
                 traceback.print_exc()
                 print(f"Warning: failed to build animations: {e}")
+        elif getattr(self.anim_context, "kind", None) == "lw":
+            # Land Warrior characters: synthetic BN## armature from the part
+            # hierarchy, skin bind, then Blender Actions sampled from the LW
+            # KSA/SAF clips (LWAnim_PoseSkeleton @ 0x4A0C00, gameplay modifiers
+            # skipped). Pose math is LW-specific (see _build_lw_action).
+            try:
+                self.build_armature_from_parts(name)
+                self.bind_meshes_to_armature()
+                self.build_lw_animations(self.anim_context)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"Warning: failed to build LW animations: {e}")
         elif int(self.ir.mesh_type) == 3:
             # Preserve skin weights for static skinned models that have no BAD.
             # This keeps ASE MESH_WEIGHTS data so OED re-export doesn't collapse
@@ -1125,6 +1138,255 @@ class BlenderSceneBuilder:
                 ad.action_slot = old_slot
 
         return action
+
+    # ----- Land Warrior animation -------------------------------------------
+
+    # LW geometry/skeleton are promoted to Blender space by the same transform
+    # the mesh path uses: render_space(lw_raw_to_ir(v)).  Composed, that signed
+    # axis permutation (x,y,z)->(y,-x,z) is a proper rotation Rz(-90deg).  The
+    # LW pose sampler returns per-bone LOCAL transforms in raw LW space; this
+    # matrix maps them into the Blender armature space the BN## bones live in.
+    _LW_RAW_TO_BLENDER = Matrix(((0.0, 1.0, 0.0),
+                                 (-1.0, 0.0, 0.0),
+                                 (0.0, 0.0, 1.0)))
+
+    def build_lw_animations(self, lw_context):
+        """Build Blender Actions from sampled Land Warrior clips.
+
+        Mirrors build_animations_from_context but for the LW pose pipeline:
+        each clip already carries per-frame, per-bone LOCAL transforms sampled
+        in C (pyopennova.lw_anim) reproducing LWAnim_PoseSkeleton @ 0x4A0C00.
+        """
+        if not self.armature_object:
+            print("[LW-ANIM] No armature object, skipping LW animations")
+            return
+
+        clips = list(getattr(lw_context, "clips", ()) or ())
+        if not clips:
+            print("[LW-ANIM] No clips to build")
+            self._tag_lw_animation_context(lw_context, 0)
+            return
+
+        armature_obj = self.armature_object
+        if not armature_obj.animation_data:
+            armature_obj.animation_data_create()
+
+        built = 0
+        active_action = None
+        nla_frame_offset = 0
+        for clip in clips:
+            try:
+                action = self._build_lw_action(clip, armature_obj)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"[LW-ANIM] Failed to build clip '{getattr(clip, 'name', '?')}': {e}")
+                continue
+            if action is None:
+                continue
+            action.use_fake_user = True
+            if active_action is None:
+                active_action = action
+
+            track = armature_obj.animation_data.nla_tracks.new()
+            track.name = action.name
+            strip = track.strips.new(action.name, int(nla_frame_offset + 1), action)
+            strip.name = action.name
+            strip.influence = 1.0
+            if hasattr(action, 'slots') and len(action.slots) > 0:
+                slot = self._find_or_create_action_slot(action, armature_obj)
+                if slot is not None:
+                    strip.action_slot = slot
+
+            frame_count = int(action.frame_range[1] - action.frame_range[0] + 1)
+            nla_frame_offset += frame_count
+            built += 1
+
+        if nla_frame_offset > 0:
+            bpy.context.scene.frame_start = 1
+            bpy.context.scene.frame_end = int(nla_frame_offset)
+
+        # Show the first clip so the imported character is posed, not in raw rest.
+        if active_action is not None:
+            armature_obj.animation_data.action = active_action
+            if hasattr(active_action, 'slots') and len(active_action.slots) > 0:
+                armature_obj.animation_data.action_slot = active_action.slots[0]
+            bpy.context.scene.frame_set(1)
+
+        self._tag_lw_animation_context(lw_context, built)
+        print(f"[LW-ANIM] Built {built}/{len(clips)} LW clips as Actions")
+
+    def _build_lw_action(self, clip, armature_obj):
+        """Build one Blender Action from a sampled LW clip.
+
+        clip.frames[f][bone] is a row-major 3x4 [R|t] LOCAL transform in raw LW
+        space (pyopennova.lw_anim.sample_frame output).  Per frame we map each
+        local transform into Blender space (Rz(-90deg) conjugation for rotation,
+        applied to translation), run forward kinematics with the root anchored
+        at its real rest head, then express each bone's world deviation from
+        rest in the bone's local rest frame to get pose-bone keyframes:
+
+            basis_i = ML_i^-1 . (Dworld_parent^-1 . Dworld_i) . ML_i
+
+        where ML_i = pose_bone.bone.matrix_local (armature-space rest, carrying
+        the edit-bone orientation) and Dworld_i = W_anim_i . W_rest_i^-1.  This
+        is identity at the rest frame for every bone, so a static (rest) clip
+        produces no deviation.
+        """
+        frame_count = int(getattr(clip, "frame_count", 0) or 0)
+        bone_infos = self._bone_infos
+        bone_count = min(int(getattr(clip, "bone_count", 0) or 0), len(bone_infos))
+        if frame_count <= 0 or bone_count <= 0:
+            return None
+
+        T = self._LW_RAW_TO_BLENDER
+        Tt = T.transposed()
+
+        action = bpy.data.actions.new(name=str(getattr(clip, "name", "lw_clip")))
+
+        slot = None
+        old_action = old_slot = None
+        if hasattr(action, 'slots'):
+            slot = self._find_or_create_action_slot(action, armature_obj)
+            ad = armature_obj.animation_data
+            if ad is None:
+                ad = armature_obj.animation_data_create()
+            old_action = ad.action
+            old_slot = getattr(ad, 'action_slot', None)
+            ad.action = action
+            ad.action_slot = slot
+
+        fcurves, slot = self._get_action_fcurves(action, armature_obj, slot)
+
+        pose_bones = armature_obj.pose.bones
+        names = [bone_infos[i][0] for i in range(bone_count)]
+        parents = [bone_infos[i][1] for i in range(bone_count)]
+
+        # Per-bone rest matrices from the armature Blender built (these carry the
+        # BN## edit-bone orientation, so we need not reconstruct it ourselves).
+        ml = [None] * bone_count          # bone.matrix_local (4x4 armature rest)
+        ml_inv = [None] * bone_count
+        w_rest_inv = [None] * bone_count  # (Translation(head))^-1  (rest world, identity rot)
+        for i in range(bone_count):
+            pb = pose_bones.get(names[i])
+            if pb is None:
+                # Missing bone: cannot pose it; abort this clip cleanly.
+                if hasattr(action, 'slots') and old_action is not None:
+                    ad = armature_obj.animation_data
+                    ad.action = old_action
+                    if old_slot is not None:
+                        ad.action_slot = old_slot
+                bpy.data.actions.remove(action)
+                return None
+            pb.rotation_mode = 'QUATERNION'
+            m = pb.bone.matrix_local.copy()
+            ml[i] = m
+            ml_inv[i] = m.inverted()
+            w_rest_inv[i] = Matrix.Translation(m.to_translation()).inverted()
+
+        # Pre-create fcurves (rotation always, translation always for LW) and
+        # pre-allocate keyframe points, matching _build_action_from_bad's bulk path.
+        rot_fc = []
+        pos_fc = []
+        for i in range(bone_count):
+            dp_rot = f'pose.bones["{names[i]}"].rotation_quaternion'
+            rot_fc.append(tuple(fcurves.new(data_path=dp_rot, index=k) for k in range(4)))
+            dp_pos = f'pose.bones["{names[i]}"].location'
+            pos_fc.append(tuple(fcurves.new(data_path=dp_pos, index=k) for k in range(3)))
+        for i in range(bone_count):
+            for fc in rot_fc[i]:
+                fc.keyframe_points.add(frame_count)
+            for fc in pos_fc[i]:
+                fc.keyframe_points.add(frame_count)
+
+        ident4 = Matrix.Identity(4)
+        prev_q = [None] * bone_count
+        frames = clip.frames
+
+        for f in range(frame_count):
+            pose = frames[f]
+            world = [None] * bone_count
+            dworld = [None] * bone_count
+            for i in range(bone_count):
+                rows = pose[i]
+                r_raw = Matrix(((rows[0][0], rows[0][1], rows[0][2]),
+                                (rows[1][0], rows[1][1], rows[1][2]),
+                                (rows[2][0], rows[2][1], rows[2][2])))
+                t_raw = Vector((rows[0][3], rows[1][3], rows[2][3]))
+                r_bl = (T @ r_raw @ Tt).to_4x4()
+                t_bl = T @ t_raw
+                local = Matrix.Translation(t_bl) @ r_bl
+
+                pi = parents[i]
+                if pi is None or pi < 0 or pi >= bone_count or pi == i:
+                    # Root: keep the sampler's (absolute) rotation but anchor the
+                    # translation at the real rest head so the root rotates about
+                    # its own origin, not the world origin.
+                    head = ml[i].to_translation()
+                    world[i] = Matrix.Translation(head) @ r_bl
+                else:
+                    world[i] = world[pi] @ local
+                dworld[i] = world[i] @ w_rest_inv[i]
+
+            for i in range(bone_count):
+                pi = parents[i]
+                if pi is None or pi < 0 or pi >= bone_count or pi == i:
+                    d_rel = dworld[i]
+                else:
+                    d_rel = dworld[pi].inverted() @ dworld[i]
+                basis = ml_inv[i] @ d_rel @ ml[i]
+
+                q = self._normalize_quat(basis.to_quaternion())
+                loc = basis.to_translation()
+
+                pv = prev_q[i]
+                if pv is not None and q.dot(pv) < 0.0:
+                    q = Quaternion((-q.w, -q.x, -q.y, -q.z))
+                prev_q[i] = q
+
+                bl_frame = f + 1
+                fw, fx, fy, fz = rot_fc[i]
+                fw.keyframe_points[f].co = (bl_frame, q.w)
+                fx.keyframe_points[f].co = (bl_frame, q.x)
+                fy.keyframe_points[f].co = (bl_frame, q.y)
+                fz.keyframe_points[f].co = (bl_frame, q.z)
+                for fc in (fw, fx, fy, fz):
+                    fc.keyframe_points[f].interpolation = 'LINEAR'
+
+                px, py, pz = pos_fc[i]
+                px.keyframe_points[f].co = (bl_frame, loc.x)
+                py.keyframe_points[f].co = (bl_frame, loc.y)
+                pz.keyframe_points[f].co = (bl_frame, loc.z)
+                for fc in (px, py, pz):
+                    fc.keyframe_points[f].interpolation = 'LINEAR'
+
+        for fc in fcurves:
+            fc.update()
+        action.frame_start = 1
+        action.frame_end = frame_count
+
+        # LW clip metadata for downstream tooling / debugging.
+        action["opennova_lw_slot"] = int(getattr(clip, "slot", -1))
+        loop_frame = int(getattr(clip, "loop_frame", -1))
+        action["opennova_lw_loop_frame"] = loop_frame
+        action["opennova_lw_velocity"] = float(getattr(clip, "velocity", 0.0))
+
+        if hasattr(action, 'slots'):
+            ad = armature_obj.animation_data
+            ad.action = old_action
+            if old_slot is not None:
+                ad.action_slot = old_slot
+
+        return action
+
+    def _tag_lw_animation_context(self, lw_context, clip_count):
+        if not self.armature_object:
+            return
+        self.armature_object["opennova_animation_format"] = "lw"
+        self.armature_object["opennova_lw_anim_def"] = getattr(lw_context, "anim_name", "")
+        self.armature_object["opennova_lw_chr_file"] = getattr(lw_context, "chr_name", "")
+        self.armature_object["opennova_lw_clip_count"] = int(clip_count)
+        self.armature_object["opennova_lw_ksa_slots"] = int(getattr(lw_context, "slot_count", 0))
 
     def merge_with_existing_scene(self, main_builder):
         _ensure_object_mode()

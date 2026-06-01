@@ -18,13 +18,60 @@ from pathlib import Path
 
 from .bfc1_ffi import is_bfc1, decompress as bfc1_decompress
 from .pff_ffi import PffArchive
-from .scr_ffi import is_scr, get_version, decrypt, SCR_KEY_DEFAULT, SCR_KEY_JO_DFX2, SCR_KEY_SHADERS
+from .scr_ffi import (
+    is_scr,
+    get_version,
+    decrypt,
+    SCR_KEY_DEFAULT,
+    SCR_KEY_JO_DFX2,
+    SCR_KEY_SHADERS,
+    SCR_KEY_DFLW,
+)
 
 _SCR_VERSION_KEYS = {
     0: SCR_KEY_DEFAULT,
     1: SCR_KEY_JO_DFX2,
     2: SCR_KEY_SHADERS,
 }
+
+# All known SCR keys. The SCR header carries no key id and the version byte is
+# ambiguous: JO, DFX2 and BHD all use version 1 with SCR_KEY_JO_DFX2, while Land
+# Warrior reuses version 1 with SCR_KEY_DFLW. SCR payloads are always text
+# (.def / .fx), so when the version's canonical key yields non-text we fall back
+# to the other keys and keep the one whose output is printable.
+_SCR_ALL_KEYS = (SCR_KEY_DEFAULT, SCR_KEY_JO_DFX2, SCR_KEY_SHADERS, SCR_KEY_DFLW)
+
+
+def _scr_payload_is_textual(data: bytes) -> bool:
+    sample = data[:64]
+    if not sample:
+        return False
+    printable = sum(1 for c in sample if c in (9, 10, 13) or 32 <= c < 127)
+    return printable / len(sample) >= 0.9
+
+
+def _scr_decrypt_auto(data: bytes) -> bytes:
+    """Decrypt an SCR blob, picking the key by validating the output.
+
+    Tries the version's canonical key first (so JO/DFX2/BHD/shaders decrypt
+    exactly as before, on the first try), then falls back to the other known
+    keys only if that produced non-text. Returns the canonical-key result if
+    nothing validates, preserving prior behavior.
+    """
+    ver = get_version(data[:4])
+    primary = _SCR_VERSION_KEYS.get(ver, SCR_KEY_DEFAULT)
+    fallback = None
+    for key in (primary, *(k for k in _SCR_ALL_KEYS if k != primary)):
+        try:
+            plain = decrypt(data, key)
+        except Exception:
+            continue
+        if fallback is None:
+            fallback = plain
+        if _scr_payload_is_textual(plain):
+            return plain
+    return fallback if fallback is not None else data
+
 
 TEXTURE_STRATEGY_GENERIC = "generic"
 TEXTURE_STRATEGY_3DI3_DF4OED = "3di3_df4oed"
@@ -120,9 +167,7 @@ class AssetResolver:
 
         data = path.read_bytes()
         if len(data) >= 4 and is_scr(data[:4]):
-            ver = get_version(data[:4])
-            scr_key = _SCR_VERSION_KEYS.get(ver, SCR_KEY_DEFAULT)
-            data = decrypt(data, scr_key)
+            data = _scr_decrypt_auto(data)
         if len(data) >= 8 and is_bfc1(data[:8]):
             data = bfc1_decompress(data)
 
@@ -153,11 +198,9 @@ class AssetResolver:
             entry = arc.find(filename)
             if entry is not None:
                 data = arc.extract(entry)
-                # Auto-decrypt SCR if needed
+                # Auto-decrypt SCR if needed (key chosen by validating output)
                 if len(data) >= 4 and is_scr(data[:4]):
-                    ver = get_version(data[:4])
-                    scr_key = _SCR_VERSION_KEYS.get(ver, SCR_KEY_DEFAULT)
-                    data = decrypt(data, scr_key)
+                    data = _scr_decrypt_auto(data)
                 # Auto-decompress BFC1 if needed
                 if len(data) >= 8 and is_bfc1(data[:8]):
                     data = bfc1_decompress(data)

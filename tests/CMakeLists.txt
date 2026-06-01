@@ -21,6 +21,18 @@ target_link_libraries(threedi_gp_roundtrip_test PRIVATE opennova_threedi)
 target_include_directories(threedi_gp_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_gp_roundtrip COMMAND threedi_gp_roundtrip_test)
 
+# Land Warrior (.3di v10) parse + IR conversion test
+add_executable(threedi_lw_parse_test threedi/lw_parse_test.cpp)
+target_link_libraries(threedi_lw_parse_test PRIVATE opennova_threedi)
+target_include_directories(threedi_lw_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_lw_parse COMMAND threedi_lw_parse_test)
+
+# Land Warrior animation (SAF1/KSA/ACA/ANM) parse + pose-sampler test
+add_executable(threedi_lw_anim_test threedi/lw_anim_test.cpp)
+target_link_libraries(threedi_lw_anim_test PRIVATE opennova_threedi)
+target_include_directories(threedi_lw_anim_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_lw_anim COMMAND threedi_lw_anim_test)
+
 # PANM unit tests
 foreach(test ctrl decode runtime wave)
     add_executable(threedi_panm_${test}_test threedi/panm_${test}_test.cpp)

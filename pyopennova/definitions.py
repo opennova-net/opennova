@@ -40,6 +40,7 @@ class ItemContext:
     name: str
     graphic_us: str
     anim_def: str | None = None
+    chr_file: str | None = None
 
 
 def parse_weapon_context(entry) -> WeaponContext | None:
@@ -65,10 +66,12 @@ def parse_item_context(entry) -> ItemContext | None:
     if not graphic:
         return None
     anim_def = entry.anim_def.decode("utf-8", errors="replace")
+    chr_file = entry.chr_file.decode("utf-8", errors="replace")
     return ItemContext(
         name=entry.display_name.decode("utf-8", errors="replace"),
         graphic_us=graphic,
         anim_def=anim_def if anim_def else None,
+        chr_file=chr_file if chr_file else None,
     )
 
 

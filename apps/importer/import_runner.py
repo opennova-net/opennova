@@ -160,14 +160,32 @@ def _import_basic_model(
 
         bad_file = None
         anim_ctx = None
-        anim_field = target_context.anim_adm if item_type == "weapon" else target_context.anim_def
-        if anim_field:
+        chr_file = getattr(target_context, "chr_file", None) if item_type != "weapon" else None
+        if chr_file:
+            # Land Warrior character: animation lives in sidecar KSA/ANM named by
+            # chr_file (+ anim_def), sampled in C (no BAD). Skeleton rest data
+            # comes from the character .3di itself, so resolve its path here.
             try:
-                anim_ctx = build_animation_context(anim_field, resolver=resolver)
-                if anim_ctx and anim_ctx.reset_animation:
-                    bad_file = parse_bad(anim_ctx.reset_animation.bad_filepath)
+                from pyopennova.lw_anim import build_lw_animation_context
+                lw_model_path = resolver.resolve(main_file) if main_file else None
+                if lw_model_path is not None:
+                    anim_ctx = build_lw_animation_context(
+                        target_context.anim_def or "",
+                        chr_file,
+                        resolver=resolver,
+                        model_path=str(lw_model_path),
+                    )
             except Exception as e:
-                log.warning("Could not load BAD file: %s", e)
+                log.warning("Could not load LW animation: %s", e)
+        else:
+            anim_field = target_context.anim_adm if item_type == "weapon" else target_context.anim_def
+            if anim_field:
+                try:
+                    anim_ctx = build_animation_context(anim_field, resolver=resolver)
+                    if anim_ctx and anim_ctx.reset_animation:
+                        bad_file = parse_bad(anim_ctx.reset_animation.bad_filepath)
+                except Exception as e:
+                    log.warning("Could not load BAD file: %s", e)
 
         success_count = 0
         main_builder = None

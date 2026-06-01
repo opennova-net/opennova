@@ -771,6 +771,9 @@ DEF_EXPORT int def_parse_items(const char *path, DefItemsFile *out) {
         } else if (lower_match_key(lower, ll, "graphic", 7)) {
             consume_value_str(trimmed, tlen, 7, current.graphic, sizeof(current.graphic));
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "chr_file", 8)) {
+            consume_value_str(trimmed, tlen, 8, current.chr_file, sizeof(current.chr_file));
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "anim_def", 8)) {
             consume_value_str(trimmed, tlen, 8, current.anim_def, sizeof(current.anim_def));
             parsed = 1;

@@ -17,6 +17,7 @@ from ._native import load_lib
 SCR_KEY_DEFAULT = 0xABEEFACE
 SCR_KEY_JO_DFX2 = 0x2A5A8EAD
 SCR_KEY_SHADERS = 0xA55B1EED
+SCR_KEY_DFLW = 0x01234567  # Delta Force: Land Warrior data (SCR version 1)
 
 
 # ---------------------------------------------------------------------------
