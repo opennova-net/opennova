@@ -143,8 +143,52 @@ static void test_50cal(const char *root) {
             CHECK(m.lods[0].subobjects[1].normal_count == 81, "50CAL: subobject[1].normal_count");
             CHECK(m.lods[0].subobjects[2].normal_count == 18, "50CAL: subobject[2].normal_count");
             CHECK(m.lods[0].subobjects[2].parent == 1, "50CAL: subobject[2].parent != 1");
+            uint32_t vertex_base = 0;
+            for (uint32_t s = 0; s < m.lods[0].subobject_count; ++s) {
+                for (uint32_t v = 0; v < m.lods[0].subobjects[s].vertex_count; ++v) {
+                    CHECK(m.lods[0].vertices[vertex_base + v].w == (int16_t)s,
+                          "50CAL: vertex w does not match owning subobject");
+                }
+                vertex_base += m.lods[0].subobjects[s].vertex_count;
+            }
         }
     }
+    threedi_lw_free(&m);
+}
+
+static void test_badguy_selectors_and_mixed_vertex_bones(const char *root) {
+    char path[4096];
+    snprintf(path, sizeof(path), "%s/fixtures/threedi/lw/BADGUY.3DI", root);
+
+    ThreediLwFile m;
+    threedi_lw_init(&m);
+    CHECK(threedi_lw_read(path, &m) == 0, "BADGUY: read failed");
+    CHECK(m.version == THREEDI_LW_VERSION_10, "BADGUY: version != 10");
+    CHECK(m.lod_count == 4, "BADGUY: lod_count != 4");
+    CHECK(m.material_count == 7, "BADGUY: material_count != 7");
+    if (m.materials && m.material_count >= 7) {
+        CHECK(m.materials[3].selector_id == 3, "BADGUY: material selector id");
+        CHECK(strcmp(m.materials[3].tex_name_0, "AFacArab.pcx") == 0, "BADGUY: material 3 name");
+    }
+    if (m.lods && m.lods[0].surfaces && m.lods[0].surface_count >= 8) {
+        CHECK(m.lods[0].surfaces[4].material_selectors[0] == 3, "BADGUY: face surface selector");
+        CHECK(m.lods[0].surfaces[7].material_selectors[0] == 6, "BADGUY: feet surface selector");
+    }
+    if (m.lods && m.lods[0].vertices && m.lods[0].subobjects) {
+        const ThreediLwLod *lod = &m.lods[0];
+        uint32_t vertex_base = 0;
+        uint32_t mixed_owner_vertices = 0;
+        for (uint32_t s = 0; s < lod->subobject_count; ++s) {
+            for (uint32_t v = 0; v < lod->subobjects[s].vertex_count; ++v) {
+                if (lod->vertices[vertex_base + v].w != (int16_t)s) {
+                    ++mixed_owner_vertices;
+                }
+            }
+            vertex_base += lod->subobjects[s].vertex_count;
+        }
+        CHECK(mixed_owner_vertices > 0, "BADGUY: fixture should contain mixed vertex bone tags");
+    }
+    check_face_ranges(&m, "BADGUY: face index out of range");
     threedi_lw_free(&m);
 }
 
@@ -176,6 +220,7 @@ int main(void) {
     const char *root = test_paths_repo_root(__FILE__);
     test_arblu(root);
     test_50cal(root);
+    test_badguy_selectors_and_mixed_vertex_bones(root);
     test_v8_is_unsupported(root);
     test_rejects_trailing_bytes(root);
 

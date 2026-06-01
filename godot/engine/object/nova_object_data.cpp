@@ -1064,6 +1064,7 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_part_anim_field", "lod_index", "anim_index", "key", "value"), &NovaObjectData::set_part_anim_field);
 	ClassDB::bind_method(D_METHOD("set_part_anim_track_field", "lod_index", "anim_index", "track", "key", "value"), &NovaObjectData::set_part_anim_track_field);
 	ClassDB::bind_method(D_METHOD("get_render_lod_info", "lod_index"), &NovaObjectData::get_render_lod_info);
+	ClassDB::bind_method(D_METHOD("get_render_parts", "lod_index"), &NovaObjectData::get_render_parts);
 	ClassDB::bind_method(D_METHOD("build_lod_submeshes", "lod_index"), &NovaObjectData::build_lod_submeshes);
 	ClassDB::bind_method(D_METHOD("eval_material_runtime", "index", "time_ms", "ctrl_values"), &NovaObjectData::eval_material_runtime);
 	ClassDB::bind_method(D_METHOD("compute_anim_frame", "index", "time_ms", "ctrl_values"), &NovaObjectData::compute_anim_frame);
@@ -2592,6 +2593,29 @@ Dictionary NovaObjectData::get_render_lod_info(int p_lod_index) const {
 	return info;
 }
 
+Array NovaObjectData::get_render_parts(int p_lod_index) const {
+	Array result;
+	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+		return result;
+	}
+	const ThreediIRLod &lod = ir.lods[p_lod_index];
+	if (lod.parts == nullptr) {
+		return result;
+	}
+	for (size_t part_index = 0; part_index < lod.part_count; ++part_index) {
+		const ThreediIRPart &part = lod.parts[part_index];
+		Dictionary entry;
+		entry["index"] = static_cast<int>(part_index);
+		entry["parent_index"] = part.parent_index;
+		entry["abs"] = godot_vec3(part.abs_position);
+		entry["rel"] = godot_vec3(part.rel_position);
+		entry["primitive_start"] = part.primitive_start;
+		entry["primitive_count"] = part.primitive_count;
+		result.push_back(entry);
+	}
+	return result;
+}
+
 Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 	Array result;
 	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
@@ -2622,7 +2646,10 @@ Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 		PackedVector2Array uvs;
 		PackedVector2Array uvs2;
 		PackedFloat32Array tangents;
+		PackedInt32Array bones;
+		PackedFloat32Array weights;
 		PackedInt32Array indices;
+		const bool has_skinning = prim.bone_table_length > 0;
 		auto get_vertex = [&](uint16_t local_index) -> const ThreediIRVertex * {
 			const uint32_t src_index = prim.vertex_offset + static_cast<uint32_t>(local_index);
 			if (src_index >= lod.vertex_count) {
@@ -2644,6 +2671,14 @@ Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 				tangents.push_back(tangent.y);
 				tangents.push_back(tangent.z);
 				tangents.push_back(w);
+			}
+			if (has_skinning) {
+				for (int bi = 0; bi < 4; ++bi) {
+					const uint8_t local_bone = v.bone_indices[bi];
+					const int global_bone = local_bone < prim.bone_table_length ? prim.bone_table[local_bone] : 0;
+					bones.push_back(global_bone);
+					weights.push_back(v.bone_weights[bi]);
+				}
 			}
 			indices.push_back(vertices.size() - 1);
 		};
@@ -2680,6 +2715,10 @@ Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 		if (!tangents.is_empty() && tangents.size() == vertices.size() * 4) {
 			surface["tangents"] = tangents;
 		}
+		if (!bones.is_empty() && bones.size() == vertices.size() * 4 && weights.size() == vertices.size() * 4) {
+			surface["bones"] = bones;
+			surface["weights"] = weights;
+		}
 		surface["indices"] = indices;
 		result.push_back(surface);
 	}
@@ -2713,6 +2752,13 @@ Array NovaObjectData::build_lod_submeshes(int p_lod_index) const {
 		if (!tangents.is_empty() && tangents.size() == vertices.size() * 4) {
 			arrays[Mesh::ARRAY_TANGENT] = tangents;
 		}
+		const PackedInt32Array bones = surface.get("bones", PackedInt32Array());
+		const PackedFloat32Array weights = surface.get("weights", PackedFloat32Array());
+		const bool is_skinned = !bones.is_empty() && bones.size() == vertices.size() * 4 && weights.size() == vertices.size() * 4;
+		if (is_skinned) {
+			arrays[Mesh::ARRAY_BONES] = bones;
+			arrays[Mesh::ARRAY_WEIGHTS] = weights;
+		}
 		arrays[Mesh::ARRAY_INDEX] = surface.get("indices", PackedInt32Array());
 
 		Ref<ArrayMesh> mesh;
@@ -2735,6 +2781,7 @@ Array NovaObjectData::build_lod_submeshes(int p_lod_index) const {
 		entry["material_index"] = material_array_index;
 		entry["source_material_index"] = surface.get("material_index", material_array_index);
 		entry["is_alpha"] = prim_index < lod.primitive_count ? primitive_is_alpha(lod, prim_index) : false;
+		entry["is_skinned"] = is_skinned;
 		entry["mesh"] = mesh;
 		entry["abs"] = abs;
 		entry["parent_index"] = parent_index;

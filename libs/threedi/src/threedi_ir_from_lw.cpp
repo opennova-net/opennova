@@ -6,7 +6,9 @@
 // out grouped by part/material. Large groups are split so uint16 indices remain
 // local to each primitive.
 //
-// Per-face material is resolved face -> surface_index -> surface.material_index.
+// Per-face material is resolved face -> surface_index -> named surface. Variant
+// surfaces use selector bytes at +0x34 to match material selector_id at +0x28;
+// name and surface.material_index are fallbacks for plain records.
 
 #include "threedi/threedi_ir.h"
 #include "threedi/threedi_lw.h"
@@ -16,15 +18,54 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Provisional fixed-point scales (tunable against rendered output, see
-// notes/3di-lw/lw-3di-format.md open items). Positions match the GP collision
-// vertex scale (int / 256). Normals are int16 directions; UVs assumed 16.16.
+// Geometry vertices use 24.8 fixed-point. Sub-object pivots are 16.16 rest
+// skeleton pivots for flag-1 LODs. Those vertices are already in model/rest
+// space; vertex.w selects the skeleton part used for the emitted bone weight.
 static const float LW_POS_SCALE = 1.0f / 256.0f;
+static const float LW_PART_POS_SCALE = 1.0f / 65536.0f;
 static const float LW_UV_SCALE  = 1.0f / 65536.0f;
 
-static int resolve_face_material(const ThreediLwLod *lod, const ThreediLwFace *f,
-                                 uint32_t material_count, uint32_t *out) {
-    if (material_count == 0) {
+static void lw_raw_to_ir(float out[3], float x, float y, float z, float scale) {
+    // LW vertices are stored in the same Z-up source frame used before the
+    // OED/ASE/newer-3DI conversion path. The authored LW model frame uses +X as
+    // forward; after the Godot adapter's IR-X mirror this yields Godot +Z
+    // forward and +Y up: raw x/y/z -> IR -y/z/x.
+    out[0] = -y * scale;
+    out[1] = z * scale;
+    out[2] = x * scale;
+}
+
+static int ascii_lower(int c) {
+    return (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c;
+}
+
+static int name_ieq(const char *a, const char *b) {
+    if (!a || !b || !a[0] || !b[0]) return 0;
+    while (*a && *b) {
+        if (ascii_lower((unsigned char)*a) != ascii_lower((unsigned char)*b)) return 0;
+        ++a;
+        ++b;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static int hidden_surface_name(const char *name) {
+    return name_ieq(name, "DONTDRAW.PCX") || name_ieq(name, "DONTDRAW.TGA") || name_ieq(name, "NoName");
+}
+
+static int material_matches_surface(const ThreediLwMaterial *mat, const char *surface_name) {
+    return name_ieq(surface_name, mat->tex_name_0) || name_ieq(surface_name, mat->tex_name_1);
+}
+
+static int material_matches_selector(const ThreediLwMaterial *mat, uint8_t selector) {
+    return mat->selector_id == (uint16_t)selector;
+}
+
+// Returns 0 when a render material was resolved, 1 when the face should be
+// skipped, and -1 for structurally invalid face/surface references.
+static int resolve_face_material(const ThreediLwFile *lw, const ThreediLwLod *lod,
+                                 const ThreediLwFace *f, uint32_t *out) {
+    if (!lw || lw->material_count == 0) {
         *out = 0;
         return 0;
     }
@@ -32,38 +73,96 @@ static int resolve_face_material(const ThreediLwLod *lod, const ThreediLwFace *f
         f->surface_index < 0 || (uint32_t)f->surface_index >= lod->surface_count) {
         return -1;
     }
-    uint32_t mat = (uint32_t)lod->surfaces[f->surface_index].material_index;
-    *out = mat < material_count ? mat : 0;
+    const ThreediLwSurface *surface = &lod->surfaces[f->surface_index];
+    if (hidden_surface_name(surface->name)) return 1;
+
+    if ((surface->flags & (0x1u | 0x8000u)) != 0) {
+        uint8_t selector = surface->material_selectors[0];
+        for (uint32_t i = 0; i < lw->material_count; ++i) {
+            if (material_matches_selector(&lw->materials[i], selector)) {
+                *out = i;
+                return 0;
+            }
+        }
+    }
+
+    for (uint32_t i = 0; i < lw->material_count; ++i) {
+        if (material_matches_surface(&lw->materials[i], surface->name)) {
+            *out = i;
+            return 0;
+        }
+    }
+
+    uint32_t mat = (uint32_t)surface->material_index;
+    if (mat >= lw->material_count) return 1;
+    *out = mat;
     return 0;
 }
 
-static void set_ir_vertex(ThreediIRVertex *dv, const ThreediLwLod *lod,
-                          uint32_t vidx, uint32_t nidx, int has_normal,
-                          int32_t u, int32_t v) {
+static int set_ir_vertex(ThreediIRVertex *dv, const ThreediLwLod *lod,
+                         uint32_t vidx, uint32_t nidx, int has_normal,
+                         int32_t u, int32_t v, uint8_t local_bone_index) {
     const ThreediLwVertex *sv = &lod->vertices[vidx];
-    dv->position[0] = (float)sv->x * LW_POS_SCALE;
-    dv->position[1] = (float)sv->y * LW_POS_SCALE;
-    dv->position[2] = (float)sv->z * LW_POS_SCALE;
+    int32_t x = sv->x;
+    int32_t y = sv->y;
+    int32_t z = sv->z;
+
+    if ((lod->flags & 1u) != 0 && lod->subobjects && lod->subobject_count > 0) {
+        if (sv->w < 0 || (uint32_t)sv->w >= lod->subobject_count) return -1;
+    }
+
+    lw_raw_to_ir(dv->position, (float)x, (float)y, (float)z, LW_POS_SCALE);
 
     if (has_normal && lod->normals && lod->normal_count) {
         const ThreediLwVertex *sn = &lod->normals[nidx];
         float nx = (float)sn->x, ny = (float)sn->y, nz = (float)sn->z;
         float len = sqrtf(nx * nx + ny * ny + nz * nz);
-        if (len > 0.0f) { dv->normal[0] = nx / len; dv->normal[1] = ny / len; dv->normal[2] = nz / len; }
-        else            { dv->normal[2] = 1.0f; }
+        if (len > 0.0f) { lw_raw_to_ir(dv->normal, nx, ny, nz, 1.0f / len); }
+        else            { dv->normal[1] = 1.0f; }
     } else {
-        dv->normal[2] = 1.0f;
+        dv->normal[1] = 1.0f;
     }
 
     dv->uv0[0] = (float)u * LW_UV_SCALE;
     dv->uv0[1] = (float)v * LW_UV_SCALE;
     dv->bone_weights[0] = 1.0f;
+    dv->bone_indices[0] = local_bone_index;
+    return 0;
 }
 
-// Build IR parts from the LW sub-objects (the rigid-part skeleton). Sets
-// parent_index, abs_position (rest pose), and rel_position (parent-relative).
+static int source_vertex_bone(const ThreediLwLod *lod, uint32_t vidx, uint32_t owning_part, uint8_t *out) {
+    if ((lod->flags & 1u) != 0 && lod->subobjects && lod->subobject_count > 0) {
+        const ThreediLwVertex *sv = &lod->vertices[vidx];
+        if (sv->w < 0 || (uint32_t)sv->w >= lod->subobject_count) return -1;
+        *out = (uint8_t)sv->w;
+        return 0;
+    }
+    *out = (uint8_t)owning_part;
+    return 0;
+}
+
+static int find_bone_slot(const uint8_t *bone_table, uint8_t bone_count, uint8_t bone) {
+    for (uint8_t i = 0; i < bone_count; ++i) {
+        if (bone_table[i] == bone) return (int)i;
+    }
+    return -1;
+}
+
+static int add_bone_to_table(uint8_t *bone_table, uint8_t *bone_count, uint8_t bone) {
+    int slot = find_bone_slot(bone_table, *bone_count, bone);
+    if (slot >= 0) return slot;
+    if (*bone_count >= 16) return -1;
+    slot = (int)*bone_count;
+    bone_table[*bone_count] = bone;
+    ++(*bone_count);
+    return slot;
+}
+
+// Build IR parts from the LW sub-objects. Flag-1 LODs use these as skeleton
+// rest pivots; flag-0 LODs render with identity part transforms.
 static int build_parts(const ThreediLwLod *src, ThreediIRLod *dst, uint32_t *out_part_count) {
     uint32_t part_count = src->subobject_count ? src->subobject_count : 1;
+    int local_space = (src->flags & 1u) != 0;
     dst->part_count = part_count;
     dst->declared_part_count = (int32_t)part_count;
     dst->parts = (ThreediIRPart *)calloc(part_count, sizeof(ThreediIRPart));
@@ -76,13 +175,14 @@ static int build_parts(const ThreediLwLod *src, ThreediIRLod *dst, uint32_t *out
             const ThreediLwSubObject *so = &src->subobjects[s];
             int pp = so->parent;
             if (pp >= 0 && (uint32_t)pp < part_count && (uint32_t)pp != s) p->parent_index = pp;
-            p->abs_position[0] = (float)so->pos[0] * LW_POS_SCALE;
-            p->abs_position[1] = (float)so->pos[1] * LW_POS_SCALE;
-            p->abs_position[2] = (float)so->pos[2] * LW_POS_SCALE;
+            if (local_space) {
+                lw_raw_to_ir(p->abs_position, (float)so->pos[0], (float)so->pos[1], (float)so->pos[2],
+                             LW_PART_POS_SCALE);
+            }
         }
     }
-    // rel_position = abs - parent_abs (parents always precede children here, but
-    // we read parent abs directly so order does not matter).
+    // rel_position = abs - parent_abs for local-space LODs. For flag-0 LODs,
+    // abs positions are identity, so rel positions stay zero as well.
     for (uint32_t s = 0; s < part_count; ++s) {
         ThreediIRPart *p = &dst->parts[s];
         if (p->parent_index >= 0) {
@@ -97,7 +197,8 @@ static int build_parts(const ThreediLwLod *src, ThreediIRLod *dst, uint32_t *out
 }
 
 static void finalize_primitive(ThreediIRLod *dst, size_t prim_idx, size_t vertex_start,
-                               size_t vertex_count, uint32_t material, uint32_t part) {
+                               size_t vertex_count, uint32_t material, uint32_t part,
+                               const uint8_t *bone_table, uint8_t bone_count) {
     ThreediIRPrimitive *p = &dst->primitives[prim_idx];
     p->material_index = (int32_t)material;
     p->part_index = (int32_t)part;
@@ -106,8 +207,10 @@ static void finalize_primitive(ThreediIRLod *dst, size_t prim_idx, size_t vertex
     p->vertex_offset = (uint32_t)vertex_start;
     p->vertex_count = (uint32_t)vertex_count;
     p->topology = THREEDI_IR_TOPOLOGY_TRIANGLES;
-    p->bone_table[0] = (uint8_t)part;
-    p->bone_table_length = 1;
+    if (bone_count > 0 && bone_table) {
+        memcpy(p->bone_table, bone_table, bone_count);
+        p->bone_table_length = bone_count;
+    }
 
     const ThreediIRVertex *first = &dst->vertices[vertex_start];
     for (int k = 0; k < 3; ++k) {
@@ -174,6 +277,7 @@ static int convert_lod(const ThreediLwFile *lw, const ThreediLwLod *src,
 
     uint32_t mat_count = lw->material_count ? lw->material_count : 1;
     uint32_t part_count = 0;
+    int skinned_lod = (src->flags & 1u) != 0;
     if (build_parts(src, dst, &part_count) != 0) return -1;
     if (part_count > 255) return -1;
 
@@ -203,36 +307,90 @@ static int convert_lod(const ThreediLwFile *lw, const ThreediLwLod *src,
         for (uint32_t m = 0; m < mat_count; ++m) {
             size_t pstart = cursor;
             uint32_t local_index = 0;
+            uint8_t bone_table[16];
+            uint8_t bone_count = 0;
+            memset(bone_table, 0, sizeof(bone_table));
             for (size_t fi = fstart; fi < fend; ++fi) {
                 const ThreediLwFace *f = &src->faces[fi];
                 uint32_t face_mat = 0;
-                if (resolve_face_material(src, f, lw->material_count, &face_mat) != 0) return -1;
+                int mat_rc = resolve_face_material(lw, src, f, &face_mat);
+                if (mat_rc < 0) return -1;
+                if (mat_rc > 0) continue;
                 if (face_mat != m) continue;
 
                 if (local_index + 3 > 65535u) {
-                    finalize_primitive(dst, prim++, pstart, local_index, m, s);
+                    finalize_primitive(dst, prim++, pstart, local_index, m, s,
+                                       skinned_lod ? bone_table : NULL,
+                                       skinned_lod ? bone_count : 0);
                     pstart = cursor;
                     local_index = 0;
+                    bone_count = 0;
+                    memset(bone_table, 0, sizeof(bone_table));
                 }
 
-                for (int k = 0; k < 3; ++k) {
+                const int corner_order[3] = {0, 2, 1};
+                uint32_t corner_vidx[3] = {0, 0, 0};
+                uint32_t corner_nidx[3] = {0, 0, 0};
+                int corner_has_normal[3] = {0, 0, 0};
+                uint8_t corner_bone[3] = {0, 0, 0};
+                for (int oi = 0; oi < 3; ++oi) {
+                    int k = corner_order[oi];
                     if (f->vertex[k] < 0 || (uint32_t)f->vertex[k] >= pv) return -1;
-                    uint32_t nidx = 0;
-                    int has_normal = 0;
+                    corner_vidx[oi] = (uint32_t)(vertex_base + (uint32_t)f->vertex[k]);
                     if (pn > 0) {
                         if (f->normal[k] < 0 || (uint32_t)f->normal[k] >= pn) return -1;
-                        nidx = (uint32_t)(normal_base + (uint32_t)f->normal[k]);
-                        has_normal = 1;
+                        corner_nidx[oi] = (uint32_t)(normal_base + (uint32_t)f->normal[k]);
+                        corner_has_normal[oi] = 1;
                     }
-                    uint32_t vidx = (uint32_t)(vertex_base + (uint32_t)f->vertex[k]);
-                    set_ir_vertex(&dst->vertices[cursor], src, vidx, nidx, has_normal, f->u[k], f->v[k]);
+                    if (source_vertex_bone(src, corner_vidx[oi], s, &corner_bone[oi]) != 0) return -1;
+                }
+
+                if (skinned_lod) {
+                    uint8_t trial_table[16];
+                    uint8_t trial_count = bone_count;
+                    memcpy(trial_table, bone_table, sizeof(trial_table));
+                    int overflow = 0;
+                    for (int oi = 0; oi < 3; ++oi) {
+                        if (add_bone_to_table(trial_table, &trial_count, corner_bone[oi]) < 0) {
+                            overflow = 1;
+                            break;
+                        }
+                    }
+                    if (overflow) {
+                        if (local_index == 0) return -1;
+                        finalize_primitive(dst, prim++, pstart, local_index, m, s, bone_table, bone_count);
+                        pstart = cursor;
+                        local_index = 0;
+                        bone_count = 0;
+                        memset(bone_table, 0, sizeof(bone_table));
+                        for (int oi = 0; oi < 3; ++oi) {
+                            if (add_bone_to_table(bone_table, &bone_count, corner_bone[oi]) < 0) return -1;
+                        }
+                    } else {
+                        memcpy(bone_table, trial_table, sizeof(bone_table));
+                        bone_count = trial_count;
+                    }
+                }
+
+                for (int oi = 0; oi < 3; ++oi) {
+                    int k = corner_order[oi];
+                    uint8_t local_bone_index = 0;
+                    if (skinned_lod) {
+                        int slot = find_bone_slot(bone_table, bone_count, corner_bone[oi]);
+                        if (slot < 0) return -1;
+                        local_bone_index = (uint8_t)slot;
+                    }
+                    if (set_ir_vertex(&dst->vertices[cursor], src, corner_vidx[oi], corner_nidx[oi],
+                                      corner_has_normal[oi], f->u[k], f->v[k], local_bone_index) != 0) return -1;
                     dst->indices[cursor] = (uint16_t)local_index;
                     cursor++;
                     local_index++;
                 }
             }
             if (local_index > 0) {
-                finalize_primitive(dst, prim++, pstart, local_index, m, s);
+                finalize_primitive(dst, prim++, pstart, local_index, m, s,
+                                   skinned_lod ? bone_table : NULL,
+                                   skinned_lod ? bone_count : 0);
             }
         }
         dst->parts[s].primitive_count = (int32_t)prim - dst->parts[s].primitive_start;

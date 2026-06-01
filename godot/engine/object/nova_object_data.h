@@ -139,6 +139,7 @@ public:
 	bool set_part_anim_field(int p_lod_index, int p_anim_index, const String &p_key, const Variant &p_value);
 	bool set_part_anim_track_field(int p_lod_index, int p_anim_index, const String &p_track, const String &p_key, const Variant &p_value);
 	Dictionary get_render_lod_info(int p_lod_index) const;
+	Array get_render_parts(int p_lod_index) const;
 	Array build_lod_submeshes(int p_lod_index) const;
 	Dictionary eval_material_runtime(int p_index, int p_time_ms, const Dictionary &p_ctrl_values) const;
 	int compute_anim_frame(int p_index, int p_time_ms, const Dictionary &p_ctrl_values) const;

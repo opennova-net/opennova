@@ -123,6 +123,7 @@ static ThreediLwSurface *read_v10_surfaces(const uint8_t *p, uint32_t count) {
         s->flags          = rd_u32(r + 0x10);
         s->material_index = rd_u16(r + 0x18);
         s->anim_frames    = r[0x1E];
+        memcpy(s->material_selectors, r + 0x34, sizeof(s->material_selectors));
     }
     return out;
 }
@@ -248,6 +249,7 @@ static int parse_v10(const uint8_t *data, size_t len, ThreediLwFile *out) {
             copy_name(mat->tex_name_0, sizeof(mat->tex_name_0), rec + 0x00, 16);
             copy_name(mat->tex_name_1, sizeof(mat->tex_name_1), rec + 0x10, 16);
             mat->group_id   = rd_u32(rec + 0x24);
+            mat->selector_id = rd_u16(rec + 0x28);
             mat->flags      = rd_u16(rec + 0x2A);
             mat->tex_width  = rd_u16(rec + 0x2C);
             mat->tex_height = rd_u16(rec + 0x2E);

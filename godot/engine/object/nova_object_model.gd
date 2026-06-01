@@ -26,6 +26,9 @@ var object_data: NovaObjectData
 var _material_cache: Dictionary = {}
 var _material_defs: Dictionary = {}
 var _robj_nodes: Dictionary = {}
+var _skeleton_node: Skeleton3D
+var _skeleton_skin: Skin
+var _skinned_mesh_instances: Array[MeshInstance3D] = []
 var _surface_material_indices: PackedInt32Array = PackedInt32Array()
 var _surface_materials: Array[ShaderMaterial] = []
 var _anim_frames_by_mat: Dictionary = {}
@@ -137,6 +140,9 @@ func rebuild() -> void:
 		remove_child(child)
 		child.queue_free()
 	_robj_nodes.clear()
+	_skeleton_node = null
+	_skeleton_skin = null
+	_skinned_mesh_instances.clear()
 	_surface_material_indices.clear()
 	_surface_materials.clear()
 	_anim_frames_by_mat.clear()
@@ -151,6 +157,15 @@ func rebuild() -> void:
 	var submeshes: Array = object_data.build_lod_submeshes(_active_lod) if object_data.has_method("build_lod_submeshes") else []
 	if submeshes.is_empty():
 		submeshes = _legacy_submeshes_from_surfaces(_active_lod)
+	var has_skinned_meshes := false
+	for entry in submeshes:
+		if entry is Dictionary and bool((entry as Dictionary).get("is_skinned", false)):
+			has_skinned_meshes = true
+			break
+	if has_skinned_meshes:
+		_skeleton_node = _build_skeleton(_active_lod)
+		if _skeleton_node != null:
+			_skeleton_skin = _skeleton_node.create_skin_from_rest_transforms()
 	for entry in submeshes:
 		var submesh: Dictionary = entry
 		var mesh := submesh.get("mesh") as ArrayMesh
@@ -158,12 +173,18 @@ func rebuild() -> void:
 			continue
 		var robj_index := int(submesh.get("robj_index", submesh.get("part_index", 0)))
 		var material_index := int(submesh.get("material_index", 0))
-		var node := _get_or_create_robj_node(robj_index)
 		var instance := MeshInstance3D.new()
 		instance.mesh = mesh
 		var material := _material_for_index(material_index)
 		instance.material_override = material
-		node.add_child(instance)
+		if bool(submesh.get("is_skinned", false)) and _skeleton_node != null and _skeleton_skin != null:
+			add_child(instance)
+			instance.skeleton = instance.get_path_to(_skeleton_node)
+			instance.skin = _skeleton_skin
+			_skinned_mesh_instances.append(instance)
+		else:
+			var node := _get_or_create_robj_node(robj_index)
+			node.add_child(instance)
 		_surface_material_indices.append(material_index)
 		_surface_materials.append(material)
 		_collect_anim_frames(material_index)
@@ -247,6 +268,33 @@ func _get_or_create_robj_node(robj_index: int) -> Node3D:
 	return node
 
 
+func _build_skeleton(lod_index: int) -> Skeleton3D:
+	if object_data == null or not object_data.has_method("get_render_parts"):
+		return null
+	var parts: Array = object_data.get_render_parts(lod_index)
+	if parts.is_empty():
+		return null
+	var skeleton := Skeleton3D.new()
+	skeleton.name = "LwSkeleton"
+	add_child(skeleton)
+	for i in range(parts.size()):
+		var part: Dictionary = parts[i]
+		var part_index := int(part.get("index", i))
+		skeleton.add_bone("Part_%d" % part_index)
+	for i in range(parts.size()):
+		var part: Dictionary = parts[i]
+		var parent_index := int(part.get("parent_index", -1))
+		if parent_index >= 0 and parent_index < parts.size() and parent_index != i:
+			skeleton.set_bone_parent(i, parent_index)
+	for i in range(parts.size()):
+		var part: Dictionary = parts[i]
+		var rel: Vector3 = part.get("rel", Vector3.ZERO)
+		skeleton.set_bone_rest(i, Transform3D(Basis(), rel))
+	skeleton.reset_bone_poses()
+	skeleton.force_update_all_bone_transforms()
+	return skeleton
+
+
 func _compute_transformed_mesh_bounds() -> AABB:
 	var bounds := AABB()
 	var has_bounds := false
@@ -266,6 +314,15 @@ func _compute_transformed_mesh_bounds() -> AABB:
 				var local_aabb: AABB = model_inverse * (instance.global_transform * mesh_aabb)
 				bounds = local_aabb if not has_bounds else bounds.merge(local_aabb)
 				has_bounds = true
+	for instance in _skinned_mesh_instances:
+		if instance == null or instance.mesh == null:
+			continue
+		var mesh_aabb := instance.mesh.get_aabb()
+		if mesh_aabb.size == Vector3.ZERO:
+			continue
+		var local_aabb: AABB = model_inverse * (instance.global_transform * mesh_aabb)
+		bounds = local_aabb if not has_bounds else bounds.merge(local_aabb)
+		has_bounds = true
 	return bounds
 
 
@@ -300,9 +357,18 @@ func _apply_runtime_state(delta: float) -> void:
 
 
 func _apply_robj_transforms() -> void:
-	if object_data == null or not object_data.has_method("evaluate_panm") or _robj_nodes.is_empty():
+	if object_data == null or not object_data.has_method("evaluate_panm"):
+		return
+	if _robj_nodes.is_empty() and _skeleton_node == null:
 		return
 	var transforms: Dictionary = object_data.evaluate_panm(_active_lod, _anim_time_ms, _ctrl_values)
+	if _skeleton_node != null:
+		for bone_index in range(_skeleton_node.get_bone_count()):
+			if transforms.has(bone_index):
+				_skeleton_node.set_bone_global_pose(bone_index, transforms[bone_index])
+			else:
+				_skeleton_node.reset_bone_pose(bone_index)
+		_skeleton_node.force_update_all_bone_transforms()
 	for key in transforms.keys():
 		var robj_index := int(key)
 		if _robj_nodes.has(robj_index):
@@ -331,6 +397,8 @@ func _apply_lights() -> void:
 	if subobject >= 0 and _robj_nodes.has(subobject):
 		var node := _robj_nodes[subobject] as Node3D
 		position = node.global_transform * position
+	elif subobject >= 0 and _skeleton_node != null and subobject < _skeleton_node.get_bone_count():
+		position = _skeleton_node.get_bone_global_pose(subobject) * position
 	for material in _surface_materials:
 		if material == null:
 			continue

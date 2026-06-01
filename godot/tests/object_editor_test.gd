@@ -13,6 +13,7 @@ const DVAN_FIXTURE := "res://../fixtures/3dp/dapche2/dapche2.3di"
 const ARMRY_FIXTURE := "res://../fixtures/3dp/armry01/Armry01.3di"
 const ARMRY_TEXTURE_FIXTURE := "res://../fixtures/3dp/armry01/KArm1_O.TGA"
 const LW_ARBLU_FIXTURE := "res://../fixtures/threedi/lw/ARBLU.3DI"
+const LW_BADGUY_FIXTURE := "res://../fixtures/threedi/lw/BADGUY.3DI"
 const US01_PROJECT_FIXTURE := "res://../fixtures/3dp/US01_onimport/US01.3dp"
 const FULL_00_ENV := "res://../fixtures/env/full_00.env"
 const OUTPUT_DIR_NAME := "object_editor_export_test"
@@ -68,6 +69,49 @@ func test_object_data_opens_lw_v10_3di_as_ir_document() -> void:
 	assert_eq(int(summary.get("material_count", 0)), 1, "LW fixture should expose its material.")
 	assert_false(data.can_export_3di(), "LW imports should not expose 3DI export.")
 	assert_false(data.get_lod_surfaces(0).is_empty(), "LW fixture should expose preview mesh surfaces.")
+
+
+func test_lw_badguy_submeshes_carry_skinning_arrays() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(LW_BADGUY_FIXTURE)), OK)
+
+	var submeshes: Array = data.build_lod_submeshes(0)
+	assert_false(submeshes.is_empty(), "BADGUY should build preview submeshes.")
+	var found_skinned := false
+	for submesh in submeshes:
+		var entry: Dictionary = submesh
+		var mesh := entry.get("mesh") as ArrayMesh
+		if mesh == null:
+			continue
+		var arrays: Array = mesh.surface_get_arrays(0)
+		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var bones: PackedInt32Array = arrays[Mesh.ARRAY_BONES]
+		var weights: PackedFloat32Array = arrays[Mesh.ARRAY_WEIGHTS]
+		if not bones.is_empty() or not weights.is_empty():
+			assert_eq(bones.size(), vertices.size() * 4, "Skinned LW meshes should provide 4 bone indices per vertex.")
+			assert_eq(weights.size(), vertices.size() * 4, "Skinned LW meshes should provide 4 bone weights per vertex.")
+			found_skinned = true
+	assert_true(found_skinned, "BADGUY should expose skinned mesh arrays.")
+
+
+func test_lw_badguy_preview_builds_skeleton() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(LW_BADGUY_FIXTURE)), OK)
+	var model = add_child_autofree(NovaObjectModelScript.new())
+	model.set_object_data(data)
+	await get_tree().process_frame
+
+	var skeleton := _find_node_by_type(model, "Skeleton3D") as Skeleton3D
+	assert_not_null(skeleton, "BADGUY preview should build a Skeleton3D.")
+	if skeleton == null:
+		return
+	assert_eq(skeleton.get_bone_count(), 15, "BADGUY skeleton should contain all LW subobjects.")
+	var mesh_instance := _find_node_by_type(model, "MeshInstance3D") as MeshInstance3D
+	assert_not_null(mesh_instance, "BADGUY preview should build skinned mesh instances.")
+	if mesh_instance != null:
+		assert_false(mesh_instance.skeleton.is_empty(), "Skinned BADGUY mesh should reference the skeleton.")
+		assert_not_null(mesh_instance.skin, "Skinned BADGUY mesh should have a Skin resource.")
+	assert_gt(model.get_model_bounds().size.length(), 0.0, "Skinned BADGUY preview should expose non-empty bounds.")
 
 
 func test_object_shader_catalog_exposes_oed_slot_flags() -> void:
