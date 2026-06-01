@@ -52,6 +52,11 @@ var _selected_ref: Dictionary = {}
 # node, plus its tracked container-local transform and authored rotation (degrees).
 var _selected_records: Array = []
 var _selected_node: Node3D
+# For an animated selection, the model's ground-anchor offset (Transform3D applied
+# as node.transform = entity_xform * offset). Static entities bake the same offset
+# into each MultiMesh instance via the pickable record, so it only needs tracking
+# for the animated-node path. IDENTITY when nothing animated is selected.
+var _selected_node_offset: Transform3D = Transform3D.IDENTITY
 var _selected_xform: Transform3D = Transform3D.IDENTITY
 var _selected_rotation_deg: Vector3 = Vector3.ZERO
 # Drag session: _drag_active spans press..release; _drag_moved gates the commit so a
@@ -705,6 +710,7 @@ func _select(kind: int, index: int) -> void:
 	_selected_ref = { "kind": kind, "index": index }
 	_selected_records = []
 	_selected_node = null
+	_selected_node_offset = Transform3D.IDENTITY
 	for rec in _pickable:
 		if int(rec["kind"]) == kind and int(rec["index"]) == index:
 			# Skip records whose backing node was freed (e.g. a re-bake mid-flight): a stale
@@ -714,6 +720,7 @@ func _select(kind: int, index: int) -> void:
 				var node = rec.get("node")
 				if node != null and is_instance_valid(node):
 					_selected_node = node
+					_selected_node_offset = rec.get("offset", Transform3D.IDENTITY)
 			else:
 				var mmi = rec.get("mmi")
 				if mmi != null and is_instance_valid(mmi):
@@ -732,6 +739,7 @@ func _deselect() -> void:
 	_selected_ref = {}
 	_selected_records = []
 	_selected_node = null
+	_selected_node_offset = Transform3D.IDENTITY
 	_hide_selection_box()
 	changed.emit()
 
@@ -753,7 +761,9 @@ func _move_selected_to_world(global_hit: Vector3) -> void:
 func _apply_selected_xform(xform: Transform3D) -> void:
 	_selected_xform = xform
 	if _selected_node != null:
-		_selected_node.transform = _selected_xform
+		# The anchor offset rides the node so the dragged model keeps its ground point
+		# under the cursor, matching how it was first placed.
+		_selected_node.transform = _selected_xform * _selected_node_offset
 	else:
 		for rec in _selected_records:
 			var mm: MultiMesh = rec["mm"]
@@ -1097,6 +1107,7 @@ func set_waypoint_mode(enabled: bool) -> void:
 	_selected_ref = {}
 	_selected_records = []
 	_selected_node = null
+	_selected_node_offset = Transform3D.IDENTITY
 	_hide_selection_box()
 	_selected_marker = {}
 	_place_item_id = 0
@@ -1709,6 +1720,7 @@ func _reset_selection_state() -> void:
 	_selected_ref = {}
 	_selected_records = []
 	_selected_node = null
+	_selected_node_offset = Transform3D.IDENTITY
 	_selected_xform = Transform3D.IDENTITY
 	_selected_rotation_deg = Vector3.ZERO
 	_drag_active = false

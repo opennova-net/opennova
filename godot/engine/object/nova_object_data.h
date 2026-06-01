@@ -130,6 +130,7 @@ public:
 	bool set_light_field(int p_index, const String &p_key, const Variant &p_value);
 	int get_user_point_count() const;
 	Dictionary get_user_point_info(int p_index) const;
+	Vector3 get_ground_anchor(int p_lod_index = 0) const;
 	int get_part_anim_count(int p_lod_index) const;
 	Array get_part_animations(int p_lod_index) const;
 	Array get_part_anim_editor_entries(int p_lod_index) const;
