@@ -205,6 +205,7 @@ func _build_behavior_section() -> void:
 	_behavior_toggle = CheckButton.new()
 	_behavior_toggle.name = "MissionBehaviorToggle"
 	_behavior_toggle.text = "Behavior"
+	_behavior_toggle.tooltip_text = "Per-unit AI and waypoint settings (these mainly drive organic units at runtime)."
 	_behavior_toggle.button_pressed = false
 	_edit_box.add_child(_behavior_toggle)
 
@@ -216,32 +217,94 @@ func _build_behavior_section() -> void:
 	_behavior_toggle.toggled.connect(func(on: bool) -> void: _behavior_box.visible = on)
 
 	# Waypoint path (waypoint_id) is the bridge: it names which authored path a unit follows.
-	_add_behavior_spin("waypoint_id", "Waypoint path", 0.0, 127.0)
+	var wp_spin := _add_behavior_spin("waypoint_id", "Waypoint path", 0.0, 127.0)
+	wp_spin.tooltip_text = "Which waypoint path this unit follows. Author paths in the Waypoints tab."
 	_add_behavior_spin("wp_number", "WP number", 0.0, 255.0)
 	ObjectUiHelpers.add_section_heading(_behavior_box, "Combat")
 	_add_behavior_spin("perception", "Perception", -1000000.0, 1000000.0)
 	_add_behavior_spin("accuracy", "Accuracy", -32768.0, 32767.0)
 	_add_behavior_spin("alert_state", "Alert state", 0.0, 255.0)
-	_add_behavior_spin("min_engagement_distance", "Min engage", -1000000.0, 1000000.0)
-	_add_behavior_spin("max_engagement_distance", "Max engage", -1000000.0, 1000000.0)
-	_add_behavior_spin("max_attack_distance", "Max attack", -1000000.0, 1000000.0)
+	_add_behavior_spin("min_engagement_distance", "Min combat range", -1000000.0, 1000000.0)
+	_add_behavior_spin("max_engagement_distance", "Max combat range", -1000000.0, 1000000.0)
+	_add_behavior_spin("max_attack_distance", "Max attack range", -1000000.0, 1000000.0)
 	ObjectUiHelpers.add_section_heading(_behavior_box, "Spawning")
 	_add_behavior_spin("spawn_count", "Spawn count", -32768.0, 32767.0)
 	_add_behavior_spin("max_simultaneous", "Max at once", 0.0, 255.0)
 	ObjectUiHelpers.add_section_heading(_behavior_box, "Flags")
-	_add_behavior_spin("ai_flags", "AI flags", 0.0, 4294967295.0)
+	# A 32-bit bitfield: a decimal field is unreadable, so author it as hexadecimal.
+	_add_behavior_line("ai_flags", "AI flags",
+		func(info) -> String: return "0x%08X" % (int(info.get("ai_flags", 0)) & 0xFFFFFFFF),
+		func(text: String) -> void: _ai_flags_set(text),
+		"Bitfield of unit AI flags, in hexadecimal (e.g. 0x0000000A). Press Enter to apply.")
 
 
-func _add_behavior_spin(property: String, label: String, min_value: float, max_value: float) -> void:
+func _add_behavior_spin(property: String, label: String, min_value: float, max_value: float) -> SpinBox:
 	var spin := ObjectUiHelpers.add_spin_row(_behavior_box, "MissionBeh_" + property, label, min_value, max_value, 1.0)
 	_behavior_binder.bind_spin(spin,
 		func(info): return float(int(info.get(property, 0))),
 		func(value: float) -> void: _behavior_set(property, value))
+	return spin
+
+
+# A text field bound through the FieldBinder (Enter to apply), for a property that reads
+# better as text than a number. Used for the ai_flags bitfield, shown as hexadecimal.
+func _add_behavior_line(property: String, label: String, getter: Callable, setter: Callable, tooltip: String = "") -> LineEdit:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_behavior_box.add_child(row)
+	var lbl := Label.new()
+	lbl.text = label
+	lbl.tooltip_text = tooltip if not tooltip.is_empty() else label
+	lbl.clip_text = true
+	lbl.custom_minimum_size = Vector2(76, 0)
+	row.add_child(lbl)
+	var line := LineEdit.new()
+	line.name = "MissionBeh_" + property
+	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if not tooltip.is_empty():
+		line.tooltip_text = tooltip
+	row.add_child(line)
+	_behavior_binder.bind_line(line, getter, setter)
+	return line
 
 
 func _behavior_set(property: String, value: float) -> void:
 	if _controller != null:
 		_controller.set_selected_property(property, int(value))
+
+
+# Apply a hexadecimal ai_flags edit. Pass the value as a signed int32 so the engine's int
+# parameter carries the exact 32-bit pattern (the high bit becomes negative and reads back
+# as the same bits). An unparseable entry restores the field from the model rather than
+# writing garbage.
+func _ai_flags_set(text: String) -> void:
+	if _controller == null:
+		return
+	var parsed := _parse_uint32(text)
+	if parsed < 0:
+		_behavior_binder.sync_from(_controller.get_selected_entity())
+		return
+	var signed: int = parsed if parsed < 0x80000000 else parsed - 0x100000000
+	_controller.set_selected_property("ai_flags", signed)
+
+
+# Parse a uint32 from "0x..." hex, bare hex, or decimal text. Returns -1 when the text is
+# empty, malformed, or out of the 0..0xFFFFFFFF range (the caller treats -1 as "no change").
+func _parse_uint32(text: String) -> int:
+	var t := text.strip_edges()
+	if t.is_empty():
+		return -1
+	var value := -1
+	if t.to_lower().begins_with("0x"):
+		if t.is_valid_hex_number(true):
+			value = t.hex_to_int()
+	elif t.is_valid_int():
+		value = t.to_int()
+	elif t.is_valid_hex_number(false):
+		value = ("0x" + t).hex_to_int()
+	if value < 0 or value > 0xFFFFFFFF:
+		return -1
+	return value
 
 
 func _refresh_edit_panel() -> void:

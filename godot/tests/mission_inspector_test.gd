@@ -249,6 +249,10 @@ func _spin(inspector, node_name: String) -> SpinBox:
 	return inspector.find_child(node_name, true, false) as SpinBox
 
 
+func _line(inspector, node_name: String) -> LineEdit:
+	return inspector.find_child(node_name, true, false) as LineEdit
+
+
 func test_edit_panel_is_hidden_without_a_selection() -> void:
 	var ctx := _make({})
 	assert_not_null(_spin(ctx.inspector, "MissionPosX"), "the edit spins are built up front")
@@ -319,6 +323,39 @@ func test_behavior_panel_toggle_shows_the_fields() -> void:
 	var ctx := _make(_sample_entity())
 	ctx.inspector._behavior_toggle.button_pressed = true  # emits toggled
 	assert_true(ctx.inspector._behavior_box.visible, "toggling Behavior reveals the fields")
+
+
+func test_ai_flags_is_a_hex_field_that_round_trips() -> void:
+	var entity := _sample_entity()
+	entity["ai_flags"] = 255
+	var ctx := _make(entity)
+	var line := _line(ctx.inspector, "MissionBeh_ai_flags")
+	assert_not_null(line, "ai_flags is edited as a text field, not a decimal spin")
+	assert_eq(line.text, "0x000000FF", "ai_flags reads as zero-padded hexadecimal")
+
+	line.text_submitted.emit("0x0000000A")  # simulate Enter
+	assert_eq(ctx.fake.last_property, "ai_flags", "the hex edit writes ai_flags")
+	assert_eq(ctx.fake.last_property_value, 10, "0x0A parses to 10")
+	assert_eq(line.text, "0x0000000A", "and the field re-reads the applied value")
+
+
+func test_ai_flags_high_bit_round_trips_as_signed_int32() -> void:
+	var ctx := _make(_sample_entity())
+	var line := _line(ctx.inspector, "MissionBeh_ai_flags")
+	line.text_submitted.emit("0xFFFFFFFF")
+	# Passed as signed int32 (-1) so the engine's int parameter carries all 32 bits; the
+	# model's -1 reads back as the same hex.
+	assert_eq(ctx.fake.last_property_value, -1, "the high-bit value is written as a signed int32")
+	assert_eq(line.text, "0xFFFFFFFF", "a stored -1 displays as 0xFFFFFFFF")
+
+
+func test_ai_flags_rejects_garbage_without_writing() -> void:
+	var ctx := _make(_sample_entity())  # ai_flags 0
+	var line := _line(ctx.inspector, "MissionBeh_ai_flags")
+	ctx.fake.property_calls = 0
+	line.text_submitted.emit("not hex")
+	assert_eq(ctx.fake.property_calls, 0, "an unparseable entry writes nothing")
+	assert_eq(line.text, "0x00000000", "and the field is restored to the model value")
 
 
 func test_behavior_field_commits_through_set_selected_property() -> void:
