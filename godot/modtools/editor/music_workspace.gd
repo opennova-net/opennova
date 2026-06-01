@@ -5,9 +5,9 @@ extends EditorWorkspace
 enum Workflow { BANK, SCRIPT, LIVE }
 
 const WORKFLOW_DEFS := [
-	{"id": Workflow.BANK, "label": "Bank", "tooltip": "Edit SBF tracks: reorder, rename, replace audio."},
-	{"id": Workflow.SCRIPT, "label": "Script", "tooltip": "Edit MUS bytecode as text; compile back to .bin."},
-	{"id": Workflow.LIVE, "label": "Live", "tooltip": "Drive the VM, hear transitions, tweak vars."},
+	{"id": Workflow.BANK, "label": "Bank", "tooltip": "Edit the audio tracks: reorder, rename, replace."},
+	{"id": Workflow.SCRIPT, "label": "Script", "tooltip": "Edit the music script as text and save it back."},
+	{"id": Workflow.LIVE, "label": "Live", "tooltip": "Play the music live and adjust its settings."},
 ]
 
 const RootScene = preload("res://modtools/music/ui/music_workspace_root.tscn")
@@ -150,7 +150,7 @@ func get_open_dialog_filters() -> PackedStringArray:
 	return PackedStringArray([
 		"*.sbf, *.bin ; Music project (.sbf / .bin)",
 		"*.sbf ; SBF audio bank",
-		"*.bin ; MUS bytecode",
+		"*.bin ; Music script",
 	])
 
 
@@ -172,6 +172,57 @@ func get_save_dialog_dir() -> String:
 
 func has_unsaved_changes() -> bool:
 	return _document != null and _document.is_dirty()
+
+
+# --- Edit: undo / redo capability hooks (matching Mission / MNU). The live
+# bank-edit history lives on the document (reorder / rename push do/undo pairs);
+# route by the active workflow so undo reverts the side the user is looking at.
+# Script-side undo is a no-op until Phase F (can_undo_script stays false) and
+# Live mode has nothing to revert, so the shell correctly disables the action
+# there. The Bank panel repaints off the document's `changed` signal, which the
+# undo callables emit, so the track list refreshes without extra wiring here.
+func can_undo() -> bool:
+	if _document == null:
+		return false
+	match _active_workflow:
+		Workflow.BANK:
+			return _document.can_undo_bank()
+		Workflow.SCRIPT:
+			return _document.can_undo_script()
+		_:
+			return false
+
+
+func can_redo() -> bool:
+	if _document == null:
+		return false
+	match _active_workflow:
+		Workflow.BANK:
+			return _document.can_redo_bank()
+		Workflow.SCRIPT:
+			return _document.can_redo_script()
+		_:
+			return false
+
+
+func undo() -> void:
+	if _document == null:
+		return
+	match _active_workflow:
+		Workflow.BANK:
+			_document.undo_bank()
+		Workflow.SCRIPT:
+			_document.undo_script()
+
+
+func redo() -> void:
+	if _document == null:
+		return
+	match _active_workflow:
+		Workflow.BANK:
+			_document.redo_bank()
+		Workflow.SCRIPT:
+			_document.redo_script()
 
 
 func get_current_resource_path() -> String:

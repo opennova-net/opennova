@@ -260,6 +260,30 @@ void NovaMnuDocument::touch() {
 
 // --- I/O ---
 
+namespace {
+// Absolute (screen-space) right/bottom extent of a window subtree. MNU child
+// POSITIONs are parent-relative (the builder nests child controls under the
+// parent node), so absolute coords accumulate ancestor left/top; right/bottom
+// live in the same frame as left/top.
+void accumulate_extent(const mnu::Window &w, int sum_x, int sum_y, int &max_r,
+		int &max_b) {
+	const mnu::Position &p = w.position;
+	const int r = sum_x + (p.has_right ? p.right : (p.has_left ? p.left : 0));
+	const int b = sum_y + (p.has_bottom ? p.bottom : (p.has_top ? p.top : 0));
+	if (r > max_r) {
+		max_r = r;
+	}
+	if (b > max_b) {
+		max_b = b;
+	}
+	const int origin_x = sum_x + (p.has_left ? p.left : 0);
+	const int origin_y = sum_y + (p.has_top ? p.top : 0);
+	for (const mnu::Window &c : w.children) {
+		accumulate_extent(c, origin_x, origin_y, max_r, max_b);
+	}
+}
+} // namespace
+
 Error NovaMnuDocument::load_from_bytes(const PackedByteArray &p_bytes) {
 	std::vector<uint8_t> bytes(static_cast<size_t>(p_bytes.size()));
 	if (!bytes.empty()) {
@@ -273,6 +297,21 @@ Error NovaMnuDocument::load_from_bytes(const PackedByteArray &p_bytes) {
 	}
 	doc_ = std::move(parsed);
 	rebuild_ids();
+	// Derive the design canvas from the authored content so the editor preview
+	// letterboxes real menus correctly: JO menus are 800x600, while the 640x480
+	// default only fit the older / hand-authored ones (the cause of the preview
+	// not filling its pane). The runtime ignores menu_size_; it only drives the
+	// editor fit. Leaves the default untouched if no window carries a position.
+	{
+		int max_r = 0;
+		int max_b = 0;
+		for (const mnu::Screen &s : doc_.screens) {
+			accumulate_extent(s.root_window, 0, 0, max_r, max_b);
+		}
+		if (max_r > 0 && max_b > 0) {
+			menu_size_ = Vector2i(max_r, max_b);
+		}
+	}
 	touch();
 	return OK;
 }

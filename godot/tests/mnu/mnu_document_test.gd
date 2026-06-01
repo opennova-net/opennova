@@ -4,6 +4,7 @@ extends GutTest
 # verify a serialize round-trip plus the core mutation surface.
 
 const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
+const JO_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"
 
 
 func _load_doc() -> NovaMnuDocument:
@@ -14,6 +15,24 @@ func _load_doc() -> NovaMnuDocument:
 	var err := doc.load_from_bytes(bytes)
 	assert_eq(err, OK, "load_from_bytes succeeds")
 	return doc
+
+
+func test_menu_size_derived_from_content() -> void:
+	# The design canvas is computed from the authored window extents on load, not
+	# left at the 640x480 default. The hand-authored widgets.mnu is a 640x480 menu;
+	# a real Joint Operations menu is 800x600. Deriving this is what lets the editor
+	# preview letterbox-fit the menu to its pane instead of overflowing a fixed
+	# 640x480 box (regression guard for the "preview doesn't fit" fix).
+	var widgets := _load_doc()
+	assert_eq(widgets.get_menu_size(), Vector2i(640, 480),
+		"640x480 menu derives its own size")
+
+	var jo_bytes := FileAccess.get_file_as_bytes(JO_FIXTURE)
+	assert_gt(jo_bytes.size(), 0, "jo_main fixture bytes are non-empty")
+	var jo := NovaMnuDocument.new()
+	assert_eq(jo.load_from_bytes(jo_bytes), OK, "jo_main loads")
+	assert_eq(jo.get_menu_size(), Vector2i(801, 600),
+		"real JO menu derives its 800x600 canvas, not the 640x480 default")
 
 
 func test_resource_loader_returns_document() -> void:

@@ -1359,11 +1359,13 @@ void write_window(const Window &win, std::string &out, int depth, bool pretty,
   for (const auto &snd : win.sounds) {
     write_sound(snd, out, depth + 1, pretty, indent_size);
   }
-  // List widgets serialize their ITEMS (rows + selection + MULTISELECT) in the
-  // List-specific block below. Skip the generic writer for them, otherwise a List
-  // emits two <ITEMS> elements (rows here, selection there); on re-parse
-  // win.items = parse_items(...) keeps only the last one, dropping the rows.
-  if (win.type != WindowType::List) {
+  // List and Table widgets serialize their ITEMS in the type-specific block
+  // below. Skip the generic writer for them, otherwise they emit two <ITEMS>
+  // elements (justify/rows here, selection/colors there); on re-parse the second
+  // overwrites win.items (parse_window sets win.items = parse_items(...) per
+  // ITEMS child) and the table-color extraction reads only the first <ITEMS> it
+  // finds, so the split drops justify and the selection colors on save/reload.
+  if (win.type != WindowType::List && win.type != WindowType::Table) {
     write_items(win.items, out, depth + 1, pretty, indent_size);
   }
   write_listbox(win.list_box, out, depth + 1, pretty, indent_size);
@@ -1514,24 +1516,37 @@ void write_window(const Window &win, std::string &out, int depth, bool pretty,
       append_line(out, depth + 1, "</COLUMN>", pretty, indent_size);
     }
 
-    // ITEMS element (outline/selection colors)
-    if (!td.outline_color.empty() || !td.selection_color.empty() || td.multiselect) {
+    // ITEMS element (justify/vjustify + outline/selection colors + MULTISELECT).
+    // One combined block: the generic write_items above is skipped for Table, so
+    // this is the single source of the table's ITEMS, mirroring the List path. A
+    // split (justify in an empty <ITEMS>, colors in a second) does not round-trip
+    // -- parse_window keeps only the last ITEMS for win.items and reads colors
+    // from the first, so each block would drop the other's data on save/reload.
+    {
       std::string items_attrs;
+      if (!win.items.justify.empty())
+        items_attrs += attr_pair("justify", win.items.justify);
+      if (!win.items.vjustify.empty())
+        items_attrs += attr_pair("vjustify", win.items.vjustify);
       if (td.multiselect) items_attrs += " MULTISELECT";
-      append_line(out, depth + 1, "<ITEMS" + items_attrs + ">", pretty, indent_size);
-      if (!td.outline_color.empty()) {
-        append_line(out, depth + 2,
-                    "<APPEARANCE type=\"outline\" state=\"default\">" +
-                        escape_xml(td.outline_color) + "</APPEARANCE>",
-                    pretty, indent_size);
+      if (!items_attrs.empty() || !td.outline_color.empty() ||
+          !td.selection_color.empty()) {
+        append_line(out, depth + 1, "<ITEMS" + items_attrs + ">", pretty,
+                    indent_size);
+        if (!td.outline_color.empty()) {
+          append_line(out, depth + 2,
+                      "<APPEARANCE type=\"outline\" state=\"default\">" +
+                          escape_xml(td.outline_color) + "</APPEARANCE>",
+                      pretty, indent_size);
+        }
+        if (!td.selection_color.empty()) {
+          append_line(out, depth + 2,
+                      "<APPEARANCE type=\"color\" state=\"selected\">" +
+                          escape_xml(td.selection_color) + "</APPEARANCE>",
+                      pretty, indent_size);
+        }
+        append_line(out, depth + 1, "</ITEMS>", pretty, indent_size);
       }
-      if (!td.selection_color.empty()) {
-        append_line(out, depth + 2,
-                    "<APPEARANCE type=\"color\" state=\"selected\">" +
-                        escape_xml(td.selection_color) + "</APPEARANCE>",
-                    pretty, indent_size);
-      }
-      append_line(out, depth + 1, "</ITEMS>", pretty, indent_size);
     }
 
     // MIN_ITEM_HEIGHT

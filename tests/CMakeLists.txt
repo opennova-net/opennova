@@ -458,6 +458,15 @@ target_link_libraries(mnu_unit_test PRIVATE opennova_mnu)
 target_include_directories(mnu_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mnu_unit COMMAND mnu_unit_test)
 
+# Compat sweep over real shipped .mnu menus (committed fixtures required-pass,
+# developer Desktop set skip-if-absent). Reads fixtures/mnu/ so it runs from the
+# repo root, like sbf_compat.
+add_executable(mnu_compat_test mnu/mnu_compat_test.cpp)
+target_link_libraries(mnu_compat_test PRIVATE opennova_mnu)
+target_include_directories(mnu_compat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mnu_compat COMMAND mnu_compat_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(mns_parse_test mns/mns_parse_test.cpp)
 target_link_libraries(mns_parse_test PRIVATE opennova_mns)
 target_include_directories(mns_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -2,6 +2,7 @@ extends GutTest
 
 const MusicWorkspaceAdapter = preload("res://modtools/editor/music_workspace.gd")
 const RootScene = preload("res://modtools/music/ui/music_workspace_root.tscn")
+const BANK_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"
 
 
 func test_workspace_id_and_label():
@@ -54,3 +55,25 @@ func test_workflow_activation_switches_visibility():
 	ws.activate_workflow(1)  # SCRIPT
 	assert_false(root.get_node("Bank").visible)
 	assert_true(root.get_node("Script").visible)
+
+
+func test_undo_hooks_surface_bank_history():
+	# The workspace implements the framework can_undo/undo/redo hooks (like Mission
+	# and MNU) by routing to the document's per-workflow history, so the already
+	# built bank-edit undo is reachable through the shell instead of stranded on the
+	# document. A fresh document has nothing to undo; a bank reorder becomes
+	# undoable; Live mode (no editable history) reports nothing.
+	var ws = MusicWorkspaceAdapter.new()
+	assert_false(ws.can_undo(), "fresh document: nothing to undo")
+	assert_false(ws.can_redo(), "fresh document: nothing to redo")
+
+	assert_eq(ws.open_file(BANK_FIXTURE), OK, "bank opens")
+	ws.activate_workflow(0)  # BANK
+	ws._document.reorder_track(0, 1)
+	assert_true(ws.can_undo(), "bank reorder is undoable through the workspace")
+	ws.undo()
+	assert_false(ws.can_undo(), "undo consumed the only history entry")
+	assert_true(ws.can_redo(), "redo is available after undo")
+
+	ws.activate_workflow(2)  # LIVE exposes no undo target
+	assert_false(ws.can_undo(), "Live mode exposes no undo")
