@@ -14,17 +14,29 @@ import os
 import shutil
 import tempfile
 import hashlib
+import struct
+import zlib
 from pathlib import Path
 
 from .bfc1_ffi import is_bfc1, decompress as bfc1_decompress
 from .pff_ffi import PffArchive
-from .scr_ffi import is_scr, get_version, decrypt, SCR_KEY_DEFAULT, SCR_KEY_JO_DFX2, SCR_KEY_SHADERS
+from .scr_ffi import (
+    is_scr,
+    get_version,
+    decrypt,
+    SCR_KEY_DEFAULT,
+    SCR_KEY_JO_DFX2,
+    SCR_KEY_SHADERS,
+    SCR_KEY_DFLW,
+)
 
 _SCR_VERSION_KEYS = {
     0: SCR_KEY_DEFAULT,
     1: SCR_KEY_JO_DFX2,
     2: SCR_KEY_SHADERS,
 }
+
+_LW_TEXT_EXTS = {".def", ".anm", ".aca"}
 
 TEXTURE_STRATEGY_GENERIC = "generic"
 TEXTURE_STRATEGY_3DI3_DF4OED = "3di3_df4oed"
@@ -102,14 +114,14 @@ class AssetResolver:
         self._archives.clear()
 
     def _ensure_decoded(self, key: str, path: Path) -> str:
-        """If a loose file is SCR-encrypted or BFC1-compressed, decode it to temp."""
+        """If a loose file is encoded/compressed, decode it to temp."""
         try:
             with open(path, "rb") as f:
                 header = f.read(8)
         except OSError:
             return str(path)
 
-        needs_decode = False
+        needs_decode = _is_lw_text_asset_name(key)
         if len(header) >= 4 and is_scr(header[:4]):
             needs_decode = True
         elif len(header) >= 8 and is_bfc1(header[:8]):
@@ -119,15 +131,12 @@ class AssetResolver:
             return str(path)
 
         data = path.read_bytes()
-        if len(data) >= 4 and is_scr(data[:4]):
-            ver = get_version(data[:4])
-            scr_key = _SCR_VERSION_KEYS.get(ver, SCR_KEY_DEFAULT)
-            data = decrypt(data, scr_key)
-        if len(data) >= 8 and is_bfc1(data[:8]):
-            data = bfc1_decompress(data)
+        decoded = _decode_asset_payload(key, data)
+        if decoded == data:
+            return str(path)
 
         dest = self._tmp_path / key
-        dest.write_bytes(data)
+        dest.write_bytes(decoded)
         self._extracted[key] = dest
         return str(dest)
 
@@ -152,15 +161,7 @@ class AssetResolver:
         for arc in self._archives:
             entry = arc.find(filename)
             if entry is not None:
-                data = arc.extract(entry)
-                # Auto-decrypt SCR if needed
-                if len(data) >= 4 and is_scr(data[:4]):
-                    ver = get_version(data[:4])
-                    scr_key = _SCR_VERSION_KEYS.get(ver, SCR_KEY_DEFAULT)
-                    data = decrypt(data, scr_key)
-                # Auto-decompress BFC1 if needed
-                if len(data) >= 8 and is_bfc1(data[:8]):
-                    data = bfc1_decompress(data)
+                data = _decode_asset_payload(filename, arc.extract(entry))
                 dest = self._tmp_path / filename
                 dest.write_bytes(data)
                 self._extracted[key] = dest
@@ -206,6 +207,27 @@ class AssetResolver:
         with the detected extension while preserving the original source file.
         """
         source = Path(path)
+        if source.suffix.lower() == ".pcx":
+            key = f"{str(source).lower()}|.png"
+            cached = self._texture_paths.get(key)
+            if cached is not None and cached.is_file():
+                return str(cached)
+            dest = self._tmp_path / f"{source.stem}.png"
+            if dest.exists() and not _same_path(dest, source):
+                dest = self._tmp_path / f"{source.stem}_{_stable_path_hash(key)}.png"
+            converted = _copy_pcx_as_png(source, dest)
+            if converted is None:
+                for root in _texture_cache_roots(self.base_dir):
+                    converted = _copy_pcx_as_png(
+                        source,
+                        root / f"{source.stem}_{_stable_path_hash(key)}.png",
+                    )
+                    if converted is not None:
+                        break
+            if converted is not None:
+                self._texture_paths[key] = converted
+                return str(converted)
+
         detected_ext = _detect_bitmap_extension(source)
         if detected_ext is None or source.suffix.lower() == detected_ext:
             return str(source)
@@ -252,6 +274,211 @@ def _detect_bitmap_extension(path: Path) -> str | None:
     if header.startswith(b"II*\x00") or header.startswith(b"MM\x00*"):
         return ".tif"
     return None
+
+
+def _copy_pcx_as_png(source: Path, dest: Path) -> Path | None:
+    try:
+        png = _pcx_to_png(source.read_bytes())
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(png)
+        return dest
+    except (OSError, ValueError, struct.error, zlib.error):
+        return None
+
+
+def _pcx_to_png(data: bytes) -> bytes:
+    if len(data) < 128:
+        raise ValueError("PCX header truncated")
+    if data[0] != 0x0A or data[2] != 1:
+        raise ValueError("Unsupported PCX header")
+
+    bits_per_pixel = data[3]
+    xmin, ymin, xmax, ymax = struct.unpack_from("<HHHH", data, 4)
+    if xmax < xmin or ymax < ymin:
+        raise ValueError("Invalid PCX dimensions")
+    width = xmax - xmin + 1
+    height = ymax - ymin + 1
+    if width <= 0 or height <= 0:
+        raise ValueError("Invalid PCX dimensions")
+
+    planes = data[65]
+    bytes_per_line = struct.unpack_from("<H", data, 66)[0]
+    if bits_per_pixel != 8 or bytes_per_line < width:
+        raise ValueError("Unsupported PCX layout")
+
+    indexed = planes == 1
+    rgb_planes = planes == 3
+    if not indexed and not rgb_planes:
+        raise ValueError("Unsupported PCX plane count")
+
+    raster_end = len(data)
+    palette = b""
+    if indexed:
+        if len(data) < 128 + 769 or data[-769] != 0x0C:
+            raise ValueError("PCX 256-color palette missing")
+        palette = data[-768:]
+        raster_end -= 769
+
+    expected = height * bytes_per_line * planes
+    decoded = _decode_pcx_rle(data, 128, raster_end, expected)
+    rows: list[bytes] = []
+    stride = bytes_per_line * planes
+    for y in range(height):
+        row = decoded[y * stride:(y + 1) * stride]
+        if indexed:
+            rgb = bytearray(width * 3)
+            for x in range(width):
+                idx = row[x]
+                rgb[x * 3:x * 3 + 3] = palette[idx * 3:idx * 3 + 3]
+            rows.append(bytes(rgb))
+        else:
+            red = row[0:bytes_per_line]
+            green = row[bytes_per_line:bytes_per_line * 2]
+            blue = row[bytes_per_line * 2:bytes_per_line * 3]
+            rgb = bytearray(width * 3)
+            for x in range(width):
+                rgb[x * 3 + 0] = red[x]
+                rgb[x * 3 + 1] = green[x]
+                rgb[x * 3 + 2] = blue[x]
+            rows.append(bytes(rgb))
+
+    return _png_from_rgb_rows(width, height, rows)
+
+
+def _decode_pcx_rle(data: bytes, start: int, end: int, expected: int) -> bytes:
+    out = bytearray()
+    pos = start
+    while pos < end and len(out) < expected:
+        value = data[pos]
+        pos += 1
+        if (value & 0xC0) == 0xC0:
+            if pos >= end:
+                raise ValueError("PCX RLE run truncated")
+            run = value & 0x3F
+            value = data[pos]
+            pos += 1
+            out.extend([value] * run)
+        else:
+            out.append(value)
+    if len(out) < expected:
+        raise ValueError("PCX scanline truncated")
+    return bytes(out[:expected])
+
+
+def _png_from_rgb_rows(width: int, height: int, rows: list[bytes]) -> bytes:
+    raw = b"".join(b"\x00" + row for row in rows)
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", zlib.compress(raw))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+def _png_chunk(kind: bytes, payload: bytes) -> bytes:
+    crc = zlib.crc32(kind + payload) & 0xFFFFFFFF
+    return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", crc)
+
+
+def _decode_asset_payload(filename: str, data: bytes) -> bytes:
+    if len(data) >= 4 and is_scr(data[:4]):
+        data = _decode_scr_blob(filename, data)
+    elif _should_try_lw_loose_text_decode(filename, data):
+        data = _decode_lw_loose_text_asset(filename, data)
+    if len(data) >= 8 and is_bfc1(data[:8]):
+        data = bfc1_decompress(data)
+    return data
+
+
+def _decode_scr_blob(filename: str, data: bytes) -> bytes:
+    ver = get_version(data[:4])
+    fallback_key = _SCR_VERSION_KEYS.get(ver, SCR_KEY_DEFAULT)
+    keys = [fallback_key]
+    if ver == 1 and _is_lw_text_asset_name(filename):
+        keys.insert(0, SCR_KEY_DFLW)
+
+    seen: set[int] = set()
+    fallback_decoded: bytes | None = None
+    for key in keys:
+        if key in seen:
+            continue
+        seen.add(key)
+        decoded = decrypt(data, key)
+        if fallback_decoded is None:
+            fallback_decoded = decoded
+        if key == SCR_KEY_DFLW and _looks_like_lw_text_asset(filename, decoded):
+            return decoded
+        if key != SCR_KEY_DFLW:
+            fallback_decoded = decoded
+    return fallback_decoded if fallback_decoded is not None else data
+
+
+def _should_try_lw_loose_text_decode(filename: str, data: bytes) -> bool:
+    if not _is_lw_text_asset_name(filename):
+        return False
+    if data.startswith(b"CBIN"):
+        return False
+    if _looks_like_lw_text_asset(filename, data):
+        return False
+    return True
+
+
+def _decode_lw_loose_text_asset(filename: str, data: bytes) -> bytes:
+    payload = _scr_encrypt_payload(data, SCR_KEY_DEFAULT)
+    decoded = _scr_decrypt_payload(payload, SCR_KEY_DFLW)
+    return decoded if _looks_like_lw_text_asset(filename, decoded) else data
+
+
+def _is_lw_text_asset_name(filename: str) -> bool:
+    return Path(filename).suffix.lower() in _LW_TEXT_EXTS
+
+
+def _looks_like_lw_text_asset(filename: str, data: bytes) -> bool:
+    if not _looks_like_text(data):
+        return False
+    lower = data[:8192].lower()
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".def":
+        return any(token in lower for token in (b"begin", b"graphic", b"gfx", b"type", b"weapon", b"ammoclass"))
+    if suffix == ".aca":
+        return b"slot" in lower and b".saf" in lower
+    if suffix == ".anm":
+        return b"override" in lower or b"walking" in lower or b"standing" in lower
+    return False
+
+
+def _looks_like_text(data: bytes) -> bool:
+    if not data:
+        return False
+    sample = data[:8192]
+    printable = 0
+    for byte in sample:
+        if byte in (9, 10, 13) or 32 <= byte <= 126:
+            printable += 1
+    return printable / len(sample) >= 0.90
+
+
+def _scr_encrypt_payload(plaintext: bytes, key: int) -> bytes:
+    return _xor_with_scr_keystream(plaintext, key)[::-1]
+
+
+def _scr_decrypt_payload(payload: bytes, key: int) -> bytes:
+    return _xor_with_scr_keystream(payload[::-1], key)
+
+
+def _xor_with_scr_keystream(data: bytes, key: int) -> bytes:
+    out = bytearray(data)
+    key &= 0xFFFFFFFF
+    for i in range(len(out)):
+        key = (_rol32((key + _rol32(key, 11)) & 0xFFFFFFFF, 4) ^ 1) & 0xFFFFFFFF
+        out[i] ^= key & 0xFF
+    return bytes(out)
+
+
+def _rol32(value: int, shift: int) -> int:
+    value &= 0xFFFFFFFF
+    return ((value << shift) | (value >> (32 - shift))) & 0xFFFFFFFF
 
 
 def _copy_texture_payload(source: Path, dest: Path) -> Path | None:

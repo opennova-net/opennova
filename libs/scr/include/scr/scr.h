@@ -28,6 +28,7 @@ extern "C" {
 #define SCR_KEY_DEFAULT  0xABEEFACEu  /* JO Demo, most .def files */
 #define SCR_KEY_JO_DFX2  0x2A5A8EADu  /* JO/DFX2 Combined Arms */
 #define SCR_KEY_SHADERS  0xA55B1EEDu  /* .fx shader files */
+#define SCR_KEY_DFLW     0x01234567u  /* Delta Force: Land Warrior text assets */
 
 /* Check if data starts with "SCR" magic.
    Returns 1 if SCR, 0 otherwise. */

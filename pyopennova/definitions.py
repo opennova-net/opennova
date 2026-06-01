@@ -110,11 +110,19 @@ def build_animation_context(
     """
     Builds an AnimationContext by parsing an .adm file and then reading
     the corresponding BAD files via FFI to extract metadata (fps, frame count).
+    Land Warrior character definitions use ANM/KSA/ACA/SAF sidecars instead
+    of ADM/BAD; those resolve to ``LwAnimationContext`` when an ANM exists.
     """
     entries = _adm_entries(adm_field, resolver=resolver)
 
     if not entries:
-        return None
+        try:
+            from .lw_animation import build_lw_animation_context
+
+            return build_lw_animation_context(adm_field, resolver=resolver)
+        except Exception as exc:
+            log.warning("Could not load LW animation context for %s: %s", adm_field, exc)
+            return None
 
     reset_entry = next(
         ((k, v) for k, v in entries if k == "anim_reset"),

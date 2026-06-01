@@ -110,8 +110,9 @@ def resolve_definition_import(
         if import_animations:
             try:
                 anim_ctx = build_animation_context(anim_field, resolver=resolver)
-                if anim_ctx and anim_ctx.reset_animation:
-                    reset_bad_path = str(anim_ctx.reset_animation.bad_filepath)
+                reset_meta = getattr(anim_ctx, "reset_animation", None)
+                if reset_meta:
+                    reset_bad_path = str(reset_meta.bad_filepath)
             except Exception as exc:
                 log.warning("Could not load BAD file: %s", exc)
         else:

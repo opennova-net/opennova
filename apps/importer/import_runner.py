@@ -164,8 +164,9 @@ def _import_basic_model(
         if anim_field:
             try:
                 anim_ctx = build_animation_context(anim_field, resolver=resolver)
-                if anim_ctx and anim_ctx.reset_animation:
-                    bad_file = parse_bad(anim_ctx.reset_animation.bad_filepath)
+                reset_meta = getattr(anim_ctx, "reset_animation", None)
+                if reset_meta:
+                    bad_file = parse_bad(reset_meta.bad_filepath)
             except Exception as e:
                 log.warning("Could not load BAD file: %s", e)
 

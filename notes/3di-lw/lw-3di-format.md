@@ -156,7 +156,7 @@ actually need.
 
 ---
 
-## 4b. Animation — `SAF1` skeletal format (separate files, NOT in the `.3di`)
+## 4b. Animation — `ANM`/`KSA`/`ACA`/`SAF1` sidecars
 
 LW does **not** embed skeletal animation in the `.3di` and uses **no `.bad` files**. Animations are
 separate **`.SAF`** files (magic `"SAF1"` = `0x31464153`), loaded on demand from PFF by
@@ -184,6 +184,47 @@ weapon (string table: `crwalk0_knife`..`crwalk7_knife`, `crwalk0_2hd`..; file na
 
 **Port implication:** SAF1 is its own format. The `.3di` parser handles geometry + skeleton + materials;
 a separate `threedi_saf` (or `libs/anim`) loader handles `.SAF`, bound to a model by sub-object/part index.
+
+### Current importer support
+
+LW animation is now represented as sidecar data rather than as geometry IR:
+
+- `pyopennova.lw_animation` parses decoded `ANM`, `ACA`, `SAF1`, and `KSA` files.
+- `build_animation_context()` still returns BAD/ADM contexts for older games, but returns
+  `LwAnimationContext` when an ANM exists and ADM/BAD does not.
+- `AssetResolver` decodes loose or PFF LW text assets before the parsers see them.
+- Blender imports LW skinned meshes with the synthetic BN## armature already derived from IR parts,
+  binds vertex weights through the existing primitive bone table, and records resolved LW animation
+  inventory on the armature.
+
+The sidecar graph observed in loose DFLW is:
+
+```
+ITEMS.DEF chr_file player01 + anim_def playanim
+  -> PLAYANIM.ANM: movement slot velocity [override]
+  -> PLAYER01.KSA: 100-byte header, 255 slot records, 15,972 baked runtime frames
+  -> PLAYER01.ACA: slot <slot_id> <saf_file> [loop_frame]
+  -> 53 *.SAF files overriding specific slots
+```
+
+`KSA` records are 28 bytes:
+
+```
+u32 frame_count
+u32 runtime_pointer    original game memory address, ignored by importers
+u32 slot_id
+u32 loop_frame
+u32 unknown[3]         zero in current samples
+```
+
+`SAF1` loader normalization from `sub_44A0B0` writes each clip frame to the same 88-byte runtime shape
+as KSA. Runtime bytes `+0x00..+0x3B` are 15 `u8 token ; i16 angle ; u8 pad` records, and bytes
+`+0x3C..+0x4D` are nine i16 root values derived from root floats `[5,8,6,9,7,10,3,2,4]` with the
+observed `85.333336`/`1365.3334` scalars and the `root[7] > -30 -> -30` clamp.
+
+SAF/KSA transform playback is intentionally not applied yet. The exact game consumer still needs RE;
+applying guessed token/axis mappings corrupts the rest pose. The imported armature records
+`lw_animation_status=parsed_not_applied_pending_re` plus clip/slot counts for diagnostics.
 
 ---
 
@@ -217,7 +258,17 @@ carry different `w` values than the owning face range, so rigid per-subobject re
 "blows out" the model. The converter preserves model-space positions and emits IR primitive bone tables
 plus one-weight vertex skinning for flag-1 LODs.
 
-## 5. Open items for the port phase
+## 5. Missing pieces and RE targets
+
+Highest-priority RE target is the runtime animation consumer: find the function that consumes the
+88-byte SAF/KSA frames and writes final sub-object matrices. That should prove token-to-bone mapping
+after the loader's `+0x80` bias, the token byte's axis/part semantics, the angle unit, interpolation,
+loop-frame behavior, root-motion fields, and whether ANM velocity affects sampling or only gameplay.
+
+Material parity is next: label `sub_47C130` render-state bits, surface mode byte `+112`, material flags
+`0x08/0x80/0x100/0x200/0x600/0x108`, secondary texture bits (`0x1000`), and surface flipbook flag
+`0x4000`. Only proven alpha/blend/two-sided/filter/wrap behavior should move into IR/material
+descriptors; everything else should stay diagnostic.
 
 1. The 12-B `[38]` and 8-B `[46]`/80-B `[48]` blob arrays (likely collision: v8 `nColPlanes`/
    `nColVolumes`). Geometry/render path does not need them; decode when adding collision.

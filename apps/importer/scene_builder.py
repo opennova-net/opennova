@@ -350,6 +350,15 @@ class BlenderSceneBuilder:
                 import traceback
                 traceback.print_exc()
                 print(f"Warning: failed to build animations: {e}")
+        elif self.anim_context and self._is_lw_animation_context(self.anim_context) and int(self.ir.mesh_type) == 3:
+            try:
+                self.build_armature_from_parts(name)
+                self.bind_meshes_to_armature()
+                self.build_lw_animations_from_context(self.anim_context)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"Warning: failed to build LW animations: {e}")
         elif int(self.ir.mesh_type) == 3:
             # Preserve skin weights for static skinned models that have no BAD.
             # This keeps ASE MESH_WEIGHTS data so OED re-export doesn't collapse
@@ -744,6 +753,15 @@ class BlenderSceneBuilder:
     # Animation building (ported from adm_scene_builder.h)
 
     @staticmethod
+    def _is_lw_animation_context(anim_context) -> bool:
+        try:
+            from pyopennova.lw_animation import is_lw_animation_context
+
+            return is_lw_animation_context(anim_context)
+        except Exception:
+            return False
+
+    @staticmethod
     def _quat_norm_sq(q: Quaternion) -> float:
         """Version-safe quaternion norm squared for mathutils."""
         return q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z
@@ -890,6 +908,178 @@ class BlenderSceneBuilder:
             if hasattr(reset_action, 'slots') and len(reset_action.slots) > 0:
                 armature_obj.animation_data.action_slot = reset_action.slots[0]
         bpy.context.scene.frame_set(1)
+
+
+    def build_lw_animations_from_context(self, anim_context):
+        """Record LW animation inventory without applying unproven transforms.
+
+        SAF/KSA parsing is wired, but the runtime consumer that maps frame
+        tokens/angles/root values to sub-object transforms still needs RE.
+        Applying guessed transforms corrupts the rest pose, so keep animation
+        data as diagnostics until that mapping is proven.
+        """
+
+        if not self.armature_object:
+            print("[LW_ANIM] No armature object, skipping animations")
+            return
+
+        armature_obj = self.armature_object
+        if not armature_obj.animation_data:
+            armature_obj.animation_data_create()
+
+        named_clips = self._lw_named_clips(anim_context)
+        armature_obj["lw_animation_status"] = "parsed_not_applied_pending_re"
+        armature_obj["lw_animation_clip_count"] = len(named_clips)
+        armature_obj["lw_animation_slot_count"] = len(getattr(anim_context, "clips", {}))
+        armature_obj["lw_animation_warning_count"] = len(getattr(anim_context, "warnings", ()))
+        if getattr(anim_context, "anm_name", ""):
+            armature_obj["lw_anm_name"] = str(anim_context.anm_name)
+        if getattr(anim_context, "ksa_name", ""):
+            armature_obj["lw_ksa_name"] = str(anim_context.ksa_name)
+        if getattr(anim_context, "aca_name", ""):
+            armature_obj["lw_aca_name"] = str(anim_context.aca_name)
+        print(
+            "[LW_ANIM] Parsed "
+            f"{len(named_clips)} movement clips / {len(getattr(anim_context, 'clips', {}))} slots; "
+            "not applying transforms until SAF frame mapping is RE'd"
+        )
+
+
+    def _lw_named_clips(self, anim_context):
+        if getattr(anim_context, "movement_clips", None):
+            names = []
+            used = set()
+            for movement_name, clip in anim_context.movement_clips.items():
+                base_name = str(movement_name)
+                name = base_name
+                suffix = 2
+                while name in used:
+                    name = f"{base_name}_{suffix}"
+                    suffix += 1
+                used.add(name)
+                names.append((name, clip))
+            return names
+
+        return [
+            (f"LW_{slot_id:03d}_{clip.source_name}", clip)
+            for slot_id, clip in sorted(getattr(anim_context, "clips", {}).items())
+        ]
+
+
+    def _build_action_from_lw_clip(self, clip, armature_obj, action_name: str):
+        frame_count = max(0, int(getattr(clip, "frame_count", 0)))
+        action = bpy.data.actions.new(name=action_name)
+        action["lw_slot_id"] = int(getattr(clip, "slot_id", -1))
+        action["lw_source_name"] = str(getattr(clip, "source_name", ""))
+        action["lw_source_type"] = str(getattr(clip, "source_type", ""))
+        action["lw_loop_frame"] = int(getattr(clip, "loop_frame", 0))
+        action["lw_transform_status"] = "partial_token_direct_index"
+
+        slot = None
+        if hasattr(action, 'slots'):
+            slot = self._find_or_create_action_slot(action, armature_obj)
+            ad = armature_obj.animation_data
+            old_action = ad.action
+            old_slot = getattr(ad, 'action_slot', None)
+            ad.action = action
+            ad.action_slot = slot
+
+        fcurves, slot = self._get_action_fcurves(action, armature_obj, slot)
+        bone_infos = self._bone_infos
+        bone_count = len(bone_infos)
+        frames = tuple(getattr(clip, "frames", ()))
+        if frame_count == 0 or bone_count == 0 or not frames:
+            action.frame_start = 1
+            action.frame_end = max(frame_count, 1)
+            if hasattr(action, 'slots'):
+                ad = armature_obj.animation_data
+                ad.action = old_action
+                if old_slot is not None:
+                    ad.action_slot = old_slot
+            return action
+
+        pose_bones = armature_obj.pose.bones
+        for bone_idx in range(bone_count):
+            pb = pose_bones.get(bone_infos[bone_idx][0])
+            if pb:
+                pb.rotation_mode = 'QUATERNION'
+
+        touched = sorted({
+            bone_idx
+            for frame in frames
+            for token, _angle in getattr(frame, "part_records", ())
+            for bone_idx in [self._lw_token_to_bone_index(token, bone_count)]
+            if bone_idx is not None
+        })
+        unresolved = sorted({
+            int(token)
+            for frame in frames
+            for token, _angle in getattr(frame, "part_records", ())
+            if self._lw_token_to_bone_index(token, bone_count) is None
+        })
+        if unresolved:
+            action["lw_unresolved_tokens"] = ",".join(str(token) for token in unresolved[:64])
+            action["lw_unresolved_token_count"] = len(unresolved)
+
+        bone_rot_fcurves = {}
+        for bone_idx in touched:
+            bname = bone_infos[bone_idx][0]
+            data_path_rot = f'pose.bones["{bname}"].rotation_quaternion'
+            curves = (
+                fcurves.new(data_path=data_path_rot, index=0),
+                fcurves.new(data_path=data_path_rot, index=1),
+                fcurves.new(data_path=data_path_rot, index=2),
+                fcurves.new(data_path=data_path_rot, index=3),
+            )
+            for fc in curves:
+                fc.keyframe_points.add(frame_count)
+            bone_rot_fcurves[bone_idx] = curves
+
+        for frame_idx in range(frame_count):
+            frame = frames[min(frame_idx, len(frames) - 1)]
+            rotations = {bone_idx: Quaternion((1, 0, 0, 0)) for bone_idx in touched}
+            for token, angle in getattr(frame, "part_records", ()):
+                bone_idx = self._lw_token_to_bone_index(token, bone_count)
+                if bone_idx is None:
+                    continue
+                rotations[bone_idx] = Quaternion((0, 0, 1), self._lw_angle_to_radians(angle))
+
+            bl_frame = frame_idx + 1
+            for bone_idx, curves in bone_rot_fcurves.items():
+                q = rotations.get(bone_idx, Quaternion((1, 0, 0, 0)))
+                curves[0].keyframe_points[frame_idx].co = (bl_frame, q.w)
+                curves[1].keyframe_points[frame_idx].co = (bl_frame, q.x)
+                curves[2].keyframe_points[frame_idx].co = (bl_frame, q.y)
+                curves[3].keyframe_points[frame_idx].co = (bl_frame, q.z)
+                for fc in curves:
+                    fc.keyframe_points[frame_idx].interpolation = 'LINEAR'
+
+        for fc in fcurves:
+            fc.update()
+
+        action.frame_start = 1
+        action.frame_end = frame_count
+
+        if hasattr(action, 'slots'):
+            ad = armature_obj.animation_data
+            ad.action = old_action
+            if old_slot is not None:
+                ad.action_slot = old_slot
+
+        return action
+
+
+    @staticmethod
+    def _lw_token_to_bone_index(token: int, bone_count: int) -> int | None:
+        token = int(token) & 0xFF
+        if 0 <= token < bone_count:
+            return token
+        return None
+
+
+    @staticmethod
+    def _lw_angle_to_radians(angle: int) -> float:
+        return float(angle) * (2.0 * math.pi / 65536.0)
 
 
     def _build_action_from_bad(self, bad_file, armature_obj, anim_name: str):
@@ -1221,6 +1411,7 @@ class BlenderSceneBuilder:
         num_primitives = int(lod.primitive_count)
 
         is_skinned = (int(self.ir.mesh_type) == 3)  # THREEDI_IR_MESH_SKINNED
+        bind_skinned_meshes = is_skinned and track_bone_data
 
         # Group primitives by part_index.
         # Creating one mesh per part (not per part+material) ensures that
@@ -1329,9 +1520,14 @@ class BlenderSceneBuilder:
                     v1 = lod.vertices[i1]
                     v2 = lod.vertices[i2]
 
-                    pos0 = render_space(Vector(v0.position) - part_abs)
-                    pos1 = render_space(Vector(v1.position) - part_abs)
-                    pos2 = render_space(Vector(v2.position) - part_abs)
+                    if bind_skinned_meshes:
+                        pos0 = render_space(Vector(v0.position))
+                        pos1 = render_space(Vector(v1.position))
+                        pos2 = render_space(Vector(v2.position))
+                    else:
+                        pos0 = render_space(Vector(v0.position) - part_abs)
+                        pos1 = render_space(Vector(v1.position) - part_abs)
+                        pos2 = render_space(Vector(v2.position) - part_abs)
 
                     bd0 = _bone_entries(v0, prim, is_skinned, part_idx)
                     bd1 = _bone_entries(v1, prim, is_skinned, part_idx)
@@ -1419,7 +1615,7 @@ class BlenderSceneBuilder:
             mesh_obj = bpy.data.objects.new(mesh_name, mesh_data)
             bpy.context.collection.objects.link(mesh_obj)
 
-            mesh_obj.parent = part_nodes[part_idx]
+            mesh_obj.parent = self.root_object if bind_skinned_meshes and self.root_object else part_nodes[part_idx]
 
             mesh_obj["_part_index"] = part_idx
             if track_bone_data:
