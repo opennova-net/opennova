@@ -238,6 +238,25 @@ int main() {
 	TEST_EXPECT(exp_index.read_file("baseonly.trn", eb));
 	TEST_EXPECT(as_string(eb) == "base trn");    // base archive still reachable
 	exp_index.clear();
+
+	// --- mount modes: LooseOnly (editor) ignores archives; Packed (shipping runtime)
+	// ignores loose overrides. The default above is PackedWithLooseOverride (runtime /d). ---
+	{
+		std::vector<uint8_t> mb;
+		opennova::ResourceIndex loose_idx;
+		TEST_EXPECT(loose_idx.scan(game.string(), "jox01", opennova::VfsMountMode::LooseOnly));
+		TEST_EXPECT(loose_idx.read_file("shared.env", mb));
+		TEST_EXPECT(as_string(mb) == "loose env");          // loose expansion file
+		TEST_EXPECT(!loose_idx.read_file("exponly.3di", mb)); // archive-only entry invisible
+		loose_idx.clear();
+
+		opennova::ResourceIndex packed_idx;
+		TEST_EXPECT(packed_idx.scan(game.string(), "jox01", opennova::VfsMountMode::Packed));
+		TEST_EXPECT(packed_idx.read_file("shared.env", mb));
+		TEST_EXPECT(as_string(mb) == "local env");          // L.pff wins; loose ignored
+		TEST_EXPECT(packed_idx.read_file("exponly.3di", mb)); // archive entry present
+		packed_idx.clear();
+	}
 	fs::remove_all(game);
 
 	// Release mounted .pff handles before deleting the directory: the VFS keeps archives

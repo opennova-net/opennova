@@ -56,11 +56,9 @@ func load_world(dir: String = "") -> int:
 	if dir.is_empty():
 		load_failed.emit("no resource directory set")
 		return ERR_FILE_NOT_FOUND
-	var resource_root := NovaResourceRoot.new()
-	var root_err := resource_root.set_root_dir(dir)
-	if root_err != OK:
-		load_failed.emit(resource_root.get_last_error())
-		return root_err
+	var resource_root := _mount_runtime_root(dir)
+	if resource_root == null:
+		return ERR_CANT_OPEN
 	if not resource_root.has_file(terrain_file):
 		load_failed.emit("%s not found in %s" % [terrain_file, dir])
 		return ERR_FILE_NOT_FOUND
@@ -91,33 +89,30 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 	if dir.is_empty():
 		load_failed.emit("no resource directory set")
 		return ERR_FILE_NOT_FOUND
-	var resource_root := NovaResourceRoot.new()
-	var root_err := resource_root.set_root_dir(dir)
-	if root_err != OK:
-		load_failed.emit(resource_root.get_last_error())
-		return root_err
+	var resource_root := _mount_runtime_root(dir)
+	if resource_root == null:
+		return ERR_CANT_OPEN
 
-	var bms_path := resource_root.resolve_file(bms_name)
-	if bms_path.is_empty():
+	if not resource_root.has_file(bms_name):
 		load_failed.emit("%s not found in %s" % [bms_name, dir])
 		return ERR_FILE_NOT_FOUND
 	var mission := NovaMissionData.new()
-	if mission.open_file(bms_path) != OK:
+	if mission.open_from_resource_root(resource_root, bms_name) != OK:
 		load_failed.emit("failed to parse %s: %s" % [bms_name, mission.get_last_error()])
 		return ERR_CANT_OPEN
 
-	var trn := resource_root.resolve_file(mission.get_terrain_ref() + ".trn")
-	if trn.is_empty():
+	var trn := mission.get_terrain_ref() + ".trn"
+	if not resource_root.has_file(trn):
 		load_failed.emit("%s.trn (from %s) not found in %s" % [mission.get_terrain_ref(), bms_name, dir])
 		return ERR_FILE_NOT_FOUND
-	var env_path := resource_root.resolve_file(mission.get_environment_ref() + ".env")
-	if env_path.is_empty():
+	var env_name := mission.get_environment_ref() + ".env"
+	if not resource_root.has_file(env_name):
 		load_failed.emit("%s.env (from %s) not found in %s" % [mission.get_environment_ref(), bms_name, dir])
 		return ERR_FILE_NOT_FOUND
 
 	_resource_root = resource_root
-	if not _load_environment(env_path):
-		load_failed.emit("failed to load %s" % env_path)
+	if not _load_environment(env_name):
+		load_failed.emit("failed to load %s" % env_name)
 		return ERR_CANT_OPEN
 	if not _load_terrain(trn):
 		load_failed.emit("failed to load %s" % trn)
@@ -128,6 +123,19 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 	_loaded = true
 	world_loaded.emit()
 	return OK
+
+
+# Mount `dir` as the runtime resource root: PFF archives are the packed game data,
+# the `/exp <name>` flag (or persisted setting) layers an expansion over the base, and
+# loose files override the archives only under the `/d` dev flag. Emits load_failed and
+# returns null on a bad root.
+func _mount_runtime_root(dir: String) -> NovaResourceRoot:
+	var resource_root := NovaResourceRoot.new()
+	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
+	if resource_root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled()) != OK:
+		load_failed.emit(resource_root.get_last_error())
+		return null
+	return resource_root
 
 
 # Populate the world with the mission's placed objects under a MissionObjects node.

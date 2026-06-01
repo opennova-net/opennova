@@ -71,10 +71,16 @@ int opennova_vfs_add_secondary_archive(OpennovaVfs *vfs, const char *pff_path) {
     return vfs->vfs.add_secondary_archive(pff_path) ? 1 : 0;
 }
 
-int opennova_vfs_mount_game(OpennovaVfs *vfs, const char *game_root, const char *expansion) {
+int opennova_vfs_mount_game(OpennovaVfs *vfs, const char *game_root, const char *expansion, int mode) {
     if (!vfs || !game_root) return 0;
     vfs->invalidate();
-    return vfs->vfs.mount_game(game_root, expansion ? std::string(expansion) : std::string()) ? 1 : 0;
+    opennova::VfsMountMode m;
+    switch (mode) {
+        case OPENNOVA_VFS_MODE_LOOSE_ONLY: m = opennova::VfsMountMode::LooseOnly; break;
+        case OPENNOVA_VFS_MODE_PACKED: m = opennova::VfsMountMode::Packed; break;
+        default: m = opennova::VfsMountMode::PackedWithLooseOverride; break;
+    }
+    return vfs->vfs.mount_game(game_root, expansion ? std::string(expansion) : std::string(), m) ? 1 : 0;
 }
 
 void opennova_vfs_clear(OpennovaVfs *vfs) {

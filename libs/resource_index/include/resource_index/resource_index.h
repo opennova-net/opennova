@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <vfs/vfs.h>
+
 namespace opennova {
 
 struct ResourceFileEntry {
@@ -31,7 +33,9 @@ public:
 	// Mount and index a game install. When `expansion` is non-empty and
 	// <root>/expansion/<name>/<name>.pff exists, the expansion's loose files + archives
 	// override the base game (see opennova::Vfs::mount_game). Empty expansion = base game.
-	bool scan(const std::string &root_dir, const std::string &expansion = std::string());
+	// `mode` selects which layers are mounted (loose, archives, or both) — see VfsMountMode.
+	bool scan(const std::string &root_dir, const std::string &expansion = std::string(),
+	          VfsMountMode mode = VfsMountMode::PackedWithLooseOverride);
 	void clear();
 
 	std::vector<ResourceFileEntry> resource_files(const std::string &kind) const;

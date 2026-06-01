@@ -13,6 +13,11 @@ import ctypes
 
 from ._native import load_lib
 
+# Mount modes, matching OPENNOVA_VFS_MODE_* in vfs_capi.h / opennova::VfsMountMode.
+MOUNT_LOOSE_ONLY = 0
+MOUNT_PACKED = 1
+MOUNT_PACKED_WITH_LOOSE = 2
+
 _bound = False
 
 
@@ -37,7 +42,7 @@ def _bind():
         fn.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
 
     lib.opennova_vfs_mount_game.restype = ctypes.c_int
-    lib.opennova_vfs_mount_game.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
+    lib.opennova_vfs_mount_game.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
 
     lib.opennova_vfs_clear.restype = None
     lib.opennova_vfs_clear.argtypes = [ctypes.c_void_p]
@@ -105,8 +110,13 @@ class Vfs:
             self._handle = None
 
     # --- Mount API ---
-    def mount_game(self, game_root: str, expansion: str | None = None) -> bool:
-        return self._lib.opennova_vfs_mount_game(self._handle, _enc(game_root), _enc(expansion)) == 1
+    def mount_game(
+        self, game_root: str, expansion: str | None = None, mode: int = MOUNT_PACKED_WITH_LOOSE
+    ) -> bool:
+        return (
+            self._lib.opennova_vfs_mount_game(self._handle, _enc(game_root), _enc(expansion), mode)
+            == 1
+        )
 
     def add_search_path(self, directory: str) -> bool:
         return self._lib.opennova_vfs_add_search_path(self._handle, _enc(directory)) == 1

@@ -320,6 +320,9 @@ DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out);
 DEF_EXPORT void def_free_weapons(DefWeaponsFile *f);
 
 DEF_EXPORT int def_parse_items(const char *path, DefItemsFile *out);
+/* Parse items.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
+   call; free with def_free_items as usual. Returns 0 on success, -1 on bad input. */
+DEF_EXPORT int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out);
 DEF_EXPORT void def_free_items(DefItemsFile *f);
 
 DEF_EXPORT int def_parse_hudpos(const char *path, DefHudPosFile *out);

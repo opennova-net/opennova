@@ -27,16 +27,24 @@ class NovaResourceRoot : public RefCounted {
 	static String lookup_name(const String &name);
 	static Dictionary file_entry_to_dictionary(const opennova::ResourceFileEntry &entry);
 
+	// Shared validate-and-scan body for both mount entry points.
+	Error mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode);
+
 protected:
 	static void _bind_methods();
 
 public:
 	static bool is_valid_root(const String &path);
 
+	// Editor / authoring mount: loose files only, PFF archives ignored. This is the path the
+	// editor and the test fixtures use, so authoring always targets loose files.
 	Error set_root_dir(const String &path);
-	// Mount a game install the way the engine does. `expansion` (e.g. "jox01") layers the
-	// expansion's loose files + archives over the base game; empty mounts the base game.
-	Error mount_game(const String &path, const String &expansion = String());
+	// Runtime mount: the PFF archives are the packed game data. `expansion` (e.g. "jox01")
+	// layers the expansion's archives over the base game. When `allow_loose_override` is true
+	// (the engine's `/d` dev flag) loose files next to the archives shadow the packed entries;
+	// otherwise the runtime reads from PFFs exclusively.
+	Error mount_runtime(const String &path, const String &expansion = String(),
+	                    bool allow_loose_override = false);
 	// Expansion names discoverable under `<path>/expansion/` (each subdir with a matching
 	// <name>.pff). Independent of the currently mounted root, so the UI can list before mounting.
 	PackedStringArray list_expansions(const String &path) const;

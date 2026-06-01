@@ -141,12 +141,10 @@ static func _find_model_path(resource_root: NovaResourceRoot, basename: String) 
 	if _model_path_cache.has(cache_key):
 		return String(_model_path_cache[cache_key])
 
-	var resolved := resource_root.resolve_file(basename + ".3di")
-	if not resolved.is_empty():
-		_model_path_cache[cache_key] = resolved
-		return resolved
-	if resource_root.has_file(basename + ".3di"):
-		var logical := basename + ".3di"
+	# Resolve through the VFS (loose or PFF). The logical name is enough: it is only
+	# fed back to NovaObjectData.open_from_resource_root, which reads it through the VFS.
+	var logical := basename + ".3di"
+	if resource_root.has_file(logical):
 		_model_path_cache[cache_key] = logical
 		return logical
 	return ""

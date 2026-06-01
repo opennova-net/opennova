@@ -31,7 +31,8 @@ bool is_flat_filename(const String &name) {
 void NovaResourceRoot::_bind_methods() {
 	ClassDB::bind_static_method("NovaResourceRoot", D_METHOD("is_valid_root", "path"), &NovaResourceRoot::is_valid_root);
 	ClassDB::bind_method(D_METHOD("set_root_dir", "path"), &NovaResourceRoot::set_root_dir);
-	ClassDB::bind_method(D_METHOD("mount_game", "path", "expansion"), &NovaResourceRoot::mount_game, DEFVAL(String()));
+	ClassDB::bind_method(D_METHOD("mount_runtime", "path", "expansion", "allow_loose_override"),
+			&NovaResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("list_expansions", "path"), &NovaResourceRoot::list_expansions);
 	ClassDB::bind_method(D_METHOD("get_root_dir"), &NovaResourceRoot::get_root_dir);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaResourceRoot::get_last_error);
@@ -95,10 +96,19 @@ bool NovaResourceRoot::is_valid_root(const String &path) {
 }
 
 Error NovaResourceRoot::set_root_dir(const String &path) {
-	return mount_game(path, String());
+	// Editor / authoring: loose files only, never the PFF archives.
+	return mount_with_mode(path, String(), opennova::VfsMountMode::LooseOnly);
 }
 
-Error NovaResourceRoot::mount_game(const String &path, const String &expansion) {
+Error NovaResourceRoot::mount_runtime(const String &path, const String &expansion, bool allow_loose_override) {
+	// Runtime: the packed PFFs are the game data; loose files only shadow them under `/d`.
+	const opennova::VfsMountMode mode = allow_loose_override
+			? opennova::VfsMountMode::PackedWithLooseOverride
+			: opennova::VfsMountMode::Packed;
+	return mount_with_mode(path, expansion, mode);
+}
+
+Error NovaResourceRoot::mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode) {
 	// The resolver's per-session caches are keyed to the previous root; drop them so a
 	// new (or re-scanned) resource directory is read fresh. scan_root() in the editor
 	// routes through here too, so a rescan picks up on-disk edits.
@@ -115,7 +125,7 @@ Error NovaResourceRoot::mount_game(const String &path, const String &expansion) 
 		return ERR_DOES_NOT_EXIST;
 	}
 	root_dir_ = clean;
-	if (!index_.scan(clean.utf8().get_data(), expansion.utf8().get_data())) {
+	if (!index_.scan(clean.utf8().get_data(), expansion.utf8().get_data(), mode)) {
 		root_dir_ = String();
 		last_error_ = String(index_.last_error().c_str());
 		return ERR_CANT_OPEN;

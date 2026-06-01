@@ -172,10 +172,10 @@ ResourceIndex::~ResourceIndex() = default;
 ResourceIndex::ResourceIndex(ResourceIndex &&) noexcept = default;
 ResourceIndex &ResourceIndex::operator=(ResourceIndex &&) noexcept = default;
 
-bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansion) {
+bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansion, VfsMountMode mode) {
 	clear();
 
-	if (!impl_->vfs.mount_game(root_dir, expansion)) {
+	if (!impl_->vfs.mount_game(root_dir, expansion, mode)) {
 		impl_->last_error = impl_->vfs.last_error();
 		return false;
 	}

@@ -32,8 +32,8 @@ func test_resource_root_resolves_only_top_level_files() -> void:
 	assert_eq(String(trns[0]).get_file(), "Alpha.TRN")
 
 
-func test_resource_root_reads_top_level_pff_entries() -> void:
-	var root := _make_flat_root("pff_entries")
+func test_editor_set_root_dir_is_loose_only() -> void:
+	var root := _make_flat_root("loose_only")
 	_write_file(root.path_join("Alpha.TRN"), "loose trn")
 	_write_pff(root.path_join("aa_base.pff"), [
 		{"name": "Alpha.TRN", "bytes": "archived trn"},
@@ -41,10 +41,26 @@ func test_resource_root_reads_top_level_pff_entries() -> void:
 	])
 
 	var resources := NovaResourceRoot.new()
+	# The editor authors loose files; set_root_dir mounts loose only, never the PFFs.
 	assert_eq(resources.set_root_dir(root), OK)
+	assert_true(resources.has_file("alpha.trn"), "Loose files mount in the editor.")
+	assert_false(resources.has_file("bravo.env"), "PFF-only entries must not mount in the editor (loose-only).")
+	assert_eq(resources.read_file("Alpha.trn").get_string_from_utf8(), "loose trn")
 
-	assert_true(resources.has_file("bravo.env"), "PFF entries should be mounted by flat filename.")
-	assert_eq(resources.read_file("Alpha.trn").get_string_from_utf8(), "loose trn", "Loose files should shadow archived entries.")
+
+func test_runtime_mount_is_packed_with_optional_loose_override() -> void:
+	var root := _make_flat_root("packed_runtime")
+	_write_file(root.path_join("Alpha.TRN"), "loose trn")
+	_write_pff(root.path_join("aa_base.pff"), [
+		{"name": "Alpha.TRN", "bytes": "archived trn"},
+		{"name": "Bravo.env", "bytes": "archived env"},
+	])
+
+	var resources := NovaResourceRoot.new()
+	# Packed runtime (no /d): the archives are the source; loose files do NOT shadow them.
+	assert_eq(resources.mount_runtime(root), OK)
+	assert_true(resources.has_file("bravo.env"), "PFF entries mount at runtime.")
+	assert_eq(resources.read_file("Alpha.trn").get_string_from_utf8(), "archived trn", "Without /d the runtime ignores loose overrides.")
 	assert_eq(resources.read_file("Bravo.env").get_string_from_utf8(), "archived env")
 
 	var entries := resources.list_file_entries(".env")
@@ -53,8 +69,12 @@ func test_resource_root_reads_top_level_pff_entries() -> void:
 	assert_eq(String(entries[0].source_type), "pff")
 	assert_eq(String(entries[0].archive_path).get_file(), "aa_base.pff")
 
+	# Packed + loose override (/d): loose files shadow the archives.
+	assert_eq(resources.mount_runtime(root, "", true), OK)
+	assert_eq(resources.read_file("Alpha.trn").get_string_from_utf8(), "loose trn", "With /d a loose file overrides the archived entry.")
 
-func test_resource_root_mount_game_expansion_override() -> void:
+
+func test_runtime_expansion_override_chain() -> void:
 	var root := _make_flat_root("expansion")
 	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/jox01"))
 	_write_pff(root.path_join("resource.pff"), [
@@ -71,13 +91,16 @@ func test_resource_root_mount_game_expansion_override() -> void:
 	_write_file(root.path_join("expansion/jox01/shared.env"), "loose env")
 
 	var resources := NovaResourceRoot.new()
-	assert_eq(resources.mount_game(root, "jox01"), OK)
-	# Override chain (high -> low): loose expansion > {name}L.pff > {name}.pff > base archives.
-	assert_eq(resources.read_file("shared.env").get_string_from_utf8(), "loose env", "Loose expansion file wins over all archives.")
+	# Packed runtime (no /d): archive chain {name}L.pff > {name}.pff > base; loose ignored.
+	assert_eq(resources.mount_runtime(root, "jox01"), OK)
+	assert_eq(resources.read_file("shared.env").get_string_from_utf8(), "local env", "{name}L.pff wins among archives.")
 	assert_eq(resources.read_file("exponly.3di").get_string_from_utf8(), "exp model", "Expansion archive beats base.")
 	assert_eq(resources.read_file("baseonly.trn").get_string_from_utf8(), "base trn", "Base archive still reachable.")
+	# With /d the loose expansion file overrides every archive.
+	assert_eq(resources.mount_runtime(root, "jox01", true), OK)
+	assert_eq(resources.read_file("shared.env").get_string_from_utf8(), "loose env", "Loose expansion file wins under /d.")
 	# A missing expansion falls back to base-game mounting (no error).
-	assert_eq(resources.mount_game(root, "doesnotexist"), OK)
+	assert_eq(resources.mount_runtime(root, "doesnotexist"), OK)
 	assert_eq(resources.read_file("baseonly.trn").get_string_from_utf8(), "base trn")
 
 
@@ -117,7 +140,7 @@ func test_resource_root_loads_dds_from_pff() -> void:
 	_write_pff(root.path_join("textures.pff"), [{"name": "swatch.dds", "bytes": dds}])
 
 	var resources := NovaResourceRoot.new()
-	assert_eq(resources.set_root_dir(root), OK)
+	assert_eq(resources.mount_runtime(root), OK)
 	var tex: Texture2D = resources.load_texture("swatch.dds")
 	assert_not_null(tex, "A DDS resident only inside a .pff should decode to a texture.")
 	if tex != null:

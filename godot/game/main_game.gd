@@ -39,9 +39,8 @@ func _ready() -> void:
 
 func _enter_menu(dir: String) -> void:
 	if _root == null or _root.get_root_dir() != dir:
-		var root := NovaResourceRoot.new()
-		if root.set_root_dir(dir) != OK:
-			push_warning("MainGame: %s" % root.get_last_error())
+		var root := _mount_runtime_root(dir)
+		if root == null:
 			_request_resource_dir()
 			return
 		_root = root
@@ -82,13 +81,24 @@ func _request_resource_dir() -> void:
 
 func _on_dir_selected(dir: String) -> void:
 	_cleanup_picker()
-	var root := NovaResourceRoot.new()
-	if root.set_root_dir(dir) != OK:
+	var root := _mount_runtime_root(dir)
+	if root == null:
 		_request_resource_dir()
 		return
 	_root = root
 	ResourceDirSettings.set_resource_dir(dir)
 	_enter_menu(dir)
+
+
+# Mount `dir` as the runtime resource root (packed PFFs, `/exp` expansion, `/d` loose
+# override). Warns and returns null on failure.
+func _mount_runtime_root(dir: String) -> NovaResourceRoot:
+	var root := NovaResourceRoot.new()
+	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
+	if root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled()) != OK:
+		push_warning("MainGame: %s" % root.get_last_error())
+		return null
+	return root
 
 
 func _on_dir_canceled() -> void:
