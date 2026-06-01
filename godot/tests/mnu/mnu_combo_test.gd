@@ -84,3 +84,30 @@ func test_combo_popup_suppressed_in_edit_mode() -> void:
 	assert_true((combo as BaseButton).disabled, "closed combo disabled while authoring")
 	combo.open_popup()
 	assert_false(combo.is_popup_open(), "popup never opens in edit_mode")
+
+
+func test_combo_popup_clamps_and_scrolls_long_list() -> void:
+	var menu := _build_menu()
+	var combo := _combo(menu)
+	var many: Array = []
+	for i in range(200):
+		many.append("Option %d" % i)
+	combo.set_items(many)
+	combo.open_popup()
+	assert_true(combo.is_popup_open(), "popup opens for a long list")
+	var popup := combo.find_child("Popup", true, false) as Control
+	assert_not_null(popup, "popup built")
+	var row0 := combo.find_child("Item0", true, false) as Control
+	assert_not_null(row0, "first row built")
+	assert_not_null(combo.find_child("Item199", true, false), "last row built")
+	# A 200-item list would tower past the menu canvas; the popup clamps below its
+	# natural height and the rows scroll inside a ScrollContainer instead. Each row's
+	# custom_minimum_size.y is min_item_height, so natural = count * that.
+	var natural := 200.0 * row0.custom_minimum_size.y
+	assert_lt(popup.size.y, natural, "popup height clamped below the natural list height")
+	assert_gt(popup.size.y, 0.0, "popup keeps a positive height")
+	var scroll := combo.find_child("Scroll", true, false)
+	assert_not_null(scroll, "rows wrapped in a ScrollContainer")
+	assert_true(scroll is ScrollContainer, "the wrapper is a ScrollContainer")
+	combo.close_popup()
+	assert_false(combo.is_popup_open(), "popup closes")

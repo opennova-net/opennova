@@ -4,6 +4,7 @@
 
 #include <godot_cpp/classes/button.hpp>
 #include <godot_cpp/classes/color_rect.hpp>
+#include <godot_cpp/classes/scroll_container.hpp>
 #include <godot_cpp/classes/style_box_flat.hpp>
 #include <godot_cpp/classes/texture_rect.hpp>
 #include <godot_cpp/classes/v_box_container.hpp>
@@ -121,7 +122,16 @@ void NovaMnuCombo::open_popup() {
 	popup_->set_z_as_relative(false);
 	popup_->set_z_index(4096); // lift above sibling widgets in the same CanvasLayer
 	const float width = get_size().x;
-	const float height = static_cast<float>(items_.size() * min_item_height_);
+	// Clamp the popup to the space below the combo so a long list does not run off
+	// the menu canvas; the rows scroll inside the clamped box. The popup only opens
+	// at runtime (edit_mode suppresses it above), so get_viewport_rect() is the game
+	// window extent -- the correct bound here.
+	const float natural = static_cast<float>(items_.size() * min_item_height_);
+	float avail = get_viewport_rect().size.y - (get_global_position().y + get_size().y);
+	if (avail < static_cast<float>(min_item_height_)) {
+		avail = static_cast<float>(min_item_height_); // never collapse to nothing
+	}
+	const float height = natural < avail ? natural : avail;
 	popup_->set_position(Vector2(0, get_size().y));
 	popup_->set_size(Vector2(width, height));
 
@@ -143,11 +153,20 @@ void NovaMnuCombo::open_popup() {
 		popup_->add_child(bg);
 	}
 
+	// Rows live inside a ScrollContainer so an overflowing list scrolls within the
+	// clamped popup instead of spilling past the canvas. The background above stays
+	// full-rect behind the (transparent) scroller; the outline below frames it.
+	ScrollContainer *scroll = memnew(ScrollContainer);
+	scroll->set_name("Scroll");
+	scroll->set_anchors_preset(Control::PRESET_FULL_RECT);
+	scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
+	popup_->add_child(scroll);
+
 	VBoxContainer *rows = memnew(VBoxContainer);
 	rows->set_name("Rows");
-	rows->set_anchors_preset(Control::PRESET_FULL_RECT);
+	rows->set_h_size_flags(Control::SIZE_EXPAND_FILL); // fill popup width; height stays natural so it scrolls
 	rows->add_theme_constant_override("separation", 0);
-	popup_->add_child(rows);
+	scroll->add_child(rows);
 
 	Ref<StyleBoxFlat> hover_sb;
 	hover_sb.instantiate();

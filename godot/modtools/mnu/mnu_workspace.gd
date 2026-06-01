@@ -54,6 +54,8 @@ func get_status_context() -> String:
 		var unresolved: int = _editor.get_unresolved_asset_count()
 		if unresolved > 0:
 			context += ", %d unresolved asset(s)" % unresolved
+		if _editor.is_selection_off_board():
+			context += ", selection off-board"
 	return context
 
 
@@ -66,6 +68,7 @@ func mount_viewport(host: Control) -> void:
 		_editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_editor.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		_editor.widget_selected.connect(_on_widget_selected)
+		_editor.selection_changed.connect(_on_selection_changed)
 	if _editor.get_parent() == null:
 		host.add_child(_editor)
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -120,6 +123,15 @@ func _on_widget_selected(id: int) -> void:
 	_selected_id = id
 	if _inspector != null and is_instance_valid(_inspector):
 		_inspector.show_widget(_document.resource, id)
+
+
+# A multi-selection (>1 widget) drives the inspector's read-only summary view; the
+# active id stays tracked for single-widget operations. Mirrors _on_widget_selected.
+func _on_selection_changed(ids: PackedInt32Array) -> void:
+	if ids.size() > 0:
+		_selected_id = ids[ids.size() - 1]
+	if _inspector != null and is_instance_valid(_inspector):
+		_inspector.show_selection(_document.resource, ids)
 
 
 func _on_inspector_edit(edit: Dictionary) -> void:

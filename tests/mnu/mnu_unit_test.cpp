@@ -91,12 +91,21 @@ bool table_header_eq(const mnu::TableHeader &a, const mnu::TableHeader &b) {
          a.text == b.text;
 }
 
+bool table_subst_eq(const mnu::TableSubst &a, const mnu::TableSubst &b) {
+  return a.column == b.column && a.value == b.value && a.is_file == b.is_file &&
+         a.file == b.file;
+}
+
 bool table_column_eq(const mnu::TableColumn &a, const mnu::TableColumn &b) {
   if (a.count != b.count || a.spacing != b.spacing) return false;
   if (a.headers.size() != b.headers.size()) return false;
   if (a.bodies.size() != b.bodies.size()) return false;
+  if (a.substitutions.size() != b.substitutions.size()) return false;
   for (size_t i = 0; i < a.headers.size(); ++i) {
     if (!table_header_eq(a.headers[i], b.headers[i])) return false;
+  }
+  for (size_t i = 0; i < a.substitutions.size(); ++i) {
+    if (!table_subst_eq(a.substitutions[i], b.substitutions[i])) return false;
   }
   return true;
 }
@@ -921,6 +930,51 @@ bool test_serialize_roundtrip() {
   return true;
 }
 
+// Test table SUBST (value->image) parse + serialize round-trip. SUBST cells were
+// historically dropped on save (the COLUMN serializer emitted HEADER/BODY only);
+// this guards that they survive parse -> serialize -> parse.
+bool test_table_subst() {
+  const std::string xml = R"(
+<SCREEN>
+  <NAME>TEST</NAME>
+  <WINDOW type="table" name="MISSION_TABLE">
+    <POSITION>
+      <TOP>40</TOP>
+      <LEFT>240</LEFT>
+      <RIGHT>691</RIGHT>
+      <BOTTOM>320</BOTTOM>
+    </POSITION>
+    <COLUMN count="3" spacing="0">
+      <BODY justify="CENTER" vjustify="CENTER" column="2" BITMAP_DRAW></BODY>
+      <SUBST column="2" value="0" FILE>alphachk0.tga</SUBST>
+      <SUBST column="2" value="1" FILE>alphachk1.tga</SUBST>
+    </COLUMN>
+  </WINDOW>
+</SCREEN>
+  )";
+  mnu::Document doc;
+  std::string err;
+  CHECK(mnu::parse(xml, doc, err), "parse failed: " + err);
+
+  const auto &col = doc.screens[0].root_window.table_data.column;
+  CHECK(col.substitutions.size() == 2, "expected 2 SUBST elements");
+  CHECK(col.substitutions[0].column == 2, "subst 0 column mismatch");
+  CHECK(col.substitutions[0].value == "0", "subst 0 value mismatch");
+  CHECK(col.substitutions[0].is_file, "subst 0 should carry the FILE flag");
+  CHECK(col.substitutions[0].file == "alphachk0.tga", "subst 0 file mismatch");
+  CHECK(col.substitutions[1].file == "alphachk1.tga", "subst 1 file mismatch");
+
+  // Round-trip: serialize then re-parse and confirm the substitutions survive
+  // (regression guard for the dropped-on-save bug).
+  const std::string serialized = mnu::serialize(doc, true, 2);
+  mnu::Document roundtrip;
+  CHECK(mnu::parse(serialized, roundtrip, err), "roundtrip parse failed: " + err);
+  const auto &rcol = roundtrip.screens[0].root_window.table_data.column;
+  CHECK(table_column_eq(col, rcol), "SUBST did not survive serialize round-trip");
+
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -953,6 +1007,7 @@ int main() {
   RUN_TEST(test_full_mnu_document);
   RUN_TEST(test_scroll_elements);
   RUN_TEST(test_table_column);
+  RUN_TEST(test_table_subst);
   RUN_TEST(test_table_scrollbar);
   RUN_TEST(test_table_items_colors);
   RUN_TEST(test_serialize_roundtrip);

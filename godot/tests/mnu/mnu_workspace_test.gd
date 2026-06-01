@@ -229,6 +229,30 @@ func test_property_inspector_shows_widget_and_screen() -> void:
 	assert_string_contains(screen_text, "menutxt.BIN", "Screen text resource shown.")
 
 
+# Regression: the inspector must be rooted in a container. As a plain Control its
+# make_inspector_box margin/scroll/box collapsed to zero size and the whole panel
+# rendered blank inside the shell's PanelContainer dock -- the symptom that read as
+# "there are no properties". Mount it the way the shell does (in a sized
+# PanelContainer) and assert the content box is actually laid out.
+func test_inspector_content_is_laid_out_non_zero() -> void:
+	var doc := _load_resource()
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(260, 600)
+	panel.size = Vector2(260, 600)
+	add_child_autofree(panel)
+	var inspector = MnuPropertyInspectorScript.new()
+	panel.add_child(inspector)
+	await get_tree().process_frame
+	inspector.show_widget(doc, _first_root_child(doc, 1))
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var box := inspector.find_child("Box", true, false)
+	assert_not_null(box, "Inspector built its content box.")
+	if box != null:
+		assert_gt(box.size.x, 0.0, "Inspector content has non-zero width (not collapsed).")
+		assert_gt(box.size.y, 0.0, "Inspector content has non-zero height (rows laid out).")
+
+
 func test_color_helper_parses_literal_and_variable() -> void:
 	assert_null(MnuUiHelpersScript.color_from_mnu("%DEF_TEXT_FG%"), "A %VAR% reference is unresolved.")
 	assert_null(MnuUiHelpersScript.color_from_mnu(""), "Empty is unresolved.")
@@ -539,6 +563,33 @@ func test_editor_marquee_datasource_edit_and_undo() -> void:
 	assert_true(ed.can_undo(), "datasource edit is undoable")
 	ed.undo()
 	assert_eq(doc.get_widget_datasource(mid), "credits.txt", "undo reverts datasource")
+	await get_tree().process_frame  # flush queue_free'd preview generations
+
+
+func test_editor_group_edit_and_undo() -> void:
+	# The radio/checkbox group id routes through the generic prop-edit path (the
+	# inspector only surfaces the row for toggle types, but apply_edit works on any
+	# widget). Mirrors the datasource scalar test.
+	var ed = MnuEditorScript.new()
+	add_child_autofree(ed)
+	ed.size = Vector2(640, 400)
+	await get_tree().process_frame
+	var editordoc = MnuEditorDocumentScript.new()
+	editordoc.open_mnu("res://../fixtures/mnu/all_widgets.mnu")
+	ed.set_document(editordoc)
+	await get_tree().process_frame
+
+	var doc = editordoc.resource
+	var wid := _find_widget_id(doc, doc.get_screen_root_id(doc.get_screen_ids()[0]), "Credits")
+	assert_gt(wid, 0, "widget located")
+	ed.select_widget(wid)
+	var before: int = doc.get_widget_group(wid)
+
+	ed.apply_edit({"target": "widget", "id": wid, "prop": "group", "value": before + 3})
+	assert_eq(doc.get_widget_group(wid), before + 3, "group edit applied")
+	assert_true(ed.can_undo(), "group edit is undoable")
+	ed.undo()
+	assert_eq(doc.get_widget_group(wid), before, "undo reverts group")
 	await get_tree().process_frame  # flush queue_free'd preview generations
 
 
@@ -1123,9 +1174,166 @@ func test_inspector_renders_item_and_table_sections() -> void:
 	var list_text := _collect_text(inspector)
 	assert_string_contains(list_text, "Items", "Inspector shows an Items section for a list.")
 	assert_string_contains(list_text, "MM_Alpha", "Inspector shows the existing item rows.")
+	assert_string_contains(list_text, "Add color", "Inspector offers an Add-color affordance for empty slots.")
 
 	inspector.show_widget(doc, _widget_named(doc, "MissionTable"))
 	await get_tree().process_frame
 	var table_text := _collect_text(inspector)
 	assert_string_contains(table_text, "Table columns", "Inspector shows a Table columns section.")
 	assert_string_contains(table_text, "Name", "Inspector shows the existing header rows.")
+	assert_string_contains(table_text, "Substitutions", "Inspector shows a Substitutions section for a table.")
+	assert_string_contains(table_text, "ping_lan.tga", "Inspector shows the existing SUBST rows.")
+
+
+# Adding a previously-empty color slot (the inspector's "Add color" affordance)
+# routes through the normal prop-edit path: it persists through save + reload and
+# reverts on undo.
+func test_editor_add_color_slot_persists_through_save_and_undo() -> void:
+	var ws = autofree(MnuWorkspaceScript.new())
+	assert_eq(ws.open_file(FIXTURE), OK)
+	var host := Control.new()
+	host.size = Vector2(800, 480)
+	add_child_autofree(host)
+	ws.mount_viewport(host)
+	await get_tree().process_frame
+	var doc: NovaMnuDocument = ws._document.resource
+	var root := _main_root(doc)
+	assert_eq(doc.get_widget_color(root, NovaMnuDocument.COLOR_DEFAULT_BG), "", "Root background color starts empty.")
+
+	ws._on_inspector_edit({"target": "widget", "id": root, "prop": "color",
+		"slot": NovaMnuDocument.COLOR_DEFAULT_BG, "value": "FFFFFF"})
+	assert_eq(doc.get_widget_color(root, NovaMnuDocument.COLOR_DEFAULT_BG), "FFFFFF", "The add-color edit sets the slot.")
+	assert_true(ws._editor.can_undo(), "Adding a color slot is undoable.")
+
+	assert_eq(ws.save_as(TEMP_DIR), OK)
+	var reloaded = autofree(MnuEditorDocumentScript.new())
+	assert_eq(reloaded.open_mnu(ws._document.current_path), OK)
+	var rroot := _main_root(reloaded.resource)
+	assert_eq(reloaded.resource.get_widget_color(rroot, NovaMnuDocument.COLOR_DEFAULT_BG), "FFFFFF",
+		"The added color slot survives save + reload.")
+
+	ws._editor.undo()
+	assert_eq(doc.get_widget_color(root, NovaMnuDocument.COLOR_DEFAULT_BG), "", "Undo clears the added color slot.")
+	await get_tree().process_frame
+
+
+# Table SUBST (value->image) cells are now authorable: the editor reads them, an
+# add + field edit applies and stays focus-stable, and both survive save + reload
+# (the regression guard for the historic dropped-on-save bug).
+func test_editor_table_subst_edit_and_round_trip() -> void:
+	var ws = autofree(MnuWorkspaceScript.new())
+	assert_eq(ws.open_file(ALL_WIDGETS), OK)
+	var host := Control.new()
+	host.size = Vector2(800, 480)
+	add_child_autofree(host)
+	ws.mount_viewport(host)
+	await get_tree().process_frame
+	var doc: NovaMnuDocument = ws._document.resource
+	var table := _widget_named(doc, "MissionTable")
+	assert_eq(doc.get_table_substs(table).size(), 1, "MissionTable reads its one SUBST cell.")
+	var first: Dictionary = doc.get_table_substs(table)[0]
+	assert_eq(int(first["column"]), 2, "SUBST column read.")
+	assert_eq(String(first["value"]), "lan", "SUBST value read.")
+	assert_true(bool(first["is_file"]), "SUBST FILE flag read.")
+	assert_eq(String(first["file"]), "ping_lan.tga", "SUBST file read.")
+
+	ws._on_inspector_edit({"id": table, "op": "subst_add",
+		"row": {"column": 2, "value": "co", "is_file": true, "file": "ping_co.tga"}})
+	assert_eq(doc.get_table_substs(table).size(), 2, "Adding a SUBST grows the list.")
+	ws._on_inspector_edit({"id": table, "op": "subst_field", "index": 0, "key": "file", "value": "ping_lan2.tga"})
+	assert_eq(String(doc.get_table_substs(table)[0]["file"]), "ping_lan2.tga", "A SUBST field edit applies.")
+	assert_eq(ws._editor.get_selected_id(), table, "A SUBST field edit keeps the table selected.")
+
+	assert_eq(ws.save_as(TEMP_DIR), OK)
+	var reloaded = autofree(MnuEditorDocumentScript.new())
+	assert_eq(reloaded.open_mnu(ws._document.current_path), OK)
+	var rtable := _widget_named(reloaded.resource, "MissionTable")
+	var rsubsts: Array = reloaded.resource.get_table_substs(rtable)
+	assert_eq(rsubsts.size(), 2, "Both SUBST cells survive save + reload.")
+	assert_eq(String(rsubsts[0]["file"]), "ping_lan2.tga", "The edited SUBST file persisted.")
+	assert_eq(String(rsubsts[1]["value"]), "co", "The added SUBST persisted.")
+
+	ws._editor.undo()
+	assert_eq(String(doc.get_table_substs(table)[0]["file"]), "ping_lan.tga", "Undo reverts the SUBST field edit.")
+	await get_tree().process_frame
+
+
+# --- Phase 4: multi-select (batch undo, selection ripple, summary) --------------
+
+func test_editor_apply_rect_batch_one_undo() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var editordoc = pair[1]
+	var doc: NovaMnuDocument = editordoc.resource
+	var a := _first_root_child(doc, 1)
+	var b := _first_root_child(doc, 0)
+	var a0: Rect2 = doc.get_window_rect(a)
+	var b0: Rect2 = doc.get_window_rect(b)
+	ed.select_widgets(PackedInt32Array([a, b]))
+	ed.apply_rect_batch([
+		{"id": a, "rect": Rect2(a0.position + Vector2(10, 5), a0.size)},
+		{"id": b, "rect": Rect2(b0.position + Vector2(10, 5), b0.size)},
+	])
+	assert_eq(doc.get_window_rect(a), Rect2(a0.position + Vector2(10, 5), a0.size), "A moved via the batch.")
+	assert_eq(doc.get_window_rect(b), Rect2(b0.position + Vector2(10, 5), b0.size), "B moved via the batch.")
+	assert_true(ed.can_undo(), "The batch is undoable.")
+	ed.undo()
+	assert_eq(doc.get_window_rect(a), a0, "One undo reverts A...")
+	assert_eq(doc.get_window_rect(b), b0, "...and B in the same single step.")
+	assert_false(ed.can_undo(), "The batch was one undo entry.")
+	ed.redo()
+	assert_eq(doc.get_window_rect(a), Rect2(a0.position + Vector2(10, 5), a0.size), "Redo re-applies A.")
+	assert_eq(doc.get_window_rect(b), Rect2(b0.position + Vector2(10, 5), b0.size), "Redo re-applies B.")
+	await get_tree().process_frame
+
+
+func test_editor_select_widgets_emits_selection_changed() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var editordoc = pair[1]
+	var doc: NovaMnuDocument = editordoc.resource
+	var a := _first_root_child(doc, 1)
+	var b := _first_root_child(doc, 0)
+	watch_signals(ed)
+	ed.select_widgets(PackedInt32Array([a, b]))
+	assert_signal_emitted_with_parameters(ed, "selection_changed", [PackedInt32Array([a, b])])
+	assert_eq(ed.get_selected_id(), b, "The active id is the last member of the set.")
+	await get_tree().process_frame
+
+
+func test_inspector_show_selection_summary() -> void:
+	var doc := _load_resource()
+	var inspector = MnuPropertyInspectorScript.new()
+	add_child_autofree(inspector)
+	await get_tree().process_frame
+	var a := _first_root_child(doc, 1)  # StartBtn
+	var b := _first_root_child(doc, 0)
+	inspector.show_selection(doc, PackedInt32Array([a, b]))
+	await get_tree().process_frame
+	var text := _collect_text(inspector)
+	assert_string_contains(text, "2 widgets selected", "The summary shows the selection count.")
+	assert_string_contains(text, "StartBtn", "The summary lists a member by name.")
+	# A single-id selection falls back to the normal editable single-widget view.
+	inspector.show_selection(doc, PackedInt32Array([a]))
+	await get_tree().process_frame
+	assert_string_contains(_collect_text(inspector), "Name", "A single-id selection shows the editable rows.")
+
+
+func test_adapter_routes_multi_selection_to_inspector() -> void:
+	var ws = autofree(MnuWorkspaceScript.new())
+	assert_eq(ws.open_file(FIXTURE), OK)
+	var host := Control.new()
+	host.size = Vector2(800, 480)
+	add_child_autofree(host)
+	var inspector_host := Control.new()
+	add_child_autofree(inspector_host)
+	ws.mount_viewport(host)
+	ws.build_inspector(inspector_host)
+	await get_tree().process_frame
+	var doc: NovaMnuDocument = ws._document.resource
+	var a := _first_root_child(doc, 1)
+	var b := _first_root_child(doc, 0)
+	ws._editor.select_widgets(PackedInt32Array([a, b]))
+	await get_tree().process_frame
+	assert_string_contains(_collect_text(inspector_host), "2 widgets selected",
+		"A multi-selection routes to the inspector summary through the adapter.")

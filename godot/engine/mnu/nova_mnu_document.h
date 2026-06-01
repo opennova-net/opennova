@@ -211,11 +211,11 @@ public:
 	void remove_item(int p_id, int p_index);
 	void move_item(int p_id, int p_from, int p_to); // p_to is the destination index
 
-	// Table column template (header/body definitions) for a Table widget. Headers
-	// are {column, width, justify, vjustify, sort, text}; bodies are {column,
-	// bitmap_draw, scale_bitmap, bitmap_flags, justify, vjustify}. Getters return
-	// empty / no-op for a non-table id. (Value->image SUBST rows are not yet
-	// serialized by libs/mnu, so they are intentionally not editable here.)
+	// Table column template (header/body/subst definitions) for a Table widget.
+	// Headers are {column, width, justify, vjustify, sort, text}; bodies are
+	// {column, bitmap_draw, scale_bitmap, bitmap_flags, justify, vjustify};
+	// value->image SUBST rows are {column, value, is_file, file}. Getters return
+	// empty / no-op for a non-table id.
 	int get_table_column_count(int p_id) const;
 	void set_table_column_count(int p_id, int p_count);
 	int get_table_column_spacing(int p_id) const;
@@ -228,6 +228,10 @@ public:
 	void set_table_body(int p_id, int p_index, const Dictionary &p_row);
 	int add_table_body(int p_id, const Dictionary &p_row); // returns the new index, or -1
 	void remove_table_body(int p_id, int p_index);
+	TypedArray<Dictionary> get_table_substs(int p_id) const;
+	void set_table_subst(int p_id, int p_index, const Dictionary &p_row);
+	int add_table_subst(int p_id, const Dictionary &p_row); // returns the new index, or -1
+	void remove_table_subst(int p_id, int p_index);
 
 	String get_widget_color(int p_id, int p_slot) const; // raw string, preserves %VAR%
 	void set_widget_color(int p_id, int p_slot, const String &p_value);

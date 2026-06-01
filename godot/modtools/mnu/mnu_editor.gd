@@ -25,12 +25,18 @@ const MnuCanvasScript = preload("res://modtools/mnu/mnu_canvas.gd")
 const NEW_WIDGET_RECT := Rect2(20, 20, 100, 30)
 
 signal widget_selected(id: int)
+# Multi-select: the full selection changed to >1 widget (or back). The single-widget
+# channel stays widget_selected(id); the workspace routes this to a summary view.
+signal selection_changed(ids: PackedInt32Array)
 
 var _document   # MnuEditorDocument
 var _resource_root: NovaResourceRoot
 var _tree        # MnuWidgetTree
 var _canvas      # MnuCanvas
 var _selected_id := -1
+# The full selection set (parallel to the active _selected_id). Size <= 1 mirrors the
+# single-select behavior exactly; >1 is a multi-selection driven by canvas gestures.
+var _selection: PackedInt32Array = PackedInt32Array()
 
 # Toolbar controls.
 var _type_picker: OptionButton
@@ -97,6 +103,8 @@ func _build_ui() -> void:
 	_canvas.widget_picked.connect(_on_canvas_picked)
 	_canvas.selection_cleared.connect(_on_canvas_cleared)
 	_canvas.rect_committed.connect(_on_canvas_rect_committed)
+	_canvas.selection_set.connect(_on_canvas_selection_set)
+	_canvas.rect_committed_batch.connect(_on_canvas_rect_committed_batch)
 	canvas_panel.add_child(_canvas)
 
 
@@ -117,6 +125,21 @@ func _build_toolbar(parent: Control) -> void:
 	bar.add_child(VSeparator.new())
 	_btn_add_screen = _add_toolbar_button(bar, "Add Screen", "Add a new screen", _on_add_screen_pressed)
 	_btn_delete_screen = _add_toolbar_button(bar, "Delete Screen", "Delete the visible screen", _on_delete_screen_pressed)
+
+	bar.add_child(VSeparator.new())
+	# View aids. "Bounds" mirrors the canvas default (on): faint outlines for every
+	# widget so tiny / empty / overlapping ones are visible. The canvas is built after
+	# the toolbar, so the handler defers to it at toggle time (no startup sync needed).
+	var bounds_btn := Button.new()
+	bounds_btn.text = "Bounds"
+	bounds_btn.tooltip_text = "Show a faint outline around every widget"
+	bounds_btn.toggle_mode = true
+	bounds_btn.set_pressed_no_signal(true)
+	bounds_btn.toggled.connect(func(on: bool) -> void:
+		if _canvas != null:
+			_canvas.set_show_all_bounds(on))
+	bar.add_child(bounds_btn)
+	_add_toolbar_button(bar, "Fit", "Reset zoom and pan to fit the board", _on_fit_pressed)
 
 
 func _add_toolbar_button(parent: Control, text: String, tip: String, handler: Callable) -> Button:
@@ -179,6 +202,10 @@ func select_widget(id: int) -> void:
 
 func get_unresolved_asset_count() -> int:
 	return _canvas.get_unresolved_asset_count() if _canvas != null else 0
+
+
+func is_selection_off_board() -> bool:
+	return _canvas.is_selection_off_board() if _canvas != null else false
 
 
 func get_visible_screen_name() -> String:
@@ -244,6 +271,10 @@ func _on_tree_selected(id: int) -> void:
 # inspector.
 func _apply_selection(id: int, emit := true) -> void:
 	_selected_id = id
+	# Collapse the multi-selection to this single id (a screen / invalid id clears it),
+	# mirroring the canvas so the two selection models stay in lockstep.
+	var sel_doc := _document_resource()
+	_selection = PackedInt32Array([id]) if (sel_doc != null and id >= 0 and sel_doc.widget_exists(id) and not sel_doc.is_screen(id)) else PackedInt32Array()
 	if _canvas != null:
 		var doc := _document_resource()
 		if doc != null and id >= 0 and doc.widget_exists(id):
@@ -316,6 +347,66 @@ func _on_canvas_rect_committed(id: int, local_rect: Rect2) -> void:
 	# The gesture (not the inspector) is the input source, so a rebuild is safe and
 	# keeps the inspector's position/size spinboxes in sync with the new rect.
 	select_widget(id)
+
+
+# --- Multi-select (Phase 4) -----------------------------------------------------
+
+# The canvas changed the multi-selection (shift/ctrl toggle or marquee). Route by
+# size: a single id collapses to the normal single-select path (so the inspector
+# shows that widget); empty selects the visible screen; >1 drives the summary view.
+func _on_canvas_selection_set(ids: PackedInt32Array) -> void:
+	if ids.size() == 1:
+		_on_canvas_picked(ids[0])
+		return
+	if ids.is_empty():
+		_on_canvas_cleared()
+		return
+	_selection = ids
+	_selected_id = ids[ids.size() - 1]
+	if _tree != null:
+		_tree.select_id(_selected_id)  # the tree tracks only the active member
+	_refresh_toolbar_state()
+	selection_changed.emit(ids)
+
+
+# Programmatic multi-select (batch-move re-select; reused by later phases). Pushes the
+# set to the canvas + tree and announces it. Size <= 1 delegates to the single path.
+func select_widgets(ids: PackedInt32Array) -> void:
+	if ids.size() <= 1:
+		select_widget(ids[0] if ids.size() == 1 else _screen_id_for_visible())
+		return
+	_selection = ids
+	_selected_id = ids[ids.size() - 1]
+	if _canvas != null:
+		_canvas.set_selection(ids)
+	if _tree != null:
+		_tree.select_id(_selected_id)
+	_refresh_toolbar_state()
+	selection_changed.emit(ids)
+
+
+func _on_canvas_rect_committed_batch(edits: Array) -> void:
+	apply_rect_batch(edits)
+
+
+# Apply N rect edits as ONE undo step (rigid group-move; reused later by align /
+# distribute / duplicate). edits = [{id, rect(local)}, ...]. Reuses the snapshot-undo
+# path (capture_state + _push_struct), which no-ops when nothing actually moved.
+func apply_rect_batch(edits: Array) -> void:
+	var doc := _document_resource()
+	if doc == null or edits.is_empty():
+		return
+	var before := doc.capture_state()
+	var sel_before := _selected_id
+	_suppress_select_emit = true
+	for e in edits:
+		var id := int(e.get("id", -1))
+		if id >= 0 and doc.widget_exists(id):
+			doc.set_window_rect(id, e["rect"])
+	_suppress_select_emit = false
+	if _push_struct("move_batch", before, sel_before, sel_before):
+		# Re-select the whole set so the handles + summary refresh against new rects.
+		select_widgets(_selection.duplicate())
 
 
 # --- Fine-grained property editing + undo (M7) ----------------------------------
@@ -501,7 +592,7 @@ func apply_list_edit(edit: Dictionary) -> void:
 		return
 	var op := String(edit.get("op", ""))
 
-	if op == "item_field" or op == "header_field" or op == "body_field":
+	if op == "item_field" or op == "header_field" or op == "body_field" or op == "subst_field":
 		var index := int(edit.get("index", -1))
 		var key := String(edit.get("key", ""))
 		var row := _read_list_row(doc, op, id, index)
@@ -528,6 +619,8 @@ func apply_list_edit(edit: Dictionary) -> void:
 		"header_remove": doc.remove_table_header(id, int(edit.get("index", -1)))
 		"body_add": doc.add_table_body(id, edit.get("row", {}))
 		"body_remove": doc.remove_table_body(id, int(edit.get("index", -1)))
+		"subst_add": doc.add_table_subst(id, edit.get("row", {}))
+		"subst_remove": doc.remove_table_subst(id, int(edit.get("index", -1)))
 		_:
 			_suppress_select_emit = false
 			return
@@ -545,6 +638,9 @@ func _read_list_row(doc: NovaMnuDocument, op: String, id: int, index: int) -> Di
 		"body_field":
 			var bodies := doc.get_table_bodies(id)
 			return bodies[index] if index >= 0 and index < bodies.size() else {}
+		"subst_field":
+			var substs := doc.get_table_substs(id)
+			return substs[index] if index >= 0 and index < substs.size() else {}
 	return {}
 
 
@@ -553,6 +649,7 @@ func _write_list_row(doc: NovaMnuDocument, op: String, id: int, index: int, row:
 		"item_field": doc.set_item(id, index, row)
 		"header_field": doc.set_table_header(id, index, row)
 		"body_field": doc.set_table_body(id, index, row)
+		"subst_field": doc.set_table_subst(id, index, row)
 
 
 func _resolve_existing_selection(id: int) -> int:
@@ -645,6 +742,7 @@ func _read_prop(doc: NovaMnuDocument, target: String, id: int, prop: String, slo
 		"font": return doc.get_widget_font(id)
 		"datasource": return doc.get_widget_datasource(id)
 		"orientation": return doc.get_widget_orientation(id)
+		"group": return doc.get_widget_group(id)
 		"color": return doc.get_widget_color(id, slot)
 		"texture": return doc.get_widget_texture(id, slot)
 		"flags": return doc.get_widget_flags(id)
@@ -669,6 +767,7 @@ func _write_prop(doc: NovaMnuDocument, target: String, id: int, prop: String, sl
 		"font": doc.set_widget_font(id, value)
 		"datasource": doc.set_widget_datasource(id, value)
 		"orientation": doc.set_widget_orientation(id, value)
+		"group": doc.set_widget_group(id, int(value))
 		"color": doc.set_widget_color(id, slot, value)
 		"texture": doc.set_widget_texture(id, slot, value)
 		"flags": doc.set_widget_flags(id, int(value))
@@ -725,6 +824,11 @@ func _on_delete_screen_pressed() -> void:
 	delete_screen_action()
 
 
+func _on_fit_pressed() -> void:
+	if _canvas != null:
+		_canvas.reset_view()
+
+
 func _on_tree_reparent_requested(id: int, new_parent: int, index: int) -> void:
 	reparent_action(id, new_parent, index)
 
@@ -748,6 +852,10 @@ func _on_resource_loaded(_resource) -> void:
 	_undo_stack.clear()
 	_redo_stack.clear()
 	_refresh_all()
+	# A fresh document (open / new) re-centers the view; in-place edits keep the
+	# user's zoom + pan (those route through _on_resource_changed, not here).
+	if _canvas != null:
+		_canvas.reset_view()
 
 
 func _on_resource_changed() -> void:

@@ -1482,8 +1482,11 @@ void write_window(const Window &win, std::string &out, int depth, bool pretty,
   if (win.type == WindowType::Table) {
     const auto &td = win.table_data;
 
-    // COLUMN element
-    if (td.column.count > 0 || !td.column.headers.empty()) {
+    // COLUMN element. Emit whenever the column carries any structure so bodies and
+    // value->image SUBST cells are never dropped on save (not only when a count or
+    // header is present).
+    if (td.column.count > 0 || !td.column.headers.empty() ||
+        !td.column.bodies.empty() || !td.column.substitutions.empty()) {
       std::string col_attrs;
       col_attrs += attr_pair("count", std::to_string(td.column.count));
       col_attrs += attr_pair("spacing", std::to_string(td.column.spacing));
@@ -1511,6 +1514,19 @@ void write_window(const Window &win, std::string &out, int depth, bool pretty,
         if (b.scale_bitmap) b_attrs += " SCALE_BITMAP";
         if (!b.bitmap_flags.empty()) b_attrs += attr_pair("BITMAP_FLAGS", b.bitmap_flags);
         append_line(out, depth + 2, "<BODY" + b_attrs + " ></BODY>", pretty, indent_size);
+      }
+
+      // SUBST elements (value -> image substitution). Parsed into
+      // td.column.substitutions and applied at runtime, so they must round-trip
+      // on save. Mirror the original fixture form: <SUBST column="N" value="x"
+      // FILE>img.tga</SUBST>, with the bare FILE flag emitted uppercase like BODY.
+      for (const auto &s : td.column.substitutions) {
+        std::string s_attrs = attr_pair("column", std::to_string(s.column));
+        if (!s.value.empty()) s_attrs += attr_pair("value", s.value);
+        if (s.is_file) s_attrs += " FILE";
+        append_line(out, depth + 2,
+                    "<SUBST" + s_attrs + ">" + escape_xml(s.file) + "</SUBST>",
+                    pretty, indent_size);
       }
 
       append_line(out, depth + 1, "</COLUMN>", pretty, indent_size);

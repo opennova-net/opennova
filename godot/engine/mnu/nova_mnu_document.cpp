@@ -127,6 +127,24 @@ mnu::TableBody body_from_dict(const Dictionary &d) {
 	return b;
 }
 
+Dictionary subst_to_dict(const mnu::TableSubst &s) {
+	Dictionary d;
+	d["column"] = s.column;
+	d["value"] = std_to_gd(s.value);
+	d["is_file"] = s.is_file;
+	d["file"] = std_to_gd(s.file);
+	return d;
+}
+
+mnu::TableSubst subst_from_dict(const Dictionary &d) {
+	mnu::TableSubst s;
+	s.column = static_cast<int>(d.get("column", 0));
+	s.value = gd_to_std(String(d.get("value", "")));
+	s.is_file = static_cast<bool>(d.get("is_file", false));
+	s.file = gd_to_std(String(d.get("file", "")));
+	return s;
+}
+
 } // namespace
 
 NovaMnuDocument::NovaMnuDocument() {
@@ -819,6 +837,46 @@ void NovaMnuDocument::remove_table_body(int p_id, int p_index) {
 	touch();
 }
 
+TypedArray<Dictionary> NovaMnuDocument::get_table_substs(int p_id) const {
+	TypedArray<Dictionary> out;
+	const mnu::TableData *td = table_of(window_at(locate(p_id)));
+	if (td == nullptr) {
+		return out;
+	}
+	for (const auto &s : td->column.substitutions) {
+		out.push_back(subst_to_dict(s));
+	}
+	return out;
+}
+
+void NovaMnuDocument::set_table_subst(int p_id, int p_index, const Dictionary &p_row) {
+	mnu::TableData *td = table_of(window_at(locate(p_id)));
+	if (td == nullptr || p_index < 0 || p_index >= static_cast<int>(td->column.substitutions.size())) {
+		return;
+	}
+	td->column.substitutions[p_index] = subst_from_dict(p_row);
+	touch();
+}
+
+int NovaMnuDocument::add_table_subst(int p_id, const Dictionary &p_row) {
+	mnu::TableData *td = table_of(window_at(locate(p_id)));
+	if (td == nullptr) {
+		return -1;
+	}
+	td->column.substitutions.push_back(subst_from_dict(p_row));
+	touch();
+	return static_cast<int>(td->column.substitutions.size()) - 1;
+}
+
+void NovaMnuDocument::remove_table_subst(int p_id, int p_index) {
+	mnu::TableData *td = table_of(window_at(locate(p_id)));
+	if (td == nullptr || p_index < 0 || p_index >= static_cast<int>(td->column.substitutions.size())) {
+		return;
+	}
+	td->column.substitutions.erase(td->column.substitutions.begin() + p_index);
+	touch();
+}
+
 String NovaMnuDocument::get_widget_color(int p_id, int p_slot) const {
 	const mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
@@ -1324,6 +1382,10 @@ void NovaMnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_table_body", "id", "index", "row"), &NovaMnuDocument::set_table_body);
 	ClassDB::bind_method(D_METHOD("add_table_body", "id", "row"), &NovaMnuDocument::add_table_body);
 	ClassDB::bind_method(D_METHOD("remove_table_body", "id", "index"), &NovaMnuDocument::remove_table_body);
+	ClassDB::bind_method(D_METHOD("get_table_substs", "id"), &NovaMnuDocument::get_table_substs);
+	ClassDB::bind_method(D_METHOD("set_table_subst", "id", "index", "row"), &NovaMnuDocument::set_table_subst);
+	ClassDB::bind_method(D_METHOD("add_table_subst", "id", "row"), &NovaMnuDocument::add_table_subst);
+	ClassDB::bind_method(D_METHOD("remove_table_subst", "id", "index"), &NovaMnuDocument::remove_table_subst);
 
 	ClassDB::bind_method(D_METHOD("get_widget_color", "id", "slot"), &NovaMnuDocument::get_widget_color);
 	ClassDB::bind_method(D_METHOD("set_widget_color", "id", "slot", "value"), &NovaMnuDocument::set_widget_color);

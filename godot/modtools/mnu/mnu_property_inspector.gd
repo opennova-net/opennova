@@ -1,8 +1,13 @@
 class_name MnuPropertyInspector
-extends Control
+extends MarginContainer
 
 # Editable property view for the selected MNU node (a screen container or a
-# widget). Every row commits through edit_requested(edit); the workspace adapter
+# widget). Extends a container (not a bare Control) so the make_inspector_box
+# margin/scroll/box chain it hosts gets a real size: the shell mounts this into a
+# PanelContainer that sizes it to fill, and a MarginContainer in turn lays out its
+# content (a plain Control would leave the size_flags-driven children at zero size,
+# leaving the whole inspector blank). Every row commits through
+# edit_requested(edit); the workspace adapter
 # forwards that to the editor, which applies the mutation and records one undo
 # step. The inspector never mutates the document itself, so the editor owns
 # before/after and the undo stack (it also no-ops unchanged values, which makes
@@ -24,6 +29,9 @@ const SIZE_MAX := 4096
 
 var _document: NovaMnuDocument
 var _selected_id := -1
+# When >1, the inspector shows a read-only multi-selection summary instead of a single
+# node's editable rows (editing requires selecting one widget).
+var _multi_ids: PackedInt32Array = PackedInt32Array()
 var _box: VBoxContainer
 
 
@@ -36,6 +44,20 @@ func _ready() -> void:
 func show_widget(doc: NovaMnuDocument, id: int) -> void:
 	_document = doc
 	_selected_id = id
+	_multi_ids = PackedInt32Array()
+	if is_node_ready():
+		_rebuild()
+
+
+# Show a summary for a multi-selection (>1 widget). Zero or one id delegates to the
+# normal single-node view. The workspace routes the editor's selection_changed here.
+func show_selection(doc: NovaMnuDocument, ids: PackedInt32Array) -> void:
+	if ids.size() <= 1:
+		show_widget(doc, ids[0] if ids.size() == 1 else -1)
+		return
+	_document = doc
+	_selected_id = -1
+	_multi_ids = ids
 	if is_node_ready():
 		_rebuild()
 
@@ -45,6 +67,10 @@ func _rebuild() -> void:
 		child.queue_free()
 	_box = MnuUiHelpersScript.make_inspector_box(self)
 
+	if _multi_ids.size() > 1:
+		_build_multi_rows()
+		return
+
 	if _document == null or _selected_id < 0 or not _document.widget_exists(_selected_id):
 		MnuUiHelpersScript.add_muted(_box, "Select a screen or widget to inspect.")
 		return
@@ -53,6 +79,21 @@ func _rebuild() -> void:
 		_build_screen_rows(_selected_id)
 	else:
 		_build_widget_rows(_selected_id)
+
+
+# Read-only summary for a multi-selection: a count heading + one muted line per member
+# (matching the canvas caption format).
+func _build_multi_rows() -> void:
+	MnuUiHelpersScript.add_heading(_box, "%d widgets selected" % _multi_ids.size())
+	if _document == null:
+		return
+	for id in _multi_ids:
+		if not _document.widget_exists(id):
+			continue
+		var type_name := _document.get_widget_type_name(_document.get_widget_type(id))
+		var wname := _document.get_widget_name(id)
+		var label := "(%s)  #%d" % [type_name, id] if wname.is_empty() else "%s (%s)  #%d" % [wname, type_name, id]
+		MnuUiHelpersScript.add_muted(_box, label)
 
 
 func _emit(edit: Dictionary) -> void:
@@ -83,6 +124,10 @@ func _build_screen_rows(id: int) -> void:
 func _build_widget_rows(id: int) -> void:
 	var type_name := _document.get_widget_type_name(_document.get_widget_type(id))
 	MnuUiHelpersScript.add_heading(_box, type_name)
+	# Name + stable id under the type, so the selection is never ambiguous (the canvas
+	# pick, the tree, and the inspector all key off this id).
+	var wname := _document.get_widget_name(id)
+	MnuUiHelpersScript.add_muted(_box, "#%d" % id if wname.is_empty() else "%s  #%d" % [wname, id])
 
 	var name_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Name", _document.get_widget_name(id))
 	_wire_text(name_edit, {"target": "widget", "id": id, "prop": "name"})
@@ -111,6 +156,14 @@ func _build_widget_rows(id: int) -> void:
 		var ds_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Datasource", _document.get_widget_datasource(id))
 		_wire_text(ds_edit, {"target": "widget", "id": id, "prop": "datasource"})
 
+	# Radio/checkbox group id: widgets sharing a group toggle as one set. The engine
+	# stores it on every window, but it is only meaningful (and only worth surfacing)
+	# for the grouped toggle types.
+	if wtype == NovaMnuDocument.TYPE_RADIO or wtype == NovaMnuDocument.TYPE_CHECKBOX:
+		var group_spin := MnuUiHelpersScript.add_spin_row(_box, "Group", _document.get_widget_group(id), 0, SIZE_MAX)
+		group_spin.value_changed.connect(func(v: float) -> void:
+			_emit({"target": "widget", "id": id, "prop": "group", "value": int(v)}))
+
 	_build_color_section(id)
 	_build_texture_section(id)
 	_build_flag_section(id)
@@ -126,33 +179,38 @@ func _build_widget_rows(id: int) -> void:
 		_build_table_section(id)
 
 
-# Only slots that currently carry a value are shown (faithful to M6's display);
-# setting a previously-empty slot is deferred to a later authoring increment.
+# Color/texture sections show every populated slot as an editable row, then offer
+# an "Add" picker over the still-empty slots so a previously uncolored / untextured
+# widget can gain one. Adding sets the slot to a default and rebuilds so it appears
+# as an editable row; it reuses the present rows' {prop, slot, value} op, so the
+# editor records one undo step (undo clears the slot, dropping the row on rebuild).
 func _build_color_section(id: int) -> void:
 	var slots := [
 		["Text", NovaMnuDocument.COLOR_DEFAULT_FG],
 		["Background", NovaMnuDocument.COLOR_DEFAULT_BG],
 		["Hover text", NovaMnuDocument.COLOR_MOUSEOVER_FG],
+		["Hover bg", NovaMnuDocument.COLOR_MOUSEOVER_BG],
 		["Selected text", NovaMnuDocument.COLOR_SELECTED_FG],
+		["Selected bg", NovaMnuDocument.COLOR_SELECTED_BG],
 		["Disabled text", NovaMnuDocument.COLOR_DISABLED_FG],
+		["Disabled bg", NovaMnuDocument.COLOR_DISABLED_BG],
 	]
-	var present: Array = []
-	for slot in slots:
-		var raw := _document.get_widget_color(id, int(slot[1]))
-		if not raw.is_empty():
-			present.append([String(slot[0]), int(slot[1]), raw])
-	if present.is_empty():
-		return
 	MnuUiHelpersScript.add_heading(_box, "Colors")
-	for row in present:
-		var slot_index := int(row[1])
-		var pair = MnuUiHelpersScript.add_color_edit_row(_box, String(row[0]), String(row[2]))
+	var empty: Array = []
+	for slot in slots:
+		var slot_index := int(slot[1])
+		var raw := _document.get_widget_color(id, slot_index)
+		if raw.is_empty():
+			empty.append([String(slot[0]), slot_index])
+			continue
+		var pair = MnuUiHelpersScript.add_color_edit_row(_box, String(slot[0]), raw)
 		var swatch: ColorRect = pair[0]
 		var edit: LineEdit = pair[1]
 		edit.text_changed.connect(func(text: String) -> void:
 			if is_instance_valid(swatch):
 				MnuUiHelpersScript.refresh_swatch(swatch, text))
 		_wire_text(edit, {"target": "widget", "id": id, "prop": "color", "slot": slot_index})
+	_build_add_slot(id, "Add color", empty, "color", "FFFFFF")
 
 
 func _build_texture_section(id: int) -> void:
@@ -162,18 +220,36 @@ func _build_texture_section(id: int) -> void:
 		["Selected", NovaMnuDocument.TEX_SELECTED],
 		["Disabled", NovaMnuDocument.TEX_DISABLED],
 	]
-	var present: Array = []
-	for slot in slots:
-		var raw := _document.get_widget_texture(id, int(slot[1]))
-		if not raw.is_empty():
-			present.append([String(slot[0]), int(slot[1]), raw])
-	if present.is_empty():
-		return
 	MnuUiHelpersScript.add_heading(_box, "Textures")
-	for row in present:
-		var slot_index := int(row[1])
-		var edit := MnuUiHelpersScript.add_text_edit_row(_box, String(row[0]), String(row[2]))
+	var empty: Array = []
+	for slot in slots:
+		var slot_index := int(slot[1])
+		var raw := _document.get_widget_texture(id, slot_index)
+		if raw.is_empty():
+			empty.append([String(slot[0]), slot_index])
+			continue
+		var edit := MnuUiHelpersScript.add_text_edit_row(_box, String(slot[0]), raw)
 		_wire_text(edit, {"target": "widget", "id": id, "prop": "texture", "slot": slot_index})
+	# A new texture seeds a visible placeholder filename the author then repoints at
+	# a real .tga (textures have no neutral default the way a color has white).
+	_build_add_slot(id, "Add texture", empty, "texture", "texture.tga")
+
+
+# Append the "Add <slot>" picker over the still-empty slots (no-op when none are
+# empty). On Add, set the chosen slot to default_value through the normal prop-edit
+# path, then rebuild so its editable row shows. The pressed button outlives this
+# callback (the rebuild's queue_free is deferred), so emitting first is safe.
+func _build_add_slot(id: int, label: String, empty: Array, prop: String, default_value: String) -> void:
+	var controls = MnuUiHelpersScript.add_add_slot_row(_box, label, empty)
+	if controls.is_empty():
+		return
+	var picker: OptionButton = controls[0]
+	var add_btn: Button = controls[1]
+	add_btn.pressed.connect(func() -> void:
+		if not is_instance_valid(picker):
+			return
+		_emit({"target": "widget", "id": id, "prop": prop, "slot": picker.get_selected_id(), "value": default_value})
+		_rebuild())
 
 
 # All flag toggles are shown; any toggle re-derives the whole bitmask from the
@@ -225,10 +301,9 @@ func _build_item_section(id: int) -> void:
 		_emit({"id": id, "op": "item_move", "from": from, "to": to}))
 
 
-# Table COLUMN authoring: column count + spacing (scalar edits) and the per-column
-# HEADER definitions (a list editor). Headers are placed by their `column`
-# attribute, so reorder is disabled. Value->image SUBST rows are not yet
-# serialized by libs/mnu, so they are intentionally not editable here.
+# Table COLUMN authoring: column count + spacing (scalar edits), the per-column
+# HEADER definitions, and the value->image SUBST cells (both list editors). Headers
+# and substitutions are keyed by their `column` attribute, so reorder is disabled.
 func _build_table_section(id: int) -> void:
 	MnuUiHelpersScript.add_heading(_box, "Table columns")
 	var count_spin := MnuUiHelpersScript.add_spin_row(_box, "Columns", _document.get_table_column_count(id), 0, 64)
@@ -256,6 +331,27 @@ func _build_table_section(id: int) -> void:
 			"row": {"column": _document.get_table_headers(id).size(), "text": "Column", "width": 80, "justify": "LEFT"}}))
 	editor.row_removed.connect(func(index: int) -> void:
 		_emit({"id": id, "op": "header_remove", "index": index}))
+
+	# Value->image SUBST cells: when column `column` holds `value`, the cell renders
+	# image `file` (the Img flag = the FILE attribute). Keyed by column/value rather
+	# than order, so reorder is disabled, mirroring headers.
+	MnuUiHelpersScript.add_muted(_box, "Substitutions")
+	var subst = MnuListEditorScript.new()
+	subst.configure([
+		{"key": "column", "label": "Col", "kind": "int", "min": 0, "max": 63},
+		{"key": "value", "label": "Value", "kind": "text"},
+		{"key": "is_file", "label": "Img", "kind": "bool"},
+		{"key": "file", "label": "File", "kind": "text"},
+	], false)
+	_box.add_child(subst)
+	subst.set_rows(_document.get_table_substs(id))
+	subst.row_field_changed.connect(func(index: int, key: String, value: Variant) -> void:
+		_emit({"id": id, "op": "subst_field", "index": index, "key": key, "value": value}))
+	subst.row_added.connect(func() -> void:
+		_emit({"id": id, "op": "subst_add",
+			"row": {"column": 0, "value": "", "is_file": true, "file": ""}}))
+	subst.row_removed.connect(func(index: int) -> void:
+		_emit({"id": id, "op": "subst_remove", "index": index}))
 
 
 # Commit a LineEdit on Enter and on blur. The edit's "value" is the field text at

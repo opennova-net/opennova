@@ -140,6 +140,26 @@ static func refresh_swatch(swatch: ColorRect, raw: String) -> void:
 	swatch.color = parsed if parsed != null else Color(0, 0, 0, 0)
 
 
+# An "add slot" row: "key [OptionButton] [Add]". options is an Array of
+# [display_name, slot_id]; each becomes a picker item whose id is the slot enum,
+# so the caller reads get_selected_id() on Add. Returns [OptionButton, Button], or
+# [] when there is nothing to add (so the caller can skip the row entirely).
+static func add_add_slot_row(parent: Control, key: String, options: Array) -> Array:
+	if options.is_empty():
+		return []
+	var row := _row(parent)
+	row.add_child(_key_label(key))
+	var picker := OptionButton.new()
+	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for opt in options:
+		picker.add_item(String(opt[0]), int(opt[1]))
+	row.add_child(picker)
+	var add_btn := Button.new()
+	add_btn.text = "Add"
+	row.add_child(add_btn)
+	return [picker, add_btn]
+
+
 # Editable toggle row. Returns the CheckBox (pressed state pre-set, no signal).
 static func add_check_row(parent: Control, label: String, pressed: bool) -> CheckBox:
 	var check := CheckBox.new()
