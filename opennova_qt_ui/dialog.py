@@ -804,6 +804,7 @@ if is_available():
             return ImportRequest.for_definition(
                 base_dir=self.game_dir_edit.text().strip(),
                 item_name=item.name,
+                item_id=item.item_id,
                 item_type=item.type,
                 output_root=self.output_root_edit.text().strip(),
                 output_stem=item.output_stem,

@@ -5,6 +5,7 @@ import math
 from typing import Any, Sequence
 
 from pyopennova import coords
+from pyopennova.mesh_build import build_skin_bone_remap
 from pyopennova.mesh_primitives import cube_mesh
 from pyopennova.mesh_utils import mtrx_to_center_rotation
 from pyopennova.model_access import (
@@ -53,6 +54,7 @@ class MaxSceneBuilder:
         self.bone_nodes: list[Any] = []
         self._bone_infos: list[tuple[str, int, tuple[float, float, float]]] = []
         self._mesh_bone_data: dict[str, Any] = {}
+        self._skin_bone_remap: list[int] = []
         try:
             from pyopennova.materials import derive_uv1_tilings
 
@@ -113,6 +115,10 @@ class MaxSceneBuilder:
             self.bind_meshes_to_armature()
             # Animation keying is applied after all merged meshes have been
             # bound, so Skin captures the reset pose for the whole import.
+        elif getattr(self.anim_context, "kind", None) == "lw":
+            self.build_armature_from_parts(name)
+            self.bind_meshes_to_armature()
+            self._tag_lw_animation_context()
         elif int(getattr(self.ir, "mesh_type", 0)) == 3:
             self.build_armature_from_parts(name)
             self.bind_meshes_to_armature()
@@ -506,6 +512,7 @@ class MaxSceneBuilder:
             self._bone_infos.append((bone.name, parent_indices[i], abs_positions[i]))
         for i, pi in enumerate(parent_indices):
             self.bone_nodes[i].parent = self.bone_nodes[pi] if pi >= 0 else skeleton
+        self._skin_bone_remap = build_skin_bone_remap(lod0, part_count)
 
     def build_armature_from_bad(self, bad_file, name: str) -> None:
         rt = _rt()
@@ -540,6 +547,11 @@ class MaxSceneBuilder:
 
         for i, (_name, parent_idx, _rest_origin) in enumerate(self._bone_infos):
             self.bone_nodes[i].parent = self.bone_nodes[parent_idx] if parent_idx >= 0 else skeleton
+        lod0 = self.ir.lods[0] if int(getattr(self.ir, "lod_count", 0)) > 0 else None
+        self._skin_bone_remap = (
+            build_skin_bone_remap(lod0, bone_count)
+            if lod0 is not None else list(range(bone_count))
+        )
 
     def _bad_bone_start_position(self, bone_index: int, bone) -> tuple[float, float, float]:
         if int(getattr(self.ir, "lod_count", 0)) > 0:
@@ -564,7 +576,11 @@ class MaxSceneBuilder:
                 bone_id_by_source = _add_skin_bones(rt, skin, self.bone_nodes)
                 bound_vertices = 0
                 for vert_idx, entries in enumerate(bone_data, start=1):
-                    bone_indices, weights = _remap_skin_weight_entries(entries, bone_id_by_source)
+                    bone_indices, weights = _remap_skin_weight_entries(
+                        entries,
+                        bone_id_by_source,
+                        self._skin_bone_remap,
+                    )
                     if bone_indices:
                         rt.skinOps.ReplaceVertexWeights(
                             skin,
@@ -581,6 +597,17 @@ class MaxSceneBuilder:
             except Exception as exc:
                 _set_user_prop(rt, mesh_obj, "opennova_skin_warning", str(exc))
         self._mesh_bone_data.clear()
+
+    def _tag_lw_animation_context(self) -> None:
+        if not self.armature_object or getattr(self.anim_context, "kind", None) != "lw":
+            return
+        rt = _rt()
+        _set_user_prop(rt, self.armature_object, "opennova_animation_format", "lw")
+        _set_user_prop(rt, self.armature_object, "opennova_lw_anim_def", getattr(self.anim_context, "anim_name", ""))
+        _set_user_prop(rt, self.armature_object, "opennova_lw_chr_file", getattr(self.anim_context, "chr_name", ""))
+        ksa = getattr(self.anim_context, "ksa", None)
+        if ksa is not None:
+            _set_user_prop(rt, self.armature_object, "opennova_lw_ksa_slots", len(getattr(ksa, "slots", {})))
 
     def build_animations_from_context(self, anim_context) -> None:
         """Build Max transform keys from AnimationContext."""
@@ -988,10 +1015,17 @@ def _add_skin_bones(rt, skin, bone_nodes: Sequence[object]) -> dict[int, int]:
     return bone_id_by_source
 
 
-def _remap_skin_weight_entries(entries, bone_id_by_source: dict[int, int]) -> tuple[list[int], list[float]]:
+def _remap_skin_weight_entries(
+    entries,
+    bone_id_by_source: dict[int, int],
+    skin_bone_remap: Sequence[int] | None = None,
+) -> tuple[list[int], list[float]]:
     bone_indices = []
     weights = []
     for bone_idx, weight in entries:
+        bone_idx = int(bone_idx)
+        if skin_bone_remap is not None and 0 <= bone_idx < len(skin_bone_remap):
+            bone_idx = int(skin_bone_remap[bone_idx])
         skin_bone_id = bone_id_by_source.get(int(bone_idx))
         if skin_bone_id is not None and float(weight) > 0.0:
             bone_indices.append(skin_bone_id)

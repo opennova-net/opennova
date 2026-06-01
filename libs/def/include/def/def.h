@@ -133,6 +133,7 @@ typedef struct DefItemDef {
     char sid[64];
     int type;  /* 0=Unknown,1=Marker,2=Vehicle,3=Person,4=Building,5=Decoration,6=Foliage,7=Object,8=Powerup */
     char graphic[128];
+    char chr_file[128];
     char anim_def[128];
     char husk[128];
     int hp;

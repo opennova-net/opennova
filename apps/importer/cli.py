@@ -103,6 +103,7 @@ def cmd_import(args: argparse.Namespace) -> int:
         item_name=args.item,
         item_type=args.type,
         output_root=args.output,
+        item_id=int(getattr(args, "item_id", 0) or 0),
         options=options_from_args(args),
     )
     backend = StandaloneBackend()
@@ -163,6 +164,7 @@ def cmd_export_all(args: argparse.Namespace) -> int:
             item_type=item["type"],
             output_root=args.output,
             output_stem=item["output_stem"],
+            item_id=int(item.get("item_id", 0) or 0),
             options=options,
         )
         for item in sorted(items, key=lambda x: (x["type"], x["name"].casefold()))
@@ -202,6 +204,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_import = sub.add_parser("import", help="Import a single item")
     p_import.add_argument("--dir", required=True, help="Game asset directory")
     p_import.add_argument("--item", required=True, help="Item name")
+    p_import.add_argument("--item-id", type=int, default=0,
+                          help="Optional items.def id to disambiguate duplicate names")
     p_import.add_argument("--type", required=True, choices=["weapon", "item"])
     p_import.add_argument("--output", required=True, help="Output root directory")
     _add_import_options(p_import)
