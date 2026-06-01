@@ -1,27 +1,71 @@
 extends Node3D
 
-# Runtime shell: drive a NovaWorld (the shared load-from-resource-dir core that a
-# future editor "Play" mode also uses) and own the runtime-only bits — the
-# first-launch directory picker and feeding the camera position to the world.
-# The engine ships no game data; everything loads from the chosen resource dir.
+# Runtime shell: boots into the game's menu front-end (NovaMenuHost, driving the
+# .mnu menu set + audio from the chosen resource dir) and hands off to a NovaWorld
+# when the player starts a mission, with pause + return-to-menu on demand. The
+# engine ships no game data; everything (menus, audio, terrain, missions) loads
+# from the chosen resource dir. The first-launch directory picker lives here
+# (runtime-only); headless probes set the dir explicitly and never block on it.
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
+enum State { MENU, WORLD, PAUSED }
+
 @onready var _world: NovaWorld = $World
 @onready var _camera: Camera3D = $Camera3D
+@onready var _hud: CanvasLayer = $HUD
+@onready var _menu_host: NovaMenuHost = $MenuLayer/MenuHost
 
 var _picker: FileDialog
+var _root: NovaResourceRoot
+var _state: int = State.MENU
+var _host_wired := false
 
 
 func _ready() -> void:
-	if _world == null or _camera == null:
+	if _world == null or _camera == null or _menu_host == null:
 		return
-	if _world.load_world() != OK:
+	# Esc toggles pause/resume in a world (the fly camera emits this on Escape).
+	if _camera.has_signal("quit_requested") and not _camera.is_connected("quit_requested", _on_camera_quit):
+		_camera.connect("quit_requested", _on_camera_quit)
+	var dir := ResourceDirSettings.get_resource_dir()
+	if dir.is_empty():
 		_request_resource_dir()
+		return
+	_enter_menu(dir)
 
 
-# The resource directory is required (no fallback). Prompt for it, unless headless
-# (CI/probes set it explicitly and never block on a dialog).
+# --- Menu state ---------------------------------------------------------------
+
+func _enter_menu(dir: String) -> void:
+	if _root == null or _root.get_root_dir() != dir:
+		var root := NovaResourceRoot.new()
+		if root.set_root_dir(dir) != OK:
+			push_warning("MainGame: %s" % root.get_last_error())
+			_request_resource_dir()
+			return
+		_root = root
+	_state = State.MENU
+	_world.visible = false
+	_set_hud_visible(false)
+	_wire_host()
+	if not _menu_host.setup(_root):
+		push_warning("MainGame: no menu found in resource dir (looked for %s)" % _menu_host.main_menu_file)
+	_menu_host.show_menu()
+
+
+func _wire_host() -> void:
+	if _host_wired:
+		return
+	_host_wired = true
+	_menu_host.start_requested.connect(_on_start_requested)
+	_menu_host.exit_to_desktop_requested.connect(_on_exit_to_desktop)
+	_menu_host.return_to_menu_requested.connect(_on_return_to_menu)
+	_menu_host.resume_requested.connect(_on_resume)
+
+
+# --- Resource dir picker (first launch) ---------------------------------------
+
 func _request_resource_dir() -> void:
 	if DisplayServer.get_name() == "headless" or _picker != null:
 		return
@@ -29,7 +73,7 @@ func _request_resource_dir() -> void:
 	_picker.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 	_picker.access = FileDialog.ACCESS_FILESYSTEM
 	_picker.use_native_dialog = true
-	_picker.title = "Select your OpenNova asset directory (contains %s)" % _world.terrain_file
+	_picker.title = "Select your OpenNova asset directory"
 	_picker.dir_selected.connect(_on_dir_selected)
 	_picker.canceled.connect(_on_dir_canceled)
 	add_child(_picker)
@@ -38,10 +82,13 @@ func _request_resource_dir() -> void:
 
 func _on_dir_selected(dir: String) -> void:
 	_cleanup_picker()
-	if _world.load_world(dir) == OK:
-		ResourceDirSettings.set_resource_dir(dir)
-	else:
+	var root := NovaResourceRoot.new()
+	if root.set_root_dir(dir) != OK:
 		_request_resource_dir()
+		return
+	_root = root
+	ResourceDirSettings.set_resource_dir(dir)
+	_enter_menu(dir)
 
 
 func _on_dir_canceled() -> void:
@@ -55,5 +102,76 @@ func _cleanup_picker() -> void:
 		_picker = null
 
 
+# --- Menu <-> world transitions ----------------------------------------------
+
+func _on_start_requested(bms_name: String) -> void:
+	_menu_host.hide_menu()
+	_world.visible = true
+	_set_hud_visible(true)
+	_state = State.WORLD
+	if not _world.world_loaded.is_connected(_on_world_loaded):
+		_world.world_loaded.connect(_on_world_loaded)
+	if not _world.load_failed.is_connected(_on_world_load_failed):
+		_world.load_failed.connect(_on_world_load_failed)
+	_world.load_mission(bms_name)
+
+
+func _on_world_loaded() -> void:
+	_menu_host.enter_game_music()
+
+
+func _on_world_load_failed(reason: String) -> void:
+	push_warning("MainGame: mission load failed: %s" % reason)
+	if _root != null:
+		_enter_menu(_root.get_root_dir())
+
+
+func _on_camera_quit() -> void:
+	# Esc: pause <-> resume while in a world; ignored in the main menu (EXIT quits).
+	if _state == State.WORLD:
+		_pause()
+	elif _state == State.PAUSED:
+		_on_resume()
+
+
+func _pause() -> void:
+	_state = State.PAUSED
+	_menu_host.open_ingame_menu()  # game.mnu overlay over the kept-loaded world
+	_menu_host.show_menu()
+
+
+func _on_resume() -> void:
+	if _state != State.PAUSED:
+		return
+	_menu_host.hide_menu()
+	_state = State.WORLD
+
+
+func _on_return_to_menu() -> void:
+	_world.unload()
+	if _root != null:
+		_enter_menu(_root.get_root_dir())
+
+
+func _on_exit_to_desktop() -> void:
+	get_tree().quit()
+
+
+# CanvasLayer contents toggle: hide/show the HUD's CanvasItem children (the FPS
+# label + debug label) so they do not draw over the menu.
+func _set_hud_visible(v: bool) -> void:
+	if _hud == null:
+		return
+	for c in _hud.get_children():
+		if c is CanvasItem:
+			(c as CanvasItem).visible = v
+
+
+# Drive the loaded world's per-frame foliage coverage. Tick whenever a world is
+# loaded and not paused (the pause menu freezes it); tick() itself no-ops until the
+# world finishes loading. Gating on "loaded, not paused" rather than State.WORLD
+# also lets a host that drives load_world() directly (the headless runtime probe,
+# which stays in MENU) keep dispatching foliage.
 func _process(_delta: float) -> void:
-	_world.tick(_camera.global_position)
+	if _state != State.PAUSED and _world.is_loaded():
+		_world.tick(_camera.global_position)

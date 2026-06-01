@@ -156,6 +156,20 @@ func get_mission_stats() -> Dictionary:
 	return _mission_stats
 
 
+## Tear down a loaded world so the host can return to the menu (or load a
+## different mission) without the previous world lingering. Frees the dynamically
+## placed MissionObjects subtree and resets the load state; the terrain /
+## environment scene nodes are kept in place and rebuilt by the next load_*().
+## Safe to call when nothing is loaded.
+func unload() -> void:
+	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
+	if container != null:
+		container.queue_free()
+	_loaded = false
+	_loaded_mission = null
+	_mission_stats = {}
+
+
 func _load_environment(env_path: String) -> bool:
 	if _env == null:
 		return true
