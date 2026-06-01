@@ -367,6 +367,7 @@ class BlenderSceneBuilder:
         self._world_rot_corrections = []           # BAD world rot -> Blender rest world rot
         self._rest_local_quats = []                # Blender local rest quaternions
         self._rest_local_inv_mats = []             # Blender local rest inverse 3x3 matrices
+        self._rest_local_translations = []         # Blender local rest translations
         self._skin_bone_remap = []                 # source skin bone -> armature bone index
 
     def build_basic_scene(self, name: str):
@@ -520,11 +521,13 @@ class BlenderSceneBuilder:
         """Cache Blender rest-local transforms for sampled action conversion."""
         self._rest_local_quats = []
         self._rest_local_inv_mats = []
+        self._rest_local_translations = []
         for bname, _parent_idx, _rest_origin, *_unused in bone_infos:
             pose_bone = armature_obj.pose.bones.get(bname)
             if pose_bone is None:
                 self._rest_local_quats.append(Quaternion())
                 self._rest_local_inv_mats.append(Matrix.Identity(3))
+                self._rest_local_translations.append(Vector((0.0, 0.0, 0.0)))
                 continue
 
             bone = pose_bone.bone
@@ -535,6 +538,7 @@ class BlenderSceneBuilder:
 
             self._rest_local_quats.append(local_mat.to_quaternion())
             self._rest_local_inv_mats.append(local_mat.to_3x3().inverted())
+            self._rest_local_translations.append(local_mat.translation.copy())
 
     def build_armature_from_bad(self, bad_file, name: str):
         """Build a Blender Armature from BAD bone data.
@@ -715,12 +719,14 @@ class BlenderSceneBuilder:
         # values ensures animation conversion is exact.
         self._rest_local_quats = []
         self._rest_local_inv_mats = []
+        self._rest_local_translations = []
 
         for i, (bname, parent_idx, rest_origin, _local_rot, _bad_length) in enumerate(bone_infos):
             pose_bone = armature_obj.pose.bones.get(bname)
             if pose_bone is None:
                 self._rest_local_quats.append(Quaternion())
                 self._rest_local_inv_mats.append(Matrix.Identity(3))
+                self._rest_local_translations.append(Vector((0.0, 0.0, 0.0)))
                 continue
 
             bone = pose_bone.bone
@@ -732,6 +738,7 @@ class BlenderSceneBuilder:
 
             self._rest_local_quats.append(local_mat.to_quaternion())
             self._rest_local_inv_mats.append(local_mat.to_3x3().inverted())
+            self._rest_local_translations.append(local_mat.translation.copy())
 
         # Per-bone world-space basis correction:
         # BAD channel rotations are authored in BAD world bone axes; Blender edit-bone
@@ -1089,6 +1096,7 @@ class BlenderSceneBuilder:
                 pb.rotation_mode = 'QUATERNION'
 
         bone_rot_fcurves = []
+        bone_pos_fcurves = []
         for bone_idx in range(bone_count):
             bname = bone_infos[bone_idx][0]
             data_path_rot = f'pose.bones["{bname}"].rotation_quaternion'
@@ -1098,12 +1106,26 @@ class BlenderSceneBuilder:
                 fcurves.new(data_path=data_path_rot, index=2),
                 fcurves.new(data_path=data_path_rot, index=3),
             ))
+            data_path_pos = f'pose.bones["{bname}"].location'
+            bone_pos_fcurves.append((
+                fcurves.new(data_path=data_path_pos, index=0),
+                fcurves.new(data_path=data_path_pos, index=1),
+                fcurves.new(data_path=data_path_pos, index=2),
+            ))
 
         for bone_idx in range(bone_count):
             for fc in bone_rot_fcurves[bone_idx]:
                 fc.keyframe_points.add(frame_count)
+            for fc in bone_pos_fcurves[bone_idx]:
+                fc.keyframe_points.add(frame_count)
 
         rest_local_quats = self._rest_local_quats or [Quaternion()] * bone_count
+        rest_local_inv_mats = self._rest_local_inv_mats or [Matrix.Identity(3)] * bone_count
+        rest_local_translations = (
+            self._rest_local_translations
+            if getattr(self, "_rest_local_translations", None)
+            else [Vector((0.0, 0.0, 0.0))] * bone_count
+        )
         prev_local_rots = [Quaternion((1, 0, 0, 0))] * bone_count
 
         for frame_idx, sampled_frame in enumerate(clip.frames):
@@ -1113,14 +1135,27 @@ class BlenderSceneBuilder:
                 sampled_bone = by_index.get(bone_idx)
                 if sampled_bone is None:
                     pose_rot = Quaternion((1, 0, 0, 0))
+                    pose_pos = Vector((0.0, 0.0, 0.0))
                 else:
                     local_rot = Quaternion(sampled_bone.local_rotation)
+                    local_pos = Vector(sampled_bone.local_position)
                     rest_quat = (
                         rest_local_quats[bone_idx]
                         if bone_idx < len(rest_local_quats)
                         else Quaternion((1, 0, 0, 0))
                     )
                     pose_rot = rest_quat.inverted() @ local_rot
+                    rest_inv = (
+                        rest_local_inv_mats[bone_idx]
+                        if bone_idx < len(rest_local_inv_mats)
+                        else Matrix.Identity(3)
+                    )
+                    rest_translation = (
+                        rest_local_translations[bone_idx]
+                        if bone_idx < len(rest_local_translations)
+                        else Vector((0.0, 0.0, 0.0))
+                    )
+                    pose_pos = rest_inv @ (local_pos - rest_translation)
 
                 if frame_idx == 0:
                     prev_local_rots[bone_idx] = pose_rot
@@ -1139,6 +1174,14 @@ class BlenderSceneBuilder:
                 fc_x.keyframe_points[frame_idx].interpolation = 'LINEAR'
                 fc_y.keyframe_points[frame_idx].interpolation = 'LINEAR'
                 fc_z.keyframe_points[frame_idx].interpolation = 'LINEAR'
+
+                fc_px, fc_py, fc_pz = bone_pos_fcurves[bone_idx]
+                fc_px.keyframe_points[frame_idx].co = (bl_frame, pose_pos.x)
+                fc_py.keyframe_points[frame_idx].co = (bl_frame, pose_pos.y)
+                fc_pz.keyframe_points[frame_idx].co = (bl_frame, pose_pos.z)
+                fc_px.keyframe_points[frame_idx].interpolation = 'LINEAR'
+                fc_py.keyframe_points[frame_idx].interpolation = 'LINEAR'
+                fc_pz.keyframe_points[frame_idx].interpolation = 'LINEAR'
 
         for fc in fcurves:
             fc.update()
