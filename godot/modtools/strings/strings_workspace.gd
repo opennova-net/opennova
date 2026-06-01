@@ -232,6 +232,9 @@ func get_current_resource_path() -> String:
 
 func open_file(path: String) -> Error:
 	_ensure_editor()
+	var resources := _resource_root()
+	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
+		return strings_editor.open_strings_bytes(resources.read_file(path), resources.get_root_dir().path_join(path.get_file()))
 	return strings_editor.open_strings(path)
 
 
@@ -253,6 +256,12 @@ func open_strings_table(path: String, key: String) -> Error:
 		if idx >= 0:
 			strings_editor.selected_index = idx
 	return err
+
+
+func _resource_root() -> NovaResourceRoot:
+	if editor_shell != null and editor_shell.has_method("get_resource_root"):
+		return editor_shell.get_resource_root()
+	return null
 
 
 func can_save() -> bool:

@@ -52,6 +52,17 @@ func open_strings(path: String) -> Error:
 	var err := string_table.load_from_path(path)
 	if err != OK:
 		return err
+	return _finish_open_strings(path)
+
+
+func open_strings_bytes(bytes: PackedByteArray, display_path: String) -> Error:
+	var err := string_table.load_from_byte_array(bytes)
+	if err != OK:
+		return err
+	return _finish_open_strings(display_path)
+
+
+func _finish_open_strings(path: String) -> Error:
 	selected_index = -1 if string_table.get_entry_count() == 0 else 0
 	set_current_path(path)
 	remember_open_path(path)

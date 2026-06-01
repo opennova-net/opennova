@@ -36,6 +36,10 @@ int threedi_smoke_self_check(void);
 // Load a 3DI file from disk into a chunk tree. Returns 0 on success.
 int threedi_read_file(const char *path, ThreediFile *out_file);
 
+// Load a 3DI file from memory into a chunk tree. The input bytes are copied so
+// the resulting ThreediFile owns a stable backing buffer.
+int threedi_read_memory(const uint8_t *data, size_t size, ThreediFile *out_file);
+
 // Write a previously-read 3DI chunk tree back to disk.
 int threedi_write_file(const char *path, const ThreediFile *file);
 

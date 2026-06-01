@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "pff/pff.h"
+#include "pff/pff_test_writer.h"
 
 static int passed = 0;
 static int failed = 0;
@@ -80,9 +81,9 @@ static int test_magic_constants(void) {
     return 1;
 }
 
-/* Test deleted flag constant */
-static int test_deleted_flag_constant(void) {
-    CHECK(PFF_FLAG_DELETED == 0x01u, "PFF_FLAG_DELETED should be 0x01");
+/* Test encrypted flag constant (bit 0 = ENCRYPTED, verified vs PFF_LoadFileToMemory @ 0x768920) */
+static int test_encrypted_flag_constant(void) {
+    CHECK(PFF_FLAG_ENCRYPTED == 0x01u, "PFF_FLAG_ENCRYPTED should be 0x01");
     return 1;
 }
 
@@ -98,6 +99,92 @@ static int test_entry_struct_size(void) {
     return 1;
 }
 
+/* ---- round-trip tests over synthetic archives (no game data needed) ---- */
+
+static int entry_bytes_equal(const PffArchive *a, const char *name,
+                             const uint8_t *expect, uint32_t n) {
+    const PffEntry *e = pff_find(a, name);
+    uint8_t *buf;
+    int ok;
+    if (!e || e->size != n) return 0;
+    buf = (uint8_t *)malloc(n ? n : 1);
+    if (pff_extract(a, e, buf, n) != 0) { free(buf); return 0; }
+    ok = (memcmp(buf, expect, n) == 0);
+    free(buf);
+    return ok;
+}
+
+/* Modern open/find/extract, including transparent decryption of an encrypted entry. */
+static int test_modern_roundtrip(void) {
+    const uint8_t a_data[] = {1, 2, 3, 4, 5};
+    const uint8_t b_data[] = {0xAA, 0xBB, 0xCC};
+    const uint8_t c_data[] = "encrypted payload contents";
+    PffTestEntry entries[3] = {
+        { "alpha.txt",  a_data, (uint32_t)sizeof(a_data), 0 },
+        { "Bravo.dat",  b_data, (uint32_t)sizeof(b_data), 0 },
+        { "secret.bin", c_data, (uint32_t)sizeof(c_data), 1 },  /* encrypted */
+    };
+    const char *path = "pff_rt_modern.pff";
+    PffArchive ar;
+
+    CHECK(pff_test_write_modern(path, entries, 3) == 0, "write modern pff");
+    CHECK(pff_open(&ar, path) == 0, "open modern pff");
+    CHECK(ar.entry_count == 3, "entry count == 3");
+    CHECK(entry_bytes_equal(&ar, "alpha.txt", a_data, sizeof(a_data)), "alpha bytes");
+    CHECK(entry_bytes_equal(&ar, "Bravo.dat", b_data, sizeof(b_data)), "bravo bytes");
+    CHECK(entry_bytes_equal(&ar, "secret.bin", c_data, sizeof(c_data)), "decrypted bytes");
+    {
+        const PffEntry *e = pff_find(&ar, "secret.bin");
+        uint8_t raw[64];
+        CHECK(e != NULL && (e->flags & PFF_FLAG_ENCRYPTED), "encrypted flag set");
+        CHECK(pff_extract_raw(&ar, e, raw, sizeof(raw)) == 0, "extract_raw ok");
+        CHECK(memcmp(raw, c_data, sizeof(c_data)) != 0, "raw bytes are ciphertext");
+        pff_test_xor(raw, (uint32_t)sizeof(c_data));
+        CHECK(memcmp(raw, c_data, sizeof(c_data)) == 0, "xor(raw) == plaintext");
+    }
+    pff_close(&ar);
+    remove(path);
+    return 1;
+}
+
+/* Lookup is case-insensitive (engine uppercases names) and misses return NULL. */
+static int test_find_case_insensitive(void) {
+    const uint8_t d[] = {9, 9, 9};
+    PffTestEntry entries[1] = { { "MixedCase.TGA", d, 3, 0 } };
+    const char *path = "pff_rt_case.pff";
+    PffArchive ar;
+
+    CHECK(pff_test_write_modern(path, entries, 1) == 0, "write");
+    CHECK(pff_open(&ar, path) == 0, "open");
+    CHECK(pff_find(&ar, "mixedcase.tga") != NULL, "lower-case query matches");
+    CHECK(pff_find(&ar, "MIXEDCASE.TGA") != NULL, "upper-case query matches");
+    CHECK(pff_find(&ar, "nope.tga") == NULL, "missing returns NULL");
+    pff_close(&ar);
+    remove(path);
+    return 1;
+}
+
+/* Legacy format: delta-encoded sizes + 0xACEDDEAD name obfuscation. */
+static int test_legacy_roundtrip(void) {
+    const uint8_t a_data[] = {10, 20, 30, 40};
+    const uint8_t b_data[] = {50, 60};
+    PffTestEntry entries[2] = {
+        { "leg1.bin", a_data, (uint32_t)sizeof(a_data), 0 },
+        { "leg2.bin", b_data, (uint32_t)sizeof(b_data), 0 },
+    };
+    const char *path = "pff_rt_legacy.pff";
+    PffArchive ar;
+
+    CHECK(pff_test_write_legacy(path, entries, 2) == 0, "write legacy");
+    CHECK(pff_open_legacy(&ar, path) == 0, "open legacy");
+    CHECK(ar.entry_count == 2, "legacy entry count == 2");
+    CHECK(entry_bytes_equal(&ar, "leg1.bin", a_data, sizeof(a_data)), "leg1 bytes");
+    CHECK(entry_bytes_equal(&ar, "leg2.bin", b_data, sizeof(b_data)), "leg2 bytes (delta size)");
+    pff_close(&ar);
+    remove(path);
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_is_pff3_magic);
     RUN_TEST(test_is_pff4_magic);
@@ -105,9 +192,12 @@ int main(void) {
     RUN_TEST(test_rejects_too_small_buffer);
     RUN_TEST(test_header_size_constants);
     RUN_TEST(test_magic_constants);
-    RUN_TEST(test_deleted_flag_constant);
+    RUN_TEST(test_encrypted_flag_constant);
     RUN_TEST(test_header_struct_size);
     RUN_TEST(test_entry_struct_size);
+    RUN_TEST(test_modern_roundtrip);
+    RUN_TEST(test_find_case_insensitive);
+    RUN_TEST(test_legacy_roundtrip);
 
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed > 0 ? EXIT_FAILURE : EXIT_SUCCESS;

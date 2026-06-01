@@ -20,7 +20,7 @@ extends RefCounted
 #     MultiMesh cannot carry per-instance skeleton/PANM state.
 #
 # Models are resolved exactly as veg_assets.gd does: items.def `graphic` -> first
-# top-level "<graphic>.3di" via NovaResourceRoot.resolve_file -> NovaObjectData.
+# top-level "<graphic>.3di" through the VFS via NovaObjectData.open_from_resource_root.
 # Static batches reuse the full object-editor fidelity path (NovaObjectModel +
 # NovaObjectShaderCache materials) by building one template model off-tree and
 # harvesting its rest-pose meshes + materials.
@@ -315,11 +315,8 @@ func _record_static_batch(graphic: String, refs: Array, mm: MultiMesh, mmi: Mult
 func _ensure_item_db() -> void:
 	if item_db != null or resource_root == null:
 		return
-	var path := resource_root.resolve_file("items.def")
-	if path.is_empty():
-		return
 	var db := NovaItemDatabase.new()
-	if db.load(path) == OK:
+	if db.load_from_resource_root(resource_root, "items.def") == OK:
 		item_db = db
 
 
@@ -345,21 +342,19 @@ func _is_animated(item_id: int) -> bool:
 	return not item_db.get_anim_def(item_id).is_empty()
 
 
-func _resolve_model_path(graphic: String) -> String:
+func _model_name_for(graphic: String) -> String:
 	var basename := graphic.get_file().get_basename()
-	if basename.is_empty():
-		return ""
-	return resource_root.resolve_file(basename + ".3di")
+	return "" if basename.is_empty() else basename + ".3di"
 
 
 func _load_object_data(graphic: String) -> NovaObjectData:
 	if _object_data_cache.has(graphic):
 		return _object_data_cache[graphic]
 	var data: NovaObjectData = null
-	var path := _resolve_model_path(graphic)
-	if not path.is_empty():
+	var model_name := _model_name_for(graphic)
+	if not model_name.is_empty() and resource_root != null:
 		var d := NovaObjectData.new()
-		if d.open_file(path) == OK:
+		if d.open_from_resource_root(resource_root, model_name) == OK:
 			data = d
 	_object_data_cache[graphic] = data
 	return data

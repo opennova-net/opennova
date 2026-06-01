@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
@@ -17,6 +18,8 @@
 #include <tdp/tdp.h>
 #include <threedi/threedi_3di3.h>
 #include <threedi/threedi_ir.h>
+
+#include "resource_index/nova_resource_root.h"
 
 namespace godot {
 
@@ -47,6 +50,7 @@ private:
 	String source_dir;
 	String object_name = "untitled";
 	String last_error;
+	Ref<NovaResourceRoot> resource_root;
 
 	void _clear();
 	void _clear_oed_session();
@@ -57,6 +61,7 @@ private:
 	uint8_t _normalize_oed_update_mask(int p_update_mask) const;
 	void _notify_object_changed(uint8_t p_update_mask = 0);
 	Error _open_3di(const String &p_path);
+	Error _open_3di_bytes(const String &p_name, const PackedByteArray &p_bytes);
 	Error _open_3dp(const String &p_path);
 	Error _open_ase(const String &p_path);
 	Error _build_ir_from_project_session(const char *p_model_name, uint8_t p_dirty_mask = 0);
@@ -84,6 +89,7 @@ public:
 	~NovaObjectData();
 
 	Error open_file(const String &p_path);
+	Error open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
 	Error save_project_to_dir(const String &p_dir_path);
 	Error export_3di_to_dir(const String &p_dir_path, int p_update_mask = 0);
 	void reset_empty(const String &p_name = "untitled");

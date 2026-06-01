@@ -12,6 +12,8 @@
 
 namespace godot {
 
+class NovaResourceRoot;
+
 // Thin GDExtension wrapper over libs/def items.def parsing (def_parse_items).
 // Resolves a mission entity's item id -> its visual model (.3di basename) and a
 // few type fields. This is the minimal "database" slice needed to place objects;
@@ -53,6 +55,9 @@ public:
 	};
 
 	Error load(const String &path);
+	// Load items.def by flat name through the mounted resource root (VFS), so the item
+	// database resolves from PFF archives at runtime. Mirrors the other *_from_resource_root.
+	Error load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
 	bool is_loaded() const;
 	String get_source_path() const;
 	String get_last_error() const;

@@ -26,16 +26,21 @@ static func list_graphics(resource_root: NovaResourceRoot, force_refresh: bool =
 
 	var out: Array = []
 	var seen: Dictionary = {}
-	for model_path in resource_root.list_files(".3di"):
-		var basename := String(model_path).get_file().get_basename().to_lower()
+	for entry_value in resource_root.list_file_entries(".3di"):
+		var entry := entry_value as Dictionary
+		var model_name := String(entry.get("logical_name", entry.get("path", "")))
+		var model_ref := String(entry.get("path", ""))
+		if model_ref.is_empty():
+			model_ref = model_name
+		var basename := model_name.get_file().get_basename().to_lower()
 		if not basename.contains("veg") or seen.has(basename):
 			continue
 		seen[basename] = true
-		_model_path_cache[_cache_key(root_key, basename)] = model_path
+		_model_path_cache[_cache_key(root_key, basename)] = model_ref
 		out.append({
 			"basename": basename,
-			"model_path": model_path,
-			"scene_path": model_path,
+			"model_path": model_ref,
+			"scene_path": model_ref,
 		})
 	out.sort_custom(func(a, b): return String(a.basename) < String(b.basename))
 	_graphics_cache_by_root[root_key] = out
@@ -75,7 +80,7 @@ static func load_mesh(resource_root: NovaResourceRoot, graphic: String) -> Mesh:
 		return null
 
 	var data := NovaObjectData.new()
-	if data.open_file(model_path) != OK:
+	if data.open_from_resource_root(resource_root, model_path) != OK:
 		return null
 	var submeshes: Array = data.build_lod_submeshes(0)
 	var mesh: Mesh = null
@@ -136,10 +141,12 @@ static func _find_model_path(resource_root: NovaResourceRoot, basename: String) 
 	if _model_path_cache.has(cache_key):
 		return String(_model_path_cache[cache_key])
 
-	var resolved := resource_root.resolve_file(basename + ".3di")
-	if not resolved.is_empty():
-		_model_path_cache[cache_key] = resolved
-		return resolved
+	# Resolve through the VFS (loose or PFF). The logical name is enough: it is only
+	# fed back to NovaObjectData.open_from_resource_root, which reads it through the VFS.
+	var logical := basename + ".3di"
+	if resource_root.has_file(logical):
+		_model_path_cache[cache_key] = logical
+		return logical
 	return ""
 
 

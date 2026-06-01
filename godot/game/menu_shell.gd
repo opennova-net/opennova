@@ -102,8 +102,8 @@ func _assemble_assets() -> void:
 	_director.auto_start = false
 	add_child(_director)
 
-	_text = _load_text(_resolve(menu_text_file))
-	_style = _load_style(_discover_path(menu_stylesheet_file, ".mns", ""))
+	_text = _load_text(menu_text_file)
+	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
 	_sound_bank = _load_bank(_discover_path(menu_sound_bank_file, ".sbf", "menu"))
 	_menu_music = _load_music(_discover_music(menu_music_file, "menu"))
 	_game_music = _load_music(_discover_music(game_music_file, "game"))
@@ -313,6 +313,24 @@ func _discover_path(explicit: String, suffix: String, prefer: String) -> String:
 	return _resolve(String(files[0]).get_file())
 
 
+# Like _discover_path, but returns the winning entry's logical basename (loadable
+# through the VFS by name via _root.read_file) rather than a loose disk path. Used
+# by the byte-based loaders so discovery works for PFF-archived assets too.
+func _discover_name(explicit: String, suffix: String, prefer: String) -> String:
+	if not explicit.is_empty():
+		return explicit
+	if _root == null:
+		return ""
+	var files := _root.list_files(suffix)
+	if files.is_empty():
+		return ""
+	if not prefer.is_empty():
+		for f in files:
+			if String(f).get_file().to_lower().contains(prefer):
+				return String(f).get_file()
+	return String(files[0]).get_file()
+
+
 # Music scripts ship as .bin (e.g. menumus.bin / gamemus.bin); .bin also covers
 # the menu string table (menutxt.BIN), so a music candidate must contain "mus"
 # (gamemus/menumus) to avoid grabbing the text table. Prefer one also matching
@@ -337,31 +355,42 @@ func _discover_music(explicit: String, prefer: String) -> String:
 	return fallback
 
 
+# The visual menu assets (.mnu document, .mns stylesheet, RTXT text) load through
+# the VFS by name so they resolve from PFF archives at runtime; menu textures and
+# fonts resolve through the resource root the menu is given (set_resource_root).
 func _load_doc(file: String) -> NovaMnuDocument:
 	if _menu_cache.has(file):
 		return _menu_cache[file]
-	var path := _resolve(file)
-	if path.is_empty():
+	if _root == null or file.is_empty():
+		return null
+	var bytes := _root.read_file(file)
+	if bytes.is_empty():
 		return null
 	var doc := NovaMnuDocument.new()
-	if doc.load_from_path(path) != OK:
+	if doc.load_from_bytes(bytes) != OK:
 		return null
 	_menu_cache[file] = doc
 	return doc
 
 
-func _load_text(path: String) -> RtxtStringFile:
-	if path.is_empty():
+func _load_text(file: String) -> RtxtStringFile:
+	if _root == null or file.is_empty():
+		return null
+	var bytes := _root.read_file(file)
+	if bytes.is_empty():
 		return null
 	var t := RtxtStringFile.new()
-	return t if t.load_from_path(path) == OK else null
+	return t if t.load_from_byte_array(bytes) == OK else null
 
 
-func _load_style(path: String) -> MnsStyleSheet:
-	if path.is_empty():
+func _load_style(file: String) -> MnsStyleSheet:
+	if _root == null or file.is_empty():
+		return null
+	var bytes := _root.read_file(file)
+	if bytes.is_empty():
 		return null
 	var s := MnsStyleSheet.new()
-	return s if s.load_from_path(path) == OK else null
+	return s if s.load_from_bytes(bytes) == OK else null
 
 
 func _load_bank(path: String) -> NovaSbfBank:

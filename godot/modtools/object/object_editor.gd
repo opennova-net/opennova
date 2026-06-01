@@ -32,6 +32,21 @@ func open_object(path: String) -> Error:
 	return OK
 
 
+func open_object_from_resource_root(resources: NovaResourceRoot, name: String) -> Error:
+	if resources == null:
+		return ERR_INVALID_PARAMETER
+	var next_data := NovaObjectData.new()
+	var err := next_data.open_from_resource_root(resources, name)
+	if err != OK:
+		return err
+	_set_object_data(next_data)
+	set_current_path(name.get_file())
+	remember_open_path(resources.get_root_dir().path_join(name.get_file()))
+	mark_clean()
+	_emit_changed()
+	return OK
+
+
 func add_lod_scene(path: String, lod_index: int = -1) -> Error:
 	if path.is_empty() or object_data == null:
 		return ERR_INVALID_PARAMETER

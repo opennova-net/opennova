@@ -237,6 +237,8 @@ func _open_selected_entry() -> void:
 	var entry := _list.get_item_metadata(selected[0]) as Dictionary
 	var path := String(entry.get("path", ""))
 	if path.is_empty():
+		path = String(entry.get("logical_name", ""))
+	if path.is_empty():
 		return
 	if _open_action.is_valid():
 		_open_action.call(path)

@@ -52,6 +52,8 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _settings_resource_dir_edit: LineEdit = %SettingsResourceDirEdit
 @onready var _settings_browse_resource_dir_button: Button = %SettingsBrowseResourceDirButton
 @onready var _settings_apply_resource_dir_button: Button = %SettingsApplyResourceDirButton
+@onready var _settings_expansion_row: HBoxContainer = %SettingsExpansionRow
+@onready var _settings_expansion_option: OptionButton = %SettingsExpansionOption
 @onready var _settings_view_section: VBoxContainer = %SettingsViewSection
 @onready var _settings_grid_toggle: CheckBox = %SettingsGridToggle
 @onready var _settings_axes_toggle: CheckBox = %SettingsAxesToggle
@@ -1009,6 +1011,7 @@ func _set_settings_popup_visible(active: bool) -> void:
 func _sync_settings_popup_state() -> void:
 	if _settings_resource_dir_edit != null:
 		_settings_resource_dir_edit.text = _resource_library.get_root_dir()
+	_populate_expansion_options()
 	if _settings_grid_toggle != null:
 		_settings_grid_toggle.set_pressed_no_signal(_view_grid_visible)
 	if _settings_axes_toggle != null:
@@ -1034,6 +1037,14 @@ func _on_settings_apply_resource_dir_pressed() -> void:
 
 func _on_settings_resource_dir_submitted(_text: String) -> void:
 	_apply_resource_settings(true)
+
+
+# The editor authors loose files only; PFF expansions are a runtime concern (mounted
+# via the `/exp` launch flag), so the settings popup no longer offers an expansion picker.
+# The row is hidden here in case the scene still carries it.
+func _populate_expansion_options() -> void:
+	if _settings_expansion_row != null:
+		_settings_expansion_row.visible = false
 
 
 func _on_settings_grid_toggled(pressed: bool) -> void:

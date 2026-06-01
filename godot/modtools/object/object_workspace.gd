@@ -251,9 +251,20 @@ func get_current_resource_path() -> String:
 
 func open_file(path: String) -> Error:
 	_ensure_object_editor()
-	var err := object_editor.open_object(path)
+	var resources := _resource_root()
+	var err := OK
+	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
+		err = object_editor.open_object_from_resource_root(resources, path)
+	else:
+		err = object_editor.open_object(path)
 	_sync_shell()
 	return err
+
+
+func _resource_root() -> NovaResourceRoot:
+	if editor_shell != null and editor_shell.has_method("get_resource_root"):
+		return editor_shell.get_resource_root()
+	return null
 
 
 func add_lod_scene(path: String, lod_index: int = -1) -> Error:
