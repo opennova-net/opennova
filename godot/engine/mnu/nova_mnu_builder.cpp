@@ -308,13 +308,25 @@ bool has_frame(const mnu::Frame &frame) {
 	return !frame.stencil.empty() || !frame.brush.empty() || !frame.monogram.empty();
 }
 
-// --- Frame 9-patch bake (port of sub_52D000, see mnu_import_plugin.cpp) ------
+// --- Frame 9-patch bake -------------------------------------------------------
+//
+// [orig: CUIElement_DrawFrame @ 0x64a210 (draw); STENCIL parse in
+//  CUIElement_ParseXMLDefinition @ 0x648120]  This bake is a Godot-NinePatch
+//  APPROXIMATION, not a port of the original drawer. (The earlier "sub_52D000"
+//  reference was wrong: 0x52D000 is ScoreConfig_SaveFile, a score.ini writer.)
+//  DIVERGENCES vs the original:
+//   (1) the original draws a center fill quad + 8 INDEPENDENTLY sized border pieces,
+//       not a 4x4 grid with mirrored corners;
+//   (2) border insets are DATA-DRIVEN from STENCIL INSETX/INSETY (elem+0x288/+0x28C
+//       @0x648717/@0x648756), not the hardcoded 16/24 used below (which the Frame
+//       struct does not yet parse).
+//  See notes/mnu/mnu.md and notes/mnu/divergence-backlog.md.
 //
 // Bakes the stencil (border art) + optional brush (tiling fill) into a single
 // RGBA8 texture whose 4x4 cell grid feeds a NinePatchRect. Corners are mirrored
 // from cell [0,0]; edges are stretched from a single sampled slice past the
 // corner curve; the interior of each edge cell and the center 2x2 are cleared to
-// transparent. Border insets are the original game's hardcoded 16/24/16/24.
+// transparent. Border insets are currently hardcoded 16/24/16/24 (see divergence above).
 Ref<ImageTexture> bake_frame_texture(MnuBuildContext &ctx, const mnu::Frame &frame,
 		int &out_cell_w, int &out_cell_h) {
 	out_cell_w = 0;

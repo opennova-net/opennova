@@ -39,6 +39,12 @@ bool MnsStyleSheet::has_variable(const String &p_name) const {
 	return sheet_.has(gd_to_std(p_name));
 }
 
+// [orig: NapiXML_ExpandVariablesInText @ 0x63a000]  ARCHITECTURE DIVERGENCE: the
+// original expands %VAR% over the whole raw .mnu byte buffer BEFORE the XML parse
+// (covers text, POSITION/SIZE and arbitrary attributes); the reimpl substitutes
+// per-field, post-parse, only on color/texture/font strings (see
+// nova_mnu_builder.cpp substitute_var). Matching for the shipped corpus, which only
+// uses %VAR% in color/font. See notes/mnu/divergence-backlog.md.
 String MnsStyleSheet::substitute(const String &p_text) const {
 	return std_to_gd(sheet_.substitute(gd_to_std(p_text)));
 }

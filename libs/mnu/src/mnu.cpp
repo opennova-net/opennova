@@ -15,6 +15,12 @@ namespace mnu {
 namespace {
 
 // Parse window type from string (case-insensitive).
+// [orig: CUIScene_CreateWidgetByType @ 0x64f630]  Original does a full-word wide
+// CRT_wcsicmp on the TYPE attribute; tokens are STATIC/BUTTON/SCROLL/EDIT/
+// MULTILINE_EDIT/RADIO/LIST/SPINLIST/CHECKBOX/TABLE/COMBOBOX/MARQUEE_WND (plus
+// GLB_TABLE/RADIOEDIT/LAN_LIST/GOPHER, not modelled here); any unrecognized type
+// falls back to a generic CWnd. window_type_name() emits these canonical spellings
+// so the round-trip stays original-valid. See notes/mnu/mnu.md.
 WindowType parse_type_string(const std::string &s) {
   std::string lower = mnu_xml::to_lower(s);
   if (lower == "window") return WindowType::Window;
@@ -347,6 +353,7 @@ ListBoxScrollbar parse_listbox_scrollbar(const mnu_xml::Node *node) {
 }
 
 // Parse LIST_BOX element.
+// [orig: CListWnd_ParseXMLDefinition @ 0x645770]
 ListBox parse_listbox(const mnu_xml::Node *listbox_node) {
   ListBox listbox;
   if (!listbox_node) return listbox;
@@ -420,6 +427,10 @@ SpinButton parse_spinbutton(const mnu_xml::Node *spin_node) {
 }
 
 // Parse table HEADER element.
+// [orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0]  DIVERGENCE: the original
+// HEADER also carries type="id" (branch @0x64344a) and resolves the header text via
+// CUIStringTable_LookupString @0x6434df; this reimpl neither parses nor serializes
+// HEADER type, so it is dropped on round-trip. See notes/mnu/divergence-backlog.md.
 TableHeader parse_table_header(const mnu_xml::Node *node) {
   TableHeader header;
   if (!node) return header;
@@ -467,6 +478,7 @@ TableSubst parse_table_subst(const mnu_xml::Node *node) {
 }
 
 // Parse table COLUMN element.
+// [orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0]
 TableColumn parse_table_column(const mnu_xml::Node *node) {
   TableColumn col;
   if (!node) return col;
@@ -523,6 +535,12 @@ TableScrollbar parse_table_scrollbar(const mnu_xml::Node *node) {
 Window parse_window(const mnu_xml::Node *window_node);
 
 // Parse WINDOW element recursively.
+// [orig: CUIElement_ParseXMLDefinition @ 0x648120 (base attrs); edit attrs in
+//  parse_edit_widget_xml_properties @ 0x661d10; checkbox attrs @ 0x64ad90]
+// The original splits attributes across a base parser + per-widget-class overrides;
+// this reimpl flattens them onto every window (harmless superset). DROPPED by reimpl:
+// FORM (int -> widget+0x124 @0x6482a6), GLOBAL_VAR (@0x648323), PASSWORD (edit, @0x661d3b).
+// See notes/mnu/divergence-backlog.md.
 Window parse_window(const mnu_xml::Node *window_node) {
   Window win;
   if (!window_node) return win;
@@ -667,6 +685,9 @@ Window parse_window(const mnu_xml::Node *window_node) {
 
 // Parse SCREEN element.
 // MNU format: <SCREEN><NAME>STARTUP</NAME><MUSICVAR>1</MUSICVAR>...
+// [orig: parse_scene_node_attributes @ 0x639630; SCREEN node callback @ 0x63b800]
+// SCREEN is the only document root the original handles (no <sc> script tag exists);
+// the reimpl's optional <MNU>/<MENU> wrapper is a harmless superset.
 Screen parse_screen(const mnu_xml::Node *screen_node) {
   Screen screen;
   if (!screen_node) return screen;
@@ -721,6 +742,9 @@ WindowType parse_window_type(const std::string &type_str) {
 }
 
 const char *window_type_name(WindowType type) {
+  // [orig: tokens matched by CUIScene_CreateWidgetByType @ 0x64f630]  These canonical
+  // spellings (e.g. Combo->"combobox", Marquee->"marquee_wnd") are exactly the wide
+  // literals the original factory full-word-matches, so round-trip stays engine-valid.
   // Output lowercase type names to match original NovaLogic MNU format
   switch (type) {
     case WindowType::Window: return "window";

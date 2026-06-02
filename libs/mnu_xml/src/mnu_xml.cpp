@@ -207,6 +207,11 @@ bool starts_with_i(const char *p, const char *end, const char *prefix) {
 
 // Decode XML entity reference. Returns decoded char and advances p past the entity.
 // If not a valid entity, returns '&' and doesn't advance.
+// [orig: XML_ParseCharEntity @ 0x769cc0; named-entity table @ 0x85a628]  DIVERGENCES:
+// the original table has NO &apos;; numeric entities are DECIMAL-only (_wtol base 10,
+// so &#xNN; -> NUL); it decodes named Latin-1 (&copy;/&reg;/&Agrave;...) which this
+// reimpl maps to '?'; and on an unknown entity it emits '&' keeping the name text,
+// while &#NNN; is truncated to the low byte (128-255 pass). See notes/mnu/mnu.md.
 char decode_entity(const char *&p, const char *end) {
   if (p >= end || *p != '&') return '\0';
 
@@ -489,6 +494,10 @@ std::unique_ptr<Node> parse_element(const char *&p, const char *end,
 }
 
 // Detect and skip BOM, return encoding type.
+// [orig: XML_ParseWithBOMDetection @ 0x76a690]  The original detects UTF-16 LE/BE and
+// UTF-8 BOMs and routes no-BOM/UTF-8 through MultiByteToWideChar (its parser is
+// wchar_t throughout); this reimpl handles only the UTF-8 BOM and works in UTF-8/ASCII
+// (matching for the all-ASCII shipped corpus). See notes/mnu/mnu.md.
 const char *skip_bom(const char *data, size_t size) {
   if (size >= 3 && static_cast<uint8_t>(data[0]) == 0xEF &&
       static_cast<uint8_t>(data[1]) == 0xBB &&
