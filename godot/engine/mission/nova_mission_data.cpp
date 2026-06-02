@@ -1,5 +1,7 @@
 #include "nova_mission_data.h"
 
+#include "resource_index/nova_resource_root.h"
+
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <cmath>
@@ -26,6 +28,7 @@ opennova::mission::EntityKind to_native_kind(int kind) {
 
 void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("open_file", "path"), &NovaMissionData::open_file);
+	ClassDB::bind_method(D_METHOD("open_from_resource_root", "resource_root", "name"), &NovaMissionData::open_from_resource_root);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaMissionData::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &NovaMissionData::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaMissionData::get_last_error);
@@ -59,6 +62,31 @@ Error NovaMissionData::open_file(const String &path) {
 		last_error = String(document.last_error().c_str());
 		return ERR_CANT_OPEN;
 	}
+	modified = false;
+	return OK;
+}
+
+Error NovaMissionData::open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name) {
+	last_error = String();
+	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
+		last_error = "Resource root is not configured";
+		return ERR_INVALID_PARAMETER;
+	}
+	const String file = p_name.get_file();
+	if (file.is_empty()) {
+		last_error = "Mission filename is empty";
+		return ERR_INVALID_PARAMETER;
+	}
+	const PackedByteArray bytes = p_resource_root->read_file(file);
+	if (bytes.is_empty()) {
+		last_error = "Mission file not found in resource root: " + file;
+		return ERR_FILE_NOT_FOUND;
+	}
+	if (!document.load_bms_bytes(bytes.ptr(), static_cast<size_t>(bytes.size()))) {
+		last_error = String(document.last_error().c_str());
+		return ERR_CANT_OPEN;
+	}
+	source_path = file;
 	modified = false;
 	return OK;
 }

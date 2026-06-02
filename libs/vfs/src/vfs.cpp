@@ -193,7 +193,7 @@ bool Vfs::add_secondary_archive(const std::string &pff_path) {
     return true;
 }
 
-bool Vfs::mount_game(const std::string &game_root, const std::string &expansion) {
+bool Vfs::mount_game(const std::string &game_root, const std::string &expansion, VfsMountMode mode) {
     clear();
 
     std::error_code ec;
@@ -203,6 +203,9 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion)
         return false;
     }
     impl_->game_root = root.string();
+
+    const bool mount_loose = mode != VfsMountMode::Packed;
+    const bool mount_archives = mode != VfsMountMode::LooseOnly;
 
     bool have_expansion = false;
     fs::path exp_dir;
@@ -215,13 +218,21 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion)
     }
 
     if (have_expansion) {
-        add_search_path(exp_dir.string());          // loose expansion files: highest
-        add_search_path(root.string());             // engine CWD probe: base loose files
-        const fs::path local = exp_dir / (expansion + "L.pff");
-        if (fs::exists(local, ec)) set_primary_archive(local.string());
-        add_secondary_archive((exp_dir / (expansion + ".pff")).string());
-    } else {
+        if (mount_loose) {
+            add_search_path(exp_dir.string());          // loose expansion files: highest
+            add_search_path(root.string());             // engine CWD probe: base loose files
+        }
+        if (mount_archives) {
+            const fs::path local = exp_dir / (expansion + "L.pff");
+            if (fs::exists(local, ec)) set_primary_archive(local.string());
+            add_secondary_archive((exp_dir / (expansion + ".pff")).string());
+        }
+    } else if (mount_loose) {
         add_search_path(root.string());
+    }
+
+    if (!mount_archives) {
+        return true;
     }
 
     // Base-root archives (resource.pff / localres.pff / language.pff / ...), appended after

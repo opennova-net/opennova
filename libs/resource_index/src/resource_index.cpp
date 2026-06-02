@@ -4,13 +4,30 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
+#include <system_error>
 
 namespace fs = std::filesystem;
 
 namespace opennova {
 
 namespace {
+
+// Last-write time of `path` as Unix seconds (UTC), or 0 when it can't be read.
+// fs::file_time_type has no portable epoch before C++20, so map it onto
+// system_clock via the now()-offset trick (precise enough for display).
+int64_t file_modified_unix_seconds(const fs::path &path) {
+	std::error_code ec;
+	const fs::file_time_type ftime = fs::last_write_time(path, ec);
+	if (ec) {
+		return 0;
+	}
+	const auto system_time = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+	        ftime - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
+	return std::chrono::duration_cast<std::chrono::seconds>(system_time.time_since_epoch()).count();
+}
 
 std::string to_lower_ascii(std::string value) {
 	for (char &ch : value) {
@@ -31,19 +48,30 @@ std::string trim_copy(const std::string &value) {
 	return value.substr(begin, end - begin);
 }
 
-bool has_rtxt_magic(const std::vector<uint8_t> &bytes) {
+bool has_magic(const std::vector<uint8_t> &bytes, const char (&want)[5]) {
 	return bytes.size() >= 4 &&
-	       bytes[0] == 'R' &&
-	       bytes[1] == 'T' &&
-	       bytes[2] == 'X' &&
-	       bytes[3] == 'T';
+	       bytes[0] == want[0] &&
+	       bytes[1] == want[1] &&
+	       bytes[2] == want[2] &&
+	       bytes[3] == want[3];
+}
+
+bool has_rtxt_magic(const std::vector<uint8_t> &bytes) {
+	return has_magic(bytes, "RTXT");
+}
+
+// MUS bytecode is stored in an .bin wrapper whose first four bytes are "SCR0"
+// (the music script loader's SCR container). This disambiguates a music .bin
+// from a localized-strings .bin (RTXT magic) and a raw .bin (neither).
+bool has_scr_magic(const std::vector<uint8_t> &bytes) {
+	return has_magic(bytes, "SCR0");
 }
 
 std::string extension_for_name(const std::string &name) {
 	return to_lower_ascii(fs::path(name).extension().string());
 }
 
-std::string kind_for_name_and_rtxt(const std::string &name, bool is_rtxt_bin) {
+std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, bool is_scr_bin) {
 	const std::string extension = extension_for_name(name);
 	if (extension == ".bms") {
 		return "mission";
@@ -68,6 +96,15 @@ std::string kind_for_name_and_rtxt(const std::string &name, bool is_rtxt_bin) {
 	}
 	if (extension == ".fnt") {
 		return "font";
+	}
+	if (extension == ".mnu") {
+		return "menu";
+	}
+	if (extension == ".sbf") {
+		return "sbf";
+	}
+	if (extension == ".bin" && is_scr_bin) {
+		return "music_script";
 	}
 	if (extension == ".bin" && is_rtxt_bin) {
 		return "strings";
@@ -104,14 +141,27 @@ std::string normalize_kind(const std::string &kind) {
 	if (key == "fnt" || key == "fonts") {
 		return "font";
 	}
+	if (key == "mnu" || key == "menus") {
+		return "menu";
+	}
 	if (key == "bin" || key == "rtxt") {
 		return "strings";
 	}
+	if (key == "mus") {
+		return "music_script";
+	}
+	// "sbf", "music_script", and the "music" umbrella pass through unchanged.
 	return key;
 }
 
 bool is_object_kind(const std::string &kind) {
 	return kind == "object_project" || kind == "object_model" || kind == "object_scene";
+}
+
+// The Music workspace browses .sbf banks and .bin (SCR0) scripts together under
+// one "music" umbrella kind, mirroring how "object" spans its sub-kinds.
+bool is_music_kind(const std::string &kind) {
+	return kind == "sbf" || kind == "music_script";
 }
 
 std::string display_name_from_name(const std::string &name) {
@@ -139,10 +189,10 @@ ResourceIndex::~ResourceIndex() = default;
 ResourceIndex::ResourceIndex(ResourceIndex &&) noexcept = default;
 ResourceIndex &ResourceIndex::operator=(ResourceIndex &&) noexcept = default;
 
-bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansion) {
+bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansion, VfsMountMode mode) {
 	clear();
 
-	if (!impl_->vfs.mount_game(root_dir, expansion)) {
+	if (!impl_->vfs.mount_game(root_dir, expansion, mode)) {
 		impl_->last_error = impl_->vfs.last_error();
 		return false;
 	}
@@ -152,12 +202,15 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 		const std::string ext = extension_for_name(loc.logical_name);
 		std::string kind;
 		if (ext == ".bin") {
-			// RTXT strings tables need a content peek; only .bin candidates are read.
+			// RTXT strings tables and SCR0 music scripts need a content peek; only
+			// .bin candidates are read. Use the raw (stored) bytes: the Vfs decodes
+			// SCR containers on read_file, which would strip the "SCR0" magic before
+			// we can classify it.
 			std::vector<uint8_t> bytes;
-			const bool ok = impl_->vfs.read_file(loc.logical_name, bytes);
-			kind = kind_for_name_and_rtxt(loc.logical_name, ok && has_rtxt_magic(bytes));
+			const bool ok = impl_->vfs.read_file_raw(loc.logical_name, bytes);
+			kind = kind_for_name_and_magic(loc.logical_name, ok && has_rtxt_magic(bytes), ok && has_scr_magic(bytes));
 		} else {
-			kind = kind_for_name_and_rtxt(loc.logical_name, false);
+			kind = kind_for_name_and_magic(loc.logical_name, false, false);
 		}
 		if (kind.empty()) {
 			continue;
@@ -174,7 +227,14 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 			// every platform. Godot paths are always '/'-separated and consumers compare
 			// these against String.path_join() output (also '/'); native '\' on Windows
 			// breaks those equality checks and yields non-portable object paths.
-			entry.path = (fs::path(loc.source_path) / loc.logical_name).generic_string();
+			const fs::path loose_path = fs::path(loc.source_path) / loc.logical_name;
+			entry.path = loose_path.generic_string();
+			std::error_code size_ec;
+			const auto size = fs::file_size(loose_path, size_ec);
+			if (!size_ec) {
+				entry.size_bytes = static_cast<uint64_t>(size);
+			}
+			entry.modified_time = file_modified_unix_seconds(loose_path);
 		} else {
 			entry.source_type = "pff";
 			entry.archive_path = loc.source_path;
@@ -203,7 +263,8 @@ std::vector<ResourceFileEntry> ResourceIndex::resource_files(const std::string &
 	std::vector<ResourceFileEntry> out;
 	for (const ResourceFileEntry &entry : impl_->records) {
 		if (filter.empty() || entry.kind == filter ||
-		    (filter == "object" && is_object_kind(entry.kind))) {
+		    (filter == "object" && is_object_kind(entry.kind)) ||
+		    (filter == "music" && is_music_kind(entry.kind))) {
 			out.push_back(entry);
 		}
 	}

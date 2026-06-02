@@ -155,6 +155,44 @@ static int test_mount_game_no_expansion() {
     return 1;
 }
 
+// mount_game mode selects which layers mount: LooseOnly (editor), Packed (shipping
+// runtime), PackedWithLooseOverride (runtime under /d).
+static int test_mount_game_modes() {
+    using opennova::VfsMountMode;
+    fs::path root = fresh_dir("game_modes");
+    write_loose(root / "shared.txt", "LOOSE");
+    {
+        PffTestEntry es[2] = {
+            { "shared.txt",   reinterpret_cast<const uint8_t *>("ARCHIVE"), 7, 0 },
+            { "packed.txt",   reinterpret_cast<const uint8_t *>("PACKED_ONLY"), 11, 0 },
+        };
+        pff_test_write_modern((root / "resource.pff").string().c_str(), es, 2);
+    }
+
+    // LooseOnly: loose files only; archive-only entries are invisible.
+    {
+        Vfs v;
+        CHECK(v.mount_game(root.string(), "", VfsMountMode::LooseOnly), "mount LooseOnly");
+        CHECK(read_vfs(v, "shared.txt") == "LOOSE", "loose readable in LooseOnly");
+        CHECK(!v.has_file("packed.txt"), "archive entry hidden in LooseOnly");
+    }
+    // Packed: archives only; loose files do not shadow and loose-only entries are gone.
+    {
+        Vfs v;
+        CHECK(v.mount_game(root.string(), "", VfsMountMode::Packed), "mount Packed");
+        CHECK(read_vfs(v, "shared.txt") == "ARCHIVE", "archive wins in Packed (no loose override)");
+        CHECK(read_vfs(v, "packed.txt") == "PACKED_ONLY", "archive-only entry readable in Packed");
+    }
+    // PackedWithLooseOverride: both; loose shadows the archive.
+    {
+        Vfs v;
+        CHECK(v.mount_game(root.string(), "", VfsMountMode::PackedWithLooseOverride), "mount PackedWithLooseOverride");
+        CHECK(read_vfs(v, "shared.txt") == "LOOSE", "loose overrides archive under /d");
+        CHECK(read_vfs(v, "packed.txt") == "PACKED_ONLY", "archive entry still reachable under /d");
+    }
+    return 1;
+}
+
 // read_file applies SCR payload decoding; read_file_raw does not (header stays).
 static int test_scr_decode_on_read() {
     fs::path d = fresh_dir("scr_decode");
@@ -206,6 +244,7 @@ int main() {
     RUN_TEST(test_search_path_order);
     RUN_TEST(test_mount_game_expansion);
     RUN_TEST(test_mount_game_no_expansion);
+    RUN_TEST(test_mount_game_modes);
     RUN_TEST(test_scr_decode_on_read);
     RUN_TEST(test_list_files);
 

@@ -712,13 +712,9 @@ static int item_type_from_string(const char *s, size_t len) {
     return 0;
 }
 
-DEF_EXPORT int def_parse_items(const char *path, DefItemsFile *out) {
-    memset(out, 0, sizeof(*out));
-
-    size_t file_len;
-    char *buf = read_file(path, &file_len);
-    if (!buf) return -1;
-
+/* Shared items.def parser over an in-memory buffer. The caller owns `buf` and must have
+   zeroed `out` first. Lets both the path loader and the VFS/PFF byte loader share one parser. */
+static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) {
     size_t entries_cap = 0;
     DefItemDef current;
     memset(&current, 0, sizeof(current));
@@ -823,8 +819,23 @@ DEF_EXPORT int def_parse_items(const char *path, DefItemsFile *out) {
         }
     }
 
-    free(buf);
     return 0;
+}
+
+DEF_EXPORT int def_parse_items(const char *path, DefItemsFile *out) {
+    memset(out, 0, sizeof(*out));
+    size_t file_len;
+    char *buf = read_file(path, &file_len);
+    if (!buf) return -1;
+    int rc = parse_items_buf(buf, file_len, out);
+    free(buf);
+    return rc;
+}
+
+DEF_EXPORT int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out) {
+    memset(out, 0, sizeof(*out));
+    if (!data) return -1;
+    return parse_items_buf((const char *)data, size, out);
 }
 
 DEF_EXPORT void def_free_items(DefItemsFile *f) {
