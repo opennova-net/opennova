@@ -10,6 +10,7 @@ const MenuHostScript := preload("res://game/menu_shell.gd")
 const MAIN_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"   # STARTUP, MUSICVAR 1
 const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"  # the cross-.mnu target
 const OPTIONS_FIXTURE := "res://../fixtures/mnu/jo_options.mnu"  # has the Mods tab (AVAIL_LIST/MOD_DESC)
+const SP_PLAY_FIXTURE := "res://../fixtures/mnu/jo_sp.mnu"  # play screen: mission list IA_LIST + ACCEPT
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
@@ -189,6 +190,64 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	host._root.clear()  # release PFF handles before deleting the temp archives
 	NovaResourceDirSettings.set_expansion(saved)
 	_rm_runtime_dir(dir)
+
+
+# Options -> Mods OK (the ACCEPT button) must APPLY the highlighted expansion, not
+# launch a mission. ACCEPT is overloaded across JO screens (launch on Single Player,
+# plain OK on Options); the host scopes it by screen role, so on a Mods screen (mod
+# list, no mission list) ACCEPT applies. Regression for the "OK loads a mission" bug.
+func test_mods_ok_applies_expansion_without_launching() -> void:
+	var saved := NovaResourceDirSettings.get_expansion()
+	NovaResourceDirSettings.set_expansion("")  # so the apply is not a no-op
+	var dir := _make_runtime_dir()
+	var host := _make_runtime_host(dir)
+	if host == null:
+		pass_test("runtime resource root unavailable in this environment")
+		NovaResourceDirSettings.set_expansion(saved)
+		_rm_runtime_dir(dir)
+		return
+	var menu := host.get_menu()
+	var avail := menu.find_child("AVAIL_LIST", true, false)
+	assert_not_null(avail, "AVAIL_LIST built")
+	avail.select(0)  # highlight jox01 (no double-click / activation)
+	var accept := menu.find_child("ACCEPT", true, false)
+	assert_not_null(accept, "options ACCEPT button built")
+	watch_signals(host)
+	(accept as BaseButton).pressed.emit()  # press OK
+	assert_signal_not_emitted(host, "start_requested", "OK on the Mods screen must not launch")
+	assert_signal_emitted_with_parameters(host, "expansion_selected", ["jox01"])  # OK applied the highlighted mod
+	assert_eq(NovaResourceDirSettings.get_expansion(), "jox01", "applied choice persisted")
+	host._root.clear()
+	NovaResourceDirSettings.set_expansion(saved)
+	_rm_runtime_dir(dir)
+
+
+# The opposite scope: on a play screen (mission list IA_LIST present) the same ACCEPT
+# name still launches, so the screen-scoped wiring did not break the SP launch path.
+func test_play_screen_accept_still_launches() -> void:
+	var dir := OS.get_temp_dir().path_join("menu_shell_sp_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	_copy(SP_PLAY_FIXTURE, dir.path_join("main.mnu"))  # jo_sp as the opened menu
+	var f := FileAccess.open(dir.path_join("alpha.bms"), FileAccess.WRITE)
+	if f != null:
+		f.store_buffer(PackedByteArray([0]))
+		f.close()
+	var host := _make_host(dir)
+	if host == null:
+		pass_test("temp resource root unavailable")
+		DirAccess.remove_absolute(dir.path_join("main.mnu"))
+		DirAccess.remove_absolute(dir.path_join("alpha.bms"))
+		DirAccess.remove_absolute(dir)
+		return
+	var accept := host.get_menu().find_child("ACCEPT", true, false)
+	assert_not_null(accept, "SP ACCEPT button built")
+	watch_signals(host)
+	(accept as BaseButton).pressed.emit()  # no explicit pick -> first .bms
+	# ACCEPT on a mission-list screen still launches (first .bms, none selected).
+	assert_signal_emitted_with_parameters(host, "start_requested", ["alpha.bms"])
+	DirAccess.remove_absolute(dir.path_join("main.mnu"))
+	DirAccess.remove_absolute(dir.path_join("alpha.bms"))
+	DirAccess.remove_absolute(dir)
 
 
 # The menu stylesheet (menu_style.mns) is PFF-archived and is not a "recognized kind",

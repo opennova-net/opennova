@@ -201,21 +201,38 @@ func open_ingame_menu() -> bool:
 	return open_menu(ingame_menu_file, "")
 
 
-# After each (re)build, connect the launch/quit controls and seed mission lists.
+# After each (re)build, connect the launch/quit controls and seed mission/mod lists.
 # The screen nodes are freshly built children, so prior connections died with the
 # old tree; we just rescan.
+#
+# The "OK" control (named ACCEPT in JO) is overloaded: it launches on a play screen
+# but is a plain confirm on Options/loadout/etc. The original engine dispatches it
+# per-screen (sub_63C060 registers callbacks keyed by screen+control), so the same
+# ACCEPT means different things on different screens. We can't hardcode JO's screen
+# names (this shell is game-agnostic), so we scope by the screen's ROLE inferred from
+# its content: a mission list -> launch screen (ACCEPT/START_GAME launch the mission);
+# else a mod list -> Mods screen (ACCEPT applies the highlighted expansion); else the
+# start controls are left to the menu's own actions. Binding them globally is what
+# made OK on Options launch the first mission.
 func _wire_named_controls() -> void:
-	_connect_named(start_control_names, _on_start_control)
-	_connect_named(exit_control_names, _on_exit_control)
-	_connect_named(return_control_names, _on_return_control)
+	var has_mission_list := false
 	for list_name in mission_list_names:
 		var list := _menu.find_child(list_name, true, false)
 		if list is NovaMnuList:
+			has_mission_list = true
 			_seed_mission_list(list as NovaMnuList)
+	var has_mod_list := false
 	for mod_name in mod_list_names:
 		var mod_list := _menu.find_child(mod_name, true, false)
 		if mod_list is NovaMnuList:
+			has_mod_list = true
 			_seed_mod_list(mod_list as NovaMnuList)
+	if has_mission_list:
+		_connect_named(start_control_names, _on_start_control)
+	elif has_mod_list:
+		_connect_named(start_control_names, _on_apply_selected_mod)
+	_connect_named(exit_control_names, _on_exit_control)
+	_connect_named(return_control_names, _on_return_control)
 
 
 func _connect_named(names: PackedStringArray, handler: Callable) -> void:
@@ -259,6 +276,23 @@ func _on_mod_activated(index: int) -> void:
 	if list == null or index < 0 or index >= list.item_count:
 		return
 	_apply_expansion(list.get_item_text(index))
+
+
+# OK/ACCEPT on a Mods screen: mount + persist the highlighted expansion rather than
+# launching a mission. Wired (instead of the launch handler) by _wire_named_controls
+# when the screen has a mod list but no mission list. Reads the live ItemList
+# selection (NovaMnuList extends ItemList), so it also covers the entry _seed_mod_list
+# pre-selected. A no-op when nothing is highlighted or it is already the current mod.
+func _on_apply_selected_mod() -> void:
+	var list := _find_mod_list()
+	if list == null:
+		return
+	var sel := list.get_selected_items()
+	if sel.is_empty():
+		return
+	var idx := sel[0]
+	if idx >= 0 and idx < list.item_count:
+		_apply_expansion(list.get_item_text(idx))
 
 
 # Mount the chosen expansion onto the live root, refresh the content that depends on
