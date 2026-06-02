@@ -7,6 +7,7 @@ add_library(opennova_threedi STATIC
     src/threedi_panm_wave.cpp
     src/threedi_panm_matrices.cpp
     src/threedi_ir.cpp
+    src/threedi_ir_ground_anchor.cpp
     src/threedi_ir_from_3di3.cpp
     src/threedi_gp.cpp
     src/threedi_ir_from_gp.cpp

@@ -29,6 +29,12 @@ foreach(test ctrl decode runtime wave)
     add_test(NAME threedi_panm_${test} COMMAND threedi_panm_${test}_test)
 endforeach()
 
+# Placement ground-anchor resolution (ground userpoint, else part-0 bounding center)
+add_executable(threedi_ground_anchor_test threedi/ground_anchor_test.cpp)
+target_link_libraries(threedi_ground_anchor_test PRIVATE opennova_threedi)
+target_include_directories(threedi_ground_anchor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_ground_anchor COMMAND threedi_ground_anchor_test)
+
 # ADM tests
 foreach(test comment trim_value parse)
     add_executable(adm_${test}_test adm/adm_${test}_test.cpp)

@@ -1050,6 +1050,7 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_light_field", "index", "key", "value"), &NovaObjectData::set_light_field);
 	ClassDB::bind_method(D_METHOD("get_user_point_count"), &NovaObjectData::get_user_point_count);
 	ClassDB::bind_method(D_METHOD("get_user_point_info", "index"), &NovaObjectData::get_user_point_info);
+	ClassDB::bind_method(D_METHOD("get_ground_anchor", "lod_index"), &NovaObjectData::get_ground_anchor, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_part_anim_count", "lod_index"), &NovaObjectData::get_part_anim_count);
 	ClassDB::bind_method(D_METHOD("get_part_animations", "lod_index"), &NovaObjectData::get_part_animations);
 	ClassDB::bind_method(D_METHOD("get_part_anim_editor_entries", "lod_index"), &NovaObjectData::get_part_anim_editor_entries);
@@ -2197,6 +2198,22 @@ Dictionary NovaObjectData::get_user_point_info(int p_index) const {
 	info["subobject"] = point.part_index;
 	info["point_type"] = point.type_code;
 	return info;
+}
+
+Vector3 NovaObjectData::get_ground_anchor(int p_lod_index) const {
+	// The model-space point that should sit at a placed object's stored position:
+	// the "ground" userpoint if present, else part 0's bounding center (see
+	// threedi_ir_ground_anchor). The helper returns IR axis order; godot_vec3
+	// applies the single negate-x that maps it into render/model space, exactly as
+	// get_user_point_info / build_lod_submeshes do for userpoints and part origins.
+	if (!has_ir) {
+		return Vector3();
+	}
+	float anchor[3];
+	if (!threedi_ir_ground_anchor(&ir, p_lod_index, anchor)) {
+		return Vector3();
+	}
+	return godot_vec3(anchor);
 }
 
 int NovaObjectData::get_part_anim_count(int p_lod_index) const {

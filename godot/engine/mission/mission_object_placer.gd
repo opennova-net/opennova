@@ -53,6 +53,9 @@ var pickable_records: Array = []
 var _object_data_cache: Dictionary = {}
 # graphic -> Array[{ mesh, material, offset, submesh }] harvested from a template.
 var _static_batch_cache: Dictionary = {}
+# graphic -> Vector3 ground anchor (model-space point that sits at the entity
+# position). Computed once per graphic; see _ground_anchor_for.
+var _anchor_cache: Dictionary = {}
 
 
 func _init(p_resource_root: NovaResourceRoot = null, p_item_db: NovaItemDatabase = null) -> void:
@@ -187,7 +190,11 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			continue
 		var model: Node3D = NovaObjectModelScript.new()
 		model.name = "Anim_%s_%d" % [a["graphic"], stats.animated]
-		model.transform = a["xform"]
+		# Anchor the whole model so its ground point sits at the entity origin (same
+		# rule as static; for an animated model the offset rides the root node, parts
+		# still animate within it). The recorded offset lets the editor drag re-apply it.
+		var anchor_inv := Transform3D(Basis(), -_ground_anchor_for(a["graphic"], data))
+		model.transform = (a["xform"] as Transform3D) * anchor_inv
 		container.add_child(model)
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
@@ -202,6 +209,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				"index": ref["index"],
 				"graphic": a["graphic"],
 				"node": model,
+				"offset": anchor_inv,
 				"animated": true,
 			})
 		stats.animated += 1
@@ -245,7 +253,8 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			return delta
 		var model: Node3D = NovaObjectModelScript.new()
 		model.name = "Anim_%s_k%d_i%d" % [graphic, kind, index]
-		model.transform = xform
+		var anchor_inv := Transform3D(Basis(), -_ground_anchor_for(graphic, data))
+		model.transform = xform * anchor_inv
 		container.add_child(model)
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
@@ -257,6 +266,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			"index": index,
 			"graphic": graphic,
 			"node": model,
+			"offset": anchor_inv,
 			"animated": true,
 		})
 		delta.placed = 1
@@ -360,6 +370,20 @@ func _load_object_data(graphic: String) -> NovaObjectData:
 	return data
 
 
+# The model-space anchor for `graphic`: the point that should sit at the entity's
+# placed position. RENDER_LOD is the LOD the placer draws (userpoints are model-global;
+# the part-0-center fallback is per-LOD). Cached per graphic; Vector3.ZERO when the
+# model is unresolved or has no anchor (degrades to the old model-origin placement).
+func _ground_anchor_for(graphic: String, data: NovaObjectData) -> Vector3:
+	if _anchor_cache.has(graphic):
+		return _anchor_cache[graphic]
+	var anchor := Vector3.ZERO
+	if data != null and data.has_method("get_ground_anchor"):
+		anchor = data.get_ground_anchor(RENDER_LOD)
+	_anchor_cache[graphic] = anchor
+	return anchor
+
+
 # Build a template NovaObjectModel, let it assemble the rest-pose meshes and
 # fidelity materials, then harvest one batch per submesh: the mesh, its shader
 # material, and the part's rest transform baked as a per-batch offset. The model is
@@ -383,6 +407,11 @@ func _get_static_batches(graphic: String, env_node: Node, tree_parent: Node) -> 
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
 		model.rebuild()
+		# Anchor the model so its ground reference point (the "ground" userpoint, else
+		# part 0's center) lands at the entity origin instead of the model origin. Baking
+		# T(-anchor) into every batch offset means every consumer of "offset" (place,
+		# place_single, the editor drag via the recorded offset, picking) inherits it.
+		var anchor_inv := Transform3D(Basis(), -_ground_anchor_for(graphic, data))
 		var submesh := 0
 		for robj_node in model.get_render_part_nodes().values():
 			var part_node := robj_node as Node3D
@@ -394,7 +423,7 @@ func _get_static_batches(graphic: String, env_node: Node, tree_parent: Node) -> 
 					batches.append({
 						"mesh": mi.mesh,
 						"material": mi.material_override,
-						"offset": part_node.transform * mi.transform,
+						"offset": anchor_inv * part_node.transform * mi.transform,
 						"submesh": submesh,
 					})
 					submesh += 1

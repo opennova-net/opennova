@@ -26,6 +26,9 @@ func _init(value: Node = null) -> void:
 	# The controller fires `changed` on load / clear / select / dirty / save; refresh
 	# the shell title + action-button state (Save enables, `*` appears) on each.
 	_controller.changed.connect(_sync_shell_title)
+	# Transient action feedback (undo / delete / place / rejected edits) flows through
+	# status_reported; relay it to the shell status bar. Open / save keep their own poll.
+	_controller.status_reported.connect(_on_controller_status)
 
 
 func _ensure_mount() -> ViewportMount:
@@ -187,11 +190,14 @@ func open_file(path: String) -> Error:
 	var err := int(_controller.open_mission(path))
 	# Surface the controller's detailed outcome (e.g. "missing dvxi5.trn", or the
 	# placement summary). On failure the shell also shows a generic error code; the
-	# success message is the one that lands for the user.
-	if editor_shell != null and editor_shell.has_method("show_status_message"):
-		var status: String = _controller.get_last_status()
-		if not status.is_empty():
+	# success message is the one that lands for the user. Without a shell (headless),
+	# a failure still goes to the log rather than vanishing.
+	var status: String = _controller.get_last_status()
+	if not status.is_empty():
+		if editor_shell != null and editor_shell.has_method("show_status_message"):
 			editor_shell.show_status_message(status, 5.0 if err == OK else 7.0)
+		elif err != OK:
+			push_warning("Mission open: " + status)
 	return err as Error
 
 
@@ -260,16 +266,51 @@ func get_save_dialog_dir() -> String:
 
 
 func _report_save_status(err: int) -> void:
-	if editor_shell == null or not editor_shell.has_method("show_status_message"):
-		return
 	var status: String = _controller.get_last_status() if _controller != null else ""
-	if not status.is_empty():
+	if status.is_empty():
+		return
+	if editor_shell != null and editor_shell.has_method("show_status_message"):
 		editor_shell.show_status_message(status, 4.0 if err == OK else 6.0)
+	elif err != OK:
+		# No shell to show in (headless), but a failed save must not be silent.
+		push_warning("Mission save: " + status)
 
 
 func _sync_shell_title() -> void:
 	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
 		editor_shell.sync_from_editor_state()
+
+
+# Surface a controller action's transient status in the shell status bar. Errors linger
+# a little longer. No-op without a shell (headless tests read get_last_status instead).
+func _on_controller_status(message: String, is_error: bool) -> void:
+	if message.is_empty() or editor_shell == null or not editor_shell.has_method("show_status_message"):
+		return
+	editor_shell.show_status_message(message, 6.0 if is_error else 3.5)
+
+
+# --- Undo / redo --------------------------------------------------------------
+# The base EditorWorkspace exposes these hooks; the controller owns the byte-snapshot
+# undo stack. The live trigger this phase is the viewport Ctrl+Z / Ctrl+Y (handled in
+# MissionController); implementing the hooks makes undo/redo reachable for tests and a
+# future shell toolbar with no shell change. Mirrors strings_workspace.gd.
+
+func can_undo() -> bool:
+	return _controller != null and _controller.can_undo()
+
+
+func can_redo() -> bool:
+	return _controller != null and _controller.can_redo()
+
+
+func undo() -> void:
+	if _controller != null:
+		_controller.undo()
+
+
+func redo() -> void:
+	if _controller != null:
+		_controller.redo()
 
 
 # --- Inspector ----------------------------------------------------------------

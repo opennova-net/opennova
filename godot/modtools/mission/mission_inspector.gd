@@ -25,12 +25,21 @@ var _box: VBoxContainer
 # handlers ignore the echo and do not re-commit (and re-emit) what they just read.
 var _loading: bool = false
 
-var _identity_label: Label
+var _identity_label: Label  # heading: the selected model's name (or kind + index)
+var _identity_sub: Label    # muted subline: kind + index, shown when a name resolved
 var _animated_note: Label
 var _pos_spins: Array = []  # [x, y, z]
 var _rot_spins: Array = []  # [pitch, yaw, roll]
 var _team_spin: SpinBox
 var _group_spin: SpinBox
+# Collapsible "Behavior" section: the per-entity AI + waypoint fields the format carries
+# beyond team / group. Bound through a FieldBinder (its own reentrancy guard), so a
+# programmatic repopulate never echoes back as an edit. The "Waypoint path" field here is
+# what links a unit to a path authored in Waypoints mode.
+var _behavior_toggle: CheckButton
+var _behavior_box: VBoxContainer
+var _behavior_binder: FieldBinder
+var _delete_button: Button
 
 # --- Place-object palette (persistent) ----------------------------------------
 var _place_box: VBoxContainer
@@ -52,6 +61,36 @@ var _placeable_names: Dictionary = {}  # id -> display label
 # not re-arm.
 var _place_syncing: bool = false
 
+# --- Edit-mode tabs + Waypoints panel (P7) ------------------------------------
+# A segmented Objects / Waypoints switch at the top drives the controller's mode; the
+# inspector shows the object panels in Objects mode and the waypoint panel in Waypoints
+# mode. The waypoint panel lists the paths and reports the selected marker (authoring
+# buttons land in later phases). _mode_syncing / _wp_syncing guard programmatic updates.
+var _mode_tabs: TabBar
+var _mode_syncing: bool = false
+var _wp_box: VBoxContainer
+var _wp_status: Label
+var _wp_new_path_button: Button
+var _wp_list: ItemList
+var _wp_marker_label: Label
+var _wp_row_paths: Array = []  # path indices parallel to the _wp_list rows
+var _wp_syncing: bool = false
+# Active-path flag toggles (loop is the inverse of the stored DoesNotLoop bit) + the
+# ordered marker sub-list. _wp_flags_syncing / _wp_marker_syncing guard programmatic sets.
+var _wp_loop_check: CheckBox
+var _wp_blue_check: CheckBox
+var _wp_red_check: CheckBox
+var _wp_flags_syncing: bool = false
+var _wp_marker_list: ItemList
+var _wp_marker_rows: Array = []  # marker indices parallel to the _wp_marker_list rows
+var _wp_marker_syncing: bool = false
+# Authoring buttons (P7d): add (a placement tool), reorder, delete, clear.
+var _wp_add_button: Button
+var _wp_up_button: Button
+var _wp_down_button: Button
+var _wp_delete_button: Button
+var _wp_clear_button: Button
+
 
 func setup(controller) -> void:
 	_controller = controller
@@ -71,8 +110,10 @@ func setup(controller) -> void:
 		_root.add_theme_constant_override("separation", 8)
 		_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		scroll.add_child(_root)
+		_build_mode_tabs()
 		_build_edit_panel()
 		_build_place_panel()
+		_build_waypoint_panel()
 		_box = VBoxContainer.new()
 		_box.add_theme_constant_override("separation", 6)
 		_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -83,8 +124,15 @@ func setup(controller) -> void:
 
 
 func _refresh() -> void:
+	_refresh_mode_tabs()
 	_refresh_edit_panel()
 	_refresh_place_panel()
+	_refresh_waypoint_panel()
+	# Mode gating: the object panels show in Objects mode, the waypoint panel in Waypoints
+	# mode (it hides itself in Objects mode). The read-only summary shows in both.
+	if _controller != null and _controller.is_waypoint_mode():
+		_edit_box.visible = false
+		_place_box.visible = false
 	_rebuild_summary()
 
 
@@ -96,8 +144,11 @@ func _build_edit_panel() -> void:
 	_edit_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root.add_child(_edit_box)
 
-	ObjectUiHelpers.add_section_heading(_edit_box, "Selected entity")
-	_identity_label = ObjectUiHelpers.add_muted_label(_edit_box, "")
+	# The identity line is the section heading: it reads the selected model's name (resolved
+	# from items.def) prominently, with a muted kind + index subline beneath, so the user
+	# sees "Humvee" rather than just "Item #42".
+	_identity_label = ObjectUiHelpers.add_section_heading(_edit_box, "Selected entity")
+	_identity_sub = ObjectUiHelpers.add_muted_label(_edit_box, "")
 
 	ObjectUiHelpers.add_section_heading(_edit_box, "Position")
 	_pos_spins = [
@@ -119,13 +170,141 @@ func _build_edit_panel() -> void:
 	_team_spin = ObjectUiHelpers.add_spin_row(_edit_box, "MissionTeam", "Team", 0.0, 255.0, 1.0)
 	_group_spin = ObjectUiHelpers.add_spin_row(_edit_box, "MissionGroup", "Group", 0.0, 255.0, 1.0)
 
+	_build_behavior_section()
+
 	_animated_note = ObjectUiHelpers.add_muted_label(_edit_box, "Animated object.")
+
+	# Delete sits at the bottom of the edit panel as the one destructive action; the whole
+	# panel is hidden when nothing is selected, so the button only shows with a selection.
+	# Removing an entity is not saved to the .bms until Save Mission, so an accidental
+	# delete is recovered by reopening the mission rather than a modal confirm here.
+	_edit_box.add_child(HSeparator.new())
+	_delete_button = Button.new()
+	_delete_button.name = "MissionDeleteEntity"
+	_delete_button.text = "Delete object"
+	_delete_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_edit_box.add_child(_delete_button)
 
 	for axis in 3:
 		_pos_spins[axis].value_changed.connect(_on_position_axis.bind(axis))
 		_rot_spins[axis].value_changed.connect(_on_rotation_axis.bind(axis))
 	_team_spin.value_changed.connect(_on_team_changed)
 	_group_spin.value_changed.connect(_on_group_changed)
+	# Behavior spins wire themselves to the controller through the FieldBinder in
+	# _build_behavior_section, so they are not connected here.
+	_delete_button.pressed.connect(_on_delete_pressed)
+
+
+# Build the collapsed-by-default "Behavior" section: a toggle that shows / hides a box of
+# the per-entity AI + waypoint fields. Each field is a FieldBinder-bound SpinBox whose
+# setter routes through controller.set_selected_property; sync happens in
+# _refresh_edit_panel via _behavior_binder.sync_from. Ranges follow the format's field
+# widths so a real value is never clamped on display.
+func _build_behavior_section() -> void:
+	_behavior_binder = FieldBinder.new()
+	_behavior_toggle = CheckButton.new()
+	_behavior_toggle.name = "MissionBehaviorToggle"
+	_behavior_toggle.text = "Behavior"
+	_behavior_toggle.tooltip_text = "Per-unit AI and waypoint settings (these mainly drive organic units at runtime)."
+	_behavior_toggle.button_pressed = false
+	_edit_box.add_child(_behavior_toggle)
+
+	_behavior_box = VBoxContainer.new()
+	_behavior_box.add_theme_constant_override("separation", 4)
+	_behavior_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_behavior_box.visible = false
+	_edit_box.add_child(_behavior_box)
+	_behavior_toggle.toggled.connect(func(on: bool) -> void: _behavior_box.visible = on)
+
+	# Waypoint path (waypoint_id) is the bridge: it names which authored path a unit follows.
+	var wp_spin := _add_behavior_spin("waypoint_id", "Waypoint path", 0.0, 127.0)
+	wp_spin.tooltip_text = "Which waypoint path this unit follows. Author paths in the Waypoints tab."
+	_add_behavior_spin("wp_number", "WP number", 0.0, 255.0)
+	ObjectUiHelpers.add_section_heading(_behavior_box, "Combat")
+	_add_behavior_spin("perception", "Perception", -1000000.0, 1000000.0)
+	_add_behavior_spin("accuracy", "Accuracy", -32768.0, 32767.0)
+	_add_behavior_spin("alert_state", "Alert state", 0.0, 255.0)
+	_add_behavior_spin("min_engagement_distance", "Min combat range", -1000000.0, 1000000.0)
+	_add_behavior_spin("max_engagement_distance", "Max combat range", -1000000.0, 1000000.0)
+	_add_behavior_spin("max_attack_distance", "Max attack range", -1000000.0, 1000000.0)
+	ObjectUiHelpers.add_section_heading(_behavior_box, "Spawning")
+	_add_behavior_spin("spawn_count", "Spawn count", -32768.0, 32767.0)
+	_add_behavior_spin("max_simultaneous", "Max at once", 0.0, 255.0)
+	ObjectUiHelpers.add_section_heading(_behavior_box, "Flags")
+	# A 32-bit bitfield: a decimal field is unreadable, so author it as hexadecimal.
+	_add_behavior_line("ai_flags", "AI flags",
+		func(info) -> String: return "0x%08X" % (int(info.get("ai_flags", 0)) & 0xFFFFFFFF),
+		func(text: String) -> void: _ai_flags_set(text),
+		"Bitfield of unit AI flags, in hexadecimal (e.g. 0x0000000A). Press Enter to apply.")
+
+
+func _add_behavior_spin(property: String, label: String, min_value: float, max_value: float) -> SpinBox:
+	var spin := ObjectUiHelpers.add_spin_row(_behavior_box, "MissionBeh_" + property, label, min_value, max_value, 1.0)
+	_behavior_binder.bind_spin(spin,
+		func(info): return float(int(info.get(property, 0))),
+		func(value: float) -> void: _behavior_set(property, value))
+	return spin
+
+
+# A text field bound through the FieldBinder (Enter to apply), for a property that reads
+# better as text than a number. Used for the ai_flags bitfield, shown as hexadecimal.
+func _add_behavior_line(property: String, label: String, getter: Callable, setter: Callable, tooltip: String = "") -> LineEdit:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_behavior_box.add_child(row)
+	var lbl := Label.new()
+	lbl.text = label
+	lbl.tooltip_text = tooltip if not tooltip.is_empty() else label
+	lbl.clip_text = true
+	lbl.custom_minimum_size = Vector2(76, 0)
+	row.add_child(lbl)
+	var line := LineEdit.new()
+	line.name = "MissionBeh_" + property
+	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if not tooltip.is_empty():
+		line.tooltip_text = tooltip
+	row.add_child(line)
+	_behavior_binder.bind_line(line, getter, setter)
+	return line
+
+
+func _behavior_set(property: String, value: float) -> void:
+	if _controller != null:
+		_controller.set_selected_property(property, int(value))
+
+
+# Apply a hexadecimal ai_flags edit. Pass the value as a signed int32 so the engine's int
+# parameter carries the exact 32-bit pattern (the high bit becomes negative and reads back
+# as the same bits). An unparseable entry restores the field from the model rather than
+# writing garbage.
+func _ai_flags_set(text: String) -> void:
+	if _controller == null:
+		return
+	var parsed := _parse_uint32(text)
+	if parsed < 0:
+		_behavior_binder.sync_from(_controller.get_selected_entity())
+		return
+	var signed: int = parsed if parsed < 0x80000000 else parsed - 0x100000000
+	_controller.set_selected_property("ai_flags", signed)
+
+
+# Parse a uint32 from "0x..." hex, bare hex, or decimal text. Returns -1 when the text is
+# empty, malformed, or out of the 0..0xFFFFFFFF range (the caller treats -1 as "no change").
+func _parse_uint32(text: String) -> int:
+	var t := text.strip_edges()
+	if t.is_empty():
+		return -1
+	var value := -1
+	if t.to_lower().begins_with("0x"):
+		if t.is_valid_hex_number(true):
+			value = t.hex_to_int()
+	elif t.is_valid_int():
+		value = t.to_int()
+	elif t.is_valid_hex_number(false):
+		value = ("0x" + t).hex_to_int()
+	if value < 0 or value > 0xFFFFFFFF:
+		return -1
+	return value
 
 
 func _refresh_edit_panel() -> void:
@@ -139,7 +318,15 @@ func _refresh_edit_panel() -> void:
 	# synchronously, and without the guard each repopulate would re-commit the value
 	# back into the model and loop.
 	_loading = true
-	_identity_label.text = "%s #%d" % [_kind_label(int(entity.get("kind", -1))), int(entity.get("index", -1))]
+	var kind_index := "%s #%d" % [_kind_label(int(entity.get("kind", -1))), int(entity.get("index", -1))]
+	var model_name: String = _controller.get_selected_display_name() if _controller != null else ""
+	if model_name.is_empty():
+		_identity_label.text = kind_index
+		_identity_sub.visible = false
+	else:
+		_identity_label.text = model_name
+		_identity_sub.text = kind_index
+		_identity_sub.visible = true
 	var pos: Vector3 = entity.get("position", Vector3.ZERO)
 	_pos_spins[0].value = pos.x
 	_pos_spins[1].value = pos.y
@@ -151,6 +338,10 @@ func _refresh_edit_panel() -> void:
 	_team_spin.value = float(int(entity.get("team", 0)))
 	_group_spin.value = float(int(entity.get("group", 0)))
 	_loading = false
+
+	# The Behavior spins carry their own reentrancy guard (FieldBinder), independent of
+	# _loading, so syncing them here cannot echo back as an edit.
+	_behavior_binder.sync_from(entity)
 
 	var summary: Dictionary = _controller.get_selection_summary() if _controller != null else {}
 	_animated_note.visible = bool(summary.get("animated", false))
@@ -196,6 +387,14 @@ func _on_group_changed(value: float) -> void:
 	if _loading or _controller == null:
 		return
 	_controller.set_selected_group(int(value))
+
+
+func _on_delete_pressed() -> void:
+	if _controller == null:
+		return
+	# The controller removes the selected entity, re-bakes the world, and fires `changed`;
+	# _refresh_edit_panel then hides this panel (nothing is selected after a delete).
+	_controller.delete_selected()
 
 
 # --- Place-object palette (persistent) ----------------------------------------
@@ -303,9 +502,13 @@ func _sync_place_affordance() -> void:
 	_place_syncing = false
 
 	if _placeable_cache.is_empty():
-		_place_status.text = "No item database (items.def) was found in the resource directory."
+		_place_status.text = "No item database (items.def) found. Set a resource directory in the Terrain workspace, then reopen the mission."
 	elif armed:
 		_place_status.text = "Placing %s. Click the terrain to place it; right-click or Esc to stop." % _placeable_names.get(armed_id, "item %d" % armed_id)
+	elif _place_list.item_count == 0 and not _place_search.text.strip_edges().is_empty():
+		# The search filtered everything out: say so, rather than leaving the generic prompt
+		# over an empty list (which reads like the mission has no items).
+		_place_status.text = "No items match \"%s\". Try a different search." % _place_search.text.strip_edges()
 	else:
 		_place_status.text = "Pick an item, then click the terrain to place it."
 
@@ -326,6 +529,285 @@ func _on_place_item_selected(row: int) -> void:
 func _on_place_stop() -> void:
 	if _controller != null:
 		_controller.disarm_placement()
+
+
+# --- Edit-mode tabs (Objects / Waypoints) -------------------------------------
+# The tabs drive the controller's mode; the controller is the single source of truth, so
+# _refresh_mode_tabs syncs the current tab back from it (guarded against echo).
+
+func _build_mode_tabs() -> void:
+	_mode_tabs = TabBar.new()
+	_mode_tabs.name = "MissionModeTabs"
+	_mode_tabs.add_tab("Objects")
+	_mode_tabs.add_tab("Waypoints")
+	_mode_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_root.add_child(_mode_tabs)
+	_mode_tabs.tab_changed.connect(_on_mode_tab_changed)
+
+
+func _on_mode_tab_changed(tab: int) -> void:
+	if _mode_syncing or _controller == null:
+		return
+	_controller.set_waypoint_mode(tab == 1)
+
+
+func _refresh_mode_tabs() -> void:
+	if _mode_tabs == null:
+		return
+	var has_mission := _controller != null and _controller.get_mission() != null
+	_mode_tabs.visible = has_mission
+	var want := 1 if (_controller != null and _controller.is_waypoint_mode()) else 0
+	if _mode_tabs.current_tab != want:
+		_mode_syncing = true
+		_mode_tabs.current_tab = want
+		_mode_syncing = false
+
+
+# --- Waypoints panel ----------------------------------------------------------
+# Lists the mission's waypoint paths and reports the selected marker. Selecting a path row
+# focuses it (controller.select_waypoint_path); markers are picked in the viewport. Built
+# once and repopulated under the _wp_syncing guard (select() must not echo as a pick).
+# Path flag editing + marker authoring buttons land in later phases.
+
+func _build_waypoint_panel() -> void:
+	_wp_box = VBoxContainer.new()
+	_wp_box.add_theme_constant_override("separation", 4)
+	_wp_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_wp_box.visible = false
+	_root.add_child(_wp_box)
+
+	ObjectUiHelpers.add_section_heading(_wp_box, "Waypoint paths")
+	_wp_status = ObjectUiHelpers.add_muted_label(_wp_box, "")
+	_wp_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+	# Always-available entry point: focus the first empty path so authoring works even when
+	# the list is empty (a brand-new or all-cleared mission), where no row could be clicked.
+	_wp_new_path_button = Button.new()
+	_wp_new_path_button.name = "MissionWpNewPath"
+	_wp_new_path_button.text = "New path"
+	_wp_new_path_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_wp_box.add_child(_wp_new_path_button)
+	_wp_new_path_button.pressed.connect(_on_wp_new_path_pressed)
+
+	_wp_list = ItemList.new()
+	_wp_list.name = "MissionWaypointPaths"
+	_wp_list.select_mode = ItemList.SELECT_SINGLE
+	_wp_list.custom_minimum_size = Vector2(0, 140)
+	_wp_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_wp_box.add_child(_wp_list)
+	_wp_list.item_selected.connect(_on_wp_path_selected)
+
+	# Active-path flags. "Loop" is shown (not "DoesNotLoop") so the toggle reads the way the
+	# route behaves; the controller inverts it back to the stored bit.
+	_wp_box.add_child(HSeparator.new())
+	ObjectUiHelpers.add_section_heading(_wp_box, "Path")
+	var flags_row := HBoxContainer.new()
+	flags_row.add_theme_constant_override("separation", 10)
+	_wp_box.add_child(flags_row)
+	_wp_loop_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionWpLoop", "Loop")
+	_wp_blue_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionWpBlue", "Blue")
+	_wp_red_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionWpRed", "Red")
+	_wp_loop_check.toggled.connect(_on_wp_flag_toggled)
+	_wp_blue_check.toggled.connect(_on_wp_flag_toggled)
+	_wp_red_check.toggled.connect(_on_wp_flag_toggled)
+
+	# The active path's markers in route order. Selecting a row selects that marker.
+	ObjectUiHelpers.add_section_heading(_wp_box, "Markers")
+	_wp_marker_list = ItemList.new()
+	_wp_marker_list.name = "MissionWaypointMarkers"
+	_wp_marker_list.select_mode = ItemList.SELECT_SINGLE
+	_wp_marker_list.custom_minimum_size = Vector2(0, 140)
+	_wp_marker_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_wp_box.add_child(_wp_marker_list)
+	_wp_marker_list.item_selected.connect(_on_wp_marker_row_selected)
+
+	# Authoring buttons: Add marker (a placement tool) on its own row; reorder / delete on
+	# the next; Clear path last.
+	_wp_add_button = Button.new()
+	_wp_add_button.name = "MissionWpAddMarker"
+	_wp_add_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_wp_box.add_child(_wp_add_button)
+	_wp_add_button.pressed.connect(_on_wp_add_pressed)
+
+	var reorder_row := HBoxContainer.new()
+	reorder_row.add_theme_constant_override("separation", 6)
+	reorder_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_wp_box.add_child(reorder_row)
+	_wp_up_button = _make_wp_button(reorder_row, "MissionWpMoveUp", "Move up")
+	_wp_down_button = _make_wp_button(reorder_row, "MissionWpMoveDown", "Move down")
+	_wp_delete_button = _make_wp_button(reorder_row, "MissionWpDeleteMarker", "Delete marker")
+	_wp_up_button.pressed.connect(_on_wp_move_pressed.bind(-1))
+	_wp_down_button.pressed.connect(_on_wp_move_pressed.bind(1))
+	_wp_delete_button.pressed.connect(_on_wp_delete_marker_pressed)
+
+	_wp_clear_button = Button.new()
+	_wp_clear_button.name = "MissionWpClearPath"
+	_wp_clear_button.text = "Clear path"
+	_wp_clear_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_wp_box.add_child(_wp_clear_button)
+	_wp_clear_button.pressed.connect(_on_wp_clear_pressed)
+
+	_wp_box.add_child(HSeparator.new())
+	_wp_marker_label = ObjectUiHelpers.add_muted_label(_wp_box, "")
+	_wp_marker_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+
+func _make_wp_button(parent: Control, node_name: String, text: String) -> Button:
+	var button := Button.new()
+	button.name = node_name
+	button.text = text
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(button)
+	return button
+
+
+func _on_wp_add_pressed() -> void:
+	if _controller == null:
+		return
+	# The button toggles the add-marker tool: arm it, or disarm if already armed.
+	if _controller.is_marker_placement_armed():
+		_controller.disarm_marker_placement()
+	else:
+		_controller.arm_marker_placement()
+
+
+func _on_wp_move_pressed(delta: int) -> void:
+	if _controller != null:
+		_controller.move_selected_marker(delta)
+
+
+func _on_wp_delete_marker_pressed() -> void:
+	if _controller != null:
+		_controller.delete_selected_marker()
+
+
+func _on_wp_clear_pressed() -> void:
+	if _controller != null:
+		_controller.clear_active_path()
+
+
+func _on_wp_flag_toggled(_pressed: bool) -> void:
+	if _wp_flags_syncing or _controller == null:
+		return
+	_controller.set_waypoint_flags(_wp_loop_check.button_pressed, _wp_blue_check.button_pressed, _wp_red_check.button_pressed)
+
+
+func _on_wp_marker_row_selected(row: int) -> void:
+	if _wp_marker_syncing or _controller == null:
+		return
+	if row < 0 or row >= _wp_marker_rows.size():
+		return
+	_controller.select_waypoint_marker(int(_wp_marker_rows[row]))
+
+
+func _on_wp_path_selected(row: int) -> void:
+	if _wp_syncing or _controller == null:
+		return
+	if row < 0 or row >= _wp_row_paths.size():
+		return
+	_controller.select_waypoint_path(int(_wp_row_paths[row]))
+
+
+func _on_wp_new_path_pressed() -> void:
+	if _controller != null:
+		_controller.select_new_waypoint_path()
+
+
+func _refresh_waypoint_panel() -> void:
+	if _wp_box == null:
+		return
+	var wp: bool = _controller != null and _controller.is_waypoint_mode() and _controller.get_mission() != null
+	_wp_box.visible = wp
+	if not wp:
+		return
+
+	# List every populated path, plus the active path even when empty (so a freshly chosen
+	# path is visible). Rebuilt each refresh: the list is small (<= 128) and changes shape
+	# as paths are authored.
+	var active := int(_controller.get_selected_waypoint_path_index())
+	var summaries: Array = _controller.get_waypoint_summaries()
+	_wp_syncing = true
+	_wp_list.clear()
+	_wp_row_paths = []
+	for s in summaries:
+		var idx := int((s as Dictionary)["index"])
+		var count := int((s as Dictionary)["marker_count"])
+		if count == 0 and idx != active:
+			continue
+		_wp_list.add_item("Path %d  -  %d markers%s" % [idx, count, _flag_suffix(int((s as Dictionary)["flags"]))])
+		_wp_row_paths.append(idx)
+		if idx == active:
+			_wp_list.select(_wp_list.item_count - 1)
+	_wp_syncing = false
+
+	if _wp_row_paths.is_empty():
+		_wp_status.text = "No waypoint paths yet. Click New path to start a route."
+	elif active < 0:
+		_wp_status.text = "Select a path to see its route, then click a marker in the viewport."
+	else:
+		_wp_status.text = "Click a marker in the viewport to select it."
+
+	# Active-path flags + ordered marker sub-list.
+	var active_path: Dictionary = _controller.get_active_waypoint_path()
+	var has_active := not active_path.is_empty()
+	var flags := int(active_path.get("flags", 0))
+	_wp_flags_syncing = true
+	_wp_loop_check.button_pressed = (flags & NovaMissionData.WP_FLAG_DOES_NOT_LOOP) == 0
+	_wp_blue_check.button_pressed = (flags & NovaMissionData.WP_FLAG_BLUE_TEAM) != 0
+	_wp_red_check.button_pressed = (flags & NovaMissionData.WP_FLAG_RED_TEAM) != 0
+	_wp_loop_check.disabled = not has_active
+	_wp_blue_check.disabled = not has_active
+	_wp_red_check.disabled = not has_active
+	_wp_flags_syncing = false
+
+	var mission: NovaMissionData = _controller.get_mission()
+	var marker_sel: Dictionary = _controller.get_selected_marker()
+	var selected_marker_index := int(marker_sel.get("marker_index", -1)) if not marker_sel.is_empty() else -1
+	var indices: PackedInt32Array = active_path.get("marker_indices", PackedInt32Array()) if has_active else PackedInt32Array()
+	_wp_marker_syncing = true
+	_wp_marker_list.clear()
+	_wp_marker_rows = []
+	for order in indices.size():
+		var mi: int = indices[order]
+		var pos: Vector3 = mission.get_entity(NovaMissionData.KIND_MARKER, mi).get("position", Vector3.ZERO)
+		_wp_marker_list.add_item("%d.  marker #%d  (%.0f, %.0f, %.0f)" % [order + 1, mi, pos.x, pos.y, pos.z])
+		_wp_marker_rows.append(mi)
+		if mi == selected_marker_index:
+			_wp_marker_list.select(_wp_marker_list.item_count - 1)
+	_wp_marker_syncing = false
+
+	# Authoring affordances: Add is a toggle (arm / stop); reorder + delete need a selected
+	# marker; clear needs a non-empty path. Armed state also drives the status line.
+	var armed: bool = _controller.is_marker_placement_armed()
+	var has_marker_sel := not marker_sel.is_empty()
+	_wp_add_button.text = "Stop adding markers" if armed else "Add marker"
+	_wp_add_button.disabled = not has_active
+	_wp_up_button.disabled = not has_marker_sel
+	_wp_down_button.disabled = not has_marker_sel
+	_wp_delete_button.disabled = not has_marker_sel
+	_wp_clear_button.disabled = not (has_active and indices.size() > 0)
+	if armed:
+		_wp_status.text = "Click the terrain to add a marker to this path; right-click or Esc to stop."
+
+	var marker: Dictionary = marker_sel
+	if marker.is_empty():
+		_wp_marker_label.text = "No marker selected."
+	else:
+		var p: Vector3 = marker.get("position", Vector3.ZERO)
+		# Whole units, matching the marker list rows above (the format stores integers).
+		_wp_marker_label.text = "Marker #%d  (%.0f, %.0f, %.0f)" % [int(marker["marker_index"]), p.x, p.y, p.z]
+
+
+# A short "[loop, blue]"-style suffix describing a path's flags, or "" when none apply.
+func _flag_suffix(flags: int) -> String:
+	var parts: Array = []
+	if (flags & NovaMissionData.WP_FLAG_DOES_NOT_LOOP) == 0:
+		parts.append("loop")
+	if (flags & NovaMissionData.WP_FLAG_BLUE_TEAM) != 0:
+		parts.append("blue")
+	if (flags & NovaMissionData.WP_FLAG_RED_TEAM) != 0:
+		parts.append("red")
+	return "  [%s]" % ", ".join(parts) if not parts.is_empty() else ""
 
 
 # --- Read-only mission summary (rebuilt) --------------------------------------
