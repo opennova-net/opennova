@@ -355,6 +355,22 @@ func test_settings_viewport_popup_edits_resource_directory() -> void:
 	assert_eq(workstation.get_resource_index().get_resource_files("terrain").size(), 1, "Flat scans should include top-level terrain files.")
 
 
+# The resource browser renders rows in a Tree (Name / Type / Size / Modified).
+# Collect the visible row items in display order.
+func _browser_rows(list: Tree) -> Array:
+	var rows: Array = []
+	if list == null:
+		return rows
+	var root := list.get_root()
+	if root == null:
+		return rows
+	var child := root.get_first_child()
+	while child != null:
+		rows.append(child)
+		child = child.get_next()
+	return rows
+
+
 func test_workspace_open_uses_resource_browser_without_filesystem_escape() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
@@ -372,7 +388,7 @@ func test_workspace_open_uses_resource_browser_without_filesystem_escape() -> vo
 	assert_not_null(dialog, "Open should create the in-editor resource browser.")
 	if dialog == null:
 		return
-	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	var list := dialog.find_child("ResourceBrowserList", true, false) as Tree
 	var dir_label := dialog.find_child("ResourceBrowserDirectoryLabel", true, false) as Label
 	var settings_shortcut := dialog.find_child("ResourceBrowserSettingsButton", true, false) as Button
 	assert_true(dialog.visible, "Resource browser should open instead of going straight to native file browsing.")
@@ -380,14 +396,42 @@ func test_workspace_open_uses_resource_browser_without_filesystem_escape() -> vo
 	assert_null(dialog.find_child("ResourceBrowserBrowseFilesButton", true, false), "Resource browser must not expose a native filesystem escape hatch.")
 	assert_not_null(dir_label, "Resource browser should show the active resource directory.")
 	assert_not_null(settings_shortcut, "Resource browser should include a Settings shortcut node.")
-	if list != null:
-		assert_eq(list.item_count, 1, "Terrain browser should list TRN files from the resource directory.")
-		assert_string_contains(list.get_item_text(0), "alpha", "Resource rows should show the matching terrain.")
+	var rows := _browser_rows(list)
+	assert_eq(rows.size(), 1, "Terrain browser should list TRN files from the resource directory.")
+	if rows.size() > 0:
+		assert_string_contains((rows[0] as TreeItem).get_text(0).to_lower(), "alpha", "Resource rows should show the matching terrain.")
 	if dir_label != null:
 		assert_string_contains(dir_label.text, root, "Directory label should show the configured root.")
 	if settings_shortcut != null:
 		assert_false(settings_shortcut.visible, "Settings shortcut should hide when resources are available.")
-	assert_true(dialog.get_ok_button().disabled, "Open should stay disabled until a resource is selected.")
+	assert_false(dialog.get_ok_button().disabled, "Open should be enabled once a row is auto-selected.")
+
+
+func test_resource_browser_open_button_opens_selection() -> void:
+	# Regression: AcceptDialog hides itself BEFORE emitting `confirmed`, so the OK
+	# ("Open") button must still open the auto-selected row. A visibility-gated
+	# guard once swallowed this, leaving only double-click (item_activated) working.
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var editor = autofree(TerrainEditorScript.new())
+	var root := _make_resource_fixture("resource_browser_ok_button")
+	workstation.set_editor(editor)
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK)
+	var workspace = workstation._get_active_workspace()
+	assert_not_null(workspace, "Terrain workspace should be active by default.")
+	if workspace == null:
+		return
+	var picked := {"path": ""}
+	workstation._resource_browser.open(workspace, func(p: String) -> void:
+		picked["path"] = p
+	)
+	var dialog := workstation.find_child("ResourceBrowserDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Browser should open.")
+	if dialog == null:
+		return
+	assert_true(dialog.visible, "Browser should be visible before confirming.")
+	dialog.get_ok_button().pressed.emit()
+	assert_false(picked["path"].is_empty(), "The Open button should open the auto-selected resource.")
+	assert_string_contains(picked["path"].to_lower(), "alpha", "Open should pass the selected resource path.")
 
 
 func test_fonts_workspace_open_uses_resource_browser() -> void:
@@ -407,11 +451,12 @@ func test_fonts_workspace_open_uses_resource_browser() -> void:
 	assert_not_null(dialog, "Font Open should use the shared resource browser.")
 	if dialog == null:
 		return
-	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	var list := dialog.find_child("ResourceBrowserList", true, false) as Tree
 	assert_not_null(list, "Font resource browser should include a list.")
-	if list != null:
-		assert_eq(list.item_count, 1, "Font browser should list FNT files from the resource directory.")
-		assert_string_contains(list.get_item_text(0), "alpha", "Font resource rows should show the matching file.")
+	var rows := _browser_rows(list)
+	assert_eq(rows.size(), 1, "Font browser should list FNT files from the resource directory.")
+	if rows.size() > 0:
+		assert_string_contains((rows[0] as TreeItem).get_text(0).to_lower(), "alpha", "Font resource rows should show the matching file.")
 
 
 func test_strings_workspace_open_uses_resource_browser() -> void:
@@ -431,11 +476,12 @@ func test_strings_workspace_open_uses_resource_browser() -> void:
 	assert_not_null(dialog, "Strings Open should use the shared resource browser.")
 	if dialog == null:
 		return
-	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	var list := dialog.find_child("ResourceBrowserList", true, false) as Tree
 	assert_not_null(list, "Strings resource browser should include a list.")
-	if list != null:
-		assert_eq(list.item_count, 1, "Strings browser should list RTXT BIN files from the resource directory.")
-		assert_string_contains(list.get_item_text(0), "alpha", "Strings resource rows should show the matching file.")
+	var rows := _browser_rows(list)
+	assert_eq(rows.size(), 1, "Strings browser should list RTXT BIN files from the resource directory.")
+	if rows.size() > 0:
+		assert_string_contains((rows[0] as TreeItem).get_text(0).to_lower(), "alpha", "Strings resource rows should show the matching file.")
 
 
 func test_workstation_opens_font_workspace_by_credits_font_name() -> void:
@@ -470,12 +516,11 @@ func test_workspace_open_without_resource_dir_shows_empty_browser() -> void:
 	assert_not_null(dialog, "Open should still create the resource browser without a root.")
 	if dialog == null:
 		return
-	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	var list := dialog.find_child("ResourceBrowserList", true, false) as Tree
 	var hint := dialog.find_child("ResourceBrowserHint", true, false) as Label
 	var settings_shortcut := dialog.find_child("ResourceBrowserSettingsButton", true, false) as Button
 	assert_null(dialog.find_child("ResourceBrowserBrowseFilesButton", true, false), "Missing resource roots should be fixed through Settings, not arbitrary file browsing.")
-	if list != null:
-		assert_eq(list.item_count, 0, "No resource directory should produce no rows.")
+	assert_eq(_browser_rows(list).size(), 0, "No resource directory should produce no rows.")
 	if hint != null:
 		assert_string_contains(hint.text, "No resource directory selected", "Empty state should name the missing resource directory.")
 	if settings_shortcut != null:
@@ -540,11 +585,12 @@ func test_environment_open_uses_resource_browser() -> void:
 	assert_not_null(dialog, "Environment Open should use the shared resource browser.")
 	if dialog == null:
 		return
-	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	var list := dialog.find_child("ResourceBrowserList", true, false) as Tree
 	assert_not_null(list, "Environment resource browser should include a list.")
-	if list != null:
-		assert_eq(list.item_count, 1, "Environment browser should list ENV files from the resource directory.")
-		assert_string_contains(list.get_item_text(0), "alpha", "Environment resource rows should show the matching file.")
+	var rows := _browser_rows(list)
+	assert_eq(rows.size(), 1, "Environment browser should list ENV files from the resource directory.")
+	if rows.size() > 0:
+		assert_string_contains((rows[0] as TreeItem).get_text(0).to_lower(), "alpha", "Environment resource rows should show the matching file.")
 
 
 func test_resource_settings_persist_in_editor_state() -> void:
