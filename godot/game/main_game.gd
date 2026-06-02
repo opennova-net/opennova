@@ -9,6 +9,11 @@ extends Node3D
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
+# Re-summon the game-folder picker. The original engine has no "change game dir"
+# control (the game *is* its install folder); this is an OpenNova convenience so a
+# wrong / menu-less folder can be re-picked without restarting. Front-end only.
+const CHANGE_DIR_KEY := KEY_F9
+
 enum State { MENU, WORLD, PAUSED }
 
 @onready var _world: NovaWorld = $World
@@ -33,6 +38,25 @@ func _ready() -> void:
 		_request_resource_dir()
 		return
 	_enter_menu(dir)
+
+
+# F9 (re)opens the asset-folder picker from the front-end so the player can point
+# the runtime at a different game folder. Restricted to the menu state so an active
+# mission is never yanked out from under a remount; ignored while a picker is open.
+func _unhandled_key_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	if key.keycode == CHANGE_DIR_KEY and _can_summon_dir_picker():
+		_request_resource_dir()
+		get_viewport().set_input_as_handled()
+
+
+# Whether the folder picker may be summoned right now: only from the menu front-end
+# and only when one is not already open. Pure predicate so it is unit-testable
+# headless (the native dialog itself cannot be shown without a display).
+func _can_summon_dir_picker() -> bool:
+	return _state == State.MENU and _picker == null
 
 
 # --- Menu state ---------------------------------------------------------------
