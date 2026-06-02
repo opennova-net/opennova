@@ -33,6 +33,55 @@ add_subdirectory(libs/mnu)
 add_subdirectory(libs/mns)
 add_subdirectory(libs/mission)
 
+# Vendored third-party deps that the net stack pulls in.
+add_subdirectory(third_party/sqlite)
+add_subdirectory(third_party/bcrypt)
+
+# Crow — async C++ HTTP framework for the standalone novaworld server.
+# Header-only; ships standalone Asio internally, no system deps required.
+# Off by default to keep the lib-only / Godot-only build paths fast.
+option(BUILD_NOVAWORLD_HTTP "Fetch + build Crow for the novaworld HTTP layer" OFF)
+if(BUILD_NOVAWORLD_HTTP)
+    include(FetchContent)
+
+    # Standalone Asio — Crow requires it but doesn't bundle it in 1.2.x.
+    # Asio is header-only; we just need to expose ASIO_INCLUDE_DIR for
+    # Crow's Findasio.cmake to pick up.
+    FetchContent_Declare(asio
+        GIT_REPOSITORY https://github.com/chriskohlhoff/asio.git
+        GIT_TAG        asio-1-30-2
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(asio)
+    set(ASIO_INCLUDE_DIR "${asio_SOURCE_DIR}/asio/include" CACHE PATH "" FORCE)
+
+    set(CROW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(CROW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(CROW_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(crow
+        GIT_REPOSITORY https://github.com/CrowCpp/Crow.git
+        GIT_TAG        v1.2.0
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(crow)
+endif()
+
+# Net stack — cherry-picked from worktree-net2 (Phase B/C IDA-verified ports).
+# These libs are NOT bundled into the FFI shared lib; they are linked into the
+# standalone novaworld server (apps/novaworld_server) and the Godot client
+# GDExtension (godot/engine/network).
+add_subdirectory(libs/novacrypto)
+add_subdirectory(libs/napi)
+add_subdirectory(libs/novaworld)
+add_subdirectory(libs/bms)
+
+# Shared app utilities (UDP sockets, pcap writer) used by the standalone
+# servers and the loopback tests.
+add_subdirectory(apps/common)
+
+# Standalone novaworld server — gate UDP + NW UDP (HTTP via Drogon to follow).
+add_subdirectory(apps/novaworld_server)
+
 set(OPENNOVA_CORE_TARGETS
     opennova_pcx
     opennova_fnt

@@ -492,3 +492,144 @@ add_executable(mns_parse_test mns/mns_parse_test.cpp)
 target_link_libraries(mns_parse_test PRIVATE opennova_mns)
 target_include_directories(mns_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mns_parse COMMAND mns_parse_test)
+
+# ----------------------------------------------------------------------------
+# Net stack tests (cherry-picked from worktree-net2)
+# ----------------------------------------------------------------------------
+
+# novacrypto tests
+add_executable(url_cipher_test novacrypto/url_cipher_test.cpp)
+target_link_libraries(url_cipher_test PRIVATE opennova_novacrypto)
+target_include_directories(url_cipher_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME url_cipher COMMAND url_cipher_test)
+
+add_executable(crc32_test novacrypto/crc32_test.cpp)
+target_link_libraries(crc32_test PRIVATE opennova_novacrypto)
+target_include_directories(crc32_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME crc32 COMMAND crc32_test)
+
+add_executable(nwu_test novacrypto/nwu_test.cpp)
+target_link_libraries(nwu_test PRIVATE opennova_novacrypto)
+target_include_directories(nwu_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nwu COMMAND nwu_test)
+
+add_executable(pubcrypto_test novacrypto/pubcrypto_test.cpp)
+target_link_libraries(pubcrypto_test PRIVATE opennova_novacrypto)
+target_include_directories(pubcrypto_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pubcrypto COMMAND pubcrypto_test)
+
+add_executable(epask_test novacrypto/epask_test.cpp)
+target_link_libraries(epask_test PRIVATE opennova_novacrypto)
+target_include_directories(epask_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME epask COMMAND epask_test)
+
+# napi tests
+add_executable(envelope_test napi/envelope_test.cpp)
+target_link_libraries(envelope_test PRIVATE opennova_napi opennova_novacrypto)
+target_include_directories(envelope_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME envelope COMMAND envelope_test)
+
+add_executable(tlv_test napi/tlv_test.cpp)
+target_link_libraries(tlv_test PRIVATE opennova_napi)
+target_include_directories(tlv_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tlv COMMAND tlv_test)
+
+add_executable(session_test napi/session_test.cpp)
+target_link_libraries(session_test PRIVATE opennova_napi)
+target_include_directories(session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME session COMMAND session_test)
+
+# novaworld tests
+add_executable(registration_url_test novaworld/registration_url_test.cpp)
+target_link_libraries(registration_url_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(registration_url_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME registration_url COMMAND registration_url_test)
+
+add_executable(gate_response_test novaworld/gate_response_test.cpp)
+target_link_libraries(gate_response_test PRIVATE opennova_novaworld)
+target_include_directories(gate_response_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gate_response COMMAND gate_response_test)
+
+add_executable(gate_probe_test novaworld/gate_probe_test.cpp)
+target_link_libraries(gate_probe_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(gate_probe_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gate_probe COMMAND gate_probe_test)
+
+add_executable(lobby_update_test novaworld/lobby_update_test.cpp)
+target_link_libraries(lobby_update_test PRIVATE opennova_novaworld)
+target_include_directories(lobby_update_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME lobby_update COMMAND lobby_update_test)
+
+add_executable(gate_server_loopback_test novaworld/gate_server_loopback_test.cpp)
+target_link_libraries(gate_server_loopback_test PRIVATE opennova_novaworld opennova_novacrypto opennova_app_common)
+target_include_directories(gate_server_loopback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gate_server_loopback COMMAND gate_server_loopback_test)
+
+add_executable(gsb_roundtrip_test novaworld/gsb_roundtrip_test.cpp)
+target_link_libraries(gsb_roundtrip_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(gsb_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gsb_roundtrip COMMAND gsb_roundtrip_test)
+
+add_executable(protocol_message_test novaworld/protocol_message_test.cpp)
+target_link_libraries(protocol_message_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(protocol_message_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME protocol_message COMMAND protocol_message_test)
+
+add_executable(game_session_test novaworld/game_session_test.cpp)
+target_link_libraries(game_session_test PRIVATE opennova_novaworld)
+target_include_directories(game_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME game_session COMMAND game_session_test)
+
+add_executable(game_server_runtime_test novaworld/game_server_runtime_test.cpp)
+target_link_libraries(game_server_runtime_test PRIVATE opennova_novaworld)
+target_include_directories(game_server_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME game_server_runtime COMMAND game_server_runtime_test)
+
+add_executable(replication_min_test novaworld/replication_min_test.cpp)
+target_link_libraries(replication_min_test PRIVATE opennova_novaworld)
+target_include_directories(replication_min_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME replication_min COMMAND replication_min_test)
+
+# bms (mission-file) parser tests
+add_executable(bms_spawn_points_test bms/spawn_points_test.cpp)
+target_link_libraries(bms_spawn_points_test PRIVATE opennova_bms)
+target_include_directories(bms_spawn_points_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME bms_spawn_points COMMAND bms_spawn_points_test)
+
+# Connection registry / manager tests
+add_executable(connection_registry_test novaworld/connection_registry_test.cpp)
+target_link_libraries(connection_registry_test PRIVATE opennova_novaworld)
+target_include_directories(connection_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME connection_registry COMMAND connection_registry_test)
+
+add_executable(connection_manager_test novaworld/connection_manager_test.cpp)
+target_link_libraries(connection_manager_test PRIVATE opennova_novaworld)
+target_include_directories(connection_manager_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME connection_manager COMMAND connection_manager_test)
+
+# SQLite wrapper + migration runner tests
+add_executable(db_sqlite_test novaworld/db_sqlite_test.cpp)
+target_link_libraries(db_sqlite_test PRIVATE opennova_novaworld)
+target_include_directories(db_sqlite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME db_sqlite COMMAND db_sqlite_test)
+
+# Phase A — ClientHello/ClientAuth serializer roundtrip
+add_executable(session_hello_roundtrip_test novaworld/session_hello_roundtrip_test.cpp)
+target_link_libraries(session_hello_roundtrip_test PRIVATE opennova_novaworld)
+target_include_directories(session_hello_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME session_hello_roundtrip COMMAND session_hello_roundtrip_test)
+
+# Phase D — LobbySession dispatch tests
+add_executable(lobby_session_test novaworld/lobby_session_test.cpp)
+target_link_libraries(lobby_session_test PRIVATE opennova_novaworld opennova_napi)
+target_include_directories(lobby_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME lobby_session COMMAND lobby_session_test)
+
+# Backend schema regression — applies the actual backend/migrations/* and
+# backend/seed/* the standalone server uses, so SQL syntax errors and seed
+# regressions break CI before they break the running server.
+add_executable(backend_schema_test novaworld/backend_schema_test.cpp)
+target_link_libraries(backend_schema_test PRIVATE opennova_novaworld)
+target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(backend_schema_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME backend_schema COMMAND backend_schema_test)
