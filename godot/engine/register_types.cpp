@@ -42,6 +42,13 @@
 #include "util/nova_texture_format.h"
 #include "resource_index/nova_resource_index.h"
 #include "resource_index/nova_resource_root.h"
+#include "audio/nova_sbf_bank.h"
+#include "audio/nova_sbf_audio_stream.h"
+#include "audio/nova_sbf_audio_stream_playback.h"
+#include "audio/sbf_resource_format.h"
+#include "audio/nova_music_script.h"
+#include "audio/nova_music_director.h"
+#include "audio/mus_resource_format.h"
 
 using namespace godot;
 
@@ -59,6 +66,10 @@ static Ref<ResourceFormatSaverFNT> fnt_saver;
 static Ref<ResourceFormatLoaderNovaTexture> nova_tex_loader;
 static Ref<ResourceFormatLoaderRTXT> rtxt_loader;
 static Ref<ResourceFormatSaverRTXT> rtxt_saver;
+static Ref<SbfResourceFormatLoader> sbf_loader;
+static Ref<SbfResourceFormatSaver> sbf_saver;
+static Ref<MusResourceFormatLoader> mus_loader;
+static Ref<MusResourceFormatSaver> mus_saver;
 
 void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
@@ -115,6 +126,15 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ResourceFormatLoaderNovaTexture);
 	GDREGISTER_CLASS(NovaResourceIndex);
 	GDREGISTER_CLASS(NovaResourceRoot);
+	GDREGISTER_CLASS(NovaSbfAudioStream);
+	GDREGISTER_CLASS(NovaSbfAudioStreamPlayback);
+	GDREGISTER_CLASS(NovaSbfBank);
+	GDREGISTER_CLASS(SbfResourceFormatLoader);
+	GDREGISTER_CLASS(SbfResourceFormatSaver);
+	GDREGISTER_CLASS(NovaMusicScript);
+	GDREGISTER_CLASS(NovaMusicDirector);
+	GDREGISTER_CLASS(MusResourceFormatLoader);
+	GDREGISTER_CLASS(MusResourceFormatSaver);
 
 	trn_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(trn_loader);
@@ -157,6 +177,18 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	rtxt_saver.instantiate();
 	ResourceSaver::get_singleton()->add_resource_format_saver(rtxt_saver);
+
+	sbf_loader.instantiate();
+	ResourceLoader::get_singleton()->add_resource_format_loader(sbf_loader);
+
+	sbf_saver.instantiate();
+	ResourceSaver::get_singleton()->add_resource_format_saver(sbf_saver);
+
+	mus_loader.instantiate();
+	ResourceLoader::get_singleton()->add_resource_format_loader(mus_loader);
+
+	mus_saver.instantiate();
+	ResourceSaver::get_singleton()->add_resource_format_saver(mus_saver);
 }
 
 void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
@@ -210,6 +242,18 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	ResourceSaver::get_singleton()->remove_resource_format_saver(rtxt_saver);
 	rtxt_saver.unref();
+
+	ResourceLoader::get_singleton()->remove_resource_format_loader(sbf_loader);
+	sbf_loader.unref();
+
+	ResourceSaver::get_singleton()->remove_resource_format_saver(sbf_saver);
+	sbf_saver.unref();
+
+	ResourceLoader::get_singleton()->remove_resource_format_loader(mus_loader);
+	mus_loader.unref();
+
+	ResourceSaver::get_singleton()->remove_resource_format_saver(mus_saver);
+	mus_saver.unref();
 }
 
 extern "C" {

@@ -73,6 +73,105 @@ target_link_libraries(pff_unit_test PRIVATE opennova_pff)
 target_include_directories(pff_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_unit COMMAND pff_unit_test)
 
+# SBF tests
+add_executable(sbf_header_test sbf/sbf_header_test.cpp)
+target_link_libraries(sbf_header_test PRIVATE opennova_sbf)
+target_include_directories(sbf_header_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME sbf_header COMMAND sbf_header_test)
+
+add_executable(sbf_parse_test sbf/sbf_parse_test.cpp)
+target_link_libraries(sbf_parse_test PRIVATE opennova_sbf)
+target_include_directories(sbf_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(sbf_parse_test PRIVATE
+    SBF_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/sbf")
+add_test(NAME sbf_parse COMMAND sbf_parse_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(sbf_decode_test sbf/sbf_decode_test.cpp)
+target_link_libraries(sbf_decode_test PRIVATE opennova_sbf)
+target_include_directories(sbf_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(sbf_decode_test PRIVATE
+    SBF_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/sbf")
+add_test(NAME sbf_decode COMMAND sbf_decode_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(sbf_compat_test sbf/sbf_compat_test.cpp)
+target_link_libraries(sbf_compat_test PRIVATE opennova_sbf)
+target_include_directories(sbf_compat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME sbf_compat COMMAND sbf_compat_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(sbf_encode_test sbf/sbf_encode_test.cpp)
+target_link_libraries(sbf_encode_test PRIVATE opennova_sbf)
+target_include_directories(sbf_encode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(sbf_encode_test PRIVATE
+    SBF_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/sbf")
+if(NOT MSVC)
+    target_link_libraries(sbf_encode_test PRIVATE m)
+endif()
+add_test(NAME sbf_encode COMMAND sbf_encode_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(sbf_roundtrip_test sbf/sbf_roundtrip_test.cpp)
+target_link_libraries(sbf_roundtrip_test PRIVATE opennova_sbf)
+target_include_directories(sbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(sbf_roundtrip_test PRIVATE
+    SBF_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/sbf")
+if(NOT MSVC)
+    target_link_libraries(sbf_roundtrip_test PRIVATE m)
+endif()
+add_test(NAME sbf_roundtrip COMMAND sbf_roundtrip_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# MUS tests
+add_executable(mus_header_test mus/mus_header_test.cpp)
+target_link_libraries(mus_header_test PRIVATE opennova_mus)
+target_include_directories(mus_header_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mus_header COMMAND mus_header_test)
+
+add_executable(mus_parse_test mus/mus_parse_test.cpp)
+target_link_libraries(mus_parse_test PRIVATE opennova_mus)
+target_include_directories(mus_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_parse_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_parse COMMAND mus_parse_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(mus_compat_test mus/mus_compat_test.cpp)
+target_link_libraries(mus_compat_test PRIVATE opennova_mus)
+target_include_directories(mus_compat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mus_compat COMMAND mus_compat_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(mus_decompile_test mus/mus_decompile_test.cpp)
+target_link_libraries(mus_decompile_test PRIVATE opennova_mus)
+target_include_directories(mus_decompile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_decompile_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_decompile COMMAND mus_decompile_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(mus_compile_test mus/mus_compile_test.cpp)
+target_link_libraries(mus_compile_test PRIVATE opennova_mus)
+target_include_directories(mus_compile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mus_compile COMMAND mus_compile_test)
+
+add_executable(mus_roundtrip_test mus/mus_roundtrip_test.cpp)
+target_link_libraries(mus_roundtrip_test PRIVATE opennova_mus)
+target_include_directories(mus_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_roundtrip_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_roundtrip COMMAND mus_roundtrip_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(mus_vm_test mus/mus_vm_test.cpp)
+target_link_libraries(mus_vm_test PRIVATE opennova_mus)
+target_include_directories(mus_vm_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_vm_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_vm COMMAND mus_vm_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # VFS tests (mount precedence, mount_game expansion override, SCR decode-on-read)
 add_executable(vfs_test vfs/vfs_test.cpp)
 target_link_libraries(vfs_test PRIVATE opennova_vfs opennova_pff)
@@ -99,6 +198,14 @@ foreach(test roundtrip byte_equal lookup strip_hotkey empty)
     target_include_directories(rtxt_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtxt)
     add_test(NAME rtxt_${test} COMMAND rtxt_${test}_test)
 endforeach()
+
+add_executable(scr_mus_test scr/scr_mus_test.cpp)
+target_link_libraries(scr_mus_test PRIVATE opennova_scr)
+target_include_directories(scr_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(scr_mus_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME scr_mus COMMAND scr_mus_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # Resource directory index tests
 add_executable(resource_index_test resource_index/resource_index_test.cpp)
