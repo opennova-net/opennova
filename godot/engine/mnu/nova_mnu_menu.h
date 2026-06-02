@@ -49,6 +49,11 @@ private:
 	int current_music_var_ = -1;
 	String current_screen_;
 	bool edit_mode_ = false;
+	// Layered on top of edit_mode_ for the ONED "play" preview: keeps the authoring
+	// suppressions (music/cursor/all-screens) but re-wires navigators so clicking a
+	// tab runs its window show/hide actions. External side effects (quit/url/cross-
+	// .mnu jump) are clamped to no-ops so the sandbox cannot reach the editor host.
+	bool interactive_ = false;
 	bool build_on_ready_ = true;
 	int unresolved_asset_count_ = 0;
 
@@ -114,6 +119,11 @@ public:
 
 	void set_edit_mode(bool p_edit);
 	bool get_edit_mode() const { return edit_mode_; }
+
+	// Toggle the interactive "play" preview (only meaningful with edit_mode on).
+	// Rebuilds so the navigators re-wire and authored window visibility resets.
+	void set_interactive(bool p_on);
+	bool get_interactive() const { return interactive_; }
 
 	void set_build_on_ready(bool p_value) { build_on_ready_ = p_value; }
 	bool get_build_on_ready() const { return build_on_ready_; }

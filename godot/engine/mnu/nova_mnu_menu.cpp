@@ -84,6 +84,19 @@ void NovaMnuMenu::set_edit_mode(bool p_edit) {
 	}
 }
 
+void NovaMnuMenu::set_interactive(bool p_on) {
+	if (interactive_ == p_on) {
+		return;
+	}
+	interactive_ = p_on;
+	// Rebuild so the builder re-applies its edit-mode suppressions with the new
+	// interactive state (navigators enabled + clickable when on) and authored window
+	// visibility (the `hidden` flags) resets; then collapse to a single visible screen.
+	if (is_inside_tree()) {
+		build();
+	}
+}
+
 void NovaMnuMenu::clear() {
 	// Remove only screen nodes; the lazily created sound-player pool persists
 	// across rebuilds (so a rebuild does not leave sound_players_ dangling).
@@ -112,6 +125,7 @@ void NovaMnuMenu::build() {
 	ctx.owner = this;
 	ctx.document = menu_.ptr();
 	ctx.edit_mode = edit_mode_;
+	ctx.interactive = interactive_;
 
 	const mnu::Document &doc = menu_->get_native();
 	// get_screen_ids()[i] aligns with doc.screens[i] (both built in the same order by
@@ -148,7 +162,9 @@ void NovaMnuMenu::build() {
 }
 
 void NovaMnuMenu::apply_screen_visibility() {
-	const bool show_all = edit_mode_;
+	// Author mode shows every screen at once (a flat canvas of all screens); the
+	// interactive preview behaves like runtime and shows only the current screen.
+	const bool show_all = edit_mode_ && !interactive_;
 	for (int i = 0; i < get_child_count(); ++i) {
 		NovaMnuScreen *screen = Object::cast_to<NovaMnuScreen>(get_child(i));
 		if (screen == nullptr) {
@@ -237,7 +253,11 @@ bool NovaMnuMenu::navigate_to_screen(const String &p_name) {
 
 bool NovaMnuMenu::pop_screen() {
 	if (nav_stack_.is_empty()) {
-		emit_signal("quit_requested");
+		// Popping past the root is a host-level back/quit; in the interactive preview
+		// there is no host, so it is a silent no-op rather than a quit.
+		if (!interactive_) {
+			emit_signal("quit_requested");
+		}
 		return false;
 	}
 	const String prev = nav_stack_[nav_stack_.size() - 1];
@@ -409,6 +429,11 @@ bool NovaMnuMenu::dispatch_action(const String &p_type, const String &p_target,
 		if (p_file.is_empty()) {
 			return navigate_to_screen(p_target);
 		}
+		// Cross-.mnu jumps are host policy; the interactive preview has no host to load
+		// another file, so the jump is consumed as a no-op instead of escaping.
+		if (interactive_) {
+			return true;
+		}
 		navigate_to_menu(p_file, p_target);
 		return true;
 	}
@@ -416,13 +441,21 @@ bool NovaMnuMenu::dispatch_action(const String &p_type, const String &p_target,
 		return pop_screen();
 	}
 	if (type == "quit" || type == "quit_game") {
+		// Must not bubble out of the editor's interactive preview to the host.
+		if (interactive_) {
+			return true;
+		}
 		quit_game();
 		return true;
 	}
 	if (type == "url") {
 		// type="URL" actions (shipped menus' website/buy buttons) are host policy:
 		// the runtime opens them externally. EXTERNAL_BROWSER is preserved on the
-		// model for round-trip; the runtime always routes URLs to the host.
+		// model for round-trip; the runtime always routes URLs to the host. The
+		// interactive preview swallows them so an authoring click never opens a browser.
+		if (interactive_) {
+			return true;
+		}
 		emit_signal("url_requested", p_target);
 		return true;
 	}
@@ -506,6 +539,8 @@ void NovaMnuMenu::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_current_screen"), &NovaMnuMenu::get_current_screen);
 	ClassDB::bind_method(D_METHOD("set_edit_mode", "edit"), &NovaMnuMenu::set_edit_mode);
 	ClassDB::bind_method(D_METHOD("get_edit_mode"), &NovaMnuMenu::get_edit_mode);
+	ClassDB::bind_method(D_METHOD("set_interactive", "on"), &NovaMnuMenu::set_interactive);
+	ClassDB::bind_method(D_METHOD("get_interactive"), &NovaMnuMenu::get_interactive);
 	ClassDB::bind_method(D_METHOD("set_build_on_ready", "value"), &NovaMnuMenu::set_build_on_ready);
 	ClassDB::bind_method(D_METHOD("get_build_on_ready"), &NovaMnuMenu::get_build_on_ready);
 
@@ -539,6 +574,7 @@ void NovaMnuMenu::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "music_var_index"), "set_music_var_index", "get_music_var_index");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "current_screen"), "set_current_screen", "get_current_screen");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "edit_mode"), "set_edit_mode", "get_edit_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "interactive"), "set_interactive", "get_interactive");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "build_on_ready"), "set_build_on_ready", "get_build_on_ready");
 
 	ADD_SIGNAL(MethodInfo("screen_changed", PropertyInfo(Variant::STRING, "screen_name")));

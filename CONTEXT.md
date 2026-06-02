@@ -41,3 +41,11 @@ _Avoid_: menu editor (ambiguous with the runtime menu)
 **Edit mode**:
 The flag that makes a live menu inert and click-through so the editor can reuse the exact runtime node as a WYSIWYG preview. Off = fully interactive runtime.
 _Avoid_: preview mode, design mode
+
+**Interactive preview**:
+An Edit-mode menu the Menus workspace can put into a "play" state: navigators wire up so clicking a Tab runs its window show/hide and screen Actions, while external Commands (launch/quit/URL/cross-menu) are sandboxed to no-ops. Lets an author preview tab/screen flow without leaving the editor.
+_Avoid_: play mode, runtime (it is still a preview)
+
+**Tab**:
+A Window shown or hidden by a sibling button's `window` Action (e.g. the Options panels). Not a widget type, just an authored convention: one button per panel, each `<ACTION type="window">` hiding the siblings and showing its own.
+_Avoid_: page, panel (when you mean the toggling mechanism)

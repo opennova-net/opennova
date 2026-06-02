@@ -9,6 +9,7 @@ const MenuHostScript := preload("res://game/menu_shell.gd")
 
 const MAIN_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"   # STARTUP, MUSICVAR 1
 const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"  # the cross-.mnu target
+const OPTIONS_FIXTURE := "res://../fixtures/mnu/jo_options.mnu"  # has the Mods tab (AVAIL_LIST/MOD_DESC)
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
@@ -154,6 +155,76 @@ func test_start_without_selection_falls_back_to_first_mission() -> void:
 	_cleanup(dir)
 
 
+# Options -> Mods: the host lists discoverable expansions in AVAIL_LIST by name, and
+# activating one mounts it over the base game, fills MOD_DESC, persists the choice
+# (read back by main_game at the next launch), and announces it. Uses a runtime
+# (packed PFF) mount so list_expansions/mount_runtime have real archives to work on.
+func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
+	var saved := NovaResourceDirSettings.get_expansion()
+	NovaResourceDirSettings.set_expansion("")  # clean slate so the activate is not a no-op
+	var dir := _make_runtime_dir()
+	var host := _make_runtime_host(dir)
+	if host == null:
+		pass_test("runtime resource root unavailable in this environment")
+		NovaResourceDirSettings.set_expansion(saved)
+		_rm_runtime_dir(dir)
+		return
+	watch_signals(host)
+	var menu := host.get_menu()
+	var avail := menu.find_child("AVAIL_LIST", true, false)
+	assert_not_null(avail, "AVAIL_LIST built")
+	assert_eq(avail.item_count, 1, "one expansion discovered under expansion/")
+	assert_eq(avail.get_item_text(0), "jox01")
+	# Activation mounts + persists + describes + announces.
+	host._on_mod_activated(0)
+	assert_signal_emitted_with_parameters(host, "expansion_selected", ["jox01"])
+	assert_eq(host.get_selected_expansion(), "jox01")
+	assert_eq(NovaResourceDirSettings.get_expansion(), "jox01", "choice persisted to config")
+	var desc := menu.find_child("MOD_DESC", true, false)
+	assert_not_null(desc, "MOD_DESC built")
+	assert_string_contains(desc.text, "Kendari", "friendly expansion name shown")
+	# The expansion's packed asset is now reachable through the live root.
+	assert_eq(host._root.read_file("expmodel.3di").get_string_from_utf8(), "exp model",
+		"expansion archive mounted over the base game")
+	host._root.clear()  # release PFF handles before deleting the temp archives
+	NovaResourceDirSettings.set_expansion(saved)
+	_rm_runtime_dir(dir)
+
+
+# The menu stylesheet (menu_style.mns) is PFF-archived and is not a "recognized kind",
+# so list_files(".mns") never surfaces it. The host must load it by its canonical name
+# through the VFS; otherwise %DEF_TEXT_*% colors (incl. the button hover colour) never
+# resolve and mouse-over has no visible effect. Regression for that hover fix.
+func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
+	var dir := OS.get_temp_dir().path_join("menu_shell_style_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	var mns := "// test stylesheet\nDEF_FONTNAME_LG Gunpl27b.fnt\nDEF_TEXT_FG FFFFFFFF\n" \
+		+ "DEF_TEXT_MOUSEOVER_FG FFFF0000\nDEF_TEXT_SELECTED_FG FFFF0000\nDEF_TEXT_DISABLED_FG FF545252\n"
+	_write_pff(dir.path_join("aa_base.pff"), [
+		{"name": "main.mnu", "bytes": FileAccess.get_file_as_bytes(MAIN_FIXTURE)},
+		{"name": "menu_style.mns", "bytes": mns},
+	])
+	var root := NovaResourceRoot.new()
+	if root.mount_runtime(dir) != OK:
+		pass_test("runtime resource root unavailable in this environment")
+		DirAccess.remove_absolute(dir.path_join("aa_base.pff"))
+		DirAccess.remove_absolute(dir)
+		return
+	assert_eq(root.list_files(".mns").size(), 0, "precondition: .mns is not surfaced by list_files")
+	var host: NovaMenuHost = MenuHostScript.new()
+	host.size = Vector2(800, 600)
+	add_child_autofree(host)
+	host.setup(root)
+	var style = host.get_menu().get_stylesheet()
+	assert_not_null(style, "menu_style.mns loaded from the PFF by canonical name")
+	if style != null:
+		assert_eq(style.substitute("%DEF_TEXT_MOUSEOVER_FG%"), "FFFF0000",
+			"hover colour macro resolves, so button mouse-over highlights")
+	root.clear()  # release the PFF handle before deleting
+	DirAccess.remove_absolute(dir.path_join("aa_base.pff"))
+	DirAccess.remove_absolute(dir)
+
+
 func test_missing_assets_degrade_without_crashing() -> void:
 	# A dir with only main.mnu (no stylesheet / sound / music / textures): the shell
 	# still builds the menu and runs; the menu just reports unresolved assets.
@@ -170,3 +241,72 @@ func test_missing_assets_degrade_without_crashing() -> void:
 	assert_not_null(host.get_music_director(), "director created even without a music script")
 	DirAccess.remove_absolute(dir.path_join("main.mnu"))
 	DirAccess.remove_absolute(dir)
+
+
+# --- Runtime (packed PFF) fixtures for the expansion/mods test -----------------
+
+# A base dir with options.mnu packed in a base archive (so it loads under a runtime
+# mount) plus one discoverable expansion (expansion/jox01/jox01.pff carrying an asset).
+func _make_runtime_dir() -> String:
+	var dir := OS.get_temp_dir().path_join("menu_shell_mods_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
+	_write_pff(dir.path_join("aa_base.pff"), [
+		{"name": "options.mnu", "bytes": FileAccess.get_file_as_bytes(OPTIONS_FIXTURE)},
+	])
+	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
+		{"name": "expmodel.3di", "bytes": "exp model"},
+	])
+	return dir
+
+
+func _make_runtime_host(dir: String) -> NovaMenuHost:
+	var root := NovaResourceRoot.new()
+	if root.mount_runtime(dir) != OK:
+		return null
+	var host: NovaMenuHost = MenuHostScript.new()
+	host.main_menu_file = "options.mnu"  # open the menu that carries the Mods tab
+	host.size = Vector2(800, 600)
+	add_child_autofree(host)
+	host.setup(root)
+	return host
+
+
+func _rm_runtime_dir(dir: String) -> void:
+	for sub in ["aa_base.pff", "expansion/jox01/jox01.pff", "expansion/jox01", "expansion"]:
+		DirAccess.remove_absolute(dir.path_join(sub))
+	DirAccess.remove_absolute(dir)
+
+
+# Minimal PFF3 writer (mirrors resource_root_contract_test._write_pff): 20-byte
+# header, 36-byte entries with a 16-byte name field, then the payloads.
+func _write_pff(path: String, entries: Array) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "PFF fixture should be writable: %s" % path)
+	if file == null:
+		return
+	var header_size := 20
+	var entry_size := 36
+	var next_payload_offset := header_size + entries.size() * entry_size
+	file.store_32(header_size)
+	file.store_32(0x33464650)  # "PFF3"
+	file.store_32(entries.size())
+	file.store_32(entry_size)
+	file.store_32(header_size)
+	for entry in entries:
+		var bytes := _entry_bytes(entry)
+		file.store_32(0)
+		file.store_32(next_payload_offset)
+		file.store_32(bytes.size())
+		file.store_32(0)
+		var name_bytes := String(entry.name).to_utf8_buffer()
+		for i in range(16):
+			file.store_8(name_bytes[i] if i < name_bytes.size() else 0)
+		file.store_32(0)
+		next_payload_offset += bytes.size()
+	for entry in entries:
+		file.store_buffer(_entry_bytes(entry))
+	file.close()
+
+
+func _entry_bytes(entry: Dictionary) -> PackedByteArray:
+	return entry.bytes if entry.bytes is PackedByteArray else String(entry.bytes).to_utf8_buffer()

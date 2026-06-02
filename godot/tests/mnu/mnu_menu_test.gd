@@ -523,6 +523,59 @@ func test_window_action_shows_hides_toggles_descendant() -> void:
 	assert_signal_emitted_with_parameters(menu, "action_dispatched", ["window", "SoundChk"])
 
 
+func test_interactive_preview_button_runs_window_action() -> void:
+	# In the ONED interactive preview, an edit_mode tree wires its navigators so a tab
+	# click runs its window show/hide actions (clicking a tab shows only its panel).
+	var xml := '<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">' + '<WINDOW type="button" name="TAB"><ACTION type="window" state="HIDE">PANEL</ACTION></WINDOW>' + '<WINDOW type="window" name="PANEL"></WINDOW></WINDOW></SCREEN>'
+	var menu := _menu_from(xml.to_utf8_buffer(), true)  # edit_mode preview
+	assert_true((menu.find_child("TAB", true, false) as BaseButton).disabled, "author-mode button is inert")
+	menu.set_interactive(true)
+	var tab := menu.find_child("TAB", true, false) as BaseButton  # tree rebuilt
+	var panel := menu.find_child("PANEL", true, false) as Control
+	assert_not_null(tab, "button rebuilt")
+	assert_not_null(panel, "panel rebuilt")
+	assert_false(tab.disabled, "interactive button is live")
+	assert_true(panel.visible, "panel visible before the click")
+	tab.emit_signal("pressed")
+	assert_false(panel.visible, "interactive click ran the HIDE window action")
+
+
+func test_interactive_preview_clamps_external_side_effects() -> void:
+	# The interactive sandbox must not reach the editor host: quit/url/cross-file are
+	# no-ops, while window show/hide still runs.
+	var xml := '<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT"><WINDOW type="window" name="PANEL"></WINDOW></WINDOW></SCREEN>'
+	var menu := _menu_from(xml.to_utf8_buffer(), true)
+	menu.set_interactive(true)
+	watch_signals(menu)
+	assert_true(menu.dispatch_action("quit", "", "", ""), "quit consumed")
+	assert_true(menu.dispatch_action("url", "http://x", "", ""), "url consumed")
+	assert_true(menu.dispatch_action("screen", "X", "other.mnu", ""), "cross-file consumed")
+	assert_signal_not_emitted(menu, "quit_requested")
+	assert_signal_not_emitted(menu, "url_requested")
+	assert_signal_not_emitted(menu, "menu_requested")
+	var panel := menu.find_child("PANEL", true, false) as Control
+	assert_true(panel.visible, "panel visible before")
+	assert_true(menu.dispatch_action("window", "PANEL", "", "hide"), "window action still runs")
+	assert_false(panel.visible, "window hidden in the sandbox")
+
+
+func test_interactive_collapses_to_single_screen() -> void:
+	# Author preview shows every screen at once; interactive shows only the current one.
+	var xml := '<SCREEN><NAME>A</NAME><WINDOW type="window" name="ROOT"></WINDOW></SCREEN><SCREEN><NAME>B</NAME><WINDOW type="window" name="ROOT"></WINDOW></SCREEN>'
+	var menu := _menu_from(xml.to_utf8_buffer(), true)
+	assert_true(_screen_visible(menu, "A") and _screen_visible(menu, "B"), "author shows all screens")
+	menu.set_interactive(true)
+	assert_true(_screen_visible(menu, "A"), "current screen A visible")
+	assert_false(_screen_visible(menu, "B"), "other screen hidden in interactive")
+
+
+func _screen_visible(menu: NovaMnuMenu, name: String) -> bool:
+	for c in menu.get_children():
+		if c is NovaMnuScreen and c.get_screen_name() == name:
+			return c.visible
+	return false
+
+
 func test_navigate_to_menu_emits_menu_requested() -> void:
 	# Cross-.mnu jumps are host policy: navigate_to_menu (and a screen action with a
 	# file) emit menu_requested instead of navigating in-menu.

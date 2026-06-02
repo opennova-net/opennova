@@ -727,7 +727,7 @@ Control *build_button(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Fon
 	// Interactivity wiring (M5): actions, sounds, hover/normal colours, and the
 	// back-pointer to the navigation controller. _ready() consumes these.
 	btn->set_menu(ctx.owner);
-	btn->set_edit_mode(ctx.edit_mode);
+	btn->set_edit_mode(ctx.inert());
 	for (const auto &act : w.actions) {
 		btn->add_action(make_action(act));
 	}
@@ -745,7 +745,7 @@ Control *build_button(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Fon
 		btn->set_font_colors(normal_c, hover_c);
 	}
 
-	if (ctx.edit_mode) {
+	if (ctx.inert()) {
 		btn->set_disabled(true); // inert while authoring
 	}
 
@@ -815,7 +815,7 @@ Control *build_checkbox(MnuBuildContext &ctx, const mnu::Window &w, const mnu::F
 	// Interactivity wiring (M5): sounds, underline colour (font selected_fg),
 	// back-pointer to the navigation controller. _ready() consumes these.
 	check->set_menu(ctx.owner);
-	check->set_edit_mode(ctx.edit_mode);
+	check->set_edit_mode(ctx.inert());
 	const WidgetSounds snd = split_sounds(w.sounds);
 	check->set_hover_sound(snd.hover_trigger, snd.hover_file);
 	check->set_click_sound(snd.click_trigger, snd.click_file);
@@ -828,7 +828,7 @@ Control *build_checkbox(MnuBuildContext &ctx, const mnu::Window &w, const mnu::F
 		check->set_underline_color(underline_c);
 	}
 
-	if (ctx.edit_mode) {
+	if (ctx.inert()) {
 		check->set_disabled(true);
 	}
 
@@ -1678,7 +1678,7 @@ Control *build_marquee(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Fo
 Control *build_goto(MnuBuildContext &ctx, const mnu::Window &w) {
 	NovaMnuGoto *go = memnew(NovaMnuGoto);
 	go->set_menu(ctx.owner);
-	go->set_edit_mode(ctx.edit_mode);
+	go->set_edit_mode(ctx.inert());
 	for (const auto &act : w.actions) {
 		go->add_action(make_action(act));
 	}
@@ -1810,7 +1810,9 @@ Control *build_window(MnuBuildContext &ctx, const mnu::Window &w, NameTracker &n
 	if (w.hidden) {
 		node->set_visible(false);
 	}
-	if (ctx.edit_mode) {
+	// Author mode makes the whole tree click-through so the canvas owns gestures; the
+	// interactive preview leaves buttons clickable (they keep their default STOP).
+	if (ctx.inert()) {
 		node->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	}
 
@@ -1840,8 +1842,13 @@ Control *mnu_build_screen(const mnu::Screen &screen, MnuBuildContext &ctx, int r
 	screen_node->set_cursor_file(to_gd(screen.cursor_file));
 	screen_node->set_edit_mode(ctx.edit_mode);
 	screen_node->set_anchors_preset(Control::PRESET_FULL_RECT);
-	if (ctx.edit_mode) {
+	if (ctx.inert()) {
 		screen_node->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+	} else if (ctx.interactive) {
+		// Interactive preview: live buttons consume their own clicks, while view
+		// gestures (wheel zoom / middle-drag pan) fall through this screen to the
+		// editor canvas behind it.
+		screen_node->set_mouse_filter(Control::MOUSE_FILTER_PASS);
 	}
 
 	// Resolve the cursor art (MNU keeps a single cursor on the root window;

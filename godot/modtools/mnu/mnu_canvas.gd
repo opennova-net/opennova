@@ -75,6 +75,11 @@ var _zoom := 1.0
 var _pan := Vector2.ZERO
 var _visible_screen_name := ""
 
+# Interactive "play" preview: the live menu drives its own navigation (click a tab
+# and only its window shows). Author gestures (select/drag/marquee/pick) and the
+# authoring overlays are suppressed; only view gestures (pan/zoom) stay live.
+var _interactive := false
+
 # View-gesture state (pan via middle-drag or Space+left-drag).
 var _panning := false
 var _pan_last := Vector2.ZERO
@@ -171,6 +176,39 @@ func show_screen_named(screen_name: String) -> void:
 
 func get_visible_screen_name() -> String:
 	return _visible_screen_name
+
+
+func is_interactive() -> bool:
+	return _interactive
+
+
+# Toggle the interactive "play" preview. On: the live menu's navigators wire up and
+# clicking a tab runs its window show/hide actions (the preview rebuilds, so authored
+# window visibility resets and only the current screen shows). Off: returns to the
+# authoring canvas (single-screen view, inert widgets) with the prior selection intact.
+func set_interactive(on: bool) -> void:
+	if _interactive == on or _preview == null:
+		return
+	_interactive = on
+	if on:
+		# Start the sandbox on the screen the author is viewing, then go live.
+		_preview.set_current_screen(_visible_screen_name)
+		_preview.set_interactive(true)
+		if not _preview.screen_changed.is_connected(_on_preview_screen_changed):
+			_preview.screen_changed.connect(_on_preview_screen_changed)
+	else:
+		if _preview.screen_changed.is_connected(_on_preview_screen_changed):
+			_preview.screen_changed.disconnect(_on_preview_screen_changed)
+		_preview.set_interactive(false)
+		_apply_screen_visibility()  # C++ build() shows all screens; restore single-screen author view
+	_rebuild_control_map()
+	queue_redraw()
+
+
+# While interactive, follow the live menu's own screen navigation so leaving the mode
+# returns the author to whatever screen they ended on.
+func _on_preview_screen_changed(screen_name: String) -> void:
+	_visible_screen_name = screen_name
 
 
 # True when the document has a screen with this (non-empty) name.
@@ -728,17 +766,25 @@ func _gui_input(event: InputEvent) -> void:
 				if _space_held:
 					_panning = mb.pressed
 					_pan_last = mb.position
+					accept_event()
+				elif _interactive:
+					# The live menu owns clicks (they reach its buttons directly); the
+					# canvas does no authoring selection while playing.
+					pass
 				elif mb.pressed:
 					_on_press(mb.position, mb.shift_pressed or mb.ctrl_pressed)
+					accept_event()
 				else:
 					_on_release()
-				accept_event()
+					accept_event()
 			MOUSE_BUTTON_RIGHT:
 				# Right-click lists every widget under the cursor so a nested one is
-				# directly selectable (no z-cycling). Does not start a gesture.
-				if mb.pressed:
-					_show_pick_menu(mb.position)
-				accept_event()
+				# directly selectable (no z-cycling). Does not start a gesture. Off
+				# while interactive (no authoring).
+				if not _interactive:
+					if mb.pressed:
+						_show_pick_menu(mb.position)
+					accept_event()
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
 		if _panning:
@@ -747,6 +793,8 @@ func _gui_input(event: InputEvent) -> void:
 			_recompute_fit()  # re-applies preview position + clamps pan
 			queue_redraw()
 			accept_event()
+		elif _interactive:
+			pass  # live menu handles its own hover; no authoring cursor/hover cues
 		elif _pressed:
 			_on_drag(mm.position, mm.alt_pressed)
 			accept_event()
@@ -1089,6 +1137,10 @@ func _draw() -> void:
 	var board := Rect2(_eff_offset(), _menu_size * _eff_scale())
 	draw_rect(board, COL_LETTERBOX)
 	draw_rect(board, COL_BORDER, false, 1.0)
+
+	# The interactive preview hides all authoring overlays so it reads like the real menu.
+	if _interactive:
+		return
 
 	# Faint outline for every widget so tiny / empty / overlapping ones stay locatable.
 	if _show_all_bounds:

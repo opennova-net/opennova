@@ -30,6 +30,15 @@ struct MnuBuildContext {
 	// Null in pure-runtime builds with no document association (tagging is skipped).
 	NovaMnuDocument *document = nullptr;
 	bool edit_mode = false;
+	// Interactive preview (ONED "play" mode): an edit_mode tree that nonetheless
+	// wires its navigators (buttons/gotos) and lets them receive clicks, so an author
+	// can click a tab and watch its window show/hide actions run. Only interactivity
+	// is restored; the tree is still a non-runtime preview. See NovaMnuMenu::set_interactive.
+	bool interactive = false;
+
+	// True when the tree must be inert for authoring: click-through and nothing
+	// wired. False both at runtime and in the interactive preview.
+	bool inert() const { return edit_mode && !interactive; }
 
 	// Distinct concrete asset names (textures/fonts, never %VAR% references) that
 	// a resolver was asked for but could not load. Populated during the build so

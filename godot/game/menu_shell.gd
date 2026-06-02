@@ -23,12 +23,20 @@ const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_s
 # menu's set_music_var_index default and the engine tests' set_var(0, ...) path).
 const MUSIC_VAR_INDEX := 0
 
+# Friendly labels for known expansions. The list item + persisted key stay the raw
+# folder name (e.g. "jox01"); unknown expansions display their raw folder name.
+const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
+
 # Asset names resolved from the resource dir. JO defaults; override per game. A
 # blank discovery name falls back to the first file of that kind in the dir.
 @export var main_menu_file := "main.mnu"
 @export var ingame_menu_file := "game.mnu"
 @export var menu_text_file := "menutxt.BIN"
-@export var menu_stylesheet_file := ""   # "" -> first .mns in the dir
+# The menu stylesheet has a fixed canonical name the original engine looks for
+# ("named menu_style.mns for the game to find it"). It is usually PFF-archived and
+# is NOT a "recognized kind", so list_files(".mns") never surfaces it; load it by
+# name through the VFS instead. A blank value falls back to the first .mns found.
+@export var menu_stylesheet_file := "menu_style.mns"
 @export var menu_sound_bank_file := ""   # "" -> a .sbf whose name contains "menu", else first
 @export var menu_music_file := ""        # "" -> a .mus/.bin whose name contains "menu", else first
 @export var game_music_file := ""        # "" -> a .mus/.bin whose name contains "game", else first
@@ -48,6 +56,15 @@ const MUSIC_VAR_INDEX := 0
 @export var mission_list_names := PackedStringArray([
 	"MISSION_LIST", "MISSIONLIST", "MISSIONS", "IA_LIST", "MAP_LIST",
 ])
+# List widgets the host fills with the expansions discoverable under the resource
+# dir (Options -> Mods). Activating one mounts it over the base game.
+@export var mod_list_names := PackedStringArray([
+	"AVAIL_LIST", "MOD_LIST", "MODLIST", "EXPANSION_LIST",
+])
+# Readonly text widgets that show the selected expansion's description/name.
+@export var mod_desc_names := PackedStringArray([
+	"MOD_DESC", "MOD_DESCRIPTION",
+])
 
 # Host -> main_game intents. The host never loads a world or quits the app
 # itself; it translates menu activity into these and lets main_game decide.
@@ -55,6 +72,10 @@ signal start_requested(bms_name: String)
 signal exit_to_desktop_requested()
 signal return_to_menu_requested()
 signal resume_requested()
+# Emitted when the player activates an expansion/mod in Options. The choice is also
+# mounted onto the live root and persisted (read back at the next launch/world load
+# by main_game.gd), so it affects gameplay, not just the menu.
+signal expansion_selected(name: String)
 
 var _menu: NovaMnuMenu
 var _director: NovaMusicDirector
@@ -69,6 +90,7 @@ var _menu_cache: Dictionary = {}            # filename -> NovaMnuDocument
 var _menu_stack: Array[Dictionary] = []     # [{file, screen}] cross-.mnu back stack
 var _current_file := ""
 var _selected_mission := ""
+var _selected_expansion := ""
 var _menu_size := Vector2(640, 480)
 var _in_game := false
 var _ready_done := false
@@ -190,6 +212,10 @@ func _wire_named_controls() -> void:
 		var list := _menu.find_child(list_name, true, false)
 		if list is NovaMnuList:
 			_seed_mission_list(list as NovaMnuList)
+	for mod_name in mod_list_names:
+		var mod_list := _menu.find_child(mod_name, true, false)
+		if mod_list is NovaMnuList:
+			_seed_mod_list(mod_list as NovaMnuList)
 
 
 func _connect_named(names: PackedStringArray, handler: Callable) -> void:
@@ -207,6 +233,81 @@ func _seed_mission_list(list: NovaMnuList) -> void:
 	list.set_items(names)
 	if not list.item_activated.is_connected(_on_mission_activated):
 		list.item_activated.connect(_on_mission_activated)
+
+
+# --- Expansion / mod selection (Options -> Mods) ------------------------------
+
+# Fill a mod list with the expansions discoverable under the resource root, mirror
+# the persisted current selection, and wire activation. list_expansions scans
+# <root>/expansion/<name>/<name>.pff and is independent of the mounted root.
+func _seed_mod_list(list: NovaMnuList) -> void:
+	if _root == null:
+		return
+	var expansions := _root.list_expansions(_root.get_root_dir())
+	list.set_items(expansions)
+	var current := _current_expansion()
+	var sel := expansions.find(current)
+	if sel >= 0:
+		list.select(sel)
+	_update_mod_desc(current if sel >= 0 else "")
+	if not list.item_activated.is_connected(_on_mod_activated):
+		list.item_activated.connect(_on_mod_activated)
+
+
+func _on_mod_activated(index: int) -> void:
+	var list := _find_mod_list()
+	if list == null or index < 0 or index >= list.item_count:
+		return
+	_apply_expansion(list.get_item_text(index))
+
+
+# Mount the chosen expansion onto the live root, refresh the content that depends on
+# it, persist the choice, and announce it. The persisted key is read at the next
+# launch/world load by main_game.gd, so the selection affects gameplay too. A failed
+# mount clears the root, so the previous expansion is re-mounted to recover.
+func _apply_expansion(name: String) -> void:
+	if _root == null or name.is_empty() or name == _current_expansion():
+		return
+	var dir := _root.get_root_dir()
+	var prev := _current_expansion()
+	if _root.mount_runtime(dir, name, NovaLaunchFlags.loose_override_enabled()) != OK:
+		push_warning("NovaMenuHost: could not mount expansion '%s': %s" % [name, _root.get_last_error()])
+		_root.mount_runtime(dir, prev, NovaLaunchFlags.loose_override_enabled())  # rollback
+		return
+	ResourceDirSettings.set_expansion(name)
+	_selected_expansion = name
+	_refresh_dependent_content()
+	_update_mod_desc(name)
+	expansion_selected.emit(name)
+
+
+# After a mount change, re-fill anything seeded from the resource dir so the
+# expansion's maps/missions appear; the prior mission pick is now stale.
+func _refresh_dependent_content() -> void:
+	_selected_mission = ""
+	for list_name in mission_list_names:
+		var list := _menu.find_child(list_name, true, false)
+		if list is NovaMnuList:
+			_seed_mission_list(list as NovaMnuList)
+
+
+func _update_mod_desc(name: String) -> void:
+	var desc := _find_mod_desc()
+	if desc != null:
+		desc.text = _describe(name)
+
+
+# Names-only is all the VFS exposes today; show a friendly label when we know one,
+# else the raw folder name. TODO(expansion-desc): read a description from the .pff.
+func _describe(name: String) -> String:
+	if name.is_empty():
+		return ""
+	var label := String(EXPANSION_DISPLAY_NAMES.get(name, name))
+	return "%s\n\n(expansion: %s)" % [label, name]
+
+
+func _current_expansion() -> String:
+	return ResourceDirSettings.get_expansion()
 
 
 # --- Menu signal handlers -----------------------------------------------------
@@ -232,6 +333,9 @@ func _on_quit_requested() -> void:
 func _on_widget_value_changed(widget_name: String, kind: String, _index: int, value: String) -> void:
 	if kind == "list" and _is_mission_list(widget_name):
 		_selected_mission = value
+	elif kind == "list" and _is_mod_list(widget_name):
+		# Single click previews the description; activation (double-click) mounts it.
+		_update_mod_desc(value)
 
 
 func _on_action_dispatched(_type: String, _target: String) -> void:
@@ -449,6 +553,30 @@ func _is_mission_list(widget_name: String) -> bool:
 	return false
 
 
+func _is_mod_list(widget_name: String) -> bool:
+	for n in mod_list_names:
+		if n == widget_name:
+			return true
+	return false
+
+
+func _find_mod_list() -> NovaMnuList:
+	for n in mod_list_names:
+		var node := _menu.find_child(n, true, false)
+		if node is NovaMnuList:
+			return node as NovaMnuList
+	return null
+
+
+# MOD_DESC builds as NovaMnuMultilineEdit (a TextEdit); set_text works while READONLY.
+func _find_mod_desc() -> TextEdit:
+	for n in mod_desc_names:
+		var node := _menu.find_child(n, true, false)
+		if node is TextEdit:
+			return node as TextEdit
+	return null
+
+
 func _find_mission_list() -> NovaMnuList:
 	for n in mission_list_names:
 		var node := _menu.find_child(n, true, false)
@@ -472,6 +600,10 @@ func get_current_menu_file() -> String:
 
 func get_selected_mission() -> String:
 	return _selected_mission
+
+
+func get_selected_expansion() -> String:
+	return _selected_expansion
 
 
 func get_menu_stack_depth() -> int:

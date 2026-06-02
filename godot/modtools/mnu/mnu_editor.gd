@@ -146,6 +146,16 @@ func _build_toolbar(parent: Control) -> void:
 	bar.add_child(bounds_btn)
 	_add_toolbar_button(bar, "Fit", "Reset zoom and pan to fit the board", _on_fit_pressed)
 
+	bar.add_child(VSeparator.new())
+	# Interactive "play" preview: click tabs/buttons in the preview to run their window
+	# show/hide + screen navigation, like the running game. No edits are made.
+	var play_btn := Button.new()
+	play_btn.text = "Interactive"
+	play_btn.tooltip_text = "Play the menu: click tabs/buttons to show/hide windows and change screens. No edits are made."
+	play_btn.toggle_mode = true
+	play_btn.toggled.connect(_on_interactive_toggled)
+	bar.add_child(play_btn)
+
 
 func _add_toolbar_button(parent: Control, text: String, tip: String, handler: Callable) -> Button:
 	var btn := Button.new()
@@ -154,6 +164,23 @@ func _add_toolbar_button(parent: Control, text: String, tip: String, handler: Ca
 	btn.pressed.connect(handler)
 	parent.add_child(btn)
 	return btn
+
+
+func _on_interactive_toggled(on: bool) -> void:
+	if _canvas != null:
+		_canvas.set_interactive(on)
+	# Authoring is unavailable while playing; restore the per-button state on exit.
+	_set_authoring_enabled(not on)
+
+
+# Enable/disable the structural authoring controls, used to lock them during the
+# interactive preview. Re-derives the add/delete states via _refresh_toolbar_state.
+func _set_authoring_enabled(enabled: bool) -> void:
+	for c in [_type_picker, _btn_add, _btn_delete, _btn_add_screen, _btn_delete_screen]:
+		if c != null:
+			c.disabled = not enabled
+	if enabled:
+		_refresh_toolbar_state()
 
 
 func _populate_type_picker() -> void:
