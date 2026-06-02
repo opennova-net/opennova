@@ -599,6 +599,9 @@ int threedi_3di3_parse(const ThreediFile *file, Threedi3di3 *out_model);
 // Convenience: read a file from disk and parse it into a Threedi3di3.
 int threedi_3di3_read(const char *path, Threedi3di3 *out_model);
 
+// Convenience: parse memory-backed 3DI bytes into a Threedi3di3.
+int threedi_3di3_read_memory(const uint8_t *data, size_t size, Threedi3di3 *out_model);
+
 // Convenience: write a previously-read model back to disk (round-trip).
 int threedi_3di3_write(const char *path, const Threedi3di3 *model);
 

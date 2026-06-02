@@ -7,6 +7,8 @@ target_include_directories(opennova_resource_index
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+target_link_libraries(opennova_resource_index PRIVATE opennova_vfs)
+
 target_compile_features(opennova_resource_index PUBLIC cxx_std_17)
 
 set_target_properties(opennova_resource_index PROPERTIES

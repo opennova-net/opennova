@@ -196,6 +196,10 @@ func get_current_resource_path() -> String:
 
 
 func open_file(path: String) -> Error:
+	var resources := _resource_root()
+	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
+		var bytes := resources.read_file(path)
+		return _document.open_fnt_bytes(bytes, resources.get_root_dir().path_join(path.get_file()))
 	return _document.open_fnt(path)
 
 
@@ -205,8 +209,11 @@ func open_font_name(font_name: String) -> Error:
 	var resources := _resource_root()
 	if resources == null or resources.get_root_dir().is_empty():
 		return ERR_DOES_NOT_EXIST
-	var path := resources.resolve_file("%s.fnt" % font_name)
-	return open_file(path) if not path.is_empty() else ERR_DOES_NOT_EXIST
+	var filename := "%s.fnt" % font_name
+	var path := resources.resolve_file(filename)
+	if not path.is_empty():
+		return open_file(path)
+	return open_file(filename) if resources.has_file(filename) else ERR_DOES_NOT_EXIST
 
 
 func _resource_root() -> NovaResourceRoot:

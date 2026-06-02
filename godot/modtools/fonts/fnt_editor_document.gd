@@ -32,13 +32,17 @@ func open_fnt(path: String) -> Error:
 	var bytes := FileAccess.get_file_as_bytes(path)
 	if bytes.is_empty():
 		return FileAccess.get_open_error()
+	return open_fnt_bytes(bytes, path)
+
+
+func open_fnt_bytes(bytes: PackedByteArray, display_path: String) -> Error:
 	var loaded := NovaFntResource.new()
 	var err := loaded.load_from_bytes(bytes)
 	if err != OK:
 		return err
 	_replace_resource(loaded)
-	set_current_path(path)
-	remember_open_path(path)
+	set_current_path(display_path)
+	remember_open_path(display_path)
 	mark_clean()
 	state_changed.emit()
 	resource_loaded.emit(resource)

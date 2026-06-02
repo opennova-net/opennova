@@ -73,6 +73,13 @@ target_link_libraries(pff_unit_test PRIVATE opennova_pff)
 target_include_directories(pff_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_unit COMMAND pff_unit_test)
 
+# VFS tests (mount precedence, mount_game expansion override, SCR decode-on-read)
+add_executable(vfs_test vfs/vfs_test.cpp)
+target_link_libraries(vfs_test PRIVATE opennova_vfs opennova_pff)
+target_include_directories(vfs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(vfs_test PRIVATE cxx_std_17)
+add_test(NAME vfs COMMAND vfs_test)
+
 # BFC1 tests
 add_executable(bfc1_unit_test bfc1/bfc1_unit_test.cpp)
 target_link_libraries(bfc1_unit_test PRIVATE opennova_bfc1)

@@ -12,6 +12,7 @@
 #include <env/env.h>
 
 #include "env/nova_env_keyframe.h"
+#include "resource_index/nova_resource_root.h"
 
 namespace godot {
 
@@ -56,6 +57,7 @@ private:
 
 	opennova::env::Config env;
 	bool loaded = false;
+	Ref<NovaResourceRoot> resource_root;
 
 	void _sync_env_from_properties();
 	void _sync_properties_from_env();
@@ -134,6 +136,7 @@ public:
 	TypedArray<NovaEnvKeyframe> get_tod_keyframes() const;
 
 	Error load();
+	Error load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
 	Error save_to_path(const String &p_path);
 	void reset_to_default();
 	bool is_loaded() const;
