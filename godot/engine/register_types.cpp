@@ -37,7 +37,6 @@
 #include "editor/opennova_editor_plugin.h"
 #include "rtxt/rtxt_string_file.h"
 #include "rtxt/rtxt_resource_format.h"
-#include "network/nova_world_client.h"
 #include "util/nova_data_format.h"
 #include "util/nova_paths.h"
 #include "util/nova_texture_format.h"
@@ -184,7 +183,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaMnuGlobe);
 	GDREGISTER_CLASS(NovaMnuMarquee);
 	GDREGISTER_CLASS(NovaMnuMenu);
-	GDREGISTER_CLASS(NovaWorldClient);
 
 	trn_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(trn_loader);
