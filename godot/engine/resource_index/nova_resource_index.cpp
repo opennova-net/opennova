@@ -39,6 +39,10 @@ Dictionary NovaResourceIndex::file_entry_to_dictionary(const opennova::ResourceF
 	out["relative_path"] = String(entry.relative_path.c_str());
 	out["source_type"] = String(entry.source_type.c_str());
 	out["archive_path"] = String(entry.archive_path.c_str());
+	// Godot ints are 64-bit signed; real resource sizes never approach the range
+	// where the uint64->int64 narrowing would matter.
+	out["size_bytes"] = static_cast<int64_t>(entry.size_bytes);
+	out["modified_time"] = static_cast<int64_t>(entry.modified_time);
 	return out;
 }
 

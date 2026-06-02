@@ -139,6 +139,18 @@ int main() {
 	TEST_EXPECT(!has_relative_path(all_files, "Scratch.bin"));
 	TEST_EXPECT(!has_relative_path(all_files, "vehicle.glb"));
 	TEST_EXPECT(!has_relative_path(all_files, "models/tree.glb"));
+
+	// Loose entries carry on-disk size + modified time (the editor's resource
+	// browser shows these as columns). Sizes match the fixture byte counts.
+	const opennova::ResourceFileEntry *alpha = find_relative_path(all_files, "Alpha.TRN");
+	TEST_EXPECT(alpha != nullptr);
+	TEST_EXPECT(alpha->source_type == "file");
+	TEST_EXPECT(alpha->size_bytes == 3);  // "trn"
+	TEST_EXPECT(alpha->modified_time > 0);
+	const opennova::ResourceFileEntry *menus = find_relative_path(all_files, "Menus.BIN");
+	TEST_EXPECT(menus != nullptr);
+	TEST_EXPECT(menus->size_bytes == 11);  // "RTXTstrings"
+
 	TEST_EXPECT(index.resource_files("terrain").size() == 1);
 	TEST_EXPECT(index.resource_files("environment").size() == 1);
 	TEST_EXPECT(index.resource_files("mission").size() == 1);

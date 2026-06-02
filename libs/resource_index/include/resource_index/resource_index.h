@@ -17,6 +17,13 @@ struct ResourceFileEntry {
 	std::string relative_path;
 	std::string source_type;
 	std::string archive_path;
+	// File metadata, filled at scan time for loose entries (the editor mounts
+	// LooseOnly, so these are always populated there). Archive (.pff) entries
+	// leave these zero because the location carries no size/time. size_bytes is
+	// the on-disk byte count; modified_time is the last-write time in Unix
+	// seconds (UTC), or 0 when unknown.
+	uint64_t size_bytes = 0;
+	int64_t modified_time = 0;
 };
 
 class ResourceIndex {

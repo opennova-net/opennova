@@ -4,13 +4,30 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
+#include <system_error>
 
 namespace fs = std::filesystem;
 
 namespace opennova {
 
 namespace {
+
+// Last-write time of `path` as Unix seconds (UTC), or 0 when it can't be read.
+// fs::file_time_type has no portable epoch before C++20, so map it onto
+// system_clock via the now()-offset trick (precise enough for display).
+int64_t file_modified_unix_seconds(const fs::path &path) {
+	std::error_code ec;
+	const fs::file_time_type ftime = fs::last_write_time(path, ec);
+	if (ec) {
+		return 0;
+	}
+	const auto system_time = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+	        ftime - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
+	return std::chrono::duration_cast<std::chrono::seconds>(system_time.time_since_epoch()).count();
+}
 
 std::string to_lower_ascii(std::string value) {
 	for (char &ch : value) {
@@ -210,7 +227,14 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 			// every platform. Godot paths are always '/'-separated and consumers compare
 			// these against String.path_join() output (also '/'); native '\' on Windows
 			// breaks those equality checks and yields non-portable object paths.
-			entry.path = (fs::path(loc.source_path) / loc.logical_name).generic_string();
+			const fs::path loose_path = fs::path(loc.source_path) / loc.logical_name;
+			entry.path = loose_path.generic_string();
+			std::error_code size_ec;
+			const auto size = fs::file_size(loose_path, size_ec);
+			if (!size_ec) {
+				entry.size_bytes = static_cast<uint64_t>(size);
+			}
+			entry.modified_time = file_modified_unix_seconds(loose_path);
 		} else {
 			entry.source_type = "pff";
 			entry.archive_path = loc.source_path;
