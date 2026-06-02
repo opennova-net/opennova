@@ -102,6 +102,26 @@ Position parse_position(const mnu_xml::Node *pos_node) {
     pos.has_bottom = true;
   }
 
+  // Aliases the original POSITION handler also accepts: ULX/ULY = left/top;
+  // WIDTH/HEIGHT derive right/bottom from origin + extent. Shipped fixtures use
+  // LEFT/TOP/RIGHT/BOTTOM; these keep a menu authored the other way intact.
+  if (!pos.has_left) {
+    std::string ulx = attr_or_child(pos_node, "ulx");
+    if (!ulx.empty()) { pos.left = parse_int(ulx); pos.has_left = true; }
+  }
+  if (!pos.has_top) {
+    std::string uly = attr_or_child(pos_node, "uly");
+    if (!uly.empty()) { pos.top = parse_int(uly); pos.has_top = true; }
+  }
+  if (!pos.has_right) {
+    std::string w = attr_or_child(pos_node, "width");
+    if (!w.empty()) { pos.right = pos.left + parse_int(w); pos.has_right = true; }
+  }
+  if (!pos.has_bottom) {
+    std::string h = attr_or_child(pos_node, "height");
+    if (!h.empty()) { pos.bottom = pos.top + parse_int(h); pos.has_bottom = true; }
+  }
+
   return pos;
 }
 
@@ -263,6 +283,14 @@ Frame parse_frame(const mnu_xml::Node *frame_node) {
     if (tag == "stencil") {
       frame.stencil = child->get_direct_text();
       frame.stencil_size = parse_int(child->attr("size"));
+      if (child->has_attr("insetx")) {
+        frame.insetx = parse_int(child->attr("insetx"));
+        frame.has_insetx = true;
+      }
+      if (child->has_attr("insety")) {
+        frame.insety = parse_int(child->attr("insety"));
+        frame.has_insety = true;
+      }
     } else if (tag == "brush") {
       frame.brush = child->get_direct_text();
     } else if (tag == "monogram") {
@@ -440,6 +468,7 @@ TableHeader parse_table_header(const mnu_xml::Node *node) {
   header.column = parse_int(node->attr("column"));
   header.sort = node->attr("sort");
   header.width = parse_int(node->attr("width"));
+  header.type = node->attr("type");
   header.text = node->get_direct_text();
 
   return header;
@@ -582,6 +611,14 @@ Window parse_window(const mnu_xml::Node *window_node) {
     win.has_maxchar = true;
   }
 
+  // Additional attributes the original parses (preserved for round-trip).
+  if (window_node->has_attr("form")) {
+    win.form = parse_int(window_node->attr("form"));
+    win.has_form = true;
+  }
+  win.global_var = window_node->attr_bool("global_var");
+  win.password = window_node->attr_bool("password");
+
   // Parse child elements.
   for (const auto &child : window_node->children) {
     if (!child->is_element()) continue;
@@ -623,6 +660,14 @@ Window parse_window(const mnu_xml::Node *window_node) {
     } else if (tag == "orientation") {
       // Scroll/slider orientation.
       win.orientation = child->get_direct_text();
+    } else if (tag == "height") {
+      // Window-level scroll-bar thickness (horizontal scroll); sibling of POSITION.
+      win.scroll_height = parse_int(child->get_direct_text());
+      win.has_scroll_height = true;
+    } else if (tag == "width") {
+      // Window-level scroll-bar thickness (vertical scroll); sibling of POSITION.
+      win.scroll_width = parse_int(child->get_direct_text());
+      win.has_scroll_width = true;
     } else if (tag == "shuttle") {
       // Slider grabber appearance (same format as appearance).
       win.shuttle.push_back(parse_appearance(child.get()));
@@ -1145,6 +1190,8 @@ void write_frame(const Frame &frame, std::string &out, int depth, bool pretty,
     std::string size_attr = frame.stencil_size > 0
                                 ? " size=\"" + std::to_string(frame.stencil_size) + "\""
                                 : "";
+    if (frame.has_insetx) size_attr += " insetx=\"" + std::to_string(frame.insetx) + "\"";
+    if (frame.has_insety) size_attr += " insety=\"" + std::to_string(frame.insety) + "\"";
     append_line(out, depth + 1,
                 "<STENCIL" + size_attr + ">" + escape_xml(frame.stencil) + "</STENCIL>",
                 pretty, indent_size);
@@ -1334,6 +1381,9 @@ void write_window(const Window &win, std::string &out, int depth, bool pretty,
   if (win.has_minval) attrs += " MINVAL=\"" + std::to_string(win.minval) + "\"";
   if (win.has_maxval) attrs += " MAXVAL=\"" + std::to_string(win.maxval) + "\"";
   if (win.has_maxchar) attrs += " MAXCHAR=\"" + std::to_string(win.maxchar) + "\"";
+  if (win.global_var) attrs += " GLOBAL_VAR";
+  if (win.password) attrs += " PASSWORD";
+  if (win.has_form) attrs += " FORM=\"" + std::to_string(win.form) + "\"";
 
   append_line(out, depth, "<WINDOW" + attrs + ">", pretty, indent_size);
 
@@ -1360,6 +1410,17 @@ void write_window(const Window &win, std::string &out, int depth, bool pretty,
   // FRAME comes before APPEARANCE (like original files)
   write_frame(win.frame, out, depth + 1, pretty, indent_size);
   write_position(win.position, out, depth + 1, pretty, indent_size);
+  // Scroll-bar thickness (window-level <HEIGHT>/<WIDTH>), sibling of POSITION.
+  if (win.has_scroll_height) {
+    append_line(out, depth + 1,
+                "<HEIGHT>" + std::to_string(win.scroll_height) + "</HEIGHT>",
+                pretty, indent_size);
+  }
+  if (win.has_scroll_width) {
+    append_line(out, depth + 1,
+                "<WIDTH>" + std::to_string(win.scroll_width) + "</WIDTH>",
+                pretty, indent_size);
+  }
   // ORIENTATION for scroll windows (comes after position)
   if (!win.orientation.empty()) {
     append_line(out, depth + 1,
@@ -1556,6 +1617,7 @@ void write_window(const Window &win, std::string &out, int depth, bool pretty,
         h_attrs += attr_pair("column", std::to_string(h.column));
         if (!h.sort.empty()) h_attrs += attr_pair("sort", h.sort);
         if (h.width > 0) h_attrs += attr_pair("width", std::to_string(h.width));
+        if (!h.type.empty()) h_attrs += attr_pair("type", h.type);
         append_line(out, depth + 2, "<HEADER" + h_attrs + ">" + escape_xml(h.text) + "</HEADER>",
                     pretty, indent_size);
       }

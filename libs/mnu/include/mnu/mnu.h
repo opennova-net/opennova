@@ -148,9 +148,16 @@ struct ListBox {
 // Frame/border definition.
 struct Frame {
   std::string stencil;   // Border texture (9-slice style)
-  int stencil_size = 0;  // Border thickness in pixels
+  int stencil_size = 0;  // Border thickness in px (STENCIL size=, orig elem+0x284)
   std::string brush;     // Tiling background texture
   std::string monogram;  // Watermark/logo overlay
+  // Data-driven 9-patch border insets the original reads from the STENCIL element
+  // (INSETX -> elem+0x288, INSETY -> elem+0x28C @ CUIElement_ParseXMLDefinition).
+  // Preserved for round-trip even when the bake ignores them.
+  bool has_insetx = false;
+  int insetx = 0;
+  bool has_insety = false;
+  int insety = 0;
 };
 
 // Spin button (up/down arrows) for SpinList.
@@ -173,7 +180,8 @@ struct TableHeader {
   int column = 0;        // Column index
   std::string sort;      // Sort order ("A" for ascending)
   int width = 0;         // Column width in pixels
-  std::string text;      // Header text
+  std::string type;      // "id" = text is a string-table key (CUIStringTable_LookupString)
+  std::string text;      // Header text, or the string ID when type=="id"
 };
 
 // Table column body definition.
@@ -247,6 +255,19 @@ struct Window {
   int maxval = 0;           // MAXVAL
   bool has_maxchar = false;
   int maxchar = 0;          // MAXCHAR
+
+  // Additional attributes the original parses; preserved for round-trip.
+  bool has_form = false;
+  int form = 0;             // FORM (int -> widget+0x124): form/grouping index
+  bool global_var = false;  // GLOBAL_VAR flag
+  bool password = false;    // PASSWORD flag (edit widgets: masked input)
+
+  // Scroll-bar thickness from a window-level <HEIGHT>/<WIDTH> on type="scroll"
+  // (sibling of POSITION; orig CUIScrollWidget_ParseExtendedXMLDef @0x64c6d0).
+  bool has_scroll_height = false;
+  int scroll_height = 0;
+  bool has_scroll_width = false;
+  int scroll_width = 0;
 
   Position position;
   std::vector<Appearance> appearances;

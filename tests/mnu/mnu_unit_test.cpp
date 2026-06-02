@@ -52,7 +52,9 @@ bool font_eq(const mnu::Font &a, const mnu::Font &b) {
 
 bool frame_eq(const mnu::Frame &a, const mnu::Frame &b) {
   return a.stencil == b.stencil && a.stencil_size == b.stencil_size &&
-         a.brush == b.brush && a.monogram == b.monogram;
+         a.brush == b.brush && a.monogram == b.monogram &&
+         a.has_insetx == b.has_insetx && a.insetx == b.insetx &&
+         a.has_insety == b.has_insety && a.insety == b.insety;
 }
 
 bool items_eq(const mnu::Items &a, const mnu::Items &b) {
@@ -88,7 +90,7 @@ bool cursor_eq(const mnu::Cursor &a, const mnu::Cursor &b) {
 bool table_header_eq(const mnu::TableHeader &a, const mnu::TableHeader &b) {
   return a.justify == b.justify && a.vjustify == b.vjustify &&
          a.column == b.column && a.sort == b.sort && a.width == b.width &&
-         a.text == b.text;
+         a.type == b.type && a.text == b.text;
 }
 
 bool table_subst_eq(const mnu::TableSubst &a, const mnu::TableSubst &b) {
@@ -133,6 +135,14 @@ bool table_data_eq(const mnu::TableData &a, const mnu::TableData &b) {
 bool window_eq(const mnu::Window &a, const mnu::Window &b) {
   if (a.name != b.name || a.type != b.type || a.hidden != b.hidden ||
       a.disabled != b.disabled || a.checked != b.checked || a.group != b.group)
+    return false;
+  if (a.has_form != b.has_form || a.form != b.form ||
+      a.global_var != b.global_var || a.password != b.password)
+    return false;
+  if (a.has_scroll_height != b.has_scroll_height ||
+      a.scroll_height != b.scroll_height ||
+      a.has_scroll_width != b.has_scroll_width ||
+      a.scroll_width != b.scroll_width)
     return false;
   if (!position_eq(a.position, b.position)) return false;
   if (a.appearances.size() != b.appearances.size()) return false;
@@ -1108,6 +1118,116 @@ bool test_create_from_scratch() {
   return true;
 }
 
+// Round-trip the attributes recovered by the 2026-06-01 Jointops.exe grill:
+// table HEADER type, STENCIL INSETX/INSETY, WINDOW FORM/GLOBAL_VAR/PASSWORD, the
+// window-level scroll <HEIGHT>, and the POSITION ULX/ULY/WIDTH/HEIGHT aliases.
+bool test_grill_attributes_roundtrip() {
+  // (A) Build in code, serialize, re-parse, confirm every field survives.
+  mnu::Document doc;
+  mnu::Screen screen;
+  screen.name = "S";
+  mnu::Window &root = screen.root_window;
+  root.name = "ROOT";
+
+  mnu::Window framed;  // FRAME with data-driven insets
+  framed.name = "PANEL";
+  framed.frame.stencil = "border.tga";
+  framed.frame.stencil_size = 32;
+  framed.frame.has_insetx = true;
+  framed.frame.insetx = 12;
+  framed.frame.has_insety = true;
+  framed.frame.insety = 18;
+  root.children.push_back(framed);
+
+  mnu::Window edit;  // FORM + GLOBAL_VAR + PASSWORD
+  edit.name = "PW";
+  edit.type = mnu::WindowType::Edit;
+  edit.has_form = true;
+  edit.form = 3;
+  edit.global_var = true;
+  edit.password = true;
+  root.children.push_back(edit);
+
+  mnu::Window scroll;  // window-level scroll thickness
+  scroll.name = "BAR";
+  scroll.type = mnu::WindowType::Scroll;
+  scroll.has_scroll_height = true;
+  scroll.scroll_height = 12;
+  root.children.push_back(scroll);
+
+  mnu::Window tbl;  // table HEADER type="id"
+  tbl.name = "GRID";
+  tbl.type = mnu::WindowType::Table;
+  tbl.table_data.column.count = 1;
+  mnu::TableHeader hdr;
+  hdr.column = 0;
+  hdr.width = 150;
+  hdr.type = "id";
+  hdr.text = "Class";
+  tbl.table_data.column.headers.push_back(hdr);
+  root.children.push_back(tbl);
+
+  doc.screens.push_back(screen);
+
+  const std::string text = mnu::serialize(doc, true, 2);
+  mnu::Document parsed;
+  std::string err;
+  CHECK(mnu::parse(text, parsed, err), "grill-attrs doc failed to parse");
+  CHECK(parsed.screens.size() == 1, "expected one screen");
+  CHECK(window_eq(doc.screens[0].root_window, parsed.screens[0].root_window),
+        "grill attributes lost on round-trip");
+
+  const mnu::Window &pr = parsed.screens[0].root_window;
+  const mnu::Window *pf = nullptr, *ppw = nullptr, *psc = nullptr, *pt = nullptr;
+  for (const auto &c : pr.children) {
+    if (c.name == "PANEL") pf = &c;
+    else if (c.name == "PW") ppw = &c;
+    else if (c.name == "BAR") psc = &c;
+    else if (c.name == "GRID") pt = &c;
+  }
+  CHECK(pf && pf->frame.has_insetx && pf->frame.insetx == 12 &&
+            pf->frame.has_insety && pf->frame.insety == 18,
+        "STENCIL INSETX/INSETY lost");
+  CHECK(ppw && ppw->has_form && ppw->form == 3 && ppw->global_var &&
+            ppw->password,
+        "FORM/GLOBAL_VAR/PASSWORD lost");
+  CHECK(psc && psc->has_scroll_height && psc->scroll_height == 12,
+        "scroll <HEIGHT> lost");
+  CHECK(pt && !pt->table_data.column.headers.empty() &&
+            pt->table_data.column.headers[0].type == "id",
+        "HEADER type=id lost (the round-trip data-loss bug)");
+
+  // (B) Parse the original authored syntax directly: STENCIL inset attributes, the
+  // POSITION ULX/ULY/WIDTH/HEIGHT aliases, and a window-level scroll <HEIGHT>.
+  const char *src =
+      "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">"
+      "<WINDOW type=\"static\" name=\"A\">"
+      "<FRAME><STENCIL size=\"16\" insetx=\"4\" insety=\"6\">b.tga</STENCIL></FRAME>"
+      "<POSITION><ULX>10</ULX><ULY>20</ULY><WIDTH>100</WIDTH><HEIGHT>40</HEIGHT></POSITION>"
+      "</WINDOW>"
+      "<WINDOW type=\"scroll\" name=\"B\"><HEIGHT>12</HEIGHT></WINDOW>"
+      "</WINDOW></SCREEN>";
+  mnu::Document d2;
+  CHECK(mnu::parse(src, d2, err), "authored-syntax parse failed");
+  CHECK(d2.screens.size() == 1, "expected one screen (B)");
+  const mnu::Window &r2 = d2.screens[0].root_window;
+  CHECK(r2.children.size() == 2, "expected two children (B)");
+  const mnu::Window &a = r2.children[0];
+  CHECK(a.frame.insetx == 4 && a.frame.insety == 6,
+        "STENCIL insetx/insety attribute parse");
+  CHECK(a.position.has_left && a.position.left == 10, "POSITION ULX alias");
+  CHECK(a.position.has_top && a.position.top == 20, "POSITION ULY alias");
+  CHECK(a.position.has_right && a.position.right == 110,
+        "POSITION WIDTH alias (left+width)");
+  CHECK(a.position.has_bottom && a.position.bottom == 60,
+        "POSITION HEIGHT alias (top+height)");
+  const mnu::Window &b = r2.children[1];
+  CHECK(b.has_scroll_height && b.scroll_height == 12,
+        "scroll-level <HEIGHT> parse");
+
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -1145,6 +1265,7 @@ int main() {
   RUN_TEST(test_table_items_colors);
   RUN_TEST(test_serialize_roundtrip);
   RUN_TEST(test_create_from_scratch);
+  RUN_TEST(test_grill_attributes_roundtrip);
 
   if (failed > 0) {
     std::cerr << "\n" << failed << " test(s) FAILED\n";
