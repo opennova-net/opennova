@@ -13,7 +13,7 @@ bool has_virtual_scheme(const String &path) {
 } // namespace
 
 void NovaResourceIndex::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("scan", "path", "expansion"), &NovaResourceIndex::scan, DEFVAL(String()));
+	ClassDB::bind_method(D_METHOD("scan", "path"), &NovaResourceIndex::scan);
 	ClassDB::bind_method(D_METHOD("clear"), &NovaResourceIndex::clear);
 	ClassDB::bind_method(D_METHOD("get_resource_files", "kind"), &NovaResourceIndex::get_resource_files);
 	ClassDB::bind_method(D_METHOD("get_root_dir"), &NovaResourceIndex::get_root_dir);
@@ -39,12 +39,20 @@ Dictionary NovaResourceIndex::file_entry_to_dictionary(const opennova::ResourceF
 	out["relative_path"] = String(entry.relative_path.c_str());
 	out["source_type"] = String(entry.source_type.c_str());
 	out["archive_path"] = String(entry.archive_path.c_str());
+	// Godot ints are 64-bit signed; real resource sizes never approach the range
+	// where the uint64->int64 narrowing would matter.
+	out["size_bytes"] = static_cast<int64_t>(entry.size_bytes);
+	out["modified_time"] = static_cast<int64_t>(entry.modified_time);
 	return out;
 }
 
-Error NovaResourceIndex::scan(const String &path, const String &expansion) {
+Error NovaResourceIndex::scan(const String &path) {
+	// The editor's resource browser indexes loose files only; the PFF archives are a
+	// runtime concern. See opennova::VfsMountMode.
 	const String native_path = to_native_path(path);
-	return index_.scan(native_path.utf8().get_data(), expansion.utf8().get_data()) ? OK : ERR_CANT_OPEN;
+	return index_.scan(native_path.utf8().get_data(), std::string(), opennova::VfsMountMode::LooseOnly)
+			? OK
+			: ERR_CANT_OPEN;
 }
 
 void NovaResourceIndex::clear() {

@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <vfs/vfs.h>
+
 namespace opennova {
 
 struct ResourceFileEntry {
@@ -15,6 +17,13 @@ struct ResourceFileEntry {
 	std::string relative_path;
 	std::string source_type;
 	std::string archive_path;
+	// File metadata, filled at scan time for loose entries (the editor mounts
+	// LooseOnly, so these are always populated there). Archive (.pff) entries
+	// leave these zero because the location carries no size/time. size_bytes is
+	// the on-disk byte count; modified_time is the last-write time in Unix
+	// seconds (UTC), or 0 when unknown.
+	uint64_t size_bytes = 0;
+	int64_t modified_time = 0;
 };
 
 class ResourceIndex {
@@ -31,7 +40,9 @@ public:
 	// Mount and index a game install. When `expansion` is non-empty and
 	// <root>/expansion/<name>/<name>.pff exists, the expansion's loose files + archives
 	// override the base game (see opennova::Vfs::mount_game). Empty expansion = base game.
-	bool scan(const std::string &root_dir, const std::string &expansion = std::string());
+	// `mode` selects which layers are mounted (loose, archives, or both) — see VfsMountMode.
+	bool scan(const std::string &root_dir, const std::string &expansion = std::string(),
+	          VfsMountMode mode = VfsMountMode::PackedWithLooseOverride);
 	void clear();
 
 	std::vector<ResourceFileEntry> resource_files(const std::string &kind) const;

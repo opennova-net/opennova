@@ -35,9 +35,15 @@ VFS_EXPORT int opennova_vfs_add_search_path(OpennovaVfs *vfs, const char *dir);
 VFS_EXPORT int opennova_vfs_set_primary_archive(OpennovaVfs *vfs, const char *pff_path);
 VFS_EXPORT int opennova_vfs_add_secondary_archive(OpennovaVfs *vfs, const char *pff_path);
 
-/* Game-faithful auto-config. `expansion` may be NULL or "" for base-game mounting. */
+/* Mount mode for opennova_vfs_mount_game: matches opennova::VfsMountMode. */
+#define OPENNOVA_VFS_MODE_LOOSE_ONLY 0               /* loose search paths only */
+#define OPENNOVA_VFS_MODE_PACKED 1                   /* PFF archives only */
+#define OPENNOVA_VFS_MODE_PACKED_WITH_LOOSE 2        /* both, loose overrides archives */
+
+/* Game-faithful auto-config. `expansion` may be NULL or "" for base-game mounting. `mode` is
+   one of the OPENNOVA_VFS_MODE_* constants; an out-of-range value falls back to packed+loose. */
 VFS_EXPORT int opennova_vfs_mount_game(OpennovaVfs *vfs, const char *game_root,
-                                       const char *expansion);
+                                       const char *expansion, int mode);
 
 VFS_EXPORT void opennova_vfs_clear(OpennovaVfs *vfs);
 

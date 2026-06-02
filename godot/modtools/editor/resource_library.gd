@@ -30,9 +30,6 @@ const AXES_VISIBLE_KEY := "axes_visible"
 var _index: RefCounted
 var _resource_root: NovaResourceRoot = NovaResourceRoot.new()
 var _root_dir: String = ""
-# Active expansion name (e.g. "jox01"); "" mounts the base game. Threaded into both the
-# resource root and the browser index so the whole editor sees the same override stack.
-var _expansion: String = ""
 
 
 func ensure_index() -> void:
@@ -49,21 +46,8 @@ func get_root_dir() -> String:
 	return _root_dir
 
 
-func get_expansion() -> String:
-	return _expansion
-
-
 func get_resource_root() -> NovaResourceRoot:
 	return _resource_root
-
-
-# Expansion names available under `path` (defaults to the configured root). Thin
-# passthrough to the C++ root so the shell never touches NovaResourceRoot directly.
-func list_expansions(path: String = "") -> PackedStringArray:
-	var dir := path if not path.is_empty() else _root_dir
-	if dir.is_empty():
-		return PackedStringArray()
-	return _resource_root.list_expansions(dir)
 
 
 func clear_index() -> void:
@@ -73,35 +57,32 @@ func clear_index() -> void:
 
 # Updates the configured flat root and (optionally) persists + scans it. Returns
 # a result the shell applies; `status` is a status-bar message to show (empty = none).
-func set_root_dir(path: String, persist: bool, scan: bool, expansion: String = "") -> Dictionary:
+# The editor mounts loose files only (set_root_dir); the PFF archives are a runtime concern.
+func set_root_dir(path: String, persist: bool, scan: bool) -> Dictionary:
 	ensure_index()
 	var previous := _root_dir
-	var previous_expansion := _expansion
 	_root_dir = path.strip_edges()
-	_expansion = expansion.strip_edges()
 	if _root_dir.is_empty():
-		_expansion = ""
 		_index.clear()
 		_resource_root.clear()
 		if persist:
 			save_state()
 		return {"err": OK, "status": ""}
-	var root_err := _resource_root.mount_game(_root_dir, _expansion)
+	var root_err := _resource_root.set_root_dir(_root_dir)
 	if root_err != OK:
 		var root_error_message := _resource_root.get_last_error()
 		_root_dir = previous
-		_expansion = previous_expansion
 		if _root_dir.is_empty():
 			_resource_root.clear()
 		else:
-			_resource_root.mount_game(_root_dir, _expansion)
+			_resource_root.set_root_dir(_root_dir)
 		_index.clear()
 		return {"err": root_err, "status": root_error_message}
 	if persist:
 		save_state()
 	if scan:
 		return scan_root()
-	if previous != _root_dir or previous_expansion != _expansion:
+	if previous != _root_dir:
 		_index.clear()
 	return {"err": OK, "status": ""}
 
@@ -113,11 +94,11 @@ func scan_root() -> Dictionary:
 	if _root_dir.is_empty():
 		_index.clear()
 		return {"err": OK, "status": ""}
-	var root_err := _resource_root.mount_game(_root_dir, _expansion)
+	var root_err := _resource_root.set_root_dir(_root_dir)
 	if root_err != OK:
 		_index.clear()
 		return {"err": root_err, "status": _resource_root.get_last_error()}
-	var err: Error = _index.scan(_root_dir, _expansion)
+	var err: Error = _index.scan(_root_dir)
 	if err == OK:
 		return {"err": OK, "status": "Resource directory indexed."}
 	var detail := ""
@@ -135,22 +116,15 @@ func load_state() -> Dictionary:
 	# Resource-dir persistence lives in NovaResourceDirSettings (shared with the
 	# runtime); get_resource_dir() already drops stale/invalid paths.
 	_root_dir = ResourceDirSettings.get_resource_dir()
-	_expansion = ResourceDirSettings.get_expansion()
 	if _root_dir.is_empty():
-		_expansion = ""
 		_resource_root.clear()
 	else:
-		# Drop a persisted expansion that no longer exists under this root (game dir moved
-		# or the expansion was removed) so we mount a clean base game instead of failing.
-		if not _expansion.is_empty() and not _resource_root.list_expansions(_root_dir).has(_expansion):
-			_expansion = ""
-		_resource_root.mount_game(_root_dir, _expansion)
-	return {"root_dir": _root_dir, "expansion": _expansion}
+		_resource_root.set_root_dir(_root_dir)
+	return {"root_dir": _root_dir}
 
 
 func save_state() -> void:
 	ResourceDirSettings.set_resource_dir(_root_dir)
-	ResourceDirSettings.set_expansion(_expansion)
 
 
 # Persisted shell layout. Split offsets are stored alongside the resource state

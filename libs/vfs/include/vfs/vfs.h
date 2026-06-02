@@ -10,6 +10,15 @@ namespace opennova {
 
 enum class VfsSource { LooseDir, Archive };
 
+// Which layers mount_game brings online.
+//   LooseOnly              - loose search paths only; archives ignored. The editor authors
+//                            loose files and never reads PFFs.
+//   Packed                 - PFF archives only; loose search paths ignored. The shipping
+//                            runtime: the packed game data is the sole source.
+//   PackedWithLooseOverride - both, loose shadowing archives. The runtime under the `/d`
+//                            dev flag, where loose files override the packed data.
+enum class VfsMountMode { LooseOnly, Packed, PackedWithLooseOverride };
+
 struct VfsFileLocation {
     std::string logical_name;                 // entry name, original case
     VfsSource source = VfsSource::LooseDir;
@@ -43,8 +52,10 @@ public:
     // (the engine's CWD probe), <name>L.pff as the primary archive and <name>.pff as a
     // secondary, then every base-root *.pff as further secondaries. Mirrors
     // Expansion_LoadAssets @ 0x4a4730 + base mounting. Returns false only on a bad root; a
-    // missing/unknown expansion gracefully falls back to base-game mounting.
-    bool mount_game(const std::string &game_root, const std::string &expansion = std::string());
+    // missing/unknown expansion gracefully falls back to base-game mounting. `mode` selects
+    // which layers are mounted (loose, archives, or both) — see VfsMountMode.
+    bool mount_game(const std::string &game_root, const std::string &expansion = std::string(),
+                    VfsMountMode mode = VfsMountMode::PackedWithLooseOverride);
 
     void clear();
 

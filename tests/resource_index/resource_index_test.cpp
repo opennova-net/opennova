@@ -101,10 +101,13 @@ int main() {
 	write_file(root / "scene.ASE", "ase");
 	write_file(root / "vehicle.glb", "glb");
 	write_file(root / "Menus.BIN", "RTXTstrings");
+	write_file(root / "jo_gamemus.sbf", "SBF0");
+	write_file(root / "jo_gamemus.bin", "SCR0music");
 	write_file(root / "Scratch.bin", "DATA");
 	write_file(root / "first.bms", "bms");
 	write_file(root / "finale.kda", "kda");
 	write_file(root / "Serpen24.fnt", "fnt");
+	write_file(root / "main.mnu", "mnu");
 	write_file(root / "missions" / "first.bms", "bms");
 	write_file(root / "models" / "tree.glb", "glb");
 	write_file(root / "models" / "tree.3di", "3di");
@@ -119,9 +122,12 @@ int main() {
 
 	TEST_EXPECT(index.scan(root.string()));
 	const std::vector<opennova::ResourceFileEntry> all_files = index.resource_files("*");
-	TEST_EXPECT(all_files.size() == 9);
+	TEST_EXPECT(all_files.size() == 12);
 	TEST_EXPECT(has_relative_path(all_files, "Alpha.TRN"));
 	TEST_EXPECT(has_relative_path(all_files, "Menus.BIN"));
+	TEST_EXPECT(has_relative_path(all_files, "main.mnu"));
+	TEST_EXPECT(has_relative_path(all_files, "jo_gamemus.sbf"));
+	TEST_EXPECT(has_relative_path(all_files, "jo_gamemus.bin"));
 	TEST_EXPECT(has_relative_path(all_files, "first.bms"));
 	TEST_EXPECT(has_relative_path(all_files, "finale.kda"));
 	TEST_EXPECT(has_relative_path(all_files, "Serpen24.fnt"));
@@ -133,6 +139,18 @@ int main() {
 	TEST_EXPECT(!has_relative_path(all_files, "Scratch.bin"));
 	TEST_EXPECT(!has_relative_path(all_files, "vehicle.glb"));
 	TEST_EXPECT(!has_relative_path(all_files, "models/tree.glb"));
+
+	// Loose entries carry on-disk size + modified time (the editor's resource
+	// browser shows these as columns). Sizes match the fixture byte counts.
+	const opennova::ResourceFileEntry *alpha = find_relative_path(all_files, "Alpha.TRN");
+	TEST_EXPECT(alpha != nullptr);
+	TEST_EXPECT(alpha->source_type == "file");
+	TEST_EXPECT(alpha->size_bytes == 3);  // "trn"
+	TEST_EXPECT(alpha->modified_time > 0);
+	const opennova::ResourceFileEntry *menus = find_relative_path(all_files, "Menus.BIN");
+	TEST_EXPECT(menus != nullptr);
+	TEST_EXPECT(menus->size_bytes == 11);  // "RTXTstrings"
+
 	TEST_EXPECT(index.resource_files("terrain").size() == 1);
 	TEST_EXPECT(index.resource_files("environment").size() == 1);
 	TEST_EXPECT(index.resource_files("mission").size() == 1);
@@ -140,6 +158,8 @@ int main() {
 	TEST_EXPECT(index.resource_files("object_model").size() == 1);
 	TEST_EXPECT(index.resource_files("object_scene").size() == 1);
 	TEST_EXPECT(index.resource_files("strings").size() == 1);
+	TEST_EXPECT(index.resource_files("menu").size() == 1);
+	TEST_EXPECT(index.resource_files("mnu").size() == 1);  // alias normalizes to "menu"
 	TEST_EXPECT(index.resource_files("glb").empty());
 	TEST_EXPECT(index.resource_files("bms").size() == 1);
 	TEST_EXPECT(index.resource_files("trn").size() == 1);
@@ -160,6 +180,10 @@ int main() {
 	TEST_EXPECT(index.resource_files("bin").size() == 1);
 	TEST_EXPECT(index.resource_files("rtxt").size() == 1);
 	TEST_EXPECT(index.resource_files("strings")[0].display_name == "Menus");
+	TEST_EXPECT(index.resource_files("sbf").size() == 1);
+	TEST_EXPECT(index.resource_files("music_script").size() == 1);
+	TEST_EXPECT(index.resource_files("mus").size() == 1);
+	TEST_EXPECT(index.resource_files("music").size() == 2);
 
 	write_file(root / "bad.pff", "not a pff");
 	write_pff(root / "aa_base.pff", {
@@ -183,7 +207,7 @@ int main() {
 	TEST_EXPECT(as_string(bytes) == "archived model");
 	TEST_EXPECT(!index.read_file("missing.trn", bytes));
 
-	TEST_EXPECT(mounted_files.size() == 12);
+	TEST_EXPECT(mounted_files.size() == 15);
 	TEST_EXPECT(has_relative_path(mounted_files, "Archive.env"));
 	TEST_EXPECT(has_relative_path(mounted_files, "MenusP.BIN"));
 	TEST_EXPECT(has_relative_path(mounted_files, "Patch.3DI"));
@@ -226,6 +250,25 @@ int main() {
 	TEST_EXPECT(exp_index.read_file("baseonly.trn", eb));
 	TEST_EXPECT(as_string(eb) == "base trn");    // base archive still reachable
 	exp_index.clear();
+
+	// --- mount modes: LooseOnly (editor) ignores archives; Packed (shipping runtime)
+	// ignores loose overrides. The default above is PackedWithLooseOverride (runtime /d). ---
+	{
+		std::vector<uint8_t> mb;
+		opennova::ResourceIndex loose_idx;
+		TEST_EXPECT(loose_idx.scan(game.string(), "jox01", opennova::VfsMountMode::LooseOnly));
+		TEST_EXPECT(loose_idx.read_file("shared.env", mb));
+		TEST_EXPECT(as_string(mb) == "loose env");          // loose expansion file
+		TEST_EXPECT(!loose_idx.read_file("exponly.3di", mb)); // archive-only entry invisible
+		loose_idx.clear();
+
+		opennova::ResourceIndex packed_idx;
+		TEST_EXPECT(packed_idx.scan(game.string(), "jox01", opennova::VfsMountMode::Packed));
+		TEST_EXPECT(packed_idx.read_file("shared.env", mb));
+		TEST_EXPECT(as_string(mb) == "local env");          // L.pff wins; loose ignored
+		TEST_EXPECT(packed_idx.read_file("exponly.3di", mb)); // archive entry present
+		packed_idx.clear();
+	}
 	fs::remove_all(game);
 
 	// Release mounted .pff handles before deleting the directory: the VFS keeps archives

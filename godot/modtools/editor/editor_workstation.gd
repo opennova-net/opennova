@@ -734,8 +734,6 @@ func _wire_settings_popup() -> void:
 		_settings_apply_resource_dir_button.pressed.connect(_on_settings_apply_resource_dir_pressed)
 	if _settings_resource_dir_edit != null and not _settings_resource_dir_edit.text_submitted.is_connected(_on_settings_resource_dir_submitted):
 		_settings_resource_dir_edit.text_submitted.connect(_on_settings_resource_dir_submitted)
-	if _settings_expansion_option != null and not _settings_expansion_option.item_selected.is_connected(_on_settings_expansion_selected):
-		_settings_expansion_option.item_selected.connect(_on_settings_expansion_selected)
 	if _settings_grid_toggle != null and not _settings_grid_toggle.toggled.is_connected(_on_settings_grid_toggled):
 		_settings_grid_toggle.toggled.connect(_on_settings_grid_toggled)
 	if _settings_axes_toggle != null and not _settings_axes_toggle.toggled.is_connected(_on_settings_axes_toggled):
@@ -1016,38 +1014,12 @@ func _on_settings_resource_dir_submitted(_text: String) -> void:
 	_apply_resource_settings(true)
 
 
-func _on_settings_expansion_selected(index: int) -> void:
-	if _settings_expansion_option == null:
-		return
-	var chosen := String(_settings_expansion_option.get_item_metadata(index))
-	if chosen == _resource_library.get_expansion():
-		return
-	_set_resource_root_dir(_resource_library.get_root_dir(), true, true, chosen)
-
-
-# Fill the expansion dropdown from the configured root: "(base game)" at index 0 (its name
-# kept in item metadata so it can never collide with a real expansion called the same), then
-# each discovered expansion. Hides the whole row when the install exposes no expansions.
+# The editor authors loose files only; PFF expansions are a runtime concern (mounted
+# via the `/exp` launch flag), so the settings popup no longer offers an expansion picker.
+# The row is hidden here in case the scene still carries it.
 func _populate_expansion_options() -> void:
-	if _settings_expansion_option == null:
-		return
-	var expansions := _resource_library.list_expansions()
-	var has_any := expansions.size() > 0
 	if _settings_expansion_row != null:
-		_settings_expansion_row.visible = has_any
-	_settings_expansion_option.disabled = not has_any
-	_settings_expansion_option.clear()
-	_settings_expansion_option.add_item("(base game)")
-	_settings_expansion_option.set_item_metadata(0, "")
-	var current := _resource_library.get_expansion()
-	var select_idx := 0
-	for exp_name in expansions:
-		var idx := _settings_expansion_option.item_count
-		_settings_expansion_option.add_item(exp_name)
-		_settings_expansion_option.set_item_metadata(idx, exp_name)
-		if exp_name == current:
-			select_idx = idx
-	_settings_expansion_option.select(select_idx)
+		_settings_expansion_row.visible = false
 
 
 func _on_settings_grid_toggled(pressed: bool) -> void:
@@ -1081,12 +1053,7 @@ func _apply_resource_settings(scan: bool, persist: bool = true) -> Error:
 	var path := _resource_library.get_root_dir()
 	if _settings_resource_dir_edit != null:
 		path = _settings_resource_dir_edit.text
-	# Keep the active expansion only if it still exists under the (possibly new) path;
-	# otherwise fall back to the base game so a dir change can't leave a dangling override.
-	var expansion := _resource_library.get_expansion()
-	if not expansion.is_empty() and not _resource_library.list_expansions(path).has(expansion):
-		expansion = ""
-	return _set_resource_root_dir(path, persist, scan, expansion)
+	return _set_resource_root_dir(path, persist, scan)
 
 
 func _ensure_resource_index() -> void:
@@ -1112,8 +1079,8 @@ func set_resource_root_dir(path: String) -> void:
 # Thin forwarders over EditorResourceLibrary (editor/resource_library.gd): the
 # helper owns the index + root-dir state + persistence; the shell applies status
 # and settings-popup sync side effects.
-func _set_resource_root_dir(path: String, persist: bool, scan: bool, expansion: String = "") -> Error:
-	var result := _resource_library.set_root_dir(path, persist, scan, expansion)
+func _set_resource_root_dir(path: String, persist: bool, scan: bool) -> Error:
+	var result := _resource_library.set_root_dir(path, persist, scan)
 	_show_resource_status(result)
 	_sync_settings_popup_state()
 	return int(result["err"])
@@ -1142,7 +1109,7 @@ func _load_resource_state() -> void:
 	var view := _resource_library.load_view_state()
 	_view_grid_visible = bool(view["grid"])
 	_view_axes_visible = bool(view["axes"])
-	_resource_library.set_root_dir(String(state["root_dir"]), false, false, String(state["expansion"]))
+	_resource_library.set_root_dir(String(state["root_dir"]), false, false)
 
 
 func _save_resource_state() -> void:
