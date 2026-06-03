@@ -159,21 +159,35 @@ class FakeController:
 		armed_id = 0
 		changed.emit()
 
-	# P7 waypoints: the edit-mode tabs + waypoint panel surface.
-	var waypoint_mode: bool = false
+	# P7 waypoints + Phase 2 zones: the edit-mode tabs + panel surface. `mode` mirrors
+	# MissionController.Mode (0 OBJECTS, 1 WAYPOINTS, 2 AREA_TRIGGERS); set_mode_calls records the
+	# mode ints the tab handler passes.
+	var mode: int = 0
 	var selected_path: int = -1
 	var waypoint_summaries: Array = []
 	var selected_marker: Dictionary = {}
 	var set_mode_calls: Array = []
 	var select_path_calls: Array = []
 
+	func get_mode() -> int:
+		return mode
+
+	func is_objects_mode() -> bool:
+		return mode == 0
+
 	func is_waypoint_mode() -> bool:
-		return waypoint_mode
+		return mode == 1
+
+	func is_area_trigger_mode() -> bool:
+		return mode == 2
+
+	func set_mode(m: int) -> void:
+		set_mode_calls.append(m)
+		mode = m
+		changed.emit()
 
 	func set_waypoint_mode(enabled: bool) -> void:
-		set_mode_calls.append(enabled)
-		waypoint_mode = enabled
-		changed.emit()
+		set_mode(1 if enabled else 0)
 
 	func get_selected_waypoint_path_index() -> int:
 		return selected_path
@@ -249,6 +263,64 @@ class FakeController:
 		clear_path_calls += 1
 		changed.emit()
 		return true
+
+	# Phase 2: area-trigger (zone) surface. `zones` are NovaMissionData-shaped dicts.
+	var zones: Array = []
+	var selected_zone: int = -1
+	var add_zone_calls: int = 0
+	var delete_zone_calls: int = 0
+	var select_zone_calls: Array = []
+	var zone_bounds_calls: Array = []
+	var zone_flags_calls: Array = []
+
+	func get_area_triggers() -> Array:
+		return zones
+
+	func get_selected_zone_index() -> int:
+		return selected_zone
+
+	func get_selected_zone() -> Dictionary:
+		if selected_zone < 0 or selected_zone >= zones.size():
+			return {}
+		return zones[selected_zone]
+
+	func select_area_trigger(index: int) -> void:
+		select_zone_calls.append(index)
+		selected_zone = index
+		changed.emit()
+
+	func add_area_trigger_default() -> int:
+		add_zone_calls += 1
+		var idx := zones.size()
+		zones.append({
+			"index": idx, "id": 0, "min": Vector3(-1, -1, -1), "max": Vector3(1, 1, 1),
+			"active": true, "constrain_z": false, "raw_flags": 1,
+		})
+		selected_zone = idx
+		changed.emit()
+		return idx
+
+	func delete_selected_area_trigger() -> bool:
+		delete_zone_calls += 1
+		if selected_zone >= 0 and selected_zone < zones.size():
+			zones.remove_at(selected_zone)
+		selected_zone = -1
+		changed.emit()
+		return true
+
+	func set_selected_zone_bounds(mn: Vector3, mx: Vector3) -> void:
+		zone_bounds_calls.append([mn, mx])
+		if selected_zone >= 0 and selected_zone < zones.size():
+			zones[selected_zone]["min"] = mn
+			zones[selected_zone]["max"] = mx
+		changed.emit()
+
+	func set_selected_zone_flags(active: bool, constrain_z: bool) -> void:
+		zone_flags_calls.append([active, constrain_z])
+		if selected_zone >= 0 and selected_zone < zones.size():
+			zones[selected_zone]["active"] = active
+			zones[selected_zone]["constrain_z"] = constrain_z
+		changed.emit()
 
 
 func _sample_entity() -> Dictionary:
@@ -532,7 +604,7 @@ func test_active_search_filter_survives_a_changed_echo() -> void:
 func _waypoint_ctx(summaries: Array, active: int) -> Dictionary:
 	var fake := FakeController.new()
 	fake.mission_ref = NovaMissionData.new()
-	fake.waypoint_mode = true
+	fake.mode = 1  # WAYPOINTS
 	fake.selected_path = active
 	fake.waypoint_summaries = summaries
 	var inspector = MissionInspector.new()
@@ -541,12 +613,15 @@ func _waypoint_ctx(summaries: Array, active: int) -> Dictionary:
 	return {"fake": fake, "inspector": inspector}
 
 
-func test_mode_tab_handler_toggles_waypoint_mode() -> void:
+func test_mode_tab_handler_drives_controller_mode() -> void:
 	var ctx := _palette_ctx()  # mission open so the tabs are live
+	# Tab order: 0 Objects, 1 Waypoints, 2 Triggers -> Mode 0/1/2.
 	ctx.inspector._on_mode_tab_changed(1)
-	assert_eq(ctx.fake.set_mode_calls, [true], "the Waypoints tab enters waypoint mode")
+	assert_eq(ctx.fake.set_mode_calls, [1], "the Waypoints tab enters waypoint mode")
+	ctx.inspector._on_mode_tab_changed(2)
+	assert_eq(ctx.fake.set_mode_calls, [1, 2], "the Triggers tab enters area-trigger mode")
 	ctx.inspector._on_mode_tab_changed(0)
-	assert_eq(ctx.fake.set_mode_calls, [true, false], "the Objects tab exits waypoint mode")
+	assert_eq(ctx.fake.set_mode_calls, [1, 2, 0], "the Objects tab returns to objects mode")
 
 
 func test_mode_tabs_hidden_without_a_mission() -> void:
@@ -706,6 +781,11 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 		"move_selected_marker", "delete_selected_marker", "clear_active_path",
 		# Phase 1: hidden string fields + mission-header editing.
 		"set_selected_string_property", "set_header_string", "set_header_int", "set_header_flag",
+		# Phase 2: edit-mode + area-trigger (zone) surface.
+		"set_mode", "get_mode", "is_objects_mode", "is_area_trigger_mode",
+		"get_area_triggers", "get_selected_zone_index", "get_selected_zone", "select_area_trigger",
+		"add_area_trigger_default", "delete_selected_area_trigger",
+		"set_selected_zone_bounds", "set_selected_zone_flags",
 	]
 	for method in required:
 		assert_true(controller.has_method(method),
@@ -793,3 +873,84 @@ func test_toggling_a_game_mode_flag_commits_through_set_header_flag() -> void:
 	assert_eq(ctx.fake.header_flag_calls.size(), 1, "one header_flag commit")
 	assert_eq(ctx.fake.header_flag_calls[0][0], NovaMissionData.ATTRIB_COOP, "bit is COOP")
 	assert_eq(ctx.fake.header_flag_calls[0][1], true, "on carried through")
+
+
+# --- Phase 2: area-trigger (zone) panel ---------------------------------------
+
+func _trigger_ctx(zones: Array, selected: int) -> Dictionary:
+	var fake := FakeController.new()
+	fake.mission_ref = NovaMissionData.new()
+	fake.mode = 2  # AREA_TRIGGERS
+	fake.zones = zones
+	fake.selected_zone = selected
+	var inspector = MissionInspector.new()
+	add_child_autofree(inspector)
+	inspector.setup(fake)
+	return {"fake": fake, "inspector": inspector}
+
+
+func _zone(index: int, mn: Vector3, mx: Vector3, active: bool, constrain_z: bool) -> Dictionary:
+	return {"index": index, "id": 0, "min": mn, "max": mx, "active": active, "constrain_z": constrain_z, "raw_flags": (1 if active else 0) | (2 if constrain_z else 0)}
+
+
+func test_trigger_panel_shows_and_lists_zones_in_trigger_mode() -> void:
+	var ctx := _trigger_ctx([
+		_zone(0, Vector3(-5, -6, -7), Vector3(5, 6, 7), true, false),
+		_zone(1, Vector3(0, 0, 0), Vector3(10, 10, 10), false, true),
+	], 0)
+	assert_true(ctx.inspector._at_box.visible, "the trigger panel shows in trigger mode")
+	assert_false(ctx.inspector._edit_box.visible, "the object edit panel is hidden in trigger mode")
+	assert_false(ctx.inspector._place_box.visible, "the palette is hidden in trigger mode")
+	assert_eq(ctx.inspector._at_list.item_count, 2, "both zones are listed")
+	assert_eq(ctx.inspector._at_rows, [0, 1], "the listed zone indices match")
+	# The selected zone's bounds populate the spins.
+	assert_eq(ctx.inspector._at_min_spins[0].value, -5.0, "min X spin reflects the selected zone")
+	assert_eq(ctx.inspector._at_max_spins[1].value, 6.0, "max Y spin reflects the selected zone")
+	assert_true(ctx.inspector._at_active_check.button_pressed, "active toggle reflects the selected zone")
+
+
+func test_trigger_panel_add_button_calls_controller() -> void:
+	var ctx := _trigger_ctx([], -1)
+	var add := ctx.inspector.find_child("MissionAtAddZone", true, false) as Button
+	assert_not_null(add, "Add zone button built")
+	add.pressed.emit()
+	assert_eq(ctx.fake.add_zone_calls, 1, "Add zone calls the controller")
+
+
+func test_trigger_panel_row_selects_zone() -> void:
+	var ctx := _trigger_ctx([
+		_zone(0, Vector3.ZERO, Vector3.ONE, true, false),
+		_zone(1, Vector3.ZERO, Vector3.ONE, true, false),
+	], 0)
+	ctx.inspector._at_list.item_selected.emit(1)
+	assert_eq(ctx.fake.select_zone_calls, [1], "selecting a row focuses that zone")
+
+
+func test_trigger_panel_bounds_spin_commits() -> void:
+	var ctx := _trigger_ctx([_zone(0, Vector3(-1, -1, -1), Vector3(1, 1, 1), true, false)], 0)
+	var min_x := ctx.inspector.find_child("MissionAtMinX", true, false) as SpinBox
+	assert_not_null(min_x, "Min X spin built")
+	# Setting .value fires value_changed naturally (as a user edit would); the handler reads the
+	# new value back off the spin.
+	min_x.value = -50.0
+	assert_eq(ctx.fake.zone_bounds_calls.size(), 1, "one bounds commit")
+	assert_eq((ctx.fake.zone_bounds_calls[0][0] as Vector3).x, -50.0, "the new min X is sent")
+
+
+func test_trigger_panel_flag_toggle_commits() -> void:
+	var ctx := _trigger_ctx([_zone(0, Vector3.ZERO, Vector3.ONE, true, false)], 0)
+	var constrain := ctx.inspector.find_child("MissionAtConstrainZ", true, false) as CheckBox
+	assert_not_null(constrain, "Constrain height toggle built")
+	# Setting button_pressed fires toggled with the new state; the handler reads both checks.
+	constrain.button_pressed = true
+	assert_eq(ctx.fake.zone_flags_calls.size(), 1, "one flag commit")
+	assert_eq(ctx.fake.zone_flags_calls[0][0], true, "active carried through")
+	assert_eq(ctx.fake.zone_flags_calls[0][1], true, "constrain_z carried through")
+
+
+func test_trigger_panel_delete_button_calls_controller() -> void:
+	var ctx := _trigger_ctx([_zone(0, Vector3.ZERO, Vector3.ONE, true, false)], 0)
+	var del := ctx.inspector.find_child("MissionAtDeleteZone", true, false) as Button
+	assert_not_null(del, "Delete zone button built")
+	del.pressed.emit()
+	assert_eq(ctx.fake.delete_zone_calls, 1, "Delete zone calls the controller")

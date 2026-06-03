@@ -126,14 +126,16 @@ struct WaypointPath {
 
 struct AreaTriggerRecord {
 	size_t index = 0;
-	int wp_number = 0;
+	int wp_number = 0;        // off 0: zone id (carried here for ABI stability; not a coordinate)
 	float min_x = 0.0f;
 	float min_y = 0.0f;
 	float min_z = 0.0f;
 	float max_x = 0.0f;
 	float max_y = 0.0f;
 	float max_z = 0.0f;
-	int reserved = 0;
+	int reserved = 0;         // raw 32-bit flags dword at off 28
+	bool active = false;      // flags & 0x01 (zone active)
+	bool constrain_z = false; // flags & 0x02 (else Z unbounded ±16384.0)
 };
 
 struct MissionEventRecord {
@@ -268,6 +270,9 @@ public:
 	size_t area_trigger_count() const;
 	bool get_area_trigger(size_t index, AreaTriggerRecord &out) const;
 	std::vector<AreaTriggerRecord> area_triggers() const;
+	bool add_area_trigger(const AreaTriggerRecord &record, AreaTriggerRecord *out = nullptr);
+	bool set_area_trigger(size_t index, const AreaTriggerRecord &record, AreaTriggerRecord *out = nullptr);
+	bool remove_area_trigger(size_t index);
 	size_t event_count() const;
 	bool get_event(size_t index, MissionEventRecord &out) const;
 	std::vector<MissionEventRecord> events() const;
@@ -391,6 +396,8 @@ typedef struct OpenNovaMissionAreaTriggerRecord {
 	float max_y;
 	float max_z;
 	int reserved;
+	int active;
+	int constrain_z;
 } OpenNovaMissionAreaTriggerRecord;
 
 typedef struct OpenNovaMissionEventRecord {
@@ -513,6 +520,14 @@ MISSION_EXPORT size_t opennova_mission_area_trigger_count(const OpenNovaMissionD
 MISSION_EXPORT int opennova_mission_get_area_trigger(const OpenNovaMissionDocument *document,
                                                      size_t index,
                                                      OpenNovaMissionAreaTriggerRecord *out_record);
+MISSION_EXPORT int opennova_mission_add_area_trigger(OpenNovaMissionDocument *document,
+                                                     const OpenNovaMissionAreaTriggerRecord *record,
+                                                     OpenNovaMissionAreaTriggerRecord *out_record);
+MISSION_EXPORT int opennova_mission_set_area_trigger(OpenNovaMissionDocument *document,
+                                                     size_t index,
+                                                     const OpenNovaMissionAreaTriggerRecord *record,
+                                                     OpenNovaMissionAreaTriggerRecord *out_record);
+MISSION_EXPORT int opennova_mission_remove_area_trigger(OpenNovaMissionDocument *document, size_t index);
 MISSION_EXPORT size_t opennova_mission_event_count(const OpenNovaMissionDocument *document);
 MISSION_EXPORT int opennova_mission_get_event(const OpenNovaMissionDocument *document,
                                               size_t index,

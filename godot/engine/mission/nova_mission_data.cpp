@@ -62,6 +62,13 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_waypoint_path", "index"), &NovaMissionData::clear_waypoint_path);
 	ClassDB::bind_method(D_METHOD("add_waypoint_marker", "path_index", "marker_item_id", "position", "rotation_deg", "insert_index"), &NovaMissionData::add_waypoint_marker);
 
+	ClassDB::bind_method(D_METHOD("get_area_trigger_count"), &NovaMissionData::get_area_trigger_count);
+	ClassDB::bind_method(D_METHOD("get_area_triggers"), &NovaMissionData::get_area_triggers);
+	ClassDB::bind_method(D_METHOD("get_area_trigger", "index"), &NovaMissionData::get_area_trigger);
+	ClassDB::bind_method(D_METHOD("add_area_trigger", "min_bounds", "max_bounds", "active", "constrain_z", "zone_id"), &NovaMissionData::add_area_trigger);
+	ClassDB::bind_method(D_METHOD("set_area_trigger", "index", "min_bounds", "max_bounds", "active", "constrain_z", "zone_id"), &NovaMissionData::set_area_trigger);
+	ClassDB::bind_method(D_METHOD("remove_area_trigger", "index"), &NovaMissionData::remove_area_trigger);
+
 	ClassDB::bind_method(D_METHOD("save_file"), &NovaMissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &NovaMissionData::save_as);
 	ClassDB::bind_method(D_METHOD("is_modified"), &NovaMissionData::is_modified);
@@ -540,6 +547,100 @@ Dictionary NovaMissionData::add_waypoint_marker(int path_index, int marker_item_
 	out["marker"] = entity_to_dictionary(marker);
 	out["path"] = waypoint_path_to_dictionary(path);
 	return out;
+}
+
+Dictionary NovaMissionData::area_trigger_to_dictionary(const opennova::mission::AreaTriggerRecord &record) const {
+	Dictionary out;
+	out["index"] = static_cast<int>(record.index);
+	out["id"] = record.wp_number;  // off-0 dword (Phase-5 UNKNOWN; carried raw)
+	// Mission-space corners (16.16 already converted to float). The placement layer maps to Godot space.
+	out["min"] = Vector3(record.min_x, record.min_y, record.min_z);
+	out["max"] = Vector3(record.max_x, record.max_y, record.max_z);
+	out["active"] = record.active;
+	out["constrain_z"] = record.constrain_z;
+	out["raw_flags"] = record.reserved;
+	return out;
+}
+
+int NovaMissionData::get_area_trigger_count() const {
+	return static_cast<int>(document.area_trigger_count());
+}
+
+Array NovaMissionData::get_area_triggers() const {
+	Array out;
+	for (const opennova::mission::AreaTriggerRecord &record : document.area_triggers()) {
+		out.push_back(area_trigger_to_dictionary(record));
+	}
+	return out;
+}
+
+Dictionary NovaMissionData::get_area_trigger(int index) const {
+	if (index < 0) {
+		return Dictionary();
+	}
+	opennova::mission::AreaTriggerRecord record;
+	if (!document.get_area_trigger(static_cast<size_t>(index), record)) {
+		return Dictionary();
+	}
+	return area_trigger_to_dictionary(record);
+}
+
+// Build a typed record from Godot-side corners, normalizing min<=max per axis (the engine does not
+// auto-swap area triggers, so a crossed-corner drag must be fixed here). raw_flags is composed from
+// the two known bits; any other flag bits start clear for a freshly authored zone.
+static opennova::mission::AreaTriggerRecord make_area_record(const Vector3 &min_bounds, const Vector3 &max_bounds,
+		bool active, bool constrain_z, int zone_id) {
+	opennova::mission::AreaTriggerRecord record;
+	record.wp_number = zone_id;
+	record.min_x = MIN(min_bounds.x, max_bounds.x);
+	record.max_x = MAX(min_bounds.x, max_bounds.x);
+	record.min_y = MIN(min_bounds.y, max_bounds.y);
+	record.max_y = MAX(min_bounds.y, max_bounds.y);
+	record.min_z = MIN(min_bounds.z, max_bounds.z);
+	record.max_z = MAX(min_bounds.z, max_bounds.z);
+	record.active = active;
+	record.constrain_z = constrain_z;
+	record.reserved = (active ? 0x1 : 0) | (constrain_z ? 0x2 : 0);
+	return record;
+}
+
+Dictionary NovaMissionData::add_area_trigger(const Vector3 &min_bounds, const Vector3 &max_bounds, bool active, bool constrain_z, int zone_id) {
+	opennova::mission::AreaTriggerRecord out;
+	if (!document.add_area_trigger(make_area_record(min_bounds, max_bounds, active, constrain_z, zone_id), &out)) {
+		return Dictionary();
+	}
+	modified = true;
+	return area_trigger_to_dictionary(out);
+}
+
+Dictionary NovaMissionData::set_area_trigger(int index, const Vector3 &min_bounds, const Vector3 &max_bounds, bool active, bool constrain_z, int zone_id) {
+	if (index < 0) {
+		return Dictionary();
+	}
+	// Preserve unknown flag bits across an edit: seed reserved from the existing record, then overwrite
+	// only the two known bits below. A fresh make_area_record would otherwise zero them.
+	opennova::mission::AreaTriggerRecord record = make_area_record(min_bounds, max_bounds, active, constrain_z, zone_id);
+	opennova::mission::AreaTriggerRecord existing;
+	if (document.get_area_trigger(static_cast<size_t>(index), existing)) {
+		record.reserved = (existing.reserved & ~0x3) | (active ? 0x1 : 0) | (constrain_z ? 0x2 : 0);
+	}
+	opennova::mission::AreaTriggerRecord out;
+	if (!document.set_area_trigger(static_cast<size_t>(index), record, &out)) {
+		return Dictionary();
+	}
+	modified = true;
+	return area_trigger_to_dictionary(out);
+}
+
+bool NovaMissionData::remove_area_trigger(int index) {
+	if (index < 0) {
+		return false;
+	}
+	if (!document.remove_area_trigger(static_cast<size_t>(index))) {
+		return false;
+	}
+	modified = true;
+	return true;
 }
 
 Error NovaMissionData::save_file() {

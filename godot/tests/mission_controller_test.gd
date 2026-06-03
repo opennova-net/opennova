@@ -1391,3 +1391,128 @@ func test_default_marker_item_id_reuses_an_existing_marker() -> void:
 	if not markers.is_empty():
 		assert_eq(id, int((markers[0] as Dictionary)["item_id"]),
 			"an existing marker's id is reused so shipped data round-trips")
+
+
+# --- Area triggers / zones (Phase 2) ------------------------------------------
+# Zone authoring is driven through the controller's public mode/zone API. Picking needs a
+# camera the headless stub lacks, so (like the marker tests) these white-box the drag seam and
+# assert against the document + the overlay's harvested pickables, which build under the real
+# MissionObjects container the open created.
+
+func test_set_mode_enters_area_trigger_and_clears_object_selection() -> void:
+	var controller := _loaded_with_selection()  # an object is selected
+	assert_true(controller.is_objects_mode(), "precondition: objects mode")
+	assert_false(controller.get_selection_summary().is_empty(), "precondition: an object is selected")
+	controller.set_mode(MissionController.Mode.AREA_TRIGGERS)
+	assert_true(controller.is_area_trigger_mode(), "the controller enters area-trigger mode")
+	assert_eq(controller.get_mode(), MissionController.Mode.AREA_TRIGGERS, "get_mode reports the new mode")
+	assert_eq(controller.get_selection_summary(), {}, "entering the mode clears the object selection")
+	assert_false(controller.is_waypoint_mode(), "and is not waypoint mode")
+
+
+func test_add_area_trigger_default_adds_selects_and_is_undoable() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	controller.set_mode(MissionController.Mode.AREA_TRIGGERS)
+	var before := mission.get_area_trigger_count()
+	var idx := controller.add_area_trigger_default()
+	assert_eq(idx, before, "the new zone takes the next index")
+	assert_eq(mission.get_area_trigger_count(), before + 1, "a zone was added")
+	assert_eq(controller.get_selected_zone_index(), idx, "and is selected")
+	assert_true(controller.is_dirty(), "adding a zone dirties the mission")
+	var zone := controller.get_selected_zone()
+	assert_true(bool(zone["active"]), "a fresh zone is active")
+	assert_false(bool(zone["constrain_z"]), "with Z unbounded by default")
+	controller.undo()
+	assert_eq(mission.get_area_trigger_count(), before, "undo removes the added zone")
+
+
+func test_set_selected_zone_bounds_and_flags_read_back_and_undo() -> void:
+	var controller := _loaded_with_selection()
+	controller.set_mode(MissionController.Mode.AREA_TRIGGERS)
+	var idx := controller.add_area_trigger_default()
+	controller.set_selected_zone_bounds(Vector3(-100, -200, -10), Vector3(100, 200, 10))
+	var zone := controller.get_selected_zone()
+	assert_eq((zone["min"] as Vector3), Vector3(-100, -200, -10), "min reads back")
+	assert_eq((zone["max"] as Vector3), Vector3(100, 200, 10), "max reads back")
+	controller.set_selected_zone_flags(true, true)
+	zone = controller.get_selected_zone()
+	assert_true(bool(zone["constrain_z"]), "constrain_z set")
+	assert_true(bool(zone["active"]), "active set")
+	controller.set_selected_zone_flags(false, false)
+	zone = controller.get_selected_zone()
+	assert_false(bool(zone["active"]), "active cleared")
+	controller.undo()  # undo the flag clear (rebakes + drops the zone selection, like object undo)
+	# Re-fetch by index from the mission: undo restores the flags-true state on the zone.
+	var reverted := controller.get_mission().get_area_trigger(idx)
+	assert_true(bool(reverted["active"]), "undo restores the active flag")
+
+
+func test_zone_overlay_harvests_a_pickable_per_zone() -> void:
+	var controller := _loaded_with_selection()
+	var base := controller.get_mission().get_area_trigger_count()
+	controller.set_mode(MissionController.Mode.AREA_TRIGGERS)
+	controller.add_area_trigger_default()
+	controller.add_area_trigger_default()
+	assert_eq(controller._zone_pickable.size(), base + 2, "the overlay harvested one pickable per zone")
+
+
+func test_delete_selected_area_trigger_removes_and_is_undoable() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	controller.set_mode(MissionController.Mode.AREA_TRIGGERS)
+	var idx := controller.add_area_trigger_default()
+	var after_add := mission.get_area_trigger_count()
+	controller.select_area_trigger(idx)
+	assert_true(controller.delete_selected_area_trigger(), "delete succeeds")
+	assert_eq(mission.get_area_trigger_count(), after_add - 1, "the zone is removed")
+	assert_eq(controller.get_selected_zone_index(), -1, "and the selection cleared")
+	controller.undo()
+	assert_eq(mission.get_area_trigger_count(), after_add, "undo restores the deleted zone")
+
+
+func test_delete_key_deletes_zone_in_area_trigger_mode() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	controller.set_mode(MissionController.Mode.AREA_TRIGGERS)
+	controller.add_area_trigger_default()
+	var before := mission.get_area_trigger_count()
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.keycode = KEY_DELETE
+	controller.handle_viewport_input(key)
+	assert_eq(mission.get_area_trigger_count(), before - 1, "Delete removed the selected zone")
+	assert_eq(controller.get_selected_zone_index(), -1, "and cleared the zone selection")
+
+
+func test_zone_drag_translates_the_box_and_commits() -> void:
+	# White-box the translate drag (no camera): begin it, drag to the stub's terrain hit,
+	# release. The container is identity here, so the box centre moves to the hit's footprint.
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	controller.set_mode(MissionController.Mode.AREA_TRIGGERS)
+	var idx := controller.add_area_trigger_default()
+	controller.select_area_trigger(idx)
+	var start := controller.get_selected_zone()
+	var start_min: Vector3 = start["min"]
+	controller._drag_active = true
+	controller._drag_moved = false
+	controller._zone_drag_min = start_min
+	controller._zone_drag_max = start["max"]
+	controller._zone_preview_min = start_min
+	controller._zone_preview_max = start["max"]
+	controller.begin_edit()
+	# First drag sample anchors; a second moves it. Use two samples with the same hit so the
+	# delta is zero only if the anchor logic is wrong; here we move the second hit.
+	controller.terrain_editor.terrain_hit = Vector3(0, 10, 0)
+	controller._on_zone_drag(Vector2(5, 5))         # anchor
+	controller.terrain_editor.terrain_hit = Vector3(32, 10, -16)
+	controller._on_zone_drag(Vector2(9, 9))         # move
+	controller._on_zone_left_release()
+	var moved := controller.get_selected_zone()
+	# godot delta (32,0,-16) -> mission delta (32, 16, 0); the box min shifts by that.
+	assert_almost_eq((moved["min"] as Vector3).x, start_min.x + 32.0, 0.5, "the box translated in mission X")
+	assert_almost_eq((moved["min"] as Vector3).y, start_min.y + 16.0, 0.5, "and in mission Y")
+	assert_true(controller.is_dirty(), "a committed zone drag dirties the mission")
+	controller.undo()  # rebakes + drops the zone selection; re-fetch the zone by index
+	assert_almost_eq((controller.get_mission().get_area_trigger(idx)["min"] as Vector3).x, start_min.x, 0.5, "undo restores the box position")

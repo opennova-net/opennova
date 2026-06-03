@@ -723,3 +723,55 @@ func test_set_header_flag_toggles_one_bit_and_preserves_others() -> void:
 	assert_eq(after & NovaMissionData.ATTRIB_COOP, NovaMissionData.ATTRIB_COOP, "COOP bit is set")
 	var other_mask := ~NovaMissionData.ATTRIB_COOP
 	assert_eq(after & other_mask, before & other_mask, "other attrib bits are preserved")
+
+
+# --- Phase 2: area-trigger / zone binding -------------------------------------
+
+func test_area_trigger_dictionary_shape() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	assert_eq(m.get_area_triggers().size(), m.get_area_trigger_count(), "list size matches count")
+	# Add one so the shape is exercised even if the fixture carries none.
+	var z := m.add_area_trigger(Vector3(-5, -6, -7), Vector3(5, 6, 7), true, false, 3)
+	assert_false(z.is_empty(), "add returns the new zone dict")
+	for key in ["index", "id", "min", "max", "active", "constrain_z", "raw_flags"]:
+		assert_true(z.has(key), "zone dict exposes %s" % key)
+	assert_typeof(z["min"], TYPE_VECTOR3, "min is a Vector3")
+	assert_typeof(z["max"], TYPE_VECTOR3, "max is a Vector3")
+	assert_eq(int(z["id"]), 3, "zone id carried through")
+	assert_true(bool(z["active"]), "active flag set")
+	assert_false(bool(z["constrain_z"]), "constrain_z flag clear")
+
+
+func test_area_trigger_add_set_remove_round_trip() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var base := m.get_area_trigger_count()
+	# Crossed corners must be normalized to min<=max (the engine does not auto-swap).
+	var z := m.add_area_trigger(Vector3(10, 20, 8), Vector3(-10, -20, -8), true, true, 0)
+	assert_eq(m.get_area_trigger_count(), base + 1, "count grew by one")
+	var idx := int(z["index"])
+	assert_eq((z["min"] as Vector3), Vector3(-10, -20, -8), "min normalized to the lower corner")
+	assert_eq((z["max"] as Vector3), Vector3(10, 20, 8), "max normalized to the upper corner")
+	assert_true(m.is_modified(), "adding a zone dirties the mission")
+	# Edit it: move max, drop constrain_z.
+	var z2 := m.set_area_trigger(idx, Vector3(-10, -20, -8), Vector3(30, 20, 8), true, false, 0)
+	assert_false(z2.is_empty(), "set returns the updated dict")
+	assert_eq((z2["max"] as Vector3).x, 30.0, "max_x updated")
+	assert_false(bool(z2["constrain_z"]), "constrain_z cleared")
+	assert_true(bool(z2["active"]), "active preserved")
+	# Persist + reload: the new zone survives a byte round-trip.
+	var tmp := _temp_bms_path()
+	assert_eq(m.save_as(tmp), OK)
+	var r := NovaMissionData.new()
+	assert_eq(r.open_file(tmp), OK)
+	assert_eq(r.get_area_trigger_count(), base + 1, "zone count survives reload")
+	var rz := r.get_area_trigger(idx)
+	assert_eq((rz["max"] as Vector3).x, 30.0, "edited max_x survives reload")
+	assert_true(bool(rz["active"]), "active survives reload")
+	# Remove it: count returns to baseline; out-of-range guards return false/empty.
+	assert_true(m.remove_area_trigger(idx), "remove succeeds")
+	assert_eq(m.get_area_trigger_count(), base, "count back to baseline")
+	assert_false(m.remove_area_trigger(999999), "out-of-range remove is rejected")
+	assert_eq(m.get_area_trigger(999999), {}, "out-of-range get yields {}")
+	assert_eq(m.set_area_trigger(999999, Vector3.ZERO, Vector3.ONE, true, true, 0), {}, "out-of-range set yields {}")

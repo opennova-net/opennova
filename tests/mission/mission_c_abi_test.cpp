@@ -135,6 +135,42 @@ int main() {
 	}
 	TEST_EXPECT(opennova_mission_get_area_trigger(document, area_count + 1, &area) == 0);
 
+	// Phase 2: area-trigger add / set / remove round-trip through the typed mutators.
+	OpenNovaMissionAreaTriggerRecord new_zone = {};
+	new_zone.wp_number = 7;
+	new_zone.min_x = -10.0f;
+	new_zone.max_x = 10.0f;
+	new_zone.min_y = -20.0f;
+	new_zone.max_y = 20.0f;
+	new_zone.min_z = -5.0f;
+	new_zone.max_z = 5.0f;
+	new_zone.active = 1;
+	new_zone.constrain_z = 1;
+	OpenNovaMissionAreaTriggerRecord added_zone = {};
+	TEST_EXPECT(opennova_mission_add_area_trigger(document, &new_zone, &added_zone) == 1);
+	TEST_EXPECT(opennova_mission_area_trigger_count(document) == area_count + 1);
+	TEST_EXPECT(added_zone.index == area_count);
+	TEST_EXPECT(added_zone.wp_number == 7);
+	TEST_EXPECT(added_zone.active == 1);
+	TEST_EXPECT(added_zone.constrain_z == 1);
+	// Fixed-point 16.16 round-trips the bounds exactly for these whole-unit values.
+	TEST_EXPECT(added_zone.min_x == -10.0f && added_zone.max_x == 10.0f);
+	TEST_EXPECT(added_zone.min_z == -5.0f && added_zone.max_z == 5.0f);
+	// Edit it: clear constrain_z, move max_x.
+	added_zone.constrain_z = 0;
+	added_zone.max_x = 25.0f;
+	OpenNovaMissionAreaTriggerRecord edited_zone = {};
+	TEST_EXPECT(opennova_mission_set_area_trigger(document, added_zone.index, &added_zone, &edited_zone) == 1);
+	TEST_EXPECT(edited_zone.constrain_z == 0);
+	TEST_EXPECT(edited_zone.active == 1);
+	TEST_EXPECT(edited_zone.max_x == 25.0f);
+	// Remove it: count returns to baseline.
+	TEST_EXPECT(opennova_mission_remove_area_trigger(document, added_zone.index) == 1);
+	TEST_EXPECT(opennova_mission_area_trigger_count(document) == area_count);
+	// Out-of-range guards.
+	TEST_EXPECT(opennova_mission_set_area_trigger(document, area_count + 99, &new_zone, nullptr) == 0);
+	TEST_EXPECT(opennova_mission_remove_area_trigger(document, area_count + 99) == 0);
+
 	TEST_EXPECT(opennova_mission_event_count(document) > 0);
 	TEST_EXPECT(opennova_mission_trigger_count(document) > 0);
 	TEST_EXPECT(opennova_mission_action_count(document) > 0);

@@ -770,7 +770,28 @@ AreaTriggerRecord to_area_trigger_record(const bms::AreaTrigger &area, size_t in
 	out.max_y = area.get_y_max();
 	out.max_z = area.get_z_max();
 	out.reserved = static_cast<int>(area.flags);
+	out.active = area.is_active();
+	out.constrain_z = area.constrains_z();
 	return out;
+}
+
+// Inverse of to_area_trigger_record: build a byte-faithful bms::AreaTrigger from the typed record.
+// Bounds go to interleaved fixed-point 16.16 (no swap). The flags dword keeps every bit of `reserved`
+// except the two low bits, which are recomposed from active/constrain_z so the UI toggles stay
+// consistent with the raw value the engine reads (Entity_IsTeamInTriggerBounds @0x43c75c).
+bms::AreaTrigger from_area_trigger_record(const AreaTriggerRecord &rec) {
+	bms::AreaTrigger area;
+	area.id = rec.wp_number;
+	area.x_min = static_cast<int32_t>(rec.min_x * 65536.0f);
+	area.x_max = static_cast<int32_t>(rec.max_x * 65536.0f);
+	area.y_min = static_cast<int32_t>(rec.min_y * 65536.0f);
+	area.y_max = static_cast<int32_t>(rec.max_y * 65536.0f);
+	area.z_min = static_cast<int32_t>(rec.min_z * 65536.0f);
+	area.z_max = static_cast<int32_t>(rec.max_z * 65536.0f);
+	uint32_t flags = static_cast<uint32_t>(rec.reserved);
+	flags = (flags & ~0x3u) | (rec.active ? 0x1u : 0u) | (rec.constrain_z ? 0x2u : 0u);
+	area.flags = flags;
+	return area;
 }
 
 MissionEventRecord to_event_record(const bms::Event &event, size_t index) {
@@ -1148,6 +1169,24 @@ void copy_area_trigger(OpenNovaMissionAreaTriggerRecord &out, const AreaTriggerR
 	out.max_y = record.max_y;
 	out.max_z = record.max_z;
 	out.reserved = record.reserved;
+	out.active = record.active ? 1 : 0;
+	out.constrain_z = record.constrain_z ? 1 : 0;
+}
+
+AreaTriggerRecord from_c_area_trigger(const OpenNovaMissionAreaTriggerRecord &in) {
+	AreaTriggerRecord out;
+	out.index = in.index;
+	out.wp_number = in.wp_number;
+	out.min_x = in.min_x;
+	out.min_y = in.min_y;
+	out.min_z = in.min_z;
+	out.max_x = in.max_x;
+	out.max_y = in.max_y;
+	out.max_z = in.max_z;
+	out.reserved = in.reserved;
+	out.active = in.active != 0;
+	out.constrain_z = in.constrain_z != 0;
+	return out;
 }
 
 void copy_event(OpenNovaMissionEventRecord &out, const MissionEventRecord &record) {
@@ -1687,6 +1726,53 @@ std::vector<AreaTriggerRecord> MissionDocument::area_triggers() const {
 		out.push_back(to_area_trigger_record(impl_->file.area_triggers[i], i));
 	}
 	return out;
+}
+
+bool MissionDocument::add_area_trigger(const AreaTriggerRecord &record, AreaTriggerRecord *out) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	impl_->file.area_triggers.push_back(from_area_trigger_record(record));
+	sync_counts();
+	if (out != nullptr) {
+		*out = to_area_trigger_record(impl_->file.area_triggers.back(), impl_->file.area_triggers.size() - 1);
+	}
+	return true;
+}
+
+bool MissionDocument::set_area_trigger(size_t index, const AreaTriggerRecord &record, AreaTriggerRecord *out) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	if (index >= impl_->file.area_triggers.size()) {
+		impl_->last_error = "Area trigger index out of range";
+		return false;
+	}
+	impl_->file.area_triggers[index] = from_area_trigger_record(record);
+	if (out != nullptr) {
+		*out = to_area_trigger_record(impl_->file.area_triggers[index], index);
+	}
+	return true;
+}
+
+bool MissionDocument::remove_area_trigger(size_t index) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	if (index >= impl_->file.area_triggers.size()) {
+		impl_->last_error = "Area trigger index out of range";
+		return false;
+	}
+	// NOTE: triggers reference area zones by *IsWithinArea param2 (an index into this array, per
+	// get_event_chain's references). Removing a zone shifts every higher index, so existing trigger
+	// references may need repointing. The exact index-vs-id semantics of off-0 are Phase-5 UNKNOWN, so
+	// we do NOT auto-repair here; the editor warns the user instead. See notes/mission/mission.md S5.
+	impl_->file.area_triggers.erase(impl_->file.area_triggers.begin() + static_cast<std::ptrdiff_t>(index));
+	sync_counts();
+	return true;
 }
 
 size_t MissionDocument::event_count() const {
@@ -2518,6 +2604,46 @@ int opennova_mission_get_area_trigger(const OpenNovaMissionDocument *document,
 	}
 	copy_area_trigger(*out_record, record);
 	return 1;
+}
+
+int opennova_mission_add_area_trigger(OpenNovaMissionDocument *document,
+                                      const OpenNovaMissionAreaTriggerRecord *record,
+                                      OpenNovaMissionAreaTriggerRecord *out_record) {
+	if (document == nullptr || record == nullptr) {
+		return 0;
+	}
+	opennova::mission::AreaTriggerRecord out;
+	if (!document->document.add_area_trigger(from_c_area_trigger(*record), &out)) {
+		return 0;
+	}
+	if (out_record != nullptr) {
+		copy_area_trigger(*out_record, out);
+	}
+	return 1;
+}
+
+int opennova_mission_set_area_trigger(OpenNovaMissionDocument *document,
+                                      size_t index,
+                                      const OpenNovaMissionAreaTriggerRecord *record,
+                                      OpenNovaMissionAreaTriggerRecord *out_record) {
+	if (document == nullptr || record == nullptr) {
+		return 0;
+	}
+	opennova::mission::AreaTriggerRecord out;
+	if (!document->document.set_area_trigger(index, from_c_area_trigger(*record), &out)) {
+		return 0;
+	}
+	if (out_record != nullptr) {
+		copy_area_trigger(*out_record, out);
+	}
+	return 1;
+}
+
+int opennova_mission_remove_area_trigger(OpenNovaMissionDocument *document, size_t index) {
+	if (document == nullptr) {
+		return 0;
+	}
+	return document->document.remove_area_trigger(index) ? 1 : 0;
 }
 
 size_t opennova_mission_event_count(const OpenNovaMissionDocument *document) {

@@ -32,6 +32,7 @@ private:
 
 	Dictionary entity_to_dictionary(const opennova::mission::EntityRecord &record) const;
 	Dictionary waypoint_path_to_dictionary(const opennova::mission::WaypointPath &path) const;
+	Dictionary area_trigger_to_dictionary(const opennova::mission::AreaTriggerRecord &record) const;
 
 protected:
 	static void _bind_methods();
@@ -153,6 +154,28 @@ public:
 	// invalid. Rotation is rounded to integer degrees (same contract as add_entity). Sets
 	// the dirty flag on success.
 	Dictionary add_waypoint_marker(int path_index, int marker_item_id, const Vector3 &position, const Vector3 &rotation_deg, int insert_index);
+
+	// --- Area triggers / restriction zones ------------------------------------
+	// A mission carries N 32-byte axis-aligned box zones (out-of-bounds / objective regions). The
+	// bounds-check consumers read them as interleaved per-axis fixed-point + a flags dword at off 28
+	// (Entity_IsTeamInTriggerBounds @0x43c75c). The lib (libs/mission) round-trips them byte-faithfully;
+	// this is the binding. A zone dictionary is { index, id, min: Vector3, max: Vector3, active: bool,
+	// constrain_z: bool, raw_flags: int }; min/max are mission-space corners (the placement layer
+	// converts to Godot space, same as entities). `id` is the off-0 dword (Phase-5 UNKNOWN; carried raw).
+	int get_area_trigger_count() const;
+	Array get_area_triggers() const;
+	// One zone by index, or {} if out of range.
+	Dictionary get_area_trigger(int index) const;
+	// Append a new zone with the given mission-space corners and flags; returns its dictionary (with
+	// the assigned "index"), or {} if no mission is loaded. min/max are normalized so min<=max per axis
+	// (the engine does NOT auto-swap area triggers, so the editor does it). Dirty on success.
+	Dictionary add_area_trigger(const Vector3 &min_bounds, const Vector3 &max_bounds, bool active, bool constrain_z, int zone_id);
+	// Overwrite the zone at `index`; same normalization + return shape as add. {} if out of range.
+	Dictionary set_area_trigger(int index, const Vector3 &min_bounds, const Vector3 &max_bounds, bool active, bool constrain_z, int zone_id);
+	// Remove the zone at `index`. Later zones shift down by one (callers holding indices must re-fetch).
+	// Triggers referencing a zone by *IsWithinArea param2 are NOT auto-repaired (index semantics are
+	// Phase-5 UNKNOWN); the editor warns. Returns false if out of range. Dirty on success.
+	bool remove_area_trigger(int index);
 
 	// Write the document back to disk. save_file() targets the path it was opened
 	// from; save_as() targets a new path and adopts it. Both clear the dirty flag and

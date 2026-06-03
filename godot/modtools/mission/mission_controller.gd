@@ -24,8 +24,15 @@ signal status_reported(message: String, is_error: bool)
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const MissionWaypointOverlay := preload("res://engine/mission/mission_waypoint_overlay.gd")
+const MissionAreaTriggerOverlay := preload("res://engine/mission/mission_area_trigger_overlay.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
 const OBJECTS_CONTAINER := "MissionObjects"
+
+# Editing modes. The viewport + inspector follow the active mode; they are mutually exclusive
+# (entering one drops every other's selection + armed tool). OBJECTS is the default (P1-P5
+# object authoring); WAYPOINTS is P7 marker authoring; AREA_TRIGGERS is zone authoring (Phase
+# 2); SCRIPTING (Phase 4) is panel-driven (the viewport is inert in that mode).
+enum Mode { OBJECTS, WAYPOINTS, AREA_TRIGGERS, SCRIPTING }
 
 var terrain_editor: Node
 
@@ -96,11 +103,11 @@ var _clean_snapshot: PackedByteArray = PackedByteArray()
 var _restoring: bool = false
 
 # --- Authoring (P7): waypoints ------------------------------------------------
-# Waypoints mode: while true the viewport selects / drags the active path's markers
-# instead of objects, and the inspector shows the waypoint panel. The two modes are
-# exclusive; switching clears the other's selection + any armed tool. Object editing
-# (P1-P5) is untouched in objects mode.
-var _waypoint_mode: bool = false
+# Active editing mode (Mode.*). The viewport + inspector follow it; modes are exclusive, so
+# switching clears the others' selection + any armed tool. Object editing (P1-P5) runs in
+# Mode.OBJECTS, waypoint marker authoring in Mode.WAYPOINTS, zone authoring in
+# Mode.AREA_TRIGGERS. Replaces the old `_waypoint_mode` bool.
+var _mode: int = Mode.OBJECTS
 # The waypoint path (0..127) the panel is focused on, or -1 when none is chosen. Persists
 # across re-bakes (undo/redo/edit), unlike the selection, so the user stays on their path.
 var _selected_path_index: int = -1
@@ -122,6 +129,28 @@ const DEFAULT_MARKER_ITEM_ID := 100001
 # The live (container-local) position of a marker being dragged, written to the record on
 # release (the drag previews the gizmo only; the record is committed once, as one step).
 var _marker_drag_local: Vector3 = Vector3.ZERO
+
+# --- Authoring (Phase 2): area triggers / zones -------------------------------
+# The in-world overlay drawing zone wire boxes + the selected zone's grab cube. Built under
+# the objects container (frees with it); ref dropped on every re-bake, lazily rebuilt. Mirrors
+# _waypoint_overlay.
+var _area_overlay  # MissionAreaTriggerOverlay (preloaded, no class_name)
+# The selected zone's index into the area-trigger list, or -1 when none is selected. Unlike
+# the waypoint path this does NOT persist across re-bakes (a zone delete shifts indices), so it
+# resets with the selection state.
+var _selected_zone_index: int = -1
+# Zone body pickables harvested from the overlay: one per zone, { zone_index, handle, aabb }.
+var _zone_pickable: Array = []
+# Whole-zone translate drag: the terrain hit where the drag began plus the zone's bounds at
+# that moment (mission space). The drag previews the box; the record commits once on release.
+var _zone_drag_start_hit: Vector3 = Vector3.ZERO
+var _zone_drag_min: Vector3 = Vector3.ZERO
+var _zone_drag_max: Vector3 = Vector3.ZERO
+# The previewed (mission-space) bounds during a live zone drag, committed on release.
+var _zone_preview_min: Vector3 = Vector3.ZERO
+var _zone_preview_max: Vector3 = Vector3.ZERO
+# Default half-extents (mission units) of a freshly added zone box, before the user resizes.
+const DEFAULT_ZONE_HALF := Vector3(64.0, 64.0, 32.0)
 
 
 func _init(p_terrain_editor: Node = null) -> void:
@@ -277,9 +306,12 @@ func open_mission(bms_path: String) -> Error:
 	# waypoint panel is not empty) only if the user is already in waypoints mode.
 	_selected_marker = {}
 	_marker_place_armed = false
-	_selected_path_index = _first_nonempty_path() if _waypoint_mode else -1
-	if _waypoint_mode:
+	_selected_zone_index = -1
+	_selected_path_index = _first_nonempty_path() if _mode == Mode.WAYPOINTS else -1
+	if _mode == Mode.WAYPOINTS:
 		_refresh_waypoint_overlay()
+	elif _mode == Mode.AREA_TRIGGERS:
+		_refresh_area_trigger_overlay()
 	_last_status = _describe_load(mission, bms_path, env_note)
 	changed.emit()
 	return OK
@@ -556,8 +588,11 @@ func handle_viewport_input(event: InputEvent) -> void:
 		if mb.pressed:
 			# Waypoints mode: left-click selects (or, when armed, adds) the active path's
 			# markers, and starts a marker drag -- never objects (the modes are exclusive).
-			if _waypoint_mode:
+			if _mode == Mode.WAYPOINTS:
 				_on_marker_left_press(mb.position)
+			# Area-trigger mode: left-click selects a zone and starts a translate drag.
+			elif _mode == Mode.AREA_TRIGGERS:
+				_on_zone_left_press(mb.position)
 			# Armed: left-click places a new instance at the cursor instead of selecting.
 			# Stay armed so the user can place several; right-click / Escape / the Stop
 			# button disarms.
@@ -566,8 +601,10 @@ func handle_viewport_input(event: InputEvent) -> void:
 			else:
 				_on_left_press(mb.position)
 		else:
-			if _waypoint_mode:
+			if _mode == Mode.WAYPOINTS:
 				_on_marker_left_release()
+			elif _mode == Mode.AREA_TRIGGERS:
+				_on_zone_left_release()
 			else:
 				_on_left_release()
 	elif event is InputEventKey:
@@ -603,9 +640,11 @@ func handle_viewport_input(event: InputEvent) -> void:
 			# credits_editor / fnt_editor / terrain_editor. Mode-scoped: a marker in waypoints
 			# mode, an object otherwise.
 			if not _gui_focus_blocks_shortcut():
-				if _waypoint_mode and not _selected_marker.is_empty():
+				if _mode == Mode.WAYPOINTS and not _selected_marker.is_empty():
 					delete_selected_marker()
-				elif not _waypoint_mode and not _selected_ref.is_empty():
+				elif _mode == Mode.AREA_TRIGGERS and _selected_zone_index >= 0:
+					delete_selected_area_trigger()
+				elif _mode == Mode.OBJECTS and not _selected_ref.is_empty():
 					delete_selected()
 	elif event is InputEventMouseMotion and _drag_active:
 		var motion := event as InputEventMouseMotion
@@ -615,9 +654,12 @@ func handle_viewport_input(event: InputEvent) -> void:
 		if (motion.button_mask & MOUSE_BUTTON_MASK_LEFT) == 0:
 			cancel_drag()
 			return
-		# Drag the active mode's selection: a marker in waypoints mode, an object otherwise.
-		if _waypoint_mode:
+		# Drag the active mode's selection: a marker in waypoints mode, a zone in area-trigger
+		# mode, an object otherwise.
+		if _mode == Mode.WAYPOINTS:
 			_on_marker_drag(motion.position)
+		elif _mode == Mode.AREA_TRIGGERS:
+			_on_zone_drag(motion.position)
 		else:
 			_on_drag(motion.position)
 
@@ -634,10 +676,12 @@ func cancel_drag() -> void:
 	# session that happens to be open keeps its undo step (commit, not discard, so a workspace
 	# switch mid-edit does not silently drop the step).
 	commit_edit()
-	# A cancelled marker drag previewed the gizmo but wrote no record; snap it back to the
-	# stored position.
-	if _waypoint_mode:
+	# A cancelled marker / zone drag previewed the gizmo but wrote no record; snap it back to
+	# the stored position.
+	if _mode == Mode.WAYPOINTS:
 		_refresh_waypoint_overlay()
+	elif _mode == Mode.AREA_TRIGGERS:
+		_refresh_area_trigger_overlay()
 
 
 func _on_left_press(mouse_pos: Vector2) -> void:
@@ -1136,10 +1180,12 @@ func _rebake_objects() -> void:
 		options["environment_node"] = env_node
 	_stats = _placer.place(_mission, world_root, options)
 	_pickable = _placer.pickable_records
-	# The re-bake replaced the container (and the old overlay with it); rebuild the waypoint
-	# overlay against the new world when waypoints mode is active.
-	if _waypoint_mode:
+	# The re-bake replaced the container (and the old overlay with it); rebuild the active
+	# mode's overlay against the new world.
+	if _mode == Mode.WAYPOINTS:
 		_refresh_waypoint_overlay()
+	elif _mode == Mode.AREA_TRIGGERS:
+		_refresh_area_trigger_overlay()
 
 
 # --- Authoring (P7): waypoint mode + marker selection -------------------------
@@ -1149,33 +1195,61 @@ func _rebake_objects() -> void:
 # across re-bakes; the marker selection (like the object selection) does not. Marker
 # picking reuses the same analytic ray-vs-AABB as objects, over the overlay's gizmo AABBs.
 
-func set_waypoint_mode(enabled: bool) -> void:
-	if _waypoint_mode == enabled:
+# Switch the active editing mode (Mode.*). A mode switch is a fresh context: it closes any
+# open edit session, then drops EVERY mode's selection + armed tool so only the new mode's
+# clicks are live. Each mode focuses a sensible default on entry (a populated waypoint path /
+# the first zone) and toggles its overlay's visibility. Inert if already in `mode`.
+func set_mode(mode: int) -> void:
+	if _mode == mode:
 		return
-	# A mode switch is a fresh context: close any open edit session as its own step first.
 	_flush_edit()
-	_waypoint_mode = enabled
+	_mode = mode
 	# Exclusive selection: clear the object selection refs + its box, the marker selection,
-	# and any armed object placement, so only the active mode's clicks are live.
+	# the zone selection, and any armed placement tool.
 	_selected_ref = {}
 	_selected_records = []
 	_selected_node = null
 	_selected_node_offset = Transform3D.IDENTITY
 	_hide_selection_box()
 	_selected_marker = {}
+	_selected_zone_index = -1
 	_place_item_id = 0
 	_marker_place_armed = false
-	if enabled and _selected_path_index < 0:
+	if mode == Mode.WAYPOINTS and _selected_path_index < 0:
 		# Focus a populated path on entry so the panel is not empty.
 		_selected_path_index = _first_nonempty_path()
+	if mode == Mode.AREA_TRIGGERS and _mission != null and _mission.get_area_trigger_count() > 0:
+		# Focus the first zone on entry so the panel is not empty.
+		_selected_zone_index = 0
 	_refresh_waypoint_overlay()
+	_refresh_area_trigger_overlay()
+	# Each overlay is visible only in its own mode.
 	if _waypoint_overlay != null and is_instance_valid(_waypoint_overlay):
-		_waypoint_overlay.visible = enabled
+		_waypoint_overlay.visible = mode == Mode.WAYPOINTS
+	if _area_overlay != null and is_instance_valid(_area_overlay):
+		_area_overlay.visible = mode == Mode.AREA_TRIGGERS
 	changed.emit()
 
 
+func get_mode() -> int:
+	return _mode
+
+
+# Backward-compatible wrapper: waypoints mode is Mode.WAYPOINTS, otherwise Mode.OBJECTS.
+func set_waypoint_mode(enabled: bool) -> void:
+	set_mode(Mode.WAYPOINTS if enabled else Mode.OBJECTS)
+
+
 func is_waypoint_mode() -> bool:
-	return _waypoint_mode
+	return _mode == Mode.WAYPOINTS
+
+
+func is_area_trigger_mode() -> bool:
+	return _mode == Mode.AREA_TRIGGERS
+
+
+func is_objects_mode() -> bool:
+	return _mode == Mode.OBJECTS
 
 
 # Focus a waypoint path (0..127) in the panel + overlay. Drops the marker selection (a
@@ -1298,7 +1372,7 @@ func _refresh_waypoint_overlay() -> void:
 	if _waypoint_overlay == null or not is_instance_valid(_waypoint_overlay):
 		_waypoint_overlay = MissionWaypointOverlay.new()
 		_waypoint_overlay.name = "MissionWaypointOverlay"
-		_waypoint_overlay.visible = _waypoint_mode
+		_waypoint_overlay.visible = _mode == Mode.WAYPOINTS
 		container.add_child(_waypoint_overlay)
 	_waypoint_overlay.rebuild(_mission, _selected_path_index)
 	_marker_pickable = _waypoint_overlay.marker_pickables()
@@ -1590,6 +1664,249 @@ func clear_active_path() -> bool:
 	return true
 
 
+# --- Authoring (Phase 2): area triggers / zones -------------------------------
+# Zone authoring mirrors the marker spine: ray-vs-AABB picking over the overlay's zone body
+# AABBs, a terrain-projected translate drag that previews the box and commits the record once
+# on release (the begin_edit/commit_edit bracket makes it one undo step), and the
+# snapshot/_push_undo_step model for one-shot mutations (add / set / flags / delete). Resize is
+# precise through the inspector spins (set_selected_zone_bounds); the in-world drag translates
+# the whole box. The engine does not auto-swap area-trigger bounds, so the binding normalizes
+# min<=max on every write (NovaMissionData.add/set_area_trigger).
+
+func get_area_triggers() -> Array:
+	return _mission.get_area_triggers() if _mission != null else []
+
+
+func get_selected_zone_index() -> int:
+	return _selected_zone_index
+
+
+# The selected zone dict (NovaMissionData shape), or {} when none is selected / no mission.
+func get_selected_zone() -> Dictionary:
+	if _mission == null or _selected_zone_index < 0:
+		return {}
+	return _mission.get_area_trigger(_selected_zone_index)
+
+
+# Select a zone by index (the inspector list drives this). Rebuilds the overlay so the bright
+# box + grab cube follow. Inert if unchanged.
+func select_area_trigger(index: int) -> void:
+	if index == _selected_zone_index:
+		return
+	_selected_zone_index = index
+	_refresh_area_trigger_overlay()
+	changed.emit()
+
+
+# Add a new zone box centred on the placed world (the average of item positions, else origin),
+# select it, and dirty. Public so it is testable without a camera. Returns the new index, or -1.
+func add_area_trigger_default() -> int:
+	if _mission == null:
+		return -1
+	var center := _world_center_mission()
+	var half := DEFAULT_ZONE_HALF
+	_flush_edit()
+	var before := _mission.snapshot()
+	# A fresh zone is active with Z unbounded (the common out-of-bounds region); the user
+	# constrains Z and resizes afterwards.
+	var zone := _mission.add_area_trigger(center - half, center + half, true, false, 0)
+	if zone.is_empty():
+		_report("Could not add an area trigger.", true)
+		return -1
+	_push_undo_step(before)
+	_selected_zone_index = int(zone.get("index", -1))
+	_refresh_area_trigger_overlay()
+	mark_dirty()
+	return _selected_zone_index
+
+
+# Overwrite the selected zone's bounds (mission space) from the inspector spins. One undo step.
+func set_selected_zone_bounds(mn: Vector3, mx: Vector3) -> void:
+	if _mission == null or _selected_zone_index < 0:
+		return
+	var zone := _mission.get_area_trigger(_selected_zone_index)
+	if zone.is_empty():
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	var updated := _mission.set_area_trigger(_selected_zone_index, mn, mx,
+		bool(zone.get("active", false)), bool(zone.get("constrain_z", false)), int(zone.get("id", 0)))
+	if not updated.is_empty():
+		_push_undo_step(before)
+		_refresh_area_trigger_overlay()
+		mark_dirty()
+
+
+# Set the selected zone's two known flag bits (active / constrain-Z). One undo step.
+func set_selected_zone_flags(active: bool, constrain_z: bool) -> void:
+	if _mission == null or _selected_zone_index < 0:
+		return
+	var zone := _mission.get_area_trigger(_selected_zone_index)
+	if zone.is_empty():
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	var updated := _mission.set_area_trigger(_selected_zone_index, zone.get("min", Vector3.ZERO),
+		zone.get("max", Vector3.ZERO), active, constrain_z, int(zone.get("id", 0)))
+	if not updated.is_empty():
+		_push_undo_step(before)
+		_refresh_area_trigger_overlay()
+		mark_dirty()
+
+
+# Delete the selected zone. Structural (shifts later indices), so the overlay rebuilds and the
+# selection drops. A zone referenced by an *IsWithinArea trigger param2 is NOT auto-repaired
+# (index semantics are under RE); the status line warns. One undo step. False if none selected.
+func delete_selected_area_trigger() -> bool:
+	if _mission == null or _selected_zone_index < 0:
+		return false
+	_flush_edit()
+	var before := _mission.snapshot()
+	if not _mission.remove_area_trigger(_selected_zone_index):
+		return false
+	_push_undo_step(before)
+	_selected_zone_index = -1
+	_refresh_area_trigger_overlay()
+	_report("Zone deleted. Any trigger that referenced a zone by index may need repointing.")
+	mark_dirty()
+	return true
+
+
+# (Re)build the in-world zone overlay from the current mission, harvesting the zone pickables.
+# Creates the overlay node under the objects container on first use (and after a re-bake freed
+# it). `preview` optionally overrides the dragged zone's bounds. Mirrors _refresh_waypoint_overlay.
+func _refresh_area_trigger_overlay(preview := {}) -> void:
+	if _mission == null:
+		return
+	var container := _objects_container()
+	if container == null:
+		return
+	if _area_overlay == null or not is_instance_valid(_area_overlay):
+		_area_overlay = MissionAreaTriggerOverlay.new()
+		_area_overlay.name = "MissionAreaTriggerOverlay"
+		_area_overlay.visible = _mode == Mode.AREA_TRIGGERS
+		container.add_child(_area_overlay)
+	_area_overlay.rebuild(_mission, _selected_zone_index, preview)
+	_zone_pickable = _area_overlay.zone_pickables()
+
+
+func _on_zone_left_press(mouse_pos: Vector2) -> void:
+	_flush_edit()
+	var index := _pick_zone(mouse_pos)
+	if index < 0:
+		_deselect_zone()
+		return
+	if index != _selected_zone_index:
+		_selected_zone_index = index
+		_refresh_area_trigger_overlay()
+		changed.emit()
+	# Begin a translate drag: motion re-grounds the box centre on the terrain, release writes
+	# the record once (a plain click just selects). The bracket makes the drag one undo step.
+	var zone := _mission.get_area_trigger(index)
+	_zone_drag_min = zone.get("min", Vector3.ZERO)
+	_zone_drag_max = zone.get("max", Vector3.ZERO)
+	_zone_preview_min = _zone_drag_min
+	_zone_preview_max = _zone_drag_max
+	_drag_active = true
+	_drag_moved = false
+	_drag_off_terrain = false
+	begin_edit()
+
+
+# Pick the nearest zone under the cursor (ray-vs-AABB over the overlay's body AABBs), or -1 on
+# a miss. Mirrors _pick_marker.
+func _pick_zone(mouse_pos: Vector2) -> int:
+	if terrain_editor == null or not terrain_editor.has_method("get_editor_camera"):
+		return -1
+	var camera: Camera3D = terrain_editor.get_editor_camera()
+	if camera == null:
+		return -1
+	var from := camera.project_ray_origin(mouse_pos)
+	var dir := camera.project_ray_normal(mouse_pos)
+	var best_t := INF
+	var best := -1
+	for rec in _zone_pickable:
+		var aabb: AABB = rec["aabb"]
+		if aabb.size == Vector3.ZERO:
+			continue
+		var t := _ray_aabb_entry(aabb, from, dir)
+		if t >= 0.0 and t < best_t:
+			best_t = t
+			best = int(rec["zone_index"])
+	return best
+
+
+# Translate the selected box horizontally to follow the terrain hit (the vertical extent is
+# left unchanged). Previews the overlay box only; the record commits once on release.
+func _on_zone_drag(mouse_pos: Vector2) -> void:
+	if _selected_zone_index < 0 or terrain_editor == null or not terrain_editor.has_method("raycast_terrain_at"):
+		return
+	var hit: Vector3 = terrain_editor.raycast_terrain_at(mouse_pos)
+	if not terrain_editor.is_valid_terrain_hit(hit):
+		_drag_off_terrain = true
+		return
+	if not _drag_moved:
+		# First valid sample anchors the drag so the box does not jump to the cursor.
+		_zone_drag_start_hit = hit
+	_drag_off_terrain = false
+	_drag_moved = true
+	# Godot (x, z) map to mission (x, -y); the vertical (godot y / mission z) extent is kept.
+	var d := hit - _zone_drag_start_hit
+	var mission_delta := Vector3(d.x, -d.z, 0.0)
+	_zone_preview_min = _zone_drag_min + mission_delta
+	_zone_preview_max = _zone_drag_max + mission_delta
+	_refresh_area_trigger_overlay({ "index": _selected_zone_index, "min": _zone_preview_min, "max": _zone_preview_max })
+
+
+func _on_zone_left_release() -> void:
+	if _drag_active and _drag_moved and _selected_zone_index >= 0:
+		_commit_zone_drag()
+	elif _drag_active and _drag_off_terrain and not _drag_moved:
+		_report("Drag ended off the terrain; the zone was not moved.")
+		_refresh_area_trigger_overlay()
+	_drag_active = false
+	_drag_moved = false
+	_drag_off_terrain = false
+	# Push the drag as one step (no-op for a plain click: nothing was written).
+	commit_edit()
+
+
+# Write the dragged box's previewed bounds back to the record, keeping its flags + id.
+func _commit_zone_drag() -> void:
+	if _mission == null or _selected_zone_index < 0:
+		return
+	var zone := _mission.get_area_trigger(_selected_zone_index)
+	if zone.is_empty():
+		return
+	var updated := _mission.set_area_trigger(_selected_zone_index, _zone_preview_min, _zone_preview_max,
+		bool(zone.get("active", false)), bool(zone.get("constrain_z", false)), int(zone.get("id", 0)))
+	if not updated.is_empty():
+		_refresh_area_trigger_overlay()
+		mark_dirty()
+
+
+func _deselect_zone() -> void:
+	if _selected_zone_index < 0:
+		return
+	_selected_zone_index = -1
+	_refresh_area_trigger_overlay()
+	changed.emit()
+
+
+# Mission-space centre of the placed world: the average of item positions, else origin. Used
+# to drop a new zone somewhere visible rather than at (0,0,0) off in a corner.
+func _world_center_mission() -> Vector3:
+	if _mission == null:
+		return Vector3.ZERO
+	var items: Array = _mission.get_entities(NovaMissionData.KIND_ITEM)
+	if items.is_empty():
+		return Vector3.ZERO
+	var sum := Vector3.ZERO
+	for it in items:
+		sum += (it as Dictionary).get("position", Vector3.ZERO)
+	return sum / float(items.size())
+
+
 # True when a GUI control that owns the keyboard currently has focus, so the viewport
 # Delete/Backspace shortcut must stay inert (the user is typing in / interacting with a
 # panel, not the 3D scene). Reaches the editor viewport through the bound terrain editor;
@@ -1785,6 +2102,11 @@ func _reset_selection_state() -> void:
 	_selected_marker = {}
 	_marker_pickable = []
 	_waypoint_overlay = null
+	# Zone selection + overlay are likewise container-tied. Unlike the waypoint path, the zone
+	# selection does NOT survive a re-bake (a delete shifts indices), so it resets here too.
+	_selected_zone_index = -1
+	_zone_pickable = []
+	_area_overlay = null
 
 
 # --- Internals ----------------------------------------------------------------
