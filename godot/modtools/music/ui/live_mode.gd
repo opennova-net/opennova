@@ -3,6 +3,10 @@ extends Control
 
 const MusicVarInspectorClass = preload("res://modtools/music/ui/var_inspector.gd")
 const MusicSectionGraphClass = preload("res://modtools/music/music_section_graph.gd")
+const MusVarNames = preload("res://modtools/music/mus_var_names.gd")
+const MusicAudioPreviewClass = preload("res://modtools/music/music_audio_preview.gd")
+const MusicTrackChipClass = preload("res://modtools/music/ui/track_chip.gd")
+const MusicInspectorPanelClass = preload("res://modtools/music/ui/inspector_panel.gd")
 
 # VM state values mirror libs/mus MusVMState.
 const VM_STOPPED := 0
@@ -37,6 +41,11 @@ const _EV_COLOR := {
 
 var _document: RefCounted
 var _director: NovaMusicDirector
+var _preview: Node  # MusicAudioPreview, for track-chip previews on the map
+var _inspector_panel: Node  # MusicInspectorPanel in the right dock
+# Auto-follow the live VM in the inspector. A manual node click pins a state
+# (turns this off); the next Start/Stop re-arms it.
+var _follow_live: bool = true
 var _current_section: StringName = &""
 # Consecutive re-entries of the SAME section. A self-loop section (e.g. the
 # gamescript's `Missionnull { enter Missionnull }`) re-fires section_entered
@@ -77,7 +86,10 @@ var _last_log_count: int = 0
 @onready var _filter_sound: CheckBox = %FilterSound
 @onready var _filter_var: CheckBox = %FilterVar
 @onready var _filter_volume: CheckBox = %FilterVolume
-@onready var _graph: VBoxContainer = %SectionGraph
+@onready var _map: GraphEdit = %SectionMap
+@onready var _inspector: VBoxContainer = %Inspector
+@onready var _advanced_drawer: PanelContainer = %AdvancedDrawer
+@onready var _advanced_toggle: Button = %AdvancedToggle
 
 
 func bind_document(document: RefCounted) -> void:
@@ -103,7 +115,7 @@ func bind_document(document: RefCounted) -> void:
 # graph empty: bind_document only fires once on mount, before the user has
 # chosen a file.
 func _on_document_changed() -> void:
-	_refresh_graph()
+	_refresh_map()
 	_refresh_button_state()
 	_refresh_var_labels()
 	_refresh_jump_options()
@@ -114,6 +126,9 @@ func _ready() -> void:
 	_director = NovaMusicDirector.new()
 	_director.auto_start = false
 	add_child(_director)
+	_preview = MusicAudioPreviewClass.new()
+	_preview.name = "ChipPreview"
+	add_child(_preview)
 	_director.section_entered.connect(_on_section)
 	_director.sound_triggered.connect(_on_sound)
 	_director.echo.connect(_on_echo)
@@ -128,10 +143,23 @@ func _ready() -> void:
 	_clear_btn.pressed.connect(_on_clear)
 	if _jump_option != null:
 		_jump_option.item_selected.connect(_on_jump_selected)
+	if _map != null:
+		_map.node_selected.connect(_on_map_node_selected)
+	_inspector_panel = MusicInspectorPanelClass.new()
+	_inspector_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	if _inspector != null:
+		_inspector.add_child(_inspector_panel)
+	_inspector_panel.preview_requested.connect(_preview_track)
+	_inspector_panel.jump_requested.connect(_on_inspector_jump)
+	_inspector_panel.advanced_requested.connect(_on_inspector_advanced)
+	_inspector_panel.add_play_requested.connect(_on_inspector_add_play)
+	_inspector_panel.remove_play_requested.connect(_on_inspector_remove_play)
+	if _advanced_toggle != null:
+		_advanced_toggle.toggled.connect(_on_advanced_toggled)
 	if _var_inspector.has_method("bind_director"):
 		_var_inspector.call("bind_director", _director)
 	_apply_state_label(VM_STOPPED)
-	_refresh_graph()
+	_refresh_map()
 	_refresh_button_state()
 	_refresh_var_labels()
 	_refresh_jump_options()
@@ -154,7 +182,7 @@ func _process(_delta: float) -> void:
 		_refresh_button_state()
 		# Section-graph buttons + jump dropdown enable only while RUNNING, and
 		# now-playing clears on stop/halt, so refresh them on every transition.
-		_refresh_graph()
+		_refresh_map()
 		_refresh_now_playing()
 	if state == VM_RUNNING or state == VM_PAUSED:
 		if _var_inspector != null and _var_inspector.has_method("refresh_from_director"):
@@ -183,13 +211,14 @@ func _on_start() -> void:
 	_vol_seen = false
 	_current_section = &""
 	_idle_ticks = 0
+	_follow_live = true
 	if _volume_meter != null:
 		_volume_meter.set_volume(0, 0)
 	_director.start()
 	_apply_state_label(_director.vm_state())
 	_refresh_button_state()
 	_refresh_now_playing()
-	_refresh_graph()
+	_refresh_map()
 
 
 # Push the loaded script's name down to the var inspector so it can swap raw
@@ -239,9 +268,10 @@ func _on_stop() -> void:
 	_apply_state_label(VM_STOPPED)
 	_current_section = &""
 	_idle_ticks = 0
+	_follow_live = true
 	_refresh_button_state()
 	_refresh_now_playing()
-	_refresh_graph()
+	_refresh_map()
 	if _volume_meter != null:
 		_volume_meter.set_volume(0, 0)
 
@@ -258,9 +288,10 @@ func stop_director() -> void:
 	_apply_state_label(VM_STOPPED)
 	_current_section = &""
 	_idle_ticks = 0
+	_follow_live = true
 	_refresh_button_state()
 	_refresh_now_playing()
-	_refresh_graph()
+	_refresh_map()
 	if _volume_meter != null:
 		_volume_meter.set_volume(0, 0)
 
@@ -343,51 +374,259 @@ func _on_section(section_name: StringName) -> void:
 		if _idle_ticks == 1:
 			_refresh_now_playing()
 		return
-	# Real transition: reset idle, log it, rebuild the graph + now-playing.
+	# Real transition: reset idle, log it, rebuild the map + now-playing, and
+	# (while auto-following) point the inspector at the entered state.
+	var prev: String = String(_current_section)
 	_current_section = section_name
 	_idle_ticks = 0
-	_refresh_graph()
+	_refresh_map()
 	_refresh_now_playing()
+	if _follow_live:
+		_show_section_in_inspector(String(section_name), prev)
 	_log_typed(EvType.SECTION, "section -> %s" % section_name)
 
 
-func _refresh_graph() -> void:
-	for c in _graph.get_children():
-		c.queue_free()
+func _refresh_map() -> void:
+	if _map == null:
+		return
+	_map.clear_connections()
+	for c in _map.get_children():
+		if c is GraphNode:
+			_map.remove_child(c)
+			c.queue_free()
 	if _document == null or not _document.script_loaded():
-		var hint := Label.new()
-		hint.text = "Open a project to view section transitions."
-		hint.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
-		_graph.add_child(hint)
 		return
 	var script_name: StringName = StringName(_document.mus_script.get_default_script_name())
-	var graph := MusicSectionGraphClass.analyze(_document.mus_script, script_name)
-	if graph.is_empty():
-		var empty_hint := Label.new()
-		empty_hint.text = "(this script has no sections)"
-		empty_hint.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
-		_graph.add_child(empty_hint)
+	# Model-driven (opcode-level), not string-parsed: edges are correct, switch
+	# fan-out is captured, and self-looping idle states are flagged.
+	var model: Array = MusicSectionGraphClass.build(_document.mus_script, script_name)
+	if model.is_empty():
 		return
-	var running: bool = _last_state == VM_RUNNING
-	for section_name in graph.keys():
-		var row := HBoxContainer.new()
-		# The section name is a flat button: clicking it jumps the running VM
-		# there. Disabled when not RUNNING (jump_to_section no-ops pre-Start
-		# anyway, but disabling makes the rule visible).
-		var btn := Button.new()
-		btn.flat = true
-		btn.text = section_name
-		btn.disabled = not running
-		btn.tooltip_text = "Jump the running script to this section."
-		if section_name == String(_current_section):
-			btn.add_theme_color_override("font_color", Color(1.0, 0.83, 0.47))
-		btn.pressed.connect(_on_graph_section_pressed.bind(StringName(section_name)))
-		row.add_child(btn)
-		for target in graph[section_name]:
-			var arrow := Label.new()
-			arrow.text = " -> %s" % target
-			row.add_child(arrow)
-		_graph.add_child(row)
+	var names: Array = _bank_names()
+	var node_by_index: Dictionary = {}
+	for section in model:
+		var idx: int = int(section.get("index", -1))
+		var gn := GraphNode.new()
+		gn.name = "S_%d" % idx
+		gn.set_meta("section", String(section.get("name", "")))
+		gn.gui_input.connect(_on_node_gui_input.bind(String(section.get("name", ""))))
+		gn.title = String(section.get("name", ""))
+		if bool(section.get("is_entry", false)):
+			gn.title += "   ★ start"
+		if bool(section.get("is_idle_loop", false)):
+			gn.title += "   ↻ idle"
+		# Body: up to 3 track chips; the full list shows in the right inspector.
+		var plays: Array = section.get("plays", [])
+		var shown: int = mini(plays.size(), 3)
+		for p in range(shown):
+			var play: Dictionary = plays[p]
+			var track: int = int(play.get("track", -1))
+			var chip := MusicTrackChipClass.new()
+			gn.add_child(chip)
+			chip.setup(track, _track_name(names, track), bool(play.get("wait", false)), false)
+			chip.preview_requested.connect(_preview_track)
+		if plays.size() > shown:
+			var more := Label.new()
+			more.text = "  +%d more" % (plays.size() - shown)
+			more.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+			gn.add_child(more)
+		if gn.get_child_count() == 0:
+			# Slot 0 needs a row; an idle / branch-only section plays nothing.
+			var spacer := Label.new()
+			spacer.text = " "
+			gn.add_child(spacer)
+		gn.set_slot(0, true, 0, Color(0.5, 0.7, 1.0), true, 0, Color(0.5, 0.7, 1.0))
+		_map.add_child(gn)
+		node_by_index[idx] = gn
+	_layout_map(model, node_by_index)
+	for section in model:
+		var from_idx: int = int(section.get("index", -1))
+		for e in section.get("edges", []):
+			var to_idx: int = int(e.get("to", -1))
+			if to_idx == from_idx:
+				continue  # self-loop is the ↻ idle badge, not a drawn connection
+			if node_by_index.has(from_idx) and node_by_index.has(to_idx):
+				_map.connect_node("S_%d" % from_idx, 0, "S_%d" % to_idx, 0)
+	_highlight_active_node()
+
+
+# Deterministic BFS layered layout from the entry section, left to right, so the
+# map doesn't reshuffle on every rebuild (GraphEdit.arrange_nodes is
+# non-deterministic). Sections no edge reaches (win/lose stings) trail in a
+# final column.
+func _layout_map(model: Array, node_by_index: Dictionary) -> void:
+	var entry_idx: int = -1
+	var adj: Dictionary = {}
+	for section in model:
+		var idx: int = int(section.get("index", -1))
+		var outs: Array = []
+		for e in section.get("edges", []):
+			var t: int = int(e.get("to", -1))
+			if t != idx:
+				outs.append(t)
+		adj[idx] = outs
+		if bool(section.get("is_entry", false)):
+			entry_idx = idx
+	var layer: Dictionary = {}
+	var queue: Array = []
+	if entry_idx >= 0:
+		layer[entry_idx] = 0
+		queue.append(entry_idx)
+	while not queue.is_empty():
+		var n: int = queue.pop_front()
+		for t in adj.get(n, []):
+			if not layer.has(t):
+				layer[t] = int(layer[n]) + 1
+				queue.append(t)
+	var max_layer: int = 0
+	for v in layer.values():
+		max_layer = maxi(max_layer, int(v))
+	for section in model:
+		var idx2: int = int(section.get("index", -1))
+		if not layer.has(idx2):
+			layer[idx2] = max_layer + 1
+	var row_in_layer: Dictionary = {}
+	var indices: Array = node_by_index.keys()
+	indices.sort()
+	for idx3 in indices:
+		var l: int = int(layer.get(idx3, 0))
+		var r: int = int(row_in_layer.get(l, 0))
+		row_in_layer[l] = r + 1
+		(node_by_index[idx3] as GraphNode).position_offset = Vector2(l * 280, r * 150)
+
+
+# Tint the running VM's current section; clear the rest. Applied on each rebuild
+# (step 3 turns this into an in-place glow that does not rebuild the map).
+func _highlight_active_node() -> void:
+	if _map == null:
+		return
+	for gn in _map.get_children():
+		if gn is GraphNode:
+			var active: bool = _last_state == VM_RUNNING \
+				and String(gn.get_meta("section", "")) == String(_current_section)
+			gn.modulate = Color(0.6, 1.0, 0.6) if active else Color(1, 1, 1)
+
+
+# Resolve bank entry names so chips read "combat1" not "sound_3". Empty when no
+# bank is loaded alongside the script.
+func _bank_names() -> Array:
+	if _document == null or not _document.bank_loaded():
+		return []
+	var out: Array = []
+	for e in _document.bank.get_entries():
+		out.append(String(e.get("name", "")))
+	return out
+
+
+func _track_name(names: Array, track: int) -> String:
+	if track >= 0 and track < names.size() and String(names[track]) != "":
+		return String(names[track])
+	return "sound_%d" % track
+
+
+# Preview a bank track through our own MusicAudioPreview (a chip's ▶ button).
+func _preview_track(track: int) -> void:
+	if _preview == null or _document == null or not _document.bank_loaded():
+		return
+	var stream: NovaSbfAudioStream = _document.bank.get_stream_at(track)
+	if stream != null:
+		_preview.play_stream(stream)
+
+
+# A map node was clicked. While RUNNING this jumps the VM there (the same path
+# the old section-graph buttons used); selection feeds the right inspector in
+# step 3. No-ops the jump while stopped.
+func _on_map_node_selected(node: Node) -> void:
+	if node == null:
+		return
+	var sec: String = String(node.get_meta("section", ""))
+	if sec == "":
+		return
+	# Clicking the section that is currently playing keeps auto-follow on;
+	# clicking a different one pins the inspector there (the next Start/Stop, or
+	# clicking the live state again, re-arms follow).
+	_follow_live = (_last_state == VM_RUNNING and sec == String(_current_section))
+	_show_section_in_inspector(sec)
+	# While running, also jump the VM there (the old section-graph buttons' role).
+	if _last_state == VM_RUNNING:
+		_on_graph_section_pressed(StringName(sec))
+
+
+func _on_advanced_toggled(pressed: bool) -> void:
+	if _advanced_drawer != null:
+		_advanced_drawer.visible = pressed
+
+
+# Double-clicking a state opens the Advanced drawer at its raw script. Single
+# clicks fall through to GraphEdit's node_selected (-> _on_map_node_selected).
+func _on_node_gui_input(event: InputEvent, section_name: String) -> void:
+	if event is InputEventMouseButton and event.double_click \
+			and event.button_index == MOUSE_BUTTON_LEFT:
+		_on_inspector_advanced(StringName(section_name))
+
+
+func _on_inspector_jump(section_name: StringName) -> void:
+	_on_graph_section_pressed(section_name)
+
+
+# Drag-to-add-play / chip remove from the inspector. The document gates these on
+# can_edit_plays() and recompiles; document.changed already rebuilds the map, so
+# we just refresh the inspector to show the changed play list (kept pinned).
+func _on_inspector_add_play(section_name: StringName, track: int) -> void:
+	if _document == null or not _document.has_method("insert_play"):
+		return
+	if _document.insert_play(section_name, track):
+		_follow_live = false
+		_show_section_in_inspector(String(section_name))
+
+
+func _on_inspector_remove_play(section_name: StringName, track: int) -> void:
+	if _document == null or not _document.has_method("remove_play"):
+		return
+	if _document.remove_play(section_name, track):
+		_follow_live = false
+		_show_section_in_inspector(String(section_name))
+
+
+func _on_inspector_advanced(section_name: StringName) -> void:
+	if _advanced_toggle != null:
+		_advanced_toggle.set_pressed_no_signal(true)
+	if _advanced_drawer != null:
+		_advanced_drawer.visible = true
+	var script_node := _script_panel()
+	if script_node != null and script_node.has_method("scroll_to_section"):
+		script_node.scroll_to_section(section_name)
+
+
+# Public entry point for the section-navigator TOC (mounted in the workstation
+# inspector host): open the Advanced drawer at a section's raw script. Routing
+# through here (rather than scrolling the Script panel directly) guarantees the
+# drawer is visible before the CodeEdit is scrolled/focused.
+func reveal_section_in_script(section_name: StringName) -> void:
+	_on_inspector_advanced(section_name)
+
+
+func _script_panel() -> Node:
+	return find_child("Script", true, false)
+
+
+# Resolve a section from the current model and show it in the right-dock
+# inspector. came_from is the breadcrumb (the section the VM just left); empty
+# when browsing manually or on the entry section.
+func _show_section_in_inspector(sec: String, came_from: String = "") -> void:
+	if _inspector_panel == null:
+		return
+	if _document == null or not _document.script_loaded():
+		_inspector_panel.clear()
+		return
+	var script_name := StringName(_document.mus_script.get_default_script_name())
+	var model: Array = MusicSectionGraphClass.build(_document.mus_script, script_name)
+	var editable: bool = _document.has_method("can_edit_plays") and _document.can_edit_plays()
+	for section in model:
+		if String(section.get("name", "")) == sec:
+			_inspector_panel.show_section(section, _bank_names(), came_from, editable)
+			return
+	_inspector_panel.clear()
 
 
 func _on_sound(idx: int, sound_name: StringName, wait: bool) -> void:
@@ -425,7 +664,13 @@ func _on_variable_changed(var_index: int, value: int) -> void:
 	if _last_logged_var.get(var_index, null) == value:
 		return
 	_last_logged_var[var_index] = value
-	_log_typed(EvType.VAR, "var Var%02d = %d" % [var_index, value])
+	# Friendly per-script name when known ("MissionActive (Var01)"), else raw
+	# "Var01". Same mus_var_names map the Variables tab uses, so the log and the
+	# inspector agree instead of the log showing opaque indices.
+	var label := "Var%02d" % var_index
+	if _document != null and _document.script_loaded():
+		label = MusVarNames.label_for(String(_document.mus_script.get_default_script_name()), var_index)
+	_log_typed(EvType.VAR, "%s = %d" % [label, value])
 
 
 func _on_volume_changed(left: int, right: int) -> void:

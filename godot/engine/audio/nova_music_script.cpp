@@ -37,6 +37,7 @@ void NovaMusicScript::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_intrinsic_names"), &NovaMusicScript::get_intrinsic_names);
 	ClassDB::bind_method(D_METHOD("get_decompiled_text", "script_name"), &NovaMusicScript::get_decompiled_text);
 	ClassDB::bind_method(D_METHOD("get_decompiled_text_with_bank", "script_name", "bank"), &NovaMusicScript::get_decompiled_text_with_bank);
+	ClassDB::bind_method(D_METHOD("get_section_model", "script_name"), &NovaMusicScript::get_section_model);
 	ClassDB::bind_method(D_METHOD("compile_text", "text"), &NovaMusicScript::compile_text);
 	ClassDB::bind_method(D_METHOD("set_compiled_bytecode", "bytecode"), &NovaMusicScript::set_compiled_bytecode);
 	ClassDB::bind_method(D_METHOD("set_compiled_file_bytes", "file_bytes"), &NovaMusicScript::set_compiled_file_bytes);
@@ -363,4 +364,59 @@ String NovaMusicScript::get_decompiled_text_with_bank(const StringName &p_script
 		return String();
 	}
 	return String::utf8(buf.data(), written);
+}
+
+Array NovaMusicScript::get_section_model(const StringName &p_script_name) const {
+	Array out;
+	if (!_opened) {
+		return out;
+	}
+	const MusScript *s = raw_script(String(p_script_name));
+	if (s == nullptr) {
+		return out;
+	}
+	MusModel model;
+	if (mus_build_section_model(s, &model) != 0) {
+		return out;
+	}
+	for (uint32_t i = 0; i < model.section_count; ++i) {
+		const MusSectionInfo &si = model.sections[i];
+		Dictionary d;
+		char sec_buf[MUS_SECTION_NAME_SIZE + 1] = { 0 };
+		if (si.section_index < s->section_count) {
+			std::memcpy(sec_buf, s->sections[si.section_index].name, MUS_SECTION_NAME_SIZE);
+		}
+		d["name"] = String(sec_buf);
+		d["index"] = (int64_t)si.section_index;
+		d["is_entry"] = (bool)si.is_entry;
+		d["is_idle_loop"] = (bool)si.is_idle_loop;
+
+		Array edges;
+		for (uint32_t e = 0; e < si.edge_count; ++e) {
+			Dictionary ed;
+			uint32_t to = si.edges[e].to_section_index;
+			ed["to"] = (int64_t)to;
+			char to_buf[MUS_SECTION_NAME_SIZE + 1] = { 0 };
+			if (to < s->section_count) {
+				std::memcpy(to_buf, s->sections[to].name, MUS_SECTION_NAME_SIZE);
+			}
+			ed["to_name"] = String(to_buf);
+			ed["kind"] = (int64_t)si.edges[e].kind;
+			edges.append(ed);
+		}
+		d["edges"] = edges;
+
+		Array plays;
+		for (uint32_t p = 0; p < si.play_count; ++p) {
+			Dictionary pd;
+			pd["track"] = (int64_t)si.plays[p].track_index;
+			pd["wait"] = (bool)si.plays[p].wait;
+			plays.append(pd);
+		}
+		d["plays"] = plays;
+
+		out.append(d);
+	}
+	mus_model_free(&model);
+	return out;
 }

@@ -1,13 +1,13 @@
 class_name MusicEditorWorkspace
 extends EditorWorkspace
 
-# Workflow IDs match the design spec's Mode enum.
-enum Workflow { BANK, SCRIPT, LIVE }
+# One unified screen now: the live-lit section map with docked Tracks / Game
+# Dials and a per-state Advanced script drawer. The old Bank / Script / Live
+# modes are coexisting docks within this single "Map" workflow.
+enum Workflow { MAP }
 
 const WORKFLOW_DEFS := [
-	{"id": Workflow.BANK, "label": "Bank", "tooltip": "Edit the audio tracks: reorder, rename, replace."},
-	{"id": Workflow.SCRIPT, "label": "Script", "tooltip": "Edit the music script as text and save it back."},
-	{"id": Workflow.LIVE, "label": "Live", "tooltip": "Play the music live and adjust its settings."},
+	{"id": Workflow.MAP, "label": "Map", "tooltip": "The live music map: states, tracks, game dials, and the script drawer on one screen."},
 ]
 
 const RootScene = preload("res://modtools/music/ui/music_workspace_root.tscn")
@@ -16,7 +16,7 @@ const MusicEditorDocumentClass = preload("res://modtools/music/music_editor_docu
 
 const STATE_PATH := "user://music_editor_state.cfg"
 
-var _active_workflow: int = Workflow.BANK
+var _active_workflow: int = Workflow.MAP
 var _root: Control
 var _document: RefCounted   # MusicEditorDocument
 
@@ -64,13 +64,9 @@ func get_active_workflow_id() -> int:
 
 
 func activate_workflow(workflow_id: int) -> void:
-	# Switching modes stops the live VM. Otherwise audio bleeds into Bank-mode
-	# preview and Script-mode editing, with no obvious way to halt it short of
-	# coming back to the Live tab and clicking Stop.
-	if _active_workflow == Workflow.LIVE and workflow_id != Workflow.LIVE and _root != null:
-		var live_node: Node = _root.get_node_or_null("Live")
-		if live_node != null and live_node.has_method("stop_director"):
-			live_node.stop_director()
+	# Single screen: nothing to show/hide. Recorded for get_status_tool /
+	# get_active_workflow_id. The live VM is stopped on workspace deactivate
+	# (see _stop_live) rather than on a tab switch -- there are no tabs.
 	_active_workflow = workflow_id
 	if _root != null:
 		_root.set_active_workflow(workflow_id)
@@ -174,55 +170,28 @@ func has_unsaved_changes() -> bool:
 	return _document != null and _document.is_dirty()
 
 
-# --- Edit: undo / redo capability hooks (matching Mission / MNU). The live
-# bank-edit history lives on the document (reorder / rename push do/undo pairs);
-# route by the active workflow so undo reverts the side the user is looking at.
-# Script-side undo is a no-op until Phase F (can_undo_script stays false) and
-# Live mode has nothing to revert, so the shell correctly disables the action
-# there. The Bank panel repaints off the document's `changed` signal, which the
-# undo callables emit, so the track list refreshes without extra wiring here.
+# --- Edit: undo / redo capability hooks (matching Mission / MNU). One unified
+# screen means one consolidated edit history on the document: bank reorder /
+# rename (and the structured play edits added later) all push do/undo pairs onto
+# the same stack, reachable regardless of which dock has focus. The Bank panel
+# repaints off the document's `changed` signal, which the undo callables emit,
+# so the track list refreshes without extra wiring here.
 func can_undo() -> bool:
-	if _document == null:
-		return false
-	match _active_workflow:
-		Workflow.BANK:
-			return _document.can_undo_bank()
-		Workflow.SCRIPT:
-			return _document.can_undo_script()
-		_:
-			return false
+	return _document != null and _document.can_undo_bank()
 
 
 func can_redo() -> bool:
-	if _document == null:
-		return false
-	match _active_workflow:
-		Workflow.BANK:
-			return _document.can_redo_bank()
-		Workflow.SCRIPT:
-			return _document.can_redo_script()
-		_:
-			return false
+	return _document != null and _document.can_redo_bank()
 
 
 func undo() -> void:
-	if _document == null:
-		return
-	match _active_workflow:
-		Workflow.BANK:
-			_document.undo_bank()
-		Workflow.SCRIPT:
-			_document.undo_script()
+	if _document != null:
+		_document.undo_bank()
 
 
 func redo() -> void:
-	if _document == null:
-		return
-	match _active_workflow:
-		Workflow.BANK:
-			_document.redo_bank()
-		Workflow.SCRIPT:
-			_document.redo_script()
+	if _document != null:
+		_document.redo_bank()
 
 
 func get_current_resource_path() -> String:
@@ -286,6 +255,9 @@ func activate() -> void:
 
 
 func deactivate() -> void:
+	# Leaving the workspace stops the live music so it doesn't keep playing in
+	# the background (single screen: there's no Live tab to return to).
+	_stop_live()
 	if _document.is_dirty():
 		var dialog := ConfirmationDialog.new()
 		dialog.dialog_text = "Music project has unsaved changes. Save before closing?"
@@ -312,6 +284,15 @@ func deactivate() -> void:
 		dialog.popup_centered()
 		return
 	_save_state()
+
+
+# Stop the live director if it's running. Called on workspace deactivate.
+func _stop_live() -> void:
+	if _root == null:
+		return
+	var live_node: Node = _root.get_panel("Live")
+	if live_node != null and live_node.has_method("stop_director"):
+		live_node.stop_director()
 
 
 func _save_state() -> void:
@@ -359,16 +340,36 @@ func unmount_viewport(_host: Control) -> void:
 		_root = null
 
 
-# Inspector host is the workstation's middle column. SCRIPT mode shows the
-# section TOC; BANK and LIVE leave it empty (no inspector content in v1).
-func build_workflow_inspector(workflow_id: int, host: Control) -> void:
+# Inspector host is the workstation's middle column. The unified screen always
+# shows the section TOC there (clicking a section scrolls the Advanced script
+# drawer to it); there are no longer separate modes to gate it on.
+func build_workflow_inspector(_workflow_id: int, host: Control) -> void:
 	if host == null:
 		return
 	for c in host.get_children():
 		c.queue_free()
-	if workflow_id != Workflow.SCRIPT:
-		return
 	var nav: Control = SectionNavigatorScene.instantiate()
 	host.add_child(nav)
 	if nav.has_method("bind_document"):
 		nav.bind_document(_document)
+	# Connect the navigator's selection so clicking a section in the TOC scrolls
+	# the Script panel to it. The signal was previously emitted but never
+	# connected, leaving the navigator inert.
+	if nav.has_signal("section_selected"):
+		if not nav.section_selected.is_connected(_on_section_selected):
+			nav.section_selected.connect(_on_section_selected)
+
+
+func _on_section_selected(section_name: StringName) -> void:
+	if _root == null:
+		return
+	# Route through the Live screen so the Advanced drawer opens before its
+	# CodeEdit is scrolled (scrolling the hidden drawer did nothing and errored
+	# on grab_focus). Fall back to a direct scroll if the method is unavailable.
+	var live_node: Node = _root.get_panel("Live")
+	if live_node != null and live_node.has_method("reveal_section_in_script"):
+		live_node.reveal_section_in_script(section_name)
+		return
+	var script_node: Node = _root.get_panel("Script")
+	if script_node != null and script_node.has_method("scroll_to_section"):
+		script_node.scroll_to_section(section_name)

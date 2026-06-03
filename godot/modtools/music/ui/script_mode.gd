@@ -90,8 +90,13 @@ func _build_highlighter() -> CodeHighlighter:
 		"empty", "method",
 	]:
 		h.add_keyword_color(op, Color(0.7, 0.9, 0.7))
-	for fn in ["GEcho", "GGRnd", "GSV", "GSDV", "GFB",
-		"FSet", "FClear", "FIsSet", "FIsClear", "TStart", "TStop"]:
+	# The decompiler strips the GLOBAL "G" prefix (split_method_name in
+	# libs/mus/src/mus_decompile.cpp), so a section body emits "SV(200)" / "FB()"
+	# (not "GSV"/"GFB"), and F./T. methods as the dotted "F.Set" / "T.Start". The
+	# previous list of prefixed names matched NOTHING actually emitted, so method
+	# verbs never highlighted. List the emitted forms instead.
+	for fn in ["SV", "SDV", "FB", "Echo", "GRnd",
+		"Set", "Clear", "IsSet", "IsClear", "Start", "Stop"]:
 		h.add_keyword_color(fn, Color(1.0, 0.9, 0.4))
 	h.number_color = Color(0.4, 0.9, 0.9)
 	h.symbol_color = Color(0.8, 0.8, 0.8)
@@ -119,6 +124,27 @@ func _refresh_text() -> void:
 	# the user is mid-edit.
 	if _code_edit.text != fresh:
 		_code_edit.text = fresh
+
+
+# Scroll the CodeEdit to a section's `section <Name>` header and park the caret
+# there. Driven by the section navigator (its section_selected signal was
+# previously emitted but never connected, so the TOC did nothing). The
+# decompiler emits the header as a lone `section <Name>` line, so an exact match
+# is unambiguous.
+func scroll_to_section(section_name: StringName) -> void:
+	if _code_edit == null:
+		return
+	var needle := "section %s" % String(section_name)
+	for i in range(_code_edit.get_line_count()):
+		if _code_edit.get_line(i).strip_edges() == needle:
+			_code_edit.set_caret_line(i)
+			_code_edit.center_viewport_to_caret()
+			# Only grab focus when actually on-screen: in the unified screen the
+			# CodeEdit lives in a collapsible drawer, and grab_focus on a hidden
+			# control throws "Can't grab focus on a control that is not visible".
+			if _code_edit.is_visible_in_tree():
+				_code_edit.grab_focus()
+			return
 
 
 func _on_text_changed() -> void:
