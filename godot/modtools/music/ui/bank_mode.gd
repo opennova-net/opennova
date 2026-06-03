@@ -29,13 +29,19 @@ func _ready() -> void:
 	_track_tree.set_column_title(1, "name")
 	_track_tree.set_column_title(2, "play")
 	_track_tree.column_titles_visible = true
+	# The bank is a flat list (create_item(root) children, no nesting), so hide
+	# the root row and the per-item fold-arrow gutter. The gutter is column 0's
+	# (the "#" column's) dead space; reclaiming it lets two/three-digit indices
+	# show in full instead of clipping "10/11/12" down to "1".
+	_track_tree.hide_root = true
+	_track_tree.hide_folding = true
 	# Column widths: # column fixed narrow, name expands, play column fixed
 	# narrow on the right. Without expand_ratio(2, 0), Godot would let the
 	# play column eat ~1/3 of the table because all columns default to
 	# expand_ratio == 1.
 	_track_tree.set_column_expand(0, false)
 	_track_tree.set_column_expand_ratio(0, 0)
-	_track_tree.set_column_custom_minimum_width(0, 40)
+	_track_tree.set_column_custom_minimum_width(0, 48)
 	_track_tree.set_column_expand(1, true)
 	_track_tree.set_column_expand_ratio(1, 1)
 	_track_tree.set_column_expand(2, false)

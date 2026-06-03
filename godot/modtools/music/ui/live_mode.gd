@@ -53,6 +53,11 @@ var _current_section: StringName = &""
 var _idle_ticks: int = 0
 var _last_state: int = VM_STOPPED
 var _start_warning_until_ms: int = 0
+# "<script>:<node count>" of the last map we fit to the viewport. _refresh_map
+# rebuilds the GraphNodes on every section transition, but only an actual
+# topology change (open/close a different script) should re-fit — so playback
+# and the user's manual pan/zoom are never yanked around mid-run.
+var _fit_signature: String = ""
 
 # De-spam state. The VM fires on_volume_changed on every GSV/GSDV call and
 # on_var_changed on every pop_global write, including same-value writes, so we
@@ -451,6 +456,55 @@ func _refresh_map() -> void:
 			if node_by_index.has(from_idx) and node_by_index.has(to_idx):
 				_map.connect_node("S_%d" % from_idx, 0, "S_%d" % to_idx, 0)
 	_highlight_active_node()
+	# Fit the graph to the viewport, but only when the topology actually changed
+	# (a different script / node count) -- not on the per-transition rebuilds that
+	# keep the same sections, which would otherwise yank the view mid-playback.
+	var sig: String = "%s:%d" % [String(script_name), node_by_index.size()]
+	if sig != _fit_signature:
+		_fit_signature = sig
+		_fit_map_to_view()
+
+
+# Center + zoom the section map so the whole graph fills the GraphEdit instead of
+# clustering in the top-left with empty canvas to the right. Deferred one frame so
+# the GraphNodes have sized themselves from their chip content before we measure.
+func _fit_map_to_view() -> void:
+	if _map == null or not is_inside_tree() or get_tree() == null:
+		return
+	await get_tree().process_frame
+	if _map == null or not is_instance_valid(_map):
+		return
+	var first: bool = true
+	var min_x: float = 0.0
+	var min_y: float = 0.0
+	var max_x: float = 0.0
+	var max_y: float = 0.0
+	for c in _map.get_children():
+		if not (c is GraphNode):
+			continue
+		var gn: GraphNode = c
+		var p: Vector2 = gn.position_offset
+		var s: Vector2 = gn.size
+		if first:
+			min_x = p.x; min_y = p.y; max_x = p.x + s.x; max_y = p.y + s.y
+			first = false
+		else:
+			min_x = minf(min_x, p.x); min_y = minf(min_y, p.y)
+			max_x = maxf(max_x, p.x + s.x); max_y = maxf(max_y, p.y + s.y)
+	if first:
+		return  # no nodes
+	var content := Vector2(max_x - min_x, max_y - min_y)
+	if content.x <= 0.0 or content.y <= 0.0:
+		return
+	var view := _map.size
+	var margin := 80.0
+	var zoom := minf((view.x - margin) / content.x, (view.y - margin) / content.y)
+	zoom = clampf(zoom, 0.25, 1.0)
+	_map.zoom = zoom
+	# scroll_offset is in zoomed pixels: a node at position_offset shows at
+	# position_offset*zoom - scroll_offset, so center the content's midpoint.
+	var center := Vector2((min_x + max_x) * 0.5, (min_y + max_y) * 0.5)
+	_map.scroll_offset = center * zoom - view * 0.5
 
 
 # Deterministic BFS layered layout from the entry section, left to right, so the
@@ -528,10 +582,17 @@ func _layout_map(model: Array, node_by_index: Dictionary) -> void:
 			if bary[a] == bary[b]:
 				return int(a) < int(b)
 			return bary[a] < bary[b])
+		# assigned_row stays the integer rank (drives the NEXT layer's barycenter
+		# ordering); the visual y is centered on a shared mid-axis so a 1-node
+		# layer lands at y=0 and a fan-out layer spreads symmetrically above and
+		# below it. The linear chain then threads the middle of each fan instead
+		# of pinning to the top with the fan hanging one-sidedly below.
 		var row: int = 0
+		var span: float = float(group.size() - 1) * 0.5
 		for idx5 in group:
 			assigned_row[idx5] = row
-			(node_by_index[idx5] as GraphNode).position_offset = Vector2(l4 * 320, row * 180)
+			var y: float = (float(row) - span) * 180.0
+			(node_by_index[idx5] as GraphNode).position_offset = Vector2(l4 * 320, y)
 			row += 1
 
 
