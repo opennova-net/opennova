@@ -44,13 +44,17 @@ struct MissionInfo {
 	std::string environment;
 	int climate = 0;
 	int weather = 0;
+	int mission_type = 0;
 	int attrib_flags = 0;
-	int start_time = 0;
+	int start_time = 0;        // raw packed u16 (NOT decoded HH:MM)
 	int minutes_per_day = 0;
 	int player_health = 0;
 	int max_saves = 0;
 	int music = 0;
 	int reverb = 0;
+	int wind_speed = 0;
+	int wind_direction = 0;
+	float map_zoom = 0.0f;
 };
 
 struct EntityTransform {
@@ -81,7 +85,11 @@ struct EntityRecord {
 	int max_engagement_distance = 0;
 	int max_attack_distance = 0;
 	int spawn_count = 0;
-	int max_simultaneous = 0;
+	int max_simultaneous = 0;  // = no_more_than (byte 74); paired with the RemoveIfMoreThan AI flag
+	int no_less_than = 0;      // byte 75; paired with the RemoveIfLessThan AI flag
+	int map_symbol = 0;        // byte 81; tactical-map icon
+	std::string name1;         // bytes 104..111 (iai_name): AI class name
+	std::string name2;         // bytes 112..119 (ai_textfile): AI script file
 };
 
 struct EntityProperties {
@@ -97,7 +105,11 @@ struct EntityProperties {
 	int max_engagement_distance = 0;
 	int max_attack_distance = 0;
 	int spawn_count = 0;
-	int max_simultaneous = 0;
+	int max_simultaneous = 0;  // = no_more_than (byte 74)
+	int no_less_than = 0;      // byte 75
+	int map_symbol = 0;        // byte 81
+	std::string name1;         // iai_name (8 bytes)
+	std::string name2;         // ai_textfile (8 bytes)
 };
 
 struct WaypointSummary {
@@ -228,6 +240,12 @@ public:
 	const std::string &last_error() const;
 
 	MissionInfo info() const;
+
+	// Mission-header editing. Field names match the MissionInfo members above.
+	bool set_header_string(const std::string &field, const std::string &value);
+	bool set_header_int(const std::string &field, int value);
+	bool set_header_flag(int bit, bool on);              // single attrib_flags bit
+	bool set_header_float(const std::string &field, float value);
 
 	size_t entity_count(EntityKind kind) const;
 	bool get_entity(EntityKind kind, size_t index, EntityRecord &out) const;

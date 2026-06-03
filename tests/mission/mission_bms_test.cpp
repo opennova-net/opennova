@@ -410,5 +410,70 @@ int main() {
 		TEST_EXPECT(at_reparsed.events.size() == at_file.events.size());
 	}
 
+	// --- Phase 1: mission-header editing round-trips through save/reload ---
+	{
+		opennova::mission::MissionDocument hdr;
+		TEST_EXPECT(hdr.load_bms_bytes(original.data(), original.size()));
+		TEST_EXPECT(hdr.set_header_string("mission_name", "Grill Test"));
+		TEST_EXPECT(hdr.set_header_int("climate", 2));
+		TEST_EXPECT(hdr.set_header_int("minutes_per_day", 1234));
+		const int coop_bit = 0x1000000; // ATTRIB_COOP
+		TEST_EXPECT(hdr.set_header_flag(coop_bit, true));
+		TEST_EXPECT(!hdr.set_header_string("nonexistent_field", "x")); // unknown rejected
+		std::vector<uint8_t> hdr_bytes;
+		TEST_EXPECT(hdr.write_bms_bytes(hdr_bytes));
+		opennova::mission::MissionDocument hdr_reload;
+		TEST_EXPECT(hdr_reload.load_bms_bytes(hdr_bytes.data(), hdr_bytes.size()));
+		const opennova::mission::MissionInfo reread_info = hdr_reload.info();
+		TEST_EXPECT(reread_info.mission_name == "Grill Test");
+		TEST_EXPECT(reread_info.climate == 2);
+		TEST_EXPECT(reread_info.minutes_per_day == 1234);
+		TEST_EXPECT((reread_info.attrib_flags & coop_bit) != 0);
+	}
+
+	// --- Phase 1: hidden entity fields (name1/name2/no_less_than/map_symbol) round-trip,
+	// and the names truncate to the format's 8-byte (7 chars + NUL) slot. ---
+	{
+		opennova::mission::MissionDocument doc;
+		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+		opennova::mission::EntityRecord rec;
+		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, rec));
+		opennova::mission::EntityProperties props; // seed from current record (overwrites all)
+		props.group_id = rec.group_id;
+		props.waypoint_id = rec.waypoint_id;
+		props.wp_number = rec.wp_number;
+		props.team = rec.team;
+		props.ai_flags = rec.ai_flags;
+		props.perception = rec.perception;
+		props.accuracy = rec.accuracy;
+		props.alert_state = rec.alert_state;
+		props.min_engagement_distance = rec.min_engagement_distance;
+		props.max_engagement_distance = rec.max_engagement_distance;
+		props.max_attack_distance = rec.max_attack_distance;
+		props.spawn_count = rec.spawn_count;
+		props.max_simultaneous = rec.max_simultaneous;
+		props.no_less_than = 9;
+		props.map_symbol = 17;
+		props.name1 = "rifle";
+		props.name2 = "patrol";
+		TEST_EXPECT(doc.set_entity_properties(opennova::mission::EntityKind::Item, 0, props, nullptr));
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(doc.write_bms_bytes(bytes));
+		opennova::mission::MissionDocument reload;
+		TEST_EXPECT(reload.load_bms_bytes(bytes.data(), bytes.size()));
+		opennova::mission::EntityRecord rec2;
+		TEST_EXPECT(reload.get_entity(opennova::mission::EntityKind::Item, 0, rec2));
+		TEST_EXPECT(rec2.no_less_than == 9);
+		TEST_EXPECT(rec2.map_symbol == 17);
+		TEST_EXPECT(rec2.name1 == "rifle");
+		TEST_EXPECT(rec2.name2 == "patrol");
+		TEST_EXPECT(rec2.max_simultaneous == rec.max_simultaneous); // no_more_than preserved
+		props.name1 = "verylongname"; // > 7 chars -> truncated to the 8-byte slot
+		TEST_EXPECT(doc.set_entity_properties(opennova::mission::EntityKind::Item, 0, props, nullptr));
+		opennova::mission::EntityRecord rec3;
+		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, rec3));
+		TEST_EXPECT(rec3.name1.size() <= 7);
+	}
+
 	return 0;
 }

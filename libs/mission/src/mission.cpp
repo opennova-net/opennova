@@ -988,8 +988,15 @@ EntityRecord to_record(const bms::Entity &entity, EntityKind kind, size_t index)
 	out.max_attack_distance = entity.max_attack_distance;
 	out.spawn_count = entity.spawns;
 	out.max_simultaneous = entity.no_more_than;
+	out.no_less_than = entity.no_less_than;
+	out.map_symbol = entity.map_symbol;
+	out.name1 = fixed_string(entity.name1, sizeof(entity.name1));
+	out.name2 = fixed_string(entity.name2, sizeof(entity.name2));
 	return out;
 }
+
+// Defined further below; used by apply_properties for the fixed-string name fields.
+void copy_cstr(char *dest, size_t dest_size, const std::string &value);
 
 void apply_transform(bms::Entity &entity, const EntityTransform &transform) {
 	entity.set_x(transform.x);
@@ -1014,6 +1021,10 @@ void apply_properties(bms::Entity &entity, const EntityProperties &properties) {
 	entity.max_attack_distance = properties.max_attack_distance;
 	entity.spawns = static_cast<int16_t>(properties.spawn_count);
 	entity.no_more_than = static_cast<uint8_t>(properties.max_simultaneous);
+	entity.no_less_than = static_cast<uint8_t>(properties.no_less_than);
+	entity.map_symbol = static_cast<uint8_t>(properties.map_symbol);
+	copy_cstr(entity.name1, sizeof(entity.name1), properties.name1);
+	copy_cstr(entity.name2, sizeof(entity.name2), properties.name2);
 }
 
 bms::Entity make_default_entity(const bms::File &file,
@@ -1344,6 +1355,7 @@ MissionInfo MissionDocument::info() const {
 	out.environment = fixed_string(header.environment, sizeof(header.environment));
 	out.climate = static_cast<int>(header.climate);
 	out.weather = static_cast<int>(header.weather_type);
+	out.mission_type = static_cast<int>(header.mission_type);
 	out.attrib_flags = static_cast<int>(header.attrib_flags);
 	out.start_time = header.start_time;
 	out.minutes_per_day = header.minutes_per_day;
@@ -1351,7 +1363,102 @@ MissionInfo MissionDocument::info() const {
 	out.max_saves = header.max_saves;
 	out.music = static_cast<int>(header.music);
 	out.reverb = static_cast<int>(header.reverb);
+	out.wind_speed = static_cast<int>(header.wind_speed);
+	out.wind_direction = static_cast<int>(header.wind_direction);
+	out.map_zoom = header.map_zoom;
 	return out;
+}
+
+bool MissionDocument::set_header_string(const std::string &field, const std::string &value) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	bms::Header &header = impl_->file.header;
+	if (field == "mission_name") {
+		copy_cstr(header.mission_name, sizeof(header.mission_name), value);
+	} else if (field == "designer") {
+		copy_cstr(header.designer, sizeof(header.designer), value);
+	} else if (field == "briefing") {
+		copy_cstr(header.mission_briefing, sizeof(header.mission_briefing), value);
+	} else if (field == "terrain") {
+		// header.terrain[48] is three 16-byte NUL-terminated slots: terrain@+0, cnv_file@+16,
+		// tt_file@+32 (see write_mis_general_information). Write only the first slot so a terrain
+		// edit does not zero-fill (and lose) the cnv_file / tt_file references.
+		copy_cstr(header.terrain, 16, value);
+	} else if (field == "environment") {
+		copy_cstr(header.environment, sizeof(header.environment), value);
+	} else {
+		impl_->last_error = "Unknown header string field: " + field;
+		return false;
+	}
+	return true;
+}
+
+bool MissionDocument::set_header_int(const std::string &field, int value) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	bms::Header &header = impl_->file.header;
+	if (field == "climate") {
+		header.climate = static_cast<bms::ClimateType>(value);
+	} else if (field == "weather") {
+		header.weather_type = static_cast<bms::WeatherType>(value);
+	} else if (field == "mission_type") {
+		header.mission_type = static_cast<bms::MissionType>(static_cast<uint8_t>(value));
+	} else if (field == "attrib_flags") {
+		header.attrib_flags = static_cast<bms::AttribFlags>(static_cast<uint32_t>(value));
+	} else if (field == "start_time") {
+		header.start_time = static_cast<uint16_t>(value);
+	} else if (field == "minutes_per_day") {
+		header.minutes_per_day = static_cast<uint16_t>(value);
+	} else if (field == "player_health") {
+		header.health = static_cast<uint32_t>(value);
+	} else if (field == "max_saves") {
+		header.max_saves = static_cast<uint8_t>(value);
+	} else if (field == "music") {
+		header.music = static_cast<uint32_t>(value);
+	} else if (field == "reverb") {
+		header.reverb = static_cast<uint32_t>(value);
+	} else if (field == "wind_speed") {
+		header.wind_speed = static_cast<uint32_t>(value);
+	} else if (field == "wind_direction") {
+		header.wind_direction = static_cast<uint32_t>(value);
+	} else {
+		impl_->last_error = "Unknown header int field: " + field;
+		return false;
+	}
+	return true;
+}
+
+bool MissionDocument::set_header_flag(int bit, bool on) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	uint32_t flags = static_cast<uint32_t>(impl_->file.header.attrib_flags);
+	if (on) {
+		flags |= static_cast<uint32_t>(bit);
+	} else {
+		flags &= ~static_cast<uint32_t>(bit);
+	}
+	impl_->file.header.attrib_flags = static_cast<bms::AttribFlags>(flags);
+	return true;
+}
+
+bool MissionDocument::set_header_float(const std::string &field, float value) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	if (field == "map_zoom") {
+		impl_->file.header.map_zoom = value;
+	} else {
+		impl_->last_error = "Unknown header float field: " + field;
+		return false;
+	}
+	return true;
 }
 
 size_t MissionDocument::entity_count(EntityKind kind) const {

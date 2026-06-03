@@ -49,6 +49,15 @@ public:
 		WP_FLAG_DOES_NOT_LOOP = 1,
 		WP_FLAG_BLUE_TEAM = 2,
 		WP_FLAG_RED_TEAM = 4,
+		// Mirrors opennova::bms::AttribFlags. Only the game-mode / option bits the inspector
+		// surfaces are bound, so the editable flag checkboxes compose without magic numbers.
+		ATTRIB_ROTATE_MAP_180 = 0x20,
+		ATTRIB_ENABLE_NVG = 0x100000,
+		ATTRIB_COOP = 0x1000000,
+		ATTRIB_DEATHMATCH = 0x2000000,
+		ATTRIB_KING_OF_THE_HILL = 0x4000000,
+		ATTRIB_CAPTURE_THE_FLAG = 0x10000000,
+		ATTRIB_TEAM_DEATHMATCH = 0x20000000,
 	};
 
 	Error open_file(const String &path);
@@ -89,6 +98,18 @@ public:
 	// one, then writes the lot back. Returns false if (kind, index) is out of range or
 	// `property` is not a known editable name. Sets the dirty flag on success.
 	bool set_entity_property_int(int kind, int index, const String &property, int value);
+	// String counterpart for the fixed-string entity fields "name1" (AI class / iai_name) and
+	// "name2" (AI script / ai_textfile). Same seed-then-overwrite-one model as the int setter;
+	// the value is truncated to the format's 8-byte slot. Sets the dirty flag on success.
+	bool set_entity_property_string(int kind, int index, const String &property, const String &value);
+	// Set one mission-header field, mirroring MissionDocument::set_header_*. String fields:
+	// mission_name|designer|briefing|terrain|environment. Int fields: climate|weather|mission_type|
+	// attrib_flags|start_time|minutes_per_day|player_health|max_saves|music|reverb|wind_speed|wind_direction.
+	// set_header_flag toggles one ATTRIB_* bit; set_header_float takes "map_zoom". Dirty on success.
+	bool set_header_string(const String &field, const String &value);
+	bool set_header_int(const String &field, int value);
+	bool set_header_flag(int bit, bool on);
+	bool set_header_float(const String &field, float value);
 	// Place a new entity of `kind` for `item_id` (an items.def id) at `position`
 	// (mission-space x, y, z) with `rotation_deg` (pitch, yaw, roll), rounded to the
 	// int fields the format stores. The lib seeds the rest of the record with sane

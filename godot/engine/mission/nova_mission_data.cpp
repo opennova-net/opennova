@@ -47,6 +47,11 @@ void NovaMissionData::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_entity_transform", "kind", "index", "position", "rotation_deg"), &NovaMissionData::set_entity_transform);
 	ClassDB::bind_method(D_METHOD("set_entity_property_int", "kind", "index", "property", "value"), &NovaMissionData::set_entity_property_int);
+	ClassDB::bind_method(D_METHOD("set_entity_property_string", "kind", "index", "property", "value"), &NovaMissionData::set_entity_property_string);
+	ClassDB::bind_method(D_METHOD("set_header_string", "field", "value"), &NovaMissionData::set_header_string);
+	ClassDB::bind_method(D_METHOD("set_header_int", "field", "value"), &NovaMissionData::set_header_int);
+	ClassDB::bind_method(D_METHOD("set_header_flag", "bit", "on"), &NovaMissionData::set_header_flag);
+	ClassDB::bind_method(D_METHOD("set_header_float", "field", "value"), &NovaMissionData::set_header_float);
 	ClassDB::bind_method(D_METHOD("add_entity", "kind", "item_id", "position", "rotation_deg"), &NovaMissionData::add_entity);
 	ClassDB::bind_method(D_METHOD("remove_entity", "kind", "index"), &NovaMissionData::remove_entity);
 
@@ -70,6 +75,13 @@ void NovaMissionData::_bind_methods() {
 	BIND_CONSTANT(WP_FLAG_DOES_NOT_LOOP);
 	BIND_CONSTANT(WP_FLAG_BLUE_TEAM);
 	BIND_CONSTANT(WP_FLAG_RED_TEAM);
+	BIND_CONSTANT(ATTRIB_ROTATE_MAP_180);
+	BIND_CONSTANT(ATTRIB_ENABLE_NVG);
+	BIND_CONSTANT(ATTRIB_COOP);
+	BIND_CONSTANT(ATTRIB_DEATHMATCH);
+	BIND_CONSTANT(ATTRIB_KING_OF_THE_HILL);
+	BIND_CONSTANT(ATTRIB_CAPTURE_THE_FLAG);
+	BIND_CONSTANT(ATTRIB_TEAM_DEATHMATCH);
 }
 
 Error NovaMissionData::open_file(const String &path) {
@@ -146,6 +158,7 @@ Dictionary NovaMissionData::get_info() const {
 	out["environment"] = String(info.environment.c_str());
 	out["climate"] = info.climate;
 	out["weather"] = info.weather;
+	out["mission_type"] = info.mission_type;
 	out["attrib_flags"] = info.attrib_flags;
 	out["start_time"] = info.start_time;
 	out["minutes_per_day"] = info.minutes_per_day;
@@ -153,6 +166,9 @@ Dictionary NovaMissionData::get_info() const {
 	out["max_saves"] = info.max_saves;
 	out["music"] = info.music;
 	out["reverb"] = info.reverb;
+	out["wind_speed"] = info.wind_speed;
+	out["wind_direction"] = info.wind_direction;
+	out["map_zoom"] = info.map_zoom;
 	return out;
 }
 
@@ -181,7 +197,11 @@ Dictionary NovaMissionData::entity_to_dictionary(const opennova::mission::Entity
 	out["max_engagement_distance"] = record.max_engagement_distance;
 	out["max_attack_distance"] = record.max_attack_distance;
 	out["spawn_count"] = record.spawn_count;
-	out["max_simultaneous"] = record.max_simultaneous;
+	out["max_simultaneous"] = record.max_simultaneous;  // = no_more_than (byte 74)
+	out["no_less_than"] = record.no_less_than;          // byte 75
+	out["map_symbol"] = record.map_symbol;              // byte 81
+	out["name1"] = String(record.name1.c_str());        // AI class (iai_name)
+	out["name2"] = String(record.name2.c_str());        // AI script (ai_textfile)
 	return out;
 }
 
@@ -270,6 +290,10 @@ bool NovaMissionData::set_entity_property_int(int kind, int index, const String 
 	properties.max_attack_distance = record.max_attack_distance;
 	properties.spawn_count = record.spawn_count;
 	properties.max_simultaneous = record.max_simultaneous;
+	properties.no_less_than = record.no_less_than;
+	properties.map_symbol = record.map_symbol;
+	properties.name1 = record.name1;
+	properties.name2 = record.name2;
 
 	// Each name matches the entity dictionary key it edits (group -> group_id). Any name
 	// not in this set is rejected rather than silently no-op'd.
@@ -297,12 +321,96 @@ bool NovaMissionData::set_entity_property_int(int kind, int index, const String 
 		properties.spawn_count = value;
 	} else if (property == "max_simultaneous") {
 		properties.max_simultaneous = value;
+	} else if (property == "no_less_than") {
+		properties.no_less_than = value;
+	} else if (property == "map_symbol") {
+		properties.map_symbol = value;
 	} else if (property == "ai_flags") {
 		properties.ai_flags = value;
 	} else {
 		return false;
 	}
 	if (!document.set_entity_properties(native_kind, static_cast<size_t>(index), properties, nullptr)) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+bool NovaMissionData::set_entity_property_string(int kind, int index, const String &property, const String &value) {
+	if (index < 0) {
+		return false;
+	}
+	const opennova::mission::EntityKind native_kind = to_native_kind(kind);
+	opennova::mission::EntityRecord record;
+	if (!document.get_entity(native_kind, static_cast<size_t>(index), record)) {
+		return false;
+	}
+	// Seed the full property set from the record (set_entity_properties overwrites every field,
+	// including name1/name2), then change only the requested string.
+	opennova::mission::EntityProperties properties;
+	properties.group_id = record.group_id;
+	properties.waypoint_id = record.waypoint_id;
+	properties.wp_number = record.wp_number;
+	properties.team = record.team;
+	properties.ai_flags = record.ai_flags;
+	properties.perception = record.perception;
+	properties.accuracy = record.accuracy;
+	properties.alert_state = record.alert_state;
+	properties.min_engagement_distance = record.min_engagement_distance;
+	properties.max_engagement_distance = record.max_engagement_distance;
+	properties.max_attack_distance = record.max_attack_distance;
+	properties.spawn_count = record.spawn_count;
+	properties.max_simultaneous = record.max_simultaneous;
+	properties.no_less_than = record.no_less_than;
+	properties.map_symbol = record.map_symbol;
+	properties.name1 = record.name1;
+	properties.name2 = record.name2;
+
+	if (property == "name1") {
+		properties.name1 = value.utf8().get_data();
+	} else if (property == "name2") {
+		properties.name2 = value.utf8().get_data();
+	} else {
+		return false;
+	}
+	if (!document.set_entity_properties(native_kind, static_cast<size_t>(index), properties, nullptr)) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+bool NovaMissionData::set_header_string(const String &field, const String &value) {
+	if (!document.set_header_string(field.utf8().get_data(), value.utf8().get_data())) {
+		last_error = String(document.last_error().c_str());
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+bool NovaMissionData::set_header_int(const String &field, int value) {
+	if (!document.set_header_int(field.utf8().get_data(), value)) {
+		last_error = String(document.last_error().c_str());
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+bool NovaMissionData::set_header_flag(int bit, bool on) {
+	if (!document.set_header_flag(bit, on)) {
+		last_error = String(document.last_error().c_str());
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+bool NovaMissionData::set_header_float(const String &field, float value) {
+	if (!document.set_header_float(field.utf8().get_data(), value)) {
+		last_error = String(document.last_error().c_str());
 		return false;
 	}
 	modified = true;
