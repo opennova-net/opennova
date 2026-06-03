@@ -722,9 +722,9 @@ static int test_vm_intrinsic_ggrnd_in_range(void) {
 static int test_vm_intrinsic_fset(void) {
     static uint8_t code[] = {
         0x01, 0x0F,        /* push 0x0F (mask) */
-        0x05, 0x00,        /* push_ga byte_off 0 (Var00) */
+        0x05, 0x00, 0x00,  /* push_ga byte_off 0 (Var00) + reserved byte (2-byte operand) */
         0x40, 0x05,        /* method FSet (idx 5) */
-        0x0F,              /* empty -> drop the return value */
+        0x0F,              /* empty -> drain the stack */
         0x3F,              /* done */
     };
     MusSection sec;
@@ -751,8 +751,8 @@ static int test_vm_intrinsic_fset(void) {
 /* FClear clears bits. Var00 starts at 0xFF, FClear with mask 0x0F leaves 0xF0. */
 static int test_vm_intrinsic_fclear(void) {
     static uint8_t code[] = {
-        0x01, 0xFF, 0x05, 0x00, 0x40, 0x05, 0x0F,   /* FSet 0xFF -> Var00 = 0xFF */
-        0x01, 0x0F, 0x05, 0x00, 0x40, 0x06, 0x0F,   /* FClear 0x0F -> Var00 = 0xF0 */
+        0x01, 0xFF, 0x05, 0x00, 0x00, 0x40, 0x05, 0x0F,   /* FSet 0xFF -> Var00 = 0xFF */
+        0x01, 0x0F, 0x05, 0x00, 0x00, 0x40, 0x06, 0x0F,   /* FClear 0x0F -> Var00 = 0xF0 */
         0x3F,
     };
     MusSection sec;
@@ -780,12 +780,12 @@ static int test_vm_intrinsic_fclear(void) {
 static int test_vm_intrinsic_fisset(void) {
     static uint8_t code[] = {
         /* Var00 = 0x0F via FSet */
-        0x01, 0x0F, 0x05, 0x00, 0x40, 0x05, 0x0F,
+        0x01, 0x0F, 0x05, 0x00, 0x00, 0x40, 0x05, 0x0F,
         /* result1 = FIsSet(0x03, &Var00) -> all bits 0x03 set in 0x0F? yes -> -1 */
-        0x01, 0x03, 0x05, 0x00, 0x40, 0x07, 0x08, 0x04,
+        0x01, 0x03, 0x05, 0x00, 0x00, 0x40, 0x07, 0x08, 0x04,
                                                     /* pop_g Var01 */
         /* result2 = FIsSet(0x10, &Var00) -> 0x10 not in 0x0F -> 0 */
-        0x01, 0x10, 0x05, 0x00, 0x40, 0x07, 0x08, 0x08,
+        0x01, 0x10, 0x05, 0x00, 0x00, 0x40, 0x07, 0x08, 0x08,
                                                     /* pop_g Var02 */
         0x3F,
     };
@@ -813,13 +813,17 @@ static int test_vm_intrinsic_fisset(void) {
     return 1;
 }
 
-/* FIsClear (idx 8) is the silent no-op stub (witnessed: NULL handler -> push 0). */
-static int test_vm_intrinsic_fisclear_stub(void) {
+/* FIsClear (idx 8) is a real bound handler in Jointops (AudioVM_Intrinsic_FIsClear
+   @ 0x6723C0): returns -1 when NONE of the mask bits are set in *var, else 0 -- the
+   inverse of FIsSet. */
+static int test_vm_intrinsic_fisclear(void) {
     static uint8_t code[] = {
-        /* method FIsClear(...) -> dispatches to intrinsic_unbound which pushes 0 */
-        0x01, 0x05,         /* push 5 (any garbage TOS) */
-        0x40, 0x08,         /* method FIsClear (idx 8) -> push 0 */
-        0x08, 0x00,         /* pop_g Var00 -> Var00 = 0 */
+        /* Var00 = 0x0F via FSet (empty drains the return value) */
+        0x01, 0x0F, 0x05, 0x00, 0x00, 0x40, 0x05, 0x0F,
+        /* result1 = FIsClear(0x10, &Var00) -> 0x10 not in 0x0F -> none set -> -1 */
+        0x01, 0x10, 0x05, 0x00, 0x00, 0x40, 0x08, 0x08, 0x04,  /* pop_g Var01 */
+        /* result2 = FIsClear(0x03, &Var00) -> 0x03 bits ARE set -> 0 */
+        0x01, 0x03, 0x05, 0x00, 0x00, 0x40, 0x08, 0x08, 0x08,  /* pop_g Var02 */
         0x3F,
     };
     MusSection sec;
@@ -835,13 +839,12 @@ static int test_vm_intrinsic_fisclear_stub(void) {
     s.entry_section_index = 0; s.globals_size = MUS_GLOBALS_BYTES;
 
     MusVM *vm = mus_vm_create();
-    mus_vm_set_var(vm, 0, 99);   /* sentinel */
-    mus_vm_load_script(vm, &s);  /* load resets Var00 to 0 */
-    /* Re-set Var00 = 99 after load to verify pop_g overrides it. */
-    mus_vm_set_var(vm, 0, 99);
+    mus_vm_load_script(vm, &s);
     mus_vm_start(vm);
     mus_vm_tick(vm, 16);
-    CHECK(mus_vm_get_var(vm, 0) == 0, "FIsClear stub pushed 0; pop_g wrote 0");
+    mus_vm_tick(vm, 16);
+    CHECK(mus_vm_get_var(vm, 1) == -1, "FIsClear(0x10) over 0x0F = -1 (bits clear)");
+    CHECK(mus_vm_get_var(vm, 2) == 0,  "FIsClear(0x03) over 0x0F = 0 (bits set)");
     mus_vm_destroy(vm);
     return 1;
 }
@@ -1265,7 +1268,7 @@ int main(void) {
     RUN_TEST(test_vm_intrinsic_fset);
     RUN_TEST(test_vm_intrinsic_fclear);
     RUN_TEST(test_vm_intrinsic_fisset);
-    RUN_TEST(test_vm_intrinsic_fisclear_stub);
+    RUN_TEST(test_vm_intrinsic_fisclear);
     /* E9 */
     RUN_TEST(test_vm_intrinsic_gecho_fires_hook);
     RUN_TEST(test_vm_intrinsic_tstart_tstop_noop);

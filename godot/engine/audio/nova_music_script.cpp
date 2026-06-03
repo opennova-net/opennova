@@ -1,5 +1,5 @@
 // MUS interactive-music script wrapper. The underlying parser is libs/mus
-// (mus_open_memory). Witnessed: dfvas!AudioVM_LoadScriptFile @ 0x00557A60.
+// (mus_open_memory). Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
 
 #include "nova_music_script.h"
 

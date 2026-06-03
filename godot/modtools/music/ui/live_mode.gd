@@ -239,8 +239,8 @@ func _on_variable_changed(var_index: int, value: int) -> void:
 
 
 func _on_volume_changed(left: int, right: int) -> void:
-	# GSV/GSDV emit 16.16 fixed-point ints (witnessed: dfvas!Intrinsic_GSV @
-	# 0x5578B0). Render as decimal so logs read as `volume L=200.00 R=200.00`
+	# GSV/GSDV emit 16.16 fixed-point ints (witnessed: Jointops.exe!Intrinsic_GSV @
+	# 0x6720E0). Render as decimal so logs read as `volume L=200.00 R=200.00`
 	# instead of the raw `L=13107200`.
 	_log("volume L=%.2f R=%.2f" % [left / 65536.0, right / 65536.0])
 

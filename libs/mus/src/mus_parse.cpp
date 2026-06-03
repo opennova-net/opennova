@@ -1,7 +1,7 @@
 /* MUS container parser implementation.
 
-   SCR0 file header parser at dfvas!AudioVM_LoadScriptFile @ 0x00557A60.
-   MU01 chunk relocator at dfvas!AudioVM_RelocateChunk @ 0x00557BA0. */
+   SCR0 file header parser at Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
+   MU01 chunk relocator at Jointops.exe!AudioVM_RelocateChunk @ 0x00672470. */
 
 #include "mus/mus.h"
 
@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Witnessed: dfvas!AudioVM_LoadScriptFile @ 0x00557A60 (magic check at 0x557acf).
+/* Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20 (magic check at 0x557acf).
    Engine itself only validates the SCR0 magic; we additionally bound the chunk
    count to a sane limit so a corrupt file does not provoke a runaway alloc. */
 extern "C" int mus_validate(const uint8_t *data, size_t size) {
@@ -134,7 +134,7 @@ static void parse_debug_export(const uint8_t *data, size_t size,
     }
 }
 
-/* Witnessed: dfvas!AudioVM_RelocateChunk @ 0x00557BA0 (chunk-pointer fixup at
+/* Witnessed: Jointops.exe!AudioVM_RelocateChunk @ 0x00672470 (chunk-pointer fixup at
    0x557b0a, per-chunk relocate at 0x557b0c). Reads one MU01 chunk into the
    parsed MusScript form. `chunk_off` is the file offset of the MU01 header. */
 static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
@@ -204,7 +204,7 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
     return 0;
 }
 
-/* Witnessed: dfvas!AudioVM_LoadScriptFile @ 0x00557A60.
+/* Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
    Memory-mode parser. Walks SCR0 header, reads chunk pointer table, parses
    each MU01 chunk into a MusScript, and copies the file-level intrinsic name
    table out of its Pascal-style strings blob. */
@@ -275,7 +275,7 @@ extern "C" int mus_open_memory(MusFile *out, const uint8_t *data, size_t size) {
     return 0;
 }
 
-/* Witnessed: dfvas!AudioVM_LoadScriptFile @ 0x00557A60 (CreateFile + ReadFile
+/* Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20 (CreateFile + ReadFile
    slurp at the head of the function). The engine reads the whole file into RAM
    before relocation; we mirror that by slurp + delegate. */
 extern "C" int mus_open(MusFile *out, const char *path) {

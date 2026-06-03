@@ -4,7 +4,7 @@
    (the same format the decompiler emits, line-for-line compatible with the
    on-godot-oscarmike Python reference), parses the top-level declarations,
    and emits SCR0/MU01-shaped bytecode that the engine VM (witnessed at
-   `dfvas!AudioVM_LoadScriptFile @ 0x00557A60`) accepts.
+   `Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20`) accepts.
 
    Phase D scope: produce bytecode that round-trips through
    `decompile(compile(decompile(x))) == decompile(x)` against the
@@ -933,8 +933,8 @@ int Compiler::parse_stmt(const char **err) {
         }
         /* Emit tablexec opcode + 4 header bytes: count, inner_op, entry_size,
            skip_size. skip_size is the TOTAL encoded instruction length
-           (1 opcode + 4 header + count*entry_size body); dfvas's
-           VmOp_TableExec @ 0x558420 reads it as `add esi, skip; dec esi` to
+           (1 opcode + 4 header + count*entry_size body); Jointops.exe's
+           VmOp_TableExec @ 0x672BB0 reads it as `add esi, skip; dec esi` to
            land the next opcode, so an incorrect (or zero) value scrambles
            the dispatcher on out-of-range indices. Witnessed: jo_gamemus
            tablexec @ 0x00c8 has size=3, entry_stride=2 → skip_size = 0x0b. */

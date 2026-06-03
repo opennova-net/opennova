@@ -232,6 +232,11 @@ target_compile_definitions(mus_vm_test PRIVATE
 add_test(NAME mus_vm COMMAND mus_vm_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(mus_vm_fixes_test mus/mus_vm_fixes_test.cpp)
+target_link_libraries(mus_vm_fixes_test PRIVATE opennova_mus)
+target_include_directories(mus_vm_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mus_vm_fixes COMMAND mus_vm_fixes_test)
+
 # VFS tests (mount precedence, mount_game expansion override, SCR decode-on-read)
 add_executable(vfs_test vfs/vfs_test.cpp)
 target_link_libraries(vfs_test PRIVATE opennova_vfs opennova_pff)
