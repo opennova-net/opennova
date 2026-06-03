@@ -6,6 +6,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include "fnt/nova_fnt_resource.h"
+#include "util/nova_data_format.h"
 #include "util/texture_path_resolver.h"
 
 namespace godot {
@@ -18,13 +19,10 @@ inline Ref<Resource> load_font_path(const String &p_path) {
 		return Ref<Resource>();
 	}
 
-	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ);
-	if (file.is_null()) {
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(p_path, bytes)) {
 		return Ref<Resource>();
 	}
-
-	PackedByteArray bytes = file->get_buffer(file->get_length());
-	file->close();
 
 	Ref<NovaFntResource> font;
 	font.instantiate();

@@ -5,8 +5,8 @@
 
 #include "nova_sbf_bank.h"
 #include "nova_sbf_audio_stream.h"
+#include "util/nova_data_format.h"
 
-#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -57,14 +57,10 @@ void NovaSbfBank::load_from_path(const String &p_path) {
 	source_path = p_path;
 	_file_bytes = PackedByteArray();
 
-	// Read whole file via Godot VFS so PFF mounts and other custom layers work.
-	Ref<FileAccess> fa = FileAccess::open(p_path, FileAccess::READ);
-	if (fa.is_null()) {
+	if (!read_nova_payload_file(p_path, _file_bytes)) {
 		UtilityFunctions::printerr("NovaSbfBank: could not open ", p_path);
 		return;
 	}
-	_file_bytes = fa->get_buffer(fa->get_length());
-	fa.unref();
 
 	if (_file_bytes.size() <= 0) {
 		UtilityFunctions::printerr("NovaSbfBank: empty file ", p_path);
@@ -132,6 +128,23 @@ const SbfRawEntry *NovaSbfBank::raw_entry_at(int p_index) const {
 		return nullptr;
 	}
 	return &_arc.entries[p_index];
+}
+
+bool NovaSbfBank::read_file_block(uint64_t p_offset, uint32_t p_size, PackedByteArray &r_block) const {
+	r_block = PackedByteArray();
+	if (p_size == 0) {
+		return true;
+	}
+	if (p_offset > static_cast<uint64_t>(_file_bytes.size())) {
+		return false;
+	}
+	const uint64_t available = static_cast<uint64_t>(_file_bytes.size()) - p_offset;
+	if (static_cast<uint64_t>(p_size) > available) {
+		return false;
+	}
+	r_block.resize(static_cast<int64_t>(p_size));
+	std::memcpy(r_block.ptrw(), _file_bytes.ptr() + p_offset, p_size);
+	return true;
 }
 
 Ref<NovaSbfAudioStream> NovaSbfBank::get_stream(const StringName &p_name) {

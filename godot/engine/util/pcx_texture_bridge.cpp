@@ -1,5 +1,7 @@
 #include "pcx_texture_bridge.h"
 
+#include "util/nova_data_format.h"
+
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 
@@ -47,13 +49,10 @@ godot::Ref<godot::Image> make_rgb_image(const IndexedImage8 &image) {
 }
 
 bool load_pcx_bytes(const godot::String &path, std::vector<uint8_t> &bytes) {
-	godot::Ref<godot::FileAccess> file = godot::FileAccess::open(path, godot::FileAccess::READ);
-	if (file.is_null()) {
+	godot::PackedByteArray packed;
+	if (!godot::read_nova_payload_file(path, packed)) {
 		return false;
 	}
-
-	const godot::PackedByteArray packed = file->get_buffer(file->get_length());
-	file.unref();
 
 	bytes.resize(static_cast<size_t>(packed.size()));
 	if (!bytes.empty()) {

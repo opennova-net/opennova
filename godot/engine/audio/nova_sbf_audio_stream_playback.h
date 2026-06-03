@@ -3,7 +3,6 @@
 
 #include <godot_cpp/classes/audio_frame.hpp>
 #include <godot_cpp/classes/audio_stream_playback.hpp>
-#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/variant.hpp>
 
@@ -13,9 +12,8 @@
 
 namespace godot {
 
-// Streaming playback for a single SBF entry. Each instance owns its own
-// FileAccess (opened in _start) so multiple players can seek independently
-// against the same bank.
+// Streaming playback for a single SBF entry. Chunk reads come from the bank's
+// decoded in-memory bytes so loose SCR-wrapped banks play the same as plaintext.
 //
 // Hot path: _mix walks the requested frame_count one frame at a time, lazy
 // loading the next chunk when the playhead crosses a chunk boundary. One
@@ -47,7 +45,6 @@ private:
 
 	Ref<NovaSbfBank> _bank;
 	int _entry_index = -1;
-	Ref<FileAccess> _file;
 	bool _playing = false;
 	int _current_chunk = -1;
 	int16_t _decoded[SBF_CHUNK_AUDIO];

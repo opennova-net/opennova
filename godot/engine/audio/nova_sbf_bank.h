@@ -45,6 +45,7 @@ public:
 	// Raw source bytes held in memory from load_from_path (kept for
 	// sbf_open_memory lifetime). Used by the saver for raw passthrough.
 	PackedByteArray get_raw_file_bytes() const { return _file_bytes; }
+	bool read_file_block(uint64_t p_offset, uint32_t p_size, PackedByteArray &r_block) const;
 
 	// Editor mutation API (Phase D / SBF F2). Replaces the audio for an entry
 	// with int16-equivalent floats in [-1, 1]. Marks bank dirty so the saver

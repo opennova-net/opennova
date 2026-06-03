@@ -1,6 +1,7 @@
 #include "nova_item_database.h"
 
 #include "resource_index/nova_resource_root.h"
+#include "util/nova_data_format.h"
 
 #include <def/def.h>
 
@@ -43,9 +44,15 @@ Error NovaItemDatabase::load(const String &path) {
 	last_error = String();
 	items.clear();
 
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(path, bytes)) {
+		last_error = String("Cannot open item database: ") + path;
+		return ERR_CANT_OPEN;
+	}
+
 	DefItemsFile file = {};
-	if (def_parse_items(path.utf8().get_data(), &file) != 0) {
-		last_error = String("def_parse_items failed for ") + path;
+	if (def_parse_items_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &file) != 0) {
+		last_error = String("def_parse_items_memory failed for ") + path;
 		return ERR_CANT_OPEN;
 	}
 
