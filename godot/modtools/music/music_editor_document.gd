@@ -18,6 +18,7 @@ var _script_dirty: bool = false
 # Cached compiled output for Script mode (Live VM runs against this)
 var _compiled_script_text: String = ""
 var _compiled_bytecode: PackedByteArray = PackedByteArray()
+var _compiled_file_bytes: PackedByteArray = PackedByteArray()
 
 # Per-mode undo stacks. Bank-side commands (reorder, rename) push do/undo
 # pairs onto _bank_history; Script-side commands will land in Phase F.
@@ -74,6 +75,7 @@ func set_script_text(_script_name: StringName, text: String) -> void:
 		return
 	_compiled_script_text = text
 	_compiled_bytecode = PackedByteArray()
+	_compiled_file_bytes = PackedByteArray()
 	_set_script_dirty(true)
 
 
@@ -104,6 +106,7 @@ func compile_script() -> Array:
 	# pre-F4 stub state).
 	if not mus_script.has_method("compile_text"):
 		_compiled_bytecode = PackedByteArray()
+		_compiled_file_bytes = PackedByteArray()
 		compile_finished.emit(true, [])
 		return []
 	var d: Dictionary = mus_script.compile_text(_compiled_script_text)
@@ -117,7 +120,22 @@ func compile_script() -> Array:
 		compile_finished.emit(false, errs)
 		return errs
 	_compiled_bytecode = d.get("bytecode", PackedByteArray())
+	_compiled_file_bytes = d.get("file_bytes", PackedByteArray())
+	if _compiled_file_bytes.size() > 0 and mus_script.has_method("set_compiled_file_bytes"):
+		mus_script.set_compiled_file_bytes(_compiled_file_bytes)
+	elif _compiled_bytecode.size() > 0 and mus_script.has_method("set_compiled_bytecode"):
+		mus_script.set_compiled_bytecode(_compiled_bytecode)
 	compile_finished.emit(true, [])
+	return []
+
+
+func prepare_script_for_run() -> Array:
+	if not script_loaded():
+		var no_script: Array = [{"line": 0, "col": 0, "message": "no script loaded"}]
+		compile_finished.emit(false, no_script)
+		return no_script
+	if _script_dirty:
+		return compile_script()
 	return []
 
 
@@ -142,6 +160,9 @@ func open_script(path: String) -> int:
 		return ERR_CANT_OPEN
 	mus_script = res
 	script_path = path
+	_compiled_script_text = ""
+	_compiled_bytecode = PackedByteArray()
+	_compiled_file_bytes = PackedByteArray()
 	_set_script_dirty(false)
 	changed.emit()
 	return OK
@@ -154,6 +175,7 @@ func close_pair() -> void:
 	script_path = ""
 	_compiled_script_text = ""
 	_compiled_bytecode = PackedByteArray()
+	_compiled_file_bytes = PackedByteArray()
 	_set_bank_dirty(false)
 	_set_script_dirty(false)
 	changed.emit()
@@ -194,12 +216,16 @@ func save_to_disk() -> int:
 	# without touching disk; the error popout in script_mode listens to the
 	# compile_finished signal that compile_script() emits.
 	if _script_dirty and script_loaded():
-		var errs: Array = compile_script()
+		var errs: Array = prepare_script_for_run()
 		if errs.size() > 0:
 			return ERR_COMPILATION_FAILED
-		if mus_script.has_method("set_compiled_bytecode"):
-			mus_script.set_compiled_bytecode(_compiled_bytecode)
 	return _save_resources()
+
+
+func get_var_profile_path() -> String:
+	if script_path == "":
+		return ""
+	return script_path.get_basename() + ".music_profile.json"
 
 
 func _save_resources() -> int:

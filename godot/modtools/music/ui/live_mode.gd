@@ -156,6 +156,9 @@ func _process(_delta: float) -> void:
 		# now-playing clears on stop/halt, so refresh them on every transition.
 		_refresh_graph()
 		_refresh_now_playing()
+	if state == VM_RUNNING or state == VM_PAUSED:
+		if _var_inspector != null and _var_inspector.has_method("refresh_from_director"):
+			_var_inspector.call("refresh_from_director")
 
 
 func _on_start() -> void:
@@ -165,6 +168,11 @@ func _on_start() -> void:
 		# already looking after pressing Start.
 		_flash_start_warning("Load a project first")
 		return
+	if _document.has_method("prepare_script_for_run"):
+		var errs: Array = _document.prepare_script_for_run()
+		if errs.size() > 0:
+			_flash_start_warning("Fix script errors first")
+			return
 	_director.bank = _document.bank
 	_director.load_mus_script(_document.mus_script)
 	_refresh_var_labels()
@@ -192,9 +200,18 @@ func _refresh_var_labels() -> void:
 	if _var_inspector == null or not _var_inspector.has_method("set_script_name"):
 		return
 	var script_name: String = ""
+	var profile_path: String = ""
 	if _document != null and _document.script_loaded():
 		script_name = String(_document.mus_script.get_default_script_name())
+		if _document.has_method("get_var_profile_path"):
+			profile_path = _document.get_var_profile_path()
+	if _var_inspector.has_method("set_profile_path"):
+		_var_inspector.call("set_profile_path", profile_path)
 	_var_inspector.call("set_script_name", script_name)
+
+
+func start_from_script_mode() -> void:
+	_on_start()
 
 
 func _on_pause() -> void:

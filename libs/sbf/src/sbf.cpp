@@ -22,6 +22,7 @@ extern "C" int sbf_validate(const uint8_t *data, size_t size) {
     SbfHeader h;
     memcpy(&h, data, SBF_HEADER_SIZE);
     if (h.magic != SBF_MAGIC) return -2;
+    if (h.flags > 2) return -5;
     if (h.index_offset != SBF_HEADER_SIZE) return -3;
     if (size > SBF_HEADER_SIZE
         && (uint64_t)h.entry_count * SBF_ENTRY_SIZE > size - SBF_HEADER_SIZE) {
@@ -316,7 +317,7 @@ extern "C" int sbf_encode_file(const char * const *names, uint32_t n,
         e.data_offset   = (uint32_t)cursor;
         e.total_size    = (uint32_t)bufs[i].size;
         e.block_size    = SBF_CHUNK_TOTAL;
-        e.total_samples = (uint32_t)counts[i];
+        e.sample_length_hint = 0;
         memcpy(out + SBF_HEADER_SIZE + (size_t)i * SBF_ENTRY_SIZE, &e, SBF_ENTRY_SIZE);
         memcpy(out + cursor, bufs[i].bytes, bufs[i].size);
         cursor += bufs[i].size;

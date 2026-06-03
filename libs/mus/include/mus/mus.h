@@ -74,7 +74,7 @@ static_assert(sizeof(MusChunkHeader) == 72, "MusChunkHeader must be 72 bytes");
 
 typedef struct MusSection {
     char     name[MUS_SECTION_NAME_SIZE]; /* from debug export table or "Section_N" */
-    uint32_t code_offset;                 /* chunk-relative bytecode PC */
+    uint32_t code_offset;                 /* bytecode-relative PC after parse */
 } MusSection;
 
 /* Named global variable declared in the editor-only debug section. The runtime
@@ -261,12 +261,12 @@ void mus_vm_stop  (MusVM *vm);
 void mus_vm_pause (MusVM *vm);
 void mus_vm_resume(MusVM *vm);
 
-/* Advance bytecode for up to one tick. Runs the dispatch loop until any of
-   the witnessed halt conditions fire (play/playw/done/setstate, 32-instruction
-   budget exhaustion, pc out of bounds, error). dt_ms is currently informational
-   (returned to the host) and reserved for future timer support; the budget is
-   per-call, not time-based. Returns the dt_ms argument on success, 0 if the VM
-   is not RUNNING. */
+/* Advance bytecode for one VM tick. The witnessed dispatch loop spends a
+   32-instruction budget, then continues only while the data stack is not
+   drained; halt opcodes (play/playw/done/setstate), pc out of bounds, and
+   errors still stop earlier. dt_ms is currently informational (returned to
+   the host) and reserved for future timer support. Returns the dt_ms argument
+   on success, 0 if the VM is not RUNNING. */
 int mus_vm_tick(MusVM *vm, uint32_t dt_ms);
 
 /* State accessors. */

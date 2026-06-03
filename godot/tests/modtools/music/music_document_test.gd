@@ -118,6 +118,22 @@ func test_add_track_grows_count_and_marks_dirty():
 	assert_eq(entries[before]["name"], "NEWTRACK")
 
 
+func test_compile_script_replaces_in_memory_script_before_save():
+	var doc = MusicEditorDocument.new()
+	var err := doc.open_script(SCRIPT_FIXTURE)
+	assert_eq(err, OK, "open_script succeeded")
+	var src := "script customscript\nsection Begin\n{\n  Var00 = 42\n  done\n}\n"
+	doc.set_script_text(&"gamescript", src)
+	var errors: Array = doc.compile_script()
+	assert_eq(errors.size(), 0, "compile succeeds")
+	assert_eq(doc.mus_script.get_default_script_name(), "customscript",
+		"compiled script name is applied immediately, before save")
+	var sections: PackedStringArray = doc.mus_script.get_section_names(&"customscript")
+	assert_eq(sections.size(), 1, "compiled section table replaces the fixture table")
+	assert_eq(String(sections[0]), "Begin")
+	assert_true(doc._script_dirty, "compile updates runnable resource but save still owns persistence")
+
+
 func test_undo_redo_reorder():
 	var doc = MusicEditorDocument.new()
 	doc.open_pair(_copy_temp_pair())
@@ -169,4 +185,3 @@ func _remove_user_file(path: String) -> void:
 	var abs := ProjectSettings.globalize_path(path)
 	if FileAccess.file_exists(abs):
 		DirAccess.remove_absolute(abs)
-

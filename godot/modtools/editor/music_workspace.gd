@@ -347,6 +347,9 @@ func mount_viewport(host: Control) -> void:
 			_root.get_parent().remove_child(_root)
 		host.add_child(_root)
 	_root.bind_document(_document)
+	if _root.has_signal("workflow_requested"):
+		if not _root.workflow_requested.is_connected(activate_workflow):
+			_root.workflow_requested.connect(activate_workflow)
 	_root.set_active_workflow(_active_workflow)
 
 

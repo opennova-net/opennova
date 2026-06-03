@@ -105,7 +105,8 @@ static int test_encode_file_minimal(void) {
     CHECK(arc.header.flags == 1, "header flags = byte-paired stereo");
     CHECK(strncmp(arc.entries[0].name, "TEST001", 7) == 0, "name");
     CHECK(arc.entries[0].block_size == SBF_CHUNK_TOTAL, "block size");
-    CHECK(arc.entries[0].total_samples == 4096, "total_samples = caller count");
+    CHECK(arc.entries[0].sample_length_hint == 0,
+          "sample_length_hint is an engine scheduler field, not caller sample count");
     sbf_close(&arc);
     sbf_free(buf);
     return 1;

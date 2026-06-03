@@ -97,8 +97,16 @@ const META := {
 
 # Returns "Friendly (VarXX)" when a friendly name is known, else "VarXX".
 # script_name: the MU01 chunk's name (e.g. "menuscript"). Empty string for
-# unknown scripts falls through to the raw VarXX form.
-static func label_for(script_name: String, var_index: int) -> String:
+# unknown scripts falls through to the raw VarXX form. profile_path is an
+# optional editor sidecar for user-authored scripts whose VarXX roles are
+# outside the built-in gamescript/menuscript tables.
+static func label_for(script_name: String, var_index: int, profile_path: String = "") -> String:
+	var profile_vars := _profile_vars(script_name, profile_path)
+	if profile_vars.has(var_index):
+		var entry: Dictionary = profile_vars[var_index]
+		var label := String(entry.get("label", ""))
+		if label != "":
+			return "%s (Var%02d)" % [label, var_index]
 	if KNOWN.has(script_name):
 		var per_script: Dictionary = KNOWN[script_name]
 		if per_script.has(var_index):
@@ -115,7 +123,12 @@ static func has_friendly_names(script_name: String) -> bool:
 
 # Returns the control descriptor for (script, var_index), or {} when none is
 # registered (the caller then renders a plain full-range int32 SpinBox).
-static func meta_for(script_name: String, var_index: int) -> Dictionary:
+static func meta_for(script_name: String, var_index: int, profile_path: String = "") -> Dictionary:
+	var profile_vars := _profile_vars(script_name, profile_path)
+	if profile_vars.has(var_index):
+		var entry: Dictionary = (profile_vars[var_index] as Dictionary).duplicate(true)
+		entry.erase("label")
+		return entry
 	if META.has(script_name):
 		var per_script: Dictionary = META[script_name]
 		if per_script.has(var_index):
@@ -126,9 +139,43 @@ static func meta_for(script_name: String, var_index: int) -> Dictionary:
 # Sorted list of the var indices that have a friendly name for this script, so
 # the inspector can render the handful that matter first. Empty for unknown
 # scripts (user-authored), which then render every slot in raw order.
-static func known_indices(script_name: String) -> Array:
+static func known_indices(script_name: String, profile_path: String = "") -> Array:
+	var profile_vars := _profile_vars(script_name, profile_path)
+	if not profile_vars.is_empty():
+		var profile_keys: Array = profile_vars.keys()
+		profile_keys.sort()
+		return profile_keys
 	if not KNOWN.has(script_name):
 		return []
 	var keys: Array = (KNOWN[script_name] as Dictionary).keys()
 	keys.sort()
 	return keys
+
+
+static func _profile_vars(script_name: String, profile_path: String) -> Dictionary:
+	if profile_path == "" or not FileAccess.file_exists(profile_path):
+		return {}
+	var f := FileAccess.open(profile_path, FileAccess.READ)
+	if f == null:
+		return {}
+	var parsed = JSON.parse_string(f.get_as_text())
+	if not (parsed is Dictionary):
+		return {}
+	var profile: Dictionary = parsed
+	var profile_script := String(profile.get("script_name", ""))
+	if profile_script != "" and profile_script != script_name:
+		return {}
+	if not (profile.get("vars", null) is Dictionary):
+		return {}
+	var raw_vars: Dictionary = profile["vars"]
+	var out := {}
+	for raw_key in raw_vars.keys():
+		var key_str := String(raw_key)
+		if not key_str.is_valid_int():
+			continue
+		var idx := int(key_str)
+		if idx < 0 or idx > 16:
+			continue
+		if raw_vars[raw_key] is Dictionary:
+			out[idx] = (raw_vars[raw_key] as Dictionary).duplicate(true)
+	return out
