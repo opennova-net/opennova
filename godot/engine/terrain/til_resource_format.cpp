@@ -1,6 +1,7 @@
 #include "til_resource_format.h"
 
 #include "nova_terrain_tile_info.h"
+#include "util/nova_data_format.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
@@ -33,13 +34,10 @@ String ResourceFormatLoaderTIL::_get_resource_type(const String &p_path) const {
 
 Variant ResourceFormatLoaderTIL::_load(const String &p_path, const String &p_original_path,
                                        bool p_use_sub_threads, int32_t p_cache_mode) const {
-	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ);
-	if (file.is_null()) {
+	PackedByteArray packed;
+	if (!read_nova_payload_file(p_path, packed)) {
 		return Variant();
 	}
-
-	const PackedByteArray packed = file->get_buffer(file->get_length());
-	file.unref();
 
 	std::vector<uint8_t> bytes(static_cast<size_t>(packed.size()));
 	if (!bytes.empty()) {

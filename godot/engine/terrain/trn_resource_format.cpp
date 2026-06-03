@@ -1,5 +1,6 @@
 #include "trn_resource_format.h"
 #include "nova_terrain_data.h"
+#include "util/nova_data_format.h"
 #include "util/texture_path_resolver.h"
 
 #include <godot_cpp/classes/file_access.hpp>
@@ -33,11 +34,9 @@ String ResourceFormatLoaderTRN::_get_resource_type(const String &p_path) const {
 PackedStringArray ResourceFormatLoaderTRN::_get_dependencies(const String &p_path, bool p_add_types) const {
 	PackedStringArray deps;
 
-	Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::READ);
-	if (f.is_null()) return deps;
-
-	std::string content = f->get_as_text().utf8().get_data();
-	f.unref();
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(p_path, bytes)) return deps;
+	std::string content(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
 
 	opennova::TrnConfig trn;
 	std::string error;

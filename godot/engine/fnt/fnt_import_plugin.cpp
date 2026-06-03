@@ -1,8 +1,8 @@
 #include "fnt/fnt_import_plugin.h"
 
 #include "fnt/nova_fnt_resource.h"
+#include "util/nova_data_format.h"
 
-#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/resource_saver.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -58,14 +58,10 @@ bool NovaFntImportPlugin::_get_option_visibility(const String &p_path, const Str
 }
 
 Error NovaFntImportPlugin::_import(const String &p_source_file, const String &p_save_path, const Dictionary &p_options, const TypedArray<String> &p_platform_variants, const TypedArray<String> &p_gen_files) const {
-	Ref<FileAccess> file = FileAccess::open(p_source_file, FileAccess::READ);
-	if (!file.is_valid()) {
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(p_source_file, bytes)) {
 		return ERR_FILE_CANT_OPEN;
 	}
-
-	const int64_t length = file->get_length();
-	PackedByteArray bytes = file->get_buffer(length);
-	file->close();
 
 	if (bytes.size() < 4 || bytes[0] != 'F' || bytes[1] != 'N' || bytes[2] != 'T' || bytes[3] != '0') {
 		return ERR_FILE_UNRECOGNIZED;

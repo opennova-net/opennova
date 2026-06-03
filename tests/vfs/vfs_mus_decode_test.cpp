@@ -15,6 +15,7 @@
 
 namespace {
 
+constexpr uint32_t kScrKeyDefault = 0xABEEFACEu;
 constexpr uint32_t kScrKeyJoDfx2 = 0x2A5A8EADu;
 
 uint32_t rol32(uint32_t value, int shift) {
@@ -49,6 +50,14 @@ std::vector<uint8_t> headerless_mus_ciphertext(const std::vector<uint8_t> &plain
     return out;
 }
 
+std::vector<uint8_t> scr_wrap_default_key(const std::vector<uint8_t> &plain) {
+    std::vector<uint8_t> payload = plain;
+    xor_scr_keystream(payload, kScrKeyDefault);
+    std::vector<uint8_t> out = {'S', 'C', 'R', 0};
+    out.insert(out.end(), payload.rbegin(), payload.rend());
+    return out;
+}
+
 } // namespace
 
 int main() {
@@ -67,6 +76,11 @@ int main() {
     const std::vector<uint8_t> headerless_original = headerless;
     TEST_EXPECT(opennova::vfs_decode_payload(headerless));
     TEST_EXPECT(headerless == headerless_original);
+
+    const std::vector<uint8_t> arbitrary_plain = {'I', 'T', 'E', 'M', 'S', '.', 'D', 'E', 'F', '\n'};
+    std::vector<uint8_t> wrapped = scr_wrap_default_key(arbitrary_plain);
+    TEST_EXPECT(opennova::vfs_decode_payload(wrapped));
+    TEST_EXPECT(wrapped == arbitrary_plain);
 
     std::printf("vfs_mus_decode_test OK\n");
     return 0;

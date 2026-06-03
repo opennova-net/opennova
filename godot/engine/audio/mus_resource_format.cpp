@@ -9,16 +9,14 @@
 #include "mus_resource_format.h"
 
 #include "nova_music_script.h"
+#include "util/nova_data_format.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "mus/mus.h"
-#include "vfs/vfs_decode.h"
 
 #include <cstdint>
-#include <cstring>
-#include <vector>
 
 using namespace godot;
 
@@ -36,22 +34,6 @@ static bool peek_is_scr0(const uint8_t *bytes, int64_t size) {
 	return size >= 4 && bytes[0] == 'S' && bytes[1] == 'C' && bytes[2] == 'R' && bytes[3] == '0';
 }
 
-static bool decode_payload(PackedByteArray &bytes) {
-	std::vector<uint8_t> data;
-	data.resize((size_t)bytes.size());
-	if (!data.empty()) {
-		memcpy(data.data(), bytes.ptr(), data.size());
-	}
-	if (!opennova::vfs_decode_payload(data)) {
-		return false;
-	}
-	bytes.resize((int64_t)data.size());
-	if (!data.empty()) {
-		memcpy(bytes.ptrw(), data.data(), data.size());
-	}
-	return true;
-}
-
 static bool is_plain_mus(const PackedByteArray &bytes) {
 	return peek_is_scr0(bytes.ptr(), bytes.size()) && mus_validate(bytes.ptr(), (size_t)bytes.size()) == 0;
 }
@@ -60,13 +42,11 @@ String MusResourceFormatLoader::_get_resource_type(const String &p_path) const {
 	if (p_path.get_extension().to_lower() != "bin") {
 		return String();
 	}
-	Ref<FileAccess> fa = FileAccess::open(p_path, FileAccess::READ);
-	if (fa.is_null()) {
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(p_path, bytes)) {
 		return String();
 	}
-	int64_t total_size = fa->get_length();
-	PackedByteArray bytes = fa->get_buffer(total_size);
-	if (decode_payload(bytes) && is_plain_mus(bytes)) {
+	if (is_plain_mus(bytes)) {
 		return "NovaMusicScript";
 	}
 	return String();
@@ -74,20 +54,18 @@ String MusResourceFormatLoader::_get_resource_type(const String &p_path) const {
 
 Variant MusResourceFormatLoader::_load(const String &p_path, const String &p_original_path,
 		bool p_use_sub_threads, int32_t p_cache_mode) const {
-	Ref<FileAccess> fa = FileAccess::open(p_path, FileAccess::READ);
-	if (fa.is_null()) {
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(p_path, bytes)) {
 		UtilityFunctions::printerr("MusResourceFormatLoader: cannot open ", p_path);
 		return Variant();
 	}
-	PackedByteArray bytes = fa->get_buffer(fa->get_length());
-	fa.unref();
 
 	if (bytes.is_empty()) {
 		UtilityFunctions::printerr("MusResourceFormatLoader: empty file ", p_path);
 		return Variant();
 	}
 
-	if (!decode_payload(bytes) || !is_plain_mus(bytes)) {
+	if (!is_plain_mus(bytes)) {
 		UtilityFunctions::printerr(
 				"MusResourceFormatLoader: ", p_path,
 				" is not a valid SCR0 MUS file after generic payload decode");

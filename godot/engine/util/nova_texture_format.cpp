@@ -1,7 +1,7 @@
 #include "util/nova_texture_format.h"
+#include "util/nova_data_format.h"
 #include "util/pcx_texture_bridge.h"
 
-#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 
@@ -45,11 +45,8 @@ String ResourceFormatLoaderNovaTexture::_get_resource_type(const String &p_path)
 
 Variant ResourceFormatLoaderNovaTexture::_load(const String &p_path, const String &p_original_path,
                                                 bool p_use_sub_threads, int32_t p_cache_mode) const {
-	Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::READ);
-	if (f.is_null()) return Variant();
-
-	PackedByteArray bytes = f->get_buffer(f->get_length());
-	f.unref();
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(p_path, bytes)) return Variant();
 
 	String ext = p_path.get_extension().to_lower();
 	Ref<Image> img;
@@ -58,7 +55,7 @@ Variant ResourceFormatLoaderNovaTexture::_load(const String &p_path, const Strin
 		img = opennova::decode_pcx_image(bytes.ptr(), bytes.size());
 	} else if (ext == "dds" && bytes_look_like_dds(bytes)) {
 		img.instantiate();
-		if (img->load(p_path) != OK)
+		if (img->load_dds_from_buffer(bytes) != OK)
 			return Variant();
 	} else {
 		// .tga, .dds, .mdt — all TGA format in NovaLogic assets
