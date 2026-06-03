@@ -140,6 +140,8 @@ add_test(NAME mus_parse COMMAND mus_parse_test
 add_executable(mus_compat_test mus/mus_compat_test.cpp)
 target_link_libraries(mus_compat_test PRIVATE opennova_mus)
 target_include_directories(mus_compat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_compat_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
 add_test(NAME mus_compat COMMAND mus_compat_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
@@ -184,6 +186,15 @@ target_include_directories(vfs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(vfs_test PRIVATE cxx_std_17)
 add_test(NAME vfs COMMAND vfs_test)
 
+add_executable(vfs_mus_decode_test vfs/vfs_mus_decode_test.cpp)
+target_link_libraries(vfs_mus_decode_test PRIVATE opennova_vfs opennova_scr)
+target_include_directories(vfs_mus_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(vfs_mus_decode_test PRIVATE cxx_std_17)
+target_compile_definitions(vfs_mus_decode_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME vfs_mus_decode COMMAND vfs_mus_decode_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # BFC1 tests
 add_executable(bfc1_unit_test bfc1/bfc1_unit_test.cpp)
 target_link_libraries(bfc1_unit_test PRIVATE opennova_bfc1)
@@ -217,6 +228,11 @@ add_executable(resource_index_test resource_index/resource_index_test.cpp)
 target_link_libraries(resource_index_test PRIVATE opennova_resource_index)
 target_include_directories(resource_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index COMMAND resource_index_test)
+
+add_executable(resource_index_mus_test resource_index/resource_index_mus_test.cpp)
+target_link_libraries(resource_index_mus_test PRIVATE opennova_resource_index opennova_scr)
+target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME resource_index_mus COMMAND resource_index_mus_test)
 
 # OED object workspace/export tests
 add_executable(oed_build_model_test oed/build_model_test.cpp)

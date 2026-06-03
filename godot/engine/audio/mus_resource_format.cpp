@@ -14,9 +14,10 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "mus/mus.h"
-#include "scr/scr.h"
+#include "mus/mus_sniff.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 
 using namespace godot;
@@ -35,98 +36,23 @@ static bool peek_is_scr0(const uint8_t *bytes, int64_t size) {
 	return size >= 4 && bytes[0] == 'S' && bytes[1] == 'C' && bytes[2] == 'R' && bytes[3] == '0';
 }
 
-// Verify a candidate decrypt result actually parses as a MUS file. Cheap
-// signal: SCR0 magic + version 0x00000100 at offset 4 + a sane chunk count.
-// MusFileHeader is 44 bytes so we need at least that much data.
-static bool peek_is_valid_mus(const uint8_t *bytes, int64_t size) {
-	if (!peek_is_scr0(bytes, size)) {
-		return false;
-	}
-	if (size < 44) {
-		return false;
-	}
-	// Little-endian uint32 at offset 4: SCR0 version stamp. Witnessed
-	// 0x00000100 across menumus.bin, gamemus.bin, and the BHD variants.
-	const uint32_t version = (uint32_t)bytes[4] |
-			((uint32_t)bytes[5] << 8) |
-			((uint32_t)bytes[6] << 16) |
-			((uint32_t)bytes[7] << 24);
-	if (version != 0x00000100u) {
-		return false;
-	}
-	// chunk_count at offset 8: typically 1, but cap loosely at 16 to
-	// reject obvious garbage from a wrong-key decrypt.
-	const uint32_t chunk_count = (uint32_t)bytes[8] |
-			((uint32_t)bytes[9] << 8) |
-			((uint32_t)bytes[10] << 16) |
-			((uint32_t)bytes[11] << 24);
-	if (chunk_count == 0 || chunk_count > 16) {
-		return false;
-	}
-	return true;
-}
-
-// Try each known SCR key against `in`, writing the decrypted result into
-// `out` when one yields a buffer that parses as a SCR0 MUS file. Returns
-// true on success and resizes `out` to the actual decrypted size.
-//
-// First pass: regular SCR-wrapped form ("SCR\xVV" + ciphertext). Falls
-// through cleanly when the input has no SCR header (scr_decrypt_buf returns
-// -1).
-// Second pass: MUS-style retail-disk form (no leading magic; cipher applied
-// to the entire on-disk buffer; output gets a literal "SCR0" prepended by
-// scr_decrypt_mus). Witnessed: dfvas!Scr_DecryptBuffer @ 0x4cc250 with
-// SCR_KEY_JO_DFX2.
-//
-// Both passes use the stronger peek_is_valid_mus check (SCR0 magic +
-// version stamp + chunk_count sanity). The bare SCR0 magic is unreliable
-// for pass 2 because scr_decrypt_mus always prepends literal "SCR0" no
-// matter which key was used, so all three candidate decrypts trip the
-// magic check; we have to look further into the header to identify the
-// correct key.
+// Decrypt/recognize a MUS .bin in any on-disk form (plaintext SCR0, SCR-wrapped,
+// or the headerless retail-disk form), writing the plaintext SCR0 bytes into
+// `out`. Delegates to libs/mus mus_decode_to_scr0 so the loader, the VFS decode
+// path, and the resource index share one definition of "is this a MUS".
 static bool try_decrypt_to_scr0(const PackedByteArray &in, PackedByteArray &out) {
-	if (in.size() < 4) {
+	if (in.size() <= 0) {
 		return false;
 	}
-	const uint32_t keys[] = { SCR_KEY_DEFAULT, SCR_KEY_JO_DFX2, SCR_KEY_SHADERS };
-
-	// Pass 1: SCR-wrapped (header-prefixed). scr_decrypt_buf strips a
-	// 4-byte header so the max possible payload is in.size() - 4.
-	{
-		const size_t cap = (size_t)(in.size() - 4);
-		PackedByteArray tmp;
-		tmp.resize((int64_t)cap);
-		for (uint32_t key : keys) {
-			size_t sz = cap;
-			int rc = scr_decrypt_buf(in.ptr(), (size_t)in.size(), tmp.ptrw(), &sz, key);
-			if (rc == 0 && peek_is_valid_mus(tmp.ptr(), (int64_t)sz)) {
-				tmp.resize((int64_t)sz);
-				out = tmp;
-				return true;
-			}
-		}
+	uint8_t *dec = nullptr;
+	size_t dec_size = 0;
+	if (!mus_decode_to_scr0(in.ptr(), (size_t)in.size(), &dec, &dec_size) || dec == nullptr) {
+		return false;
 	}
-
-	// Pass 2: MUS-style (no header). scr_decrypt_mus prepends "SCR0" so a
-	// successful decrypt yields out_size == in.size() + 4 with magic intact.
-	for (uint32_t key : keys) {
-		uint8_t *mus_out = nullptr;
-		size_t mus_out_size = 0;
-		int rc = scr_decrypt_mus(in.ptr(), (size_t)in.size(), &mus_out, &mus_out_size, key);
-		if (rc != 0 || mus_out == nullptr) {
-			continue;
-		}
-		bool ok = peek_is_valid_mus(mus_out, (int64_t)mus_out_size);
-		if (ok) {
-			out.resize((int64_t)mus_out_size);
-			memcpy(out.ptrw(), mus_out, mus_out_size);
-		}
-		scr_free_buffer(mus_out);
-		if (ok) {
-			return true;
-		}
-	}
-	return false;
+	out.resize((int64_t)dec_size);
+	memcpy(out.ptrw(), dec, dec_size);
+	free(dec);
+	return true;
 }
 
 String MusResourceFormatLoader::_get_resource_type(const String &p_path) const {
@@ -138,14 +64,10 @@ String MusResourceFormatLoader::_get_resource_type(const String &p_path) const {
 		return String();
 	}
 	int64_t total_size = fa->get_length();
-	PackedByteArray peek = fa->get_buffer(4);
-	if (peek_is_scr0(peek.ptr(), peek.size())) {
-		return "NovaMusicScript";
-	}
-	// Encrypted MUS still gets recognised when size is in the typical range.
-	// The actual SCR-decrypt magic check only runs in _load (it requires the
-	// full file). Coarse size filter avoids claiming arbitrary cc.bin etc.
-	if (total_size > 64 && total_size < 200000) {
+	// Real content check (decrypt-probe + header validation) so we don't claim
+	// arbitrary .bin (e.g. cc.bin). Shared with the VFS + index via mus_sniff.
+	PackedByteArray bytes = fa->get_buffer(total_size);
+	if (mus_is_mus(bytes.ptr(), bytes.size())) {
 		return "NovaMusicScript";
 	}
 	return String();

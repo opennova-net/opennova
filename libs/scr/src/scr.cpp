@@ -117,6 +117,30 @@ int scr_decrypt_mus(const uint8_t *in, size_t in_size,
     return 0;
 }
 
+/* Inverse of scr_decrypt_mus. Given a decrypted "SCR0"+payload buffer, recover
+ * the headerless on-disk ciphertext: reverse the payload, then forward-keystream
+ * XOR (the same keystream scr_decrypt_mus applies before reversing, so the two
+ * operations undo each other position-for-position). */
+int scr_encrypt_mus(const uint8_t *in, size_t in_size,
+                    uint8_t **out, size_t *out_size, uint32_t key) {
+    uint8_t *buf;
+    size_t payload, i;
+    if (out == NULL || out_size == NULL) return -1;
+    if (in == NULL || in_size < SCR_HEADER_SIZE) return -1;   /* needs the SCR0 prefix */
+    payload = in_size - SCR_HEADER_SIZE;
+    buf = (uint8_t *)malloc(payload ? payload : 1);
+    if (buf == NULL) return -3;
+    /* reverse(in[4:]) */
+    for (i = 0; i < payload; ++i) {
+        buf[i] = in[SCR_HEADER_SIZE + (payload - 1 - i)];
+    }
+    /* forward keystream XOR (matches scr_decrypt_mus's pre-reverse pass) */
+    xor_with_keystream(buf, payload, key);
+    *out = buf;
+    *out_size = payload;
+    return 0;
+}
+
 void scr_free_buffer(uint8_t *buf) {
     free(buf);
 }

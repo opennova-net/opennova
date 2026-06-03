@@ -62,7 +62,19 @@ SCR_EXPORT int scr_decrypt_buf(const uint8_t *data, size_t size,
 SCR_EXPORT int scr_decrypt_mus(const uint8_t *in, size_t in_size,
                                 uint8_t **out, size_t *out_size, uint32_t key);
 
-/* Free a buffer allocated by scr_decrypt_mus. Safe to call with NULL. */
+/* Inverse of scr_decrypt_mus: take a decrypted MUS buffer (must begin with the
+ * literal "SCR0" magic) and produce the headerless on-disk ciphertext form
+ * (in_size - 4 bytes): drop "SCR0", reverse the payload, then apply the forward
+ * keystream XOR. Round-trips with scr_decrypt_mus under the same key. Allocates
+ * *out via malloc; free with scr_free_buffer().
+ *
+ * The engine never encrypts; this exists so tests/tools can synthesize the
+ * on-disk encrypted form from a committed plaintext fixture instead of shipping
+ * the ciphertext. Returns 0 on success, -1 on bad input, -3 on allocation fail. */
+SCR_EXPORT int scr_encrypt_mus(const uint8_t *in, size_t in_size,
+                                uint8_t **out, size_t *out_size, uint32_t key);
+
+/* Free a buffer allocated by scr_decrypt_mus / scr_encrypt_mus. NULL-safe. */
 SCR_EXPORT void scr_free_buffer(uint8_t *buf);
 
 #ifdef __cplusplus

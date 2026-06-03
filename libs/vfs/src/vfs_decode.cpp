@@ -2,6 +2,9 @@
 
 #include <bfc1/bfc1.h>
 #include <scr/scr.h>
+#include <mus/mus_sniff.h>
+
+#include <cstdlib>
 
 namespace opennova {
 namespace {
@@ -55,10 +58,30 @@ bool decode_bfc1(std::vector<uint8_t> &data) {
     return true;
 }
 
+// Resolve a MUS script to its plaintext "SCR0" form. Handled BEFORE the generic
+// SCR-container decode for two reasons: (1) the headerless retail-disk form has
+// no magic the generic path recognizes (scr_decrypt_mus is never reached by
+// decode_scr), and (2) a plaintext "SCR0" MUS would otherwise be mis-decrypted
+// by decode_scr, whose scr_is_scr() magic check matches the first three bytes
+// "SCR" and so also fires on "SCR0". mus_decode_to_scr0 exits cheaply for the
+// common forms (plaintext / SCR-header); non-MUS data falls through to the
+// generic decoders unchanged.
+bool decode_mus(std::vector<uint8_t> &data) {
+    uint8_t *out = nullptr;
+    size_t out_size = 0;
+    if (mus_decode_to_scr0(data.data(), data.size(), &out, &out_size) && out) {
+        data.assign(out, out + out_size);
+        free(out);
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 bool vfs_decode_payload(std::vector<uint8_t> &data) {
-    if (!decode_scr(data)) return false;   // SCR first
+    if (decode_mus(data)) return true;     // MUS (plaintext / SCR-wrapped / headerless) first
+    if (!decode_scr(data)) return false;   // then generic SCR container
     if (!decode_bfc1(data)) return false;  // then BFC1 (possibly over the decrypted bytes)
     return true;
 }

@@ -1,11 +1,7 @@
-/* MUS-style SCR cipher (no leading SCR magic) parity tests.
- *
- * Verifies scr_decrypt_mus() against:
- *   1. fixtures/mus/jo_gamemus.bin (post-decrypt golden, 2521 B = 4 B "SCR0"
- *      magic + 2517 B payload).
- *   2. C:/Users/taylor/Desktop/JO_ASSETS_t/gamemus.bin (retail-disk encrypted
- *      input, 2517 B). Skipped if absent so CI without the asset still passes.
- */
+/* MUS-style SCR cipher (no leading SCR magic) parity tests. Fixture-only: the
+ * cross-check synthesizes the headerless on-disk form from the committed
+ * plaintext golden (scr_encrypt_mus) and round-trips it back through
+ * scr_decrypt_mus, requiring byte-exact recovery. No external assets. */
 #include "scr/scr.h"
 
 #include <cstdint>
@@ -17,10 +13,6 @@
 
 #ifndef MUS_FIXTURE_DIR
 #define MUS_FIXTURE_DIR "fixtures/mus"
-#endif
-
-#ifndef RETAIL_GAMEMUS_PATH
-#define RETAIL_GAMEMUS_PATH "C:/Users/taylor/Desktop/JO_ASSETS_t/gamemus.bin"
 #endif
 
 static uint8_t *slurp(const char *path, size_t *out_size) {
@@ -102,22 +94,20 @@ int main() {
     // scr_free_buffer NULL safety.
     scr_free_buffer(nullptr);
 
-    // Golden parity: decrypt retail gamemus.bin and compare against the
-    // committed golden. Both paths are required for the strict parity test.
-    size_t enc_size = 0;
-    uint8_t *enc = slurp(RETAIL_GAMEMUS_PATH, &enc_size);
+    // Golden parity, fixture-only: synthesize the headerless on-disk ciphertext
+    // from the committed plaintext golden (scr_encrypt_mus), then decrypt it back
+    // (scr_decrypt_mus) and require byte-exact recovery. This is the same cipher
+    // cross-check the old retail-asset comparison gave, without any external file.
     size_t gold_size = 0;
     uint8_t *gold = slurp(MUS_FIXTURE_DIR "/jo_gamemus.bin", &gold_size);
-
-    if (enc == nullptr) {
-        std::printf("SKIP: retail gamemus.bin not at %s; cipher round-trip + empty checks still ran.\n",
-                    RETAIL_GAMEMUS_PATH);
-        free(gold);
-        return 0;
-    }
     TEST_EXPECT(gold != nullptr);
-    std::printf("Retail size: %zu, golden size: %zu\n", enc_size, gold_size);
-    TEST_EXPECT(gold_size == enc_size + 4);
+    TEST_EXPECT(gold_size >= 4 && gold[0] == 'S' && gold[1] == 'C' && gold[2] == 'R' && gold[3] == '0');
+
+    uint8_t *enc = nullptr;
+    size_t enc_size = 0;
+    TEST_EXPECT(scr_encrypt_mus(gold, gold_size, &enc, &enc_size, SCR_KEY_JO_DFX2) == 0);
+    TEST_EXPECT(enc != nullptr);
+    TEST_EXPECT(enc_size == gold_size - 4);   // headerless form drops the "SCR0" magic
 
     uint8_t *out = nullptr;
     size_t out_size = 0;
@@ -126,12 +116,9 @@ int main() {
     TEST_EXPECT(out_size == gold_size);
     TEST_EXPECT(out[0] == 'S' && out[1] == 'C' && out[2] == 'R' && out[3] == '0');
     if (std::memcmp(out, gold, gold_size) != 0) {
-        // Find first divergence for diagnostics.
         for (size_t i = 0; i < gold_size; ++i) {
             if (out[i] != gold[i]) {
-                std::fprintf(stderr,
-                             "byte %zu: decrypted=0x%02x golden=0x%02x\n",
-                             i, out[i], gold[i]);
+                std::fprintf(stderr, "byte %zu: roundtrip=0x%02x golden=0x%02x\n", i, out[i], gold[i]);
                 break;
             }
         }
@@ -139,7 +126,7 @@ int main() {
     TEST_EXPECT(std::memcmp(out, gold, gold_size) == 0);
 
     scr_free_buffer(out);
-    free(enc);
+    scr_free_buffer(enc);
     free(gold);
     return 0;
 }
