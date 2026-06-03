@@ -652,3 +652,74 @@ func test_restore_snapshot_of_garbage_returns_false() -> void:
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var garbage := PackedByteArray([0, 1, 2, 3, 4, 5, 6, 7])
 	assert_false(m.restore_snapshot(garbage), "restoring unparseable bytes returns false")
+
+
+# --- Phase 1: hidden entity fields + mission-header editing --------------------
+
+func test_entity_dictionary_exposes_hidden_fields() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var e: Dictionary = m.get_entities(NovaMissionData.KIND_BUILDING)[0]
+	assert_true(e.has("no_less_than"), "dict carries no_less_than (byte 75)")
+	assert_true(e.has("map_symbol"), "dict carries map_symbol (byte 81)")
+	assert_true(e.has("name1"), "dict carries name1 (AI class)")
+	assert_true(e.has("name2"), "dict carries name2 (AI script)")
+	assert_true(e.has("max_simultaneous"), "no_more_than stays exposed as max_simultaneous (byte 74)")
+
+
+func test_set_entity_property_string_round_trips_through_save_reload() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var target: Dictionary = m.get_entities(NovaMissionData.KIND_BUILDING)[0]
+	var kind := int(target["kind"])
+	var index := int(target["index"])
+	assert_true(m.set_entity_property_string(kind, index, "name1", "rifle"), "name1 write succeeds")
+	assert_true(m.set_entity_property_string(kind, index, "name2", "patrol"), "name2 write succeeds")
+	assert_false(m.set_entity_property_string(kind, index, "bogus", "x"), "unknown string property rejected")
+	var tmp := _temp_bms_path()
+	assert_eq(m.save_as(tmp), OK)
+	var r := NovaMissionData.new()
+	assert_eq(r.open_file(tmp), OK)
+	var e2: Dictionary = r.get_entity(kind, index)
+	assert_eq(String(e2["name1"]), "rifle", "name1 survives save/reload")
+	assert_eq(String(e2["name2"]), "patrol", "name2 survives save/reload")
+
+
+func test_set_hidden_int_fields_round_trip() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var target: Dictionary = m.get_entities(NovaMissionData.KIND_BUILDING)[0]
+	var kind := int(target["kind"])
+	var index := int(target["index"])
+	assert_true(m.set_entity_property_int(kind, index, "no_less_than", 9))
+	assert_true(m.set_entity_property_int(kind, index, "map_symbol", 17))
+	var e2: Dictionary = m.get_entity(kind, index)
+	assert_eq(int(e2["no_less_than"]), 9, "no_less_than reads back")
+	assert_eq(int(e2["map_symbol"]), 17, "map_symbol reads back")
+
+
+func test_set_header_string_and_int_round_trip() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	assert_true(m.set_header_string("mission_name", "Grill Test"), "name set")
+	assert_true(m.set_header_int("climate", 2), "climate set")
+	assert_false(m.set_header_string("bogus_field", "x"), "unknown header field rejected")
+	assert_true(m.is_modified(), "a header edit dirties the mission")
+	var tmp := _temp_bms_path()
+	assert_eq(m.save_as(tmp), OK)
+	var r := NovaMissionData.new()
+	assert_eq(r.open_file(tmp), OK)
+	var info := r.get_info()
+	assert_eq(String(info["mission_name"]), "Grill Test", "mission_name survives reload")
+	assert_eq(int(info["climate"]), 2, "climate survives reload")
+
+
+func test_set_header_flag_toggles_one_bit_and_preserves_others() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var before := int(m.get_info()["attrib_flags"])
+	assert_true(m.set_header_flag(NovaMissionData.ATTRIB_COOP, true), "set COOP")
+	var after := int(m.get_info()["attrib_flags"])
+	assert_eq(after & NovaMissionData.ATTRIB_COOP, NovaMissionData.ATTRIB_COOP, "COOP bit is set")
+	var other_mask := ~NovaMissionData.ATTRIB_COOP
+	assert_eq(after & other_mask, before & other_mask, "other attrib bits are preserved")

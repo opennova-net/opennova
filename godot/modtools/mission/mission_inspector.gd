@@ -229,7 +229,23 @@ func _build_behavior_section() -> void:
 	_add_behavior_spin("max_attack_distance", "Max attack range", -1000000.0, 1000000.0)
 	ObjectUiHelpers.add_section_heading(_behavior_box, "Spawning")
 	_add_behavior_spin("spawn_count", "Spawn count", -32768.0, 32767.0)
-	_add_behavior_spin("max_simultaneous", "Max at once", 0.0, 255.0)
+	# no_more_than (byte 74) / no_less_than (byte 75) pair with the RemoveIfMoreThan /
+	# RemoveIfLessThan AI flags to gate spawning by player count.
+	var nmt := _add_behavior_spin("max_simultaneous", "No more than", 0.0, 255.0)
+	nmt.tooltip_text = "Max copies kept (no_more_than, byte 74). Pairs with the RemoveIfMoreThan AI flag."
+	var nlt := _add_behavior_spin("no_less_than", "No less than", 0.0, 255.0)
+	nlt.tooltip_text = "Min copies kept (no_less_than, byte 75). Pairs with the RemoveIfLessThan AI flag."
+	ObjectUiHelpers.add_section_heading(_behavior_box, "Identity")
+	var sym := _add_behavior_spin("map_symbol", "Map symbol", 0.0, 255.0)
+	sym.tooltip_text = "Tactical-map icon index (byte 81)."
+	_add_behavior_line("name1", "AI class",
+		func(info) -> String: return String(info.get("name1", "")),
+		func(text: String) -> void: _behavior_set_string("name1", text),
+		"AI class name (iai_name), max 7 chars. Press Enter to apply.")
+	_add_behavior_line("name2", "AI script",
+		func(info) -> String: return String(info.get("name2", "")),
+		func(text: String) -> void: _behavior_set_string("name2", text),
+		"AI script file (ai_textfile), max 7 chars. Press Enter to apply.")
 	ObjectUiHelpers.add_section_heading(_behavior_box, "Flags")
 	# A 32-bit bitfield: a decimal field is unreadable, so author it as hexadecimal.
 	_add_behavior_line("ai_flags", "AI flags",
@@ -271,6 +287,11 @@ func _add_behavior_line(property: String, label: String, getter: Callable, sette
 func _behavior_set(property: String, value: float) -> void:
 	if _controller != null:
 		_controller.set_selected_property(property, int(value))
+
+
+func _behavior_set_string(property: String, value: String) -> void:
+	if _controller != null:
+		_controller.set_selected_string_property(property, value)
 
 
 # Apply a hexadecimal ai_flags edit. Pass the value as a signed int32 so the engine's int

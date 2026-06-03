@@ -878,6 +878,59 @@ func set_selected_property(property: String, value: int) -> void:
 		_report("Could not set %s on the selected object." % property, true)
 
 
+# String counterpart of set_selected_property, for the fixed-string entity fields
+# "name1" (AI class) and "name2" (AI script). Same snapshot / one-undo-step model.
+func set_selected_string_property(property: String, value: String) -> void:
+	if _selected_ref.is_empty() or _mission == null:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	if _mission.set_entity_property_string(int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value):
+		_push_undo_step(before)
+		mark_dirty()
+	else:
+		_report("Could not set %s on the selected object." % property, true)
+
+
+# --- Authoring: mission-header editing ----------------------------------------
+# Each setter snapshots, writes one header field through NovaMissionData, then pushes a
+# single undo step. Field names match NovaMissionData::set_header_* and the inspector form.
+func set_header_string(field: String, value: String) -> void:
+	if _mission == null:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	if _mission.set_header_string(field, value):
+		_push_undo_step(before)
+		mark_dirty()
+	else:
+		_report("Could not set mission %s." % field, true)
+
+
+func set_header_int(field: String, value: int) -> void:
+	if _mission == null:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	if _mission.set_header_int(field, value):
+		_push_undo_step(before)
+		mark_dirty()
+	else:
+		_report("Could not set mission %s." % field, true)
+
+
+func set_header_flag(bit: int, on: bool) -> void:
+	if _mission == null:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	if _mission.set_header_flag(bit, on):
+		_push_undo_step(before)
+		mark_dirty()
+	else:
+		_report("Could not set mission flag.", true)
+
+
 # --- Authoring (Phase 3): place new objects -----------------------------------
 # The inspector's palette arms an items.def item; a left-click on the terrain then
 # places a new instance there (add_entity + incremental render) and selects it, while

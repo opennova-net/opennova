@@ -76,6 +76,11 @@ static func bms_to_godot_position(p: Vector3) -> Vector3:
 
 static func bms_to_godot_rotation(rot_deg: Vector3) -> Vector3:
 	# rot_deg = (pitch, yaw, roll) in degrees -> Godot euler (YXZ order).
+	# [orig: Entity_SpawnFromBMSRecord @0x40eb66 (Jointops.exe): heading = (90 - yaw) as a 32-bit BAM,
+	#  pitch (@0x40eb86) and roll (@0x40eba6) used POSITIVE. The 3DI mesh import flips X only
+	#  (godot_position = (-x,y,z), nova_object_data.cpp:887 — a LH->RH conversion keeping +Z), so the
+	#  +PI (180-yaw) here is correct for +Z-forward models. Pitch/roll signs are unverified under the
+	#  X-flip and only matter for tilted entities — visual A/B pending.]
 	return Vector3(
 		deg_to_rad(-rot_deg.x),
 		deg_to_rad(-rot_deg.y) + PI,
