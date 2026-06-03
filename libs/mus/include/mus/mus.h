@@ -93,6 +93,11 @@ typedef struct MusScript {
     uint32_t    entry_section_index;
     uint32_t    globals_size;             /* bytes */
     uint32_t    locals_size;              /* bytes */
+    /* Locals frame base used by the `enter` opcode: dst = LocalsBase + this.
+       Witnessed as instance[+0x3C] (the chunk's string_section_size field) in
+       AudioVM_Op_Enter @ 0x672C20; MDEdit invariantly emits 0x20. Parsed from
+       the chunk; the compiler defaults it to 0x20. 0 is treated as 0x20. */
+    uint32_t    locals_frame_offset;
 
     /* Editor debug info (string_section / aux tables in the chunk). Empty when
        the chunk was stripped. Witnessed: editor MDEdit writes a 256-byte source
@@ -189,9 +194,11 @@ void mus_free(void *p);
 
    Witnessed: Jointops.exe!AudioVM_DispatchLoop @ 0x00672720 (32-instruction budget,
    65-entry dispatch table at Jointops.exe!0x0084F220, two stacks: data EBP-tracked
-   and call EDI-tracked). 8 of 11 intrinsics bound: GEcho, GGRnd, GSV, GSDV,
-   GFB, FSet, FClear, FIsSet (FIsClear, TStart, TStop are NULL handlers that
-   silently no-op + push 0). */
+   and call EDI-tracked). The intrinsic name table @ 0x84F0C8 has 9 entries, ALL
+   bound: GEcho, GGRnd, GSV, GSDV, GFB, FSet, FClear, FIsSet, FIsClear
+   (@ 0x6720C0/0x672320/0x6720E0/0x672120/0x672150/0x672360/0x672380/0x6723A0/0x6723C0).
+   TStart/TStop from the canonical MDEdit set do NOT exist in this build; method
+   indices >= 9 resolve to a NULL handler that no-ops + pushes 0. */
 
 typedef struct MusVM MusVM;
 typedef enum MusVMState {
