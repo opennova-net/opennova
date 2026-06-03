@@ -1206,29 +1206,24 @@ static int test_vm_jo_fixtures_no_desync(void) {
     return 1;
 }
 
-/* Behavioral proof (Tier 3): assert the shipped programs produce the right
-   input-DEPENDENT outputs, not just "no desync". Captures the ordered event
-   stream (volume / play / section) and checks it against the decompiled control
-   flow. gamescript's `push_g Var1; neq; brfalse; setstate` is the discriminator:
-   Var1==0 -> Multiplayerstart plays sound_0; Var1!=0 -> Missionnull, silent. */
+/* Behavioral proof (Tier 3, CI form): assert the shipped programs produce the
+   EXACT observable event stream the Tier-4 Unicorn differential proved byte-
+   identical to the ORIGINAL Jointops handlers (notes/audio/mus_diff_jointops.py:
+   original == reimpl for all scenarios). `V<v>` = on_volume_changed (GSV; 200<<16),
+   `P<i>` = on_play_sound. The golden streams are captured at a fixed 12-tick window;
+   each Var value yields a DISTINCT stream, which is the proof that var-gated routing
+   works (gamescript's `push_g Var1; neq; brfalse; setstate`; menuscript's Var2). */
 struct BehLog {
-    char kind[64];          /* 'V' volume, 'P' play, 'S' section */
-    int  ival[64];          /* play index, or volume left-channel value */
-    char sname[64][32];
-    int  n;
+    char ev[2048];                 /* "V<v> P<i> ..." accumulated in order */
+    int  saw_mpstart, saw_null;    /* gamescript section routing */
 };
-static void beh_play(void *u, uint32_t i, int) {
-    BehLog *L = (BehLog *)u;
-    if (L->n < 64) { L->kind[L->n] = 'P'; L->ival[L->n] = (int)i; L->sname[L->n][0] = 0; ++L->n; }
-}
-static void beh_vol(void *u, int32_t l, int32_t /*r*/) {
-    BehLog *L = (BehLog *)u;
-    if (L->n < 64) { L->kind[L->n] = 'V'; L->ival[L->n] = l; L->sname[L->n][0] = 0; ++L->n; }
-}
+static void beh_app(BehLog *L, const char *s) { strncat(L->ev, s, sizeof(L->ev) - strlen(L->ev) - 1); }
+static void beh_play(void *u, uint32_t i, int) { char b[24]; snprintf(b, sizeof(b), "P%u ", i); beh_app((BehLog *)u, b); }
+static void beh_vol(void *u, int32_t l, int32_t /*r*/) { char b[24]; snprintf(b, sizeof(b), "V%d ", l); beh_app((BehLog *)u, b); }
 static void beh_sect(void *u, const char *nm) {
     BehLog *L = (BehLog *)u;
-    if (L->n < 64) { L->kind[L->n] = 'S'; L->ival[L->n] = 0;
-                     strncpy(L->sname[L->n], nm, 31); L->sname[L->n][31] = 0; ++L->n; }
+    if (!strcmp(nm, "Multiplayerstart")) L->saw_mpstart = 1;
+    if (!strcmp(nm, "Missionnull"))      L->saw_null = 1;
 }
 static void beh_run(const char *fname, uint8_t varIdx, int32_t varVal, int ticks, BehLog *L) {
     memset(L, 0, sizeof(*L));
@@ -1244,30 +1239,26 @@ static void beh_run(const char *fname, uint8_t varIdx, int32_t varVal, int ticks
     for (int t = 0; t < ticks; ++t) { mus_vm_tick(vm, 16); if (mus_vm_state(vm) != MUS_VM_RUNNING) break; }
     mus_vm_destroy(vm); mus_close(&mf);
 }
-static int first_play(const BehLog *L){ for(int i=0;i<L->n;i++) if(L->kind[i]=='P') return L->ival[i]; return -1; }
-static int count_play(const BehLog *L){ int c=0; for(int i=0;i<L->n;i++) if(L->kind[i]=='P') ++c; return c; }
-static int saw_section(const BehLog *L,const char*nm){ for(int i=0;i<L->n;i++) if(L->kind[i]=='S'&&strcmp(L->sname[i],nm)==0) return 1; return 0; }
 
 static int test_vm_jo_behavioral(void) {
     BehLog L;
-    /* gamescript Var1=0 (no mission): SV(200) first, then Multiplayerstart -> sound_0. */
-    beh_run("jo_gamemus.bin", 1, 0, 16, &L);
-    if (L.n == 0) { fprintf(stderr, "  skip: gamemus fixture absent\n"); return 1; }
-    CHECK(L.kind[0] == 'V' && L.ival[0] == (200 << 16), "gamemus Var1=0: first event GSV(200) = 200<<16");
-    CHECK(first_play(&L) == 0, "gamemus Var1=0: first sound is sound_0 (Multiplayerstart)");
-    CHECK(saw_section(&L, "Multiplayerstart"), "gamemus Var1=0: reaches Multiplayerstart");
+    beh_run("jo_gamemus.bin", 1, 0, 12, &L);
+    if (L.ev[0] == 0) { fprintf(stderr, "  skip: gamemus fixture absent\n"); return 1; }
+    /* Var1=0 (no mission): SV(200), then Multiplayerstart loops sound_0. */
+    CHECK(strcmp(L.ev, "V13107200 P0 P0 P0 P0 P0 P0 P0 P0 P0 P0 ") == 0, "gamemus Var1=0 stream == original");
+    CHECK(L.saw_mpstart && !L.saw_null, "gamemus Var1=0 routes to Multiplayerstart");
 
-    /* gamescript Var1=1 (mission active): the branch routes to Missionnull, silent. */
-    beh_run("jo_gamemus.bin", 1, 1, 16, &L);
-    CHECK(L.kind[0] == 'V' && L.ival[0] == (200 << 16), "gamemus Var1=1: GSV(200) still first");
-    CHECK(count_play(&L) == 0, "gamemus Var1=1: NO sound plays (Missionnull idle)");
-    CHECK(saw_section(&L, "Missionnull"), "gamemus Var1=1: routes to Missionnull");
-    CHECK(!saw_section(&L, "Multiplayerstart"), "gamemus Var1=1: does NOT reach Multiplayerstart");
+    beh_run("jo_gamemus.bin", 1, 1, 12, &L);
+    /* Var1=1 (mission active): branch routes to silent Missionnull -- the discriminator. */
+    CHECK(strcmp(L.ev, "V13107200 ") == 0, "gamemus Var1=1 stream == original (SV200 then silent)");
+    CHECK(L.saw_null && !L.saw_mpstart, "gamemus Var1=1 routes to Missionnull (branch discriminator)");
 
-    /* menuscript: seed Var2; must reach a play without desync (per-screen track map
-       not independently confirmed, so keep this loose). */
-    beh_run("jo_menumus.bin", 2, 1, 16, &L);
-    if (L.n > 0) CHECK(count_play(&L) >= 1, "menumus Var2=1: reaches at least one play");
+    beh_run("jo_menumus.bin", 2, 0, 12, &L);
+    CHECK(strcmp(L.ev, "V13107200 V13107200 P1 V13107200 V13107200 P2 P0 P0 ") == 0, "menumus Var2=0 stream == original");
+    beh_run("jo_menumus.bin", 2, 1, 12, &L);
+    CHECK(strcmp(L.ev, "V13107200 V13107200 P1 V13107200 V13107200 P2 P3 P4 P5 P6 P7 P8 P2 ") == 0, "menumus Var2=1 stream == original (P2..P8 loop)");
+    beh_run("jo_menumus.bin", 2, 2, 12, &L);
+    CHECK(strcmp(L.ev, "V13107200 V13107200 P1 V13107200 V13107200 P2 V13107200 P2 V13107200 P2 ") == 0, "menumus Var2=2 stream == original (V,P2 loop)");
     return 1;
 }
 #endif
