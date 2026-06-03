@@ -349,22 +349,25 @@ void write_mis_groups(const bms::File &file, std::string &out) {
 	for (size_t i = 0; i < file.group_records.size(); ++i) {
 		const bms::GroupRecord &record = file.group_records[i];
 		const uint8_t *raw = record.raw_data;
-		const int32_t attrib = read_i32_at(raw, 0);
-		const int32_t commander = read_i32_at(raw, 4);
-		const int32_t color = read_i32_at(raw, 8);
-		if (attrib == 0 && commander == 0 && color == 0) {
+		// [orig: Mission_LoadBMSFile @0x40fbbb keeps three ints per 32-byte record from offsets
+		//  0, 8, 12 (temp_record[0], [2], [3]). Field meanings are NOT proven by the loader, so the
+		//  keys are emitted as tentative field0/field8/field12 (was: 0/4/8 with guessed attrib/commander/color).]
+		const int32_t field0 = read_i32_at(raw, 0);
+		const int32_t field8 = read_i32_at(raw, 8);
+		const int32_t field12 = read_i32_at(raw, 12);
+		if (field0 == 0 && field8 == 0 && field12 == 0) {
 			continue;
 		}
 		append_kv(out, "begin group ", i);
 		append_line(out, "  description \"\"");
-		if (attrib != 0) {
-			append_kv(out, "  attrib ", attrib);
+		if (field0 != 0) {
+			append_kv(out, "  field0 ", field0);
 		}
-		if (color != 0) {
-			append_kv(out, "  color ", color);
+		if (field8 != 0) {
+			append_kv(out, "  field8 ", field8);
 		}
-		if (commander != 0) {
-			append_kv(out, "  commander ", commander);
+		if (field12 != 0) {
+			append_kv(out, "  field12 ", field12);
 		}
 		append_line(out, "end group");
 		append_line(out);
@@ -757,14 +760,16 @@ std::string action_sub_type_name(int action_type, int sub_type) {
 AreaTriggerRecord to_area_trigger_record(const bms::AreaTrigger &area, size_t index) {
 	AreaTriggerRecord out;
 	out.index = index;
-	out.wp_number = area.wp_number;
-	out.min_x = area.get_min_x();
-	out.min_y = area.get_min_y();
-	out.min_z = area.get_min_z();
-	out.max_x = area.get_max_x();
-	out.max_y = area.get_max_y();
-	out.max_z = area.get_max_z();
-	out.reserved = area.reserved;
+	// Corrected mapping: file layout is interleaved per axis with a flags dword at off 28.
+	// (id at off 0 carried in wp_number for ABI stability; raw flags in reserved.)
+	out.wp_number = area.id;
+	out.min_x = area.get_x_min();
+	out.min_y = area.get_y_min();
+	out.min_z = area.get_z_min();
+	out.max_x = area.get_x_max();
+	out.max_y = area.get_y_max();
+	out.max_z = area.get_z_max();
+	out.reserved = static_cast<int>(area.flags);
 	return out;
 }
 
@@ -2011,6 +2016,7 @@ void MissionDocument::sync_counts() {
 	impl_->file.header.num_events = static_cast<uint32_t>(impl_->file.events.size());
 	impl_->file.header.area_trigger_count = static_cast<int16_t>(impl_->file.area_triggers.size());
 	impl_->file.header.weapon_loadout_chunk_len = static_cast<uint16_t>(impl_->file.loadout.raw_data.size());
+	impl_->file.header.secondary_chunk_len = static_cast<uint16_t>(impl_->file.secondary_chunk.size());
 	impl_->file.events_count = static_cast<int32_t>(impl_->file.events.size());
 	impl_->file.trigger_count = static_cast<int32_t>(impl_->file.triggers.size());
 	impl_->file.action_count = static_cast<int32_t>(impl_->file.actions.size());

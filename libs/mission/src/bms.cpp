@@ -178,6 +178,12 @@ bool parse_header(Reader& r, Header& h, std::string& error) {
         error = "Invalid BMS magic";
         return false;
     }
+    // [orig: version gate `byte_A761D3 < 19` @0x40f5aa Mission_LoadBMSFile / @0x40e30a BMS_LoadAndValidateHeader]
+    if (static_cast<uint8_t>(h.magic[3]) < kMinVersion) {
+        error = "Unsupported BMS version " + std::to_string(static_cast<uint8_t>(h.magic[3])) +
+                " (minimum " + std::to_string(kMinVersion) + ")";
+        return false;
+    }
 
     r.read_fixed_string(h.mission_name, 32);
     r.read_fixed_string(h.designer, 32);
@@ -222,7 +228,7 @@ bool parse_header(Reader& r, Header& h, std::string& error) {
     h.area_trigger_count = r.read_i16();
     h.weapon_loadout_chunk_len = r.read_u16();
     h.bonus_expiration = r.read_u16();
-    h.unknown8 = r.read_u16();
+    h.secondary_chunk_len = r.read_u16();
     h.start_time = r.read_u16();
     h.minutes_per_day = r.read_u16();
     r.read_bytes(h.unknown9, 28);
@@ -282,7 +288,7 @@ void write_header(Writer& w, const Header& h) {
     w.write_i16(h.area_trigger_count);
     w.write_u16(h.weapon_loadout_chunk_len);
     w.write_u16(h.bonus_expiration);
-    w.write_u16(h.unknown8);
+    w.write_u16(h.secondary_chunk_len);
     w.write_u16(h.start_time);
     w.write_u16(h.minutes_per_day);
     w.write_bytes(h.unknown9, 28);
@@ -469,31 +475,27 @@ void write_layer_record(Writer& w, const LayerRecord& lr) {
 }
 
 bool parse_area_trigger(Reader& r, AreaTrigger& at, std::string& /*error*/) {
-    at.wp_number = r.read_i32();
-    // Coordinates in fixed-point, file stores with Y/Z swapped
-    at.min_x = r.read_i32();
-    int32_t file_min_y = r.read_i32();
-    int32_t file_min_z = r.read_i32();
-    at.min_z = file_min_y;  // Y/Z swapped
-    at.min_y = file_min_z;
-    at.max_x = r.read_i32();
-    int32_t file_max_y = r.read_i32();
-    int32_t file_max_z = r.read_i32();
-    at.max_z = file_max_y;  // Y/Z swapped
-    at.max_y = file_max_z;
-    at.reserved = r.read_i32();
+    // [orig: interleaved per-axis layout, no swap — Entity_IsTeamInTriggerBounds @0x43c75c]
+    at.id = r.read_i32();      // off 0
+    at.x_min = r.read_i32();   // off 4
+    at.x_max = r.read_i32();   // off 8
+    at.y_min = r.read_i32();   // off 12
+    at.y_max = r.read_i32();   // off 16
+    at.z_min = r.read_i32();   // off 20
+    at.z_max = r.read_i32();   // off 24
+    at.flags = r.read_u32();   // off 28
     return true;
 }
 
 void write_area_trigger(Writer& w, const AreaTrigger& at) {
-    w.write_i32(at.wp_number);
-    w.write_i32(at.min_x);
-    w.write_i32(at.min_z);  // Y/Z swap back
-    w.write_i32(at.min_y);
-    w.write_i32(at.max_x);
-    w.write_i32(at.max_z);  // Y/Z swap back
-    w.write_i32(at.max_y);
-    w.write_i32(at.reserved);
+    w.write_i32(at.id);
+    w.write_i32(at.x_min);
+    w.write_i32(at.x_max);
+    w.write_i32(at.y_min);
+    w.write_i32(at.y_max);
+    w.write_i32(at.z_min);
+    w.write_i32(at.z_max);
+    w.write_u32(at.flags);
 }
 
 bool parse_event(Reader& r, Event& e, std::string& /*error*/) {
@@ -617,9 +619,14 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
         return false;
     }
 
-    // Parse weapon loadout
+    // Parse weapon loadout [orig: word_A76412 @hdr+0x242 bytes; read+sanitized in SP, seeked in MP]
     out.loadout.raw_data.resize(out.header.weapon_loadout_chunk_len);
     r.read_bytes(out.loadout.raw_data.data(), out.header.weapon_loadout_chunk_len);
+
+    // Parse the second chunk the engine always seeks past after the loadout.
+    // [orig: word_A76416 @hdr+0x246 bytes; fseek at @0x40f751 (SP) / @0x40f6d1 (MP) in Mission_LoadBMSFile]
+    // Usually empty; preserved verbatim so a mission that uses it still round-trips.
+    r.read_bytes(out.secondary_chunk, out.header.secondary_chunk_len);
 
     // Parse entities
     out.items.resize(out.header.num_items);
@@ -759,8 +766,9 @@ bool write(const File& file, std::vector<uint8_t>& out, std::string& error) {
     // Write header
     write_header(w, file.header);
 
-    // Write weapon loadout
+    // Write weapon loadout, then the second opaque chunk (mirrors the read order in parse()).
     w.write_bytes(file.loadout.raw_data);
+    w.write_bytes(file.secondary_chunk);
 
     // Write entities
     for (const auto& e : file.items) {

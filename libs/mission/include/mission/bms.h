@@ -12,7 +12,15 @@ namespace opennova::bms {
 // Constants
 // ============================================================================
 
-constexpr uint32_t kMagic = 0x534D42;  // "BMS\0" as little-endian (first 3 bytes)
+constexpr uint32_t kMagic = 0x534D42;  // 'B','M','S' (first 3 header bytes; magic[3] is the format version)
+// [orig: version gate `byte_A761D3 < 19` @0x40f5aa Mission_LoadBMSFile / @0x40e30a BMS_LoadAndValidateHeader (Jointops.exe)]
+constexpr uint8_t kMinVersion = 19;    // 0x13; shipped JO missions are version 19 (magic reads "BMS\x13")
+// [orig: per-pool "Too many ..." clamps @0x40f5b5+ Mission_LoadBMSFile / @0x40e326+ BMS_LoadAndValidateHeader.
+//  Over-limit shows a warning dialog then continues loading; it does NOT reject the file.]
+constexpr uint32_t kMaxItems = 0x4B0;      // 1200
+constexpr uint32_t kMaxBuildings = 0x4B0;  // 1200 (engine calls these "decorations")
+constexpr uint32_t kMaxMarkers = 0x300;    // 768
+constexpr uint32_t kMaxOrganics = 0x100;   // 256
 constexpr size_t kHeaderSize = 616;
 constexpr size_t kEntitySize = 0xAC;  // 172 bytes
 constexpr size_t kWaypointRecordSize = 136;
@@ -334,7 +342,7 @@ enum class TeammateActionSubType : int32_t {
 #pragma pack(push, 1)
 
 struct Header {
-    char magic[4];                     // "BMS\x03"
+    char magic[4];                     // 'B','M','S', version byte (shipped JO = 19/0x13); gated by kMinVersion
     char mission_name[32];
     char designer[32];
     char terrain[48];
@@ -375,10 +383,12 @@ struct Header {
     uint8_t max_saves;
     uint8_t unknown7[16];
     float map_zoom;
-    int16_t area_trigger_count;
-    uint16_t weapon_loadout_chunk_len;
+    int16_t area_trigger_count;        // [orig: word_A76410 @hdr+0x240] count of 32-byte area-trigger records
+    uint16_t weapon_loadout_chunk_len; // [orig: word_A76412 @hdr+0x242] length of the weapon-loadout chunk
     uint16_t bonus_expiration;
-    uint16_t unknown8;
+    // [orig: word_A76416 @hdr+0x246] length of a SECOND chunk after the weapon loadout. The engine always
+    // seeks past it (Mission_LoadBMSFile @0x40f6d1 MP / @0x40f751 SP); usually 0. Its bytes live in File::secondary_chunk.
+    uint16_t secondary_chunk_len;
     uint16_t start_time;
     uint16_t minutes_per_day;
     uint8_t unknown9[28];
@@ -467,19 +477,32 @@ struct LayerRecord {
     uint8_t raw_data[kLayerRecordSize];
 };
 
+// 32-byte area-trigger / restriction-zone record.
+// [orig: read raw into unk_A32D10 by Mission_LoadBMSFile @0x40fc45 (no field interpretation at load).
+//  The byte layout comes from the bounds-check consumers: Entity_IsTeamInTriggerBounds @0x43c75c,
+//  Entity_IsBmsRefInTriggerBounds @0x43e53b, Entity_IsLocalPlayerOutOfBounds @0x439d40 (zone_ptr =
+//  &unk_A32D14 = base+4; zone_ptr[6]&1 is the @28 flags). Bounds are INTERLEAVED per axis
+//  (x_min,x_max,y_min,y_max,z_min,z_max) — NOT min-triple/max-triple — and there is NO Y/Z swap.]
 struct AreaTrigger {
-    int32_t wp_number;
-    int32_t min_x, min_y, min_z;       // Fixed-point 16.16 (note: Y/Z swapped in file)
-    int32_t max_x, max_y, max_z;
-    int32_t reserved;
+    int32_t id;                        // off 0: not read by the bounds checks (likely a zone id); Phase-5 RE
+    int32_t x_min, x_max;              // off 4, 8   Fixed-point 16.16
+    int32_t y_min, y_max;              // off 12, 16
+    int32_t z_min, z_max;              // off 20, 24
+    uint32_t flags;                    // off 28: bit0x01 = zone active; bit0x02 = constrain-Z (else Z unbounded)
+
+    // [orig: when flags&0x02 is clear, the consumers use Z in [-1073741824, 0x40000000] = ±16384.0 (16.16)]
+    static constexpr float kUnboundedZMin = -16384.0f;
+    static constexpr float kUnboundedZMax = 16384.0f;
 
     // Accessors for float bounds
-    float get_min_x() const { return min_x / 65536.0f; }
-    float get_min_y() const { return min_y / 65536.0f; }
-    float get_min_z() const { return min_z / 65536.0f; }
-    float get_max_x() const { return max_x / 65536.0f; }
-    float get_max_y() const { return max_y / 65536.0f; }
-    float get_max_z() const { return max_z / 65536.0f; }
+    float get_x_min() const { return x_min / 65536.0f; }
+    float get_x_max() const { return x_max / 65536.0f; }
+    float get_y_min() const { return y_min / 65536.0f; }
+    float get_y_max() const { return y_max / 65536.0f; }
+    float get_z_min() const { return z_min / 65536.0f; }
+    float get_z_max() const { return z_max / 65536.0f; }
+    bool is_active() const { return (flags & 0x1u) != 0; }
+    bool constrains_z() const { return (flags & 0x2u) != 0; }
 };
 
 struct Event {
@@ -551,6 +574,9 @@ struct WeaponLoadout {
 struct File {
     Header header;
     WeaponLoadout loadout;
+    // [orig: word_A76416 @hdr+0x246 bytes] opaque chunk the engine seeks past after the loadout.
+    // Preserved verbatim for round-trip fidelity; almost always empty in shipped missions.
+    std::vector<uint8_t> secondary_chunk;
     std::vector<Entity> items;
     std::vector<Entity> buildings;
     std::vector<Entity> markers;

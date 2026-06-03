@@ -335,5 +335,80 @@ int main() {
 	TEST_EXPECT(mis_text.find("begin event 0\r\n") != std::string::npos);
 	TEST_EXPECT(mis_text.find("//bms") == std::string::npos);
 
+	// --- Phase 0: version gate. Engine rejects magic[3] < 19 (@0x40f5aa); the magic sniff
+	// (is_bms) still passes because the gate lives in the loader, mirroring the engine. ---
+	{
+		std::vector<uint8_t> bad_version(original);
+		bad_version[3] = 18;
+		opennova::bms::File rejected;
+		std::string gate_error;
+		TEST_EXPECT(opennova::bms::is_bms(bad_version.data(), bad_version.size()));
+		TEST_EXPECT(!opennova::bms::parse(bad_version.data(), bad_version.size(), rejected, gate_error));
+		TEST_EXPECT(!gate_error.empty());
+		bad_version[3] = 19;
+		opennova::bms::File accepted;
+		TEST_EXPECT(opennova::bms::parse(bad_version.data(), bad_version.size(), accepted, gate_error));
+	}
+
+	// --- Phase 0: the second loadout chunk (word_A76416 @hdr+0x246) is consumed, keeping every
+	// later section aligned. The fixture has none, so inject one and confirm round-trip + alignment. ---
+	{
+		opennova::bms::File with_chunk;
+		std::string chunk_error;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), with_chunk, chunk_error));
+		TEST_EXPECT(with_chunk.secondary_chunk.empty());
+		with_chunk.secondary_chunk = {0xDE, 0xAD, 0xBE, 0xEF, 0x01};
+		with_chunk.header.secondary_chunk_len = static_cast<uint16_t>(with_chunk.secondary_chunk.size());
+		std::vector<uint8_t> chunk_bytes;
+		TEST_EXPECT(opennova::bms::write(with_chunk, chunk_bytes, chunk_error));
+		opennova::bms::File chunk_reparsed;
+		TEST_EXPECT(opennova::bms::parse(chunk_bytes.data(), chunk_bytes.size(), chunk_reparsed, chunk_error));
+		TEST_EXPECT(chunk_reparsed.secondary_chunk == with_chunk.secondary_chunk);
+		// Sections after the chunk stay aligned: counts and the first item match the no-chunk parse.
+		TEST_EXPECT(chunk_reparsed.items.size() == with_chunk.items.size());
+		TEST_EXPECT(chunk_reparsed.markers.size() == with_chunk.markers.size());
+		TEST_EXPECT(chunk_reparsed.area_triggers.size() == with_chunk.area_triggers.size());
+		TEST_EXPECT(chunk_reparsed.events.size() == with_chunk.events.size());
+		if (!with_chunk.items.empty()) {
+			TEST_EXPECT(chunk_reparsed.items[0].type_id == with_chunk.items[0].type_id);
+			TEST_EXPECT(chunk_reparsed.items[0].x == with_chunk.items[0].x);
+		}
+	}
+
+	// --- Phase 0: area-trigger 32-byte record is interleaved per axis (x_min,x_max,y_min,y_max,
+	// z_min,z_max,flags), NOT min-triple/max-triple, and there is no Y/Z swap (@0x43c75c). ---
+	{
+		opennova::bms::File at_file;
+		std::string at_error;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), at_file, at_error));
+		opennova::bms::AreaTrigger trig{};
+		trig.id = 7;
+		trig.x_min = 100; trig.x_max = 200;
+		trig.y_min = 300; trig.y_max = 400;
+		trig.z_min = 500; trig.z_max = 600;
+		trig.flags = 0x3; // active + constrain-Z
+		at_file.area_triggers.push_back(trig);
+		at_file.header.area_trigger_count = static_cast<int16_t>(at_file.area_triggers.size());
+		std::vector<uint8_t> at_bytes;
+		TEST_EXPECT(opennova::bms::write(at_file, at_bytes, at_error));
+		opennova::bms::File at_reparsed;
+		TEST_EXPECT(opennova::bms::parse(at_bytes.data(), at_bytes.size(), at_reparsed, at_error));
+		TEST_EXPECT(at_reparsed.area_triggers.size() == 1);
+		const opennova::bms::AreaTrigger &rt = at_reparsed.area_triggers[0];
+		TEST_EXPECT(rt.id == 7);
+		TEST_EXPECT(rt.x_min == 100 && rt.x_max == 200);
+		TEST_EXPECT(rt.y_min == 300 && rt.y_max == 400);
+		TEST_EXPECT(rt.z_min == 500 && rt.z_max == 600);
+		TEST_EXPECT(rt.flags == 0x3u);
+		TEST_EXPECT(rt.is_active());
+		TEST_EXPECT(rt.constrains_z());
+		// Per-axis min<max preserved (a wrong min-triple/max-triple layout would scramble these).
+		TEST_EXPECT(rt.get_x_min() < rt.get_x_max());
+		TEST_EXPECT(rt.get_y_min() < rt.get_y_max());
+		TEST_EXPECT(rt.get_z_min() < rt.get_z_max());
+		// Events after the area-trigger section are still aligned.
+		TEST_EXPECT(at_reparsed.events.size() == at_file.events.size());
+	}
+
 	return 0;
 }
