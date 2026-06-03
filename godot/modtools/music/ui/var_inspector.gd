@@ -31,7 +31,9 @@ func set_script_name(script_name: String) -> void:
 func _build_rows() -> void:
 	for c in _grid.get_children():
 		c.queue_free()
-	for i in range(16):
+	# 17 int32 slots: Var00..Var15 plus the user global Var16
+	# (MUS_GLOBALS_BYTES 68 / 4). The VM can write Var16, so it needs a row.
+	for i in range(17):
 		var label := Label.new()
 		label.text = MusVarNames.label_for(_script_name, i)
 		_grid.add_child(label)
@@ -45,7 +47,12 @@ func _build_rows() -> void:
 
 
 func _on_var_changed_external(var_index: int, value: int) -> void:
-	# Use set_value_no_signal to avoid echoing back into set_var.
-	var spin := _grid.get_child(var_index * 2 + 1) as SpinBox
+	# Use set_value_no_signal to avoid echoing back into set_var. Guard the
+	# child index: the VM may report a var_index past the rows we built (the
+	# globals area is the source of truth, not this view).
+	var child_index := var_index * 2 + 1
+	if child_index < 0 or child_index >= _grid.get_child_count():
+		return
+	var spin := _grid.get_child(child_index) as SpinBox
 	if spin:
 		spin.set_value_no_signal(float(value))
