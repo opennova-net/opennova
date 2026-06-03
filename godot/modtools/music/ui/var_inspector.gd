@@ -146,6 +146,13 @@ func _make_control(i: int, meta: Dictionary) -> Dictionary:
 			spin.min_value = meta.get("min", -2147483648)
 			spin.max_value = meta.get("max", 2147483647)
 			spin.step = 1
+			# min/max are display hints only: the VM can hold (and an author may
+			# want to test) any int32, so never let them clamp the true value.
+			# Without this, seeding the VM's default 0 into a hinted var like
+			# menuscript "Entry" (min 1) would clamp the widget up to 1 and look
+			# hardset, mismatching the live-value column.
+			spin.allow_lesser = true
+			spin.allow_greater = true
 			spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			spin.value_changed.connect(func(v):
 				if _director != null:

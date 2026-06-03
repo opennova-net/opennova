@@ -121,6 +121,23 @@ func test_var_labels_refresh_when_script_loads():
 		"Var01 picks up the friendly name once gamescript loads")
 
 
+# Regression: a typed var with a nominal min > 0 (menuscript "Entry", min 1)
+# must still show the VM's true default (0), not clamp it up to the min and
+# look "hardset". The spinbox uses allow_lesser/allow_greater so its range is
+# a hint, never a clamp.
+func test_entry_var_shows_true_value_not_clamped_min():
+	var lm: Control = LiveModeScene.instantiate()
+	add_child_autofree(lm)
+	await get_tree().process_frame
+	var insp: Control = lm.get_node("%VarInspector")
+	insp.set_script_name("menuscript")
+	await get_tree().process_frame
+	var ctrl = insp.get_value_control(0)
+	assert_true(ctrl is SpinBox, "Entry renders as a spinbox")
+	assert_eq(ctrl.value, 0.0, "Entry shows the true VM value 0, not the clamped min 1")
+	assert_true(ctrl.allow_lesser, "spinbox can represent values below the nominal min")
+
+
 # Polish B3: events log uses incremental update and caps at 50 rows. _log()
 # is the system-event shim and is always shown.
 func test_events_log_appends_and_caps():
