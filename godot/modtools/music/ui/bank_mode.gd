@@ -13,7 +13,7 @@ var _preview: Node           # MusicAudioPreview
 var _play_button_icon: Texture2D
 
 @onready var _track_tree: Tree = %TrackTree
-@onready var _toolbar: HBoxContainer = %Toolbar
+@onready var _toolbar: HFlowContainer = %Toolbar
 @onready var _add_button: Button = %AddButton
 @onready var _replace_button: Button = %ReplaceButton
 @onready var _move_up_button: Button = %MoveUpButton

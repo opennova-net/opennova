@@ -11,7 +11,6 @@ const WORKFLOW_DEFS := [
 ]
 
 const RootScene = preload("res://modtools/music/ui/music_workspace_root.tscn")
-const SectionNavigatorScene = preload("res://modtools/music/ui/section_navigator.tscn")
 const MusicEditorDocumentClass = preload("res://modtools/music/music_editor_document.gd")
 
 const STATE_PATH := "user://music_editor_state.cfg"
@@ -46,12 +45,20 @@ func uses_asset_dock() -> bool:
 	return false
 
 
+# Music presents its whole UI in the viewport (the unified live screen). The
+# section map already indexes every section as a live-lit, clickable node, so
+# the shell's left lane (a single-choice "Map" picker + a redundant section TOC)
+# is dead weight -- opt out so the unified screen gets that width.
+func uses_left_lane() -> bool:
+	return false
+
+
 # The shell renders workflows as typed InspectorDef rows (_rebuild_workflow_rail
 # does `entry as InspectorDef`), so expose them via the framework base's
 # get_workflows() -> _ensure_inspector_defs() path. Labels/tooltips stay
-# single-sourced with WORKFLOW_DEFS (also used by get_status_tool). No
-# per-workflow inspector script: build_workflow_inspector() is overridden below to
-# mount the section navigator directly, so the script arg is null.
+# single-sourced with WORKFLOW_DEFS (also used by get_status_tool). The single
+# "Map" workflow drives no left-lane picker (uses_left_lane is false), so the
+# inspector script arg is null and build_workflow_inspector() is a no-op.
 func _build_inspector_defs() -> Array:
 	var defs: Array = []
 	for wf in WORKFLOW_DEFS:
@@ -340,36 +347,8 @@ func unmount_viewport(_host: Control) -> void:
 		_root = null
 
 
-# Inspector host is the workstation's middle column. The unified screen always
-# shows the section TOC there (clicking a section scrolls the Advanced script
-# drawer to it); there are no longer separate modes to gate it on.
-func build_workflow_inspector(_workflow_id: int, host: Control) -> void:
-	if host == null:
-		return
-	for c in host.get_children():
-		c.queue_free()
-	var nav: Control = SectionNavigatorScene.instantiate()
-	host.add_child(nav)
-	if nav.has_method("bind_document"):
-		nav.bind_document(_document)
-	# Connect the navigator's selection so clicking a section in the TOC scrolls
-	# the Script panel to it. The signal was previously emitted but never
-	# connected, leaving the navigator inert.
-	if nav.has_signal("section_selected"):
-		if not nav.section_selected.is_connected(_on_section_selected):
-			nav.section_selected.connect(_on_section_selected)
-
-
-func _on_section_selected(section_name: StringName) -> void:
-	if _root == null:
-		return
-	# Route through the Live screen so the Advanced drawer opens before its
-	# CodeEdit is scrolled (scrolling the hidden drawer did nothing and errored
-	# on grab_focus). Fall back to a direct scroll if the method is unavailable.
-	var live_node: Node = _root.get_panel("Live")
-	if live_node != null and live_node.has_method("reveal_section_in_script"):
-		live_node.reveal_section_in_script(section_name)
-		return
-	var script_node: Node = _root.get_panel("Script")
-	if script_node != null and script_node.has_method("scroll_to_section"):
-		script_node.scroll_to_section(section_name)
+# Music opts out of the shell left lane (uses_left_lane == false), so there is no
+# inspector host to populate. Explicit no-op: the live section map IS the section
+# index (click a node to select it; double-click opens its raw-script drawer).
+func build_workflow_inspector(_workflow_id: int, _host: Control) -> void:
+	pass
