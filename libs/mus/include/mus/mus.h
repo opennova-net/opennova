@@ -5,8 +5,8 @@
 
    SCR0 file header parser witnessed at
        Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20
-   MU01 chunk relocator at
-       Jointops.exe!AudioVM_RelocateChunk @ 0x00672470 */
+   MU01 chunk pointer fixup at
+       Jointops.exe!AudioVM_FixupPointers @ 0x00672470 */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -26,7 +26,9 @@ extern "C" {
 /* --- On-disk structs --- */
 
 /* SCR0 file-level header. Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
-   Field offsets confirmed against the relocation pattern at 0x557af3..0x557b3d. */
+   Field offsets confirmed against the load+relocation loop in that function: magic
+   compare vs 'SCR0' 0x30524353, chunk-table ptr relocate at +0x0C, name string-blob
+   and resolve-table relocate at +0x14/+0x18 (each resolved via AudioVM_FindContextByName). */
 typedef struct MusFileHeader {
     uint32_t magic;                       /* 'SCR0' */
     uint32_t version;                     /* 0x00000100; not read by engine */
@@ -38,8 +40,8 @@ typedef struct MusFileHeader {
     uint32_t reserved[4];                 /* 16 bytes; never read by engine */
 } MusFileHeader;
 
-/* MU01 chunk header. Witnessed: Jointops.exe!AudioVM_RelocateChunk @ 0x00672470
-   plus Jointops.exe!AudioVM_ScriptInstanceInit @ 0x00672D20. */
+/* MU01 chunk header. Witnessed: Jointops.exe!AudioVM_FixupPointers @ 0x00672470
+   plus Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20. */
 typedef struct MusChunkHeader {
     uint32_t tag;                         /* 'MU01'; never validated at runtime */
     uint32_t version;                     /* 0x00000100; not read */

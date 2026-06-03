@@ -25,13 +25,22 @@ func test_menuscript_unknown_indices_fall_back():
 
 
 func test_gamescript_known_vars_get_friendly_names():
-	# Per fixtures/mus/golden_jo_gamemus.mus.txt line 87 (`if (Var01 != 0)`)
+	# Binary-grounded by the Jointops.exe grill: AudioVM_SetVariable @ 0x671FA0
+	# callers Game_StartMission @ 0x524360 and
+	# Entity_UpdateInfantryPhysics_Continuation2 @ 0x4B434F.
 	assert_eq(MusVarNames.label_for("gamescript", 1), "MissionActive (Var01)")
+	assert_eq(MusVarNames.label_for("gamescript", 2), "ViewPitch (Var02)")
+	assert_eq(MusVarNames.label_for("gamescript", 5), "Speed (Var05)")
+	assert_eq(MusVarNames.label_for("gamescript", 7), "HealthPct (Var07)")
+	assert_eq(MusVarNames.label_for("gamescript", 8), "GameState (Var08)")
+	assert_eq(MusVarNames.label_for("gamescript", 10), "Team (Var10)")
 
 
 func test_gamescript_unknown_indices_fall_back():
+	# Slots left raw (lower-confidence or seeded-0-and-never-driven).
 	assert_eq(MusVarNames.label_for("gamescript", 0), "Var00")
-	assert_eq(MusVarNames.label_for("gamescript", 2), "Var02")
+	assert_eq(MusVarNames.label_for("gamescript", 3), "Var03")
+	assert_eq(MusVarNames.label_for("gamescript", 9), "Var09")
 
 
 func test_has_friendly_names_predicate():
