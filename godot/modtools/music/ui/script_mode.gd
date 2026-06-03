@@ -162,8 +162,9 @@ func _on_error_clicked(item_index: int) -> void:
 	var line_str: String = text.substr(0, colon)
 	if not line_str.is_valid_int():
 		return
-	var line: int = int(line_str) - 1
-	if line < 0:
-		line = 0
+	# Clamp to the current document. The error list can outlive the text it was
+	# compiled against (e.g. after switching to a shorter script), so a stale
+	# line number must not run past the end of _code_edit.
+	var line: int = clampi(int(line_str) - 1, 0, _code_edit.get_line_count() - 1)
 	_code_edit.set_caret_line(line)
 	_code_edit.grab_focus()
