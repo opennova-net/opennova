@@ -1,7 +1,7 @@
 /* MUS container parser implementation.
 
    SCR0 file header parser at Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
-   MU01 chunk relocator at Jointops.exe!AudioVM_RelocateChunk @ 0x00672470. */
+   MU01 chunk pointer fixup at Jointops.exe!AudioVM_FixupPointers @ 0x00672470. */
 
 #include "mus/mus.h"
 
@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20 (magic check at 0x557acf).
+/* Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20 (magic compare vs 'SCR0' 0x30524353).
    Engine itself only validates the SCR0 magic; we additionally bound the chunk
    count to a sane limit so a corrupt file does not provoke a runaway alloc. */
 extern "C" int mus_validate(const uint8_t *data, size_t size) {
@@ -134,8 +134,8 @@ static void parse_debug_export(const uint8_t *data, size_t size,
     }
 }
 
-/* Witnessed: Jointops.exe!AudioVM_RelocateChunk @ 0x00672470 (chunk-pointer fixup at
-   0x557b0a, per-chunk relocate at 0x557b0c). Reads one MU01 chunk into the
+/* Witnessed: Jointops.exe!AudioVM_FixupPointers @ 0x00672470, driven by the chunk-pointer
+   relocation loop in AudioVM_LoadScriptFile @ 0x00672D20. Reads one MU01 chunk into the
    parsed MusScript form. `chunk_off` is the file offset of the MU01 header. */
 static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
                        MusScript *out) {
