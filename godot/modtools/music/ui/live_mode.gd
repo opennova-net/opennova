@@ -19,20 +19,64 @@ const COLOR_PAUSED := Color(1.0, 0.85, 0.3)
 const COLOR_HALTED := Color(1.0, 0.85, 0.3)
 const COLOR_ERROR := Color(1.0, 0.4, 0.4)
 
+# Event-log entry types, used to colour rows and gate the per-type filters.
+# section/sound are the events authors validate against and show by default;
+# var/volume are high-frequency (the VM fires them on every write / GSV call)
+# and are surfaced on the Variables tab + volume meter instead, so their log
+# lines are off by default. echo/system always show (errors must never hide).
+enum EvType { SECTION, SOUND, VAR, VOLUME, ECHO, SYSTEM }
+
+const _EV_COLOR := {
+	EvType.SECTION: Color(0.55, 0.8, 1.0),
+	EvType.SOUND: Color(0.6, 0.9, 0.6),
+	EvType.VAR: Color(0.85, 0.7, 1.0),
+	EvType.VOLUME: Color(1.0, 0.85, 0.4),
+	EvType.ECHO: Color(0.8, 0.8, 0.8),
+	EvType.SYSTEM: Color(1.0, 0.6, 0.55),
+}
+
 var _document: RefCounted
 var _director: NovaMusicDirector
 var _current_section: StringName = &""
+# Consecutive re-entries of the SAME section. A self-loop section (e.g. the
+# gamescript's `Missionnull { enter Missionnull }`) re-fires section_entered
+# every VM tick; we count those as idle rather than logging each one.
+var _idle_ticks: int = 0
 var _last_state: int = VM_STOPPED
 var _start_warning_until_ms: int = 0
+
+# De-spam state. The VM fires on_volume_changed on every GSV/GSDV call and
+# on_var_changed on every pop_global write, including same-value writes, so we
+# only log a line when the value actually changes (the meter / inspector still
+# reflect every update). Reset on each Start.
+var _last_logged_var: Dictionary = {}
+var _vol_seen: bool = false
+var _last_vol_l: int = 0
+var _last_vol_r: int = 0
+
+# Coalesce run-length for the events log: the last appended row's identity and
+# how many identical events have folded into it. A distinct (type, text) breaks
+# the run and starts a new row, so e.g. Multiplayerstart's 20 identical play
+# lines collapse to one "play 0 (sound_0)  x20" row.
+var _last_log_type: int = -1
+var _last_log_text: String = ""
+var _last_log_count: int = 0
 
 @onready var _start_btn: Button = %StartButton
 @onready var _pause_btn: Button = %PauseButton
 @onready var _resume_btn: Button = %ResumeButton
 @onready var _stop_btn: Button = %StopButton
 @onready var _state_label: Label = %StateLabel
+@onready var _now_playing: Label = %NowPlaying
+@onready var _jump_option: OptionButton = %JumpSection
+@onready var _volume_meter: Control = %VolumeMeter
 @onready var _var_inspector: Control = %VarInspector
 @onready var _events: ItemList = %Events
 @onready var _clear_btn: Button = %ClearButton
+@onready var _filter_section: CheckBox = %FilterSection
+@onready var _filter_sound: CheckBox = %FilterSound
+@onready var _filter_var: CheckBox = %FilterVar
+@onready var _filter_volume: CheckBox = %FilterVolume
 @onready var _graph: VBoxContainer = %SectionGraph
 
 
@@ -52,16 +96,18 @@ func bind_document(document: RefCounted) -> void:
 
 
 # Fired both on initial bind and any time the document re-emits `changed`
-# (open/close/reorder/rename/etc). All three Live-mode panels read off the
-# document, so refresh them together. Without this, opening a project via
-# the Open menu (vs. having it pre-loaded from saved state) leaves the
-# Start button grayed out, var labels stuck on Var00, and the section
-# graph empty: bind_document only fires once on mount, before the user
-# has chosen a file.
+# (open/close/reorder/rename/etc). All Live-mode panels read off the document,
+# so refresh them together. Without this, opening a project via the Open menu
+# (vs. having it pre-loaded from saved state) leaves the Start button grayed
+# out, var labels stuck on Var00, the jump dropdown empty, and the section
+# graph empty: bind_document only fires once on mount, before the user has
+# chosen a file.
 func _on_document_changed() -> void:
 	_refresh_graph()
 	_refresh_button_state()
 	_refresh_var_labels()
+	_refresh_jump_options()
+	_refresh_now_playing()
 
 
 func _ready() -> void:
@@ -80,12 +126,16 @@ func _ready() -> void:
 	_resume_btn.pressed.connect(_on_resume)
 	_stop_btn.pressed.connect(_on_stop)
 	_clear_btn.pressed.connect(_on_clear)
+	if _jump_option != null:
+		_jump_option.item_selected.connect(_on_jump_selected)
 	if _var_inspector.has_method("bind_director"):
 		_var_inspector.call("bind_director", _director)
 	_apply_state_label(VM_STOPPED)
 	_refresh_graph()
 	_refresh_button_state()
 	_refresh_var_labels()
+	_refresh_jump_options()
+	_refresh_now_playing()
 
 
 # Polls the VM only while it's plausibly active, and only flips the label on
@@ -102,6 +152,10 @@ func _process(_delta: float) -> void:
 	if state != _last_state:
 		_apply_state_label(state)
 		_refresh_button_state()
+		# Section-graph buttons + jump dropdown enable only while RUNNING, and
+		# now-playing clears on stop/halt, so refresh them on every transition.
+		_refresh_graph()
+		_refresh_now_playing()
 
 
 func _on_start() -> void:
@@ -114,15 +168,26 @@ func _on_start() -> void:
 	_director.bank = _document.bank
 	_director.load_mus_script(_document.mus_script)
 	_refresh_var_labels()
+	# Fresh run: clear de-spam memory + section/idle state and reset the meter so
+	# the first events log cleanly rather than being suppressed against a prior
+	# run's values.
+	_last_logged_var.clear()
+	_vol_seen = false
+	_current_section = &""
+	_idle_ticks = 0
+	if _volume_meter != null:
+		_volume_meter.set_volume(0, 0)
 	_director.start()
 	_apply_state_label(_director.vm_state())
 	_refresh_button_state()
+	_refresh_now_playing()
+	_refresh_graph()
 
 
-# Push the loaded script's name down to the var inspector so it can swap
-# raw VarXX labels for known friendly names (menuscript / gamescript). When
-# no script is loaded, falls back to the empty-string form which renders
-# raw VarXX.
+# Push the loaded script's name down to the var inspector so it can swap raw
+# VarXX labels for known friendly names (menuscript / gamescript) and pick
+# friendlier controls. When no script is loaded, falls back to the
+# empty-string form which renders raw VarXX spinboxes.
 func _refresh_var_labels() -> void:
 	if _var_inspector == null or not _var_inspector.has_method("set_script_name"):
 		return
@@ -138,7 +203,7 @@ func _on_pause() -> void:
 	_director.pause()
 	_apply_state_label(_director.vm_state())
 	_refresh_button_state()
-	_log("paused")
+	_log_typed(EvType.SYSTEM, "paused")
 
 
 func _on_resume() -> void:
@@ -147,7 +212,7 @@ func _on_resume() -> void:
 	_director.resume()
 	_apply_state_label(_director.vm_state())
 	_refresh_button_state()
-	_log("resumed")
+	_log_typed(EvType.SYSTEM, "resumed")
 
 
 func _on_stop() -> void:
@@ -155,7 +220,13 @@ func _on_stop() -> void:
 		return
 	_director.stop()
 	_apply_state_label(VM_STOPPED)
+	_current_section = &""
+	_idle_ticks = 0
 	_refresh_button_state()
+	_refresh_now_playing()
+	_refresh_graph()
+	if _volume_meter != null:
+		_volume_meter.set_volume(0, 0)
 
 
 # Public stop hook used by music_workspace.gd::activate_workflow when leaving
@@ -168,13 +239,99 @@ func stop_director() -> void:
 		return
 	_director.stop()
 	_apply_state_label(VM_STOPPED)
+	_current_section = &""
+	_idle_ticks = 0
 	_refresh_button_state()
+	_refresh_now_playing()
+	_refresh_graph()
+	if _volume_meter != null:
+		_volume_meter.set_volume(0, 0)
 
+
+# --- Section jump ------------------------------------------------------
+
+# Populate the jump dropdown with every section in the loaded script (the flat
+# list, so win/lose stings that no variable branch reaches are still
+# selectable). Disabled until the VM is RUNNING.
+func _refresh_jump_options() -> void:
+	if _jump_option == null:
+		return
+	_jump_option.clear()
+	if _document == null or not _document.script_loaded():
+		_jump_option.disabled = true
+		return
+	var script_name: StringName = StringName(_document.mus_script.get_default_script_name())
+	var sections: PackedStringArray = _document.mus_script.get_section_names(script_name)
+	for s in sections:
+		_jump_option.add_item(String(s))
+	_update_jump_enabled()
+
+
+func _update_jump_enabled() -> void:
+	if _jump_option == null:
+		return
+	_jump_option.disabled = (_last_state != VM_RUNNING) or _jump_option.item_count == 0
+
+
+func _on_jump_selected(index: int) -> void:
+	if _director == null or _last_state != VM_RUNNING:
+		return
+	if index < 0 or index >= _jump_option.item_count:
+		return
+	var section := StringName(_jump_option.get_item_text(index))
+	_director.jump_to_section(section)
+	_log_typed(EvType.SYSTEM, "jump -> %s" % section)
+
+
+func _on_graph_section_pressed(section_name: StringName) -> void:
+	if _director == null or _last_state != VM_RUNNING:
+		return
+	_director.jump_to_section(section_name)
+	_log_typed(EvType.SYSTEM, "jump -> %s" % section_name)
+
+
+# --- Now playing -------------------------------------------------------
+
+# Single source of truth for the now-playing label. Suffix precedence: a
+# just-triggered sound (the most recent concrete event) wins, else the idle
+# marker if we're self-looping in the current section, else nothing.
+func _refresh_now_playing(sound_name: String = "") -> void:
+	if _now_playing == null:
+		return
+	if _last_state != VM_RUNNING and _last_state != VM_PAUSED:
+		_now_playing.text = "Now playing: —"
+		return
+	var sec: String = String(_current_section)
+	if sec == "":
+		_now_playing.text = "Now playing: —"
+		return
+	var suffix := ""
+	if sound_name != "":
+		suffix = "  (♪ %s)" % sound_name
+	elif _idle_ticks > 0:
+		suffix = "  (idle — looping, waiting for the game)"
+	_now_playing.text = "Now playing: %s%s" % [sec, suffix]
+
+
+# --- Director signal handlers ------------------------------------------
 
 func _on_section(section_name: StringName) -> void:
+	# A self-loop section (e.g. the gamescript's `Missionnull { enter Missionnull }`)
+	# re-fires section_entered ~60/sec. libs/mus + the director stay byte-faithful;
+	# we collapse the repeats here. Same section as last time = an idle tick: bump
+	# the counter and refresh the now-playing suffix only. No new log row, no graph
+	# rebuild (which would otherwise thrash 60/sec).
+	if section_name == _current_section and _current_section != &"":
+		_idle_ticks += 1
+		if _idle_ticks == 1:
+			_refresh_now_playing()
+		return
+	# Real transition: reset idle, log it, rebuild the graph + now-playing.
 	_current_section = section_name
+	_idle_ticks = 0
 	_refresh_graph()
-	_log("section -> %s" % section_name)
+	_refresh_now_playing()
+	_log_typed(EvType.SECTION, "section -> %s" % section_name)
 
 
 func _refresh_graph() -> void:
@@ -194,13 +351,21 @@ func _refresh_graph() -> void:
 		empty_hint.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 		_graph.add_child(empty_hint)
 		return
+	var running: bool = _last_state == VM_RUNNING
 	for section_name in graph.keys():
 		var row := HBoxContainer.new()
-		var lbl := Label.new()
-		lbl.text = section_name
+		# The section name is a flat button: clicking it jumps the running VM
+		# there. Disabled when not RUNNING (jump_to_section no-ops pre-Start
+		# anyway, but disabling makes the rule visible).
+		var btn := Button.new()
+		btn.flat = true
+		btn.text = section_name
+		btn.disabled = not running
+		btn.tooltip_text = "Jump the running script to this section."
 		if section_name == String(_current_section):
-			lbl.add_theme_color_override("font_color", Color(1.0, 0.83, 0.47))
-		row.add_child(lbl)
+			btn.add_theme_color_override("font_color", Color(1.0, 0.83, 0.47))
+		btn.pressed.connect(_on_graph_section_pressed.bind(StringName(section_name)))
+		row.add_child(btn)
 		for target in graph[section_name]:
 			var arrow := Label.new()
 			arrow.text = " -> %s" % target
@@ -209,11 +374,12 @@ func _refresh_graph() -> void:
 
 
 func _on_sound(idx: int, sound_name: StringName, wait: bool) -> void:
-	_log("play %d (%s)%s" % [idx, sound_name, " wait" if wait else ""])
+	_log_typed(EvType.SOUND, "play %d (%s)%s" % [idx, sound_name, " wait" if wait else ""])
+	_refresh_now_playing(String(sound_name))
 
 
 func _on_echo(arg: int) -> void:
-	_log("echo %d" % arg)
+	_log_typed(EvType.ECHO, "echo %d" % arg)
 
 
 # Emitted by the VM when a section runs to its terminal `done`. Treat as a
@@ -221,7 +387,8 @@ func _on_echo(arg: int) -> void:
 # required.
 func _on_halted() -> void:
 	_apply_state_label(VM_HALTED)
-	_log("halted")
+	_refresh_now_playing()
+	_log_typed(EvType.SYSTEM, "halted")
 
 
 # vm_error means mus_vm_load_script or runtime hit a hard fault. The director
@@ -229,42 +396,102 @@ func _on_halted() -> void:
 func _on_vm_error(message: String) -> void:
 	_apply_state_label(VM_ERROR)
 	if message.is_empty():
-		_log("error")
+		_log_typed(EvType.SYSTEM, "error")
 	else:
-		_log("error: %s" % message)
+		_log_typed(EvType.SYSTEM, "error: %s" % message)
 
 
 func _on_variable_changed(var_index: int, value: int) -> void:
-	_log("var Var%02d = %d" % [var_index, value])
+	# The Variables tab mirrors every write live; only log a line when the
+	# value actually changes (and the var filter is on), so per-frame writes
+	# don't drown the log.
+	if _last_logged_var.get(var_index, null) == value:
+		return
+	_last_logged_var[var_index] = value
+	_log_typed(EvType.VAR, "var Var%02d = %d" % [var_index, value])
 
 
 func _on_volume_changed(left: int, right: int) -> void:
 	# GSV/GSDV emit 16.16 fixed-point ints (witnessed: Jointops.exe!Intrinsic_GSV @
-	# 0x6720E0). Render as decimal so logs read as `volume L=200.00 R=200.00`
-	# instead of the raw `L=13107200`.
-	_log("volume L=%.2f R=%.2f" % [left / 65536.0, right / 65536.0])
+	# 0x6720E0). The meter always shows the latest value; the log line only
+	# fires on an actual change (and when the volume filter is on) so a
+	# per-tick volume loop doesn't flood the list.
+	if _volume_meter != null:
+		_volume_meter.set_volume(left, right)
+	if _vol_seen and left == _last_vol_l and right == _last_vol_r:
+		return
+	_vol_seen = true
+	_last_vol_l = left
+	_last_vol_r = right
+	_log_typed(EvType.VOLUME, "volume L=%.2f R=%.2f" % [left / 65536.0, right / 65536.0])
 
 
 func _on_clear() -> void:
 	if _events == null:
 		return
 	_events.clear()
+	_last_log_type = -1
+	_last_log_text = ""
+	_last_log_count = 0
 
 
-# Append the new line, drop the oldest entry if we're past the 50-row cap, and
-# scroll the tail into view. ensure_current_is_visible only nudges the scroll
-# when an item is current, so we set the new tail current first. The previous
-# implementation cleared + re-added every entry every frame, with no item
-# selected, leaving the scroll pinned to the head of the list.
-func _log(text: String) -> void:
+# --- Events log --------------------------------------------------------
+
+# True if the given event type should be appended right now. section/sound/var/
+# volume are gated by their filter checkboxes; echo/system always show so
+# errors and halts can't be hidden. Filters apply to FUTURE entries only,
+# which preserves the incremental-append design (no full rebuild).
+func _is_type_shown(type: int) -> bool:
+	match type:
+		EvType.SECTION:
+			return _filter_section == null or _filter_section.button_pressed
+		EvType.SOUND:
+			return _filter_sound == null or _filter_sound.button_pressed
+		EvType.VAR:
+			return _filter_var == null or _filter_var.button_pressed
+		EvType.VOLUME:
+			return _filter_volume == null or _filter_volume.button_pressed
+		_:
+			return true
+
+
+# Append a typed, colour-coded line, drop the oldest entry past the 50-row cap,
+# and scroll the tail into view. ensure_current_is_visible only nudges the
+# scroll when an item is current, so we set the new tail current first.
+func _log_typed(type: int, text: String) -> void:
 	if _events == null:
 		return
+	if not _is_type_shown(type):
+		return
+	# Coalesce a run of identical (type, text) events into the existing tail row
+	# as "<text>  xN" rather than appending duplicates. A distinct line breaks
+	# the run (so the cap test's distinct "flood N" lines never fold).
+	if _events.item_count > 0 and type == _last_log_type and text == _last_log_text:
+		_last_log_count += 1
+		var tail := _events.item_count - 1
+		_events.set_item_text(tail, "[%s] %s  x%d" % [_timestamp(), text, _last_log_count])
+		if _EV_COLOR.has(type):
+			_events.set_item_custom_fg_color(tail, _EV_COLOR[type])
+		_events.select(tail)
+		_events.ensure_current_is_visible()
+		return
 	_events.add_item("[%s] %s" % [_timestamp(), text])
+	if _EV_COLOR.has(type):
+		_events.set_item_custom_fg_color(_events.item_count - 1, _EV_COLOR[type])
 	if _events.item_count > 50:
 		_events.remove_item(0)
+	_last_log_type = type
+	_last_log_text = text
+	_last_log_count = 1
 	if _events.item_count > 0:
 		_events.select(_events.item_count - 1)
 		_events.ensure_current_is_visible()
+
+
+# Back-compat shim: untyped log lines are system events. Kept so callers/tests
+# that use _log() keep working.
+func _log(text: String) -> void:
+	_log_typed(EvType.SYSTEM, text)
 
 
 func _timestamp() -> String:
@@ -315,6 +542,7 @@ func _flash_start_warning(message: String) -> void:
 # - Pause: enabled iff RUNNING
 # - Resume: enabled iff PAUSED
 # - Stop: enabled iff RUNNING or PAUSED
+# Also keeps the jump dropdown's RUNNING-only rule in sync.
 func _refresh_button_state() -> void:
 	var has_project: bool = _document != null and _document.bank_loaded() and _document.script_loaded()
 	var state: int = _last_state
@@ -326,3 +554,4 @@ func _refresh_button_state() -> void:
 		_resume_btn.disabled = state != VM_PAUSED
 	if _stop_btn != null:
 		_stop_btn.disabled = state != VM_RUNNING and state != VM_PAUSED
+	_update_jump_enabled()

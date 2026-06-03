@@ -48,3 +48,34 @@ func test_has_friendly_names_predicate():
 	assert_true(MusVarNames.has_friendly_names("gamescript"))
 	assert_false(MusVarNames.has_friendly_names("user_authored"))
 	assert_false(MusVarNames.has_friendly_names(""))
+
+
+func test_meta_for_known_controls():
+	# HealthPct renders as a 0..100 slider.
+	var health := MusVarNames.meta_for("gamescript", 7)
+	assert_eq(health.get("kind"), "slider")
+	assert_eq(health.get("min"), 0)
+	assert_eq(health.get("max"), 100)
+	# MissionActive / IntroPlayed render as checkboxes.
+	assert_eq(MusVarNames.meta_for("gamescript", 1).get("kind"), "bool")
+	assert_eq(MusVarNames.meta_for("menuscript", 14).get("kind"), "bool")
+	# MenuScreen renders as an enum dropdown with labelled IDs.
+	var screen := MusVarNames.meta_for("menuscript", 2)
+	assert_eq(screen.get("kind"), "enum")
+	assert_eq((screen.get("options") as Dictionary).get(1), "Main")
+
+
+func test_meta_for_falls_back_to_empty():
+	# No control hint -> {} so the inspector uses a plain int32 spinbox.
+	assert_eq(MusVarNames.meta_for("gamescript", 99), {})
+	assert_eq(MusVarNames.meta_for("gamescript", 5), {})
+	assert_eq(MusVarNames.meta_for("user_authored", 0), {})
+	assert_eq(MusVarNames.meta_for("", 0), {})
+
+
+func test_known_indices_sorted():
+	assert_eq(MusVarNames.known_indices("gamescript"), [1, 2, 5, 7, 8, 10])
+	assert_eq(MusVarNames.known_indices("menuscript"), [0, 2, 14])
+	# Unknown scripts have no known vars, so the inspector renders all slots raw.
+	assert_eq(MusVarNames.known_indices("user_authored"), [])
+	assert_eq(MusVarNames.known_indices(""), [])

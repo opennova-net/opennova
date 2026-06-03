@@ -67,6 +67,34 @@ const KNOWN := {
 }
 
 
+# Optional per-var control metadata. Where present it lets the var inspector
+# render a friendlier control than a full-range int32 SpinBox; absent entries
+# fall back to that SpinBox, so this table is purely additive and a script
+# can have a friendly name (in KNOWN) without a control hint here.
+#   kind "slider" -> HSlider + readout, integer range [min,max]
+#   kind "bool"   -> CheckBox (0/1)
+#   kind "enum"   -> OptionButton; "options" maps the stored int value -> label
+#   kind "int" / no entry -> SpinBox (full int32 range unless min/max given)
+# These are a UI convenience layered over the binary-grounded KNOWN map; the
+# ranges/labels mirror the host-side semantics documented in KNOWN above.
+const META := {
+	"gamescript": {
+		1: {"kind": "bool"},                          # MissionActive: gate flag
+		7: {"kind": "slider", "min": 0, "max": 100},  # HealthPct: 0..100
+		8: {"kind": "int", "min": 0, "max": 255},     # GameState: small enum-ish
+		10: {"kind": "int", "min": 0, "max": 32},     # Team: small index
+	},
+	"menuscript": {
+		0: {"kind": "int", "min": 1, "max": 3},       # Entry: 1-3 all reach Main
+		# MenuScreen (the MUSICVAR); IDs per the KNOWN comment above.
+		2: {"kind": "enum", "options": {
+				0: "Error", 1: "Main", 5: "MP", 6: "MP2",
+				8: "Host", 9: "Options", 10: "Player", 11: "SP"}},
+		14: {"kind": "bool"},                          # IntroPlayed: 0/1
+	},
+}
+
+
 # Returns "Friendly (VarXX)" when a friendly name is known, else "VarXX".
 # script_name: the MU01 chunk's name (e.g. "menuscript"). Empty string for
 # unknown scripts falls through to the raw VarXX form.
@@ -83,3 +111,24 @@ static func label_for(script_name: String, var_index: int) -> String:
 # column for legibility.
 static func has_friendly_names(script_name: String) -> bool:
 	return KNOWN.has(script_name) and not (KNOWN[script_name] as Dictionary).is_empty()
+
+
+# Returns the control descriptor for (script, var_index), or {} when none is
+# registered (the caller then renders a plain full-range int32 SpinBox).
+static func meta_for(script_name: String, var_index: int) -> Dictionary:
+	if META.has(script_name):
+		var per_script: Dictionary = META[script_name]
+		if per_script.has(var_index):
+			return per_script[var_index]
+	return {}
+
+
+# Sorted list of the var indices that have a friendly name for this script, so
+# the inspector can render the handful that matter first. Empty for unknown
+# scripts (user-authored), which then render every slot in raw order.
+static func known_indices(script_name: String) -> Array:
+	if not KNOWN.has(script_name):
+		return []
+	var keys: Array = (KNOWN[script_name] as Dictionary).keys()
+	keys.sort()
+	return keys
