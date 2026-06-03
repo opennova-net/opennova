@@ -775,3 +775,59 @@ func test_area_trigger_add_set_remove_round_trip() -> void:
 	assert_false(m.remove_area_trigger(999999), "out-of-range remove is rejected")
 	assert_eq(m.get_area_trigger(999999), {}, "out-of-range get yields {}")
 	assert_eq(m.set_area_trigger(999999, Vector3.ZERO, Vector3.ONE, true, true, 0), {}, "out-of-range set yields {}")
+
+
+func test_weapon_loadout_dictionary_and_round_trip() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var entries := m.get_weapon_loadout()
+	# The fixture ships 7 three-string records (name, "-1", "-1").
+	assert_eq(entries.size(), 7, "fixture loadout has 7 weapons")
+	var first := entries[0] as Dictionary
+	for key in ["index", "name", "value1", "value2"]:
+		assert_true(first.has(key), "loadout dict exposes %s" % key)
+	assert_eq(String(first["name"]), "WPN_CAR15AUTO", "first weapon name")
+	assert_eq(String(first["value1"]), "-1", "first value1")
+	# Edit one entry + append a custom one; persist and reload.
+	entries[0]["value1"] = "5"
+	entries.append({ "name": "WPN_TEST", "value1": "1", "value2": "2" })
+	assert_true(m.set_weapon_loadout(entries), "set_weapon_loadout succeeds")
+	assert_true(m.is_modified(), "editing the loadout dirties the mission")
+	var tmp := _temp_bms_path()
+	assert_eq(m.save_as(tmp), OK)
+	var r := NovaMissionData.new()
+	assert_eq(r.open_file(tmp), OK)
+	var reloaded := r.get_weapon_loadout()
+	assert_eq(reloaded.size(), 8, "edited loadout survives reload")
+	assert_eq(String((reloaded[0] as Dictionary)["value1"]), "5", "edited value1 survives reload")
+	assert_eq(String((reloaded[7] as Dictionary)["name"]), "WPN_TEST", "appended weapon survives reload")
+	# Clearing yields an empty list.
+	assert_true(m.set_weapon_loadout([]), "clearing the loadout succeeds")
+	assert_eq(m.get_weapon_loadout().size(), 0, "loadout is empty after clear")
+
+
+func test_group_get_set_round_trip() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	assert_eq(m.get_group_count(), 64, "64 fixed group records")
+	assert_eq(m.get_groups().size(), m.get_group_count(), "groups list matches count")
+	var g := m.get_group(3)
+	for key in ["index", "field0", "field8", "field12"]:
+		assert_true(g.has(key), "group dict exposes %s" % key)
+	# A neighbour's baseline must be untouched by editing group 3.
+	var neighbour_before := m.get_group(4)
+	assert_true(m.set_group(3, 1234, 5678, 9012), "set_group succeeds")
+	var g2 := m.get_group(3)
+	assert_eq(int(g2["field0"]), 1234, "field0 written")
+	assert_eq(int(g2["field8"]), 5678, "field8 written")
+	assert_eq(int(g2["field12"]), 9012, "field12 written")
+	assert_eq(m.get_group(4), neighbour_before, "neighbouring group untouched")
+	# Persist + reload.
+	var tmp := _temp_bms_path()
+	assert_eq(m.save_as(tmp), OK)
+	var r := NovaMissionData.new()
+	assert_eq(r.open_file(tmp), OK)
+	assert_eq(int(r.get_group(3)["field8"]), 5678, "edited group survives reload")
+	# Out-of-range guards.
+	assert_eq(m.get_group(999), {}, "out-of-range group get yields {}")
+	assert_false(m.set_group(999, 1, 2, 3), "out-of-range group set rejected")

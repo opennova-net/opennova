@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cstdio>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -195,6 +196,94 @@ int main() {
 	opennova_mission_destroy(clamp_reload);
 	opennova_mission_free_bytes(&clamp_bytes);
 	TEST_EXPECT(opennova_mission_remove_area_trigger(document, clamped_index) == 1);
+
+	// Phase 3: weapon loadout. The fixture ships 7 three-string records (name, "-1", "-1"); the
+	// earlier entity/zone edits do not touch the loadout chunk, so it still reads back verbatim.
+	const size_t loadout_count = opennova_mission_weapon_loadout_count(document);
+	TEST_EXPECT(loadout_count == 7);
+	OpenNovaMissionWeaponLoadoutEntry first_loadout = {};
+	TEST_EXPECT(opennova_mission_get_weapon_loadout_entry(document, 0, &first_loadout) == 1);
+	TEST_EXPECT(std::string(first_loadout.name) == "WPN_CAR15AUTO");
+	TEST_EXPECT(std::string(first_loadout.value1) == "-1");
+	TEST_EXPECT(std::string(first_loadout.value2) == "-1");
+	OpenNovaMissionWeaponLoadoutEntry last_loadout = {};
+	TEST_EXPECT(opennova_mission_get_weapon_loadout_entry(document, loadout_count - 1, &last_loadout) == 1);
+	TEST_EXPECT(std::string(last_loadout.name) == "WPN_KNIFE");
+	TEST_EXPECT(opennova_mission_get_weapon_loadout_entry(document, loadout_count, &last_loadout) == 0);
+	// Re-serialize the parsed entries and confirm the round-trip is identity (3-string format is exact).
+	std::vector<OpenNovaMissionWeaponLoadoutEntry> loadout_snapshot(loadout_count);
+	for (size_t i = 0; i < loadout_count; ++i) {
+		TEST_EXPECT(opennova_mission_get_weapon_loadout_entry(document, i, &loadout_snapshot[i]) == 1);
+	}
+	TEST_EXPECT(opennova_mission_set_weapon_loadout(document, loadout_snapshot.data(), loadout_count) == 1);
+	TEST_EXPECT(opennova_mission_weapon_loadout_count(document) == loadout_count);
+	OpenNovaMissionWeaponLoadoutEntry reparsed = {};
+	TEST_EXPECT(opennova_mission_get_weapon_loadout_entry(document, 0, &reparsed) == 1);
+	TEST_EXPECT(std::string(reparsed.name) == "WPN_CAR15AUTO");
+	// Replace the loadout with a custom two-entry set; survive a byte round-trip.
+	OpenNovaMissionWeaponLoadoutEntry custom[2] = {};
+	std::snprintf(custom[0].name, sizeof(custom[0].name), "WPN_KNIFE");
+	std::snprintf(custom[0].value1, sizeof(custom[0].value1), "-1");
+	std::snprintf(custom[0].value2, sizeof(custom[0].value2), "-1");
+	std::snprintf(custom[1].name, sizeof(custom[1].name), "WPN_M9Berreta");
+	std::snprintf(custom[1].value1, sizeof(custom[1].value1), "2");
+	std::snprintf(custom[1].value2, sizeof(custom[1].value2), "0");
+	TEST_EXPECT(opennova_mission_set_weapon_loadout(document, custom, 2) == 1);
+	TEST_EXPECT(opennova_mission_weapon_loadout_count(document) == 2);
+	OpenNovaMissionBytes loadout_bytes = {};
+	TEST_EXPECT(opennova_mission_write_bytes(document, &loadout_bytes) == 1);
+	OpenNovaMissionDocument *loadout_reload = opennova_mission_create();
+	TEST_EXPECT(opennova_mission_load_bytes(loadout_reload, loadout_bytes.data, loadout_bytes.size) == 1);
+	TEST_EXPECT(opennova_mission_weapon_loadout_count(loadout_reload) == 2);
+	OpenNovaMissionWeaponLoadoutEntry reload_entry = {};
+	TEST_EXPECT(opennova_mission_get_weapon_loadout_entry(loadout_reload, 1, &reload_entry) == 1);
+	TEST_EXPECT(std::string(reload_entry.name) == "WPN_M9Berreta");
+	TEST_EXPECT(std::string(reload_entry.value1) == "2");
+	TEST_EXPECT(std::string(reload_entry.value2) == "0");
+	opennova_mission_destroy(loadout_reload);
+	opennova_mission_free_bytes(&loadout_bytes);
+	// Clearing the loadout yields an empty chunk (the loader installs the WPN_KNIFE default at runtime).
+	TEST_EXPECT(opennova_mission_set_weapon_loadout(document, nullptr, 0) == 1);
+	TEST_EXPECT(opennova_mission_weapon_loadout_count(document) == 0);
+	// The empty chunk (len 0) must survive a byte round-trip — not regress to a stray NUL or a stale length.
+	OpenNovaMissionBytes empty_bytes = {};
+	TEST_EXPECT(opennova_mission_write_bytes(document, &empty_bytes) == 1);
+	OpenNovaMissionDocument *empty_reload = opennova_mission_create();
+	TEST_EXPECT(opennova_mission_load_bytes(empty_reload, empty_bytes.data, empty_bytes.size) == 1);
+	TEST_EXPECT(opennova_mission_weapon_loadout_count(empty_reload) == 0);
+	opennova_mission_destroy(empty_reload);
+	opennova_mission_free_bytes(&empty_bytes);
+
+	// Phase 3: groups. 64 fixed records; only the three ints at offsets 0/8/12 are editable.
+	TEST_EXPECT(opennova_mission_group_count(document) == opennova::bms::kGroupRecordCount);
+	OpenNovaMissionGroupRecord group_before = {};
+	TEST_EXPECT(opennova_mission_get_group(document, 7, &group_before) == 1);
+	TEST_EXPECT(group_before.index == 7);
+	// Capture a neighbour's baseline (the fixture's groups are not all zero) to prove set_group is local.
+	OpenNovaMissionGroupRecord neighbour_before = {};
+	TEST_EXPECT(opennova_mission_get_group(document, 8, &neighbour_before) == 1);
+	TEST_EXPECT(opennova_mission_set_group(document, 7, 111, 222, 333) == 1);
+	OpenNovaMissionGroupRecord group_after = {};
+	TEST_EXPECT(opennova_mission_get_group(document, 7, &group_after) == 1);
+	TEST_EXPECT(group_after.field0 == 111 && group_after.field8 == 222 && group_after.field12 == 333);
+	// A different group is untouched by the edit above.
+	OpenNovaMissionGroupRecord neighbour_after = {};
+	TEST_EXPECT(opennova_mission_get_group(document, 8, &neighbour_after) == 1);
+	TEST_EXPECT(neighbour_after.field0 == neighbour_before.field0);
+	TEST_EXPECT(neighbour_after.field8 == neighbour_before.field8);
+	TEST_EXPECT(neighbour_after.field12 == neighbour_before.field12);
+	// Out-of-range guard + byte round-trip of the edited group.
+	OpenNovaMissionGroupRecord group_other = {};
+	TEST_EXPECT(opennova_mission_get_group(document, opennova::bms::kGroupRecordCount, &group_other) == 0);
+	OpenNovaMissionBytes group_bytes = {};
+	TEST_EXPECT(opennova_mission_write_bytes(document, &group_bytes) == 1);
+	OpenNovaMissionDocument *group_reload = opennova_mission_create();
+	TEST_EXPECT(opennova_mission_load_bytes(group_reload, group_bytes.data, group_bytes.size) == 1);
+	OpenNovaMissionGroupRecord group_rt = {};
+	TEST_EXPECT(opennova_mission_get_group(group_reload, 7, &group_rt) == 1);
+	TEST_EXPECT(group_rt.field0 == 111 && group_rt.field8 == 222 && group_rt.field12 == 333);
+	opennova_mission_destroy(group_reload);
+	opennova_mission_free_bytes(&group_bytes);
 
 	TEST_EXPECT(opennova_mission_event_count(document) > 0);
 	TEST_EXPECT(opennova_mission_trigger_count(document) > 0);

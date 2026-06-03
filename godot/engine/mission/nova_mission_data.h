@@ -33,6 +33,8 @@ private:
 	Dictionary entity_to_dictionary(const opennova::mission::EntityRecord &record) const;
 	Dictionary waypoint_path_to_dictionary(const opennova::mission::WaypointPath &path) const;
 	Dictionary area_trigger_to_dictionary(const opennova::mission::AreaTriggerRecord &record) const;
+	Dictionary weapon_loadout_to_dictionary(const opennova::mission::WeaponLoadoutEntry &entry, int index) const;
+	Dictionary group_to_dictionary(const opennova::mission::GroupFields &fields) const;
 
 protected:
 	static void _bind_methods();
@@ -176,6 +178,23 @@ public:
 	// Triggers referencing a zone by *IsWithinArea param2 are NOT auto-repaired (index semantics are
 	// Phase-5 UNKNOWN); the editor warns. Returns false if out of range. Dirty on success.
 	bool remove_area_trigger(int index);
+
+	// --- Weapon loadout + groups (mission-global, Phase 3) --------------------
+	// The weapon / restriction loadout is a list of records, each three strings (name, value1, value2);
+	// see WeaponLoadoutEntry in libs/mission. get_weapon_loadout() returns an Array of dictionaries
+	// { index: int, name: String, value1: String, value2: String }. set_weapon_loadout() takes an Array
+	// of dictionaries with at least a "name" (value1/value2 default to "-1") and re-serializes the chunk.
+	// Dirty on success.
+	Array get_weapon_loadout() const;
+	bool set_weapon_loadout(const Array &entries);
+	// Groups: 64 fixed records; only the three ints at offsets 0/8/12 are surfaced (field0/field8/field12;
+	// meanings unproven, Phase-5 RE). A group dictionary is { index, field0, field8, field12 }.
+	int get_group_count() const;
+	Array get_groups() const;
+	Dictionary get_group(int index) const;
+	// Overwrite the three editable ints of the group at `index`, preserving every other byte of the
+	// 32-byte record. Returns false if out of range. Dirty on success.
+	bool set_group(int index, int field0, int field8, int field12);
 
 	// Write the document back to disk. save_file() targets the path it was opened
 	// from; save_as() targets a new path and adopts it. Both clear the dirty flag and

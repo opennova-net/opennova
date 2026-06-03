@@ -977,6 +977,58 @@ func set_header_flag(bit: int, on: bool) -> void:
 		_report("Could not set mission flag.", true)
 
 
+# --- Weapon loadout + groups (mission-global) ---------------------------------
+# Loadout entries are dictionaries { index, name, value1, value2 }; groups are
+# { index, field0, field8, field12 }. Both edit through the one-step snapshot/undo recipe.
+
+func get_weapon_loadout() -> Array:
+	if _mission == null:
+		return []
+	return _mission.get_weapon_loadout()
+
+
+func set_weapon_loadout(entries: Array) -> void:
+	if _mission == null:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	if _mission.set_weapon_loadout(entries):
+		_push_undo_step(before)
+		mark_dirty()
+	else:
+		_report("Could not update the weapon loadout.", true)
+
+
+func get_group_count() -> int:
+	if _mission == null:
+		return 0
+	return _mission.get_group_count()
+
+
+func get_groups() -> Array:
+	if _mission == null:
+		return []
+	return _mission.get_groups()
+
+
+func get_group(index: int) -> Dictionary:
+	if _mission == null:
+		return {}
+	return _mission.get_group(index)
+
+
+func set_group(index: int, field0: int, field8: int, field12: int) -> void:
+	if _mission == null:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	if _mission.set_group(index, field0, field8, field12):
+		_push_undo_step(before)
+		mark_dirty()
+	else:
+		_report("Could not update group %d." % index, true)
+
+
 # --- Authoring (Phase 3): place new objects -----------------------------------
 # The inspector's palette arms an items.def item; a left-click on the terrain then
 # places a new instance there (add_entity + incremental render) and selects it, while

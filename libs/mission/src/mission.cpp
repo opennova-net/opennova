@@ -66,6 +66,14 @@ int32_t read_i32_at(const uint8_t *bytes, size_t offset) {
 	                            (static_cast<uint32_t>(bytes[offset + 3]) << 24));
 }
 
+void write_i32_at(uint8_t *bytes, size_t offset, int32_t value) {
+	const uint32_t v = static_cast<uint32_t>(value);
+	bytes[offset] = static_cast<uint8_t>(v & 0xFF);
+	bytes[offset + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+	bytes[offset + 2] = static_cast<uint8_t>((v >> 16) & 0xFF);
+	bytes[offset + 3] = static_cast<uint8_t>((v >> 24) & 0xFF);
+}
+
 int header_time_to_hhmm(uint16_t encoded) {
 	const int hours = (encoded >> 8) & 0xFF;
 	const int frac = encoded & 0xFF;
@@ -1775,6 +1783,120 @@ bool MissionDocument::remove_area_trigger(size_t index) {
 	return true;
 }
 
+// Append one NUL-terminated string to a loadout byte buffer.
+static void append_loadout_field(std::vector<uint8_t> &raw, const std::string &value) {
+	raw.insert(raw.end(), value.begin(), value.end());
+	raw.push_back(0);
+}
+
+std::vector<WeaponLoadoutEntry> MissionDocument::weapon_loadout() const {
+	std::vector<WeaponLoadoutEntry> out;
+	if (!impl_->loaded) {
+		return out;
+	}
+	const std::vector<uint8_t> &raw = impl_->file.loadout.raw_data;
+	size_t pos = 0;
+	// Walk records until an empty record (a leading NUL = the terminator) or the buffer is exhausted,
+	// reading exactly three NUL-terminated strings each (name, value1, value2). A short/unterminated
+	// tail stops the walk without emitting a partial record. [orig: Mission_LoadBMSFile @0x40f7b6;
+	// see notes for the loader's 4th-string over-read, which is a filter quirk, not the file format.]
+	while (pos < raw.size() && raw[pos] != 0) {
+		WeaponLoadoutEntry entry;
+		std::string *fields[3] = { &entry.name, &entry.value1, &entry.value2 };
+		bool complete = true;
+		for (int f = 0; f < 3; ++f) {
+			const size_t start = pos;
+			while (pos < raw.size() && raw[pos] != 0) {
+				++pos;
+			}
+			if (pos >= raw.size()) {
+				complete = false;
+				break;
+			}
+			fields[f]->assign(reinterpret_cast<const char *>(raw.data() + start), pos - start);
+			++pos;  // skip the NUL terminator
+		}
+		if (!complete) {
+			break;
+		}
+		out.push_back(std::move(entry));
+	}
+	return out;
+}
+
+bool MissionDocument::set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &entries) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	std::vector<uint8_t> raw;
+	for (const WeaponLoadoutEntry &entry : entries) {
+		append_loadout_field(raw, entry.name);
+		append_loadout_field(raw, entry.value1);
+		append_loadout_field(raw, entry.value2);
+	}
+	// The loader walks records while the next byte is non-NUL, so a non-empty chunk needs a trailing
+	// empty record (one extra NUL) to terminate. An empty loadout serializes to an empty chunk (len 0),
+	// which the loader treats as "no restrictions" (it installs the WPN_KNIFE default at runtime).
+	if (!raw.empty()) {
+		raw.push_back(0);
+	}
+	impl_->file.loadout.raw_data = std::move(raw);
+	sync_counts();
+	return true;
+}
+
+size_t MissionDocument::group_count() const {
+	if (!impl_->loaded) {
+		return 0;
+	}
+	return impl_->file.group_records.size();
+}
+
+bool MissionDocument::get_group(size_t index, GroupFields &out) const {
+	if (!impl_->loaded || index >= impl_->file.group_records.size()) {
+		return false;
+	}
+	const uint8_t *raw = impl_->file.group_records[index].raw_data;
+	out.index = index;
+	out.field0 = read_i32_at(raw, 0);
+	out.field8 = read_i32_at(raw, 8);
+	out.field12 = read_i32_at(raw, 12);
+	return true;
+}
+
+std::vector<GroupFields> MissionDocument::groups() const {
+	std::vector<GroupFields> out;
+	if (!impl_->loaded) {
+		return out;
+	}
+	out.reserve(impl_->file.group_records.size());
+	for (size_t i = 0; i < impl_->file.group_records.size(); ++i) {
+		GroupFields g;
+		get_group(i, g);
+		out.push_back(g);
+	}
+	return out;
+}
+
+bool MissionDocument::set_group(size_t index, int field0, int field8, int field12) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	if (index >= impl_->file.group_records.size()) {
+		impl_->last_error = "Group index out of range";
+		return false;
+	}
+	// Only the three loader-consumed ints are written; the other 20 bytes are preserved so the record
+	// round-trips. [orig: Mission_LoadBMSFile @0x40fbbb keeps offsets 0/8/12]
+	uint8_t *raw = impl_->file.group_records[index].raw_data;
+	write_i32_at(raw, 0, static_cast<int32_t>(field0));
+	write_i32_at(raw, 8, static_cast<int32_t>(field8));
+	write_i32_at(raw, 12, static_cast<int32_t>(field12));
+	return true;
+}
+
 size_t MissionDocument::event_count() const {
 	if (!impl_->loaded) {
 		return 0;
@@ -2644,6 +2766,81 @@ int opennova_mission_remove_area_trigger(OpenNovaMissionDocument *document, size
 		return 0;
 	}
 	return document->document.remove_area_trigger(index) ? 1 : 0;
+}
+
+size_t opennova_mission_weapon_loadout_count(const OpenNovaMissionDocument *document) {
+	if (document == nullptr || !document->document.is_loaded()) {
+		return 0;
+	}
+	return document->document.weapon_loadout().size();
+}
+
+int opennova_mission_get_weapon_loadout_entry(const OpenNovaMissionDocument *document,
+                                              size_t index,
+                                              OpenNovaMissionWeaponLoadoutEntry *out_entry) {
+	if (document == nullptr || out_entry == nullptr) {
+		return 0;
+	}
+	const std::vector<WeaponLoadoutEntry> entries = document->document.weapon_loadout();
+	if (index >= entries.size()) {
+		return 0;
+	}
+	const WeaponLoadoutEntry &entry = entries[index];
+	copy_cstr(out_entry->name, sizeof(out_entry->name), entry.name);
+	copy_cstr(out_entry->value1, sizeof(out_entry->value1), entry.value1);
+	copy_cstr(out_entry->value2, sizeof(out_entry->value2), entry.value2);
+	return 1;
+}
+
+int opennova_mission_set_weapon_loadout(OpenNovaMissionDocument *document,
+                                        const OpenNovaMissionWeaponLoadoutEntry *entries,
+                                        size_t count) {
+	if (document == nullptr || (entries == nullptr && count > 0)) {
+		return 0;
+	}
+	std::vector<WeaponLoadoutEntry> records;
+	records.reserve(count);
+	for (size_t i = 0; i < count; ++i) {
+		WeaponLoadoutEntry record;
+		record.name = fixed_string(entries[i].name, sizeof(entries[i].name));
+		record.value1 = fixed_string(entries[i].value1, sizeof(entries[i].value1));
+		record.value2 = fixed_string(entries[i].value2, sizeof(entries[i].value2));
+		records.push_back(std::move(record));
+	}
+	return document->document.set_weapon_loadout(records) ? 1 : 0;
+}
+
+size_t opennova_mission_group_count(const OpenNovaMissionDocument *document) {
+	if (document == nullptr || !document->document.is_loaded()) {
+		return 0;
+	}
+	return document->document.group_count();
+}
+
+int opennova_mission_get_group(const OpenNovaMissionDocument *document,
+                               size_t index,
+                               OpenNovaMissionGroupRecord *out_record) {
+	if (document == nullptr || out_record == nullptr) {
+		return 0;
+	}
+	GroupFields fields;
+	if (!document->document.get_group(index, fields)) {
+		return 0;
+	}
+	out_record->index = fields.index;
+	out_record->field0 = fields.field0;
+	out_record->field8 = fields.field8;
+	out_record->field12 = fields.field12;
+	return 1;
+}
+
+int opennova_mission_set_group(OpenNovaMissionDocument *document,
+                               size_t index,
+                               int field0, int field8, int field12) {
+	if (document == nullptr) {
+		return 0;
+	}
+	return document->document.set_group(index, field0, field8, field12) ? 1 : 0;
 }
 
 size_t opennova_mission_event_count(const OpenNovaMissionDocument *document) {

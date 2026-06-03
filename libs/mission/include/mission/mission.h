@@ -138,6 +138,31 @@ struct AreaTriggerRecord {
 	bool constrain_z = false; // flags & 0x02 (else Z unbounded ±16384.0)
 };
 
+// One weapon / restriction-loadout record: three NUL-terminated strings stored back-to-back on disk
+// (name, value1, value2). [orig: chunk walked by Mission_LoadBMSFile @0x40f7b6; verified byte-exact on
+// ash_i5b: 7 records + a terminating NUL = 136 B]. The retail loader actually reads four strings per
+// iteration, so on real 3-string data it over-reads into the next record's name; that only changes the
+// rarely-used restriction filter (unused6 @0x40f834), never the file format. Names are matched
+// case-insensitively against an internal weapon-def table (dword_2540CE0); unknown names are dropped at
+// load (not corruption). value1/value2 are almost always "-1" (likely default/unlimited); their exact
+// meaning is Phase-5 RE, so they are surfaced neutrally.
+struct WeaponLoadoutEntry {
+	std::string name;
+	std::string value1;
+	std::string value2;
+};
+
+// Typed view of a 32-byte group record. The loader keeps three ints per record at on-disk byte offsets
+// 0/8/12 and discards the rest (offset 4 is read-but-unused). [orig: Mission_LoadBMSFile @0x40fbbb:
+// temp_record[0]/[2]/[3] scattered into unk_A33FB4]. Field meanings are unproven (Phase-5 RE), so they
+// are surfaced as neutral field0/field8/field12.
+struct GroupFields {
+	size_t index = 0;
+	int field0 = 0;
+	int field8 = 0;
+	int field12 = 0;
+};
+
 struct MissionEventRecord {
 	size_t index = 0;
 	int flags = 0;
@@ -273,6 +298,17 @@ public:
 	bool add_area_trigger(const AreaTriggerRecord &record, AreaTriggerRecord *out = nullptr);
 	bool set_area_trigger(size_t index, const AreaTriggerRecord &record, AreaTriggerRecord *out = nullptr);
 	bool remove_area_trigger(size_t index);
+	// Weapon / restriction loadout (mission-global). weapon_loadout() walks the on-disk chunk into typed
+	// records; set_weapon_loadout() re-serializes them (each record three NUL-terminated strings, then a
+	// terminating empty record) and refreshes weapon_loadout_chunk_len via sync_counts().
+	std::vector<WeaponLoadoutEntry> weapon_loadout() const;
+	bool set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &entries);
+	// Groups: a fixed array of 64 records; only the three ints at offsets 0/8/12 are meaningful (the rest
+	// stay untouched so the record round-trips). set_group preserves every other byte.
+	size_t group_count() const;
+	bool get_group(size_t index, GroupFields &out) const;
+	std::vector<GroupFields> groups() const;
+	bool set_group(size_t index, int field0, int field8, int field12);
 	size_t event_count() const;
 	bool get_event(size_t index, MissionEventRecord &out) const;
 	std::vector<MissionEventRecord> events() const;
@@ -399,6 +435,21 @@ typedef struct OpenNovaMissionAreaTriggerRecord {
 	int active;
 	int constrain_z;
 } OpenNovaMissionAreaTriggerRecord;
+
+// Loadout entry over FFI. The three on-disk strings are copied into fixed 64-char buffers (real weapon
+// names + "-1" values are short); a longer field would be truncated to 63 chars on read.
+typedef struct OpenNovaMissionWeaponLoadoutEntry {
+	char name[64];
+	char value1[64];
+	char value2[64];
+} OpenNovaMissionWeaponLoadoutEntry;
+
+typedef struct OpenNovaMissionGroupRecord {
+	size_t index;
+	int field0;
+	int field8;
+	int field12;
+} OpenNovaMissionGroupRecord;
 
 typedef struct OpenNovaMissionEventRecord {
 	size_t index;
@@ -528,6 +579,20 @@ MISSION_EXPORT int opennova_mission_set_area_trigger(OpenNovaMissionDocument *do
                                                      const OpenNovaMissionAreaTriggerRecord *record,
                                                      OpenNovaMissionAreaTriggerRecord *out_record);
 MISSION_EXPORT int opennova_mission_remove_area_trigger(OpenNovaMissionDocument *document, size_t index);
+MISSION_EXPORT size_t opennova_mission_weapon_loadout_count(const OpenNovaMissionDocument *document);
+MISSION_EXPORT int opennova_mission_get_weapon_loadout_entry(const OpenNovaMissionDocument *document,
+                                                             size_t index,
+                                                             OpenNovaMissionWeaponLoadoutEntry *out_entry);
+MISSION_EXPORT int opennova_mission_set_weapon_loadout(OpenNovaMissionDocument *document,
+                                                       const OpenNovaMissionWeaponLoadoutEntry *entries,
+                                                       size_t count);
+MISSION_EXPORT size_t opennova_mission_group_count(const OpenNovaMissionDocument *document);
+MISSION_EXPORT int opennova_mission_get_group(const OpenNovaMissionDocument *document,
+                                              size_t index,
+                                              OpenNovaMissionGroupRecord *out_record);
+MISSION_EXPORT int opennova_mission_set_group(OpenNovaMissionDocument *document,
+                                              size_t index,
+                                              int field0, int field8, int field12);
 MISSION_EXPORT size_t opennova_mission_event_count(const OpenNovaMissionDocument *document);
 MISSION_EXPORT int opennova_mission_get_event(const OpenNovaMissionDocument *document,
                                               size_t index,

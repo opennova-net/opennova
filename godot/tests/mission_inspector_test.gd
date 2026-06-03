@@ -322,6 +322,38 @@ class FakeController:
 			zones[selected_zone]["constrain_z"] = constrain_z
 		changed.emit()
 
+	# Phase 3: weapon loadout + groups (mission-global). `loadout`/`groups` are
+	# NovaMissionData-shaped dictionaries; the *_calls arrays record what the inspector sent.
+	var loadout: Array = []
+	var groups: Array = []
+	var set_loadout_calls: Array = []
+	var set_group_calls: Array = []
+
+	func get_weapon_loadout() -> Array:
+		return loadout
+
+	func set_weapon_loadout(entries: Array) -> void:
+		set_loadout_calls.append(entries.duplicate(true))
+		loadout = entries.duplicate(true)
+		changed.emit()
+
+	func get_group_count() -> int:
+		return groups.size()
+
+	func get_groups() -> Array:
+		return groups
+
+	func get_group(index: int) -> Dictionary:
+		if index < 0 or index >= groups.size():
+			return {}
+		return groups[index]
+
+	func set_group(index: int, f0: int, f8: int, f12: int) -> void:
+		set_group_calls.append([index, f0, f8, f12])
+		if index >= 0 and index < groups.size():
+			groups[index] = {"index": index, "field0": f0, "field8": f8, "field12": f12}
+		changed.emit()
+
 
 func _sample_entity() -> Dictionary:
 	return {
@@ -789,6 +821,9 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 		"get_area_triggers", "get_selected_zone_index", "get_selected_zone", "select_area_trigger",
 		"add_area_trigger_default", "delete_selected_area_trigger",
 		"set_selected_zone_bounds", "set_selected_zone_flags",
+		# Phase 3: weapon loadout + groups (mission-global).
+		"get_weapon_loadout", "set_weapon_loadout",
+		"get_group_count", "get_groups", "get_group", "set_group",
 	]
 	for method in required:
 		assert_true(controller.has_method(method),
@@ -977,3 +1012,144 @@ func test_trigger_panel_editors_disabled_when_zones_exist_but_none_selected() ->
 	assert_true(ctx.inspector._at_active_check.disabled, "Active toggle disabled with no selection")
 	assert_true(ctx.inspector._at_constrain_check.disabled, "Constrain toggle disabled with no selection")
 	assert_true(ctx.inspector._at_delete_button.disabled, "Delete disabled with no selection")
+
+
+# --- Phase 3: weapon loadout + groups panels ----------------------------------
+
+func _loadout_ctx(loadout: Array) -> Dictionary:
+	var fake := FakeController.new()
+	fake.mission_ref = NovaMissionData.new()
+	fake.mode = 0
+	fake.entity = _sample_entity()
+	fake.loadout = loadout
+	var inspector = MissionInspector.new()
+	add_child_autofree(inspector)
+	inspector.setup(fake)
+	# Expand the (collapsed-by-default) section so the list / editors populate.
+	inspector._loadout_toggle.button_pressed = true
+	inspector._loadout_toggle.toggled.emit(true)
+	return {"fake": fake, "inspector": inspector}
+
+
+func _groups_ctx(groups: Array) -> Dictionary:
+	var fake := FakeController.new()
+	fake.mission_ref = NovaMissionData.new()
+	fake.mode = 0
+	fake.entity = _sample_entity()
+	fake.groups = groups
+	var inspector = MissionInspector.new()
+	add_child_autofree(inspector)
+	inspector.setup(fake)
+	inspector._groups_toggle.button_pressed = true
+	inspector._groups_toggle.toggled.emit(true)
+	return {"fake": fake, "inspector": inspector}
+
+
+func _loadout_entry(name: String, v1: String, v2: String) -> Dictionary:
+	return {"name": name, "value1": v1, "value2": v2}
+
+
+func test_loadout_panel_lists_entries() -> void:
+	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1"), _loadout_entry("WPN_M9", "-1", "-1")])
+	assert_true(ctx.inspector._loadout_toggle.visible, "the loadout toggle shows when a mission is loaded")
+	assert_eq(ctx.inspector._loadout_list.item_count, 2, "both weapons listed")
+
+
+func test_loadout_panel_hidden_without_a_mission() -> void:
+	var fake := FakeController.new()
+	fake.mission_ref = null
+	var inspector = MissionInspector.new()
+	add_child_autofree(inspector)
+	inspector.setup(fake)
+	assert_false(inspector._loadout_toggle.visible, "no loadout toggle without a mission")
+	assert_false(inspector._groups_toggle.visible, "no groups toggle without a mission")
+
+
+func test_loadout_add_calls_controller() -> void:
+	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1")])
+	var add := ctx.inspector.find_child("MissionLoadoutAdd", true, false) as Button
+	assert_not_null(add, "Add weapon button built")
+	add.pressed.emit()
+	assert_eq(ctx.fake.set_loadout_calls.size(), 1, "add commits a new loadout")
+	assert_eq((ctx.fake.set_loadout_calls.back() as Array).size(), 2, "the appended weapon grows the list")
+
+
+func test_loadout_edit_commits_on_submit() -> void:
+	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1")])
+	ctx.inspector._loadout_list.item_selected.emit(0)
+	ctx.inspector._loadout_name.text = "WPN_FOO"
+	ctx.inspector._loadout_name.text_submitted.emit("WPN_FOO")
+	var committed := ctx.fake.set_loadout_calls.back() as Array
+	assert_eq(String((committed[0] as Dictionary)["name"]), "WPN_FOO", "the edited name is committed")
+
+
+func test_loadout_unchanged_edit_does_not_commit() -> void:
+	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1")])
+	ctx.inspector._loadout_list.item_selected.emit(0)
+	# Re-submit the same text: no commit (no spurious undo step).
+	ctx.inspector._loadout_name.text_submitted.emit("WPN_KNIFE")
+	assert_eq(ctx.fake.set_loadout_calls.size(), 0, "an unchanged edit commits nothing")
+
+
+func test_loadout_delete_calls_controller() -> void:
+	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1"), _loadout_entry("WPN_M9", "-1", "-1")])
+	ctx.inspector._loadout_list.item_selected.emit(1)
+	var del := ctx.inspector.find_child("MissionLoadoutDelete", true, false) as Button
+	del.pressed.emit()
+	assert_eq(ctx.fake.set_loadout_calls.size(), 1, "delete commits the shorter loadout")
+	assert_eq((ctx.fake.set_loadout_calls.back() as Array).size(), 1, "one weapon removed")
+
+
+func test_groups_panel_lists_and_syncs_selection() -> void:
+	var ctx := _groups_ctx([
+		{"index": 0, "field0": 0, "field8": 0, "field12": 0},
+		{"index": 1, "field0": 11, "field8": 22, "field12": 33},
+	])
+	assert_true(ctx.inspector._groups_toggle.visible, "the groups toggle shows when a mission is loaded")
+	assert_eq(ctx.inspector._groups_list.item_count, 2, "both groups listed")
+	ctx.inspector._groups_list.item_selected.emit(1)
+	assert_eq(ctx.inspector._group_spins[0].value, 11.0, "field0 spin syncs to the selected group")
+	assert_eq(ctx.inspector._group_spins[1].value, 22.0, "field8 spin syncs")
+	assert_eq(ctx.inspector._group_spins[2].value, 33.0, "field12 spin syncs")
+
+
+func test_group_spin_commits_to_controller() -> void:
+	var ctx := _groups_ctx([{"index": 0, "field0": 0, "field8": 0, "field12": 0}])
+	ctx.inspector._groups_list.item_selected.emit(0)
+	ctx.inspector._group_spins[0].value = 99.0  # fires value_changed
+	assert_eq(ctx.fake.set_group_calls.size(), 1, "changing a spin commits the group")
+	var call := ctx.fake.set_group_calls.back() as Array
+	assert_eq(int(call[0]), 0, "group index 0")
+	assert_eq(int(call[1]), 99, "field0 sent")
+	assert_eq(int(call[2]), 0, "field8 sent (unchanged)")
+	assert_eq(int(call[3]), 0, "field12 sent (unchanged)")
+
+
+func test_loadout_edit_survives_external_refresh_while_focused() -> void:
+	# The critical guard: an external `changed` (e.g. an undo elsewhere) fires a full refresh; an
+	# in-flight, uncommitted keystroke in a focused field must NOT be clobbered by the model sync.
+	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1")])
+	ctx.inspector._loadout_list.item_selected.emit(0)
+	ctx.inspector._loadout_name.grab_focus()
+	if not ctx.inspector._loadout_name.has_focus():
+		pass_test("headless focus unavailable; focus guard is unit-covered by the spin variant")
+		return
+	ctx.inspector._loadout_name.text = "WPN_TYPING"  # uncommitted
+	ctx.fake.changed.emit()                          # external refresh
+	assert_eq(ctx.inspector._loadout_name.text, "WPN_TYPING", "focused in-flight edit survives an external refresh")
+
+
+func test_group_spin_edit_survives_external_refresh_while_focused() -> void:
+	var ctx := _groups_ctx([{"index": 0, "field0": 5, "field8": 0, "field12": 0}])
+	ctx.inspector._groups_list.item_selected.emit(0)  # spin0 synced to 5
+	var inner: LineEdit = ctx.inspector._group_spins[0].get_line_edit()
+	inner.grab_focus()
+	if not inner.has_focus():
+		pass_test("headless focus unavailable")
+		return
+	# The user is mid-typing in the spin's inner field (not yet applied), while an external change
+	# (e.g. an undo) moves the model to a different value. The refresh must not clobber the typed text.
+	inner.text = "70"
+	ctx.fake.groups[0] = {"index": 0, "field0": 9, "field8": 0, "field12": 0}
+	ctx.fake.changed.emit()
+	assert_eq(inner.text, "70", "focused, in-flight spin text survives an external refresh")

@@ -69,6 +69,13 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_area_trigger", "index", "min_bounds", "max_bounds", "active", "constrain_z", "zone_id"), &NovaMissionData::set_area_trigger);
 	ClassDB::bind_method(D_METHOD("remove_area_trigger", "index"), &NovaMissionData::remove_area_trigger);
 
+	ClassDB::bind_method(D_METHOD("get_weapon_loadout"), &NovaMissionData::get_weapon_loadout);
+	ClassDB::bind_method(D_METHOD("set_weapon_loadout", "entries"), &NovaMissionData::set_weapon_loadout);
+	ClassDB::bind_method(D_METHOD("get_group_count"), &NovaMissionData::get_group_count);
+	ClassDB::bind_method(D_METHOD("get_groups"), &NovaMissionData::get_groups);
+	ClassDB::bind_method(D_METHOD("get_group", "index"), &NovaMissionData::get_group);
+	ClassDB::bind_method(D_METHOD("set_group", "index", "field0", "field8", "field12"), &NovaMissionData::set_group);
+
 	ClassDB::bind_method(D_METHOD("save_file"), &NovaMissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &NovaMissionData::save_as);
 	ClassDB::bind_method(D_METHOD("is_modified"), &NovaMissionData::is_modified);
@@ -637,6 +644,87 @@ bool NovaMissionData::remove_area_trigger(int index) {
 		return false;
 	}
 	if (!document.remove_area_trigger(static_cast<size_t>(index))) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+Dictionary NovaMissionData::weapon_loadout_to_dictionary(const opennova::mission::WeaponLoadoutEntry &entry, int index) const {
+	Dictionary out;
+	out["index"] = index;
+	out["name"] = String::utf8(entry.name.c_str());
+	out["value1"] = String::utf8(entry.value1.c_str());
+	out["value2"] = String::utf8(entry.value2.c_str());
+	return out;
+}
+
+Array NovaMissionData::get_weapon_loadout() const {
+	Array out;
+	const std::vector<opennova::mission::WeaponLoadoutEntry> entries = document.weapon_loadout();
+	for (size_t i = 0; i < entries.size(); ++i) {
+		out.push_back(weapon_loadout_to_dictionary(entries[i], static_cast<int>(i)));
+	}
+	return out;
+}
+
+bool NovaMissionData::set_weapon_loadout(const Array &entries) {
+	std::vector<opennova::mission::WeaponLoadoutEntry> records;
+	records.reserve(entries.size());
+	for (int i = 0; i < entries.size(); ++i) {
+		const Dictionary dict = entries[i];
+		opennova::mission::WeaponLoadoutEntry record;
+		record.name = String(dict.get("name", "")).utf8().get_data();
+		// value1/value2 default to "-1" (the shipped convention) when a caller omits them.
+		record.value1 = String(dict.get("value1", "-1")).utf8().get_data();
+		record.value2 = String(dict.get("value2", "-1")).utf8().get_data();
+		records.push_back(std::move(record));
+	}
+	if (!document.set_weapon_loadout(records)) {
+		last_error = String(document.last_error().c_str());
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+Dictionary NovaMissionData::group_to_dictionary(const opennova::mission::GroupFields &fields) const {
+	Dictionary out;
+	out["index"] = static_cast<int>(fields.index);
+	out["field0"] = fields.field0;
+	out["field8"] = fields.field8;
+	out["field12"] = fields.field12;
+	return out;
+}
+
+int NovaMissionData::get_group_count() const {
+	return static_cast<int>(document.group_count());
+}
+
+Array NovaMissionData::get_groups() const {
+	Array out;
+	for (const opennova::mission::GroupFields &fields : document.groups()) {
+		out.push_back(group_to_dictionary(fields));
+	}
+	return out;
+}
+
+Dictionary NovaMissionData::get_group(int index) const {
+	if (index < 0) {
+		return Dictionary();
+	}
+	opennova::mission::GroupFields fields;
+	if (!document.get_group(static_cast<size_t>(index), fields)) {
+		return Dictionary();
+	}
+	return group_to_dictionary(fields);
+}
+
+bool NovaMissionData::set_group(int index, int field0, int field8, int field12) {
+	if (index < 0) {
+		return false;
+	}
+	if (!document.set_group(static_cast<size_t>(index), field0, field8, field12)) {
 		return false;
 	}
 	modified = true;
