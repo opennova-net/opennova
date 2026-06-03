@@ -1,24 +1,25 @@
 class_name MusicWorkspaceRoot
 extends Control
 
-# Holds three mode sub-scenes, only one visible at a time. The workspace
-# adapter sets the active mode via set_active_workflow.
+# The unified Music screen. The three legacy panels (Bank / Script / Live) are
+# instanced WHOLE inside live_mode.tscn -- Tracks (Bank) and the Advanced drawer
+# (Script) dock around the live-lit section map -- so each panel's standalone
+# tests keep passing untouched. This root just wraps that screen and fans the
+# shared document out to every panel.
+#
+# Because Bank and Script now live nested inside the embedded Live screen rather
+# than as direct children, panel lookups go through find_child (recursive,
+# owner-agnostic) instead of a direct-child get_node.
 
 signal workflow_requested(workflow_id: int)
 
-const WORKFLOW_LIVE := 2
-
 var _document: RefCounted   # MusicEditorDocument (loose-typed; defined in Phase B)
-var _active_workflow: int = 0  # MusicEditorWorkspace.Workflow.BANK
 
 
 func bind_document(document: RefCounted) -> void:
 	_document = document
-	# Forward to each mode panel that knows how to bind. Phase C wires Bank;
-	# Script and Live land in later phases.
-	var names := ["Bank", "Script", "Live"]
-	for n in names:
-		var node := get_node_or_null(n)
+	for n in ["Bank", "Script", "Live"]:
+		var node := get_panel(n)
 		if node != null and node.has_method("bind_document"):
 			node.bind_document(document)
 	_wire_script_mode()
@@ -28,22 +29,22 @@ func _ready() -> void:
 	_wire_script_mode()
 
 
-func set_active_workflow(workflow_id: int) -> void:
-	_active_workflow = workflow_id
-	_refresh_visibility()
+# Recursive, owner-agnostic lookup. Bank and Script are nested inside the
+# embedded Live screen, so a plain get_node("Bank") (direct child only) misses
+# them; find_child walks into the instanced sub-scene.
+func get_panel(panel_name: String) -> Node:
+	return find_child(panel_name, true, false)
 
 
-func _refresh_visibility() -> void:
-	# Each child mode panel is named "Bank", "Script", "Live".
-	var names := ["Bank", "Script", "Live"]
-	for i in range(names.size()):
-		var node := get_node_or_null(names[i])
-		if node and node is Control:
-			(node as Control).visible = (i == _active_workflow)
+# Single-screen: the workflows are coexisting docks, not mutually-exclusive
+# panels, so there is nothing to show/hide. Kept as a no-op for the workspace
+# adapter's set_active_workflow call.
+func set_active_workflow(_workflow_id: int) -> void:
+	pass
 
 
 func _wire_script_mode() -> void:
-	var script_node := get_node_or_null("Script")
+	var script_node := get_panel("Script")
 	if script_node == null or not script_node.has_signal("compile_and_run_requested"):
 		return
 	if not script_node.compile_and_run_requested.is_connected(_on_compile_and_run_requested):
@@ -51,7 +52,8 @@ func _wire_script_mode() -> void:
 
 
 func _on_compile_and_run_requested() -> void:
-	workflow_requested.emit(WORKFLOW_LIVE)
-	var live_node := get_node_or_null("Live")
+	# One screen, no tab to switch to: just start the live director. The Script
+	# panel already compiled clean before emitting this.
+	var live_node := get_panel("Live")
 	if live_node != null and live_node.has_method("start_from_script_mode"):
 		live_node.start_from_script_mode()

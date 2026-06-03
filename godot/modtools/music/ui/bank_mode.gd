@@ -55,6 +55,9 @@ func _ready() -> void:
 	_rename_button.pressed.connect(_on_rename_pressed)
 	_delete_button.pressed.connect(_on_delete_pressed)
 	_stop_button.pressed.connect(_on_stop_pressed)
+	# Tracks are a drag source: drop one on a state in the section map to add a
+	# `play` (the drop side is gated behind the structured-edit parity check).
+	_track_tree.set_drag_forwarding(_tree_get_drag_data, Callable(), Callable())
 	_refresh_table()
 	_refresh_toolbar_state()
 
@@ -172,6 +175,32 @@ func _preview_index(index: int) -> void:
 	var stream: NovaSbfAudioStream = _document.bank.get_stream_at(index)
 	if stream != null:
 		_preview.play_stream(stream)
+
+
+# --- Drag source: a track row can be dragged onto a state in the section map
+# to add a `play` for it. The payload is {kind, index, name}; the map's drop
+# side stays disabled until the structured-edit parity gate is green.
+
+func _track_drag_payload(index: int) -> Dictionary:
+	if _document == null or not _document.bank_loaded():
+		return {}
+	var entries: Array = _document.bank.get_entries()
+	if index < 0 or index >= entries.size():
+		return {}
+	return {"kind": "mus_track", "index": index, "name": String(entries[index].get("name", ""))}
+
+
+func _tree_get_drag_data(at_position: Vector2) -> Variant:
+	var item := _track_tree.get_item_at_position(at_position)
+	if item == null:
+		return null
+	var payload := _track_drag_payload(int(item.get_metadata(0)))
+	if payload.is_empty():
+		return null
+	var preview := Label.new()
+	preview.text = "♪ %s" % payload["name"]
+	set_drag_preview(preview)
+	return payload
 
 
 # --- Phase E2: toolbar handlers ------------------------------------------

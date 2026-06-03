@@ -179,6 +179,37 @@ target_link_libraries(mus_vm_fixes_test PRIVATE opennova_mus)
 target_include_directories(mus_vm_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mus_vm_fixes COMMAND mus_vm_fixes_test)
 
+add_executable(mus_model_test mus/mus_model_test.cpp)
+target_link_libraries(mus_model_test PRIVATE opennova_mus)
+target_include_directories(mus_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_model_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_model COMMAND mus_model_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Write-path parity: the canonical re-encoded form is a byte-stable fixed point
+# (byte-identity to the ORIGINAL .bin is impossible -- editor debug info is not
+# reproduced). Gates the structured-edit write path; see the test file header.
+add_executable(mus_encode_idempotence_test mus/mus_encode_idempotence_test.cpp)
+target_link_libraries(mus_encode_idempotence_test PRIVATE opennova_mus)
+target_include_directories(mus_encode_idempotence_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_encode_idempotence_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_encode_idempotence COMMAND mus_encode_idempotence_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Structured play-edit parity: splicing a play into a section's decompiled text
+# adds exactly one model play with unchanged edges, and a no-op insert/remove is
+# byte-identical. Guards the editor's drag-to-add-play write path.
+add_executable(mus_structured_play_edit_test mus/mus_structured_play_edit_test.cpp)
+target_link_libraries(mus_structured_play_edit_test PRIVATE opennova_mus)
+target_include_directories(mus_structured_play_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mus_structured_play_edit_test PRIVATE cxx_std_17)
+target_compile_definitions(mus_structured_play_edit_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_structured_play_edit COMMAND mus_structured_play_edit_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # VFS tests (mount precedence, mount_game expansion override, SCR decode-on-read)
 add_executable(vfs_test vfs/vfs_test.cpp)
 target_link_libraries(vfs_test PRIVATE opennova_vfs opennova_pff)

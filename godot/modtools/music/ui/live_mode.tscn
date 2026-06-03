@@ -1,8 +1,10 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://modtools/music/ui/live_mode.gd" id="1_live"]
 [ext_resource type="PackedScene" path="res://modtools/music/ui/var_inspector.tscn" id="2_var"]
 [ext_resource type="PackedScene" path="res://modtools/music/ui/volume_meter.tscn" id="3_vol"]
+[ext_resource type="PackedScene" path="res://modtools/music/ui/bank_mode.tscn" id="4_bank"]
+[ext_resource type="PackedScene" path="res://modtools/music/ui/script_mode.tscn" id="5_script"]
 
 [node name="LiveMode" type="Control"]
 layout_mode = 3
@@ -11,154 +13,200 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 script = ExtResource("1_live")
 
-[node name="Split" type="HSplitContainer" parent="."]
+[node name="Screen" type="VBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-split_offset = 300
 
-[node name="Left" type="VBoxContainer" parent="Split"]
-layout_mode = 2
-custom_minimum_size = Vector2(280, 0)
-
-[node name="Toolbar" type="HBoxContainer" parent="Split/Left"]
+[node name="TransportBar" type="HBoxContainer" parent="Screen"]
 layout_mode = 2
 
-[node name="StartButton" type="Button" parent="Split/Left/Toolbar"]
+[node name="StartButton" type="Button" parent="Screen/TransportBar"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Start"
 
-[node name="PauseButton" type="Button" parent="Split/Left/Toolbar"]
+[node name="PauseButton" type="Button" parent="Screen/TransportBar"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Pause"
 
-[node name="ResumeButton" type="Button" parent="Split/Left/Toolbar"]
+[node name="ResumeButton" type="Button" parent="Screen/TransportBar"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Resume"
 
-[node name="StopButton" type="Button" parent="Split/Left/Toolbar"]
+[node name="StopButton" type="Button" parent="Screen/TransportBar"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Stop"
 
-[node name="StateLabel" type="Label" parent="Split/Left"]
+[node name="TSep" type="VSeparator" parent="Screen/TransportBar"]
+layout_mode = 2
+
+[node name="StateLabel" type="Label" parent="Screen/TransportBar"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "STOPPED"
 
-[node name="NowPlaying" type="Label" parent="Split/Left"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Now playing: —"
-tooltip_text = "The section the music VM is currently in. Updates live as the script transitions or you jump."
-
-[node name="JumpRow" type="HBoxContainer" parent="Split/Left"]
-layout_mode = 2
-
-[node name="JumpLabel" type="Label" parent="Split/Left/JumpRow"]
-layout_mode = 2
-text = "Jump to:"
-
-[node name="JumpSection" type="OptionButton" parent="Split/Left/JumpRow"]
+[node name="NowPlaying" type="Label" parent="Screen/TransportBar"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-disabled = true
-tooltip_text = "Jump the running script straight to any section, including the win/lose stings the script's variable branches never reach on their own. Enabled while the music is playing."
+text = "Now playing: —"
+tooltip_text = "The section the music is currently in. Updates live as the script transitions or you jump."
 
-[node name="VolumeMeter" parent="Split/Left" instance=ExtResource("3_vol")]
+[node name="AdvancedToggle" type="Button" parent="Screen/TransportBar"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+text = "Advanced script"
+tooltip_text = "Show the raw script text for the selected section. The faithful decompiler output; the map and tracks are the friendly view over it."
+
+[node name="Body" type="HSplitContainer" parent="Screen"]
+layout_mode = 2
+size_flags_vertical = 3
+split_offset = 300
+
+[node name="LeftDock" type="VSplitContainer" parent="Screen/Body"]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+
+[node name="TracksPanel" type="VBoxContainer" parent="Screen/Body/LeftDock"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="TracksHeader" type="Label" parent="Screen/Body/LeftDock/TracksPanel"]
+layout_mode = 2
+text = "Tracks"
+tooltip_text = "The sounds in the loaded bank. Each section's plays trigger these by index."
+
+[node name="Bank" parent="Screen/Body/LeftDock/TracksPanel" instance=ExtResource("4_bank")]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="DialsPanel" type="VBoxContainer" parent="Screen/Body/LeftDock"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="DialsHeader" type="Label" parent="Screen/Body/LeftDock/DialsPanel"]
+layout_mode = 2
+text = "Game Dials"
+tooltip_text = "The variables the game writes to drive the music. Poke one while playing to watch the map follow."
+
+[node name="VarInspector" parent="Screen/Body/LeftDock/DialsPanel" instance=ExtResource("2_var")]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="VolumeMeter" parent="Screen/Body/LeftDock/DialsPanel" instance=ExtResource("3_vol")]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="AudioHint" type="Label" parent="Split/Left"]
+[node name="AudioHint" type="Label" parent="Screen/Body/LeftDock/DialsPanel"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.55, 0.55, 1)
-text = "Sounds play on your default audio device. If you hear nothing, the editor may have fallen back to a silent driver (the volume meter above still moves)."
+text = "Sounds play on your default audio device. If you hear nothing, the editor may have fallen back to a silent driver (the meter above still moves)."
 autowrap_mode = 2
 
-[node name="Sep" type="HSeparator" parent="Split/Left"]
+[node name="CenterRight" type="HSplitContainer" parent="Screen/Body"]
 layout_mode = 2
+size_flags_horizontal = 3
+split_offset = -320
 
-[node name="SectionGraphHeader" type="Label" parent="Split/Left"]
-layout_mode = 2
-text = "Section transitions"
-tooltip_text = "Each row is a section in the loaded script and the sections it can jump to. While the VM runs, click a section to jump to it; the current section is highlighted in orange."
-
-[node name="HostHint" type="Label" parent="Split/Left"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1)
-text = "This script waits for the game. It loops in place until a variable changes (Variables tab) or you Jump to a section."
-autowrap_mode = 2
-
-[node name="SectionGraph" type="VBoxContainer" parent="Split/Left"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="Tabs" type="TabContainer" parent="Split"]
-unique_name_in_owner = true
+[node name="CenterCol" type="VBoxContainer" parent="Screen/Body/CenterRight"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="Variables" type="VBoxContainer" parent="Split/Tabs"]
+[node name="MapHeader" type="Label" parent="Screen/Body/CenterRight/CenterCol"]
 layout_mode = 2
+text = "Section map"
+tooltip_text = "Each box is a musical state. Arrows show how the script moves between them. While playing, the active state lights up; click a box to jump there."
 
-[node name="VarInspector" parent="Split/Tabs/Variables" instance=ExtResource("2_var")]
+[node name="SectionMap" type="GraphEdit" parent="Screen/Body/CenterRight/CenterCol"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+show_grid = false
+show_menu = false
+minimap_enabled = false
 
-[node name="Events" type="VBoxContainer" parent="Split/Tabs"]
+[node name="RightDock" type="VBoxContainer" parent="Screen/Body/CenterRight"]
+custom_minimum_size = Vector2(320, 0)
 layout_mode = 2
 
-[node name="FilterRow" type="HBoxContainer" parent="Split/Tabs/Events"]
+[node name="Inspector" type="VBoxContainer" parent="Screen/Body/CenterRight/RightDock"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="AdvancedDrawer" type="PanelContainer" parent="Screen/Body/CenterRight/RightDock"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Script" parent="Screen/Body/CenterRight/RightDock/AdvancedDrawer" instance=ExtResource("5_script")]
 layout_mode = 2
 
-[node name="FilterLabel" type="Label" parent="Split/Tabs/Events/FilterRow"]
+[node name="LogStrip" type="VBoxContainer" parent="Screen"]
+layout_mode = 2
+
+[node name="FilterRow" type="HBoxContainer" parent="Screen/LogStrip"]
+layout_mode = 2
+
+[node name="FilterLabel" type="Label" parent="Screen/LogStrip/FilterRow"]
 layout_mode = 2
 text = "Show:"
 
-[node name="FilterSection" type="CheckBox" parent="Split/Tabs/Events/FilterRow"]
+[node name="FilterSection" type="CheckBox" parent="Screen/LogStrip/FilterRow"]
 unique_name_in_owner = true
 layout_mode = 2
 button_pressed = true
 text = "section"
 
-[node name="FilterSound" type="CheckBox" parent="Split/Tabs/Events/FilterRow"]
+[node name="FilterSound" type="CheckBox" parent="Screen/LogStrip/FilterRow"]
 unique_name_in_owner = true
 layout_mode = 2
 button_pressed = true
 text = "sound"
 
-[node name="FilterVar" type="CheckBox" parent="Split/Tabs/Events/FilterRow"]
+[node name="FilterVar" type="CheckBox" parent="Screen/LogStrip/FilterRow"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "var"
-tooltip_text = "Off by default: the Variables tab already mirrors every live value, so logging each write floods the list."
+tooltip_text = "Off by default: the Game Dials already mirror every live value, so logging each write floods the list."
 
-[node name="FilterVolume" type="CheckBox" parent="Split/Tabs/Events/FilterRow"]
+[node name="FilterVolume" type="CheckBox" parent="Screen/LogStrip/FilterRow"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "volume"
 tooltip_text = "Off by default: the volume meter shows the live value, so logging each GSV/GSDV call floods the list."
 
-[node name="Spacer" type="Control" parent="Split/Tabs/Events/FilterRow"]
+[node name="Spacer" type="Control" parent="Screen/LogStrip/FilterRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="ClearButton" type="Button" parent="Split/Tabs/Events/FilterRow"]
+[node name="JumpLabel" type="Label" parent="Screen/LogStrip/FilterRow"]
+layout_mode = 2
+text = "Jump to:"
+
+[node name="JumpSection" type="OptionButton" parent="Screen/LogStrip/FilterRow"]
+unique_name_in_owner = true
+layout_mode = 2
+disabled = true
+tooltip_text = "Jump the running script straight to any section, including the win/lose stings the script's variable branches never reach on their own. Enabled while the music is playing."
+
+[node name="ClearButton" type="Button" parent="Screen/LogStrip/FilterRow"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Clear"
 
-[node name="Events" type="ItemList" parent="Split/Tabs/Events"]
+[node name="Events" type="ItemList" parent="Screen/LogStrip"]
 unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
 custom_minimum_size = Vector2(0, 80)
+layout_mode = 2

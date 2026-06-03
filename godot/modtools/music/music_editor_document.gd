@@ -341,6 +341,202 @@ func delete_track(index: int) -> void:
 	changed.emit()
 
 
+# --- Structured play edits (drag-to-add-play) ----------------------------
+#
+# A play edit is a TEXT transform over the faithful decompiled text: splice or
+# remove one `play <bind>` line in a section's body, then recompile. It never
+# hand-assembles bytecode and never touches the decompiler emitter, so it can
+# only ever produce scripts the round-trip already supports. Gated by
+# can_edit_plays() (a script whose current text doesn't compile stays
+# read-only). The byte-stability of this path is proven in
+# tests/mus/mus_structured_play_edit_test.cpp and the GUT parity test; do not
+# loosen the gate without a passing parity test.
+
+func can_edit_plays() -> bool:
+	if not script_loaded() or not mus_script.has_method("compile_text"):
+		return false
+	# Structured edits operate on a single chunk (the default script) and
+	# re-encode a one-chunk file; a multi-chunk .bin would lose its other chunks
+	# on the first edit, so keep those read-only.
+	if mus_script.has_method("get_script_count") and int(mus_script.get_script_count()) != 1:
+		return false
+	var text := _current_script_text()
+	if text == "":
+		return false
+	var d: Dictionary = mus_script.compile_text(text)
+	return int(d.get("rc", -1)) == 0
+
+
+func insert_play(section_name: StringName, track: int) -> bool:
+	if not can_edit_plays():
+		return false
+	# The play opcode operand is one byte; a track that can't be represented
+	# would silently wrap, so reject it rather than write the wrong sound.
+	if track < 0 or track > 255:
+		return false
+	var prev := _current_script_text()
+	if prev == "":
+		return false
+	var next := _splice_play(prev, String(section_name), _track_bind_id(track))
+	if next == prev:
+		return false  # section not found / nothing changed
+	if not _apply_script_text(next):
+		_apply_script_text(prev)  # compile failed: roll back, edit nothing
+		return false
+	_push_text_edit(prev, next)
+	return true
+
+
+func remove_play(section_name: StringName, track: int) -> bool:
+	if not can_edit_plays():
+		return false
+	var prev := _current_script_text()
+	if prev == "":
+		return false
+	var next := _remove_one_play(prev, String(section_name), _track_bind_id(track))
+	if next == prev:
+		return false
+	if not _apply_script_text(next):
+		_apply_script_text(prev)
+		return false
+	_push_text_edit(prev, next)
+	return true
+
+
+# Push a do/undo pair that swaps the script text (and recompiles). Weakref
+# capture (see reorder_track) keeps the history off an uncollectable cycle.
+func _push_text_edit(prev: String, next: String) -> void:
+	var wself: WeakRef = weakref(self)
+	var do_cb := func() -> void:
+		var s: MusicEditorDocument = wself.get_ref()
+		if s != null:
+			s._apply_script_text(next)
+	var undo_cb := func() -> void:
+		var s: MusicEditorDocument = wself.get_ref()
+		if s != null:
+			s._apply_script_text(prev)
+	_bank_history.push(do_cb, undo_cb)
+
+
+# Set the script text, recompile, and on success emit changed so the map /
+# inspector rebuild off the new model. Returns false if the text doesn't compile
+# (the caller rolls back).
+func _apply_script_text(text: String) -> bool:
+	set_script_text(StringName(""), text)
+	var errs: Array = compile_script()
+	if errs.is_empty():
+		changed.emit()
+		return true
+	return false
+
+
+func _current_script_text() -> String:
+	# Operate on the NAMES-LESS decompile of the COMMITTED script. The names-less
+	# form is the proven round-trip (tests/mus/mus_roundtrip_test); the
+	# names-aware form (real bank names as bind identifiers) is a display
+	# convenience that does not necessarily recompile, so it must never drive the
+	# write path. Reading the committed mus_script (not the in-flight
+	# _compiled_script_text, which the raw drawer fills with names-aware text)
+	# keeps structured edits self-consistent and always compilable.
+	if not script_loaded():
+		return ""
+	var script_name := StringName(mus_script.get_default_script_name())
+	return mus_script.get_decompiled_text(script_name)
+
+
+# The bind identifier a `play` references. The names-less decompile (which the
+# write path operates on) binds every slot as "sound_N"; the inspector resolves
+# the friendly bank name for display only.
+func _track_bind_id(track: int) -> String:
+	return "sound_%d" % track
+
+
+# Insert "play <bind>" into the section's STRAIGHT-LINE body (brace depth 1),
+# never inside a nested if/else/on(...) block (which would make it conditional).
+# Anchor on the last top-level play so it appends to the unconditional sequence;
+# else place it before the first top-level transition/halt so it still runs;
+# else just inside the opening brace. Mirrors splice_play in
+# tests/mus/mus_structured_play_edit_test.cpp.
+func _splice_play(text: String, section_name: String, bind: String) -> String:
+	var lines := text.split("\n")
+	var hidx := _section_header_line(lines, section_name)
+	if hidx < 0:
+		return text
+	var end := _section_window_end(lines, hidx)
+	var depth := 0
+	var open_brace := -1
+	var last_top_play := -1
+	var first_top_transition := -1
+	for i in range(hidx + 1, end):
+		var s := lines[i].strip_edges()
+		if s == "{":
+			depth += 1
+			if open_brace < 0:
+				open_brace = i
+			continue
+		if s == "}":
+			depth -= 1
+			continue
+		if depth == 1:
+			if s.begins_with("play ") or s.begins_with("playw "):
+				last_top_play = i
+			elif first_top_transition < 0 and (s.begins_with("enter ") or s == "done" or s.begins_with("on (")):
+				first_top_transition = i
+	var insert_at := -1
+	if last_top_play >= 0:
+		insert_at = last_top_play + 1
+	elif first_top_transition >= 0:
+		insert_at = first_top_transition
+	elif open_brace >= 0:
+		insert_at = open_brace + 1
+	else:
+		insert_at = hidx + 1
+	lines.insert(insert_at, "play %s" % bind)
+	return "\n".join(lines)
+
+
+# Remove the LAST top-level "play <bind>" so it cancels _splice_play's append
+# exactly: insert + remove is a byte-identical no-op even when the track already
+# appears earlier in the body. Only depth-1 plays are touched, so a play nested
+# in a conditional branch is never silently deleted.
+func _remove_one_play(text: String, section_name: String, bind: String) -> String:
+	var lines := text.split("\n")
+	var hidx := _section_header_line(lines, section_name)
+	if hidx < 0:
+		return text
+	var end := _section_window_end(lines, hidx)
+	var depth := 0
+	var remove_at := -1
+	for i in range(hidx + 1, end):
+		var s := lines[i].strip_edges()
+		if s == "{":
+			depth += 1
+			continue
+		if s == "}":
+			depth -= 1
+			continue
+		if depth == 1 and s == "play %s" % bind:
+			remove_at = i
+	if remove_at >= 0:
+		lines.remove_at(remove_at)
+	return "\n".join(lines)
+
+
+func _section_header_line(lines: PackedStringArray, section_name: String) -> int:
+	for i in range(lines.size()):
+		if lines[i].strip_edges() == "section %s" % section_name:
+			return i
+	return -1
+
+
+func _section_window_end(lines: PackedStringArray, header_idx: int) -> int:
+	for i in range(header_idx + 1, lines.size()):
+		var s := lines[i].strip_edges()
+		if s.begins_with("section ") or s.begins_with("declsection "):
+			return i
+	return lines.size()
+
+
 # --- Phase E4: per-mode undo --------------------------------------------
 
 func undo_bank() -> void:

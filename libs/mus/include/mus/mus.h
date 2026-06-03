@@ -190,6 +190,60 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
 /* Free a buffer returned by `mus_encode_file`. */
 void mus_free(void *p);
 
+/* --- Structural section model (editor-facing, read-only) ---
+
+   A per-section, opcode-level view of a script for editor surfaces (the section
+   map / state-machine view and structured editors). Built from the SAME decoded
+   instruction stream the decompiler uses (mus_decode.h), but reading the OPCODE
+   so it distinguishes the real state transition `setstate` (0x3B, witnessed
+   Jointops.exe!VmOp_SetState @ 0x672C70: seeks pc to the target section + fires
+   on_section_entered) from the frame-setup `enter` (0x38, VmOp_Enter @ 0x672C20:
+   pops N dwords into locals, does NOT change section) -- a distinction the
+   decompiled TEXT collapses (both print `enter`). Read-only: builds nothing into
+   the bytecode and is independent of the round-trip compile path. Every
+   instruction is bound to exactly one owning section by code offset (the section
+   with the greatest code_offset <= the instruction's offset), so tail code that
+   the text decompiler leaks past a `done` is still attributed to its section. */
+
+typedef enum MusEdgeKind {
+    MUS_EDGE_TRANSITION = 0,  /* setstate 0x3B: unconditional move to a section */
+    MUS_EDGE_SWITCH     = 1,  /* tablexec 0x35 entry: one branch of a switch */
+    MUS_EDGE_BRANCH     = 2,  /* goto/brfalse/brtrue whose target is a section entry */
+} MusEdgeKind;
+
+typedef struct MusSectionEdge {
+    uint32_t to_section_index;  /* index into script->sections */
+    int      kind;              /* MusEdgeKind */
+} MusSectionEdge;
+
+typedef struct MusSectionPlay {
+    uint32_t track_index;       /* SBF bank entry index from the play/playw operand */
+    int      wait;              /* 1 for playw (0x3D), 0 for play (0x3E) */
+} MusSectionPlay;
+
+typedef struct MusSectionInfo {
+    uint32_t        section_index;  /* index into script->sections */
+    int             is_entry;       /* == script->entry_section_index */
+    int             is_idle_loop;   /* has >=1 edge and every edge targets itself */
+    MusSectionEdge *edges;          /* outgoing edges, deduped by target (TRANSITION wins) */
+    uint32_t        edge_count;
+    MusSectionPlay *plays;          /* play/playw triggers, in code order */
+    uint32_t        play_count;
+} MusSectionInfo;
+
+typedef struct MusModel {
+    MusSectionInfo *sections;       /* section_count entries, parallel to script->sections */
+    uint32_t        section_count;
+} MusModel;
+
+/* Build the structural model for a script. Allocates buffers owned by `*out`;
+   release via mus_model_free. Returns 0 on success, negative on error (NULL
+   inputs). The caller retains ownership of `script`. */
+int mus_build_section_model(const MusScript *script, MusModel *out);
+
+/* Free all malloc'd buffers held by `model` and zero it. Idempotent. */
+void mus_model_free(MusModel *model);
+
 /* --- VM (interpreter) ---
 
    Witnessed: Jointops.exe!AudioVM_DispatchLoop @ 0x00672720 (32-instruction budget,

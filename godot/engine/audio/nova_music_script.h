@@ -50,6 +50,18 @@ public:
 	String get_decompiled_text_with_bank(const StringName &p_script_name,
 			const Ref<NovaSbfBank> &p_bank);
 
+	// Read-only structural section model for the editor's state-machine map.
+	// One Dictionary per section: { name:String, index:int, is_entry:bool,
+	// is_idle_loop:bool, edges:Array[{to:int, to_name:String, kind:int}],
+	// plays:Array[{track:int, wait:bool}] }. kind: 0=transition (setstate),
+	// 1=switch (tablexec), 2=branch. Built from libs/mus mus_build_section_model,
+	// which reads OPCODES (so a real setstate transition is distinguished from
+	// the frame-setup `enter` the decompiled text can't tell apart) and binds
+	// every instruction to an owning section by code offset. Independent of the
+	// compile/round-trip path. Track names are left to the caller (it has the
+	// bank); `track` is the SBF entry index.
+	Array get_section_model(const StringName &p_script_name) const;
+
 	// Phase F4: text -> bytecode bridge for the music editor's Script mode.
 	// Returns a Dictionary with keys:
 	//   "rc"        : int  -- 0 on success, negative on parse/emit failure

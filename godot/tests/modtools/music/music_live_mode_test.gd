@@ -271,18 +271,29 @@ func test_jump_to_section_drives_director():
 	assert_string_contains(lm.get_node("%NowPlaying").text, String(names[target_idx]))
 
 
-func test_section_graph_rows_are_clickable_buttons():
+func test_section_map_builds_graph_nodes():
+	# Direction B: the section view is now a GraphEdit state map (one GraphNode
+	# per section), not a VBox of button rows. Clicking a node jumps the running
+	# VM there; while stopped the jump is a no-op (the old buttons were disabled).
 	var doc = MusicEditorDocument.new()
 	doc.open_pair(_copy_temp_pair())
 	var lm: Control = LiveModeScene.instantiate()
 	add_child_autofree(lm)
 	lm.bind_document(doc)
 	await get_tree().process_frame
-	var graph: VBoxContainer = lm.get_node("%SectionGraph")
-	assert_gt(graph.get_child_count(), 0, "graph has section rows")
-	var first_btn = graph.get_child(0).get_child(0)
-	assert_true(first_btn is Button, "section name is a clickable Button")
-	assert_true(first_btn.disabled, "graph buttons disabled while stopped")
+	var map = lm.get_node("%SectionMap")
+	assert_true(map is GraphEdit, "section view is a GraphEdit map")
+	var nodes := []
+	for c in map.get_children():
+		if c is GraphNode:
+			nodes.append(c)
+	assert_gt(nodes.size(), 0, "map built a GraphNode per section")
+	assert_ne(String(nodes[0].title), "", "node carries its section name as the title")
+	# Stopped: clicking a node must not jump (jump is RUNNING-gated, like the old
+	# disabled buttons).
+	var before := String(lm._current_section)
+	lm._on_map_node_selected(nodes[0])
+	assert_eq(String(lm._current_section), before, "node click is a no-op while stopped")
 
 
 # --- Now playing / volume meter ----------------------------------------
