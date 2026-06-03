@@ -11,9 +11,6 @@ target_include_directories(opennova_resource_index
 # include dir must propagate to consumers (the GDExtension, tests).
 target_link_libraries(opennova_resource_index PUBLIC opennova_vfs)
 
-# PRIVATE: mus_sniff classifies encrypted-on-disk MUS .bin (impl detail).
-target_link_libraries(opennova_resource_index PRIVATE opennova_mus)
-
 target_compile_features(opennova_resource_index PUBLIC cxx_std_17)
 
 set_target_properties(opennova_resource_index PROPERTIES

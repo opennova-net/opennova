@@ -1,9 +1,8 @@
 #ifndef MUS_RESOURCE_FORMAT_H
 #define MUS_RESOURCE_FORMAT_H
 
-// MUS .bin loader. Recognises files whose decrypted body starts with the
-// SCR0 magic (MusFileHeader.magic). Falls back to libs/scr decryption for
-// SCR-wrapped variants found in retail installs.
+// MUS .bin loader. Recognises files whose generic decoded body is a valid
+// SCR0 music script (MusFileHeader.magic).
 
 #include <godot_cpp/classes/resource_format_loader.hpp>
 #include <godot_cpp/classes/resource_format_saver.hpp>
@@ -25,9 +24,8 @@ public:
 			bool p_use_sub_threads, int32_t p_cache_mode) const override;
 };
 
-// Saver: passthrough only for v1. Writes the decrypted SCR0 form back to
-// disk via NovaMusicScript::get_raw_file_bytes(). Re-encryption to match
-// the encrypted-on-disk layout is editor-spec territory.
+// Saver: passthrough only for v1. Writes the decoded SCR0 form back to disk
+// via NovaMusicScript::get_raw_file_bytes().
 class MusResourceFormatSaver : public ResourceFormatSaver {
 	GDCLASS(MusResourceFormatSaver, ResourceFormatSaver)
 

@@ -247,11 +247,9 @@ target_compile_features(vfs_test PRIVATE cxx_std_17)
 add_test(NAME vfs COMMAND vfs_test)
 
 add_executable(vfs_mus_decode_test vfs/vfs_mus_decode_test.cpp)
-target_link_libraries(vfs_mus_decode_test PRIVATE opennova_vfs opennova_scr)
+target_link_libraries(vfs_mus_decode_test PRIVATE opennova_vfs)
 target_include_directories(vfs_mus_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(vfs_mus_decode_test PRIVATE cxx_std_17)
-target_compile_definitions(vfs_mus_decode_test PRIVATE
-    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
 add_test(NAME vfs_mus_decode COMMAND vfs_mus_decode_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
@@ -275,14 +273,6 @@ foreach(test roundtrip byte_equal lookup strip_hotkey empty)
     add_test(NAME rtxt_${test} COMMAND rtxt_${test}_test)
 endforeach()
 
-add_executable(scr_mus_test scr/scr_mus_test.cpp)
-target_link_libraries(scr_mus_test PRIVATE opennova_scr)
-target_include_directories(scr_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(scr_mus_test PRIVATE
-    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-add_test(NAME scr_mus COMMAND scr_mus_test
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
 # Resource directory index tests
 add_executable(resource_index_test resource_index/resource_index_test.cpp)
 target_link_libraries(resource_index_test PRIVATE opennova_resource_index)
@@ -290,7 +280,7 @@ target_include_directories(resource_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 add_test(NAME resource_index COMMAND resource_index_test)
 
 add_executable(resource_index_mus_test resource_index/resource_index_mus_test.cpp)
-target_link_libraries(resource_index_mus_test PRIVATE opennova_resource_index opennova_scr)
+target_link_libraries(resource_index_mus_test PRIVATE opennova_resource_index)
 target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index_mus COMMAND resource_index_mus_test)
 

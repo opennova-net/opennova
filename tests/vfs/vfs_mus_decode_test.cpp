@@ -1,66 +1,73 @@
-/* vfs_decode_payload MUS handling (regression for the headerless-MUS extraction
-   bug). Synthesizes the headerless on-disk ciphertext from the committed
-   plaintext fixture via scr_encrypt_mus, then checks that vfs_decode_payload:
-     1. decodes the headerless-encrypted form back to plaintext SCR0, and
-     2. leaves a plaintext "SCR0" MUS untouched (the SCR0/"SCR" magic collision
-        that would otherwise corrupt it via the generic SCR-container path).
-   No external assets. */
+/* vfs_decode_payload generic payload handling around SCR0.
+
+   MUS .bin files in JO_CLIENT/localres.pff are already plaintext SCR0 payloads.
+   SCR0 is not an encrypted SCR container and must pass through unchanged. The
+   headerless MUS cipher experimented with in PR #53 is intentionally outside
+   VFS auto-decode; without an explicit SCR/PFF marker it is just opaque bytes. */
 
 #include "vfs/vfs_decode.h"
-#include "scr/scr.h"
 
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <vector>
 
 #include "common/test_expect.h"
 
-#ifndef MUS_FIXTURE_DIR
-#define MUS_FIXTURE_DIR "fixtures/mus"
-#endif
+namespace {
 
-static std::vector<uint8_t> slurp(const char *path) {
-    std::vector<uint8_t> v;
-    FILE *f = fopen(path, "rb");
-    if (!f) return v;
-    fseek(f, 0, SEEK_END);
-    long n = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    v.resize((size_t)n);
-    if (n > 0 && fread(v.data(), 1, (size_t)n, f) != (size_t)n) v.clear();
-    fclose(f);
-    return v;
+constexpr uint32_t kScrKeyJoDfx2 = 0x2A5A8EADu;
+
+uint32_t rol32(uint32_t value, int shift) {
+    return (value << shift) | (value >> (32 - shift));
 }
 
+void xor_scr_keystream(std::vector<uint8_t> &bytes, uint32_t key) {
+    for (uint8_t &byte : bytes) {
+        key = rol32(key + rol32(key, 11), 4) ^ 1u;
+        byte ^= static_cast<uint8_t>(key);
+    }
+}
+
+std::vector<uint8_t> minimal_plain_mus() {
+    std::vector<uint8_t> plain(48, 0);
+    plain[0] = 'S';
+    plain[1] = 'C';
+    plain[2] = 'R';
+    plain[3] = '0';
+    plain[5] = 0x01; // version 0x00000100
+    plain[8] = 0x01; // chunk_count = 1
+    return plain;
+}
+
+std::vector<uint8_t> headerless_mus_ciphertext(const std::vector<uint8_t> &plain) {
+    std::vector<uint8_t> payload;
+    if (plain.size() > 4) {
+        payload.assign(plain.begin() + 4, plain.end());
+    }
+    std::vector<uint8_t> out(payload.rbegin(), payload.rend());
+    xor_scr_keystream(out, kScrKeyJoDfx2);
+    return out;
+}
+
+} // namespace
+
 int main() {
-    const std::vector<uint8_t> plain = slurp(MUS_FIXTURE_DIR "/jo_gamemus.bin");
-    TEST_EXPECT(!plain.empty());
-    TEST_EXPECT(plain.size() >= 4 && plain[0] == 'S' && plain[1] == 'C' && plain[2] == 'R' && plain[3] == '0');
+    const std::vector<uint8_t> plain = minimal_plain_mus();
 
-    // Headerless-encrypted form -> vfs_decode_payload must yield plaintext SCR0.
-    {
-        uint8_t *enc = nullptr;
-        size_t enc_size = 0;
-        TEST_EXPECT(scr_encrypt_mus(plain.data(), plain.size(), &enc, &enc_size, SCR_KEY_JO_DFX2) == 0);
-        std::vector<uint8_t> data(enc, enc + enc_size);
-        scr_free_buffer(enc);
-        TEST_EXPECT(data.size() < 4 || data[0] != 'S' || data[3] != '0');  // really encrypted
+    std::vector<uint8_t> data = plain;
+    TEST_EXPECT(opennova::vfs_decode_payload(data));
+    TEST_EXPECT(data == plain);
 
-        TEST_EXPECT(opennova::vfs_decode_payload(data));
-        TEST_EXPECT(data.size() == plain.size());
-        TEST_EXPECT(std::memcmp(data.data(), plain.data(), plain.size()) == 0);
-    }
+    std::vector<uint8_t> scr0_marker = {'S', 'C', 'R', '0', 'n', 'o', 't', '-', 'm', 'u', 's'};
+    const std::vector<uint8_t> scr0_original = scr0_marker;
+    TEST_EXPECT(opennova::vfs_decode_payload(scr0_marker));
+    TEST_EXPECT(scr0_marker == scr0_original);
 
-    // Plaintext SCR0 MUS must pass through unchanged (must NOT be mangled by the
-    // generic SCR-container decode, whose magic check also matches "SCR0").
-    {
-        std::vector<uint8_t> data = plain;
-        TEST_EXPECT(opennova::vfs_decode_payload(data));
-        TEST_EXPECT(data == plain);
-    }
+    std::vector<uint8_t> headerless = headerless_mus_ciphertext(plain);
+    const std::vector<uint8_t> headerless_original = headerless;
+    TEST_EXPECT(opennova::vfs_decode_payload(headerless));
+    TEST_EXPECT(headerless == headerless_original);
 
-    std::printf("vfs_mus_decode_test OK (%zu B fixture)\n", plain.size());
+    std::printf("vfs_mus_decode_test OK\n");
     return 0;
 }

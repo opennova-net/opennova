@@ -18,6 +18,12 @@ int main() {
     TEST_EXPECT(scr_is_scr(encrypted, 3) == 0);
     TEST_EXPECT(scr_get_version(encrypted, 3) == 0);
 
+    static const uint8_t scr0_plain[] = {
+        'S', 'C', 'R', '0', 'm', 'u', 's', 'i', 'c'
+    };
+    TEST_EXPECT(scr_is_scr(scr0_plain, sizeof(scr0_plain)) == 0);
+    TEST_EXPECT(scr_get_version(scr0_plain, sizeof(scr0_plain)) == 0);
+
     uint8_t tiny[4] = {};
     size_t tiny_size = sizeof(tiny);
     TEST_EXPECT(scr_decrypt_buf(encrypted, sizeof(encrypted), tiny, &tiny_size, SCR_KEY_DEFAULT) == -2);
@@ -32,6 +38,9 @@ int main() {
     static const uint8_t invalid[] = {'N', 'O', 'P', 'E'};
     out_size = sizeof(out);
     TEST_EXPECT(scr_decrypt_buf(invalid, sizeof(invalid), out, &out_size, SCR_KEY_DEFAULT) == -1);
+
+    out_size = sizeof(out);
+    TEST_EXPECT(scr_decrypt_buf(scr0_plain, sizeof(scr0_plain), out, &out_size, SCR_KEY_DEFAULT) == -1);
 
     return 0;
 }
