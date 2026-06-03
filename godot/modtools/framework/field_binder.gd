@@ -46,6 +46,23 @@ func bind_line(line: LineEdit, getter: Callable, setter: Callable) -> LineEdit:
 	return line
 
 
+func bind_option(option: OptionButton, getter: Callable, setter: Callable) -> OptionButton:
+	# The option's item ids carry the model value (set_item_id when populating). sync selects the
+	# item whose id matches getter(info); a user pick fires setter(selected id). Setting `selected`
+	# programmatically does not emit item_selected, and the guard suppresses any echo regardless.
+	_bindings.append(func(info):
+		var want := int(getter.call(info))
+		option.selected = -1
+		for i in option.item_count:
+			if option.get_item_id(i) == want:
+				option.selected = i
+				break)
+	option.item_selected.connect(func(idx: int):
+		if not _guard.active:
+			setter.call(option.get_item_id(idx)))
+	return option
+
+
 func sync_from(info: Dictionary) -> void:
 	_guard.run(func() -> void:
 		for apply in _bindings:

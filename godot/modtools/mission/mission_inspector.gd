@@ -91,6 +91,15 @@ var _wp_down_button: Button
 var _wp_delete_button: Button
 var _wp_clear_button: Button
 
+# --- Mission properties (header) editable form --------------------------------
+# A collapsible form for the mission-level header fields. Built ONCE and synced in
+# place via _props_binder (FieldBinder), since LineEdits would lose their caret if torn
+# down on every `changed`. Setters route through the controller's set_header_* (one undo
+# step each). Mission-global, so it shows in both Objects and Waypoints mode.
+var _props_toggle: CheckButton
+var _props_box: VBoxContainer
+var _props_binder: FieldBinder
+
 
 func setup(controller) -> void:
 	_controller = controller
@@ -114,6 +123,7 @@ func setup(controller) -> void:
 		_build_edit_panel()
 		_build_place_panel()
 		_build_waypoint_panel()
+		_build_props_panel()
 		_box = VBoxContainer.new()
 		_box.add_theme_constant_override("separation", 6)
 		_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -128,6 +138,7 @@ func _refresh() -> void:
 	_refresh_edit_panel()
 	_refresh_place_panel()
 	_refresh_waypoint_panel()
+	_refresh_props_panel()
 	# Mode gating: the object panels show in Objects mode, the waypoint panel in Waypoints
 	# mode (it hides itself in Objects mode). The read-only summary shows in both.
 	if _controller != null and _controller.is_waypoint_mode():
@@ -829,6 +840,139 @@ func _flag_suffix(flags: int) -> String:
 	if (flags & NovaMissionData.WP_FLAG_RED_TEAM) != 0:
 		parts.append("red")
 	return "  [%s]" % ", ".join(parts) if not parts.is_empty() else ""
+
+
+# --- Mission properties (header) editable form --------------------------------
+
+func _build_props_panel() -> void:
+	_props_binder = FieldBinder.new()
+	_props_toggle = CheckButton.new()
+	_props_toggle.name = "MissionPropsToggle"
+	_props_toggle.text = "Mission properties"
+	_props_toggle.tooltip_text = "Mission-level header: title, world, gameplay, game modes."
+	_props_toggle.button_pressed = false
+	_props_toggle.visible = false
+	_root.add_child(_props_toggle)
+
+	_props_box = VBoxContainer.new()
+	_props_box.name = "MissionPropsBox"
+	_props_box.add_theme_constant_override("separation", 4)
+	_props_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_props_box.visible = false
+	_root.add_child(_props_box)
+	_props_toggle.toggled.connect(func(on: bool) -> void: _props_box.visible = on)
+
+	_add_props_line("mission_name", "Name", "Mission title.")
+	_add_props_line("designer", "Designer", "Mission author.")
+	_add_props_line("briefing", "Briefing", "Mission briefing text.")
+	ObjectUiHelpers.add_section_heading(_props_box, "World")
+	_add_props_option("climate", "Climate", [[0, "Desert"], [1, "Jungle"], [2, "Snow"]])
+	_add_props_option("weather", "Weather", [[0, "Nice day"], [1, "Rainy"], [2, "Snow"]])
+	_add_props_option("mission_type", "Type", [[1, "Normal"], [2, "Combat vehicle"], [3, "Tenth Mountain"]])
+	ObjectUiHelpers.add_section_heading(_props_box, "Gameplay")
+	_add_props_spin("player_health", "Player health", 0.0, 1000000.0)
+	_add_props_spin("minutes_per_day", "Minutes / day", 0.0, 65535.0)
+	_add_props_spin("max_saves", "Max saves", 0.0, 255.0)
+	_add_props_spin("start_time", "Start time", 0.0, 65535.0)
+	ObjectUiHelpers.add_section_heading(_props_box, "Game modes")
+	_add_props_flag(NovaMissionData.ATTRIB_COOP, "Co-op")
+	_add_props_flag(NovaMissionData.ATTRIB_DEATHMATCH, "Deathmatch")
+	_add_props_flag(NovaMissionData.ATTRIB_TEAM_DEATHMATCH, "Team deathmatch")
+	_add_props_flag(NovaMissionData.ATTRIB_CAPTURE_THE_FLAG, "Capture the flag")
+	_add_props_flag(NovaMissionData.ATTRIB_KING_OF_THE_HILL, "King of the hill")
+	_add_props_flag(NovaMissionData.ATTRIB_ENABLE_NVG, "Night vision")
+	_add_props_flag(NovaMissionData.ATTRIB_ROTATE_MAP_180, "Rotate map 180")
+	ObjectUiHelpers.add_section_heading(_props_box, "Audio")
+	_add_props_spin("music", "Music track", 0.0, 1000000.0)
+	_add_props_spin("reverb", "Reverb", 0.0, 1000000.0)
+
+
+func _add_props_line(field: String, label: String, tooltip: String = "") -> LineEdit:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_props_box.add_child(row)
+	var lbl := Label.new()
+	lbl.text = label
+	lbl.tooltip_text = tooltip if not tooltip.is_empty() else label
+	lbl.clip_text = true
+	lbl.custom_minimum_size = Vector2(96, 0)
+	row.add_child(lbl)
+	var line := LineEdit.new()
+	line.name = "MissionProp_" + field
+	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(line)
+	_props_binder.bind_line(line,
+		func(info) -> String: return String(info.get(field, "")),
+		func(text: String) -> void: _set_header_string(field, text))
+	return line
+
+
+func _add_props_option(field: String, label: String, choices: Array) -> OptionButton:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_props_box.add_child(row)
+	var lbl := Label.new()
+	lbl.text = label
+	lbl.custom_minimum_size = Vector2(96, 0)
+	row.add_child(lbl)
+	var option := OptionButton.new()
+	option.name = "MissionProp_" + field
+	option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for choice in choices:
+		var idx := option.item_count
+		option.add_item(String(choice[1]))
+		option.set_item_id(idx, int(choice[0]))
+	row.add_child(option)
+	_props_binder.bind_option(option,
+		func(info) -> int: return int(info.get(field, 0)),
+		func(value: int) -> void: _set_header_int(field, value))
+	return option
+
+
+func _add_props_spin(field: String, label: String, min_value: float, max_value: float) -> SpinBox:
+	var spin := ObjectUiHelpers.add_spin_row(_props_box, "MissionProp_" + field, label, min_value, max_value, 1.0)
+	_props_binder.bind_spin(spin,
+		func(info) -> float: return float(int(info.get(field, 0))),
+		func(value: float) -> void: _set_header_int(field, int(value)))
+	return spin
+
+
+func _add_props_flag(bit: int, label: String) -> CheckBox:
+	var check := CheckBox.new()
+	check.name = "MissionFlag_%d" % bit
+	check.text = label
+	_props_box.add_child(check)
+	_props_binder.bind_checkbox(check,
+		func(info) -> bool: return (int(info.get("attrib_flags", 0)) & bit) != 0,
+		func(on: bool) -> void: _set_header_flag(bit, on))
+	return check
+
+
+func _set_header_string(field: String, value: String) -> void:
+	if _controller != null:
+		_controller.set_header_string(field, value)
+
+
+func _set_header_int(field: String, value: int) -> void:
+	if _controller != null:
+		_controller.set_header_int(field, value)
+
+
+func _set_header_flag(bit: int, on: bool) -> void:
+	if _controller != null:
+		_controller.set_header_flag(bit, on)
+
+
+func _refresh_props_panel() -> void:
+	if _props_toggle == null:
+		return
+	var mission: NovaMissionData = _controller.get_mission() if _controller != null else null
+	if mission == null:
+		_props_toggle.visible = false
+		_props_box.visible = false
+		return
+	_props_toggle.visible = true
+	_props_binder.sync_from(mission.get_info())
 
 
 # --- Read-only mission summary (rebuilt) --------------------------------------

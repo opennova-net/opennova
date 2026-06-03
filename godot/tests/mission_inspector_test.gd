@@ -106,6 +106,33 @@ class FakeController:
 		dirty = true
 		changed.emit()
 
+	# Phase 1: hidden string fields + mission-header editing.
+	var string_property_calls: Array = []   # [name, value] per call
+	var header_string_calls: Array = []      # [field, value]
+	var header_int_calls: Array = []         # [field, value]
+	var header_flag_calls: Array = []        # [bit, on]
+
+	func set_selected_string_property(name: String, v: String) -> void:
+		string_property_calls.append([name, v])
+		entity[name] = v
+		dirty = true
+		changed.emit()
+
+	func set_header_string(field: String, value: String) -> void:
+		header_string_calls.append([field, value])
+		dirty = true
+		changed.emit()
+
+	func set_header_int(field: String, value: int) -> void:
+		header_int_calls.append([field, value])
+		dirty = true
+		changed.emit()
+
+	func set_header_flag(bit: int, on: bool) -> void:
+		header_flag_calls.append([bit, on])
+		dirty = true
+		changed.emit()
+
 	func delete_selected() -> bool:
 		delete_calls += 1
 		entity = {}  # mirror the real controller clearing the selection after a delete
@@ -677,7 +704,92 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 		"get_active_waypoint_path", "set_waypoint_flags", "select_waypoint_marker",
 		"is_marker_placement_armed", "arm_marker_placement", "disarm_marker_placement",
 		"move_selected_marker", "delete_selected_marker", "clear_active_path",
+		# Phase 1: hidden string fields + mission-header editing.
+		"set_selected_string_property", "set_header_string", "set_header_int", "set_header_flag",
 	]
 	for method in required:
 		assert_true(controller.has_method(method),
 			"MissionController must implement %s (called by the inspector)" % method)
+
+
+# --- Phase 1: hidden entity fields + mission-properties (header) form ----------
+
+func _loaded_mission_for_props() -> NovaMissionData:
+	var m := NovaMissionData.new()
+	m.open_file(ProjectSettings.globalize_path("res://../fixtures/bms/ash_i5b.reference.bms"))
+	return m
+
+
+func test_behavior_panel_shows_hidden_fields() -> void:
+	var ctx := _make(_sample_entity())
+	assert_not_null(_spin(ctx.inspector, "MissionBeh_no_less_than"), "no_less_than spin built")
+	assert_not_null(_spin(ctx.inspector, "MissionBeh_map_symbol"), "map_symbol spin built")
+	assert_not_null(_line(ctx.inspector, "MissionBeh_name1"), "name1 line built")
+	assert_not_null(_line(ctx.inspector, "MissionBeh_name2"), "name2 line built")
+
+
+func test_editing_ai_class_commits_through_set_selected_string_property() -> void:
+	var ctx := _make(_sample_entity())
+	var name1 := _line(ctx.inspector, "MissionBeh_name1")
+	name1.text = "rifle"
+	name1.text_submitted.emit("rifle")
+	assert_eq(ctx.fake.string_property_calls.size(), 1, "one string-property commit")
+	assert_eq(ctx.fake.string_property_calls[0][0], "name1", "field is name1")
+	assert_eq(ctx.fake.string_property_calls[0][1], "rifle", "value carried through")
+
+
+func test_props_form_is_hidden_without_a_mission() -> void:
+	var ctx := _make({})
+	assert_false(ctx.inspector._props_toggle.visible, "the props toggle hides without a mission")
+
+
+func test_props_form_reads_header_values() -> void:
+	var ctx := _make({})
+	ctx.fake.mission_ref = _loaded_mission_for_props()
+	ctx.inspector._refresh()
+	assert_true(ctx.inspector._props_toggle.visible, "the props toggle shows with a mission")
+	var name_line := _line(ctx.inspector, "MissionProp_mission_name")
+	assert_not_null(name_line, "the name field is built")
+	assert_eq(name_line.text, String(ctx.fake.mission_ref.get_info()["mission_name"]),
+		"the name field reads the header")
+
+
+func test_editing_name_commits_through_set_header_string() -> void:
+	var ctx := _make({})
+	ctx.fake.mission_ref = _loaded_mission_for_props()
+	ctx.inspector._refresh()
+	var name_line := _line(ctx.inspector, "MissionProp_mission_name")
+	name_line.text = "Renamed"
+	name_line.text_submitted.emit("Renamed")
+	assert_eq(ctx.fake.header_string_calls.size(), 1, "one header_string commit")
+	assert_eq(ctx.fake.header_string_calls[0][0], "mission_name", "field is mission_name")
+	assert_eq(ctx.fake.header_string_calls[0][1], "Renamed", "value carried through")
+
+
+func test_changing_climate_commits_through_set_header_int() -> void:
+	var ctx := _make({})
+	ctx.fake.mission_ref = _loaded_mission_for_props()
+	ctx.inspector._refresh()
+	var climate := ctx.inspector.find_child("MissionProp_climate", true, false) as OptionButton
+	assert_not_null(climate, "climate option built")
+	for i in climate.item_count:
+		if climate.get_item_id(i) == 2:  # Snow
+			climate.selected = i
+			climate.item_selected.emit(i)
+			break
+	assert_eq(ctx.fake.header_int_calls.size(), 1, "one header_int commit")
+	assert_eq(ctx.fake.header_int_calls[0][0], "climate", "field is climate")
+	assert_eq(ctx.fake.header_int_calls[0][1], 2, "selected id (Snow) carried through")
+
+
+func test_toggling_a_game_mode_flag_commits_through_set_header_flag() -> void:
+	var ctx := _make({})
+	ctx.fake.mission_ref = _loaded_mission_for_props()
+	ctx.inspector._refresh()
+	var coop := ctx.inspector.find_child("MissionFlag_%d" % NovaMissionData.ATTRIB_COOP, true, false) as CheckBox
+	assert_not_null(coop, "co-op flag checkbox built")
+	# Emit the user-toggle signal directly (setting button_pressed would itself emit, double-firing).
+	coop.toggled.emit(true)
+	assert_eq(ctx.fake.header_flag_calls.size(), 1, "one header_flag commit")
+	assert_eq(ctx.fake.header_flag_calls[0][0], NovaMissionData.ATTRIB_COOP, "bit is COOP")
+	assert_eq(ctx.fake.header_flag_calls[0][1], true, "on carried through")
