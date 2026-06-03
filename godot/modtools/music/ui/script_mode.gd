@@ -15,7 +15,6 @@ var _document: RefCounted
 @onready var _compile_bar: Label = %CompileBar
 @onready var _compile_button: Button = %CompileButton
 @onready var _compile_run_button: Button = %CompileRunButton
-@onready var _insert_play_template_button: Button = %InsertPlayTemplateButton
 @onready var _error_panel: PanelContainer = %ErrorPanel
 @onready var _error_list: ItemList = %ErrorList
 
@@ -48,8 +47,6 @@ func _ready() -> void:
 		_compile_button.pressed.connect(_on_compile_pressed)
 	if _compile_run_button != null:
 		_compile_run_button.pressed.connect(_on_compile_run_pressed)
-	if _insert_play_template_button != null:
-		_insert_play_template_button.pressed.connect(_on_insert_play_template_pressed)
 	if _error_list != null:
 		_error_list.item_activated.connect(_on_error_clicked)
 	if _error_panel != null:
@@ -166,20 +163,6 @@ func _on_compile_run_pressed() -> void:
 	var errors: Array = _document.compile_script()
 	if errors.is_empty():
 		compile_and_run_requested.emit()
-
-
-func _on_insert_play_template_pressed() -> void:
-	if _code_edit == null:
-		return
-	var sound_name := "sound_0"
-	if _document != null and _document.bank_loaded():
-		var entries: Array = _document.bank.get_entries()
-		if not entries.is_empty():
-			var first := String(entries[0].get("name", ""))
-			if first != "":
-				sound_name = first
-	_code_edit.insert_text_at_caret("  play %s\n" % sound_name)
-	_on_text_changed()
 
 
 func _on_compile_finished(success: bool, errors: Array) -> void:

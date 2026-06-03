@@ -20,13 +20,13 @@ var _compiled_script_text: String = ""
 var _compiled_bytecode: PackedByteArray = PackedByteArray()
 var _compiled_file_bytes: PackedByteArray = PackedByteArray()
 
-# Per-mode undo stacks. Bank-side commands (reorder, rename) push do/undo
-# pairs onto _bank_history; Script-side commands will land in Phase F.
-# Declared as RefCounted so the parser doesn't need MusicEditHistory's
-# class_name registered before this file resolves; the preloaded class is
-# the actual concrete type.
-var _bank_history: RefCounted
-var _script_history: RefCounted
+# Single unified edit history for the whole document. The Music screen is one
+# surface, so bank edits (reorder, rename) and script/play edits share one
+# timeline and one Ctrl+Z -- a play edit is a script-semantics change, but the
+# user only sees "undo the last thing I did". Declared as RefCounted so the
+# parser doesn't need MusicEditHistory's class_name registered before this file
+# resolves; the preloaded class is the actual concrete type.
+var _history: RefCounted
 
 signal changed
 signal bank_dirty_changed(dirty: bool)
@@ -36,8 +36,7 @@ signal compile_finished(success: bool, errors: Array)
 
 
 func _init() -> void:
-	_bank_history = MusicEditHistoryClass.new()
-	_script_history = MusicEditHistoryClass.new()
+	_history = MusicEditHistoryClass.new()
 
 
 func is_dirty() -> bool:
@@ -258,7 +257,7 @@ func reorder_track(from_index: int, to_index: int) -> void:
 	if not bank_loaded():
 		return
 	# Capture a weakref, never self: the history stack outlives the call, so a
-	# self-bound Callable would form a document -> _bank_history -> Callable ->
+	# self-bound Callable would form a document -> _history -> Callable ->
 	# document cycle that GDScript refcounting can never collect. That leaks the
 	# document and its loaded bank/script (the resources stay "in use" at exit).
 	var wself: WeakRef = weakref(self)
@@ -271,7 +270,7 @@ func reorder_track(from_index: int, to_index: int) -> void:
 		if s != null:
 			s._reorder_track_no_history(to_index, from_index)
 	do_cb.call()
-	_bank_history.push(do_cb, undo_cb)
+	_history.push(do_cb, undo_cb)
 
 
 func _reorder_track_no_history(from_index: int, to_index: int) -> void:
@@ -302,7 +301,7 @@ func rename_track(index: int, new_name: StringName) -> void:
 		if s != null:
 			s._rename_track_no_history(index, prev_name)
 	do_cb.call()
-	_bank_history.push(do_cb, undo_cb)
+	_history.push(do_cb, undo_cb)
 
 
 func _rename_track_no_history(index: int, new_name: String) -> void:
@@ -415,7 +414,7 @@ func _push_text_edit(prev: String, next: String) -> void:
 		var s: MusicEditorDocument = wself.get_ref()
 		if s != null:
 			s._apply_script_text(prev)
-	_bank_history.push(do_cb, undo_cb)
+	_history.push(do_cb, undo_cb)
 
 
 # Set the script text, recompile, and on success emit changed so the map /
@@ -537,38 +536,36 @@ func _section_window_end(lines: PackedStringArray, header_idx: int) -> int:
 	return lines.size()
 
 
-# --- Phase E4: per-mode undo --------------------------------------------
+# --- Unified document undo ----------------------------------------------
+# One timeline for every edit (bank reorder/rename + play/script edits), so the
+# single screen has a single, predictable Ctrl+Z.
 
-func undo_bank() -> void:
-	_bank_history.undo()
-
-
-func redo_bank() -> void:
-	_bank_history.redo()
+func undo() -> void:
+	_history.undo()
 
 
-func undo_script() -> void:
-	_script_history.undo()
+func redo() -> void:
+	_history.redo()
 
 
-func redo_script() -> void:
-	_script_history.redo()
+func can_undo() -> bool:
+	return _history.can_undo()
 
 
-func can_undo_bank() -> bool:
-	return _bank_history.can_undo()
+func can_redo() -> bool:
+	return _history.can_redo()
 
 
-func can_redo_bank() -> bool:
-	return _bank_history.can_redo()
-
-
-func can_undo_script() -> bool:
-	return _script_history.can_undo()
-
-
-func can_redo_script() -> bool:
-	return _script_history.can_redo()
+# Back-compat aliases: callers/tests that predate the unified history. All route
+# to the one timeline so bank and script edits undo in the order they happened.
+func undo_bank() -> void: _history.undo()
+func redo_bank() -> void: _history.redo()
+func undo_script() -> void: _history.undo()
+func redo_script() -> void: _history.redo()
+func can_undo_bank() -> bool: return _history.can_undo()
+func can_redo_bank() -> bool: return _history.can_redo()
+func can_undo_script() -> bool: return _history.can_undo()
+func can_redo_script() -> bool: return _history.can_redo()
 
 
 # Lazy seed: pull the decompiler's text for the default script and cache it.

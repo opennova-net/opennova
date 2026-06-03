@@ -413,6 +413,31 @@ static void resolve_play_name(int idx, const char *const *sbf_names,
     snprintf(out, cap, "sound_%d", idx);
 }
 
+/* True when `s` lexes as a single bare MUS identifier: non-empty, [A-Za-z_]
+   then [A-Za-z0-9_]*. SBF entry names with spaces/dots fail this. */
+static int is_bare_ident(const char *s) {
+    if (!s || !s[0]) return 0;
+    char c0 = s[0];
+    if (!((c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z') || c0 == '_'))
+        return 0;
+    for (const char *p = s + 1; *p; ++p) {
+        char c = *p;
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+              || (c >= '0' && c <= '9') || c == '_'))
+            return 0;
+    }
+    return 1;
+}
+
+/* Format a play target for emission: a bare identifier as-is, otherwise quoted
+   so the compiler reads it as one String token and resolves it via the bind
+   map. Keeps names-aware decompiles ("play GAMINT" / "play \"Main Theme\"")
+   recompilable; names-less ("sound_N") is always a bare ident, never quoted. */
+static void format_play_token(const char *name, char *out, size_t cap) {
+    if (is_bare_ident(name)) snprintf(out, cap, "%s", name);
+    else                     snprintf(out, cap, "\"%s\"", name);
+}
+
 /* Forward decl for recursion. */
 static void decompile_block(Buf *out,
                             const Instruction *insts, int begin_idx, int end_idx,
@@ -690,8 +715,10 @@ static void decompile_block(Buf *out,
             char pname[64];
             resolve_play_name(idx, sbf_names, sbf_name_count,
                               pname, sizeof(pname));
+            char ptok[72];
+            format_play_token(pname, ptok, sizeof(ptok));
             emit_indent(out, indent);
-            buf_printf(out, "play %s\n", pname);
+            buf_printf(out, "play %s\n", ptok);
         }
         else if (strcmp(m, "return") == 0) {
             emit_indent(out, indent);
@@ -761,8 +788,10 @@ static void decompile_block(Buf *out,
                 } else if ((inner_op == 0x3D || inner_op == 0x3E) && es_size >= 2) {
                     int sidx = entry[1];
                     if (inner_op == 0x3D && es_size >= 3) sidx = entry[1] | (entry[2] << 8);
+                    char raw[64];
                     resolve_play_name(sidx, sbf_names, sbf_name_count,
-                                      tname, sizeof(tname));
+                                      raw, sizeof(raw));
+                    format_play_token(raw, tname, sizeof(tname));
                 } else if (inner_op == 0x30 && es_size >= 5) {
                     uint32_t addr = (uint32_t)entry[1]
                                   | ((uint32_t)entry[2] << 8)
