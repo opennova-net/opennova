@@ -184,21 +184,21 @@ func has_unsaved_changes() -> bool:
 # repaints off the document's `changed` signal, which the undo callables emit,
 # so the track list refreshes without extra wiring here.
 func can_undo() -> bool:
-	return _document != null and _document.can_undo_bank()
+	return _document != null and _document.can_undo()
 
 
 func can_redo() -> bool:
-	return _document != null and _document.can_redo_bank()
+	return _document != null and _document.can_redo()
 
 
 func undo() -> void:
 	if _document != null:
-		_document.undo_bank()
+		_document.undo()
 
 
 func redo() -> void:
 	if _document != null:
-		_document.redo_bank()
+		_document.redo()
 
 
 func get_current_resource_path() -> String:

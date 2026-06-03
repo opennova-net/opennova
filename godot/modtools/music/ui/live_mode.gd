@@ -105,9 +105,17 @@ func bind_document(document: RefCounted) -> void:
 	# pings after it's gone.
 	if _document != null and _document.changed.is_connected(_on_document_changed):
 		_document.changed.disconnect(_on_document_changed)
+	if _document != null and _document.has_signal("compile_finished") \
+			and _document.compile_finished.is_connected(_on_compile_finished):
+		_document.compile_finished.disconnect(_on_compile_finished)
 	_document = document
 	if _document != null:
 		_document.changed.connect(_on_document_changed)
+		# Surface compile failures on the always-visible transport label and pop
+		# the Advanced drawer (where the detailed error list lives). Without this a
+		# failed Compile&Run / Save was silent whenever the drawer was collapsed.
+		if _document.has_signal("compile_finished"):
+			_document.compile_finished.connect(_on_compile_finished)
 	if is_node_ready():
 		_on_document_changed()
 
@@ -656,6 +664,29 @@ func _on_map_node_selected(node: Node) -> void:
 func _on_advanced_toggled(pressed: bool) -> void:
 	if _advanced_drawer != null:
 		_advanced_drawer.visible = pressed
+
+
+# A failed compile (Compile / Compile&Run / Save) only populates the Script-mode
+# error list inside the Advanced drawer. Flash the first diagnostic on the
+# transport label and reveal the drawer so the failure is never silent.
+func _on_compile_finished(success: bool, errors: Array) -> void:
+	if success or errors.is_empty():
+		return
+	var first: Dictionary = errors[0] if errors[0] is Dictionary else {}
+	var msg: String = String(first.get("message", "compile error"))
+	var line: int = int(first.get("line", 0))
+	if line > 0:
+		msg = "line %d: %s" % [line, msg]
+	_flash_start_warning(msg)
+	_reveal_advanced_drawer()
+
+
+func _reveal_advanced_drawer() -> void:
+	if _advanced_drawer != null:
+		_advanced_drawer.visible = true
+	# Keep the toggle in sync without re-triggering _on_advanced_toggled.
+	if _advanced_toggle != null and _advanced_toggle.has_method("set_pressed_no_signal"):
+		_advanced_toggle.set_pressed_no_signal(true)
 
 
 # Double-clicking a state opens the Advanced drawer at its raw script. Single

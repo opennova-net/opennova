@@ -28,11 +28,6 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Compile & Run"
 
-[node name="InsertPlayTemplateButton" type="Button" parent="VBox/Toolbar"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Insert Play"
-
 [node name="CodeEdit" type="CodeEdit" parent="VBox"]
 unique_name_in_owner = true
 layout_mode = 2

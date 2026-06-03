@@ -166,6 +166,14 @@ target_compile_definitions(mus_roundtrip_test PRIVATE
 add_test(NAME mus_roundtrip COMMAND mus_roundtrip_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(mus_names_roundtrip_test mus/mus_names_roundtrip_test.cpp)
+target_link_libraries(mus_names_roundtrip_test PRIVATE opennova_mus)
+target_include_directories(mus_names_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_names_roundtrip_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_names_roundtrip COMMAND mus_names_roundtrip_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(mus_vm_test mus/mus_vm_test.cpp)
 target_link_libraries(mus_vm_test PRIVATE opennova_mus)
 target_include_directories(mus_vm_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

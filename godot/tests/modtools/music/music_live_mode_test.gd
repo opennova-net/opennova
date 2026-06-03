@@ -34,6 +34,26 @@ func test_live_starts_and_stops():
 	assert_eq(lm._director.vm_state(), 0, "VM STOPPED after Stop press")
 
 
+func test_compile_failure_reveals_drawer_and_flashes_label():
+	var doc = MusicEditorDocument.new()
+	doc.open_pair(_copy_temp_pair())
+	var lm: Control = LiveModeScene.instantiate()
+	add_child_autofree(lm)
+	lm.bind_document(doc)
+	await get_tree().process_frame
+	var drawer: Control = lm.get_node("%AdvancedDrawer")
+	var label: Label = lm.get_node("%StateLabel")
+	drawer.visible = false  # collapsed, as on first open
+	# A failed compile must surface globally, not just in the hidden drawer.
+	doc.compile_finished.emit(false, [{"line": 3, "col": 1, "message": "boom"}])
+	assert_true(drawer.visible, "Advanced drawer revealed on compile failure")
+	assert_true(label.text.contains("boom"), "transport label flashes the diagnostic")
+	# A clean compile must not force the drawer open.
+	drawer.visible = false
+	doc.compile_finished.emit(true, [])
+	assert_false(drawer.visible, "clean compile does not pop the drawer")
+
+
 func test_var_inspector_infrastructure():
 	var doc = MusicEditorDocument.new()
 	doc.open_pair(_copy_temp_pair())
