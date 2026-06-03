@@ -1,12 +1,12 @@
 // NovaMusicDirector. Hosts a libs/mus VM and forwards hook callbacks to
 // godot::Object signals. Witnessed wire-level paths in libs/mus:
-//   dfvas!AudioVM_LoadScriptFile @ 0x00557A60   -> mus_vm_load_script
-//   dfvas!VmOp_Play @ 0x558520 / VmOp_PlayWait @ 0x558500
+//   Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20   -> mus_vm_load_script
+//   Jointops.exe!VmOp_Play @ 0x672CB0 / VmOp_PlayWait @ 0x672C90
 //                                                  -> _on_play_sound
-//   dfvas!VmOp_SetState @ 0x5584E0              -> _on_section_entered
-//   dfvas!Intrinsic_GSV @ 0x5578B0 / GSDV @ 0x5578F0
+//   Jointops.exe!VmOp_SetState @ 0x672C70              -> _on_section_entered
+//   Jointops.exe!Intrinsic_GSV @ 0x6720E0 / GSDV @ 0x672120
 //                                                  -> _on_volume_changed
-//   dfvas!Intrinsic_GEcho @ 0x557890            -> _on_echo
+//   Jointops.exe!Intrinsic_GEcho @ 0x6720C0            -> _on_echo
 
 #include "nova_music_director.h"
 

@@ -3,7 +3,7 @@
 
 // MUS interactive-music script wrapper. The underlying parser is libs/mus
 // (mus_open_memory), which mirrors the engine's
-// AudioVM_LoadScriptFile @ 0x00557A60 (dfvas) script-load path. Held as a
+// AudioVM_LoadScriptFile @ 0x00672D20 (Jointops.exe) script-load path. Held as a
 // godot::Resource so a .bin script file appears in the editor's resource
 // browser alongside SBF banks.
 

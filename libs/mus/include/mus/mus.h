@@ -4,9 +4,9 @@
 /* MUS (interactive-music script) container reader.
 
    SCR0 file header parser witnessed at
-       dfvas!AudioVM_LoadScriptFile @ 0x00557A60
+       Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20
    MU01 chunk relocator at
-       dfvas!AudioVM_RelocateChunk @ 0x00557BA0 */
+       Jointops.exe!AudioVM_RelocateChunk @ 0x00672470 */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -25,7 +25,7 @@ extern "C" {
 
 /* --- On-disk structs --- */
 
-/* SCR0 file-level header. Witnessed: dfvas!AudioVM_LoadScriptFile @ 0x00557A60.
+/* SCR0 file-level header. Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
    Field offsets confirmed against the relocation pattern at 0x557af3..0x557b3d. */
 typedef struct MusFileHeader {
     uint32_t magic;                       /* 'SCR0' */
@@ -38,8 +38,8 @@ typedef struct MusFileHeader {
     uint32_t reserved[4];                 /* 16 bytes; never read by engine */
 } MusFileHeader;
 
-/* MU01 chunk header. Witnessed: dfvas!AudioVM_RelocateChunk @ 0x00557BA0
-   plus dfvas!AudioVM_ScriptInstanceInit @ 0x00557C70. */
+/* MU01 chunk header. Witnessed: Jointops.exe!AudioVM_RelocateChunk @ 0x00672470
+   plus Jointops.exe!AudioVM_ScriptInstanceInit @ 0x00672D20. */
 typedef struct MusChunkHeader {
     uint32_t tag;                         /* 'MU01'; never validated at runtime */
     uint32_t version;                     /* 0x00000100; not read */
@@ -185,8 +185,8 @@ void mus_free(void *p);
 
 /* --- VM (interpreter) ---
 
-   Witnessed: dfvas!AudioVM_DispatchLoop @ 0x00557FA0 (32-instruction budget,
-   65-entry dispatch table at dfvas!0x0064CB9C, two stacks: data EBP-tracked
+   Witnessed: Jointops.exe!AudioVM_DispatchLoop @ 0x00672720 (32-instruction budget,
+   65-entry dispatch table at Jointops.exe!0x0084F220, two stacks: data EBP-tracked
    and call EDI-tracked). 8 of 11 intrinsics bound: GEcho, GGRnd, GSV, GSDV,
    GFB, FSet, FClear, FIsSet (FIsClear, TStart, TStop are NULL handlers that
    silently no-op + push 0). */
@@ -202,26 +202,26 @@ typedef enum MusVMState {
 
 /* Host-supplied callbacks. All take a void* user pointer the host registered
    with `mus_vm_set_hooks`. Any callback may be NULL, in which case the VM
-   silently elides the call. Hook signatures match the witnessed dfvas
+   silently elides the call. Hook signatures match the witnessed Jointops.exe
    side-effects (Phase A revisions, see spec §"libs/mus C API"). */
 typedef struct MusVMHooks {
     void *user;
-    /* Witnessed: dfvas!VmOp_Play @ 0x558520 (0x3E, 1B index)
-       and       dfvas!VmOp_PlayWait @ 0x558500 (0x3D, 2B index).
+    /* Witnessed: Jointops.exe!VmOp_Play @ 0x672CB0 (0x3E, 1B index)
+       and       Jointops.exe!VmOp_PlayWait @ 0x672C90 (0x3D, 2B index).
        wait=1 for playw (0x3D), 0 for play (0x3E). */
     void (*on_play_sound)     (void *user, uint32_t sbf_entry_index, int wait);
     /* Fired when execution enters a section (via setstate or
-       mus_vm_jump_to_section). Witnessed: dfvas!VmOp_SetState @ 0x5584E0. */
+       mus_vm_jump_to_section). Witnessed: Jointops.exe!VmOp_SetState @ 0x672C70. */
     void (*on_section_entered)(void *user, const char *section_name);
     /* Fired by pop_g (0x08), GSV, GSDV intrinsics whenever a global var slot
        is written. var_index is the byte offset / 4 (Var00..Var15 fit indices
        0..15; user globals at index 16+). */
     void (*on_var_changed)    (void *user, uint8_t var_index, int32_t new_value);
     /* GEcho intrinsic: pops 1 arg, fires this hook with the int32 value.
-       Witnessed: dfvas!Intrinsic_GEcho @ 0x557890. */
+       Witnessed: Jointops.exe!Intrinsic_GEcho @ 0x6720C0. */
     void (*on_echo)           (void *user, int32_t arg);
     /* GSV / GSDV set master / right-channel volumes in 16.16 fixed point.
-       Witnessed: dfvas!Intrinsic_GSV @ 0x5578B0, GSDV @ 0x5578F0. */
+       Witnessed: Jointops.exe!Intrinsic_GSV @ 0x6720E0, GSDV @ 0x672120. */
     void (*on_volume_changed) (void *user, int32_t left_16_16, int32_t right_16_16);
 } MusVMHooks;
 

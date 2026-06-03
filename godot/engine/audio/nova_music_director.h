@@ -5,9 +5,9 @@
 // signals. Owns a small AudioStreamPlayer pool for marker playback driven
 // by the play / playw opcodes.
 //
-// Witnessed wire-level paths (libs/mus): dfvas!AudioVM_LoadScriptFile @
-// 0x00557A60 (script load), dfvas!VmOp_Play @ 0x558520 + VmOp_PlayWait @
-// 0x558500 (sound triggers), dfvas!Intrinsic_GSV / GSDV (volume).
+// Witnessed wire-level paths (libs/mus): Jointops.exe!AudioVM_LoadScriptFile @
+// 0x00672D20 (script load), Jointops.exe!VmOp_Play @ 0x672CB0 + VmOp_PlayWait @
+// 0x672C90 (sound triggers), Jointops.exe!Intrinsic_GSV / GSDV (volume).
 
 #include <godot_cpp/classes/audio_stream_player.hpp>
 #include <godot_cpp/classes/node.hpp>

@@ -62,7 +62,18 @@ int scr_decrypt_buf(const uint8_t *data, size_t size,
 /* Music-file variant of SCR cipher.
  *
  * Witnessed: dfvas!Scr_DecryptBuffer @ 0x4cc250, called by the audio VM load
- * chain with key SCR_KEY_JO_DFX2 (0x2A5A8EAD). Encrypted on-disk form has no
+ * chain with key SCR_KEY_JO_DFX2 (0x2A5A8EAD).
+ *
+ * NOTE (Jointops.exe re-anchor, 2026-06-02): this rol32 additive cipher is NOT
+ * present in Jointops.exe's audio path. There, AudioVM_LoadScriptFile @ 0x672D20
+ * loads via File_LoadResource @ 0x75B540 and checks the plaintext 'SCR0' magic
+ * directly -- no decrypt call -- and neither key (0xABEEFACE/0x2A5A8EAD) appears
+ * as an immediate in that binary. The cipher itself is independently correct
+ * (verified byte-for-byte vs the retail jo_gamemus.bin), but its citation stays
+ * dfvas-only because no Jointops.exe equivalent exists to re-anchor to.
+ * See notes/audio/sbf-mus-format.md (SCR verdict: UNKNOWN vs Jointops.exe).
+ *
+ * Encrypted on-disk form has no
  * "SCR\xVV" header: every byte is ciphertext. Decryption applies the XOR
  * keystream to every input byte, reverses, and prepends a literal "SCR0"
  * magic so the output is consumable by the standard SCR0 audio script
