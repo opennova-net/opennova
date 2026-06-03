@@ -1612,7 +1612,7 @@ func add_marker_to_active_path_at_world(global_hit: Vector3) -> bool:
 	var before := _mission.snapshot()
 	var result := _mission.add_waypoint_marker(_selected_path_index, _default_marker_item_id(), bms_pos, Vector3.ZERO, -1)
 	if result.is_empty():
-		_last_status = "Could not add a waypoint marker."
+		_report("Could not add a waypoint marker.", true)
 		return false
 	_push_undo_step(before)
 	_refresh_waypoint_overlay()
