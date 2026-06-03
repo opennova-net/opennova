@@ -1,7 +1,6 @@
 #include "resource_index/resource_index.h"
 
 #include <vfs/vfs.h>
-#include <mus/mus_sniff.h>
 
 #include <algorithm>
 #include <cctype>
@@ -203,20 +202,13 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 		const std::string ext = extension_for_name(loc.logical_name);
 		std::string kind;
 		if (ext == ".bin") {
-			// RTXT strings tables and music scripts need a content peek; only .bin
-			// candidates are read. Use the raw (stored) bytes: the Vfs decodes
-			// containers on read_file, which would transform the magic before we can
-			// classify it.
+			// RTXT strings tables and SCR0 music scripts need a content peek; only
+			// .bin candidates are read. Use decoded VFS bytes so explicit SCR-wrapped
+			// loose/PFF payloads classify the same way as plaintext files.
 			std::vector<uint8_t> bytes;
-			const bool ok = impl_->vfs.read_file_raw(loc.logical_name, bytes);
+			const bool ok = impl_->vfs.read_file(loc.logical_name, bytes);
 			const bool rtxt = ok && has_rtxt_magic(bytes);
-			bool scr = ok && has_scr_magic(bytes);
-			// Encrypted-on-disk MUS (the headerless retail form) carries no SCR0
-			// magic in its raw bytes; recognize it the same way the loader does so
-			// quick-open lists exactly what can be opened.
-			if (ok && !scr && !rtxt && mus_is_mus(bytes.data(), bytes.size())) {
-				scr = true;
-			}
+			const bool scr = ok && has_scr_magic(bytes);
 			kind = kind_for_name_and_magic(loc.logical_name, rtxt, scr);
 		} else {
 			kind = kind_for_name_and_magic(loc.logical_name, false, false);

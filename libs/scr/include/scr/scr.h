@@ -29,7 +29,7 @@ extern "C" {
 #define SCR_KEY_JO_DFX2  0x2A5A8EADu  /* JO/DFX2 Combined Arms */
 #define SCR_KEY_SHADERS  0xA55B1EEDu  /* .fx shader files */
 
-/* Check if data starts with "SCR" magic.
+/* Check if data starts with a valid SCR container header.
    Returns 1 if SCR, 0 otherwise. */
 SCR_EXPORT int scr_is_scr(const uint8_t *data, size_t size);
 
@@ -49,33 +49,6 @@ SCR_EXPORT void scr_decrypt(uint8_t *data, size_t size, uint32_t key);
            -2 if output buffer is too small. */
 SCR_EXPORT int scr_decrypt_buf(const uint8_t *data, size_t size,
                     uint8_t *out, size_t *out_size, uint32_t key);
-
-/* Decrypt a NovaLogic MUS-style encrypted blob: no SCR magic header on disk,
- * apply XOR keystream then reverse, prepend literal "SCR0" magic.
- * This is the music-file (gamemus.bin / menumus.bin) variant of SCR encryption,
- * distinct from .def / .fx files which carry a leading "SCR\xVV" header.
- * Witnessed: dfvas!Scr_DecryptBuffer @ 0x4cc250 with key 0x2A5A8EAD.
- *
- * Allocates output buffer at *out (size: in_size + 4). Caller frees with
- * scr_free_buffer(). Returns 0 on success, -1 on input/output errors,
- * -3 on allocation failure. */
-SCR_EXPORT int scr_decrypt_mus(const uint8_t *in, size_t in_size,
-                                uint8_t **out, size_t *out_size, uint32_t key);
-
-/* Inverse of scr_decrypt_mus: take a decrypted MUS buffer (must begin with the
- * literal "SCR0" magic) and produce the headerless on-disk ciphertext form
- * (in_size - 4 bytes): drop "SCR0", reverse the payload, then apply the forward
- * keystream XOR. Round-trips with scr_decrypt_mus under the same key. Allocates
- * *out via malloc; free with scr_free_buffer().
- *
- * The engine never encrypts; this exists so tests/tools can synthesize the
- * on-disk encrypted form from a committed plaintext fixture instead of shipping
- * the ciphertext. Returns 0 on success, -1 on bad input, -3 on allocation fail. */
-SCR_EXPORT int scr_encrypt_mus(const uint8_t *in, size_t in_size,
-                                uint8_t **out, size_t *out_size, uint32_t key);
-
-/* Free a buffer allocated by scr_decrypt_mus / scr_encrypt_mus. NULL-safe. */
-SCR_EXPORT void scr_free_buffer(uint8_t *buf);
 
 #ifdef __cplusplus
 }

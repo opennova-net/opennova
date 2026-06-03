@@ -3,10 +3,6 @@ extends GutTest
 # MUS load smoke (fixture-only). Stages the committed plaintext jo_gamemus.bin
 # (byte-identical to JO_CLIENT/localres.pff's canonical entry) into user:// and
 # loads it via ResourceLoader, asserting the MUS loader returns a NovaMusicScript.
-#
-# The encrypted on-disk forms (SCR-wrapped and headerless) are covered at the C++
-# level (tests/scr/scr_mus_test, tests/vfs/vfs_mus_decode_test) using a
-# synthesized ciphertext, so no external asset or committed ciphertext is needed.
 
 const FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
 const USER_COPY := "user://test_jo_gamemus.bin"
