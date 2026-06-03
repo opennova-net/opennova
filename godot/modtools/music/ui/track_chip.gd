@@ -40,6 +40,10 @@ func setup(track_index: int, display_name: String, wait: bool, editable: bool = 
 	name_label.text = display_name
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_label.clip_text = true
+	# Trim long names with an ellipsis (not a hard cut to "soun") and keep the
+	# full name reachable on hover. The right inspector shows the untrimmed name.
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	name_label.tooltip_text = display_name
 	add_child(name_label)
 
 	if _wait:

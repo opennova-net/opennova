@@ -407,6 +407,9 @@ func _refresh_map() -> void:
 	for section in model:
 		var idx: int = int(section.get("index", -1))
 		var gn := GraphNode.new()
+		# Floor the node width so play-chip names (e.g. "JOMEN602A") read instead of
+		# clipping to "soun"; long names still ellipsize with a full-name tooltip.
+		gn.custom_minimum_size = Vector2(190, 0)
 		gn.name = "S_%d" % idx
 		gn.set_meta("section", String(section.get("name", "")))
 		gn.gui_input.connect(_on_node_gui_input.bind(String(section.get("name", ""))))
@@ -452,8 +455,10 @@ func _refresh_map() -> void:
 
 # Deterministic BFS layered layout from the entry section, left to right, so the
 # map doesn't reshuffle on every rebuild (GraphEdit.arrange_nodes is
-# non-deterministic). Sections no edge reaches (win/lose stings) trail in a
-# final column.
+# non-deterministic). Within each layer, nodes are ordered by the average row of
+# their already-placed parents (barycenter) so a switch's targets sit beside the
+# switch instead of sprawling, which cuts edge crossings. Sections no edge
+# reaches (win/lose stings) trail in a final column.
 func _layout_map(model: Array, node_by_index: Dictionary) -> void:
 	var entry_idx: int = -1
 	var adj: Dictionary = {}
@@ -485,14 +490,49 @@ func _layout_map(model: Array, node_by_index: Dictionary) -> void:
 		var idx2: int = int(section.get("index", -1))
 		if not layer.has(idx2):
 			layer[idx2] = max_layer + 1
-	var row_in_layer: Dictionary = {}
+	# Reverse adjacency: who points at each node (self-loops already excluded).
+	var incoming: Dictionary = {}
+	for src in adj.keys():
+		for dst in adj[src]:
+			if not incoming.has(dst):
+				incoming[dst] = []
+			(incoming[dst] as Array).append(src)
+	# Group nodes by layer, node-index order as the stable tiebreak.
+	var members: Dictionary = {}
 	var indices: Array = node_by_index.keys()
 	indices.sort()
+	var top_layer: int = 0
 	for idx3 in indices:
-		var l: int = int(layer.get(idx3, 0))
-		var r: int = int(row_in_layer.get(l, 0))
-		row_in_layer[l] = r + 1
-		(node_by_index[idx3] as GraphNode).position_offset = Vector2(l * 280, r * 150)
+		var l3: int = int(layer.get(idx3, 0))
+		if not members.has(l3):
+			members[l3] = []
+		(members[l3] as Array).append(idx3)
+		top_layer = maxi(top_layer, l3)
+	# Place layer by layer; order each layer by the barycenter of its already-
+	# placed parents. Parentless nodes (entry, unreached stings) keep index order.
+	var assigned_row: Dictionary = {}
+	for l4 in range(top_layer + 1):
+		if not members.has(l4):
+			continue
+		var group: Array = (members[l4] as Array).duplicate()
+		var bary: Dictionary = {}
+		for idx4 in group:
+			var total: float = 0.0
+			var cnt: int = 0
+			for src2 in incoming.get(idx4, []):
+				if assigned_row.has(src2):
+					total += float(assigned_row[src2])
+					cnt += 1
+			bary[idx4] = (total / cnt) if cnt > 0 else 1e9
+		group.sort_custom(func(a, b):
+			if bary[a] == bary[b]:
+				return int(a) < int(b)
+			return bary[a] < bary[b])
+		var row: int = 0
+		for idx5 in group:
+			assigned_row[idx5] = row
+			(node_by_index[idx5] as GraphNode).position_offset = Vector2(l4 * 320, row * 180)
+			row += 1
 
 
 # Tint the running VM's current section; clear the rest. Applied on each rebuild

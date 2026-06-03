@@ -600,6 +600,10 @@ func _refresh_workspace_surface() -> void:
 	_rebuild_workspace_actions(workspace)
 	_modes_label.visible = has_workflows
 	_mode_rail.visible = has_workflows
+	# Whole left lane (picker + inspector host) is opt-out: a workspace that lives
+	# entirely in the viewport (e.g. Music's unified screen) hides it to reclaim
+	# the width. BodyRow is an HSplitContainer, so the viewport takes the space.
+	_left_lane.visible = workspace == null or workspace.uses_left_lane()
 	_sync_asset_dock_for_workspace(workspace)
 	_rebuild_workflow_rail(workflows)
 	if has_workflows:

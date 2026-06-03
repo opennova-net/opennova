@@ -67,10 +67,10 @@ tooltip_text = "Show the raw script text for the selected section. The faithful 
 [node name="Body" type="HSplitContainer" parent="Screen"]
 layout_mode = 2
 size_flags_vertical = 3
-split_offset = 300
+split_offset = 340
 
 [node name="LeftDock" type="VSplitContainer" parent="Screen/Body"]
-custom_minimum_size = Vector2(300, 0)
+custom_minimum_size = Vector2(340, 0)
 layout_mode = 2
 
 [node name="TracksPanel" type="VBoxContainer" parent="Screen/Body/LeftDock"]
@@ -89,6 +89,7 @@ size_flags_vertical = 3
 [node name="DialsPanel" type="VBoxContainer" parent="Screen/Body/LeftDock"]
 layout_mode = 2
 size_flags_vertical = 3
+size_flags_stretch_ratio = 1.4
 
 [node name="DialsHeader" type="Label" parent="Screen/Body/LeftDock/DialsPanel"]
 layout_mode = 2
@@ -104,11 +105,12 @@ size_flags_vertical = 3
 [node name="VolumeMeter" parent="Screen/Body/LeftDock/DialsPanel" instance=ExtResource("3_vol")]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_vertical = 4
 
 [node name="AudioHint" type="Label" parent="Screen/Body/LeftDock/DialsPanel"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.55, 0.55, 1)
-text = "Sounds play on your default audio device. If you hear nothing, the editor may have fallen back to a silent driver (the meter above still moves)."
+text = "No sound? The editor may be on a silent audio driver; the meter above still moves."
 autowrap_mode = 2
 
 [node name="CenterRight" type="HSplitContainer" parent="Screen/Body"]
