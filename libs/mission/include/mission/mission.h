@@ -243,6 +243,14 @@ struct MissionLogicSummary {
 	size_t diagnostic_count = 0;
 };
 
+// One row of an enum choice list (value + display name), produced by the *_types() reflectors below.
+// The reflectors probe the existing name-mapping switches in mission.cpp so a new enum value added to
+// bms.h shows up in the editor's dropdowns for free; entries the switch does not name are omitted.
+struct MissionEnumEntry {
+	int value = 0;
+	std::string name;
+};
+
 class MissionDocument {
 public:
 	MissionDocument();
@@ -328,7 +336,25 @@ public:
 	bool insert_event_action(size_t event_index, size_t local_index, const MissionActionRecord &record, MissionEventChain *out = nullptr);
 	bool remove_event_action(size_t event_index, size_t local_index, MissionEventChain *out = nullptr);
 	bool move_event_action(size_t event_index, size_t local_index, int delta, MissionEventChain *out = nullptr);
+	// Whole-event add / remove (the only scripting mutators the engine's loader implies but that the
+	// insert/remove_event_* helpers above did not cover). add_event appends a fresh empty event (no
+	// triggers/actions; the caller fills them via insert_event_trigger/action) and returns its index via
+	// `out`. remove_event drains the event's trigger and action ranges through the single-element removers
+	// (so every other event's trigger_index/action_index stays correct), repairs ResetEvent action
+	// references (param1 = event index: decremented past the hole; an exact hit is set to -1 = dangling,
+	// which get_event_chain then flags), erases the event, and re-syncs the header counts.
+	bool add_event(const MissionEventRecord &record, MissionEventRecord *out = nullptr);
+	bool remove_event(size_t index);
 	MissionLogicSummary logic_summary() const;
+
+	// Enum choice lists for the editor's type dropdowns, reflected from the name-mapping switches so they
+	// track bms.h. trigger_sub_types / action_sub_types are composite (the sub-type set depends on the
+	// main / action type), matching the engine's nested switch. event_flag_bits lists the EventFlags bits.
+	std::vector<MissionEnumEntry> trigger_main_types() const;
+	std::vector<MissionEnumEntry> trigger_sub_types(int main_type) const;
+	std::vector<MissionEnumEntry> action_types() const;
+	std::vector<MissionEnumEntry> action_sub_types(int action_type) const;
+	std::vector<MissionEnumEntry> event_flag_bits() const;
 
 	const bms::File &bms_file() const;
 	bms::File &bms_file();

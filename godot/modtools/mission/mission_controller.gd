@@ -152,6 +152,13 @@ var _zone_preview_max: Vector3 = Vector3.ZERO
 # Default half-extents (mission units) of a freshly added zone box, before the user resizes.
 const DEFAULT_ZONE_HALF := Vector3(64.0, 64.0, 32.0)
 
+# --- Authoring (Phase 4): mission scripting (events / triggers / actions) ------
+# Scripting is panel-driven: the viewport is inert in Mode.SCRIPTING, so there is no overlay or
+# pickable list, only a selected event. The selected event index persists across re-bakes (like the
+# waypoint path, unlike the zone selection) so a logic edit elsewhere keeps the user on their event;
+# it is clamped back into range whenever the event list shrinks (see get_selected_event_index).
+var _selected_event_index: int = -1
+
 
 func _init(p_terrain_editor: Node = null) -> void:
 	terrain_editor = p_terrain_editor
@@ -1275,6 +1282,10 @@ func set_mode(mode: int) -> void:
 	if mode == Mode.AREA_TRIGGERS and _mission != null and _mission.get_area_trigger_count() > 0:
 		# Focus the first zone on entry so the panel is not empty.
 		_selected_zone_index = 0
+	if mode == Mode.SCRIPTING and _mission != null and get_selected_event_index() < 0 and _mission.get_event_count() > 0:
+		# Focus the first event on entry so the scripting panel is not empty (get_selected_event_index
+		# reads a stale-but-out-of-range selection as -1, so a shrunken list re-focuses event 0).
+		_selected_event_index = 0
 	_refresh_waypoint_overlay()
 	_refresh_area_trigger_overlay()
 	# Each overlay is visible only in its own mode.
@@ -1304,6 +1315,10 @@ func is_area_trigger_mode() -> bool:
 
 func is_objects_mode() -> bool:
 	return _mode == Mode.OBJECTS
+
+
+func is_scripting_mode() -> bool:
+	return _mode == Mode.SCRIPTING
 
 
 # Focus a waypoint path (0..127) in the panel + overlay. Drops the marker selection (a
@@ -1945,6 +1960,205 @@ func _deselect_zone() -> void:
 	_selected_zone_index = -1
 	_refresh_area_trigger_overlay()
 	changed.emit()
+
+
+# --- Authoring (Phase 4): mission scripting forwarders ------------------------
+# Panel-driven (no viewport interaction): the inspector's Scripting tab calls these, each on the same
+# snapshot -> _push_undo_step -> mark_dirty undo recipe as the other modes. Reads pass through to the
+# binding; every read tolerates "no mission" by returning an empty value.
+
+func get_event_count() -> int:
+	return _mission.get_event_count() if _mission != null else 0
+
+
+func get_events() -> Array:
+	return _mission.get_events() if _mission != null else []
+
+
+# The selected event index, or -1 when nothing valid is selected. Pure read (no side effects): a
+# selection that fell out of range (the event list shrank under it via a delete or an undo) reads as
+# "nothing selected" rather than a stale index, and the caller re-selects from the list. The stored
+# field is left alone; every read re-validates it against the current event count.
+func get_selected_event_index() -> int:
+	if _mission == null or _selected_event_index < 0 or _selected_event_index >= _mission.get_event_count():
+		return -1
+	return _selected_event_index
+
+
+# The selected event's full chain { event, triggers, actions, references, diagnostics }, or {}.
+func get_selected_event_chain() -> Dictionary:
+	var index := get_selected_event_index()
+	if _mission == null or index < 0:
+		return {}
+	return _mission.get_event_chain(index)
+
+
+func get_logic_summary() -> Dictionary:
+	return _mission.get_logic_summary() if _mission != null else {}
+
+
+func get_trigger_main_types() -> Array:
+	return _mission.get_trigger_main_types() if _mission != null else []
+
+
+func get_trigger_sub_types(main_type: int) -> Array:
+	return _mission.get_trigger_sub_types(main_type) if _mission != null else []
+
+
+func get_action_types() -> Array:
+	return _mission.get_action_types() if _mission != null else []
+
+
+func get_action_sub_types(action_type: int) -> Array:
+	return _mission.get_action_sub_types(action_type) if _mission != null else []
+
+
+func get_event_flag_bits() -> Array:
+	return _mission.get_event_flag_bits() if _mission != null else []
+
+
+# Focus an event by index (the inspector list drives this). Inert if unchanged.
+func select_event(index: int) -> void:
+	if index == _selected_event_index:
+		return
+	_selected_event_index = index
+	changed.emit()
+
+
+# Append a new empty event, select it, and dirty. One undo step. Returns the new index, or -1.
+func add_event_default() -> int:
+	if _mission == null:
+		return -1
+	_flush_edit()
+	var before := _mission.snapshot()
+	var event := _mission.add_event(0, 0, 0)
+	if event.is_empty():
+		_report("Could not add an event.", true)
+		return -1
+	_push_undo_step(before)
+	_selected_event_index = int(event.get("index", -1))
+	mark_dirty()
+	return _selected_event_index
+
+
+# Delete the selected event (drops its triggers + actions; ResetEvent references are repaired in the
+# lib). Structural, so the selection clamps to the shrunken list. One undo step. False if none selected.
+func delete_selected_event() -> bool:
+	if _mission == null or get_selected_event_index() < 0:
+		return false
+	_flush_edit()
+	var before := _mission.snapshot()
+	if not _mission.remove_event(_selected_event_index):
+		return false
+	_push_undo_step(before)
+	# Drop the selection after a delete (like the zone panel): the row the user was on is gone, and the
+	# index would otherwise point at the event that shifted into its slot.
+	_selected_event_index = -1
+	_report("Event deleted. A ResetEvent action that pointed past it was repaired; a direct hit was unset.")
+	mark_dirty()
+	return true
+
+
+# Overwrite the selected event's own attributes (the EventFlags bitfield + reset_after / delay). One step.
+func set_selected_event(flags: int, reset_after: int, delay: int) -> void:
+	if _mission == null or get_selected_event_index() < 0:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	if _mission.set_event(_selected_event_index, flags, reset_after, delay):
+		_push_undo_step(before)
+		mark_dirty()
+
+
+# Append a trigger to the selected event (defaults to a Group / Null condition). One undo step.
+func add_selected_event_trigger() -> void:
+	if _mission == null or get_selected_event_index() < 0:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	var chain := _mission.add_event_trigger(_selected_event_index, {})
+	if chain.is_empty():
+		_report("Could not add a trigger (an event chains at most 20).", true)
+		return
+	_push_undo_step(before)
+	mark_dirty()
+
+
+# Overwrite the trigger at `local_index` (its position in the event's chain) from an editor dict. One step.
+func set_selected_event_trigger(local_index: int, trigger: Dictionary) -> void:
+	if _mission == null or get_selected_event_index() < 0:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	var chain := _mission.set_event_trigger(_selected_event_index, local_index, trigger)
+	if not chain.is_empty():
+		_push_undo_step(before)
+		mark_dirty()
+
+
+func remove_selected_event_trigger(local_index: int) -> void:
+	if _mission == null or get_selected_event_index() < 0:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	if _mission.remove_event_trigger(_selected_event_index, local_index):
+		_push_undo_step(before)
+		mark_dirty()
+
+
+func move_selected_event_trigger(local_index: int, delta: int) -> void:
+	if _mission == null or get_selected_event_index() < 0:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	if _mission.move_event_trigger(_selected_event_index, local_index, delta):
+		_push_undo_step(before)
+		mark_dirty()
+
+
+# Append an action to the selected event (defaults to a Null action). One undo step.
+func add_selected_event_action() -> void:
+	if _mission == null or get_selected_event_index() < 0:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	var chain := _mission.add_event_action(_selected_event_index, {})
+	if chain.is_empty():
+		_report("Could not add an action (an event chains at most 20).", true)
+		return
+	_push_undo_step(before)
+	mark_dirty()
+
+
+func set_selected_event_action(local_index: int, action: Dictionary) -> void:
+	if _mission == null or get_selected_event_index() < 0:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	var chain := _mission.set_event_action(_selected_event_index, local_index, action)
+	if not chain.is_empty():
+		_push_undo_step(before)
+		mark_dirty()
+
+
+func remove_selected_event_action(local_index: int) -> void:
+	if _mission == null or get_selected_event_index() < 0:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	if _mission.remove_event_action(_selected_event_index, local_index):
+		_push_undo_step(before)
+		mark_dirty()
+
+
+func move_selected_event_action(local_index: int, delta: int) -> void:
+	if _mission == null or get_selected_event_index() < 0:
+		return
+	_flush_edit()
+	var before := _mission.snapshot()
+	if _mission.move_event_action(_selected_event_index, local_index, delta):
+		_push_undo_step(before)
+		mark_dirty()
 
 
 # Mission-space centre of the placed world: the average of item positions, else origin. Used

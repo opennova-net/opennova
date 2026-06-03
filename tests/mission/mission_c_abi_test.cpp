@@ -31,6 +31,170 @@ std::vector<uint8_t> read_file(const std::string &path) {
 	return data;
 }
 
+// Direct C++ exercise of the whole-event CRUD (add_event / remove_event) and the enum reflectors,
+// the genuinely new mission-scripting logic. Uses opennova::mission::MissionDocument straight (these
+// have no C-ABI wrapper: the Godot editor calls the C++ document directly), and round-trips the bytes.
+// Returns 0 on success; TEST_EXPECT returns 1 from here on the first failed expectation.
+int test_event_scripting_cpp(const std::vector<uint8_t> &original) {
+	using namespace opennova::mission;
+	namespace bms = opennova::bms;
+	MissionDocument doc;
+	TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+
+	const size_t base_events = doc.event_count();
+	const size_t base_triggers = doc.trigger_count();
+	const size_t base_actions = doc.action_count();
+	TEST_EXPECT(base_events > 0);
+
+	// add_event appends an empty event carrying only the editable attributes.
+	MissionEventRecord seed;
+	seed.flags = static_cast<int>(bms::EventFlags::ResetAfter);
+	seed.reset_after = 7;
+	seed.delay = 3;
+	MissionEventRecord added;
+	TEST_EXPECT(doc.add_event(seed, &added));
+	TEST_EXPECT(doc.event_count() == base_events + 1);
+	TEST_EXPECT(added.index == base_events);
+	TEST_EXPECT(added.flags == static_cast<int>(bms::EventFlags::ResetAfter));
+	TEST_EXPECT(added.reset_after == 7);
+	TEST_EXPECT(added.delay == 3);
+	TEST_EXPECT(added.trigger_count == 0);
+	TEST_EXPECT(added.action_count == 0);
+
+	// Fill the new event with one trigger and one (self-referencing) ResetEvent action.
+	MissionTriggerRecord trig;
+	trig.main_type = static_cast<int>(bms::TriggerMainType::Single);
+	trig.sub_type = static_cast<int>(bms::SingleTriggerType::SingleIsWithinArea);
+	trig.param2 = 0;  // area-trigger index reference
+	TEST_EXPECT(doc.insert_event_trigger(added.index, 0, trig));
+	TEST_EXPECT(doc.trigger_count() == base_triggers + 1);
+
+	MissionActionRecord act;
+	act.action_type = static_cast<int>(bms::ActionType::ResetEvent);
+	act.param1 = static_cast<int>(added.index);  // points at the new event
+	TEST_EXPECT(doc.insert_event_action(added.index, 0, act));
+	TEST_EXPECT(doc.action_count() == base_actions + 1);
+
+	MissionEventChain chain;
+	TEST_EXPECT(doc.get_event_chain(added.index, chain));
+	TEST_EXPECT(chain.triggers.size() == 1);
+	TEST_EXPECT(chain.actions.size() == 1);
+	TEST_EXPECT(chain.triggers[0].main_type_name == "Single");
+	TEST_EXPECT(chain.triggers[0].sub_type_name == "SingleIsWithinArea");
+	TEST_EXPECT(chain.actions[0].action_type_name == "ResetEvent");
+
+	// The augmented document round-trips through the byte writer.
+	std::vector<uint8_t> bytes;
+	TEST_EXPECT(doc.write_bms_bytes(bytes));
+	MissionDocument reload;
+	TEST_EXPECT(reload.load_bms_bytes(bytes.data(), bytes.size()));
+	TEST_EXPECT(reload.event_count() == base_events + 1);
+	MissionEventChain reloaded;
+	TEST_EXPECT(reload.get_event_chain(base_events, reloaded));
+	TEST_EXPECT(reloaded.triggers.size() == 1);
+	TEST_EXPECT(reloaded.actions.size() == 1);
+	TEST_EXPECT(reloaded.event.reset_after == 7);
+	TEST_EXPECT(reloaded.event.delay == 3);
+
+	// remove_event drains the event's ranges and repairs ResetEvent refs. Removing event 0 shifts the
+	// appended event (and its self-reference) down by one; the reference must follow to base_events - 1.
+	const size_t triggers_before = doc.trigger_count();
+	const size_t actions_before = doc.action_count();
+	MissionEventChain ev0;
+	TEST_EXPECT(doc.get_event_chain(0, ev0));
+	const size_t ev0_triggers = ev0.triggers.size();
+	const size_t ev0_actions = ev0.actions.size();
+
+	TEST_EXPECT(doc.remove_event(0));
+	TEST_EXPECT(doc.event_count() == base_events);
+	TEST_EXPECT(doc.trigger_count() == triggers_before - ev0_triggers);
+	TEST_EXPECT(doc.action_count() == actions_before - ev0_actions);
+
+	MissionEventChain moved;
+	TEST_EXPECT(doc.get_event_chain(base_events - 1, moved));
+	TEST_EXPECT(moved.actions.size() == 1);
+	TEST_EXPECT(moved.actions[0].action_type == static_cast<int>(bms::ActionType::ResetEvent));
+	TEST_EXPECT(moved.actions[0].param1 == static_cast<int>(base_events - 1));
+	bool reset_ref_valid = false;
+	for (const MissionLogicReference &ref : moved.references) {
+		if (ref.source_kind == "action" && ref.target_kind == "event") {
+			reset_ref_valid = ref.valid;
+		}
+	}
+	TEST_EXPECT(reset_ref_valid);
+
+	// Exact-hit repair: a ResetEvent that points AT the removed event (not merely past it) becomes -1
+	// (dangling), which get_event_chain then flags. Add a throwaway event and a ResetEvent in the earlier
+	// appended event that targets it, then remove the throwaway.
+	MissionEventRecord blank;
+	MissionEventRecord throwaway;
+	TEST_EXPECT(doc.add_event(blank, &throwaway));
+	const size_t throwaway_index = throwaway.index;
+	MissionActionRecord reset_throwaway;
+	reset_throwaway.action_type = static_cast<int>(bms::ActionType::ResetEvent);
+	reset_throwaway.param1 = static_cast<int>(throwaway_index);
+	MissionEventRecord host;
+	TEST_EXPECT(doc.get_event(base_events - 1, host));
+	TEST_EXPECT(doc.insert_event_action(base_events - 1, host.action_count, reset_throwaway));
+	TEST_EXPECT(doc.remove_event(throwaway_index));
+	MissionEventChain after_exact;
+	TEST_EXPECT(doc.get_event_chain(base_events - 1, after_exact));
+	bool found_dangling = false;
+	for (const MissionActionRecord &a : after_exact.actions) {
+		if (a.action_type == static_cast<int>(bms::ActionType::ResetEvent) && a.param1 == -1) {
+			found_dangling = true;
+		}
+	}
+	TEST_EXPECT(found_dangling);
+	// The dangling reference is flagged by the chain diagnostics.
+	bool flagged = false;
+	for (const MissionLogicDiagnostic &d : after_exact.diagnostics) {
+		if (d.code == "logic.event_reference_out_of_range") {
+			flagged = true;
+		}
+	}
+	TEST_EXPECT(flagged);
+
+	// Enum reflectors are generated by probing the name switches, so non-contiguous / high-numbered
+	// values appear without a hand-maintained table.
+	const std::vector<MissionEnumEntry> mains = doc.trigger_main_types();
+	TEST_EXPECT(mains.size() == 7);  // Group(1)..Player(7)
+	TEST_EXPECT(mains.front().value == static_cast<int>(bms::TriggerMainType::Group));
+	TEST_EXPECT(mains.front().name == "Group");
+
+	const std::vector<MissionEnumEntry> single_subs = doc.trigger_sub_types(static_cast<int>(bms::TriggerMainType::Single));
+	bool found_high_single = false;
+	for (const MissionEnumEntry &e : single_subs) {
+		if (e.value == 45) {
+			found_high_single = e.name == "SingleDoesNotSeeOrFarther";
+		}
+	}
+	TEST_EXPECT(found_high_single);
+
+	const std::vector<MissionEnumEntry> action_kinds = doc.action_types();
+	bool found_reset_action = false;
+	for (const MissionEnumEntry &e : action_kinds) {
+		if (e.value == static_cast<int>(bms::ActionType::ResetEvent)) {
+			found_reset_action = e.name == "ResetEvent";
+		}
+	}
+	TEST_EXPECT(found_reset_action);
+
+	const std::vector<MissionEnumEntry> ai_subs = doc.action_sub_types(static_cast<int>(bms::ActionType::ChangeGroupAI));
+	bool found_firing_angle = false;
+	for (const MissionEnumEntry &e : ai_subs) {
+		if (e.value == 46) {
+			found_firing_angle = e.name == "FiringAngle";
+		}
+	}
+	TEST_EXPECT(found_firing_angle);
+
+	const std::vector<MissionEnumEntry> flag_bits = doc.event_flag_bits();
+	TEST_EXPECT(flag_bits.size() == 5);
+	TEST_EXPECT(flag_bits.front().value == static_cast<int>(bms::EventFlags::ResetAfter));
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -307,6 +471,8 @@ int main() {
 	TEST_EXPECT(logic_summary.trigger_count == opennova_mission_trigger_count(document));
 	TEST_EXPECT(logic_summary.action_count == opennova_mission_action_count(document));
 	TEST_EXPECT(logic_summary.area_trigger_count == opennova_mission_area_trigger_count(document));
+
+	TEST_EXPECT(test_event_scripting_cpp(original) == 0);
 
 	OpenNovaMissionEntityTransform placed = {};
 	placed.x = 7.0f;

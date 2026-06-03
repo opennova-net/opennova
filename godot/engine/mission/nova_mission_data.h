@@ -35,6 +35,18 @@ private:
 	Dictionary area_trigger_to_dictionary(const opennova::mission::AreaTriggerRecord &record) const;
 	Dictionary weapon_loadout_to_dictionary(const opennova::mission::WeaponLoadoutEntry &entry, int index) const;
 	Dictionary group_to_dictionary(const opennova::mission::GroupFields &fields) const;
+	Dictionary event_to_dictionary(const opennova::mission::MissionEventRecord &record) const;
+	Dictionary trigger_to_dictionary(const opennova::mission::MissionTriggerRecord &record) const;
+	Dictionary action_to_dictionary(const opennova::mission::MissionActionRecord &record) const;
+	Dictionary logic_reference_to_dictionary(const opennova::mission::MissionLogicReference &reference) const;
+	Dictionary logic_diagnostic_to_dictionary(const opennova::mission::MissionLogicDiagnostic &diagnostic) const;
+	Dictionary event_chain_to_dictionary(const opennova::mission::MissionEventChain &chain) const;
+	// Build a trigger / action record from an editor dictionary, starting from `seed` so omitted keys keep
+	// their existing value (and the trigger's unmodeled condition_flags high bits + unknown7, and the
+	// action's reserved words, survive an edit). The trigger's negated/logic_or/logic_xor booleans compose
+	// condition_flags bits 0/1/2.
+	opennova::mission::MissionTriggerRecord trigger_from_dictionary(const Dictionary &dict, const opennova::mission::MissionTriggerRecord &seed) const;
+	opennova::mission::MissionActionRecord action_from_dictionary(const Dictionary &dict, const opennova::mission::MissionActionRecord &seed) const;
 
 protected:
 	static void _bind_methods();
@@ -195,6 +207,49 @@ public:
 	// Overwrite the three editable ints of the group at `index`, preserving every other byte of the
 	// 32-byte record. Returns false if out of range. Dirty on success.
 	bool set_group(int index, int field0, int field8, int field12);
+
+	// --- Mission scripting (events / triggers / actions, Phase 4) -------------
+	// A mission's logic is a list of events; each event chains a contiguous run of triggers (conditions)
+	// and a run of actions (effects). The typed model + index bookkeeping live in libs/mission; this is the
+	// binding. Dictionary shapes: an event is { index, flags, trigger_index, action_index, trigger_count,
+	// action_count, reset_after, delay, unknown5, unknown6 }; a trigger is { index, condition_flags,
+	// main_type, main_type_name, sub_type, sub_type_name, param1..4, unknown7, negated, logic_or, logic_xor,
+	// logic_operator }; an action is { index, action_type, action_type_name, action_sub_type,
+	// action_sub_type_name, param1..4, reserved0, reserved1 }. get_event_chain returns { event, triggers:[],
+	// actions:[], references:[], diagnostics:[] } (references/diagnostics resolve cross-links like a trigger
+	// pointing at an area zone, or a ResetEvent action pointing at an event). Every mutator dirties on success.
+	int get_event_count() const;
+	Array get_events() const;
+	Dictionary get_event(int index) const;
+	Dictionary get_event_chain(int index) const;
+	Dictionary get_logic_summary() const;
+	// Whole-event CRUD. add_event appends an empty event (fill it via add_event_trigger/action) and returns
+	// its dictionary; remove_event drops it and repairs ResetEvent references; set_event edits the event's
+	// own attributes (the EventFlags bitfield + the 10-bit reset_after / delay counters).
+	Dictionary add_event(int flags, int reset_after, int delay);
+	bool remove_event(int index);
+	bool set_event(int index, int flags, int reset_after, int delay);
+	// Event-local trigger ops. `local_index` is the trigger's position within the event's chain (0-based).
+	// `trigger` is an editor dictionary (see trigger_from_dictionary). add appends; set overwrites; remove /
+	// move (delta +/-1) reorder. add/set return the refreshed event-chain dictionary, or {} on failure.
+	Dictionary add_event_trigger(int event_index, const Dictionary &trigger);
+	Dictionary set_event_trigger(int event_index, int local_index, const Dictionary &trigger);
+	bool remove_event_trigger(int event_index, int local_index);
+	bool move_event_trigger(int event_index, int local_index, int delta);
+	// Event-local action ops, mirroring the trigger ops. `action` is an editor dictionary (action_type,
+	// action_sub_type, param1..4).
+	Dictionary add_event_action(int event_index, const Dictionary &action);
+	Dictionary set_event_action(int event_index, int local_index, const Dictionary &action);
+	bool remove_event_action(int event_index, int local_index);
+	bool move_event_action(int event_index, int local_index, int delta);
+	// Enum choice lists for the editor's type dropdowns; each an Array of { value: int, name: String },
+	// reflected from libs/mission's name switches so new enum values appear without UI changes. The sub-type
+	// lists are composite (depend on the chosen main / action type).
+	Array get_trigger_main_types() const;
+	Array get_trigger_sub_types(int main_type) const;
+	Array get_action_types() const;
+	Array get_action_sub_types(int action_type) const;
+	Array get_event_flag_bits() const;
 
 	// Write the document back to disk. save_file() targets the path it was opened
 	// from; save_as() targets a new path and adopts it. Both clear the dirty flag and

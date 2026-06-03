@@ -831,3 +831,110 @@ func test_group_get_set_round_trip() -> void:
 	# Out-of-range guards.
 	assert_eq(m.get_group(999), {}, "out-of-range group get yields {}")
 	assert_false(m.set_group(999, 1, 2, 3), "out-of-range group set rejected")
+
+
+# --- Phase 4: mission scripting (events / triggers / actions) ------------------
+
+func test_event_chain_dictionary_shape() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	assert_gt(m.get_event_count(), 0, "the reference mission has events")
+	var chain := m.get_event_chain(0)
+	assert_true(chain.has("event"), "the chain carries the event")
+	assert_true(chain.has("triggers"), "the chain carries triggers")
+	assert_true(chain.has("actions"), "the chain carries actions")
+	assert_true(chain.has("references"), "the chain carries references")
+	assert_true(chain.has("diagnostics"), "the chain carries diagnostics")
+	var summary := m.get_logic_summary()
+	assert_eq(int(summary["events"]), m.get_event_count(), "the logic summary event count matches")
+
+
+func test_enum_tables_reflect_the_engine_names() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	# Group(1)..Player(7) -> 7 named main types.
+	assert_eq(m.get_trigger_main_types().size(), 7, "seven trigger main types")
+	# A non-contiguous, high-numbered sub-type still appears.
+	var found_high := false
+	for entry in m.get_trigger_sub_types(2):  # Single
+		if int(entry["value"]) == 45:
+			found_high = String(entry["name"]) == "SingleDoesNotSeeOrFarther"
+	assert_true(found_high, "the high-numbered Single sub-type reflects through")
+	var found_reset := false
+	for entry in m.get_action_types():
+		if int(entry["value"]) == 34:
+			found_reset = String(entry["name"]) == "ResetEvent"
+	assert_true(found_reset, "ResetEvent appears in the action types")
+	assert_eq(m.get_event_flag_bits().size(), 5, "five event-flag bits")
+
+
+func test_add_event_with_trigger_and_action_persists_through_save_reload() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var base_events := m.get_event_count()
+
+	var event := m.add_event(1, 7, 3)  # ResetAfter flag, reset_after 7, delay 3
+	assert_false(event.is_empty(), "add_event returns the new event dict")
+	assert_eq(int(event["index"]), base_events, "the new event is appended at the end")
+	var ev_index := int(event["index"])
+
+	# Append a trigger and an action to the new event.
+	var with_trigger := m.add_event_trigger(ev_index, {"main_type": 2, "sub_type": 10, "param2": 1, "negated": true})
+	assert_false(with_trigger.is_empty(), "add_event_trigger returns the chain")
+	assert_eq((with_trigger["triggers"] as Array).size(), 1, "the event now has one trigger")
+	var with_action := m.add_event_action(ev_index, {"action_type": 34, "param1": ev_index})
+	assert_eq((with_action["actions"] as Array).size(), 1, "the event now has one action")
+	assert_true(m.is_modified(), "scripting edits set the modified flag")
+
+	var tmp := _temp_bms_path()
+	assert_eq(m.save_as(tmp), OK)
+	var r := NovaMissionData.new()
+	assert_eq(r.open_file(tmp), OK, "the augmented mission reopens")
+	assert_eq(r.get_event_count(), base_events + 1, "the new event survives reload")
+	var chain := r.get_event_chain(ev_index)
+	var triggers := chain["triggers"] as Array
+	var actions := chain["actions"] as Array
+	assert_eq(triggers.size(), 1, "the trigger survives reload")
+	assert_eq(int((triggers[0] as Dictionary)["main_type"]), 2, "the trigger main type round-trips (Single)")
+	assert_eq(int((triggers[0] as Dictionary)["sub_type"]), 10, "the trigger sub type round-trips")
+	assert_true(bool((triggers[0] as Dictionary)["negated"]), "the negate flag round-trips")
+	assert_eq(int((actions[0] as Dictionary)["action_type"]), 34, "the action type round-trips (ResetEvent)")
+	assert_eq(int((chain["event"] as Dictionary)["reset_after"]), 7, "reset_after round-trips")
+
+
+func test_set_event_trigger_edits_a_param_in_place() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var event := m.add_event(0, 0, 0)
+	var ev_index := int(event["index"])
+	m.add_event_trigger(ev_index, {"main_type": 1, "sub_type": 1})
+	# Overwrite the trigger's param1 + logic flag, leaving its type alone (omitted keys keep their value).
+	var chain := m.set_event_trigger(ev_index, 0, {"param1": 42, "logic_or": true})
+	assert_false(chain.is_empty(), "set_event_trigger returns the chain")
+	var trigger := (chain["triggers"] as Array)[0] as Dictionary
+	assert_eq(int(trigger["param1"]), 42, "the edited param lands")
+	assert_eq(int(trigger["main_type"]), 1, "the omitted main type is preserved")
+	assert_true(bool(trigger["logic_or"]), "the OR logic flag lands")
+
+
+func test_remove_event_drops_it_and_repairs_reset_references() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var base_events := m.get_event_count()
+	# Append an event whose action resets itself, then remove event 0: the self-reference must follow.
+	var event := m.add_event(0, 0, 0)
+	var ev_index := int(event["index"])
+	m.add_event_action(ev_index, {"action_type": 34, "param1": ev_index})  # ResetEvent -> self
+	assert_eq(m.get_event_count(), base_events + 1)
+
+	assert_true(m.remove_event(0), "remove_event drops event 0")
+	assert_eq(m.get_event_count(), base_events, "the count drops back")
+	# The appended event is now at base_events - 1; its ResetEvent must point at the new index.
+	var chain := m.get_event_chain(base_events - 1)
+	var actions := chain["actions"] as Array
+	assert_eq(actions.size(), 1, "the appended event kept its action")
+	assert_eq(int((actions[0] as Dictionary)["param1"]), base_events - 1, "the ResetEvent reference was repaired")
+	# Out-of-range guards.
+	assert_eq(m.get_event(9999), {}, "out-of-range event get yields {}")
+	assert_false(m.remove_event(9999), "out-of-range event remove rejected")
+

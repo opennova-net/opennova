@@ -76,6 +76,28 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_group", "index"), &NovaMissionData::get_group);
 	ClassDB::bind_method(D_METHOD("set_group", "index", "field0", "field8", "field12"), &NovaMissionData::set_group);
 
+	ClassDB::bind_method(D_METHOD("get_event_count"), &NovaMissionData::get_event_count);
+	ClassDB::bind_method(D_METHOD("get_events"), &NovaMissionData::get_events);
+	ClassDB::bind_method(D_METHOD("get_event", "index"), &NovaMissionData::get_event);
+	ClassDB::bind_method(D_METHOD("get_event_chain", "index"), &NovaMissionData::get_event_chain);
+	ClassDB::bind_method(D_METHOD("get_logic_summary"), &NovaMissionData::get_logic_summary);
+	ClassDB::bind_method(D_METHOD("add_event", "flags", "reset_after", "delay"), &NovaMissionData::add_event);
+	ClassDB::bind_method(D_METHOD("remove_event", "index"), &NovaMissionData::remove_event);
+	ClassDB::bind_method(D_METHOD("set_event", "index", "flags", "reset_after", "delay"), &NovaMissionData::set_event);
+	ClassDB::bind_method(D_METHOD("add_event_trigger", "event_index", "trigger"), &NovaMissionData::add_event_trigger);
+	ClassDB::bind_method(D_METHOD("set_event_trigger", "event_index", "local_index", "trigger"), &NovaMissionData::set_event_trigger);
+	ClassDB::bind_method(D_METHOD("remove_event_trigger", "event_index", "local_index"), &NovaMissionData::remove_event_trigger);
+	ClassDB::bind_method(D_METHOD("move_event_trigger", "event_index", "local_index", "delta"), &NovaMissionData::move_event_trigger);
+	ClassDB::bind_method(D_METHOD("add_event_action", "event_index", "action"), &NovaMissionData::add_event_action);
+	ClassDB::bind_method(D_METHOD("set_event_action", "event_index", "local_index", "action"), &NovaMissionData::set_event_action);
+	ClassDB::bind_method(D_METHOD("remove_event_action", "event_index", "local_index"), &NovaMissionData::remove_event_action);
+	ClassDB::bind_method(D_METHOD("move_event_action", "event_index", "local_index", "delta"), &NovaMissionData::move_event_action);
+	ClassDB::bind_method(D_METHOD("get_trigger_main_types"), &NovaMissionData::get_trigger_main_types);
+	ClassDB::bind_method(D_METHOD("get_trigger_sub_types", "main_type"), &NovaMissionData::get_trigger_sub_types);
+	ClassDB::bind_method(D_METHOD("get_action_types"), &NovaMissionData::get_action_types);
+	ClassDB::bind_method(D_METHOD("get_action_sub_types", "action_type"), &NovaMissionData::get_action_sub_types);
+	ClassDB::bind_method(D_METHOD("get_event_flag_bits"), &NovaMissionData::get_event_flag_bits);
+
 	ClassDB::bind_method(D_METHOD("save_file"), &NovaMissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &NovaMissionData::save_as);
 	ClassDB::bind_method(D_METHOD("is_modified"), &NovaMissionData::is_modified);
@@ -729,6 +751,407 @@ bool NovaMissionData::set_group(int index, int field0, int field8, int field12) 
 	}
 	modified = true;
 	return true;
+}
+
+// --- Mission scripting (events / triggers / actions, Phase 4) ----------------
+
+Dictionary NovaMissionData::event_to_dictionary(const opennova::mission::MissionEventRecord &record) const {
+	Dictionary out;
+	out["index"] = static_cast<int>(record.index);
+	out["flags"] = record.flags;
+	out["trigger_index"] = record.trigger_index;
+	out["action_index"] = record.action_index;
+	out["trigger_count"] = record.trigger_count;
+	out["action_count"] = record.action_count;
+	out["reset_after"] = record.reset_after;
+	out["delay"] = record.delay;
+	out["unknown5"] = record.unknown5;
+	out["unknown6"] = record.unknown6;
+	return out;
+}
+
+Dictionary NovaMissionData::trigger_to_dictionary(const opennova::mission::MissionTriggerRecord &record) const {
+	Dictionary out;
+	out["index"] = static_cast<int>(record.index);
+	out["condition_flags"] = record.condition_flags;
+	out["main_type"] = record.main_type;
+	out["main_type_name"] = String::utf8(record.main_type_name.c_str());
+	out["sub_type"] = record.sub_type;
+	out["sub_type_name"] = String::utf8(record.sub_type_name.c_str());
+	out["param1"] = record.param1;
+	out["param2"] = record.param2;
+	out["param3"] = record.param3;
+	out["param4"] = record.param4;
+	out["unknown7"] = record.unknown7;
+	out["negated"] = record.negated;
+	out["logic_or"] = record.logic_or;
+	out["logic_xor"] = record.logic_xor;
+	out["logic_operator"] = String::utf8(record.logic_operator.c_str());
+	return out;
+}
+
+Dictionary NovaMissionData::action_to_dictionary(const opennova::mission::MissionActionRecord &record) const {
+	Dictionary out;
+	out["index"] = static_cast<int>(record.index);
+	out["action_type"] = record.action_type;
+	out["action_type_name"] = String::utf8(record.action_type_name.c_str());
+	out["action_sub_type"] = record.action_sub_type;
+	out["action_sub_type_name"] = String::utf8(record.action_sub_type_name.c_str());
+	out["param1"] = record.param1;
+	out["param2"] = record.param2;
+	out["param3"] = record.param3;
+	out["param4"] = record.param4;
+	out["reserved0"] = record.reserved0;
+	out["reserved1"] = record.reserved1;
+	return out;
+}
+
+Dictionary NovaMissionData::logic_reference_to_dictionary(const opennova::mission::MissionLogicReference &reference) const {
+	Dictionary out;
+	out["source_kind"] = String::utf8(reference.source_kind.c_str());
+	out["source_index"] = reference.source_index;
+	out["target_kind"] = String::utf8(reference.target_kind.c_str());
+	out["target_index"] = reference.target_index;
+	out["param_slot"] = reference.param_slot;
+	out["raw_value"] = reference.raw_value;
+	out["label"] = String::utf8(reference.label.c_str());
+	out["valid"] = reference.valid;
+	return out;
+}
+
+Dictionary NovaMissionData::logic_diagnostic_to_dictionary(const opennova::mission::MissionLogicDiagnostic &diagnostic) const {
+	Dictionary out;
+	out["severity"] = String::utf8(diagnostic.severity.c_str());
+	out["code"] = String::utf8(diagnostic.code.c_str());
+	out["message"] = String::utf8(diagnostic.message.c_str());
+	out["subject_kind"] = String::utf8(diagnostic.subject_kind.c_str());
+	out["subject_index"] = diagnostic.subject_index;
+	return out;
+}
+
+Dictionary NovaMissionData::event_chain_to_dictionary(const opennova::mission::MissionEventChain &chain) const {
+	Dictionary out;
+	out["event"] = event_to_dictionary(chain.event);
+	Array triggers;
+	for (const opennova::mission::MissionTriggerRecord &trigger : chain.triggers) {
+		triggers.push_back(trigger_to_dictionary(trigger));
+	}
+	out["triggers"] = triggers;
+	Array actions;
+	for (const opennova::mission::MissionActionRecord &action : chain.actions) {
+		actions.push_back(action_to_dictionary(action));
+	}
+	out["actions"] = actions;
+	Array references;
+	for (const opennova::mission::MissionLogicReference &reference : chain.references) {
+		references.push_back(logic_reference_to_dictionary(reference));
+	}
+	out["references"] = references;
+	Array diagnostics;
+	for (const opennova::mission::MissionLogicDiagnostic &diagnostic : chain.diagnostics) {
+		diagnostics.push_back(logic_diagnostic_to_dictionary(diagnostic));
+	}
+	out["diagnostics"] = diagnostics;
+	return out;
+}
+
+opennova::mission::MissionTriggerRecord NovaMissionData::trigger_from_dictionary(const Dictionary &dict, const opennova::mission::MissionTriggerRecord &seed) const {
+	opennova::mission::MissionTriggerRecord record = seed;
+	record.main_type = static_cast<int>(dict.get("main_type", seed.main_type));
+	record.sub_type = static_cast<int>(dict.get("sub_type", seed.sub_type));
+	record.param1 = static_cast<int>(dict.get("param1", seed.param1));
+	record.param2 = static_cast<int>(dict.get("param2", seed.param2));
+	record.param3 = static_cast<int>(dict.get("param3", seed.param3));
+	record.param4 = static_cast<int>(dict.get("param4", seed.param4));
+	// Compose condition_flags bits 0/1/2 from the editor booleans; keep the seed's unmodeled high bits so
+	// an edit never drops a flag the format carries but the editor does not surface. unknown7 rides on the
+	// `record = seed` copy. Defaults for omitted keys come from the condition_flags bits (the canonical
+	// source: condition_flags is what trigger_from_record serializes), not the seed's mirror bool fields,
+	// so an out-of-sync seed can never propagate. The bool mirrors are then re-derived to stay consistent.
+	int condition = seed.condition_flags & ~0x7;
+	if (static_cast<bool>(dict.get("negated", (seed.condition_flags & 0x1) != 0))) {
+		condition |= 0x1;
+	}
+	if (static_cast<bool>(dict.get("logic_or", (seed.condition_flags & 0x2) != 0))) {
+		condition |= 0x2;
+	}
+	if (static_cast<bool>(dict.get("logic_xor", (seed.condition_flags & 0x4) != 0))) {
+		condition |= 0x4;
+	}
+	record.condition_flags = condition;
+	record.negated = (condition & 0x1) != 0;
+	record.logic_or = (condition & 0x2) != 0;
+	record.logic_xor = (condition & 0x4) != 0;
+	return record;
+}
+
+opennova::mission::MissionActionRecord NovaMissionData::action_from_dictionary(const Dictionary &dict, const opennova::mission::MissionActionRecord &seed) const {
+	opennova::mission::MissionActionRecord record = seed;
+	record.action_type = static_cast<int>(dict.get("action_type", seed.action_type));
+	record.action_sub_type = static_cast<int>(dict.get("action_sub_type", seed.action_sub_type));
+	record.param1 = static_cast<int>(dict.get("param1", seed.param1));
+	record.param2 = static_cast<int>(dict.get("param2", seed.param2));
+	record.param3 = static_cast<int>(dict.get("param3", seed.param3));
+	record.param4 = static_cast<int>(dict.get("param4", seed.param4));
+	return record;  // reserved0/reserved1 ride on the `record = seed` copy
+}
+
+int NovaMissionData::get_event_count() const {
+	return static_cast<int>(document.event_count());
+}
+
+Array NovaMissionData::get_events() const {
+	Array out;
+	for (const opennova::mission::MissionEventRecord &record : document.events()) {
+		out.push_back(event_to_dictionary(record));
+	}
+	return out;
+}
+
+Dictionary NovaMissionData::get_event(int index) const {
+	if (index < 0) {
+		return Dictionary();
+	}
+	opennova::mission::MissionEventRecord record;
+	if (!document.get_event(static_cast<size_t>(index), record)) {
+		return Dictionary();
+	}
+	return event_to_dictionary(record);
+}
+
+Dictionary NovaMissionData::get_event_chain(int index) const {
+	if (index < 0) {
+		return Dictionary();
+	}
+	opennova::mission::MissionEventChain chain;
+	if (!document.get_event_chain(static_cast<size_t>(index), chain)) {
+		return Dictionary();
+	}
+	return event_chain_to_dictionary(chain);
+}
+
+Dictionary NovaMissionData::get_logic_summary() const {
+	const opennova::mission::MissionLogicSummary summary = document.logic_summary();
+	Dictionary out;
+	out["events"] = static_cast<int>(summary.event_count);
+	out["triggers"] = static_cast<int>(summary.trigger_count);
+	out["actions"] = static_cast<int>(summary.action_count);
+	out["area_triggers"] = static_cast<int>(summary.area_trigger_count);
+	out["diagnostics"] = static_cast<int>(summary.diagnostic_count);
+	return out;
+}
+
+Dictionary NovaMissionData::add_event(int flags, int reset_after, int delay) {
+	opennova::mission::MissionEventRecord seed;
+	seed.flags = flags;
+	seed.reset_after = reset_after;
+	seed.delay = delay;
+	opennova::mission::MissionEventRecord out;
+	if (!document.add_event(seed, &out)) {
+		return Dictionary();
+	}
+	modified = true;
+	return event_to_dictionary(out);
+}
+
+bool NovaMissionData::remove_event(int index) {
+	if (index < 0) {
+		return false;
+	}
+	if (!document.remove_event(static_cast<size_t>(index))) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+bool NovaMissionData::set_event(int index, int flags, int reset_after, int delay) {
+	if (index < 0) {
+		return false;
+	}
+	// Seed from the existing event so the read-only structural fields (trigger/action index + count) and
+	// the unknown bytes survive: set_event applies only the editable attributes below.
+	opennova::mission::MissionEventRecord record;
+	if (!document.get_event(static_cast<size_t>(index), record)) {
+		return false;
+	}
+	record.flags = flags;
+	record.reset_after = reset_after;
+	record.delay = delay;
+	if (!document.set_event(static_cast<size_t>(index), record)) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+Dictionary NovaMissionData::add_event_trigger(int event_index, const Dictionary &trigger) {
+	if (event_index < 0) {
+		return Dictionary();
+	}
+	opennova::mission::MissionEventRecord event;
+	if (!document.get_event(static_cast<size_t>(event_index), event)) {
+		return Dictionary();
+	}
+	// A fresh trigger defaults to a Group / Null condition (a valid, named pairing) before the dict edits.
+	opennova::mission::MissionTriggerRecord seed;
+	seed.main_type = static_cast<int>(opennova::bms::TriggerMainType::Group);
+	const opennova::mission::MissionTriggerRecord record = trigger_from_dictionary(trigger, seed);
+	opennova::mission::MissionEventChain chain;
+	if (!document.insert_event_trigger(static_cast<size_t>(event_index), static_cast<size_t>(event.trigger_count), record, &chain)) {
+		return Dictionary();
+	}
+	modified = true;
+	return event_chain_to_dictionary(chain);
+}
+
+Dictionary NovaMissionData::set_event_trigger(int event_index, int local_index, const Dictionary &trigger) {
+	if (event_index < 0 || local_index < 0) {
+		return Dictionary();
+	}
+	opennova::mission::MissionEventRecord event;
+	if (!document.get_event(static_cast<size_t>(event_index), event)) {
+		return Dictionary();
+	}
+	if (local_index >= event.trigger_count) {
+		return Dictionary();
+	}
+	const size_t global = static_cast<size_t>(event.trigger_index) + static_cast<size_t>(local_index);
+	opennova::mission::MissionTriggerRecord existing;
+	if (!document.get_trigger(global, existing)) {
+		return Dictionary();
+	}
+	const opennova::mission::MissionTriggerRecord record = trigger_from_dictionary(trigger, existing);
+	if (!document.set_trigger(global, record)) {
+		return Dictionary();
+	}
+	modified = true;
+	opennova::mission::MissionEventChain chain;
+	document.get_event_chain(static_cast<size_t>(event_index), chain);
+	return event_chain_to_dictionary(chain);
+}
+
+bool NovaMissionData::remove_event_trigger(int event_index, int local_index) {
+	if (event_index < 0 || local_index < 0) {
+		return false;
+	}
+	if (!document.remove_event_trigger(static_cast<size_t>(event_index), static_cast<size_t>(local_index))) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+bool NovaMissionData::move_event_trigger(int event_index, int local_index, int delta) {
+	if (event_index < 0 || local_index < 0) {
+		return false;
+	}
+	if (!document.move_event_trigger(static_cast<size_t>(event_index), static_cast<size_t>(local_index), delta)) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+Dictionary NovaMissionData::add_event_action(int event_index, const Dictionary &action) {
+	if (event_index < 0) {
+		return Dictionary();
+	}
+	opennova::mission::MissionEventRecord event;
+	if (!document.get_event(static_cast<size_t>(event_index), event)) {
+		return Dictionary();
+	}
+	opennova::mission::MissionActionRecord seed;  // defaults to a Null action
+	const opennova::mission::MissionActionRecord record = action_from_dictionary(action, seed);
+	opennova::mission::MissionEventChain chain;
+	if (!document.insert_event_action(static_cast<size_t>(event_index), static_cast<size_t>(event.action_count), record, &chain)) {
+		return Dictionary();
+	}
+	modified = true;
+	return event_chain_to_dictionary(chain);
+}
+
+Dictionary NovaMissionData::set_event_action(int event_index, int local_index, const Dictionary &action) {
+	if (event_index < 0 || local_index < 0) {
+		return Dictionary();
+	}
+	opennova::mission::MissionEventRecord event;
+	if (!document.get_event(static_cast<size_t>(event_index), event)) {
+		return Dictionary();
+	}
+	if (local_index >= event.action_count) {
+		return Dictionary();
+	}
+	const size_t global = static_cast<size_t>(event.action_index) + static_cast<size_t>(local_index);
+	opennova::mission::MissionActionRecord existing;
+	if (!document.get_action(global, existing)) {
+		return Dictionary();
+	}
+	const opennova::mission::MissionActionRecord record = action_from_dictionary(action, existing);
+	if (!document.set_action(global, record)) {
+		return Dictionary();
+	}
+	modified = true;
+	opennova::mission::MissionEventChain chain;
+	document.get_event_chain(static_cast<size_t>(event_index), chain);
+	return event_chain_to_dictionary(chain);
+}
+
+bool NovaMissionData::remove_event_action(int event_index, int local_index) {
+	if (event_index < 0 || local_index < 0) {
+		return false;
+	}
+	if (!document.remove_event_action(static_cast<size_t>(event_index), static_cast<size_t>(local_index))) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+bool NovaMissionData::move_event_action(int event_index, int local_index, int delta) {
+	if (event_index < 0 || local_index < 0) {
+		return false;
+	}
+	if (!document.move_event_action(static_cast<size_t>(event_index), static_cast<size_t>(local_index), delta)) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+namespace {
+
+Array enum_entries_to_array(const std::vector<opennova::mission::MissionEnumEntry> &entries) {
+	Array out;
+	for (const opennova::mission::MissionEnumEntry &entry : entries) {
+		Dictionary dict;
+		dict["value"] = entry.value;
+		dict["name"] = String::utf8(entry.name.c_str());
+		out.push_back(dict);
+	}
+	return out;
+}
+
+} // namespace
+
+Array NovaMissionData::get_trigger_main_types() const {
+	return enum_entries_to_array(document.trigger_main_types());
+}
+
+Array NovaMissionData::get_trigger_sub_types(int main_type) const {
+	return enum_entries_to_array(document.trigger_sub_types(main_type));
+}
+
+Array NovaMissionData::get_action_types() const {
+	return enum_entries_to_array(document.action_types());
+}
+
+Array NovaMissionData::get_action_sub_types(int action_type) const {
+	return enum_entries_to_array(document.action_sub_types(action_type));
+}
+
+Array NovaMissionData::get_event_flag_bits() const {
+	return enum_entries_to_array(document.event_flag_bits());
 }
 
 Error NovaMissionData::save_file() {

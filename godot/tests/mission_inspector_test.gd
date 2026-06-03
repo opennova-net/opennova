@@ -354,6 +354,117 @@ class FakeController:
 			groups[index] = {"index": index, "field0": f0, "field8": f8, "field12": f12}
 		changed.emit()
 
+	# Phase 4: mission scripting. `events` are NovaMissionData-shaped event dicts; `chain` is the
+	# selected event's chain ({ event, triggers, actions, references, diagnostics }); the *_calls arrays
+	# record what the inspector's Scripting tab sent. Mode 3 is SCRIPTING.
+	var events: Array = []
+	var selected_event: int = -1
+	var chain: Dictionary = {}
+	var select_event_calls: Array = []
+	var add_event_calls: int = 0
+	var delete_event_calls: int = 0
+	var set_event_calls: Array = []
+	var add_trigger_calls: int = 0
+	var set_trigger_calls: Array = []
+	var remove_trigger_calls: Array = []
+	var move_trigger_calls: Array = []
+	var add_action_calls: int = 0
+	var set_action_calls: Array = []
+	var remove_action_calls: Array = []
+	var move_action_calls: Array = []
+
+	func is_scripting_mode() -> bool:
+		return mode == 3
+
+	func get_events() -> Array:
+		return events
+
+	func get_event_count() -> int:
+		return events.size()
+
+	func get_selected_event_index() -> int:
+		return selected_event
+
+	func get_selected_event_chain() -> Dictionary:
+		return chain
+
+	func get_logic_summary() -> Dictionary:
+		return {}
+
+	func get_event_flag_bits() -> Array:
+		return [{"value": 1, "name": "Reset after"}, {"value": 2, "name": "Pre-mission"}, {"value": 4, "name": "Post-mission"}]
+
+	func get_trigger_main_types() -> Array:
+		return [{"value": 1, "name": "Group"}, {"value": 2, "name": "Single"}]
+
+	func get_trigger_sub_types(main_type: int) -> Array:
+		if main_type == 2:
+			return [{"value": 0, "name": "Null"}, {"value": 10, "name": "SingleIsWithinArea"}]
+		return [{"value": 0, "name": "Null"}, {"value": 1, "name": "GroupSeesGroup"}, {"value": 10, "name": "GroupIsWithinArea"}]
+
+	func get_action_types() -> Array:
+		return [{"value": 0, "name": "Null"}, {"value": 6, "name": "OutputText"}, {"value": 34, "name": "ResetEvent"}]
+
+	func get_action_sub_types(_action_type: int) -> Array:
+		return [{"value": 0, "name": "Null"}]
+
+	func select_event(index: int) -> void:
+		select_event_calls.append(index)
+		selected_event = index
+		changed.emit()
+
+	func add_event_default() -> int:
+		add_event_calls += 1
+		var idx := events.size()
+		events.append({"index": idx, "flags": 0, "trigger_count": 0, "action_count": 0, "reset_after": 0, "delay": 0})
+		selected_event = idx
+		changed.emit()
+		return idx
+
+	func delete_selected_event() -> bool:
+		delete_event_calls += 1
+		if selected_event >= 0 and selected_event < events.size():
+			events.remove_at(selected_event)
+		selected_event = -1
+		changed.emit()
+		return true
+
+	func set_selected_event(flags: int, reset_after: int, delay: int) -> void:
+		set_event_calls.append([flags, reset_after, delay])
+		changed.emit()
+
+	func add_selected_event_trigger() -> void:
+		add_trigger_calls += 1
+		changed.emit()
+
+	func set_selected_event_trigger(local_index: int, trigger: Dictionary) -> void:
+		set_trigger_calls.append([local_index, trigger.duplicate(true)])
+		changed.emit()
+
+	func remove_selected_event_trigger(local_index: int) -> void:
+		remove_trigger_calls.append(local_index)
+		changed.emit()
+
+	func move_selected_event_trigger(local_index: int, delta: int) -> void:
+		move_trigger_calls.append([local_index, delta])
+		changed.emit()
+
+	func add_selected_event_action() -> void:
+		add_action_calls += 1
+		changed.emit()
+
+	func set_selected_event_action(local_index: int, action: Dictionary) -> void:
+		set_action_calls.append([local_index, action.duplicate(true)])
+		changed.emit()
+
+	func remove_selected_event_action(local_index: int) -> void:
+		remove_action_calls.append(local_index)
+		changed.emit()
+
+	func move_selected_event_action(local_index: int, delta: int) -> void:
+		move_action_calls.append([local_index, delta])
+		changed.emit()
+
 
 func _sample_entity() -> Dictionary:
 	return {
@@ -824,6 +935,15 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 		# Phase 3: weapon loadout + groups (mission-global).
 		"get_weapon_loadout", "set_weapon_loadout",
 		"get_group_count", "get_groups", "get_group", "set_group",
+		# Phase 4: mission scripting (events / triggers / actions).
+		"is_scripting_mode", "get_events", "get_selected_event_index", "get_selected_event_chain",
+		"get_event_flag_bits", "get_trigger_main_types", "get_trigger_sub_types",
+		"get_action_types", "get_action_sub_types", "select_event",
+		"add_event_default", "delete_selected_event", "set_selected_event",
+		"add_selected_event_trigger", "set_selected_event_trigger",
+		"remove_selected_event_trigger", "move_selected_event_trigger",
+		"add_selected_event_action", "set_selected_event_action",
+		"remove_selected_event_action", "move_selected_event_action",
 	]
 	for method in required:
 		assert_true(controller.has_method(method),
@@ -1153,3 +1273,212 @@ func test_group_spin_edit_survives_external_refresh_while_focused() -> void:
 	ctx.fake.groups[0] = {"index": 0, "field0": 9, "field8": 0, "field12": 0}
 	ctx.fake.changed.emit()
 	assert_eq(inner.text, "70", "focused, in-flight spin text survives an external refresh")
+
+
+# --- Phase 4: mission scripting (events / triggers / actions) tab --------------
+
+func _sc_event(index: int, flags: int, reset_after: int, delay: int, trig_count: int, act_count: int) -> Dictionary:
+	return {
+		"index": index, "flags": flags, "trigger_index": 0, "action_index": 0,
+		"trigger_count": trig_count, "action_count": act_count,
+		"reset_after": reset_after, "delay": delay, "unknown5": 0, "unknown6": 0,
+	}
+
+
+func _sc_trig(main_type: int, main_name: String, sub_type: int, sub_name: String, params: Array, op: String = "and") -> Dictionary:
+	return {
+		"index": 0, "condition_flags": 0,
+		"main_type": main_type, "main_type_name": main_name,
+		"sub_type": sub_type, "sub_type_name": sub_name,
+		"param1": params[0], "param2": params[1], "param3": params[2], "param4": params[3],
+		"unknown7": 0, "negated": op == "not", "logic_or": op == "or", "logic_xor": op == "xor",
+		"logic_operator": op,
+	}
+
+
+func _sc_act(action_type: int, type_name: String, sub_type: int, sub_name: String, params: Array) -> Dictionary:
+	return {
+		"index": 0, "action_type": action_type, "action_type_name": type_name,
+		"action_sub_type": sub_type, "action_sub_type_name": sub_name,
+		"param1": params[0], "param2": params[1], "param3": params[2], "param4": params[3],
+		"reserved0": 0, "reserved1": 0,
+	}
+
+
+func _sc_chain_dict(event: Dictionary, triggers: Array, actions: Array, diagnostics: Array = []) -> Dictionary:
+	return {"event": event, "triggers": triggers, "actions": actions, "references": [], "diagnostics": diagnostics}
+
+
+func _scripting_ctx(events: Array, selected: int, chain: Dictionary) -> Dictionary:
+	var fake := FakeController.new()
+	fake.mission_ref = NovaMissionData.new()
+	fake.mode = 3  # SCRIPTING
+	fake.events = events
+	fake.selected_event = selected
+	fake.chain = chain
+	# A live selection would show the object panel but for the mode gate (load-bearing for the hide test).
+	fake.entity = _sample_entity()
+	var inspector = MissionInspector.new()
+	add_child_autofree(inspector)
+	inspector.setup(fake)
+	return {"fake": fake, "inspector": inspector}
+
+
+func test_scripting_panel_shows_and_lists_events_in_scripting_mode() -> void:
+	var event := _sc_event(0, 1, 5, 2, 1, 1)
+	var chain := _sc_chain_dict(event,
+		[_sc_trig(2, "Single", 10, "SingleIsWithinArea", [0, 3, 0, 0])],
+		[_sc_act(34, "ResetEvent", 0, "Null", [0, 0, 0, 0])])
+	var ctx := _scripting_ctx([event, _sc_event(1, 0, 0, 0, 0, 0)], 0, chain)
+	assert_true(ctx.inspector._sc_box.visible, "the scripting panel shows in scripting mode")
+	assert_false(ctx.inspector._edit_box.visible, "the object edit panel is hidden in scripting mode")
+	assert_false(ctx.inspector._place_box.visible, "the palette is hidden in scripting mode")
+	assert_eq(ctx.inspector._sc_event_list.item_count, 2, "both events listed")
+	assert_eq(ctx.inspector._sc_event_rows, [0, 1], "the listed event indices match")
+	assert_eq(ctx.inspector._sc_trigger_list.item_count, 1, "the selected event's trigger is listed")
+	assert_eq(ctx.inspector._sc_action_list.item_count, 1, "the selected event's action is listed")
+	assert_eq(ctx.inspector._sc_reset_spin.value, 5.0, "reset_after spin reflects the event")
+	assert_eq(ctx.inspector._sc_delay_spin.value, 2.0, "delay spin reflects the event")
+	assert_true((ctx.inspector._sc_flag_checks[0]["check"] as CheckBox).button_pressed, "the Reset-after flag reflects the event")
+
+
+func test_scripting_panel_hidden_in_objects_mode() -> void:
+	var ctx := _scripting_ctx([], -1, {})
+	ctx.fake.mode = 0
+	ctx.fake.changed.emit()
+	assert_false(ctx.inspector._sc_box.visible, "the scripting panel hides outside scripting mode")
+
+
+func test_scripting_add_event_calls_controller() -> void:
+	var ctx := _scripting_ctx([], -1, {})
+	var add := ctx.inspector.find_child("MissionScAddEvent", true, false) as Button
+	assert_not_null(add, "Add event button built")
+	add.pressed.emit()
+	assert_eq(ctx.fake.add_event_calls, 1, "Add event calls the controller")
+
+
+func test_scripting_delete_event_calls_controller() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 0)
+	var ctx := _scripting_ctx([event], 0, _sc_chain_dict(event, [], []))
+	var del := ctx.inspector.find_child("MissionScDeleteEvent", true, false) as Button
+	del.pressed.emit()
+	assert_eq(ctx.fake.delete_event_calls, 1, "Delete event calls the controller")
+
+
+func test_scripting_event_row_selects_event() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 0)
+	var ctx := _scripting_ctx([event, _sc_event(1, 0, 0, 0, 0, 0)], 0, _sc_chain_dict(event, [], []))
+	ctx.inspector._sc_event_list.item_selected.emit(1)
+	assert_eq(ctx.fake.select_event_calls, [1], "selecting a row focuses that event")
+
+
+func test_scripting_event_flag_toggle_commits() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 0)
+	var ctx := _scripting_ctx([event], 0, _sc_chain_dict(event, [], []))
+	var flag := ctx.inspector._sc_flag_checks[0]["check"] as CheckBox  # Reset after (bit 1)
+	flag.button_pressed = true  # fires toggled
+	assert_eq(ctx.fake.set_event_calls.size(), 1, "toggling a flag commits the event")
+	assert_eq(int((ctx.fake.set_event_calls[0] as Array)[0]), 1, "the Reset-after bit is set in the committed flags")
+
+
+func test_scripting_reset_spin_commits() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 0)
+	var ctx := _scripting_ctx([event], 0, _sc_chain_dict(event, [], []))
+	ctx.inspector._sc_reset_spin.value = 12.0  # fires value_changed
+	assert_eq(ctx.fake.set_event_calls.size(), 1, "changing reset_after commits the event")
+	assert_eq(int((ctx.fake.set_event_calls[0] as Array)[1]), 12, "the new reset_after is sent")
+
+
+func test_scripting_trigger_editor_populates_with_hint() -> void:
+	var event := _sc_event(0, 0, 0, 0, 1, 0)
+	var chain := _sc_chain_dict(event, [_sc_trig(2, "Single", 10, "SingleIsWithinArea", [7, 3, 0, 0])], [])
+	var ctx := _scripting_ctx([event], 0, chain)
+	ctx.inspector._sc_trigger_list.item_selected.emit(0)
+	assert_eq(ctx.inspector._sc_trigger_main.get_selected_id(), 2, "the main-type dropdown shows Single")
+	assert_eq(ctx.inspector._sc_trigger_sub.get_selected_id(), 10, "the sub-type dropdown shows SingleIsWithinArea")
+	assert_eq(ctx.inspector._sc_trigger_params[0].value, 7.0, "param1 spin reflects the trigger")
+	assert_true(ctx.inspector._sc_trigger_params[1].tooltip_text.find("zone") != -1, "param2 carries the area-zone hint for an *IsWithinArea trigger")
+
+
+func test_scripting_trigger_type_change_commits_and_resets_sub() -> void:
+	var event := _sc_event(0, 0, 0, 0, 1, 0)
+	var chain := _sc_chain_dict(event, [_sc_trig(2, "Single", 10, "SingleIsWithinArea", [0, 0, 0, 0])], [])
+	var ctx := _scripting_ctx([event], 0, chain)
+	ctx.inspector._sc_trigger_list.item_selected.emit(0)
+	var main: OptionButton = ctx.inspector._sc_trigger_main
+	main.select(0)  # Group (id 1) is the first main-type entry
+	main.item_selected.emit(0)
+	assert_eq(ctx.fake.set_trigger_calls.size(), 1, "changing the main type commits")
+	var sent := (ctx.fake.set_trigger_calls[0] as Array)[1] as Dictionary
+	assert_eq(int(sent["main_type"]), 1, "the new main type (Group) is committed")
+	assert_eq(int(sent["sub_type"]), 0, "the sub-type resets to 0 on a main-type change")
+
+
+func test_scripting_trigger_param_commits() -> void:
+	var event := _sc_event(0, 0, 0, 0, 1, 0)
+	var chain := _sc_chain_dict(event, [_sc_trig(1, "Group", 1, "GroupSeesGroup", [0, 0, 0, 0])], [])
+	var ctx := _scripting_ctx([event], 0, chain)
+	ctx.inspector._sc_trigger_list.item_selected.emit(0)
+	ctx.inspector._sc_trigger_params[0].value = 42.0  # fires value_changed
+	assert_eq(ctx.fake.set_trigger_calls.size(), 1, "editing a param commits the trigger exactly once")
+	var sent := (ctx.fake.set_trigger_calls.back() as Array)[1] as Dictionary
+	assert_eq(int(sent["param1"]), 42, "the new param1 is committed")
+
+
+func test_scripting_trigger_add_remove_move_call_controller() -> void:
+	var event := _sc_event(0, 0, 0, 0, 2, 0)
+	var chain := _sc_chain_dict(event, [
+		_sc_trig(1, "Group", 1, "GroupSeesGroup", [0, 0, 0, 0]),
+		_sc_trig(1, "Group", 1, "GroupSeesGroup", [0, 0, 0, 0]),
+	], [])
+	var ctx := _scripting_ctx([event], 0, chain)
+	(ctx.inspector.find_child("MissionScTrigAdd", true, false) as Button).pressed.emit()
+	assert_eq(ctx.fake.add_trigger_calls, 1, "Add trigger calls the controller")
+	ctx.inspector._sc_trigger_list.item_selected.emit(1)
+	(ctx.inspector.find_child("MissionScTrigRemove", true, false) as Button).pressed.emit()
+	assert_eq(ctx.fake.remove_trigger_calls, [1], "Remove sends the selected local index")
+	ctx.inspector._sc_trigger_list.item_selected.emit(1)
+	(ctx.inspector.find_child("MissionScTrigUp", true, false) as Button).pressed.emit()
+	assert_eq(ctx.fake.move_trigger_calls, [[1, -1]], "Up moves the selected trigger toward the front")
+
+
+func test_scripting_action_editor_populates_and_commits() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 1)
+	var chain := _sc_chain_dict(event, [], [_sc_act(34, "ResetEvent", 0, "Null", [4, 0, 0, 0])])
+	var ctx := _scripting_ctx([event], 0, chain)
+	ctx.inspector._sc_action_list.item_selected.emit(0)
+	assert_eq(ctx.inspector._sc_action_type.get_selected_id(), 34, "the action-type dropdown shows ResetEvent")
+	assert_eq(ctx.inspector._sc_action_params[0].value, 4.0, "param1 spin reflects the action")
+	assert_true(ctx.inspector._sc_action_params[0].tooltip_text.find("Event") != -1, "ResetEvent param1 carries the event-index hint")
+	ctx.inspector._sc_action_params[0].value = 1.0  # fires value_changed
+	assert_eq(ctx.fake.set_action_calls.size(), 1, "editing a param commits the action exactly once")
+	assert_eq(int(((ctx.fake.set_action_calls.back() as Array)[1] as Dictionary)["param1"]), 1, "the new param1 is committed")
+
+
+func test_scripting_diagnostics_render() -> void:
+	var event := _sc_event(0, 0, 0, 0, 1, 0)
+	var chain := _sc_chain_dict(event,
+		[_sc_trig(2, "Single", 10, "SingleIsWithinArea", [0, 99, 0, 0])], [],
+		[{"severity": "warning", "code": "logic.area_reference_out_of_range",
+			"message": "Trigger references an area trigger index outside the mission area table.",
+			"subject_kind": "trigger", "subject_index": 0}])
+	var ctx := _scripting_ctx([event], 0, chain)
+	assert_true(ctx.inspector._sc_diagnostics.text.find("area trigger index") != -1, "the diagnostic message renders")
+
+
+func test_scripting_trigger_param_survives_external_refresh_while_focused() -> void:
+	# The same focus guard as the other panels: a mid-typed param spin must survive an external refresh.
+	var event := _sc_event(0, 0, 0, 0, 1, 0)
+	var ctx := _scripting_ctx([event], 0, _sc_chain_dict(event, [_sc_trig(1, "Group", 1, "GroupSeesGroup", [5, 0, 0, 0])], []))
+	ctx.inspector._sc_trigger_list.item_selected.emit(0)  # param1 synced to 5
+	var inner: LineEdit = ctx.inspector._sc_trigger_params[0].get_line_edit()
+	inner.grab_focus()
+	if not inner.has_focus():
+		pass_test("headless focus unavailable")
+		return
+	inner.text = "70"
+	# An external change moves the model under the user; the refresh must not clobber the typed text.
+	ctx.fake.chain = _sc_chain_dict(event, [_sc_trig(1, "Group", 1, "GroupSeesGroup", [9, 0, 0, 0])], [])
+	ctx.fake.changed.emit()
+	assert_eq(inner.text, "70", "focused, in-flight trigger param survives an external refresh")
+

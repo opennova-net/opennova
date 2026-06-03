@@ -147,6 +147,59 @@ var _group_spins: Array = []  # [field0, field8, field12]
 var _groups_selected: int = -1
 var _groups_syncing: bool = false
 
+# --- Scripting (events / triggers / actions) panel (Phase 4) ------------------
+# Shown in Scripting mode (4th tab). Top: the event list + Add / Delete event. Middle: the selected
+# event's flag checkboxes + reset / delay spins. Then a Triggers sub-list with a type / sub-type /
+# logic-flags / 4-param editor, and an Actions sub-list with a type / sub-type / 4-param editor, each
+# with Add / Remove / Move. Bottom: a diagnostics strip. Built ONCE; every sub-widget group carries its
+# own *_syncing guard so a programmatic repopulate never echoes back as a user edit, and spins sync
+# through _sync_spin so a refresh never clobbers a value being typed. Edits route through the controller.
+# Reset / delay are the engine's 10-bit fields, so the spins clamp to 0..1023.
+const SCRIPT_PARAM_MIN := -2147483648.0
+const SCRIPT_PARAM_MAX := 2147483647.0
+const SCRIPT_COUNTER_MAX := 1023.0
+var _sc_box: VBoxContainer
+var _sc_status: Label
+var _sc_event_list: ItemList
+var _sc_event_rows: Array = []  # event indices parallel to the event-list rows
+var _sc_add_event_button: Button
+var _sc_delete_event_button: Button
+var _sc_event_syncing: bool = false
+# Selected event's own attributes.
+var _sc_flags_row: HBoxContainer  # holds the lazily-built flag checkboxes
+var _sc_flag_checks: Array = []  # [{ "bit": int, "check": CheckBox }]
+var _sc_reset_spin: SpinBox
+var _sc_delay_spin: SpinBox
+var _sc_attr_syncing: bool = false
+# Triggers sub-list + per-trigger editor. _sc_trigger_selected is the local index within the event chain.
+var _sc_trigger_list: ItemList
+var _sc_trigger_add: Button
+var _sc_trigger_remove: Button
+var _sc_trigger_up: Button
+var _sc_trigger_down: Button
+var _sc_trigger_main: OptionButton
+var _sc_trigger_sub: OptionButton
+var _sc_trigger_negate: CheckBox
+var _sc_trigger_or: CheckBox
+var _sc_trigger_xor: CheckBox
+var _sc_trigger_params: Array = []  # [p1, p2, p3, p4] SpinBox
+var _sc_trigger_selected: int = -1
+var _sc_trigger_syncing: bool = false
+# Actions sub-list + per-action editor.
+var _sc_action_list: ItemList
+var _sc_action_add: Button
+var _sc_action_remove: Button
+var _sc_action_up: Button
+var _sc_action_down: Button
+var _sc_action_type: OptionButton
+var _sc_action_sub: OptionButton
+var _sc_action_params: Array = []  # [p1, p2, p3, p4] SpinBox
+var _sc_action_selected: int = -1
+var _sc_action_syncing: bool = false
+var _sc_diagnostics: Label
+# The event chain the panel was last populated from, so the sub-list handlers read the same data.
+var _sc_chain: Dictionary = {}
+
 
 func setup(controller) -> void:
 	_controller = controller
@@ -171,6 +224,7 @@ func setup(controller) -> void:
 		_build_place_panel()
 		_build_waypoint_panel()
 		_build_area_trigger_panel()
+		_build_scripting_panel()
 		_build_props_panel()
 		_build_loadout_panel()
 		_build_groups_panel()
@@ -189,6 +243,7 @@ func _refresh() -> void:
 	_refresh_place_panel()
 	_refresh_waypoint_panel()
 	_refresh_area_trigger_panel()
+	_refresh_scripting_panel()
 	_refresh_props_panel()
 	_refresh_loadout_panel()
 	_refresh_groups_panel()
@@ -620,11 +675,12 @@ func _on_place_stop() -> void:
 # The tabs drive the controller's mode; the controller is the single source of truth, so
 # _refresh_mode_tabs syncs the current tab back from it (guarded against echo).
 
-# Tab index <-> controller Mode. Tab order: 0 Objects, 1 Waypoints, 2 Triggers (zones).
+# Tab index <-> controller Mode. Tab order: 0 Objects, 1 Waypoints, 2 Triggers (zones), 3 Scripting.
 const _TAB_TO_MODE := [
 	MissionController.Mode.OBJECTS,
 	MissionController.Mode.WAYPOINTS,
 	MissionController.Mode.AREA_TRIGGERS,
+	MissionController.Mode.SCRIPTING,
 ]
 
 func _build_mode_tabs() -> void:
@@ -633,6 +689,7 @@ func _build_mode_tabs() -> void:
 	_mode_tabs.add_tab("Objects")
 	_mode_tabs.add_tab("Waypoints")
 	_mode_tabs.add_tab("Triggers")
+	_mode_tabs.add_tab("Scripting")
 	_mode_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root.add_child(_mode_tabs)
 	_mode_tabs.tab_changed.connect(_on_mode_tab_changed)
@@ -1070,6 +1127,554 @@ func _refresh_area_trigger_panel() -> void:
 	_at_flags_syncing = false
 
 	_at_delete_button.disabled = not has_sel
+
+
+# --- Scripting (events / triggers / actions) panel ----------------------------
+# Mode-tab panel (4th tab). The event list drives the controller's selected event; the event's flags +
+# reset/delay, its triggers, and its actions are edited in place. The same focus/echo guards as the
+# other panels apply. All mutations go through the controller (one undo step each).
+
+func _make_sc_button(parent: Control, node_name: String, text: String, handler: Callable) -> Button:
+	var button := Button.new()
+	button.name = node_name
+	button.text = text
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(button)
+	button.pressed.connect(handler)
+	return button
+
+
+func _add_sc_option(parent: Control, node_name: String, label_text: String, handler: Callable) -> OptionButton:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(row)
+	var lbl := Label.new()
+	lbl.text = label_text
+	lbl.custom_minimum_size = Vector2(96, 0)
+	row.add_child(lbl)
+	var option := OptionButton.new()
+	option.name = node_name
+	option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(option)
+	option.item_selected.connect(handler)
+	return option
+
+
+func _build_scripting_panel() -> void:
+	_sc_box = VBoxContainer.new()
+	_sc_box.add_theme_constant_override("separation", 4)
+	_sc_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_sc_box.visible = false
+	_root.add_child(_sc_box)
+
+	ObjectUiHelpers.add_section_heading(_sc_box, "Mission scripting (events)")
+	_sc_status = ObjectUiHelpers.add_muted_label(_sc_box, "")
+	_sc_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+	_sc_add_event_button = _make_sc_button(_sc_box, "MissionScAddEvent", "Add event", _on_sc_add_event)
+
+	_sc_event_list = ItemList.new()
+	_sc_event_list.name = "MissionScEvents"
+	_sc_event_list.select_mode = ItemList.SELECT_SINGLE
+	_sc_event_list.custom_minimum_size = Vector2(0, 100)
+	_sc_event_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_sc_box.add_child(_sc_event_list)
+	_sc_event_list.item_selected.connect(_on_sc_event_selected)
+
+	_sc_delete_event_button = _make_sc_button(_sc_box, "MissionScDeleteEvent", "Delete event", _on_sc_delete_event)
+
+	_sc_box.add_child(HSeparator.new())
+	ObjectUiHelpers.add_section_heading(_sc_box, "Event")
+	# The flag checkboxes are generated from the engine's bit list on the first refresh (a mission must be
+	# loaded for the controller to answer), so a new EventFlags bit appears without touching the UI code.
+	_sc_flags_row = HBoxContainer.new()
+	_sc_flags_row.name = "MissionScEventFlags"
+	_sc_flags_row.add_theme_constant_override("separation", 10)
+	_sc_box.add_child(_sc_flags_row)
+	_sc_reset_spin = ObjectUiHelpers.add_spin_row(_sc_box, "MissionScReset", "Reset after", 0.0, SCRIPT_COUNTER_MAX, 1.0)
+	_sc_delay_spin = ObjectUiHelpers.add_spin_row(_sc_box, "MissionScDelay", "Delay", 0.0, SCRIPT_COUNTER_MAX, 1.0)
+	_sc_reset_spin.tooltip_text = "Ticks before a Reset-after event may fire again (the engine keeps the top 10 bits)."
+	_sc_delay_spin.tooltip_text = "Ticks the event waits, after its triggers pass, before running its actions."
+	_sc_reset_spin.value_changed.connect(_on_sc_attr_changed)
+	_sc_delay_spin.value_changed.connect(_on_sc_attr_changed)
+
+	_sc_box.add_child(HSeparator.new())
+	ObjectUiHelpers.add_section_heading(_sc_box, "Triggers (conditions)")
+	_sc_trigger_list = ItemList.new()
+	_sc_trigger_list.name = "MissionScTriggers"
+	_sc_trigger_list.select_mode = ItemList.SELECT_SINGLE
+	_sc_trigger_list.custom_minimum_size = Vector2(0, 76)
+	_sc_trigger_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_sc_box.add_child(_sc_trigger_list)
+	_sc_trigger_list.item_selected.connect(_on_sc_trigger_selected)
+	var trig_buttons := HBoxContainer.new()
+	trig_buttons.add_theme_constant_override("separation", 6)
+	_sc_box.add_child(trig_buttons)
+	_sc_trigger_add = _make_sc_button(trig_buttons, "MissionScTrigAdd", "Add", _on_sc_trigger_add)
+	_sc_trigger_remove = _make_sc_button(trig_buttons, "MissionScTrigRemove", "Remove", _on_sc_trigger_remove)
+	_sc_trigger_up = _make_sc_button(trig_buttons, "MissionScTrigUp", "Up", _on_sc_trigger_up)
+	_sc_trigger_down = _make_sc_button(trig_buttons, "MissionScTrigDown", "Down", _on_sc_trigger_down)
+	_sc_trigger_main = _add_sc_option(_sc_box, "MissionScTrigMain", "Type", _on_sc_trigger_main_selected)
+	_sc_trigger_sub = _add_sc_option(_sc_box, "MissionScTrigSub", "Sub-type", _on_sc_trigger_sub_selected)
+	var trig_flags := HBoxContainer.new()
+	trig_flags.add_theme_constant_override("separation", 10)
+	_sc_box.add_child(trig_flags)
+	_sc_trigger_negate = ObjectUiHelpers.add_checkbox(trig_flags, "MissionScTrigNeg", "Negate")
+	_sc_trigger_or = ObjectUiHelpers.add_checkbox(trig_flags, "MissionScTrigOr", "OR")
+	_sc_trigger_xor = ObjectUiHelpers.add_checkbox(trig_flags, "MissionScTrigXor", "XOR")
+	_sc_trigger_negate.tooltip_text = "Invert this condition (condition_flags bit 0)."
+	_sc_trigger_or.tooltip_text = "Combine with the other triggers using OR instead of AND (bit 1)."
+	_sc_trigger_xor.tooltip_text = "Combine using XOR (bit 2)."
+	_sc_trigger_negate.toggled.connect(_on_sc_trigger_flag_toggled)
+	_sc_trigger_or.toggled.connect(_on_sc_trigger_flag_toggled)
+	_sc_trigger_xor.toggled.connect(_on_sc_trigger_flag_toggled)
+	_sc_trigger_params = [
+		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScTrigP1", "Param 1", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScTrigP2", "Param 2", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScTrigP3", "Param 3", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScTrigP4", "Param 4", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+	]
+	for spin in _sc_trigger_params:
+		spin.value_changed.connect(_on_sc_trigger_param_changed)
+
+	_sc_box.add_child(HSeparator.new())
+	ObjectUiHelpers.add_section_heading(_sc_box, "Actions (effects)")
+	_sc_action_list = ItemList.new()
+	_sc_action_list.name = "MissionScActions"
+	_sc_action_list.select_mode = ItemList.SELECT_SINGLE
+	_sc_action_list.custom_minimum_size = Vector2(0, 76)
+	_sc_action_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_sc_box.add_child(_sc_action_list)
+	_sc_action_list.item_selected.connect(_on_sc_action_selected)
+	var act_buttons := HBoxContainer.new()
+	act_buttons.add_theme_constant_override("separation", 6)
+	_sc_box.add_child(act_buttons)
+	_sc_action_add = _make_sc_button(act_buttons, "MissionScActAdd", "Add", _on_sc_action_add)
+	_sc_action_remove = _make_sc_button(act_buttons, "MissionScActRemove", "Remove", _on_sc_action_remove)
+	_sc_action_up = _make_sc_button(act_buttons, "MissionScActUp", "Up", _on_sc_action_up)
+	_sc_action_down = _make_sc_button(act_buttons, "MissionScActDown", "Down", _on_sc_action_down)
+	_sc_action_type = _add_sc_option(_sc_box, "MissionScActType", "Type", _on_sc_action_type_selected)
+	_sc_action_sub = _add_sc_option(_sc_box, "MissionScActSub", "Sub-type", _on_sc_action_sub_selected)
+	_sc_action_params = [
+		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScActP1", "Param 1", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScActP2", "Param 2", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScActP3", "Param 3", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScActP4", "Param 4", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+	]
+	for spin in _sc_action_params:
+		spin.value_changed.connect(_on_sc_action_param_changed)
+
+	_sc_box.add_child(HSeparator.new())
+	ObjectUiHelpers.add_section_heading(_sc_box, "Diagnostics")
+	_sc_diagnostics = ObjectUiHelpers.add_muted_label(_sc_box, "")
+	_sc_diagnostics.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+
+func _populate_sc_option(option: OptionButton, entries: Array, selected_value: int) -> void:
+	option.clear()
+	var sel_idx := -1
+	for entry in entries:
+		var entry_dict := entry as Dictionary
+		var value := int(entry_dict.get("value", 0))
+		var idx := option.item_count
+		option.add_item(String(entry_dict.get("name", "")))
+		option.set_item_id(idx, value)
+		if value == selected_value:
+			sel_idx = idx
+	if sel_idx >= 0:
+		option.select(sel_idx)
+	else:
+		# The stored value is not in the named set (an unknown sub-type, say); surface it as a raw row so
+		# the dropdown shows the actual value instead of silently snapping to the first entry.
+		option.add_item("Value %d" % selected_value)
+		option.set_item_id(option.item_count - 1, selected_value)
+		option.select(option.item_count - 1)
+
+
+func _refresh_scripting_panel() -> void:
+	if _sc_box == null:
+		return
+	var on: bool = _controller != null and _controller.is_scripting_mode() and _controller.get_mission() != null
+	_sc_box.visible = on
+	if not on:
+		return
+
+	# Build the flag checkboxes once, from the engine's bit list.
+	if _sc_flag_checks.is_empty():
+		for entry in _controller.get_event_flag_bits():
+			var entry_dict := entry as Dictionary
+			var bit := int(entry_dict.get("value", 0))
+			var check := ObjectUiHelpers.add_checkbox(_sc_flags_row, "MissionScFlag%d" % bit, String(entry_dict.get("name", "")))
+			check.toggled.connect(_on_sc_flag_toggled)
+			_sc_flag_checks.append({ "bit": bit, "check": check })
+
+	var events: Array = _controller.get_events()
+	var selected := int(_controller.get_selected_event_index())
+	_sc_event_syncing = true
+	_sc_event_list.clear()
+	_sc_event_rows = []
+	for ev in events:
+		var ev_dict := ev as Dictionary
+		var eidx := int(ev_dict.get("index", -1))
+		_sc_event_list.add_item("Event %d  (%d trig, %d act)" % [eidx, int(ev_dict.get("trigger_count", 0)), int(ev_dict.get("action_count", 0))])
+		_sc_event_rows.append(eidx)
+		if eidx == selected:
+			_sc_event_list.select(_sc_event_list.item_count - 1)
+	_sc_event_syncing = false
+
+	var has_event := selected >= 0
+	_sc_delete_event_button.disabled = not has_event
+	if events.is_empty():
+		_sc_status.text = "No events yet. Click Add event, then chain triggers (conditions) and actions (effects)."
+	elif not has_event:
+		_sc_status.text = "Select an event to edit its triggers and actions."
+	else:
+		_sc_status.text = "Triggers are the conditions; when they pass, the actions run."
+
+	_sc_chain = _controller.get_selected_event_chain()
+	var event_dict: Dictionary = _sc_chain.get("event", {})
+	var triggers: Array = _sc_chain.get("triggers", [])
+	var actions: Array = _sc_chain.get("actions", [])
+
+	_sc_attr_syncing = true
+	var flags := int(event_dict.get("flags", 0))
+	for flag_entry in _sc_flag_checks:
+		var check := flag_entry["check"] as CheckBox
+		check.button_pressed = (flags & int(flag_entry["bit"])) != 0
+		check.disabled = not has_event
+	_sync_spin(_sc_reset_spin, float(event_dict.get("reset_after", 0)))
+	_sync_spin(_sc_delay_spin, float(event_dict.get("delay", 0)))
+	_sc_reset_spin.editable = has_event
+	_sc_delay_spin.editable = has_event
+	_sc_attr_syncing = false
+
+	# Clamp sub-selections to their (possibly shrunken) lists before repopulating the editors.
+	if _sc_trigger_selected >= triggers.size():
+		_sc_trigger_selected = triggers.size() - 1
+	if _sc_action_selected >= actions.size():
+		_sc_action_selected = actions.size() - 1
+
+	_refresh_sc_trigger_section(triggers)
+	_refresh_sc_action_section(actions)
+
+	var diagnostics: Array = _sc_chain.get("diagnostics", [])
+	if not has_event:
+		_sc_diagnostics.text = ""
+	elif diagnostics.is_empty():
+		_sc_diagnostics.text = "No problems detected in this event."
+	else:
+		var lines: Array = []
+		for diag in diagnostics:
+			lines.append("⚠ " + String((diag as Dictionary).get("message", "")))
+		_sc_diagnostics.text = "\n".join(lines)
+
+
+func _refresh_sc_trigger_section(triggers: Array) -> void:
+	_sc_trigger_syncing = true
+	_sc_trigger_list.clear()
+	for i in triggers.size():
+		var trig := triggers[i] as Dictionary
+		var negate := "!" if bool(trig.get("negated", false)) else ""
+		_sc_trigger_list.add_item("%d. %s%s / %s  [%s]" % [i, negate, String(trig.get("main_type_name", "?")), String(trig.get("sub_type_name", "?")), String(trig.get("logic_operator", "and"))])
+		if i == _sc_trigger_selected:
+			_sc_trigger_list.select(i)
+	_sc_trigger_syncing = false
+
+	var has_sel := _sc_trigger_selected >= 0 and _sc_trigger_selected < triggers.size()
+	_sc_trigger_add.disabled = _controller.get_selected_event_index() < 0 or triggers.size() >= 20
+	_sc_trigger_remove.disabled = not has_sel
+	_sc_trigger_up.disabled = not (has_sel and _sc_trigger_selected > 0)
+	_sc_trigger_down.disabled = not (has_sel and _sc_trigger_selected < triggers.size() - 1)
+	_sc_trigger_main.disabled = not has_sel
+	_sc_trigger_sub.disabled = not has_sel
+	_sc_trigger_negate.disabled = not has_sel
+	_sc_trigger_or.disabled = not has_sel
+	_sc_trigger_xor.disabled = not has_sel
+	for spin in _sc_trigger_params:
+		spin.editable = has_sel
+
+	_sc_trigger_syncing = true
+	if not has_sel:
+		_sc_trigger_main.clear()
+		_sc_trigger_sub.clear()
+		_sc_trigger_negate.button_pressed = false
+		_sc_trigger_or.button_pressed = false
+		_sc_trigger_xor.button_pressed = false
+		_sc_trigger_syncing = false
+		return
+	var trig := triggers[_sc_trigger_selected] as Dictionary
+	var main_type := int(trig.get("main_type", 0))
+	var sub_type := int(trig.get("sub_type", 0))
+	_populate_sc_option(_sc_trigger_main, _controller.get_trigger_main_types(), main_type)
+	_populate_sc_option(_sc_trigger_sub, _controller.get_trigger_sub_types(main_type), sub_type)
+	_sc_trigger_negate.button_pressed = bool(trig.get("negated", false))
+	_sc_trigger_or.button_pressed = bool(trig.get("logic_or", false))
+	_sc_trigger_xor.button_pressed = bool(trig.get("logic_xor", false))
+	var params := [int(trig.get("param1", 0)), int(trig.get("param2", 0)), int(trig.get("param3", 0)), int(trig.get("param4", 0))]
+	var hints := _trigger_param_hints(main_type, sub_type)
+	for i in 4:
+		_sync_spin(_sc_trigger_params[i], float(params[i]))
+		_sc_trigger_params[i].tooltip_text = hints[i]
+	_sc_trigger_syncing = false
+
+
+func _refresh_sc_action_section(actions: Array) -> void:
+	_sc_action_syncing = true
+	_sc_action_list.clear()
+	for i in actions.size():
+		var act := actions[i] as Dictionary
+		_sc_action_list.add_item("%d. %s / %s" % [i, String(act.get("action_type_name", "?")), String(act.get("action_sub_type_name", "?"))])
+		if i == _sc_action_selected:
+			_sc_action_list.select(i)
+	_sc_action_syncing = false
+
+	var has_sel := _sc_action_selected >= 0 and _sc_action_selected < actions.size()
+	_sc_action_add.disabled = _controller.get_selected_event_index() < 0 or actions.size() >= 20
+	_sc_action_remove.disabled = not has_sel
+	_sc_action_up.disabled = not (has_sel and _sc_action_selected > 0)
+	_sc_action_down.disabled = not (has_sel and _sc_action_selected < actions.size() - 1)
+	_sc_action_type.disabled = not has_sel
+	_sc_action_sub.disabled = not has_sel
+	for spin in _sc_action_params:
+		spin.editable = has_sel
+
+	_sc_action_syncing = true
+	if not has_sel:
+		_sc_action_type.clear()
+		_sc_action_sub.clear()
+		_sc_action_syncing = false
+		return
+	var act := actions[_sc_action_selected] as Dictionary
+	var action_type := int(act.get("action_type", 0))
+	var action_sub := int(act.get("action_sub_type", 0))
+	_populate_sc_option(_sc_action_type, _controller.get_action_types(), action_type)
+	_populate_sc_option(_sc_action_sub, _controller.get_action_sub_types(action_type), action_sub)
+	var params := [int(act.get("param1", 0)), int(act.get("param2", 0)), int(act.get("param3", 0)), int(act.get("param4", 0))]
+	var hints := _action_param_hints(action_type)
+	for i in 4:
+		_sync_spin(_sc_action_params[i], float(params[i]))
+		_sc_action_params[i].tooltip_text = hints[i]
+	_sc_action_syncing = false
+
+
+# Param hints surface the two proven cross-references; everything else stays a raw parameter.
+func _trigger_param_hints(main_type: int, sub_type: int) -> Array:
+	var hints := ["Raw parameter 1", "Raw parameter 2", "Raw parameter 3", "Raw parameter 4"]
+	# A Group/Single *IsWithinArea trigger's param2 indexes the area-trigger (zone) table.
+	if (main_type == 1 or main_type == 2) and sub_type == 10:
+		hints[1] = "Area zone index (which zone in the Triggers tab this checks)"
+	return hints
+
+
+func _action_param_hints(action_type: int) -> Array:
+	var hints := ["Raw parameter 1", "Raw parameter 2", "Raw parameter 3", "Raw parameter 4"]
+	if action_type == 34:  # ResetEvent
+		hints[0] = "Event index to reset"
+	return hints
+
+
+func _on_sc_add_event() -> void:
+	if _controller == null:
+		return
+	_sc_trigger_selected = -1
+	_sc_action_selected = -1
+	_controller.add_event_default()
+
+
+func _on_sc_delete_event() -> void:
+	if _controller == null:
+		return
+	_sc_trigger_selected = -1
+	_sc_action_selected = -1
+	_controller.delete_selected_event()
+
+
+func _on_sc_event_selected(row: int) -> void:
+	if _sc_event_syncing or _controller == null:
+		return
+	if row < 0 or row >= _sc_event_rows.size():
+		return
+	# A different event has its own triggers / actions; drop the sub-selections.
+	_sc_trigger_selected = -1
+	_sc_action_selected = -1
+	_controller.select_event(int(_sc_event_rows[row]))
+
+
+func _on_sc_flag_toggled(_pressed: bool) -> void:
+	if _sc_attr_syncing or _controller == null:
+		return
+	_commit_selected_event()
+
+
+func _on_sc_attr_changed(_value: float) -> void:
+	if _sc_attr_syncing or _controller == null:
+		return
+	_commit_selected_event()
+
+
+func _commit_selected_event() -> void:
+	if _controller == null:
+		return
+	var flags := 0
+	for flag_entry in _sc_flag_checks:
+		if (flag_entry["check"] as CheckBox).button_pressed:
+			flags |= int(flag_entry["bit"])
+	_controller.set_selected_event(flags, int(_sc_reset_spin.value), int(_sc_delay_spin.value))
+
+
+func _on_sc_trigger_selected(row: int) -> void:
+	if _sc_trigger_syncing or _controller == null:
+		return
+	_sc_trigger_selected = row
+	_refresh_sc_trigger_section(_sc_chain.get("triggers", []))
+
+
+func _on_sc_trigger_add() -> void:
+	if _controller == null:
+		return
+	# The appended trigger lands at the end; pre-select that index so the post-add refresh focuses it.
+	_sc_trigger_selected = int(_sc_chain.get("triggers", []).size())
+	_controller.add_selected_event_trigger()
+
+
+func _on_sc_trigger_remove() -> void:
+	if _controller == null or _sc_trigger_selected < 0:
+		return
+	_controller.remove_selected_event_trigger(_sc_trigger_selected)
+
+
+func _on_sc_trigger_up() -> void:
+	if _controller == null or _sc_trigger_selected <= 0:
+		return
+	var from := _sc_trigger_selected
+	_sc_trigger_selected = from - 1
+	_controller.move_selected_event_trigger(from, -1)
+
+
+func _on_sc_trigger_down() -> void:
+	if _controller == null or _sc_trigger_selected < 0:
+		return
+	if _sc_trigger_selected >= int(_sc_chain.get("triggers", []).size()) - 1:
+		return
+	var from := _sc_trigger_selected
+	_sc_trigger_selected = from + 1
+	_controller.move_selected_event_trigger(from, 1)
+
+
+func _on_sc_trigger_main_selected(_idx: int) -> void:
+	if _sc_trigger_syncing:
+		return
+	# Switching the main type resets the sub-type (the old sub rarely maps onto the new type).
+	_commit_selected_trigger({ "sub_type": 0 })
+
+
+func _on_sc_trigger_sub_selected(_idx: int) -> void:
+	if _sc_trigger_syncing:
+		return
+	_commit_selected_trigger()
+
+
+func _on_sc_trigger_flag_toggled(_pressed: bool) -> void:
+	if _sc_trigger_syncing:
+		return
+	_commit_selected_trigger()
+
+
+func _on_sc_trigger_param_changed(_value: float) -> void:
+	if _sc_trigger_syncing:
+		return
+	_commit_selected_trigger()
+
+
+func _commit_selected_trigger(overrides: Dictionary = {}) -> void:
+	if _controller == null or _sc_trigger_selected < 0:
+		return
+	var trigger := {
+		"main_type": _sc_trigger_main.get_selected_id(),
+		"sub_type": _sc_trigger_sub.get_selected_id(),
+		"param1": int(_sc_trigger_params[0].value),
+		"param2": int(_sc_trigger_params[1].value),
+		"param3": int(_sc_trigger_params[2].value),
+		"param4": int(_sc_trigger_params[3].value),
+		"negated": _sc_trigger_negate.button_pressed,
+		"logic_or": _sc_trigger_or.button_pressed,
+		"logic_xor": _sc_trigger_xor.button_pressed,
+	}
+	for key in overrides:
+		trigger[key] = overrides[key]
+	_controller.set_selected_event_trigger(_sc_trigger_selected, trigger)
+
+
+func _on_sc_action_selected(row: int) -> void:
+	if _sc_action_syncing or _controller == null:
+		return
+	_sc_action_selected = row
+	_refresh_sc_action_section(_sc_chain.get("actions", []))
+
+
+func _on_sc_action_add() -> void:
+	if _controller == null:
+		return
+	_sc_action_selected = int(_sc_chain.get("actions", []).size())
+	_controller.add_selected_event_action()
+
+
+func _on_sc_action_remove() -> void:
+	if _controller == null or _sc_action_selected < 0:
+		return
+	_controller.remove_selected_event_action(_sc_action_selected)
+
+
+func _on_sc_action_up() -> void:
+	if _controller == null or _sc_action_selected <= 0:
+		return
+	var from := _sc_action_selected
+	_sc_action_selected = from - 1
+	_controller.move_selected_event_action(from, -1)
+
+
+func _on_sc_action_down() -> void:
+	if _controller == null or _sc_action_selected < 0:
+		return
+	if _sc_action_selected >= int(_sc_chain.get("actions", []).size()) - 1:
+		return
+	var from := _sc_action_selected
+	_sc_action_selected = from + 1
+	_controller.move_selected_event_action(from, 1)
+
+
+func _on_sc_action_type_selected(_idx: int) -> void:
+	if _sc_action_syncing:
+		return
+	_commit_selected_action({ "action_sub_type": 0 })
+
+
+func _on_sc_action_sub_selected(_idx: int) -> void:
+	if _sc_action_syncing:
+		return
+	_commit_selected_action()
+
+
+func _on_sc_action_param_changed(_value: float) -> void:
+	if _sc_action_syncing:
+		return
+	_commit_selected_action()
+
+
+func _commit_selected_action(overrides: Dictionary = {}) -> void:
+	if _controller == null or _sc_action_selected < 0:
+		return
+	var action := {
+		"action_type": _sc_action_type.get_selected_id(),
+		"action_sub_type": _sc_action_sub.get_selected_id(),
+		"param1": int(_sc_action_params[0].value),
+		"param2": int(_sc_action_params[1].value),
+		"param3": int(_sc_action_params[2].value),
+		"param4": int(_sc_action_params[3].value),
+	}
+	for key in overrides:
+		action[key] = overrides[key]
+	_controller.set_selected_event_action(_sc_action_selected, action)
 
 
 # --- Mission properties (header) editable form --------------------------------

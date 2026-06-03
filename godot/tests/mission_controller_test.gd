@@ -1547,3 +1547,113 @@ func test_set_group_writes_three_ints_and_is_undoable() -> void:
 	assert_eq(controller.get_group(5), before, "undo restores the group")
 	controller.redo()
 	assert_eq(int(controller.get_group(5)["field0"]), 4321, "redo replays the group edit")
+
+
+# --- Phase 4: mission scripting forwarders ------------------------------------
+
+func test_add_event_default_appends_selects_and_is_undoable() -> void:
+	var controller := _loaded_with_selection()
+	controller.set_mode(MissionController.Mode.SCRIPTING)
+	var base := controller.get_event_count()
+	var idx := controller.add_event_default()
+	assert_eq(idx, base, "the new event is appended at the end")
+	assert_eq(controller.get_event_count(), base + 1, "event count grows")
+	assert_eq(controller.get_selected_event_index(), base, "the new event is selected")
+	assert_true(controller.is_dirty(), "adding an event dirties the mission")
+	controller.undo()
+	assert_eq(controller.get_event_count(), base, "undo removes the event")
+	controller.redo()
+	assert_eq(controller.get_event_count(), base + 1, "redo re-adds the event")
+
+
+func test_scripting_trigger_and_action_ops_edit_the_selected_event() -> void:
+	var controller := _loaded_with_selection()
+	controller.set_mode(MissionController.Mode.SCRIPTING)
+	controller.add_event_default()  # selects the fresh, empty event
+
+	controller.add_selected_event_trigger()
+	assert_eq((controller.get_selected_event_chain()["triggers"] as Array).size(), 1, "a trigger was added")
+	controller.set_selected_event_trigger(0, {"main_type": 2, "sub_type": 10, "param2": 1})
+	var trig := (controller.get_selected_event_chain()["triggers"] as Array)[0] as Dictionary
+	assert_eq(int(trig["main_type"]), 2, "the trigger edit lands (Single)")
+	assert_eq(int(trig["sub_type"]), 10, "the sub type lands (SingleIsWithinArea)")
+
+	controller.add_selected_event_action()
+	assert_eq((controller.get_selected_event_chain()["actions"] as Array).size(), 1, "an action was added")
+	assert_true(controller.is_dirty(), "scripting edits dirty the mission")
+
+	# Each op is its own undo step: undoing once removes only the last (the action add).
+	controller.undo()
+	assert_eq((controller.get_selected_event_chain()["actions"] as Array).size(), 0, "undo removes the action")
+	assert_eq((controller.get_selected_event_chain()["triggers"] as Array).size(), 1, "the trigger remains")
+
+
+func test_set_selected_event_attributes_is_undoable() -> void:
+	var controller := _loaded_with_selection()
+	controller.set_mode(MissionController.Mode.SCRIPTING)
+	controller.add_event_default()
+	controller.set_selected_event(1, 9, 4)  # ResetAfter flag, reset_after 9, delay 4
+	var event := controller.get_selected_event_chain()["event"] as Dictionary
+	assert_eq(int(event["reset_after"]), 9, "reset_after is set")
+	assert_eq(int(event["delay"]), 4, "delay is set")
+	assert_eq(int(event["flags"]) & 1, 1, "the Reset-after flag bit is set")
+	controller.undo()
+	var restored := controller.get_selected_event_chain()["event"] as Dictionary
+	assert_eq(int(restored["reset_after"]), 0, "undo restores reset_after")
+
+
+func test_delete_selected_event_is_undoable() -> void:
+	var controller := _loaded_with_selection()
+	controller.set_mode(MissionController.Mode.SCRIPTING)
+	var base := controller.get_event_count()
+	controller.add_event_default()
+	assert_eq(controller.get_event_count(), base + 1)
+	assert_true(controller.delete_selected_event(), "the selected event deletes")
+	assert_eq(controller.get_event_count(), base, "the count drops back")
+	controller.undo()
+	assert_eq(controller.get_event_count(), base + 1, "undo restores the deleted event")
+
+
+func test_scripting_edits_are_inert_without_a_selected_event() -> void:
+	var controller := _loaded_with_selection()
+	controller.set_mode(MissionController.Mode.SCRIPTING)
+	# Drive the selection out of range (no event focused) and confirm the mutators no-op safely.
+	controller.select_event(-1)
+	controller.add_selected_event_trigger()
+	controller.set_selected_event(1, 2, 3)
+	assert_false(controller.is_dirty(), "scripting mutators do nothing without a selected event")
+
+
+func test_move_selected_event_trigger_reorders_the_chain() -> void:
+	var controller := _loaded_with_selection()
+	controller.set_mode(MissionController.Mode.SCRIPTING)
+	controller.add_event_default()
+	controller.add_selected_event_trigger()
+	controller.add_selected_event_trigger()
+	# Tag the two triggers by param so the reorder is observable end-to-end (real C++ std::swap).
+	controller.set_selected_event_trigger(0, {"param1": 100})
+	controller.set_selected_event_trigger(1, {"param1": 200})
+	assert_eq((controller.get_selected_event_chain()["triggers"] as Array).size(), 2, "two triggers present")
+
+	controller.move_selected_event_trigger(1, -1)  # move the 2nd trigger toward the front
+	var triggers := controller.get_selected_event_chain()["triggers"] as Array
+	assert_eq(int((triggers[0] as Dictionary)["param1"]), 200, "the moved trigger is now first")
+	assert_eq(int((triggers[1] as Dictionary)["param1"]), 100, "the displaced trigger is now second")
+	controller.undo()
+	var restored := controller.get_selected_event_chain()["triggers"] as Array
+	assert_eq(int((restored[0] as Dictionary)["param1"]), 100, "undo restores the original order")
+
+
+func test_move_selected_event_action_reorders_the_chain() -> void:
+	var controller := _loaded_with_selection()
+	controller.set_mode(MissionController.Mode.SCRIPTING)
+	controller.add_event_default()
+	controller.add_selected_event_action()
+	controller.add_selected_event_action()
+	controller.set_selected_event_action(0, {"param1": 11})
+	controller.set_selected_event_action(1, {"param1": 22})
+
+	controller.move_selected_event_action(0, 1)  # move the 1st action toward the back
+	var actions := controller.get_selected_event_chain()["actions"] as Array
+	assert_eq(int((actions[0] as Dictionary)["param1"]), 22, "the displaced action is now first")
+	assert_eq(int((actions[1] as Dictionary)["param1"]), 11, "the moved action is now second")

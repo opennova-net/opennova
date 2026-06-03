@@ -2248,6 +2248,68 @@ bool MissionDocument::move_event_action(size_t event_index, size_t local_index, 
 	return true;
 }
 
+bool MissionDocument::add_event(const MissionEventRecord &record, MissionEventRecord *out) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	bms::Event event = {};
+	apply_event_record(event, record);
+	// A fresh event owns no triggers/actions; the index/count fields stay zero until the caller adds
+	// entries via insert_event_trigger/insert_event_action (each assigns the global index on first add).
+	event.trigger_index = 0;
+	event.action_index = 0;
+	event.trigger_count = 0;
+	event.action_count = 0;
+	impl_->file.events.push_back(event);
+	sync_counts();
+	if (out != nullptr) {
+		*out = to_event_record(impl_->file.events.back(), impl_->file.events.size() - 1);
+	}
+	return true;
+}
+
+bool MissionDocument::remove_event(size_t index) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	if (index >= impl_->file.events.size()) {
+		impl_->last_error = "Mission event index out of range";
+		return false;
+	}
+	// Drain the event's triggers and actions through the single-element removers, which fix up every
+	// other event's trigger_index / action_index exactly as a normal trigger/action delete would. The
+	// break is an infinite-loop guard: a remover only fails on an already-malformed (invalid-range) event.
+	while (impl_->file.events[index].trigger_count > 0) {
+		if (!remove_event_trigger(index, 0)) {
+			break;
+		}
+	}
+	while (impl_->file.events[index].action_count > 0) {
+		if (!remove_event_action(index, 0)) {
+			break;
+		}
+	}
+	// Repair ResetEvent action references (param1 = event index, the one proven cross-reference): events
+	// after the hole shift down by one; a reference to the removed event becomes dangling (-1), which
+	// get_event_chain then flags as out-of-range. (Area-trigger refs are left alone because their index
+	// semantics are still under RE; here the semantics are proven, so the repair is safe.)
+	for (bms::Action &action : impl_->file.actions) {
+		if (action.action_type != bms::ActionType::ResetEvent) {
+			continue;
+		}
+		if (action.param1 > static_cast<int32_t>(index)) {
+			action.param1 -= 1;
+		} else if (action.param1 == static_cast<int32_t>(index)) {
+			action.param1 = -1;
+		}
+	}
+	impl_->file.events.erase(impl_->file.events.begin() + static_cast<std::ptrdiff_t>(index));
+	sync_counts();
+	return true;
+}
+
 bool MissionDocument::get_event_chain(size_t index, MissionEventChain &out) const {
 	out = {};
 	if (!impl_->loaded || index >= impl_->file.events.size()) {
@@ -2313,6 +2375,74 @@ MissionLogicSummary MissionDocument::logic_summary() const {
 		}
 	}
 	return out;
+}
+
+namespace {
+
+// True when a name-mapping switch named the probed value (anything other than the "Unknown(N)" fallback
+// from unknown_label). The reflectors below keep only named values, so the dropdowns track bms.h.
+bool is_named_enum_value(const std::string &name) {
+	return name.rfind("Unknown(", 0) != 0;
+}
+
+} // namespace
+
+std::vector<MissionEnumEntry> MissionDocument::trigger_main_types() const {
+	std::vector<MissionEnumEntry> out;
+	for (int value = 0; value <= 15; ++value) {
+		std::string name = trigger_main_type_name(value);
+		if (is_named_enum_value(name)) {
+			out.push_back({value, name});
+		}
+	}
+	return out;
+}
+
+std::vector<MissionEnumEntry> MissionDocument::trigger_sub_types(int main_type) const {
+	std::vector<MissionEnumEntry> out;
+	// Sub-type values are non-contiguous (e.g. SingleTriggerType jumps 17 -> 42); probe wide and keep
+	// the named ones so the editor lists exactly the engine's accepted sub-types for this main type.
+	for (int value = 0; value <= 63; ++value) {
+		std::string name = trigger_sub_type_name(main_type, value);
+		if (is_named_enum_value(name)) {
+			out.push_back({value, name});
+		}
+	}
+	return out;
+}
+
+std::vector<MissionEnumEntry> MissionDocument::action_types() const {
+	std::vector<MissionEnumEntry> out;
+	for (int value = 0; value <= 63; ++value) {
+		std::string name = action_type_name(value);
+		if (is_named_enum_value(name)) {
+			out.push_back({value, name});
+		}
+	}
+	return out;
+}
+
+std::vector<MissionEnumEntry> MissionDocument::action_sub_types(int action_type) const {
+	std::vector<MissionEnumEntry> out;
+	for (int value = 0; value <= 63; ++value) {
+		std::string name = action_sub_type_name(action_type, value);
+		if (is_named_enum_value(name)) {
+			out.push_back({value, name});
+		}
+	}
+	return out;
+}
+
+std::vector<MissionEnumEntry> MissionDocument::event_flag_bits() const {
+	// EventFlags (bms.h): ResetAfter=1, PreMission=2, PostMission=4, plus two unnamed bits surfaced raw so
+	// a mission's unknown event flags survive a round-trip edit.
+	return {
+			{static_cast<int>(bms::EventFlags::ResetAfter), "Reset after"},
+			{static_cast<int>(bms::EventFlags::PreMission), "Pre-mission"},
+			{static_cast<int>(bms::EventFlags::PostMission), "Post-mission"},
+			{static_cast<int>(bms::EventFlags::Unknown4), "Unknown (16)"},
+			{static_cast<int>(bms::EventFlags::Unknown5), "Unknown (32)"},
+	};
 }
 
 const bms::File &MissionDocument::bms_file() const {
