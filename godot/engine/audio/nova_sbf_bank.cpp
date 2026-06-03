@@ -98,7 +98,7 @@ Array NovaSbfBank::get_entries() const {
 		d["name"] = String(name_buf);
 		d["total_size"] = (int64_t)e.total_size;
 		d["block_size"] = (int64_t)e.block_size;
-		d["total_samples"] = (int64_t)e.total_samples;
+		d["sample_length_hint"] = (int64_t)e.sample_length_hint;
 		out.append(d);
 	}
 	return out;
@@ -397,7 +397,7 @@ Error NovaSbfBank::add_entry(const String &p_name, const PackedFloat32Array &p_s
 	}
 	slot.block_size = SBF_CHUNK_TOTAL;
 	slot.total_size = (uint32_t)(chunk_count * SBF_CHUNK_TOTAL);
-	slot.total_samples = (uint32_t)sample_count;
+	slot.sample_length_hint = 0;
 	slot.data_offset = 0; // re-encoder fills this when building bytes.
 
 	_arc.header.entry_count = new_n;

@@ -8,6 +8,7 @@ var _director: NovaMusicDirector
 # and control-type lookup. Empty string means rows render the raw VarXX form
 # with plain int32 spinboxes (the user-authored / unknown-script case).
 var _script_name: String = ""
+var _profile_path: String = ""
 
 # var_index -> { control: Control, setter: Callable, value_label: Label,
 #                name_label: Label }. Replaces the old positional
@@ -19,8 +20,11 @@ var _controls: Dictionary = {}
 
 
 func bind_director(d: NovaMusicDirector) -> void:
+	if _director != null and _director.variable_changed.is_connected(_on_var_changed_external):
+		_director.variable_changed.disconnect(_on_var_changed_external)
 	_director = d
-	_director.variable_changed.connect(_on_var_changed_external)
+	if _director != null and not _director.variable_changed.is_connected(_on_var_changed_external):
+		_director.variable_changed.connect(_on_var_changed_external)
 	_build_rows()
 
 
@@ -35,6 +39,14 @@ func set_script_name(script_name: String) -> void:
 		_build_rows()
 
 
+func set_profile_path(profile_path: String) -> void:
+	if _profile_path == profile_path:
+		return
+	_profile_path = profile_path
+	if _director != null:
+		_build_rows()
+
+
 # 17 int32 slots: Var00..Var15 plus the user global Var16 (MUS_GLOBALS_BYTES
 # 68 / 4). Known vars for the active script render first (the handful that
 # matter), then a separator, then the remaining raw slots. Unknown scripts
@@ -44,7 +56,7 @@ func _build_rows() -> void:
 	for c in _grid.get_children():
 		c.queue_free()
 	_controls.clear()
-	var known: Array = MusVarNames.known_indices(_script_name)
+	var known: Array = MusVarNames.known_indices(_script_name, _profile_path)
 	var order: Array = known.duplicate()
 	for i in range(17):
 		if not (i in known):
@@ -64,9 +76,9 @@ func _build_rows() -> void:
 
 func _add_row(i: int) -> void:
 	var name_label := Label.new()
-	name_label.text = MusVarNames.label_for(_script_name, i)
+	name_label.text = MusVarNames.label_for(_script_name, i, _profile_path)
 	_grid.add_child(name_label)
-	var entry: Dictionary = _make_control(i, MusVarNames.meta_for(_script_name, i))
+	var entry: Dictionary = _make_control(i, MusVarNames.meta_for(_script_name, i, _profile_path))
 	entry["name_label"] = name_label
 	_grid.add_child(entry["control"])
 	_grid.add_child(entry["value_label"])
@@ -172,6 +184,14 @@ func _on_var_changed_external(var_index: int, value: int) -> void:
 	if entry.is_empty():
 		return
 	(entry["setter"] as Callable).call(value)
+
+
+func refresh_from_director() -> void:
+	if _director == null:
+		return
+	for var_index in _controls.keys():
+		var entry: Dictionary = _controls[var_index]
+		(entry["setter"] as Callable).call(_director.get_var(int(var_index)))
 
 
 # --- Test / introspection helpers --------------------------------------

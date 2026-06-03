@@ -1360,12 +1360,13 @@ extern "C" int mus_encode_file(const MusScript *const *scripts, uint32_t script_
         free(sec_tab_slots);
 
         /* Optional editor debug section: source path + section name table +
-           variable name table. Emitted only when source_path or variables
-           are populated; otherwise the chunk omits the string section
-           entirely (parser leaves source_path empty). */
+           variable name table. Emit it whenever author-facing names exist;
+           otherwise a freshly compiled script would reload with synthetic
+           Section_N labels even though the source named its sections. */
         size_t str_section_at = 0;
         size_t debug_info_at  = 0;
         bool   emit_debug     = (s->source_path[0] != 0)
+                             || (s->section_count > 0)
                              || (s->variable_count > 0);
         if (emit_debug) {
             /* debug_info_offset is editor-only and the runtime never reads

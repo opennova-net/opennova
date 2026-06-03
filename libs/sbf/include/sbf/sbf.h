@@ -42,8 +42,8 @@ typedef struct SbfRawEntry {
     uint32_t data_offset;
     uint32_t total_size;
     uint32_t block_size;            /* 0x1008 in every observed file */
-    uint32_t total_samples;         /* per-entry total sample count
-                                       (engine: sample_length scheduler) */
+    uint32_t sample_length_hint;    /* engine copies to sample_length scheduler;
+                                       observed shipped files store 0 */
 } SbfRawEntry;
 
 typedef struct SbfChunkHeader {

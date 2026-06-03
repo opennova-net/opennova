@@ -570,6 +570,16 @@ static void op_tablexec(MusVM *vm) {
     vm->pc = entry_off + 1;
     eh(vm);
 
+    /* [orig: AudioVM_Op_TableExec @ 0x672C05] after the embedded `call eax`, the
+       engine executes `cmp esi, entry_end`, which OVERWRITES the carry flag the
+       embedded op may have set (setstate/play/done all STC). The tick therefore
+       halts ONLY when the post-dispatch IP landed strictly BELOW entry_end (a
+       backward jump, CF=1); a forward setstate/play/goto -- the common case --
+       clears carry and CONTINUES in the same tick (its pc-jump and any sound
+       still take effect). So we recompute halt_latch from the IP instead of
+       letting the embedded op's halt stand. (A tablexec whose entry resolves to
+       a forward target never ends the tick by itself.) */
+    vm->halt_latch = (vm->pc < entry_end) ? 1 : 0;
     if (vm->pc == entry_end) {
         vm->pc = pc_at_header + (uint32_t)skip_size - 1;
     }

@@ -1205,6 +1205,71 @@ static int test_vm_jo_fixtures_no_desync(void) {
     CHECK(run_fixture_no_error("jo_menumus.bin", 2000), "menuscript runs without VM error");
     return 1;
 }
+
+/* Behavioral proof (Tier 3): assert the shipped programs produce the right
+   input-DEPENDENT outputs, not just "no desync". Captures the ordered event
+   stream (volume / play / section) and checks it against the decompiled control
+   flow. gamescript's `push_g Var1; neq; brfalse; setstate` is the discriminator:
+   Var1==0 -> Multiplayerstart plays sound_0; Var1!=0 -> Missionnull, silent. */
+struct BehLog {
+    char kind[64];          /* 'V' volume, 'P' play, 'S' section */
+    int  ival[64];          /* play index, or volume left-channel value */
+    char sname[64][32];
+    int  n;
+};
+static void beh_play(void *u, uint32_t i, int) {
+    BehLog *L = (BehLog *)u;
+    if (L->n < 64) { L->kind[L->n] = 'P'; L->ival[L->n] = (int)i; L->sname[L->n][0] = 0; ++L->n; }
+}
+static void beh_vol(void *u, int32_t l, int32_t /*r*/) {
+    BehLog *L = (BehLog *)u;
+    if (L->n < 64) { L->kind[L->n] = 'V'; L->ival[L->n] = l; L->sname[L->n][0] = 0; ++L->n; }
+}
+static void beh_sect(void *u, const char *nm) {
+    BehLog *L = (BehLog *)u;
+    if (L->n < 64) { L->kind[L->n] = 'S'; L->ival[L->n] = 0;
+                     strncpy(L->sname[L->n], nm, 31); L->sname[L->n][31] = 0; ++L->n; }
+}
+static void beh_run(const char *fname, uint8_t varIdx, int32_t varVal, int ticks, BehLog *L) {
+    memset(L, 0, sizeof(*L));
+    char path[512]; snprintf(path, sizeof(path), "%s/%s", MUS_FIXTURE_DIR, fname);
+    MusFile mf; if (mus_open(&mf, path) != 0) return;
+    MusVM *vm = mus_vm_create();
+    MusVMHooks h = {}; h.user = L;
+    h.on_play_sound = beh_play; h.on_volume_changed = beh_vol; h.on_section_entered = beh_sect;
+    mus_vm_set_hooks(vm, &h);
+    mus_vm_load_script(vm, &mf.scripts[0]);
+    mus_vm_set_var(vm, varIdx, varVal);
+    mus_vm_start(vm);
+    for (int t = 0; t < ticks; ++t) { mus_vm_tick(vm, 16); if (mus_vm_state(vm) != MUS_VM_RUNNING) break; }
+    mus_vm_destroy(vm); mus_close(&mf);
+}
+static int first_play(const BehLog *L){ for(int i=0;i<L->n;i++) if(L->kind[i]=='P') return L->ival[i]; return -1; }
+static int count_play(const BehLog *L){ int c=0; for(int i=0;i<L->n;i++) if(L->kind[i]=='P') ++c; return c; }
+static int saw_section(const BehLog *L,const char*nm){ for(int i=0;i<L->n;i++) if(L->kind[i]=='S'&&strcmp(L->sname[i],nm)==0) return 1; return 0; }
+
+static int test_vm_jo_behavioral(void) {
+    BehLog L;
+    /* gamescript Var1=0 (no mission): SV(200) first, then Multiplayerstart -> sound_0. */
+    beh_run("jo_gamemus.bin", 1, 0, 16, &L);
+    if (L.n == 0) { fprintf(stderr, "  skip: gamemus fixture absent\n"); return 1; }
+    CHECK(L.kind[0] == 'V' && L.ival[0] == (200 << 16), "gamemus Var1=0: first event GSV(200) = 200<<16");
+    CHECK(first_play(&L) == 0, "gamemus Var1=0: first sound is sound_0 (Multiplayerstart)");
+    CHECK(saw_section(&L, "Multiplayerstart"), "gamemus Var1=0: reaches Multiplayerstart");
+
+    /* gamescript Var1=1 (mission active): the branch routes to Missionnull, silent. */
+    beh_run("jo_gamemus.bin", 1, 1, 16, &L);
+    CHECK(L.kind[0] == 'V' && L.ival[0] == (200 << 16), "gamemus Var1=1: GSV(200) still first");
+    CHECK(count_play(&L) == 0, "gamemus Var1=1: NO sound plays (Missionnull idle)");
+    CHECK(saw_section(&L, "Missionnull"), "gamemus Var1=1: routes to Missionnull");
+    CHECK(!saw_section(&L, "Multiplayerstart"), "gamemus Var1=1: does NOT reach Multiplayerstart");
+
+    /* menuscript: seed Var2; must reach a play without desync (per-screen track map
+       not independently confirmed, so keep this loose). */
+    beh_run("jo_menumus.bin", 2, 1, 16, &L);
+    if (L.n > 0) CHECK(count_play(&L) >= 1, "menumus Var2=1: reaches at least one play");
+    return 1;
+}
 #endif
 
 /* ---- E2: load + state transitions -------------------------------------- */
@@ -1320,6 +1385,7 @@ int main(void) {
 #ifdef MUS_FIXTURE_DIR
     RUN_TEST(test_vm_jo_fixture_first_sound);
     RUN_TEST(test_vm_jo_fixtures_no_desync);
+    RUN_TEST(test_vm_jo_behavioral);
 #endif
 
     printf("\n%d passed, %d failed\n", passed, failed);

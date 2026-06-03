@@ -39,6 +39,7 @@ void NovaMusicScript::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_decompiled_text_with_bank", "script_name", "bank"), &NovaMusicScript::get_decompiled_text_with_bank);
 	ClassDB::bind_method(D_METHOD("compile_text", "text"), &NovaMusicScript::compile_text);
 	ClassDB::bind_method(D_METHOD("set_compiled_bytecode", "bytecode"), &NovaMusicScript::set_compiled_bytecode);
+	ClassDB::bind_method(D_METHOD("set_compiled_file_bytes", "file_bytes"), &NovaMusicScript::set_compiled_file_bytes);
 	ClassDB::bind_method(D_METHOD("load_from_decrypted_bytes", "bytes", "source"),
 			&NovaMusicScript::load_from_decrypted_bytes);
 	ClassDB::bind_method(D_METHOD("get_raw_file_bytes"), &NovaMusicScript::get_raw_file_bytes);
@@ -191,6 +192,7 @@ Dictionary NovaMusicScript::compile_text(const String &p_text) {
 	Dictionary out;
 	out["rc"] = -1;
 	out["bytecode"] = PackedByteArray();
+	out["file_bytes"] = PackedByteArray();
 	out["err_line"] = 0;
 	out["err_col"] = 0;
 	out["err_msg"] = String();
@@ -209,20 +211,35 @@ Dictionary NovaMusicScript::compile_text(const String &p_text) {
 		return out;
 	}
 
-	// Phase F4 ships the simpler path: hand back raw chunk bytes (script.code,
-	// length script.code_size). The companion set_compiled_bytecode() splices
-	// these into the existing MusFile in place; no need to round-trip through
-	// mus_encode_file at compile time.
+	// Keep the legacy raw-code field for narrow tests, but also encode the full
+	// SCR0/MU01 file so editor runs can replace script name, section table,
+	// debug names, locals frame offset, and bytecode together.
 	PackedByteArray bytecode;
 	if (script.code != nullptr && script.code_size > 0) {
 		bytecode.resize((int)script.code_size);
 		std::memcpy(bytecode.ptrw(), script.code, script.code_size);
 	}
 
+	PackedByteArray file_bytes;
+	const MusScript *scripts[1] = { &script };
+	uint8_t *encoded = nullptr;
+	size_t encoded_size = 0;
+	rc = mus_encode_file(scripts, 1, &encoded, &encoded_size);
+	if (rc != 0 || encoded == nullptr) {
+		mus_script_free(&script);
+		out["rc"] = rc != 0 ? rc : -1;
+		out["err_msg"] = String("encode failed");
+		return out;
+	}
+	file_bytes.resize((int)encoded_size);
+	std::memcpy(file_bytes.ptrw(), encoded, encoded_size);
+	mus_free(encoded);
+
 	mus_script_free(&script);
 
 	out["rc"] = 0;
 	out["bytecode"] = bytecode;
+	out["file_bytes"] = file_bytes;
 	return out;
 }
 
@@ -269,6 +286,14 @@ void NovaMusicScript::set_compiled_bytecode(const PackedByteArray &p_bytecode) {
 	std::memcpy(fresh.ptrw(), out_buf, out_size);
 	mus_free(out_buf);
 	_file_bytes = fresh;
+}
+
+void NovaMusicScript::set_compiled_file_bytes(const PackedByteArray &p_file_bytes) {
+	if (p_file_bytes.size() <= 0) {
+		return;
+	}
+	String keep_source = source_path;
+	load_from_decrypted_bytes(p_file_bytes, keep_source);
 }
 
 String NovaMusicScript::get_decompiled_text(const StringName &p_script_name) {

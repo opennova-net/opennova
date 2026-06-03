@@ -1,6 +1,13 @@
 extends GutTest
 
 const MusVarNames = preload("res://modtools/music/mus_var_names.gd")
+const PROFILE_PATH := "user://custom_music_profile.json"
+
+
+func after_each() -> void:
+	var abs := ProjectSettings.globalize_path(PROFILE_PATH)
+	if FileAccess.file_exists(abs):
+		DirAccess.remove_absolute(abs)
 
 
 func test_unknown_script_falls_back_to_raw_var():
@@ -79,3 +86,23 @@ func test_known_indices_sorted():
 	# Unknown scripts have no known vars, so the inspector renders all slots raw.
 	assert_eq(MusVarNames.known_indices("user_authored"), [])
 	assert_eq(MusVarNames.known_indices(""), [])
+
+
+func test_custom_profile_sidecar_labels_and_controls():
+	var f := FileAccess.open(PROFILE_PATH, FileAccess.WRITE)
+	assert_not_null(f, "profile sidecar writable")
+	f.store_string(JSON.stringify({
+		"script_name": "customscript",
+		"vars": {
+			"3": {"label": "Mood", "kind": "slider", "min": 0, "max": 10},
+			"9": {"label": "Intensity", "kind": "int", "min": -5, "max": 5},
+		}
+	}))
+	f.close()
+
+	assert_eq(MusVarNames.label_for("customscript", 3, PROFILE_PATH), "Mood (Var03)")
+	assert_eq(MusVarNames.label_for("customscript", 4, PROFILE_PATH), "Var04")
+	assert_eq(MusVarNames.known_indices("customscript", PROFILE_PATH), [3, 9])
+	var mood := MusVarNames.meta_for("customscript", 3, PROFILE_PATH)
+	assert_eq(mood.get("kind"), "slider")
+	assert_eq(mood.get("max"), 10)

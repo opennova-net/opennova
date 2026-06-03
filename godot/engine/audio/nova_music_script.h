@@ -54,6 +54,7 @@ public:
 	// Returns a Dictionary with keys:
 	//   "rc"        : int  -- 0 on success, negative on parse/emit failure
 	//   "bytecode"  : PackedByteArray -- raw chunk bytes (code only, no SCR0/MU01 wrapper)
+	//   "file_bytes": PackedByteArray -- full decrypted SCR0/MU01 bytes
 	//   "err_line"  : int  -- 1-based source line for the diagnostic, 0 on success
 	//   "err_col"   : int  -- 1-based source column for the diagnostic, 0 on success
 	//   "err_msg"   : String -- empty on success
@@ -65,6 +66,7 @@ public:
 	// re-parsing the SCR0 wrapper. Replaces the default script's `code`
 	// buffer in-place; the saver passes the rewritten file bytes through.
 	void set_compiled_bytecode(const PackedByteArray &p_bytecode);
+	void set_compiled_file_bytes(const PackedByteArray &p_file_bytes);
 
 	// Internal access for the upcoming Director (Phase G).
 	const MusScript *raw_script(const String &p_name) const;

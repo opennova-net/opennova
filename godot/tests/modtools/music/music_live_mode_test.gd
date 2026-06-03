@@ -121,6 +121,53 @@ func test_var_labels_refresh_when_script_loads():
 		"Var01 picks up the friendly name once gamescript loads")
 
 
+func test_custom_profile_labels_refresh_when_sidecar_exists():
+	var doc = MusicEditorDocument.new()
+	var script_path := _copy_temp_pair().get_basename() + ".bin"
+	var profile_path := script_path.get_basename() + ".music_profile.json"
+	var f := FileAccess.open(profile_path, FileAccess.WRITE)
+	assert_not_null(f, "profile sidecar writable")
+	f.store_string(JSON.stringify({
+		"script_name": "gamescript",
+		"vars": {"3": {"label": "CustomMood", "kind": "slider", "min": 0, "max": 5}}
+	}))
+	f.close()
+	doc.open_pair(PAIR_BANK)
+	var lm: Control = LiveModeScene.instantiate()
+	add_child_autofree(lm)
+	lm.bind_document(doc)
+	await get_tree().process_frame
+	var inspector: Control = lm.get_node("%VarInspector")
+	assert_eq(inspector.get_row_label_text(3), "CustomMood (Var03)")
+	assert_true(inspector.get_value_control(3) is HSlider, "custom profile kind drives control")
+	_remove_user_file(profile_path)
+
+
+func test_start_compiles_dirty_script_before_running():
+	var doc = MusicEditorDocument.new()
+	doc.open_pair(_copy_temp_pair())
+	doc.set_script_text(&"gamescript", "script customscript\nsection Begin\n{\n  done\n}\n")
+	var lm: Control = LiveModeScene.instantiate()
+	add_child_autofree(lm)
+	lm.bind_document(doc)
+	await get_tree().process_frame
+	lm.get_node("%StartButton").pressed.emit()
+	await get_tree().create_timer(0.1).timeout
+	assert_eq(doc.mus_script.get_default_script_name(), "customscript",
+		"Live start compiles and applies dirty script text before loading VM")
+
+
+func test_var_inspector_poll_refresh_catches_silent_vm_mutation():
+	var lm: Control = LiveModeScene.instantiate()
+	add_child_autofree(lm)
+	await get_tree().process_frame
+	var inspector: Control = lm.get_node("%VarInspector")
+	lm._director.set_var(4, 77)
+	inspector.refresh_from_director()
+	assert_eq((inspector.get_value_control(4) as SpinBox).value, 77.0,
+		"poll refresh mirrors vars even when no variable_changed callback fired")
+
+
 # Regression: a typed var with a nominal min > 0 (menuscript "Entry", min 1)
 # must still show the VM's true default (0), not clamp it up to the min and
 # look "hardset". The spinbox uses allow_lesser/allow_greater so its range is
