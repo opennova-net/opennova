@@ -113,14 +113,6 @@ func zone_pickables() -> Array:
 	return _zone_pickable
 
 
-# Move the centre grab cube without a full rebuild (live drag preview). Caller passes the
-# previewed world-space centre.
-func preview_handle_position(world_center: Vector3) -> void:
-	if _handle != null:
-		_handle.position = world_center
-		_handle.visible = true
-
-
 func _collect_box_segments(out: Array, mn: Vector3, mx: Vector3, color: Color) -> void:
 	# Eight mission-space corners -> godot, then the 12 edges of the axis-aligned box.
 	var c := []

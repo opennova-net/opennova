@@ -171,6 +171,31 @@ int main() {
 	TEST_EXPECT(opennova_mission_set_area_trigger(document, area_count + 99, &new_zone, nullptr) == 0);
 	TEST_EXPECT(opennova_mission_remove_area_trigger(document, area_count + 99) == 0);
 
+	// A bound beyond the 16.16 representable range (~±32768) must be clamped, not overflowed into
+	// garbage (the float->int32 cast would otherwise be UB). The clamped value reads back finite and
+	// in range, and survives a byte round-trip.
+	OpenNovaMissionAreaTriggerRecord huge = {};
+	huge.min_x = -500000.0f;  // far beyond INT32_MAX/65536
+	huge.max_x = 500000.0f;
+	huge.min_y = -10.0f;
+	huge.max_y = 10.0f;
+	huge.active = 1;
+	OpenNovaMissionAreaTriggerRecord clamped = {};
+	TEST_EXPECT(opennova_mission_add_area_trigger(document, &huge, &clamped) == 1);
+	TEST_EXPECT(clamped.min_x > -32769.0f && clamped.min_x <= -32767.0f);
+	TEST_EXPECT(clamped.max_x < 32769.0f && clamped.max_x >= 32767.0f);
+	const size_t clamped_index = clamped.index;
+	OpenNovaMissionBytes clamp_bytes = {};
+	TEST_EXPECT(opennova_mission_write_bytes(document, &clamp_bytes) == 1);
+	OpenNovaMissionDocument *clamp_reload = opennova_mission_create();
+	TEST_EXPECT(opennova_mission_load_bytes(clamp_reload, clamp_bytes.data, clamp_bytes.size) == 1);
+	OpenNovaMissionAreaTriggerRecord clamp_rt = {};
+	TEST_EXPECT(opennova_mission_get_area_trigger(clamp_reload, clamped_index, &clamp_rt) == 1);
+	TEST_EXPECT(clamp_rt.min_x <= -32767.0f && clamp_rt.min_x > -32769.0f);
+	opennova_mission_destroy(clamp_reload);
+	opennova_mission_free_bytes(&clamp_bytes);
+	TEST_EXPECT(opennova_mission_remove_area_trigger(document, clamped_index) == 1);
+
 	TEST_EXPECT(opennova_mission_event_count(document) > 0);
 	TEST_EXPECT(opennova_mission_trigger_count(document) > 0);
 	TEST_EXPECT(opennova_mission_action_count(document) > 0);

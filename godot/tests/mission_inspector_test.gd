@@ -605,6 +605,9 @@ func _waypoint_ctx(summaries: Array, active: int) -> Dictionary:
 	var fake := FakeController.new()
 	fake.mission_ref = NovaMissionData.new()
 	fake.mode = 1  # WAYPOINTS
+	# A populated selection makes the "_edit_box hidden in waypoint mode" gate assertion
+	# load-bearing (the edit panel would otherwise be hidden just for lack of a selection).
+	fake.entity = _sample_entity()
 	fake.selected_path = active
 	fake.waypoint_summaries = summaries
 	var inspector = MissionInspector.new()
@@ -883,6 +886,10 @@ func _trigger_ctx(zones: Array, selected: int) -> Dictionary:
 	fake.mode = 2  # AREA_TRIGGERS
 	fake.zones = zones
 	fake.selected_zone = selected
+	# Populate a selection so the object edit panel WOULD be visible but for the mode gate; this
+	# makes the "_edit_box hidden in trigger mode" assertion load-bearing (the real controller
+	# clears the selection on set_mode, but the inspector's gate must not rely on that).
+	fake.entity = _sample_entity()
 	var inspector = MissionInspector.new()
 	add_child_autofree(inspector)
 	inspector.setup(fake)
@@ -954,3 +961,19 @@ func test_trigger_panel_delete_button_calls_controller() -> void:
 	assert_not_null(del, "Delete zone button built")
 	del.pressed.emit()
 	assert_eq(ctx.fake.delete_zone_calls, 1, "Delete zone calls the controller")
+
+
+func test_trigger_panel_editors_disabled_when_zones_exist_but_none_selected() -> void:
+	# Zones present, but selection is -1: the bounds spins, flag toggles, and Delete must all be
+	# disabled so the user cannot edit "nothing". (The selected-zone test pins the enabled side.)
+	var ctx := _trigger_ctx([
+		_zone(0, Vector3.ZERO, Vector3.ONE, true, false),
+		_zone(1, Vector3.ZERO, Vector3.ONE, false, true),
+	], -1)
+	assert_eq(ctx.inspector._at_list.item_count, 2, "both zones still listed with no selection")
+	for axis in 3:
+		assert_false(ctx.inspector._at_min_spins[axis].editable, "min spin %d disabled with no selection" % axis)
+		assert_false(ctx.inspector._at_max_spins[axis].editable, "max spin %d disabled with no selection" % axis)
+	assert_true(ctx.inspector._at_active_check.disabled, "Active toggle disabled with no selection")
+	assert_true(ctx.inspector._at_constrain_check.disabled, "Constrain toggle disabled with no selection")
+	assert_true(ctx.inspector._at_delete_button.disabled, "Delete disabled with no selection")

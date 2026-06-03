@@ -398,6 +398,22 @@ struct Header {
 
 static_assert(sizeof(Header) == kHeaderSize, "Header must be 616 bytes");
 
+// Convert a float to the format's signed 16.16 fixed-point, clamping to the int32 range first.
+// Positions / zone bounds are stored as int32 = value * 65536, so anything beyond ~±32768 mission
+// units would overflow the float->int cast (undefined behavior, typically yields INT32_MIN and
+// silently corrupts the record). An editor SpinBox can hand us such a value; clamp defensively.
+// kMax is just under INT32_MAX/65536 so the multiply stays < 2^31; kMin = INT32_MIN/65536 exactly.
+inline int32_t to_fixed_16_16(float v) {
+    constexpr float kMax = 32767.99f;
+    constexpr float kMin = -32768.0f;
+    if (v > kMax) {
+        v = kMax;
+    } else if (v < kMin) {
+        v = kMin;
+    }
+    return static_cast<int32_t>(v * 65536.0f);
+}
+
 struct Entity {
     ItemType type;                     // Set during parsing, not serialized as separate field
     int32_t type_id;
@@ -453,9 +469,9 @@ struct Entity {
     float get_x() const { return x / 65536.0f; }
     float get_y() const { return y / 65536.0f; }
     float get_z() const { return z / 65536.0f; }
-    void set_x(float v) { x = static_cast<int32_t>(v * 65536.0f); }
-    void set_y(float v) { y = static_cast<int32_t>(v * 65536.0f); }
-    void set_z(float v) { z = static_cast<int32_t>(v * 65536.0f); }
+    void set_x(float v) { x = to_fixed_16_16(v); }
+    void set_y(float v) { y = to_fixed_16_16(v); }
+    void set_z(float v) { z = to_fixed_16_16(v); }
 
     BmsiAttributeFlags get_ai_flags() const {
         return static_cast<BmsiAttributeFlags>(bmsi_attributes);

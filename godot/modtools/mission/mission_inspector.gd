@@ -911,15 +911,19 @@ func _build_area_trigger_panel() -> void:
 
 	_at_box.add_child(HSeparator.new())
 	ObjectUiHelpers.add_section_heading(_at_box, "Bounds (mission units)")
+	# The format stores bounds as signed 16.16 fixed-point, so the representable range is
+	# ~±32768 mission units; the spins are bounded to that (the lib also clamps on write).
+	const ZONE_MIN := -32767.0
+	const ZONE_MAX := 32767.0
 	_at_min_spins = [
-		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMinX", "Min X", -1000000.0, 1000000.0, 0.001),
-		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMinY", "Min Y", -1000000.0, 1000000.0, 0.001),
-		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMinZ", "Min Z", -1000000.0, 1000000.0, 0.001),
+		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMinX", "Min X", ZONE_MIN, ZONE_MAX, 0.001),
+		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMinY", "Min Y", ZONE_MIN, ZONE_MAX, 0.001),
+		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMinZ", "Min Z", ZONE_MIN, ZONE_MAX, 0.001),
 	]
 	_at_max_spins = [
-		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMaxX", "Max X", -1000000.0, 1000000.0, 0.001),
-		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMaxY", "Max Y", -1000000.0, 1000000.0, 0.001),
-		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMaxZ", "Max Z", -1000000.0, 1000000.0, 0.001),
+		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMaxX", "Max X", ZONE_MIN, ZONE_MAX, 0.001),
+		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMaxY", "Max Y", ZONE_MIN, ZONE_MAX, 0.001),
+		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMaxZ", "Max Z", ZONE_MIN, ZONE_MAX, 0.001),
 	]
 	for axis in 3:
 		_at_min_spins[axis].value_changed.connect(_on_at_bounds_changed)

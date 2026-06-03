@@ -782,12 +782,12 @@ AreaTriggerRecord to_area_trigger_record(const bms::AreaTrigger &area, size_t in
 bms::AreaTrigger from_area_trigger_record(const AreaTriggerRecord &rec) {
 	bms::AreaTrigger area;
 	area.id = rec.wp_number;
-	area.x_min = static_cast<int32_t>(rec.min_x * 65536.0f);
-	area.x_max = static_cast<int32_t>(rec.max_x * 65536.0f);
-	area.y_min = static_cast<int32_t>(rec.min_y * 65536.0f);
-	area.y_max = static_cast<int32_t>(rec.max_y * 65536.0f);
-	area.z_min = static_cast<int32_t>(rec.min_z * 65536.0f);
-	area.z_max = static_cast<int32_t>(rec.max_z * 65536.0f);
+	area.x_min = bms::to_fixed_16_16(rec.min_x);
+	area.x_max = bms::to_fixed_16_16(rec.max_x);
+	area.y_min = bms::to_fixed_16_16(rec.min_y);
+	area.y_max = bms::to_fixed_16_16(rec.max_y);
+	area.z_min = bms::to_fixed_16_16(rec.min_z);
+	area.z_max = bms::to_fixed_16_16(rec.max_z);
 	uint32_t flags = static_cast<uint32_t>(rec.reserved);
 	flags = (flags & ~0x3u) | (rec.active ? 0x1u : 0u) | (rec.constrain_z ? 0x2u : 0u);
 	area.flags = flags;

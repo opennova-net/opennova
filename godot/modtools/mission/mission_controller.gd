@@ -306,8 +306,10 @@ func open_mission(bms_path: String) -> Error:
 	# waypoint panel is not empty) only if the user is already in waypoints mode.
 	_selected_marker = {}
 	_marker_place_armed = false
-	_selected_zone_index = -1
 	_selected_path_index = _first_nonempty_path() if _mode == Mode.WAYPOINTS else -1
+	# Focus the first zone when reopening already in area-trigger mode, mirroring set_mode (and the
+	# waypoint branch above), so the Triggers panel is not empty after an open.
+	_selected_zone_index = 0 if (_mode == Mode.AREA_TRIGGERS and mission.get_area_trigger_count() > 0) else -1
 	if _mode == Mode.WAYPOINTS:
 		_refresh_waypoint_overlay()
 	elif _mode == Mode.AREA_TRIGGERS:
