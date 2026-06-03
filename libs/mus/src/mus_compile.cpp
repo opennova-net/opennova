@@ -1172,6 +1172,7 @@ int Compiler::finalize(const char **err) {
     }
     out.globals_size = gsize;
     out.locals_size = 0x28;       /* match the JO fixture default */
+    out.locals_frame_offset = 0x20;   /* `enter` frame base; JO/MDEdit witness */
     out.entry_section_index = 0;
 
     /* Populate intrinsic names with the canonical 11. */
@@ -1435,7 +1436,9 @@ extern "C" int mus_encode_file(const MusScript *const *scripts, uint32_t script_
             ch.debug_info_offset    = (uint32_t)(debug_info_at - chunk_hdr_at);
             ch.debug_info_count     = 0;
             ch.string_section_offset= (uint32_t)(str_section_at - chunk_hdr_at);
-            ch.string_section_size  = 0x20;   /* matches the JO fixture witness */
+            /* +0x3C doubles as the `enter` frame base (instance[+0x3C]); preserve
+               a parsed value, default 0x20 (the JO/MDEdit witness). */
+            ch.string_section_size  = s->locals_frame_offset ? s->locals_frame_offset : 0x20;
         } else {
             /* No debug section: still set debug_info_offset to the end of
                the bytecode region so the parser's smallest_after() heuristic

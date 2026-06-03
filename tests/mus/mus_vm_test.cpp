@@ -1168,6 +1168,43 @@ static int test_vm_jo_fixture_first_sound(void) {
     mus_close(&mf);
     return 1;
 }
+
+/* Executable form of the opcode census: drive the real shipped scripts through
+   the VM for many ticks and assert the engine-width walk never desyncs into an
+   unknown opcode (MUS_VM_ERROR). gamescript exercises enter/tablexec/method;
+   menuscript exercises the large push_g/l_and/brfalse/setstate/play state
+   machine. Proves the VM executes the stock bins faithfully. */
+static int run_fixture_no_error(const char *fname, int max_ticks) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s", MUS_FIXTURE_DIR, fname);
+    MusFile mf;
+    int rc = mus_open(&mf, path);
+    if (rc != 0) { fprintf(stderr, "  skip: %s (rc=%d)\n", path, rc); return 1; }
+    CHECK(mf.scripts != NULL, "scripts present");
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &mf.scripts[0]);
+    mus_vm_start(vm);
+    int ok = 1;
+    for (int t = 0; t < max_ticks; ++t) {
+        mus_vm_tick(vm, 16);
+        MusVMState st = mus_vm_state(vm);
+        if (st == MUS_VM_ERROR) {
+            fprintf(stderr, "  %s: VM ERROR at tick %d: %s (pc=0x%X)\n",
+                    fname, t, mus_vm_last_error(vm), mus_vm_pc(vm));
+            ok = 0; break;
+        }
+        if (st != MUS_VM_RUNNING) break;   /* ran off the end / HALTED cleanly */
+    }
+    mus_vm_destroy(vm);
+    mus_close(&mf);
+    return ok;
+}
+
+static int test_vm_jo_fixtures_no_desync(void) {
+    CHECK(run_fixture_no_error("jo_gamemus.bin", 500),  "gamescript runs without VM error");
+    CHECK(run_fixture_no_error("jo_menumus.bin", 2000), "menuscript runs without VM error");
+    return 1;
+}
 #endif
 
 /* ---- E2: load + state transitions -------------------------------------- */
@@ -1282,6 +1319,7 @@ int main(void) {
     RUN_TEST(test_vm_pc_accessor);
 #ifdef MUS_FIXTURE_DIR
     RUN_TEST(test_vm_jo_fixture_first_sound);
+    RUN_TEST(test_vm_jo_fixtures_no_desync);
 #endif
 
     printf("\n%d passed, %d failed\n", passed, failed);

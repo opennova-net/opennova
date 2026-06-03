@@ -51,13 +51,18 @@ static const OpInfo kOps[256] = {
     /* 0x02 */ {"push",     1, {2}},
     /* 0x03 */ {"push_g",   1, {3}},
     /* 0x04 */ {"push_l",   1, {4}},
-    /* 0x05 */ {"push_ga",  2, {3, 2}},
-    /* 0x06 */ {"push_la",  2, {4, 2}},
-    /* 0x07 */ {"pushstr",  1, {2}},
+    /* 0x05 push_ga: [orig 0x6727F0] movzx byte; inc esi; inc esi -> the engine
+       advances IP by 2 (1-byte global offset + 1 reserved byte), NOT u8+u32.
+       0x06/0x0A/0x0B likewise advance 2; 0x07 pushstr [0x672830] advances 1.
+       (The old {.,2}/{2} widths were inherited from the Python disassembler and
+       desync on any real script that uses these ops; stock scripts use none.) */
+    /* 0x05 */ {"push_ga",  2, {3, 0}},
+    /* 0x06 */ {"push_la",  2, {4, 0}},
+    /* 0x07 */ {"pushstr",  1, {0}},
     /* 0x08 */ {"pop_g",    1, {3}},
     /* 0x09 */ {"pop_l",    1, {4}},
-    /* 0x0A */ {"pop_ga",   2, {3, 2}},
-    /* 0x0B */ {"pop_la",   2, {4, 2}},
+    /* 0x0A */ {"pop_ga",   2, {3, 0}},
+    /* 0x0B */ {"pop_la",   2, {4, 0}},
     /* 0x0C */ {"push_me",  0, {0}},
     /* 0x0D */ {NULL,       0, {0}},
     /* 0x0E */ {NULL,       0, {0}},

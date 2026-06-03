@@ -83,6 +83,26 @@ int main(void) {
     CHECK(mus_vm_get_var(vm3, 0) == 0, "pushstr pushes 0 placeholder");
     mus_vm_destroy(vm3);
 
+    /* ---- Script 4: enter (0x38) pops N dwords + frame offset (D-NEW-2 / D-MUS-6)
+       [orig: AudioVM_Op_Enter @ 0x672C20: sub ebp,N*4 (pop) + dst=LocalsBase+
+       instance[+0x3C] (frame, 0x20 in JO/MDEdit)].
+         push 5; push 7; push 99; enter 2; push_l 0x20; pop_g 4; pop_g 0; done
+       enter copies the top 2 (7,99) to locals[0x20]/[0x24] AND pops them, leaving
+       [5]. push_l 0x20 -> 7; pop_g 4 -> Var1=7; pop_g 0 -> Var0=5.
+       If enter did NOT pop (the old bug), TOS after enter would be 99 and Var0
+       would be 99, not 5. If the frame were not 0x20, push_l 0x20 would read 0. */
+    uint8_t code4[] = { 0x01,5, 0x01,7, 0x01,99, 0x38,0x02, 0x04,0x20,
+                        0x08,0x04, 0x08,0x00, 0x3F };
+    MusScript s4 = make_script(code4, sizeof(code4), &sec);
+    MusVM *vm4 = mus_vm_create();
+    mus_vm_load_script(vm4, &s4);
+    mus_vm_start(vm4);
+    mus_vm_tick(vm4, 16);
+    CHECK(mus_vm_state(vm4) != MUS_VM_ERROR, "enter script ran without error");
+    CHECK(mus_vm_get_var(vm4, 1) == 7, "enter wrote arg0 to locals[frame=0x20]");
+    CHECK(mus_vm_get_var(vm4, 0) == 5, "enter popped its 2 args (TOS left = 5, not 99)");
+    mus_vm_destroy(vm4);
+
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;
 }

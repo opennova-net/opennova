@@ -148,6 +148,10 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
     out->globals_size        = ch.globals_size;
     out->locals_size         = ch.locals_size;
     out->entry_section_index = ch.entry_section_index;
+    /* `enter` frame base = instance[+0x3C] (witnessed @ AudioVM_Op_Enter
+       0x672C20), which is the chunk's string_section_size field. MDEdit emits
+       0x20; carry it through so the VM matches the binary for any chunk. */
+    out->locals_frame_offset = ch.string_section_size;
 
     /* Section table: section_count uint32 chunk-relative entry-PCs. We
        normalise these to bytecode-relative offsets (subtract bytecode_offset)

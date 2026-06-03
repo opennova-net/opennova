@@ -246,17 +246,10 @@ static int32_t read_u32(MusVM *vm) {
     return v;
 }
 
-/* Witnessed: Jointops.exe!VmOp_PushImm8 @ 0x672790. */
+/* [orig: AudioVM_Op_PushImm8 @ 0x672790] `movzx eax, byte ptr [esi]; inc esi`
+   -- the 1-byte immediate is ZERO-extended to int32 (range 0..255). */
 static void op_push_imm8(MusVM *vm) {
-    int8_t v = (int8_t)read_u8(vm);   /* sign-extend per Jointops.exe movzx-then-store
-                                          mismatch: Jointops.exe writes the zero-
-                                          extended byte but small immediates
-                                          we author are unsigned. Treat low
-                                          byte as signed int32 -- compatible
-                                          with Jointops.exe movzx for values 0..127
-                                          which is the only documented use. */
-    /* Actually Jointops.exe uses MOVZX (zero-extend). To match: */
-    vm_push(vm, (int32_t)(uint8_t)v);
+    vm_push(vm, (int32_t)(uint8_t)read_u8(vm));
 }
 
 /* Witnessed: Jointops.exe!VmOp_PushImm32 @ 0x6727A0. */
@@ -336,21 +329,17 @@ static void op_empty(MusVM *vm) {
 /* Witnessed: Jointops.exe!VmOp_Nop @ 0x672780. */
 static void op_nop(MusVM *vm) { (void)vm; }
 
-/* Witnessed: VmOp_IncGlobal/DecGlobal @ 0x672AE0/0x672AF0. The Jointops.exe handlers
-   inc/dec a single byte at the indexed offset (NOT a full int32). */
+/* [orig: AudioVM_Op_IncGlobal/DecGlobal @ 0x672AE0/0x672AF0] inc/dec a single
+   BYTE at globals[off] (NOT a full int32). D-MUS-5: unlike pop_g, the original
+   does NOT raise the globals-dirty signal (dword_3246B28) and fires no host
+   notification here, so we deliberately omit notify_var_changed to match. */
 static void op_inc_g(MusVM *vm) {
     int byte_off = read_u8(vm);
-    if (byte_off >= 0 && byte_off < kGlobalsBytes) {
-        ++vm->globals[byte_off];
-        notify_var_changed(vm, byte_off & ~3, globals_read32(vm, byte_off & ~3));
-    }
+    if (byte_off >= 0 && byte_off < kGlobalsBytes) ++vm->globals[byte_off];
 }
 static void op_dec_g(MusVM *vm) {
     int byte_off = read_u8(vm);
-    if (byte_off >= 0 && byte_off < kGlobalsBytes) {
-        --vm->globals[byte_off];
-        notify_var_changed(vm, byte_off & ~3, globals_read32(vm, byte_off & ~3));
-    }
+    if (byte_off >= 0 && byte_off < kGlobalsBytes) --vm->globals[byte_off];
 }
 static void op_inc_l(MusVM *vm) {
     int byte_off = read_u8(vm);
@@ -479,6 +468,11 @@ static void op_div    (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(v
 /* Witnessed Jointops.exe!VmOp_Mod @ 0x672950 does div-then-mod with both writes
    landing on the same slot; the final stored value is plain `a % b`. */
 static void op_mod    (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, b ? a % b : 0); }
+/* NB: opcodes 0x15/0x16 are AudioVM_Op_BitwiseAnd/BitwiseOr @ 0x672960/0x672980
+   and 0x17/0x18 are AudioVM_Op_And/Or @ 0x6729A0/0x6729B0 -- both PAIRS are
+   plain bitwise & / | in the original (0x15/0x16 carry a dead boolean-ize that
+   is computed but never stored). The "l_" prefix here is a historical misnomer;
+   all four are bitwise, matching the binary. */
 static void op_l_and  (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, a & b); }
 static void op_l_or   (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, a | b); }
 static void op_b_and  (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, a & b); }
@@ -582,16 +576,26 @@ static void op_tablexec(MusVM *vm) {
 }
 
 static void op_enter  (MusVM *vm) {
-    /* Witnessed: VmOp_Enter @ 0x672C20 reads u8 N (= dword count); copies
-       N dwords from data stack top to locals at chunk[15] (= 0x20). For now
-       we copy to locals at offset 0x20 (matches the witnessed default). */
+    /* [orig: AudioVM_Op_Enter @ 0x672C20]
+         movzx ecx,[esi]; inc esi          ; N
+         lea ecx,[ecx*4]; sub ebp,ecx      ; POP N dwords off the data stack
+         mov ebx,LocalsBase; add ebx,[instance+0x3C]
+         loop: copy N dwords from the popped stack region to locals[frame + i*4]
+       The frame offset is instance[+0x3C] (== the chunk's string_section_size
+       field, witnessed as 0x20 in jo_gamemus/menumus; MDEdit invariantly emits
+       0x20). We plumb it via MusScript.locals_frame_offset (default 0x20) so the
+       handler is faithful to any chunk rather than hardcoding 0x20.
+       D-NEW-2: the original POPS the N args (`sub ebp,N*4`); we mirror with
+       `vm->sp -= n`. (We guard sp >= n; the original does not bounds-check.) */
     int n = read_u8(vm);
-    int dst_off = 0x20;
+    int dst_off = vm->script ? (int)vm->script->locals_frame_offset : 0x20;
+    if (dst_off <= 0) dst_off = 0x20;
     if (n > 0 && vm->sp >= n) {
         for (int i = 0; i < n; ++i) {
             int32_t v = vm->data_stack[vm->sp - n + i];
             locals_write32(vm, dst_off + i * 4, v);
         }
+        vm->sp -= n;
     }
 }
 static void op_return (MusVM *vm) {
@@ -633,7 +637,13 @@ static void op_setstate(MusVM *vm) {
     vm->halt_latch = 1;
 }
 
-/* play / playw stubs (proper bodies in E10). */
+/* [orig: AudioVM_Op_Play @ 0x672CB0 (1B index), AudioVM_Op_PlayWait @ 0x672C90
+   (2B index)] D-NEW-3: BOTH handlers call the SAME AudioVM_StartSound(idx) and
+   STC (halt) identically -- the original makes NO play-vs-wait behavioral
+   distinction; the only real difference is the operand width (u8 vs u16, so
+   0x3D allows sound indices > 255). The `wait` arg we pass to on_play_sound is
+   a reimpl convenience, not a witnessed semantic; hosts should treat both as
+   "start sound idx". */
 static void op_play (MusVM *vm) {
     int idx = read_u8(vm);
     if (vm->hooks.on_play_sound) {
@@ -814,12 +824,12 @@ static void intrinsic_gsdv(MusVM *vm) {
     vm_push(vm, fixed);
 }
 
-/* Witnessed: Jointops.exe!Intrinsic_GFB @ 0x672150.
-   Pops 0, pushes 0 (witness: handler returns the value of an internal
-   assignment to 0). Side effect: clears `dword_100F654` (frame begin /
-   fade base). No hook to host; treat as a no-op stub. */
+/* [orig: AudioVM_Intrinsic_GFB @ 0x672150] `mov dword_31C37EC, 0; retn` -- takes
+   NO args (does not deref the &TOS pointer), returns void. Side effect: clears
+   the fade-base global dword_31C37EC. We don't model the fade subsystem, so this
+   is a no-op stub; we push 0 to satisfy the method-call convention (which always
+   pushes the handler's return slot). */
 static void intrinsic_gfb(MusVM *vm) {
-    /* Witnessed: pops 0 args. Just push 0 to satisfy method-call convention. */
     vm_push(vm, 0);
 }
 
@@ -939,8 +949,21 @@ extern "C" int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
     if (!vm->script || !vm->script->code) return 0;
 
     vm->halt_latch = 0;
+    /* [orig: AudioVM_DispatchLoop @ 0x672720] the instruction budget
+       (dword_3246B24 = 32) is a SOFT floor, not a hard cap. The loop tail is
+       `dec budget; jg loop; cmp ebp,stack_base; jnz loop`, i.e.
+       `while (--budget > 0 || ebp != stack_base)`: once the 32 budget is spent
+       it keeps executing until the data stack drains back to base (sp == 0) or
+       a handler sets the carry/halt latch. D-NEW-1: we mirror that by breaking
+       only when the budget is spent AND the data stack is empty. (pc-range and
+       unknown-opcode guards still bound malformed scripts; vm_push overflow ->
+       ERROR.) */
     int budget = kTickBudget;
-    while (budget-- > 0) {
+    /* Safety ceiling on the soft-drain extension: a well-formed statement is far
+       under this, but a malformed `goto`-loop that never drains/halts would spin
+       forever (the original hangs too); cap it so the host never wedges. */
+    int extension = kTickBudget * 64;
+    for (;;) {
         if (vm->state != MUS_VM_RUNNING) break;
         if (vm->pc >= vm->script->code_size) {
             vm->state = MUS_VM_HALTED;
@@ -957,6 +980,8 @@ extern "C" int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
         h(vm);
         check_section_transition(vm);
         if (vm->halt_latch) break;
+        if (--budget <= 0 && vm->sp <= 0) break;   /* budget spent + stack drained */
+        if (--extension <= 0) break;               /* safety: never spin forever */
     }
     return (int)dt_ms;
 }
