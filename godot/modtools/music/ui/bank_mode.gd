@@ -92,6 +92,17 @@ func _refresh_table() -> void:
 		return
 	var bank: NovaSbfBank = _document.bank
 	var entries: Array = bank.get_entries()
+	if entries.is_empty():
+		# A freshly-created (or emptied) bank: point at the import affordance so
+		# the dock doesn't read as a dead blank list.
+		var hint := _track_tree.create_item(root)
+		hint.set_text(1, "No tracks yet — ＋ Add to import a 16-bit WAV")
+		hint.set_custom_color(1, Color(0.6, 0.6, 0.6))
+		hint.set_selectable(0, false)
+		hint.set_selectable(1, false)
+		hint.set_selectable(2, false)
+		_refresh_toolbar_state()
+		return
 	for i in range(entries.size()):
 		var d: Dictionary = entries[i]
 		var item := _track_tree.create_item(root)

@@ -99,6 +99,10 @@ var _breadcrumb_label: Label
 var _follow_btn: CheckButton
 var _map_header: Control
 var _map_toolbar: Control
+# Centered "create or open" prompt shown when no project is loaded, so the blank
+# map isn't a dead end (the loudest from-scratch gap was that New gave you nothing
+# and there was no visual way to make a project).
+var _empty_state: Control
 var _logic_section_name: String = ""
 
 
@@ -175,6 +179,7 @@ func _ready() -> void:
 	# (add/replace/delete/reorder/add-play) route from the graph in _install_logic_graph.
 	_install_add_state_button()
 	_install_logic_graph()
+	_install_empty_state()
 	if _var_inspector.has_method("bind_director"):
 		_var_inspector.call("bind_director", _director)
 	_apply_state_label(VM_STOPPED)
@@ -417,6 +422,7 @@ func _refresh_map() -> void:
 		if c is GraphNode:
 			_map.remove_child(c)
 			c.queue_free()
+	_refresh_empty_state()
 	if _document == null or not _document.script_loaded():
 		return
 	var script_name: StringName = StringName(_document.mus_script.get_default_script_name())
@@ -877,6 +883,71 @@ func _install_add_state_button() -> void:
 	col.move_child(toolbar, _map.get_index())
 	_map_toolbar = toolbar
 	_map_header = col.get_node_or_null("MapHeader")
+
+
+# Centered welcome shown when nothing is loaded: a primary "create from scratch"
+# button + a hint to Open. Without it, New produced a blank canvas with a disabled
+# "＋ Add State" and the message "Open a project first" -- and no way to create one.
+# Mounted into the map's column; _refresh_empty_state toggles it vs the map chrome.
+func _install_empty_state() -> void:
+	if _map == null:
+		return
+	var col := _map.get_parent()
+	if col == null:
+		return
+	var center := CenterContainer.new()
+	center.name = "EmptyState"
+	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	center.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	center.visible = false
+	var box := VBoxContainer.new()
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 12)
+	center.add_child(box)
+	var title := Label.new()
+	title.text = "No music project open"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 18)
+	box.add_child(title)
+	var new_btn := Button.new()
+	new_btn.text = "＋ New music program"
+	new_btn.tooltip_text = "Create a music program from scratch: a start state plus an empty sound bank. Import tracks in the Tracks dock, then wire up the states."
+	new_btn.focus_mode = Control.FOCUS_NONE
+	new_btn.pressed.connect(_on_new_project_pressed)
+	box.add_child(new_btn)
+	var hint := Label.new()
+	hint.text = "or use Open to load an existing .sbf / .bin"
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	box.add_child(hint)
+	col.add_child(center)
+	_empty_state = center
+
+
+# Show the welcome prompt iff no script is loaded (hiding the map chrome behind
+# it); otherwise hide it and -- when on the map, not drilled into a blueprint --
+# restore the map chrome (the blueprint owns chrome visibility on its own).
+func _refresh_empty_state() -> void:
+	var empty: bool = _document == null or not _document.script_loaded()
+	if _empty_state != null:
+		_empty_state.visible = empty
+	if empty:
+		if _map != null:
+			_map.visible = false
+		if _map_toolbar != null:
+			_map_toolbar.visible = false
+		if _map_header != null:
+			_map_header.visible = false
+	elif _logic_section_name == "":
+		_set_map_chrome_visible(true)
+
+
+func _on_new_project_pressed() -> void:
+	if _document == null or not _document.has_method("new_project"):
+		return
+	# Emits `changed` -> _on_document_changed -> _refresh_map, which hides this
+	# prompt and renders the new start state.
+	_document.new_project()
 
 
 # Why structured authoring is currently off, or "" when available. Prefers the

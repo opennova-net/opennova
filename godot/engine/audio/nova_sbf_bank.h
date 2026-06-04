@@ -29,6 +29,14 @@ public:
 	// for tests / fixtures that bypass the loader.
 	void load_from_path(const String &p_path);
 
+	// Factory: a fresh, empty, editable bank (zero entries) ready for add_entry()
+	// and save. Mirrors the in-memory state a loaded archive has but with no
+	// entries, so the music editor can author a sound bank from scratch. The
+	// default constructor leaves the bank unconfigured (_opened == false), which
+	// makes every mutation return ERR_UNCONFIGURED; this is the only producer of
+	// an editable bank that does not read a file from disk.
+	static Ref<NovaSbfBank> create_empty();
+
 	int get_entry_count() const;
 	String get_source_path() const { return source_path; }
 	Array get_entries() const;

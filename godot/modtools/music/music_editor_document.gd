@@ -180,6 +180,85 @@ func close_pair() -> void:
 	changed.emit()
 
 
+# --- Create a project from scratch ---------------------------------------
+#
+# The editor could only ever EDIT an existing .sbf/.bin pair; there was no way to
+# author a music program from nothing. new_project mints a fresh, editable
+# script + empty bank so authoring can begin immediately.
+#
+# The script is minted from a minimal template through the SAME proven path the
+# structured edits use: compile_text -> file_bytes -> set_compiled_file_bytes ->
+# load_from_decrypted_bytes. The resulting in-memory state is byte-identical to
+# opening a real .bin (and get_raw_file_bytes() is non-empty, so the saver can
+# write it). The bank is a fresh empty SBF (NovaSbfBank.create_empty); the user
+# imports tracks via the Tracks dock (＋ Add).
+
+# A script with one empty section. The empty body compiles to a single `done`,
+# and that first section is the entry/start (mus_compile pins entry index 0).
+const _NEW_SCRIPT_TEMPLATE := "script %s\nsection Begin\n{\n}\n"
+
+
+func new_script(script_name: String = "gamescript") -> int:
+	var ms := NovaMusicScript.new()
+	if not ms.has_method("compile_text") or not ms.has_method("set_compiled_file_bytes"):
+		return ERR_UNAVAILABLE
+	var d: Dictionary = ms.compile_text(_NEW_SCRIPT_TEMPLATE % script_name)
+	if int(d.get("rc", -1)) != 0:
+		return ERR_CANT_CREATE
+	var fb: PackedByteArray = d.get("file_bytes", PackedByteArray())
+	if fb.is_empty():
+		return ERR_CANT_CREATE
+	# Loads the freshly-encoded bytes into the resource (sets source bytes the
+	# saver passes through). Now script_loaded() and can_author() are both true.
+	ms.set_compiled_file_bytes(fb)
+	mus_script = ms
+	script_path = ""
+	_compiled_script_text = ""
+	_compiled_bytecode = PackedByteArray()
+	_compiled_file_bytes = PackedByteArray()
+	_set_script_dirty(true)
+	return OK
+
+
+func new_bank() -> int:
+	# create_empty is a static factory on the NovaSbfBank GDExtension class (the
+	# default constructor leaves a bank unconfigured). Guard so an older binary
+	# without the factory degrades to a script-only project instead of crashing.
+	if not ClassDB.class_has_method("NovaSbfBank", "create_empty", true):
+		return ERR_UNAVAILABLE
+	var b = NovaSbfBank.create_empty()
+	if b == null:
+		return ERR_CANT_CREATE
+	bank = b
+	bank_path = ""
+	_set_bank_dirty(true)
+	return OK
+
+
+# New script + empty bank, unsaved (no paths). A brand-new project starts a fresh
+# undo timeline so Ctrl+Z can't reach back into the discarded project. Returns the
+# script error if the script couldn't be minted; a bank failure is a soft degrade
+# (the script is still authorable/saveable) and does not abort the project.
+func new_project() -> int:
+	_history = MusicEditHistoryClass.new()
+	bank = null
+	bank_path = ""
+	mus_script = null
+	script_path = ""
+	_compiled_script_text = ""
+	_compiled_bytecode = PackedByteArray()
+	_compiled_file_bytes = PackedByteArray()
+	_set_bank_dirty(false)
+	_set_script_dirty(false)
+	var serr := new_script()
+	if serr != OK:
+		changed.emit()
+		return serr
+	new_bank()  # best-effort; Start needs a bank, but authoring/save don't
+	changed.emit()
+	return OK
+
+
 func open_pair(any_path: String) -> int:
 	var ext := any_path.get_extension().to_lower()
 	var sibling: String = ""

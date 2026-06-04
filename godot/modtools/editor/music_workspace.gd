@@ -212,8 +212,11 @@ func get_current_resource_path() -> String:
 func new_current() -> Error:
 	if _document == null:
 		return ERR_UNAVAILABLE
-	_document.close_pair()
-	return OK
+	# Mint a fresh script + empty bank so the user can author from scratch (the
+	# old behaviour just cleared the workspace, leaving a dead "Open a project
+	# first" screen with no way to make one). The shell already flushed unsaved
+	# changes before calling this.
+	return _document.new_project()
 
 
 func open_file(path: String) -> Error:
@@ -254,6 +257,12 @@ func _basename_for_save_as() -> String:
 		return _document.bank_path.get_file().get_basename()
 	if not _document.script_path.is_empty():
 		return _document.script_path.get_file().get_basename()
+	# Brand-new project (no paths yet): name the pair after the script chunk
+	# (e.g. gamescript.sbf / gamescript.bin) instead of a bare "untitled".
+	if _document.script_loaded():
+		var n := String(_document.mus_script.get_default_script_name())
+		if n != "":
+			return n
 	return "untitled"
 
 
