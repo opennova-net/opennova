@@ -609,6 +609,394 @@ func _section_window_end(lines: PackedStringArray, header_idx: int) -> int:
 	return lines.size()
 
 
+# --- Phase 2: structured statement + section authoring -------------------
+#
+# Generalizes the play-edit write path to every construct. An edit is still a
+# TEXT transform over the names-less decompile of the committed script, recompiled
+# through _apply_script_text (rolls back on failure), pushed onto the one undo
+# timeline. The new precision comes from get_annotated_decompile (NovaMusicScript),
+# which hands back the names-less text PLUS a per-top-level-statement line span
+# (computed by the SAME emitter the AST uses), so a single statement can be
+# spliced/deleted/replaced/reordered by line range -- robust to the brace-leak and
+# compound if/on blocks that a brace scanner mishandles. The C++ twin of these
+# transforms is proven byte-stable in tests/mus/mus_structured_section_edit_test.cpp.
+
+# MusAstStmtKind mirror (libs/mus/include/mus/ast.h). The annotated rows carry the
+# kind so the anchor logic can find a section's terminator.
+const _K_PLAY := 0
+const _K_TRANSITION := 1
+const _K_GOTO := 2
+const _K_CALL := 3
+const _K_RETURN := 4
+const _K_YIELD := 5
+const _K_NOP := 6
+const _K_DONE := 7
+const _K_ASSIGN := 8
+const _K_INCDEC := 9
+const _K_EXPR := 10
+const _K_IF := 11
+const _K_SWITCH := 12
+const _K_BRANCH_COMMENT := 13
+
+# Statements that end (or redirect) a section's straight-line flow. A new
+# statement inserts before the first of these so it actually runs.
+const _TERMINATOR_KINDS := [
+	_K_TRANSITION, _K_GOTO, _K_CALL, _K_RETURN, _K_YIELD, _K_DONE, _K_SWITCH,
+]
+
+
+# The Phase-2 gate. Same body as can_edit_plays() (single chunk, compiles); a
+# distinct name so authoring call sites read intentionally. Kept as an alias so
+# the play-edit callers/tests are untouched.
+func can_author() -> bool:
+	return can_edit_plays()
+
+
+# {text, rows} for the committed names-less decompile, via the bridge. rows is an
+# Array of { section_index, ordinal, code_offset, kind, line_start, line_end }.
+func _annotated() -> Dictionary:
+	if not script_loaded() or not mus_script.has_method("get_annotated_decompile"):
+		return {}
+	var script_name := StringName(mus_script.get_default_script_name())
+	return mus_script.get_annotated_decompile(script_name)
+
+
+func _rows_for_section(rows: Array, section_index: int) -> Array:
+	var out: Array = []
+	for r in rows:
+		if int(r.get("section_index", -1)) == section_index:
+			out.append(r)
+	out.sort_custom(func(a, b): return int(a.get("ordinal", 0)) < int(b.get("ordinal", 0)))
+	return out
+
+
+func _find_row(rows: Array, section_index: int, ordinal: int) -> Dictionary:
+	for r in rows:
+		if int(r.get("section_index", -1)) == section_index and int(r.get("ordinal", -1)) == ordinal:
+			return r
+	return {}
+
+
+# Where a fresh statement lands in a section: just before the first terminator
+# (so it runs before the state moves on), else after the last statement. Every
+# section ends in a `done`, so the terminator branch always fires for real scripts.
+func _anchor_line(srows: Array) -> int:
+	for r in srows:
+		if int(r.get("kind", -1)) in _TERMINATOR_KINDS:
+			return int(r.get("line_start", -1))
+	if not srows.is_empty():
+		return int(srows[-1].get("line_end", -1))
+	return -1
+
+
+# Insert statement lines into a section at the canonical anchor. lines are the
+# already-rendered, already-indented .mus body lines (one entry per text line).
+func insert_statement(section_index: int, lines: PackedStringArray) -> bool:
+	if not can_author() or lines.is_empty():
+		return false
+	var ann := _annotated()
+	if ann.is_empty():
+		return false
+	var text := String(ann.get("text", ""))
+	var srows := _rows_for_section(ann.get("rows", []), section_index)
+	var at := _anchor_line(srows)
+	if at < 0:
+		return false
+	var next := _splice_lines(text, at, lines)
+	if next == text:
+		return false
+	return _commit_edit(text, next)
+
+
+func delete_statement(section_index: int, ordinal: int) -> bool:
+	if not can_author():
+		return false
+	var ann := _annotated()
+	if ann.is_empty():
+		return false
+	var text := String(ann.get("text", ""))
+	var row := _find_row(ann.get("rows", []), section_index, ordinal)
+	if row.is_empty():
+		return false
+	# The section-closing `}` (done) is structural -- deleting it would leak the
+	# section into the next. Keep it.
+	if int(row.get("kind", -1)) == _K_DONE:
+		return false
+	var ls := int(row.get("line_start", -1))
+	var le := int(row.get("line_end", -1))
+	if ls < 0 or le <= ls:
+		return false
+	var next := _delete_lines(text, ls, le)
+	if next == text:
+		return false
+	return _commit_edit(text, next)
+
+
+func replace_statement(section_index: int, ordinal: int, lines: PackedStringArray) -> bool:
+	if not can_author() or lines.is_empty():
+		return false
+	var ann := _annotated()
+	if ann.is_empty():
+		return false
+	var text := String(ann.get("text", ""))
+	var row := _find_row(ann.get("rows", []), section_index, ordinal)
+	if row.is_empty():
+		return false
+	if int(row.get("kind", -1)) == _K_DONE:
+		return false
+	var ls := int(row.get("line_start", -1))
+	var le := int(row.get("line_end", -1))
+	if ls < 0 or le <= ls:
+		return false
+	var arr := text.split("\n")
+	for i in range(le - ls):
+		arr.remove_at(ls)
+	for i in range(lines.size()):
+		arr.insert(ls + i, lines[i])
+	var next := "\n".join(arr)
+	if next == text:
+		return false
+	return _commit_edit(text, next)
+
+
+# Swap a statement with its neighbour (direction -1 up / +1 down) in the same
+# section. Both must be real statements (not the section terminator) and adjacent.
+func reorder_statement(section_index: int, ordinal: int, direction: int) -> bool:
+	if not can_author() or direction == 0:
+		return false
+	var ann := _annotated()
+	if ann.is_empty():
+		return false
+	var text := String(ann.get("text", ""))
+	var srows := _rows_for_section(ann.get("rows", []), section_index)
+	var pos := -1
+	for i in range(srows.size()):
+		if int(srows[i].get("ordinal", -1)) == ordinal:
+			pos = i
+			break
+	if pos < 0:
+		return false
+	# Skip text-less (zero-width, e.g. nop) neighbours so a real statement can step
+	# over them instead of getting stuck against an invisible row.
+	var other := pos + direction
+	while other >= 0 and other < srows.size():
+		var nr: Dictionary = srows[other]
+		if int(nr.get("line_start", 0)) != int(nr.get("line_end", 0)):
+			break
+		other += direction
+	if other < 0 or other >= srows.size():
+		return false
+	var lo: Dictionary = srows[mini(pos, other)]
+	var hi: Dictionary = srows[maxi(pos, other)]
+	# Don't shuffle across the section terminator (would leak into the tail).
+	if int(lo.get("kind", -1)) == _K_DONE or int(hi.get("kind", -1)) == _K_DONE:
+		return false
+	if int(lo.get("line_end", -1)) != int(hi.get("line_start", -2)):
+		return false
+	var arr := text.split("\n")
+	var a_ls := int(lo.get("line_start", 0))
+	var a_le := int(lo.get("line_end", 0))
+	var b_ls := int(hi.get("line_start", 0))
+	var b_le := int(hi.get("line_end", 0))
+	var out := PackedStringArray()
+	out.append_array(arr.slice(0, a_ls))
+	out.append_array(arr.slice(b_ls, b_le))
+	out.append_array(arr.slice(a_ls, a_le))
+	out.append_array(arr.slice(b_le, arr.size()))
+	var next := "\n".join(out)
+	if next == text:
+		return false
+	return _commit_edit(text, next)
+
+
+# Rename a section everywhere it is a section reference (its section/declsection
+# headers + every enter/goto/call/on target). Produces identical runtime bytecode
+# (names live only in the editor-debug string table), so this is always safe when
+# it compiles. Rejects reserved/taken/invalid names.
+func rename_section(old_name: StringName, new_name: StringName) -> bool:
+	if not can_author():
+		return false
+	var nn := String(new_name).strip_edges()
+	var on := String(old_name)
+	if not _is_valid_section_name(nn) or nn == on:
+		return false
+	var ann := _annotated()
+	if ann.is_empty():
+		return false
+	var text := String(ann.get("text", ""))
+	var lines := text.split("\n")
+	if _section_header_line(lines, on) < 0:
+		return false  # old section missing
+	if _section_header_line(lines, nn) >= 0:
+		return false  # new name already a section
+	var next := _rename_identifier(text, on, nn)
+	if next == text:
+		return false
+	return _commit_edit(text, next)
+
+
+# Delete a section's declsection + body. Refused (no-op) when the section is
+# referenced, because a removed `enter X` would silently re-intern X at offset 0
+# (the compile gate can't catch that). The user must retarget references first.
+func delete_section(name: StringName) -> bool:
+	if not can_author():
+		return false
+	# Refuse deleting the entry/start section. The compiler re-pins the entry to the
+	# first-declared section, so deleting the entry would silently change where
+	# playback begins -- and the result still compiles, so the gate wouldn't catch
+	# it. The user must designate a new start state first.
+	if _is_entry_section(String(name)):
+		return false
+	var ann := _annotated()
+	if ann.is_empty():
+		return false
+	var text := String(ann.get("text", ""))
+	if _count_section_token(text, String(name)) > 2:
+		return false  # referenced -> refuse
+	var next := _delete_section_text(text, String(name))
+	if next == text:
+		return false
+	return _commit_edit(text, next)
+
+
+# Gate + commit shared by every Phase-2 op: recompile through _apply_script_text
+# (rolls back to `prev` on failure), then push the do/undo pair.
+func _commit_edit(prev: String, next: String) -> bool:
+	if not _apply_script_text(next):
+		_apply_script_text(prev)  # compile failed: change nothing
+		return false
+	_push_text_edit(prev, next)
+	return true
+
+
+# --- line-splice primitives (twin of the C++ test's helpers) -------------
+
+func _splice_lines(text: String, at_line: int, lines: PackedStringArray) -> String:
+	var arr := text.split("\n")
+	if at_line < 0 or at_line > arr.size():
+		return text
+	for i in range(lines.size()):
+		arr.insert(at_line + i, lines[i])
+	return "\n".join(arr)
+
+
+func _delete_lines(text: String, start: int, end_excl: int) -> String:
+	var arr := text.split("\n")
+	if start < 0 or end_excl > arr.size() or start >= end_excl:
+		return text
+	for i in range(end_excl - start):
+		arr.remove_at(start)
+	return "\n".join(arr)
+
+
+# --- section-token transforms (twin of the C++ test's helpers) -----------
+
+# Whole-identifier token replace, skipping string literals and // comments.
+func _rename_identifier(text: String, old_name: String, new_name: String) -> String:
+	var out := ""
+	var i := 0
+	var n := text.length()
+	var in_str := false
+	while i < n:
+		var c := text[i]
+		if c == "\"":
+			in_str = not in_str
+			out += c
+			i += 1
+			continue
+		if not in_str and c == "/" and i + 1 < n and text[i + 1] == "/":
+			while i < n and text[i] != "\n":
+				out += text[i]
+				i += 1
+			continue
+		if not in_str and _is_ident_start_char(c):
+			var j := i + 1
+			while j < n and _is_ident_cont_char(text[j]):
+				j += 1
+			var tok := text.substr(i, j - i)
+			out += new_name if tok == old_name else tok
+			i = j
+		else:
+			out += c
+			i += 1
+	return out
+
+
+# Count whole-identifier occurrences of a section name (outside strings/comments).
+# A canonical decompile names each section twice when unreferenced (declsection +
+# section header), so > 2 means referenced.
+func _count_section_token(text: String, name: String) -> int:
+	var count := 0
+	var i := 0
+	var n := text.length()
+	var in_str := false
+	while i < n:
+		var c := text[i]
+		if c == "\"":
+			in_str = not in_str
+			i += 1
+			continue
+		if not in_str and c == "/" and i + 1 < n and text[i + 1] == "/":
+			while i < n and text[i] != "\n":
+				i += 1
+			continue
+		if not in_str and _is_ident_start_char(c):
+			var j := i + 1
+			while j < n and _is_ident_cont_char(text[j]):
+				j += 1
+			if text.substr(i, j - i) == name:
+				count += 1
+			i = j
+		else:
+			i += 1
+	return count
+
+
+func _delete_section_text(text: String, name: String) -> String:
+	var lines := text.split("\n")
+	# Drop the declsection forward-decl.
+	var dl := -1
+	for i in range(lines.size()):
+		if lines[i].strip_edges() == "declsection %s" % name:
+			dl = i
+			break
+	if dl >= 0:
+		lines.remove_at(dl)
+	# Drop the section body window (header -> next section/declsection header / EOF).
+	var hidx := _section_header_line(lines, name)
+	if hidx < 0:
+		return text
+	var end := _section_window_end(lines, hidx)
+	for i in range(end - hidx):
+		lines.remove_at(hidx)
+	return "\n".join(lines)
+
+
+# True when `name` is the script's entry/start section (is_entry on the AST dict).
+func _is_entry_section(name: String) -> bool:
+	if not script_loaded() or not mus_script.has_method("get_program_ast"):
+		return false
+	var sn := StringName(mus_script.get_default_script_name())
+	for s in mus_script.get_program_ast(sn):
+		if String(s.get("name", "")) == name:
+			return bool(s.get("is_entry", false))
+	return false
+
+
+func _is_ident_start_char(c: String) -> bool:
+	if c.is_empty():
+		return false
+	var u := c.unicode_at(0)
+	return (u >= 65 and u <= 90) or (u >= 97 and u <= 122) or u == 95
+
+
+func _is_ident_cont_char(c: String) -> bool:
+	if c.is_empty():
+		return false
+	var u := c.unicode_at(0)
+	return (u >= 65 and u <= 90) or (u >= 97 and u <= 122) or (u >= 48 and u <= 57) or u == 95
+
+
 # --- Unified document undo ----------------------------------------------
 # One timeline for every edit (bank reorder/rename + play/script edits), so the
 # single screen has a single, predictable Ctrl+Z.

@@ -41,6 +41,7 @@ void NovaMusicScript::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_decompiled_text_with_bank", "script_name", "bank"), &NovaMusicScript::get_decompiled_text_with_bank);
 	ClassDB::bind_method(D_METHOD("get_section_model", "script_name"), &NovaMusicScript::get_section_model);
 	ClassDB::bind_method(D_METHOD("get_program_ast", "script_name"), &NovaMusicScript::get_program_ast);
+	ClassDB::bind_method(D_METHOD("get_annotated_decompile", "script_name"), &NovaMusicScript::get_annotated_decompile);
 	ClassDB::bind_method(D_METHOD("compile_text", "text"), &NovaMusicScript::compile_text);
 	ClassDB::bind_method(D_METHOD("set_compiled_bytecode", "bytecode"), &NovaMusicScript::set_compiled_bytecode);
 	ClassDB::bind_method(D_METHOD("set_compiled_file_bytes", "file_bytes"), &NovaMusicScript::set_compiled_file_bytes);
@@ -560,6 +561,50 @@ Array NovaMusicScript::get_program_ast(const StringName &p_script_name) const {
 		d["statements"] = ast_stmts_to_array(prog, sec.statements, sec.statement_count);
 		out.append(d);
 	}
+	mus_program_free(prog);
+	return out;
+}
+
+Dictionary NovaMusicScript::get_annotated_decompile(const StringName &p_script_name) const {
+	Dictionary out;
+	out["text"] = String();
+	out["rows"] = Array();
+	if (!_opened) {
+		return out;
+	}
+	const MusScript *s = raw_script(String(p_script_name));
+	if (s == nullptr) {
+		return out;
+	}
+	MusAstProgram *prog = mus_parse_to_ast(s);
+	if (prog == nullptr) {
+		return out;
+	}
+	char *text = nullptr;
+	MusStmtLineSpan *spans = nullptr;
+	uint32_t span_count = 0;
+	// Names-less spans: the editor's write path operates on the names-less
+	// decompile (the proven round-trip), so the line spans must index that text.
+	int rc = mus_ast_emit_text_spans(prog, nullptr, 0, &text, &spans, &span_count);
+	if (rc == 0) {
+		if (text != nullptr) {
+			out["text"] = String::utf8(text);
+		}
+		Array rows;
+		for (uint32_t i = 0; i < span_count; ++i) {
+			Dictionary r;
+			r["section_index"] = (int64_t)spans[i].section_index;
+			r["ordinal"] = (int64_t)spans[i].ordinal;
+			r["code_offset"] = (int64_t)spans[i].code_offset;
+			r["kind"] = (int64_t)spans[i].kind;
+			r["line_start"] = (int64_t)spans[i].line_start;
+			r["line_end"] = (int64_t)spans[i].line_end;
+			rows.append(r);
+		}
+		out["rows"] = rows;
+	}
+	mus_free(text);
+	mus_free(spans);
 	mus_program_free(prog);
 	return out;
 }
