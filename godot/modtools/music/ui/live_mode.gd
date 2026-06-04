@@ -7,6 +7,7 @@ const MusVarNames = preload("res://modtools/music/mus_var_names.gd")
 const MusicAudioPreviewClass = preload("res://modtools/music/music_audio_preview.gd")
 const MusicTrackChipClass = preload("res://modtools/music/ui/track_chip.gd")
 const MusicInspectorPanelClass = preload("res://modtools/music/ui/inspector_panel.gd")
+const MusicSectionLogicGraphClass = preload("res://modtools/music/ui/section_logic_graph.gd")
 
 # VM state values mirror libs/mus MusVMState.
 const VM_STOPPED := 0
@@ -96,6 +97,13 @@ var _last_log_count: int = 0
 @onready var _advanced_drawer: PanelContainer = %AdvancedDrawer
 @onready var _advanced_toggle: Button = %AdvancedToggle
 var _add_state_btn: Button
+# Level-2 drill-in: the section logic graph swaps into the center canvas (Stage 2).
+var _logic_graph: GraphEdit
+var _breadcrumb: HBoxContainer
+var _breadcrumb_label: Label
+var _map_header: Control
+var _map_toolbar: Control
+var _logic_section_name: String = ""
 
 
 func bind_document(document: RefCounted) -> void:
@@ -185,6 +193,7 @@ func _ready() -> void:
 	if _advanced_toggle != null:
 		_advanced_toggle.toggled.connect(_on_advanced_toggled)
 	_install_add_state_button()
+	_install_logic_graph()
 	if _var_inspector.has_method("bind_director"):
 		_var_inspector.call("bind_director", _director)
 	_apply_state_label(VM_STOPPED)
@@ -217,8 +226,11 @@ func _process(_delta: float) -> void:
 		if _var_inspector != null and _var_inspector.has_method("refresh_from_director"):
 			_var_inspector.call("refresh_from_director")
 		_update_live_highlight(state)
-	elif _inspector_panel != null and _inspector_panel.has_method("set_active_offset"):
-		_inspector_panel.set_active_offset(-1)
+	else:
+		if _inspector_panel != null and _inspector_panel.has_method("set_active_offset"):
+			_inspector_panel.set_active_offset(-1)
+		if _logic_graph != null:
+			_logic_graph.set_active_offset(-1)
 
 
 func _on_start() -> void:
@@ -795,12 +807,14 @@ func _reveal_advanced_drawer() -> void:
 		_advanced_toggle.set_pressed_no_signal(true)
 
 
-# Double-clicking a state opens the Advanced drawer at its raw script. Single
-# clicks fall through to GraphEdit's node_selected (-> _on_map_node_selected).
+# Double-clicking a state drills into its logic-graph blueprint (Stage 2). Single
+# clicks fall through to GraphEdit's node_selected (-> _on_map_node_selected). The
+# raw script stays reachable via the transport's "Advanced script" toggle and the
+# inspector's "Show raw script" button.
 func _on_node_gui_input(event: InputEvent, section_name: String) -> void:
 	if event is InputEventMouseButton and event.double_click \
 			and event.button_index == MOUSE_BUTTON_LEFT:
-		_on_inspector_advanced(StringName(section_name))
+		_drill_into(section_name)
 
 
 func _on_inspector_jump(section_name: StringName) -> void:
@@ -989,12 +1003,18 @@ func _collect_section_targets(stmts: Array, out: Dictionary) -> void:
 # showing the section that is actually running -- the pc is a global bytecode
 # offset, so another section's rows would mis-bracket it.
 func _update_live_highlight(state: int) -> void:
-	if _inspector_panel == null or not _inspector_panel.has_method("set_active_offset"):
-		return
-	if state == VM_RUNNING and _inspector_panel.current_section() == String(_current_section):
-		_inspector_panel.set_active_offset(_director.current_pc())
-	else:
-		_inspector_panel.set_active_offset(-1)
+	if _inspector_panel != null and _inspector_panel.has_method("set_active_offset"):
+		if state == VM_RUNNING and _inspector_panel.current_section() == String(_current_section):
+			_inspector_panel.set_active_offset(_director.current_pc())
+		else:
+			_inspector_panel.set_active_offset(-1)
+	# Drive the drill-in logic graph too, but only while it shows the running
+	# section (pc is a global offset, so another section's nodes would mis-bracket).
+	if _logic_graph != null and _logic_graph.visible:
+		if state == VM_RUNNING and _logic_section_name == String(_current_section):
+			_logic_graph.set_active_offset(_director.current_pc())
+		else:
+			_logic_graph.set_active_offset(-1)
 
 
 # --- Add State (visual-first authoring slice) --------------------------
@@ -1016,6 +1036,8 @@ func _install_add_state_button() -> void:
 	toolbar.add_child(_add_state_btn)
 	col.add_child(toolbar)
 	col.move_child(toolbar, _map.get_index())
+	_map_toolbar = toolbar
+	_map_header = col.get_node_or_null("MapHeader")
 
 
 func _on_add_state() -> void:
@@ -1049,6 +1071,88 @@ func _unique_state_name() -> String:
 	while existing.has("State_%d" % n):
 		n += 1
 	return "State_%d" % n
+
+
+# --- Level-2 logic graph (drill-in blueprint) --------------------------
+
+# Mount the section logic graph + a Back breadcrumb into the center column,
+# hidden until the user drills into a state. The map and the logic graph share
+# the canvas; only one is visible at a time.
+func _install_logic_graph() -> void:
+	if _map == null:
+		return
+	var col := _map.get_parent()
+	if col == null:
+		return
+	_breadcrumb = HBoxContainer.new()
+	_breadcrumb.name = "LogicBreadcrumb"
+	var back := Button.new()
+	back.text = "◀ Map"
+	back.tooltip_text = "Back to the state map."
+	back.focus_mode = Control.FOCUS_NONE
+	back.pressed.connect(_back_to_map)
+	_breadcrumb.add_child(back)
+	_breadcrumb_label = Label.new()
+	_breadcrumb_label.add_theme_color_override("font_color", Color(0.85, 0.92, 1.0))
+	_breadcrumb.add_child(_breadcrumb_label)
+	_breadcrumb.visible = false
+	col.add_child(_breadcrumb)
+	col.move_child(_breadcrumb, 0)
+
+	_logic_graph = MusicSectionLogicGraphClass.new()
+	_logic_graph.name = "LogicGraph"
+	_logic_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_logic_graph.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_logic_graph.visible = false
+	_logic_graph.statement_selected.connect(_on_logic_statement_selected)
+	_logic_graph.open_section_requested.connect(func(n): _drill_into(String(n)))
+	col.add_child(_logic_graph)
+
+
+# Drill into a state: swap the center canvas from the map to that section's logic
+# graph (statements as exec-flow nodes) with a Back breadcrumb, and pin the right
+# inspector on it. Double-clicking a map node or an in-graph "open ▸" lands here.
+func _drill_into(section_name: String) -> void:
+	if _logic_graph == null or _document == null or not _document.script_loaded():
+		return
+	var sn := StringName(_document.mus_script.get_default_script_name())
+	var ast: Array = _document.mus_script.get_program_ast(sn)
+	for sec in ast:
+		if String(sec.get("name", "")) == section_name:
+			_logic_graph.show_section(sec, _bank_names())
+			_logic_section_name = section_name
+			_logic_graph.visible = true
+			_set_map_chrome_visible(false)
+			_breadcrumb.visible = true
+			_breadcrumb_label.text = "  ▸  %s   (blueprint)" % section_name
+			_follow_live = false
+			_show_section_in_inspector(section_name)
+			return
+
+
+func _back_to_map() -> void:
+	if _logic_graph != null:
+		_logic_graph.visible = false
+	if _breadcrumb != null:
+		_breadcrumb.visible = false
+	_logic_section_name = ""
+	_set_map_chrome_visible(true)
+
+
+func _set_map_chrome_visible(v: bool) -> void:
+	if _map != null:
+		_map.visible = v
+	if _map_header != null:
+		_map_header.visible = v
+	if _map_toolbar != null:
+		_map_toolbar.visible = v
+
+
+# A node in the logic graph was selected: keep the right inspector pinned on its
+# section as the read-only details view (per-statement focusing is Stage 3).
+func _on_logic_statement_selected(_section_index: int, _ordinal: int) -> void:
+	if _logic_section_name != "":
+		_show_section_in_inspector(_logic_section_name)
 
 
 func _on_sound(idx: int, sound_name: StringName, wait: bool) -> void:

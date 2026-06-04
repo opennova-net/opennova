@@ -190,6 +190,28 @@ func test_edge_colors_distinct_by_kind():
 		"branch wire colour differs from a plain transition")
 
 
+func test_drill_into_swaps_map_for_logic_graph():
+	# Double-clicking a state (or calling _drill_into) replaces the center map with
+	# that section's logic-graph blueprint; Back restores the map.
+	var lm := _make_live()
+	await get_tree().process_frame
+	var begin = _node_titled(_nodes(lm.get_node("%SectionMap")), "Begin")
+	assert_not_null(begin, "Begin node present")
+	var sec := String(begin.get_meta("section", ""))
+	lm._drill_into(sec)
+	await get_tree().process_frame
+	assert_true(lm._logic_graph.visible, "logic graph shown after drill-in")
+	assert_false(lm.get_node("%SectionMap").visible, "map hidden while drilled in")
+	var lg_nodes := 0
+	for c in lm._logic_graph.get_children():
+		if c is GraphNode:
+			lg_nodes += 1
+	assert_gt(lg_nodes, 0, "logic graph built nodes for the section")
+	lm._back_to_map()
+	assert_false(lm._logic_graph.visible, "Back hides the logic graph")
+	assert_true(lm.get_node("%SectionMap").visible, "Back restores the map")
+
+
 func _copy(src_path: String, dst_path: String) -> void:
 	var src := FileAccess.open(src_path, FileAccess.READ)
 	assert_not_null(src, "fixture readable: %s" % src_path)
