@@ -375,13 +375,18 @@ func test_kind_for_item_type_matches_shipping_data() -> void:
 		assert_eq(c._kind_for_item_type(t), NovaMissionData.KIND_ITEM, "type %d -> item" % t)
 
 
-func test_get_placeable_items_excludes_markers() -> void:
+func test_get_placeable_items_includes_markers() -> void:
+	# Markers are general placeable entities (player start, insertion, waypoint, ...), so the
+	# palette offers them alongside meshes; the 13-item fixture (one of them the marker) yields 13.
 	var controller := _loaded_with_item_db()
 	var items := controller.get_placeable_items()
-	assert_eq(items.size(), 12, "the 13-item fixture yields 12 placeable (its one marker is excluded)")
+	assert_eq(items.size(), 13, "every items.def entry is placeable, markers included")
+	var has_marker := false
 	for it in items:
-		assert_ne(int(it["type"]), NovaItemDatabase.TYPE_MARKER, "no marker is offered for placement")
 		assert_true(it.has("id") and it.has("display_name"), "each palette entry has id + name")
+		if int(it["id"]) == 100001:
+			has_marker = true
+	assert_true(has_marker, "the marker item (100001) is offered for placement")
 
 
 func test_open_mission_auto_resolves_items_db_for_the_palette() -> void:
@@ -397,8 +402,8 @@ func test_open_mission_auto_resolves_items_db_for_the_palette() -> void:
 	var controller := MissionController.new(stub)
 	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
 	# No db injection here: the items must come from the auto-resolve chain.
-	assert_eq(controller.get_placeable_items().size(), 12,
-		"items.def auto-resolves from the resource root (13 items, 1 marker excluded)")
+	assert_eq(controller.get_placeable_items().size(), 13,
+		"items.def auto-resolves from the resource root (all 13 items placeable, markers included)")
 
 
 func test_arm_and_disarm_placement() -> void:
@@ -411,12 +416,45 @@ func test_arm_and_disarm_placement() -> void:
 	assert_false(controller.is_placement_armed(), "disarm leaves placement mode")
 
 
-func test_arm_rejects_unknown_and_marker_items() -> void:
+func test_arm_rejects_unknown_but_allows_markers() -> void:
 	var controller := _loaded_with_item_db()
 	controller.arm_placement(999999)  # not in items.def
 	assert_false(controller.is_placement_armed(), "an unknown id cannot be armed")
-	controller.arm_placement(100001)  # Marker Alpha (type marker, mesh-less)
-	assert_false(controller.is_placement_armed(), "a marker cannot be armed (no mesh)")
+	controller.arm_placement(100001)  # Marker Alpha -- markers are placeable general entities
+	assert_true(controller.is_placement_armed(), "a marker item can be armed for placement")
+	assert_eq(controller.get_placement_item_id(), 100001, "the armed marker id is exposed")
+
+
+# --- Markers: placed as general entities in Objects mode ----------------------
+# Markers are mesh-less KIND_MARKER entities (player start, insertion, waypoint, ...). They place
+# from the same palette as meshes, render via the marker overlay, and select/drag/delete in-place.
+
+func test_place_marker_adds_a_marker_entity_and_selects_it() -> void:
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	assert_true(controller.place_entity_at_world(100001, Vector3(50.0, 10.0, -50.0)),
+		"placing a marker from the palette succeeds")
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before + 1, "a marker entity was added")
+	var sel := controller.get_selection_summary()
+	assert_eq(int(sel.get("kind", -1)), NovaMissionData.KIND_MARKER, "the new marker is selected")
+	assert_eq(int(sel.get("index", -1)), before, "and it is the just-appended marker")
+	assert_true(controller.is_dirty(), "placing a marker dirties the mission")
+	assert_true(controller.can_undo(), "and is undoable")
+	# The marker is mesh-less, so it is NOT in the object pickable set, but the marker overlay
+	# exposes a pickable gizmo for it.
+	assert_gt(controller._marker_overlay.marker_pickables().size(), 0,
+		"the marker overlay renders a pickable gizmo for the placed marker")
+
+
+func test_delete_selected_marker_in_objects_mode() -> void:
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	controller.place_entity_at_world(100001, Vector3(40.0, 10.0, -40.0))
+	var after_place := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	assert_true(controller.delete_selected(), "the selected marker deletes")
+	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), after_place - 1, "the marker entity is removed")
+	assert_eq(controller.get_selection_summary(), {}, "and the selection is cleared")
 
 
 func test_place_entity_routes_to_the_kind_its_type_maps_to() -> void:

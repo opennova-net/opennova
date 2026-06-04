@@ -68,7 +68,13 @@ func test_new_mission_end_to_end_on_a_real_terrain() -> void:
 		"redo restores the placement")
 	assert_true(controller.is_dirty(), "and re-dirties")
 
-	# Save As, then reopen the written .bms and confirm the terrain ref + placed object survived.
+	# Place a marker (e.g. a player start) from the same palette -- a mesh-less general entity.
+	assert_true(controller.place_entity_at_world(100001, Vector3(72.0, 10.0, -72.0)),
+		"placing a marker from the palette works")
+	assert_eq(controller.get_mission().get_entity_count(NovaMissionData.KIND_MARKER), 1,
+		"the marker landed")
+
+	# Save As, then reopen the written .bms and confirm the terrain ref + placed object + marker survived.
 	assert_eq(int(ws.save_as(_abs(SAVE_DIR))), OK, "Save As writes the from-scratch mission")
 	assert_false(controller.is_dirty(), "a saved mission is clean")
 	var path := _abs(SAVE_DIR).path_join("mission.bms")
@@ -79,3 +85,5 @@ func test_new_mission_end_to_end_on_a_real_terrain() -> void:
 	assert_eq(reopened.get_terrain_ref().to_lower(), "dvxi5", "terrain ref round-trips")
 	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_BUILDING), 1,
 		"the placed building round-trips through save + reopen")
+	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_MARKER), 1,
+		"the placed marker round-trips through save + reopen")

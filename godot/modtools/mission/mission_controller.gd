@@ -25,6 +25,7 @@ signal status_reported(message: String, is_error: bool)
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const MissionWaypointOverlay := preload("res://engine/mission/mission_waypoint_overlay.gd")
 const MissionAreaTriggerOverlay := preload("res://engine/mission/mission_area_trigger_overlay.gd")
+const MissionMarkerOverlay := preload("res://engine/mission/mission_marker_overlay.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
 const OBJECTS_CONTAINER := "MissionObjects"
 
@@ -107,6 +108,12 @@ var _marker_pickable: Array = []
 # The in-world overlay drawing marker gizmos + path lines. Built under the objects
 # container (so it frees with it); the ref is dropped on every re-bake and lazily rebuilt.
 var _waypoint_overlay  # MissionWaypointOverlay (preloaded, no class_name)
+# The in-world overlay drawing a gizmo for EVERY marker (any type), so markers are visible +
+# selectable in Objects mode where they are placed/edited as general entities. Built under the
+# objects container (frees with it); ref dropped on every re-bake, lazily rebuilt. Visible only in
+# Objects mode (the waypoint overlay shows path markers in Waypoints mode), so the two never
+# double-draw. Mirrors _waypoint_overlay.
+var _marker_overlay  # MissionMarkerOverlay (preloaded, no class_name)
 # Marker placement ("add marker" tool): while armed, a terrain click adds a marker to the
 # active path instead of selecting (mirrors object placement arming, but mode-scoped).
 var _marker_place_armed: bool = false
@@ -311,6 +318,8 @@ func open_mission(bms_path: String) -> Error:
 		_refresh_waypoint_overlay()
 	elif _mode == Mode.AREA_TRIGGERS:
 		_refresh_area_trigger_overlay()
+	elif _mode == Mode.OBJECTS:
+		_refresh_marker_overlay()
 	_last_status = _describe_load(mission, bms_path, env_note)
 	changed.emit()
 	return OK
@@ -368,6 +377,8 @@ func new_mission() -> Error:
 		_refresh_waypoint_overlay()
 	elif _mode == Mode.AREA_TRIGGERS:
 		_refresh_area_trigger_overlay()
+	elif _mode == Mode.OBJECTS:
+		_refresh_marker_overlay()
 	if not env_note.is_empty():
 		_last_status = "New mission on %s (%s)." % [terrain_ref, env_note]
 	else:
@@ -694,6 +705,8 @@ func cancel_drag() -> void:
 		_refresh_waypoint_overlay()
 	elif _mode == Mode.AREA_TRIGGERS:
 		_refresh_area_trigger_overlay()
+	elif _mode == Mode.OBJECTS:
+		_refresh_marker_overlay()
 
 
 func _on_left_press(mouse_pos: Vector2) -> void:
@@ -759,6 +772,18 @@ func _pick_entity(mouse_pos: Vector2) -> Dictionary:
 		if t >= 0.0 and t < best_t:
 			best_t = t
 			best = { "kind": int(rec["kind"]), "index": int(rec["index"]) }
+	# Markers are mesh-less, so they are not in _pickable; their gizmo AABBs come from the marker
+	# overlay. The container sits at the world origin, so the overlay's AABBs are world-space (same
+	# assumption as _pick_marker). The nearest of {mesh, marker gizmo} wins.
+	if _marker_overlay != null and is_instance_valid(_marker_overlay):
+		for rec in _marker_overlay.marker_pickables():
+			var maabb: AABB = rec["aabb"]
+			if maabb.size == Vector3.ZERO:
+				continue
+			var mt := _ray_aabb_entry(maabb, from, dir)
+			if mt >= 0.0 and mt < best_t:
+				best_t = mt
+				best = { "kind": NovaMissionData.KIND_MARKER, "index": int(rec["marker_index"]) }
 	return best
 
 
@@ -785,6 +810,9 @@ func _select(kind: int, index: int) -> void:
 	_selected_rotation_deg = entity.get("rotation_deg", Vector3.ZERO)
 	_selected_xform = MissionObjectPlacer.entity_transform(
 		entity.get("position", Vector3.ZERO), _selected_rotation_deg)
+	# A marker has no mesh records, so the selection box stays hidden; highlight its gizmo instead.
+	if kind == NovaMissionData.KIND_MARKER and _marker_overlay != null and is_instance_valid(_marker_overlay):
+		_marker_overlay.set_selected_marker(index)
 	_update_selection_box()
 	changed.emit()
 
@@ -797,6 +825,8 @@ func _deselect() -> void:
 	_selected_node = null
 	_selected_node_offset = Transform3D.IDENTITY
 	_hide_selection_box()
+	if _marker_overlay != null and is_instance_valid(_marker_overlay):
+		_marker_overlay.set_selected_marker(-1)
 	changed.emit()
 
 
@@ -816,6 +846,12 @@ func _move_selected_to_world(global_hit: Vector3) -> void:
 # move the in-world object identically.
 func _apply_selected_xform(xform: Transform3D) -> void:
 	_selected_xform = xform
+	if not _selected_ref.is_empty() and int(_selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
+		# A marker is mesh-less: preview its gizmo (container-local origin) via the overlay. No mesh
+		# records / node to move, and the selection box stays hidden.
+		if _marker_overlay != null and is_instance_valid(_marker_overlay):
+			_marker_overlay.preview_marker_position(int(_selected_ref["index"]), _selected_xform.origin)
+		return
 	if _selected_node != null:
 		# The anchor offset rides the node so the dragged model keeps its ground point
 		# under the cursor, matching how it was first placed.
@@ -832,6 +868,10 @@ func _commit_selected_transform() -> void:
 		return
 	var bms_pos := MissionObjectPlacer.godot_to_bms_position(_selected_xform.origin)
 	if _mission.set_entity_transform(int(_selected_ref["kind"]), int(_selected_ref["index"]), bms_pos, _selected_rotation_deg):
+		# A marker's gizmo was preview-moved; rebuild the overlay so its pickable AABB tracks the
+		# committed position (re-applies the selection highlight).
+		if int(_selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
+			_refresh_marker_overlay()
 		mark_dirty()
 
 
@@ -1041,14 +1081,16 @@ func set_group(index: int, field0: int, field8: int, field12: int) -> void:
 
 # --- Authoring (Phase 3): place new objects -----------------------------------
 # The inspector's palette arms an items.def item; a left-click on the terrain then
-# places a new instance there (add_entity + incremental render) and selects it, while
-# staying armed so several can be placed. Markers are excluded (no mesh; they belong
-# to the deferred waypoint editing).
+# places a new instance there and selects it, while staying armed so several can be
+# placed. Markers (player start, insertion, waypoint, ...) are placed the same way --
+# they are mesh-less general entities shown as gizmos by the marker overlay (the engine
+# spawns markers through the same path as every other entity; a marker's role is its
+# items.def item). Waypoint *paths* (sequencing waypoint markers) are a separate concern
+# handled in Waypoints mode.
 
-# The placeable items for the palette: every items.def entry that maps to a renderable
-# entity kind (markers excluded), as { id, display_name, type }, in the database's
-# stable display order. Empty until a mission (hence a resource root + items.def) is
-# loaded.
+# The placeable items for the palette: every items.def entry, as { id, display_name, type },
+# in the database's stable display order. Markers are included (placed as gizmo entities).
+# Empty until a mission (hence a resource root + items.def) is loaded.
 func get_placeable_items() -> Array:
 	var db := _item_db()
 	if db == null:
@@ -1056,27 +1098,22 @@ func get_placeable_items() -> Array:
 	var out: Array = []
 	for item in db.get_items():
 		var entry: Dictionary = item
-		var type := int(entry.get("type", 0))
-		if _kind_for_item_type(type) == NovaMissionData.KIND_MARKER:
-			continue
 		out.append({
 			"id": int(entry.get("id", 0)),
 			"display_name": String(entry.get("display_name", "")),
-			"type": type,
+			"type": int(entry.get("type", 0)),
 		})
 	return out
 
 
 # Arm placement for an items.def item id. A later terrain click places it. Rejects
-# unknown ids and marker-kind items (mesh-less). Drops any current selection so the
-# inspector shows the placement affordance rather than an edit panel.
+# unknown ids. Drops any current selection so the inspector shows the placement
+# affordance rather than an edit panel. Marker items arm too (placed as gizmo entities).
 func arm_placement(item_id: int) -> void:
 	if _mission == null:
 		return
 	var db := _item_db()
 	if db == null or not db.has_item(item_id):
-		return
-	if _kind_for_item_type(db.get_item_type(item_id)) == NovaMissionData.KIND_MARKER:
 		return
 	# Arming is a new action: close any open transform session as its own undo step first.
 	_flush_edit()
@@ -1129,7 +1166,12 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 		return false
 	_mission.commit_edit()
 	var new_index := int(record.get("index", -1))
-	_render_placed_entity(kind, new_index)
+	# Markers are mesh-less: the placer skips them, so render via the marker overlay (rebuild so the
+	# new gizmo + pickable exist before we select it). Mesh entities render incrementally.
+	if kind == NovaMissionData.KIND_MARKER:
+		_refresh_marker_overlay()
+	else:
+		_render_placed_entity(kind, new_index)
 	mark_dirty()
 	_select(kind, new_index)
 	_report("Placed %s. Ctrl+Z to undo." % item_name)
@@ -1195,10 +1237,10 @@ func _render_placed_entity(kind: int, index: int) -> void:
 # construction, and cheap because the retained placer keeps its model + batch caches.
 
 # Remove the currently-selected entity, then re-bake the world so it matches the new
-# record. Markers are never selectable (mesh-less), so this only ever deletes a
-# mesh-having entity. Returns false (a no-op) when nothing is selected or the lib
-# rejects the removal; clears the selection on success. Public so the inspector's
-# Delete button and the viewport Delete key share one path.
+# record. A selected marker (mesh-less) skips the object re-bake (its delete shifts no object
+# MultiMesh indices) and just rebuilds the marker overlay. Returns false (a no-op) when nothing is
+# selected or the lib rejects the removal; clears the selection on success. Public so the
+# inspector's Delete button and the viewport Delete key share one path.
 func delete_selected() -> bool:
 	if _selected_ref.is_empty() or _mission == null:
 		return false
@@ -1216,9 +1258,15 @@ func delete_selected() -> bool:
 		_report("Could not delete the selected object.", true)
 		return false
 	_mission.commit_edit()
-	# Re-bake first (it resets the selection state and rebuilds stats), then dirty +
-	# emit once so the inspector refreshes against the post-delete world in a single pass.
-	_rebake_objects()
+	if kind == NovaMissionData.KIND_MARKER:
+		# Objects are untouched by a marker delete; drop the selection and rebuild only the marker
+		# overlay against the post-delete list (cheaper than re-placing every object).
+		_deselect()
+		_refresh_marker_overlay()
+	else:
+		# Re-bake first (it resets the selection state and rebuilds stats), then dirty +
+		# emit once so the inspector refreshes against the post-delete world in a single pass.
+		_rebake_objects()
 	mark_dirty()
 	_report("Deleted %s. Ctrl+Z to undo." % (label if not label.is_empty() else "object"))
 	return true
@@ -1250,6 +1298,8 @@ func _rebake_objects() -> void:
 		_refresh_waypoint_overlay()
 	elif _mode == Mode.AREA_TRIGGERS:
 		_refresh_area_trigger_overlay()
+	elif _mode == Mode.OBJECTS:
+		_refresh_marker_overlay()
 
 
 # --- Authoring (P7): waypoint mode + marker selection -------------------------
@@ -1291,11 +1341,16 @@ func set_mode(mode: int) -> void:
 		_selected_event_index = 0
 	_refresh_waypoint_overlay()
 	_refresh_area_trigger_overlay()
-	# Each overlay is visible only in its own mode.
+	_refresh_marker_overlay()
+	# Each overlay is visible only in its own mode (markers are placed/edited in Objects mode; the
+	# waypoint overlay shows path markers in Waypoints mode), so the two marker-gizmo overlays never
+	# double-draw.
 	if _waypoint_overlay != null and is_instance_valid(_waypoint_overlay):
 		_waypoint_overlay.visible = mode == Mode.WAYPOINTS
 	if _area_overlay != null and is_instance_valid(_area_overlay):
 		_area_overlay.visible = mode == Mode.AREA_TRIGGERS
+	if _marker_overlay != null and is_instance_valid(_marker_overlay):
+		_marker_overlay.visible = mode == Mode.OBJECTS
 	changed.emit()
 
 
@@ -1450,6 +1505,41 @@ func _refresh_waypoint_overlay() -> void:
 	_marker_pickable = _waypoint_overlay.marker_pickables()
 	if not _selected_marker.is_empty():
 		_waypoint_overlay.set_selected_marker(int(_selected_marker["marker_index"]))
+
+
+# (Re)build the always-on marker overlay (a gizmo per marker, labelled with its items.def display
+# name) and re-apply the gizmo highlight for a selected marker. Creates the node under the objects
+# container on first use (and after a re-bake freed it); visible only in Objects mode. Markers are
+# placed + edited as general entities there, so this is the Objects-mode counterpart of the
+# waypoint overlay.
+func _refresh_marker_overlay() -> void:
+	if _mission == null:
+		return
+	var container := _objects_container()
+	if container == null:
+		return
+	if _marker_overlay == null or not is_instance_valid(_marker_overlay):
+		_marker_overlay = MissionMarkerOverlay.new()
+		_marker_overlay.name = "MissionMarkerOverlay"
+		_marker_overlay.visible = _mode == Mode.OBJECTS
+		container.add_child(_marker_overlay)
+	_marker_overlay.rebuild(_mission, _marker_labels())
+	# Re-apply the highlight for a selected marker (the object-selection path holds it in _selected_ref).
+	if not _selected_ref.is_empty() and int(_selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
+		_marker_overlay.set_selected_marker(int(_selected_ref["index"]))
+
+
+# The display name for every marker (aligned to KIND_MARKER index), so the overlay can label each
+# gizmo and the user can tell a player start from a waypoint node. Falls back to "" (no label) when
+# the name can't be resolved.
+func _marker_labels() -> Array:
+	var labels: Array = []
+	if _mission == null:
+		return labels
+	var count := _mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	for i in count:
+		labels.append(entity_display_name(NovaMissionData.KIND_MARKER, i))
+	return labels
 
 
 # Select a marker on the active path by its KIND_MARKER entity index (the inspector's
@@ -2395,6 +2485,9 @@ func _reset_selection_state() -> void:
 	_selected_marker = {}
 	_marker_pickable = []
 	_waypoint_overlay = null
+	# The marker overlay is a container child too, so the re-bake freed it; drop the dangling ref so
+	# the next _refresh_marker_overlay rebuilds it rather than orphaning a freed node.
+	_marker_overlay = null
 	# Zone selection + overlay are likewise container-tied. Unlike the waypoint path, the zone
 	# selection does NOT survive a re-bake (a delete shifts indices), so it resets here too.
 	_selected_zone_index = -1
