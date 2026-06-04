@@ -24,6 +24,26 @@ var _root: VBoxContainer
 var _edit_box: VBoxContainer
 var _box: VBoxContainer
 
+# --- Right-dock split (browser left, editor right) ----------------------------
+# The inspector owns every widget but parents the per-selection editors + the mission-global
+# form under a TabContainer (Selection | Mission) that lives in the shell's right dock
+# (%AssetDock), keeping the left pane to just the mode tabs + the current mode's list/palette.
+# `_detail_root` is the one owned container reparented between the dock and `_root`: when the
+# workspace forwards a dock host it mounts in the dock; with no host (headless / GUT tests) it
+# falls back under `_root`, so the whole tree stays a descendant of `self` and find_child /
+# is_visible_in_tree assertions keep working unchanged.
+var _detail_host: Control       # the %AssetDock PanelContainer, or null (tests / no dock)
+var _detail_host_inner: Control # cached Margin scaffold built once inside the dock
+var _detail_root: VBoxContainer # owned; holds _detail_tabs; reparented dock <-> _root
+var _detail_tabs: TabContainer
+var _sel_content: VBoxContainer     # Selection tab page content (per-mode editors)
+var _mission_content: VBoxContainer # Mission tab page content (header / loadout / groups / summary)
+var _sel_empty: Label               # shown when nothing is selected in the current mode
+# Per-mode editor boxes, split off their left-pane list boxes and parented under _sel_content.
+var _wp_detail_box: VBoxContainer
+var _at_detail_box: VBoxContainer
+var _sc_detail_box: VBoxContainer
+
 # True while programmatically repopulating the edit widgets, so the value_changed
 # handlers ignore the echo and do not re-commit (and re-emit) what they just read.
 var _loading: bool = false
@@ -201,7 +221,10 @@ var _sc_diagnostics: Label
 var _sc_chain: Dictionary = {}
 
 
-func setup(controller) -> void:
+# `detail_host` is the shell's right dock (%AssetDock), forwarded by the workspace adapter; the
+# editor panels + the Mission form mount there. It defaults to null so the existing one-arg test
+# calls (`inspector.setup(fake)`) keep building the whole tree under `_root` unchanged.
+func setup(controller, detail_host: Control = null) -> void:
 	_controller = controller
 	add_theme_constant_override("margin_left", 12)
 	add_theme_constant_override("margin_top", 12)
@@ -219,21 +242,125 @@ func setup(controller) -> void:
 		_root.add_theme_constant_override("separation", 8)
 		_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		scroll.add_child(_root)
-		_build_mode_tabs()
-		_build_edit_panel()
-		_build_place_panel()
-		_build_waypoint_panel()
-		_build_area_trigger_panel()
-		_build_scripting_panel()
-		_build_props_panel()
-		_build_loadout_panel()
-		_build_groups_panel()
+		# Build the dock-resident container first, so the editor / Mission builders below can add
+		# straight into the Selection / Mission tab pages.
+		_detail_host = detail_host
+		_ensure_detail_root()
+		_build_mode_tabs()           # LEFT
+		_build_edit_panel()          # DOCK: Selection
+		_build_place_panel()         # LEFT
+		_build_waypoint_panel()      # LEFT list + DOCK detail
+		_build_area_trigger_panel()  # LEFT list + DOCK detail
+		_build_scripting_panel()     # LEFT list + DOCK detail
+		_build_selection_empty()     # DOCK: Selection standby label (last in the page)
+		_build_props_panel()         # DOCK: Mission
+		_build_loadout_panel()       # DOCK: Mission
+		_build_groups_panel()        # DOCK: Mission
 		_box = VBoxContainer.new()
 		_box.add_theme_constant_override("separation", 6)
 		_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_root.add_child(_box)
+		_mission_content.add_child(_box)
+	else:
+		# Already built (a re-setup): just re-point the dock subtree.
+		set_detail_host(detail_host)
 	if _controller != null and not _controller.changed.is_connected(_refresh):
 		_controller.changed.connect(_refresh)
+	_refresh()
+
+
+# --- Right-dock plumbing ------------------------------------------------------
+# `_detail_root` is built once and reparented between the dock (real host) and `_root` (no host).
+# Each per-mode editor / Mission panel adds into `_sel_content` or `_mission_content`. The tree
+# stays owned by `self`, so a refresh writes into the same widget references regardless of where
+# the subtree currently lives.
+
+func _ensure_detail_root() -> void:
+	if _detail_root != null:
+		return
+	_detail_root = VBoxContainer.new()
+	_detail_root.name = "MissionDetailRoot"
+	_detail_root.add_theme_constant_override("separation", 8)
+	_detail_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_detail_root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+	_detail_tabs = TabContainer.new()
+	_detail_tabs.name = "MissionDetailTabs"
+	_detail_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_detail_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_detail_root.add_child(_detail_tabs)
+
+	_sel_content = _add_detail_page("Selection")
+	_mission_content = _add_detail_page("Mission")
+	# Selection is page 0, the default current tab: this is what keeps the edit panel (and its
+	# Delete button) is_visible_in_tree() in the null-host test path.
+	_detail_tabs.current_tab = 0
+	_attach_detail_root()
+
+
+# Build one TabContainer page (ScrollContainer with horizontal scroll disabled, a content VBox),
+# title it, and return the content VBox.
+func _add_detail_page(title: String) -> VBoxContainer:
+	var page := ScrollContainer.new()
+	page.name = title
+	page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_detail_tabs.add_child(page)
+	_detail_tabs.set_tab_title(_detail_tabs.get_tab_count() - 1, title)
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 8)
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page.add_child(content)
+	return content
+
+
+# Parent `_detail_root` under the dock (when a host is set) or under `_root` (no host). Reparents
+# without freeing, so the live editor widgets keep their state and signal connections.
+func _attach_detail_root() -> void:
+	if _detail_root == null or not is_instance_valid(_detail_root):
+		return
+	var target: Control = _detail_host_box() if (_detail_host != null and is_instance_valid(_detail_host)) else _root
+	if target == null:
+		return
+	var current := _detail_root.get_parent()
+	if current == target:
+		return
+	if current != null:
+		current.remove_child(_detail_root)
+	target.add_child(_detail_root)
+
+
+# Lazily build a margin scaffold inside the bare %AssetDock PanelContainer and cache it. The dock
+# pages scroll their own content, so the scaffold is just a padded host. The shell owns the dock's
+# lifetime (it remove_child + frees the scaffold on switch-away), so we never free it ourselves.
+func _detail_host_box() -> Control:
+	if _detail_host == null or not is_instance_valid(_detail_host):
+		return null
+	if _detail_host_inner != null and is_instance_valid(_detail_host_inner) and _detail_host_inner.get_parent() == _detail_host:
+		return _detail_host_inner
+	var margin := MarginContainer.new()
+	margin.name = "MissionDockMargin"
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_detail_host.add_child(margin)
+	_detail_host_inner = margin
+	return _detail_host_inner
+
+
+# Re-point the dock subtree at a new host (or null to evacuate it back under `_root` before the
+# shell clears the dock on a workspace switch). Idempotent: the same host already mounted is a no-op,
+# which absorbs the shell re-asserting the dock on every editor-state sync without thrashing focus.
+func set_detail_host(detail_host: Control) -> void:
+	if detail_host == _detail_host and _detail_root != null and is_instance_valid(_detail_root) and _detail_root.get_parent() != null:
+		return
+	_detail_host = detail_host
+	if _detail_root == null:
+		return  # not built yet; setup() attaches on first build
+	_attach_detail_root()
 	_refresh()
 
 
@@ -252,7 +379,32 @@ func _refresh() -> void:
 	if _controller != null and not _controller.is_objects_mode():
 		_edit_box.visible = false
 		_place_box.visible = false
+	_refresh_selection_empty()
 	_rebuild_summary()
+
+
+# The Selection tab's standby label: shown when the current mode has no editor on screen (no
+# mission, or Objects mode with nothing selected — the other modes always show their editor with
+# disabled fields). Each per-mode editor box has already set its own visibility by this point.
+func _build_selection_empty() -> void:
+	_sel_empty = ObjectUiHelpers.add_muted_label(_sel_content, "")
+	_sel_empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+
+func _refresh_selection_empty() -> void:
+	if _sel_empty == null:
+		return
+	# Shown only when the current mode has no editor on screen (no mission, or Objects mode with
+	# nothing selected — the other modes always show their editor with disabled fields).
+	var any_editor := _edit_box.visible or _wp_detail_box.visible or _at_detail_box.visible or _sc_detail_box.visible
+	_sel_empty.visible = not any_editor
+	if any_editor:
+		return
+	var has_mission := _controller != null and _controller.get_mission() != null
+	if has_mission:
+		_sel_empty.text = "Select an object in the viewport, or pick one from the palette to place it."
+	else:
+		_sel_empty.text = "Open a mission, then select an object, zone, or event to edit it here."
 
 
 # --- Editable selection panel (persistent) ------------------------------------
@@ -261,7 +413,7 @@ func _build_edit_panel() -> void:
 	_edit_box = VBoxContainer.new()
 	_edit_box.add_theme_constant_override("separation", 4)
 	_edit_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_root.add_child(_edit_box)
+	_sel_content.add_child(_edit_box)
 
 	# The identity line is the section heading: it reads the selected model's name (resolved
 	# from items.def) prominently, with a muted kind + index subline beneath, so the user
@@ -750,20 +902,6 @@ func _build_waypoint_panel() -> void:
 	_wp_box.add_child(_wp_list)
 	_wp_list.item_selected.connect(_on_wp_path_selected)
 
-	# Active-path flags. "Loop" is shown (not "DoesNotLoop") so the toggle reads the way the
-	# route behaves; the controller inverts it back to the stored bit.
-	_wp_box.add_child(HSeparator.new())
-	ObjectUiHelpers.add_section_heading(_wp_box, "Path")
-	var flags_row := HBoxContainer.new()
-	flags_row.add_theme_constant_override("separation", 10)
-	_wp_box.add_child(flags_row)
-	_wp_loop_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionWpLoop", "Loop")
-	_wp_blue_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionWpBlue", "Blue")
-	_wp_red_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionWpRed", "Red")
-	_wp_loop_check.toggled.connect(_on_wp_flag_toggled)
-	_wp_blue_check.toggled.connect(_on_wp_flag_toggled)
-	_wp_red_check.toggled.connect(_on_wp_flag_toggled)
-
 	# The active path's markers in route order. Selecting a row selects that marker.
 	ObjectUiHelpers.add_section_heading(_wp_box, "Markers")
 	_wp_marker_list = ItemList.new()
@@ -800,8 +938,30 @@ func _build_waypoint_panel() -> void:
 	_wp_box.add_child(_wp_clear_button)
 	_wp_clear_button.pressed.connect(_on_wp_clear_pressed)
 
-	_wp_box.add_child(HSeparator.new())
-	_wp_marker_label = ObjectUiHelpers.add_muted_label(_wp_box, "")
+	# --- Detail (dock Selection): active-path flags + selected-marker readout -----
+	# These edit the selected path / marker, so they live in the Selection tab beside the other
+	# per-selection editors. "Loop" is shown (not "DoesNotLoop") so the toggle reads the way the
+	# route behaves; the controller inverts it back to the stored bit.
+	_wp_detail_box = VBoxContainer.new()
+	_wp_detail_box.add_theme_constant_override("separation", 4)
+	_wp_detail_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_wp_detail_box.visible = false
+	_sel_content.add_child(_wp_detail_box)
+
+	ObjectUiHelpers.add_section_heading(_wp_detail_box, "Path")
+	var flags_row := HBoxContainer.new()
+	flags_row.add_theme_constant_override("separation", 10)
+	_wp_detail_box.add_child(flags_row)
+	_wp_loop_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionWpLoop", "Loop")
+	_wp_blue_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionWpBlue", "Blue")
+	_wp_red_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionWpRed", "Red")
+	_wp_loop_check.toggled.connect(_on_wp_flag_toggled)
+	_wp_blue_check.toggled.connect(_on_wp_flag_toggled)
+	_wp_red_check.toggled.connect(_on_wp_flag_toggled)
+
+	_wp_detail_box.add_child(HSeparator.new())
+	ObjectUiHelpers.add_section_heading(_wp_detail_box, "Selected marker")
+	_wp_marker_label = ObjectUiHelpers.add_muted_label(_wp_detail_box, "")
 	_wp_marker_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 
@@ -871,6 +1031,7 @@ func _refresh_waypoint_panel() -> void:
 		return
 	var wp: bool = _controller != null and _controller.is_waypoint_mode() and _controller.get_mission() != null
 	_wp_box.visible = wp
+	_wp_detail_box.visible = wp
 	if not wp:
 		return
 
@@ -995,30 +1156,37 @@ func _build_area_trigger_panel() -> void:
 	_at_box.add_child(_at_list)
 	_at_list.item_selected.connect(_on_at_row_selected)
 
-	_at_box.add_child(HSeparator.new())
-	ObjectUiHelpers.add_section_heading(_at_box, "Bounds (mission units)")
+	# --- Detail (dock Selection): the selected zone's bounds + flags + delete ------
+	# The six bounds spins gain the wider dock column over the cramped left lane.
+	_at_detail_box = VBoxContainer.new()
+	_at_detail_box.add_theme_constant_override("separation", 4)
+	_at_detail_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_at_detail_box.visible = false
+	_sel_content.add_child(_at_detail_box)
+
+	ObjectUiHelpers.add_section_heading(_at_detail_box, "Bounds (mission units)")
 	# The format stores bounds as signed 16.16 fixed-point, so the representable range is
 	# ~±32768 mission units; the spins are bounded to that (the lib also clamps on write).
 	const ZONE_MIN := -32767.0
 	const ZONE_MAX := 32767.0
 	_at_min_spins = [
-		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMinX", "Min X", ZONE_MIN, ZONE_MAX, 0.001),
-		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMinY", "Min Y", ZONE_MIN, ZONE_MAX, 0.001),
-		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMinZ", "Min Z", ZONE_MIN, ZONE_MAX, 0.001),
+		ObjectUiHelpers.add_spin_row(_at_detail_box, "MissionAtMinX", "Min X", ZONE_MIN, ZONE_MAX, 0.001),
+		ObjectUiHelpers.add_spin_row(_at_detail_box, "MissionAtMinY", "Min Y", ZONE_MIN, ZONE_MAX, 0.001),
+		ObjectUiHelpers.add_spin_row(_at_detail_box, "MissionAtMinZ", "Min Z", ZONE_MIN, ZONE_MAX, 0.001),
 	]
 	_at_max_spins = [
-		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMaxX", "Max X", ZONE_MIN, ZONE_MAX, 0.001),
-		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMaxY", "Max Y", ZONE_MIN, ZONE_MAX, 0.001),
-		ObjectUiHelpers.add_spin_row(_at_box, "MissionAtMaxZ", "Max Z", ZONE_MIN, ZONE_MAX, 0.001),
+		ObjectUiHelpers.add_spin_row(_at_detail_box, "MissionAtMaxX", "Max X", ZONE_MIN, ZONE_MAX, 0.001),
+		ObjectUiHelpers.add_spin_row(_at_detail_box, "MissionAtMaxY", "Max Y", ZONE_MIN, ZONE_MAX, 0.001),
+		ObjectUiHelpers.add_spin_row(_at_detail_box, "MissionAtMaxZ", "Max Z", ZONE_MIN, ZONE_MAX, 0.001),
 	]
 	for axis in 3:
 		_at_min_spins[axis].value_changed.connect(_on_at_bounds_changed)
 		_at_max_spins[axis].value_changed.connect(_on_at_bounds_changed)
 
-	ObjectUiHelpers.add_section_heading(_at_box, "Flags")
+	ObjectUiHelpers.add_section_heading(_at_detail_box, "Flags")
 	var flags_row := HBoxContainer.new()
 	flags_row.add_theme_constant_override("separation", 10)
-	_at_box.add_child(flags_row)
+	_at_detail_box.add_child(flags_row)
 	_at_active_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionAtActive", "Active")
 	_at_constrain_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionAtConstrainZ", "Constrain height")
 	_at_active_check.tooltip_text = "Zone is enforced (flags bit 0x01). When clear, the engine ignores it."
@@ -1026,12 +1194,12 @@ func _build_area_trigger_panel() -> void:
 	_at_active_check.toggled.connect(_on_at_flag_toggled)
 	_at_constrain_check.toggled.connect(_on_at_flag_toggled)
 
-	_at_box.add_child(HSeparator.new())
+	_at_detail_box.add_child(HSeparator.new())
 	_at_delete_button = Button.new()
 	_at_delete_button.name = "MissionAtDeleteZone"
 	_at_delete_button.text = "Delete zone"
 	_at_delete_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_at_box.add_child(_at_delete_button)
+	_at_detail_box.add_child(_at_delete_button)
 	_at_delete_button.pressed.connect(_on_at_delete_pressed)
 
 
@@ -1072,6 +1240,7 @@ func _refresh_area_trigger_panel() -> void:
 		return
 	var on: bool = _controller != null and _controller.is_area_trigger_mode() and _controller.get_mission() != null
 	_at_box.visible = on
+	_at_detail_box.visible = on
 	if not on:
 		return
 
@@ -1183,42 +1352,49 @@ func _build_scripting_panel() -> void:
 
 	_sc_delete_event_button = _make_sc_button(_sc_box, "MissionScDeleteEvent", "Delete event", _on_sc_delete_event)
 
-	_sc_box.add_child(HSeparator.new())
-	ObjectUiHelpers.add_section_heading(_sc_box, "Event")
+	# --- Detail (dock Selection): the selected event's flags + triggers + actions -
+	# The dense chain editor moves to the wider dock; the left pane keeps just the event browser.
+	_sc_detail_box = VBoxContainer.new()
+	_sc_detail_box.add_theme_constant_override("separation", 4)
+	_sc_detail_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_sc_detail_box.visible = false
+	_sel_content.add_child(_sc_detail_box)
+
+	ObjectUiHelpers.add_section_heading(_sc_detail_box, "Event")
 	# The flag checkboxes are generated from the engine's bit list on the first refresh (a mission must be
 	# loaded for the controller to answer), so a new EventFlags bit appears without touching the UI code.
 	_sc_flags_row = HBoxContainer.new()
 	_sc_flags_row.name = "MissionScEventFlags"
 	_sc_flags_row.add_theme_constant_override("separation", 10)
-	_sc_box.add_child(_sc_flags_row)
-	_sc_reset_spin = ObjectUiHelpers.add_spin_row(_sc_box, "MissionScReset", "Reset after", 0.0, SCRIPT_COUNTER_MAX, 1.0)
-	_sc_delay_spin = ObjectUiHelpers.add_spin_row(_sc_box, "MissionScDelay", "Delay", 0.0, SCRIPT_COUNTER_MAX, 1.0)
+	_sc_detail_box.add_child(_sc_flags_row)
+	_sc_reset_spin = ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScReset", "Reset after", 0.0, SCRIPT_COUNTER_MAX, 1.0)
+	_sc_delay_spin = ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScDelay", "Delay", 0.0, SCRIPT_COUNTER_MAX, 1.0)
 	_sc_reset_spin.tooltip_text = "Ticks before a Reset-after event may fire again (the engine keeps the top 10 bits)."
 	_sc_delay_spin.tooltip_text = "Ticks the event waits, after its triggers pass, before running its actions."
 	_sc_reset_spin.value_changed.connect(_on_sc_attr_changed)
 	_sc_delay_spin.value_changed.connect(_on_sc_attr_changed)
 
-	_sc_box.add_child(HSeparator.new())
-	ObjectUiHelpers.add_section_heading(_sc_box, "Triggers (conditions)")
+	_sc_detail_box.add_child(HSeparator.new())
+	ObjectUiHelpers.add_section_heading(_sc_detail_box, "Triggers (conditions)")
 	_sc_trigger_list = ItemList.new()
 	_sc_trigger_list.name = "MissionScTriggers"
 	_sc_trigger_list.select_mode = ItemList.SELECT_SINGLE
 	_sc_trigger_list.custom_minimum_size = Vector2(0, 76)
 	_sc_trigger_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_sc_box.add_child(_sc_trigger_list)
+	_sc_detail_box.add_child(_sc_trigger_list)
 	_sc_trigger_list.item_selected.connect(_on_sc_trigger_selected)
 	var trig_buttons := HBoxContainer.new()
 	trig_buttons.add_theme_constant_override("separation", 6)
-	_sc_box.add_child(trig_buttons)
+	_sc_detail_box.add_child(trig_buttons)
 	_sc_trigger_add = _make_sc_button(trig_buttons, "MissionScTrigAdd", "Add", _on_sc_trigger_add)
 	_sc_trigger_remove = _make_sc_button(trig_buttons, "MissionScTrigRemove", "Remove", _on_sc_trigger_remove)
 	_sc_trigger_up = _make_sc_button(trig_buttons, "MissionScTrigUp", "Up", _on_sc_trigger_up)
 	_sc_trigger_down = _make_sc_button(trig_buttons, "MissionScTrigDown", "Down", _on_sc_trigger_down)
-	_sc_trigger_main = _add_sc_option(_sc_box, "MissionScTrigMain", "Type", _on_sc_trigger_main_selected)
-	_sc_trigger_sub = _add_sc_option(_sc_box, "MissionScTrigSub", "Sub-type", _on_sc_trigger_sub_selected)
+	_sc_trigger_main = _add_sc_option(_sc_detail_box, "MissionScTrigMain", "Type", _on_sc_trigger_main_selected)
+	_sc_trigger_sub = _add_sc_option(_sc_detail_box, "MissionScTrigSub", "Sub-type", _on_sc_trigger_sub_selected)
 	var trig_flags := HBoxContainer.new()
 	trig_flags.add_theme_constant_override("separation", 10)
-	_sc_box.add_child(trig_flags)
+	_sc_detail_box.add_child(trig_flags)
 	_sc_trigger_negate = ObjectUiHelpers.add_checkbox(trig_flags, "MissionScTrigNeg", "Negate")
 	_sc_trigger_or = ObjectUiHelpers.add_checkbox(trig_flags, "MissionScTrigOr", "OR")
 	_sc_trigger_xor = ObjectUiHelpers.add_checkbox(trig_flags, "MissionScTrigXor", "XOR")
@@ -1229,44 +1405,44 @@ func _build_scripting_panel() -> void:
 	_sc_trigger_or.toggled.connect(_on_sc_trigger_flag_toggled)
 	_sc_trigger_xor.toggled.connect(_on_sc_trigger_flag_toggled)
 	_sc_trigger_params = [
-		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScTrigP1", "Param 1", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScTrigP2", "Param 2", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScTrigP3", "Param 3", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScTrigP4", "Param 4", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScTrigP1", "Param 1", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScTrigP2", "Param 2", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScTrigP3", "Param 3", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScTrigP4", "Param 4", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
 	]
 	for spin in _sc_trigger_params:
 		spin.value_changed.connect(_on_sc_trigger_param_changed)
 
-	_sc_box.add_child(HSeparator.new())
-	ObjectUiHelpers.add_section_heading(_sc_box, "Actions (effects)")
+	_sc_detail_box.add_child(HSeparator.new())
+	ObjectUiHelpers.add_section_heading(_sc_detail_box, "Actions (effects)")
 	_sc_action_list = ItemList.new()
 	_sc_action_list.name = "MissionScActions"
 	_sc_action_list.select_mode = ItemList.SELECT_SINGLE
 	_sc_action_list.custom_minimum_size = Vector2(0, 76)
 	_sc_action_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_sc_box.add_child(_sc_action_list)
+	_sc_detail_box.add_child(_sc_action_list)
 	_sc_action_list.item_selected.connect(_on_sc_action_selected)
 	var act_buttons := HBoxContainer.new()
 	act_buttons.add_theme_constant_override("separation", 6)
-	_sc_box.add_child(act_buttons)
+	_sc_detail_box.add_child(act_buttons)
 	_sc_action_add = _make_sc_button(act_buttons, "MissionScActAdd", "Add", _on_sc_action_add)
 	_sc_action_remove = _make_sc_button(act_buttons, "MissionScActRemove", "Remove", _on_sc_action_remove)
 	_sc_action_up = _make_sc_button(act_buttons, "MissionScActUp", "Up", _on_sc_action_up)
 	_sc_action_down = _make_sc_button(act_buttons, "MissionScActDown", "Down", _on_sc_action_down)
-	_sc_action_type = _add_sc_option(_sc_box, "MissionScActType", "Type", _on_sc_action_type_selected)
-	_sc_action_sub = _add_sc_option(_sc_box, "MissionScActSub", "Sub-type", _on_sc_action_sub_selected)
+	_sc_action_type = _add_sc_option(_sc_detail_box, "MissionScActType", "Type", _on_sc_action_type_selected)
+	_sc_action_sub = _add_sc_option(_sc_detail_box, "MissionScActSub", "Sub-type", _on_sc_action_sub_selected)
 	_sc_action_params = [
-		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScActP1", "Param 1", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScActP2", "Param 2", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScActP3", "Param 3", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_sc_box, "MissionScActP4", "Param 4", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScActP1", "Param 1", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScActP2", "Param 2", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScActP3", "Param 3", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScActP4", "Param 4", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
 	]
 	for spin in _sc_action_params:
 		spin.value_changed.connect(_on_sc_action_param_changed)
 
-	_sc_box.add_child(HSeparator.new())
-	ObjectUiHelpers.add_section_heading(_sc_box, "Diagnostics")
-	_sc_diagnostics = ObjectUiHelpers.add_muted_label(_sc_box, "")
+	_sc_detail_box.add_child(HSeparator.new())
+	ObjectUiHelpers.add_section_heading(_sc_detail_box, "Diagnostics")
+	_sc_diagnostics = ObjectUiHelpers.add_muted_label(_sc_detail_box, "")
 	_sc_diagnostics.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 
@@ -1296,6 +1472,7 @@ func _refresh_scripting_panel() -> void:
 		return
 	var on: bool = _controller != null and _controller.is_scripting_mode() and _controller.get_mission() != null
 	_sc_box.visible = on
+	_sc_detail_box.visible = on
 	if not on:
 		return
 
@@ -1687,14 +1864,14 @@ func _build_props_panel() -> void:
 	_props_toggle.tooltip_text = "Mission-level header: title, world, gameplay, game modes."
 	_props_toggle.button_pressed = false
 	_props_toggle.visible = false
-	_root.add_child(_props_toggle)
+	_mission_content.add_child(_props_toggle)
 
 	_props_box = VBoxContainer.new()
 	_props_box.name = "MissionPropsBox"
 	_props_box.add_theme_constant_override("separation", 4)
 	_props_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_props_box.visible = false
-	_root.add_child(_props_box)
+	_mission_content.add_child(_props_box)
 	_props_toggle.toggled.connect(func(on: bool) -> void: _props_box.visible = on)
 
 	_add_props_line("mission_name", "Name", "Mission title.")
@@ -1819,14 +1996,14 @@ func _build_loadout_panel() -> void:
 	_loadout_toggle.tooltip_text = "Weapons allowed for this mission. An empty list means no restriction (the game uses its default)."
 	_loadout_toggle.button_pressed = false
 	_loadout_toggle.visible = false
-	_root.add_child(_loadout_toggle)
+	_mission_content.add_child(_loadout_toggle)
 
 	_loadout_box = VBoxContainer.new()
 	_loadout_box.name = "MissionLoadoutBox"
 	_loadout_box.add_theme_constant_override("separation", 4)
 	_loadout_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_loadout_box.visible = false
-	_root.add_child(_loadout_box)
+	_mission_content.add_child(_loadout_box)
 	# Repopulate on expand (the per-`changed` refresh skips the list rebuild while collapsed).
 	_loadout_toggle.toggled.connect(func(on: bool) -> void:
 		_loadout_box.visible = on
@@ -2006,14 +2183,14 @@ func _build_groups_panel() -> void:
 	_groups_toggle.tooltip_text = "Per-group data (64 groups). Three raw integer fields per group; their exact meaning is not yet reverse-engineered."
 	_groups_toggle.button_pressed = false
 	_groups_toggle.visible = false
-	_root.add_child(_groups_toggle)
+	_mission_content.add_child(_groups_toggle)
 
 	_groups_box = VBoxContainer.new()
 	_groups_box.name = "MissionGroupsBox"
 	_groups_box.add_theme_constant_override("separation", 4)
 	_groups_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_groups_box.visible = false
-	_root.add_child(_groups_box)
+	_mission_content.add_child(_groups_box)
 	_groups_toggle.toggled.connect(func(on: bool) -> void:
 		_groups_box.visible = on
 		if on:

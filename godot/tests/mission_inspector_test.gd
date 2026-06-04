@@ -1482,3 +1482,84 @@ func test_scripting_trigger_param_survives_external_refresh_while_focused() -> v
 	ctx.fake.changed.emit()
 	assert_eq(inner.text, "70", "focused, in-flight trigger param survives an external refresh")
 
+
+# --- Two-host split: browser left, editor in the right dock -------------------
+# When the workspace forwards a dock host, the per-selection editor + the Mission form mount in the
+# dock while the mode tabs + lists stay in the inspector's own _root. With no host (the one-arg
+# setup the rest of this file uses) the whole tree stays under _root, so every find_child /
+# is_visible_in_tree assertion above keeps working unchanged.
+
+func _make_split(entity: Dictionary) -> Dictionary:
+	var fake := FakeController.new()
+	fake.entity = entity
+	fake.mission_ref = NovaMissionData.new()  # a mission makes the palette + Mission form live
+	var dock := PanelContainer.new()
+	dock.custom_minimum_size = Vector2(280, 0)
+	add_child_autofree(dock)
+	var inspector = MissionInspector.new()
+	add_child_autofree(inspector)
+	inspector.setup(fake, dock)
+	return {"fake": fake, "inspector": inspector, "dock": dock}
+
+
+func test_split_editor_lands_in_dock_browser_stays_left() -> void:
+	var ctx := _make_split(_sample_entity())  # Objects mode (default) with a selection
+	# The entity editor mounts in the dock, not the left root.
+	assert_not_null(ctx.dock.find_child("MissionPosX", true, false), "the entity editor is in the dock")
+	assert_null(ctx.inspector._root.find_child("MissionPosX", true, false), "and not in the left root")
+	# The mode tabs + the place palette stay in the left root.
+	assert_not_null(ctx.inspector._root.find_child("MissionModeTabs", true, false), "the mode tabs stay left")
+	assert_not_null(ctx.inspector._root.find_child("MissionScEvents", true, false), "the event list (a browser) stays left")
+	# The Mission form (header) mounts in the dock too.
+	assert_not_null(ctx.dock.find_child("MissionProp_mission_name", true, false), "the Mission header form is in the dock")
+
+
+func test_split_null_host_keeps_everything_under_root() -> void:
+	# The regression guard for the one-arg path the rest of this file uses: with no dock, the editor
+	# subtree falls back under _root, so find_child / is_visible_in_tree still reach it.
+	var ctx := _make(_sample_entity())
+	assert_not_null(ctx.inspector._root.find_child("MissionPosX", true, false), "no dock -> editor under _root")
+	assert_true(ctx.inspector._edit_box.visible, "the edit panel shows with a selection")
+	assert_true(ctx.inspector._delete_button.is_visible_in_tree(), "and the Delete button is on screen (Selection is the default tab)")
+
+
+func test_split_mode_switch_reroutes_dock_content() -> void:
+	var ctx := _make_split(_sample_entity())
+	assert_true(ctx.inspector._edit_box.visible, "Objects mode shows the entity editor in the dock")
+	assert_false(ctx.inspector._at_detail_box.visible, "and not the zone editor")
+	var dock_box: Node = ctx.inspector._detail_root.get_parent()
+	# Switch to Triggers (area-trigger) mode.
+	ctx.fake.mode = 2
+	ctx.fake.changed.emit()
+	assert_false(ctx.inspector._edit_box.visible, "the entity editor hides outside Objects mode")
+	assert_true(ctx.inspector._at_detail_box.visible, "the zone editor shows in Triggers mode")
+	assert_eq(ctx.inspector._detail_root.get_parent(), dock_box, "the dock subtree is not reparented on a mode switch")
+
+
+func test_split_edit_through_dock_widget_commits_via_controller() -> void:
+	var ctx := _make_split(_sample_entity())
+	var team := ctx.dock.find_child("MissionTeam", true, false) as SpinBox
+	assert_not_null(team, "the Team spin lives in the dock")
+	team.value = 5.0  # fires value_changed through the _loading guard
+	assert_eq(ctx.fake.team_calls, 1, "an edit in the dock commits exactly once via the controller")
+	assert_eq(ctx.fake.last_team, 5, "with the new value")
+
+
+func test_split_set_detail_host_null_evacuates_without_freeing() -> void:
+	var ctx := _make_split(_sample_entity())
+	var edit_box = ctx.inspector._edit_box
+	assert_not_null(ctx.dock.find_child("MissionPosX", true, false), "editor starts in the dock")
+	# Evacuate (the shell calls this on switch-away, before it frees the dock's children).
+	ctx.inspector.set_detail_host(null)
+	assert_true(is_instance_valid(edit_box), "the editor is reparented, not freed")
+	assert_not_null(ctx.inspector._root.find_child("MissionPosX", true, false), "and now lives under _root")
+	assert_null(ctx.dock.find_child("MissionPosX", true, false), "no longer under the dock")
+	# Re-mount (switch-back).
+	ctx.inspector.set_detail_host(ctx.dock)
+	assert_not_null(ctx.dock.find_child("MissionPosX", true, false), "re-mounting puts it back in the dock")
+	# A repeated set with the same host is an idempotent no-op (the shell re-asserts the dock on
+	# every editor-state sync).
+	var parent_before: Node = ctx.inspector._detail_root.get_parent()
+	ctx.inspector.set_detail_host(ctx.dock)
+	assert_eq(ctx.inspector._detail_root.get_parent(), parent_before, "same-host re-mount does not thrash the subtree")
+

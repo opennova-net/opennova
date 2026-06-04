@@ -18,6 +18,12 @@ const MissionInspectorScript = preload("res://modtools/mission/mission_inspector
 var terrain_editor: Node
 var _controller  # MissionController
 var _mount: ViewportMount
+# The live inspector + the shell's right dock (%AssetDock). The inspector splits its UI across the
+# left pane (browser) and the dock (per-selection editor + Mission form). The shell forwards the
+# dock via set_asset_dock BEFORE build_inspector on activation, so we cache it and hand it over when
+# the inspector is built (or push it into an already-built inspector on a re-sync / teardown).
+var _inspector  # MissionInspector (preloaded, no class_name)
+var _detail_host: Control
 
 
 func _init(value: Node = null) -> void:
@@ -316,6 +322,32 @@ func redo() -> void:
 # --- Inspector ----------------------------------------------------------------
 
 func build_inspector(host: Control) -> void:
-	var panel := MissionInspectorScript.new()
-	host.add_child(panel)
-	panel.setup(_controller)
+	_inspector = MissionInspectorScript.new()
+	host.add_child(_inspector)
+	# The dock host was forwarded just before this (set_asset_dock at shell line 585, build_inspector
+	# at 592), so it is already cached: the fresh inspector builds its editor + Mission form straight
+	# into the dock with no reparent.
+	_inspector.setup(_controller, _detail_host)
+
+
+# --- Asset dock (the right pane) ----------------------------------------------
+# Opt into %AssetDock and host the per-selection editor + the Mission form there, keeping the left
+# pane to just the mode tabs + the current mode's list/palette. The inspector owns the dock subtree
+# and reparents it back under its own root on teardown (set_asset_dock(null)) before the shell frees
+# the dock's children, so the editor widgets are never torn down.
+
+func uses_asset_dock() -> bool:
+	return true
+
+
+func set_asset_dock(dock: Control) -> void:
+	_detail_host = dock
+	# is_instance_valid guards the gap between switch-away (old inspector freed) and switch-back
+	# (set_asset_dock fires before build_inspector rebuilds it): skip the stale ref, just cache.
+	if _inspector != null and is_instance_valid(_inspector):
+		_inspector.set_detail_host(dock)
+
+
+func sync_asset_dock() -> void:
+	if _inspector != null and is_instance_valid(_inspector) and _detail_host != null:
+		_inspector.set_detail_host(_detail_host)

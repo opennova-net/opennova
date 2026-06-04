@@ -63,3 +63,29 @@ func test_undo_redo_hooks_delegate_to_the_controller() -> void:
 	assert_true(ws.can_undo(), "can_undo reflects the controller's undo stack")
 	ws._controller._redo_stack.append(PackedByteArray([2]))
 	assert_true(ws.can_redo(), "can_redo reflects the controller's redo stack")
+
+
+# --- Right-dock split: the inspector mounts its editor in %AssetDock ----------
+
+func test_uses_asset_dock() -> void:
+	var ws = MissionWorkspace.new()
+	assert_true(ws.uses_asset_dock(), "the mission workspace opts into the right dock")
+
+
+func test_asset_dock_before_build_hosts_the_editor() -> void:
+	# The shell forwards the dock (set_asset_dock) BEFORE building the inspector on activation; the
+	# adapter caches it so the fresh inspector builds its editor straight into the dock.
+	var ws = MissionWorkspace.new()
+	var dock := PanelContainer.new()
+	add_child_autofree(dock)
+	var host := Control.new()
+	add_child_autofree(host)
+	ws.set_asset_dock(dock)
+	ws.build_inspector(host)
+	assert_not_null(dock.find_child("MissionPosX", true, false), "the entity editor mounts in the dock")
+	assert_null(host.find_child("MissionPosX", true, false), "and not in the left inspector host")
+	# On switch-away the shell calls set_asset_dock(null) before clearing the dock; the editor must
+	# reparent back under the inspector (host) rather than be freed.
+	ws.set_asset_dock(null)
+	assert_null(dock.find_child("MissionPosX", true, false), "the dock is emptied of the editor")
+	assert_not_null(host.find_child("MissionPosX", true, false), "the editor is reparented under the inspector host")
