@@ -9,6 +9,7 @@ const TerrainEditorAssetDockScene = preload("res://modtools/terrain/ui/editor_as
 const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
 const EnvironmentInspectorScript = preload("res://modtools/environment/environment_inspector.gd")
 const QuadrantBoardScript = preload("res://modtools/terrain/ui/widgets/quadrant_board.gd")
+const MissionInspectorScript = preload("res://modtools/mission/mission_inspector.gd")
 const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const FIXTURE_CACHE_DIR := "opennova_test"
 
@@ -291,19 +292,31 @@ func test_mission_workspace_exposes_document_actions_and_inspector() -> void:
 
 	var actions_host: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
 	var inspector_host: Control = workstation.get_node("%InspectorHost")
+	var asset_dock: Control = workstation.get_node("%AssetDock")
 	assert_eq(workstation.get_node("%ProjectLabel").text, "Mission", "An unloaded Mission workspace owns the shell title while active.")
-	assert_false(workstation.get_node("%AssetDock").visible, "Terrain properties should hide outside the terrain workspace.")
+	assert_true(asset_dock.visible, "Mission authoring hosts its per-selection editor + Mission form in the shared right dock.")
 	assert_null(workstation.get_node_or_null("%FileMenu"), "Global File menu should be removed.")
 	assert_null(workstation.get_node_or_null("%SaveButton"), "Global Save button should be removed.")
 	assert_null(workstation.get_node_or_null("%ExportButton"), "Global Export button should be removed.")
-	# Authoring (Phase 1) lands Save / Save As alongside Open. The shell builds these
-	# buttons up front (before a mission is loaded); they sit disabled until there is a
-	# loaded / dirtied mission. The inspector replaces the old "Coming soon" stub.
+	# Authoring lands New (create-from-scratch) + Save / Save As alongside Open. The shell builds
+	# these buttons up front (before a mission is loaded); Save / Save As sit disabled until there
+	# is a loaded / dirtied mission. The real MissionInspector replaces the old "Coming soon" stub:
+	# its left pane (mode tabs + lists) mounts in %InspectorHost, while its Selection | Mission
+	# editor reparents into the shared right dock.
 	assert_true(actions_host.visible, "Mission should expose its document actions.")
-	assert_eq(_workspace_action_texts(actions_host), ["Open Mission...", "Save Mission", "Save Mission As..."],
-		"Mission exposes Open + Save + Save As once authoring lands.")
-	assert_true(_has_label_text(inspector_host, "Mission"), "Mission should show its inspector panel.")
+	assert_eq(_workspace_action_texts(actions_host), ["New Mission", "Open Mission...", "Save Mission", "Save Mission As..."],
+		"Mission exposes New + Open + Save + Save As once authoring lands.")
+	# The left pane mounts the real MissionInspector node (its Selection | Mission editor reparents
+	# into the dock). The prior workspace's inspector children are queue_free'd, which is deferred,
+	# so they can still coexist this same frame; find the inspector by script rather than by index.
+	var inspector: Node = null
+	for child in inspector_host.get_children():
+		if child.get_script() == MissionInspectorScript:
+			inspector = child
+			break
+	assert_not_null(inspector, "Mission should mount its real inspector panel in the left pane, not a placeholder.")
 	assert_false(_has_label_text(inspector_host, "Coming soon"), "The coming-soon stub should be gone.")
+	assert_gt(asset_dock.get_child_count(), 0, "Mission authoring mounts its Selection + Mission editor in the right dock.")
 
 
 func test_resource_index_lists_object_resources_without_glb_models() -> void:
@@ -867,8 +880,9 @@ func test_workstation_mounts_workspace_specific_right_docks() -> void:
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
 
-	assert_false(dock.visible, "Mission should hide the right dock host.")
-	assert_eq(dock.get_child_count(), 0, "Workspaces without a right dock should leave the shared host empty.")
+	assert_true(dock.visible, "Mission authoring shows the shared right dock for its per-selection editor + Mission form.")
+	assert_gt(dock.get_child_count(), 0, "Mission should mount its inspector detail content in the shared right dock.")
+	assert_null(_find_node_by_name(dock, "TerrainAssetDock"), "Switching from Object to Mission should clear the prior dock content.")
 
 
 func test_workspace_switching_mounts_terrain_and_mission_viewports() -> void:
