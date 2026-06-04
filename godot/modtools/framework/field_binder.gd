@@ -52,9 +52,17 @@ func bind_line(line: LineEdit, getter: Callable, setter: Callable) -> LineEdit:
 		var v: String = getter.call(info)
 		if line.text != v and not line.has_focus():
 			line.text = v)
+	# Commit on BOTH Enter (text_submitted) and focus-out. Focus-out is essential: leaving a field for
+	# another one WITHOUT pressing Enter must persist the edit, otherwise the next model `changed`
+	# (e.g. from committing a sibling field) re-syncs this now-unfocused LineEdit back to its stale
+	# model value and silently blanks what the user just typed. The guard suppresses any echo during a
+	# programmatic sync_from; model-side dedupe makes a no-op focus-out commit harmless.
 	line.text_submitted.connect(func(value: String):
 		if not _guard.active:
 			setter.call(value))
+	line.focus_exited.connect(func():
+		if not _guard.active:
+			setter.call(line.text))
 	return line
 
 

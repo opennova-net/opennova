@@ -56,3 +56,21 @@ func test_color_and_line_bind_push_and_emit() -> void:
 	line.text_submitted.emit("world")
 	assert_eq(color_writes, [Color(0, 1, 0, 1)], "color_changed should call the color setter.")
 	assert_eq(text_writes, ["world"], "text_submitted should call the line setter.")
+
+
+func test_line_commits_on_focus_out() -> void:
+	# Leaving a field for another one WITHOUT pressing Enter must still persist the edit. Otherwise the
+	# next model `changed` re-syncs this now-unfocused LineEdit back to its stale model value and
+	# silently blanks the user's typing (the mission-header "Name blanks when you tab to Designer" bug).
+	var binder = FieldBinderScript.new()
+	var writes := []
+	var line := LineEdit.new()
+	add_child_autofree(line)
+	binder.bind_line(line, func(info): return String(info.get("name", "")), func(v): writes.append(v))
+	line.text = "typed but not submitted"
+	line.focus_exited.emit()
+	assert_eq(writes, ["typed but not submitted"], "focus-out should commit the current text once.")
+	# And a programmatic sync_from (which writes .text on unfocused fields) must not echo a commit.
+	binder.sync_from({"name": "from model"})
+	assert_eq(line.text, "from model", "sync_from pushes the model value.")
+	assert_eq(writes.size(), 1, "sync_from must not commit through the setter.")

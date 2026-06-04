@@ -363,6 +363,8 @@ struct Header {
     uint32_t num_buildings;
     uint32_t num_markers;
     uint32_t num_people;
+    // The loader does NOT read events using this field; the event count comes from the dedicated
+    // 3-count block [orig: EventTrigger_LoadAllData @0x453eb0]. Round-tripped verbatim regardless.
     uint32_t num_events;
     WeatherType weather_type;
     uint8_t win_conditions[8];

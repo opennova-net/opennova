@@ -1442,13 +1442,21 @@ func test_select_new_waypoint_path_enables_from_scratch_authoring() -> void:
 	var controller := _loaded_with_selection()
 	controller.set_waypoint_mode(true)
 	var idx := controller.select_new_waypoint_path()
-	assert_true(idx >= 0, "an empty path is available to start a new route")
+	# A new route must be authored at a FOLLOWABLE index: waypoint_id 0 == "no path" in the engine, so
+	# record 0 is reserved and never offered in the Behavior picker. Authoring into it would create a
+	# route no unit could ever follow (the "waypoint path doesn't populate paths to choose from" bug).
+	assert_gt(idx, 0, "a new route is authored at index >= 1 (record 0 is the reserved 'no path' slot)")
 	assert_eq(controller.get_selected_waypoint_path_index(), idx, "and it becomes the active path")
 	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 0, "the new path starts empty")
 	# Authoring into the freshly-focused path now works end to end.
 	assert_true(controller.add_marker_to_active_path_at_world(Vector3(10, 5, -10)),
 		"a marker can be added to the new path")
 	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 1, "and lands on it")
+	# And the authored route now appears in the Behavior "Waypoint path" picker.
+	var ids: Array = []
+	for o in controller.get_waypoint_path_options():
+		ids.append(int((o as Dictionary)["id"]))
+	assert_true(ids.has(idx), "the newly authored route appears in the waypoint-path picker")
 
 
 func test_switching_paths_clears_a_shared_marker_highlight() -> void:

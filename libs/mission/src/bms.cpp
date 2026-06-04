@@ -418,19 +418,24 @@ bool parse_waypoint_record(Reader& r, WaypointRecord& wp, std::string& error) {
     wp.flags = static_cast<WaypointFlags>(r.read_u32());
     wp.marker_count = r.read_u32();
 
-    // Validate marker_count to prevent integer underflow in padding calculation
-    if (wp.marker_count > 32) {
-        error = "invalid waypoint marker_count: " + std::to_string(wp.marker_count);
-        return false;
-    }
+    // The on-disk record is a fixed 136 bytes: flags(4) + marker_count(4) + a 128-byte data region
+    // (kMaxWaypointSlots = 32 marker-index u32s). The engine reads the whole waypoint block as one
+    // fixed blob (fread(Buffer, 0x88, 0x80) @0x40fb56) and NEVER validates marker_count at load -- so
+    // a record may carry a count > 32 (CP19.bms ships one with marker_count == 39). Preserve the count
+    // verbatim for byte-exact round-trip, but cap the slot split at the 128-byte region so the padding
+    // math can't underflow (this also hardens against an outright corrupt count).
+    // (The engine also forces flags |= 1 when marker_count == 1 [orig: @0x40fb7a] -- a runtime
+    //  normalization applied after load, so we do NOT replicate it here; it would break round-trip.)
+    constexpr uint32_t kMaxWaypointSlots = (kWaypointRecordSize - 8) / 4; // 32
+    const uint32_t slots = wp.marker_count < kMaxWaypointSlots ? wp.marker_count : kMaxWaypointSlots;
 
     wp.waypoint_numbers.clear();
-    for (uint32_t i = 0; i < wp.marker_count; i++) {
+    for (uint32_t i = 0; i < slots; i++) {
         wp.waypoint_numbers.push_back(r.read_u32());
     }
 
-    // Read remaining bytes as padding (128 bytes for waypoint numbers, minus what we used)
-    size_t used = wp.marker_count * 4;
+    // Read remaining bytes as padding (128-byte region minus the slots we consumed).
+    size_t used = slots * 4;
     size_t remaining = 128 - used;
     wp.padding.resize(remaining);
     r.read_bytes(wp.padding.data(), remaining);
@@ -579,6 +584,9 @@ void write_action(Writer& w, const Action& a) {
 }
 
 bool parse_bounding_box(Reader& r, BoundingBox& bb, std::string& /*error*/) {
+    // 0x24-byte record: min/max XYZ (16.16) + 12 opaque bytes. The engine swaps each axis so min<=max
+    // AFTER reading [orig: Mission_LoadBMSFile @0x40fcf4]; that is a runtime normalization, so we
+    // preserve the on-disk order verbatim for byte-exact round-trip (the editor normalizes on author).
     bb.min_x = r.read_i32();
     bb.min_y = r.read_i32();
     bb.min_z = r.read_i32();
@@ -633,7 +641,15 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
 
     Reader r(data, size);
 
-    // Parse header
+    // Section read order + sizes verified byte-for-byte against the engine loader
+    // [orig: Mission_LoadBMSFile @0x40f7b6 (Jointops.exe)]:
+    //   header 0x268 -> weapon-loadout chunk (hdr+0x242) -> secondary chunk (hdr+0x246, seeked) ->
+    //   items/buildings/markers/organics (0xAC each; counts @hdr+0xA4/0xA8/0xAC/0xB0) ->
+    //   waypoints 0x88 x128 -> groups 0x20 x64 -> layers 0x14 x32 ->
+    //   area triggers 0x20 x (hdr+0x240) -> event block -> bbox count(i32) + boxes 0x24.
+    // The event block (counts + arrays) is read by EventTrigger_LoadAllData @0x453eb0. This order is
+    // exercised end-to-end by tests/mission/mission_corpus_test.cpp (byte-exact round-trip over the
+    // full shipped mission set).
     if (!parse_header(r, out.header, error)) {
         return false;
     }
@@ -717,7 +733,10 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
         }
     }
 
-    // Read event/trigger/action counts
+    // Read event/trigger/action counts, then each array. This dedicated 3-count block -- NOT the
+    // header's num_events @hdr+0xB4 -- is the loader's source of truth for the event count
+    // [orig: EventTrigger_LoadAllData @0x453eb0 reads dword_AE0700/0708/0710 then sizes the arrays
+    // 24/32/32]. header.num_events is round-tripped verbatim but is not consulted to read events here.
     out.events_count = r.read_i32();
     out.trigger_count = r.read_i32();
     out.action_count = r.read_i32();

@@ -934,7 +934,7 @@ func set_selected_rotation(rot_deg: Vector3) -> void:
 	# degrees, so keeping a fractional value would leave get_selected_rotation out of
 	# step with the persisted record on the next axis edit.
 	_selected_rotation_deg = rot_deg.round()
-	var basis := Basis.from_euler(MissionObjectPlacer.bms_to_godot_rotation(_selected_rotation_deg))
+	var basis := MissionObjectPlacer.bms_to_godot_basis(_selected_rotation_deg)
 	_apply_selected_xform(Transform3D(basis, _selected_xform.origin))
 	_commit_selected_transform()
 
@@ -1486,9 +1486,14 @@ func _first_nonempty_path() -> int:
 func _first_empty_path() -> int:
 	if _mission == null:
 		return -1
+	# Reserve record index 0: the engine reads waypoint_id (byte 79) with 0 == "follow no path"
+	# [orig: Entity_SpawnFromBMSRecord @0x40f02f, `if (record[79])`], so a route authored into record 0
+	# can never be a follow target and get_waypoint_path_options omits it. Author new routes from
+	# index 1 so they show up in the Behavior "Waypoint path" picker.
 	for s in _mission.get_waypoint_summaries():
-		if int((s as Dictionary)["marker_count"]) == 0:
-			return int((s as Dictionary)["index"])
+		var idx := int((s as Dictionary)["index"])
+		if idx >= 1 and int((s as Dictionary)["marker_count"]) == 0:
+			return idx
 	return -1
 
 

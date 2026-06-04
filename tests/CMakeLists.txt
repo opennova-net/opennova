@@ -73,6 +73,14 @@ target_link_libraries(mission_c_abi_test PRIVATE opennova_mission)
 target_include_directories(mission_c_abi_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_c_abi COMMAND mission_c_abi_test)
 
+# Corpus round-trip: parse->write byte-exact over a directory of real shipped .bms missions.
+# Gated on OPENNOVA_MISSION_CORPUS (copyrighted assets, not committed); skips + passes when unset.
+add_executable(mission_corpus_test mission/mission_corpus_test.cpp)
+target_link_libraries(mission_corpus_test PRIVATE opennova_mission)
+target_include_directories(mission_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_corpus_test PRIVATE cxx_std_17)
+add_test(NAME mission_corpus COMMAND mission_corpus_test)
+
 # PFF tests
 add_executable(pff_unit_test pff/pff_unit_test.cpp)
 target_link_libraries(pff_unit_test PRIVATE opennova_pff)

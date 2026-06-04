@@ -64,32 +64,41 @@ func _init(p_resource_root: NovaResourceRoot = null, p_item_db: NovaItemDatabase
 
 
 # --- Coordinate conversion (BMS is Z-up; Godot is Y-up) -----------------------
-# Ported from the reference mission importer and kept as pure static helpers so
-# they are unit-testable without any assets. Position is rotated -90 deg about X;
-# rotation negates pitch/yaw and adds a half-turn of yaw, matching the authored
-# heading convention.
+# Pure static helpers (unit-testable without assets). Position is a -90 deg rotation
+# about X; orientation is a structural port of the engine's matrix builder conjugated
+# into Godot's basis (see bms_to_godot_basis).
 
 static func bms_to_godot_position(p: Vector3) -> Vector3:
 	# A -90 deg rotation about X maps (x, y, z) -> (x, z, -y).
 	return Vector3(p.x, p.z, -p.y)
 
 
-static func bms_to_godot_rotation(rot_deg: Vector3) -> Vector3:
-	# rot_deg = (pitch, yaw, roll) in degrees -> Godot euler (YXZ order).
-	# [orig: Entity_SpawnFromBMSRecord @0x40eb66 (Jointops.exe): heading = (90 - yaw) as a 32-bit BAM,
-	#  pitch (@0x40eb86) and roll (@0x40eba6) used POSITIVE. The 3DI mesh import flips X only
-	#  (godot_position = (-x,y,z), nova_object_data.cpp:887 — a LH->RH conversion keeping +Z), so the
-	#  +PI (180-yaw) here is correct for +Z-forward models. Pitch/roll signs are unverified under the
-	#  X-flip and only matter for tilted entities — visual A/B pending.]
-	return Vector3(
-		deg_to_rad(-rot_deg.x),
-		deg_to_rad(-rot_deg.y) + PI,
-		deg_to_rad(rot_deg.z))
+# Godot orientation basis for an entity authored as (pitch, yaw, roll) in degrees.
+#
+# [orig: Entity_SpawnFromBMSRecord @0x40eb66 + Math_BuildFixedPointMatrixFromEulerAngles @0x613f40,
+#  called via Entity_UpdateOrientationMatrix @0x43b440 (Jointops.exe)] The engine builds the world
+#  matrix as Rz(90-yaw) * Ry(pitch) * Rx(roll) in its Z-up, right-handed world: yaw drives the Z/up
+#  axis (euler[3] = 90 - yaw), pitch the Y axis (euler[4], positive), roll the X axis (euler[5],
+#  positive). Conjugating by the position basis M:(x,y,z)->(x,z,-y) -- which sends engine +Z->godot
+#  +Y, +Y->godot -Z, +X->godot +X -- gives the faithful Godot world rotation
+#      R_godot = RotY(90 - yaw) * RotZ(-pitch) * RotX(roll).
+#  The .3di model imports Y-up / +Z-forward, so a constant model-forward correction C = RotY(90)
+#  turns the model's +Z nose onto the engine's +X canonical heading. For yaw-only this collapses to
+#  RotY(180 - yaw) -- identical to the long-standing (visually-correct) heading -- while correcting
+#  pitch, which the old euler form (Rx(-pitch) in a YXZ basis) tipped the wrong way (nose up instead
+#  of down). Roll was already equivalent. See godot/tests/mission_object_placer_test.gd.
+static func bms_to_godot_basis(rot_deg: Vector3) -> Basis:
+	var pitch := deg_to_rad(rot_deg.x)
+	var yaw := deg_to_rad(rot_deg.y)
+	var roll := deg_to_rad(rot_deg.z)
+	return Basis(Vector3.UP, deg_to_rad(90.0) - yaw) \
+		* Basis(Vector3.BACK, -pitch) \
+		* Basis(Vector3.RIGHT, roll) \
+		* Basis(Vector3.UP, deg_to_rad(90.0))
 
 
 static func entity_transform(position: Vector3, rotation_deg: Vector3) -> Transform3D:
-	var euler := bms_to_godot_rotation(rotation_deg)
-	return Transform3D(Basis.from_euler(euler), bms_to_godot_position(position))
+	return Transform3D(bms_to_godot_basis(rotation_deg), bms_to_godot_position(position))
 
 
 # Inverse of bms_to_godot_position: a Godot-space point back to mission (BMS) space.

@@ -26,22 +26,51 @@ func test_position_is_minus_90_about_x() -> void:
 			"position conversion matches the -90 deg X basis for %s" % v)
 
 
-func test_rotation_negates_pitch_yaw_and_half_turns_yaw() -> void:
-	var rot := Placer.bms_to_godot_rotation(Vector3(30, 90, 45))
-	assert_almost_eq(rot.x, deg_to_rad(-30.0), 0.0001, "pitch negated")
-	assert_almost_eq(rot.y, deg_to_rad(-90.0) + PI, 0.0001, "yaw negated + half turn")
-	assert_almost_eq(rot.z, deg_to_rad(45.0), 0.0001, "roll preserved")
+# Yaw-only must stay byte-for-byte the long-standing (visually-correct) heading: the engine's
+# Rz(90 - yaw) about the up axis, conjugated into Godot and composed with the +Z-forward model
+# correction C = RotY(90), collapses to RotY(180 - yaw) -- exactly the previous euler form. This is
+# the no-regression guard for the common (untilted) case. [orig: @0x40eb66 / @0x613f40]
+func test_yaw_only_basis_matches_the_legacy_heading() -> void:
+	for yaw in [0.0, 45.0, 90.0, 180.0, 270.0]:
+		var got := Placer.bms_to_godot_basis(Vector3(0, yaw, 0))
+		var legacy := Basis(Vector3.UP, PI - deg_to_rad(yaw))
+		assert_true(got.is_equal_approx(legacy),
+			"yaw=%s basis is RotY(180 - yaw), unchanged from the legacy heading" % yaw)
+
+
+# Pitch must tip the model's nose the way the engine does. The model's local forward is +Z
+# (Vector3.BACK). At yaw=0, a +30 deg pitch points the nose DOWN: forward = (0, -sin30, -cos30),
+# matching M * Rz(90) * Ry(30) * (+X_engine). The old euler form produced (0, +sin30, -cos30) --
+# nose UP -- which is the bug this fix corrects. [orig: @0x40eb86 / @0x613f40]
+func test_pitch_tips_the_nose_down_like_the_engine() -> void:
+	var basis := Placer.bms_to_godot_basis(Vector3(30, 0, 0))
+	var forward: Vector3 = basis * Vector3.BACK
+	var up: Vector3 = basis * Vector3.UP
+	assert_true(forward.is_equal_approx(Vector3(0.0, -sin(deg_to_rad(30.0)), -cos(deg_to_rad(30.0)))),
+		"a downward pitch points the nose down (engine-faithful), not up")
+	assert_true(up.is_equal_approx(Vector3(0.0, cos(deg_to_rad(30.0)), -sin(deg_to_rad(30.0)))),
+		"and the model's up tilts to match")
+
+
+# Roll banks the model about its forward axis the way the engine does. At yaw=90 (so the heading
+# term is identity), a +30 deg roll tilts the up vector to (0, cos30, sin30), matching
+# M * Rx(30) * (+Z_engine). [orig: @0x40eba6 / @0x613f40]
+func test_roll_banks_like_the_engine() -> void:
+	var basis := Placer.bms_to_godot_basis(Vector3(0, 90, 30))
+	var up: Vector3 = basis * Vector3.UP
+	assert_true(up.is_equal_approx(Vector3(0.0, cos(deg_to_rad(30.0)), sin(deg_to_rad(30.0)))),
+		"roll banks the up vector engine-faithfully")
 
 
 func test_entity_transform_composes_basis_and_origin() -> void:
 	var pos := Vector3(10, 20, 30)
-	var rot_deg := Vector3(0, 180, 0)
+	var rot_deg := Vector3(15, 180, 25)
 	var xform := Placer.entity_transform(pos, rot_deg)
 	assert_true(
 		xform.origin.is_equal_approx(Placer.bms_to_godot_position(pos)),
 		"origin is the converted position")
-	var expected_basis := Basis.from_euler(Placer.bms_to_godot_rotation(rot_deg))
-	assert_true(xform.basis.is_equal_approx(expected_basis), "basis is the converted rotation")
+	assert_true(xform.basis.is_equal_approx(Placer.bms_to_godot_basis(rot_deg)),
+		"basis is the converted rotation")
 
 
 func test_godot_to_bms_position_inverts_bms_to_godot() -> void:

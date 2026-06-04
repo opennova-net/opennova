@@ -1644,7 +1644,12 @@ std::vector<WaypointSummary> MissionDocument::waypoint_summaries() const {
 		WaypointSummary summary;
 		summary.index = i;
 		summary.flags = static_cast<int>(record.flags);
-		summary.marker_count = static_cast<int>(record.marker_count);
+		// Report the count the editor can actually act on. A shipped record may carry a raw
+		// marker_count above the 32-slot region (CP19.bms has 39); the parser preserves that on
+		// disk for byte-exact round-trip, but the editor only ever has min(count, 32) marker slots,
+		// so clamp here to keep the path-list label honest and the ">0 = populated" test correct.
+		summary.marker_count = static_cast<int>(
+				std::min<uint32_t>(record.marker_count, static_cast<uint32_t>(kMaxWaypointPathMarkers)));
 		out.push_back(summary);
 	}
 	return out;
