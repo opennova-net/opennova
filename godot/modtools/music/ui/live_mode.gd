@@ -148,6 +148,13 @@ func _on_document_changed() -> void:
 		var shown: String = _inspector_panel.current_section()
 		if shown != "":
 			_show_section_in_inspector(shown)
+	# If the user is drilled into a section's blueprint, an edit / undo / redo must
+	# rebuild that graph too (document.changed only refreshes the map + inspector
+	# above). Re-populate from the new AST; if the section vanished (deleted, or
+	# renamed out from under the breadcrumb), fall back to the map.
+	if _logic_graph != null and _logic_graph.visible and _logic_section_name != "":
+		if not _populate_logic_graph(_logic_section_name):
+			_back_to_map()
 
 
 func _ready() -> void:
@@ -1106,6 +1113,16 @@ func _install_logic_graph() -> void:
 	_logic_graph.visible = false
 	_logic_graph.statement_selected.connect(_on_logic_statement_selected)
 	_logic_graph.open_section_requested.connect(func(n): _drill_into(String(n)))
+	# Stage 3 authoring intents reuse the inspector's document handlers verbatim --
+	# the graph and the inspector emit the same add/replace/delete/reorder/add-play
+	# signals, so one set of parity-gated, undoable write-path routes serves both.
+	_logic_graph.add_statement_requested.connect(_on_inspector_add_statement)
+	_logic_graph.replace_statement_requested.connect(_on_inspector_replace_statement)
+	_logic_graph.delete_statement_requested.connect(_on_inspector_delete_statement)
+	_logic_graph.reorder_statement_requested.connect(_on_inspector_reorder_statement)
+	_logic_graph.add_play_requested.connect(_on_inspector_add_play)
+	_logic_graph.open_raw_requested.connect(_on_inspector_advanced)
+	_logic_graph.author_failed.connect(func(msg: String): _flash_start_warning(msg))
 	col.add_child(_logic_graph)
 
 
@@ -1115,19 +1132,34 @@ func _install_logic_graph() -> void:
 func _drill_into(section_name: String) -> void:
 	if _logic_graph == null or _document == null or not _document.script_loaded():
 		return
+	if not _populate_logic_graph(section_name):
+		return
+	_logic_section_name = section_name
+	_logic_graph.visible = true
+	_set_map_chrome_visible(false)
+	_breadcrumb.visible = true
+	_breadcrumb_label.text = "  ▸  %s   (blueprint)" % section_name
+	_follow_live = false
+	_show_section_in_inspector(section_name)
+
+
+# Build (or rebuild) the logic graph for `section_name` from the current AST,
+# configuring its authoring context FIRST so the per-node tools + ＋Add palette
+# match the script's current editability (can_author). Returns false if the
+# section no longer exists (e.g. an edit/undo renamed or removed it).
+func _populate_logic_graph(section_name: String) -> bool:
+	if _logic_graph == null or _document == null or not _document.script_loaded():
+		return false
 	var sn := StringName(_document.mus_script.get_default_script_name())
 	var ast: Array = _document.mus_script.get_program_ast(sn)
 	for sec in ast:
 		if String(sec.get("name", "")) == section_name:
+			var editable: bool = _document.has_method("can_author") and _document.can_author()
+			var section_names: PackedStringArray = _document.mus_script.get_section_names(sn)
+			_logic_graph.configure_authoring(section_names, _build_var_list(), _document.mus_script, _bank_names(), editable)
 			_logic_graph.show_section(sec, _bank_names())
-			_logic_section_name = section_name
-			_logic_graph.visible = true
-			_set_map_chrome_visible(false)
-			_breadcrumb.visible = true
-			_breadcrumb_label.text = "  ▸  %s   (blueprint)" % section_name
-			_follow_live = false
-			_show_section_in_inspector(section_name)
-			return
+			return true
+	return false
 
 
 func _back_to_map() -> void:

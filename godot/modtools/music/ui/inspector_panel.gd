@@ -10,14 +10,18 @@ extends VBoxContainer
 #
 # Phase 2 (authoring): in editable mode every top-level statement gains a ✎/✕/↑/↓
 # tool cluster, a "＋ Add" palette offers the full construct menu, and the header
-# carries Rename / Delete-state. Each edit builds canonical names-less .mus lines
-# (MusStmtText / MusExpr) and emits an intent the host routes to the document's
-# parity-gated write path. Plays keep their drag/▶/✕ chip affordances.
+# carries Rename / Delete-state. The construct palette + per-kind forms live in the
+# shared MusForms (so this inspector and the logic-graph blueprint emit identical
+# canonical names-less .mus lines via MusStmtText / MusExpr); each edit emits an
+# intent the host routes to the document's parity-gated write path. Plays keep
+# their drag/▶/✕ chip affordances.
 
 const MusicTrackChipClass = preload("res://modtools/music/ui/track_chip.gd")
-const MusStmtText = preload("res://modtools/music/mus_stmt_text.gd")
-const MusExpr = preload("res://modtools/music/mus_expr.gd")
-const ExprBuilderClass = preload("res://modtools/music/ui/expr_builder.gd")
+const MusForms = preload("res://modtools/music/mus_forms.gd")
+
+# Shared authoring-form factory (palette + per-kind dialogs). Configured fresh
+# before each open so a live edit sees the current section/var/bank context.
+var _forms = MusForms.new()
 
 signal preview_requested(track_index: int)
 signal jump_requested(section_name: StringName)
@@ -483,50 +487,23 @@ func _track_name(track: int) -> String:
 # Authoring: the "＋ Add" palette + per-construct forms.
 # =====================================================================
 
-const _ADD_ITEMS := [
-	["→  enter a state", "transition"],
-	["↪  goto a label", "goto"],
-	["ƒ  call a state", "call"],
-	["⋔  on (selector) …", "switch"],
-	["◇  if / else", "if"],
-	["✎  set a variable", "assign"],
-	["±  increment / decrement", "incdec"],
-	["ƒ  call a method", "expr"],
-	["⏎  return", "return"],
-	["⏸  yield", "yield"],
-	# nop is intentionally NOT offered: the decompiler renders nop as nothing, so an
-	# authored nop has no text line -- it would vanish on the next re-decompile and
-	# couldn't be deleted/reordered. (A pre-existing top-level nop is shown read-only.)
-]
-
-
 func _populate_add_menu(popup: PopupMenu) -> void:
 	popup.clear()
-	for i in range(_ADD_ITEMS.size()):
-		popup.add_item(String(_ADD_ITEMS[i][0]), i)
+	for i in range(MusForms.ADD_ITEMS.size()):
+		popup.add_item(String(MusForms.ADD_ITEMS[i][0]), i)
 	if not popup.id_pressed.is_connected(_on_add_menu_id):
 		popup.id_pressed.connect(_on_add_menu_id)
 
 
 func _on_add_menu_id(id: int) -> void:
-	if id < 0 or id >= _ADD_ITEMS.size():
+	if id < 0 or id >= MusForms.ADD_ITEMS.size():
 		return
-	var kind := String(_ADD_ITEMS[id][1])
-	match kind:
-		"return", "yield":
-			# No inputs -- insert directly.
-			add_statement_requested.emit(_section_index, _simple_lines(kind))
-		_:
-			_open_add_form(kind)
-
-
-func _simple_lines(kind: String) -> PackedStringArray:
-	match kind:
-		"return":
-			return MusStmtText.ret()
-		"yield":
-			return MusStmtText.yield_stmt()
-	return PackedStringArray()
+	var kind := String(MusForms.ADD_ITEMS[id][1])
+	if _forms.is_inputless(kind):
+		# No inputs -- insert the canonical line directly.
+		add_statement_requested.emit(_section_index, _forms.simple_lines(kind))
+	else:
+		_open_add_form(kind)
 
 
 # Open an authoring form for a NEW statement (ordinal < 0) ...
@@ -552,38 +529,12 @@ func _open_edit_form(kind: String, ordinal: int, stmt: Dictionary) -> void:
 func _open_form(kind: String, ordinal: int, prefill: Dictionary) -> void:
 	# Capture the section index NOW: a background refresh (a live VM transition)
 	# can re-point the panel at another state while the dialog is open, so reading
-	# _section_index at confirm time could emit against the wrong section.
+	# _section_index at confirm time could emit against the wrong section. The
+	# palette + per-kind forms live in MusForms; configure it with the current
+	# context, then let it own the dialog and hand back the produced lines.
 	var sidx := _section_index
-	var dlg := ConfirmationDialog.new()
-	dlg.title = ("Edit " if ordinal >= 0 else "Add ") + kind
-	dlg.min_size = Vector2i(380, 140)
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 6)
-	dlg.add_child(box)
-	# state captured per-kind, read in the confirmed handler via a producer Callable
-	var producer: Callable = Callable()
-
-	match kind:
-		"transition", "goto", "call":
-			producer = _build_transition_form(box, kind, prefill)
-		"play":
-			producer = _build_play_form(box, prefill)
-		"assign":
-			producer = _build_assign_form(box, prefill)
-		"incdec":
-			producer = _build_incdec_form(box, prefill)
-		"expr":
-			producer = _build_expr_form(box, prefill)
-		"if":
-			producer = _build_if_form(box, prefill)
-		"switch":
-			producer = _build_switch_form(box, prefill)
-		_:
-			producer = func() -> PackedStringArray: return PackedStringArray()
-
-	add_child(dlg)
-	dlg.confirmed.connect(func():
-		var lines: PackedStringArray = producer.call()
+	_forms.configure(_section_names, _var_list, _mus, _bank_names)
+	_forms.open_form(self, kind, prefill, ordinal >= 0, func(lines: PackedStringArray):
 		if lines.is_empty():
 			# Nothing buildable (e.g. no target picked / no track loaded): tell the
 			# user instead of closing as if the edit applied.
@@ -591,294 +542,7 @@ func _open_form(kind: String, ordinal: int, prefill: Dictionary) -> void:
 		elif ordinal >= 0:
 			replace_statement_requested.emit(sidx, ordinal, lines)
 		else:
-			add_statement_requested.emit(sidx, lines)
-		dlg.queue_free()
-	)
-	dlg.canceled.connect(func(): dlg.queue_free())
-	dlg.close_requested.connect(func(): dlg.queue_free())
-	dlg.popup_centered()
-
-
-# Play track-swap form: a single track picker seeded from the row's current track.
-func _build_play_form(box: VBoxContainer, prefill: Dictionary) -> Callable:
-	box.add_child(_label("Play which track?"))
-	var tob := OptionButton.new()
-	for i in range(_bank_names.size()):
-		tob.add_item("%d: %s" % [i, _track_name(i)])
-	if _bank_names.is_empty():
-		# No bank loaded: still let the user pick a slot index by number.
-		for i in range(8):
-			tob.add_item("sound_%d" % i)
-	var cur := int(prefill.get("track", -1))
-	if cur >= 0 and cur < tob.item_count:
-		tob.select(cur)
-	box.add_child(tob)
-	return func() -> PackedStringArray:
-		if tob.selected < 0:
-			return PackedStringArray()
-		return MusStmtText.play(tob.selected)
-
-
-# --- per-construct form builders (return a producer -> PackedStringArray) ---
-
-func _section_option(selected_name: String) -> OptionButton:
-	var ob := OptionButton.new()
-	for i in range(_section_names.size()):
-		ob.add_item(_section_names[i])
-		if _section_names[i] == selected_name:
-			ob.select(ob.item_count - 1)
-	return ob
-
-
-func _var_option(selected_token: String, selected_offset: int = -1) -> OptionButton:
-	var ob := OptionButton.new()
-	var picked := -1
-	for i in range(_var_list.size()):
-		ob.add_item(String(_var_list[i].get("label", _var_list[i].get("token", "Var00"))))
-		if String(_var_list[i].get("token", "")) == selected_token:
-			picked = i
-	if _var_list.is_empty():
-		ob.add_item("Var00")
-	# Fall back to byte-offset matching when the resolved name didn't match a token:
-	# a script with editor-named globals reports its custom name (e.g. "Intensity"),
-	# not "VarNN", so a name-only match would silently default to Var00 on edit.
-	# 64 is the last 4-byte-aligned global offset (Var16, MUS_GLOBALS_BYTES 68).
-	if picked < 0 and selected_offset >= 0 and selected_offset <= 64:
-		var idx := selected_offset / 4
-		if idx < _var_list.size():
-			picked = idx
-	if picked >= 0:
-		ob.select(picked)
-	return ob
-
-
-func _var_token_at(ob: OptionButton) -> String:
-	var idx := ob.selected
-	if idx >= 0 and idx < _var_list.size():
-		return String(_var_list[idx].get("token", "Var00"))
-	return "Var00"
-
-
-func _build_transition_form(box: VBoxContainer, kind: String, prefill: Dictionary) -> Callable:
-	var lbl := Label.new()
-	lbl.text = "Go to which state?"
-	box.add_child(lbl)
-	var target := String(prefill.get("target_name", ""))
-	var ob := _section_option(target)
-	box.add_child(ob)
-	return func() -> PackedStringArray:
-		if ob.selected < 0 or ob.selected >= _section_names.size():
-			return PackedStringArray()
-		var name := _section_names[ob.selected]
-		match kind:
-			"goto":
-				return MusStmtText.goto_section(name)
-			"call":
-				return MusStmtText.call_section(name)
-			_:
-				return MusStmtText.enter(name)
-
-
-func _build_assign_form(box: VBoxContainer, prefill: Dictionary) -> Callable:
-	var row := HBoxContainer.new()
-	row.add_child(Label.new())
-	row.get_child(0).text = "Set"
-	var vob := _var_option(String(prefill.get("var_name", "")), int(prefill.get("var_offset", -1)))
-	row.add_child(vob)
-	var eq := Label.new()
-	eq.text = "="
-	row.add_child(eq)
-	box.add_child(row)
-	var eb := ExprBuilderClass.new()
-	eb.setup(_var_list, _mus)
-	box.add_child(eb)
-	if prefill.has("rhs"):
-		eb.set_expression_text(String(prefill.get("rhs", "")))
-	return func() -> PackedStringArray:
-		return MusStmtText.assign(_var_token_at(vob), eb.get_expression_text())
-
-
-func _build_incdec_form(box: VBoxContainer, prefill: Dictionary) -> Callable:
-	var row := HBoxContainer.new()
-	var vob := _var_option(String(prefill.get("var_name", "")), int(prefill.get("var_offset", -1)))
-	row.add_child(vob)
-	var dir := OptionButton.new()
-	dir.add_item("++  (increment)", 1)
-	dir.add_item("--  (decrement)", 0)
-	dir.select(0 if bool(prefill.get("is_inc", true)) else 1)
-	row.add_child(dir)
-	box.add_child(row)
-	return func() -> PackedStringArray:
-		return MusStmtText.incdec(_var_token_at(vob), dir.get_selected_id() == 1)
-
-
-func _build_expr_form(box: VBoxContainer, prefill: Dictionary) -> Callable:
-	var lbl := Label.new()
-	lbl.text = "Run an expression (e.g. a function call):"
-	box.add_child(lbl)
-	var eb := ExprBuilderClass.new()
-	eb.setup(_var_list, _mus)
-	box.add_child(eb)
-	if prefill.has("expr"):
-		eb.set_expression_text(String(prefill.get("expr", "")))
-	return func() -> PackedStringArray:
-		return MusStmtText.expr_stmt(eb.get_expression_text())
-
-
-# if / else: condition + a single then-action and optional else-action (enter a
-# state or play a track). Richer multi-statement branches are a follow-up; this
-# covers the dominant conditional-transition / conditional-play case.
-func _build_if_form(box: VBoxContainer, prefill: Dictionary) -> Callable:
-	box.add_child(_label("When this is true:"))
-	var cond := ExprBuilderClass.new()
-	cond.setup(_var_list, _mus)
-	box.add_child(cond)
-	if prefill.has("expr"):
-		cond.set_expression_text(String(prefill.get("expr", "")))
-
-	box.add_child(_label("then:"))
-	var then_action := _action_picker()
-	box.add_child(then_action[0])
-	var with_else := CheckBox.new()
-	with_else.text = "otherwise (else):"
-	with_else.button_pressed = bool(prefill.get("else_present", false))
-	box.add_child(with_else)
-	var else_action := _action_picker()
-	box.add_child(else_action[0])
-
-	return func() -> PackedStringArray:
-		var then_line := _action_line(then_action)
-		if then_line == "":
-			return PackedStringArray()
-		var then_body := PackedStringArray([then_line])
-		var else_body := PackedStringArray()
-		var has_else := with_else.button_pressed
-		if has_else:
-			var el := _action_line(else_action)
-			if el == "":
-				has_else = false
-			else:
-				else_body = PackedStringArray([el])
-		return MusStmtText.if_block(cond.get_expression_text(), then_body, has_else, else_body)
-
-
-# A small [enter state | play track] action picker; returns [container, kind_opt,
-# section_opt, track_opt] so _action_line can read it.
-func _action_picker() -> Array:
-	var row := HBoxContainer.new()
-	var kind_opt := OptionButton.new()
-	kind_opt.add_item("enter a state", 0)
-	kind_opt.add_item("play a track", 1)
-	row.add_child(kind_opt)
-	var sob := _section_option("")
-	row.add_child(sob)
-	var tob := OptionButton.new()
-	for i in range(_bank_names.size()):
-		tob.add_item("%d: %s" % [i, _track_name(i)])
-	tob.visible = false
-	row.add_child(tob)
-	kind_opt.item_selected.connect(func(idx):
-		sob.visible = (idx == 0)
-		tob.visible = (idx == 1))
-	return [row, kind_opt, sob, tob]
-
-
-func _action_line(picker: Array) -> String:
-	var kind_opt: OptionButton = picker[1]
-	if kind_opt.get_selected_id() == 1:
-		var tob: OptionButton = picker[3]
-		var t := tob.selected
-		if t < 0:
-			return ""
-		return "play sound_%d" % t
-	var sob: OptionButton = picker[2]
-	if sob.selected < 0 or sob.selected >= _section_names.size():
-		return ""
-	return "enter %s" % _section_names[sob.selected]
-
-
-# on (selector) <action> <targets...>. Action enter/goto -> section targets;
-# play -> track targets. A simple add/remove target list.
-func _build_switch_form(box: VBoxContainer, prefill: Dictionary) -> Callable:
-	box.add_child(_label("Choose based on:"))
-	var sel := ExprBuilderClass.new()
-	sel.setup(_var_list, _mus)
-	box.add_child(sel)
-	if prefill.has("expr"):
-		sel.set_expression_text(String(prefill.get("expr", "")))
-
-	var arow := HBoxContainer.new()
-	arow.add_child(_label("action:"))
-	var action := OptionButton.new()
-	action.add_item("enter", 0)
-	action.add_item("goto", 1)
-	action.add_item("play", 2)
-	var pa := String(prefill.get("action", "enter"))
-	action.select(2 if pa == "play" else (1 if pa == "goto" else 0))
-	arow.add_child(action)
-	box.add_child(arow)
-
-	var targets_box := VBoxContainer.new()
-	box.add_child(targets_box)
-	var add_target := Button.new()
-	add_target.text = "＋ add target"
-	box.add_child(add_target)
-
-	var rows: Array = []  # each: [container, section_opt, track_opt]
-	var add_row := func(sec_name: String, track: int) -> void:
-		var r := HBoxContainer.new()
-		var sob := _section_option(sec_name)
-		r.add_child(sob)
-		var tob := OptionButton.new()
-		for i in range(_bank_names.size()):
-			tob.add_item("%d: %s" % [i, _track_name(i)])
-		if track >= 0 and track < tob.item_count:
-			tob.select(track)
-		r.add_child(tob)
-		var is_play: bool = action.get_selected_id() == 2
-		sob.visible = not is_play
-		tob.visible = is_play
-		var rm := _tool_button("✕", "Remove target")
-		r.add_child(rm)
-		targets_box.add_child(r)
-		var entry := [r, sob, tob]
-		rows.append(entry)
-		rm.pressed.connect(func():
-			rows.erase(entry)
-			r.queue_free())
-	# Seed from prefill targets, else one empty row.
-	var pretargets: Array = prefill.get("targets", [])
-	if pretargets.is_empty():
-		add_row.call("", -1)
-	else:
-		for t in pretargets:
-			add_row.call(String(t.get("name", "")), int(t.get("track", -1)))
-	add_target.pressed.connect(func(): add_row.call("", -1))
-	action.item_selected.connect(func(idx):
-		var is_play: bool = idx == 2
-		for e in rows:
-			(e[1] as OptionButton).visible = not is_play
-			(e[2] as OptionButton).visible = is_play)
-
-	return func() -> PackedStringArray:
-		var act := "enter"
-		if action.get_selected_id() == 1:
-			act = "goto"
-		elif action.get_selected_id() == 2:
-			act = "play"
-		var toks := PackedStringArray()
-		for e in rows:
-			if act == "play":
-				var tob: OptionButton = e[2]
-				if tob.selected >= 0:
-					toks.append("sound_%d" % tob.selected)
-			else:
-				var sob: OptionButton = e[1]
-				if sob.selected >= 0 and sob.selected < _section_names.size():
-					toks.append(_section_names[sob.selected])
-		if toks.is_empty():
-			return PackedStringArray()
-		return MusStmtText.switch_stmt(sel.get_expression_text(), act, toks)
+			add_statement_requested.emit(sidx, lines))
 
 
 func _label(text: String) -> Label:
