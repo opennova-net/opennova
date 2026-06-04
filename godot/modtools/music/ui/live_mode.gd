@@ -95,6 +95,7 @@ var _last_log_count: int = 0
 @onready var _inspector: VBoxContainer = %Inspector
 @onready var _advanced_drawer: PanelContainer = %AdvancedDrawer
 @onready var _advanced_toggle: Button = %AdvancedToggle
+var _add_state_btn: Button
 
 
 func bind_document(document: RefCounted) -> void:
@@ -133,6 +134,12 @@ func _on_document_changed() -> void:
 	_refresh_var_labels()
 	_refresh_jump_options()
 	_refresh_now_playing()
+	# Re-show the pinned section so an edit / undo / redo refreshes its statement
+	# list (and clears the inspector if that section was removed by the edit).
+	if _inspector_panel != null and _inspector_panel.has_method("current_section"):
+		var shown: String = _inspector_panel.current_section()
+		if shown != "":
+			_show_section_in_inspector(shown)
 
 
 func _ready() -> void:
@@ -169,6 +176,7 @@ func _ready() -> void:
 	_inspector_panel.remove_play_requested.connect(_on_inspector_remove_play)
 	if _advanced_toggle != null:
 		_advanced_toggle.toggled.connect(_on_advanced_toggled)
+	_install_add_state_button()
 	if _var_inspector.has_method("bind_director"):
 		_var_inspector.call("bind_director", _director)
 	_apply_state_label(VM_STOPPED)
@@ -200,6 +208,9 @@ func _process(_delta: float) -> void:
 	if state == VM_RUNNING or state == VM_PAUSED:
 		if _var_inspector != null and _var_inspector.has_method("refresh_from_director"):
 			_var_inspector.call("refresh_from_director")
+		_update_live_highlight(state)
+	elif _inspector_panel != null and _inspector_panel.has_method("set_active_offset"):
+		_inspector_panel.set_active_offset(-1)
 
 
 func _on_start() -> void:
@@ -742,9 +753,10 @@ func _script_panel() -> Node:
 	return find_child("Script", true, false)
 
 
-# Resolve a section from the current model and show it in the right-dock
-# inspector. came_from is the breadcrumb (the section the VM just left); empty
-# when browsing manually or on the entry section.
+# Resolve a section from the structured program AST and show every statement it
+# runs in the right-dock inspector. came_from is the breadcrumb (the section the
+# VM just left); empty when browsing manually or on the entry section. The idle-
+# loop badge is sourced from the topology model so it matches the map node.
 func _show_section_in_inspector(sec: String, came_from: String = "") -> void:
 	if _inspector_panel == null:
 		return
@@ -752,13 +764,116 @@ func _show_section_in_inspector(sec: String, came_from: String = "") -> void:
 		_inspector_panel.clear()
 		return
 	var script_name := StringName(_document.mus_script.get_default_script_name())
-	var model: Array = MusicSectionGraphClass.build(_document.mus_script, script_name)
+	var ast: Array = _document.mus_script.get_program_ast(script_name)
 	var editable: bool = _document.has_method("can_edit_plays") and _document.can_edit_plays()
-	for section in model:
+	for section in ast:
 		if String(section.get("name", "")) == sec:
+			# Derive the idle-loop badge from the AST we already have (a section
+			# whose every outgoing target is itself) rather than re-parsing the
+			# topology model -- it agrees with the map's ↻ badge for every real
+			# script (the self-loop case both detect identically).
+			section["is_idle_loop"] = _ast_section_is_idle(section)
 			_inspector_panel.show_section(section, _bank_names(), came_from, editable)
 			return
 	_inspector_panel.clear()
+
+
+# A section is an idle self-loop when it has at least one outgoing section target
+# and every distinct target is itself -- the same definition mus_build_section_model
+# uses, computed from the AST so no second parse is needed.
+func _ast_section_is_idle(section: Dictionary) -> bool:
+	var own := int(section.get("index", -1))
+	var targets: Dictionary = {}
+	_collect_section_targets(section.get("statements", []), targets)
+	if targets.is_empty():
+		return false
+	for t in targets.keys():
+		if int(t) != own:
+			return false
+	return true
+
+
+func _collect_section_targets(stmts: Array, out: Dictionary) -> void:
+	for s in stmts:
+		match String(s.get("kind", "")):
+			"transition", "goto", "call", "branch_comment":
+				var ts := int(s.get("target_section", -1))
+				if ts >= 0:
+					out[ts] = true
+			"switch":
+				for t in s.get("targets", []):
+					var sec := int(t.get("section", -1))
+					if sec >= 0:
+						out[sec] = true
+			"if":
+				_collect_section_targets(s.get("then", []), out)
+				_collect_section_targets(s.get("else", []), out)
+
+
+# Light the inspector statement the VM pc is on, but only while the inspector is
+# showing the section that is actually running -- the pc is a global bytecode
+# offset, so another section's rows would mis-bracket it.
+func _update_live_highlight(state: int) -> void:
+	if _inspector_panel == null or not _inspector_panel.has_method("set_active_offset"):
+		return
+	if state == VM_RUNNING and _inspector_panel.current_section() == String(_current_section):
+		_inspector_panel.set_active_offset(_director.current_pc())
+	else:
+		_inspector_panel.set_active_offset(-1)
+
+
+# --- Add State (visual-first authoring slice) --------------------------
+
+# Mount a "＋ Add State" button just above the section map. The loudest missing
+# affordance was that there was no visual way to add a section.
+func _install_add_state_button() -> void:
+	if _map == null:
+		return
+	var col := _map.get_parent()
+	if col == null:
+		return
+	var toolbar := HBoxContainer.new()
+	toolbar.name = "MapToolbar"
+	_add_state_btn = Button.new()
+	_add_state_btn.text = "＋ Add State"
+	_add_state_btn.tooltip_text = "Create a new empty state, then wire it up by dragging tracks onto it and drawing transitions."
+	_add_state_btn.pressed.connect(_on_add_state)
+	toolbar.add_child(_add_state_btn)
+	col.add_child(toolbar)
+	col.move_child(toolbar, _map.get_index())
+
+
+func _on_add_state() -> void:
+	if _document == null or not _document.script_loaded():
+		_flash_start_warning("Open a project first")
+		return
+	if not (_document.has_method("can_edit_plays") and _document.can_edit_plays()):
+		_flash_start_warning("Script must compile to add a state")
+		return
+	if not _document.has_method("add_section"):
+		return
+	var new_name := _unique_state_name()
+	if not _document.add_section(StringName(new_name)):
+		_flash_start_warning("Could not add state")
+		return
+	_log_typed(EvType.SYSTEM, "added state %s" % new_name)
+	# add_section emitted `changed` -> the map already rebuilt; pin the inspector
+	# on the new state so the user sees it (and can start authoring it).
+	_follow_live = false
+	_show_section_in_inspector(new_name)
+
+
+# Lowest free "State_N" so a fresh state never collides with an existing section.
+func _unique_state_name() -> String:
+	var existing: Dictionary = {}
+	if _document != null and _document.script_loaded():
+		var sname := StringName(_document.mus_script.get_default_script_name())
+		for s in _document.mus_script.get_section_names(sname):
+			existing[String(s)] = true
+	var n := 1
+	while existing.has("State_%d" % n):
+		n += 1
+	return "State_%d" % n
 
 
 func _on_sound(idx: int, sound_name: StringName, wait: bool) -> void:

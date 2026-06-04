@@ -58,6 +58,7 @@ void NovaMusicDirector::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("current_section"), &NovaMusicDirector::current_section);
 	ClassDB::bind_method(D_METHOD("vm_state"), &NovaMusicDirector::vm_state);
 	ClassDB::bind_method(D_METHOD("last_error"), &NovaMusicDirector::last_error);
+	ClassDB::bind_method(D_METHOD("current_pc"), &NovaMusicDirector::current_pc);
 
 	// Properties (inspector). We deliberately do NOT expose a script property
 	// because Godot scans for set_script/get_script pairs as the built-in script
@@ -285,6 +286,13 @@ String NovaMusicDirector::last_error() const {
 	}
 	const char *s = mus_vm_last_error(_vm);
 	return String(s ? s : "");
+}
+
+int NovaMusicDirector::current_pc() const {
+	if (_vm == nullptr) {
+		return -1;
+	}
+	return (int)mus_vm_pc(_vm);
 }
 
 // --- Hook trampolines --------------------------------------------------
