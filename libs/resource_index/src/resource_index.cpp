@@ -271,6 +271,11 @@ std::vector<ResourceFileEntry> ResourceIndex::resource_files(const std::string &
 	return out;
 }
 
+void ResourceIndex::set_scr_policy(int scr_policy) {
+	// Vfs::clear() (called by scan) does not reset the policy, so this persists across re-scans.
+	impl_->vfs.set_scr_policy(scr_policy);
+}
+
 bool ResourceIndex::read_file(const std::string &name, std::vector<uint8_t> &out) const {
 	return impl_->vfs.read_file(name, out);
 }

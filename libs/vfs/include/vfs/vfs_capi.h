@@ -47,6 +47,11 @@ VFS_EXPORT int opennova_vfs_mount_game(OpennovaVfs *vfs, const char *game_root,
 
 VFS_EXPORT void opennova_vfs_clear(OpennovaVfs *vfs);
 
+/* Choose how read_file keys SCR payloads. `policy` is a gameprofile ScrPolicy value
+   (0 = version-detect default, 1 = force DEFAULT/JO-Demo, 2 = force JO_DFX2, 3 = force shaders).
+   Persists across mounts. Resolve a game's policy via gameprofile_scr_policy_for_code(). */
+VFS_EXPORT void opennova_vfs_set_scr_policy(OpennovaVfs *vfs, int policy);
+
 /* Resolution. has_file returns 1/0. read_file returns 1 on success and allocates *out
    (free with opennova_vfs_free); the bytes are SCR/BFC1-decoded. read_file_raw returns the
    stored bytes without payload decoding. */

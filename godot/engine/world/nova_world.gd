@@ -126,13 +126,15 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 
 
 # Mount `dir` as the runtime resource root: PFF archives are the packed game data,
-# the `/exp <name>` flag (or persisted setting) layers an expansion over the base, and
-# loose files override the archives only under the `/d` dev flag. Emits load_failed and
-# returns null on a bad root.
+# the `/exp <name>` flag (or persisted setting) layers an expansion over the base,
+# loose files override the archives only under the `/d` dev flag, and the `/game <code>`
+# flag (or persisted setting, default "jo") selects the SCR decode key so demo data
+# decodes correctly. Emits load_failed and returns null on a bad root.
 func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 	var resource_root := NovaResourceRoot.new()
 	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
-	if resource_root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled()) != OK:
+	var game := NovaLaunchFlags.game(ResourceDirSettings.get_game())
+	if resource_root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled(), game) != OK:
 		load_failed.emit(resource_root.get_last_error())
 		return null
 	return resource_root

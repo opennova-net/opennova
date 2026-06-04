@@ -89,6 +89,11 @@ void opennova_vfs_clear(OpennovaVfs *vfs) {
     vfs->vfs.clear();
 }
 
+void opennova_vfs_set_scr_policy(OpennovaVfs *vfs, int policy) {
+    if (!vfs) return;
+    vfs->vfs.set_scr_policy(policy);
+}
+
 int opennova_vfs_has_file(const OpennovaVfs *vfs, const char *name) {
     if (!vfs || !name) return 0;
     return vfs->vfs.has_file(name) ? 1 : 0;

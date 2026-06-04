@@ -129,8 +129,12 @@ bool NovaPffArchive::read_entry_bytes(const Entry &entry, bool decode, std::vect
 		// Decode into a COPY: vfs_decode_payload runs SCR then BFC1 and only swaps on success, so a
 		// SCR-ok/BFC1-fail would leave a half-transformed buffer. On failure we keep `out` as the
 		// container-decrypted fallback (so the file still extracts) and report it via out_decoded.
+		// The SCR key follows the selected game's profile: the version byte alone can't tell the JO
+		// Demo (DEFAULT-keyed) from retail JO/DFX2 (JO_DFX2-keyed), so the dropdown choice matters.
+		const NovaGameProfile *profile = gameprofile_by_id(game_id_);
+		const int scr_policy = profile ? profile->scr_policy : SCR_POLICY_VERSION_DETECT;
 		std::vector<uint8_t> decoded(out);
-		if (opennova::vfs_decode_payload(decoded)) {
+		if (opennova::vfs_decode_payload(decoded, scr_policy)) {
 			out.swap(decoded);
 			if (out_decoded != nullptr) {
 				*out_decoded = true;

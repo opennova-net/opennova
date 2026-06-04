@@ -1,5 +1,6 @@
 // Tests for the engine-faithful VFS: mount precedence, mount_game expansion override, and
 // SCR decode-on-read. Fixtures are synthesized in a temp dir (no game data needed).
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -10,10 +11,29 @@
 
 #include "pff/pff_test_writer.h"
 #include "vfs/vfs.h"
+#include "vfs/vfs_decode.h"
 
 namespace fs = std::filesystem;
 using opennova::Vfs;
 using opennova::VfsSource;
+
+// SCR keys (mirror libs/scr/include/scr/scr.h; vfs_test doesn't link opennova_scr).
+static const uint32_t SCR_KEY_DEFAULT_C = 0xABEEFACEu; // JO Demo
+static const uint32_t SCR_KEY_JO_DFX2_C = 0x2A5A8EADu; // retail JO/DFX2
+
+// Produce the stored SCR form of `plaintext` under `key`: encryption is the inverse of
+// scr_decrypt (which reverses then XORs), i.e. XOR with the keystream then reverse the bytes.
+// The 4-byte "SCR" + version header is prepended by the caller.
+static std::string scr_encrypt(const std::string &plaintext, uint32_t key) {
+    std::string b = plaintext;
+    uint32_t k = key;
+    for (size_t i = 0; i < b.size(); ++i) {
+        k = (((k + ((k << 11) | (k >> 21))) << 4) | ((k + ((k << 11) | (k >> 21))) >> 28)) ^ 1u;
+        b[i] = static_cast<char>(static_cast<uint8_t>(b[i]) ^ static_cast<uint8_t>(k));
+    }
+    std::reverse(b.begin(), b.end());
+    return b;
+}
 
 static int passed = 0;
 static int failed = 0;
@@ -212,6 +232,75 @@ static int test_scr_decode_on_read() {
     return 1;
 }
 
+// The SCR key follows the decode policy, not just the version byte. The JO Demo stamps version 1
+// on files keyed with the DEFAULT key, while retail JO/DFX2 version-1 files use the JO_DFX2 key
+// (which the version byte selects). So decoding a demo-style file needs FORCE_DEFAULT; plain
+// version-detect picks the wrong key and yields garbage. Regression test for the demo .def bug.
+static int test_scr_decode_policy() {
+    const std::string plaintext = "begin \"Null\"\r\n  id 100000\r\n  type marker\r\nend\r\n";
+
+    // A demo-style payload: "SCR" + version byte 1, body encrypted with the DEFAULT key.
+    std::string demo = "SCR";
+    demo.push_back('\x01');
+    demo += scr_encrypt(plaintext, SCR_KEY_DEFAULT_C);
+
+    auto as_bytes = [](const std::string &s) {
+        return std::vector<uint8_t>(s.begin(), s.end());
+    };
+    auto as_string = [](const std::vector<uint8_t> &v) {
+        return std::string(v.begin(), v.end());
+    };
+
+    // FORCE_DEFAULT recovers the plaintext.
+    std::vector<uint8_t> forced = as_bytes(demo);
+    CHECK(opennova::vfs_decode_payload(forced, opennova::VFS_SCR_FORCE_DEFAULT), "decode FORCE_DEFAULT ok");
+    CHECK(as_string(forced) == plaintext, "FORCE_DEFAULT recovers demo text");
+
+    // VERSION_DETECT maps version 1 -> JO_DFX2 key: it still "decodes" (header stripped, same
+    // length) but the bytes are wrong. This is exactly the broken default the demo hit.
+    std::vector<uint8_t> detected = as_bytes(demo);
+    CHECK(opennova::vfs_decode_payload(detected, opennova::VFS_SCR_VERSION_DETECT), "decode VERSION_DETECT ok");
+    CHECK(detected.size() == plaintext.size(), "version-detect strips header, keeps length");
+    CHECK(as_string(detected) != plaintext, "version-detect picks the wrong key for a demo file");
+
+    // FORCE_JO_DFX2 on a real retail-style file (encrypted with the JO_DFX2 key) round-trips,
+    // and that same key is what version-detect picks for version 1 — so retail is unaffected.
+    std::string retail = "SCR";
+    retail.push_back('\x01');
+    retail += scr_encrypt(plaintext, SCR_KEY_JO_DFX2_C);
+    std::vector<uint8_t> retail_detect = as_bytes(retail);
+    CHECK(opennova::vfs_decode_payload(retail_detect, opennova::VFS_SCR_VERSION_DETECT), "decode retail version-detect ok");
+    CHECK(as_string(retail_detect) == plaintext, "version-detect still correct for retail version-1 files");
+    return 1;
+}
+
+// Vfs::set_scr_policy drives read_file's SCR keying end-to-end: a demo-style archived file
+// (version 1, DEFAULT-keyed) reads back as plaintext only when the policy forces DEFAULT.
+static int test_vfs_scr_policy() {
+    const std::string plaintext = "begin \"Null\"\r\n  id 100000\r\nend\r\n";
+    std::string stored = "SCR";
+    stored.push_back('\x01');
+    stored += scr_encrypt(plaintext, SCR_KEY_DEFAULT_C);
+
+    fs::path d = fresh_dir("vfs_scr_policy");
+    write_pff1(d / "data.pff", "demo.def", stored);
+
+    // Default policy (version-detect) picks JO_DFX2 for version 1 -> not the plaintext.
+    {
+        Vfs v;
+        v.add_secondary_archive((d / "data.pff").string());
+        CHECK(read_vfs(v, "demo.def") != plaintext, "default policy mis-keys the demo file");
+    }
+    // FORCE_DEFAULT recovers it through the full read_file path.
+    {
+        Vfs v;
+        v.add_secondary_archive((d / "data.pff").string());
+        v.set_scr_policy(opennova::VFS_SCR_FORCE_DEFAULT);
+        CHECK(read_vfs(v, "demo.def") == plaintext, "FORCE_DEFAULT decodes the demo file on read");
+    }
+    return 1;
+}
+
 // Enumeration reports each logical name with its winning source.
 static int test_list_files() {
     fs::path d = fresh_dir("listing");
@@ -246,6 +335,8 @@ int main() {
     RUN_TEST(test_mount_game_no_expansion);
     RUN_TEST(test_mount_game_modes);
     RUN_TEST(test_scr_decode_on_read);
+    RUN_TEST(test_scr_decode_policy);
+    RUN_TEST(test_vfs_scr_policy);
     RUN_TEST(test_list_files);
 
     fs::remove_all(g_root, ec);
