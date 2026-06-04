@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -432,7 +433,7 @@ int main() {
 	}
 
 	// --- Phase 1: hidden entity fields (name1/name2/no_less_than/map_symbol) round-trip,
-	// and the names truncate to the format's 8-byte (7 chars + NUL) slot. ---
+	// and the names use the format's full 8-byte slot (a name longer than 8 is cut to 8). ---
 	{
 		opennova::mission::MissionDocument doc;
 		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
@@ -468,11 +469,71 @@ int main() {
 		TEST_EXPECT(rec2.name1 == "rifle");
 		TEST_EXPECT(rec2.name2 == "patrol");
 		TEST_EXPECT(rec2.max_simultaneous == rec.max_simultaneous); // no_more_than preserved
-		props.name1 = "verylongname"; // > 7 chars -> truncated to the 8-byte slot
+		// An exactly-8-char name keeps all 8 bytes: copy_cstr used to force a NUL into byte 7 and
+		// drop the 8th char, silently corrupting an unedited AI class name on every property edit.
+		props.name1 = "rifleman"; // 8 chars
+		TEST_EXPECT(doc.set_entity_properties(opennova::mission::EntityKind::Item, 0, props, nullptr));
+		opennova::mission::EntityRecord rec_full;
+		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, rec_full));
+		TEST_EXPECT(rec_full.name1 == "rifleman");
+		props.name1 = "verylongname"; // > 8 chars -> cut to the 8-byte slot
 		TEST_EXPECT(doc.set_entity_properties(opennova::mission::EntityKind::Item, 0, props, nullptr));
 		opennova::mission::EntityRecord rec3;
 		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, rec3));
-		TEST_EXPECT(rec3.name1.size() <= 7);
+		TEST_EXPECT(rec3.name1 == "verylong");
+		TEST_EXPECT(rec3.name1.size() == 8);
+	}
+
+	// --- Regression (review): event reset_after/delay round-trip across the full 0..1023 range.
+	// The values pack into the upper 10 bits; the old signed `value << 22` was UB for value >= 512
+	// (1023 << 22 overflows INT32_MAX) and the signed `>> 22` read sign-extended to a negative. ---
+	{
+		opennova::bms::File f;
+		std::string err;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), f, err));
+		if (f.events.empty()) {
+			f.events.push_back(opennova::bms::Event{});
+			f.events_count = 1;
+		}
+		f.events[0].reset_after = 1023;
+		f.events[0].delay = 600;
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(opennova::bms::write(f, bytes, err));
+		opennova::bms::File reparsed;
+		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
+		TEST_EXPECT(!reparsed.events.empty());
+		TEST_EXPECT(reparsed.events[0].reset_after == 1023);
+		TEST_EXPECT(reparsed.events[0].delay == 600);
+	}
+
+	// --- Regression (review): a corrupt pool count fails the parse cleanly instead of crashing. A
+	// huge num_items would otherwise make vector::resize() throw an uncaught length_error/bad_alloc. ---
+	{
+		std::vector<uint8_t> corrupt = original;
+		const size_t off = offsetof(opennova::bms::Header, num_items);
+		corrupt[off + 0] = 0xFF;
+		corrupt[off + 1] = 0xFF;
+		corrupt[off + 2] = 0xFF;
+		corrupt[off + 3] = 0xFF;
+		opennova::bms::File f;
+		std::string err;
+		TEST_EXPECT(!opennova::bms::parse(corrupt.data(), corrupt.size(), f, err));
+	}
+
+	// --- Regression (review): an empty-name loadout entry is skipped, not serialized as a leading
+	// NUL the loader reads as the chunk terminator (which would drop it AND every later entry). ---
+	{
+		opennova::mission::MissionDocument doc;
+		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+		std::vector<opennova::mission::WeaponLoadoutEntry> entries;
+		entries.push_back({"WPN_A", "-1", "-1"});
+		entries.push_back({"", "-1", "-1"}); // empty name -> skipped, must not truncate the list
+		entries.push_back({"WPN_B", "-1", "-1"});
+		TEST_EXPECT(doc.set_weapon_loadout(entries));
+		const std::vector<opennova::mission::WeaponLoadoutEntry> reread = doc.weapon_loadout();
+		TEST_EXPECT(reread.size() == 2);
+		TEST_EXPECT(reread[0].name == "WPN_A");
+		TEST_EXPECT(reread[1].name == "WPN_B");
 	}
 
 	return 0;

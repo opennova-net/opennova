@@ -156,7 +156,9 @@ const DEFAULT_ZONE_HALF := Vector3(64.0, 64.0, 32.0)
 # Scripting is panel-driven: the viewport is inert in Mode.SCRIPTING, so there is no overlay or
 # pickable list, only a selected event. The selected event index persists across re-bakes (like the
 # waypoint path, unlike the zone selection) so a logic edit elsewhere keeps the user on their event;
-# it is clamped back into range whenever the event list shrinks (see get_selected_event_index).
+# it is clamped back into range whenever the event list shrinks (see get_selected_event_index). A
+# structural undo/redo can REORDER events, which the in-range clamp cannot detect, so _restore drops
+# the selection rather than risk binding it to a different event.
 var _selected_event_index: int = -1
 
 
@@ -549,6 +551,7 @@ func redo() -> void:
 # exact dirty flag. Emits changed once (via mark_dirty after the re-bake) so the inspector
 # refreshes against the restored world in a single pass.
 func _restore(snapshot: PackedByteArray) -> bool:
+	var prev_event_count := _mission.get_event_count() if _mission != null else 0
 	if not _mission.restore_snapshot(snapshot):
 		# Self-produced snapshots always parse, so this is a defensive path: load_bms_bytes
 		# leaves the document empty on failure, so clear rather than re-bake against nothing.
@@ -556,6 +559,13 @@ func _restore(snapshot: PackedByteArray) -> bool:
 		_report("Could not restore the mission. It was cleared to recover; reopen it to continue.", true)
 		clear()
 		return false
+	# Adding/deleting an event shifts later event indices, so a kept _selected_event_index could bind
+	# to a DIFFERENT event after undo/redo (the in-range clamp can't see a shift). Drop the selection
+	# only when the event set actually changed; an attribute/trigger/action undo leaves the list intact
+	# and keeps the user on their event. (Event add/delete are the only ops that change the count --
+	# there is no event-reorder op -- so a count change is exactly the structural case.)
+	if _mission.get_event_count() != prev_event_count:
+		_selected_event_index = -1
 	_rebake_objects()
 	mark_dirty()
 	return true
@@ -1713,9 +1723,13 @@ func clear_active_path() -> bool:
 	var indices: PackedInt32Array = path.get("marker_indices", PackedInt32Array())
 	if indices.is_empty():
 		return false
+	# Dedup before removing: a (corrupt/hand-edited) path can list the same marker index twice, and
+	# removing descending would delete the duplicate's now-shifted neighbour on the second pass.
 	var descending: Array = []
 	for mi in indices:
-		descending.append(int(mi))
+		var idx := int(mi)
+		if not descending.has(idx):
+			descending.append(idx)
 	descending.sort()
 	descending.reverse()
 	_flush_edit()

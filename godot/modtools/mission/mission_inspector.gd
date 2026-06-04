@@ -167,6 +167,12 @@ var _group_spins: Array = []  # [field0, field8, field12]
 var _groups_selected: int = -1
 var _groups_syncing: bool = false
 
+# The mission object last seen by _refresh. When it changes (a new mission opened, or cleared to
+# null) the per-list selections above are stale -- the same row index is a different weapon / group /
+# event in another document -- so they reset. open_mission builds a fresh NovaMissionData; edits and
+# undo/redo reuse the same object, so this only flips on an actual document swap.
+var _last_mission: NovaMissionData = null
+
 # --- Scripting (events / triggers / actions) panel (Phase 4) ------------------
 # Shown in Scripting mode (4th tab). Top: the event list + Add / Delete event. Middle: the selected
 # event's flag checkboxes + reset / delay spins. Then a Triggers sub-list with a type / sub-type /
@@ -365,6 +371,15 @@ func set_detail_host(detail_host: Control) -> void:
 
 
 func _refresh() -> void:
+	# Reset the per-list selections when the mission identity flips (open / clear): a kept row index
+	# would otherwise bind to a different weapon / group / event in the newly opened document.
+	var mission: NovaMissionData = _controller.get_mission() if _controller != null else null
+	if mission != _last_mission:
+		_last_mission = mission
+		_loadout_selected = -1
+		_groups_selected = -1
+		_sc_trigger_selected = -1
+		_sc_action_selected = -1
 	_refresh_mode_tabs()
 	_refresh_edit_panel()
 	_refresh_place_panel()
@@ -619,16 +634,19 @@ func _refresh_edit_panel() -> void:
 		_identity_label.text = model_name
 		_identity_sub.text = kind_index
 		_identity_sub.visible = true
+	# Use _sync_spin (focus-aware) so a refresh that lands while the user is mid-typing a position /
+	# team value does not clobber the keystroke -- matching the zone-bounds and scripting spins. The
+	# _loading bracket still suppresses the value_changed echo for the spins that do get written.
 	var pos: Vector3 = entity.get("position", Vector3.ZERO)
-	_pos_spins[0].value = pos.x
-	_pos_spins[1].value = pos.y
-	_pos_spins[2].value = pos.z
+	_sync_spin(_pos_spins[0], pos.x)
+	_sync_spin(_pos_spins[1], pos.y)
+	_sync_spin(_pos_spins[2], pos.z)
 	var rot: Vector3 = entity.get("rotation_deg", Vector3.ZERO)
-	_rot_spins[0].value = rot.x
-	_rot_spins[1].value = rot.y
-	_rot_spins[2].value = rot.z
-	_team_spin.value = float(int(entity.get("team", 0)))
-	_group_spin.value = float(int(entity.get("group", 0)))
+	_sync_spin(_rot_spins[0], rot.x)
+	_sync_spin(_rot_spins[1], rot.y)
+	_sync_spin(_rot_spins[2], rot.z)
+	_sync_spin(_team_spin, float(int(entity.get("team", 0))))
+	_sync_spin(_group_spin, float(int(entity.get("group", 0))))
 	_loading = false
 
 	# The Behavior spins carry their own reentrancy guard (FieldBinder), independent of
@@ -2066,7 +2084,9 @@ func _on_loadout_add_pressed() -> void:
 	if _controller == null:
 		return
 	var entries: Array = _controller.get_weapon_loadout()
-	entries.append({ "name": "", "value1": "-1", "value2": "-1" })
+	# Seed a non-empty name: an empty name serializes to a leading NUL the loader treats as the chunk
+	# terminator (dropping this row and any after it). The user renames it (the name field grabs focus).
+	entries.append({ "name": "WPN_NEW", "value1": "-1", "value2": "-1" })
 	_loadout_selected = entries.size() - 1
 	_controller.set_weapon_loadout(entries)
 	_loadout_name.grab_focus()

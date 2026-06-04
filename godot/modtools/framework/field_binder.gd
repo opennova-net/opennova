@@ -15,7 +15,13 @@ var _bindings: Array = []
 
 
 func bind_spin(spin: SpinBox, getter: Callable, setter: Callable) -> SpinBox:
-	_bindings.append(func(info): spin.value = getter.call(info))
+	# Skip a spin whose inner LineEdit is focused (and only write a changed value): sync_from fires
+	# on every model `changed`, including one that lands while the user is mid-typing (e.g. an undo),
+	# and a blind `.value =` would clobber the in-flight keystroke and move the caret.
+	_bindings.append(func(info):
+		var v: float = getter.call(info)
+		if spin.value != v and not spin.get_line_edit().has_focus():
+			spin.value = v)
 	spin.value_changed.connect(func(value: float):
 		if not _guard.active:
 			setter.call(value))
@@ -39,7 +45,13 @@ func bind_color(picker: ColorPickerButton, getter: Callable, setter: Callable) -
 
 
 func bind_line(line: LineEdit, getter: Callable, setter: Callable) -> LineEdit:
-	_bindings.append(func(info): line.text = getter.call(info))
+	# Skip a focused LineEdit (and only write changed text): sync_from fires on every model `changed`,
+	# including one that lands while the user is typing (e.g. an undo), and a blind `.text =` would
+	# overwrite the half-typed value and reset the caret. The commit-on-Enter/focus-out path reconciles.
+	_bindings.append(func(info):
+		var v: String = getter.call(info)
+		if line.text != v and not line.has_focus():
+			line.text = v)
 	line.text_submitted.connect(func(value: String):
 		if not _guard.active:
 			setter.call(value))

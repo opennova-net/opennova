@@ -1027,6 +1027,21 @@ EntityRecord to_record(const bms::Entity &entity, EntityKind kind, size_t index)
 // Defined further below; used by apply_properties for the fixed-string name fields.
 void copy_cstr(char *dest, size_t dest_size, const std::string &value);
 
+// Copy into a fixed-width on-disk field that may use ALL dest_size bytes (no reserved NUL
+// terminator). The format's name1/name2 are 8-byte slots a shipped mission can fill completely,
+// so copy_cstr (which forces dest[dest_size-1] = '\0') would drop the 8th byte and silently
+// truncate an 8-char name on every property round-trip. Values longer than the field are cut to
+// dest_size; shorter values zero-pad the remainder. fixed_string reads it back symmetrically.
+void copy_fixed_field(char *dest, size_t dest_size, const std::string &value) {
+	const size_t copy_len = std::min(dest_size, value.size());
+	if (copy_len > 0) {
+		std::memcpy(dest, value.data(), copy_len);
+	}
+	if (copy_len < dest_size) {
+		std::memset(dest + copy_len, 0, dest_size - copy_len);
+	}
+}
+
 void apply_transform(bms::Entity &entity, const EntityTransform &transform) {
 	entity.set_x(transform.x);
 	entity.set_y(transform.y);
@@ -1037,23 +1052,28 @@ void apply_transform(bms::Entity &entity, const EntityTransform &transform) {
 }
 
 void apply_properties(bms::Entity &entity, const EntityProperties &properties) {
-	entity.group_id = static_cast<uint8_t>(properties.group_id);
-	entity.waypoint_id = static_cast<uint8_t>(properties.waypoint_id);
+	// The uint8-backed fields clamp (rather than a bare static_cast) so an out-of-range value from a
+	// programmatic caller saturates instead of silently wrapping (e.g. map_symbol 300 -> 44). The
+	// inspector SpinBoxes already cap these, but set_entity_properties is a public API boundary.
+	entity.group_id = static_cast<uint8_t>(std::clamp(properties.group_id, 0, 255));
+	entity.waypoint_id = static_cast<uint8_t>(std::clamp(properties.waypoint_id, 0, 255));
 	entity.wp_number = properties.wp_number;
-	entity.team = static_cast<uint8_t>(properties.team);
+	entity.team = static_cast<uint8_t>(std::clamp(properties.team, 0, 255));
 	entity.bmsi_attributes = static_cast<uint32_t>(properties.ai_flags);
 	entity.perception2 = properties.perception;
 	entity.w_accuracy1 = static_cast<int16_t>(properties.accuracy);
-	entity.alert_state = static_cast<uint8_t>(properties.alert_state);
+	entity.alert_state = static_cast<uint8_t>(std::clamp(properties.alert_state, 0, 255));
 	entity.min_engagement_distance = properties.min_engagement_distance;
 	entity.max_engagement_distance = properties.max_engagement_distance;
 	entity.max_attack_distance = properties.max_attack_distance;
 	entity.spawns = static_cast<int16_t>(properties.spawn_count);
-	entity.no_more_than = static_cast<uint8_t>(properties.max_simultaneous);
-	entity.no_less_than = static_cast<uint8_t>(properties.no_less_than);
-	entity.map_symbol = static_cast<uint8_t>(properties.map_symbol);
-	copy_cstr(entity.name1, sizeof(entity.name1), properties.name1);
-	copy_cstr(entity.name2, sizeof(entity.name2), properties.name2);
+	entity.no_more_than = static_cast<uint8_t>(std::clamp(properties.max_simultaneous, 0, 255));
+	entity.no_less_than = static_cast<uint8_t>(std::clamp(properties.no_less_than, 0, 255));
+	entity.map_symbol = static_cast<uint8_t>(std::clamp(properties.map_symbol, 0, 255));
+	// name1/name2 are fixed 8-byte slots a mission can fill completely; copy_fixed_field keeps all
+	// 8 bytes (copy_cstr would force a NUL into byte 7 and truncate an 8-char name on every edit).
+	copy_fixed_field(entity.name1, sizeof(entity.name1), properties.name1);
+	copy_fixed_field(entity.name2, sizeof(entity.name2), properties.name2);
 }
 
 bms::Entity make_default_entity(const bms::File &file,
@@ -1831,6 +1851,12 @@ bool MissionDocument::set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &
 	}
 	std::vector<uint8_t> raw;
 	for (const WeaponLoadoutEntry &entry : entries) {
+		// An empty name serializes to a leading NUL, which the loader reads as the chunk terminator,
+		// dropping this entry AND every entry after it. The format cannot represent a nameless
+		// weapon, so skip it rather than corrupt the chunk (the editor seeds new rows with a name).
+		if (entry.name.empty()) {
+			continue;
+		}
 		append_loadout_field(raw, entry.name);
 		append_loadout_field(raw, entry.value1);
 		append_loadout_field(raw, entry.value2);

@@ -2,6 +2,7 @@
 // Used for mission files (.bms) in Delta Force and related games.
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -406,7 +407,11 @@ static_assert(sizeof(Header) == kHeaderSize, "Header must be 616 bytes");
 inline int32_t to_fixed_16_16(float v) {
     constexpr float kMax = 32767.99f;
     constexpr float kMin = -32768.0f;
-    if (v > kMax) {
+    if (std::isnan(v)) {
+        // NaN compares false against both bounds, so without this it would reach
+        // static_cast<int32_t>(NaN) -- undefined behavior. Map it to the origin.
+        v = 0.0f;
+    } else if (v > kMax) {
         v = kMax;
     } else if (v < kMin) {
         v = kMin;

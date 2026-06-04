@@ -503,9 +503,10 @@ bool parse_event(Reader& r, Event& e, std::string& /*error*/) {
     e.trigger_index = r.read_i32();
     e.action_index = r.read_i32();
 
-    // Upper 10 bits contain the value (lower 22 bits are always zero)
-    e.reset_after = r.read_i32() >> 22;
-    e.delay = r.read_i32() >> 22;
+    // Upper 10 bits contain the value (lower 22 bits are always zero). Read unsigned and shift
+    // logically: a signed arithmetic >> would sign-extend any value >= 512 into a negative result.
+    e.reset_after = static_cast<int32_t>(r.read_u32() >> 22);
+    e.delay = static_cast<int32_t>(r.read_u32() >> 22);
 
     e.unknown5 = r.read_u8();
     e.trigger_count = r.read_u8();
@@ -519,9 +520,11 @@ void write_event(Writer& w, const Event& e) {
     w.write_i32(static_cast<int32_t>(e.flags));
     w.write_i32(e.trigger_index);
     w.write_i32(e.action_index);
-    // Reconstruct raw value: upper 10 bits contain value, lower 22 bits are zero
-    w.write_i32(e.reset_after << 22);
-    w.write_i32(e.delay << 22);
+    // Reconstruct raw value: upper 10 bits contain value, lower 22 bits are zero. Shift as
+    // unsigned -- e.reset_after << 22 on a signed int32 is UB for values >= 512 (1023 << 22
+    // overflows INT32_MAX); the written byte pattern is identical to the well-defined form.
+    w.write_u32(static_cast<uint32_t>(e.reset_after) << 22);
+    w.write_u32(static_cast<uint32_t>(e.delay) << 22);
     w.write_u8(e.unknown5);
     w.write_u8(e.trigger_count);
     w.write_u8(e.action_count);
@@ -595,6 +598,21 @@ void write_bounding_box(Writer& w, const BoundingBox& bb) {
     w.write_bytes(bb.unknown_data, 12);
 }
 
+// Reject a record count that cannot fit in the bytes left in the buffer. The pool/chunk counts come
+// straight from the (possibly corrupt or hostile) header; a negative or huge value handed to
+// std::vector::resize() throws std::length_error / std::bad_alloc, and nothing up the load chain
+// catches C++ exceptions, so it would abort the process instead of failing the parse cleanly.
+// record_size must be > 0.
+bool count_fits(const Reader& r, int64_t count, size_t record_size,
+                const char* what, std::string& error) {
+    if (count < 0 || static_cast<uint64_t>(count) > r.remaining() / record_size) {
+        error = std::string("BMS ") + what + " count " + std::to_string(count) +
+                " is invalid (" + std::to_string(r.remaining()) + " bytes remain)";
+        return false;
+    }
+    return true;
+}
+
 }  // namespace
 
 // ============================================================================
@@ -629,6 +647,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     r.read_bytes(out.secondary_chunk, out.header.secondary_chunk_len);
 
     // Parse entities
+    if (!count_fits(r, out.header.num_items, kEntitySize, "item", error)) return false;
     out.items.resize(out.header.num_items);
     for (uint32_t i = 0; i < out.header.num_items; i++) {
         if (!parse_entity(r, out.items[i], error)) {
@@ -637,6 +656,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
         out.items[i].type = ItemType::Item;
     }
 
+    if (!count_fits(r, out.header.num_buildings, kEntitySize, "building", error)) return false;
     out.buildings.resize(out.header.num_buildings);
     for (uint32_t i = 0; i < out.header.num_buildings; i++) {
         if (!parse_entity(r, out.buildings[i], error)) {
@@ -645,6 +665,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
         out.buildings[i].type = ItemType::Building;
     }
 
+    if (!count_fits(r, out.header.num_markers, kEntitySize, "marker", error)) return false;
     out.markers.resize(out.header.num_markers);
     for (uint32_t i = 0; i < out.header.num_markers; i++) {
         if (!parse_entity(r, out.markers[i], error)) {
@@ -653,6 +674,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
         out.markers[i].type = ItemType::Marker;
     }
 
+    if (!count_fits(r, out.header.num_people, kEntitySize, "organic", error)) return false;
     out.organics.resize(out.header.num_people);
     for (uint32_t i = 0; i < out.header.num_people; i++) {
         if (!parse_entity(r, out.organics[i], error)) {
@@ -686,6 +708,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     }
 
     // Parse area triggers
+    if (!count_fits(r, out.header.area_trigger_count, kAreaTriggerSize, "area-trigger", error)) return false;
     out.area_triggers.resize(out.header.area_trigger_count);
     for (int16_t i = 0; i < out.header.area_trigger_count; i++) {
         if (!parse_area_trigger(r, out.area_triggers[i], error)) {
@@ -699,6 +722,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     out.action_count = r.read_i32();
 
     // Parse events
+    if (!count_fits(r, out.events_count, kEventSize, "event", error)) return false;
     out.events.resize(out.events_count);
     for (int32_t i = 0; i < out.events_count; i++) {
         if (!parse_event(r, out.events[i], error)) {
@@ -707,6 +731,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     }
 
     // Parse triggers
+    if (!count_fits(r, out.trigger_count, kTriggerSize, "trigger", error)) return false;
     out.triggers.resize(out.trigger_count);
     for (int32_t i = 0; i < out.trigger_count; i++) {
         if (!parse_trigger(r, out.triggers[i], error)) {
@@ -715,6 +740,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     }
 
     // Parse actions
+    if (!count_fits(r, out.action_count, kActionSize, "action", error)) return false;
     out.actions.resize(out.action_count);
     for (int32_t i = 0; i < out.action_count; i++) {
         if (!parse_action(r, out.actions[i], error)) {
@@ -724,6 +750,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
 
     // Read bounding box count and parse
     out.bounding_box_count = r.read_i32();
+    if (!count_fits(r, out.bounding_box_count, kBoundingBoxSize, "bounding-box", error)) return false;
     out.bounding_boxes.resize(out.bounding_box_count);
     for (int32_t i = 0; i < out.bounding_box_count; i++) {
         if (!parse_bounding_box(r, out.bounding_boxes[i], error)) {
