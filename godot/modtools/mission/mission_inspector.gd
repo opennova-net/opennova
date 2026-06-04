@@ -54,7 +54,9 @@ var _animated_note: Label
 var _pos_spins: Array = []  # [x, y, z]
 var _rot_spins: Array = []  # [pitch, yaw, roll]
 var _team_spin: SpinBox
-var _group_spin: SpinBox
+# Group is a "pick an available squad" dropdown (was a blind 0-255 spin): Ungrouped / each used group
+# / a New-group entry, refilled each refresh from controller.get_group_options(); bound via the binder.
+var _group_option: OptionButton
 # Collapsible "Behavior" section: the per-entity AI + waypoint fields the format carries
 # beyond team / group. Bound through a FieldBinder (its own reentrancy guard), so a
 # programmatic repopulate never echoes back as an edit. The "Waypoint path" field here is
@@ -62,6 +64,9 @@ var _group_spin: SpinBox
 var _behavior_toggle: CheckButton
 var _behavior_box: VBoxContainer
 var _behavior_binder: FieldBinder
+# "Waypoint path" is a dropdown of the mission's real paths (was a blind 0-127 spin): None / each
+# populated path, refilled each refresh from controller.get_waypoint_path_options(); bound via the binder.
+var _waypoint_option: OptionButton
 var _delete_button: Button
 
 # --- Place-object palette (persistent) ----------------------------------------
@@ -433,6 +438,10 @@ func _build_edit_panel() -> void:
 	_edit_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_sel_content.add_child(_edit_box)
 
+	# Build the shared field binder up front: both the Faction "Group" picker (below) and the
+	# Behavior fields bind to it, and the Faction section is built before _build_behavior_section.
+	_behavior_binder = FieldBinder.new()
+
 	# The identity line is the section heading: it reads the selected model's name (resolved
 	# from items.def) prominently, with a muted kind + index subline beneath, so the user
 	# sees "Humvee" rather than just "Item #42".
@@ -457,7 +466,10 @@ func _build_edit_panel() -> void:
 	# all selectable objects; in practice they drive organics (units) at runtime.
 	ObjectUiHelpers.add_section_heading(_edit_box, "Faction")
 	_team_spin = ObjectUiHelpers.add_spin_row(_edit_box, "MissionTeam", "Team", 0.0, 255.0, 1.0)
-	_group_spin = ObjectUiHelpers.add_spin_row(_edit_box, "MissionGroup", "Group", 0.0, 255.0, 1.0)
+	# Group is chosen from the mission's actual squads (Ungrouped / each used group / a New group
+	# entry), not typed as a raw number; the option list is refilled in _refresh_edit_panel.
+	_group_option = _add_entity_option_row(_edit_box, "group", "Group",
+		"Which squad this unit belongs to. Lists groups already in use, plus a new one.")
 
 	_build_behavior_section()
 
@@ -478,9 +490,8 @@ func _build_edit_panel() -> void:
 		_pos_spins[axis].value_changed.connect(_on_position_axis.bind(axis))
 		_rot_spins[axis].value_changed.connect(_on_rotation_axis.bind(axis))
 	_team_spin.value_changed.connect(_on_team_changed)
-	_group_spin.value_changed.connect(_on_group_changed)
-	# Behavior spins wire themselves to the controller through the FieldBinder in
-	# _build_behavior_section, so they are not connected here.
+	# The Group dropdown is wired by _add_entity_option_row (via the FieldBinder), not here.
+	# Behavior fields likewise wire themselves through the FieldBinder in _build_behavior_section.
 	_delete_button.pressed.connect(_on_delete_pressed)
 
 
@@ -490,7 +501,7 @@ func _build_edit_panel() -> void:
 # _refresh_edit_panel via _behavior_binder.sync_from. Ranges follow the format's field
 # widths so a real value is never clamped on display.
 func _build_behavior_section() -> void:
-	_behavior_binder = FieldBinder.new()
+	# _behavior_binder is created in _build_edit_panel (the Faction Group picker binds to it too).
 	_behavior_toggle = CheckButton.new()
 	_behavior_toggle.name = "MissionBehaviorToggle"
 	_behavior_toggle.text = "Behavior"
@@ -505,9 +516,10 @@ func _build_behavior_section() -> void:
 	_edit_box.add_child(_behavior_box)
 	_behavior_toggle.toggled.connect(func(on: bool) -> void: _behavior_box.visible = on)
 
-	# Waypoint path (waypoint_id) is the bridge: it names which authored path a unit follows.
-	var wp_spin := _add_behavior_spin("waypoint_id", "Waypoint path", 0.0, 127.0)
-	wp_spin.tooltip_text = "Which waypoint path this unit follows. Author paths in the Waypoints tab."
+	# Waypoint path (waypoint_id) is the bridge: it names which authored path a unit follows. A
+	# dropdown of the mission's real paths (None / each populated path), not a blind 0-127 number.
+	_waypoint_option = _add_entity_option_row(_behavior_box, "waypoint_id", "Waypoint path",
+		"Which waypoint path this unit follows. Author paths in the Waypoints tab.")
 	_add_behavior_spin("wp_number", "WP number", 0.0, 255.0)
 	ObjectUiHelpers.add_section_heading(_behavior_box, "Combat")
 	_add_behavior_spin("perception", "Perception", -1000000.0, 1000000.0)
@@ -549,6 +561,22 @@ func _add_behavior_spin(property: String, label: String, min_value: float, max_v
 		func(info): return float(int(info.get(property, 0))),
 		func(value: float) -> void: _behavior_set(property, value))
 	return spin
+
+
+# A labelled OptionButton "pick from available options" row for an entity field (waypoint path /
+# group), bound through the behaviour FieldBinder so its guard stops a programmatic repopulate from
+# echoing back as an edit. The option items are (re)filled each refresh in _refresh_edit_panel from
+# controller-supplied { id, label } options via ObjectUiHelpers.populate_id_option (which also appends
+# the entity's current value when it is not in the set). Item ids carry the model value, as
+# bind_option expects, so a user pick commits through set_selected_property(property, id).
+func _add_entity_option_row(parent: Control, property: String, label: String, tooltip: String = "") -> OptionButton:
+	var option := ObjectUiHelpers.add_id_option_row(parent, "MissionOpt_" + property, label, [])
+	if not tooltip.is_empty():
+		option.tooltip_text = tooltip
+	_behavior_binder.bind_option(option,
+		func(info): return int(info.get(property, 0)),
+		func(value: int) -> void: _behavior_set(property, value))
+	return option
 
 
 # A text field bound through the FieldBinder (Enter to apply), for a property that reads
@@ -649,11 +677,17 @@ func _refresh_edit_panel() -> void:
 	_sync_spin(_rot_spins[1], rot.y)
 	_sync_spin(_rot_spins[2], rot.z)
 	_sync_spin(_team_spin, float(int(entity.get("team", 0))))
-	_sync_spin(_group_spin, float(int(entity.get("group", 0))))
 	_loading = false
 
-	# The Behavior spins carry their own reentrancy guard (FieldBinder), independent of
-	# _loading, so syncing them here cannot echo back as an edit.
+	# Refill the dynamic pickers (the available waypoint paths / groups change as the mission is
+	# edited) before the binder selects the current value. populate_id_option appends the entity's
+	# current value if it is not in the option set, so an out-of-list value still shows + round-trips.
+	if _controller != null:
+		ObjectUiHelpers.populate_id_option(_waypoint_option, _controller.get_waypoint_path_options(), int(entity.get("waypoint_id", 0)))
+		ObjectUiHelpers.populate_id_option(_group_option, _controller.get_group_options(), int(entity.get("group", 0)))
+
+	# The Behavior fields (and the two pickers above) carry their own reentrancy guard (FieldBinder),
+	# independent of _loading, so syncing them here cannot echo back as an edit.
 	_behavior_binder.sync_from(entity)
 
 	var summary: Dictionary = _controller.get_selection_summary() if _controller != null else {}
@@ -694,12 +728,6 @@ func _on_team_changed(value: float) -> void:
 	if _loading or _controller == null:
 		return
 	_controller.set_selected_team(int(value))
-
-
-func _on_group_changed(value: float) -> void:
-	if _loading or _controller == null:
-		return
-	_controller.set_selected_group(int(value))
 
 
 func _on_delete_pressed() -> void:

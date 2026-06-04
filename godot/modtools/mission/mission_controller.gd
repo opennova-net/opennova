@@ -117,10 +117,15 @@ var _marker_overlay  # MissionMarkerOverlay (preloaded, no class_name)
 # Marker placement ("add marker" tool): while armed, a terrain click adds a marker to the
 # active path instead of selecting (mirrors object placement arming, but mode-scoped).
 var _marker_place_armed: bool = false
-# The active path marker id seeded into add_waypoint_marker when the mission carries no
-# marker to copy from (authoring waypoints from scratch). Reused from an existing marker
-# when one is present, so shipped data round-trips with its own id.
-const DEFAULT_MARKER_ITEM_ID := 100001
+# The items.def id of the engine's canonical "waypoint" marker: BMS type_id 6005 + kItemIdOffset
+# (100000). A waypoint-path member must be a waypoint-TYPE marker so the engine treats it as a
+# waypoint node ([orig: Entity_SpawnFromBMSRecord @0x40f060 switches on type_id == 6005]); a
+# marker's role is entirely its type_id. Real data confirms it: items.def id 106005 = "waypoint",
+# while 106001 = "start, player", 106178+ = "snd:" emitters, 100396+ = vehicle-spawn markers, etc. --
+# distinct marker types that must NOT be turned into waypoints. Seeding a new path marker by copying
+# whatever marker happened to be placed first (a player start) was the "waypoints become player
+# starts" bug. See _waypoint_marker_item_id_for_path / _default_marker_item_id.
+const WAYPOINT_MARKER_ITEM_ID := 106005
 # The live (container-local) position of a marker being dragged, written to the record on
 # release (the drag previews the gizmo only; the record is committed once, as one step).
 var _marker_drag_local: Vector3 = Vector3.ZERO
@@ -1703,7 +1708,7 @@ func add_marker_to_active_path_at_world(global_hit: Vector3) -> bool:
 	var bms_pos := MissionObjectPlacer.godot_to_bms_position(local)
 	_flush_edit()
 	_mission.begin_edit()
-	var result := _mission.add_waypoint_marker(_selected_path_index, _default_marker_item_id(), bms_pos, Vector3.ZERO, -1)
+	var result := _mission.add_waypoint_marker(_selected_path_index, _waypoint_marker_item_id_for_path(_selected_path_index), bms_pos, Vector3.ZERO, -1)
 	if result.is_empty():
 		_report("Could not add a waypoint marker.", true)
 		return false
@@ -1716,22 +1721,30 @@ func add_marker_to_active_path_at_world(global_hit: Vector3) -> bool:
 	return true
 
 
-# The item id to seed a new marker with. Prefer copying an existing marker's id so shipped
-# data keeps its own marker type. When authoring from scratch, use a marker-type id the
-# loaded database actually carries (so the marker resolves to a real model) rather than a
-# hardcoded id the database might not have; only then fall back to the plausible default.
+# The item id for a NEW marker added to `path_index`. Reuse the type of the markers already on THAT
+# path, so a path authored with a specific waypoint variant (e.g. items.def 106026 "waypoint, mp,
+# alpha") stays consistent and shipped data round-trips with its own id. Crucially this looks only at
+# the path's OWN members -- never the whole scene -- so a player start / spawn / sound placed
+# elsewhere can never bleed into a waypoint (the old "copy markers[0]" bug). An empty path falls back
+# to the canonical "waypoint" type.
+func _waypoint_marker_item_id_for_path(path_index: int) -> int:
+	if _mission != null and path_index >= 0:
+		var path := _mission.get_waypoint_path(path_index)
+		var indices: PackedInt32Array = path.get("marker_indices", PackedInt32Array())
+		if not indices.is_empty():
+			var existing := _mission.get_entity(NovaMissionData.KIND_MARKER, int(indices[0]))
+			var id := int(existing.get("item_id", 0))
+			if id > 0:
+				return id
+	return _default_marker_item_id()
+
+
+# The canonical waypoint marker item id: the engine's "waypoint" type (BMS type_id 6005 = items.def
+# id 106005). Always 6005 so the saved record is a real waypoint the engine follows, whether or not
+# the loaded db carries a model for it (a mesh-less waypoint renders as a gizmo, which is correct).
+# NEVER an arbitrary marker copied from the scene.
 func _default_marker_item_id() -> int:
-	if _mission != null:
-		var markers := _mission.get_entities(NovaMissionData.KIND_MARKER)
-		if not markers.is_empty():
-			return int((markers[0] as Dictionary).get("item_id", DEFAULT_MARKER_ITEM_ID))
-	var db := _item_db()
-	if db != null:
-		for item in db.get_items():
-			var entry: Dictionary = item
-			if int(entry.get("type", -1)) == NovaItemDatabase.TYPE_MARKER:
-				return int(entry.get("id", DEFAULT_MARKER_ITEM_ID))
-	return DEFAULT_MARKER_ITEM_ID
+	return WAYPOINT_MARKER_ITEM_ID
 
 
 # Raycast the terrain under the cursor and add a marker there; a miss (off the terrain) is
@@ -1857,6 +1870,51 @@ func get_all_entities() -> Array:
 			var display := entity_display_name(kind, int(ed.get("index", 0)))
 			var label := ("%s #%d" % [display, bms_id]) if display != "" else ("Unit #%d" % bms_id)
 			out.append({ "value": bms_id, "label": label })
+	return out
+
+
+# Options for the inspector's "Waypoint path" picker -- which path a unit follows (the waypoint_id /
+# byte-79 field, [orig: Entity_SpawnFromBMSRecord @0x40f02f `if (record[79]) follow path record[79]`]).
+# Shaped { id, label } for ObjectUiHelpers.populate_id_option. id 0 = "None": byte 79 == 0 means the
+# unit follows no path, so path index 0 is unreachable as a follow target and is not offered. The
+# inspector adds the unit's current value if it is not in this set, so an odd value still round-trips.
+func get_waypoint_path_options() -> Array:
+	var out: Array = [{ "id": 0, "label": "None" }]
+	if _mission == null:
+		return out
+	for s in _mission.get_waypoint_summaries():
+		var d := s as Dictionary
+		var idx := int(d.get("index", 0))
+		var count := int(d.get("marker_count", 0))
+		if idx <= 0 or count <= 0:
+			continue
+		out.append({ "id": idx, "label": "Path %d  -  %d markers" % [idx, count] })
+	return out
+
+
+# Options for the inspector's "Group" picker -- which squad a unit belongs to (the group_id / byte-78
+# field, [orig: Entity_SpawnFromBMSRecord @0x40ebb7]; the format carries 64 groups, 0..63). Shaped
+# { id, label }: "Ungrouped" (0), every group already in use (annotated with its unit count so the
+# user joins an existing squad), and a "New group N" entry for the first free group so a fresh squad
+# can be started. The inspector adds the unit's current group if it is not already listed.
+func get_group_options() -> Array:
+	var out: Array = [{ "id": 0, "label": "Ungrouped" }]
+	if _mission == null:
+		return out
+	var counts: Dictionary = {}
+	for kind in [NovaMissionData.KIND_MARKER, NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_ORGANIC]:
+		for e in _mission.get_entities(kind):
+			var g := int((e as Dictionary).get("group", 0))
+			if g > 0:
+				counts[g] = int(counts.get(g, 0)) + 1
+	var used: Array = counts.keys()
+	used.sort()
+	for g in used:
+		out.append({ "id": int(g), "label": "Group %d  (%d units)" % [int(g), int(counts[g])] })
+	for candidate in range(1, 64):
+		if not counts.has(candidate):
+			out.append({ "id": candidate, "label": "New group %d" % candidate })
+			break
 	return out
 
 

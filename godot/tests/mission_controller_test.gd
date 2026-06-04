@@ -457,6 +457,93 @@ func test_delete_selected_marker_in_objects_mode() -> void:
 	assert_eq(controller.get_selection_summary(), {}, "and the selection is cleared")
 
 
+# --- Waypoint markers are the engine waypoint type (6005), never a copied scene marker --------
+# Regression for "placed waypoint markers turn into player starts": the waypoint "Add marker" tool
+# used to seed the new marker by copying markers[0] (any marker, e.g. a player start placed first).
+# A path member must be the engine's waypoint marker (BMS type_id 6005 = items.def id 106005).
+
+func test_added_waypoint_marker_is_a_waypoint_type_not_a_copied_player_start() -> void:
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	# Place a non-waypoint marker first (fixture id 100001 = BMS type_id 1), mimicking a player start.
+	var ps_index := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	assert_true(controller.place_entity_at_world(100001, Vector3(20, 5, -20)),
+		"a non-waypoint marker is placed in Objects mode")
+	assert_eq(int(mission.get_entity(NovaMissionData.KIND_MARKER, ps_index)["type_id"]), 1,
+		"precondition: the placed marker is the non-waypoint fixture type (1)")
+	# Author a waypoint path and add a marker to it via the tool.
+	controller.set_waypoint_mode(true)
+	controller.select_waypoint_path(_first_empty_path(mission))
+	assert_true(controller.add_marker_to_active_path_at_world(Vector3(60, 5, -60)),
+		"a waypoint marker is added to the path")
+	var wp_index := int(controller.get_selected_marker()["marker_index"])
+	assert_eq(int(mission.get_entity(NovaMissionData.KIND_MARKER, wp_index)["type_id"]), 6005,
+		"the added path marker is the engine waypoint type (6005), not the copied player-start type")
+	assert_eq(int(mission.get_entity(NovaMissionData.KIND_MARKER, ps_index)["type_id"]), 1,
+		"and the pre-existing non-waypoint marker keeps its own type")
+
+
+func test_waypoint_marker_reuses_the_active_paths_existing_type() -> void:
+	# Adding to a path that already has markers reuses THAT path's variant (so a path authored with a
+	# specific waypoint type stays consistent), never the scene's first marker.
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	controller.set_waypoint_mode(true)
+	var path := _first_empty_path(mission)
+	controller.select_waypoint_path(path)
+	# Seed the path with a specific waypoint variant (106026 = "waypoint, mp, alpha", BMS type 6026).
+	mission.add_waypoint_marker(path, 106026, Vector3(1, 0, -1), Vector3.ZERO, -1)
+	controller._refresh_waypoint_overlay()
+	assert_true(controller.add_marker_to_active_path_at_world(Vector3(5, 0, -5)),
+		"a second marker is added to the path")
+	var idx := int(controller.get_selected_marker()["marker_index"])
+	assert_eq(int(mission.get_entity(NovaMissionData.KIND_MARKER, idx)["type_id"]), 6026,
+		"a new path marker matches the path's existing waypoint variant, not the canonical 6005")
+
+
+# --- Inspector picker options (waypoint path / group) -------------------------
+
+func test_get_waypoint_path_options_lists_none_and_populated_paths() -> void:
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	# Populate an empty path with index >= 1 (index 0 is never offered: waypoint_id 0 == "no path").
+	var path := -1
+	for s in mission.get_waypoint_summaries():
+		var d := s as Dictionary
+		if int(d["index"]) >= 1 and int(d["marker_count"]) == 0:
+			path = int(d["index"])
+			break
+	assert_gt(path, 0, "precondition: an empty path with index >= 1 exists in the fixture")
+	mission.add_waypoint_marker(path, 106005, Vector3(1, 0, -1), Vector3.ZERO, -1)
+	var opts := controller.get_waypoint_path_options()
+	assert_eq(int((opts[0] as Dictionary)["id"]), 0, "the first option is None (id 0)")
+	var ids: Array = []
+	for o in opts:
+		ids.append(int((o as Dictionary)["id"]))
+	assert_true(ids.has(path), "the populated path appears as an option")
+	assert_eq(ids.count(0), 1, "id 0 appears once (None only; path index 0 is not offered as a target)")
+
+
+func test_get_group_options_lists_ungrouped_used_groups_and_a_new_group() -> void:
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	# Place a building and assign it to a high group (unlikely used by the fixture).
+	assert_true(controller.place_entity_at_world(102001, Vector3(10, 5, -10)), "a building is placed + selected")
+	controller.set_selected_property("group", 60)
+	var opts := controller.get_group_options()
+	var by_id: Dictionary = {}
+	for o in opts:
+		by_id[int((o as Dictionary)["id"])] = String((o as Dictionary)["label"])
+	assert_true(by_id.has(0), "Ungrouped (0) is always offered")
+	assert_true(by_id.has(60), "the group the unit was assigned to is offered")
+	assert_string_contains(String(by_id[60]), "Group 60", "the used group is labelled by index")
+	var has_new := false
+	for o in opts:
+		if String((o as Dictionary)["label"]).begins_with("New group"):
+			has_new = true
+	assert_true(has_new, "a New group entry is offered to start a fresh squad")
+
+
 func test_place_entity_routes_to_the_kind_its_type_maps_to() -> void:
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()
@@ -1481,17 +1568,15 @@ func test_off_terrain_drag_reports_and_moves_nothing() -> void:
 	assert_false(controller.is_dirty(), "an all-off-terrain drag changes nothing")
 
 
-func test_default_marker_item_id_reuses_an_existing_marker() -> void:
-	# Shipped data keeps its own marker type: a new marker copies an existing marker's id when
-	# the mission carries one. (The from-scratch DB-scan branch needs a marker-free mission,
-	# which the fixture is not, so it is covered by reading rather than asserted here.)
+func test_default_marker_item_id_is_the_engine_waypoint_type() -> void:
+	# A new waypoint-path marker is ALWAYS the engine waypoint type (BMS type_id 6005 = item id
+	# 106005), never a copy of an arbitrary scene marker -- even when the mission already carries
+	# markers of other types (the fixture does). Copying markers[0] was the "waypoints turn into
+	# player starts" bug. Reusing a path's OWN variant when that path already has markers is a
+	# separate, path-aware path (test_waypoint_marker_reuses_the_active_paths_existing_type).
 	var controller := _loaded_with_item_db()
-	var id := controller._default_marker_item_id()
-	assert_gt(id, 0, "a new marker seeds a positive item id")
-	var markers := controller.get_mission().get_entities(NovaMissionData.KIND_MARKER)
-	if not markers.is_empty():
-		assert_eq(id, int((markers[0] as Dictionary)["item_id"]),
-			"an existing marker's id is reused so shipped data round-trips")
+	assert_eq(controller._default_marker_item_id(), 106005,
+		"the canonical waypoint marker id (106005) is used, not a scene marker's id")
 
 
 # --- Area triggers / zones (Phase 2) ------------------------------------------

@@ -346,6 +346,17 @@ class FakeController:
 	func get_all_entities() -> Array:
 		return all_entities
 
+	# Options for the entity-edit pickers (waypoint path / group). Settable per test; default empty
+	# so the inspector's populate_id_option falls back to the entity's current value.
+	var waypoint_options: Array = []
+	var group_options: Array = []
+
+	func get_waypoint_path_options() -> Array:
+		return waypoint_options
+
+	func get_group_options() -> Array:
+		return group_options
+
 	func get_groups() -> Array:
 		return groups
 
@@ -501,6 +512,22 @@ func _line(inspector, node_name: String) -> LineEdit:
 	return inspector.find_child(node_name, true, false) as LineEdit
 
 
+func _option(inspector, node_name: String) -> OptionButton:
+	return inspector.find_child(node_name, true, false) as OptionButton
+
+
+func _option_id(inspector, node_name: String) -> int:
+	var opt := _option(inspector, node_name)
+	return opt.get_item_id(opt.selected) if opt != null and opt.selected >= 0 else -1
+
+
+func _option_row_for_id(opt: OptionButton, id: int) -> int:
+	for i in opt.item_count:
+		if opt.get_item_id(i) == id:
+			return i
+	return -1
+
+
 func test_edit_panel_is_hidden_without_a_selection() -> void:
 	var ctx := _make({})
 	assert_not_null(_spin(ctx.inspector, "MissionPosX"), "the edit spins are built up front")
@@ -514,7 +541,8 @@ func test_edit_panel_shows_the_selected_values() -> void:
 	assert_eq(_spin(ctx.inspector, "MissionPosZ").value, -5.0, "Z reads from the entity")
 	assert_eq(_spin(ctx.inspector, "MissionRotYaw").value, 45.0, "yaw reads from the entity")
 	assert_eq(_spin(ctx.inspector, "MissionTeam").value, 1.0, "team reads from the entity")
-	assert_eq(_spin(ctx.inspector, "MissionGroup").value, 2.0, "group reads from the entity")
+	assert_eq(_option_id(ctx.inspector, "MissionOpt_group"), 2,
+		"group reads from the entity as the selected dropdown option")
 
 
 func test_identity_shows_resolved_model_name() -> void:
@@ -550,20 +578,30 @@ func test_editing_one_position_axis_leaves_the_others() -> void:
 		"only X changed; Y and Z came from the model, not the sibling spins")
 
 
-func test_editing_group_commits_once() -> void:
+func test_editing_group_commits_through_set_selected_property() -> void:
+	# Group is a "pick an available squad" dropdown now: choosing one commits through
+	# set_selected_property("group", id), not the old clamped set_selected_group spin path.
 	var ctx := _make(_sample_entity())
-	_spin(ctx.inspector, "MissionGroup").value = 9
-	assert_eq(ctx.fake.last_group, 9)
-	assert_eq(ctx.fake.group_calls, 1, "no echo re-commit")
+	ctx.fake.group_options = [{"id": 0, "label": "Ungrouped"}, {"id": 9, "label": "New group 9"}]
+	ctx.inspector._refresh()  # refill the dropdown with the available groups
+	var opt := _option(ctx.inspector, "MissionOpt_group")
+	var row := _option_row_for_id(opt, 9)
+	assert_gt(row, -1, "the chosen group is an available option")
+	opt.selected = row
+	opt.item_selected.emit(row)  # simulate the user picking the group
+	assert_eq(ctx.fake.last_property, "group", "the group edit names the group field")
+	assert_eq(ctx.fake.last_property_value, 9, "with the chosen group id")
+	assert_eq(ctx.fake.property_calls, 1, "one commit, no echo loop (the binder guard holds)")
 
 
 # --- P7: the Behavior panel (per-entity AI + waypoint fields) ------------------
 
 func test_behavior_panel_reads_the_selected_values() -> void:
 	var ctx := _make(_sample_entity())
-	var spin := _spin(ctx.inspector, "MissionBeh_waypoint_id")
-	assert_not_null(spin, "the behavior panel builds a waypoint_id spin")
-	assert_eq(spin.value, 3.0, "waypoint_id reads from the entity (even while the section is collapsed)")
+	var opt := _option(ctx.inspector, "MissionOpt_waypoint_id")
+	assert_not_null(opt, "the behavior panel builds a waypoint_id picker")
+	assert_eq(_option_id(ctx.inspector, "MissionOpt_waypoint_id"), 3,
+		"waypoint_id reads from the entity (even while the section is collapsed)")
 	assert_false(ctx.inspector._behavior_box.visible, "the Behavior section is collapsed by default")
 
 
@@ -607,12 +645,28 @@ func test_ai_flags_rejects_garbage_without_writing() -> void:
 
 
 func test_behavior_field_commits_through_set_selected_property() -> void:
+	# A still-numeric behavior field (wp_number) commits through set_selected_property once.
 	var ctx := _make(_sample_entity())
-	_spin(ctx.inspector, "MissionBeh_waypoint_id").value = 7  # simulate a user edit
-	assert_eq(ctx.fake.last_property, "waypoint_id", "the edit names the field it changed")
+	_spin(ctx.inspector, "MissionBeh_wp_number").value = 7  # simulate a user edit
+	assert_eq(ctx.fake.last_property, "wp_number", "the edit names the field it changed")
 	assert_eq(ctx.fake.last_property_value, 7, "with the new value")
 	assert_eq(ctx.fake.property_calls, 1, "the FieldBinder guard holds: one commit, no echo loop")
 	assert_true(ctx.fake.is_dirty())
+
+
+func test_waypoint_path_picker_commits_through_set_selected_property() -> void:
+	# Picking a path from the "Waypoint path" dropdown writes the waypoint_id field once.
+	var ctx := _make(_sample_entity())
+	ctx.fake.waypoint_options = [{"id": 0, "label": "None"}, {"id": 7, "label": "Path 7  -  2 markers"}]
+	ctx.inspector._refresh()  # refill the dropdown with the available paths
+	var opt := _option(ctx.inspector, "MissionOpt_waypoint_id")
+	var row := _option_row_for_id(opt, 7)
+	assert_gt(row, -1, "the chosen path is an available option")
+	opt.selected = row
+	opt.item_selected.emit(row)  # simulate the user picking the path
+	assert_eq(ctx.fake.last_property, "waypoint_id", "picking a path writes the waypoint_id field")
+	assert_eq(ctx.fake.last_property_value, 7, "with the chosen path id")
+	assert_eq(ctx.fake.property_calls, 1, "one commit, no echo loop (the binder guard holds)")
 
 
 func test_behavior_field_does_not_clamp_to_a_byte() -> void:
@@ -924,6 +978,7 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 		"get_selected_position", "get_selected_rotation",
 		"set_selected_position", "set_selected_rotation", "set_selected_team",
 		"set_selected_group", "set_selected_property", "delete_selected", "is_dirty",
+		"get_waypoint_path_options", "get_group_options",
 		"get_placeable_items", "get_placement_item_id", "arm_placement", "disarm_placement",
 		# P7 waypoints surface.
 		"is_waypoint_mode", "set_waypoint_mode", "select_waypoint_path", "select_new_waypoint_path",

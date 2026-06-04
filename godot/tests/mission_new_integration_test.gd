@@ -73,8 +73,23 @@ func test_new_mission_end_to_end_on_a_real_terrain() -> void:
 		"placing a marker from the palette works")
 	assert_eq(controller.get_mission().get_entity_count(NovaMissionData.KIND_MARKER), 1,
 		"the marker landed")
+	var ps_type := int(controller.get_mission().get_entity(NovaMissionData.KIND_MARKER, 0)["type_id"])
 
-	# Save As, then reopen the written .bms and confirm the terrain ref + placed object + marker survived.
+	# Add a WAYPOINT marker via the Waypoints tool: it must be the engine waypoint type (6005), NOT a
+	# copy of the player-start-style marker placed above (the headline marker-type bug).
+	controller.set_waypoint_mode(true)
+	controller.select_new_waypoint_path()
+	assert_true(controller.add_marker_to_active_path_at_world(Vector3(80.0, 10.0, -80.0)),
+		"adding a waypoint marker to a path works")
+	assert_eq(controller.get_mission().get_entity_count(NovaMissionData.KIND_MARKER), 2,
+		"the waypoint marker is a second marker entity")
+	var wp_idx := int(controller.get_selected_marker()["marker_index"])
+	assert_eq(int(controller.get_mission().get_entity(NovaMissionData.KIND_MARKER, wp_idx)["type_id"]), 6005,
+		"the waypoint marker is the engine waypoint type (6005)")
+	assert_ne(int(controller.get_mission().get_entity(NovaMissionData.KIND_MARKER, wp_idx)["type_id"]), ps_type,
+		"and a distinct type from the player-start-style marker")
+
+	# Save As, then reopen the written .bms and confirm the terrain ref + placed object + markers survived.
 	assert_eq(int(ws.save_as(_abs(SAVE_DIR))), OK, "Save As writes the from-scratch mission")
 	assert_false(controller.is_dirty(), "a saved mission is clean")
 	var path := _abs(SAVE_DIR).path_join("mission.bms")
@@ -85,5 +100,10 @@ func test_new_mission_end_to_end_on_a_real_terrain() -> void:
 	assert_eq(reopened.get_terrain_ref().to_lower(), "dvxi5", "terrain ref round-trips")
 	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_BUILDING), 1,
 		"the placed building round-trips through save + reopen")
-	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_MARKER), 1,
-		"the placed marker round-trips through save + reopen")
+	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_MARKER), 2,
+		"both markers (player-start-style + waypoint) round-trip through save + reopen")
+	var reopened_marker_types: Array = []
+	for i in reopened.get_entity_count(NovaMissionData.KIND_MARKER):
+		reopened_marker_types.append(int(reopened.get_entity(NovaMissionData.KIND_MARKER, i)["type_id"]))
+	assert_true(reopened_marker_types.has(6005), "the waypoint marker (type 6005) survives the round-trip")
+	assert_true(reopened_marker_types.has(ps_type), "and the player-start-style marker keeps its own type")
