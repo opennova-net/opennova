@@ -14,6 +14,7 @@ add_subdirectory(libs/threedi)
 add_subdirectory(libs/bad)
 add_subdirectory(libs/adm)
 add_subdirectory(libs/pff)
+add_subdirectory(libs/gameprofile)
 add_subdirectory(libs/bfc1)
 add_subdirectory(libs/cbin)
 add_subdirectory(libs/def)
@@ -42,6 +43,7 @@ set(OPENNOVA_CORE_TARGETS
     opennova_terrain
     opennova_threedi
     opennova_pff
+    opennova_gameprofile
     opennova_bfc1
     opennova_cbin
     opennova_bad

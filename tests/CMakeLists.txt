@@ -263,6 +263,12 @@ target_compile_definitions(mus_structured_section_edit_test PRIVATE
 add_test(NAME mus_structured_section_edit COMMAND mus_structured_section_edit_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Game profile table tests
+add_executable(gameprofile_test gameprofile/gameprofile_test.c)
+target_link_libraries(gameprofile_test PRIVATE opennova_gameprofile)
+target_include_directories(gameprofile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gameprofile COMMAND gameprofile_test)
+
 # VFS tests (mount precedence, mount_game expansion override, SCR decode-on-read)
 add_executable(vfs_test vfs/vfs_test.cpp)
 target_link_libraries(vfs_test PRIVATE opennova_vfs opennova_pff)

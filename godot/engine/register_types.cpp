@@ -49,6 +49,7 @@
 #include "audio/nova_music_script.h"
 #include "audio/nova_music_director.h"
 #include "audio/mus_resource_format.h"
+#include "pff/nova_pff_archive.h"
 
 using namespace godot;
 
@@ -135,6 +136,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaMusicDirector);
 	GDREGISTER_CLASS(MusResourceFormatLoader);
 	GDREGISTER_CLASS(MusResourceFormatSaver);
+	GDREGISTER_CLASS(NovaPffArchive);
 
 	trn_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(trn_loader);
