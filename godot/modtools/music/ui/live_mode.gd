@@ -435,13 +435,19 @@ func _refresh_map() -> void:
 	if model.is_empty():
 		return
 	var names: Array = _bank_names()
+	# Per-section logic glyph summary (◇if ⋔switch ✎var ƒcall) so the map node
+	# surfaces the logic that isn't a track chip -- the part that used to be
+	# invisible until you opened the cramped right list. Keyed by section index.
+	var logic_by_index: Dictionary = _build_logic_summaries(script_name)
 	var node_by_index: Dictionary = {}
 	for section in model:
 		var idx: int = int(section.get("index", -1))
 		var gn := GraphNode.new()
 		# Floor the node width so play-chip names (e.g. "JOMEN602A") read instead of
 		# clipping to "soun"; long names still ellipsize with a full-name tooltip.
-		gn.custom_minimum_size = Vector2(190, 0)
+		# Wider for the blueprint look + the logic badge row.
+		gn.custom_minimum_size = Vector2(240, 0)
+		gn.add_theme_font_size_override("title_font_size", 15)
 		gn.name = "S_%d" % idx
 		gn.set_meta("section", String(section.get("name", "")))
 		gn.gui_input.connect(_on_node_gui_input.bind(String(section.get("name", ""))))
@@ -465,12 +471,24 @@ func _refresh_map() -> void:
 			more.text = "  +%d more" % (plays.size() - shown)
 			more.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 			gn.add_child(more)
+		# Logic badge: the if/switch/var/call summary the chips can't show. Only
+		# when the state actually runs logic; reads as "open me to see the blueprint".
+		var badge_text: String = String(logic_by_index.get(idx, ""))
+		if badge_text != "":
+			var badge := Label.new()
+			badge.text = badge_text
+			badge.add_theme_color_override("font_color", Color(0.72, 0.74, 0.82))
+			badge.tooltip_text = "Logic this state runs (◇ if · ⋔ switch · ✎ var · ƒ call). Double-click to open its blueprint."
+			gn.add_child(badge)
 		if gn.get_child_count() == 0:
 			# Slot 0 needs a row; an idle / branch-only section plays nothing.
 			var spacer := Label.new()
 			spacer.text = " "
 			gn.add_child(spacer)
-		gn.set_slot(0, true, 0, Color(0.5, 0.7, 1.0), true, 0, Color(0.5, 0.7, 1.0))
+		# Output pin coloured by the dominant outgoing edge kind so a switch fan-out
+		# (cyan) reads apart from a plain transition (blue) / branch (gold). Input pin
+		# stays a muted neutral. GraphEdit tints each wire by its source pin colour.
+		gn.set_slot(0, true, 0, Color(0.45, 0.50, 0.60), true, 0, _section_edge_color(section))
 		_map.add_child(gn)
 		node_by_index[idx] = gn
 	_layout_map(model, node_by_index)
@@ -490,6 +508,75 @@ func _refresh_map() -> void:
 	if sig != _fit_signature:
 		_fit_signature = sig
 		_fit_map_to_view()
+
+
+# Build {section_index -> compact logic-glyph summary} from the program AST, so a
+# map node can show the if/switch/var/call shape it runs (the logic that isn't a
+# track chip). One AST parse per rebuild; cheap for the shipped scripts.
+func _build_logic_summaries(script_name: StringName) -> Dictionary:
+	var out: Dictionary = {}
+	if _document == null or not _document.script_loaded():
+		return out
+	var ast: Array = _document.mus_script.get_program_ast(script_name)
+	for sec in ast:
+		out[int(sec.get("index", -1))] = _section_logic_badge(sec.get("statements", []))
+	return out
+
+
+# Compact glyph summary of the LOGIC a section runs (◇ if · ⋔ switch · ✎ var ·
+# ƒ call), counts elided when zero, empty when the section is just plays/
+# transitions. Recurses if/switch bodies so nested logic still surfaces.
+func _section_logic_badge(stmts: Array) -> String:
+	var c := {"if": 0, "switch": 0, "var": 0, "call": 0}
+	_count_logic(stmts, c)
+	var parts := PackedStringArray()
+	if c["if"] > 0:
+		parts.append("◇%d" % c["if"])
+	if c["switch"] > 0:
+		parts.append("⋔%d" % c["switch"])
+	if c["var"] > 0:
+		parts.append("✎%d" % c["var"])
+	if c["call"] > 0:
+		parts.append("ƒ%d" % c["call"])
+	return "  ".join(parts)
+
+
+func _count_logic(stmts: Array, c: Dictionary) -> void:
+	for s in stmts:
+		match String(s.get("kind", "")):
+			"if":
+				c["if"] += 1
+				_count_logic(s.get("then", []), c)
+				_count_logic(s.get("else", []), c)
+			"switch":
+				c["switch"] += 1
+			"assign":
+				c["var"] += 1
+				if bool(s.get("has_call", false)):
+					c["call"] += 1
+			"incdec":
+				c["var"] += 1
+			"expr":
+				if bool(s.get("has_call", false)):
+					c["call"] += 1
+
+
+# Output-pin colour for a section, by its dominant outgoing edge kind: a switch
+# fan-out reads cyan, a conditional branch gold, a plain transition blue.
+func _section_edge_color(section: Dictionary) -> Color:
+	var has_switch := false
+	var has_branch := false
+	for e in section.get("edges", []):
+		var k := int(e.get("kind", 0))
+		if k == MusicSectionGraphClass.KIND_SWITCH:
+			has_switch = true
+		elif k == MusicSectionGraphClass.KIND_BRANCH:
+			has_branch = true
+	if has_switch:
+		return MusicSectionGraphClass.edge_color(MusicSectionGraphClass.KIND_SWITCH)
+	if has_branch:
+		return MusicSectionGraphClass.edge_color(MusicSectionGraphClass.KIND_BRANCH)
+	return MusicSectionGraphClass.edge_color(MusicSectionGraphClass.KIND_TRANSITION)
 
 
 # Center + zoom the section map so the whole graph fills the GraphEdit instead of

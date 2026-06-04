@@ -152,6 +152,44 @@ func test_idle_ticks_do_not_rebuild_map():
 	assert_ne(ids3, ids2, "a real transition rebuilds the map (guard isn't a no-op)")
 
 
+func _node_label_texts(node: Node) -> Array:
+	var out := []
+	for c in node.get_children():
+		if c is Label:
+			out.append(String(c.text))
+	return out
+
+
+func test_map_shows_blueprint_grid_and_minimap():
+	var lm := _make_live()
+	await get_tree().process_frame
+	var map = lm.get_node("%SectionMap")
+	assert_true(map.minimap_enabled, "minimap on for navigating bigger graphs")
+	assert_true(map.show_grid, "blueprint grid on")
+
+
+func test_nodes_carry_a_logic_badge():
+	# A state that runs if/switch/var/call logic surfaces a glyph badge on its map
+	# node, so the logic that isn't a track chip is visible without opening it.
+	var lm := _make_live()
+	await get_tree().process_frame
+	var found := false
+	for n in _nodes(lm.get_node("%SectionMap")):
+		for t in _node_label_texts(n):
+			if t.contains("◇") or t.contains("⋔") or t.contains("✎") or t.contains("ƒ"):
+				found = true
+	assert_true(found, "states that run logic surface a ◇/⋔/✎/ƒ badge on the map node")
+
+
+func test_edge_colors_distinct_by_kind():
+	assert_ne(MusicSectionGraph.edge_color(MusicSectionGraph.KIND_SWITCH),
+		MusicSectionGraph.edge_color(MusicSectionGraph.KIND_TRANSITION),
+		"switch wire colour differs from a plain transition")
+	assert_ne(MusicSectionGraph.edge_color(MusicSectionGraph.KIND_BRANCH),
+		MusicSectionGraph.edge_color(MusicSectionGraph.KIND_TRANSITION),
+		"branch wire colour differs from a plain transition")
+
+
 func _copy(src_path: String, dst_path: String) -> void:
 	var src := FileAccess.open(src_path, FileAccess.READ)
 	assert_not_null(src, "fixture readable: %s" % src_path)
