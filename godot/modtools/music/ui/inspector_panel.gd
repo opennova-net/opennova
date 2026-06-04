@@ -241,28 +241,32 @@ func _tool_button(glyph: String, tip: String) -> Button:
 	return b
 
 
-# The per-row ✎/✕/↑/↓ cluster. Plays get a ✎ that swaps the track (their chip
-# already carries ▶/✕, so no duplicate delete). The structural `done` and the
-# text-less `nop` carry no tools (neither is editable as a text line).
+# The per-row ✎/✕/↑/↓ cluster, identical for EVERY editable row (plays included)
+# so the four glyphs form clean vertical columns instead of jumping around. A
+# play's ✎ swaps its track; its ✕ deletes that exact play (ordinal-precise, so a
+# section that plays the same track twice removes the right one). The chip shows
+# preview + name only -- it no longer carries its own out-of-column ✕. The
+# structural `done` and the text-less `nop` carry no tools (neither is editable
+# as a text line). Buttons are fixed-width so the cluster lines up row to row.
 func _row_tools(ordinal: int, kind: String, stmt: Dictionary) -> Control:
 	var box := HBoxContainer.new()
-	box.add_theme_constant_override("separation", 0)
+	box.add_theme_constant_override("separation", 2)
 	if kind == "done" or kind == "nop":
 		return box
 	var edit := _tool_button("✎", "Edit")
 	edit.pressed.connect(func(): _open_edit_form(kind, ordinal, stmt))
 	box.add_child(edit)
-	# A play's chip already has its own ✕; avoid a second delete control on it.
-	if kind != "play":
-		var del := _tool_button("✕", "Delete")
-		del.pressed.connect(func(): delete_statement_requested.emit(_section_index, ordinal))
-		box.add_child(del)
+	var del := _tool_button("✕", "Delete")
+	del.pressed.connect(func(): delete_statement_requested.emit(_section_index, ordinal))
+	box.add_child(del)
 	var up := _tool_button("↑", "Move up")
 	up.pressed.connect(func(): reorder_statement_requested.emit(_section_index, ordinal, -1))
 	box.add_child(up)
 	var down := _tool_button("↓", "Move down")
 	down.pressed.connect(func(): reorder_statement_requested.emit(_section_index, ordinal, 1))
 	box.add_child(down)
+	for b in box.get_children():
+		(b as Control).custom_minimum_size = Vector2(26, 0)
 	return box
 
 
@@ -274,9 +278,15 @@ func _render_play(s: Dictionary, container: Node, indent: int) -> Control:
 	var chip := MusicTrackChipClass.new()
 	chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(chip)
-	chip.setup(track, _track_name(track), bool(s.get("wait", false)), _editable)
+	# Preview + name only: the row's ✎/✕/↑/↓ cluster (added by _render_top_statement
+	# in editable mode) owns edit/delete, so the play shares the exact tool layout of
+	# every other row. Passing false keeps the chip from drawing a second, out-of-
+	# column ✕ that made plays read "✕ ✎ ↑ ↓" while every other row read "✎ ✕ ↑ ↓".
+	chip.setup(track, _track_name(track), bool(s.get("wait", false)), false)
 	chip.preview_requested.connect(func(t): preview_requested.emit(t))
-	chip.remove_requested.connect(func(t): remove_play_requested.emit(StringName(_section_name), t))
+	# Deletion is owned solely by the row's ✕ (delete_statement_requested, ordinal-
+	# precise); the chip is preview-only here, so we don't also route its (disabled)
+	# remove_requested to remove_play -- that would be a second, track-indexed delete.
 	container.add_child(row)
 	_register_row(row, int(s.get("code_offset", -1)))
 	return row
@@ -341,12 +351,36 @@ func _render_simple(s: Dictionary, container: Node, indent: int) -> Control:
 	return row
 
 
+# Strip ONE fully-enclosing matched paren pair, for display only. The decompiler
+# wraps an if/switch selector once and a binop self-parenthesizes, so the stored
+# expr reads "(Var02 != 10)"; without this the inspector would show the redundant
+# double-paren "if ((Var02 != 10))". Display-only: the authored script text keeps
+# its canonical (round-tripping) form, so byte-stability is untouched. Only peels
+# when the leading "(" matches the trailing ")" (so "(a) + (b)" is left intact).
+func _unwrap_outer_parens(expr: String) -> String:
+	var t := expr.strip_edges()
+	if t.length() < 2 or t[0] != "(" or t[t.length() - 1] != ")":
+		return t
+	var depth := 0
+	for idx in range(t.length()):
+		var ch := t[idx]
+		if ch == "(":
+			depth += 1
+		elif ch == ")":
+			depth -= 1
+			if depth == 0:
+				if idx == t.length() - 1:
+					return t.substr(1, t.length() - 2).strip_edges()
+				return t
+	return t
+
+
 func _render_if(s: Dictionary, container: Node, indent: int) -> Control:
 	var head := HBoxContainer.new()
 	head.add_child(_indent_spacer(indent))
 	head.add_child(_glyph_label("if"))
 	var lbl := Label.new()
-	lbl.text = "if (%s)" % String(s.get("expr", ""))
+	lbl.text = "if (%s)" % _unwrap_outer_parens(String(s.get("expr", "")))
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(lbl)
 	container.add_child(head)
@@ -367,7 +401,7 @@ func _render_switch(s: Dictionary, container: Node, indent: int) -> Control:
 	head.add_child(_glyph_label("switch"))
 	var action := String(s.get("action", "enter"))
 	var lbl := Label.new()
-	lbl.text = "on (%s) → %s" % [String(s.get("expr", "")), action]
+	lbl.text = "on (%s) → %s" % [_unwrap_outer_parens(String(s.get("expr", ""))), action]
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(lbl)
 	container.add_child(head)
@@ -608,7 +642,8 @@ func _var_option(selected_token: String, selected_offset: int = -1) -> OptionBut
 	# Fall back to byte-offset matching when the resolved name didn't match a token:
 	# a script with editor-named globals reports its custom name (e.g. "Intensity"),
 	# not "VarNN", so a name-only match would silently default to Var00 on edit.
-	if picked < 0 and selected_offset >= 0 and selected_offset <= 60:
+	# 64 is the last 4-byte-aligned global offset (Var16, MUS_GLOBALS_BYTES 68).
+	if picked < 0 and selected_offset >= 0 and selected_offset <= 64:
 		var idx := selected_offset / 4
 		if idx < _var_list.size():
 			picked = idx
