@@ -158,6 +158,48 @@ func test_inspector_renders_statement_tree_with_go():
 		assert_eq(captured.size(), 1, "Go emits jump_requested once")
 
 
+func test_if_switch_conditions_drop_redundant_parens():
+	# The decompiler stores the selector pre-wrapped ("(Var01 != 0)"); the visual
+	# surface must read "if (Var01 != 0)", NOT the canonical double-paren
+	# "if ((Var01 != 0))" (correct for the script text, redundant to read). A
+	# bare-var selector ("Var02") has no wrapper to peel and stays single-paren.
+	var panel = MusicInspectorPanel.new()
+	add_child_autofree(panel)
+	await get_tree().process_frame
+	var sec := {
+		"name": "S", "index": 0, "is_entry": true, "code_offset": 0,
+		"statements": [
+			{"kind": "if", "code_offset": 0, "byte_size": 6, "expr": "(Var01 != 0)", "else_present": false,
+				"then": [{"kind": "return", "code_offset": 4, "byte_size": 2, "text": "return"}], "else": []},
+			{"kind": "switch", "code_offset": 8, "byte_size": 8, "expr": "Var02", "action": "enter",
+				"targets": [{"name": "A", "section": 1}]},
+		],
+	}
+	panel.show_section(sec, ["S", "A"], "", false)
+	var rows := []
+	_all_rows(panel, rows)
+	var labels := []
+	for r in rows:
+		for c in r.get_children():
+			if c is Label:
+				labels.append(String(c.text))
+	assert_true("if (Var01 != 0)" in labels, "if condition drops the redundant outer paren")
+	assert_true("on (Var02) → enter" in labels, "bare-var switch selector stays single-paren")
+	var joined := " | ".join(PackedStringArray(labels))
+	assert_false(joined.contains("(("), "no double-paren leaks into the visual surface")
+
+
+# The authoring variable picker must offer all 17 global slots (Var00..Var16,
+# MUS_GLOBALS_BYTES 68/4) so the assignment / expression builder stays in step
+# with the Game Dials panel, which already shows the user global Var16.
+func test_var_picker_covers_all_seventeen_globals():
+	var lm := _make_live()
+	await get_tree().process_frame
+	var vars: Array = lm._build_var_list()
+	assert_eq(vars.size(), 17, "picker offers Var00..Var16")
+	assert_eq(String(vars[16].get("token", "")), "Var16", "the 17th slot is the user global Var16")
+
+
 func test_assign_with_call_shows_function_badge():
 	# An assignment whose RHS runs a function must read as BOTH a var-mutation and
 	# a function-call at a glance (the ✎ icon plus a ƒ badge), so "what changed /

@@ -95,6 +95,13 @@ func _add_row(i: int) -> void:
 # { control, setter, value_label }. `setter` applies an incoming VM value to
 # the control WITHOUT re-emitting (so external updates don't echo back into
 # set_var) and refreshes the live-value label.
+#
+# The column-3 readout is only populated where the control doesn't already show
+# the number: a slider has no numeric display, and an enum shows a label ("MP")
+# not the stored int. A SpinBox and a CheckBox already read out their own value,
+# so duplicating it there just printed every dial's value twice (the "0 ... 0"
+# noise across the raw-slot rows). For those the label stays blank but present,
+# so the GridContainer's three columns still line up.
 func _make_control(i: int, meta: Dictionary) -> Dictionary:
 	var kind: String = meta.get("kind", "int")
 	var value_label := Label.new()
@@ -118,14 +125,13 @@ func _make_control(i: int, meta: Dictionary) -> Dictionary:
 				value_label.text = str(val)
 			return {"control": slider, "setter": setter, "value_label": value_label}
 		"bool":
+			# The checkbox itself reads out on/off, so no duplicate column-3 number.
 			var cb := CheckBox.new()
 			cb.toggled.connect(func(pressed):
 				if _director != null:
-					_director.set_var(i, 1 if pressed else 0)
-				value_label.text = "1" if pressed else "0")
+					_director.set_var(i, 1 if pressed else 0))
 			var setter := func(val):
 				cb.set_pressed_no_signal(int(val) != 0)
-				value_label.text = str(val)
 			return {"control": cb, "setter": setter, "value_label": value_label}
 		"enum":
 			var ob := OptionButton.new()
@@ -166,13 +172,12 @@ func _make_control(i: int, meta: Dictionary) -> Dictionary:
 			spin.allow_lesser = true
 			spin.allow_greater = true
 			spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			# The spinbox shows its own value, so no duplicate column-3 number.
 			spin.value_changed.connect(func(v):
 				if _director != null:
-					_director.set_var(i, int(v))
-				value_label.text = str(int(v)))
+					_director.set_var(i, int(v)))
 			var setter := func(val):
 				spin.set_value_no_signal(float(val))
-				value_label.text = str(val)
 			return {"control": spin, "setter": setter, "value_label": value_label}
 
 

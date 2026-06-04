@@ -792,14 +792,17 @@ func _show_section_in_inspector(sec: String, came_from: String = "") -> void:
 	_inspector_panel.clear()
 
 
-# Variable picker list for the authoring popups: Var00..Var15 with friendly,
-# per-script names where known (the same map the Variables tab + event log use).
+# Variable picker list for the authoring popups: Var00..Var16 (all 17 int32
+# slots in MUS_GLOBALS_BYTES = 68/4, matching the Game Dials panel) with
+# friendly, per-script names where known (the same map the Variables tab + event
+# log use). Var16 is the user global; offering it here keeps the assignment /
+# expression picker in step with the dials, which already show it.
 func _build_var_list() -> Array:
 	var out: Array = []
 	var sname := ""
 	if _document != null and _document.script_loaded():
 		sname = String(_document.mus_script.get_default_script_name())
-	for i in range(16):
+	for i in range(17):
 		var label := MusVarNames.label_for(sname, i) if sname != "" else "Var%02d" % i
 		out.append({"token": "Var%02d" % i, "label": label})
 	return out
