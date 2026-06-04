@@ -287,6 +287,19 @@ target_compile_definitions(mus_structured_play_edit_test PRIVATE
 add_test(NAME mus_structured_play_edit COMMAND mus_structured_play_edit_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Structured statement + section edit parity (Phase 2 authoring): top-level
+# statements are located by line span (mus_ast_emit_text_spans, the same emit the
+# editor's get_annotated_decompile bridge uses) then spliced/deleted/replaced/
+# reordered; section rename is bytecode-identical, referenced-delete is refused.
+add_executable(mus_structured_section_edit_test mus/mus_structured_section_edit_test.cpp)
+target_link_libraries(mus_structured_section_edit_test PRIVATE opennova_mus)
+target_include_directories(mus_structured_section_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mus_structured_section_edit_test PRIVATE cxx_std_17)
+target_compile_definitions(mus_structured_section_edit_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_structured_section_edit COMMAND mus_structured_section_edit_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # VFS tests (mount precedence, mount_game expansion override, SCR decode-on-read)
 add_executable(vfs_test vfs/vfs_test.cpp)
 target_link_libraries(vfs_test PRIVATE opennova_vfs opennova_pff)

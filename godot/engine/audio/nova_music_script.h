@@ -82,6 +82,21 @@ public:
 	// are left to the caller (it has the bank); `track` is the SBF entry index.
 	Array get_program_ast(const StringName &p_script_name) const;
 
+	// Phase 2 (visual authoring): the names-less decompile PLUS a per-top-level-
+	// statement line-span map, so the editor's write path can address a single
+	// statement for splice/delete/replace without re-scanning braces (the brace-
+	// leak past a `done` and compound if/on blocks make text scanning fragile).
+	// Returns a Dictionary:
+	//   "text": String        -- byte-identical to get_decompiled_text (names-less)
+	//   "rows": Array[ {       -- one per top-level statement, in emission order
+	//       section_index:int, ordinal:int, code_offset:int, kind:int,
+	//       line_start:int, line_end:int   -- [start,end) 0-based line range
+	//   } ]
+	// Built from the same mus_ast_emit_text_spans the AST emitter uses, so rows
+	// and the text are guaranteed consistent. A NOP yields an empty span
+	// (line_start == line_end) since the decompiler renders it as nothing.
+	Dictionary get_annotated_decompile(const StringName &p_script_name) const;
+
 	// Phase F4: text -> bytecode bridge for the music editor's Script mode.
 	// Returns a Dictionary with keys:
 	//   "rc"        : int  -- 0 on success, negative on parse/emit failure

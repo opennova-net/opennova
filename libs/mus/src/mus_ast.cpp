@@ -690,11 +690,12 @@ extern "C" void mus_program_free(MusAstProgram *program) {
 
 namespace {
 
-struct EBuf { char *p; size_t cap; size_t used; };
+struct EBuf { char *p; size_t cap; size_t used; size_t line; };
 
 static void e_putc(EBuf *b, char c) {
     if (b->p && b->used + 1 < b->cap) b->p[b->used] = c;
     ++b->used;
+    if (c == '\n') ++b->line;   /* track the current 0-based line for span emit */
 }
 static void e_puts(EBuf *b, const char *s) { while (*s) e_putc(b, *s++); }
 static void e_printf(EBuf *b, const char *fmt, ...) {
@@ -790,20 +791,20 @@ static void emit_stmt_list(EBuf *b, const MusAstStmt *stmts, uint32_t count, int
     for (uint32_t i = 0; i < count; ++i) emit_stmt(b, &stmts[i], indent, names, name_count);
 }
 
-} // namespace
-
-extern "C" int mus_ast_emit_text(const MusAstProgram *prog,
-                                 const char *const *sbf_names, uint32_t sbf_name_count,
-                                 char *out_text, size_t out_capacity) {
-    if (!prog) return -1;
-    EBuf b; b.p = out_text; b.cap = out_capacity; b.used = 0;
-
+/* Shared emit core: header + bind/global/declsection blocks + section bodies, in
+   the exact order and form mus_decompile produces (the byte-identity is pinned by
+   mus_ast_test.cpp). When `spans` is non-NULL, each top-level statement's
+   [line_start, line_end) line range is appended in emission order -- the editor's
+   Phase-2 authoring uses it to address a single statement for splice/delete. */
+static void emit_program(const MusAstProgram *prog,
+                         const char *const *sbf_names, uint32_t sbf_name_count,
+                         EBuf *b, std::vector<MusStmtLineSpan> *spans) {
     /* ---- Header ---- */
-    e_printf(&b, "// Script: %s\n", prog->name);
-    if (prog->source_path[0]) e_printf(&b, "// Original source: %s\n", prog->source_path);
-    e_puts(&b, "//\n");
-    e_puts(&b, "// IMPORTANT: Load MUSIC.LAN before opening this file in MDEdit\n");
-    e_puts(&b, "// The following methods are used: ");
+    e_printf(b, "// Script: %s\n", prog->name);
+    if (prog->source_path[0]) e_printf(b, "// Original source: %s\n", prog->source_path);
+    e_puts(b, "//\n");
+    e_puts(b, "// IMPORTANT: Load MUSIC.LAN before opening this file in MDEdit\n");
+    e_puts(b, "// The following methods are used: ");
     {
         int first = 1;
         for (uint32_t i = 0; i < prog->intrinsic_count; ++i) {
@@ -811,39 +812,39 @@ extern "C" int mus_ast_emit_text(const MusAstProgram *prog,
             if (!combined[0] || combined[0] == '@') continue;
             char obj[16], mth[64];
             split_method_name(combined, obj, sizeof(obj), mth, sizeof(mth));
-            if (!first) e_puts(&b, ", ");
+            if (!first) e_puts(b, ", ");
             first = 0;
-            if (obj[0]) e_printf(&b, "%s.%s", obj, mth);
-            else        e_printf(&b, "%s", combined);
+            if (obj[0]) e_printf(b, "%s.%s", obj, mth);
+            else        e_printf(b, "%s", combined);
         }
     }
-    e_putc(&b, '\n');
-    e_putc(&b, '\n');
+    e_putc(b, '\n');
+    e_putc(b, '\n');
 
-    e_printf(&b, "script %s\n\n", prog->name);
+    e_printf(b, "script %s\n\n", prog->name);
 
     /* Bind declarations. */
     if (prog->max_play_index >= 0) {
-        e_puts(&b, "// Sound bind declarations (play requires bind identifiers)\n");
+        e_puts(b, "// Sound bind declarations (play requires bind identifiers)\n");
         for (int k = 0; k <= prog->max_play_index; ++k) {
             char qname[96];
             resolve_play_name(k, sbf_names, sbf_name_count, qname, sizeof(qname));
-            e_printf(&b, "bind sound_%d \"%s\"\n", k, qname);
+            e_printf(b, "bind sound_%d \"%s\"\n", k, qname);
         }
-        e_putc(&b, '\n');
+        e_putc(b, '\n');
     }
 
     /* Global variables block. */
     if (prog->globals_used_count > 0) {
-        e_puts(&b, "// Global variables\n");
-        e_puts(&b, "// Used global offsets from original: [");
+        e_puts(b, "// Global variables\n");
+        e_puts(b, "// Used global offsets from original: [");
         for (uint32_t k = 0; k < prog->globals_used_count; ++k) {
-            if (k > 0) e_puts(&b, ", ");
-            e_printf(&b, "%d", prog->globals_used[k]);
+            if (k > 0) e_puts(b, ", ");
+            e_printf(b, "%d", prog->globals_used[k]);
         }
-        e_puts(&b, "]\n");
-        e_printf(&b, "// Original globals_area = %u bytes\n", prog->globals_size);
-        e_puts(&b, "// NOTE: MDEdit pre-defines Var00-Var15 at offsets 0-60 (64 bytes)\n");
+        e_puts(b, "]\n");
+        e_printf(b, "// Original globals_area = %u bytes\n", prog->globals_size);
+        e_puts(b, "// NOTE: MDEdit pre-defines Var00-Var15 at offsets 0-60 (64 bytes)\n");
 
         int max_user = INT32_MIN;
         for (uint32_t k = 0; k < prog->globals_used_count; ++k)
@@ -858,21 +859,21 @@ extern "C" int mus_ast_emit_text(const MusAstProgram *prog,
                     char vname[64];
                     resolve_global_into(vname, sizeof(vname), off,
                                         prog->variables, prog->variable_count);
-                    e_printf(&b, "global INT %s\n", vname);
+                    e_printf(b, "global INT %s\n", vname);
                 } else {
-                    e_printf(&b, "global INT _pad_%d\n", off / 4);
+                    e_printf(b, "global INT _pad_%d\n", off / 4);
                 }
             }
         }
-        e_putc(&b, '\n');
+        e_putc(b, '\n');
     }
 
     /* declsection forward declarations (script index order). */
     if (prog->section_count > 0) {
-        e_puts(&b, "// Section forward declarations\n");
+        e_puts(b, "// Section forward declarations\n");
         for (uint32_t s = 0; s < prog->section_count; ++s)
-            e_printf(&b, "declsection %s\n", prog->sections[s].name);
-        e_putc(&b, '\n');
+            e_printf(b, "declsection %s\n", prog->sections[s].name);
+        e_putc(b, '\n');
     }
 
     /* ---- Section bodies, in code-offset order (reproduces the decompiler's
@@ -887,17 +888,79 @@ extern "C" int mus_ast_emit_text(const MusAstProgram *prog,
                 }
         for (size_t oi = 0; oi < order.size(); ++oi) {
             const MusAstSection &sec = prog->sections[order[oi]];
-            e_putc(&b, '\n');
-            e_printf(&b, "section %s\n", sec.name);
-            e_puts(&b, "{\n");
-            emit_stmt_list(&b, sec.statements, sec.statement_count, 0,
-                           sbf_names, sbf_name_count);
+            e_putc(b, '\n');
+            e_printf(b, "section %s\n", sec.name);
+            e_puts(b, "{\n");
+            /* Emit each top-level statement, recording its line span when asked.
+               (NOP emits nothing, so its span is empty -- it has no editable text,
+               matching the decompiler dropping it.) */
+            for (uint32_t k = 0; k < sec.statement_count; ++k) {
+                int ls = (int)b->line;
+                emit_stmt(b, &sec.statements[k], 0, sbf_names, sbf_name_count);
+                if (spans) {
+                    MusStmtLineSpan sp;
+                    sp.section_index = sec.section_index;
+                    sp.ordinal       = (int)k;
+                    sp.code_offset   = sec.statements[k].code_offset;
+                    sp.kind          = sec.statements[k].kind;
+                    sp.line_start    = ls;
+                    sp.line_end      = (int)b->line;
+                    spans->push_back(sp);
+                }
+            }
         }
     }
+}
 
+} // namespace
+
+extern "C" int mus_ast_emit_text(const MusAstProgram *prog,
+                                 const char *const *sbf_names, uint32_t sbf_name_count,
+                                 char *out_text, size_t out_capacity) {
+    if (!prog) return -1;
+    EBuf b; b.p = out_text; b.cap = out_capacity; b.used = 0; b.line = 0;
+    emit_program(prog, sbf_names, sbf_name_count, &b, NULL);
     if (b.p && b.cap > 0) {
         size_t end = b.used < b.cap ? b.used : b.cap - 1;
         b.p[end] = 0;
     }
     return (int)b.used;
+}
+
+extern "C" int mus_ast_emit_text_spans(const MusAstProgram *prog,
+                                       const char *const *sbf_names, uint32_t sbf_name_count,
+                                       char **out_text,
+                                       MusStmtLineSpan **out_spans, uint32_t *out_span_count) {
+    if (!prog || !out_text || !out_spans || !out_span_count) return -1;
+    *out_text = NULL;
+    *out_spans = NULL;
+    *out_span_count = 0;
+
+    /* Sizing pass (no buffer): get the byte length so we can allocate exactly. */
+    EBuf sz; sz.p = NULL; sz.cap = 0; sz.used = 0; sz.line = 0;
+    emit_program(prog, sbf_names, sbf_name_count, &sz, NULL);
+
+    size_t need = sz.used + 1;
+    char *text = (char *)malloc(need);
+    if (!text) return -1;
+
+    /* Write pass with span collection. */
+    EBuf b; b.p = text; b.cap = need; b.used = 0; b.line = 0;
+    std::vector<MusStmtLineSpan> spans;
+    emit_program(prog, sbf_names, sbf_name_count, &b, &spans);
+    {
+        size_t end = b.used < b.cap ? b.used : b.cap - 1;
+        text[end] = 0;
+    }
+
+    MusStmtLineSpan *arr = NULL;
+    if (!spans.empty()) {
+        arr = (MusStmtLineSpan *)malloc(spans.size() * sizeof(MusStmtLineSpan));
+        if (!arr) { free(text); return -1; }
+        for (size_t i = 0; i < spans.size(); ++i) arr[i] = spans[i];
+    }
+    *out_text = text;
+    *out_spans = arr;
+    *out_span_count = (uint32_t)spans.size();
+    return 0;
 }

@@ -174,6 +174,14 @@ func _ready() -> void:
 	_inspector_panel.advanced_requested.connect(_on_inspector_advanced)
 	_inspector_panel.add_play_requested.connect(_on_inspector_add_play)
 	_inspector_panel.remove_play_requested.connect(_on_inspector_remove_play)
+	# Phase 2 authoring intents -> document write path.
+	_inspector_panel.add_statement_requested.connect(_on_inspector_add_statement)
+	_inspector_panel.replace_statement_requested.connect(_on_inspector_replace_statement)
+	_inspector_panel.delete_statement_requested.connect(_on_inspector_delete_statement)
+	_inspector_panel.reorder_statement_requested.connect(_on_inspector_reorder_statement)
+	_inspector_panel.rename_section_requested.connect(_on_inspector_rename_section)
+	_inspector_panel.delete_section_requested.connect(_on_inspector_delete_section)
+	_inspector_panel.author_failed.connect(func(msg: String): _flash_start_warning(msg))
 	if _advanced_toggle != null:
 		_advanced_toggle.toggled.connect(_on_advanced_toggled)
 	_install_add_state_button()
@@ -765,7 +773,13 @@ func _show_section_in_inspector(sec: String, came_from: String = "") -> void:
 		return
 	var script_name := StringName(_document.mus_script.get_default_script_name())
 	var ast: Array = _document.mus_script.get_program_ast(script_name)
-	var editable: bool = _document.has_method("can_edit_plays") and _document.can_edit_plays()
+	var editable: bool = _document.has_method("can_author") and _document.can_author()
+	# Hand the inspector the context its authoring popups need (section list for
+	# transition/switch targets + rename validation, variable list, the script for
+	# expression validation).
+	if _inspector_panel.has_method("configure_authoring"):
+		var section_names: PackedStringArray = _document.mus_script.get_section_names(script_name)
+		_inspector_panel.configure_authoring(section_names, _build_var_list(), _document.mus_script)
 	for section in ast:
 		if String(section.get("name", "")) == sec:
 			# Derive the idle-loop badge from the AST we already have (a section
@@ -776,6 +790,77 @@ func _show_section_in_inspector(sec: String, came_from: String = "") -> void:
 			_inspector_panel.show_section(section, _bank_names(), came_from, editable)
 			return
 	_inspector_panel.clear()
+
+
+# Variable picker list for the authoring popups: Var00..Var15 with friendly,
+# per-script names where known (the same map the Variables tab + event log use).
+func _build_var_list() -> Array:
+	var out: Array = []
+	var sname := ""
+	if _document != null and _document.script_loaded():
+		sname = String(_document.mus_script.get_default_script_name())
+	for i in range(16):
+		var label := MusVarNames.label_for(sname, i) if sname != "" else "Var%02d" % i
+		out.append({"token": "Var%02d" % i, "label": label})
+	return out
+
+
+# --- Phase 2 authoring intent handlers (route to the document, keep pinned) ---
+
+func _on_inspector_add_statement(section_index: int, lines: PackedStringArray) -> void:
+	if _document == null or not _document.has_method("insert_statement"):
+		return
+	_follow_live = false
+	if not _document.insert_statement(section_index, lines):
+		_flash_start_warning("Couldn't add that here")
+
+
+func _on_inspector_replace_statement(section_index: int, ordinal: int, lines: PackedStringArray) -> void:
+	if _document == null or not _document.has_method("replace_statement"):
+		return
+	_follow_live = false
+	if not _document.replace_statement(section_index, ordinal, lines):
+		_flash_start_warning("Couldn't apply that edit")
+
+
+func _on_inspector_delete_statement(section_index: int, ordinal: int) -> void:
+	if _document == null or not _document.has_method("delete_statement"):
+		return
+	_follow_live = false
+	if not _document.delete_statement(section_index, ordinal):
+		_flash_start_warning("Couldn't delete that")
+
+
+func _on_inspector_reorder_statement(section_index: int, ordinal: int, direction: int) -> void:
+	if _document == null or not _document.has_method("reorder_statement"):
+		return
+	_follow_live = false
+	if not _document.reorder_statement(section_index, ordinal, direction):
+		_flash_start_warning("Can't move it further")
+
+
+func _on_inspector_rename_section(old_name: StringName, new_name: StringName) -> void:
+	if _document == null or not _document.has_method("rename_section"):
+		return
+	_follow_live = false
+	if _document.rename_section(old_name, new_name):
+		# The pinned section's name changed; re-pin under the new name (the
+		# document.changed refresh would otherwise look up the gone old name).
+		_show_section_in_inspector(String(new_name))
+		_log_typed(EvType.SYSTEM, "renamed %s -> %s" % [old_name, new_name])
+	else:
+		_flash_start_warning("Rename rejected (name taken/invalid)")
+
+
+func _on_inspector_delete_section(section_name: StringName) -> void:
+	if _document == null or not _document.has_method("delete_section"):
+		return
+	_follow_live = false
+	if _document.delete_section(section_name):
+		_log_typed(EvType.SYSTEM, "deleted state %s" % section_name)
+		# Section gone -> document.changed re-show finds nothing and clears.
+	else:
+		_flash_start_warning("Can't delete: state is still referenced")
 
 
 # A section is an idle self-loop when it has at least one outgoing section target

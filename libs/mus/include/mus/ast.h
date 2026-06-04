@@ -149,6 +149,35 @@ int mus_ast_emit_text(const MusAstProgram *program,
                       const char *const *sbf_names, uint32_t sbf_name_count,
                       char *out_text, size_t out_capacity);
 
+/* One emitted top-level statement, with its line span in the emitted text. This
+   is the location backbone the visual editor's Phase-2 authoring stands on: it
+   maps each AST top-level statement (in source order, per section) to the exact
+   line range it occupies in mus_ast_emit_text's output, which is byte-identical
+   to mus_decompile() -- so the editor can splice/delete/replace a specific
+   statement by line range without re-scanning braces (which the brace-leak and
+   compound if/on blocks make fragile). Line indices are 0-based; the range is
+   [line_start, line_end) (line_end exclusive). Compound statements (IF) span all
+   their lines; DONE is its own one-line statement (the section-closing "}"). */
+typedef struct MusStmtLineSpan {
+    int      section_index;   /* MusAstSection.section_index that owns the statement */
+    int      ordinal;         /* index into that section's top-level statements      */
+    uint32_t code_offset;     /* originating opcode offset (matches the AST stmt)    */
+    int      kind;            /* MusAstStmtKind                                      */
+    int      line_start;      /* 0-based first line of the statement                 */
+    int      line_end;        /* exclusive: first line past the statement            */
+} MusStmtLineSpan;
+
+/* Emit .mus text AND a parallel array of top-level statement line spans. Both are
+   malloc'd and handed to the caller: free *out_text and *out_spans with mus_free.
+   Same text as mus_ast_emit_text(program, sbf_names, ...). Returns 0 on success,
+   negative on NULL input / OOM. *out_span_count is the number of spans written
+   (== total top-level statements across all sections). The spans are in emission
+   order (section bodies in code-offset order, statements in source order). */
+int mus_ast_emit_text_spans(const MusAstProgram *program,
+                            const char *const *sbf_names, uint32_t sbf_name_count,
+                            char **out_text,
+                            MusStmtLineSpan **out_spans, uint32_t *out_span_count);
+
 #ifdef __cplusplus
 }
 #endif
