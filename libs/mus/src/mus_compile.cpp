@@ -801,6 +801,13 @@ int Compiler::parse_stmt(const char **err) {
             *err = "unknown play target (expected 'sound_N' or a bound name)";
             return -1;
         }
+        /* The play opcode operand is a single byte; a larger index would silently
+           wrap to a different sound. Reject it so the editor can never emit a
+           valid-but-wrong play (the original engine reads only a u8 here too). */
+        if (idx > 255) {
+            *err = "play target index out of range (max 255)";
+            return -1;
+        }
         emit.byte(0x3E);
         emit.byte((uint8_t)idx);
         lex.advance();
@@ -975,6 +982,13 @@ int Compiler::parse_stmt(const char **err) {
             ++ntargets;
             lex.advance();
         }
+        /* Stopping at 64 must be a hard error, not a silent truncation: leftover
+           target tokens would otherwise be misparsed as the next statement (a
+           confusing downstream error) and the count byte can't represent them. */
+        if (lex.cur_kind == Tok::Ident || lex.cur_kind == Tok::String) {
+            *err = "too many targets in on(...) table (max 64)";
+            return -1;
+        }
         /* Emit tablexec opcode + 4 header bytes: count, inner_op, entry_size,
            skip_size. skip_size is the TOTAL encoded instruction length
            (1 opcode + 4 header + count*entry_size body); Jointops.exe's
@@ -983,6 +997,13 @@ int Compiler::parse_stmt(const char **err) {
            the dispatcher on out-of-range indices. Witnessed: jo_gamemus
            tablexec @ 0x00c8 has size=3, entry_stride=2 → skip_size = 0x0b. */
         uint32_t total_size = 5u + (uint32_t)ntargets * (uint32_t)entry_size;
+        /* skip_size is a single byte the VM uses to step past the table; a wrapped
+           value scrambles the dispatcher on out-of-range indices. Reachable with a
+           goto-action table (entry_size 5) of >=51 targets. Error instead of wrap. */
+        if (total_size > 255) {
+            *err = "on(...) table too large to encode (reduce targets)";
+            return -1;
+        }
         emit.byte(0x35);
         emit.byte((uint8_t)ntargets);
         emit.byte(inner_op);
@@ -994,12 +1015,20 @@ int Compiler::parse_stmt(const char **err) {
                 /* enter or play: entry[1] = section/sound idx (1 byte) */
                 if (inner_op == 0x3B) {
                     int sidx = section_find_or_create(targets[t]);
+                    if (sidx > 255) {
+                        *err = "too many sections to index in on(...) table";
+                        return -1;
+                    }
                     emit.byte((uint8_t)sidx);
                 } else {
                     /* play: target is sound_N or a bound name */
                     int sidx = resolve_play_target(targets[t]);
                     if (sidx < 0) {
                         *err = "unknown play target in on(...) play table";
+                        return -1;
+                    }
+                    if (sidx > 255) {
+                        *err = "play target index out of range in on(...) table (max 255)";
                         return -1;
                     }
                     emit.byte((uint8_t)sidx);

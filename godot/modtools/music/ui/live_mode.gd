@@ -96,6 +96,7 @@ var _add_state_btn: Button
 var _logic_graph: GraphEdit
 var _breadcrumb: HBoxContainer
 var _breadcrumb_label: Label
+var _follow_btn: CheckButton
 var _map_header: Control
 var _map_toolbar: Control
 var _logic_section_name: String = ""
@@ -115,9 +116,9 @@ func bind_document(document: RefCounted) -> void:
 	_document = document
 	if _document != null:
 		_document.changed.connect(_on_document_changed)
-		# Surface compile failures on the always-visible transport label and pop
-		# the Advanced drawer (where the detailed error list lives). Without this a
-		# failed Compile&Run / Save was silent whenever the drawer was collapsed.
+		# Surface compile failures on the always-visible transport label. Structured
+		# edits are gated and rolled back, so a failure here is rare (mainly Save);
+		# without this it would be silent.
 		if _document.has_signal("compile_finished"):
 			_document.compile_finished.connect(_on_compile_finished)
 	if is_node_ready():
@@ -194,6 +195,10 @@ func _process(_delta: float) -> void:
 	if _start_warning_until_ms != 0 and Time.get_ticks_msec() >= _start_warning_until_ms:
 		_start_warning_until_ms = 0
 		_apply_state_label(_last_state)
+	# Reflect the (programmatically-set) follow state on the breadcrumb toggle without
+	# re-emitting toggled -- many edit paths pin follow off; this keeps the UI honest.
+	if _follow_btn != null and _follow_btn.button_pressed != _follow_live:
+		_follow_btn.set_pressed_no_signal(_follow_live)
 	var state: int = _director.vm_state()
 	if state != _last_state:
 		_apply_state_label(state)
@@ -440,6 +445,9 @@ func _refresh_map() -> void:
 		gn.title = String(section.get("name", ""))
 		if bool(section.get("is_entry", false)):
 			gn.title += "   ★ start"
+			# Be honest about the fixed entry: the first-declared state is always the
+			# start, and there is no set-start / reorder affordance yet.
+			gn.tooltip_text = "Start state: playback begins here. The first state is always the start (choosing a different start state, or reordering states, isn't supported yet)."
 		if bool(section.get("is_idle_loop", false)):
 			gn.title += "   ↻ idle"
 		# Body: up to 3 track chips; the full list shows in the right inspector.
@@ -871,12 +879,26 @@ func _install_add_state_button() -> void:
 	_map_header = col.get_node_or_null("MapHeader")
 
 
+# Why structured authoring is currently off, or "" when available. Prefers the
+# document's specific reason (esp. the multi-chunk read-only case) over a generic
+# "must compile" so the user understands a greyed-out edit instead of guessing.
+func _authoring_blocked_reason() -> String:
+	if _document == null or not _document.script_loaded():
+		return "Open a project first"
+	if _document.has_method("authoring_blocked_reason"):
+		return String(_document.authoring_blocked_reason())
+	if not (_document.has_method("can_author") and _document.can_author()):
+		return "Script must compile first"
+	return ""
+
+
 func _on_add_state() -> void:
 	if _document == null or not _document.script_loaded():
 		_flash_start_warning("Open a project first")
 		return
-	if not (_document.has_method("can_edit_plays") and _document.can_edit_plays()):
-		_flash_start_warning("Script must compile to add a state")
+	var reason: String = _authoring_blocked_reason()
+	if reason != "":
+		_flash_start_warning(reason)
 		return
 	if not _document.has_method("add_section"):
 		return
@@ -942,6 +964,16 @@ func _install_logic_graph() -> void:
 	del.focus_mode = Control.FOCUS_NONE
 	del.pressed.connect(_on_breadcrumb_delete)
 	_breadcrumb.add_child(del)
+	# Follow-live toggle: when on, a VM transition re-drills the blueprint into the
+	# entered state. A manual node click pins (turns this off); flipping it back on
+	# resumes following -- the explicit, visible control the auto-pin behaviour lacked.
+	_follow_btn = CheckButton.new()
+	_follow_btn.text = "Follow live"
+	_follow_btn.tooltip_text = "Follow the VM into each state it enters. Clicking a state pins the view (turns this off); re-enable to resume following."
+	_follow_btn.focus_mode = Control.FOCUS_NONE
+	_follow_btn.button_pressed = _follow_live
+	_follow_btn.toggled.connect(_on_follow_toggled)
+	_breadcrumb.add_child(_follow_btn)
 	_breadcrumb.visible = false
 	col.add_child(_breadcrumb)
 	col.move_child(_breadcrumb, 0)
@@ -976,6 +1008,14 @@ func _on_breadcrumb_delete() -> void:
 		_open_delete_section_dialog(_logic_section_name)
 
 
+func _on_follow_toggled(pressed: bool) -> void:
+	_follow_live = pressed
+	# Re-enabling while the VM is running snaps the blueprint to the live state now,
+	# rather than waiting for the next transition.
+	if pressed and _last_state == VM_RUNNING and String(_current_section) != "":
+		_drill_into(String(_current_section), false)
+
+
 # Right-click a state on the map: open its blueprint, rename it, or delete it.
 # Rename + delete need an editable (single-chunk, compiling) script.
 func _show_state_context_menu(section_name: String, global_pos: Vector2) -> void:
@@ -986,6 +1026,11 @@ func _show_state_context_menu(section_name: String, global_pos: Vector2) -> void
 	var can: bool = _document != null and _document.has_method("can_author") and _document.can_author()
 	pop.set_item_disabled(1, not can)
 	pop.set_item_disabled(2, not can)
+	if not can:
+		# Explain the greyed-out items (esp. the multi-chunk read-only case).
+		var reason := _authoring_blocked_reason()
+		pop.set_item_tooltip(1, reason)
+		pop.set_item_tooltip(2, reason)
 	add_child(pop)
 	pop.id_pressed.connect(_on_state_menu_id.bind(section_name))
 	pop.popup_hide.connect(pop.queue_free)
@@ -1090,7 +1135,27 @@ func _drill_into(section_name: String, pin: bool = true) -> void:
 	_logic_graph.visible = true
 	_set_map_chrome_visible(false)
 	_breadcrumb.visible = true
-	_breadcrumb_label.text = "  ▸  %s   (blueprint)" % section_name
+	# Surface the self-loop "idle" state on the blueprint too (the map shows ↻ idle on
+	# the node; without this the drilled-in view gave no hint why it loops in place).
+	var suffix := "(blueprint)"
+	if _section_is_idle_loop(section_name):
+		suffix = "(blueprint · ↻ loops to itself)"
+	_breadcrumb_label.text = "  ▸  %s   %s" % [section_name, suffix]
+
+
+# Whether a section is a self-loop "idle" state, per the opcode-level section model
+# (the AST dict doesn't carry it). Used to badge the drill-in breadcrumb.
+func _section_is_idle_loop(section_name: String) -> bool:
+	if _document == null or not _document.script_loaded():
+		return false
+	var ms = _document.mus_script
+	if not ms.has_method("get_section_model"):
+		return false
+	var sn := StringName(ms.get_default_script_name())
+	for sec in ms.get_section_model(sn):
+		if String(sec.get("name", "")) == section_name:
+			return bool(sec.get("is_idle_loop", false))
+	return false
 
 
 # Build (or rebuild) the logic graph for `section_name` from the current AST,

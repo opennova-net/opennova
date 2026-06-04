@@ -22,6 +22,10 @@ var _suppress := false
 var _form_opt: OptionButton
 var _body: VBoxContainer
 var _valid: Label
+# Debounce the compiler-backed validation so fast typing in a raw field doesn't
+# compile a probe on every keystroke. The emitted text + get_expression_text() stay
+# live; only the ✓/✗ label waits for the typing to settle.
+var _validate_timer: Timer
 
 # rebuilt per form
 var _leaf_a: HBoxContainer
@@ -145,6 +149,11 @@ func _build_chrome() -> void:
 	_valid = Label.new()
 	_valid.add_theme_color_override("font_color", Color(0.6, 0.9, 0.6))
 	add_child(_valid)
+	_validate_timer = Timer.new()
+	_validate_timer.one_shot = true
+	_validate_timer.wait_time = 0.3
+	_validate_timer.timeout.connect(_run_validation)
+	add_child(_validate_timer)
 
 
 func _clear_body() -> void:
@@ -251,6 +260,19 @@ func _current_text() -> String:
 func _recompute() -> void:
 	if _suppress:
 		return
+	# The text + signal are cheap and stay live; only the compiler-backed ✓/✗ label
+	# is debounced. Before the builder is in the tree (initial build) the timer can't
+	# run, so validate inline then.
+	expression_changed.emit(_current_text())
+	if _validate_timer != null and is_inside_tree():
+		_validate_timer.start()
+	else:
+		_run_validation()
+
+
+func _run_validation() -> void:
+	if _valid == null:
+		return
 	var text := _current_text()
 	var v: Dictionary = MusExpr.validate_expr(text, _mus)
 	if bool(v.get("ok", true)):
@@ -259,7 +281,6 @@ func _recompute() -> void:
 	else:
 		_valid.text = "✗ %s" % String(v.get("err", "invalid"))
 		_valid.add_theme_color_override("font_color", Color(1.0, 0.5, 0.5))
-	expression_changed.emit(text)
 
 
 func get_expression_text() -> String:

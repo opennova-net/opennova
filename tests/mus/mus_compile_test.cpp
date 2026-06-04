@@ -88,9 +88,65 @@ static int test_encode_file_minimal(void) {
     return 1;
 }
 
+/* Operand-bounds guards (editor write-path safety). The compiler emits 1-byte
+   operands for play targets, switch (tablexec) section/sound indices, and the
+   tablexec count + skip_size. An out-of-range value used to silently wrap to a
+   different-but-valid byte, so a visual edit could compile yet encode the wrong
+   program. These now error, so the editor's compile gate rolls the edit back. */
+static int compiles(const char *src) {
+    MusScript out = {};
+    int el = 0, ec = 0;
+    const char *em = NULL;
+    int rc = mus_compile(src, &out, &el, &ec, &em);
+    mus_script_free(&out);   /* idempotent; safe on the partial/failed result */
+    return rc == 0;
+}
+
+static int test_reject_play_track_over_255(void) {
+    CHECK(!compiles(
+        "script t\nsection Begin\n{\n  play sound_256\n  done\n}\n"),
+        "play sound_256 must be rejected, not wrapped to sound_0");
+    return 1;
+}
+
+static int test_accept_play_track_255(void) {
+    /* 255 is the boundary: still a valid single-byte operand. */
+    CHECK(compiles(
+        "script t\nsection Begin\n{\n  play sound_255\n  done\n}\n"),
+        "play sound_255 is in range and must compile");
+    return 1;
+}
+
+static int test_reject_switch_over_64_targets(void) {
+    char src[4096];
+    int n = snprintf(src, sizeof(src), "script t\nsection Begin\n{\n  on (Var00) enter");
+    for (int i = 0; i < 65; ++i)
+        n += snprintf(src + n, sizeof(src) - (size_t)n, " Begin");
+    snprintf(src + n, sizeof(src) - (size_t)n, "\n  done\n}\n");
+    CHECK(!compiles(src), "65-target on(...) table must be rejected, not truncated");
+    return 1;
+}
+
+static int test_reject_goto_table_too_large(void) {
+    /* goto entries are 5 bytes each, so 51 targets make total_size = 5 + 51*5 =
+       260 > 255 -- the skip_size byte would wrap. Count (51) is under 64, so this
+       specifically exercises the total_size guard, not the target-count guard. */
+    char src[4096];
+    int n = snprintf(src, sizeof(src), "script t\nsection Begin\n{\n  on (Var00) goto");
+    for (int i = 0; i < 51; ++i)
+        n += snprintf(src + n, sizeof(src) - (size_t)n, " Begin");
+    snprintf(src + n, sizeof(src) - (size_t)n, "\n  done\n}\n");
+    CHECK(!compiles(src), "oversized goto table must be rejected, not wrapped");
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_compile_minimal_script);
     RUN_TEST(test_encode_file_minimal);
+    RUN_TEST(test_reject_play_track_over_255);
+    RUN_TEST(test_accept_play_track_255);
+    RUN_TEST(test_reject_switch_over_64_targets);
+    RUN_TEST(test_reject_goto_table_too_large);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }
