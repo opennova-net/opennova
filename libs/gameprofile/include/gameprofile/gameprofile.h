@@ -21,11 +21,12 @@
 extern "C" {
 #endif
 
-/* Per-game profiles for the PFF archive tool. A single "game" choice has to drive both how an
-   existing archive's contents are decoded and how a new/edited archive is written, so the
-   profile bundles the container-encryption key, the SCR payload-codec policy, and the default
-   container format. Dependency-free by design (no pff.h include): the format field is a plain
-   int whose values mirror PffFormat, so a future CLI / export packer can share this table. */
+/* Per-game profiles. A single "game" choice drives how an existing archive's contents are decoded
+   (container key + SCR payload-codec policy) and how a new/edited archive is written. It is the one
+   source of truth for game identity across the whole engine: the editor PFF tool picks a game by id,
+   the runtime picks one by short `code` (the `/game <code>` launch flag), and the Python importer
+   picks one by code over FFI — all resolve to the same `scr_policy` here. Dependency-free by design
+   (no pff.h include): the format field is a plain int whose values mirror PffFormat. */
 
 typedef enum NovaGameId {
     NOVA_GAME_JO = 0,    /* Joint Operations: Typhoon Rising            */
@@ -48,6 +49,7 @@ typedef enum ScrPolicy {
 
 typedef struct NovaGameProfile {
     int         id;             /* NovaGameId                                                    */
+    const char *code;           /* short launch-flag / FFI token, lowercase (e.g. "jo", "jodemo") */
     const char *display_name;   /* artist-facing label                                           */
     uint32_t    container_key;  /* ROL7 XOR seed for PFF_FLAG_ENCRYPTED entries (all = 0x0312A4CE
                                    today; verified vs PFF_LoadFileToMemory @ 0x768920)            */
@@ -64,6 +66,14 @@ GAMEPROFILE_EXPORT const NovaGameProfile *gameprofile_at(int index);
 
 /* Profile for a NovaGameId; NULL if unknown. */
 GAMEPROFILE_EXPORT const NovaGameProfile *gameprofile_by_id(int game_id);
+
+/* Profile whose `code` matches (case-insensitive); NULL for NULL/unknown code. */
+GAMEPROFILE_EXPORT const NovaGameProfile *gameprofile_by_code(const char *code);
+
+/* The SCR policy (ScrPolicy) for a game `code`. Returns SCR_POLICY_VERSION_DETECT for a
+   NULL/unknown code, so a missing or bad `/game` value safely behaves like the JO default.
+   This is the single game->policy seam the runtime and the Python importer share. */
+GAMEPROFILE_EXPORT int gameprofile_scr_policy_for_code(const char *code);
 
 #ifdef __cplusplus
 }

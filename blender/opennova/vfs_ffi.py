@@ -18,6 +18,12 @@ MOUNT_LOOSE_ONLY = 0
 MOUNT_PACKED = 1
 MOUNT_PACKED_WITH_LOOSE = 2
 
+# SCR decode policies, matching ScrPolicy in gameprofile.h / VfsScrPolicy in vfs_decode.h.
+SCR_POLICY_VERSION_DETECT = 0
+SCR_POLICY_FORCE_DEFAULT = 1
+SCR_POLICY_FORCE_JO_DFX2 = 2
+SCR_POLICY_FORCE_SHADERS = 3
+
 _bound = False
 
 
@@ -46,6 +52,9 @@ def _bind():
 
     lib.opennova_vfs_clear.restype = None
     lib.opennova_vfs_clear.argtypes = [ctypes.c_void_p]
+
+    lib.opennova_vfs_set_scr_policy.restype = None
+    lib.opennova_vfs_set_scr_policy.argtypes = [ctypes.c_void_p, ctypes.c_int]
 
     lib.opennova_vfs_has_file.restype = ctypes.c_int
     lib.opennova_vfs_has_file.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
@@ -129,6 +138,11 @@ class Vfs:
 
     def clear(self):
         self._lib.opennova_vfs_clear(self._handle)
+
+    def set_scr_policy(self, policy: int) -> None:
+        """Choose how read_file keys SCR payloads (an SCR_POLICY_* value). Persists across
+        mounts. Resolve a game's policy via gameprofile_ffi.scr_policy_for_code()."""
+        self._lib.opennova_vfs_set_scr_policy(self._handle, int(policy))
 
     # --- Resolution ---
     def has_file(self, name: str) -> bool:
