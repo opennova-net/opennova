@@ -128,7 +128,6 @@ func _ready() -> void:
 	_pff_tool.setup(
 		self,
 		_open_files_dialog,
-		_open_save_file_dialog,
 		_open_dir_dialog,
 		show_status_message
 	)
@@ -1233,10 +1232,6 @@ func _open_dir_dialog(title: String, on_pick: Callable, current_dir: String = ""
 
 func _open_files_dialog(title: String, filters: PackedStringArray, on_pick: Callable, current_dir: String = "") -> void:
 	_ensure_file_dialogs().open_files(title, filters, on_pick, current_dir)
-
-
-func _open_save_file_dialog(title: String, filters: PackedStringArray, default_name: String, on_pick: Callable, current_dir: String = "") -> void:
-	_ensure_file_dialogs().save_file(title, filters, default_name, on_pick, current_dir)
 
 
 func _preferred_save_dir(workspace: EditorWorkspace = null) -> String:

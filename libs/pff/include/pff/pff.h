@@ -161,6 +161,18 @@ PFF_EXPORT int pff_write_archive_streamed(const char *path, PffFormat format,
                                           const PffWriteStreamEntry *entries, uint32_t n,
                                           PffReadEntryFn read_entry, void *ctx);
 
+/* Optional progress callback for the streaming writer: invoked once per entry as payloads are
+   written, with `done` running 1..n and `total` == n (fires for zero-size entries too, so `done`
+   always reaches n; never fires for a zero-entry archive). */
+typedef void (*PffWriteProgressFn)(void *ctx, uint32_t done, uint32_t total);
+
+/* As pff_write_archive_streamed, plus a progress callback. pff_write_archive_streamed forwards here
+   with progress == NULL, so the layout/behavior is identical when no progress is wanted. */
+PFF_EXPORT int pff_write_archive_streamed_progress(const char *path, PffFormat format,
+                                                   const PffWriteStreamEntry *entries, uint32_t n,
+                                                   PffReadEntryFn read_entry, void *ctx,
+                                                   PffWriteProgressFn progress, void *progress_ctx);
+
 /* In-place symmetric container XOR (PFF_FLAG_ENCRYPTED keystream). XOR is its own inverse, so the
    same call encrypts (before storing a payload) and decrypts (after reading one). `container_key`
    is the keystream seed; every reversed NovaLogic game uses 0x0312A4CE (PFF_LoadFileToMemory

@@ -10,7 +10,9 @@
 
 #include <pff/pff.h>
 
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace godot {
@@ -47,18 +49,46 @@ private:
 	bool dirty_ = false;
 	mutable String last_error_;
 	std::vector<Entry> entries_;
+	// Count of entries written un-decoded (decode requested but payload codec failed) by the most
+	// recent extract batch / extract_to_status call. Lets the UI warn "N saved as raw".
+	mutable int last_undecoded_count_ = 0;
+
+	// Background Save-As job (mirrors NovaTerrainBuildJob). The worker thread is the ONLY reader of
+	// source_ while a save runs; the UI disables all other ops, so there is no concurrent access.
+	struct SaveState {
+		bool running = false;
+		bool finished = false;
+		int result = 0;             // godot Error (OK == 0)
+		uint32_t done = 0;
+		uint32_t total = 0;
+		std::string message;        // error text for get_save_error()
+	};
+	mutable std::mutex save_mutex_;
+	std::thread save_thread_;
+	SaveState save_state_;
+	std::vector<PffWriteStreamEntry> save_entries_;  // captured snapshot for the worker
+	std::vector<std::string> save_names_;            // keeps save_entries_[i].name alive
+	std::string save_out_native_;
+	PffFormat save_format_ = PFF_FORMAT_PFF3;
 
 	uint32_t container_key() const;
 	void close_source();
 	void build_model_from_source();
 	const Entry *find_entry(const String &name) const;
-	bool read_entry_bytes(const Entry &entry, bool decode, std::vector<uint8_t> &out) const;
+	// out_decoded (optional): set true if the payload codec ran, false if decode was requested but
+	// failed and `out` was left as the container-decrypted (raw) fallback. Genuine read failures
+	// (unreadable entry) still return false.
+	bool read_entry_bytes(const Entry &entry, bool decode, std::vector<uint8_t> &out,
+	                      bool *out_decoded = nullptr) const;
 	Error do_open(const String &path, bool legacy);
+	void join_save_thread();
+	void save_worker();
 
 	static String to_native_path(const String &path);
 	static PffFormat format_from_magic(uint32_t magic);
 	// Streaming-writer callback: fills `out` with entry[index]'s stored bytes. ctx is `this`.
 	static int read_entry_cb(void *ctx, uint32_t index, uint8_t *out, uint32_t size);
+	static void save_progress_cb(void *ctx, uint32_t done, uint32_t total);
 
 protected:
 	static void _bind_methods();
@@ -89,6 +119,11 @@ public:
 	Error extract_to(const String &name, const String &out_path, bool decode) const;
 	Error extract_selected(const PackedStringArray &names, const String &out_dir, bool decode) const;
 	Error extract_all(const String &out_dir, bool decode) const;
+	// Per-file extract for the editor's batched loop. Returns 0 = extracted (decoded), 1 = extracted
+	// but saved raw (decode requested but failed), 2 = hard failure (nothing written).
+	int extract_to_status(const String &name, const String &out_path, bool decode) const;
+	// Number of files the most recent batch / extract_to_status saved un-decoded.
+	int get_last_undecoded_count() const;
 
 	// add stores the file's bytes verbatim (optionally container-XOR-encrypted); marks dirty.
 	Error add_file_from_disk(const String &src_path, const String &store_name, bool encrypt);
@@ -97,6 +132,17 @@ public:
 
 	// Writes a NEW archive (never the source). Preserves the source container format, PFF3 default.
 	Error save_as(const String &out_path);
+
+	// Non-blocking Save-As: validates + snapshots on the calling (main) thread, then writes on a
+	// background thread. Returns OK if the job started (poll is_save_finished()), else an error.
+	Error save_as_async(const String &out_path);
+	bool is_save_running() const;
+	bool is_save_finished() const;
+	int get_save_progress_done() const;
+	int get_save_progress_total() const;
+	int get_save_result() const;        // godot Error of the finished save
+	String get_save_error() const;
+	void wait_for_save_completion();     // joins the worker; clears dirty on success (main thread)
 };
 
 } // namespace godot

@@ -2,24 +2,21 @@ class_name EditorPffTool
 extends RefCounted
 
 ## The OpenNova Editor's PFF archive tool: open one or more .pff archives, browse their
-## contents, extract files (decoded or raw), add files from disk, delete files, and write the
-## result to a NEW archive (Save As — the source files are never modified). Launched from a
-## button in the Settings popover, not as a workspace.
+## contents, and extract files (decoded or raw) to disk. Read-only — it never writes archives.
+## Launched from a button in the Settings popover, not as a workspace.
 ##
 ## Built as a child of the host shell (so it inherits the editor theme), with the capabilities it
 ## can't own injected as Callables in setup(), mirroring EditorResourceBrowser:
-##   - open_files(title, filters, on_pick, dir)            multi-file picker
-##   - save_file(title, filters, default_name, on_pick, dir)  Save As destination picker
-##   - open_dir(title, on_pick, dir)                       output-folder picker
-##   - show_status(text)                                   mirror a message into the status bar
+##   - open_files(title, filters, on_pick, dir)   multi-file picker (choose .pff archives)
+##   - open_dir(title, on_pick, dir)              output-folder picker (extract destination)
+##   - show_status(text)                          mirror a message into the status bar
 ##
-## Each opened archive is a NovaPffArchive (the C++ shim). Loaded archives + pending edits live in
-## this object, which the shell keeps for the whole session, so closing the dialog just hides it;
-## nothing is discarded until the editor exits, and originals are never touched.
+## Each opened archive is a NovaPffArchive (the C++ shim). Loaded archives live in this object,
+## which the shell keeps for the whole session, so closing the dialog just hides it. The .pff
+## files on disk are only ever read.
 
 var _host: Control
 var _open_files: Callable
-var _save_file: Callable
 var _open_dir: Callable
 var _show_status: Callable
 var _preferred_dir: String = ""
@@ -27,29 +24,33 @@ var _preferred_dir: String = ""
 var _dialog: AcceptDialog
 var _toolbar: HBoxContainer
 var _open_button: Button
-var _add_button: Button
 var _extract_selected_button: Button
 var _extract_all_button: Button
-var _remove_button: Button
-var _save_button: Button
 var _game_option: OptionButton
 var _archive_list: ItemList
 var _search: LineEdit
 var _tree: Tree
 var _decode_check: CheckBox
 var _status_label: Label
-var _confirm_dialog: ConfirmationDialog
-var _confirm_callback: Callable = Callable()
+
+# Progress row, shown only while an extraction runs.
+var _progress_row: HBoxContainer
+var _progress_bar: ProgressBar
+var _progress_label: Label
+var _cancel_button: Button
+var _busy: bool = false
+var _cancelled: bool = false
 
 # One NovaPffArchive per opened .pff; _active indexes the one shown on the right.
 var _archives: Array = []
 var _active: int = -1
 
+const _EXTRACT_BATCH := 16
 
-func setup(host: Control, open_files: Callable, save_file: Callable, open_dir: Callable, show_status: Callable) -> void:
+
+func setup(host: Control, open_files: Callable, open_dir: Callable, show_status: Callable) -> void:
 	_host = host
 	_open_files = open_files
-	_save_file = save_file
 	_open_dir = open_dir
 	_show_status = show_status
 
@@ -76,6 +77,7 @@ func _ensure_dialog() -> void:
 	if _host != null and _host.theme != null:
 		_dialog.theme = _host.theme
 	_dialog.get_ok_button().text = "Close"
+	_dialog.close_requested.connect(_on_dialog_close_requested)
 	_host.add_child(_dialog)
 
 	var box := VBoxContainer.new()
@@ -93,14 +95,8 @@ func _ensure_dialog() -> void:
 
 	_open_button = _make_tool_button("Open Archive…", "Open one or more .pff archives.", _on_open_pressed)
 	_toolbar.add_child(VSeparator.new())
-	_add_button = _make_tool_button("Add Files…", "Add files from disk into the selected archive.", _on_add_pressed)
 	_extract_selected_button = _make_tool_button("Extract Selected…", "Save the highlighted files to a folder.", _on_extract_selected_pressed)
-	_extract_all_button = _make_tool_button("Extract All…", "Save every file in the archive to a folder.", _on_extract_all_pressed)
-	_remove_button = _make_tool_button("Remove Selected", "Remove the highlighted files from the working copy.", _on_remove_pressed)
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_toolbar.add_child(spacer)
-	_save_button = _make_tool_button("Save As…", "Write a new archive file. Your original is never changed.", _on_save_as_pressed)
+	_extract_all_button = _make_tool_button("Extract All…", "Save every file from all open archives to a folder.", _on_extract_all_pressed)
 
 	# Game row.
 	var game_row := HBoxContainer.new()
@@ -173,6 +169,29 @@ func _ensure_dialog() -> void:
 	_decode_check.tooltip_text = "Unscramble and unpack files on extract so they open in normal tools. Turn off to save the exact bytes stored in the archive."
 	decode_row.add_child(_decode_check)
 
+	# Progress row spanning the dialog, hidden until a long op runs.
+	_progress_row = HBoxContainer.new()
+	_progress_row.name = "PffToolProgressRow"
+	_progress_row.add_theme_constant_override("separation", 8)
+	_progress_row.visible = false
+	box.add_child(_progress_row)
+	_progress_bar = ProgressBar.new()
+	_progress_bar.name = "PffToolProgressBar"
+	_progress_bar.show_percentage = false
+	_progress_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_progress_row.add_child(_progress_bar)
+	_progress_label = Label.new()
+	_progress_label.name = "PffToolProgressLabel"
+	_progress_label.theme_type_variation = &"Muted"
+	_progress_label.custom_minimum_size = Vector2(120, 0)
+	_progress_row.add_child(_progress_label)
+	_cancel_button = Button.new()
+	_cancel_button.name = "PffToolCancel"
+	_cancel_button.text = "Stop"
+	_cancel_button.focus_mode = Control.FOCUS_NONE
+	_cancel_button.pressed.connect(_on_cancel_pressed)
+	_progress_row.add_child(_cancel_button)
+
 	_status_label = Label.new()
 	_status_label.name = "PffToolStatus"
 	_status_label.theme_type_variation = &"Muted"
@@ -226,9 +245,7 @@ func _refresh_archive_list() -> void:
 		var arc: NovaPffArchive = _archives[i]
 		var base := arc.get_source_path().get_file()
 		if base.is_empty():
-			base = "(unsaved archive)"
-		if arc.is_dirty():
-			base += "  *"
+			base = "(archive)"
 		_archive_list.add_item(base)
 	if _active >= 0 and _active < _archives.size():
 		_archive_list.select(_active)
@@ -267,22 +284,19 @@ func _refresh_tree() -> void:
 
 
 func _update_buttons() -> void:
+	# The busy lock (_set_busy) owns disabling during a run; this is the idle-state authority.
+	if _busy:
+		return
 	var arc := _active_archive()
 	var has_active := arc != null
-	var has_entries := has_active and arc.get_entry_count() > 0
 	var has_selection := _selected_names().size() > 0
-	if _add_button != null:
-		_add_button.disabled = not has_active
 	if _extract_all_button != null:
-		_extract_all_button.disabled = not has_entries
-	if _save_button != null:
-		_save_button.disabled = not has_active
+		# Extract All covers every open archive, so it only needs at least one open.
+		_extract_all_button.disabled = _archives.is_empty()
 	if _game_option != null:
 		_game_option.disabled = not has_active
 	if _extract_selected_button != null:
 		_extract_selected_button.disabled = not (has_active and has_selection)
-	if _remove_button != null:
-		_remove_button.disabled = not (has_active and has_selection)
 
 
 func _selected_names() -> PackedStringArray:
@@ -354,31 +368,9 @@ func _on_game_selected(index: int) -> void:
 		arc.set_game(int(_game_option.get_item_metadata(index)))
 
 
-func _on_add_pressed() -> void:
-	if _active_archive() == null:
-		return
-	_open_files.call("Add File(s)", PackedStringArray(["*.* ; All files"]), _on_files_to_add, _preferred_dir)
-
-
-func _on_files_to_add(paths: PackedStringArray) -> void:
-	var arc := _active_archive()
-	if arc == null:
-		return
-	var added := 0
-	for path in paths:
-		var store_name := String(path).get_file()
-		if arc.add_file_from_disk(path, store_name, false) == OK:
-			added += 1
-		else:
-			_set_status(arc.get_last_error())
-	_refresh_all()
-	if added > 0:
-		_set_status("Added %d file(s). Use Save As to write a new archive." % added)
-
-
 func _on_extract_selected_pressed() -> void:
 	var arc := _active_archive()
-	if arc == null:
+	if arc == null or _busy:
 		return
 	var names := _selected_names()
 	if names.is_empty():
@@ -388,106 +380,121 @@ func _on_extract_selected_pressed() -> void:
 
 
 func _do_extract(names: PackedStringArray, dir: String) -> void:
+	# Extract Selected is scoped to the active archive (selection lives in its tree).
 	var arc := _active_archive()
 	if arc == null:
 		return
-	var decode := _decode_check.button_pressed
-	if arc.extract_selected(names, dir, decode) == OK:
-		_set_status("Extracted %d file(s) to %s" % [names.size(), dir])
-	else:
-		_set_status("Extract failed: %s" % arc.get_last_error())
+	var jobs: Array = []
+	for n in names:
+		jobs.append({"arc": arc, "name": n, "out_path": dir.path_join(String(n).get_file())})
+	await _perform_extraction(jobs, dir, 1)
 
 
 func _on_extract_all_pressed() -> void:
-	var arc := _active_archive()
-	if arc == null:
+	# Extract All covers EVERY open archive, not just the active one.
+	if _archives.is_empty() or _busy:
 		return
 	_open_dir.call("Extract all to folder", func(dir: String) -> void: _do_extract_all(dir), _preferred_dir)
 
 
 func _do_extract_all(dir: String) -> void:
-	var arc := _active_archive()
-	if arc == null:
+	# Flat: every file from every open archive goes straight into `dir`. Same-named files across
+	# archives are last-write-wins — kept intentionally simple.
+	var jobs: Array = []
+	for arc in _archives:
+		for entry_value in arc.get_entries():
+			var entry := entry_value as Dictionary
+			var name := String(entry.get("name", ""))
+			jobs.append({"arc": arc, "name": name, "out_path": dir.path_join(name)})
+	await _perform_extraction(jobs, dir, _archives.size())
+
+
+# Shared non-blocking extraction: runs per-file extract_to_status in batches, yielding a frame
+# between batches so the editor stays responsive, with a progress bar + Stop.
+func _perform_extraction(jobs: Array, dir: String, archive_count: int) -> void:
+	if _busy:
+		return
+	if jobs.is_empty():
+		_set_status("Nothing to extract.")
 		return
 	var decode := _decode_check.button_pressed
-	var count := arc.get_entry_count()
-	if arc.extract_all(dir, decode) == OK:
-		_set_status("Extracted %d file(s) to %s" % [count, dir])
-	else:
-		_set_status("Extract failed: %s" % arc.get_last_error())
-
-
-func _on_remove_pressed() -> void:
-	var arc := _active_archive()
-	if arc == null:
-		return
-	var names := _selected_names()
-	if names.is_empty():
-		_set_status("Select one or more files first.")
-		return
-	var msg := "Remove %d file(s)? This only affects the working copy until you Save As." % names.size()
-	_confirm(msg, "Remove", func() -> void: _do_remove(names))
-
-
-func _do_remove(names: PackedStringArray) -> void:
-	var arc := _active_archive()
-	if arc == null:
-		return
-	arc.remove_entries(names)
+	_cancelled = false
+	_set_busy(true)
+	_cancel_button.visible = true
+	var total := jobs.size()
+	_progress_bar.max_value = total
+	_progress_bar.value = 0
+	var ok := 0
+	var raw := 0
+	var failed := 0
+	var done := 0
+	for job in jobs:
+		var arc = job["arc"]
+		var st := int(arc.extract_to_status(job["name"], job["out_path"], decode))
+		if st == 0:
+			ok += 1
+		elif st == 1:
+			raw += 1
+		else:
+			failed += 1
+		done += 1
+		if done % _EXTRACT_BATCH == 0 or done == total:
+			_progress_bar.value = done
+			_progress_label.text = "%d / %d" % [done, total]
+			await _host.get_tree().process_frame
+			if not is_instance_valid(_dialog):
+				return
+			if _cancelled:
+				break
+	_set_busy(false)
 	_refresh_all()
-	_set_status("Removed %d file(s). Use Save As to write a new archive." % names.size())
+	_report_extraction(done, total, ok, raw, failed, dir, archive_count)
 
 
-func _on_save_as_pressed() -> void:
-	var arc := _active_archive()
-	if arc == null:
-		return
-	var default_name := arc.get_source_path().get_file()
-	if default_name.is_empty():
-		default_name = "archive.pff"
-	_save_file.call("Save archive as", PackedStringArray(["*.pff ; PFF archive"]), default_name, _do_save, _preferred_dir)
-
-
-func _do_save(path: String) -> void:
-	var arc := _active_archive()
-	if arc == null:
-		return
-	var out := path
-	if out.get_extension().to_lower() != "pff":
-		out += ".pff"
-	if arc.save_as(out) == OK:
-		_refresh_all()
-		_set_status("Saved to %s" % out)
+func _report_extraction(done: int, total: int, ok: int, raw: int, failed: int, dir: String, archive_count: int) -> void:
+	var written := ok + raw
+	var msg := ""
+	if _cancelled and done < total:
+		msg = "Stopped: %d of %d processed, %d written to %s" % [done, total, written, dir]
+	elif archive_count > 1:
+		msg = "Extracted %d file(s) from %d archives to %s" % [written, archive_count, dir]
 	else:
-		_set_status("Save failed: %s" % arc.get_last_error())
+		msg = "Extracted %d file(s) to %s" % [written, dir]
+	if raw > 0:
+		msg += "  (%d saved as raw — could not unscramble)" % raw
+	if failed > 0:
+		msg += "  (%d could not be read)" % failed
+	_set_status(msg)
 
 
-# ---------------------------------------------------------------------------
-# Confirm dialog (reused for destructive actions)
-# ---------------------------------------------------------------------------
-
-func _ensure_confirm() -> void:
-	if _confirm_dialog != null and is_instance_valid(_confirm_dialog):
-		return
-	_confirm_dialog = ConfirmationDialog.new()
-	_confirm_dialog.name = "PffToolConfirm"
-	_confirm_dialog.exclusive = true
-	if _host != null and _host.theme != null:
-		_confirm_dialog.theme = _host.theme
-	_host.add_child(_confirm_dialog)
-	_confirm_dialog.confirmed.connect(_on_confirm_confirmed)
-
-
-func _confirm(text: String, ok_text: String, callback: Callable) -> void:
-	_ensure_confirm()
-	_confirm_dialog.dialog_text = text
-	_confirm_dialog.get_ok_button().text = ok_text
-	_confirm_callback = callback
-	_confirm_dialog.popup_centered()
+func _set_busy(active: bool) -> void:
+	_busy = active
+	if _progress_row != null:
+		_progress_row.visible = active
+	var dis := active
+	for b in [_open_button, _extract_selected_button, _extract_all_button]:
+		if b != null:
+			b.disabled = dis
+	if _game_option != null:
+		_game_option.disabled = dis
+	if _dialog != null and is_instance_valid(_dialog):
+		_dialog.get_ok_button().disabled = dis
+	if not active:
+		if _progress_bar != null:
+			_progress_bar.value = 0
+		if _progress_label != null:
+			_progress_label.text = ""
+		_update_buttons()  # restore selection-dependent idle enablement
 
 
-func _on_confirm_confirmed() -> void:
-	if _confirm_callback.is_valid():
-		var cb := _confirm_callback
-		_confirm_callback = Callable()
-		cb.call()
+func _on_cancel_pressed() -> void:
+	if _busy:
+		_cancelled = true
+		if _progress_label != null:
+			_progress_label.text = "Stopping…"
+
+
+func _on_dialog_close_requested() -> void:
+	# Closing mid-extraction cancels cooperatively; files already written are kept.
+	if _busy:
+		_cancelled = true

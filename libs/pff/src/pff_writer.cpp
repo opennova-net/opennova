@@ -65,9 +65,11 @@ int pff_validate_and_order(const PffWriteStreamEntry *entries, uint32_t n,
 }
 
 /* Serialize into an already-open file using the streaming callback. `order` lists entry indices in
-   write order (sorted by normalized name). Returns PFF_WRITE_OK or PFF_WRITE_ERR_IO. */
+   write order (sorted by normalized name). `progress` (optional) is fired once per entry as the
+   payloads are written. Returns PFF_WRITE_OK or PFF_WRITE_ERR_IO. */
 int pff_write_body(FILE *f, PffFormat format, const PffWriteStreamEntry *entries, uint32_t n,
-                   const std::vector<uint32_t> &order, PffReadEntryFn read_entry, void *ctx)
+                   const std::vector<uint32_t> &order, PffReadEntryFn read_entry, void *ctx,
+                   PffWriteProgressFn progress, void *progress_ctx)
 {
     uint32_t hdr[5];
     hdr[0] = PFF_HEADER_SIZE;
@@ -99,6 +101,9 @@ int pff_write_body(FILE *f, PffFormat format, const PffWriteStreamEntry *entries
                 return PFF_WRITE_ERR_IO;
         }
         off += entries[i].size;
+        /* Tick after each entry (including zero-size ones) so `done` reaches `n`. */
+        if (progress)
+            progress(progress_ctx, k + 1, n);
     }
 
     /* Directory table. */
@@ -148,9 +153,10 @@ int array_read_entry(void *ctx, uint32_t index, uint8_t *out, uint32_t size)
 
 } // namespace
 
-int pff_write_archive_streamed(const char *path, PffFormat format,
-                               const PffWriteStreamEntry *entries, uint32_t n,
-                               PffReadEntryFn read_entry, void *ctx)
+int pff_write_archive_streamed_progress(const char *path, PffFormat format,
+                                        const PffWriteStreamEntry *entries, uint32_t n,
+                                        PffReadEntryFn read_entry, void *ctx,
+                                        PffWriteProgressFn progress, void *progress_ctx)
 {
     if (!path)
         return PFF_WRITE_ERR_IO;
@@ -167,7 +173,7 @@ int pff_write_archive_streamed(const char *path, PffFormat format,
     FILE *f = fopen(tmp.c_str(), "wb");
     if (!f)
         return PFF_WRITE_ERR_IO;
-    rc = pff_write_body(f, format, entries, n, order, read_entry, ctx);
+    rc = pff_write_body(f, format, entries, n, order, read_entry, ctx, progress, progress_ctx);
     fclose(f);
     if (rc != PFF_WRITE_OK) {
         remove(tmp.c_str());
@@ -181,6 +187,14 @@ int pff_write_archive_streamed(const char *path, PffFormat format,
         return PFF_WRITE_ERR_IO;
     }
     return PFF_WRITE_OK;
+}
+
+int pff_write_archive_streamed(const char *path, PffFormat format,
+                               const PffWriteStreamEntry *entries, uint32_t n,
+                               PffReadEntryFn read_entry, void *ctx)
+{
+    return pff_write_archive_streamed_progress(path, format, entries, n, read_entry, ctx,
+                                               NULL, NULL);
 }
 
 int pff_write_archive(const char *path, PffFormat format,

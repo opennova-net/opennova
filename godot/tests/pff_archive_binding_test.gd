@@ -110,6 +110,25 @@ func test_save_as_refuses_overwriting_source() -> void:
 	assert_string_contains(arc.get_last_error().to_lower(), "source", "Error explains the refusal.")
 
 
+func test_extract_to_status_raw_fallback() -> void:
+	# An entry that claims BFC1 but is not a valid stream: decode fails, so extract must fall back to
+	# writing the raw stored bytes (status 1) rather than silently skipping it. A decodable plaintext
+	# entry reports status 0.
+	var root := _pff_dir()
+	var bad := "BFC1".to_ascii_buffer()
+	bad.append_array(PackedByteArray([0, 0, 1, 0, 255, 255, 255, 255, 255, 255, 255, 255]))
+	var path := root.path_join("raw.pff")
+	_write_pff(path, [{"name": "broken.dat", "bytes": bad}, {"name": "plain.txt", "bytes": "hello"}])
+	var arc := NovaPffArchive.new()
+	assert_eq(arc.open(path), OK)
+
+	var bad_out := root.path_join("broken.out")
+	assert_eq(arc.extract_to_status("broken.dat", bad_out, true), 1, "undecodable entry saved as raw (status 1)")
+	assert_eq(FileAccess.get_file_as_bytes(bad_out), bad, "raw bytes written verbatim, not dropped")
+	assert_eq(arc.extract_to_status("plain.txt", root.path_join("plain.out"), true), 0, "decodable entry status 0")
+	assert_eq(arc.get_last_undecoded_count(), 1, "one entry counted as saved-raw")
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

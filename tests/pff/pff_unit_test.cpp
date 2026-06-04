@@ -414,6 +414,51 @@ static int test_write_preserves_name_case(void) {
     return 1;
 }
 
+/* Streaming-writer read callback over an array of payload pointers (NULL allowed for size 0). */
+static int prog_read_entry(void *ctx, uint32_t index, uint8_t *out, uint32_t size) {
+    const uint8_t **datas = (const uint8_t **)ctx;
+    if (size) memcpy(out, datas[index], size);
+    return 0;
+}
+
+typedef struct { int calls; uint32_t last_done; uint32_t last_total; } ProgCount;
+static void prog_count_cb(void *ctx, uint32_t done, uint32_t total) {
+    ProgCount *p = (ProgCount *)ctx;
+    p->calls++;
+    p->last_done = done;
+    p->last_total = total;
+}
+
+/* The streaming writer's progress callback fires once per entry (including a zero-size one), and
+   `done` reaches `total == n`. The written archive must still be valid. */
+static int test_write_progress_callback(void) {
+    const uint8_t a[] = {1, 2, 3};
+    const uint8_t b[] = {4, 4};
+    const uint8_t *datas[3] = { a, NULL, b };   /* entry 1 is empty */
+    PffWriteStreamEntry se[3] = {
+        { "a.bin",     3, 0, 0, 0 },
+        { "empty.bin", 0, 0, 0, 0 },
+        { "b.bin",     2, 0, 0, 0 },
+    };
+    ProgCount pc = { 0, 0, 0 };
+    const char *path = "pff_prog.pff";
+    PffArchive ar;
+
+    CHECK(pff_write_archive_streamed_progress(path, PFF_FORMAT_PFF3, se, 3,
+              prog_read_entry, (void *)datas, prog_count_cb, &pc) == PFF_WRITE_OK, "write w/ progress");
+    CHECK(pc.calls == 3, "progress fires once per entry (incl. the empty one)");
+    CHECK(pc.last_total == 3, "total == n");
+    CHECK(pc.last_done == 3, "done reaches n");
+
+    CHECK(pff_open(&ar, path) == 0, "open progress-written archive");
+    CHECK(ar.entry_count == 3, "entry count == 3");
+    CHECK(entry_bytes_equal(&ar, "a.bin", a, sizeof(a)), "a bytes");
+    CHECK(entry_bytes_equal(&ar, "b.bin", b, sizeof(b)), "b bytes");
+    pff_close(&ar);
+    remove(path);
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_is_pff3_magic);
     RUN_TEST(test_is_pff4_magic);
@@ -436,6 +481,7 @@ int main(void) {
     RUN_TEST(test_write_rejects_overlong_name);
     RUN_TEST(test_write_rejects_duplicate_names);
     RUN_TEST(test_write_preserves_name_case);
+    RUN_TEST(test_write_progress_callback);
 
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed > 0 ? EXIT_FAILURE : EXIT_SUCCESS;
