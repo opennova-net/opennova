@@ -134,6 +134,23 @@ func test_compile_script_replaces_in_memory_script_before_save():
 	assert_true(doc._script_dirty, "compile updates runnable resource but save still owns persistence")
 
 
+# C1 regression: with a bank loaded, the lazy compile-buffer seed must use the
+# NAMES-LESS decompile (the proven-recompilable form), NOT the names-aware one
+# (real bank names as bind identifiers, which need not recompile). A names-aware
+# seed could make the live VM run -- or Save write -- a script that won't compile.
+func test_seed_uses_names_less_decompile_when_bank_loaded():
+	var doc = MusicEditorDocument.new()
+	doc.open_pair(_copy_temp_pair())
+	assert_true(doc.bank_loaded() and doc.script_loaded(), "pair loaded")
+	var name := StringName(doc.mus_script.get_default_script_name())
+	var names_less: String = doc.mus_script.get_decompiled_text(name)
+	# Empty buffer on a fresh open -> compile_script triggers the lazy seed.
+	var errors: Array = doc.compile_script()
+	assert_eq(errors.size(), 0, "seeded buffer compiles with a bank loaded")
+	assert_eq(doc._compiled_script_text, names_less,
+		"compile buffer seeded from the names-less decompile, not names-aware")
+
+
 func test_undo_redo_reorder():
 	var doc = MusicEditorDocument.new()
 	doc.open_pair(_copy_temp_pair())

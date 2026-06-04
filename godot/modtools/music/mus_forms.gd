@@ -115,7 +115,9 @@ func open_form(host: Node, kind: String, prefill: Dictionary, is_edit: bool, on_
 func _build_play_form(box: VBoxContainer, prefill: Dictionary) -> Callable:
 	box.add_child(_label("Play which track?"))
 	var tob := OptionButton.new()
-	for i in range(_bank_names.size()):
+	# Cap at 256: the play opcode operand is a single byte, so tracks >= 256 are
+	# unplayable by the original engine and must not be offered.
+	for i in range(mini(_bank_names.size(), 256)):
 		tob.add_item("%d: %s" % [i, _track_name(i)])
 	if _bank_names.is_empty():
 		# No bank loaded: still let the user pick a slot index by number.
@@ -314,7 +316,9 @@ func _action_picker() -> Array:
 	var sob := _section_option("")
 	row.add_child(sob)
 	var tob := OptionButton.new()
-	for i in range(_bank_names.size()):
+	# Cap at 256: the play opcode operand is a single byte, so tracks >= 256 are
+	# unplayable by the original engine and must not be offered.
+	for i in range(mini(_bank_names.size(), 256)):
 		tob.add_item("%d: %s" % [i, _track_name(i)])
 	tob.visible = false
 	row.add_child(tob)
@@ -371,7 +375,7 @@ func _build_switch_form(box: VBoxContainer, prefill: Dictionary) -> Callable:
 		var sob := _section_option(sec_name)
 		r.add_child(sob)
 		var tob := OptionButton.new()
-		for i in range(_bank_names.size()):
+		for i in range(mini(_bank_names.size(), 256)):
 			tob.add_item("%d: %s" % [i, _track_name(i)])
 		if track >= 0 and track < tob.item_count:
 			tob.select(track)
@@ -384,8 +388,12 @@ func _build_switch_form(box: VBoxContainer, prefill: Dictionary) -> Callable:
 		targets_box.add_child(r)
 		var entry := [r, sob, tob]
 		rows.append(entry)
+		# The tablexec count + skip_size are single bytes; the compiler rejects a
+		# table over 64 targets. Stop offering more rows so the user can't build one.
+		add_target.disabled = rows.size() >= 64
 		rm.pressed.connect(func():
 			rows.erase(entry)
+			add_target.disabled = rows.size() >= 64
 			r.queue_free())
 	# Seed from prefill targets, else one empty row.
 	var pretargets: Array = prefill.get("targets", [])

@@ -13,9 +13,10 @@ extends GraphEdit
 # all routed through the shared MusForms so the emitted lines are canonical. The
 # graph never writes bytecode; it emits add/replace/delete/reorder intents the host
 # (live_mode) hands to the document's parity-gated, undoable write path. A folded ×N
-# run can be expanded in place (⊞ unfold) to edit a single member; an existing if's
-# nested bodies stay read-only (editing those routes to the raw-script drawer the
-# host owns) so an edit is never ambiguous about which of N statements it touches.
+# run can be expanded in place (⊞ unfold) to edit a single member; a flat if's bodies
+# are edited statement-by-statement here, while a non-flat if (a nested if/switch in a
+# body) stays a read-only annotation -- none occurs in stock and the forms can't author
+# one, so no edit path is lost (there is no raw-script editor; it was removed).
 # The frame-setup op (0x38) renders as a locked, non-navigable note (it is engine
 # state setup, not a transition, and must never be edited as one).
 #
@@ -151,15 +152,17 @@ func _build_seq(stmts: Array, depth: int, parent_ordinal: int) -> Dictionary:
 		if kind in _FOLDABLE:
 			while i + run < stmts.size() and _same_simple(stmts[i + run], s):
 				run += 1
-		# An expanded run (editable + the user pressed ⊞ unfold): render each member
-		# as its own individually-editable node -- every folded member is a distinct
-		# top-level statement addressable by its own ordinal -- with a ⊟ fold toggle
-		# on the first. The non-folding path below handles run==1 and collapsed runs.
-		if _editable and top and run > 1 and _unfolded.has(ordinal):
+		# An expanded run (the user pressed ⊞ unfold): render each member as its own
+		# node -- every folded member is a distinct top-level statement addressable by
+		# its own ordinal, individually editable when the script is editable -- with a
+		# ⊟ fold toggle on the first. Below handles run==1 and collapsed runs. Unfolding
+		# is display-only, so a read-only script can still expand a run to inspect it.
+		if top and run > 1 and _unfolded.has(ordinal):
 			for k in range(run):
 				var member: Dictionary = stmts[i + k]
 				var b := _build_simple(member, depth, ordinal + k, 1)
-				_attach_tools(b["node"], member, ordinal + k)
+				if _editable:
+					_attach_tools(b["node"], member, ordinal + k)
 				if k == 0:
 					_attach_fold_toggle(b["node"], ordinal, true, run)
 				if entry.is_empty():
@@ -172,9 +175,10 @@ func _build_seq(stmts: Array, depth: int, parent_ordinal: int) -> Dictionary:
 		var built: Dictionary
 		if kind in _FOLDABLE:
 			built = _build_simple(s, depth, ordinal, run)
-			# A collapsed run of >1 gets a ⊞ unfold toggle so its members become
-			# individually editable (the only Inspector-era edit the graph lacked).
-			if _editable and top and run > 1:
+			# A collapsed run of >1 gets a ⊞ unfold toggle so its members can be seen
+			# (and, when editable, individually edited) one at a time. The toggle is
+			# display-only, so it is offered in read-only mode too.
+			if top and run > 1:
 				_attach_fold_toggle(built["node"], ordinal, false, run)
 			i += run
 		else:

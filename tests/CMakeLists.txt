@@ -234,6 +234,29 @@ target_compile_definitions(mus_names_roundtrip_test PRIVATE
 add_test(NAME mus_names_roundtrip COMMAND mus_names_roundtrip_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Entry-section round-trip: the compiler hardcodes entry_section_index = 0, so a
+# faithful round-trip needs the original entry to be its lowest-offset section
+# (true for both stock bins). Pins that the recompiled entry names the same
+# section -- a drift the text round-trip and encode-idempotence cannot see.
+add_executable(mus_entry_roundtrip_test mus/mus_entry_roundtrip_test.cpp)
+target_link_libraries(mus_entry_roundtrip_test PRIVATE opennova_mus)
+target_include_directories(mus_entry_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_entry_roundtrip_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_entry_roundtrip COMMAND mus_entry_roundtrip_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Authored-program behavior: compile the canonical .mus TEXT the visual editor
+# emits (play, if/else, on-switch + default, enter-transition, assign, inc/dec,
+# method/volume) and assert the observable event stream on the VM. The companion
+# notes/audio/mus_diff_jointops.py runs the SAME corpus through the original
+# Jointops handlers; this committed test locks the behavior without that binary.
+add_executable(mus_authored_behavioral_test mus/mus_authored_behavioral_test.cpp)
+target_link_libraries(mus_authored_behavioral_test PRIVATE opennova_mus)
+target_include_directories(mus_authored_behavioral_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mus_authored_behavioral_test PRIVATE cxx_std_17)
+add_test(NAME mus_authored_behavioral COMMAND mus_authored_behavioral_test)
+
 add_executable(mus_ast_test mus/mus_ast_test.cpp)
 target_link_libraries(mus_ast_test PRIVATE opennova_mus)
 target_include_directories(mus_ast_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

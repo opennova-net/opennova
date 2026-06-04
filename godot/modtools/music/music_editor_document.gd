@@ -507,9 +507,9 @@ func _current_script_text() -> String:
 	# form is the proven round-trip (tests/mus/mus_roundtrip_test); the
 	# names-aware form (real bank names as bind identifiers) is a display
 	# convenience that does not necessarily recompile, so it must never drive the
-	# write path. Reading the committed mus_script (not the in-flight
-	# _compiled_script_text, which the raw drawer fills with names-aware text)
-	# keeps structured edits self-consistent and always compilable.
+	# write path. Reading the committed mus_script (re-decompiled fresh) rather than
+	# the in-flight _compiled_script_text keeps every structured edit based on the
+	# canonical names-less text and always compilable.
 	if not script_loaded():
 		return ""
 	var script_name := StringName(mus_script.get_default_script_name())
@@ -660,6 +660,25 @@ const _LOCKED_KINDS := [_K_DONE, _K_FRAME_ENTER]
 # the play-edit callers/tests are untouched.
 func can_author() -> bool:
 	return can_edit_plays()
+
+
+# Human-readable reason the structured write path is currently disabled, or "" when
+# authoring is available. Mirrors can_edit_plays()'s checks so the editor can explain
+# WHY edits are off -- most importantly the multi-chunk case, which compiles fine but
+# is intentionally read-only (a structured edit re-encodes a single chunk and would
+# drop the others), where a bare "must compile" message would just confuse.
+func authoring_blocked_reason() -> String:
+	if not script_loaded() or not mus_script.has_method("compile_text"):
+		return "Open a project first"
+	if mus_script.has_method("get_script_count") and int(mus_script.get_script_count()) != 1:
+		return "Multi-chunk script is read-only (editing would drop the other chunks)"
+	var text := _current_script_text()
+	if text == "":
+		return "Script is empty"
+	var d: Dictionary = mus_script.compile_text(text)
+	if int(d.get("rc", -1)) != 0:
+		return "Fix script errors first"
+	return ""
 
 
 # {text, rows} for the committed names-less decompile, via the bridge. rows is an
@@ -1041,15 +1060,19 @@ func can_redo_script() -> bool: return _history.can_redo()
 
 
 # Lazy seed: pull the decompiler's text for the default script and cache it.
-# Used by compile_script when the user presses Compile without having edited
-# the CodeEdit first. Doing this eagerly in open_script would clobber any
-# in-flight script_text the user has already typed; lazy keeps both paths
-# safe.
+# Used by compile_script (e.g. on transport Start / Save) when the buffer hasn't
+# been filled by a structured edit yet. Doing this eagerly in open_script would
+# clobber any in-flight script_text; lazy keeps both paths safe.
+#
+# ALWAYS seed from the NAMES-LESS decompile, even with a bank loaded. The
+# names-aware form (real bank names as bind identifiers) is a display convenience
+# that does NOT reliably recompile -- a bank name containing a space or other
+# non-identifier character fails to lex -- so seeding the compile buffer from it
+# could make the live VM run, or Save write, a script that won't round-trip. The
+# structured write path is already names-less (see _current_script_text); seeding
+# names-less keeps the whole compile path on the one proven-recompilable form.
 func _seed_compiled_text_from_script() -> void:
 	if not script_loaded():
 		return
 	var script_name: StringName = StringName(mus_script.get_default_script_name())
-	if bank_loaded() and mus_script.has_method("get_decompiled_text_with_bank"):
-		_compiled_script_text = mus_script.get_decompiled_text_with_bank(script_name, bank)
-	else:
-		_compiled_script_text = mus_script.get_decompiled_text(script_name)
+	_compiled_script_text = mus_script.get_decompiled_text(script_name)
