@@ -349,6 +349,7 @@ func unmount_viewport(_host: Control) -> void:
 
 # Music opts out of the shell left lane (uses_left_lane == false), so there is no
 # inspector host to populate. Explicit no-op: the live section map IS the section
-# index (click a node to select it; double-click opens its raw-script drawer).
+# index (single-click selects/jumps, double-click opens its blueprint, right-click
+# renames/deletes).
 func build_workflow_inspector(_workflow_id: int, _host: Control) -> void:
 	pass

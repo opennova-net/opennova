@@ -1,10 +1,11 @@
 extends GutTest
 
-# The inspector's drag-to-add-play drop sink: gated by the editable flag (the
+# The blueprint graph's drag-to-add-play drop sink: gated by the editable flag (the
 # can_edit_plays parity gate), targets the shown state, and end-to-end through
-# live_mode it adds a play to the model.
+# live_mode it adds a play to the model. (The drop sink moved off the removed right
+# inspector onto the blueprint graph, now the sole per-statement authoring surface.)
 
-const MusicInspectorPanel = preload("res://modtools/music/ui/inspector_panel.gd")
+const MusicSectionLogicGraph = preload("res://modtools/music/ui/section_logic_graph.gd")
 const MusicEditorDocument = preload("res://modtools/music/music_editor_document.gd")
 const LiveModeScene = preload("res://modtools/music/ui/live_mode.tscn")
 const BANK_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"
@@ -18,35 +19,39 @@ func after_each() -> void:
 	_rm(PAIR_SCRIPT)
 
 
+# AST-shaped section dict (what the blueprint graph's show_section consumes).
 func _section() -> Dictionary:
-	return {"name": "Win000", "index": 3, "is_entry": false, "is_idle_loop": false,
-		"edges": [], "plays": []}
+	return {"name": "Win000", "index": 3, "statements": []}
 
 
 func test_drop_sink_gated_by_editable():
-	var panel = MusicInspectorPanel.new()
-	add_child_autofree(panel)
+	var graph = MusicSectionLogicGraph.new()
+	add_child_autofree(graph)
 	await get_tree().process_frame
-	panel.show_section(_section(), [], "", false)
-	assert_false(panel._can_drop_data(Vector2.ZERO, {"kind": "mus_track", "index": 0}),
-		"read-only inspector rejects drops")
-	panel.show_section(_section(), [], "", true)
-	assert_true(panel._can_drop_data(Vector2.ZERO, {"kind": "mus_track", "index": 0}),
-		"editable inspector accepts a track drop")
-	assert_false(panel._can_drop_data(Vector2.ZERO, {"kind": "something_else"}),
+	# configure_authoring sets the editable flag; show_section sets the section name.
+	graph.configure_authoring(PackedStringArray(), [], null, [], false)
+	graph.show_section(_section(), [])
+	assert_false(graph._can_drop_data(Vector2.ZERO, {"kind": "mus_track", "index": 0}),
+		"read-only blueprint rejects drops")
+	graph.configure_authoring(PackedStringArray(), [], null, [], true)
+	graph.show_section(_section(), [])
+	assert_true(graph._can_drop_data(Vector2.ZERO, {"kind": "mus_track", "index": 0}),
+		"editable blueprint accepts a track drop")
+	assert_false(graph._can_drop_data(Vector2.ZERO, {"kind": "something_else"}),
 		"rejects non-track payloads")
 
 
 func test_drop_emits_add_play_for_shown_section():
-	var panel = MusicInspectorPanel.new()
-	add_child_autofree(panel)
+	var graph = MusicSectionLogicGraph.new()
+	add_child_autofree(graph)
 	await get_tree().process_frame
-	panel.show_section(_section(), [], "", true)
+	graph.configure_authoring(PackedStringArray(), [], null, [], true)
+	graph.show_section(_section(), [])
 	var got := {"section": "", "track": -1}
-	panel.add_play_requested.connect(func(s, t):
+	graph.add_play_requested.connect(func(s, t):
 		got["section"] = String(s)
 		got["track"] = t)
-	panel._drop_data(Vector2.ZERO, {"kind": "mus_track", "index": 5})
+	graph._drop_data(Vector2.ZERO, {"kind": "mus_track", "index": 5})
 	assert_eq(String(got["section"]), "Win000", "drop targets the shown state")
 	assert_eq(int(got["track"]), 5, "drop carries the dropped track index")
 

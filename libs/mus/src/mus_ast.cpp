@@ -251,7 +251,7 @@ static int try_make_node(const Instruction *insts, int i, int end,
         return 1;
     }
 
-    if (strcmp(m, "setstate") == 0 || strcmp(m, "enter") == 0) {
+    if (strcmp(m, "setstate") == 0) {
         int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
         const char *name = resolve_section_idx(idx, script, fallback, sizeof(fallback));
         char line[128];
@@ -259,6 +259,26 @@ static int try_make_node(const Instruction *insts, int i, int end,
         *out = blank_stmt(MUS_AST_TRANSITION, inst->offset, inst->size);
         out->text = dup_str(line);
         out->target_section = (idx >= 0 && (uint32_t)idx < script->section_count) ? idx : -1;
+        return 1;
+    }
+
+    /* enter (0x38) is FRAME SETUP, not a transition: the operand is a locals dword
+       COUNT, not a section index. mus_decompile.cpp renders it "enter <resolve_
+       section_idx(operand)>" identically to setstate -- a known text-level collapse
+       -- so we MUST keep that exact text for byte-identity with the decompiler (and
+       the round-trip the golden test pins). But the editor must NOT treat it as a
+       navigable/editable transition: no target_section, a distinct kind, and the
+       locals count carried in var_offset for a read-only "frame setup" annotation.
+       [orig: AudioVM_Op_Enter @0x672C20 copies N dwords into the frame; no IP move.] */
+    if (strcmp(m, "enter") == 0) {
+        int n_locals = (inst->operand_count > 0) ? inst->operands[0] : 0;
+        const char *name = resolve_section_idx(n_locals, script, fallback, sizeof(fallback));
+        char line[128];
+        snprintf(line, sizeof(line), "enter %s", name);   /* byte-identical to decompile */
+        *out = blank_stmt(MUS_AST_FRAME_ENTER, inst->offset, inst->size);
+        out->text = dup_str(line);
+        out->target_section = -1;        /* NOT a transition target */
+        out->var_offset = n_locals;      /* frame locals dword count (read-only display) */
         return 1;
     }
 

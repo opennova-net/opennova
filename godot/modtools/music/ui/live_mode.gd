@@ -6,7 +6,6 @@ const MusicSectionGraphClass = preload("res://modtools/music/music_section_graph
 const MusVarNames = preload("res://modtools/music/mus_var_names.gd")
 const MusicAudioPreviewClass = preload("res://modtools/music/music_audio_preview.gd")
 const MusicTrackChipClass = preload("res://modtools/music/ui/track_chip.gd")
-const MusicInspectorPanelClass = preload("res://modtools/music/ui/inspector_panel.gd")
 const MusicSectionLogicGraphClass = preload("res://modtools/music/ui/section_logic_graph.gd")
 
 # VM state values mirror libs/mus MusVMState.
@@ -43,9 +42,8 @@ const _EV_COLOR := {
 var _document: RefCounted
 var _director: NovaMusicDirector
 var _preview: Node  # MusicAudioPreview, for track-chip previews on the map
-var _inspector_panel: Node  # MusicInspectorPanel in the right dock
-# Auto-follow the live VM in the inspector. A manual node click pins a state
-# (turns this off); the next Start/Stop re-arms it.
+# Auto-follow the live VM: when on, a section transition drills the blueprint to the
+# entered state. A manual node click pins a state (turns this off); Start/Stop re-arms.
 var _follow_live: bool = true
 var _current_section: StringName = &""
 # Consecutive re-entries of the SAME section. A self-loop section (e.g. the
@@ -93,7 +91,6 @@ var _last_log_count: int = 0
 @onready var _filter_var: CheckBox = %FilterVar
 @onready var _filter_volume: CheckBox = %FilterVolume
 @onready var _map: GraphEdit = %SectionMap
-@onready var _inspector: VBoxContainer = %Inspector
 @onready var _advanced_drawer: PanelContainer = %AdvancedDrawer
 @onready var _advanced_toggle: Button = %AdvancedToggle
 var _add_state_btn: Button
@@ -142,16 +139,10 @@ func _on_document_changed() -> void:
 	_refresh_var_labels()
 	_refresh_jump_options()
 	_refresh_now_playing()
-	# Re-show the pinned section so an edit / undo / redo refreshes its statement
-	# list (and clears the inspector if that section was removed by the edit).
-	if _inspector_panel != null and _inspector_panel.has_method("current_section"):
-		var shown: String = _inspector_panel.current_section()
-		if shown != "":
-			_show_section_in_inspector(shown)
 	# If the user is drilled into a section's blueprint, an edit / undo / redo must
-	# rebuild that graph too (document.changed only refreshes the map + inspector
-	# above). Re-populate from the new AST; if the section vanished (deleted, or
-	# renamed out from under the breadcrumb), fall back to the map.
+	# rebuild that graph too (document.changed only refreshes the map above).
+	# Re-populate from the new AST; if the section vanished (deleted, or renamed out
+	# from under the breadcrumb), fall back to the map.
 	if _logic_graph != null and _logic_graph.visible and _logic_section_name != "":
 		if not _populate_logic_graph(_logic_section_name):
 			_back_to_map()
@@ -180,23 +171,9 @@ func _ready() -> void:
 		_jump_option.item_selected.connect(_on_jump_selected)
 	if _map != null:
 		_map.node_selected.connect(_on_map_node_selected)
-	_inspector_panel = MusicInspectorPanelClass.new()
-	_inspector_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	if _inspector != null:
-		_inspector.add_child(_inspector_panel)
-	_inspector_panel.preview_requested.connect(_preview_track)
-	_inspector_panel.jump_requested.connect(_on_inspector_jump)
-	_inspector_panel.advanced_requested.connect(_on_inspector_advanced)
-	_inspector_panel.add_play_requested.connect(_on_inspector_add_play)
-	_inspector_panel.remove_play_requested.connect(_on_inspector_remove_play)
-	# Phase 2 authoring intents -> document write path.
-	_inspector_panel.add_statement_requested.connect(_on_inspector_add_statement)
-	_inspector_panel.replace_statement_requested.connect(_on_inspector_replace_statement)
-	_inspector_panel.delete_statement_requested.connect(_on_inspector_delete_statement)
-	_inspector_panel.reorder_statement_requested.connect(_on_inspector_reorder_statement)
-	_inspector_panel.rename_section_requested.connect(_on_inspector_rename_section)
-	_inspector_panel.delete_section_requested.connect(_on_inspector_delete_section)
-	_inspector_panel.author_failed.connect(func(msg: String): _flash_start_warning(msg))
+	# The drill-in blueprint graph is now the sole per-statement authoring surface;
+	# the old right-dock inspector is gone. All authoring intents (add/replace/delete/
+	# reorder/add-play) route from the graph in _install_logic_graph below.
 	if _advanced_toggle != null:
 		_advanced_toggle.toggled.connect(_on_advanced_toggled)
 	_install_add_state_button()
@@ -234,8 +211,6 @@ func _process(_delta: float) -> void:
 			_var_inspector.call("refresh_from_director")
 		_update_live_highlight(state)
 	else:
-		if _inspector_panel != null and _inspector_panel.has_method("set_active_offset"):
-			_inspector_panel.set_active_offset(-1)
 		if _logic_graph != null:
 			_logic_graph.set_active_offset(-1)
 
@@ -425,15 +400,15 @@ func _on_section(section_name: StringName) -> void:
 		if _idle_ticks == 1:
 			_refresh_now_playing()
 		return
-	# Real transition: reset idle, log it, rebuild the map + now-playing, and
-	# (while auto-following) point the inspector at the entered state.
-	var prev: String = String(_current_section)
+	# Real transition: reset idle, log it, rebuild the map + now-playing, and -- while
+	# auto-following and already drilled into a blueprint -- follow the VM into the
+	# entered state's blueprint so the live highlight tracks where it actually is.
 	_current_section = section_name
 	_idle_ticks = 0
 	_refresh_map()
 	_refresh_now_playing()
-	if _follow_live:
-		_show_section_in_inspector(String(section_name), prev)
+	if _follow_live and _logic_graph != null and _logic_graph.visible:
+		_drill_into(String(section_name), false)
 	_log_typed(EvType.SECTION, "section -> %s" % section_name)
 
 
@@ -767,21 +742,19 @@ func _preview_track(track: int) -> void:
 		_preview.play_stream(stream)
 
 
-# A map node was clicked. While RUNNING this jumps the VM there (the same path
-# the old section-graph buttons used); selection feeds the right inspector in
-# step 3. No-ops the jump while stopped.
+# A map node was clicked. While RUNNING this jumps the VM there. Double-click drills
+# into the blueprint; right-click opens the state menu. No-ops the jump while stopped.
 func _on_map_node_selected(node: Node) -> void:
 	if node == null:
 		return
 	var sec: String = String(node.get_meta("section", ""))
 	if sec == "":
 		return
-	# Clicking the section that is currently playing keeps auto-follow on;
-	# clicking a different one pins the inspector there (the next Start/Stop, or
-	# clicking the live state again, re-arms follow).
+	# Clicking the section that is currently playing keeps live auto-follow on;
+	# clicking a different one pins away from it (Start/Stop, or clicking the live
+	# state again, re-arms follow so a transition re-drills the blueprint).
 	_follow_live = (_last_state == VM_RUNNING and sec == String(_current_section))
-	_show_section_in_inspector(sec)
-	# While running, also jump the VM there (the old section-graph buttons' role).
+	# While running, also jump the VM there.
 	if _last_state == VM_RUNNING:
 		_on_graph_section_pressed(StringName(sec))
 
@@ -814,39 +787,33 @@ func _reveal_advanced_drawer() -> void:
 		_advanced_toggle.set_pressed_no_signal(true)
 
 
-# Double-clicking a state drills into its logic-graph blueprint (Stage 2). Single
-# clicks fall through to GraphEdit's node_selected (-> _on_map_node_selected). The
-# raw script stays reachable via the transport's "Advanced script" toggle and the
-# inspector's "Show raw script" button.
+# Double-clicking a state drills into its logic-graph blueprint. Single clicks fall
+# through to GraphEdit's node_selected (-> _on_map_node_selected). Right-click opens
+# the state context menu (rename / delete / open) -- the state-level operations the
+# removed right inspector used to own. The raw script stays reachable via the
+# transport's "Advanced script" toggle.
 func _on_node_gui_input(event: InputEvent, section_name: String) -> void:
 	if event is InputEventMouseButton and event.double_click \
 			and event.button_index == MOUSE_BUTTON_LEFT:
 		_drill_into(section_name)
+	elif event is InputEventMouseButton and event.pressed \
+			and event.button_index == MOUSE_BUTTON_RIGHT:
+		_show_state_context_menu(section_name, event.global_position)
 
 
-func _on_inspector_jump(section_name: StringName) -> void:
-	_on_graph_section_pressed(section_name)
-
-
-# Drag-to-add-play / chip remove from the inspector. The document gates these on
-# can_edit_plays() and recompiles; document.changed already rebuilds the map, so
-# we just refresh the inspector to show the changed play list (kept pinned).
+# Drag-to-add-play from the Tracks dock onto a blueprint node. The document gates
+# this on can_edit_plays() and recompiles; document.changed rebuilds the map and
+# re-populates the drilled-in blueprint, so there's nothing else to refresh here.
 func _on_inspector_add_play(section_name: StringName, track: int) -> void:
 	if _document == null or not _document.has_method("insert_play"):
 		return
 	if _document.insert_play(section_name, track):
 		_follow_live = false
-		_show_section_in_inspector(String(section_name))
 
 
-func _on_inspector_remove_play(section_name: StringName, track: int) -> void:
-	if _document == null or not _document.has_method("remove_play"):
-		return
-	if _document.remove_play(section_name, track):
-		_follow_live = false
-		_show_section_in_inspector(String(section_name))
-
-
+# Reveal the raw-script drawer at a section. Fired by the blueprint's open_raw intent
+# (editing a construct the visual form can't represent losslessly) and the transport's
+# "Advanced script" toggle. The blueprint is the language; this is the last resort.
 func _on_inspector_advanced(section_name: StringName) -> void:
 	if _advanced_toggle != null:
 		_advanced_toggle.set_pressed_no_signal(true)
@@ -857,47 +824,8 @@ func _on_inspector_advanced(section_name: StringName) -> void:
 		script_node.scroll_to_section(section_name)
 
 
-# Public entry point for the section-navigator TOC (mounted in the workstation
-# inspector host): open the Advanced drawer at a section's raw script. Routing
-# through here (rather than scrolling the Script panel directly) guarantees the
-# drawer is visible before the CodeEdit is scrolled/focused.
-func reveal_section_in_script(section_name: StringName) -> void:
-	_on_inspector_advanced(section_name)
-
-
 func _script_panel() -> Node:
 	return find_child("Script", true, false)
-
-
-# Resolve a section from the structured program AST and show every statement it
-# runs in the right-dock inspector. came_from is the breadcrumb (the section the
-# VM just left); empty when browsing manually or on the entry section. The idle-
-# loop badge is sourced from the topology model so it matches the map node.
-func _show_section_in_inspector(sec: String, came_from: String = "") -> void:
-	if _inspector_panel == null:
-		return
-	if _document == null or not _document.script_loaded():
-		_inspector_panel.clear()
-		return
-	var script_name := StringName(_document.mus_script.get_default_script_name())
-	var ast: Array = _document.mus_script.get_program_ast(script_name)
-	var editable: bool = _document.has_method("can_author") and _document.can_author()
-	# Hand the inspector the context its authoring popups need (section list for
-	# transition/switch targets + rename validation, variable list, the script for
-	# expression validation).
-	if _inspector_panel.has_method("configure_authoring"):
-		var section_names: PackedStringArray = _document.mus_script.get_section_names(script_name)
-		_inspector_panel.configure_authoring(section_names, _build_var_list(), _document.mus_script)
-	for section in ast:
-		if String(section.get("name", "")) == sec:
-			# Derive the idle-loop badge from the AST we already have (a section
-			# whose every outgoing target is itself) rather than re-parsing the
-			# topology model -- it agrees with the map's ↻ badge for every real
-			# script (the self-loop case both detect identically).
-			section["is_idle_loop"] = _ast_section_is_idle(section)
-			_inspector_panel.show_section(section, _bank_names(), came_from, editable)
-			return
-	_inspector_panel.clear()
 
 
 # Variable picker list for the authoring popups: Var00..Var16 (all 17 int32
@@ -950,73 +878,10 @@ func _on_inspector_reorder_statement(section_index: int, ordinal: int, direction
 		_flash_start_warning("Can't move it further")
 
 
-func _on_inspector_rename_section(old_name: StringName, new_name: StringName) -> void:
-	if _document == null or not _document.has_method("rename_section"):
-		return
-	_follow_live = false
-	if _document.rename_section(old_name, new_name):
-		# The pinned section's name changed; re-pin under the new name (the
-		# document.changed refresh would otherwise look up the gone old name).
-		_show_section_in_inspector(String(new_name))
-		_log_typed(EvType.SYSTEM, "renamed %s -> %s" % [old_name, new_name])
-	else:
-		_flash_start_warning("Rename rejected (name taken/invalid)")
-
-
-func _on_inspector_delete_section(section_name: StringName) -> void:
-	if _document == null or not _document.has_method("delete_section"):
-		return
-	_follow_live = false
-	if _document.delete_section(section_name):
-		_log_typed(EvType.SYSTEM, "deleted state %s" % section_name)
-		# Section gone -> document.changed re-show finds nothing and clears.
-	else:
-		_flash_start_warning("Can't delete: state is still referenced")
-
-
-# A section is an idle self-loop when it has at least one outgoing section target
-# and every distinct target is itself -- the same definition mus_build_section_model
-# uses, computed from the AST so no second parse is needed.
-func _ast_section_is_idle(section: Dictionary) -> bool:
-	var own := int(section.get("index", -1))
-	var targets: Dictionary = {}
-	_collect_section_targets(section.get("statements", []), targets)
-	if targets.is_empty():
-		return false
-	for t in targets.keys():
-		if int(t) != own:
-			return false
-	return true
-
-
-func _collect_section_targets(stmts: Array, out: Dictionary) -> void:
-	for s in stmts:
-		match String(s.get("kind", "")):
-			"transition", "goto", "call", "branch_comment":
-				var ts := int(s.get("target_section", -1))
-				if ts >= 0:
-					out[ts] = true
-			"switch":
-				for t in s.get("targets", []):
-					var sec := int(t.get("section", -1))
-					if sec >= 0:
-						out[sec] = true
-			"if":
-				_collect_section_targets(s.get("then", []), out)
-				_collect_section_targets(s.get("else", []), out)
-
-
-# Light the inspector statement the VM pc is on, but only while the inspector is
-# showing the section that is actually running -- the pc is a global bytecode
-# offset, so another section's rows would mis-bracket it.
+# Light the drilled-in blueprint statement the VM pc is on, but only while the graph
+# shows the section that is actually running -- the pc is a global bytecode offset, so
+# another section's nodes would mis-bracket it.
 func _update_live_highlight(state: int) -> void:
-	if _inspector_panel != null and _inspector_panel.has_method("set_active_offset"):
-		if state == VM_RUNNING and _inspector_panel.current_section() == String(_current_section):
-			_inspector_panel.set_active_offset(_director.current_pc())
-		else:
-			_inspector_panel.set_active_offset(-1)
-	# Drive the drill-in logic graph too, but only while it shows the running
-	# section (pc is a global offset, so another section's nodes would mis-bracket).
 	if _logic_graph != null and _logic_graph.visible:
 		if state == VM_RUNNING and _logic_section_name == String(_current_section):
 			_logic_graph.set_active_offset(_director.current_pc())
@@ -1061,10 +926,10 @@ func _on_add_state() -> void:
 		_flash_start_warning("Could not add state")
 		return
 	_log_typed(EvType.SYSTEM, "added state %s" % new_name)
-	# add_section emitted `changed` -> the map already rebuilt; pin the inspector
-	# on the new state so the user sees it (and can start authoring it).
+	# add_section emitted `changed` -> the map already rebuilt; drill straight into
+	# the new state's blueprint so the user can start authoring it.
 	_follow_live = false
-	_show_section_in_inspector(new_name)
+	_drill_into(new_name)
 
 
 # Lowest free "State_N" so a fresh state never collides with an existing section.
@@ -1101,7 +966,23 @@ func _install_logic_graph() -> void:
 	_breadcrumb.add_child(back)
 	_breadcrumb_label = Label.new()
 	_breadcrumb_label.add_theme_color_override("font_color", Color(0.85, 0.92, 1.0))
+	_breadcrumb_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_breadcrumb.add_child(_breadcrumb_label)
+	# Rename / delete THIS state -- the state-level operations the right inspector
+	# used to own, now on the blueprint's own breadcrumb. They act on the drilled-in
+	# section and reuse the document's rename_section / delete_section.
+	var ren := Button.new()
+	ren.text = "✎ Rename"
+	ren.tooltip_text = "Rename this state."
+	ren.focus_mode = Control.FOCUS_NONE
+	ren.pressed.connect(_on_breadcrumb_rename)
+	_breadcrumb.add_child(ren)
+	var del := Button.new()
+	del.text = "✕ Delete"
+	del.tooltip_text = "Delete this state (only if nothing else points at it)."
+	del.focus_mode = Control.FOCUS_NONE
+	del.pressed.connect(_on_breadcrumb_delete)
+	_breadcrumb.add_child(del)
 	_breadcrumb.visible = false
 	col.add_child(_breadcrumb)
 	col.move_child(_breadcrumb, 0)
@@ -1111,7 +992,6 @@ func _install_logic_graph() -> void:
 	_logic_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_logic_graph.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_logic_graph.visible = false
-	_logic_graph.statement_selected.connect(_on_logic_statement_selected)
 	_logic_graph.open_section_requested.connect(func(n): _drill_into(String(n)))
 	# Stage 3 authoring intents reuse the inspector's document handlers verbatim --
 	# the graph and the inspector emit the same add/replace/delete/reorder/add-play
@@ -1126,21 +1006,133 @@ func _install_logic_graph() -> void:
 	col.add_child(_logic_graph)
 
 
+# --- State-level operations (rename / delete), re-homed from the right inspector ---
+
+func _on_breadcrumb_rename() -> void:
+	if _logic_section_name != "":
+		_open_rename_dialog(_logic_section_name)
+
+
+func _on_breadcrumb_delete() -> void:
+	if _logic_section_name != "":
+		_open_delete_section_dialog(_logic_section_name)
+
+
+# Right-click a state on the map: open its blueprint, rename it, or delete it.
+# Rename + delete need an editable (single-chunk, compiling) script.
+func _show_state_context_menu(section_name: String, global_pos: Vector2) -> void:
+	var pop := PopupMenu.new()
+	pop.add_item("Open blueprint", 0)
+	pop.add_item("Rename state…", 1)
+	pop.add_item("Delete state", 2)
+	var can: bool = _document != null and _document.has_method("can_author") and _document.can_author()
+	pop.set_item_disabled(1, not can)
+	pop.set_item_disabled(2, not can)
+	add_child(pop)
+	pop.id_pressed.connect(_on_state_menu_id.bind(section_name))
+	pop.popup_hide.connect(pop.queue_free)
+	pop.position = Vector2i(global_pos)
+	pop.reset_size()
+	pop.popup()
+
+
+func _on_state_menu_id(id: int, section_name: String) -> void:
+	match id:
+		0: _drill_into(section_name)
+		1: _open_rename_dialog(section_name)
+		2: _open_delete_section_dialog(section_name)
+
+
+func _open_rename_dialog(section_name: String) -> void:
+	var dlg := ConfirmationDialog.new()
+	dlg.title = "Rename state"
+	dlg.min_size = Vector2i(340, 120)
+	var box := VBoxContainer.new()
+	dlg.add_child(box)
+	var lbl := Label.new()
+	lbl.text = "New name for '%s':" % section_name
+	box.add_child(lbl)
+	var edit := LineEdit.new()
+	edit.text = section_name
+	box.add_child(edit)
+	add_child(dlg)
+	dlg.confirmed.connect(func():
+		_do_rename_section(section_name, edit.text.strip_edges())
+		dlg.queue_free())
+	dlg.canceled.connect(dlg.queue_free)
+	dlg.close_requested.connect(dlg.queue_free)
+	dlg.popup_centered()
+	edit.select_all()
+	edit.grab_focus()
+
+
+func _do_rename_section(old_name: String, new_name: String) -> void:
+	if new_name == "" or new_name == old_name:
+		return
+	if _document == null or not _document.has_method("rename_section"):
+		return
+	_follow_live = false
+	# If we're drilled into this state, re-point the breadcrumb to the new name
+	# BEFORE the rename so the post-change refresh re-populates the blueprint under
+	# it (instead of failing to find the old name and bouncing back to the map).
+	var was_drilled := _logic_section_name == old_name
+	if was_drilled:
+		_logic_section_name = new_name
+		if _breadcrumb_label != null:
+			_breadcrumb_label.text = "  ▸  %s   (blueprint)" % new_name
+	if _document.rename_section(StringName(old_name), StringName(new_name)):
+		_log_typed(EvType.SYSTEM, "renamed %s -> %s" % [old_name, new_name])
+	else:
+		if was_drilled:
+			_logic_section_name = old_name
+			if _breadcrumb_label != null:
+				_breadcrumb_label.text = "  ▸  %s   (blueprint)" % old_name
+		_flash_start_warning("Rename rejected (name taken/invalid)")
+
+
+func _open_delete_section_dialog(section_name: String) -> void:
+	var dlg := ConfirmationDialog.new()
+	dlg.title = "Delete state"
+	dlg.dialog_text = "Delete state '%s'?\nStates that other states point at can't be deleted until those links are retargeted." % section_name
+	add_child(dlg)
+	dlg.confirmed.connect(func():
+		_do_delete_section(section_name)
+		dlg.queue_free())
+	dlg.canceled.connect(dlg.queue_free)
+	dlg.close_requested.connect(dlg.queue_free)
+	dlg.popup_centered()
+
+
+func _do_delete_section(section_name: String) -> void:
+	if _document == null or not _document.has_method("delete_section"):
+		return
+	_follow_live = false
+	# If we're deleting the drilled-in state, drop back to the map first so the
+	# post-change refresh doesn't try to re-populate a now-gone section.
+	if _logic_section_name == section_name:
+		_back_to_map()
+	if _document.delete_section(StringName(section_name)):
+		_log_typed(EvType.SYSTEM, "deleted state %s" % section_name)
+	else:
+		_flash_start_warning("Can't delete: state is still referenced")
+
+
 # Drill into a state: swap the center canvas from the map to that section's logic
-# graph (statements as exec-flow nodes) with a Back breadcrumb, and pin the right
-# inspector on it. Double-clicking a map node or an in-graph "open ▸" lands here.
-func _drill_into(section_name: String) -> void:
+# graph (statements as exec-flow nodes) with a Back breadcrumb. A manual drill
+# (double-click, "open ▸", Add State) pins (stops live auto-follow); a live-follow
+# drill from _on_section passes pin=false so the VM keeps re-drilling on transitions.
+func _drill_into(section_name: String, pin: bool = true) -> void:
 	if _logic_graph == null or _document == null or not _document.script_loaded():
 		return
 	if not _populate_logic_graph(section_name):
 		return
+	if pin:
+		_follow_live = false
 	_logic_section_name = section_name
 	_logic_graph.visible = true
 	_set_map_chrome_visible(false)
 	_breadcrumb.visible = true
 	_breadcrumb_label.text = "  ▸  %s   (blueprint)" % section_name
-	_follow_live = false
-	_show_section_in_inspector(section_name)
 
 
 # Build (or rebuild) the logic graph for `section_name` from the current AST,
@@ -1178,13 +1170,6 @@ func _set_map_chrome_visible(v: bool) -> void:
 		_map_header.visible = v
 	if _map_toolbar != null:
 		_map_toolbar.visible = v
-
-
-# A node in the logic graph was selected: keep the right inspector pinned on its
-# section as the read-only details view (per-statement focusing is Stage 3).
-func _on_logic_statement_selected(_section_index: int, _ordinal: int) -> void:
-	if _logic_section_name != "":
-		_show_section_in_inspector(_logic_section_name)
 
 
 func _on_sound(idx: int, sound_name: StringName, wait: bool) -> void:

@@ -1,14 +1,13 @@
 extends RefCounted
 
 # Shared MUS authoring forms: the "＋ Add" construct palette and the per-kind
-# dialog builders, lifted out of inspector_panel.gd so the legacy per-state
-# inspector AND the Stage-3 logic-graph blueprint emit BYTE-IDENTICAL canonical
-# .mus lines (every producer routes through MusStmtText / MusExpr / the structured
-# ExprBuilder). Both surfaces instance one of these, configure() it with the
-# section/var/bank context, then open_form(); on OK the dialog hands the produced
-# lines to the on_lines callback, which the host routes to the document's
-# parity-gated add/replace write path. The forms NEVER hand-assemble bytecode --
-# they only emit text the compile gate already accepts.
+# dialog builders used by the logic-graph blueprint (the sole authoring surface).
+# Every producer routes through MusStmtText / MusExpr / the structured ExprBuilder
+# so the emitted .mus lines are canonical. The graph instances one of these,
+# configure()s it with the section/var/bank context, then open_form(); on OK the
+# dialog hands the produced lines to the on_lines callback, which the host routes to
+# the document's parity-gated add/replace write path. The forms NEVER hand-assemble
+# bytecode -- they only emit text the compile gate already accepts.
 #
 # No class_name (preload as a const) to avoid GDScript class-registration ordering
 # surprises, matching mus_stmt_text.gd / mus_expr.gd.

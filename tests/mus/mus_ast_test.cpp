@@ -237,6 +237,16 @@ static int test_statement_tree_gamemus() {
     const MusAstStmt *tr = first_of_kind(begin->statements, begin->statement_count, MUS_AST_TRANSITION);
     CHECK(tr != nullptr && tr->target_section >= 0, "Begin has a transition with a target section");
 
+    // The leaked tail's `enter` (opcode 0x38) is FRAME SETUP, not a transition: a
+    // distinct FRAME_ENTER kind with NO navigable target, so the editor never
+    // treats it as a state change (editing it would corrupt the frame). Its text
+    // stays "enter <name>" for byte-identity with the decompiler; the kind/target
+    // distinguish it. [orig: AudioVM_Op_Enter @0x672C20 vs setstate 0x3B @0x672C70.]
+    const MusAstStmt *fe = first_of_kind(begin->statements, begin->statement_count, MUS_AST_FRAME_ENTER);
+    CHECK(fe != nullptr, "Begin's leaked enter (0x38) is FRAME_ENTER, not a transition");
+    CHECK(fe->target_section == -1, "frame_enter carries no transition target");
+    CHECK(strncmp(fe->text, "enter ", 6) == 0, "frame_enter text stays 'enter <name>' (byte-identity)");
+
     // statements are in ascending code offset order.
     for (uint32_t i = 1; i < begin->statement_count; ++i)
         CHECK(begin->statements[i].code_offset >= begin->statements[i - 1].code_offset,

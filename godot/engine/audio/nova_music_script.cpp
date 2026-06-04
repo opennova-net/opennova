@@ -443,6 +443,7 @@ static const char *ast_kind_name(int kind) {
 		case MUS_AST_IF: return "if";
 		case MUS_AST_SWITCH: return "switch";
 		case MUS_AST_BRANCH_COMMENT: return "branch_comment";
+		case MUS_AST_FRAME_ENTER: return "frame_enter";
 		default: return "unknown";
 	}
 }
@@ -502,6 +503,12 @@ static Dictionary ast_stmt_to_dict(const MusAstProgram *prog, const MusAstStmt &
 		case MUS_AST_BRANCH_COMMENT:
 			d["expr"] = String(s.expr_text ? s.expr_text : "");
 			d["target_section"] = (int64_t)s.target_section;
+			break;
+		case MUS_AST_FRAME_ENTER:
+			// Frame setup (0x38): read-only annotation. Carry the locals dword
+			// count; deliberately NO target_section/target_name (it is not a
+			// transition, so the editor must not offer to navigate/edit it).
+			d["locals_count"] = (int64_t)s.var_offset;
 			break;
 		case MUS_AST_IF:
 			d["expr"] = String(s.expr_text ? s.expr_text : "");

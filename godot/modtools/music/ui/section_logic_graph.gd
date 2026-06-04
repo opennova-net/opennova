@@ -5,26 +5,29 @@ extends GraphEdit
 # flow node graph (UE-Blueprint style). Each statement is a node wired by exec
 # pins; `if` exposes then/else/after pins, `switch` one pin per target, and
 # enter/goto/call render as clickable "to-state" nodes that drill back to the map.
-# Built purely from NovaMusicScript.get_program_ast(section) -- no new C++.
+# Built purely from NovaMusicScript.get_program_ast(section) -- no new C++. This is
+# now the SOLE per-statement authoring surface (the old right-dock inspector is gone).
 #
-# Stage 3 adds editing: when configure_authoring() turns the graph editable, every
-# TOP-LEVEL statement node grows a ✎/✕/↑/↓ cluster and the toolbar gains a "＋ Add"
-# palette, all routed through the SAME shared MusForms the inspector uses, so both
-# surfaces emit byte-identical canonical lines. The graph never writes bytecode; it
-# emits the same add/replace/delete/reorder intents the inspector does, which the
-# host (live_mode) hands to the document's parity-gated, undoable write path. A
-# folded ×N run and an existing if's nested bodies stay read-only on the graph
-# (editing those routes to the raw drawer / the unfolded inspector) so an edit is
-# never ambiguous about which of N statements it touches.
+# Editing: when configure_authoring() turns the graph editable, every TOP-LEVEL
+# statement node grows a ✎/✕/↑/↓ cluster and the toolbar gains a "＋ Add" palette,
+# all routed through the shared MusForms so the emitted lines are canonical. The
+# graph never writes bytecode; it emits add/replace/delete/reorder intents the host
+# (live_mode) hands to the document's parity-gated, undoable write path. A folded ×N
+# run can be expanded in place (⊞ unfold) to edit a single member; an existing if's
+# nested bodies stay read-only (editing those routes to the raw-script drawer the
+# host owns) so an edit is never ambiguous about which of N statements it touches.
+# The frame-setup op (0x38) renders as a locked, non-navigable note (it is engine
+# state setup, not a transition, and must never be edited as one).
 #
 # Layout is deterministic (left-to-right flow by a monotonic column, branch depth
 # down the Y axis) so it never reshuffles and tests can assert topology. Runs of
 # identical simple statements (e.g. 21x the same play) fold into one xN node --
-# folding is suppressed for nothing; the tool cluster is just withheld from folds.
+# folding is suppressed for nothing; the tool cluster is withheld from a collapsed
+# fold but restored on each member once unfolded.
 
 signal statement_selected(section_index: int, ordinal: int)
 signal open_section_requested(section_name: StringName)
-# Stage 3 authoring intents (host routes to the document, mirrors inspector_panel):
+# Authoring intents (host routes them to the document's parity-gated write path):
 signal add_statement_requested(section_index: int, lines: PackedStringArray)
 signal replace_statement_requested(section_index: int, ordinal: int, lines: PackedStringArray)
 signal delete_statement_requested(section_index: int, ordinal: int)
@@ -57,6 +60,7 @@ const _KIND_STYLE := {
 	"if": ["◇ If", Color(1.00, 0.85, 0.45)],
 	"switch": ["⋔ On", Color(0.50, 0.85, 0.90)],
 	"branch_comment": ["⌥ Branch", Color(0.55, 0.55, 0.55)],
+	"frame_enter": ["▣ Frame setup", Color(0.52, 0.52, 0.52)],
 }
 
 const _EXEC_PIN := Color(0.85, 0.85, 0.85)   # neutral exec wire
@@ -76,6 +80,11 @@ var _node_seq: int = 0
 # Live-highlight registry: [{ "node": GraphNode, "offset": int }].
 var _offset_nodes: Array = []
 var _active_node: GraphNode = null
+# Last-rendered section dict, so a fold/unfold toggle can re-render in place.
+var _section_dict: Dictionary = {}
+# Set of run-start ordinals the user has expanded (folded ×N -> individual rows).
+# Carries across a re-render; reset when a different section is shown.
+var _unfolded: Dictionary = {}
 
 # Stage 3 authoring context (set by the host via configure_authoring).
 var _editable: bool = false
@@ -97,8 +106,12 @@ func _ready() -> void:
 
 # Render one AST section dict (NovaMusicScript.get_program_ast element).
 func show_section(section: Dictionary, bank_names: Array) -> void:
+	var new_index := int(section.get("index", -1))
+	if new_index != _section_index:
+		_unfolded.clear()   # a different section -- expanded folds don't carry over
 	_bank_names = bank_names
-	_section_index = int(section.get("index", -1))
+	_section_index = new_index
+	_section_dict = section
 	_section_name = String(section.get("name", ""))
 	_node_seq = 0
 	_offset_nodes = []
@@ -134,19 +147,43 @@ func _build_seq(stmts: Array, depth: int, parent_ordinal: int) -> Dictionary:
 		var kind := String(s.get("kind", ""))
 		var ordinal := parent_ordinal if parent_ordinal >= 0 else i
 		var run := 1
-		var built: Dictionary
 		if kind in _FOLDABLE:
 			while i + run < stmts.size() and _same_simple(stmts[i + run], s):
 				run += 1
+		# An expanded run (editable + the user pressed ⊞ unfold): render each member
+		# as its own individually-editable node -- every folded member is a distinct
+		# top-level statement addressable by its own ordinal -- with a ⊟ fold toggle
+		# on the first. The non-folding path below handles run==1 and collapsed runs.
+		if _editable and top and run > 1 and _unfolded.has(ordinal):
+			for k in range(run):
+				var member: Dictionary = stmts[i + k]
+				var b := _build_simple(member, depth, ordinal + k, 1)
+				_attach_tools(b["node"], member, ordinal + k)
+				if k == 0:
+					_attach_fold_toggle(b["node"], ordinal, true, run)
+				if entry.is_empty():
+					entry = b["entry"]
+				for e in prev_exits:
+					_wire(e, b["entry"])
+				prev_exits = b["exits"]
+			i += run
+			continue
+		var built: Dictionary
+		if kind in _FOLDABLE:
 			built = _build_simple(s, depth, ordinal, run)
+			# A collapsed run of >1 gets a ⊞ unfold toggle so its members become
+			# individually editable (the only Inspector-era edit the graph lacked).
+			if _editable and top and run > 1:
+				_attach_fold_toggle(built["node"], ordinal, false, run)
 			i += run
 		else:
 			built = _build_stmt(s, depth, ordinal)
 			i += 1
 		# Edit only unambiguous, individually-addressable statements: a top-level
-		# node that isn't a folded ×N run. Folds + nested bodies stay read-only on
-		# the graph (edited via the raw drawer or the unfolded right inspector).
-		if _editable and top and run == 1 and built.has("node"):
+		# node that isn't a folded ×N run, and not the read-only frame-setup op
+		# (0x38) which the engine runs but the editor must never mutate. Folds +
+		# nested bodies stay read-only on the graph.
+		if _editable and top and run == 1 and kind != "frame_enter" and built.has("node"):
 			_attach_tools(built["node"], s, ordinal)
 		if entry.is_empty():
 			entry = built["entry"]
@@ -154,6 +191,35 @@ func _build_seq(stmts: Array, depth: int, parent_ordinal: int) -> Dictionary:
 			_wire(e, built["entry"])
 		prev_exits = built["exits"]
 	return {"entry": entry, "exits": prev_exits}
+
+
+# Re-render the current section in place (after a fold/unfold toggle). _unfolded
+# persists across this (show_section only clears it on a section change).
+func _rerender() -> void:
+	if not _section_dict.is_empty():
+		show_section(_section_dict, _bank_names)
+
+
+# The ⊞ unfold / ⊟ fold affordance on a folded run's node. Toggles the run-start
+# ordinal in _unfolded and re-renders. Appended as a trailing (slot-less) row so it
+# never disturbs the node's exec pin.
+func _attach_fold_toggle(gn: GraphNode, start_ordinal: int, expanded: bool, run: int) -> void:
+	var b := Button.new()
+	b.flat = true
+	b.focus_mode = Control.FOCUS_NONE
+	if expanded:
+		b.text = "⊟ fold"
+		b.tooltip_text = "Collapse these %d identical statements back into one row." % run
+	else:
+		b.text = "⊞ unfold ×%d" % run
+		b.tooltip_text = "Expand this run into %d individually-editable rows." % run
+	b.pressed.connect(func():
+		if _unfolded.has(start_ordinal):
+			_unfolded.erase(start_ordinal)
+		else:
+			_unfolded[start_ordinal] = true
+		_rerender())
+	gn.add_child(b)
 
 
 func _build_stmt(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
@@ -165,8 +231,29 @@ func _build_stmt(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
 			return _build_switch(s, depth, ordinal)
 		"transition", "goto", "call":
 			return _build_jump(s, depth, ordinal)
+		"frame_enter":
+			return _build_frame_enter(s, depth, ordinal)
 		_:
 			return _build_simple(s, depth, ordinal, 1)
+
+
+# enter (0x38) = FRAME SETUP, not a transition. Render a muted, read-only node so
+# the op stays VISIBLE (the engine really runs it) but never looks navigable or
+# editable: its operand is a locals dword count, not a section index, so unlike a
+# real `enter`/`setstate` there is no "open ▸" and no tool cluster (the _build_seq
+# guard skips frame_enter). 0x38 does not move the IP, so flow continues -- a
+# non-terminal exec out pin.
+func _build_frame_enter(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
+	var gn := _new_node("frame_enter", ordinal, depth)
+	var n := int(s.get("locals_count", 0))
+	var body := Label.new()
+	body.text = "reserves %d local%s · read-only" % [n, "" if n == 1 else "s"]
+	body.add_theme_color_override("font_color", Color(0.55, 0.55, 0.55))
+	body.tooltip_text = "Frame setup (engine op 0x38): reserves local slots. Not a state change, and not editable -- its value is a frame size, not a target."
+	gn.add_child(body)
+	_register(gn, int(s.get("code_offset", -1)))
+	gn.set_slot(0, true, 0, _IN_PIN, true, 0, _EXEC_PIN)
+	return {"entry": [gn.name, 0], "exits": [[gn.name, 0]], "node": gn}
 
 
 # A single-row node (play/assign/incdec/expr/return/yield/nop/done/branch_comment).

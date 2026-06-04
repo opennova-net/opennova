@@ -637,12 +637,22 @@ const _K_EXPR := 10
 const _K_IF := 11
 const _K_SWITCH := 12
 const _K_BRANCH_COMMENT := 13
+# enter (0x38) frame setup: a read-only annotation, never mutable. Its operand is
+# a locals dword count, not a section index; rewriting it as a transition (the
+# decompiler/compiler collapse "enter" to setstate 0x3B) would corrupt the frame.
+const _K_FRAME_ENTER := 14
 
 # Statements that end (or redirect) a section's straight-line flow. A new
-# statement inserts before the first of these so it actually runs.
+# statement inserts before the first of these so it actually runs. (frame_enter is
+# NOT a terminator -- 0x38 does not move the IP -- so it is excluded.)
 const _TERMINATOR_KINDS := [
 	_K_TRANSITION, _K_GOTO, _K_CALL, _K_RETURN, _K_YIELD, _K_DONE, _K_SWITCH,
 ]
+
+# Structural / non-mutable rows the write path must refuse: the section-closing
+# `}` (done) and the frame-setup `enter` (0x38). Editing either corrupts the
+# section (leak the body / scramble the frame), so delete/replace/reorder reject them.
+const _LOCKED_KINDS := [_K_DONE, _K_FRAME_ENTER]
 
 
 # The Phase-2 gate. Same body as can_edit_plays() (single chunk, compiles); a
@@ -719,8 +729,8 @@ func delete_statement(section_index: int, ordinal: int) -> bool:
 	if row.is_empty():
 		return false
 	# The section-closing `}` (done) is structural -- deleting it would leak the
-	# section into the next. Keep it.
-	if int(row.get("kind", -1)) == _K_DONE:
+	# section into the next; the frame-setup `enter` (0x38) is read-only. Keep both.
+	if int(row.get("kind", -1)) in _LOCKED_KINDS:
 		return false
 	var ls := int(row.get("line_start", -1))
 	var le := int(row.get("line_end", -1))
@@ -742,7 +752,7 @@ func replace_statement(section_index: int, ordinal: int, lines: PackedStringArra
 	var row := _find_row(ann.get("rows", []), section_index, ordinal)
 	if row.is_empty():
 		return false
-	if int(row.get("kind", -1)) == _K_DONE:
+	if int(row.get("kind", -1)) in _LOCKED_KINDS:
 		return false
 	var ls := int(row.get("line_start", -1))
 	var le := int(row.get("line_end", -1))
@@ -788,8 +798,9 @@ func reorder_statement(section_index: int, ordinal: int, direction: int) -> bool
 		return false
 	var lo: Dictionary = srows[mini(pos, other)]
 	var hi: Dictionary = srows[maxi(pos, other)]
-	# Don't shuffle across the section terminator (would leak into the tail).
-	if int(lo.get("kind", -1)) == _K_DONE or int(hi.get("kind", -1)) == _K_DONE:
+	# Don't shuffle across a locked row (the section terminator `}` would leak into
+	# the tail; the frame-setup `enter` is read-only).
+	if int(lo.get("kind", -1)) in _LOCKED_KINDS or int(hi.get("kind", -1)) in _LOCKED_KINDS:
 		return false
 	if int(lo.get("line_end", -1)) != int(hi.get("line_start", -2)):
 		return false

@@ -48,6 +48,17 @@ typedef enum MusAstStmtKind {
     MUS_AST_IF,              /* if (cond) {then} [else {else}]                */
     MUS_AST_SWITCH,          /* on (sel) action t1 t2 ... (tablexec 0x35)     */
     MUS_AST_BRANCH_COMMENT,  /* undetected brfalse/brtrue -> "// if ... goto" */
+    MUS_AST_FRAME_ENTER,     /* enter (0x38): FRAME SETUP, not a transition.
+                                Operand is a locals dword COUNT, not a section
+                                index. The decompiler renders it "enter <name>"
+                                identically to setstate (a text-level collapse),
+                                so the emitter keeps that exact text for byte-
+                                identity -- but the editor must treat it as a
+                                read-only annotation (var_offset = locals count),
+                                never a navigable/editable transition.
+                                [orig: AudioVM_Op_Enter @0x672C20 copies N dwords
+                                into the frame, no IP change; vs setstate 0x3B
+                                @0x672C70 which seeks pc + halts.] */
 } MusAstStmtKind;
 
 /* One target of an on-switch (tablexec). */
