@@ -140,8 +140,48 @@ static int test_reject_goto_table_too_large(void) {
     return 1;
 }
 
+/* The exact template the editor mints for "New music program from scratch":
+   a script with a single empty section. An empty body `{ }` compiles to one
+   implicit `done`, and that section is the entry (index 0). This locks the
+   from-scratch path so a future grammar change can't silently break New. The
+   GDScript side seeds this same text (music_editor_document.new_script). */
+static int test_compile_minimal_single_section(void) {
+    const char *src =
+        "script gamescript\n"
+        "section Begin\n"
+        "{\n"
+        "}\n";
+    MusScript out = {};
+    int err_line = 0, err_col = 0;
+    const char *err_msg = NULL;
+    int rc = mus_compile(src, &out, &err_line, &err_col, &err_msg);
+    CHECK(rc == 0, err_msg ? err_msg : "empty single-section template must compile");
+    CHECK(out.section_count == 1, "one section");
+    CHECK(out.code_size > 0, "empty body emits a single done byte");
+    CHECK(out.entry_section_index == 0, "the only section is the entry");
+
+    /* It must also encode to a file the loader re-opens (the New write path is
+       compile -> encode -> set_compiled_file_bytes -> save). */
+    const MusScript *scripts[1] = { &out };
+    uint8_t *buf = NULL;
+    size_t bufsize = 0;
+    rc = mus_encode_file(scripts, 1, &buf, &bufsize);
+    CHECK(rc == 0 && buf != NULL, "encode succeeds");
+    MusFile mf;
+    rc = mus_open_memory(&mf, buf, bufsize);
+    CHECK(rc == 0, "re-parse");
+    CHECK(mf.header.chunk_count == 1, "1 chunk");
+    CHECK(mf.scripts[0].section_count == 1, "1 section preserved");
+    CHECK(mf.scripts[0].entry_section_index == 0, "entry index preserved");
+    mus_close(&mf);
+    mus_free(buf);
+    mus_script_free(&out);
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_compile_minimal_script);
+    RUN_TEST(test_compile_minimal_single_section);
     RUN_TEST(test_encode_file_minimal);
     RUN_TEST(test_reject_play_track_over_255);
     RUN_TEST(test_accept_play_track_255);

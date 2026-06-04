@@ -35,6 +35,7 @@ void NovaSbfBank::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_stream", "name"), &NovaSbfBank::get_stream);
 	ClassDB::bind_method(D_METHOD("get_stream_at", "index"), &NovaSbfBank::get_stream_at);
 	ClassDB::bind_method(D_METHOD("load_from_path", "path"), &NovaSbfBank::load_from_path);
+	ClassDB::bind_static_method("NovaSbfBank", D_METHOD("create_empty"), &NovaSbfBank::create_empty);
 	ClassDB::bind_method(D_METHOD("get_raw_file_bytes"), &NovaSbfBank::get_raw_file_bytes);
 	ClassDB::bind_method(D_METHOD("set_entry_pcm", "index", "samples"), &NovaSbfBank::set_entry_pcm);
 	ClassDB::bind_method(D_METHOD("is_dirty"), &NovaSbfBank::is_dirty);
@@ -72,6 +73,29 @@ void NovaSbfBank::load_from_path(const String &p_path) {
 		return;
 	}
 	_opened = true;
+}
+
+Ref<NovaSbfBank> NovaSbfBank::create_empty() {
+	Ref<NovaSbfBank> bank;
+	bank.instantiate();
+	// Start from a zeroed archive: entries == nullptr is the valid empty state
+	// (add_entry reallocs from null on the same allocator sbf_close frees with).
+	// Stamp a coherent empty SBF header so any header reader sees a real bank,
+	// matching the bytes sbf_encode_file would later write.
+	std::memset(&bank->_arc, 0, sizeof(bank->_arc));
+	bank->_arc.header.magic = SBF_MAGIC;
+	bank->_arc.header.version = 0x00000100u;
+	bank->_arc.header.flags = 0x00000001u; // byte-paired stereo (matches sbf_encode_file)
+	bank->_arc.header.index_offset = SBF_HEADER_SIZE;
+	bank->_arc.header.entry_count = 0;
+	bank->_arc.entries = nullptr;
+	bank->source_path = String();
+	bank->_file_bytes = PackedByteArray();
+	// _opened lights up the mutation API; _dirty steers the saver to the
+	// re-encode (build_encoded_bytes) path rather than raw passthrough.
+	bank->_opened = true;
+	bank->_dirty = true;
+	return bank;
 }
 
 int NovaSbfBank::get_entry_count() const {
