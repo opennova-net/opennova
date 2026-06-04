@@ -355,6 +355,70 @@ func test_settings_viewport_popup_edits_resource_directory() -> void:
 	assert_eq(workstation.get_resource_index().get_resource_files("terrain").size(), 1, "Flat scans should include top-level terrain files.")
 
 
+func _recent_option_index_for_path(recent: OptionButton, path: String) -> int:
+	for i in recent.item_count:
+		var meta = recent.get_item_metadata(i)  # null for the separator row
+		if typeof(meta) == TYPE_STRING and meta == path:
+			return i
+	return -1
+
+
+func _recent_option_index_for_text(recent: OptionButton, text: String) -> int:
+	for i in recent.item_count:
+		if recent.get_item_text(i) == text:
+			return i
+	return -1
+
+
+func test_settings_recent_dropdown_lists_other_dirs_and_switches() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var a := _make_resource_fixture("recent_a")
+	var b := _make_resource_fixture("recent_b")
+	# persist=true records each applied dir in the shared recents list.
+	assert_eq(workstation._set_resource_root_dir(a, true, false), OK, "Applying dir A should succeed.")
+	assert_eq(workstation._set_resource_root_dir(b, true, false), OK, "Applying dir B should succeed.")
+
+	var recent: OptionButton = workstation.get_node("%SettingsRecentOption")
+	var row: HBoxContainer = workstation.get_node("%SettingsRecentRow")
+	workstation._populate_recent_dirs()
+
+	assert_true(row.visible, "Recent row shows when there is another directory to switch to.")
+	var a_index := _recent_option_index_for_path(recent, a)
+	assert_gt(a_index, 0, "Dir A should be offered as a recent entry.")
+	assert_eq(_recent_option_index_for_path(recent, b), -1, "The active dir B should be excluded from the list.")
+	assert_eq(recent.get_item_text(a_index), a.get_file(), "Recent entries show the folder name.")
+
+	# Picking A switches the active resource directory to A.
+	recent.item_selected.emit(a_index)
+	assert_eq(workstation.get_resource_root_dir(), a, "Picking a recent entry switches the resource directory.")
+
+
+func test_settings_recent_dropdown_hidden_without_history() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	assert_eq(workstation._set_resource_root_dir("", false, false), OK, "Start with no configured resource directory.")
+	workstation._resource_library.clear_recent_dirs()
+	workstation._populate_recent_dirs()
+	var row: HBoxContainer = workstation.get_node("%SettingsRecentRow")
+	assert_false(row.visible, "Recent row stays hidden when there is no history to offer.")
+
+
+func test_settings_recent_dropdown_clear_list_empties_history() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var a := _make_resource_fixture("recent_clear_a")
+	var b := _make_resource_fixture("recent_clear_b")
+	assert_eq(workstation._set_resource_root_dir(a, true, false), OK, "Apply dir A.")
+	assert_eq(workstation._set_resource_root_dir(b, true, false), OK, "Apply dir B.")
+
+	var recent: OptionButton = workstation.get_node("%SettingsRecentOption")
+	workstation._populate_recent_dirs()
+	var clear_index := _recent_option_index_for_text(recent, "Clear list")
+	assert_gt(clear_index, 0, "A Clear list entry should be present when there are recents.")
+
+	recent.item_selected.emit(clear_index)
+	assert_eq(workstation._resource_library.get_recent_dirs().size(), 0, "Clear list empties the recent directories.")
+	assert_false((workstation.get_node("%SettingsRecentRow") as HBoxContainer).visible, "Recent row hides after clearing the list.")
+
+
 func test_workspace_open_uses_resource_browser_without_filesystem_escape() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
