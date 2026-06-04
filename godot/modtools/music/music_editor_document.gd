@@ -386,6 +386,79 @@ func insert_play(section_name: StringName, track: int) -> bool:
 	return true
 
 
+# Add a new (empty) section/state. The minimal authoring slice of the visual-
+# first mandate: the loudest missing affordance was "there is no visual way to
+# add a section". A text transform over the names-less decompile -- append
+# `section <name> { }` (an empty body the compiler emits as a single `done`) --
+# then recompile through the same parity gate as play edits, so it can only ever
+# produce a script the round-trip supports. Reachability/contents are authored
+# afterwards (Phase 2). Returns false if the name is invalid, already taken, or
+# the result doesn't compile.
+func add_section(section_name: StringName) -> bool:
+	if not can_edit_plays():
+		return false
+	var name := String(section_name).strip_edges()
+	if not _is_valid_section_name(name):
+		return false
+	var prev := _current_script_text()
+	if prev == "":
+		return false
+	# A duplicate name would re-point the existing section on recompile; reject it.
+	if _section_header_line(prev.split("\n"), name) >= 0:
+		return false
+	var next := _append_section(prev, name)
+	if next == prev:
+		return false
+	if not _apply_script_text(next):
+		_apply_script_text(prev)  # compile failed: roll back, change nothing
+		return false
+	_push_text_edit(prev, next)
+	return true
+
+
+# Compiler keywords (mus_compile.cpp lexer): a section can't be named any of
+# these, since `section <kw>` lexes <kw> as the keyword token, not an identifier,
+# and the recompile would fail. Auto-named States never collide, but a Phase-2
+# rename UI will route through this validator too.
+const _RESERVED := {
+	"script": true, "bind": true, "section": true, "declsection": true,
+	"global": true, "if": true, "else": true, "return": true, "yield": true,
+	"nop": true, "goto": true, "enter": true, "play": true, "on": true,
+	"call": true, "done": true, "Me": true,
+}
+
+
+# A section name must lex as a single bare identifier ([A-Za-z_][A-Za-z0-9_]*)
+# that isn't a reserved keyword -- the only form the compiler's `section <ident>`
+# accepts.
+func _is_valid_section_name(name: String) -> bool:
+	if name.is_empty() or name.length() > 31:
+		return false
+	if _RESERVED.has(name):
+		return false
+	var c0 := name.unicode_at(0)
+	var is_alpha0 := (c0 >= 65 and c0 <= 90) or (c0 >= 97 and c0 <= 122) or c0 == 95
+	if not is_alpha0:
+		return false
+	for i in range(1, name.length()):
+		var c := name.unicode_at(i)
+		var ok := (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 95
+		if not ok:
+			return false
+	return true
+
+
+# Append an empty `section <name> { }` block. The decompiler regenerates the
+# declsection forward-decl and orders bodies by code offset on reload, so the
+# new section lands last and the text stays canonical.
+func _append_section(text: String, name: String) -> String:
+	var t := text
+	if not t.ends_with("\n"):
+		t += "\n"
+	t += "\nsection %s\n{\n}\n" % name
+	return t
+
+
 func remove_play(section_name: StringName, track: int) -> bool:
 	if not can_edit_plays():
 		return false

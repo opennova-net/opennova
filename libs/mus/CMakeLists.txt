@@ -4,6 +4,7 @@ add_library(opennova_mus STATIC
     src/mus_compile.cpp
     src/mus_vm.cpp
     src/mus_model.cpp
+    src/mus_ast.cpp
 )
 
 target_include_directories(opennova_mus
