@@ -36,3 +36,17 @@ static func edge_glyph(kind: int) -> String:
 			return "↪"
 		_:
 			return "→"
+
+
+# Wire colour for an edge kind, so the blueprint map reads a switch fan-out
+# (cyan) apart from a plain transition (blue) or a conditional branch (gold) at a
+# glance. Matches the inspector's per-kind icon palette (switch ⋔ cyan, if ◇ gold,
+# transition → blue). The GraphEdit draws each connection in its source pin colour.
+static func edge_color(kind: int) -> Color:
+	match kind:
+		KIND_SWITCH:
+			return Color(0.50, 0.85, 0.90)
+		KIND_BRANCH:
+			return Color(1.00, 0.85, 0.45)
+		_:
+			return Color(0.55, 0.80, 1.00)

@@ -116,7 +116,7 @@ autowrap_mode = 2
 [node name="CenterRight" type="HSplitContainer" parent="Screen/Body"]
 layout_mode = 2
 size_flags_horizontal = 3
-split_offset = -320
+split_offset = -420
 
 [node name="CenterCol" type="VBoxContainer" parent="Screen/Body/CenterRight"]
 layout_mode = 2
@@ -133,12 +133,13 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-show_grid = false
+show_grid = true
+grid_pattern = 1
 show_menu = false
-minimap_enabled = false
+minimap_enabled = true
 
 [node name="RightDock" type="VBoxContainer" parent="Screen/Body/CenterRight"]
-custom_minimum_size = Vector2(320, 0)
+custom_minimum_size = Vector2(360, 0)
 layout_mode = 2
 
 [node name="Inspector" type="VBoxContainer" parent="Screen/Body/CenterRight/RightDock"]
