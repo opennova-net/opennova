@@ -12,6 +12,7 @@ const CONFIG_PATH := "user://terrain_editor_state.cfg"
 const SECTION := "resources"
 const DIR_KEY := "resource_dir"
 const EXPANSION_KEY := "expansion"
+const GAME_KEY := "game"
 const RECENT_KEY := "recent_dirs"
 const RECENT_LIMIT := 8
 
@@ -56,6 +57,24 @@ static func set_expansion(name: String) -> void:
 	var config := ConfigFile.new()
 	config.load(CONFIG_PATH)
 	config.set_value(SECTION, EXPANSION_KEY, name.strip_edges())
+	config.save(CONFIG_PATH)
+
+
+## The persisted game code (e.g. "jodemo"), or "jo" when unset. Selects the SCR decode
+## key. A `/game` launch flag overrides this (see NovaLaunchFlags.game).
+static func get_game() -> String:
+	var config := ConfigFile.new()
+	if config.load(CONFIG_PATH) != OK:
+		return "jo"
+	var code := String(config.get_value(SECTION, GAME_KEY, "jo")).strip_edges().to_lower()
+	return code if not code.is_empty() else "jo"
+
+
+## Persist the game code, preserving any other sections in the config.
+static func set_game(code: String) -> void:
+	var config := ConfigFile.new()
+	config.load(CONFIG_PATH)
+	config.set_value(SECTION, GAME_KEY, code.strip_edges().to_lower())
 	config.save(CONFIG_PATH)
 
 

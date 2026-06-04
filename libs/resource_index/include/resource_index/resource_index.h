@@ -45,6 +45,11 @@ public:
 	          VfsMountMode mode = VfsMountMode::PackedWithLooseOverride);
 	void clear();
 
+	// Choose how read_file keys SCR payloads (forwards to the underlying Vfs). Pass a
+	// gameprofile ScrPolicy / VfsScrPolicy value; defaults to version-detect and persists
+	// across scans. Set by the game-aware caller so demo-vs-retail keying is correct.
+	void set_scr_policy(int scr_policy);
+
 	std::vector<ResourceFileEntry> resource_files(const std::string &kind) const;
 	bool read_file(const std::string &name, std::vector<uint8_t> &out) const;
 	const std::string &root_dir() const;

@@ -74,6 +74,7 @@ def execute_loose_import(
     import_collisions: bool,
     import_occlusion: bool,
     import_lights: bool,
+    game: str = "jo",
 ) -> tuple[bool, list[str]]:
     """Loose import: read one 3DI, build a scene, write outputs.
 
@@ -98,7 +99,7 @@ def execute_loose_import(
     base_dir = asset_base_dir or str(Path(threedi_path).parent)
     name = output_stem or Path(threedi_path).stem
 
-    with loaded_3di_model(threedi_path) as ir, AssetResolver(base_dir) as resolver:
+    with loaded_3di_model(threedi_path) as ir, AssetResolver(base_dir, game=game) as resolver:
         builder = builder_factory(
             ir,
             resolver=resolver,
@@ -128,6 +129,7 @@ def execute_definition_import(
     import_occlusion: bool,
     import_lights: bool,
     output_stem: str,
+    game: str = "jo",
 ) -> tuple[bool, list[str], str]:
     """Definition import: resolve a plan, walk its main/secondary models, write.
 
@@ -156,7 +158,7 @@ def execute_definition_import(
     if reset_scene_fn is not None:
         reset_scene_fn()
 
-    with AssetResolver(base_dir) as resolver:
+    with AssetResolver(base_dir, game=game) as resolver:
         plan = resolve_definition_import(
             base_dir=base_dir,
             item_name=item_name,

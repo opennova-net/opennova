@@ -4,6 +4,7 @@
 #include "fnt/nova_fnt_resource.h"
 #include "util/texture_path_resolver.h"
 
+#include <gameprofile/gameprofile.h>
 #include <vfs/vfs.h>
 
 #include <godot_cpp/classes/dir_access.hpp>
@@ -31,8 +32,8 @@ bool is_flat_filename(const String &name) {
 void NovaResourceRoot::_bind_methods() {
 	ClassDB::bind_static_method("NovaResourceRoot", D_METHOD("is_valid_root", "path"), &NovaResourceRoot::is_valid_root);
 	ClassDB::bind_method(D_METHOD("set_root_dir", "path"), &NovaResourceRoot::set_root_dir);
-	ClassDB::bind_method(D_METHOD("mount_runtime", "path", "expansion", "allow_loose_override"),
-			&NovaResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("mount_runtime", "path", "expansion", "allow_loose_override", "game_code"),
+			&NovaResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false), DEFVAL("jo"));
 	ClassDB::bind_method(D_METHOD("list_expansions", "path"), &NovaResourceRoot::list_expansions);
 	ClassDB::bind_method(D_METHOD("get_root_dir"), &NovaResourceRoot::get_root_dir);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaResourceRoot::get_last_error);
@@ -96,19 +97,22 @@ bool NovaResourceRoot::is_valid_root(const String &path) {
 }
 
 Error NovaResourceRoot::set_root_dir(const String &path) {
-	// Editor / authoring: loose files only, never the PFF archives.
-	return mount_with_mode(path, String(), opennova::VfsMountMode::LooseOnly);
+	// Editor / authoring: loose files only, never the PFF archives. Loose files aren't SCR-wrapped,
+	// so the JO default (version-detect) is correct here.
+	return mount_with_mode(path, String(), opennova::VfsMountMode::LooseOnly, "jo");
 }
 
-Error NovaResourceRoot::mount_runtime(const String &path, const String &expansion, bool allow_loose_override) {
+Error NovaResourceRoot::mount_runtime(const String &path, const String &expansion, bool allow_loose_override,
+		const String &game_code) {
 	// Runtime: the packed PFFs are the game data; loose files only shadow them under `/d`.
 	const opennova::VfsMountMode mode = allow_loose_override
 			? opennova::VfsMountMode::PackedWithLooseOverride
 			: opennova::VfsMountMode::Packed;
-	return mount_with_mode(path, expansion, mode);
+	return mount_with_mode(path, expansion, mode, game_code);
 }
 
-Error NovaResourceRoot::mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode) {
+Error NovaResourceRoot::mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
+		const String &game_code) {
 	// The resolver's per-session caches are keyed to the previous root; drop them so a
 	// new (or re-scanned) resource directory is read fresh. scan_root() in the editor
 	// routes through here too, so a rescan picks up on-disk edits.
@@ -130,6 +134,9 @@ Error NovaResourceRoot::mount_with_mode(const String &path, const String &expans
 		last_error_ = String(index_.last_error().c_str());
 		return ERR_CANT_OPEN;
 	}
+	// Game-aware SCR keying: resolve the chosen game's policy once (gameprofile is the single
+	// source) and apply it for subsequent read_file calls. An empty/unknown code is the JO default.
+	index_.set_scr_policy(gameprofile_scr_policy_for_code(game_code.utf8().get_data()));
 	last_error_ = String();
 	return OK;
 }
