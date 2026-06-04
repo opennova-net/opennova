@@ -5,15 +5,37 @@ extends GraphEdit
 # flow node graph (UE-Blueprint style). Each statement is a node wired by exec
 # pins; `if` exposes then/else/after pins, `switch` one pin per target, and
 # enter/goto/call render as clickable "to-state" nodes that drill back to the map.
-# Built purely from NovaMusicScript.get_program_ast(section) -- no new C++. The
-# graph is read-only here (Stage 2); editing intents land in Stage 3.
+# Built purely from NovaMusicScript.get_program_ast(section) -- no new C++.
+#
+# Stage 3 adds editing: when configure_authoring() turns the graph editable, every
+# TOP-LEVEL statement node grows a ✎/✕/↑/↓ cluster and the toolbar gains a "＋ Add"
+# palette, all routed through the SAME shared MusForms the inspector uses, so both
+# surfaces emit byte-identical canonical lines. The graph never writes bytecode; it
+# emits the same add/replace/delete/reorder intents the inspector does, which the
+# host (live_mode) hands to the document's parity-gated, undoable write path. A
+# folded ×N run and an existing if's nested bodies stay read-only on the graph
+# (editing those routes to the raw drawer / the unfolded inspector) so an edit is
+# never ambiguous about which of N statements it touches.
 #
 # Layout is deterministic (left-to-right flow by a monotonic column, branch depth
 # down the Y axis) so it never reshuffles and tests can assert topology. Runs of
-# identical simple statements (e.g. 21x the same play) fold into one xN node.
+# identical simple statements (e.g. 21x the same play) fold into one xN node --
+# folding is suppressed for nothing; the tool cluster is just withheld from folds.
 
 signal statement_selected(section_index: int, ordinal: int)
 signal open_section_requested(section_name: StringName)
+# Stage 3 authoring intents (host routes to the document, mirrors inspector_panel):
+signal add_statement_requested(section_index: int, lines: PackedStringArray)
+signal replace_statement_requested(section_index: int, ordinal: int, lines: PackedStringArray)
+signal delete_statement_requested(section_index: int, ordinal: int)
+signal reorder_statement_requested(section_index: int, ordinal: int, direction: int)
+signal add_play_requested(section_name: StringName, track: int)
+# An existing if/switch body (nested statements) is lossy to the single-action
+# form, so editing it routes to the raw-script drawer the host owns.
+signal open_raw_requested(section_name: StringName)
+signal author_failed(message: String)
+
+const MusForms = preload("res://modtools/music/mus_forms.gd")
 
 const COL_W := 250.0
 const ROW_H := 130.0
@@ -48,11 +70,20 @@ const _FOLDABLE := ["play", "assign", "incdec", "expr"]
 const _TERMINAL := ["transition", "goto", "return", "done"]
 
 var _section_index: int = -1
+var _section_name: String = ""
 var _bank_names: Array = []
 var _node_seq: int = 0
 # Live-highlight registry: [{ "node": GraphNode, "offset": int }].
 var _offset_nodes: Array = []
 var _active_node: GraphNode = null
+
+# Stage 3 authoring context (set by the host via configure_authoring).
+var _editable: bool = false
+var _forms = MusForms.new()
+var _section_names: PackedStringArray = PackedStringArray()
+var _var_list: Array = []        # [{token:String, label:String}]
+var _mus = null                  # NovaMusicScript for expr validation
+var _add_menu: MenuButton = null
 
 
 func _ready() -> void:
@@ -68,6 +99,7 @@ func _ready() -> void:
 func show_section(section: Dictionary, bank_names: Array) -> void:
 	_bank_names = bank_names
 	_section_index = int(section.get("index", -1))
+	_section_name = String(section.get("name", ""))
 	_node_seq = 0
 	_offset_nodes = []
 	_active_node = null
@@ -93,14 +125,17 @@ func current_section_index() -> int:
 func _build_seq(stmts: Array, depth: int, parent_ordinal: int) -> Dictionary:
 	var entry: Array = []
 	var prev_exits: Array = []
+	# Top-level statements own a distinct ordinal; nested (if/switch body) ones
+	# share their parent's, so only the top level is individually editable.
+	var top := parent_ordinal < 0
 	var i := 0
 	while i < stmts.size():
 		var s: Dictionary = stmts[i]
 		var kind := String(s.get("kind", ""))
 		var ordinal := parent_ordinal if parent_ordinal >= 0 else i
+		var run := 1
 		var built: Dictionary
 		if kind in _FOLDABLE:
-			var run := 1
 			while i + run < stmts.size() and _same_simple(stmts[i + run], s):
 				run += 1
 			built = _build_simple(s, depth, ordinal, run)
@@ -108,6 +143,11 @@ func _build_seq(stmts: Array, depth: int, parent_ordinal: int) -> Dictionary:
 		else:
 			built = _build_stmt(s, depth, ordinal)
 			i += 1
+		# Edit only unambiguous, individually-addressable statements: a top-level
+		# node that isn't a folded ×N run. Folds + nested bodies stay read-only on
+		# the graph (edited via the raw drawer or the unfolded right inspector).
+		if _editable and top and run == 1 and built.has("node"):
+			_attach_tools(built["node"], s, ordinal)
 		if entry.is_empty():
 			entry = built["entry"]
 		for e in prev_exits:
@@ -415,3 +455,128 @@ func _fit_to_view() -> void:
 	z = clampf(z, 0.2, 1.0)
 	zoom = z
 	scroll_offset = (mn + mx) * 0.5 * z - size * 0.5
+
+
+# --- Stage 3: authoring -------------------------------------------------
+
+# Supply the context the construct forms need + flip editing on/off. The host calls
+# this on each drill-in (and on every document.changed refresh) so the palette /
+# forms see the current section list, variable list, bank names, and whether the
+# script presently compiles (editable). MUST run before show_section, since the
+# per-node tool clusters are built with this mode.
+func configure_authoring(section_names: PackedStringArray, var_list: Array, mus, bank_names: Array, editable: bool) -> void:
+	_section_names = section_names
+	_var_list = var_list
+	_mus = mus
+	_bank_names = bank_names
+	_editable = editable
+	_forms.configure(section_names, var_list, mus, bank_names)
+	if editable:
+		_ensure_add_menu()
+	if _add_menu != null:
+		_add_menu.visible = editable
+
+
+# Mount the "＋ Add" palette into the GraphEdit's built-in toolbar (top-right),
+# once. Items mirror the inspector palette (MusForms.ADD_ITEMS) so both add the
+# same constructs.
+func _ensure_add_menu() -> void:
+	if _add_menu != null:
+		return
+	_add_menu = MenuButton.new()
+	_add_menu.text = "＋ Add"
+	_add_menu.tooltip_text = "Add a statement to this state."
+	_add_menu.focus_mode = Control.FOCUS_NONE
+	var pop := _add_menu.get_popup()
+	for i in range(MusForms.ADD_ITEMS.size()):
+		pop.add_item(String(MusForms.ADD_ITEMS[i][0]), i)
+	pop.id_pressed.connect(_on_add_palette_id)
+	get_menu_hbox().add_child(_add_menu)
+
+
+func _on_add_palette_id(id: int) -> void:
+	if id < 0 or id >= MusForms.ADD_ITEMS.size():
+		return
+	var kind := String(MusForms.ADD_ITEMS[id][1])
+	if _forms.is_inputless(kind):
+		add_statement_requested.emit(_section_index, _forms.simple_lines(kind))
+		return
+	var sidx := _section_index
+	_forms.configure(_section_names, _var_list, _mus, _bank_names)
+	_forms.open_form(self, kind, {}, false, func(lines: PackedStringArray):
+		if lines.is_empty():
+			author_failed.emit("Fill in the fields first")
+		else:
+			add_statement_requested.emit(sidx, lines))
+
+
+# The per-node ✎/✕/↑/↓ cluster, appended as a (slot-less) trailing row so it never
+# disturbs the exec/branch pin ports built above it. done/nop carry no tools;
+# return/yield carry no ✎ (nothing to edit). if + branch_comment route ✎ to the raw
+# drawer (their nested bodies are lossy to the single-action form); everything else
+# opens its structured form as a replace.
+func _attach_tools(gn: GraphNode, s: Dictionary, ordinal: int) -> void:
+	var kind := String(s.get("kind", ""))
+	if kind == "done" or kind == "nop":
+		return
+	var box := HBoxContainer.new()
+	box.add_theme_constant_override("separation", 2)
+	if kind != "return" and kind != "yield":
+		var edit := _tool_btn("✎", "Edit")
+		edit.pressed.connect(func(): _open_edit(kind, ordinal, s))
+		box.add_child(edit)
+	var del := _tool_btn("✕", "Delete")
+	del.pressed.connect(func(): delete_statement_requested.emit(_section_index, ordinal))
+	box.add_child(del)
+	var up := _tool_btn("↑", "Move up")
+	up.pressed.connect(func(): reorder_statement_requested.emit(_section_index, ordinal, -1))
+	box.add_child(up)
+	var down := _tool_btn("↓", "Move down")
+	down.pressed.connect(func(): reorder_statement_requested.emit(_section_index, ordinal, 1))
+	box.add_child(down)
+	for b in box.get_children():
+		(b as Control).custom_minimum_size = Vector2(26, 0)
+	gn.add_child(box)
+
+
+func _open_edit(kind: String, ordinal: int, s: Dictionary) -> void:
+	# An existing if (or an unstructured branch_comment) can hold arbitrary nested
+	# statements the single-action form can't represent, so a structured edit would
+	# silently truncate them: route to the raw-script drawer instead (lossless). This
+	# mirrors inspector_panel._open_edit_form.
+	if kind == "if" or kind == "branch_comment":
+		open_raw_requested.emit(StringName(_section_name))
+		return
+	var sidx := _section_index
+	_forms.configure(_section_names, _var_list, _mus, _bank_names)
+	_forms.open_form(self, kind, s, true, func(lines: PackedStringArray):
+		if lines.is_empty():
+			author_failed.emit("Fill in the fields first")
+		else:
+			replace_statement_requested.emit(sidx, ordinal, lines))
+
+
+func _tool_btn(glyph: String, tip: String) -> Button:
+	var b := Button.new()
+	b.text = glyph
+	b.tooltip_text = tip
+	b.flat = true
+	b.focus_mode = Control.FOCUS_NONE
+	return b
+
+
+# Drop sink for the Tracks dock: a {kind:"mus_track", index} payload adds a play to
+# the shown state (only while editable). Mirrors the inspector's drop sink so a
+# track dragged onto the blueprint canvas behaves like one dropped on the state.
+# (Real drops land on empty canvas; dropping onto a node falls through to the node.)
+func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
+	return _editable and _section_name != "" \
+		and data is Dictionary and String((data as Dictionary).get("kind", "")) == "mus_track"
+
+
+func _drop_data(_at_position: Vector2, data: Variant) -> void:
+	if not (data is Dictionary):
+		return
+	var track := int((data as Dictionary).get("index", -1))
+	if track >= 0:
+		add_play_requested.emit(StringName(_section_name), track)
