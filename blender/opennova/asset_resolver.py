@@ -15,6 +15,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+from . import gameprofile_ffi
 from .vfs_ffi import Vfs
 
 
@@ -27,20 +28,27 @@ class AssetResolver:
     are decoded natively. Resolved bytes are materialized to a temp file so the C/DCC
     parsers (which take paths) can read them.
 
+    `game` is the source game's code (e.g. "jo", "jodemo"); it selects the SCR decode key,
+    since the JO Demo keys version-1 payloads differently from retail JO/DFX2. Defaults to "jo".
+
     Usage::
 
-        with AssetResolver(base_dir) as resolver:
+        with AssetResolver(base_dir, game="jodemo") as resolver:
             path = resolver.resolve("weapon.def")
     """
 
-    def __init__(self, base_dir: str):
+    def __init__(self, base_dir: str, game: str = "jo"):
         self.base_dir = Path(base_dir)
+        self.game = game
         self._tmp_path = Path(tempfile.mkdtemp(prefix="opennova_"))
 
         self._vfs = Vfs()
         # No expansion -> base-game mounting (loose shadows archives; *.pff mounted
         # sorted). A non-directory base_dir leaves the VFS empty, so resolve() -> None.
         self._vfs.mount_game(str(self.base_dir))
+        # Game-aware SCR keying: resolve the policy through the single C mapping so Blender
+        # decodes exactly like the engine. Unknown/None code -> JO default.
+        self._vfs.set_scr_policy(gameprofile_ffi.scr_policy_for_code(game))
 
         # Materialized temp files: lowercase logical name -> temp Path
         self._extracted: dict[str, Path] = {}
