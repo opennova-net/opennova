@@ -19,6 +19,10 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS 
 
 enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 
+# Item metadata sentinel for the "Clear list" entry in the recent-directories
+# dropdown; real entries carry their path, the disabled placeholder carries "".
+const _RECENT_CLEAR_META := "::clear::"
+
 @onready var _project_label: Label = %ProjectLabel
 @onready var _top_bar: PanelContainer = %TopBar
 @onready var _body_row: SplitContainer = %BodyRow
@@ -50,6 +54,8 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _settings_resource_dir_edit: LineEdit = %SettingsResourceDirEdit
 @onready var _settings_browse_resource_dir_button: Button = %SettingsBrowseResourceDirButton
 @onready var _settings_apply_resource_dir_button: Button = %SettingsApplyResourceDirButton
+@onready var _settings_recent_row: HBoxContainer = %SettingsRecentRow
+@onready var _settings_recent_option: OptionButton = %SettingsRecentOption
 @onready var _settings_expansion_row: HBoxContainer = %SettingsExpansionRow
 @onready var _settings_expansion_option: OptionButton = %SettingsExpansionOption
 @onready var _settings_view_section: VBoxContainer = %SettingsViewSection
@@ -742,6 +748,8 @@ func _wire_settings_popup() -> void:
 		_settings_apply_resource_dir_button.pressed.connect(_on_settings_apply_resource_dir_pressed)
 	if _settings_resource_dir_edit != null and not _settings_resource_dir_edit.text_submitted.is_connected(_on_settings_resource_dir_submitted):
 		_settings_resource_dir_edit.text_submitted.connect(_on_settings_resource_dir_submitted)
+	if _settings_recent_option != null and not _settings_recent_option.item_selected.is_connected(_on_settings_recent_selected):
+		_settings_recent_option.item_selected.connect(_on_settings_recent_selected)
 	if _settings_grid_toggle != null and not _settings_grid_toggle.toggled.is_connected(_on_settings_grid_toggled):
 		_settings_grid_toggle.toggled.connect(_on_settings_grid_toggled)
 	if _settings_axes_toggle != null and not _settings_axes_toggle.toggled.is_connected(_on_settings_axes_toggled):
@@ -1004,6 +1012,7 @@ func _sync_settings_popup_state() -> void:
 	if _settings_resource_dir_edit != null:
 		_settings_resource_dir_edit.text = _resource_library.get_root_dir()
 	_populate_expansion_options()
+	_populate_recent_dirs()
 	if _settings_grid_toggle != null:
 		_settings_grid_toggle.set_pressed_no_signal(_view_grid_visible)
 	if _settings_axes_toggle != null:
@@ -1037,6 +1046,59 @@ func _on_settings_resource_dir_submitted(_text: String) -> void:
 func _populate_expansion_options() -> void:
 	if _settings_expansion_row != null:
 		_settings_expansion_row.visible = false
+
+
+# Fill the "Recent directories…" dropdown from the shared recent-dirs list. Index 0
+# is a disabled placeholder so the control reads as an action menu (its face never
+# shows a picked path); the currently active root is excluded; a "Clear list" item
+# trails the entries. The whole row hides when there is nothing else to switch to.
+func _populate_recent_dirs() -> void:
+	if _settings_recent_option == null:
+		return
+	_settings_recent_option.clear()
+	_settings_recent_option.add_item("Recent directories…")
+	_settings_recent_option.set_item_disabled(0, true)
+	_settings_recent_option.set_item_metadata(0, "")
+	var current_key := _resource_library.canonical_key(_resource_library.get_root_dir())
+	var count := 0
+	for path in _resource_library.get_recent_dirs():
+		if _resource_library.canonical_key(path) == current_key:
+			continue
+		var display := path.replace("\\", "/").rstrip("/").get_file()
+		if display.is_empty():
+			display = path
+		var idx := _settings_recent_option.item_count
+		_settings_recent_option.add_item(display)
+		_settings_recent_option.set_item_metadata(idx, path)
+		_settings_recent_option.set_item_tooltip(idx, path)
+		count += 1
+	if count > 0:
+		_settings_recent_option.add_separator()
+		var clear_idx := _settings_recent_option.item_count
+		_settings_recent_option.add_item("Clear list")
+		_settings_recent_option.set_item_metadata(clear_idx, _RECENT_CLEAR_META)
+	_settings_recent_option.select(0)
+	if _settings_recent_row != null:
+		_settings_recent_row.visible = count > 0
+
+
+# Apply a directory chosen from the recent-directories dropdown (mirrors the Browse
+# on_pick: fill the path field, then apply + refresh). The control is reset to its
+# placeholder so it never displays a selection and the same entry can be re-picked.
+func _on_settings_recent_selected(index: int) -> void:
+	if _settings_recent_option == null:
+		return
+	var path := String(_settings_recent_option.get_item_metadata(index))
+	_settings_recent_option.select(0)
+	if path.is_empty():
+		return
+	if path == _RECENT_CLEAR_META:
+		_resource_library.clear_recent_dirs()
+		_populate_recent_dirs()
+		return
+	if _settings_resource_dir_edit != null:
+		_settings_resource_dir_edit.text = path
+	_apply_resource_settings(true)
 
 
 func _on_settings_grid_toggled(pressed: bool) -> void:
