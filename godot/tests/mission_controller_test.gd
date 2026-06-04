@@ -299,6 +299,69 @@ func _loaded_with_item_db() -> MissionController:
 	return controller
 
 
+# A controller holding a from-scratch (new_mission) document on a stubbed loaded terrain, with the
+# fixture item db injected so the palette + kind mapping work. Mirrors _loaded_with_item_db but via
+# new_mission instead of open_mission.
+func _new_with_item_db() -> MissionController:
+	var stub := StubTerrainEditor.new()
+	stub.resource_root = _dvxi5_root()
+	stub.world_root = Node3D.new()
+	stub.current_trn_path = "dvxi5.trn"  # a terrain is loaded -> new_mission can build on it
+	add_child_autofree(stub.world_root)
+	add_child_autofree(stub)
+	var controller := MissionController.new(stub)
+	assert_eq(controller.new_mission(), OK, "a new mission is created on the loaded terrain")
+	var db := NovaItemDatabase.new()
+	assert_eq(db.load(_abs(ITEMS_PATH)), OK, "the items.def fixture loads")
+	controller._placer.item_db = db
+	return controller
+
+
+# --- Phase: create a mission from scratch (new_mission) -----------------------
+
+func test_new_mission_requires_a_loaded_terrain() -> void:
+	var stub := StubTerrainEditor.new()
+	stub.resource_root = _dvxi5_root()
+	# world_root left null and current_trn_path empty: no terrain is loaded.
+	add_child_autofree(stub)
+	var controller := MissionController.new(stub)
+	assert_eq(controller.new_mission(), ERR_UNCONFIGURED, "no terrain -> cannot start a mission")
+	assert_false(controller.is_loaded(), "and nothing is created")
+	assert_string_contains(controller.get_last_status().to_lower(), "terrain")
+
+
+func test_new_mission_creates_a_loaded_empty_clean_document() -> void:
+	var controller := _new_with_item_db()
+	assert_true(controller.is_loaded(), "a new mission is loaded")
+	assert_eq(controller.get_current_path(), "", "a new mission has no file path yet")
+	var m := controller.get_mission()
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_ITEM), 0, "no items")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), 0, "no buildings")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_ORGANIC), 0, "no people")
+	assert_false(controller.is_dirty(), "a fresh mission is clean until the first edit")
+	var title := controller.get_mission_title()
+	assert_string_contains(title, "untitled", "an unsaved new mission is titled 'untitled'")
+	assert_false(title.ends_with("*"), "and shows no dirty marker until edited")
+
+
+func test_new_mission_adopts_the_loaded_terrain_ref() -> void:
+	var controller := _new_with_item_db()
+	assert_eq(controller.get_mission().get_terrain_ref(), "dvxi5",
+		"the new mission references the loaded terrain by basename")
+
+
+func test_new_mission_palette_and_placement_work() -> void:
+	var controller := _new_with_item_db()
+	assert_gt(controller.get_placeable_items().size(), 0,
+		"the placement palette is live on a from-scratch mission (placer + item db exist)")
+	var m := controller.get_mission()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50.0, 10.0, -50.0)),
+		"placing into a from-scratch mission succeeds")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), 1, "the placed building lands")
+	assert_true(controller.is_dirty(), "the first placement dirties the new mission")
+	assert_true(controller.can_undo(), "and is undoable")
+
+
 func test_kind_for_item_type_matches_shipping_data() -> void:
 	# The empirically verified 1:1 mapping (185k entities across 114 JO missions). The
 	# non-obvious part is Decoration AND Foliage sharing the Building list with Building.
@@ -795,10 +858,10 @@ func test_multi_axis_edit_coalesces_to_one_step() -> void:
 	controller.set_selected_position(Vector3(p.x + 1.0, p.y + 2.0, p.z))
 	controller.set_selected_position(Vector3(p.x + 1.0, p.y + 2.0, p.z + 3.0))
 	controller.set_selected_rotation(Vector3(0, 45, 0))
-	assert_eq(controller._undo_stack.size(), 0, "the open session is not on the stack until it is flushed")
+	assert_eq(controller.undo_depth(), 0, "the open session is not on the stack until it is flushed")
 
 	controller._flush_edit()
-	assert_eq(controller._undo_stack.size(), 1, "X/Y/Z and a rotation coalesce into a single undo step")
+	assert_eq(controller.undo_depth(), 1, "X/Y/Z and a rotation coalesce into a single undo step")
 
 	# One undo reverts the whole session.
 	controller.undo()
@@ -813,10 +876,10 @@ func test_an_edit_session_with_no_change_pushes_no_step() -> void:
 	var controller := _loaded_with_selection()
 	controller.begin_edit()
 	controller.commit_edit()
-	assert_eq(controller._undo_stack.size(), 0, "a session that changed nothing adds no undo step")
+	assert_eq(controller.undo_depth(), 0, "a session that changed nothing adds no undo step")
 	controller.begin_edit()
 	controller.cancel_drag()
-	assert_eq(controller._undo_stack.size(), 0, "a cancelled drag adds no undo step")
+	assert_eq(controller.undo_depth(), 0, "a cancelled drag adds no undo step")
 
 
 func test_a_new_edit_clears_the_redo_stack() -> void:

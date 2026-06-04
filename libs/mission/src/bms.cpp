@@ -3,6 +3,7 @@
 
 #include <cstring>
 #include <fstream>
+#include <type_traits>
 
 namespace opennova::bms {
 
@@ -891,6 +892,72 @@ bool write_file(const File& file, const std::string& path, std::string& error) {
         return false;
     }
 
+    return true;
+}
+
+namespace {
+
+// Byte compare a vector of trivially-copyable records. Every fixed BMS record is value-initialized
+// on construction (padding included) and mutators only touch named fields, so this is exact.
+template <typename T>
+bool pod_vectors_equal(const std::vector<T>& a, const std::vector<T>& b) {
+    static_assert(std::is_trivially_copyable<T>::value, "pod_vectors_equal needs a trivially-copyable element");
+    if (a.size() != b.size()) {
+        return false;
+    }
+    if (a.empty()) {
+        return true;
+    }
+    return std::memcmp(a.data(), b.data(), a.size() * sizeof(T)) == 0;
+}
+
+// WaypointRecord carries inner vectors, so it cannot be byte-compared; compare field-wise.
+bool waypoint_records_equal(const std::vector<WaypointRecord>& a, const std::vector<WaypointRecord>& b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (a[i].flags != b[i].flags || a[i].marker_count != b[i].marker_count ||
+            a[i].waypoint_numbers != b[i].waypoint_numbers || a[i].padding != b[i].padding) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+bool equal(const File& a, const File& b) {
+    // Header is packed (static_assert sizeof == 616); a byte compare is exact and includes the
+    // count fields. The body comparisons below are over the actual vectors, so they detect a
+    // change even when a header count is momentarily out of sync with its vector (sync_counts runs
+    // only at write time) -- the comparison never depends on that.
+    if (std::memcmp(&a.header, &b.header, sizeof(Header)) != 0) {
+        return false;
+    }
+    if (a.loadout.raw_data != b.loadout.raw_data || a.secondary_chunk != b.secondary_chunk) {
+        return false;
+    }
+    if (!pod_vectors_equal(a.items, b.items) || !pod_vectors_equal(a.buildings, b.buildings) ||
+        !pod_vectors_equal(a.markers, b.markers) || !pod_vectors_equal(a.organics, b.organics)) {
+        return false;
+    }
+    if (!waypoint_records_equal(a.waypoint_records, b.waypoint_records) ||
+        !pod_vectors_equal(a.group_records, b.group_records) ||
+        !pod_vectors_equal(a.layer_records, b.layer_records)) {
+        return false;
+    }
+    if (!pod_vectors_equal(a.area_triggers, b.area_triggers)) {
+        return false;
+    }
+    if (a.events_count != b.events_count || a.trigger_count != b.trigger_count ||
+        a.action_count != b.action_count || a.bounding_box_count != b.bounding_box_count) {
+        return false;
+    }
+    if (!pod_vectors_equal(a.events, b.events) || !pod_vectors_equal(a.triggers, b.triggers) ||
+        !pod_vectors_equal(a.actions, b.actions) || !pod_vectors_equal(a.bounding_boxes, b.bounding_boxes)) {
+        return false;
+    }
     return true;
 }
 

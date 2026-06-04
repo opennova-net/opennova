@@ -1397,6 +1397,23 @@ void MissionDocument::clear() {
 	impl_->loaded = false;
 }
 
+void MissionDocument::create_default() {
+	// Build a minimal, valid, empty mission in memory (no file backing). The only header
+	// field the format requires is the magic + version (parse gates magic == "BMS" and the
+	// version byte >= kMinVersion); every other field round-trips fine at zero, and write()
+	// recomputes no positional offsets. sync_counts() then backfills the fixed
+	// waypoint/group/layer tables (and waypoint padding) so write_bms_bytes() produces a
+	// buffer parse() accepts.
+	clear();
+	bms::Header &header = impl_->file.header;
+	header.magic[0] = 'B';
+	header.magic[1] = 'M';
+	header.magic[2] = 'S';
+	header.magic[3] = static_cast<char>(bms::kMinVersion);
+	impl_->loaded = true;
+	sync_counts();
+}
+
 bool MissionDocument::is_loaded() const {
 	return impl_->loaded;
 }
@@ -2518,6 +2535,14 @@ void MissionDocument::sync_counts() {
 	if (impl_->file.layer_records.empty()) {
 		impl_->file.layer_records.resize(bms::kLayerRecordCount);
 	}
+	// A freshly-resized WaypointRecord has empty padding, so the writer emits a short
+	// (8-byte) record that no longer reparses (parse expects the fixed 136-byte record).
+	// Normalize every record's padding to the 128-byte payload (128 - markers*4), matching
+	// parse_waypoint_record. Idempotent for already-loaded records, so byte-exact
+	// round-trips are preserved; it is the from-scratch (create_default) path that needs it.
+	for (bms::WaypointRecord &record : impl_->file.waypoint_records) {
+		resize_waypoint_padding(record);
+	}
 }
 
 } // namespace opennova::mission
@@ -2541,6 +2566,12 @@ MISSION_EXPORT void opennova_mission_destroy(OpenNovaMissionDocument *document) 
 void opennova_mission_clear(OpenNovaMissionDocument *document) {
 	if (document != nullptr) {
 		document->document.clear();
+	}
+}
+
+MISSION_EXPORT void opennova_mission_create_default(OpenNovaMissionDocument *document) {
+	if (document != nullptr) {
+		document->document.create_default();
 	}
 }
 

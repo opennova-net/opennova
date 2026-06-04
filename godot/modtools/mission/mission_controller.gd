@@ -42,7 +42,6 @@ var _current_path: String = ""
 # Terrain workspace can be detected (see reconcile_with_terrain()).
 var _loaded_trn_path: String = ""
 var _last_open_dir: String = ""
-var _is_dirty: bool = false
 var _stats: Dictionary = {}
 var _last_status: String = ""
 # The placer that built the current world, retained so place-new can render one entity
@@ -82,22 +81,11 @@ var _place_item_id: int = 0
 var _selection_box: MeshInstance3D
 
 # --- Authoring (Phase 5): undo / redo -----------------------------------------
-# Whole-document byte snapshots taken through the real serializer
-# (NovaMissionData.snapshot = write_bms_bytes) and restored via restore_snapshot
-# (load_bms_bytes). Each stack entry is a re-serialized, valid .bms — never the raw
-# bytes opened from disk — so the same machinery rewinds a from-scratch mission too.
-# Mirrors strings_editor.gd. UNDO_LIMIT caps memory; the oldest step is dropped first.
-const UNDO_LIMIT := 100
-var _undo_stack: Array[PackedByteArray] = []
-var _redo_stack: Array[PackedByteArray] = []
-# An open edit session (begin_edit .. commit_edit) coalesces a continuous gesture (a
-# terrain drag, or a run of inspector SpinBox edits) into one undo step: the pre-edit
-# snapshot is held here and pushed only if the bytes actually changed.
-var _pending_snapshot: PackedByteArray = PackedByteArray()
-var _editing: bool = false
-# The document bytes as opened / last saved. The dirty flag is exact: true iff the
-# current document differs from this, so undoing back to the original drops the `*`.
-var _clean_snapshot: PackedByteArray = PackedByteArray()
+# The undo history + dirty flag live on the NovaMissionData document (in-memory bms::File
+# snapshots, never serialized bytes); the controller is a thin driver. A continuous gesture (a
+# terrain drag, a run of inspector SpinBox edits) is bracketed by begin_edit/commit_edit and
+# becomes one step; one-shot mutations bracket the same way. undo/redo swap the document in
+# memory and the controller re-bakes the world to match.
 # Guards undo/redo against re-entrancy (a restore -> rebake -> changed -> inspector
 # refresh must never re-enter another restore).
 var _restoring: bool = false
@@ -181,7 +169,9 @@ func is_loaded() -> bool:
 
 
 func is_dirty() -> bool:
-	return _is_dirty
+	# Exact, owned by the document: true iff it differs from the clean baseline (set at open /
+	# save / new), so undoing back to the saved state clears the `*`.
+	return _mission != null and _mission.is_dirty()
 
 
 func get_current_path() -> String:
@@ -255,7 +245,7 @@ func get_mission_title() -> String:
 		mission_name = _current_path.get_file().get_basename()
 	if mission_name.is_empty():
 		mission_name = "untitled"
-	return "%s%s" % [mission_name, "*" if _is_dirty else ""]
+	return "%s%s" % [mission_name, "*" if is_dirty() else ""]
 
 
 # --- Open ---------------------------------------------------------------------
@@ -305,12 +295,10 @@ func open_mission(bms_path: String) -> Error:
 	_current_path = bms_path
 	_loaded_trn_path = trn_path
 	_last_open_dir = bms_path.get_base_dir()
-	_is_dirty = false
-	# Baseline for the exact dirty flag, and a fresh undo history for this document.
-	# The baseline is a re-serialization (not the raw file bytes) so it compares
-	# apples-to-apples with later snapshot()s.
-	_clean_snapshot = mission.snapshot()
+	# A fresh undo history for this document, and a clean baseline so the freshly-opened mission
+	# is not dirty (and undoing back to it later clears the `*`).
 	_clear_history()
+	_mission.mark_clean()
 	# Fresh document: drop any prior marker selection and focus a populated path (so the
 	# waypoint panel is not empty) only if the user is already in waypoints mode.
 	_selected_marker = {}
@@ -328,6 +316,66 @@ func open_mission(bms_path: String) -> Error:
 	return OK
 
 
+## Create a brand-new empty mission on the currently-loaded terrain. A mission needs a terrain
+## both to place objects onto and to reference in its header, so this requires one to be loaded
+## already (open or create a terrain first); it adopts that terrain's basename as the mission's
+## terrain ref. The (empty) objects are placed so the placer + palette + picking are live, exactly
+## as after an open. The mission has no file yet (Save routes to Save As) and is clean until the
+## first edit. Returns OK, or an error; get_last_status() carries a human-facing reason.
+func new_mission() -> Error:
+	_last_status = ""
+	if terrain_editor == null or not terrain_editor.has_method("get_resource_root"):
+		_last_status = "No terrain editor is bound."
+		return ERR_UNAVAILABLE
+	var resource_root: NovaResourceRoot = terrain_editor.get_resource_root()
+	if resource_root == null:
+		_last_status = "Set a resource directory before creating a mission."
+		return ERR_UNCONFIGURED
+	var trn_path := String(terrain_editor.get_current_trn_path()) if terrain_editor.has_method("get_current_trn_path") else ""
+	var world_root: Node3D = terrain_editor.get_terrain_world_root() if terrain_editor.has_method("get_terrain_world_root") else null
+	if trn_path.is_empty() or world_root == null:
+		_last_status = "Open or create a terrain first, then start a new mission on it."
+		return ERR_UNCONFIGURED
+
+	var mission := NovaMissionData.new()
+	if mission.create_default() != OK:
+		_last_status = "Could not create a new mission: %s" % mission.get_last_error()
+		return FAILED
+	# Self-describe: adopt the loaded terrain's basename so a later reopen resolves the same world.
+	var terrain_ref := trn_path.get_file().get_basename()
+	mission.set_header_string("terrain", terrain_ref)
+
+	# Reset to a neutral environment (a fresh mission carries no env ref), then build the empty
+	# world so the placer + palette + picking are live, exactly as after an open.
+	var env_note := _load_environment(mission, resource_root)
+	_place_objects(mission, resource_root)
+
+	_mission = mission
+	_current_path = ""          # no file yet; Save routes through Save As
+	_loaded_trn_path = trn_path
+	# Empty undo history and a clean baseline: the new mission is not dirty until the first edit
+	# (Save As is always available regardless). mark_clean must follow create_default so the
+	# baseline is the empty mission.
+	_clear_history()
+	_mission.mark_clean()
+	_reset_selection_state()
+	_selected_marker = {}
+	_marker_place_armed = false
+	_selected_path_index = -1
+	_selected_zone_index = -1
+	_selected_event_index = -1
+	if _mode == Mode.WAYPOINTS:
+		_refresh_waypoint_overlay()
+	elif _mode == Mode.AREA_TRIGGERS:
+		_refresh_area_trigger_overlay()
+	if not env_note.is_empty():
+		_last_status = "New mission on %s (%s)." % [terrain_ref, env_note]
+	else:
+		_last_status = "New mission on %s." % terrain_ref
+	changed.emit()
+	return OK
+
+
 func clear() -> void:
 	_reset_selection_state()
 	_pickable = []
@@ -336,15 +384,12 @@ func clear() -> void:
 	_selected_path_index = -1
 	_placer = null
 	_clear_objects()
+	# Dropping the document drops its undo history + clean baseline with it (they live on the
+	# NovaMissionData), so there is nothing else to reset; is_dirty() reads false once _mission is null.
 	_mission = null
 	_current_path = ""
 	_loaded_trn_path = ""
 	_stats = {}
-	_is_dirty = false
-	# Drop the undo history and baseline: they describe a document that is no longer
-	# loaded, and restoring into a missing mission is meaningless.
-	_clean_snapshot = PackedByteArray()
-	_clear_history()
 	changed.emit()
 
 
@@ -369,25 +414,11 @@ func set_objects_visible(value: bool) -> void:
 		container.visible = value
 
 
-# Recompute the exact dirty flag and notify. Called after every mutation, undo, and
-# redo. Dirty is exact: true iff the current document differs from the opened / last-
-# saved bytes, so undoing all the way back to the original clears the `*`. The compare
-# is cheap (the document is already serialized for the undo snapshots).
+# Notify listeners that the document may have changed. The dirty flag itself is owned by the
+# document (is_dirty -> _mission.is_dirty(), an exact compare against the clean baseline), so this
+# just re-emits `changed` to refresh the title (`*`) + Save enablement + inspector.
 func mark_dirty() -> void:
-	_recompute_dirty()
 	changed.emit()
-
-
-func _recompute_dirty() -> void:
-	if _mission == null:
-		_is_dirty = false
-		return
-	# Before a clean baseline exists (e.g. mid-open), fall back to the binding's coarse
-	# "modified since load" flag rather than reporting spuriously clean.
-	if _clean_snapshot.is_empty():
-		_is_dirty = _mission.is_modified()
-		return
-	_is_dirty = _mission.snapshot() != _clean_snapshot
 
 
 # --- Save ---------------------------------------------------------------------
@@ -402,10 +433,9 @@ func save_current() -> Error:
 		return ERR_INVALID_PARAMETER
 	var err := int(_mission.save_file())
 	if err == OK:
-		# The saved bytes are the new clean baseline; the undo history is kept so the user
-		# can still undo across the save.
-		_clean_snapshot = _mission.snapshot()
-		_is_dirty = false
+		# The saved state is the new clean baseline; the undo history is kept so the user can
+		# still undo across the save.
+		_mission.mark_clean()
 		_last_status = "Saved %s." % _current_path.get_file()
 		changed.emit()
 	else:
@@ -429,8 +459,7 @@ func save_as(dir_path: String) -> Error:
 	if err == OK:
 		_current_path = path
 		_last_open_dir = dir_path
-		_clean_snapshot = _mission.snapshot()
-		_is_dirty = false
+		_mission.mark_clean()
 		_last_status = "Saved %s." % filename
 		changed.emit()
 	else:
@@ -439,75 +468,49 @@ func save_as(dir_path: String) -> Error:
 
 
 # --- Authoring (Phase 5): undo / redo -----------------------------------------
-# Whole-document byte snapshots, mirroring strings_editor.gd. A mutation snapshots the
-# pre-edit document, pushes it on the undo stack, and clears redo; undo/redo swap the
-# current state onto the opposite stack and restore the popped snapshot, then re-bake
-# the world to match. Continuous gestures (a drag, a run of inspector edits) are
-# bracketed by begin_edit/commit_edit so each becomes one step. Triggered by the
-# viewport Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y; also exposed for the workspace's framework
-# hooks. Selection is dropped on restore: structural edits reindex entities, so a stored
-# {kind, index} could bind to a different entity, and the re-bake resets selection anyway.
+# The history + dirty flag live on the document (NovaMissionData): in-memory bms::File snapshots,
+# never serialized bytes. The controller drives them. A continuous gesture (a drag, a run of
+# inspector edits) is bracketed by begin_edit/commit_edit so it becomes one step; one-shot
+# mutations bracket the same way (commit pushes a step only if the document actually changed, so a
+# plain click / same-value / failed edit pushes nothing). undo/redo swap the document in memory
+# (O(1), cannot fail) and the controller re-bakes the world to match. Triggered by the viewport
+# Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y; also exposed for the workspace's framework hooks. Selection is
+# dropped on restore: structural edits reindex entities, and the re-bake resets selection anyway.
 
 func can_undo() -> bool:
-	return not _undo_stack.is_empty()
+	return _mission != null and _mission.can_undo()
 
 
 func can_redo() -> bool:
-	return not _redo_stack.is_empty()
+	return _mission != null and _mission.can_redo()
 
 
-# Open an edit session, capturing the pre-edit snapshot once. Inert if a session is
-# already open (so a run of axis edits coalesces) or no mission is loaded.
+# The number of undo steps on the stack (for tests / a future history readout).
+func undo_depth() -> int:
+	return _mission.undo_depth() if _mission != null else 0
+
+
+# Open an edit session, capturing the pre-edit document once. Inert if a session is already open
+# (so a run of axis edits coalesces) or no mission is loaded. Delegates to the document.
 func begin_edit() -> void:
-	if _editing or _mission == null:
-		return
-	_pending_snapshot = _mission.snapshot()
-	_editing = true
+	if _mission != null:
+		_mission.begin_edit()
 
 
-# Close an edit session, pushing the held snapshot as one undo step only if the document
-# actually changed (a plain click, a same-value edit, or a programmatic refresh push
-# nothing). Clears redo on a real change.
+# Close an edit session, pushing one undo step only if the document actually changed (a plain
+# click, a same-value edit, or a programmatic refresh push nothing). Delegates to the document.
 func commit_edit() -> void:
-	if not _editing:
-		return
-	_editing = false
-	var pending := _pending_snapshot
-	_pending_snapshot = PackedByteArray()
-	if pending.is_empty() or _mission == null:
-		return
-	if _mission.snapshot() != pending:
-		_undo_stack.append(pending)
-		_trim_undo()
-		_redo_stack.clear()
+	if _mission != null:
+		_mission.commit_edit()
 
 
 func _flush_edit() -> void:
 	commit_edit()
 
 
-# Record one undo step from a snapshot captured BEFORE a mutation, clearing redo. Skips
-# the push when the document did not actually change, so a no-op edit adds no step.
-func _push_undo_step(before: PackedByteArray) -> void:
-	if before.is_empty() or _mission == null:
-		return
-	if _mission.snapshot() == before:
-		return
-	_undo_stack.append(before)
-	_trim_undo()
-	_redo_stack.clear()
-
-
-func _trim_undo() -> void:
-	while _undo_stack.size() > UNDO_LIMIT:
-		_undo_stack.pop_front()
-
-
 func _clear_history() -> void:
-	_undo_stack.clear()
-	_redo_stack.clear()
-	_pending_snapshot = PackedByteArray()
-	_editing = false
+	if _mission != null:
+		_mission.clear_history()
 
 
 func undo() -> void:
@@ -519,15 +522,15 @@ func undo() -> void:
 	cancel_drag()
 	if _mission == null:
 		return
-	if _undo_stack.is_empty():
+	if not _mission.can_undo():
 		_report("Nothing to undo.")
 		return
 	_restoring = true
-	_redo_stack.append(_mission.snapshot())
-	var ok := _restore(_undo_stack.pop_back())
+	var prev_event_count := _mission.get_event_count()
+	_mission.undo()
+	_after_restore(prev_event_count)
 	_restoring = false
-	if ok:
-		_report("Undid the last change.")
+	_report("Undid the last change.")
 
 
 func redo() -> void:
@@ -536,39 +539,29 @@ func redo() -> void:
 	cancel_drag()
 	if _mission == null:
 		return
-	if _redo_stack.is_empty():
+	if not _mission.can_redo():
 		_report("Nothing to redo.")
 		return
 	_restoring = true
-	_undo_stack.append(_mission.snapshot())
-	var ok := _restore(_redo_stack.pop_back())
+	var prev_event_count := _mission.get_event_count()
+	_mission.redo()
+	_after_restore(prev_event_count)
 	_restoring = false
-	if ok:
-		_report("Redid the last change.")
+	_report("Redid the last change.")
 
 
-# Replace the document from a snapshot, then re-bake the world to match and recompute the
-# exact dirty flag. Emits changed once (via mark_dirty after the re-bake) so the inspector
-# refreshes against the restored world in a single pass.
-func _restore(snapshot: PackedByteArray) -> bool:
-	var prev_event_count := _mission.get_event_count() if _mission != null else 0
-	if not _mission.restore_snapshot(snapshot):
-		# Self-produced snapshots always parse, so this is a defensive path: load_bms_bytes
-		# leaves the document empty on failure, so clear rather than re-bake against nothing.
-		# Surface it as an error (it is catastrophic: the mission is cleared to recover).
-		_report("Could not restore the mission. It was cleared to recover; reopen it to continue.", true)
-		clear()
-		return false
-	# Adding/deleting an event shifts later event indices, so a kept _selected_event_index could bind
-	# to a DIFFERENT event after undo/redo (the in-range clamp can't see a shift). Drop the selection
-	# only when the event set actually changed; an attribute/trigger/action undo leaves the list intact
-	# and keeps the user on their event. (Event add/delete are the only ops that change the count --
-	# there is no event-reorder op -- so a count change is exactly the structural case.)
+# Sync the world + selection to the document after an in-memory undo/redo swap, then re-bake and
+# notify once so the inspector refreshes against the restored world in a single pass. Adding /
+# deleting an event shifts later event indices, so a kept _selected_event_index could bind to a
+# DIFFERENT event (the in-range clamp can't see a shift); drop the selection only when the event
+# set actually changed (event add/delete are the only ops that change the count -- there is no
+# event-reorder op -- so a count change is exactly the structural case). An attribute / trigger /
+# action undo leaves the list intact and keeps the user on their event.
+func _after_restore(prev_event_count: int) -> void:
 	if _mission.get_event_count() != prev_event_count:
 		_selected_event_index = -1
 	_rebake_objects()
 	mark_dirty()
-	return true
 
 
 # Mark the current input event handled so a consumed Ctrl+Z / Ctrl+Y does not propagate
@@ -922,20 +915,20 @@ func set_selected_group(value: int) -> void:
 # AI + waypoint fields the format carries (waypoint_id, wp_number, perception, accuracy,
 # alert_state, the engagement / attack distances, spawn_count, max_simultaneous,
 # ai_flags). `property` is the entity-dictionary key it edits. A property change is its
-# own undo step: close any open transform session first, then capture the pre-edit state
-# and record it only if the write actually changed the bytes (a same-value write is a
-# no-op). The value range is governed by the inspector's SpinBoxes and the format's field
+# own undo step: close any open transform session first, then bracket the write with
+# begin_edit/commit_edit so it records one step only if the write actually changed the document
+# (a same-value write is a no-op). The value range is governed by the inspector's SpinBoxes and the format's field
 # widths, so this does not clamp; team / group clamp through their wrappers above.
 func set_selected_property(property: String, value: int) -> void:
 	if _selected_ref.is_empty() or _mission == null:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	# set_entity_property_int returns false only on rejection (bad index, unknown property,
 	# failed write) -- never on a benign same-value write -- so a false return is a real
 	# error worth surfacing rather than swallowing.
 	if _mission.set_entity_property_int(int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 	else:
 		_report("Could not set %s on the selected object." % property, true)
@@ -947,9 +940,9 @@ func set_selected_string_property(property: String, value: String) -> void:
 	if _selected_ref.is_empty() or _mission == null:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if _mission.set_entity_property_string(int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 	else:
 		_report("Could not set %s on the selected object." % property, true)
@@ -962,9 +955,9 @@ func set_header_string(field: String, value: String) -> void:
 	if _mission == null:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if _mission.set_header_string(field, value):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 	else:
 		_report("Could not set mission %s." % field, true)
@@ -974,9 +967,9 @@ func set_header_int(field: String, value: int) -> void:
 	if _mission == null:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if _mission.set_header_int(field, value):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 	else:
 		_report("Could not set mission %s." % field, true)
@@ -986,9 +979,9 @@ func set_header_flag(bit: int, on: bool) -> void:
 	if _mission == null:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if _mission.set_header_flag(bit, on):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 	else:
 		_report("Could not set mission flag.", true)
@@ -1008,9 +1001,9 @@ func set_weapon_loadout(entries: Array) -> void:
 	if _mission == null:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if _mission.set_weapon_loadout(entries):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 	else:
 		_report("Could not update the weapon loadout.", true)
@@ -1038,9 +1031,9 @@ func set_group(index: int, field0: int, field8: int, field12: int) -> void:
 	if _mission == null:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if _mission.set_group(index, field0, field8, field12):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 	else:
 		_report("Could not update group %d." % index, true)
@@ -1126,15 +1119,15 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 		item_name = "item %d" % item_id
 	var local := container.global_transform.affine_inverse() * global_hit
 	var bms_pos := MissionObjectPlacer.godot_to_bms_position(local)
-	# Placing is its own undo step: close any open session, snapshot the pre-place state,
-	# then record it after the add succeeds.
+	# Placing is its own undo step: close any open session, then bracket the add with
+	# begin_edit/commit_edit (commit pushes one step iff the add changed the document).
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	var record := _mission.add_entity(kind, item_id, bms_pos, Vector3.ZERO)
 	if record.is_empty():
 		_report("Could not place %s." % item_name, true)
 		return false
-	_push_undo_step(before)
+	_mission.commit_edit()
 	var new_index := int(record.get("index", -1))
 	_render_placed_entity(kind, new_index)
 	mark_dirty()
@@ -1214,15 +1207,15 @@ func delete_selected() -> bool:
 	# Capture a readable label before the removal: after the re-bake the selection (and its
 	# resolvable name) is gone.
 	var label := get_selected_display_name()
-	# Deleting is its own undo step: close any open session, snapshot the pre-delete state,
-	# then record it after the removal succeeds (a successful removal always changes the
-	# document, so this is never a no-op step).
+	# Deleting is its own undo step: close any open session, then bracket the removal with
+	# begin_edit/commit_edit (a successful removal always changes the document, so this is never a
+	# no-op step).
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if not _mission.remove_entity(kind, index):
 		_report("Could not delete the selected object.", true)
 		return false
-	_push_undo_step(before)
+	_mission.commit_edit()
 	# Re-bake first (it resets the selection state and rebuilds stats), then dirty +
 	# emit once so the inspector refreshes against the post-delete world in a single pass.
 	_rebake_objects()
@@ -1384,9 +1377,9 @@ func set_waypoint_flags(loop: bool, blue: bool, red: bool) -> void:
 		flags |= NovaMissionData.WP_FLAG_RED_TEAM
 	var indices: PackedInt32Array = path.get("marker_indices", PackedInt32Array())
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if _mission.set_waypoint_path(_selected_path_index, indices, flags):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		_refresh_waypoint_overlay()
 		mark_dirty()
 
@@ -1527,8 +1520,8 @@ func _deselect_marker() -> void:
 
 
 # --- Authoring (P7d): marker drag / add / reorder / delete --------------------
-# Marker editing reuses the object authoring spine: the terrain-regrounding drag, the
-# begin_edit/commit_edit undo bracketing, and the snapshot/_push_undo_step step model. A
+# Marker editing reuses the object authoring spine: the terrain-regrounding drag and the
+# begin_edit/commit_edit undo bracketing (each gesture is one step). A
 # drag previews the gizmo and commits the record once on release; add / delete are
 # structural (they change the marker list), so they re-bake; reorder / flags rewrite only
 # the path's reference list.
@@ -1619,12 +1612,12 @@ func add_marker_to_active_path_at_world(global_hit: Vector3) -> bool:
 	var local := container.global_transform.affine_inverse() * global_hit
 	var bms_pos := MissionObjectPlacer.godot_to_bms_position(local)
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	var result := _mission.add_waypoint_marker(_selected_path_index, _default_marker_item_id(), bms_pos, Vector3.ZERO, -1)
 	if result.is_empty():
 		_report("Could not add a waypoint marker.", true)
 		return false
-	_push_undo_step(before)
+	_mission.commit_edit()
 	_refresh_waypoint_overlay()
 	var marker_index := int((result.get("marker", {}) as Dictionary).get("index", -1))
 	if marker_index >= 0:
@@ -1685,9 +1678,9 @@ func move_selected_marker(delta: int) -> void:
 	indices[pos] = indices[target]
 	indices[target] = tmp
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if _mission.set_waypoint_path(_selected_path_index, indices, int(path.get("flags", 0))):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		_refresh_waypoint_overlay()
 		mark_dirty()
 
@@ -1701,10 +1694,10 @@ func delete_selected_marker() -> bool:
 		return false
 	var marker_index := int(_selected_marker["marker_index"])
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if not _mission.remove_entity(NovaMissionData.KIND_MARKER, marker_index):
 		return false
-	_push_undo_step(before)
+	_mission.commit_edit()
 	_rebake_objects()
 	mark_dirty()
 	return true
@@ -1733,14 +1726,14 @@ func clear_active_path() -> bool:
 	descending.sort()
 	descending.reverse()
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	var removed := false
 	for mi in descending:
 		if _mission.remove_entity(NovaMissionData.KIND_MARKER, mi):
 			removed = true
 	if not removed:
 		return false
-	_push_undo_step(before)
+	_mission.commit_edit()
 	_selected_marker = {}
 	_rebake_objects()
 	mark_dirty()
@@ -1750,8 +1743,8 @@ func clear_active_path() -> bool:
 # --- Authoring (Phase 2): area triggers / zones -------------------------------
 # Zone authoring mirrors the marker spine: ray-vs-AABB picking over the overlay's zone body
 # AABBs, a terrain-projected translate drag that previews the box and commits the record once
-# on release (the begin_edit/commit_edit bracket makes it one undo step), and the
-# snapshot/_push_undo_step model for one-shot mutations (add / set / flags / delete). Resize is
+# on release (the begin_edit/commit_edit bracket makes it one undo step), and the same
+# begin_edit/commit_edit bracket for one-shot mutations (add / set / flags / delete). Resize is
 # precise through the inspector spins (set_selected_zone_bounds); the in-world drag translates
 # the whole box. The engine does not auto-swap area-trigger bounds, so the binding normalizes
 # min<=max on every write (NovaMissionData.add/set_area_trigger).
@@ -1806,14 +1799,14 @@ func add_area_trigger_default() -> int:
 	var center := _world_center_mission()
 	var half := DEFAULT_ZONE_HALF
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	# A fresh zone is active with Z unbounded (the common out-of-bounds region); the user
 	# constrains Z and resizes afterwards.
 	var zone := _mission.add_area_trigger(center - half, center + half, true, false, 0)
 	if zone.is_empty():
 		_report("Could not add an area trigger.", true)
 		return -1
-	_push_undo_step(before)
+	_mission.commit_edit()
 	_selected_zone_index = int(zone.get("index", -1))
 	_refresh_area_trigger_overlay()
 	mark_dirty()
@@ -1828,11 +1821,11 @@ func set_selected_zone_bounds(mn: Vector3, mx: Vector3) -> void:
 	if zone.is_empty():
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	var updated := _mission.set_area_trigger(_selected_zone_index, mn, mx,
 		bool(zone.get("active", false)), bool(zone.get("constrain_z", false)), int(zone.get("id", 0)))
 	if not updated.is_empty():
-		_push_undo_step(before)
+		_mission.commit_edit()
 		_refresh_area_trigger_overlay()
 		mark_dirty()
 
@@ -1845,11 +1838,11 @@ func set_selected_zone_flags(active: bool, constrain_z: bool) -> void:
 	if zone.is_empty():
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	var updated := _mission.set_area_trigger(_selected_zone_index, zone.get("min", Vector3.ZERO),
 		zone.get("max", Vector3.ZERO), active, constrain_z, int(zone.get("id", 0)))
 	if not updated.is_empty():
-		_push_undo_step(before)
+		_mission.commit_edit()
 		_refresh_area_trigger_overlay()
 		mark_dirty()
 
@@ -1862,10 +1855,10 @@ func delete_selected_area_trigger() -> bool:
 	if _mission == null or _selected_zone_index < 0:
 		return false
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if not _mission.remove_area_trigger(_selected_zone_index):
 		return false
-	_push_undo_step(before)
+	_mission.commit_edit()
 	_selected_zone_index = -1
 	_refresh_area_trigger_overlay()
 	_report("Zone deleted. Triggers that referenced a higher zone shifted down; a direct reference was unset.")
@@ -1996,8 +1989,8 @@ func _deselect_zone() -> void:
 
 # --- Authoring (Phase 4): mission scripting forwarders ------------------------
 # Panel-driven (no viewport interaction): the inspector's Scripting tab calls these, each on the same
-# snapshot -> _push_undo_step -> mark_dirty undo recipe as the other modes. Reads pass through to the
-# binding; every read tolerates "no mission" by returning an empty value.
+# begin_edit -> mutate -> commit_edit -> mark_dirty undo recipe as the other modes. Reads pass through
+# to the binding; every read tolerates "no mission" by returning an empty value.
 
 func get_event_count() -> int:
 	return _mission.get_event_count() if _mission != null else 0
@@ -2062,12 +2055,12 @@ func add_event_default() -> int:
 	if _mission == null:
 		return -1
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	var event := _mission.add_event(0, 0, 0)
 	if event.is_empty():
 		_report("Could not add an event.", true)
 		return -1
-	_push_undo_step(before)
+	_mission.commit_edit()
 	_selected_event_index = int(event.get("index", -1))
 	mark_dirty()
 	return _selected_event_index
@@ -2079,10 +2072,10 @@ func delete_selected_event() -> bool:
 	if _mission == null or get_selected_event_index() < 0:
 		return false
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if not _mission.remove_event(_selected_event_index):
 		return false
-	_push_undo_step(before)
+	_mission.commit_edit()
 	# Drop the selection after a delete (like the zone panel): the row the user was on is gone, and the
 	# index would otherwise point at the event that shifted into its slot.
 	_selected_event_index = -1
@@ -2096,9 +2089,9 @@ func set_selected_event(flags: int, reset_after: int, delay: int) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if _mission.set_event(_selected_event_index, flags, reset_after, delay):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 
 
@@ -2107,12 +2100,12 @@ func add_selected_event_trigger() -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	var chain := _mission.add_event_trigger(_selected_event_index, {})
 	if chain.is_empty():
 		_report("Could not add a trigger (an event chains at most 20).", true)
 		return
-	_push_undo_step(before)
+	_mission.commit_edit()
 	mark_dirty()
 
 
@@ -2121,10 +2114,10 @@ func set_selected_event_trigger(local_index: int, trigger: Dictionary) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	var chain := _mission.set_event_trigger(_selected_event_index, local_index, trigger)
 	if not chain.is_empty():
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 
 
@@ -2132,9 +2125,9 @@ func remove_selected_event_trigger(local_index: int) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if _mission.remove_event_trigger(_selected_event_index, local_index):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 
 
@@ -2142,9 +2135,9 @@ func move_selected_event_trigger(local_index: int, delta: int) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if _mission.move_event_trigger(_selected_event_index, local_index, delta):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 
 
@@ -2153,12 +2146,12 @@ func add_selected_event_action() -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	var chain := _mission.add_event_action(_selected_event_index, {})
 	if chain.is_empty():
 		_report("Could not add an action (an event chains at most 20).", true)
 		return
-	_push_undo_step(before)
+	_mission.commit_edit()
 	mark_dirty()
 
 
@@ -2166,10 +2159,10 @@ func set_selected_event_action(local_index: int, action: Dictionary) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	var chain := _mission.set_event_action(_selected_event_index, local_index, action)
 	if not chain.is_empty():
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 
 
@@ -2177,9 +2170,9 @@ func remove_selected_event_action(local_index: int) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if _mission.remove_event_action(_selected_event_index, local_index):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 
 
@@ -2187,9 +2180,9 @@ func move_selected_event_action(local_index: int, delta: int) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
 	_flush_edit()
-	var before := _mission.snapshot()
+	_mission.begin_edit()
 	if _mission.move_event_action(_selected_event_index, local_index, delta):
-		_push_undo_step(before)
+		_mission.commit_edit()
 		mark_dirty()
 
 

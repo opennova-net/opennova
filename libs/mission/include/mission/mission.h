@@ -269,6 +269,10 @@ public:
 	bool save_mis_file(const std::string &path);
 	bool write_mis_text(std::string &out);
 	void clear();
+	// Build a minimal, valid, empty mission in memory (no file). Resets to the loaded state
+	// with a correct magic + version and the fixed waypoint/group/layer tables backfilled via
+	// sync_counts(), so write_bms_bytes() produces a buffer parse() accepts. Always succeeds.
+	void create_default();
 
 	bool is_loaded() const;
 	const std::string &source_path() const;
@@ -538,6 +542,7 @@ typedef struct OpenNovaMissionBytes {
 MISSION_EXPORT OpenNovaMissionDocument *opennova_mission_create(void);
 MISSION_EXPORT void opennova_mission_destroy(OpenNovaMissionDocument *document);
 MISSION_EXPORT void opennova_mission_clear(OpenNovaMissionDocument *document);
+MISSION_EXPORT void opennova_mission_create_default(OpenNovaMissionDocument *document);
 MISSION_EXPORT int opennova_mission_load_path(OpenNovaMissionDocument *document, const char *path);
 MISSION_EXPORT int opennova_mission_load_bytes(OpenNovaMissionDocument *document, const uint8_t *data, size_t size);
 MISSION_EXPORT int opennova_mission_save_path(OpenNovaMissionDocument *document, const char *path);

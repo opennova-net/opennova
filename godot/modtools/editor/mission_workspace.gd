@@ -1,14 +1,13 @@
 class_name MissionEditorWorkspace
 extends EditorWorkspace
 
-# Mission workspace: open a .bms mission and view its world. The mission's header
-# selects the terrain + environment, which load into the shared terrain viewport
-# (read-only here), and its placed objects are instanced under the terrain world
-# root by the host-agnostic MissionObjectPlacer. Mission authoring (place / move /
-# save entities) is deferred, so this is a viewer: Open is the only document
-# action and the document never goes dirty.
+# Mission workspace: create or open a .bms mission and author its world. The mission's header
+# selects the terrain + environment, which load into the shared terrain viewport, and its placed
+# objects are instanced under the terrain world root by the host-agnostic MissionObjectPlacer.
+# New Mission builds an empty mission on the currently-loaded terrain; from there objects, zones,
+# waypoints, and scripting are editable (with undo/redo + Save / Save As).
 #
-# The load + resolve + place work lives in MissionController and the placer; this
+# The create + load + resolve + place + edit work lives in MissionController and the placer; this
 # adapter is the EditorWorkspace shell binding (capability hooks + inspector).
 
 const TerrainViewportScript = preload("res://modtools/terrain/terrain_viewport.gd")
@@ -164,7 +163,33 @@ func get_viewport_camera() -> Camera3D:
 	return null
 
 
-# --- Open (the only document action this phase) -------------------------------
+# --- New (create a mission from scratch) --------------------------------------
+# The shell builds the New button on workspace switch when has_new_action() is true (base returns
+# can_new()); visibility must not depend on a loaded mission, so can_new() needs only a bound
+# terrain editor. The controller checks for a loaded terrain and reports if there is none.
+
+func can_new() -> bool:
+	return _controller != null and terrain_editor != null
+
+
+func get_new_action_label() -> String:
+	return "New Mission"
+
+
+func new_current() -> Error:
+	if _controller == null:
+		return ERR_UNAVAILABLE
+	var err := int(_controller.new_mission())
+	var status: String = _controller.get_last_status()
+	if not status.is_empty():
+		if editor_shell != null and editor_shell.has_method("show_status_message"):
+			editor_shell.show_status_message(status, 4.0 if err == OK else 6.0)
+		elif err != OK:
+			push_warning("New mission: " + status)
+	return err as Error
+
+
+# --- Open ---------------------------------------------------------------------
 
 func can_open() -> bool:
 	return terrain_editor != null
@@ -296,10 +321,10 @@ func _on_controller_status(message: String, is_error: bool) -> void:
 
 
 # --- Undo / redo --------------------------------------------------------------
-# The base EditorWorkspace exposes these hooks; the controller owns the byte-snapshot
-# undo stack. The live trigger this phase is the viewport Ctrl+Z / Ctrl+Y (handled in
-# MissionController); implementing the hooks makes undo/redo reachable for tests and a
-# future shell toolbar with no shell change. Mirrors strings_workspace.gd.
+# The base EditorWorkspace exposes these hooks; the controller drives the document's in-memory
+# undo history. The live trigger is the viewport Ctrl+Z / Ctrl+Y (handled in MissionController);
+# implementing the hooks makes undo/redo reachable for tests and a future shell toolbar with no
+# shell change. Mirrors strings_workspace.gd.
 
 func can_undo() -> bool:
 	return _controller != null and _controller.can_undo()

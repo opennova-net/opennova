@@ -47,7 +47,15 @@ func test_build_inspector_mounts_a_panel() -> void:
 	assert_gt(host.get_child_count(), 0, "the mission inspector panel is mounted into the host")
 
 
-# --- Phase 5: undo / redo hooks -----------------------------------------------
+# --- New + undo / redo hooks --------------------------------------------------
+
+func test_new_action_requires_a_terrain_editor() -> void:
+	var ws = MissionWorkspace.new()
+	assert_eq(ws.get_new_action_label(), "New Mission")
+	assert_false(ws.can_new(), "New is gated on a bound terrain editor")
+	# new_current with no terrain editor delegates to the controller, which reports it cannot.
+	assert_ne(int(ws.new_current()), OK, "New fails (and is surfaced) without a terrain")
+
 
 func test_undo_redo_hooks_delegate_to_the_controller() -> void:
 	var ws = MissionWorkspace.new()
@@ -57,12 +65,20 @@ func test_undo_redo_hooks_delegate_to_the_controller() -> void:
 	ws.undo()
 	ws.redo()
 
-	# can_undo/can_redo read the controller's stacks: seeding them proves delegation
-	# without standing up a full mission load.
-	ws._controller._undo_stack.append(PackedByteArray([1]))
-	assert_true(ws.can_undo(), "can_undo reflects the controller's undo stack")
-	ws._controller._redo_stack.append(PackedByteArray([2]))
-	assert_true(ws.can_redo(), "can_redo reflects the controller's redo stack")
+	# The history lives on the document; seed it on a from-scratch mission and hand it to the
+	# controller. can_undo/can_redo then reflect it -- proving the hooks delegate through the
+	# controller without standing up a full terrain + world load.
+	var mission := NovaMissionData.new()
+	mission.create_default()
+	mission.begin_edit()
+	mission.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
+	mission.commit_edit()
+	ws._controller._mission = mission
+	assert_true(ws.can_undo(), "can_undo reflects the document's undo history")
+	assert_false(ws.can_redo(), "nothing to redo yet")
+	mission.undo()
+	assert_false(ws.can_undo(), "the step was consumed")
+	assert_true(ws.can_redo(), "and is now redoable")
 
 
 # --- Right-dock split: the inspector mounts its editor in %AssetDock ----------

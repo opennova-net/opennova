@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 using namespace godot;
@@ -31,6 +32,7 @@ opennova::mission::EntityKind to_native_kind(int kind) {
 
 void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("open_file", "path"), &NovaMissionData::open_file);
+	ClassDB::bind_method(D_METHOD("create_default"), &NovaMissionData::create_default);
 	ClassDB::bind_method(D_METHOD("open_from_resource_root", "resource_root", "name"), &NovaMissionData::open_from_resource_root);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaMissionData::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &NovaMissionData::get_source_path);
@@ -101,8 +103,16 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("save_file"), &NovaMissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &NovaMissionData::save_as);
 	ClassDB::bind_method(D_METHOD("is_modified"), &NovaMissionData::is_modified);
-	ClassDB::bind_method(D_METHOD("snapshot"), &NovaMissionData::snapshot);
-	ClassDB::bind_method(D_METHOD("restore_snapshot", "bytes"), &NovaMissionData::restore_snapshot);
+	ClassDB::bind_method(D_METHOD("begin_edit"), &NovaMissionData::begin_edit);
+	ClassDB::bind_method(D_METHOD("commit_edit"), &NovaMissionData::commit_edit);
+	ClassDB::bind_method(D_METHOD("can_undo"), &NovaMissionData::can_undo);
+	ClassDB::bind_method(D_METHOD("can_redo"), &NovaMissionData::can_redo);
+	ClassDB::bind_method(D_METHOD("undo"), &NovaMissionData::undo);
+	ClassDB::bind_method(D_METHOD("redo"), &NovaMissionData::redo);
+	ClassDB::bind_method(D_METHOD("undo_depth"), &NovaMissionData::undo_depth);
+	ClassDB::bind_method(D_METHOD("clear_history"), &NovaMissionData::clear_history);
+	ClassDB::bind_method(D_METHOD("is_dirty"), &NovaMissionData::is_dirty);
+	ClassDB::bind_method(D_METHOD("mark_clean"), &NovaMissionData::mark_clean);
 
 	BIND_CONSTANT(KIND_MARKER);
 	BIND_CONSTANT(KIND_ITEM);
@@ -128,6 +138,15 @@ Error NovaMissionData::open_file(const String &path) {
 		return ERR_CANT_OPEN;
 	}
 	modified = false;
+	return OK;
+}
+
+Error NovaMissionData::create_default() {
+	source_path = String();
+	last_error = String();
+	document.create_default();
+	modified = false;
+	clear_history();
 	return OK;
 }
 
@@ -1180,27 +1199,85 @@ bool NovaMissionData::is_modified() const {
 	return modified;
 }
 
-PackedByteArray NovaMissionData::snapshot() {
-	PackedByteArray out;
-	std::vector<uint8_t> bytes;
-	// write_bms_bytes returns false when nothing is loaded; surface an empty array so
-	// the caller can skip pushing a meaningless snapshot.
-	if (!document.write_bms_bytes(bytes)) {
-		return out;
+void NovaMissionData::begin_edit() {
+	// Capture the pre-edit document once. Inert if a session is already open (so a run of edits
+	// coalesces) or nothing is loaded.
+	if (editing || !document.is_loaded()) {
+		return;
 	}
-	out.resize(static_cast<int64_t>(bytes.size()));
-	if (!bytes.empty()) {
-		std::memcpy(out.ptrw(), bytes.data(), bytes.size());
-	}
-	return out;
+	pending_snapshot = document.bms_file();
+	editing = true;
 }
 
-bool NovaMissionData::restore_snapshot(const PackedByteArray &bytes) {
-	// load_bms_bytes clears the document before parsing, so on failure we are left with
-	// an empty document; return the parse result and let the caller decide.
-	const bool ok = document.load_bms_bytes(bytes.ptr(), static_cast<size_t>(bytes.size()));
-	if (!ok) {
-		last_error = String(document.last_error().c_str());
+void NovaMissionData::commit_edit() {
+	// Close the session, pushing the held snapshot as one undo step only if the edit actually
+	// changed the document (a plain click, a same-value edit, or a programmatic refresh push
+	// nothing). Clears redo on a real change. A new step drops the oldest when over the cap.
+	if (!editing) {
+		return;
 	}
-	return ok;
+	editing = false;
+	if (!opennova::bms::equal(document.bms_file(), pending_snapshot)) {
+		undo_history.push_back(std::move(pending_snapshot));
+		if (undo_history.size() > kUndoLimit) {
+			undo_history.erase(undo_history.begin());
+		}
+		redo_history.clear();
+	}
+	pending_snapshot = opennova::bms::File{};
+}
+
+bool NovaMissionData::can_undo() const {
+	return !undo_history.empty();
+}
+
+bool NovaMissionData::can_redo() const {
+	return !redo_history.empty();
+}
+
+bool NovaMissionData::undo() {
+	if (undo_history.empty() || !document.is_loaded()) {
+		return false;
+	}
+	// Swap the live file onto the redo stack and adopt the popped state. Pure in-memory moves: no
+	// serialize / parse, so this cannot fail, and the document stays loaded (only its file changes).
+	redo_history.push_back(document.bms_file());
+	document.bms_file() = std::move(undo_history.back());
+	undo_history.pop_back();
+	return true;
+}
+
+bool NovaMissionData::redo() {
+	if (redo_history.empty() || !document.is_loaded()) {
+		return false;
+	}
+	undo_history.push_back(document.bms_file());
+	document.bms_file() = std::move(redo_history.back());
+	redo_history.pop_back();
+	return true;
+}
+
+int NovaMissionData::undo_depth() const {
+	return static_cast<int>(undo_history.size());
+}
+
+void NovaMissionData::clear_history() {
+	undo_history.clear();
+	redo_history.clear();
+	pending_snapshot = opennova::bms::File{};
+	editing = false;
+}
+
+bool NovaMissionData::is_dirty() const {
+	if (!has_clean_baseline) {
+		// No baseline yet (e.g. a just-created document the editor has not marked clean): fall
+		// back to the coarse "any mutation since load" flag.
+		return modified;
+	}
+	return !opennova::bms::equal(document.bms_file(), clean_baseline);
+}
+
+void NovaMissionData::mark_clean() {
+	clean_baseline = document.bms_file();
+	has_clean_baseline = true;
 }

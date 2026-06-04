@@ -8,6 +8,10 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <cstddef>
+#include <vector>
+
+#include <mission/bms.h>
 #include <mission/mission.h>
 
 namespace godot {
@@ -26,9 +30,23 @@ private:
 	opennova::mission::MissionDocument document;
 	String source_path;
 	String last_error;
-	// True once an in-memory mutation lands and before the next successful save/load.
-	// MissionDocument carries no dirty bit of its own, so the wrapper owns it.
+	// True once an in-memory mutation lands and before the next successful save/load. Used only
+	// as the dirty fallback before a clean baseline exists; the exact dirty flag is the
+	// clean_baseline compare below.
 	bool modified = false;
+
+	// In-memory undo / redo history: whole-document snapshots held as bms::File copies (never
+	// serialized bytes). begin_edit() captures the pre-edit document; commit_edit() pushes it iff
+	// the edit actually changed something (bms::equal); undo()/redo() swap the document's file with
+	// a stack top. Dirty is exact and survives undo-stack trimming: the document differs from
+	// clean_baseline, which is reset at open / save / new (mark_clean()).
+	std::vector<opennova::bms::File> undo_history;
+	std::vector<opennova::bms::File> redo_history;
+	opennova::bms::File pending_snapshot;
+	bool editing = false;
+	opennova::bms::File clean_baseline;
+	bool has_clean_baseline = false;
+	static constexpr size_t kUndoLimit = 100;
 
 	Dictionary entity_to_dictionary(const opennova::mission::EntityRecord &record) const;
 	Dictionary waypoint_path_to_dictionary(const opennova::mission::WaypointPath &path) const;
@@ -76,6 +94,10 @@ public:
 	};
 
 	Error open_file(const String &path);
+	// Build a fresh, empty, valid mission in memory (no file backing). Mirrors open_file's
+	// post-state: loaded document, source_path cleared, modified flag cleared, history reset.
+	// Always returns OK.
+	Error create_default();
 	// Load a .bms by flat name through the mounted resource root (VFS), so missions packed in
 	// PFF archives load at runtime. Mirrors NovaObjectData::open_from_resource_root.
 	Error open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
@@ -259,20 +281,24 @@ public:
 	Error save_as(const String &path);
 	bool is_modified() const;
 
-	// --- Snapshot / restore (undo/redo support) -------------------------------
-	// Serialize the whole document to a byte buffer through the same byte-faithful
-	// writer as save (write_bms_bytes), not the bytes it was opened from. The result
-	// is a valid .bms regardless of how the document was built, so callers (the
-	// editor's undo stack) hold re-serialized states, never raw input passed through.
-	// Returns an empty array when no mission is loaded. Non-const: write_bms_bytes
-	// syncs the header counts on the underlying document before serializing.
-	PackedByteArray snapshot();
-	// Replace the whole in-memory document by parsing `bytes` (load_bms_bytes). Used
-	// to restore an undo/redo snapshot without touching the filesystem. Leaves the
-	// dirty flag untouched: the editor owns its own dirty state and recomputes it.
-	// Returns false (and leaves the document empty: load_bms_bytes clears first) when
-	// the bytes fail to parse, so callers must not assume a valid document on false.
-	bool restore_snapshot(const PackedByteArray &bytes);
+	// --- Undo / redo + dirty (in-memory document snapshots) -------------------
+	// The history holds whole-document bms::File copies, never serialized bytes. A continuous
+	// gesture (a drag, a run of inspector edits) is bracketed by begin_edit()/commit_edit() and
+	// becomes one step; commit pushes a step only if the document actually changed (bms::equal),
+	// so a no-op edit adds nothing. One-shot mutations bracket the same way. undo()/redo() swap
+	// the live document's file with a stack top in O(1) and cannot fail (no parse). is_dirty() is
+	// exact: true iff the document differs from the clean baseline (set by mark_clean() at open /
+	// save / new); it falls back to the coarse modified flag before any baseline exists.
+	void begin_edit();
+	void commit_edit();
+	bool can_undo() const;
+	bool can_redo() const;
+	bool undo();
+	bool redo();
+	int undo_depth() const;
+	void clear_history();
+	bool is_dirty() const;
+	void mark_clean();
 };
 
 } // namespace godot

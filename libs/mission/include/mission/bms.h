@@ -663,4 +663,11 @@ bool write_file(const File& file, const std::string& path, std::string& error);
 // Check if data starts with BMS magic.
 bool is_bms(const uint8_t* data, size_t size);
 
+// Value-equality of two in-memory missions: true iff they would serialize (write()) to the same
+// bytes. The editor's undo / dirty tracking uses this to decide whether an edit changed anything,
+// without round-tripping through the byte serializer. The fixed record structs are trivially
+// copyable and always value-initialized, so they compare byte-wise; WaypointRecord (inner vectors)
+// compares field-wise. NOTE: if you add a field that write() serializes, add it to equal() too.
+bool equal(const File& a, const File& b);
+
 } // namespace opennova::bms

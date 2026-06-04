@@ -536,5 +536,80 @@ int main() {
 		TEST_EXPECT(reread[1].name == "WPN_B");
 	}
 
+	// --- From-scratch: create_default() builds a valid, empty mission that round-trips. This is
+	// the first path that writes freshly-resized waypoint records, so it guards the sync_counts
+	// padding backfill (without it the writer emits 8-byte waypoint records that fail to reparse). ---
+	{
+		opennova::mission::MissionDocument fresh;
+		fresh.create_default();
+		TEST_EXPECT(fresh.is_loaded());
+		TEST_EXPECT(fresh.source_path().empty());
+		TEST_EXPECT(fresh.entity_count(opennova::mission::EntityKind::Item) == 0);
+		TEST_EXPECT(fresh.entity_count(opennova::mission::EntityKind::Marker) == 0);
+		std::vector<uint8_t> fresh_bytes;
+		TEST_EXPECT(fresh.write_bms_bytes(fresh_bytes));
+		TEST_EXPECT(opennova::bms::is_bms(fresh_bytes.data(), fresh_bytes.size()));
+		opennova::bms::File fresh_parsed;
+		std::string fresh_err;
+		TEST_EXPECT(opennova::bms::parse(fresh_bytes.data(), fresh_bytes.size(), fresh_parsed, fresh_err));
+		TEST_EXPECT(fresh_parsed.waypoint_records.size() == opennova::bms::kWaypointRecordCount);
+		TEST_EXPECT(fresh_parsed.group_records.size() == opennova::bms::kGroupRecordCount);
+		TEST_EXPECT(fresh_parsed.layer_records.size() == opennova::bms::kLayerRecordCount);
+		TEST_EXPECT(fresh_parsed.header.num_items == 0);
+		TEST_EXPECT(fresh_parsed.events.empty());
+		// Reparse + rewrite is byte-stable (the snapshot/restore parity the editor relies on).
+		opennova::mission::MissionDocument fresh_round;
+		TEST_EXPECT(fresh_round.load_bms_bytes(fresh_bytes.data(), fresh_bytes.size()));
+		std::vector<uint8_t> rewritten;
+		TEST_EXPECT(fresh_round.write_bms_bytes(rewritten));
+		TEST_EXPECT(rewritten == fresh_bytes);
+		// A from-scratch mission can adopt a terrain ref and round-trip it.
+		TEST_EXPECT(fresh.set_header_string("terrain", "dvxi5"));
+		std::vector<uint8_t> ref_bytes;
+		TEST_EXPECT(fresh.write_bms_bytes(ref_bytes));
+		opennova::mission::MissionDocument ref_reload;
+		TEST_EXPECT(ref_reload.load_bms_bytes(ref_bytes.data(), ref_bytes.size()));
+		TEST_EXPECT(ref_reload.info().terrain == "dvxi5");
+	}
+
+	// --- bms::equal: the editor's undo / dirty change-detection. Identity holds across a copy; a
+	// scalar, header, structural, or waypoint-record difference is detected; it agrees with
+	// serialized-bytes equality; two independently-built defaults compare equal. ---
+	{
+		opennova::bms::File base;
+		std::string err;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), base, err));
+		opennova::bms::File copy = base;
+		TEST_EXPECT(opennova::bms::equal(base, copy));
+		if (!copy.items.empty()) {
+			copy.items[0].x += 1;
+			TEST_EXPECT(!opennova::bms::equal(base, copy));
+			copy.items[0].x -= 1;
+			TEST_EXPECT(opennova::bms::equal(base, copy)); // restored -> equal again
+		}
+		opennova::bms::File hdr_changed = base;
+		hdr_changed.header.minutes_per_day = static_cast<uint16_t>(hdr_changed.header.minutes_per_day + 1);
+		TEST_EXPECT(!opennova::bms::equal(base, hdr_changed));
+		opennova::bms::File grew = base;
+		grew.items.push_back(opennova::bms::Entity{});
+		TEST_EXPECT(!opennova::bms::equal(base, grew));
+		opennova::bms::File wp_changed = base;
+		TEST_EXPECT(!wp_changed.waypoint_records.empty());
+		wp_changed.waypoint_records[0].flags = static_cast<opennova::bms::WaypointFlags>(
+			static_cast<int>(wp_changed.waypoint_records[0].flags) ^ 1);
+		TEST_EXPECT(!opennova::bms::equal(base, wp_changed));
+		// equal() agrees with serialized-bytes equality.
+		std::vector<uint8_t> base_bytes, grew_bytes;
+		TEST_EXPECT(opennova::bms::write(base, base_bytes, err));
+		TEST_EXPECT(opennova::bms::write(grew, grew_bytes, err));
+		TEST_EXPECT((base_bytes == grew_bytes) == opennova::bms::equal(base, grew));
+		// Two independently-built defaults serialize identically, so they compare equal.
+		opennova::mission::MissionDocument d1;
+		opennova::mission::MissionDocument d2;
+		d1.create_default();
+		d2.create_default();
+		TEST_EXPECT(opennova::bms::equal(d1.bms_file(), d2.bms_file()));
+	}
+
 	return 0;
 }

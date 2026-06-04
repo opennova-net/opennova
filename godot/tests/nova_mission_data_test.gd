@@ -586,72 +586,116 @@ func test_waypoint_methods_reject_out_of_range_paths() -> void:
 		"add_waypoint_marker rejects a negative path")
 
 
-# --- Authoring (Phase 5): snapshot / restore (undo/redo spine) ----------------
-# snapshot() serializes the whole document through the same byte-faithful writer as
-# save (write_bms_bytes), and restore_snapshot() re-parses it (load_bms_bytes). The
-# editor's undo stack holds these re-serialized states; restoring one rewinds the
-# whole document without touching the filesystem. The byte fidelity itself is proven
-# at the lib level (tests/mission/mission_bms_test.cpp); here we assert the GDScript
-# boundary: a snapshot round-trips, captures the live (not the on-disk) state, and
-# fails cleanly on garbage.
+# --- create_default (from-scratch) --------------------------------------------
+# create_default() builds a valid, empty mission in memory (no file). The byte fidelity of the
+# round-trip is proven at the lib level (tests/mission/mission_bms_test.cpp); here we assert the
+# GDScript boundary: loaded + empty, editable, and savable + reopenable.
 
-func test_snapshot_restore_rewinds_a_mutation() -> void:
+func test_create_default_is_loaded_and_empty() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.create_default(), OK, "create_default succeeds")
+	assert_true(m.is_loaded(), "a default mission reports loaded")
+	assert_eq(m.get_source_path(), "", "a default mission has no source path")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_ITEM), 0, "no items")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), 0, "no buildings")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_MARKER), 0, "no markers")
+	assert_false(m.is_dirty(), "a freshly-created mission is not dirty")
+
+
+func test_create_default_save_and_reopen() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.create_default(), OK)
+	assert_true(m.set_header_string("terrain", "dvxi5"), "terrain ref is settable")
+	m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3(5, 6, 7), Vector3.ZERO)
+	var path := ProjectSettings.globalize_path("user://test_create_default.bms")
+	assert_eq(m.save_as(path), OK, "a from-scratch mission saves to disk")
+
+	var reopened := NovaMissionData.new()
+	assert_eq(reopened.open_file(path), OK, "the saved from-scratch mission reopens")
+	assert_eq(reopened.get_terrain_ref(), "dvxi5", "terrain ref round-trips")
+	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_ITEM), 1, "the placed item round-trips")
+	DirAccess.remove_absolute(path)
+
+
+# --- Undo / redo + dirty (in-memory document history) -------------------------
+# The history holds in-memory document snapshots (no serialized bytes). begin_edit/commit_edit
+# bracket a gesture into one step (commit pushes only on a real change); undo/redo swap the
+# document; is_dirty() is exact against the clean baseline set by mark_clean().
+
+func test_begin_commit_undo_rewinds_a_mutation() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
+	m.mark_clean()
 	var before := m.get_entity_count(NovaMissionData.KIND_BUILDING)
-	var clean := m.snapshot()
-	assert_false(clean.is_empty(), "a loaded mission snapshots to non-empty bytes")
+	assert_false(m.can_undo(), "a freshly opened mission has no undo history")
 
-	# Mutate, then restore the pre-mutation snapshot: the added entity must be gone.
+	m.begin_edit()
 	m.add_entity(NovaMissionData.KIND_BUILDING, 102001, Vector3(1, 2, 3), Vector3.ZERO)
+	m.commit_edit()
 	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "the placement landed")
-	assert_true(m.restore_snapshot(clean), "restoring a valid snapshot succeeds")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before, "restore rewinds the placement")
-	assert_true(m.is_loaded(), "the document is still loaded after a restore")
+	assert_true(m.can_undo(), "the committed edit is one undo step")
+	assert_eq(m.undo_depth(), 1, "exactly one step")
+
+	assert_true(m.undo(), "undo succeeds")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before, "undo rewinds the placement")
+	assert_true(m.is_loaded(), "the document is still loaded after an undo")
+	assert_true(m.can_redo(), "and is now redoable")
 
 
-func test_snapshot_captures_the_live_state_not_the_file() -> void:
-	# The snapshot is a re-serialization of the current in-memory document, not the bytes
-	# opened from disk. So a snapshot taken after one edit, restored after a second edit,
-	# must land on the first-edit state (proving no raw-input passthrough).
+func test_no_change_session_pushes_no_step() -> void:
+	# A begin/commit with no actual mutation (or a same-value edit) must add no undo step --
+	# this pins bms::equal at the binding boundary.
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
+	m.begin_edit()
+	m.commit_edit()
+	assert_false(m.can_undo(), "an empty edit session pushes nothing")
+
 	var index := int(m.get_entities(NovaMissionData.KIND_BUILDING)[0]["index"])
-	var rotation: Vector3 = m.get_entity(NovaMissionData.KIND_BUILDING, index)["rotation_deg"]
-
-	m.set_entity_transform(NovaMissionData.KIND_BUILDING, index, Vector3(10, 20, 30), rotation)
-	var after_first := m.snapshot()
-	m.set_entity_transform(NovaMissionData.KIND_BUILDING, index, Vector3(99, 88, 77), rotation)
-	assert_true(m.restore_snapshot(after_first), "restoring the first-edit snapshot succeeds")
-
-	var restored: Vector3 = m.get_entity(NovaMissionData.KIND_BUILDING, index)["position"]
-	assert_almost_eq(restored.x, 10.0, 0.02, "restore lands on the first edit's X, not the second")
-	assert_almost_eq(restored.y, 20.0, 0.02, "restore lands on the first edit's Y")
-	assert_almost_eq(restored.z, 30.0, 0.02, "restore lands on the first edit's Z")
+	var pos: Vector3 = m.get_entity(NovaMissionData.KIND_BUILDING, index)["position"]
+	var rot: Vector3 = m.get_entity(NovaMissionData.KIND_BUILDING, index)["rotation_deg"]
+	m.begin_edit()
+	m.set_entity_transform(NovaMissionData.KIND_BUILDING, index, pos, rot) # same value
+	m.commit_edit()
+	assert_false(m.can_undo(), "a same-value edit pushes nothing")
 
 
-func test_restore_snapshot_leaves_the_dirty_flag_to_the_caller() -> void:
-	# The editor owns its own dirty state; restore must not clear modified (an undo can
-	# leave the document dirty relative to disk).
+func test_undo_redo_round_trip() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var clean := m.snapshot()
+	var before := m.get_entity_count(NovaMissionData.KIND_ITEM)
+	m.begin_edit()
 	m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
-	assert_true(m.is_modified(), "the placement set the dirty flag")
-	assert_true(m.restore_snapshot(clean), "restore succeeds")
-	assert_true(m.is_modified(), "restore does not touch the dirty flag (the caller recomputes it)")
+	m.commit_edit()
+	assert_true(m.undo(), "undo")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_ITEM), before, "undo removes the item")
+	assert_true(m.redo(), "redo")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_ITEM), before + 1, "redo re-adds the item")
+	assert_false(m.can_redo(), "the redo step is consumed")
 
 
-func test_snapshot_without_a_mission_is_empty() -> void:
-	var m := NovaMissionData.new()  # never opened -> nothing to serialize
-	assert_true(m.snapshot().is_empty(), "snapshot of an unloaded mission is an empty array")
-
-
-func test_restore_snapshot_of_garbage_returns_false() -> void:
+func test_is_dirty_tracks_the_clean_baseline() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var garbage := PackedByteArray([0, 1, 2, 3, 4, 5, 6, 7])
-	assert_false(m.restore_snapshot(garbage), "restoring unparseable bytes returns false")
+	m.mark_clean()
+	assert_false(m.is_dirty(), "a freshly-cleaned mission is not dirty")
+	m.begin_edit()
+	m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
+	m.commit_edit()
+	assert_true(m.is_dirty(), "an edit dirties the mission")
+	assert_true(m.undo(), "undo")
+	assert_false(m.is_dirty(), "undoing back to the clean baseline clears dirty")
+	assert_true(m.redo(), "redo")
+	assert_true(m.is_dirty(), "redo re-dirties")
+	m.mark_clean()
+	assert_false(m.is_dirty(), "mark_clean rebaselines to the current state")
+
+
+func test_undo_on_empty_history_returns_false() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	assert_false(m.undo(), "undo with no history returns false")
+	assert_false(m.redo(), "redo with no history returns false")
 
 
 # --- Phase 1: hidden entity fields + mission-header editing --------------------
