@@ -41,8 +41,8 @@ func test_track_drag_payload_empty_without_bank():
 
 
 func test_double_click_node_drills_into_logic_graph():
-	# Double-click now drills into the state's logic-graph blueprint (Stage 2),
-	# not the raw-script drawer (which stays reachable via the Advanced toggle).
+	# Double-click drills into the state's logic-graph blueprint (the sole authoring
+	# surface; there is no raw-script drawer anymore).
 	var doc = MusicEditorDocument.new()
 	_copy(BANK_FIXTURE, PAIR_BANK)
 	_copy(SCRIPT_FIXTURE, PAIR_SCRIPT)
@@ -51,7 +51,6 @@ func test_double_click_node_drills_into_logic_graph():
 	add_child_autofree(lm)
 	lm.bind_document(doc)
 	await get_tree().process_frame
-	var drawer = lm.get_node("%AdvancedDrawer")
 	var ev := InputEventMouseButton.new()
 	ev.button_index = MOUSE_BUTTON_LEFT
 	ev.double_click = true
@@ -59,7 +58,6 @@ func test_double_click_node_drills_into_logic_graph():
 	await get_tree().process_frame
 	assert_true(lm._logic_graph.visible, "double-clicking a state drills into its logic graph")
 	assert_false(lm.get_node("%SectionMap").visible, "the map hides while drilled in")
-	assert_false(drawer.visible, "double-click no longer pops the raw-script drawer")
 
 
 func _copy(src_path: String, dst_path: String) -> void:

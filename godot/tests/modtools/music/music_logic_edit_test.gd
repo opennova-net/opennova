@@ -137,9 +137,10 @@ func test_folded_run_has_no_tools():
 	assert_null(_button_in(play, "✕"), "a folded ×N node carries no edit tools")
 
 
-func test_nested_branch_statement_has_no_tools():
-	# A statement inside an if's then/else shares the if's ordinal, so it isn't
-	# individually editable on the graph (edit the whole if via its ✎ -> raw).
+func test_flat_if_body_statement_is_editable_in_place():
+	# A leaf statement inside a flat if's then/else is now individually editable on
+	# the graph (Phase B): it carries its own ✎/✕/↑/↓; deleting it regenerates the
+	# whole if and emits a replace of the if's row (not a top-level delete).
 	var g := _egraph({
 		"index": 0, "name": "S", "statements": [
 			{"kind": "if", "code_offset": 0, "expr": "(Var01 == 0)", "else_present": false,
@@ -148,10 +149,10 @@ func test_nested_branch_statement_has_no_tools():
 		],
 	})
 	await get_tree().process_frame
-	# The nested "enter A" to-state node must NOT carry a delete tool.
 	var enter := _node_titled(g, "Enter")
 	assert_not_null(enter, "nested enter node present")
-	assert_null(_button_in(enter, "✕"), "a nested (branch-body) node carries no tools")
+	assert_not_null(_button_in(enter, "✕"), "a flat if-body leaf now carries a delete tool")
+	assert_not_null(_button_in(enter, "✎"), "a flat if-body leaf now carries an edit tool")
 
 
 # --- tool buttons emit the right intents --------------------------------
@@ -185,23 +186,103 @@ func test_reorder_buttons_emit_direction():
 	assert_eq(moves, [[2, 0, -1], [2, 0, 1]], "↑/↓ emit reorder with -1 / +1")
 
 
-func test_if_edit_routes_to_raw_drawer():
-	# An existing if can hold nested bodies the single-action form can't represent,
-	# so its ✎ routes to the raw-script drawer instead of a lossy structured edit.
+func test_flat_if_header_edits_condition():
+	# Phase B: a flat if's ✎ edits its CONDITION in place (a small expression dialog);
+	# its body statements are edited on their own nodes. There is no raw drawer.
 	var g := _egraph({
 		"index": 7, "name": "Branchy", "statements": [
 			{"kind": "if", "code_offset": 0, "expr": "(Var01 == 0)", "else_present": false,
-				"then": [{"kind": "return", "code_offset": 4, "text": "return"}], "else": []},
+				"then": [{"kind": "transition", "code_offset": 4, "target_name": "A", "target_section": 1, "text": "enter A"}], "else": []},
 		],
 	})
 	await get_tree().process_frame
-	var raw := []
-	g.open_raw_requested.connect(func(n): raw.append(String(n)))
-	var replaced := []
-	g.replace_statement_requested.connect(func(si, o, l): replaced.append([si, o]))
 	_button_in(_node_titled(g, "If"), "✎").pressed.emit()
-	assert_eq(raw, ["Branchy"], "editing an if opens the raw drawer for its section")
-	assert_eq(replaced.size(), 0, "an if edit does NOT emit a (lossy) structured replace")
+	assert_not_null(_first_dialog(g), "the if ✎ opens a condition editor dialog")
+
+
+# --- if regeneration: the whole block is rebuilt from its (edited) body texts ----
+
+func test_if_body_replace_regenerates_block():
+	var g := _egraph({"index": 5, "name": "S", "statements": [
+		{"kind": "if", "expr": "(Var01 != 0)", "else_present": true,
+			"then": [{"kind": "transition", "target_name": "A", "text": "enter A"}],
+			"else": [{"kind": "transition", "target_name": "B", "text": "enter B"}]}]})
+	await get_tree().process_frame
+	var captured := []
+	g.replace_statement_requested.connect(func(si, o, l): captured.append([si, o, Array(l)]))
+	var if_dict := {"expr": "(Var01 != 0)", "else_present": true,
+		"then": [{"text": "enter A"}], "else": [{"text": "enter B"}]}
+	g._apply_branch_mutation(if_dict, 0, "then", 0, "replace", "enter Next")
+	assert_eq(captured.size(), 1, "one replace emitted")
+	assert_eq(captured[0][0], 5, "section index comes from the shown section")
+	assert_eq(captured[0][1], 0, "the if's ordinal")
+	assert_eq(captured[0][2],
+		["if ((Var01 != 0))", "{", "    enter Next", "}", "else", "{", "    enter B", "}"],
+		"then[0] replaced, else preserved, canonical formatting")
+
+
+func test_if_body_delete_and_append_regenerate():
+	var g := _egraph({"index": 1, "name": "S", "statements": [
+		{"kind": "if", "expr": "(x)", "else_present": false, "then": [], "else": []}]})
+	await get_tree().process_frame
+	var captured := []
+	g.replace_statement_requested.connect(func(si, o, l): captured.append(Array(l)))
+	# expr already carries its parens (binops self-parenthesize), so if_block wraps to
+	# the decompiler's canonical double-paren form: if ((x)).
+	var if_dict := {"expr": "(x)", "else_present": false,
+		"then": [{"text": "play sound_0"}, {"text": "enter A"}], "else": []}
+	g._apply_branch_mutation(if_dict, 0, "then", 0, "delete", "")
+	assert_eq(captured[0], ["if ((x))", "{", "    enter A", "}"], "delete then[0] leaves then[1]")
+	captured.clear()
+	g._apply_branch_mutation(if_dict, 0, "then", -1, "append", "play sound_3")
+	assert_eq(captured[0], ["if ((x))", "{", "    play sound_0", "    enter A", "    play sound_3", "}"],
+		"append adds to the end of the branch")
+
+
+func test_if_condition_edit_regenerates_keeping_body():
+	var g := _egraph({"index": 2, "name": "S", "statements": [
+		{"kind": "if", "expr": "(Var01 != 0)", "else_present": false,
+			"then": [{"kind": "transition", "target_name": "A", "text": "enter A"}], "else": []}]})
+	await get_tree().process_frame
+	var captured := []
+	g.replace_statement_requested.connect(func(si, o, l): captured.append(Array(l)))
+	var if_dict := {"expr": "(Var01 != 0)", "else_present": false,
+		"then": [{"text": "enter A"}], "else": []}
+	g._emit_if_replace(if_dict, 0, "(Var05 > 3)", g._branch_texts(if_dict, "then"), g._branch_texts(if_dict, "else"))
+	assert_eq(captured[0], ["if ((Var05 > 3))", "{", "    enter A", "}"],
+		"new condition, body preserved, no else block")
+
+
+func test_edit_if_body_target_through_document():
+	# End-to-end against the shipped gamemus: retarget the Testmission if's then-branch
+	# transition via the graph's branch mutation, routed through the document.
+	var doc := _doc()
+	var sn := _sname(doc)
+	var tm := _section(doc, "Testmission")
+	assert_false(tm.is_empty(), "Testmission present")
+	var stmts: Array = tm.get("statements", [])
+	var if_idx := -1
+	for i in range(stmts.size()):
+		if String(stmts[i].get("kind", "")) == "if":
+			if_idx = i
+	assert_gt(if_idx, -1, "Testmission has an if")
+	var if_dict: Dictionary = stmts[if_idx]
+	var g = MusicSectionLogicGraph.new()
+	g.size = Vector2(960, 720)
+	add_child_autofree(g)
+	g.configure_authoring(doc.mus_script.get_section_names(sn), _vars(), doc.mus_script, [], true)
+	g.show_section(tm, [])
+	await get_tree().process_frame
+	g.replace_statement_requested.connect(func(si, o, l): doc.replace_statement(si, o, l))
+	g._apply_branch_mutation(if_dict, if_idx, "then", 0, "replace", "enter Win000")
+	# Re-fetch and confirm the if's then-body now enters Win000.
+	var if2 := {}
+	for s in _section(doc, "Testmission").get("statements", []):
+		if String(s.get("kind", "")) == "if":
+			if2 = s
+	assert_false(if2.is_empty(), "if still present after the edit")
+	var then0: String = String((if2.get("then", []) as Array)[0].get("text", ""))
+	assert_eq(then0, "enter Win000", "the if's then-branch transition now targets Win000")
 
 
 # --- frame-setup (0x38) renders locked (the IDA fidelity fix) ------------

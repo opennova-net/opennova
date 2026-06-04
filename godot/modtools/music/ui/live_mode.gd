@@ -91,8 +91,6 @@ var _last_log_count: int = 0
 @onready var _filter_var: CheckBox = %FilterVar
 @onready var _filter_volume: CheckBox = %FilterVolume
 @onready var _map: GraphEdit = %SectionMap
-@onready var _advanced_drawer: PanelContainer = %AdvancedDrawer
-@onready var _advanced_toggle: Button = %AdvancedToggle
 var _add_state_btn: Button
 # Level-2 drill-in: the section logic graph swaps into the center canvas (Stage 2).
 var _logic_graph: GraphEdit
@@ -171,11 +169,9 @@ func _ready() -> void:
 		_jump_option.item_selected.connect(_on_jump_selected)
 	if _map != null:
 		_map.node_selected.connect(_on_map_node_selected)
-	# The drill-in blueprint graph is now the sole per-statement authoring surface;
-	# the old right-dock inspector is gone. All authoring intents (add/replace/delete/
-	# reorder/add-play) route from the graph in _install_logic_graph below.
-	if _advanced_toggle != null:
-		_advanced_toggle.toggled.connect(_on_advanced_toggled)
+	# The drill-in blueprint graph is now the sole authoring surface; the right-dock
+	# inspector and the raw-script drawer are both gone. All authoring intents
+	# (add/replace/delete/reorder/add-play) route from the graph in _install_logic_graph.
 	_install_add_state_button()
 	_install_logic_graph()
 	if _var_inspector.has_method("bind_director"):
@@ -263,10 +259,6 @@ func _refresh_var_labels() -> void:
 	if _var_inspector.has_method("set_profile_path"):
 		_var_inspector.call("set_profile_path", profile_path)
 	_var_inspector.call("set_script_name", script_name)
-
-
-func start_from_script_mode() -> void:
-	_on_start()
 
 
 func _on_pause() -> void:
@@ -759,14 +751,9 @@ func _on_map_node_selected(node: Node) -> void:
 		_on_graph_section_pressed(StringName(sec))
 
 
-func _on_advanced_toggled(pressed: bool) -> void:
-	if _advanced_drawer != null:
-		_advanced_drawer.visible = pressed
-
-
-# A failed compile (Compile / Compile&Run / Save) only populates the Script-mode
-# error list inside the Advanced drawer. Flash the first diagnostic on the
-# transport label and reveal the drawer so the failure is never silent.
+# A failed compile (Save, or the rare structured edit that doesn't round-trip)
+# flashes the first diagnostic on the always-visible transport label. Structured
+# edits are gated and roll back on failure, so this is a belt-and-suspenders surface.
 func _on_compile_finished(success: bool, errors: Array) -> void:
 	if success or errors.is_empty():
 		return
@@ -776,22 +763,11 @@ func _on_compile_finished(success: bool, errors: Array) -> void:
 	if line > 0:
 		msg = "line %d: %s" % [line, msg]
 	_flash_start_warning(msg)
-	_reveal_advanced_drawer()
-
-
-func _reveal_advanced_drawer() -> void:
-	if _advanced_drawer != null:
-		_advanced_drawer.visible = true
-	# Keep the toggle in sync without re-triggering _on_advanced_toggled.
-	if _advanced_toggle != null and _advanced_toggle.has_method("set_pressed_no_signal"):
-		_advanced_toggle.set_pressed_no_signal(true)
 
 
 # Double-clicking a state drills into its logic-graph blueprint. Single clicks fall
 # through to GraphEdit's node_selected (-> _on_map_node_selected). Right-click opens
-# the state context menu (rename / delete / open) -- the state-level operations the
-# removed right inspector used to own. The raw script stays reachable via the
-# transport's "Advanced script" toggle.
+# the state context menu (rename / delete / open).
 func _on_node_gui_input(event: InputEvent, section_name: String) -> void:
 	if event is InputEventMouseButton and event.double_click \
 			and event.button_index == MOUSE_BUTTON_LEFT:
@@ -809,23 +785,6 @@ func _on_inspector_add_play(section_name: StringName, track: int) -> void:
 		return
 	if _document.insert_play(section_name, track):
 		_follow_live = false
-
-
-# Reveal the raw-script drawer at a section. Fired by the blueprint's open_raw intent
-# (editing a construct the visual form can't represent losslessly) and the transport's
-# "Advanced script" toggle. The blueprint is the language; this is the last resort.
-func _on_inspector_advanced(section_name: StringName) -> void:
-	if _advanced_toggle != null:
-		_advanced_toggle.set_pressed_no_signal(true)
-	if _advanced_drawer != null:
-		_advanced_drawer.visible = true
-	var script_node := _script_panel()
-	if script_node != null and script_node.has_method("scroll_to_section"):
-		script_node.scroll_to_section(section_name)
-
-
-func _script_panel() -> Node:
-	return find_child("Script", true, false)
 
 
 # Variable picker list for the authoring popups: Var00..Var16 (all 17 int32
@@ -993,15 +952,14 @@ func _install_logic_graph() -> void:
 	_logic_graph.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_logic_graph.visible = false
 	_logic_graph.open_section_requested.connect(func(n): _drill_into(String(n)))
-	# Stage 3 authoring intents reuse the inspector's document handlers verbatim --
-	# the graph and the inspector emit the same add/replace/delete/reorder/add-play
-	# signals, so one set of parity-gated, undoable write-path routes serves both.
+	# The blueprint's authoring intents route to the document's parity-gated, undoable
+	# write path (these handlers keep their _on_inspector_* names from when the inspector
+	# shared them; the inspector is gone, the graph is the sole emitter now).
 	_logic_graph.add_statement_requested.connect(_on_inspector_add_statement)
 	_logic_graph.replace_statement_requested.connect(_on_inspector_replace_statement)
 	_logic_graph.delete_statement_requested.connect(_on_inspector_delete_statement)
 	_logic_graph.reorder_statement_requested.connect(_on_inspector_reorder_statement)
 	_logic_graph.add_play_requested.connect(_on_inspector_add_play)
-	_logic_graph.open_raw_requested.connect(_on_inspector_advanced)
 	_logic_graph.author_failed.connect(func(msg: String): _flash_start_warning(msg))
 	col.add_child(_logic_graph)
 

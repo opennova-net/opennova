@@ -33,12 +33,10 @@ signal replace_statement_requested(section_index: int, ordinal: int, lines: Pack
 signal delete_statement_requested(section_index: int, ordinal: int)
 signal reorder_statement_requested(section_index: int, ordinal: int, direction: int)
 signal add_play_requested(section_name: StringName, track: int)
-# An existing if/switch body (nested statements) is lossy to the single-action
-# form, so editing it routes to the raw-script drawer the host owns.
-signal open_raw_requested(section_name: StringName)
 signal author_failed(message: String)
 
 const MusForms = preload("res://modtools/music/mus_forms.gd")
+const MusStmtText = preload("res://modtools/music/mus_stmt_text.gd")
 
 const COL_W := 250.0
 const ROW_H := 130.0
@@ -93,6 +91,9 @@ var _section_names: PackedStringArray = PackedStringArray()
 var _var_list: Array = []        # [{token:String, label:String}]
 var _mus = null                  # NovaMusicScript for expr validation
 var _add_menu: MenuButton = null
+# Items shown in the per-branch ＋Add popup (MusForms.ADD_ITEMS minus if/switch, so
+# bodies stay flat); set when the popup opens, read by _on_branch_add_id.
+var _branch_add_items: Array = []
 
 
 func _ready() -> void:
@@ -308,20 +309,19 @@ func _build_jump(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
 # built at depth+1 and rejoined to whatever follows (their exits + the after pin).
 func _build_if(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
 	var gn := _new_node("if", ordinal, depth)
+	# Flat ifs (no nested if/switch in a body) are editable in place: the header ✎
+	# edits the condition, each then/else label carries a ＋ to add to that branch,
+	# and each body node carries its own ✎/✕/↑/↓. Every mutation regenerates the whole
+	# if from its bodies and replaces it as one row. (No stock if is non-flat.)
+	var flat := _if_flat_editable(s)
 	var cond := Label.new()
 	cond.text = "if (%s)" % _unwrap_outer_parens(String(s.get("expr", "")))
 	gn.add_child(cond)
-	var then_lbl := Label.new()
-	then_lbl.text = "✓ then ▸"
-	then_lbl.add_theme_color_override("font_color", Color(0.6, 0.9, 0.6))
-	gn.add_child(then_lbl)
+	gn.add_child(_branch_header_row("✓ then ▸", Color(0.6, 0.9, 0.6), s, ordinal, "then", flat))
 	var else_present := bool(s.get("else_present", false))
 	var else_row := -1
 	if else_present:
-		var else_lbl := Label.new()
-		else_lbl.text = "✗ else ▸"
-		else_lbl.add_theme_color_override("font_color", Color(0.9, 0.6, 0.6))
-		gn.add_child(else_lbl)
+		gn.add_child(_branch_header_row("✗ else ▸", Color(0.9, 0.6, 0.6), s, ordinal, "else", flat))
 		else_row = gn.get_child_count() - 1
 	var after_lbl := Label.new()
 	after_lbl.text = "▾ after"
@@ -341,14 +341,14 @@ func _build_if(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
 	gn.set_slot(after_row, false, 0, _IN_PIN, true, 0, _EXEC_PIN)
 
 	var exits: Array = []
-	var then_seq := _build_seq(s.get("then", []), depth + 1, ordinal)
+	var then_seq := _build_branch(s, ordinal, "then", depth + 1)
 	if not then_seq["entry"].is_empty():
 		_wire([gn.name, then_port], then_seq["entry"])
 		exits.append_array(then_seq["exits"])
 	else:
 		exits.append([gn.name, then_port])
 	if else_present:
-		var else_seq := _build_seq(s.get("else", []), depth + 1, ordinal)
+		var else_seq := _build_branch(s, ordinal, "else", depth + 1)
 		if not else_seq["entry"].is_empty():
 			_wire([gn.name, 1], else_seq["entry"])
 			exits.append_array(else_seq["exits"])
@@ -356,6 +356,166 @@ func _build_if(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
 			exits.append([gn.name, 1])
 	exits.append([gn.name, after_port])
 	return {"entry": [gn.name, 0], "exits": exits, "node": gn}
+
+
+# --- in-place if-body editing (regenerate the whole if, replace as one row) ---
+
+# A flat if has only leaf statements in its bodies (no nested if/switch/branch_comment).
+# Only flat ifs are editable in place, because regeneration rebuilds the body from each
+# statement's rendered TEXT -- a nested block's text is just its header, so a non-flat
+# body would be truncated. No stock script has a non-flat if.
+func _if_flat_editable(s: Dictionary) -> bool:
+	if not _editable:
+		return false
+	for branch in ["then", "else"]:
+		for st in s.get(branch, []):
+			var k := String(st.get("kind", ""))
+			if k == "if" or k == "switch" or k == "branch_comment":
+				return false
+	return true
+
+
+# A then/else header label, plus a ＋ (add to this branch) when the if is editable.
+func _branch_header_row(label_text: String, color: Color, if_dict: Dictionary, if_ordinal: int, branch: String, flat: bool) -> Control:
+	var row := HBoxContainer.new()
+	var lbl := Label.new()
+	lbl.text = label_text
+	lbl.add_theme_color_override("font_color", color)
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(lbl)
+	if flat:
+		var add := _tool_btn("＋", "Add a statement to this branch")
+		add.pressed.connect(func(): _open_branch_add(if_dict, if_ordinal, branch))
+		row.add_child(add)
+	return row
+
+
+# Build one branch's body nodes, wired in sequence; each leaf gets branch-aware tools
+# (when the if is flat-editable). Mirrors _build_seq but addresses by (branch, index)
+# into the owning if rather than by a top-level ordinal.
+func _build_branch(if_dict: Dictionary, if_ordinal: int, branch: String, depth: int) -> Dictionary:
+	var stmts: Array = if_dict.get(branch, [])
+	var entry: Array = []
+	var prev_exits: Array = []
+	var flat := _if_flat_editable(if_dict)
+	for i in range(stmts.size()):
+		var st: Dictionary = stmts[i]
+		var built := _build_stmt(st, depth, if_ordinal)
+		if flat and built.has("node"):
+			_attach_branch_tools(built["node"], if_dict, if_ordinal, branch, i, st)
+		if entry.is_empty():
+			entry = built["entry"]
+		for e in prev_exits:
+			_wire(e, built["entry"])
+		prev_exits = built["exits"]
+	return {"entry": entry, "exits": prev_exits}
+
+
+func _attach_branch_tools(gn: GraphNode, if_dict: Dictionary, if_ordinal: int, branch: String, idx: int, st: Dictionary) -> void:
+	var kind := String(st.get("kind", ""))
+	var box := HBoxContainer.new()
+	box.add_theme_constant_override("separation", 2)
+	if kind != "return" and kind != "yield" and kind != "done" and kind != "nop":
+		var edit := _tool_btn("✎", "Edit")
+		edit.pressed.connect(func(): _open_branch_edit(if_dict, if_ordinal, branch, idx, st))
+		box.add_child(edit)
+	var del := _tool_btn("✕", "Delete")
+	del.pressed.connect(func(): _apply_branch_mutation(if_dict, if_ordinal, branch, idx, "delete", ""))
+	box.add_child(del)
+	var up := _tool_btn("↑", "Move up")
+	up.pressed.connect(func(): _apply_branch_mutation(if_dict, if_ordinal, branch, idx, "up", ""))
+	box.add_child(up)
+	var down := _tool_btn("↓", "Move down")
+	down.pressed.connect(func(): _apply_branch_mutation(if_dict, if_ordinal, branch, idx, "down", ""))
+	box.add_child(down)
+	for b in box.get_children():
+		(b as Control).custom_minimum_size = Vector2(26, 0)
+	gn.add_child(box)
+
+
+func _open_branch_edit(if_dict: Dictionary, if_ordinal: int, branch: String, idx: int, st: Dictionary) -> void:
+	var kind := String(st.get("kind", ""))
+	_forms.configure(_section_names, _var_list, _mus, _bank_names)
+	_forms.open_form(self, kind, st, true, func(lines: PackedStringArray):
+		if lines.is_empty():
+			author_failed.emit("Fill in the fields first")
+		else:
+			_apply_branch_mutation(if_dict, if_ordinal, branch, idx, "replace", String(lines[0])))
+
+
+func _open_branch_add(if_dict: Dictionary, if_ordinal: int, branch: String) -> void:
+	var pop := PopupMenu.new()
+	_branch_add_items = []
+	for item in MusForms.ADD_ITEMS:
+		var k := String(item[1])
+		if k == "if" or k == "switch":
+			continue  # bodies stay flat (no nested blocks)
+		_branch_add_items.append(item)
+	for i in range(_branch_add_items.size()):
+		pop.add_item(String(_branch_add_items[i][0]), i)
+	add_child(pop)
+	pop.id_pressed.connect(_on_branch_add_id.bind(if_dict, if_ordinal, branch))
+	pop.popup_hide.connect(pop.queue_free)
+	pop.position = Vector2i(get_global_mouse_position())
+	pop.reset_size()
+	pop.popup()
+
+
+func _on_branch_add_id(id: int, if_dict: Dictionary, if_ordinal: int, branch: String) -> void:
+	if id < 0 or id >= _branch_add_items.size():
+		return
+	var kind := String(_branch_add_items[id][1])
+	if _forms.is_inputless(kind):
+		var l := _forms.simple_lines(kind)
+		if not l.is_empty():
+			_apply_branch_mutation(if_dict, if_ordinal, branch, -1, "append", String(l[0]))
+		return
+	_forms.configure(_section_names, _var_list, _mus, _bank_names)
+	_forms.open_form(self, kind, {}, false, func(lines: PackedStringArray):
+		if not lines.is_empty():
+			_apply_branch_mutation(if_dict, if_ordinal, branch, -1, "append", String(lines[0])))
+
+
+# Apply a mutation to one branch's flat text list, then regenerate + replace the whole
+# if. idx<0 for append. Reads the CURRENT body texts from the AST dict (names-less,
+# recompilable) so unedited statements survive verbatim.
+func _apply_branch_mutation(if_dict: Dictionary, if_ordinal: int, branch: String, idx: int, op: String, new_line: String) -> void:
+	var then_t := _branch_texts(if_dict, "then")
+	var else_t := _branch_texts(if_dict, "else")
+	var target: Array = then_t if branch == "then" else else_t
+	match op:
+		"delete":
+			if idx >= 0 and idx < target.size():
+				target.remove_at(idx)
+		"replace":
+			if idx >= 0 and idx < target.size():
+				target[idx] = new_line
+		"append":
+			target.append(new_line)
+		"up":
+			if idx > 0 and idx < target.size():
+				var t: String = target[idx]
+				target[idx] = target[idx - 1]
+				target[idx - 1] = t
+		"down":
+			if idx >= 0 and idx < target.size() - 1:
+				var t: String = target[idx]
+				target[idx] = target[idx + 1]
+				target[idx + 1] = t
+	_emit_if_replace(if_dict, if_ordinal, String(if_dict.get("expr", "")), then_t, else_t)
+
+
+func _branch_texts(if_dict: Dictionary, branch: String) -> Array:
+	var out := []
+	for st in if_dict.get(branch, []):
+		out.append(String(st.get("text", "")))
+	return out
+
+
+func _emit_if_replace(if_dict: Dictionary, if_ordinal: int, cond: String, then_texts: Array, else_texts: Array) -> void:
+	var with_else := bool(if_dict.get("else_present", false))
+	var lines := MusStmtText.if_block(cond, PackedStringArray(then_texts), with_else, PackedStringArray(else_texts))
+	replace_statement_requested.emit(_section_index, if_ordinal, lines)
 
 
 # on (selector) action t0 t1 ... : in pin on the selector row, one out pin per
@@ -599,16 +759,20 @@ func _on_add_palette_id(id: int) -> void:
 
 # The per-node ✎/✕/↑/↓ cluster, appended as a (slot-less) trailing row so it never
 # disturbs the exec/branch pin ports built above it. done/nop carry no tools;
-# return/yield carry no ✎ (nothing to edit). if + branch_comment route ✎ to the raw
-# drawer (their nested bodies are lossy to the single-action form); everything else
-# opens its structured form as a replace.
+# return/yield carry no ✎ (nothing to edit); a branch_comment (an undetected branch)
+# and a non-flat if are read-only annotations with no ✎ either. The ✕/↑/↓ still
+# delete/move the whole statement. A flat if's ✎ edits its condition; everything
+# else opens its structured form as a replace.
 func _attach_tools(gn: GraphNode, s: Dictionary, ordinal: int) -> void:
 	var kind := String(s.get("kind", ""))
 	if kind == "done" or kind == "nop":
 		return
 	var box := HBoxContainer.new()
 	box.add_theme_constant_override("separation", 2)
-	if kind != "return" and kind != "yield":
+	var has_edit := kind != "return" and kind != "yield" and kind != "branch_comment"
+	if kind == "if" and not _if_flat_editable(s):
+		has_edit = false
+	if has_edit:
 		var edit := _tool_btn("✎", "Edit")
 		edit.pressed.connect(func(): _open_edit(kind, ordinal, s))
 		box.add_child(edit)
@@ -627,12 +791,18 @@ func _attach_tools(gn: GraphNode, s: Dictionary, ordinal: int) -> void:
 
 
 func _open_edit(kind: String, ordinal: int, s: Dictionary) -> void:
-	# An existing if (or an unstructured branch_comment) can hold arbitrary nested
-	# statements the single-action form can't represent, so a structured edit would
-	# silently truncate them: route to the raw-script drawer instead (lossless). This
-	# mirrors inspector_panel._open_edit_form.
-	if kind == "if" or kind == "branch_comment":
-		open_raw_requested.emit(StringName(_section_name))
+	# A flat if's ✎ edits just its CONDITION in place; its body statements are edited
+	# on their own nodes. The whole if is regenerated from its bodies + the new
+	# condition and replaced as one row. (Non-flat ifs / branch_comments get no ✎, so
+	# _open_edit is only ever reached for a flat if or a form-backed leaf kind.)
+	if kind == "if":
+		_forms.configure(_section_names, _var_list, _mus, _bank_names)
+		_forms.open_form(self, "condition", s, true, func(lines: PackedStringArray):
+			if lines.is_empty():
+				author_failed.emit("Enter a condition")
+			else:
+				_emit_if_replace(s, ordinal, String(lines[0]),
+					_branch_texts(s, "then"), _branch_texts(s, "else")))
 		return
 	var sidx := _section_index
 	_forms.configure(_section_names, _var_list, _mus, _bank_names)

@@ -212,7 +212,7 @@ func _path_exists(path: String) -> bool:
 func save_to_disk() -> int:
 	# Compile-on-Save: when the script side has uncommitted edits, run the
 	# compiler first so the saver writes fresh bytecode. A failed compile bails
-	# without touching disk; the error popout in script_mode listens to the
+	# without touching disk; the transport label flashes the diagnostic via the
 	# compile_finished signal that compile_script() emits.
 	if _script_dirty and script_loaded():
 		var errs: Array = prepare_script_for_run()
