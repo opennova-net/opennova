@@ -169,7 +169,13 @@ int NovaPffArchive::read_entry_cb(void *ctx, uint32_t index, uint8_t *out, uint3
 NovaPffArchive::NovaPffArchive() {}
 
 NovaPffArchive::~NovaPffArchive() {
-	// Join the save worker BEFORE freeing the source handle / model vectors it reads.
+	// Join both workers BEFORE freeing the source handle / model vectors they read. Request cancel
+	// first so a long-running extract stops at the next entry boundary instead of running to the end.
+	{
+		std::lock_guard<std::mutex> lock(extract_mutex_);
+		extract_state_.cancel_requested = true;
+	}
+	join_extract_thread();
 	join_save_thread();
 	close_source();
 }
@@ -195,6 +201,16 @@ void NovaPffArchive::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("extract_all", "out_dir", "decode"), &NovaPffArchive::extract_all, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("extract_to_status", "name", "out_path", "decode"), &NovaPffArchive::extract_to_status, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("get_last_undecoded_count"), &NovaPffArchive::get_last_undecoded_count);
+	ClassDB::bind_method(D_METHOD("extract_async", "names", "out_dir", "decode"), &NovaPffArchive::extract_async, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("is_extract_running"), &NovaPffArchive::is_extract_running);
+	ClassDB::bind_method(D_METHOD("is_extract_finished"), &NovaPffArchive::is_extract_finished);
+	ClassDB::bind_method(D_METHOD("request_extract_cancel"), &NovaPffArchive::request_extract_cancel);
+	ClassDB::bind_method(D_METHOD("get_extract_progress_done"), &NovaPffArchive::get_extract_progress_done);
+	ClassDB::bind_method(D_METHOD("get_extract_progress_total"), &NovaPffArchive::get_extract_progress_total);
+	ClassDB::bind_method(D_METHOD("get_extract_ok_count"), &NovaPffArchive::get_extract_ok_count);
+	ClassDB::bind_method(D_METHOD("get_extract_raw_count"), &NovaPffArchive::get_extract_raw_count);
+	ClassDB::bind_method(D_METHOD("get_extract_failed_count"), &NovaPffArchive::get_extract_failed_count);
+	ClassDB::bind_method(D_METHOD("wait_for_extract_completion"), &NovaPffArchive::wait_for_extract_completion);
 	ClassDB::bind_method(D_METHOD("add_file_from_disk", "src_path", "store_name", "encrypt"), &NovaPffArchive::add_file_from_disk, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("remove_entries", "names"), &NovaPffArchive::remove_entries);
 	ClassDB::bind_method(D_METHOD("is_dirty"), &NovaPffArchive::is_dirty);
@@ -679,4 +695,152 @@ void NovaPffArchive::wait_for_save_completion() {
 	if (ok) {
 		dirty_ = false; // cleared on the main thread only
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Async Extract (background thread; mirrors the Save worker)
+// ---------------------------------------------------------------------------
+
+void NovaPffArchive::join_extract_thread() {
+	if (extract_thread_.joinable()) {
+		extract_thread_.join();
+	}
+}
+
+// Runs on the worker thread. Reads source_/entries_ and writes output files; the editor disables
+// every other op while it runs, so the model is stable (same invariant as save_worker).
+void NovaPffArchive::extract_worker() {
+	for (const ExtractJob &job : extract_jobs_) {
+		{
+			std::lock_guard<std::mutex> lock(extract_mutex_);
+			if (extract_state_.cancel_requested) {
+				break;
+			}
+		}
+		// Read + decode (off the main thread). read_entry_bytes leaves `bytes` as the raw
+		// container-decrypted fallback when decode was asked for but the codec couldn't handle it.
+		std::vector<uint8_t> bytes;
+		bool decoded = false;
+		bool ok = (job.index < entries_.size()) &&
+				read_entry_bytes(entries_[job.index], extract_decode_, bytes, &decoded);
+		if (ok) {
+			FILE *f = fopen(job.out_native.c_str(), "wb");
+			if (f == nullptr) {
+				ok = false;
+			} else {
+				const bool wrote = bytes.empty() ||
+						fwrite(bytes.data(), 1, bytes.size(), f) == bytes.size();
+				fclose(f);
+				ok = wrote;
+			}
+		}
+		std::lock_guard<std::mutex> lock(extract_mutex_);
+		if (!ok) {
+			++extract_state_.failed;
+		} else if (extract_decode_ && !decoded) {
+			++extract_state_.raw;
+		} else {
+			++extract_state_.ok;
+		}
+		++extract_state_.done;
+	}
+	std::lock_guard<std::mutex> lock(extract_mutex_);
+	extract_state_.running = false;
+	extract_state_.finished = true;
+}
+
+Error NovaPffArchive::extract_async(const PackedStringArray &names, const String &out_dir, bool decode) {
+	last_error_ = String();
+	join_extract_thread(); // never start a second extract over a running one
+	const String dir_native = to_native_path(out_dir);
+	if (dir_native.strip_edges().is_empty()) {
+		last_error_ = "Output folder is empty";
+		return ERR_INVALID_PARAMETER;
+	}
+
+	// Resolve the job list on the main thread (find_entry mutates the lazy name index, so it must
+	// not run on the worker). Basename-only output paths: an entry name can never escape out_dir.
+	extract_jobs_.clear();
+	extract_decode_ = decode;
+	uint32_t total = 0;
+	uint32_t prefailed = 0;
+	if (names.is_empty()) {
+		total = static_cast<uint32_t>(entries_.size());
+		for (size_t i = 0; i < entries_.size(); ++i) {
+			ExtractJob j;
+			j.index = i;
+			const String base = String(entries_[i].name.c_str()).get_file();
+			j.out_native = dir_native.path_join(base).utf8().get_data();
+			extract_jobs_.push_back(std::move(j));
+		}
+	} else {
+		total = static_cast<uint32_t>(names.size());
+		for (int k = 0; k < names.size(); ++k) {
+			const Entry *e = find_entry(names[k]);
+			if (e == nullptr) {
+				++prefailed; // an unknown name counts as a failure but never starts a job
+				continue;
+			}
+			ExtractJob j;
+			j.index = static_cast<size_t>(e - entries_.data());
+			j.out_native = dir_native.path_join(String(names[k]).get_file()).utf8().get_data();
+			extract_jobs_.push_back(std::move(j));
+		}
+	}
+
+	{
+		std::lock_guard<std::mutex> lock(extract_mutex_);
+		extract_state_ = ExtractState();
+		extract_state_.running = true;
+		extract_state_.total = total;
+		// Pre-count unresolved names so `done` still reaches `total` when the worker finishes.
+		extract_state_.done = prefailed;
+		extract_state_.failed = prefailed;
+	}
+	extract_thread_ = std::thread(&NovaPffArchive::extract_worker, this);
+	return OK;
+}
+
+bool NovaPffArchive::is_extract_running() const {
+	std::lock_guard<std::mutex> lock(extract_mutex_);
+	return extract_state_.running;
+}
+
+bool NovaPffArchive::is_extract_finished() const {
+	std::lock_guard<std::mutex> lock(extract_mutex_);
+	return extract_state_.finished;
+}
+
+void NovaPffArchive::request_extract_cancel() {
+	std::lock_guard<std::mutex> lock(extract_mutex_);
+	extract_state_.cancel_requested = true;
+}
+
+int NovaPffArchive::get_extract_progress_done() const {
+	std::lock_guard<std::mutex> lock(extract_mutex_);
+	return static_cast<int>(extract_state_.done);
+}
+
+int NovaPffArchive::get_extract_progress_total() const {
+	std::lock_guard<std::mutex> lock(extract_mutex_);
+	return static_cast<int>(extract_state_.total);
+}
+
+int NovaPffArchive::get_extract_ok_count() const {
+	std::lock_guard<std::mutex> lock(extract_mutex_);
+	return static_cast<int>(extract_state_.ok);
+}
+
+int NovaPffArchive::get_extract_raw_count() const {
+	std::lock_guard<std::mutex> lock(extract_mutex_);
+	return static_cast<int>(extract_state_.raw);
+}
+
+int NovaPffArchive::get_extract_failed_count() const {
+	std::lock_guard<std::mutex> lock(extract_mutex_);
+	return static_cast<int>(extract_state_.failed);
+}
+
+void NovaPffArchive::wait_for_extract_completion() {
+	join_extract_thread();
 }

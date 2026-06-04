@@ -47,8 +47,6 @@ var _last_collisions: int = 0
 var _archives: Array = []
 var _active: int = -1
 
-const _EXTRACT_BATCH := 16
-
 
 func setup(host: Control, open_files: Callable, open_dir: Callable, show_status: Callable) -> void:
 	_host = host
@@ -358,6 +356,12 @@ func _on_archives_picked(paths: PackedStringArray) -> void:
 
 
 func _on_archive_selected(index: int) -> void:
+	# Don't switch the active archive while an extraction is running: the worker reads the model and
+	# the list selection drives which archive that is. The list reverts to the running archive.
+	if _busy:
+		if _active >= 0 and _active < _archive_list.item_count:
+			_archive_list.select(_active)
+		return
 	_active = index
 	_refresh_game_option()
 	_refresh_tree()
@@ -386,11 +390,9 @@ func _do_extract(names: PackedStringArray, dir: String) -> void:
 	var arc := _active_archive()
 	if arc == null:
 		return
-	var jobs: Array = []
 	_last_collisions = 0
-	for n in names:
-		jobs.append({"arc": arc, "name": n, "out_path": dir.path_join(String(n).get_file())})
-	await _perform_extraction(jobs, dir, 1)
+	# One step: the active archive extracts just the selected names.
+	await _perform_extraction([{"arc": arc, "names": names}], dir, 1)
 
 
 func _on_extract_all_pressed() -> void:
@@ -403,66 +405,81 @@ func _on_extract_all_pressed() -> void:
 func _do_extract_all(dir: String) -> void:
 	# Flat: every file from every open archive goes straight into `dir`. Same-named files across
 	# archives are last-write-wins — kept intentionally simple, but we count collisions so the
-	# report can warn rather than silently dropping files.
-	var jobs: Array = []
+	# report can warn rather than silently dropping files. Each archive is one step with an empty
+	# name list, meaning "extract everything in it".
+	var plan: Array = []
 	var seen := {}
 	_last_collisions = 0
 	for arc in _archives:
+		plan.append({"arc": arc, "names": PackedStringArray()})
 		for entry_value in arc.get_entries():
-			var entry := entry_value as Dictionary
-			var name := String(entry.get("name", ""))
-			# Basename only: never let an entry name resolve outside the chosen folder.
-			var out_path := dir.path_join(name.get_file())
-			if seen.has(out_path):
+			# Collisions are by output basename, since that is what lands in `dir`.
+			var base := String((entry_value as Dictionary).get("name", "")).get_file()
+			if seen.has(base):
 				_last_collisions += 1
-			seen[out_path] = true
-			jobs.append({"arc": arc, "name": name, "out_path": out_path})
-	await _perform_extraction(jobs, dir, _archives.size())
+			seen[base] = true
+	await _perform_extraction(plan, dir, _archives.size())
 
 
-# Shared non-blocking extraction: runs per-file extract_to_status in batches, yielding a frame
-# between batches so the editor stays responsive, with a progress bar + Stop.
-func _perform_extraction(jobs: Array, dir: String, archive_count: int) -> void:
+# Shared non-blocking extraction. Each plan step extracts one archive on a background C++ worker
+# (read + decode + write off the main thread); this coroutine just polls progress, drives the
+# Stop button, and keeps the editor responsive. A step's `names` lists the entries to pull, or is
+# empty to mean "every entry in that archive".
+func _perform_extraction(plan: Array, dir: String, archive_count: int) -> void:
 	if _busy:
 		return
-	if jobs.is_empty():
+	# Total up front, so the progress bar spans the whole multi-archive run.
+	var total := 0
+	for step in plan:
+		var names: PackedStringArray = step["names"]
+		total += names.size() if names.size() > 0 else int(step["arc"].get_entry_count())
+	if total == 0:
 		_set_status("Nothing to extract.")
 		return
 	var decode := _decode_check.button_pressed
 	_cancelled = false
 	_set_busy(true)
 	_cancel_button.visible = true
-	var total := jobs.size()
 	_progress_bar.max_value = total
 	_progress_bar.value = 0
 	var ok := 0
 	var raw := 0
 	var failed := 0
-	var done := 0
-	for job in jobs:
-		var arc = job["arc"]
-		var st := int(arc.extract_to_status(job["name"], job["out_path"], decode))
-		if st == 0:
-			ok += 1
-		elif st == 1:
-			raw += 1
-		else:
-			failed += 1
-		done += 1
-		if done % _EXTRACT_BATCH == 0 or done == total:
-			_progress_bar.value = done
-			_progress_label.text = "%d / %d" % [done, total]
+	var base := 0  # entries fully accounted for by completed steps
+	for step in plan:
+		if _cancelled:
+			break
+		var arc = step["arc"]
+		var names: PackedStringArray = step["names"]
+		var step_total: int = names.size() if names.size() > 0 else int(arc.get_entry_count())
+		if arc.extract_async(names, dir, decode) != OK:
+			# Could not even start this archive: count the whole step as failed and move on.
+			failed += step_total
+			base += step_total
+			continue
+		while arc.is_extract_running():
 			await _host.get_tree().process_frame
 			if not is_instance_valid(_dialog):
-				# Host/dialog torn down mid-run: clear the busy lock so a rebuilt tool isn't
-				# wedged, then bail (the UI nodes are gone, so skip the refresh/report below).
+				# Host/dialog torn down mid-run: stop the worker and clear the busy lock. The
+				# archive's destructor joins the thread, so no work escapes; skip the dead UI.
+				arc.request_extract_cancel()
 				_busy = false
 				return
 			if _cancelled:
-				break
+				arc.request_extract_cancel()
+			var done_now: int = base + int(arc.get_extract_progress_done())
+			_progress_bar.value = done_now
+			_progress_label.text = "%d / %d" % [done_now, total]
+		arc.wait_for_extract_completion()
+		ok += int(arc.get_extract_ok_count())
+		raw += int(arc.get_extract_raw_count())
+		failed += int(arc.get_extract_failed_count())
+		base += step_total
+		_progress_bar.value = base
+		_progress_label.text = "%d / %d" % [base, total]
 	_set_busy(false)
 	_refresh_all()
-	_report_extraction(done, total, ok, raw, failed, dir, archive_count)
+	_report_extraction(ok + raw + failed, total, ok, raw, failed, dir, archive_count)
 
 
 func _report_extraction(done: int, total: int, ok: int, raw: int, failed: int, dir: String, archive_count: int) -> void:

@@ -67,6 +67,64 @@ func test_extract_to_and_extract_all() -> void:
 	assert_eq(FileAccess.get_file_as_string(out_dir.path_join("b.bin")), "BBBBBB")
 
 
+func test_extract_async_selected_and_all() -> void:
+	var root := _pff_dir()
+	var path := root.path_join("async.pff")
+	_write_pff(path, [
+		{"name": "a.bin", "bytes": "AAAA"},
+		{"name": "b.bin", "bytes": "BBBBBB"},
+		{"name": "c.bin", "bytes": "CC"},
+	])
+	var arc := NovaPffArchive.new()
+	assert_eq(arc.open(path), OK)
+
+	# Selected names: only a.bin and c.bin should land.
+	var sel_dir := root.path_join("sel")
+	assert_eq(DirAccess.make_dir_recursive_absolute(sel_dir), OK)
+	assert_eq(arc.extract_async(PackedStringArray(["a.bin", "c.bin"]), sel_dir, true), OK, arc.get_last_error())
+	while arc.is_extract_running():
+		await get_tree().process_frame
+	arc.wait_for_extract_completion()
+	assert_eq(arc.get_extract_progress_done(), 2, "Both selected entries processed.")
+	assert_eq(arc.get_extract_ok_count(), 2, "Both extracted cleanly.")
+	assert_eq(arc.get_extract_failed_count(), 0)
+	assert_eq(FileAccess.get_file_as_string(sel_dir.path_join("a.bin")), "AAAA")
+	assert_eq(FileAccess.get_file_as_string(sel_dir.path_join("c.bin")), "CC")
+	assert_false(FileAccess.file_exists(sel_dir.path_join("b.bin")), "Unselected entry is not extracted.")
+
+	# Empty name list means "every entry".
+	var all_dir := root.path_join("all")
+	assert_eq(DirAccess.make_dir_recursive_absolute(all_dir), OK)
+	assert_eq(arc.extract_async(PackedStringArray(), all_dir, true), OK)
+	while arc.is_extract_running():
+		await get_tree().process_frame
+	arc.wait_for_extract_completion()
+	assert_eq(arc.get_extract_progress_total(), 3, "Total spans every entry.")
+	assert_eq(arc.get_extract_ok_count(), 3, "All three extracted.")
+	assert_eq(FileAccess.get_file_as_string(all_dir.path_join("b.bin")), "BBBBBB")
+
+
+func test_extract_async_reports_raw_fallback() -> void:
+	# An undecodable BFC1 entry must still be written (counted raw), not dropped.
+	var root := _pff_dir()
+	var bad := "BFC1".to_ascii_buffer()
+	bad.append_array(PackedByteArray([0, 0, 1, 0, 255, 255, 255, 255, 255, 255, 255, 255]))
+	var path := root.path_join("asyncraw.pff")
+	_write_pff(path, [{"name": "broken.dat", "bytes": bad}, {"name": "plain.txt", "bytes": "hello"}])
+	var arc := NovaPffArchive.new()
+	assert_eq(arc.open(path), OK)
+
+	var out := root.path_join("out")
+	assert_eq(DirAccess.make_dir_recursive_absolute(out), OK)
+	assert_eq(arc.extract_async(PackedStringArray(), out, true), OK)
+	while arc.is_extract_running():
+		await get_tree().process_frame
+	arc.wait_for_extract_completion()
+	assert_eq(arc.get_extract_raw_count(), 1, "Undecodable entry counted as saved-raw.")
+	assert_eq(arc.get_extract_ok_count(), 1, "Decodable entry counted ok.")
+	assert_eq(FileAccess.get_file_as_bytes(out.path_join("broken.dat")), bad, "Raw bytes written verbatim.")
+
+
 func test_add_remove_save_roundtrip() -> void:
 	var root := _pff_dir()
 	var path := root.path_join("edit.pff")

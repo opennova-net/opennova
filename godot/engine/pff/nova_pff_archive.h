@@ -78,6 +78,31 @@ private:
 	std::string save_out_native_;
 	PffFormat save_format_ = PFF_FORMAT_PFF3;
 
+	// Background extract job (mirrors the Save worker). The worker reads source_/entries_ and writes
+	// the output files off the main thread; the editor disables every other op while it runs, so the
+	// model it reads is stable (the same invariant the save worker relies on). Cancel is checked
+	// between entries, so a single large file still finishes before the job stops, but the UI never
+	// blocks mid-entry.
+	struct ExtractState {
+		bool running = false;
+		bool finished = false;
+		bool cancel_requested = false;
+		uint32_t done = 0;
+		uint32_t total = 0;
+		uint32_t ok = 0;        // extracted and fully decoded
+		uint32_t raw = 0;       // extracted but saved raw (decode requested, codec failed)
+		uint32_t failed = 0;    // hard failure (unreadable entry or unwritable output)
+	};
+	struct ExtractJob {
+		size_t index = 0;          // index into entries_ (stable for the job's lifetime)
+		std::string out_native;    // resolved native output path
+	};
+	mutable std::mutex extract_mutex_;
+	std::thread extract_thread_;
+	ExtractState extract_state_;
+	std::vector<ExtractJob> extract_jobs_;  // worker-owned snapshot, built on the main thread
+	bool extract_decode_ = true;
+
 	uint32_t container_key() const;
 	void close_source();
 	void build_model_from_source();
@@ -94,6 +119,8 @@ private:
 	Error do_open(const String &path, bool legacy);
 	void join_save_thread();
 	void save_worker();
+	void join_extract_thread();
+	void extract_worker();
 
 	static String to_native_path(const String &path);
 	static PffFormat format_from_magic(uint32_t magic);
@@ -135,6 +162,21 @@ public:
 	int extract_to_status(const String &name, const String &out_path, bool decode) const;
 	// Number of files the most recent batch / extract_to_status saved un-decoded.
 	int get_last_undecoded_count() const;
+
+	// Non-blocking batch extract. Resolves the job list on the calling (main) thread, then reads,
+	// decodes, and writes each file on a background thread. `names` empty means "every entry";
+	// output files are written into out_dir by basename. Returns OK if the job started (then poll
+	// is_extract_running() and read the counters), else an error. Mirrors save_as_async.
+	Error extract_async(const PackedStringArray &names, const String &out_dir, bool decode);
+	bool is_extract_running() const;
+	bool is_extract_finished() const;
+	void request_extract_cancel();          // ask the worker to stop after the current entry
+	int get_extract_progress_done() const;  // entries processed so far (incl. failures)
+	int get_extract_progress_total() const;
+	int get_extract_ok_count() const;       // extracted and fully decoded
+	int get_extract_raw_count() const;       // extracted but saved raw (decode failed)
+	int get_extract_failed_count() const;    // hard failures (unreadable / unwritable)
+	void wait_for_extract_completion();      // joins the worker (main thread)
 
 	// add stores the file's bytes verbatim (optionally container-XOR-encrypted); marks dirty.
 	Error add_file_from_disk(const String &src_path, const String &store_name, bool encrypt);
