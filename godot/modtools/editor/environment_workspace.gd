@@ -92,7 +92,18 @@ func get_current_resource_path() -> String:
 
 
 func open_file(path: String) -> Error:
-	return environment_editor.open_env(path) if environment_editor else ERR_UNAVAILABLE
+	if environment_editor == null:
+		return ERR_UNAVAILABLE
+	var resources := _resource_root()
+	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
+		return environment_editor.open_env_from_resource_root(resources, path)
+	return environment_editor.open_env(path)
+
+
+func _resource_root() -> NovaResourceRoot:
+	if editor_shell != null and editor_shell.has_method("get_resource_root"):
+		return editor_shell.get_resource_root()
+	return null
 
 
 func has_unsaved_changes() -> bool:

@@ -4,8 +4,13 @@
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+
+#include <resource_index/resource_index.h>
 
 namespace godot {
 
@@ -14,11 +19,16 @@ class NovaResourceRoot : public RefCounted {
 
 	String root_dir_;
 	String last_error_;
+	opennova::ResourceIndex index_;
 
 	static bool has_virtual_scheme(const String &path);
 	static String to_native_path(const String &path);
 	static String normalize_dir(const String &path);
 	static String lookup_name(const String &name);
+	static Dictionary file_entry_to_dictionary(const opennova::ResourceFileEntry &entry);
+
+	// Shared validate-and-scan body for both mount entry points.
+	Error mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode);
 
 protected:
 	static void _bind_methods();
@@ -26,13 +36,27 @@ protected:
 public:
 	static bool is_valid_root(const String &path);
 
+	// Editor / authoring mount: loose files only, PFF archives ignored. This is the path the
+	// editor and the test fixtures use, so authoring always targets loose files.
 	Error set_root_dir(const String &path);
+	// Runtime mount: the PFF archives are the packed game data. `expansion` (e.g. "jox01")
+	// layers the expansion's archives over the base game. When `allow_loose_override` is true
+	// (the engine's `/d` dev flag) loose files next to the archives shadow the packed entries;
+	// otherwise the runtime reads from PFFs exclusively.
+	Error mount_runtime(const String &path, const String &expansion = String(),
+	                    bool allow_loose_override = false);
+	// Expansion names discoverable under `<path>/expansion/` (each subdir with a matching
+	// <name>.pff). Independent of the currently mounted root, so the UI can list before mounting.
+	PackedStringArray list_expansions(const String &path) const;
 	String get_root_dir() const;
 	String get_last_error() const;
 	void clear();
 
 	String resolve_file(const String &name);
 	PackedStringArray list_files(const String &suffix = String()) const;
+	Array list_file_entries(const String &suffix = String()) const;
+	bool has_file(const String &name) const;
+	PackedByteArray read_file(const String &name) const;
 	Ref<Texture2D> load_texture(const String &name) const;
 	Ref<Resource> load_font(const String &name) const;
 };

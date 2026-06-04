@@ -50,9 +50,12 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _settings_resource_dir_edit: LineEdit = %SettingsResourceDirEdit
 @onready var _settings_browse_resource_dir_button: Button = %SettingsBrowseResourceDirButton
 @onready var _settings_apply_resource_dir_button: Button = %SettingsApplyResourceDirButton
+@onready var _settings_expansion_row: HBoxContainer = %SettingsExpansionRow
+@onready var _settings_expansion_option: OptionButton = %SettingsExpansionOption
 @onready var _settings_view_section: VBoxContainer = %SettingsViewSection
 @onready var _settings_grid_toggle: CheckBox = %SettingsGridToggle
 @onready var _settings_axes_toggle: CheckBox = %SettingsAxesToggle
+@onready var _settings_pff_tool_button: Button = %SettingsPffToolButton
 @onready var _asset_dock: Control = %AssetDock
 @onready var _status_bar: PanelContainer = %StatusBar
 @onready var _status_tool_label: Label = %StatusToolLabel
@@ -106,6 +109,7 @@ var _cdep_dialog: ConfirmationDialog
 var _export_dialog: ExportFlavorDialog
 var _cdep_fix_callback: Callable = Callable()
 var _resource_browser := EditorResourceBrowser.new()
+var _pff_tool := EditorPffTool.new()
 var _file_dialogs: FileDialogHelper
 
 
@@ -120,6 +124,12 @@ func _ready() -> void:
 		func() -> void: _set_settings_popup_visible(true),
 		_current_resource_path_for_browser,
 		func() -> void: _scan_resource_root(false)
+	)
+	_pff_tool.setup(
+		self,
+		_open_files_dialog,
+		_open_dir_dialog,
+		show_status_message
 	)
 	_build_workspace_rail()
 	_wire_workspace_scroll_affordance()
@@ -736,7 +746,16 @@ func _wire_settings_popup() -> void:
 		_settings_grid_toggle.toggled.connect(_on_settings_grid_toggled)
 	if _settings_axes_toggle != null and not _settings_axes_toggle.toggled.is_connected(_on_settings_axes_toggled):
 		_settings_axes_toggle.toggled.connect(_on_settings_axes_toggled)
+	if _settings_pff_tool_button != null and not _settings_pff_tool_button.pressed.is_connected(_on_settings_pff_tool_pressed):
+		_settings_pff_tool_button.pressed.connect(_on_settings_pff_tool_pressed)
 	_sync_settings_popup_state()
+
+
+func _on_settings_pff_tool_pressed() -> void:
+	# Close the settings popover so the modal archive tool isn't competing with it,
+	# then open the tool seeded at the configured resource directory.
+	_set_settings_popup_visible(false)
+	_pff_tool.open(_preferred_resource_root_dir())
 
 
 func _build_camera_icon() -> Texture2D:
@@ -984,6 +1003,7 @@ func _set_settings_popup_visible(active: bool) -> void:
 func _sync_settings_popup_state() -> void:
 	if _settings_resource_dir_edit != null:
 		_settings_resource_dir_edit.text = _resource_library.get_root_dir()
+	_populate_expansion_options()
 	if _settings_grid_toggle != null:
 		_settings_grid_toggle.set_pressed_no_signal(_view_grid_visible)
 	if _settings_axes_toggle != null:
@@ -1009,6 +1029,14 @@ func _on_settings_apply_resource_dir_pressed() -> void:
 
 func _on_settings_resource_dir_submitted(_text: String) -> void:
 	_apply_resource_settings(true)
+
+
+# The editor authors loose files only; PFF expansions are a runtime concern (mounted
+# via the `/exp` launch flag), so the settings popup no longer offers an expansion picker.
+# The row is hidden here in case the scene still carries it.
+func _populate_expansion_options() -> void:
+	if _settings_expansion_row != null:
+		_settings_expansion_row.visible = false
 
 
 func _on_settings_grid_toggled(pressed: bool) -> void:
@@ -1200,6 +1228,10 @@ func _open_file_dialog(title: String, filters: PackedStringArray, on_pick: Calla
 
 func _open_dir_dialog(title: String, on_pick: Callable, current_dir: String = "") -> void:
 	_ensure_file_dialogs().open_dir(title, on_pick, current_dir)
+
+
+func _open_files_dialog(title: String, filters: PackedStringArray, on_pick: Callable, current_dir: String = "") -> void:
+	_ensure_file_dialogs().open_files(title, filters, on_pick, current_dir)
 
 
 func _preferred_save_dir(workspace: EditorWorkspace = null) -> String:

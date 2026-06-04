@@ -12,6 +12,11 @@ add_subdirectory(../../libs/trn opennova_trn)
 add_subdirectory(../../libs/cpt opennova_cpt)
 add_subdirectory(../../libs/env opennova_env)
 add_subdirectory(../../libs/threedi opennova_threedi)
+add_subdirectory(../../libs/pff opennova_pff)
+add_subdirectory(../../libs/gameprofile opennova_gameprofile)
+add_subdirectory(../../libs/scr opennova_scr)
+add_subdirectory(../../libs/bfc1 opennova_bfc1)
+add_subdirectory(../../libs/vfs opennova_vfs)
 add_subdirectory(../../libs/rtxt opennova_rtxt)
 add_subdirectory(../../libs/ase opennova_ase)
 add_subdirectory(../../libs/tdp opennova_tdp)
@@ -59,6 +64,7 @@ add_library(${TARGET_NAME} SHARED
     util/texture_path_resolver.cpp
     resource_index/nova_resource_index.cpp
     resource_index/nova_resource_root.cpp
+    pff/nova_pff_archive.cpp
     editor/opennova_editor_plugin.cpp
     fnt/nova_fnt_resource.cpp
     fnt/fnt_resource_format.cpp
@@ -81,12 +87,15 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_cbin
     opennova_env
     opennova_threedi
+    opennova_pff
+    opennova_gameprofile
     opennova_rtxt
     opennova_ase
     opennova_tdp
     opennova_oed
     opennova_renderer
     opennova_terrain
+    opennova_vfs
     opennova_resource_index
     opennova_def
     opennova_mission

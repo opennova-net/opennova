@@ -1011,6 +1011,7 @@ NovaObjectData::~NovaObjectData() {
 
 void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("open_file", "path"), &NovaObjectData::open_file);
+	ClassDB::bind_method(D_METHOD("open_from_resource_root", "resource_root", "name"), &NovaObjectData::open_from_resource_root);
 	ClassDB::bind_method(D_METHOD("save_project_to_dir", "dir_path"), &NovaObjectData::save_project_to_dir);
 	ClassDB::bind_method(D_METHOD("export_3di_to_dir", "dir_path", "update_mask"), &NovaObjectData::export_3di_to_dir, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("reset_empty", "name"), &NovaObjectData::reset_empty, DEFVAL("untitled"));
@@ -1123,6 +1124,7 @@ void NovaObjectData::_clear() {
 	source_kind = SourceKind::Empty;
 	source_path = String();
 	source_dir = String();
+	resource_root.unref();
 	object_name = "untitled";
 	last_error = String();
 	oed_dirty_mask = UPDATE_NONE;
@@ -1232,6 +1234,31 @@ Error NovaObjectData::open_file(const String &p_path) {
 	return ERR_FILE_UNRECOGNIZED;
 }
 
+Error NovaObjectData::open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name) {
+	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
+		last_error = "Resource root is not configured";
+		return ERR_INVALID_PARAMETER;
+	}
+	const String file = p_name.get_file();
+	if (file.get_extension().to_lower() != "3di") {
+		last_error = "Only mounted .3di object files are supported";
+		return ERR_FILE_UNRECOGNIZED;
+	}
+	const PackedByteArray bytes = p_resource_root->read_file(file);
+	if (bytes.is_empty()) {
+		last_error = "Object file not found in resource root: " + file;
+		return ERR_FILE_NOT_FOUND;
+	}
+
+	const Error err = _open_3di_bytes(file, bytes);
+	if (err == OK) {
+		resource_root = p_resource_root;
+		source_dir = p_resource_root->get_root_dir();
+		_notify_object_changed();
+	}
+	return err;
+}
+
 Error NovaObjectData::_open_3di(const String &p_path) {
 	_clear();
 	const std::string native_path = to_native_path(p_path);
@@ -1251,6 +1278,30 @@ Error NovaObjectData::_open_3di(const String &p_path) {
 	source_dir = p_path.get_base_dir();
 	object_name = ir.name[0] != '\0' ? from_native(ir.name) : filename_stem(p_path);
 	_notify_object_changed();
+	return OK;
+}
+
+Error NovaObjectData::_open_3di_bytes(const String &p_name, const PackedByteArray &p_bytes) {
+	_clear();
+	if (p_bytes.is_empty()) {
+		last_error = "Mounted 3DI entry is empty";
+		return ERR_FILE_CANT_READ;
+	}
+	if (threedi_3di3_read_memory(p_bytes.ptr(), static_cast<size_t>(p_bytes.size()), &source_model) != 0) {
+		last_error = "Failed to read mounted 3DI";
+		return ERR_FILE_CANT_READ;
+	}
+	has_source_model = true;
+	if (threedi_ir_from_3di3(&source_model, &ir) != 0) {
+		last_error = "Failed to convert mounted 3DI to IR";
+		_clear();
+		return ERR_FILE_CORRUPT;
+	}
+	has_ir = true;
+	source_kind = SourceKind::Threedi;
+	source_path = p_name.get_file();
+	source_dir = String();
+	object_name = ir.name[0] != '\0' ? from_native(ir.name) : filename_stem(p_name);
 	return OK;
 }
 
@@ -1707,7 +1758,10 @@ Array NovaObjectData::get_materials() const {
 			tex["type"] = mat.textures[t].type;
 			tex["flags"] = mat.textures[t].flags;
 			tex["frame"] = mat.textures[t].frame;
-			tex["resolved_path"] = opennova::resolve_texture_path(source_dir, from_native(mat.textures[t].name));
+			// Resolve through the resource root when mounted (so PFF-resident textures
+			// report a path) and fall back to the loose source dir otherwise. Reuses the
+			// same root-aware logic as the per-texture resolver below.
+			tex["resolved_path"] = resolve_material_texture_path(static_cast<int>(i), static_cast<int>(t));
 			textures.push_back(tex);
 		}
 		item["textures"] = textures;
@@ -1976,7 +2030,12 @@ String NovaObjectData::resolve_material_texture_path(int p_material_index, int p
 		return String();
 	}
 
-	return opennova::resolve_texture_path(source_dir, from_native(material.textures[p_texture_index].name));
+	const String texture_name = from_native(material.textures[p_texture_index].name);
+	if (resource_root.is_valid()) {
+		const String resolved = resource_root->resolve_file(texture_name);
+		return resolved.is_empty() && resource_root->load_texture(texture_name).is_valid() ? texture_name : resolved;
+	}
+	return opennova::resolve_texture_path(source_dir, texture_name);
 }
 
 Ref<Texture2D> NovaObjectData::load_material_texture(int p_material_index, int p_texture_index) const {
@@ -1990,12 +2049,19 @@ Ref<Texture2D> NovaObjectData::load_material_texture(int p_material_index, int p
 		return Ref<Texture2D>();
 	}
 
-	return opennova::load_texture_from_dir(source_dir, from_native(material.textures[p_texture_index].name));
+	const String texture_name = from_native(material.textures[p_texture_index].name);
+	return resource_root.is_valid()
+			? resource_root->load_texture(texture_name)
+			: opennova::load_texture_from_dir(source_dir, texture_name);
 }
 
 String NovaObjectData::resolve_texture_name(const String &p_texture_name) const {
 	if (!has_ir || p_texture_name.is_empty()) {
 		return String();
+	}
+	if (resource_root.is_valid()) {
+		const String resolved = resource_root->resolve_file(p_texture_name);
+		return resolved.is_empty() && resource_root->load_texture(p_texture_name).is_valid() ? p_texture_name : resolved;
 	}
 	return opennova::resolve_texture_path(source_dir, p_texture_name);
 }
@@ -2003,6 +2069,9 @@ String NovaObjectData::resolve_texture_name(const String &p_texture_name) const 
 Ref<Texture2D> NovaObjectData::load_texture_name(const String &p_texture_name) const {
 	if (!has_ir || p_texture_name.is_empty()) {
 		return Ref<Texture2D>();
+	}
+	if (resource_root.is_valid()) {
+		return resource_root->load_texture(p_texture_name);
 	}
 	return opennova::load_texture_from_dir(source_dir, p_texture_name);
 }

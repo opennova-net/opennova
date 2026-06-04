@@ -38,11 +38,28 @@ func open(title: String, filters: PackedStringArray, on_pick: Callable, current_
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	dialog.title = title
 	dialog.filters = filters
+	dialog.current_file = ""
 	if not current_dir.is_empty():
 		dialog.current_dir = current_dir
 	for sig in dialog.file_selected.get_connections():
 		dialog.file_selected.disconnect(sig["callable"])
 	dialog.file_selected.connect(on_pick, CONNECT_ONE_SHOT)
+	dialog.popup_centered()
+
+
+## Configure the (cached) dialog to pick one or more files. on_pick(PackedStringArray)
+## fires once with the selected paths.
+func open_files(title: String, filters: PackedStringArray, on_pick: Callable, current_dir: String = "") -> void:
+	var dialog := _ensure()
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILES
+	dialog.title = title
+	dialog.filters = filters
+	dialog.current_file = ""
+	if not current_dir.is_empty():
+		dialog.current_dir = current_dir
+	for sig in dialog.files_selected.get_connections():
+		dialog.files_selected.disconnect(sig["callable"])
+	dialog.files_selected.connect(on_pick, CONNECT_ONE_SHOT)
 	dialog.popup_centered()
 
 
@@ -53,11 +70,28 @@ func open_dir(title: String, on_pick: Callable, current_dir: String = "") -> voi
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 	dialog.title = title
 	dialog.filters = PackedStringArray()
+	dialog.current_file = ""
 	if not current_dir.is_empty():
 		dialog.current_dir = current_dir
 	for sig in dialog.dir_selected.get_connections():
 		dialog.dir_selected.disconnect(sig["callable"])
 	dialog.dir_selected.connect(on_pick, CONNECT_ONE_SHOT)
+	dialog.popup_centered()
+
+
+## Configure the (cached) dialog to pick a destination file path (Save As). The
+## name field is pre-filled with default_name. on_pick(String) fires once.
+func save_file(title: String, filters: PackedStringArray, default_name: String, on_pick: Callable, current_dir: String = "") -> void:
+	var dialog := _ensure()
+	dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	dialog.title = title
+	dialog.filters = filters
+	if not current_dir.is_empty():
+		dialog.current_dir = current_dir
+	dialog.current_file = default_name
+	for sig in dialog.file_selected.get_connections():
+		dialog.file_selected.disconnect(sig["callable"])
+	dialog.file_selected.connect(on_pick, CONNECT_ONE_SHOT)
 	dialog.popup_centered()
 
 

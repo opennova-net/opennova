@@ -1,5 +1,7 @@
 #include "nova_item_database.h"
 
+#include "resource_index/nova_resource_root.h"
+
 #include <def/def.h>
 
 #include <algorithm>
@@ -9,6 +11,7 @@ using namespace godot;
 
 void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load", "path"), &NovaItemDatabase::load);
+	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &NovaItemDatabase::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaItemDatabase::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &NovaItemDatabase::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaItemDatabase::get_last_error);
@@ -56,6 +59,46 @@ Error NovaItemDatabase::load(const String &path) {
 	}
 
 	def_free_items(&file);
+	return OK;
+}
+
+Error NovaItemDatabase::load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name) {
+	last_error = String();
+	items.clear();
+	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
+		last_error = "Resource root is not configured";
+		return ERR_INVALID_PARAMETER;
+	}
+	const String file_name = p_name.get_file();
+	if (file_name.is_empty()) {
+		last_error = "Item database filename is empty";
+		return ERR_INVALID_PARAMETER;
+	}
+	const PackedByteArray bytes = p_resource_root->read_file(file_name);
+	if (bytes.is_empty()) {
+		last_error = String("Item database not found in resource root: ") + file_name;
+		return ERR_FILE_NOT_FOUND;
+	}
+
+	DefItemsFile file = {};
+	if (def_parse_items_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &file) != 0) {
+		last_error = String("def_parse_items_memory failed for ") + file_name;
+		return ERR_CANT_OPEN;
+	}
+
+	for (size_t i = 0; i < file.count; ++i) {
+		const DefItemDef &entry = file.entries[i];
+		Item item;
+		item.id = entry.id;
+		item.type = entry.type;
+		item.display_name = String(entry.display_name);
+		item.graphic = String(entry.graphic);
+		item.anim_def = String(entry.anim_def);
+		items[entry.id] = item;
+	}
+
+	def_free_items(&file);
+	source_path = file_name;
 	return OK;
 }
 

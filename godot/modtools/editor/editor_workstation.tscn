@@ -397,6 +397,22 @@ layout_mode = 2
 focus_mode = 0
 text = "Browse"
 
+[node name="SettingsExpansionRow" type="HBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SettingsExpansionLabel" type="Label" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsExpansionRow"]
+layout_mode = 2
+text = "Expansion"
+
+[node name="SettingsExpansionOption" type="OptionButton" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsExpansionRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+tooltip_text = "Layer an expansion's assets over the base game; \"(base game)\" mounts only the base archives."
+
 [node name="SettingsApplyResourceDirButton" type="Button" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 34)
@@ -404,6 +420,19 @@ layout_mode = 2
 focus_mode = 0
 text = "Apply and Refresh"
 tooltip_text = "Refresh the resource browser index."
+
+[node name="SettingsToolsLabel" type="Label" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "Tools"
+
+[node name="SettingsPffToolButton" type="Button" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+focus_mode = 0
+text = "Archive Tool…"
+tooltip_text = "Open, browse, extract, and repack game archive (.pff) files."
 
 [node name="SettingsViewSection" type="VBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
 unique_name_in_owner = true

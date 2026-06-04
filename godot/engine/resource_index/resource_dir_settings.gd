@@ -11,6 +11,7 @@ extends RefCounted
 const CONFIG_PATH := "user://terrain_editor_state.cfg"
 const SECTION := "resources"
 const DIR_KEY := "resource_dir"
+const EXPANSION_KEY := "expansion"
 
 
 ## The persisted resource directory, or "" when unset / no longer a valid dir.
@@ -27,6 +28,24 @@ static func set_resource_dir(path: String) -> void:
 	var config := ConfigFile.new()
 	config.load(CONFIG_PATH)
 	config.set_value(SECTION, DIR_KEY, path.strip_edges())
+	config.save(CONFIG_PATH)
+
+
+## The persisted expansion name (e.g. "jox01"), or "" for the base game. Not validated
+## here (there is no dir context); resource_library.gd drops a name that no longer matches
+## an expansion under the live root.
+static func get_expansion() -> String:
+	var config := ConfigFile.new()
+	if config.load(CONFIG_PATH) != OK:
+		return ""
+	return String(config.get_value(SECTION, EXPANSION_KEY, ""))
+
+
+## Persist the expansion name, preserving any other sections in the config.
+static func set_expansion(name: String) -> void:
+	var config := ConfigFile.new()
+	config.load(CONFIG_PATH)
+	config.set_value(SECTION, EXPANSION_KEY, name.strip_edges())
 	config.save(CONFIG_PATH)
 
 

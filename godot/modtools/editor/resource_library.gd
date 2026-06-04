@@ -57,6 +57,7 @@ func clear_index() -> void:
 
 # Updates the configured flat root and (optionally) persists + scans it. Returns
 # a result the shell applies; `status` is a status-bar message to show (empty = none).
+# The editor mounts loose files only (set_root_dir); the PFF archives are a runtime concern.
 func set_root_dir(path: String, persist: bool, scan: bool) -> Dictionary:
 	ensure_index()
 	var previous := _root_dir
