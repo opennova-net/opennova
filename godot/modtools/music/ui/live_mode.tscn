@@ -113,22 +113,17 @@ theme_override_colors/font_color = Color(0.55, 0.55, 0.55, 1)
 text = "No sound? The editor may be on a silent audio driver; the meter above still moves."
 autowrap_mode = 2
 
-[node name="CenterRight" type="HSplitContainer" parent="Screen/Body"]
-layout_mode = 2
-size_flags_horizontal = 3
-split_offset = -420
-
-[node name="CenterCol" type="VBoxContainer" parent="Screen/Body/CenterRight"]
+[node name="CenterCol" type="VBoxContainer" parent="Screen/Body"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="MapHeader" type="Label" parent="Screen/Body/CenterRight/CenterCol"]
+[node name="MapHeader" type="Label" parent="Screen/Body/CenterCol"]
 layout_mode = 2
 text = "Section map"
-tooltip_text = "Each box is a musical state. Arrows show how the script moves between them. While playing, the active state lights up; click a box to jump there."
+tooltip_text = "Each box is a musical state. Arrows show how the script moves between them. While playing, the active state lights up. Single-click jumps there; double-click opens its blueprint; right-click to rename or delete."
 
-[node name="SectionMap" type="GraphEdit" parent="Screen/Body/CenterRight/CenterCol"]
+[node name="SectionMap" type="GraphEdit" parent="Screen/Body/CenterCol"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -138,22 +133,13 @@ grid_pattern = 1
 show_menu = false
 minimap_enabled = true
 
-[node name="RightDock" type="VBoxContainer" parent="Screen/Body/CenterRight"]
-custom_minimum_size = Vector2(360, 0)
-layout_mode = 2
-
-[node name="Inspector" type="VBoxContainer" parent="Screen/Body/CenterRight/RightDock"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="AdvancedDrawer" type="PanelContainer" parent="Screen/Body/CenterRight/RightDock"]
+[node name="AdvancedDrawer" type="PanelContainer" parent="Screen"]
 unique_name_in_owner = true
 visible = false
+custom_minimum_size = Vector2(0, 240)
 layout_mode = 2
-size_flags_vertical = 3
 
-[node name="Script" parent="Screen/Body/CenterRight/RightDock/AdvancedDrawer" instance=ExtResource("5_script")]
+[node name="Script" parent="Screen/AdvancedDrawer" instance=ExtResource("5_script")]
 layout_mode = 2
 
 [node name="LogStrip" type="VBoxContainer" parent="Screen"]

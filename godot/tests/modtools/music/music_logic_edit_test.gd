@@ -74,6 +74,24 @@ func _button_in(node: Node, text: String) -> Button:
 	return null
 
 
+func _button_starting(node: Node, prefix: String) -> Button:
+	var all := []
+	_descendants(node, all)
+	for c in all:
+		if c is Button and String((c as Button).text).begins_with(prefix):
+			return c
+	return null
+
+
+func _nodes_titled(g, needle: String) -> Array:
+	var out := []
+	for n in _nodes(g):
+		if String(n.title).contains(needle):
+			out.append(n)
+	out.sort_custom(func(a, b): return a.position_offset.x < b.position_offset.x)
+	return out
+
+
 # --- per-node tool clusters ---------------------------------------------
 
 func test_top_level_statement_gets_edit_delete_tools():
@@ -184,6 +202,93 @@ func test_if_edit_routes_to_raw_drawer():
 	_button_in(_node_titled(g, "If"), "✎").pressed.emit()
 	assert_eq(raw, ["Branchy"], "editing an if opens the raw drawer for its section")
 	assert_eq(replaced.size(), 0, "an if edit does NOT emit a (lossy) structured replace")
+
+
+# --- frame-setup (0x38) renders locked (the IDA fidelity fix) ------------
+
+func test_frame_enter_renders_locked_no_tools():
+	# enter (0x38) is frame setup, not a transition: it renders as a read-only
+	# "Frame setup" node with NO ✎/✕/↑/↓ and NO "open ▸", even in an editable graph,
+	# so it can never be mutated (its operand is a frame size, not a section target).
+	var g := _egraph({
+		"index": 0, "name": "S", "statements": [
+			{"kind": "frame_enter", "code_offset": 0, "locals_count": 2, "text": "enter X"},
+			{"kind": "play", "code_offset": 2, "track": 0, "text": "play sound_0"},
+		],
+	})
+	await get_tree().process_frame
+	var fe := _node_titled(g, "Frame setup")
+	assert_not_null(fe, "the 0x38 op renders as a 'Frame setup' node")
+	assert_null(_button_in(fe, "✕"), "frame setup carries no delete tool")
+	assert_null(_button_in(fe, "✎"), "frame setup carries no edit tool")
+	assert_null(_button_in(fe, "open ▸"), "frame setup is not a navigable to-state node")
+	# The sibling play still gets its tools, proving the lock is frame_enter-specific.
+	assert_not_null(_button_in(_node_titled(g, "Play"), "✕"), "a normal sibling still has tools")
+
+
+func test_frame_enter_present_in_gamemus_and_uneditable():
+	# End-to-end against the shipped gamemus: Begin's leaked 0x38 decodes as a
+	# frame_enter (not a transition), and the document refuses to delete/replace it.
+	var doc := _doc()
+	var begin := _section(doc, "Begin")
+	assert_false(begin.is_empty(), "Begin section present")
+	var stmts: Array = begin.get("statements", [])
+	var fe_ord := -1
+	for i in range(stmts.size()):
+		if String(stmts[i].get("kind", "")) == "frame_enter":
+			fe_ord = i
+	assert_gt(fe_ord, -1, "Begin's leaked 0x38 op decodes as a frame_enter, not a transition")
+	var sidx := int(begin.get("index", -1))
+	var before := _stmt_count(doc, "Begin")
+	assert_false(doc.delete_statement(sidx, fe_ord), "the document refuses to delete a frame_enter row")
+	assert_false(doc.replace_statement(sidx, fe_ord, PackedStringArray(["enter Win000"])),
+		"the document refuses to replace a frame_enter row")
+	assert_eq(_stmt_count(doc, "Begin"), before, "frame_enter rejections were no-ops")
+
+
+# --- folded ×N runs can be unfolded to edit one member -------------------
+
+func test_folded_run_unfolds_to_editable_members():
+	# A folded ×N run carries an ⊞ unfold toggle; expanding it re-renders the run as
+	# N individually-tooled member nodes (the only Inspector-era edit the graph lacked).
+	var stmts := []
+	for i in range(3):
+		stmts.append({"kind": "play", "code_offset": i * 2, "track": 0, "text": "play sound_0"})
+	var g := _egraph({"index": 9, "name": "S", "statements": stmts})
+	await get_tree().process_frame
+	var fold := _node_titled(g, "Play")
+	assert_not_null(fold, "the folded run node is present")
+	var unfold := _button_starting(fold, "⊞")
+	assert_not_null(unfold, "a folded run offers an ⊞ unfold toggle")
+	assert_null(_button_in(fold, "✕"), "the collapsed fold has no per-member tools")
+	unfold.pressed.emit()
+	await get_tree().process_frame
+	var members := _nodes_titled(g, "Play")
+	assert_eq(members.size(), 3, "unfold expands the run into 3 member nodes")
+	var tooled := 0
+	for n in members:
+		if _button_in(n, "✕") != null:
+			tooled += 1
+	assert_eq(tooled, 3, "each unfolded member carries its own edit tools")
+	# And a ⊟ fold toggle re-collapses.
+	assert_not_null(_button_starting(members[0], "⊟"), "the first member offers a ⊟ fold toggle")
+
+
+func test_unfolded_member_delete_targets_its_own_ordinal():
+	# Unfolding ordinal-addresses each member: deleting the 2nd member emits ordinal 1.
+	var stmts := []
+	for i in range(3):
+		stmts.append({"kind": "play", "code_offset": i * 2, "track": 0, "text": "play sound_0"})
+	var g := _egraph({"index": 4, "name": "S", "statements": stmts})
+	await get_tree().process_frame
+	_button_starting(_node_titled(g, "Play"), "⊞").pressed.emit()
+	await get_tree().process_frame
+	var deletes := []
+	g.delete_statement_requested.connect(func(si, o): deletes.append([si, o]))
+	var members := _nodes_titled(g, "Play")
+	assert_eq(members.size(), 3, "three member nodes after unfold")
+	_button_in(members[1], "✕").pressed.emit()
+	assert_eq(deletes, [[4, 1]], "deleting the 2nd unfolded member targets section 4, ordinal 1")
 
 
 # --- the ＋Add palette ---------------------------------------------------
