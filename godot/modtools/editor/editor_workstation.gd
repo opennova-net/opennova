@@ -55,6 +55,7 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 @onready var _settings_view_section: VBoxContainer = %SettingsViewSection
 @onready var _settings_grid_toggle: CheckBox = %SettingsGridToggle
 @onready var _settings_axes_toggle: CheckBox = %SettingsAxesToggle
+@onready var _settings_pff_tool_button: Button = %SettingsPffToolButton
 @onready var _asset_dock: Control = %AssetDock
 @onready var _status_bar: PanelContainer = %StatusBar
 @onready var _status_tool_label: Label = %StatusToolLabel
@@ -108,6 +109,7 @@ var _cdep_dialog: ConfirmationDialog
 var _export_dialog: ExportFlavorDialog
 var _cdep_fix_callback: Callable = Callable()
 var _resource_browser := EditorResourceBrowser.new()
+var _pff_tool := EditorPffTool.new()
 var _file_dialogs: FileDialogHelper
 
 
@@ -122,6 +124,13 @@ func _ready() -> void:
 		func() -> void: _set_settings_popup_visible(true),
 		_current_resource_path_for_browser,
 		func() -> void: _scan_resource_root(false)
+	)
+	_pff_tool.setup(
+		self,
+		_open_files_dialog,
+		_open_save_file_dialog,
+		_open_dir_dialog,
+		show_status_message
 	)
 	_build_workspace_rail()
 	_wire_workspace_scroll_affordance()
@@ -738,7 +747,16 @@ func _wire_settings_popup() -> void:
 		_settings_grid_toggle.toggled.connect(_on_settings_grid_toggled)
 	if _settings_axes_toggle != null and not _settings_axes_toggle.toggled.is_connected(_on_settings_axes_toggled):
 		_settings_axes_toggle.toggled.connect(_on_settings_axes_toggled)
+	if _settings_pff_tool_button != null and not _settings_pff_tool_button.pressed.is_connected(_on_settings_pff_tool_pressed):
+		_settings_pff_tool_button.pressed.connect(_on_settings_pff_tool_pressed)
 	_sync_settings_popup_state()
+
+
+func _on_settings_pff_tool_pressed() -> void:
+	# Close the settings popover so the modal archive tool isn't competing with it,
+	# then open the tool seeded at the configured resource directory.
+	_set_settings_popup_visible(false)
+	_pff_tool.open(_preferred_resource_root_dir())
 
 
 func _build_camera_icon() -> Texture2D:
@@ -1211,6 +1229,14 @@ func _open_file_dialog(title: String, filters: PackedStringArray, on_pick: Calla
 
 func _open_dir_dialog(title: String, on_pick: Callable, current_dir: String = "") -> void:
 	_ensure_file_dialogs().open_dir(title, on_pick, current_dir)
+
+
+func _open_files_dialog(title: String, filters: PackedStringArray, on_pick: Callable, current_dir: String = "") -> void:
+	_ensure_file_dialogs().open_files(title, filters, on_pick, current_dir)
+
+
+func _open_save_file_dialog(title: String, filters: PackedStringArray, default_name: String, on_pick: Callable, current_dir: String = "") -> void:
+	_ensure_file_dialogs().save_file(title, filters, default_name, on_pick, current_dir)
 
 
 func _preferred_save_dir(workspace: EditorWorkspace = null) -> String:
