@@ -195,6 +195,55 @@ int test_event_scripting_cpp(const std::vector<uint8_t> &original) {
 	return 0;
 }
 
+// Zone-delete reference repair. Phase-5 RE confirmed *IsWithinArea param2 is the area-trigger ARRAY INDEX,
+// so removing a zone must shift higher references down and set a direct reference to -1 (dangling).
+int test_zone_reference_repair_cpp(const std::vector<uint8_t> &original) {
+	using namespace opennova::mission;
+	namespace bms = opennova::bms;
+	MissionDocument doc;
+	TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+
+	// Append three zones; capture their indices (base, base+1, base+2).
+	const size_t base = doc.area_trigger_count();
+	AreaTriggerRecord z;
+	z.min_x = -1.0f; z.max_x = 1.0f; z.min_y = -1.0f; z.max_y = 1.0f;
+	AreaTriggerRecord z0, z1, z2;
+	TEST_EXPECT(doc.add_area_trigger(z, &z0));
+	TEST_EXPECT(doc.add_area_trigger(z, &z1));
+	TEST_EXPECT(doc.add_area_trigger(z, &z2));
+	TEST_EXPECT(z0.index == base && z1.index == base + 1 && z2.index == base + 2);
+
+	// A fresh event with three GroupIsWithinArea triggers referencing the three zones via param2.
+	MissionEventRecord seed, ev;
+	TEST_EXPECT(doc.add_event(seed, &ev));
+	for (int i = 0; i < 3; ++i) {
+		MissionTriggerRecord t;
+		t.main_type = static_cast<int>(bms::TriggerMainType::Group);
+		t.sub_type = static_cast<int>(bms::GroupTriggerType::GroupIsWithinArea);
+		t.param2 = static_cast<int>(base) + i;  // -> z0, z1, z2
+		TEST_EXPECT(doc.insert_event_trigger(ev.index, static_cast<size_t>(i), t));
+	}
+
+	// Remove the MIDDLE zone (base+1): the ref to base stays, the ref to base+1 dangles (-1), base+2 -> base+1.
+	TEST_EXPECT(doc.remove_area_trigger(base + 1));
+	MissionEventChain chain;
+	TEST_EXPECT(doc.get_event_chain(ev.index, chain));
+	TEST_EXPECT(chain.triggers.size() == 3);
+	TEST_EXPECT(chain.triggers[0].param2 == static_cast<int>(base));      // below the hole: unchanged
+	TEST_EXPECT(chain.triggers[1].param2 == -1);                          // direct hit: dangling
+	TEST_EXPECT(chain.triggers[2].param2 == static_cast<int>(base) + 1);  // above the hole: shifted down
+
+	// The dangling reference is flagged by get_event_chain's area-reference diagnostic.
+	bool dangling_flagged = false;
+	for (const MissionLogicDiagnostic &d : chain.diagnostics) {
+		if (d.code == "logic.area_reference_out_of_range") {
+			dangling_flagged = true;
+		}
+	}
+	TEST_EXPECT(dangling_flagged);
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -473,6 +522,7 @@ int main() {
 	TEST_EXPECT(logic_summary.area_trigger_count == opennova_mission_area_trigger_count(document));
 
 	TEST_EXPECT(test_event_scripting_cpp(original) == 0);
+	TEST_EXPECT(test_zone_reference_repair_cpp(original) == 0);
 
 	OpenNovaMissionEntityTransform placed = {};
 	placed.x = 7.0f;

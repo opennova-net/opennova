@@ -1794,10 +1794,26 @@ bool MissionDocument::remove_area_trigger(size_t index) {
 		impl_->last_error = "Area trigger index out of range";
 		return false;
 	}
-	// NOTE: triggers reference area zones by *IsWithinArea param2 (an index into this array, per
-	// get_event_chain's references). Removing a zone shifts every higher index, so existing trigger
-	// references may need repointing. The exact index-vs-id semantics of off-0 are Phase-5 UNKNOWN, so
-	// we do NOT auto-repair here; the editor warns the user instead. See notes/mission/mission.md S5.
+	// Repair *IsWithinArea references. Phase-5 RE confirmed param2 is the area-trigger ARRAY INDEX
+	// (Entity_IsTeamInTriggerBounds @0x43c730: &unk_A32D10 + 32*param2), so removing a zone shifts every
+	// higher index down by one. A reference to the removed zone becomes -1 (dangling), which
+	// get_event_chain then flags. [orig: zone bounds consumers @0x43c730 / @0x43e510]
+	const int removed = static_cast<int>(index);
+	for (bms::Trigger &t : impl_->file.triggers) {
+		const bool area_trigger =
+				(t.main_type == bms::TriggerMainType::Group &&
+						t.sub_type == static_cast<int>(bms::GroupTriggerType::GroupIsWithinArea)) ||
+				(t.main_type == bms::TriggerMainType::Single &&
+						t.sub_type == static_cast<int>(bms::SingleTriggerType::SingleIsWithinArea));
+		if (!area_trigger) {
+			continue;
+		}
+		if (t.param2 == removed) {
+			t.param2 = -1;  // the referenced zone is gone
+		} else if (t.param2 > removed) {
+			--t.param2;     // zones above the hole shifted down
+		}
+	}
 	impl_->file.area_triggers.erase(impl_->file.area_triggers.begin() + static_cast<std::ptrdiff_t>(index));
 	sync_counts();
 	return true;

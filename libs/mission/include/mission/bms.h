@@ -208,13 +208,16 @@ enum class SingleTriggerType : int32_t {
     SingleDoesNotSeeOrFarther = 45,
 };
 
-// Mission variable trigger subtypes
+// Mission variable trigger subtypes.
+// [orig: EventTrigger_EvaluateCondition cat 4 @0x453620 — dword_C6B240[param1] <op> param2]
+// Engine compares: 1:==, 2:<, 3:>, 4:<=, 5:>=. Values 3/4 were previously swapped (inherited from the C#
+// reference); corrected here so the name matches what the engine evaluates. See notes/mission/param-semantics.md R6.
 enum class MissionVariableTriggerType : int32_t {
-    MissionVariableIsEqual = 1,
-    MissionVariableIsLessThan = 2,
-    MissionVariableIsLessThanOrEqual = 3,
-    MissionVariableIsGreaterThan = 4,
-    MissionVariableIsGreaterThanOrEqual = 5,
+    MissionVariableIsEqual = 1,             // ==
+    MissionVariableIsLessThan = 2,          // <
+    MissionVariableIsGreaterThan = 3,       // >  (engine sub_type 3)
+    MissionVariableIsLessThanOrEqual = 4,   // <= (engine sub_type 4)
+    MissionVariableIsGreaterThanOrEqual = 5,// >=
 };
 
 // Teammate trigger subtypes
@@ -526,18 +529,26 @@ struct AreaTrigger {
     bool constrains_z() const { return (flags & 0x2u) != 0; }
 };
 
+// [orig: EventTrigger_UpdateEntry @0x454c30; per-frame passes UpdateAllWithFlag2/4 @0x454dc0/0x454e00]
+// Runtime: reset_after/delay value (top 10 bits) becomes reload = value*64, decremented 64/tick => value
+// = TICKS. delay = wait after conditions pass before actions run; reset_after = re-arm wait for a repeating
+// event. flags bit0=ResetAfter (repeat; else fire-once), bit1=PreMission, bit2=PostMission (gate the pass).
 struct Event {
     EventFlags flags;
     int32_t trigger_index;
     int32_t action_index;
-    int32_t reset_after;               // Upper 10 bits of raw 32-bit value (value << 22)
-    int32_t delay;                     // Upper 10 bits of raw 32-bit value (value << 22)
-    uint8_t unknown5;
+    int32_t reset_after;               // Upper 10 bits of raw 32-bit value (value << 22); = ticks at runtime
+    int32_t delay;                     // Upper 10 bits of raw 32-bit value (value << 22); = ticks at runtime
+    uint8_t unknown5;                  // [orig:] runtime ACTIVE/has-fired flag; 0 on disk; ResetEvent clears it
     uint8_t trigger_count;
     uint8_t action_count;
-    uint8_t unknown6;
+    uint8_t unknown6;                  // [orig:] never read by evaluator/scheduler => reserved
 };
 
+// [orig: EventTrigger_EvaluateCondition @0x453620 reads param1..4 as triggerParams[3..6]]
+// Per-type param meaning (group/entity/zone/var/event refs, thresholds, distances) in
+// notes/mission/param-semantics.md. *IsWithinArea (sub 10): param2 = area-trigger ARRAY INDEX, param1 = tested
+// group/entity. Single distance subtypes (43-45): param3 = whole meters (engine uses param3<<16).
 struct Trigger {
     int32_t condition_flags;
     TriggerMainType main_type;
@@ -546,8 +557,11 @@ struct Trigger {
     int32_t param2;
     int32_t param3;
     int32_t param4;
-    int32_t unknown7;
+    int32_t unknown7;                  // [orig:] never read by evaluator => reserved
 
+    // [orig: condition fold sub_454050 @0x454050] Each trigger's result is negated by ITS bit0; the combine
+    // operator (or/xor/else and) is taken from the PREVIOUS trigger, i.e. these bits control how the NEXT
+    // trigger joins. Last trigger's or/xor bits are unused; zero triggers => TRUE.
     bool is_negated() const { return (condition_flags & 1) != 0; }
     bool is_or() const { return (condition_flags & 2) != 0; }
     bool is_xor() const { return (condition_flags & 4) != 0; }
@@ -559,6 +573,10 @@ struct Trigger {
     }
 };
 
+// [orig: EventAction_Dispatch @0x4542e0 — switch(action_type) reads param1..4 as actionEntry[3..6]]
+// Per-type param meaning in notes/mission/param-semantics.md. MisvarChange (5): action_sub_type
+// 1=Set/2=Add/3=Sub/4=Inc/5=Dec on dword_C6B240[param1] with param2. ResetEvent (34): clears events[param1]
+// active flag. reserved0/reserved1 unused by the dispatcher.
 struct Action {
     int32_t reserved0;
     ActionType action_type;

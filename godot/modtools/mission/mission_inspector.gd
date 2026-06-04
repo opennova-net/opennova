@@ -208,7 +208,8 @@ var _sc_trigger_sub: OptionButton
 var _sc_trigger_negate: CheckBox
 var _sc_trigger_or: CheckBox
 var _sc_trigger_xor: CheckBox
-var _sc_trigger_params: Array = []  # [p1, p2, p3, p4] SpinBox
+var _sc_trigger_desc: Label  # plain-language description of the selected trigger type
+var _sc_trigger_params: Array = []  # [p1, p2, p3, p4] MissionParamSlot
 var _sc_trigger_selected: int = -1
 var _sc_trigger_syncing: bool = false
 # Actions sub-list + per-action editor.
@@ -219,9 +220,11 @@ var _sc_action_up: Button
 var _sc_action_down: Button
 var _sc_action_type: OptionButton
 var _sc_action_sub: OptionButton
-var _sc_action_params: Array = []  # [p1, p2, p3, p4] SpinBox
+var _sc_action_desc: Label  # plain-language description of the selected action type
+var _sc_action_params: Array = []  # [p1, p2, p3, p4] MissionParamSlot
 var _sc_action_selected: int = -1
 var _sc_action_syncing: bool = false
+var _sc_event_summary: Label  # "when <conditions> then <actions>" readout for the selected event
 var _sc_diagnostics: Label
 # The event chain the panel was last populated from, so the sub-list handlers read the same data.
 var _sc_chain: Dictionary = {}
@@ -1207,7 +1210,7 @@ func _build_area_trigger_panel() -> void:
 	_at_detail_box.add_child(flags_row)
 	_at_active_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionAtActive", "Active")
 	_at_constrain_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionAtConstrainZ", "Constrain height")
-	_at_active_check.tooltip_text = "Zone is enforced (flags bit 0x01). When clear, the engine ignores it."
+	_at_active_check.tooltip_text = "Flags bit 0x01. NOTE: the in-zone trigger condition (*IsWithinArea) does NOT read this bit; only the mission-boundary out-of-bounds check does. Shipped missions leave it clear."
 	_at_constrain_check.tooltip_text = "Limit the zone to its Z (height) range (bit 0x02). When clear, the zone is unbounded vertically (+/-16384)."
 	_at_active_check.toggled.connect(_on_at_flag_toggled)
 	_at_constrain_check.toggled.connect(_on_at_flag_toggled)
@@ -1410,6 +1413,8 @@ func _build_scripting_panel() -> void:
 	_sc_trigger_down = _make_sc_button(trig_buttons, "MissionScTrigDown", "Down", _on_sc_trigger_down)
 	_sc_trigger_main = _add_sc_option(_sc_detail_box, "MissionScTrigMain", "Type", _on_sc_trigger_main_selected)
 	_sc_trigger_sub = _add_sc_option(_sc_detail_box, "MissionScTrigSub", "Sub-type", _on_sc_trigger_sub_selected)
+	_sc_trigger_desc = ObjectUiHelpers.add_muted_label(_sc_detail_box, "")
+	_sc_trigger_desc.name = "MissionScTrigDesc"
 	var trig_flags := HBoxContainer.new()
 	trig_flags.add_theme_constant_override("separation", 10)
 	_sc_detail_box.add_child(trig_flags)
@@ -1417,19 +1422,14 @@ func _build_scripting_panel() -> void:
 	_sc_trigger_or = ObjectUiHelpers.add_checkbox(trig_flags, "MissionScTrigOr", "OR")
 	_sc_trigger_xor = ObjectUiHelpers.add_checkbox(trig_flags, "MissionScTrigXor", "XOR")
 	_sc_trigger_negate.tooltip_text = "Invert this condition (condition_flags bit 0)."
-	_sc_trigger_or.tooltip_text = "Combine with the other triggers using OR instead of AND (bit 1)."
-	_sc_trigger_xor.tooltip_text = "Combine using XOR (bit 2)."
+	# The engine takes the combine operator from THIS trigger's flags to join the NEXT condition in the
+	# chain (left to right). The last trigger's OR/XOR bits are unused. [orig: sub_454050 @0x454050]
+	_sc_trigger_or.tooltip_text = "Join the NEXT condition with OR instead of AND (bit 1)."
+	_sc_trigger_xor.tooltip_text = "Join the NEXT condition with XOR (bit 2)."
 	_sc_trigger_negate.toggled.connect(_on_sc_trigger_flag_toggled)
 	_sc_trigger_or.toggled.connect(_on_sc_trigger_flag_toggled)
 	_sc_trigger_xor.toggled.connect(_on_sc_trigger_flag_toggled)
-	_sc_trigger_params = [
-		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScTrigP1", "Param 1", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScTrigP2", "Param 2", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScTrigP3", "Param 3", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScTrigP4", "Param 4", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-	]
-	for spin in _sc_trigger_params:
-		spin.value_changed.connect(_on_sc_trigger_param_changed)
+	_sc_trigger_params = _build_sc_param_slots("MissionScTrigP", _on_sc_trigger_param_changed)
 
 	_sc_detail_box.add_child(HSeparator.new())
 	ObjectUiHelpers.add_section_heading(_sc_detail_box, "Actions (effects)")
@@ -1449,19 +1449,31 @@ func _build_scripting_panel() -> void:
 	_sc_action_down = _make_sc_button(act_buttons, "MissionScActDown", "Down", _on_sc_action_down)
 	_sc_action_type = _add_sc_option(_sc_detail_box, "MissionScActType", "Type", _on_sc_action_type_selected)
 	_sc_action_sub = _add_sc_option(_sc_detail_box, "MissionScActSub", "Sub-type", _on_sc_action_sub_selected)
-	_sc_action_params = [
-		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScActP1", "Param 1", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScActP2", "Param 2", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScActP3", "Param 3", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_sc_detail_box, "MissionScActP4", "Param 4", SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX, 1.0),
-	]
-	for spin in _sc_action_params:
-		spin.value_changed.connect(_on_sc_action_param_changed)
+	_sc_action_desc = ObjectUiHelpers.add_muted_label(_sc_detail_box, "")
+	_sc_action_desc.name = "MissionScActDesc"
+	_sc_action_params = _build_sc_param_slots("MissionScActP", _on_sc_action_param_changed)
 
 	_sc_detail_box.add_child(HSeparator.new())
+	ObjectUiHelpers.add_section_heading(_sc_detail_box, "Summary")
+	_sc_event_summary = ObjectUiHelpers.add_muted_label(_sc_detail_box, "")
+	_sc_event_summary.name = "MissionScSummary"
+	_sc_event_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	ObjectUiHelpers.add_section_heading(_sc_detail_box, "Diagnostics")
 	_sc_diagnostics = ObjectUiHelpers.add_muted_label(_sc_detail_box, "")
 	_sc_diagnostics.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+
+# Build 4 typed param slots (label + stacked spinbox/dropdown). One build, never freed; configure() per
+# refresh picks the widget from the schema and set_value() syncs focus-guarded. [feature: typed pickers]
+func _build_sc_param_slots(prefix: String, on_changed: Callable) -> Array:
+	var slots: Array = []
+	for i in 4:
+		var slot := MissionParamSlot.new()
+		slot.setup("%s%d" % [prefix, i + 1], "Param %d" % (i + 1), SCRIPT_PARAM_MIN, SCRIPT_PARAM_MAX)
+		_sc_detail_box.add_child(slot)
+		slot.committed.connect(func(): on_changed.call(0.0))
+		slots.append(slot)
+	return slots
 
 
 func _populate_sc_option(option: OptionButton, entries: Array, selected_value: int) -> void:
@@ -1552,16 +1564,100 @@ func _refresh_scripting_panel() -> void:
 	_refresh_sc_trigger_section(triggers)
 	_refresh_sc_action_section(actions)
 
+	# Readable "when <conditions> then <actions>" summary of the whole event. [feature: event-flow readability]
+	_sc_event_summary.text = _sc_summary_text(triggers, actions) if has_event else ""
+
+	# Diagnostics: the model's reference checks (zone/event) + editor-side ref-integrity for the typed refs
+	# the model doesn't cover (group/event-trigger/waypoint). [feature: validation & ref-integrity]
 	var diagnostics: Array = _sc_chain.get("diagnostics", [])
 	if not has_event:
 		_sc_diagnostics.text = ""
-	elif diagnostics.is_empty():
-		_sc_diagnostics.text = "No problems detected in this event."
 	else:
 		var lines: Array = []
 		for diag in diagnostics:
 			lines.append("⚠ " + String((diag as Dictionary).get("message", "")))
-		_sc_diagnostics.text = "\n".join(lines)
+		lines.append_array(_sc_ref_integrity_lines(triggers, actions))
+		_sc_diagnostics.text = "No problems detected in this event." if lines.is_empty() else "\n".join(lines)
+
+
+# Compose the event's plain-language summary. Each trigger phrase comes from the schema description with its
+# raw params substituted; triggers are joined left-to-right by THIS trigger's operator (engine semantics,
+# sub_454050) and prefixed NOT when negated. Actions are listed in order.
+func _sc_summary_text(triggers: Array, actions: Array) -> String:
+	var when_part := ""
+	if triggers.is_empty():
+		when_part = "always"
+	else:
+		for i in triggers.size():
+			var t := triggers[i] as Dictionary
+			var phrase := _sc_trigger_phrase(t)
+			if bool(t.get("negated", false)):
+				phrase = "NOT (%s)" % phrase
+			when_part += phrase
+			if i < triggers.size() - 1:
+				when_part += " %s " % String(t.get("logic_operator", "and")).to_upper()
+	var then_part := ""
+	if actions.is_empty():
+		then_part = "(no actions)"
+	else:
+		var act_phrases: Array = []
+		for a in actions:
+			act_phrases.append(_sc_action_phrase(a as Dictionary))
+		then_part = "; ".join(act_phrases)
+	return "When %s, then %s." % [when_part, then_part]
+
+
+func _sc_trigger_phrase(t: Dictionary) -> String:
+	var schema := MissionParamSchema.trigger_slots(int(t.get("main_type", 0)), int(t.get("sub_type", 0)))
+	var params := [int(t.get("param1", 0)), int(t.get("param2", 0)), int(t.get("param3", 0)), int(t.get("param4", 0))]
+	var desc := _fill_desc(String(schema["desc"]), params)
+	return desc if desc != "" else String(t.get("sub_type_name", t.get("main_type_name", "?")))
+
+
+func _sc_action_phrase(a: Dictionary) -> String:
+	var schema := MissionParamSchema.action_slots(int(a.get("action_type", 0)))
+	var params := [int(a.get("param1", 0)), int(a.get("param2", 0)), int(a.get("param3", 0)), int(a.get("param4", 0))]
+	var desc := _fill_desc(String(schema["desc"]), params)
+	return desc if desc != "" else String(a.get("action_type_name", "?"))
+
+
+func _fill_desc(desc: String, params: Array) -> String:
+	if desc == "":
+		return ""
+	var out := desc
+	for i in 4:
+		out = out.replace("{p%d}" % (i + 1), str(params[i]))
+	return out
+
+
+# Editor-side range checks for typed refs the C++ event-chain diagnostics don't already cover (it handles
+# zone + ResetEvent refs). Conservative: only kinds with a well-defined bound (group 0..count, waypoint
+# path), so it never cries wolf and never double-reports what the model already flagged.
+func _sc_ref_integrity_lines(triggers: Array, actions: Array) -> Array:
+	var lines: Array = []
+	var group_count: int = _controller.get_group_count()
+	var path_count: int = _controller.get_waypoint_summaries().size()
+	var check := func(kind: int, value: int, what: String) -> void:
+		match kind:
+			MissionParamSchema.Kind.GROUP:
+				if value < 0 or value >= group_count:
+					lines.append("⚠ %s references group %d (only %d groups)." % [what, value, group_count])
+			MissionParamSchema.Kind.WAYPOINT:
+				if value < -1 or value >= path_count:
+					lines.append("⚠ %s references waypoint path %d (only %d paths)." % [what, value, path_count])
+	for ti in triggers.size():
+		var t := triggers[ti] as Dictionary
+		var ts := MissionParamSchema.trigger_slots(int(t.get("main_type", 0)), int(t.get("sub_type", 0)))
+		var tp := [int(t.get("param1", 0)), int(t.get("param2", 0)), int(t.get("param3", 0)), int(t.get("param4", 0))]
+		for i in 4:
+			check.call(int((ts["params"][i] as Dictionary)["kind"]), tp[i], "Trigger %d" % ti)
+	for ai in actions.size():
+		var a := actions[ai] as Dictionary
+		var as_ := MissionParamSchema.action_slots(int(a.get("action_type", 0)))
+		var ap := [int(a.get("param1", 0)), int(a.get("param2", 0)), int(a.get("param3", 0)), int(a.get("param4", 0))]
+		for i in 4:
+			check.call(int((as_["params"][i] as Dictionary)["kind"]), ap[i], "Action %d" % ai)
+	return lines
 
 
 func _refresh_sc_trigger_section(triggers: Array) -> void:
@@ -1585,8 +1681,8 @@ func _refresh_sc_trigger_section(triggers: Array) -> void:
 	_sc_trigger_negate.disabled = not has_sel
 	_sc_trigger_or.disabled = not has_sel
 	_sc_trigger_xor.disabled = not has_sel
-	for spin in _sc_trigger_params:
-		spin.editable = has_sel
+	for slot in _sc_trigger_params:
+		slot.set_editable(has_sel)
 
 	_sc_trigger_syncing = true
 	if not has_sel:
@@ -1595,6 +1691,7 @@ func _refresh_sc_trigger_section(triggers: Array) -> void:
 		_sc_trigger_negate.button_pressed = false
 		_sc_trigger_or.button_pressed = false
 		_sc_trigger_xor.button_pressed = false
+		_sc_trigger_desc.text = ""
 		_sc_trigger_syncing = false
 		return
 	var trig := triggers[_sc_trigger_selected] as Dictionary
@@ -1606,10 +1703,12 @@ func _refresh_sc_trigger_section(triggers: Array) -> void:
 	_sc_trigger_or.button_pressed = bool(trig.get("logic_or", false))
 	_sc_trigger_xor.button_pressed = bool(trig.get("logic_xor", false))
 	var params := [int(trig.get("param1", 0)), int(trig.get("param2", 0)), int(trig.get("param3", 0)), int(trig.get("param4", 0))]
-	var hints := _trigger_param_hints(main_type, sub_type)
+	var schema := MissionParamSchema.trigger_slots(main_type, sub_type)
+	_sc_trigger_desc.text = String(schema["desc"]) if String(schema["desc"]) != "" else "No description yet for this trigger type; parameters are raw values."
 	for i in 4:
-		_sync_spin(_sc_trigger_params[i], float(params[i]))
-		_sc_trigger_params[i].tooltip_text = hints[i]
+		var slot_def := schema["params"][i] as Dictionary
+		_sc_trigger_params[i].configure(slot_def, _sc_param_items(int(slot_def["kind"]), slot_def))
+		_sc_trigger_params[i].set_value(params[i])
 	_sc_trigger_syncing = false
 
 
@@ -1630,13 +1729,14 @@ func _refresh_sc_action_section(actions: Array) -> void:
 	_sc_action_down.disabled = not (has_sel and _sc_action_selected < actions.size() - 1)
 	_sc_action_type.disabled = not has_sel
 	_sc_action_sub.disabled = not has_sel
-	for spin in _sc_action_params:
-		spin.editable = has_sel
+	for slot in _sc_action_params:
+		slot.set_editable(has_sel)
 
 	_sc_action_syncing = true
 	if not has_sel:
 		_sc_action_type.clear()
 		_sc_action_sub.clear()
+		_sc_action_desc.text = ""
 		_sc_action_syncing = false
 		return
 	var act := actions[_sc_action_selected] as Dictionary
@@ -1645,27 +1745,51 @@ func _refresh_sc_action_section(actions: Array) -> void:
 	_populate_sc_option(_sc_action_type, _controller.get_action_types(), action_type)
 	_populate_sc_option(_sc_action_sub, _controller.get_action_sub_types(action_type), action_sub)
 	var params := [int(act.get("param1", 0)), int(act.get("param2", 0)), int(act.get("param3", 0)), int(act.get("param4", 0))]
-	var hints := _action_param_hints(action_type)
+	var schema := MissionParamSchema.action_slots(action_type)
+	_sc_action_desc.text = String(schema["desc"]) if String(schema["desc"]) != "" else "No description yet for this action type; parameters are raw values."
 	for i in 4:
-		_sync_spin(_sc_action_params[i], float(params[i]))
-		_sc_action_params[i].tooltip_text = hints[i]
+		var slot_def := schema["params"][i] as Dictionary
+		_sc_action_params[i].configure(slot_def, _sc_param_items(int(slot_def["kind"]), slot_def))
+		_sc_action_params[i].set_value(params[i])
 	_sc_action_syncing = false
 
 
-# Param hints surface the two proven cross-references; everything else stays a raw parameter.
-func _trigger_param_hints(main_type: int, sub_type: int) -> Array:
-	var hints := ["Raw parameter 1", "Raw parameter 2", "Raw parameter 3", "Raw parameter 4"]
-	# A Group/Single *IsWithinArea trigger's param2 indexes the area-trigger (zone) table.
-	if (main_type == 1 or main_type == 2) and sub_type == 10:
-		hints[1] = "Area zone index (which zone in the Triggers tab this checks)"
-	return hints
-
-
-func _action_param_hints(action_type: int) -> Array:
-	var hints := ["Raw parameter 1", "Raw parameter 2", "Raw parameter 3", "Raw parameter 4"]
-	if action_type == 34:  # ResetEvent
-		hints[0] = "Event index to reset"
-	return hints
+# Build the dropdown items for a picker-kind param slot from the mission's collections. RAW kinds get [].
+# An out-of-range stored value is handled by MissionParamSlot.set_value (shows it as a raw "Value N" row).
+func _sc_param_items(kind: int, slot_def: Dictionary) -> Array:
+	if _controller == null:
+		return []
+	match kind:
+		MissionParamSchema.Kind.GROUP:
+			var groups: Array = []
+			for i in _controller.get_group_count():
+				groups.append({ "value": i, "label": "Group %d" % i })
+			return groups
+		MissionParamSchema.Kind.ENTITY:
+			return _controller.get_all_entities()
+		MissionParamSchema.Kind.ZONE:
+			var zones: Array = []
+			for z in _controller.get_area_triggers():
+				var zd := z as Dictionary
+				zones.append({ "value": int(zd.get("index", 0)), "label": "Zone %d (id %d)" % [int(zd.get("index", 0)), int(zd.get("id", 0))] })
+			return zones
+		MissionParamSchema.Kind.EVENT:
+			var evs: Array = []
+			for e in _controller.get_events():
+				var ed := e as Dictionary
+				evs.append({ "value": int(ed.get("index", 0)), "label": "Event %d" % int(ed.get("index", 0)) })
+			return evs
+		MissionParamSchema.Kind.WAYPOINT:
+			var wps: Array = [{ "value": -1, "label": "-1 (nearest of type)" }]
+			for w in _controller.get_waypoint_summaries():
+				var wd := w as Dictionary
+				wps.append({ "value": int(wd.get("index", 0)), "label": "Path %d" % int(wd.get("index", 0)) })
+			return wps
+		MissionParamSchema.Kind.BOOL:
+			return [{ "value": 0, "label": "Off (0)" }, { "value": 1, "label": "On (1)" }]
+		MissionParamSchema.Kind.ENUM:
+			return slot_def.get("enum", [])
+	return []
 
 
 func _on_sc_add_event() -> void:
@@ -1787,10 +1911,10 @@ func _commit_selected_trigger(overrides: Dictionary = {}) -> void:
 	var trigger := {
 		"main_type": _sc_trigger_main.get_selected_id(),
 		"sub_type": _sc_trigger_sub.get_selected_id(),
-		"param1": int(_sc_trigger_params[0].value),
-		"param2": int(_sc_trigger_params[1].value),
-		"param3": int(_sc_trigger_params[2].value),
-		"param4": int(_sc_trigger_params[3].value),
+		"param1": _sc_trigger_params[0].read_value(),
+		"param2": _sc_trigger_params[1].read_value(),
+		"param3": _sc_trigger_params[2].read_value(),
+		"param4": _sc_trigger_params[3].read_value(),
 		"negated": _sc_trigger_negate.button_pressed,
 		"logic_or": _sc_trigger_or.button_pressed,
 		"logic_xor": _sc_trigger_xor.button_pressed,
@@ -1862,10 +1986,10 @@ func _commit_selected_action(overrides: Dictionary = {}) -> void:
 	var action := {
 		"action_type": _sc_action_type.get_selected_id(),
 		"action_sub_type": _sc_action_sub.get_selected_id(),
-		"param1": int(_sc_action_params[0].value),
-		"param2": int(_sc_action_params[1].value),
-		"param3": int(_sc_action_params[2].value),
-		"param4": int(_sc_action_params[3].value),
+		"param1": _sc_action_params[0].read_value(),
+		"param2": _sc_action_params[1].read_value(),
+		"param3": _sc_action_params[2].read_value(),
+		"param4": _sc_action_params[3].read_value(),
 	}
 	for key in overrides:
 		action[key] = overrides[key]

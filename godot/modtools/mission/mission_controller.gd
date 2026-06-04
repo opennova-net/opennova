@@ -1760,6 +1760,23 @@ func get_area_triggers() -> Array:
 	return _mission.get_area_triggers() if _mission != null else []
 
 
+# Flat list of every entity (all kinds), shaped for a scripting param picker: { value: bms_id, label }.
+# Single/Player triggers and Single actions reference a unit by its BMS/net id, not an array index
+# ([orig: EntityPool_FindByNetId @0x4f0a20]); an unmatched value still round-trips as a raw row.
+func get_all_entities() -> Array:
+	if _mission == null:
+		return []
+	var out: Array = []
+	for kind in [NovaMissionData.KIND_MARKER, NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_ORGANIC]:
+		for e in _mission.get_entities(kind):
+			var ed := e as Dictionary
+			var bms_id := int(ed.get("bms_id", 0))
+			var display := entity_display_name(kind, int(ed.get("index", 0)))
+			var label := ("%s #%d" % [display, bms_id]) if display != "" else ("Unit #%d" % bms_id)
+			out.append({ "value": bms_id, "label": label })
+	return out
+
+
 func get_selected_zone_index() -> int:
 	return _selected_zone_index
 
@@ -1838,8 +1855,9 @@ func set_selected_zone_flags(active: bool, constrain_z: bool) -> void:
 
 
 # Delete the selected zone. Structural (shifts later indices), so the overlay rebuilds and the
-# selection drops. A zone referenced by an *IsWithinArea trigger param2 is NOT auto-repaired
-# (index semantics are under RE); the status line warns. One undo step. False if none selected.
+# selection drops. *IsWithinArea trigger param2 references are auto-repaired in the lib (Phase-5 RE
+# confirmed param2 is an array index): higher refs shift down, a direct hit becomes -1 (dangling, which
+# the scripting diagnostics then flag). One undo step. False if none selected.
 func delete_selected_area_trigger() -> bool:
 	if _mission == null or _selected_zone_index < 0:
 		return false
@@ -1850,7 +1868,7 @@ func delete_selected_area_trigger() -> bool:
 	_push_undo_step(before)
 	_selected_zone_index = -1
 	_refresh_area_trigger_overlay()
-	_report("Zone deleted. Any trigger that referenced a zone by index may need repointing.")
+	_report("Zone deleted. Triggers that referenced a higher zone shifted down; a direct reference was unset.")
 	mark_dirty()
 	return true
 

@@ -340,6 +340,12 @@ class FakeController:
 	func get_group_count() -> int:
 		return groups.size()
 
+	# Flat entity list for scripting ENTITY_REF pickers: [{value, label}]. Settable per test.
+	var all_entities: Array = []
+
+	func get_all_entities() -> Array:
+		return all_entities
+
 	func get_groups() -> Array:
 		return groups
 
@@ -1389,15 +1395,20 @@ func test_scripting_reset_spin_commits() -> void:
 	assert_eq(int((ctx.fake.set_event_calls[0] as Array)[1]), 12, "the new reset_after is sent")
 
 
-func test_scripting_trigger_editor_populates_with_hint() -> void:
+func test_scripting_trigger_editor_typed_pickers() -> void:
 	var event := _sc_event(0, 0, 0, 0, 1, 0)
 	var chain := _sc_chain_dict(event, [_sc_trig(2, "Single", 10, "SingleIsWithinArea", [7, 3, 0, 0])], [])
 	var ctx := _scripting_ctx([event], 0, chain)
 	ctx.inspector._sc_trigger_list.item_selected.emit(0)
 	assert_eq(ctx.inspector._sc_trigger_main.get_selected_id(), 2, "the main-type dropdown shows Single")
 	assert_eq(ctx.inspector._sc_trigger_sub.get_selected_id(), 10, "the sub-type dropdown shows SingleIsWithinArea")
-	assert_eq(ctx.inspector._sc_trigger_params[0].value, 7.0, "param1 spin reflects the trigger")
-	assert_true(ctx.inspector._sc_trigger_params[1].tooltip_text.find("zone") != -1, "param2 carries the area-zone hint for an *IsWithinArea trigger")
+	# SingleIsWithinArea: param1 = entity (unit) picker, param2 = zone picker. Both expose a dropdown and
+	# round-trip the stored raw value even when nothing in the (empty) collections matches.
+	assert_true(ctx.inspector._sc_trigger_params[0].is_picker(), "param1 renders as a typed picker (unit)")
+	assert_eq(ctx.inspector._sc_trigger_params[0].read_value(), 7, "param1 round-trips the stored unit id")
+	assert_true(ctx.inspector._sc_trigger_params[1].is_picker(), "param2 renders as a typed picker (zone)")
+	assert_eq(ctx.inspector._sc_trigger_params[1].read_value(), 3, "param2 round-trips the stored zone index")
+	assert_true(ctx.inspector._sc_trigger_desc.text.to_lower().find("zone") != -1, "the type description mentions the zone")
 
 
 func test_scripting_trigger_type_change_commits_and_resets_sub() -> void:
@@ -1414,15 +1425,60 @@ func test_scripting_trigger_type_change_commits_and_resets_sub() -> void:
 	assert_eq(int(sent["sub_type"]), 0, "the sub-type resets to 0 on a main-type change")
 
 
-func test_scripting_trigger_param_commits() -> void:
+func test_scripting_trigger_raw_param_commits() -> void:
+	# GroupHasLostMoreUnits: param2 is a raw count (not a picker); editing its spinbox commits once.
 	var event := _sc_event(0, 0, 0, 0, 1, 0)
-	var chain := _sc_chain_dict(event, [_sc_trig(1, "Group", 1, "GroupSeesGroup", [0, 0, 0, 0])], [])
+	var chain := _sc_chain_dict(event, [_sc_trig(1, "Group", 6, "GroupHasLostMoreUnits", [2, 0, 0, 0])], [])
 	var ctx := _scripting_ctx([event], 0, chain)
 	ctx.inspector._sc_trigger_list.item_selected.emit(0)
-	ctx.inspector._sc_trigger_params[0].value = 42.0  # fires value_changed
+	assert_false(ctx.inspector._sc_trigger_params[1].is_picker(), "param2 is a raw count spinbox")
+	ctx.inspector._sc_trigger_params[1].get_spin().value = 42.0  # fires value_changed -> committed
 	assert_eq(ctx.fake.set_trigger_calls.size(), 1, "editing a param commits the trigger exactly once")
 	var sent := (ctx.fake.set_trigger_calls.back() as Array)[1] as Dictionary
-	assert_eq(int(sent["param1"]), 42, "the new param1 is committed")
+	assert_eq(int(sent["param2"]), 42, "the new param2 is committed")
+
+
+func test_scripting_unmapped_type_param_roundtrips_raw() -> void:
+	# A trigger type with no schema entry: every param stays a raw spinbox and round-trips untouched.
+	var event := _sc_event(0, 0, 0, 0, 1, 0)
+	var chain := _sc_chain_dict(event, [_sc_trig(1, "Group", 99, "Value 99", [11, 22, 33, 44])], [])
+	var ctx := _scripting_ctx([event], 0, chain)
+	ctx.inspector._sc_trigger_list.item_selected.emit(0)
+	for i in 4:
+		assert_false(ctx.inspector._sc_trigger_params[i].is_picker(), "unmapped param %d is raw" % i)
+	assert_eq(ctx.inspector._sc_trigger_params[0].read_value(), 11, "raw param1 round-trips")
+	assert_eq(ctx.inspector._sc_trigger_params[3].read_value(), 44, "raw param4 round-trips")
+	ctx.inspector._sc_trigger_params[2].get_spin().value = 12345.0
+	var sent := (ctx.fake.set_trigger_calls.back() as Array)[1] as Dictionary
+	assert_eq(int(sent["param3"]), 12345, "an unmapped param commits its exact raw value")
+
+
+func test_scripting_picker_out_of_range_shows_raw_row() -> void:
+	# A zone ref past the end of the (empty) zone table is shown as its own raw row, not snapped to entry 0.
+	var event := _sc_event(0, 0, 0, 0, 1, 0)
+	var chain := _sc_chain_dict(event, [_sc_trig(2, "Single", 10, "SingleIsWithinArea", [0, 99, 0, 0])], [])
+	var ctx := _scripting_ctx([event], 0, chain)
+	ctx.inspector._sc_trigger_list.item_selected.emit(0)
+	var opt: OptionButton = ctx.inspector._sc_trigger_params[1].get_option()
+	assert_eq(opt.get_item_text(opt.selected), "Value 99", "out-of-range zone shows as a raw Value row")
+	assert_eq(ctx.inspector._sc_trigger_params[1].read_value(), 99, "and read_value preserves the raw value")
+
+
+func test_scripting_zone_picker_commits_selected_index() -> void:
+	var event := _sc_event(0, 0, 0, 0, 1, 0)
+	var chain := _sc_chain_dict(event, [_sc_trig(2, "Single", 10, "SingleIsWithinArea", [0, 0, 0, 0])], [])
+	var ctx := _scripting_ctx([event], 0, chain)
+	ctx.fake.zones = [{"index": 0, "id": 10}, {"index": 1, "id": 20}, {"index": 2, "id": 30}]
+	ctx.inspector._sc_trigger_list.item_selected.emit(0)
+	var opt: OptionButton = ctx.inspector._sc_trigger_params[1].get_option()
+	# Select the zone whose id is 30 (array index 2) and fire the selection.
+	for i in opt.item_count:
+		if opt.get_item_id(i) == 2:
+			opt.select(i)
+			opt.item_selected.emit(i)
+			break
+	var sent := (ctx.fake.set_trigger_calls.back() as Array)[1] as Dictionary
+	assert_eq(int(sent["param2"]), 2, "picking a zone commits its array index as param2")
 
 
 func test_scripting_trigger_add_remove_move_call_controller() -> void:
@@ -1448,11 +1504,19 @@ func test_scripting_action_editor_populates_and_commits() -> void:
 	var ctx := _scripting_ctx([event], 0, chain)
 	ctx.inspector._sc_action_list.item_selected.emit(0)
 	assert_eq(ctx.inspector._sc_action_type.get_selected_id(), 34, "the action-type dropdown shows ResetEvent")
-	assert_eq(ctx.inspector._sc_action_params[0].value, 4.0, "param1 spin reflects the action")
-	assert_true(ctx.inspector._sc_action_params[0].tooltip_text.find("Event") != -1, "ResetEvent param1 carries the event-index hint")
-	ctx.inspector._sc_action_params[0].value = 1.0  # fires value_changed
-	assert_eq(ctx.fake.set_action_calls.size(), 1, "editing a param commits the action exactly once")
-	assert_eq(int(((ctx.fake.set_action_calls.back() as Array)[1] as Dictionary)["param1"]), 1, "the new param1 is committed")
+	# ResetEvent param1 = event picker. Stored value 4 has no matching event (only event 0), so it shows raw.
+	assert_true(ctx.inspector._sc_action_params[0].is_picker(), "ResetEvent param1 renders as an event picker")
+	assert_eq(ctx.inspector._sc_action_params[0].read_value(), 4, "param1 round-trips the stored event index")
+	assert_true(ctx.inspector._sc_action_desc.text.to_lower().find("event") != -1, "the action description mentions the event")
+	# Pick the real event 0 and fire the selection.
+	var opt: OptionButton = ctx.inspector._sc_action_params[0].get_option()
+	for i in opt.item_count:
+		if opt.get_item_id(i) == 0:
+			opt.select(i)
+			opt.item_selected.emit(i)
+			break
+	assert_eq(ctx.fake.set_action_calls.size(), 1, "picking an event commits the action exactly once")
+	assert_eq(int(((ctx.fake.set_action_calls.back() as Array)[1] as Dictionary)["param1"]), 0, "the chosen event index is committed")
 
 
 func test_scripting_diagnostics_render() -> void:
@@ -1467,20 +1531,42 @@ func test_scripting_diagnostics_render() -> void:
 
 
 func test_scripting_trigger_param_survives_external_refresh_while_focused() -> void:
-	# The same focus guard as the other panels: a mid-typed param spin must survive an external refresh.
+	# The same focus guard as the other panels: a mid-typed RAW param spin must survive an external refresh.
 	var event := _sc_event(0, 0, 0, 0, 1, 0)
-	var ctx := _scripting_ctx([event], 0, _sc_chain_dict(event, [_sc_trig(1, "Group", 1, "GroupSeesGroup", [5, 0, 0, 0])], []))
-	ctx.inspector._sc_trigger_list.item_selected.emit(0)  # param1 synced to 5
-	var inner: LineEdit = ctx.inspector._sc_trigger_params[0].get_line_edit()
+	var ctx := _scripting_ctx([event], 0, _sc_chain_dict(event, [_sc_trig(1, "Group", 6, "GroupHasLostMoreUnits", [0, 5, 0, 0])], []))
+	ctx.inspector._sc_trigger_list.item_selected.emit(0)  # param2 (raw count) synced to 5
+	var inner: LineEdit = ctx.inspector._sc_trigger_params[1].get_spin().get_line_edit()
 	inner.grab_focus()
 	if not inner.has_focus():
 		pass_test("headless focus unavailable")
 		return
 	inner.text = "70"
 	# An external change moves the model under the user; the refresh must not clobber the typed text.
-	ctx.fake.chain = _sc_chain_dict(event, [_sc_trig(1, "Group", 1, "GroupSeesGroup", [9, 0, 0, 0])], [])
+	ctx.fake.chain = _sc_chain_dict(event, [_sc_trig(1, "Group", 6, "GroupHasLostMoreUnits", [0, 9, 0, 0])], [])
 	ctx.fake.changed.emit()
 	assert_eq(inner.text, "70", "focused, in-flight trigger param survives an external refresh")
+
+
+func test_scripting_event_summary_renders() -> void:
+	var event := _sc_event(0, 0, 0, 0, 1, 1)
+	var chain := _sc_chain_dict(event,
+		[_sc_trig(1, "Group", 5, "GroupAlive", [3, 0, 0, 0])],
+		[_sc_act(2, "KillGroup", 0, "Null", [4, 0, 0, 0])])
+	var ctx := _scripting_ctx([event], 0, chain)
+	var summary: String = ctx.inspector._sc_event_summary.text
+	assert_true(summary.begins_with("When "), "the summary reads as a when/then sentence")
+	assert_true(summary.find("Group 3 is alive") != -1, "the trigger phrase substitutes its param")
+	assert_true(summary.find("Kill group 4") != -1, "the action phrase substitutes its param")
+
+
+func test_scripting_ref_integrity_flags_bad_group() -> void:
+	# A group ref past the group table is flagged by the editor-side ref-integrity pass.
+	var event := _sc_event(0, 0, 0, 0, 1, 0)
+	var chain := _sc_chain_dict(event, [_sc_trig(1, "Group", 5, "GroupAlive", [7, 0, 0, 0])], [])
+	var ctx := _scripting_ctx([event], 0, chain)
+	ctx.fake.groups = [{"index": 0}, {"index": 1}]  # only 2 groups, ref is 7
+	ctx.fake.changed.emit()
+	assert_true(ctx.inspector._sc_diagnostics.text.find("references group 7") != -1, "an out-of-range group ref is flagged")
 
 
 # --- Two-host split: browser left, editor in the right dock -------------------
