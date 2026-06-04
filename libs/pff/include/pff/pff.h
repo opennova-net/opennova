@@ -130,6 +130,7 @@ typedef struct PffWriteEntry {
 #define PFF_WRITE_ERR_NAME_LEN  (-2)  /* a name exceeds PFF_NAME_SIZE bytes                       */
 #define PFF_WRITE_ERR_NAME_EMPTY (-3) /* a name normalizes to empty (blank / whitespace only)     */
 #define PFF_WRITE_ERR_DUP_NAME  (-4)  /* two entries share a normalized (uppercased) name         */
+#define PFF_WRITE_ERR_TOO_LARGE (-5)  /* total payload size overflows the uint32 offset space     */
 
 /* Write a modern archive: header(20) | payloads | directory(36 each). Entries are emitted sorted
    by normalized name (uppercase + trailing-space trim), matching the engine's on-disk convention

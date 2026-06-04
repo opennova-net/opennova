@@ -42,6 +42,10 @@ int pff_validate_and_order(const PffWriteStreamEntry *entries, uint32_t n,
 {
     std::vector<std::string> norm(n);
     order.resize(n);
+    /* Entry offsets and file_table_offset are uint32. The last payload ends at
+       PFF_HEADER_SIZE + sum(sizes); if that exceeds UINT32_MAX the offsets silently wrap and the
+       archive is unreadable, so reject it up front rather than writing a corrupt file. */
+    uint64_t total = PFF_HEADER_SIZE;
     for (uint32_t i = 0; i < n; ++i) {
         const char *name = entries[i].name ? entries[i].name : "";
         size_t raw_len = strlen(name);
@@ -53,6 +57,9 @@ int pff_validate_and_order(const PffWriteStreamEntry *entries, uint32_t n,
             return PFF_WRITE_ERR_NAME_EMPTY;
         norm[i] = buf;
         order[i] = i;
+        total += entries[i].size;
+        if (total > 0xFFFFFFFFull)
+            return PFF_WRITE_ERR_TOO_LARGE;
     }
     std::sort(order.begin(), order.end(), [&norm](uint32_t a, uint32_t b) {
         return norm[a] < norm[b];
@@ -179,13 +186,22 @@ int pff_write_archive_streamed_progress(const char *path, PffFormat format,
         remove(tmp.c_str());
         return rc;
     }
-    /* rename() will not overwrite an existing file on Windows, so clear the target first. The
-       caller (e.g. NovaPffArchive::save_as) guarantees `path` is not the still-open source. */
-    remove(path);
+    /* rename() will not overwrite an existing file on Windows, so an existing target must be moved
+       aside first. Rather than remove() it outright (which would lose the original if the process
+       died before the rename completed), move it to "<path>.bak" so a crash mid-swap always leaves
+       a recoverable copy; the backup is deleted only once the new file is in place. The caller
+       (e.g. NovaPffArchive::save_as) guarantees `path` is not the still-open source. */
+    std::string bak = std::string(path) + ".bak";
+    remove(bak.c_str()); /* clear any stale backup from a previous interrupted save */
+    const bool had_original = (rename(path, bak.c_str()) == 0);
     if (rename(tmp.c_str(), path) != 0) {
         remove(tmp.c_str());
+        if (had_original)
+            rename(bak.c_str(), path); /* restore the original on failure */
         return PFF_WRITE_ERR_IO;
     }
+    if (had_original)
+        remove(bak.c_str());
     return PFF_WRITE_OK;
 }
 

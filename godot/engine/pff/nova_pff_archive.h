@@ -13,6 +13,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace godot {
@@ -49,6 +50,12 @@ private:
 	bool dirty_ = false;
 	mutable String last_error_;
 	std::vector<Entry> entries_;
+	// Normalized-name -> index into entries_, rebuilt lazily on the next find_entry after any model
+	// mutation (open/add/remove). Keeps lookups O(1) instead of an O(n) per-call scan, so batch
+	// extract over a multi-thousand-entry archive is O(n) rather than O(n^2). Invalidate via
+	// invalidate_index() whenever entries_ changes.
+	mutable std::unordered_map<std::string, size_t> name_index_;
+	mutable bool index_dirty_ = true;
 	// Count of entries written un-decoded (decode requested but payload codec failed) by the most
 	// recent extract batch / extract_to_status call. Lets the UI warn "N saved as raw".
 	mutable int last_undecoded_count_ = 0;
@@ -74,6 +81,10 @@ private:
 	uint32_t container_key() const;
 	void close_source();
 	void build_model_from_source();
+	void invalidate_index() { index_dirty_ = true; }
+	// Normalize a PFF name the same way the C library does (uppercase + trailing-space trim) so the
+	// binding's lookup matches the writer's dedup and the on-disk sort order.
+	static std::string normalize_name(const String &name);
 	const Entry *find_entry(const String &name) const;
 	// out_decoded (optional): set true if the payload codec ran, false if decode was requested but
 	// failed and `out` was left as the container-decrypted (raw) fallback. Genuine read failures

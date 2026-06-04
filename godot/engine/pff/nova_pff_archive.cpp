@@ -5,6 +5,7 @@
 
 #include <godot_cpp/classes/project_settings.hpp>
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -48,6 +49,7 @@ void NovaPffArchive::close_source() {
 
 void NovaPffArchive::build_model_from_source() {
 	entries_.clear();
+	invalidate_index();
 	entries_.reserve(source_.entry_count);
 	for (uint32_t i = 0; i < source_.entry_count; ++i) {
 		const PffEntry &pe = source_.entries[i];
@@ -67,14 +69,33 @@ void NovaPffArchive::build_model_from_source() {
 	}
 }
 
-const NovaPffArchive::Entry *NovaPffArchive::find_entry(const String &name) const {
-	const String wanted = name.strip_edges().to_lower();
-	for (const Entry &e : entries_) {
-		if (String(e.name.c_str()).to_lower() == wanted) {
-			return &e;
-		}
+std::string NovaPffArchive::normalize_name(const String &name) {
+	// Mirror libs/pff pff_norm_name: uppercase, then trim trailing spaces. Matches the writer's
+	// dedup and the on-disk sort so the binding never disagrees with the C library about identity.
+	const CharString utf8 = name.utf8();
+	std::string out(utf8.get_data(), static_cast<size_t>(utf8.length()));
+	for (char &c : out) {
+		c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
 	}
-	return nullptr;
+	while (!out.empty() && out.back() == ' ') {
+		out.pop_back();
+	}
+	return out;
+}
+
+const NovaPffArchive::Entry *NovaPffArchive::find_entry(const String &name) const {
+	if (index_dirty_) {
+		name_index_.clear();
+		name_index_.reserve(entries_.size());
+		for (size_t i = 0; i < entries_.size(); ++i) {
+			// First write wins, so the index agrees with a linear scan even if the model ever holds
+			// two normalized-equal names (the writer rejects that, but the model can be mid-edit).
+			name_index_.emplace(normalize_name(String(entries_[i].name.c_str())), i);
+		}
+		index_dirty_ = false;
+	}
+	const auto it = name_index_.find(normalize_name(name));
+	return it == name_index_.end() ? nullptr : &entries_[it->second];
 }
 
 bool NovaPffArchive::read_entry_bytes(const Entry &entry, bool decode, std::vector<uint8_t> &out,
@@ -366,7 +387,8 @@ Error NovaPffArchive::extract_all(const String &out_dir, bool decode) const {
 	Error last = OK;
 	for (const Entry &e : entries_) {
 		const String name(e.name.c_str());
-		const Error rc = extract_to(name, out_dir.path_join(name), decode);
+		// Basename only: an entry name must never resolve outside out_dir.
+		const Error rc = extract_to(name, out_dir.path_join(name.get_file()), decode);
 		if (rc != OK) {
 			last = rc;
 		}
@@ -401,12 +423,25 @@ Error NovaPffArchive::add_file_from_disk(const String &src_path, const String &s
 		last_error_ = "Cannot open file: " + src_path;
 		return ERR_CANT_OPEN;
 	}
-	fseek(f, 0, SEEK_END);
-	long n = ftell(f);
-	fseek(f, 0, SEEK_SET);
+	// 64-bit size: plain ftell()/long is 32-bit on Win64, which would silently truncate a >2GB file.
+#ifdef _WIN32
+	_fseeki64(f, 0, SEEK_END);
+	const long long n = _ftelli64(f);
+	_fseeki64(f, 0, SEEK_SET);
+#else
+	fseeko(f, 0, SEEK_END);
+	const long long n = static_cast<long long>(ftello(f));
+	fseeko(f, 0, SEEK_SET);
+#endif
 	if (n < 0) {
 		fclose(f);
 		last_error_ = "Cannot size file: " + src_path;
+		return ERR_FILE_CANT_READ;
+	}
+	// PFF stores sizes/offsets as uint32, so a single entry can never exceed 4GB.
+	if (static_cast<unsigned long long>(n) > 0xFFFFFFFFull) {
+		fclose(f);
+		last_error_ = "File too large for a PFF archive (max 4GB): " + src_path;
 		return ERR_FILE_CANT_READ;
 	}
 
@@ -432,6 +467,7 @@ Error NovaPffArchive::add_file_from_disk(const String &src_path, const String &s
 	}
 	e.size = static_cast<uint32_t>(e.data.size());
 	entries_.push_back(std::move(e));
+	invalidate_index();
 	dirty_ = true;
 	return OK;
 }
@@ -440,9 +476,9 @@ Error NovaPffArchive::remove_entries(const PackedStringArray &names) {
 	last_error_ = String();
 	int removed = 0;
 	for (int i = 0; i < names.size(); ++i) {
-		const String wanted = names[i].strip_edges().to_lower();
+		const std::string wanted = normalize_name(names[i]);
 		for (size_t j = 0; j < entries_.size();) {
-			if (String(entries_[j].name.c_str()).to_lower() == wanted) {
+			if (normalize_name(String(entries_[j].name.c_str())) == wanted) {
 				entries_.erase(entries_.begin() + j);
 				++removed;
 			} else {
@@ -451,6 +487,7 @@ Error NovaPffArchive::remove_entries(const PackedStringArray &names) {
 		}
 	}
 	if (removed > 0) {
+		invalidate_index();
 		dirty_ = true;
 	}
 	return OK;
@@ -502,6 +539,7 @@ Error NovaPffArchive::save_as(const String &out_path) {
 			case PFF_WRITE_ERR_NAME_LEN: last_error_ = "An entry name exceeds 16 characters"; break;
 			case PFF_WRITE_ERR_NAME_EMPTY: last_error_ = "An entry has an empty name"; break;
 			case PFF_WRITE_ERR_DUP_NAME: last_error_ = "Two entries share the same name"; break;
+			case PFF_WRITE_ERR_TOO_LARGE: last_error_ = "Archive is too large (max 4GB total)"; break;
 			default: last_error_ = "Failed to write archive: " + out_path; break;
 		}
 		return ERR_CANT_CREATE;
@@ -551,6 +589,7 @@ void NovaPffArchive::save_worker() {
 			case PFF_WRITE_ERR_NAME_LEN: save_state_.message = "An entry name exceeds 16 characters"; break;
 			case PFF_WRITE_ERR_NAME_EMPTY: save_state_.message = "An entry has an empty name"; break;
 			case PFF_WRITE_ERR_DUP_NAME: save_state_.message = "Two entries share the same name"; break;
+			case PFF_WRITE_ERR_TOO_LARGE: save_state_.message = "Archive is too large (max 4GB total)"; break;
 			case -1000: save_state_.message = "Internal error while saving"; break;
 			default: save_state_.message = "Failed to write archive"; break;
 		}

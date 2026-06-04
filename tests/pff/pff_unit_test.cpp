@@ -459,6 +459,24 @@ static int test_write_progress_callback(void) {
     return 1;
 }
 
+/* A payload set whose total size overflows the uint32 offset space is rejected up front, before
+   any read callback runs, rather than silently wrapping offsets into a corrupt archive. */
+static int test_write_rejects_offset_overflow(void) {
+    /* Three ~1.5GB entries sum to >4GB. The read callback is never reached (validation fails
+       first), so no memory is actually allocated for these sizes. */
+    PffWriteStreamEntry se[3] = {
+        { "a.bin", 0x60000000u, 0, 0, 0 },
+        { "b.bin", 0x60000000u, 0, 0, 0 },
+        { "c.bin", 0x60000000u, 0, 0, 0 },
+    };
+    const uint8_t *datas[3] = { NULL, NULL, NULL };
+    CHECK(pff_write_archive_streamed("pff_huge.pff", PFF_FORMAT_PFF3, se, 3,
+              prog_read_entry, (void *)datas) == PFF_WRITE_ERR_TOO_LARGE,
+          "total payload over 4GB rejected");
+    remove("pff_huge.pff");
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_is_pff3_magic);
     RUN_TEST(test_is_pff4_magic);
@@ -482,6 +500,7 @@ int main(void) {
     RUN_TEST(test_write_rejects_duplicate_names);
     RUN_TEST(test_write_preserves_name_case);
     RUN_TEST(test_write_progress_callback);
+    RUN_TEST(test_write_rejects_offset_overflow);
 
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed > 0 ? EXIT_FAILURE : EXIT_SUCCESS;

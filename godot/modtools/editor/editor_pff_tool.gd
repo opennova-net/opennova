@@ -40,6 +40,8 @@ var _progress_label: Label
 var _cancel_button: Button
 var _busy: bool = false
 var _cancelled: bool = false
+# Same-named files across archives that clobbered each other in the last Extract-All run.
+var _last_collisions: int = 0
 
 # One NovaPffArchive per opened .pff; _active indexes the one shown on the right.
 var _archives: Array = []
@@ -385,6 +387,7 @@ func _do_extract(names: PackedStringArray, dir: String) -> void:
 	if arc == null:
 		return
 	var jobs: Array = []
+	_last_collisions = 0
 	for n in names:
 		jobs.append({"arc": arc, "name": n, "out_path": dir.path_join(String(n).get_file())})
 	await _perform_extraction(jobs, dir, 1)
@@ -399,13 +402,21 @@ func _on_extract_all_pressed() -> void:
 
 func _do_extract_all(dir: String) -> void:
 	# Flat: every file from every open archive goes straight into `dir`. Same-named files across
-	# archives are last-write-wins — kept intentionally simple.
+	# archives are last-write-wins — kept intentionally simple, but we count collisions so the
+	# report can warn rather than silently dropping files.
 	var jobs: Array = []
+	var seen := {}
+	_last_collisions = 0
 	for arc in _archives:
 		for entry_value in arc.get_entries():
 			var entry := entry_value as Dictionary
 			var name := String(entry.get("name", ""))
-			jobs.append({"arc": arc, "name": name, "out_path": dir.path_join(name)})
+			# Basename only: never let an entry name resolve outside the chosen folder.
+			var out_path := dir.path_join(name.get_file())
+			if seen.has(out_path):
+				_last_collisions += 1
+			seen[out_path] = true
+			jobs.append({"arc": arc, "name": name, "out_path": out_path})
 	await _perform_extraction(jobs, dir, _archives.size())
 
 
@@ -443,6 +454,9 @@ func _perform_extraction(jobs: Array, dir: String, archive_count: int) -> void:
 			_progress_label.text = "%d / %d" % [done, total]
 			await _host.get_tree().process_frame
 			if not is_instance_valid(_dialog):
+				# Host/dialog torn down mid-run: clear the busy lock so a rebuilt tool isn't
+				# wedged, then bail (the UI nodes are gone, so skip the refresh/report below).
+				_busy = false
 				return
 			if _cancelled:
 				break
@@ -464,6 +478,8 @@ func _report_extraction(done: int, total: int, ok: int, raw: int, failed: int, d
 		msg += "  (%d saved as raw — could not unscramble)" % raw
 	if failed > 0:
 		msg += "  (%d could not be read)" % failed
+	if _last_collisions > 0:
+		msg += "  (%d overwritten by a same-named file from another archive)" % _last_collisions
 	_set_status(msg)
 
 
