@@ -95,6 +95,8 @@ func open_form(host: Node, kind: String, prefill: Dictionary, is_edit: bool, on_
 			producer = _build_expr_form(box, prefill)
 		"if":
 			producer = _build_if_form(box, prefill)
+		"condition":
+			producer = _build_condition_form(box, prefill)
 		"switch":
 			producer = _build_switch_form(box, prefill)
 		_:
@@ -281,6 +283,24 @@ func _build_if_form(box: VBoxContainer, prefill: Dictionary) -> Callable:
 			else:
 				else_body = PackedStringArray([el])
 		return MusStmtText.if_block(cond.get_expression_text(), then_body, has_else, else_body)
+
+
+# Condition-only editor: just the expression builder, for editing an EXISTING if's
+# `if (cond)` header in place (the body statements are edited on the graph). Returns
+# the raw expression text as a single "line" (NOT an expr statement) -- the caller
+# splices it back into the regenerated if block. Empty when the field is blank.
+func _build_condition_form(box: VBoxContainer, prefill: Dictionary) -> Callable:
+	box.add_child(_label("When this is true:"))
+	var eb := ExprBuilderClass.new()
+	eb.setup(_var_list, _mus)
+	box.add_child(eb)
+	if prefill.has("expr"):
+		eb.set_expression_text(String(prefill.get("expr", "")))
+	return func() -> PackedStringArray:
+		var t := eb.get_expression_text()
+		if t.strip_edges() == "":
+			return PackedStringArray()
+		return PackedStringArray([t])
 
 
 # A small [enter state | play track] action picker; returns [container, kind_opt,

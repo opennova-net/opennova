@@ -44,17 +44,16 @@ func test_mount_unmount_does_not_crash():
 
 
 func test_workflow_panels_coexist_on_one_screen():
-	# Direction B: Bank / Script / Live are coexisting docks on one screen, not
-	# mutually-exclusive tabs. After mount all three panels are present (Tracks
-	# and the Advanced script panel are nested inside the embedded Live screen),
-	# and activating the single workflow toggles nothing.
+	# One unified screen: the Tracks (Bank) dock is nested inside the embedded Live
+	# screen. The raw-script (Script) panel is gone -- the blueprint is the language.
+	# Activating the single workflow toggles nothing.
 	var ws = MusicWorkspaceAdapter.new()
 	var host := Control.new()
 	add_child_autofree(host)
 	ws.mount_viewport(host)
 	var root: Control = host.get_child(0)
 	assert_not_null(root.find_child("Bank", true, false), "Tracks (Bank) dock present")
-	assert_not_null(root.find_child("Script", true, false), "Advanced script (Script) panel present")
+	assert_null(root.find_child("Script", true, false), "the raw-script panel is gone")
 	assert_not_null(root.find_child("Live", true, false), "Live screen present")
 	ws.activate_workflow(0)  # MAP -- no-op on the layout
 	assert_true(root.find_child("Live", true, false).visible, "the unified screen stays visible")

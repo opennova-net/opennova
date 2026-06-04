@@ -1,10 +1,9 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://modtools/music/ui/live_mode.gd" id="1_live"]
 [ext_resource type="PackedScene" path="res://modtools/music/ui/var_inspector.tscn" id="2_var"]
 [ext_resource type="PackedScene" path="res://modtools/music/ui/volume_meter.tscn" id="3_vol"]
 [ext_resource type="PackedScene" path="res://modtools/music/ui/bank_mode.tscn" id="4_bank"]
-[ext_resource type="PackedScene" path="res://modtools/music/ui/script_mode.tscn" id="5_script"]
 
 [node name="LiveMode" type="Control"]
 layout_mode = 3
@@ -56,13 +55,6 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "Now playing: —"
 tooltip_text = "The section the music is currently in. Updates live as the script transitions or you jump."
-
-[node name="AdvancedToggle" type="Button" parent="Screen/TransportBar"]
-unique_name_in_owner = true
-layout_mode = 2
-toggle_mode = true
-text = "Advanced script"
-tooltip_text = "Show the raw script text for the selected section. The faithful decompiler output; the map and tracks are the friendly view over it."
 
 [node name="Body" type="HSplitContainer" parent="Screen"]
 layout_mode = 2
@@ -132,15 +124,6 @@ show_grid = true
 grid_pattern = 1
 show_menu = false
 minimap_enabled = true
-
-[node name="AdvancedDrawer" type="PanelContainer" parent="Screen"]
-unique_name_in_owner = true
-visible = false
-custom_minimum_size = Vector2(0, 240)
-layout_mode = 2
-
-[node name="Script" parent="Screen/AdvancedDrawer" instance=ExtResource("5_script")]
-layout_mode = 2
 
 [node name="LogStrip" type="VBoxContainer" parent="Screen"]
 layout_mode = 2
