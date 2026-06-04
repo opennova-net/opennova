@@ -127,6 +127,21 @@ func save_state() -> void:
 	ResourceDirSettings.set_resource_dir(_root_dir)
 
 
+# Recently used resource directories (shared with the runtime via
+# NovaResourceDirSettings). The shell reaches this state only through the library,
+# so these thin forwarders keep that boundary while the dropdown lives in the shell.
+func get_recent_dirs() -> PackedStringArray:
+	return ResourceDirSettings.get_recent_dirs()
+
+
+func clear_recent_dirs() -> void:
+	ResourceDirSettings.clear_recent_dirs()
+
+
+func canonical_key(path: String) -> String:
+	return ResourceDirSettings.canonical_key(path)
+
+
 # Persisted shell layout. Split offsets are stored alongside the resource state
 # in the same config. Presence is reported explicitly (has_left/has_right)
 # because a valid split offset can be negative, so no numeric value can stand in
