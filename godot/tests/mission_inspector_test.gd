@@ -364,7 +364,13 @@ class FakeController:
 	# Flat entity list for scripting ENTITY_REF pickers: [{value, label}]. Settable per test.
 	var all_entities: Array = []
 
+	# Call counters: the inspector caches these and should only re-call them when the membership
+	# revision changes, not on every refresh.
+	var all_entities_calls: int = 0
+	var group_options_calls: int = 0
+
 	func get_all_entities() -> Array:
+		all_entities_calls += 1
 		return all_entities
 
 	# Options for the entity-edit pickers (waypoint path / group). Settable per test; default empty
@@ -376,7 +382,14 @@ class FakeController:
 		return waypoint_options
 
 	func get_group_options() -> Array:
+		group_options_calls += 1
 		return group_options
+
+	# The inspector caches the option lists and rebuilds only when this changes (the real controller
+	# bumps a counter on entity-set / group changes). Returning a content hash of the three lists makes
+	# the cache transparent to tests: any test that swaps the arrays gets a fresh revision automatically.
+	func get_membership_revision() -> int:
+		return hash([all_entities, group_options, waypoint_options])
 
 	func get_groups() -> Array:
 		return groups
@@ -613,6 +626,33 @@ func test_editing_group_commits_through_set_selected_property() -> void:
 	assert_eq(ctx.fake.last_property, "group", "the group edit names the group field")
 	assert_eq(ctx.fake.last_property_value, 9, "with the chosen group id")
 	assert_eq(ctx.fake.property_calls, 1, "one commit, no echo loop (the binder guard holds)")
+
+
+func test_group_picker_shows_a_single_fallback_for_an_out_of_set_value() -> void:
+	# Regression: the Group/Waypoint pickers used to be populated TWICE per refresh (populate_id_option
+	# + the binder), which stacked two different fallback rows for an out-of-set value. Now the binder
+	# is the sole populator, so exactly one fallback row appears and repeated refreshes don't accumulate.
+	var ctx := _make(_sample_entity())  # _sample_entity().group == 2
+	ctx.fake.group_options = [{"id": 0, "label": "Ungrouped"}]  # 2 is NOT offered
+	ctx.inspector._refresh()
+	var opt := _option(ctx.inspector, "MissionOpt_group")
+	assert_eq(opt.item_count, 2, "one offered row + exactly one fallback for the out-of-set group")
+	assert_eq(opt.get_item_id(opt.selected), 2, "and the entity's real group value is selected via that fallback")
+	ctx.inspector._refresh()
+	assert_eq(opt.item_count, 2, "a repeated refresh does not stack another fallback row")
+
+
+func test_option_lists_are_cached_until_membership_changes() -> void:
+	# Regression (perf): get_group_options / get_all_entities marshal every entity, so they must be
+	# fetched only when the membership revision changes, not on every `changed` (every edit / drag).
+	var ctx := _make(_sample_entity())
+	var base: int = ctx.fake.group_options_calls
+	ctx.inspector._refresh()
+	ctx.inspector._refresh()
+	assert_eq(ctx.fake.group_options_calls, base, "unchanged membership reuses the cached option lists")
+	ctx.fake.group_options = [{"id": 0, "label": "Ungrouped"}, {"id": 5, "label": "New group 5"}]
+	ctx.inspector._refresh()  # a new membership revision (the fake hashes its option lists)
+	assert_gt(ctx.fake.group_options_calls, base, "a membership change re-fetches the option lists")
 
 
 # --- P7: the Behavior panel (per-entity AI + waypoint fields) ------------------
@@ -1590,6 +1630,29 @@ func test_scripting_trigger_editor_typed_pickers() -> void:
 	assert_true(ctx.inspector._sc_trigger_params[1].is_picker(), "param2 renders as a typed picker (zone)")
 	assert_eq(ctx.inspector._sc_trigger_params[1].read_value(), 3, "param2 round-trips the stored zone index")
 	assert_true(ctx.inspector._sc_trigger_desc.text.to_lower().find("zone") != -1, "the type description mentions the zone")
+
+
+func test_scripting_subselection_resets_when_event_changes_without_a_click() -> void:
+	# Regression: the trigger/action sub-selection is reset by the event-list click handler, but the
+	# controller can also switch events without a click (set_mode auto-focus, add_event). A stale
+	# sub-selection must be dropped on the next refresh so the editor never binds to another event's
+	# trigger.
+	var ev0 := _sc_event(0, 0, 0, 0, 3, 0)
+	var ev1 := _sc_event(1, 0, 0, 0, 3, 0)
+	var trigs := [
+		_sc_trig(1, "Group", 6, "GroupHasLostMoreUnits", [0, 0, 0, 0]),
+		_sc_trig(1, "Group", 6, "GroupHasLostMoreUnits", [0, 0, 0, 0]),
+		_sc_trig(1, "Group", 6, "GroupHasLostMoreUnits", [0, 0, 0, 0]),
+	]
+	var ctx := _scripting_ctx([ev0, ev1], 0, _sc_chain_dict(ev0, trigs, []))
+	ctx.inspector._sc_trigger_list.item_selected.emit(2)  # user selects trigger row 2 of event 0
+	assert_eq(ctx.inspector._sc_trigger_selected, 2, "precondition: trigger 2 of event 0 is selected")
+	# The controller switches the selected event WITHOUT a click on the event list, then emits changed.
+	ctx.fake.selected_event = 1
+	ctx.fake.chain = _sc_chain_dict(ev1, trigs, [])
+	ctx.inspector._refresh()
+	assert_eq(ctx.inspector._sc_trigger_selected, -1,
+		"the stale trigger sub-selection is dropped when the event changed without a click")
 
 
 func test_scripting_trigger_type_change_commits_and_resets_sub() -> void:

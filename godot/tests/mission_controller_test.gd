@@ -1737,6 +1737,34 @@ func test_set_selected_zone_bounds_and_flags_read_back_and_undo() -> void:
 	assert_true(bool(reverted["active"]), "undo restores the active flag")
 
 
+func test_undo_of_a_zone_delete_does_not_dangle_the_selection() -> void:
+	# Regression: _object_signature() excludes area triggers, so an undo/redo of a zone add/delete takes
+	# the lightweight overlay-only restore path. Without re-validating _selected_zone_index there, a kept
+	# index rebinds to a DIFFERENT (reindexed) zone after the restore. The fix drops the selection when
+	# the zone count changes across the restore.
+	var controller := _loaded_with_selection()
+	controller.set_mode(MissionController.Mode.AREA_TRIGGERS)
+	var base := controller.get_mission().get_area_trigger_count()
+	# Three zones A, B, C with distinguishable bounds (min.x = 0 / 10 / 20).
+	controller.add_area_trigger_default()
+	controller.set_selected_zone_bounds(Vector3(0, 0, 0), Vector3(1, 1, 1))    # A @ base
+	controller.add_area_trigger_default()
+	controller.set_selected_zone_bounds(Vector3(10, 0, 0), Vector3(11, 1, 1))  # B @ base+1
+	controller.add_area_trigger_default()
+	controller.set_selected_zone_bounds(Vector3(20, 0, 0), Vector3(21, 1, 1))  # C @ base+2
+	# Delete the MIDDLE zone B; C shifts down into base+1.
+	controller.select_area_trigger(base + 1)
+	assert_true(controller.delete_selected_area_trigger(), "the middle zone deletes")
+	# Select C, now at base+1 (min.x == 20).
+	controller.select_area_trigger(base + 1)
+	assert_eq((controller.get_selected_zone()["min"] as Vector3).x, 20.0, "precondition: C is selected")
+	# Undo the delete: B is reinserted at base+1, so base+1 now refers to B again (min.x == 10), not C.
+	controller.undo()
+	assert_eq(controller.get_mission().get_area_trigger_count(), base + 3, "the deleted zone is restored")
+	assert_eq(controller.get_selected_zone_index(), -1,
+		"the now-ambiguous zone selection is dropped rather than dangling onto a different zone")
+
+
 func test_zone_overlay_harvests_a_pickable_per_zone() -> void:
 	var controller := _loaded_with_selection()
 	var base := controller.get_mission().get_area_trigger_count()

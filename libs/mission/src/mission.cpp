@@ -154,12 +154,19 @@ bool from_int_kind(int kind, EntityKind &out) {
 }
 
 void resize_waypoint_padding(bms::WaypointRecord &record) {
-	const size_t marker_count = std::min<size_t>(record.waypoint_numbers.size(), kMaxWaypointPathMarkers);
-	if (record.waypoint_numbers.size() != marker_count) {
-		record.waypoint_numbers.resize(marker_count);
+	const size_t slots = std::min<size_t>(record.waypoint_numbers.size(), kMaxWaypointPathMarkers);
+	if (record.waypoint_numbers.size() != slots) {
+		record.waypoint_numbers.resize(slots);
 	}
-	record.marker_count = static_cast<uint32_t>(marker_count);
-	const size_t used = marker_count * sizeof(uint32_t);
+	// parse_waypoint_record preserves an on-disk marker_count that exceeds the 32-slot capacity
+	// verbatim (CP19.bms ships one == 39) for byte-exact round-trip. sync_counts runs this on every
+	// load/save, so resyncing marker_count to the slot count unconditionally would silently rewrite
+	// that shipped value (39 -> 32). Keep the over-count while the slots stay saturated at the cap;
+	// any edit that drops below the cap makes the stored over-count meaningless, so then resync it.
+	if (!(record.marker_count > kMaxWaypointPathMarkers && slots == kMaxWaypointPathMarkers)) {
+		record.marker_count = static_cast<uint32_t>(slots);
+	}
+	const size_t used = slots * sizeof(uint32_t);
 	record.padding.assign(128 - used, 0);
 }
 
@@ -859,11 +866,19 @@ MissionActionRecord to_action_record(const bms::Action &action, size_t index) {
 }
 
 constexpr int kMaxEventChainEntries = 20;
+// reset_after / delay are stored in the upper 10 bits of their u32 slot (see write_event), so the
+// representable value range is 0..1023.
+constexpr int kMaxEventDelayTicks = 1023;
 
 void apply_event_record(bms::Event &event, const MissionEventRecord &record) {
 	event.flags = static_cast<bms::EventFlags>(record.flags);
-	event.reset_after = record.reset_after;
-	event.delay = record.delay;
+	// reset_after / delay occupy only the upper 10 bits on disk (write_event packs them << 22, parse
+	// reads >> 22), so the value range is 0..1023. Clamp here at the library boundary the way the other
+	// apply_* setters bound their fields: an out-of-range value would otherwise wrap on serialize
+	// (e.g. 2000 -> (uint32)2000 << 22 truncates, reparses as 976) with no error. The editor SpinBox
+	// already caps at 1023, but a direct C/C-ABI caller of set_event/add_event does not.
+	event.reset_after = std::clamp(record.reset_after, 0, kMaxEventDelayTicks);
+	event.delay = std::clamp(record.delay, 0, kMaxEventDelayTicks);
 	event.unknown5 = static_cast<uint8_t>(std::clamp(record.unknown5, 0, 255));
 	event.unknown6 = static_cast<uint8_t>(std::clamp(record.unknown6, 0, 255));
 }
@@ -1988,6 +2003,33 @@ bool MissionDocument::set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &
 		impl_->last_error = "No mission loaded";
 		return false;
 	}
+	// Capture any bytes the existing chunk carries past the canonical records + terminator, so they
+	// survive a loadout edit instead of being truncated (byte-exact round-trip when the records are
+	// unchanged; a faithful tail otherwise). For the common chunk (records + terminator, no extras)
+	// the walk consumes the whole buffer, so the tail is empty and this is a no-op.
+	const std::vector<uint8_t> &old_raw = impl_->file.loadout.raw_data;
+	size_t consumed = 0;
+	while (consumed < old_raw.size() && old_raw[consumed] != 0) {
+		bool complete = true;
+		for (int f = 0; f < 3; ++f) {
+			while (consumed < old_raw.size() && old_raw[consumed] != 0) {
+				++consumed;
+			}
+			if (consumed >= old_raw.size()) {
+				complete = false;
+				break;
+			}
+			++consumed;  // skip the field NUL
+		}
+		if (!complete) {
+			break;
+		}
+	}
+	if (consumed < old_raw.size() && old_raw[consumed] == 0) {
+		++consumed;  // include the empty-record terminator
+	}
+	std::vector<uint8_t> tail(old_raw.begin() + std::min(consumed, old_raw.size()), old_raw.end());
+
 	std::vector<uint8_t> raw;
 	for (const WeaponLoadoutEntry &entry : entries) {
 		// An empty name serializes to a leading NUL, which the loader reads as the chunk terminator,
@@ -2005,6 +2047,7 @@ bool MissionDocument::set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &
 	// which the loader treats as "no restrictions" (it installs the WPN_KNIFE default at runtime).
 	if (!raw.empty()) {
 		raw.push_back(0);
+		raw.insert(raw.end(), tail.begin(), tail.end());
 	}
 	impl_->file.loadout.raw_data = std::move(raw);
 	sync_counts();
@@ -2858,8 +2901,21 @@ int opennova_mission_set_entity_properties(OpenNovaMissionDocument *document,
 	if (!from_int_kind(kind, entity_kind)) {
 		return 0;
 	}
+	// set_entity_properties overwrites the whole record. The C-ABI struct can't carry name1/name2
+	// (std::string) or the no_less_than/map_symbol ints, so from_c_properties leaves them default;
+	// seed those four from the current record first so this bulk setter preserves them instead of
+	// zeroing/clearing them. (The GDScript editor path is unaffected: it sets fields individually via
+	// set_entity_property_int/_string, which seed the full set from properties_from_record.)
+	opennova::mission::EntityProperties props = from_c_properties(*properties);
+	opennova::mission::EntityRecord current;
+	if (document->document.get_entity(entity_kind, index, current)) {
+		props.no_less_than = current.no_less_than;
+		props.map_symbol = current.map_symbol;
+		props.name1 = current.name1;
+		props.name2 = current.name2;
+	}
 	opennova::mission::EntityRecord record;
-	if (!document->document.set_entity_properties(entity_kind, index, from_c_properties(*properties), &record)) {
+	if (!document->document.set_entity_properties(entity_kind, index, props, &record)) {
 		return 0;
 	}
 	if (out_record != nullptr) {

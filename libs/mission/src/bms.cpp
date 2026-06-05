@@ -655,12 +655,17 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     }
 
     // Parse weapon loadout [orig: word_A76412 @hdr+0x242 bytes; read+sanitized in SP, seeked in MP]
+    // Guard the length like the record arrays below: read_bytes zero-fills and does NOT advance on an
+    // underflow, so a chunk length larger than the bytes remaining would silently mis-align every
+    // section after it (a corrupt/truncated file would parse to garbage instead of failing cleanly).
+    if (!count_fits(r, out.header.weapon_loadout_chunk_len, 1, "weapon loadout chunk", error)) return false;
     out.loadout.raw_data.resize(out.header.weapon_loadout_chunk_len);
     r.read_bytes(out.loadout.raw_data.data(), out.header.weapon_loadout_chunk_len);
 
     // Parse the second chunk the engine always seeks past after the loadout.
     // [orig: word_A76416 @hdr+0x246 bytes; fseek at @0x40f751 (SP) / @0x40f6d1 (MP) in Mission_LoadBMSFile]
     // Usually empty; preserved verbatim so a mission that uses it still round-trips.
+    if (!count_fits(r, out.header.secondary_chunk_len, 1, "secondary chunk", error)) return false;
     r.read_bytes(out.secondary_chunk, out.header.secondary_chunk_len);
 
     // Parse entities

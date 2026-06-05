@@ -106,6 +106,10 @@ var _objects_cache: Array = []
 var _objects_rows: Array = []
 var _objects_built_for: NovaMissionData
 var _objects_built_count: int = -1
+# The controller membership revision the rows were built for. Gating on the count alone would miss an
+# identity change at a constant total (e.g. an undo/redo that swaps an entity for a different one of the
+# same kind, or a future "change item" edit); the revision bumps on every such re-bake, so include it.
+var _objects_built_rev: int = -1
 var _objects_db_ready: bool = false
 # True while programmatically syncing the list selection, so item_selected echoes do not re-select.
 var _objects_syncing: bool = false
@@ -167,6 +171,18 @@ var _at_delete_button: Button
 var _props_toggle: CheckButton
 var _props_box: VBoxContainer
 var _props_binder: FieldBinder
+
+# --- Cached option lists (group / waypoint-path / entity pickers) --------------
+# get_group_options / get_waypoint_path_options / get_all_entities each walk + marshal every entity
+# (~1600 Dictionaries across the C++ boundary). They feed the Faction Group + Behavior Waypoint-path
+# pickers (refilled on every _refresh_edit_panel) and the scripting ENTITY param picker, so calling
+# them on each `changed` (every edit commit / drag release) is the dominant per-edit cost. Cache them
+# and rebuild only when the controller's membership revision (entity set + group membership) changes.
+var _options_rev: int = -1
+var _options_mission: NovaMissionData
+var _cached_group_options: Array = []
+var _cached_waypoint_options: Array = []
+var _cached_all_entities: Array = []
 
 # --- Weapon loadout + groups (mission-global collapsibles) --------------------
 # Like the header form, these are shown whenever a mission is loaded, in any mode, and built
@@ -256,6 +272,11 @@ var _sc_action_desc: Label  # plain-language description of the selected action 
 var _sc_action_params: Array = []  # [p1, p2, p3, p4] MissionParamSlot
 var _sc_action_selected: int = -1
 var _sc_action_syncing: bool = false
+# The event index the trigger/action sub-selections currently belong to. The event-list click handler
+# resets the sub-selections, but the controller can also switch events without a click (set_mode
+# auto-focusing the first event, add_event_default). Tracking the shown event lets the refresh drop a
+# stale sub-selection so the trigger/action editor never binds to a different event's chain.
+var _sc_event_shown: int = -1
 var _sc_event_summary: Label  # "when <conditions> then <actions>" readout for the selected event
 var _sc_diagnostics: Label
 # The event chain the panel was last populated from, so the sub-list handlers read the same data.
@@ -407,6 +428,13 @@ func set_detail_host(detail_host: Control) -> void:
 
 
 func _refresh() -> void:
+	# Defensively clear the FieldBinder reentrancy guards before this pass. GDScript has no try/finally,
+	# so if a bound getter/setter ever errors mid-sync the guard would stay stuck true and silently
+	# no-op every field write; clearing here bounds that to a single refresh (changed fires often).
+	if _behavior_binder != null:
+		_behavior_binder.reset_guard()
+	if _props_binder != null:
+		_props_binder.reset_guard()
 	# Reset the per-list selections when the mission identity flips (open / clear): a kept row index
 	# would otherwise bind to a different weapon / group / event in the newly opened document.
 	var mission: NovaMissionData = _controller.get_mission() if _controller != null else null
@@ -416,6 +444,7 @@ func _refresh() -> void:
 		_groups_selected = -1
 		_sc_trigger_selected = -1
 		_sc_action_selected = -1
+	_refresh_option_caches()
 	_refresh_mode_tabs()
 	_refresh_edit_panel()
 	_refresh_object_browser()
@@ -499,7 +528,8 @@ func _build_edit_panel() -> void:
 	# Group is chosen from the mission's actual squads (Ungrouped / each used group / a New group
 	# entry), not typed as a raw number; the option list is refilled in _refresh_edit_panel.
 	_group_option = _add_entity_option_row(_edit_box, "group", "Group",
-		"Which squad this unit belongs to. Lists groups already in use, plus a new one.")
+		"Which squad this unit belongs to. Lists groups already in use, plus a new one.",
+		func(): return _cached_group_options)
 
 	_build_behavior_section()
 
@@ -549,7 +579,8 @@ func _build_behavior_section() -> void:
 	# Waypoint path (waypoint_id) is the bridge: it names which authored path a unit follows. A
 	# dropdown of the mission's real paths (None / each populated path), not a blind 0-127 number.
 	_waypoint_option = _add_entity_option_row(_behavior_box, "waypoint_id", "Waypoint path",
-		"Which waypoint path this unit follows. Author paths in the Waypoints tab.")
+		"Which waypoint path this unit follows. Author paths in the Waypoints tab.",
+		func(): return _cached_waypoint_options)
 	# The plain numeric rows + their section headings come from one ordered table (the field set +
 	# ranges live in MissionEntityFields, matching the libs/mission name->member map). The picker /
 	# text / flag rows below are not plain spins, so they stay explicit.
@@ -586,18 +617,23 @@ func _add_behavior_spin(property: String, label: String, min_value: float, max_v
 
 
 # A labelled OptionButton "pick from available options" row for an entity field (waypoint path /
-# group), bound through the behaviour FieldBinder so its guard stops a programmatic repopulate from
-# echoing back as an edit. The option items are (re)filled each refresh in _refresh_edit_panel from
-# controller-supplied { id, label } options via ObjectUiHelpers.populate_id_option (which also appends
-# the entity's current value when it is not in the set). Item ids carry the model value, as
-# bind_option expects, so a user pick commits through set_selected_property(property, id).
-func _add_entity_option_row(parent: Control, property: String, label: String, tooltip: String = "") -> OptionButton:
+# group), bound through the behaviour FieldBinder. The binder OWNS the row: each sync_from refills the
+# items from `options_getter` ({ id, label }, cached in _refresh_option_caches), selects the entity's
+# current value, adds a single out-of-range fallback row if needed, and its guard stops the
+# programmatic repopulate echoing back as an edit. Item ids carry the model value, so a user pick
+# commits through set_selected_property(property, id). One populator only -- do not also call
+# populate_id_option on these (that double-population left a duplicate/untagged fallback row).
+func _add_entity_option_row(parent: Control, property: String, label: String, tooltip: String = "", options_getter := Callable()) -> OptionButton:
 	var option := ObjectUiHelpers.add_id_option_row(parent, "MissionOpt_" + property, label, [])
 	if not tooltip.is_empty():
 		option.tooltip_text = tooltip
+	# The binder OWNS the list (refills it from options_getter each sync) as well as the selection +
+	# out-of-range fallback, so it is the single populator -- _refresh_edit_panel must not also call
+	# populate_id_option on these (that double-population left a duplicate/untagged fallback row).
 	_behavior_binder.bind_option(option,
 		func(info): return int(info.get(property, 0)),
-		func(value: int) -> void: _behavior_set(property, value))
+		func(value: int) -> void: _behavior_set(property, value),
+		options_getter)
 	return option
 
 
@@ -667,6 +703,29 @@ func _parse_uint32(text: String) -> int:
 	return value
 
 
+# Rebuild the cached group / waypoint-path / entity option lists only when the controller's membership
+# revision (entity set + group membership) changes, or the mission flips. Everything that affects these
+# lists -- object/marker add+remove and group edits -- bumps that revision, so a position/team/AI edit
+# or a drag (which fire `changed` too) reuses the cache instead of re-marshalling every entity.
+func _refresh_option_caches() -> void:
+	if _controller == null:
+		_cached_group_options = []
+		_cached_waypoint_options = []
+		_cached_all_entities = []
+		return
+	var mission: NovaMissionData = _controller.get_mission()
+	var rev: int = _controller.get_membership_revision()
+	# Rebuild only when the document or its membership revision changes. (get_group_options etc. handle
+	# a null mission by returning their base list, so this is safe before a mission is loaded too.)
+	if mission == _options_mission and rev == _options_rev:
+		return
+	_options_mission = mission
+	_options_rev = rev
+	_cached_group_options = _controller.get_group_options()
+	_cached_waypoint_options = _controller.get_waypoint_path_options()
+	_cached_all_entities = _controller.get_all_entities()
+
+
 func _refresh_edit_panel() -> void:
 	var entity: Dictionary = _controller.get_selected_entity() if _controller != null else {}
 	if entity.is_empty():
@@ -701,15 +760,10 @@ func _refresh_edit_panel() -> void:
 	_sync_spin(_team_spin, float(int(entity.get("team", 0))))
 	_loading = false
 
-	# Refill the dynamic pickers (the available waypoint paths / groups change as the mission is
-	# edited) before the binder selects the current value. populate_id_option appends the entity's
-	# current value if it is not in the option set, so an out-of-list value still shows + round-trips.
-	if _controller != null:
-		ObjectUiHelpers.populate_id_option(_waypoint_option, _controller.get_waypoint_path_options(), int(entity.get("waypoint_id", 0)))
-		ObjectUiHelpers.populate_id_option(_group_option, _controller.get_group_options(), int(entity.get("group", 0)))
-
-	# The Behavior fields (and the two pickers above) carry their own reentrancy guard (FieldBinder),
-	# independent of _loading, so syncing them here cannot echo back as an edit.
+	# The Behavior fields AND the Group / Waypoint-path pickers all sync through the FieldBinder here:
+	# bind_option refills each picker from its cached option list (see _refresh_option_caches), selects
+	# the entity's current value, and adds a single out-of-range fallback row if needed. The binder's
+	# own reentrancy guard (independent of _loading) stops this programmatic sync echoing back as edits.
 	_behavior_binder.sync_from(entity)
 
 	var summary: Dictionary = _controller.get_selection_summary() if _controller != null else {}
@@ -803,13 +857,16 @@ func _refresh_object_browser() -> void:
 		return
 	_objects_box.visible = true
 	var count: int = _controller.get_object_count()
+	var rev: int = _controller.get_membership_revision()
 	var db_ready: bool = _controller.has_item_database()
 	var mission_changed := mission != _objects_built_for
-	# Rebuild rows when the document or its object set changes, or the first time item names
-	# become resolvable (so placeholder "Item <id>" labels get replaced by real model names).
-	if mission_changed or count != _objects_built_count or (db_ready and not _objects_db_ready):
+	# Rebuild rows when the document, its object set (count), or its composition (membership revision,
+	# which bumps on every entity-set re-bake) changes, or the first time item names become resolvable
+	# (so placeholder "Item <id>" labels get replaced by real model names).
+	if mission_changed or count != _objects_built_count or rev != _objects_built_rev or (db_ready and not _objects_db_ready):
 		_objects_built_for = mission
 		_objects_built_count = count
+		_objects_built_rev = rev
 		_objects_db_ready = db_ready
 		_rebuild_object_cache()
 		if mission_changed:
@@ -1766,7 +1823,13 @@ func _refresh_scripting_panel() -> void:
 	_sc_delay_spin.editable = has_event
 	_sc_attr_syncing = false
 
-	# Clamp sub-selections to their (possibly shrunken) lists before repopulating the editors.
+	# Drop the sub-selections when the selected event changed since the last refresh through ANY path
+	# (event-list click, set_mode auto-focus, add_event), so the trigger/action editor never binds to a
+	# trigger/action of a different event than the one now shown. Then clamp to the (possibly shrunken) lists.
+	if selected != _sc_event_shown:
+		_sc_event_shown = selected
+		_sc_trigger_selected = -1
+		_sc_action_selected = -1
 	if _sc_trigger_selected >= triggers.size():
 		_sc_trigger_selected = triggers.size() - 1
 	if _sc_action_selected >= actions.size():
@@ -1982,7 +2045,9 @@ func _sc_param_items(kind: int, slot_def: Dictionary) -> Array:
 				groups.append({ "value": i, "label": "Group %d" % i })
 			return groups
 		MissionParamSchema.Kind.ENTITY:
-			return _controller.get_all_entities()
+			# Cached (see _refresh_option_caches): get_all_entities marshals every entity, so calling it
+			# per param slot on every scripting refresh would re-walk the whole scene each keystroke.
+			return _cached_all_entities
 		MissionParamSchema.Kind.ZONE:
 			var zones: Array = []
 			for z in _controller.get_area_triggers():

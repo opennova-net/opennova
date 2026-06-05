@@ -139,6 +139,11 @@ var _area_overlay  # MissionAreaTriggerOverlay (preloaded, no class_name)
 # the waypoint path this does NOT persist across re-bakes (a zone delete shifts indices), so it
 # resets with the selection state.
 var _selected_zone_index: int = -1
+# Bumped whenever the entity SET or its group membership changes (object/marker add/remove via
+# _rebake_objects, and group edits). The inspector caches the group / waypoint-path / entity pickers
+# and rebuilds them only when this changes, instead of re-marshalling every entity (~1600 Dictionaries)
+# on each `changed` -- which fires on every edit commit / drag release, not just structural changes.
+var _membership_rev: int = 0
 # Zone body pickables harvested from the overlay: one per zone, { zone_index, handle, aabb }.
 var _zone_pickable: Array = []
 # Whole-zone translate drag: the terrain hit where the drag began plus the zone's bounds at
@@ -608,9 +613,10 @@ func undo() -> void:
 		return
 	_restoring = true
 	var prev_event_count := _mission.get_event_count()
+	var prev_zone_count := _mission.get_area_trigger_count()
 	var prev_object_sig := _object_signature()
 	_mission.undo()
-	_after_restore(prev_event_count, prev_object_sig)
+	_after_restore(prev_event_count, prev_zone_count, prev_object_sig)
 	_restoring = false
 	_report("Undid the last change.")
 
@@ -626,9 +632,10 @@ func redo() -> void:
 		return
 	_restoring = true
 	var prev_event_count := _mission.get_event_count()
+	var prev_zone_count := _mission.get_area_trigger_count()
 	var prev_object_sig := _object_signature()
 	_mission.redo()
-	_after_restore(prev_event_count, prev_object_sig)
+	_after_restore(prev_event_count, prev_zone_count, prev_object_sig)
 	_restoring = false
 	_report("Redid the last change.")
 
@@ -640,9 +647,19 @@ func redo() -> void:
 # set actually changed (event add/delete are the only ops that change the count -- there is no
 # event-reorder op -- so a count change is exactly the structural case). An attribute / trigger /
 # action undo leaves the list intact and keeps the user on their event.
-func _after_restore(prev_event_count: int, prev_object_sig: Array) -> void:
+func _after_restore(prev_event_count: int, prev_zone_count: int, prev_object_sig: Array) -> void:
 	if _mission.get_event_count() != prev_event_count:
 		_selected_event_index = -1
+	# Same reasoning for the zone selection: area triggers are NOT in _object_signature (it covers only
+	# placed objects), so an undo/redo of a zone add/delete takes the lightweight overlay-only path
+	# below and would otherwise rebuild the overlay against a stale _selected_zone_index that now points
+	# at a different (reindexed) zone. Add/delete are the only ops that change the zone count (no
+	# reorder), so a count change is exactly the structural case; drop the selection then.
+	if _mission.get_area_trigger_count() != prev_zone_count:
+		_selected_zone_index = -1
+	# Defensive clamp: never leave the index past the end of the restored zone list.
+	if _selected_zone_index >= _mission.get_area_trigger_count():
+		_selected_zone_index = -1
 	# Skip the full object re-place when the undo/redo changed only non-object data (events /
 	# triggers / actions / zones / header / loadout / groups): every placed object is byte-identical,
 	# so re-baking ~all MultiMesh instances is pure waste. The placed nodes + pickable index + stats
@@ -1061,6 +1078,17 @@ func set_selected_property(property: String, value: int) -> void:
 	_edit_step(func(): return _mission.set_entity_property_int(
 			int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value),
 		"Could not set %s on the selected object." % property)
+	# A group change moves which groups are "in use" (and which "New group N" the picker offers), so the
+	# cached group dropdown must rebuild. Entity-set changes are covered by _rebake_objects; other
+	# per-entity fields (waypoint_id, team, AI) don't affect any cached option list, so don't bump here.
+	if property == "group":
+		_membership_rev += 1
+
+
+# Revision of the entity set + group membership; see _membership_rev. The inspector gates its
+# (otherwise per-`changed`, ~1600-entity) rebuild of the group / waypoint-path / entity pickers on this.
+func get_membership_revision() -> int:
+	return _membership_rev
 
 
 # String counterpart of set_selected_property, for the fixed-string entity fields
@@ -1216,6 +1244,9 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 		return false
 	_mission.commit_edit()
 	var new_index := int(record.get("index", -1))
+	# The entity set grew: invalidate the inspector's cached group / waypoint-path / entity pickers.
+	# (Placement renders incrementally rather than through _rebake_objects, which is the other bump site.)
+	_membership_rev += 1
 	# Markers are mesh-less: the placer skips them, so render via the marker overlay (rebuild so the
 	# new gizmo + pickable exist before we select it). Mesh entities render incrementally.
 	if kind == NovaMissionData.KIND_MARKER:
@@ -1336,6 +1367,10 @@ func _rebake_objects() -> void:
 	if world_root == null:
 		return
 	_reset_selection_state()
+	# A re-bake is the universal choke point for entity-set changes (add / remove / place / delete /
+	# marker edits, and undo/redo whose object signature differs), so bump the membership revision here
+	# to invalidate the inspector's cached group / waypoint-path / entity pickers.
+	_membership_rev += 1
 	var options: Dictionary = {}
 	var env_node := _environment_node()
 	if env_node != null:
@@ -1765,6 +1800,9 @@ func add_marker_to_active_path_at_world(global_hit: Vector3) -> bool:
 		_report("Could not add a waypoint marker.", true)
 		return false
 	_mission.commit_edit()
+	# A new marker entity grew the entity set: invalidate the cached pickers (added incrementally via
+	# the overlay rather than _rebake_objects).
+	_membership_rev += 1
 	_refresh_waypoint_overlay()
 	var marker_index := int((result.get("marker", {}) as Dictionary).get("index", -1))
 	if marker_index >= 0:
@@ -1911,6 +1949,7 @@ func get_all_entities() -> Array:
 	if _mission == null:
 		return []
 	var out: Array = []
+	var id_counts: Dictionary = {}
 	for kind in [NovaMissionData.KIND_MARKER, NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_ORGANIC]:
 		for e in _mission.get_entities(kind):
 			var ed := e as Dictionary
@@ -1918,6 +1957,19 @@ func get_all_entities() -> Array:
 			var display := entity_display_name(kind, int(ed.get("index", 0)))
 			var label := ("%s #%d" % [display, bms_id]) if display != "" else ("Unit #%d" % bms_id)
 			out.append({ "value": bms_id, "label": label })
+			id_counts[bms_id] = int(id_counts.get(bms_id, 0)) + 1
+	# bms_id is not guaranteed unique on disk (many records default to 0), and the picker keys its
+	# OptionButton items by value, so rows that share an id would be visually indistinguishable. Append a
+	# 1-based ordinal to each member of a colliding id so the user can tell them apart. The committed
+	# value stays the bms_id -- the engine resolves units by that id (FindByNetId), so same-id rows are
+	# genuinely equivalent on disk; this only disambiguates the display.
+	var seen: Dictionary = {}
+	for row in out:
+		var v := int(row["value"])
+		if int(id_counts.get(v, 0)) > 1:
+			var n := int(seen.get(v, 0)) + 1
+			seen[v] = n
+			row["label"] = "%s  (%d)" % [String(row["label"]), n]
 	return out
 
 

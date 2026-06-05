@@ -71,26 +71,38 @@ func bind_line(line: LineEdit, getter: Callable, setter: Callable) -> LineEdit:
 	return line
 
 
-func bind_option(option: OptionButton, getter: Callable, setter: Callable) -> OptionButton:
+func bind_option(option: OptionButton, getter: Callable, setter: Callable, options_getter := Callable()) -> OptionButton:
 	# The option's item ids carry the model value (set_item_id when populating). sync selects the
 	# item whose id matches getter(info); a user pick fires setter(selected id). Setting `selected`
 	# programmatically does not emit item_selected, and the guard suppresses any echo regardless.
+	#
+	# When options_getter is supplied, this binder also OWNS the item list: each sync refills it from
+	# options_getter() (an Array of { id, label }, cached upstream so this is cheap). That keeps populate
+	# + select + out-of-range fallback in ONE place -- callers must NOT also populate the list (a second
+	# populator would fight this one and leave a duplicate/untagged fallback row).
 	_bindings.append(func(info):
 		var want := int(getter.call(info))
-		# Drop any fallback row a previous sync appended: the model value may now be in range, or
-		# may have moved to a different out-of-range value. Walk back-to-front so removals are stable.
-		for i in range(option.item_count - 1, -1, -1):
-			if option.get_item_metadata(i) == _OPTION_FALLBACK_META:
-				option.remove_item(i)
+		if options_getter.is_valid():
+			option.clear()  # also drops any prior fallback row
+			for opt in options_getter.call():
+				var oi := option.item_count
+				option.add_item(String((opt as Dictionary).get("label", "")))
+				option.set_item_id(oi, int((opt as Dictionary).get("id", 0)))
+		else:
+			# The caller populated the list; drop any fallback row a previous sync appended (the model
+			# value may now be in range, or moved to a different out-of-range value). Walk back-to-front.
+			for i in range(option.item_count - 1, -1, -1):
+				if option.get_item_metadata(i) == _OPTION_FALLBACK_META:
+					option.remove_item(i)
 		option.selected = -1
 		for i in option.item_count:
 			if option.get_item_id(i) == want:
 				option.selected = i
 				break
 		if option.selected == -1:
-			# The model holds a value outside the caller's curated choices (e.g. a shipped enum the
-			# editor does not enumerate). Surface it as a raw row so the control shows the real value
-			# instead of rendering blank. Mirrors ObjectUiHelpers.populate_id_option's fallback.
+			# The model holds a value outside the offered choices (e.g. a shipped enum the editor does
+			# not enumerate). Surface it as a raw row so the control shows the real value instead of
+			# rendering blank. Mirrors ObjectUiHelpers.populate_id_option's fallback.
 			var idx := option.item_count
 			option.add_item("Value %d" % want)
 			option.set_item_id(idx, want)
@@ -106,3 +118,10 @@ func sync_from(info: Dictionary) -> void:
 	_guard.run(func() -> void:
 		for apply in _bindings:
 			apply.call(info))
+
+
+# Force the reentrancy guard clear. GDScript cannot try/finally, so if a bound getter/setter errors
+# mid-sync the guard would stay stuck true and silence every field write; callers clear it at the top
+# of their refresh so a stuck guard self-heals within one cycle rather than disabling the panel.
+func reset_guard() -> void:
+	_guard.active = false

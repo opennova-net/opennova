@@ -678,5 +678,78 @@ int main() {
 		TEST_EXPECT(opennova::bms::equal(d1.bms_file(), d2.bms_file()));
 	}
 
+	// --- Regression (review): a waypoint marker_count > 32 (the 32-slot capacity) survives a
+	// MissionDocument load/save. parse preserves a shipped over-count (CP19.bms ships 39) verbatim, but
+	// sync_counts used to clobber it to the slot count on every load/save, breaking byte-exact round-trip.
+	{
+		opennova::mission::MissionDocument doc;
+		doc.create_default();
+		opennova::bms::File &f = doc.bms_file();
+		TEST_EXPECT(!f.waypoint_records.empty());
+		f.waypoint_records[0].waypoint_numbers.assign(opennova::mission::kMaxWaypointPathMarkers, 7u); // saturate the 32 slots
+		f.waypoint_records[0].marker_count = 39;                                                       // the shipped over-count
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(doc.write_bms_bytes(bytes)); // runs sync_counts -> must preserve the saturated over-count
+		opennova::bms::File reparsed;
+		std::string err;
+		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
+		TEST_EXPECT(reparsed.waypoint_records[0].marker_count == 39);
+		// But a count that drops below the cap is meaningless as an over-count, so it resyncs to the slots.
+		doc.bms_file().waypoint_records[0].waypoint_numbers.assign(5, 7u);
+		doc.bms_file().waypoint_records[0].marker_count = 39; // stale over-count, now only 5 slots
+		std::vector<uint8_t> bytes2;
+		TEST_EXPECT(doc.write_bms_bytes(bytes2));
+		opennova::bms::File reparsed2;
+		TEST_EXPECT(opennova::bms::parse(bytes2.data(), bytes2.size(), reparsed2, err));
+		TEST_EXPECT(reparsed2.waypoint_records[0].marker_count == 5);
+	}
+
+	// --- Regression (review): set_event / add_event clamp reset_after & delay to 0..1023 (their packed
+	// 10-bit range) at the library boundary, so an out-of-range value can't wrap on serialize. ---
+	{
+		opennova::mission::MissionDocument doc;
+		doc.create_default();
+		opennova::mission::MissionEventRecord rec; // zero-initialized
+		rec.delay = 2000;        // > 1023: would pack as (uint32)2000 << 22 (truncates) and reparse as 976
+		rec.reset_after = 5000;  // > 1023
+		opennova::mission::MissionEventRecord out;
+		TEST_EXPECT(doc.add_event(rec, &out));
+		TEST_EXPECT(out.delay == 1023);
+		TEST_EXPECT(out.reset_after == 1023);
+	}
+
+	// --- Regression (review): a secondary-chunk length larger than the bytes remaining fails the parse
+	// cleanly (count_fits guard) instead of silently zero-filling + mis-aligning every later section. ---
+	{
+		opennova::bms::File f;
+		std::string err;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), f, err));
+		f.header.secondary_chunk_len = 0xFFFF; // claim 64KB; secondary_chunk stays empty so the file under-runs
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(opennova::bms::write(f, bytes, err)); // raw writer emits the inflated length verbatim
+		opennova::bms::File reparsed;
+		TEST_EXPECT(!opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
+	}
+
+	// --- Regression (review): a loadout edit preserves any bytes the chunk carried past the canonical
+	// records + terminator (byte-exact round-trip for unchanged records; faithful tail otherwise). ---
+	{
+		opennova::mission::MissionDocument doc;
+		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+		// Inject a loadout chunk = one record + terminator + two trailing bytes.
+		doc.bms_file().loadout.raw_data = {
+			'W', 'P', 'N', '_', 'A', 0, '-', '1', 0, '-', '1', 0, // one record (name, value1, value2)
+			0,                                                     // empty-record terminator
+			0xAB, 0xCD,                                            // trailing bytes past the terminator
+		};
+		std::vector<opennova::mission::WeaponLoadoutEntry> entries = doc.weapon_loadout();
+		TEST_EXPECT(entries.size() == 1);
+		entries[0].value1 = "5"; // edit the loadout -> rewrites the chunk
+		TEST_EXPECT(doc.set_weapon_loadout(entries));
+		const std::vector<uint8_t> &raw = doc.bms_file().loadout.raw_data;
+		TEST_EXPECT(raw.size() >= 2);
+		TEST_EXPECT(raw[raw.size() - 2] == 0xAB && raw[raw.size() - 1] == 0xCD);
+	}
+
 	return 0;
 }
