@@ -74,7 +74,32 @@ func test_unmapped_action_is_all_raw() -> void:
 		assert_eq(int((slot as Dictionary)["kind"]), Schema.Kind.RAW, "unmapped action degrades to raw")
 
 
+func test_change_team_action_param2_is_team_enum() -> void:
+	# dfx2med Med_ParamTeam @0x449A90: a fixed 3-team table {0 Neutral, 1 Good, 2 Evil}. Actions 16/24 param2.
+	for action in [16, 24]:
+		var s := Schema.action_slots(action)
+		var team := s["params"][1] as Dictionary
+		assert_eq(int(team["kind"]), Schema.Kind.ENUM, "team is an enum picker (action %d)" % action)
+		var values: Array = []
+		for it in team["enum"]:
+			values.append(int((it as Dictionary)["value"]))
+		assert_eq(values, [0, 1, 2], "team enum is exactly {0,1,2} (action %d)" % action)
+
+
+func test_subgoal_actions_param1_is_bounded_1_to_8() -> void:
+	# dfx2med Med_ParamSubGoalWon/Lost @0x449710/@0x449830: 8 fixed slots, i=1..8. Actions 14/15/35/36 param1.
+	for action in [14, 15, 35, 36]:
+		var s := Schema.action_slots(action)
+		var sub := s["params"][0] as Dictionary
+		assert_eq(int(sub["kind"]), Schema.Kind.ENUM, "subgoal is an enum picker (action %d)" % action)
+		var values: Array = []
+		for it in sub["enum"]:
+			values.append(int((it as Dictionary)["value"]))
+		assert_eq(values, [1, 2, 3, 4, 5, 6, 7, 8], "subgoal enum is 1..8 (action %d)" % action)
+
+
 func test_is_picker_classifies_kinds() -> void:
+	assert_true(Schema.is_picker(Schema.Kind.ENUM), "enum is a picker")
 	assert_true(Schema.is_picker(Schema.Kind.GROUP), "group is a picker")
 	assert_true(Schema.is_picker(Schema.Kind.ZONE), "zone is a picker")
 	assert_false(Schema.is_picker(Schema.Kind.RAW), "raw is not a picker")

@@ -15,6 +15,24 @@ enum Kind { RAW, GROUP, ENTITY, ZONE, EVENT, WAYPOINT, BOOL, ENUM }
 
 const _DEFAULT_SLOT := { "label": "", "kind": Kind.RAW, "tip": "", "enum": [] }
 
+# Fixed team table (dfx2med Med_ParamTeam @0x449A90: the {id,name-key} array at unk_5E63B0, NULL-terminated;
+# names from config section "Teams"). Only three teams exist; ChangeGroupTeam/ChangeSingleTeam param2 picks one.
+const TEAM_ENUM := [
+	{ "value": 0, "label": "Neutral (0)" },
+	{ "value": 1, "label": "Good / blue (1)" },
+	{ "value": 2, "label": "Evil / red (2)" },
+]
+
+# Win/lose subgoals are a fixed 8-slot table (dfx2med Med_ParamSubGoalWon/Lost @0x449710/@0x449830 loop i=1..8;
+# each slot maps to a STRWINCOND%.3d / STRLOSECOND%.3d condition string in the mission config). The .bms carries
+# only the slot index 1..8; the display text lives in the companion mission config, which our model does not load.
+const SUBGOAL_ENUM := [
+	{ "value": 1, "label": "Subgoal 1" }, { "value": 2, "label": "Subgoal 2" },
+	{ "value": 3, "label": "Subgoal 3" }, { "value": 4, "label": "Subgoal 4" },
+	{ "value": 5, "label": "Subgoal 5" }, { "value": 6, "label": "Subgoal 6" },
+	{ "value": 7, "label": "Subgoal 7" }, { "value": 8, "label": "Subgoal 8" },
+]
+
 # Trigger main types (TriggerMainType): 1=Group 2=Single 3=Event 4=MissionVariable 5=SecondTimeThrough
 # 6=Teammate 7=Player. Keyed [main_type][sub_type] -> { desc, p:[slot,...] }. A "_default" entry under a
 # main type applies to any sub-type without its own row (used where every sub shares the same param shape).
@@ -55,7 +73,7 @@ const TRIGGERS := {
 		16: { "desc": "Unit {p1} can see unit {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Other unit","kind":Kind.ENTITY} ] },
 		17: { "desc": "Unit {p1} has shot unit {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Other unit","kind":Kind.ENTITY} ] },
 		42: { "desc": "Unit {p1} is on top of unit {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Other unit","kind":Kind.ENTITY} ] },
-		43: { "desc": "Unit {p1} is within {p3} m of unit {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Other unit","kind":Kind.ENTITY}, {"label":"Distance (m)","tip":"Whole metres (engine stores param<<16)."} ] },
+		43: { "desc": "Unit {p1} is within {p3} m of unit {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Other unit","kind":Kind.ENTITY}, {"label":"Distance (m)","tip":"Whole metres, stored raw (the engine shifts <<16 when evaluating)."} ] },
 		44: { "desc": "Unit {p1} has no line of sight to unit {p2} within {p3} m.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Other unit","kind":Kind.ENTITY}, {"label":"Distance (m)"} ] },
 		45: { "desc": "Unit {p1} does not see unit {p2}, or is farther than {p3} m.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Other unit","kind":Kind.ENTITY}, {"label":"Range (m)"} ] },
 	},
@@ -90,9 +108,9 @@ const ACTIONS := {
 	9:  { "desc": "Red team wins the round.", "p": [] },
 	10: { "desc": "Green team wins the round.", "p": [] },
 	11: { "desc": "Set group {p1} move speed to {p2} kph.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Speed (kph)"} ] },
-	14: { "desc": "Win subgoal {p1}.", "p": [ {"label":"Subgoal #"} ] },
-	15: { "desc": "Lose subgoal {p1}.", "p": [ {"label":"Subgoal #"} ] },
-	16: { "desc": "Change group {p1} team to {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Team"} ] },
+	14: { "desc": "Win subgoal {p1}.", "p": [ {"label":"Subgoal #","kind":Kind.ENUM,"enum":SUBGOAL_ENUM} ] },
+	15: { "desc": "Lose subgoal {p1}.", "p": [ {"label":"Subgoal #","kind":Kind.ENUM,"enum":SUBGOAL_ENUM} ] },
+	16: { "desc": "Change group {p1} team to {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Team","kind":Kind.ENUM,"enum":TEAM_ENUM} ] },
 	17: { "desc": "Change group {p1}'s action to group {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Group","kind":Kind.GROUP} ] },
 	18: { "desc": "Teleport group {p1} to teleport target {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Teleport target"} ] },
 	19: { "desc": "Send unit {p1} to a waypoint.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Waypoint type"}, {"label":"Waypoint","kind":Kind.WAYPOINT} ] },
@@ -100,7 +118,7 @@ const ACTIONS := {
 	21: { "desc": "Change unit {p1} AI (see sub-type).", "variable": true, "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Value"} ] },
 	22: { "desc": "Vaporize unit {p1}.", "p": [ {"label":"Unit","kind":Kind.ENTITY} ] },
 	23: { "desc": "Set unit {p1} move speed to {p2} kph.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Speed (kph)"} ] },
-	24: { "desc": "Change unit {p1} team to {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Team"} ] },
+	24: { "desc": "Change unit {p1} team to {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Team","kind":Kind.ENUM,"enum":TEAM_ENUM} ] },
 	25: { "desc": "Move unit {p1} into group {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Group","kind":Kind.GROUP} ] },
 	26: { "desc": "Teleport unit {p1} to teleport target {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Teleport target"} ] },
 	27: { "desc": "Play particle effect at target {p1}.", "p": [ {"label":"Target #"} ] },
@@ -109,8 +127,8 @@ const ACTIONS := {
 	32: { "desc": "Reset group {p1}'s has-visited flag.", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
 	33: { "desc": "Reset unit {p1}'s has-visited flag.", "p": [ {"label":"Unit","kind":Kind.ENTITY} ] },
 	34: { "desc": "Re-arm event {p1} so it can fire again.", "p": [ {"label":"Event","kind":Kind.EVENT} ] },
-	35: { "desc": "Show/hide win subgoal {p1}.", "p": [ {"label":"Subgoal #"}, {"label":"Show","kind":Kind.BOOL} ] },
-	36: { "desc": "Show/hide lose subgoal {p1}.", "p": [ {"label":"Subgoal #"}, {"label":"Show","kind":Kind.BOOL} ] },
+	35: { "desc": "Show/hide win subgoal {p1}.", "p": [ {"label":"Subgoal #","kind":Kind.ENUM,"enum":SUBGOAL_ENUM}, {"label":"Show","kind":Kind.BOOL} ] },
+	36: { "desc": "Show/hide lose subgoal {p1}.", "p": [ {"label":"Subgoal #","kind":Kind.ENUM,"enum":SUBGOAL_ENUM}, {"label":"Show","kind":Kind.BOOL} ] },
 	37: { "desc": "Mount unit {p1} on its emplaced weapon.", "p": [ {"label":"Unit","kind":Kind.ENTITY} ] },
 	38: { "desc": "Set light {p1} state to {p2}.", "p": [ {"label":"Light #"}, {"label":"On","kind":Kind.BOOL} ] },
 	# 39 (Teammates) param shape depends on the teammate sub-type (medic/evac targets); left raw.
