@@ -181,6 +181,15 @@ class FakeController:
 	func set_pick_debug(value: bool) -> void:
 		pick_debug = value
 
+	# Transform-gizmo toggle surface used by the object browser's gizmo checkbox.
+	var gizmo_enabled: bool = true
+
+	func is_gizmo_enabled() -> bool:
+		return gizmo_enabled
+
+	func set_gizmo_enabled(value: bool) -> void:
+		gizmo_enabled = value
+
 	func has_item_database() -> bool:
 		return has_item_db
 

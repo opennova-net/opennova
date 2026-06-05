@@ -26,6 +26,7 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const MissionWaypointOverlay := preload("res://engine/mission/mission_waypoint_overlay.gd")
 const MissionAreaTriggerOverlay := preload("res://engine/mission/mission_area_trigger_overlay.gd")
 const MissionMarkerOverlay := preload("res://engine/mission/mission_marker_overlay.gd")
+const MissionGizmo := preload("res://engine/mission/mission_gizmo.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
 const OBJECTS_CONTAINER := "MissionObjects"
 
@@ -69,6 +70,24 @@ var _selected_collider: Node3D
 var _selected_anchor_inv: Transform3D = Transform3D.IDENTITY
 # Debug: when on, draw the pick hulls in world (see _refresh_pick_debug).
 var _pick_debug := false
+
+# --- Transform gizmo (ImGuizmo-style translate + rotate) ----------------------
+# An in-world gizmo on the selected object: world-aligned translate arrows (X/Y/Z) and three
+# rotate rings (pitch / yaw / roll). It produces drag deltas; the controller applies them
+# through the same _apply_selected_xform / _commit_selected_transform spine as the terrain
+# drag + numeric edits, so undo + the inspector stay in sync. Objects only (markers keep
+# their terrain-drag). The node lives under the MissionObjects container, so it frees with a
+# re-bake; the ref is dropped in _reset_selection_state and lazily rebuilt in _refresh_gizmo.
+var _gizmo  # MissionGizmo (preloaded, no class_name)
+var _gizmo_enabled := true
+# Active handle drag: { part, axis } while a gizmo handle is held, else empty. The selection's
+# transform at grab time is snapshotted so every motion applies an absolute delta (no drift).
+var _gizmo_drag: Dictionary = {}
+var _gizmo_start_origin: Vector3 = Vector3.ZERO
+var _gizmo_start_rot: Vector3 = Vector3.ZERO
+# Last cursor position the gizmo hover-highlight ran for, to throttle the per-motion handle hit-test
+# to pixel movement (mirrors the object hover's HOVER_PIXEL_EPSILON gate). Reset on (re)selection.
+var _gizmo_hover_pos: Vector2 = Vector2(-1, -1)
 
 # Hover preview: a distinct-color wire box bracketing the object under the cursor
 # (objects mode, not dragging/armed), so the user sees what a click would select.
@@ -731,6 +750,12 @@ func handle_viewport_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
+		# A non-left button pressed mid gizmo-drag (e.g. right-click to look / middle to orbit) ends
+		# the drag and restores the grab-time pose. Otherwise FlyCamera (which also sees the event)
+		# would move the camera under the gizmo's frozen drag plane, flinging the selection across the
+		# map as the same cursor pixel reprojects. cancel_drag() rolls back to the snapshot.
+		if mb.pressed and mb.button_index != MOUSE_BUTTON_LEFT and not _gizmo_drag.is_empty():
+			cancel_drag()
 		# Right-click while armed cancels the placement tool (a familiar "drop the tool"
 		# gesture) and does not fall through to selection -- objects in objects mode, the
 		# add-marker tool in waypoints mode.
@@ -763,6 +788,8 @@ func handle_viewport_input(event: InputEvent) -> void:
 				_on_marker_left_release()
 			elif _mode == Mode.AREA_TRIGGERS:
 				_on_zone_left_release()
+			elif not _gizmo_drag.is_empty():
+				_on_gizmo_release()
 			else:
 				_on_left_release()
 	elif event is InputEventKey:
@@ -818,11 +845,16 @@ func handle_viewport_input(event: InputEvent) -> void:
 			_on_marker_drag(motion.position)
 		elif _mode == Mode.AREA_TRIGGERS:
 			_on_zone_drag(motion.position)
+		elif not _gizmo_drag.is_empty():
+			_on_gizmo_drag(motion.position)
 		else:
 			_on_drag(motion.position)
 	elif event is InputEventMouseMotion:
-		# Bare hover (not dragging): preview the object under the cursor in objects mode.
-		_on_hover((event as InputEventMouseMotion).position)
+		# Bare hover (not dragging): highlight the gizmo handle under the cursor + preview the
+		# object that a click would select (objects mode).
+		var hover_pos := (event as InputEventMouseMotion).position
+		_update_gizmo_hover(hover_pos)
+		_on_hover(hover_pos)
 
 
 # End an in-progress drag without committing. The workspace calls this when it
@@ -837,6 +869,16 @@ func cancel_drag() -> void:
 	# session that happens to be open keeps its undo step (commit, not discard, so a workspace
 	# switch mid-edit does not silently drop the step).
 	commit_edit()
+	# A cancelled transform-gizmo drag previewed a move/rotate but wrote no record; restore the
+	# selection to the snapshot taken at grab time, then drop the gizmo drag + highlight.
+	if not _gizmo_drag.is_empty():
+		_gizmo_drag = {}
+		if not _selected_ref.is_empty():
+			_selected_rotation_deg = _gizmo_start_rot
+			_apply_selected_xform(Transform3D(MissionObjectPlacer.bms_to_godot_basis(_gizmo_start_rot), _gizmo_start_origin))
+		if _gizmo != null and is_instance_valid(_gizmo):
+			_gizmo.end_drag()
+			_gizmo.set_highlight({})
 	# A cancelled marker / zone drag previewed the gizmo but wrote no record; snap it back to
 	# the stored position.
 	if _mode == Mode.WAYPOINTS:
@@ -853,6 +895,11 @@ func _on_left_press(mouse_pos: Vector2) -> void:
 	_flush_edit()
 	# Drop the hover highlight so it does not linger over the entity we are selecting.
 	_clear_hover()
+	# A grab on the transform gizmo's handle takes priority over (re)selection / free-drag: it
+	# manipulates the already-selected object along that axis / ring. Only when the cursor misses
+	# every handle does a left-press fall through to picking + the terrain free-drag below.
+	if _begin_gizmo_drag(mouse_pos):
+		return
 	var ref := _pick_entity(mouse_pos)
 	if ref.is_empty():
 		_deselect()
@@ -892,6 +939,144 @@ func _on_left_release() -> void:
 	_drag_off_terrain = false
 	# Push the drag as one undo step (no-op for a plain click: the bytes are unchanged).
 	commit_edit()
+
+
+# --- Transform gizmo ----------------------------------------------------------
+# The in-world gizmo (engine/mission/mission_gizmo.gd) draws translate arrows + rotate rings on
+# the selected object and returns drag deltas; the controller applies them through the same
+# _apply_selected_xform / _commit_selected_transform spine as the terrain drag + numeric edits, so
+# undo + the inspector stay in lockstep. Objects only (markers keep their terrain-drag). The node
+# is a child of the MissionObjects container so it frees with a re-bake.
+
+func is_gizmo_enabled() -> bool:
+	return _gizmo_enabled
+
+
+func set_gizmo_enabled(value: bool) -> void:
+	_gizmo_enabled = value
+	_refresh_gizmo()
+
+
+# The editor camera, or null (headless tests / no terrain editor bound).
+func _editor_camera() -> Camera3D:
+	if terrain_editor == null or not terrain_editor.has_method("get_editor_camera"):
+		return null
+	return terrain_editor.get_editor_camera()
+
+
+# Try to start a gizmo handle drag at `mouse_pos`. Returns true (and arms the drag) when the cursor
+# is over an arrow / ring of the visible gizmo; false otherwise so the caller falls through to
+# picking + the terrain free-drag. Snapshots the selection transform so each motion applies an
+# absolute delta from the grab (no drift), and opens the same begin_edit/commit_edit undo bracket.
+func _begin_gizmo_drag(mouse_pos: Vector2) -> bool:
+	if _gizmo == null or not is_instance_valid(_gizmo) or not _gizmo.visible or _selected_ref.is_empty():
+		return false
+	var camera := _editor_camera()
+	if camera == null:
+		return false
+	var handle: Dictionary = _gizmo.pick_handle(camera, mouse_pos)
+	if handle.is_empty():
+		return false
+	_gizmo_drag = handle
+	_gizmo_start_origin = _selected_xform.origin
+	_gizmo_start_rot = _selected_rotation_deg
+	_gizmo.begin(handle, camera, mouse_pos)
+	_gizmo.set_highlight(handle)
+	_drag_active = true
+	_drag_moved = false
+	_drag_off_terrain = false
+	begin_edit()
+	return true
+
+
+# Apply the gizmo's drag delta to the snapshotted start transform: translate slides the origin
+# along a world axis; rotate spins one authored angle (pitch/yaw/roll). Previews via
+# _apply_selected_xform (which moves the mesh, pick body, selection box, and the gizmo); the record
+# commits once on release.
+func _on_gizmo_drag(mouse_pos: Vector2) -> void:
+	if _gizmo_drag.is_empty() or _selected_ref.is_empty() or _gizmo == null or not is_instance_valid(_gizmo):
+		return
+	var camera := _editor_camera()
+	if camera == null:
+		return
+	var d: Dictionary = _gizmo.update(camera, mouse_pos)
+	if d.has("translate"):
+		var world_delta: Vector3 = d["translate"]
+		var local_delta := world_delta
+		var container := _objects_container()
+		if container != null:
+			local_delta = container.global_transform.basis.inverse() * world_delta
+		_drag_moved = true
+		_apply_selected_xform(Transform3D(_selected_xform.basis, _gizmo_start_origin + local_delta))
+	elif d.has("rotate_deg"):
+		var axis := int(_gizmo_drag.get("axis", 1))
+		var nv := roundf(_gizmo_start_rot[axis] + float(d["rotate_deg"]))
+		var r := _gizmo_start_rot
+		if axis == 0:
+			r.x = nv
+		elif axis == 1:
+			r.y = nv
+		else:
+			r.z = nv
+		_selected_rotation_deg = r
+		_drag_moved = true
+		_apply_selected_xform(Transform3D(MissionObjectPlacer.bms_to_godot_basis(r), _selected_xform.origin))
+
+
+func _on_gizmo_release() -> void:
+	if _drag_moved:
+		# _commit_selected_transform writes BOTH position and _selected_rotation_deg, so a rotate
+		# gesture commits with no extra code.
+		_commit_selected_transform()
+	_gizmo_drag = {}
+	_drag_active = false
+	_drag_moved = false
+	_drag_off_terrain = false
+	if _gizmo != null and is_instance_valid(_gizmo):
+		_gizmo.end_drag()
+		_gizmo.set_highlight({})
+	# Push the gesture as one undo step (no-op when nothing moved), then re-orient the rings to the
+	# committed rotation.
+	commit_edit()
+	_refresh_gizmo()
+
+
+# Highlight the gizmo handle under the cursor on a bare hover (no drag), for grab feedback.
+# Throttled to pixel movement so the (fixed-cost) handle hit-test does not re-run on sub-pixel jitter.
+func _update_gizmo_hover(mouse_pos: Vector2) -> void:
+	if _gizmo == null or not is_instance_valid(_gizmo) or not _gizmo.visible or not _gizmo_drag.is_empty():
+		return
+	if _gizmo_hover_pos.distance_to(mouse_pos) < HOVER_PIXEL_EPSILON:
+		return
+	_gizmo_hover_pos = mouse_pos
+	var camera := _editor_camera()
+	if camera == null:
+		return
+	_gizmo.set_highlight(_gizmo.pick_handle(camera, mouse_pos))
+
+
+# (Re)build / place / hide the transform gizmo for the current selection. Shown only in Objects
+# mode, gizmo enabled, with a non-marker object selected and no placement tool armed. Created lazily
+# under the objects container (freed with it on a re-bake; the ref is dropped in
+# _reset_selection_state). Re-orients the rings to the selection's current degrees.
+func _refresh_gizmo() -> void:
+	if _mission == null:
+		return
+	var container := _objects_container()
+	if container == null:
+		return
+	var want := _gizmo_enabled and _mode == Mode.OBJECTS and not is_placement_armed() \
+		and not _selected_ref.is_empty() and int(_selected_ref.get("kind", -1)) != NovaMissionData.KIND_MARKER
+	if not want:
+		if _gizmo != null and is_instance_valid(_gizmo):
+			_gizmo.visible = false
+		return
+	if _gizmo == null or not is_instance_valid(_gizmo):
+		_gizmo = MissionGizmo.new()
+		_gizmo.name = "MissionTransformGizmo"
+		container.add_child(_gizmo)
+	_gizmo.visible = true
+	_gizmo.show_for(_selected_xform.origin, _selected_rotation_deg)
 
 
 # --- Pick bodies --------------------------------------------------------------
@@ -1064,6 +1249,10 @@ func _select(kind: int, index: int) -> void:
 	if kind == NovaMissionData.KIND_MARKER and _marker_overlay != null and is_instance_valid(_marker_overlay):
 		_marker_overlay.set_selected_marker(index)
 	_update_selection_box()
+	# Show the transform gizmo on this selection (hidden for markers / non-objects modes). Reset the
+	# hover throttle so the first motion over the rebuilt gizmo re-highlights.
+	_refresh_gizmo()
+	_gizmo_hover_pos = Vector2(-1, -1)
 	changed.emit()
 
 
@@ -1077,6 +1266,8 @@ func _deselect() -> void:
 	_selected_collider = null
 	_selected_anchor_inv = Transform3D.IDENTITY
 	_hide_selection_box()
+	if _gizmo != null and is_instance_valid(_gizmo):
+		_gizmo.visible = false
 	if _marker_overlay != null and is_instance_valid(_marker_overlay):
 		_marker_overlay.set_selected_marker(-1)
 	changed.emit()
@@ -1117,6 +1308,14 @@ func _apply_selected_xform(xform: Transform3D) -> void:
 	if _selected_collider != null and is_instance_valid(_selected_collider):
 		_selected_collider.transform = _selected_xform * _selected_anchor_inv
 	_update_selection_box()
+	# Keep the transform gizmo on the selection. During a gizmo drag, only reposition (keep the
+	# captured drag plane + ring orientation frozen); otherwise re-orient the rings to the new
+	# rotation (numeric edits, fresh selection).
+	if _gizmo != null and is_instance_valid(_gizmo) and _gizmo.visible:
+		if _gizmo_drag.is_empty():
+			_gizmo.show_for(_selected_xform.origin, _selected_rotation_deg)
+		else:
+			_gizmo.set_origin(_selected_xform.origin)
 
 
 func _commit_selected_transform() -> void:
@@ -1349,6 +1548,9 @@ func disarm_placement() -> void:
 	if _place_item_id == 0:
 		return
 	_place_item_id = 0
+	# Placement suppresses the gizmo (its want-gate excludes is_placement_armed). A just-placed
+	# entity stays selected, so once disarmed re-show its gizmo (no-op when nothing is selected).
+	_refresh_gizmo()
 	changed.emit()
 
 
@@ -1595,6 +1797,10 @@ func set_mode(mode: int) -> void:
 		_area_overlay.visible = mode == Mode.AREA_TRIGGERS
 	if _marker_overlay != null and is_instance_valid(_marker_overlay):
 		_marker_overlay.visible = mode == Mode.OBJECTS
+	# The transform gizmo lives only in Objects mode and only with a selection; a mode switch
+	# clears the selection above, so just hide it here (rebuilt on the next object select).
+	if _gizmo != null and is_instance_valid(_gizmo):
+		_gizmo.visible = false
 	changed.emit()
 
 
@@ -2859,6 +3065,11 @@ func _reset_selection_state() -> void:
 	_drag_active = false
 	_drag_moved = false
 	_drag_off_terrain = false
+	# The transform gizmo is a container child too, so a re-bake freed it; drop the dangling ref
+	# (and any in-flight gizmo drag) so the next _refresh_gizmo rebuilds it.
+	_gizmo = null
+	_gizmo_drag = {}
+	_gizmo_hover_pos = Vector2(-1, -1)
 	_selection_box = null
 	# The hover box is a container child too, so the re-bake freed it; drop the dangling ref.
 	_hover_box = null

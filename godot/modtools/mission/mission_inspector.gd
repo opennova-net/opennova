@@ -829,6 +829,19 @@ func _build_object_browser() -> void:
 	_objects_status = ObjectUiHelpers.add_muted_label(_objects_box, "")
 	_objects_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
+	# Show the translate/rotate gizmo on the selected object (drag the arrows to move, the rings to
+	# rotate). On by default; turn it off for a plain terrain free-drag.
+	var gizmo_check := CheckBox.new()
+	gizmo_check.name = "MissionGizmoCheck"
+	gizmo_check.text = "Show transform gizmo"
+	gizmo_check.tooltip_text = "Show the move/rotate gizmo on the selected object: drag an axis arrow to move it, a ring to rotate it."
+	gizmo_check.button_pressed = _controller == null or _controller.is_gizmo_enabled()
+	_objects_box.add_child(gizmo_check)
+	gizmo_check.toggled.connect(func(pressed: bool) -> void:
+		if _controller != null:
+			_controller.set_gizmo_enabled(pressed)
+	)
+
 	# Debug: visualize the convex collision hulls that picking tests against, in world.
 	var pick_debug := CheckBox.new()
 	pick_debug.name = "MissionPickDebugCheck"
