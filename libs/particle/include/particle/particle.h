@@ -84,38 +84,50 @@ constexpr std::uint32_t Bubble    = 1u <<  4;  // bit 4 = 0x10 — engine table 
 std::uint32_t parse_move_bits(std::string_view raw) noexcept;
 std::string format_move_bits(std::uint32_t bits);
 
-// FlagTable @ 0x846A18, 26 named entries (`dword_846A14` reports 29 slots, the
-// last 3 are zeroed). Bits are powers of two in the FlagTable order observed
-// at 0x846A20+. Engine semantics: FlagTable_ParseFromString matches each token
-// in the input string and ORs the bit; output writer emits space-separated
-// names in table order via sub_5DF9C0 @ 0x5df9c0.
+// Particle flag table. 29 named entries — verified live from
+// `g_ParticleFlagTable @ 0x5ba500` in ParticleEdit_v1_1.exe (count
+// `dword_5BC2E8` = 29; stride 264 B, u32 bitmask at name-4). JO equivalent
+// @ 0x846A18. Bits are powers of two in table order. Engine semantics: the
+// parser matches each token and ORs the bit; the writer emits space-separated
+// names in table order via FlagTable_BuildString @ 0x428fe0 (JO sub_5DF9C0
+// @ 0x5df9c0).
+//
+// Bit values MUST match the engine exactly: HAZE (idx 9), BELOWH20 (idx 27),
+// ABOVEH20 (idx 28) were absent in the earlier 26-entry list, which silently
+// shifted GLOBALWIND..AMBIENTCOLOR off by one bit and dropped HAZE (used in
+// fire.ptl) on round-trip. See notes/ida_particle_witness.md "ParticleEdit
+// cross-witness grill" D5. BELOWH20/ABOVEH20 are the water-level flags the
+// emitter kill-plane logic refers to as bits 27/28.
 namespace particle_flag {
-constexpr std::uint32_t NoVisNoUpdate         = 1u <<  0;
-constexpr std::uint32_t InitialClip           = 1u <<  1;  // "INITIALYCLIP" (sic)
-constexpr std::uint32_t NeverAge              = 1u <<  2;
-constexpr std::uint32_t TopAlign              = 1u <<  3;
-constexpr std::uint32_t OnMyDeath             = 1u <<  4;
-constexpr std::uint32_t UseParentScale        = 1u <<  5;
-constexpr std::uint32_t UseParentColor        = 1u <<  6;
-constexpr std::uint32_t UseParentAlpha        = 1u <<  7;
-constexpr std::uint32_t YawAndPitch           = 1u <<  8;
-constexpr std::uint32_t GlobalWind            = 1u <<  9;
-constexpr std::uint32_t FocalWind             = 1u << 10;
-constexpr std::uint32_t FocalWindForceAging   = 1u << 11;
-constexpr std::uint32_t CollideBounce         = 1u << 12;
-constexpr std::uint32_t CollideSlide          = 1u << 13;
-constexpr std::uint32_t CollideKill           = 1u << 14;
-constexpr std::uint32_t EmitVector            = 1u << 15;
-constexpr std::uint32_t PositionInterpolate   = 1u << 16;
-constexpr std::uint32_t ForeverEmit           = 1u << 17;
-constexpr std::uint32_t PositionRelative      = 1u << 18;
-constexpr std::uint32_t UseParentRotations    = 1u << 19;
-constexpr std::uint32_t GfxFlipRand           = 1u << 20;
-constexpr std::uint32_t ControledAlignment    = 1u << 21;  // "CONTROLEDALLIGNMENT" (sic)
-constexpr std::uint32_t SignedRotations       = 1u << 22;
-constexpr std::uint32_t OneFrame              = 1u << 23;
-constexpr std::uint32_t BurstDistribute       = 1u << 24;
-constexpr std::uint32_t AmbientColor          = 1u << 25;
+constexpr std::uint32_t NoVisNoUpdate         = 1u <<  0;  // 0x01
+constexpr std::uint32_t InitialClip           = 1u <<  1;  // 0x02  "INITIALYCLIP" (sic)
+constexpr std::uint32_t NeverAge              = 1u <<  2;  // 0x04
+constexpr std::uint32_t TopAlign              = 1u <<  3;  // 0x08
+constexpr std::uint32_t OnMyDeath             = 1u <<  4;  // 0x10
+constexpr std::uint32_t UseParentScale        = 1u <<  5;  // 0x20
+constexpr std::uint32_t UseParentColor        = 1u <<  6;  // 0x40
+constexpr std::uint32_t UseParentAlpha        = 1u <<  7;  // 0x80
+constexpr std::uint32_t YawAndPitch           = 1u <<  8;  // 0x100
+constexpr std::uint32_t Haze                  = 1u <<  9;  // 0x200  "HAZE" — engine table idx 9
+constexpr std::uint32_t GlobalWind            = 1u << 10;  // 0x400
+constexpr std::uint32_t FocalWind             = 1u << 11;  // 0x800
+constexpr std::uint32_t FocalWindForceAging   = 1u << 12;  // 0x1000
+constexpr std::uint32_t CollideBounce         = 1u << 13;  // 0x2000
+constexpr std::uint32_t CollideSlide          = 1u << 14;  // 0x4000
+constexpr std::uint32_t CollideKill           = 1u << 15;  // 0x8000
+constexpr std::uint32_t EmitVector            = 1u << 16;  // 0x10000
+constexpr std::uint32_t PositionInterpolate   = 1u << 17;  // 0x20000
+constexpr std::uint32_t ForeverEmit           = 1u << 18;  // 0x40000
+constexpr std::uint32_t PositionRelative      = 1u << 19;  // 0x80000
+constexpr std::uint32_t UseParentRotations    = 1u << 20;  // 0x100000
+constexpr std::uint32_t GfxFlipRand           = 1u << 21;  // 0x200000
+constexpr std::uint32_t ControledAlignment    = 1u << 22;  // 0x400000 "CONTROLEDALLIGNMENT" (sic)
+constexpr std::uint32_t SignedRotations       = 1u << 23;  // 0x800000
+constexpr std::uint32_t OneFrame              = 1u << 24;  // 0x1000000
+constexpr std::uint32_t BurstDistribute       = 1u << 25;  // 0x2000000
+constexpr std::uint32_t AmbientColor          = 1u << 26;  // 0x4000000
+constexpr std::uint32_t BelowH2O              = 1u << 27;  // 0x8000000  "BELOWH20" — engine table idx 27
+constexpr std::uint32_t AboveH2O              = 1u << 28;  // 0x10000000 "ABOVEH20" — engine table idx 28
 } // namespace particle_flag
 
 std::uint32_t parse_particle_flags(std::string_view raw) noexcept;

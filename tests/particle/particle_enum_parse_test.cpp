@@ -61,11 +61,13 @@ int main() {
 	if (!expect((both & particle_flag::EmitVector) != 0,   "EMITVECTOR bit")) return 1;
 	if (!expect((both & particle_flag::AmbientColor) != 0, "AMBIENTCOLOR bit")) return 1;
 
-	// 2. Format helpers — engine writer uses table order, single space, trailing space.
+	// 2. Format helpers — engine FlagTable_BuildString @ 0x428fe0 seeds a LEADING
+	// space then appends "<name> " per matched bit, so the value is
+	// " NAME1 NAME2 " (leading + single-separator + trailing space). See D1.
 	const std::string move_str = format_move_bits(move_flag::Normal);
-	if (!expect(move_str == "NORMAL ", "format_move_bits emits trailing space")) return 1;
+	if (!expect(move_str == " NORMAL ", "format_move_bits emits leading+trailing space")) return 1;
 	const std::string flags_str = format_particle_flags(particle_flag::EmitVector | particle_flag::AmbientColor);
-	if (!expect(flags_str == "EMITVECTOR AMBIENTCOLOR ", "format_particle_flags follows table order")) return 1;
+	if (!expect(flags_str == " EMITVECTOR AMBIENTCOLOR ", "format_particle_flags follows table order")) return 1;
 
 	// 3. Fixture-driven projections — buildup.ptl: flags=TOPALIGN, move=GRAVITATE,
 	// graphic1 = line.tga, additive; scale_func = table12 reverse;

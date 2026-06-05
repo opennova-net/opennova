@@ -15,7 +15,7 @@ const ParticleTableInspectorScript = preload("res://modtools/particle/inspectors
 const FlyCameraScript = preload("res://engine/fly_camera.gd")
 
 const OUTPUT_DIR_NAME := "particle_editor_workstation_test"
-const PARTICLE_FLAG_FOREVER_EMIT := 1 << 17
+const PARTICLE_FLAG_FOREVER_EMIT := 1 << 18  # particle_flag::ForeverEmit = 0x40000 (engine flag-table idx 18, post-HAZE)
 
 
 func before_each() -> void:
@@ -380,7 +380,7 @@ func test_color_tint_zeroes_channel() -> void:
 	assert_gt(rendered.b, 0.5, "tint.b=1 preserves blue channel (got %f)" % rendered.b)
 
 
-const PARTICLE_FLAG_POSITION_RELATIVE := 1 << 18
+const PARTICLE_FLAG_POSITION_RELATIVE := 1 << 19  # particle_flag::PositionRelative = 0x80000 (engine flag-table idx 19, post-HAZE)
 
 
 # CParticleEmitter_BuildBillboardQuads @ 0x5e6d60: lit-color path triggered
@@ -587,7 +587,7 @@ func test_world_space_default_keeps_particles_when_emitter_moves() -> void:
 
 
 func test_position_relative_carries_particles_with_emitter() -> void:
-	# PositionRelative flag (bit 18 = 0x40000): alive particles translate
+	# PositionRelative flag (bit 19 = 0x80000): alive particles translate
 	# with the emitter when its position changes. Quad world-coordinates
 	# shift by the same delta as the emitter.
 	var particle := _make_render_test_particle(0)

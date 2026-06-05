@@ -232,6 +232,10 @@ void apply_effect_key(EffectDef &effect, const std::string &key,
 	}
 }
 
+// [orig: ParticleDef_ParseField @ 0x433e20 (ParticleEdit_v1_1.exe); JO CParticleDef_ParseProperties @ 0x5ea320]
+// ParticleEdit confirms: graphic color keys are REMAPPED (g2_color1->color2,
+// g3_color1/2->color3, g4_color1/2->color4); we deliberately map 1:1. See
+// notes/ida_particle_witness.md "ParticleEdit cross-witness grill" D4.
 void apply_particle_key(ParticleDef &particle, const std::string &key,
 		const std::string &raw_value, const std::vector<std::string> &values) {
 	// Per-graphic header: `graphic1 = mbFlash2.tga, additive;`

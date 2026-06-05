@@ -137,7 +137,9 @@ void write_graphic(std::ostream &out, const GraphicLayer &layer, int slot,
 }
 
 void write_particle(std::ostream &out, const ParticleDef &p) {
-	// CParticleDef_SaveToFile @ 0x5e4d70 — exact field ordering and whitespace.
+	// [orig: ParticleDef_Write @ 0x42ec20 (ParticleEdit_v1_1.exe); JO CParticleDef_SaveToFile @ 0x5e4d70]
+	// Field order/whitespace/duplicate emit_dur/unconditional lod/BGR colors all
+	// byte-match ParticleEdit's fprintf format strings — exact field ordering and whitespace.
 	out << NL << "[particledef]" << NL << "{" << NL;
 
 	out << "id\t= " << p.id << ";" << NL;

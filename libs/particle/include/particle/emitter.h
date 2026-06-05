@@ -102,17 +102,19 @@ struct Emitter {
 	std::uint32_t lod_divisor = 1;
 
 	// CParticleEmitter_UpdateParticles @ 0x5e6980 kill-plane:
-	//   def.flags & 0x08000000 (bit 27): kill if particle.y > threshold
-	//   def.flags & 0x10000000 (bit 28): kill if particle.y <= threshold
+	//   def.flags & 0x08000000 (bit 27 = BELOWH20): kill if particle.y > threshold
+	//   def.flags & 0x10000000 (bit 28 = ABOVEH20): kill if particle.y <= threshold
 	// Engine threshold lives at `*(emitter+332)` (a manager-supplied
 	// `float*` populated per spawn site — terrain y for ground kill,
 	// ceiling y for upward kill). We expose the value + mode directly.
-	// Default mode 0 = disabled (no kill plane). Bits 27/28 are
-	// engine-internal — outside the 26-name flag table at 0x846A18 — so
-	// neither the parser nor the corpus carries them; the manager
-	// populates them at spawn. Like `color_tint` / `spring_const` /
-	// `lod_divisor`, these are runtime scalars NOT reset by
-	// `emitter_init`.
+	// Default mode 0 = disabled (no kill plane). Bits 27/28 are the named
+	// flags BELOWH20 / ABOVEH20 (`particle_flag::BelowH2O` / `AboveH2O`,
+	// engine flag-table idx 27/28 — corrected from the earlier "engine-
+	// internal" note per the ParticleEdit grill D5). `def.flags` can now
+	// carry them via the parser; the corpus doesn't use them. The kill
+	// threshold y is still manager-supplied per spawn site. Like
+	// `color_tint` / `spring_const` / `lod_divisor`, these are runtime
+	// scalars NOT reset by `emitter_init`.
 	std::uint32_t kill_plane_mode = 0;  // 0=disabled, 1=kill above, 2=kill at/below
 	float kill_plane_y = 0.0f;
 

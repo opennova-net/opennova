@@ -53,9 +53,12 @@ bool icontains(std::string_view haystack, std::string_view needle) noexcept {
 	return false;
 }
 
-// Engine flag table @ 0x846A18 — order matches CParticleDef_ParseProperties
-// dispatch and FlagTable_ParseFromString iteration.
-constexpr std::array<std::pair<const char *, std::uint32_t>, 26> kParticleFlagEntries = {{
+// [orig: g_ParticleFlagTable @ 0x5ba500 (ParticleEdit_v1_1.exe, cnt dword_5BC2E8=29); JO @ 0x846A18]
+// 29 entries in engine table order (the write order). HAZE (idx 9), BELOWH20
+// (idx 27), ABOVEH20 (idx 28) added per the ParticleEdit cross-witness grill
+// (D5) — fixes the HAZE round-trip drop (fire.ptl) and the GLOBALWIND..
+// AMBIENTCOLOR bit-shift. See notes/ida_particle_witness.md.
+constexpr std::array<std::pair<const char *, std::uint32_t>, 29> kParticleFlagEntries = {{
 	{"NOVISNOUPDATE",        particle_flag::NoVisNoUpdate},
 	{"INITIALYCLIP",         particle_flag::InitialClip},
 	{"NEVERAGE",             particle_flag::NeverAge},
@@ -65,6 +68,7 @@ constexpr std::array<std::pair<const char *, std::uint32_t>, 26> kParticleFlagEn
 	{"USEPARENTCOLOR",       particle_flag::UseParentColor},
 	{"USEPARENTALPHA",       particle_flag::UseParentAlpha},
 	{"YAWANDPITCH",          particle_flag::YawAndPitch},
+	{"HAZE",                 particle_flag::Haze},
 	{"GLOBALWIND",           particle_flag::GlobalWind},
 	{"FOCALWIND",            particle_flag::FocalWind},
 	{"FOCALWINDFORCEAGING",  particle_flag::FocalWindForceAging},
@@ -82,6 +86,8 @@ constexpr std::array<std::pair<const char *, std::uint32_t>, 26> kParticleFlagEn
 	{"ONEFRAME",             particle_flag::OneFrame},
 	{"BURSTDISTRIBUTE",      particle_flag::BurstDistribute},
 	{"AMBIENTCOLOR",         particle_flag::AmbientColor},
+	{"BELOWH20",             particle_flag::BelowH2O},
+	{"ABOVEH20",             particle_flag::AboveH2O},
 }};
 
 // Engine move table @ 0x848800 — same convention.
@@ -108,15 +114,20 @@ std::uint32_t parse_flag_table(std::string_view raw,
 template <std::size_t N>
 std::string format_flag_table(std::uint32_t bits,
 		const std::array<std::pair<const char *, std::uint32_t>, N> &entries) {
-	// Engine sub_5DF9C0 @ 0x5df9c0 emits names in table order, separated by
-	// single spaces, with one trailing space — replicate exactly so round-trip
-	// matches what the runtime would write.
+	// [orig: FlagTable_BuildString @ 0x428fe0 (ParticleEdit_v1_1.exe); JO sub_5DF9C0 @ 0x5df9c0]
+	// DIVERGENCE D1 (see notes/ida_particle_witness.md): the engine seeds the
+	// buffer with a LEADING space (*(WORD*)buf = 0x20) before appending names, so
+	// the value is " NAME1 NAME2 " and a line reads "flags\t=  NAME1 NAME2 ;" (two
+	// spaces after '='). Corpus confirms. We emit no leading space (single space).
+	// Engine emits names in table order. FlagTable_BuildString seeds the buffer
+	// with a LEADING space, then appends "<name> " per matched bit — so the value
+	// is " NAME1 NAME2 " (leading + single-separator + trailing space) and a line
+	// reads "flags\t=  NAME1 NAME2 ;" (two spaces after '='). Reproduce that by
+	// prefixing each name with a space; gives "" for the (never-written) empty case.
 	std::string out;
 	for (const auto &entry : entries) {
 		if ((bits & entry.second) != 0) {
-			if (!out.empty()) {
-				out.push_back(' ');
-			}
+			out.push_back(' ');
 			out.append(entry.first);
 		}
 	}
@@ -145,7 +156,9 @@ const char *blend_mode_name(BlendMode mode) noexcept {
 }
 
 BlendMode parse_blend_mode(std::string_view raw) noexcept {
-	// CParticleDefEntry_ParseBlendMode @ 0x5e29f0 uses chained strstr — first
+	// [orig: ParseBlendMode @ 0x42c080 (ParticleEdit_v1_1.exe); JO CParticleDefEntry_ParseBlendMode @ 0x5e29f0]
+	// ParticleEdit confirms the chained-strstr order exactly (no distort case;
+	// distort=7 is a Jointops-era addition). CParticleDefEntry_ParseBlendMode uses chained strstr — first
 	// match wins. Order matters because "bump" is a substring of "bumpadd";
 	// engine checks "bump" first and would return Bump for "bumpadd". Match
 	// the engine exactly so corpus parses identically.
