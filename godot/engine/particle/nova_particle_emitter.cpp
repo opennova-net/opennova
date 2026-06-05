@@ -56,6 +56,34 @@ struct RenderParticle {
 	Color lit_color = Color(1.0f, 1.0f, 1.0f, 1.0f);
 };
 
+void duplicate_atlas_gutter(const Ref<Image> &atlas_image, const Vector2i &content_origin,
+		int width, int height, int gutter_pixels) {
+	if (atlas_image.is_null() || width <= 0 || height <= 0 || gutter_pixels <= 0) {
+		return;
+	}
+
+	for (int y = 0; y < height; ++y) {
+		const int atlas_y = content_origin.y + y;
+		const Color left = atlas_image->get_pixel(content_origin.x, atlas_y);
+		const Color right = atlas_image->get_pixel(content_origin.x + width - 1, atlas_y);
+		for (int g = 1; g <= gutter_pixels; ++g) {
+			atlas_image->set_pixel(content_origin.x - g, atlas_y, left);
+			atlas_image->set_pixel(content_origin.x + width - 1 + g, atlas_y, right);
+		}
+	}
+
+	const int padded_x0 = content_origin.x - gutter_pixels;
+	const int padded_x1 = content_origin.x + width + gutter_pixels;
+	for (int x = padded_x0; x < padded_x1; ++x) {
+		const Color top = atlas_image->get_pixel(x, content_origin.y);
+		const Color bottom = atlas_image->get_pixel(x, content_origin.y + height - 1);
+		for (int g = 1; g <= gutter_pixels; ++g) {
+			atlas_image->set_pixel(x, content_origin.y - g, top);
+			atlas_image->set_pixel(x, content_origin.y + height - 1 + g, bottom);
+		}
+	}
+}
+
 } // namespace
 
 NovaParticleEmitter::NovaParticleEmitter() {
@@ -496,8 +524,10 @@ void NovaParticleEmitter::_rebuild_atlas_texture(
 		sizes[static_cast<std::size_t>(i)] = {widths[i], heights[i]};
 	}
 
+	constexpr int ATLAS_GUTTER_PIXELS = 1;
 	const opennova::particle::AtlasLayout layout =
-			opennova::particle::bake_atlas_layout(*native_def, sizes);
+			opennova::particle::bake_atlas_layout(*native_def, sizes,
+					opennova::particle::AtlasBakeOptions{ATLAS_GUTTER_PIXELS});
 
 	if (layout.atlas_width <= 0 || layout.atlas_height <= 0) {
 		atlas_texture.unref();
@@ -526,9 +556,12 @@ void NovaParticleEmitter::_rebuild_atlas_texture(
 		if (layer_image->get_format() != Image::FORMAT_RGBA8) {
 			layer_image->convert(Image::FORMAT_RGBA8);
 		}
+		const Vector2i content_origin(layout.layer_x_offset[i], ATLAS_GUTTER_PIXELS);
 		atlas_image->blit_rect(layer_image,
 				Rect2i(Vector2i(0, 0), Vector2i(widths[i], heights[i])),
-				Vector2i(layout.layer_x_offset[i], 0));
+				content_origin);
+		duplicate_atlas_gutter(atlas_image, content_origin,
+				widths[i], heights[i], ATLAS_GUTTER_PIXELS);
 	}
 
 	atlas_texture = ImageTexture::create_from_image(atlas_image);
@@ -706,19 +739,10 @@ void NovaParticleEmitter::_update_meshes() {
 		//   5. Scale by def.bump_scale and encode per channel:
 		//      `byte = clamp((value + 1) × 0.5, 0, 1) × 255`.
 		//
-		// Our portable form rotates the camera right/up axes by rp.rotation
-		// around the view direction (matches our billboard frame
-		// construction exactly), then projects the engine light direction
-		// into the local frame via dot products with the orthonormal axes.
-		// Result: lit_color varies with particle rotation, matching the
-		// engine's intent of direction-dependent shading.
-		//
-		// **Bounded deviation**: the engine rotates around the X axis of a
-		// composite view-space matrix (D3DXMatrixRotationX), while we rotate
-		// around the view direction (Z axis of our billboard frame). Both
-		// paths produce direction-dependent variation that responds to
-		// rotation, but exact per-channel values differ vs the engine.
-		// Closing this gap requires a 4×4 matrix port + axis-convention RE.
+		// Portable matrix form uses the billboard frame as the parent/view
+		// matrix, applies RotationX in that local frame (right axis fixed,
+		// up/forward rotate), then projects the engine light direction by the
+		// transposed composite matrix via dot products.
 		if ((p.flags & opennova::particle::particle_runtime_flag::LitColor) != 0) {
 			const float bump_scale = native_def->bump_scale;
 			constexpr float k = 0.5773503f;  // 1/√3 (engine: flt_848D34/D38/D3C)
@@ -726,12 +750,15 @@ void NovaParticleEmitter::_update_meshes() {
 
 			const float rc = std::cos(rp.rotation);
 			const float rs = std::sin(rp.rotation);
-			const Vector3 local_right = right * rc + up * rs;
-			const Vector3 local_up = -right * rs + up * rc;
+			const Vector3 local_right = right;
 			Vector3 local_forward = right.cross(up);
 			if (local_forward.length_squared() > 0.0f) {
 				local_forward.normalize();
+			} else {
+				local_forward = Vector3(0.0f, 0.0f, 1.0f);
 			}
+			const Vector3 local_up = up * rc + local_forward * rs;
+			local_forward = -up * rs + local_forward * rc;
 
 			const Vector3 light_local(
 					local_right.dot(light_world),

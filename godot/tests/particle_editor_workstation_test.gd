@@ -159,7 +159,7 @@ func test_particles_workspace_actions_listed() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.PARTICLE)
 	await get_tree().process_frame
 
-	var actions_host: VBoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	var actions_host: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
 	var labels: Array = []
 	for child in actions_host.get_children():
 		if child is Button:
@@ -385,11 +385,9 @@ const PARTICLE_FLAG_POSITION_RELATIVE := 1 << 18
 
 # CParticleEmitter_BuildBillboardQuads @ 0x5e6d60: lit-color path triggered
 # when particle.flags & 0x80 (LitColor for Bump=3 / Bumpadd=6 blend modes).
-# Engine encodes `bump_scale × M^T × (-1/√3, -1/√3, +1/√3)` per axis into a
-# byte via `clamp((value + 1) × 0.5, 0, 1) × 255` where M = particle's
-# composite view + rotation matrix. Bounded deviation: we rotate around the
-# view direction instead of the engine's D3DXMatrixRotationX axis (full RE
-# of the engine's exact axis convention is deferred — see witness notes).
+# Engine encodes `bump_scale x M^T x (-1/sqrt(3), -1/sqrt(3), +1/sqrt(3))`
+# per axis into a byte via `clamp((value + 1) x 0.5, 0, 1) x 255`, where M
+# is the particle's composite view + RotationX matrix.
 func test_lit_color_default_neutral_when_not_bump() -> void:
 	# blend mode 0 (Blend) → particle.flags has no LitColor bit → lit_color
 	# stays neutral white in our renderer.
@@ -472,10 +470,13 @@ func test_lit_color_varies_with_particle_rotation() -> void:
 func test_atlas_texture_combines_multiple_layers() -> void:
 	# CParticleManager_BuildTextureAtlases @ 0x5e8db0: per-emitter atlas
 	# combining all present graphic layers' textures into one image, with
-	# atlas-relative UV rects. Verify the wrapper builds the atlas correctly
-	# from two distinct loose PNG textures and binds it to all 4 layer
-	# materials' `albedo_tex`.
-	var dir := _output_dir()
+	# atlas-relative UV rects. The wrapper adds a 1-pixel gutter around each
+	# packed layer to prevent linear-filter bleed between loose textures.
+	# Unique texture dir per test: the engine's texture_path_resolver caches each
+	# directory's listing, so two tests writing different textures into one shared
+	# dir would have the second miss the first's stale cache. A per-test dir gives
+	# each its own cache key and a fresh enumeration.
+	var dir := _output_dir().path_join("atlas_combine")
 	DirAccess.make_dir_recursive_absolute(dir)
 	var path0 := dir.path_join("atlas_layer_a.png")
 	var path1 := dir.path_join("atlas_layer_b.png")
@@ -509,8 +510,19 @@ func test_atlas_texture_combines_multiple_layers() -> void:
 
 	var atlas: ImageTexture = emitter.get_debug_atlas_texture()
 	assert_not_null(atlas, "Atlas texture should be built when both layers loaded.")
-	assert_eq(atlas.get_width(), 24, "Atlas width = sum of layer widths (8+16=24).")
-	assert_eq(atlas.get_height(), 8, "Atlas height = max of layer heights.")
+	assert_eq(atlas.get_width(), 28, "Atlas width includes 1px gutters around both layers.")
+	assert_eq(atlas.get_height(), 10, "Atlas height includes top/bottom gutters.")
+
+	var atlas_image := atlas.get_image()
+	assert_not_null(atlas_image, "Atlas image should be readable for gutter verification.")
+	assert_eq(atlas_image.get_pixel(0, 1), Color(1.0, 0.0, 0.0, 1.0),
+			"Layer 0 left gutter duplicates the red edge pixel.")
+	assert_eq(atlas_image.get_pixel(9, 1), Color(1.0, 0.0, 0.0, 1.0),
+			"Layer 0 right gutter duplicates the red edge pixel.")
+	assert_eq(atlas_image.get_pixel(10, 1), Color(0.0, 1.0, 0.0, 1.0),
+			"Layer 1 left gutter duplicates the green edge pixel.")
+	assert_eq(atlas_image.get_pixel(27, 1), Color(0.0, 1.0, 0.0, 1.0),
+			"Layer 1 right gutter duplicates the green edge pixel.")
 
 	# Every layer material's albedo_tex points at the same atlas RID.
 	var atlas_rid := atlas.get_rid()
@@ -526,7 +538,8 @@ func test_atlas_texture_combines_multiple_layers() -> void:
 func test_atlas_clears_when_def_unset() -> void:
 	# Setting def back to null releases the atlas reference + resets the
 	# rebuild signature so a subsequent set_def rebuilds.
-	var dir := _output_dir()
+	# Per-test texture dir (own resolver-cache key); see test_atlas_texture_combines.
+	var dir := _output_dir().path_join("atlas_clear")
 	DirAccess.make_dir_recursive_absolute(dir)
 	var path0 := dir.path_join("atlas_clear_a.png")
 	_write_test_texture(path0)

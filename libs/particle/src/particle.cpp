@@ -246,8 +246,10 @@ void bake_particle_def_curves(ParticleDef &def,
 }
 
 AtlasLayout bake_atlas_layout(ParticleDef &def,
-		const std::array<AtlasInputSize, 4> &sizes) noexcept {
+		const std::array<AtlasInputSize, 4> &sizes,
+		AtlasBakeOptions options) noexcept {
 	AtlasLayout layout{};
+	const int gutter = std::max(options.gutter_pixels, 0);
 	int total_width = 0;
 	int max_height = 0;
 	for (std::size_t i = 0; i < def.graphics.size(); ++i) {
@@ -256,10 +258,11 @@ AtlasLayout bake_atlas_layout(ParticleDef &def,
 		if (!present_for_atlas) {
 			continue;
 		}
-		layout.layer_x_offset[i] = total_width;
-		total_width += sizes[i].width;
-		if (sizes[i].height > max_height) {
-			max_height = sizes[i].height;
+		layout.layer_x_offset[i] = total_width + gutter;
+		total_width += sizes[i].width + gutter * 2;
+		const int packed_height = sizes[i].height + gutter * 2;
+		if (packed_height > max_height) {
+			max_height = packed_height;
 		}
 	}
 	layout.atlas_width = total_width;
@@ -284,7 +287,9 @@ AtlasLayout bake_atlas_layout(ParticleDef &def,
 				/ static_cast<float>(total_width);
 		const float u_max_layer = static_cast<float>(layout.layer_x_offset[i] + sizes[i].width)
 				/ static_cast<float>(total_width);
-		const float v_max_layer = static_cast<float>(sizes[i].height)
+		const float v_min_layer = static_cast<float>(gutter)
+				/ static_cast<float>(max_height);
+		const float v_max_layer = static_cast<float>(gutter + sizes[i].height)
 				/ static_cast<float>(max_height);
 		const float frame_width = (u_max_layer - u_min_layer)
 				/ static_cast<float>(frames);
@@ -293,7 +298,7 @@ AtlasLayout bake_atlas_layout(ParticleDef &def,
 			UvRect &rect = layer.baked_uv_rects[static_cast<std::size_t>(j)];
 			rect.u_min = u_min_layer + static_cast<float>(j) * frame_width;
 			rect.u_max = u_min_layer + static_cast<float>(j + 1) * frame_width;
-			rect.v_min = 0.0f;
+			rect.v_min = v_min_layer;
 			rect.v_max = v_max_layer;
 			rect.inset = 0.0f;
 		}

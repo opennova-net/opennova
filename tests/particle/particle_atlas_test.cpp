@@ -184,6 +184,44 @@ bool test_absent_layer_keeps_horizontal_strip_default() {
 	return true;
 }
 
+bool test_gutter_layout_offsets_content_uvs() {
+	// A 1-pixel gutter surrounds each packed layer. The content x offset skips
+	// the leading gutter, and UVs point at the content region, not the padded
+	// duplicate pixels.
+	using namespace opennova::particle;
+	ParticleDef def;
+	def.graphics[0].present = true;
+	def.graphics[0].flip_frames = 1;
+	def.graphics[1].present = true;
+	def.graphics[1].flip_frames = 1;
+
+	std::array<AtlasInputSize, 4> sizes{};
+	sizes[0] = {64, 64};
+	sizes[1] = {64, 64};
+
+	const AtlasLayout layout = bake_atlas_layout(def, sizes, AtlasBakeOptions{1});
+
+	if (!expect(layout.atlas_width == 132, "2 layers with 1px gutters -> 132w atlas")) return false;
+	if (!expect(layout.atlas_height == 66, "64h layer with 1px gutters -> 66h atlas")) return false;
+	if (!expect(layout.layer_x_offset[0] == 1, "layer 0 content starts after left gutter")) return false;
+	if (!expect(layout.layer_x_offset[1] == 67, "layer 1 content starts after its left gutter")) return false;
+
+	const UvRect &r0 = def.graphics[0].baked_uv_rects[0];
+	if (!expect(nearly_equal(r0.u_min, 1.0f / 132.0f) &&
+			nearly_equal(r0.u_max, 65.0f / 132.0f),
+			"layer 0 UVs address content inside gutter")) {
+		std::fprintf(stderr, "  got u=(%f, %f)\n", r0.u_min, r0.u_max);
+		return false;
+	}
+	if (!expect(nearly_equal(r0.v_min, 1.0f / 66.0f) &&
+			nearly_equal(r0.v_max, 65.0f / 66.0f),
+			"layer 0 V UVs address content inside gutter")) {
+		std::fprintf(stderr, "  got v=(%f, %f)\n", r0.v_min, r0.v_max);
+		return false;
+	}
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -193,6 +231,7 @@ int main() {
 	if (!test_atlas_uv_split_by_frames())               ++failures;
 	if (!test_atlas_layout_handles_different_heights()) ++failures;
 	if (!test_absent_layer_keeps_horizontal_strip_default()) ++failures;
+	if (!test_gutter_layout_offsets_content_uvs())      ++failures;
 	if (failures != 0) {
 		std::fprintf(stderr, "%d test(s) failed\n", failures);
 		return 1;
