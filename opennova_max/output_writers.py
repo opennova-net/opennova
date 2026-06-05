@@ -15,13 +15,16 @@ def write_outputs(
     write_max: bool = True,
     write_ase: bool = True,
     write_3dp: bool = True,
+    write_anims: bool = False,
     copy_textures: bool = True,
 ) -> list[str]:
     """Write selected outputs for the current Max scene.
 
     ``.ase`` is intentionally written through the Max current-scene exporter,
     not through the host-neutral IR ASE writer. That keeps Max/Blender parity
-    tied to what each DCC plugin actually exports.
+    tied to what each DCC plugin actually exports. ``.bad``/``.adm`` animations
+    are likewise sourced from the live skeleton (off by default; enable for
+    batch/headless parity with the interactive Anims export).
     """
     del builder
     os.makedirs(output_dir, exist_ok=True)
@@ -32,9 +35,20 @@ def write_outputs(
         written.append(export_ase_scene(output_dir, output_name))
     if write_max:
         written.append(save_max_scene(output_dir, output_name))
+    if write_anims:
+        written.extend(_write_anim_outputs(output_dir, output_name))
     if copy_textures and resolver is not None:
         written.extend(_copy_texture_outputs(model, output_dir, resolver))
     return written
+
+
+def _write_anim_outputs(output_dir: str, output_name: str) -> list[str]:
+    from .anim_scene_exporter import AnimSceneExporter
+
+    adm_path = os.path.join(output_dir, output_name + ".adm")
+    if AnimSceneExporter(_rt()).export(adm_path):
+        return [adm_path]
+    return []
 
 
 def _write_project_outputs(model, output_dir: str, output_name: str) -> list[str]:

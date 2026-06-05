@@ -50,7 +50,20 @@ def key_animation_context(
 
     sampled_set = sample_animation_context(anim_context, bone_infos)
     timeline_clips = rebase_timeline_clips(sampled_set.clips)
-    timeline_set = replace(sampled_set, clips=timeline_clips)
+    # Persist the full clip set (reset pinned to frame 0) so the .bad exporter can
+    # round-trip clip names/flags/ranges, not just the on-timeline animations.
+    reset_clips = tuple(
+        replace(
+            clip,
+            start_frame=0,
+            end_frame=0,
+            frame_count=1,
+            frames=(clip.frames[0],) if clip.frames else (),
+        )
+        for clip in sampled_set.clips
+        if clip.is_reset
+    )
+    timeline_set = replace(sampled_set, clips=reset_clips + timeline_clips)
     store_animation_metadata(rt, skeleton_node, timeline_set)
     apply_sampled_clips(rt, sampled_set.clips, bone_nodes, root_motion_node)
     return sampled_set
