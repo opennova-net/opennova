@@ -11,6 +11,7 @@ extends GutTest
 const MissionController := preload("res://modtools/mission/mission_controller.gd")
 const Placer := preload("res://engine/mission/mission_object_placer.gd")
 const WaypointOverlay := preload("res://engine/mission/mission_waypoint_overlay.gd")
+const OverlayUtil := preload("res://engine/mission/mission_overlay_util.gd")
 
 const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
 
@@ -803,6 +804,58 @@ func test_delete_key_is_suppressed_while_a_text_field_has_focus() -> void:
 	assert_false(controller.get_selection_summary().is_empty(), "and the selection survives")
 
 
+func test_non_object_undo_skips_object_replace() -> void:
+	# An undo that touches only non-object data (here a mission-header string) must NOT re-place every
+	# object. The lightweight path keeps the existing placed nodes intact and only refreshes the
+	# active overlay; re-baking ~all MultiMesh instances on every header / event / zone undo was waste.
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(2, 2, 2)
+	controller._placer._static_batch_cache["StaticCrate1"] = [{
+		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
+	}]
+	assert_true(controller.place_entity_at_world(105004, Vector3(10, 0, -10)))
+	var container := controller._objects_container()
+	assert_true(is_instance_valid(container), "objects are placed into a container")
+	assert_gt(container.get_child_count(), 0, "the placement produced a container child")
+	var child_before = container.get_child(0)
+
+	# A header rename is its own undo step and changes no object record.
+	controller.set_header_string("mission_name", "Renamed")
+	assert_true(controller.can_undo(), "the header edit pushed an undo step")
+	controller.undo()
+
+	# The placed node survived as the same instance: the object world was not re-baked.
+	assert_true(is_instance_valid(child_before), "a non-object undo does not free the placed objects")
+	assert_eq(container.get_child(0), child_before, "the placed node instance is reused, not re-placed")
+
+
+func test_object_transform_undo_rebakes_the_world() -> void:
+	# The complement: an undo that DOES change an object record (a position nudge) takes the full
+	# re-bake path, so the object signature must detect the transform change and replace the nodes.
+	var controller := _loaded_with_item_db()
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(2, 2, 2)
+	controller._placer._static_batch_cache["StaticCrate1"] = [{
+		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
+	}]
+	assert_true(controller.place_entity_at_world(105004, Vector3(10, 0, -10)))
+	var container := controller._objects_container()
+	var child_before = container.get_child(0)
+
+	# Nudge the selected object's position, then flush the coalescing edit session into one undo
+	# step (position edits stay open to merge a run of axis edits) and undo it.
+	controller.set_selected_position(Vector3(25, 0, -25))
+	controller.commit_edit()
+	assert_true(controller.can_undo(), "the position edit pushed an undo step")
+	controller.undo()
+
+	# The transform change moved the object signature, so the world was re-placed (old node freed).
+	assert_false(is_instance_valid(child_before) and container.get_child(0) == child_before,
+		"an object-transform undo re-bakes the world rather than reusing the stale node")
+
+
 func test_delete_rebakes_pickable_index_and_frees_the_selection_box() -> void:
 	# The render-side contract of the structural re-bake: deleting an entity rebuilds the
 	# whole container, so the pickable index is re-derived against the post-delete (shifted)
@@ -1546,7 +1599,9 @@ func test_marker_gizmo_carries_a_route_order_label() -> void:
 	var overlay = WaypointOverlay.new()
 	add_child_autofree(overlay)
 	overlay._ensure_built()
-	var giz = overlay._make_gizmo(Vector3.ZERO, Color.WHITE, 3)
+	# The overlay builds its gizmos through the shared overlay util, passing the 1-based order as
+	# the label text (str(order + 1)); a route order of 2 (0-based) renders "3".
+	var giz = OverlayUtil.make_gizmo(overlay._gizmo_mesh, Vector3.ZERO, Color.WHITE, "3")
 	add_child_autofree(giz)
 	var label: Label3D = null
 	for child in giz.get_children():

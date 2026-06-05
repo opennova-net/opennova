@@ -999,7 +999,9 @@ std::string File::get_designer() const {
 }
 
 std::string File::get_terrain() const {
-    return fixed_string(header.terrain, sizeof(header.terrain));
+    // terrain[48] is three 16-byte slots (terrain / cnv_file / tt_file); the terrain name is the
+    // first slot. Bound to 16 so a full 16-char name does not run on into cnv_file.
+    return fixed_string(header.terrain, 16);
 }
 
 } // namespace opennova::bms

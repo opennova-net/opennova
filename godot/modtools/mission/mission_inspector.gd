@@ -178,6 +178,12 @@ var _groups_syncing: bool = false
 # undo/redo reuse the same object, so this only flips on an actual document swap.
 var _last_mission: NovaMissionData = null
 
+# Signature of the values the read-only summary last rendered. _refresh (and thus _rebuild_summary)
+# fires on every model `changed` -- each spin nudge, drag-commit, and placement -- but the summary
+# only moves on a handful of aggregate values, so it skips the (node-churning) rebuild when this is
+# unchanged. Empty until the first build.
+var _summary_sig: Array = []
+
 # --- Scripting (events / triggers / actions) panel (Phase 4) ------------------
 # Shown in Scripting mode (4th tab). Top: the event list + Add / Delete event. Middle: the selected
 # event's flag checkboxes + reset / delay spins. Then a Triggers sub-list with a type / sub-type /
@@ -520,25 +526,17 @@ func _build_behavior_section() -> void:
 	# dropdown of the mission's real paths (None / each populated path), not a blind 0-127 number.
 	_waypoint_option = _add_entity_option_row(_behavior_box, "waypoint_id", "Waypoint path",
 		"Which waypoint path this unit follows. Author paths in the Waypoints tab.")
-	_add_behavior_spin("wp_number", "WP number", 0.0, 255.0)
-	ObjectUiHelpers.add_section_heading(_behavior_box, "Combat")
-	_add_behavior_spin("perception", "Perception", -1000000.0, 1000000.0)
-	_add_behavior_spin("accuracy", "Accuracy", -32768.0, 32767.0)
-	_add_behavior_spin("alert_state", "Alert state", 0.0, 255.0)
-	_add_behavior_spin("min_engagement_distance", "Min combat range", -1000000.0, 1000000.0)
-	_add_behavior_spin("max_engagement_distance", "Max combat range", -1000000.0, 1000000.0)
-	_add_behavior_spin("max_attack_distance", "Max attack range", -1000000.0, 1000000.0)
-	ObjectUiHelpers.add_section_heading(_behavior_box, "Spawning")
-	_add_behavior_spin("spawn_count", "Spawn count", -32768.0, 32767.0)
-	# no_more_than (byte 74) / no_less_than (byte 75) pair with the RemoveIfMoreThan /
-	# RemoveIfLessThan AI flags to gate spawning by player count.
-	var nmt := _add_behavior_spin("max_simultaneous", "No more than", 0.0, 255.0)
-	nmt.tooltip_text = "Max copies kept (no_more_than, byte 74). Pairs with the RemoveIfMoreThan AI flag."
-	var nlt := _add_behavior_spin("no_less_than", "No less than", 0.0, 255.0)
-	nlt.tooltip_text = "Min copies kept (no_less_than, byte 75). Pairs with the RemoveIfLessThan AI flag."
-	ObjectUiHelpers.add_section_heading(_behavior_box, "Identity")
-	var sym := _add_behavior_spin("map_symbol", "Map symbol", 0.0, 255.0)
-	sym.tooltip_text = "Tactical-map icon index (byte 81)."
+	# The plain numeric rows + their section headings come from one ordered table (the field set +
+	# ranges live in MissionEntityFields, matching the libs/mission name->member map). The picker /
+	# text / flag rows below are not plain spins, so they stay explicit.
+	for entry in MissionEntityFields.SPIN_FIELDS:
+		if entry.has("section"):
+			ObjectUiHelpers.add_section_heading(_behavior_box, String(entry["section"]))
+			continue
+		var spin := _add_behavior_spin(String(entry["property"]), String(entry["label"]),
+			float(entry["min"]), float(entry["max"]))
+		if entry.has("tip"):
+			spin.tooltip_text = String(entry["tip"])
 	_add_behavior_line("name1", "AI class",
 		func(info) -> String: return String(info.get("name1", "")),
 		func(text: String) -> void: _behavior_set_string("name1", text),
@@ -2441,16 +2439,43 @@ func _refresh_groups_panel() -> void:
 func _rebuild_summary() -> void:
 	if _box == null:
 		return
+
+	var mission: NovaMissionData = _controller.get_mission() if _controller != null else null
+	var info := {}
+	var stats := {}
+	var selection := {}
+	# Fingerprint everything the summary renders, then bail before any node churn when it is
+	# unchanged from the last build (the common case: most refreshes touch a per-entity field the
+	# summary does not show).
+	var sig: Array = [null]
+	if mission != null:
+		info = mission.get_info()
+		stats = _controller.get_stats() if _controller != null else {}
+		selection = _controller.get_selection_summary() if _controller != null else {}
+		sig = [
+			mission.get_instance_id(),
+			mission.get_mission_name(), mission.get_designer(),
+			mission.get_terrain_ref(), mission.get_environment_ref(),
+			int(info.get("climate", 0)), int(info.get("weather", 0)),
+			selection.is_empty(),
+			int(stats.get("placed", 0)), int(stats.get("batched", 0)), int(stats.get("batches", 0)),
+			int(stats.get("animated", 0)), int(stats.get("unresolved", 0)), int(stats.get("markers", 0)),
+			mission.get_entity_count(NovaMissionData.KIND_ITEM),
+			mission.get_entity_count(NovaMissionData.KIND_BUILDING),
+			mission.get_entity_count(NovaMissionData.KIND_ORGANIC),
+			mission.get_entity_count(NovaMissionData.KIND_MARKER),
+		]
+	if sig == _summary_sig:
+		return
+	_summary_sig = sig
+
 	for child in _box.get_children():
 		child.queue_free()
 
-	var mission: NovaMissionData = _controller.get_mission() if _controller != null else null
 	if mission == null:
 		_add_heading("Mission")
 		_add_body("Open a .bms mission to load its terrain, environment, and placed objects.")
 		return
-
-	var info := mission.get_info()
 
 	_add_heading(_nonempty(mission.get_mission_name(), "Untitled mission"))
 	var designer := mission.get_designer().strip_edges()
@@ -2459,7 +2484,6 @@ func _rebuild_summary() -> void:
 
 	# The selected entity has its own editable panel above; here, only prompt when
 	# nothing is selected so the viewer always explains how to begin.
-	var selection: Dictionary = _controller.get_selection_summary() if _controller != null else {}
 	if selection.is_empty():
 		_add_separator()
 		_add_heading("Selection")
@@ -2474,7 +2498,6 @@ func _rebuild_summary() -> void:
 
 	_add_separator()
 	_add_heading("Objects")
-	var stats: Dictionary = _controller.get_stats()
 	_add_row("Placed", str(int(stats.get("placed", 0))))
 	_add_row("Batched", "%d in %d draw groups" % [int(stats.get("batched", 0)), int(stats.get("batches", 0))])
 	_add_row("Animated", str(int(stats.get("animated", 0))))

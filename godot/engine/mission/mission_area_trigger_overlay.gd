@@ -14,6 +14,7 @@ extends Node3D
 # waypoint overlay.
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const Overlay := preload("res://engine/mission/mission_overlay_util.gd")
 
 # Half-extent (world units) of the centre grab cube; also its pick-target half-size.
 const HANDLE_HALF := 1.5
@@ -39,7 +40,7 @@ func _ensure_built() -> void:
 		_lines.name = "AreaTriggerLines"
 		_lines.mesh = _line_mesh
 		_lines.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		_lines.material_override = _line_material()
+		_lines.material_override = Overlay.line_material()
 		add_child(_lines)
 	if _handle_mesh == null:
 		_handle_mesh = BoxMesh.new()
@@ -99,14 +100,7 @@ func rebuild(mission, selected_index: int, preview: Dictionary = {}) -> void:
 			_handle.position = (lo + hi) * 0.5
 			_handle.visible = true
 
-	if not segments.is_empty():
-		_line_mesh.surface_begin(Mesh.PRIMITIVE_LINES)
-		for seg in segments:
-			_line_mesh.surface_set_color(seg["color"])
-			_line_mesh.surface_add_vertex(seg["a"])
-			_line_mesh.surface_set_color(seg["color"])
-			_line_mesh.surface_add_vertex(seg["b"])
-		_line_mesh.surface_end()
+	Overlay.emit_line_segments(_line_mesh, segments)
 
 
 func zone_pickables() -> Array:
@@ -128,11 +122,3 @@ func _collect_box_segments(out: Array, mn: Vector3, mx: Vector3, color: Color) -
 	]
 	for e in edges:
 		out.append({ "a": c[e[0]], "b": c[e[1]], "color": color })
-
-
-func _line_material() -> StandardMaterial3D:
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.vertex_color_use_as_albedo = true
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	return mat

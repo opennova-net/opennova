@@ -1076,6 +1076,56 @@ void apply_properties(bms::Entity &entity, const EntityProperties &properties) {
 	copy_fixed_field(entity.name2, sizeof(entity.name2), properties.name2);
 }
 
+// Build the editable property set from a record. set_entity_properties overwrites every field, so a
+// single-property edit must seed the full set from the current record first. One copy helper shared
+// by set_entity_property_int / _string keeps the field list in one place.
+EntityProperties properties_from_record(const EntityRecord &record) {
+	EntityProperties properties;
+	properties.group_id = record.group_id;
+	properties.waypoint_id = record.waypoint_id;
+	properties.wp_number = record.wp_number;
+	properties.team = record.team;
+	properties.ai_flags = record.ai_flags;
+	properties.perception = record.perception;
+	properties.accuracy = record.accuracy;
+	properties.alert_state = record.alert_state;
+	properties.min_engagement_distance = record.min_engagement_distance;
+	properties.max_engagement_distance = record.max_engagement_distance;
+	properties.max_attack_distance = record.max_attack_distance;
+	properties.spawn_count = record.spawn_count;
+	properties.max_simultaneous = record.max_simultaneous;
+	properties.no_less_than = record.no_less_than;
+	properties.map_symbol = record.map_symbol;
+	properties.name1 = record.name1;
+	properties.name2 = record.name2;
+	return properties;
+}
+
+// The editable int properties, mapping each editor/dictionary key to its EntityProperties member.
+// Single source of truth for set_entity_property_int: adding an int field is one row here. Only
+// `group` differs from its member name (group_id); every other key equals its member.
+struct EntityIntField {
+	const char *name;
+	int EntityProperties::*member;
+};
+constexpr EntityIntField kEntityIntFields[] = {
+	{"group", &EntityProperties::group_id},
+	{"waypoint_id", &EntityProperties::waypoint_id},
+	{"wp_number", &EntityProperties::wp_number},
+	{"team", &EntityProperties::team},
+	{"ai_flags", &EntityProperties::ai_flags},
+	{"perception", &EntityProperties::perception},
+	{"accuracy", &EntityProperties::accuracy},
+	{"alert_state", &EntityProperties::alert_state},
+	{"min_engagement_distance", &EntityProperties::min_engagement_distance},
+	{"max_engagement_distance", &EntityProperties::max_engagement_distance},
+	{"max_attack_distance", &EntityProperties::max_attack_distance},
+	{"spawn_count", &EntityProperties::spawn_count},
+	{"max_simultaneous", &EntityProperties::max_simultaneous},
+	{"no_less_than", &EntityProperties::no_less_than},
+	{"map_symbol", &EntityProperties::map_symbol},
+};
+
 bms::Entity make_default_entity(const bms::File &file,
                                 EntityKind kind,
                                 int item_id,
@@ -1435,7 +1485,9 @@ MissionInfo MissionDocument::info() const {
 	out.mission_name = fixed_string(header.mission_name, sizeof(header.mission_name));
 	out.designer = fixed_string(header.designer, sizeof(header.designer));
 	out.briefing = fixed_string(header.mission_briefing, sizeof(header.mission_briefing));
-	out.terrain = fixed_string(header.terrain, sizeof(header.terrain));
+	// terrain[48] packs three 16-byte slots (terrain / cnv_file / tt_file); bound the read to the
+	// first slot so a full 16-char terrain name does not bleed into cnv_file.
+	out.terrain = fixed_string(header.terrain, 16);
 	out.environment = fixed_string(header.environment, sizeof(header.environment));
 	out.climate = static_cast<int>(header.climate);
 	out.weather = static_cast<int>(header.weather_type);
@@ -1466,12 +1518,17 @@ bool MissionDocument::set_header_string(const std::string &field, const std::str
 	} else if (field == "briefing") {
 		copy_cstr(header.mission_briefing, sizeof(header.mission_briefing), value);
 	} else if (field == "terrain") {
-		// header.terrain[48] is three 16-byte NUL-terminated slots: terrain@+0, cnv_file@+16,
-		// tt_file@+32 (see write_mis_general_information). Write only the first slot so a terrain
-		// edit does not zero-fill (and lose) the cnv_file / tt_file references.
-		copy_cstr(header.terrain, 16, value);
+		// header.terrain[48] is three 16-byte fixed slots: terrain@+0, cnv_file@+16, tt_file@+32
+		// (see write_mis_general_information). Write only the first slot so a terrain edit does not
+		// zero-fill (and lose) the cnv_file / tt_file references. copy_fixed_field (not copy_cstr)
+		// keeps all 16 bytes: a slot a shipped mission fills completely would otherwise lose its
+		// 16th byte to a forced NUL, mirroring the name1/name2 fix in apply_properties. The
+		// inspector / get_terrain reads are bounded to 16 so a full slot never bleeds into cnv_file.
+		copy_fixed_field(header.terrain, 16, value);
 	} else if (field == "environment") {
-		copy_cstr(header.environment, sizeof(header.environment), value);
+		// environment[16] is a standalone fixed slot read back with fixed_string(.,16); copy_fixed_field
+		// preserves a full 16-char name (copy_cstr would force a NUL into byte 15 and truncate it).
+		copy_fixed_field(header.environment, sizeof(header.environment), value);
 	} else {
 		impl_->last_error = "Unknown header string field: " + field;
 		return false;
@@ -1594,6 +1651,45 @@ bool MissionDocument::set_entity_properties(EntityKind kind, size_t index, const
 		*out = to_record((*entities)[index], kind, index);
 	}
 	return true;
+}
+
+// Edit one named int property of an entity, mirroring set_header_int: the name->member mapping lives
+// here (kEntityIntFields) instead of in each caller. Seeds the full property set from the record,
+// changes only the requested member, and reuses set_entity_properties (which owns the clamp rules).
+bool MissionDocument::set_entity_property_int(EntityKind kind, size_t index, const std::string &name, int value) {
+	EntityRecord record;
+	if (!get_entity(kind, index, record)) {
+		impl_->last_error = "Mission entity index out of range";
+		return false;
+	}
+	EntityProperties properties = properties_from_record(record);
+	for (const EntityIntField &field : kEntityIntFields) {
+		if (name == field.name) {
+			properties.*(field.member) = value;
+			return set_entity_properties(kind, index, properties, nullptr);
+		}
+	}
+	impl_->last_error = "Unknown entity int property: " + name;
+	return false;
+}
+
+// Edit one named string property (name1 / name2) of an entity. Same shape as set_entity_property_int.
+bool MissionDocument::set_entity_property_string(EntityKind kind, size_t index, const std::string &name, const std::string &value) {
+	EntityRecord record;
+	if (!get_entity(kind, index, record)) {
+		impl_->last_error = "Mission entity index out of range";
+		return false;
+	}
+	EntityProperties properties = properties_from_record(record);
+	if (name == "name1") {
+		properties.name1 = value;
+	} else if (name == "name2") {
+		properties.name2 = value;
+	} else {
+		impl_->last_error = "Unknown entity string property: " + name;
+		return false;
+	}
+	return set_entity_properties(kind, index, properties, nullptr);
 }
 
 bool MissionDocument::add_entity(EntityKind kind, int item_id, const EntityTransform &transform, EntityRecord *out) {

@@ -10,6 +10,11 @@ extends RefCounted
 ## sync read-back" boilerplate. Setters route through the model (e.g.
 ## NovaObjectData.set_light_field) unchanged.
 
+# Marks an OptionButton row bind_option appended itself to surface a model value that is absent
+# from the caller's curated choices. Tagged so each sync can drop its own prior fallback before
+# re-evaluating, without disturbing caller-populated rows.
+const _OPTION_FALLBACK_META := "__field_binder_fallback__"
+
 var _guard := SyncGuard.new()
 var _bindings: Array = []
 
@@ -72,11 +77,25 @@ func bind_option(option: OptionButton, getter: Callable, setter: Callable) -> Op
 	# programmatically does not emit item_selected, and the guard suppresses any echo regardless.
 	_bindings.append(func(info):
 		var want := int(getter.call(info))
+		# Drop any fallback row a previous sync appended: the model value may now be in range, or
+		# may have moved to a different out-of-range value. Walk back-to-front so removals are stable.
+		for i in range(option.item_count - 1, -1, -1):
+			if option.get_item_metadata(i) == _OPTION_FALLBACK_META:
+				option.remove_item(i)
 		option.selected = -1
 		for i in option.item_count:
 			if option.get_item_id(i) == want:
 				option.selected = i
-				break)
+				break
+		if option.selected == -1:
+			# The model holds a value outside the caller's curated choices (e.g. a shipped enum the
+			# editor does not enumerate). Surface it as a raw row so the control shows the real value
+			# instead of rendering blank. Mirrors ObjectUiHelpers.populate_id_option's fallback.
+			var idx := option.item_count
+			option.add_item("Value %d" % want)
+			option.set_item_id(idx, want)
+			option.set_item_metadata(idx, _OPTION_FALLBACK_META)
+			option.selected = idx)
 	option.item_selected.connect(func(idx: int):
 		if not _guard.active:
 			setter.call(option.get_item_id(idx)))

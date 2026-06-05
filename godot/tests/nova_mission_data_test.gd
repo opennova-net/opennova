@@ -285,6 +285,24 @@ func test_set_entity_property_int_supports_behavior_fields() -> void:
 				assert_eq(int(after[other]), int(before[other]), "%s preserved through a %s edit" % [other, prop])
 
 
+func test_behavior_spin_table_matches_engine_setter() -> void:
+	# Drift guard: every numeric field the inspector's Behavior panel renders (MissionEntityFields,
+	# the single UI table) must be accepted by the engine's set_entity_property_int (whose name->member
+	# map lives in libs/mission). A typo'd or stale property in the table would otherwise bind a row
+	# whose edits are silently rejected. Section markers carry no property and are skipped.
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var kind := _kind_with_entities(m)
+	var index := int(m.get_entities(kind)[0]["index"])
+	for entry in MissionEntityFields.SPIN_FIELDS:
+		if not entry.has("property"):
+			continue
+		var prop := String(entry["property"])
+		var current := int(_entity(m, kind, index).get(prop, 0))
+		assert_true(m.set_entity_property_int(kind, index, prop, current),
+			"the engine accepts the Behavior-panel field '%s'" % prop)
+
+
 func test_set_entity_property_int_behavior_field_persists_through_save_reload() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)

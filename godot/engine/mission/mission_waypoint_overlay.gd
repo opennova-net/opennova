@@ -11,13 +11,14 @@ extends Node3D
 # Referenced via preload (no class_name), the same convention as the controller / placer.
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const Overlay := preload("res://engine/mission/mission_overlay_util.gd")
 
 # Half-extent (world units) of a marker gizmo cube; also its pick-target half-size.
-const MARKER_HALF := 1.5
-const COLOR_NEUTRAL := Color(0.95, 0.85, 0.2)    # path with no team flag
+const MARKER_HALF := Overlay.MARKER_HALF
+const COLOR_NEUTRAL := Overlay.COLOR_NEUTRAL    # path with no team flag
 const COLOR_BLUE := Color(0.3, 0.6, 1.0)
 const COLOR_RED := Color(1.0, 0.4, 0.35)
-const COLOR_SELECTED := Color(0.2, 1.0, 0.5)
+const COLOR_SELECTED := Overlay.COLOR_SELECTED
 const COLOR_LINE_DIM := Color(0.6, 0.6, 0.6, 0.35)
 
 var _gizmos: Node3D            # parent of the active path's marker MeshInstance3D gizmos
@@ -41,7 +42,7 @@ func _ensure_built() -> void:
 		_lines.name = "WaypointLines"
 		_lines.mesh = _line_mesh
 		_lines.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		_lines.material_override = _line_material()
+		_lines.material_override = Overlay.line_material()
 		add_child(_lines)
 	if _gizmo_mesh == null:
 		_gizmo_mesh = BoxMesh.new()
@@ -78,14 +79,7 @@ func rebuild(mission, active_path_index: int) -> void:
 		var is_active := int(path.get("index", -1)) == active_path_index
 		var color: Color = _path_color(int(path.get("flags", 0))) if is_active else COLOR_LINE_DIM
 		_collect_path_segments(segments, markers, indices, int(path.get("flags", 0)), color)
-	if not segments.is_empty():
-		_line_mesh.surface_begin(Mesh.PRIMITIVE_LINES)
-		for seg in segments:
-			_line_mesh.surface_set_color(seg["color"])
-			_line_mesh.surface_add_vertex(seg["a"])
-			_line_mesh.surface_set_color(seg["color"])
-			_line_mesh.surface_add_vertex(seg["b"])
-		_line_mesh.surface_end()
+	Overlay.emit_line_segments(_line_mesh, segments)
 
 	# Gizmos + pickables for the active path's markers only.
 	if active_path_index >= 0:
@@ -100,7 +94,7 @@ func rebuild(mission, active_path_index: int) -> void:
 				var pos: Vector3 = MissionObjectPlacer.bms_to_godot_position(markers[marker_index]["position"])
 				# Label the gizmo with its 1-based route order so the path reads in the
 				# viewport (matches the inspector's "1. marker #..." list).
-				var giz := _make_gizmo(pos, acolor, order + 1)
+				var giz := Overlay.make_gizmo(_gizmo_mesh, pos, acolor, str(order + 1))
 				_gizmos.add_child(giz)
 				_gizmo_by_marker[marker_index] = giz
 				_marker_pickable.append({
@@ -122,16 +116,7 @@ func marker_pickables() -> Array:
 # not on the active path (no gizmo): it just records the index for the next rebuild.
 func set_selected_marker(marker_index: int) -> void:
 	_selected_marker_index = marker_index
-	for mi in _gizmo_by_marker:
-		var giz: MeshInstance3D = _gizmo_by_marker[mi]
-		var mat := giz.material_override as StandardMaterial3D
-		if mat != null:
-			mat.albedo_color = giz.get_meta("base_color", COLOR_NEUTRAL)
-	if marker_index >= 0 and _gizmo_by_marker.has(marker_index):
-		var sel: MeshInstance3D = _gizmo_by_marker[marker_index]
-		var sel_mat := sel.material_override as StandardMaterial3D
-		if sel_mat != null:
-			sel_mat.albedo_color = COLOR_SELECTED
+	Overlay.apply_selection(_gizmo_by_marker, marker_index)
 
 
 # Move a marker gizmo's world position without a full rebuild (live drag preview). No-op if
@@ -140,41 +125,6 @@ func set_selected_marker(marker_index: int) -> void:
 func preview_marker_position(marker_index: int, world_pos: Vector3) -> void:
 	if _gizmo_by_marker.has(marker_index):
 		(_gizmo_by_marker[marker_index] as MeshInstance3D).position = world_pos
-
-
-func _make_gizmo(pos: Vector3, color: Color, order: int) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	mi.mesh = _gizmo_mesh
-	mi.position = pos
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = color
-	mi.material_override = mat
-	mi.set_meta("base_color", color)
-	# A constant-size, always-on-top route-order number floating above the cube. It is its
-	# own node (not the cube's material), so the selection re-tint never disturbs it.
-	var label := Label3D.new()
-	label.text = str(order)
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.fixed_size = true
-	label.no_depth_test = true
-	label.font_size = 28
-	label.outline_size = 10
-	label.modulate = Color.WHITE
-	label.outline_modulate = Color(0.0, 0.0, 0.0, 0.85)
-	label.position = Vector3(0.0, MARKER_HALF + 0.6, 0.0)
-	mi.add_child(label)
-	return mi
-
-
-func _line_material() -> StandardMaterial3D:
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.vertex_color_use_as_albedo = true
-	# Dim context lines carry alpha < 1, so the material must blend.
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	return mat
 
 
 func _collect_path_segments(out: Array, markers: Array, indices: PackedInt32Array, flags: int, color: Color) -> void:

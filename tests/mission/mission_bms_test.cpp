@@ -432,6 +432,44 @@ int main() {
 		TEST_EXPECT((reread_info.attrib_flags & coop_bit) != 0);
 	}
 
+	// --- Regression (review): the terrain slot is a fixed 16-byte field (first of the three
+	// 16-byte slots in header.terrain[48]: terrain / cnv_file / tt_file). copy_cstr used to force a
+	// NUL into byte 15 and truncate a full 16-char terrain name on every edit; copy_fixed_field
+	// keeps all 16, and the info()/get_terrain reads are bounded to 16 so a full slot does not bleed
+	// into cnv_file. Editing terrain must also leave cnv_file / tt_file untouched. ---
+	{
+		opennova::mission::MissionDocument doc;
+		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+		// Seed cnv_file (@+16) and tt_file (@+32) so we can prove a terrain edit preserves them.
+		char *terrain_region = doc.bms_file().header.terrain;
+		std::memcpy(terrain_region + 16, "convert.cnv", 11);
+		terrain_region[16 + 11] = '\0';
+		std::memcpy(terrain_region + 32, "tiles.tt", 8);
+		terrain_region[32 + 8] = '\0';
+
+		const std::string full16 = "sixteen_char_ter"; // exactly 16 chars, fills the slot
+		TEST_EXPECT(full16.size() == 16);
+		TEST_EXPECT(doc.set_header_string("terrain", full16));
+
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(doc.write_bms_bytes(bytes));
+		opennova::mission::MissionDocument reload;
+		TEST_EXPECT(reload.load_bms_bytes(bytes.data(), bytes.size()));
+		// All 16 chars survive and do not run on into cnv_file.
+		TEST_EXPECT(reload.info().terrain == full16);
+		TEST_EXPECT(reload.bms_file().get_terrain() == full16);
+		// cnv_file / tt_file are untouched by the terrain edit.
+		const char *reload_region = reload.bms_file().header.terrain;
+		TEST_EXPECT(std::string(reload_region + 16) == "convert.cnv");
+		TEST_EXPECT(std::string(reload_region + 32) == "tiles.tt");
+
+		// A name longer than 16 is cut to the slot; a shorter name still round-trips.
+		TEST_EXPECT(doc.set_header_string("terrain", "way_too_long_terrain_name"));
+		TEST_EXPECT(doc.info().terrain == "way_too_long_ter"); // 16 chars
+		TEST_EXPECT(doc.set_header_string("terrain", "short"));
+		TEST_EXPECT(doc.info().terrain == "short");
+	}
+
 	// --- Phase 1: hidden entity fields (name1/name2/no_less_than/map_symbol) round-trip,
 	// and the names use the format's full 8-byte slot (a name longer than 8 is cut to 8). ---
 	{
@@ -482,6 +520,35 @@ int main() {
 		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, rec3));
 		TEST_EXPECT(rec3.name1 == "verylong");
 		TEST_EXPECT(rec3.name1.size() == 8);
+	}
+
+	// --- Regression (review): set_entity_property_int / _string edit one named field and leave the
+	// rest intact, the name->member mapping owning the field list in one place (mirrors set_header_*).
+	{
+		opennova::mission::MissionDocument doc;
+		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+		opennova::mission::EntityRecord before;
+		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, before));
+		// `group` is the one key whose member name differs (group_id).
+		TEST_EXPECT(doc.set_entity_property_int(opennova::mission::EntityKind::Item, 0, "group", 5));
+		TEST_EXPECT(doc.set_entity_property_int(opennova::mission::EntityKind::Item, 0, "map_symbol", 22));
+		TEST_EXPECT(doc.set_entity_property_string(opennova::mission::EntityKind::Item, 0, "name1", "scout"));
+		opennova::mission::EntityRecord after;
+		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, after));
+		TEST_EXPECT(after.group_id == 5);
+		TEST_EXPECT(after.map_symbol == 22);
+		TEST_EXPECT(after.name1 == "scout");
+		// Untouched fields are preserved (only the requested members changed).
+		TEST_EXPECT(after.team == before.team);
+		TEST_EXPECT(after.accuracy == before.accuracy);
+		TEST_EXPECT(after.name2 == before.name2);
+		TEST_EXPECT(after.max_engagement_distance == before.max_engagement_distance);
+		// Unknown names are rejected (not silently ignored), with last_error set.
+		TEST_EXPECT(!doc.set_entity_property_int(opennova::mission::EntityKind::Item, 0, "bogus_field", 1));
+		TEST_EXPECT(!doc.last_error().empty());
+		TEST_EXPECT(!doc.set_entity_property_string(opennova::mission::EntityKind::Item, 0, "name3", "x"));
+		// Out-of-range index is rejected.
+		TEST_EXPECT(!doc.set_entity_property_int(opennova::mission::EntityKind::Item, 99999, "team", 1));
 	}
 
 	// --- Regression (review): event reset_after/delay round-trip across the full 0..1023 range.

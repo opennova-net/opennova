@@ -290,6 +290,11 @@ public:
 	bool get_entity(EntityKind kind, size_t index, EntityRecord &out) const;
 	bool set_entity_transform(EntityKind kind, size_t index, const EntityTransform &transform);
 	bool set_entity_properties(EntityKind kind, size_t index, const EntityProperties &properties, EntityRecord *out = nullptr);
+	// Edit a single named property of an entity (mirrors set_header_int/set_header_string). The
+	// name->member mapping lives in mission.cpp, so callers do not re-derive it. Unknown name -> false
+	// with last_error set; out-of-range index -> false.
+	bool set_entity_property_int(EntityKind kind, size_t index, const std::string &name, int value);
+	bool set_entity_property_string(EntityKind kind, size_t index, const std::string &name, const std::string &value);
 	bool add_entity(EntityKind kind, int item_id, const EntityTransform &transform, EntityRecord *out = nullptr);
 	bool remove_entity(EntityKind kind, size_t index);
 	std::vector<WaypointSummary> waypoint_summaries() const;

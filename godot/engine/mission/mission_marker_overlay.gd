@@ -15,12 +15,13 @@ extends Node3D
 # Referenced via preload (no class_name), the same convention as the controller / placer.
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const Overlay := preload("res://engine/mission/mission_overlay_util.gd")
 
-# Half-extent (world units) of a marker gizmo cube; also its pick-target half-size. Matches the
-# waypoint overlay so gizmos read at a consistent size across modes.
-const MARKER_HALF := 1.5
-const COLOR_NEUTRAL := Color(0.95, 0.85, 0.2)
-const COLOR_SELECTED := Color(0.2, 1.0, 0.5)
+# Half-extent (world units) of a marker gizmo cube; also its pick-target half-size. Sourced from the
+# shared overlay util so gizmos read at a consistent size across modes.
+const MARKER_HALF := Overlay.MARKER_HALF
+const COLOR_NEUTRAL := Overlay.COLOR_NEUTRAL
+const COLOR_SELECTED := Overlay.COLOR_SELECTED
 
 var _gizmos: Node3D
 var _gizmo_mesh: BoxMesh
@@ -57,7 +58,7 @@ func rebuild(mission, labels: Array = []) -> void:
 	for marker_index in markers.size():
 		var pos: Vector3 = MissionObjectPlacer.bms_to_godot_position(markers[marker_index]["position"])
 		var label: String = String(labels[marker_index]) if marker_index < labels.size() else ""
-		var giz := _make_gizmo(pos, COLOR_NEUTRAL, label)
+		var giz := Overlay.make_gizmo(_gizmo_mesh, pos, COLOR_NEUTRAL, label)
 		_gizmos.add_child(giz)
 		_gizmo_by_marker[marker_index] = giz
 		_marker_pickable.append({
@@ -74,16 +75,7 @@ func marker_pickables() -> Array:
 # (e.g. just after a structural change): it only records the index for the next rebuild.
 func set_selected_marker(marker_index: int) -> void:
 	_selected_marker_index = marker_index
-	for mi in _gizmo_by_marker:
-		var giz: MeshInstance3D = _gizmo_by_marker[mi]
-		var mat := giz.material_override as StandardMaterial3D
-		if mat != null:
-			mat.albedo_color = giz.get_meta("base_color", COLOR_NEUTRAL)
-	if marker_index >= 0 and _gizmo_by_marker.has(marker_index):
-		var sel: MeshInstance3D = _gizmo_by_marker[marker_index]
-		var sel_mat := sel.material_override as StandardMaterial3D
-		if sel_mat != null:
-			sel_mat.albedo_color = COLOR_SELECTED
+	Overlay.apply_selection(_gizmo_by_marker, marker_index)
 
 
 # Move a marker gizmo's world position without a full rebuild (live drag preview). No-op if the
@@ -92,31 +84,3 @@ func set_selected_marker(marker_index: int) -> void:
 func preview_marker_position(marker_index: int, world_pos: Vector3) -> void:
 	if _gizmo_by_marker.has(marker_index):
 		(_gizmo_by_marker[marker_index] as MeshInstance3D).position = world_pos
-
-
-func _make_gizmo(pos: Vector3, color: Color, label_text: String) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	mi.mesh = _gizmo_mesh
-	mi.position = pos
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = color
-	mi.material_override = mat
-	mi.set_meta("base_color", color)
-	if not label_text.is_empty():
-		# A constant-size, always-on-top name floating above the cube, so the user can tell marker
-		# types apart. Its own node (not the cube's material), so the selection re-tint never
-		# disturbs it.
-		var label := Label3D.new()
-		label.text = label_text
-		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		label.fixed_size = true
-		label.no_depth_test = true
-		label.font_size = 22
-		label.outline_size = 8
-		label.modulate = Color.WHITE
-		label.outline_modulate = Color(0.0, 0.0, 0.0, 0.85)
-		label.position = Vector3(0.0, MARKER_HALF + 0.6, 0.0)
-		mi.add_child(label)
-	return mi

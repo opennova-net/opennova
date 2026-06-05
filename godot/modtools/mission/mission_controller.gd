@@ -524,6 +524,36 @@ func _flush_edit() -> void:
 	commit_edit()
 
 
+# One-shot mutation recipe shared by the simple setters. Flush any open edit session as its own step,
+# open a fresh edit, run `do` (which performs exactly one NovaMissionData mutation and returns its
+# result), and on success commit a single undo step, run `on_success` (e.g. an overlay refresh), and
+# mark the document dirty. A bool result commits when true; a Dictionary / Array result (the chain
+# mutators return the edited record / chain) commits when non-empty. On a rejected edit, surface
+# `err` when it is non-empty. Returns whether the edit applied. Callers keep their own pre-guards (a
+# valid selection, a fetched record) before calling -- this owns only the begin/commit/dirty bracket.
+func _edit_step(do: Callable, err := "", on_success := Callable()) -> bool:
+	if _mission == null:
+		return false
+	_flush_edit()
+	_mission.begin_edit()
+	var result: Variant = do.call()
+	var ok := false
+	if result is Dictionary:
+		ok = not (result as Dictionary).is_empty()
+	elif result is Array:
+		ok = not (result as Array).is_empty()
+	else:
+		ok = bool(result)
+	if ok:
+		_mission.commit_edit()
+		if on_success.is_valid():
+			on_success.call()
+		mark_dirty()
+	elif not err.is_empty():
+		_report(err, true)
+	return ok
+
+
 func _clear_history() -> void:
 	if _mission != null:
 		_mission.clear_history()
@@ -543,8 +573,9 @@ func undo() -> void:
 		return
 	_restoring = true
 	var prev_event_count := _mission.get_event_count()
+	var prev_object_sig := _object_signature()
 	_mission.undo()
-	_after_restore(prev_event_count)
+	_after_restore(prev_event_count, prev_object_sig)
 	_restoring = false
 	_report("Undid the last change.")
 
@@ -560,8 +591,9 @@ func redo() -> void:
 		return
 	_restoring = true
 	var prev_event_count := _mission.get_event_count()
+	var prev_object_sig := _object_signature()
 	_mission.redo()
-	_after_restore(prev_event_count)
+	_after_restore(prev_event_count, prev_object_sig)
 	_restoring = false
 	_report("Redid the last change.")
 
@@ -573,11 +605,33 @@ func redo() -> void:
 # set actually changed (event add/delete are the only ops that change the count -- there is no
 # event-reorder op -- so a count change is exactly the structural case). An attribute / trigger /
 # action undo leaves the list intact and keeps the user on their event.
-func _after_restore(prev_event_count: int) -> void:
+func _after_restore(prev_event_count: int, prev_object_sig: Array) -> void:
 	if _mission.get_event_count() != prev_event_count:
 		_selected_event_index = -1
-	_rebake_objects()
+	# Skip the full object re-place when the undo/redo changed only non-object data (events /
+	# triggers / actions / zones / header / loadout / groups): every placed object is byte-identical,
+	# so re-baking ~all MultiMesh instances is pure waste. The placed nodes + pickable index + stats
+	# + object selection all stay valid; only the active mode's overlay (which reads events / zones /
+	# paths from the document) needs a refresh. Any object change moves the signature -> full re-bake.
+	if _object_signature() == prev_object_sig:
+		_refresh_active_overlay()
+	else:
+		_rebake_objects()
 	mark_dirty()
+
+
+# A content fingerprint of every placed-object record (items / buildings / organics / markers), used
+# by undo/redo to decide whether the world needs a full re-place. Array.hash() walks each kind's
+# entity dictionaries, so any change to a position / rotation / type (or a count) moves the hash.
+func _object_signature() -> Array:
+	if _mission == null:
+		return []
+	return [
+		_mission.get_entities(NovaMissionData.KIND_ITEM).hash(),
+		_mission.get_entities(NovaMissionData.KIND_BUILDING).hash(),
+		_mission.get_entities(NovaMissionData.KIND_ORGANIC).hash(),
+		_mission.get_entities(NovaMissionData.KIND_MARKER).hash(),
+	]
 
 
 # Mark the current input event handled so a consumed Ctrl+Z / Ctrl+Y does not propagate
@@ -965,71 +1019,41 @@ func set_selected_group(value: int) -> void:
 # (a same-value write is a no-op). The value range is governed by the inspector's SpinBoxes and the format's field
 # widths, so this does not clamp; team / group clamp through their wrappers above.
 func set_selected_property(property: String, value: int) -> void:
-	if _selected_ref.is_empty() or _mission == null:
+	if _selected_ref.is_empty():
 		return
-	_flush_edit()
-	_mission.begin_edit()
-	# set_entity_property_int returns false only on rejection (bad index, unknown property,
-	# failed write) -- never on a benign same-value write -- so a false return is a real
-	# error worth surfacing rather than swallowing.
-	if _mission.set_entity_property_int(int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value):
-		_mission.commit_edit()
-		mark_dirty()
-	else:
-		_report("Could not set %s on the selected object." % property, true)
+	# set_entity_property_int returns false only on rejection (bad index, unknown property, failed
+	# write) -- never on a benign same-value write -- so a false return is a real error worth surfacing.
+	_edit_step(func(): return _mission.set_entity_property_int(
+			int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value),
+		"Could not set %s on the selected object." % property)
 
 
 # String counterpart of set_selected_property, for the fixed-string entity fields
 # "name1" (AI class) and "name2" (AI script). Same snapshot / one-undo-step model.
 func set_selected_string_property(property: String, value: String) -> void:
-	if _selected_ref.is_empty() or _mission == null:
+	if _selected_ref.is_empty():
 		return
-	_flush_edit()
-	_mission.begin_edit()
-	if _mission.set_entity_property_string(int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value):
-		_mission.commit_edit()
-		mark_dirty()
-	else:
-		_report("Could not set %s on the selected object." % property, true)
+	_edit_step(func(): return _mission.set_entity_property_string(
+			int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value),
+		"Could not set %s on the selected object." % property)
 
 
 # --- Authoring: mission-header editing ----------------------------------------
 # Each setter snapshots, writes one header field through NovaMissionData, then pushes a
 # single undo step. Field names match NovaMissionData::set_header_* and the inspector form.
 func set_header_string(field: String, value: String) -> void:
-	if _mission == null:
-		return
-	_flush_edit()
-	_mission.begin_edit()
-	if _mission.set_header_string(field, value):
-		_mission.commit_edit()
-		mark_dirty()
-	else:
-		_report("Could not set mission %s." % field, true)
+	_edit_step(func(): return _mission.set_header_string(field, value),
+		"Could not set mission %s." % field)
 
 
 func set_header_int(field: String, value: int) -> void:
-	if _mission == null:
-		return
-	_flush_edit()
-	_mission.begin_edit()
-	if _mission.set_header_int(field, value):
-		_mission.commit_edit()
-		mark_dirty()
-	else:
-		_report("Could not set mission %s." % field, true)
+	_edit_step(func(): return _mission.set_header_int(field, value),
+		"Could not set mission %s." % field)
 
 
 func set_header_flag(bit: int, on: bool) -> void:
-	if _mission == null:
-		return
-	_flush_edit()
-	_mission.begin_edit()
-	if _mission.set_header_flag(bit, on):
-		_mission.commit_edit()
-		mark_dirty()
-	else:
-		_report("Could not set mission flag.", true)
+	_edit_step(func(): return _mission.set_header_flag(bit, on),
+		"Could not set mission flag.")
 
 
 # --- Weapon loadout + groups (mission-global) ---------------------------------
@@ -1043,15 +1067,8 @@ func get_weapon_loadout() -> Array:
 
 
 func set_weapon_loadout(entries: Array) -> void:
-	if _mission == null:
-		return
-	_flush_edit()
-	_mission.begin_edit()
-	if _mission.set_weapon_loadout(entries):
-		_mission.commit_edit()
-		mark_dirty()
-	else:
-		_report("Could not update the weapon loadout.", true)
+	_edit_step(func(): return _mission.set_weapon_loadout(entries),
+		"Could not update the weapon loadout.")
 
 
 func get_group_count() -> int:
@@ -1073,15 +1090,8 @@ func get_group(index: int) -> Dictionary:
 
 
 func set_group(index: int, field0: int, field8: int, field12: int) -> void:
-	if _mission == null:
-		return
-	_flush_edit()
-	_mission.begin_edit()
-	if _mission.set_group(index, field0, field8, field12):
-		_mission.commit_edit()
-		mark_dirty()
-	else:
-		_report("Could not update group %d." % index, true)
+	_edit_step(func(): return _mission.set_group(index, field0, field8, field12),
+		"Could not update group %d." % index)
 
 
 # --- Authoring (Phase 3): place new objects -----------------------------------
@@ -1299,6 +1309,12 @@ func _rebake_objects() -> void:
 	_pickable = _placer.pickable_records
 	# The re-bake replaced the container (and the old overlay with it); rebuild the active
 	# mode's overlay against the new world.
+	_refresh_active_overlay()
+
+
+# Rebuild only the overlay for the current mode (each mode owns exactly one). Shared by the
+# re-bake and the lightweight undo path so the mode -> overlay dispatch lives in one place.
+func _refresh_active_overlay() -> void:
 	if _mode == Mode.WAYPOINTS:
 		_refresh_waypoint_overlay()
 	elif _mode == Mode.AREA_TRIGGERS:
@@ -1436,12 +1452,8 @@ func set_waypoint_flags(loop: bool, blue: bool, red: bool) -> void:
 	if red:
 		flags |= NovaMissionData.WP_FLAG_RED_TEAM
 	var indices: PackedInt32Array = path.get("marker_indices", PackedInt32Array())
-	_flush_edit()
-	_mission.begin_edit()
-	if _mission.set_waypoint_path(_selected_path_index, indices, flags):
-		_mission.commit_edit()
-		_refresh_waypoint_overlay()
-		mark_dirty()
+	_edit_step(func(): return _mission.set_waypoint_path(_selected_path_index, indices, flags),
+		"", _refresh_waypoint_overlay)
 
 
 func get_waypoint_summaries() -> Array:
@@ -1785,12 +1797,8 @@ func move_selected_marker(delta: int) -> void:
 	var tmp := indices[pos]
 	indices[pos] = indices[target]
 	indices[target] = tmp
-	_flush_edit()
-	_mission.begin_edit()
-	if _mission.set_waypoint_path(_selected_path_index, indices, int(path.get("flags", 0))):
-		_mission.commit_edit()
-		_refresh_waypoint_overlay()
-		mark_dirty()
+	_edit_step(func(): return _mission.set_waypoint_path(_selected_path_index, indices, int(path.get("flags", 0))),
+		"", _refresh_waypoint_overlay)
 
 
 # Delete the selected marker entirely: remove_entity drops the KIND_MARKER entity and
@@ -1973,14 +1981,9 @@ func set_selected_zone_bounds(mn: Vector3, mx: Vector3) -> void:
 	var zone := _mission.get_area_trigger(_selected_zone_index)
 	if zone.is_empty():
 		return
-	_flush_edit()
-	_mission.begin_edit()
-	var updated := _mission.set_area_trigger(_selected_zone_index, mn, mx,
-		bool(zone.get("active", false)), bool(zone.get("constrain_z", false)), int(zone.get("id", 0)))
-	if not updated.is_empty():
-		_mission.commit_edit()
-		_refresh_area_trigger_overlay()
-		mark_dirty()
+	_edit_step(func(): return _mission.set_area_trigger(_selected_zone_index, mn, mx,
+			bool(zone.get("active", false)), bool(zone.get("constrain_z", false)), int(zone.get("id", 0))),
+		"", _refresh_area_trigger_overlay)
 
 
 # Set the selected zone's two known flag bits (active / constrain-Z). One undo step.
@@ -1990,14 +1993,9 @@ func set_selected_zone_flags(active: bool, constrain_z: bool) -> void:
 	var zone := _mission.get_area_trigger(_selected_zone_index)
 	if zone.is_empty():
 		return
-	_flush_edit()
-	_mission.begin_edit()
-	var updated := _mission.set_area_trigger(_selected_zone_index, zone.get("min", Vector3.ZERO),
-		zone.get("max", Vector3.ZERO), active, constrain_z, int(zone.get("id", 0)))
-	if not updated.is_empty():
-		_mission.commit_edit()
-		_refresh_area_trigger_overlay()
-		mark_dirty()
+	_edit_step(func(): return _mission.set_area_trigger(_selected_zone_index, zone.get("min", Vector3.ZERO),
+			zone.get("max", Vector3.ZERO), active, constrain_z, int(zone.get("id", 0))),
+		"", _refresh_area_trigger_overlay)
 
 
 # Delete the selected zone. Structural (shifts later indices), so the overlay rebuilds and the
@@ -2241,102 +2239,60 @@ func delete_selected_event() -> bool:
 func set_selected_event(flags: int, reset_after: int, delay: int) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
-	_flush_edit()
-	_mission.begin_edit()
-	if _mission.set_event(_selected_event_index, flags, reset_after, delay):
-		_mission.commit_edit()
-		mark_dirty()
+	_edit_step(func(): return _mission.set_event(_selected_event_index, flags, reset_after, delay))
 
 
 # Append a trigger to the selected event (defaults to a Group / Null condition). One undo step.
 func add_selected_event_trigger() -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
-	_flush_edit()
-	_mission.begin_edit()
-	var chain := _mission.add_event_trigger(_selected_event_index, {})
-	if chain.is_empty():
-		_report("Could not add a trigger (an event chains at most 20).", true)
-		return
-	_mission.commit_edit()
-	mark_dirty()
+	_edit_step(func(): return _mission.add_event_trigger(_selected_event_index, {}),
+		"Could not add a trigger (an event chains at most 20).")
 
 
 # Overwrite the trigger at `local_index` (its position in the event's chain) from an editor dict. One step.
 func set_selected_event_trigger(local_index: int, trigger: Dictionary) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
-	_flush_edit()
-	_mission.begin_edit()
-	var chain := _mission.set_event_trigger(_selected_event_index, local_index, trigger)
-	if not chain.is_empty():
-		_mission.commit_edit()
-		mark_dirty()
+	_edit_step(func(): return _mission.set_event_trigger(_selected_event_index, local_index, trigger))
 
 
 func remove_selected_event_trigger(local_index: int) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
-	_flush_edit()
-	_mission.begin_edit()
-	if _mission.remove_event_trigger(_selected_event_index, local_index):
-		_mission.commit_edit()
-		mark_dirty()
+	_edit_step(func(): return _mission.remove_event_trigger(_selected_event_index, local_index))
 
 
 func move_selected_event_trigger(local_index: int, delta: int) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
-	_flush_edit()
-	_mission.begin_edit()
-	if _mission.move_event_trigger(_selected_event_index, local_index, delta):
-		_mission.commit_edit()
-		mark_dirty()
+	_edit_step(func(): return _mission.move_event_trigger(_selected_event_index, local_index, delta))
 
 
 # Append an action to the selected event (defaults to a Null action). One undo step.
 func add_selected_event_action() -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
-	_flush_edit()
-	_mission.begin_edit()
-	var chain := _mission.add_event_action(_selected_event_index, {})
-	if chain.is_empty():
-		_report("Could not add an action (an event chains at most 20).", true)
-		return
-	_mission.commit_edit()
-	mark_dirty()
+	_edit_step(func(): return _mission.add_event_action(_selected_event_index, {}),
+		"Could not add an action (an event chains at most 20).")
 
 
 func set_selected_event_action(local_index: int, action: Dictionary) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
-	_flush_edit()
-	_mission.begin_edit()
-	var chain := _mission.set_event_action(_selected_event_index, local_index, action)
-	if not chain.is_empty():
-		_mission.commit_edit()
-		mark_dirty()
+	_edit_step(func(): return _mission.set_event_action(_selected_event_index, local_index, action))
 
 
 func remove_selected_event_action(local_index: int) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
-	_flush_edit()
-	_mission.begin_edit()
-	if _mission.remove_event_action(_selected_event_index, local_index):
-		_mission.commit_edit()
-		mark_dirty()
+	_edit_step(func(): return _mission.remove_event_action(_selected_event_index, local_index))
 
 
 func move_selected_event_action(local_index: int, delta: int) -> void:
 	if _mission == null or get_selected_event_index() < 0:
 		return
-	_flush_edit()
-	_mission.begin_edit()
-	if _mission.move_event_action(_selected_event_index, local_index, delta):
-		_mission.commit_edit()
-		mark_dirty()
+	_edit_step(func(): return _mission.move_event_action(_selected_event_index, local_index, delta))
 
 
 # Mission-space centre of the placed world: the average of item positions, else origin. Used

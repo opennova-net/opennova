@@ -323,69 +323,11 @@ bool NovaMissionData::set_entity_property_int(int kind, int index, const String 
 	if (index < 0) {
 		return false;
 	}
-	const opennova::mission::EntityKind native_kind = to_native_kind(kind);
-	opennova::mission::EntityRecord record;
-	if (!document.get_entity(native_kind, static_cast<size_t>(index), record)) {
-		return false;
-	}
-	// set_entity_properties overwrites every field of EntityProperties, so seed it
-	// from the entity's current state and change only the requested one. This keeps
-	// the other twelve AI/waypoint properties intact.
-	opennova::mission::EntityProperties properties;
-	properties.group_id = record.group_id;
-	properties.waypoint_id = record.waypoint_id;
-	properties.wp_number = record.wp_number;
-	properties.team = record.team;
-	properties.ai_flags = record.ai_flags;
-	properties.perception = record.perception;
-	properties.accuracy = record.accuracy;
-	properties.alert_state = record.alert_state;
-	properties.min_engagement_distance = record.min_engagement_distance;
-	properties.max_engagement_distance = record.max_engagement_distance;
-	properties.max_attack_distance = record.max_attack_distance;
-	properties.spawn_count = record.spawn_count;
-	properties.max_simultaneous = record.max_simultaneous;
-	properties.no_less_than = record.no_less_than;
-	properties.map_symbol = record.map_symbol;
-	properties.name1 = record.name1;
-	properties.name2 = record.name2;
-
-	// Each name matches the entity dictionary key it edits (group -> group_id). Any name
-	// not in this set is rejected rather than silently no-op'd.
-	if (property == "team") {
-		properties.team = value;
-	} else if (property == "group") {
-		properties.group_id = value;
-	} else if (property == "waypoint_id") {
-		properties.waypoint_id = value;
-	} else if (property == "wp_number") {
-		properties.wp_number = value;
-	} else if (property == "perception") {
-		properties.perception = value;
-	} else if (property == "accuracy") {
-		properties.accuracy = value;
-	} else if (property == "alert_state") {
-		properties.alert_state = value;
-	} else if (property == "min_engagement_distance") {
-		properties.min_engagement_distance = value;
-	} else if (property == "max_engagement_distance") {
-		properties.max_engagement_distance = value;
-	} else if (property == "max_attack_distance") {
-		properties.max_attack_distance = value;
-	} else if (property == "spawn_count") {
-		properties.spawn_count = value;
-	} else if (property == "max_simultaneous") {
-		properties.max_simultaneous = value;
-	} else if (property == "no_less_than") {
-		properties.no_less_than = value;
-	} else if (property == "map_symbol") {
-		properties.map_symbol = value;
-	} else if (property == "ai_flags") {
-		properties.ai_flags = value;
-	} else {
-		return false;
-	}
-	if (!document.set_entity_properties(native_kind, static_cast<size_t>(index), properties, nullptr)) {
+	// The name->member mapping (and the seed-from-record + clamp rules) lives in libs/mission, the
+	// same as the header setters; the wrapper just forwards the field name. Adding an AI/waypoint
+	// field is one edit there, not four parallel ones across this file and the inspector.
+	if (!document.set_entity_property_int(to_native_kind(kind), static_cast<size_t>(index),
+	            property.utf8().get_data(), value)) {
 		return false;
 	}
 	modified = true;
@@ -396,40 +338,8 @@ bool NovaMissionData::set_entity_property_string(int kind, int index, const Stri
 	if (index < 0) {
 		return false;
 	}
-	const opennova::mission::EntityKind native_kind = to_native_kind(kind);
-	opennova::mission::EntityRecord record;
-	if (!document.get_entity(native_kind, static_cast<size_t>(index), record)) {
-		return false;
-	}
-	// Seed the full property set from the record (set_entity_properties overwrites every field,
-	// including name1/name2), then change only the requested string.
-	opennova::mission::EntityProperties properties;
-	properties.group_id = record.group_id;
-	properties.waypoint_id = record.waypoint_id;
-	properties.wp_number = record.wp_number;
-	properties.team = record.team;
-	properties.ai_flags = record.ai_flags;
-	properties.perception = record.perception;
-	properties.accuracy = record.accuracy;
-	properties.alert_state = record.alert_state;
-	properties.min_engagement_distance = record.min_engagement_distance;
-	properties.max_engagement_distance = record.max_engagement_distance;
-	properties.max_attack_distance = record.max_attack_distance;
-	properties.spawn_count = record.spawn_count;
-	properties.max_simultaneous = record.max_simultaneous;
-	properties.no_less_than = record.no_less_than;
-	properties.map_symbol = record.map_symbol;
-	properties.name1 = record.name1;
-	properties.name2 = record.name2;
-
-	if (property == "name1") {
-		properties.name1 = value.utf8().get_data();
-	} else if (property == "name2") {
-		properties.name2 = value.utf8().get_data();
-	} else {
-		return false;
-	}
-	if (!document.set_entity_properties(native_kind, static_cast<size_t>(index), properties, nullptr)) {
+	if (!document.set_entity_property_string(to_native_kind(kind), static_cast<size_t>(index),
+	            property.utf8().get_data(), value.utf8().get_data())) {
 		return false;
 	}
 	modified = true;
