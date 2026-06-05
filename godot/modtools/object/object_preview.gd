@@ -4,6 +4,7 @@ extends Control
 const FlyCameraScript = preload("res://engine/fly_camera.gd")
 const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd")
 const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
+const CollisionHull = preload("res://engine/object/collision_hull.gd")
 
 var object_data: NovaObjectData
 
@@ -16,11 +17,13 @@ var _environment: NovaEnvironment
 var _camera: Camera3D
 var _grid_material: StandardMaterial3D
 var _axis_material: StandardMaterial3D
+var _collision_materials: Dictionary = {}
 var _environment_file: EnvFile
 var _environment_time := 1200.0
 var _wireframe := false
 var _grid_visible := true
 var _axes_visible := true
+var _collision_visible := false
 var _has_framed := false
 
 var _material_defs: Dictionary = {}
@@ -47,6 +50,7 @@ func set_object_data(value: NovaObjectData) -> void:
 		_model.set_object_data(value)
 		_sync_model_debug_refs()
 		_refresh_preview_guides()
+		_refresh_collision_overlay()
 
 
 func get_object_model():
@@ -106,6 +110,7 @@ func _build_viewport() -> void:
 	_axis_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_axis_material.vertex_color_use_as_albedo = true
 	_axis_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+
 	_add_axis_gizmo()
 	set_wireframe(_wireframe)
 	_refresh_preview_guides()
@@ -172,6 +177,69 @@ func is_axes_visible() -> bool:
 func set_axes_visible(value: bool) -> void:
 	_axes_visible = value
 	_apply_guide_visibility()
+
+
+func is_collision_visible() -> bool:
+	return _collision_visible
+
+
+func set_collision_visible(value: bool) -> void:
+	_collision_visible = value
+	_refresh_collision_overlay()
+
+
+func has_collision() -> bool:
+	return object_data != null and object_data.has_method("has_collision") and object_data.has_collision()
+
+
+# Rebuild the collision-volume overlay: one ConvexPolygonShape3D per parsed
+# collision volume (the exact hulls mission picking will use), drawn via Godot's
+# own collision debug wireframe (Shape3D.get_debug_mesh) and colored by collidable
+# type. The hulls come back in model-local space (the (y,z,x) collision frame), so
+# parenting under _guide_root -- a sibling of the model at the same root transform --
+# lands them on the rendered model with no extra offset, which is the whole point of
+# validating here first.
+func _refresh_collision_overlay() -> void:
+	if _guide_root == null:
+		return
+	for child in _guide_root.get_children():
+		if child.name == "ObjectCollision":
+			_guide_root.remove_child(child)
+			child.free()
+	if not _collision_visible or object_data == null or not object_data.has_method("get_collision_volumes"):
+		return
+	var volumes: Array = object_data.get_collision_volumes()
+	if volumes.is_empty():
+		return
+	var root := Node3D.new()
+	root.name = "ObjectCollision"
+	_guide_root.add_child(root)
+	for v in volumes:
+		var pts: PackedVector3Array = CollisionHull.hull_points(v)
+		if pts.size() < 4:
+			continue
+		var shape := ConvexPolygonShape3D.new()
+		shape.points = pts
+		var mi := MeshInstance3D.new()
+		mi.mesh = shape.get_debug_mesh()
+		mi.material_override = _collision_material_for(int((v as Dictionary).get("type", 0)))
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(mi)
+
+
+# An unshaded, depth-test-off material colored by collidable type (cached per type
+# so all volumes of a type share one). Drawn through the model so enclosed volumes
+# stay visible.
+func _collision_material_for(type: int) -> StandardMaterial3D:
+	if _collision_materials.has(type):
+		return _collision_materials[type]
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = CollisionHull.color_for_type(type)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.no_depth_test = true
+	_collision_materials[type] = m
+	return m
 
 
 # Apply the current grid/axes visibility to the live guide nodes. The grid is

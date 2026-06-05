@@ -172,6 +172,15 @@ class FakeController:
 	func get_object_count() -> int:
 		return object_list.size()
 
+	# Pick-debug toggle surface used by the object browser's debug checkbox.
+	var pick_debug: bool = false
+
+	func is_pick_debug() -> bool:
+		return pick_debug
+
+	func set_pick_debug(value: bool) -> void:
+		pick_debug = value
+
 	func has_item_database() -> bool:
 		return has_item_db
 

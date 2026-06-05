@@ -30,6 +30,7 @@ extends RefCounted
 # editor re-import (same convention as veg_assets.gd).
 
 const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
+const CollisionHull := preload("res://engine/object/collision_hull.gd")
 
 const CONTAINER_NAME := "MissionObjects"
 const RENDER_LOD := 0
@@ -56,6 +57,9 @@ var _static_batch_cache: Dictionary = {}
 # graphic -> Vector3 ground anchor (model-space point that sits at the entity
 # position). Computed once per graphic; see _ground_anchor_for.
 var _anchor_cache: Dictionary = {}
+# graphic -> Array[ConvexPolygonShape3D] collision hulls in model-local space (the
+# editor's pickable bodies; see collision_shapes_for). Computed once per graphic.
+var _collision_shapes_cache: Dictionary = {}
 
 
 func _init(p_resource_root: NovaResourceRoot = null, p_item_db: NovaItemDatabase = null) -> void:
@@ -195,6 +199,12 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				_record_static_batch(graphic, static_refs_by_graphic.get(graphic, []), mm, mmi, offset, batch["mesh"])
 		stats.batched += xforms.size()
 		stats.placed += xforms.size()
+		# One pick collider per entity (not per submesh): collision is whole-model.
+		if edit_mode:
+			var prefs: Array = static_refs_by_graphic.get(graphic, [])
+			for i in range(xforms.size()):
+				var pref: Dictionary = prefs[i] if i < prefs.size() else {}
+				add_pick_collider(container, int(pref.get("kind", -1)), int(pref.get("index", -1)), graphic, xforms[i])
 
 	# Animated: an individual NovaObjectModel per entity.
 	for a in animated:
@@ -226,6 +236,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				"offset": anchor_inv,
 				"animated": true,
 			})
+			add_pick_collider(container, int(ref["kind"]), int(ref["index"]), a["graphic"], a["xform"])
 		stats.animated += 1
 		stats.placed += 1
 
@@ -283,6 +294,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			"offset": anchor_inv,
 			"animated": true,
 		})
+		add_pick_collider(container, kind, index, graphic, xform)
 		delta.placed = 1
 		delta.animated = 1
 		return delta
@@ -307,6 +319,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		container.add_child(mmi)
 		delta.batches += 1
 		_record_static_batch(graphic, refs, mm, mmi, offset, batch["mesh"])
+	add_pick_collider(container, kind, index, graphic, xform)
 	delta.placed = 1
 	delta.batched = 1
 	return delta
@@ -396,6 +409,86 @@ func _ground_anchor_for(graphic: String, data: NovaObjectData) -> Vector3:
 		anchor = data.get_ground_anchor(RENDER_LOD)
 	_anchor_cache[graphic] = anchor
 	return anchor
+
+
+# The ground-anchor inverse for `graphic`: the translation baked into every placed
+# instance so the model's ground point sits at the entity origin. The editor's pick
+# bodies are placed at `entity_transform * anchor_inv` (same as the visual), so a
+# collision hull in model-local space lands exactly on the rendered model.
+func anchor_inv_for(graphic: String) -> Transform3D:
+	var data := _load_object_data(graphic)
+	return Transform3D(Basis(), -_ground_anchor_for(graphic, data))
+
+
+# Convex collision hulls for `graphic`, in model-local space, for the editor's
+# pickable physics bodies. Built once per graphic (cached) from the model's parsed
+# collision volumes via CollisionHull.shapes_for -- the SAME path the Object Editor
+# overlay validates, so what the user saw is exactly what picking tests against.
+# Models with no collision volumes fall back to a single box hull from the visual
+# model AABB so every placed entity stays pickable (never worse than the old AABB pick).
+func collision_shapes_for(graphic: String) -> Array:
+	if _collision_shapes_cache.has(graphic):
+		return _collision_shapes_cache[graphic]
+	var shapes: Array = []
+	var data := _load_object_data(graphic)
+	if data != null and data.has_method("get_collision_volumes"):
+		shapes = CollisionHull.shapes_for(data.get_collision_volumes())
+	if shapes.is_empty():
+		var aabb := _visual_model_aabb(data)
+		if aabb.size != Vector3.ZERO:
+			var pts := PackedVector3Array()
+			for x in [aabb.position.x, aabb.end.x]:
+				for y in [aabb.position.y, aabb.end.y]:
+					for z in [aabb.position.z, aabb.end.z]:
+						pts.push_back(Vector3(x, y, z))
+			var box := ConvexPolygonShape3D.new()
+			box.points = pts
+			shapes = [box]
+	_collision_shapes_cache[graphic] = shapes
+	return shapes
+
+
+# Add one StaticBody3D pick collider for entity (kind,index) under the container, with
+# this graphic's convex collision hulls and an "entity_ref" meta the editor reads back
+# from intersect_ray. Positioned exactly like the visual (entity_xform * anchor_inv), so
+# the body coincides with the drawn model. Editor-only (edit_mode); freed automatically
+# when the container is cleared/re-baked -- no manual lifecycle.
+func add_pick_collider(container: Node3D, kind: int, index: int, graphic: String, entity_xform: Transform3D) -> StaticBody3D:
+	var shapes: Array = collision_shapes_for(graphic)
+	if shapes.is_empty():
+		return null
+	var body := StaticBody3D.new()
+	body.name = "Pick_%d_%d" % [kind, index]
+	body.set_meta("entity_ref", { "kind": kind, "index": index })
+	body.transform = entity_xform * anchor_inv_for(graphic)
+	for shape in shapes:
+		var cs := CollisionShape3D.new()
+		cs.shape = shape
+		body.add_child(cs)
+	container.add_child(body)
+	return body
+
+
+# Merged AABB of the render submeshes (model-local), used only as the collision
+# fallback for models that carry no collision volumes.
+func _visual_model_aabb(data: NovaObjectData) -> AABB:
+	if data == null or not data.has_method("build_lod_submeshes"):
+		return AABB()
+	var aabb := AABB()
+	var first := true
+	for s in data.build_lod_submeshes(RENDER_LOD):
+		var entry: Dictionary = s
+		var mesh: ArrayMesh = entry.get("mesh")
+		if mesh == null:
+			continue
+		var m: AABB = mesh.get_aabb()
+		m.position += entry.get("abs", Vector3.ZERO) as Vector3
+		if first:
+			aabb = m
+			first = false
+		else:
+			aabb = aabb.merge(m)
+	return aabb
 
 
 # Build a template NovaObjectModel, let it assemble the rest-pose meshes and

@@ -53,6 +53,30 @@ var _placer  # MissionObjectPlacer (preloaded, no class_name)
 # Pickable index harvested from the placer (edit_mode): one record per (entity,
 # static batch) or per animated entity. See MissionObjectPlacer.pickable_records.
 var _pickable: Array = []
+
+# --- Exact picking via per-entity collision bodies ----------------------------
+# Object picking shoots the cursor ray through the viewport world's physics space and
+# reads the hit collider's "entity_ref" meta. The collision bodies are real
+# StaticBody3D + CollisionShape3D nodes (convex hulls from the 3di collision volumes)
+# created by the placer under the MissionObjects container, so they are freed with the
+# container automatically -- no manual lifecycle here. The viewport SubViewport sets
+# own_world_3d so its physics is stepped (a shared/un-stepped world makes intersect_ray
+# silently miss). Markers/zones stay analytic-AABB gizmos.
+const PICK_RAY_LENGTH := 100000.0
+# The selected entity's pick body (for live drag) + its anchor (entity_xform * this =
+# the body's container-local transform). Set in _select, moved in _apply_selected_xform.
+var _selected_collider: Node3D
+var _selected_anchor_inv: Transform3D = Transform3D.IDENTITY
+# Debug: when on, draw the pick hulls in world (see _refresh_pick_debug).
+var _pick_debug := false
+
+# Hover preview: a distinct-color wire box bracketing the object under the cursor
+# (objects mode, not dragging/armed), so the user sees what a click would select.
+const HOVER_PIXEL_EPSILON := 3.0
+var _hover_box: MeshInstance3D
+var _hovered_ref: Dictionary = {}
+var _hover_pos: Vector2 = Vector2(-1, -1)
+
 # The selected entity as { kind, index }, or empty when nothing is selected.
 var _selected_ref: Dictionary = {}
 # The selected entity's static batch records (its MultiMesh slots), or its animated
@@ -796,6 +820,9 @@ func handle_viewport_input(event: InputEvent) -> void:
 			_on_zone_drag(motion.position)
 		else:
 			_on_drag(motion.position)
+	elif event is InputEventMouseMotion:
+		# Bare hover (not dragging): preview the object under the cursor in objects mode.
+		_on_hover((event as InputEventMouseMotion).position)
 
 
 # End an in-progress drag without committing. The workspace calls this when it
@@ -824,6 +851,8 @@ func _on_left_press(mouse_pos: Vector2) -> void:
 	# Close any open inspector edit session as its own step before starting a new gesture,
 	# so SpinBox edits and a following drag never coalesce.
 	_flush_edit()
+	# Drop the hover highlight so it does not linger over the entity we are selecting.
+	_clear_hover()
 	var ref := _pick_entity(mouse_pos)
 	if ref.is_empty():
 		_deselect()
@@ -865,6 +894,98 @@ func _on_left_release() -> void:
 	commit_edit()
 
 
+# --- Pick bodies --------------------------------------------------------------
+# The pick bodies (StaticBody3D + CollisionShape3D, "entity_ref" meta) are created by
+# MissionObjectPlacer.add_pick_collider under the MissionObjects container, so they are
+# built and freed with the visual world -- nothing to manage here. The selected entity's
+# body is looked up by name ("Pick_<kind>_<index>") in _select for live drag.
+
+func _selected_pick_collider() -> Node3D:
+	if _selected_ref.is_empty():
+		return null
+	var container := _objects_container()
+	if container == null:
+		return null
+	return container.get_node_or_null(NodePath("Pick_%d_%d" % [int(_selected_ref["kind"]), int(_selected_ref["index"])])) as Node3D
+
+
+# World-space AABB of a placed entity (union over its pickable records / animated
+# node). Used to bracket the hover highlight, mirroring _selected_world_aabb.
+func _entity_world_aabb(kind: int, index: int) -> AABB:
+	var result := AABB()
+	var have := false
+	for rec in _pickable:
+		if int(rec["kind"]) != kind or int(rec["index"]) != index:
+			continue
+		var a := _record_world_aabb(rec)
+		if a.size == Vector3.ZERO:
+			continue
+		if not have:
+			result = a
+			have = true
+		else:
+			result = result.merge(a)
+	return result
+
+
+# --- Pick debug overlay -------------------------------------------------------
+# A diagnostic the user can toggle from the object browser: draws every pick body's
+# convex collision hull(s) in world (the exact geometry intersect_ray tests), so it
+# is obvious whether bodies exist and sit on their objects.
+
+func is_pick_debug() -> bool:
+	return _pick_debug
+
+
+func set_pick_debug(value: bool) -> void:
+	_pick_debug = value
+	_refresh_pick_debug()
+
+
+func _refresh_pick_debug() -> void:
+	var container := _objects_container()
+	if container == null:
+		return
+	var existing := container.get_node_or_null("MissionPickDebug")
+	if existing != null:
+		container.remove_child(existing)
+		existing.queue_free()
+	if not _pick_debug or _mission == null or _placer == null:
+		return
+	var root := Node3D.new()
+	root.name = "MissionPickDebug"
+	container.add_child(root)
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(0.30, 1.0, 0.45, 0.9)
+	mat.no_depth_test = true
+	var seen: Dictionary = {}
+	for rec in _pickable:
+		var kind := int(rec["kind"])
+		var index := int(rec["index"])
+		var key := "%d:%d" % [kind, index]
+		if seen.has(key):
+			continue
+		seen[key] = true
+		var graphic := String(rec.get("graphic", ""))
+		if graphic.is_empty():
+			continue
+		var shapes: Array = _placer.collision_shapes_for(graphic)
+		if shapes.is_empty():
+			continue
+		# Container-local transform of the body (= world / container.global_transform).
+		var entity := _find_entity(kind, index)
+		var local: Transform3D = MissionObjectPlacer.entity_transform(
+			entity.get("position", Vector3.ZERO), entity.get("rotation_deg", Vector3.ZERO)) * _placer.anchor_inv_for(graphic)
+		for shape in shapes:
+			var mi := MeshInstance3D.new()
+			mi.mesh = (shape as Shape3D).get_debug_mesh()
+			mi.material_override = mat
+			mi.transform = local
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			root.add_child(mi)
+
+
 func _pick_entity(mouse_pos: Vector2) -> Dictionary:
 	if not terrain_editor.has_method("get_editor_camera"):
 		return {}
@@ -875,17 +996,26 @@ func _pick_entity(mouse_pos: Vector2) -> Dictionary:
 	var dir := camera.project_ray_normal(mouse_pos)
 	var best_t := INF
 	var best: Dictionary = {}
-	for rec in _pickable:
-		var aabb := _record_world_aabb(rec)
-		if aabb.size == Vector3.ZERO:
-			continue
-		var t := _ray_aabb_entry(aabb, from, dir)
-		if t >= 0.0 and t < best_t:
-			best_t = t
-			best = { "kind": int(rec["kind"]), "index": int(rec["index"]) }
-	# Markers are mesh-less, so they are not in _pickable; their gizmo AABBs come from the marker
+	# Objects: exact ray-vs-convex-hull via the viewport world's stepped physics space
+	# (BVH broadphase, nearest hit). The hit StaticBody3D carries its (kind,index) in its
+	# "entity_ref" meta.
+	var container := _objects_container()
+	if container != null and container.is_inside_tree():
+		var world := container.get_world_3d()
+		if world != null:
+			var ss := world.direct_space_state
+			if ss != null:
+				var q := PhysicsRayQueryParameters3D.create(from, from + dir * PICK_RAY_LENGTH)
+				var hit := ss.intersect_ray(q)
+				if not hit.is_empty():
+					var collider = hit.get("collider")
+					if collider != null and (collider as Object).has_meta("entity_ref"):
+						var ref: Dictionary = (collider as Object).get_meta("entity_ref")
+						best = { "kind": int(ref["kind"]), "index": int(ref["index"]) }
+						best_t = from.distance_to(hit["position"])
+	# Markers are mesh-less, so they are not bodies; their gizmo AABBs come from the marker
 	# overlay. The container sits at the world origin, so the overlay's AABBs are world-space (same
-	# assumption as _pick_marker). The nearest of {mesh, marker gizmo} wins.
+	# assumption as _pick_marker). The nearest of {hull hit, marker gizmo} wins.
 	if _marker_overlay != null and is_instance_valid(_marker_overlay):
 		for rec in _marker_overlay.marker_pickables():
 			var maabb: AABB = rec["aabb"]
@@ -903,8 +1033,11 @@ func _select(kind: int, index: int) -> void:
 	_selected_records = []
 	_selected_node = null
 	_selected_node_offset = Transform3D.IDENTITY
+	var graphic := ""
 	for rec in _pickable:
 		if int(rec["kind"]) == kind and int(rec["index"]) == index:
+			if graphic.is_empty():
+				graphic = String(rec.get("graphic", ""))
 			# Skip records whose backing node was freed (e.g. a re-bake mid-flight): a stale
 			# ref would dangle through _apply_selected_xform. A dropped record just means no
 			# box / no drag handle for that slot, not a crash.
@@ -917,6 +1050,12 @@ func _select(kind: int, index: int) -> void:
 				var mmi = rec.get("mmi")
 				if mmi != null and is_instance_valid(mmi):
 					_selected_records.append(rec)
+	# Bind the entity's pick body node + its anchor so a drag can move the body live
+	# (keeps a mid-drag re-pick exact). Markers have no body, so this resolves to null.
+	_selected_collider = _selected_pick_collider()
+	_selected_anchor_inv = Transform3D.IDENTITY
+	if _placer != null and not graphic.is_empty():
+		_selected_anchor_inv = _placer.anchor_inv_for(graphic)
 	var entity := _find_entity(kind, index)
 	_selected_rotation_deg = entity.get("rotation_deg", Vector3.ZERO)
 	_selected_xform = MissionObjectPlacer.entity_transform(
@@ -935,6 +1074,8 @@ func _deselect() -> void:
 	_selected_records = []
 	_selected_node = null
 	_selected_node_offset = Transform3D.IDENTITY
+	_selected_collider = null
+	_selected_anchor_inv = Transform3D.IDENTITY
 	_hide_selection_box()
 	if _marker_overlay != null and is_instance_valid(_marker_overlay):
 		_marker_overlay.set_selected_marker(-1)
@@ -971,6 +1112,10 @@ func _apply_selected_xform(xform: Transform3D) -> void:
 		for rec in _selected_records:
 			var mm: MultiMesh = rec["mm"]
 			mm.set_instance_transform(int(rec["slot"]), _selected_xform * (rec["offset"] as Transform3D))
+	# Move the pick body node in lockstep so a re-pick mid/after-drag stays exact (the
+	# body carries the same anchor offset as the visual). No-op for a marker (no body).
+	if _selected_collider != null and is_instance_valid(_selected_collider):
+		_selected_collider.transform = _selected_xform * _selected_anchor_inv
 	_update_selection_box()
 
 
@@ -1304,10 +1449,12 @@ func _render_placed_entity(kind: int, index: int) -> void:
 	var container := _objects_container()
 	if container == null:
 		return
+	# place_single already added this entity's pick collider node under the container.
 	var delta: Dictionary = _placer.place_single(_mission, container, kind, index, _environment_node())
 	_pickable = _placer.pickable_records
 	for key in delta:
 		_stats[key] = int(_stats.get(key, 0)) + int(delta[key])
+	_refresh_pick_debug()
 
 
 # --- Authoring (Phase 4): delete + structural re-bake -------------------------
@@ -1377,6 +1524,8 @@ func _rebake_objects() -> void:
 		options["environment_node"] = env_node
 	_stats = _placer.place(_mission, world_root, options)
 	_pickable = _placer.pickable_records
+	# The placer (re)created the pick colliders with the world; just refresh the debug overlay.
+	_refresh_pick_debug()
 	# The re-bake replaced the container (and the old overlay with it); rebuild the active
 	# mode's overlay against the new world.
 	_refresh_active_overlay()
@@ -1415,7 +1564,11 @@ func set_mode(mode: int) -> void:
 	_selected_records = []
 	_selected_node = null
 	_selected_node_offset = Transform3D.IDENTITY
+	_selected_collider = null
+	_selected_anchor_inv = Transform3D.IDENTITY
 	_hide_selection_box()
+	# Hover only lives in objects mode; drop it on any mode switch.
+	_clear_hover()
 	_selected_marker = {}
 	_selected_zone_index = -1
 	_place_item_id = 0
@@ -2628,6 +2781,67 @@ func _hide_selection_box() -> void:
 		_selection_box.visible = false
 
 
+# --- Hover preview ------------------------------------------------------------
+# Re-pick on bare mouse motion (objects mode only) and bracket the object under the
+# cursor with an amber wire box, distinct from the cyan selection box. Throttled to
+# pixel movement; never mutates selection or opens an edit session.
+func _on_hover(mouse_pos: Vector2) -> void:
+	if _mode != Mode.OBJECTS or _drag_active or is_placement_armed():
+		_clear_hover()
+		return
+	if _hover_pos.distance_to(mouse_pos) < HOVER_PIXEL_EPSILON:
+		return
+	_hover_pos = mouse_pos
+	var ref := _pick_entity(mouse_pos)
+	var kind := int(ref.get("kind", -1))
+	var index := int(ref.get("index", -1))
+	# Skip empties, markers (their own gizmo highlights), and the current selection.
+	if ref.is_empty() or kind == NovaMissionData.KIND_MARKER \
+			or (not _selected_ref.is_empty() \
+				and int(_selected_ref.get("kind", -2)) == kind \
+				and int(_selected_ref.get("index", -2)) == index):
+		_clear_hover()
+		return
+	_hovered_ref = { "kind": kind, "index": index }
+	var aabb := _entity_world_aabb(kind, index)
+	if aabb.size == Vector3.ZERO:
+		_clear_hover()
+		return
+	var box := _ensure_hover_box()
+	if box == null:
+		return
+	var pad := Vector3.ONE * 0.2
+	box.global_transform = Transform3D(Basis().scaled(aabb.size + pad * 2.0), aabb.position + aabb.size * 0.5)
+	box.visible = true
+
+
+func _ensure_hover_box() -> MeshInstance3D:
+	if _hover_box != null and is_instance_valid(_hover_box):
+		return _hover_box
+	var container := _objects_container()
+	if container == null:
+		return null
+	var mi := MeshInstance3D.new()
+	mi.name = "MissionHoverBox"
+	mi.mesh = _build_selection_wire_mesh()
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1.0, 0.85, 0.2)
+	mat.no_depth_test = true
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	container.add_child(mi)
+	_hover_box = mi
+	return mi
+
+
+func _clear_hover() -> void:
+	_hovered_ref = {}
+	_hover_pos = Vector2(-1, -1)
+	if _hover_box != null and is_instance_valid(_hover_box):
+		_hover_box.visible = false
+
+
 # Clear selection refs without touching the scene. The selection box is a child of the
 # objects container, so it is freed when the container is (re)built; here we only drop
 # the dangling ref.
@@ -2638,10 +2852,18 @@ func _reset_selection_state() -> void:
 	_selected_node_offset = Transform3D.IDENTITY
 	_selected_xform = Transform3D.IDENTITY
 	_selected_rotation_deg = Vector3.ZERO
+	# Drop the selection's pick-body ref (the body node is freed/rebuilt with the
+	# container, not here).
+	_selected_collider = null
+	_selected_anchor_inv = Transform3D.IDENTITY
 	_drag_active = false
 	_drag_moved = false
 	_drag_off_terrain = false
 	_selection_box = null
+	# The hover box is a container child too, so the re-bake freed it; drop the dangling ref.
+	_hover_box = null
+	_hovered_ref = {}
+	_hover_pos = Vector2(-1, -1)
 	# Waypoint marker selection + overlay are tied to the container contents, so they reset
 	# with it; the chosen path (_selected_path_index) persists across re-bakes by design.
 	_selected_marker = {}
@@ -2711,6 +2933,8 @@ func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot) -
 		options["environment_node"] = env_node
 	_stats = _placer.place(mission, world_root, options)
 	_pickable = _placer.pickable_records
+	# The placer created the pick colliders with the world; refresh the debug overlay if on.
+	_refresh_pick_debug()
 
 
 func _environment_node() -> Node:
