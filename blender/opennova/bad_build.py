@@ -271,6 +271,36 @@ def assemble_bad_clip(
     )
 
 
+def rest_origins_from_max_world(
+    rows0: Sequence[Mat3],
+    node_pos0: Sequence[Vec3],
+    root_pos0: Vec3,
+    parents: Sequence[int],
+) -> list[Vec3]:
+    """Parent-local zup rest origins from one frame of Max world transforms.
+
+    rows0[b] = bone b's Max node rotation rows at the reference frame;
+    node_pos0[b] = its world position; root_pos0 = the root_motion node position;
+    parents[b] = parent bone index (-1 for root). This recovers the same rest
+    origins the importer derived via coords.bone_space(bone.position).
+    """
+    bone_count = len(rows0)
+    zup_rot0: list[Mat3] = []
+    for b in range(bone_count):
+        xyzw = bad_xyzw_from_max_world_rows(rows0[b])
+        zup = bad_channel_to_zup_quat(bad_ffi.BadQuaternion(xyzw[0], xyzw[1], xyzw[2], xyzw[3]))
+        zup_rot0.append(quat_to_matrix(zup))
+    swp0 = [vec_sub(node_pos0[b], root_pos0) for b in range(bone_count)]
+    rest: list[Vec3] = [ZERO_VEC3] * bone_count
+    for b in range(bone_count):
+        p = int(parents[b])
+        if p < 0 or p >= bone_count:
+            rest[b] = swp0[b]
+        else:
+            rest[b] = mat_vec_mul(mat_transpose(zup_rot0[p]), vec_sub(swp0[b], swp0[p]))
+    return rest
+
+
 def assemble_clip_from_max_world(
     *,
     bones_meta: Sequence[Tuple[str, int, float]],
@@ -284,6 +314,7 @@ def assemble_clip_from_max_world(
     name: str = "",
     bad_name: str = "",
     is_reset: bool = False,
+    reset_rest_origins: Sequence[Vec3] | None = None,
 ) -> BadClipOut:
     """Invert the 3ds Max import keying into a BadClipOut.
 
@@ -295,8 +326,12 @@ def assemble_clip_from_max_world(
       * per_frame_root_pos[f]     = the Bip001 (root_motion) node.position
       * bones_meta[b]             = (name, parent_index, length)
 
-    The bone-table rest is taken from frame 0 (translation assumed 0 there, as
-    the importer does); per-frame translations are deviations from that rest.
+    The bone-table rest (bone.position) is taken from this clip's frame 0, matching
+    stock per-clip bone tables. Per-frame translations, however, MUST be measured
+    against the RESET clip's rest origins, because the importer accumulates every
+    clip's world positions from the reset skeleton's rest (build_armature_from_bad
+    uses the reset BAD for all clips). Pass `reset_rest_origins` for that; when it
+    is None the clip's own frame-0 rest is used (correct only for the reset clip).
     Root motion events are recovered from the root-node displacement so the
     importer's accumulation reproduces per_frame_root_pos.
     """
@@ -323,16 +358,15 @@ def assemble_clip_from_max_world(
         for f in range(frame_count)
     ]
 
-    # Rest origins from frame 0 (parent-local; translation[0] assumed 0).
-    rest_origin: list[Vec3] = [ZERO_VEC3] * bone_count
-    for b in range(bone_count):
-        p = parents[b]
-        if p < 0 or p >= bone_count:
-            rest_origin[b] = swp[0][b]
-        else:
-            rest_origin[b] = mat_vec_mul(
-                mat_transpose(zup_rot[0][p]), vec_sub(swp[0][b], swp[0][p])
-            )
+    # Per-clip frame-0 rest (parent-local). Used for the bone table, matching
+    # stock per-clip bone tables.
+    rest_origin = rest_origins_from_max_world(
+        per_frame_rows[0], per_frame_node_pos[0], per_frame_root_pos[0], parents
+    )
+    # Translations are anchored to the RESET skeleton's rest, because the importer
+    # rebuilds every clip's world positions from the reset rest. Fall back to this
+    # clip's frame-0 rest only when no reset reference is supplied (reset clip).
+    trans_ref = list(reset_rest_origins) if reset_rest_origins is not None else rest_origin
 
     bones_out: list[BadBoneOut] = []
     for b in range(bone_count):
@@ -357,11 +391,11 @@ def assemble_clip_from_max_world(
             for b in range(bone_count):
                 p = parents[b]
                 if p < 0 or p >= bone_count:
-                    t_zup = vec_sub(swp[f][b], rest_origin[b])
+                    t_zup = vec_sub(swp[f][b], trans_ref[b])
                 else:
                     t_zup = vec_sub(
                         vec_sub(swp[f][b], swp[f][p]),
-                        mat_vec_mul(zup_rot[f][p], rest_origin[b]),
+                        mat_vec_mul(zup_rot[f][p], trans_ref[b]),
                     )
                 row.append(inverse_bone_space(t_zup))
             per_frame_trans.append(row)

@@ -49,6 +49,110 @@ def _approx(a, b, eps=1e-4):
     return all(abs(float(x) - float(y)) <= eps for x, y in zip(a, b))
 
 
+def _forward_to_max(sampled):
+    """Replicate the Max import keying: per-frame node rows + world positions + root."""
+    rows, node_pos, root_pos = [], [], []
+    for fr in sampled.frames:
+        rp = fr.max_root_motion_position
+        root_pos.append(rp)
+        rows.append([_max_rows(b.source_rotation_xyzw) for b in fr.bones])
+        node_pos.append([vec_add(b.world_position, rp) for b in fr.bones])
+    return rows, node_pos, root_pos
+
+
+def test_translation_anchored_to_reset_not_clip_frame0(tmp_path):
+    """An animated clip whose frame 0 != the reset pose must export translations
+    anchored to the RESET rest (what the importer rebuilds from), not the clip's
+    own frame 0. This is the regression for the 'plays wrong on re-import' bug."""
+    bones = [
+        bad_build.BadBoneOut("BN01", -1, 1.0, (0.0, 0.0, 0.0), _IDENTITY_ROWS),
+        bad_build.BadBoneOut("BN02", 0, 0.5, (0.5, 0.0, 0.0), _IDENTITY_ROWS),
+        bad_build.BadBoneOut("BN03", 1, 0.5, (0.0, 0.5, 0.0), _IDENTITY_ROWS),
+    ]
+    TR = bad_build.ANIM_FLAG_TRANSLATION
+
+    reset = bad_build.assemble_bad_clip(
+        bones=bones,
+        per_frame_rotations_xyzw=[[(0, 0, 0, 1)] * 3],
+        frame_count=1,
+        flags=TR,
+        per_frame_translations=[[(0.0, 0.0, 0.0)] * 3],
+    )
+    anim_rots = [
+        [(0, 0, 0, 1), (0.1, 0, 0, 0.99499), (0, 0.2, 0, 0.9798)],
+        [(0.05, 0, 0, 0.99875), (0.15, 0, 0, 0.98869), (0, 0.25, 0, 0.96825)],
+        [(0, 0.1, 0, 0.99499), (0.2, 0, 0, 0.9798), (0, 0.3, 0, 0.95394)],
+    ]
+    # Translations are NONZERO at frame 0 -> clip frame 0 differs from the reset.
+    anim_trans = [
+        [(0.3, -0.2, 0.1), (0.1, 0.2, 0.0), (-0.1, 0.0, 0.2)],
+        [(0.35, -0.1, 0.1), (0.15, 0.25, 0.0), (-0.05, 0.05, 0.2)],
+        [(0.4, -0.15, 0.0), (0.2, 0.2, -0.1), (0.0, 0.3, 0.1)],
+    ]
+    anim = bad_build.assemble_bad_clip(
+        bones=bones,
+        per_frame_rotations_xyzw=anim_rots,
+        frame_count=3,
+        flags=TR,
+        per_frame_translations=anim_trans,
+    )
+
+    reset_path = str(tmp_path / "reset.bad")
+    anim_path = str(tmp_path / "anim.bad")
+    bad_build.write_bad(reset_path, reset)
+    bad_build.write_bad(anim_path, anim)
+    bf_reset = bad_ffi.parse_bad(reset_path)
+    bf_anim = bad_ffi.parse_bad(anim_path)
+    try:
+        # The importer samples EVERY clip against the reset skeleton's rest.
+        reset_infos = _bone_infos(bf_reset)
+        s_reset = sample_bad_clip(bf_reset, reset_infos, animation_name="reset")
+        s_anim = sample_bad_clip(bf_anim, reset_infos, animation_name="anim")
+
+        r_rows, r_node, r_root = _forward_to_max(s_reset)
+        a_rows, a_node, a_root = _forward_to_max(s_anim)
+
+        bones_meta = [("BN01", -1, 1.0), ("BN02", 0, 0.5), ("BN03", 1, 0.5)]
+        parents = [-1, 0, 1]
+        reset_rest = bad_build.rest_origins_from_max_world(r_rows[0], r_node[0], r_root[0], parents)
+
+        def export_and_resample(reset_rest_origins):
+            clip = bad_build.assemble_clip_from_max_world(
+                bones_meta=bones_meta,
+                per_frame_rows=a_rows,
+                per_frame_node_pos=a_node,
+                per_frame_root_pos=a_root,
+                frame_count=3,
+                flags=TR,
+                reset_rest_origins=reset_rest_origins,
+            )
+            path = str(tmp_path / ("rt_%s.bad" % ("fixed" if reset_rest_origins else "buggy")))
+            bad_build.write_bad(path, clip)
+            bf = bad_ffi.parse_bad(path)
+            try:
+                return sample_bad_clip(bf, reset_infos, animation_name="rt")
+            finally:
+                bad_ffi.free_bad(bf)
+
+        s_fixed = export_and_resample(reset_rest)
+        s_buggy = export_and_resample(None)  # pre-fix: per-clip frame-0 anchoring
+
+        fixed_ok = True
+        buggy_matches = True
+        for f in range(3):
+            for b in range(3):
+                orig = s_anim.frames[f].bones[b].world_position
+                if not _approx(orig, s_fixed.frames[f].bones[b].world_position, eps=1e-3):
+                    fixed_ok = False
+                if not _approx(orig, s_buggy.frames[f].bones[b].world_position, eps=1e-3):
+                    buggy_matches = False
+        assert fixed_ok, "reset-anchored export must reproduce the original world positions"
+        assert not buggy_matches, "without reset anchoring the round-trip should diverge"
+    finally:
+        bad_ffi.free_bad(bf_reset)
+        bad_ffi.free_bad(bf_anim)
+
+
 def test_root_position_zeroed_by_root_status_not_index():
     """The BAD root bone is zeroed by parent status, not by array index 0."""
     # bone 0 is a CHILD of bone 1; bone 1 is the root.

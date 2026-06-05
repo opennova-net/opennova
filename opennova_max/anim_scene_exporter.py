@@ -55,6 +55,11 @@ class AnimSceneExporter:
         out_dir = os.path.dirname(adm_path) or "."
         os.makedirs(out_dir, exist_ok=True)
 
+        # Translations for every clip are measured against the RESET skeleton's
+        # rest (the importer rebuilds all clips from the reset rest), so sample
+        # the reset pose once up front and reuse it for all clips.
+        reset_rest_origins = self._compute_reset_rest_origins(bone_nodes, parents, root, clips)
+
         refs: List[bad_build.AdmClipRef] = []
         reset_count = 0
         for clip in clips:
@@ -84,6 +89,7 @@ class AnimSceneExporter:
                 name=name,
                 bad_name=bad_name,
                 is_reset=is_reset,
+                reset_rest_origins=reset_rest_origins,
             )
             bad_build.write_bad(os.path.join(out_dir, bad_name + ".bad"), clip_out)
             refs.append(bad_build.AdmClipRef(animation_name=name, bad_name=bad_name, is_reset=is_reset))
@@ -133,6 +139,19 @@ class AnimSceneExporter:
                 pi = -1
             parents.append(pi)
         return bones, parents
+
+    def _compute_reset_rest_origins(self, bone_nodes, parents, root, clips):
+        """Sample the reset clip's pose once -> shared rest origins for translations.
+
+        Returns None if no reset clip is present (caller then falls back to each
+        clip's own frame-0 rest, the pre-fix behavior).
+        """
+        reset = next((c for c in clips if bool(c.get("is_reset"))), None)
+        if reset is None:
+            return None
+        start = int(reset.get("start_frame", 0))
+        rows, node_pos, root_pos = self._sample_clip(bone_nodes, root, start, 1)
+        return bad_build.rest_origins_from_max_world(rows[0], node_pos[0], root_pos[0], parents)
 
     def _bones_meta(self, bone_nodes, parents, frame0_pos):
         # length: prefer the stored BAD rest length, else child-head distance.
