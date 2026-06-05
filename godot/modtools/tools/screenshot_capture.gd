@@ -45,7 +45,7 @@ const FONT_NAME := "Serpen36"  # bare basename; the fonts workspace appends .fnt
 const CREDITS_NAME := "nlist.kda"
 const STRINGS_NAME := "GAMETEXT.bin"
 # A textured object that frames well from the 3/4 vantage _frame_object() uses.
-const OBJECT_NAME := "MH53.3di"
+const OBJECT_NAME := "Dblkhwk1.3di"
 # The Particles workspace edits .ptl files, which the game ships inside PFFs
 # rather than as loose files in the resource dir, so (unlike the other shots)
 # this one opens a bundled repo fixture by its res:// path. buildup.ptl is a
