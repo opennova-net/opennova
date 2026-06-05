@@ -99,6 +99,11 @@ func set_editable(on: bool) -> void:
 	_option.disabled = not on
 
 
+# True when the active control accepts edits (the inspector disables slots a type doesn't use).
+func is_editable() -> bool:
+	return _option.disabled == false if SchemaScript.is_picker(_kind) else _spin.editable
+
+
 # --- Accessors (used by tests and for focus handling) -------------------------
 func is_picker() -> bool:
 	return SchemaScript.is_picker(_kind)

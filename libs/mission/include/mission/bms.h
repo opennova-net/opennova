@@ -295,28 +295,36 @@ enum class ActionType : int32_t {
     GroupTargetGroupExc = 49,
 };
 
-// AI action subtypes
+// AI action subtypes — shared by CHANGE_GROUP_AI(3), AREA_AI_RED/BLUE(12/13), CHANGE_SINGLE_AI(21).
+// [orig: dfx2med Med_ActionSubTypeName @0x445EE0 / param layout Med_AiSubTypeParams @0x44A920]
+// Canonical names + values from the DFX2 mission editor token table (notes/mission/event-grill-dfx2med.md
+// section 4). Several names were corrected against the editor and the alert/wpz sub-types added.
 enum class AIActionSubType : int32_t {
     GuardBit = 2,
+    RedAlert = 5,            // TO_RED_ALERT (added)
+    GreenAlert = 6,          // TO_GREEN_ALERT (added)
     Accuracy = 8,
     BlindBit = 15,
     BerserkBit = 16,
     ClimberBit = 17,
     CowardBit = 21,
-    Skill1 = 26,
-    Skill2 = 27,
-    AiState = 28,
-    SpeedKmh1 = 29,
-    SpeedKmh2 = 30,
-    TargetSsn1 = 31,
-    AnimNum = 34,
-    HudItem = 37,
+    YellowAlert = 22,        // TO_YELLOW_ALERT (added)
+    DriveSkill = 26,         // was Skill1 — editor DRIVESKILL
+    AimSkill = 27,           // was Skill2 — editor AIMSKILL
+    AiSetState = 28,         // was AiState — editor AISETSTATE
+    CombatSpeed = 29,        // was SpeedKmh1 — editor COMBATSPEED
+    PatrolSpeed = 30,        // was SpeedKmh2 — editor PATROLSPEED
+    FindAndUse = 31,         // was TargetSsn1 — editor FIND_AND_USE
+    AiUseWpz = 32,           // AIUSEWPZ (added)
+    AiClearWpz = 33,         // AICLEARWPZ (added)
+    PlayPartAnim = 34,       // was AnimNum — editor PLAYPARTANIM (slots ANIMNUM, ANIMPLAYTYPE, ANIMTIME)
+    HudItem = 37,            // HUD flash (slots HUDITEM, TICKS)
     TmateStatus = 39,
     AiNodePathBit = 40,
     AttackDistanceValue = 41,
-    EngageDistanceMin = 42,
+    EngageDistanceMin = 42,  // ENGAGEDISTANCE (slots MIN, MAX)
     IndestructableBit = 43,
-    TargetSsn2 = 44,
+    TargetSsn = 44,          // was TargetSsn2 — editor TARGETSSN
     StartFiringBit = 45,
     FiringAngle = 46,
 };

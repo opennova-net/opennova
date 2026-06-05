@@ -708,25 +708,30 @@ std::string action_type_name(int value) {
 std::string ai_action_sub_type_name(int value) {
 	switch (static_cast<bms::AIActionSubType>(value)) {
 		case bms::AIActionSubType::GuardBit: return "GuardBit";
+		case bms::AIActionSubType::RedAlert: return "RedAlert";
+		case bms::AIActionSubType::GreenAlert: return "GreenAlert";
 		case bms::AIActionSubType::Accuracy: return "Accuracy";
 		case bms::AIActionSubType::BlindBit: return "BlindBit";
 		case bms::AIActionSubType::BerserkBit: return "BerserkBit";
 		case bms::AIActionSubType::ClimberBit: return "ClimberBit";
 		case bms::AIActionSubType::CowardBit: return "CowardBit";
-		case bms::AIActionSubType::Skill1: return "Skill1";
-		case bms::AIActionSubType::Skill2: return "Skill2";
-		case bms::AIActionSubType::AiState: return "AiState";
-		case bms::AIActionSubType::SpeedKmh1: return "SpeedKmh1";
-		case bms::AIActionSubType::SpeedKmh2: return "SpeedKmh2";
-		case bms::AIActionSubType::TargetSsn1: return "TargetSsn1";
-		case bms::AIActionSubType::AnimNum: return "AnimNum";
+		case bms::AIActionSubType::YellowAlert: return "YellowAlert";
+		case bms::AIActionSubType::DriveSkill: return "DriveSkill";
+		case bms::AIActionSubType::AimSkill: return "AimSkill";
+		case bms::AIActionSubType::AiSetState: return "AiSetState";
+		case bms::AIActionSubType::CombatSpeed: return "CombatSpeed";
+		case bms::AIActionSubType::PatrolSpeed: return "PatrolSpeed";
+		case bms::AIActionSubType::FindAndUse: return "FindAndUse";
+		case bms::AIActionSubType::AiUseWpz: return "AiUseWpz";
+		case bms::AIActionSubType::AiClearWpz: return "AiClearWpz";
+		case bms::AIActionSubType::PlayPartAnim: return "PlayPartAnim";
 		case bms::AIActionSubType::HudItem: return "HudItem";
 		case bms::AIActionSubType::TmateStatus: return "TmateStatus";
 		case bms::AIActionSubType::AiNodePathBit: return "AiNodePathBit";
 		case bms::AIActionSubType::AttackDistanceValue: return "AttackDistanceValue";
 		case bms::AIActionSubType::EngageDistanceMin: return "EngageDistanceMin";
 		case bms::AIActionSubType::IndestructableBit: return "IndestructableBit";
-		case bms::AIActionSubType::TargetSsn2: return "TargetSsn2";
+		case bms::AIActionSubType::TargetSsn: return "TargetSsn";
 		case bms::AIActionSubType::StartFiringBit: return "StartFiringBit";
 		case bms::AIActionSubType::FiringAngle: return "FiringAngle";
 	}

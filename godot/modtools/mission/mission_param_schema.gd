@@ -26,26 +26,30 @@ const TRIGGERS := {
 		4:  { "desc": "Group {p1} is destroyed (no units left).", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
 		5:  { "desc": "Group {p1} is alive (at least one unit).", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
 		6:  { "desc": "Group {p1} has lost {p2} or more units.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Units lost","tip":"Trigger passes once this many of the group's units are gone."} ] },
-		7:  { "desc": "Group {p1} reaches a waypoint.", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
+		7:  { "desc": "Group {p1} reaches waypoint {p3} (type {p2}).", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Waypoint type"}, {"label":"Waypoint","kind":Kind.WAYPOINT} ] },
 		9:  { "desc": "Group {p1} is intact (no losses).", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
 		10: { "desc": "Group {p1} is inside zone {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Zone","kind":Kind.ZONE} ] },
-		11: { "desc": "Group {p1} is holding group {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Other group","kind":Kind.GROUP} ] },
+		11: { "desc": "Group {p1} is holding group {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Item group","kind":Kind.GROUP} ] },
 		12: { "desc": "Group {p1} has {p2} or more units.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Unit count"} ] },
 		13: { "desc": "Group {p1} has shot group {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Other group","kind":Kind.GROUP} ] },
 		14: { "desc": "Group {p1} is at yellow alert.", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
-		15: { "desc": "Group {p1} has targeted a single unit.", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
-		16: { "desc": "Group {p1} can see a single unit.", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
-		17: { "desc": "Group {p1} has shot a single unit.", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
+		15: { "desc": "Group {p1} has targeted unit {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Unit","kind":Kind.ENTITY} ] },
+		16: { "desc": "Group {p1} can see unit {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Unit","kind":Kind.ENTITY} ] },
+		17: { "desc": "Group {p1} has shot unit {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Unit","kind":Kind.ENTITY} ] },
 	},
 	2: {  # Single — param1 is an entity (SSN / BMS id)
+		1:  { "desc": "Unit {p1} can see group {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Group","kind":Kind.GROUP} ] },
+		2:  { "desc": "Unit {p1} has targeted group {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Group","kind":Kind.GROUP} ] },
 		3:  { "desc": "Unit {p1} is at red alert.", "p": [ {"label":"Unit","kind":Kind.ENTITY} ] },
 		4:  { "desc": "Unit {p1} is destroyed.", "p": [ {"label":"Unit","kind":Kind.ENTITY} ] },
 		5:  { "desc": "Unit {p1} is alive.", "p": [ {"label":"Unit","kind":Kind.ENTITY} ] },
-		6:  { "desc": "Unit {p1} has taken {p2}+ damage.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Threshold"} ] },
+		6:  { "desc": "Unit {p1} has taken {p2}+ damage.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Hits / damage"} ] },
+		7:  { "desc": "Unit {p1} reaches waypoint {p3} (type {p2}).", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Waypoint type"}, {"label":"Waypoint","kind":Kind.WAYPOINT} ] },
 		9:  { "desc": "Unit {p1} is at full health.", "p": [ {"label":"Unit","kind":Kind.ENTITY} ] },
 		10: { "desc": "Unit {p1} is inside zone {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Zone","kind":Kind.ZONE} ] },
-		11: { "desc": "Unit {p1} is holding group {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Group","kind":Kind.GROUP} ] },
-		12: { "desc": "Unit {p1} is above a health threshold.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Health threshold"} ] },
+		11: { "desc": "Unit {p1} is holding group {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Item group","kind":Kind.GROUP} ] },
+		12: { "desc": "Unit {p1} has {p2}+ hit points.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Hit points"} ] },
+		13: { "desc": "Unit {p1} has shot group {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Group","kind":Kind.GROUP} ] },
 		14: { "desc": "Unit {p1} is at yellow alert.", "p": [ {"label":"Unit","kind":Kind.ENTITY} ] },
 		15: { "desc": "Unit {p1} has targeted unit {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Other unit","kind":Kind.ENTITY} ] },
 		16: { "desc": "Unit {p1} can see unit {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Other unit","kind":Kind.ENTITY} ] },
@@ -65,6 +69,7 @@ const TRIGGERS := {
 		34: { "desc": "Player dialog {p1} is done.", "p": [ {"label":"Dialog #"} ] },
 		35: { "desc": "Player dialog {p1} finished.", "p": [ {"label":"Dialog #"} ] },
 		36: { "desc": "Player has been outside the mission area for {p1} seconds.", "p": [ {"label":"Seconds"} ] },
+		37: { "desc": "Player has placed a satchel in zone {p1}.", "p": [ {"label":"Zone","kind":Kind.ZONE} ] },
 		38: { "desc": "Player is attached to vehicle {p1}.", "p": [ {"label":"Vehicle (SSN)","kind":Kind.ENTITY} ] },
 		39: { "desc": "Player is on vehicle {p1}.", "p": [ {"label":"Vehicle (SSN)","kind":Kind.ENTITY} ] },
 		40: { "desc": "Player is driving vehicle {p1}.", "p": [ {"label":"Vehicle (SSN)","kind":Kind.ENTITY} ] },
@@ -76,7 +81,7 @@ const TRIGGERS := {
 const ACTIONS := {
 	1:  { "desc": "Send group {p1} to a waypoint.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Waypoint type"}, {"label":"Waypoint","kind":Kind.WAYPOINT,"tip":"-1 = nearest of that type."} ] },
 	2:  { "desc": "Kill group {p1}.", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
-	3:  { "desc": "Change group {p1} AI (see sub-type).", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Value"} ] },
+	3:  { "desc": "Change group {p1} AI (see sub-type).", "variable": true, "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Value"} ] },
 	4:  { "desc": "Vaporize group {p1}.", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
 	5:  { "desc": "Change mission variable #{p1} (see sub-type) by {p2}.", "p": [ {"label":"Variable #"}, {"label":"Value"} ] },
 	6:  { "desc": "Show on-screen text {p1}.", "p": [ {"label":"Text / string id"} ] },
@@ -88,12 +93,17 @@ const ACTIONS := {
 	14: { "desc": "Win subgoal {p1}.", "p": [ {"label":"Subgoal #"} ] },
 	15: { "desc": "Lose subgoal {p1}.", "p": [ {"label":"Subgoal #"} ] },
 	16: { "desc": "Change group {p1} team to {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Team"} ] },
-	18: { "desc": "Teleport group {p1} to its spawn.", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
+	17: { "desc": "Change group {p1}'s action to group {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Group","kind":Kind.GROUP} ] },
+	18: { "desc": "Teleport group {p1} to teleport target {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Teleport target"} ] },
 	19: { "desc": "Send unit {p1} to a waypoint.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Waypoint type"}, {"label":"Waypoint","kind":Kind.WAYPOINT} ] },
 	20: { "desc": "Kill unit {p1}.", "p": [ {"label":"Unit","kind":Kind.ENTITY} ] },
-	21: { "desc": "Change unit {p1} AI (see sub-type).", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Value"} ] },
+	21: { "desc": "Change unit {p1} AI (see sub-type).", "variable": true, "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Value"} ] },
+	22: { "desc": "Vaporize unit {p1}.", "p": [ {"label":"Unit","kind":Kind.ENTITY} ] },
+	23: { "desc": "Set unit {p1} move speed to {p2} kph.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Speed (kph)"} ] },
+	24: { "desc": "Change unit {p1} team to {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Team"} ] },
 	25: { "desc": "Move unit {p1} into group {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Group","kind":Kind.GROUP} ] },
-	26: { "desc": "Teleport unit {p1} to its spawn.", "p": [ {"label":"Unit","kind":Kind.ENTITY} ] },
+	26: { "desc": "Teleport unit {p1} to teleport target {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Teleport target"} ] },
+	27: { "desc": "Play particle effect at target {p1}.", "p": [ {"label":"Target #"} ] },
 	30: { "desc": "Open doors for group {p1}.", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
 	31: { "desc": "Close doors for group {p1}.", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
 	32: { "desc": "Reset group {p1}'s has-visited flag.", "p": [ {"label":"Group","kind":Kind.GROUP} ] },
@@ -102,11 +112,28 @@ const ACTIONS := {
 	35: { "desc": "Show/hide win subgoal {p1}.", "p": [ {"label":"Subgoal #"}, {"label":"Show","kind":Kind.BOOL} ] },
 	36: { "desc": "Show/hide lose subgoal {p1}.", "p": [ {"label":"Subgoal #"}, {"label":"Show","kind":Kind.BOOL} ] },
 	37: { "desc": "Mount unit {p1} on its emplaced weapon.", "p": [ {"label":"Unit","kind":Kind.ENTITY} ] },
+	38: { "desc": "Set light {p1} state to {p2}.", "p": [ {"label":"Light #"}, {"label":"On","kind":Kind.BOOL} ] },
+	# 39 (Teammates) param shape depends on the teammate sub-type (medic/evac targets); left raw.
+	40: { "desc": "Show or hide waypoints.", "p": [ {"label":"Show","kind":Kind.BOOL} ] },
+	42: { "desc": "Make unit {p1} prioritise targeting unit {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Target unit","kind":Kind.ENTITY} ] },
+	43: { "desc": "Make unit {p1} exclude unit {p2} from targeting.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Excluded unit","kind":Kind.ENTITY} ] },
+	44: { "desc": "Make unit {p1} prioritise targeting group {p2}.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Target group","kind":Kind.GROUP} ] },
+	45: { "desc": "Make unit {p1} exclude group {p2} from targeting.", "p": [ {"label":"Unit","kind":Kind.ENTITY}, {"label":"Excluded group","kind":Kind.GROUP} ] },
+	46: { "desc": "Make group {p1} prioritise targeting unit {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Target unit","kind":Kind.ENTITY} ] },
+	47: { "desc": "Make group {p1} exclude unit {p2} from targeting.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Excluded unit","kind":Kind.ENTITY} ] },
+	48: { "desc": "Make group {p1} prioritise targeting group {p2}.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Target group","kind":Kind.GROUP} ] },
+	49: { "desc": "Make group {p1} exclude group {p2} from targeting.", "p": [ {"label":"Group","kind":Kind.GROUP}, {"label":"Excluded group","kind":Kind.GROUP} ] },
 }
 
 
 static func _normalize(entry: Dictionary) -> Dictionary:
 	var raw: Array = entry.get("p", [])
+	# A described type carries a row (desc/p); an undescribed type arrives as the {} fallback from
+	# .get(type, {}). For described types, a slot beyond `p` is unused -> disabled by the inspector.
+	# Undescribed types (count unknown) and `variable` AI types (count depends on sub-type) keep all 4
+	# slots usable so a real param is never blocked.
+	var known := not entry.is_empty()
+	var variable := bool(entry.get("variable", false))
 	var slots: Array = []
 	for i in 4:
 		var slot: Dictionary = _DEFAULT_SLOT.duplicate(true)
@@ -114,6 +141,7 @@ static func _normalize(entry: Dictionary) -> Dictionary:
 			var src := raw[i] as Dictionary
 			for k in src:
 				slot[k] = src[k]
+		slot["used"] = (not known) or variable or (i < raw.size())
 		slots.append(slot)
 	return { "desc": String(entry.get("desc", "")), "params": slots }
 

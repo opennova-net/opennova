@@ -1508,6 +1508,79 @@ func test_scripting_unmapped_type_param_roundtrips_raw() -> void:
 	assert_eq(int(sent["param3"]), 12345, "an unmapped param commits its exact raw value")
 
 
+func test_param_schema_marks_unused_slots() -> void:
+	# Described, fixed count: KillGroup (2) uses 1 param -> slot 0 used, 1-3 unused.
+	var kill := MissionParamSchema.action_slots(2)
+	assert_true(bool(kill["params"][0]["used"]), "KillGroup slot 1 is used")
+	assert_false(bool(kill["params"][1]["used"]), "KillGroup slot 2 is unused")
+	assert_false(bool(kill["params"][3]["used"]), "KillGroup slot 4 is unused")
+	# Zero params: BlueWin (8) -> every slot unused.
+	var blue := MissionParamSchema.action_slots(8)
+	for i in 4:
+		assert_false(bool(blue["params"][i]["used"]), "BlueWin slot %d is unused" % (i + 1))
+	# Undescribed type: AreaAiRed (12) has no row -> count unknown -> all slots stay usable.
+	var area := MissionParamSchema.action_slots(12)
+	for i in 4:
+		assert_true(bool(area["params"][i]["used"]), "undescribed action slot %d stays usable" % (i + 1))
+	# Variable (AI) type: ChangeGroupAI (3) -> all slots usable (count depends on sub-type).
+	var ai := MissionParamSchema.action_slots(3)
+	for i in 4:
+		assert_true(bool(ai["params"][i]["used"]), "AI action slot %d stays usable" % (i + 1))
+	# Triggers likewise: GroupAtRedAlert (main 1 / sub 3) uses only param1.
+	var trig := MissionParamSchema.trigger_slots(1, 3)
+	assert_true(bool(trig["params"][0]["used"]), "GroupAtRedAlert slot 1 is used")
+	assert_false(bool(trig["params"][1]["used"]), "GroupAtRedAlert slot 2 is unused")
+
+
+func test_scripting_action_disables_unused_param_slots() -> void:
+	# KillGroup uses one param (the group); the inspector greys the other three.
+	var event := _sc_event(0, 0, 0, 0, 0, 1)
+	var chain := _sc_chain_dict(event, [], [_sc_act(2, "KillGroup", 0, "Null", [5, 0, 0, 0])])
+	var ctx := _scripting_ctx([event], 0, chain)
+	ctx.inspector._sc_action_list.item_selected.emit(0)
+	assert_true(ctx.inspector._sc_action_params[0].is_editable(), "the used param (group) stays editable")
+	assert_false(ctx.inspector._sc_action_params[1].is_editable(), "unused param 2 is disabled")
+	assert_false(ctx.inspector._sc_action_params[2].is_editable(), "unused param 3 is disabled")
+	assert_false(ctx.inspector._sc_action_params[3].is_editable(), "unused param 4 is disabled")
+
+
+func test_scripting_zero_param_action_disables_all_slots() -> void:
+	# BlueWin takes no params -> all four rows greyed.
+	var event := _sc_event(0, 0, 0, 0, 0, 1)
+	var chain := _sc_chain_dict(event, [], [_sc_act(8, "BlueWin", 0, "Null", [0, 0, 0, 0])])
+	var ctx := _scripting_ctx([event], 0, chain)
+	ctx.inspector._sc_action_list.item_selected.emit(0)
+	for i in 4:
+		assert_false(ctx.inspector._sc_action_params[i].is_editable(), "BlueWin param %d is disabled" % (i + 1))
+
+
+func test_scripting_ai_and_unmapped_actions_keep_slots_editable() -> void:
+	# ChangeGroupAI (variable count by sub-type) and an undescribed action both keep all slots editable
+	# so a real param is never blocked.
+	var event := _sc_event(0, 0, 0, 0, 0, 1)
+	var ai_chain := _sc_chain_dict(event, [], [_sc_act(3, "ChangeGroupAI", 34, "PlayPartAnim", [1, 2, 3, 4])])
+	var ai_ctx := _scripting_ctx([event], 0, ai_chain)
+	ai_ctx.inspector._sc_action_list.item_selected.emit(0)
+	for i in 4:
+		assert_true(ai_ctx.inspector._sc_action_params[i].is_editable(), "AI action param %d stays editable" % (i + 1))
+	var raw_chain := _sc_chain_dict(event, [], [_sc_act(12, "AreaAiRed", 0, "Null", [1, 2, 3, 4])])
+	var raw_ctx := _scripting_ctx([event], 0, raw_chain)
+	raw_ctx.inspector._sc_action_list.item_selected.emit(0)
+	for i in 4:
+		assert_true(raw_ctx.inspector._sc_action_params[i].is_editable(), "undescribed action param %d stays editable" % (i + 1))
+
+
+func test_scripting_trigger_disables_unused_param_slots() -> void:
+	# GroupAtRedAlert uses only param1; the rest are greyed.
+	var event := _sc_event(0, 0, 0, 0, 1, 0)
+	var chain := _sc_chain_dict(event, [_sc_trig(1, "Group", 3, "GroupAtRedAlert", [5, 0, 0, 0])], [])
+	var ctx := _scripting_ctx([event], 0, chain)
+	ctx.inspector._sc_trigger_list.item_selected.emit(0)
+	assert_true(ctx.inspector._sc_trigger_params[0].is_editable(), "the used param (group) stays editable")
+	assert_false(ctx.inspector._sc_trigger_params[1].is_editable(), "unused trigger param 2 is disabled")
+	assert_false(ctx.inspector._sc_trigger_params[3].is_editable(), "unused trigger param 4 is disabled")
+
+
 func test_scripting_picker_out_of_range_shows_raw_row() -> void:
 	# A zone ref past the end of the (empty) zone table is shown as its own raw row, not snapped to entry 0.
 	var event := _sc_event(0, 0, 0, 0, 1, 0)

@@ -11,11 +11,15 @@ const MARKER_HALF := 1.5
 const COLOR_NEUTRAL := Color(0.95, 0.85, 0.2)
 const COLOR_SELECTED := Color(0.2, 1.0, 0.5)
 
-# Marker / waypoint label sizing. The labels are billboarded + fixed_size, so font_size and
-# outline_size are effectively screen-space pixel sizes. Kept small so a name or route number
-# annotates its gizmo without dominating the viewport (the previous 22-28px text read far too large).
-const LABEL_FONT_SIZE := 13
-const LABEL_OUTLINE_SIZE := 4
+# Marker / waypoint label sizing. The labels are billboarded but NOT fixed_size: they live in world
+# space so they scale with camera distance -- readable when you zoom toward an entity, and shrinking
+# away to nothing in a high-altitude overview. (fixed_size kept every label a constant on-screen size
+# regardless of zoom, so a map overview of hundreds of sound-emitter / marker names piled into an
+# unreadable wall of huge text.) World text height = font_size * LABEL_PIXEL_SIZE; ~0.96 units here,
+# a bit under the 1.5-unit gizmo half-extent, so a label sits just above its cube up close.
+const LABEL_FONT_SIZE := 32
+const LABEL_OUTLINE_SIZE := 8
+const LABEL_PIXEL_SIZE := 0.03
 
 
 # A cube gizmo at `pos` tinted `color`, with `base_color` meta so apply_selection can restore it.
@@ -35,7 +39,8 @@ static func make_gizmo(mesh: BoxMesh, pos: Vector3, color: Color, label_text: St
 		var label := Label3D.new()
 		label.text = label_text
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		label.fixed_size = true
+		label.fixed_size = false
+		label.pixel_size = LABEL_PIXEL_SIZE
 		label.no_depth_test = true
 		label.font_size = LABEL_FONT_SIZE
 		label.outline_size = LABEL_OUTLINE_SIZE

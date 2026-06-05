@@ -1735,6 +1735,9 @@ func _refresh_sc_trigger_section(triggers: Array) -> void:
 		var slot_def := schema["params"][i] as Dictionary
 		_sc_trigger_params[i].configure(slot_def, _sc_param_items(int(slot_def["kind"]), slot_def))
 		_sc_trigger_params[i].set_value(params[i])
+		# Disable slots this trigger type doesn't use (greyed, non-editable). `used` is false only for
+		# described types past their param count; unknown / variable types keep all four editable.
+		_sc_trigger_params[i].set_editable(bool(slot_def.get("used", true)))
 	_sc_trigger_syncing = false
 
 
@@ -1777,6 +1780,8 @@ func _refresh_sc_action_section(actions: Array) -> void:
 		var slot_def := schema["params"][i] as Dictionary
 		_sc_action_params[i].configure(slot_def, _sc_param_items(int(slot_def["kind"]), slot_def))
 		_sc_action_params[i].set_value(params[i])
+		# Disable slots this action type doesn't use; AI actions (variable) + raw types stay editable.
+		_sc_action_params[i].set_editable(bool(slot_def.get("used", true)))
 	_sc_action_syncing = false
 
 

@@ -16,16 +16,19 @@ const Schema := preload("res://modtools/mission/mission_param_schema.gd")
 # named engine enum the inspector currently renders as a plain labelled int; a NEW enum value lands
 # outside this list and fails the test until it gets a schema row or is added here on purpose.
 const TRIGGER_RAW_ALLOWLIST := {
-	1: [0],                  # Group: Null (no condition).
-	2: [0, 1, 2, 7, 13],     # Single: Null + sub-types whose params are not yet RE'd.
-	5: [0],                  # SecondTimeThrough: single "Null" sub-type, no params.
-	6: [1, 2, 3],            # Teammate: enabled / medic-assisting / evacuating -- params not yet RE'd.
-	7: [18, 19, 20, 21, 37], # Player: berserk / view-mode / satchel states (no params).
+	1: [0],              # Group: Null (no condition).
+	2: [0],              # Single: Null (no condition).
+	5: [0],              # SecondTimeThrough: single "Null" sub-type, no params.
+	6: [1, 2, 3],        # Teammate: enabled / medic-assisting / evacuating -- no param slots (dfx2med).
+	7: [18, 19, 20, 21], # Player: berserk / first / third / cockpit view -- no param slots (dfx2med).
 }
-# Action types deliberately left raw (no ACTIONS row): Null, the area/AI/effect/targeting families
-# whose params are not yet reverse-engineered.
+# Action types deliberately left raw (no ACTIONS row), confirmed against dfx2med:
+#   0  Null (no-op)
+#   12/13 AreaAiRed/Blue -- AI-bit driven (slot1+ depend on the AI sub-type; rendered as raw Value)
+#   39 Teammates -- param shape depends on the teammate sub-type (medic/evac targets)
+#   41 ExecuteWac -- editor exposes no param slot
 const ACTION_RAW_ALLOWLIST := [
-	0, 12, 13, 17, 22, 23, 24, 27, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
+	0, 12, 13, 39, 41,
 ]
 
 
