@@ -164,8 +164,6 @@ def _bind():
     lib.tdp_parse.argtypes = [ctypes.c_char_p, ctypes.POINTER(TdpProject)]
     lib.tdp_write.restype = ctypes.c_int
     lib.tdp_write.argtypes = [ctypes.c_char_p, ctypes.POINTER(TdpProject)]
-    lib.tdp_write_3da.restype = ctypes.c_int
-    lib.tdp_write_3da.argtypes = [ctypes.c_char_p, ctypes.POINTER(TdpProject)]
     lib.tdp_from_ir.restype = ctypes.c_int
     lib.tdp_from_ir.argtypes = [ctypes.POINTER(ThreediModelIR), ctypes.POINTER(TdpProject)]
     lib.tdp_alloc_materials.restype = None
@@ -199,17 +197,6 @@ def write_tdp(path: str, proj) -> None:
     rc = lib.tdp_write(path, ctypes.byref(proj))
     if rc != 0:
         raise RuntimeError(f"tdp_write failed for {path!r}")
-
-
-def write_3da(path: str, proj) -> None:
-    """Write a .3da project file (legacy ModSuperOED format)."""
-    _bind()
-    lib = load_lib()
-    if isinstance(path, str):
-        path = path.encode("utf-8")
-    rc = lib.tdp_write_3da(path, ctypes.byref(proj))
-    if rc != 0:
-        raise RuntimeError(f"tdp_write_3da failed for {path!r}")
 
 
 def tdp_from_ir(ir) -> TdpProject:

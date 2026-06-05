@@ -56,6 +56,9 @@ void NovaTerrainTileInfo::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_entries"), &NovaTerrainTileInfo::clear_entries);
 	ClassDB::bind_method(D_METHOD("find_entry_index_at_cell", "cell_x", "cell_z"), &NovaTerrainTileInfo::find_entry_index_at_cell);
 	ClassDB::bind_method(D_METHOD("get_entry_indices_at_cell", "cell_x", "cell_z"), &NovaTerrainTileInfo::get_entry_indices_at_cell);
+	ClassDB::bind_static_method("NovaTerrainTileInfo",
+	                            D_METHOD("transform_local_uv", "uv", "flags"),
+	                            &NovaTerrainTileInfo::transform_local_uv);
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "entries", PROPERTY_HINT_ARRAY_TYPE, "NovaTerrainTileEntry"),
 	             "set_entries",
 	             "get_entries");
@@ -150,6 +153,13 @@ PackedInt32Array NovaTerrainTileInfo::get_entry_indices_at_cell(int cell_x, int 
 		}
 	}
 	return indices;
+}
+
+Vector2 NovaTerrainTileInfo::transform_local_uv(Vector2 uv, int flags) {
+	const opennova::TilUv result = opennova::til_transform_local_uv(
+	    opennova::TilUv{static_cast<float>(uv.x), static_cast<float>(uv.y)},
+	    static_cast<uint8_t>(flags & 0xFF));
+	return Vector2(result.u, result.v);
 }
 
 void NovaTerrainTileInfo::copy_from_native(const opennova::TilFile &file) {

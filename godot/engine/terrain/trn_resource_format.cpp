@@ -1,5 +1,6 @@
 #include "trn_resource_format.h"
 #include "nova_terrain_data.h"
+#include "util/texture_path_resolver.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -63,7 +64,10 @@ PackedStringArray ResourceFormatLoaderTRN::_get_dependencies(const String &p_pat
 	add(trn.tilestrip);
 	if (!trn.tileinfo.empty()) {
 		const String tileinfo = String(trn.tileinfo.c_str());
-		if (tileinfo.get_extension().to_lower() == "til") {
+		const String resolved = opennova::resolve_sidecar_path(dir, tileinfo, "til");
+		if (!resolved.is_empty()) {
+			deps.push_back(resolved);
+		} else if (tileinfo.get_extension().to_lower() == "til") {
 			deps.push_back(dir.path_join(tileinfo));
 		} else {
 			deps.push_back(dir.path_join(tileinfo + String(".til")));

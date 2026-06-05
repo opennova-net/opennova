@@ -49,6 +49,24 @@ func open_env(path: String) -> Error:
 	return OK
 
 
+func open_env_from_resource_root(resources: NovaResourceRoot, name: String) -> Error:
+	if resources == null:
+		return ERR_INVALID_PARAMETER
+	var next_file := EnvFile.new()
+	var err := next_file.load_from_resource_root(resources, name)
+	if err != OK:
+		return err
+	_disconnect_env_file()
+	env_file = next_file
+	set_current_path(name.get_file())
+	remember_open_path(resources.get_root_dir().path_join(name.get_file()))
+	time_of_day = float(env_file.get_curtime())
+	mark_clean()
+	_connect_env_file()
+	_emit_all_changed()
+	return OK
+
+
 func save_current() -> Error:
 	if current_path.is_empty():
 		return ERR_INVALID_PARAMETER
@@ -95,7 +113,13 @@ func _save_to_path(path: String, clear_dirty: bool) -> Error:
 func set_time_of_day(value: float, mark_dirty: bool = true) -> void:
 	time_of_day = fposmod(value, 2400.0)
 	if env_file:
+		# Guard the inner EnvFile change so its environment_changed echo does not
+		# fan out a second, redundant environment_changed/state_changed for this
+		# step; we emit exactly once below. Dragging time-of-day otherwise rebuilt
+		# the shell twice per step.
+		_suspend_dirty = true
 		env_file.set_curtime(int(time_of_day))
+		_suspend_dirty = false
 	if mark_dirty:
 		_mark_dirty()
 	environment_changed.emit(env_file, time_of_day)

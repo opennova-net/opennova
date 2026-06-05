@@ -1,90 +1,103 @@
 class_name TerrainEditorWorkspace
-extends "res://modtools/editor/editor_workspace.gd"
+extends EditorWorkspace
 
-const SculptInspectorScene = preload("res://modtools/terrain/ui/inspectors/sculpt_inspector.tscn")
-const PaintInspectorScene = preload("res://modtools/terrain/ui/inspectors/paint_inspector.tscn")
-const ScatterInspectorScene = preload("res://modtools/terrain/ui/inspectors/scatter_inspector.tscn")
-const StampInspectorScene = preload("res://modtools/terrain/ui/inspectors/stamp_inspector.tscn")
-const LayoutInspectorScene = preload("res://modtools/terrain/ui/inspectors/layout_inspector.tscn")
 const TerrainViewportScript = preload("res://modtools/terrain/terrain_viewport.gd")
+const TerrainAssetDockScene = preload("res://modtools/terrain/ui/editor_asset_dock.tscn")
 
 enum Workflow { SCULPT, PAINT, SCATTER, STAMP, LAYOUT }
 enum ExportFlavor { BHD = 0, DFX_JO = 1 }
 
 const DETAIL_LABELS := ["Detail A", "Detail B", "Detail C"]
 
-const WORKFLOW_DEFS := [
-	{"id": Workflow.SCULPT, "label": "Sculpt", "tooltip": "Raise, lower, smooth, and flatten the terrain."},
-	{"id": Workflow.PAINT, "label": "Paint", "tooltip": "Paint detail layers, color, clone, and surface types."},
-	{"id": Workflow.SCATTER, "label": "Foliage", "tooltip": "Manage and paint foliage placement."},
-	{"id": Workflow.STAMP, "label": "Tile", "tooltip": "Place and edit tiles."},
-	{"id": Workflow.LAYOUT, "label": "Layout", "tooltip": "Edit sectors, map size, origin, and water."},
-]
-
-const INSPECTOR_SCENES := {
-	Workflow.SCULPT: SculptInspectorScene,
-	Workflow.PAINT: PaintInspectorScene,
-	Workflow.SCATTER: ScatterInspectorScene,
-	Workflow.STAMP: StampInspectorScene,
-	Workflow.LAYOUT: LayoutInspectorScene,
-}
+# Workflow inspectors are declared as typed InspectorDef rows in
+# _build_inspector_defs(); Sculpt is code-first, the rest are still scene-backed
+# while the terrain port is in progress.
 
 var terrain_editor: Node
+var _inspectors: Dictionary = {}
+var _asset_dock_host: Control
 var _asset_dock: Control
-var _viewport: Control
+var _mount: ViewportMount
 
 
 func _init(value: Node = null) -> void:
 	terrain_editor = value
 
 
+func _ensure_mount() -> ViewportMount:
+	if _mount == null:
+		_mount = ViewportMount.new(&"TerrainViewport", func() -> Control: return TerrainViewportScript.new())
+	return _mount
+
+
 func set_terrain_editor(value: Node) -> void:
 	terrain_editor = value
-	if _viewport != null:
-		_viewport.set_terrain_editor(terrain_editor)
+	if _mount != null:
+		var viewport := _mount.get_viewport_node()
+		if viewport != null:
+			viewport.set_terrain_editor(terrain_editor)
+
+
+func bind_to_editor(value: Node) -> void:
+	set_terrain_editor(value)
+
+
+func get_workspace_tooltip() -> String:
+	return "Edit terrain sculpting, paint, foliage, tiles, and layout."
+
+
+func shows_camera_status() -> bool:
+	return true
+
+
+func shows_tile_gizmo() -> bool:
+	return true
+
+
+func get_export_flavors() -> Array:
+	return [
+		{"id": ExportFlavor.BHD, "label": "BHD"},
+		{"id": ExportFlavor.DFX_JO, "label": "DFX / JO"},
+	]
 
 
 func activate() -> void:
-	if terrain_editor != null and _viewport != null and _viewport.get_parent() != null:
-		terrain_editor.set_viewport_active(true)
+	if terrain_editor != null and _mount != null and _mount.is_mounted():
+		terrain_editor.set_viewport_active(true, true)
 
 
 func deactivate() -> void:
 	if terrain_editor != null:
-		terrain_editor.set_viewport_active(false)
+		terrain_editor.set_viewport_active(false, false)
 
 
 func mount_viewport(host: Control) -> void:
 	if host == null or terrain_editor == null:
 		return
-	if _viewport == null:
-		_viewport = TerrainViewportScript.new()
-		_viewport.name = "TerrainViewport"
-		_viewport.set_anchors_preset(Control.PRESET_FULL_RECT)
-		_viewport.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_viewport.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_viewport.set_terrain_editor(terrain_editor)
-	if _viewport.get_parent() == null:
-		host.add_child(_viewport)
-		_viewport.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var viewport := _ensure_mount().mount(host)
+	if viewport != null:
+		viewport.set_terrain_editor(terrain_editor)
+		viewport.set_edit_input_enabled(true)
 
 
 func unmount_viewport(_host: Control) -> void:
 	if terrain_editor != null:
-		terrain_editor.set_viewport_active(false)
-	if _viewport != null and _viewport.get_parent() != null:
-		_viewport.get_parent().remove_child(_viewport)
+		terrain_editor.set_viewport_active(false, false)
+	if _mount != null:
+		_mount.unmount()
 
 
 func release_viewport() -> void:
 	if terrain_editor != null:
-		terrain_editor.set_viewport_active(false)
-	if _viewport == null:
-		return
-	if _viewport.get_parent() != null:
-		_viewport.get_parent().remove_child(_viewport)
-	_viewport.free()
-	_viewport = null
+		terrain_editor.set_viewport_active(false, false)
+	if _mount != null:
+		_mount.release()
+
+
+func get_viewport_camera() -> Camera3D:
+	if terrain_editor != null and terrain_editor.has_method("get_editor_camera"):
+		return terrain_editor.get_editor_camera()
+	return null
 
 
 func get_workspace_id() -> String:
@@ -150,8 +163,22 @@ func uses_asset_dock() -> bool:
 
 
 func set_asset_dock(dock: Control) -> void:
-	_asset_dock = dock
-	if _asset_dock != null and _asset_dock.has_method("set_editor"):
+	if _asset_dock != null and _asset_dock.get_parent() != null:
+		_asset_dock.get_parent().remove_child(_asset_dock)
+	if dock == null:
+		if _asset_dock != null:
+			_asset_dock.free()
+			_asset_dock = null
+		_asset_dock_host = null
+		return
+	_asset_dock_host = dock
+	if _asset_dock == null:
+		_asset_dock = TerrainAssetDockScene.instantiate()
+		_asset_dock.name = "TerrainAssetDock"
+		_asset_dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_asset_dock.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_asset_dock_host.add_child(_asset_dock)
+	if _asset_dock.has_method("set_editor"):
 		_asset_dock.set_editor(terrain_editor)
 
 
@@ -160,8 +187,14 @@ func sync_asset_dock() -> void:
 		_asset_dock.sync_from_editor_state()
 
 
-func get_workflows() -> Array:
-	return WORKFLOW_DEFS
+func _build_inspector_defs() -> Array:
+	return [
+		InspectorDef.make(Workflow.SCULPT, "Sculpt", "Raise, lower, smooth, and flatten the terrain.", SculptInspector),
+		InspectorDef.make(Workflow.PAINT, "Paint", "Paint detail layers, color, clone, and surface types.", PaintInspector),
+		InspectorDef.make(Workflow.SCATTER, "Foliage", "Manage and paint foliage placement.", ScatterInspector),
+		InspectorDef.make(Workflow.STAMP, "Tile", "Place and edit tiles.", StampInspector),
+		InspectorDef.make(Workflow.LAYOUT, "Layout", "Edit sectors, map size, origin, and water.", LayoutInspector),
+	]
 
 
 func get_active_workflow_id() -> int:
@@ -178,12 +211,14 @@ func activate_workflow(workflow_id: int) -> void:
 
 
 func build_workflow_inspector(workflow_id: int, host: Control) -> void:
-	if not INSPECTOR_SCENES.has(workflow_id):
+	var def := _def_for(workflow_id)
+	if def == null or def.inspector_script == null:
 		return
-	var inspector: Node = INSPECTOR_SCENES[workflow_id].instantiate()
-	host.add_child(inspector)
-	if terrain_editor != null and inspector.has_method("set_editor"):
-		inspector.set_editor(terrain_editor)
+	if _inspectors.get(workflow_id) == null:
+		_inspectors[workflow_id] = def.inspector_script.new()
+	var code_inspector = _inspectors[workflow_id]
+	code_inspector.build_main(host)
+	code_inspector.set_editor(terrain_editor)
 
 
 func is_busy() -> bool:
@@ -251,6 +286,16 @@ func get_open_dialog_filters() -> PackedStringArray:
 
 func get_open_dialog_dir() -> String:
 	return terrain_editor.get_last_open_dir() if terrain_editor else ""
+
+
+func get_open_resource_kind() -> String:
+	return "terrain"
+
+
+func get_current_resource_path() -> String:
+	if terrain_editor != null and terrain_editor.has_method("get_current_trn_path"):
+		return terrain_editor.get_current_trn_path()
+	return ""
 
 
 func open_file(path: String) -> Error:

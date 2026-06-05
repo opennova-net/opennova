@@ -1,11 +1,12 @@
 [project]
 name = "opennova-tools"
-version = "0.1.1"
+version = "0.1.3"
 description = "Standalone OpenNova tools (importer)"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    "bpy>=5.0,<6.0",
+    "bpy==5.0.0",
+    "PySide6>=6.5",
 ]
 
 [project.scripts]
@@ -14,15 +15,20 @@ onimport = "apps.importer.__main__:main"
 [dependency-groups]
 dev = [
     "pytest>=8",
+    "pytest-qt>=4",
     "pyinstaller>=6",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["-p", "no:pytest-qt"]
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["apps*"]
+include = ["apps*", "opennova_blender*", "opennova_jobs*", "opennova_max*", "opennova_qt_ui*", "pyopennova*"]
+
+[tool.setuptools.package-data]
+opennova_max = ["maxscript/*.mcr"]

@@ -55,7 +55,7 @@ var tileinfo_state: String = TILEINFO_STATE_NONE
 var tileinfo_selected_index: int = -1
 var tile_stamp_tile_index: int = 0
 var tile_stamp_flags: int = 0
-var surface_map_state: Dictionary = {}
+var surface_map: NovaTerrainSurfaceMap = null
 var foliage_defs: Array[NovaTerrainFoliageDef] = []
 var foliage_map: NovaTerrainFoliageMap
 var selected_foliage_def_index: int = -1
@@ -72,7 +72,7 @@ func reset_trn_metadata() -> void:
 	tileinfo_source_path = ""
 	tileinfo_state = TILEINFO_STATE_NONE
 	tileinfo_selected_index = -1
-	surface_map_state = {}
+	surface_map = null
 	foliage_map = null
 	foliage_defs = []
 	selected_foliage_def_index = -1
@@ -103,7 +103,7 @@ func apply_default_visual_state(material: ShaderMaterial, sync_data: bool = true
 		for slot_id in ["charmap", "foliagemap"]:
 			data.reset_pcx_slot_default(slot_id, HM_SIZE, HM_SIZE)
 			TerrainEditorSlots.apply_slot_texture(material, data, slot_id, TerrainEditorSlots.get_slot_texture(data, slot_id))
-		surface_map_state = _clone_surface_map_state(data.get_pcx_slot_state("charmap"))
+		surface_map = _surface_map_from_slot(data.get_pcx_slot_state("charmap"))
 		foliage_map = data.get_foliage_map()
 	sync_material_from_data(material)
 
@@ -485,7 +485,9 @@ func get_foliage_map_preview_texture() -> Texture2D:
 
 
 func get_surface_palette_bytes() -> PackedByteArray:
-	return TerrainEditorSurfacePaint.get_palette_bytes(surface_map_state)
+	if surface_map == null:
+		return PackedByteArray()
+	return surface_map.get_palette_bytes()
 
 
 func get_foliage_def(index: int) -> NovaTerrainFoliageDef:
@@ -549,14 +551,20 @@ func restore_foliage_map_history_state(state: Dictionary) -> void:
 
 
 func capture_surface_map_history_state() -> Dictionary:
-	return _clone_surface_map_state(surface_map_state)
+	if surface_map == null:
+		return {}
+	return surface_map.to_dictionary().duplicate(true)
 
 
 func restore_surface_map_history_state(material: ShaderMaterial, state: Dictionary) -> void:
-	surface_map_state = _clone_surface_map_state(state)
-	if data == null or surface_map_state.is_empty():
+	surface_map = _surface_map_from_slot(state)
+	sync_surface_map_to_data(material)
+
+
+func sync_surface_map_to_data(material: ShaderMaterial) -> void:
+	if data == null or surface_map == null or surface_map.get_width() <= 0:
 		return
-	data.set_pcx_slot_state("charmap", surface_map_state)
+	data.set_pcx_slot_state("charmap", surface_map.to_dictionary())
 	if material != null:
 		material.set_shader_parameter("u_charmap", TerrainEditorSlots.get_slot_texture(data, "charmap"))
 
@@ -653,7 +661,7 @@ func capture_trn_resource(resource: NovaTerrainData) -> void:
 			texture_files[String(slot_id)] = filename
 	tileinfo_filename = _normalize_tileinfo_reference(String(resource.get_tileinfo_filename()))
 	_clear_tileinfo_resource()
-	surface_map_state = _clone_surface_map_state(resource.get_pcx_slot_state("charmap"))
+	surface_map = _surface_map_from_slot(resource.get_pcx_slot_state("charmap"))
 	foliage_defs = _clone_foliage_defs(resource.get_foliage_defs())
 	foliage_map = _clone_foliage_map(resource.get_foliage_map())
 	normalize_foliage_state_for_editor()
@@ -687,7 +695,7 @@ func apply_loaded_textures_from_data(material: ShaderMaterial) -> void:
 		var texture := TerrainEditorSlots.get_slot_texture(data, String(slot_id))
 		if texture != null or slot_id == "detailmap" or slot_id == "detailmap2" or slot_id == "detailmapdist2":
 			TerrainEditorSlots.apply_slot_texture(material, data, String(slot_id), texture)
-	surface_map_state = _clone_surface_map_state(data.get_pcx_slot_state("charmap"))
+	surface_map = _surface_map_from_slot(data.get_pcx_slot_state("charmap"))
 	sync_material_from_data(material)
 
 
@@ -704,7 +712,7 @@ func load_texture_slot(material: ShaderMaterial, slot_id: String, path: String) 
 			return false
 		material.set_shader_parameter(String(slot["uniform"]), TerrainEditorSlots.get_slot_texture(data, slot_id))
 		if slot_id == "charmap":
-			surface_map_state = _clone_surface_map_state(data.get_pcx_slot_state("charmap"))
+			surface_map = _surface_map_from_slot(data.get_pcx_slot_state("charmap"))
 		if slot_id == "foliagemap":
 			foliage_map = _clone_foliage_map(data.get_foliage_map())
 		texture_files[slot_id] = path.get_file()
@@ -727,7 +735,7 @@ func reset_texture_slot(material: ShaderMaterial, slot_id: String) -> void:
 		data.reset_pcx_slot_default(slot_id, HM_SIZE, HM_SIZE)
 		TerrainEditorSlots.apply_slot_texture(material, data, slot_id, TerrainEditorSlots.get_slot_texture(data, slot_id))
 		if slot_id == "charmap":
-			surface_map_state = _clone_surface_map_state(data.get_pcx_slot_state("charmap"))
+			surface_map = _surface_map_from_slot(data.get_pcx_slot_state("charmap"))
 		if slot_id == "foliagemap":
 			foliage_map = _clone_foliage_map(data.get_foliage_map())
 	else:
@@ -737,10 +745,19 @@ func reset_texture_slot(material: ShaderMaterial, slot_id: String) -> void:
 
 
 func save_texture_assets(material: ShaderMaterial, output_dir: String, terrain_name: String) -> Error:
-	var err := NovaTerrainBuilder.save_image_tga(colormap_image, output_dir + "/" + terrain_name + "_c.tga")
+	# Source the editable buffers from NovaTerrainData (their owner); fall back to
+	# the local refs if data is absent. They are the same Image objects.
+	var colormap_source := colormap_image
+	var blendmap_source := blendmap_image
+	if data != null:
+		if data.get_colormap_image() != null:
+			colormap_source = data.get_colormap_image()
+		if data.get_blendmap_image() != null:
+			blendmap_source = data.get_blendmap_image()
+	var err := NovaTerrainBuilder.save_image_tga(colormap_source, output_dir + "/" + terrain_name + "_c.tga")
 	if err != OK:
 		return err
-	err = NovaTerrainBuilder.save_image_tga(blendmap_image, output_dir + "/" + terrain_name + "_d1.tga")
+	err = NovaTerrainBuilder.save_image_tga(blendmap_source, output_dir + "/" + terrain_name + "_d1.tga")
 	if err != OK:
 		return err
 	normalize_foliage_state_for_editor()
@@ -806,17 +823,19 @@ func build_heightmap_from_data() -> Image:
 
 
 func build_heightmap_from_raw16(raw_bytes: PackedByteArray) -> Image:
-	var image := Image.create(HM_SIZE, HM_SIZE, false, Image.FORMAT_RF)
-	for i in HM_SIZE * HM_SIZE:
-		var low := raw_bytes[i * 2]
-		var high := raw_bytes[i * 2 + 1]
-		var height := float(low | (high << 8)) / 256.0
-		image.set_pixel(i % HM_SIZE, i / HM_SIZE, Color(height, 0, 0, 1))
-	return image
+	if data != null:
+		var image: Image = data.heightmap_image_from_raw16(raw_bytes)
+		if image != null:
+			return image
+	return Image.create(HM_SIZE, HM_SIZE, false, Image.FORMAT_RF)
 
 
 func set_heightmap_image(image: Image) -> void:
 	heightmap_image = image
+	if data != null:
+		# NovaTerrainData owns the editable depth: hand it the same Image so brush
+		# edits (which mutate this object in place) keep get_depth_raw16 current.
+		data.set_heightmap_image(image)
 
 
 func set_colormap_image(material: ShaderMaterial, image: Image, sync_data: bool = true) -> void:
@@ -824,6 +843,9 @@ func set_colormap_image(material: ShaderMaterial, image: Image, sync_data: bool 
 	colormap_tex = ImageTexture.create_from_image(colormap_image)
 	material.set_shader_parameter("u_colormap", colormap_tex)
 	if sync_data and data:
+		# NovaTerrainData owns the editable buffer (same Image object the brush
+		# mutates) plus the derived display/runtime Texture2D.
+		data.set_colormap_image(colormap_image)
 		data.set_colormap(colormap_tex)
 
 
@@ -832,6 +854,7 @@ func set_blendmap_image(material: ShaderMaterial, image: Image, sync_data: bool 
 	blendmap_tex = ImageTexture.create_from_image(blendmap_image)
 	material.set_shader_parameter("u_blendmap", blendmap_tex)
 	if sync_data and data:
+		data.set_blendmap_image(blendmap_image)
 		data.set_detailblendmap(blendmap_tex)
 
 
@@ -841,37 +864,21 @@ func sync_material_from_data(material: ShaderMaterial) -> void:
 	material.set_shader_parameter("u_detail_density", float(data.get_detail_density()))
 
 
-func image_to_raw16(image: Image, enforce_cdep: bool = false) -> PackedByteArray:
-	var raw := PackedByteArray()
-	raw.resize(HM_SIZE * HM_SIZE * 2)
-	var pixels := image.get_data()
-	# When called for a CDEP export, scan first: CDEP's 4-bit bits_per_delta
-	# field caps each 256-pixel horizontal block at a 32767-raw-unit range.
-	# The brush enforces this live, but the bake-time scan makes corrupt CPTs
-	# impossible regardless of how the heightmap got into this state. On
-	# violation, return empty so the caller can fail the export cleanly
-	# instead of silently writing a desynced .cpt.
-	if enforce_cdep:
-		for z in HM_SIZE:
-			for bx in 4:
-				var x_lo := bx * 256
-				var lo := 65535
-				var hi := 0
-				for x in range(x_lo, x_lo + 256):
-					var idx := (z * HM_SIZE + x) * 4
-					var v := clampi(int(pixels.decode_float(idx) * 256.0), 0, 65535)
-					if v < lo: lo = v
-					if v > hi: hi = v
-				if hi - lo > 32767:
-					push_error("CDEP per-block range exceeded at row %d block %d (range=%d > 32767)" % [z, bx, hi - lo])
-					return PackedByteArray()
-	for i in HM_SIZE * HM_SIZE:
-		var height := pixels.decode_float(i * 4)
-		var value := clampi(int(height * 256.0), 0, 65535)
-		var output := i * 2
-		raw[output] = value & 0xFF
-		raw[output + 1] = (value >> 8) & 0xFF
-	return raw
+func cdep_ranges_valid(image: Image) -> bool:
+	# CDEP's 4-bit bits_per_delta field caps each 256-pixel horizontal block at
+	# a 32767-raw-unit range. The brush enforces this live; this bake-time guard
+	# makes a corrupt CPT impossible regardless of how the heightmap got into
+	# this state. The raw16 range scan lives in C++ (NovaTerrainData ->
+	# libs/terrain/cdep_constraint); this stays GDScript as export policy.
+	if image == null:
+		return false
+	if data == null:
+		return true
+	var violations := data.cdep_count_violations()
+	if violations > 0:
+		push_error("CDEP per-block range exceeded in %d block(s) (> 32767 raw units)" % violations)
+		return false
+	return true
 
 
 func get_terrain_name() -> String:
@@ -909,17 +916,8 @@ func _read_tga_bpp(path: String) -> int:
 
 
 func _resolve_existing_file(base_dir: String, filename: String) -> String:
-	if base_dir.is_empty() or filename.is_empty():
-		return ""
-	var direct := base_dir.path_join(filename)
-	if FileAccess.file_exists(direct):
-		return direct
-
-	var wanted := filename.to_lower()
-	for existing in DirAccess.get_files_at(base_dir):
-		if String(existing).to_lower() == wanted:
-			return base_dir.path_join(String(existing))
-	return ""
+	# Shared case-insensitive resolver — same primitive textures/models use.
+	return NovaPaths.resolve_file(base_dir, filename)
 
 
 func _clear_tileinfo_resource() -> void:
@@ -1011,7 +1009,7 @@ func _compose_tileinfo_flags(flags: int, operation: String) -> int:
 	var base_flags := normalized_flags & TILEINFO_TRANSFORM_FLAG_MASK
 	var target_uvs: Array[Vector2] = []
 	for corner in TILEINFO_LOCAL_CORNERS:
-		target_uvs.append(_transform_tileinfo_uv(_apply_tileinfo_local_operation(corner, operation), base_flags))
+		target_uvs.append(NovaTerrainTileInfo.transform_local_uv(_apply_tileinfo_local_operation(corner, operation), base_flags))
 
 	for candidate in TILEINFO_COMPOSABLE_FLAG_CANDIDATES:
 		if _tileinfo_uvs_match(target_uvs, candidate):
@@ -1021,7 +1019,7 @@ func _compose_tileinfo_flags(flags: int, operation: String) -> int:
 
 func _tileinfo_uvs_match(target_uvs: Array[Vector2], candidate_flags: int) -> bool:
 	for i in TILEINFO_LOCAL_CORNERS.size():
-		var candidate_uv := _transform_tileinfo_uv(TILEINFO_LOCAL_CORNERS[i], candidate_flags)
+		var candidate_uv: Vector2 = NovaTerrainTileInfo.transform_local_uv(TILEINFO_LOCAL_CORNERS[i], candidate_flags)
 		if candidate_uv.distance_squared_to(target_uvs[i]) > 0.0001:
 			return false
 	return true
@@ -1037,17 +1035,6 @@ func _apply_tileinfo_local_operation(value: Vector2, operation: String) -> Vecto
 			return Vector2(value.x, 1.0 - value.y)
 		_:
 			return value
-
-
-func _transform_tileinfo_uv(value: Vector2, flags: int) -> Vector2:
-	var uv := value
-	if (flags & NovaTerrainTileInfo.FLAG_FLIP_X) != 0:
-		uv.x = 1.0 - uv.x
-	if (flags & NovaTerrainTileInfo.FLAG_FLIP_Y) != 0:
-		uv.y = 1.0 - uv.y
-	if (flags & NovaTerrainTileInfo.FLAG_ROTATE_90) != 0:
-		uv = Vector2(uv.y, 1.0 - uv.x)
-	return uv
 
 
 func _normalize_tileinfo_reference(value: String) -> String:
@@ -1119,8 +1106,12 @@ func _clone_foliage_map(source: NovaTerrainFoliageMap) -> NovaTerrainFoliageMap:
 	return copy
 
 
-func _clone_surface_map_state(state: Dictionary) -> Dictionary:
-	return state.duplicate(true)
+func _surface_map_from_slot(state: Dictionary) -> NovaTerrainSurfaceMap:
+	if state.is_empty():
+		return null
+	var map := NovaTerrainSurfaceMap.new()
+	map.load_from_dictionary(state)
+	return map
 
 
 func _assign_canonical_foliage_matches() -> void:
@@ -1133,20 +1124,7 @@ func _assign_canonical_foliage_matches() -> void:
 func _remap_foliage_map_indices(remap: Dictionary) -> bool:
 	if foliage_map == null or remap.is_empty():
 		return false
-	var indices := foliage_map.get_indices()
-	var changed := false
-	for idx in range(indices.size()):
-		var painted_index := int(indices[idx])
-		if not remap.has(painted_index):
-			continue
-		var next_index := clampi(int(remap[painted_index]), 0, 255)
-		if next_index == painted_index:
-			continue
-		indices[idx] = next_index
-		changed = true
-	if changed:
-		foliage_map.set_indices(indices)
-	return changed
+	return foliage_map.remap_indices(remap) > 0
 
 
 func _clamp_foliage_selection() -> void:

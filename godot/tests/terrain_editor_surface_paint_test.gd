@@ -4,22 +4,24 @@ const TerrainEditorSurfacePaint = preload("res://modtools/terrain/terrain_editor
 
 
 func test_surface_paint_circle_overwrites_indices() -> void:
-	var state := {
-		"width": 16,
-		"height": 16,
-	}
 	var indices := PackedByteArray()
 	indices.resize(16 * 16)
 	indices.fill(TerrainEditorSurfacePaint.DEFAULT_SURFACE_INDEX)
 	var palette := PackedByteArray()
 	palette.resize(256 * 3)
-	state["indices"] = indices
-	state["palette"] = palette
 
-	var changed := TerrainEditorSurfacePaint.paint_circle(state, 8, 8, 3, 1.0, 1.0, 5)
+	var surface_map := NovaTerrainSurfaceMap.new()
+	surface_map.load_from_dictionary({
+		"width": 16,
+		"height": 16,
+		"indices": indices,
+		"palette": palette,
+	})
+
+	var changed := surface_map.paint_circle(8, 8, 3, 1.0, 1.0, 5)
 	assert_true(changed, "Surface paint should report when it writes a new index.")
-	assert_eq(TerrainEditorSurfacePaint.get_index(state, 8, 8), 5, "Surface paint should write the selected index at the brush center.")
-	assert_eq(TerrainEditorSurfacePaint.get_index(state, 0, 0), TerrainEditorSurfacePaint.DEFAULT_SURFACE_INDEX, "Surface paint should not touch pixels outside the brush.")
+	assert_eq(surface_map.get_index(8, 8), 5, "Surface paint should write the selected index at the brush center.")
+	assert_eq(surface_map.get_index(0, 0), TerrainEditorSurfacePaint.DEFAULT_SURFACE_INDEX, "Surface paint should not touch pixels outside the brush.")
 
 
 func test_nova_terrain_data_charmap_state_roundtrips() -> void:

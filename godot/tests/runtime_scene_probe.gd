@@ -1,10 +1,13 @@
 extends SceneTree
 
 # Headless validation of the main_game.tscn runtime pipeline. Loads the scene,
-# waits for NovaTerrainData, moves the camera onto a painted foliage point, then
-# verifies the runtime foliage dispatcher is using broad camera-grid coverage.
+# points the shared NovaWorld at an explicit resource dir (a synthesized one-root
+# fixture by default, or a dir passed via `-- <dir>`), waits for NovaTerrainData,
+# moves the camera onto a painted foliage point, then verifies the foliage
+# dispatcher is using broad camera-grid coverage. There is no runtime fallback;
+# the probe chooses the directory itself.
 #
-# Use: `godot --headless --path godot -s res://tests/runtime_scene_probe.gd`
+# Use: `godot --headless --path godot -s res://tests/runtime_scene_probe.gd -- <dir>`
 
 const INVALID_CELL := Vector2i(-9999, -9999)
 
@@ -14,6 +17,9 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	var args := OS.get_cmdline_user_args()
+	var dir := args[0] if args.size() >= 1 else _default_runtime_resource_root()
+
 	var packed := load("res://game/main_game.tscn") as PackedScene
 	if packed == null:
 		push_error("runtime_scene_probe: failed to load main_game.tscn")
@@ -22,6 +28,11 @@ func _run() -> void:
 
 	var scene := packed.instantiate()
 	root.add_child(scene)
+	# main_game._ready already ran load_world() (no-op headless without a config
+	# dir); drive the shared world loader directly at our chosen dir, no persist.
+	var world: NovaWorld = scene.get_node_or_null("World")
+	if world != null:
+		world.load_world(dir)
 
 	var terrain: NovaTerrain = null
 	var dispatcher: NovaFoliageDispatcher = null
@@ -31,11 +42,11 @@ func _run() -> void:
 
 	for _i in range(30):
 		await process_frame
-		terrain = scene.get_node_or_null("NovaTerrain")
-		dispatcher = scene.get_node_or_null("NovaTerrain/FoliageDispatcher")
-		overlay = scene.get_node_or_null("NovaTerrain/TileOverlay")
+		terrain = scene.get_node_or_null("World/NovaTerrain")
+		dispatcher = scene.get_node_or_null("World/NovaTerrain/FoliageDispatcher")
+		overlay = scene.get_node_or_null("World/NovaTerrain/TileOverlay")
 		camera = scene.get_node_or_null("Camera3D")
-		data = terrain.terrain_data if terrain != null else null
+		data = world.get_terrain_data() if world != null else null
 		if data != null and data.is_loaded():
 			break
 
@@ -49,10 +60,26 @@ func _run() -> void:
 	for _i in range(10):
 		await process_frame
 
+	# Terrain texture resolution. These are null in a broken export (raw .tga
+	# sources stripped from the PCK, decoded via FileAccess); after the
+	# ResourceLoader fix they resolve to the imported CompressedTexture2D. Running
+	# this probe inside the exported build is the real gate for the texture fix.
+	var colormap_ok := data != null and data.get_colormap() != null
+	var detail_ok := (
+		data != null
+		and data.get_detailmap_c1() != null
+		and data.get_detailmap_c2() != null
+		and data.get_detailmap_c3() != null
+		and data.get_detailblendmap() != null
+	)
+
 	var diagnostics := {
 		"terrain_node": terrain != null,
 		"terrain_data": data != null,
 		"terrain_loaded": data != null and data.is_loaded(),
+		"colormap_resolved": colormap_ok,
+		"detail_maps_resolved": detail_ok,
+		"tilestrip_resolved": data != null and data.get_tilestrip_tex() != null,
 		"foliage_defs": data.get_foliage_defs().size() if data != null else -1,
 		"painted_probe_found": painted_probe.has("position"),
 		"painted_probe": painted_probe,
@@ -85,6 +112,12 @@ func _run() -> void:
 			"expected dispatcher.cached_cells > 0 after camera-grid dispatch, got %d"
 				% dispatcher.get_cached_cells()
 		)
+
+	if data != null and data.is_loaded():
+		if not colormap_ok:
+			failures.append("expected terrain colormap to resolve (null => export-stripped .tga)")
+		if not detail_ok:
+			failures.append("expected terrain detail/blend maps to resolve (null => export-stripped .tga)")
 
 	if data == null or not data.is_loaded():
 		failures.append("expected NovaTerrainData to be loaded")
@@ -119,6 +152,33 @@ func _run() -> void:
 						% [slot_index, wants_shadow, expected, child.cast_shadow]
 				)
 
+	# Foliage ground-color tint. The runtime dispatcher (terrain_data set) tints
+	# each instance from the colormap. Pre-fix the editor path left foliage white.
+	if dispatcher != null and dispatcher.get_total_instances() > 0:
+		if not _has_nonwhite_instance(dispatcher):
+			failures.append("runtime foliage instances are all white; colormap tint not applied")
+
+	# Editor-path parity: a dispatcher wired like terrain_foliage_preview.gd
+	# (colormap_source set, terrain_data UNSET, Callable samplers) must tint from
+	# the colormap too. This is the regression gate for the editor-foliage fix.
+	if data != null and data.is_loaded() and camera != null and painted_probe.has("position"):
+		var editor_dispatcher := _make_editor_style_dispatcher(data)
+		root.add_child(editor_dispatcher)
+		for _i in range(6):
+			await process_frame
+		editor_dispatcher.dispatch(camera.global_position)
+		for _i in range(4):
+			await process_frame
+		var editor_instances := editor_dispatcher.get_total_instances()
+		var editor_nonwhite := _has_nonwhite_instance(editor_dispatcher)
+		print("editor-style foliage: instances=%d nonwhite=%s" % [editor_instances, editor_nonwhite])
+		if editor_instances <= 0:
+			failures.append("editor-style dispatcher placed no foliage at painted point")
+		elif not editor_nonwhite:
+			failures.append("editor-style foliage instances are all white (colormap_source tint missing)")
+		editor_dispatcher.queue_free()
+		await process_frame
+
 	if failures.is_empty():
 		print("runtime_scene_probe: OK")
 	else:
@@ -128,6 +188,75 @@ func _run() -> void:
 	scene.queue_free()
 	await process_frame
 	quit(0 if failures.is_empty() else 1)
+
+
+func _has_nonwhite_instance(dispatcher: NovaFoliageDispatcher) -> bool:
+	for child in dispatcher.get_children():
+		if not (child is MultiMeshInstance3D):
+			continue
+		var mm: MultiMesh = (child as MultiMeshInstance3D).multimesh
+		if mm == null or not mm.use_colors:
+			continue
+		for i in range(mm.instance_count):
+			var c := mm.get_instance_color(i)
+			if absf(c.r - 1.0) > 0.02 or absf(c.g - 1.0) > 0.02 or absf(c.b - 1.0) > 0.02:
+				return true
+	return false
+
+
+func _default_runtime_resource_root() -> String:
+	var root := ProjectSettings.globalize_path("user://runtime_scene_probe_resource_root")
+	DirAccess.make_dir_recursive_absolute(root)
+	_copy_dir_files(ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"), root)
+	_copy_file(
+		ProjectSettings.globalize_path("res://../fixtures/env/full_00.env"),
+		root.path_join("full_00.env")
+	)
+	return root
+
+
+func _copy_dir_files(src_dir: String, dst_dir: String) -> void:
+	var dir := DirAccess.open(src_dir)
+	if dir == null:
+		push_error("runtime_scene_probe: cannot open fixture dir " + src_dir)
+		return
+	dir.list_dir_begin()
+	var filename := dir.get_next()
+	while not filename.is_empty():
+		if not dir.current_is_dir():
+			_copy_file(src_dir.path_join(filename), dst_dir.path_join(filename))
+		filename = dir.get_next()
+	dir.list_dir_end()
+
+
+func _copy_file(src_path: String, dst_path: String) -> void:
+	var src := FileAccess.open(src_path, FileAccess.READ)
+	if src == null:
+		push_error("runtime_scene_probe: cannot read fixture file " + src_path)
+		return
+	var dst := FileAccess.open(dst_path, FileAccess.WRITE)
+	if dst == null:
+		src.close()
+		push_error("runtime_scene_probe: cannot write fixture file " + dst_path)
+		return
+	dst.store_buffer(src.get_buffer(src.get_length()))
+	dst.close()
+	src.close()
+
+
+func _make_editor_style_dispatcher(data: NovaTerrainData) -> NovaFoliageDispatcher:
+	# Mirror terrain_foliage_preview.gd: colormap_source set for tint, terrain_data
+	# left null, placement driven by Callable samplers over the same data.
+	var d := NovaFoliageDispatcher.new()
+	d.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
+	d.cell_grid_radius = 8
+	d.foliage_defs = data.get_foliage_defs()
+	d.colormap_source = data
+	d.height_sampler = func(wx: float, wz: float) -> float:
+		return data.get_height_world_bilinear(Vector3(wx, 0.0, wz))
+	d.foliage_sampler = func(wx: float, wz: float) -> int:
+		return int(data.get_foliage_index_world(wx, wz))
+	return d
 
 
 func _find_painted_world_point(data: NovaTerrainData) -> Dictionary:

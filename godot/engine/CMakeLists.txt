@@ -1,17 +1,33 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(opennova_godot LANGUAGES CXX)
+project(opennova_godot LANGUAGES C CXX)
 
 add_subdirectory(../../third_party/godot-cpp godot-cpp)
 add_subdirectory(../../libs/pcx opennova_pcx)
+add_subdirectory(../../libs/fnt opennova_fnt)
 add_subdirectory(../../libs/foliage opennova_foliage)
 add_subdirectory(../../libs/til opennova_til)
 add_subdirectory(../../libs/tpj opennova_tpj)
 add_subdirectory(../../libs/trn opennova_trn)
 add_subdirectory(../../libs/cpt opennova_cpt)
 add_subdirectory(../../libs/env opennova_env)
+add_subdirectory(../../libs/threedi opennova_threedi)
+add_subdirectory(../../libs/pff opennova_pff)
+add_subdirectory(../../libs/gameprofile opennova_gameprofile)
+add_subdirectory(../../libs/scr opennova_scr)
+add_subdirectory(../../libs/bfc1 opennova_bfc1)
+add_subdirectory(../../libs/vfs opennova_vfs)
+add_subdirectory(../../libs/rtxt opennova_rtxt)
+add_subdirectory(../../libs/ase opennova_ase)
+add_subdirectory(../../libs/tdp opennova_tdp)
+add_subdirectory(../../libs/oed opennova_oed)
+add_subdirectory(../../libs/renderer opennova_renderer)
+add_subdirectory(../../libs/cbin opennova_cbin)
 add_subdirectory(../../libs/terrain opennova_terrain)
 add_subdirectory(../../libs/particle opennova_particle)
+add_subdirectory(../../libs/resource_index opennova_resource_index)
+add_subdirectory(../../libs/def opennova_def)
+add_subdirectory(../../libs/mission opennova_mission)
 
 set(TARGET_NAME "opennova")
 
@@ -23,6 +39,7 @@ add_library(${TARGET_NAME} SHARED
     terrain/nova_terrain_builder.cpp
     terrain/nova_terrain_foliage_def.cpp
     terrain/nova_terrain_foliage_map.cpp
+    terrain/nova_terrain_surface_map.cpp
     terrain/nova_foliage_dispatcher.cpp
     terrain/nova_terrain_tile_entry.cpp
     terrain/nova_terrain_tile_info.cpp
@@ -30,6 +47,9 @@ add_library(${TARGET_NAME} SHARED
     terrain/trn_resource_format.cpp
     terrain/cpt_resource_format.cpp
     terrain/til_resource_format.cpp
+    cbin/cbin_credits_resource.cpp
+    cbin/kda_resource_format.cpp
+    cbin/nova_credits_player.cpp
     env/nova_env_keyframe.cpp
     env/env_file.cpp
     particle/nova_particle_curve_ref.cpp
@@ -41,10 +61,24 @@ add_library(${TARGET_NAME} SHARED
     particle/nova_particle_file.cpp
     particle/nova_particle_emitter.cpp
     particle/ptl_resource_format.cpp
+    object/nova_object_data.cpp
+    object/nova_object_shader_cache.cpp
+    object/nova_item_database.cpp
+    mission/nova_mission_data.cpp
+    rtxt/rtxt_string_file.cpp
+    rtxt/rtxt_resource_format.cpp
     util/nova_data_format.cpp
+    util/nova_paths.cpp
     util/nova_texture_format.cpp
     util/pcx_texture_bridge.cpp
     util/texture_path_resolver.cpp
+    resource_index/nova_resource_index.cpp
+    resource_index/nova_resource_root.cpp
+    pff/nova_pff_archive.cpp
+    editor/opennova_editor_plugin.cpp
+    fnt/nova_fnt_resource.cpp
+    fnt/fnt_resource_format.cpp
+    fnt/fnt_import_plugin.cpp
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE
@@ -54,14 +88,28 @@ target_include_directories(${TARGET_NAME} PRIVATE
 target_link_libraries(${TARGET_NAME} PRIVATE
     godot-cpp
     opennova_pcx
+    opennova_fnt
     opennova_foliage
     opennova_til
     opennova_tpj
     opennova_trn
     opennova_cpt
+    opennova_cbin
     opennova_env
+    opennova_threedi
+    opennova_pff
+    opennova_gameprofile
+    opennova_rtxt
+    opennova_ase
+    opennova_tdp
+    opennova_oed
+    opennova_renderer
     opennova_terrain
     opennova_particle
+    opennova_vfs
+    opennova_resource_index
+    opennova_def
+    opennova_mission
 )
 
 # The bake worker thread in nova_terrain_build_job.cpp installs

@@ -15,13 +15,11 @@ const DEFAULT_HEIGHT := 20.0
 const INVALID_HEIGHT := -1000000.0
 const INVALID_HIT := Vector3(INF, INF, INF)
 const EDITOR_MIN_WINDOW_SIZE := Vector2i(1366, 768)
-const TerrainEditorBrushes = preload("res://modtools/terrain/terrain_editor_brushes.gd")
 const TerrainEditorSlots = preload("res://modtools/terrain/terrain_editor_slots.gd")
 const TerrainEditorSurfacePaint = preload("res://modtools/terrain/terrain_editor_surface_paint.gd")
 const TerrainEditHistory = preload("res://modtools/terrain/terrain_edit_history.gd")
 const TerrainEditorDocument = preload("res://modtools/terrain/terrain_editor_document.gd")
 const TerrainEditorBrushSession = preload("res://modtools/terrain/terrain_editor_brush_session.gd")
-const CDEPConstraint = preload("res://modtools/terrain/terrain_editor_cdep_constraint.gd")
 const TerrainFoliagePreview = preload("res://modtools/terrain/terrain_foliage_preview.gd")
 const TerrainTileOverlayPreview = preload("res://modtools/terrain/terrain_tile_overlay_preview.gd")
 const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
@@ -148,77 +146,10 @@ var _hover_hit := Vector3(-1.0, -1.0, -1.0)
 var _hover_hit_valid: bool = false
 var _active_sector_cell := Vector2i(-1, -1)
 
-var _stroke_last_hit: Vector3:
-	get:
-		return _brush_session._stroke_last_hit
-	set(value):
-		_brush_session._stroke_last_hit = value
-
-var _stroke_has_last_hit: bool:
-	get:
-		return _brush_session._stroke_has_last_hit
-	set(value):
-		_brush_session._stroke_has_last_hit = value
-
 var _export_job: NovaTerrainBuildJob
 var _export_output_dir: String = ""
 
-var _history:
-	get:
-		return _brush_session._history
-
-var _stroke_kind: int:
-	get:
-		return _brush_session._stroke_kind
-	set(value):
-		_brush_session._stroke_kind = value
-
-var _stroke_invert: bool:
-	get:
-		return _brush_session._stroke_invert
-	set(value):
-		_brush_session._stroke_invert = value
-
-var _paint_texture_image: Image:
-	get:
-		return _brush_session._paint_texture_image
-	set(value):
-		_brush_session._paint_texture_image = value
-
-var _paint_texture_filename: String:
-	get:
-		return _brush_session._paint_texture_filename
-	set(value):
-		_brush_session._paint_texture_filename = value
-
-var _clone_source_set: bool:
-	get:
-		return _brush_session._clone_source_set
-	set(value):
-		_brush_session._clone_source_set = value
-
-var _clone_source_world: Vector3:
-	get:
-		return _brush_session._clone_source_world
-	set(value):
-		_brush_session._clone_source_world = value
-
-var _clone_source_image: Image:
-	get:
-		return _brush_session._clone_source_image
-	set(value):
-		_brush_session._clone_source_image = value
-
-var _clone_offset_px: Vector2i:
-	get:
-		return _brush_session._clone_offset_px
-	set(value):
-		_brush_session._clone_offset_px = value
-
 var _clone_source_marker: MeshInstance3D
-
-# Diagnostic: trace height values through load/edit/export to compare with NovaTerrain.
-const _HEIGHT_DEBUG := false
 
 var _water_instance: MeshInstance3D
 var _water_plane_mesh: PlaneMesh
@@ -256,6 +187,7 @@ var _previous_window_min_size: Vector2i = Vector2i.ZERO
 var _ui_state_version: int = 0
 var _uses_workspace_viewport: bool = false
 var _viewport_active: bool = false
+var _viewport_edit_input_active: bool = false
 var _viewport_mouse_position: Vector2 = Vector2.ZERO
 
 
@@ -397,17 +329,8 @@ func _apply_environment_to_preview() -> void:
 		return
 	var material := _get_material()
 	if material:
-		material.set_shader_parameter("u_sun_light", _environment_node.get_sun_light())
-		material.set_shader_parameter("u_fill_light", _environment_node.get_fill_light())
-		material.set_shader_parameter("u_sky_ambient", _environment_node.get_sky_ambient())
-		material.set_shader_parameter("u_sun_direction", _environment_node.get_sun_direction())
-		material.set_shader_parameter("u_terrain_tint", _environment_node.get_terrain_lighting_attenuation())
-		material.set_shader_parameter("u_fog_color", _environment_node.get_fog_color())
-		var fog_end: float = _environment_node.get_fog_level()
-		var fog_start: float = _environment_node.get_fog_start() if _environment_node.has_method("get_fog_start") else 0.5
-		material.set_shader_parameter("u_fog_end", fog_end)
-		material.set_shader_parameter("u_fog_start", fog_start)
-		material.set_shader_parameter("u_fog_type", _environment_node.get_fog_type())
+		# Same env -> terrain-uniform push the runtime uses (NovaEnvironment owns it).
+		_environment_node.apply_terrain_uniforms(material)
 	if _water_material:
 		var water: Vector3 = _environment_node.get_water_color()
 		var alpha := 0.55
@@ -445,7 +368,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func handle_viewport_input(event: InputEvent) -> void:
-	if not _viewport_active:
+	if not _viewport_active or not _viewport_edit_input_active:
 		return
 	if event is InputEventMouse:
 		_viewport_mouse_position = (event as InputEventMouse).position
@@ -524,22 +447,33 @@ func _handle_viewport_input(event: InputEvent) -> void:
 			KEY_F: set_tool(Tool.FOLIAGE_PAINT)
 			KEY_G: set_tool(Tool.SURFACE_PAINT)
 			KEY_BRACKETLEFT:
-				set_brush_radius_value(maxf(1.0, brush_radius - 4.0))
+				set_brush_radius_value(maxf(TerrainEditorBrushSession.BRUSH_RADIUS_MIN, brush_radius - 4.0))
 			KEY_BRACKETRIGHT:
-				set_brush_radius_value(minf(128.0, brush_radius + 4.0))
+				set_brush_radius_value(minf(TerrainEditorBrushSession.BRUSH_RADIUS_MAX, brush_radius + 4.0))
 			KEY_SEMICOLON:
-				set_brush_strength_value(maxf(0.01, brush_strength - 0.05))
+				set_brush_strength_value(maxf(TerrainEditorBrushSession.BRUSH_STRENGTH_MIN, brush_strength - 0.05))
 			KEY_APOSTROPHE:
-				set_brush_strength_value(minf(5.0, brush_strength + 0.05))
+				set_brush_strength_value(minf(TerrainEditorBrushSession.BRUSH_STRENGTH_MAX, brush_strength + 0.05))
 			KEY_COMMA:
-				set_brush_hardness_value(maxf(0.0, brush_hardness - 0.05))
+				set_brush_hardness_value(maxf(TerrainEditorBrushSession.BRUSH_HARDNESS_MIN, brush_hardness - 0.05))
 			KEY_PERIOD:
-				set_brush_hardness_value(minf(1.0, brush_hardness + 0.05))
+				set_brush_hardness_value(minf(TerrainEditorBrushSession.BRUSH_HARDNESS_MAX, brush_hardness + 0.05))
 
 
 func _process(delta: float) -> void:
 	_poll_export_job()
-	if not _viewport_active and _uses_workspace_viewport:
+	if _uses_workspace_viewport and not _viewport_active:
+		return
+
+	if not _viewport_edit_input_active and _uses_workspace_viewport:
+		_hover_hit = INVALID_HIT
+		_hover_hit_valid = false
+		var inactive_material := _get_material()
+		if inactive_material:
+			inactive_material.set_shader_parameter("u_brush_pos", Vector2(-10000.0, -10000.0))
+			inactive_material.set_shader_parameter("u_show_surface_overlay", false)
+		_sync_foliage_preview()
+		_sync_tile_overlay_preview()
 		return
 
 	_hover_hit = _raycast_terrain()
@@ -695,18 +629,27 @@ func get_environment_editor():
 	return environment_editor
 
 
+# The shared NovaEnvironment node (EditorEnvironment under the world root). The
+# mission workspace hands it to placed objects so their lighting matches the
+# terrain preview, the same way the runtime passes its NovaEnvironment node.
+func get_environment_node() -> Node:
+	return _environment_node
+
+
 func get_terrain_world_root() -> Node3D:
 	return terrain_world_root
 
 
-func set_viewport_active(active: bool) -> void:
+func set_viewport_active(active: bool, edit_input_enabled: bool = true) -> void:
 	_uses_workspace_viewport = true
-	if _viewport_active == active:
+	var next_edit_input := active and edit_input_enabled
+	if _viewport_active == active and _viewport_edit_input_active == next_edit_input:
 		return
 	_viewport_active = active
+	_viewport_edit_input_active = next_edit_input
 	if camera != null:
 		camera.current = active
-	if not active:
+	if not next_edit_input:
 		brush_active = false
 		_hover_hit = INVALID_HIT
 		_hover_hit_valid = false
@@ -714,6 +657,10 @@ func set_viewport_active(active: bool) -> void:
 
 func is_viewport_active() -> bool:
 	return _viewport_active
+
+
+func is_viewport_edit_input_active() -> bool:
+	return _viewport_edit_input_active
 
 
 func set_viewport_mouse_position(position: Vector2) -> void:
@@ -855,7 +802,7 @@ func get_paint_detail_channel() -> int:
 func set_brush_radius_value(value: float) -> void:
 	if is_export_running():
 		return
-	var next := clampf(value, 1.0, 128.0)
+	var next := clampf(value, TerrainEditorBrushSession.BRUSH_RADIUS_MIN, TerrainEditorBrushSession.BRUSH_RADIUS_MAX)
 	if is_equal_approx(brush_radius, next):
 		return
 	brush_radius = next
@@ -865,7 +812,7 @@ func set_brush_radius_value(value: float) -> void:
 func set_brush_strength_value(value: float) -> void:
 	if is_export_running():
 		return
-	var next := clampf(value, 0.01, 5.0)
+	var next := clampf(value, TerrainEditorBrushSession.BRUSH_STRENGTH_MIN, TerrainEditorBrushSession.BRUSH_STRENGTH_MAX)
 	if is_equal_approx(brush_strength, next):
 		return
 	brush_strength = next
@@ -875,7 +822,7 @@ func set_brush_strength_value(value: float) -> void:
 func set_brush_hardness_value(value: float) -> void:
 	if is_export_running():
 		return
-	var next := clampf(value, 0.0, 1.0)
+	var next := clampf(value, TerrainEditorBrushSession.BRUSH_HARDNESS_MIN, TerrainEditorBrushSession.BRUSH_HARDNESS_MAX)
 	if is_equal_approx(brush_hardness, next):
 		return
 	brush_hardness = next
@@ -1037,6 +984,12 @@ func get_editor_camera() -> Camera3D:
 	return camera
 
 
+func get_resource_root() -> NovaResourceRoot:
+	if workstation != null and workstation.has_method("get_resource_root"):
+		return workstation.get_resource_root()
+	return null
+
+
 func get_sector_cell(row: int, col: int) -> int:
 	if not _data:
 		return 0
@@ -1090,13 +1043,6 @@ func get_foliage_defs() -> Array[NovaTerrainFoliageDef]:
 
 func get_foliage_map() -> NovaTerrainFoliageMap:
 	return _document.foliage_map
-
-
-func get_foliage_preview_summary() -> Dictionary:
-	if _foliage_preview == null:
-		return {}
-	_sync_foliage_preview()
-	return _foliage_preview.get_preview_summary()
 
 
 func get_selected_foliage_def_index() -> int:
@@ -1329,31 +1275,6 @@ func reset_tileinfo() -> void:
 	_sync_hud_from_editor()
 
 
-func load_paint_texture(path: String) -> void:
-	if is_export_running():
-		return
-	if not _brush_session.load_paint_texture(path):
-		return
-	_update_hud()
-
-
-func clear_paint_texture() -> void:
-	_brush_session.clear_paint_texture()
-	_update_hud()
-
-
-func get_paint_texture() -> Image:
-	return _brush_session.get_paint_texture()
-
-
-func get_paint_texture_filename() -> String:
-	return _brush_session.get_paint_texture_filename()
-
-
-func has_paint_texture() -> bool:
-	return _brush_session.has_paint_texture()
-
-
 func _tile_cell_from_world(world_x: float, world_z: float) -> Vector2i:
 	return Vector2i(
 		int(floor(world_x / float(NovaTerrainTileInfo.CELL_WORLD_SIZE))),
@@ -1440,28 +1361,28 @@ func _sync_foliage_preview() -> void:
 		camera,
 		_document.foliage_map,
 		_document.foliage_defs,
-		_document.selected_foliage_def_index
+		_document.selected_foliage_def_index,
+		_data,
+		get_resource_root()
 	)
 	_foliage_preview.rebuild_if_needed()
 
 
 func _apply_foliage_paint_stroke(delta: float) -> bool:
 	if _document.foliage_map == null or not _hover_hit_valid:
-		_stroke_has_last_hit = false
+		_brush_session.reset_stroke_tracking()
 		return false
 
 	var target_index := 0
 	if not Input.is_key_pressed(KEY_CTRL):
 		target_index = _document.get_selected_foliage_paint_index()
 		if target_index < 0:
-			_stroke_has_last_hit = false
+			_brush_session.reset_stroke_tracking()
 			return false
 
-	var start_hit: Vector3 = _stroke_last_hit if _stroke_has_last_hit else _hover_hit
+	var start_hit := _brush_session.get_stroke_start_hit(_hover_hit)
 	var end_hit := _hover_hit
-	var spacing := maxf(1.0, brush_radius * 0.25)
-	var distance := Vector2(end_hit.x - start_hit.x, end_hit.z - start_hit.z).length()
-	var dab_count: int = 1 if not _stroke_has_last_hit else maxi(1, int(ceil(distance / spacing)))
+	var dab_count := _brush_session.get_stroke_dab_count(start_hit, end_hit)
 	var map_width := maxi(_document.foliage_map.get_width(), 1)
 	var map_height := maxi(_document.foliage_map.get_height(), 1)
 	var radius_pixels := maxi(1, int(round(brush_radius * float(map_width) / float(HM_SIZE))))
@@ -1486,8 +1407,7 @@ func _apply_foliage_paint_stroke(delta: float) -> bool:
 			target_index
 		) or changed
 
-	_stroke_last_hit = end_hit
-	_stroke_has_last_hit = true
+	_brush_session.commit_stroke_hit(end_hit)
 	if changed:
 		_foliage_map_stroke_changed = true
 	return changed
@@ -1565,21 +1485,20 @@ func _sync_tile_overlay_preview() -> void:
 
 
 func _apply_surface_paint_stroke(_delta: float) -> bool:
-	if _document.surface_map_state.is_empty() or not _hover_hit_valid:
-		_stroke_has_last_hit = false
+	var surface_map: NovaTerrainSurfaceMap = _document.surface_map
+	if surface_map == null or not _hover_hit_valid:
+		_brush_session.reset_stroke_tracking()
 		return false
 
-	var map_width := int(_document.surface_map_state.get("width", 0))
-	var map_height := int(_document.surface_map_state.get("height", 0))
+	var map_width := surface_map.get_width()
+	var map_height := surface_map.get_height()
 	if map_width <= 0 or map_height <= 0:
-		_stroke_has_last_hit = false
+		_brush_session.reset_stroke_tracking()
 		return false
 
-	var start_hit: Vector3 = _stroke_last_hit if _stroke_has_last_hit else _hover_hit
+	var start_hit := _brush_session.get_stroke_start_hit(_hover_hit)
 	var end_hit := _hover_hit
-	var spacing := maxf(1.0, brush_radius * 0.25)
-	var distance := Vector2(end_hit.x - start_hit.x, end_hit.z - start_hit.z).length()
-	var dab_count: int = 1 if not _stroke_has_last_hit else maxi(1, int(ceil(distance / spacing)))
+	var dab_count := _brush_session.get_stroke_dab_count(start_hit, end_hit)
 	var radius_pixels := maxi(1, int(round(brush_radius * float(map_width) / float(HM_SIZE))))
 	var target_index := _get_surface_paint_index(Input.is_key_pressed(KEY_CTRL))
 	var changed := false
@@ -1590,12 +1509,11 @@ func _apply_surface_paint_stroke(_delta: float) -> bool:
 		var source := terrain_mesh.world_to_source_coords(dab_hit.x, dab_hit.z)
 		if source.x < 0.0 or source.y < 0.0:
 			continue
-		var center_x := TerrainEditorSurfacePaint.map_x_from_heightmap_x(source.x, map_width)
-		var center_y := TerrainEditorSurfacePaint.map_y_from_heightmap_y(source.y, map_height)
+		var center_x := surface_map.map_x_from_heightmap_x(source.x)
+		var center_y := surface_map.map_y_from_heightmap_y(source.y)
 		if center_x < 0 or center_y < 0 or center_x >= map_width or center_y >= map_height:
 			continue
-		changed = TerrainEditorSurfacePaint.paint_circle(
-			_document.surface_map_state,
+		changed = surface_map.paint_circle(
 			center_x,
 			center_y,
 			radius_pixels,
@@ -1605,27 +1523,27 @@ func _apply_surface_paint_stroke(_delta: float) -> bool:
 		) or changed
 
 	if changed:
-		_document.restore_surface_map_history_state(_get_material(), _document.surface_map_state)
+		_document.sync_surface_map_to_data(_get_material())
 		_surface_map_stroke_changed = true
 
-	_stroke_last_hit = end_hit
-	_stroke_has_last_hit = true
+	_brush_session.commit_stroke_hit(end_hit)
 	return changed
 
 
 func _eyedrop_surface_at_hover() -> bool:
-	if _document.surface_map_state.is_empty() or not _hover_hit_valid:
+	var surface_map: NovaTerrainSurfaceMap = _document.surface_map
+	if surface_map == null or not _hover_hit_valid:
 		return false
-	var map_width := int(_document.surface_map_state.get("width", 0))
-	var map_height := int(_document.surface_map_state.get("height", 0))
+	var map_width := surface_map.get_width()
+	var map_height := surface_map.get_height()
 	if map_width <= 0 or map_height <= 0:
 		return false
 	var source := terrain_mesh.world_to_source_coords(_hover_hit.x, _hover_hit.z)
 	if source.x < 0.0 or source.y < 0.0:
 		return false
-	var map_x := TerrainEditorSurfacePaint.map_x_from_heightmap_x(source.x, map_width)
-	var map_y := TerrainEditorSurfacePaint.map_y_from_heightmap_y(source.y, map_height)
-	selected_surface_index = TerrainEditorSurfacePaint.get_index(_document.surface_map_state, map_x, map_y)
+	var map_x := surface_map.map_x_from_heightmap_x(source.x)
+	var map_y := surface_map.map_y_from_heightmap_y(source.y)
+	selected_surface_index = surface_map.get_index(map_x, map_y)
 	_update_hud()
 	return true
 
@@ -1676,7 +1594,7 @@ func _on_primary_start() -> void:
 			_select_tileinfo_entry_at_hover()
 		return
 	if current_tool == Tool.SURFACE_PAINT:
-		if not _hover_hit_valid or _document.surface_map_state.is_empty():
+		if not _hover_hit_valid or _document.surface_map == null:
 			return
 		if Input.is_key_pressed(KEY_ALT):
 			_eyedrop_surface_at_hover()
@@ -1684,7 +1602,7 @@ func _on_primary_start() -> void:
 		_surface_map_stroke_before = _document.capture_surface_map_history_state()
 		_surface_map_stroke_changed = false
 		brush_active = true
-		_stroke_has_last_hit = false
+		_brush_session.reset_stroke_tracking()
 		_apply_surface_paint_stroke(1.0 / 60.0)
 		return
 	if current_tool == Tool.FOLIAGE_PAINT:
@@ -1700,7 +1618,7 @@ func _on_primary_start() -> void:
 		_foliage_map_stroke_before = _document.capture_foliage_map_history_state()
 		_foliage_map_stroke_changed = false
 		brush_active = true
-		_stroke_has_last_hit = false
+		_brush_session.reset_stroke_tracking()
 		_apply_foliage_paint_stroke(1.0 / 60.0)
 		return
 	if current_tool == Tool.CLONE_COLOR:
@@ -1708,7 +1626,7 @@ func _on_primary_start() -> void:
 			_set_clone_source(_hover_hit)
 			_update_hud()
 			return
-		if not _clone_source_set or not _hover_hit_valid:
+		if not _brush_session.has_clone_source() or not _hover_hit_valid:
 			return
 		if not _brush_session.prepare_clone_drag(_hover_hit, terrain_mesh):
 			return
@@ -1716,7 +1634,7 @@ func _on_primary_start() -> void:
 	if current_tool == Tool.PAINT_COLORMAP and Input.is_key_pressed(KEY_ALT) and _hover_hit_valid:
 		var source := terrain_mesh.world_to_source_coords(_hover_hit.x, _hover_hit.z)
 		if source.x >= 0.0:
-			paint_color = TerrainEditorBrushes.sample_colormap(_colormap_image, source.x, source.y)
+			paint_color = _data.brush_sample_colormap(source.x, source.y)
 			_update_hud()
 		return
 	_brush_session.begin_brush_drag(_source_image_for_kind(_brush_session.history_kind_for_tool(current_tool)), Input.is_key_pressed(KEY_CTRL))
@@ -1725,7 +1643,7 @@ func _on_primary_start() -> void:
 func _on_primary_end() -> void:
 	if current_tool == Tool.SURFACE_PAINT:
 		brush_active = false
-		_stroke_has_last_hit = false
+		_brush_session.reset_stroke_tracking()
 		if _surface_map_stroke_changed:
 			var after_state := _document.capture_surface_map_history_state()
 			_push_surface_map_history(_surface_map_stroke_before, after_state)
@@ -1736,7 +1654,7 @@ func _on_primary_end() -> void:
 		return
 	if current_tool == Tool.FOLIAGE_PAINT:
 		brush_active = false
-		_stroke_has_last_hit = false
+		_brush_session.reset_stroke_tracking()
 		if _foliage_map_stroke_changed:
 			var after_state := _document.capture_foliage_map_history_state()
 			_push_foliage_map_history(_foliage_map_stroke_before, after_state)
@@ -1746,32 +1664,28 @@ func _on_primary_end() -> void:
 		_foliage_map_stroke_before = {}
 		_foliage_map_stroke_changed = false
 		return
-	var result := _brush_session.end_brush_drag(_source_image_for_kind(_stroke_kind))
-	if result.get("history_committed", false):
-		if _HEIGHT_DEBUG and result.get("history_kind", -1) == TerrainEditHistory.Kind.HEIGHTMAP:
-			_log_stroke_height_delta()
+	_brush_session.end_brush_drag(_source_image_for_kind(_brush_session.get_stroke_kind()))
 
 
-func _log_stroke_height_delta() -> void:
-	if _history._undo_stack.is_empty():
-		return
-	var snap: Dictionary = _history._undo_stack.back()
-	var rect: Rect2i = snap["rect"]
-	var before: Image = snap["before"]
-	var after: Image = snap["after"]
-	if rect.size.x <= 0 or rect.size.y <= 0:
-		return
-	var lx := rect.size.x / 2
-	var ly := rect.size.y / 2
-	var bx := rect.position.x + lx
-	var by := rect.position.y + ly
-	var before_v: float = before.get_pixel(lx, ly).r
-	var after_v: float = after.get_pixel(lx, ly).r
-	print("[height-debug] STROKE at rect center atlas (%d,%d): before=%.4f after=%.4f delta=%.4f" % [bx, by, before_v, after_v, after_v - before_v])
+# Public: intersect a viewport-space mouse position with the terrain surface. Returns
+# a world-space point, or INVALID_HIT on a miss; pair with is_valid_terrain_hit().
+# Used by the Mission workspace to drag/place entities onto the ground.
+func raycast_terrain_at(mouse_pos: Vector2) -> Vector3:
+	if camera == null or terrain_mesh == null:
+		return INVALID_HIT
+	return _raycast_terrain_from(mouse_pos)
+
+
+func is_valid_terrain_hit(hit: Vector3) -> bool:
+	return hit != INVALID_HIT
 
 
 func _raycast_terrain() -> Vector3:
 	var mouse_pos := _viewport_mouse_position if _uses_workspace_viewport else get_viewport().get_mouse_position()
+	return _raycast_terrain_from(mouse_pos)
+
+
+func _raycast_terrain_from(mouse_pos: Vector2) -> Vector3:
 	var from := camera.project_ray_origin(mouse_pos)
 	var direction := camera.project_ray_normal(mouse_pos)
 	var bounds_hit := _intersect_ray_xz_bounds(from, direction)
@@ -1886,7 +1800,7 @@ func _apply_brush_stroke(delta: float) -> void:
 			is_dirty = true
 			_mark_foliage_preview_dirty()
 		return
-	var result := _brush_session.apply_brush_stroke(delta, _hover_hit, _hover_hit_valid, terrain_mesh, _heightmap_image, _blendmap_image, _colormap_image)
+	var result := _brush_session.apply_brush_stroke(delta, _hover_hit, _hover_hit_valid, terrain_mesh, _data)
 	if result["changed_heightmap"]:
 		terrain_mesh.set_heightmap(_heightmap_image)
 		_mark_tile_overlay_dirty()
@@ -1963,10 +1877,6 @@ func _apply_history_snapshot(snapshot: Dictionary, is_undo: bool) -> void:
 		is_dirty = true
 
 
-func _history_kind_for_tool(tool: Tool) -> int:
-	return _brush_session.history_kind_for_tool(tool)
-
-
 func _source_image_for_kind(kind: int) -> Image:
 	match kind:
 		TerrainEditHistory.Kind.HEIGHTMAP:
@@ -2007,6 +1917,10 @@ func has_pending_unsaved_action() -> bool:
 
 func get_current_project_dir() -> String:
 	return _document.current_project_dir
+
+
+func get_current_trn_path() -> String:
+	return _document.current_trn_path
 
 
 func has_current_project_dir() -> bool:
@@ -2119,6 +2033,7 @@ func _load_editor_state() -> void:
 
 func _save_editor_state() -> void:
 	var config := ConfigFile.new()
+	config.load("user://terrain_editor_state.cfg")
 	config.set_value("paths", "last_open_dir", _last_open_dir)
 	config.set_value("paths", "last_save_dir", _last_save_dir)
 	config.set_value("paths", "last_export_dir", _last_export_dir)
@@ -2156,6 +2071,9 @@ func new_terrain() -> void:
 func open_trn(trn_path: String) -> Error:
 	if is_export_running():
 		return ERR_BUSY
+	var resources := get_resource_root()
+	if not FileAccess.file_exists(trn_path) and resources != null and resources.has_file(trn_path):
+		return _open_trn_from_resource_root(resources, trn_path)
 	_brush_session.clear_history()
 	clear_clone_source()
 	_data = NovaTerrainData.new()
@@ -2210,6 +2128,48 @@ func open_trn(trn_path: String) -> Error:
 	return OK
 
 
+func _open_trn_from_resource_root(resources: NovaResourceRoot, trn_name: String) -> Error:
+	if resources == null:
+		return ERR_INVALID_PARAMETER
+	_brush_session.clear_history()
+	clear_clone_source()
+	_data = NovaTerrainData.new()
+	var err := _data.load_from_resource_root(resources, trn_name)
+	if err != OK:
+		return err
+
+	texture_files = {}
+	_apply_default_visual_state(false)
+
+	var depth_bytes := resources.read_file("%s_depth.raw" % _data.get_terrain_name())
+	if depth_bytes.size() == HM_SIZE * HM_SIZE * 2:
+		_set_heightmap_image(_build_heightmap_from_raw16(depth_bytes))
+	else:
+		_set_heightmap_image(_build_heightmap_from_data())
+
+	_apply_loaded_textures_from_data()
+	var normalized := _normalize_sector_layout_if_needed()
+	_sync_sector_layout(true)
+	_document.capture_trn_resource(_data)
+	var tileinfo := _data.get_tileinfo_resource()
+	if tileinfo != null:
+		_document.tileinfo_resource = tileinfo
+		_document.tileinfo_source_path = resources.get_root_dir().path_join(_data.get_tileinfo_filename())
+		_document.tileinfo_state = "explicit"
+		_document.tileinfo_selected_index = -1
+	var normalized_tileinfo := _normalize_loaded_tileinfo_if_needed()
+	_document.current_trn_path = trn_name.get_file()
+	_document.current_project_dir = ""
+	_remember_open_path(resources.get_root_dir().path_join(trn_name.get_file()))
+
+	is_dirty = normalized or normalized_tileinfo
+	_mark_foliage_preview_dirty()
+	_update_hud()
+	_sync_hud_from_editor()
+	_check_loaded_cdep_violations()
+	return OK
+
+
 func save_project(dir_path: String) -> Error:
 	if is_export_running():
 		return ERR_BUSY
@@ -2225,7 +2185,7 @@ func save_project(dir_path: String) -> Error:
 	if _data and String(_data.get_terrain_name()) != name:
 		_data.set_terrain_name(name)
 
-	var raw16 := _image_to_raw16(_heightmap_image)
+	var raw16 := _data.get_depth_raw16()
 	var depth_path := dir_path + "/" + name + "_depth.raw"
 	var depth_file: FileAccess = FileAccess.open(depth_path, FileAccess.WRITE)
 	if not depth_file:
@@ -2263,9 +2223,9 @@ func save_project(dir_path: String) -> Error:
 # auto-clamp; otherwise the eventual DFX/JO export will fail at the bake
 # guard with a less actionable message.
 func _check_loaded_cdep_violations() -> void:
-	if not _heightmap_image:
+	if _data == null or not _heightmap_image:
 		return
-	var count := CDEPConstraint.count_violations(_heightmap_image)
+	var count := _data.cdep_count_violations()
 	if count == 0:
 		return
 	if workstation and workstation.has_method("prompt_cdep_violations"):
@@ -2275,9 +2235,9 @@ func _check_loaded_cdep_violations() -> void:
 
 
 func _auto_fix_cdep_violations() -> void:
-	if not _heightmap_image:
+	if _data == null or not _heightmap_image:
 		return
-	var clamped := CDEPConstraint.clamp_all_violations(_heightmap_image)
+	var clamped := _data.cdep_clamp_all_violations()
 	terrain_mesh.set_heightmap(_heightmap_image)
 	_mark_foliage_preview_dirty()
 	_mark_tile_overlay_dirty()
@@ -2293,9 +2253,9 @@ func _auto_fix_cdep_violations() -> void:
 func _auto_clamp_for_export_if_needed(flavor: int) -> void:
 	if flavor != ExportFlavor.DFX_JO:
 		return
-	if not _heightmap_image:
+	if _data == null or not _heightmap_image:
 		return
-	var clamped := CDEPConstraint.clamp_all_violations(_heightmap_image)
+	var clamped := _data.cdep_clamp_all_violations()
 	if clamped == 0:
 		return
 	terrain_mesh.set_heightmap(_heightmap_image)
@@ -2312,9 +2272,11 @@ func begin_export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO)
 	DirAccess.make_dir_recursive_absolute(output_dir)
 	var name := _get_terrain_name()
 	_auto_clamp_for_export_if_needed(flavor)
-	var raw16 := _image_to_raw16(_heightmap_image, flavor == ExportFlavor.DFX_JO)
-	if raw16.is_empty():
+	if flavor == ExportFlavor.DFX_JO and not _document.cdep_ranges_valid(_heightmap_image):
 		_notify_status("Export blocked: some areas are too steep for Joint Operations / DFX. Flatten them, or export for original Delta Force instead.")
+		return ERR_INVALID_DATA
+	var raw16 := _data.get_depth_raw16()
+	if raw16.is_empty():
 		return ERR_INVALID_DATA
 	var builder: NovaTerrainBuilder = NovaTerrainBuilder.new()
 	var job: NovaTerrainBuildJob = builder.begin_build_from_data(raw16, output_dir, name, "", flavor)
@@ -2324,7 +2286,7 @@ func begin_export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO)
 	_export_job = job
 	_export_output_dir = output_dir
 	brush_active = false
-	_stroke_has_last_hit = false
+	_brush_session.reset_stroke_tracking()
 	_remember_export_dir(output_dir)
 
 	if workstation and workstation.has_method("on_export_started"):
@@ -2339,9 +2301,11 @@ func export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO) -> Er
 
 	DirAccess.make_dir_recursive_absolute(output_dir)
 	_auto_clamp_for_export_if_needed(flavor)
-	var raw16 := _image_to_raw16(_heightmap_image, flavor == ExportFlavor.DFX_JO)
-	if raw16.is_empty():
+	if flavor == ExportFlavor.DFX_JO and not _document.cdep_ranges_valid(_heightmap_image):
 		_notify_status("Export blocked: some areas are too steep for Joint Operations / DFX. Flatten them, or export for original Delta Force instead.")
+		return ERR_INVALID_DATA
+	var raw16 := _data.get_depth_raw16()
+	if raw16.is_empty():
 		return ERR_INVALID_DATA
 	var builder: NovaTerrainBuilder = NovaTerrainBuilder.new()
 	var err := builder.build_from_data(raw16, output_dir, _get_terrain_name(), "", flavor)
@@ -2432,20 +2396,6 @@ func _build_heightmap_from_raw16(raw_bytes: PackedByteArray) -> Image:
 	return _document.build_heightmap_from_raw16(raw_bytes)
 
 
-func _log_image_stats(tag: String, image: Image) -> void:
-	var data := image.get_data()
-	var count := HM_SIZE * HM_SIZE
-	var lo := INF
-	var hi := -INF
-	var sum := 0.0
-	for i in count:
-		var v := data.decode_float(i * 4)
-		lo = minf(lo, v)
-		hi = maxf(hi, v)
-		sum += v
-	print("[height-debug] %s image stats: min=%.4f max=%.4f avg=%.4f" % [tag, lo, hi, sum / float(count)])
-
-
 func _set_heightmap_image(image: Image) -> void:
 	_document.set_heightmap_image(image)
 	terrain_mesh.set_heightmap(_heightmap_image)
@@ -2469,6 +2419,9 @@ func _sync_material_from_data() -> void:
 func _sync_sector_layout(reframe_camera: bool) -> void:
 	if not _data:
 		return
+	# The mesh forwards world->atlas coordinate queries to NovaTerrainData's C++
+	# kernel, so hand it the live data alongside the layout it draws.
+	terrain_mesh.set_terrain_data(_data)
 	terrain_mesh.set_sector_layout(
 		_data.get_sector_count(),
 		_data.get_sector_rows(),
@@ -2573,10 +2526,6 @@ func _get_material() -> ShaderMaterial:
 	if terrain_mesh == null:
 		return null
 	return terrain_mesh.get_material()
-
-
-func _image_to_raw16(image: Image, enforce_cdep: bool = false) -> PackedByteArray:
-	return _document.image_to_raw16(image, enforce_cdep)
 
 
 func _notification(what: int) -> void:

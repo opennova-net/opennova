@@ -977,7 +977,7 @@ static int parse_rmodel(GpReader *r, ThreediGpMeshType mesh_type, ThreediGpRMode
             READ_ANIM_XFORM(pa->rot_z);
             READ_ANIM_XFORM(pa->translate);
             #undef READ_ANIM_XFORM
-            // 3DA: rotate_type, scale_type, transform_as, yaw_rate, pitch_rate, roll_rate
+            // legacy rotate_type, scale_type, transform_as, yaw_rate, pitch_rate, roll_rate
             pa->rotate_type = gp_u32(&rbr);
             pa->scale_type = gp_u32(&rbr);
             pa->transform_as = gp_u32(&rbr);

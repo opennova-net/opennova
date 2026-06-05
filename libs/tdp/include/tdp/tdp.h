@@ -157,9 +157,6 @@ TDP_EXPORT int tdp_parse(const char *path, TdpProject *out);
 // Write a .3dp project file. Returns 0 on success, -1 on error.
 TDP_EXPORT int tdp_write(const char *path, const TdpProject *proj);
 
-// Write a .3da project file (legacy ModSuperOED format). Returns 0 on success, -1 on error.
-TDP_EXPORT int tdp_write_3da(const char *path, const TdpProject *proj);
-
 // Allocate (or reallocate) arrays so that Python/FFI callers can build
 // projects without manual malloc.  Each frees the old pointer first.
 TDP_EXPORT void tdp_alloc_materials(TdpProject *proj, size_t count);

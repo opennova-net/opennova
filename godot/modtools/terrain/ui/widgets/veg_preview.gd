@@ -14,6 +14,14 @@ var _mesh_instance: MeshInstance3D
 var _pending_mesh: Mesh = null
 var _has_pending: bool = false
 var _current_graphic: String = ""
+var _resource_root: NovaResourceRoot
+
+
+func set_resource_root(value: NovaResourceRoot) -> void:
+	if _resource_root == value:
+		return
+	_resource_root = value
+	_current_graphic = ""
 
 
 func _ready() -> void:
@@ -75,7 +83,7 @@ func set_graphic(graphic: String) -> void:
 	_current_graphic = key
 	var mesh: Mesh = null
 	if not graphic.is_empty():
-		mesh = VegAssets.load_mesh(graphic)
+		mesh = VegAssets.load_mesh(_resource_root, graphic)
 	set_mesh(mesh)
 
 

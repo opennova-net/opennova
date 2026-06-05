@@ -5,7 +5,7 @@ import argparse
 import logging
 import sys
 
-from apps.importer.jobs import ImportOptions, ImportRequest
+from opennova_jobs import ImportOptions, ImportRequest
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ _OPTION_FIELDS = (
     "write_ase",
     "write_glb",
     "write_fbx",
+    "write_max",
 )
 
 
@@ -46,6 +47,7 @@ def _add_import_options(parser: argparse.ArgumentParser, *, include_def_only: bo
         write_ase=None,
         write_glb=None,
         write_fbx=None,
+        write_max=None,
     )
     if include_def_only:
         parser.add_argument("--no-animations", dest="import_animations", action="store_false",
@@ -64,13 +66,17 @@ def _add_import_options(parser: argparse.ArgumentParser, *, include_def_only: bo
     parser.add_argument("--no-blend", dest="write_blend", action="store_false",
                         help="Do not write .blend scene files")
     parser.add_argument("--no-3dp", dest="write_3dp", action="store_false",
-                        help="Do not write .3dp/.3da project files")
+                        help="Do not write .3dp object workspace files")
     parser.add_argument("--no-ase", dest="write_ase", action="store_false",
                         help="Do not write .ase files")
     parser.add_argument("--glb", dest="write_glb", action="store_true",
-                        help="Write .glb files")
+                        help="Write .glb files via Blender")
     parser.add_argument("--fbx", dest="write_fbx", action="store_true",
-                        help="Write .fbx files")
+                        help="Write .fbx files via Blender")
+    parser.add_argument("--max", dest="write_max", action="store_true",
+                        help="Write .max scene files via 3ds Max")
+    parser.add_argument("--no-max", dest="write_max", action="store_false",
+                        help="Do not write .max scene files")
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
@@ -90,7 +96,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 
 def cmd_import(args: argparse.Namespace) -> int:
-    from apps.importer.import_runner import execute_import_request
+    from opennova_blender import StandaloneBackend
 
     request = ImportRequest.for_definition(
         base_dir=args.dir,
@@ -99,7 +105,11 @@ def cmd_import(args: argparse.Namespace) -> int:
         output_root=args.output,
         options=options_from_args(args),
     )
-    result = execute_import_request(request)
+    backend = StandaloneBackend()
+    try:
+        result = backend.execute(request)
+    finally:
+        backend.shutdown()
     if not result.ok:
         log.error("%s failed: %s", request.label, result.error)
         return 1
@@ -108,7 +118,7 @@ def cmd_import(args: argparse.Namespace) -> int:
 
 
 def cmd_import_loose(args: argparse.Namespace) -> int:
-    from apps.importer.import_runner import execute_import_request
+    from opennova_blender import StandaloneBackend
 
     request = ImportRequest.for_loose(
         threedi_path=args.file,
@@ -117,7 +127,11 @@ def cmd_import_loose(args: argparse.Namespace) -> int:
         base_dir=args.asset_dir or "",
         options=options_from_args(args),
     )
-    result = execute_import_request(request)
+    backend = StandaloneBackend()
+    try:
+        result = backend.execute(request)
+    finally:
+        backend.shutdown()
     if not result.ok:
         log.error("%s failed: %s", request.label, result.error)
         return 1
@@ -126,7 +140,8 @@ def cmd_import_loose(args: argparse.Namespace) -> int:
 
 
 def cmd_export_all(args: argparse.Namespace) -> int:
-    from apps.importer.import_runner import execute_import_request, scan_directory_result
+    from apps.importer.import_runner import scan_directory_result
+    from opennova_blender import StandaloneBackend
 
     scan = scan_directory_result(args.dir)
     if not scan.ok:
@@ -141,23 +156,36 @@ def cmd_export_all(args: argparse.Namespace) -> int:
         return 1
 
     options = options_from_args(args)
-    success = 0
-    failed = 0
-    for item in sorted(items, key=lambda x: (x["type"], x["name"].casefold())):
-        request = ImportRequest.for_definition(
+    requests = [
+        ImportRequest.for_definition(
             base_dir=args.dir,
             item_name=item["name"],
             item_type=item["type"],
             output_root=args.output,
+            output_stem=item["output_stem"],
             options=options,
         )
-        log.info("Importing %s -> %s", request.label, args.output)
-        result = execute_import_request(request)
-        if result.ok:
-            success += 1
-        else:
-            failed += 1
-            log.error("  FAILED: %s", result.error)
+        for item in sorted(items, key=lambda x: (x["type"], x["name"].casefold()))
+    ]
+
+    success = 0
+    failed = 0
+    backend = StandaloneBackend()
+    try:
+        log.info(
+            "Dispatching %d jobs across %d Blender worker(s)...",
+            len(requests),
+            backend.max_workers,
+        )
+        for result in backend.execute_batch(requests):
+            if result.ok:
+                success += 1
+                log.info("Done: %s", result.request.label)
+            else:
+                failed += 1
+                log.error("FAILED: %s: %s", result.request.label, result.error)
+    finally:
+        backend.shutdown()
 
     print(f"\nDone: {success} succeeded, {failed} failed.")
     return 0 if failed == 0 else 1

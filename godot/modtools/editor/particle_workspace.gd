@@ -1,5 +1,5 @@
 class_name ParticleEditorWorkspace
-extends "res://modtools/editor/editor_workspace.gd"
+extends EditorWorkspace
 
 # Workspace adapter for the .ptl particle editor. Owns a ParticleEditor
 # document model and a ParticlePreview viewport that the shell mounts into its
@@ -15,14 +15,11 @@ const ParticlePreviewScript = preload("res://modtools/particle/particle_preview.
 const EffectInspectorScene = preload("res://modtools/particle/inspectors/effect_inspector.tscn")
 const ParticleInspectorScene = preload("res://modtools/particle/inspectors/particle_inspector.tscn")
 const TableInspectorScene = preload("res://modtools/particle/inspectors/table_inspector.tscn")
+const EffectInspectorScript = preload("res://modtools/particle/inspectors/effect_inspector.gd")
+const ParticleInspectorScript = preload("res://modtools/particle/inspectors/particle_inspector.gd")
+const TableInspectorScript = preload("res://modtools/particle/inspectors/table_inspector.gd")
 
 enum Workflow { EFFECTS, PARTICLES, TABLES }
-
-const WORKFLOW_DEFS := [
-	{"id": Workflow.EFFECTS, "label": "Effects", "tooltip": "Browse and edit [effectdef] entries"},
-	{"id": Workflow.PARTICLES, "label": "Particles", "tooltip": "Browse and edit [particledef] entries; live preview"},
-	{"id": Workflow.TABLES, "label": "Tables", "tooltip": "Visualize [tabledef] curves"},
-]
 
 var particle_editor: ParticleEditor
 var _preview: ParticlePreview
@@ -114,8 +111,15 @@ func get_status_context() -> String:
 	]
 
 
-func get_workflows() -> Array:
-	return WORKFLOW_DEFS
+func _build_inspector_defs() -> Array:
+	# The shell renders the rail from these InspectorDef rows (id/label/tooltip)
+	# and instantiates the inspector via build_workflow_inspector() below, which
+	# loads the .tscn scenes and wires them to this workspace + the editor model.
+	return [
+		InspectorDef.make(Workflow.EFFECTS, "Effects", "Browse and edit [effectdef] entries", EffectInspectorScript),
+		InspectorDef.make(Workflow.PARTICLES, "Particles", "Browse and edit [particledef] entries; live preview", ParticleInspectorScript),
+		InspectorDef.make(Workflow.TABLES, "Tables", "Visualize [tabledef] curves", TableInspectorScript),
+	]
 
 
 func get_active_workflow_id() -> int:

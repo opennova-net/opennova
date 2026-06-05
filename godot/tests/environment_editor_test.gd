@@ -15,6 +15,21 @@ func test_environment_editor_tracks_dirty_state_from_env_resource() -> void:
 	assert_eq(editor.get_project_title(), "Storm Test*", "Dirty environment title should include the dirty marker.")
 
 
+func test_set_time_of_day_emits_changes_once_per_step() -> void:
+	# Each TOD step must fan out exactly one environment_changed / state_changed.
+	# The inner EnvFile.set_curtime echo previously doubled the fan-out, which is
+	# what made dragging time-of-day rebuild the shell twice per pixel.
+	var editor = add_child_autofree(EnvironmentEditorScript.new())
+	editor.create_default_environment(false)
+	watch_signals(editor)
+
+	editor.set_time_of_day(1300.0)
+
+	assert_signal_emit_count(editor, "environment_changed", 1, "Time-of-day changes should fan out a single environment_changed per step.")
+	assert_signal_emit_count(editor, "state_changed", 1, "Time-of-day changes should fan out a single state_changed per step.")
+	assert_true(editor.is_dirty, "A time-of-day edit should still mark the environment dirty.")
+
+
 func test_environment_editor_exports_current_env_file() -> void:
 	var editor = add_child_autofree(EnvironmentEditorScript.new())
 	editor.create_default_environment(false)

@@ -1,12 +1,23 @@
 """Entry point for `python -m apps.importer`."""
 import logging
+import multiprocessing
 import os
 import sys
+from pathlib import Path
+
+multiprocessing.freeze_support()
 
 # Set up file logging before any other imports so all downstream loggers
 # (import_runner, scene_builder, bpy_session, etc.) inherit this handler.
-_log_path = os.path.join(os.path.dirname(os.path.abspath(sys.executable
-    if getattr(sys, 'frozen', False) else __file__)), "onimport.log")
+def _log_dir() -> Path:
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return Path(appdata) / "OpenNova"
+    return Path.home() / ".opennova"
+
+
+_log_dir().mkdir(parents=True, exist_ok=True)
+_log_path = str(_log_dir() / "onimport.log")
 _file_handler = logging.FileHandler(_log_path, mode="w", encoding="utf-8")
 _file_handler.setLevel(logging.DEBUG)
 _console_handler = logging.StreamHandler(sys.stdout)
@@ -23,7 +34,7 @@ def main():
     args = sys.argv[1:]
     if not args or args[0] == "gui":
         log.info("Loading OpenNova Importer... (log: %s)", _log_path)
-        from apps.importer.ui.app import run_gui
+        from apps.importer.ui.qt_app import run_gui
         run_gui()
     else:
         log.debug("Starting OpenNova Importer CLI (log: %s)", _log_path)

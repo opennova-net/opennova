@@ -1,132 +1,158 @@
 extends RefCounted
 
-const SEARCH_PREFIXES := [
-	"res://modtools/assets/models/",
-	"res://game/assets/models/",
-]
+# Vegetation .3di are not bundled. Runtime and editor callers pass the same
+# flat NovaResourceRoot used for terrain/env/credits, so there is no process
+# global search-root state.
 
 static var _mesh_cache: Dictionary = {}
-static var _scene_path_cache: Dictionary = {}
-static var _graphics_cache: Array = []
-static var _graphics_cache_valid: bool = false
+static var _model_path_cache: Dictionary = {}
+static var _graphics_cache_by_root: Dictionary = {}
 
 
-## Enumerate all *veg*.glb graphics across the search paths.
-## Returns an Array of dictionaries: [{"basename": String, "scene_path": String}, ...]
-## Sorted by basename, deduplicated (modtools path wins when both have the same basename).
-static func list_graphics(force_refresh: bool = false) -> Array:
-	if _graphics_cache_valid and not force_refresh:
-		return _graphics_cache.duplicate(true)
+static func clear_cache() -> void:
+	_mesh_cache.clear()
+	_model_path_cache.clear()
+	_graphics_cache_by_root.clear()
+
+
+## Enumerate all top-level *veg*.3di graphics in the resource root.
+## Returns dictionaries with basename/model_path, sorted by basename.
+static func list_graphics(resource_root: NovaResourceRoot, force_refresh: bool = false) -> Array:
+	if resource_root == null or resource_root.get_root_dir().is_empty():
+		return []
+	var root_key := _root_key(resource_root)
+	if not force_refresh and _graphics_cache_by_root.has(root_key):
+		return _graphics_cache_by_root[root_key].duplicate(true)
 
 	var out: Array = []
 	var seen: Dictionary = {}
-	_scene_path_cache.clear()
-	for prefix_value in SEARCH_PREFIXES:
-		var prefix: String = String(prefix_value)
-		var dir := DirAccess.open(prefix)
-		if dir == null:
+	for entry_value in resource_root.list_file_entries(".3di"):
+		var entry := entry_value as Dictionary
+		var model_name := String(entry.get("logical_name", entry.get("path", "")))
+		var model_ref := String(entry.get("path", ""))
+		if model_ref.is_empty():
+			model_ref = model_name
+		var basename := model_name.get_file().get_basename().to_lower()
+		if not basename.contains("veg") or seen.has(basename):
 			continue
-		dir.list_dir_begin()
-		var name := dir.get_next()
-		while name != "":
-			if not dir.current_is_dir():
-				var lower := name.to_lower()
-				if lower.ends_with(".glb") and lower.contains("veg"):
-					var basename := name.get_basename().to_lower()
-					if not seen.has(basename):
-						var scene_path := prefix + name
-						seen[basename] = true
-						_scene_path_cache[basename] = scene_path
-						out.append({
-							"basename": basename,
-							"scene_path": scene_path,
-						})
-			name = dir.get_next()
-		dir.list_dir_end()
+		seen[basename] = true
+		_model_path_cache[_cache_key(root_key, basename)] = model_ref
+		out.append({
+			"basename": basename,
+			"model_path": model_ref,
+			"scene_path": model_ref,
+		})
 	out.sort_custom(func(a, b): return String(a.basename) < String(b.basename))
-	_graphics_cache = out
-	_graphics_cache_valid = true
-	return _graphics_cache.duplicate(true)
+	_graphics_cache_by_root[root_key] = out
+	return out.duplicate(true)
 
 
-## Resolve each def's `graphic` name to the first Mesh inside its .glb.
+## Resolve each def's `graphic` name to the first Mesh built from its .3di.
 ## Returns an Array parallel to `defs`; null entries fall back to BoxMesh inside
 ## the C++ dispatcher.
-static func resolve_slot_meshes(defs: Array) -> Array:
+static func resolve_slot_meshes(resource_root: NovaResourceRoot, defs: Array) -> Array:
 	var meshes: Array = []
 	for def in defs:
 		if def == null:
 			meshes.append(null)
 			continue
 		var graphic: String = String(def.graphic)
-		var mesh: Mesh = load_mesh(graphic) if not graphic.is_empty() else null
+		var mesh: Mesh = load_mesh(resource_root, graphic) if not graphic.is_empty() else null
 		meshes.append(mesh)
 	return meshes
 
 
-## Resolve a graphic name (e.g. "mveg5", "mveg5.3di", "MVEG5.glb") to the first Mesh
-## found inside the matching .glb. Returns null if not resolvable.
-static func load_mesh(graphic: String) -> Mesh:
+## Resolve a graphic name (e.g. "mveg5" or "mveg5.3di") to the first
+## Mesh built from the matching top-level .3di. Returns null if not resolvable.
+static func load_mesh(resource_root: NovaResourceRoot, graphic: String) -> Mesh:
+	if resource_root == null or resource_root.get_root_dir().is_empty():
+		return null
+	var root_key := _root_key(resource_root)
 	var basename: String = graphic.get_file().get_basename().to_lower()
 	if basename.is_empty():
 		return null
-	if _mesh_cache.has(basename):
-		return _mesh_cache[basename]
+	var cache_key := _cache_key(root_key, basename)
+	if _mesh_cache.has(cache_key):
+		return _mesh_cache[cache_key]
 
-	var scene_path := _find_scene_path(basename)
-	if scene_path.is_empty():
+	var model_path := _find_model_path(resource_root, basename)
+	if model_path.is_empty():
 		return null
 
-	var packed: PackedScene = ResourceLoader.load(scene_path, "PackedScene", ResourceLoader.CACHE_MODE_REUSE) as PackedScene
-	if packed == null:
+	var data := NovaObjectData.new()
+	if data.open_from_resource_root(resource_root, model_path) != OK:
 		return null
-	var root: Node = packed.instantiate()
-	var mesh: Mesh = _extract_first_mesh(root)
-	root.free()
+	var submeshes: Array = data.build_lod_submeshes(0)
+	var mesh: Mesh = null
+	if not submeshes.is_empty():
+		var first: Dictionary = submeshes[0]
+		mesh = first.get("mesh") as Mesh
+		if mesh != null and mesh.get_surface_count() > 0:
+			var diffuse := _load_diffuse_texture(data, int(first.get("material_index", 0)))
+			if diffuse != null:
+				var mat := StandardMaterial3D.new()
+				mat.albedo_texture = diffuse
+				mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+				mat.alpha_scissor_threshold = 0.33
+				mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+				mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+				mesh.surface_set_material(0, mat)
 	if mesh != null:
-		_mesh_cache[basename] = mesh
+		_mesh_cache[cache_key] = mesh
 	return mesh
 
 
-static func _find_scene_path(basename: String) -> String:
-	if _scene_path_cache.has(basename):
-		return String(_scene_path_cache[basename])
-	if not _graphics_cache_valid:
-		list_graphics()
-	if _scene_path_cache.has(basename):
-		return String(_scene_path_cache[basename])
+## Load the diffuse (slot 1, falling back to detail slot 2) texture for a .3di
+## material, mirroring nova_object_model._load_texture_for_slot. Returns null if
+## the material has no resolvable texture.
+static func _load_diffuse_texture(data: NovaObjectData, material_index: int) -> Texture2D:
+	var material_defs := {}
+	for material in data.get_materials():
+		var mi := int(material.get("material_index", material.get("index", 0)))
+		material_defs[mi] = material
+		var ai := int(material.get("index", mi))
+		if not material_defs.has(ai):
+			material_defs[ai] = material
 
-	for prefix_value in SEARCH_PREFIXES:
-		var prefix: String = String(prefix_value)
-		var lower_path := prefix + basename + ".glb"
-		if ResourceLoader.exists(lower_path, "PackedScene"):
-			_scene_path_cache[basename] = lower_path
-			return lower_path
+	var material_def: Dictionary = material_defs.get(material_index, {})
+	if material_def.is_empty():
+		return null
+	var array_index := int(material_def.get("index", -1))
+	if array_index < 0:
+		return null
+	var textures: Array = material_def.get("textures", [])
+	for want_slot in [1, 2]:
+		for i in range(textures.size()):
+			var texture: Dictionary = textures[i]
+			if int(texture.get("slot", 0)) == want_slot:
+				var loaded: Texture2D = data.load_material_texture(array_index, i)
+				if loaded != null:
+					return loaded
+	return null
 
-		var dir := DirAccess.open(prefix)
-		if dir == null:
-			continue
-		dir.list_dir_begin()
-		var name := dir.get_next()
-		while name != "":
-			if not dir.current_is_dir() and name.to_lower().ends_with(".glb"):
-				if name.get_basename().to_lower() == basename:
-					var scene_path := prefix + name
-					_scene_path_cache[basename] = scene_path
-					dir.list_dir_end()
-					return scene_path
-			name = dir.get_next()
-		dir.list_dir_end()
+
+static func _find_model_path(resource_root: NovaResourceRoot, basename: String) -> String:
+	var root_key := _root_key(resource_root)
+	var cache_key := _cache_key(root_key, basename)
+	if _model_path_cache.has(cache_key):
+		return String(_model_path_cache[cache_key])
+	list_graphics(resource_root)
+	if _model_path_cache.has(cache_key):
+		return String(_model_path_cache[cache_key])
+
+	# Resolve through the VFS (loose or PFF). The logical name is enough: it is only
+	# fed back to NovaObjectData.open_from_resource_root, which reads it through the VFS.
+	var logical := basename + ".3di"
+	if resource_root.has_file(logical):
+		_model_path_cache[cache_key] = logical
+		return logical
 	return ""
 
 
-static func _extract_first_mesh(node: Node) -> Mesh:
-	if node is MeshInstance3D:
-		var mesh_instance := node as MeshInstance3D
-		if mesh_instance.mesh != null:
-			return mesh_instance.mesh
-	for child in node.get_children():
-		var mesh := _extract_first_mesh(child)
-		if mesh != null:
-			return mesh
-	return null
+static func _root_key(resource_root: NovaResourceRoot) -> String:
+	return resource_root.get_root_dir().replace("\\", "/").rstrip("/").to_lower()
+
+
+static func _cache_key(root_key: String, basename: String) -> String:
+	return "%s|%s" % [root_key, basename]

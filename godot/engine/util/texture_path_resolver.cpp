@@ -1,142 +1,216 @@
 #include "texture_path_resolver.h"
 
+#include "util/pcx_texture_bridge.h"
+
+#include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 
-#include "util/pcx_texture_bridge.h"
-
-#include <algorithm>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace opennova {
 
 namespace {
 
+// NovaLogic assets reference textures by name with inconsistent case (e.g. a
+// .trn says "trntile10.tga" while the file is "TRNTILE10.TGA") and an extension
+// that may not match what is on disk, so we try the name + extension fallbacks.
+// Case is handled by the case-insensitive directory match (build_lowercase_dir_index),
+// so the extension list needs no upper-case variants.
 static constexpr const char *tex_ext_priority[] = {
-	"dds", "DDS", "mdt", "MDT", "dds.tga", "DDS.TGA", "tga", "TGA", "pcx", "PCX",
-	"png", "PNG", "jpg", "JPG", "jpeg", "JPEG", "bmp", "BMP"
+	"tga", "dds", "dds.tga", "mdt", "pcx", "png", "jpg", "jpeg", "bmp"
 };
-
-bool candidate_exists(const godot::String &path) {
-	if (path.begins_with("res://")) {
-		return godot::ResourceLoader::get_singleton()->exists(path);
-	}
-	return godot::FileAccess::file_exists(path);
-}
 
 void append_unique(std::vector<godot::String> &items, const godot::String &value) {
 	if (value.is_empty()) {
 		return;
 	}
-	if (std::find(items.begin(), items.end(), value) == items.end()) {
-		items.push_back(value);
-	}
-}
-
-void append_stem_variants(std::vector<godot::String> &items, const godot::String &dir, const godot::String &stem,
-		const char *ext) {
-	const godot::String extension = godot::String(".") + ext;
-	append_unique(items, dir.path_join(stem + extension));
-	append_unique(items, dir.path_join(stem.to_lower() + extension));
-	append_unique(items, dir.path_join(stem.to_upper() + extension));
-	append_unique(items, dir.path_join(stem + godot::String("_O") + extension));
-	append_unique(items, dir.path_join(stem + godot::String("_o") + extension));
-	append_unique(items, dir.path_join(stem.to_lower() + godot::String("_o") + extension));
-	append_unique(items, dir.path_join(stem.to_upper() + godot::String("_O") + extension));
-}
-
-godot::String texture_stem(const godot::String &filename) {
-	const godot::String file = filename.get_file();
-	const godot::String lower = file.to_lower();
-	static constexpr const char *known_suffixes[] = {
-		".dds.tga", ".tga", ".dds", ".mdt", ".pcx", ".png", ".jpg", ".jpeg", ".bmp"
-	};
-	for (const char *suffix : known_suffixes) {
-		const godot::String suffix_string(suffix);
-		if (lower.ends_with(suffix_string)) {
-			return file.substr(0, file.length() - suffix_string.length());
+	for (const godot::String &item : items) {
+		if (item == value) {
+			return;
 		}
 	}
-	return file.get_basename();
+	items.push_back(value);
 }
 
-godot::Ref<godot::Image> load_nova_image_file(const godot::String &path) {
-	const godot::String lower = path.to_lower();
-	godot::Ref<godot::Image> image;
-
-	if (lower.ends_with(".pcx")) {
-		godot::Ref<godot::FileAccess> file = godot::FileAccess::open(path, godot::FileAccess::READ);
-		if (file.is_null()) {
-			return image;
-		}
-		const godot::PackedByteArray bytes = file->get_buffer(file->get_length());
-		file.unref();
-		image = decode_pcx_image(bytes.ptr(), bytes.size());
-	} else if (lower.ends_with(".tga") || lower.ends_with(".dds") || lower.ends_with(".mdt")) {
-		godot::Ref<godot::FileAccess> file = godot::FileAccess::open(path, godot::FileAccess::READ);
-		if (file.is_null()) {
-			return image;
-		}
-		const godot::PackedByteArray bytes = file->get_buffer(file->get_length());
-		file.unref();
-		image.instantiate();
-		if (image->load_tga_from_buffer(bytes) != godot::OK) {
-			image.unref();
-			return image;
-		}
-	} else {
-		image.instantiate();
-		if (image->load(path) != godot::OK) {
-			image.unref();
-			return image;
-		}
+std::vector<godot::String> texture_stems(const godot::String &filename) {
+	std::vector<godot::String> stems;
+	const godot::String stem = filename.get_file().get_basename();
+	if (stem.is_empty()) {
+		return stems;
 	}
 
+	append_unique(stems, stem);
+	// NovaLogic outline/overlay textures append an "_O" suffix to the base name.
+	// (Case is normalized by the directory match, so no _o/_O or stem-case dupes.)
+	if (!stem.to_lower().ends_with("_o")) {
+		append_unique(stems, stem + godot::String("_O"));
+	}
+	return stems;
+}
+
+bool is_resource_dir(const godot::String &dir) {
+	return dir.begins_with("res://") || dir.begins_with("uid://");
+}
+
+// Per-session resolver caches (MAIN-THREAD ONLY; cleared on resource-dir change via
+// opennova::clear_texture_resolver_caches()). The original code re-enumerated the
+// whole asset directory on EVERY texture probe and re-decoded shared textures each
+// time; for a directory of thousands of files placing hundreds of objects that is the
+// dominant load cost. Keyed by dir / resolved-path so a different directory is a
+// separate entry.
+std::unordered_map<std::string, std::unordered_map<std::string, godot::String>> g_dir_index_cache;
+std::unordered_map<std::string, godot::Ref<godot::Texture2D>> g_texture_cache;
+
+// List an absolute/external directory into a lower-cased filename -> real filename
+// index. Called once per directory by get_lowercase_dir_index(), which caches it.
+std::unordered_map<std::string, godot::String> build_lowercase_dir_index_uncached(const godot::String &dir) {
+	std::unordered_map<std::string, godot::String> index;
+	godot::Ref<godot::DirAccess> dir_access = godot::DirAccess::open(dir);
+	if (dir_access.is_null()) {
+		return index;
+	}
+	dir_access->list_dir_begin();
+	godot::String entry = dir_access->get_next();
+	while (!entry.is_empty()) {
+		if (!dir_access->current_is_dir()) {
+			index.emplace(std::string(entry.to_lower().utf8().get_data()), entry);
+		}
+		entry = dir_access->get_next();
+	}
+	dir_access->list_dir_end();
+	return index;
+}
+
+// Cached lower-cased filename index for `dir`: enumerate the directory once, then
+// reuse for every subsequent probe (callers do in-memory hash lookups instead of
+// re-listing the directory). Returns a const reference to avoid copying the map.
+const std::unordered_map<std::string, godot::String> &get_lowercase_dir_index(const godot::String &dir) {
+	const std::string key(dir.utf8().get_data());
+	auto it = g_dir_index_cache.find(key);
+	if (it != g_dir_index_cache.end()) {
+		return it->second;
+	}
+	auto inserted = g_dir_index_cache.emplace(key, build_lowercase_dir_index_uncached(dir));
+	return inserted.first->second;
+}
+
+bool bytes_look_like_dds(const godot::PackedByteArray &bytes) {
+	return bytes.size() >= 4 &&
+			bytes[0] == 'D' &&
+			bytes[1] == 'D' &&
+			bytes[2] == 'S' &&
+			bytes[3] == ' ';
+}
+
+godot::Ref<godot::Texture2D> texture_from_image(godot::Ref<godot::Image> image) {
 	if (image.is_null() || image->is_empty()) {
-		image.unref();
-		return image;
+		return godot::Ref<godot::Texture2D>();
 	}
 	if (image->is_compressed()) {
 		image->decompress();
 	}
 	image->generate_mipmaps();
-	return image;
+	return godot::ImageTexture::create_from_image(image);
+}
+
+// Decode a texture from raw on-disk bytes. Used ONLY for absolute/external paths
+// (original game assets) — res:// assets go through ResourceLoader instead, which
+// also resolves the imported .ctex that replaces the raw source in exported PCKs.
+godot::Ref<godot::Texture2D> load_existing_texture_path(const godot::String &path) {
+	const godot::String ext = path.get_extension().to_lower();
+
+	godot::Ref<godot::FileAccess> file = godot::FileAccess::open(path, godot::FileAccess::READ);
+	if (file.is_null()) {
+		return godot::Ref<godot::Texture2D>();
+	}
+	godot::PackedByteArray bytes = file->get_buffer(file->get_length());
+	file.unref();
+
+	if (ext == "pcx") {
+		return texture_from_image(decode_pcx_image(bytes.ptr(), bytes.size()));
+	}
+
+	if (ext == "dds" && bytes_look_like_dds(bytes)) {
+		return godot::ResourceLoader::get_singleton()->load(path, "ImageTexture", godot::ResourceLoader::CACHE_MODE_IGNORE);
+	}
+
+	if ((ext == "tga" || ext == "mdt" || ext == "dds") && !bytes_look_like_dds(bytes)) {
+		if (bytes.size() < 18) {
+			return godot::Ref<godot::Texture2D>();
+		}
+		godot::Ref<godot::Image> image;
+		image.instantiate();
+		if (image->load_tga_from_buffer(bytes) != godot::OK) {
+			return godot::Ref<godot::Texture2D>();
+		}
+		return texture_from_image(image);
+	}
+
+	godot::Ref<godot::Image> image;
+	image.instantiate();
+	if (image->load(path) != godot::OK) {
+		return godot::Ref<godot::Texture2D>();
+	}
+	return texture_from_image(image);
 }
 
 } // namespace
+
+// Candidate FILENAMES (not full paths) to try, in priority order: the requested
+// name as-is first, then every stem casing x extension.
+std::vector<godot::String> texture_candidate_filenames(const godot::String &filename) {
+	std::vector<godot::String> candidates;
+	const godot::String file = filename.get_file();
+	if (file.is_empty()) {
+		return candidates;
+	}
+
+	append_unique(candidates, file);
+	for (const godot::String &stem : texture_stems(filename)) {
+		for (const char *ext : tex_ext_priority) {
+			append_unique(candidates, stem + godot::String(".") + ext);
+		}
+	}
+	return candidates;
+}
 
 godot::String resolve_texture_path(const godot::String &dir, const godot::String &filename) {
 	if (dir.is_empty() || filename.is_empty()) {
 		return godot::String();
 	}
 
-	const godot::String file = filename.get_file();
-	if (file.is_empty()) {
+	const std::vector<godot::String> candidates = texture_candidate_filenames(filename);
+
+	if (is_resource_dir(dir)) {
+		// res:// — probe ResourceLoader per case-variant. This matches imported
+		// textures via their .import/.uid remap (so it works in exported PCKs where
+		// the raw source is stripped) without enumerating the directory.
+		godot::ResourceLoader *loader = godot::ResourceLoader::get_singleton();
+		for (const godot::String &file : candidates) {
+			const godot::String path = dir.path_join(file);
+			if (loader->exists(path)) {
+				return path;
+			}
+		}
 		return godot::String();
 	}
 
-	std::vector<godot::String> candidates;
-	append_unique(candidates, dir.path_join(file));
-	append_unique(candidates, dir.path_join(file.to_lower()));
-	append_unique(candidates, dir.path_join(file.to_upper()));
-
-	const godot::String stem = texture_stem(file);
-	if (stem.is_empty()) {
+	// Absolute / external — cached directory listing, in-memory case-insensitive match.
+	const std::unordered_map<std::string, godot::String> &index = get_lowercase_dir_index(dir);
+	if (index.empty()) {
 		return godot::String();
 	}
-
-	for (const char *ext : tex_ext_priority) {
-		append_stem_variants(candidates, dir, stem, ext);
-	}
-
-	for (const godot::String &candidate : candidates) {
-		if (candidate_exists(candidate)) {
-			return candidate;
+	for (const godot::String &file : candidates) {
+		auto it = index.find(std::string(file.to_lower().utf8().get_data()));
+		if (it != index.end()) {
+			return dir.path_join(it->second);
 		}
 	}
-
 	return godot::String();
 }
 
@@ -145,56 +219,150 @@ godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, con
 		return godot::Ref<godot::Texture2D>();
 	}
 
-	const godot::String resolved = resolve_texture_path(dir, filename);
-	if (resolved.is_empty()) {
+	// Try each candidate in priority order and keep searching when one resolves
+	// but fails to decode (e.g. a truncated/garbage same-stem file shadowing a
+	// valid sibling), matching the original loop-and-fallback behavior.
+	const std::vector<godot::String> candidates = texture_candidate_filenames(filename);
+
+	if (is_resource_dir(dir)) {
+		// res://: ResourceLoader resolves the imported CompressedTexture2D (.ctex)
+		// for .tga and routes .pcx/.mdt through ResourceFormatLoaderNovaTexture —
+		// the only path that survives export (raw .tga sources are not packed).
+		godot::ResourceLoader *loader = godot::ResourceLoader::get_singleton();
+		for (const godot::String &file : candidates) {
+			const godot::String path = dir.path_join(file);
+			if (loader->exists(path)) {
+				godot::Ref<godot::Texture2D> tex = loader->load(path);
+				if (tex.is_valid()) {
+					return tex;
+				}
+			}
+		}
 		return godot::Ref<godot::Texture2D>();
 	}
 
-	if (resolved.begins_with("res://") || resolved.begins_with("user://")) {
-		godot::Ref<godot::Texture2D> texture = godot::ResourceLoader::get_singleton()->load(resolved);
-		if (texture.is_valid()) {
-			return texture;
+	// Absolute/external original-asset path: ResourceLoader only handles res://, so
+	// decode the raw bytes ourselves. Cached directory listing + decoded-texture cache
+	// so a shared texture is enumerated/decoded/uploaded once, not per material.
+	const std::unordered_map<std::string, godot::String> &index = get_lowercase_dir_index(dir);
+	if (index.empty()) {
+		return godot::Ref<godot::Texture2D>();
+	}
+	for (const godot::String &file : candidates) {
+		auto it = index.find(std::string(file.to_lower().utf8().get_data()));
+		if (it != index.end()) {
+			const godot::String resolved = dir.path_join(it->second);
+			const std::string tex_key(resolved.utf8().get_data());
+			auto cached = g_texture_cache.find(tex_key);
+			godot::Ref<godot::Texture2D> tex;
+			if (cached != g_texture_cache.end()) {
+				tex = cached->second;
+			} else {
+				tex = load_existing_texture_path(resolved);
+				// Cache the null too: a truncated/garbage file should not be re-read on
+				// every probe; the loop still falls through to the next candidate.
+				g_texture_cache.emplace(tex_key, tex);
+			}
+			if (tex.is_valid()) {
+				return tex;
+			}
 		}
 	}
-
-	godot::Ref<godot::Image> image = load_nova_image_file(resolved);
-	if (image.is_null() || image->is_empty()) {
-		return godot::Ref<godot::Texture2D>();
-	}
-	return godot::ImageTexture::create_from_image(image);
+	return godot::Ref<godot::Texture2D>();
 }
 
-godot::String resolve_asset_path(const godot::String &dir, const godot::String &name, const char *ext) {
-	if (name.is_empty()) {
+godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filename, const godot::PackedByteArray &bytes) {
+	if (filename.is_empty() || bytes.is_empty()) {
+		return godot::Ref<godot::Texture2D>();
+	}
+
+	const godot::String ext = filename.get_extension().to_lower();
+	if (ext == "pcx") {
+		return texture_from_image(decode_pcx_image(bytes.ptr(), static_cast<size_t>(bytes.size())));
+	}
+
+	// True DDS (DXT/BC payload): Godot 4.6 decodes it straight from the buffer, so a DDS
+	// that exists only inside a .pff (no filesystem path) still loads. Keyed on the magic,
+	// not the extension, so a mis-named entry still routes here. texture_from_image()
+	// decompresses the BC payload before generating mipmaps.
+	if (bytes_look_like_dds(bytes)) {
+		godot::Ref<godot::Image> image;
+		image.instantiate();
+		if (image->load_dds_from_buffer(bytes) != godot::OK) {
+			return godot::Ref<godot::Texture2D>();
+		}
+		return texture_from_image(image);
+	}
+
+	if ((ext == "tga" || ext == "mdt" || ext == "dds") && !bytes_look_like_dds(bytes)) {
+		if (bytes.size() < 18) {
+			return godot::Ref<godot::Texture2D>();
+		}
+		godot::Ref<godot::Image> image;
+		image.instantiate();
+		if (image->load_tga_from_buffer(bytes) != godot::OK) {
+			return godot::Ref<godot::Texture2D>();
+		}
+		return texture_from_image(image);
+	}
+
+	return godot::Ref<godot::Texture2D>();
+}
+
+godot::String resolve_file_in_dir(const godot::String &dir, const godot::String &name) {
+	if (dir.is_empty() || name.is_empty()) {
+		return godot::String();
+	}
+	if (is_resource_dir(dir)) {
+		const godot::String path = dir.path_join(name);
+		return godot::ResourceLoader::get_singleton()->exists(path) ? path : godot::String();
+	}
+	const std::unordered_map<std::string, godot::String> &index = get_lowercase_dir_index(dir);
+	auto it = index.find(std::string(name.to_lower().utf8().get_data()));
+	return it != index.end() ? dir.path_join(it->second) : godot::String();
+}
+
+godot::String resolve_sidecar_path(const godot::String &dir, const godot::String &filename, const char *ext) {
+	if (filename.is_empty()) {
 		return godot::String();
 	}
 
-	godot::String stem = name.get_file().get_basename();
+	const godot::String direct = dir.path_join(filename);
+	if (godot::FileAccess::file_exists(direct)) {
+		return direct;
+	}
+
+	const godot::String requested_ext = godot::String(ext).to_lower();
+	const godot::String file_dir = filename.get_base_dir();
+	const godot::String file_name = filename.get_file();
+	godot::String stem = file_name;
+	if (file_name.get_extension().to_lower() == requested_ext) {
+		stem = file_name.get_basename();
+	}
 	if (stem.is_empty()) {
-		stem = name;
+		stem = file_name;
 	}
 
 	const godot::String stem_lower = stem.to_lower();
 	const godot::String stem_upper = stem.to_upper();
-	godot::String stem_cap = stem_lower;
-	if (!stem_cap.is_empty()) {
-		stem_cap = stem_cap.substr(0, 1).to_upper() + stem_cap.substr(1);
-	}
-
-	const godot::String stems[] = {stem, stem_lower, stem_upper, stem_cap};
+	const godot::String stems[] = {stem, stem_lower, stem_upper};
+	const godot::String exts[] = {requested_ext, requested_ext.to_upper()};
+	const godot::String search_dir = file_dir.is_empty() ? dir : dir.path_join(file_dir);
 	for (const godot::String &candidate_stem : stems) {
-		const godot::String candidate = dir.path_join(candidate_stem + godot::String(".") + ext);
-		if (godot::ResourceLoader::get_singleton()->exists(candidate)) {
-			return candidate;
-		}
-
-		const godot::String upper_candidate = dir.path_join(candidate_stem + godot::String(".") + godot::String(ext).to_upper());
-		if (godot::ResourceLoader::get_singleton()->exists(upper_candidate)) {
-			return upper_candidate;
+		for (const godot::String &candidate_ext : exts) {
+			const godot::String candidate = search_dir.path_join(candidate_stem + godot::String(".") + candidate_ext);
+			if (godot::FileAccess::file_exists(candidate)) {
+				return candidate;
+			}
 		}
 	}
 
 	return godot::String();
+}
+
+void clear_texture_resolver_caches() {
+	g_dir_index_cache.clear();
+	g_texture_cache.clear();
 }
 
 } // namespace opennova

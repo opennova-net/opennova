@@ -65,6 +65,8 @@ void NovaFoliageDispatcher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_foliage_sampler"), &NovaFoliageDispatcher::get_foliage_sampler);
 	ClassDB::bind_method(D_METHOD("set_terrain_data", "data"), &NovaFoliageDispatcher::set_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_terrain_data"), &NovaFoliageDispatcher::get_terrain_data);
+	ClassDB::bind_method(D_METHOD("set_colormap_source", "data"), &NovaFoliageDispatcher::set_colormap_source);
+	ClassDB::bind_method(D_METHOD("get_colormap_source"), &NovaFoliageDispatcher::get_colormap_source);
 	ClassDB::bind_method(D_METHOD("set_dispatch_algorithm", "algorithm"), &NovaFoliageDispatcher::set_dispatch_algorithm);
 	ClassDB::bind_method(D_METHOD("get_dispatch_algorithm"), &NovaFoliageDispatcher::get_dispatch_algorithm);
 	ClassDB::bind_method(D_METHOD("set_cell_grid_radius", "radius"), &NovaFoliageDispatcher::set_cell_grid_radius);
@@ -92,6 +94,8 @@ void NovaFoliageDispatcher::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "foliage_sampler"), "set_foliage_sampler", "get_foliage_sampler");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data", PROPERTY_HINT_RESOURCE_TYPE, "NovaTerrainData"),
 	             "set_terrain_data", "get_terrain_data");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "colormap_source", PROPERTY_HINT_RESOURCE_TYPE, "NovaTerrainData"),
+	             "set_colormap_source", "get_colormap_source");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "dispatch_algorithm", PROPERTY_HINT_ENUM,
 	                          "Engine Centers,Cell Grid"),
 	             "set_dispatch_algorithm", "get_dispatch_algorithm");
@@ -141,6 +145,17 @@ void NovaFoliageDispatcher::set_terrain_data(const Ref<NovaTerrainData> &p_data)
 }
 
 Ref<NovaTerrainData> NovaFoliageDispatcher::get_terrain_data() const { return terrain_data_; }
+
+void NovaFoliageDispatcher::set_colormap_source(const Ref<NovaTerrainData> &p_data) {
+	if (colormap_source_ == p_data) {
+		return;
+	}
+	colormap_source_ = p_data;
+	// Tints are baked into the cached instance colors at scatter time, so refresh.
+	reset();
+}
+
+Ref<NovaTerrainData> NovaFoliageDispatcher::get_colormap_source() const { return colormap_source_; }
 
 void NovaFoliageDispatcher::set_dispatch_algorithm(int p_algorithm) {
 	const int clamped = std::clamp(p_algorithm,
@@ -380,7 +395,9 @@ Color NovaFoliageDispatcher::_sample_ground_color(const opennova::foliage::Place
 	using opennova::foliage::FIXED_TO_FLOAT;
 
 	(void)quad_half_width;
-	NovaTerrainData *td = terrain_data_.ptr();
+	// Prefer the runtime fast-path terrain_data; fall back to the editor's
+	// colormap-only source so the editor preview tints from the colormap too.
+	NovaTerrainData *td = terrain_data_.is_valid() ? terrain_data_.ptr() : colormap_source_.ptr();
 	if (td == nullptr) {
 		return Color(1.0f, 1.0f, 1.0f, 1.0f);
 	}

@@ -1,91 +1,59 @@
 extends Node3D
 
-# Runtime wiring for NovaFoliageDispatcher + NovaTerrainTileOverlay. Both are
-# the same GDExtension classes the editor preview uses; the samplers resolve
-# to shared C++ methods on NovaTerrainData (sub_5C6770 / sub_5C65E0 analogues)
-# so runtime and editor go through one set of engine-correct math.
+# Runtime shell: drive a NovaWorld (the shared load-from-resource-dir core that a
+# future editor "Play" mode also uses) and own the runtime-only bits — the
+# first-launch directory picker and feeding the camera position to the world.
+# The engine ships no game data; everything loads from the chosen resource dir.
 
-const VegAssets := preload("res://engine/terrain/veg_assets.gd")
+const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
-@onready var _terrain: NovaTerrain = $NovaTerrain
+@onready var _world: NovaWorld = $World
 @onready var _camera: Camera3D = $Camera3D
-@onready var _dispatcher: NovaFoliageDispatcher = $NovaTerrain/FoliageDispatcher
-@onready var _tile_overlay: NovaTerrainTileOverlay = $NovaTerrain/TileOverlay
 
-var _terrain_data: NovaTerrainData
-var _runtime_assets_configured: bool = false
+var _picker: FileDialog
 
 
 func _ready() -> void:
-	if _terrain == null or _dispatcher == null:
+	if _world == null or _camera == null:
 		return
-	_terrain_data = _terrain.terrain_data
-	if _terrain_data == null:
+	if _world.load_world() != OK:
+		_request_resource_dir()
+
+
+# The resource directory is required (no fallback). Prompt for it, unless headless
+# (CI/probes set it explicitly and never block on a dialog).
+func _request_resource_dir() -> void:
+	if DisplayServer.get_name() == "headless" or _picker != null:
 		return
-
-	if not _terrain_data.terrain_changed.is_connected(_on_terrain_data_changed):
-		_terrain_data.terrain_changed.connect(_on_terrain_data_changed)
-	_refresh_runtime_assets()
-
-
-func _on_terrain_data_changed() -> void:
-	_runtime_assets_configured = false
-
-
-func _refresh_runtime_assets() -> void:
-	if _runtime_assets_configured:
-		return
-	if _terrain_data == null or not _terrain_data.is_loaded():
-		return
-
-	# Fast path: dispatcher calls terrain_data's C++ samplers directly, skipping
-	# the Callable/Variant round trip. Callables remain set for symmetry / as a
-	# fallback if terrain_data ever gets cleared at runtime.
-	_dispatcher.terrain_data = _terrain_data
-	_dispatcher.height_sampler = Callable(self, "_sample_height_xz")
-	_dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
-	_dispatcher.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
-	_dispatcher.cell_grid_radius = 8
-
-	var defs: Array = _terrain_data.get_foliage_defs()
-	_dispatcher.foliage_defs = defs
-	_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(defs)
-
-	if _tile_overlay != null:
-		# Runtime tile parity is handled by NovaTerrain's terrain-composited
-		# overlay bake. A scene-assigned TileOverlay remains useful as an
-		# authoring override provider, but should not draw separate quads.
-		if _terrain.tile_info_override == null and _tile_overlay.tile_info != null:
-			_terrain.tile_info_override = _tile_overlay.tile_info
-		_tile_overlay.clear()
-		_tile_overlay.visible = false
-
-	_runtime_assets_configured = true
+	_picker = FileDialog.new()
+	_picker.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	_picker.access = FileDialog.ACCESS_FILESYSTEM
+	_picker.use_native_dialog = true
+	_picker.title = "Select your OpenNova asset directory (contains %s)" % _world.terrain_file
+	_picker.dir_selected.connect(_on_dir_selected)
+	_picker.canceled.connect(_on_dir_canceled)
+	add_child(_picker)
+	_picker.popup_centered_ratio(0.6)
 
 
-# Runtime height sampler. NovaTerrainData.get_height_world_bilinear is the
-# engine's Terrain_SampleHeightBilinear @ 0x5C6770 analogue.
-func _sample_height_xz(world_x: float, world_z: float) -> float:
-	if _terrain_data == null:
-		return -1000000.0
-	return _terrain_data.get_height_world_bilinear(Vector3(world_x, 0.0, world_z))
+func _on_dir_selected(dir: String) -> void:
+	_cleanup_picker()
+	if _world.load_world(dir) == OK:
+		ResourceDirSettings.set_resource_dir(dir)
+	else:
+		_request_resource_dir()
 
 
-# Runtime foliagemap sampler. Delegates to the shared C++ implementation so
-# the editor preview and runtime go through identical sector/origin math.
-func _sample_foliage_index(world_x: float, world_z: float) -> int:
-	if _terrain_data == null:
-		return 0
-	return _terrain_data.get_foliage_index_world(world_x, world_z)
+func _on_dir_canceled() -> void:
+	_cleanup_picker()
+	_request_resource_dir()
+
+
+func _cleanup_picker() -> void:
+	if _picker != null:
+		_picker.queue_free()
+		_picker = null
 
 
 func _process(_delta: float) -> void:
-	if _dispatcher == null or _camera == null:
-		return
-	_refresh_runtime_assets()
-	if not _runtime_assets_configured:
-		return
-	# Runtime currently uses the camera CELL_GRID coverage algorithm. The
-	# IDA-matched ENGINE_CENTERS path remains available for future visible-
-	# entity dispatch; this scene needs broad camera-local coverage today.
-	_dispatcher.dispatch(_camera.global_position)
+	_world.tick(_camera.global_position)

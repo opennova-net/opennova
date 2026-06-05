@@ -1,5 +1,5 @@
 class_name EnvironmentEditorWorkspace
-extends "res://modtools/editor/editor_workspace.gd"
+extends EditorWorkspace
 
 # Shell adapter for the EnvFile document. The IDA-backed format/TOD behavior is
 # in libs/env (sub_53FA70, sub_53E3F0, sub_53FCC0); this file stays UI-only.
@@ -15,6 +15,15 @@ func _init(value = null) -> void:
 
 func set_environment_editor(value) -> void:
 	environment_editor = value
+
+
+func bind_to_editor(value: Node) -> void:
+	var env = value.get_environment_editor() if value != null and value.has_method("get_environment_editor") else null
+	set_environment_editor(env)
+
+
+func get_workspace_tooltip() -> String:
+	return "Edit .env weather, lighting, atmosphere, and time of day."
 
 
 func get_workspace_id() -> String:
@@ -72,8 +81,29 @@ func get_open_dialog_dir() -> String:
 	return environment_editor.get_last_open_dir() if environment_editor else ""
 
 
+func get_open_resource_kind() -> String:
+	return "environment"
+
+
+func get_current_resource_path() -> String:
+	if environment_editor == null:
+		return ""
+	return String(environment_editor.current_path)
+
+
 func open_file(path: String) -> Error:
-	return environment_editor.open_env(path) if environment_editor else ERR_UNAVAILABLE
+	if environment_editor == null:
+		return ERR_UNAVAILABLE
+	var resources := _resource_root()
+	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
+		return environment_editor.open_env_from_resource_root(resources, path)
+	return environment_editor.open_env(path)
+
+
+func _resource_root() -> NovaResourceRoot:
+	if editor_shell != null and editor_shell.has_method("get_resource_root"):
+		return editor_shell.get_resource_root()
+	return null
 
 
 func has_unsaved_changes() -> bool:
@@ -104,32 +134,12 @@ func save_as(dir_path: String) -> Error:
 	return environment_editor.save_as(dir_path) if environment_editor else ERR_UNAVAILABLE
 
 
-func can_export() -> bool:
-	return environment_editor != null and environment_editor.env_file != null
-
-
-func has_export_action() -> bool:
-	return false
-
-
-func begin_export(dir_path: String, _flavor: int) -> Error:
-	return environment_editor.export_to_dir(dir_path) if environment_editor else ERR_UNAVAILABLE
-
-
 func get_save_dialog_title() -> String:
 	return "Choose where to save the environment"
 
 
 func get_save_dialog_dir() -> String:
 	return environment_editor.get_last_save_dir() if environment_editor else ""
-
-
-func get_export_dialog_title() -> String:
-	return "Choose where to export the environment"
-
-
-func get_export_dialog_dir() -> String:
-	return environment_editor.get_last_export_dir() if environment_editor else ""
 
 
 func build_inspector(host: Control) -> void:

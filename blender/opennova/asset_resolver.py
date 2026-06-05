@@ -1,71 +1,56 @@
 """
 Unified loose-file + PFF asset resolver.
 
-Allows pointing at a game install directory containing .pff archives
-instead of requiring pre-extracted assets. Loose files still work too.
+Allows pointing at a game install directory containing .pff archives instead of
+requiring pre-extracted assets. Loose files still work too.
 
-Since all C FFI parsers take file paths (not buffers), PFF-extracted
-assets are written to a temporary directory.
+Thin wrapper over the engine-faithful native VFS (libs/vfs): mount precedence and
+SCR/BFC1 decoding happen in C, so Blender and the importer resolve byte-identical
+assets. Since the C FFI parsers take file paths (not buffers), resolved files are
+materialized to a temporary directory.
 """
 
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 
-from .bfc1_ffi import is_bfc1, decompress as bfc1_decompress
-from .pff_ffi import PffArchive
-from .scr_ffi import is_scr, get_version, decrypt, SCR_KEY_DEFAULT, SCR_KEY_JO_DFX2, SCR_KEY_SHADERS
-
-_SCR_VERSION_KEYS = {
-    0: SCR_KEY_DEFAULT,
-    1: SCR_KEY_JO_DFX2,
-    2: SCR_KEY_SHADERS,
-}
+from . import gameprofile_ffi
+from .vfs_ffi import Vfs
 
 
 class AssetResolver:
     """Context manager that resolves asset filenames to filesystem paths.
 
-    Search order for resolve():
-      1. Loose file in base_dir (case-insensitive)
-      2. Already-extracted temp file (avoids re-extraction)
-      3. PFF archives (sorted alphabetically, first match wins)
-         - SCR-encrypted files are auto-decrypted on extraction
+    Backed by the native VFS, which mounts base_dir the way the game engine does:
+    loose files in base_dir shadow archived files, and every .pff in base_dir is
+    mounted (sorted) as a secondary archive. SCR-encrypted / BFC1-compressed payloads
+    are decoded natively. Resolved bytes are materialized to a temp file so the C/DCC
+    parsers (which take paths) can read them.
+
+    `game` is the source game's code (e.g. "jo", "jodemo"); it selects the SCR decode key,
+    since the JO Demo keys version-1 payloads differently from retail JO/DFX2. Defaults to "jo".
 
     Usage::
 
-        with AssetResolver(base_dir) as resolver:
+        with AssetResolver(base_dir, game="jodemo") as resolver:
             path = resolver.resolve("weapon.def")
     """
 
-    def __init__(self, base_dir: str):
+    def __init__(self, base_dir: str, game: str = "jo"):
         self.base_dir = Path(base_dir)
+        self.game = game
         self._tmp_path = Path(tempfile.mkdtemp(prefix="opennova_"))
 
-        # Case-insensitive lookup for loose files: lowercase name -> actual Path
-        self._loose: dict[str, Path] = {}
-        try:
-            for entry in os.scandir(str(self.base_dir)):
-                if entry.is_file():
-                    self._loose[entry.name.lower()] = Path(entry.path)
-        except OSError:
-            pass
+        self._vfs = Vfs()
+        # No expansion -> base-game mounting (loose shadows archives; *.pff mounted
+        # sorted). A non-directory base_dir leaves the VFS empty, so resolve() -> None.
+        self._vfs.mount_game(str(self.base_dir))
+        # Game-aware SCR keying: resolve the policy through the single C mapping so Blender
+        # decodes exactly like the engine. Unknown/None code -> JO default.
+        self._vfs.set_scr_policy(gameprofile_ffi.scr_policy_for_code(game))
 
-        # Open all PFF archives found in the directory, sorted alphabetically
-        self._archives: list[PffArchive] = []
-        pff_paths = sorted(
-            p for p in self.base_dir.iterdir()
-            if p.is_file() and p.suffix.lower() == ".pff"
-        ) if self.base_dir.is_dir() else []
-        for pff_path in pff_paths:
-            try:
-                self._archives.append(PffArchive(str(pff_path)))
-            except RuntimeError:
-                pass  # skip archives that fail to open
-
-        # Track already-extracted temp files: lowercase name -> temp Path
+        # Materialized temp files: lowercase logical name -> temp Path
         self._extracted: dict[str, Path] = {}
 
     def __enter__(self):
@@ -76,85 +61,39 @@ class AssetResolver:
         return False
 
     def close(self):
-        """Close all PFF archive handles.
+        """Release the native VFS (and its open archive handles).
 
-        Extracted temp files are intentionally left on disk so that
-        Blender can continue to reference textures by path.  The OS
-        cleans the system temp directory on reboot.
+        Materialized temp files are intentionally left on disk so that Blender can
+        keep referencing textures by path. The OS cleans the system temp dir on reboot.
         """
-        for arc in self._archives:
-            try:
-                arc.close()
-            except Exception:
-                pass
-        self._archives.clear()
-
-    def _ensure_decoded(self, key: str, path: Path) -> str:
-        """If a loose file is SCR-encrypted or BFC1-compressed, decode it to temp."""
-        try:
-            with open(path, "rb") as f:
-                header = f.read(8)
-        except OSError:
-            return str(path)
-
-        needs_decode = False
-        if len(header) >= 4 and is_scr(header[:4]):
-            needs_decode = True
-        elif len(header) >= 8 and is_bfc1(header[:8]):
-            needs_decode = True
-
-        if not needs_decode:
-            return str(path)
-
-        data = path.read_bytes()
-        if len(data) >= 4 and is_scr(data[:4]):
-            ver = get_version(data[:4])
-            scr_key = _SCR_VERSION_KEYS.get(ver, SCR_KEY_DEFAULT)
-            data = decrypt(data, scr_key)
-        if len(data) >= 8 and is_bfc1(data[:8]):
-            data = bfc1_decompress(data)
-
-        dest = self._tmp_path / key
-        dest.write_bytes(data)
-        self._extracted[key] = dest
-        return str(dest)
+        if getattr(self, "_vfs", None) is not None:
+            self._vfs.close()
+            self._vfs = None
 
     def resolve(self, filename: str) -> str | None:
         """Resolve a filename to a filesystem path, or None if not found.
 
-        Returns a string path suitable for passing to C FFI functions.
+        Returns a string path suitable for passing to C FFI functions. The bytes are
+        already SCR-decrypted / BFC1-decompressed by the native VFS.
         """
         if not filename:
             return None
         key = filename.lower()
 
-        # 1. Loose file
-        if key in self._loose:
-            return self._ensure_decoded(key, self._loose[key])
+        cached = self._extracted.get(key)
+        if cached is not None and cached.is_file():
+            return str(cached)
 
-        # 2. Already extracted
-        if key in self._extracted:
-            return str(self._extracted[key])
+        if getattr(self, "_vfs", None) is None:
+            return None
+        data = self._vfs.read_file(filename)
+        if data is None:
+            return None
 
-        # 3. PFF archives
-        for arc in self._archives:
-            entry = arc.find(filename)
-            if entry is not None:
-                data = arc.extract(entry)
-                # Auto-decrypt SCR if needed
-                if len(data) >= 4 and is_scr(data[:4]):
-                    ver = get_version(data[:4])
-                    scr_key = _SCR_VERSION_KEYS.get(ver, SCR_KEY_DEFAULT)
-                    data = decrypt(data, scr_key)
-                # Auto-decompress BFC1 if needed
-                if len(data) >= 8 and is_bfc1(data[:8]):
-                    data = bfc1_decompress(data)
-                dest = self._tmp_path / filename
-                dest.write_bytes(data)
-                self._extracted[key] = dest
-                return str(dest)
-
-        return None
+        dest = self._tmp_path / Path(filename).name
+        dest.write_bytes(data)
+        self._extracted[key] = dest
+        return str(dest)
 
     def resolve_texture(self, texture_name: str) -> str | None:
         """Resolve a texture name with extension fallback.
@@ -191,4 +130,3 @@ class AssetResolver:
                 return result
 
         return None
-

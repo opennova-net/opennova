@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="OpenNova"
-config/version="0.0.7"
+config/version="0.0.8"
 run/main_scene="res://modtools/terrain/terrain_editor.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 boot_splash/bg_color=Color(0.08, 0.09, 0.12, 1)
@@ -19,9 +19,23 @@ boot_splash/show_image=false
 config/icon="res://icon.svg"
 run/main_scene.runtime_game="res://game/main_game.tscn"
 
+[autoload]
+
+NovaStrings="*res://engine/strings/nova_strings.gd"
+
 [display]
 
+window/size/viewport_width=1600
+window/size/viewport_height=900
 window/vsync/vsync_mode=0
+
+[editor]
+
+; Godot 4.6.1's parallel asset importer can intermittently segfault on a cold
+; import (race in the multithreaded reimport path), leaving a half-populated
+; .godot/imported cache. Serialize imports: the first-import cost is one-time
+; and only affects the editor, not the running game. See PR #23 CI history.
+import/use_multiple_threads=false
 
 [editor_plugins]
 
@@ -31,6 +45,8 @@ enabled=PackedStringArray("res://addons/gut/plugin.cfg")
 
 rendering_device/driver.windows="d3d12"
 environment/defaults/default_clear_color=Color(0.08, 0.09, 0.12, 1)
+textures/vram_compression/import_s3tc_bptc=true
+textures/vram_compression/import_etc2_astc=true
 
 [shader_globals]
 

@@ -33,11 +33,12 @@ jobs:
 
       - name: Build and test
         shell: bash
+        env:
+          BUILD_GODOT: "0"
         run: scripts/build.sh
 
   package-addon:
     runs-on: ubuntu-latest
-    needs: [test]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,9 +63,36 @@ jobs:
           name: opennova_blender
           path: dist/opennova_blender-v*.zip
 
+  package-max-mzp:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Pull Git LFS assets
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull
+          git lfs fsck --objects
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Package Max MZP
+        shell: pwsh
+        run: scripts/package_max_mzp.ps1
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova_max
+          path: dist/opennova_max-v*.mzp
+
   package-importer:
     runs-on: windows-latest
-    needs: [test]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -91,9 +119,11 @@ jobs:
           name: opennova_importer
           path: dist/onimport-v*.exe
 
-  package-godot:
+  package-godot-windows-editor:
     runs-on: windows-latest
-    needs: [test]
+    env:
+      GODOT_VERSION: 4.6.1-stable
+      GODOT_VERSION_PLAIN: 4.6.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -107,9 +137,21 @@ jobs:
           git lfs pull
           git lfs fsck --objects
 
-      - name: Package Godot exports
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Cache Godot export templates
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
+          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Package Godot Windows editor export
         shell: pwsh
-        run: scripts/package_godot_windows.ps1
+        run: scripts/package_godot_editor_windows.ps1
 
       - name: Upload opennova-modtools Windows zip
         uses: actions/upload-artifact@v4
@@ -117,19 +159,137 @@ jobs:
           name: opennova_modtools_windows
           path: dist/opennova-modtools-windows-v*.zip
 
+  package-godot-windows-runtime:
+    runs-on: windows-latest
+    env:
+      GODOT_VERSION: 4.6.1-stable
+      GODOT_VERSION_PLAIN: 4.6.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Pull Git LFS assets
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull
+          git lfs fsck --objects
+
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Cache Godot export templates
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
+          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Package Godot Windows runtime export
+        shell: pwsh
+        run: scripts/package_godot_runtime_windows.ps1
+
       - name: Upload opennova runtime Windows zip
         uses: actions/upload-artifact@v4
         with:
           name: opennova_runtime_windows
           path: dist/opennova-runtime-windows-v*.zip
 
+  package-godot-macos-editor:
+    runs-on: macos-latest
+    env:
+      GODOT_VERSION: 4.6.1-stable
+      GODOT_VERSION_PLAIN: 4.6.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Pull Git LFS assets
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull
+          git lfs fsck --objects
+
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Cache Godot export templates
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Application Support/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable
+          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Package Godot macOS editor export
+        shell: bash
+        run: scripts/package_godot_editor_macos.sh
+
+      - name: Upload opennova-modtools macOS zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova_modtools_macos
+          path: dist/opennova-modtools-macos-v*.zip
+
+  package-godot-macos-runtime:
+    runs-on: macos-latest
+    env:
+      GODOT_VERSION: 4.6.1-stable
+      GODOT_VERSION_PLAIN: 4.6.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Pull Git LFS assets
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull
+          git lfs fsck --objects
+
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Cache Godot export templates
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Application Support/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable
+          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Package Godot macOS runtime export
+        shell: bash
+        run: scripts/package_godot_runtime_macos.sh
+
+      - name: Upload opennova runtime macOS zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova_runtime_macos
+          path: dist/opennova-runtime-macos-v*.zip
+
   release:
     runs-on: ubuntu-latest
-    needs: [package-addon, package-importer, package-godot]
+    needs: [test, package-addon, package-max-mzp, package-importer, package-godot-windows-editor, package-godot-windows-runtime, package-godot-macos-editor, package-godot-macos-runtime]
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -137,29 +297,13 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Build component manifest
-        run: |
-          BLENDER=$(grep -E '^version = ' blender/blender_manifest.toml | sed -E 's/.*"(.*)".*/\1/')
-          IMPORTER=$(grep -E '^version = ' pyproject.toml | sed -E 's/.*"(.*)".*/\1/')
-          GODOT=$(grep -E '^config/version=' godot/project.godot | sed -E 's/.*"(.*)".*/\1/')
-          cat > release-body.md <<EOF
-          ## Components in this release
-
-          | Component | Version |
-          |---|---|
-          | Blender addon | ${BLENDER} |
-          | Standalone importer | ${IMPORTER} |
-          | Godot mod tools | ${GODOT} |
-          | Godot runtime | ${GODOT} |
-
-          EOF
+      - name: Validate release deliverables
+        run: python scripts/validate_release_deliverables.py --release-version "$GITHUB_REF_NAME"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/*.zip
-            dist/onimport-v*.exe
+          files: dist/release-assets/*
           body_path: release-body.md
           append_body: true
           generate_release_notes: true

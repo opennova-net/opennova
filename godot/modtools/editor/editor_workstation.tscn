@@ -1,10 +1,8 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://modtools/editor/editor_workstation.gd" id="1_workstation"]
 [ext_resource type="Theme" uid="uid://brsq3gfp1bk2a" path="res://modtools/terrain/ui/theme/editor_theme.tres" id="2_theme"]
-[ext_resource type="PackedScene" path="res://modtools/terrain/ui/editor_asset_dock.tscn" id="3_asset_dock"]
-
-[sub_resource type="ButtonGroup" id="PromptFormatGroup"]
+[ext_resource type="Script" path="res://modtools/framework/popover_panel.gd" id="3_popover"]
 
 [node name="EditorWorkstation" type="Control"]
 layout_mode = 3
@@ -27,16 +25,128 @@ grow_vertical = 2
 mouse_filter = 2
 theme_override_constants/separation = 12
 
-[node name="BodyRow" type="HBoxContainer" parent="WorkstationLayout"]
+[node name="TopBar" type="PanelContainer" parent="WorkstationLayout"]
+unique_name_in_owner = true
 layout_mode = 2
-mouse_filter = 2
+
+[node name="TopMargin" type="MarginContainer" parent="WorkstationLayout/TopBar"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 4
+
+[node name="TopRow" type="HBoxContainer" parent="WorkstationLayout/TopBar/TopMargin"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ProjectLabel" type="Label" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"Heading"
+text = "OpenNova Terrain Editor"
+vertical_alignment = 1
+clip_text = true
+
+[node name="TopProjectSeparator" type="VSeparator" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+layout_mode = 2
+
+[node name="WorkspaceScrollLeftButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(30, 36)
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Scroll workspaces left"
+
+[node name="WorkspaceScrollSlot" type="Control" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+custom_minimum_size = Vector2(96, 36)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="WorkspaceScroll" type="ScrollContainer" parent="WorkstationLayout/TopBar/TopMargin/TopRow/WorkspaceScrollSlot"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+vertical_scroll_mode = 0
+
+[node name="WorkspaceRail" type="HBoxContainer" parent="WorkstationLayout/TopBar/TopMargin/TopRow/WorkspaceScrollSlot/WorkspaceScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="WorkspaceScrollRightButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(30, 36)
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Scroll workspaces right"
+
+[node name="TopActionSeparator" type="VSeparator" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+layout_mode = 2
+
+[node name="WorkspaceActionsHost" type="HBoxContainer" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TopGlobalSeparator" type="VSeparator" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+layout_mode = 2
+
+[node name="GlobalButtonRail" type="HBoxContainer" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="CameraToggleButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow/GlobalButtonRail"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+focus_mode = 0
+toggle_mode = true
+tooltip_text = "Camera"
+flat = false
+
+[node name="EnvironmentToggleButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow/GlobalButtonRail"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+focus_mode = 0
+toggle_mode = true
+tooltip_text = "Environment"
+flat = false
+
+[node name="SettingsToggleButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow/GlobalButtonRail"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+focus_mode = 0
+toggle_mode = true
+tooltip_text = "Settings"
+flat = false
+
+[node name="BodyRow" type="HSplitContainer" parent="WorkstationLayout"]
+unique_name_in_owner = true
+layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/separation = 12
+theme_override_constants/separation = 8
 
 [node name="LeftLane" type="PanelContainer" parent="WorkstationLayout/BodyRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(320, 0)
+custom_minimum_size = Vector2(240, 0)
 layout_mode = 2
+size_flags_horizontal = 1
 size_flags_vertical = 3
 
 [node name="LeftMargin" type="MarginContainer" parent="WorkstationLayout/BodyRow/LeftLane"]
@@ -50,32 +160,6 @@ theme_override_constants/margin_bottom = 10
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 10
-
-[node name="ProjectLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-theme_type_variation = &"Heading"
-text = "OpenNova Terrain Editor"
-vertical_alignment = 1
-
-[node name="WorkspaceLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
-layout_mode = 2
-theme_type_variation = &"Heading"
-text = "Workspace"
-
-[node name="WorkspaceRail" type="HBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="WorkspaceActionsHost" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="WorkspaceSeparator" type="HSeparator" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
-layout_mode = 2
 
 [node name="ModesLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
 unique_name_in_owner = true
@@ -97,17 +181,305 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="ViewportLane" type="Control" parent="WorkstationLayout/BodyRow"]
+[node name="CenterRightSplit" type="HSplitContainer" parent="WorkstationLayout/BodyRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="ViewportLane" type="Control" parent="WorkstationLayout/BodyRow/CenterRightSplit"]
 unique_name_in_owner = true
 layout_mode = 2
 mouse_filter = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+clip_contents = true
 
-[node name="AssetDock" parent="WorkstationLayout/BodyRow" instance=ExtResource("3_asset_dock")]
+[node name="ViewportHost" type="Control" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(360, 0)
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="TopPopoverLayer" type="Control" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="CameraPopup" type="PanelContainer" parent="TopPopoverLayer"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(320, 0)
+layout_mode = 1
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -344.0
+offset_top = 56.0
+offset_right = -12.0
+offset_bottom = -12.0
+grow_horizontal = 0
+script = ExtResource("3_popover")
+
+[node name="CameraPopupMargin" type="MarginContainer" parent="TopPopoverLayer/CameraPopup"]
 layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="CameraPopupBox" type="VBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="CameraPopupHeader" type="HBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="CameraPopupTitle" type="Label" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Heading"
+text = "Camera"
+vertical_alignment = 1
+clip_text = true
+
+[node name="CameraPopupClose" type="Button" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(34, 30)
+focus_mode = 0
+text = "X"
+tooltip_text = "Close camera settings"
+
+[node name="CameraSettingsHost" type="VBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="EnvironmentPopup" type="PanelContainer" parent="TopPopoverLayer"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(400, 0)
+layout_mode = 1
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -424.0
+offset_top = 56.0
+offset_right = -12.0
+offset_bottom = -12.0
+grow_horizontal = 0
+script = ExtResource("3_popover")
+
+[node name="EnvironmentPopupMargin" type="MarginContainer" parent="TopPopoverLayer/EnvironmentPopup"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="EnvironmentPopupBox" type="VBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="EnvironmentPopupHeader" type="HBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="EnvironmentPopupTitle" type="Label" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Heading"
+text = "Environment"
+vertical_alignment = 1
+clip_text = true
+
+[node name="EnvironmentPopupClose" type="Button" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(34, 30)
+focus_mode = 0
+text = "X"
+tooltip_text = "Close environment editor"
+
+[node name="EnvironmentActionsHost" type="VBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="EnvironmentInspectorHost" type="PanelContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="SettingsPopup" type="PanelContainer" parent="TopPopoverLayer"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -444.0
+offset_top = 56.0
+offset_right = -12.0
+offset_bottom = 0.0
+grow_horizontal = 0
+script = ExtResource("3_popover")
+
+[node name="SettingsPopupMargin" type="MarginContainer" parent="TopPopoverLayer/SettingsPopup"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="SettingsPopupBox" type="VBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="SettingsPopupHeader" type="HBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SettingsPopupTitle" type="Label" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsPopupHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Heading"
+text = "Settings"
+vertical_alignment = 1
+clip_text = true
+
+[node name="SettingsPopupClose" type="Button" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsPopupHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(34, 30)
+focus_mode = 0
+text = "X"
+tooltip_text = "Close settings"
+
+[node name="SettingsResourceLabel" type="Label" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "Resource Directory"
+
+[node name="SettingsResourceRow" type="HBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SettingsResourceDirEdit" type="LineEdit" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsResourceRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Path to game or mod resources"
+
+[node name="SettingsBrowseResourceDirButton" type="Button" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsResourceRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Browse"
+
+[node name="SettingsRecentRow" type="HBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SettingsRecentLabel" type="Label" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsRecentRow"]
+layout_mode = 2
+text = "Recent"
+
+[node name="SettingsRecentOption" type="OptionButton" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsRecentRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+clip_text = true
+tooltip_text = "Switch to a recently used resource directory."
+
+[node name="SettingsExpansionRow" type="HBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SettingsExpansionLabel" type="Label" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsExpansionRow"]
+layout_mode = 2
+text = "Expansion"
+
+[node name="SettingsExpansionOption" type="OptionButton" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsExpansionRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+tooltip_text = "Layer an expansion's assets over the base game; \"(base game)\" mounts only the base archives."
+
+[node name="SettingsApplyResourceDirButton" type="Button" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+focus_mode = 0
+text = "Apply and Refresh"
+tooltip_text = "Refresh the resource browser index."
+
+[node name="SettingsToolsLabel" type="Label" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "Tools"
+
+[node name="SettingsPffToolButton" type="Button" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+focus_mode = 0
+text = "Archive Tool…"
+tooltip_text = "Open, browse, extract, and repack game archive (.pff) files."
+
+[node name="SettingsViewSection" type="VBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SettingsViewLabel" type="Label" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsViewSection"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "View"
+
+[node name="SettingsGridToggle" type="CheckBox" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsViewSection"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
+text = "Show grid"
+tooltip_text = "Show the reference grid in the 3D preview."
+
+[node name="SettingsAxesToggle" type="CheckBox" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsViewSection"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
+text = "Show axes"
+tooltip_text = "Show the origin axis gizmo in the 3D preview."
+
+[node name="AssetDock" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+size_flags_horizontal = 1
 size_flags_vertical = 3
 
 [node name="StatusBar" type="PanelContainer" parent="WorkstationLayout"]
@@ -265,128 +637,3 @@ layout_mode = 2
 [node name="ProgressCountsLabel" type="Label" parent="ProgressPanel/Margin/ProgressBox"]
 unique_name_in_owner = true
 layout_mode = 2
-
-[node name="PromptBackdrop" type="ColorRect" parent="."]
-unique_name_in_owner = true
-visible = false
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 0
-color = Color(0.02, 0.03, 0.04, 0.72)
-
-[node name="PromptHost" type="CenterContainer" parent="."]
-unique_name_in_owner = true
-visible = false
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 0
-
-[node name="PromptCard" type="PanelContainer" parent="PromptHost"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(480, 0)
-layout_mode = 2
-
-[node name="Margin" type="MarginContainer" parent="PromptHost/PromptCard"]
-layout_mode = 2
-theme_override_constants/margin_left = 20
-theme_override_constants/margin_top = 18
-theme_override_constants/margin_right = 20
-theme_override_constants/margin_bottom = 18
-
-[node name="VBox" type="VBoxContainer" parent="PromptHost/PromptCard/Margin"]
-layout_mode = 2
-theme_override_constants/separation = 12
-
-[node name="PromptEyebrow" type="Label" parent="PromptHost/PromptCard/Margin/VBox"]
-unique_name_in_owner = true
-layout_mode = 2
-visible = false
-theme_type_variation = &"Muted"
-text = "Prompt"
-
-[node name="PromptLead" type="Label" parent="PromptHost/PromptCard/Margin/VBox"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"Heading"
-text = "Prompt title"
-autowrap_mode = 3
-
-[node name="PromptBody" type="Label" parent="PromptHost/PromptCard/Margin/VBox"]
-unique_name_in_owner = true
-layout_mode = 2
-visible = false
-theme_type_variation = &"Muted"
-autowrap_mode = 3
-text = "Prompt body"
-
-[node name="PromptInfoPanel" type="PanelContainer" parent="PromptHost/PromptCard/Margin/VBox"]
-unique_name_in_owner = true
-layout_mode = 2
-
-[node name="Margin" type="MarginContainer" parent="PromptHost/PromptCard/Margin/VBox/PromptInfoPanel"]
-layout_mode = 2
-theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 12
-theme_override_constants/margin_bottom = 10
-
-[node name="PromptInfoLabel" type="Label" parent="PromptHost/PromptCard/Margin/VBox/PromptInfoPanel/Margin"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"Muted"
-text = "Prompt info"
-autowrap_mode = 3
-
-[node name="PromptFormatSection" type="VBoxContainer" parent="PromptHost/PromptCard/Margin/VBox"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="PromptFormatRow" type="HBoxContainer" parent="PromptHost/PromptCard/Margin/VBox/PromptFormatSection"]
-layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="PromptFormatBHD" type="CheckButton" parent="PromptHost/PromptCard/Margin/VBox/PromptFormatSection/PromptFormatRow"]
-unique_name_in_owner = true
-layout_mode = 2
-button_pressed = false
-button_group = SubResource("PromptFormatGroup")
-text = "BHD"
-
-[node name="PromptFormatCDEP" type="CheckButton" parent="PromptHost/PromptCard/Margin/VBox/PromptFormatSection/PromptFormatRow"]
-unique_name_in_owner = true
-layout_mode = 2
-button_pressed = true
-button_group = SubResource("PromptFormatGroup")
-text = "JO/DFX"
-
-[node name="PromptButtonRow" type="HBoxContainer" parent="PromptHost/PromptCard/Margin/VBox"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="PromptSecondaryButton" type="Button" parent="PromptHost/PromptCard/Margin/VBox/PromptButtonRow"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Cancel"
-
-[node name="PromptTertiaryButton" type="Button" parent="PromptHost/PromptCard/Margin/VBox/PromptButtonRow"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Discard"
-
-[node name="PromptSpacer" type="Control" parent="PromptHost/PromptCard/Margin/VBox/PromptButtonRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="PromptPrimaryButton" type="Button" parent="PromptHost/PromptCard/Margin/VBox/PromptButtonRow"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Save"

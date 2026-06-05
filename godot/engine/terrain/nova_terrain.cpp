@@ -397,29 +397,20 @@ void NovaTerrain::_notification(int p_what) {
 				_cache_env_weather_nodes();
 
 			if (cached_env_node && (bool)cached_env_node->call("is_loaded")) {
+				// Base env -> terrain-uniform push, shared with the editor preview
+				// (NovaEnvironment.apply_terrain_uniforms drives both shaders' uniforms).
+				cached_env_node->call("apply_terrain_uniforms", terrain_material);
+				// Runtime-only: prefer NovaWeather-smoothed colors when a weather node
+				// is present (overriding the four it smooths).
 				if (cached_weather_node) {
 					terrain_material->set_shader_parameter("u_sun_light", cached_weather_node->call("get_smooth_sun"));
 					terrain_material->set_shader_parameter("u_fill_light", cached_weather_node->call("get_smooth_fill"));
 					terrain_material->set_shader_parameter("u_sky_ambient", cached_weather_node->call("get_smooth_sky"));
 					terrain_material->set_shader_parameter("u_fog_color", cached_weather_node->call("get_smooth_fog"));
-				} else {
-					terrain_material->set_shader_parameter("u_sun_light", cached_env_node->call("get_sun_light"));
-					terrain_material->set_shader_parameter("u_fill_light", cached_env_node->call("get_fill_light"));
-					terrain_material->set_shader_parameter("u_sky_ambient", cached_env_node->call("get_sky_ambient"));
-					terrain_material->set_shader_parameter("u_fog_color", cached_env_node->call("get_fog_color"));
 				}
-				terrain_material->set_shader_parameter("u_sun_direction", cached_env_node->call("get_sun_direction"));
-				const Variant terrain_attenuation = cached_env_node->call("get_terrain_lighting_attenuation");
-				terrain_material->set_shader_parameter("u_terrain_tint", terrain_attenuation);
-				terrain_material->set_shader_parameter("u_tile_overlay_tint", terrain_attenuation);
-				float fog_end = (float)cached_env_node->call("get_fog_level");
-				float fog_start = 0.5f;
-				if (cached_env_node->has_method("get_fog_start")) {
-					fog_start = (float)cached_env_node->call("get_fog_start");
-				}
-				terrain_material->set_shader_parameter("u_fog_end", fog_end);
-				terrain_material->set_shader_parameter("u_fog_start", fog_start);
-				terrain_material->set_shader_parameter("u_fog_type", cached_env_node->call("get_fog_type"));
+				// Tile overlay shares the terrain tint (editor shader has no tile overlay).
+				terrain_material->set_shader_parameter("u_tile_overlay_tint",
+					cached_env_node->call("get_terrain_lighting_attenuation"));
 			}
 		}
 
@@ -687,7 +678,10 @@ void NovaTerrain::build() {
 		return;
 	}
 
-	_build_terrain();
+	if (!_build_terrain()) {
+		UtilityFunctions::push_warning("NovaTerrain: no valid baked CPT data; skipping native mesh build");
+		return;
+	}
 	_build_quadtree();
 	_build_collision();
 
@@ -713,12 +707,24 @@ void NovaTerrain::build() {
 		" tiles, ", static_cast<int>(quad_nodes.size()), " quad nodes, pool=", PATCH_POOL_SIZE);
 }
 
-void NovaTerrain::_build_terrain() {
+bool NovaTerrain::_build_terrain() {
 	const auto& cpt = terrain_data->get_cpt();
 
-	if (cpt.tiles.empty() || cpt.depth_buffer.empty()) return;
+	if (cpt.tiles.empty() || cpt.depth_buffer.empty()) {
+		return false;
+	}
 
-	const int hm_size = 1024;
+	constexpr int hm_size = 1024;
+	constexpr size_t expected_depth_samples = static_cast<size_t>(hm_size) * static_cast<size_t>(hm_size);
+	if (cpt.depth_buffer.size() != expected_depth_samples) {
+		UtilityFunctions::push_warning(
+			"NovaTerrain: CPT depth buffer has ",
+			static_cast<int64_t>(cpt.depth_buffer.size()),
+			" samples; expected ",
+			static_cast<int64_t>(expected_depth_samples)
+		);
+		return false;
+	}
 	const float height_scale = 1.0f / 256.0f;
 
 	terrain_shader = _load_terrain_shader();
@@ -829,6 +835,7 @@ void NovaTerrain::_build_terrain() {
 
 	UtilityFunctions::print("NovaTerrain: ", total_verts, " verts, ", total_indices, " indices across ",
 		static_cast<int>(cpt.tiles.size()), " tiles");
+	return true;
 }
 
 void NovaTerrain::_build_quadtree() {

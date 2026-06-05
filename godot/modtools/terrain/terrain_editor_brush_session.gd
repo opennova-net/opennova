@@ -1,11 +1,14 @@
 class_name TerrainEditorBrushSession
 extends RefCounted
 
-const TerrainEditorBrushes = preload("res://modtools/terrain/terrain_editor_brushes.gd")
-const TerrainEditorSlots = preload("res://modtools/terrain/terrain_editor_slots.gd")
 const TerrainEditHistory = preload("res://modtools/terrain/terrain_edit_history.gd")
-const CDEPConstraint = preload("res://modtools/terrain/terrain_editor_cdep_constraint.gd")
 const HM_SIZE := 1024
+const BRUSH_RADIUS_MIN := 1.0
+const BRUSH_RADIUS_MAX := 128.0
+const BRUSH_STRENGTH_MIN := 0.01
+const BRUSH_STRENGTH_MAX := 5.0
+const BRUSH_HARDNESS_MIN := 0.0
+const BRUSH_HARDNESS_MAX := 1.0
 
 enum Tool { RAISE, LOWER, SMOOTH, FLATTEN, PAINT_DETAIL, EDIT_SECTORS, PAINT_COLORMAP, CLONE_COLOR, TILE_STAMP, FOLIAGE_PAINT, SURFACE_PAINT }
 
@@ -25,9 +28,6 @@ var _history: TerrainEditHistory = TerrainEditHistory.new()
 var _stroke_kind: int = -1
 var _stroke_invert: bool = false
 
-var _paint_texture_image: Image = null
-var _paint_texture_filename: String = ""
-
 var _clone_source_set: bool = false
 var _clone_source_world: Vector3 = Vector3.ZERO
 var _clone_source_image: Image = null
@@ -38,30 +38,27 @@ func clear_history() -> void:
 	_history.clear()
 
 
-func load_paint_texture(path: String) -> bool:
-	var image := TerrainEditorSlots.load_image_from_file(path)
-	if image == null:
-		return false
-	_paint_texture_image = image
-	_paint_texture_filename = path.get_file()
-	return true
+func reset_stroke_tracking() -> void:
+	_stroke_has_last_hit = false
 
 
-func clear_paint_texture() -> void:
-	_paint_texture_image = null
-	_paint_texture_filename = ""
+func get_stroke_kind() -> int:
+	return _stroke_kind
 
 
-func get_paint_texture() -> Image:
-	return _paint_texture_image
+func get_stroke_start_hit(fallback: Vector3) -> Vector3:
+	return _stroke_last_hit if _stroke_has_last_hit else fallback
 
 
-func get_paint_texture_filename() -> String:
-	return _paint_texture_filename
+func get_stroke_dab_count(start_hit: Vector3, end_hit: Vector3) -> int:
+	var spacing := maxf(1.0, brush_radius * 0.25)
+	var distance := Vector2(end_hit.x - start_hit.x, end_hit.z - start_hit.z).length()
+	return 1 if not _stroke_has_last_hit else maxi(1, int(ceil(distance / spacing)))
 
 
-func has_paint_texture() -> bool:
-	return _paint_texture_image != null
+func commit_stroke_hit(hit: Vector3) -> void:
+	_stroke_last_hit = hit
+	_stroke_has_last_hit = true
 
 
 func set_clone_source(world_pos: Vector3, source_image: Image) -> void:
@@ -122,7 +119,10 @@ func end_brush_drag(current_image: Image) -> Dictionary:
 	return result
 
 
-func apply_brush_stroke(delta: float, hover_hit: Vector3, hover_hit_valid: bool, terrain_mesh, heightmap_image: Image, blendmap_image: Image, colormap_image: Image) -> Dictionary:
+# `data` is the NovaTerrainData that owns the editable height/colour/blend buffers;
+# every tool runs its C++ kernel through it. The brush is skipped when data is null
+# (production always passes the loaded data; only some unit tests may omit it).
+func apply_brush_stroke(delta: float, hover_hit: Vector3, hover_hit_valid: bool, terrain_mesh, data = null) -> Dictionary:
 	var result := {
 		"changed_heightmap": false,
 		"changed_blendmap": false,
@@ -147,10 +147,10 @@ func apply_brush_stroke(delta: float, hover_hit: Vector3, hover_hit_valid: bool,
 			continue
 		var dab_delta := delta / float(dab_count)
 
-		if current_tool == Tool.FLATTEN and not flatten_target_set:
+		if current_tool == Tool.FLATTEN and not flatten_target_set and data != null:
 			var hit_source: Vector2 = terrain_mesh.world_to_source_coords(dab_hit.x, dab_hit.z)
 			if hit_source.x >= 0.0:
-				flatten_target_height = TerrainEditorBrushes.sample_flatten_target(heightmap_image, hit_source.x, hit_source.y)
+				flatten_target_height = data.brush_sample_flatten_target(hit_source.x, hit_source.y)
 				flatten_target_set = true
 
 		var seen_sectors: Dictionary = {}
@@ -187,33 +187,38 @@ func apply_brush_stroke(delta: float, hover_hit: Vector3, hover_hit_valid: bool,
 
 			match effective_tool:
 				Tool.RAISE:
-					TerrainEditorBrushes.apply_raise_lower(heightmap_image, center_x, center_z, radius, brush_strength * dab_delta * 20.0, brush_hardness, clip_rect)
-					CDEPConstraint.clamp_blocks_in_rect(heightmap_image, height_dab_rect)
-					result["changed_heightmap"] = true
+					if data != null:
+						data.brush_raise_lower(center_x, center_z, radius, brush_strength * dab_delta * 20.0, brush_hardness, clip_rect)
+						data.cdep_clamp_blocks_in_rect(height_dab_rect)
+						result["changed_heightmap"] = true
 				Tool.LOWER:
-					TerrainEditorBrushes.apply_raise_lower(heightmap_image, center_x, center_z, radius, -brush_strength * dab_delta * 20.0, brush_hardness, clip_rect)
-					CDEPConstraint.clamp_blocks_in_rect(heightmap_image, height_dab_rect)
-					result["changed_heightmap"] = true
+					if data != null:
+						data.brush_raise_lower(center_x, center_z, radius, -brush_strength * dab_delta * 20.0, brush_hardness, clip_rect)
+						data.cdep_clamp_blocks_in_rect(height_dab_rect)
+						result["changed_heightmap"] = true
 				Tool.SMOOTH:
-					TerrainEditorBrushes.apply_smooth(heightmap_image, center_x, center_z, radius, brush_strength * dab_delta * 5.0, brush_hardness, clip_rect)
-					CDEPConstraint.clamp_blocks_in_rect(heightmap_image, height_dab_rect)
-					result["changed_heightmap"] = true
+					if data != null:
+						data.brush_smooth(center_x, center_z, radius, brush_strength * dab_delta * 5.0, brush_hardness, clip_rect)
+						data.cdep_clamp_blocks_in_rect(height_dab_rect)
+						result["changed_heightmap"] = true
 				Tool.FLATTEN:
-					if flatten_target_set:
-						TerrainEditorBrushes.apply_flatten(heightmap_image, center_x, center_z, radius, flatten_target_height, brush_strength * dab_delta * 5.0, brush_hardness, clip_rect)
-						CDEPConstraint.clamp_blocks_in_rect(heightmap_image, height_dab_rect)
+					if data != null and flatten_target_set:
+						data.brush_flatten(center_x, center_z, radius, flatten_target_height, brush_strength * dab_delta * 5.0, brush_hardness, clip_rect)
+						data.cdep_clamp_blocks_in_rect(height_dab_rect)
 						result["changed_heightmap"] = true
 				Tool.PAINT_DETAIL:
-					TerrainEditorBrushes.apply_blend_paint(blendmap_image, paint_detail_channel, center_x, center_z, radius, brush_strength * dab_delta * 3.0, brush_hardness, clip_rect)
-					result["changed_blendmap"] = true
+					if data != null:
+						data.brush_blend_paint(paint_detail_channel, center_x, center_z, radius, brush_strength * dab_delta * 3.0, brush_hardness, clip_rect)
+						result["changed_blendmap"] = true
 				Tool.PAINT_COLORMAP:
-					TerrainEditorBrushes.apply_colormap_paint(colormap_image, paint_color, center_x, center_z, radius, brush_strength * dab_delta * 3.0, brush_hardness, clip_rect, _paint_texture_image)
-					result["changed_colormap"] = true
+					if data != null:
+						data.brush_colormap_paint(paint_color, center_x, center_z, radius, brush_strength * dab_delta * 3.0, brush_hardness, clip_rect)
+						result["changed_colormap"] = true
 				Tool.CLONE_COLOR:
-					if _clone_source_image != null:
+					if data != null and _clone_source_image != null:
 						var src_cx := center_x + _clone_offset_px.x
 						var src_cy := center_z + _clone_offset_px.y
-						TerrainEditorBrushes.apply_colormap_clone(colormap_image, _clone_source_image, src_cx, src_cy, center_x, center_z, radius, brush_strength * dab_delta * 3.0, brush_hardness, clip_rect)
+						data.brush_colormap_clone(_clone_source_image, src_cx, src_cy, center_x, center_z, radius, brush_strength * dab_delta * 3.0, brush_hardness, clip_rect)
 						result["changed_colormap"] = true
 
 	_stroke_last_hit = end_hit

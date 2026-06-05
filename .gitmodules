@@ -4,3 +4,6 @@
 [submodule "third_party/gut"]
 	path = third_party/gut
 	url = https://github.com/bitwes/Gut.git
+[submodule "third_party/modsuperoed"]
+	path = third_party/modsuperoed
+	url = https://github.com/opennova-net/modsuperoed.git

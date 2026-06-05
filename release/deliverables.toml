@@ -1,0 +1,112 @@
+[[deliverables]]
+id = "asset-importer"
+source = "onimport-v{python_version}.exe"
+public = "opennova-asset-importer-windows-{release_version}.exe"
+kind = "exe"
+platform = "Windows"
+title = "OpenNova Asset Importer"
+purpose = "Standalone Windows importer for converting NovaLogic game assets to Blender, ASE, 3ds Max, and OpenNova project files."
+install = "Download the exe and run it directly; no separate installer is required."
+use = "Launch it, point it at a game directory, choose assets, and select the output formats to write."
+
+[[deliverables]]
+id = "blender-ase-exporter"
+source = "opennova_blender-v{blender_version}.zip"
+public = "opennova-blender-ase-exporter-{release_version}.zip"
+kind = "zip"
+platform = "Windows and Linux"
+title = "OpenNova Blender ASE Exporter"
+purpose = "Blender 5.x addon for exporting NovaLogic-compatible ASE files, bundled with native libraries for Windows and Linux."
+install = "Install from Blender with Edit > Preferences > Add-ons > Install, then select this zip."
+use = "In Blender, use File > Export > Novalogic ASE (.ase)."
+required_entries = [
+    "blender_manifest.toml",
+    "__init__.py",
+    "lib/windows-x64/opennova.dll",
+    "lib/linux-x64/libopennova.so",
+]
+
+[[deliverables]]
+id = "max-ase-exporter"
+source = "opennova_max-v{python_version}.mzp"
+public = "opennova-3ds-max-ase-exporter-windows-{release_version}.mzp"
+kind = "mzp"
+platform = "Windows / 3ds Max 2021-2026"
+title = "OpenNova 3ds Max ASE Exporter"
+purpose = "3ds Max plugin installer that adds NovaLogic ASE export."
+install = "Run the MZP in 3ds Max; it installs an Autodesk ApplicationPlugins bundle under your user profile."
+use = "Restart 3ds Max, then use File > Export > Novalogic ASE (.ase)."
+required_entries = [
+    "mzp.run",
+    "install.ms",
+    "install.ds",
+    "install.py",
+    "OpenNovaMax-{python_version}.bundle/PackageContents.xml",
+    "OpenNovaMax-{python_version}.bundle/Contents/macroscripts/OpenNovaExport.mcr",
+    "OpenNovaMax-{python_version}.bundle/Contents/startup/opennova_max_startup.ms",
+    "OpenNovaMax-{python_version}.bundle/Contents/startup/opennova_max_startup.py",
+    "OpenNovaMax-{python_version}.bundle/Contents/python/opennova_max/__init__.py",
+    "OpenNovaMax-{python_version}.bundle/Contents/python/pyopennova/lib/windows-x64/opennova.dll",
+]
+
+[[deliverables]]
+id = "modding-editor"
+source = "opennova-modtools-windows-v{godot_version}.zip"
+public = "opennova-modding-editor-windows-{release_version}.zip"
+kind = "zip"
+platform = "Windows"
+title = "OpenNova Modding Editor"
+purpose = "Standalone OpenNova Editor for authoring NovaLogic terrain, environment, tile, and related mod data."
+install = "Extract the zip to a writable folder."
+use = "Run opennova-modtools.exe to launch the editor."
+required_entries = [
+    "opennova-modtools.exe",
+    "libopennova.windows.template_release.x86_64.dll",
+]
+
+[[deliverables]]
+id = "game-runtime"
+source = "opennova-runtime-windows-v{godot_version}.zip"
+public = "opennova-game-runtime-windows-{release_version}.zip"
+kind = "zip"
+platform = "Windows"
+title = "OpenNova Game Runtime"
+purpose = "Standalone Godot-hosted OpenNova runtime for loading exported scenes and runtime systems."
+install = "Extract the zip to a writable folder."
+use = "Run opennova.exe to launch the runtime."
+required_entries = [
+    "opennova.exe",
+    "libopennova.windows.template_release.x86_64.dll",
+]
+
+[[deliverables]]
+id = "modding-editor-macos"
+source = "opennova-modtools-macos-v{godot_version}.zip"
+public = "opennova-modding-editor-macos-{release_version}.zip"
+kind = "zip"
+platform = "macOS (universal: Apple Silicon and Intel)"
+title = "OpenNova Modding Editor (macOS)"
+purpose = "Standalone OpenNova Editor for authoring NovaLogic terrain, environment, tile, and related mod data."
+install = "Unzip, then move OpenNova Mod Tools.app to Applications. The app is ad-hoc signed, not notarized: right-click then Open the first time, or run xattr -dr com.apple.quarantine on the .app to clear Gatekeeper."
+use = "Open the .app to launch the editor."
+required_entries = [
+    "opennova-modtools.app/Contents/Info.plist",
+    "opennova-modtools.app/Contents/MacOS/OpenNova",
+    "opennova-modtools.app/Contents/Frameworks/libopennova.macos.template_release.universal.dylib",
+]
+
+[[deliverables]]
+id = "game-runtime-macos"
+source = "opennova-runtime-macos-v{godot_version}.zip"
+public = "opennova-game-runtime-macos-{release_version}.zip"
+kind = "zip"
+platform = "macOS (universal: Apple Silicon and Intel)"
+title = "OpenNova Game Runtime (macOS)"
+purpose = "Standalone Godot-hosted OpenNova runtime for loading exported scenes and runtime systems."
+install = "Unzip, then move OpenNova.app to Applications. The app is ad-hoc signed, not notarized: right-click then Open the first time, or run xattr -dr com.apple.quarantine on the .app to clear Gatekeeper."
+use = "Open the .app to launch the runtime."
+required_entries = [
+    "opennova.app/Contents/Info.plist",
+    "opennova.app/Contents/MacOS/OpenNova",
+    "opennova.app/Contents/Frameworks/libopennova.macos.template_release.universal.dylib",
+]
