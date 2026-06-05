@@ -46,12 +46,19 @@ const CREDITS_NAME := "nlist.kda"
 const STRINGS_NAME := "GAMETEXT.bin"
 # A textured object that frames well from the 3/4 vantage _frame_object() uses.
 const OBJECT_NAME := "MH53.3di"
+# The Particles workspace edits .ptl files, which the game ships inside PFFs
+# rather than as loose files in the resource dir, so (unlike the other shots)
+# this one opens a bundled repo fixture by its res:// path. buildup.ptl is a
+# small, self-contained effect whose first particle emits a steady stream.
+const PARTICLE_FIXTURE := "res://../fixtures/particle/buildup.ptl"
 
 # [workspace_id, asset_name, out_filename]. The asset is resolved from the
-# resource dir and opened before the workspace is activated.
+# resource dir and opened before the workspace is activated (PARTICLE is the
+# exception — its asset_name is a res:// fixture path opened directly).
 var _shots: Array = [
 	[EditorWorkstation.Workspace.TERRAIN, TERRAIN_NAME, "overview.png"],
 	[EditorWorkstation.Workspace.OBJECT, OBJECT_NAME, "object.png"],
+	[EditorWorkstation.Workspace.PARTICLE, PARTICLE_FIXTURE, "particles.png"],
 	[EditorWorkstation.Workspace.FONTS, FONT_NAME, "fonts.png"],
 	[EditorWorkstation.Workspace.CREDITS, CREDITS_NAME, "credits.png"],
 	[EditorWorkstation.Workspace.STRINGS, STRINGS_NAME, "strings.png"],
@@ -124,7 +131,8 @@ func _run_all() -> void:
 		var asset_name: String = shot[1]
 		var out_name: String = shot[2]
 		var is_3d: bool = ws_id == EditorWorkstation.Workspace.TERRAIN \
-			or ws_id == EditorWorkstation.Workspace.OBJECT
+			or ws_id == EditorWorkstation.Workspace.OBJECT \
+			or ws_id == EditorWorkstation.Workspace.PARTICLE
 
 		# Open the asset BEFORE activating the workspace: set_active_workspace()
 		# rebuilds the workflow inspectors, so opening first means they're built
@@ -137,6 +145,14 @@ func _run_all() -> void:
 			var ferr: int = int(ws.call("open_font_name", asset_name))
 			if ferr != OK:
 				push_error("[capture] open_font_name failed (%d): %s" % [ferr, asset_name])
+		elif ws_id == EditorWorkstation.Workspace.PARTICLE:
+			# .ptl assets ship inside PFFs, not as loose resource-dir files, so the
+			# shot's asset_name is a bundled fixture's res:// path; open it by its
+			# absolute path (the workspace resolves sibling textures from that dir).
+			var ppath := ProjectSettings.globalize_path(asset_name)
+			var perr: int = ws.open_file(ppath)
+			if perr != OK:
+				push_error("[capture] open_file failed (%d): %s" % [perr, ppath])
 		else:
 			# Resolve the asset case-insensitively against the resource dir and
 			# hand the workspace a real OS path (open_file accepts absolute paths).
@@ -163,10 +179,18 @@ func _run_all() -> void:
 			_frame_terrain()
 		elif ws_id == EditorWorkstation.Workspace.OBJECT:
 			_frame_object(ws)
+		elif ws_id == EditorWorkstation.Workspace.PARTICLE:
+			_prime_particles(ws)
 		elif ws_id == EditorWorkstation.Workspace.CREDITS:
 			_balance_credits_split(ws)
 
-		if is_3d:
+		if ws_id == EditorWorkstation.Workspace.PARTICLE:
+			# The restart in _prime_particles re-seeds the emit from t=0; give the
+			# stream time to spawn and rise so the capture shows live particles over
+			# the preview grid rather than an empty frame.
+			for _i in 24:
+				await get_tree().process_frame
+		elif is_3d:
 			# Let the new camera transform and far plane take effect.
 			for _i in 6:
 				await get_tree().process_frame
@@ -227,6 +251,18 @@ func _frame_object(ws: EditorWorkspace) -> void:
 	var dir := Vector3(0.85, 0.45, 1.0).normalized()
 	cam.position = center + dir * radius * 2.0
 	cam.look_at(center)
+
+
+# Replay the selected particle from t=0 so the capture lands during active
+# emission. open_file pre-selects the first particle def; some defs are
+# short-lived one-shots that would otherwise have expired by capture time after
+# the 3D settle budget.
+func _prime_particles(ws: EditorWorkspace) -> void:
+	var preview = ws.get("_preview")
+	if preview == null:
+		return
+	if preview.has_method("restart"):
+		preview.restart()
 
 
 # The credits editor defaults to a very wide preview pane (split_offset -480),
