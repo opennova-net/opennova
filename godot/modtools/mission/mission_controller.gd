@@ -249,6 +249,41 @@ func get_selection_summary() -> Dictionary:
 	}
 
 
+# Select an object from the inspector's "Placed objects" browser by kind + array index,
+# then frame the editor camera on it so it is found in the viewport. This is the whole
+# point of the list: on a large map a named unit can be located without hunting the world.
+# Public (the viewport pick path uses the private _select); a missing entity is a no-op.
+func select_object(kind: int, index: int) -> void:
+	if _mission == null or _find_entity(kind, index).is_empty():
+		return
+	_select(kind, index)
+	focus_selection_in_view()
+
+
+# Orbit the editor camera onto the current selection's world AABB (falling back to its
+# authored origin when the selection has no baked mesh). Keeps the current heading so the
+# view does not spin. Returns false with no camera / nothing selected (e.g. headless tests).
+func focus_selection_in_view() -> bool:
+	if _selected_ref.is_empty() or terrain_editor == null or not terrain_editor.has_method("get_editor_camera"):
+		return false
+	var camera: Camera3D = terrain_editor.get_editor_camera()
+	if camera == null or not camera.has_method("frame_bounds_custom"):
+		return false
+	var aabb := _selected_world_aabb()
+	var center: Vector3
+	var radius: float
+	if aabb.size != Vector3.ZERO:
+		center = aabb.position + aabb.size * 0.5
+		radius = maxf(aabb.size.length() * 0.5, 8.0)
+	else:
+		# Mesh-less / not-yet-baked: frame the authored origin, converted to world space.
+		var container := _objects_container()
+		center = (container.global_transform * _selected_xform.origin) if container != null else _selected_xform.origin
+		radius = 16.0
+	camera.frame_bounds_custom(center, radius, 2.5, 1200.0, camera.rotation.y, -0.55)
+	return true
+
+
 func get_mission_title() -> String:
 	if _mission == null:
 		return "Mission"
@@ -1884,6 +1919,62 @@ func get_all_entities() -> Array:
 			var label := ("%s #%d" % [display, bms_id]) if display != "" else ("Unit #%d" % bms_id)
 			out.append({ "value": bms_id, "label": label })
 	return out
+
+
+# Human kind label for a "Placed objects" browser row. The list covers every entity kind the
+# Objects mode renders + picks, markers included (they are placed / edited as general entities
+# there, gizmo-picked via the always-on marker overlay; Waypoints mode is just a second view of them).
+func _object_kind_label(kind: int) -> String:
+	match kind:
+		NovaMissionData.KIND_BUILDING:
+			return "Building"
+		NovaMissionData.KIND_ORGANIC:
+			return "Person"
+		NovaMissionData.KIND_MARKER:
+			return "Marker"
+		_:
+			return "Item"
+
+
+# Flat, ordered list of every placed object (items / buildings / people / markers) for the
+# inspector's left-pane browser. One row per entity: { kind, index, item_id, name, category }.
+# `name` is the resolved model name (or "" -> the inspector falls back to the item id); the row
+# order is the on-disk array order, stable across edits, so duplicate-name ordinals stay put.
+func get_object_list() -> Array:
+	var out: Array = []
+	if _mission == null:
+		return out
+	for kind in [NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_ORGANIC, NovaMissionData.KIND_MARKER]:
+		var category := _object_kind_label(kind)
+		for e in _mission.get_entities(kind):
+			var ed := e as Dictionary
+			var index := int(ed.get("index", 0))
+			out.append({
+				"kind": kind,
+				"index": index,
+				"item_id": int(ed.get("item_id", 0)),
+				"name": entity_display_name(kind, index),
+				"category": category,
+			})
+	return out
+
+
+# Number of placed objects across every Objects-mode kind (markers included). Cheap (count fields,
+# no record walk); the inspector gates its (potentially 1000+ row) list rebuild on this changing.
+func get_object_count() -> int:
+	if _mission == null:
+		return 0
+	return _mission.get_entity_count(NovaMissionData.KIND_ITEM) \
+		+ _mission.get_entity_count(NovaMissionData.KIND_BUILDING) \
+		+ _mission.get_entity_count(NovaMissionData.KIND_ORGANIC) \
+		+ _mission.get_entity_count(NovaMissionData.KIND_MARKER)
+
+
+# Whether item names are resolvable yet. A mission can open before its items.def is reachable
+# (the resource directory is repointed afterwards); the inspector rebuilds its row labels once
+# this flips true so the browser does not stay stuck on "Item <id>" placeholders.
+func has_item_database() -> bool:
+	return _item_db() != null
 
 
 # Options for the inspector's "Waypoint path" picker -- which path a unit follows (the waypoint_id /

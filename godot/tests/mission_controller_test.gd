@@ -458,6 +458,46 @@ func test_delete_selected_marker_in_objects_mode() -> void:
 	assert_eq(controller.get_selection_summary(), {}, "and the selection is cleared")
 
 
+# --- Placed-objects browser (left-pane "find on map" list) --------------------
+
+func test_get_object_list_covers_every_kind_including_markers() -> void:
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	# Place a marker so KIND_MARKER is guaranteed present alongside the fixture's meshes.
+	assert_true(controller.place_entity_at_world(100001, Vector3(50.0, 10.0, -50.0)))
+	var rows := controller.get_object_list()
+	assert_eq(rows.size(), controller.get_object_count(),
+		"one row per placed object, matching the count the inspector gates its rebuild on")
+	assert_eq(controller.get_object_count(),
+		mission.get_entity_count(NovaMissionData.KIND_ITEM)
+		+ mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+		+ mission.get_entity_count(NovaMissionData.KIND_ORGANIC)
+		+ mission.get_entity_count(NovaMissionData.KIND_MARKER),
+		"the count spans every Objects-mode kind, markers included")
+	var marker_rows := rows.filter(func(r): return int(r.get("kind", -1)) == NovaMissionData.KIND_MARKER)
+	assert_gt(marker_rows.size(), 0, "markers appear in the placed-objects list")
+	assert_eq(String(marker_rows[0].get("category", "")), "Marker", "and carry the Marker kind label")
+	for r in rows:
+		assert_true(r.has("kind") and r.has("index") and r.has("name") and r.has("category"),
+			"each row exposes the kind / index / name / category the inspector needs")
+
+
+func test_select_object_selects_the_addressed_entity() -> void:
+	var controller := _loaded_with_item_db()
+	var buildings := controller.get_mission().get_entities(NovaMissionData.KIND_BUILDING)
+	assert_gt(buildings.size(), 0, "the fixture has at least one building")
+	var idx := int(buildings[0]["index"])
+	controller.select_object(NovaMissionData.KIND_BUILDING, idx)
+	var sel := controller.get_selection_summary()
+	assert_eq(int(sel.get("kind", -1)), NovaMissionData.KIND_BUILDING, "select_object selects the addressed kind")
+	assert_eq(int(sel.get("index", -1)), idx, "and index")
+	# An unknown entity is a safe no-op: the prior selection is left intact (the stub editor has no
+	# camera, so the camera-framing half just returns false without affecting selection).
+	controller.select_object(NovaMissionData.KIND_BUILDING, 999999)
+	assert_eq(int(controller.get_selection_summary().get("index", -1)), idx,
+		"an out-of-range index is ignored, leaving the prior selection in place")
+
+
 # --- Waypoint markers are the engine waypoint type (6005), never a copied scene marker --------
 # Regression for "placed waypoint markers turn into player starts": the waypoint "Add marker" tool
 # used to seed the new marker by copying markers[0] (any marker, e.g. a player start placed first).

@@ -159,6 +159,27 @@ class FakeController:
 		armed_id = 0
 		changed.emit()
 
+	# Placed-objects browser state. `object_list` rows mirror MissionController.get_object_list
+	# ({ kind, index, item_id, name, category }); select_object records the (kind, index) the
+	# list row handler forwards and selects that entity (the real controller also frames the camera).
+	var object_list: Array = []
+	var has_item_db: bool = true
+	var select_object_calls: Array = []
+
+	func get_object_list() -> Array:
+		return object_list
+
+	func get_object_count() -> int:
+		return object_list.size()
+
+	func has_item_database() -> bool:
+		return has_item_db
+
+	func select_object(kind: int, index: int) -> void:
+		select_object_calls.append([kind, index])
+		entity = { "kind": kind, "index": index, "position": Vector3.ZERO }
+		changed.emit()
+
 	# P7 waypoints + Phase 2 zones: the edit-mode tabs + panel surface. `mode` mirrors
 	# MissionController.Mode (0 OBJECTS, 1 WAYPOINTS, 2 AREA_TRIGGERS); set_mode_calls records the
 	# mode ints the tab handler passes.
@@ -800,6 +821,111 @@ func test_active_search_filter_survives_a_changed_echo() -> void:
 	assert_eq(ctx.inspector._place_list.item_count, 1, "the filtered rows survive; the list is not repopulated")
 	assert_eq(int(ctx.inspector._place_row_ids[0]), 101291, "and the surviving row is still the match")
 	assert_true(ctx.inspector._place_stop.visible, "still armed after the echo")
+
+
+# --- Placed-objects browser ---------------------------------------------------
+
+func _object_rows() -> Array:
+	return [
+		{"kind": NovaMissionData.KIND_ORGANIC, "index": 0, "item_id": 105311, "name": "Soldier", "category": "Person"},
+		{"kind": NovaMissionData.KIND_ORGANIC, "index": 1, "item_id": 105311, "name": "Soldier", "category": "Person"},
+		{"kind": NovaMissionData.KIND_BUILDING, "index": 0, "item_id": 102001, "name": "Guard Tower", "category": "Building"},
+		{"kind": NovaMissionData.KIND_ITEM, "index": 0, "item_id": 999, "name": "", "category": "Item"},
+	]
+
+
+func _browser_ctx() -> Dictionary:
+	var fake := FakeController.new()
+	fake.mission_ref = NovaMissionData.new()
+	fake.object_list = _object_rows()
+	var inspector = MissionInspector.new()
+	add_child_autofree(inspector)
+	inspector.setup(fake)
+	return {"fake": fake, "inspector": inspector}
+
+
+func test_browser_is_hidden_without_a_mission() -> void:
+	var fake := FakeController.new()  # mission_ref left null
+	var inspector = MissionInspector.new()
+	add_child_autofree(inspector)
+	inspector.setup(fake)
+	assert_false(inspector._objects_box.visible, "the placed-objects list hides when no mission is open")
+
+
+func test_browser_lists_every_placed_object_with_ordinals() -> void:
+	var ctx := _browser_ctx()
+	assert_true(ctx.inspector._objects_box.visible, "the list shows with a mission open")
+	assert_eq(ctx.inspector._objects_list.item_count, 4, "every placed object becomes a row")
+	# Duplicate base names get a "(n)" ordinal so the two Soldiers are distinguishable.
+	assert_eq(ctx.inspector._objects_list.get_item_text(0), "Soldier (1)")
+	assert_eq(ctx.inspector._objects_list.get_item_text(1), "Soldier (2)")
+	assert_eq(ctx.inspector._objects_list.get_item_text(2), "Guard Tower", "unique names carry no ordinal")
+	assert_eq(ctx.inspector._objects_list.get_item_text(3), "Item 999", "an unresolved name falls back to the item id")
+
+
+func test_selecting_a_browser_row_selects_that_entity() -> void:
+	var ctx := _browser_ctx()
+	ctx.inspector._on_object_row_selected(2)  # the Guard Tower row
+	assert_eq(ctx.fake.select_object_calls.size(), 1, "the row drives exactly one select")
+	assert_eq(ctx.fake.select_object_calls[0], [NovaMissionData.KIND_BUILDING, 0],
+		"with the kind + index from that row (which also frames the camera in the real controller)")
+
+
+func test_browser_search_filters_rows() -> void:
+	var ctx := _browser_ctx()
+	ctx.inspector._on_object_search_changed("tower")
+	assert_eq(ctx.inspector._objects_list.item_count, 1, "the search narrows to matching names")
+	assert_eq(ctx.inspector._objects_rows[0], {"kind": NovaMissionData.KIND_BUILDING, "index": 0},
+		"and the surviving row maps to the matching entity")
+	# Category words are searchable too, so "person" finds both Soldiers.
+	ctx.inspector._on_object_search_changed("person")
+	assert_eq(ctx.inspector._objects_list.item_count, 2, "the category is part of the search key")
+	ctx.inspector._on_object_search_changed("")
+	assert_eq(ctx.inspector._objects_list.item_count, 4, "clearing the search restores every row")
+
+
+func test_browser_highlights_the_controllers_selection() -> void:
+	var ctx := _browser_ctx()
+	# A viewport pick selects an entity; the list must light up + scroll to the matching row.
+	ctx.fake.entity = {"kind": NovaMissionData.KIND_BUILDING, "index": 0, "position": Vector3.ZERO}
+	ctx.inspector._refresh()
+	assert_eq(ctx.inspector._objects_list.get_selected_items(), PackedInt32Array([2]),
+		"the row for the current selection is highlighted")
+
+
+func test_browser_repopulates_when_the_item_db_arrives_late() -> void:
+	# Same lifecycle dead-end the palette guards: a mission can open before items.def resolves,
+	# so the rows first show "Item <id>" placeholders. Once names resolve, a later refresh must
+	# relabel them WITHOUT the object set (count) changing.
+	var fake := FakeController.new()
+	fake.mission_ref = NovaMissionData.new()
+	fake.has_item_db = false
+	fake.object_list = [
+		{"kind": NovaMissionData.KIND_BUILDING, "index": 0, "item_id": 102001, "name": "", "category": "Building"},
+	]
+	var inspector = MissionInspector.new()
+	add_child_autofree(inspector)
+	inspector.setup(fake)
+	assert_eq(inspector._objects_list.get_item_text(0), "Item 102001", "placeholder until the database resolves")
+
+	fake.has_item_db = true
+	fake.object_list = [
+		{"kind": NovaMissionData.KIND_BUILDING, "index": 0, "item_id": 102001, "name": "Guard Tower", "category": "Building"},
+	]
+	inspector._refresh()
+	assert_eq(inspector._objects_list.get_item_text(0), "Guard Tower", "relabelled without the object set changing")
+
+
+func test_browser_rows_survive_a_same_mission_changed_echo() -> void:
+	# Like the palette: the list is rebuilt only when the object set (count) changes, not on the
+	# `changed` that fires on every edit / drag frame. A typed filter and its rows must survive.
+	var ctx := _browser_ctx()
+	ctx.inspector._objects_search.text = "tower"
+	ctx.inspector._on_object_search_changed("tower")
+	assert_eq(ctx.inspector._objects_list.item_count, 1, "precondition: filtered to one row")
+	ctx.fake.changed.emit()  # stand in for an edit on the same mission (no count change)
+	assert_eq(ctx.inspector._objects_search.text, "tower", "the search text survives a same-mission `changed`")
+	assert_eq(ctx.inspector._objects_list.item_count, 1, "the filtered rows survive; the list is not rebuilt")
 
 
 # --- P7: edit-mode tabs + waypoint panel --------------------------------------
