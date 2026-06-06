@@ -171,6 +171,23 @@ func _loaded_with_selection() -> MissionController:
 	return controller
 
 
+func test_set_game_mode_is_single_select_and_undoable() -> void:
+	var controller := _loaded_with_selection()
+	var mission := controller.get_mission()
+	var mask := int(NovaMissionData.ATTRIB_GAME_MODE_MASK)
+
+	controller.set_game_mode(NovaMissionData.ATTRIB_COOP) # known starting mode
+	assert_eq(int(mission.get_game_mode()), int(NovaMissionData.ATTRIB_COOP), "coop set via controller")
+
+	controller.set_game_mode(NovaMissionData.ATTRIB_KING_OF_THE_HILL)
+	assert_eq(int(mission.get_game_mode()), int(NovaMissionData.ATTRIB_KING_OF_THE_HILL), "switched to KOTH")
+	assert_eq(int(mission.get_info()["attrib_flags"]) & mask, int(NovaMissionData.ATTRIB_KING_OF_THE_HILL),
+		"exactly one mode bit set (the others cleared)")
+
+	controller.undo()
+	assert_eq(int(mission.get_game_mode()), int(NovaMissionData.ATTRIB_COOP), "undo restores the prior mode")
+
+
 func test_selection_edits_without_a_selection_are_inert() -> void:
 	var controller := MissionController.new(null)
 	controller.set_selected_team(2)

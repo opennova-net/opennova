@@ -54,6 +54,8 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_header_int", "field", "value"), &NovaMissionData::set_header_int);
 	ClassDB::bind_method(D_METHOD("set_header_flag", "bit", "on"), &NovaMissionData::set_header_flag);
 	ClassDB::bind_method(D_METHOD("set_header_float", "field", "value"), &NovaMissionData::set_header_float);
+	ClassDB::bind_method(D_METHOD("get_game_mode"), &NovaMissionData::get_game_mode);
+	ClassDB::bind_method(D_METHOD("set_game_mode", "bit"), &NovaMissionData::set_game_mode);
 	ClassDB::bind_method(D_METHOD("add_entity", "kind", "item_id", "position", "rotation_deg"), &NovaMissionData::add_entity);
 	ClassDB::bind_method(D_METHOD("remove_entity", "kind", "index"), &NovaMissionData::remove_entity);
 
@@ -125,11 +127,18 @@ void NovaMissionData::_bind_methods() {
 	BIND_CONSTANT(WP_FLAG_RED_TEAM);
 	BIND_CONSTANT(ATTRIB_ROTATE_MAP_180);
 	BIND_CONSTANT(ATTRIB_ENABLE_NVG);
+	BIND_CONSTANT(ATTRIB_ADVANCE_AND_SECURE);
+	BIND_CONSTANT(ATTRIB_CONQUER_AND_CONTROL);
+	BIND_CONSTANT(ATTRIB_ATTACK_AND_DEFEND);
 	BIND_CONSTANT(ATTRIB_COOP);
 	BIND_CONSTANT(ATTRIB_DEATHMATCH);
 	BIND_CONSTANT(ATTRIB_KING_OF_THE_HILL);
+	BIND_CONSTANT(ATTRIB_FLAGBALL);
 	BIND_CONSTANT(ATTRIB_CAPTURE_THE_FLAG);
 	BIND_CONSTANT(ATTRIB_TEAM_DEATHMATCH);
+	BIND_CONSTANT(ATTRIB_TEAM_KING_OF_THE_HILL);
+	BIND_CONSTANT(ATTRIB_SEARCH_AND_DESTROY);
+	BIND_CONSTANT(ATTRIB_GAME_MODE_MASK);
 }
 
 Error NovaMissionData::open_file(const String &path) {
@@ -217,6 +226,7 @@ Dictionary NovaMissionData::get_info() const {
 	out["weather"] = info.weather;
 	out["mission_type"] = info.mission_type;
 	out["attrib_flags"] = info.attrib_flags;
+	out["game_mode"] = get_game_mode();
 	out["start_time"] = info.start_time;
 	out["minutes_per_day"] = info.minutes_per_day;
 	out["player_health"] = info.player_health;
@@ -1204,4 +1214,52 @@ Dictionary NovaMissionData::structure_fingerprint() const {
 	out["zones"] = get_area_trigger_count();
 	out["object_rev"] = object_records_revision();
 	return out;
+}
+
+// Game mode is a single-select among the 11 attrib_flags mode bits. [orig: sub_402770, dfx2med.exe.
+// Decode @0x4050c7 tests the bits in the priority order below and selects the matching combobox item;
+// encode @0x4031cd clears them with `and 0x7CFFFF` (== ~ATTRIB_GAME_MODE_MASK) then OR's exactly one.]
+int64_t NovaMissionData::get_game_mode() const {
+	if (!document.is_loaded()) {
+		return 0;
+	}
+	const uint32_t flags = static_cast<uint32_t>(document.bms_file().header.attrib_flags);
+	// Engine decode priority (uint32 literals to avoid a narrowing conversion from the unnamed enum;
+	// values mirror the ATTRIB_* constants named in the comments).
+	const uint32_t priority[] = {
+		0x1000000u,  // ATTRIB_COOP
+		0x2000000u,  // ATTRIB_DEATHMATCH
+		0x20000000u, // ATTRIB_TEAM_DEATHMATCH
+		0x4000000u,  // ATTRIB_KING_OF_THE_HILL
+		0x40000000u, // ATTRIB_TEAM_KING_OF_THE_HILL
+		0x10000000u, // ATTRIB_CAPTURE_THE_FLAG
+		0x800000u,   // ATTRIB_ATTACK_AND_DEFEND
+		0x80000000u, // ATTRIB_SEARCH_AND_DESTROY
+		0x8000000u,  // ATTRIB_FLAGBALL
+		0x10000u,    // ATTRIB_ADVANCE_AND_SECURE
+		0x20000u,    // ATTRIB_CONQUER_AND_CONTROL
+	};
+	for (uint32_t bit : priority) {
+		if (flags & bit) {
+			return static_cast<int64_t>(bit);
+		}
+	}
+	return 0; // no mode bit set -> Single Player
+}
+
+bool NovaMissionData::set_game_mode(int64_t bit) {
+	if (!document.is_loaded()) {
+		return false;
+	}
+	const uint32_t b = static_cast<uint32_t>(static_cast<uint64_t>(bit));
+	const uint32_t mask = static_cast<uint32_t>(ATTRIB_GAME_MODE_MASK);
+	// Valid iff 0 (Single Player) or exactly one of the 11 mode bits.
+	if (b != 0 && ((b & ~mask) != 0 || (b & (b - 1)) != 0)) {
+		return false;
+	}
+	auto &field = document.bms_file().header.attrib_flags;
+	const uint32_t cur = static_cast<uint32_t>(field);
+	field = static_cast<opennova::bms::AttribFlags>((cur & ~mask) | b);
+	modified = true;
+	return true;
 }

@@ -168,6 +168,51 @@ func test_object_records_revision_and_fingerprint_track_placed_objects() -> void
 	assert_ne(m.object_records_revision(), rev0, "moving a placed entity moves the object revision")
 
 
+# Game mode is single-select: set_game_mode keeps exactly one mode bit (or none), clears the rest,
+# preserves the non-mode option bits, decodes by priority, and rejects invalid bits.
+# [orig: sub_402770 decode @0x4050c7 / encode @0x4031cd, dfx2med.exe]
+func test_game_mode_single_select_and_priority() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+	var mask := int(NovaMissionData.ATTRIB_GAME_MODE_MASK)
+
+	# Deathmatch: exactly that mode bit, nothing else in the mode mask.
+	assert_true(m.set_game_mode(NovaMissionData.ATTRIB_DEATHMATCH), "set deathmatch")
+	assert_eq(int(m.get_info()["attrib_flags"]) & mask, int(NovaMissionData.ATTRIB_DEATHMATCH), "only DM mode bit set")
+	assert_eq(int(m.get_game_mode()), int(NovaMissionData.ATTRIB_DEATHMATCH), "get_game_mode reports DM")
+
+	# Switch to Search & destroy (the high bit 0x80000000): replaces DM, no leftovers.
+	assert_true(m.set_game_mode(NovaMissionData.ATTRIB_SEARCH_AND_DESTROY), "set S&D")
+	assert_eq(int(m.get_info()["attrib_flags"]) & mask, int(NovaMissionData.ATTRIB_SEARCH_AND_DESTROY), "DM cleared, S&D set")
+	assert_eq(int(m.get_game_mode()), int(NovaMissionData.ATTRIB_SEARCH_AND_DESTROY), "get reports S&D (high bit survives)")
+
+	# Single player (0) clears all mode bits.
+	assert_true(m.set_game_mode(0), "set single player")
+	assert_eq(int(m.get_info()["attrib_flags"]) & mask, 0, "no mode bits remain")
+	assert_eq(int(m.get_game_mode()), 0, "get reports single player")
+
+	# Non-mode option bits survive a game-mode change.
+	assert_true(m.set_header_flag(NovaMissionData.ATTRIB_ROTATE_MAP_180, true), "set rotate option")
+	assert_true(m.set_game_mode(NovaMissionData.ATTRIB_COOP), "set coop")
+	assert_ne(int(m.get_info()["attrib_flags"]) & int(NovaMissionData.ATTRIB_ROTATE_MAP_180), 0, "rotate option preserved across mode change")
+	assert_eq(int(m.get_game_mode()), int(NovaMissionData.ATTRIB_COOP), "coop active")
+
+	# Invalid bits are rejected and change nothing.
+	var before := int(m.get_info()["attrib_flags"])
+	assert_false(m.set_game_mode(0x4), "an override bit is not a valid game mode")
+	assert_false(m.set_game_mode(int(NovaMissionData.ATTRIB_COOP) | int(NovaMissionData.ATTRIB_DEATHMATCH)), "two mode bits is invalid")
+	assert_eq(int(m.get_info()["attrib_flags"]), before, "rejected calls leave flags unchanged")
+
+	# A mode set round-trips through save / reopen.
+	assert_true(m.set_game_mode(NovaMissionData.ATTRIB_CAPTURE_THE_FLAG), "set CTF")
+	var tmp := _temp_bms_path()
+	assert_eq(m.save_as(tmp), OK, "save")
+	var reopened := NovaMissionData.new()
+	assert_eq(reopened.open_file(tmp), OK, "reopen")
+	assert_eq(int(reopened.get_game_mode()), int(NovaMissionData.ATTRIB_CAPTURE_THE_FLAG), "CTF persists across save/reload")
+	DirAccess.remove_absolute(tmp)
+
+
 func test_save_without_edits_is_non_destructive() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)

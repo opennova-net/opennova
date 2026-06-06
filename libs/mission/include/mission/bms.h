@@ -66,7 +66,12 @@ enum class ClimateType : uint32_t {
     Snow = 2,
 };
 
-// Mission attribute flags
+// Mission attribute flags. A single 32-bit field (header offset 0x88) holding render/option flags plus
+// the game mode. The 11 game-mode bits are single-select; their union mask is 0xFF830000.
+// [orig: dfx2med.exe (DFX2 mission editor) sub_402770 — decode @0x4050c7 tests the bits in priority
+// order to pick the host combobox item; encode @0x4031cd does `and [x+0x1D4],0x7CFFFF` (== clear the
+// game-mode bits) then OR's exactly one. The option bits 0x1/0x2/0x4/0x8/0x20/0x40/0x100000/0x400000
+// read/write the SAME dword (some via byte accesses at +0x1D6), confirming one field, not two.]
 enum class AttribFlags : uint32_t {
     None = 0,
     WaterOverrideEnable = 0x1,
@@ -75,7 +80,7 @@ enum class AttribFlags : uint32_t {
     WeatherOverrideEnable = 0x8,
     RotateMap180 = 0x20,
     SinglePlayerRespawn = 0x40,
-    AdvanceAndSecure = 0x10000,
+    AdvanceAndSecure = 0x10000, // [orig: dfx2med string literal "ATTACK_AND_SECURE"; classic-DF/JO name is Advance & Secure]
     ConquerAndControl = 0x20000,
     EnableNVG = 0x100000,
     StartWithNVGOn = 0x400000,

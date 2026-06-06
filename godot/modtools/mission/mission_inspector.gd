@@ -2334,12 +2334,9 @@ func _build_props_panel() -> void:
 	_add_props_spin("minutes_per_day", "Minutes / day", 0.0, 65535.0)
 	_add_props_spin("max_saves", "Max saves", 0.0, 255.0)
 	_add_props_spin("start_time", "Start time", 0.0, 65535.0)
-	ObjectUiHelpers.add_section_heading(_props_box, "Game modes")
-	_add_props_flag(NovaMissionData.ATTRIB_COOP, "Co-op")
-	_add_props_flag(NovaMissionData.ATTRIB_DEATHMATCH, "Deathmatch")
-	_add_props_flag(NovaMissionData.ATTRIB_TEAM_DEATHMATCH, "Team deathmatch")
-	_add_props_flag(NovaMissionData.ATTRIB_CAPTURE_THE_FLAG, "Capture the flag")
-	_add_props_flag(NovaMissionData.ATTRIB_KING_OF_THE_HILL, "King of the hill")
+	ObjectUiHelpers.add_section_heading(_props_box, "Game mode")
+	_add_props_game_mode()
+	ObjectUiHelpers.add_section_heading(_props_box, "Options")
 	_add_props_flag(NovaMissionData.ATTRIB_ENABLE_NVG, "Night vision")
 	_add_props_flag(NovaMissionData.ATTRIB_ROTATE_MAP_180, "Rotate map 180")
 	ObjectUiHelpers.add_section_heading(_props_box, "Audio")
@@ -2406,6 +2403,58 @@ func _add_props_flag(bit: int, label: String) -> CheckBox:
 		func(info) -> bool: return (int(info.get("attrib_flags", 0)) & bit) != 0,
 		func(on: bool) -> void: _set_header_flag(bit, on))
 	return check
+
+
+# Engine combobox order [orig: sub_402770 @0x404eff dfx2med.exe]. Index 0 = no mode bits (Single
+# Player). The dropdown uses the list INDEX as the item id (Godot ids are 32-bit, but the high modes
+# like Search & Destroy = 0x80000000 are not), mapping index <-> attrib_flags bit through this table.
+const _GAME_MODE_BITS := [
+	0,          # Single player (no mode bits)
+	0x1000000,  # Co-op
+	0x2000000,  # Deathmatch
+	0x20000000, # Team deathmatch
+	0x4000000,  # King of the hill
+	0x40000000, # Team king of the hill
+	0x10000000, # Capture the flag
+	0x800000,   # Attack & defend
+	0x80000000, # Search & destroy
+	0x8000000,  # Flagball
+	0x10000,    # Advance & secure
+	0x20000,    # Conquer & control
+]
+const _GAME_MODE_LABELS := [
+	"Single player", "Co-op", "Deathmatch", "Team deathmatch", "King of the hill",
+	"Team king of the hill", "Capture the flag", "Attack & defend", "Search & destroy",
+	"Flagball", "Advance & secure", "Conquer & control",
+]
+
+
+func _add_props_game_mode() -> OptionButton:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_props_box.add_child(row)
+	var lbl := Label.new()
+	lbl.text = "Game mode"
+	lbl.custom_minimum_size = Vector2(96, 0)
+	row.add_child(lbl)
+	var option := OptionButton.new()
+	option.name = "MissionProp_game_mode"
+	option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for i in _GAME_MODE_LABELS.size():
+		option.add_item(String(_GAME_MODE_LABELS[i]))
+		option.set_item_id(i, i)
+	row.add_child(option)
+	# The mission stores the active mode as one attrib_flags bit; get_game_mode() returns it (0 = SP).
+	# Map bit -> index for selection, index -> bit on edit.
+	_props_binder.bind_option(option,
+		func(info) -> int: return maxi(0, _GAME_MODE_BITS.find(int(info.get("game_mode", 0)))),
+		func(id: int) -> void: _set_game_mode(int(_GAME_MODE_BITS[id])))
+	return option
+
+
+func _set_game_mode(bit: int) -> void:
+	if _controller != null:
+		_controller.set_game_mode(bit)
 
 
 func _set_header_string(field: String, value: String) -> void:

@@ -1448,6 +1448,13 @@ func set_header_flag(bit: int, on: bool) -> void:
 		"Could not set mission flag.")
 
 
+# Single-select game mode (one attrib_flags mode bit, or 0 = Single Player). Mirrors set_header_*:
+# one undo step + dirty. NovaMissionData.set_game_mode clears the other mode bits.
+func set_game_mode(bit: int) -> void:
+	_edit_step(func(): return _mission.set_game_mode(bit),
+		"Could not set the game mode.")
+
+
 # --- Weapon loadout + groups (mission-global) ---------------------------------
 # Loadout entries are dictionaries { index, name, value1, value2 }; groups are
 # { index, field0, field8, field12 }. Both edit through the one-step snapshot/undo recipe.

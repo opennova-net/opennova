@@ -111,6 +111,7 @@ class FakeController:
 	var header_string_calls: Array = []      # [field, value]
 	var header_int_calls: Array = []         # [field, value]
 	var header_flag_calls: Array = []        # [bit, on]
+	var game_mode_calls: Array = []          # [bit] per set_game_mode
 
 	func set_selected_string_property(name: String, v: String) -> void:
 		string_property_calls.append([name, v])
@@ -130,6 +131,11 @@ class FakeController:
 
 	func set_header_flag(bit: int, on: bool) -> void:
 		header_flag_calls.append([bit, on])
+		dirty = true
+		changed.emit()
+
+	func set_game_mode(bit: int) -> void:
+		game_mode_calls.append(bit)
 		dirty = true
 		changed.emit()
 
@@ -1265,17 +1271,20 @@ func test_changing_climate_commits_through_set_header_int() -> void:
 	assert_eq(ctx.fake.header_int_calls[0][1], 2, "selected id (Snow) carried through")
 
 
-func test_toggling_a_game_mode_flag_commits_through_set_header_flag() -> void:
+func test_selecting_game_mode_commits_through_set_game_mode() -> void:
 	var ctx := _make({})
 	ctx.fake.mission_ref = _loaded_mission_for_props()
 	ctx.inspector._refresh()
-	var coop := ctx.inspector.find_child("MissionFlag_%d" % NovaMissionData.ATTRIB_COOP, true, false) as CheckBox
-	assert_not_null(coop, "co-op flag checkbox built")
-	# Emit the user-toggle signal directly (setting button_pressed would itself emit, double-firing).
-	coop.toggled.emit(true)
-	assert_eq(ctx.fake.header_flag_calls.size(), 1, "one header_flag commit")
-	assert_eq(ctx.fake.header_flag_calls[0][0], NovaMissionData.ATTRIB_COOP, "bit is COOP")
-	assert_eq(ctx.fake.header_flag_calls[0][1], true, "on carried through")
+	var option := ctx.inspector.find_child("MissionProp_game_mode", true, false) as OptionButton
+	assert_not_null(option, "game mode dropdown built")
+	# 12 entries: Single Player + the 11 engine modes (single-select, replacing the old checkboxes).
+	assert_eq(option.item_count, 12, "dropdown lists Single Player + 11 modes")
+	# Pick "Deathmatch" (index 2 in engine combobox order) and confirm it routes the bit, not a flag.
+	option.selected = 2
+	option.item_selected.emit(2)
+	assert_eq(ctx.fake.game_mode_calls.size(), 1, "one set_game_mode commit")
+	assert_eq(int(ctx.fake.game_mode_calls[0]), int(NovaMissionData.ATTRIB_DEATHMATCH), "bit is Deathmatch")
+	assert_eq(ctx.fake.header_flag_calls.size(), 0, "game mode no longer routes through set_header_flag")
 
 
 # --- Phase 2: area-trigger (zone) panel ---------------------------------------

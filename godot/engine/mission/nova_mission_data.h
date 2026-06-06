@@ -73,8 +73,10 @@ protected:
 	static void _bind_methods();
 
 public:
-	// Mirrors opennova::mission::EntityKind. Bound as plain constants.
-	enum {
+	// Mirrors opennova::mission::EntityKind. Bound as plain constants. Fixed uint32_t underlying type
+	// so the high game-mode bits (ATTRIB_SEARCH_AND_DESTROY 0x80000000, ATTRIB_GAME_MODE_MASK 0xFF830000)
+	// bind to GDScript as positive values instead of wrapping to negative signed-int.
+	enum : uint32_t {
 		KIND_MARKER = 0,
 		KIND_ITEM = 1,
 		KIND_BUILDING = 2,
@@ -85,15 +87,24 @@ public:
 		WP_FLAG_DOES_NOT_LOOP = 1,
 		WP_FLAG_BLUE_TEAM = 2,
 		WP_FLAG_RED_TEAM = 4,
-		// Mirrors opennova::bms::AttribFlags. Only the game-mode / option bits the inspector
-		// surfaces are bound, so the editable flag checkboxes compose without magic numbers.
+		// Mirrors opennova::bms::AttribFlags. The option bits (surfaced as checkboxes) plus the 11
+		// game-mode bits (surfaced as the single-select Game mode dropdown via get/set_game_mode).
+		// ATTRIB_GAME_MODE_MASK is the union of the 11 mode bits [orig: 0xFF830000, the complement of
+		// the engine's `and 0x7CFFFF` clear in sub_402770 @0x4031cd, dfx2med.exe].
 		ATTRIB_ROTATE_MAP_180 = 0x20,
 		ATTRIB_ENABLE_NVG = 0x100000,
+		ATTRIB_ADVANCE_AND_SECURE = 0x10000,
+		ATTRIB_CONQUER_AND_CONTROL = 0x20000,
+		ATTRIB_ATTACK_AND_DEFEND = 0x800000,
 		ATTRIB_COOP = 0x1000000,
 		ATTRIB_DEATHMATCH = 0x2000000,
 		ATTRIB_KING_OF_THE_HILL = 0x4000000,
+		ATTRIB_FLAGBALL = 0x8000000,
 		ATTRIB_CAPTURE_THE_FLAG = 0x10000000,
 		ATTRIB_TEAM_DEATHMATCH = 0x20000000,
+		ATTRIB_TEAM_KING_OF_THE_HILL = 0x40000000,
+		ATTRIB_SEARCH_AND_DESTROY = 0x80000000,
+		ATTRIB_GAME_MODE_MASK = 0xFF830000,
 	};
 
 	Error open_file(const String &path);
@@ -150,6 +161,13 @@ public:
 	bool set_header_int(const String &field, int value);
 	bool set_header_flag(int bit, bool on);
 	bool set_header_float(const String &field, float value);
+	// Game mode is a single-select among the 11 ATTRIB_* mode bits (or none = Single Player). The
+	// engine stores it as exactly one bit of attrib_flags and selects by priority [orig: sub_402770
+	// decode @0x4050c7, encode @0x4031cd `and 0x7CFFFF`/`or <bit>`, dfx2med.exe]. get_game_mode returns
+	// the active mode bit (0 = Single Player); set_game_mode clears all 11 mode bits then sets `bit`
+	// (0 clears all). Returns int64 because ATTRIB_SEARCH_AND_DESTROY (0x80000000) overflows a signed int.
+	int64_t get_game_mode() const;
+	bool set_game_mode(int64_t bit);
 	// Place a new entity of `kind` for `item_id` (an items.def id) at `position`
 	// (mission-space x, y, z) with `rotation_deg` (pitch, yaw, roll), rounded to the
 	// int fields the format stores. The lib seeds the rest of the record with sane
