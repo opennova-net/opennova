@@ -132,6 +132,42 @@ func test_set_entity_transform_persists_through_save_reload() -> void:
 	DirAccess.remove_absolute(tmp)
 
 
+# Guards the undo/redo rebake heuristic: object_records_revision() (and the structure_fingerprint
+# it feeds) must move for placed-object edits and stay put for non-object edits, so the controller
+# re-bakes the ~1600-node world only when an object actually changed and otherwise just refreshes the
+# overlay.
+func test_object_records_revision_and_fingerprint_track_placed_objects() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.open_file(_bms_abs()), OK)
+
+	var rev0 := m.object_records_revision()
+	var fp0 := m.structure_fingerprint()
+	assert_true(fp0.has("events") and fp0.has("zones") and fp0.has("object_rev"),
+		"structure_fingerprint exposes events / zones / object_rev")
+	assert_eq(int(fp0["object_rev"]), rev0, "the fingerprint's object_rev mirrors object_records_revision")
+
+	# A non-object edit (the mission header) must NOT move the placed-object revision -- this is what
+	# lets an undo/redo of header / event / zone data skip re-baking the world.
+	assert_true(m.set_header_string("designer", "someone-else"), "header edit applies")
+	assert_eq(m.object_records_revision(), rev0, "a header edit leaves the object revision unchanged")
+
+	# A zone edit moves the zone count in the fingerprint but still leaves object_rev alone (area
+	# triggers are not placed objects), so a zone undo takes the lightweight overlay-only path.
+	var zones0 := int(m.structure_fingerprint()["zones"])
+	var zone := m.add_area_trigger(Vector3(-1, -1, -1), Vector3(1, 1, 1), true, false, 0)
+	assert_false(zone.is_empty(), "a zone is added")
+	assert_eq(int(m.structure_fingerprint()["zones"]), zones0 + 1, "the zone count moves in the fingerprint")
+	assert_eq(m.object_records_revision(), rev0, "adding a zone does not move the object revision")
+
+	# An object edit (moving a placed entity) MUST move the revision -> a full re-bake on undo/redo.
+	var buildings := m.get_entities(NovaMissionData.KIND_BUILDING)
+	assert_gt(buildings.size(), 0, "need a building to move")
+	var b: Dictionary = buildings[0]
+	assert_true(m.set_entity_transform(int(b["kind"]), int(b["index"]),
+		Vector3(10.0, 20.0, 30.0), b["rotation_deg"]), "moving a building applies")
+	assert_ne(m.object_records_revision(), rev0, "moving a placed entity moves the object revision")
+
+
 func test_save_without_edits_is_non_destructive() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)

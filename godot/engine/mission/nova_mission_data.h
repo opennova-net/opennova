@@ -9,10 +9,12 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include <mission/bms.h>
 #include <mission/mission.h>
+#include <oned_edit/edit_history.h>
 
 namespace godot {
 
@@ -35,18 +37,19 @@ private:
 	// clean_baseline compare below.
 	bool modified = false;
 
-	// In-memory undo / redo history: whole-document snapshots held as bms::File copies (never
-	// serialized bytes). begin_edit() captures the pre-edit document; commit_edit() pushes it iff
-	// the edit actually changed something (bms::equal); undo()/redo() swap the document's file with
-	// a stack top. Dirty is exact and survives undo-stack trimming: the document differs from
-	// clean_baseline, which is reset at open / save / new (mark_clean()).
-	std::vector<opennova::bms::File> undo_history;
-	std::vector<opennova::bms::File> redo_history;
-	opennova::bms::File pending_snapshot;
-	bool editing = false;
-	opennova::bms::File clean_baseline;
-	bool has_clean_baseline = false;
-	static constexpr size_t kUndoLimit = 100;
+	// Whole-document undo / redo history + exact dirty, on the shared editor core
+	// (libs/oned_edit). The snapshot is the parsed bms::File (never serialized bytes);
+	// the no-op equal-gate and the dirty compare both use the byte-faithful bms::equal
+	// via BmsFileEqual (a free function, not operator==). begin_edit() captures the
+	// pre-edit document, commit_edit() records one step iff it changed, undo()/redo()
+	// swap the live file with a stack top in O(1), and is_dirty() compares against the
+	// baseline set by mark_clean() at open / save / new. See nova_mission_data.cpp.
+	struct BmsFileEqual {
+		bool operator()(const opennova::bms::File &a, const opennova::bms::File &b) const {
+			return opennova::bms::equal(a, b);
+		}
+	};
+	opennova::edit::EditHistory<opennova::bms::File, BmsFileEqual> history{100};
 
 	Dictionary entity_to_dictionary(const opennova::mission::EntityRecord &record) const;
 	Dictionary waypoint_path_to_dictionary(const opennova::mission::WaypointPath &path) const;
@@ -299,6 +302,17 @@ public:
 	void clear_history();
 	bool is_dirty() const;
 	void mark_clean();
+
+	// A 64-bit content revision of the placed-object records (items / buildings /
+	// markers / organics): equal documents share it, any record byte or count change
+	// moves it. The editor uses it to decide, after an undo / redo, whether to
+	// re-place the baked world or only refresh overlays.
+	int64_t object_records_revision() const;
+	// { events, zones, object_rev } -- the structural fingerprint the editor captures
+	// before a restore and compares after (an event / zone count change means a
+	// reindex that invalidates a kept selection; an object-revision change means the
+	// baked world must be re-placed). One call replaces three separate probes.
+	Dictionary structure_fingerprint() const;
 };
 
 } // namespace godot

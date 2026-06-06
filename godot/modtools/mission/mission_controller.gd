@@ -643,90 +643,75 @@ func _clear_history() -> void:
 
 
 func undo() -> void:
-	if _restoring:
-		return
-	# A keyboard undo can arrive mid-drag; cancel_drag abandons the visual gesture (so the
-	# re-bake does not free nodes a continuing drag still references) and commits any open
-	# edit session as its step before we rewind.
-	cancel_drag()
-	if _mission == null:
-		return
-	if not _mission.can_undo():
-		_report("Nothing to undo.")
-		return
-	_restoring = true
-	var prev_event_count := _mission.get_event_count()
-	var prev_zone_count := _mission.get_area_trigger_count()
-	var prev_object_sig := _object_signature()
-	_mission.undo()
-	_after_restore(prev_event_count, prev_zone_count, prev_object_sig)
-	_restoring = false
-	_report("Undid the last change.")
+	_restore_step(true)
 
 
 func redo() -> void:
+	_restore_step(false)
+
+
+# Shared undo/redo spine (the two differ only in direction + the status line). A keyboard undo/redo
+# can arrive mid-drag; cancel_drag abandons the visual gesture (so the re-bake does not free nodes a
+# continuing drag still references) and commits any open edit session as its step before we rewind.
+# _restoring guards re-entrancy: a restore -> rebake -> `changed` -> inspector roundtrip must not recurse.
+func _restore_step(is_undo: bool) -> void:
 	if _restoring:
 		return
 	cancel_drag()
 	if _mission == null:
 		return
-	if not _mission.can_redo():
+	if is_undo and not _mission.can_undo():
+		_report("Nothing to undo.")
+		return
+	if not is_undo and not _mission.can_redo():
 		_report("Nothing to redo.")
 		return
 	_restoring = true
-	var prev_event_count := _mission.get_event_count()
-	var prev_zone_count := _mission.get_area_trigger_count()
-	var prev_object_sig := _object_signature()
-	_mission.redo()
-	_after_restore(prev_event_count, prev_zone_count, prev_object_sig)
+	var before := _mission.structure_fingerprint()
+	if is_undo:
+		_mission.undo()
+	else:
+		_mission.redo()
+	_after_restore(before)
 	_restoring = false
-	_report("Redid the last change.")
+	_report("Undid the last change." if is_undo else "Redid the last change.")
 
 
 # Sync the world + selection to the document after an in-memory undo/redo swap, then re-bake and
-# notify once so the inspector refreshes against the restored world in a single pass. Adding /
-# deleting an event shifts later event indices, so a kept _selected_event_index could bind to a
-# DIFFERENT event (the in-range clamp can't see a shift); drop the selection only when the event
-# set actually changed (event add/delete are the only ops that change the count -- there is no
-# event-reorder op -- so a count change is exactly the structural case). An attribute / trigger /
-# action undo leaves the list intact and keeps the user on their event.
-func _after_restore(prev_event_count: int, prev_zone_count: int, prev_object_sig: Array) -> void:
-	if _mission.get_event_count() != prev_event_count:
+# notify once so the inspector refreshes against the restored world in a single pass. `before` is the
+# pre-restore NovaMissionData.structure_fingerprint() -- { events, zones, object_rev }.
+#
+# Adding / deleting an event shifts later event indices, so a kept _selected_event_index could bind to
+# a DIFFERENT event (the in-range clamp can't see a shift); drop the selection only when the event set
+# actually changed (event add/delete are the only ops that change the count -- there is no event-reorder
+# op -- so a count change is exactly the structural case). An attribute / trigger / action undo leaves
+# the list intact and keeps the user on their event.
+func _after_restore(before: Dictionary) -> void:
+	var after := _mission.structure_fingerprint()
+	if int(after["events"]) != int(before["events"]):
 		_selected_event_index = -1
-	# Same reasoning for the zone selection: area triggers are NOT in _object_signature (it covers only
+	# Same reasoning for the zone selection: area triggers are NOT part of object_rev (it covers only
 	# placed objects), so an undo/redo of a zone add/delete takes the lightweight overlay-only path
 	# below and would otherwise rebuild the overlay against a stale _selected_zone_index that now points
 	# at a different (reindexed) zone. Add/delete are the only ops that change the zone count (no
 	# reorder), so a count change is exactly the structural case; drop the selection then.
-	if _mission.get_area_trigger_count() != prev_zone_count:
+	if int(after["zones"]) != int(before["zones"]):
 		_selected_zone_index = -1
 	# Defensive clamp: never leave the index past the end of the restored zone list.
 	if _selected_zone_index >= _mission.get_area_trigger_count():
 		_selected_zone_index = -1
-	# Skip the full object re-place when the undo/redo changed only non-object data (events /
-	# triggers / actions / zones / header / loadout / groups): every placed object is byte-identical,
-	# so re-baking ~all MultiMesh instances is pure waste. The placed nodes + pickable index + stats
-	# + object selection all stay valid; only the active mode's overlay (which reads events / zones /
-	# paths from the document) needs a refresh. Any object change moves the signature -> full re-bake.
-	if _object_signature() == prev_object_sig:
+	# Skip the full object re-place when the undo/redo changed only non-object data (events / triggers /
+	# actions / zones / header / loadout / groups): every placed object is byte-identical, so re-baking
+	# ~all MultiMesh instances is pure waste. The placed nodes + pickable index + stats + object selection
+	# all stay valid; only the active mode's overlay (which reads events / zones / paths from the document)
+	# needs a refresh. Any object change moves object_rev -> full re-bake. object_rev is computed in C++
+	# (NovaMissionData.object_records_revision) over the raw record bytes, so this no longer marshals the
+	# placed-object set into ~1600 entity dictionaries twice per undo.
+	if int(after["object_rev"]) == int(before["object_rev"]):
 		_refresh_active_overlay()
 	else:
 		_rebake_objects()
 	mark_dirty()
-
-
-# A content fingerprint of every placed-object record (items / buildings / organics / markers), used
-# by undo/redo to decide whether the world needs a full re-place. Array.hash() walks each kind's
-# entity dictionaries, so any change to a position / rotation / type (or a count) moves the hash.
-func _object_signature() -> Array:
-	if _mission == null:
-		return []
-	return [
-		_mission.get_entities(NovaMissionData.KIND_ITEM).hash(),
-		_mission.get_entities(NovaMissionData.KIND_BUILDING).hash(),
-		_mission.get_entities(NovaMissionData.KIND_ORGANIC).hash(),
-		_mission.get_entities(NovaMissionData.KIND_MARKER).hash(),
-	]
 
 
 # Mark the current input event handled so a consumed Ctrl+Z / Ctrl+Y does not propagate

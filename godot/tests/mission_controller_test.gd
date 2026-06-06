@@ -1738,7 +1738,7 @@ func test_set_selected_zone_bounds_and_flags_read_back_and_undo() -> void:
 
 
 func test_undo_of_a_zone_delete_does_not_dangle_the_selection() -> void:
-	# Regression: _object_signature() excludes area triggers, so an undo/redo of a zone add/delete takes
+	# Regression: object_records_revision excludes area triggers, so an undo/redo of a zone add/delete takes
 	# the lightweight overlay-only restore path. Without re-validating _selected_zone_index there, a kept
 	# index rebinds to a DIFFERENT (reindexed) zone after the restore. The fix drops the selection when
 	# the zone count changes across the restore.

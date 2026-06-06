@@ -113,6 +113,8 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_history"), &NovaMissionData::clear_history);
 	ClassDB::bind_method(D_METHOD("is_dirty"), &NovaMissionData::is_dirty);
 	ClassDB::bind_method(D_METHOD("mark_clean"), &NovaMissionData::mark_clean);
+	ClassDB::bind_method(D_METHOD("object_records_revision"), &NovaMissionData::object_records_revision);
+	ClassDB::bind_method(D_METHOD("structure_fingerprint"), &NovaMissionData::structure_fingerprint);
 
 	BIND_CONSTANT(KIND_MARKER);
 	BIND_CONSTANT(KIND_ITEM);
@@ -1110,84 +1112,96 @@ bool NovaMissionData::is_modified() const {
 }
 
 void NovaMissionData::begin_edit() {
-	// Capture the pre-edit document once. Inert if a session is already open (so a run of edits
-	// coalesces) or nothing is loaded.
-	if (editing || !document.is_loaded()) {
+	// Open an edit session, snapshotting the pre-edit document. The shared history
+	// coalesces a run of edits into one step (begin is inert while a session is open);
+	// we add only the "is a document loaded?" guard it cannot know about.
+	if (!document.is_loaded()) {
 		return;
 	}
-	pending_snapshot = document.bms_file();
-	editing = true;
+	history.begin(document.bms_file());
 }
 
 void NovaMissionData::commit_edit() {
-	// Close the session, pushing the held snapshot as one undo step only if the edit actually
-	// changed the document (a plain click, a same-value edit, or a programmatic refresh push
-	// nothing). Clears redo on a real change. A new step drops the oldest when over the cap.
-	if (!editing) {
-		return;
-	}
-	editing = false;
-	if (!opennova::bms::equal(document.bms_file(), pending_snapshot)) {
-		undo_history.push_back(std::move(pending_snapshot));
-		if (undo_history.size() > kUndoLimit) {
-			undo_history.erase(undo_history.begin());
-		}
-		redo_history.clear();
-	}
-	pending_snapshot = opennova::bms::File{};
+	// Close the session, recording one undo step only if the document actually changed:
+	// the history's equal-gate uses bms::equal, so a plain click / same-value edit /
+	// programmatic refresh records nothing.
+	history.commit(document.bms_file());
 }
 
 bool NovaMissionData::can_undo() const {
-	return !undo_history.empty();
+	return history.can_undo();
 }
 
 bool NovaMissionData::can_redo() const {
-	return !redo_history.empty();
+	return history.can_redo();
 }
 
 bool NovaMissionData::undo() {
-	if (undo_history.empty() || !document.is_loaded()) {
+	// O(1) in-memory swap of the live file with the top undo step: no serialize / parse,
+	// so it cannot fail once a document is loaded.
+	if (!document.is_loaded()) {
 		return false;
 	}
-	// Swap the live file onto the redo stack and adopt the popped state. Pure in-memory moves: no
-	// serialize / parse, so this cannot fail, and the document stays loaded (only its file changes).
-	redo_history.push_back(document.bms_file());
-	document.bms_file() = std::move(undo_history.back());
-	undo_history.pop_back();
-	return true;
+	return history.swap_undo(document.bms_file());
 }
 
 bool NovaMissionData::redo() {
-	if (redo_history.empty() || !document.is_loaded()) {
+	if (!document.is_loaded()) {
 		return false;
 	}
-	undo_history.push_back(document.bms_file());
-	document.bms_file() = std::move(redo_history.back());
-	redo_history.pop_back();
-	return true;
+	return history.swap_redo(document.bms_file());
 }
 
 int NovaMissionData::undo_depth() const {
-	return static_cast<int>(undo_history.size());
+	return static_cast<int>(history.undo_depth());
 }
 
 void NovaMissionData::clear_history() {
-	undo_history.clear();
-	redo_history.clear();
-	pending_snapshot = opennova::bms::File{};
-	editing = false;
+	history.clear();
 }
 
 bool NovaMissionData::is_dirty() const {
-	if (!has_clean_baseline) {
-		// No baseline yet (e.g. a just-created document the editor has not marked clean): fall
-		// back to the coarse "any mutation since load" flag.
-		return modified;
-	}
-	return !opennova::bms::equal(document.bms_file(), clean_baseline);
+	// Exact: the document differs from the clean baseline (set at open / save / new).
+	// Before a baseline exists, fall back to the coarse "any mutation since load" flag.
+	return history.is_dirty(document.bms_file(), modified);
 }
 
 void NovaMissionData::mark_clean() {
-	clean_baseline = document.bms_file();
-	has_clean_baseline = true;
+	history.mark_clean(document.bms_file());
+}
+
+int64_t NovaMissionData::object_records_revision() const {
+	// 64-bit FNV-1a over the raw bytes of the placed-object record vectors. This mirrors
+	// how bms::equal decides these vectors (memcmp via pod_vectors_equal), so two
+	// documents with byte-identical object records share a revision and any change moves
+	// it -- far cheaper than marshalling ~every entity into a Dictionary to hash it.
+	const opennova::bms::File &file = document.bms_file();
+	uint64_t h = 1469598103934665603ull; // FNV-1a 64-bit offset basis
+	const auto mix = [&h](const void *data, size_t size) {
+		const unsigned char *p = static_cast<const unsigned char *>(data);
+		for (size_t i = 0; i < size; ++i) {
+			h ^= p[i];
+			h *= 1099511628211ull; // FNV-1a 64-bit prime
+		}
+	};
+	const auto mix_entities = [&](const std::vector<opennova::bms::Entity> &v) {
+		const uint64_t count = v.size();
+		mix(&count, sizeof(count)); // a count change moves the revision even at a byte realignment
+		if (!v.empty()) {
+			mix(v.data(), v.size() * sizeof(opennova::bms::Entity));
+		}
+	};
+	mix_entities(file.items);
+	mix_entities(file.buildings);
+	mix_entities(file.markers);
+	mix_entities(file.organics);
+	return static_cast<int64_t>(h);
+}
+
+Dictionary NovaMissionData::structure_fingerprint() const {
+	Dictionary out;
+	out["events"] = get_event_count();
+	out["zones"] = get_area_trigger_count();
+	out["object_rev"] = object_records_revision();
+	return out;
 }

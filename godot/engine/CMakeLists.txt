@@ -27,6 +27,7 @@ add_subdirectory(../../libs/terrain opennova_terrain)
 add_subdirectory(../../libs/resource_index opennova_resource_index)
 add_subdirectory(../../libs/def opennova_def)
 add_subdirectory(../../libs/mission opennova_mission)
+add_subdirectory(../../libs/oned_edit opennova_oned_edit)
 
 set(TARGET_NAME "opennova")
 
@@ -99,6 +100,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_resource_index
     opennova_def
     opennova_mission
+    opennova_oned_edit
 )
 
 # The bake worker thread in nova_terrain_build_job.cpp installs
