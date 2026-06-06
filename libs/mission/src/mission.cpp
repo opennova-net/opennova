@@ -459,7 +459,7 @@ void write_mis_events(const bms::File &file, std::string &out) {
 
 void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out) {
 	const uint16_t crouch_timer = combined_u16(entity.crouch_timer, entity.unk15a);
-	const int32_t group_rel = combined_i32_from_i16(entity.unk25, entity.unk26);
+	const int32_t group_rel = combined_i32_from_i16(entity.group_rel_lo, entity.group_rel_hi);
 	const uint8_t *gen_raw = reinterpret_cast<const uint8_t *>(entity.gen_string);
 	const std::string gen_string = fixed_string(entity.gen_string, 32);
 
@@ -480,8 +480,8 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out)
 	if (entity.bmsi_attributes != 0) append_kv(out, "  bmsi_attributes ", entity.bmsi_attributes);
 	if (entity.no_less_than != 0) append_kv(out, "  nolessthan ", static_cast<int>(entity.no_less_than));
 	if (entity.no_more_than != 0) append_kv(out, "  nomorethan ", static_cast<int>(entity.no_more_than));
-	if (byte_from_i16(entity.unk19, 0) != 0) append_kv(out, "  weapon_type ", byte_from_i16(entity.unk19, 0));
-	if (byte_from_i16(entity.unk19, 1) != 0) append_kv(out, "  sweapon_type ", byte_from_i16(entity.unk19, 1));
+	if (byte_from_i16(entity.weapon_types, 0) != 0) append_kv(out, "  weapon_type ", byte_from_i16(entity.weapon_types, 0));
+	if (byte_from_i16(entity.weapon_types, 1) != 0) append_kv(out, "  sweapon_type ", byte_from_i16(entity.weapon_types, 1));
 	if (entity.group_id != 0) append_kv(out, "  group_id ", static_cast<int>(entity.group_id));
 	if (group_rel != 0) append_kv(out, "  group_rel ", group_rel);
 	if (entity.waypoint_id != 0) append_kv(out, "  waypoint_id ", static_cast<int>(entity.waypoint_id));
@@ -489,7 +489,7 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out)
 	append_kv(out, "  wpdistance ", entity.wp_distance);
 	if (entity.wp_adv_trigger != -1) append_kv(out, "  wp_adv_trigger ", entity.wp_adv_trigger);
 	for (int i = 0; i < 4; ++i) {
-		const int32_t goal = byte_from_i32(entity.unk30_31, i);
+		const int32_t goal = byte_from_i32(entity.wp_goals, i);
 		if (goal != 0) {
 			append_kv(out, "  wpgoal", i, " ", goal);
 		}
@@ -505,10 +505,10 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out)
 	append_kv(out, "  crouchtimer ", crouch_timer);
 	append_kv(out, "  shoottimer ", entity.shoot_timer);
 	append_kv(out, "  attention ", entity.attention);
-	append_kv(out, "  advancetimer ", entity.fire_timer);
+	append_kv(out, "  advancetimer ", entity.advancetimer);
 	append_kv(out, "  max_attack_distance ", entity.max_attack_distance);
 	append_kv(out, "  edistances ", entity.min_engagement_distance, " ", entity.max_engagement_distance);
-	if (entity.unk41 != 0) append_kv(out, "  next_ssn ", entity.unk41);
+	if (entity.next_ssn != 0) append_kv(out, "  next_ssn ", entity.next_ssn);
 	if (entity.color_override != 0) append_kv(out, "  color_override ", static_cast<int>(entity.color_override));
 	if (gen_raw[32] != 0) append_kv(out, "  grenades ", static_cast<int>(gen_raw[32]));
 	if (gen_raw[34] != 0) append_kv(out, "  mission_critical ", static_cast<int>(gen_raw[34]));

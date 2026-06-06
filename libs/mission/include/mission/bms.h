@@ -366,7 +366,7 @@ struct Header {
     char magic[4];                     // 'B','M','S', version byte (shipped JO = 19/0x13); gated by kMinVersion
     char mission_name[32];
     char designer[32];
-    char terrain[48];
+    char terrain[48];                  // [orig editor: 3x char[16] packed by Med_WriteBmsFile @0x44f920 (RAM a1+416/432/448)]
     char default_str[16];
     ClimateType climate;
     AttribFlags attrib_flags;
@@ -404,6 +404,7 @@ struct Header {
     int16_t unknown6;
     MissionType mission_type;
     uint8_t max_saves;
+    // [orig editor: win_scores[8] + lose_scores[8], each = value/100; Med_WriteBmsFile @0x44f920 Buffer[556..571]]
     uint8_t unknown7[16];
     float map_zoom;
     int16_t area_trigger_count;        // [orig: word_A76410 @hdr+0x240] count of 32-byte area-trigger records
@@ -441,6 +442,18 @@ inline int32_t to_fixed_16_16(float v) {
     return static_cast<int32_t>(v * 65536.0f);
 }
 
+// [orig editor: dfx2med.exe. Every offset CONFIRMED byte-exact by the packer Med_PackEntityRecord @0x44c8e0
+//  (RAM 448B -> disk 172B); canonical field NAMES come from the .mis text writer Med_WriteMisFile @0x454630
+//  (literal keywords). Notes: yaw/pitch/roll stored % 360; w_accuracy1 clamped <= w_accuracy2; iai_name (name1)
+//  is from the graphic .def table (not per-entity); ai_textfile = name2; unk42b@166/unk43@168 are NEVER written
+//  (zero-filled) -> reserved/pad. write_mis_item in mission.cpp already uses the canonical names below; this is
+//  validated against the original .mis writer. Full table: notes/mission/unmodeled-grill-2026-06-06.md.
+//  Canonical names: perception2/perfectionist2/wp_distance/wp_adv_trigger/wp_number/w_accuracy1,2/obliqueness/
+//  alert_state/map_symbol/team_budget/color_override/max_attack_distance are CORRECT as-is. CORRECTIONS (raw
+//  field -> canonical): spawns@62=movetimer; unk19@76=weapon_type(b0)|sweapon_type(b1); unk23/24@84-87=
+//  blink_parent_a/b + blink_group_a/b; unk25+unk26@88=group_rel(i32); fire_timer@92=advancetimer;
+//  unk30_31@100=wpgoal0..3(4 bytes); unk41@160=next_ssn; gen_string@120 is 31B and @152/154/155 hold
+//  grenades/mission_critical/lfp_group (currently swallowed by gen_string[36] -> split to model+export).]
 struct Entity {
     ItemType type;                     // Set during parsing, not serialized as separate field
     int32_t type_id;
@@ -459,8 +472,8 @@ struct Entity {
     int16_t yaw;
     int16_t pitch;
     int16_t roll;
-    int16_t spawns;
-    uint8_t crouch_timer;
+    int16_t spawns;                    // .mis: movetimer (exposed as spawn_count in the binding — a misnomer)
+    uint8_t crouch_timer;              // .mis: crouchtimer (low byte; unk15a is the high byte)
     uint8_t unk15a;
     int16_t shoot_timer;
     int16_t wp_adv_trigger;
@@ -469,28 +482,29 @@ struct Entity {
     uint8_t team;
     uint8_t no_more_than;
     uint8_t no_less_than;
-    int16_t unk19;
+    int16_t weapon_types;              // .mis: weapon_type (byte0) | sweapon_type (byte1)
     uint8_t group_id;
     uint8_t waypoint_id;
     uint8_t obliqueness;
     uint8_t map_symbol;
-    int16_t unk22;
-    int16_t unk23;
-    int16_t unk24;
-    int16_t unk25;
-    int16_t unk26;
-    int32_t fire_timer;
-    int32_t ttool_index;
-    int32_t unk30_31;
+    int16_t unk22;                     // @82: not written by the editor (reserved/pad)
+    int16_t blink_parent;              // .mis: blink_parent_a (byte0) | blink_parent_b (byte1)
+    int16_t blink_group;               // .mis: blink_group_a (byte0) | blink_group_b (byte1)
+    int16_t group_rel_lo;              // .mis: group_rel (i32, with group_rel_hi)
+    int16_t group_rel_hi;
+    int32_t advancetimer;              // .mis: advancetimer (was fire_timer)
+    int32_t ttool_index;               // .mis: ttoolindex
+    int32_t wp_goals;                  // .mis: wpgoal0..3 (4 packed bytes)
     char name1[8];                     // iai_name
     char name2[8];                     // ai_textfile
-    char gen_string[36];
+    char gen_string[36];               // .mis: gen_string is 31B @120-150; @152/154/155 hold
+                                       //   grenades / mission_critical / lfp_group (split to model+export)
     int32_t max_attack_distance;
-    int32_t unk41;
+    int32_t next_ssn;                  // .mis: next_ssn (was unk41)
     uint8_t color_override;
     uint8_t team_budget;
-    int16_t unk42b;
-    int32_t unk43;
+    int16_t unk42b;                    // @166: not written by the editor (reserved/pad)
+    int32_t unk43;                     // @168: not written by the editor (reserved/pad)
 
     // Accessors for float positions (fixed-point 16.16 conversion)
     float get_x() const { return x / 65536.0f; }
@@ -512,10 +526,15 @@ struct WaypointRecord {
     std::vector<uint8_t> padding;      // Remaining bytes after waypoint numbers
 };
 
+// [orig editor: Med_WriteBmsFile @0x44f920 packs each 32-byte group as: @0 flags (bit0/bit1 from the editor
+//  group flags), @4=0, @8 = a value, @12 = constant 10, @16..28 = 0. The JO loader keeps @0/@8/@12; @12 is
+//  the literal 10, @0 a 2-bit flags, @8 the only free int. See notes/mission/unmodeled-grill-2026-06-06.md.]
 struct GroupRecord {
     uint8_t raw_data[kGroupRecordSize];
 };
 
+// [orig editor: Med_WriteBmsFile @0x44f920 copies the editor LAYER NAME (a string) into this 20-byte record.
+//  i.e. raw_data is effectively char name[20]. JO reads-and-discards it. Promote to char name[20] if surfaced.]
 struct LayerRecord {
     uint8_t raw_data[kLayerRecordSize];
 };
@@ -526,12 +545,17 @@ struct LayerRecord {
 //  Entity_IsBmsRefInTriggerBounds @0x43e53b, Entity_IsLocalPlayerOutOfBounds @0x439d40 (zone_ptr =
 //  &unk_A32D14 = base+4; zone_ptr[6]&1 is the @28 flags). Bounds are INTERLEAVED per axis
 //  (x_min,x_max,y_min,y_max,z_min,z_max) — NOT min-triple/max-triple — and there is NO Y/Z swap.]
+// [orig editor: dfx2med.exe AREA_TRIGGERS dialog Med_AreaTriggerDialogProc @0x40f400 confirms off-0 = the
+//  designer zone id 1..99 (zones listed/addressed by id, `unk_221DEC4 + 312*id`, markers store it at
+//  entity+144) and flags bit0 = "MISSION_AREA" boundary (CheckDlgButton 1175), bit1 = constrain-Z
+//  (CheckDlgButton 1169). See notes/mission/unmodeled-grill-2026-06-06.md.]
 struct AreaTrigger {
-    int32_t id;                        // off 0: not read by the bounds checks (likely a zone id); Phase-5 RE
+    int32_t id;                        // off 0: designer zone id 1..99 (editor-confirmed; markers reference it)
     int32_t x_min, x_max;              // off 4, 8   Fixed-point 16.16
     int32_t y_min, y_max;              // off 12, 16
     int32_t z_min, z_max;              // off 20, 24
-    uint32_t flags;                    // off 28: bit0x01 = zone active; bit0x02 = constrain-Z (else Z unbounded)
+    uint32_t flags;                    // off 28: bit0x01 = MISSION_AREA (mission boundary; read only by the
+                                       //   boundary check, NOT *IsWithinArea); bit0x02 = constrain-Z (else Z unbounded)
 
     // [orig: when flags&0x02 is clear, the consumers use Z in [-1073741824, 0x40000000] = ±16384.0 (16.16)]
     static constexpr float kUnboundedZMin = -16384.0f;
@@ -544,6 +568,8 @@ struct AreaTrigger {
     float get_y_max() const { return y_max / 65536.0f; }
     float get_z_min() const { return z_min / 65536.0f; }
     float get_z_max() const { return z_max / 65536.0f; }
+    // bit0 is the MISSION_AREA / mission-boundary flag (editor label, see flags note above), not a generic
+    // "enabled" toggle; *IsWithinArea trigger zones ignore it. Name kept to avoid an editor/binding ripple.
     bool is_active() const { return (flags & 0x1u) != 0; }
     bool constrains_z() const { return (flags & 0x2u) != 0; }
 };
@@ -632,8 +658,11 @@ struct WeaponLoadout {
 struct File {
     Header header;
     WeaponLoadout loadout;
-    // [orig: word_A76416 @hdr+0x246 bytes] opaque chunk the engine seeks past after the loadout.
-    // Preserved verbatim for round-trip fidelity; almost always empty in shipped missions.
+    // [orig: word_A76416 @hdr+0x246 bytes] second chunk after the weapon loadout (the engine seeks past it).
+    // [orig editor: Med_WriteBmsFile @0x44f920 builds it via Med_BuildItemAvailabilityChunk @0x432c00 — an
+    //  ITEM-AVAILABILITY list: for each enabled entry in the item/weapon table, one record = name\0 + 1 status
+    //  byte, terminated by an empty name. Sibling of the loadout chunk (3-string records). Usually empty in
+    //  shipped JO missions.] Preserved verbatim for round-trip fidelity.
     std::vector<uint8_t> secondary_chunk;
     std::vector<Entity> items;
     std::vector<Entity> buildings;
