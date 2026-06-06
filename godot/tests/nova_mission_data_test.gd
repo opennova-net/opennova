@@ -868,6 +868,27 @@ func test_set_header_flag_toggles_one_bit_and_preserves_others() -> void:
 	assert_eq(after & other_mask, before & other_mask, "other attrib bits are preserved")
 
 
+func test_set_event_preserves_unmodeled_flag_bits() -> void:
+	# Regression (review #2): the inspector rebuilds an event's flags from the exposed checkboxes only
+	# (event_flag_bits = ResetAfter/PreMission/PostMission, mask 0x07 — matching the DFX2 editor), so
+	# set_event must preserve on-disk bits it does not surface (e.g. 0x08) instead of clobbering them,
+	# mirroring trigger condition_flags. Otherwise nudging any event attribute silently drops those bits.
+	var m := NovaMissionData.new()
+	assert_eq(m.create_default(), OK)
+	var UNMODELED := 0x08 # gap bit: no event_flag_bits() checkbox, must survive verbatim
+	# Seed an event carrying the unmodeled bit plus an exposed one (ResetAfter = 0x01).
+	var added := m.add_event(UNMODELED | 0x01, 0, 0)
+	assert_false(added.is_empty(), "event added")
+	var idx := int(added["index"])
+	assert_eq(int(m.get_event(idx)["flags"]) & UNMODELED, UNMODELED, "unmodeled bit present after add")
+	# An editor edit rebuilds flags from exposed checkboxes only (here PreMission = 0x02, ResetAfter off).
+	assert_true(m.set_event(idx, 0x02, 0, 0), "set_event succeeds")
+	var flags := int(m.get_event(idx)["flags"])
+	assert_eq(flags & UNMODELED, UNMODELED, "unmodeled bit 0x08 preserved across the edit")
+	assert_eq(flags & 0x02, 0x02, "exposed PreMission bit applied")
+	assert_eq(flags & 0x01, 0, "exposed ResetAfter bit cleared (unchecked)")
+
+
 # --- Phase 2: area-trigger / zone binding -------------------------------------
 
 func test_area_trigger_dictionary_shape() -> void:
@@ -1008,7 +1029,7 @@ func test_enum_tables_reflect_the_engine_names() -> void:
 		if int(entry["value"]) == 34:
 			found_reset = String(entry["name"]) == "ResetEvent"
 	assert_true(found_reset, "ResetEvent appears in the action types")
-	assert_eq(m.get_event_flag_bits().size(), 5, "five event-flag bits")
+	assert_eq(m.get_event_flag_bits().size(), 3, "three author-facing event-flag bits (matches dfx2med)")
 
 
 func test_add_event_with_trigger_and_action_persists_through_save_reload() -> void:

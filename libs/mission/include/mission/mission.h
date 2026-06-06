@@ -364,6 +364,10 @@ public:
 	std::vector<MissionEnumEntry> action_types() const;
 	std::vector<MissionEnumEntry> action_sub_types(int action_type) const;
 	std::vector<MissionEnumEntry> event_flag_bits() const;
+	// Bitmask of every editor-exposed event flag (OR of the event_flag_bits values). The editor rebuilds
+	// an event's flags from these checkboxes only, so set_event must preserve the complementary (unmodeled
+	// / engine-internal) bits rather than clobber them. See NovaMissionData::set_event.
+	int event_flag_mask() const;
 
 	const bms::File &bms_file() const;
 	bms::File &bms_file();

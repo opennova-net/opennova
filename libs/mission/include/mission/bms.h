@@ -142,14 +142,18 @@ inline WaypointFlags operator|(WaypointFlags a, WaypointFlags b) {
     return static_cast<WaypointFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
 }
 
-// Event flags
+// Event flags (event record flags dword, offset +0 on disk). The DFX2 mission editor exposes EXACTLY
+// these three as author checkboxes; its dialog commit sets/clears only bits 0-2 (via |= / &= ~) and
+// PRESERVES every other bit verbatim. Bits >= 0x08 are therefore engine-internal / reserved, not
+// author-editable in the original tool, and survive an edit untouched (see MissionDocument::event_flag_mask
+// + NovaMissionData::set_event). Confirmed against dfx2med.exe (md5 e690e69e94029c6b9cc44e934e96e3be).
+// [orig: Med_EventDialogPopulate @0x411690 -> CheckDlgButton(4203/4212/4213, flags bit0/1/2);
+//        Med_EventDialogCommit @0x4118d0 -> IsDlgButtonChecked sets bits 0/1/2 only, leaves the rest]
 enum class EventFlags : uint32_t {
     None = 0,
-    ResetAfter = 1,
-    PreMission = 2,
-    PostMission = 4,
-    Unknown4 = 16,
-    Unknown5 = 32,
+    ResetAfter = 1 << 0,   // 0x01  RESET_AFTER        (repeat; else fire-once)   dlg checkbox 4203
+    PreMission = 1 << 1,   // 0x02  PRE_MISSION_EVENT                             dlg checkbox 4212
+    PostMission = 1 << 2,  // 0x04  POST_MISSION_EVENT                            dlg checkbox 4213
 };
 
 inline EventFlags operator|(EventFlags a, EventFlags b) {

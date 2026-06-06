@@ -2603,6 +2603,19 @@ func _commit_loadout_editors() -> void:
 			and String(entry.get("value1", "")) == _loadout_value1.text \
 			and String(entry.get("value2", "")) == _loadout_value2.text:
 		return
+	# A weapon cannot be nameless: the .bms loadout chunk uses an empty name as its terminator, so a blank
+	# would drop the weapon (set_weapon_loadout rejects "" too — same is_empty() test, so the two layers
+	# agree). Reject the whole edit: revert ALL three fields to the stored entry (not just the name, so a
+	# simultaneous value edit can't be half-applied or left visually stale) and warn in the panel's own
+	# status. Remove deletes a weapon.
+	if _loadout_name.text.is_empty():
+		_loadout_syncing = true
+		_loadout_name.text = String(entry.get("name", ""))
+		_loadout_value1.text = String(entry.get("value1", ""))
+		_loadout_value2.text = String(entry.get("value2", ""))
+		_loadout_syncing = false
+		_loadout_status.text = "A weapon needs a name. Use Remove to delete it."
+		return
 	entry["name"] = _loadout_name.text
 	entry["value1"] = _loadout_value1.text
 	entry["value2"] = _loadout_value2.text

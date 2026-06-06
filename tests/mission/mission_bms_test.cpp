@@ -587,20 +587,32 @@ int main() {
 		TEST_EXPECT(!opennova::bms::parse(corrupt.data(), corrupt.size(), f, err));
 	}
 
-	// --- Regression (review): an empty-name loadout entry is skipped, not serialized as a leading
-	// NUL the loader reads as the chunk terminator (which would drop it AND every later entry). ---
+	// --- Regression (review #3): an empty-name loadout entry is REJECTED (set_weapon_loadout returns
+	// false and leaves the loadout untouched), not silently dropped. The format serializes an empty name
+	// as the chunk terminator, so a nameless weapon cannot be stored; silently skipping the row was itself
+	// data loss (blanking a mid-list weapon's name deleted that weapon with no warning). ---
 	{
 		opennova::mission::MissionDocument doc;
 		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
-		std::vector<opennova::mission::WeaponLoadoutEntry> entries;
-		entries.push_back({"WPN_A", "-1", "-1"});
-		entries.push_back({"", "-1", "-1"}); // empty name -> skipped, must not truncate the list
-		entries.push_back({"WPN_B", "-1", "-1"});
-		TEST_EXPECT(doc.set_weapon_loadout(entries));
+		// Establish a known-good two-weapon loadout first.
+		std::vector<opennova::mission::WeaponLoadoutEntry> good;
+		good.push_back({"WPN_A", "-1", "-1"});
+		good.push_back({"WPN_B", "-1", "-1"});
+		TEST_EXPECT(doc.set_weapon_loadout(good));
+		TEST_EXPECT(doc.weapon_loadout().size() == 2);
+		// An edit that blanks a mid-list name is rejected; the loadout is left exactly as it was.
+		std::vector<opennova::mission::WeaponLoadoutEntry> with_blank;
+		with_blank.push_back({"WPN_A", "-1", "-1"});
+		with_blank.push_back({"", "-1", "-1"}); // blanked name -> reject the whole edit, no silent drop
+		with_blank.push_back({"WPN_B", "-1", "-1"});
+		TEST_EXPECT(!doc.set_weapon_loadout(with_blank));
 		const std::vector<opennova::mission::WeaponLoadoutEntry> reread = doc.weapon_loadout();
 		TEST_EXPECT(reread.size() == 2);
 		TEST_EXPECT(reread[0].name == "WPN_A");
 		TEST_EXPECT(reread[1].name == "WPN_B");
+		// Deleting every weapon (an empty list) is still valid: the chunk goes to length 0.
+		TEST_EXPECT(doc.set_weapon_loadout({}));
+		TEST_EXPECT(doc.weapon_loadout().empty());
 	}
 
 	// --- From-scratch: create_default() builds a valid, empty mission that round-trips. This is
@@ -702,6 +714,37 @@ int main() {
 		opennova::bms::File reparsed2;
 		TEST_EXPECT(opennova::bms::parse(bytes2.data(), bytes2.size(), reparsed2, err));
 		TEST_EXPECT(reparsed2.waypoint_records[0].marker_count == 5);
+	}
+
+	// --- Regression (review #1): an AUTHORED waypoint edit that keeps a path saturated at 32 markers must
+	// resync a shipped over-count (39) down to 32, NOT preserve it. The pure round-trip above keeps 39 for
+	// byte-exactness, but once the marker list is rewritten (reorder / flag-only / set_waypoint_path) the 39
+	// no longer describes the data and the engine would walk 7 phantom waypoints. apply_waypoint_path_to_record
+	// passes preserve_over_count=false so the count tracks the authored list. ---
+	{
+		opennova::mission::MissionDocument doc;
+		doc.create_default();
+		opennova::bms::File &f = doc.bms_file();
+		TEST_EXPECT(!f.waypoint_records.empty());
+		// 32 real markers so a full 32-index path validates.
+		f.markers.assign(opennova::mission::kMaxWaypointPathMarkers, opennova::bms::Entity{});
+		// Saturate path 0 at 32 slots and stamp the shipped over-count.
+		f.waypoint_records[0].waypoint_numbers.assign(opennova::mission::kMaxWaypointPathMarkers, 0u);
+		f.waypoint_records[0].marker_count = 39;
+		// An authored edit re-applies a (still 32-marker) list, e.g. a flag-only change.
+		std::vector<int> indices;
+		for (int i = 0; i < static_cast<int>(opennova::mission::kMaxWaypointPathMarkers); ++i) {
+			indices.push_back(i);
+		}
+		TEST_EXPECT(doc.set_waypoint_path(0, indices, 1, nullptr));
+		// Resynced in memory immediately, and it stays resynced through save/reparse (no over-count revival).
+		TEST_EXPECT(doc.bms_file().waypoint_records[0].marker_count == opennova::mission::kMaxWaypointPathMarkers);
+		std::vector<uint8_t> wbytes;
+		TEST_EXPECT(doc.write_bms_bytes(wbytes));
+		opennova::bms::File wreparsed;
+		std::string werr;
+		TEST_EXPECT(opennova::bms::parse(wbytes.data(), wbytes.size(), wreparsed, werr));
+		TEST_EXPECT(wreparsed.waypoint_records[0].marker_count == opennova::mission::kMaxWaypointPathMarkers);
 	}
 
 	// --- Regression (review): set_event / add_event clamp reset_after & delay to 0..1023 (their packed

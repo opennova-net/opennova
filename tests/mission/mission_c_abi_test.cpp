@@ -189,9 +189,13 @@ int test_event_scripting_cpp(const std::vector<uint8_t> &original) {
 	}
 	TEST_EXPECT(found_firing_angle);
 
+	// Three author-facing event flags, matching the DFX2 editor exactly (bits 0x08+ are preserved, not
+	// surfaced). [orig: Med_EventDialogCommit @0x4118d0 sets bits 0/1/2 only]
 	const std::vector<MissionEnumEntry> flag_bits = doc.event_flag_bits();
-	TEST_EXPECT(flag_bits.size() == 5);
+	TEST_EXPECT(flag_bits.size() == 3);
 	TEST_EXPECT(flag_bits.front().value == static_cast<int>(bms::EventFlags::ResetAfter));
+	// event_flag_mask is the OR of those bits = 0x07; every other bit is preserve-only.
+	TEST_EXPECT(doc.event_flag_mask() == 0x7);
 	return 0;
 }
 

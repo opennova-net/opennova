@@ -153,17 +153,22 @@ bool from_int_kind(int kind, EntityKind &out) {
 	}
 }
 
-void resize_waypoint_padding(bms::WaypointRecord &record) {
+// preserve_over_count keeps a shipped on-disk marker_count that exceeds the 32-slot capacity verbatim
+// (CP19.bms ships one == 39) so an UNTOUCHED path round-trips byte-exact. parse_waypoint_record records
+// the over-count; sync_counts runs this on every load/save and passes true to preserve it. An AUTHORED
+// edit (apply_waypoint_path_to_record / repair_waypoint_marker_references) rewrites the marker list, so
+// the stored over-count no longer describes the data: those call sites pass false to resync marker_count
+// to the real slot count. (Without that, a reorder or flag-only edit on a saturated 32-marker path would
+// keep advertising 39 markers, and the engine would walk 7 phantom waypoints.)
+void resize_waypoint_padding(bms::WaypointRecord &record, bool preserve_over_count) {
 	const size_t slots = std::min<size_t>(record.waypoint_numbers.size(), kMaxWaypointPathMarkers);
 	if (record.waypoint_numbers.size() != slots) {
 		record.waypoint_numbers.resize(slots);
 	}
-	// parse_waypoint_record preserves an on-disk marker_count that exceeds the 32-slot capacity
-	// verbatim (CP19.bms ships one == 39) for byte-exact round-trip. sync_counts runs this on every
-	// load/save, so resyncing marker_count to the slot count unconditionally would silently rewrite
-	// that shipped value (39 -> 32). Keep the over-count while the slots stay saturated at the cap;
-	// any edit that drops below the cap makes the stored over-count meaningless, so then resync it.
-	if (!(record.marker_count > kMaxWaypointPathMarkers && slots == kMaxWaypointPathMarkers)) {
+	const bool keep_over_count = preserve_over_count
+			&& record.marker_count > kMaxWaypointPathMarkers
+			&& slots == kMaxWaypointPathMarkers;
+	if (!keep_over_count) {
 		record.marker_count = static_cast<uint32_t>(slots);
 	}
 	const size_t used = slots * sizeof(uint32_t);
@@ -209,7 +214,7 @@ void apply_waypoint_path_to_record(bms::WaypointRecord &record, const std::vecto
 	for (int marker_index : marker_indices) {
 		record.waypoint_numbers.push_back(static_cast<uint32_t>(marker_index));
 	}
-	resize_waypoint_padding(record);
+	resize_waypoint_padding(record, /*preserve_over_count=*/false); // authored edit: count tracks the new list
 }
 
 void repair_waypoint_marker_references(bms::File &file, size_t removed_index) {
@@ -231,7 +236,7 @@ void repair_waypoint_marker_references(bms::File &file, size_t removed_index) {
 		}
 		if (changed) {
 			record.waypoint_numbers = repaired;
-			resize_waypoint_padding(record);
+			resize_waypoint_padding(record, /*preserve_over_count=*/false); // marker delete rewrote the list
 		}
 	}
 }
@@ -871,6 +876,9 @@ constexpr int kMaxEventChainEntries = 20;
 constexpr int kMaxEventDelayTicks = 1023;
 
 void apply_event_record(bms::Event &event, const MissionEventRecord &record) {
+	// Full-fidelity: write the flags dword verbatim so low-level / C-ABI callers keep full control of every
+	// bit. The editor-only policy of preserving bits it does not surface (event_flag_mask) lives in the
+	// binding NovaMissionData::set_event, not here, mirroring trigger_from_dictionary vs trigger_from_record.
 	event.flags = static_cast<bms::EventFlags>(record.flags);
 	// reset_after / delay occupy only the upper 10 bits on disk (write_event packs them << 22, parse
 	// reads >> 22), so the value range is 0..1023. Clamp here at the library boundary the way the other
@@ -2003,6 +2011,17 @@ bool MissionDocument::set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &
 		impl_->last_error = "No mission loaded";
 		return false;
 	}
+	// The .bms loadout chunk serializes an empty name as a leading NUL, which the loader reads as the
+	// chunk terminator: a nameless entry cannot be stored and would silently drop that weapon (and every
+	// entry after it). Reject the whole edit and leave the loadout untouched rather than lose data.
+	// Removing a weapon goes through the dedicated remove path, never a blanked name; the editor also
+	// guards this up front in _commit_loadout_editors. An empty entry list (delete all) is still valid.
+	for (const WeaponLoadoutEntry &entry : entries) {
+		if (entry.name.empty()) {
+			impl_->last_error = "Weapon loadout entries require a name";
+			return false;
+		}
+	}
 	// Capture any bytes the existing chunk carries past the canonical records + terminator, so they
 	// survive a loadout edit instead of being truncated (byte-exact round-trip when the records are
 	// unchanged; a faithful tail otherwise). For the common chunk (records + terminator, no extras)
@@ -2032,12 +2051,7 @@ bool MissionDocument::set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &
 
 	std::vector<uint8_t> raw;
 	for (const WeaponLoadoutEntry &entry : entries) {
-		// An empty name serializes to a leading NUL, which the loader reads as the chunk terminator,
-		// dropping this entry AND every entry after it. The format cannot represent a nameless
-		// weapon, so skip it rather than corrupt the chunk (the editor seeds new rows with a name).
-		if (entry.name.empty()) {
-			continue;
-		}
+		// Names are guaranteed non-empty by the validation above.
 		append_loadout_field(raw, entry.name);
 		append_loadout_field(raw, entry.value1);
 		append_loadout_field(raw, entry.value2);
@@ -2642,15 +2656,24 @@ std::vector<MissionEnumEntry> MissionDocument::action_sub_types(int action_type)
 }
 
 std::vector<MissionEnumEntry> MissionDocument::event_flag_bits() const {
-	// EventFlags (bms.h): ResetAfter=1, PreMission=2, PostMission=4, plus two unnamed bits surfaced raw so
-	// a mission's unknown event flags survive a round-trip edit.
+	// The three author-facing event flags, matching the DFX2 editor's checkboxes EXACTLY. The earlier
+	// "Unknown (16)" / "Unknown (32)" entries were speculative: the original editor exposes no checkbox for
+	// bit 0x08 or above and preserves those bits verbatim, so we drop them here and let event_flag_mask /
+	// set_event preserve every non-author bit. [orig: Med_EventDialogPopulate @0x411690 (CheckDlgButton
+	// 4203/4212/4213), Med_EventDialogCommit @0x4118d0 (sets bits 0/1/2 only). dfx2med.exe]
 	return {
 			{static_cast<int>(bms::EventFlags::ResetAfter), "Reset after"},
 			{static_cast<int>(bms::EventFlags::PreMission), "Pre-mission"},
 			{static_cast<int>(bms::EventFlags::PostMission), "Post-mission"},
-			{static_cast<int>(bms::EventFlags::Unknown4), "Unknown (16)"},
-			{static_cast<int>(bms::EventFlags::Unknown5), "Unknown (32)"},
 	};
+}
+
+int MissionDocument::event_flag_mask() const {
+	int mask = 0;
+	for (const MissionEnumEntry &entry : event_flag_bits()) {
+		mask |= entry.value;
+	}
+	return mask;
 }
 
 const bms::File &MissionDocument::bms_file() const {
@@ -2690,7 +2713,7 @@ void MissionDocument::sync_counts() {
 	// parse_waypoint_record. Idempotent for already-loaded records, so byte-exact
 	// round-trips are preserved; it is the from-scratch (create_default) path that needs it.
 	for (bms::WaypointRecord &record : impl_->file.waypoint_records) {
-		resize_waypoint_padding(record);
+		resize_waypoint_padding(record, /*preserve_over_count=*/true); // pure round-trip: keep a shipped over-count
 	}
 }
 

@@ -1465,6 +1465,23 @@ func test_loadout_unchanged_edit_does_not_commit() -> void:
 	assert_eq(ctx.fake.set_loadout_calls.size(), 0, "an unchanged edit commits nothing")
 
 
+func test_loadout_blank_name_is_rejected_and_reverts_all_fields() -> void:
+	# Regression (review #3 / adversarial): blanking a weapon's name must reject the whole edit (an empty
+	# name is the .bms chunk terminator and would drop the weapon), revert ALL three fields to the stored
+	# entry (not just the name, so a simultaneous value edit can't be half-applied or left visually stale),
+	# and never reach the controller (no commit, no crash from a private call).
+	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1")])
+	ctx.inspector._loadout_list.item_selected.emit(0)
+	# Change a value AND blank the name, then submit.
+	ctx.inspector._loadout_value1.text = "5"
+	ctx.inspector._loadout_name.text = ""
+	ctx.inspector._loadout_name.text_submitted.emit("")
+	assert_eq(ctx.fake.set_loadout_calls.size(), 0, "a blank name commits nothing")
+	assert_eq(ctx.inspector._loadout_name.text, "WPN_KNIFE", "name field reverts to the stored value")
+	assert_eq(ctx.inspector._loadout_value1.text, "-1", "value1 field reverts too (no half-applied edit)")
+	assert_eq(ctx.inspector._loadout_value2.text, "-1", "value2 field stays consistent with the model")
+
+
 func test_loadout_delete_calls_controller() -> void:
 	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1"), _loadout_entry("WPN_M9", "-1", "-1")])
 	ctx.inspector._loadout_list.item_selected.emit(1)

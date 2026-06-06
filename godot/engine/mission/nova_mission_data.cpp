@@ -916,7 +916,13 @@ bool NovaMissionData::set_event(int index, int flags, int reset_after, int delay
 	if (!document.get_event(static_cast<size_t>(index), record)) {
 		return false;
 	}
-	record.flags = flags;
+	// Preserve flag bits the editor does not surface, mirroring trigger_from_dictionary's condition_flags
+	// handling. The inspector rebuilds `flags` from the event_flag_bits() checkboxes only, so without this
+	// merge any on-disk bit outside that exposed set (e.g. 0x08, or any bit >= 0x40) is silently dropped on
+	// every event edit. `record.flags` is seeded from the existing on-disk event, so its complementary bits
+	// are exactly the ones to keep.
+	const int exposed = document.event_flag_mask();
+	record.flags = (record.flags & ~exposed) | (flags & exposed);
 	record.reset_after = reset_after;
 	record.delay = delay;
 	if (!document.set_event(static_cast<size_t>(index), record)) {
