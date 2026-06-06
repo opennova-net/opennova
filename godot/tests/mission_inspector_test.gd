@@ -2009,4 +2009,3 @@ func test_split_set_detail_host_null_evacuates_without_freeing() -> void:
 	var parent_before: Node = ctx.inspector._detail_root.get_parent()
 	ctx.inspector.set_detail_host(ctx.dock)
 	assert_eq(ctx.inspector._detail_root.get_parent(), parent_before, "same-host re-mount does not thrash the subtree")
-

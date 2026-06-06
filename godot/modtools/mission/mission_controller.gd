@@ -1268,9 +1268,10 @@ func _move_selected_to_world(global_hit: Vector3) -> void:
 	if container == null:
 		return
 	var local := container.global_transform.affine_inverse() * global_hit
-	# Bake the Ground userpoint: the dropped model's origin sits at the terrain hit minus its ground
-	# anchor, so its ground point lands under the cursor (render is direct). [orig: sub_401A90, dfx2med.exe]
-	_apply_selected_xform(Transform3D(_selected_xform.basis, local - _selected_ground_offset))
+	# Bake the Ground userpoint: the dropped model's origin sits at the terrain hit minus its rotated
+	# model-local ground anchor, so its ground point lands under the cursor (render is direct).
+	# [orig: sub_401A90, dfx2med.exe]
+	_apply_selected_xform(Transform3D(_selected_xform.basis, local - (_selected_xform.basis * _selected_ground_offset)))
 
 
 # Write a new container-local transform onto the selection: rewrite every static

@@ -2500,18 +2500,23 @@ bool MissionDocument::remove_event(size_t index) {
 		impl_->last_error = "Mission event index out of range";
 		return false;
 	}
+	const bms::Event &event = impl_->file.events[index];
+	if (!valid_range(event.trigger_index, event.trigger_count, impl_->file.triggers.size())) {
+		impl_->last_error = "Mission event trigger range is invalid";
+		return false;
+	}
+	if (!valid_range(event.action_index, event.action_count, impl_->file.actions.size())) {
+		impl_->last_error = "Mission event action range is invalid";
+		return false;
+	}
 	// Drain the event's triggers and actions through the single-element removers, which fix up every
 	// other event's trigger_index / action_index exactly as a normal trigger/action delete would. The
-	// break is an infinite-loop guard: a remover only fails on an already-malformed (invalid-range) event.
+	// ranges above are validated before the first mutation so malformed documents fail transactionally.
 	while (impl_->file.events[index].trigger_count > 0) {
-		if (!remove_event_trigger(index, 0)) {
-			break;
-		}
+		remove_event_trigger(index, 0);
 	}
 	while (impl_->file.events[index].action_count > 0) {
-		if (!remove_event_action(index, 0)) {
-			break;
-		}
+		remove_event_action(index, 0);
 	}
 	// Repair ResetEvent action references (param1 = event index, the one proven cross-reference): events
 	// after the hole shift down by one; a reference to the removed event becomes dangling (-1), which

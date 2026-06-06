@@ -1101,4 +1101,3 @@ func test_remove_event_drops_it_and_repairs_reset_references() -> void:
 	# Out-of-range guards.
 	assert_eq(m.get_event(9999), {}, "out-of-range event get yields {}")
 	assert_false(m.remove_event(9999), "out-of-range event remove rejected")
-

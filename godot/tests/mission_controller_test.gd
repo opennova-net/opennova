@@ -488,6 +488,22 @@ func test_placement_bakes_the_ground_anchor_into_the_stored_position() -> void:
 	assert_lt(((origin + anchor) - hit).length(), 0.02, "the rendered model's ground point lands at the drop point")
 
 
+func test_drag_bakes_rotated_ground_anchor_under_cursor() -> void:
+	var controller := _loaded_with_item_db()
+	var item_id := 102001
+	assert_true(controller.place_entity_at_world(item_id, Vector3(50.0, 10.0, -50.0)), "placement succeeds")
+	controller.set_selected_rotation(Vector3(0.0, 45.0, 0.0))
+	var graphic: String = controller._placer.graphic_for(item_id)
+	var anchor: Vector3 = controller._placer.ground_anchor_godot(graphic)
+	var hit := Vector3(80.0, 12.0, -40.0)
+
+	controller._move_selected_to_world(hit)
+
+	var ground_point: Vector3 = controller._selected_xform.origin + controller._selected_xform.basis * anchor
+	assert_lt((ground_point - hit).length(), 0.02,
+		"dragging a rotated object keeps the rotated Ground userpoint under the cursor")
+
+
 func test_delete_selected_marker_in_objects_mode() -> void:
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()

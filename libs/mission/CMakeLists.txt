@@ -1,6 +1,7 @@
 add_library(opennova_mission STATIC
     src/bms.cpp
     src/mission.cpp
+    src/mission_runtime.cpp
 )
 
 target_include_directories(opennova_mission

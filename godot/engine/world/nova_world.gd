@@ -14,6 +14,7 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 
 signal world_loaded()
 signal load_failed(reason: String)
+signal mission_commands(commands: Array)
 
 # A mission (.bms) to boot into. When set, the mission's header selects the
 # terrain + environment (terrain_file/env_file below are ignored) and its placed
@@ -35,6 +36,7 @@ var _terrain_data: NovaTerrainData
 var _resource_root: NovaResourceRoot
 var _loaded: bool = false
 var _loaded_mission: NovaMissionData
+var _mission_runtime: NovaMissionRuntime
 var _mission_stats: Dictionary = {}
 
 
@@ -120,6 +122,7 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 
 	_loaded_mission = mission
 	_place_mission_objects(mission)
+	_start_mission_runtime(mission)
 	_loaded = true
 	world_loaded.emit()
 	return OK
@@ -160,6 +163,10 @@ func get_loaded_mission() -> NovaMissionData:
 	return _loaded_mission
 
 
+func get_mission_runtime() -> NovaMissionRuntime:
+	return _mission_runtime
+
+
 func get_mission_stats() -> Dictionary:
 	return _mission_stats
 
@@ -175,6 +182,7 @@ func unload() -> void:
 		container.queue_free()
 	_loaded = false
 	_loaded_mission = null
+	_mission_runtime = null
 	_mission_stats = {}
 
 
@@ -240,3 +248,14 @@ func is_loaded() -> bool:
 func tick(camera_pos: Vector3) -> void:
 	if _loaded and _dispatcher != null:
 		_dispatcher.dispatch(camera_pos)
+	if _loaded and _mission_runtime != null:
+		var commands := _mission_runtime.tick()
+		if not commands.is_empty():
+			mission_commands.emit(commands)
+
+
+func _start_mission_runtime(mission: NovaMissionData) -> void:
+	_mission_runtime = NovaMissionRuntime.new()
+	if not _mission_runtime.load_from_mission(mission):
+		_mission_runtime = null
+		push_warning("NovaWorld: failed to start mission runtime")

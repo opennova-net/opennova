@@ -28,6 +28,36 @@ opennova::mission::EntityKind to_native_kind(int kind) {
 	}
 }
 
+Dictionary param_slot_to_dictionary(const opennova::mission::MissionParamSlot &slot) {
+	Dictionary out;
+	out["label"] = String(slot.label.c_str());
+	out["kind"] = static_cast<int>(slot.kind);
+	out["tip"] = String(slot.tip.c_str());
+	out["used"] = slot.used;
+	Array enum_values;
+	for (const opennova::mission::MissionParamEnumEntry &entry : slot.enum_values) {
+		Dictionary row;
+		row["value"] = entry.value;
+		row["label"] = String(entry.label.c_str());
+		enum_values.push_back(row);
+	}
+	out["enum"] = enum_values;
+	return out;
+}
+
+Dictionary param_spec_to_dictionary(const opennova::mission::MissionParamSpec &spec) {
+	Dictionary out;
+	out["desc"] = String(spec.description.c_str());
+	out["known"] = spec.known;
+	out["variable"] = spec.variable;
+	Array params;
+	for (const opennova::mission::MissionParamSlot &slot : spec.params) {
+		params.push_back(param_slot_to_dictionary(slot));
+	}
+	out["params"] = params;
+	return out;
+}
+
 } // namespace
 
 void NovaMissionData::_bind_methods() {
@@ -101,6 +131,8 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_action_types"), &NovaMissionData::get_action_types);
 	ClassDB::bind_method(D_METHOD("get_action_sub_types", "action_type"), &NovaMissionData::get_action_sub_types);
 	ClassDB::bind_method(D_METHOD("get_event_flag_bits"), &NovaMissionData::get_event_flag_bits);
+	ClassDB::bind_method(D_METHOD("get_trigger_param_schema", "main_type", "sub_type"), &NovaMissionData::get_trigger_param_schema);
+	ClassDB::bind_method(D_METHOD("get_action_param_schema", "action_type"), &NovaMissionData::get_action_param_schema);
 
 	ClassDB::bind_method(D_METHOD("save_file"), &NovaMissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &NovaMissionData::save_as);
@@ -1099,6 +1131,14 @@ Array NovaMissionData::get_action_sub_types(int action_type) const {
 
 Array NovaMissionData::get_event_flag_bits() const {
 	return enum_entries_to_array(document.event_flag_bits());
+}
+
+Dictionary NovaMissionData::get_trigger_param_schema(int main_type, int sub_type) const {
+	return param_spec_to_dictionary(opennova::mission::trigger_param_schema(main_type, sub_type));
+}
+
+Dictionary NovaMissionData::get_action_param_schema(int action_type) const {
+	return param_spec_to_dictionary(opennova::mission::action_param_schema(action_type));
 }
 
 Error NovaMissionData::save_file() {

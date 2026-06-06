@@ -14,6 +14,7 @@
 
 #include <mission/bms.h>
 #include <mission/mission.h>
+#include <mission/mission_runtime.h>
 #include <oned_edit/edit_history.h>
 
 namespace godot {
@@ -293,6 +294,10 @@ public:
 	Array get_action_types() const;
 	Array get_action_sub_types(int action_type) const;
 	Array get_event_flag_bits() const;
+	Dictionary get_trigger_param_schema(int main_type, int sub_type) const;
+	Dictionary get_action_param_schema(int action_type) const;
+
+	const opennova::mission::MissionDocument &native_document() const { return document; }
 
 	// Write the document back to disk. save_file() targets the path it was opened
 	// from; save_as() targets a new path and adopts it. Both clear the dirty flag and
