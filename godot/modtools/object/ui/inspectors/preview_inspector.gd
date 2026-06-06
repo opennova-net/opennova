@@ -4,6 +4,8 @@ extends WorkflowInspector
 ## and per-control-register sliders. The export mask itself is coordinator
 ## state (used by begin_export); this inspector only builds its checkboxes.
 
+const CollisionHull = preload("res://engine/object/collision_hull.gd")
+
 
 func build_main(host: Control) -> void:
 	var box := _make_inspector_box(host)
@@ -36,6 +38,14 @@ func build_main(host: Control) -> void:
 	wire.button_pressed = _preview != null and _preview.is_wireframe()
 	playback.add_child(wire)
 
+	var collision := CheckBox.new()
+	collision.name = "PreviewCollisionCheck"
+	collision.text = "Collision"
+	collision.button_pressed = _preview != null and _preview.is_collision_visible()
+	# Only meaningful when the model carries collision volumes.
+	collision.disabled = _preview == null or not _preview.has_collision()
+	playback.add_child(collision)
+
 	play.toggled.connect(func(pressed: bool) -> void:
 		if _preview != null:
 			_preview.set_playing(pressed)
@@ -49,7 +59,12 @@ func build_main(host: Control) -> void:
 		if _preview != null:
 			_preview.set_wireframe(pressed)
 	)
+	collision.toggled.connect(func(pressed: bool) -> void:
+		if _preview != null:
+			_preview.set_collision_visible(pressed)
+	)
 
+	_build_collision_legend(box)
 	_build_export_mask_controls(box)
 
 	var ctrl_regs: Array = object_editor.object_data.get_control_registers() if object_editor and object_editor.object_data and object_editor.object_data.has_method("get_control_registers") else []
@@ -79,6 +94,38 @@ func build_main(host: Control) -> void:
 				if _preview != null:
 					_preview.set_ctrl_value(name, int(value))
 			)
+
+
+# Color key for the collision overlay: one swatch + label per distinct collidable
+# type present in the loaded model, matching CollisionHull.color_for_type. Helps the
+# artist read which colored hull is which type when validating.
+func _build_collision_legend(box: VBoxContainer) -> void:
+	if object_editor == null or object_editor.object_data == null:
+		return
+	if not object_editor.object_data.has_method("get_collision_volumes"):
+		return
+	var volumes: Array = object_editor.object_data.get_collision_volumes()
+	if volumes.is_empty():
+		return
+	var seen: Dictionary = {}
+	for v in volumes:
+		seen[int((v as Dictionary).get("type", 0))] = true
+	var types := seen.keys()
+	types.sort()
+	var label := Label.new()
+	label.text = "Collision types"
+	box.add_child(label)
+	for t in types:
+		var row := HBoxContainer.new()
+		box.add_child(row)
+		var swatch := ColorRect.new()
+		swatch.color = CollisionHull.color_for_type(t)
+		swatch.custom_minimum_size = Vector2(16, 16)
+		row.add_child(swatch)
+		var name := CollisionHull.name_for_type(t)
+		var caption := Label.new()
+		caption.text = "Type %d (%s?)" % [t, name] if name != "" else "Type %d" % t
+		row.add_child(caption)
 
 
 func _build_export_mask_controls(box: VBoxContainer) -> void:

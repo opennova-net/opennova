@@ -1,14 +1,13 @@
 class_name MissionEditorWorkspace
 extends EditorWorkspace
 
-# Mission workspace: open a .bms mission and view its world. The mission's header
-# selects the terrain + environment, which load into the shared terrain viewport
-# (read-only here), and its placed objects are instanced under the terrain world
-# root by the host-agnostic MissionObjectPlacer. Mission authoring (place / move /
-# save entities) is deferred, so this is a viewer: Open is the only document
-# action and the document never goes dirty.
+# Mission workspace: create or open a .bms mission and author its world. The mission's header
+# selects the terrain + environment, which load into the shared terrain viewport, and its placed
+# objects are instanced under the terrain world root by the host-agnostic MissionObjectPlacer.
+# New Mission builds an empty mission on the currently-loaded terrain; from there objects, zones,
+# waypoints, and scripting are editable (with undo/redo + Save / Save As).
 #
-# The load + resolve + place work lives in MissionController and the placer; this
+# The create + load + resolve + place + edit work lives in MissionController and the placer; this
 # adapter is the EditorWorkspace shell binding (capability hooks + inspector).
 
 const TerrainViewportScript = preload("res://modtools/terrain/terrain_viewport.gd")
@@ -18,6 +17,12 @@ const MissionInspectorScript = preload("res://modtools/mission/mission_inspector
 var terrain_editor: Node
 var _controller  # MissionController
 var _mount: ViewportMount
+# The live inspector + the shell's right dock (%AssetDock). The inspector splits its UI across the
+# left pane (browser) and the dock (per-selection editor + Mission form). The shell forwards the
+# dock via set_asset_dock BEFORE build_inspector on activation, so we cache it and hand it over when
+# the inspector is built (or push it into an already-built inspector on a re-sync / teardown).
+var _inspector  # MissionInspector (preloaded, no class_name)
+var _detail_host: Control
 
 
 func _init(value: Node = null) -> void:
@@ -26,6 +31,9 @@ func _init(value: Node = null) -> void:
 	# The controller fires `changed` on load / clear / select / dirty / save; refresh
 	# the shell title + action-button state (Save enables, `*` appears) on each.
 	_controller.changed.connect(_sync_shell_title)
+	# Transient action feedback (undo / delete / place / rejected edits) flows through
+	# status_reported; relay it to the shell status bar. Open / save keep their own poll.
+	_controller.status_reported.connect(_on_controller_status)
 
 
 func _ensure_mount() -> ViewportMount:
@@ -155,7 +163,33 @@ func get_viewport_camera() -> Camera3D:
 	return null
 
 
-# --- Open (the only document action this phase) -------------------------------
+# --- New (create a mission from scratch) --------------------------------------
+# The shell builds the New button on workspace switch when has_new_action() is true (base returns
+# can_new()); visibility must not depend on a loaded mission, so can_new() needs only a bound
+# terrain editor. The controller checks for a loaded terrain and reports if there is none.
+
+func can_new() -> bool:
+	return _controller != null and terrain_editor != null
+
+
+func get_new_action_label() -> String:
+	return "New Mission"
+
+
+func new_current() -> Error:
+	if _controller == null:
+		return ERR_UNAVAILABLE
+	var err := int(_controller.new_mission())
+	var status: String = _controller.get_last_status()
+	if not status.is_empty():
+		if editor_shell != null and editor_shell.has_method("show_status_message"):
+			editor_shell.show_status_message(status, 4.0 if err == OK else 6.0)
+		elif err != OK:
+			push_warning("New mission: " + status)
+	return err as Error
+
+
+# --- Open ---------------------------------------------------------------------
 
 func can_open() -> bool:
 	return terrain_editor != null
@@ -187,11 +221,14 @@ func open_file(path: String) -> Error:
 	var err := int(_controller.open_mission(path))
 	# Surface the controller's detailed outcome (e.g. "missing dvxi5.trn", or the
 	# placement summary). On failure the shell also shows a generic error code; the
-	# success message is the one that lands for the user.
-	if editor_shell != null and editor_shell.has_method("show_status_message"):
-		var status: String = _controller.get_last_status()
-		if not status.is_empty():
+	# success message is the one that lands for the user. Without a shell (headless),
+	# a failure still goes to the log rather than vanishing.
+	var status: String = _controller.get_last_status()
+	if not status.is_empty():
+		if editor_shell != null and editor_shell.has_method("show_status_message"):
 			editor_shell.show_status_message(status, 5.0 if err == OK else 7.0)
+		elif err != OK:
+			push_warning("Mission open: " + status)
 	return err as Error
 
 
@@ -260,11 +297,14 @@ func get_save_dialog_dir() -> String:
 
 
 func _report_save_status(err: int) -> void:
-	if editor_shell == null or not editor_shell.has_method("show_status_message"):
-		return
 	var status: String = _controller.get_last_status() if _controller != null else ""
-	if not status.is_empty():
+	if status.is_empty():
+		return
+	if editor_shell != null and editor_shell.has_method("show_status_message"):
 		editor_shell.show_status_message(status, 4.0 if err == OK else 6.0)
+	elif err != OK:
+		# No shell to show in (headless), but a failed save must not be silent.
+		push_warning("Mission save: " + status)
 
 
 func _sync_shell_title() -> void:
@@ -272,9 +312,67 @@ func _sync_shell_title() -> void:
 		editor_shell.sync_from_editor_state()
 
 
+# Surface a controller action's transient status in the shell status bar. Errors linger
+# a little longer. No-op without a shell (headless tests read get_last_status instead).
+func _on_controller_status(message: String, is_error: bool) -> void:
+	if message.is_empty() or editor_shell == null or not editor_shell.has_method("show_status_message"):
+		return
+	editor_shell.show_status_message(message, 6.0 if is_error else 3.5)
+
+
+# --- Undo / redo --------------------------------------------------------------
+# The base EditorWorkspace exposes these hooks; the controller drives the document's in-memory
+# undo history. The live trigger is the viewport Ctrl+Z / Ctrl+Y (handled in MissionController);
+# implementing the hooks makes undo/redo reachable for tests and a future shell toolbar with no
+# shell change. Mirrors strings_workspace.gd.
+
+func can_undo() -> bool:
+	return _controller != null and _controller.can_undo()
+
+
+func can_redo() -> bool:
+	return _controller != null and _controller.can_redo()
+
+
+func undo() -> void:
+	if _controller != null:
+		_controller.undo()
+
+
+func redo() -> void:
+	if _controller != null:
+		_controller.redo()
+
+
 # --- Inspector ----------------------------------------------------------------
 
 func build_inspector(host: Control) -> void:
-	var panel := MissionInspectorScript.new()
-	host.add_child(panel)
-	panel.setup(_controller)
+	_inspector = MissionInspectorScript.new()
+	host.add_child(_inspector)
+	# The dock host was forwarded just before this (set_asset_dock at shell line 585, build_inspector
+	# at 592), so it is already cached: the fresh inspector builds its editor + Mission form straight
+	# into the dock with no reparent.
+	_inspector.setup(_controller, _detail_host)
+
+
+# --- Asset dock (the right pane) ----------------------------------------------
+# Opt into %AssetDock and host the per-selection editor + the Mission form there, keeping the left
+# pane to just the mode tabs + the current mode's list/palette. The inspector owns the dock subtree
+# and reparents it back under its own root on teardown (set_asset_dock(null)) before the shell frees
+# the dock's children, so the editor widgets are never torn down.
+
+func uses_asset_dock() -> bool:
+	return true
+
+
+func set_asset_dock(dock: Control) -> void:
+	_detail_host = dock
+	# is_instance_valid guards the gap between switch-away (old inspector freed) and switch-back
+	# (set_asset_dock fires before build_inspector rebuilds it): skip the stale ref, just cache.
+	if _inspector != null and is_instance_valid(_inspector):
+		_inspector.set_detail_host(dock)
+
+
+func sync_asset_dock() -> void:
+	if _inspector != null and is_instance_valid(_inspector) and _detail_host != null:
+		_inspector.set_detail_host(_detail_host)

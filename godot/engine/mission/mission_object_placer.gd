@@ -30,6 +30,7 @@ extends RefCounted
 # editor re-import (same convention as veg_assets.gd).
 
 const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
+const CollisionHull := preload("res://engine/object/collision_hull.gd")
 
 const CONTAINER_NAME := "MissionObjects"
 const RENDER_LOD := 0
@@ -53,6 +54,12 @@ var pickable_records: Array = []
 var _object_data_cache: Dictionary = {}
 # graphic -> Array[{ mesh, material, offset, submesh }] harvested from a template.
 var _static_batch_cache: Dictionary = {}
+# graphic -> Vector3 ground anchor (model-space point that sits at the entity
+# position). Computed once per graphic; see _ground_anchor_for.
+var _anchor_cache: Dictionary = {}
+# graphic -> Array[ConvexPolygonShape3D] collision hulls in model-local space (the
+# editor's pickable bodies; see collision_shapes_for). Computed once per graphic.
+var _collision_shapes_cache: Dictionary = {}
 
 
 func _init(p_resource_root: NovaResourceRoot = null, p_item_db: NovaItemDatabase = null) -> void:
@@ -61,27 +68,41 @@ func _init(p_resource_root: NovaResourceRoot = null, p_item_db: NovaItemDatabase
 
 
 # --- Coordinate conversion (BMS is Z-up; Godot is Y-up) -----------------------
-# Ported from the reference mission importer and kept as pure static helpers so
-# they are unit-testable without any assets. Position is rotated -90 deg about X;
-# rotation negates pitch/yaw and adds a half-turn of yaw, matching the authored
-# heading convention.
+# Pure static helpers (unit-testable without assets). Position is a -90 deg rotation
+# about X; orientation is a structural port of the engine's matrix builder conjugated
+# into Godot's basis (see bms_to_godot_basis).
 
 static func bms_to_godot_position(p: Vector3) -> Vector3:
 	# A -90 deg rotation about X maps (x, y, z) -> (x, z, -y).
 	return Vector3(p.x, p.z, -p.y)
 
 
-static func bms_to_godot_rotation(rot_deg: Vector3) -> Vector3:
-	# rot_deg = (pitch, yaw, roll) in degrees -> Godot euler (YXZ order).
-	return Vector3(
-		deg_to_rad(-rot_deg.x),
-		deg_to_rad(-rot_deg.y) + PI,
-		deg_to_rad(rot_deg.z))
+# Godot orientation basis for an entity authored as (pitch, yaw, roll) in degrees.
+#
+# [orig: Entity_SpawnFromBMSRecord @0x40eb66 + Math_BuildFixedPointMatrixFromEulerAngles @0x613f40,
+#  called via Entity_UpdateOrientationMatrix @0x43b440 (Jointops.exe)] The engine builds the world
+#  matrix as Rz(90-yaw) * Ry(pitch) * Rx(roll) in its Z-up, right-handed world: yaw drives the Z/up
+#  axis (euler[3] = 90 - yaw), pitch the Y axis (euler[4], positive), roll the X axis (euler[5],
+#  positive). Conjugating by the position basis M:(x,y,z)->(x,z,-y) -- which sends engine +Z->godot
+#  +Y, +Y->godot -Z, +X->godot +X -- gives the faithful Godot world rotation
+#      R_godot = RotY(90 - yaw) * RotZ(-pitch) * RotX(roll).
+#  The .3di model imports Y-up / +Z-forward, so a constant model-forward correction C = RotY(90)
+#  turns the model's +Z nose onto the engine's +X canonical heading. For yaw-only this collapses to
+#  RotY(180 - yaw) -- identical to the long-standing (visually-correct) heading -- while correcting
+#  pitch, which the old euler form (Rx(-pitch) in a YXZ basis) tipped the wrong way (nose up instead
+#  of down). Roll was already equivalent. See godot/tests/mission_object_placer_test.gd.
+static func bms_to_godot_basis(rot_deg: Vector3) -> Basis:
+	var pitch := deg_to_rad(rot_deg.x)
+	var yaw := deg_to_rad(rot_deg.y)
+	var roll := deg_to_rad(rot_deg.z)
+	return Basis(Vector3.UP, deg_to_rad(90.0) - yaw) \
+		* Basis(Vector3.BACK, -pitch) \
+		* Basis(Vector3.RIGHT, roll) \
+		* Basis(Vector3.UP, deg_to_rad(90.0))
 
 
 static func entity_transform(position: Vector3, rotation_deg: Vector3) -> Transform3D:
-	var euler := bms_to_godot_rotation(rotation_deg)
-	return Transform3D(Basis.from_euler(euler), bms_to_godot_position(position))
+	return Transform3D(bms_to_godot_basis(rotation_deg), bms_to_godot_position(position))
 
 
 # Inverse of bms_to_godot_position: a Godot-space point back to mission (BMS) space.
@@ -178,6 +199,12 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				_record_static_batch(graphic, static_refs_by_graphic.get(graphic, []), mm, mmi, offset, batch["mesh"])
 		stats.batched += xforms.size()
 		stats.placed += xforms.size()
+		# One pick collider per entity (not per submesh): collision is whole-model.
+		if edit_mode:
+			var prefs: Array = static_refs_by_graphic.get(graphic, [])
+			for i in range(xforms.size()):
+				var pref: Dictionary = prefs[i] if i < prefs.size() else {}
+				add_pick_collider(container, int(pref.get("kind", -1)), int(pref.get("index", -1)), graphic, xforms[i])
 
 	# Animated: an individual NovaObjectModel per entity.
 	for a in animated:
@@ -187,7 +214,10 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			continue
 		var model: Node3D = NovaObjectModelScript.new()
 		model.name = "Anim_%s_%d" % [a["graphic"], stats.animated]
-		model.transform = a["xform"]
+		# Render the model origin at the entity's stored position directly. The engine bakes the
+		# Ground userpoint into the stored position once, at author-time (place / terrain-drag), not
+		# at render -- so a loaded .bms renders at its stored coords verbatim. [orig: sub_401A90, dfx2med.exe]
+		model.transform = a["xform"] as Transform3D
 		container.add_child(model)
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
@@ -202,8 +232,10 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				"index": ref["index"],
 				"graphic": a["graphic"],
 				"node": model,
+				"offset": Transform3D.IDENTITY,
 				"animated": true,
 			})
+			add_pick_collider(container, int(ref["kind"]), int(ref["index"]), a["graphic"], a["xform"])
 		stats.animated += 1
 		stats.placed += 1
 
@@ -257,8 +289,10 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			"index": index,
 			"graphic": graphic,
 			"node": model,
+			"offset": Transform3D.IDENTITY,
 			"animated": true,
 		})
+		add_pick_collider(container, kind, index, graphic, xform)
 		delta.placed = 1
 		delta.animated = 1
 		return delta
@@ -283,6 +317,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		container.add_child(mmi)
 		delta.batches += 1
 		_record_static_batch(graphic, refs, mm, mmi, offset, batch["mesh"])
+	add_pick_collider(container, kind, index, graphic, xform)
 	delta.placed = 1
 	delta.batched = 1
 	return delta
@@ -360,6 +395,105 @@ func _load_object_data(graphic: String) -> NovaObjectData:
 	return data
 
 
+# The Godot model-local ground reference point for `graphic`: the "ground" userpoint if present,
+# else part-0 center (NovaObjectData.get_ground_anchor). RENDER_LOD is the LOD the placer draws.
+# Cached per graphic; Vector3.ZERO when the model is unresolved or has no anchor. No longer applied
+# at render -- the editor subtracts it (in BMS axes) from a terrain-drop position so the model's
+# ground point lands at the cursor, mirroring the engine's author-time bake. [orig: sub_401A90]
+func _ground_anchor_for(graphic: String, data: NovaObjectData) -> Vector3:
+	if _anchor_cache.has(graphic):
+		return _anchor_cache[graphic]
+	var anchor := Vector3.ZERO
+	if data != null and data.has_method("get_ground_anchor"):
+		anchor = data.get_ground_anchor(RENDER_LOD)
+	_anchor_cache[graphic] = anchor
+	return anchor
+
+
+# Public: the Godot model-local ground anchor for `graphic` (resolves + caches the model). The editor
+# subtracts this from a terrain-drop position (converted to BMS axes) for the author-time ground bake.
+func ground_anchor_godot(graphic: String) -> Vector3:
+	return _ground_anchor_for(graphic, _load_object_data(graphic))
+
+
+# Public: the model graphic for an items.def id (or "" if unresolved), so the editor can resolve a
+# fresh placement's anchor without reaching into the private item-db cache.
+func graphic_for(item_id: int) -> String:
+	_ensure_item_db()
+	return _graphic_for(item_id)
+
+
+# Convex collision hulls for `graphic`, in model-local space, for the editor's
+# pickable physics bodies. Built once per graphic (cached) from the model's parsed
+# collision volumes via CollisionHull.shapes_for -- the SAME path the Object Editor
+# overlay validates, so what the user saw is exactly what picking tests against.
+# Models with no collision volumes fall back to a single box hull from the visual
+# model AABB so every placed entity stays pickable (never worse than the old AABB pick).
+func collision_shapes_for(graphic: String) -> Array:
+	if _collision_shapes_cache.has(graphic):
+		return _collision_shapes_cache[graphic]
+	var shapes: Array = []
+	var data := _load_object_data(graphic)
+	if data != null and data.has_method("get_collision_volumes"):
+		shapes = CollisionHull.shapes_for(data.get_collision_volumes())
+	if shapes.is_empty():
+		var aabb := _visual_model_aabb(data)
+		if aabb.size != Vector3.ZERO:
+			var pts := PackedVector3Array()
+			for x in [aabb.position.x, aabb.end.x]:
+				for y in [aabb.position.y, aabb.end.y]:
+					for z in [aabb.position.z, aabb.end.z]:
+						pts.push_back(Vector3(x, y, z))
+			var box := ConvexPolygonShape3D.new()
+			box.points = pts
+			shapes = [box]
+	_collision_shapes_cache[graphic] = shapes
+	return shapes
+
+
+# Add one StaticBody3D pick collider for entity (kind,index) under the container, with
+# this graphic's convex collision hulls and an "entity_ref" meta the editor reads back
+# from intersect_ray. Positioned at the entity transform (render is direct now), so the body
+# coincides with the drawn model. Editor-only (edit_mode); freed automatically when the
+# container is cleared/re-baked -- no manual lifecycle.
+func add_pick_collider(container: Node3D, kind: int, index: int, graphic: String, entity_xform: Transform3D) -> StaticBody3D:
+	var shapes: Array = collision_shapes_for(graphic)
+	if shapes.is_empty():
+		return null
+	var body := StaticBody3D.new()
+	body.name = "Pick_%d_%d" % [kind, index]
+	body.set_meta("entity_ref", { "kind": kind, "index": index })
+	body.transform = entity_xform
+	for shape in shapes:
+		var cs := CollisionShape3D.new()
+		cs.shape = shape
+		body.add_child(cs)
+	container.add_child(body)
+	return body
+
+
+# Merged AABB of the render submeshes (model-local), used only as the collision
+# fallback for models that carry no collision volumes.
+func _visual_model_aabb(data: NovaObjectData) -> AABB:
+	if data == null or not data.has_method("build_lod_submeshes"):
+		return AABB()
+	var aabb := AABB()
+	var first := true
+	for s in data.build_lod_submeshes(RENDER_LOD):
+		var entry: Dictionary = s
+		var mesh: ArrayMesh = entry.get("mesh")
+		if mesh == null:
+			continue
+		var m: AABB = mesh.get_aabb()
+		m.position += entry.get("abs", Vector3.ZERO) as Vector3
+		if first:
+			aabb = m
+			first = false
+		else:
+			aabb = aabb.merge(m)
+	return aabb
+
+
 # Build a template NovaObjectModel, let it assemble the rest-pose meshes and
 # fidelity materials, then harvest one batch per submesh: the mesh, its shader
 # material, and the part's rest transform baked as a per-batch offset. The model is
@@ -383,6 +517,10 @@ func _get_static_batches(graphic: String, env_node: Node, tree_parent: Node) -> 
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
 		model.rebuild()
+		# Each batch's "offset" is the submesh's model-local rest transform (part * mesh) relative to
+		# the entity origin -- NO ground-anchor offset. The engine bakes the Ground userpoint into the
+		# stored position at author-time, not at render, so a loaded .bms draws at its stored coords
+		# verbatim. [orig: sub_401A90, dfx2med.exe]
 		var submesh := 0
 		for robj_node in model.get_render_part_nodes().values():
 			var part_node := robj_node as Node3D

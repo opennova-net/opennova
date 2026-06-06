@@ -66,6 +66,14 @@ int32_t read_i32_at(const uint8_t *bytes, size_t offset) {
 	                            (static_cast<uint32_t>(bytes[offset + 3]) << 24));
 }
 
+void write_i32_at(uint8_t *bytes, size_t offset, int32_t value) {
+	const uint32_t v = static_cast<uint32_t>(value);
+	bytes[offset] = static_cast<uint8_t>(v & 0xFF);
+	bytes[offset + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+	bytes[offset + 2] = static_cast<uint8_t>((v >> 16) & 0xFF);
+	bytes[offset + 3] = static_cast<uint8_t>((v >> 24) & 0xFF);
+}
+
 int header_time_to_hhmm(uint16_t encoded) {
 	const int hours = (encoded >> 8) & 0xFF;
 	const int frac = encoded & 0xFF;
@@ -145,13 +153,25 @@ bool from_int_kind(int kind, EntityKind &out) {
 	}
 }
 
-void resize_waypoint_padding(bms::WaypointRecord &record) {
-	const size_t marker_count = std::min<size_t>(record.waypoint_numbers.size(), kMaxWaypointPathMarkers);
-	if (record.waypoint_numbers.size() != marker_count) {
-		record.waypoint_numbers.resize(marker_count);
+// preserve_over_count keeps a shipped on-disk marker_count that exceeds the 32-slot capacity verbatim
+// (CP19.bms ships one == 39) so an UNTOUCHED path round-trips byte-exact. parse_waypoint_record records
+// the over-count; sync_counts runs this on every load/save and passes true to preserve it. An AUTHORED
+// edit (apply_waypoint_path_to_record / repair_waypoint_marker_references) rewrites the marker list, so
+// the stored over-count no longer describes the data: those call sites pass false to resync marker_count
+// to the real slot count. (Without that, a reorder or flag-only edit on a saturated 32-marker path would
+// keep advertising 39 markers, and the engine would walk 7 phantom waypoints.)
+void resize_waypoint_padding(bms::WaypointRecord &record, bool preserve_over_count) {
+	const size_t slots = std::min<size_t>(record.waypoint_numbers.size(), kMaxWaypointPathMarkers);
+	if (record.waypoint_numbers.size() != slots) {
+		record.waypoint_numbers.resize(slots);
 	}
-	record.marker_count = static_cast<uint32_t>(marker_count);
-	const size_t used = marker_count * sizeof(uint32_t);
+	const bool keep_over_count = preserve_over_count
+			&& record.marker_count > kMaxWaypointPathMarkers
+			&& slots == kMaxWaypointPathMarkers;
+	if (!keep_over_count) {
+		record.marker_count = static_cast<uint32_t>(slots);
+	}
+	const size_t used = slots * sizeof(uint32_t);
 	record.padding.assign(128 - used, 0);
 }
 
@@ -194,7 +214,7 @@ void apply_waypoint_path_to_record(bms::WaypointRecord &record, const std::vecto
 	for (int marker_index : marker_indices) {
 		record.waypoint_numbers.push_back(static_cast<uint32_t>(marker_index));
 	}
-	resize_waypoint_padding(record);
+	resize_waypoint_padding(record, /*preserve_over_count=*/false); // authored edit: count tracks the new list
 }
 
 void repair_waypoint_marker_references(bms::File &file, size_t removed_index) {
@@ -216,7 +236,7 @@ void repair_waypoint_marker_references(bms::File &file, size_t removed_index) {
 		}
 		if (changed) {
 			record.waypoint_numbers = repaired;
-			resize_waypoint_padding(record);
+			resize_waypoint_padding(record, /*preserve_over_count=*/false); // marker delete rewrote the list
 		}
 	}
 }
@@ -349,22 +369,25 @@ void write_mis_groups(const bms::File &file, std::string &out) {
 	for (size_t i = 0; i < file.group_records.size(); ++i) {
 		const bms::GroupRecord &record = file.group_records[i];
 		const uint8_t *raw = record.raw_data;
-		const int32_t attrib = read_i32_at(raw, 0);
-		const int32_t commander = read_i32_at(raw, 4);
-		const int32_t color = read_i32_at(raw, 8);
-		if (attrib == 0 && commander == 0 && color == 0) {
+		// [orig: Mission_LoadBMSFile @0x40fbbb keeps three ints per 32-byte record from offsets
+		//  0, 8, 12 (temp_record[0], [2], [3]). Field meanings are NOT proven by the loader, so the
+		//  keys are emitted as tentative field0/field8/field12 (was: 0/4/8 with guessed attrib/commander/color).]
+		const int32_t field0 = read_i32_at(raw, 0);
+		const int32_t field8 = read_i32_at(raw, 8);
+		const int32_t field12 = read_i32_at(raw, 12);
+		if (field0 == 0 && field8 == 0 && field12 == 0) {
 			continue;
 		}
 		append_kv(out, "begin group ", i);
 		append_line(out, "  description \"\"");
-		if (attrib != 0) {
-			append_kv(out, "  attrib ", attrib);
+		if (field0 != 0) {
+			append_kv(out, "  field0 ", field0);
 		}
-		if (color != 0) {
-			append_kv(out, "  color ", color);
+		if (field8 != 0) {
+			append_kv(out, "  field8 ", field8);
 		}
-		if (commander != 0) {
-			append_kv(out, "  commander ", commander);
+		if (field12 != 0) {
+			append_kv(out, "  field12 ", field12);
 		}
 		append_line(out, "end group");
 		append_line(out);
@@ -436,7 +459,7 @@ void write_mis_events(const bms::File &file, std::string &out) {
 
 void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out) {
 	const uint16_t crouch_timer = combined_u16(entity.crouch_timer, entity.unk15a);
-	const int32_t group_rel = combined_i32_from_i16(entity.unk25, entity.unk26);
+	const int32_t group_rel = combined_i32_from_i16(entity.group_rel_lo, entity.group_rel_hi);
 	const uint8_t *gen_raw = reinterpret_cast<const uint8_t *>(entity.gen_string);
 	const std::string gen_string = fixed_string(entity.gen_string, 32);
 
@@ -457,8 +480,8 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out)
 	if (entity.bmsi_attributes != 0) append_kv(out, "  bmsi_attributes ", entity.bmsi_attributes);
 	if (entity.no_less_than != 0) append_kv(out, "  nolessthan ", static_cast<int>(entity.no_less_than));
 	if (entity.no_more_than != 0) append_kv(out, "  nomorethan ", static_cast<int>(entity.no_more_than));
-	if (byte_from_i16(entity.unk19, 0) != 0) append_kv(out, "  weapon_type ", byte_from_i16(entity.unk19, 0));
-	if (byte_from_i16(entity.unk19, 1) != 0) append_kv(out, "  sweapon_type ", byte_from_i16(entity.unk19, 1));
+	if (byte_from_i16(entity.weapon_types, 0) != 0) append_kv(out, "  weapon_type ", byte_from_i16(entity.weapon_types, 0));
+	if (byte_from_i16(entity.weapon_types, 1) != 0) append_kv(out, "  sweapon_type ", byte_from_i16(entity.weapon_types, 1));
 	if (entity.group_id != 0) append_kv(out, "  group_id ", static_cast<int>(entity.group_id));
 	if (group_rel != 0) append_kv(out, "  group_rel ", group_rel);
 	if (entity.waypoint_id != 0) append_kv(out, "  waypoint_id ", static_cast<int>(entity.waypoint_id));
@@ -466,7 +489,7 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out)
 	append_kv(out, "  wpdistance ", entity.wp_distance);
 	if (entity.wp_adv_trigger != -1) append_kv(out, "  wp_adv_trigger ", entity.wp_adv_trigger);
 	for (int i = 0; i < 4; ++i) {
-		const int32_t goal = byte_from_i32(entity.unk30_31, i);
+		const int32_t goal = byte_from_i32(entity.wp_goals, i);
 		if (goal != 0) {
 			append_kv(out, "  wpgoal", i, " ", goal);
 		}
@@ -482,10 +505,10 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out)
 	append_kv(out, "  crouchtimer ", crouch_timer);
 	append_kv(out, "  shoottimer ", entity.shoot_timer);
 	append_kv(out, "  attention ", entity.attention);
-	append_kv(out, "  advancetimer ", entity.fire_timer);
+	append_kv(out, "  advancetimer ", entity.advancetimer);
 	append_kv(out, "  max_attack_distance ", entity.max_attack_distance);
 	append_kv(out, "  edistances ", entity.min_engagement_distance, " ", entity.max_engagement_distance);
-	if (entity.unk41 != 0) append_kv(out, "  next_ssn ", entity.unk41);
+	if (entity.next_ssn != 0) append_kv(out, "  next_ssn ", entity.next_ssn);
 	if (entity.color_override != 0) append_kv(out, "  color_override ", static_cast<int>(entity.color_override));
 	if (gen_raw[32] != 0) append_kv(out, "  grenades ", static_cast<int>(gen_raw[32]));
 	if (gen_raw[34] != 0) append_kv(out, "  mission_critical ", static_cast<int>(gen_raw[34]));
@@ -697,25 +720,30 @@ std::string action_type_name(int value) {
 std::string ai_action_sub_type_name(int value) {
 	switch (static_cast<bms::AIActionSubType>(value)) {
 		case bms::AIActionSubType::GuardBit: return "GuardBit";
+		case bms::AIActionSubType::RedAlert: return "RedAlert";
+		case bms::AIActionSubType::GreenAlert: return "GreenAlert";
 		case bms::AIActionSubType::Accuracy: return "Accuracy";
 		case bms::AIActionSubType::BlindBit: return "BlindBit";
 		case bms::AIActionSubType::BerserkBit: return "BerserkBit";
 		case bms::AIActionSubType::ClimberBit: return "ClimberBit";
 		case bms::AIActionSubType::CowardBit: return "CowardBit";
-		case bms::AIActionSubType::Skill1: return "Skill1";
-		case bms::AIActionSubType::Skill2: return "Skill2";
-		case bms::AIActionSubType::AiState: return "AiState";
-		case bms::AIActionSubType::SpeedKmh1: return "SpeedKmh1";
-		case bms::AIActionSubType::SpeedKmh2: return "SpeedKmh2";
-		case bms::AIActionSubType::TargetSsn1: return "TargetSsn1";
-		case bms::AIActionSubType::AnimNum: return "AnimNum";
+		case bms::AIActionSubType::YellowAlert: return "YellowAlert";
+		case bms::AIActionSubType::DriveSkill: return "DriveSkill";
+		case bms::AIActionSubType::AimSkill: return "AimSkill";
+		case bms::AIActionSubType::AiSetState: return "AiSetState";
+		case bms::AIActionSubType::CombatSpeed: return "CombatSpeed";
+		case bms::AIActionSubType::PatrolSpeed: return "PatrolSpeed";
+		case bms::AIActionSubType::FindAndUse: return "FindAndUse";
+		case bms::AIActionSubType::AiUseWpz: return "AiUseWpz";
+		case bms::AIActionSubType::AiClearWpz: return "AiClearWpz";
+		case bms::AIActionSubType::PlayPartAnim: return "PlayPartAnim";
 		case bms::AIActionSubType::HudItem: return "HudItem";
 		case bms::AIActionSubType::TmateStatus: return "TmateStatus";
 		case bms::AIActionSubType::AiNodePathBit: return "AiNodePathBit";
 		case bms::AIActionSubType::AttackDistanceValue: return "AttackDistanceValue";
 		case bms::AIActionSubType::EngageDistanceMin: return "EngageDistanceMin";
 		case bms::AIActionSubType::IndestructableBit: return "IndestructableBit";
-		case bms::AIActionSubType::TargetSsn2: return "TargetSsn2";
+		case bms::AIActionSubType::TargetSsn: return "TargetSsn";
 		case bms::AIActionSubType::StartFiringBit: return "StartFiringBit";
 		case bms::AIActionSubType::FiringAngle: return "FiringAngle";
 	}
@@ -757,15 +785,38 @@ std::string action_sub_type_name(int action_type, int sub_type) {
 AreaTriggerRecord to_area_trigger_record(const bms::AreaTrigger &area, size_t index) {
 	AreaTriggerRecord out;
 	out.index = index;
-	out.wp_number = area.wp_number;
-	out.min_x = area.get_min_x();
-	out.min_y = area.get_min_y();
-	out.min_z = area.get_min_z();
-	out.max_x = area.get_max_x();
-	out.max_y = area.get_max_y();
-	out.max_z = area.get_max_z();
-	out.reserved = area.reserved;
+	// Corrected mapping: file layout is interleaved per axis with a flags dword at off 28.
+	// (id at off 0 carried in wp_number for ABI stability; raw flags in reserved.)
+	out.wp_number = area.id;
+	out.min_x = area.get_x_min();
+	out.min_y = area.get_y_min();
+	out.min_z = area.get_z_min();
+	out.max_x = area.get_x_max();
+	out.max_y = area.get_y_max();
+	out.max_z = area.get_z_max();
+	out.reserved = static_cast<int>(area.flags);
+	out.active = area.is_active();
+	out.constrain_z = area.constrains_z();
 	return out;
+}
+
+// Inverse of to_area_trigger_record: build a byte-faithful bms::AreaTrigger from the typed record.
+// Bounds go to interleaved fixed-point 16.16 (no swap). The flags dword keeps every bit of `reserved`
+// except the two low bits, which are recomposed from active/constrain_z so the UI toggles stay
+// consistent with the raw value the engine reads (Entity_IsTeamInTriggerBounds @0x43c75c).
+bms::AreaTrigger from_area_trigger_record(const AreaTriggerRecord &rec) {
+	bms::AreaTrigger area;
+	area.id = rec.wp_number;
+	area.x_min = bms::to_fixed_16_16(rec.min_x);
+	area.x_max = bms::to_fixed_16_16(rec.max_x);
+	area.y_min = bms::to_fixed_16_16(rec.min_y);
+	area.y_max = bms::to_fixed_16_16(rec.max_y);
+	area.z_min = bms::to_fixed_16_16(rec.min_z);
+	area.z_max = bms::to_fixed_16_16(rec.max_z);
+	uint32_t flags = static_cast<uint32_t>(rec.reserved);
+	flags = (flags & ~0x3u) | (rec.active ? 0x1u : 0u) | (rec.constrain_z ? 0x2u : 0u);
+	area.flags = flags;
+	return area;
 }
 
 MissionEventRecord to_event_record(const bms::Event &event, size_t index) {
@@ -820,11 +871,22 @@ MissionActionRecord to_action_record(const bms::Action &action, size_t index) {
 }
 
 constexpr int kMaxEventChainEntries = 20;
+// reset_after / delay are stored in the upper 10 bits of their u32 slot (see write_event), so the
+// representable value range is 0..1023.
+constexpr int kMaxEventDelayTicks = 1023;
 
 void apply_event_record(bms::Event &event, const MissionEventRecord &record) {
+	// Full-fidelity: write the flags dword verbatim so low-level / C-ABI callers keep full control of every
+	// bit. The editor-only policy of preserving bits it does not surface (event_flag_mask) lives in the
+	// binding NovaMissionData::set_event, not here, mirroring trigger_from_dictionary vs trigger_from_record.
 	event.flags = static_cast<bms::EventFlags>(record.flags);
-	event.reset_after = record.reset_after;
-	event.delay = record.delay;
+	// reset_after / delay occupy only the upper 10 bits on disk (write_event packs them << 22, parse
+	// reads >> 22), so the value range is 0..1023. Clamp here at the library boundary the way the other
+	// apply_* setters bound their fields: an out-of-range value would otherwise wrap on serialize
+	// (e.g. 2000 -> (uint32)2000 << 22 truncates, reparses as 976) with no error. The editor SpinBox
+	// already caps at 1023, but a direct C/C-ABI caller of set_event/add_event does not.
+	event.reset_after = std::clamp(record.reset_after, 0, kMaxEventDelayTicks);
+	event.delay = std::clamp(record.delay, 0, kMaxEventDelayTicks);
 	event.unknown5 = static_cast<uint8_t>(std::clamp(record.unknown5, 0, 255));
 	event.unknown6 = static_cast<uint8_t>(std::clamp(record.unknown6, 0, 255));
 }
@@ -983,7 +1045,29 @@ EntityRecord to_record(const bms::Entity &entity, EntityKind kind, size_t index)
 	out.max_attack_distance = entity.max_attack_distance;
 	out.spawn_count = entity.spawns;
 	out.max_simultaneous = entity.no_more_than;
+	out.no_less_than = entity.no_less_than;
+	out.map_symbol = entity.map_symbol;
+	out.name1 = fixed_string(entity.name1, sizeof(entity.name1));
+	out.name2 = fixed_string(entity.name2, sizeof(entity.name2));
 	return out;
+}
+
+// Defined further below; used by apply_properties for the fixed-string name fields.
+void copy_cstr(char *dest, size_t dest_size, const std::string &value);
+
+// Copy into a fixed-width on-disk field that may use ALL dest_size bytes (no reserved NUL
+// terminator). The format's name1/name2 are 8-byte slots a shipped mission can fill completely,
+// so copy_cstr (which forces dest[dest_size-1] = '\0') would drop the 8th byte and silently
+// truncate an 8-char name on every property round-trip. Values longer than the field are cut to
+// dest_size; shorter values zero-pad the remainder. fixed_string reads it back symmetrically.
+void copy_fixed_field(char *dest, size_t dest_size, const std::string &value) {
+	const size_t copy_len = std::min(dest_size, value.size());
+	if (copy_len > 0) {
+		std::memcpy(dest, value.data(), copy_len);
+	}
+	if (copy_len < dest_size) {
+		std::memset(dest + copy_len, 0, dest_size - copy_len);
+	}
 }
 
 void apply_transform(bms::Entity &entity, const EntityTransform &transform) {
@@ -996,20 +1080,79 @@ void apply_transform(bms::Entity &entity, const EntityTransform &transform) {
 }
 
 void apply_properties(bms::Entity &entity, const EntityProperties &properties) {
-	entity.group_id = static_cast<uint8_t>(properties.group_id);
-	entity.waypoint_id = static_cast<uint8_t>(properties.waypoint_id);
+	// The uint8-backed fields clamp (rather than a bare static_cast) so an out-of-range value from a
+	// programmatic caller saturates instead of silently wrapping (e.g. map_symbol 300 -> 44). The
+	// inspector SpinBoxes already cap these, but set_entity_properties is a public API boundary.
+	entity.group_id = static_cast<uint8_t>(std::clamp(properties.group_id, 0, 255));
+	entity.waypoint_id = static_cast<uint8_t>(std::clamp(properties.waypoint_id, 0, 255));
 	entity.wp_number = properties.wp_number;
-	entity.team = static_cast<uint8_t>(properties.team);
+	entity.team = static_cast<uint8_t>(std::clamp(properties.team, 0, 255));
 	entity.bmsi_attributes = static_cast<uint32_t>(properties.ai_flags);
 	entity.perception2 = properties.perception;
 	entity.w_accuracy1 = static_cast<int16_t>(properties.accuracy);
-	entity.alert_state = static_cast<uint8_t>(properties.alert_state);
+	entity.alert_state = static_cast<uint8_t>(std::clamp(properties.alert_state, 0, 255));
 	entity.min_engagement_distance = properties.min_engagement_distance;
 	entity.max_engagement_distance = properties.max_engagement_distance;
 	entity.max_attack_distance = properties.max_attack_distance;
 	entity.spawns = static_cast<int16_t>(properties.spawn_count);
-	entity.no_more_than = static_cast<uint8_t>(properties.max_simultaneous);
+	entity.no_more_than = static_cast<uint8_t>(std::clamp(properties.max_simultaneous, 0, 255));
+	entity.no_less_than = static_cast<uint8_t>(std::clamp(properties.no_less_than, 0, 255));
+	entity.map_symbol = static_cast<uint8_t>(std::clamp(properties.map_symbol, 0, 255));
+	// name1/name2 are fixed 8-byte slots a mission can fill completely; copy_fixed_field keeps all
+	// 8 bytes (copy_cstr would force a NUL into byte 7 and truncate an 8-char name on every edit).
+	copy_fixed_field(entity.name1, sizeof(entity.name1), properties.name1);
+	copy_fixed_field(entity.name2, sizeof(entity.name2), properties.name2);
 }
+
+// Build the editable property set from a record. set_entity_properties overwrites every field, so a
+// single-property edit must seed the full set from the current record first. One copy helper shared
+// by set_entity_property_int / _string keeps the field list in one place.
+EntityProperties properties_from_record(const EntityRecord &record) {
+	EntityProperties properties;
+	properties.group_id = record.group_id;
+	properties.waypoint_id = record.waypoint_id;
+	properties.wp_number = record.wp_number;
+	properties.team = record.team;
+	properties.ai_flags = record.ai_flags;
+	properties.perception = record.perception;
+	properties.accuracy = record.accuracy;
+	properties.alert_state = record.alert_state;
+	properties.min_engagement_distance = record.min_engagement_distance;
+	properties.max_engagement_distance = record.max_engagement_distance;
+	properties.max_attack_distance = record.max_attack_distance;
+	properties.spawn_count = record.spawn_count;
+	properties.max_simultaneous = record.max_simultaneous;
+	properties.no_less_than = record.no_less_than;
+	properties.map_symbol = record.map_symbol;
+	properties.name1 = record.name1;
+	properties.name2 = record.name2;
+	return properties;
+}
+
+// The editable int properties, mapping each editor/dictionary key to its EntityProperties member.
+// Single source of truth for set_entity_property_int: adding an int field is one row here. Only
+// `group` differs from its member name (group_id); every other key equals its member.
+struct EntityIntField {
+	const char *name;
+	int EntityProperties::*member;
+};
+constexpr EntityIntField kEntityIntFields[] = {
+	{"group", &EntityProperties::group_id},
+	{"waypoint_id", &EntityProperties::waypoint_id},
+	{"wp_number", &EntityProperties::wp_number},
+	{"team", &EntityProperties::team},
+	{"ai_flags", &EntityProperties::ai_flags},
+	{"perception", &EntityProperties::perception},
+	{"accuracy", &EntityProperties::accuracy},
+	{"alert_state", &EntityProperties::alert_state},
+	{"min_engagement_distance", &EntityProperties::min_engagement_distance},
+	{"max_engagement_distance", &EntityProperties::max_engagement_distance},
+	{"max_attack_distance", &EntityProperties::max_attack_distance},
+	{"spawn_count", &EntityProperties::spawn_count},
+	{"max_simultaneous", &EntityProperties::max_simultaneous},
+	{"no_less_than", &EntityProperties::no_less_than},
+	{"map_symbol", &EntityProperties::map_symbol},
+};
 
 bms::Entity make_default_entity(const bms::File &file,
                                 EntityKind kind,
@@ -1132,6 +1275,24 @@ void copy_area_trigger(OpenNovaMissionAreaTriggerRecord &out, const AreaTriggerR
 	out.max_y = record.max_y;
 	out.max_z = record.max_z;
 	out.reserved = record.reserved;
+	out.active = record.active ? 1 : 0;
+	out.constrain_z = record.constrain_z ? 1 : 0;
+}
+
+AreaTriggerRecord from_c_area_trigger(const OpenNovaMissionAreaTriggerRecord &in) {
+	AreaTriggerRecord out;
+	out.index = in.index;
+	out.wp_number = in.wp_number;
+	out.min_x = in.min_x;
+	out.min_y = in.min_y;
+	out.min_z = in.min_z;
+	out.max_x = in.max_x;
+	out.max_y = in.max_y;
+	out.max_z = in.max_z;
+	out.reserved = in.reserved;
+	out.active = in.active != 0;
+	out.constrain_z = in.constrain_z != 0;
+	return out;
 }
 
 void copy_event(OpenNovaMissionEventRecord &out, const MissionEventRecord &record) {
@@ -1314,6 +1475,23 @@ void MissionDocument::clear() {
 	impl_->loaded = false;
 }
 
+void MissionDocument::create_default() {
+	// Build a minimal, valid, empty mission in memory (no file backing). The only header
+	// field the format requires is the magic + version (parse gates magic == "BMS" and the
+	// version byte >= kMinVersion); every other field round-trips fine at zero, and write()
+	// recomputes no positional offsets. sync_counts() then backfills the fixed
+	// waypoint/group/layer tables (and waypoint padding) so write_bms_bytes() produces a
+	// buffer parse() accepts.
+	clear();
+	bms::Header &header = impl_->file.header;
+	header.magic[0] = 'B';
+	header.magic[1] = 'M';
+	header.magic[2] = 'S';
+	header.magic[3] = static_cast<char>(bms::kMinVersion);
+	impl_->loaded = true;
+	sync_counts();
+}
+
 bool MissionDocument::is_loaded() const {
 	return impl_->loaded;
 }
@@ -1335,10 +1513,13 @@ MissionInfo MissionDocument::info() const {
 	out.mission_name = fixed_string(header.mission_name, sizeof(header.mission_name));
 	out.designer = fixed_string(header.designer, sizeof(header.designer));
 	out.briefing = fixed_string(header.mission_briefing, sizeof(header.mission_briefing));
-	out.terrain = fixed_string(header.terrain, sizeof(header.terrain));
+	// terrain[48] packs three 16-byte slots (terrain / cnv_file / tt_file); bound the read to the
+	// first slot so a full 16-char terrain name does not bleed into cnv_file.
+	out.terrain = fixed_string(header.terrain, 16);
 	out.environment = fixed_string(header.environment, sizeof(header.environment));
 	out.climate = static_cast<int>(header.climate);
 	out.weather = static_cast<int>(header.weather_type);
+	out.mission_type = static_cast<int>(header.mission_type);
 	out.attrib_flags = static_cast<int>(header.attrib_flags);
 	out.start_time = header.start_time;
 	out.minutes_per_day = header.minutes_per_day;
@@ -1346,7 +1527,107 @@ MissionInfo MissionDocument::info() const {
 	out.max_saves = header.max_saves;
 	out.music = static_cast<int>(header.music);
 	out.reverb = static_cast<int>(header.reverb);
+	out.wind_speed = static_cast<int>(header.wind_speed);
+	out.wind_direction = static_cast<int>(header.wind_direction);
+	out.map_zoom = header.map_zoom;
 	return out;
+}
+
+bool MissionDocument::set_header_string(const std::string &field, const std::string &value) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	bms::Header &header = impl_->file.header;
+	if (field == "mission_name") {
+		copy_cstr(header.mission_name, sizeof(header.mission_name), value);
+	} else if (field == "designer") {
+		copy_cstr(header.designer, sizeof(header.designer), value);
+	} else if (field == "briefing") {
+		copy_cstr(header.mission_briefing, sizeof(header.mission_briefing), value);
+	} else if (field == "terrain") {
+		// header.terrain[48] is three 16-byte fixed slots: terrain@+0, cnv_file@+16, tt_file@+32
+		// (see write_mis_general_information). Write only the first slot so a terrain edit does not
+		// zero-fill (and lose) the cnv_file / tt_file references. copy_fixed_field (not copy_cstr)
+		// keeps all 16 bytes: a slot a shipped mission fills completely would otherwise lose its
+		// 16th byte to a forced NUL, mirroring the name1/name2 fix in apply_properties. The
+		// inspector / get_terrain reads are bounded to 16 so a full slot never bleeds into cnv_file.
+		copy_fixed_field(header.terrain, 16, value);
+	} else if (field == "environment") {
+		// environment[16] is a standalone fixed slot read back with fixed_string(.,16); copy_fixed_field
+		// preserves a full 16-char name (copy_cstr would force a NUL into byte 15 and truncate it).
+		copy_fixed_field(header.environment, sizeof(header.environment), value);
+	} else {
+		impl_->last_error = "Unknown header string field: " + field;
+		return false;
+	}
+	return true;
+}
+
+bool MissionDocument::set_header_int(const std::string &field, int value) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	bms::Header &header = impl_->file.header;
+	if (field == "climate") {
+		header.climate = static_cast<bms::ClimateType>(value);
+	} else if (field == "weather") {
+		header.weather_type = static_cast<bms::WeatherType>(value);
+	} else if (field == "mission_type") {
+		header.mission_type = static_cast<bms::MissionType>(static_cast<uint8_t>(value));
+	} else if (field == "attrib_flags") {
+		header.attrib_flags = static_cast<bms::AttribFlags>(static_cast<uint32_t>(value));
+	} else if (field == "start_time") {
+		header.start_time = static_cast<uint16_t>(value);
+	} else if (field == "minutes_per_day") {
+		header.minutes_per_day = static_cast<uint16_t>(value);
+	} else if (field == "player_health") {
+		header.health = static_cast<uint32_t>(value);
+	} else if (field == "max_saves") {
+		header.max_saves = static_cast<uint8_t>(value);
+	} else if (field == "music") {
+		header.music = static_cast<uint32_t>(value);
+	} else if (field == "reverb") {
+		header.reverb = static_cast<uint32_t>(value);
+	} else if (field == "wind_speed") {
+		header.wind_speed = static_cast<uint32_t>(value);
+	} else if (field == "wind_direction") {
+		header.wind_direction = static_cast<uint32_t>(value);
+	} else {
+		impl_->last_error = "Unknown header int field: " + field;
+		return false;
+	}
+	return true;
+}
+
+bool MissionDocument::set_header_flag(int bit, bool on) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	uint32_t flags = static_cast<uint32_t>(impl_->file.header.attrib_flags);
+	if (on) {
+		flags |= static_cast<uint32_t>(bit);
+	} else {
+		flags &= ~static_cast<uint32_t>(bit);
+	}
+	impl_->file.header.attrib_flags = static_cast<bms::AttribFlags>(flags);
+	return true;
+}
+
+bool MissionDocument::set_header_float(const std::string &field, float value) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	if (field == "map_zoom") {
+		impl_->file.header.map_zoom = value;
+	} else {
+		impl_->last_error = "Unknown header float field: " + field;
+		return false;
+	}
+	return true;
 }
 
 size_t MissionDocument::entity_count(EntityKind kind) const {
@@ -1400,6 +1681,45 @@ bool MissionDocument::set_entity_properties(EntityKind kind, size_t index, const
 	return true;
 }
 
+// Edit one named int property of an entity, mirroring set_header_int: the name->member mapping lives
+// here (kEntityIntFields) instead of in each caller. Seeds the full property set from the record,
+// changes only the requested member, and reuses set_entity_properties (which owns the clamp rules).
+bool MissionDocument::set_entity_property_int(EntityKind kind, size_t index, const std::string &name, int value) {
+	EntityRecord record;
+	if (!get_entity(kind, index, record)) {
+		impl_->last_error = "Mission entity index out of range";
+		return false;
+	}
+	EntityProperties properties = properties_from_record(record);
+	for (const EntityIntField &field : kEntityIntFields) {
+		if (name == field.name) {
+			properties.*(field.member) = value;
+			return set_entity_properties(kind, index, properties, nullptr);
+		}
+	}
+	impl_->last_error = "Unknown entity int property: " + name;
+	return false;
+}
+
+// Edit one named string property (name1 / name2) of an entity. Same shape as set_entity_property_int.
+bool MissionDocument::set_entity_property_string(EntityKind kind, size_t index, const std::string &name, const std::string &value) {
+	EntityRecord record;
+	if (!get_entity(kind, index, record)) {
+		impl_->last_error = "Mission entity index out of range";
+		return false;
+	}
+	EntityProperties properties = properties_from_record(record);
+	if (name == "name1") {
+		properties.name1 = value;
+	} else if (name == "name2") {
+		properties.name2 = value;
+	} else {
+		impl_->last_error = "Unknown entity string property: " + name;
+		return false;
+	}
+	return set_entity_properties(kind, index, properties, nullptr);
+}
+
 bool MissionDocument::add_entity(EntityKind kind, int item_id, const EntityTransform &transform, EntityRecord *out) {
 	if (!impl_->loaded) {
 		impl_->last_error = "No mission loaded";
@@ -1448,7 +1768,12 @@ std::vector<WaypointSummary> MissionDocument::waypoint_summaries() const {
 		WaypointSummary summary;
 		summary.index = i;
 		summary.flags = static_cast<int>(record.flags);
-		summary.marker_count = static_cast<int>(record.marker_count);
+		// Report the count the editor can actually act on. A shipped record may carry a raw
+		// marker_count above the 32-slot region (CP19.bms has 39); the parser preserves that on
+		// disk for byte-exact round-trip, but the editor only ever has min(count, 32) marker slots,
+		// so clamp here to keep the path-list label honest and the ">0 = populated" test correct.
+		summary.marker_count = static_cast<int>(
+				std::min<uint32_t>(record.marker_count, static_cast<uint32_t>(kMaxWaypointPathMarkers)));
 		out.push_back(summary);
 	}
 	return out;
@@ -1575,6 +1900,223 @@ std::vector<AreaTriggerRecord> MissionDocument::area_triggers() const {
 		out.push_back(to_area_trigger_record(impl_->file.area_triggers[i], i));
 	}
 	return out;
+}
+
+bool MissionDocument::add_area_trigger(const AreaTriggerRecord &record, AreaTriggerRecord *out) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	impl_->file.area_triggers.push_back(from_area_trigger_record(record));
+	sync_counts();
+	if (out != nullptr) {
+		*out = to_area_trigger_record(impl_->file.area_triggers.back(), impl_->file.area_triggers.size() - 1);
+	}
+	return true;
+}
+
+bool MissionDocument::set_area_trigger(size_t index, const AreaTriggerRecord &record, AreaTriggerRecord *out) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	if (index >= impl_->file.area_triggers.size()) {
+		impl_->last_error = "Area trigger index out of range";
+		return false;
+	}
+	impl_->file.area_triggers[index] = from_area_trigger_record(record);
+	if (out != nullptr) {
+		*out = to_area_trigger_record(impl_->file.area_triggers[index], index);
+	}
+	return true;
+}
+
+bool MissionDocument::remove_area_trigger(size_t index) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	if (index >= impl_->file.area_triggers.size()) {
+		impl_->last_error = "Area trigger index out of range";
+		return false;
+	}
+	// Repair *IsWithinArea references. Phase-5 RE confirmed param2 is the area-trigger ARRAY INDEX
+	// (Entity_IsTeamInTriggerBounds @0x43c730: &unk_A32D10 + 32*param2), so removing a zone shifts every
+	// higher index down by one. A reference to the removed zone becomes -1 (dangling), which
+	// get_event_chain then flags. [orig: zone bounds consumers @0x43c730 / @0x43e510]
+	const int removed = static_cast<int>(index);
+	for (bms::Trigger &t : impl_->file.triggers) {
+		const bool area_trigger =
+				(t.main_type == bms::TriggerMainType::Group &&
+						t.sub_type == static_cast<int>(bms::GroupTriggerType::GroupIsWithinArea)) ||
+				(t.main_type == bms::TriggerMainType::Single &&
+						t.sub_type == static_cast<int>(bms::SingleTriggerType::SingleIsWithinArea));
+		if (!area_trigger) {
+			continue;
+		}
+		if (t.param2 == removed) {
+			t.param2 = -1;  // the referenced zone is gone
+		} else if (t.param2 > removed) {
+			--t.param2;     // zones above the hole shifted down
+		}
+	}
+	impl_->file.area_triggers.erase(impl_->file.area_triggers.begin() + static_cast<std::ptrdiff_t>(index));
+	sync_counts();
+	return true;
+}
+
+// Append one NUL-terminated string to a loadout byte buffer.
+static void append_loadout_field(std::vector<uint8_t> &raw, const std::string &value) {
+	raw.insert(raw.end(), value.begin(), value.end());
+	raw.push_back(0);
+}
+
+std::vector<WeaponLoadoutEntry> MissionDocument::weapon_loadout() const {
+	std::vector<WeaponLoadoutEntry> out;
+	if (!impl_->loaded) {
+		return out;
+	}
+	const std::vector<uint8_t> &raw = impl_->file.loadout.raw_data;
+	size_t pos = 0;
+	// Walk records until an empty record (a leading NUL = the terminator) or the buffer is exhausted,
+	// reading exactly three NUL-terminated strings each (name, value1, value2). A short/unterminated
+	// tail stops the walk without emitting a partial record. [orig: Mission_LoadBMSFile @0x40f7b6;
+	// see notes for the loader's 4th-string over-read, which is a filter quirk, not the file format.]
+	while (pos < raw.size() && raw[pos] != 0) {
+		WeaponLoadoutEntry entry;
+		std::string *fields[3] = { &entry.name, &entry.value1, &entry.value2 };
+		bool complete = true;
+		for (int f = 0; f < 3; ++f) {
+			const size_t start = pos;
+			while (pos < raw.size() && raw[pos] != 0) {
+				++pos;
+			}
+			if (pos >= raw.size()) {
+				complete = false;
+				break;
+			}
+			fields[f]->assign(reinterpret_cast<const char *>(raw.data() + start), pos - start);
+			++pos;  // skip the NUL terminator
+		}
+		if (!complete) {
+			break;
+		}
+		out.push_back(std::move(entry));
+	}
+	return out;
+}
+
+bool MissionDocument::set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &entries) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	// The .bms loadout chunk serializes an empty name as a leading NUL, which the loader reads as the
+	// chunk terminator: a nameless entry cannot be stored and would silently drop that weapon (and every
+	// entry after it). Reject the whole edit and leave the loadout untouched rather than lose data.
+	// Removing a weapon goes through the dedicated remove path, never a blanked name; the editor also
+	// guards this up front in _commit_loadout_editors. An empty entry list (delete all) is still valid.
+	for (const WeaponLoadoutEntry &entry : entries) {
+		if (entry.name.empty()) {
+			impl_->last_error = "Weapon loadout entries require a name";
+			return false;
+		}
+	}
+	// Capture any bytes the existing chunk carries past the canonical records + terminator, so they
+	// survive a loadout edit instead of being truncated (byte-exact round-trip when the records are
+	// unchanged; a faithful tail otherwise). For the common chunk (records + terminator, no extras)
+	// the walk consumes the whole buffer, so the tail is empty and this is a no-op.
+	const std::vector<uint8_t> &old_raw = impl_->file.loadout.raw_data;
+	size_t consumed = 0;
+	while (consumed < old_raw.size() && old_raw[consumed] != 0) {
+		bool complete = true;
+		for (int f = 0; f < 3; ++f) {
+			while (consumed < old_raw.size() && old_raw[consumed] != 0) {
+				++consumed;
+			}
+			if (consumed >= old_raw.size()) {
+				complete = false;
+				break;
+			}
+			++consumed;  // skip the field NUL
+		}
+		if (!complete) {
+			break;
+		}
+	}
+	if (consumed < old_raw.size() && old_raw[consumed] == 0) {
+		++consumed;  // include the empty-record terminator
+	}
+	std::vector<uint8_t> tail(old_raw.begin() + std::min(consumed, old_raw.size()), old_raw.end());
+
+	std::vector<uint8_t> raw;
+	for (const WeaponLoadoutEntry &entry : entries) {
+		// Names are guaranteed non-empty by the validation above.
+		append_loadout_field(raw, entry.name);
+		append_loadout_field(raw, entry.value1);
+		append_loadout_field(raw, entry.value2);
+	}
+	// The loader walks records while the next byte is non-NUL, so a non-empty chunk needs a trailing
+	// empty record (one extra NUL) to terminate. An empty loadout serializes to an empty chunk (len 0),
+	// which the loader treats as "no restrictions" (it installs the WPN_KNIFE default at runtime).
+	if (!raw.empty()) {
+		raw.push_back(0);
+		raw.insert(raw.end(), tail.begin(), tail.end());
+	}
+	impl_->file.loadout.raw_data = std::move(raw);
+	sync_counts();
+	return true;
+}
+
+size_t MissionDocument::group_count() const {
+	if (!impl_->loaded) {
+		return 0;
+	}
+	return impl_->file.group_records.size();
+}
+
+bool MissionDocument::get_group(size_t index, GroupFields &out) const {
+	if (!impl_->loaded || index >= impl_->file.group_records.size()) {
+		return false;
+	}
+	const uint8_t *raw = impl_->file.group_records[index].raw_data;
+	out.index = index;
+	out.field0 = read_i32_at(raw, 0);
+	out.field8 = read_i32_at(raw, 8);
+	out.field12 = read_i32_at(raw, 12);
+	return true;
+}
+
+std::vector<GroupFields> MissionDocument::groups() const {
+	std::vector<GroupFields> out;
+	if (!impl_->loaded) {
+		return out;
+	}
+	out.reserve(impl_->file.group_records.size());
+	for (size_t i = 0; i < impl_->file.group_records.size(); ++i) {
+		GroupFields g;
+		get_group(i, g);
+		out.push_back(g);
+	}
+	return out;
+}
+
+bool MissionDocument::set_group(size_t index, int field0, int field8, int field12) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	if (index >= impl_->file.group_records.size()) {
+		impl_->last_error = "Group index out of range";
+		return false;
+	}
+	// Only the three loader-consumed ints are written; the other 20 bytes are preserved so the record
+	// round-trips. [orig: Mission_LoadBMSFile @0x40fbbb keeps offsets 0/8/12]
+	uint8_t *raw = impl_->file.group_records[index].raw_data;
+	write_i32_at(raw, 0, static_cast<int32_t>(field0));
+	write_i32_at(raw, 8, static_cast<int32_t>(field8));
+	write_i32_at(raw, 12, static_cast<int32_t>(field12));
+	return true;
 }
 
 size_t MissionDocument::event_count() const {
@@ -1928,6 +2470,68 @@ bool MissionDocument::move_event_action(size_t event_index, size_t local_index, 
 	return true;
 }
 
+bool MissionDocument::add_event(const MissionEventRecord &record, MissionEventRecord *out) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	bms::Event event = {};
+	apply_event_record(event, record);
+	// A fresh event owns no triggers/actions; the index/count fields stay zero until the caller adds
+	// entries via insert_event_trigger/insert_event_action (each assigns the global index on first add).
+	event.trigger_index = 0;
+	event.action_index = 0;
+	event.trigger_count = 0;
+	event.action_count = 0;
+	impl_->file.events.push_back(event);
+	sync_counts();
+	if (out != nullptr) {
+		*out = to_event_record(impl_->file.events.back(), impl_->file.events.size() - 1);
+	}
+	return true;
+}
+
+bool MissionDocument::remove_event(size_t index) {
+	if (!impl_->loaded) {
+		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	if (index >= impl_->file.events.size()) {
+		impl_->last_error = "Mission event index out of range";
+		return false;
+	}
+	// Drain the event's triggers and actions through the single-element removers, which fix up every
+	// other event's trigger_index / action_index exactly as a normal trigger/action delete would. The
+	// break is an infinite-loop guard: a remover only fails on an already-malformed (invalid-range) event.
+	while (impl_->file.events[index].trigger_count > 0) {
+		if (!remove_event_trigger(index, 0)) {
+			break;
+		}
+	}
+	while (impl_->file.events[index].action_count > 0) {
+		if (!remove_event_action(index, 0)) {
+			break;
+		}
+	}
+	// Repair ResetEvent action references (param1 = event index, the one proven cross-reference): events
+	// after the hole shift down by one; a reference to the removed event becomes dangling (-1), which
+	// get_event_chain then flags as out-of-range. (Area-trigger refs are left alone because their index
+	// semantics are still under RE; here the semantics are proven, so the repair is safe.)
+	for (bms::Action &action : impl_->file.actions) {
+		if (action.action_type != bms::ActionType::ResetEvent) {
+			continue;
+		}
+		if (action.param1 > static_cast<int32_t>(index)) {
+			action.param1 -= 1;
+		} else if (action.param1 == static_cast<int32_t>(index)) {
+			action.param1 = -1;
+		}
+	}
+	impl_->file.events.erase(impl_->file.events.begin() + static_cast<std::ptrdiff_t>(index));
+	sync_counts();
+	return true;
+}
+
 bool MissionDocument::get_event_chain(size_t index, MissionEventChain &out) const {
 	out = {};
 	if (!impl_->loaded || index >= impl_->file.events.size()) {
@@ -1995,6 +2599,83 @@ MissionLogicSummary MissionDocument::logic_summary() const {
 	return out;
 }
 
+namespace {
+
+// True when a name-mapping switch named the probed value (anything other than the "Unknown(N)" fallback
+// from unknown_label). The reflectors below keep only named values, so the dropdowns track bms.h.
+bool is_named_enum_value(const std::string &name) {
+	return name.rfind("Unknown(", 0) != 0;
+}
+
+} // namespace
+
+std::vector<MissionEnumEntry> MissionDocument::trigger_main_types() const {
+	std::vector<MissionEnumEntry> out;
+	for (int value = 0; value <= 15; ++value) {
+		std::string name = trigger_main_type_name(value);
+		if (is_named_enum_value(name)) {
+			out.push_back({value, name});
+		}
+	}
+	return out;
+}
+
+std::vector<MissionEnumEntry> MissionDocument::trigger_sub_types(int main_type) const {
+	std::vector<MissionEnumEntry> out;
+	// Sub-type values are non-contiguous (e.g. SingleTriggerType jumps 17 -> 42); probe wide and keep
+	// the named ones so the editor lists exactly the engine's accepted sub-types for this main type.
+	for (int value = 0; value <= 63; ++value) {
+		std::string name = trigger_sub_type_name(main_type, value);
+		if (is_named_enum_value(name)) {
+			out.push_back({value, name});
+		}
+	}
+	return out;
+}
+
+std::vector<MissionEnumEntry> MissionDocument::action_types() const {
+	std::vector<MissionEnumEntry> out;
+	for (int value = 0; value <= 63; ++value) {
+		std::string name = action_type_name(value);
+		if (is_named_enum_value(name)) {
+			out.push_back({value, name});
+		}
+	}
+	return out;
+}
+
+std::vector<MissionEnumEntry> MissionDocument::action_sub_types(int action_type) const {
+	std::vector<MissionEnumEntry> out;
+	for (int value = 0; value <= 63; ++value) {
+		std::string name = action_sub_type_name(action_type, value);
+		if (is_named_enum_value(name)) {
+			out.push_back({value, name});
+		}
+	}
+	return out;
+}
+
+std::vector<MissionEnumEntry> MissionDocument::event_flag_bits() const {
+	// The three author-facing event flags, matching the DFX2 editor's checkboxes EXACTLY. The earlier
+	// "Unknown (16)" / "Unknown (32)" entries were speculative: the original editor exposes no checkbox for
+	// bit 0x08 or above and preserves those bits verbatim, so we drop them here and let event_flag_mask /
+	// set_event preserve every non-author bit. [orig: Med_EventDialogPopulate @0x411690 (CheckDlgButton
+	// 4203/4212/4213), Med_EventDialogCommit @0x4118d0 (sets bits 0/1/2 only). dfx2med.exe]
+	return {
+			{static_cast<int>(bms::EventFlags::ResetAfter), "Reset after"},
+			{static_cast<int>(bms::EventFlags::PreMission), "Pre-mission"},
+			{static_cast<int>(bms::EventFlags::PostMission), "Post-mission"},
+	};
+}
+
+int MissionDocument::event_flag_mask() const {
+	int mask = 0;
+	for (const MissionEnumEntry &entry : event_flag_bits()) {
+		mask |= entry.value;
+	}
+	return mask;
+}
+
 const bms::File &MissionDocument::bms_file() const {
 	return impl_->file;
 }
@@ -2011,6 +2692,7 @@ void MissionDocument::sync_counts() {
 	impl_->file.header.num_events = static_cast<uint32_t>(impl_->file.events.size());
 	impl_->file.header.area_trigger_count = static_cast<int16_t>(impl_->file.area_triggers.size());
 	impl_->file.header.weapon_loadout_chunk_len = static_cast<uint16_t>(impl_->file.loadout.raw_data.size());
+	impl_->file.header.secondary_chunk_len = static_cast<uint16_t>(impl_->file.secondary_chunk.size());
 	impl_->file.events_count = static_cast<int32_t>(impl_->file.events.size());
 	impl_->file.trigger_count = static_cast<int32_t>(impl_->file.triggers.size());
 	impl_->file.action_count = static_cast<int32_t>(impl_->file.actions.size());
@@ -2024,6 +2706,14 @@ void MissionDocument::sync_counts() {
 	}
 	if (impl_->file.layer_records.empty()) {
 		impl_->file.layer_records.resize(bms::kLayerRecordCount);
+	}
+	// A freshly-resized WaypointRecord has empty padding, so the writer emits a short
+	// (8-byte) record that no longer reparses (parse expects the fixed 136-byte record).
+	// Normalize every record's padding to the 128-byte payload (128 - markers*4), matching
+	// parse_waypoint_record. Idempotent for already-loaded records, so byte-exact
+	// round-trips are preserved; it is the from-scratch (create_default) path that needs it.
+	for (bms::WaypointRecord &record : impl_->file.waypoint_records) {
+		resize_waypoint_padding(record, /*preserve_over_count=*/true); // pure round-trip: keep a shipped over-count
 	}
 }
 
@@ -2048,6 +2738,12 @@ MISSION_EXPORT void opennova_mission_destroy(OpenNovaMissionDocument *document) 
 void opennova_mission_clear(OpenNovaMissionDocument *document) {
 	if (document != nullptr) {
 		document->document.clear();
+	}
+}
+
+MISSION_EXPORT void opennova_mission_create_default(OpenNovaMissionDocument *document) {
+	if (document != nullptr) {
+		document->document.create_default();
 	}
 }
 
@@ -2228,8 +2924,21 @@ int opennova_mission_set_entity_properties(OpenNovaMissionDocument *document,
 	if (!from_int_kind(kind, entity_kind)) {
 		return 0;
 	}
+	// set_entity_properties overwrites the whole record. The C-ABI struct can't carry name1/name2
+	// (std::string) or the no_less_than/map_symbol ints, so from_c_properties leaves them default;
+	// seed those four from the current record first so this bulk setter preserves them instead of
+	// zeroing/clearing them. (The GDScript editor path is unaffected: it sets fields individually via
+	// set_entity_property_int/_string, which seed the full set from properties_from_record.)
+	opennova::mission::EntityProperties props = from_c_properties(*properties);
+	opennova::mission::EntityRecord current;
+	if (document->document.get_entity(entity_kind, index, current)) {
+		props.no_less_than = current.no_less_than;
+		props.map_symbol = current.map_symbol;
+		props.name1 = current.name1;
+		props.name2 = current.name2;
+	}
 	opennova::mission::EntityRecord record;
-	if (!document->document.set_entity_properties(entity_kind, index, from_c_properties(*properties), &record)) {
+	if (!document->document.set_entity_properties(entity_kind, index, props, &record)) {
 		return 0;
 	}
 	if (out_record != nullptr) {
@@ -2405,6 +3114,121 @@ int opennova_mission_get_area_trigger(const OpenNovaMissionDocument *document,
 	}
 	copy_area_trigger(*out_record, record);
 	return 1;
+}
+
+int opennova_mission_add_area_trigger(OpenNovaMissionDocument *document,
+                                      const OpenNovaMissionAreaTriggerRecord *record,
+                                      OpenNovaMissionAreaTriggerRecord *out_record) {
+	if (document == nullptr || record == nullptr) {
+		return 0;
+	}
+	opennova::mission::AreaTriggerRecord out;
+	if (!document->document.add_area_trigger(from_c_area_trigger(*record), &out)) {
+		return 0;
+	}
+	if (out_record != nullptr) {
+		copy_area_trigger(*out_record, out);
+	}
+	return 1;
+}
+
+int opennova_mission_set_area_trigger(OpenNovaMissionDocument *document,
+                                      size_t index,
+                                      const OpenNovaMissionAreaTriggerRecord *record,
+                                      OpenNovaMissionAreaTriggerRecord *out_record) {
+	if (document == nullptr || record == nullptr) {
+		return 0;
+	}
+	opennova::mission::AreaTriggerRecord out;
+	if (!document->document.set_area_trigger(index, from_c_area_trigger(*record), &out)) {
+		return 0;
+	}
+	if (out_record != nullptr) {
+		copy_area_trigger(*out_record, out);
+	}
+	return 1;
+}
+
+int opennova_mission_remove_area_trigger(OpenNovaMissionDocument *document, size_t index) {
+	if (document == nullptr) {
+		return 0;
+	}
+	return document->document.remove_area_trigger(index) ? 1 : 0;
+}
+
+size_t opennova_mission_weapon_loadout_count(const OpenNovaMissionDocument *document) {
+	if (document == nullptr || !document->document.is_loaded()) {
+		return 0;
+	}
+	return document->document.weapon_loadout().size();
+}
+
+int opennova_mission_get_weapon_loadout_entry(const OpenNovaMissionDocument *document,
+                                              size_t index,
+                                              OpenNovaMissionWeaponLoadoutEntry *out_entry) {
+	if (document == nullptr || out_entry == nullptr) {
+		return 0;
+	}
+	const std::vector<WeaponLoadoutEntry> entries = document->document.weapon_loadout();
+	if (index >= entries.size()) {
+		return 0;
+	}
+	const WeaponLoadoutEntry &entry = entries[index];
+	copy_cstr(out_entry->name, sizeof(out_entry->name), entry.name);
+	copy_cstr(out_entry->value1, sizeof(out_entry->value1), entry.value1);
+	copy_cstr(out_entry->value2, sizeof(out_entry->value2), entry.value2);
+	return 1;
+}
+
+int opennova_mission_set_weapon_loadout(OpenNovaMissionDocument *document,
+                                        const OpenNovaMissionWeaponLoadoutEntry *entries,
+                                        size_t count) {
+	if (document == nullptr || (entries == nullptr && count > 0)) {
+		return 0;
+	}
+	std::vector<WeaponLoadoutEntry> records;
+	records.reserve(count);
+	for (size_t i = 0; i < count; ++i) {
+		WeaponLoadoutEntry record;
+		record.name = fixed_string(entries[i].name, sizeof(entries[i].name));
+		record.value1 = fixed_string(entries[i].value1, sizeof(entries[i].value1));
+		record.value2 = fixed_string(entries[i].value2, sizeof(entries[i].value2));
+		records.push_back(std::move(record));
+	}
+	return document->document.set_weapon_loadout(records) ? 1 : 0;
+}
+
+size_t opennova_mission_group_count(const OpenNovaMissionDocument *document) {
+	if (document == nullptr || !document->document.is_loaded()) {
+		return 0;
+	}
+	return document->document.group_count();
+}
+
+int opennova_mission_get_group(const OpenNovaMissionDocument *document,
+                               size_t index,
+                               OpenNovaMissionGroupRecord *out_record) {
+	if (document == nullptr || out_record == nullptr) {
+		return 0;
+	}
+	GroupFields fields;
+	if (!document->document.get_group(index, fields)) {
+		return 0;
+	}
+	out_record->index = fields.index;
+	out_record->field0 = fields.field0;
+	out_record->field8 = fields.field8;
+	out_record->field12 = fields.field12;
+	return 1;
+}
+
+int opennova_mission_set_group(OpenNovaMissionDocument *document,
+                               size_t index,
+                               int field0, int field8, int field12) {
+	if (document == nullptr) {
+		return 0;
+	}
+	return document->document.set_group(index, field0, field8, field12) ? 1 : 0;
 }
 
 size_t opennova_mission_event_count(const OpenNovaMissionDocument *document) {

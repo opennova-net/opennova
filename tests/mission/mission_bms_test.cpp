@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -334,6 +335,464 @@ int main() {
 	TEST_EXPECT(mis_text.find("  position ") != std::string::npos);
 	TEST_EXPECT(mis_text.find("begin event 0\r\n") != std::string::npos);
 	TEST_EXPECT(mis_text.find("//bms") == std::string::npos);
+
+	// --- Phase 0: version gate. Engine rejects magic[3] < 19 (@0x40f5aa); the magic sniff
+	// (is_bms) still passes because the gate lives in the loader, mirroring the engine. ---
+	{
+		std::vector<uint8_t> bad_version(original);
+		bad_version[3] = 18;
+		opennova::bms::File rejected;
+		std::string gate_error;
+		TEST_EXPECT(opennova::bms::is_bms(bad_version.data(), bad_version.size()));
+		TEST_EXPECT(!opennova::bms::parse(bad_version.data(), bad_version.size(), rejected, gate_error));
+		TEST_EXPECT(!gate_error.empty());
+		bad_version[3] = 19;
+		opennova::bms::File accepted;
+		TEST_EXPECT(opennova::bms::parse(bad_version.data(), bad_version.size(), accepted, gate_error));
+	}
+
+	// --- Phase 0: the second loadout chunk (word_A76416 @hdr+0x246) is consumed, keeping every
+	// later section aligned. The fixture has none, so inject one and confirm round-trip + alignment. ---
+	{
+		opennova::bms::File with_chunk;
+		std::string chunk_error;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), with_chunk, chunk_error));
+		TEST_EXPECT(with_chunk.secondary_chunk.empty());
+		with_chunk.secondary_chunk = {0xDE, 0xAD, 0xBE, 0xEF, 0x01};
+		with_chunk.header.secondary_chunk_len = static_cast<uint16_t>(with_chunk.secondary_chunk.size());
+		std::vector<uint8_t> chunk_bytes;
+		TEST_EXPECT(opennova::bms::write(with_chunk, chunk_bytes, chunk_error));
+		opennova::bms::File chunk_reparsed;
+		TEST_EXPECT(opennova::bms::parse(chunk_bytes.data(), chunk_bytes.size(), chunk_reparsed, chunk_error));
+		TEST_EXPECT(chunk_reparsed.secondary_chunk == with_chunk.secondary_chunk);
+		// Sections after the chunk stay aligned: counts and the first item match the no-chunk parse.
+		TEST_EXPECT(chunk_reparsed.items.size() == with_chunk.items.size());
+		TEST_EXPECT(chunk_reparsed.markers.size() == with_chunk.markers.size());
+		TEST_EXPECT(chunk_reparsed.area_triggers.size() == with_chunk.area_triggers.size());
+		TEST_EXPECT(chunk_reparsed.events.size() == with_chunk.events.size());
+		if (!with_chunk.items.empty()) {
+			TEST_EXPECT(chunk_reparsed.items[0].type_id == with_chunk.items[0].type_id);
+			TEST_EXPECT(chunk_reparsed.items[0].x == with_chunk.items[0].x);
+		}
+	}
+
+	// --- Phase 0: area-trigger 32-byte record is interleaved per axis (x_min,x_max,y_min,y_max,
+	// z_min,z_max,flags), NOT min-triple/max-triple, and there is no Y/Z swap (@0x43c75c). ---
+	{
+		opennova::bms::File at_file;
+		std::string at_error;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), at_file, at_error));
+		opennova::bms::AreaTrigger trig{};
+		trig.id = 7;
+		trig.x_min = 100; trig.x_max = 200;
+		trig.y_min = 300; trig.y_max = 400;
+		trig.z_min = 500; trig.z_max = 600;
+		trig.flags = 0x3; // active + constrain-Z
+		at_file.area_triggers.push_back(trig);
+		at_file.header.area_trigger_count = static_cast<int16_t>(at_file.area_triggers.size());
+		std::vector<uint8_t> at_bytes;
+		TEST_EXPECT(opennova::bms::write(at_file, at_bytes, at_error));
+		opennova::bms::File at_reparsed;
+		TEST_EXPECT(opennova::bms::parse(at_bytes.data(), at_bytes.size(), at_reparsed, at_error));
+		TEST_EXPECT(at_reparsed.area_triggers.size() == 1);
+		const opennova::bms::AreaTrigger &rt = at_reparsed.area_triggers[0];
+		TEST_EXPECT(rt.id == 7);
+		TEST_EXPECT(rt.x_min == 100 && rt.x_max == 200);
+		TEST_EXPECT(rt.y_min == 300 && rt.y_max == 400);
+		TEST_EXPECT(rt.z_min == 500 && rt.z_max == 600);
+		TEST_EXPECT(rt.flags == 0x3u);
+		TEST_EXPECT(rt.is_active());
+		TEST_EXPECT(rt.constrains_z());
+		// Per-axis min<max preserved (a wrong min-triple/max-triple layout would scramble these).
+		TEST_EXPECT(rt.get_x_min() < rt.get_x_max());
+		TEST_EXPECT(rt.get_y_min() < rt.get_y_max());
+		TEST_EXPECT(rt.get_z_min() < rt.get_z_max());
+		// Events after the area-trigger section are still aligned.
+		TEST_EXPECT(at_reparsed.events.size() == at_file.events.size());
+	}
+
+	// --- Phase 1: mission-header editing round-trips through save/reload ---
+	{
+		opennova::mission::MissionDocument hdr;
+		TEST_EXPECT(hdr.load_bms_bytes(original.data(), original.size()));
+		TEST_EXPECT(hdr.set_header_string("mission_name", "Grill Test"));
+		TEST_EXPECT(hdr.set_header_int("climate", 2));
+		TEST_EXPECT(hdr.set_header_int("minutes_per_day", 1234));
+		const int coop_bit = 0x1000000; // ATTRIB_COOP
+		TEST_EXPECT(hdr.set_header_flag(coop_bit, true));
+		TEST_EXPECT(!hdr.set_header_string("nonexistent_field", "x")); // unknown rejected
+		std::vector<uint8_t> hdr_bytes;
+		TEST_EXPECT(hdr.write_bms_bytes(hdr_bytes));
+		opennova::mission::MissionDocument hdr_reload;
+		TEST_EXPECT(hdr_reload.load_bms_bytes(hdr_bytes.data(), hdr_bytes.size()));
+		const opennova::mission::MissionInfo reread_info = hdr_reload.info();
+		TEST_EXPECT(reread_info.mission_name == "Grill Test");
+		TEST_EXPECT(reread_info.climate == 2);
+		TEST_EXPECT(reread_info.minutes_per_day == 1234);
+		TEST_EXPECT((reread_info.attrib_flags & coop_bit) != 0);
+	}
+
+	// --- Regression (review): the terrain slot is a fixed 16-byte field (first of the three
+	// 16-byte slots in header.terrain[48]: terrain / cnv_file / tt_file). copy_cstr used to force a
+	// NUL into byte 15 and truncate a full 16-char terrain name on every edit; copy_fixed_field
+	// keeps all 16, and the info()/get_terrain reads are bounded to 16 so a full slot does not bleed
+	// into cnv_file. Editing terrain must also leave cnv_file / tt_file untouched. ---
+	{
+		opennova::mission::MissionDocument doc;
+		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+		// Seed cnv_file (@+16) and tt_file (@+32) so we can prove a terrain edit preserves them.
+		char *terrain_region = doc.bms_file().header.terrain;
+		std::memcpy(terrain_region + 16, "convert.cnv", 11);
+		terrain_region[16 + 11] = '\0';
+		std::memcpy(terrain_region + 32, "tiles.tt", 8);
+		terrain_region[32 + 8] = '\0';
+
+		const std::string full16 = "sixteen_char_ter"; // exactly 16 chars, fills the slot
+		TEST_EXPECT(full16.size() == 16);
+		TEST_EXPECT(doc.set_header_string("terrain", full16));
+
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(doc.write_bms_bytes(bytes));
+		opennova::mission::MissionDocument reload;
+		TEST_EXPECT(reload.load_bms_bytes(bytes.data(), bytes.size()));
+		// All 16 chars survive and do not run on into cnv_file.
+		TEST_EXPECT(reload.info().terrain == full16);
+		TEST_EXPECT(reload.bms_file().get_terrain() == full16);
+		// cnv_file / tt_file are untouched by the terrain edit.
+		const char *reload_region = reload.bms_file().header.terrain;
+		TEST_EXPECT(std::string(reload_region + 16) == "convert.cnv");
+		TEST_EXPECT(std::string(reload_region + 32) == "tiles.tt");
+
+		// A name longer than 16 is cut to the slot; a shorter name still round-trips.
+		TEST_EXPECT(doc.set_header_string("terrain", "way_too_long_terrain_name"));
+		TEST_EXPECT(doc.info().terrain == "way_too_long_ter"); // 16 chars
+		TEST_EXPECT(doc.set_header_string("terrain", "short"));
+		TEST_EXPECT(doc.info().terrain == "short");
+	}
+
+	// --- Phase 1: hidden entity fields (name1/name2/no_less_than/map_symbol) round-trip,
+	// and the names use the format's full 8-byte slot (a name longer than 8 is cut to 8). ---
+	{
+		opennova::mission::MissionDocument doc;
+		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+		opennova::mission::EntityRecord rec;
+		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, rec));
+		opennova::mission::EntityProperties props; // seed from current record (overwrites all)
+		props.group_id = rec.group_id;
+		props.waypoint_id = rec.waypoint_id;
+		props.wp_number = rec.wp_number;
+		props.team = rec.team;
+		props.ai_flags = rec.ai_flags;
+		props.perception = rec.perception;
+		props.accuracy = rec.accuracy;
+		props.alert_state = rec.alert_state;
+		props.min_engagement_distance = rec.min_engagement_distance;
+		props.max_engagement_distance = rec.max_engagement_distance;
+		props.max_attack_distance = rec.max_attack_distance;
+		props.spawn_count = rec.spawn_count;
+		props.max_simultaneous = rec.max_simultaneous;
+		props.no_less_than = 9;
+		props.map_symbol = 17;
+		props.name1 = "rifle";
+		props.name2 = "patrol";
+		TEST_EXPECT(doc.set_entity_properties(opennova::mission::EntityKind::Item, 0, props, nullptr));
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(doc.write_bms_bytes(bytes));
+		opennova::mission::MissionDocument reload;
+		TEST_EXPECT(reload.load_bms_bytes(bytes.data(), bytes.size()));
+		opennova::mission::EntityRecord rec2;
+		TEST_EXPECT(reload.get_entity(opennova::mission::EntityKind::Item, 0, rec2));
+		TEST_EXPECT(rec2.no_less_than == 9);
+		TEST_EXPECT(rec2.map_symbol == 17);
+		TEST_EXPECT(rec2.name1 == "rifle");
+		TEST_EXPECT(rec2.name2 == "patrol");
+		TEST_EXPECT(rec2.max_simultaneous == rec.max_simultaneous); // no_more_than preserved
+		// An exactly-8-char name keeps all 8 bytes: copy_cstr used to force a NUL into byte 7 and
+		// drop the 8th char, silently corrupting an unedited AI class name on every property edit.
+		props.name1 = "rifleman"; // 8 chars
+		TEST_EXPECT(doc.set_entity_properties(opennova::mission::EntityKind::Item, 0, props, nullptr));
+		opennova::mission::EntityRecord rec_full;
+		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, rec_full));
+		TEST_EXPECT(rec_full.name1 == "rifleman");
+		props.name1 = "verylongname"; // > 8 chars -> cut to the 8-byte slot
+		TEST_EXPECT(doc.set_entity_properties(opennova::mission::EntityKind::Item, 0, props, nullptr));
+		opennova::mission::EntityRecord rec3;
+		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, rec3));
+		TEST_EXPECT(rec3.name1 == "verylong");
+		TEST_EXPECT(rec3.name1.size() == 8);
+	}
+
+	// --- Regression (review): set_entity_property_int / _string edit one named field and leave the
+	// rest intact, the name->member mapping owning the field list in one place (mirrors set_header_*).
+	{
+		opennova::mission::MissionDocument doc;
+		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+		opennova::mission::EntityRecord before;
+		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, before));
+		// `group` is the one key whose member name differs (group_id).
+		TEST_EXPECT(doc.set_entity_property_int(opennova::mission::EntityKind::Item, 0, "group", 5));
+		TEST_EXPECT(doc.set_entity_property_int(opennova::mission::EntityKind::Item, 0, "map_symbol", 22));
+		TEST_EXPECT(doc.set_entity_property_string(opennova::mission::EntityKind::Item, 0, "name1", "scout"));
+		opennova::mission::EntityRecord after;
+		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, after));
+		TEST_EXPECT(after.group_id == 5);
+		TEST_EXPECT(after.map_symbol == 22);
+		TEST_EXPECT(after.name1 == "scout");
+		// Untouched fields are preserved (only the requested members changed).
+		TEST_EXPECT(after.team == before.team);
+		TEST_EXPECT(after.accuracy == before.accuracy);
+		TEST_EXPECT(after.name2 == before.name2);
+		TEST_EXPECT(after.max_engagement_distance == before.max_engagement_distance);
+		// Unknown names are rejected (not silently ignored), with last_error set.
+		TEST_EXPECT(!doc.set_entity_property_int(opennova::mission::EntityKind::Item, 0, "bogus_field", 1));
+		TEST_EXPECT(!doc.last_error().empty());
+		TEST_EXPECT(!doc.set_entity_property_string(opennova::mission::EntityKind::Item, 0, "name3", "x"));
+		// Out-of-range index is rejected.
+		TEST_EXPECT(!doc.set_entity_property_int(opennova::mission::EntityKind::Item, 99999, "team", 1));
+	}
+
+	// --- Regression (review): event reset_after/delay round-trip across the full 0..1023 range.
+	// The values pack into the upper 10 bits; the old signed `value << 22` was UB for value >= 512
+	// (1023 << 22 overflows INT32_MAX) and the signed `>> 22` read sign-extended to a negative. ---
+	{
+		opennova::bms::File f;
+		std::string err;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), f, err));
+		if (f.events.empty()) {
+			f.events.push_back(opennova::bms::Event{});
+			f.events_count = 1;
+		}
+		f.events[0].reset_after = 1023;
+		f.events[0].delay = 600;
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(opennova::bms::write(f, bytes, err));
+		opennova::bms::File reparsed;
+		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
+		TEST_EXPECT(!reparsed.events.empty());
+		TEST_EXPECT(reparsed.events[0].reset_after == 1023);
+		TEST_EXPECT(reparsed.events[0].delay == 600);
+	}
+
+	// --- Regression (review): a corrupt pool count fails the parse cleanly instead of crashing. A
+	// huge num_items would otherwise make vector::resize() throw an uncaught length_error/bad_alloc. ---
+	{
+		std::vector<uint8_t> corrupt = original;
+		const size_t off = offsetof(opennova::bms::Header, num_items);
+		corrupt[off + 0] = 0xFF;
+		corrupt[off + 1] = 0xFF;
+		corrupt[off + 2] = 0xFF;
+		corrupt[off + 3] = 0xFF;
+		opennova::bms::File f;
+		std::string err;
+		TEST_EXPECT(!opennova::bms::parse(corrupt.data(), corrupt.size(), f, err));
+	}
+
+	// --- Regression (review #3): an empty-name loadout entry is REJECTED (set_weapon_loadout returns
+	// false and leaves the loadout untouched), not silently dropped. The format serializes an empty name
+	// as the chunk terminator, so a nameless weapon cannot be stored; silently skipping the row was itself
+	// data loss (blanking a mid-list weapon's name deleted that weapon with no warning). ---
+	{
+		opennova::mission::MissionDocument doc;
+		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+		// Establish a known-good two-weapon loadout first.
+		std::vector<opennova::mission::WeaponLoadoutEntry> good;
+		good.push_back({"WPN_A", "-1", "-1"});
+		good.push_back({"WPN_B", "-1", "-1"});
+		TEST_EXPECT(doc.set_weapon_loadout(good));
+		TEST_EXPECT(doc.weapon_loadout().size() == 2);
+		// An edit that blanks a mid-list name is rejected; the loadout is left exactly as it was.
+		std::vector<opennova::mission::WeaponLoadoutEntry> with_blank;
+		with_blank.push_back({"WPN_A", "-1", "-1"});
+		with_blank.push_back({"", "-1", "-1"}); // blanked name -> reject the whole edit, no silent drop
+		with_blank.push_back({"WPN_B", "-1", "-1"});
+		TEST_EXPECT(!doc.set_weapon_loadout(with_blank));
+		const std::vector<opennova::mission::WeaponLoadoutEntry> reread = doc.weapon_loadout();
+		TEST_EXPECT(reread.size() == 2);
+		TEST_EXPECT(reread[0].name == "WPN_A");
+		TEST_EXPECT(reread[1].name == "WPN_B");
+		// Deleting every weapon (an empty list) is still valid: the chunk goes to length 0.
+		TEST_EXPECT(doc.set_weapon_loadout({}));
+		TEST_EXPECT(doc.weapon_loadout().empty());
+	}
+
+	// --- From-scratch: create_default() builds a valid, empty mission that round-trips. This is
+	// the first path that writes freshly-resized waypoint records, so it guards the sync_counts
+	// padding backfill (without it the writer emits 8-byte waypoint records that fail to reparse). ---
+	{
+		opennova::mission::MissionDocument fresh;
+		fresh.create_default();
+		TEST_EXPECT(fresh.is_loaded());
+		TEST_EXPECT(fresh.source_path().empty());
+		TEST_EXPECT(fresh.entity_count(opennova::mission::EntityKind::Item) == 0);
+		TEST_EXPECT(fresh.entity_count(opennova::mission::EntityKind::Marker) == 0);
+		std::vector<uint8_t> fresh_bytes;
+		TEST_EXPECT(fresh.write_bms_bytes(fresh_bytes));
+		TEST_EXPECT(opennova::bms::is_bms(fresh_bytes.data(), fresh_bytes.size()));
+		opennova::bms::File fresh_parsed;
+		std::string fresh_err;
+		TEST_EXPECT(opennova::bms::parse(fresh_bytes.data(), fresh_bytes.size(), fresh_parsed, fresh_err));
+		TEST_EXPECT(fresh_parsed.waypoint_records.size() == opennova::bms::kWaypointRecordCount);
+		TEST_EXPECT(fresh_parsed.group_records.size() == opennova::bms::kGroupRecordCount);
+		TEST_EXPECT(fresh_parsed.layer_records.size() == opennova::bms::kLayerRecordCount);
+		TEST_EXPECT(fresh_parsed.header.num_items == 0);
+		TEST_EXPECT(fresh_parsed.events.empty());
+		// Reparse + rewrite is byte-stable (the snapshot/restore parity the editor relies on).
+		opennova::mission::MissionDocument fresh_round;
+		TEST_EXPECT(fresh_round.load_bms_bytes(fresh_bytes.data(), fresh_bytes.size()));
+		std::vector<uint8_t> rewritten;
+		TEST_EXPECT(fresh_round.write_bms_bytes(rewritten));
+		TEST_EXPECT(rewritten == fresh_bytes);
+		// A from-scratch mission can adopt a terrain ref and round-trip it.
+		TEST_EXPECT(fresh.set_header_string("terrain", "dvxi5"));
+		std::vector<uint8_t> ref_bytes;
+		TEST_EXPECT(fresh.write_bms_bytes(ref_bytes));
+		opennova::mission::MissionDocument ref_reload;
+		TEST_EXPECT(ref_reload.load_bms_bytes(ref_bytes.data(), ref_bytes.size()));
+		TEST_EXPECT(ref_reload.info().terrain == "dvxi5");
+	}
+
+	// --- bms::equal: the editor's undo / dirty change-detection. Identity holds across a copy; a
+	// scalar, header, structural, or waypoint-record difference is detected; it agrees with
+	// serialized-bytes equality; two independently-built defaults compare equal. ---
+	{
+		opennova::bms::File base;
+		std::string err;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), base, err));
+		opennova::bms::File copy = base;
+		TEST_EXPECT(opennova::bms::equal(base, copy));
+		if (!copy.items.empty()) {
+			copy.items[0].x += 1;
+			TEST_EXPECT(!opennova::bms::equal(base, copy));
+			copy.items[0].x -= 1;
+			TEST_EXPECT(opennova::bms::equal(base, copy)); // restored -> equal again
+		}
+		opennova::bms::File hdr_changed = base;
+		hdr_changed.header.minutes_per_day = static_cast<uint16_t>(hdr_changed.header.minutes_per_day + 1);
+		TEST_EXPECT(!opennova::bms::equal(base, hdr_changed));
+		opennova::bms::File grew = base;
+		grew.items.push_back(opennova::bms::Entity{});
+		TEST_EXPECT(!opennova::bms::equal(base, grew));
+		opennova::bms::File wp_changed = base;
+		TEST_EXPECT(!wp_changed.waypoint_records.empty());
+		wp_changed.waypoint_records[0].flags = static_cast<opennova::bms::WaypointFlags>(
+			static_cast<int>(wp_changed.waypoint_records[0].flags) ^ 1);
+		TEST_EXPECT(!opennova::bms::equal(base, wp_changed));
+		// equal() agrees with serialized-bytes equality.
+		std::vector<uint8_t> base_bytes, grew_bytes;
+		TEST_EXPECT(opennova::bms::write(base, base_bytes, err));
+		TEST_EXPECT(opennova::bms::write(grew, grew_bytes, err));
+		TEST_EXPECT((base_bytes == grew_bytes) == opennova::bms::equal(base, grew));
+		// Two independently-built defaults serialize identically, so they compare equal.
+		opennova::mission::MissionDocument d1;
+		opennova::mission::MissionDocument d2;
+		d1.create_default();
+		d2.create_default();
+		TEST_EXPECT(opennova::bms::equal(d1.bms_file(), d2.bms_file()));
+	}
+
+	// --- Regression (review): a waypoint marker_count > 32 (the 32-slot capacity) survives a
+	// MissionDocument load/save. parse preserves a shipped over-count (CP19.bms ships 39) verbatim, but
+	// sync_counts used to clobber it to the slot count on every load/save, breaking byte-exact round-trip.
+	{
+		opennova::mission::MissionDocument doc;
+		doc.create_default();
+		opennova::bms::File &f = doc.bms_file();
+		TEST_EXPECT(!f.waypoint_records.empty());
+		f.waypoint_records[0].waypoint_numbers.assign(opennova::mission::kMaxWaypointPathMarkers, 7u); // saturate the 32 slots
+		f.waypoint_records[0].marker_count = 39;                                                       // the shipped over-count
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(doc.write_bms_bytes(bytes)); // runs sync_counts -> must preserve the saturated over-count
+		opennova::bms::File reparsed;
+		std::string err;
+		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
+		TEST_EXPECT(reparsed.waypoint_records[0].marker_count == 39);
+		// But a count that drops below the cap is meaningless as an over-count, so it resyncs to the slots.
+		doc.bms_file().waypoint_records[0].waypoint_numbers.assign(5, 7u);
+		doc.bms_file().waypoint_records[0].marker_count = 39; // stale over-count, now only 5 slots
+		std::vector<uint8_t> bytes2;
+		TEST_EXPECT(doc.write_bms_bytes(bytes2));
+		opennova::bms::File reparsed2;
+		TEST_EXPECT(opennova::bms::parse(bytes2.data(), bytes2.size(), reparsed2, err));
+		TEST_EXPECT(reparsed2.waypoint_records[0].marker_count == 5);
+	}
+
+	// --- Regression (review #1): an AUTHORED waypoint edit that keeps a path saturated at 32 markers must
+	// resync a shipped over-count (39) down to 32, NOT preserve it. The pure round-trip above keeps 39 for
+	// byte-exactness, but once the marker list is rewritten (reorder / flag-only / set_waypoint_path) the 39
+	// no longer describes the data and the engine would walk 7 phantom waypoints. apply_waypoint_path_to_record
+	// passes preserve_over_count=false so the count tracks the authored list. ---
+	{
+		opennova::mission::MissionDocument doc;
+		doc.create_default();
+		opennova::bms::File &f = doc.bms_file();
+		TEST_EXPECT(!f.waypoint_records.empty());
+		// 32 real markers so a full 32-index path validates.
+		f.markers.assign(opennova::mission::kMaxWaypointPathMarkers, opennova::bms::Entity{});
+		// Saturate path 0 at 32 slots and stamp the shipped over-count.
+		f.waypoint_records[0].waypoint_numbers.assign(opennova::mission::kMaxWaypointPathMarkers, 0u);
+		f.waypoint_records[0].marker_count = 39;
+		// An authored edit re-applies a (still 32-marker) list, e.g. a flag-only change.
+		std::vector<int> indices;
+		for (int i = 0; i < static_cast<int>(opennova::mission::kMaxWaypointPathMarkers); ++i) {
+			indices.push_back(i);
+		}
+		TEST_EXPECT(doc.set_waypoint_path(0, indices, 1, nullptr));
+		// Resynced in memory immediately, and it stays resynced through save/reparse (no over-count revival).
+		TEST_EXPECT(doc.bms_file().waypoint_records[0].marker_count == opennova::mission::kMaxWaypointPathMarkers);
+		std::vector<uint8_t> wbytes;
+		TEST_EXPECT(doc.write_bms_bytes(wbytes));
+		opennova::bms::File wreparsed;
+		std::string werr;
+		TEST_EXPECT(opennova::bms::parse(wbytes.data(), wbytes.size(), wreparsed, werr));
+		TEST_EXPECT(wreparsed.waypoint_records[0].marker_count == opennova::mission::kMaxWaypointPathMarkers);
+	}
+
+	// --- Regression (review): set_event / add_event clamp reset_after & delay to 0..1023 (their packed
+	// 10-bit range) at the library boundary, so an out-of-range value can't wrap on serialize. ---
+	{
+		opennova::mission::MissionDocument doc;
+		doc.create_default();
+		opennova::mission::MissionEventRecord rec; // zero-initialized
+		rec.delay = 2000;        // > 1023: would pack as (uint32)2000 << 22 (truncates) and reparse as 976
+		rec.reset_after = 5000;  // > 1023
+		opennova::mission::MissionEventRecord out;
+		TEST_EXPECT(doc.add_event(rec, &out));
+		TEST_EXPECT(out.delay == 1023);
+		TEST_EXPECT(out.reset_after == 1023);
+	}
+
+	// --- Regression (review): a secondary-chunk length larger than the bytes remaining fails the parse
+	// cleanly (count_fits guard) instead of silently zero-filling + mis-aligning every later section. ---
+	{
+		opennova::bms::File f;
+		std::string err;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), f, err));
+		f.header.secondary_chunk_len = 0xFFFF; // claim 64KB; secondary_chunk stays empty so the file under-runs
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(opennova::bms::write(f, bytes, err)); // raw writer emits the inflated length verbatim
+		opennova::bms::File reparsed;
+		TEST_EXPECT(!opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
+	}
+
+	// --- Regression (review): a loadout edit preserves any bytes the chunk carried past the canonical
+	// records + terminator (byte-exact round-trip for unchanged records; faithful tail otherwise). ---
+	{
+		opennova::mission::MissionDocument doc;
+		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+		// Inject a loadout chunk = one record + terminator + two trailing bytes.
+		doc.bms_file().loadout.raw_data = {
+			'W', 'P', 'N', '_', 'A', 0, '-', '1', 0, '-', '1', 0, // one record (name, value1, value2)
+			0,                                                     // empty-record terminator
+			0xAB, 0xCD,                                            // trailing bytes past the terminator
+		};
+		std::vector<opennova::mission::WeaponLoadoutEntry> entries = doc.weapon_loadout();
+		TEST_EXPECT(entries.size() == 1);
+		entries[0].value1 = "5"; // edit the loadout -> rewrites the chunk
+		TEST_EXPECT(doc.set_weapon_loadout(entries));
+		const std::vector<uint8_t> &raw = doc.bms_file().loadout.raw_data;
+		TEST_EXPECT(raw.size() >= 2);
+		TEST_EXPECT(raw[raw.size() - 2] == 0xAB && raw[raw.size() - 1] == 0xCD);
+	}
 
 	return 0;
 }

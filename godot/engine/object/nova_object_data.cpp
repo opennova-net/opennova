@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -1050,6 +1051,9 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_light_field", "index", "key", "value"), &NovaObjectData::set_light_field);
 	ClassDB::bind_method(D_METHOD("get_user_point_count"), &NovaObjectData::get_user_point_count);
 	ClassDB::bind_method(D_METHOD("get_user_point_info", "index"), &NovaObjectData::get_user_point_info);
+	ClassDB::bind_method(D_METHOD("get_ground_anchor", "lod_index"), &NovaObjectData::get_ground_anchor, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("has_collision"), &NovaObjectData::has_collision);
+	ClassDB::bind_method(D_METHOD("get_collision_volumes"), &NovaObjectData::get_collision_volumes);
 	ClassDB::bind_method(D_METHOD("get_part_anim_count", "lod_index"), &NovaObjectData::get_part_anim_count);
 	ClassDB::bind_method(D_METHOD("get_part_animations", "lod_index"), &NovaObjectData::get_part_animations);
 	ClassDB::bind_method(D_METHOD("get_part_anim_editor_entries", "lod_index"), &NovaObjectData::get_part_anim_editor_entries);
@@ -2199,11 +2203,86 @@ Dictionary NovaObjectData::get_user_point_info(int p_index) const {
 	return info;
 }
 
+Vector3 NovaObjectData::get_ground_anchor(int p_lod_index) const {
+	// The model-space point that should sit at a placed object's stored position:
+	// the "ground" userpoint if present, else part 0's bounding center (see
+	// threedi_ir_ground_anchor). The helper returns IR axis order; godot_vec3
+	// applies the single negate-x that maps it into render/model space, exactly as
+	// get_user_point_info / build_lod_submeshes do for userpoints and part origins.
+	if (!has_ir) {
+		return Vector3();
+	}
+	float anchor[3];
+	if (!threedi_ir_ground_anchor(&ir, p_lod_index, anchor)) {
+		return Vector3();
+	}
+	return godot_vec3(anchor);
+}
+
 int NovaObjectData::get_part_anim_count(int p_lod_index) const {
 	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
 		return 0;
 	}
 	return static_cast<int>(ir.lods[p_lod_index].part_animation_count);
+}
+
+bool NovaObjectData::has_collision() const {
+	return has_ir && ir.collision != nullptr && ir.collision->volume_count > 0;
+}
+
+Array NovaObjectData::get_collision_volumes() const {
+	// Expose the parsed collision bounding volumes (the engine's CB/CC collidable
+	// primitives) in Godot model-local space. Each volume carries its AABB plus the
+	// bounding planes that carve the convex region; callers build ConvexPolygonShape3D
+	// hulls from them (editor picking now, runtime collision later).
+	//
+	// Coordinate frame: unlike render geometry (RDTA, which the importer stores already
+	// converted to engine space, so the Godot boundary only needs godot_position's
+	// negate-x), collision geometry (CVRT) is stored in *workspace* space with no
+	// conversion -- confirmed in the OED exporter and validated here against the visual
+	// mesh AABB. RDTA reaches engine space via (-y, z, x); composing that with
+	// godot_position's negate-x gives the net workspace->Godot map (x, y, z) -> (y, z, x),
+	// a pure cyclic axis rotation. Applying it makes a hull placed at the same transform
+	// as the visual model coincide with it (empirically the best of the candidates: see
+	// the Object Editor "Collision" overlay).
+	Array out;
+	if (!has_ir || ir.collision == nullptr) {
+		return out;
+	}
+	const ThreediIRCollision *col = ir.collision;
+	for (size_t i = 0; i < col->volume_count; ++i) {
+		const ThreediIRCollisionVolume &v = col->volumes[i];
+		// (x, y, z) -> (y, z, x); the cyclic rotation has no sign flips, so min stays min.
+		const Vector3 gmin(v.min[1], v.min[2], v.min[0]);
+		const Vector3 gmax(v.max[1], v.max[2], v.max[0]);
+		Array planes;
+		const int32_t start = v.plane_start;
+		const int32_t count = v.plane_count;
+		for (int32_t p = 0; p < count; ++p) {
+			const int32_t idx = start + p;
+			if (idx < 0 || static_cast<size_t>(idx) >= col->plane_count) {
+				continue;
+			}
+			const ThreediIRCollisionPlane &pl = col->planes[idx];
+			// The map is orthonormal, so the normal rotates the same way and the plane's
+			// perpendicular offset is preserved in magnitude. The stored convention is
+			// `normal.dot(p) + distance == 0` (offset is the *negated* signed distance,
+			// verified against the volume AABBs), whereas Godot's Plane(normal, d) means
+			// `normal.dot(p) == d`; hence the negation.
+			const Vector3 n(pl.normal[1], pl.normal[2], pl.normal[0]);
+			planes.push_back(Plane(n, -pl.distance));
+		}
+		Dictionary d;
+		d["type"] = v.type;
+		d["flags"] = v.flags;
+		d["min"] = gmin;
+		d["max"] = gmax;
+		d["planes"] = planes;
+		d["part_index"] = v.part_index;
+		d["object_index"] = v.object_index;
+		out.push_back(d);
+	}
+	return out;
 }
 
 Array NovaObjectData::get_part_anim_editor_entries(int p_lod_index) const {

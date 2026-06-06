@@ -3,6 +3,7 @@
 
 #include <cstring>
 #include <fstream>
+#include <type_traits>
 
 namespace opennova::bms {
 
@@ -178,6 +179,12 @@ bool parse_header(Reader& r, Header& h, std::string& error) {
         error = "Invalid BMS magic";
         return false;
     }
+    // [orig: version gate `byte_A761D3 < 19` @0x40f5aa Mission_LoadBMSFile / @0x40e30a BMS_LoadAndValidateHeader]
+    if (static_cast<uint8_t>(h.magic[3]) < kMinVersion) {
+        error = "Unsupported BMS version " + std::to_string(static_cast<uint8_t>(h.magic[3])) +
+                " (minimum " + std::to_string(kMinVersion) + ")";
+        return false;
+    }
 
     r.read_fixed_string(h.mission_name, 32);
     r.read_fixed_string(h.designer, 32);
@@ -222,7 +229,7 @@ bool parse_header(Reader& r, Header& h, std::string& error) {
     h.area_trigger_count = r.read_i16();
     h.weapon_loadout_chunk_len = r.read_u16();
     h.bonus_expiration = r.read_u16();
-    h.unknown8 = r.read_u16();
+    h.secondary_chunk_len = r.read_u16();
     h.start_time = r.read_u16();
     h.minutes_per_day = r.read_u16();
     r.read_bytes(h.unknown9, 28);
@@ -282,7 +289,7 @@ void write_header(Writer& w, const Header& h) {
     w.write_i16(h.area_trigger_count);
     w.write_u16(h.weapon_loadout_chunk_len);
     w.write_u16(h.bonus_expiration);
-    w.write_u16(h.unknown8);
+    w.write_u16(h.secondary_chunk_len);
     w.write_u16(h.start_time);
     w.write_u16(h.minutes_per_day);
     w.write_bytes(h.unknown9, 28);
@@ -319,24 +326,24 @@ bool parse_entity(Reader& r, Entity& e, std::string& error) {
     e.team = r.read_u8();
     e.no_more_than = r.read_u8();
     e.no_less_than = r.read_u8();
-    e.unk19 = r.read_i16();
+    e.weapon_types = r.read_i16();
     e.group_id = r.read_u8();
     e.waypoint_id = r.read_u8();
     e.obliqueness = r.read_u8();
     e.map_symbol = r.read_u8();
     e.unk22 = r.read_i16();
-    e.unk23 = r.read_i16();
-    e.unk24 = r.read_i16();
-    e.unk25 = r.read_i16();
-    e.unk26 = r.read_i16();
-    e.fire_timer = r.read_i32();
+    e.blink_parent = r.read_i16();
+    e.blink_group = r.read_i16();
+    e.group_rel_lo = r.read_i16();
+    e.group_rel_hi = r.read_i16();
+    e.advancetimer = r.read_i32();
     e.ttool_index = r.read_i32();
-    e.unk30_31 = r.read_i32();
+    e.wp_goals = r.read_i32();
     r.read_fixed_string(e.name1, 8);
     r.read_fixed_string(e.name2, 8);
     r.read_fixed_string(e.gen_string, 36);
     e.max_attack_distance = r.read_i32();
-    e.unk41 = r.read_i32();
+    e.next_ssn = r.read_i32();
     e.color_override = r.read_u8();
     e.team_budget = r.read_u8();
     e.unk42b = r.read_i16();
@@ -381,24 +388,24 @@ void write_entity(Writer& w, const Entity& e) {
     w.write_u8(e.team);
     w.write_u8(e.no_more_than);
     w.write_u8(e.no_less_than);
-    w.write_i16(e.unk19);
+    w.write_i16(e.weapon_types);
     w.write_u8(e.group_id);
     w.write_u8(e.waypoint_id);
     w.write_u8(e.obliqueness);
     w.write_u8(e.map_symbol);
     w.write_i16(e.unk22);
-    w.write_i16(e.unk23);
-    w.write_i16(e.unk24);
-    w.write_i16(e.unk25);
-    w.write_i16(e.unk26);
-    w.write_i32(e.fire_timer);
+    w.write_i16(e.blink_parent);
+    w.write_i16(e.blink_group);
+    w.write_i16(e.group_rel_lo);
+    w.write_i16(e.group_rel_hi);
+    w.write_i32(e.advancetimer);
     w.write_i32(e.ttool_index);
-    w.write_i32(e.unk30_31);
+    w.write_i32(e.wp_goals);
     w.write_fixed_string(e.name1, 8);
     w.write_fixed_string(e.name2, 8);
     w.write_fixed_string(e.gen_string, 36);
     w.write_i32(e.max_attack_distance);
-    w.write_i32(e.unk41);
+    w.write_i32(e.next_ssn);
     w.write_u8(e.color_override);
     w.write_u8(e.team_budget);
     w.write_i16(e.unk42b);
@@ -411,19 +418,24 @@ bool parse_waypoint_record(Reader& r, WaypointRecord& wp, std::string& error) {
     wp.flags = static_cast<WaypointFlags>(r.read_u32());
     wp.marker_count = r.read_u32();
 
-    // Validate marker_count to prevent integer underflow in padding calculation
-    if (wp.marker_count > 32) {
-        error = "invalid waypoint marker_count: " + std::to_string(wp.marker_count);
-        return false;
-    }
+    // The on-disk record is a fixed 136 bytes: flags(4) + marker_count(4) + a 128-byte data region
+    // (kMaxWaypointSlots = 32 marker-index u32s). The engine reads the whole waypoint block as one
+    // fixed blob (fread(Buffer, 0x88, 0x80) @0x40fb56) and NEVER validates marker_count at load -- so
+    // a record may carry a count > 32 (CP19.bms ships one with marker_count == 39). Preserve the count
+    // verbatim for byte-exact round-trip, but cap the slot split at the 128-byte region so the padding
+    // math can't underflow (this also hardens against an outright corrupt count).
+    // (The engine also forces flags |= 1 when marker_count == 1 [orig: @0x40fb7a] -- a runtime
+    //  normalization applied after load, so we do NOT replicate it here; it would break round-trip.)
+    constexpr uint32_t kMaxWaypointSlots = (kWaypointRecordSize - 8) / 4; // 32
+    const uint32_t slots = wp.marker_count < kMaxWaypointSlots ? wp.marker_count : kMaxWaypointSlots;
 
     wp.waypoint_numbers.clear();
-    for (uint32_t i = 0; i < wp.marker_count; i++) {
+    for (uint32_t i = 0; i < slots; i++) {
         wp.waypoint_numbers.push_back(r.read_u32());
     }
 
-    // Read remaining bytes as padding (128 bytes for waypoint numbers, minus what we used)
-    size_t used = wp.marker_count * 4;
+    // Read remaining bytes as padding (128-byte region minus the slots we consumed).
+    size_t used = slots * 4;
     size_t remaining = 128 - used;
     wp.padding.resize(remaining);
     r.read_bytes(wp.padding.data(), remaining);
@@ -469,31 +481,27 @@ void write_layer_record(Writer& w, const LayerRecord& lr) {
 }
 
 bool parse_area_trigger(Reader& r, AreaTrigger& at, std::string& /*error*/) {
-    at.wp_number = r.read_i32();
-    // Coordinates in fixed-point, file stores with Y/Z swapped
-    at.min_x = r.read_i32();
-    int32_t file_min_y = r.read_i32();
-    int32_t file_min_z = r.read_i32();
-    at.min_z = file_min_y;  // Y/Z swapped
-    at.min_y = file_min_z;
-    at.max_x = r.read_i32();
-    int32_t file_max_y = r.read_i32();
-    int32_t file_max_z = r.read_i32();
-    at.max_z = file_max_y;  // Y/Z swapped
-    at.max_y = file_max_z;
-    at.reserved = r.read_i32();
+    // [orig: interleaved per-axis layout, no swap — Entity_IsTeamInTriggerBounds @0x43c75c]
+    at.id = r.read_i32();      // off 0
+    at.x_min = r.read_i32();   // off 4
+    at.x_max = r.read_i32();   // off 8
+    at.y_min = r.read_i32();   // off 12
+    at.y_max = r.read_i32();   // off 16
+    at.z_min = r.read_i32();   // off 20
+    at.z_max = r.read_i32();   // off 24
+    at.flags = r.read_u32();   // off 28
     return true;
 }
 
 void write_area_trigger(Writer& w, const AreaTrigger& at) {
-    w.write_i32(at.wp_number);
-    w.write_i32(at.min_x);
-    w.write_i32(at.min_z);  // Y/Z swap back
-    w.write_i32(at.min_y);
-    w.write_i32(at.max_x);
-    w.write_i32(at.max_z);  // Y/Z swap back
-    w.write_i32(at.max_y);
-    w.write_i32(at.reserved);
+    w.write_i32(at.id);
+    w.write_i32(at.x_min);
+    w.write_i32(at.x_max);
+    w.write_i32(at.y_min);
+    w.write_i32(at.y_max);
+    w.write_i32(at.z_min);
+    w.write_i32(at.z_max);
+    w.write_u32(at.flags);
 }
 
 bool parse_event(Reader& r, Event& e, std::string& /*error*/) {
@@ -501,9 +509,10 @@ bool parse_event(Reader& r, Event& e, std::string& /*error*/) {
     e.trigger_index = r.read_i32();
     e.action_index = r.read_i32();
 
-    // Upper 10 bits contain the value (lower 22 bits are always zero)
-    e.reset_after = r.read_i32() >> 22;
-    e.delay = r.read_i32() >> 22;
+    // Upper 10 bits contain the value (lower 22 bits are always zero). Read unsigned and shift
+    // logically: a signed arithmetic >> would sign-extend any value >= 512 into a negative result.
+    e.reset_after = static_cast<int32_t>(r.read_u32() >> 22);
+    e.delay = static_cast<int32_t>(r.read_u32() >> 22);
 
     e.unknown5 = r.read_u8();
     e.trigger_count = r.read_u8();
@@ -517,9 +526,11 @@ void write_event(Writer& w, const Event& e) {
     w.write_i32(static_cast<int32_t>(e.flags));
     w.write_i32(e.trigger_index);
     w.write_i32(e.action_index);
-    // Reconstruct raw value: upper 10 bits contain value, lower 22 bits are zero
-    w.write_i32(e.reset_after << 22);
-    w.write_i32(e.delay << 22);
+    // Reconstruct raw value: upper 10 bits contain value, lower 22 bits are zero. Shift as
+    // unsigned -- e.reset_after << 22 on a signed int32 is UB for values >= 512 (1023 << 22
+    // overflows INT32_MAX); the written byte pattern is identical to the well-defined form.
+    w.write_u32(static_cast<uint32_t>(e.reset_after) << 22);
+    w.write_u32(static_cast<uint32_t>(e.delay) << 22);
     w.write_u8(e.unknown5);
     w.write_u8(e.trigger_count);
     w.write_u8(e.action_count);
@@ -573,6 +584,9 @@ void write_action(Writer& w, const Action& a) {
 }
 
 bool parse_bounding_box(Reader& r, BoundingBox& bb, std::string& /*error*/) {
+    // 0x24-byte record: min/max XYZ (16.16) + 12 opaque bytes. The engine swaps each axis so min<=max
+    // AFTER reading [orig: Mission_LoadBMSFile @0x40fcf4]; that is a runtime normalization, so we
+    // preserve the on-disk order verbatim for byte-exact round-trip (the editor normalizes on author).
     bb.min_x = r.read_i32();
     bb.min_y = r.read_i32();
     bb.min_z = r.read_i32();
@@ -591,6 +605,21 @@ void write_bounding_box(Writer& w, const BoundingBox& bb) {
     w.write_i32(bb.max_y);
     w.write_i32(bb.max_z);
     w.write_bytes(bb.unknown_data, 12);
+}
+
+// Reject a record count that cannot fit in the bytes left in the buffer. The pool/chunk counts come
+// straight from the (possibly corrupt or hostile) header; a negative or huge value handed to
+// std::vector::resize() throws std::length_error / std::bad_alloc, and nothing up the load chain
+// catches C++ exceptions, so it would abort the process instead of failing the parse cleanly.
+// record_size must be > 0.
+bool count_fits(const Reader& r, int64_t count, size_t record_size,
+                const char* what, std::string& error) {
+    if (count < 0 || static_cast<uint64_t>(count) > r.remaining() / record_size) {
+        error = std::string("BMS ") + what + " count " + std::to_string(count) +
+                " is invalid (" + std::to_string(r.remaining()) + " bytes remain)";
+        return false;
+    }
+    return true;
 }
 
 }  // namespace
@@ -612,16 +641,35 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
 
     Reader r(data, size);
 
-    // Parse header
+    // Section read order + sizes verified byte-for-byte against the engine loader
+    // [orig: Mission_LoadBMSFile @0x40f7b6 (Jointops.exe)]:
+    //   header 0x268 -> weapon-loadout chunk (hdr+0x242) -> secondary chunk (hdr+0x246, seeked) ->
+    //   items/buildings/markers/organics (0xAC each; counts @hdr+0xA4/0xA8/0xAC/0xB0) ->
+    //   waypoints 0x88 x128 -> groups 0x20 x64 -> layers 0x14 x32 ->
+    //   area triggers 0x20 x (hdr+0x240) -> event block -> bbox count(i32) + boxes 0x24.
+    // The event block (counts + arrays) is read by EventTrigger_LoadAllData @0x453eb0. This order is
+    // exercised end-to-end by tests/mission/mission_corpus_test.cpp (byte-exact round-trip over the
+    // full shipped mission set).
     if (!parse_header(r, out.header, error)) {
         return false;
     }
 
-    // Parse weapon loadout
+    // Parse weapon loadout [orig: word_A76412 @hdr+0x242 bytes; read+sanitized in SP, seeked in MP]
+    // Guard the length like the record arrays below: read_bytes zero-fills and does NOT advance on an
+    // underflow, so a chunk length larger than the bytes remaining would silently mis-align every
+    // section after it (a corrupt/truncated file would parse to garbage instead of failing cleanly).
+    if (!count_fits(r, out.header.weapon_loadout_chunk_len, 1, "weapon loadout chunk", error)) return false;
     out.loadout.raw_data.resize(out.header.weapon_loadout_chunk_len);
     r.read_bytes(out.loadout.raw_data.data(), out.header.weapon_loadout_chunk_len);
 
+    // Parse the second chunk the engine always seeks past after the loadout.
+    // [orig: word_A76416 @hdr+0x246 bytes; fseek at @0x40f751 (SP) / @0x40f6d1 (MP) in Mission_LoadBMSFile]
+    // Usually empty; preserved verbatim so a mission that uses it still round-trips.
+    if (!count_fits(r, out.header.secondary_chunk_len, 1, "secondary chunk", error)) return false;
+    r.read_bytes(out.secondary_chunk, out.header.secondary_chunk_len);
+
     // Parse entities
+    if (!count_fits(r, out.header.num_items, kEntitySize, "item", error)) return false;
     out.items.resize(out.header.num_items);
     for (uint32_t i = 0; i < out.header.num_items; i++) {
         if (!parse_entity(r, out.items[i], error)) {
@@ -630,6 +678,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
         out.items[i].type = ItemType::Item;
     }
 
+    if (!count_fits(r, out.header.num_buildings, kEntitySize, "building", error)) return false;
     out.buildings.resize(out.header.num_buildings);
     for (uint32_t i = 0; i < out.header.num_buildings; i++) {
         if (!parse_entity(r, out.buildings[i], error)) {
@@ -638,6 +687,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
         out.buildings[i].type = ItemType::Building;
     }
 
+    if (!count_fits(r, out.header.num_markers, kEntitySize, "marker", error)) return false;
     out.markers.resize(out.header.num_markers);
     for (uint32_t i = 0; i < out.header.num_markers; i++) {
         if (!parse_entity(r, out.markers[i], error)) {
@@ -646,6 +696,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
         out.markers[i].type = ItemType::Marker;
     }
 
+    if (!count_fits(r, out.header.num_people, kEntitySize, "organic", error)) return false;
     out.organics.resize(out.header.num_people);
     for (uint32_t i = 0; i < out.header.num_people; i++) {
         if (!parse_entity(r, out.organics[i], error)) {
@@ -679,6 +730,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     }
 
     // Parse area triggers
+    if (!count_fits(r, out.header.area_trigger_count, kAreaTriggerSize, "area-trigger", error)) return false;
     out.area_triggers.resize(out.header.area_trigger_count);
     for (int16_t i = 0; i < out.header.area_trigger_count; i++) {
         if (!parse_area_trigger(r, out.area_triggers[i], error)) {
@@ -686,12 +738,16 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
         }
     }
 
-    // Read event/trigger/action counts
+    // Read event/trigger/action counts, then each array. This dedicated 3-count block -- NOT the
+    // header's num_events @hdr+0xB4 -- is the loader's source of truth for the event count
+    // [orig: EventTrigger_LoadAllData @0x453eb0 reads dword_AE0700/0708/0710 then sizes the arrays
+    // 24/32/32]. header.num_events is round-tripped verbatim but is not consulted to read events here.
     out.events_count = r.read_i32();
     out.trigger_count = r.read_i32();
     out.action_count = r.read_i32();
 
     // Parse events
+    if (!count_fits(r, out.events_count, kEventSize, "event", error)) return false;
     out.events.resize(out.events_count);
     for (int32_t i = 0; i < out.events_count; i++) {
         if (!parse_event(r, out.events[i], error)) {
@@ -700,6 +756,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     }
 
     // Parse triggers
+    if (!count_fits(r, out.trigger_count, kTriggerSize, "trigger", error)) return false;
     out.triggers.resize(out.trigger_count);
     for (int32_t i = 0; i < out.trigger_count; i++) {
         if (!parse_trigger(r, out.triggers[i], error)) {
@@ -708,6 +765,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     }
 
     // Parse actions
+    if (!count_fits(r, out.action_count, kActionSize, "action", error)) return false;
     out.actions.resize(out.action_count);
     for (int32_t i = 0; i < out.action_count; i++) {
         if (!parse_action(r, out.actions[i], error)) {
@@ -717,6 +775,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
 
     // Read bounding box count and parse
     out.bounding_box_count = r.read_i32();
+    if (!count_fits(r, out.bounding_box_count, kBoundingBoxSize, "bounding-box", error)) return false;
     out.bounding_boxes.resize(out.bounding_box_count);
     for (int32_t i = 0; i < out.bounding_box_count; i++) {
         if (!parse_bounding_box(r, out.bounding_boxes[i], error)) {
@@ -759,8 +818,9 @@ bool write(const File& file, std::vector<uint8_t>& out, std::string& error) {
     // Write header
     write_header(w, file.header);
 
-    // Write weapon loadout
+    // Write weapon loadout, then the second opaque chunk (mirrors the read order in parse()).
     w.write_bytes(file.loadout.raw_data);
+    w.write_bytes(file.secondary_chunk);
 
     // Write entities
     for (const auto& e : file.items) {
@@ -859,6 +919,72 @@ bool write_file(const File& file, const std::string& path, std::string& error) {
     return true;
 }
 
+namespace {
+
+// Byte compare a vector of trivially-copyable records. Every fixed BMS record is value-initialized
+// on construction (padding included) and mutators only touch named fields, so this is exact.
+template <typename T>
+bool pod_vectors_equal(const std::vector<T>& a, const std::vector<T>& b) {
+    static_assert(std::is_trivially_copyable<T>::value, "pod_vectors_equal needs a trivially-copyable element");
+    if (a.size() != b.size()) {
+        return false;
+    }
+    if (a.empty()) {
+        return true;
+    }
+    return std::memcmp(a.data(), b.data(), a.size() * sizeof(T)) == 0;
+}
+
+// WaypointRecord carries inner vectors, so it cannot be byte-compared; compare field-wise.
+bool waypoint_records_equal(const std::vector<WaypointRecord>& a, const std::vector<WaypointRecord>& b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (a[i].flags != b[i].flags || a[i].marker_count != b[i].marker_count ||
+            a[i].waypoint_numbers != b[i].waypoint_numbers || a[i].padding != b[i].padding) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+bool equal(const File& a, const File& b) {
+    // Header is packed (static_assert sizeof == 616); a byte compare is exact and includes the
+    // count fields. The body comparisons below are over the actual vectors, so they detect a
+    // change even when a header count is momentarily out of sync with its vector (sync_counts runs
+    // only at write time) -- the comparison never depends on that.
+    if (std::memcmp(&a.header, &b.header, sizeof(Header)) != 0) {
+        return false;
+    }
+    if (a.loadout.raw_data != b.loadout.raw_data || a.secondary_chunk != b.secondary_chunk) {
+        return false;
+    }
+    if (!pod_vectors_equal(a.items, b.items) || !pod_vectors_equal(a.buildings, b.buildings) ||
+        !pod_vectors_equal(a.markers, b.markers) || !pod_vectors_equal(a.organics, b.organics)) {
+        return false;
+    }
+    if (!waypoint_records_equal(a.waypoint_records, b.waypoint_records) ||
+        !pod_vectors_equal(a.group_records, b.group_records) ||
+        !pod_vectors_equal(a.layer_records, b.layer_records)) {
+        return false;
+    }
+    if (!pod_vectors_equal(a.area_triggers, b.area_triggers)) {
+        return false;
+    }
+    if (a.events_count != b.events_count || a.trigger_count != b.trigger_count ||
+        a.action_count != b.action_count || a.bounding_box_count != b.bounding_box_count) {
+        return false;
+    }
+    if (!pod_vectors_equal(a.events, b.events) || !pod_vectors_equal(a.triggers, b.triggers) ||
+        !pod_vectors_equal(a.actions, b.actions) || !pod_vectors_equal(a.bounding_boxes, b.bounding_boxes)) {
+        return false;
+    }
+    return true;
+}
+
 std::vector<const Entity*> File::all_entities() const {
     std::vector<const Entity*> result;
     result.reserve(items.size() + buildings.size() + markers.size() + organics.size());
@@ -878,7 +1004,9 @@ std::string File::get_designer() const {
 }
 
 std::string File::get_terrain() const {
-    return fixed_string(header.terrain, sizeof(header.terrain));
+    // terrain[48] is three 16-byte slots (terrain / cnv_file / tt_file); the terrain name is the
+    // first slot. Bound to 16 so a full 16-char name does not run on into cnv_file.
+    return fixed_string(header.terrain, 16);
 }
 
 } // namespace opennova::bms
