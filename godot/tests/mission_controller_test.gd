@@ -465,6 +465,29 @@ func test_place_marker_adds_a_marker_entity_and_selects_it() -> void:
 		"the marker overlay renders a pickable gizmo for the placed marker")
 
 
+func test_placement_bakes_the_ground_anchor_into_the_stored_position() -> void:
+	# Engine-faithful: the Ground userpoint is baked into the stored position ONCE, at author-time,
+	# and the renderer draws stored positions directly (no load/render offset). [orig: sub_401A90,
+	# dfx2med.exe] The stub container is identity, so the global hit is also the container-local point.
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	var item_id := 102001  # a static building (resolves to a model; House-family carry a "ground" userpoint)
+	var hit := Vector3(50.0, 10.0, -50.0)
+	assert_true(controller.place_entity_at_world(item_id, hit), "placement succeeds")
+	var sel := controller.get_selection_summary()
+	var kind := int(sel.get("kind", -1))
+	var index := int(sel.get("index", -1))
+	var stored: Vector3 = mission.get_entity(kind, index)["position"]
+	var graphic: String = controller._placer.graphic_for(item_id)
+	var anchor: Vector3 = controller._placer.ground_anchor_godot(graphic)
+	# stored == cursor - anchor (in BMS axes): the bake the engine does at placement.
+	var expected := Placer.godot_to_bms_position(hit - anchor)
+	assert_lt((stored - expected).length(), 0.02, "the Ground userpoint is baked into the stored position")
+	# Render is direct (origin at stored), so origin + anchor returns the model's ground point to the cursor.
+	var origin := Placer.bms_to_godot_position(stored)
+	assert_lt(((origin + anchor) - hit).length(), 0.02, "the rendered model's ground point lands at the drop point")
+
+
 func test_delete_selected_marker_in_objects_mode() -> void:
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()

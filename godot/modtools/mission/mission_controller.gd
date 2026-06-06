@@ -67,7 +67,10 @@ const PICK_RAY_LENGTH := 100000.0
 # The selected entity's pick body (for live drag) + its anchor (entity_xform * this =
 # the body's container-local transform). Set in _select, moved in _apply_selected_xform.
 var _selected_collider: Node3D
-var _selected_anchor_inv: Transform3D = Transform3D.IDENTITY
+# The selected object's Godot model-local ground anchor (Vector3.ZERO for none / markers). Subtracted
+# from a terrain-drop position so the model's ground point lands under the cursor -- the author-time
+# bake the engine does (and the only place the Ground userpoint is applied; render is direct).
+var _selected_ground_offset: Vector3 = Vector3.ZERO
 # Debug: when on, draw the pick hulls in world (see _refresh_pick_debug).
 var _pick_debug := false
 
@@ -1146,7 +1149,7 @@ func _refresh_pick_debug() -> void:
 		# Container-local transform of the body (= world / container.global_transform).
 		var entity := _find_entity(kind, index)
 		var local: Transform3D = MissionObjectPlacer.entity_transform(
-			entity.get("position", Vector3.ZERO), entity.get("rotation_deg", Vector3.ZERO)) * _placer.anchor_inv_for(graphic)
+			entity.get("position", Vector3.ZERO), entity.get("rotation_deg", Vector3.ZERO))
 		for shape in shapes:
 			var mi := MeshInstance3D.new()
 			mi.mesh = (shape as Shape3D).get_debug_mesh()
@@ -1223,9 +1226,9 @@ func _select(kind: int, index: int) -> void:
 	# Bind the entity's pick body node + its anchor so a drag can move the body live
 	# (keeps a mid-drag re-pick exact). Markers have no body, so this resolves to null.
 	_selected_collider = _selected_pick_collider()
-	_selected_anchor_inv = Transform3D.IDENTITY
+	_selected_ground_offset = Vector3.ZERO
 	if _placer != null and not graphic.is_empty():
-		_selected_anchor_inv = _placer.anchor_inv_for(graphic)
+		_selected_ground_offset = _placer.ground_anchor_godot(graphic)
 	var entity := _find_entity(kind, index)
 	_selected_rotation_deg = entity.get("rotation_deg", Vector3.ZERO)
 	_selected_xform = MissionObjectPlacer.entity_transform(
@@ -1249,7 +1252,7 @@ func _deselect() -> void:
 	_selected_node = null
 	_selected_node_offset = Transform3D.IDENTITY
 	_selected_collider = null
-	_selected_anchor_inv = Transform3D.IDENTITY
+	_selected_ground_offset = Vector3.ZERO
 	_hide_selection_box()
 	if _gizmo != null and is_instance_valid(_gizmo):
 		_gizmo.visible = false
@@ -1265,7 +1268,9 @@ func _move_selected_to_world(global_hit: Vector3) -> void:
 	if container == null:
 		return
 	var local := container.global_transform.affine_inverse() * global_hit
-	_apply_selected_xform(Transform3D(_selected_xform.basis, local))
+	# Bake the Ground userpoint: the dropped model's origin sits at the terrain hit minus its ground
+	# anchor, so its ground point lands under the cursor (render is direct). [orig: sub_401A90, dfx2med.exe]
+	_apply_selected_xform(Transform3D(_selected_xform.basis, local - _selected_ground_offset))
 
 
 # Write a new container-local transform onto the selection: rewrite every static
@@ -1288,10 +1293,11 @@ func _apply_selected_xform(xform: Transform3D) -> void:
 		for rec in _selected_records:
 			var mm: MultiMesh = rec["mm"]
 			mm.set_instance_transform(int(rec["slot"]), _selected_xform * (rec["offset"] as Transform3D))
-	# Move the pick body node in lockstep so a re-pick mid/after-drag stays exact (the
-	# body carries the same anchor offset as the visual). No-op for a marker (no body).
+	# Move the pick body node in lockstep so a re-pick mid/after-drag stays exact. The body sits at
+	# the entity transform directly (render is direct; the ground anchor is baked into the stored
+	# position, not applied here). No-op for a marker (no body).
 	if _selected_collider != null and is_instance_valid(_selected_collider):
-		_selected_collider.transform = _selected_xform * _selected_anchor_inv
+		_selected_collider.transform = _selected_xform
 	_update_selection_box()
 	# Keep the transform gizmo on the selection. During a gizmo drag, only reposition (keep the
 	# captured drag plane + ring orientation frozen); otherwise re-orient the rings to the new
@@ -1572,7 +1578,12 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	if item_name.is_empty():
 		item_name = "item %d" % item_id
 	var local := container.global_transform.affine_inverse() * global_hit
-	var bms_pos := MissionObjectPlacer.godot_to_bms_position(local)
+	# Bake the Ground userpoint into the stored position so the model's ground point lands at the
+	# cursor (render is direct). Mirrors the engine's author-time bake. [orig: sub_401A90, dfx2med.exe]
+	var ground := Vector3.ZERO
+	if _placer != null and kind != NovaMissionData.KIND_MARKER:
+		ground = _placer.ground_anchor_godot(_placer.graphic_for(item_id))
+	var bms_pos := MissionObjectPlacer.godot_to_bms_position(local - ground)
 	# Placing is its own undo step: close any open session, then bracket the add with
 	# begin_edit/commit_edit (commit pushes one step iff the add changed the document).
 	_flush_edit()
@@ -1759,7 +1770,7 @@ func set_mode(mode: int) -> void:
 	_selected_node = null
 	_selected_node_offset = Transform3D.IDENTITY
 	_selected_collider = null
-	_selected_anchor_inv = Transform3D.IDENTITY
+	_selected_ground_offset = Vector3.ZERO
 	_hide_selection_box()
 	# Hover only lives in objects mode; drop it on any mode switch.
 	_clear_hover()
@@ -3053,7 +3064,7 @@ func _reset_selection_state() -> void:
 	# Drop the selection's pick-body ref (the body node is freed/rebuilt with the
 	# container, not here).
 	_selected_collider = null
-	_selected_anchor_inv = Transform3D.IDENTITY
+	_selected_ground_offset = Vector3.ZERO
 	_drag_active = false
 	_drag_moved = false
 	_drag_off_terrain = false

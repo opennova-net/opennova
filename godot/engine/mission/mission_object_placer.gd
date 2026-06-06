@@ -214,11 +214,10 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			continue
 		var model: Node3D = NovaObjectModelScript.new()
 		model.name = "Anim_%s_%d" % [a["graphic"], stats.animated]
-		# Anchor the whole model so its ground point sits at the entity origin (same
-		# rule as static; for an animated model the offset rides the root node, parts
-		# still animate within it). The recorded offset lets the editor drag re-apply it.
-		var anchor_inv := Transform3D(Basis(), -_ground_anchor_for(a["graphic"], data))
-		model.transform = (a["xform"] as Transform3D) * anchor_inv
+		# Render the model origin at the entity's stored position directly. The engine bakes the
+		# Ground userpoint into the stored position once, at author-time (place / terrain-drag), not
+		# at render -- so a loaded .bms renders at its stored coords verbatim. [orig: sub_401A90, dfx2med.exe]
+		model.transform = a["xform"] as Transform3D
 		container.add_child(model)
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
@@ -233,7 +232,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				"index": ref["index"],
 				"graphic": a["graphic"],
 				"node": model,
-				"offset": anchor_inv,
+				"offset": Transform3D.IDENTITY,
 				"animated": true,
 			})
 			add_pick_collider(container, int(ref["kind"]), int(ref["index"]), a["graphic"], a["xform"])
@@ -278,8 +277,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			return delta
 		var model: Node3D = NovaObjectModelScript.new()
 		model.name = "Anim_%s_k%d_i%d" % [graphic, kind, index]
-		var anchor_inv := Transform3D(Basis(), -_ground_anchor_for(graphic, data))
-		model.transform = xform * anchor_inv
+		model.transform = xform
 		container.add_child(model)
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
@@ -291,7 +289,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			"index": index,
 			"graphic": graphic,
 			"node": model,
-			"offset": anchor_inv,
+			"offset": Transform3D.IDENTITY,
 			"animated": true,
 		})
 		add_pick_collider(container, kind, index, graphic, xform)
@@ -397,10 +395,11 @@ func _load_object_data(graphic: String) -> NovaObjectData:
 	return data
 
 
-# The model-space anchor for `graphic`: the point that should sit at the entity's
-# placed position. RENDER_LOD is the LOD the placer draws (userpoints are model-global;
-# the part-0-center fallback is per-LOD). Cached per graphic; Vector3.ZERO when the
-# model is unresolved or has no anchor (degrades to the old model-origin placement).
+# The Godot model-local ground reference point for `graphic`: the "ground" userpoint if present,
+# else part-0 center (NovaObjectData.get_ground_anchor). RENDER_LOD is the LOD the placer draws.
+# Cached per graphic; Vector3.ZERO when the model is unresolved or has no anchor. No longer applied
+# at render -- the editor subtracts it (in BMS axes) from a terrain-drop position so the model's
+# ground point lands at the cursor, mirroring the engine's author-time bake. [orig: sub_401A90]
 func _ground_anchor_for(graphic: String, data: NovaObjectData) -> Vector3:
 	if _anchor_cache.has(graphic):
 		return _anchor_cache[graphic]
@@ -411,13 +410,17 @@ func _ground_anchor_for(graphic: String, data: NovaObjectData) -> Vector3:
 	return anchor
 
 
-# The ground-anchor inverse for `graphic`: the translation baked into every placed
-# instance so the model's ground point sits at the entity origin. The editor's pick
-# bodies are placed at `entity_transform * anchor_inv` (same as the visual), so a
-# collision hull in model-local space lands exactly on the rendered model.
-func anchor_inv_for(graphic: String) -> Transform3D:
-	var data := _load_object_data(graphic)
-	return Transform3D(Basis(), -_ground_anchor_for(graphic, data))
+# Public: the Godot model-local ground anchor for `graphic` (resolves + caches the model). The editor
+# subtracts this from a terrain-drop position (converted to BMS axes) for the author-time ground bake.
+func ground_anchor_godot(graphic: String) -> Vector3:
+	return _ground_anchor_for(graphic, _load_object_data(graphic))
+
+
+# Public: the model graphic for an items.def id (or "" if unresolved), so the editor can resolve a
+# fresh placement's anchor without reaching into the private item-db cache.
+func graphic_for(item_id: int) -> String:
+	_ensure_item_db()
+	return _graphic_for(item_id)
 
 
 # Convex collision hulls for `graphic`, in model-local space, for the editor's
@@ -450,9 +453,9 @@ func collision_shapes_for(graphic: String) -> Array:
 
 # Add one StaticBody3D pick collider for entity (kind,index) under the container, with
 # this graphic's convex collision hulls and an "entity_ref" meta the editor reads back
-# from intersect_ray. Positioned exactly like the visual (entity_xform * anchor_inv), so
-# the body coincides with the drawn model. Editor-only (edit_mode); freed automatically
-# when the container is cleared/re-baked -- no manual lifecycle.
+# from intersect_ray. Positioned at the entity transform (render is direct now), so the body
+# coincides with the drawn model. Editor-only (edit_mode); freed automatically when the
+# container is cleared/re-baked -- no manual lifecycle.
 func add_pick_collider(container: Node3D, kind: int, index: int, graphic: String, entity_xform: Transform3D) -> StaticBody3D:
 	var shapes: Array = collision_shapes_for(graphic)
 	if shapes.is_empty():
@@ -460,7 +463,7 @@ func add_pick_collider(container: Node3D, kind: int, index: int, graphic: String
 	var body := StaticBody3D.new()
 	body.name = "Pick_%d_%d" % [kind, index]
 	body.set_meta("entity_ref", { "kind": kind, "index": index })
-	body.transform = entity_xform * anchor_inv_for(graphic)
+	body.transform = entity_xform
 	for shape in shapes:
 		var cs := CollisionShape3D.new()
 		cs.shape = shape
@@ -514,11 +517,10 @@ func _get_static_batches(graphic: String, env_node: Node, tree_parent: Node) -> 
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
 		model.rebuild()
-		# Anchor the model so its ground reference point (the "ground" userpoint, else
-		# part 0's center) lands at the entity origin instead of the model origin. Baking
-		# T(-anchor) into every batch offset means every consumer of "offset" (place,
-		# place_single, the editor drag via the recorded offset, picking) inherits it.
-		var anchor_inv := Transform3D(Basis(), -_ground_anchor_for(graphic, data))
+		# Each batch's "offset" is the submesh's model-local rest transform (part * mesh) relative to
+		# the entity origin -- NO ground-anchor offset. The engine bakes the Ground userpoint into the
+		# stored position at author-time, not at render, so a loaded .bms draws at its stored coords
+		# verbatim. [orig: sub_401A90, dfx2med.exe]
 		var submesh := 0
 		for robj_node in model.get_render_part_nodes().values():
 			var part_node := robj_node as Node3D
@@ -530,7 +532,7 @@ func _get_static_batches(graphic: String, env_node: Node, tree_parent: Node) -> 
 					batches.append({
 						"mesh": mi.mesh,
 						"material": mi.material_override,
-						"offset": anchor_inv * part_node.transform * mi.transform,
+						"offset": part_node.transform * mi.transform,
 						"submesh": submesh,
 					})
 					submesh += 1
