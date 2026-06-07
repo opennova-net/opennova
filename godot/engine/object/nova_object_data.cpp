@@ -2256,14 +2256,20 @@ Array NovaObjectData::get_collision_volumes() const {
 		const Vector3 gmin(v.min[1], v.min[2], v.min[0]);
 		const Vector3 gmax(v.max[1], v.max[2], v.max[0]);
 		Array planes;
-		const int32_t start = v.plane_start;
-		const int32_t count = v.plane_count;
-		for (int32_t p = 0; p < count; ++p) {
-			const int32_t idx = start + p;
-			if (idx < 0 || static_cast<size_t>(idx) >= col->plane_count) {
-				continue;
-			}
-			const ThreediIRCollisionPlane &pl = col->planes[idx];
+		// plane_start / plane_count come straight from the on-disk model with no clamp
+		// (threedi_ir_from_3di3), so a malformed file can make plane_count huge or plane_start out of
+		// range. Planes are contiguous, so clamp the window to [0, col->plane_count) and iterate that
+		// instead of spinning over billions of out-of-range indices; the arithmetic is 64-bit so
+		// plane_start + plane_count cannot signed-overflow.
+		const int64_t start = v.plane_start;
+		const int64_t plane_total = static_cast<int64_t>(col->plane_count);
+		const int64_t begin = start > 0 ? start : 0;
+		int64_t end = start + static_cast<int64_t>(v.plane_count);
+		if (end > plane_total) {
+			end = plane_total;
+		}
+		for (int64_t idx = begin; idx < end; ++idx) {
+			const ThreediIRCollisionPlane &pl = col->planes[static_cast<size_t>(idx)];
 			// The map is orthonormal, so the normal rotates the same way and the plane's
 			// perpendicular offset is preserved in magnitude. The stored convention is
 			// `normal.dot(p) + distance == 0` (offset is the *negated* signed distance,

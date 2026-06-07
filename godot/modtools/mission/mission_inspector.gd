@@ -942,9 +942,10 @@ func _refresh_object_browser() -> void:
 	var db_ready: bool = _controller.has_item_database()
 	var mission_changed := mission != _objects_built_for
 	# Rebuild rows when the document, its object set (count), or its composition (membership revision,
-	# which bumps on every entity-set re-bake) changes, or the first time item names become resolvable
-	# (so placeholder "Item <id>" labels get replaced by real model names).
-	if mission_changed or count != _objects_built_count or rev != _objects_built_rev or (db_ready and not _objects_db_ready):
+	# which bumps on every entity-set re-bake) changes, or whenever the item database's readiness flips
+	# in EITHER direction (names become resolvable -> replace "Item <id>" placeholders; or the resource
+	# dir is cleared/repointed and they must fall back to placeholders again).
+	if mission_changed or count != _objects_built_count or rev != _objects_built_rev or db_ready != _objects_db_ready:
 		_objects_built_for = mission
 		_objects_built_count = count
 		_objects_built_rev = rev
@@ -2552,7 +2553,11 @@ func _add_props_game_mode() -> OptionButton:
 	# Map bit -> index for selection, index -> bit on edit.
 	_props_binder.bind_option(option,
 		func(info) -> int: return maxi(0, _GAME_MODE_BITS.find(int(info.get("game_mode", 0)))),
-		func(id: int) -> void: _set_game_mode(int(_GAME_MODE_BITS[id])))
+		func(id: int) -> void:
+			# Bounds-check: the item id equals the list index today (no fallback row), but guard so a
+			# future out-of-range fallback id cannot index _GAME_MODE_BITS out of bounds.
+			if id >= 0 and id < _GAME_MODE_BITS.size():
+				_set_game_mode(int(_GAME_MODE_BITS[id])))
 	return option
 
 

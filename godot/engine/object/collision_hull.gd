@@ -67,8 +67,10 @@ static func hull_points(volume: Dictionary) -> PackedVector3Array:
 	return pts
 
 
-# One ConvexPolygonShape3D per volume (volumes that come out degenerate are
-# skipped). Order is preserved so callers can correlate with get_collision_volumes().
+# One ConvexPolygonShape3D per NON-degenerate volume: a volume that yields fewer than 4 hull points
+# is skipped, so the returned array may be SHORTER than `volumes` and is NOT positionally 1:1 with
+# get_collision_volumes(). Callers that need a shape's owning volume must carry it explicitly rather
+# than zipping the two arrays by index.
 static func shapes_for(volumes: Array) -> Array:
 	var shapes: Array = []
 	for v in volumes:

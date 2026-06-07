@@ -182,6 +182,11 @@ Error NovaMissionData::open_file(const String &path) {
 		return ERR_CANT_OPEN;
 	}
 	modified = false;
+	// Drop any prior document's undo stack + clean baseline and adopt the freshly loaded mission as
+	// the clean baseline, so a reused NovaMissionData instance never inherits the old mission's history
+	// (swap-based undo would otherwise overwrite the new document) or report a wrong dirty state.
+	clear_history();
+	mark_clean();
 	return OK;
 }
 
@@ -191,6 +196,9 @@ Error NovaMissionData::create_default() {
 	document.create_default();
 	modified = false;
 	clear_history();
+	// Adopt the empty document as the clean baseline; without this a reused instance keeps a prior
+	// mission's baseline and the brand-new mission reports is_dirty() == true with no edits.
+	mark_clean();
 	return OK;
 }
 
@@ -216,6 +224,10 @@ Error NovaMissionData::open_from_resource_root(const Ref<NovaResourceRoot> &p_re
 	}
 	source_path = file;
 	modified = false;
+	// Mirror open_file(): clear any inherited history and re-baseline so a reused instance starts the
+	// reopened document clean with an empty undo stack.
+	clear_history();
+	mark_clean();
 	return OK;
 }
 

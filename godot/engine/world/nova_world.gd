@@ -299,6 +299,14 @@ func _start_mission_runtime(mission: NovaMissionData) -> void:
 func _start_command_host(mission: NovaMissionData) -> void:
 	if _mission_runtime == null:
 		return
+	# A reload reuses this NovaWorld: free any command host (a direct child, not under the rebuilt
+	# MissionObjects container) + registry left over from the previous mission first, mirroring
+	# unload(), so they are not orphaned in the tree still wired to mission_commands and driving
+	# freed entity nodes.
+	if _command_host != null:
+		_command_host.queue_free()
+		_command_host = null
+	_entity_registry = null
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
 	_entity_registry = MissionEntityRegistry.new()
 	_entity_registry.build(container, mission)

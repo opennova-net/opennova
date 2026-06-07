@@ -1210,21 +1210,25 @@ EntityTransform from_c_transform(const OpenNovaMissionEntityTransform &transform
 }
 
 EntityProperties from_c_properties(const OpenNovaMissionEntityProperties &properties) {
-	return {
-		properties.group_id,
-		properties.waypoint_id,
-		properties.wp_number,
-		properties.team,
-		properties.ai_flags,
-		properties.perception,
-		properties.accuracy,
-		properties.alert_state,
-		properties.min_engagement_distance,
-		properties.max_engagement_distance,
-		properties.max_attack_distance,
-		properties.spawn_count,
-		properties.max_simultaneous,
-	};
+	// Assign by name rather than a positional aggregate initializer: a future reorder or insert among
+	// EntityProperties' members would otherwise keep compiling while silently copying C-ABI fields into
+	// the wrong members. EntityProperties' default member initializers zero the trailing
+	// no_less_than / map_symbol / name1 / name2, which are not part of the C-ABI struct.
+	EntityProperties out;
+	out.group_id = properties.group_id;
+	out.waypoint_id = properties.waypoint_id;
+	out.wp_number = properties.wp_number;
+	out.team = properties.team;
+	out.ai_flags = properties.ai_flags;
+	out.perception = properties.perception;
+	out.accuracy = properties.accuracy;
+	out.alert_state = properties.alert_state;
+	out.min_engagement_distance = properties.min_engagement_distance;
+	out.max_engagement_distance = properties.max_engagement_distance;
+	out.max_attack_distance = properties.max_attack_distance;
+	out.spawn_count = properties.spawn_count;
+	out.max_simultaneous = properties.max_simultaneous;
+	return out;
 }
 
 void copy_record(OpenNovaMissionEntityRecord &out, const EntityRecord &record) {
@@ -1540,11 +1544,16 @@ bool MissionDocument::set_header_string(const std::string &field, const std::str
 	}
 	bms::Header &header = impl_->file.header;
 	if (field == "mission_name") {
-		copy_cstr(header.mission_name, sizeof(header.mission_name), value);
+		// These are fixed-width on-disk slots read back at full width via fixed_string(., sizeof)
+		// (see info()), so use copy_fixed_field, not copy_cstr: a name/designer/briefing that fills
+		// every byte would otherwise lose its last byte to a forced NUL and break the byte-exact
+		// round-trip, exactly the truncation the terrain / environment / name1 / name2 fields below
+		// (and apply_properties) already avoid.
+		copy_fixed_field(header.mission_name, sizeof(header.mission_name), value);
 	} else if (field == "designer") {
-		copy_cstr(header.designer, sizeof(header.designer), value);
+		copy_fixed_field(header.designer, sizeof(header.designer), value);
 	} else if (field == "briefing") {
-		copy_cstr(header.mission_briefing, sizeof(header.mission_briefing), value);
+		copy_fixed_field(header.mission_briefing, sizeof(header.mission_briefing), value);
 	} else if (field == "terrain") {
 		// header.terrain[48] is three 16-byte fixed slots: terrain@+0, cnv_file@+16, tt_file@+32
 		// (see write_mis_general_information). Write only the first slot so a terrain edit does not

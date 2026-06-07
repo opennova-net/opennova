@@ -175,7 +175,10 @@ func restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
 	if slot < 0 or slot > 1:
 		return
 	var register := _resolve_anim_channel_register(slot)
-	if not register.is_empty():
+	# Stop (play_type == 0) must freeze the part where it is, so do NOT reseed the register: reseeding
+	# to 0 would jump the part to its 0 pose before play_part_anim's stop erases the channel. Only the
+	# forward/reverse previews seed a rest start (0 forward / max reverse).
+	if not register.is_empty() and play_type != 0:
 		_ctrl_values[register] = 0 if play_type >= 0 else 65535
 	play_part_anim(channel, play_type, time_s)
 

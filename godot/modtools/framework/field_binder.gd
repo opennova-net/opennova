@@ -53,21 +53,28 @@ func bind_line(line: LineEdit, getter: Callable, setter: Callable) -> LineEdit:
 	# Skip a focused LineEdit (and only write changed text): sync_from fires on every model `changed`,
 	# including one that lands while the user is typing (e.g. an undo), and a blind `.text =` would
 	# overwrite the half-typed value and reset the caret. The commit-on-Enter/focus-out path reconciles.
+	# `shown` tracks the text we last DISPLAYED (via a sync write or a commit), so focus-out can tell a
+	# genuine user edit (text changed since) from an unchanged field whose model moved underneath it.
+	var state := { "shown": line.text }
 	_bindings.append(func(info):
 		var v: String = getter.call(info)
 		if line.text != v and not line.has_focus():
-			line.text = v)
+			line.text = v
+			state.shown = v)
 	# Commit on BOTH Enter (text_submitted) and focus-out. Focus-out is essential: leaving a field for
-	# another one WITHOUT pressing Enter must persist the edit, otherwise the next model `changed`
-	# (e.g. from committing a sibling field) re-syncs this now-unfocused LineEdit back to its stale
-	# model value and silently blanks what the user just typed. The guard suppresses any echo during a
-	# programmatic sync_from; model-side dedupe makes a no-op focus-out commit harmless.
+	# another one WITHOUT pressing Enter must persist the edit. But commit ONLY when the text actually
+	# changed since it was last displayed: a model `changed` that arrived while this field was focused
+	# was skipped by the sync above (still showing the old text), so an unconditional focus-out commit
+	# would write that stale text back over the newer model value (e.g. reverting an undo). The guard
+	# suppresses echoes during a programmatic sync_from.
 	line.text_submitted.connect(func(value: String):
 		if not _guard.active:
-			setter.call(value))
+			setter.call(value)
+			state.shown = value)
 	line.focus_exited.connect(func():
-		if not _guard.active:
-			setter.call(line.text))
+		if not _guard.active and line.text != state.shown:
+			setter.call(line.text)
+			state.shown = line.text)
 	return line
 
 
