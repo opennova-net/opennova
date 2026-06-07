@@ -443,6 +443,333 @@ int main() {
         CHECK(e.brain.f[AiBrain::kFireTimer] == 50 - 64); // -= kStep
     }
 
+    // ======================= P2: GROUND combat + targeting =======================
+
+    // ---- PRNG: the rotate-LCG (dword_31BFBB8 / PRNG_Next16) is byte-exact + independent ----
+    {
+        AiSystem sys;
+        sys.prng_a = 1;
+        // s = rotl(1+rotl(1,11),4)^1 = rotl(0x801,4)^1 = 0x8010^1 = 0x8011 = 32785.
+        CHECK(static_cast<uint32_t>(sys.prng_step_a()) == 0x8011u);
+        CHECK(sys.prng_a == 0x8011u);             // state advanced
+        CHECK((0x8011u & 0xFFFFu) % 62 == 49);    // the %62 jitter the engagement adds
+
+        // PRNG_Next16 is the same algorithm over a separate stream (dword_31BFBB0).
+        sys.prng16 = 1;
+        CHECK(static_cast<uint32_t>(sys.prng_step16()) == 0x8011u);
+        CHECK(sys.prng_a == 0x8011u);             // stepping 16 did NOT touch stream a (independent)
+    }
+
+    // ---- ai_score_target: byte-exact FOV/range/stealth/priority scoring ----
+    {
+        // Centered (angle 0), close (dist 50), fully visible: primary FOV path.
+        // primary_fov=0x41 (=65), gate (65|2)>>1=33; angle 0<33 -> angle_score=((65)<<16)/65=0x10000.
+        // range=0x640000/50=0x20000; stealth=0x10000; priority=0x10000 -> score 0x20000=131072.
+        CHECK(ai_score_target(0, 50, 0x41, 0x41, 100, 100, 100, 100, 0, 0) == 131072);
+
+        // Outside both FOV gates -> -1 (gate-fail sentinel, distinct from an in-gate score of 0).
+        CHECK(ai_score_target(50, 50, 0x41, 0x41, 100, 100, 100, 100, 0, 0) == -1);
+
+        // Beyond range -> -1 even when perfectly centered.
+        CHECK(ai_score_target(0, 200, 0x41, 0x41, 100, 100, 100, 100, 0, 0) == -1);
+
+        // Secondary FOV path (fails primary angle, passes secondary): scores > 0, < the centered max.
+        int sec = ai_score_target(35, 50, 0x41, 0x51, 100, 100, 100, 100, 0, 0);
+        CHECK(sec > 0 && sec < 131072);
+
+        // Stealth: visibility >= 16 zeroes the score (in-gate 0, NOT gate-fail -1); partial scales it.
+        CHECK(ai_score_target(0, 50, 0x41, 0x41, 100, 100, 100, 100, 16, 0) == 0);
+        int dim = ai_score_target(0, 50, 0x41, 0x41, 100, 100, 100, 100, 8, 0);
+        CHECK(dim > 0 && dim < 131072);                            // stealth 0xFF00 < 0x10000
+
+        // Priority flag (&0x4000) applies the 6.0x weight (393216/0x10000).
+        CHECK(ai_score_target(0, 50, 0x41, 0x41, 100, 100, 100, 100, 0, 0x4000) == 131072 * 6);
+    }
+
+    // ---- acquire_target: best-of, team filter, LOS, priority bypass ----
+    {
+        AiSystem sys;
+        int idx = sys.attach(EntityHandle::make(0, 0));
+        AiEntity &e = *sys.at(idx);
+        e.heading = 0;
+        e.team = 1;
+        e.profile.fov_primary = 0x40;     // -> 0x41
+        e.profile.fov_secondary = 0x40;
+        e.profile.range_primary = 1000;
+        e.profile.range_secondary = 1000;
+
+        // Far enemy (dist large but in range) and near enemy (better range_score); both centered.
+        AiCandidate far{};
+        far.handle = EntityHandle::make(1, 5);
+        far.team = 2; far.pos[0] = 500 << 16; far.health = 100;
+        far.range_primary = 1000; far.range_secondary = 1000;
+        far.relmat_id = 0x11; far.net_id = 0x111;
+        AiCandidate near{};
+        near.handle = EntityHandle::make(1, 6);
+        near.team = 2; near.pos[0] = 100 << 16; near.health = 100;
+        near.range_primary = 1000; near.range_secondary = 1000;
+        near.relmat_id = 0x22; near.net_id = 0x222; near.has_controller = true;
+        sys.candidates = {far, near};
+
+        AiTarget out{};
+        CHECK(sys.acquire_target(e, out) == true);
+        CHECK(sys.find_target_calls == 1);
+        CHECK(out.net_id == 0x222);          // nearer -> higher range_score -> chosen
+        CHECK(out.relmat_id == 0x22);
+        CHECK(out.has_controller == true);
+
+        // Same-team candidate is filtered out -> no target.
+        sys.candidates = {AiCandidate{}};
+        sys.candidates[0].handle = EntityHandle::make(1, 7);
+        sys.candidates[0].team = 1;          // same team as e
+        sys.candidates[0].pos[0] = 100 << 16; sys.candidates[0].health = 100;
+        sys.candidates[0].range_primary = 1000; sys.candidates[0].range_secondary = 1000;
+        AiTarget none{};
+        CHECK(sys.acquire_target(e, none) == false);
+
+        // LOS blocked on the only enemy -> no target.
+        sys.candidates = {near};
+        sys.candidates[0].los_blocked = true;
+        CHECK(sys.acquire_target(e, none) == false);
+
+        // Priority target (in-gate) bypasses scoring and returns immediately on LOS.
+        AiCandidate prio = near;
+        prio.is_priority = true; prio.net_id = 0x333; prio.relmat_id = 0x33;
+        prio.pos[0] = 900 << 16; // would score worse than a closer one, but priority wins
+        AiCandidate closer = near;
+        closer.net_id = 0x444; closer.pos[0] = 50 << 16;
+        sys.candidates = {closer, prio};
+        AiTarget pout{};
+        CHECK(sys.acquire_target(e, pout) == true);
+        CHECK(pout.net_id == 0x333);         // priority bypass beats the closer non-priority
+
+        // [grill fix: priority bypass @0x467350 is reached only PAST the FOV/range gate]
+        // A priority target OUTSIDE the engage range is skipped; an in-range non-priority enemy wins.
+        AiCandidate prio_far{};
+        prio_far.handle = EntityHandle::make(1, 20);
+        prio_far.team = 2; prio_far.pos[0] = 5000 << 16; prio_far.health = 100;
+        prio_far.range_primary = 1000; prio_far.range_secondary = 1000;
+        prio_far.is_priority = true; prio_far.net_id = 0x888;  // dist 5000 > range 1000 -> gate-fail
+        AiCandidate inrange{};
+        inrange.handle = EntityHandle::make(1, 21);
+        inrange.team = 2; inrange.pos[0] = 100 << 16; inrange.health = 100;
+        inrange.range_primary = 1000; inrange.range_secondary = 1000;
+        inrange.net_id = 0x999;
+        sys.candidates = {prio_far, inrange};
+        AiTarget gout{};
+        CHECK(sys.acquire_target(e, gout) == true);
+        CHECK(gout.net_id == 0x999);         // out-of-gate priority skipped; in-range enemy chosen
+    }
+
+    // ---- death event on a non-authority in-session client zeroes health before the death tick ----
+    {
+        World w;
+        AiSystem sys;
+        sys.is_authority = false;
+        sys.is_in_session = true;
+        int idx = sys.attach(EntityHandle::make(0, 0));
+        AiEntity &e = *sys.at(idx);
+        e.has_physics = false;
+        e.health = 100;                                    // still "alive" coming in
+        e.vel_x = 2000; e.vel_z = 0;                       // crash speed (>= 1057)
+        e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp; // tick = h_ground_followwp_tick
+        sys.process_infantry_state_machine(e, w, 4);
+        CHECK(e.health == 0);                              // zeroed before the tick [orig @0x45827f]
+        bool saw_death = false, saw_20 = false;            // death tick (3) + SM's type-20 event
+        for (int i = 0; i < sys.events.count(); ++i) {
+            if (sys.events.at(i).type() == 3) saw_death = true;
+            if (sys.events.at(i).type() == 20) saw_20 = true;
+        }
+        CHECK(saw_death);                                  // death PATH ran (not the alive path)
+        CHECK(saw_20);
+    }
+
+    // ---- engage_target: 8 relation ops in order, target set, fire-delay jitter, pending 17 ----
+    {
+        AiSystem sys;
+        sys.prng16 = 1;
+        int idx = sys.attach(EntityHandle::make(0, 0));
+        AiEntity &e = *sys.at(idx);
+        e.relmat_id = 0x1234;
+        e.net_id = 0x9999;
+        e.profile.field104 = 0;
+        AiTarget t{0x55, 0x66, /*has_controller=*/false};
+
+        sys.engage_target(e, t);
+
+        CHECK(e.brain.f[AiBrain::kPendState] == 17);   // GROUND_COMBAT
+        CHECK(e.brain.f[AiBrain::kCombatTimer] == 0);
+        // branch B: always jitter via PRNG_Next16; field104=0 -> delay = 0 + 49.
+        CHECK(e.brain.f[AiBrain::kFireDelay] == 49);
+        CHECK(sys.target_set_calls.size() == 1 && sys.target_set_calls[0] == 0x66);
+        CHECK(sys.rel_ops.size() == 8);
+        CHECK(sys.rel_ops[0].op == kRelEventSpecial && sys.rel_ops[0].a == 0x1234 && sys.rel_ops[0].b == 0x55);
+        CHECK(sys.rel_ops[1].op == kRelSharedMem    && sys.rel_ops[1].a == 0x9999 && sys.rel_ops[1].b == 0x55);
+        CHECK(sys.rel_ops[2].op == kRelProximity    && sys.rel_ops[2].a == 0x1234 && sys.rel_ops[2].b == 0x66);
+        CHECK(sys.rel_ops[3].op == kRelEnemy        && sys.rel_ops[3].a == 0x9999 && sys.rel_ops[3].b == 0x66);
+        CHECK(sys.rel_ops[4].op == kRelAllied       && sys.rel_ops[4].a == 0x1234 && sys.rel_ops[4].b == 0x55);
+        CHECK(sys.rel_ops[5].op == kRel452B30       && sys.rel_ops[5].a == 0x9999 && sys.rel_ops[5].b == 0x55);
+        CHECK(sys.rel_ops[6].op == kRelDamaged      && sys.rel_ops[6].a == 0x1234 && sys.rel_ops[6].b == 0x66);
+        CHECK(sys.rel_ops[7].op == kRelSpotted      && sys.rel_ops[7].a == 0x9999 && sys.rel_ops[7].b == 0x66);
+    }
+
+    // ---- engage_target: branch A (has_controller) guards jitter by base-delay; sign-extends relmat ----
+    {
+        AiSystem sys;
+        sys.prng_a = 1;
+        int idx = sys.attach(EntityHandle::make(0, 0));
+        AiEntity &e = *sys.at(idx);
+        e.relmat_id = 0x8000;             // high bit set -> (int16) sign-extends to -32768
+        e.profile.field104 = 0;           // base delay 0 -> branch A skips jitter entirely
+        AiTarget t{0x55, 0x66, /*has_controller=*/true};
+        sys.engage_target(e, t);
+        CHECK(e.brain.f[AiBrain::kFireDelay] == 0);     // no jitter when base_delay == 0
+        CHECK(sys.prng_a == 1);                          // stream A untouched (jitter skipped)
+        CHECK(sys.rel_ops[0].a == -32768);               // movsx of 0x8000
+
+        // Now with a base delay: branch A jitters via stream A (49) and advances it.
+        AiSystem sys2;
+        sys2.prng_a = 1;
+        int i2 = sys2.attach(EntityHandle::make(0, 0));
+        AiEntity &e2 = *sys2.at(i2);
+        e2.profile.field104 = 100;
+        AiTarget t2{1, 2, /*has_controller=*/true};
+        sys2.engage_target(e2, t2);
+        CHECK(e2.brain.f[AiBrain::kFireDelay] == 149);   // 100 + 49
+        CHECK(sys2.prng_a == 0x8011u);                   // stream A advanced
+    }
+
+    // ---- state-16 tick: a visible enemy -> engage (pending 17) instead of walking ----
+    {
+        World w;
+        AiSystem sys;
+        int idx = sys.attach(EntityHandle::make(0, 0));
+        AiEntity &e = *sys.at(idx);
+        e.team = 1;
+        e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp;
+        e.profile.fov_primary = 0x40;
+        e.profile.fov_secondary = 0x40;
+        e.profile.range_primary = 1000;
+        e.profile.range_secondary = 1000;
+        AiCandidate enemy{};
+        enemy.handle = EntityHandle::make(1, 9);
+        enemy.team = 2; enemy.pos[0] = 100 << 16; enemy.health = 100;
+        enemy.range_primary = 1000; enemy.range_secondary = 1000;
+        enemy.net_id = 0x777; enemy.relmat_id = 0x77;
+        sys.candidates = {enemy};
+        AiThinkCtx ctx{&sys, &e, &w, nullptr};
+        sys.row(kAiGroundFollowWp).tick(ctx);
+        CHECK(e.brain.f[AiBrain::kPendState] == 17);     // engaged
+        CHECK(sys.rel_ops.size() == 8);
+        CHECK(sys.target_set_calls.size() == 1 && sys.target_set_calls[0] == 0x777);
+        CHECK(e.brain.f[AiBrain::kOutSpeed] != 10);      // mover did NOT run (no walk)
+    }
+
+    // ---- state-18 patrol tick: arrival clears the goal; otherwise fallback vs engage ----
+    {
+        World w;
+        AiSystem sys;
+        int idx = sys.attach(EntityHandle::make(0, 0));
+        AiEntity &e = *sys.at(idx);
+        e.brain.f[AiBrain::kCurState] = kAiGroundEvade; // 18
+        e.brain.f[AiBrain::kWorkHeading] = 1000;        // brain[132] target heading
+        e.arrival_prox = 100;
+        e.heading = 1050;                                // within [900,1100] -> arrived
+        e.patrol_goal = 1;
+        AiThinkCtx ctx{&sys, &e, &w, nullptr};
+        sys.row(kAiGroundEvade).tick(ctx);
+        CHECK(e.patrol_goal == 0);                       // cleared on arrival
+        CHECK(e.brain.f[AiBrain::kPendState] == 0);      // no transition yet (goal-clear branch)
+
+        // Goal still set but heading out of range -> goal stays, no transition.
+        e.patrol_goal = 1;
+        e.heading = 2000;
+        sys.row(kAiGroundEvade).tick(ctx);
+        CHECK(e.patrol_goal == 1);
+        CHECK(e.brain.f[AiBrain::kPendState] == 0);
+
+        // No goal + fallback flag -> pending = fallback state (brain[6]).
+        e.patrol_goal = 0;
+        e.profile.flags100 = 2;
+        e.brain.f[AiBrain::kFallback] = 22;
+        sys.row(kAiGroundEvade).tick(ctx);
+        CHECK(e.brain.f[AiBrain::kPendState] == 22);
+
+        // No goal + no fallback flag -> pending = 17 (GROUND_COMBAT).
+        e.patrol_goal = 0;
+        e.profile.flags100 = 0;
+        e.brain.f[AiBrain::kPendState] = 0;
+        sys.row(kAiGroundEvade).tick(ctx);
+        CHECK(e.brain.f[AiBrain::kPendState] == 17);
+    }
+
+    // ---- state-18 patrol tick: death queues an event; fire timer decrements ----
+    {
+        World w;
+        AiSystem sys;
+        int idx = sys.attach(EntityHandle::make(0, 0));
+        AiEntity &e = *sys.at(idx);
+        e.brain.f[AiBrain::kCurState] = kAiGroundEvade;
+        e.health = 0;
+        e.vel_x = 2000; e.vel_z = 0;          // >= 1057 -> crash death (3)
+        AiThinkCtx ctx{&sys, &e, &w, nullptr};
+        sys.row(kAiGroundEvade).tick(ctx);
+        CHECK(sys.events.count() == 1 && sys.events.at(0).type() == 3);
+
+        e.health = 100;
+        e.profile.flags96 = 0x10;             // can-fire
+        e.brain.f[AiBrain::kFireTimer] = 50;
+        e.brain.f[AiBrain::kStep] = 64;
+        e.patrol_goal = 1;                    // stay in the goal branch (no transition)
+        e.brain.f[AiBrain::kWorkHeading] = 0; e.arrival_prox = 1; e.heading = 1000; // not arrived
+        int before = sys.unported_calls;
+        sys.row(kAiGroundEvade).tick(ctx);
+        CHECK(sys.unported_calls == before + 1);          // compute-fire-positions stub
+        CHECK(e.brain.f[AiBrain::kFireTimer] == 50 - 64); // -= step
+    }
+
+    // ---- combat event handler (states 16/17/18 event): damage/death/destroy transitions ----
+    {
+        World w;
+        AiSystem sys;
+        int idx = sys.attach(EntityHandle::make(0, 0));
+        AiEntity &e = *sys.at(idx);
+
+        // type 1 (damage): pending = 18 + brain[39] = event[3], when not dead/suppressed.
+        e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp;
+        e.brain.f[AiBrain::kPendState] = 0;
+        e.profile.flags96 = 0; // not suppressed
+        AiEventEntry dmg{};
+        dmg.f[0] = 1; dmg.f[3] = 0xDEAD;
+        AiThinkCtx ctx{&sys, &e, &w, &dmg};
+        sys.row(kAiGroundFollowWp).event(ctx);
+        CHECK(e.brain.f[AiBrain::kPendState] == 18);
+        CHECK(e.brain.f[AiBrain::kDamageInfo] == 0xDEAD);
+
+        // type 1 but already transitioning to 21 -> no 18 (still stashes damage info).
+        e.brain.f[AiBrain::kPendState] = 21;
+        e.brain.f[AiBrain::kDamageInfo] = 0;
+        sys.row(kAiGroundCombat).event(ctx);
+        CHECK(e.brain.f[AiBrain::kPendState] == 21);  // unchanged
+        CHECK(e.brain.f[AiBrain::kDamageInfo] == 0xDEAD);
+
+        // type 1 but suppressed (flags96 & 2) -> no 18.
+        e.brain.f[AiBrain::kPendState] = 0;
+        e.profile.flags96 = 2;
+        sys.row(kAiGroundEvade).event(ctx);
+        CHECK(e.brain.f[AiBrain::kPendState] == 0);
+
+        // type 3 (death) -> 21; type 4 (destroy) -> 23.
+        AiEventEntry death{}; death.f[0] = 3;
+        AiThinkCtx ctx3{&sys, &e, &w, &death};
+        sys.row(kAiGroundFollowWp).event(ctx3);
+        CHECK(e.brain.f[AiBrain::kPendState] == 21);
+        AiEventEntry destroy{}; destroy.f[0] = 4;
+        AiThinkCtx ctx4{&sys, &e, &w, &destroy};
+        sys.row(kAiGroundCombat).event(ctx4);
+        CHECK(e.brain.f[AiBrain::kPendState] == 23);
+    }
+
     if (failures == 0) std::printf("ai: all tests passed\n");
     return failures ? 1 : 0;
 }

@@ -95,6 +95,9 @@ struct AiBrain {
         kWpExtra = 24,     // node payload f[4] (type1) / 0 (type3) [byte +96]
         kAnimFlag = 32,    // cleared on node advance [byte +128]
         kStoredKeyTime = 35, // stored node-val on advance [byte +140]
+        kDamageInfo = 39,  // damage source/info copied from a damage event's extra [byte +156]
+        kCombatTimer = 40, // no-target / combat re-acquire timer (>620 re-acquire) [byte +160]
+        kFireDelay = 41,   // fire-delay countdown set on engagement [byte +164]
         kAlert = 46,       // alert level [byte +184]
         kPrevAlert = 47,   // previous alert level (edge) [byte +188]
         kNoTargetIdle = 48,// set 1 when no target + profile not combat [byte +192]
@@ -131,11 +134,17 @@ static_assert(sizeof(AiSlot) == 172, "AiSlot must match unk_A34B90 172-byte stri
 // flag bytes the state machine reads. [orig: AIProfile_LoadOrFind @0x45fd80.]
 struct AiProfile {
     uint8_t flags96 = 0;   // +96: bit1 (&2) combat-capable, bit4 (&0x10) can-fire
-    uint8_t flags100 = 0;  // +100: bit1 (&2) use-fallback-state
+    uint8_t flags100 = 0;  // +100: bit1 (&2) use-fallback-state, bit3 (&8) ignore-stealth gate
     bool has_src148 = false; // +148 target-source gate
     bool has_src180 = false; // +180 target-source gate
     int32_t field216 = 0;  // +216: added into brain working field [131]
     int32_t field220 = 0;  // +220: copied into brain working field [138]
+    // ---- combat / targeting (P2) ----
+    int32_t field104 = 0;       // +104: base fire delay (engagement); 0 -> no jitter (branch A)
+    uint8_t fov_primary = 0;    // +75:  primary FOV arc byte (OR'd with 1 before use)
+    uint8_t fov_secondary = 0;  // +67:  secondary FOV / turret arc byte (OR'd with 1)
+    int16_t range_primary = 0;  // +78:  primary-FOV max engage range (world units, signed i16)
+    int16_t range_secondary = 0;// +70:  secondary-FOV max engage range (world units, signed i16)
 };
 
 // AiScheduler — brain[2], the shared per-frame budget accumulator (the +16 field).
@@ -203,8 +212,48 @@ struct AiEntity {
     int32_t vel_x = 0;         // entity+152
     int32_t vel_z = 0;         // entity+156
     int16_t health = 100;      // entity+286 (<=0 -> death path)
-    int32_t net_id = 0;        // entity+124 (RelationMatrix_SetBitA key)
+    int32_t net_id = 0;        // entity+124 (RelationMatrix_SetBitA key / DcbId)
     uint16_t relmat_id = 0;    // entity+284 (RelationMatrix_SetBitB key)
+    uint8_t team = 0;          // entity+354 (team id; 0 = neutral)
+    bool see_all = false;      // entity+104 aiSlot[4] & 0x200 (targets any team)
+    int32_t arrival_prox = 0;  // entity+32 def +2340 (heading arrival proximity, patrol)
+    // brain[2] "scheduler" per-entity patrol state. Tracked deviation: the original keeps the
+    // frame budget (+16) and the patrol triple (+0/+4/+8) in one struct reached via brain[2];
+    // we keep the budget shared (AiSystem::scheduler, the foundation's frame-stagger model) and
+    // model the per-entity patrol fields here. Whether brain[2] is global or per-entity/per-group
+    // is an open RE TODO (notes §9); reconciling would move the budget here too.
+    int32_t patrol_f0 = 0;     // scheduler +0
+    int32_t patrol_delta = 0;  // scheduler +4 (patrol heading delta)
+    int32_t patrol_goal = 0;   // scheduler +8 (patrol goal active -> still en route)
+};
+
+// A resolved AI target — the fields the engagement bookkeeping reads off the target entity.
+// [orig: best_target in AI_HandleEvent_HelicopterCombatD @0x467730.]
+struct AiTarget {
+    int32_t relmat_id = 0;       // target+284 (pad6_pre[24], i16) — relation-matrix key
+    int32_t net_id = 0;          // target+124 (DcbId)
+    bool has_controller = false; // target pad3_pre[48] nonzero -> PRNG branch A (inline) vs B
+};
+
+// A perception candidate for acquire_target. [orig: AI_FindBestTargetB @0x466f60 scans the
+// g_pool_list pools; we scan an injected eligible-candidate list — the weapon-slot pool
+// selection + vehicle/building sub-filter (profile+40 slot config) and the relation-matrix
+// team filter are deferred to the weapon/relation phase. The per-candidate perception gates +
+// FOV/range/stealth scoring + LOS + priority bypass are faithful.]
+struct AiCandidate {
+    EntityHandle handle;
+    int32_t pos[3] = {};        // candidate+4/+8/+12 (X/Y/Z, 16.16 fixed)
+    uint8_t team = 0;           // candidate+354
+    int32_t flags = 0;          // candidate[9] (+36): &2 ignore, &0x4000 priority, &0x8000000 skip
+    int16_t health = 100;       // candidate+286 (*143)
+    int32_t visibility = 0;     // candidate+530 (*265): stealth counter (0 = fully visible)
+    int32_t range_primary = 0;  // candidate+422 (*211): max primary-FOV engage range
+    int32_t range_secondary = 0;// candidate+420 (*210): max secondary-FOV engage range
+    int32_t relmat_id = 0;      // candidate+284
+    int32_t net_id = 0;         // candidate+124 (DcbId)
+    bool has_controller = false;// candidate pad3_pre[48]
+    bool is_priority = false;   // == profile+148 priority target -> LOS-only bypass
+    bool los_blocked = false;   // Entity_CheckMutualLineOfSight @0x539be0 (default: clear)
 };
 
 class AiSystem; // fwd
@@ -279,6 +328,32 @@ struct RelMatCall {
     int32_t node;
 };
 
+// The 8 relation-matrix bit-set ops emitted on target engagement, in call order.
+// [orig: AI_HandleEvent_HelicopterCombatD @0x4677b3..0x4678b2.] The matrices live in the
+// net/relation layer; we record the calls (op + the two keys) rather than apply them.
+enum RelOp {
+    kRelEventSpecial = 0, // EventMatrix_SetSpecialBit   @0x452a40 (self relmat, target relmat)
+    kRelSharedMem = 1,    // SharedMem_Init              @0x452ad0 (self net,    target relmat)
+    kRelProximity = 2,    // EntityMatrix_SetProximityBit@0x452b60 (self relmat, target net)
+    kRelEnemy = 3,        // TeamMatrix_SetEnemy         @0x452bf0 (self net,    target net)
+    kRelAllied = 4,       // TeamMatrix_SetAllied        @0x452aa0 (self relmat, target relmat)
+    kRel452B30 = 5,       // sub_452B30                  @0x452b30 (self net,    target relmat)
+    kRelDamaged = 6,      // EntityMatrix_SetDamagedBit  @0x452bc0 (self relmat, target net)
+    kRelSpotted = 7,      // TeamMatrix_SetSpottedBy     @0x452c70 (self net,    target net)
+};
+struct RelOpCall { int op; int32_t a; int32_t b; };
+
+// [orig: AI_FindBestTargetB @0x466f60 scoring core] Combined FOV/range/stealth/priority score
+// for a candidate (16.16 fixed point, 64-bit intermediates, +0x8000 rounding). Returns -1 when
+// the candidate is outside both FOV/range gates (the orig's LABEL_17 skip) — distinct from a
+// legitimate in-gate score of 0 (a fully-stealthed target), which the caller needs to honor the
+// priority-bypass ordering. `angle_diff` is the folded BAM heading delta in [0,128]; `distance`
+// is ftol2(dist3d) >> 16 (world units). primary/secondary_fov are the profile arc bytes already
+// OR'd with 1; the *_max args are the engage-range caps.
+int32_t ai_score_target(int angle_diff, int distance, int primary_fov, int secondary_fov,
+                        int primary_max, int secondary_max, int cand_primary_max,
+                        int cand_secondary_max, int visibility, int cand_flags);
+
 // The AI subsystem: a world::ISystem ticking all AI brains on the shared world.
 class AiSystem : public ISystem {
 public:
@@ -298,8 +373,40 @@ public:
     bool is_authority = true; // [orig: g_napi_np_ctx.is_authority]
     bool is_in_session = false;
     int unported_calls = 0;   // coverage counter for not_yet_ported handlers
-    int find_target_calls = 0;// coverage: P2 target acquisition stub invocations
+    int find_target_calls = 0;// coverage: target-acquisition invocations
     std::vector<RelMatCall> relmat_calls; // recorded mover side effects (net layer = P2+)
+
+    // ---- P2: GROUND combat + targeting ----
+    std::vector<AiCandidate> candidates;   // injected perception candidates (acquire_target input)
+    std::vector<RelOpCall> rel_ops;        // recorded engagement relation-matrix ops
+    std::vector<int32_t> target_set_calls; // recorded Entity_SetAITarget net-ids (@0x45d760)
+    uint32_t prng_a = 0;    // [orig: dword_31BFBB8] engagement fire-delay jitter stream
+    uint32_t prng16 = 0;    // [orig: dword_31BFBB0] PRNG_Next16 stream
+
+    // The shared 32-bit rotate LCG: s = rotl(s + rotl(s,11), 4) ^ 1; returns the new state.
+    int32_t prng_step_a();  // [orig: inline LCG on dword_31BFBB8]
+    int32_t prng_step16();  // [orig: PRNG_Next16 @0x6130a0, dword_31BFBB0]
+
+    int index_of(const AiEntity &e) const; // AI index (= AIEvent entity_index)
+
+    // [orig: the shared death-velocity event @0x467730/0x457d70/0x467400] queue a crash(3) or
+    // still(4) AIEvent by horizontal speed (sqrt(vx^2+vz^2), >=1057 -> 3 else 4; channel 0).
+    void queue_death_event(AiEntity &e);
+
+    // [orig: AI_FindBestTargetB @0x466f60] scan `candidates` (perception gates + FOV/range/stealth
+    // scoring + LOS + priority bypass); on success fill `out` and return true. Pool scan + team
+    // relation + weapon-slot selection deferred (see AiCandidate). Counts calls.
+    bool acquire_target(AiEntity &e, AiTarget &out);
+
+    // [orig: the engagement block @0x4677b3..0x4678b2] record the 8 relation-matrix ops +
+    // Entity_SetAITarget, reset the combat timer, set the fire-delay (exact PRNG jitter; the
+    // has_controller branch is guarded by base-delay, the other is unconditional), pending = 17.
+    void engage_target(AiEntity &e, const AiTarget &t);
+
+    // [orig: AI_HandleCommand @0x465770] AI command dispatcher (cases 6..0x16). Deferred to the
+    // AI-command phase; for damage/death/destroy events (1/3/4) the original returns 0, so this
+    // returns false and the combat event switch proceeds faithfully.
+    bool ai_handle_command(AiEntity &e, const AiEventEntry &ev);
 
     // [orig: AI_BeginUpdate @0x457b40] budget gate. Returns false (skip this frame)
     // when the shared scheduler budget exceeds the cap; forces idle/fallback.
@@ -315,10 +422,6 @@ public:
     // the nav table; writes the working target transform (kWorkPos*/kWorkHeading) and
     // out-speed (kOutSpeed). Records the per-advance relation-matrix side effects.
     int update_waypoint_movement(AiEntity &e);
-
-    // [orig: AI_FindBestTargetB @0x466f60] target acquisition — P2 (combat). Stub
-    // returns false (no target) so GROUND_FOLLOWWP runs the mover; counts calls.
-    bool acquire_target(AiEntity &e);
 
     const StateRow &row(int32_t state) const;
 
