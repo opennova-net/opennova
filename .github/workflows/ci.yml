@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: [master]
 
+# On a PR, github.head_ref is the source branch, so a new push cancels the older
+# run (and prevents two runs racing to post the build-links comment). On push to
+# master, head_ref is empty and we fall back to the unique run_id, so master runs
+# are never cancelled.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   test:
     strategy:
@@ -288,6 +296,8 @@ jobs:
 
   package-godot-windows-editor:
     runs-on: windows-latest
+    outputs:
+      artifact_url: ${{ steps.upload_modtools.outputs.artifact-url }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -321,6 +331,7 @@ jobs:
         run: scripts/package_godot_editor_windows.ps1
 
       - name: Upload opennova-modtools Windows zip
+        id: upload_modtools
         uses: actions/upload-artifact@v4
         with:
           name: opennova_modtools_windows
@@ -328,6 +339,8 @@ jobs:
 
   package-godot-windows-runtime:
     runs-on: windows-latest
+    outputs:
+      artifact_url: ${{ steps.upload_runtime.outputs.artifact-url }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -361,6 +374,7 @@ jobs:
         run: scripts/package_godot_runtime_windows.ps1
 
       - name: Upload opennova runtime Windows zip
+        id: upload_runtime
         uses: actions/upload-artifact@v4
         with:
           name: opennova_runtime_windows
@@ -470,3 +484,58 @@ jobs:
         with:
           name: opennova_release_assets
           path: dist/release-assets/*
+
+  # Surface the two Windows builds on the PR as a single comment that updates in
+  # place. Depends on the Windows package jobs (not the test jobs), so links only
+  # ever advance to a build that succeeded; a failed build skips this job and the
+  # previous comment is left untouched.
+  pr-build-links:
+    runs-on: ubuntu-latest
+    needs: [package-godot-windows-editor, package-godot-windows-runtime]
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Post or update the build-links comment
+        uses: actions/github-script@v7
+        env:
+          MODTOOLS_URL: ${{ needs.package-godot-windows-editor.outputs.artifact_url }}
+          RUNTIME_URL: ${{ needs.package-godot-windows-runtime.outputs.artifact_url }}
+        with:
+          script: |
+            // A hidden marker lets us find our own comment across runs, so there
+            // is only ever one: find it -> update; absent -> create.
+            const marker = '<!-- opennova-ci-build-links -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const sha = (context.payload.pull_request.head.sha || '').slice(0, 7);
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const body = [
+              marker,
+              '### OpenNova CI builds',
+              '',
+              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})):`,
+              '',
+              '| Build | Download |',
+              '| --- | --- |',
+              `| OpenNova Editor (Mod Tools) | [opennova-modtools-windows.zip](${process.env.MODTOOLS_URL}) |`,
+              `| Game runtime | [opennova-runtime-windows.zip](${process.env.RUNTIME_URL}) |`,
+              '',
+              'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
+            ].join('\n');
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number, per_page: 100,
+              });
+              const existing = comments.find(c => c.body && c.body.includes(marker));
+              if (existing) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              }
+            } catch (err) {
+              // Forked-PR tokens are read-only and cannot comment; warn instead of
+              // failing CI. Same-repo branch PRs (the normal path here) always work.
+              core.warning(`Could not post build-links comment (forked PR or token lacks pull-requests:write?): ${err.message}`);
+            }
