@@ -211,3 +211,33 @@ void adm_free(AdmFile *af) {
     af->entries = NULL;
     af->count = 0;
 }
+
+int adm_write(const char *path, const AdmEntry *entries, size_t count) {
+    FILE *f;
+    size_t i;
+    int ok = 1;
+
+    if (!path) return -1;
+    if (count > 0 && !entries) return -1;
+
+    f = fopen(path, "wb");
+    if (!f) return -1;
+
+    // Leading blank line.
+    if (fputs("\r\n", f) < 0) ok = 0;
+
+    for (i = 0; i < count && ok; ++i) {
+        if (fprintf(f, "%s\t\t\t\t\"%s\"", entries[i].key, entries[i].value) < 0) ok = 0;
+        if (ok && i + 1 < count) {
+            if (fputs("\r\n", f) < 0) ok = 0;
+        }
+    }
+
+    // Trailing CRLF*3 + NUL (the parser maps embedded NULs to newlines).
+    if (ok) {
+        if (fwrite("\r\n\r\n\r\n\0", 1, 7, f) != 7) ok = 0;
+    }
+
+    fclose(f);
+    return ok ? 0 : -1;
+}

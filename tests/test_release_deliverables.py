@@ -320,8 +320,8 @@ def test_readme_lists_public_asset_names_and_install_hints() -> None:
     assert "Extract the zip" in readme
 
 
-def test_blender_manifest_names_the_ase_exporter() -> None:
+def test_blender_manifest_names_the_ase_and_anim_exporter() -> None:
     manifest = (ROOT / "blender/blender_manifest.toml").read_text(encoding="utf-8")
 
-    assert 'name = "OpenNova Blender ASE Exporter"' in manifest
-    assert 'tagline = "Export Novalogic ASE files"' in manifest
+    assert 'name = "OpenNova Blender ASE & Anim Exporter"' in manifest
+    assert 'tagline = "Export Novalogic ASE models and ADM/BAD animations"' in manifest

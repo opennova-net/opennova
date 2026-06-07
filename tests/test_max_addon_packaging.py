@@ -10,7 +10,7 @@ def _read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_max_package_script_builds_ase_only_mzp() -> None:
+def test_max_package_script_builds_ase_and_anim_mzp() -> None:
     script_path = ROOT / "scripts/package_max_mzp.ps1"
     assert script_path.exists()
 
@@ -46,6 +46,9 @@ def test_max_package_script_builds_ase_only_mzp() -> None:
         "maxOps.GetICuiMenuMgr()",
         "#cuiRegisterMenus",
         "OpenNovaExportAse`OpenNova",
+        "OpenNovaExportAnims`OpenNova",
+        "Novalogic Anims (.adm + .bad)",
+        "anim_scene_exporter.py",
         "menuMgr.GetMenuById",
         "eed3eaef-ea24-4342-aacc-9dfd87f9a4f4",
     ]
@@ -54,9 +57,7 @@ def test_max_package_script_builds_ase_only_mzp() -> None:
 
     forbidden = [
         "OpenNovaImporter",
-        "OpenNovaExportAnims",
         "opennova_qt_ui",
-        "Novalogic Anims",
         'Description="macro scripts"',
         'Description="post-start-up scripts"',
     ]
