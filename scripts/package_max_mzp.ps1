@@ -468,7 +468,9 @@ Assert-File (Join-Path $StartupRoot "opennova_max_startup.py")
 Assert-File (Join-Path $PythonRoot "opennova_max\__init__.py")
 Assert-File (Join-Path $PythonRoot "opennova_max\_packaged_version.py")
 Assert-File (Join-Path $PythonRoot "opennova_max\ase_scene_exporter.py")
+Assert-File (Join-Path $PythonRoot "opennova_max\anim_scene_exporter.py")
 Assert-File (Join-Path $PythonRoot "pyopennova\ase_ffi.py")
+Assert-File (Join-Path $PythonRoot "pyopennova\bad_build.py")
 Assert-File (Join-Path $PythonRoot "pyopennova\lib\windows-x64\opennova.dll")
 Assert-Dir (Join-Path $PythonRoot "opennova_jobs")
 
@@ -608,9 +610,12 @@ sys.path.insert(0, str(python_root))
 import opennova_max
 from opennova_max import ui
 import opennova_max.ase_scene_exporter
+import opennova_max.anim_scene_exporter
 import pyopennova.ase_ffi
+import pyopennova.bad_build
 
-for module in (opennova_max, ui, opennova_max.ase_scene_exporter, pyopennova.ase_ffi):
+for module in (opennova_max, ui, opennova_max.ase_scene_exporter,
+               opennova_max.anim_scene_exporter, pyopennova.ase_ffi, pyopennova.bad_build):
     module_file = Path(module.__file__).resolve()
     if not str(module_file).lower().startswith(str(python_root).lower()):
         raise RuntimeError(f'{module.__name__} imported from wrong path: {module_file}')
@@ -618,15 +623,18 @@ for module in (opennova_max, ui, opennova_max.ase_scene_exporter, pyopennova.ase
 assert opennova_max.get_version() == os.environ['OPENNOVA_MAX_SMOKE_VERSION']
 menu_script = ui.build_menu_script()
 assert 'Novalogic ASE (.ase)' in menu_script
+assert 'Novalogic Anims (.adm + .bad)' in menu_script
 assert 'maxOps.GetICuiMenuMgr()' in menu_script
 assert '#cuiRegisterMenus' in menu_script
 assert 'OpenNovaExportAse`OpenNova' in menu_script
+assert 'OpenNovaExportAnims`OpenNova' in menu_script
 assert 'menuMgr.GetMenuById' in menu_script
 assert 'eed3eaef-ea24-4342-aacc-9dfd87f9a4f4' in menu_script
 assert 'exportMenu.addItem aseItem -1' in menu_script
+assert 'exportMenu.addItem animsItem -1' in menu_script
 assert 'OpenNovaExportMenu' not in menu_script
 assert 'createSubMenuItem "OpenNova"' not in menu_script
-print('staged Max ASE exporter smoke ok')
+print('staged Max ASE + Anim exporter smoke ok')
 '@
     if ($LASTEXITCODE -ne 0) {
         throw "Staged Python smoke check failed"

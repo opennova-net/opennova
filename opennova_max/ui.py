@@ -9,12 +9,20 @@ def export_ase():
     return export_scene_with_dialog()
 
 
+def export_anims():
+    # type: () -> bool
+    from .anim_scene_exporter import export_anims_with_dialog
+
+    return export_anims_with_dialog()
+
+
 def build_menu_script():
     # type: () -> str
     return r'''
 global openNovaRegisterModernMenus
 
 global OPENNOVA_FILE_ASE_ACTION_GUID = "5CB72814-7B1D-4E71-9E31-0F5C4F4E4D01"
+global OPENNOVA_FILE_ANIMS_ACTION_GUID = "5CB72814-7B1D-4E71-9E31-0F5C4F4E4D02"
 
 fn openNovaMenuItemTitle item =
 (
@@ -162,6 +170,7 @@ fn openNovaRegisterModernMenus =
     if exportMenu != undefined do
     (
         openNovaCreateModernAction exportMenu OPENNOVA_FILE_ASE_ACTION_GUID "OpenNovaExportAse`OpenNova" "Novalogic ASE (.ase)"
+        openNovaCreateModernAction exportMenu OPENNOVA_FILE_ANIMS_ACTION_GUID "OpenNovaExportAnims`OpenNova" "Novalogic Anims (.adm + .bad)"
     )
     true
 )
@@ -211,6 +220,7 @@ try
     if exportMenu != undefined do
     (
         openNovaRemoveLegacyMenuItemByTitle exportMenu "Novalogic ASE (.ase)"
+        openNovaRemoveLegacyMenuItemByTitle exportMenu "Novalogic Anims (.adm + .bad)"
 
         local aseItem = menuMan.createActionItem "OpenNovaExportAse" "OpenNova"
         openNovaLogLegacyAction "OpenNovaExportAse" aseItem
@@ -223,6 +233,19 @@ try
             )
             catch()
             exportMenu.addItem aseItem -1
+        )
+
+        local animsItem = menuMan.createActionItem "OpenNovaExportAnims" "OpenNova"
+        openNovaLogLegacyAction "OpenNovaExportAnims" animsItem
+        if animsItem != undefined then
+        (
+            try
+            (
+                animsItem.setTitle "Novalogic Anims (.adm + .bad)"
+                animsItem.setUseCustomTitle true
+            )
+            catch()
+            exportMenu.addItem animsItem -1
         )
         menuMan.updateMenuBar()
     )
