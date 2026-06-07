@@ -1,0 +1,145 @@
+extends GutTest
+
+# Phase 5: the property inspector's deep string integration. For a widget whose text
+# is a string-table key (type="id"), the inspector resolves the display text, flags an
+# unknown key, lets the user pick a key from the table (committing through the normal
+# edit path), and offers one-click jumps to the Strings / Fonts workspaces. Also covers
+# the standalone MnuStringPicker filtering + pick.
+
+const MnuPropertyInspectorScript = preload("res://modtools/mnu/mnu_property_inspector.gd")
+const MnuStringPickerScript = preload("res://modtools/mnu/mnu_string_picker.gd")
+const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
+
+
+# A string table with two known entries (keys uppercased to stay deterministic).
+func _make_table() -> RtxtStringFile:
+	var t := RtxtStringFile.new()
+	t.reset_empty()
+	var sec := t.add_section("default")
+	t.add_entry("ALPHA", "Alpha", sec, Vector2i())
+	t.add_entry("BRAVO", "Bravo", sec, Vector2i())
+	return t
+
+
+# A fixture document with one extra string-id widget under MAIN's root. Returns
+# [doc, widget_id].
+func _doc_with_id_widget(key: String) -> Array:
+	var doc := NovaMnuDocument.new()
+	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
+	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
+	var w := doc.add_widget(root, NovaMnuDocument.TYPE_STATIC, Rect2(10, 10, 100, 30))
+	doc.set_widget_string_type(w, "id")
+	doc.set_widget_text(w, key)
+	return [doc, w]
+
+
+func _all_text(node: Node) -> String:
+	var out := ""
+	if node is Label:
+		out += (node as Label).text + "\n"
+	elif node is LineEdit:
+		out += (node as LineEdit).text + "\n"
+	for c in node.get_children():
+		out += _all_text(c)
+	return out
+
+
+func _find_button(node: Node, text: String) -> Button:
+	if node is Button and (node as Button).text == text:
+		return node
+	for c in node.get_children():
+		var found := _find_button(c, text)
+		if found != null:
+			return found
+	return null
+
+
+func _inspector_for(doc: NovaMnuDocument, id: int, text_res: RtxtStringFile):
+	var inspector = MnuPropertyInspectorScript.new()
+	add_child_autofree(inspector)
+	await get_tree().process_frame
+	inspector.show_widget(doc, id, text_res)
+	await get_tree().process_frame
+	return inspector
+
+
+func test_inspector_shows_resolved_text_for_string_id() -> void:
+	var arr := _doc_with_id_widget("ALPHA")
+	var inspector = await _inspector_for(arr[0], arr[1], _make_table())
+	assert_string_contains(_all_text(inspector), "Alpha",
+		"The resolved display text is shown for a string id.")
+
+
+func test_inspector_flags_unresolved_key() -> void:
+	var arr := _doc_with_id_widget("MISSING_KEY")
+	var inspector = await _inspector_for(arr[0], arr[1], _make_table())
+	assert_string_contains(_all_text(inspector), "Not in string table",
+		"An unknown string id is flagged.")
+
+
+func test_inspector_string_helpers_hidden_without_table() -> void:
+	# No table loaded (no resource root): no resolved line, picker, or jump button.
+	var arr := _doc_with_id_widget("ALPHA")
+	var inspector = await _inspector_for(arr[0], arr[1], null)
+	assert_null(_find_button(inspector, "Pick string..."),
+		"The picker is hidden when no string table is loaded.")
+	assert_null(_find_button(inspector, "Edit in Strings"),
+		"The jump is hidden when no string table is loaded.")
+
+
+func test_inspector_string_jump_emits_key() -> void:
+	var arr := _doc_with_id_widget("ALPHA")
+	var inspector = await _inspector_for(arr[0], arr[1], _make_table())
+	var btn := _find_button(inspector, "Edit in Strings")
+	assert_not_null(btn, "The Edit in Strings button is present for a string id.")
+	watch_signals(inspector)
+	btn.pressed.emit()
+	assert_signal_emitted(inspector, "string_jump_requested", "Pressing jumps to Strings.")
+	assert_eq(get_signal_parameters(inspector, "string_jump_requested", 0)[0], "ALPHA",
+		"The jump carries the widget's string id.")
+
+
+func test_inspector_pick_commits_text_edit() -> void:
+	var arr := _doc_with_id_widget("ALPHA")
+	var inspector = await _inspector_for(arr[0], arr[1], _make_table())
+	var captured: Array = []
+	inspector.edit_requested.connect(func(e: Dictionary) -> void: captured.append(e))
+	# Drive the pick result directly (the popup itself is covered by the picker test).
+	inspector._picker_target_id = arr[1]
+	inspector._on_string_picked("BRAVO")
+	assert_eq(captured.size(), 1, "Picking commits exactly one edit.")
+	if captured.size() == 1:
+		var e: Dictionary = captured[0]
+		assert_eq(e.get("prop"), "text", "The edit sets the widget text.")
+		assert_eq(e.get("value"), "BRAVO", "The edit carries the chosen key.")
+		assert_eq(e.get("id"), arr[1], "The edit targets the selected widget.")
+
+
+func test_inspector_font_jump_emits_font() -> void:
+	var arr := _doc_with_id_widget("ALPHA")
+	var doc: NovaMnuDocument = arr[0]
+	var w: int = arr[1]
+	doc.set_widget_font(w, "Gunpl22b.fnt")
+	var inspector = await _inspector_for(doc, w, null)
+	var btn := _find_button(inspector, "Open in Fonts")
+	assert_not_null(btn, "The Open in Fonts button shows when a font is set.")
+	watch_signals(inspector)
+	btn.pressed.emit()
+	assert_signal_emitted(inspector, "font_jump_requested", "Pressing jumps to Fonts.")
+	assert_eq(get_signal_parameters(inspector, "font_jump_requested", 0)[0], "Gunpl22b.fnt",
+		"The jump carries the widget's font.")
+
+
+func test_string_picker_filters_and_picks() -> void:
+	var picker = MnuStringPickerScript.new()
+	add_child_autofree(picker)
+	await get_tree().process_frame
+	picker.set_table(_make_table(), "")
+	assert_eq(picker.row_count(), 2, "All keys are listed initially.")
+	picker.filter("brav")
+	assert_eq(picker.row_count(), 1, "Filter narrows by key/text (case-insensitive).")
+	assert_eq(picker.key_at(0), "BRAVO", "The remaining row is the match.")
+	watch_signals(picker)
+	picker.choose(0)
+	assert_signal_emitted(picker, "picked", "Choosing a row emits picked.")
+	assert_eq(get_signal_parameters(picker, "picked", 0)[0], "BRAVO", "picked carries the chosen key.")

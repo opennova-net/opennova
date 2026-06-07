@@ -9,10 +9,11 @@ const FontsWorkspaceAdapter = preload("res://modtools/editor/fonts_workspace.gd"
 const CreditsWorkspaceAdapter = preload("res://modtools/editor/credits_workspace.gd")
 const StringsWorkspaceAdapter = preload("res://modtools/strings/strings_workspace.gd")
 const SoundWorkspaceAdapter = preload("res://modtools/sound/sound_workspace.gd")
+const MnuWorkspaceAdapter = preload("res://modtools/mnu/mnu_workspace.gd")
 const MusicWorkspaceAdapter = preload("res://modtools/editor/music_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
 
-enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, SOUND, MUSIC }
+enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, SOUND, MNU, MUSIC }
 
 # Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
 # shows the non-popup ones in order. The enum below stays only as stable id
@@ -223,6 +224,7 @@ func _workspace_defs() -> Array:
 		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter, false, &"Interface"),
 		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter, false, &"Interface"),
 		WorkspaceDef.make(Workspace.SOUND, SoundWorkspaceAdapter, false, &"Atmosphere"),
+		WorkspaceDef.make(Workspace.MNU, MnuWorkspaceAdapter, false, &"Interface"),
 		WorkspaceDef.make(Workspace.MUSIC, MusicWorkspaceAdapter, false, &"Audio"),
 		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true, &"Atmosphere"),
 	]
@@ -526,6 +528,27 @@ func open_font_workspace(font_name: String) -> Error:
 		_refresh_workspace_surface()
 		sync_from_editor_state()
 	show_status_message("Opened font %s." % clean_name, 3.0)
+	return OK
+
+
+# Cross-jump used by the Menus workspace's "Edit in Strings": open the menu's resolved
+# text table in the Strings workspace and focus the given key. Mirrors
+# open_font_workspace. table_path is an absolute path (already resolved by the caller).
+func open_strings_workspace(table_path: String, key: String) -> Error:
+	_ensure_workspaces()
+	var workspace := _get_workspace(Workspace.STRINGS)
+	if workspace == null:
+		return ERR_UNAVAILABLE
+	var err: Error = int(workspace.call("open_strings_table", table_path, key))
+	if err != OK:
+		show_status_message("Could not open string table: %s" % table_path.get_file(), 5.0)
+		return err
+	if _active_workspace_id != Workspace.STRINGS:
+		set_active_workspace(Workspace.STRINGS)
+	else:
+		_refresh_workspace_surface()
+		sync_from_editor_state()
+	show_status_message("Editing string %s." % (key if not key.is_empty() else table_path.get_file()), 3.0)
 	return OK
 
 
