@@ -581,9 +581,14 @@ func _build_behavior_section() -> void:
 
 	# Waypoint path (waypoint_id) is the bridge: it names which authored path a unit follows. A
 	# dropdown of the mission's real paths (None / each populated path), not a blind 0-127 number.
+	# waypoint_id is a fixed path NUMBER (0..127; 0 = None), not an index into the populated-path list. The
+	# dropdown lists only paths that have markers, so a unit pointed at an empty slot (common for units that
+	# man a gun / ride a vehicle and never path-follow) has no matching row; label that case as the real
+	# (empty) path slot rather than the generic "Value N".
 	_waypoint_option = _add_entity_option_row(_behavior_box, "waypoint_id", "Waypoint path",
-		"Which waypoint path this unit follows. Author paths in the Waypoints tab.",
-		func(): return _cached_waypoint_options)
+		"Which authored path this unit follows (0-127; 0 = None). Units manning a gun or riding a vehicle don't follow a path -- set None.",
+		func(): return _cached_waypoint_options,
+		func(v: int) -> String: return ("Path %d (no markers)" % v) if (v >= 1 and v <= 127) else ("Value %d" % v))
 	# The plain numeric rows + their section headings come from one ordered table (the field set +
 	# ranges live in MissionEntityFields, matching the libs/mission name->member map). The picker /
 	# text / flag rows below are not plain spins, so they stay explicit.
@@ -633,7 +638,7 @@ func _add_behavior_spin(property: String, label: String, min_value: float, max_v
 # programmatic repopulate echoing back as an edit. Item ids carry the model value, so a user pick
 # commits through set_selected_property(property, id). One populator only -- do not also call
 # populate_id_option on these (that double-population left a duplicate/untagged fallback row).
-func _add_entity_option_row(parent: Control, property: String, label: String, tooltip: String = "", options_getter := Callable()) -> OptionButton:
+func _add_entity_option_row(parent: Control, property: String, label: String, tooltip: String = "", options_getter := Callable(), fallback_label := Callable()) -> OptionButton:
 	var option := ObjectUiHelpers.add_id_option_row(parent, "MissionOpt_" + property, label, [])
 	if not tooltip.is_empty():
 		option.tooltip_text = tooltip
@@ -643,7 +648,7 @@ func _add_entity_option_row(parent: Control, property: String, label: String, to
 	_behavior_binder.bind_option(option,
 		func(info): return int(info.get(property, 0)),
 		func(value: int) -> void: _behavior_set(property, value),
-		options_getter)
+		options_getter, fallback_label)
 	return option
 
 

@@ -606,6 +606,32 @@ func test_edit_panel_shows_the_selected_values() -> void:
 		"group reads from the entity as the selected dropdown option")
 
 
+func test_waypoint_pointing_at_empty_slot_shows_path_label() -> void:
+	# waypoint_id is a fixed path NUMBER (0-127). A unit pointed at a valid but EMPTY slot (no markers --
+	# common for units that man a gun / ride a vehicle and never path-follow) has no row in the curated
+	# dropdown, so it must read "Path N (no markers)", not the generic "Value N".
+	var entity := _sample_entity()
+	entity["waypoint_id"] = 125
+	var ctx := _make(entity)  # fake.waypoint_options defaults to [] -> path 125 is absent
+	var opt := _option(ctx.inspector, "MissionOpt_waypoint_id")
+	assert_not_null(opt, "the Waypoint path picker exists")
+	assert_eq(opt.get_item_id(opt.selected), 125, "the picker preserves the real waypoint_id")
+	assert_eq(opt.get_item_text(opt.selected), "Path 125 (no markers)",
+		"an empty-slot reference is labelled as a path, not 'Value 125'")
+
+
+func test_waypoint_pointing_at_populated_path_selects_it() -> void:
+	var entity := _sample_entity()
+	entity["waypoint_id"] = 3
+	var ctx := _make(entity)
+	ctx.fake.waypoint_options = [{ "id": 0, "label": "None" }, { "id": 3, "label": "Path 3  -  4 markers" }]
+	ctx.inspector._refresh()  # swapping the option list bumps the membership revision -> cache rebuilds
+	var opt := _option(ctx.inspector, "MissionOpt_waypoint_id")
+	assert_eq(opt.get_item_id(opt.selected), 3, "a populated path is selected by id")
+	assert_eq(opt.get_item_text(opt.selected), "Path 3  -  4 markers",
+		"a real path shows its label, not a fallback")
+
+
 func test_identity_shows_resolved_model_name() -> void:
 	# With a resolved model name the identity heading reads the name and a muted kind + index
 	# subline appears beneath it.

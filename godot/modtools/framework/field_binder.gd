@@ -71,7 +71,7 @@ func bind_line(line: LineEdit, getter: Callable, setter: Callable) -> LineEdit:
 	return line
 
 
-func bind_option(option: OptionButton, getter: Callable, setter: Callable, options_getter := Callable()) -> OptionButton:
+func bind_option(option: OptionButton, getter: Callable, setter: Callable, options_getter := Callable(), fallback_label := Callable()) -> OptionButton:
 	# The option's item ids carry the model value (set_item_id when populating). sync selects the
 	# item whose id matches getter(info); a user pick fires setter(selected id). Setting `selected`
 	# programmatically does not emit item_selected, and the guard suppresses any echo regardless.
@@ -101,10 +101,13 @@ func bind_option(option: OptionButton, getter: Callable, setter: Callable, optio
 				break
 		if option.selected == -1:
 			# The model holds a value outside the offered choices (e.g. a shipped enum the editor does
-			# not enumerate). Surface it as a raw row so the control shows the real value instead of
-			# rendering blank. Mirrors ObjectUiHelpers.populate_id_option's fallback.
+			# not enumerate, or a valid-but-empty waypoint slot). Surface it as a raw row so the control
+			# shows the real value instead of rendering blank. fallback_label lets a caller name the value
+			# in domain terms ("Path 125 (no markers)") instead of the generic "Value 125"; mirrors
+			# ObjectUiHelpers.populate_id_option's fallback otherwise.
 			var idx := option.item_count
-			option.add_item("Value %d" % want)
+			var fb_text := String(fallback_label.call(want)) if fallback_label.is_valid() else "Value %d" % want
+			option.add_item(fb_text)
 			option.set_item_id(idx, want)
 			option.set_item_metadata(idx, _OPTION_FALLBACK_META)
 			option.selected = idx)
