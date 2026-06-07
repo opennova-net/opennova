@@ -9,10 +9,10 @@ namespace godot {
 
 // Decodes raw RIFF/WAVE bytes (as served by the VFS / NovaResourceRoot) into a
 // Godot AudioStreamWAV. NovaLogic .wav samples are PCM, mono, 22050 Hz, 8-bit
-// UNSIGNED (0x80 = silence); AudioStreamWAV's FORMAT_8_BITS is SIGNED, so the
-// loader converts unsigned-8 -> signed-8 (XOR 0x80). 16-bit PCM is signed LE in
-// both, copied verbatim. Non-PCM (e.g. ADPCM) is not yet supported and returns
-// a null Ref.
+// UNSIGNED (0x80 = silence). The loader UPCONVERTS 8-bit -> signed 16-bit LE
+// (sample16 = (u - 128) << 8) and emits FORMAT_16_BITS, matching the path Godot's
+// own .wav importer takes; 16-bit PCM is signed LE and copied verbatim. Non-PCM
+// (e.g. ADPCM) is not yet supported and returns a null Ref.
 class NovaWavLoader : public RefCounted {
 	GDCLASS(NovaWavLoader, RefCounted);
 

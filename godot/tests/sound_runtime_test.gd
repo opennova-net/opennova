@@ -44,15 +44,17 @@ func test_wav_loader_decodes_pcm8_unsigned() -> void:
 	var wav := _build_wav(samples, 1, 22050, 8)
 	var stream := NovaWavLoader.from_bytes(wav)
 	assert_not_null(stream, "PCM8 WAV decodes")
-	assert_eq(stream.format, AudioStreamWAV.FORMAT_8_BITS)
+	# 8-bit input is upconverted to signed 16-bit (matches Godot's own .wav importer).
+	assert_eq(stream.format, AudioStreamWAV.FORMAT_16_BITS)
 	assert_eq(stream.mix_rate, 22050)
 	assert_false(stream.stereo)
 	var data := stream.data
-	assert_eq(data.size(), 4)
-	# Unsigned 0x80 (silence) -> signed 0x00; 0x00 -> 0x80; 0xFF -> 0x7F.
-	assert_eq(data[0], 0x00, "0x80 unsigned maps to 0x00 signed (silence)")
-	assert_eq(data[1], 0x80, "0x00 unsigned maps to -128")
-	assert_eq(data[2], 0x7F, "0xFF unsigned maps to +127")
+	assert_eq(data.size(), 8, "4 mono samples x 2 bytes each (16-bit)")
+	# sample16 = (u - 128) << 8: 0x80 -> 0 (silence), 0x00 -> -32768, 0xFF -> +32512.
+	assert_eq(data.decode_s16(0), 0, "0x80 unsigned (silence) -> 0")
+	assert_eq(data.decode_s16(2), -32768, "0x00 unsigned -> minimum")
+	assert_eq(data.decode_s16(4), 32512, "0xFF unsigned -> 0x7F00")
+	assert_eq(data.decode_s16(6), 0, "0x80 unsigned (silence) -> 0")
 
 
 func test_wav_loader_rejects_non_riff() -> void:

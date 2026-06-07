@@ -135,7 +135,9 @@ func _make_player(stream: AudioStreamWAV, layer_d: Dictionary, member: Dictionar
 		s.loop_begin = 0
 		s.loop_end = 0
 	player.stream = s
-	if bus != StringName():
+	# Only route to a bus that actually exists; otherwise keep the default (Master)
+	# so a missing/renamed bus can never silence the voice.
+	if bus != StringName() and AudioServer.get_bus_index(bus) >= 0:
 		player.bus = bus
 	var base_pitch := float(member.get("base_pitch", 1.0))
 	player.pitch_scale = base_pitch if base_pitch > 0.01 else 1.0

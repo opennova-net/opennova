@@ -94,14 +94,18 @@ Ref<AudioStreamWAV> NovaWavLoader::from_bytes(const PackedByteArray &p_bytes) {
 	PackedByteArray pcm;
 	AudioStreamWAV::Format fmt;
 	if (bits_per_sample == 8) {
-		// WAV PCM8 is unsigned (128 = center); AudioStreamWAV FORMAT_8_BITS is
-		// signed two's complement, so XOR 0x80 to convert.
-		fmt = AudioStreamWAV::FORMAT_8_BITS;
-		pcm.resize(data_size);
+		// WAV PCM8 is UNSIGNED (128 = center). Upconvert to signed 16-bit LE
+		// (sample16 = (u - 128) << 8) and emit FORMAT_16_BITS, matching the path
+		// Godot's own .wav importer takes (the archive prototype played 16-bit and
+		// worked). Avoids any FORMAT_8_BITS-from-bytes playback quirk.
+		fmt = AudioStreamWAV::FORMAT_16_BITS;
+		pcm.resize(static_cast<int64_t>(data_size) * 2);
 		uint8_t *dst = pcm.ptrw();
 		const uint8_t *src = buf + data_off;
 		for (uint32_t i = 0; i < data_size; ++i) {
-			dst[i] = src[i] ^ 0x80;
+			const int16_t s = static_cast<int16_t>((static_cast<int>(src[i]) - 128) << 8);
+			dst[i * 2] = static_cast<uint8_t>(s & 0xFF);
+			dst[i * 2 + 1] = static_cast<uint8_t>((s >> 8) & 0xFF);
 		}
 	} else if (bits_per_sample == 16) {
 		// WAV PCM16 and AudioStreamWAV FORMAT_16_BITS are both signed LE.
