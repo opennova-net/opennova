@@ -45,6 +45,17 @@ func test_00trg_mission_dialog_resolves() -> void:
 	gut.p("resolved %d / %d dialog ids to loaded sets" % [resolved, dialog_count])
 	assert_gt(resolved, 0, "at least one dialog id resolves to a playable set")
 
+	# The dialog/zone wavs are IMA-ADPCM (audioFormat 0x11) -- they must now decode
+	# to a non-empty 16-bit stream (previously NovaWavLoader returned null -> silence).
+	var wbytes := root.read_file("z00gr100.wav")
+	if not wbytes.is_empty():
+		var stream := NovaWavLoader.from_bytes(wbytes)
+		assert_not_null(stream, "IMA-ADPCM dialog wav decodes")
+		if stream != null:
+			assert_eq(stream.format, AudioStreamWAV.FORMAT_16_BITS)
+			assert_gt(stream.data.size(), 0, "decoded PCM is non-empty")
+			gut.p("z00gr100.wav (IMA-ADPCM) decoded: %d bytes 16-bit @ %d Hz" % [stream.data.size(), stream.mix_rate])
+
 	# Diagnostic: how many PlayDialog commands fire on host-ungated ticks? (If zero,
 	# the mission's dialog is all host-trigger-gated -> the documented follow-up.)
 	var rt := NovaMissionRuntime.new()

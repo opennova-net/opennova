@@ -61,6 +61,51 @@ func test_wav_loader_rejects_non_riff() -> void:
 	assert_null(NovaWavLoader.from_bytes(PackedByteArray([1, 2, 3, 4])), "garbage is rejected")
 
 
+func test_wav_loader_decodes_ima_adpcm() -> void:
+	# One mono IMA-ADPCM block: predictor=1000, step index 0, then a 4-byte word of
+	# zero-nibbles. At step index 0 a zero nibble adds 0, so every sample stays 1000.
+	var wav := _build_ima_wav(1000, 0, PackedByteArray([0, 0, 0, 0]), 11025, 8)
+	var stream := NovaWavLoader.from_bytes(wav)
+	assert_not_null(stream, "IMA-ADPCM WAV decodes")
+	assert_eq(stream.format, AudioStreamWAV.FORMAT_16_BITS, "ADPCM is decoded to 16-bit PCM")
+	assert_eq(stream.mix_rate, 11025)
+	assert_false(stream.stereo)
+	var d := stream.data
+	# 1 header predictor sample + 8 nibble samples = 9 samples x 2 bytes.
+	assert_eq(d.size(), 18, "9 mono 16-bit samples")
+	assert_eq(d.decode_s16(0), 1000, "first sample is the block predictor")
+	assert_eq(d.decode_s16(2), 1000, "zero nibble at step 0 keeps the predictor flat")
+	assert_eq(d.decode_s16(16), 1000)
+
+
+# Build a minimal one-block mono IMA-ADPCM WAV (audioFormat 0x11).
+func _build_ima_wav(predictor: int, step_index: int, nibble_bytes: PackedByteArray, rate: int, block_align: int) -> PackedByteArray:
+	var blk := StreamPeerBuffer.new()
+	blk.big_endian = false
+	blk.put_16(predictor)      # int16 LE predictor
+	blk.put_u8(step_index)
+	blk.put_u8(0)              # reserved
+	blk.put_data(nibble_bytes)
+	var data := blk.data_array
+	var buf := StreamPeerBuffer.new()
+	buf.big_endian = false
+	buf.put_data("RIFF".to_ascii_buffer())
+	buf.put_u32(36 + data.size())
+	buf.put_data("WAVE".to_ascii_buffer())
+	buf.put_data("fmt ".to_ascii_buffer())
+	buf.put_u32(16)
+	buf.put_u16(0x11)          # IMA ADPCM
+	buf.put_u16(1)             # mono
+	buf.put_u32(rate)
+	buf.put_u32(rate)          # byteRate (loader ignores)
+	buf.put_u16(block_align)
+	buf.put_u16(4)             # bits per sample
+	buf.put_data("data".to_ascii_buffer())
+	buf.put_u32(data.size())
+	buf.put_data(data)
+	return buf.data_array
+
+
 # Build a minimal RIFF/WAVE PCM container around `samples`.
 func _build_wav(samples: PackedByteArray, channels: int, rate: int, bits: int) -> PackedByteArray:
 	var data_size := samples.size()

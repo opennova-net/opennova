@@ -8,11 +8,12 @@
 namespace godot {
 
 // Decodes raw RIFF/WAVE bytes (as served by the VFS / NovaResourceRoot) into a
-// Godot AudioStreamWAV. NovaLogic .wav samples are PCM, mono, 22050 Hz, 8-bit
-// UNSIGNED (0x80 = silence). The loader UPCONVERTS 8-bit -> signed 16-bit LE
-// (sample16 = (u - 128) << 8) and emits FORMAT_16_BITS, matching the path Godot's
-// own .wav importer takes; 16-bit PCM is signed LE and copied verbatim. Non-PCM
-// (e.g. ADPCM) is not yet supported and returns a null Ref.
+// Godot AudioStreamWAV, always emitting signed 16-bit (FORMAT_16_BITS):
+//   - PCM 8-bit UNSIGNED (ambient, e.g. game.lwf): upconvert (u-128)<<8.
+//   - PCM 16-bit signed LE: copied verbatim.
+//   - IMA-ADPCM (audioFormat 0x11; NovaLogic voice / zone / dialog audio, 4-bit
+//     block-based): decoded to 16-bit via the standard step/index tables.
+// Other formats (e.g. MS-ADPCM 0x02) are unsupported and return a null Ref.
 class NovaWavLoader : public RefCounted {
 	GDCLASS(NovaWavLoader, RefCounted);
 
