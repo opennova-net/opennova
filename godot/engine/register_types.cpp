@@ -49,6 +49,7 @@
 #include "audio/nova_music_script.h"
 #include "audio/nova_music_director.h"
 #include "audio/mus_resource_format.h"
+#include "pff/nova_pff_archive.h"
 #include "mnu/nova_mnu_document.h"
 #include "mnu/mns_stylesheet.h"
 #include "mnu/mnu_resource_format.h"
@@ -160,6 +161,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaMusicDirector);
 	GDREGISTER_CLASS(MusResourceFormatLoader);
 	GDREGISTER_CLASS(MusResourceFormatSaver);
+	GDREGISTER_CLASS(NovaPffArchive);
 	GDREGISTER_CLASS(NovaMnuDocument);
 	GDREGISTER_CLASS(MnsStyleSheet);
 	GDREGISTER_CLASS(ResourceFormatLoaderMNU);

@@ -165,6 +165,8 @@ class ImportRequest:
     item_type: str = ""
     threedi_path: str = ""
     output_stem: str = ""
+    # Source game code (e.g. "jo", "jodemo"); selects the SCR decode key. Defaults to JO.
+    game: str = "jo"
 
     @classmethod
     def for_definition(
@@ -176,6 +178,7 @@ class ImportRequest:
         output_root: str,
         output_stem: str = "",
         options: ImportOptions | None = None,
+        game: str = "jo",
     ) -> "ImportRequest":
         return cls(
             mode=IMPORT_MODE_DEF,
@@ -185,6 +188,7 @@ class ImportRequest:
             output_root=output_root,
             output_stem=output_stem,
             options=options or ImportOptions(),
+            game=game,
         )
 
     @classmethod
@@ -196,6 +200,7 @@ class ImportRequest:
         output_stem: str = "",
         base_dir: str = "",
         options: ImportOptions | None = None,
+        game: str = "jo",
     ) -> "ImportRequest":
         return cls(
             mode=IMPORT_MODE_LOOSE,
@@ -206,6 +211,7 @@ class ImportRequest:
             output_stem=output_stem,
             output_root=output_root,
             options=options or ImportOptions(),
+            game=game,
         )
 
     @property

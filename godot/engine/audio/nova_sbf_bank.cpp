@@ -5,8 +5,8 @@
 
 #include "nova_sbf_bank.h"
 #include "nova_sbf_audio_stream.h"
+#include "util/nova_data_format.h"
 
-#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -35,6 +35,7 @@ void NovaSbfBank::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_stream", "name"), &NovaSbfBank::get_stream);
 	ClassDB::bind_method(D_METHOD("get_stream_at", "index"), &NovaSbfBank::get_stream_at);
 	ClassDB::bind_method(D_METHOD("load_from_path", "path"), &NovaSbfBank::load_from_path);
+	ClassDB::bind_static_method("NovaSbfBank", D_METHOD("create_empty"), &NovaSbfBank::create_empty);
 	ClassDB::bind_method(D_METHOD("get_raw_file_bytes"), &NovaSbfBank::get_raw_file_bytes);
 	ClassDB::bind_method(D_METHOD("set_entry_pcm", "index", "samples"), &NovaSbfBank::set_entry_pcm);
 	ClassDB::bind_method(D_METHOD("is_dirty"), &NovaSbfBank::is_dirty);
@@ -57,14 +58,10 @@ void NovaSbfBank::load_from_path(const String &p_path) {
 	source_path = p_path;
 	_file_bytes = PackedByteArray();
 
-	// Read whole file via Godot VFS so PFF mounts and other custom layers work.
-	Ref<FileAccess> fa = FileAccess::open(p_path, FileAccess::READ);
-	if (fa.is_null()) {
+	if (!read_nova_payload_file(p_path, _file_bytes)) {
 		UtilityFunctions::printerr("NovaSbfBank: could not open ", p_path);
 		return;
 	}
-	_file_bytes = fa->get_buffer(fa->get_length());
-	fa.unref();
 
 	if (_file_bytes.size() <= 0) {
 		UtilityFunctions::printerr("NovaSbfBank: empty file ", p_path);
@@ -76,6 +73,29 @@ void NovaSbfBank::load_from_path(const String &p_path) {
 		return;
 	}
 	_opened = true;
+}
+
+Ref<NovaSbfBank> NovaSbfBank::create_empty() {
+	Ref<NovaSbfBank> bank;
+	bank.instantiate();
+	// Start from a zeroed archive: entries == nullptr is the valid empty state
+	// (add_entry reallocs from null on the same allocator sbf_close frees with).
+	// Stamp a coherent empty SBF header so any header reader sees a real bank,
+	// matching the bytes sbf_encode_file would later write.
+	std::memset(&bank->_arc, 0, sizeof(bank->_arc));
+	bank->_arc.header.magic = SBF_MAGIC;
+	bank->_arc.header.version = 0x00000100u;
+	bank->_arc.header.flags = 0x00000001u; // byte-paired stereo (matches sbf_encode_file)
+	bank->_arc.header.index_offset = SBF_HEADER_SIZE;
+	bank->_arc.header.entry_count = 0;
+	bank->_arc.entries = nullptr;
+	bank->source_path = String();
+	bank->_file_bytes = PackedByteArray();
+	// _opened lights up the mutation API; _dirty steers the saver to the
+	// re-encode (build_encoded_bytes) path rather than raw passthrough.
+	bank->_opened = true;
+	bank->_dirty = true;
+	return bank;
 }
 
 int NovaSbfBank::get_entry_count() const {
@@ -98,7 +118,7 @@ Array NovaSbfBank::get_entries() const {
 		d["name"] = String(name_buf);
 		d["total_size"] = (int64_t)e.total_size;
 		d["block_size"] = (int64_t)e.block_size;
-		d["total_samples"] = (int64_t)e.total_samples;
+		d["sample_length_hint"] = (int64_t)e.sample_length_hint;
 		out.append(d);
 	}
 	return out;
@@ -132,6 +152,23 @@ const SbfRawEntry *NovaSbfBank::raw_entry_at(int p_index) const {
 		return nullptr;
 	}
 	return &_arc.entries[p_index];
+}
+
+bool NovaSbfBank::read_file_block(uint64_t p_offset, uint32_t p_size, PackedByteArray &r_block) const {
+	r_block = PackedByteArray();
+	if (p_size == 0) {
+		return true;
+	}
+	if (p_offset > static_cast<uint64_t>(_file_bytes.size())) {
+		return false;
+	}
+	const uint64_t available = static_cast<uint64_t>(_file_bytes.size()) - p_offset;
+	if (static_cast<uint64_t>(p_size) > available) {
+		return false;
+	}
+	r_block.resize(static_cast<int64_t>(p_size));
+	std::memcpy(r_block.ptrw(), _file_bytes.ptr() + p_offset, p_size);
+	return true;
 }
 
 Ref<NovaSbfAudioStream> NovaSbfBank::get_stream(const StringName &p_name) {
@@ -397,7 +434,7 @@ Error NovaSbfBank::add_entry(const String &p_name, const PackedFloat32Array &p_s
 	}
 	slot.block_size = SBF_CHUNK_TOTAL;
 	slot.total_size = (uint32_t)(chunk_count * SBF_CHUNK_TOTAL);
-	slot.total_samples = (uint32_t)sample_count;
+	slot.sample_length_hint = 0;
 	slot.data_offset = 0; // re-encoder fills this when building bytes.
 
 	_arc.header.entry_count = new_n;

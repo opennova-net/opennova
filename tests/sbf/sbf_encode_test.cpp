@@ -105,7 +105,28 @@ static int test_encode_file_minimal(void) {
     CHECK(arc.header.flags == 1, "header flags = byte-paired stereo");
     CHECK(strncmp(arc.entries[0].name, "TEST001", 7) == 0, "name");
     CHECK(arc.entries[0].block_size == SBF_CHUNK_TOTAL, "block size");
-    CHECK(arc.entries[0].total_samples == 4096, "total_samples = caller count");
+    CHECK(arc.entries[0].sample_length_hint == 0,
+          "sample_length_hint is an engine scheduler field, not caller sample count");
+    sbf_close(&arc);
+    sbf_free(buf);
+    return 1;
+}
+
+/* A bank authored from scratch (NovaSbfBank::create_empty) and saved before any
+   track is added encodes as a valid 24-byte header-only file: zero entries, no
+   per-entry input arrays required. Re-parses to an empty-but-valid archive. */
+static int test_encode_file_zero_entries(void) {
+    uint8_t *buf = NULL; size_t bufsize = 0;
+    int rc = sbf_encode_file(NULL, 0, NULL, NULL, &buf, &bufsize);
+    CHECK(rc == 0, "zero-entry encode succeeds without input arrays");
+    CHECK(buf != NULL, "buffer allocated");
+    CHECK(bufsize == SBF_HEADER_SIZE, "header-only file is exactly 24 bytes");
+
+    SbfArchive arc;
+    CHECK(sbf_open_memory(&arc, buf, bufsize) == 0, "re-parse empty bank");
+    CHECK(arc.header.entry_count == 0, "0 entries");
+    CHECK(arc.header.magic == SBF_MAGIC, "magic stamped");
+    CHECK(arc.header.flags == 1, "header flags = byte-paired stereo");
     sbf_close(&arc);
     sbf_free(buf);
     return 1;
@@ -118,6 +139,7 @@ int main(void) {
     RUN_TEST(test_pick_scale_monotonic);
     RUN_TEST(test_encode_chunk_roundtrip);
     RUN_TEST(test_encode_file_minimal);
+    RUN_TEST(test_encode_file_zero_entries);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

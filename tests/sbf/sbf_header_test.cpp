@@ -41,6 +41,19 @@ static int test_validate_valid_header(void) {
     return 1;
 }
 
+static int test_validate_rejects_engine_unsupported_flags(void) {
+    uint8_t buf[24] = {
+        0x53,0x42,0x46,0x30,  /* SBF0 */
+        0x00,0x01,0x00,0x00,  /* version */
+        0x03,0x00,0x00,0x00,  /* flags = 3; engine accepts only <= 2 */
+        0x00,0x00,0x00,0x00,  /* reserved */
+        0x18,0x00,0x00,0x00,  /* index_offset = 24 */
+        0x00,0x00,0x00,0x00,  /* entry_count = 0 */
+    };
+    CHECK(sbf_validate(buf, sizeof(buf)) != 0, "flags > 2 should fail");
+    return 1;
+}
+
 static int test_validate_bad_magic(void) {
     uint8_t buf[24] = {0};
     buf[0] = 'X';
@@ -58,6 +71,7 @@ int main(void) {
     RUN_TEST(test_struct_sizes);
     RUN_TEST(test_constants);
     RUN_TEST(test_validate_valid_header);
+    RUN_TEST(test_validate_rejects_engine_unsupported_flags);
     RUN_TEST(test_validate_bad_magic);
     RUN_TEST(test_validate_too_small);
     printf("\n%d passed, %d failed\n", passed, failed);

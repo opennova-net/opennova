@@ -945,6 +945,8 @@ def _create_bad_bone(rt, name: str, bone, start: Sequence[float]):
         node.transform = tm
     except Exception:
         pass
+    # Persist the BAD rest length so the .bad exporter can round-trip it exactly.
+    _set_user_prop(rt, node, "opennova_bad_length", float(getattr(bone, "length", 0.0)))
     _try_set(node, "width", 0.1 * length)
     _try_set(node, "height", 0.1 * length)
     return node

@@ -41,6 +41,13 @@ ADM_EXPORT int adm_parse(const char *path, AdmFile *out);
 // Free all allocations inside an AdmFile.
 ADM_EXPORT void adm_free(AdmFile *af);
 
+// Write entries to a .adm file. Each entry is emitted as
+//   <key>\t\t\t\t"<value>"
+// one per line (CRLF), preceded by a blank line and followed by a trailing
+// CRLF*3 + NUL, matching stock NovaLogic .adm files. Callers order entries
+// (reset first, key "anim_reset"). Returns 0 on success, -1 on error.
+ADM_EXPORT int adm_write(const char *path, const AdmEntry *entries, size_t count);
+
 #ifdef __cplusplus
 }
 #endif

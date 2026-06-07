@@ -1,22 +1,21 @@
 class_name MusicEditorWorkspace
 extends EditorWorkspace
 
-# Workflow IDs match the design spec's Mode enum.
-enum Workflow { BANK, SCRIPT, LIVE }
+# One unified screen now: the live-lit section map with docked Tracks / Game
+# Dials and a per-state Advanced script drawer. The old Bank / Script / Live
+# modes are coexisting docks within this single "Map" workflow.
+enum Workflow { MAP }
 
 const WORKFLOW_DEFS := [
-	{"id": Workflow.BANK, "label": "Bank", "tooltip": "Edit the audio tracks: reorder, rename, replace."},
-	{"id": Workflow.SCRIPT, "label": "Script", "tooltip": "Edit the music script as text and save it back."},
-	{"id": Workflow.LIVE, "label": "Live", "tooltip": "Play the music live and adjust its settings."},
+	{"id": Workflow.MAP, "label": "Map", "tooltip": "The live music map: states, tracks, game dials, and the script drawer on one screen."},
 ]
 
 const RootScene = preload("res://modtools/music/ui/music_workspace_root.tscn")
-const SectionNavigatorScene = preload("res://modtools/music/ui/section_navigator.tscn")
 const MusicEditorDocumentClass = preload("res://modtools/music/music_editor_document.gd")
 
 const STATE_PATH := "user://music_editor_state.cfg"
 
-var _active_workflow: int = Workflow.BANK
+var _active_workflow: int = Workflow.MAP
 var _root: Control
 var _document: RefCounted   # MusicEditorDocument
 
@@ -46,12 +45,20 @@ func uses_asset_dock() -> bool:
 	return false
 
 
+# Music presents its whole UI in the viewport (the unified live screen). The
+# section map already indexes every section as a live-lit, clickable node, so
+# the shell's left lane (a single-choice "Map" picker + a redundant section TOC)
+# is dead weight -- opt out so the unified screen gets that width.
+func uses_left_lane() -> bool:
+	return false
+
+
 # The shell renders workflows as typed InspectorDef rows (_rebuild_workflow_rail
 # does `entry as InspectorDef`), so expose them via the framework base's
 # get_workflows() -> _ensure_inspector_defs() path. Labels/tooltips stay
-# single-sourced with WORKFLOW_DEFS (also used by get_status_tool). No
-# per-workflow inspector script: build_workflow_inspector() is overridden below to
-# mount the section navigator directly, so the script arg is null.
+# single-sourced with WORKFLOW_DEFS (also used by get_status_tool). The single
+# "Map" workflow drives no left-lane picker (uses_left_lane is false), so the
+# inspector script arg is null and build_workflow_inspector() is a no-op.
 func _build_inspector_defs() -> Array:
 	var defs: Array = []
 	for wf in WORKFLOW_DEFS:
@@ -64,13 +71,9 @@ func get_active_workflow_id() -> int:
 
 
 func activate_workflow(workflow_id: int) -> void:
-	# Switching modes stops the live VM. Otherwise audio bleeds into Bank-mode
-	# preview and Script-mode editing, with no obvious way to halt it short of
-	# coming back to the Live tab and clicking Stop.
-	if _active_workflow == Workflow.LIVE and workflow_id != Workflow.LIVE and _root != null:
-		var live_node: Node = _root.get_node_or_null("Live")
-		if live_node != null and live_node.has_method("stop_director"):
-			live_node.stop_director()
+	# Single screen: nothing to show/hide. Recorded for get_status_tool /
+	# get_active_workflow_id. The live VM is stopped on workspace deactivate
+	# (see _stop_live) rather than on a tab switch -- there are no tabs.
 	_active_workflow = workflow_id
 	if _root != null:
 		_root.set_active_workflow(workflow_id)
@@ -174,55 +177,28 @@ func has_unsaved_changes() -> bool:
 	return _document != null and _document.is_dirty()
 
 
-# --- Edit: undo / redo capability hooks (matching Mission / MNU). The live
-# bank-edit history lives on the document (reorder / rename push do/undo pairs);
-# route by the active workflow so undo reverts the side the user is looking at.
-# Script-side undo is a no-op until Phase F (can_undo_script stays false) and
-# Live mode has nothing to revert, so the shell correctly disables the action
-# there. The Bank panel repaints off the document's `changed` signal, which the
-# undo callables emit, so the track list refreshes without extra wiring here.
+# --- Edit: undo / redo capability hooks (matching Mission / MNU). One unified
+# screen means one consolidated edit history on the document: bank reorder /
+# rename (and the structured play edits added later) all push do/undo pairs onto
+# the same stack, reachable regardless of which dock has focus. The Bank panel
+# repaints off the document's `changed` signal, which the undo callables emit,
+# so the track list refreshes without extra wiring here.
 func can_undo() -> bool:
-	if _document == null:
-		return false
-	match _active_workflow:
-		Workflow.BANK:
-			return _document.can_undo_bank()
-		Workflow.SCRIPT:
-			return _document.can_undo_script()
-		_:
-			return false
+	return _document != null and _document.can_undo()
 
 
 func can_redo() -> bool:
-	if _document == null:
-		return false
-	match _active_workflow:
-		Workflow.BANK:
-			return _document.can_redo_bank()
-		Workflow.SCRIPT:
-			return _document.can_redo_script()
-		_:
-			return false
+	return _document != null and _document.can_redo()
 
 
 func undo() -> void:
-	if _document == null:
-		return
-	match _active_workflow:
-		Workflow.BANK:
-			_document.undo_bank()
-		Workflow.SCRIPT:
-			_document.undo_script()
+	if _document != null:
+		_document.undo()
 
 
 func redo() -> void:
-	if _document == null:
-		return
-	match _active_workflow:
-		Workflow.BANK:
-			_document.redo_bank()
-		Workflow.SCRIPT:
-			_document.redo_script()
+	if _document != null:
+		_document.redo()
 
 
 func get_current_resource_path() -> String:
@@ -236,8 +212,11 @@ func get_current_resource_path() -> String:
 func new_current() -> Error:
 	if _document == null:
 		return ERR_UNAVAILABLE
-	_document.close_pair()
-	return OK
+	# Mint a fresh script + empty bank so the user can author from scratch (the
+	# old behaviour just cleared the workspace, leaving a dead "Open a project
+	# first" screen with no way to make one). The shell already flushed unsaved
+	# changes before calling this.
+	return _document.new_project()
 
 
 func open_file(path: String) -> Error:
@@ -278,6 +257,12 @@ func _basename_for_save_as() -> String:
 		return _document.bank_path.get_file().get_basename()
 	if not _document.script_path.is_empty():
 		return _document.script_path.get_file().get_basename()
+	# Brand-new project (no paths yet): name the pair after the script chunk
+	# (e.g. gamescript.sbf / gamescript.bin) instead of a bare "untitled".
+	if _document.script_loaded():
+		var n := String(_document.mus_script.get_default_script_name())
+		if n != "":
+			return n
 	return "untitled"
 
 
@@ -286,6 +271,9 @@ func activate() -> void:
 
 
 func deactivate() -> void:
+	# Leaving the workspace stops the live music so it doesn't keep playing in
+	# the background (single screen: there's no Live tab to return to).
+	_stop_live()
 	if _document.is_dirty():
 		var dialog := ConfirmationDialog.new()
 		dialog.dialog_text = "Music project has unsaved changes. Save before closing?"
@@ -312,6 +300,15 @@ func deactivate() -> void:
 		dialog.popup_centered()
 		return
 	_save_state()
+
+
+# Stop the live director if it's running. Called on workspace deactivate.
+func _stop_live() -> void:
+	if _root == null:
+		return
+	var live_node: Node = _root.get_panel("Live")
+	if live_node != null and live_node.has_method("stop_director"):
+		live_node.stop_director()
 
 
 func _save_state() -> void:
@@ -347,6 +344,9 @@ func mount_viewport(host: Control) -> void:
 			_root.get_parent().remove_child(_root)
 		host.add_child(_root)
 	_root.bind_document(_document)
+	if _root.has_signal("workflow_requested"):
+		if not _root.workflow_requested.is_connected(activate_workflow):
+			_root.workflow_requested.connect(activate_workflow)
 	_root.set_active_workflow(_active_workflow)
 
 
@@ -356,16 +356,9 @@ func unmount_viewport(_host: Control) -> void:
 		_root = null
 
 
-# Inspector host is the workstation's middle column. SCRIPT mode shows the
-# section TOC; BANK and LIVE leave it empty (no inspector content in v1).
-func build_workflow_inspector(workflow_id: int, host: Control) -> void:
-	if host == null:
-		return
-	for c in host.get_children():
-		c.queue_free()
-	if workflow_id != Workflow.SCRIPT:
-		return
-	var nav: Control = SectionNavigatorScene.instantiate()
-	host.add_child(nav)
-	if nav.has_method("bind_document"):
-		nav.bind_document(_document)
+# Music opts out of the shell left lane (uses_left_lane == false), so there is no
+# inspector host to populate. Explicit no-op: the live section map IS the section
+# index (single-click selects/jumps, double-click opens its blueprint, right-click
+# renames/deletes).
+func build_workflow_inspector(_workflow_id: int, _host: Control) -> void:
+	pass

@@ -145,6 +145,13 @@ func uses_asset_dock() -> bool:
 	return false
 
 
+# The shell's left lane (workflow picker + inspector host). Workspaces that
+# present their whole UI in the viewport can opt out to reclaim the width (e.g.
+# Music's unified screen, whose section map already indexes every section).
+func uses_left_lane() -> bool:
+	return true
+
+
 func set_asset_dock(_dock: Control) -> void:
 	pass
 

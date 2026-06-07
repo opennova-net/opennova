@@ -1,7 +1,7 @@
 /* MUS bytecode VM (interpreter).
 
-   Witnessed dispatch loop: dfvas!AudioVM_DispatchLoop @ 0x00557FA0.
-   Witnessed opcode table: dfvas!g_vm_opcode_dispatch_table @ 0x0064CB9C
+   Witnessed dispatch loop: Jointops.exe!AudioVM_DispatchLoop @ 0x00672720.
+   Witnessed opcode table: Jointops.exe!g_vm_opcode_dispatch_table @ 0x0084F220
    (65 entries, 0x00..0x40). Stack element size = 4 bytes (int32).
    Two stacks: data (EBP-tracked, 256 entries here) + call (EDI-tracked,
    64 frames here). 32-instruction budget per dispatch loop call.
@@ -27,7 +27,7 @@ namespace {
 constexpr int kDataStackCap = 256;
 constexpr int kCallStackCap = 64;
 constexpr int kLocalsCap    = 256;
-constexpr int kTickBudget   = 32;   /* witnessed: dword_F8D4E8 = 0x20 */
+constexpr int kTickBudget   = 32;   /* witnessed: dword_3246B24 = 0x20 */
 
 /* Globals area is byte-addressable per the witness (inc_g/dec_g operate on
    1 byte at the indexed offset, NOT on a full int32). MUS_GLOBALS_BYTES is
@@ -124,7 +124,7 @@ extern "C" int mus_vm_load_script(MusVM *vm, const MusScript *s) {
     vm->last_error[0] = 0;
     vm->current_section_name[0] = 0;
 
-    /* Witnessed: dfvas!AudioVM_ScriptInstanceInit @ 0x00557C70
+    /* Witnessed: Jointops.exe!AudioVM_ScriptInstanceInit @ 0x00672D20
        initial_pc = section_table[entry_section_index]. */
     vm->pc = 0;
     if (s->section_count > 0 && s->entry_section_index < s->section_count) {
@@ -246,38 +246,31 @@ static int32_t read_u32(MusVM *vm) {
     return v;
 }
 
-/* Witnessed: dfvas!VmOp_PushImm8 @ 0x558000. */
+/* [orig: AudioVM_Op_PushImm8 @ 0x672790] `movzx eax, byte ptr [esi]; inc esi`
+   -- the 1-byte immediate is ZERO-extended to int32 (range 0..255). */
 static void op_push_imm8(MusVM *vm) {
-    int8_t v = (int8_t)read_u8(vm);   /* sign-extend per dfvas movzx-then-store
-                                          mismatch: dfvas writes the zero-
-                                          extended byte but small immediates
-                                          we author are unsigned. Treat low
-                                          byte as signed int32 -- compatible
-                                          with dfvas movzx for values 0..127
-                                          which is the only documented use. */
-    /* Actually dfvas uses MOVZX (zero-extend). To match: */
-    vm_push(vm, (int32_t)(uint8_t)v);
+    vm_push(vm, (int32_t)(uint8_t)read_u8(vm));
 }
 
-/* Witnessed: dfvas!VmOp_PushImm32 @ 0x558010. */
+/* Witnessed: Jointops.exe!VmOp_PushImm32 @ 0x6727A0. */
 static void op_push_imm32(MusVM *vm) {
     vm_push(vm, read_u32(vm));
 }
 
-/* Witnessed: dfvas!VmOp_PushGlobal @ 0x558020. */
+/* Witnessed: Jointops.exe!VmOp_PushGlobal @ 0x6727B0. */
 static void op_push_global(MusVM *vm) {
     int byte_off = read_u8(vm);
     vm_push(vm, globals_read32(vm, byte_off));
 }
 
-/* Witnessed: dfvas!VmOp_PushLocal @ 0x558040. The dfvas operand is a byte
+/* Witnessed: Jointops.exe!VmOp_PushLocal @ 0x6727D0. The Jointops.exe operand is a byte
    offset into the locals area (matches globals shape). */
 static void op_push_local(MusVM *vm) {
     int byte_off = read_u8(vm);
     vm_push(vm, locals_read32(vm, byte_off));
 }
 
-/* Witnessed: dfvas!VmOp_PopGlobal @ 0x5580C0; sets globals_dirty=1 and we
+/* Witnessed: Jointops.exe!VmOp_PopGlobal @ 0x672850; sets globals_dirty=1 and we
    fire on_var_changed in its place. */
 static void op_pop_global(MusVM *vm) {
     int byte_off = read_u8(vm);
@@ -286,65 +279,67 @@ static void op_pop_global(MusVM *vm) {
     notify_var_changed(vm, byte_off, v);
 }
 
-/* Witnessed: dfvas!VmOp_PopLocal @ 0x5580E0. */
+/* Witnessed: Jointops.exe!VmOp_PopLocal @ 0x672870. */
 static void op_pop_local(MusVM *vm) {
     int byte_off = read_u8(vm);
     int32_t v = vm_pop(vm);
     locals_write32(vm, byte_off, v);
 }
 
-/* Witnessed: dfvas!VmOp_PushGlobalAddr @ 0x558060. Pushes a synthetic "address"
-   that downstream method handlers (FSet/FClear/FIsSet) treat as a pointer.
-   We can't push a real pointer (we run in our own address space), so encode
-   the byte offset and decode it back inside the F* handlers. We use the high
-   bit as a tag for "this is a globals address" vs raw value. */
+/* Witnessed: Jointops.exe!AudioVM_Op_PushGlobalAddr @ 0x6727F0. Pushes a synthetic
+   "address" that downstream method handlers (FSet/FClear/FIsSet/FIsClear) treat as a
+   pointer. We can't push a real pointer (we run in our own address space), so encode
+   the byte offset and decode it back inside the F* handlers (high bit tags it as an
+   address vs a raw value).
+
+   Operand width: the original reads ONE byte as the offset but ADVANCES THE IP BY TWO
+   (`movzx eax, byte ptr [esi]; inc esi; inc esi`) -- the 2nd operand byte is reserved
+   and ignored. We consume both so the IP stays aligned when running real bytecode. */
 static constexpr int32_t kAddrTagBit  = (int32_t)0x40000000;   /* large flag */
 static constexpr int32_t kAddrLocalBit= (int32_t)0x20000000;
 
 static void op_push_global_addr(MusVM *vm) {
     int byte_off = read_u8(vm);
+    (void)read_u8(vm);                 /* reserved 2nd operand byte (engine advances 2) */
     vm_push(vm, kAddrTagBit | byte_off);
 }
 
-/* Witnessed: dfvas!VmOp_PushLocalAddr @ 0x558080. */
+/* Witnessed: Jointops.exe!AudioVM_Op_PushLocalAddr @ 0x672810 (same 2-byte operand). */
 static void op_push_local_addr(MusVM *vm) {
     int byte_off = read_u8(vm);
+    (void)read_u8(vm);                 /* reserved 2nd operand byte (engine advances 2) */
     vm_push(vm, kAddrTagBit | kAddrLocalBit | byte_off);
 }
 
-/* Witnessed: dfvas!VmOp_PushSelf @ 0x558160; dfvas pushes the current
+/* Witnessed: Jointops.exe!VmOp_PushSelf @ 0x6728F0; Jointops.exe pushes the current
    instance pointer. We have no analogue; push 0 and document. */
 static void op_push_self(MusVM *vm) {
     vm_push(vm, 0);
 }
 
-/* Witnessed: dfvas!VmOp_Empty @ 0x558170. The original sets EBP to a sentinel
-   to drain the stack and break the dispatch loop on the next budget tick.
-   For us "empty" closes an expression statement: drop the top-of-stack and
-   continue. We do NOT halt here -- the witnessed loop only halts via STC
-   when the budget is exhausted at the same moment. */
+/* Jointops.exe!AudioVM_Op_Empty @ 0x672900: `mov ebp, off_84F218; clc; ret`, i.e. it
+   resets the data-stack pointer to the stack base -- a FULL DRAIN of the data stack at
+   a statement boundary, not a single pop. (The original `method`/intrinsic ops leave
+   their args on the stack and push the result on top; `empty` clears that residue.)
+   Does not touch the call stack and does not halt (clc). */
 static void op_empty(MusVM *vm) {
-    if (vm->sp > 0) --vm->sp;
+    vm->sp = 0;
 }
 
-/* Witnessed: dfvas!VmOp_Nop @ 0x557FF0. */
+/* Witnessed: Jointops.exe!VmOp_Nop @ 0x672780. */
 static void op_nop(MusVM *vm) { (void)vm; }
 
-/* Witnessed: VmOp_IncGlobal/DecGlobal @ 0x558350/0x558360. The dfvas handlers
-   inc/dec a single byte at the indexed offset (NOT a full int32). */
+/* [orig: AudioVM_Op_IncGlobal/DecGlobal @ 0x672AE0/0x672AF0] inc/dec a single
+   BYTE at globals[off] (NOT a full int32). D-MUS-5: unlike pop_g, the original
+   does NOT raise the globals-dirty signal (dword_3246B28) and fires no host
+   notification here, so we deliberately omit notify_var_changed to match. */
 static void op_inc_g(MusVM *vm) {
     int byte_off = read_u8(vm);
-    if (byte_off >= 0 && byte_off < kGlobalsBytes) {
-        ++vm->globals[byte_off];
-        notify_var_changed(vm, byte_off & ~3, globals_read32(vm, byte_off & ~3));
-    }
+    if (byte_off >= 0 && byte_off < kGlobalsBytes) ++vm->globals[byte_off];
 }
 static void op_dec_g(MusVM *vm) {
     int byte_off = read_u8(vm);
-    if (byte_off >= 0 && byte_off < kGlobalsBytes) {
-        --vm->globals[byte_off];
-        notify_var_changed(vm, byte_off & ~3, globals_read32(vm, byte_off & ~3));
-    }
+    if (byte_off >= 0 && byte_off < kGlobalsBytes) --vm->globals[byte_off];
 }
 static void op_inc_l(MusVM *vm) {
     int byte_off = read_u8(vm);
@@ -370,6 +365,8 @@ static OpHandler kHandlers[256] = {0};
 static int       kHandlersInit = 0;
 
 /* Forward decl for handlers added in later tasks. */
+static void op_push_str(MusVM *vm);
+static void op_pop_global_block(MusVM *vm); static void op_pop_local_block(MusVM *vm);
 static void op_add(MusVM *vm); static void op_sub(MusVM *vm);
 static void op_mul(MusVM *vm); static void op_div(MusVM *vm);
 static void op_mod(MusVM *vm); static void op_l_and(MusVM *vm);
@@ -401,9 +398,15 @@ static void init_handlers(void) {
     kHandlers[0x04] = op_push_local;
     kHandlers[0x05] = op_push_global_addr;
     kHandlers[0x06] = op_push_local_addr;
-    /* 0x07 pushstr unused (no string section reads in dfvas runtime) */
+    /* D-MUS-2 fixed: 0x07 pushstr, 0x0A pop_global_block, 0x0B pop_local_block are now
+       implemented at the original's operand widths (see handler bodies). They appear in
+       real Jointops bytecode; the reimpl compiler never emits them, so this only affects
+       running real .mus data. */
+    kHandlers[0x07] = op_push_str;
     kHandlers[0x08] = op_pop_global;
     kHandlers[0x09] = op_pop_local;
+    kHandlers[0x0A] = op_pop_global_block;
+    kHandlers[0x0B] = op_pop_local_block;
     kHandlers[0x0C] = op_push_self;
     kHandlers[0x0F] = op_empty;
     /* Slots 0x0D 0x0E nop; tolerate. */
@@ -462,9 +465,14 @@ static void op_add    (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(v
 static void op_sub    (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, a - b); }
 static void op_mul    (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, a * b); }
 static void op_div    (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, b ? a / b : 0); }
-/* Witnessed dfvas!VmOp_Mod @ 0x5581C0 does div-then-mod with both writes
+/* Witnessed Jointops.exe!VmOp_Mod @ 0x672950 does div-then-mod with both writes
    landing on the same slot; the final stored value is plain `a % b`. */
 static void op_mod    (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, b ? a % b : 0); }
+/* NB: opcodes 0x15/0x16 are AudioVM_Op_BitwiseAnd/BitwiseOr @ 0x672960/0x672980
+   and 0x17/0x18 are AudioVM_Op_And/Or @ 0x6729A0/0x6729B0 -- both PAIRS are
+   plain bitwise & / | in the original (0x15/0x16 carry a dead boolean-ize that
+   is computed but never stored). The "l_" prefix here is a historical misnomer;
+   all four are bitwise, matching the binary. */
 static void op_l_and  (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, a & b); }
 static void op_l_or   (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, a | b); }
 static void op_b_and  (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, a & b); }
@@ -474,9 +482,9 @@ static void op_neg    (MusVM *vm) { int32_t a = vm_pop(vm); vm_push(vm, -a); }
 static void op_b_not  (MusVM *vm) { int32_t a = vm_pop(vm); vm_push(vm, ~a); }
 static void op_lshift (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, a << (b & 31)); }
 static void op_rshift (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, a >> (b & 31)); }
-/* Witnessed: VmOp_LogicalNot @ 0x558280. result = -1 when 0, else 0. */
+/* Witnessed: VmOp_LogicalNot @ 0x672A10. result = -1 when 0, else 0. */
 static void op_l_not  (MusVM *vm) { int32_t a = vm_pop(vm); vm_push(vm, a == 0 ? -1 : 0); }
-/* Witnessed: comparison handlers @ 0x558290..0x558330 push -1 when true (signed). */
+/* Witnessed: comparison handlers @ 0x672A20..0x672AC0 push -1 when true (signed). */
 static void op_eq (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, a == b ? -1 : 0); }
 static void op_neq(MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, a != b ? -1 : 0); }
 static void op_ge (MusVM *vm) { int32_t b = vm_pop(vm); int32_t a = vm_pop(vm); vm_push(vm, a >= b ? -1 : 0); }
@@ -500,12 +508,12 @@ static void op_callv  (MusVM *vm) {
     if (vm->csp < kCallStackCap) vm->call_stack[vm->csp++] = vm->pc;
     vm->pc = (uint32_t)target;
 }
-/* Witnessed: dfvas!VmOp_TableExec @ 0x558420.
+/* Witnessed: Jointops.exe!VmOp_TableExec @ 0x672BB0.
    Used for switch-statement codegen in MDEdit-authored scripts (menumus.bin
    uses several). Layout at vm->pc on entry (the dispatcher already consumed
    the 0x35 opcode byte):
      +0  size           (count of slots in the jump table)
-     +1  stride_a       (loaded into ebx in dfvas, then overwritten unread)
+     +1  stride_a       (loaded into ebx in Jointops.exe, then overwritten unread)
      +2  entry_stride   (bytes per slot; typically 5 for `goto target`)
      +3  skip_size      (TOTAL bytes in the encoded instruction including
                          the opcode + header + table_data; pc_at_opcode +
@@ -515,7 +523,7 @@ static void op_callv  (MusVM *vm) {
    Pops idx from the data stack. If idx >= size or the chosen entry's
    first byte is 0, advances pc past the whole table by setting
    pc = pc_at_header + skip_size - 1. The trailing -1 mirrors the
-   `dec esi` in dfvas; under our dispatcher (which pre-incremented past
+   `dec esi` in Jointops.exe; under our dispatcher (which pre-incremented past
    the opcode), this lands pc on the next opcode byte. Otherwise the
    entry's first byte is dispatched as a recursive opcode with pc set
    just past it. If the recursive handler ended exactly at the end of
@@ -531,7 +539,7 @@ static void op_tablexec(MusVM *vm) {
         return;
     }
     uint8_t size         = vm->script->code[pc_at_header + 0];
-    /* +1 stride_a is read by dfvas into ebx but never used (overwritten
+    /* +1 stride_a is read by Jointops.exe into ebx but never used (overwritten
        before the next read). Mirror by ignoring. */
     uint8_t entry_stride = vm->script->code[pc_at_header + 2];
     uint8_t skip_size    = vm->script->code[pc_at_header + 3];
@@ -562,22 +570,42 @@ static void op_tablexec(MusVM *vm) {
     vm->pc = entry_off + 1;
     eh(vm);
 
+    /* [orig: AudioVM_Op_TableExec @ 0x672C05] after the embedded `call eax`, the
+       engine executes `cmp esi, entry_end`, which OVERWRITES the carry flag the
+       embedded op may have set (setstate/play/done all STC). The tick therefore
+       halts ONLY when the post-dispatch IP landed strictly BELOW entry_end (a
+       backward jump, CF=1); a forward setstate/play/goto -- the common case --
+       clears carry and CONTINUES in the same tick (its pc-jump and any sound
+       still take effect). So we recompute halt_latch from the IP instead of
+       letting the embedded op's halt stand. (A tablexec whose entry resolves to
+       a forward target never ends the tick by itself.) */
+    vm->halt_latch = (vm->pc < entry_end) ? 1 : 0;
     if (vm->pc == entry_end) {
         vm->pc = pc_at_header + (uint32_t)skip_size - 1;
     }
 }
 
 static void op_enter  (MusVM *vm) {
-    /* Witnessed: VmOp_Enter @ 0x558490 reads u8 N (= dword count); copies
-       N dwords from data stack top to locals at chunk[15] (= 0x20). For now
-       we copy to locals at offset 0x20 (matches the witnessed default). */
+    /* [orig: AudioVM_Op_Enter @ 0x672C20]
+         movzx ecx,[esi]; inc esi          ; N
+         lea ecx,[ecx*4]; sub ebp,ecx      ; POP N dwords off the data stack
+         mov ebx,LocalsBase; add ebx,[instance+0x3C]
+         loop: copy N dwords from the popped stack region to locals[frame + i*4]
+       The frame offset is instance[+0x3C] (== the chunk's string_section_size
+       field, witnessed as 0x20 in jo_gamemus/menumus; MDEdit invariantly emits
+       0x20). We plumb it via MusScript.locals_frame_offset (default 0x20) so the
+       handler is faithful to any chunk rather than hardcoding 0x20.
+       D-NEW-2: the original POPS the N args (`sub ebp,N*4`); we mirror with
+       `vm->sp -= n`. (We guard sp >= n; the original does not bounds-check.) */
     int n = read_u8(vm);
-    int dst_off = 0x20;
+    int dst_off = vm->script ? (int)vm->script->locals_frame_offset : 0x20;
+    if (dst_off <= 0) dst_off = 0x20;
     if (n > 0 && vm->sp >= n) {
         for (int i = 0; i < n; ++i) {
             int32_t v = vm->data_stack[vm->sp - n + i];
             locals_write32(vm, dst_off + i * 4, v);
         }
+        vm->sp -= n;
     }
 }
 static void op_return (MusVM *vm) {
@@ -588,7 +616,7 @@ static void op_yield  (MusVM *vm) { vm->halt_latch = 1; }
 
 /* Halt opcodes (E6/E10): set the latch so the dispatch loop exits. */
 static void op_done(MusVM *vm) {
-    /* Witnessed: VmOp_Done @ 0x558540 sets instance entry_section_index back
+    /* Witnessed: VmOp_Done @ 0x672CD0 sets instance entry_section_index back
        to chunk->entry_section_index (0) and STC. We mirror by re-seeking pc
        to the entry section's code_offset and halting. */
     if (vm->script && vm->script->section_count > 0
@@ -619,7 +647,13 @@ static void op_setstate(MusVM *vm) {
     vm->halt_latch = 1;
 }
 
-/* play / playw stubs (proper bodies in E10). */
+/* [orig: AudioVM_Op_Play @ 0x672CB0 (1B index), AudioVM_Op_PlayWait @ 0x672C90
+   (2B index)] D-NEW-3: BOTH handlers call the SAME AudioVM_StartSound(idx) and
+   STC (halt) identically -- the original makes NO play-vs-wait behavioral
+   distinction; the only real difference is the operand width (u8 vs u16, so
+   0x3D allows sound indices > 255). The `wait` arg we pass to on_play_sound is
+   a reimpl convenience, not a witnessed semantic; hosts should treat both as
+   "start sound idx". */
 static void op_play (MusVM *vm) {
     int idx = read_u8(vm);
     if (vm->hooks.on_play_sound) {
@@ -638,8 +672,13 @@ static void op_playw(MusVM *vm) {
 /* method/callvl: implemented in E7/E8/E9. */
 static void op_method (MusVM *vm); /* impl below */
 static void op_callvl (MusVM *vm) {
-    /* dfvas!VmOp_CallVL @ 0x5583E0: dword_F8C2C0 is uninit BSS in dfvas, so
-       this opcode is dead and pushes 0. Mirror that. */
+    /* Jointops.exe!AudioVM_Op_CallVL @ 0x672B70 is LIVE here: it dispatches through
+       the resolved-name table dword_3245958[byte] (populated by AudioVM_LoadScriptFile's
+       name-resolution pass) and pushes the handler result. In the Jointops.exe build that
+       table was uninitialised BSS, so the opcode was dead. DIVERGENCE: we mirror the
+       Jointops.exe dead-stub (push 0). MDEdit music scripts use opcode 0x40 `method` for the
+       built-in intrinsics (GEcho/GSV/...), not callvl, so this is inert for known
+       fixtures. See notes/audio/sbf-mus-format.md (D-MUS-7). */
     (void)read_u8(vm);
     vm_push(vm, 0);
 }
@@ -664,7 +703,7 @@ static void op_method(MusVM *vm) {
 
 /* ---- Intrinsic methods (E7-E9) ---------------------------------------- */
 
-/* Witnessed: dfvas!Intrinsic_GEcho @ 0x557890.
+/* Witnessed: Jointops.exe!Intrinsic_GEcho @ 0x6720C0.
    Pops 1 (TOS) and pushes 0. Fires on_echo with the popped int32. */
 static void intrinsic_gecho(MusVM *vm) {
     int32_t arg = vm_pop(vm);
@@ -672,22 +711,26 @@ static void intrinsic_gecho(MusVM *vm) {
     vm_push(vm, 0);
 }
 
-/* Witnessed: dfvas!Intrinsic_GGRnd @ 0x557930.
-   Pops 2 (NOS=lo, TOS=hi). Pushes random in [lo, hi].
-   Uses a deterministic LCG so tests can pin behaviour without #include <random>. */
+static inline uint32_t mus_rol32(uint32_t v, int s) {
+    return (v << s) | (v >> (32 - s));
+}
+
+/* Jointops.exe!AudioVM_Intrinsic_GGRnd @ 0x672320 (byte-exact port).
+   Pops 2 (NOS=lo, TOS=hi). The process-global seed AudioVM_GGRndSeed @ 0x84F210 is
+   statically initialised to 0xBABEFACE in the binary and updated in place:
+       seed = rol32(seed + rol32(seed, 11), 2)
+   Then (asm `and eax,0FFFFh; idiv ecx`): rnd = (seed & 0xFFFF) % span, span = hi-lo+1
+   (rnd forced to 0 when span == 0); result = lo + rnd. We mirror the process-global
+   seed with a file-static so the sequence matches a fresh game process. */
 static void intrinsic_ggrnd(MusVM *vm) {
     int32_t hi = vm_pop(vm);
     int32_t lo = vm_pop(vm);
-    /* Witnessed: seed update is `seed = rol(seed + rol(seed, 11), 2)`. We use
-       a simple LCG for determinism; mismatch with dfvas is acceptable since
-       this is a stub PRNG (the script's behaviour depends on game state more
-       than the exact PRNG). */
-    static uint32_t s_seed = 0x12345678u;
-    s_seed = s_seed * 1103515245u + 12345u;
-    int32_t span = (hi - lo) + 1;
-    int32_t r = lo;
-    if (span > 0) r = lo + (int32_t)(s_seed % (uint32_t)span);
-    vm_push(vm, r);
+    static uint32_t s_ggrnd_seed = 0xBABEFACEu;   /* initial value of dword_84F210 */
+    s_ggrnd_seed = mus_rol32(s_ggrnd_seed + mus_rol32(s_ggrnd_seed, 11), 2);
+    int32_t span = hi - lo + 1;
+    int32_t rnd  = 0;
+    if (span != 0) rnd = (int32_t)(s_ggrnd_seed & 0xFFFFu) % span;
+    vm_push(vm, lo + rnd);
 }
 
 /* Helper: decode an address tag value back to (is_local, byte_offset).
@@ -713,7 +756,50 @@ static void write_tagged(MusVM *vm, int32_t tagged, int32_t v) {
     else { globals_write32(vm, off, v); notify_var_changed(vm, off, v); }
 }
 
-/* Witnessed: dfvas!Intrinsic_GSV @ 0x5578B0.
+/* Read a dword from a tagged source region at a sub-offset (for the block-copy ops). */
+static int32_t read_tagged_at(MusVM *vm, int32_t tagged, int sub_off) {
+    int local = 0;
+    int off = decode_tag_addr(tagged, &local);
+    if (off < 0) return 0;            /* untagged source: no region to copy from */
+    return local ? locals_read32(vm, off + sub_off) : globals_read32(vm, off + sub_off);
+}
+
+/* Jointops.exe!AudioVM_Op_PushStr @ 0x672830: reads a u8 index (IP advances 1) and
+   pushes context[+0x30][index] from the script's string/aux table. The single-context
+   reimpl does not model that table, so we push 0 -- the key fix is that the IP advances
+   correctly (1 byte) so the rest of a real script keeps decoding. */
+static void op_push_str(MusVM *vm) {
+    (void)read_u8(vm);
+    vm_push(vm, 0);
+}
+
+/* Jointops.exe!AudioVM_Op_PopGlobalBlock @ 0x672890 (0x0A): pops a source address
+   (TOS, from push_*_addr), reads two u8 operands (dst byte-offset, byte count), and
+   copies `count` bytes (dword-granular, matching the engine's 4-byte chunk loop) from
+   the source region into the globals area at dst_off. Sets the globals-dirty signal. */
+static void op_pop_global_block(MusVM *vm) {
+    int dst_off = read_u8(vm);
+    int count   = read_u8(vm);
+    int32_t src = vm_pop(vm);
+    for (int i = 0; i + 4 <= count; i += 4) {
+        int32_t v = read_tagged_at(vm, src, i);
+        globals_write32(vm, dst_off + i, v);
+        notify_var_changed(vm, dst_off + i, v);
+    }
+}
+
+/* Jointops.exe!AudioVM_Op_PopLocalBlock @ 0x6728C0 (0x0B): same as 0x0A but the
+   destination is the locals area and no dirty signal is raised. */
+static void op_pop_local_block(MusVM *vm) {
+    int dst_off = read_u8(vm);
+    int count   = read_u8(vm);
+    int32_t src = vm_pop(vm);
+    for (int i = 0; i + 4 <= count; i += 4) {
+        locals_write32(vm, dst_off + i, read_tagged_at(vm, src, i));
+    }
+}
+
+/* Witnessed: Jointops.exe!Intrinsic_GSV @ 0x6720E0.
    Sets master and right-channel volume to clamp(TOS,0,255)<<16 (16.16 fixed
    point). Hooks on_volume_changed. Returns the original arg so net stack
    delta is 0 (call site sees the value still on stack). */
@@ -729,7 +815,7 @@ static void intrinsic_gsv(MusVM *vm) {
     vm_push(vm, fixed);
 }
 
-/* Witnessed: dfvas!Intrinsic_GSDV @ 0x5578F0.
+/* Witnessed: Jointops.exe!Intrinsic_GSDV @ 0x672120.
    Sets right-channel only. Reuse on_volume_changed but pass current(left)
    unchanged; we don't track the previous left value, so pass `fixed` for
    both channels and let the host disambiguate. */
@@ -748,16 +834,16 @@ static void intrinsic_gsdv(MusVM *vm) {
     vm_push(vm, fixed);
 }
 
-/* Witnessed: dfvas!Intrinsic_GFB @ 0x557920.
-   Pops 0, pushes 0 (witness: handler returns the value of an internal
-   assignment to 0). Side effect: clears `dword_100F654` (frame begin /
-   fade base). No hook to host; treat as a no-op stub. */
+/* [orig: AudioVM_Intrinsic_GFB @ 0x672150] `mov dword_31C37EC, 0; retn` -- takes
+   NO args (does not deref the &TOS pointer), returns void. Side effect: clears
+   the fade-base global dword_31C37EC. We don't model the fade subsystem, so this
+   is a no-op stub; we push 0 to satisfy the method-call convention (which always
+   pushes the handler's return slot). */
 static void intrinsic_gfb(MusVM *vm) {
-    /* Witnessed: pops 0 args. Just push 0 to satisfy method-call convention. */
     vm_push(vm, 0);
 }
 
-/* Witnessed: dfvas!Intrinsic_FSet @ 0x557970.
+/* Witnessed: Jointops.exe!Intrinsic_FSet @ 0x672360.
    Pops 2 (NOS=mask, TOS=&var). Sets *var |= mask, returns new value.
    Operands typically come from `push <mask>; push_ga <var>; method FSet`.
 
@@ -789,21 +875,31 @@ static void intrinsic_fisset(MusVM *vm) {
     vm_push(vm, ((cur & mask) == mask) ? -1 : 0);
 }
 
-/* Witnessed: NULL handler -> push 0. The 8-method limit in dfvas means
-   FIsClear, TStart, TStop are unreachable. We register them with this stub
-   so scripts that call them silently no-op (matches dfvas behaviour). */
+/* Jointops.exe!AudioVM_Intrinsic_FIsClear @ 0x6723C0: pops 2 (NOS=mask, TOS=&var),
+   returns -1 when NONE of the mask bits are set (`(mask & *var) == 0`), else 0.
+   This is a real bound handler in Jointops (idx 8), the inverse of FIsSet. */
+static void intrinsic_fisclear(MusVM *vm) {
+    int32_t var_addr = vm_pop(vm);
+    int32_t mask     = vm_pop(vm);
+    int32_t cur = read_tagged(vm, var_addr);
+    vm_push(vm, ((cur & mask) == 0) ? -1 : 0);
+}
+
+/* NULL-handler fallback -> push 0. Jointops.exe's intrinsic name table (@ 0x84F0C8)
+   has 9 entries (GEcho,GGRnd,GSV,GSDV,GFB,FSet,FClear,FIsSet,FIsClear) -- all bound.
+   TStart/TStop from the canonical MDEdit set do not exist in this build, so any index
+   >= 9 resolves here and no-ops. */
 static void intrinsic_unbound(MusVM *vm) {
-    /* Don't pop anything; we don't know the call shape. Just push 0 like
-       dfvas's "guarded `test eax,eax / jz` skips the call -> push 0". */
     vm_push(vm, 0);
 }
 
 static void init_intrinsics(void) {
     if (kIntrinsicsInit) return;
     kIntrinsicsInit = 1;
-    /* MDEdit name table order (canonical): GEcho, GGRnd, GSV, GSDV, GFB,
-       FSet, FClear, FIsSet, FIsClear, TStart, TStop. dfvas binds the first
-       8; the last 3 (FIsClear, TStart, TStop) are silent no-ops. */
+    /* Jointops.exe intrinsic name table (@ 0x84F0C8, 9 records x 36B): GEcho,
+       GGRnd, GSV, GSDV, GFB, FSet, FClear, FIsSet, FIsClear -- all 9 bound (matches
+       Jointops). TStart/TStop from the canonical MDEdit set are NOT present in this
+       build; indices 9/10 resolve to the no-op fallback. */
     kIntrinsics[0]  = intrinsic_gecho;
     kIntrinsics[1]  = intrinsic_ggrnd;
     kIntrinsics[2]  = intrinsic_gsv;
@@ -812,9 +908,9 @@ static void init_intrinsics(void) {
     kIntrinsics[5]  = intrinsic_fset;
     kIntrinsics[6]  = intrinsic_fclear;
     kIntrinsics[7]  = intrinsic_fisset;
-    kIntrinsics[8]  = intrinsic_unbound;   /* FIsClear (silent no-op) */
-    kIntrinsics[9]  = intrinsic_unbound;   /* TStart (silent no-op) */
-    kIntrinsics[10] = intrinsic_unbound;   /* TStop  (silent no-op) */
+    kIntrinsics[8]  = intrinsic_fisclear;  /* bound in Jointops (@ 0x6723C0) */
+    kIntrinsics[9]  = intrinsic_unbound;   /* TStart: absent in this build */
+    kIntrinsics[10] = intrinsic_unbound;   /* TStop:  absent in this build */
 }
 
 /* Bytecode-name compare bounded to MUS_SECTION_NAME_SIZE; treats either NUL
@@ -854,8 +950,8 @@ static void check_section_transition(MusVM *vm) {
     }
 }
 
-/* Tick: witnessed dispatch loop @ dfvas!AudioVM_DispatchLoop @ 0x00557FA0.
-   Budget = 32 instructions (dword_F8D4E8). Halt latches break early. */
+/* Tick: witnessed dispatch loop @ Jointops.exe!AudioVM_DispatchLoop @ 0x00672720.
+   Budget = 32 instructions (dword_3246B24). Halt latches break early. */
 extern "C" int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
     init_handlers();
     if (!vm) return 0;
@@ -863,8 +959,21 @@ extern "C" int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
     if (!vm->script || !vm->script->code) return 0;
 
     vm->halt_latch = 0;
+    /* [orig: AudioVM_DispatchLoop @ 0x672720] the instruction budget
+       (dword_3246B24 = 32) is a SOFT floor, not a hard cap. The loop tail is
+       `dec budget; jg loop; cmp ebp,stack_base; jnz loop`, i.e.
+       `while (--budget > 0 || ebp != stack_base)`: once the 32 budget is spent
+       it keeps executing until the data stack drains back to base (sp == 0) or
+       a handler sets the carry/halt latch. D-NEW-1: we mirror that by breaking
+       only when the budget is spent AND the data stack is empty. (pc-range and
+       unknown-opcode guards still bound malformed scripts; vm_push overflow ->
+       ERROR.) */
     int budget = kTickBudget;
-    while (budget-- > 0) {
+    /* Safety ceiling on the soft-drain extension: a well-formed statement is far
+       under this, but a malformed `goto`-loop that never drains/halts would spin
+       forever (the original hangs too); cap it so the host never wedges. */
+    int extension = kTickBudget * 64;
+    for (;;) {
         if (vm->state != MUS_VM_RUNNING) break;
         if (vm->pc >= vm->script->code_size) {
             vm->state = MUS_VM_HALTED;
@@ -881,6 +990,8 @@ extern "C" int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
         h(vm);
         check_section_transition(vm);
         if (vm->halt_latch) break;
+        if (--budget <= 0 && vm->sp <= 0) break;   /* budget spent + stack drained */
+        if (--extension <= 0) break;               /* safety: never spin forever */
     }
     return (int)dt_ms;
 }

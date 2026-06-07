@@ -5,9 +5,9 @@
 // signals. Owns a small AudioStreamPlayer pool for marker playback driven
 // by the play / playw opcodes.
 //
-// Witnessed wire-level paths (libs/mus): dfvas!AudioVM_LoadScriptFile @
-// 0x00557A60 (script load), dfvas!VmOp_Play @ 0x558520 + VmOp_PlayWait @
-// 0x558500 (sound triggers), dfvas!Intrinsic_GSV / GSDV (volume).
+// Witnessed wire-level paths (libs/mus): Jointops.exe!AudioVM_LoadScriptFile @
+// 0x00672D20 (script load), Jointops.exe!VmOp_Play @ 0x672CB0 + VmOp_PlayWait @
+// 0x672C90 (sound triggers), Jointops.exe!Intrinsic_GSV / GSDV (volume).
 
 #include <godot_cpp/classes/audio_stream_player.hpp>
 #include <godot_cpp/classes/node.hpp>
@@ -59,6 +59,11 @@ public:
 	StringName current_section() const;
 	int vm_state() const;
 	String last_error() const;
+	// Current VM program counter (bytecode offset of the next opcode), or -1 when
+	// no VM/script is live. Drives the editor's live statement highlight: a
+	// statement whose [code_offset, code_offset+byte_size) contains this pc is the
+	// one about to execute. Witnessed: Jointops.exe!AudioVM_DispatchLoop esi=IP.
+	int current_pc() const;
 
 	// Engine callbacks (Node virtuals via godot-cpp)
 	void _ready() override;

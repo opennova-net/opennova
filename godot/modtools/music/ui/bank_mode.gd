@@ -13,7 +13,7 @@ var _preview: Node           # MusicAudioPreview
 var _play_button_icon: Texture2D
 
 @onready var _track_tree: Tree = %TrackTree
-@onready var _toolbar: HBoxContainer = %Toolbar
+@onready var _toolbar: HFlowContainer = %Toolbar
 @onready var _add_button: Button = %AddButton
 @onready var _replace_button: Button = %ReplaceButton
 @onready var _move_up_button: Button = %MoveUpButton
@@ -29,13 +29,19 @@ func _ready() -> void:
 	_track_tree.set_column_title(1, "name")
 	_track_tree.set_column_title(2, "play")
 	_track_tree.column_titles_visible = true
+	# The bank is a flat list (create_item(root) children, no nesting), so hide
+	# the root row and the per-item fold-arrow gutter. The gutter is column 0's
+	# (the "#" column's) dead space; reclaiming it lets two/three-digit indices
+	# show in full instead of clipping "10/11/12" down to "1".
+	_track_tree.hide_root = true
+	_track_tree.hide_folding = true
 	# Column widths: # column fixed narrow, name expands, play column fixed
 	# narrow on the right. Without expand_ratio(2, 0), Godot would let the
 	# play column eat ~1/3 of the table because all columns default to
 	# expand_ratio == 1.
 	_track_tree.set_column_expand(0, false)
 	_track_tree.set_column_expand_ratio(0, 0)
-	_track_tree.set_column_custom_minimum_width(0, 40)
+	_track_tree.set_column_custom_minimum_width(0, 48)
 	_track_tree.set_column_expand(1, true)
 	_track_tree.set_column_expand_ratio(1, 1)
 	_track_tree.set_column_expand(2, false)
@@ -55,6 +61,9 @@ func _ready() -> void:
 	_rename_button.pressed.connect(_on_rename_pressed)
 	_delete_button.pressed.connect(_on_delete_pressed)
 	_stop_button.pressed.connect(_on_stop_pressed)
+	# Tracks are a drag source: drop one on a state in the section map to add a
+	# `play` (the drop side is gated behind the structured-edit parity check).
+	_track_tree.set_drag_forwarding(_tree_get_drag_data, Callable(), Callable())
 	_refresh_table()
 	_refresh_toolbar_state()
 
@@ -83,6 +92,17 @@ func _refresh_table() -> void:
 		return
 	var bank: NovaSbfBank = _document.bank
 	var entries: Array = bank.get_entries()
+	if entries.is_empty():
+		# A freshly-created (or emptied) bank: point at the import affordance so
+		# the dock doesn't read as a dead blank list.
+		var hint := _track_tree.create_item(root)
+		hint.set_text(1, "No tracks yet — ＋ Add to import a 16-bit WAV")
+		hint.set_custom_color(1, Color(0.6, 0.6, 0.6))
+		hint.set_selectable(0, false)
+		hint.set_selectable(1, false)
+		hint.set_selectable(2, false)
+		_refresh_toolbar_state()
+		return
 	for i in range(entries.size()):
 		var d: Dictionary = entries[i]
 		var item := _track_tree.create_item(root)
@@ -172,6 +192,32 @@ func _preview_index(index: int) -> void:
 	var stream: NovaSbfAudioStream = _document.bank.get_stream_at(index)
 	if stream != null:
 		_preview.play_stream(stream)
+
+
+# --- Drag source: a track row can be dragged onto a state in the section map
+# to add a `play` for it. The payload is {kind, index, name}; the map's drop
+# side stays disabled until the structured-edit parity gate is green.
+
+func _track_drag_payload(index: int) -> Dictionary:
+	if _document == null or not _document.bank_loaded():
+		return {}
+	var entries: Array = _document.bank.get_entries()
+	if index < 0 or index >= entries.size():
+		return {}
+	return {"kind": "mus_track", "index": index, "name": String(entries[index].get("name", ""))}
+
+
+func _tree_get_drag_data(at_position: Vector2) -> Variant:
+	var item := _track_tree.get_item_at_position(at_position)
+	if item == null:
+		return null
+	var payload := _track_drag_payload(int(item.get_metadata(0)))
+	if payload.is_empty():
+		return null
+	var preview := Label.new()
+	preview.text = "♪ %s" % payload["name"]
+	set_drag_preview(preview)
+	return payload
 
 
 # --- Phase E2: toolbar handlers ------------------------------------------

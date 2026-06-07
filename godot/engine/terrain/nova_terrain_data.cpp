@@ -18,6 +18,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "util/pcx_texture_bridge.h"
+#include "util/nova_data_format.h"
 #include "util/texture_path_resolver.h"
 
 #include <godot_cpp/classes/file_access.hpp>
@@ -471,13 +472,11 @@ void NovaTerrainData::_apply_foliage_map_to_slot(const opennova::FoliageMap &map
 }
 
 Error NovaTerrainData::import_pcx_slot(const String &slot_id, const String &path) {
-	Ref<FileAccess> f = FileAccess::open(path, FileAccess::READ);
-	if (f.is_null()) {
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(path, bytes)) {
 		UtilityFunctions::push_error("import_pcx_slot: cannot open ", path);
 		return ERR_FILE_CANT_OPEN;
 	}
-	PackedByteArray bytes = f->get_buffer(f->get_length());
-	f.unref();
 
 	return _import_pcx_slot_bytes(slot_id, path.get_file(), bytes);
 }
@@ -808,14 +807,12 @@ Error NovaTerrainData::load() {
 		return ERR_INVALID_PARAMETER;
 	}
 
-	// Read TRN via Godot FileAccess (works in editor and exported builds)
-	Ref<FileAccess> trn_file = FileAccess::open(trn_path, FileAccess::READ);
-	if (trn_file.is_null()) {
+	PackedByteArray trn_bytes;
+	if (!read_nova_payload_file(trn_path, trn_bytes)) {
 		UtilityFunctions::printerr("NovaTerrainData: Cannot open TRN: ", trn_path);
 		return ERR_FILE_CANT_READ;
 	}
-	std::string trn_content = trn_file->get_as_text().utf8().get_data();
-	trn_file.unref();
+	std::string trn_content(reinterpret_cast<const char *>(trn_bytes.ptr()), static_cast<size_t>(trn_bytes.size()));
 
 	return _load_from_trn_text(trn_content, trn_path);
 }
@@ -972,11 +969,7 @@ Error NovaTerrainData::_load_from_trn_text(const std::string &trn_content, const
 	if (use_resource_root) {
 		cpt_bytes = resource_root->read_file(cpt_name);
 	} else {
-		Ref<FileAccess> cpt_file = FileAccess::open(cpt_path, FileAccess::READ);
-		if (cpt_file.is_valid()) {
-			cpt_bytes = cpt_file->get_buffer(cpt_file->get_length());
-			cpt_file.unref();
-		}
+		read_nova_payload_file(cpt_path, cpt_bytes);
 	}
 	if (cpt_bytes.is_empty()) {
 		loaded = true;
@@ -1591,11 +1584,7 @@ Ref<NovaTerrainTileInfo> NovaTerrainData::get_tileinfo_resource() const {
 			bytes = resource_root->read_file(lookup_name);
 		}
 	} else {
-		Ref<FileAccess> file = FileAccess::open(lookup, FileAccess::READ);
-		if (file.is_valid()) {
-			bytes = file->get_buffer(file->get_length());
-			file.unref();
-		}
+		read_nova_payload_file(lookup, bytes);
 	}
 	if (bytes.is_empty()) {
 		UtilityFunctions::push_warning("NovaTerrainData: tileinfo file not found at ", lookup);

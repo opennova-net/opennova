@@ -722,9 +722,9 @@ static int test_vm_intrinsic_ggrnd_in_range(void) {
 static int test_vm_intrinsic_fset(void) {
     static uint8_t code[] = {
         0x01, 0x0F,        /* push 0x0F (mask) */
-        0x05, 0x00,        /* push_ga byte_off 0 (Var00) */
+        0x05, 0x00, 0x00,  /* push_ga byte_off 0 (Var00) + reserved byte (2-byte operand) */
         0x40, 0x05,        /* method FSet (idx 5) */
-        0x0F,              /* empty -> drop the return value */
+        0x0F,              /* empty -> drain the stack */
         0x3F,              /* done */
     };
     MusSection sec;
@@ -751,8 +751,8 @@ static int test_vm_intrinsic_fset(void) {
 /* FClear clears bits. Var00 starts at 0xFF, FClear with mask 0x0F leaves 0xF0. */
 static int test_vm_intrinsic_fclear(void) {
     static uint8_t code[] = {
-        0x01, 0xFF, 0x05, 0x00, 0x40, 0x05, 0x0F,   /* FSet 0xFF -> Var00 = 0xFF */
-        0x01, 0x0F, 0x05, 0x00, 0x40, 0x06, 0x0F,   /* FClear 0x0F -> Var00 = 0xF0 */
+        0x01, 0xFF, 0x05, 0x00, 0x00, 0x40, 0x05, 0x0F,   /* FSet 0xFF -> Var00 = 0xFF */
+        0x01, 0x0F, 0x05, 0x00, 0x00, 0x40, 0x06, 0x0F,   /* FClear 0x0F -> Var00 = 0xF0 */
         0x3F,
     };
     MusSection sec;
@@ -780,12 +780,12 @@ static int test_vm_intrinsic_fclear(void) {
 static int test_vm_intrinsic_fisset(void) {
     static uint8_t code[] = {
         /* Var00 = 0x0F via FSet */
-        0x01, 0x0F, 0x05, 0x00, 0x40, 0x05, 0x0F,
+        0x01, 0x0F, 0x05, 0x00, 0x00, 0x40, 0x05, 0x0F,
         /* result1 = FIsSet(0x03, &Var00) -> all bits 0x03 set in 0x0F? yes -> -1 */
-        0x01, 0x03, 0x05, 0x00, 0x40, 0x07, 0x08, 0x04,
+        0x01, 0x03, 0x05, 0x00, 0x00, 0x40, 0x07, 0x08, 0x04,
                                                     /* pop_g Var01 */
         /* result2 = FIsSet(0x10, &Var00) -> 0x10 not in 0x0F -> 0 */
-        0x01, 0x10, 0x05, 0x00, 0x40, 0x07, 0x08, 0x08,
+        0x01, 0x10, 0x05, 0x00, 0x00, 0x40, 0x07, 0x08, 0x08,
                                                     /* pop_g Var02 */
         0x3F,
     };
@@ -813,13 +813,17 @@ static int test_vm_intrinsic_fisset(void) {
     return 1;
 }
 
-/* FIsClear (idx 8) is the silent no-op stub (witnessed: NULL handler -> push 0). */
-static int test_vm_intrinsic_fisclear_stub(void) {
+/* FIsClear (idx 8) is a real bound handler in Jointops (AudioVM_Intrinsic_FIsClear
+   @ 0x6723C0): returns -1 when NONE of the mask bits are set in *var, else 0 -- the
+   inverse of FIsSet. */
+static int test_vm_intrinsic_fisclear(void) {
     static uint8_t code[] = {
-        /* method FIsClear(...) -> dispatches to intrinsic_unbound which pushes 0 */
-        0x01, 0x05,         /* push 5 (any garbage TOS) */
-        0x40, 0x08,         /* method FIsClear (idx 8) -> push 0 */
-        0x08, 0x00,         /* pop_g Var00 -> Var00 = 0 */
+        /* Var00 = 0x0F via FSet (empty drains the return value) */
+        0x01, 0x0F, 0x05, 0x00, 0x00, 0x40, 0x05, 0x0F,
+        /* result1 = FIsClear(0x10, &Var00) -> 0x10 not in 0x0F -> none set -> -1 */
+        0x01, 0x10, 0x05, 0x00, 0x00, 0x40, 0x08, 0x08, 0x04,  /* pop_g Var01 */
+        /* result2 = FIsClear(0x03, &Var00) -> 0x03 bits ARE set -> 0 */
+        0x01, 0x03, 0x05, 0x00, 0x00, 0x40, 0x08, 0x08, 0x08,  /* pop_g Var02 */
         0x3F,
     };
     MusSection sec;
@@ -835,13 +839,12 @@ static int test_vm_intrinsic_fisclear_stub(void) {
     s.entry_section_index = 0; s.globals_size = MUS_GLOBALS_BYTES;
 
     MusVM *vm = mus_vm_create();
-    mus_vm_set_var(vm, 0, 99);   /* sentinel */
-    mus_vm_load_script(vm, &s);  /* load resets Var00 to 0 */
-    /* Re-set Var00 = 99 after load to verify pop_g overrides it. */
-    mus_vm_set_var(vm, 0, 99);
+    mus_vm_load_script(vm, &s);
     mus_vm_start(vm);
     mus_vm_tick(vm, 16);
-    CHECK(mus_vm_get_var(vm, 0) == 0, "FIsClear stub pushed 0; pop_g wrote 0");
+    mus_vm_tick(vm, 16);
+    CHECK(mus_vm_get_var(vm, 1) == -1, "FIsClear(0x10) over 0x0F = -1 (bits clear)");
+    CHECK(mus_vm_get_var(vm, 2) == 0,  "FIsClear(0x03) over 0x0F = 0 (bits set)");
     mus_vm_destroy(vm);
     return 1;
 }
@@ -1165,6 +1168,99 @@ static int test_vm_jo_fixture_first_sound(void) {
     mus_close(&mf);
     return 1;
 }
+
+/* Executable form of the opcode census: drive the real shipped scripts through
+   the VM for many ticks and assert the engine-width walk never desyncs into an
+   unknown opcode (MUS_VM_ERROR). gamescript exercises enter/tablexec/method;
+   menuscript exercises the large push_g/l_and/brfalse/setstate/play state
+   machine. Proves the VM executes the stock bins faithfully. */
+static int run_fixture_no_error(const char *fname, int max_ticks) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s", MUS_FIXTURE_DIR, fname);
+    MusFile mf;
+    int rc = mus_open(&mf, path);
+    if (rc != 0) { fprintf(stderr, "  skip: %s (rc=%d)\n", path, rc); return 1; }
+    CHECK(mf.scripts != NULL, "scripts present");
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &mf.scripts[0]);
+    mus_vm_start(vm);
+    int ok = 1;
+    for (int t = 0; t < max_ticks; ++t) {
+        mus_vm_tick(vm, 16);
+        MusVMState st = mus_vm_state(vm);
+        if (st == MUS_VM_ERROR) {
+            fprintf(stderr, "  %s: VM ERROR at tick %d: %s (pc=0x%X)\n",
+                    fname, t, mus_vm_last_error(vm), mus_vm_pc(vm));
+            ok = 0; break;
+        }
+        if (st != MUS_VM_RUNNING) break;   /* ran off the end / HALTED cleanly */
+    }
+    mus_vm_destroy(vm);
+    mus_close(&mf);
+    return ok;
+}
+
+static int test_vm_jo_fixtures_no_desync(void) {
+    CHECK(run_fixture_no_error("jo_gamemus.bin", 500),  "gamescript runs without VM error");
+    CHECK(run_fixture_no_error("jo_menumus.bin", 2000), "menuscript runs without VM error");
+    return 1;
+}
+
+/* Behavioral proof (Tier 3, CI form): assert the shipped programs produce the
+   EXACT observable event stream the Tier-4 Unicorn differential proved byte-
+   identical to the ORIGINAL Jointops handlers (notes/audio/mus_diff_jointops.py:
+   original == reimpl for all scenarios). `V<v>` = on_volume_changed (GSV; 200<<16),
+   `P<i>` = on_play_sound. The golden streams are captured at a fixed 12-tick window;
+   each Var value yields a DISTINCT stream, which is the proof that var-gated routing
+   works (gamescript's `push_g Var1; neq; brfalse; setstate`; menuscript's Var2). */
+struct BehLog {
+    char ev[2048];                 /* "V<v> P<i> ..." accumulated in order */
+    int  saw_mpstart, saw_null;    /* gamescript section routing */
+};
+static void beh_app(BehLog *L, const char *s) { strncat(L->ev, s, sizeof(L->ev) - strlen(L->ev) - 1); }
+static void beh_play(void *u, uint32_t i, int) { char b[24]; snprintf(b, sizeof(b), "P%u ", i); beh_app((BehLog *)u, b); }
+static void beh_vol(void *u, int32_t l, int32_t /*r*/) { char b[24]; snprintf(b, sizeof(b), "V%d ", l); beh_app((BehLog *)u, b); }
+static void beh_sect(void *u, const char *nm) {
+    BehLog *L = (BehLog *)u;
+    if (!strcmp(nm, "Multiplayerstart")) L->saw_mpstart = 1;
+    if (!strcmp(nm, "Missionnull"))      L->saw_null = 1;
+}
+static void beh_run(const char *fname, uint8_t varIdx, int32_t varVal, int ticks, BehLog *L) {
+    memset(L, 0, sizeof(*L));
+    char path[512]; snprintf(path, sizeof(path), "%s/%s", MUS_FIXTURE_DIR, fname);
+    MusFile mf; if (mus_open(&mf, path) != 0) return;
+    MusVM *vm = mus_vm_create();
+    MusVMHooks h = {}; h.user = L;
+    h.on_play_sound = beh_play; h.on_volume_changed = beh_vol; h.on_section_entered = beh_sect;
+    mus_vm_set_hooks(vm, &h);
+    mus_vm_load_script(vm, &mf.scripts[0]);
+    mus_vm_set_var(vm, varIdx, varVal);
+    mus_vm_start(vm);
+    for (int t = 0; t < ticks; ++t) { mus_vm_tick(vm, 16); if (mus_vm_state(vm) != MUS_VM_RUNNING) break; }
+    mus_vm_destroy(vm); mus_close(&mf);
+}
+
+static int test_vm_jo_behavioral(void) {
+    BehLog L;
+    beh_run("jo_gamemus.bin", 1, 0, 12, &L);
+    if (L.ev[0] == 0) { fprintf(stderr, "  skip: gamemus fixture absent\n"); return 1; }
+    /* Var1=0 (no mission): SV(200), then Multiplayerstart loops sound_0. */
+    CHECK(strcmp(L.ev, "V13107200 P0 P0 P0 P0 P0 P0 P0 P0 P0 P0 ") == 0, "gamemus Var1=0 stream == original");
+    CHECK(L.saw_mpstart && !L.saw_null, "gamemus Var1=0 routes to Multiplayerstart");
+
+    beh_run("jo_gamemus.bin", 1, 1, 12, &L);
+    /* Var1=1 (mission active): branch routes to silent Missionnull -- the discriminator. */
+    CHECK(strcmp(L.ev, "V13107200 ") == 0, "gamemus Var1=1 stream == original (SV200 then silent)");
+    CHECK(L.saw_null && !L.saw_mpstart, "gamemus Var1=1 routes to Missionnull (branch discriminator)");
+
+    beh_run("jo_menumus.bin", 2, 0, 12, &L);
+    CHECK(strcmp(L.ev, "V13107200 V13107200 P1 V13107200 V13107200 P2 P0 P0 ") == 0, "menumus Var2=0 stream == original");
+    beh_run("jo_menumus.bin", 2, 1, 12, &L);
+    CHECK(strcmp(L.ev, "V13107200 V13107200 P1 V13107200 V13107200 P2 P3 P4 P5 P6 P7 P8 P2 ") == 0, "menumus Var2=1 stream == original (P2..P8 loop)");
+    beh_run("jo_menumus.bin", 2, 2, 12, &L);
+    CHECK(strcmp(L.ev, "V13107200 V13107200 P1 V13107200 V13107200 P2 V13107200 P2 V13107200 P2 ") == 0, "menumus Var2=2 stream == original (V,P2 loop)");
+    return 1;
+}
 #endif
 
 /* ---- E2: load + state transitions -------------------------------------- */
@@ -1265,7 +1361,7 @@ int main(void) {
     RUN_TEST(test_vm_intrinsic_fset);
     RUN_TEST(test_vm_intrinsic_fclear);
     RUN_TEST(test_vm_intrinsic_fisset);
-    RUN_TEST(test_vm_intrinsic_fisclear_stub);
+    RUN_TEST(test_vm_intrinsic_fisclear);
     /* E9 */
     RUN_TEST(test_vm_intrinsic_gecho_fires_hook);
     RUN_TEST(test_vm_intrinsic_tstart_tstop_noop);
@@ -1279,6 +1375,8 @@ int main(void) {
     RUN_TEST(test_vm_pc_accessor);
 #ifdef MUS_FIXTURE_DIR
     RUN_TEST(test_vm_jo_fixture_first_sound);
+    RUN_TEST(test_vm_jo_fixtures_no_desync);
+    RUN_TEST(test_vm_jo_behavioral);
 #endif
 
     printf("\n%d passed, %d failed\n", passed, failed);

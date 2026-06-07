@@ -4,7 +4,7 @@
    (the same format the decompiler emits, line-for-line compatible with the
    on-godot-oscarmike Python reference), parses the top-level declarations,
    and emits SCR0/MU01-shaped bytecode that the engine VM (witnessed at
-   `dfvas!AudioVM_LoadScriptFile @ 0x00557A60`) accepts.
+   `Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20`) accepts.
 
    Phase D scope: produce bytecode that round-trips through
    `decompile(compile(decompile(x))) == decompile(x)` against the
@@ -459,8 +459,20 @@ struct Compiler {
     size_t       variable_cap;
     size_t       variable_count;
 
+    /* Bind map. `bind sound_N "Name"` records BOTH `sound_N` and `Name` -> N so
+       a later `play Name`, `play sound_N`, or `on (...) play Name` all resolve to
+       the same sound index. This is MDEdit's real bind semantics (the binary
+       carries no bind table, but the editor's names-aware decompile emits real
+       SBF entry names at play sites). The decompiler emits all binds before the
+       first section, so the map is fully populated before any play is parsed. */
+    struct BindDef { char name[64]; int index; };
+    BindDef     *binds;
+    size_t       bind_cap;
+    size_t       bind_count;
+
     Compiler() : sections(NULL), section_cap(0), section_count(0),
-                 variables(NULL), variable_cap(0), variable_count(0) {}
+                 variables(NULL), variable_cap(0), variable_count(0),
+                 binds(NULL), bind_cap(0), bind_count(0) {}
 
     /* Find/intern a section by name; returns its index in `sections`. */
     int section_find_or_create(const char *name) {
@@ -495,6 +507,34 @@ struct Compiler {
         strncpy(v.name, name, MUS_INTRINSIC_NAME_SIZE - 1);
         v.byte_offset = byte_offset;
         return (int)(variable_count - 1);
+    }
+
+    /* Record a `bind <name> <index>` mapping (last write wins per name). */
+    void bind_add(const char *name, int index) {
+        if (!name || !name[0]) return;
+        for (size_t i = 0; i < bind_count; ++i) {
+            if (strcmp(binds[i].name, name) == 0) { binds[i].index = index; return; }
+        }
+        if (bind_count >= bind_cap) {
+            size_t nc = bind_cap ? bind_cap * 2 : 8;
+            binds = (BindDef *)realloc(binds, nc * sizeof(BindDef));
+            bind_cap = nc;
+        }
+        BindDef &b = binds[bind_count++];
+        memset(&b, 0, sizeof(b));
+        strncpy(b.name, name, sizeof(b.name) - 1);
+        b.index = index;
+    }
+
+    /* Resolve a `play` / `on (...) play` target to a sound index: a literal
+       `sound_N` first, else a bound name (`bind sound_N "Name"`), else -1. */
+    int resolve_play_target(const char *name) {
+        int idx = parse_sound_index(name);
+        if (idx >= 0) return idx;
+        for (size_t i = 0; i < bind_count; ++i) {
+            if (strcmp(binds[i].name, name) == 0) return binds[i].index;
+        }
+        return -1;
     }
 
     /* Resolve a global-variable reference name to a byte offset. */
@@ -749,16 +789,23 @@ int Compiler::parse_expr(const char **err) {
 }
 
 int Compiler::parse_stmt(const char **err) {
-    /* play sound_N */
+    /* play <sound_N | bound-name | "bound name"> */
     if (lex.cur_kind == Tok::KwPlay) {
         lex.advance();
-        if (lex.cur_kind != Tok::Ident) {
+        if (lex.cur_kind != Tok::Ident && lex.cur_kind != Tok::String) {
             *err = "expected sound name after 'play'";
             return -1;
         }
-        int idx = parse_sound_index(lex.cur_text);
+        int idx = resolve_play_target(lex.cur_text);
         if (idx < 0) {
-            *err = "expected 'sound_N' after 'play'";
+            *err = "unknown play target (expected 'sound_N' or a bound name)";
+            return -1;
+        }
+        /* The play opcode operand is a single byte; a larger index would silently
+           wrap to a different sound. Reject it so the editor can never emit a
+           valid-but-wrong play (the original engine reads only a u8 here too). */
+        if (idx > 255) {
+            *err = "play target index out of range (max 255)";
             return -1;
         }
         emit.byte(0x3E);
@@ -922,23 +969,41 @@ int Compiler::parse_stmt(const char **err) {
         else if (lex.cur_kind == Tok::KwGoto)  { inner_op = 0x30; entry_size = 5; }
         else { *err = "expected enter/play/goto after 'on (...)'"; return -1; }
         lex.advance();
-        /* Collect target identifiers. */
+        /* Collect target identifiers. Names-aware decompiles can emit a play
+           target as a quoted string when the SBF entry name isn't a bare
+           identifier, so accept String here too (cur_text holds the unquoted
+           bytes). enter/goto targets are always bare section idents. */
         char targets[64][MUS_SECTION_NAME_SIZE];
         int  ntargets = 0;
-        while (lex.cur_kind == Tok::Ident && ntargets < 64) {
+        while ((lex.cur_kind == Tok::Ident || lex.cur_kind == Tok::String)
+               && ntargets < 64) {
             strncpy(targets[ntargets], lex.cur_text, MUS_SECTION_NAME_SIZE - 1);
             targets[ntargets][MUS_SECTION_NAME_SIZE - 1] = 0;
             ++ntargets;
             lex.advance();
         }
+        /* Stopping at 64 must be a hard error, not a silent truncation: leftover
+           target tokens would otherwise be misparsed as the next statement (a
+           confusing downstream error) and the count byte can't represent them. */
+        if (lex.cur_kind == Tok::Ident || lex.cur_kind == Tok::String) {
+            *err = "too many targets in on(...) table (max 64)";
+            return -1;
+        }
         /* Emit tablexec opcode + 4 header bytes: count, inner_op, entry_size,
            skip_size. skip_size is the TOTAL encoded instruction length
-           (1 opcode + 4 header + count*entry_size body); dfvas's
-           VmOp_TableExec @ 0x558420 reads it as `add esi, skip; dec esi` to
+           (1 opcode + 4 header + count*entry_size body); Jointops.exe's
+           VmOp_TableExec @ 0x672BB0 reads it as `add esi, skip; dec esi` to
            land the next opcode, so an incorrect (or zero) value scrambles
            the dispatcher on out-of-range indices. Witnessed: jo_gamemus
            tablexec @ 0x00c8 has size=3, entry_stride=2 → skip_size = 0x0b. */
         uint32_t total_size = 5u + (uint32_t)ntargets * (uint32_t)entry_size;
+        /* skip_size is a single byte the VM uses to step past the table; a wrapped
+           value scrambles the dispatcher on out-of-range indices. Reachable with a
+           goto-action table (entry_size 5) of >=51 targets. Error instead of wrap. */
+        if (total_size > 255) {
+            *err = "on(...) table too large to encode (reduce targets)";
+            return -1;
+        }
         emit.byte(0x35);
         emit.byte((uint8_t)ntargets);
         emit.byte(inner_op);
@@ -950,12 +1015,20 @@ int Compiler::parse_stmt(const char **err) {
                 /* enter or play: entry[1] = section/sound idx (1 byte) */
                 if (inner_op == 0x3B) {
                     int sidx = section_find_or_create(targets[t]);
+                    if (sidx > 255) {
+                        *err = "too many sections to index in on(...) table";
+                        return -1;
+                    }
                     emit.byte((uint8_t)sidx);
                 } else {
-                    /* play: target like sound_N */
-                    int sidx = parse_sound_index(targets[t]);
+                    /* play: target is sound_N or a bound name */
+                    int sidx = resolve_play_target(targets[t]);
                     if (sidx < 0) {
-                        *err = "expected 'sound_N' in on(...) play table";
+                        *err = "unknown play target in on(...) play table";
+                        return -1;
+                    }
+                    if (sidx > 255) {
+                        *err = "play target index out of range in on(...) table (max 255)";
                         return -1;
                     }
                     emit.byte((uint8_t)sidx);
@@ -1053,15 +1126,32 @@ int Compiler::parse_section_body(const char **err, bool inside_section) {
 }
 
 int Compiler::parse_top_decl(const char **err) {
-    /* `bind sound_N "..."` -- aesthetic; consume but don't emit. */
+    /* `bind sound_N "Name"` -- record the name->index mapping so a later
+       `play Name` (the names-aware decompile form) resolves to sound index N.
+       Emits no bytecode (the runtime carries no bind table); the identifier
+       `sound_N` itself also maps to N so the names-less form keeps working. */
     if (lex.cur_kind == Tok::KwBind) {
         lex.advance();
         if (lex.cur_kind != Tok::Ident) {
             *err = "expected bind name";
             return -1;
         }
+        char bind_id[64];
+        strncpy(bind_id, lex.cur_text, sizeof(bind_id) - 1);
+        bind_id[sizeof(bind_id) - 1] = 0;
         lex.advance();
-        if (lex.cur_kind == Tok::String) lex.advance();
+        char display[64];
+        display[0] = 0;
+        if (lex.cur_kind == Tok::String) {
+            strncpy(display, lex.cur_text, sizeof(display) - 1);
+            display[sizeof(display) - 1] = 0;
+            lex.advance();
+        }
+        int idx = parse_sound_index(bind_id);
+        if (idx >= 0) {
+            bind_add(bind_id, idx);              /* sound_N -> N */
+            if (display[0]) bind_add(display, idx);  /* "Name" -> N */
+        }
         return 0;
     }
     /* `global INT name` -- aesthetic; remember name -> auto-allocated offset. */
@@ -1172,6 +1262,7 @@ int Compiler::finalize(const char **err) {
     }
     out.globals_size = gsize;
     out.locals_size = 0x28;       /* match the JO fixture default */
+    out.locals_frame_offset = 0x20;   /* `enter` frame base; JO/MDEdit witness */
     out.entry_section_index = 0;
 
     /* Populate intrinsic names with the canonical 11. */
@@ -1253,6 +1344,7 @@ extern "C" int mus_compile(const char *text, MusScript *out_script,
     free(c.emit.patches);
     free(c.sections);
     free(c.variables);
+    free(c.binds);
     if (rc != 0) {
         if (err_msg)  *err_msg  = local_err ? local_err : "compile error";
         if (err_line) *err_line = c.lex.line;
@@ -1359,12 +1451,13 @@ extern "C" int mus_encode_file(const MusScript *const *scripts, uint32_t script_
         free(sec_tab_slots);
 
         /* Optional editor debug section: source path + section name table +
-           variable name table. Emitted only when source_path or variables
-           are populated; otherwise the chunk omits the string section
-           entirely (parser leaves source_path empty). */
+           variable name table. Emit it whenever author-facing names exist;
+           otherwise a freshly compiled script would reload with synthetic
+           Section_N labels even though the source named its sections. */
         size_t str_section_at = 0;
         size_t debug_info_at  = 0;
         bool   emit_debug     = (s->source_path[0] != 0)
+                             || (s->section_count > 0)
                              || (s->variable_count > 0);
         if (emit_debug) {
             /* debug_info_offset is editor-only and the runtime never reads
@@ -1435,7 +1528,9 @@ extern "C" int mus_encode_file(const MusScript *const *scripts, uint32_t script_
             ch.debug_info_offset    = (uint32_t)(debug_info_at - chunk_hdr_at);
             ch.debug_info_count     = 0;
             ch.string_section_offset= (uint32_t)(str_section_at - chunk_hdr_at);
-            ch.string_section_size  = 0x20;   /* matches the JO fixture witness */
+            /* +0x3C doubles as the `enter` frame base (instance[+0x3C]); preserve
+               a parsed value, default 0x20 (the JO/MDEdit witness). */
+            ch.string_section_size  = s->locals_frame_offset ? s->locals_frame_offset : 0x20;
         } else {
             /* No debug section: still set debug_info_offset to the end of
                the bytecode region so the parser's smallest_after() heuristic

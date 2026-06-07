@@ -47,6 +47,28 @@ def write_loose(path: Path, data: bytes) -> None:
     path.write_bytes(data)
 
 
+def _rol32(v: int, s: int) -> int:
+    v &= 0xFFFFFFFF
+    return ((v << s) | (v >> (32 - s))) & 0xFFFFFFFF
+
+
+def scr_blob(plaintext: bytes, key: int) -> bytes:
+    """The stored "SCR\\x01" form of `plaintext` under `key`: the inverse of libs/scr decrypt
+    (XOR keystream, then reverse), so vfs_decode_payload recovers `plaintext` with that key."""
+    b = bytearray(plaintext)
+    k = key & 0xFFFFFFFF
+    for i in range(len(b)):
+        k = (_rol32((k + _rol32(k, 11)) & 0xFFFFFFFF, 4) ^ 1) & 0xFFFFFFFF
+        b[i] ^= k & 0xFF
+    b.reverse()
+    return b"SCR\x01" + bytes(b)
+
+
+# SCR keys (mirror libs/scr/include/scr/scr.h).
+_SCR_KEY_DEFAULT = 0xABEEFACE  # JO Demo
+_SCR_KEY_JO_DFX2 = 0x2A5A8EAD  # retail JO/DFX2
+
+
 # ----------------------------- AssetResolver (frozen public API) -----------------------------
 
 def test_resolver_loose_shadows_archive(tmp_path: Path) -> None:
@@ -93,6 +115,49 @@ def test_resolve_texture_extension_fallback(tmp_path: Path) -> None:
         resolved = r.resolve_texture("tex.tga")
         assert resolved is not None
         assert Path(resolved).name.lower() == "tex.dds"
+
+
+# ----------------------------- game-aware SCR decode policy -----------------------------
+
+def test_gameprofile_scr_policy_for_code() -> None:
+    from pyopennova import gameprofile_ffi as gp
+
+    assert gp.scr_policy_for_code("jodemo") == gp.SCR_POLICY_FORCE_DEFAULT
+    assert gp.scr_policy_for_code("jo") == gp.SCR_POLICY_VERSION_DETECT
+    assert gp.scr_policy_for_code("JODEMO") == gp.SCR_POLICY_FORCE_DEFAULT  # case-insensitive
+    assert gp.scr_policy_for_code(None) == gp.SCR_POLICY_VERSION_DETECT  # JO default
+    assert gp.scr_policy_for_code("nope") == gp.SCR_POLICY_VERSION_DETECT
+
+
+def test_vfs_set_scr_policy_keys_decode(tmp_path: Path) -> None:
+    from pyopennova.vfs_ffi import SCR_POLICY_FORCE_DEFAULT, SCR_POLICY_VERSION_DETECT
+
+    plaintext = b'begin "Null"\r\n  id 100000\r\nend\r\n'
+    # Demo-style: version byte 1, body keyed with the DEFAULT key.
+    write_loose(tmp_path / "demo.def", scr_blob(plaintext, _SCR_KEY_DEFAULT))
+
+    with Vfs() as v:
+        assert v.add_search_path(str(tmp_path))
+        # Default (version-detect) maps version 1 -> JO_DFX2 key: wrong key, not the plaintext.
+        v.set_scr_policy(SCR_POLICY_VERSION_DETECT)
+        assert v.read_file("demo.def") != plaintext
+        # Forcing the demo's DEFAULT key recovers the text through the full read path.
+        v.set_scr_policy(SCR_POLICY_FORCE_DEFAULT)
+        assert v.read_file("demo.def") == plaintext
+
+
+def test_resolver_is_game_aware(tmp_path: Path) -> None:
+    from pyopennova.asset_resolver import AssetResolver
+
+    plaintext = b'description "Demo Item"\r\ntype marker\r\n'
+    write_loose(tmp_path / "weapon.def", scr_blob(plaintext, _SCR_KEY_DEFAULT))
+
+    # game="jo" (default) version-detects -> wrong key for this demo-keyed file.
+    with AssetResolver(str(tmp_path), game="jo") as r:
+        assert Path(r.resolve("weapon.def")).read_bytes() != plaintext
+    # game="jodemo" forces the DEFAULT key -> readable.
+    with AssetResolver(str(tmp_path), game="jodemo") as r:
+        assert Path(r.resolve("weapon.def")).read_bytes() == plaintext
 
 
 # ----------------------------- low-level Vfs precedence -----------------------------

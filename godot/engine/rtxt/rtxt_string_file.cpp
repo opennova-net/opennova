@@ -1,5 +1,7 @@
 #include "rtxt_string_file.h"
 
+#include "util/nova_data_format.h"
+
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -252,12 +254,10 @@ void RtxtStringFile::rename_section(int p_index, const String &p_name) {
 // --- I/O ---
 
 Error RtxtStringFile::load_from_path(const String &p_path) {
-	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ);
-	if (file.is_null()) {
+	PackedByteArray packed;
+	if (!read_nova_payload_file(p_path, packed)) {
 		return ERR_FILE_CANT_OPEN;
 	}
-	const PackedByteArray packed = file->get_buffer(file->get_length());
-	file->close();
 	return load_from_byte_array(packed);
 }
 

@@ -1,5 +1,6 @@
 add_library(opennova_pff STATIC
     src/pff.cpp
+    src/pff_writer.cpp
 )
 
 target_include_directories(opennova_pff

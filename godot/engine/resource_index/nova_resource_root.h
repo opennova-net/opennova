@@ -27,8 +27,10 @@ class NovaResourceRoot : public RefCounted {
 	static String lookup_name(const String &name);
 	static Dictionary file_entry_to_dictionary(const opennova::ResourceFileEntry &entry);
 
-	// Shared validate-and-scan body for both mount entry points.
-	Error mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode);
+	// Shared validate-and-scan body for both mount entry points. `game_code` selects the SCR
+	// decode policy (gameprofile code, e.g. "jo"/"jodemo"); an empty/unknown code is the JO default.
+	Error mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
+	                      const String &game_code);
 
 protected:
 	static void _bind_methods();
@@ -42,9 +44,10 @@ public:
 	// Runtime mount: the PFF archives are the packed game data. `expansion` (e.g. "jox01")
 	// layers the expansion's archives over the base game. When `allow_loose_override` is true
 	// (the engine's `/d` dev flag) loose files next to the archives shadow the packed entries;
-	// otherwise the runtime reads from PFFs exclusively.
+	// otherwise the runtime reads from PFFs exclusively. `game_code` (the `/game <code>` launch
+	// flag, default "jo") selects the SCR decode key so demo data decodes correctly.
 	Error mount_runtime(const String &path, const String &expansion = String(),
-	                    bool allow_loose_override = false);
+	                    bool allow_loose_override = false, const String &game_code = "jo");
 	// Expansion names discoverable under `<path>/expansion/` (each subdir with a matching
 	// <name>.pff). Independent of the currently mounted root, so the UI can list before mounting.
 	PackedStringArray list_expansions(const String &path) const;

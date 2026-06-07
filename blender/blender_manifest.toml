@@ -2,8 +2,8 @@ schema_version = "1.0.0"
 
 id = "opennova_blender"
 version = "0.0.3"
-name = "OpenNova Blender ASE Exporter"
-tagline = "Export Novalogic ASE files"
+name = "OpenNova Blender ASE & Anim Exporter"
+tagline = "Export Novalogic ASE models and ADM/BAD animations"
 maintainer = "Taylor Finnell <noreply@anthropic.com>"
 type = "add-on"
 
@@ -17,4 +17,4 @@ platforms = ["windows-x64", "linux-x64"]
 wheels = []
 
 [permissions]
-files = "Export Novalogic ASE files"
+files = "Export Novalogic ASE models and ADM/BAD animation files"

@@ -8,8 +8,8 @@
 //                              Audio_SubmitStereoSampleSplit @ 0x007BD205
 //                              at unity gain (see sbf_ida_witness.md).
 //
-// Each instance opens its own FileAccess so multiple players can seek
-// independently against the same bank's source path.
+// Chunk data is read from NovaSbfBank's decoded in-memory byte stream, so
+// SCR-wrapped loose banks and plaintext banks use the same playback path.
 
 #include "nova_sbf_audio_stream_playback.h"
 
@@ -38,11 +38,7 @@ void NovaSbfAudioStreamPlayback::_start(double p_from_pos) {
 		_playing = false;
 		return;
 	}
-	// Open our own file handle. Routes through Godot VFS so PFF mounts and
-	// other custom layers work, and so seeks here don't fight any other
-	// player streaming the same bank.
-	_file = FileAccess::open(_bank->get_path_for_playback(), FileAccess::READ);
-	_playing = _file.is_valid();
+	_playing = _bank->raw_entry_at(_entry_index) != nullptr;
 	_current_chunk = -1; // force reload on first mix
 	_decoded_count = 0;
 	_frames_consumed = (uint64_t)(p_from_pos * (double)SBF_SAMPLE_RATE);
@@ -50,7 +46,6 @@ void NovaSbfAudioStreamPlayback::_start(double p_from_pos) {
 
 void NovaSbfAudioStreamPlayback::_stop() {
 	_playing = false;
-	_file.unref();
 }
 
 bool NovaSbfAudioStreamPlayback::_is_playing() const {
@@ -65,7 +60,7 @@ void NovaSbfAudioStreamPlayback::_seek(double p_position) {
 
 bool NovaSbfAudioStreamPlayback::_load_chunk(int p_chunk_index) {
 	const SbfRawEntry *e = _bank.is_valid() ? _bank->raw_entry_at(_entry_index) : nullptr;
-	if (!e || _file.is_null() || e->block_size == 0) {
+	if (!e || e->block_size == 0) {
 		_decoded_count = 0;
 		return false;
 	}
@@ -79,9 +74,8 @@ bool NovaSbfAudioStreamPlayback::_load_chunk(int p_chunk_index) {
 	}
 
 	const uint64_t off = (uint64_t)e->data_offset + chunk_byte_off;
-	_file->seek(off);
-	PackedByteArray block = _file->get_buffer(e->block_size);
-	if ((uint32_t)block.size() < e->block_size) {
+	PackedByteArray block;
+	if (!_bank->read_file_block(off, e->block_size, block)) {
 		_decoded_count = 0;
 		return false;
 	}
@@ -102,7 +96,7 @@ bool NovaSbfAudioStreamPlayback::_load_chunk(int p_chunk_index) {
 int32_t NovaSbfAudioStreamPlayback::_mix(AudioFrame *p_buffer,
 		float /*p_rate_scale*/,
 		int32_t p_frames) {
-	if (!_playing || _bank.is_null() || _file.is_null()) {
+	if (!_playing || _bank.is_null()) {
 		return 0;
 	}
 	const SbfRawEntry *e = _bank->raw_entry_at(_entry_index);

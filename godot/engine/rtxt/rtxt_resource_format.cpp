@@ -1,8 +1,8 @@
 #include "rtxt_resource_format.h"
 
 #include "rtxt_string_file.h"
+#include "util/nova_data_format.h"
 
-#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 
 using namespace godot;
@@ -11,13 +11,11 @@ namespace {
 
 // True when the file at p_path begins with the 'RTXT' magic.
 bool has_rtxt_magic(const String &p_path) {
-	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ);
-	if (file.is_null() || file->get_length() < 4) {
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(p_path, bytes) || bytes.size() < 4) {
 		return false;
 	}
-	const PackedByteArray head = file->get_buffer(4);
-	file->close();
-	return head.size() == 4 && head[0] == 'R' && head[1] == 'T' && head[2] == 'X' && head[3] == 'T';
+	return bytes[0] == 'R' && bytes[1] == 'T' && bytes[2] == 'X' && bytes[3] == 'T';
 }
 
 } // namespace

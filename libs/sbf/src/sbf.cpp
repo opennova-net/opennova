@@ -22,6 +22,7 @@ extern "C" int sbf_validate(const uint8_t *data, size_t size) {
     SbfHeader h;
     memcpy(&h, data, SBF_HEADER_SIZE);
     if (h.magic != SBF_MAGIC) return -2;
+    if (h.flags > 2) return -5;
     if (h.index_offset != SBF_HEADER_SIZE) return -3;
     if (size > SBF_HEADER_SIZE
         && (uint64_t)h.entry_count * SBF_ENTRY_SIZE > size - SBF_HEADER_SIZE) {
@@ -261,7 +262,11 @@ extern "C" int sbf_encode_file(const char * const *names, uint32_t n,
                                 const int16_t * const *pcm,
                                 const size_t *counts,
                                 uint8_t **out_buf, size_t *out_size) {
-    if (!names || !pcm || !counts || !out_buf || !out_size) return -1;
+    if (!out_buf || !out_size) return -1;
+    /* A zero-entry bank is a valid 24-byte header-only file; the per-entry
+       input arrays are unused in that case, so don't require them (an empty
+       bank authored from scratch and saved before any track is added). */
+    if (n != 0 && (!names || !pcm || !counts)) return -1;
 
     typedef struct { uint8_t *bytes; size_t size; } Buf;
     Buf *bufs = (Buf *)calloc(n ? n : 1, sizeof(Buf));
@@ -316,7 +321,7 @@ extern "C" int sbf_encode_file(const char * const *names, uint32_t n,
         e.data_offset   = (uint32_t)cursor;
         e.total_size    = (uint32_t)bufs[i].size;
         e.block_size    = SBF_CHUNK_TOTAL;
-        e.total_samples = (uint32_t)counts[i];
+        e.sample_length_hint = 0;
         memcpy(out + SBF_HEADER_SIZE + (size_t)i * SBF_ENTRY_SIZE, &e, SBF_ENTRY_SIZE);
         memcpy(out + cursor, bufs[i].bytes, bufs[i].size);
         cursor += bufs[i].size;

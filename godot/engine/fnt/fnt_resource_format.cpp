@@ -1,6 +1,7 @@
 #include "fnt/fnt_resource_format.h"
 
 #include "fnt/nova_fnt_resource.h"
+#include "util/nova_data_format.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -31,14 +32,11 @@ Variant ResourceFormatLoaderFNT::_load(const String &p_path, const String &p_ori
 	(void)p_use_sub_threads;
 	(void)p_cache_mode;
 
-	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ);
-	if (file.is_null()) {
+	PackedByteArray data;
+	if (!read_nova_payload_file(p_path, data)) {
 		UtilityFunctions::push_error("ResourceFormatLoaderFNT: cannot open file: ", p_path);
 		return Variant();
 	}
-
-	PackedByteArray data = file->get_buffer(file->get_length());
-	file->close();
 
 	Ref<NovaFntResource> resource;
 	resource.instantiate();

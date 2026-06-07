@@ -119,6 +119,7 @@ def _execute_to_files(request: ImportRequest) -> tuple[list[str], str]:
             write_ase=options.write_ase,
             write_3dp=options.write_3dp,
             reset_scene=True,
+            game=request.game,
         )
         return _coerce_written_output(raw, request.loose_output_dir)
 
@@ -136,6 +137,7 @@ def _execute_to_files(request: ImportRequest) -> tuple[list[str], str]:
         write_max=options.write_max,
         write_ase=options.write_ase,
         write_3dp=options.write_3dp,
+        game=request.game,
     )
     return _coerce_written_output(raw, request.likely_output_dir)
 
@@ -153,6 +155,7 @@ def _run_loose_import_impl(
     write_ase: bool,
     write_3dp: bool,
     reset_scene: bool,
+    game: str = "jo",
 ) -> tuple[list[str], str]:
     _require_output(write_max=write_max, write_ase=write_ase, write_3dp=write_3dp)
     built, written = execute_loose_import(
@@ -170,6 +173,7 @@ def _run_loose_import_impl(
         import_collisions=import_collisions,
         import_occlusion=import_occlusion,
         import_lights=import_lights,
+        game=game,
     )
     if not built:
         raise RuntimeError("3ds Max scene builder did not create any meshes.")
@@ -191,6 +195,7 @@ def _run_definition_import_impl(
     write_max: bool,
     write_ase: bool,
     write_3dp: bool,
+    game: str = "jo",
 ) -> tuple[list[str], str]:
     _require_output(write_max=write_max, write_ase=write_ase, write_3dp=write_3dp)
     built, written, project_dir = execute_definition_import(
@@ -213,6 +218,7 @@ def _run_definition_import_impl(
         import_occlusion=import_occlusion,
         import_lights=import_lights,
         output_stem=output_stem,
+        game=game,
     )
     if not built:
         raise RuntimeError("3ds Max scene builder did not create any meshes.")

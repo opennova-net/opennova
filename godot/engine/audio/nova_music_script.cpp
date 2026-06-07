@@ -1,9 +1,11 @@
 // MUS interactive-music script wrapper. The underlying parser is libs/mus
-// (mus_open_memory). Witnessed: dfvas!AudioVM_LoadScriptFile @ 0x00557A60.
+// (mus_open_memory). Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
 
 #include "nova_music_script.h"
 
 #include "nova_sbf_bank.h"
+
+#include "mus/ast.h"
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -37,8 +39,12 @@ void NovaMusicScript::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_intrinsic_names"), &NovaMusicScript::get_intrinsic_names);
 	ClassDB::bind_method(D_METHOD("get_decompiled_text", "script_name"), &NovaMusicScript::get_decompiled_text);
 	ClassDB::bind_method(D_METHOD("get_decompiled_text_with_bank", "script_name", "bank"), &NovaMusicScript::get_decompiled_text_with_bank);
+	ClassDB::bind_method(D_METHOD("get_section_model", "script_name"), &NovaMusicScript::get_section_model);
+	ClassDB::bind_method(D_METHOD("get_program_ast", "script_name"), &NovaMusicScript::get_program_ast);
+	ClassDB::bind_method(D_METHOD("get_annotated_decompile", "script_name"), &NovaMusicScript::get_annotated_decompile);
 	ClassDB::bind_method(D_METHOD("compile_text", "text"), &NovaMusicScript::compile_text);
 	ClassDB::bind_method(D_METHOD("set_compiled_bytecode", "bytecode"), &NovaMusicScript::set_compiled_bytecode);
+	ClassDB::bind_method(D_METHOD("set_compiled_file_bytes", "file_bytes"), &NovaMusicScript::set_compiled_file_bytes);
 	ClassDB::bind_method(D_METHOD("load_from_decrypted_bytes", "bytes", "source"),
 			&NovaMusicScript::load_from_decrypted_bytes);
 	ClassDB::bind_method(D_METHOD("get_raw_file_bytes"), &NovaMusicScript::get_raw_file_bytes);
@@ -191,6 +197,7 @@ Dictionary NovaMusicScript::compile_text(const String &p_text) {
 	Dictionary out;
 	out["rc"] = -1;
 	out["bytecode"] = PackedByteArray();
+	out["file_bytes"] = PackedByteArray();
 	out["err_line"] = 0;
 	out["err_col"] = 0;
 	out["err_msg"] = String();
@@ -209,20 +216,35 @@ Dictionary NovaMusicScript::compile_text(const String &p_text) {
 		return out;
 	}
 
-	// Phase F4 ships the simpler path: hand back raw chunk bytes (script.code,
-	// length script.code_size). The companion set_compiled_bytecode() splices
-	// these into the existing MusFile in place; no need to round-trip through
-	// mus_encode_file at compile time.
+	// Keep the legacy raw-code field for narrow tests, but also encode the full
+	// SCR0/MU01 file so editor runs can replace script name, section table,
+	// debug names, locals frame offset, and bytecode together.
 	PackedByteArray bytecode;
 	if (script.code != nullptr && script.code_size > 0) {
 		bytecode.resize((int)script.code_size);
 		std::memcpy(bytecode.ptrw(), script.code, script.code_size);
 	}
 
+	PackedByteArray file_bytes;
+	const MusScript *scripts[1] = { &script };
+	uint8_t *encoded = nullptr;
+	size_t encoded_size = 0;
+	rc = mus_encode_file(scripts, 1, &encoded, &encoded_size);
+	if (rc != 0 || encoded == nullptr) {
+		mus_script_free(&script);
+		out["rc"] = rc != 0 ? rc : -1;
+		out["err_msg"] = String("encode failed");
+		return out;
+	}
+	file_bytes.resize((int)encoded_size);
+	std::memcpy(file_bytes.ptrw(), encoded, encoded_size);
+	mus_free(encoded);
+
 	mus_script_free(&script);
 
 	out["rc"] = 0;
 	out["bytecode"] = bytecode;
+	out["file_bytes"] = file_bytes;
 	return out;
 }
 
@@ -269,6 +291,14 @@ void NovaMusicScript::set_compiled_bytecode(const PackedByteArray &p_bytecode) {
 	std::memcpy(fresh.ptrw(), out_buf, out_size);
 	mus_free(out_buf);
 	_file_bytes = fresh;
+}
+
+void NovaMusicScript::set_compiled_file_bytes(const PackedByteArray &p_file_bytes) {
+	if (p_file_bytes.size() <= 0) {
+		return;
+	}
+	String keep_source = source_path;
+	load_from_decrypted_bytes(p_file_bytes, keep_source);
 }
 
 String NovaMusicScript::get_decompiled_text(const StringName &p_script_name) {
@@ -338,4 +368,250 @@ String NovaMusicScript::get_decompiled_text_with_bank(const StringName &p_script
 		return String();
 	}
 	return String::utf8(buf.data(), written);
+}
+
+Array NovaMusicScript::get_section_model(const StringName &p_script_name) const {
+	Array out;
+	if (!_opened) {
+		return out;
+	}
+	const MusScript *s = raw_script(String(p_script_name));
+	if (s == nullptr) {
+		return out;
+	}
+	MusModel model;
+	if (mus_build_section_model(s, &model) != 0) {
+		return out;
+	}
+	for (uint32_t i = 0; i < model.section_count; ++i) {
+		const MusSectionInfo &si = model.sections[i];
+		Dictionary d;
+		char sec_buf[MUS_SECTION_NAME_SIZE + 1] = { 0 };
+		if (si.section_index < s->section_count) {
+			std::memcpy(sec_buf, s->sections[si.section_index].name, MUS_SECTION_NAME_SIZE);
+		}
+		d["name"] = String(sec_buf);
+		d["index"] = (int64_t)si.section_index;
+		d["is_entry"] = (bool)si.is_entry;
+		d["is_idle_loop"] = (bool)si.is_idle_loop;
+
+		Array edges;
+		for (uint32_t e = 0; e < si.edge_count; ++e) {
+			Dictionary ed;
+			uint32_t to = si.edges[e].to_section_index;
+			ed["to"] = (int64_t)to;
+			char to_buf[MUS_SECTION_NAME_SIZE + 1] = { 0 };
+			if (to < s->section_count) {
+				std::memcpy(to_buf, s->sections[to].name, MUS_SECTION_NAME_SIZE);
+			}
+			ed["to_name"] = String(to_buf);
+			ed["kind"] = (int64_t)si.edges[e].kind;
+			edges.append(ed);
+		}
+		d["edges"] = edges;
+
+		Array plays;
+		for (uint32_t p = 0; p < si.play_count; ++p) {
+			Dictionary pd;
+			pd["track"] = (int64_t)si.plays[p].track_index;
+			pd["wait"] = (bool)si.plays[p].wait;
+			plays.append(pd);
+		}
+		d["plays"] = plays;
+
+		out.append(d);
+	}
+	mus_model_free(&model);
+	return out;
+}
+
+// ---- Structured statement tree (Phase 1, visual-first) ----
+
+static const char *ast_kind_name(int kind) {
+	switch (kind) {
+		case MUS_AST_PLAY: return "play";
+		case MUS_AST_TRANSITION: return "transition";
+		case MUS_AST_GOTO: return "goto";
+		case MUS_AST_CALL: return "call";
+		case MUS_AST_RETURN: return "return";
+		case MUS_AST_YIELD: return "yield";
+		case MUS_AST_NOP: return "nop";
+		case MUS_AST_DONE: return "done";
+		case MUS_AST_ASSIGN: return "assign";
+		case MUS_AST_INCDEC: return "incdec";
+		case MUS_AST_EXPR: return "expr";
+		case MUS_AST_IF: return "if";
+		case MUS_AST_SWITCH: return "switch";
+		case MUS_AST_BRANCH_COMMENT: return "branch_comment";
+		case MUS_AST_FRAME_ENTER: return "frame_enter";
+		default: return "unknown";
+	}
+}
+
+static const char *ast_switch_action_name(int inner_op) {
+	if (inner_op == 0x3D || inner_op == 0x3E) return "play";
+	if (inner_op == 0x30) return "goto";
+	return "enter"; // 0x3B and default
+}
+
+static Array ast_stmts_to_array(const MusAstProgram *prog, const MusAstStmt *stmts, uint32_t count);
+
+// Resolve a section index to its name via the program's section table, or "".
+static String ast_section_name(const MusAstProgram *prog, int idx) {
+	if (prog != nullptr && idx >= 0 && (uint32_t)idx < prog->section_count) {
+		return String(prog->sections[idx].name);
+	}
+	return String();
+}
+
+static Dictionary ast_stmt_to_dict(const MusAstProgram *prog, const MusAstStmt &s) {
+	Dictionary d;
+	d["kind"] = String(ast_kind_name(s.kind));
+	d["code_offset"] = (int64_t)s.code_offset;
+	d["byte_size"] = (int64_t)s.byte_size;
+	d["text"] = String(s.text ? s.text : "");
+	switch (s.kind) {
+		case MUS_AST_PLAY:
+			d["track"] = (int64_t)s.track_index;
+			d["wait"] = (bool)s.wait;
+			break;
+		case MUS_AST_TRANSITION:
+		case MUS_AST_GOTO:
+		case MUS_AST_CALL:
+			d["target_section"] = (int64_t)s.target_section;
+			d["target_name"] = ast_section_name(prog, s.target_section);
+			break;
+		case MUS_AST_ASSIGN:
+			d["var_name"] = String(s.var_name ? s.var_name : "");
+			d["var_offset"] = (int64_t)s.var_offset;
+			d["is_local"] = (bool)s.is_local;
+			d["rhs"] = String(s.rhs_text ? s.rhs_text : "");
+			d["has_call"] = (bool)s.has_call;
+			d["call_name"] = String(s.call_name ? s.call_name : "");
+			break;
+		case MUS_AST_INCDEC:
+			d["var_name"] = String(s.var_name ? s.var_name : "");
+			d["var_offset"] = (int64_t)s.var_offset;
+			d["is_local"] = (bool)s.is_local;
+			d["is_inc"] = (bool)s.is_inc;
+			break;
+		case MUS_AST_EXPR:
+			d["expr"] = String(s.expr_text ? s.expr_text : "");
+			d["has_call"] = (bool)s.has_call;
+			d["call_name"] = String(s.call_name ? s.call_name : "");
+			break;
+		case MUS_AST_BRANCH_COMMENT:
+			d["expr"] = String(s.expr_text ? s.expr_text : "");
+			d["target_section"] = (int64_t)s.target_section;
+			break;
+		case MUS_AST_FRAME_ENTER:
+			// Frame setup (0x38): read-only annotation. Carry the locals dword
+			// count; deliberately NO target_section/target_name (it is not a
+			// transition, so the editor must not offer to navigate/edit it).
+			d["locals_count"] = (int64_t)s.var_offset;
+			break;
+		case MUS_AST_IF:
+			d["expr"] = String(s.expr_text ? s.expr_text : "");
+			d["then"] = ast_stmts_to_array(prog, s.then_body, s.then_count);
+			// else_body non-NULL marks an if/else (the else block exists even when empty).
+			d["else_present"] = (bool)(s.else_body != nullptr);
+			d["else"] = ast_stmts_to_array(prog, s.else_body, s.else_count);
+			break;
+		case MUS_AST_SWITCH: {
+			d["expr"] = String(s.expr_text ? s.expr_text : "");
+			d["action"] = String(ast_switch_action_name(s.switch_action));
+			Array targets;
+			for (uint32_t t = 0; t < s.target_count; ++t) {
+				Dictionary td;
+				td["name"] = String(s.targets[t].name);
+				td["section"] = (int64_t)s.targets[t].section_index;
+				td["track"] = (int64_t)s.targets[t].track_index;
+				targets.append(td);
+			}
+			d["targets"] = targets;
+			break;
+		}
+		default:
+			break;
+	}
+	return d;
+}
+
+static Array ast_stmts_to_array(const MusAstProgram *prog, const MusAstStmt *stmts, uint32_t count) {
+	Array out;
+	for (uint32_t i = 0; i < count; ++i) {
+		out.append(ast_stmt_to_dict(prog, stmts[i]));
+	}
+	return out;
+}
+
+Array NovaMusicScript::get_program_ast(const StringName &p_script_name) const {
+	Array out;
+	if (!_opened) {
+		return out;
+	}
+	const MusScript *s = raw_script(String(p_script_name));
+	if (s == nullptr) {
+		return out;
+	}
+	MusAstProgram *prog = mus_parse_to_ast(s);
+	if (prog == nullptr) {
+		return out;
+	}
+	for (uint32_t i = 0; i < prog->section_count; ++i) {
+		const MusAstSection &sec = prog->sections[i];
+		Dictionary d;
+		d["name"] = String(sec.name);
+		d["index"] = (int64_t)sec.section_index;
+		d["is_entry"] = (bool)sec.is_entry;
+		d["code_offset"] = (int64_t)sec.code_offset;
+		d["statements"] = ast_stmts_to_array(prog, sec.statements, sec.statement_count);
+		out.append(d);
+	}
+	mus_program_free(prog);
+	return out;
+}
+
+Dictionary NovaMusicScript::get_annotated_decompile(const StringName &p_script_name) const {
+	Dictionary out;
+	out["text"] = String();
+	out["rows"] = Array();
+	if (!_opened) {
+		return out;
+	}
+	const MusScript *s = raw_script(String(p_script_name));
+	if (s == nullptr) {
+		return out;
+	}
+	MusAstProgram *prog = mus_parse_to_ast(s);
+	if (prog == nullptr) {
+		return out;
+	}
+	char *text = nullptr;
+	MusStmtLineSpan *spans = nullptr;
+	uint32_t span_count = 0;
+	// Names-less spans: the editor's write path operates on the names-less
+	// decompile (the proven round-trip), so the line spans must index that text.
+	int rc = mus_ast_emit_text_spans(prog, nullptr, 0, &text, &spans, &span_count);
+	if (rc == 0) {
+		if (text != nullptr) {
+			out["text"] = String::utf8(text);
+		}
+		Array rows;
+		for (uint32_t i = 0; i < span_count; ++i) {
+			Dictionary r;
+			r["section_index"] = (int64_t)spans[i].section_index;
+			r["ordinal"] = (int64_t)spans[i].ordinal;
+			r["code_offset"] = (int64_t)spans[i].code_offset;
+			r["kind"] = (int64_t)spans[i].kind;
+			r["line_start"] = (int64_t)spans[i].line_start;
+			r["line_end"] = (int64_t)spans[i].line_end;
+			rows.append(r);
+		}
+		out["rows"] = rows;
+	}
+	mus_free(text);
+	mus_free(spans);
+	mus_program_free(prog);
+	return out;
 }

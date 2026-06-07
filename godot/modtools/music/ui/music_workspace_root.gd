@@ -1,33 +1,37 @@
 class_name MusicWorkspaceRoot
 extends Control
 
-# Holds three mode sub-scenes, only one visible at a time. The workspace
-# adapter sets the active mode via set_active_workflow.
+# The unified Music screen. The legacy Bank panel is instanced WHOLE inside
+# live_mode.tscn (Tracks docks around the live-lit section map), so its standalone
+# tests keep passing untouched. This root just wraps that screen and fans the shared
+# document out to every panel. The blueprint graph is the sole authoring surface;
+# the old right-dock inspector and the raw-script drawer are gone.
+#
+# Bank lives nested inside the embedded Live screen, so panel lookups go through
+# find_child (recursive, owner-agnostic) instead of a direct-child get_node.
 
-var _document: RefCounted   # MusicEditorDocument (loose-typed; defined in Phase B)
-var _active_workflow: int = 0  # MusicEditorWorkspace.Workflow.BANK
+signal workflow_requested(workflow_id: int)
+
+var _document: RefCounted   # MusicEditorDocument
 
 
 func bind_document(document: RefCounted) -> void:
 	_document = document
-	# Forward to each mode panel that knows how to bind. Phase C wires Bank;
-	# Script and Live land in later phases.
-	var names := ["Bank", "Script", "Live"]
-	for n in names:
-		var node := get_node_or_null(n)
+	for n in ["Bank", "Live"]:
+		var node := get_panel(n)
 		if node != null and node.has_method("bind_document"):
 			node.bind_document(document)
 
 
-func set_active_workflow(workflow_id: int) -> void:
-	_active_workflow = workflow_id
-	_refresh_visibility()
+# Recursive, owner-agnostic lookup. Bank is nested inside the embedded Live screen,
+# so a plain get_node("Bank") (direct child only) misses it; find_child walks into
+# the instanced sub-scene.
+func get_panel(panel_name: String) -> Node:
+	return find_child(panel_name, true, false)
 
 
-func _refresh_visibility() -> void:
-	# Each child mode panel is named "Bank", "Script", "Live".
-	var names := ["Bank", "Script", "Live"]
-	for i in range(names.size()):
-		var node := get_node_or_null(names[i])
-		if node and node is Control:
-			(node as Control).visible = (i == _active_workflow)
+# Single-screen: the workflows are coexisting docks, not mutually-exclusive panels,
+# so there is nothing to show/hide. Kept as a no-op for the workspace adapter's
+# set_active_workflow call.
+func set_active_workflow(_workflow_id: int) -> void:
+	pass

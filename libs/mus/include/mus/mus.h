@@ -4,9 +4,9 @@
 /* MUS (interactive-music script) container reader.
 
    SCR0 file header parser witnessed at
-       dfvas!AudioVM_LoadScriptFile @ 0x00557A60
-   MU01 chunk relocator at
-       dfvas!AudioVM_RelocateChunk @ 0x00557BA0 */
+       Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20
+   MU01 chunk pointer fixup at
+       Jointops.exe!AudioVM_FixupPointers @ 0x00672470 */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -25,8 +25,10 @@ extern "C" {
 
 /* --- On-disk structs --- */
 
-/* SCR0 file-level header. Witnessed: dfvas!AudioVM_LoadScriptFile @ 0x00557A60.
-   Field offsets confirmed against the relocation pattern at 0x557af3..0x557b3d. */
+/* SCR0 file-level header. Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
+   Field offsets confirmed against the load+relocation loop in that function: magic
+   compare vs 'SCR0' 0x30524353, chunk-table ptr relocate at +0x0C, name string-blob
+   and resolve-table relocate at +0x14/+0x18 (each resolved via AudioVM_FindContextByName). */
 typedef struct MusFileHeader {
     uint32_t magic;                       /* 'SCR0' */
     uint32_t version;                     /* 0x00000100; not read by engine */
@@ -38,8 +40,8 @@ typedef struct MusFileHeader {
     uint32_t reserved[4];                 /* 16 bytes; never read by engine */
 } MusFileHeader;
 
-/* MU01 chunk header. Witnessed: dfvas!AudioVM_RelocateChunk @ 0x00557BA0
-   plus dfvas!AudioVM_ScriptInstanceInit @ 0x00557C70. */
+/* MU01 chunk header. Witnessed: Jointops.exe!AudioVM_FixupPointers @ 0x00672470
+   plus Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20. */
 typedef struct MusChunkHeader {
     uint32_t tag;                         /* 'MU01'; never validated at runtime */
     uint32_t version;                     /* 0x00000100; not read */
@@ -72,7 +74,7 @@ static_assert(sizeof(MusChunkHeader) == 72, "MusChunkHeader must be 72 bytes");
 
 typedef struct MusSection {
     char     name[MUS_SECTION_NAME_SIZE]; /* from debug export table or "Section_N" */
-    uint32_t code_offset;                 /* chunk-relative bytecode PC */
+    uint32_t code_offset;                 /* bytecode-relative PC after parse */
 } MusSection;
 
 /* Named global variable declared in the editor-only debug section. The runtime
@@ -91,6 +93,11 @@ typedef struct MusScript {
     uint32_t    entry_section_index;
     uint32_t    globals_size;             /* bytes */
     uint32_t    locals_size;              /* bytes */
+    /* Locals frame base used by the `enter` opcode: dst = LocalsBase + this.
+       Witnessed as instance[+0x3C] (the chunk's string_section_size field) in
+       AudioVM_Op_Enter @ 0x672C20; MDEdit invariantly emits 0x20. Parsed from
+       the chunk; the compiler defaults it to 0x20. 0 is treated as 0x20. */
+    uint32_t    locals_frame_offset;
 
     /* Editor debug info (string_section / aux tables in the chunk). Empty when
        the chunk was stripped. Witnessed: editor MDEdit writes a 256-byte source
@@ -183,13 +190,69 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
 /* Free a buffer returned by `mus_encode_file`. */
 void mus_free(void *p);
 
+/* --- Structural section model (editor-facing, read-only) ---
+
+   A per-section, opcode-level view of a script for editor surfaces (the section
+   map / state-machine view and structured editors). Built from the SAME decoded
+   instruction stream the decompiler uses (mus_decode.h), but reading the OPCODE
+   so it distinguishes the real state transition `setstate` (0x3B, witnessed
+   Jointops.exe!VmOp_SetState @ 0x672C70: seeks pc to the target section + fires
+   on_section_entered) from the frame-setup `enter` (0x38, VmOp_Enter @ 0x672C20:
+   pops N dwords into locals, does NOT change section) -- a distinction the
+   decompiled TEXT collapses (both print `enter`). Read-only: builds nothing into
+   the bytecode and is independent of the round-trip compile path. Every
+   instruction is bound to exactly one owning section by code offset (the section
+   with the greatest code_offset <= the instruction's offset), so tail code that
+   the text decompiler leaks past a `done` is still attributed to its section. */
+
+typedef enum MusEdgeKind {
+    MUS_EDGE_TRANSITION = 0,  /* setstate 0x3B: unconditional move to a section */
+    MUS_EDGE_SWITCH     = 1,  /* tablexec 0x35 entry: one branch of a switch */
+    MUS_EDGE_BRANCH     = 2,  /* goto/brfalse/brtrue whose target is a section entry */
+} MusEdgeKind;
+
+typedef struct MusSectionEdge {
+    uint32_t to_section_index;  /* index into script->sections */
+    int      kind;              /* MusEdgeKind */
+} MusSectionEdge;
+
+typedef struct MusSectionPlay {
+    uint32_t track_index;       /* SBF bank entry index from the play/playw operand */
+    int      wait;              /* 1 for playw (0x3D), 0 for play (0x3E) */
+} MusSectionPlay;
+
+typedef struct MusSectionInfo {
+    uint32_t        section_index;  /* index into script->sections */
+    int             is_entry;       /* == script->entry_section_index */
+    int             is_idle_loop;   /* has >=1 edge and every edge targets itself */
+    MusSectionEdge *edges;          /* outgoing edges, deduped by target (TRANSITION wins) */
+    uint32_t        edge_count;
+    MusSectionPlay *plays;          /* play/playw triggers, in code order */
+    uint32_t        play_count;
+} MusSectionInfo;
+
+typedef struct MusModel {
+    MusSectionInfo *sections;       /* section_count entries, parallel to script->sections */
+    uint32_t        section_count;
+} MusModel;
+
+/* Build the structural model for a script. Allocates buffers owned by `*out`;
+   release via mus_model_free. Returns 0 on success, negative on error (NULL
+   inputs). The caller retains ownership of `script`. */
+int mus_build_section_model(const MusScript *script, MusModel *out);
+
+/* Free all malloc'd buffers held by `model` and zero it. Idempotent. */
+void mus_model_free(MusModel *model);
+
 /* --- VM (interpreter) ---
 
-   Witnessed: dfvas!AudioVM_DispatchLoop @ 0x00557FA0 (32-instruction budget,
-   65-entry dispatch table at dfvas!0x0064CB9C, two stacks: data EBP-tracked
-   and call EDI-tracked). 8 of 11 intrinsics bound: GEcho, GGRnd, GSV, GSDV,
-   GFB, FSet, FClear, FIsSet (FIsClear, TStart, TStop are NULL handlers that
-   silently no-op + push 0). */
+   Witnessed: Jointops.exe!AudioVM_DispatchLoop @ 0x00672720 (32-instruction budget,
+   65-entry dispatch table at Jointops.exe!0x0084F220, two stacks: data EBP-tracked
+   and call EDI-tracked). The intrinsic name table @ 0x84F0C8 has 9 entries, ALL
+   bound: GEcho, GGRnd, GSV, GSDV, GFB, FSet, FClear, FIsSet, FIsClear
+   (@ 0x6720C0/0x672320/0x6720E0/0x672120/0x672150/0x672360/0x672380/0x6723A0/0x6723C0).
+   TStart/TStop from the canonical MDEdit set do NOT exist in this build; method
+   indices >= 9 resolve to a NULL handler that no-ops + pushes 0. */
 
 typedef struct MusVM MusVM;
 typedef enum MusVMState {
@@ -202,26 +265,26 @@ typedef enum MusVMState {
 
 /* Host-supplied callbacks. All take a void* user pointer the host registered
    with `mus_vm_set_hooks`. Any callback may be NULL, in which case the VM
-   silently elides the call. Hook signatures match the witnessed dfvas
+   silently elides the call. Hook signatures match the witnessed Jointops.exe
    side-effects (Phase A revisions, see spec §"libs/mus C API"). */
 typedef struct MusVMHooks {
     void *user;
-    /* Witnessed: dfvas!VmOp_Play @ 0x558520 (0x3E, 1B index)
-       and       dfvas!VmOp_PlayWait @ 0x558500 (0x3D, 2B index).
+    /* Witnessed: Jointops.exe!VmOp_Play @ 0x672CB0 (0x3E, 1B index)
+       and       Jointops.exe!VmOp_PlayWait @ 0x672C90 (0x3D, 2B index).
        wait=1 for playw (0x3D), 0 for play (0x3E). */
     void (*on_play_sound)     (void *user, uint32_t sbf_entry_index, int wait);
     /* Fired when execution enters a section (via setstate or
-       mus_vm_jump_to_section). Witnessed: dfvas!VmOp_SetState @ 0x5584E0. */
+       mus_vm_jump_to_section). Witnessed: Jointops.exe!VmOp_SetState @ 0x672C70. */
     void (*on_section_entered)(void *user, const char *section_name);
     /* Fired by pop_g (0x08), GSV, GSDV intrinsics whenever a global var slot
        is written. var_index is the byte offset / 4 (Var00..Var15 fit indices
        0..15; user globals at index 16+). */
     void (*on_var_changed)    (void *user, uint8_t var_index, int32_t new_value);
     /* GEcho intrinsic: pops 1 arg, fires this hook with the int32 value.
-       Witnessed: dfvas!Intrinsic_GEcho @ 0x557890. */
+       Witnessed: Jointops.exe!Intrinsic_GEcho @ 0x6720C0. */
     void (*on_echo)           (void *user, int32_t arg);
     /* GSV / GSDV set master / right-channel volumes in 16.16 fixed point.
-       Witnessed: dfvas!Intrinsic_GSV @ 0x5578B0, GSDV @ 0x5578F0. */
+       Witnessed: Jointops.exe!Intrinsic_GSV @ 0x6720E0, GSDV @ 0x672120. */
     void (*on_volume_changed) (void *user, int32_t left_16_16, int32_t right_16_16);
 } MusVMHooks;
 
@@ -252,12 +315,12 @@ void mus_vm_stop  (MusVM *vm);
 void mus_vm_pause (MusVM *vm);
 void mus_vm_resume(MusVM *vm);
 
-/* Advance bytecode for up to one tick. Runs the dispatch loop until any of
-   the witnessed halt conditions fire (play/playw/done/setstate, 32-instruction
-   budget exhaustion, pc out of bounds, error). dt_ms is currently informational
-   (returned to the host) and reserved for future timer support; the budget is
-   per-call, not time-based. Returns the dt_ms argument on success, 0 if the VM
-   is not RUNNING. */
+/* Advance bytecode for one VM tick. The witnessed dispatch loop spends a
+   32-instruction budget, then continues only while the data stack is not
+   drained; halt opcodes (play/playw/done/setstate), pc out of bounds, and
+   errors still stop earlier. dt_ms is currently informational (returned to
+   the host) and reserved for future timer support. Returns the dt_ms argument
+   on success, 0 if the VM is not RUNNING. */
 int mus_vm_tick(MusVM *vm, uint32_t dt_ms);
 
 /* State accessors. */
