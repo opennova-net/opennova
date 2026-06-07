@@ -50,6 +50,44 @@ int main() {
 		TEST_EXPECT(slot.kind == MissionParamKind::Raw);
 	}
 
+	// AI-change actions are sub-type-aware: PLAYPARTANIM exposes target / ANIMNUM / ANIMPLAYTYPE / ANIMTIME.
+	const MissionParamSpec play_anim = action_param_schema(
+		static_cast<int>(opennova::bms::ActionType::ChangeSingleAI),
+		static_cast<int>(opennova::bms::AIActionSubType::PlayPartAnim));
+	TEST_EXPECT(play_anim.known);
+	TEST_EXPECT(play_anim.params[0].kind == MissionParamKind::Entity);       // target unit (param1)
+	TEST_EXPECT(play_anim.params[1].kind == MissionParamKind::Raw);          // ANIMNUM = part channel (1/2)
+	TEST_EXPECT(play_anim.params[2].kind == MissionParamKind::Enum);         // ANIMPLAYTYPE
+	TEST_EXPECT(play_anim.params[2].enum_values.size() == 3);                // Play / Stop / Reverse
+	TEST_EXPECT(play_anim.params[3].kind == MissionParamKind::FixedSeconds); // ANIMTIME
+	for (const MissionParamSlot &slot : play_anim.params) {
+		TEST_EXPECT(slot.used);
+	}
+
+	// A single-slot sub-type (ACCURACY) leaves param3/4 unused; the target stays a Group.
+	const MissionParamSpec group_accuracy = action_param_schema(
+		static_cast<int>(opennova::bms::ActionType::ChangeGroupAI),
+		static_cast<int>(opennova::bms::AIActionSubType::Accuracy));
+	TEST_EXPECT(group_accuracy.known);
+	TEST_EXPECT(group_accuracy.params[0].kind == MissionParamKind::Group);
+	TEST_EXPECT(group_accuracy.params[1].used);
+	TEST_EXPECT(!group_accuracy.params[2].used);
+
+	// AISETSTATE is an enum of the five FSM states.
+	const MissionParamSpec set_state = action_param_schema(
+		static_cast<int>(opennova::bms::ActionType::ChangeSingleAI),
+		static_cast<int>(opennova::bms::AIActionSubType::AiSetState));
+	TEST_EXPECT(set_state.params[1].kind == MissionParamKind::Enum);
+	TEST_EXPECT(set_state.params[1].enum_values.size() == 5);
+
+	// AREA_AI_RED was previously unmodelled (raw fallthrough); it now resolves to a Zone target + sub-type slots.
+	const MissionParamSpec area_ai = action_param_schema(
+		static_cast<int>(opennova::bms::ActionType::AreaAiRed),
+		static_cast<int>(opennova::bms::AIActionSubType::BlindBit));
+	TEST_EXPECT(area_ai.known);
+	TEST_EXPECT(area_ai.params[0].kind == MissionParamKind::Zone);
+	TEST_EXPECT(area_ai.params[1].kind == MissionParamKind::Bool);
+
 	const MissionParamSpec event_trigger = trigger_param_schema(static_cast<int>(opennova::bms::TriggerMainType::Event), 123);
 	TEST_EXPECT(event_trigger.known);
 	TEST_EXPECT(event_trigger.params[0].kind == MissionParamKind::Event);

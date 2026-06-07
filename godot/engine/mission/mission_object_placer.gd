@@ -156,11 +156,18 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			entity.get("position", Vector3.ZERO),
 			entity.get("rotation_deg", Vector3.ZERO))
 		if _is_animated(item_id):
-			var a := { "graphic": graphic, "xform": xform }
-			if edit_mode:
-				a["kind"] = int(entity.get("kind", -1))
-				a["index"] = int(entity.get("index", -1))
-			animated.append(a)
+			# Always capture identity (not just edit_mode): the runtime needs it to tag the node so
+			# MissionEntityRegistry can resolve SSN/group/zone host-action targets to this live model.
+			animated.append({
+				"graphic": graphic,
+				"xform": xform,
+				"kind": int(entity.get("kind", -1)),
+				"index": int(entity.get("index", -1)),
+				"bms_id": int(entity.get("bms_id", 0)),
+				"group": int(entity.get("group", -1)),
+				"team": int(entity.get("team", -1)),
+				"position": entity.get("position", Vector3.ZERO),
+			})
 		else:
 			if not static_by_graphic.has(graphic):
 				static_by_graphic[graphic] = []
@@ -224,9 +231,19 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		# Drive the build explicitly (not via _ready) so it is independent of when
 		# place() runs relative to the main loop; matches the static template path.
 		model.set_object_data(data)
+		# Tag identity on the node in BOTH runtime + editor so MissionEntityRegistry can resolve
+		# SSN/group/zone host-action targets (e.g. PLAYPARTANIM) back to this live model. Picking +
+		# colliders stay editor-only.
+		var ref := {
+			"kind": int(a.get("kind", -1)),
+			"index": int(a.get("index", -1)),
+			"bms_id": int(a.get("bms_id", 0)),
+			"group": int(a.get("group", -1)),
+			"team": int(a.get("team", -1)),
+			"position": a.get("position", Vector3.ZERO),
+		}
+		model.set_meta("entity_ref", ref)
 		if edit_mode:
-			var ref := { "kind": int(a.get("kind", -1)), "index": int(a.get("index", -1)) }
-			model.set_meta("entity_ref", ref)
 			pickable_records.append({
 				"kind": ref["kind"],
 				"index": ref["index"],
@@ -282,7 +299,14 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
 		model.set_object_data(data)
-		var ref := { "kind": kind, "index": index }
+		var ref := {
+			"kind": kind,
+			"index": index,
+			"bms_id": int(entity.get("bms_id", 0)),
+			"group": int(entity.get("group", -1)),
+			"team": int(entity.get("team", -1)),
+			"position": entity.get("position", Vector3.ZERO),
+		}
 		model.set_meta("entity_ref", ref)
 		pickable_records.append({
 			"kind": kind,

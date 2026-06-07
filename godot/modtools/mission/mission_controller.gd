@@ -27,8 +27,17 @@ const MissionWaypointOverlay := preload("res://engine/mission/mission_waypoint_o
 const MissionAreaTriggerOverlay := preload("res://engine/mission/mission_area_trigger_overlay.gd")
 const MissionMarkerOverlay := preload("res://engine/mission/mission_marker_overlay.gd")
 const MissionGizmo := preload("res://engine/mission/mission_gizmo.gd")
+const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
 const OBJECTS_CONTAINER := "MissionObjects"
+
+# AI-change action family + the PLAYPARTANIM sub-type, for resolving a scripting action's target to a
+# live model for in-editor preview. Mirrors MissionCommandHost. [orig: Entity_ApplyCommand case 0x22]
+const _ACT_CHANGE_GROUP_AI := 3
+const _ACT_AREA_AI_RED := 12
+const _ACT_AREA_AI_BLUE := 13
+const _ACT_CHANGE_SINGLE_AI := 21
+const _AI_SUB_PLAYPARTANIM := 34
 
 # Editing modes. The viewport + inspector follow the active mode; they are mutually exclusive
 # (entering one drops every other's selection + armed tool). OBJECTS is the default (P1-P5
@@ -112,6 +121,12 @@ var _selected_node: Node3D
 var _selected_node_offset: Transform3D = Transform3D.IDENTITY
 var _selected_xform: Transform3D = Transform3D.IDENTITY
 var _selected_rotation_deg: Vector3 = Vector3.ZERO
+# In-editor PLAYPARTANIM preview: the model node currently being previewed (or null), plus a registry
+# (cached, rebuilt when the entity set changes via _membership_rev) to resolve a scripting action's
+# target SSN/group/zone to its live model -- the same MissionEntityRegistry the runtime host uses.
+var _preview_node: Node3D
+var _preview_registry
+var _preview_registry_rev: int = -1
 # Drag session: _drag_active spans press..release; _drag_moved gates the commit so a
 # plain click only selects.
 var _drag_active: bool = false
@@ -1202,6 +1217,7 @@ func _pick_entity(mouse_pos: Vector2) -> Dictionary:
 
 
 func _select(kind: int, index: int) -> void:
+	stop_preview()
 	_selected_ref = { "kind": kind, "index": index }
 	_selected_records = []
 	_selected_node = null
@@ -1245,6 +1261,7 @@ func _select(kind: int, index: int) -> void:
 
 
 func _deselect() -> void:
+	stop_preview()
 	if _selected_ref.is_empty():
 		return
 	_selected_ref = {}
@@ -1259,6 +1276,85 @@ func _deselect() -> void:
 	if _marker_overlay != null and is_instance_valid(_marker_overlay):
 		_marker_overlay.set_selected_marker(-1)
 	changed.emit()
+
+
+# --- In-editor PLAYPARTANIM preview -------------------------------------------
+# Play a scripting PLAYPARTANIM action's part animation on its target model in the editor viewport so an
+# author can see the motion without launching the game. Reuses the runtime path: it resolves the action's
+# target (SSN / group / zone) through the same MissionEntityRegistry the host uses, then drives
+# NovaObjectModel.restart_part_anim (a clean-from-rest variant of the runtime play_part_anim). The placed
+# model already _process-ticks in the viewport, so the sweep animates live.
+
+# Registry over the placed (edit-mode) container, rebuilt only when the entity set changes.
+func _get_preview_registry():
+	if _preview_registry == null or _preview_registry_rev != _membership_rev:
+		_preview_registry = MissionEntityRegistry.new()
+		_preview_registry.build(_objects_container(), _mission)
+		_preview_registry_rev = _membership_rev
+	return _preview_registry
+
+
+# Resolve a PLAYPARTANIM action to one live animatable model: its explicit target (param1) by
+# action_type, else an animated current selection, else null.
+func _resolve_part_anim_node(action: Dictionary) -> Node3D:
+	var registry = _get_preview_registry()
+	var target := int(action.get("param1", 0))
+	var nodes: Array = []
+	match int(action.get("action_type", -1)):
+		_ACT_CHANGE_SINGLE_AI:
+			var hit = registry.resolve_single(target)  # registry is untyped here; no := inference
+			if hit != null:
+				nodes = [hit]
+		_ACT_CHANGE_GROUP_AI:
+			nodes = registry.resolve_group(target)
+		_ACT_AREA_AI_RED, _ACT_AREA_AI_BLUE:
+			nodes = registry.resolve_zone(target)
+	for n in nodes:
+		if n != null and is_instance_valid(n) and n.has_method("play_part_anim"):
+			return n
+	# Fallback: an animated current selection (e.g. previewing while an object is selected).
+	if _selected_node != null and is_instance_valid(_selected_node) and _selected_node.has_method("play_part_anim"):
+		return _selected_node
+	return null
+
+
+## True when the given scripting action can be previewed (a target model resolves).
+func can_preview_part_anim(action: Dictionary) -> bool:
+	return not action.is_empty() and _resolve_part_anim_node(action) != null
+
+
+## Play the action's part animation on its target model (clean restart from rest). Returns false when no
+## target resolves. channel = param2, play_type = param3, time = param4 (16.16 seconds -> seconds).
+func preview_part_anim(action: Dictionary) -> bool:
+	var node := _resolve_part_anim_node(action)
+	if node == null:
+		return false
+	stop_preview()
+	_preview_node = node
+	var channel := int(action.get("param2", 0))
+	var play_type := int(action.get("param3", 0))
+	var time_s := float(int(action.get("param4", 0))) / 65536.0
+	if node.has_method("set_playing"):
+		node.set_playing(true)
+	if node.has_method("reset_animation_time"):
+		node.reset_animation_time()
+	if node.has_method("restart_part_anim"):
+		node.restart_part_anim(channel, play_type, time_s)
+	elif node.has_method("play_part_anim"):
+		node.play_part_anim(channel, play_type, time_s)
+	return true
+
+
+## Stop any running preview and return the previewed model to rest.
+func stop_preview() -> void:
+	if _preview_node != null and is_instance_valid(_preview_node):
+		if _preview_node.has_method("clear_part_anims"):
+			_preview_node.clear_part_anims()
+		if _preview_node.has_method("clear_ctrl_values"):
+			_preview_node.clear_ctrl_values()
+		if _preview_node.has_method("reset_animation_time"):
+			_preview_node.reset_animation_time()
+	_preview_node = null
 
 
 # Move the selected entity so its origin sits at a world-space ground point: keep the
@@ -1764,6 +1860,8 @@ func set_mode(mode: int) -> void:
 		return
 	_flush_edit()
 	_mode = mode
+	# A mode switch is a fresh context: stop any running part-animation preview.
+	stop_preview()
 	# Exclusive selection: clear the object selection refs + its box, the marker selection,
 	# the zone selection, and any armed placement tool.
 	_selected_ref = {}
@@ -2699,6 +2797,10 @@ func get_event_flag_bits() -> Array:
 	return _mission.get_event_flag_bits() if _mission != null else []
 
 
+func get_ai_flag_bits() -> Array:
+	return _mission.get_ai_flag_bits() if _mission != null else []
+
+
 # Focus an event by index (the inspector list drives this). Inert if unchanged.
 func select_event(index: int) -> void:
 	if index == _selected_event_index:
@@ -3056,6 +3158,7 @@ func _clear_hover() -> void:
 # objects container, so it is freed when the container is (re)built; here we only drop
 # the dangling ref.
 func _reset_selection_state() -> void:
+	stop_preview()
 	_selected_ref = {}
 	_selected_records = []
 	_selected_node = null

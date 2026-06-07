@@ -11,6 +11,8 @@ extends Node3D
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
+const MissionCommandHost := preload("res://engine/world/mission_command_host.gd")
 
 signal world_loaded()
 signal load_failed(reason: String)
@@ -40,6 +42,8 @@ var _mission_runtime: NovaMissionRuntime
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
 var _mission_audio: NovaMissionAudio
+var _entity_registry
+var _command_host
 
 
 func _ready() -> void:
@@ -125,6 +129,7 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 	_loaded_mission = mission
 	_place_mission_objects(mission)
 	_start_mission_runtime(mission)
+	_start_command_host(mission)
 	_start_mission_audio(mission, bms_name)
 	_loaded = true
 	world_loaded.emit()
@@ -190,6 +195,10 @@ func unload() -> void:
 	_mission_runtime = null
 	_mission_audio = null
 	_placer = null
+	if _command_host != null:
+		_command_host.queue_free()
+	_command_host = null
+	_entity_registry = null
 	_mission_stats = {}
 
 
@@ -282,6 +291,22 @@ func _start_mission_runtime(mission: NovaMissionData) -> void:
 	if not _mission_runtime.load_from_mission(mission):
 		_mission_runtime = null
 		push_warning("NovaWorld: failed to start mission runtime")
+
+
+# Build the entity registry from the placed MissionObjects and wire the command host onto the
+# mission_commands signal, so host-side actions (e.g. PLAYPARTANIM) reach their target models. The
+# runtime emits commands regardless; the host is simply their first consumer. No runtime -> nothing to do.
+func _start_command_host(mission: NovaMissionData) -> void:
+	if _mission_runtime == null:
+		return
+	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
+	_entity_registry = MissionEntityRegistry.new()
+	_entity_registry.build(container, mission)
+	_command_host = MissionCommandHost.new()
+	_command_host.name = "MissionCommandHost"
+	add_child(_command_host)
+	_command_host.setup(_entity_registry, mission)
+	_command_host.attach(self)
 
 
 # Place real ambient sounds at the mission's sound markers: load the co-named .LWF

@@ -16,6 +16,8 @@ var _option: OptionButton
 var _kind: int = SchemaScript.Kind.RAW
 var _items: Array = []  ## [{value:int, label:String}] for picker kinds; built by the inspector.
 var _default_label: String = "Param"  ## shown for raw/unmapped slots that the schema doesn't name
+var _spin_min: float = 0.0  ## raw-int spin bounds captured in setup(); restored for non-FIXED_SECONDS kinds
+var _spin_max: float = 0.0
 
 
 func setup(node_name: String, default_label: String, spin_min: float, spin_max: float) -> void:
@@ -25,11 +27,13 @@ func setup(node_name: String, default_label: String, spin_min: float, spin_max: 
 
 	_label = Label.new()
 	_label.clip_text = true
-	_label.custom_minimum_size = Vector2(76, 0)
+	_label.custom_minimum_size = Vector2(ObjectUiHelpers.LABEL_COL_WIDTH, 0)
 	add_child(_label)
 
 	_spin = SpinBox.new()
 	_spin.name = "Spin"
+	_spin_min = spin_min
+	_spin_max = spin_max
 	_spin.min_value = spin_min
 	_spin.max_value = spin_max
 	_spin.step = 1.0
@@ -61,6 +65,20 @@ func configure(slot: Dictionary, items: Array) -> void:
 	var picker := SchemaScript.is_picker(_kind)
 	_spin.visible = not picker
 	_option.visible = picker
+	# FIXED_SECONDS shows a seconds spin (the model stores raw 16.16 = seconds * 65536); every other
+	# kind uses the raw-int bounds captured in setup().
+	if _kind == SchemaScript.Kind.FIXED_SECONDS:
+		# The model stores raw 16.16 (= seconds * 65536). The original editor (Med_ParamAnimTime
+		# @0x449ff0) steps ANIMTIME by 256 raw units, so the seconds step is 256/65536; this keeps
+		# every value the original can produce exact through the seconds<->raw conversion (Range
+		# snaps the spin value to step, so a coarser/rounder step would not round-trip).
+		_spin.min_value = -32768.0
+		_spin.max_value = 32767.0
+		_spin.step = 256.0 / 65536.0
+	else:
+		_spin.min_value = _spin_min
+		_spin.max_value = _spin_max
+		_spin.step = 1.0
 
 
 # Sync the active control to a raw int. Focus-guarded for the spin so a programmatic refresh never clobbers a
@@ -83,14 +101,17 @@ func set_value(raw: int) -> void:
 			_option.set_item_id(_option.item_count - 1, raw)
 			_option.select(_option.item_count - 1)
 	else:
-		if not _spin.get_line_edit().has_focus() and _spin.value != float(raw):
-			_spin.value = float(raw)
+		var shown := (float(raw) / 65536.0) if _kind == SchemaScript.Kind.FIXED_SECONDS else float(raw)
+		if not _spin.get_line_edit().has_focus() and _spin.value != shown:
+			_spin.value = shown
 
 
 # Always returns the raw int, whichever control is active.
 func read_value() -> int:
 	if SchemaScript.is_picker(_kind):
 		return _option.get_selected_id()
+	if _kind == SchemaScript.Kind.FIXED_SECONDS:
+		return int(round(_spin.value * 65536.0))
 	return int(_spin.value)
 
 

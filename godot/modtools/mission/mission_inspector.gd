@@ -51,6 +51,9 @@ var _loading: bool = false
 var _identity_label: Label  # heading: the selected model's name (or kind + index)
 var _identity_sub: Label    # muted subline: kind + index, shown when a name resolved
 var _animated_note: Label
+var _behavior_flags_box: VBoxContainer  ## container for the AI-attribute checkboxes (built lazily)
+var _behavior_flag_checks: Array = []  ## [{ "bit": int, "check": CheckBox }]
+var _behavior_flag_syncing: bool = false
 var _pos_spins: Array = []  # [x, y, z]
 var _rot_spins: Array = []  # [pitch, yaw, roll]
 var _team_spin: SpinBox
@@ -270,6 +273,9 @@ var _sc_action_type: OptionButton
 var _sc_action_sub: OptionButton
 var _sc_action_desc: Label  # plain-language description of the selected action type
 var _sc_action_params: Array = []  # [p1, p2, p3, p4] MissionParamSlot
+var _sc_action_preview_row: HBoxContainer
+var _sc_action_preview: Button
+var _sc_action_preview_stop: Button
 var _sc_action_selected: int = -1
 var _sc_action_syncing: bool = false
 # The event index the trigger/action sub-selections currently belong to. The event-list click handler
@@ -281,6 +287,9 @@ var _sc_event_summary: Label  # "when <conditions> then <actions>" readout for t
 var _sc_diagnostics: Label
 # The event chain the panel was last populated from, so the sub-list handlers read the same data.
 var _sc_chain: Dictionary = {}
+# PLAYPARTANIM preview gate: the AI-change action family + the play-part-anim sub-type.
+const _AI_CHANGE_ACTION_TYPES := [3, 12, 13, 21]
+const _PLAYPARTANIM_SUB := 34
 
 
 # `detail_host` is the shell's right dock (%AssetDock), forwarded by the workspace adapter; the
@@ -578,9 +587,14 @@ func _build_behavior_section() -> void:
 
 	# Waypoint path (waypoint_id) is the bridge: it names which authored path a unit follows. A
 	# dropdown of the mission's real paths (None / each populated path), not a blind 0-127 number.
+	# waypoint_id is a fixed path NUMBER (0..127; 0 = None), not an index into the populated-path list. The
+	# dropdown lists only paths that have markers, so a unit pointed at an empty slot (common for units that
+	# man a gun / ride a vehicle and never path-follow) has no matching row; label that case as the real
+	# (empty) path slot rather than the generic "Value N".
 	_waypoint_option = _add_entity_option_row(_behavior_box, "waypoint_id", "Waypoint path",
-		"Which waypoint path this unit follows. Author paths in the Waypoints tab.",
-		func(): return _cached_waypoint_options)
+		"Which authored path this unit follows (0-127; 0 = None). Units manning a gun or riding a vehicle don't follow a path -- set None.",
+		func(): return _cached_waypoint_options,
+		func(v: int) -> String: return ("Path %d (no markers)" % v) if (v >= 1 and v <= 127) else ("Value %d" % v))
 	# The plain numeric rows + their section headings come from one ordered table (the field set +
 	# ranges live in MissionEntityFields, matching the libs/mission name->member map). The picker /
 	# text / flag rows below are not plain spins, so they stay explicit.
@@ -601,11 +615,18 @@ func _build_behavior_section() -> void:
 		func(text: String) -> void: _behavior_set_string("name2", text),
 		"AI script file (ai_textfile), max 7 chars. Press Enter to apply.")
 	ObjectUiHelpers.add_section_heading(_behavior_box, "Flags")
-	# A 32-bit bitfield: a decimal field is unreadable, so author it as hexadecimal.
-	_add_behavior_line("ai_flags", "AI flags",
+	# The named AI-attribute bits are authored as checkboxes, generated lazily from the engine's bit list
+	# (a mission must be loaded for the controller to answer). The hex field below stays as an advanced
+	# editor + escape hatch: it shows the full 32-bit value, so bits the editor does not name (preserved
+	# verbatim on round-trip) remain visible and editable.
+	_behavior_flags_box = VBoxContainer.new()
+	_behavior_flags_box.name = "MissionBehFlags"
+	_behavior_flags_box.add_theme_constant_override("separation", 2)
+	_behavior_box.add_child(_behavior_flags_box)
+	_add_behavior_line("ai_flags", "AI flags (hex)",
 		func(info) -> String: return "0x%08X" % (int(info.get("ai_flags", 0)) & 0xFFFFFFFF),
 		func(text: String) -> void: _ai_flags_set(text),
-		"Bitfield of unit AI flags, in hexadecimal (e.g. 0x0000000A). Press Enter to apply.")
+		"Full 32-bit AI flags in hex. The checkboxes cover the named bits; use this for any others. Press Enter to apply.")
 
 
 func _add_behavior_spin(property: String, label: String, min_value: float, max_value: float) -> SpinBox:
@@ -623,7 +644,7 @@ func _add_behavior_spin(property: String, label: String, min_value: float, max_v
 # programmatic repopulate echoing back as an edit. Item ids carry the model value, so a user pick
 # commits through set_selected_property(property, id). One populator only -- do not also call
 # populate_id_option on these (that double-population left a duplicate/untagged fallback row).
-func _add_entity_option_row(parent: Control, property: String, label: String, tooltip: String = "", options_getter := Callable()) -> OptionButton:
+func _add_entity_option_row(parent: Control, property: String, label: String, tooltip: String = "", options_getter := Callable(), fallback_label := Callable()) -> OptionButton:
 	var option := ObjectUiHelpers.add_id_option_row(parent, "MissionOpt_" + property, label, [])
 	if not tooltip.is_empty():
 		option.tooltip_text = tooltip
@@ -633,7 +654,7 @@ func _add_entity_option_row(parent: Control, property: String, label: String, to
 	_behavior_binder.bind_option(option,
 		func(info): return int(info.get(property, 0)),
 		func(value: int) -> void: _behavior_set(property, value),
-		options_getter)
+		options_getter, fallback_label)
 	return option
 
 
@@ -647,7 +668,7 @@ func _add_behavior_line(property: String, label: String, getter: Callable, sette
 	lbl.text = label
 	lbl.tooltip_text = tooltip if not tooltip.is_empty() else label
 	lbl.clip_text = true
-	lbl.custom_minimum_size = Vector2(76, 0)
+	lbl.custom_minimum_size = Vector2(ObjectUiHelpers.LABEL_COL_WIDTH, 0)
 	row.add_child(lbl)
 	var line := LineEdit.new()
 	line.name = "MissionBeh_" + property
@@ -701,6 +722,40 @@ func _parse_uint32(text: String) -> int:
 	if value < 0 or value > 0xFFFFFFFF:
 		return -1
 	return value
+
+
+# Build the AI-attribute checkboxes once (from the engine's bit list) and set each from `flags`. Mirrors
+# the event-flag checkbox pattern (_sc_flag_checks): one build, synced on every selection refresh.
+func _sync_behavior_flags(flags: int) -> void:
+	if _behavior_flag_checks.is_empty() and _controller != null and _behavior_flags_box != null:
+		for entry in _controller.get_ai_flag_bits():
+			var entry_dict := entry as Dictionary
+			var bit := int(entry_dict.get("value", 0))
+			var check := ObjectUiHelpers.add_checkbox(_behavior_flags_box, "MissionBehFlag%d" % bit, String(entry_dict.get("name", "")))
+			check.toggled.connect(_on_behavior_flag_toggled)
+			_behavior_flag_checks.append({ "bit": bit, "check": check })
+	_behavior_flag_syncing = true
+	for flag_entry in _behavior_flag_checks:
+		(flag_entry["check"] as CheckBox).button_pressed = (flags & int(flag_entry["bit"])) != 0
+	_behavior_flag_syncing = false
+
+
+# Toggle a named AI-attribute bit. Merge against the entity's current flags so bits the checkboxes do not
+# cover (e.g. DEAF / IGNORE_FOOTSTEPS, not yet decoded) are never dropped, then apply the checked bits.
+func _on_behavior_flag_toggled(_pressed: bool) -> void:
+	if _behavior_flag_syncing or _controller == null:
+		return
+	var known_mask := 0
+	var checked := 0
+	for flag_entry in _behavior_flag_checks:
+		var bit := int(flag_entry["bit"])
+		known_mask |= bit
+		if (flag_entry["check"] as CheckBox).button_pressed:
+			checked |= bit
+	var current := int(_controller.get_selected_entity().get("ai_flags", 0)) & 0xFFFFFFFF
+	var merged := (current & ~known_mask) | checked
+	var signed: int = merged if merged < 0x80000000 else merged - 0x100000000
+	_controller.set_selected_property("ai_flags", signed)
 
 
 # Rebuild the cached group / waypoint-path / entity option lists only when the controller's membership
@@ -765,6 +820,7 @@ func _refresh_edit_panel() -> void:
 	# the entity's current value, and adds a single out-of-range fallback row if needed. The binder's
 	# own reentrancy guard (independent of _loading) stops this programmatic sync echoing back as edits.
 	_behavior_binder.sync_from(entity)
+	_sync_behavior_flags(int(entity.get("ai_flags", 0)))
 
 	var summary: Dictionary = _controller.get_selection_summary() if _controller != null else {}
 	_animated_note.visible = bool(summary.get("animated", false))
@@ -1746,6 +1802,18 @@ func _build_scripting_panel() -> void:
 	_sc_action_desc.name = "MissionScActDesc"
 	_sc_action_params = _build_sc_param_slots("MissionScActP", _on_sc_action_param_changed)
 
+	# Preview row: play this action's part animation on its target model in the editor viewport. Shown
+	# only for PLAYPARTANIM (the AI-change "play part anim" sub-type); hidden for every other action.
+	_sc_action_preview_row = HBoxContainer.new()
+	_sc_action_preview_row.name = "MissionScActPreviewRow"
+	_sc_action_preview_row.add_theme_constant_override("separation", 6)
+	_sc_action_preview_row.visible = false
+	_sc_detail_box.add_child(_sc_action_preview_row)
+	_sc_action_preview = _make_sc_button(_sc_action_preview_row, "MissionScActPreview", "Preview", _on_sc_action_preview)
+	_sc_action_preview.tooltip_text = "Play this part animation on the target unit in the viewport."
+	_sc_action_preview_stop = _make_sc_button(_sc_action_preview_row, "MissionScActPreviewStop", "Stop", _on_sc_action_preview_stop)
+	_sc_action_preview_stop.tooltip_text = "Stop the preview and return the model to rest."
+
 	_sc_detail_box.add_child(HSeparator.new())
 	ObjectUiHelpers.add_section_heading(_sc_detail_box, "Summary")
 	_sc_event_summary = ObjectUiHelpers.add_muted_label(_sc_detail_box, "")
@@ -1914,7 +1982,7 @@ func _sc_trigger_phrase(t: Dictionary) -> String:
 
 
 func _sc_action_phrase(a: Dictionary) -> String:
-	var schema := MissionParamSchema.action_slots(int(a.get("action_type", 0)))
+	var schema := MissionParamSchema.action_slots(int(a.get("action_type", 0)), int(a.get("action_sub_type", 0)))
 	var params := [int(a.get("param1", 0)), int(a.get("param2", 0)), int(a.get("param3", 0)), int(a.get("param4", 0))]
 	var desc := _fill_desc(String(schema["desc"]), params)
 	return desc if desc != "" else String(a.get("action_type_name", "?"))
@@ -1952,7 +2020,7 @@ func _sc_ref_integrity_lines(triggers: Array, actions: Array) -> Array:
 			check.call(int((ts["params"][i] as Dictionary)["kind"]), tp[i], "Trigger %d" % ti)
 	for ai in actions.size():
 		var a := actions[ai] as Dictionary
-		var as_ := MissionParamSchema.action_slots(int(a.get("action_type", 0)))
+		var as_ := MissionParamSchema.action_slots(int(a.get("action_type", 0)), int(a.get("action_sub_type", 0)))
 		var ap := [int(a.get("param1", 0)), int(a.get("param2", 0)), int(a.get("param3", 0)), int(a.get("param4", 0))]
 		for i in 4:
 			check.call(int((as_["params"][i] as Dictionary)["kind"]), ap[i], "Action %d" % ai)
@@ -2040,6 +2108,7 @@ func _refresh_sc_action_section(actions: Array) -> void:
 		_sc_action_sub.clear()
 		_sc_action_desc.text = ""
 		_sc_action_syncing = false
+		_refresh_sc_preview(-1, -1)  # no action selected -> hide the row + stop any preview
 		return
 	var act := actions[_sc_action_selected] as Dictionary
 	var action_type := int(act.get("action_type", 0))
@@ -2047,7 +2116,7 @@ func _refresh_sc_action_section(actions: Array) -> void:
 	_populate_sc_option(_sc_action_type, _controller.get_action_types(), action_type)
 	_populate_sc_option(_sc_action_sub, _controller.get_action_sub_types(action_type), action_sub)
 	var params := [int(act.get("param1", 0)), int(act.get("param2", 0)), int(act.get("param3", 0)), int(act.get("param4", 0))]
-	var schema := MissionParamSchema.action_slots(action_type)
+	var schema := MissionParamSchema.action_slots(action_type, action_sub)
 	_sc_action_desc.text = String(schema["desc"]) if String(schema["desc"]) != "" else "No description yet for this action type; parameters are raw values."
 	for i in 4:
 		var slot_def := schema["params"][i] as Dictionary
@@ -2056,6 +2125,27 @@ func _refresh_sc_action_section(actions: Array) -> void:
 		# Disable slots this action type doesn't use; AI actions (variable) + raw types stay editable.
 		_sc_action_params[i].set_editable(bool(slot_def.get("used", true)))
 	_sc_action_syncing = false
+	_refresh_sc_preview(action_type, action_sub)
+
+
+# Show the Preview/Stop row only for a PLAYPARTANIM action, and enable it only when a target model
+# resolves. Leaving PLAYPARTANIM (or having no resolvable target) stops any running preview.
+func _refresh_sc_preview(action_type: int, action_sub: int) -> void:
+	if _sc_action_preview_row == null:
+		return
+	var is_ppa := action_sub == _PLAYPARTANIM_SUB and action_type in _AI_CHANGE_ACTION_TYPES
+	_sc_action_preview_row.visible = is_ppa
+	if not is_ppa:
+		if _controller != null:
+			_controller.stop_preview()
+		return
+	var actions: Array = _sc_chain.get("actions", [])
+	var action: Dictionary = actions[_sc_action_selected] if _sc_action_selected >= 0 and _sc_action_selected < actions.size() else {}
+	var can: bool = _controller != null and not action.is_empty() and _controller.can_preview_part_anim(action)
+	_sc_action_preview.disabled = not can
+	_sc_action_preview_stop.disabled = not can
+	_sc_action_preview.tooltip_text = "Play this part animation on the target unit in the viewport." if can \
+		else "Select or target an animated entity to preview this part animation."
 
 
 # Build the dropdown items for a picker-kind param slot from the mission's collections. RAW kinds get [].
@@ -2284,6 +2374,20 @@ func _on_sc_action_param_changed(_value: float) -> void:
 	if _sc_action_syncing:
 		return
 	_commit_selected_action()
+
+
+func _on_sc_action_preview() -> void:
+	if _controller == null or _sc_action_selected < 0:
+		return
+	var actions: Array = _sc_chain.get("actions", [])
+	if _sc_action_selected >= actions.size():
+		return
+	_controller.preview_part_anim(actions[_sc_action_selected])
+
+
+func _on_sc_action_preview_stop() -> void:
+	if _controller != null:
+		_controller.stop_preview()
 
 
 func _commit_selected_action(overrides: Dictionary = {}) -> void:

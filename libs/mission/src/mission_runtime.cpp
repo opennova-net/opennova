@@ -38,6 +38,31 @@ const std::vector<MissionParamEnumEntry> &subgoal_enum() {
 	return values;
 }
 
+// PLAYPARTANIM play type. [orig: dfx2med Med_ParamAnimPlayType @0x449f20, "Fsm" config
+// section, table @0x5e64f8 — FSMANIMPLAY=1 / FSMANIMSTOP=0 / FSMANIMREV=-1.]
+const std::vector<MissionParamEnumEntry> &anim_play_type_enum() {
+	static const std::vector<MissionParamEnumEntry> values = {
+		enum_entry(1, "Play"),
+		enum_entry(0, "Stop"),
+		enum_entry(-1, "Reverse"),
+	};
+	return values;
+}
+
+// AISETSTATE behaviour state. [orig: dfx2med Med_ParamAiState @0x449e40, "Fsm" config
+// section, table @0x5e64c8 — raw tokens kept in the label; the engine maps them to
+// display text via the "Fsm" config we do not ship.]
+const std::vector<MissionParamEnumEntry> &ai_state_enum() {
+	static const std::vector<MissionParamEnumEntry> values = {
+		enum_entry(1, "Formation (FSMFORMATION)"),
+		enum_entry(2, "Return to base (FSMRTB)"),
+		enum_entry(3, "Pretty (FSMPRETTY)"),
+		enum_entry(4, "Land (FSMLAND)"),
+		enum_entry(5, "Follow waypoint (FSMFOLLOWWP)"),
+	};
+	return values;
+}
+
 MissionParamSlot slot(const char *label,
                       Kind kind = Kind::Raw,
                       const char *tip = "",
@@ -47,6 +72,78 @@ MissionParamSlot slot(const char *label,
 	out.kind = kind;
 	out.tip = tip;
 	out.enum_values = std::move(enum_values);
+	return out;
+}
+
+// Per-AI-sub-type slots for param2/3/4 of the AI-change action family (CHANGE_GROUP_AI /
+// AREA_AI_RED/BLUE / CHANGE_SINGLE_AI). Mirrors the original editor's Med_AiSubTypeParams
+// @0x44A920 (slot index 0/1/2 -> param2/3/4); ai_change_spec prepends the target (param1).
+// Widget kinds map: Med_ParamIntGeneric(0..999)/Med_ParamIntSmall(0..100) -> Raw,
+// Med_ParamBitToggle{0,1} -> Bool, Med_ParamPickSingle -> Entity, Med_ParamAnimPlayType /
+// Med_ParamAiState -> Enum, Med_ParamAnimTime -> FixedSeconds, ANIMNUM -> Animation.
+// SKILL (Med_ParamSkill @0x449eb0) and HUDITEM (Med_ParamHudItem @0x44a160) are "Fsm"-section
+// enums in the original; modelled Raw here (values round-trip exactly) and upgraded to Enum in P5.
+std::vector<MissionParamSlot> ai_subtype_slots(int sub_type) {
+	switch (static_cast<bms::AIActionSubType>(sub_type)) {
+		case bms::AIActionSubType::GuardBit: return { slot("Guard", Kind::Bool) };
+		case bms::AIActionSubType::Accuracy: return { slot("Accuracy %", Kind::Raw, "Weapon accuracy, 0-100.") };
+		case bms::AIActionSubType::BlindBit: return { slot("Blind", Kind::Bool) };
+		case bms::AIActionSubType::BerserkBit: return { slot("Berserk", Kind::Bool) };
+		case bms::AIActionSubType::ClimberBit: return { slot("Climber", Kind::Bool) };
+		case bms::AIActionSubType::CowardBit: return { slot("Coward", Kind::Bool) };
+		case bms::AIActionSubType::DriveSkill: return { slot("Drive skill", Kind::Raw) };
+		case bms::AIActionSubType::AimSkill: return { slot("Aim skill", Kind::Raw) };
+		case bms::AIActionSubType::AiSetState: return { slot("AI state", Kind::Enum, "AI behaviour state.", ai_state_enum()) };
+		case bms::AIActionSubType::CombatSpeed: return { slot("Combat speed (kph)", Kind::Raw) };
+		case bms::AIActionSubType::PatrolSpeed: return { slot("Patrol speed (kph)", Kind::Raw) };
+		case bms::AIActionSubType::FindAndUse: return { slot("Target unit", Kind::Entity) };
+		case bms::AIActionSubType::TargetSsn: return { slot("Target unit", Kind::Entity) };
+		case bms::AIActionSubType::PlayPartAnim:
+			// ANIMNUM is the model's part-animation CHANNEL, not an animation name: the game
+			// (Jointops Entity_ApplyCommand @0x43ab60 case 0x22) acts on channels 1/2 only, playing the
+			// part per ANIMPLAYTYPE (-1/0/1) over ANIMTIME. The off_8135F0 walk/idle/weapon table is the
+			// separate AI-state-driven infantry set, not this param.
+			return { slot("Part #", Kind::Raw, "Part-animation channel on the model (ANIMNUM; the game uses 1 or 2)."),
+			         slot("Play type", Kind::Enum, "", anim_play_type_enum()),
+			         slot("Time (s)", Kind::FixedSeconds, "Play duration in seconds.") };
+		case bms::AIActionSubType::HudItem: return { slot("HUD item", Kind::Raw), slot("Ticks", Kind::Raw) };
+		case bms::AIActionSubType::TmateStatus: return { slot("Teammate status", Kind::Bool) };
+		case bms::AIActionSubType::AiNodePathBit: return { slot("AI node path", Kind::Bool) };
+		case bms::AIActionSubType::AttackDistanceValue: return { slot("Attack distance", Kind::Raw) };
+		case bms::AIActionSubType::EngageDistanceMin: return { slot("Engage min", Kind::Raw), slot("Engage max", Kind::Raw) };
+		case bms::AIActionSubType::IndestructableBit: return { slot("Indestructible", Kind::Bool) };
+		case bms::AIActionSubType::StartFiringBit: return { slot("Start firing", Kind::Bool) };
+		case bms::AIActionSubType::FiringAngle: return { slot("Firing angle", Kind::Raw, "Degrees, 0 to -359.") };
+		case bms::AIActionSubType::RedAlert:
+		case bms::AIActionSubType::GreenAlert:
+		case bms::AIActionSubType::YellowAlert:
+		case bms::AIActionSubType::AiUseWpz:
+		case bms::AIActionSubType::AiClearWpz:
+			return {};  // alert / wpz toggles: target only, no value slot (Med_AiSubTypeParams returns NULL)
+		default: return { slot("Value") };  // unmodelled sub-types: a single raw value fallback
+	}
+}
+
+// Build the spec for an AI-change action: the target (param1) followed by the selected
+// sub-type's slots (param2/3/4). Mirrors spec()'s used-flag semantics for the trailing slots.
+MissionParamSpec ai_change_spec(const char *description, MissionParamSlot target, int sub_type) {
+	MissionParamSpec out;
+	out.description = description;
+	out.known = true;
+	std::vector<MissionParamSlot> slots;
+	slots.push_back(std::move(target));
+	std::vector<MissionParamSlot> sub = ai_subtype_slots(sub_type);
+	for (MissionParamSlot &s : sub) {
+		slots.push_back(std::move(s));
+	}
+	for (size_t i = 0; i < out.params.size(); ++i) {
+		if (i < slots.size()) {
+			out.params[i] = slots[i];
+			out.params[i].used = true;
+		} else {
+			out.params[i].used = false;
+		}
+	}
 	return out;
 }
 
@@ -186,11 +283,14 @@ MissionParamSpec trigger_param_schema(int main_type, int sub_type) {
 	return unknown_spec();
 }
 
-MissionParamSpec action_param_schema(int action_type) {
+MissionParamSpec action_param_schema(int action_type, int action_sub_type) {
 	switch (static_cast<bms::ActionType>(action_type)) {
 		case bms::ActionType::RedirectGroupTo: return spec("Send group {p1} to a waypoint.", { slot("Group", Kind::Group), slot("Waypoint type"), slot("Waypoint", Kind::Waypoint, "-1 = nearest of that type.") });
 		case bms::ActionType::KillGroup: return spec("Kill group {p1}.", { slot("Group", Kind::Group) });
-		case bms::ActionType::ChangeGroupAI: return spec("Change group {p1} AI (see sub-type).", { slot("Group", Kind::Group), slot("Value") }, true);
+		case bms::ActionType::ChangeGroupAI: return ai_change_spec("Change group {p1} AI (see sub-type).", slot("Group", Kind::Group), action_sub_type);
+		// AREA_AI_RED/BLUE apply an AI sub-type to the team's units within a zone. [target kind = Zone: verify in P5]
+		case bms::ActionType::AreaAiRed: return ai_change_spec("Change AI of red units in zone {p1} (see sub-type).", slot("Zone", Kind::Zone), action_sub_type);
+		case bms::ActionType::AreaAiBlue: return ai_change_spec("Change AI of blue units in zone {p1} (see sub-type).", slot("Zone", Kind::Zone), action_sub_type);
 		case bms::ActionType::VaporizeGroup: return spec("Vaporize group {p1}.", { slot("Group", Kind::Group) });
 		case bms::ActionType::MisvarChange: return spec("Change mission variable #{p1} (see sub-type) by {p2}.", { slot("Variable #"), slot("Value") });
 		case bms::ActionType::OutputText: return spec("Show on-screen text {p1}.", { slot("Text / string id") });
@@ -206,7 +306,7 @@ MissionParamSpec action_param_schema(int action_type) {
 		case bms::ActionType::GroupTeleportAction: return spec("Teleport group {p1} to teleport target {p2}.", { slot("Group", Kind::Group), slot("Teleport target") });
 		case bms::ActionType::RedirectSingleTo: return spec("Send unit {p1} to a waypoint.", { slot("Unit", Kind::Entity), slot("Waypoint type"), slot("Waypoint", Kind::Waypoint) });
 		case bms::ActionType::KillSingle: return spec("Kill unit {p1}.", { slot("Unit", Kind::Entity) });
-		case bms::ActionType::ChangeSingleAI: return spec("Change unit {p1} AI (see sub-type).", { slot("Unit", Kind::Entity), slot("Value") }, true);
+		case bms::ActionType::ChangeSingleAI: return ai_change_spec("Change unit {p1} AI (see sub-type).", slot("Unit", Kind::Entity), action_sub_type);
 		case bms::ActionType::VaporizeSingle: return spec("Vaporize unit {p1}.", { slot("Unit", Kind::Entity) });
 		case bms::ActionType::SingleVelocity: return spec("Set unit {p1} move speed to {p2} kph.", { slot("Unit", Kind::Entity), slot("Speed (kph)") });
 		case bms::ActionType::ChangeSteamAction: return spec("Change unit {p1} team to {p2}.", { slot("Unit", Kind::Entity), slot("Team", Kind::Enum, "", team_enum()) });
@@ -485,14 +585,16 @@ void MissionRuntime::dispatch_action(const MissionActionRecord &action, size_t e
 			command.label = "set_light_state";
 			result.commands.push_back(command);
 			return;
-		default:
-			command.kind = action_param_schema(action.action_type).known ? MissionRuntimeCommandKind::HostAction : MissionRuntimeCommandKind::UnsupportedAction;
-			command.supported = action_param_schema(action.action_type).known;
+		default: {
+			const bool known = action_param_schema(action.action_type, action.action_sub_type).known;
+			command.kind = known ? MissionRuntimeCommandKind::HostAction : MissionRuntimeCommandKind::UnsupportedAction;
+			command.supported = known;
 			if (!command.supported) {
 				add_runtime_diagnostic(result, "runtime.unsupported_action", "Action type is not supported by the mission runtime.", event_index, static_cast<int>(action.index));
 			}
 			result.commands.push_back(command);
 			return;
+		}
 	}
 }
 

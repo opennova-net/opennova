@@ -30,6 +30,7 @@ var _surface_material_indices: PackedInt32Array = PackedInt32Array()
 var _surface_materials: Array[ShaderMaterial] = []
 var _anim_frames_by_mat: Dictionary = {}
 var _ctrl_values: Dictionary = {}
+var _part_anims: Dictionary = {}
 var _anim_time_ms: int = 0
 var _active_lod: int = 0
 var _is_playing := true
@@ -47,6 +48,7 @@ func set_object_data(value: NovaObjectData) -> void:
 	if object_data != null and object_data.object_changed.is_connected(_on_object_changed):
 		object_data.object_changed.disconnect(_on_object_changed)
 	object_data = value
+	_part_anims.clear()
 	_active_lod = _clamp_lod_index(_active_lod)
 	if object_data != null and not object_data.object_changed.is_connected(_on_object_changed):
 		object_data.object_changed.connect(_on_object_changed, CONNECT_DEFERRED)
@@ -130,6 +132,95 @@ func clear_ctrl_values() -> void:
 
 func get_ctrl_values() -> Dictionary:
 	return _ctrl_values.duplicate(true)
+
+
+# --- Part-animation channels (PLAYPARTANIM mission action) ---
+# [orig: Jointops Entity_ApplyCommand @0x43ab60 case 0x22] PLAYPARTANIM(channel, play_type, time):
+# ANIMNUM (channel) in {1,2} selects one of two part-anim channels (slot = channel-1); ANIMPLAYTYPE
+# +1/0/-1 = forward/stop/reverse; ANIMTIME seconds = how long the part takes to cross its full range.
+# The original stores a per-channel direction + per-tick rate on the AI struct and a per-frame consumer
+# sweeps a 16.16 phase (0..65536, full range in ANIMTIME at 62.5Hz), clamping at the ends; it is
+# velocity-from-current (it does NOT reset the phase). We drive part channel `slot` through the model's
+# PANM control register at index `slot`, value 0..65535 == that phase, fed to evaluate_panm() each frame.
+# See notes/mission/anim-ai-grill-2026-06-07.md.
+
+## Play a model part animation, mirroring the runtime PLAYPARTANIM action so editor preview and host
+## playback share one path. channel: 1 or 2. play_type: 1 play / 0 stop / -1 reverse. time_s: seconds
+## for the part to traverse its full range (ANIMTIME).
+func play_part_anim(channel: int, play_type: int, time_s: float) -> void:
+	var slot := channel - 1
+	if slot < 0 or slot > 1:
+		return  # the original validates channel in {1,2}; anything else is ignored
+	var register := _resolve_anim_channel_register(slot)
+	if register.is_empty():
+		return
+	if play_type == 0:
+		_part_anims.erase(register)  # Stop: freeze the part at its current value
+		return
+	var dir := 1 if play_type > 0 else -1
+	var speed := 65535.0 / time_s if time_s > 0.0 else 1.0e9  # full range crossed in time_s seconds
+	_part_anims[register] = {
+		"register": register,
+		"dir": dir,
+		"speed": speed,
+		"value": float(int(_ctrl_values.get(register, 0))),  # velocity from current (no reset)
+	}
+
+
+## Editor-preview convenience: seed the channel at its rest start (0 forward / max reverse) then play,
+## so a preview always shows the full motion from rest. The runtime uses play_part_anim directly
+## (velocity-from-current, faithful to the action); only the editor preview restarts.
+func restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
+	var slot := channel - 1
+	if slot < 0 or slot > 1:
+		return
+	var register := _resolve_anim_channel_register(slot)
+	if not register.is_empty():
+		_ctrl_values[register] = 0 if play_type >= 0 else 65535
+	play_part_anim(channel, play_type, time_s)
+
+
+## Stop a single channel's part animation (freeze in place); no-op if the channel is not animating.
+func stop_part_anim(channel: int) -> void:
+	var register := _resolve_anim_channel_register(channel - 1)
+	if not register.is_empty():
+		_part_anims.erase(register)
+
+
+func clear_part_anims() -> void:
+	_part_anims.clear()
+
+
+func get_active_part_anims() -> Dictionary:
+	return _part_anims.duplicate(true)
+
+
+# [orig: ANIMNUM channel (1/2) -> part-anim slot 0/1 -> the model's PANM control register at index `slot`.]
+func _resolve_anim_channel_register(slot: int) -> String:
+	if object_data == null or not object_data.has_method("get_control_registers"):
+		return ""
+	var regs: Array = object_data.get_control_registers()
+	if slot < 0 or slot >= regs.size():
+		return ""
+	return String((regs[slot] as Dictionary).get("name", ""))
+
+
+# Advance each active channel's phase toward its endpoint at the authored speed, clamping at [0,65535].
+# Writes straight into _ctrl_values (NOT set_ctrl_value, which would eagerly re-evaluate per channel);
+# the enclosing _apply_runtime_state applies the result once, in the same frame, to materials + PANM.
+func _advance_part_anims(delta: float) -> void:
+	if _part_anims.is_empty() or delta <= 0.0:
+		return
+	var finished: Array = []
+	for register in _part_anims.keys():
+		var anim: Dictionary = _part_anims[register]
+		var value := clampf(float(anim["value"]) + float(anim["speed"]) * float(anim["dir"]) * delta, 0.0, 65535.0)
+		anim["value"] = value
+		_ctrl_values[register] = int(round(value))
+		if (int(anim["dir"]) > 0 and value >= 65535.0) or (int(anim["dir"]) < 0 and value <= 0.0):
+			finished.append(register)  # reached the clamp endpoint; the part holds there
+	for register in finished:
+		_part_anims.erase(register)
 
 
 func rebuild() -> void:
@@ -274,6 +365,7 @@ func _apply_runtime_state(delta: float) -> void:
 		return
 	if _is_playing:
 		_anim_time_ms = (_anim_time_ms + int(delta * 1000.0)) & 0x7fffffff
+	_advance_part_anims(delta)
 	for i in range(_surface_materials.size()):
 		var material := _surface_materials[i]
 		if material == null:

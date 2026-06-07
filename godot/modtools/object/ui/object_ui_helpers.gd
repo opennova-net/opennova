@@ -12,6 +12,11 @@ const CtrlRegPickerScript = preload("res://modtools/object/ui/widgets/ctrl_reg_p
 const PANEL_MARGIN := 10
 const CARD_MARGIN := 8
 
+# Width (px) of the left-hand label column in row builders. Wide enough for the
+# longest inspector labels (e.g. "Min combat range") so they no longer clip;
+# clip_text + the tooltip stay as a safety net for anything longer.
+const LABEL_COL_WIDTH := 120
+
 
 static func add_spin_row(parent: Control, node_name: String, label_text: String, min_value: float, max_value: float, step: float) -> SpinBox:
 	var row := HBoxContainer.new()
@@ -21,7 +26,7 @@ static func add_spin_row(parent: Control, node_name: String, label_text: String,
 	label.text = label_text
 	label.tooltip_text = label_text
 	label.clip_text = true
-	label.custom_minimum_size = Vector2(76, 0)
+	label.custom_minimum_size = Vector2(LABEL_COL_WIDTH, 0)
 	row.add_child(label)
 	var spin := SpinBox.new()
 	spin.name = node_name
@@ -49,7 +54,7 @@ static func add_color_row(parent: Control, node_name: String, label_text: String
 	label.text = label_text
 	label.tooltip_text = label_text
 	label.clip_text = true
-	label.custom_minimum_size = Vector2(76, 0)
+	label.custom_minimum_size = Vector2(LABEL_COL_WIDTH, 0)
 	row.add_child(label)
 	var picker := ColorPickerButton.new()
 	picker.name = node_name
@@ -66,7 +71,7 @@ static func add_id_option_row(parent: Control, node_name: String, label_text: St
 	label.text = label_text
 	label.tooltip_text = label_text
 	label.clip_text = true
-	label.custom_minimum_size = Vector2(76, 0)
+	label.custom_minimum_size = Vector2(LABEL_COL_WIDTH, 0)
 	row.add_child(label)
 	var option := OptionButton.new()
 	option.name = node_name
@@ -84,7 +89,7 @@ static func add_ctrl_reg_row(parent: Control, node_name: String, label_text: Str
 	label.text = label_text
 	label.tooltip_text = label_text
 	label.clip_text = true
-	label.custom_minimum_size = Vector2(76, 0)
+	label.custom_minimum_size = Vector2(LABEL_COL_WIDTH, 0)
 	row.add_child(label)
 	var picker = CtrlRegPickerScript.new()
 	picker.name = node_name

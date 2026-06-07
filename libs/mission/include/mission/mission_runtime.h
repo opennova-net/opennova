@@ -19,6 +19,7 @@ enum class MissionParamKind : int {
 	Waypoint = 5,
 	Bool = 6,
 	Enum = 7,
+	FixedSeconds = 8,  // raw int = seconds * 65536 (16.16); the editor shows a seconds spin
 };
 
 struct MissionParamEnumEntry {
@@ -42,7 +43,9 @@ struct MissionParamSpec {
 };
 
 MissionParamSpec trigger_param_schema(int main_type, int sub_type);
-MissionParamSpec action_param_schema(int action_type);
+// action_sub_type selects the per-sub-type slot layout for the AI-change action family
+// (CHANGE_GROUP_AI / AREA_AI_RED/BLUE / CHANGE_SINGLE_AI); ignored by other action types.
+MissionParamSpec action_param_schema(int action_type, int action_sub_type = 0);
 bool mission_param_kind_is_picker(MissionParamKind kind);
 
 enum class MissionRuntimeCommandKind : int {

@@ -24,11 +24,11 @@ const TRIGGER_RAW_ALLOWLIST := {
 }
 # Action types deliberately left raw (no ACTIONS row), confirmed against dfx2med:
 #   0  Null (no-op)
-#   12/13 AreaAiRed/Blue -- AI-bit driven (slot1+ depend on the AI sub-type; rendered as raw Value)
 #   39 Teammates -- param shape depends on the teammate sub-type (medic/evac targets)
 #   41 ExecuteWac -- editor exposes no param slot
+# (AreaAiRed/Blue 12/13 are now sub-type-aware AI-change actions and carry a schema row.)
 const ACTION_RAW_ALLOWLIST := [
-	0, 12, 13, 39, 41,
+	0, 39, 41,
 ]
 
 

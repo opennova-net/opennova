@@ -41,6 +41,10 @@ class FakeController:
 	var armed_id: int = 0
 	var arm_calls: Array = []
 	var disarm_calls: int = 0
+	# Phase 4: PLAYPARTANIM preview hooks.
+	var preview_calls: Array = []
+	var stop_preview_calls: int = 0
+	var can_preview: bool = false
 
 	func get_mission():
 		return mission_ref
@@ -469,6 +473,9 @@ class FakeController:
 	func get_event_flag_bits() -> Array:
 		return [{"value": 1, "name": "Reset after"}, {"value": 2, "name": "Pre-mission"}, {"value": 4, "name": "Post-mission"}]
 
+	func get_ai_flag_bits() -> Array:
+		return [{"value": 1, "name": "Blind"}, {"value": 2, "name": "Guarding"}, {"value": 1 << 22, "name": "Navigation waypoint"}]
+
 	func get_trigger_main_types() -> Array:
 		return [{"value": 1, "name": "Group"}, {"value": 2, "name": "Single"}]
 
@@ -482,6 +489,16 @@ class FakeController:
 
 	func get_action_sub_types(_action_type: int) -> Array:
 		return [{"value": 0, "name": "Null"}]
+
+	func can_preview_part_anim(_action: Dictionary) -> bool:
+		return can_preview
+
+	func preview_part_anim(action: Dictionary) -> bool:
+		preview_calls.append(action.duplicate(true))
+		return can_preview
+
+	func stop_preview() -> void:
+		stop_preview_calls += 1
 
 	func select_event(index: int) -> void:
 		select_event_calls.append(index)
@@ -601,6 +618,32 @@ func test_edit_panel_shows_the_selected_values() -> void:
 	assert_eq(_spin(ctx.inspector, "MissionTeam").value, 1.0, "team reads from the entity")
 	assert_eq(_option_id(ctx.inspector, "MissionOpt_group"), 2,
 		"group reads from the entity as the selected dropdown option")
+
+
+func test_waypoint_pointing_at_empty_slot_shows_path_label() -> void:
+	# waypoint_id is a fixed path NUMBER (0-127). A unit pointed at a valid but EMPTY slot (no markers --
+	# common for units that man a gun / ride a vehicle and never path-follow) has no row in the curated
+	# dropdown, so it must read "Path N (no markers)", not the generic "Value N".
+	var entity := _sample_entity()
+	entity["waypoint_id"] = 125
+	var ctx := _make(entity)  # fake.waypoint_options defaults to [] -> path 125 is absent
+	var opt := _option(ctx.inspector, "MissionOpt_waypoint_id")
+	assert_not_null(opt, "the Waypoint path picker exists")
+	assert_eq(opt.get_item_id(opt.selected), 125, "the picker preserves the real waypoint_id")
+	assert_eq(opt.get_item_text(opt.selected), "Path 125 (no markers)",
+		"an empty-slot reference is labelled as a path, not 'Value 125'")
+
+
+func test_waypoint_pointing_at_populated_path_selects_it() -> void:
+	var entity := _sample_entity()
+	entity["waypoint_id"] = 3
+	var ctx := _make(entity)
+	ctx.fake.waypoint_options = [{ "id": 0, "label": "None" }, { "id": 3, "label": "Path 3  -  4 markers" }]
+	ctx.inspector._refresh()  # swapping the option list bumps the membership revision -> cache rebuilds
+	var opt := _option(ctx.inspector, "MissionOpt_waypoint_id")
+	assert_eq(opt.get_item_id(opt.selected), 3, "a populated path is selected by id")
+	assert_eq(opt.get_item_text(opt.selected), "Path 3  -  4 markers",
+		"a real path shows its label, not a fallback")
 
 
 func test_identity_shows_resolved_model_name() -> void:
@@ -1188,8 +1231,9 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 		"get_group_count", "get_groups", "get_group", "set_group",
 		# Phase 4: mission scripting (events / triggers / actions).
 		"is_scripting_mode", "get_events", "get_selected_event_index", "get_selected_event_chain",
-		"get_event_flag_bits", "get_trigger_main_types", "get_trigger_sub_types",
+		"get_event_flag_bits", "get_ai_flag_bits", "get_trigger_main_types", "get_trigger_sub_types",
 		"get_action_types", "get_action_sub_types", "select_event",
+		"can_preview_part_anim", "preview_part_anim", "stop_preview",
 		"add_event_default", "delete_selected_event", "set_selected_event",
 		"add_selected_event_trigger", "set_selected_event_trigger",
 		"remove_selected_event_trigger", "move_selected_event_trigger",
@@ -1751,14 +1795,20 @@ func test_param_schema_marks_unused_slots() -> void:
 	var blue := MissionParamSchema.action_slots(8)
 	for i in 4:
 		assert_false(bool(blue["params"][i]["used"]), "BlueWin slot %d is unused" % (i + 1))
-	# Undescribed type: AreaAiRed (12) has no row -> count unknown -> all slots stay usable.
-	var area := MissionParamSchema.action_slots(12)
+	# AI-change family is sub-type-aware: PLAYPARTANIM (34) uses all four (target + ANIMNUM / play / time)...
+	var ai_anim := MissionParamSchema.action_slots(3, 34)
 	for i in 4:
-		assert_true(bool(area["params"][i]["used"]), "undescribed action slot %d stays usable" % (i + 1))
-	# Variable (AI) type: ChangeGroupAI (3) -> all slots usable (count depends on sub-type).
-	var ai := MissionParamSchema.action_slots(3)
+		assert_true(bool(ai_anim["params"][i]["used"]), "ChangeGroupAI/PlayPartAnim slot %d is used" % (i + 1))
+	# ...while a single-value sub-type (ACCURACY 8) uses only the target + one value.
+	var ai_acc := MissionParamSchema.action_slots(3, 8)
+	assert_true(bool(ai_acc["params"][0]["used"]), "ChangeGroupAI target is used")
+	assert_true(bool(ai_acc["params"][1]["used"]), "ChangeGroupAI/Accuracy value is used")
+	assert_false(bool(ai_acc["params"][2]["used"]), "ChangeGroupAI/Accuracy slot 3 is unused")
+	# AreaAiRed (12) is now modelled (was raw): a Zone target plus the sub-type's slots.
+	var area := MissionParamSchema.action_slots(12, 34)
+	assert_eq(int(area["params"][0]["kind"]), MissionParamSchema.Kind.ZONE, "AreaAiRed targets a zone")
 	for i in 4:
-		assert_true(bool(ai["params"][i]["used"]), "AI action slot %d stays usable" % (i + 1))
+		assert_true(bool(area["params"][i]["used"]), "AreaAiRed/PlayPartAnim slot %d is used" % (i + 1))
 	# Triggers likewise: GroupAtRedAlert (main 1 / sub 3) uses only param1.
 	var trig := MissionParamSchema.trigger_slots(1, 3)
 	assert_true(bool(trig["params"][0]["used"]), "GroupAtRedAlert slot 1 is used")
@@ -1787,20 +1837,106 @@ func test_scripting_zero_param_action_disables_all_slots() -> void:
 		assert_false(ctx.inspector._sc_action_params[i].is_editable(), "BlueWin param %d is disabled" % (i + 1))
 
 
-func test_scripting_ai_and_unmapped_actions_keep_slots_editable() -> void:
-	# ChangeGroupAI (variable count by sub-type) and an undescribed action both keep all slots editable
-	# so a real param is never blocked.
+func test_scripting_ai_action_enables_exactly_its_sub_type_slots() -> void:
+	# PLAYPARTANIM uses all four (unit target + ANIMNUM / play type / time), so every row is editable.
 	var event := _sc_event(0, 0, 0, 0, 0, 1)
-	var ai_chain := _sc_chain_dict(event, [], [_sc_act(3, "ChangeGroupAI", 34, "PlayPartAnim", [1, 2, 3, 4])])
-	var ai_ctx := _scripting_ctx([event], 0, ai_chain)
-	ai_ctx.inspector._sc_action_list.item_selected.emit(0)
+	var anim_chain := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1, 2, 1, 65536])])
+	var anim_ctx := _scripting_ctx([event], 0, anim_chain)
+	anim_ctx.inspector._sc_action_list.item_selected.emit(0)
 	for i in 4:
-		assert_true(ai_ctx.inspector._sc_action_params[i].is_editable(), "AI action param %d stays editable" % (i + 1))
-	var raw_chain := _sc_chain_dict(event, [], [_sc_act(12, "AreaAiRed", 0, "Null", [1, 2, 3, 4])])
+		assert_true(anim_ctx.inspector._sc_action_params[i].is_editable(), "PlayPartAnim param %d is editable" % (i + 1))
+	# A single-value sub-type (ACCURACY) enables only the target + one value; the rest grey out.
+	var acc_chain := _sc_chain_dict(event, [], [_sc_act(3, "ChangeGroupAI", 8, "Accuracy", [1, 90, 0, 0])])
+	var acc_ctx := _scripting_ctx([event], 0, acc_chain)
+	acc_ctx.inspector._sc_action_list.item_selected.emit(0)
+	assert_true(acc_ctx.inspector._sc_action_params[0].is_editable(), "Accuracy target stays editable")
+	assert_true(acc_ctx.inspector._sc_action_params[1].is_editable(), "Accuracy value stays editable")
+	assert_false(acc_ctx.inspector._sc_action_params[2].is_editable(), "Accuracy param 3 greys out")
+	assert_false(acc_ctx.inspector._sc_action_params[3].is_editable(), "Accuracy param 4 greys out")
+	# A genuinely unknown action type still degrades to four raw, editable slots so no param is ever blocked.
+	var raw_chain := _sc_chain_dict(event, [], [_sc_act(999, "Action 999", 0, "Null", [1, 2, 3, 4])])
 	var raw_ctx := _scripting_ctx([event], 0, raw_chain)
 	raw_ctx.inspector._sc_action_list.item_selected.emit(0)
 	for i in 4:
-		assert_true(raw_ctx.inspector._sc_action_params[i].is_editable(), "undescribed action param %d stays editable" % (i + 1))
+		assert_true(raw_ctx.inspector._sc_action_params[i].is_editable(), "unknown action param %d stays editable" % (i + 1))
+
+
+# --- Phase 4: PLAYPARTANIM in-editor preview ----------------------------------
+
+func test_scripting_preview_row_shows_only_for_playpartanim() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 1)
+	var ppa := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1001, 2, 1, 65536])])
+	var ctx := _scripting_ctx([event], 0, ppa)
+	ctx.inspector._sc_action_list.item_selected.emit(0)
+	assert_true(ctx.inspector._sc_action_preview_row.visible, "the Preview row shows for a PLAYPARTANIM action")
+	# An AI-change action with a different sub-type hides it.
+	var acc := _sc_chain_dict(event, [], [_sc_act(3, "ChangeGroupAI", 8, "Accuracy", [1, 90, 0, 0])])
+	var ctx2 := _scripting_ctx([event], 0, acc)
+	ctx2.inspector._sc_action_list.item_selected.emit(0)
+	assert_false(ctx2.inspector._sc_action_preview_row.visible, "hidden for a non-PLAYPARTANIM AI sub-type")
+	# A non-AI action hides it too.
+	var other := _sc_chain_dict(event, [], [_sc_act(34, "ResetEvent", 0, "Null", [0, 0, 0, 0])])
+	var ctx3 := _scripting_ctx([event], 0, other)
+	ctx3.inspector._sc_action_list.item_selected.emit(0)
+	assert_false(ctx3.inspector._sc_action_preview_row.visible, "hidden for a non-AI action")
+
+
+func test_scripting_preview_button_enabled_state_follows_target() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 1)
+	var ppa := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1001, 2, 1, 65536])])
+	# No resolvable target -> the button is disabled with a hint.
+	var ctx := _scripting_ctx([event], 0, ppa)
+	ctx.fake.can_preview = false
+	ctx.inspector._sc_action_list.item_selected.emit(0)
+	assert_true(ctx.inspector._sc_action_preview.disabled, "Preview is disabled without an animated target")
+	assert_string_contains(ctx.inspector._sc_action_preview.tooltip_text, "animated")
+	# With a target -> enabled.
+	var ctx2 := _scripting_ctx([event], 0, ppa)
+	ctx2.fake.can_preview = true
+	ctx2.inspector._sc_action_list.item_selected.emit(0)
+	assert_false(ctx2.inspector._sc_action_preview.disabled, "Preview is enabled when a target resolves")
+
+
+func test_scripting_preview_button_calls_controller_with_action() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 1)
+	# channel 2, play, time raw 2*65536 (== 2.0s).
+	var ppa := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1001, 2, 1, 131072])])
+	var ctx := _scripting_ctx([event], 0, ppa)
+	ctx.fake.can_preview = true
+	ctx.inspector._sc_action_list.item_selected.emit(0)
+	ctx.inspector._sc_action_preview.pressed.emit()
+	assert_eq(ctx.fake.preview_calls.size(), 1, "Preview calls the controller once")
+	var called: Dictionary = ctx.fake.preview_calls[0]
+	assert_eq(int(called["param2"]), 2, "channel (param2) forwarded")
+	assert_eq(int(called["param3"]), 1, "play type (param3) forwarded")
+	assert_eq(int(called["param4"]), 131072, "time (param4, raw 16.16) forwarded")
+
+
+func test_scripting_preview_stop_button_calls_controller() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 1)
+	var ppa := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1001, 2, 1, 65536])])
+	var ctx := _scripting_ctx([event], 0, ppa)
+	ctx.fake.can_preview = true
+	ctx.inspector._sc_action_list.item_selected.emit(0)
+	var before: int = ctx.fake.stop_preview_calls
+	ctx.inspector._sc_action_preview_stop.pressed.emit()
+	assert_eq(ctx.fake.stop_preview_calls, before + 1, "Stop calls the controller")
+
+
+func test_scripting_switching_away_from_playpartanim_stops_preview() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 2)
+	var chain := _sc_chain_dict(event, [], [
+		_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1001, 2, 1, 65536]),
+		_sc_act(34, "ResetEvent", 0, "Null", [0, 0, 0, 0]),
+	])
+	var ctx := _scripting_ctx([event], 0, chain)
+	ctx.fake.can_preview = true
+	ctx.inspector._sc_action_list.item_selected.emit(0)  # PLAYPARTANIM -> row visible
+	assert_true(ctx.inspector._sc_action_preview_row.visible)
+	var before: int = ctx.fake.stop_preview_calls
+	ctx.inspector._sc_action_list.item_selected.emit(1)  # ResetEvent -> row hidden, preview stopped
+	assert_false(ctx.inspector._sc_action_preview_row.visible, "the row hides on a non-PLAYPARTANIM action")
+	assert_gt(ctx.fake.stop_preview_calls, before, "leaving PLAYPARTANIM stops any running preview")
 
 
 func test_scripting_trigger_disables_unused_param_slots() -> void:
