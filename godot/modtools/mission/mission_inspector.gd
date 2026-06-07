@@ -273,6 +273,9 @@ var _sc_action_type: OptionButton
 var _sc_action_sub: OptionButton
 var _sc_action_desc: Label  # plain-language description of the selected action type
 var _sc_action_params: Array = []  # [p1, p2, p3, p4] MissionParamSlot
+var _sc_action_preview_row: HBoxContainer
+var _sc_action_preview: Button
+var _sc_action_preview_stop: Button
 var _sc_action_selected: int = -1
 var _sc_action_syncing: bool = false
 # The event index the trigger/action sub-selections currently belong to. The event-list click handler
@@ -284,6 +287,9 @@ var _sc_event_summary: Label  # "when <conditions> then <actions>" readout for t
 var _sc_diagnostics: Label
 # The event chain the panel was last populated from, so the sub-list handlers read the same data.
 var _sc_chain: Dictionary = {}
+# PLAYPARTANIM preview gate: the AI-change action family + the play-part-anim sub-type.
+const _AI_CHANGE_ACTION_TYPES := [3, 12, 13, 21]
+const _PLAYPARTANIM_SUB := 34
 
 
 # `detail_host` is the shell's right dock (%AssetDock), forwarded by the workspace adapter; the
@@ -1796,6 +1802,18 @@ func _build_scripting_panel() -> void:
 	_sc_action_desc.name = "MissionScActDesc"
 	_sc_action_params = _build_sc_param_slots("MissionScActP", _on_sc_action_param_changed)
 
+	# Preview row: play this action's part animation on its target model in the editor viewport. Shown
+	# only for PLAYPARTANIM (the AI-change "play part anim" sub-type); hidden for every other action.
+	_sc_action_preview_row = HBoxContainer.new()
+	_sc_action_preview_row.name = "MissionScActPreviewRow"
+	_sc_action_preview_row.add_theme_constant_override("separation", 6)
+	_sc_action_preview_row.visible = false
+	_sc_detail_box.add_child(_sc_action_preview_row)
+	_sc_action_preview = _make_sc_button(_sc_action_preview_row, "MissionScActPreview", "Preview", _on_sc_action_preview)
+	_sc_action_preview.tooltip_text = "Play this part animation on the target unit in the viewport."
+	_sc_action_preview_stop = _make_sc_button(_sc_action_preview_row, "MissionScActPreviewStop", "Stop", _on_sc_action_preview_stop)
+	_sc_action_preview_stop.tooltip_text = "Stop the preview and return the model to rest."
+
 	_sc_detail_box.add_child(HSeparator.new())
 	ObjectUiHelpers.add_section_heading(_sc_detail_box, "Summary")
 	_sc_event_summary = ObjectUiHelpers.add_muted_label(_sc_detail_box, "")
@@ -2090,6 +2108,7 @@ func _refresh_sc_action_section(actions: Array) -> void:
 		_sc_action_sub.clear()
 		_sc_action_desc.text = ""
 		_sc_action_syncing = false
+		_refresh_sc_preview(-1, -1)  # no action selected -> hide the row + stop any preview
 		return
 	var act := actions[_sc_action_selected] as Dictionary
 	var action_type := int(act.get("action_type", 0))
@@ -2106,6 +2125,27 @@ func _refresh_sc_action_section(actions: Array) -> void:
 		# Disable slots this action type doesn't use; AI actions (variable) + raw types stay editable.
 		_sc_action_params[i].set_editable(bool(slot_def.get("used", true)))
 	_sc_action_syncing = false
+	_refresh_sc_preview(action_type, action_sub)
+
+
+# Show the Preview/Stop row only for a PLAYPARTANIM action, and enable it only when a target model
+# resolves. Leaving PLAYPARTANIM (or having no resolvable target) stops any running preview.
+func _refresh_sc_preview(action_type: int, action_sub: int) -> void:
+	if _sc_action_preview_row == null:
+		return
+	var is_ppa := action_sub == _PLAYPARTANIM_SUB and action_type in _AI_CHANGE_ACTION_TYPES
+	_sc_action_preview_row.visible = is_ppa
+	if not is_ppa:
+		if _controller != null:
+			_controller.stop_preview()
+		return
+	var actions: Array = _sc_chain.get("actions", [])
+	var action: Dictionary = actions[_sc_action_selected] if _sc_action_selected >= 0 and _sc_action_selected < actions.size() else {}
+	var can: bool = _controller != null and not action.is_empty() and _controller.can_preview_part_anim(action)
+	_sc_action_preview.disabled = not can
+	_sc_action_preview_stop.disabled = not can
+	_sc_action_preview.tooltip_text = "Play this part animation on the target unit in the viewport." if can \
+		else "Select or target an animated entity to preview this part animation."
 
 
 # Build the dropdown items for a picker-kind param slot from the mission's collections. RAW kinds get [].
@@ -2334,6 +2374,20 @@ func _on_sc_action_param_changed(_value: float) -> void:
 	if _sc_action_syncing:
 		return
 	_commit_selected_action()
+
+
+func _on_sc_action_preview() -> void:
+	if _controller == null or _sc_action_selected < 0:
+		return
+	var actions: Array = _sc_chain.get("actions", [])
+	if _sc_action_selected >= actions.size():
+		return
+	_controller.preview_part_anim(actions[_sc_action_selected])
+
+
+func _on_sc_action_preview_stop() -> void:
+	if _controller != null:
+		_controller.stop_preview()
 
 
 func _commit_selected_action(overrides: Dictionary = {}) -> void:

@@ -2030,3 +2030,101 @@ func test_move_selected_event_action_reorders_the_chain() -> void:
 	var actions := controller.get_selected_event_chain()["actions"] as Array
 	assert_eq(int((actions[0] as Dictionary)["param1"]), 22, "the displaced action is now first")
 	assert_eq(int((actions[1] as Dictionary)["param1"]), 11, "the moved action is now second")
+
+
+# --- Phase 4: PLAYPARTANIM in-editor preview ----------------------------------
+# The preview resolves a scripting action's target to its live model (the same MissionEntityRegistry the
+# runtime host uses) and drives it. Asset-free: a fake model tagged with entity_ref under a synthetic
+# MissionObjects container (no .3di / real mission needed for routing).
+
+class FakeModel:
+	extends Node3D
+	var play_calls: Array = []
+	var restart_calls: Array = []
+	var playing: bool = false
+	var reset_calls: int = 0
+	var cleared: int = 0
+	func play_part_anim(channel: int, play_type: int, time_s: float) -> void:
+		play_calls.append([channel, play_type, time_s])
+	func restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
+		restart_calls.append([channel, play_type, time_s])
+	func set_playing(v: bool) -> void:
+		playing = v
+	func reset_animation_time() -> void:
+		reset_calls += 1
+	func clear_part_anims() -> void:
+		cleared += 1
+	func clear_ctrl_values() -> void:
+		pass
+
+
+# A controller whose world has a MissionObjects container holding one animatable model tagged with the
+# given bms_id, so the preview resolver can find it. Returns { controller, model }.
+func _controller_with_model(bms_id: int) -> Dictionary:
+	var stub := StubTerrainEditor.new()
+	add_child_autofree(stub)
+	var world_root := Node3D.new()
+	stub.world_root = world_root
+	add_child_autofree(world_root)
+	var container := Node3D.new()
+	container.name = "MissionObjects"
+	world_root.add_child(container)
+	var model := FakeModel.new()
+	model.set_meta("entity_ref", { "kind": 1, "index": 0, "bms_id": bms_id, "group": 4, "team": 0, "position": Vector3.ZERO })
+	container.add_child(model)
+	return { "controller": MissionController.new(stub), "model": model }
+
+
+func _ppa_action(action_type: int, target: int, channel: int, play_type: int, time_raw: int) -> Dictionary:
+	return {
+		"action_type": action_type, "action_sub_type": 34,
+		"param1": target, "param2": channel, "param3": play_type, "param4": time_raw,
+	}
+
+
+func test_preview_part_anim_routes_to_target_model() -> void:
+	var ctx := _controller_with_model(1001)
+	var model: FakeModel = ctx.model
+	var ok: bool = ctx.controller.preview_part_anim(_ppa_action(21, 1001, 2, 1, 131072))  # ChangeSingleAI, 2.0s
+	assert_true(ok, "preview resolves the target and returns true")
+	assert_eq(model.restart_calls.size(), 1, "the model is restarted for a clean preview")
+	var call: Array = model.restart_calls[0]
+	assert_eq(int(call[0]), 2, "channel forwarded")
+	assert_eq(int(call[1]), 1, "play type forwarded")
+	assert_almost_eq(float(call[2]), 2.0, 0.0001, "time (raw 16.16) -> seconds")
+	assert_true(model.playing, "the model is set playing for the preview")
+
+
+func test_can_preview_part_anim_reflects_target_resolution() -> void:
+	var ctx := _controller_with_model(1001)
+	assert_true(ctx.controller.can_preview_part_anim(_ppa_action(21, 1001, 1, 1, 65536)), "resolvable target -> previewable")
+	assert_false(ctx.controller.can_preview_part_anim(_ppa_action(21, 9999, 1, 1, 65536)), "unknown SSN -> not previewable")
+	assert_false(ctx.controller.can_preview_part_anim({}), "empty action -> not previewable")
+
+
+func test_preview_no_target_returns_false() -> void:
+	var ctx := _controller_with_model(1001)
+	var model: FakeModel = ctx.model
+	var ok: bool = ctx.controller.preview_part_anim(_ppa_action(21, 9999, 1, 1, 65536))
+	assert_false(ok, "no resolvable target -> false")
+	assert_eq(model.restart_calls.size(), 0, "and nothing is played")
+
+
+func test_stop_preview_returns_model_to_rest() -> void:
+	var ctx := _controller_with_model(1001)
+	var model: FakeModel = ctx.model
+	ctx.controller.preview_part_anim(_ppa_action(21, 1001, 1, 1, 65536))
+	var cleared_before := model.cleared
+	ctx.controller.stop_preview()
+	assert_gt(model.cleared, cleared_before, "stop clears the running part anims")
+	ctx.controller.stop_preview()  # idempotent: safe to call again
+	pass_test("stop_preview is safe to call twice")
+
+
+func test_deselect_stops_preview() -> void:
+	var ctx := _controller_with_model(1001)
+	var model: FakeModel = ctx.model
+	ctx.controller.preview_part_anim(_ppa_action(21, 1001, 1, 1, 65536))
+	var cleared_before := model.cleared
+	ctx.controller._deselect()
+	assert_gt(model.cleared, cleared_before, "a selection change stops any running preview")

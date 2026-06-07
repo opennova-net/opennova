@@ -41,6 +41,10 @@ class FakeController:
 	var armed_id: int = 0
 	var arm_calls: Array = []
 	var disarm_calls: int = 0
+	# Phase 4: PLAYPARTANIM preview hooks.
+	var preview_calls: Array = []
+	var stop_preview_calls: int = 0
+	var can_preview: bool = false
 
 	func get_mission():
 		return mission_ref
@@ -485,6 +489,16 @@ class FakeController:
 
 	func get_action_sub_types(_action_type: int) -> Array:
 		return [{"value": 0, "name": "Null"}]
+
+	func can_preview_part_anim(_action: Dictionary) -> bool:
+		return can_preview
+
+	func preview_part_anim(action: Dictionary) -> bool:
+		preview_calls.append(action.duplicate(true))
+		return can_preview
+
+	func stop_preview() -> void:
+		stop_preview_calls += 1
 
 	func select_event(index: int) -> void:
 		select_event_calls.append(index)
@@ -1219,6 +1233,7 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 		"is_scripting_mode", "get_events", "get_selected_event_index", "get_selected_event_chain",
 		"get_event_flag_bits", "get_ai_flag_bits", "get_trigger_main_types", "get_trigger_sub_types",
 		"get_action_types", "get_action_sub_types", "select_event",
+		"can_preview_part_anim", "preview_part_anim", "stop_preview",
 		"add_event_default", "delete_selected_event", "set_selected_event",
 		"add_selected_event_trigger", "set_selected_event_trigger",
 		"remove_selected_event_trigger", "move_selected_event_trigger",
@@ -1844,6 +1859,84 @@ func test_scripting_ai_action_enables_exactly_its_sub_type_slots() -> void:
 	raw_ctx.inspector._sc_action_list.item_selected.emit(0)
 	for i in 4:
 		assert_true(raw_ctx.inspector._sc_action_params[i].is_editable(), "unknown action param %d stays editable" % (i + 1))
+
+
+# --- Phase 4: PLAYPARTANIM in-editor preview ----------------------------------
+
+func test_scripting_preview_row_shows_only_for_playpartanim() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 1)
+	var ppa := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1001, 2, 1, 65536])])
+	var ctx := _scripting_ctx([event], 0, ppa)
+	ctx.inspector._sc_action_list.item_selected.emit(0)
+	assert_true(ctx.inspector._sc_action_preview_row.visible, "the Preview row shows for a PLAYPARTANIM action")
+	# An AI-change action with a different sub-type hides it.
+	var acc := _sc_chain_dict(event, [], [_sc_act(3, "ChangeGroupAI", 8, "Accuracy", [1, 90, 0, 0])])
+	var ctx2 := _scripting_ctx([event], 0, acc)
+	ctx2.inspector._sc_action_list.item_selected.emit(0)
+	assert_false(ctx2.inspector._sc_action_preview_row.visible, "hidden for a non-PLAYPARTANIM AI sub-type")
+	# A non-AI action hides it too.
+	var other := _sc_chain_dict(event, [], [_sc_act(34, "ResetEvent", 0, "Null", [0, 0, 0, 0])])
+	var ctx3 := _scripting_ctx([event], 0, other)
+	ctx3.inspector._sc_action_list.item_selected.emit(0)
+	assert_false(ctx3.inspector._sc_action_preview_row.visible, "hidden for a non-AI action")
+
+
+func test_scripting_preview_button_enabled_state_follows_target() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 1)
+	var ppa := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1001, 2, 1, 65536])])
+	# No resolvable target -> the button is disabled with a hint.
+	var ctx := _scripting_ctx([event], 0, ppa)
+	ctx.fake.can_preview = false
+	ctx.inspector._sc_action_list.item_selected.emit(0)
+	assert_true(ctx.inspector._sc_action_preview.disabled, "Preview is disabled without an animated target")
+	assert_string_contains(ctx.inspector._sc_action_preview.tooltip_text, "animated")
+	# With a target -> enabled.
+	var ctx2 := _scripting_ctx([event], 0, ppa)
+	ctx2.fake.can_preview = true
+	ctx2.inspector._sc_action_list.item_selected.emit(0)
+	assert_false(ctx2.inspector._sc_action_preview.disabled, "Preview is enabled when a target resolves")
+
+
+func test_scripting_preview_button_calls_controller_with_action() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 1)
+	# channel 2, play, time raw 2*65536 (== 2.0s).
+	var ppa := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1001, 2, 1, 131072])])
+	var ctx := _scripting_ctx([event], 0, ppa)
+	ctx.fake.can_preview = true
+	ctx.inspector._sc_action_list.item_selected.emit(0)
+	ctx.inspector._sc_action_preview.pressed.emit()
+	assert_eq(ctx.fake.preview_calls.size(), 1, "Preview calls the controller once")
+	var called: Dictionary = ctx.fake.preview_calls[0]
+	assert_eq(int(called["param2"]), 2, "channel (param2) forwarded")
+	assert_eq(int(called["param3"]), 1, "play type (param3) forwarded")
+	assert_eq(int(called["param4"]), 131072, "time (param4, raw 16.16) forwarded")
+
+
+func test_scripting_preview_stop_button_calls_controller() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 1)
+	var ppa := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1001, 2, 1, 65536])])
+	var ctx := _scripting_ctx([event], 0, ppa)
+	ctx.fake.can_preview = true
+	ctx.inspector._sc_action_list.item_selected.emit(0)
+	var before: int = ctx.fake.stop_preview_calls
+	ctx.inspector._sc_action_preview_stop.pressed.emit()
+	assert_eq(ctx.fake.stop_preview_calls, before + 1, "Stop calls the controller")
+
+
+func test_scripting_switching_away_from_playpartanim_stops_preview() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 2)
+	var chain := _sc_chain_dict(event, [], [
+		_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1001, 2, 1, 65536]),
+		_sc_act(34, "ResetEvent", 0, "Null", [0, 0, 0, 0]),
+	])
+	var ctx := _scripting_ctx([event], 0, chain)
+	ctx.fake.can_preview = true
+	ctx.inspector._sc_action_list.item_selected.emit(0)  # PLAYPARTANIM -> row visible
+	assert_true(ctx.inspector._sc_action_preview_row.visible)
+	var before: int = ctx.fake.stop_preview_calls
+	ctx.inspector._sc_action_list.item_selected.emit(1)  # ResetEvent -> row hidden, preview stopped
+	assert_false(ctx.inspector._sc_action_preview_row.visible, "the row hides on a non-PLAYPARTANIM action")
+	assert_gt(ctx.fake.stop_preview_calls, before, "leaving PLAYPARTANIM stops any running preview")
 
 
 func test_scripting_trigger_disables_unused_param_slots() -> void:
