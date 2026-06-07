@@ -258,9 +258,23 @@ func tick(camera_pos: Vector3) -> void:
 	if _loaded and _mission_runtime != null:
 		var commands := _mission_runtime.tick()
 		if not commands.is_empty():
+			_route_mission_commands(commands)
 			mission_commands.emit(commands)
 	if _loaded and _mission_audio != null:
 		_mission_audio.tick(camera_pos)
+
+
+# Fire mission audio for runtime commands. PlayWavList actions arrive as PLAY_DIALOG
+# commands carrying the dialog/wav id in param1; route them to the mission audio
+# (which resolves the id through the co-named .DBF and plays the LWF set). Other
+# command kinds are still emitted via mission_commands for host consumers (HUD, etc.).
+func _route_mission_commands(commands: Array) -> void:
+	if _mission_audio == null:
+		return
+	for c in commands:
+		var cmd: Dictionary = c
+		if int(cmd.get("kind", -1)) == NovaMissionRuntime.COMMAND_PLAY_DIALOG:
+			_mission_audio.play_dialog(int(cmd.get("param1", 0)))
 
 
 func _start_mission_runtime(mission: NovaMissionData) -> void:

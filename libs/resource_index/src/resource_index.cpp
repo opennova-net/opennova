@@ -106,6 +106,9 @@ std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, b
 	if (extension == ".lwf") {
 		return "sound";
 	}
+	if (extension == ".dbf") {
+		return "sound";
+	}
 	if (extension == ".bin" && is_scr_bin) {
 		return "music_script";
 	}

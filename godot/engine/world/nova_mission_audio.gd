@@ -12,6 +12,7 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 
 const AMBIENT_BUS := &"Ambient"
 const SFX_BUS := &"SFX"
+const VOICE_BUS := &"Voice"
 # Global banks loaded after the mission's co-named .LWF: game.lwf holds the
 # non-localized ambient loops / SFX (LPNV_*), gamelocl.LWF the localized voice.
 const GAME_LWF := "game.lwf"
@@ -29,6 +30,7 @@ const STRATEGY_TARGET_ID := 2
 var _resource_root  # NovaResourceRoot
 var _item_db  # NovaItemDatabase
 var _bank: NovaSoundBank
+var _dbf  # NovaDbfData (mission co-named dialog bank; null if absent)
 var _audio_root: Node3D
 var _markers: Array = []  # [{ node:Node3D, pos:Vector3 }]
 var _strategy: int = STRATEGY_ITEM_SOUNDLOOP
@@ -52,6 +54,15 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 	_load_bank(mission_name.get_file().get_basename() + ".LWF")
 	_load_bank(GAME_LWF)
 	_load_bank(GLOBAL_LWF)
+
+	# The mission's co-named .DBF maps a PlayWavList dialog id (dlg001) to the LWF
+	# set name(s) it plays; loaded only if present.
+	var dbf_name := mission_name.get_file().get_basename() + ".DBF"
+	if _resource_root.has_file(dbf_name):
+		var dbf = NovaDbfData.new()
+		if dbf.open_from_resource_root(_resource_root, dbf_name) == OK:
+			_dbf = dbf
+			_stats["dialogs"] = dbf.get_dialog_count()
 
 	_audio_root = Node3D.new()
 	_audio_root.name = "MissionAudio"
@@ -93,6 +104,48 @@ func fire_soundset(name: String, world_pos: Vector3) -> bool:
 	if _bank == null or _audio_root == null:
 		return false
 	return _bank.play_oneshot_3d(_audio_root, world_pos, name, SFX_BUS)
+
+
+## Play a mission dialog/wav by its PlayWavList id (param1). Resolution, faithful
+## first: dialog id "dlg%03d" -> co-named .DBF -> def_id set name(s); then direct
+## set-name fallbacks. Plays a non-positional voice. Returns true if anything fired.
+func play_dialog(wav_id: int) -> bool:
+	if _bank == null or _audio_root == null:
+		return false
+	var candidates := PackedStringArray()
+	var dlg_id := "dlg%03d" % wav_id
+	if _dbf != null and _dbf.is_loaded():
+		for def_id in _dbf.resolve_dialog(dlg_id):
+			if not String(def_id).is_empty():
+				candidates.append(def_id)
+	# Fallbacks if there is no .dbf or it did not resolve: try direct set-name forms.
+	candidates.append("DLG%03d" % wav_id)
+	candidates.append(dlg_id)
+	candidates.append(str(wav_id))
+	for name in candidates:
+		if _bank.has_set(name):
+			return _bank.play_oneshot_2d(_audio_root, name, VOICE_BUS)
+	push_warning("NovaMissionAudio: unresolved dialog id %d (tried %s)" % [wav_id, str(Array(candidates))])
+	return false
+
+
+## Resolve-only (no playback) for tests/diagnostics: the first set name a dialog id
+## maps to that the loaded banks actually contain, or "" if none.
+func resolve_dialog_set(wav_id: int) -> String:
+	if _bank == null:
+		return ""
+	var candidates := PackedStringArray()
+	var dlg_id := "dlg%03d" % wav_id
+	if _dbf != null and _dbf.is_loaded():
+		for def_id in _dbf.resolve_dialog(dlg_id):
+			candidates.append(def_id)
+	candidates.append("DLG%03d" % wav_id)
+	candidates.append(dlg_id)
+	candidates.append(str(wav_id))
+	for name in candidates:
+		if _bank.has_set(name):
+			return name
+	return ""
 
 
 ## Pause ambient voices outside the cull radius around the listener; resume inside.

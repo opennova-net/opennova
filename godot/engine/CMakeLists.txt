@@ -28,6 +28,7 @@ add_subdirectory(../../libs/resource_index opennova_resource_index)
 add_subdirectory(../../libs/def opennova_def)
 add_subdirectory(../../libs/mission opennova_mission)
 add_subdirectory(../../libs/lwf opennova_lwf)
+add_subdirectory(../../libs/dbf opennova_dbf)
 add_subdirectory(../../libs/oned_edit opennova_oned_edit)
 
 set(TARGET_NAME "opennova")
@@ -60,6 +61,7 @@ add_library(${TARGET_NAME} SHARED
     mission/nova_mission_runtime.cpp
     lwf/nova_lwf_data.cpp
     lwf/nova_wav_loader.cpp
+    dbf/nova_dbf_data.cpp
     rtxt/rtxt_string_file.cpp
     rtxt/rtxt_resource_format.cpp
     util/nova_data_format.cpp
@@ -105,6 +107,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_def
     opennova_mission
     opennova_lwf
+    opennova_dbf
     opennova_oned_edit
 )
 

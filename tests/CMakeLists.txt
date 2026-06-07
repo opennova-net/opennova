@@ -98,6 +98,13 @@ target_link_libraries(lwf_roundtrip_test PRIVATE opennova_lwf)
 target_include_directories(lwf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME lwf_roundtrip COMMAND lwf_roundtrip_test)
 
+# DBF dialog-bank tests: byte-exact round-trip + dlg-id -> def-id mapping over a
+# real JO fixture (fixtures/dbf/00TRg.DBF).
+add_executable(dbf_roundtrip_test dbf/dbf_roundtrip_test.cpp)
+target_link_libraries(dbf_roundtrip_test PRIVATE opennova_dbf)
+target_include_directories(dbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME dbf_roundtrip COMMAND dbf_roundtrip_test)
+
 # PFF tests
 add_executable(pff_unit_test pff/pff_unit_test.cpp)
 target_link_libraries(pff_unit_test PRIVATE opennova_pff)

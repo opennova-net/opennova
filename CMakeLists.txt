@@ -29,6 +29,7 @@ add_subdirectory(libs/vfs)
 add_subdirectory(libs/resource_index)
 add_subdirectory(libs/mission)
 add_subdirectory(libs/lwf)
+add_subdirectory(libs/dbf)
 add_subdirectory(libs/oned_edit)
 
 set(OPENNOVA_CORE_TARGETS

@@ -114,6 +114,40 @@ func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: Stri
 	return played
 
 
+## Fire a one-shot, NON-positional voice for the named set (mission dialog/voice is
+## centered and full-volume, not 3D-attenuated). Auto-frees on finish. Returns true
+## if anything played.
+func play_oneshot_2d(parent: Node, name: String, bus: StringName) -> bool:
+	var loc := _find_set(name)
+	if loc.is_empty():
+		return false
+	var lwf = _banks[loc.bank]
+	var set_d: Dictionary = lwf.get_set(loc.set)
+	var layers: Array = set_d.get("layers", [])
+	var played := false
+	for li in layers.size():
+		var layer_d: Dictionary = layers[li]
+		var member := _pick_member(layer_d, loc.bank, loc.set, li)
+		if member.is_empty():
+			continue
+		var stream := _resolve_stream(member)
+		if stream == null:
+			continue
+		var player := AudioStreamPlayer.new()
+		if bus != StringName() and AudioServer.get_bus_index(bus) >= 0:
+			player.bus = bus
+		var base_pitch := float(member.get("base_pitch", 1.0))
+		player.pitch_scale = base_pitch if base_pitch > 0.01 else 1.0
+		var volume := int(member.get("volume", 255))
+		player.volume_db = linear_to_db(clampf(float(volume) / 255.0, 0.0001, 1.0))
+		player.stream = stream
+		parent.add_child(player)
+		player.finished.connect(player.queue_free)
+		player.play()
+		played = true
+	return played
+
+
 # --- Internals ---
 
 func _find_set(name: String) -> Dictionary:
