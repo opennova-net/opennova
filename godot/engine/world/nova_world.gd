@@ -38,6 +38,8 @@ var _loaded: bool = false
 var _loaded_mission: NovaMissionData
 var _mission_runtime: NovaMissionRuntime
 var _mission_stats: Dictionary = {}
+var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
+var _mission_audio: NovaMissionAudio
 
 
 func _ready() -> void:
@@ -123,6 +125,7 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 	_loaded_mission = mission
 	_place_mission_objects(mission)
 	_start_mission_runtime(mission)
+	_start_mission_audio(mission, bms_name)
 	_loaded = true
 	world_loaded.emit()
 	return OK
@@ -148,8 +151,8 @@ func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 func _place_mission_objects(mission: NovaMissionData) -> void:
 	if _resource_root == null or mission == null:
 		return
-	var placer := MissionObjectPlacer.new(_resource_root)
-	_mission_stats = placer.place(mission, self, { "environment_node": _env })
+	_placer = MissionObjectPlacer.new(_resource_root)
+	_mission_stats = _placer.place(mission, self, { "environment_node": _env })
 	print("NovaWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
 		int(_mission_stats.get("placed", 0)),
 		int(_mission_stats.get("batched", 0)),
@@ -180,9 +183,13 @@ func unload() -> void:
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
 	if container != null:
 		container.queue_free()
+	if _mission_audio != null:
+		_mission_audio.teardown()
 	_loaded = false
 	_loaded_mission = null
 	_mission_runtime = null
+	_mission_audio = null
+	_placer = null
 	_mission_stats = {}
 
 
@@ -252,6 +259,8 @@ func tick(camera_pos: Vector3) -> void:
 		var commands := _mission_runtime.tick()
 		if not commands.is_empty():
 			mission_commands.emit(commands)
+	if _loaded and _mission_audio != null:
+		_mission_audio.tick(camera_pos)
 
 
 func _start_mission_runtime(mission: NovaMissionData) -> void:
@@ -259,3 +268,22 @@ func _start_mission_runtime(mission: NovaMissionData) -> void:
 	if not _mission_runtime.load_from_mission(mission):
 		_mission_runtime = null
 		push_warning("NovaWorld: failed to start mission runtime")
+
+
+# Place real ambient sounds at the mission's sound markers: load the co-named .LWF
+# + gamelocl.LWF, resolve each marker to a sound set by name, and spawn looping 3D
+# voices. Reuses the placer's item database for the item_id -> sound_profile lookup.
+func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
+	var item_db = _placer.get_item_db() if _placer != null else null
+	_mission_audio = NovaMissionAudio.new(_resource_root, item_db)
+	var stats := _mission_audio.setup(mission, bms_name, self)
+	print("NovaWorld: mission audio — %d/%d sound markers resolved, %d bank(s), %d voice(s)" % [
+		int(stats.get("markers_resolved", 0)),
+		int(stats.get("markers_total", 0)),
+		int(stats.get("banks_loaded", 0)),
+		int(stats.get("voices", 0)),
+	])
+
+
+func get_mission_audio() -> NovaMissionAudio:
+	return _mission_audio

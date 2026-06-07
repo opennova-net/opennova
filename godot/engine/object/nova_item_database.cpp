@@ -21,6 +21,8 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_anim_def", "id"), &NovaItemDatabase::get_anim_def);
 	ClassDB::bind_method(D_METHOD("get_item_type", "id"), &NovaItemDatabase::get_item_type);
 	ClassDB::bind_method(D_METHOD("get_display_name", "id"), &NovaItemDatabase::get_display_name);
+	ClassDB::bind_method(D_METHOD("get_sound_profile", "id"), &NovaItemDatabase::get_sound_profile);
+	ClassDB::bind_method(D_METHOD("get_sound_loops", "id"), &NovaItemDatabase::get_sound_loops);
 	ClassDB::bind_method(D_METHOD("get_item", "id"), &NovaItemDatabase::get_item);
 	ClassDB::bind_method(D_METHOD("get_item_ids"), &NovaItemDatabase::get_item_ids);
 	ClassDB::bind_method(D_METHOD("get_items"), &NovaItemDatabase::get_items);
@@ -55,6 +57,10 @@ Error NovaItemDatabase::load(const String &path) {
 		item.display_name = String(entry.display_name);
 		item.graphic = String(entry.graphic);
 		item.anim_def = String(entry.anim_def);
+		item.sound_profile = String(entry.sound_profile);
+		for (int s = 0; s < 7; ++s) {
+			item.soundloops[s] = String(entry.soundloops[s]);
+		}
 		items[entry.id] = item;
 	}
 
@@ -94,6 +100,10 @@ Error NovaItemDatabase::load_from_resource_root(const Ref<NovaResourceRoot> &p_r
 		item.display_name = String(entry.display_name);
 		item.graphic = String(entry.graphic);
 		item.anim_def = String(entry.anim_def);
+		item.sound_profile = String(entry.sound_profile);
+		for (int s = 0; s < 7; ++s) {
+			item.soundloops[s] = String(entry.soundloops[s]);
+		}
 		items[entry.id] = item;
 	}
 
@@ -142,6 +152,23 @@ String NovaItemDatabase::get_display_name(int id) const {
 	return it == items.end() ? String() : it->second.display_name;
 }
 
+String NovaItemDatabase::get_sound_profile(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? String() : it->second.sound_profile;
+}
+
+PackedStringArray NovaItemDatabase::get_sound_loops(int id) const {
+	PackedStringArray out;
+	out.resize(7);
+	const auto it = items.find(id);
+	if (it != items.end()) {
+		for (int s = 0; s < 7; ++s) {
+			out.set(s, it->second.soundloops[s]);
+		}
+	}
+	return out;
+}
+
 Dictionary NovaItemDatabase::get_item(int id) const {
 	Dictionary out;
 	const auto it = items.find(id);
@@ -153,6 +180,8 @@ Dictionary NovaItemDatabase::get_item(int id) const {
 	out["display_name"] = it->second.display_name;
 	out["graphic"] = it->second.graphic;
 	out["anim_def"] = it->second.anim_def;
+	out["sound_profile"] = it->second.sound_profile;
+	out["soundloops"] = get_sound_loops(id);
 	return out;
 }
 
@@ -194,6 +223,8 @@ Array NovaItemDatabase::get_items() const {
 		entry["display_name"] = item->display_name;
 		entry["graphic"] = item->graphic;
 		entry["anim_def"] = item->anim_def;
+		entry["sound_profile"] = item->sound_profile;
+		entry["soundloops"] = get_sound_loops(item->id);
 		out.push_back(entry);
 	}
 	return out;

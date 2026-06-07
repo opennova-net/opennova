@@ -19,6 +19,10 @@ boot_splash/show_image=false
 config/icon="res://icon.svg"
 run/main_scene.runtime_game="res://game/main_game.tscn"
 
+[audio]
+
+buses/default_bus_layout="res://default_bus_layout.tres"
+
 [autoload]
 
 NovaStrings="*res://engine/strings/nova_strings.gd"

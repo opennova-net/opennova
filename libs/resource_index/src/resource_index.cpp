@@ -103,6 +103,9 @@ std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, b
 	if (extension == ".sbf") {
 		return "sbf";
 	}
+	if (extension == ".lwf") {
+		return "sound";
+	}
 	if (extension == ".bin" && is_scr_bin) {
 		return "music_script";
 	}
@@ -150,7 +153,10 @@ std::string normalize_kind(const std::string &kind) {
 	if (key == "mus") {
 		return "music_script";
 	}
-	// "sbf", "music_script", and the "music" umbrella pass through unchanged.
+	if (key == "lwf" || key == "sounds" || key == "sound_profile") {
+		return "sound";
+	}
+	// "sbf", "music_script", "sound", and the "music" umbrella pass through unchanged.
 	return key;
 }
 
