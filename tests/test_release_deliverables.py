@@ -231,6 +231,19 @@ def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> Non
     assert "dist/opennova-runtime-windows.zip" not in workflow
 
 
+def test_windows_godot_tests_use_console_binary_for_bash_runner() -> None:
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    godot_tests = _workflow_job(workflow, "godot-tests")
+    test_script = (ROOT / "scripts/test_godot.sh").read_text(encoding="utf-8")
+
+    assert "Godot_v${version}_win64_console.exe" in godot_tests
+    assert "Godot_v${GODOT_VERSION}_win64_console.exe" in godot_tests
+    assert "Godot_v4.6.1-stable_win64_console.exe" in test_script
+    assert test_script.index("Godot_v4.6.1-stable_win64_console.exe") < test_script.index(
+        "Godot_v4.6.1-stable_win64.exe"
+    )
+
+
 def test_release_splits_godot_editor_and_runtime_package_jobs() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     package_jobs = [

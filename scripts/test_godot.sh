@@ -11,6 +11,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ -z "${GODOT_BIN:-}" ]]; then
   for candidate in \
+    "$root/.godot-bin/Godot_v4.6.1-stable_win64_console.exe" \
     "$root/.godot-bin/Godot_v4.6.1-stable_win64.exe" \
     "$root/.godot-bin/Godot_v4.6.1-stable_linux.x86_64" \
     "$root/.godot-bin/Godot_v4.6.1-stable_macos.universal"
