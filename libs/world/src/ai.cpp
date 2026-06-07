@@ -3,7 +3,40 @@
 // per-state behaviors route to not_yet_ported until their phase lands.
 #include "world/ai.h"
 
+#include <cmath>
+
 namespace opennova::world {
+
+namespace {
+
+// radians -> 32-bit binary angle. [orig: dbl_7C19D8 = 0x41C45F306DC9C883.]
+constexpr double kBamPerRadian = 683565275.5764316; // 2^32 / (2*pi)
+
+// Saturation clamp on the death-velocity magnitude. [orig: flt_7C19E0 = 0x4EFFFE00.]
+constexpr double kDeathSpeedClamp = 2147418112.0;
+
+// Byte-exact integer abs (cdq/xor/sub idiom; INT_MIN -> INT_MIN like the orig).
+inline int32_t iabs32(int32_t v) {
+    int32_t s = v >> 31;
+    return (v ^ s) - s;
+}
+
+// Shared distance + bearing math for both waypoint types. [orig: AIWaypoint_UpdateTarget
+// @0x457380.] Approx 3D distance = larger-axis + ((5*(other-axis + |dy|)) >> 16), all in
+// wrapping 32-bit; bearing = trunc(atan2(dz, dx) * 2^32/2pi). dx/dz/dy follow the decomp
+// naming (dx<-pos+4, dz<-pos+8, dy<-pos+12).
+void wp_dist_bearing(int32_t dx, int32_t dz, int32_t dy, int32_t &dist, int32_t &bearing) {
+    int32_t adx = iabs32(dx), adz = iabs32(dz), ady = iabs32(dy);
+    int32_t base, cross;
+    if (adx <= adz) { base = adz; cross = static_cast<int32_t>(static_cast<uint32_t>(adx) + static_cast<uint32_t>(ady)); }
+    else            { base = adx; cross = static_cast<int32_t>(static_cast<uint32_t>(adz) + static_cast<uint32_t>(ady)); }
+    int32_t term = static_cast<int32_t>(static_cast<uint32_t>(cross) * 5u) >> 16; // x5 wrap, arithmetic >>16
+    dist = static_cast<int32_t>(static_cast<uint32_t>(base) + static_cast<uint32_t>(term));
+    bearing = static_cast<int32_t>(static_cast<int64_t>(
+        std::atan2(static_cast<double>(dz), static_cast<double>(dx)) * kBamPerRadian)); // chop toward zero
+}
+
+} // namespace
 
 // ----------------------------------------------------------------------------
 // State name table. [orig: Entity_LookupAIStateName @0x455cc0.]
@@ -100,6 +133,53 @@ void h_handle_alert_event(AiThinkCtx &ctx) {
         ctx.self->brain.set_pend(15);
 }
 
+// [orig: AI_HandleEvent_HelicopterCombatD @0x467730] state-16 GROUND_FOLLOWWP tick.
+// (The kong name is cross-wired; the address is ground truth — this is the GROUND
+// follow-waypoint behavior.) On death: queue a crash (3) or still (4) death event by
+// horizontal speed. Alive: acquire a target (P2 stub -> none), tick the fire timer,
+// then either engage (P2) or walk the waypoint path (P1 core).
+void h_ground_followwp_tick(AiThinkCtx &ctx) {
+    AiEntity &e = *ctx.self;
+    AiBrain &b = e.brain;
+
+    if (e.health <= 0) { // [orig: *(int16*)(entity+286) <= 0]
+        double sp = std::sqrt(static_cast<double>(e.vel_x) * e.vel_x +
+                              static_cast<double>(e.vel_z) * e.vel_z);
+        if (sp > kDeathSpeedClamp) sp = kDeathSpeedClamp; // flt_7C19E0 min-clamp
+        int32_t isp = static_cast<int32_t>(sp);
+        AiEventEntry ev{};
+        ev.f[0] = (isp >= 1057) ? 3 : 4;          // crash/ragdoll vs still death
+        int ai_index = static_cast<int>(&e - ctx.sys->at(0));
+        ev.f[1] = (ai_index << 16);                // channel 0 | entity index
+        ev.set_timer(0.0f);
+        ctx.sys->events.queue(ev);
+        return;
+    }
+
+    // Target acquisition is skipped when profile+100 & 2 (use-fallback).
+    bool has_target = ((e.profile.flags100 & 2) != 0) ? false : ctx.sys->acquire_target(e);
+
+    if ((e.profile.flags96 & 0x10) != 0) { // can-fire
+        if (b.f[AiBrain::kFireTimer] <= 0)
+            b.f[AiBrain::kFireTimer] = 0;
+        else
+            ++ctx.sys->unported_calls; // [orig: Entity_ComputeWeaponFirePositions @0x455ef0] -> P2
+    }
+    int32_t ft = b.f[AiBrain::kFireTimer];
+    if (ft <= 0)
+        b.f[AiBrain::kFireTimer] = 0;
+    else
+        b.f[AiBrain::kFireTimer] = ft - b.f[AiBrain::kStep];
+
+    if (has_target) {
+        // [orig: set relation matrices + Entity_SetAITarget + pending=17] -> P2 combat.
+        ++ctx.sys->unported_calls;
+        b.set_pend(kAiGroundCombat); // 17
+    } else {
+        ctx.sys->update_waypoint_movement(e); // [orig: AI_UpdateWaypointMovement @0x457bd0]
+    }
+}
+
 // The 24-state dispatch table, mirroring off_815238/3C/40/44 @0x815238.
 // Columns: {enter, tick, exit, event}. U = not-yet-ported (visible stub), _ = noop.
 constexpr AiHandler U = h_not_yet_ported;
@@ -122,7 +202,7 @@ const StateRow kTable[kAiStateCount] = {
     /* 13 (transition)     */ {U, U, _, h_handle_alert_event},
     /* 14 HELO_PRETTY      */ {h_reset_to_patrol, U, _, U},
     /* 15 HELO_DEAD        */ {U, U, _, U},
-    /* 16 GROUND_FOLLOWWP  */ {h_set_state_idle, U, _, U},
+    /* 16 GROUND_FOLLOWWP  */ {h_set_state_idle, h_ground_followwp_tick, _, U},
     /* 17 GROUND_COMBAT    */ {U, U, h_clear_bone_flag, U},
     /* 18 GROUND_EVADE     */ {U, U, _, U},
     /* 19 GROUND_FORMATION */ {h_full_reset_to_idle, U, _, U},
@@ -313,6 +393,124 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             process_infantry_state_machine(e, world, 0);
     }
     events.process_timed(*this, world);
+}
+
+// ----------------------------------------------------------------------------
+// Waypoint targeting + movement (P1: GROUND_FOLLOWWP).
+// ----------------------------------------------------------------------------
+
+// [orig: AIWaypoint_UpdateTarget @0x457380] wp = brain+52 (= b.f[13..]). Deviation:
+// kWpResolved stores the pool-3 node INDEX (orig stored the resolved pointer); the
+// dword values written are byte-identical.
+int ai_waypoint_update_target(AiBrain &b, const int32_t pos[3], const NavNodeTable &nav) {
+    int32_t type = b.f[AiBrain::kWpType];
+    if (type == 1) { // nav node
+        int32_t navMeshId = b.f[AiBrain::kWpChannel];
+        const NavChannel *ch = (navMeshId != 0) ? nav.channel(navMeshId) : nullptr;
+        if (!ch || ch->count == 0) return -1; // [orig: navMeshId==0 || dword_A71DD4[34*id]==0]
+        // Tracked deviation: the original reads entryIndex[34*navMeshId + node] and
+        // Pool_GetEntryUnchecked(3,idx) UNCHECKED (always returns 0, writes fields). Our
+        // container rebase adds a bounds/null guard that returns -1 only for indices the
+        // original would treat as wild pointers (UB). On valid data (node < count <= 32,
+        // populated pool) it never fires, so resolved values stay byte-identical.
+        int32_t sub = b.f[AiBrain::kWpNode];
+        if (sub < 0 || sub >= 32) return -1;  // entries[] holds 32 nodes max
+        int32_t nodeIdx = ch->entries[sub];   // [orig: entryIndex[34*navMeshId + wp[2]]]
+        const NavEntry *node = nav.entry(nodeIdx);
+        if (!node) return -1;                 // [orig: unchecked Pool_GetEntryUnchecked(3,idx)]
+        b.f[AiBrain::kWpResolved] = nodeIdx;  // [orig: waypointData+12 = navEntry]
+        int32_t dx = node->f[1] - pos[0];
+        int32_t dz = node->f[2] - pos[1];
+        int32_t dy = node->f[3] - pos[2];
+        wp_dist_bearing(dx, dz, dy, b.f[AiBrain::kWpDistance], b.f[AiBrain::kWpBearing]);
+        b.f[AiBrain::kWpNodeVal] = node->f[0]; // [orig: *navEntry]
+        b.f[AiBrain::kWpExtra] = node->f[4];   // [orig: navEntry[4]]
+        return 0;
+    }
+    if (type == 3) { // literal coordinate
+        int32_t dx = b.f[AiBrain::kWpCoordX] - pos[0];
+        int32_t dz = b.f[AiBrain::kWpCoordY] - pos[1];
+        int32_t dy = b.f[AiBrain::kWpCoordZ] - pos[2];
+        wp_dist_bearing(dx, dz, dy, b.f[AiBrain::kWpDistance], b.f[AiBrain::kWpBearing]);
+        b.f[AiBrain::kWpExtra] = 0;                          // [orig: waypointData+44 = 0]
+        b.f[AiBrain::kWpNodeVal] = b.f[AiBrain::kWpCoordSrc];// [orig: +40 = +28]
+        return 0;
+    }
+    return (type == 2) ? 0 : -1; // [orig: type 2 -> 0 (no-op); any other -> -1]
+}
+
+// [orig: AI_UpdateWaypointMovement @0x457bd0] advance along the path; write the working
+// target transform + out-speed. The return value is unused by the caller; we mirror the
+// original's "freeze on path end / no waypoint" branches faithfully.
+int AiSystem::update_waypoint_movement(AiEntity &e) {
+    AiBrain &b = e.brain;
+    int32_t moveSpeed = (b.f[AiBrain::kCurState] == 16) ? b.f[AiBrain::kSpeedB]
+                                                        : b.f[AiBrain::kSpeedA];
+    int wr = ai_waypoint_update_target(b, e.pos, nav);
+    if (wr == -1) { // no resolvable waypoint -> freeze at current transform
+        b.f[AiBrain::kWorkPosX] = e.pos[0];
+        b.f[AiBrain::kWorkPosY] = e.pos[1];
+        b.f[AiBrain::kWorkPosZ] = e.pos[2];
+        b.f[AiBrain::kWorkHeading] = e.heading;
+        b.f[AiBrain::kWorkPitch] = e.pitch;
+        b.f[AiBrain::kWorkRoll] = e.roll;
+        b.f[AiBrain::kOutSpeed] = 0;
+        return e.roll; // [orig: returns *(entity+24); unused]
+    }
+
+    int32_t animTime = b.f[AiBrain::kWpNodeVal];     // aiState[23]
+    if (b.f[AiBrain::kWpDistance] < animTime) {       // within arrival threshold -> advance
+        int32_t ch = b.f[AiBrain::kWpChannel];        // aiState[14]
+        int32_t kf = b.f[AiBrain::kWpNode];           // aiState[15] (pre-increment)
+        b.f[AiBrain::kStoredKeyTime] = animTime;      // aiState[35]
+        b.f[AiBrain::kAnimFlag] = 0;                  // aiState[32]
+        // [orig: SetBitB key = movsx word [entity+284] @0x457c6d -> sign-extend the u16]
+        relmat_calls.push_back({1, static_cast<int32_t>(static_cast<int16_t>(e.relmat_id)), ch, kf});
+        relmat_calls.push_back({0, e.net_id, ch, kf}); // SetBitA(entity+124) is a full dword load
+        ++b.f[AiBrain::kWpNode];                      // ++aiState[15]
+        const NavChannel *nc = nav.channel(ch);
+        int32_t numKeyframes = nc ? nc->count : 0;    // dword_A71DD4[34*ch]
+        if (b.f[AiBrain::kWpNode] >= numKeyframes) {
+            int32_t loopflag = nc ? nc->loopflag : 0; // Buffer[34*ch]
+            if ((loopflag & 1) != 0) {                // one-shot: terminate + freeze
+                b.f[AiBrain::kWpType] = 0;            // aiState[13]=0 (path done)
+                b.f[AiBrain::kWpNode] = numKeyframes - 1;
+                b.f[AiBrain::kWorkPosX] = e.pos[0];
+                b.f[AiBrain::kWorkPosY] = e.pos[1];
+                b.f[AiBrain::kWorkPosZ] = e.pos[2];
+                b.f[AiBrain::kWorkHeading] = e.heading;
+                b.f[AiBrain::kWorkPitch] = e.pitch;
+                b.f[AiBrain::kOutSpeed] = 0;
+                b.f[AiBrain::kWorkRoll] = e.roll;
+                return e.roll; // [orig: returns entity+4 (a ptr); unused]
+            }
+            b.f[AiBrain::kWpNode] = 0;                // loop: wrap to node 0
+        }
+    }
+
+    int32_t timeDelta = b.f[AiBrain::kWpDistance] - b.f[AiBrain::kWpNodeVal]; // [22]-[23]
+    bool halve = (b.f[AiBrain::kCurState] == 17) ? (timeDelta < 16 * moveSpeed)
+                                                 : (timeDelta < moveSpeed * b.f[AiBrain::kStep]);
+    if (halve) moveSpeed >>= 1;
+
+    const NavEntry *node = nav.entry(b.f[AiBrain::kWpResolved]); // aiState[16]
+    int32_t nodeX = node ? node->f[1] : 0; // *(waypointPtr+4)
+    int32_t nodeY = node ? node->f[2] : 0; // *(waypointPtr+8)
+    int32_t result = b.f[AiBrain::kWpBearing];                   // aiState[21]
+    b.f[AiBrain::kWorkPosX] = nodeX;
+    b.f[AiBrain::kWorkPitch] = 0;   // aiState[133]
+    b.f[AiBrain::kWorkRoll] = 0;    // aiState[134]
+    b.f[AiBrain::kWorkPosY] = nodeY;
+    b.f[AiBrain::kWorkHeading] = result;
+    b.f[AiBrain::kOutSpeed] = moveSpeed;
+    return result;
+}
+
+// [orig: AI_FindBestTargetB @0x466f60] -> P2 (combat). Stub: never finds a target so
+// GROUND_FOLLOWWP always walks its path; counts calls for coverage visibility.
+bool AiSystem::acquire_target(AiEntity &) {
+    ++find_target_calls;
+    return false;
 }
 
 } // namespace opennova::world
