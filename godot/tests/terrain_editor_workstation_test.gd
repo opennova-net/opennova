@@ -171,6 +171,7 @@ func _make_resource_fixture(name: String) -> String:
 	_write_fixture_file(root.path_join("alpha.3di"), "3di")
 	_write_fixture_file(root.path_join("alpha.ase"), "ase")
 	_write_fixture_file(root.path_join("alpha.fnt"), "fnt")
+	_write_fixture_file(root.path_join("alpha.ptl"), "ptl")
 	_write_fixture_file(root.path_join("alpha.bin"), "RTXTstrings")
 	_write_fixture_file(root.path_join("raw.bin"), "raw")
 	_write_fixture_file(root.path_join("ignored/nested.trn"), "nested")
@@ -198,7 +199,7 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 	for child in workspace_rail.get_children():
 		if child is Button:
 			row_texts.append((child as Button).text)
-	assert_eq(row_texts, ["Terrain", "Object", "Mission", "Fonts", "Credits", "Strings", "Environment"],
+	assert_eq(row_texts, ["Terrain", "Object", "Mission", "Particles", "Fonts", "Credits", "Strings", "Environment"],
 		"The nav should list every workspace as a full-width row, with Environment promoted from the sun button.")
 
 	assert_false(_has_label_text(workspace_rail, "World"), "Top-bar workspace groups should use separators, not inline category words.")
@@ -318,10 +319,12 @@ func test_resource_index_lists_object_resources_without_glb_models() -> void:
 	assert_eq(index.get_resource_files("object_model").size(), 1, "3DI files should be indexed as object model resources.")
 	assert_eq(index.get_resource_files("object_scene").size(), 1, "ASE files should be indexed as importable object scenes.")
 	assert_eq(index.get_resource_files("font").size(), 1, "FNT files should be indexed as font resources.")
+	assert_eq(index.get_resource_files("particle").size(), 1, "PTL files should be indexed as particle resources.")
 	assert_eq(index.get_resource_files("strings").size(), 1, "RTXT BIN files should be indexed as strings resources.")
 	assert_eq(index.get_resource_files("glb").size(), 0, "GLB files should no longer be indexed.")
-	assert_eq(index.get_resource_files("all").size(), 8, "All openable resources should exclude GLB and non-RTXT BIN blobs.")
+	assert_eq(index.get_resource_files("all").size(), 9, "All openable resources should exclude GLB and non-RTXT BIN blobs.")
 	assert_eq(String((index.get_resource_files("object_model")[0] as Dictionary).get("relative_path", "")), "alpha.3di", "Object model entries should keep root-relative paths.")
+	assert_eq(String((index.get_resource_files("particle")[0] as Dictionary).get("relative_path", "")), "alpha.ptl", "Particle entries should keep root-relative paths.")
 	assert_eq(String((index.get_resource_files("strings")[0] as Dictionary).get("relative_path", "")), "alpha.bin", "Strings entries should keep root-relative paths.")
 
 
@@ -500,6 +503,30 @@ func test_strings_workspace_open_uses_resource_browser() -> void:
 	if list != null:
 		assert_eq(list.item_count, 1, "Strings browser should list RTXT BIN files from the resource directory.")
 		assert_string_contains(list.get_item_text(0), "alpha", "Strings resource rows should show the matching file.")
+
+
+func test_particles_workspace_open_uses_resource_browser() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var root := _make_resource_fixture("resource_browser_particles")
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index particle files.")
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.PARTICLE)
+	await get_tree().process_frame
+
+	var open_button := _find_button_by_text(workstation.get_node("%WorkspaceActionsHost"), "Open PTL...")
+	assert_not_null(open_button, "Particles workspace should expose Open PTL.")
+	if open_button == null:
+		return
+	open_button.pressed.emit()
+
+	var dialog := workstation.find_child("ResourceBrowserDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Particles Open should use the shared resource browser.")
+	if dialog == null:
+		return
+	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	assert_not_null(list, "Particles resource browser should include a list.")
+	if list != null:
+		assert_eq(list.item_count, 1, "Particles browser should list PTL files from the resource directory.")
+		assert_string_contains(list.get_item_text(0), "alpha", "Particle resource rows should show the matching file.")
 
 
 func test_workstation_opens_font_workspace_by_credits_font_name() -> void:

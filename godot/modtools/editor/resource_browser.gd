@@ -204,6 +204,8 @@ func _kind_label() -> String:
 			return "environment"
 		"mission":
 			return "mission"
+		"particle":
+			return "particle"
 		"strings":
 			return "strings"
 		"object", "object_project", "object_model", "object_scene":

@@ -192,6 +192,14 @@ func get_open_dialog_dir() -> String:
 	return _last_open_dir
 
 
+func get_open_resource_kind() -> String:
+	return "particle"
+
+
+func get_current_resource_path() -> String:
+	return particle_editor.current_path if particle_editor != null else ""
+
+
 func open_file(path: String) -> Error:
 	if particle_editor == null:
 		return ERR_UNAVAILABLE

@@ -97,6 +97,9 @@ std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, b
 	if (extension == ".fnt") {
 		return "font";
 	}
+	if (extension == ".ptl") {
+		return "particle";
+	}
 	if (extension == ".mnu") {
 		return "menu";
 	}
@@ -140,6 +143,9 @@ std::string normalize_kind(const std::string &kind) {
 	}
 	if (key == "fnt" || key == "fonts") {
 		return "font";
+	}
+	if (key == "ptl" || key == "particles") {
+		return "particle";
 	}
 	if (key == "mnu" || key == "menus") {
 		return "menu";

@@ -15,7 +15,7 @@ func test_strings_workspace_in_rail() -> void:
 		if child is Button:
 			row_texts.append((child as Button).text)
 	assert_true(row_texts.has("Strings"), "Strings should join the workspace nav.")
-	assert_eq(row_texts[5], "Strings", "Strings should be the last switchable workspace row.")
+	assert_eq(row_texts[6], "Strings", "Strings should be the last switchable workspace row.")
 
 
 func test_strings_workspace_mounts_self_contained_view() -> void:
