@@ -52,6 +52,7 @@ def test_execute_loose_request_dispatches_real_runner(monkeypatch, tmp_path: Pat
             "write_ase": True,
             "write_3dp": True,
             "reset_scene": True,
+            "game": "jo",
         }
     ]
 
@@ -102,6 +103,7 @@ def test_execute_definition_request_dispatches_real_runner(monkeypatch, tmp_path
             "write_max": True,
             "write_ase": False,
             "write_3dp": False,
+            "game": "jo",
         }
     ]
 
