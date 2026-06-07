@@ -469,6 +469,9 @@ class FakeController:
 	func get_event_flag_bits() -> Array:
 		return [{"value": 1, "name": "Reset after"}, {"value": 2, "name": "Pre-mission"}, {"value": 4, "name": "Post-mission"}]
 
+	func get_ai_flag_bits() -> Array:
+		return [{"value": 1, "name": "Blind"}, {"value": 2, "name": "Guarding"}, {"value": 1 << 22, "name": "Navigation waypoint"}]
+
 	func get_trigger_main_types() -> Array:
 		return [{"value": 1, "name": "Group"}, {"value": 2, "name": "Single"}]
 
@@ -1188,7 +1191,7 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 		"get_group_count", "get_groups", "get_group", "set_group",
 		# Phase 4: mission scripting (events / triggers / actions).
 		"is_scripting_mode", "get_events", "get_selected_event_index", "get_selected_event_chain",
-		"get_event_flag_bits", "get_trigger_main_types", "get_trigger_sub_types",
+		"get_event_flag_bits", "get_ai_flag_bits", "get_trigger_main_types", "get_trigger_sub_types",
 		"get_action_types", "get_action_sub_types", "select_event",
 		"add_event_default", "delete_selected_event", "set_selected_event",
 		"add_selected_event_trigger", "set_selected_event_trigger",
@@ -1751,14 +1754,20 @@ func test_param_schema_marks_unused_slots() -> void:
 	var blue := MissionParamSchema.action_slots(8)
 	for i in 4:
 		assert_false(bool(blue["params"][i]["used"]), "BlueWin slot %d is unused" % (i + 1))
-	# Undescribed type: AreaAiRed (12) has no row -> count unknown -> all slots stay usable.
-	var area := MissionParamSchema.action_slots(12)
+	# AI-change family is sub-type-aware: PLAYPARTANIM (34) uses all four (target + ANIMNUM / play / time)...
+	var ai_anim := MissionParamSchema.action_slots(3, 34)
 	for i in 4:
-		assert_true(bool(area["params"][i]["used"]), "undescribed action slot %d stays usable" % (i + 1))
-	# Variable (AI) type: ChangeGroupAI (3) -> all slots usable (count depends on sub-type).
-	var ai := MissionParamSchema.action_slots(3)
+		assert_true(bool(ai_anim["params"][i]["used"]), "ChangeGroupAI/PlayPartAnim slot %d is used" % (i + 1))
+	# ...while a single-value sub-type (ACCURACY 8) uses only the target + one value.
+	var ai_acc := MissionParamSchema.action_slots(3, 8)
+	assert_true(bool(ai_acc["params"][0]["used"]), "ChangeGroupAI target is used")
+	assert_true(bool(ai_acc["params"][1]["used"]), "ChangeGroupAI/Accuracy value is used")
+	assert_false(bool(ai_acc["params"][2]["used"]), "ChangeGroupAI/Accuracy slot 3 is unused")
+	# AreaAiRed (12) is now modelled (was raw): a Zone target plus the sub-type's slots.
+	var area := MissionParamSchema.action_slots(12, 34)
+	assert_eq(int(area["params"][0]["kind"]), MissionParamSchema.Kind.ZONE, "AreaAiRed targets a zone")
 	for i in 4:
-		assert_true(bool(ai["params"][i]["used"]), "AI action slot %d stays usable" % (i + 1))
+		assert_true(bool(area["params"][i]["used"]), "AreaAiRed/PlayPartAnim slot %d is used" % (i + 1))
 	# Triggers likewise: GroupAtRedAlert (main 1 / sub 3) uses only param1.
 	var trig := MissionParamSchema.trigger_slots(1, 3)
 	assert_true(bool(trig["params"][0]["used"]), "GroupAtRedAlert slot 1 is used")
@@ -1787,20 +1796,28 @@ func test_scripting_zero_param_action_disables_all_slots() -> void:
 		assert_false(ctx.inspector._sc_action_params[i].is_editable(), "BlueWin param %d is disabled" % (i + 1))
 
 
-func test_scripting_ai_and_unmapped_actions_keep_slots_editable() -> void:
-	# ChangeGroupAI (variable count by sub-type) and an undescribed action both keep all slots editable
-	# so a real param is never blocked.
+func test_scripting_ai_action_enables_exactly_its_sub_type_slots() -> void:
+	# PLAYPARTANIM uses all four (unit target + ANIMNUM / play type / time), so every row is editable.
 	var event := _sc_event(0, 0, 0, 0, 0, 1)
-	var ai_chain := _sc_chain_dict(event, [], [_sc_act(3, "ChangeGroupAI", 34, "PlayPartAnim", [1, 2, 3, 4])])
-	var ai_ctx := _scripting_ctx([event], 0, ai_chain)
-	ai_ctx.inspector._sc_action_list.item_selected.emit(0)
+	var anim_chain := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1, 2, 1, 65536])])
+	var anim_ctx := _scripting_ctx([event], 0, anim_chain)
+	anim_ctx.inspector._sc_action_list.item_selected.emit(0)
 	for i in 4:
-		assert_true(ai_ctx.inspector._sc_action_params[i].is_editable(), "AI action param %d stays editable" % (i + 1))
-	var raw_chain := _sc_chain_dict(event, [], [_sc_act(12, "AreaAiRed", 0, "Null", [1, 2, 3, 4])])
+		assert_true(anim_ctx.inspector._sc_action_params[i].is_editable(), "PlayPartAnim param %d is editable" % (i + 1))
+	# A single-value sub-type (ACCURACY) enables only the target + one value; the rest grey out.
+	var acc_chain := _sc_chain_dict(event, [], [_sc_act(3, "ChangeGroupAI", 8, "Accuracy", [1, 90, 0, 0])])
+	var acc_ctx := _scripting_ctx([event], 0, acc_chain)
+	acc_ctx.inspector._sc_action_list.item_selected.emit(0)
+	assert_true(acc_ctx.inspector._sc_action_params[0].is_editable(), "Accuracy target stays editable")
+	assert_true(acc_ctx.inspector._sc_action_params[1].is_editable(), "Accuracy value stays editable")
+	assert_false(acc_ctx.inspector._sc_action_params[2].is_editable(), "Accuracy param 3 greys out")
+	assert_false(acc_ctx.inspector._sc_action_params[3].is_editable(), "Accuracy param 4 greys out")
+	# A genuinely unknown action type still degrades to four raw, editable slots so no param is ever blocked.
+	var raw_chain := _sc_chain_dict(event, [], [_sc_act(999, "Action 999", 0, "Null", [1, 2, 3, 4])])
 	var raw_ctx := _scripting_ctx([event], 0, raw_chain)
 	raw_ctx.inspector._sc_action_list.item_selected.emit(0)
 	for i in 4:
-		assert_true(raw_ctx.inspector._sc_action_params[i].is_editable(), "undescribed action param %d stays editable" % (i + 1))
+		assert_true(raw_ctx.inspector._sc_action_params[i].is_editable(), "unknown action param %d stays editable" % (i + 1))
 
 
 func test_scripting_trigger_disables_unused_param_slots() -> void:

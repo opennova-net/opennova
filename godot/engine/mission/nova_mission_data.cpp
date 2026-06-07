@@ -131,8 +131,9 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_action_types"), &NovaMissionData::get_action_types);
 	ClassDB::bind_method(D_METHOD("get_action_sub_types", "action_type"), &NovaMissionData::get_action_sub_types);
 	ClassDB::bind_method(D_METHOD("get_event_flag_bits"), &NovaMissionData::get_event_flag_bits);
+	ClassDB::bind_method(D_METHOD("get_ai_flag_bits"), &NovaMissionData::get_ai_flag_bits);
 	ClassDB::bind_method(D_METHOD("get_trigger_param_schema", "main_type", "sub_type"), &NovaMissionData::get_trigger_param_schema);
-	ClassDB::bind_method(D_METHOD("get_action_param_schema", "action_type"), &NovaMissionData::get_action_param_schema);
+	ClassDB::bind_method(D_METHOD("get_action_param_schema", "action_type", "action_sub_type"), &NovaMissionData::get_action_param_schema, DEFVAL(0));
 
 	ClassDB::bind_method(D_METHOD("save_file"), &NovaMissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &NovaMissionData::save_as);
@@ -1133,12 +1134,16 @@ Array NovaMissionData::get_event_flag_bits() const {
 	return enum_entries_to_array(document.event_flag_bits());
 }
 
+Array NovaMissionData::get_ai_flag_bits() const {
+	return enum_entries_to_array(document.ai_attribute_flag_bits());
+}
+
 Dictionary NovaMissionData::get_trigger_param_schema(int main_type, int sub_type) const {
 	return param_spec_to_dictionary(opennova::mission::trigger_param_schema(main_type, sub_type));
 }
 
-Dictionary NovaMissionData::get_action_param_schema(int action_type) const {
-	return param_spec_to_dictionary(opennova::mission::action_param_schema(action_type));
+Dictionary NovaMissionData::get_action_param_schema(int action_type, int action_sub_type) const {
+	return param_spec_to_dictionary(opennova::mission::action_param_schema(action_type, action_sub_type));
 }
 
 Error NovaMissionData::save_file() {

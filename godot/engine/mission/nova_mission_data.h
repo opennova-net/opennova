@@ -294,8 +294,9 @@ public:
 	Array get_action_types() const;
 	Array get_action_sub_types(int action_type) const;
 	Array get_event_flag_bits() const;
+	Array get_ai_flag_bits() const;
 	Dictionary get_trigger_param_schema(int main_type, int sub_type) const;
-	Dictionary get_action_param_schema(int action_type) const;
+	Dictionary get_action_param_schema(int action_type, int action_sub_type) const;
 
 	const opennova::mission::MissionDocument &native_document() const { return document; }
 

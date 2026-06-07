@@ -368,6 +368,10 @@ public:
 	// an event's flags from these checkboxes only, so set_event must preserve the complementary (unmodeled
 	// / engine-internal) bits rather than clobber them. See NovaMissionData::set_event.
 	int event_flag_mask() const;
+	// Per-entity AI attribute flags (bmsi_attributes), surfaced as inspector checkboxes. Lists only the
+	// bits whose positions are RE-confirmed; any other on-disk bit is preserved verbatim by the editor's
+	// merge-on-write (mirrors event flags).
+	std::vector<MissionEnumEntry> ai_attribute_flag_bits() const;
 
 	const bms::File &bms_file() const;
 	bms::File &bms_file();

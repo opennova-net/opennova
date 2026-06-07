@@ -2681,6 +2681,29 @@ int MissionDocument::event_flag_mask() const {
 	return mask;
 }
 
+std::vector<MissionEnumEntry> MissionDocument::ai_attribute_flag_bits() const {
+	// Author-facing AI attribute flags (bmsi_attributes). Labels confirmed against the DFX2 object-properties
+	// dialog (Med_ObjectPropertiesDialog @0x4096d0; label table @0x5b1c84: BLIND / GUARDING / MULTIPLAYER /
+	// INDESTRUCTABLE / NAVIGATION_WAYPT / REFLECTIVE / ...). Bits whose dialog control->bit map is not yet
+	// decoded (e.g. DEAF, IGNORE_FOOTSTEPS) are intentionally omitted and preserved verbatim by the editor's
+	// merge-on-write, exactly like event_flag_bits drops bit 0x08+.
+	return {
+			{static_cast<int>(bms::BmsiAttributeFlags::Blind), "Blind"},
+			{static_cast<int>(bms::BmsiAttributeFlags::Guarding), "Guarding"},
+			{static_cast<int>(bms::BmsiAttributeFlags::RemoveIfLessThan), "Remove if fewer than"},
+			{static_cast<int>(bms::BmsiAttributeFlags::RemoveIfMoreThan), "Remove if more than"},
+			{static_cast<int>(bms::BmsiAttributeFlags::Multiplayer), "Multiplayer only"},
+			{static_cast<int>(bms::BmsiAttributeFlags::Berserk), "Berserk"},
+			{static_cast<int>(bms::BmsiAttributeFlags::FlyingOrganic), "Flying"},
+			{static_cast<int>(bms::BmsiAttributeFlags::Coward), "Coward"},
+			{static_cast<int>(bms::BmsiAttributeFlags::AdvancedAmmo), "Advanced ammo"},
+			{static_cast<int>(bms::BmsiAttributeFlags::Indestructible), "Indestructible"},
+			{static_cast<int>(bms::BmsiAttributeFlags::NavigationWaypoint), "Navigation waypoint"},
+			{static_cast<int>(bms::BmsiAttributeFlags::Reflective), "Reflective"},
+			{static_cast<int>(bms::BmsiAttributeFlags::NoShadow), "No shadow"},
+	};
+}
+
 const bms::File &MissionDocument::bms_file() const {
 	return impl_->file;
 }

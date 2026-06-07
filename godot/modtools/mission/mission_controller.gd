@@ -2699,6 +2699,10 @@ func get_event_flag_bits() -> Array:
 	return _mission.get_event_flag_bits() if _mission != null else []
 
 
+func get_ai_flag_bits() -> Array:
+	return _mission.get_ai_flag_bits() if _mission != null else []
+
+
 # Focus an event by index (the inspector list drives this). Inert if unchanged.
 func select_event(index: int) -> void:
 	if index == _selected_event_index:

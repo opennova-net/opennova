@@ -252,6 +252,29 @@ func test_save_file_without_path_is_invalid() -> void:
 	assert_eq(m.save_file(), ERR_INVALID_PARAMETER, "save_file with no path is ERR_INVALID_PARAMETER")
 
 
+func test_ai_flag_bits_are_distinct_named_bits() -> void:
+	# get_ai_flag_bits drives the Behavior > Flags checkboxes; each entry must be a single distinct bit
+	# with a label so the inspector's merge-on-write (clear known mask, OR checked bits) is unambiguous.
+	var m := NovaMissionData.new()
+	var bits := m.get_ai_flag_bits()
+	assert_gt(bits.size(), 0, "engine exposes AI attribute flag bits")
+	var seen_mask := 0
+	var masks: Array = []
+	for entry in bits:
+		var e := entry as Dictionary
+		var value := int(e.get("value", 0))
+		assert_false(String(e.get("name", "")).is_empty(), "each flag bit has a label")
+		assert_gt(value, 0, "flag value is positive")
+		assert_eq(value & (value - 1), 0, "flag value is a single bit (%d)" % value)
+		assert_eq(seen_mask & value, 0, "flag bits do not overlap (%d)" % value)
+		seen_mask |= value
+		masks.append(value)
+	# RE-confirmed positions (bms.h BmsiAttributeFlags / dfx2med object dialog).
+	assert_true(masks.has(1 << 0), "Blind is bit 0")
+	assert_true(masks.has(1 << 1), "Guarding is bit 1")
+	assert_true(masks.has(1 << 22), "NavigationWaypoint is bit 22")
+
+
 # --- Authoring (Phase 2): edit team / group ----------------------------------
 # set_entity_property_int seeds the lib's all-fields property setter from the entity's
 # current state and changes only the named field, so editing team must leave group and

@@ -5,7 +5,7 @@ extends RefCounted
 ## in libs/mission so runtime and editor consume the same reverse-engineered core
 ## data; this wrapper preserves the old editor-facing GDScript API.
 
-enum Kind { RAW, GROUP, ENTITY, ZONE, EVENT, WAYPOINT, BOOL, ENUM }
+enum Kind { RAW, GROUP, ENTITY, ZONE, EVENT, WAYPOINT, BOOL, ENUM, FIXED_SECONDS }
 
 static var _mission_schema_source: NovaMissionData
 
@@ -20,8 +20,8 @@ static func trigger_slots(main_type: int, sub_type: int) -> Dictionary:
 	return _source().get_trigger_param_schema(main_type, sub_type)
 
 
-static func action_slots(action_type: int) -> Dictionary:
-	return _source().get_action_param_schema(action_type)
+static func action_slots(action_type: int, sub_type: int = 0) -> Dictionary:
+	return _source().get_action_param_schema(action_type, sub_type)
 
 
 static func is_picker(kind: int) -> bool:
