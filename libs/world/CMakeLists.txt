@@ -1,6 +1,7 @@
 add_library(opennova_world STATIC
     src/entity_registry.cpp
     src/world.cpp
+    src/ai.cpp
 )
 
 target_include_directories(opennova_world

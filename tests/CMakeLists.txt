@@ -391,6 +391,15 @@ target_include_directories(world_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(world_test PRIVATE cxx_std_17)
 add_test(NAME world COMMAND world_test)
 
+# AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
+# budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
+# and the trivial enter/exit/event handler ports.
+add_executable(ai_test world/ai_test.cpp)
+target_link_libraries(ai_test PRIVATE opennova_world)
+target_include_directories(ai_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ai_test PRIVATE cxx_std_17)
+add_test(NAME ai COMMAND ai_test)
+
 # WAC scripting: registry oracle (165-command ISA + 28 param types from the binary),
 # VM behavior (var math, entity mutation, temporal/edge firing, env, authority),
 # and a zero-crash parse over the real shipped .wac corpus (dirs via argv, else the
