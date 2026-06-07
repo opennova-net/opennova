@@ -297,6 +297,18 @@ def test_ci_builds_gdextension_once_per_os_and_caches_with_sccache() -> None:
     assert "pattern: opennova_*" in _workflow_job(workflow, "validate-deliverables")
 
 
+def test_godot_test_wrapper_allows_fixture_inner_classes() -> None:
+    test_script = (ROOT / "scripts/test_godot.sh").read_text(encoding="utf-8")
+    collection_patterns = re.findall(
+        r"grep\s+-[qE]+\s+'([^']*does not extend GutTest)'",
+        test_script,
+    )
+
+    assert collection_patterns
+    assert any(pattern.startswith("Ignoring script ") for pattern in collection_patterns)
+    assert all("Inner Class" not in pattern for pattern in collection_patterns)
+
+
 def test_release_splits_godot_editor_and_runtime_package_jobs() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     package_jobs = [
