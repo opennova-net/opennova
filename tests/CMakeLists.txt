@@ -91,6 +91,20 @@ target_include_directories(mission_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_features(mission_corpus_test PRIVATE cxx_std_17)
 add_test(NAME mission_corpus COMMAND mission_corpus_test)
 
+# LWF sound-profile tests: byte-exact parse->encode round-trip + mutate-reread
+# over real JO fixtures (fixtures/lwf/00TRa.LWF + gamelocl.LWF).
+add_executable(lwf_roundtrip_test lwf/lwf_roundtrip_test.cpp)
+target_link_libraries(lwf_roundtrip_test PRIVATE opennova_lwf)
+target_include_directories(lwf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME lwf_roundtrip COMMAND lwf_roundtrip_test)
+
+# DBF dialog-bank tests: byte-exact round-trip + dlg-id -> def-id mapping over a
+# real JO fixture (fixtures/dbf/00TRg.DBF).
+add_executable(dbf_roundtrip_test dbf/dbf_roundtrip_test.cpp)
+target_link_libraries(dbf_roundtrip_test PRIVATE opennova_dbf)
+target_include_directories(dbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME dbf_roundtrip COMMAND dbf_roundtrip_test)
+
 # PFF tests
 add_executable(pff_unit_test pff/pff_unit_test.cpp)
 target_link_libraries(pff_unit_test PRIVATE opennova_pff)

@@ -103,6 +103,13 @@ std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, b
 	if (extension == ".sbf") {
 		return "sbf";
 	}
+	if (extension == ".lwf") {
+		return "sound";
+	}
+	// NOTE: .dbf (dialog bank) is intentionally NOT classified as a browsable kind.
+	// It is consumed at runtime by name (NovaDbfData), and the Sound workspace only
+	// opens .lwf — classifying .dbf as "sound" made it show up in the sound quick-open
+	// next to a mission's co-named .lwf and broke "open" (a DLG0 file is not an LWF1).
 	if (extension == ".bin" && is_scr_bin) {
 		return "music_script";
 	}
@@ -150,7 +157,10 @@ std::string normalize_kind(const std::string &kind) {
 	if (key == "mus") {
 		return "music_script";
 	}
-	// "sbf", "music_script", and the "music" umbrella pass through unchanged.
+	if (key == "lwf" || key == "sounds" || key == "sound_profile") {
+		return "sound";
+	}
+	// "sbf", "music_script", "sound", and the "music" umbrella pass through unchanged.
 	return key;
 }
 
