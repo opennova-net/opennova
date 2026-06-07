@@ -1,5 +1,6 @@
 add_library(opennova_bad STATIC
     src/bad.cpp
+    src/bad_write.cpp
 )
 
 target_include_directories(opennova_bad

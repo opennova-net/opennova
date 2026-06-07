@@ -30,7 +30,7 @@ foreach(test ctrl decode runtime wave)
 endforeach()
 
 # ADM tests
-foreach(test comment trim_value parse)
+foreach(test comment trim_value parse write)
     add_executable(adm_${test}_test adm/adm_${test}_test.cpp)
     target_link_libraries(adm_${test}_test PRIVATE opennova_adm)
     target_include_directories(adm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -42,6 +42,11 @@ add_executable(bad_parse_test bad/bad_parse_test.cpp)
 target_link_libraries(bad_parse_test PRIVATE opennova_bad)
 target_include_directories(bad_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME bad_parse COMMAND bad_parse_test)
+
+add_executable(bad_roundtrip_test bad/bad_roundtrip_test.cpp)
+target_link_libraries(bad_roundtrip_test PRIVATE opennova_bad)
+target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
 
 # DEF tests
 add_executable(def_comment_strip_test def/def_comment_strip_test.cpp)
