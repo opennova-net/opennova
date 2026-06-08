@@ -124,6 +124,13 @@ var _objects_syncing: bool = false
 # buttons land in later phases). _mode_syncing / _wp_syncing guard programmatic updates.
 var _mode_tabs: TabBar
 var _mode_syncing: bool = false
+
+# Live-simulation transport (Play the mission): drives the controller's sim over the placed nodes.
+var _sim_bar: HBoxContainer
+var _sim_play_btn: Button
+var _sim_pause_btn: Button
+var _sim_step_btn: Button
+var _sim_stop_btn: Button
 var _wp_box: VBoxContainer
 var _wp_status: Label
 var _wp_new_path_button: Button
@@ -1216,6 +1223,58 @@ func _build_mode_tabs() -> void:
 	_mode_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root.add_child(_mode_tabs)
 	_mode_tabs.tab_changed.connect(_on_mode_tab_changed)
+	_build_sim_bar()
+
+
+# A Play / Pause / Step / Stop row that runs the live mission simulation over the placed entities
+# (the AI walks the NPCs along their authored routes). Read-only over the mission; Stop restores.
+func _build_sim_bar() -> void:
+	_sim_bar = HBoxContainer.new()
+	_sim_bar.name = "MissionSimBar"
+	_sim_bar.add_theme_constant_override("separation", 4)
+	_root.add_child(_sim_bar)
+
+	ObjectUiHelpers.add_muted_label(_sim_bar, "Simulate:")
+
+	_sim_play_btn = Button.new()
+	_sim_play_btn.text = "Play"
+	_sim_play_btn.tooltip_text = "Promote the loaded mission and walk its AI along their routes."
+	_sim_bar.add_child(_sim_play_btn)
+	_sim_play_btn.pressed.connect(func() -> void:
+		if _controller != null: _controller.sim_play())
+
+	_sim_pause_btn = Button.new()
+	_sim_pause_btn.text = "Pause"
+	_sim_bar.add_child(_sim_pause_btn)
+	_sim_pause_btn.pressed.connect(func() -> void:
+		if _controller != null: _controller.sim_pause())
+
+	_sim_step_btn = Button.new()
+	_sim_step_btn.text = "Step"
+	_sim_step_btn.tooltip_text = "Advance the simulation one tick."
+	_sim_bar.add_child(_sim_step_btn)
+	_sim_step_btn.pressed.connect(func() -> void:
+		if _controller != null: _controller.sim_step())
+
+	_sim_stop_btn = Button.new()
+	_sim_stop_btn.text = "Stop"
+	_sim_stop_btn.tooltip_text = "Stop and restore the authored positions."
+	_sim_bar.add_child(_sim_stop_btn)
+	_sim_stop_btn.pressed.connect(func() -> void:
+		if _controller != null: _controller.sim_stop())
+
+
+func _refresh_sim_bar() -> void:
+	if _sim_bar == null:
+		return
+	var can: bool = _controller != null and _controller.can_simulate()
+	var simming: bool = _controller != null and _controller.is_simulating()
+	var playing: bool = _controller != null and _controller.is_sim_playing()
+	_sim_bar.visible = can or simming
+	_sim_play_btn.disabled = not can or playing
+	_sim_pause_btn.disabled = not playing
+	_sim_step_btn.disabled = not can or playing
+	_sim_stop_btn.disabled = not simming
 
 
 func _on_mode_tab_changed(tab: int) -> void:
@@ -1226,6 +1285,7 @@ func _on_mode_tab_changed(tab: int) -> void:
 
 
 func _refresh_mode_tabs() -> void:
+	_refresh_sim_bar()
 	if _mode_tabs == null:
 		return
 	var has_mission := _controller != null and _controller.get_mission() != null

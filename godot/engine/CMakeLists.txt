@@ -26,6 +26,8 @@ add_subdirectory(../../libs/cbin opennova_cbin)
 add_subdirectory(../../libs/terrain opennova_terrain)
 add_subdirectory(../../libs/resource_index opennova_resource_index)
 add_subdirectory(../../libs/def opennova_def)
+add_subdirectory(../../libs/world opennova_world)
+add_subdirectory(../../libs/wac opennova_wac)
 add_subdirectory(../../libs/mission opennova_mission)
 add_subdirectory(../../libs/lwf opennova_lwf)
 add_subdirectory(../../libs/dbf opennova_dbf)
@@ -59,6 +61,7 @@ add_library(${TARGET_NAME} SHARED
     object/nova_item_database.cpp
     mission/nova_mission_data.cpp
     mission/nova_mission_runtime.cpp
+    simulation/nova_simulation.cpp
     lwf/nova_lwf_data.cpp
     lwf/nova_wav_loader.cpp
     dbf/nova_dbf_data.cpp
@@ -105,6 +108,8 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_vfs
     opennova_resource_index
     opennova_def
+    opennova_world
+    opennova_wac
     opennova_mission
     opennova_lwf
     opennova_dbf

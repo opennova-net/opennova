@@ -396,3 +396,49 @@ add_executable(oned_edit_edit_history_test oned_edit/edit_history_test.cpp)
 target_link_libraries(oned_edit_edit_history_test PRIVATE opennova_oned_edit)
 target_include_directories(oned_edit_edit_history_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME edit_history COMMAND oned_edit_edit_history_test)
+
+# World runtime substrate: addressable entities (faithful find_by_net_id), shared
+# var store, entity-command primitives, tick service cadence, snapshot/restore.
+add_executable(world_test world/world_test.cpp)
+target_link_libraries(world_test PRIVATE opennova_world)
+target_include_directories(world_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(world_test PRIVATE cxx_std_17)
+add_test(NAME world COMMAND world_test)
+
+# AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
+# budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
+# and the trivial enter/exit/event handler ports.
+add_executable(ai_test world/ai_test.cpp)
+target_link_libraries(ai_test PRIVATE opennova_world)
+target_include_directories(ai_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ai_test PRIVATE cxx_std_17)
+add_test(NAME ai COMMAND ai_test)
+
+# WAC scripting: registry oracle (165-command ISA + 28 param types from the binary),
+# VM behavior (var math, entity mutation, temporal/edge firing, env, authority),
+# and a zero-crash parse over the real shipped .wac corpus (dirs via argv, else the
+# dev defaults; absent dirs skip).
+foreach(test registry_oracle behavior corpus)
+    add_executable(wac_${test}_test wac/wac_${test}_test.cpp)
+    target_link_libraries(wac_${test}_test PRIVATE opennova_wac)
+    target_include_directories(wac_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(wac_${test}_test PRIVATE cxx_std_17)
+    add_test(NAME wac_${test} COMMAND wac_${test}_test)
+endforeach()
+
+# Cross-system: BMS event runtime + WAC share one world/var store (libs/mission
+# event_runtime + opennova_wac). MisvarChange(V#) and WAC eq(V#) see the same var.
+add_executable(event_runtime_test mission/event_runtime_test.cpp)
+target_link_libraries(event_runtime_test PRIVATE opennova_mission opennova_wac opennova_world)
+target_include_directories(event_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(event_runtime_test PRIVATE cxx_std_17)
+add_test(NAME event_runtime_bms COMMAND event_runtime_test)
+
+# Mission -> world promotion: spawn a parsed mission's entities into the world pools,
+# allocate AI brains per organic, build the waypoint nav table, then tick the AI to prove
+# entities patrol their authored routes (the connective tissue for the live sim).
+add_executable(promote_test mission/promote_test.cpp)
+target_link_libraries(promote_test PRIVATE opennova_mission opennova_world)
+target_include_directories(promote_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(promote_test PRIVATE cxx_std_17)
+add_test(NAME mission_promote COMMAND promote_test)

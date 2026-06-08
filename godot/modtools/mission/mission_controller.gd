@@ -28,6 +28,7 @@ const MissionAreaTriggerOverlay := preload("res://engine/mission/mission_area_tr
 const MissionMarkerOverlay := preload("res://engine/mission/mission_marker_overlay.gd")
 const MissionGizmo := preload("res://engine/mission/mission_gizmo.gd")
 const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
+const MissionSimDriver := preload("res://modtools/mission/mission_sim_driver.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
 const OBJECTS_CONTAINER := "MissionObjects"
 
@@ -67,6 +68,12 @@ var _placer  # MissionObjectPlacer (preloaded, no class_name)
 # Pickable index harvested from the placer (edit_mode): one record per (entity,
 # static batch) or per animated entity. See MissionObjectPlacer.pickable_records.
 var _pickable: Array = []
+
+# --- Live simulation ("Play the mission") -------------------------------------
+# A MissionSimDriver node (parented under the objects container so it gets _process) that promotes
+# the loaded mission into a libs/world World + AI and walks the placed entity nodes. Null when not
+# simulating. Mutually exclusive with editing: starting it disarms the active tool.
+var _sim_driver: Node = null
 
 # --- Exact picking via per-entity collision bodies ----------------------------
 # Object picking shoots the cursor ray through the viewport world's physics space and
@@ -492,6 +499,7 @@ func new_mission() -> Error:
 
 
 func clear() -> void:
+	sim_stop() # tear down a running simulation before the placed world it drives is cleared
 	_reset_selection_state()
 	_pickable = []
 	_place_item_id = 0
@@ -3297,6 +3305,68 @@ func _objects_container() -> Node3D:
 	if world_root == null:
 		return null
 	return world_root.get_node_or_null(NodePath(OBJECTS_CONTAINER)) as Node3D
+
+
+# --- Live simulation ("Play the mission") -------------------------------------
+# Promote the loaded mission into a libs/world World + AI (NovaSimulation) and walk the placed
+# entity nodes. Read-only over the mission data: Stop restores the authored transforms.
+
+func can_simulate() -> bool:
+	return is_loaded() and _objects_container() != null
+
+func is_simulating() -> bool:
+	return _sim_driver != null and is_instance_valid(_sim_driver)
+
+func is_sim_playing() -> bool:
+	return is_simulating() and _sim_driver.is_playing()
+
+func _ensure_sim_driver() -> bool:
+	if is_simulating():
+		return true
+	if not is_loaded():
+		return false
+	var container := _objects_container()
+	if container == null:
+		_report("Load a mission on a terrain before simulating.", true)
+		return false
+	# Entering sim mode ends any half-finished edit gesture / armed tool.
+	cancel_drag()
+	disarm_placement()
+	_sim_driver = MissionSimDriver.new()
+	_sim_driver.name = "MissionSimDriver"
+	container.add_child(_sim_driver)
+	if int(_sim_driver.setup(_mission, _pickable)) <= 0:
+		sim_stop()
+		_report("No AI entities to simulate in this mission.", false)
+		return false
+	return true
+
+func sim_play() -> void:
+	if not _ensure_sim_driver():
+		return
+	_sim_driver.set_playing(true)
+	_report("Simulating mission (%d AI)." % int(_sim_driver.entity_count()), false)
+	changed.emit()
+
+func sim_pause() -> void:
+	if is_simulating():
+		_sim_driver.set_playing(false)
+		changed.emit()
+
+func sim_step() -> void:
+	if not _ensure_sim_driver():
+		return
+	_sim_driver.set_playing(false)
+	_sim_driver.step()
+	changed.emit()
+
+func sim_stop() -> void:
+	if not is_simulating():
+		return
+	_sim_driver.restore()
+	_sim_driver.queue_free()
+	_sim_driver = null
+	changed.emit()
 
 
 func _clear_objects() -> void:
