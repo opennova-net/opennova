@@ -123,9 +123,18 @@ build_gdextension() {
 DEBUG_DYLIB="$ROOT/godot/bin/libopennova.macos.template_debug.arm64.dylib"
 RELEASE_DYLIB="$ROOT/godot/bin/libopennova.macos.template_release.universal.dylib"
 
-build_gdextension template_debug   build-godot-debug   Debug   "$DEBUG_DYLIB"
-build_gdextension template_release build-godot-release Release "$RELEASE_DYLIB" \
-  -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
+  # CI builds the GDExtension once (the build-gdextension-macos job) and downloads
+  # the dylibs into godot/bin; skip the per-job rebuild. Local runs leave SKIP_BUILD
+  # unset and build normally.
+  echo "=== SKIP_BUILD=1: using prebuilt GDExtension dylibs in godot/bin ==="
+  [[ -f "$DEBUG_DYLIB"   ]] || { echo "error: expected prebuilt debug dylib missing: $DEBUG_DYLIB" >&2; exit 1; }
+  [[ -f "$RELEASE_DYLIB" ]] || { echo "error: expected prebuilt release dylib missing: $RELEASE_DYLIB" >&2; exit 1; }
+else
+  build_gdextension template_debug   build-godot-debug   Debug   "$DEBUG_DYLIB"
+  build_gdextension template_release build-godot-release Release "$RELEASE_DYLIB" \
+    -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+fi
 
 echo "=== GDExtension binaries ==="
 ls -la "$ROOT/godot/bin"

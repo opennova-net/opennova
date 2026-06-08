@@ -211,8 +211,17 @@ def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> Non
     assert "scripts/package_godot_editor_macos.sh" in workflow
     assert "scripts/package_godot_runtime_macos.sh" in workflow
     assert "BUILD_GODOT: \"0\"" in _workflow_job(workflow, "test")
+    # The non-Godot package jobs run independently (no needs).
     for package_job in package_jobs:
+        if package_job in godot_package_jobs:
+            continue  # these now need their build-gdextension-<os> job (asserted below)
         assert "needs:" not in _workflow_job(workflow, package_job)
+    # The Godot package jobs reuse a prebuilt GDExtension (compiled once per OS by
+    # build-gdextension-<os>) instead of recompiling it, so each needs its build job.
+    assert "needs: [build-gdextension-windows]" in _workflow_job(workflow, "package-godot-windows-editor")
+    assert "needs: [build-gdextension-windows]" in _workflow_job(workflow, "package-godot-windows-runtime")
+    assert "needs: [build-gdextension-macos]" in _workflow_job(workflow, "package-godot-macos-editor")
+    assert "needs: [build-gdextension-macos]" in _workflow_job(workflow, "package-godot-macos-runtime")
     assert (
         "needs: [test, godot-tests, package-addon, package-max-mzp, package-importer, "
         "package-godot-windows-editor, package-godot-windows-runtime, "
@@ -229,6 +238,50 @@ def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> Non
     assert "dist/onimport.exe" not in workflow
     assert "dist/opennova-modtools-windows.zip" not in workflow
     assert "dist/opennova-runtime-windows.zip" not in workflow
+
+
+def test_ci_builds_gdextension_once_per_os_and_caches_with_sccache() -> None:
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+    # The GDExtension (godot/engine + libs/ + the pinned godot-cpp submodule) is
+    # compiled once per OS in dedicated jobs, not in every consumer.
+    assert "build-gdextension-windows:" in workflow
+    assert "build-gdextension-macos:" in workflow
+
+    # Those build jobs cache godot-cpp's objects across runs via sccache.
+    assert "mozilla-actions/sccache-action" in workflow
+    assert "SCCACHE_GHA_ENABLED" in workflow
+    assert "CMAKE_CXX_COMPILER_LAUNCHER: sccache" in workflow
+
+    # Windows must use the Ninja generator (the Visual Studio generator ignores
+    # CMAKE_*_COMPILER_LAUNCHER) with the MSVC environment activated.
+    win_build = _workflow_job(workflow, "build-gdextension-windows")
+    assert "-G Ninja" in win_build
+    assert "ilammy/msvc-dev-cmd" in win_build
+
+    # godot-tests and the Godot package jobs consume the prebuilt DLLs: each needs a
+    # build job and downloads the artifact rather than recompiling.
+    assert (
+        "needs: [build-gdextension-windows, build-gdextension-macos]"
+        in _workflow_job(workflow, "godot-tests")
+    )
+    consumers = [
+        "godot-tests",
+        "package-godot-windows-editor",
+        "package-godot-windows-runtime",
+        "package-godot-macos-editor",
+        "package-godot-macos-runtime",
+    ]
+    for job in consumers:
+        body = _workflow_job(workflow, job)
+        assert "actions/download-artifact" in body
+        # No consumer recompiles the GDExtension inline.
+        assert "cmake -S godot/engine" not in body
+
+    # validate-deliverables downloads every artifact into dist/, so it must scope
+    # the download to the deliverables (opennova_*) and skip the gdext_* build
+    # artifacts, which the validator rejects as unexpected files in dist/.
+    assert "pattern: opennova_*" in _workflow_job(workflow, "validate-deliverables")
 
 
 def test_release_splits_godot_editor_and_runtime_package_jobs() -> None:
