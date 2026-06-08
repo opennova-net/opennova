@@ -9,6 +9,14 @@ on:
     branches: [master, unified-edit-history]
   workflow_dispatch:
 
+# On a PR, github.head_ref is the source branch, so a new push cancels the older
+# run (and prevents two runs racing to post the build-links comment). On push to
+# master, head_ref is empty and we fall back to the unique run_id, so master runs
+# are never cancelled.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   test:
     strategy:
@@ -94,12 +102,132 @@ jobs:
           OPENNOVA_MODSUPEROED_DIR: ${{ github.workspace }}\third_party\modsuperoed
         run: uv run pytest tests/test_modsuperoed_automation.py::test_external_modsuperoed_smoke -q
 
+  # Compile the GDExtension (godot/engine + libs/ + the pinned third_party/godot-cpp)
+  # ONCE per OS. godot-tests and the four package jobs download these DLLs instead of
+  # recompiling. sccache caches godot-cpp's objects across runs, so after one warm-up
+  # only changed engine/libs sources recompile. Windows must use Ninja: the Visual
+  # Studio generator ignores CMAKE_*_COMPILER_LAUNCHER.
+  build-gdextension-windows:
+    runs-on: windows-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false   # the build consumes no LFS game assets
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Build GDExtension (debug + release)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # First-run toolchain sanity: CMake must be >= 3.25 for the /Z7 flag, and
+          # Ninja + cl must be on PATH (the latter via msvc-dev-cmd).
+          cmake --version
+          ninja --version
+          Write-Host "cl: $((Get-Command cl -ErrorAction SilentlyContinue).Source)"
+          foreach ($c in @(
+            @{ t = "template_debug";   d = "build-godot-debug";   b = "Debug" },
+            @{ t = "template_release"; d = "build-godot-release"; b = "Release" }
+          )) {
+            # -G Ninja so the sccache compiler launcher is honored. /Z7 (embedded
+            # debug info via CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded) makes the
+            # Debug objects cacheable; the default /Zi separate-PDB is not. CMP0141=NEW
+            # forces that policy into godot-cpp (its CMake policy ceiling is < 3.25).
+            cmake -S godot/engine -B $c.d -G Ninja `
+              "-DGODOTCPP_TARGET=$($c.t)" `
+              "-DCMAKE_BUILD_TYPE=$($c.b)" `
+              "-DCMAKE_POLICY_DEFAULT_CMP0141=NEW" `
+              "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
+            if ($LASTEXITCODE -ne 0) { throw "configure $($c.t) failed" }
+            cmake --build $c.d --target opennova
+            if ($LASTEXITCODE -ne 0) { throw "build $($c.t) failed" }
+          }
+          foreach ($f in @(
+            "godot/bin/libopennova.windows.template_debug.x86_64.dll",
+            "godot/bin/libopennova.windows.template_release.x86_64.dll"
+          )) {
+            if (-not (Test-Path $f)) { throw "missing GDExtension DLL: $f" }
+          }
+
+      - name: sccache stats
+        shell: bash
+        run: sccache --show-stats
+
+      - name: Upload Windows GDExtension
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdext_windows
+          if-no-files-found: error
+          path: |
+            godot/bin/libopennova.windows.template_debug.x86_64.dll
+            godot/bin/libopennova.windows.template_release.x86_64.dll
+
+  build-gdextension-macos:
+    runs-on: macos-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false   # the build consumes no LFS game assets
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Build GDExtension (debug arm64 + release universal)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Unix Makefiles already honor CMAKE_*_COMPILER_LAUNCHER; no generator change.
+          # -j 3 is deliberate: a bare -j OOM/swap-thrashes the 3-core macOS runner.
+          cmake -S godot/engine -B build-godot-debug \
+            -DGODOTCPP_TARGET=template_debug -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build-godot-debug --target opennova -j 3
+          cmake -S godot/engine -B build-godot-release \
+            -DGODOTCPP_TARGET=template_release -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          cmake --build build-godot-release --target opennova -j 3
+          for f in godot/bin/libopennova.macos.template_debug.arm64.dylib \
+                   godot/bin/libopennova.macos.template_release.universal.dylib; do
+            [[ -f "$f" ]] || { echo "missing GDExtension dylib: $f" >&2; exit 1; }
+          done
+          lipo -archs godot/bin/libopennova.macos.template_release.universal.dylib
+
+      - name: sccache stats
+        run: sccache --show-stats
+
+      - name: Upload macOS GDExtension
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdext_macos
+          if-no-files-found: error
+          path: |
+            godot/bin/libopennova.macos.template_debug.arm64.dylib
+            godot/bin/libopennova.macos.template_release.universal.dylib
+
   godot-tests:
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    # Matrix legs can't have per-OS needs; depending on both build jobs is harmless
+    # (each leg only downloads its own artifact below).
+    needs: [build-gdextension-windows, build-gdextension-macos]
     env:
       GODOT_VERSION: 4.6.1-stable
     steps:
@@ -162,13 +290,19 @@ jobs:
             chmod +x ".godot-bin/Godot.app/Contents/MacOS/Godot"
           fi
 
-      - name: Build GDExtension
-        shell: bash
-        run: |
-          cmake -S godot/engine -B build-godot -DCMAKE_BUILD_TYPE=Release
-          # Bound parallelism: a bare -j on the macOS Unix Makefiles generator
-          # means unbounded jobs, which OOM/swap-thrashes the 3-core runner.
-          cmake --build build-godot --config Release --target opennova -j 3
+      - name: Download GDExtension (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/download-artifact@v4
+        with:
+          name: gdext_windows
+          path: godot/bin
+
+      - name: Download GDExtension (macOS)
+        if: matrix.os == 'macos-latest'
+        uses: actions/download-artifact@v4
+        with:
+          name: gdext_macos
+          path: godot/bin
 
       - name: Prime Godot import cache
         shell: bash
@@ -291,6 +425,9 @@ jobs:
 
   package-godot-windows-editor:
     runs-on: windows-latest
+    needs: [build-gdextension-windows]
+    outputs:
+      artifact_url: ${{ steps.upload_modtools.outputs.artifact-url }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -319,11 +456,18 @@ jobs:
           path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
           key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
 
+      - name: Download GDExtension
+        uses: actions/download-artifact@v4
+        with:
+          name: gdext_windows
+          path: godot/bin
+
       - name: Package Godot Windows editor export
         shell: pwsh
-        run: scripts/package_godot_editor_windows.ps1
+        run: scripts/package_godot_editor_windows.ps1 -SkipBuild
 
       - name: Upload opennova-modtools Windows zip
+        id: upload_modtools
         uses: actions/upload-artifact@v4
         with:
           name: opennova_modtools_windows
@@ -331,6 +475,9 @@ jobs:
 
   package-godot-windows-runtime:
     runs-on: windows-latest
+    needs: [build-gdextension-windows]
+    outputs:
+      artifact_url: ${{ steps.upload_runtime.outputs.artifact-url }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -359,11 +506,18 @@ jobs:
           path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
           key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
 
+      - name: Download GDExtension
+        uses: actions/download-artifact@v4
+        with:
+          name: gdext_windows
+          path: godot/bin
+
       - name: Package Godot Windows runtime export
         shell: pwsh
-        run: scripts/package_godot_runtime_windows.ps1
+        run: scripts/package_godot_runtime_windows.ps1 -SkipBuild
 
       - name: Upload opennova runtime Windows zip
+        id: upload_runtime
         uses: actions/upload-artifact@v4
         with:
           name: opennova_runtime_windows
@@ -371,6 +525,7 @@ jobs:
 
   package-godot-macos-editor:
     runs-on: macos-latest
+    needs: [build-gdextension-macos]
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -399,8 +554,16 @@ jobs:
           path: ~/Library/Application Support/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable
           key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
 
+      - name: Download GDExtension
+        uses: actions/download-artifact@v4
+        with:
+          name: gdext_macos
+          path: godot/bin
+
       - name: Package Godot macOS editor export
         shell: bash
+        env:
+          SKIP_BUILD: "1"
         run: scripts/package_godot_editor_macos.sh
 
       - name: Upload opennova-modtools macOS zip
@@ -411,6 +574,7 @@ jobs:
 
   package-godot-macos-runtime:
     runs-on: macos-latest
+    needs: [build-gdextension-macos]
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -439,8 +603,16 @@ jobs:
           path: ~/Library/Application Support/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable
           key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
 
+      - name: Download GDExtension
+        uses: actions/download-artifact@v4
+        with:
+          name: gdext_macos
+          path: godot/bin
+
       - name: Package Godot macOS runtime export
         shell: bash
+        env:
+          SKIP_BUILD: "1"
         run: scripts/package_godot_runtime_macos.sh
 
       - name: Upload opennova runtime macOS zip
@@ -463,6 +635,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
+          # Only the deliverable artifacts (all named opennova_*); excludes the
+          # gdext_* GDExtension build artifacts, which the validator would reject
+          # as unexpected files in dist/.
+          pattern: opennova_*
           merge-multiple: true
 
       - name: Validate release deliverables
@@ -473,3 +649,58 @@ jobs:
         with:
           name: opennova_release_assets
           path: dist/release-assets/*
+
+  # Surface the two Windows builds on the PR as a single comment that updates in
+  # place. Depends on the Windows package jobs (not the test jobs), so links only
+  # ever advance to a build that succeeded; a failed build skips this job and the
+  # previous comment is left untouched.
+  pr-build-links:
+    runs-on: ubuntu-latest
+    needs: [package-godot-windows-editor, package-godot-windows-runtime]
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Post or update the build-links comment
+        uses: actions/github-script@v7
+        env:
+          MODTOOLS_URL: ${{ needs.package-godot-windows-editor.outputs.artifact_url }}
+          RUNTIME_URL: ${{ needs.package-godot-windows-runtime.outputs.artifact_url }}
+        with:
+          script: |
+            // A hidden marker lets us find our own comment across runs, so there
+            // is only ever one: find it -> update; absent -> create.
+            const marker = '<!-- opennova-ci-build-links -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const sha = (context.payload.pull_request.head.sha || '').slice(0, 7);
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const body = [
+              marker,
+              '### OpenNova CI builds',
+              '',
+              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})):`,
+              '',
+              '| Build | Download |',
+              '| --- | --- |',
+              `| OpenNova Editor (Mod Tools) | [opennova-modtools-windows.zip](${process.env.MODTOOLS_URL}) |`,
+              `| Game runtime | [opennova-runtime-windows.zip](${process.env.RUNTIME_URL}) |`,
+              '',
+              'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
+            ].join('\n');
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number, per_page: 100,
+              });
+              const existing = comments.find(c => c.body && c.body.includes(marker));
+              if (existing) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              }
+            } catch (err) {
+              // Forked-PR tokens are read-only and cannot comment; warn instead of
+              // failing CI. Same-repo branch PRs (the normal path here) always work.
+              core.warning(`Could not post build-links comment (forked PR or token lacks pull-requests:write?): ${err.message}`);
+            }
