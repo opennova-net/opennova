@@ -1267,9 +1267,12 @@ func _build_sim_bar() -> void:
 func _refresh_sim_bar() -> void:
 	if _sim_bar == null:
 		return
-	var can: bool = _controller != null and _controller.can_simulate()
-	var simming: bool = _controller != null and _controller.is_simulating()
-	var playing: bool = _controller != null and _controller.is_sim_playing()
+	# Simulation is an optional controller capability; tolerate controllers (e.g. the test
+	# doubles) that don't implement it by hiding the bar instead of erroring.
+	var supported: bool = _controller != null and _controller.has_method("can_simulate")
+	var can: bool = supported and _controller.can_simulate()
+	var simming: bool = supported and _controller.is_simulating()
+	var playing: bool = supported and _controller.is_sim_playing()
 	_sim_bar.visible = can or simming
 	_sim_play_btn.disabled = not can or playing
 	_sim_pause_btn.disabled = not playing
