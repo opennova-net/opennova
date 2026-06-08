@@ -29,6 +29,7 @@
 #include "object/nova_item_database.h"
 #include "mission/nova_mission_data.h"
 #include "mission/nova_mission_runtime.h"
+#include "simulation/nova_simulation.h"
 #include "cbin/cbin_credits_resource.h"
 #include "cbin/kda_resource_format.h"
 #include "cbin/nova_credits_player.h"
@@ -99,6 +100,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaItemDatabase);
 	GDREGISTER_CLASS(NovaMissionData);
 	GDREGISTER_CLASS(NovaMissionRuntime);
+	GDREGISTER_CLASS(NovaSimulation);
 	GDREGISTER_ABSTRACT_CLASS(CbinEntry);
 	GDREGISTER_CLASS(CbinTextEntry);
 	GDREGISTER_CLASS(CbinNewlineEntry);

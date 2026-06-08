@@ -111,6 +111,7 @@ func deactivate() -> void:
 	if _controller != null:
 		# End any half-finished drag and drop the placement tool before leaving, so a
 		# stray click after the user returns cannot resume either gesture.
+		_controller.sim_stop()
 		_controller.cancel_drag()
 		_controller.disarm_placement()
 		_controller.set_objects_visible(false)

@@ -59,6 +59,7 @@ add_library(${TARGET_NAME} SHARED
     object/nova_item_database.cpp
     mission/nova_mission_data.cpp
     mission/nova_mission_runtime.cpp
+    simulation/nova_simulation.cpp
     rtxt/rtxt_string_file.cpp
     rtxt/rtxt_resource_format.cpp
     util/nova_data_format.cpp
