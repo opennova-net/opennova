@@ -62,6 +62,61 @@ Quat bad_channel_quat(float x, float y, float z, float w) {
     return quat_normalize({w, x, y, z});
 }
 
+Quat quat_slerp(Quat a, Quat b, float t) {
+    a = quat_normalize(a);
+    b = quat_normalize(b);
+    float dot = a.w * b.w + a.x * b.x + a.y * b.y + a.z * b.z;
+    if (dot < 0.0f) {  // shortest path (hemisphere flip)
+        b = {-b.w, -b.x, -b.y, -b.z};
+        dot = -dot;
+    }
+    if (dot > 0.9995f) {  // near-parallel: nlerp (matches the engine's small-angle fast path)
+        return quat_normalize({a.w + (b.w - a.w) * t, a.x + (b.x - a.x) * t,
+                               a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t});
+    }
+    const float theta = std::acos(dot);
+    const float inv_sin = 1.0f / std::sin(theta);
+    const float wa = std::sin((1.0f - t) * theta) * inv_sin;
+    const float wb = std::sin(t * theta) * inv_sin;
+    return quat_normalize({a.w * wa + b.w * wb, a.x * wa + b.x * wb,
+                           a.y * wa + b.y * wb, a.z * wa + b.z * wb});
+}
+
+namespace {
+
+// Per-bone WORLD rotation at integer tick `tick`, faithful to BoneAnim_FindKeyframeAtTime @0x410220:
+// walk THIS bone's keyframe duration table (frame_lengths) to find the keyframe whose
+// [accumulated, accumulated+duration) window holds `tick`, then slerp rot[i] -> rot[i+1] (wrap to 0)
+// by the in-window fraction. Compressed clips key each bone sparsely with per-bone-different
+// durations; a flat rotations[tick] index would snap a short bone to identity past its keyframe
+// count. For a dense uniform clip (every keyframe duration == 1) this returns rotations[tick].
+Quat sample_bone_world_rot(const BadChannel &ch, uint32_t tick) {
+    if (ch.rotations == nullptr || ch.frame_count == 0) {
+        return kIdentityQuat;
+    }
+    const uint32_t count = ch.frame_count;
+    const auto kf = [&](uint32_t i) {
+        const BadQuaternion &r = ch.rotations[i];
+        return bad_channel_quat(r.x, r.y, r.z, r.w);
+    };
+    if (count == 1) {
+        return kf(0);
+    }
+    uint32_t acc = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint32_t dur = (ch.frame_lengths != nullptr && ch.frame_lengths[i] > 0) ? ch.frame_lengths[i] : 1u;
+        if (acc + dur > tick) {
+            const float blend = static_cast<float>(tick - acc) / static_cast<float>(dur);
+            const uint32_t next = (i + 1 < count) ? i + 1 : 0u;  // wrap to keyframe 0 (loop)
+            return quat_slerp(kf(i), kf(next), blend);
+        }
+        acc += dur;
+    }
+    return kf(count - 1);  // tick past the bone's summed duration: hold the last keyframe
+}
+
+}  // namespace
+
 Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins) {
     Clip clip;
     clip.fps = bad.fps;
@@ -104,14 +159,12 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
         frame.resize(bone_count);
 
         for (size_t b = 0; b < bone_count; ++b) {
-            // Channel rotation -> engine-native world rotation (identity if missing).
+            // Per-bone WORLD rotation at tick f, walking THIS bone's own keyframe duration table
+            // (sample_bone_world_rot / BoneAnim_FindKeyframeAtTime @0x410220) -- NOT a flat
+            // rotations[f] index, which snaps sparsely-keyed bones to identity on compressed clips.
             Quat world_rot = kIdentityQuat;
             if (b < bad.num_channels) {
-                const BadChannel &ch = bad.channels[b];
-                if (f < ch.frame_count && ch.rotations != nullptr) {
-                    const BadQuaternion &rq = ch.rotations[f];
-                    world_rot = bad_channel_quat(rq.x, rq.y, rq.z, rq.w);
-                }
+                world_rot = sample_bone_world_rot(bad.channels[b], f);
             }
 
             Vec3 translation = kZeroVec;

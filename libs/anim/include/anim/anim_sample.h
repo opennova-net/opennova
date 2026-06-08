@@ -78,6 +78,8 @@ Quat quat_normalize(Quat q);
 Quat quat_mul(Quat a, Quat b);
 Quat quat_inv(Quat q);          // conjugate of the normalized quat
 Vec3 quat_rotate(Quat q, Vec3 v);
+// Shortest-path slerp (lerp fast-path when near-parallel), mirrors Math_QuaternionSlerp @0x615e20.
+Quat quat_slerp(Quat a, Quat b, float t);
 // BAD channel quaternion (stored x, y, z, w) -> our w-first {w,x,y,z}, normalized
 // (a reorder only -- the engine consumes BAD quaternions natively, no axis swap).
 Quat bad_channel_quat(float x, float y, float z, float w);

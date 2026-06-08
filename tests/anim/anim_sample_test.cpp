@@ -146,6 +146,45 @@ int main() {
         TEST_EXPECT(real_differs);
     }
 
+    // --- compressed clip: per-bone sparse keyframes with non-uniform durations (regression) ---
+    // A flat rotations[frame] index snaps a bone to IDENTITY once frame >= its keyframe count; the
+    // per-bone duration walk (BoneAnim_FindKeyframeAtTime) must instead hold/interpolate its own
+    // keyframes across the whole clip. Build a 10-frame clip where bone0 is keyed ONCE.
+    {
+        BadBone sbones[2] = {};
+        sbones[0].parent_index = -1;
+        sbones[0].rotation[0] = 1.0f; sbones[0].rotation[4] = 1.0f; sbones[0].rotation[8] = 1.0f;
+        sbones[1].parent_index = 0; sbones[1].position[1] = 1.0f;
+        sbones[1].rotation[0] = 1.0f; sbones[1].rotation[4] = 1.0f; sbones[1].rotation[8] = 1.0f;
+
+        uint16_t fl0[1] = {10};
+        BadQuaternion rot0[1] = {{0.0f, 0.0f, 0.70710678f, 0.70710678f}};            // 90deg about Z
+        uint16_t fl1[3] = {3, 3, 4};
+        BadQuaternion rot1[3] = {{0, 0, 0, 1}, {0, 0, 0.70710678f, 0.70710678f}, {0, 0, 1, 0}};
+
+        BadChannel schan[2] = {};
+        schan[0].frame_count = 1; schan[0].frame_lengths = fl0; schan[0].rotations = rot0;
+        schan[1].frame_count = 3; schan[1].frame_lengths = fl1; schan[1].rotations = rot1;
+
+        BadFile sbad = {};
+        sbad.fps = 30; sbad.frame_count = 10; sbad.flags = 1;
+        sbad.bones = sbones; sbad.num_bones = 2;
+        sbad.channels = schan; sbad.num_channels = 2;
+
+        Clip sclip = sample_clip(sbad);
+        TEST_EXPECT(sclip.frames.size() == 10);
+        const Quat held = bad_channel_quat(0.0f, 0.0f, 0.70710678f, 0.70710678f);
+        const Quat identity = {1.0f, 0.0f, 0.0f, 0.0f};
+        // bone0 (one keyframe) is HELD for the whole clip -- never identity past frame 0.
+        TEST_EXPECT(quat_approx(sclip.frames[0][0].world_rotation, held));
+        TEST_EXPECT(quat_approx(sclip.frames[5][0].world_rotation, held));
+        TEST_EXPECT(quat_approx(sclip.frames[9][0].world_rotation, held));
+        TEST_EXPECT(!quat_approx(sclip.frames[5][0].world_rotation, identity));  // the old-code bug
+        // bone1 mid-window (tick 5 spans keyframe 1->2): a valid normalized, non-identity slerp.
+        const Quat &w1 = sclip.frames[5][1].world_rotation;
+        TEST_EXPECT(approx(w1.w * w1.w + w1.x * w1.x + w1.y * w1.y + w1.z * w1.z, 1.0f, 1e-3f));
+    }
+
     bad_free(&bad);
     return 0;
 }
