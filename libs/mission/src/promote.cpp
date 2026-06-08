@@ -28,6 +28,7 @@ int pool_for_kind(EntityKind k) {
 Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t origin) {
     Entity s;
     s.net_id = ssn;
+    s.bms_id = e.id; // carry the file entity id so the host can map this entity back to its placed node
     s.kind = kind;
     s.item_id = e.type_id;
     s.position.x = e.get_x();
@@ -140,6 +141,21 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
         ai.nav.channels.push_back(ch);
     }
     r.nav_channels = static_cast<int>(m.waypoint_records.size());
+
+    // Area-trigger zones -> the registry's area table, registered in array order so the area id ==
+    // the area-trigger array index (the value SingleIsWithinArea/GroupIsWithinArea param2 references;
+    // bms.h param-semantics). Z is unbounded (+-16384.0) unless the trigger constrains it. Without
+    // this the within-area triggers + AREA_AI family resolve against an empty table (always false).
+    // [The designer-zone-id (1..99) <-> array-index correspondence + AREA_AI param1's exact zone
+    // reference are grill-gated (P5); registering the table is the prerequisite.]
+    for (const bms::AreaTrigger &at : m.area_triggers) {
+        Aabb b;
+        b.min.x = at.get_x_min(); b.max.x = at.get_x_max();
+        b.min.y = at.get_y_min(); b.max.y = at.get_y_max();
+        if (at.constrains_z()) { b.min.z = at.get_z_min(); b.max.z = at.get_z_max(); }
+        else { b.min.z = bms::AreaTrigger::kUnboundedZMin; b.max.z = bms::AreaTrigger::kUnboundedZMax; }
+        world.registry.register_area(std::string(), b);
+    }
 
     // Spawn actors + AI brains (organics are AI-driven; vehicles get brains in the vehicle phase).
     uint16_t ssn = opts.first_ssn;

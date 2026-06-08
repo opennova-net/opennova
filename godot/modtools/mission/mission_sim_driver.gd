@@ -19,8 +19,10 @@ var loco_scale: int = 4096   # AI-speed -> world-units pace (see AiSystem::loco_
 func setup(mission, pickable: Array) -> int:
 	_sim = NovaSimulation.new() # off-tree: only this driver ticks it
 	if mission == null or not _sim.load_from_mission_data(mission):
+		_sim.free() # NovaSimulation is a Node (not RefCounted); free the orphan on load failure
 		_sim = null
 		return 0
+	_sim.set_tick_mode(NovaSimulation.TICK_EVERY_PROCESS) # snappy preview: one logic tick per frame
 	_sim.set_loco_scale(loco_scale)
 
 	var node_by_key := {}
@@ -69,8 +71,19 @@ func _apply() -> void:
 # Restore the authored node transforms (called before teardown so stopping the sim leaves the
 # placed world exactly as it was).
 func restore() -> void:
+	if _sim != null:
+		_sim.restart() # rewind the world + AI to the play-start baseline (World::restore)
 	for i in range(min(_nodes.size(), _orig.size())):
 		var n = _nodes[i]
 		if n != null and is_instance_valid(n):
 			n.transform = _orig[i]
 	_playing = false
+
+
+# The driver holds its NovaSimulation off-tree, so Godot won't free it when the driver is freed
+# (Nodes aren't reference-counted). Free it explicitly when the driver leaves the tree (the
+# controller queue_free()s the driver on stop).
+func _exit_tree() -> void:
+	if _sim != null:
+		_sim.free()
+		_sim = null

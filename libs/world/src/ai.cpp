@@ -508,6 +508,9 @@ void AiSystem::apply_transition(AiEntity &e, World &world) {
 }
 
 void AiSystem::tick(World &world, const TickContext &ctx) {
+    // AI does not run during the BMS pre-mission script pass: that invocation only
+    // settles initial scripted state (EventFlags PreMission), it does not step brains.
+    if (ctx.pre_mission) return;
     is_authority = ctx.is_authority;
     scheduler.budget = 0; // per-frame budget reset (the staggering accumulator)
     for (int i = 0; i < count(); ++i) {
@@ -516,8 +519,79 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             process_infantry_state_machine(e, world, 0);
             if (locomotion_enabled) apply_locomotion(e);
         }
+        advance_part_anim(e); // part-anim channels integrate independent of the AI budget gate
     }
     events.process_timed(*this, world);
+}
+
+void AiSystem::advance_part_anim(AiEntity &e) {
+    AiBrain &b = e.brain;
+    for (int slot = 0; slot < 2; ++slot) {
+        int32_t dir = b.f[AiBrain::kPartAnimDir0 + slot];
+        int32_t rate = b.f[AiBrain::kPartAnimRate0 + slot];
+        if (dir == 0 || rate == 0) continue; // play_type 0 (stop) freezes the sweep
+        int64_t phase = static_cast<int64_t>(b.f[AiBrain::kPartAnimPhase0 + slot]) +
+                        static_cast<int64_t>(rate) * dir;
+        if (phase < 0) phase = 0;
+        if (phase > 65535) phase = 65535; // clamp endpoints (one-shot; wrap is a def-idle case)
+        b.f[AiBrain::kPartAnimPhase0 + slot] = static_cast<int32_t>(phase);
+    }
+}
+
+// [orig: Entity_ApplyCommand @0x43ab60] See the header. Only case 0x22 (PLAYPARTANIM) is ported.
+void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
+    switch (sub_type) {
+        case 0x22: { // PLAYPARTANIM: p2=ANIMNUM(channel), p3=ANIMPLAYTYPE, p4=ANIMTIME(16.16 s)
+            const int channel = p2;
+            if (channel != 1 && channel != 2) return;              // only channels 1,2 act
+            const int play_type = p3;
+            if (static_cast<unsigned>(play_type + 1) > 2u) return; // play_type in {-1,0,1}
+            const int slot = channel - 1;
+            // rate = (0.016 / seconds) * 65536 phase-units/tick, min 1. [flt_7C3310=1/65536,
+            // flt_7C3B40=0.016, flt_7C32BC=65536.] The original computes `base` unconditionally, so
+            // ANIMTIME==0 -> base 0.0 -> 0.016/0.0 = +inf, and the x87 ftol of infinity is the
+            // integer-indefinite 0x80000000 (INT_MIN) -- nonzero, so the min-1 guard does NOT fire.
+            // That makes ANIMTIME==0 saturate the part to a clamp endpoint on the first tick (matching
+            // the GDScript host's 1e9 instant-saturation). Replicated here rather than short-circuited.
+            const double seconds = static_cast<double>(p4) / 65536.0; // base; p4==0 -> 0.0
+            const double rate_f = (0.016 / seconds) * 65536.0;        // +inf when p4==0
+            int32_t rate;
+            if (rate_f != rate_f || rate_f >= 2147483648.0 || rate_f < -2147483648.0) {
+                rate = static_cast<int32_t>(0x80000000); // ftol integer-indefinite (inf/NaN/overflow)
+            } else {
+                rate = static_cast<int32_t>(rate_f);      // truncate toward zero
+            }
+            if (rate == 0) rate = 1;                      // min-1 guard (does NOT fire for INT_MIN)
+            comp.f[AiBrain::kPartAnimDir0 + slot] = play_type;  // comp+436+4*slot (direction)
+            comp.f[AiBrain::kPartAnimRate0 + slot] = rate;      // comp+444+4*slot (rate)
+            break;
+        }
+        default:
+            // Tracked-TODO: alert(5/6/0x16), accuracy(8), AISETSTATE(0x1C), speed(0x1D/0x1E),
+            // etc. (notes/mission/anim-ai-grill-2026-06-07.md). No-op so an unported sub-type
+            // can't corrupt the AI component.
+            break;
+    }
+}
+
+void AiSystem::capture_spawn_baseline() {
+    spawn_baseline_ = entities_;
+    baseline_captured_ = true;
+}
+
+// Per-mission re-init seam: World::restore() calls load_systems() on an editor Play->Stop,
+// which reaches this. Rewind every brain (position/heading/state/timers) to the captured
+// spawn baseline and drop the transient queues, so a simulate/stop cycle leaves the authored
+// mission clean. The nav table is read-only path data and is left intact.
+void AiSystem::on_load(World &) {
+    if (baseline_captured_) entities_ = spawn_baseline_;
+    events.clear();
+    scheduler.budget = 0;
+    relmat_calls.clear();
+    rel_ops.clear();
+    target_set_calls.clear();
+    unported_calls = 0;
+    find_target_calls = 0;
 }
 
 // Kinematic locomotion over the mover output. The brain decides a target (kWorkPos*), a heading

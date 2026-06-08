@@ -78,10 +78,10 @@ target_link_libraries(mission_c_abi_test PRIVATE opennova_mission)
 target_include_directories(mission_c_abi_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_c_abi COMMAND mission_c_abi_test)
 
-add_executable(mission_runtime_test mission/mission_runtime_test.cpp)
-target_link_libraries(mission_runtime_test PRIVATE opennova_mission)
-target_include_directories(mission_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME mission_runtime COMMAND mission_runtime_test)
+add_executable(mission_schema_test mission/mission_schema_test.cpp)
+target_link_libraries(mission_schema_test PRIVATE opennova_mission)
+target_include_directories(mission_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_schema COMMAND mission_schema_test)
 
 # Corpus round-trip: parse->write byte-exact over a directory of real shipped .bms missions.
 # Gated on OPENNOVA_MISSION_CORPUS (copyrighted assets, not committed); skips + passes when unset.

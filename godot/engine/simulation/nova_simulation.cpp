@@ -4,6 +4,7 @@
 #include <string>
 
 #include <mission/bms.h>
+#include <mission/mission_systems.h>
 
 using namespace godot;
 using opennova::world::AiBrain;
@@ -68,16 +69,35 @@ opennova::bms::File make_demo_mission() {
 } // namespace
 
 NovaSimulation::NovaSimulation() {
-	world_ = std::make_unique<World>();
-	ai_ = std::make_unique<AiSystem>();
+	reset_world();
 	set_process(true);
 }
 
 void NovaSimulation::reset_world() {
 	world_ = std::make_unique<World>();
 	ai_ = std::make_unique<AiSystem>();
+	bms_ = std::make_unique<opennova::mission::BmsEventSystem>();
+	wac_ = std::make_unique<opennova::wac::WacSystem>();
+	tick_service_ = opennova::world::TickService{};
 	promo_ = opennova::mission::PromoteResult{};
 	loaded_ = false;
+	playing_ = false;
+	have_baseline_ = false;
+}
+
+void NovaSimulation::finish_load(const opennova::bms::File &file) {
+	// One world, three systems, the faithful tick order. The AI-change action family reaches
+	// brains through World::ai; wire it before registering so the pre-mission pass can dispatch.
+	bms_->load(file.events, file.triggers, file.actions);
+	world_->ai = ai_.get();
+	opennova::mission::register_mission_systems(*world_, *wac_, *bms_, *ai_);
+	// PreMission events settle initial scripted state before the clock starts (AI is skipped on
+	// the pre-mission pass). Snapshot AFTER it so Stop restores the true play-start state.
+	world_->run_logic_tick(/*is_authority=*/true, /*pre_mission=*/true);
+	baseline_ = world_->snapshot();
+	ai_->capture_spawn_baseline();
+	have_baseline_ = true;
+	loaded_ = true;
 }
 
 void NovaSimulation::_bind_methods() {
@@ -88,6 +108,15 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_playing", "playing"), &NovaSimulation::set_playing);
 	ClassDB::bind_method(D_METHOD("is_playing"), &NovaSimulation::is_playing);
 	ClassDB::bind_method(D_METHOD("step"), &NovaSimulation::step);
+	ClassDB::bind_method(D_METHOD("advance_frame"), &NovaSimulation::advance_frame);
+	ClassDB::bind_method(D_METHOD("restart"), &NovaSimulation::restart);
+	ClassDB::bind_method(D_METHOD("set_tick_mode", "mode"), &NovaSimulation::set_tick_mode);
+	ClassDB::bind_method(D_METHOD("get_tick_mode"), &NovaSimulation::get_tick_mode);
+	ClassDB::bind_method(D_METHOD("drain_effects"), &NovaSimulation::drain_effects);
+	ClassDB::bind_method(D_METHOD("set_mission_variable", "index", "value"), &NovaSimulation::set_mission_variable);
+	ClassDB::bind_method(D_METHOD("get_mission_variable", "index"), &NovaSimulation::get_mission_variable);
+	ClassDB::bind_method(D_METHOD("has_event_fired", "index"), &NovaSimulation::has_event_fired);
+	ClassDB::bind_method(D_METHOD("get_event_count"), &NovaSimulation::get_event_count);
 	ClassDB::bind_method(D_METHOD("get_entity_count"), &NovaSimulation::get_entity_count);
 	ClassDB::bind_method(D_METHOD("get_entity_kind", "index"), &NovaSimulation::get_entity_kind);
 	ClassDB::bind_method(D_METHOD("get_entity_index", "index"), &NovaSimulation::get_entity_index);
@@ -95,18 +124,30 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_yaw", "index"), &NovaSimulation::get_entity_yaw);
 	ClassDB::bind_method(D_METHOD("get_entity_yaw_deg", "index"), &NovaSimulation::get_entity_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_entity_state", "index"), &NovaSimulation::get_entity_state);
+	ClassDB::bind_method(D_METHOD("get_entity_net_id", "index"), &NovaSimulation::get_entity_net_id);
+	ClassDB::bind_method(D_METHOD("get_entity_bms_id", "index"), &NovaSimulation::get_entity_bms_id);
+	ClassDB::bind_method(D_METHOD("get_entity_part_anim_phase", "index", "channel"), &NovaSimulation::get_entity_part_anim_phase);
+	ClassDB::bind_method(D_METHOD("get_entity_part_anim_active", "index", "channel"), &NovaSimulation::get_entity_part_anim_active);
 	ClassDB::bind_method(D_METHOD("set_loco_scale", "scale"), &NovaSimulation::set_loco_scale);
 	ClassDB::bind_method(D_METHOD("get_loco_scale"), &NovaSimulation::get_loco_scale);
 	ClassDB::bind_method(D_METHOD("get_spawned_count"), &NovaSimulation::get_spawned_count);
 	ClassDB::bind_method(D_METHOD("get_brain_count"), &NovaSimulation::get_brain_count);
 
+	BIND_ENUM_CONSTANT(TICK_DIVIDED);
+	BIND_ENUM_CONSTANT(TICK_EVERY_PROCESS);
+
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "playing"), "set_playing", "is_playing");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "tick_mode"), "set_tick_mode", "get_tick_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "loco_scale"), "set_loco_scale", "get_loco_scale");
 }
 
 void NovaSimulation::_notification(int p_what) {
-	if (p_what == NOTIFICATION_PROCESS) {
-		if (playing_ && loaded_) step();
+	if (p_what == NOTIFICATION_PROCESS && playing_ && loaded_) {
+		if (tick_mode_ == TICK_EVERY_PROCESS) {
+			step();
+		} else {
+			advance_frame();
+		}
 	}
 }
 
@@ -116,7 +157,7 @@ bool NovaSimulation::load_from_mission_data(const Ref<NovaMissionData> &p_missio
 	// The editor's live, in-memory mission (unsaved edits included).
 	const opennova::bms::File &file = p_mission->native_document().bms_file();
 	promo_ = opennova::mission::promote_mission(file, *world_, *ai_);
-	loaded_ = true;
+	finish_load(file);
 	return true;
 }
 
@@ -128,7 +169,7 @@ bool NovaSimulation::load_mission_file(const String &path) {
 		return false;
 	}
 	promo_ = opennova::mission::promote_mission(file, *world_, *ai_);
-	loaded_ = true;
+	finish_load(file);
 	return true;
 }
 
@@ -136,15 +177,58 @@ void NovaSimulation::build_demo_mission() {
 	reset_world();
 	opennova::bms::File file = make_demo_mission();
 	promo_ = opennova::mission::promote_mission(file, *world_, *ai_);
-	loaded_ = true;
+	finish_load(file);
 }
 
 void NovaSimulation::step() {
 	if (!loaded_) return;
-	TickContext ctx;
-	ctx.world = world_.get();
-	ctx.is_authority = true;
-	ai_->tick(*world_, ctx); // decision + locomotion (apply_locomotion runs inside tick)
+	world_->run_logic_tick(); // one logic tick: cache + WAC + BMS + AI, then ++logic_tick
+}
+
+bool NovaSimulation::advance_frame() {
+	if (!loaded_) return false;
+	return tick_service_.advance_frame(*world_); // fires a logic tick every 62 frames
+}
+
+void NovaSimulation::restart() {
+	if (!loaded_ || !have_baseline_) return;
+	world_->restore(baseline_); // rewinds registry/vars/env/clock + re-inits systems (incl. AI)
+	tick_service_ = opennova::world::TickService{}; // reset the 62-frame accumulator
+}
+
+Array NovaSimulation::drain_effects() {
+	Array out;
+	if (!loaded_) return out;
+	for (const opennova::world::Effect &e : world_->effects.entries()) {
+		Dictionary d;
+		d["kind"] = String(e.kind.c_str());
+		d["a"] = e.a;
+		d["b"] = e.b;
+		d["c"] = e.c;
+		d["d"] = e.d;
+		d["str"] = String(e.str.c_str());
+		out.push_back(d);
+	}
+	world_->effects.clear();
+	return out;
+}
+
+void NovaSimulation::set_mission_variable(int index, int value) {
+	if (world_) world_->vars.set_mission(index, value);
+}
+
+int NovaSimulation::get_mission_variable(int index) const {
+	return world_ ? world_->vars.get_mission(index) : 0;
+}
+
+bool NovaSimulation::has_event_fired(int index) const {
+	if (!bms_ || index < 0) return false;
+	const std::vector<opennova::mission::ScriptedEvent> &evs = bms_->events();
+	return static_cast<size_t>(index) < evs.size() && evs[index].fired;
+}
+
+int NovaSimulation::get_event_count() const {
+	return bms_ ? static_cast<int>(bms_->events().size()) : 0;
 }
 
 int NovaSimulation::get_entity_count() const {
@@ -198,6 +282,36 @@ int NovaSimulation::get_entity_state(int p_index) const {
 	AiEntity *e = ai_->at(p_index);
 	if (!e) return 0;
 	return e->brain.f[AiBrain::kCurState];
+}
+
+int NovaSimulation::get_entity_net_id(int p_index) const {
+	if (!ai_) return 0;
+	AiEntity *e = ai_->at(p_index);
+	return e ? e->net_id : 0;
+}
+
+int NovaSimulation::get_entity_bms_id(int p_index) const {
+	if (!ai_ || !world_) return 0;
+	AiEntity *e = ai_->at(p_index);
+	if (!e) return 0;
+	const opennova::world::Entity *ent = world_->registry.get(e->handle);
+	return ent ? ent->bms_id : 0;
+}
+
+int NovaSimulation::get_entity_part_anim_phase(int p_index, int channel) const {
+	if (!ai_ || channel < 1 || channel > 2) return 0;
+	AiEntity *e = ai_->at(p_index);
+	if (!e) return 0;
+	return e->brain.f[AiBrain::kPartAnimPhase0 + (channel - 1)];
+}
+
+bool NovaSimulation::get_entity_part_anim_active(int p_index, int channel) const {
+	if (!ai_ || channel < 1 || channel > 2) return false;
+	AiEntity *e = ai_->at(p_index);
+	if (!e) return false;
+	const int slot = channel - 1;
+	return e->brain.f[AiBrain::kPartAnimRate0 + slot] != 0 ||
+	       e->brain.f[AiBrain::kPartAnimPhase0 + slot] != 0;
 }
 
 void NovaSimulation::set_loco_scale(int p_scale) {

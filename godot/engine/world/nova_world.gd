@@ -16,7 +16,10 @@ const MissionCommandHost := preload("res://engine/world/mission_command_host.gd"
 
 signal world_loaded()
 signal load_failed(reason: String)
-signal mission_commands(commands: Array)
+# Host-presentation side effects drained from the mission runtime's EffectLog each tick
+# (kind: "text"/"win"/"subgoal_*"/"show_waypoints"/"set_light"/"dialog"). Consumed by the HUD;
+# "dialog" is also routed straight to mission audio below.
+signal mission_effects(effects: Array)
 
 # A mission (.bms) to boot into. When set, the mission's header selects the
 # terrain + environment (terrain_file/env_file below are ignored) and its placed
@@ -38,7 +41,7 @@ var _terrain_data: NovaTerrainData
 var _resource_root: NovaResourceRoot
 var _loaded: bool = false
 var _loaded_mission: NovaMissionData
-var _mission_runtime: NovaMissionRuntime
+var _sim: NovaSimulation  # the one mission runtime (World + WAC + BMS + AI), driven at 62-frame cadence
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
 var _mission_audio: NovaMissionAudio
@@ -128,7 +131,7 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 
 	_loaded_mission = mission
 	_place_mission_objects(mission)
-	_start_mission_runtime(mission)
+	_start_mission_sim(mission)
 	_start_command_host(mission)
 	_start_mission_audio(mission, bms_name)
 	_loaded = true
@@ -171,8 +174,8 @@ func get_loaded_mission() -> NovaMissionData:
 	return _loaded_mission
 
 
-func get_mission_runtime() -> NovaMissionRuntime:
-	return _mission_runtime
+func get_sim() -> NovaSimulation:
+	return _sim
 
 
 func get_mission_stats() -> Dictionary:
@@ -192,7 +195,9 @@ func unload() -> void:
 		_mission_audio.teardown()
 	_loaded = false
 	_loaded_mission = null
-	_mission_runtime = null
+	if _sim != null:
+		_sim.free()
+	_sim = null
 	_mission_audio = null
 	_placer = null
 	if _command_host != null:
@@ -260,49 +265,56 @@ func is_loaded() -> bool:
 	return _loaded
 
 
-## Drive per-frame foliage coverage around the viewer.
+## Drive per-frame foliage coverage around the viewer, advance the mission runtime at the faithful
+## 62-frame cadence, render its part animations, and route its presentation effects.
 func tick(camera_pos: Vector3) -> void:
 	if _loaded and _dispatcher != null:
 		_dispatcher.dispatch(camera_pos)
-	if _loaded and _mission_runtime != null:
-		var commands := _mission_runtime.tick()
-		if not commands.is_empty():
-			_route_mission_commands(commands)
-			mission_commands.emit(commands)
+	if _loaded and _sim != null:
+		var ticked := _sim.advance_frame() # fires one logic tick every 62 render frames
+		if ticked:
+			if _command_host != null:
+				_command_host.render() # pose part animations from the engine-computed brain phase
+			var effects := _sim.drain_effects()
+			if not effects.is_empty():
+				_route_mission_effects(effects)
+				mission_effects.emit(effects)
 	if _loaded and _mission_audio != null:
 		_mission_audio.tick(camera_pos)
 
 
-# Fire mission audio for runtime commands. PlayWavList actions arrive as PLAY_DIALOG
-# commands carrying the dialog/wav id in param1; route them to the mission audio
-# (which resolves the id through the co-named .DBF and plays the LWF set). Other
-# command kinds are still emitted via mission_commands for host consumers (HUD, etc.).
-func _route_mission_commands(commands: Array) -> void:
+# Fire mission audio for presentation effects. PlayWavList actions surface as "dialog" effects
+# carrying the dialog/wav id in `a`; route them to the mission audio (which resolves the id through
+# the co-named .DBF and plays the LWF set). Other kinds are still emitted via mission_effects for
+# host consumers (HUD, etc.).
+func _route_mission_effects(effects: Array) -> void:
 	if _mission_audio == null:
 		return
-	for c in commands:
-		var cmd: Dictionary = c
-		if int(cmd.get("kind", -1)) == NovaMissionRuntime.COMMAND_PLAY_DIALOG:
-			_mission_audio.play_dialog(int(cmd.get("param1", 0)))
+	for e in effects:
+		var eff: Dictionary = e
+		if String(eff.get("kind", "")) == "dialog":
+			_mission_audio.play_dialog(int(eff.get("a", 0)))
 
 
-func _start_mission_runtime(mission: NovaMissionData) -> void:
-	_mission_runtime = NovaMissionRuntime.new()
-	if not _mission_runtime.load_from_mission(mission):
-		_mission_runtime = null
+func _start_mission_sim(mission: NovaMissionData) -> void:
+	_sim = NovaSimulation.new()
+	_sim.set_tick_mode(NovaSimulation.TICK_DIVIDED) # game cadence: one logic tick per 62 frames
+	if not _sim.load_from_mission_data(mission):
+		_sim.free()
+		_sim = null
 		push_warning("NovaWorld: failed to start mission runtime")
-
-
-# Build the entity registry from the placed MissionObjects and wire the command host onto the
-# mission_commands signal, so host-side actions (e.g. PLAYPARTANIM) reach their target models. The
-# runtime emits commands regardless; the host is simply their first consumer. No runtime -> nothing to do.
-func _start_command_host(mission: NovaMissionData) -> void:
-	if _mission_runtime == null:
 		return
-	# A reload reuses this NovaWorld: free any command host (a direct child, not under the rebuilt
-	# MissionObjects container) + registry left over from the previous mission first, mirroring
-	# unload(), so they are not orphaned in the tree still wired to mission_commands and driving
-	# freed entity nodes.
+	add_child(_sim) # parented for lifetime only; NovaWorld drives it via advance_frame() (not playing)
+
+
+# Build the entity registry from the placed MissionObjects and wire the command host to the sim, so
+# the host can pose each entity's part animations (PLAYPARTANIM, applied in-engine) onto its model
+# every tick. No sim -> nothing to render.
+func _start_command_host(mission: NovaMissionData) -> void:
+	if _sim == null:
+		return
+	# A reload reuses this NovaWorld: free any command host + registry left over from the previous
+	# mission first, mirroring unload(), so they are not orphaned driving freed entity nodes.
 	if _command_host != null:
 		_command_host.queue_free()
 		_command_host = null
@@ -313,8 +325,7 @@ func _start_command_host(mission: NovaMissionData) -> void:
 	_command_host = MissionCommandHost.new()
 	_command_host.name = "MissionCommandHost"
 	add_child(_command_host)
-	_command_host.setup(_entity_registry, mission)
-	_command_host.attach(self)
+	_command_host.setup(_entity_registry, _sim)
 
 
 # Place real ambient sounds at the mission's sound markers: load the co-named .LWF

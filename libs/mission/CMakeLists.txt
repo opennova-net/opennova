@@ -1,7 +1,7 @@
 add_library(opennova_mission STATIC
     src/bms.cpp
     src/mission.cpp
-    src/mission_runtime.cpp
+    src/mission_schema.cpp
     src/event_runtime.cpp
     src/promote.cpp
 )

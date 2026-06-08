@@ -48,6 +48,8 @@ struct EntityHandle {
 // the renderer/AI's full entity layout is a separate, deferred concern.
 struct Entity {
     uint16_t net_id = 0;      // SSN; the field WAC/BMS address entities by
+    int32_t bms_id = 0;       // file entity id (bms::Entity::id); the host keys placed nodes by this
+                              // (MissionEntityRegistry), distinct from the runtime net_id/SSN.
     EntityHandle handle;      // self-handle (assigned at spawn)
 
     EntityKind kind = EntityKind::Item;

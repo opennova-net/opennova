@@ -6,6 +6,7 @@
 #include "mission/event_runtime.h"
 #include "wac/compiler.h"
 #include "wac/wac_system.h"
+#include "world/ai.h"
 #include "world/world.h"
 
 using namespace opennova;
@@ -130,10 +131,141 @@ static void test_bms_increment_and_threshold() {
     CHECK(w.vars.get_mission(3) == 1); // threshold event fired once V2 hit 3
 }
 
+// A ChangeSingleAI/PLAYPARTANIM action mutates the target's AI brain IN-ENGINE (no host
+// effect), faithful to Entity_ApplyCommand @0x43ab60 case 0x22; the AI integrator then
+// advances the channel phase. Proves the in-engine action-dispatch path end to end.
+static void test_playpartanim_mutates_brain() {
+    World w;
+    w.registry.configure_pool(0, 8);
+    world::Entity org;
+    org.net_id = 42;
+    org.alive = true;
+    world::EntityHandle h = w.registry.spawn(0, org);
+
+    world::AiSystem ai;
+    ai.attach(h);
+    w.ai = &ai; // the AI-change family reaches the brain through World::ai
+
+    bms::Event e{};
+    e.flags = bms::EventFlags::None;
+    e.trigger_count = 0; // unconditional -> fires
+    e.action_index = 0;
+    e.action_count = 1;
+    bms::Action act{};
+    act.action_type = bms::ActionType::ChangeSingleAI;
+    act.action_sub_type = static_cast<int32_t>(bms::AIActionSubType::PlayPartAnim); // 34 / 0x22
+    act.param1 = 42;       // target ssn
+    act.param2 = 1;        // ANIMNUM channel 1 -> slot 0
+    act.param3 = 1;        // ANIMPLAYTYPE = play (+1)
+    act.param4 = 1 << 16;  // ANIMTIME = 1.0 s (16.16)
+    mission::BmsEventSystem sys;
+    sys.load({e}, {}, {act});
+    w.add_system(&sys);
+    w.load_systems();
+
+    w.run_logic_tick(true);
+    world::AiEntity *ae = ai.for_handle(h);
+    CHECK(ae != nullptr);
+    if (ae) {
+        // direction = play_type; rate = trunc(0.016/1.0 * 65536) = 1048.
+        CHECK(ae->brain.f[world::AiBrain::kPartAnimDir0] == 1);
+        CHECK(ae->brain.f[world::AiBrain::kPartAnimRate0] == 1048);
+        // The integrator advances the phase by rate*dir each tick (clamped [0,65535]).
+        ai.advance_part_anim(*ae);
+        ai.advance_part_anim(*ae);
+        CHECK(ae->brain.f[world::AiBrain::kPartAnimPhase0] == 2096);
+    }
+    // In-engine mutation, NOT a host effect.
+    CHECK(w.effects.count("unported_action") == 0);
+}
+
+// Host-presentation actions surface as presentation-only EffectLog entries; an unmodelled
+// action records as "unported_action" (diagnostic), never as a real effect.
+static void test_presentation_effects() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    bms::Event e{};
+    e.flags = bms::EventFlags::None;
+    e.trigger_count = 0;
+    e.action_index = 0;
+    e.action_count = 2;
+    bms::Action dlg{};
+    dlg.action_type = bms::ActionType::PlayWavList;
+    dlg.param1 = 7; // dialog id
+    dlg.param2 = 1; // always play
+    bms::Action wps{};
+    wps.action_type = bms::ActionType::ShowWaypoints;
+    wps.param1 = 1;
+    mission::BmsEventSystem sys;
+    sys.load({e}, {}, {dlg, wps});
+    w.add_system(&sys);
+    w.load_systems();
+
+    w.run_logic_tick(true);
+    CHECK(w.effects.count("dialog") == 1);
+    CHECK(w.effects.count("show_waypoints") == 1);
+    CHECK(w.effects.count("unported_action") == 0);
+}
+
+// OutputText surfaces a "text" effect; ResetEvent re-arms a fired event so it fires again.
+// (Coverage carried over from the retired MissionRuntime evaluator test.)
+static void test_output_text_and_reset_event() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    // Event 0: fire-once, unconditional, OutputText(7).
+    bms::Event e0{};
+    e0.flags = bms::EventFlags::None;
+    e0.trigger_count = 0;
+    e0.action_index = 0;
+    e0.action_count = 1;
+    // Event 1: fire-once, unconditional, ResetEvent(0) -> re-arms event 0.
+    bms::Event e1{};
+    e1.flags = bms::EventFlags::None;
+    e1.trigger_count = 0;
+    e1.action_index = 1;
+    e1.action_count = 1;
+    bms::Action text{};
+    text.action_type = bms::ActionType::OutputText;
+    text.param1 = 7;
+    bms::Action reset{};
+    reset.action_type = bms::ActionType::ResetEvent;
+    reset.param1 = 0; // re-arm event 0
+    mission::BmsEventSystem sys;
+    sys.load({e0, e1}, {}, {text, reset});
+    w.add_system(&sys);
+    w.load_systems();
+
+    w.run_logic_tick(true);
+    CHECK(w.effects.count("text") == 1); // event 0 fired OutputText(7)
+    // event 1's ResetEvent re-armed event 0, so it fires its OutputText again next tick.
+    w.effects.clear();
+    w.run_logic_tick(true);
+    CHECK(w.effects.count("text") == 1);
+}
+
+// PLAYPARTANIM with ANIMTIME=0: rate = INT_MIN (ftol of +inf), so advance_part_anim saturates the
+// channel to a clamp endpoint on the first tick (0 forward / 65535 reverse), matching the original.
+static void test_playpartanim_zero_time_saturates() {
+    world::AiBrain b;
+    world::ai_apply_command(b, 0x22, /*channel=*/1, /*play_type=*/1, /*time=*/0);
+    CHECK(b.f[world::AiBrain::kPartAnimDir0] == 1);
+    CHECK(b.f[world::AiBrain::kPartAnimRate0] == static_cast<int32_t>(0x80000000)); // INT_MIN
+    world::AiSystem ai;
+    // advance integrates phase += rate*dir (int64), clamped: INT_MIN * +1 -> 0.
+    world::AiEntity tmp;
+    tmp.brain = b;
+    ai.advance_part_anim(tmp);
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
+}
+
 int main() {
     test_bms_to_wac_shared_var();
     test_wac_to_bms_shared_var();
     test_bms_increment_and_threshold();
+    test_playpartanim_mutates_brain();
+    test_presentation_effects();
+    test_output_text_and_reset_event();
+    test_playpartanim_zero_time_saturates();
     std::printf(failures ? "EVENT RUNTIME TESTS FAILED (%d)\n" : "event runtime tests passed\n", failures);
     return failures ? 1 : 0;
 }

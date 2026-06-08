@@ -2,6 +2,8 @@
 
 #include <vector>
 
+#include "world/ai.h" // AiSystem / AiEntity / ai_apply_command — the AI-change command target
+
 namespace opennova::world {
 
 // ----------------------------------------------------------------------------
@@ -222,6 +224,49 @@ bool EntityCommands::group_dead(int group) const {
     return !group_alive(group);
 }
 
+// --- AI command (the AI-change action family) ---
+// [orig: Entity_ApplyCommand @0x43ab60.] Resolve the target's brain through World::ai and
+// apply the sub-type command in-engine. No AI system / no brain -> no-op.
+
+bool EntityCommands::apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
+    if (!world_.ai) return false;
+    AiEntity *ae = world_.ai->for_handle(world_.registry.find_by_net_id(ssn));
+    if (!ae) return false;
+    ai_apply_command(ae->brain, sub_type, p2, p3, p4);
+    return true;
+}
+
+int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
+    if (!world_.ai) return 0;
+    std::vector<EntityHandle> members;
+    world_.registry.by_group(static_cast<uint8_t>(group), members);
+    int n = 0;
+    for (EntityHandle h : members) {
+        AiEntity *ae = world_.ai->for_handle(h);
+        if (ae) { ai_apply_command(ae->brain, sub_type, p2, p3, p4); ++n; }
+    }
+    return n;
+}
+
+int EntityCommands::apply_area_ai_command(int zone_area_id, int team, int sub_type,
+                                          int32_t p2, int32_t p3, int32_t p4) {
+    // AREA_AI_RED/BLUE: apply to the team's units inside a zone. [target = zone area id,
+    // team filter: blue=1/red=2; the exact BMS zone->area mapping is grill-gated (P5).]
+    if (!world_.ai) return 0;
+    const Area *a = world_.registry.area(zone_area_id);
+    if (!a) return 0;
+    std::vector<EntityHandle> in;
+    world_.registry.in_area(a->bounds, in);
+    int n = 0;
+    for (EntityHandle h : in) {
+        const Entity *e = world_.registry.get(h);
+        if (!e || e->team != static_cast<uint8_t>(team)) continue;
+        AiEntity *ae = world_.ai->for_handle(h);
+        if (ae) { ai_apply_command(ae->brain, sub_type, p2, p3, p4); ++n; }
+    }
+    return n;
+}
+
 // ----------------------------------------------------------------------------
 // World
 // ----------------------------------------------------------------------------
@@ -235,6 +280,10 @@ void World::load_systems() {
 }
 
 void World::run_logic_tick(bool is_authority, bool pre_mission) {
+    // [orig: sub_4F81A0 refreshes the per-tick local-player cache via
+    // WacScript_CacheLocalPlayerState @0x4f5780 at the top of the tick, before the
+    // script evaluators read it. Deferred: the mission sim has no local-player avatar
+    // yet, so `cached` stays host-populated and the WAC near-* builtins read it as-is.]
     TickContext ctx;
     ctx.world = this;
     ctx.logic_tick = logic_tick;

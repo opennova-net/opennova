@@ -56,15 +56,17 @@ func test_00trg_mission_dialog_resolves() -> void:
 			assert_gt(stream.data.size(), 0, "decoded PCM is non-empty")
 			gut.p("z00gr100.wav (IMA-ADPCM) decoded: %d bytes 16-bit @ %d Hz" % [stream.data.size(), stream.mix_rate])
 
-	# Diagnostic: how many PlayDialog commands fire on host-ungated ticks? (If zero,
-	# the mission's dialog is all host-trigger-gated -> the documented follow-up.)
-	var rt := NovaMissionRuntime.new()
-	if rt.load_from_mission(mission):
+	# Diagnostic: how many "dialog" effects fire on ungated ticks? (If zero, the mission's
+	# dialog is all host-trigger-gated -> the documented follow-up.)
+	var sim := NovaSimulation.new()
+	if sim.load_from_mission_data(mission):
 		var fired := 0
 		for _frame in range(8):
-			for c in rt.tick():
-				if int((c as Dictionary).get("kind", -1)) == NovaMissionRuntime.COMMAND_PLAY_DIALOG:
+			sim.step()
+			for e in sim.drain_effects():
+				if String((e as Dictionary).get("kind", "")) == "dialog":
 					fired += 1
-		gut.p("PlayDialog commands fired on 8 host-ungated ticks: %d" % fired)
+		gut.p("dialog effects fired on 8 ungated ticks: %d" % fired)
+	sim.free()
 
 	audio.teardown()

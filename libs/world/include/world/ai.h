@@ -103,6 +103,16 @@ struct AiBrain {
         kNoTargetIdle = 48,// set 1 when no target + profile not combat [byte +192]
         kSpeedA = 49,      // move speed A [byte +196]
         kSpeedB = 50,      // move speed B (state 16 GROUND_FOLLOWWP) [byte +200]
+        // ---- part-anim channels (vehicle/emplacement parts; PLAYPARTANIM, 2 channels) ----
+        // [orig: Entity_ApplyCommand @0x43ab60 case 0x22 writes comp+436 (direction) /
+        // comp+444 (rate). Def defaults: Entity_CopyVehicleDefToAIComp @0x45ddf9 copies
+        // def+764..784 -> comp+436..456, so the phase pair (comp+452/+456) is def-seeded.]
+        kPartAnimDir0 = 109,   // comp+436 channel-1 sweep direction (-1/0/+1)
+        kPartAnimDir1 = 110,   // comp+440 channel-2 sweep direction
+        kPartAnimRate0 = 111,  // comp+444 channel-1 rate (16.16 phase units / tick)
+        kPartAnimRate1 = 112,  // comp+448 channel-2 rate
+        kPartAnimPhase0 = 113, // comp+452 channel-1 phase 0..65535 [our integrator; inferred slot]
+        kPartAnimPhase1 = 114, // comp+456 channel-2 phase
         kTargetRef = 127,  // primary target ref [byte +508]
         kOutSpeed = 128,   // mover output speed [byte +512]
         kWorkPosX = 129,   // working target transform X [byte +516]
@@ -319,6 +329,15 @@ struct StateRow {
 // be resolved (channel 0, missing count) or the type is unknown.
 int ai_waypoint_update_target(AiBrain &b, const int32_t pos[3], const NavNodeTable &nav);
 
+// [orig: Entity_ApplyCommand @0x43ab60] Apply a BMS AI-change command sub-type to an AI
+// component in-engine (the original mutates entity[25]; we mutate the brain directly). Only
+// PLAYPARTANIM (sub-type 0x22) is ported: it writes the part-anim channel's sweep direction
+// (comp+436) and rate (comp+444), computed from ANIMTIME via the verified FPU constants
+// (1/65536, 0.016, 65536). p2=channel(1/2), p3=play_type(-1/0/+1), p4=time(16.16 seconds).
+// Other sub-types (alert/accuracy/state/speed/...) are tracked-TODO no-ops; see
+// notes/mission/anim-ai-grill-2026-06-07.md.
+void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32_t p4);
+
 // A recorded RelationMatrix_SetBitA/B side effect (net-replication bookkeeping the
 // mover emits per node advance; the actual matrix is deferred to the net layer).
 struct RelMatCall {
@@ -359,6 +378,16 @@ class AiSystem : public ISystem {
 public:
     const char *name() const override { return "ai"; }
     void tick(World &world, const TickContext &ctx) override;
+
+    // Re-seed every brain to the captured spawn baseline + clear the transient queues.
+    // [Drives World::restore: load_systems() calls on_load on Play->Stop, so the AI
+    // rewinds alongside the registry/vars/env the World snapshot restores. No-op until
+    // capture_spawn_baseline() has run.]
+    void on_load(World &world) override;
+
+    // Capture the current AI state as the restore baseline. The host calls this once at
+    // play start (after promote + the pre-mission pass), when it snapshots the World.
+    void capture_spawn_baseline();
 
     // Attach a brain to a world entity; returns its AI index (faithful to the
     // unk_AED380 array index used by AIEvent entity_index).
@@ -436,10 +465,17 @@ public:
     // the kWorkPos* target by kOutSpeed * loco_scale, clamped to not overshoot). See loco_scale.
     void apply_locomotion(AiEntity &e);
 
+    // Integrate the part-anim channel phases: phase[slot] += rate[slot] * dir[slot], clamped to
+    // [0,65535] (one-shot door/turret sweep). The per-frame consumer of PLAYPARTANIM, which writes
+    // only direction + rate (ai_apply_command case 0x22). Runs regardless of the AI budget gate.
+    void advance_part_anim(AiEntity &e);
+
     const StateRow &row(int32_t state) const;
 
 private:
-    std::vector<AiEntity> entities_; // pool-relative; index == AIEvent entity_index
+    std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
+    std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)
+    bool baseline_captured_ = false;
 };
 
 } // namespace opennova::world

@@ -124,8 +124,40 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
         case bms::ActionType::KillGroup: cmds.kill_group(a.param1); break;
         case bms::ActionType::RedirectSingleTo: cmds.set_ssn_waypoint(static_cast<uint16_t>(a.param1), a.param2); break;
         case bms::ActionType::RedirectGroupTo: cmds.group_to_waypoint(a.param1, a.param2); break;
+        // AI-change family: param1 = target, action_sub_type selects the command, param2/3/4 are
+        // its slots. Mutates the AI component in-engine (no effect emitted). [orig: cases 3/0x15
+        // -> Entity_HandleAlertCommand / Entity_HandleAlertStateEvent @0x43dee0 -> Entity_ApplyCommand
+        // @0x43ab60; AREA_AI_RED/BLUE apply to a zone's red/blue units. team: blue=1, red=2.]
+        case bms::ActionType::ChangeSingleAI:
+            cmds.apply_ai_command(static_cast<uint16_t>(a.param1), a.action_sub_type, a.param2, a.param3, a.param4);
+            break;
+        case bms::ActionType::ChangeGroupAI:
+            cmds.apply_group_ai_command(a.param1, a.action_sub_type, a.param2, a.param3, a.param4);
+            break;
+        case bms::ActionType::AreaAiRed:
+            cmds.apply_area_ai_command(a.param1, /*team=*/2, a.action_sub_type, a.param2, a.param3, a.param4);
+            break;
+        case bms::ActionType::AreaAiBlue:
+            cmds.apply_area_ai_command(a.param1, /*team=*/1, a.action_sub_type, a.param2, a.param3, a.param4);
+            break;
         case bms::ActionType::OutputText:
             w.effects.push({"text", a.param1, 0, 0, 0, std::string()});
+            break;
+        // Host-presentation effects: the engine hands these to the host's audio/HUD/overlay.
+        case bms::ActionType::PlayWavList: // play dialog/wav param1 (param2 = always-play flag)
+            w.effects.push({"dialog", a.param1, a.param2, 0, 0, std::string()});
+            break;
+        case bms::ActionType::ShowWaypoints:
+            w.effects.push({"show_waypoints", a.param1, 0, 0, 0, std::string()});
+            break;
+        case bms::ActionType::SetLightState:
+            w.effects.push({"set_light", a.param1, a.param2, 0, 0, std::string()});
+            break;
+        case bms::ActionType::ShowWinSubgoal:
+            w.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/0, 0, std::string()});
+            break;
+        case bms::ActionType::ShowLoseSubgoal:
+            w.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/1, 0, std::string()});
             break;
         case bms::ActionType::BlueWin: w.effects.push({"win", 1, 0, 0, 0, std::string()}); break;
         case bms::ActionType::RedWin: w.effects.push({"win", 2, 0, 0, 0, std::string()}); break;
@@ -145,7 +177,10 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             w.effects.push({"execute_wac", a.param1, 0, 0, 0, std::string()});
             break;
         default:
-            w.effects.push({"bms_action", static_cast<int32_t>(a.action_type), a.action_sub_type,
+            // No faithful in-engine handler yet: record as an UNPORTED marker (coverage /
+            // diagnostic only — never a host presentation effect). Supported missions should
+            // emit zero of these; a test asserts that. [tracked-TODO, not a command stream.]
+            w.effects.push({"unported_action", static_cast<int32_t>(a.action_type), a.action_sub_type,
                             a.param1, a.param2, std::string()});
             break;
     }

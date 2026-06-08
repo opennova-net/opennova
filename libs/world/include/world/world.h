@@ -89,7 +89,9 @@ struct LocalSink : INetCommandSink {
     void send_command(EntityHandle, uint16_t, const int32_t *, int) override {}
 };
 
-class World; // fwd
+class World;     // fwd
+class AiSystem;  // fwd (lives in world/ai.h; World holds a non-owning pointer so the
+                 // shared command layer can reach an entity's AI component in-engine)
 
 // ----------------------------------------------------------------------------
 // Shared entity-command primitive layer. Models the original Entity_* mutation
@@ -134,6 +136,17 @@ public:
     bool group_dead(int group) const;   // true if all members dead/absent
     bool group_alive(int group) const;  // true if any member alive
 
+    // --- AI command (the AI-change action family) ---
+    // [orig: Entity_ApplyCommand @0x43ab60, reached from EventAction_Dispatch @0x4542e0
+    // via Entity_HandleAlertStateEvent @0x43dee0.] Apply an AI sub-type command to the
+    // target's AI component, reached through World::ai. p2/p3/p4 are the sub-type's slots
+    // (e.g. PLAYPARTANIM: p2=channel, p3=play_type, p4=time). No-op (returns false / 0)
+    // when there is no AI system or no brain for the target.
+    bool apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4);
+    int apply_group_ai_command(int group, int sub_type, int32_t p2, int32_t p3, int32_t p4);
+    int apply_area_ai_command(int zone_area_id, int team, int sub_type,
+                              int32_t p2, int32_t p3, int32_t p4);
+
     World &world() { return world_; }
 
 private:
@@ -172,6 +185,8 @@ public:
     LocalSink local_sink;
     INetCommandSink *net = &local_sink;
     EntityCommands commands;
+    AiSystem *ai = nullptr;    // non-owning; the host wires this to the AI system driving
+                               // this world, so the AI-change command family can reach brains.
 
     uint32_t logic_tick = 0;   // [orig: dword_C6EAD8]
 

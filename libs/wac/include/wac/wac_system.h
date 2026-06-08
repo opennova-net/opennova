@@ -28,6 +28,7 @@ public:
 
     void tick(opennova::world::World &world, const opennova::world::TickContext &ctx) override {
         if (!ctx.is_authority) return; // WAC runs only on the authoritative host
+        if (!vm_.loaded()) return;     // no program installed (e.g. a BMS-only mission)
         vm_.execute(world);
     }
 

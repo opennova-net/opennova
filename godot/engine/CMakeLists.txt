@@ -60,7 +60,6 @@ add_library(${TARGET_NAME} SHARED
     object/nova_object_shader_cache.cpp
     object/nova_item_database.cpp
     mission/nova_mission_data.cpp
-    mission/nova_mission_runtime.cpp
     simulation/nova_simulation.cpp
     lwf/nova_lwf_data.cpp
     lwf/nova_wav_loader.cpp

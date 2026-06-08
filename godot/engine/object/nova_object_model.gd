@@ -183,6 +183,18 @@ func restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
 	play_part_anim(channel, play_type, time_s)
 
 
+## Pose a part channel directly to an engine-computed phase (0..65535 == 0..1 over the part's range).
+## The faithful runtime path: NovaSimulation/the AI brain integrates the PLAYPARTANIM phase in-engine
+## (Entity_ApplyCommand @0x43ab60 + the per-frame consumer), and the host just writes it to the PANM
+## control register here. Distinct from play_part_anim (the editor/object-preview host-side integrator).
+func set_part_phase(channel: int, phase: int) -> void:
+	var register := _resolve_anim_channel_register(channel - 1)
+	if register.is_empty():
+		return
+	_part_anims.erase(register)  # the engine owns this channel's phase; no host integrator on it
+	_ctrl_values[register] = clampi(phase, 0, 65535)
+
+
 ## Stop a single channel's part animation (freeze in place); no-op if the channel is not animating.
 func stop_part_anim(channel: int) -> void:
 	var register := _resolve_anim_channel_register(channel - 1)

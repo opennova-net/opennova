@@ -1,108 +1,49 @@
 extends Node
 
-# Consumes the mission runtime's per-tick command stream (NovaWorld.mission_commands) and applies the
-# host-side effects the runtime cannot perform itself. Today it implements PLAYPARTANIM: start / stop a
-# model part animation on the targeted entity, group, or zone. Dispatch is a table keyed by AI sub-type
-# so further host actions slot in later; only PLAYPARTANIM is wired now. Targets are resolved through a
-# MissionEntityRegistry.
+# Renders in-engine part animations onto the placed models. The mission runtime (NovaSimulation)
+# applies the PLAYPARTANIM action to the AI brain IN-ENGINE (faithful to Entity_ApplyCommand
+# @0x43ab60 case 0x22: it writes the part channel's direction + rate, and the AI integrates the
+# phase). This host reads each entity's per-channel part-anim phase from the sim every tick and
+# poses the rendered model's PANM control register to it -- the original mutates engine state and
+# renders from it; the host never re-interprets the action. Targets are resolved by SSN through a
+# MissionEntityRegistry (only animatable NovaObjectModel nodes are indexed).
 #
-# [orig: Jointops EventAction_Dispatch @0x4542e0 -> Entity_HandleAlertStateEvent @0x43dee0 ->
-#  Entity_ApplyCommand @0x43ab60 case 0x22 (PLAYPARTANIM).] See notes/mission/anim-ai-grill-2026-06-07.md.
+# [orig: Entity_ApplyCommand @0x43ab60 case 0x22 (PLAYPARTANIM).] See
+# notes/mission/anim-ai-grill-2026-06-07.md.
 #
 # Referenced via preload() (no class_name), same convention as MissionObjectPlacer / MissionEntityRegistry.
 
-# MissionRuntimeCommandKind::HostAction (== NovaMissionRuntime.COMMAND_HOST_ACTION).
-const KIND_HOST_ACTION := 0
-
-# bms::ActionType -- the AI-change family that carries an AI sub-type in action_sub_type.
-const ACT_CHANGE_GROUP_AI := 3
-const ACT_AREA_AI_RED := 12
-const ACT_AREA_AI_BLUE := 13
-const ACT_CHANGE_SINGLE_AI := 21
-
-# bms::AIActionSubType.
-const AI_SUB_PLAYPARTANIM := 34
-
-# ANIMTIME is stored as 16.16 fixed-point seconds (raw = seconds * 65536); the runtime copies params
-# verbatim, so the host converts to seconds exactly once. [orig: Entity_ApplyCommand case 0x22 fild*1/65536]
-const ANIMTIME_FIXED_ONE := 65536.0
-
-var _registry
-var _mission
-var _handlers: Dictionary = {}
-var _stats: Dictionary = { "applied": 0, "unresolved": 0, "ignored": 0 }
+var _registry  # MissionEntityRegistry: SSN -> animatable node
+var _sim        # NovaSimulation: the live mission runtime
+var _stats: Dictionary = { "posed": 0, "unresolved": 0 }
 
 
-func setup(registry, mission) -> void:
+func setup(registry, sim) -> void:
 	_registry = registry
-	_mission = mission
-	_handlers = { AI_SUB_PLAYPARTANIM: _handle_play_part_anim }
-
-
-## Connect to a NovaWorld's mission_commands signal (idempotent).
-func attach(world) -> void:
-	if world != null and world.has_signal("mission_commands") \
-			and not world.mission_commands.is_connected(_on_mission_commands):
-		world.mission_commands.connect(_on_mission_commands)
+	_sim = sim
 
 
 func get_stats() -> Dictionary:
 	return _stats.duplicate()
 
 
-func _on_mission_commands(commands: Array) -> void:
-	for c in commands:
-		_dispatch(c as Dictionary)
-
-
-func _dispatch(cmd: Dictionary) -> void:
-	if int(cmd.get("kind", -1)) != KIND_HOST_ACTION:
-		_stats.ignored += 1
+## Pose every animated entity's part channels to their engine-computed phase. Called once per logic
+## tick by NovaWorld (after the sim advances). Channels the sim reports inactive are left untouched
+## so a part that was never commanded keeps its default pose.
+func render() -> void:
+	if _registry == null or _sim == null:
 		return
-	if not _is_ai_change(int(cmd.get("action_type", -1))):
-		_stats.ignored += 1
-		return
-	var handler: Callable = _handlers.get(int(cmd.get("action_sub_type", -1)), Callable())
-	if not handler.is_valid():
-		_stats.ignored += 1
-		return
-	handler.call(cmd)
-
-
-func _is_ai_change(action_type: int) -> bool:
-	return action_type == ACT_CHANGE_SINGLE_AI or action_type == ACT_CHANGE_GROUP_AI \
-		or action_type == ACT_AREA_AI_RED or action_type == ACT_AREA_AI_BLUE
-
-
-func _handle_play_part_anim(cmd: Dictionary) -> void:
-	var nodes := _resolve_targets(cmd)
-	if nodes.is_empty():
-		_stats.unresolved += 1
-		return
-	var channel := int(cmd.get("param2", 0))                       # ANIMNUM (channel 1/2)
-	var play_type := int(cmd.get("param3", 0))                     # ANIMPLAYTYPE {1 play, 0 stop, -1 rev}
-	var time_s := float(int(cmd.get("param4", 0))) / ANIMTIME_FIXED_ONE  # ANIMTIME 16.16 -> seconds
-	var applied := false
-	for node in nodes:
-		if node != null and is_instance_valid(node) and node.has_method("play_part_anim"):
-			node.play_part_anim(channel, play_type, time_s)
-			applied = true
-	if applied:
-		_stats.applied += 1
-	else:
-		_stats.unresolved += 1
-
-
-func _resolve_targets(cmd: Dictionary) -> Array:
-	if _registry == null:
-		return []
-	var target := int(cmd.get("param1", 0))
-	match int(cmd.get("action_type", -1)):
-		ACT_CHANGE_SINGLE_AI:
-			var node = _registry.resolve_single(target)
-			return [node] if node != null else []
-		ACT_CHANGE_GROUP_AI:
-			return _registry.resolve_group(target)
-		ACT_AREA_AI_RED, ACT_AREA_AI_BLUE:
-			return _registry.resolve_zone(target)
-	return []
+	var count: int = _sim.get_entity_count()
+	for i in range(count):
+		# Resolve by the file entity id (bms_id), the same key MissionEntityRegistry indexes nodes
+		# by -- NOT the runtime SSN (net_id), which is a separate id space.
+		var bms_id: int = _sim.get_entity_bms_id(i)
+		if bms_id == 0:
+			continue
+		var node = _registry.resolve_single(bms_id)
+		if node == null or not is_instance_valid(node) or not node.has_method("set_part_phase"):
+			continue
+		for channel in [1, 2]:
+			if _sim.get_entity_part_anim_active(i, channel):
+				node.set_part_phase(channel, _sim.get_entity_part_anim_phase(i, channel))
+				_stats.posed += 1

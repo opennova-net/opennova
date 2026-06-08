@@ -106,6 +106,25 @@ int main() {
     CHECK(world.registry.find_by_net_id(2).valid()); // second organic
     CHECK(world.registry.find_by_net_id(3).valid()); // building
 
+    // ---- area-trigger zones are promoted into the registry's area table (array order) ----
+    {
+        bms::File ma{};
+        bms::AreaTrigger zone{};
+        zone.id = 5;                  // designer zone id (1..99); registered at array index 0
+        zone.x_min = -10 << 16; zone.x_max = 10 << 16;
+        zone.y_min = -10 << 16; zone.y_max = 10 << 16;
+        zone.flags = 0;               // Z unbounded
+        ma.area_triggers.push_back(zone);
+        ma.organics.push_back(organic(0, 0, 0, 1, 0, 0));         // SSN 1, inside the zone
+        ma.organics.push_back(organic(100 << 16, 0, 0, 1, 0, 0)); // SSN 2, outside
+        World wz;
+        AiSystem aiz;
+        mission::promote_mission(ma, wz, aiz);
+        CHECK(wz.registry.area(0) != nullptr);  // the zone populated the table (was empty before)
+        CHECK(wz.commands.ssn_in_area(1, 0));    // organic at origin is inside zone 0
+        CHECK(!wz.commands.ssn_in_area(2, 0));   // organic at x=100 is outside
+    }
+
     // a non-routed entity option: with patrol_on_spawn=false the brain stays in state 0.
     {
         World w2;

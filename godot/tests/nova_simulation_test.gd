@@ -47,3 +47,26 @@ func test_transport_play_flag() -> void:
 	sim.set_playing(true)
 	assert_true(sim.is_playing(), "play flag toggles")
 	sim.free()
+
+func test_bms_event_fires_through_binding() -> void:
+	# The capability consolidation adds: a BMS event evaluates through the SAME binding that
+	# runs the AI (the editor preview used to walk AI but never fire events). Build an
+	# unconditional OutputText(77) event, tick once, and confirm the host-presentation effect
+	# drains out of the shared World EffectLog.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, {"action_type": 6, "param1": 77}).is_empty())
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md), "loaded the scripted mission")
+	assert_eq(sim.get_event_count(), 1, "one BMS event registered in the runtime")
+
+	sim.step() # one logic tick: the unconditional event fires its OutputText action
+	var effects := sim.drain_effects()
+	assert_eq(effects.size(), 1, "one presentation effect drained")
+	assert_eq(String((effects[0] as Dictionary)["kind"]), "text", "OutputText -> text effect")
+	assert_eq(int((effects[0] as Dictionary)["a"]), 77, "carries the string id")
+	assert_true(sim.has_event_fired(0), "the event is marked fired")
+	assert_true(sim.drain_effects().is_empty(), "drain cleared the log")
+	sim.free()

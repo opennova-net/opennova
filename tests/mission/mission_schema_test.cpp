@@ -1,10 +1,12 @@
+// Editor parameter-schema tests (mission_schema.h): the trigger/action -> widget metadata the
+// ONED inspector renders. Split out of the old mission_runtime_test when the duplicate MissionRuntime
+// evaluator was retired in favour of the shared-world BmsEventSystem (see event_runtime_test).
 #include <string>
-#include <vector>
 
 #include "common/test_expect.h"
 #include "mission/bms.h"
 #include "mission/mission.h"
-#include "mission/mission_runtime.h"
+#include "mission/mission_schema.h"
 
 namespace {
 
@@ -12,23 +14,6 @@ opennova::mission::MissionEventRecord make_event(int flags = 0) {
 	opennova::mission::MissionEventRecord event;
 	event.flags = flags;
 	return event;
-}
-
-opennova::mission::MissionTriggerRecord make_mission_variable_trigger(int variable, int compare_value) {
-	opennova::mission::MissionTriggerRecord trigger;
-	trigger.main_type = static_cast<int>(opennova::bms::TriggerMainType::MissionVariable);
-	trigger.sub_type = static_cast<int>(opennova::bms::MissionVariableTriggerType::MissionVariableIsGreaterThan);
-	trigger.param1 = variable;
-	trigger.param2 = compare_value;
-	return trigger;
-}
-
-opennova::mission::MissionActionRecord make_action(opennova::bms::ActionType type, int p1 = 0, int p2 = 0) {
-	opennova::mission::MissionActionRecord action;
-	action.action_type = static_cast<int>(type);
-	action.param1 = p1;
-	action.param2 = p2;
-	return action;
 }
 
 } // namespace
@@ -80,7 +65,7 @@ int main() {
 	TEST_EXPECT(set_state.params[1].kind == MissionParamKind::Enum);
 	TEST_EXPECT(set_state.params[1].enum_values.size() == 5);
 
-	// AREA_AI_RED was previously unmodelled (raw fallthrough); it now resolves to a Zone target + sub-type slots.
+	// AREA_AI_RED resolves to a Zone target + the sub-type's slots.
 	const MissionParamSpec area_ai = action_param_schema(
 		static_cast<int>(opennova::bms::ActionType::AreaAiRed),
 		static_cast<int>(opennova::bms::AIActionSubType::BlindBit));
@@ -92,60 +77,7 @@ int main() {
 	TEST_EXPECT(event_trigger.known);
 	TEST_EXPECT(event_trigger.params[0].kind == MissionParamKind::Event);
 
-	MissionDocument doc;
-	doc.create_default();
-	MissionEventRecord event0;
-	TEST_EXPECT(doc.add_event(make_event(), &event0));
-	TEST_EXPECT(event0.index == 0);
-	TEST_EXPECT(doc.insert_event_action(0, 0, make_action(opennova::bms::ActionType::OutputText, 123)));
-
-	MissionRuntime runtime;
-	TEST_EXPECT(runtime.load(doc));
-	MissionRuntimeTickResult result = runtime.tick();
-	TEST_EXPECT(result.commands.size() == 1);
-	TEST_EXPECT(result.commands[0].kind == MissionRuntimeCommandKind::OutputText);
-	TEST_EXPECT(result.commands[0].event_index == 0);
-	TEST_EXPECT(result.commands[0].action_index == 0);
-	TEST_EXPECT(result.commands[0].param1 == 123);
-	TEST_EXPECT(runtime.has_event_fired(0));
-	TEST_EXPECT(runtime.tick().commands.empty());
-
-	MissionDocument vars_doc;
-	vars_doc.create_default();
-	TEST_EXPECT(vars_doc.add_event(make_event()));
-	TEST_EXPECT(vars_doc.insert_event_trigger(0, 0, make_mission_variable_trigger(2, 4)));
-	MissionActionRecord add_var = make_action(opennova::bms::ActionType::MisvarChange, 2, 3);
-	add_var.action_sub_type = static_cast<int>(opennova::bms::MissionVariableActionSubType::Add);
-	TEST_EXPECT(vars_doc.insert_event_action(0, 0, add_var));
-
-	MissionRuntime vars_runtime;
-	TEST_EXPECT(vars_runtime.load(vars_doc));
-	vars_runtime.set_mission_variable(2, 5);
-	result = vars_runtime.tick();
-	TEST_EXPECT(vars_runtime.get_mission_variable(2) == 8);
-	TEST_EXPECT(result.commands.size() == 1);
-	TEST_EXPECT(result.commands[0].kind == MissionRuntimeCommandKind::MissionVariableChanged);
-	TEST_EXPECT(result.commands[0].param1 == 2);
-	TEST_EXPECT(result.commands[0].param2 == 8);
-
-	MissionDocument reset_doc;
-	reset_doc.create_default();
-	TEST_EXPECT(reset_doc.add_event(make_event()));
-	TEST_EXPECT(reset_doc.insert_event_action(0, 0, make_action(opennova::bms::ActionType::OutputText, 7)));
-	TEST_EXPECT(reset_doc.add_event(make_event()));
-	TEST_EXPECT(reset_doc.insert_event_action(1, 0, make_action(opennova::bms::ActionType::ResetEvent, 0)));
-
-	MissionRuntime reset_runtime;
-	TEST_EXPECT(reset_runtime.load(reset_doc));
-	result = reset_runtime.tick();
-	TEST_EXPECT(result.commands.size() == 2);
-	TEST_EXPECT(!reset_runtime.has_event_fired(0));
-	TEST_EXPECT(reset_runtime.has_event_fired(1));
-	result = reset_runtime.tick();
-	TEST_EXPECT(result.commands.size() == 1);
-	TEST_EXPECT(result.commands[0].kind == MissionRuntimeCommandKind::OutputText);
-	TEST_EXPECT(result.commands[0].param1 == 7);
-
+	// MissionDocument integrity: a malformed trigger_index must block remove_event without corrupting counts.
 	MissionDocument malformed;
 	malformed.create_default();
 	TEST_EXPECT(malformed.add_event(make_event()));

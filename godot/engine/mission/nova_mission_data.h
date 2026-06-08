@@ -14,7 +14,7 @@
 
 #include <mission/bms.h>
 #include <mission/mission.h>
-#include <mission/mission_runtime.h>
+#include <mission/mission_schema.h>
 #include <oned_edit/edit_history.h>
 
 namespace godot {
