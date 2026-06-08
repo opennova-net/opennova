@@ -1582,7 +1582,7 @@ func set_game_mode(bit: int) -> void:
 
 # --- Weapon loadout + groups (mission-global) ---------------------------------
 # Loadout entries are dictionaries { index, name, value1, value2 }; groups are
-# { index, field0, field8, field12 }. Both edit through the one-step snapshot/undo recipe.
+# { index, field0(flags), field8(value), field12(constant 10) }. Edits use the one-step snapshot/undo recipe.
 
 func get_weapon_loadout() -> Array:
 	if _mission == null:
@@ -2007,7 +2007,7 @@ func set_waypoint_flags(loop: bool, blue: bool, red: bool) -> void:
 	if path.is_empty():
 		return
 	# Preserve any on-disk flag bits beyond the three the UI exposes (the event- and zone-flag paths
-	# mask-merge the same way) so toggling a checkbox keeps the round-trip byte-exact: seed from the
+	# mask-merge the same way): seed from the
 	# path's current flags with the known bits cleared, then set only DoesNotLoop / BlueTeam / RedTeam.
 	var known_mask := NovaMissionData.WP_FLAG_DOES_NOT_LOOP | NovaMissionData.WP_FLAG_BLUE_TEAM | NovaMissionData.WP_FLAG_RED_TEAM
 	var flags := int(path.get("flags", 0)) & ~known_mask

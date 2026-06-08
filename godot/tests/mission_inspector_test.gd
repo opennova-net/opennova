@@ -1537,27 +1537,28 @@ func test_loadout_delete_calls_controller() -> void:
 
 func test_groups_panel_lists_and_syncs_selection() -> void:
 	var ctx := _groups_ctx([
-		{"index": 0, "field0": 0, "field8": 0, "field12": 0},
-		{"index": 1, "field0": 11, "field8": 22, "field12": 33},
+		{"index": 0, "field0": 0, "field8": 0, "field12": 10},
+		{"index": 1, "field0": 3, "field8": 22, "field12": 10},
 	])
 	assert_true(ctx.inspector._groups_toggle.visible, "the groups toggle shows when a mission is loaded")
 	assert_eq(ctx.inspector._groups_list.item_count, 2, "both groups listed")
 	ctx.inspector._groups_list.item_selected.emit(1)
-	assert_eq(ctx.inspector._group_spins[0].value, 11.0, "field0 spin syncs to the selected group")
-	assert_eq(ctx.inspector._group_spins[1].value, 22.0, "field8 spin syncs")
-	assert_eq(ctx.inspector._group_spins[2].value, 33.0, "field12 spin syncs")
+	assert_eq(ctx.inspector._group_spins[0].value, 3.0, "flags spin syncs to the selected group")
+	assert_eq(ctx.inspector._group_spins[1].value, 22.0, "value spin syncs")
+	assert_eq(ctx.inspector._group_spins[2].value, 10.0, "constant spin syncs")
+	assert_false(ctx.inspector._group_spins[2].editable, "constant is read-only")
 
 
 func test_group_spin_commits_to_controller() -> void:
-	var ctx := _groups_ctx([{"index": 0, "field0": 0, "field8": 0, "field12": 0}])
+	var ctx := _groups_ctx([{"index": 0, "field0": 0, "field8": 0, "field12": 10}])
 	ctx.inspector._groups_list.item_selected.emit(0)
-	ctx.inspector._group_spins[0].value = 99.0  # fires value_changed
+	ctx.inspector._group_spins[0].value = 3.0  # fires value_changed
 	assert_eq(ctx.fake.set_group_calls.size(), 1, "changing a spin commits the group")
 	var call := ctx.fake.set_group_calls.back() as Array
 	assert_eq(int(call[0]), 0, "group index 0")
-	assert_eq(int(call[1]), 99, "field0 sent")
-	assert_eq(int(call[2]), 0, "field8 sent (unchanged)")
-	assert_eq(int(call[3]), 0, "field12 sent (unchanged)")
+	assert_eq(int(call[1]), 3, "flags sent")
+	assert_eq(int(call[2]), 0, "value sent (unchanged)")
+	assert_eq(int(call[3]), 10, "constant sent")
 
 
 func test_loadout_edit_survives_external_refresh_while_focused() -> void:
@@ -1575,9 +1576,9 @@ func test_loadout_edit_survives_external_refresh_while_focused() -> void:
 
 
 func test_group_spin_edit_survives_external_refresh_while_focused() -> void:
-	var ctx := _groups_ctx([{"index": 0, "field0": 5, "field8": 0, "field12": 0}])
-	ctx.inspector._groups_list.item_selected.emit(0)  # spin0 synced to 5
-	var inner: LineEdit = ctx.inspector._group_spins[0].get_line_edit()
+	var ctx := _groups_ctx([{"index": 0, "field0": 0, "field8": 5, "field12": 10}])
+	ctx.inspector._groups_list.item_selected.emit(0)  # value spin synced to 5
+	var inner: LineEdit = ctx.inspector._group_spins[1].get_line_edit()
 	inner.grab_focus()
 	if not inner.has_focus():
 		pass_test("headless focus unavailable")
@@ -1585,7 +1586,7 @@ func test_group_spin_edit_survives_external_refresh_while_focused() -> void:
 	# The user is mid-typing in the spin's inner field (not yet applied), while an external change
 	# (e.g. an undo) moves the model to a different value. The refresh must not clobber the typed text.
 	inner.text = "70"
-	ctx.fake.groups[0] = {"index": 0, "field0": 9, "field8": 0, "field12": 0}
+	ctx.fake.groups[0] = {"index": 0, "field0": 0, "field8": 9, "field12": 10}
 	ctx.fake.changed.emit()
 	assert_eq(inner.text, "70", "focused, in-flight spin text survives an external refresh")
 

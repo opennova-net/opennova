@@ -1,9 +1,11 @@
 // BMS mission file parser implementation.
 #include "mission/bms.h"
 
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <type_traits>
+#include <utility>
 
 namespace opennova::bms {
 
@@ -16,6 +18,22 @@ std::string fixed_string(const char *data, size_t max_len) {
     }
     return std::string(data, len);
 }
+
+constexpr uint32_t kKnownBmsiAttributeMask =
+    static_cast<uint32_t>(BmsiAttributeFlags::Blind) |
+    static_cast<uint32_t>(BmsiAttributeFlags::Guarding) |
+    static_cast<uint32_t>(BmsiAttributeFlags::RemoveIfLessThan) |
+    static_cast<uint32_t>(BmsiAttributeFlags::RemoveIfMoreThan) |
+    static_cast<uint32_t>(BmsiAttributeFlags::Multiplayer) |
+    static_cast<uint32_t>(BmsiAttributeFlags::Berserk) |
+    static_cast<uint32_t>(BmsiAttributeFlags::FlyingOrganic) |
+    static_cast<uint32_t>(BmsiAttributeFlags::Coward) |
+    static_cast<uint32_t>(BmsiAttributeFlags::Attribute17) |
+    static_cast<uint32_t>(BmsiAttributeFlags::AdvancedAmmo) |
+    static_cast<uint32_t>(BmsiAttributeFlags::Indestructible) |
+    static_cast<uint32_t>(BmsiAttributeFlags::NavigationWaypoint) |
+    static_cast<uint32_t>(BmsiAttributeFlags::Reflective) |
+    static_cast<uint32_t>(BmsiAttributeFlags::NoShadow);
 
 // Helper class for reading binary data
 class Reader {
@@ -224,7 +242,8 @@ bool parse_header(Reader& r, Header& h, std::string& error) {
     h.unknown6 = r.read_i16();
     h.mission_type = static_cast<MissionType>(r.read_u8());
     h.max_saves = r.read_u8();
-    r.read_bytes(h.unknown7, 16);
+    r.read_bytes(h.win_scores, 8);
+    r.read_bytes(h.lose_scores, 8);
     h.map_zoom = r.read_f32();
     h.area_trigger_count = r.read_i16();
     h.weapon_loadout_chunk_len = r.read_u16();
@@ -284,7 +303,8 @@ void write_header(Writer& w, const Header& h) {
     w.write_i16(h.unknown6);
     w.write_u8(static_cast<uint8_t>(h.mission_type));
     w.write_u8(h.max_saves);
-    w.write_bytes(h.unknown7, 16);
+    w.write_bytes(h.win_scores, 8);
+    w.write_bytes(h.lose_scores, 8);
     w.write_f32(h.map_zoom);
     w.write_i16(h.area_trigger_count);
     w.write_u16(h.weapon_loadout_chunk_len);
@@ -302,6 +322,10 @@ bool parse_entity(Reader& r, Entity& e, std::string& error) {
     e.name_index = r.read_i32();
     e.id = r.read_i32();
     e.bmsi_attributes = r.read_u32();
+    if ((e.bmsi_attributes & ~kKnownBmsiAttributeMask) != 0) {
+        error = "BMS entity has unsupported AI attribute bits";
+        return false;
+    }
     e.x = r.read_i32();
     e.y = r.read_i32();
     e.z = r.read_i32();
@@ -341,13 +365,26 @@ bool parse_entity(Reader& r, Entity& e, std::string& error) {
     e.wp_goals = r.read_i32();
     r.read_fixed_string(e.name1, 8);
     r.read_fixed_string(e.name2, 8);
-    r.read_fixed_string(e.gen_string, 36);
+    r.read_fixed_string(e.gen_string, sizeof(e.gen_string));
+    e.gen_reserved0 = r.read_u8();
+    e.grenades = r.read_u8();
+    e.gen_reserved1 = r.read_u8();
+    e.mission_critical = r.read_u8();
+    e.lfp_group = r.read_u8();
+    if (e.gen_reserved0 != 0 || e.gen_reserved1 != 0) {
+        error = "BMS entity has nonzero gen_string reserved bytes";
+        return false;
+    }
     e.max_attack_distance = r.read_i32();
     e.next_ssn = r.read_i32();
     e.color_override = r.read_u8();
     e.team_budget = r.read_u8();
     e.unk42b = r.read_i16();
     e.unk43 = r.read_i32();
+    if (e.unk22 != 0 || e.unk42b != 0 || e.unk43 != 0) {
+        error = "BMS entity has nonzero reserved fields";
+        return false;
+    }
 
     size_t bytes_read = r.position() - start;
     if (bytes_read != kEntitySize) {
@@ -363,7 +400,7 @@ void write_entity(Writer& w, const Entity& e) {
     w.write_i32(e.type_id);
     w.write_i32(e.name_index);
     w.write_i32(e.id);
-    w.write_u32(e.bmsi_attributes);
+    w.write_u32(e.bmsi_attributes & kKnownBmsiAttributeMask);
     w.write_i32(e.x);
     w.write_i32(e.y);
     w.write_i32(e.z);
@@ -393,7 +430,7 @@ void write_entity(Writer& w, const Entity& e) {
     w.write_u8(e.waypoint_id);
     w.write_u8(e.obliqueness);
     w.write_u8(e.map_symbol);
-    w.write_i16(e.unk22);
+    w.write_i16(0);
     w.write_i16(e.blink_parent);
     w.write_i16(e.blink_group);
     w.write_i16(e.group_rel_lo);
@@ -403,13 +440,18 @@ void write_entity(Writer& w, const Entity& e) {
     w.write_i32(e.wp_goals);
     w.write_fixed_string(e.name1, 8);
     w.write_fixed_string(e.name2, 8);
-    w.write_fixed_string(e.gen_string, 36);
+    w.write_fixed_string(e.gen_string, sizeof(e.gen_string));
+    w.write_u8(0);
+    w.write_u8(e.grenades);
+    w.write_u8(0);
+    w.write_u8(e.mission_critical);
+    w.write_u8(e.lfp_group);
     w.write_i32(e.max_attack_distance);
     w.write_i32(e.next_ssn);
     w.write_u8(e.color_override);
     w.write_u8(e.team_budget);
-    w.write_i16(e.unk42b);
-    w.write_i32(e.unk43);
+    w.write_i16(0);
+    w.write_i32(0);
 }
 
 bool parse_waypoint_record(Reader& r, WaypointRecord& wp, std::string& error) {
@@ -462,22 +504,49 @@ void write_waypoint_record(Writer& w, const WaypointRecord& wp) {
     w.write_bytes(wp.padding);
 }
 
-bool parse_group_record(Reader& r, GroupRecord& gr, std::string& /*error*/) {
-    r.read_bytes(gr.raw_data, kGroupRecordSize);
+bool parse_group_record(Reader& r, GroupRecord& gr, std::string& error) {
+    const int32_t flags = r.read_i32();
+    const int32_t zero_after_flags = r.read_i32();
+    const int32_t value = r.read_i32();
+    const int32_t constant10 = r.read_i32();
+    int32_t tail[4] = {};
+    for (int i = 0; i < 4; ++i) {
+        tail[i] = r.read_i32();
+    }
+    if ((flags & ~0x3) != 0) {
+        error = "BMS group record has unsupported flag bits";
+        return false;
+    }
+    if (zero_after_flags != 0 || tail[0] != 0 || tail[1] != 0 || tail[2] != 0 || tail[3] != 0) {
+        error = "BMS group record has nonzero reserved bytes";
+        return false;
+    }
+    const bool empty_record = flags == 0 && zero_after_flags == 0 && value == 0 && constant10 == 0 &&
+                              tail[0] == 0 && tail[1] == 0 && tail[2] == 0 && tail[3] == 0;
+    if (constant10 != 10 && !empty_record) {
+        error = "BMS group record constant is not 10";
+        return false;
+    }
+    gr.flags = flags;
+    gr.value = value;
     return true;
 }
 
 void write_group_record(Writer& w, const GroupRecord& gr) {
-    w.write_bytes(gr.raw_data, kGroupRecordSize);
+    w.write_i32(gr.flags & 0x3);
+    w.write_i32(0);
+    w.write_i32(gr.value);
+    w.write_i32(10);
+    w.write_zeros(16);
 }
 
 bool parse_layer_record(Reader& r, LayerRecord& lr, std::string& /*error*/) {
-    r.read_bytes(lr.raw_data, kLayerRecordSize);
+    r.read_fixed_string(lr.name, kLayerRecordSize);
     return true;
 }
 
 void write_layer_record(Writer& w, const LayerRecord& lr) {
-    w.write_bytes(lr.raw_data, kLayerRecordSize);
+    w.write_fixed_string(lr.name, kLayerRecordSize);
 }
 
 bool parse_area_trigger(Reader& r, AreaTrigger& at, std::string& /*error*/) {
@@ -504,8 +573,12 @@ void write_area_trigger(Writer& w, const AreaTrigger& at) {
     w.write_u32(at.flags);
 }
 
-bool parse_event(Reader& r, Event& e, std::string& /*error*/) {
+bool parse_event(Reader& r, Event& e, std::string& error) {
     e.flags = static_cast<EventFlags>(r.read_i32());
+    if ((static_cast<uint32_t>(e.flags) & ~kEventKnownFlagMask) != 0) {
+        error = "BMS event has unsupported flag bits";
+        return false;
+    }
     e.trigger_index = r.read_i32();
     e.action_index = r.read_i32();
 
@@ -518,12 +591,16 @@ bool parse_event(Reader& r, Event& e, std::string& /*error*/) {
     e.trigger_count = r.read_u8();
     e.action_count = r.read_u8();
     e.unknown6 = r.read_u8();
+    if (e.unknown5 != 0 || e.unknown6 != 0) {
+        error = "BMS event has nonzero reserved runtime bytes";
+        return false;
+    }
 
     return true;
 }
 
 void write_event(Writer& w, const Event& e) {
-    w.write_i32(static_cast<int32_t>(e.flags));
+    w.write_i32(static_cast<int32_t>(static_cast<uint32_t>(e.flags) & kEventKnownFlagMask));
     w.write_i32(e.trigger_index);
     w.write_i32(e.action_index);
     // Reconstruct raw value: upper 10 bits contain value, lower 22 bits are zero. Shift as
@@ -531,13 +608,13 @@ void write_event(Writer& w, const Event& e) {
     // overflows INT32_MAX); the written byte pattern is identical to the well-defined form.
     w.write_u32(static_cast<uint32_t>(e.reset_after) << 22);
     w.write_u32(static_cast<uint32_t>(e.delay) << 22);
-    w.write_u8(e.unknown5);
+    w.write_u8(0);
     w.write_u8(e.trigger_count);
     w.write_u8(e.action_count);
-    w.write_u8(e.unknown6);
+    w.write_u8(0);
 }
 
-bool parse_trigger(Reader& r, Trigger& t, std::string& /*error*/) {
+bool parse_trigger(Reader& r, Trigger& t, std::string& error) {
     t.condition_flags = r.read_i32();
     t.main_type = static_cast<TriggerMainType>(r.read_i32());
     t.sub_type = r.read_i32();
@@ -546,6 +623,10 @@ bool parse_trigger(Reader& r, Trigger& t, std::string& /*error*/) {
     t.param3 = r.read_i32();
     t.param4 = r.read_i32();
     t.unknown7 = r.read_i32();
+    if (t.unknown7 != 0) {
+        error = "BMS trigger has nonzero reserved field";
+        return false;
+    }
     return true;
 }
 
@@ -557,10 +638,10 @@ void write_trigger(Writer& w, const Trigger& t) {
     w.write_i32(t.param2);
     w.write_i32(t.param3);
     w.write_i32(t.param4);
-    w.write_i32(t.unknown7);
+    w.write_i32(0);
 }
 
-bool parse_action(Reader& r, Action& a, std::string& /*error*/) {
+bool parse_action(Reader& r, Action& a, std::string& error) {
     a.reserved0 = r.read_i32();
     a.action_type = static_cast<ActionType>(r.read_i32());
     a.action_sub_type = r.read_i32();
@@ -569,31 +650,39 @@ bool parse_action(Reader& r, Action& a, std::string& /*error*/) {
     a.param3 = r.read_i32();
     a.param4 = r.read_i32();
     a.reserved1 = r.read_i32();
+    if (a.reserved0 != 0 || a.reserved1 != 0) {
+        error = "BMS action has nonzero reserved field";
+        return false;
+    }
     return true;
 }
 
 void write_action(Writer& w, const Action& a) {
-    w.write_i32(a.reserved0);
+    w.write_i32(0);
     w.write_i32(static_cast<int32_t>(a.action_type));
     w.write_i32(a.action_sub_type);
     w.write_i32(a.param1);
     w.write_i32(a.param2);
     w.write_i32(a.param3);
     w.write_i32(a.param4);
-    w.write_i32(a.reserved1);
+    w.write_i32(0);
 }
 
-bool parse_bounding_box(Reader& r, BoundingBox& bb, std::string& /*error*/) {
-    // 0x24-byte record: min/max XYZ (16.16) + 12 opaque bytes. The engine swaps each axis so min<=max
-    // AFTER reading [orig: Mission_LoadBMSFile @0x40fcf4]; that is a runtime normalization, so we
-    // preserve the on-disk order verbatim for byte-exact round-trip (the editor normalizes on author).
+bool parse_bounding_box(Reader& r, BoundingBox& bb, std::string& error) {
+    // 0x24-byte record: min/max XYZ (16.16) + type/ref metadata + reserved zero.
     bb.min_x = r.read_i32();
     bb.min_y = r.read_i32();
     bb.min_z = r.read_i32();
     bb.max_x = r.read_i32();
     bb.max_y = r.read_i32();
     bb.max_z = r.read_i32();
-    r.read_bytes(bb.unknown_data, 12);
+    bb.type = r.read_i32();
+    bb.ref_id = r.read_i32();
+    bb.reserved0 = r.read_i32();
+    if (bb.reserved0 != 0) {
+        error = "BMS bounding box has nonzero reserved field";
+        return false;
+    }
     return true;
 }
 
@@ -604,7 +693,9 @@ void write_bounding_box(Writer& w, const BoundingBox& bb) {
     w.write_i32(bb.max_x);
     w.write_i32(bb.max_y);
     w.write_i32(bb.max_z);
-    w.write_bytes(bb.unknown_data, 12);
+    w.write_i32(bb.type);
+    w.write_i32(bb.ref_id);
+    w.write_i32(0);
 }
 
 // Reject a record count that cannot fit in the bytes left in the buffer. The pool/chunk counts come
@@ -618,6 +709,209 @@ bool count_fits(const Reader& r, int64_t count, size_t record_size,
         error = std::string("BMS ") + what + " count " + std::to_string(count) +
                 " is invalid (" + std::to_string(r.remaining()) + " bytes remain)";
         return false;
+    }
+    return true;
+}
+
+bool read_nul_field(const std::vector<uint8_t>& raw, size_t& pos, std::string& out) {
+    const size_t start = pos;
+    while (pos < raw.size() && raw[pos] != 0) {
+        ++pos;
+    }
+    if (pos >= raw.size()) {
+        return false;
+    }
+    out.assign(reinterpret_cast<const char*>(raw.data() + start), pos - start);
+    ++pos;
+    return true;
+}
+
+bool contains_nul(const std::string& value) {
+    return value.find('\0') != std::string::npos;
+}
+
+bool write_weapon_loadout_chunk(const WeaponLoadout& loadout, std::vector<uint8_t>& out, std::string& error);
+
+size_t find_nul(const std::vector<uint8_t>& raw, size_t pos, size_t limit) {
+    while (pos < limit && raw[pos] != 0) {
+        ++pos;
+    }
+    return pos;
+}
+
+size_t loadout_parse_limit(const std::vector<uint8_t>& raw) {
+    if (raw.empty() || raw[0] == 0) {
+        return 0;
+    }
+    for (size_t i = 0; i + 1 < raw.size(); ++i) {
+        if (raw[i] == 0 && raw[i + 1] == 0) {
+            return i;
+        }
+    }
+    return raw.size();
+}
+
+bool is_loadout_name_at(const std::vector<uint8_t>& raw, size_t pos, size_t limit) {
+    return pos + 4 <= limit && raw[pos] == 'W' && raw[pos + 1] == 'P' &&
+           raw[pos + 2] == 'N' && raw[pos + 3] == '_';
+}
+
+std::string loadout_string_at(const std::vector<uint8_t>& raw, size_t pos, size_t limit) {
+    const size_t end = find_nul(raw, pos, limit);
+    return std::string(reinterpret_cast<const char*>(raw.data() + pos), end - pos);
+}
+
+std::string sanitize_loadout_value(const std::string& value) {
+    if (value.empty()) {
+        return "-1";
+    }
+    size_t pos = 0;
+    if (value[pos] == '-' || value[pos] == '+') {
+        ++pos;
+    }
+    const size_t digits_start = pos;
+    while (pos < value.size() && value[pos] >= '0' && value[pos] <= '9') {
+        ++pos;
+    }
+    if (pos == digits_start) {
+        return "-1";
+    }
+    return value.substr(0, pos);
+}
+
+std::string loadout_value_after(const std::vector<uint8_t>& raw, size_t& pos, size_t limit) {
+    if (pos >= limit) {
+        return "-1";
+    }
+    const std::string value = loadout_string_at(raw, pos, limit);
+    pos = find_nul(raw, pos, limit);
+    if (pos < limit) {
+        ++pos;
+    }
+    return sanitize_loadout_value(value);
+}
+
+bool parse_weapon_loadout_chunk(const std::vector<uint8_t>& raw, WeaponLoadout& out, std::string& error) {
+    out.entries.clear();
+    if (raw.empty()) {
+        return true;
+    }
+
+    const size_t limit = loadout_parse_limit(raw);
+    if (limit == 0) {
+        return true;
+    }
+    for (size_t pos = 0; pos < limit; ++pos) {
+        if (!is_loadout_name_at(raw, pos, limit)) {
+            continue;
+        }
+        const size_t name_end = find_nul(raw, pos, limit);
+        if (name_end == limit) {
+            error = "BMS weapon loadout chunk has an unterminated weapon name";
+            return false;
+        }
+        WeaponLoadoutRecord entry;
+        entry.name = loadout_string_at(raw, pos, limit);
+        size_t value_pos = name_end + 1;
+        entry.value1 = loadout_value_after(raw, value_pos, limit);
+        entry.value2 = loadout_value_after(raw, value_pos, limit);
+        entry.value3 = loadout_value_after(raw, value_pos, limit);
+        out.entries.push_back(std::move(entry));
+        pos = name_end;
+    }
+    if (out.entries.empty()) {
+        error = "BMS weapon loadout chunk has no weapon names";
+        return false;
+    }
+    return true;
+}
+
+bool write_weapon_loadout_chunk(const WeaponLoadout& loadout, std::vector<uint8_t>& out, std::string& error) {
+    out.clear();
+    for (const WeaponLoadoutRecord& entry : loadout.entries) {
+        if (entry.name.empty()) {
+            error = "BMS weapon loadout entries require a name";
+            return false;
+        }
+        const std::string value3 = entry.value3.empty() ? "-1" : entry.value3;
+        if (contains_nul(entry.name) || contains_nul(entry.value1) || contains_nul(entry.value2) ||
+            contains_nul(value3)) {
+            error = "BMS weapon loadout entries cannot contain embedded NUL bytes";
+            return false;
+        }
+        out.insert(out.end(), entry.name.begin(), entry.name.end());
+        out.push_back(0);
+        out.insert(out.end(), entry.value1.begin(), entry.value1.end());
+        out.push_back(0);
+        out.insert(out.end(), entry.value2.begin(), entry.value2.end());
+        out.push_back(0);
+        out.insert(out.end(), value3.begin(), value3.end());
+        out.push_back(0);
+    }
+    if (!out.empty()) {
+        out.push_back(0);
+    }
+    return true;
+}
+
+bool parse_item_availability_chunk(const std::vector<uint8_t>& raw,
+                                   std::vector<ItemAvailabilityEntry>& out,
+                                   std::string& error) {
+    out.clear();
+    if (raw.empty()) {
+        return true;
+    }
+
+    size_t pos = 0;
+    while (true) {
+        if (pos >= raw.size()) {
+            error = "BMS item availability chunk missing terminator";
+            return false;
+        }
+        if (raw[pos] == 0) {
+            ++pos;
+            break;
+        }
+
+        ItemAvailabilityEntry entry;
+        if (!read_nul_field(raw, pos, entry.name)) {
+            error = "BMS item availability chunk has an unterminated name";
+            return false;
+        }
+        if (pos >= raw.size()) {
+            error = "BMS item availability chunk missing status byte";
+            return false;
+        }
+        entry.status = raw[pos++];
+        out.push_back(std::move(entry));
+    }
+
+    if (pos != raw.size()) {
+        error = "BMS item availability chunk has trailing bytes";
+        return false;
+    }
+    return true;
+}
+
+bool write_item_availability_chunk(const std::vector<ItemAvailabilityEntry>& entries,
+                                   std::vector<uint8_t>& out,
+                                   std::string& error) {
+    out.clear();
+    for (const ItemAvailabilityEntry& entry : entries) {
+        if (entry.name.empty()) {
+            error = "BMS item availability entries require a name";
+            return false;
+        }
+        if (contains_nul(entry.name)) {
+            error = "BMS item availability names cannot contain embedded NUL bytes";
+            return false;
+        }
+        out.insert(out.end(), entry.name.begin(), entry.name.end());
+        out.push_back(0);
+        out.push_back(entry.status);
+    }
+    if (!out.empty()) {
+        out.push_back(0);
     }
     return true;
 }
@@ -648,7 +942,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     //   waypoints 0x88 x128 -> groups 0x20 x64 -> layers 0x14 x32 ->
     //   area triggers 0x20 x (hdr+0x240) -> event block -> bbox count(i32) + boxes 0x24.
     // The event block (counts + arrays) is read by EventTrigger_LoadAllData @0x453eb0. This order is
-    // exercised end-to-end by tests/mission/mission_corpus_test.cpp (byte-exact round-trip over the
+    // exercised end-to-end by tests/mission/mission_corpus_test.cpp (canonical idempotence over the
     // full shipped mission set).
     if (!parse_header(r, out.header, error)) {
         return false;
@@ -659,14 +953,25 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     // underflow, so a chunk length larger than the bytes remaining would silently mis-align every
     // section after it (a corrupt/truncated file would parse to garbage instead of failing cleanly).
     if (!count_fits(r, out.header.weapon_loadout_chunk_len, 1, "weapon loadout chunk", error)) return false;
-    out.loadout.raw_data.resize(out.header.weapon_loadout_chunk_len);
-    r.read_bytes(out.loadout.raw_data.data(), out.header.weapon_loadout_chunk_len);
+    std::vector<uint8_t> loadout_chunk;
+    r.read_bytes(loadout_chunk, out.header.weapon_loadout_chunk_len);
+    if (!parse_weapon_loadout_chunk(loadout_chunk, out.loadout, error)) {
+        return false;
+    }
+    if (!write_weapon_loadout_chunk(out.loadout, loadout_chunk, error)) {
+        return false;
+    }
+    out.header.weapon_loadout_chunk_len = static_cast<uint16_t>(loadout_chunk.size());
 
     // Parse the second chunk the engine always seeks past after the loadout.
     // [orig: word_A76416 @hdr+0x246 bytes; fseek at @0x40f751 (SP) / @0x40f6d1 (MP) in Mission_LoadBMSFile]
-    // Usually empty; preserved verbatim so a mission that uses it still round-trips.
+    // Usually empty; parsed as an item-availability list so a mission that uses it stays modeled.
     if (!count_fits(r, out.header.secondary_chunk_len, 1, "secondary chunk", error)) return false;
-    r.read_bytes(out.secondary_chunk, out.header.secondary_chunk_len);
+    std::vector<uint8_t> item_availability_chunk;
+    r.read_bytes(item_availability_chunk, out.header.secondary_chunk_len);
+    if (!parse_item_availability_chunk(item_availability_chunk, out.item_availability, error)) {
+        return false;
+    }
 
     // Parse entities
     if (!count_fits(r, out.header.num_items, kEntitySize, "item", error)) return false;
@@ -814,13 +1119,25 @@ bool parse_file(const std::string& path, File& out, std::string& error) {
 
 bool write(const File& file, std::vector<uint8_t>& out, std::string& error) {
     Writer w;
+    std::vector<uint8_t> loadout_chunk;
+    if (!write_weapon_loadout_chunk(file.loadout, loadout_chunk, error)) {
+        return false;
+    }
+    std::vector<uint8_t> item_availability_chunk;
+    if (!write_item_availability_chunk(file.item_availability, item_availability_chunk, error)) {
+        return false;
+    }
+
+    File header_file = file;
+    header_file.header.weapon_loadout_chunk_len = static_cast<uint16_t>(loadout_chunk.size());
+    header_file.header.secondary_chunk_len = static_cast<uint16_t>(item_availability_chunk.size());
 
     // Write header
-    write_header(w, file.header);
+    write_header(w, header_file.header);
 
-    // Write weapon loadout, then the second opaque chunk (mirrors the read order in parse()).
-    w.write_bytes(file.loadout.raw_data);
-    w.write_bytes(file.secondary_chunk);
+    // Write weapon loadout, then the item-availability chunk (mirrors the read order in parse()).
+    w.write_bytes(loadout_chunk);
+    w.write_bytes(item_availability_chunk);
 
     // Write entities
     for (const auto& e : file.items) {
@@ -949,6 +1266,34 @@ bool waypoint_records_equal(const std::vector<WaypointRecord>& a, const std::vec
     return true;
 }
 
+bool weapon_loadout_equal(const WeaponLoadout& a, const WeaponLoadout& b) {
+    if (a.entries.size() != b.entries.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.entries.size(); ++i) {
+        if (a.entries[i].name != b.entries[i].name ||
+            a.entries[i].value1 != b.entries[i].value1 ||
+            a.entries[i].value2 != b.entries[i].value2 ||
+            a.entries[i].value3 != b.entries[i].value3) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool item_availability_equal(const std::vector<ItemAvailabilityEntry>& a,
+                             const std::vector<ItemAvailabilityEntry>& b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (a[i].name != b[i].name || a[i].status != b[i].status) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 bool equal(const File& a, const File& b) {
@@ -959,7 +1304,8 @@ bool equal(const File& a, const File& b) {
     if (std::memcmp(&a.header, &b.header, sizeof(Header)) != 0) {
         return false;
     }
-    if (a.loadout.raw_data != b.loadout.raw_data || a.secondary_chunk != b.secondary_chunk) {
+    if (!weapon_loadout_equal(a.loadout, b.loadout) ||
+        !item_availability_equal(a.item_availability, b.item_availability)) {
         return false;
     }
     if (!pod_vectors_equal(a.items, b.items) || !pod_vectors_equal(a.buildings, b.buildings) ||

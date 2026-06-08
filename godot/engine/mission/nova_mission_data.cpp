@@ -955,15 +955,15 @@ bool NovaMissionData::set_event(int index, int flags, int reset_after, int delay
 	if (index < 0) {
 		return false;
 	}
-	// Seed from the existing event so the read-only structural fields (trigger/action index + count) and
-	// the unknown bytes survive: set_event applies only the editable attributes below.
+	// Seed from the existing event so the read-only structural fields (trigger/action index + count) survive:
+	// set_event applies only the editable attributes below.
 	opennova::mission::MissionEventRecord record;
 	if (!document.get_event(static_cast<size_t>(index), record)) {
 		return false;
 	}
 	// Preserve flag bits the editor does not surface, mirroring trigger_from_dictionary's condition_flags
 	// handling. The inspector rebuilds `flags` from the event_flag_bits() checkboxes only, so without this
-	// merge any on-disk bit outside that exposed set (e.g. 0x08, or any bit >= 0x40) is silently dropped on
+	// merge confirmed internal bits outside that exposed set (0x10/0x20) would be silently dropped on
 	// every event edit. `record.flags` is seeded from the existing on-disk event, so its complementary bits
 	// are exactly the ones to keep.
 	const int exposed = document.event_flag_mask();

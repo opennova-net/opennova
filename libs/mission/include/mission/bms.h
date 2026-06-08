@@ -116,6 +116,7 @@ enum class BmsiAttributeFlags : uint32_t {
     Berserk = 1 << 11,
     FlyingOrganic = 1 << 14,
     Coward = 1 << 16,
+    Attribute17 = 1 << 17, // present in shipped missions; editor label bit map not yet pinned
     AdvancedAmmo = 1 << 18,
     Indestructible = 1 << 21,
     NavigationWaypoint = 1 << 22,
@@ -142,11 +143,10 @@ inline WaypointFlags operator|(WaypointFlags a, WaypointFlags b) {
     return static_cast<WaypointFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
 }
 
-// Event flags (event record flags dword, offset +0 on disk). The DFX2 mission editor exposes EXACTLY
-// these three as author checkboxes; its dialog commit sets/clears only bits 0-2 (via |= / &= ~) and
-// PRESERVES every other bit verbatim. Bits >= 0x08 are therefore engine-internal / reserved, not
-// author-editable in the original tool, and survive an edit untouched (see MissionDocument::event_flag_mask
-// + NovaMissionData::set_event). Confirmed against dfx2med.exe (md5 e690e69e94029c6b9cc44e934e96e3be).
+// Event flags (event record flags dword, offset +0 on disk). The DFX2 mission editor exposes exactly
+// these three as author checkboxes; shipped JO missions also use internal bits 0x10/0x20, which are
+// preserved by editor-facing edits but not exposed as checkboxes. Bit 0x08 remains unsupported by the
+// shipped corpus and parser.
 // [orig: Med_EventDialogPopulate @0x411690 -> CheckDlgButton(4203/4212/4213, flags bit0/1/2);
 //        Med_EventDialogCommit @0x4118d0 -> IsDlgButtonChecked sets bits 0/1/2 only, leaves the rest]
 enum class EventFlags : uint32_t {
@@ -155,6 +155,13 @@ enum class EventFlags : uint32_t {
     PreMission = 1 << 1,   // 0x02  PRE_MISSION_EVENT                             dlg checkbox 4212
     PostMission = 1 << 2,  // 0x04  POST_MISSION_EVENT                            dlg checkbox 4213
 };
+
+constexpr uint32_t kEventAuthorFlagMask =
+    static_cast<uint32_t>(EventFlags::ResetAfter) |
+    static_cast<uint32_t>(EventFlags::PreMission) |
+    static_cast<uint32_t>(EventFlags::PostMission);
+constexpr uint32_t kEventInternalFlagMask = 0x10u | 0x20u;
+constexpr uint32_t kEventKnownFlagMask = kEventAuthorFlagMask | kEventInternalFlagMask;
 
 inline EventFlags operator|(EventFlags a, EventFlags b) {
     return static_cast<EventFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
@@ -405,13 +412,14 @@ struct Header {
     MissionType mission_type;
     uint8_t max_saves;
     // [orig editor: win_scores[8] + lose_scores[8], each = value/100; Med_WriteBmsFile @0x44f920 Buffer[556..571]]
-    uint8_t unknown7[16];
+    uint8_t win_scores[8];
+    uint8_t lose_scores[8];
     float map_zoom;
     int16_t area_trigger_count;        // [orig: word_A76410 @hdr+0x240] count of 32-byte area-trigger records
     uint16_t weapon_loadout_chunk_len; // [orig: word_A76412 @hdr+0x242] length of the weapon-loadout chunk
     uint16_t bonus_expiration;
     // [orig: word_A76416 @hdr+0x246] length of a SECOND chunk after the weapon loadout. The engine always
-    // seeks past it (Mission_LoadBMSFile @0x40f6d1 MP / @0x40f751 SP); usually 0. Its bytes live in File::secondary_chunk.
+    // seeks past it (Mission_LoadBMSFile @0x40f6d1 MP / @0x40f751 SP); usually 0. Modeled as item_availability.
     uint16_t secondary_chunk_len;
     uint16_t start_time;
     uint16_t minutes_per_day;
@@ -453,7 +461,7 @@ inline int32_t to_fixed_16_16(float v) {
 //  field -> canonical): spawns@62=movetimer; unk19@76=weapon_type(b0)|sweapon_type(b1); unk23/24@84-87=
 //  blink_parent_a/b + blink_group_a/b; unk25+unk26@88=group_rel(i32); fire_timer@92=advancetimer;
 //  unk30_31@100=wpgoal0..3(4 bytes); unk41@160=next_ssn; gen_string@120 is 31B and @152/154/155 hold
-//  grenades/mission_critical/lfp_group (currently swallowed by gen_string[36] -> split to model+export).]
+//  grenades/mission_critical/lfp_group.]
 struct Entity {
     ItemType type;                     // Set during parsing, not serialized as separate field
     int32_t type_id;
@@ -497,8 +505,12 @@ struct Entity {
     int32_t wp_goals;                  // .mis: wpgoal0..3 (4 packed bytes)
     char name1[8];                     // iai_name
     char name2[8];                     // ai_textfile
-    char gen_string[36];               // .mis: gen_string is 31B @120-150; @152/154/155 hold
-                                       //   grenades / mission_critical / lfp_group (split to model+export)
+    char gen_string[31];               // .mis: gen_string is 31B @120-150
+    uint8_t gen_reserved0;             // @151: reserved zero
+    uint8_t grenades;                  // @152: .mis grenades
+    uint8_t gen_reserved1;             // @153: reserved zero
+    uint8_t mission_critical;          // @154: .mis mission_critical
+    uint8_t lfp_group;                 // @155: .mis lfp_group
     int32_t max_attack_distance;
     int32_t next_ssn;                  // .mis: next_ssn (was unk41)
     uint8_t color_override;
@@ -530,13 +542,14 @@ struct WaypointRecord {
 //  group flags), @4=0, @8 = a value, @12 = constant 10, @16..28 = 0. The JO loader keeps @0/@8/@12; @12 is
 //  the literal 10, @0 a 2-bit flags, @8 the only free int. See notes/mission/unmodeled-grill-2026-06-06.md.]
 struct GroupRecord {
-    uint8_t raw_data[kGroupRecordSize];
+    int32_t flags = 0;
+    int32_t value = 0;
 };
 
 // [orig editor: Med_WriteBmsFile @0x44f920 copies the editor LAYER NAME (a string) into this 20-byte record.
-//  i.e. raw_data is effectively char name[20]. JO reads-and-discards it. Promote to char name[20] if surfaced.]
+//  JO reads-and-discards it, but the editor-authored bytes are a fixed-width name, not an opaque payload.]
 struct LayerRecord {
-    uint8_t raw_data[kLayerRecordSize];
+    char name[kLayerRecordSize] = {};
 };
 
 // 32-byte area-trigger / restriction-zone record.
@@ -636,7 +649,9 @@ struct Action {
 struct BoundingBox {
     int32_t min_x, min_y, min_z;       // Fixed-point 16.16
     int32_t max_x, max_y, max_z;
-    uint8_t unknown_data[12];
+    int32_t type;                      // shipped values: 1 or 5
+    int32_t ref_id;                    // shipped values: -2/-1 or a positive marker/entity id
+    int32_t reserved0;                 // always zero in the shipped corpus
 
     // Accessors for float bounds
     float get_min_x() const { return min_x / 65536.0f; }
@@ -647,8 +662,20 @@ struct BoundingBox {
     float get_max_z() const { return max_z / 65536.0f; }
 };
 
+struct WeaponLoadoutRecord {
+    std::string name;
+    std::string value1;
+    std::string value2;
+    std::string value3 = "-1";
+};
+
 struct WeaponLoadout {
-    std::vector<uint8_t> raw_data;
+    std::vector<WeaponLoadoutRecord> entries;
+};
+
+struct ItemAvailabilityEntry {
+    std::string name;
+    uint8_t status = 0;
 };
 
 // ============================================================================
@@ -661,9 +688,9 @@ struct File {
     // [orig: word_A76416 @hdr+0x246 bytes] second chunk after the weapon loadout (the engine seeks past it).
     // [orig editor: Med_WriteBmsFile @0x44f920 builds it via Med_BuildItemAvailabilityChunk @0x432c00 — an
     //  ITEM-AVAILABILITY list: for each enabled entry in the item/weapon table, one record = name\0 + 1 status
-    //  byte, terminated by an empty name. Sibling of the loadout chunk (3-string records). Usually empty in
-    //  shipped JO missions.] Preserved verbatim for round-trip fidelity.
-    std::vector<uint8_t> secondary_chunk;
+    //  byte, terminated by an empty name. Sibling of the weapon-loadout chunk. Usually empty in
+    //  shipped JO missions.]
+    std::vector<ItemAvailabilityEntry> item_availability;
     std::vector<Entity> items;
     std::vector<Entity> buildings;
     std::vector<Entity> markers;

@@ -1906,20 +1906,20 @@ func test_set_weapon_loadout_edits_and_is_undoable() -> void:
 	assert_eq(controller.get_weapon_loadout().size(), base + 1, "redo replays the loadout edit")
 
 
-func test_set_group_writes_three_ints_and_is_undoable() -> void:
+func test_set_group_writes_flags_value_and_is_undoable() -> void:
 	var controller := _loaded_with_selection()
 	assert_eq(controller.get_group_count(), 64, "64 fixed groups")
 	var before := controller.get_group(5)
-	controller.set_group(5, 4321, 8765, 1357)
+	controller.set_group(5, 3, 8765, 10)
 	var after := controller.get_group(5)
-	assert_eq(int(after["field0"]), 4321, "field0 written")
-	assert_eq(int(after["field8"]), 8765, "field8 written")
-	assert_eq(int(after["field12"]), 1357, "field12 written")
+	assert_eq(int(after["field0"]), 3, "group flags written")
+	assert_eq(int(after["field8"]), 8765, "group value written")
+	assert_eq(int(after["field12"]), 10, "group constant remains fixed")
 	assert_true(controller.is_dirty(), "editing a group dirties the mission")
 	controller.undo()
 	assert_eq(controller.get_group(5), before, "undo restores the group")
 	controller.redo()
-	assert_eq(int(controller.get_group(5)["field0"]), 4321, "redo replays the group edit")
+	assert_eq(int(controller.get_group(5)["field0"]), 3, "redo replays the group edit")
 
 
 # --- Phase 4: mission scripting forwarders ------------------------------------

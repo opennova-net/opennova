@@ -215,7 +215,7 @@ var _loadout_syncing: bool = false
 var _groups_toggle: CheckButton
 var _groups_box: VBoxContainer
 var _groups_list: ItemList
-var _group_spins: Array = []  # [field0, field8, field12]
+var _group_spins: Array = []  # [flags, value, constant10]
 var _groups_selected: int = -1
 var _groups_syncing: bool = false
 
@@ -2864,7 +2864,7 @@ func _build_groups_panel() -> void:
 	_groups_toggle = CheckButton.new()
 	_groups_toggle.name = "MissionGroupsToggle"
 	_groups_toggle.text = "Groups"
-	_groups_toggle.tooltip_text = "Per-group data (64 groups). Three raw integer fields per group; their exact meaning is not yet reverse-engineered."
+	_groups_toggle.tooltip_text = "Per-group data (64 groups)."
 	_groups_toggle.button_pressed = false
 	_groups_toggle.visible = false
 	_mission_content.add_child(_groups_toggle)
@@ -2889,16 +2889,17 @@ func _build_groups_panel() -> void:
 	_groups_list.item_selected.connect(_on_group_row_selected)
 
 	_groups_box.add_child(HSeparator.new())
-	ObjectUiHelpers.add_section_heading(_groups_box, "Fields (raw)")
+	ObjectUiHelpers.add_section_heading(_groups_box, "Fields")
 	const INT32_MIN := -2147483648.0
 	const INT32_MAX := 2147483647.0
 	_group_spins = [
-		ObjectUiHelpers.add_spin_row(_groups_box, "MissionGroupField0", "Field 0", INT32_MIN, INT32_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_groups_box, "MissionGroupField8", "Field 8", INT32_MIN, INT32_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_groups_box, "MissionGroupField12", "Field 12", INT32_MIN, INT32_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_groups_box, "MissionGroupFlags", "Flags", 0.0, 3.0, 1.0),
+		ObjectUiHelpers.add_spin_row(_groups_box, "MissionGroupValue", "Value", INT32_MIN, INT32_MAX, 1.0),
+		ObjectUiHelpers.add_spin_row(_groups_box, "MissionGroupConstant", "Constant", 10.0, 10.0, 1.0),
 	]
-	for spin in _group_spins:
+	for spin in [_group_spins[0], _group_spins[1]]:
 		spin.value_changed.connect(_on_group_spin_changed)
+	_group_spins[2].editable = false
 
 
 func _on_group_row_selected(row: int) -> void:
@@ -2932,7 +2933,7 @@ func _refresh_groups_panel() -> void:
 	_groups_list.clear()
 	for i in groups.size():
 		var g := groups[i] as Dictionary
-		_groups_list.add_item("Group %d   (%d, %d, %d)" % [int(g.get("index", i)), int(g.get("field0", 0)), int(g.get("field8", 0)), int(g.get("field12", 0))])
+		_groups_list.add_item("Group %d   (flags %d, value %d)" % [int(g.get("index", i)), int(g.get("field0", 0)), int(g.get("field8", 0))])
 		if i == _groups_selected:
 			_groups_list.select(i)
 	_groups_syncing = false
@@ -2943,8 +2944,9 @@ func _refresh_groups_panel() -> void:
 	_sync_spin(_group_spins[0], float(int(sel.get("field0", 0))))
 	_sync_spin(_group_spins[1], float(int(sel.get("field8", 0))))
 	_sync_spin(_group_spins[2], float(int(sel.get("field12", 0))))
-	for spin in _group_spins:
-		spin.editable = has_sel
+	_group_spins[0].editable = has_sel
+	_group_spins[1].editable = has_sel
+	_group_spins[2].editable = false
 	_groups_syncing = false
 
 

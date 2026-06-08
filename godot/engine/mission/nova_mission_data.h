@@ -236,15 +236,16 @@ public:
 	bool remove_area_trigger(int index);
 
 	// --- Weapon loadout + groups (mission-global, Phase 3) --------------------
-	// The weapon / restriction loadout is a list of records, each three strings (name, value1, value2);
-	// see WeaponLoadoutEntry in libs/mission. get_weapon_loadout() returns an Array of dictionaries
+	// The weapon / restriction loadout is stored as canonical four-field BMS records. The Godot API exposes
+	// the public three-field view from WeaponLoadoutEntry in libs/mission. get_weapon_loadout() returns
+	// an Array of dictionaries
 	// { index: int, name: String, value1: String, value2: String }. set_weapon_loadout() takes an Array
 	// of dictionaries with at least a "name" (value1/value2 default to "-1") and re-serializes the chunk.
 	// Dirty on success.
 	Array get_weapon_loadout() const;
 	bool set_weapon_loadout(const Array &entries);
-	// Groups: 64 fixed records; only the three ints at offsets 0/8/12 are surfaced (field0/field8/field12;
-	// meanings unproven, Phase-5 RE). A group dictionary is { index, field0, field8, field12 }.
+	// Groups: 64 fixed records; field0 is flags, field8 is value, field12 is the canonical constant.
+	// A group dictionary is { index, field0, field8, field12 }.
 	int get_group_count() const;
 	Array get_groups() const;
 	Dictionary get_group(int index) const;

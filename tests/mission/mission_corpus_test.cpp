@@ -1,9 +1,6 @@
-// Corpus round-trip test: parse -> write -> compare byte-exact across a directory of REAL shipped
-// .bms missions, then reparse and confirm bms::equal. The single committed fixture (ash_i5b) proves
-// the format on one file; this proves it across the whole shipped set -- every climate, area-trigger
-// count, weapon-loadout / secondary-chunk variation, and event/trigger/action/bbox count that appears
-// in the wild. The engine loader was grilled byte-for-byte (Mission_LoadBMSFile @0x40f7b6,
-// EventTrigger_LoadAllData @0x453eb0, Jointops.exe); this is the data-side proof on real data.
+// Corpus canonicalization test: parse -> write -> parse -> write across a directory of REAL shipped
+// .bms missions. The first write is the OpenNova canonical form; the second write must be byte-identical
+// to that canonical form and bms::equal must report the same modeled mission.
 //
 // The corpus is copyrighted game data and is NOT committed. The test is gated on the env var
 // OPENNOVA_MISSION_CORPUS (point it at e.g. an extracted JO_ASSETS dir). When the var is unset the
@@ -47,7 +44,7 @@ bool has_bms_extension(const fs::path &path) {
 	return ext == ".bms";
 }
 
-// Round-trips one mission. Returns true on success; logs the first divergence on failure.
+// Canonicalizes one mission. Returns true on success; logs the first divergence on failure.
 bool check_mission(const fs::path &path) {
 	const std::string name = path.filename().string();
 	const std::vector<uint8_t> original = read_file(path);
@@ -87,27 +84,25 @@ bool check_mission(const fs::path &path) {
 		std::fprintf(stderr, "  FAIL %s: write failed: %s\n", name.c_str(), error.c_str());
 		return false;
 	}
-	if (encoded.size() != original.size()) {
-		std::fprintf(stderr, "  FAIL %s: re-encoded size %zu != original %zu\n", name.c_str(),
-		             encoded.size(), original.size());
-		return false;
-	}
-	if (std::memcmp(encoded.data(), original.data(), original.size()) != 0) {
-		size_t off = 0;
-		while (off < original.size() && encoded[off] == original[off]) {
-			++off;
-		}
-		std::fprintf(stderr, "  FAIL %s: byte mismatch at offset %zu (orig=0x%02X enc=0x%02X)\n",
-		             name.c_str(), off, original[off], encoded[off]);
-		return false;
-	}
-
-	// The re-encoded bytes must reparse, and equal() (the editor's undo/dirty change-detector) must
-	// agree that nothing changed across the round-trip.
+	// The canonical bytes must reparse, and equal() (the editor's undo/dirty change-detector) must
+	// agree that nothing changed across the canonical round-trip.
 	opennova::bms::File reparsed;
 	if (!opennova::bms::parse(encoded.data(), encoded.size(), reparsed, error)) {
 		std::fprintf(stderr, "  FAIL %s: reparse of re-encoded bytes failed: %s\n", name.c_str(),
 		             error.c_str());
+		return false;
+	}
+	std::vector<uint8_t> encoded2;
+	if (!opennova::bms::write(reparsed, encoded2, error)) {
+		std::fprintf(stderr, "  FAIL %s: rewrite of canonical form failed: %s\n", name.c_str(), error.c_str());
+		return false;
+	}
+	if (encoded2 != encoded) {
+		size_t off = 0;
+		while (off < encoded.size() && off < encoded2.size() && encoded[off] == encoded2[off]) {
+			++off;
+		}
+		std::fprintf(stderr, "  FAIL %s: canonical rewrite differs at offset %zu\n", name.c_str(), off);
 		return false;
 	}
 	if (!opennova::bms::equal(parsed, reparsed)) {
@@ -161,7 +156,7 @@ int main() {
 		}
 	}
 
-	std::fprintf(stderr, "mission_corpus: %zu/%zu round-tripped byte-exact (%zu failed)\n",
+	std::fprintf(stderr, "mission_corpus: %zu/%zu canonicalized idempotently (%zu failed)\n",
 	             missions.size() - failed, missions.size(), failed);
 	return failed == 0 ? 0 : 1;
 }

@@ -368,26 +368,16 @@ void write_mis_waypoints(const bms::File &file, std::string &out) {
 void write_mis_groups(const bms::File &file, std::string &out) {
 	for (size_t i = 0; i < file.group_records.size(); ++i) {
 		const bms::GroupRecord &record = file.group_records[i];
-		const uint8_t *raw = record.raw_data;
-		// [orig: Mission_LoadBMSFile @0x40fbbb keeps three ints per 32-byte record from offsets
-		//  0, 8, 12 (temp_record[0], [2], [3]). Field meanings are NOT proven by the loader, so the
-		//  keys are emitted as tentative field0/field8/field12 (was: 0/4/8 with guessed attrib/commander/color).]
-		const int32_t field0 = read_i32_at(raw, 0);
-		const int32_t field8 = read_i32_at(raw, 8);
-		const int32_t field12 = read_i32_at(raw, 12);
-		if (field0 == 0 && field8 == 0 && field12 == 0) {
+		if (record.flags == 0 && record.value == 0) {
 			continue;
 		}
 		append_kv(out, "begin group ", i);
 		append_line(out, "  description \"\"");
-		if (field0 != 0) {
-			append_kv(out, "  field0 ", field0);
+		if (record.flags != 0) {
+			append_kv(out, "  flags ", record.flags);
 		}
-		if (field8 != 0) {
-			append_kv(out, "  field8 ", field8);
-		}
-		if (field12 != 0) {
-			append_kv(out, "  field12 ", field12);
+		if (record.value != 0) {
+			append_kv(out, "  value ", record.value);
 		}
 		append_line(out, "end group");
 		append_line(out);
@@ -396,8 +386,7 @@ void write_mis_groups(const bms::File &file, std::string &out) {
 
 void write_mis_layers(const bms::File &file, std::string &out) {
 	for (size_t i = 0; i < file.layer_records.size(); ++i) {
-		const std::string description = fixed_string(reinterpret_cast<const char *>(file.layer_records[i].raw_data),
-		                                             bms::kLayerRecordSize);
+		const std::string description = fixed_string(file.layer_records[i].name, bms::kLayerRecordSize);
 		if (description.empty()) {
 			continue;
 		}
@@ -460,8 +449,7 @@ void write_mis_events(const bms::File &file, std::string &out) {
 void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out) {
 	const uint16_t crouch_timer = combined_u16(entity.crouch_timer, entity.unk15a);
 	const int32_t group_rel = combined_i32_from_i16(entity.group_rel_lo, entity.group_rel_hi);
-	const uint8_t *gen_raw = reinterpret_cast<const uint8_t *>(entity.gen_string);
-	const std::string gen_string = fixed_string(entity.gen_string, 32);
+	const std::string gen_string = fixed_string(entity.gen_string, sizeof(entity.gen_string));
 
 	append_kv(out, "begin item ", index);
 	append_kv(out, "  type_id ", entity.type_id);
@@ -510,9 +498,9 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out)
 	append_kv(out, "  edistances ", entity.min_engagement_distance, " ", entity.max_engagement_distance);
 	if (entity.next_ssn != 0) append_kv(out, "  next_ssn ", entity.next_ssn);
 	if (entity.color_override != 0) append_kv(out, "  color_override ", static_cast<int>(entity.color_override));
-	if (gen_raw[32] != 0) append_kv(out, "  grenades ", static_cast<int>(gen_raw[32]));
-	if (gen_raw[34] != 0) append_kv(out, "  mission_critical ", static_cast<int>(gen_raw[34]));
-	if (gen_raw[35] != 0) append_kv(out, "  lfp_group ", static_cast<int>(gen_raw[35]));
+	if (entity.grenades != 0) append_kv(out, "  grenades ", static_cast<int>(entity.grenades));
+	if (entity.mission_critical != 0) append_kv(out, "  mission_critical ", static_cast<int>(entity.mission_critical));
+	if (entity.lfp_group != 0) append_kv(out, "  lfp_group ", static_cast<int>(entity.lfp_group));
 	append_line(out, "  extra_mlink \"\"");
 	append_line(out, "  extra_val1 0");
 	append_line(out, "  extra_val2 0");
@@ -829,8 +817,8 @@ MissionEventRecord to_event_record(const bms::Event &event, size_t index) {
 	out.action_count = event.action_count;
 	out.reset_after = event.reset_after;
 	out.delay = event.delay;
-	out.unknown5 = event.unknown5;
-	out.unknown6 = event.unknown6;
+	out.unknown5 = 0;
+	out.unknown6 = 0;
 	return out;
 }
 
@@ -846,7 +834,7 @@ MissionTriggerRecord to_trigger_record(const bms::Trigger &trigger, size_t index
 	out.param2 = trigger.param2;
 	out.param3 = trigger.param3;
 	out.param4 = trigger.param4;
-	out.unknown7 = trigger.unknown7;
+	out.unknown7 = 0;
 	out.negated = trigger.is_negated();
 	out.logic_or = trigger.is_or();
 	out.logic_xor = trigger.is_xor();
@@ -865,8 +853,8 @@ MissionActionRecord to_action_record(const bms::Action &action, size_t index) {
 	out.param2 = action.param2;
 	out.param3 = action.param3;
 	out.param4 = action.param4;
-	out.reserved0 = action.reserved0;
-	out.reserved1 = action.reserved1;
+	out.reserved0 = 0;
+	out.reserved1 = 0;
 	return out;
 }
 
@@ -874,12 +862,26 @@ constexpr int kMaxEventChainEntries = 20;
 // reset_after / delay are stored in the upper 10 bits of their u32 slot (see write_event), so the
 // representable value range is 0..1023.
 constexpr int kMaxEventDelayTicks = 1023;
+constexpr uint32_t kKnownAiAttributeMask =
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::Blind) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::Guarding) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::RemoveIfLessThan) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::RemoveIfMoreThan) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::Multiplayer) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::Berserk) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::FlyingOrganic) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::Coward) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::Attribute17) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::AdvancedAmmo) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::Indestructible) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::NavigationWaypoint) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::Reflective) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::NoShadow);
 
 void apply_event_record(bms::Event &event, const MissionEventRecord &record) {
-	// Full-fidelity: write the flags dword verbatim so low-level / C-ABI callers keep full control of every
-	// bit. The editor-only policy of preserving bits it does not surface (event_flag_mask) lives in the
-	// binding NovaMissionData::set_event, not here, mirroring trigger_from_dictionary vs trigger_from_record.
-	event.flags = static_cast<bms::EventFlags>(record.flags);
+	const uint32_t preserved_internal = static_cast<uint32_t>(event.flags) & bms::kEventInternalFlagMask;
+	const uint32_t requested_known = static_cast<uint32_t>(record.flags) & bms::kEventKnownFlagMask;
+	event.flags = static_cast<bms::EventFlags>(preserved_internal | requested_known);
 	// reset_after / delay occupy only the upper 10 bits on disk (write_event packs them << 22, parse
 	// reads >> 22), so the value range is 0..1023. Clamp here at the library boundary the way the other
 	// apply_* setters bound their fields: an out-of-range value would otherwise wrap on serialize
@@ -887,8 +889,8 @@ void apply_event_record(bms::Event &event, const MissionEventRecord &record) {
 	// already caps at 1023, but a direct C/C-ABI caller of set_event/add_event does not.
 	event.reset_after = std::clamp(record.reset_after, 0, kMaxEventDelayTicks);
 	event.delay = std::clamp(record.delay, 0, kMaxEventDelayTicks);
-	event.unknown5 = static_cast<uint8_t>(std::clamp(record.unknown5, 0, 255));
-	event.unknown6 = static_cast<uint8_t>(std::clamp(record.unknown6, 0, 255));
+	event.unknown5 = 0;
+	event.unknown6 = 0;
 }
 
 bms::Trigger trigger_from_record(const MissionTriggerRecord &record) {
@@ -900,20 +902,20 @@ bms::Trigger trigger_from_record(const MissionTriggerRecord &record) {
 	trigger.param2 = record.param2;
 	trigger.param3 = record.param3;
 	trigger.param4 = record.param4;
-	trigger.unknown7 = record.unknown7;
+	trigger.unknown7 = 0;
 	return trigger;
 }
 
 bms::Action action_from_record(const MissionActionRecord &record) {
 	bms::Action action = {};
-	action.reserved0 = record.reserved0;
+	action.reserved0 = 0;
 	action.action_type = static_cast<bms::ActionType>(record.action_type);
 	action.action_sub_type = record.action_sub_type;
 	action.param1 = record.param1;
 	action.param2 = record.param2;
 	action.param3 = record.param3;
 	action.param4 = record.param4;
-	action.reserved1 = record.reserved1;
+	action.reserved1 = 0;
 	return action;
 }
 
@@ -1683,6 +1685,10 @@ bool MissionDocument::set_entity_properties(EntityKind kind, size_t index, const
 		impl_->last_error = "Mission entity index out of range";
 		return false;
 	}
+	if ((static_cast<uint32_t>(properties.ai_flags) & ~kKnownAiAttributeMask) != 0) {
+		impl_->last_error = "Mission entity AI flags include unsupported bits";
+		return false;
+	}
 	apply_properties((*entities)[index], properties);
 	if (out != nullptr) {
 		*out = to_record((*entities)[index], kind, index);
@@ -1974,43 +1980,14 @@ bool MissionDocument::remove_area_trigger(size_t index) {
 	return true;
 }
 
-// Append one NUL-terminated string to a loadout byte buffer.
-static void append_loadout_field(std::vector<uint8_t> &raw, const std::string &value) {
-	raw.insert(raw.end(), value.begin(), value.end());
-	raw.push_back(0);
-}
-
 std::vector<WeaponLoadoutEntry> MissionDocument::weapon_loadout() const {
 	std::vector<WeaponLoadoutEntry> out;
 	if (!impl_->loaded) {
 		return out;
 	}
-	const std::vector<uint8_t> &raw = impl_->file.loadout.raw_data;
-	size_t pos = 0;
-	// Walk records until an empty record (a leading NUL = the terminator) or the buffer is exhausted,
-	// reading exactly three NUL-terminated strings each (name, value1, value2). A short/unterminated
-	// tail stops the walk without emitting a partial record. [orig: Mission_LoadBMSFile @0x40f7b6;
-	// see notes for the loader's 4th-string over-read, which is a filter quirk, not the file format.]
-	while (pos < raw.size() && raw[pos] != 0) {
-		WeaponLoadoutEntry entry;
-		std::string *fields[3] = { &entry.name, &entry.value1, &entry.value2 };
-		bool complete = true;
-		for (int f = 0; f < 3; ++f) {
-			const size_t start = pos;
-			while (pos < raw.size() && raw[pos] != 0) {
-				++pos;
-			}
-			if (pos >= raw.size()) {
-				complete = false;
-				break;
-			}
-			fields[f]->assign(reinterpret_cast<const char *>(raw.data() + start), pos - start);
-			++pos;  // skip the NUL terminator
-		}
-		if (!complete) {
-			break;
-		}
-		out.push_back(std::move(entry));
+	out.reserve(impl_->file.loadout.entries.size());
+	for (const bms::WeaponLoadoutRecord &entry : impl_->file.loadout.entries) {
+		out.push_back({entry.name, entry.value1, entry.value2});
 	}
 	return out;
 }
@@ -2031,48 +2008,13 @@ bool MissionDocument::set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &
 			return false;
 		}
 	}
-	// Capture any bytes the existing chunk carries past the canonical records + terminator, so they
-	// survive a loadout edit instead of being truncated (byte-exact round-trip when the records are
-	// unchanged; a faithful tail otherwise). For the common chunk (records + terminator, no extras)
-	// the walk consumes the whole buffer, so the tail is empty and this is a no-op.
-	const std::vector<uint8_t> &old_raw = impl_->file.loadout.raw_data;
-	size_t consumed = 0;
-	while (consumed < old_raw.size() && old_raw[consumed] != 0) {
-		bool complete = true;
-		for (int f = 0; f < 3; ++f) {
-			while (consumed < old_raw.size() && old_raw[consumed] != 0) {
-				++consumed;
-			}
-			if (consumed >= old_raw.size()) {
-				complete = false;
-				break;
-			}
-			++consumed;  // skip the field NUL
-		}
-		if (!complete) {
-			break;
-		}
-	}
-	if (consumed < old_raw.size() && old_raw[consumed] == 0) {
-		++consumed;  // include the empty-record terminator
-	}
-	std::vector<uint8_t> tail(old_raw.begin() + std::min(consumed, old_raw.size()), old_raw.end());
-
-	std::vector<uint8_t> raw;
+	std::vector<bms::WeaponLoadoutRecord> records;
+	records.reserve(entries.size());
 	for (const WeaponLoadoutEntry &entry : entries) {
 		// Names are guaranteed non-empty by the validation above.
-		append_loadout_field(raw, entry.name);
-		append_loadout_field(raw, entry.value1);
-		append_loadout_field(raw, entry.value2);
+		records.push_back({entry.name, entry.value1, entry.value2, "-1"});
 	}
-	// The loader walks records while the next byte is non-NUL, so a non-empty chunk needs a trailing
-	// empty record (one extra NUL) to terminate. An empty loadout serializes to an empty chunk (len 0),
-	// which the loader treats as "no restrictions" (it installs the WPN_KNIFE default at runtime).
-	if (!raw.empty()) {
-		raw.push_back(0);
-		raw.insert(raw.end(), tail.begin(), tail.end());
-	}
-	impl_->file.loadout.raw_data = std::move(raw);
+	impl_->file.loadout.entries = std::move(records);
 	sync_counts();
 	return true;
 }
@@ -2088,11 +2030,10 @@ bool MissionDocument::get_group(size_t index, GroupFields &out) const {
 	if (!impl_->loaded || index >= impl_->file.group_records.size()) {
 		return false;
 	}
-	const uint8_t *raw = impl_->file.group_records[index].raw_data;
 	out.index = index;
-	out.field0 = read_i32_at(raw, 0);
-	out.field8 = read_i32_at(raw, 8);
-	out.field12 = read_i32_at(raw, 12);
+	out.field0 = impl_->file.group_records[index].flags;
+	out.field8 = impl_->file.group_records[index].value;
+	out.field12 = 10;
 	return true;
 }
 
@@ -2119,12 +2060,16 @@ bool MissionDocument::set_group(size_t index, int field0, int field8, int field1
 		impl_->last_error = "Group index out of range";
 		return false;
 	}
-	// Only the three loader-consumed ints are written; the other 20 bytes are preserved so the record
-	// round-trips. [orig: Mission_LoadBMSFile @0x40fbbb keeps offsets 0/8/12]
-	uint8_t *raw = impl_->file.group_records[index].raw_data;
-	write_i32_at(raw, 0, static_cast<int32_t>(field0));
-	write_i32_at(raw, 8, static_cast<int32_t>(field8));
-	write_i32_at(raw, 12, static_cast<int32_t>(field12));
+	if ((field0 & ~0x3) != 0) {
+		impl_->last_error = "Group flags may only use bits 0 and 1";
+		return false;
+	}
+	if (field12 != 10) {
+		impl_->last_error = "Group constant must be 10";
+		return false;
+	}
+	impl_->file.group_records[index].flags = static_cast<int32_t>(field0);
+	impl_->file.group_records[index].value = static_cast<int32_t>(field8);
 	return true;
 }
 
@@ -2670,11 +2615,10 @@ std::vector<MissionEnumEntry> MissionDocument::action_sub_types(int action_type)
 }
 
 std::vector<MissionEnumEntry> MissionDocument::event_flag_bits() const {
-	// The three author-facing event flags, matching the DFX2 editor's checkboxes EXACTLY. The earlier
-	// "Unknown (16)" / "Unknown (32)" entries were speculative: the original editor exposes no checkbox for
-	// bit 0x08 or above and preserves those bits verbatim, so we drop them here and let event_flag_mask /
-	// set_event preserve every non-author bit. [orig: Med_EventDialogPopulate @0x411690 (CheckDlgButton
-	// 4203/4212/4213), Med_EventDialogCommit @0x4118d0 (sets bits 0/1/2 only). dfx2med.exe]
+	// The three author-facing event flags, matching the DFX2 editor's checkboxes exactly. Shipped missions
+	// also use internal bits 0x10/0x20; set_event preserves those while editing only the checkbox mask.
+	// [orig: Med_EventDialogPopulate @0x411690 (CheckDlgButton 4203/4212/4213),
+	// Med_EventDialogCommit @0x4118d0 (sets bits 0/1/2 only). dfx2med.exe]
 	return {
 			{static_cast<int>(bms::EventFlags::ResetAfter), "Reset after"},
 			{static_cast<int>(bms::EventFlags::PreMission), "Pre-mission"},
@@ -2683,19 +2627,14 @@ std::vector<MissionEnumEntry> MissionDocument::event_flag_bits() const {
 }
 
 int MissionDocument::event_flag_mask() const {
-	int mask = 0;
-	for (const MissionEnumEntry &entry : event_flag_bits()) {
-		mask |= entry.value;
-	}
-	return mask;
+	return static_cast<int>(bms::kEventAuthorFlagMask);
 }
 
 std::vector<MissionEnumEntry> MissionDocument::ai_attribute_flag_bits() const {
 	// Author-facing AI attribute flags (bmsi_attributes). Labels confirmed against the DFX2 object-properties
 	// dialog (Med_ObjectPropertiesDialog @0x4096d0; label table @0x5b1c84: BLIND / GUARDING / MULTIPLAYER /
-	// INDESTRUCTABLE / NAVIGATION_WAYPT / REFLECTIVE / ...). Bits whose dialog control->bit map is not yet
-	// decoded (e.g. DEAF, IGNORE_FOOTSTEPS) are intentionally omitted and preserved verbatim by the editor's
-	// merge-on-write, exactly like event_flag_bits drops bit 0x08+.
+	// INDESTRUCTABLE / NAVIGATION_WAYPT / REFLECTIVE / ...). Attribute17 is accepted because it appears in
+	// shipped missions, but its editor label is not pinned, so it is intentionally omitted from checkboxes.
 	return {
 			{static_cast<int>(bms::BmsiAttributeFlags::Blind), "Blind"},
 			{static_cast<int>(bms::BmsiAttributeFlags::Guarding), "Guarding"},
@@ -2728,8 +2667,32 @@ void MissionDocument::sync_counts() {
 	impl_->file.header.num_people = static_cast<uint32_t>(impl_->file.organics.size());
 	impl_->file.header.num_events = static_cast<uint32_t>(impl_->file.events.size());
 	impl_->file.header.area_trigger_count = static_cast<int16_t>(impl_->file.area_triggers.size());
-	impl_->file.header.weapon_loadout_chunk_len = static_cast<uint16_t>(impl_->file.loadout.raw_data.size());
-	impl_->file.header.secondary_chunk_len = static_cast<uint16_t>(impl_->file.secondary_chunk.size());
+	std::vector<uint8_t> loadout_chunk;
+	for (const bms::WeaponLoadoutRecord &entry : impl_->file.loadout.entries) {
+		loadout_chunk.insert(loadout_chunk.end(), entry.name.begin(), entry.name.end());
+		loadout_chunk.push_back(0);
+		loadout_chunk.insert(loadout_chunk.end(), entry.value1.begin(), entry.value1.end());
+		loadout_chunk.push_back(0);
+		loadout_chunk.insert(loadout_chunk.end(), entry.value2.begin(), entry.value2.end());
+		loadout_chunk.push_back(0);
+		const std::string value3 = entry.value3.empty() ? "-1" : entry.value3;
+		loadout_chunk.insert(loadout_chunk.end(), value3.begin(), value3.end());
+		loadout_chunk.push_back(0);
+	}
+	if (!loadout_chunk.empty()) {
+		loadout_chunk.push_back(0);
+	}
+	std::vector<uint8_t> availability_chunk;
+	for (const bms::ItemAvailabilityEntry &entry : impl_->file.item_availability) {
+		availability_chunk.insert(availability_chunk.end(), entry.name.begin(), entry.name.end());
+		availability_chunk.push_back(0);
+		availability_chunk.push_back(entry.status);
+	}
+	if (!availability_chunk.empty()) {
+		availability_chunk.push_back(0);
+	}
+	impl_->file.header.weapon_loadout_chunk_len = static_cast<uint16_t>(loadout_chunk.size());
+	impl_->file.header.secondary_chunk_len = static_cast<uint16_t>(availability_chunk.size());
 	impl_->file.events_count = static_cast<int32_t>(impl_->file.events.size());
 	impl_->file.trigger_count = static_cast<int32_t>(impl_->file.triggers.size());
 	impl_->file.action_count = static_cast<int32_t>(impl_->file.actions.size());

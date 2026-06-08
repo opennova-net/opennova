@@ -894,11 +894,11 @@ func test_set_header_flag_toggles_one_bit_and_preserves_others() -> void:
 func test_set_event_preserves_unmodeled_flag_bits() -> void:
 	# Regression (review #2): the inspector rebuilds an event's flags from the exposed checkboxes only
 	# (event_flag_bits = ResetAfter/PreMission/PostMission, mask 0x07 — matching the DFX2 editor), so
-	# set_event must preserve on-disk bits it does not surface (e.g. 0x08) instead of clobbering them,
+	# set_event must preserve confirmed internal bits it does not surface (e.g. 0x10) instead of clobbering them,
 	# mirroring trigger condition_flags. Otherwise nudging any event attribute silently drops those bits.
 	var m := NovaMissionData.new()
 	assert_eq(m.create_default(), OK)
-	var UNMODELED := 0x08 # gap bit: no event_flag_bits() checkbox, must survive verbatim
+	var UNMODELED := 0x10 # confirmed internal bit: no event_flag_bits() checkbox, must survive edits
 	# Seed an event carrying the unmodeled bit plus an exposed one (ResetAfter = 0x01).
 	var added := m.add_event(UNMODELED | 0x01, 0, 0)
 	assert_false(added.is_empty(), "event added")
@@ -907,7 +907,7 @@ func test_set_event_preserves_unmodeled_flag_bits() -> void:
 	# An editor edit rebuilds flags from exposed checkboxes only (here PreMission = 0x02, ResetAfter off).
 	assert_true(m.set_event(idx, 0x02, 0, 0), "set_event succeeds")
 	var flags := int(m.get_event(idx)["flags"])
-	assert_eq(flags & UNMODELED, UNMODELED, "unmodeled bit 0x08 preserved across the edit")
+	assert_eq(flags & UNMODELED, UNMODELED, "internal bit 0x10 preserved across the edit")
 	assert_eq(flags & 0x02, 0x02, "exposed PreMission bit applied")
 	assert_eq(flags & 0x01, 0, "exposed ResetAfter bit cleared (unchecked)")
 
@@ -968,7 +968,7 @@ func test_weapon_loadout_dictionary_and_round_trip() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var entries := m.get_weapon_loadout()
-	# The fixture ships 7 three-string records (name, "-1", "-1").
+	# The fixture canonicalizes to 7 loadout records in the public three-field view.
 	assert_eq(entries.size(), 7, "fixture loadout has 7 weapons")
 	var first := entries[0] as Dictionary
 	for key in ["index", "name", "value1", "value2"]:
@@ -1003,11 +1003,11 @@ func test_group_get_set_round_trip() -> void:
 		assert_true(g.has(key), "group dict exposes %s" % key)
 	# A neighbour's baseline must be untouched by editing group 3.
 	var neighbour_before := m.get_group(4)
-	assert_true(m.set_group(3, 1234, 5678, 9012), "set_group succeeds")
+	assert_true(m.set_group(3, 3, 5678, 10), "set_group succeeds")
 	var g2 := m.get_group(3)
-	assert_eq(int(g2["field0"]), 1234, "field0 written")
-	assert_eq(int(g2["field8"]), 5678, "field8 written")
-	assert_eq(int(g2["field12"]), 9012, "field12 written")
+	assert_eq(int(g2["field0"]), 3, "group flags written")
+	assert_eq(int(g2["field8"]), 5678, "group value written")
+	assert_eq(int(g2["field12"]), 10, "group constant remains fixed")
 	assert_eq(m.get_group(4), neighbour_before, "neighbouring group untouched")
 	# Persist + reload.
 	var tmp := _temp_bms_path()
@@ -1018,6 +1018,8 @@ func test_group_get_set_round_trip() -> void:
 	# Out-of-range guards.
 	assert_eq(m.get_group(999), {}, "out-of-range group get yields {}")
 	assert_false(m.set_group(999, 1, 2, 3), "out-of-range group set rejected")
+	assert_false(m.set_group(3, 4, 2, 10), "unsupported group flag bits rejected")
+	assert_false(m.set_group(3, 3, 2, 11), "noncanonical group constant rejected")
 
 
 # --- Phase 4: mission scripting (events / triggers / actions) ------------------

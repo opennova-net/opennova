@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,23 @@ std::vector<uint8_t> read_file(const std::string &path) {
 	return data;
 }
 
+void write_u16_le(std::vector<uint8_t> &bytes, size_t offset, uint16_t value) {
+	bytes[offset] = static_cast<uint8_t>(value & 0xFF);
+	bytes[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+}
+
+uint16_t read_u16_le(const std::vector<uint8_t> &bytes, size_t offset) {
+	return static_cast<uint16_t>(bytes[offset]) |
+	       (static_cast<uint16_t>(bytes[offset + 1]) << 8);
+}
+
+void write_u32_le(std::vector<uint8_t> &bytes, size_t offset, uint32_t value) {
+	bytes[offset] = static_cast<uint8_t>(value & 0xFF);
+	bytes[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+	bytes[offset + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+	bytes[offset + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+}
+
 } // namespace
 
 int main() {
@@ -53,13 +71,19 @@ int main() {
 
 	std::vector<uint8_t> encoded;
 	TEST_EXPECT(opennova::bms::write(bms_file, encoded, error));
-	TEST_EXPECT(encoded.size() == original.size());
-	TEST_EXPECT(std::memcmp(encoded.data(), original.data(), original.size()) == 0);
+	opennova::bms::File encoded_file;
+	TEST_EXPECT(opennova::bms::parse(encoded.data(), encoded.size(), encoded_file, error));
+	TEST_EXPECT(opennova::bms::equal(bms_file, encoded_file));
+	std::vector<uint8_t> encoded2;
+	TEST_EXPECT(opennova::bms::write(encoded_file, encoded2, error));
+	TEST_EXPECT(encoded2 == encoded);
 
 	opennova::mission::MissionDocument document;
 	TEST_EXPECT(document.load_bms_bytes(original.data(), original.size()));
 	TEST_EXPECT(document.is_loaded());
 	TEST_EXPECT(!document.info().mission_name.empty());
+	const uint16_t original_loadout_len = read_u16_le(original, offsetof(opennova::bms::Header, weapon_loadout_chunk_len));
+	const uint16_t original_secondary_len = read_u16_le(original, offsetof(opennova::bms::Header, secondary_chunk_len));
 
 	const size_t original_item_count = document.entity_count(opennova::mission::EntityKind::Item);
 	TEST_EXPECT(original_item_count > 0);
@@ -90,8 +114,7 @@ int main() {
 	properties.wp_number = 12;
 	properties.team = 2;
 	properties.ai_flags = static_cast<int>(opennova::bms::BmsiAttributeFlags::Blind) |
-	                      static_cast<int>(opennova::bms::BmsiAttributeFlags::NoShadow) |
-	                      (1 << 29);
+	                      static_cast<int>(opennova::bms::BmsiAttributeFlags::NoShadow);
 	properties.perception = 88;
 	properties.accuracy = 66;
 	properties.alert_state = 4;
@@ -351,29 +374,41 @@ int main() {
 		TEST_EXPECT(opennova::bms::parse(bad_version.data(), bad_version.size(), accepted, gate_error));
 	}
 
-	// --- Phase 0: the second loadout chunk (word_A76416 @hdr+0x246) is consumed, keeping every
-	// later section aligned. The fixture has none, so inject one and confirm round-trip + alignment. ---
+	// --- Modeling policy: the second loadout chunk is an item-availability list, not opaque bytes.
+	// Arbitrary bytes must fail load instead of being preserved. ---
 	{
 		opennova::bms::File with_chunk;
 		std::string chunk_error;
 		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), with_chunk, chunk_error));
-		TEST_EXPECT(with_chunk.secondary_chunk.empty());
-		with_chunk.secondary_chunk = {0xDE, 0xAD, 0xBE, 0xEF, 0x01};
-		with_chunk.header.secondary_chunk_len = static_cast<uint16_t>(with_chunk.secondary_chunk.size());
-		std::vector<uint8_t> chunk_bytes;
-		TEST_EXPECT(opennova::bms::write(with_chunk, chunk_bytes, chunk_error));
+		TEST_EXPECT(with_chunk.item_availability.empty());
+		std::vector<uint8_t> chunk_bytes = original;
+		const size_t loadout_end = opennova::bms::kHeaderSize + original_loadout_len;
+		const uint8_t invalid_availability[] = {0xDE, 0xAD, 0xBE, 0xEF, 0x01};
+		chunk_bytes.insert(chunk_bytes.begin() + static_cast<std::ptrdiff_t>(loadout_end),
+		                   std::begin(invalid_availability), std::end(invalid_availability));
+		write_u16_le(chunk_bytes, offsetof(opennova::bms::Header, secondary_chunk_len),
+		             static_cast<uint16_t>(sizeof(invalid_availability)));
 		opennova::bms::File chunk_reparsed;
-		TEST_EXPECT(opennova::bms::parse(chunk_bytes.data(), chunk_bytes.size(), chunk_reparsed, chunk_error));
-		TEST_EXPECT(chunk_reparsed.secondary_chunk == with_chunk.secondary_chunk);
-		// Sections after the chunk stay aligned: counts and the first item match the no-chunk parse.
-		TEST_EXPECT(chunk_reparsed.items.size() == with_chunk.items.size());
-		TEST_EXPECT(chunk_reparsed.markers.size() == with_chunk.markers.size());
-		TEST_EXPECT(chunk_reparsed.area_triggers.size() == with_chunk.area_triggers.size());
-		TEST_EXPECT(chunk_reparsed.events.size() == with_chunk.events.size());
-		if (!with_chunk.items.empty()) {
-			TEST_EXPECT(chunk_reparsed.items[0].type_id == with_chunk.items[0].type_id);
-			TEST_EXPECT(chunk_reparsed.items[0].x == with_chunk.items[0].x);
-		}
+		TEST_EXPECT(!opennova::bms::parse(chunk_bytes.data(), chunk_bytes.size(), chunk_reparsed, chunk_error));
+		TEST_EXPECT(chunk_error.find("item availability") != std::string::npos);
+	}
+
+	// --- Modeling policy: group records are flags/value/constant records. Offset 4 and bytes 16..31
+	// are canonical zero, and offset 12 is the writer-confirmed literal 10. ---
+	{
+		std::string group_error;
+		std::vector<uint8_t> group_bytes = original;
+		const size_t entity_count = bms_file.header.num_items + bms_file.header.num_buildings +
+		                            bms_file.header.num_markers + bms_file.header.num_people;
+		const size_t group_offset = opennova::bms::kHeaderSize +
+		                            original_loadout_len +
+		                            original_secondary_len +
+		                            entity_count * opennova::bms::kEntitySize +
+		                            opennova::bms::kWaypointRecordCount * opennova::bms::kWaypointRecordSize;
+		group_bytes[group_offset + 4] = 1;
+		opennova::bms::File rejected_group;
+		TEST_EXPECT(!opennova::bms::parse(group_bytes.data(), group_bytes.size(), rejected_group, group_error));
+		TEST_EXPECT(group_error.find("group") != std::string::npos);
 	}
 
 	// --- Phase 0: area-trigger 32-byte record is interleaved per axis (x_min,x_max,y_min,y_max,
@@ -409,6 +444,79 @@ int main() {
 		TEST_EXPECT(rt.get_z_min() < rt.get_z_max());
 		// Events after the area-trigger section are still aligned.
 		TEST_EXPECT(at_reparsed.events.size() == at_file.events.size());
+	}
+
+	// --- Modeling policy: event/trigger/action reserved slots and unsupported event flag bits
+	// fail load. They are not raw data carried for preservation. ---
+	{
+		const size_t entity_count = bms_file.header.num_items + bms_file.header.num_buildings +
+		                            bms_file.header.num_markers + bms_file.header.num_people;
+		const size_t event_block = opennova::bms::kHeaderSize +
+		                           original_loadout_len +
+		                           original_secondary_len +
+		                           entity_count * opennova::bms::kEntitySize +
+		                           opennova::bms::kWaypointRecordCount * opennova::bms::kWaypointRecordSize +
+		                           opennova::bms::kGroupRecordCount * opennova::bms::kGroupRecordSize +
+		                           opennova::bms::kLayerRecordCount * opennova::bms::kLayerRecordSize +
+		                           bms_file.header.area_trigger_count * opennova::bms::kAreaTriggerSize;
+		const int32_t events = static_cast<int32_t>(bms_file.events.size());
+		const int32_t triggers = static_cast<int32_t>(bms_file.triggers.size());
+		const size_t first_event = event_block + 12;
+		const size_t first_trigger = first_event + events * opennova::bms::kEventSize;
+		const size_t first_action = first_trigger + triggers * opennova::bms::kTriggerSize;
+
+		std::string strict_error;
+		opennova::bms::File rejected;
+		std::vector<uint8_t> bad_event_flags = original;
+		write_u32_le(bad_event_flags, first_event, static_cast<uint32_t>(bms_file.events[0].flags) | 0x08u);
+		TEST_EXPECT(!opennova::bms::parse(bad_event_flags.data(), bad_event_flags.size(), rejected, strict_error));
+		TEST_EXPECT(strict_error.find("event") != std::string::npos);
+
+		std::vector<uint8_t> bad_event_reserved = original;
+		bad_event_reserved[first_event + 23] = 1;
+		TEST_EXPECT(!opennova::bms::parse(bad_event_reserved.data(), bad_event_reserved.size(), rejected, strict_error));
+		TEST_EXPECT(strict_error.find("event") != std::string::npos);
+
+		std::vector<uint8_t> bad_trigger_reserved = original;
+		write_u32_le(bad_trigger_reserved, first_trigger + 28, 1);
+		TEST_EXPECT(!opennova::bms::parse(bad_trigger_reserved.data(), bad_trigger_reserved.size(), rejected, strict_error));
+		TEST_EXPECT(strict_error.find("trigger") != std::string::npos);
+
+		std::vector<uint8_t> bad_action_reserved = original;
+		write_u32_le(bad_action_reserved, first_action, 1);
+		TEST_EXPECT(!opennova::bms::parse(bad_action_reserved.data(), bad_action_reserved.size(), rejected, strict_error));
+		TEST_EXPECT(strict_error.find("action") != std::string::npos);
+	}
+
+	// --- Modeling policy: entity AI flags must be a known BmsiAttributeFlags combination. ---
+	{
+		std::vector<uint8_t> bad_ai_flags = original;
+		const size_t first_item_ai_flags = opennova::bms::kHeaderSize +
+		                                   original_loadout_len +
+		                                   original_secondary_len + 12;
+		write_u32_le(bad_ai_flags, first_item_ai_flags, 1u << 29);
+		opennova::bms::File rejected;
+		std::string ai_error;
+		TEST_EXPECT(!opennova::bms::parse(bad_ai_flags.data(), bad_ai_flags.size(), rejected, ai_error));
+		TEST_EXPECT(ai_error.find("AI") != std::string::npos);
+	}
+
+	// --- Modeling policy: editor-reserved entity fields are canonical zero. ---
+	{
+		const size_t first_item = opennova::bms::kHeaderSize +
+		                          original_loadout_len +
+		                          original_secondary_len;
+		std::vector<uint8_t> bad_entity_reserved = original;
+		bad_entity_reserved[first_item + 82] = 1;
+		opennova::bms::File rejected;
+		std::string entity_error;
+		TEST_EXPECT(!opennova::bms::parse(bad_entity_reserved.data(), bad_entity_reserved.size(), rejected, entity_error));
+		TEST_EXPECT(entity_error.find("entity") != std::string::npos);
+
+		std::vector<uint8_t> bad_entity_tail = original;
+		bad_entity_tail[first_item + 168] = 1;
+		TEST_EXPECT(!opennova::bms::parse(bad_entity_tail.data(), bad_entity_tail.size(), rejected, entity_error));
+		TEST_EXPECT(entity_error.find("entity") != std::string::npos);
 	}
 
 	// --- Phase 1: mission-header editing round-trips through save/reload ---
@@ -520,6 +628,37 @@ int main() {
 		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, rec3));
 		TEST_EXPECT(rec3.name1 == "verylong");
 		TEST_EXPECT(rec3.name1.size() == 8);
+	}
+
+	// --- Modeling policy: gen_string is a 31-byte string plus named option bytes at offsets
+	// 152/154/155. The intervening bytes 151 and 153 are reserved zero and fail load if nonzero. ---
+	{
+		opennova::bms::File f;
+		std::string err;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), f, err));
+		TEST_EXPECT(!f.items.empty());
+		std::memset(f.items[0].gen_string, 0, sizeof(f.items[0].gen_string));
+		std::memcpy(f.items[0].gen_string, "generator", 9);
+		f.items[0].grenades = 4;
+		f.items[0].mission_critical = 1;
+		f.items[0].lfp_group = 7;
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(opennova::bms::write(f, bytes, err));
+		opennova::bms::File reparsed;
+		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
+		TEST_EXPECT(std::string(reparsed.items[0].gen_string) == "generator");
+		TEST_EXPECT(reparsed.items[0].grenades == 4);
+		TEST_EXPECT(reparsed.items[0].mission_critical == 1);
+		TEST_EXPECT(reparsed.items[0].lfp_group == 7);
+
+		const size_t first_item_gen = opennova::bms::kHeaderSize +
+		                              original_loadout_len +
+		                              original_secondary_len + 120;
+		std::vector<uint8_t> bad_reserved = original;
+		bad_reserved[first_item_gen + 31] = 1;
+		opennova::bms::File rejected;
+		TEST_EXPECT(!opennova::bms::parse(bad_reserved.data(), bad_reserved.size(), rejected, err));
+		TEST_EXPECT(err.find("entity") != std::string::npos);
 	}
 
 	// --- Regression (review): set_entity_property_int / _string edit one named field and leave the
@@ -764,34 +903,31 @@ int main() {
 	// --- Regression (review): a secondary-chunk length larger than the bytes remaining fails the parse
 	// cleanly (count_fits guard) instead of silently zero-filling + mis-aligning every later section. ---
 	{
-		opennova::bms::File f;
 		std::string err;
-		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), f, err));
-		f.header.secondary_chunk_len = 0xFFFF; // claim 64KB; secondary_chunk stays empty so the file under-runs
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(opennova::bms::write(f, bytes, err)); // raw writer emits the inflated length verbatim
+		std::vector<uint8_t> bytes = original;
+		write_u16_le(bytes, offsetof(opennova::bms::Header, secondary_chunk_len), 0xFFFF);
 		opennova::bms::File reparsed;
 		TEST_EXPECT(!opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
 	}
 
-	// --- Regression (review): a loadout edit preserves any bytes the chunk carried past the canonical
-	// records + terminator (byte-exact round-trip for unchanged records; faithful tail otherwise). ---
+	// --- Modeling policy: the loader sanitizes the loadout chunk into canonical four-string
+	// records. Bytes after the empty-name terminator are ignored by the retail sanitizer and are
+	// dropped by the canonical writer. ---
 	{
-		opennova::mission::MissionDocument doc;
-		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
-		// Inject a loadout chunk = one record + terminator + two trailing bytes.
-		doc.bms_file().loadout.raw_data = {
-			'W', 'P', 'N', '_', 'A', 0, '-', '1', 0, '-', '1', 0, // one record (name, value1, value2)
-			0,                                                     // empty-record terminator
-			0xAB, 0xCD,                                            // trailing bytes past the terminator
-		};
-		std::vector<opennova::mission::WeaponLoadoutEntry> entries = doc.weapon_loadout();
-		TEST_EXPECT(entries.size() == 1);
-		entries[0].value1 = "5"; // edit the loadout -> rewrites the chunk
-		TEST_EXPECT(doc.set_weapon_loadout(entries));
-		const std::vector<uint8_t> &raw = doc.bms_file().loadout.raw_data;
-		TEST_EXPECT(raw.size() >= 2);
-		TEST_EXPECT(raw[raw.size() - 2] == 0xAB && raw[raw.size() - 1] == 0xCD);
+		std::string err;
+		std::vector<uint8_t> bytes = original;
+		const size_t loadout_end = opennova::bms::kHeaderSize + original_loadout_len;
+		const uint8_t trailing[] = {0xAB, 0xCD};
+		bytes.insert(bytes.begin() + static_cast<std::ptrdiff_t>(loadout_end), std::begin(trailing), std::end(trailing));
+		write_u16_le(bytes, offsetof(opennova::bms::Header, weapon_loadout_chunk_len),
+		             static_cast<uint16_t>(original_loadout_len + sizeof(trailing)));
+		opennova::bms::File parsed_trailing;
+		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), parsed_trailing, err));
+		std::vector<uint8_t> canonical;
+		TEST_EXPECT(opennova::bms::write(parsed_trailing, canonical, err));
+		opennova::bms::File reparsed_trailing;
+		TEST_EXPECT(opennova::bms::parse(canonical.data(), canonical.size(), reparsed_trailing, err));
+		TEST_EXPECT(opennova::bms::equal(parsed_trailing, reparsed_trailing));
 	}
 
 	return 0;

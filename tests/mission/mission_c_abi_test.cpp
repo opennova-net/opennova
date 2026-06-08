@@ -46,7 +46,7 @@ int test_event_scripting_cpp(const std::vector<uint8_t> &original) {
 	const size_t base_actions = doc.action_count();
 	TEST_EXPECT(base_events > 0);
 
-	// add_event appends an empty event carrying only the editable attributes.
+	// add_event appends an empty event carrying only the editable attributes by default.
 	MissionEventRecord seed;
 	seed.flags = static_cast<int>(bms::EventFlags::ResetAfter);
 	seed.reset_after = 7;
@@ -60,6 +60,28 @@ int test_event_scripting_cpp(const std::vector<uint8_t> &original) {
 	TEST_EXPECT(added.delay == 3);
 	TEST_EXPECT(added.trigger_count == 0);
 	TEST_EXPECT(added.action_count == 0);
+
+	// Confirmed internal event bits can be seeded on add and are preserved by editor-style edits that only
+	// submit author-facing checkbox bits.
+	{
+		MissionDocument flag_doc;
+		TEST_EXPECT(flag_doc.load_bms_bytes(original.data(), original.size()));
+		MissionEventRecord internal_seed;
+		internal_seed.flags = 0x10 | static_cast<int>(bms::EventFlags::ResetAfter);
+		MissionEventRecord internal_added;
+		TEST_EXPECT(flag_doc.add_event(internal_seed, &internal_added));
+		TEST_EXPECT((internal_added.flags & 0x10) == 0x10);
+		TEST_EXPECT((internal_added.flags & static_cast<int>(bms::kEventAuthorFlagMask)) ==
+		            static_cast<int>(bms::EventFlags::ResetAfter));
+
+		MissionEventRecord edit = internal_added;
+		edit.flags = static_cast<int>(bms::EventFlags::PreMission);
+		MissionEventRecord edited;
+		TEST_EXPECT(flag_doc.set_event(internal_added.index, edit, &edited));
+		TEST_EXPECT((edited.flags & 0x10) == 0x10);
+		TEST_EXPECT((edited.flags & static_cast<int>(bms::kEventAuthorFlagMask)) ==
+		            static_cast<int>(bms::EventFlags::PreMission));
+	}
 
 	// Fill the new event with one trigger and one (self-referencing) ResetEvent action.
 	MissionTriggerRecord trig;
@@ -189,12 +211,12 @@ int test_event_scripting_cpp(const std::vector<uint8_t> &original) {
 	}
 	TEST_EXPECT(found_firing_angle);
 
-	// Three author-facing event flags, matching the DFX2 editor exactly (bits 0x08+ are preserved, not
-	// surfaced). [orig: Med_EventDialogCommit @0x4118d0 sets bits 0/1/2 only]
+	// Three author-facing event flags, matching the DFX2 editor exactly. Confirmed internal bits 0x10/0x20
+	// are preserve-only, not surfaced. [orig: Med_EventDialogCommit @0x4118d0 sets bits 0/1/2 only]
 	const std::vector<MissionEnumEntry> flag_bits = doc.event_flag_bits();
 	TEST_EXPECT(flag_bits.size() == 3);
 	TEST_EXPECT(flag_bits.front().value == static_cast<int>(bms::EventFlags::ResetAfter));
-	// event_flag_mask is the OR of those bits = 0x07; every other bit is preserve-only.
+	// event_flag_mask is the OR of the author-facing bits = 0x07.
 	TEST_EXPECT(doc.event_flag_mask() == 0x7);
 	return 0;
 }
@@ -287,7 +309,8 @@ int main() {
 	properties.waypoint_id = 4;
 	properties.wp_number = 9;
 	properties.team = 3;
-	properties.ai_flags = static_cast<int>(opennova::bms::BmsiAttributeFlags::Guarding) | (1 << 28);
+	properties.ai_flags = static_cast<int>(opennova::bms::BmsiAttributeFlags::Guarding) |
+	                      static_cast<int>(opennova::bms::BmsiAttributeFlags::NoShadow);
 	properties.perception = 77;
 	properties.accuracy = 63;
 	properties.alert_state = 5;
@@ -414,8 +437,8 @@ int main() {
 	opennova_mission_free_bytes(&clamp_bytes);
 	TEST_EXPECT(opennova_mission_remove_area_trigger(document, clamped_index) == 1);
 
-	// Phase 3: weapon loadout. The fixture ships 7 three-string records (name, "-1", "-1"); the
-	// earlier entity/zone edits do not touch the loadout chunk, so it still reads back verbatim.
+	// Phase 3: weapon loadout. The fixture canonicalizes to 7 public three-field loadout records; the
+	// earlier entity/zone edits do not touch the loadout list.
 	const size_t loadout_count = opennova_mission_weapon_loadout_count(document);
 	TEST_EXPECT(loadout_count == 7);
 	OpenNovaMissionWeaponLoadoutEntry first_loadout = {};
@@ -479,10 +502,10 @@ int main() {
 	// Capture a neighbour's baseline (the fixture's groups are not all zero) to prove set_group is local.
 	OpenNovaMissionGroupRecord neighbour_before = {};
 	TEST_EXPECT(opennova_mission_get_group(document, 8, &neighbour_before) == 1);
-	TEST_EXPECT(opennova_mission_set_group(document, 7, 111, 222, 333) == 1);
+	TEST_EXPECT(opennova_mission_set_group(document, 7, 3, 222, 10) == 1);
 	OpenNovaMissionGroupRecord group_after = {};
 	TEST_EXPECT(opennova_mission_get_group(document, 7, &group_after) == 1);
-	TEST_EXPECT(group_after.field0 == 111 && group_after.field8 == 222 && group_after.field12 == 333);
+	TEST_EXPECT(group_after.field0 == 3 && group_after.field8 == 222 && group_after.field12 == 10);
 	// A different group is untouched by the edit above.
 	OpenNovaMissionGroupRecord neighbour_after = {};
 	TEST_EXPECT(opennova_mission_get_group(document, 8, &neighbour_after) == 1);
@@ -498,7 +521,7 @@ int main() {
 	TEST_EXPECT(opennova_mission_load_bytes(group_reload, group_bytes.data, group_bytes.size) == 1);
 	OpenNovaMissionGroupRecord group_rt = {};
 	TEST_EXPECT(opennova_mission_get_group(group_reload, 7, &group_rt) == 1);
-	TEST_EXPECT(group_rt.field0 == 111 && group_rt.field8 == 222 && group_rt.field12 == 333);
+	TEST_EXPECT(group_rt.field0 == 3 && group_rt.field8 == 222 && group_rt.field12 == 10);
 	opennova_mission_destroy(group_reload);
 	opennova_mission_free_bytes(&group_bytes);
 
