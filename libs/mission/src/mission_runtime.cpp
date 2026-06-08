@@ -391,6 +391,9 @@ void MissionRuntime::reset() {
 		state = {};
 	}
 	std::fill(mission_variables_.begin(), mission_variables_.end(), 0);
+	// Mirror load(): drop stale host-trigger state so a restart does not re-fire an event off a
+	// trigger the host set during the previous run (before the host re-pushes fresh state).
+	host_triggers_.clear();
 }
 
 MissionRuntimeTickResult MissionRuntime::tick() {

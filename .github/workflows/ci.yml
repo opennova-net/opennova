@@ -4,7 +4,10 @@ on:
   push:
     branches: [master]
   pull_request:
-    branches: [master]
+    # Include unified-edit-history so PRs stacked on the Mission Workspace branch
+    # (e.g. the .lwf sound PR) get CI before that branch lands on master.
+    branches: [master, unified-edit-history]
+  workflow_dispatch:
 
 jobs:
   test:

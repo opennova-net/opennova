@@ -102,6 +102,7 @@ public:
 		if (undo_.empty()) {
 			return false;
 		}
+		discard_open_session();
 		redo_.push_back(std::move(live));
 		live = std::move(undo_.back());
 		undo_.pop_back();
@@ -112,6 +113,7 @@ public:
 		if (redo_.empty()) {
 			return false;
 		}
+		discard_open_session();
 		undo_.push_back(std::move(live));
 		live = std::move(redo_.back());
 		redo_.pop_back();
@@ -150,6 +152,16 @@ public:
 	}
 
 private:
+	// Drop any in-flight begin() session. An undo/redo that fires mid-gesture would otherwise leave
+	// editing_/pending_ stale: the next commit() would compare against the pre-undo snapshot, push it
+	// as a spurious step, and wipe the redo entry the swap just produced. Whole-document drivers are
+	// expected to flush (commit) before undo/redo, but defend the invariant so a consumer that forgets
+	// cannot corrupt the stacks.
+	void discard_open_session() {
+		editing_ = false;
+		pending_ = Snapshot();
+	}
+
 	void push_undo(Snapshot snapshot) {
 		undo_.push_back(std::move(snapshot));
 		if (undo_.size() > limit_) {

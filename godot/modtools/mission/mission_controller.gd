@@ -56,6 +56,10 @@ var _loaded_trn_path: String = ""
 var _last_open_dir: String = ""
 var _stats: Dictionary = {}
 var _last_status: String = ""
+# Memoised is_dirty() result (-1 = needs recompute, 0 = clean, 1 = dirty). _mission.is_dirty() is a
+# full-document bms::equal compare and the shell polls is_dirty() every frame (Save enablement + title
+# `*`), so the result is cached and invalidated on every `changed` emission (see _notify_changed).
+var _dirty_cache: int = -1
 # The placer that built the current world, retained so place-new can render one entity
 # incrementally (reusing its model + batch caches) instead of rebuilding everything.
 var _placer  # MissionObjectPlacer (preloaded, no class_name)
@@ -255,8 +259,12 @@ func is_loaded() -> bool:
 
 func is_dirty() -> bool:
 	# Exact, owned by the document: true iff it differs from the clean baseline (set at open /
-	# save / new), so undoing back to the saved state clears the `*`.
-	return _mission != null and _mission.is_dirty()
+	# save / new), so undoing back to the saved state clears the `*`. Memoised: _mission.is_dirty()
+	# is a full-document compare and the shell polls this every frame, so cache it and recompute only
+	# when `changed` fires (every mutation / save / load / undo / redo re-emits it via _notify_changed).
+	if _dirty_cache < 0:
+		_dirty_cache = 1 if (_mission != null and _mission.is_dirty()) else 0
+	return _dirty_cache == 1
 
 
 func get_current_path() -> String:
@@ -427,14 +435,9 @@ func open_mission(bms_path: String) -> Error:
 	# Focus the first zone when reopening already in area-trigger mode, mirroring set_mode (and the
 	# waypoint branch above), so the Triggers panel is not empty after an open.
 	_selected_zone_index = 0 if (_mode == Mode.AREA_TRIGGERS and mission.get_area_trigger_count() > 0) else -1
-	if _mode == Mode.WAYPOINTS:
-		_refresh_waypoint_overlay()
-	elif _mode == Mode.AREA_TRIGGERS:
-		_refresh_area_trigger_overlay()
-	elif _mode == Mode.OBJECTS:
-		_refresh_marker_overlay()
+	_refresh_active_overlay()
 	_last_status = _describe_load(mission, bms_path, env_note)
-	changed.emit()
+	_notify_changed()
 	return OK
 
 
@@ -486,17 +489,12 @@ func new_mission() -> Error:
 	_selected_path_index = -1
 	_selected_zone_index = -1
 	_selected_event_index = -1
-	if _mode == Mode.WAYPOINTS:
-		_refresh_waypoint_overlay()
-	elif _mode == Mode.AREA_TRIGGERS:
-		_refresh_area_trigger_overlay()
-	elif _mode == Mode.OBJECTS:
-		_refresh_marker_overlay()
+	_refresh_active_overlay()
 	if not env_note.is_empty():
 		_last_status = "New mission on %s (%s)." % [terrain_ref, env_note]
 	else:
 		_last_status = "New mission on %s." % terrain_ref
-	changed.emit()
+	_notify_changed()
 	return OK
 
 
@@ -515,7 +513,7 @@ func clear() -> void:
 	_current_path = ""
 	_loaded_trn_path = ""
 	_stats = {}
-	changed.emit()
+	_notify_changed()
 
 
 # If the terrain underneath was swapped out from under a loaded mission (the user
@@ -543,7 +541,17 @@ func set_objects_visible(value: bool) -> void:
 # document (is_dirty -> _mission.is_dirty(), an exact compare against the clean baseline), so this
 # just re-emits `changed` to refresh the title (`*`) + Save enablement + inspector.
 func mark_dirty() -> void:
-	changed.emit()
+	_notify_changed()
+
+
+# Invalidate the cached dirty state and notify listeners. Every site that previously called
+# changed.emit() now routes through here, so is_dirty()'s memo is dropped in lockstep with the
+# title `*` / Save enablement / inspector refresh that `changed` already drives (a mutation, save,
+# load, clear, undo or redo). Uses emit_signal so the global changed.emit() -> _notify_changed()
+# rewrite does not recurse into this helper.
+func _notify_changed() -> void:
+	_dirty_cache = -1
+	emit_signal("changed")
 
 
 # --- Save ---------------------------------------------------------------------
@@ -562,7 +570,7 @@ func save_current() -> Error:
 		# still undo across the save.
 		_mission.mark_clean()
 		_last_status = "Saved %s." % _current_path.get_file()
-		changed.emit()
+		_notify_changed()
 	else:
 		_last_status = "Could not save %s: %s" % [_current_path.get_file(), _mission.get_last_error()]
 	return err as Error
@@ -586,7 +594,7 @@ func save_as(dir_path: String) -> Error:
 		_last_open_dir = dir_path
 		_mission.mark_clean()
 		_last_status = "Saved %s." % filename
-		changed.emit()
+		_notify_changed()
 	else:
 		_last_status = "Could not save %s: %s" % [filename, _mission.get_last_error()]
 	return err as Error
@@ -759,6 +767,11 @@ func _consume_viewport_key() -> void:
 func handle_viewport_input(event: InputEvent) -> void:
 	if _mission == null or terrain_editor == null:
 		return
+	# Scripting mode is panel-driven and the viewport is inert in it (see Mode docs): swallow all
+	# pointer events so a stray click cannot select, drag, or hover-pick an object, while still
+	# letting the keyboard shortcuts (undo / redo / delete) below run.
+	if is_scripting_mode() and not (event is InputEventKey):
+		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		# A non-left button pressed mid gizmo-drag (e.g. right-click to look / middle to orbit) ends
@@ -891,13 +904,8 @@ func cancel_drag() -> void:
 			_gizmo.end_drag()
 			_gizmo.set_highlight({})
 	# A cancelled marker / zone drag previewed the gizmo but wrote no record; snap it back to
-	# the stored position.
-	if _mode == Mode.WAYPOINTS:
-		_refresh_waypoint_overlay()
-	elif _mode == Mode.AREA_TRIGGERS:
-		_refresh_area_trigger_overlay()
-	elif _mode == Mode.OBJECTS:
-		_refresh_marker_overlay()
+	# the stored position by rebuilding the active mode's overlay.
+	_refresh_active_overlay()
 
 
 func _on_left_press(mouse_pos: Vector2) -> void:
@@ -1225,6 +1233,11 @@ func _pick_entity(mouse_pos: Vector2) -> Dictionary:
 
 
 func _select(kind: int, index: int) -> void:
+	# End any open edit-coalescing window before the selection changes. set_selected_position /
+	# set_selected_rotation leave a begin_edit() session open (committed by the next gesture's flush),
+	# so an inspector-driven re-select must flush it here too (the viewport's _on_left_press already
+	# does), otherwise SpinBox edits to two different objects fold into a single undo step.
+	_flush_edit()
 	stop_preview()
 	_selected_ref = { "kind": kind, "index": index }
 	_selected_records = []
@@ -1265,7 +1278,7 @@ func _select(kind: int, index: int) -> void:
 	# hover throttle so the first motion over the rebuilt gizmo re-highlights.
 	_refresh_gizmo()
 	_gizmo_hover_pos = Vector2(-1, -1)
-	changed.emit()
+	_notify_changed()
 
 
 func _deselect() -> void:
@@ -1283,7 +1296,7 @@ func _deselect() -> void:
 		_gizmo.visible = false
 	if _marker_overlay != null and is_instance_valid(_marker_overlay):
 		_marker_overlay.set_selected_marker(-1)
-	changed.emit()
+	_notify_changed()
 
 
 # --- In-editor PLAYPARTANIM preview -------------------------------------------
@@ -1644,7 +1657,7 @@ func arm_placement(item_id: int) -> void:
 	_flush_edit()
 	_place_item_id = item_id
 	_deselect()
-	changed.emit()
+	_notify_changed()
 
 
 func disarm_placement() -> void:
@@ -1654,7 +1667,7 @@ func disarm_placement() -> void:
 	# Placement suppresses the gizmo (its want-gate excludes is_placement_armed). A just-placed
 	# entity stays selected, so once disarmed re-show its gizmo (no-op when nothing is selected).
 	_refresh_gizmo()
-	changed.emit()
+	_notify_changed()
 
 
 func is_placement_armed() -> bool:
@@ -1695,6 +1708,9 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	_mission.begin_edit()
 	var record := _mission.add_entity(kind, item_id, bms_pos, Vector3.ZERO)
 	if record.is_empty():
+		# Balance the begin_edit() bracket on the reject path (no-op step, the failed add changed
+		# nothing) so the open session does not leak into the next gesture.
+		_mission.commit_edit()
 		_report("Could not place %s." % item_name, true)
 		return false
 	_mission.commit_edit()
@@ -1793,12 +1809,18 @@ func delete_selected() -> bool:
 	_flush_edit()
 	_mission.begin_edit()
 	if not _mission.remove_entity(kind, index):
+		# Balance the begin_edit() bracket on the reject path (no-op step, the failed remove changed
+		# nothing) so the open session does not leak into the next gesture.
+		_mission.commit_edit()
 		_report("Could not delete the selected object.", true)
 		return false
 	_mission.commit_edit()
 	if kind == NovaMissionData.KIND_MARKER:
 		# Objects are untouched by a marker delete; drop the selection and rebuild only the marker
-		# overlay against the post-delete list (cheaper than re-placing every object).
+		# overlay against the post-delete list (cheaper than re-placing every object). The marker is
+		# still part of the entity set the inspector's cached pickers marshal, so bump the membership
+		# revision (the non-marker branch gets this from _rebake_objects).
+		_membership_rev += 1
 		_deselect()
 		_refresh_marker_overlay()
 	else:
@@ -1911,7 +1933,7 @@ func set_mode(mode: int) -> void:
 	# clears the selection above, so just hide it here (rebuilt on the next object select).
 	if _gizmo != null and is_instance_valid(_gizmo):
 		_gizmo.visible = false
-	changed.emit()
+	_notify_changed()
 
 
 func get_mode() -> int:
@@ -1952,7 +1974,7 @@ func select_waypoint_path(index: int) -> void:
 	if _waypoint_overlay != null and is_instance_valid(_waypoint_overlay):
 		_waypoint_overlay.set_selected_marker(-1)
 	_refresh_waypoint_overlay()
-	changed.emit()
+	_notify_changed()
 
 
 func get_selected_waypoint_path_index() -> int:
@@ -1983,7 +2005,11 @@ func set_waypoint_flags(loop: bool, blue: bool, red: bool) -> void:
 	var path := _mission.get_waypoint_path(_selected_path_index)
 	if path.is_empty():
 		return
-	var flags := 0
+	# Preserve any on-disk flag bits beyond the three the UI exposes (the event- and zone-flag paths
+	# mask-merge the same way) so toggling a checkbox keeps the round-trip byte-exact: seed from the
+	# path's current flags with the known bits cleared, then set only DoesNotLoop / BlueTeam / RedTeam.
+	var known_mask := NovaMissionData.WP_FLAG_DOES_NOT_LOOP | NovaMissionData.WP_FLAG_BLUE_TEAM | NovaMissionData.WP_FLAG_RED_TEAM
+	var flags := int(path.get("flags", 0)) & ~known_mask
 	if not loop:
 		flags |= NovaMissionData.WP_FLAG_DOES_NOT_LOOP
 	if blue:
@@ -2158,7 +2184,7 @@ func _select_marker(path_index: int, marker_index: int) -> void:
 	_selected_marker = { "path_index": path_index, "marker_index": marker_index }
 	if _waypoint_overlay != null and is_instance_valid(_waypoint_overlay):
 		_waypoint_overlay.set_selected_marker(marker_index)
-	changed.emit()
+	_notify_changed()
 
 
 func _deselect_marker() -> void:
@@ -2167,7 +2193,7 @@ func _deselect_marker() -> void:
 	_selected_marker = {}
 	if _waypoint_overlay != null and is_instance_valid(_waypoint_overlay):
 		_waypoint_overlay.set_selected_marker(-1)
-	changed.emit()
+	_notify_changed()
 
 
 # --- Authoring (P7d): marker drag / add / reorder / delete --------------------
@@ -2235,14 +2261,14 @@ func arm_marker_placement() -> void:
 	_flush_edit()
 	_marker_place_armed = true
 	_deselect_marker()
-	changed.emit()
+	_notify_changed()
 
 
 func disarm_marker_placement() -> void:
 	if not _marker_place_armed:
 		return
 	_marker_place_armed = false
-	changed.emit()
+	_notify_changed()
 
 
 func is_marker_placement_armed() -> bool:
@@ -2561,7 +2587,7 @@ func select_area_trigger(index: int) -> void:
 		return
 	_selected_zone_index = index
 	_refresh_area_trigger_overlay()
-	changed.emit()
+	_notify_changed()
 
 
 # Add a new zone box centred on the placed world (the average of item positions, else origin),
@@ -2656,7 +2682,7 @@ func _on_zone_left_press(mouse_pos: Vector2) -> void:
 	if index != _selected_zone_index:
 		_selected_zone_index = index
 		_refresh_area_trigger_overlay()
-		changed.emit()
+		_notify_changed()
 	# Begin a translate drag: motion re-grounds the box centre on the terrain, release writes
 	# the record once (a plain click just selects). The bracket makes the drag one undo step.
 	var zone := _mission.get_area_trigger(index)
@@ -2747,7 +2773,7 @@ func _deselect_zone() -> void:
 		return
 	_selected_zone_index = -1
 	_refresh_area_trigger_overlay()
-	changed.emit()
+	_notify_changed()
 
 
 # --- Authoring (Phase 4): mission scripting forwarders ------------------------
@@ -2814,7 +2840,7 @@ func select_event(index: int) -> void:
 	if index == _selected_event_index:
 		return
 	_selected_event_index = index
-	changed.emit()
+	_notify_changed()
 
 
 # Append a new empty event, select it, and dirty. One undo step. Returns the new index, or -1.
@@ -2951,12 +2977,15 @@ func _find_entity(kind: int, index: int) -> Dictionary:
 
 
 func _record_world_aabb(rec: Dictionary) -> AABB:
+	# Hover (_entity_world_aabb) walks every _pickable record, which can transiently hold a freed
+	# node after a mid-flight re-bake. Guard with is_instance_valid (not just != null) so a
+	# freed-but-non-null node/mmi does not error on is_inside_tree(), matching _select's staleness guard.
 	if bool(rec.get("animated", false)):
 		var node: Node3D = rec.get("node")
-		return _node_world_aabb(node) if node != null and node.is_inside_tree() else AABB()
+		return _node_world_aabb(node) if is_instance_valid(node) and node.is_inside_tree() else AABB()
 	var mmi: MultiMeshInstance3D = rec.get("mmi")
 	var mm: MultiMesh = rec.get("mm")
-	if mmi == null or mm == null or not mmi.is_inside_tree():
+	if not is_instance_valid(mmi) or not is_instance_valid(mm) or not mmi.is_inside_tree():
 		return AABB()
 	var inst := mmi.global_transform * mm.get_instance_transform(int(rec["slot"]))
 	return inst * (rec["mesh_aabb"] as AABB)

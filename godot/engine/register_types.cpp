@@ -30,6 +30,9 @@
 #include "mission/nova_mission_data.h"
 #include "mission/nova_mission_runtime.h"
 #include "simulation/nova_simulation.h"
+#include "lwf/nova_lwf_data.h"
+#include "lwf/nova_wav_loader.h"
+#include "dbf/nova_dbf_data.h"
 #include "cbin/cbin_credits_resource.h"
 #include "cbin/kda_resource_format.h"
 #include "cbin/nova_credits_player.h"
@@ -101,6 +104,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaMissionData);
 	GDREGISTER_CLASS(NovaMissionRuntime);
 	GDREGISTER_CLASS(NovaSimulation);
+	GDREGISTER_CLASS(NovaLwfData);
+	GDREGISTER_CLASS(NovaWavLoader);
+	GDREGISTER_CLASS(NovaDbfData);
 	GDREGISTER_ABSTRACT_CLASS(CbinEntry);
 	GDREGISTER_CLASS(CbinTextEntry);
 	GDREGISTER_CLASS(CbinNewlineEntry);

@@ -18,6 +18,12 @@ var _items: Array = []  ## [{value:int, label:String}] for picker kinds; built b
 var _default_label: String = "Param"  ## shown for raw/unmapped slots that the schema doesn't name
 var _spin_min: float = 0.0  ## raw-int spin bounds captured in setup(); restored for non-FIXED_SECONDS kinds
 var _spin_max: float = 0.0
+## FIXED_SECONDS round-trip: the seconds spin steps by 256/65536 (matching the original editor) and is
+## bounded, so Range snaps/clamps the value set_value shows. Remember the exact raw last set and the
+## resulting (snapped) spin value, so read_value() returns the original raw byte-exact when the user has
+## not moved the spin -- a non-256-aligned or out-of-range imported value must not be rewritten on re-save.
+var _raw_value: int = 0
+var _committed_spin: float = 0.0
 
 
 func setup(node_name: String, default_label: String, spin_min: float, spin_max: float) -> void:
@@ -101,9 +107,13 @@ func set_value(raw: int) -> void:
 			_option.set_item_id(_option.item_count - 1, raw)
 			_option.select(_option.item_count - 1)
 	else:
+		_raw_value = raw
 		var shown := (float(raw) / 65536.0) if _kind == SchemaScript.Kind.FIXED_SECONDS else float(raw)
 		if not _spin.get_line_edit().has_focus() and _spin.value != shown:
 			_spin.value = shown
+		# Record the (snapped/clamped) value the spin actually holds so read_value() can tell whether the
+		# user has since moved it.
+		_committed_spin = _spin.value
 
 
 # Always returns the raw int, whichever control is active.
@@ -111,6 +121,11 @@ func read_value() -> int:
 	if SchemaScript.is_picker(_kind):
 		return _option.get_selected_id()
 	if _kind == SchemaScript.Kind.FIXED_SECONDS:
+		# Return the exact raw we were given when the user has not moved the spin since set_value (its
+		# value still equals the snapped/clamped value we recorded), so a non-256-aligned or out-of-range
+		# raw round-trips byte-exact instead of being rewritten to the spin's step/bounds.
+		if is_equal_approx(_spin.value, _committed_spin):
+			return _raw_value
 		return int(round(_spin.value * 65536.0))
 	return int(_spin.value)
 
