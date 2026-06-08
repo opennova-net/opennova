@@ -13,7 +13,11 @@
 
 param(
     [ValidateSet("all", "editor", "runtime")]
-    [string]$Target = "all"
+    [string]$Target = "all",
+    # CI builds the GDExtension once (the build-gdextension-windows job) and downloads
+    # the DLLs into godot\bin; -SkipBuild then skips the per-job rebuild. Local runs
+    # omit it and build normally. See .github/workflows/ci.yml build-gdextension-windows.
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -117,17 +121,24 @@ $RELEASE_DLL = "$ROOT\godot\bin\libopennova.windows.template_release.x86_64.dll"
 # The Godot editor loads the debug/editor library while scanning scripts for an
 # export. The release export template then needs the release library for the
 # packaged app. Fresh CI runners must have both.
-Invoke-GDExtensionBuild `
-    -GodotCppTarget "template_debug" `
-    -BuildDir "build-godot-debug" `
-    -Config "Debug" `
-    -ExpectedDll $DEBUG_DLL
+if ($SkipBuild) {
+    Write-Host "=== -SkipBuild: using prebuilt GDExtension DLLs in godot\bin ==="
+    if (-not (Test-Path $DEBUG_DLL))   { throw "Expected prebuilt debug DLL missing: $DEBUG_DLL" }
+    if (-not (Test-Path $RELEASE_DLL)) { throw "Expected prebuilt release DLL missing: $RELEASE_DLL" }
+}
+else {
+    Invoke-GDExtensionBuild `
+        -GodotCppTarget "template_debug" `
+        -BuildDir "build-godot-debug" `
+        -Config "Debug" `
+        -ExpectedDll $DEBUG_DLL
 
-Invoke-GDExtensionBuild `
-    -GodotCppTarget "template_release" `
-    -BuildDir "build-godot-release" `
-    -Config "Release" `
-    -ExpectedDll $RELEASE_DLL
+    Invoke-GDExtensionBuild `
+        -GodotCppTarget "template_release" `
+        -BuildDir "build-godot-release" `
+        -Config "Release" `
+        -ExpectedDll $RELEASE_DLL
+}
 
 # ---------------------------------------------------------------------------
 # 4. Run headless exports
