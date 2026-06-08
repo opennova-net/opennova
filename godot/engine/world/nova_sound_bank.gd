@@ -2,15 +2,17 @@ class_name NovaSoundBank
 extends RefCounted
 
 ## Runtime playback over one or more loaded .lwf banks (NovaLwfData). Indexes
-## sound sets by name (case-insensitive across all banks), implements the original
-## member-selection logic (FIRST / RANDOM / SEQUENTIAL / RANDOM_SEQUENTIAL with
-## per-layer state, ported from the archive's sound_set.cpp), decodes member .wav
-## bytes via NovaWavLoader (cached), and spawns AudioStreamPlayer3D voices.
+## sound sets by name (case-insensitive across all banks), decodes member .wav
+## bytes via NovaWavLoader (cached), and spawns AudioStreamPlayer3D voices. The
+## member-selection state machine (FIRST / RANDOM / SEQUENTIAL / RANDOM_SEQUENTIAL
+## with per-layer state, originally the archive's sound_set.cpp) lives in portable
+## C++ (libs/audio, via NovaSoundSelector); this only feeds it the layer's member
+## count + mode and poses the chosen member.
 ##
 ## Resolution is NAME-keyed, matching the engine (SoundProfile_FindLoadedByName @
 ## Jointops 0x5274f0); the .lwf Multi.target_id is NOT used. See notes/lwf/grill.md.
 
-# Mirrors NovaLwfData selection-mode constants.
+# Mirrors NovaLwfData / opennova::audio::SelectionMode selection-mode constants.
 const SELECTION_FIRST := 0
 const SELECTION_RANDOM := 1
 const SELECTION_SEQUENTIAL := 2
@@ -20,8 +22,8 @@ var _resource_root  # NovaResourceRoot
 var _banks: Array = []  # Array[NovaLwfData]
 # name(lower) -> Array[{bank:int, set:int}]
 var _index: Dictionary = {}
-# "bank:set:layer" -> { seq:int, bag:Array[int] } selection state
-var _state: Dictionary = {}
+# The portable member-selection state machine (libs/audio); holds the per-(bank,set,layer) state.
+var _selector := NovaSoundSelector.new()
 # wav basename(lower) -> AudioStreamWAV (or null if it failed to resolve/decode)
 var _wav_cache: Dictionary = {}
 
@@ -188,33 +190,18 @@ func _make_player(stream: AudioStreamWAV, layer_d: Dictionary, member: Dictionar
 	return player
 
 
+# Pick the member to play for one layer. The selection STATE MACHINE (mode + per-layer cursor/bag)
+# lives in libs/audio (NovaSoundSelector); here we only feed it the member count + mode and return
+# the chosen member dictionary. Faithful to the engine's per-layer member selection.
 func _pick_member(layer_d: Dictionary, bank: int, set_i: int, layer_i: int) -> Dictionary:
 	var members: Array = layer_d.get("members", [])
 	if members.is_empty():
 		return {}
 	var mode := int(layer_d.get("selection_mode", SELECTION_FIRST))
-	var key := "%d:%d:%d" % [bank, set_i, layer_i]
-	match mode:
-		SELECTION_RANDOM:
-			return members[randi() % members.size()]
-		SELECTION_SEQUENTIAL:
-			var st: Dictionary = _state.get(key, {"seq": 0, "bag": []})
-			var idx := int(st.seq) % members.size()
-			st.seq = idx + 1
-			_state[key] = st
-			return members[idx]
-		SELECTION_RANDOM_SEQ:
-			var st2: Dictionary = _state.get(key, {"seq": 0, "bag": []})
-			var bag: Array = st2.bag
-			if bag.is_empty():
-				bag = range(members.size())
-				bag.shuffle()
-			var pick := int(bag.pop_back())
-			st2.bag = bag
-			_state[key] = st2
-			return members[pick]
-		_:  # SELECTION_FIRST
-			return members[0]
+	var idx := int(_selector.select_member(bank, set_i, layer_i, members.size(), mode))
+	if idx < 0 or idx >= members.size():
+		return {}
+	return members[idx]
 
 
 func _resolve_stream(member: Dictionary) -> AudioStreamWAV:

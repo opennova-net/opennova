@@ -31,6 +31,7 @@ add_subdirectory(../../libs/wac opennova_wac)
 add_subdirectory(../../libs/mission opennova_mission)
 add_subdirectory(../../libs/lwf opennova_lwf)
 add_subdirectory(../../libs/dbf opennova_dbf)
+add_subdirectory(../../libs/audio opennova_audio)
 add_subdirectory(../../libs/oned_edit opennova_oned_edit)
 
 set(TARGET_NAME "opennova")
@@ -63,6 +64,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/nova_simulation.cpp
     lwf/nova_lwf_data.cpp
     lwf/nova_wav_loader.cpp
+    audio/nova_sound_selector.cpp
     dbf/nova_dbf_data.cpp
     rtxt/rtxt_string_file.cpp
     rtxt/rtxt_resource_format.cpp
@@ -112,6 +114,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_mission
     opennova_lwf
     opennova_dbf
+    opennova_audio
     opennova_oned_edit
 )
 

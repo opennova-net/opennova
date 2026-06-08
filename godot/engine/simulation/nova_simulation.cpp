@@ -128,6 +128,10 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_bms_id", "index"), &NovaSimulation::get_entity_bms_id);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_phase", "index", "channel"), &NovaSimulation::get_entity_part_anim_phase);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_active", "index", "channel"), &NovaSimulation::get_entity_part_anim_active);
+	ClassDB::bind_method(D_METHOD("get_entity_anim_slot", "index"), &NovaSimulation::get_entity_anim_slot);
+	ClassDB::bind_method(D_METHOD("get_entity_hidden", "index"), &NovaSimulation::get_entity_hidden);
+	ClassDB::bind_method(D_METHOD("get_present_snapshot"), &NovaSimulation::get_present_snapshot);
+	ClassDB::bind_method(D_METHOD("get_present_stride"), &NovaSimulation::get_present_stride);
 	ClassDB::bind_method(D_METHOD("set_loco_scale", "scale"), &NovaSimulation::set_loco_scale);
 	ClassDB::bind_method(D_METHOD("get_loco_scale"), &NovaSimulation::get_loco_scale);
 	ClassDB::bind_method(D_METHOD("get_spawned_count"), &NovaSimulation::get_spawned_count);
@@ -135,6 +139,26 @@ void NovaSimulation::_bind_methods() {
 
 	BIND_ENUM_CONSTANT(TICK_DIVIDED);
 	BIND_ENUM_CONSTANT(TICK_EVERY_PROCESS);
+
+	// Present-snapshot field layout (single source of truth for the GDScript present pass).
+	BIND_ENUM_CONSTANT(PF_KIND);
+	BIND_ENUM_CONSTANT(PF_INDEX);
+	BIND_ENUM_CONSTANT(PF_BMS_ID);
+	BIND_ENUM_CONSTANT(PF_NET_ID);
+	BIND_ENUM_CONSTANT(PF_POS_X);
+	BIND_ENUM_CONSTANT(PF_POS_Y);
+	BIND_ENUM_CONSTANT(PF_POS_Z);
+	BIND_ENUM_CONSTANT(PF_PITCH_DEG);
+	BIND_ENUM_CONSTANT(PF_YAW_DEG);
+	BIND_ENUM_CONSTANT(PF_ROLL_DEG);
+	BIND_ENUM_CONSTANT(PF_PHASE1);
+	BIND_ENUM_CONSTANT(PF_ACTIVE1);
+	BIND_ENUM_CONSTANT(PF_PHASE2);
+	BIND_ENUM_CONSTANT(PF_ACTIVE2);
+	BIND_ENUM_CONSTANT(PF_ANIM_SLOT);
+	BIND_ENUM_CONSTANT(PF_HIDDEN);
+	BIND_ENUM_CONSTANT(PF_ALIVE);
+	BIND_ENUM_CONSTANT(PF_STRIDE);
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "playing"), "set_playing", "is_playing");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "tick_mode"), "set_tick_mode", "get_tick_mode");
@@ -312,6 +336,66 @@ bool NovaSimulation::get_entity_part_anim_active(int p_index, int channel) const
 	const int slot = channel - 1;
 	return e->brain.f[AiBrain::kPartAnimRate0 + slot] != 0 ||
 	       e->brain.f[AiBrain::kPartAnimPhase0 + slot] != 0;
+}
+
+int NovaSimulation::get_entity_anim_slot(int p_index) const {
+	if (!ai_ || !world_) return -1;
+	AiEntity *e = ai_->at(p_index);
+	if (!e) return -1;
+	const opennova::world::Entity *ent = world_->registry.get(e->handle);
+	return ent ? ent->anim_slot : -1;
+}
+
+bool NovaSimulation::get_entity_hidden(int p_index) const {
+	if (!ai_ || !world_) return false;
+	AiEntity *e = ai_->at(p_index);
+	if (!e) return false;
+	const opennova::world::Entity *ent = world_->registry.get(e->handle);
+	return ent ? ent->hidden : false;
+}
+
+PackedFloat32Array NovaSimulation::get_present_snapshot() const {
+	PackedFloat32Array out;
+	if (!ai_ || !world_) return out;
+	const int count = ai_->count();
+	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
+	float *w = out.ptrw();
+	for (int i = 0; i < count; ++i) {
+		float *r = w + static_cast<int64_t>(i) * PF_STRIDE;
+		// Defaults for a missing/invalid entity: -1 ids, identity transform, inactive, dead/hidden.
+		r[PF_KIND] = -1.0f; r[PF_INDEX] = -1.0f; r[PF_BMS_ID] = 0.0f; r[PF_NET_ID] = 0.0f;
+		r[PF_POS_X] = 0.0f; r[PF_POS_Y] = 0.0f; r[PF_POS_Z] = 0.0f;
+		r[PF_PITCH_DEG] = 0.0f; r[PF_YAW_DEG] = 0.0f; r[PF_ROLL_DEG] = 0.0f;
+		r[PF_PHASE1] = 0.0f; r[PF_ACTIVE1] = 0.0f; r[PF_PHASE2] = 0.0f; r[PF_ACTIVE2] = 0.0f;
+		r[PF_ANIM_SLOT] = -1.0f; r[PF_HIDDEN] = 0.0f; r[PF_ALIVE] = 0.0f;
+
+		AiEntity *e = ai_->at(i);
+		if (!e) continue;
+		const opennova::world::Entity *ent = world_->registry.get(e->handle);
+		if (ent) {
+			r[PF_KIND] = static_cast<float>(ent->spawn_origin >> 24);        // [orig promote: (kind<<24)|index]
+			r[PF_INDEX] = static_cast<float>(ent->spawn_origin & 0xFFFFFF);
+			r[PF_BMS_ID] = static_cast<float>(ent->bms_id);
+			r[PF_ANIM_SLOT] = static_cast<float>(ent->anim_slot);
+			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
+			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
+		}
+		r[PF_NET_ID] = static_cast<float>(e->net_id);
+		// mission (x, y, z) 16.16 -> Godot (x, z, -y) world units. [orig render remap: (x, z, -y).]
+		r[PF_POS_X] = static_cast<float>(e->pos[0] / kFixed16);
+		r[PF_POS_Y] = static_cast<float>(e->pos[2] / kFixed16);
+		r[PF_POS_Z] = static_cast<float>(-e->pos[1] / kFixed16);
+		// Yaw-only today: mission-space heading degrees; the host builds the basis through the one
+		// placer convention (MissionObjectPlacer.bms_to_godot_basis). Pitch/roll reserved (0).
+		r[PF_YAW_DEG] = static_cast<float>(static_cast<double>(e->heading) / kBamPerDegree);
+		const int phase1 = e->brain.f[AiBrain::kPartAnimPhase0];
+		const int phase2 = e->brain.f[AiBrain::kPartAnimPhase0 + 1];
+		r[PF_PHASE1] = static_cast<float>(phase1);
+		r[PF_PHASE2] = static_cast<float>(phase2);
+		r[PF_ACTIVE1] = (e->brain.f[AiBrain::kPartAnimRate0] != 0 || phase1 != 0) ? 1.0f : 0.0f;
+		r[PF_ACTIVE2] = (e->brain.f[AiBrain::kPartAnimRate0 + 1] != 0 || phase2 != 0) ? 1.0f : 0.0f;
+	}
+	return out;
 }
 
 void NovaSimulation::set_loco_scale(int p_scale) {

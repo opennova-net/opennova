@@ -12,6 +12,7 @@ extends RefCounted
 # resolves without an editor re-import.
 
 var _by_bms_id: Dictionary = {}     # bms_id (SSN) -> Node
+var _by_kind_index: Dictionary = {} # "kind:index" -> Node (fallback when bms_id is 0)
 var _by_group: Dictionary = {}      # group_id -> Array[Node]
 var _nodes: Array = []              # [{ node, pos (mission-space Vector3), team }]
 var _area_triggers: Array = []      # cached mission.get_area_triggers()
@@ -33,6 +34,10 @@ func build(container: Node, mission) -> void:
 		var bms_id := int(ref.get("bms_id", 0))
 		if bms_id != 0:
 			_by_bms_id[bms_id] = child
+		var kind := int(ref.get("kind", -1))
+		var index := int(ref.get("index", -1))
+		if kind >= 0 and index >= 0:
+			_by_kind_index["%d:%d" % [kind, index]] = child
 		var group := int(ref.get("group", -1))
 		if group >= 0:
 			if not _by_group.has(group):
@@ -47,9 +52,23 @@ func build(container: Node, mission) -> void:
 
 func clear() -> void:
 	_by_bms_id.clear()
+	_by_kind_index.clear()
 	_by_group.clear()
 	_nodes.clear()
 	_area_triggers = []
+
+
+## Resolve one entity's node for the present pass: by file id (bms_id) first -- stable when a mission
+## loads from disk -- then by (kind, index) -- the editor sims the in-memory bms::File where bms_id may
+## be 0. Returns the live node or null. This is THE present-path resolver shared by game + editor;
+## resolve_single/group/zone below remain for the editor's single-action preview.
+func resolve(bms_id: int, kind: int, index: int) -> Node:
+	var node: Variant = null
+	if bms_id != 0:
+		node = _by_bms_id.get(bms_id, null)
+	if (node == null or not is_instance_valid(node)) and kind >= 0 and index >= 0:
+		node = _by_kind_index.get("%d:%d" % [kind, index], null)
+	return node if (node != null and is_instance_valid(node)) else null
 
 
 ## Resolve a single entity by its SSN (bms_id). Returns the live node or null.

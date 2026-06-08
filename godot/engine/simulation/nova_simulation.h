@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -37,6 +38,34 @@ public:
 	enum TickMode {
 		TICK_DIVIDED = 0,      // one logic tick per 62 render frames (game; faithful sub_4F81A0)
 		TICK_EVERY_PROCESS = 1 // one logic tick per render frame (editor preview)
+	};
+
+	// Field layout of one entity record in get_present_snapshot()'s flat float buffer. ONE batched
+	// PackedFloat32Array call replaces the per-entity scalar getters in the per-tick present loop
+	// (the scalar getters box a Variant each; see feedback_dispatcher_callable_perf). Mirrored on the
+	// GDScript side via these bound constants so the layout has a single source of truth (C++).
+	// Rotation is emitted as mission-space degrees (pitch, yaw, roll) so the host builds the basis
+	// through the one placer convention (MissionObjectPlacer.bms_to_godot_basis); position is already
+	// in Godot space (x, z, -y). Pitch/roll are 0 today (yaw-only locomotion) — reserved for parity.
+	enum PresentField {
+		PF_KIND = 0,   // mission ItemType (3 = Organic), -1 if none
+		PF_INDEX,      // index within its kind's list
+		PF_BMS_ID,     // file entity id; host maps this to a placed node (primary key)
+		PF_NET_ID,     // runtime SSN (WAC/BMS addressing)
+		PF_POS_X,      // Godot-space position (mission (x,y,z) 16.16 -> (x, z, -y) units)
+		PF_POS_Y,
+		PF_POS_Z,
+		PF_PITCH_DEG,  // mission-space rotation, degrees (0 today; reserved)
+		PF_YAW_DEG,
+		PF_ROLL_DEG,   // (0 today; reserved)
+		PF_PHASE1,     // PANM channel 1 phase 0..65535
+		PF_ACTIVE1,    // 1 when channel 1 has a live part-anim to render, else 0
+		PF_PHASE2,     // PANM channel 2 phase
+		PF_ACTIVE2,
+		PF_ANIM_SLOT,  // Entity.anim_slot (main-body .bad/.adm clip; consumed only by the deferred seam)
+		PF_HIDDEN,     // 1 when the entity is hidden
+		PF_ALIVE,      // 1 when alive
+		PF_STRIDE      // record length; also the count of fields above
 	};
 
 private:
@@ -110,6 +139,19 @@ public:
 	// True when channel has a live part-anim to render (rate set or phase moved off rest), so the
 	// host only poses commanded channels and leaves untouched parts at their default.
 	bool get_entity_part_anim_active(int p_index, int channel) const;
+	// Entity.anim_slot: the main-body skeletal clip (.bad via .adm) the AI requested. Written by
+	// EntityCommands::set_ssn_anim; consumed only by the host's deferred apply_body_anim seam today
+	// (skeletal runtime not yet built — AnimMap_PlayAnimBySlot @0x40bda0 / off_8135F0). -1 = none.
+	int get_entity_anim_slot(int p_index) const;
+	// True when the entity is flagged hidden (HideSingle / held). The present pass maps
+	// (not hidden and alive) -> Node3D.visible.
+	bool get_entity_hidden(int p_index) const;
+
+	// ONE batched present snapshot for the per-tick render pass: a flat PackedFloat32Array of
+	// get_entity_count() records, PF_STRIDE floats each, fields per the PresentField enum. Avoids the
+	// ~10 Variant-boxed scalar getter calls per entity the present loop would otherwise make.
+	PackedFloat32Array get_present_snapshot() const;
+	int get_present_stride() const { return PF_STRIDE; }
 
 	// The AI-speed -> world-units locomotion factor (see AiSystem::loco_scale).
 	void set_loco_scale(int p_scale);
@@ -122,3 +164,4 @@ public:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::NovaSimulation::TickMode);
+VARIANT_ENUM_CAST(godot::NovaSimulation::PresentField);

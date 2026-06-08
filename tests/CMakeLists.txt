@@ -105,6 +105,14 @@ target_link_libraries(dbf_roundtrip_test PRIVATE opennova_dbf)
 target_include_directories(dbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME dbf_roundtrip COMMAND dbf_roundtrip_test)
 
+# Audio sound-set member selection state machine (FIRST/RANDOM/SEQUENTIAL/RANDOM_SEQ),
+# pushed down from nova_sound_bank.gd into libs/audio.
+add_executable(sound_selector_test audio/sound_selector_test.cpp)
+target_link_libraries(sound_selector_test PRIVATE opennova_audio)
+target_include_directories(sound_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(sound_selector_test PRIVATE cxx_std_17)
+add_test(NAME sound_selector COMMAND sound_selector_test)
+
 # PFF tests
 add_executable(pff_unit_test pff/pff_unit_test.cpp)
 target_link_libraries(pff_unit_test PRIVATE opennova_pff)

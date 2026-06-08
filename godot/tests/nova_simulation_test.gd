@@ -40,6 +40,38 @@ func test_load_from_editor_mission_data() -> void:
 	assert_eq(sim.get_entity_kind(0), 3, "entity 0 maps back to KIND_ORGANIC")
 	sim.free()
 
+func test_present_snapshot_shape_and_stride() -> void:
+	# ONE batched present snapshot replaces ~10 Variant-boxed scalar getter calls per entity in the
+	# per-tick present loop. Its length must be count * stride, and the bound stride must match the
+	# PF_STRIDE layout constant the GDScript present pass mirrors.
+	var sim := NovaSimulation.new()
+	sim.build_demo_mission()
+	var stride: int = sim.get_present_stride()
+	assert_eq(stride, NovaSimulation.PF_STRIDE, "bound stride == PF_STRIDE layout constant")
+	var snap: PackedFloat32Array = sim.get_present_snapshot()
+	assert_eq(snap.size(), sim.get_entity_count() * stride, "snapshot is count * stride floats")
+	sim.free()
+
+func test_present_snapshot_matches_scalar_getters() -> void:
+	# The batched snapshot must carry exactly what the scalar getters report (it's the same source),
+	# so the present pass and any scalar consumer agree. Checked at spawn (pre-tick).
+	var sim := NovaSimulation.new()
+	sim.build_demo_mission()
+	var snap: PackedFloat32Array = sim.get_present_snapshot()
+	var stride: int = sim.get_present_stride()
+	for i in range(sim.get_entity_count()):
+		var base := i * stride
+		var pos: Vector3 = sim.get_entity_position(i)
+		assert_almost_eq(snap[base + NovaSimulation.PF_POS_X], pos.x, 0.001, "pos.x matches")
+		assert_almost_eq(snap[base + NovaSimulation.PF_POS_Y], pos.y, 0.001, "pos.y matches")
+		assert_almost_eq(snap[base + NovaSimulation.PF_POS_Z], pos.z, 0.001, "pos.z matches")
+		assert_almost_eq(snap[base + NovaSimulation.PF_YAW_DEG], sim.get_entity_yaw_deg(i), 0.01, "yaw_deg matches")
+		assert_eq(int(snap[base + NovaSimulation.PF_BMS_ID]), sim.get_entity_bms_id(i), "bms_id matches")
+		assert_eq(int(snap[base + NovaSimulation.PF_KIND]), sim.get_entity_kind(i), "kind matches")
+		assert_eq(int(snap[base + NovaSimulation.PF_NET_ID]), sim.get_entity_net_id(i), "net_id matches")
+		assert_eq(int(snap[base + NovaSimulation.PF_ALIVE]), 1, "spawned entity is alive")
+	sim.free()
+
 func test_transport_play_flag() -> void:
 	var sim := NovaSimulation.new()
 	sim.build_demo_mission()

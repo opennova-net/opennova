@@ -28,12 +28,12 @@ const MissionAreaTriggerOverlay := preload("res://engine/mission/mission_area_tr
 const MissionMarkerOverlay := preload("res://engine/mission/mission_marker_overlay.gd")
 const MissionGizmo := preload("res://engine/mission/mission_gizmo.gd")
 const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
-const MissionSimDriver := preload("res://modtools/mission/mission_sim_driver.gd")
+const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
 const OBJECTS_CONTAINER := "MissionObjects"
 
 # AI-change action family + the PLAYPARTANIM sub-type, for resolving a scripting action's target to a
-# live model for in-editor preview. Mirrors MissionCommandHost. [orig: Entity_ApplyCommand case 0x22]
+# live model for in-editor preview. Mirrors the runtime present pass. [orig: Entity_ApplyCommand case 0x22]
 const _ACT_CHANGE_GROUP_AI := 3
 const _ACT_AREA_AI_RED := 12
 const _ACT_AREA_AI_BLUE := 13
@@ -70,9 +70,10 @@ var _placer  # MissionObjectPlacer (preloaded, no class_name)
 var _pickable: Array = []
 
 # --- Live simulation ("Play the mission") -------------------------------------
-# A MissionSimDriver node (parented under the objects container so it gets _process) that promotes
-# the loaded mission into a libs/world World + AI and walks the placed entity nodes. Null when not
-# simulating. Mutually exclusive with editing: starting it disarms the active tool.
+# The shared MissionRuntime node (parented under the objects container so it self-ticks via _process)
+# that promotes the loaded mission into a libs/world World + AI and presents entity state (transform +
+# part anims + visibility) onto the placed nodes -- the SAME runtime + present pass the game runs. Null
+# when not simulating. Mutually exclusive with editing: starting it disarms the active tool.
 var _sim_driver: Node = null
 
 # --- Exact picking via per-entity collision bodies ----------------------------
@@ -3308,8 +3309,9 @@ func _objects_container() -> Node3D:
 
 
 # --- Live simulation ("Play the mission") -------------------------------------
-# Promote the loaded mission into a libs/world World + AI (NovaSimulation) and walk the placed
-# entity nodes. Read-only over the mission data: Stop restores the authored transforms.
+# Promote the loaded mission into a libs/world World + AI through the shared MissionRuntime (the same
+# driver + present pass the game runs), in EVERY_PROCESS mode so the preview is snappy. Read-only over
+# the mission data: Stop rewinds the world and restores the authored node transforms.
 
 func can_simulate() -> bool:
 	return is_loaded() and _objects_container() != null
@@ -3332,10 +3334,16 @@ func _ensure_sim_driver() -> bool:
 	# Entering sim mode ends any half-finished edit gesture / armed tool.
 	cancel_drag()
 	disarm_placement()
-	_sim_driver = MissionSimDriver.new()
-	_sim_driver.name = "MissionSimDriver"
+	_sim_driver = MissionRuntime.new()
+	_sim_driver.name = "MissionRuntime"
 	container.add_child(_sim_driver)
-	if int(_sim_driver.setup(_mission, _pickable)) <= 0:
+	# EVERY_PROCESS (one tick per frame) + self_tick so the driver runs itself while playing; loco_scale
+	# 4096 paces AI movement for the snappy preview. The driver builds its present index over `container`.
+	if int(_sim_driver.setup(_mission, container, {
+			"tick_mode": NovaSimulation.TICK_EVERY_PROCESS,
+			"loco_scale": 4096,
+			"self_tick": true,
+		})) <= 0:
 		sim_stop()
 		_report("No AI entities to simulate in this mission.", false)
 		return false
@@ -3344,26 +3352,25 @@ func _ensure_sim_driver() -> bool:
 func sim_play() -> void:
 	if not _ensure_sim_driver():
 		return
-	_sim_driver.set_playing(true)
+	_sim_driver.play()
 	_report("Simulating mission (%d AI)." % int(_sim_driver.entity_count()), false)
 	changed.emit()
 
 func sim_pause() -> void:
 	if is_simulating():
-		_sim_driver.set_playing(false)
+		_sim_driver.pause()
 		changed.emit()
 
 func sim_step() -> void:
 	if not _ensure_sim_driver():
 		return
-	_sim_driver.set_playing(false)
-	_sim_driver.step()
+	_sim_driver.step_once()
 	changed.emit()
 
 func sim_stop() -> void:
 	if not is_simulating():
 		return
-	_sim_driver.restore()
+	_sim_driver.stop()
 	_sim_driver.queue_free()
 	_sim_driver = null
 	changed.emit()
