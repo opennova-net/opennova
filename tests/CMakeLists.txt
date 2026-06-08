@@ -419,3 +419,12 @@ target_link_libraries(event_runtime_test PRIVATE opennova_mission opennova_wac o
 target_include_directories(event_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(event_runtime_test PRIVATE cxx_std_17)
 add_test(NAME event_runtime_bms COMMAND event_runtime_test)
+
+# Mission -> world promotion: spawn a parsed mission's entities into the world pools,
+# allocate AI brains per organic, build the waypoint nav table, then tick the AI to prove
+# entities patrol their authored routes (the connective tissue for the live sim).
+add_executable(promote_test mission/promote_test.cpp)
+target_link_libraries(promote_test PRIVATE opennova_mission opennova_world)
+target_include_directories(promote_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(promote_test PRIVATE cxx_std_17)
+add_test(NAME mission_promote COMMAND promote_test)

@@ -3,6 +3,7 @@ add_library(opennova_mission STATIC
     src/mission.cpp
     src/mission_runtime.cpp
     src/event_runtime.cpp
+    src/promote.cpp
 )
 
 target_include_directories(opennova_mission
