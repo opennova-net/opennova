@@ -137,29 +137,110 @@ func _build_animation_controls(box: VBoxContainer) -> void:
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(status)
 
+	# Load opens the in-app resource picker filtered to .adm (the chosen name fills the field and
+	# loads); typing a name + Enter still works as a fallback.
 	load_button.pressed.connect(func() -> void:
-		if _preview == null:
-			return
-		var root: Variant = _ws.get_resource_root() if _ws != null and _ws.has_method("get_resource_root") else null
-		var keys: PackedStringArray = _preview.load_animation_set(name_edit.text.strip_edges(), root)
-		clip_picker.clear()
-		if keys.is_empty():
-			clip_picker.disabled = true
-			status.text = "No animations loaded: %s" % _preview.get_animation_error()
-			return
-		for k in keys:
-			clip_picker.add_item(k)
-		clip_picker.disabled = false
-		var skinned: bool = _preview.has_skeleton()
-		status.text = "%d clip(s) loaded%s" % [keys.size(), "" if skinned else "  (model has no skin to pose)"]
-		clip_picker.select(0)
-		_preview.play_animation(clip_picker.get_item_text(0))
+		_open_picker("Open .adm animation", _scan_resource_files(".adm"), func(picked: String) -> void:
+			name_edit.text = picked.get_file()
+			_do_load_adm(name_edit.text.strip_edges(), clip_picker, status)
+		)
+	)
+	name_edit.text_submitted.connect(func(_text: String) -> void:
+		_do_load_adm(name_edit.text.strip_edges(), clip_picker, status)
 	)
 
 	clip_picker.item_selected.connect(func(index: int) -> void:
 		if _preview != null:
 			_preview.play_animation(clip_picker.get_item_text(index))
 	)
+
+	# Arms overlay: load a second .3di (e.g. ArmsG.3di) that rides the same .adm skeleton, so the
+	# first-person arms animate together with the model. Picks a .3di only; the .adm is shared.
+	var arms_row := HBoxContainer.new()
+	arms_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(arms_row)
+
+	var arms_load := Button.new()
+	arms_load.name = "ArmsLoadButton"
+	arms_load.text = "Load Arms"
+	arms_row.add_child(arms_load)
+
+	var arms_clear := Button.new()
+	arms_clear.name = "ArmsClearButton"
+	arms_clear.text = "Clear"
+	arms_row.add_child(arms_clear)
+
+	var arms_status := Label.new()
+	arms_status.name = "ArmsStatusLabel"
+	arms_status.theme_type_variation = &"Muted"
+	arms_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	arms_status.clip_text = true
+	arms_row.add_child(arms_status)
+
+	arms_load.pressed.connect(func() -> void:
+		_open_picker("Open arms .3di", _scan_resource_files(".3di"), func(picked: String) -> void:
+			if _preview == null:
+				return
+			var root: Variant = _ws.get_resource_root() if _ws != null and _ws.has_method("get_resource_root") else null
+			if _preview.load_arms(picked.get_file(), root):
+				arms_status.text = "Arms: %s" % picked.get_file()
+			else:
+				arms_status.text = "Arms failed: %s" % _preview.get_arms_error()
+		)
+	)
+	arms_clear.pressed.connect(func() -> void:
+		if _preview != null:
+			_preview.clear_arms()
+		arms_status.text = ""
+	)
+
+
+# Bind a .adm to the previewed model (builds the Skeleton3D + Skin), populate the clip picker, and
+# play the first clip. Shared by the resource picker and the typed-name (Enter) fallback.
+func _do_load_adm(adm_name: String, clip_picker: OptionButton, status: Label) -> void:
+	if _preview == null:
+		return
+	var root: Variant = _ws.get_resource_root() if _ws != null and _ws.has_method("get_resource_root") else null
+	var keys: PackedStringArray = _preview.load_animation_set(adm_name, root)
+	clip_picker.clear()
+	if keys.is_empty():
+		clip_picker.disabled = true
+		status.text = "No animations loaded: %s" % _preview.get_animation_error()
+		return
+	for k in keys:
+		clip_picker.add_item(k)
+	clip_picker.disabled = false
+	var skinned: bool = _preview.has_skeleton()
+	status.text = "%d clip(s) loaded%s" % [keys.size(), "" if skinned else "  (model has no skin to pose)"]
+	clip_picker.select(0)
+	_preview.play_animation(clip_picker.get_item_text(0))
+
+
+# Open the in-app resource picker (via the editor shell) over an explicit, scoped file list -- used
+# for .adm (which the resource index does not register) and the arms .3di. No-op if the shell lacks
+# the picker (keeps headless / tests safe).
+func _open_picker(title: String, files: PackedStringArray, on_pick: Callable) -> void:
+	var shell: Variant = _ws.editor_shell if _ws != null else null
+	if shell != null and shell.has_method("open_file_picker"):
+		shell.open_file_picker(title, files, on_pick)
+
+
+# Flat (top-level) basenames under the mounted resource root with the given suffix, for the scoped
+# picker. .adm is not indexed, so we scan the directory directly; the loaders read by basename.
+func _scan_resource_files(suffix: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	var root: Variant = _ws.get_resource_root() if _ws != null and _ws.has_method("get_resource_root") else null
+	if root == null:
+		return out
+	var dir := String(root.get_root_dir())
+	if dir.is_empty():
+		return out
+	var lower := suffix.to_lower()
+	for f in DirAccess.get_files_at(dir):
+		if String(f).to_lower().ends_with(lower):
+			out.push_back(f)
+	out.sort()
+	return out
 
 
 # Best-guess .adm name for the loaded model: its basename + ".adm" (the convention an

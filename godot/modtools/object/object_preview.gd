@@ -34,6 +34,11 @@ var _surface_materials: Array = []
 var _skeletal                   # NovaSkeletalAnim, or null
 var _last_anim_error := ""
 
+var _arms_model                 # NovaObjectModel arms overlay, or null
+var _arms_data: NovaObjectData
+var _current_clip := ""         # active clip key, mirrored onto the arms overlay
+var _last_arms_error := ""
+
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -126,11 +131,15 @@ func is_playing() -> bool:
 func set_playing(value: bool) -> void:
 	if _model != null:
 		_model.set_playing(value)
+	if _arms_model != null:
+		_arms_model.set_playing(value)
 
 
 func reset_animation_time() -> void:
 	if _model != null:
 		_model.reset_animation_time()
+	if _arms_model != null:
+		_arms_model.reset_animation_time()
 
 
 # --- Skeletal animation preview (.bad/.adm smoke test) --------------------------
@@ -158,18 +167,26 @@ func load_animation_set(adm_name: String, resource_root) -> PackedStringArray:
 		return PackedStringArray()
 	_skeletal = sk
 	_model.set_skeletal_anim(sk)
+	if _arms_model != null:
+		_arms_model.set_skeletal_anim(sk)  # the arms overlay rides the same .adm skeleton
 	return sk.get_clip_keys()
 
 
 func play_animation(clip_key: String) -> void:
+	_current_clip = clip_key
 	if _model != null:
 		_model.play_body_clip(clip_key)
+	if _arms_model != null:
+		_arms_model.play_body_clip(clip_key)
 
 
 func clear_animation_set() -> void:
 	_skeletal = null
+	_current_clip = ""
 	if _model != null:
 		_model.set_skeletal_anim(null)
+	if _arms_model != null:
+		_arms_model.set_skeletal_anim(null)
 
 
 func get_animation_error() -> String:
@@ -178,6 +195,54 @@ func get_animation_error() -> String:
 
 func has_skeleton() -> bool:
 	return _model != null and _model.has_skeleton()
+
+
+# --- Arms overlay (first-person view model: skinned arms riding the same .adm skeleton) ---------
+# Load a SECOND .3di (e.g. ArmsG.3di) into a sibling model that shares the main model's
+# NovaSkeletalAnim, so the arms animate together with the weapon/body. Returns false on failure
+# (see get_arms_error()). With no .adm loaded yet the arms render static at rest; load_animation_set()
+# rebinds them when an .adm is loaded.
+func load_arms(arms_name: String, resource_root) -> bool:
+	_last_arms_error = ""
+	if resource_root == null:
+		_last_arms_error = "No resource directory mounted"
+		return false
+	if arms_name.strip_edges().is_empty():
+		_last_arms_error = "Pick a .3di"
+		return false
+	var data := NovaObjectData.new()
+	var err := data.open_from_resource_root(resource_root, arms_name)
+	if err != OK:
+		_last_arms_error = "Could not load %s (error %d)" % [arms_name, err]
+		return false
+	_arms_data = data
+	if _arms_model == null:
+		_arms_model = NovaObjectModelScript.new()
+		_arms_model.name = "NovaArmsModel"
+		_root.add_child(_arms_model)
+		_arms_model.set_environment_node(_environment)
+	_arms_model.set_object_data(data)
+	_arms_model.set_skeletal_anim(_skeletal)  # share the main model's .adm skeleton (may be null)
+	_arms_model.set_playing(_model.is_playing() if _model != null else true)
+	if not _current_clip.is_empty():
+		_arms_model.play_body_clip(_current_clip)
+	return true
+
+
+func clear_arms() -> void:
+	_arms_data = null
+	if _arms_model != null:
+		_root.remove_child(_arms_model)
+		_arms_model.queue_free()
+		_arms_model = null
+
+
+func has_arms() -> bool:
+	return _arms_model != null
+
+
+func get_arms_error() -> String:
+	return _last_arms_error
 
 
 func get_animation_time_ms() -> int:

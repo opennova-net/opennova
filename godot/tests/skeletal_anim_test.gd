@@ -111,3 +111,23 @@ func test_model_skeletal_methods_no_op_without_set() -> void:
 	model.play_body_anim(-1)  # no-op on "no clip" slot
 	model.stop_body_clip()
 	assert_eq(model.get_active_body_clip(), "", "No active clip without a skeletal set.")
+
+
+func test_object_preview_arms_overlay() -> void:
+	# Public-API check for the arms overlay (object_preview.load_arms/clear_arms). No .adm is needed
+	# -- with none loaded the arms render static at rest, a valid loaded state. Uses the committed
+	# CharModel fixture mounted as a resource root.
+	var preview := ObjectPreview.new()
+	add_child_autofree(preview)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/threedi/3di3"))
+	# Failure path: no resource root -> false + error, no arms model.
+	assert_false(preview.load_arms("CharModel.3di", null), "load_arms with null root fails")
+	assert_ne(preview.get_arms_error(), "", "arms error reported on failure")
+	assert_false(preview.has_arms(), "no arms model after a failed load")
+	# Success path: a second model node is created.
+	assert_true(preview.load_arms("CharModel.3di", root), "load_arms: %s" % preview.get_arms_error())
+	assert_true(preview.has_arms(), "arms model exists after load")
+	# Clear removes it.
+	preview.clear_arms()
+	assert_false(preview.has_arms(), "arms model removed after clear")

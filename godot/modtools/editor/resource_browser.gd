@@ -72,6 +72,32 @@ func open(workspace: EditorWorkspace, on_pick: Callable) -> void:
 	_dialog.popup_centered(Vector2i(760, 520))
 
 
+## Open the picker over an explicit, caller-supplied file list (kind-independent). Unlike open(),
+## this does not consult the C++ resource index, so it serves resource types the index does not
+## register (e.g. .adm) -- scoped to a single call site rather than registered globally. `files`
+## are flat names/paths (display shows the basename); `on_pick` receives the chosen entry's name.
+func open_files(title: String, files: PackedStringArray, on_pick: Callable) -> void:
+	_ensure_dialog()
+	_kind = ""
+	_title = title
+	_filters = PackedStringArray()
+	_current_dir = ""
+	_open_action = on_pick
+	_entries = []
+	for f in files:
+		var name := String(f)
+		_entries.append({
+			"display_name": name.get_file(),
+			"relative_path": name,
+			"path": name,
+			"logical_name": name,
+		})
+	_search.text = ""
+	_dialog.title = title
+	_refresh()
+	_dialog.popup_centered(Vector2i(760, 520))
+
+
 func _ensure_dialog() -> void:
 	if _dialog != null and is_instance_valid(_dialog):
 		return
