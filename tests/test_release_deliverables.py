@@ -278,6 +278,11 @@ def test_ci_builds_gdextension_once_per_os_and_caches_with_sccache() -> None:
         # No consumer recompiles the GDExtension inline.
         assert "cmake -S godot/engine" not in body
 
+    # validate-deliverables downloads every artifact into dist/, so it must scope
+    # the download to the deliverables (opennova_*) and skip the gdext_* build
+    # artifacts, which the validator rejects as unexpected files in dist/.
+    assert "pattern: opennova_*" in _workflow_job(workflow, "validate-deliverables")
+
 
 def test_release_splits_godot_editor_and_runtime_package_jobs() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")

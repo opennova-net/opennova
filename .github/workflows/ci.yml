@@ -632,6 +632,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
+          # Only the deliverable artifacts (all named opennova_*); excludes the
+          # gdext_* GDExtension build artifacts, which the validator would reject
+          # as unexpected files in dist/.
+          pattern: opennova_*
           merge-multiple: true
 
       - name: Validate release deliverables
