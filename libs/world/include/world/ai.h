@@ -372,6 +372,15 @@ public:
     NavNodeTable nav;         // channel/node table the waypoint mover walks
     bool is_authority = true; // [orig: g_napi_np_ctx.is_authority]
     bool is_in_session = false;
+
+    // Locomotion: apply the mover output (kOutSpeed/kWorkPos*/kWorkHeading) to the entity
+    // transform each tick. The AI brain is byte-exact (P1/P2); the entity-movement physics
+    // (the unanalyzed driver near 0x462120 + collision/terrain) is NOT reversed, so this is a
+    // clean kinematic integrator: turn to the mover heading + advance toward the target. The
+    // AI-speed -> world-units factor lives in that physics; loco_scale models it (a visual
+    // default until the driver is RE'd). Disable to tick AI decisions without moving entities.
+    bool locomotion_enabled = true;
+    int32_t loco_scale = 32768; // out_speed (AI units) * loco_scale = 16.16 world-units / tick
     int unported_calls = 0;   // coverage counter for not_yet_ported handlers
     int find_target_calls = 0;// coverage: target-acquisition invocations
     std::vector<RelMatCall> relmat_calls; // recorded mover side effects (net layer = P2+)
@@ -422,6 +431,10 @@ public:
     // the nav table; writes the working target transform (kWorkPos*/kWorkHeading) and
     // out-speed (kOutSpeed). Records the per-advance relation-matrix side effects.
     int update_waypoint_movement(AiEntity &e);
+
+    // Apply the mover output to the entity transform (turn to kWorkHeading, advance pos toward
+    // the kWorkPos* target by kOutSpeed * loco_scale, clamped to not overshoot). See loco_scale.
+    void apply_locomotion(AiEntity &e);
 
     const StateRow &row(int32_t state) const;
 

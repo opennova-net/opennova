@@ -770,6 +770,34 @@ int main() {
         CHECK(e.brain.f[AiBrain::kPendState] == 23);
     }
 
+    // ---- locomotion: apply the mover output (advance toward target, clamp, face heading) ----
+    {
+        AiSystem sys;
+        sys.loco_scale = 65536; // 1.0 in 16.16: out_speed N -> N world-units / tick
+        int idx = sys.attach(EntityHandle::make(0, 0));
+        AiEntity &e = *sys.at(idx);
+        e.pos[0] = 0; e.pos[1] = 0;
+        e.brain.f[AiBrain::kOutSpeed] = 3;          // 3 units this tick
+        e.brain.f[AiBrain::kWorkPosX] = 100 << 16;  // target X
+        e.brain.f[AiBrain::kWorkPosY] = 0;
+        e.brain.f[AiBrain::kWorkHeading] = 12345;   // BAM heading from the mover
+        sys.apply_locomotion(e);
+        CHECK(e.pos[0] == (3 << 16));   // advanced 3 units toward the target
+        CHECK(e.pos[1] == 0);
+        CHECK(e.heading == 12345);      // entity now faces the mover heading
+
+        // A large speed arrives exactly at the target (clamp, no overshoot).
+        e.brain.f[AiBrain::kOutSpeed] = 100000;
+        sys.apply_locomotion(e);
+        CHECK(e.pos[0] == (100 << 16));
+
+        // Out-speed 0 (frozen / engaging) leaves the entity put.
+        e.brain.f[AiBrain::kOutSpeed] = 0;
+        e.pos[0] = 42;
+        sys.apply_locomotion(e);
+        CHECK(e.pos[0] == 42);
+    }
+
     if (failures == 0) std::printf("ai: all tests passed\n");
     return failures ? 1 : 0;
 }

@@ -129,6 +129,28 @@ int main() {
     CHECK(e0->brain.f[AiBrain::kOutSpeed] > 0);          // the mover produced a movement command
     CHECK(e0->brain.f[AiBrain::kWorkPosX] == (100 << 16)); // heading toward route marker 0
 
+    // ---- end-to-end: the entity WALKS its route (locomotion + arrival + node advance) ----
+    {
+        ai.loco_scale = 32768;          // ~12.5 world-units/tick at speed 25
+        e0->pos[0] = 0; e0->pos[1] = 0; e0->pos[2] = 0; // back to spawn
+        e0->brain.f[AiBrain::kWpType] = 1;
+        e0->brain.f[AiBrain::kWpChannel] = 1;
+        e0->brain.f[AiBrain::kWpNode] = 0;
+        e0->brain.f[AiBrain::kCurState] = 16;
+        e0->brain.f[AiBrain::kPendState] = 16;
+        e0->brain.f[AiBrain::kSpeedB] = 25; // small raw AI speed (mover-faithful)
+
+        int max_node = 0;
+        for (int t = 0; t < 12; ++t) {
+            ai.tick(world, ctx);
+            if (e0->brain.f[AiBrain::kWpNode] > max_node) max_node = e0->brain.f[AiBrain::kWpNode];
+        }
+        // It reached marker 0 (100<<16), advanced to node 1, and is now en route to marker 1.
+        CHECK(max_node >= 1);                                // arrived at a marker + advanced the node
+        CHECK(e0->pos[0] > (100 << 16));                     // walked past the first route marker
+        CHECK(e0->pos[0] < (300 << 16));                     // still on the route, not teleported
+    }
+
     if (failures == 0) std::printf("promote: all tests passed\n");
     return failures ? 1 : 0;
 }

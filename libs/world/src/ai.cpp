@@ -512,10 +512,37 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     scheduler.budget = 0; // per-frame budget reset (the staggering accumulator)
     for (int i = 0; i < count(); ++i) {
         AiEntity &e = *at(i);
-        if (begin_update(e))
+        if (begin_update(e)) {
             process_infantry_state_machine(e, world, 0);
+            if (locomotion_enabled) apply_locomotion(e);
+        }
     }
     events.process_timed(*this, world);
+}
+
+// Kinematic locomotion over the mover output. The brain decides a target (kWorkPos*), a heading
+// (kWorkHeading, BAM) and a speed (kOutSpeed); here we turn to that heading and advance the entity
+// toward the target by kOutSpeed * loco_scale, clamped so we never overshoot. The original's full
+// movement physics (collision/terrain/turn-rate, the unanalyzed driver near 0x462120) is deferred;
+// see loco_scale. Out-speed 0 (frozen / engaging) leaves the entity put.
+void AiSystem::apply_locomotion(AiEntity &e) {
+    AiBrain &b = e.brain;
+    int32_t speed = b.f[AiBrain::kOutSpeed]; // brain[128]
+    if (speed <= 0) return;
+    e.heading = b.f[AiBrain::kWorkHeading];  // brain[132] (snap; turn-rate physics deferred)
+    int64_t stepd = static_cast<int64_t>(speed) * loco_scale; // AI units -> 16.16 world delta
+    int64_t dx = static_cast<int64_t>(b.f[AiBrain::kWorkPosX]) - e.pos[0]; // brain[129]
+    int64_t dy = static_cast<int64_t>(b.f[AiBrain::kWorkPosY]) - e.pos[1]; // brain[130]
+    double dist = std::sqrt(static_cast<double>(dx) * static_cast<double>(dx) +
+                            static_cast<double>(dy) * static_cast<double>(dy));
+    if (dist == 0.0 || dist <= static_cast<double>(stepd)) {
+        e.pos[0] = b.f[AiBrain::kWorkPosX]; // arrive (clamp, no overshoot)
+        e.pos[1] = b.f[AiBrain::kWorkPosY];
+    } else {
+        double f = static_cast<double>(stepd) / dist;
+        e.pos[0] += static_cast<int32_t>(static_cast<double>(dx) * f);
+        e.pos[1] += static_cast<int32_t>(static_cast<double>(dy) * f);
+    }
 }
 
 // ----------------------------------------------------------------------------
