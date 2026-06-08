@@ -12,6 +12,9 @@ add_subdirectory(../../libs/trn opennova_trn)
 add_subdirectory(../../libs/cpt opennova_cpt)
 add_subdirectory(../../libs/env opennova_env)
 add_subdirectory(../../libs/threedi opennova_threedi)
+add_subdirectory(../../libs/bad opennova_bad)
+add_subdirectory(../../libs/adm opennova_adm)
+add_subdirectory(../../libs/anim opennova_anim)
 add_subdirectory(../../libs/pff opennova_pff)
 add_subdirectory(../../libs/gameprofile opennova_gameprofile)
 add_subdirectory(../../libs/scr opennova_scr)
@@ -60,6 +63,7 @@ add_library(${TARGET_NAME} SHARED
     object/nova_object_data.cpp
     object/nova_object_shader_cache.cpp
     object/nova_item_database.cpp
+    object/nova_skeletal_anim.cpp
     mission/nova_mission_data.cpp
     simulation/nova_simulation.cpp
     lwf/nova_lwf_data.cpp
@@ -98,6 +102,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_cbin
     opennova_env
     opennova_threedi
+    opennova_bad
+    opennova_adm
+    opennova_anim
     opennova_pff
     opennova_gameprofile
     opennova_rtxt

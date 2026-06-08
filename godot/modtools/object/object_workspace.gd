@@ -267,6 +267,12 @@ func _resource_root() -> NovaResourceRoot:
 	return null
 
 
+## The mounted game resource root (VFS), if the shell provides one. Used by the preview
+## to resolve a model's .adm/.bad animation files for the skeletal-animation smoke test.
+func get_resource_root() -> NovaResourceRoot:
+	return _resource_root()
+
+
 func add_lod_scene(path: String, lod_index: int = -1) -> Error:
 	_ensure_object_editor()
 	var err := object_editor.add_lod_scene(path, lod_index)

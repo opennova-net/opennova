@@ -52,6 +52,9 @@ var pickable_records: Array = []
 
 # graphic -> NovaObjectData (or null when unresolvable).
 var _object_data_cache: Dictionary = {}
+# adm name -> NovaSkeletalAnim (or null when it failed to load). Shared read-only across
+# every entity using the same anim_def (eval_pose is const, so sharing one instance is safe).
+var _skeletal_cache: Dictionary = {}
 # graphic -> Array[{ mesh, material, offset, submesh }] harvested from a template.
 var _static_batch_cache: Dictionary = {}
 # graphic -> Vector3 ground anchor (model-space point that sits at the entity
@@ -160,6 +163,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			# MissionEntityRegistry can resolve SSN/group/zone host-action targets to this live model.
 			animated.append({
 				"graphic": graphic,
+				"item_id": item_id,
 				"xform": xform,
 				"kind": int(entity.get("kind", -1)),
 				"index": int(entity.get("index", -1)),
@@ -231,6 +235,9 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		# Drive the build explicitly (not via _ready) so it is independent of when
 		# place() runs relative to the main loop; matches the static template path.
 		model.set_object_data(data)
+		# Load the entity's body-animation set (.adm) so its Skeleton3D builds and the present
+		# pass can drive walk/idle; rigid weapon parts fake-skin. No anim_def -> stays static.
+		_apply_skeletal_anim(model, int(a.get("item_id", 0)))
 		# Tag identity on the node in BOTH runtime + editor so MissionEntityRegistry can resolve
 		# SSN/group/zone host-action targets (e.g. PLAYPARTANIM) back to this live model. Picking +
 		# colliders stay editor-only.
@@ -299,6 +306,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
 		model.set_object_data(data)
+		_apply_skeletal_anim(model, item_id)
 		var ref := {
 			"kind": kind,
 			"index": index,
@@ -404,6 +412,28 @@ func _is_animated(item_id: int) -> bool:
 func _model_name_for(graphic: String) -> String:
 	var basename := graphic.get_file().get_basename()
 	return "" if basename.is_empty() else basename + ".3di"
+
+
+# Resolve an animated entity's body-animation set from its item def's anim_def and attach it to
+# the model so its Skeleton3D builds. Cached per .adm (shared read-only across entities). A model
+# with an empty anim_def, or whose .adm fails to load, is left static (unchanged behaviour).
+func _apply_skeletal_anim(model: Node3D, item_id: int) -> void:
+	if model == null or resource_root == null or item_db == null:
+		return
+	var anim_def := item_db.get_anim_def(item_id)
+	if anim_def.is_empty():
+		return
+	var adm_name := anim_def if anim_def.to_lower().ends_with(".adm") else anim_def + ".adm"
+	var skeletal
+	if _skeletal_cache.has(adm_name):
+		skeletal = _skeletal_cache[adm_name]
+	else:
+		skeletal = NovaSkeletalAnim.new()
+		if not skeletal.load_from_resource_root(resource_root, adm_name):
+			skeletal = null
+		_skeletal_cache[adm_name] = skeletal
+	if skeletal != null and model.has_method("set_skeletal_anim"):
+		model.set_skeletal_anim(skeletal)
 
 
 func _load_object_data(graphic: String) -> NovaObjectData:

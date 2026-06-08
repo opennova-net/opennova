@@ -31,6 +31,9 @@ var _robj_nodes: Dictionary = {}
 var _surface_material_indices: PackedInt32Array = PackedInt32Array()
 var _surface_materials: Array = []
 
+var _skeletal                   # NovaSkeletalAnim, or null
+var _last_anim_error := ""
+
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -128,6 +131,53 @@ func set_playing(value: bool) -> void:
 func reset_animation_time() -> void:
 	if _model != null:
 		_model.reset_animation_time()
+
+
+# --- Skeletal animation preview (.bad/.adm smoke test) --------------------------
+# Load a model's animation set from the mounted resource root (its .adm names the .bad
+# clips), bind it to the model (builds the Skeleton3D + Skin when the model is skinned),
+# and return the available clip keys. Empty on failure (see get_animation_error()).
+func load_animation_set(adm_name: String, resource_root) -> PackedStringArray:
+	_skeletal = null
+	_last_anim_error = ""
+	if _model == null:
+		_last_anim_error = "No model"
+		return PackedStringArray()
+	if resource_root == null:
+		_last_anim_error = "No resource directory mounted"
+		_model.set_skeletal_anim(null)
+		return PackedStringArray()
+	if adm_name.strip_edges().is_empty():
+		_last_anim_error = "Enter a .adm name"
+		_model.set_skeletal_anim(null)
+		return PackedStringArray()
+	var sk := NovaSkeletalAnim.new()
+	if not sk.load_from_resource_root(resource_root, adm_name):
+		_last_anim_error = sk.get_last_error()
+		_model.set_skeletal_anim(null)
+		return PackedStringArray()
+	_skeletal = sk
+	_model.set_skeletal_anim(sk)
+	return sk.get_clip_keys()
+
+
+func play_animation(clip_key: String) -> void:
+	if _model != null:
+		_model.play_body_clip(clip_key)
+
+
+func clear_animation_set() -> void:
+	_skeletal = null
+	if _model != null:
+		_model.set_skeletal_anim(null)
+
+
+func get_animation_error() -> String:
+	return _last_anim_error
+
+
+func has_skeleton() -> bool:
+	return _model != null and _model.has_skeleton()
 
 
 func get_animation_time_ms() -> int:

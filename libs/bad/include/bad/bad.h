@@ -85,6 +85,11 @@ typedef struct BadFile {
 // On success, caller must eventually call bad_free().
 BAD_EXPORT int bad_parse(const char *path, BadFile *out);
 
+// Parse a BAD file from an in-memory buffer (does not take ownership of `data`).
+// Returns 0 on success, -1 on error. On success, caller must call bad_free().
+// Used by hosts that read assets from a VFS (PFF archive) rather than disk.
+BAD_EXPORT int bad_parse_buffer(const uint8_t *data, size_t data_size, BadFile *out);
+
 // Free all allocations inside a BadFile.
 BAD_EXPORT void bad_free(BadFile *bf);
 

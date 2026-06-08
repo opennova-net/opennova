@@ -54,6 +54,14 @@ target_link_libraries(bad_roundtrip_test PRIVATE opennova_bad)
 target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
 
+# ANIM skeletal sampler (libs/anim): coordinate conventions, quaternion helpers, and
+# world<->local self-consistency on the real BINOC.bad fixture.
+add_executable(anim_sample_test anim/anim_sample_test.cpp)
+target_link_libraries(anim_sample_test PRIVATE opennova_anim opennova_bad)
+target_include_directories(anim_sample_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_sample_test PRIVATE cxx_std_17)
+add_test(NAME anim_sample COMMAND anim_sample_test)
+
 # DEF tests
 add_executable(def_comment_strip_test def/def_comment_strip_test.cpp)
 target_link_libraries(def_comment_strip_test PRIVATE opennova_def)

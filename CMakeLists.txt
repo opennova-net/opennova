@@ -13,6 +13,7 @@ add_subdirectory(libs/env)
 add_subdirectory(libs/threedi)
 add_subdirectory(libs/bad)
 add_subdirectory(libs/adm)
+add_subdirectory(libs/anim)
 add_subdirectory(libs/pff)
 add_subdirectory(libs/gameprofile)
 add_subdirectory(libs/bfc1)
@@ -52,6 +53,7 @@ set(OPENNOVA_CORE_TARGETS
     opennova_cbin
     opennova_bad
     opennova_adm
+    opennova_anim
     opennova_def
     opennova_scr
     opennova_rtxt

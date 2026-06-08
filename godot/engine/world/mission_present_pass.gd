@@ -13,10 +13,16 @@ extends RefCounted
 # Two animation systems, distinct on purpose:
 #  - Procedural part-anim (PANM): the vehicle/emplacement part system (turret/dish), PLAYPARTANIM
 #    case 0x22, integrated in-engine; applied here via set_part_phase. IMPLEMENTED.
-#  - Main-body skeletal (.bad via .adm): the primary infantry/player/view-model animation, selected by
-#    AI state. The skeletal runtime is NOT built yet (libs/bad + libs/adm are parse-only; no
-#    Skeleton3D/AnimationPlayer; organics render frozen at rest pose). apply_body_anim is a DEFERRED
-#    SEAM. [orig: AnimMap_PlayAnimBySlot @0x40bda0, off_8135F0, Entity_UpdateInfantryAI @0x4b9910.]
+#  - Main-body skeletal (.bad via .adm): the primary infantry/view-model animation, selected by AI
+#    state. The AI writes a canonical body-anim slot into Entity.anim_slot (a minimal port of
+#    Entity_UpdateInfantryAI @0x4b9910); it arrives here as PF_ANIM_SLOT and is applied via
+#    play_body_anim, which the model resolves to a clip in its .adm. IMPLEMENTED (walk/idle; the
+#    player avatar's off_8135F0 slots + blend/transition fidelity are later grill follow-ups).
+#
+# Per-entity visual contract (NovaEntityVisual): the present pass is host-agnostic and drives each
+# resolved node through a small duck-typed surface (GDScript) that NovaObjectModel implements:
+#   transform (Node3D), set_part_phase(channel, phase), visible (Node3D), play_body_anim(slot).
+# has_method guards keep non-animated/static nodes untouched. See docs/adr/0003.
 #
 # Targets resolve through ONE shared index (MissionEntityRegistry.resolve: bms_id primary, (kind,index)
 # fallback). Host-agnostic, RefCounted, preload-referenced (same convention as MissionObjectPlacer).
@@ -104,11 +110,12 @@ func _apply_procedural_part(node, snap: PackedFloat32Array, base: int) -> void:
 		_stats.posed += 1
 
 
-# DEFERRED SEAM. The main-body skeletal clip (.bad via .adm) selected by AI state/anim_slot. The
-# skeletal runtime does not exist yet, so this only records the requested slot for inspection; when the
-# runtime is built it will drive AnimMap_PlayAnimBySlot. See the class header for the IDA anchors.
+# Main-body skeletal clip (.bad via .adm), selected by the AI's canonical body-anim slot. The model
+# (NovaObjectModel) resolves the slot to a clip in its .adm and poses its Skeleton3D; play_body_anim is
+# idempotent so calling it every tick keeps a loop running without restarting it. No-op on slot < 0
+# (no change / rest) and on nodes that aren't animated (static props, non-skeletal models).
 func _apply_body_anim(node, anim_slot: int) -> void:
 	if anim_slot < 0:
 		return
-	if node.has_method("set_meta"):
-		node.set_meta("requested_anim_slot", anim_slot)
+	if node.has_method("play_body_anim"):
+		node.play_body_anim(anim_slot)

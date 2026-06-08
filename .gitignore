@@ -1,6 +1,7 @@
 # Scratch/working files
 .scratch/
 .claude/
+notes/
 
 # Build artifacts
 build/

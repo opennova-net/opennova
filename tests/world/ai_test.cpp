@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "world/ai.h"
+#include "world/body_anim.h"
 #include "world/world.h"
 
 using namespace opennova::world;
@@ -142,6 +143,57 @@ int main() {
         ctx.is_authority = true;
         sys.tick(w, ctx);
         CHECK(sys.unported_calls >= 1); // state-17 tick routed through the stub
+    }
+
+    // ---- body-anim slot selection from movement (update_body_anim_slot) ----
+    {
+        // body_anim_adm_key maps slots to the AI .adm key namespace.
+        CHECK(streq(body_anim_adm_key(kBodyAnimIdle), "anim_idle"));
+        CHECK(streq(body_anim_adm_key(kBodyAnimWalkForward), "anim_walk_forward"));
+        CHECK(streq(body_anim_adm_key(kBodyAnimRunForward), "anim_run_forward"));
+        CHECK(streq(body_anim_adm_key(-1), ""));
+
+        World w;
+        w.registry.configure_pool(0, 8);
+        Entity seed;
+        seed.alive = true;
+        seed.health = 100;
+        EntityHandle h = w.registry.spawn(0, seed);
+        CHECK(h != EntityHandle{});
+
+        AiSystem sys;
+        sys.is_authority = true;
+        int idx = sys.attach(h);
+        AiEntity &e = *sys.at(idx);
+        e.has_physics = false;
+        // State 17's tick/enter are no-op stubs, so they don't clobber kOutSpeed -- isolating the
+        // movement->slot mapping (which keys off kOutSpeed + kAlert, not the state id).
+        e.brain.f[AiBrain::kCurState] = kAiGroundCombat;  // 17
+        e.brain.f[AiBrain::kPendState] = kAiGroundCombat;
+
+        // Moving, not alert -> walk_forward.
+        e.brain.f[AiBrain::kOutSpeed] = 10;
+        e.brain.f[AiBrain::kAlert] = 0;
+        sys.process_infantry_state_machine(e, w, 0);
+        CHECK(w.registry.get(h)->anim_slot == kBodyAnimWalkForward);
+
+        // Moving + alert -> run_forward.
+        e.brain.f[AiBrain::kOutSpeed] = 10;
+        e.brain.f[AiBrain::kAlert] = 2;
+        sys.process_infantry_state_machine(e, w, 0);
+        CHECK(w.registry.get(h)->anim_slot == kBodyAnimRunForward);
+
+        // Stopped -> idle.
+        e.brain.f[AiBrain::kOutSpeed] = 0;
+        sys.process_infantry_state_machine(e, w, 0);
+        CHECK(w.registry.get(h)->anim_slot == kBodyAnimIdle);
+
+        // Dead -> slot left as-is (present pass hides it); not overwritten to idle.
+        w.registry.get(h)->anim_slot = kBodyAnimWalkForward;
+        w.registry.get(h)->alive = false;
+        w.registry.get(h)->health = 0;
+        sys.process_infantry_state_machine(e, w, 0);
+        CHECK(w.registry.get(h)->anim_slot == kBodyAnimWalkForward);
     }
 
     // ======================= P1: GROUND_FOLLOWWP movement =======================

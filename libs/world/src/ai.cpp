@@ -3,11 +3,33 @@
 // per-state behaviors route to not_yet_ported until their phase lands.
 #include "world/ai.h"
 
+#include "world/body_anim.h"
+#include "world/world.h"
+
 #include <cmath>
 
 namespace opennova::world {
 
 namespace {
+
+// Minimal port of Entity_UpdateInfantryAI @0x4b9910's anim selection: pick a body-anim slot
+// from the brain state + movement so 3rd-person NPCs walk/idle instead of sliding at rest.
+// Writes the world Entity's anim_slot (what the present snapshot reads). Full fidelity
+// (randomized idle variants, jog/run thresholds, attack/death clips) is a grill follow-up.
+void update_body_anim_slot(AiEntity &e, World &world) {
+    Entity *ent = world.registry.get(e.handle);
+    if (ent == nullptr) return;
+    if (!ent->alive || ent->health <= 0) return; // dead: present pass hides it; leave the slot
+    const AiBrain &b = e.brain;
+    const bool moving = b.f[AiBrain::kOutSpeed] > 0;
+    int32_t slot;
+    if (moving) {
+        slot = (b.f[AiBrain::kAlert] >= 2) ? kBodyAnimRunForward : kBodyAnimWalkForward;
+    } else {
+        slot = kBodyAnimIdle;
+    }
+    ent->anim_slot = slot;
+}
 
 // radians -> 32-bit binary angle. [orig: dbl_7C19D8 = 0x41C45F306DC9C883.]
 constexpr double kBamPerRadian = 683565275.5764316; // 2^32 / (2*pi)
@@ -457,6 +479,7 @@ void AiSystem::process_infantry_state_machine(AiEntity &e, World &world, int eve
         if (is_authority || b.f[AiBrain::kCurState] == 13 || b.f[AiBrain::kCurState] == 15)
             row(b.f[AiBrain::kCurState]).tick(ctx);
         ++b.f[AiBrain::kTick];
+        update_body_anim_slot(e, world); // pick walk/idle from state+movement for the present pass
         finish();
         return;
     }

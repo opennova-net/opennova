@@ -64,6 +64,7 @@ func build_main(host: Control) -> void:
 			_preview.set_collision_visible(pressed)
 	)
 
+	_build_animation_controls(box)
 	_build_collision_legend(box)
 	_build_export_mask_controls(box)
 
@@ -94,6 +95,80 @@ func build_main(host: Control) -> void:
 				if _preview != null:
 					_preview.set_ctrl_value(name, int(value))
 			)
+
+
+# Skeletal animation (.bad/.adm) preview -- the smoke test for the runtime skeletal
+# system. Pick a .adm (defaults to the model's basename), Load to bind it to the model
+# (builds the Skeleton3D + Skin when the model is skinned), then choose a clip to play.
+# Reads the .adm + its .bad clips from the mounted resource root by name (the VFS path),
+# so it works whether assets are loose or in PFF archives.
+func _build_animation_controls(box: VBoxContainer) -> void:
+	if _preview == null:
+		return
+	var label := Label.new()
+	label.text = "Skeletal animation (.adm)"
+	box.add_child(label)
+
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(row)
+
+	var name_edit := LineEdit.new()
+	name_edit.name = "AdmNameEdit"
+	name_edit.placeholder_text = "model.adm"
+	name_edit.text = _default_adm_name()
+	name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(name_edit)
+
+	var load_button := Button.new()
+	load_button.name = "AdmLoadButton"
+	load_button.text = "Load"
+	row.add_child(load_button)
+
+	var clip_picker := OptionButton.new()
+	clip_picker.name = "AdmClipPicker"
+	clip_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	clip_picker.disabled = true
+	box.add_child(clip_picker)
+
+	var status := Label.new()
+	status.name = "AdmStatusLabel"
+	status.theme_type_variation = &"Muted"
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(status)
+
+	load_button.pressed.connect(func() -> void:
+		if _preview == null:
+			return
+		var root: Variant = _ws.get_resource_root() if _ws != null and _ws.has_method("get_resource_root") else null
+		var keys: PackedStringArray = _preview.load_animation_set(name_edit.text.strip_edges(), root)
+		clip_picker.clear()
+		if keys.is_empty():
+			clip_picker.disabled = true
+			status.text = "No animations loaded: %s" % _preview.get_animation_error()
+			return
+		for k in keys:
+			clip_picker.add_item(k)
+		clip_picker.disabled = false
+		var skinned: bool = _preview.has_skeleton()
+		status.text = "%d clip(s) loaded%s" % [keys.size(), "" if skinned else "  (model has no skin to pose)"]
+		clip_picker.select(0)
+		_preview.play_animation(clip_picker.get_item_text(0))
+	)
+
+	clip_picker.item_selected.connect(func(index: int) -> void:
+		if _preview != null:
+			_preview.play_animation(clip_picker.get_item_text(index))
+	)
+
+
+# Best-guess .adm name for the loaded model: its basename + ".adm" (the convention an
+# item .def follows -- graphic "US01" / anim_def "US01"). Blank for an unsaved model.
+func _default_adm_name() -> String:
+	if object_editor == null or object_editor.object_data == null:
+		return ""
+	var name := String(object_editor.object_data.get_object_name()).get_file().get_basename().strip_edges()
+	return "" if name.is_empty() or name == "untitled" else name + ".adm"
 
 
 # Color key for the collision overlay: one swatch + label per distinct collidable

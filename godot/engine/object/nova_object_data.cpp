@@ -1069,7 +1069,8 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_part_anim_field", "lod_index", "anim_index", "key", "value"), &NovaObjectData::set_part_anim_field);
 	ClassDB::bind_method(D_METHOD("set_part_anim_track_field", "lod_index", "anim_index", "track", "key", "value"), &NovaObjectData::set_part_anim_track_field);
 	ClassDB::bind_method(D_METHOD("get_render_lod_info", "lod_index"), &NovaObjectData::get_render_lod_info);
-	ClassDB::bind_method(D_METHOD("build_lod_submeshes", "lod_index"), &NovaObjectData::build_lod_submeshes);
+	ClassDB::bind_method(D_METHOD("build_lod_submeshes", "lod_index", "skeletal", "bone_count"), &NovaObjectData::build_lod_submeshes, DEFVAL(false), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("is_skinned", "lod_index"), &NovaObjectData::is_skinned);
 	ClassDB::bind_method(D_METHOD("eval_material_runtime", "index", "time_ms", "ctrl_values"), &NovaObjectData::eval_material_runtime);
 	ClassDB::bind_method(D_METHOD("compute_anim_frame", "index", "time_ms", "ctrl_values"), &NovaObjectData::compute_anim_frame);
 	ClassDB::bind_method(D_METHOD("evaluate_panm", "lod_index", "time_ms", "ctrl_values"), &NovaObjectData::evaluate_panm);
@@ -2744,6 +2745,25 @@ Dictionary NovaObjectData::get_render_lod_info(int p_lod_index) const {
 	return info;
 }
 
+bool NovaObjectData::is_skinned(int p_lod_index) const {
+	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+		return false;
+	}
+	if (ir.mesh_type == THREEDI_IR_MESH_SKINNED) {
+		return true;
+	}
+	const ThreediIRLod &lod = ir.lods[p_lod_index];
+	if (lod.primitives == nullptr) {
+		return false;
+	}
+	for (size_t i = 0; i < lod.primitive_count; ++i) {
+		if (lod.primitives[i].bone_table_length > 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
 Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 	Array result;
 	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
@@ -2775,6 +2795,14 @@ Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 		PackedVector2Array uvs2;
 		PackedFloat32Array tangents;
 		PackedInt32Array indices;
+		// Per-vertex skinning, emitted only for skinned primitives. ARRAY_BONES carries 4
+		// *skeleton* bone indices (the per-vertex bone_indices are local indices into this
+		// primitive's bone_table, which maps local -> skeleton; we remap here so the host
+		// can bind one whole-skeleton Skin). ARRAY_WEIGHTS carries the 4 matching weights.
+		// [orig: the runtime skins via the .bad skeleton; bone_table is the per-strip remap.]
+		const bool skinned = prim.bone_table_length > 0;
+		PackedInt32Array bones;
+		PackedFloat32Array weights;
 		auto get_vertex = [&](uint16_t local_index) -> const ThreediIRVertex * {
 			const uint32_t src_index = prim.vertex_offset + static_cast<uint32_t>(local_index);
 			if (src_index >= lod.vertex_count) {
@@ -2796,6 +2824,29 @@ Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 				tangents.push_back(tangent.y);
 				tangents.push_back(tangent.z);
 				tangents.push_back(w);
+			}
+			if (skinned) {
+				for (int k = 0; k < 4; ++k) {
+					const int local = static_cast<int>(v.bone_indices[k]);
+					const int bone = (local >= 0 && local < prim.bone_table_length)
+							? static_cast<int>(prim.bone_table[local])
+							: 0;
+					bones.push_back(bone);
+				}
+				float w0 = v.bone_weights[0];
+				float w1 = v.bone_weights[1];
+				float w2 = v.bone_weights[2];
+				float w3 = v.bone_weights[3];
+				float sum = w0 + w1 + w2 + w3;
+				if (sum <= 1e-6f) {  // degenerate: pin fully to the first influence
+					w0 = 1.0f;
+					w1 = w2 = w3 = 0.0f;
+					sum = 1.0f;
+				}
+				weights.push_back(w0 / sum);
+				weights.push_back(w1 / sum);
+				weights.push_back(w2 / sum);
+				weights.push_back(w3 / sum);
 			}
 			indices.push_back(vertices.size() - 1);
 		};
@@ -2832,13 +2883,18 @@ Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 		if (!tangents.is_empty() && tangents.size() == vertices.size() * 4) {
 			surface["tangents"] = tangents;
 		}
+		if (skinned && bones.size() == vertices.size() * 4 && weights.size() == vertices.size() * 4) {
+			surface["bones"] = bones;
+			surface["weights"] = weights;
+			surface["is_skinned"] = true;
+		}
 		surface["indices"] = indices;
 		result.push_back(surface);
 	}
 	return result;
 }
 
-Array NovaObjectData::build_lod_submeshes(int p_lod_index) const {
+Array NovaObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bone_count) const {
 	Array result;
 	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
 		return result;
@@ -2864,6 +2920,36 @@ Array NovaObjectData::build_lod_submeshes(int p_lod_index) const {
 		const PackedFloat32Array tangents = surface.get("tangents", PackedFloat32Array());
 		if (!tangents.is_empty() && tangents.size() == vertices.size() * 4) {
 			arrays[Mesh::ARRAY_TANGENT] = tangents;
+		}
+		// Skinning arrays (4 bones + 4 weights per vertex). ArrayMesh requires both present
+		// together; only attach when both are valid for this surface's vertex count.
+		PackedInt32Array bones = surface.get("bones", PackedInt32Array());
+		PackedFloat32Array weights = surface.get("weights", PackedFloat32Array());
+		bool surface_skinned = bones.size() == vertices.size() * 4 && weights.size() == vertices.size() * 4;
+		// Rigid "fake skinning": when a skeleton will be applied (p_skeletal) but this surface
+		// has no per-vertex skin, fully weight every vertex (1.0) to a single bone = the part's
+		// subobject index. The .bad skeleton is authored so subobject i <-> bone i, so the rigid
+		// part follows that bone. [orig: rigid weapon parts ride a bone via fake skinning.]
+		if (!surface_skinned && p_skeletal) {
+			const int bone = p_bone_count > 0 ? CLAMP(part_index, 0, p_bone_count - 1) : MAX(part_index, 0);
+			const int vcount = static_cast<int>(vertices.size());
+			bones.resize(vcount * 4);
+			weights.resize(vcount * 4);
+			for (int v = 0; v < vcount; ++v) {
+				bones.set(v * 4 + 0, bone);
+				bones.set(v * 4 + 1, 0);
+				bones.set(v * 4 + 2, 0);
+				bones.set(v * 4 + 3, 0);
+				weights.set(v * 4 + 0, 1.0f);
+				weights.set(v * 4 + 1, 0.0f);
+				weights.set(v * 4 + 2, 0.0f);
+				weights.set(v * 4 + 3, 0.0f);
+			}
+			surface_skinned = true;
+		}
+		if (surface_skinned) {
+			arrays[Mesh::ARRAY_BONES] = bones;
+			arrays[Mesh::ARRAY_WEIGHTS] = weights;
 		}
 		arrays[Mesh::ARRAY_INDEX] = surface.get("indices", PackedInt32Array());
 
@@ -2891,6 +2977,7 @@ Array NovaObjectData::build_lod_submeshes(int p_lod_index) const {
 		entry["abs"] = abs;
 		entry["parent_index"] = parent_index;
 		entry["primitive_index"] = surface.get("primitive_index", i);
+		entry["is_skinned"] = surface_skinned;
 		result.push_back(entry);
 	}
 	return result;

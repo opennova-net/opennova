@@ -37,6 +37,17 @@ var _is_playing := true
 var _model_bounds := AABB()
 var _environment_node: Node
 
+# Main-body skeletal animation (.bad/.adm via NovaSkeletalAnim). Distinct from PANM
+# (vehicle part channels above): this drives a Skeleton3D built from the .bad skeleton,
+# with the skinned meshes bound through a rest-derived Skin. _skeletal is null for static
+# / non-organic models, in which case nothing here runs and the model renders as before.
+var _skeletal                       # NovaSkeletalAnim, or null
+var _skeleton: Skeleton3D           # built in rebuild() when skinned + _skeletal loaded
+var _skeleton_skin: Skin
+var _anim_key := ""                 # active clip key (ADM key, e.g. "anim_walk")
+var _anim_time := 0.0               # playhead seconds into the active clip
+var _anim_playing := false
+
 
 func _ready() -> void:
 	set_process(true)
@@ -94,7 +105,63 @@ func set_playing(value: bool) -> void:
 
 func reset_animation_time() -> void:
 	_anim_time_ms = 0
+	_anim_time = 0.0
 	_apply_runtime_state(0.0)
+
+
+# --- Main-body skeletal animation (.bad/.adm) -----------------------------------
+# A NovaSkeletalAnim carries the parsed/sampled skeleton + clips for this model. Setting
+# it (then a skinned model) makes rebuild() build the Skeleton3D + Skin; play_body_clip
+# selects the active clip the per-frame pass poses. Both the object-editor preview and the
+# mission present pass drive these, so organic bodies animate from one path.
+func set_skeletal_anim(skeletal) -> void:
+	_skeletal = skeletal
+	_anim_key = ""
+	_anim_time = 0.0
+	_anim_playing = false
+	rebuild()
+
+
+func get_skeletal_anim():
+	return _skeletal
+
+
+func get_skeleton() -> Skeleton3D:
+	return _skeleton
+
+
+func has_skeleton() -> bool:
+	return _skeleton != null
+
+
+## Play a main-body clip by ADM key (e.g. "anim_walk"). No-op if no skeletal set / unknown.
+func play_body_clip(key: String) -> void:
+	if _skeletal == null or not _skeletal.has_clip(key):
+		return
+	_anim_key = key
+	_anim_time = 0.0
+	_anim_playing = true
+
+
+func stop_body_clip() -> void:
+	_anim_playing = false
+
+
+func get_active_body_clip() -> String:
+	return _anim_key
+
+
+## Play a main-body animation by canonical AI slot (opennova::world::BodyAnim). Resolves the
+## slot to a clip key via the loaded NovaSkeletalAnim (with idle/reset fallback) and plays it.
+## Idempotent: a repeated same-slot call (every present tick) does not restart a playing loop.
+## No-op without a skeletal set or for slot < 0. This is the present pass's body-anim entry point.
+func play_body_anim(slot: int) -> void:
+	if _skeletal == null or slot < 0:
+		return
+	var key: String = _skeletal.slot_to_key(slot)
+	if key.is_empty() or key == _anim_key:
+		return
+	play_body_clip(key)
 
 
 func get_animation_time_ms() -> int:
@@ -238,11 +305,29 @@ func _advance_part_anims(delta: float) -> void:
 		_part_anims.erase(register)
 
 
+# Pose the Skeleton3D from the active main-body clip. Advances the playhead while playing,
+# evaluates the parent-local pose per bone (NovaSkeletalAnim, Godot space) and writes it as
+# the bone pose. With no active clip the bones stay at their reset (== bind) pose.
+func _advance_body_anim(delta: float) -> void:
+	if _skeleton == null or _skeletal == null or _anim_key.is_empty():
+		return
+	if _is_playing and _anim_playing:
+		_anim_time += delta
+	var pose: Array = _skeletal.eval_pose(_anim_key, _anim_time)
+	var count: int = mini(pose.size(), _skeleton.get_bone_count())
+	for i in range(count):
+		var t: Transform3D = pose[i]
+		_skeleton.set_bone_pose_position(i, t.origin)
+		_skeleton.set_bone_pose_rotation(i, t.basis.get_rotation_quaternion())
+
+
 func rebuild() -> void:
 	for child in get_children():
 		remove_child(child)
 		child.queue_free()
 	_robj_nodes.clear()
+	_skeleton = null
+	_skeleton_skin = null
 	_surface_material_indices.clear()
 	_surface_materials.clear()
 	_anim_frames_by_mat.clear()
@@ -254,7 +339,15 @@ func rebuild() -> void:
 
 	_material_defs = _build_material_defs()
 	_active_lod = _clamp_lod_index(_active_lod)
-	var submeshes: Array = object_data.build_lod_submeshes(_active_lod) if object_data.has_method("build_lod_submeshes") else []
+	# A loaded .adm drives the model: build a Skeleton3D from its .bad skeleton. This applies to
+	# BOTH per-vertex skinned models (organic bodies/arms) AND rigid models (first-person weapons) --
+	# rigid parts ride a bone via "fake skinning" (build_lod_submeshes(skeletal=true)). Without a
+	# .adm, no skeleton is built and the model renders static exactly as before.
+	var skeletal_mode: bool = _skeletal != null and _skeletal.is_loaded()
+	if skeletal_mode:
+		_build_skeleton()
+	var bone_count: int = _skeleton.get_bone_count() if skeletal_mode and _skeleton != null else 0
+	var submeshes: Array = object_data.build_lod_submeshes(_active_lod, skeletal_mode, bone_count) if object_data.has_method("build_lod_submeshes") else []
 	if submeshes.is_empty():
 		submeshes = _legacy_submeshes_from_surfaces(_active_lod)
 	for entry in submeshes:
@@ -264,12 +357,19 @@ func rebuild() -> void:
 			continue
 		var robj_index := int(submesh.get("robj_index", submesh.get("part_index", 0)))
 		var material_index := int(submesh.get("material_index", 0))
-		var node := _get_or_create_robj_node(robj_index)
 		var instance := MeshInstance3D.new()
 		instance.mesh = mesh
 		var material := _material_for_index(material_index)
 		instance.material_override = material
-		node.add_child(instance)
+		# Skinned + rigid-fake-skinned submeshes bind to the shared Skeleton3D; everything else
+		# stays under its render-object (Robj) part node so PANM part transforms keep working.
+		if skeletal_mode and _skeleton != null and bool(submesh.get("is_skinned", false)):
+			_skeleton.add_child(instance)
+			instance.skin = _skeleton_skin
+			instance.skeleton = instance.get_path_to(_skeleton)
+		else:
+			var node := _get_or_create_robj_node(robj_index)
+			node.add_child(instance)
 		_surface_material_indices.append(material_index)
 		_surface_materials.append(material)
 		_collect_anim_frames(material_index)
@@ -277,6 +377,29 @@ func rebuild() -> void:
 	_apply_robj_transforms()
 	_apply_runtime_state(0.0)
 	_set_model_bounds(_compute_transformed_mesh_bounds())
+
+
+# Build the Skeleton3D + rest-derived Skin from the loaded NovaSkeletalAnim. Bones come from
+# the .bad skeleton (names/parents/parent-local bind rest). The Skin binds each bone with its
+# global-rest inverse (create_skin_from_rest_transforms), so a skinned mesh renders exactly at
+# rest when the pose equals the rest -- making the rest render independent of the (animated)
+# coordinate convention. [orig: BoneFile_Load @0x40fff0 builds the runtime skeleton.]
+func _build_skeleton() -> void:
+	_skeleton = Skeleton3D.new()
+	_skeleton.name = "Skeleton3D"
+	add_child(_skeleton)
+	var bones: Array = _skeletal.get_skeleton_bones()
+	for b in bones:
+		_skeleton.add_bone(String((b as Dictionary).get("name", "bone")))
+	for i in range(bones.size()):
+		var bd: Dictionary = bones[i]
+		var parent := int(bd.get("parent_index", -1))
+		if parent >= 0 and parent < _skeleton.get_bone_count() and parent != i:
+			_skeleton.set_bone_parent(i, parent)
+		_skeleton.set_bone_rest(i, bd.get("rest", Transform3D()))
+	for i in range(_skeleton.get_bone_count()):
+		_skeleton.reset_bone_pose(i)
+	_skeleton_skin = _skeleton.create_skin_from_rest_transforms()
 
 
 func _on_object_changed() -> void:
@@ -381,6 +504,7 @@ func _apply_runtime_state(delta: float) -> void:
 	if _is_playing:
 		_anim_time_ms = (_anim_time_ms + int(delta * 1000.0)) & 0x7fffffff
 	_advance_part_anims(delta)
+	_advance_body_anim(delta)
 	for i in range(_surface_materials.size()):
 		var material := _surface_materials[i]
 		if material == null:
