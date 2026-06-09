@@ -642,6 +642,41 @@ void NovaMnuDocument::set_widget_orientation(int p_id, const String &p_value) {
 	touch();
 }
 
+TypedArray<Dictionary> NovaMnuDocument::get_widget_sounds(int p_id) const {
+	TypedArray<Dictionary> out;
+	const mnu::Window *w = window_at(locate(p_id));
+	if (!w) {
+		return out;
+	}
+	for (const mnu::Sound &s : w->sounds) {
+		Dictionary d;
+		d["state"] = std_to_gd(s.state);
+		d["trigger"] = std_to_gd(s.trigger);
+		d["file"] = std_to_gd(s.file);
+		out.push_back(d);
+	}
+	return out;
+}
+
+void NovaMnuDocument::set_widget_sounds(int p_id, const TypedArray<Dictionary> &p_sounds) {
+	mnu::Window *w = window_at(locate(p_id));
+	if (!w) {
+		return;
+	}
+	std::vector<mnu::Sound> next;
+	next.reserve(static_cast<size_t>(p_sounds.size()));
+	for (int i = 0; i < p_sounds.size(); ++i) {
+		const Dictionary d = p_sounds[i];
+		mnu::Sound s;
+		s.state = gd_to_std(String(d.get("state", "")));
+		s.trigger = gd_to_std(String(d.get("trigger", "")));
+		s.file = gd_to_std(String(d.get("file", "")));
+		next.push_back(s);
+	}
+	w->sounds = next;
+	touch();
+}
+
 // --- M10: item rows (list / multi / spinlist / combo) ---
 
 int NovaMnuDocument::get_item_count(int p_id) const {
@@ -1363,6 +1398,8 @@ void NovaMnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_widget_orientation", "id", "value"), &NovaMnuDocument::set_widget_orientation);
 
 	ClassDB::bind_method(D_METHOD("get_item_count", "id"), &NovaMnuDocument::get_item_count);
+	ClassDB::bind_method(D_METHOD("get_widget_sounds", "id"), &NovaMnuDocument::get_widget_sounds);
+	ClassDB::bind_method(D_METHOD("set_widget_sounds", "id", "sounds"), &NovaMnuDocument::set_widget_sounds);
 	ClassDB::bind_method(D_METHOD("get_item", "id", "index"), &NovaMnuDocument::get_item);
 	ClassDB::bind_method(D_METHOD("get_items", "id"), &NovaMnuDocument::get_items);
 	ClassDB::bind_method(D_METHOD("set_item", "id", "index", "row"), &NovaMnuDocument::set_item);

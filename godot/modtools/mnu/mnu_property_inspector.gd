@@ -21,6 +21,9 @@ signal edit_requested(edit: Dictionary)
 # the selected widget's string in the Strings workspace, or its font in Fonts.
 signal string_jump_requested(key: String)
 signal font_jump_requested(font: String)
+# Audition a widget's sound: the workspace resolves (trigger -> set in the menu .lwf
+# -> member -> .wav) and plays it, reusing the Sound workspace's preview player.
+signal sound_preview_requested(trigger: String, file: String)
 
 const MnuUiHelpersScript = preload("res://modtools/mnu/mnu_ui_helpers.gd")
 const MnuListEditorScript = preload("res://modtools/mnu/mnu_list_editor.gd")
@@ -43,6 +46,9 @@ var _box: VBoxContainer
 var _text_resource: RtxtStringFile
 var _picker: MnuStringPicker
 var _picker_target_id := -1
+# Sound-set names from the open menu's .lwf profile (set by the workspace). When
+# present, the per-sound trigger field becomes a dropdown over the real sets.
+var _sound_sets: PackedStringArray = PackedStringArray()
 
 
 func _ready() -> void:
@@ -57,6 +63,15 @@ func show_widget(doc: NovaMnuDocument, id: int, text_res: RtxtStringFile = null)
 	_multi_ids = PackedInt32Array()
 	_text_resource = text_res
 	if is_node_ready():
+		_rebuild()
+
+
+# The open menu's .lwf set names (the valid sound triggers). The workspace calls
+# this when the profile loads; the Sounds section turns its trigger field into a
+# dropdown over these. Empty -> free-text trigger entry (no profile loaded).
+func set_sound_sets(sets: PackedStringArray) -> void:
+	_sound_sets = sets
+	if is_node_ready() and _selected_id >= 0:
 		_rebuild()
 
 
@@ -196,6 +211,7 @@ func _build_widget_rows(id: int) -> void:
 	_build_color_section(id)
 	_build_texture_section(id)
 	_build_flag_section(id)
+	_build_sound_section(id)
 
 	# M10: nested template authoring. Item rows for list-like widgets; column
 	# header/body definitions for tables. These emit op-tagged edits that the
@@ -350,6 +366,118 @@ func _build_flag_section(id: int) -> void:
 				if is_instance_valid(e[0]) and (e[0] as CheckBox).button_pressed:
 					mask |= int(e[1])
 			_emit({"target": "widget", "id": id, "prop": "flags", "value": mask}))
+
+
+# --- Sounds (hover / click) -----------------------------------------------------
+
+# Each <SOUND> row names a .lwf profile (file) and a trigger that selects a set in
+# it (MOUSE_OVER/CLICK_SELECT/...). Rows let the author retarget the trigger (from
+# the profile's real set list when loaded, else free text), edit the .lwf file,
+# preview, or remove; an "Add" button appends one. Every change replaces the whole
+# list through the normal "sounds" prop, so the editor records one undo step.
+func _build_sound_section(id: int) -> void:
+	MnuUiHelpersScript.add_heading(_box, "Sounds")
+	var sounds := _document.get_widget_sounds(id)
+	if sounds.is_empty():
+		MnuUiHelpersScript.add_muted(_box, "No interaction sounds.")
+	for i in range(sounds.size()):
+		_build_sound_row(id, sounds[i], i)
+	var add_btn := Button.new()
+	add_btn.text = "Add sound"
+	add_btn.tooltip_text = "Add a hover/click sound played from the menu .lwf profile"
+	add_btn.pressed.connect(func() -> void: _add_sound(id))
+	_box.add_child(add_btn)
+
+
+func _build_sound_row(id: int, snd: Dictionary, index: int) -> void:
+	var trigger := String(snd.get("trigger", ""))
+	var file := String(snd.get("file", ""))
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("separation", 6)
+	_box.add_child(row)
+
+	# Trigger: a dropdown over the profile's real set names when one is loaded,
+	# else a free-text field (so triggers survive without a profile).
+	if _sound_sets.size() > 0:
+		var opt := OptionButton.new()
+		opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var matched := false
+		for si in range(_sound_sets.size()):
+			opt.add_item(_sound_sets[si], si)
+			if _sound_sets[si].to_upper() == trigger.to_upper():
+				opt.select(si)
+				matched = true
+		if not matched and not trigger.is_empty():
+			opt.add_item(trigger, _sound_sets.size())  # preserve an off-profile trigger
+			opt.select(opt.item_count - 1)
+		opt.item_selected.connect(func(idx: int) -> void:
+			_set_sound_field(id, index, "trigger", opt.get_item_text(idx)))
+		row.add_child(opt)
+	else:
+		var trig_edit := LineEdit.new()
+		trig_edit.text = trigger
+		trig_edit.placeholder_text = "trigger (e.g. MOUSE_OVER)"
+		trig_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		trig_edit.text_submitted.connect(func(t: String) -> void: _set_sound_field(id, index, "trigger", t))
+		trig_edit.focus_exited.connect(func() -> void: _set_sound_field(id, index, "trigger", trig_edit.text))
+		row.add_child(trig_edit)
+
+	var file_edit := LineEdit.new()
+	file_edit.text = file
+	file_edit.placeholder_text = "menu.lwf"
+	file_edit.custom_minimum_size = Vector2(96, 0)
+	file_edit.text_submitted.connect(func(t: String) -> void: _set_sound_field(id, index, "file", t))
+	file_edit.focus_exited.connect(func() -> void: _set_sound_field(id, index, "file", file_edit.text))
+	row.add_child(file_edit)
+
+	var play := Button.new()
+	play.text = "▶"
+	play.tooltip_text = "Preview this sound"
+	play.pressed.connect(func() -> void: sound_preview_requested.emit(trigger, file))
+	row.add_child(play)
+
+	var rm := Button.new()
+	rm.text = "✕"
+	rm.tooltip_text = "Remove this sound"
+	rm.pressed.connect(func() -> void: _remove_sound(id, index))
+	row.add_child(rm)
+
+
+# Mutate one field of one sound row and commit the whole list. Re-reads from the
+# document each time so concurrent edits compose; no-ops an unchanged value.
+func _set_sound_field(id: int, index: int, key: String, value: String) -> void:
+	var sounds := _document.get_widget_sounds(id)
+	if index < 0 or index >= sounds.size():
+		return
+	var snd: Dictionary = (sounds[index] as Dictionary).duplicate()
+	if String(snd.get(key, "")) == value:
+		return
+	snd[key] = value
+	sounds[index] = snd
+	_emit({"target": "widget", "id": id, "prop": "sounds", "value": sounds})
+	_rebuild()
+
+
+func _add_sound(id: int) -> void:
+	var sounds := _document.get_widget_sounds(id)
+	var trigger := String(_sound_sets[0]) if _sound_sets.size() > 0 else "MOUSE_OVER"
+	# Default the state to match the trigger family (cosmetic for playback, but it
+	# keeps the round-tripped <SOUND state=...> faithful to the shipped menus).
+	var up := trigger.to_upper()
+	var state := "selected" if up.contains("CLICK") or up.contains("SELECT") else "mousein"
+	sounds.append({"state": state, "trigger": trigger, "file": "menu.lwf"})
+	_emit({"target": "widget", "id": id, "prop": "sounds", "value": sounds})
+	_rebuild()
+
+
+func _remove_sound(id: int, index: int) -> void:
+	var sounds := _document.get_widget_sounds(id)
+	if index < 0 or index >= sounds.size():
+		return
+	sounds.remove_at(index)
+	_emit({"target": "widget", "id": id, "prop": "sounds", "value": sounds})
+	_rebuild()
 
 
 # --- M10: nested template editors ----------------------------------------------

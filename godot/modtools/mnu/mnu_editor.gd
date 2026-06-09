@@ -792,6 +792,7 @@ func _read_prop(doc: NovaMnuDocument, target: String, id: int, prop: String, slo
 		"color": return doc.get_widget_color(id, slot)
 		"texture": return doc.get_widget_texture(id, slot)
 		"flags": return doc.get_widget_flags(id)
+		"sounds": return doc.get_widget_sounds(id)
 		"table_count": return doc.get_table_column_count(id)
 		"table_spacing": return doc.get_table_column_spacing(id)
 	return null
@@ -817,6 +818,7 @@ func _write_prop(doc: NovaMnuDocument, target: String, id: int, prop: String, sl
 		"color": doc.set_widget_color(id, slot, value)
 		"texture": doc.set_widget_texture(id, slot, value)
 		"flags": doc.set_widget_flags(id, int(value))
+		"sounds": doc.set_widget_sounds(id, value)
 		"table_count": doc.set_table_column_count(id, int(value))
 		"table_spacing": doc.set_table_column_spacing(id, int(value))
 

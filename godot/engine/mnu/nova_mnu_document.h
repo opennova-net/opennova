@@ -195,6 +195,14 @@ public:
 	String get_widget_orientation(int p_id) const;
 	void set_widget_orientation(int p_id, const String &p_value);
 
+	// Per-widget interaction sounds (hover/click etc.). Each row is
+	// {state, trigger, file}: file is the .lwf profile and trigger names a set in
+	// it (MOUSE_OVER/CLICK_SELECT/...). set replaces the whole list (the editor's
+	// natural undo unit), preserving any rows beyond hover/click the author leaves
+	// in place (e.g. CLICK_VALUE on a combo).
+	TypedArray<Dictionary> get_widget_sounds(int p_id) const;
+	void set_widget_sounds(int p_id, const TypedArray<Dictionary> &p_sounds);
+
 	// --- M10: structured authoring of nested list/table templates ---
 	//
 	// Item rows for list-like widgets (list / multi / spinlist / combo). Each row

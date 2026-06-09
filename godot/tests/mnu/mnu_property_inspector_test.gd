@@ -130,6 +130,95 @@ func test_inspector_font_jump_emits_font() -> void:
 		"The jump carries the widget's font.")
 
 
+# --- Sounds section ------------------------------------------------------------
+
+# widgets.mnu MAIN root children: [Title, StartBtn, SoundChk, Difficulty, Version].
+# StartBtn carries a MOUSE_OVER sound; Title has none.
+func _widgets_doc() -> NovaMnuDocument:
+	var doc := NovaMnuDocument.new()
+	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
+	return doc
+
+
+func _main_child(doc: NovaMnuDocument, index: int) -> int:
+	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
+	return doc.get_child_ids(root)[index]
+
+
+func _find_option_with_item(node: Node, item_text: String) -> OptionButton:
+	if node is OptionButton:
+		var opt := node as OptionButton
+		for i in range(opt.item_count):
+			if opt.get_item_text(i) == item_text:
+				return opt
+	for c in node.get_children():
+		var found := _find_option_with_item(c, item_text)
+		if found != null:
+			return found
+	return null
+
+
+func test_inspector_shows_sound_rows() -> void:
+	var doc := _widgets_doc()
+	var inspector = await _inspector_for(doc, _main_child(doc, 1), null)  # StartBtn
+	var text := _all_text(inspector)
+	assert_string_contains(text, "Sounds", "the Sounds section heading shows")
+	assert_string_contains(text, "MOUSE_OVER", "the hover trigger shows")
+	assert_string_contains(text, "menu.lwf", "the sound file shows")
+
+
+func test_inspector_add_sound_emits_sounds_prop() -> void:
+	var doc := _widgets_doc()
+	var title := _main_child(doc, 0)  # Title: a static with no sounds
+	var inspector = await _inspector_for(doc, title, null)
+	var captured: Array = []
+	inspector.edit_requested.connect(func(e: Dictionary) -> void: captured.append(e))
+	var add_btn := _find_button(inspector, "Add sound")
+	assert_not_null(add_btn, "an Add sound button is present")
+	add_btn.pressed.emit()
+	assert_eq(captured.size(), 1, "adding commits exactly one edit")
+	if captured.size() == 1:
+		assert_eq(captured[0].get("prop"), "sounds", "the edit targets the sounds list")
+		assert_eq((captured[0].get("value") as Array).size(), 1, "one sound was appended")
+
+
+func test_inspector_remove_sound_emits_shorter_list() -> void:
+	var doc := _widgets_doc()
+	var inspector = await _inspector_for(doc, _main_child(doc, 1), null)  # StartBtn (1 sound)
+	var captured: Array = []
+	inspector.edit_requested.connect(func(e: Dictionary) -> void: captured.append(e))
+	var rm := _find_button(inspector, "✕")
+	assert_not_null(rm, "a remove button is present for the existing sound")
+	rm.pressed.emit()
+	assert_eq(captured.size(), 1, "removing commits one edit")
+	if captured.size() == 1:
+		assert_eq(captured[0].get("prop"), "sounds", "the edit targets the sounds list")
+		assert_eq((captured[0].get("value") as Array).size(), 0, "the sound was removed")
+
+
+func test_inspector_trigger_dropdown_from_profile_sets() -> void:
+	# When the workspace supplies the profile's set names, the trigger field becomes
+	# a dropdown over them (so the author picks a real trigger, not free text).
+	var doc := _widgets_doc()
+	var inspector = await _inspector_for(doc, _main_child(doc, 1), null)  # StartBtn
+	inspector.set_sound_sets(PackedStringArray(["MOUSE_OVER", "CLICK_SELECT", "CLICK_VALUE"]))
+	await get_tree().process_frame
+	var opt := _find_option_with_item(inspector, "CLICK_SELECT")
+	assert_not_null(opt, "the trigger field is a dropdown over the profile's sets")
+
+
+func test_inspector_sound_preview_emits_request() -> void:
+	var doc := _widgets_doc()
+	var inspector = await _inspector_for(doc, _main_child(doc, 1), null)  # StartBtn
+	watch_signals(inspector)
+	var play := _find_button(inspector, "▶")
+	assert_not_null(play, "a preview button is present for the existing sound")
+	play.pressed.emit()
+	assert_signal_emitted(inspector, "sound_preview_requested", "preview asks the workspace to play")
+	assert_eq(get_signal_parameters(inspector, "sound_preview_requested", 0)[0], "MOUSE_OVER",
+		"the preview carries the sound's trigger")
+
+
 func test_string_picker_filters_and_picks() -> void:
 	var picker = MnuStringPickerScript.new()
 	add_child_autofree(picker)

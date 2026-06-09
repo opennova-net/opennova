@@ -10,11 +10,20 @@ extends EditorWorkspace
 const MnuEditorDocumentScript = preload("res://modtools/mnu/mnu_editor_document.gd")
 const MnuEditorScript = preload("res://modtools/mnu/mnu_editor.gd")
 const MnuPropertyInspectorScript = preload("res://modtools/mnu/mnu_property_inspector.gd")
+const SoundPreviewPlayerScript = preload("res://modtools/sound/sound_preview_player.gd")
+
+# The widgets' <SOUND> file (universal across shipped JO menus); its sets are the
+# valid triggers and the source for the inspector's trigger dropdown + preview.
+const MENU_SOUND_PROFILE := "menu.lwf"
 
 var _document   # MnuEditorDocument
 var _editor: Control
 var _inspector: Control
 var _selected_id := -1
+# Editor-local sound audition (reused from the Sound workspace) + a cache of loaded
+# .lwf profiles keyed by file name, so the inspector can preview a widget's sound.
+var _preview              # SoundPreviewPlayer
+var _profiles: Dictionary = {}   # lower-case .lwf name -> NovaLwfData (or null if absent)
 
 
 func _init() -> void:
@@ -82,6 +91,10 @@ func unmount_viewport(_host: Control) -> void:
 
 
 func release_viewport() -> void:
+	if _preview != null and is_instance_valid(_preview):
+		_preview.queue_free()
+	_preview = null
+	_profiles.clear()
 	if _inspector != null and is_instance_valid(_inspector):
 		_disconnect_inspector(_inspector)
 		_inspector.queue_free()
@@ -107,6 +120,9 @@ func build_inspector(host: Control) -> void:
 	# Strings / Fonts workspace; the adapter resolves the target and drives the shell.
 	_inspector.string_jump_requested.connect(_on_string_jump)
 	_inspector.font_jump_requested.connect(_on_font_jump)
+	# Preview a widget's sound through the menu .lwf profile (reuses the Sound
+	# workspace's audition player); the inspector lists triggers from the same profile.
+	_inspector.sound_preview_requested.connect(_on_sound_preview)
 	host.add_child(_inspector)
 	# Populate from the editor's current selection. Subsequent selection changes
 	# (user + document reloads, which re-select the first screen) reach the
@@ -121,6 +137,21 @@ func _populate_inspector() -> void:
 	if _editor != null:
 		_selected_id = _editor.get_selected_id()
 	_inspector.show_widget(_document.resource, _selected_id, _text_resource())
+	_apply_sound_sets()
+
+
+# Feed the inspector the menu profile's set names so its Sounds trigger field
+# becomes a dropdown over the real triggers (MOUSE_OVER/CLICK_SELECT/...). Empty
+# when no menu.lwf resolves (the inspector then falls back to free-text entry).
+func _apply_sound_sets() -> void:
+	if _inspector == null or not is_instance_valid(_inspector):
+		return
+	var profile = _profile_for(MENU_SOUND_PROFILE)
+	var names := PackedStringArray()
+	if profile != null:
+		for si in range(profile.get_set_count()):
+			names.append(String(profile.get_set(si).get("name", "")))
+	_inspector.set_sound_sets(names)
 
 
 func _on_widget_selected(id: int) -> void:
@@ -170,6 +201,55 @@ func _on_font_jump(font: String) -> void:
 		editor_shell.open_font_workspace(font)
 
 
+# Audition a widget's sound: resolve the trigger to a set in its .lwf profile and
+# play a member through the shared preview player (the same set->member->.wav path
+# the runtime uses). No-ops with a status hint when the profile/set can't resolve.
+func _on_sound_preview(trigger: String, file: String) -> void:
+	var name := file if not file.is_empty() else MENU_SOUND_PROFILE
+	var profile = _profile_for(name)
+	if profile == null:
+		_status("Sound profile '%s' not found in the resource dir." % name)
+		return
+	var want := trigger.to_upper()
+	for si in range(profile.get_set_count()):
+		if String(profile.get_set(si).get("name", "")).to_upper() == want:
+			_ensure_preview().preview_set(profile, _resource_root(), si)
+			return
+	_status("Trigger '%s' is not a set in %s." % [trigger, name])
+
+
+# Load (and cache) a .lwf profile by name through the resource root. Caches misses
+# as null so a missing profile is not retried every preview/selection.
+func _profile_for(name: String):
+	var key := name.to_lower()
+	if _profiles.has(key):
+		return _profiles[key]
+	var profile = null
+	var root := _resource_root()
+	if root != null:
+		var d := NovaLwfData.new()
+		if d.open_from_resource_root(root, name) == OK and d.is_loaded() and d.get_set_count() > 0:
+			profile = d
+	_profiles[key] = profile
+	return profile
+
+
+func _ensure_preview():
+	# The workspace is a RefCounted adapter (not a Node), so the audition player
+	# lives under the shell. Without a shell (headless), preview is a no-op.
+	if _preview == null or not is_instance_valid(_preview):
+		_preview = SoundPreviewPlayerScript.new()
+		_preview.name = "MnuSoundPreview"
+		if editor_shell != null:
+			editor_shell.add_child(_preview)
+	return _preview
+
+
+func _status(message: String) -> void:
+	if editor_shell != null and editor_shell.has_method("show_status_message"):
+		editor_shell.show_status_message(message, 4.0)
+
+
 # Sever the edit channel before an inspector is freed/replaced, so a deferred
 # signal from the outgoing inspector cannot reach a stale editor (mirrors the
 # defensive disconnect in fonts_workspace.gd).
@@ -180,6 +260,8 @@ func _disconnect_inspector(inspector: Control) -> void:
 		inspector.string_jump_requested.disconnect(_on_string_jump)
 	if inspector.font_jump_requested.is_connected(_on_font_jump):
 		inspector.font_jump_requested.disconnect(_on_font_jump)
+	if inspector.sound_preview_requested.is_connected(_on_sound_preview):
+		inspector.sound_preview_requested.disconnect(_on_sound_preview)
 
 
 func _resource_root() -> NovaResourceRoot:

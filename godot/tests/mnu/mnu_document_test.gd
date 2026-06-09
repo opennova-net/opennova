@@ -421,3 +421,27 @@ func test_item_combo_top_level_items_with_empty_list_box() -> void:
 	var combo2 := _find_widget(doc2, "ModeBox")
 	assert_eq(doc2.get_item_count(combo2), 3, "the added row survives the round-trip")
 	assert_eq(doc2.get_item(combo2, 2)["text"], "Co-op", "added row content persisted")
+
+
+func test_widget_sounds_read_edit_roundtrip() -> void:
+	# StartBtn carries <SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>.
+	var doc := _load_doc()
+	var start := _find_widget(doc, "StartBtn")
+	var sounds := doc.get_widget_sounds(start)
+	assert_eq(sounds.size(), 1, "StartBtn has one authored sound")
+	assert_eq(String(sounds[0]["trigger"]), "MOUSE_OVER", "hover trigger read")
+	assert_eq(String(sounds[0]["file"]), "menu.lwf", "sound file read")
+	assert_eq(String(sounds[0]["state"]), "mousein", "sound state read")
+
+	# Append a click sound and replace the whole list.
+	sounds.append({"state": "selected", "trigger": "CLICK_SELECT", "file": "menu.lwf"})
+	doc.set_widget_sounds(start, sounds)
+	assert_eq(doc.get_widget_sounds(start).size(), 2, "click sound added in-place")
+
+	# Both survive a serialize round-trip.
+	var doc2 := NovaMnuDocument.new()
+	assert_eq(doc2.load_from_bytes(doc.to_byte_array()), OK, "edited menu re-parses")
+	var start2 := _find_widget(doc2, "StartBtn")
+	var sounds2 := doc2.get_widget_sounds(start2)
+	assert_eq(sounds2.size(), 2, "both sounds persisted through the round-trip")
+	assert_eq(String(sounds2[1]["trigger"]), "CLICK_SELECT", "added click trigger persisted")
