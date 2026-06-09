@@ -11,6 +11,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ -z "${GODOT_BIN:-}" ]]; then
   for candidate in \
+    "$root/.godot-bin/Godot_v4.6.1-stable_win64_console.exe" \
     "$root/.godot-bin/Godot_v4.6.1-stable_win64.exe" \
     "$root/.godot-bin/Godot_v4.6.1-stable_linux.x86_64" \
     "$root/.godot-bin/Godot_v4.6.1-stable_macos.universal"
@@ -34,6 +35,7 @@ set +e
 "$GODOT_BIN" --headless --path "$root/godot" \
   -s addons/gut/gut_cmdln.gd \
   -gdir=res://tests \
+  -ginclude_subdirs \
   -gprefix= \
   -gsuffix=_test.gd \
   -gexit 2>&1 | tee "$log"
@@ -45,6 +47,20 @@ set -e
 # collector rather than counted as failures. Catch that here.
 if grep -qE 'SCRIPT ERROR: Parse Error' "$log"; then
   echo "error: GDScript parse errors detected during test collection" >&2
+  exit 1
+fi
+
+# A *_test.gd that references an unregistered GDExtension class (e.g. a stale
+# DLL on a fresh worktree) often loads WITHOUT a "Parse Error" line, fails GUT's
+# top-level "extends GutTest" check, and is dropped from collection with only a
+# warning -- so the suite stays green while silently skipping the test. Helper
+# inner classes inside an accepted GutTest script are allowed; GUT reports them
+# separately, and the outer script still runs. Every *_test.gd we ship extends
+# GutTest, so any top-level script drop is a real defect, not an intentional
+# non-test file. (See third_party/gut test_collector.gd add_script.)
+if grep -qE 'Ignoring script .*does not extend GutTest' "$log"; then
+  echo "error: a test script was dropped from collection (parse error or unregistered class):" >&2
+  grep -E 'Ignoring script .*does not extend GutTest' "$log" >&2
   exit 1
 fi
 

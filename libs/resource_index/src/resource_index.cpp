@@ -203,12 +203,13 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 		std::string kind;
 		if (ext == ".bin") {
 			// RTXT strings tables and SCR0 music scripts need a content peek; only
-			// .bin candidates are read. Use the raw (stored) bytes: the Vfs decodes
-			// SCR containers on read_file, which would strip the "SCR0" magic before
-			// we can classify it.
+			// .bin candidates are read. Use decoded VFS bytes so explicit SCR-wrapped
+			// loose/PFF payloads classify the same way as plaintext files.
 			std::vector<uint8_t> bytes;
-			const bool ok = impl_->vfs.read_file_raw(loc.logical_name, bytes);
-			kind = kind_for_name_and_magic(loc.logical_name, ok && has_rtxt_magic(bytes), ok && has_scr_magic(bytes));
+			const bool ok = impl_->vfs.read_file(loc.logical_name, bytes);
+			const bool rtxt = ok && has_rtxt_magic(bytes);
+			const bool scr = ok && has_scr_magic(bytes);
+			kind = kind_for_name_and_magic(loc.logical_name, rtxt, scr);
 		} else {
 			kind = kind_for_name_and_magic(loc.logical_name, false, false);
 		}

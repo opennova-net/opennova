@@ -6,8 +6,13 @@
 
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/string.hpp>
 
 namespace godot {
+
+bool decode_nova_payload_bytes(PackedByteArray &p_bytes);
+bool read_nova_payload_file(const String &p_path, PackedByteArray &r_bytes);
 
 class NovaDataFile : public Resource {
 	GDCLASS(NovaDataFile, Resource)

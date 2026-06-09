@@ -8,9 +8,10 @@ const MissionWorkspaceAdapter = preload("res://modtools/editor/mission_workspace
 const FontsWorkspaceAdapter = preload("res://modtools/editor/fonts_workspace.gd")
 const CreditsWorkspaceAdapter = preload("res://modtools/editor/credits_workspace.gd")
 const StringsWorkspaceAdapter = preload("res://modtools/strings/strings_workspace.gd")
+const MusicWorkspaceAdapter = preload("res://modtools/editor/music_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
 
-enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS }
+enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC }
 
 # Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
 # shows the non-popup ones in order. The enum below stays only as stable id
@@ -220,6 +221,7 @@ func _workspace_defs() -> Array:
 		WorkspaceDef.make(Workspace.FONTS, FontsWorkspaceAdapter, false, &"Interface"),
 		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter, false, &"Interface"),
 		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter, false, &"Interface"),
+		WorkspaceDef.make(Workspace.MUSIC, MusicWorkspaceAdapter, false, &"Audio"),
 		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true, &"Atmosphere"),
 	]
 
@@ -596,6 +598,10 @@ func _refresh_workspace_surface() -> void:
 	_rebuild_workspace_actions(workspace)
 	_modes_label.visible = has_workflows
 	_mode_rail.visible = has_workflows
+	# Whole left lane (picker + inspector host) is opt-out: a workspace that lives
+	# entirely in the viewport (e.g. Music's unified screen) hides it to reclaim
+	# the width. BodyRow is an HSplitContainer, so the viewport takes the space.
+	_left_lane.visible = workspace == null or workspace.uses_left_lane()
 	_sync_asset_dock_for_workspace(workspace)
 	_rebuild_workflow_rail(workflows)
 	if has_workflows:
