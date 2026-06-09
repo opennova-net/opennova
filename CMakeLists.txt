@@ -27,6 +27,8 @@ add_subdirectory(libs/renderer)
 add_subdirectory(libs/terrain)
 add_subdirectory(libs/vfs)
 add_subdirectory(libs/resource_index)
+add_subdirectory(libs/sbf)
+add_subdirectory(libs/mus)
 add_subdirectory(libs/mission)
 
 set(OPENNOVA_CORE_TARGETS
@@ -55,6 +57,8 @@ set(OPENNOVA_CORE_TARGETS
     opennova_renderer
     opennova_vfs
     opennova_resource_index
+    opennova_sbf
+    opennova_mus
     opennova_mission
 )
 

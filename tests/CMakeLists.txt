@@ -84,12 +84,210 @@ target_link_libraries(gameprofile_test PRIVATE opennova_gameprofile)
 target_include_directories(gameprofile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gameprofile COMMAND gameprofile_test)
 
+# SBF tests
+add_executable(sbf_header_test sbf/sbf_header_test.cpp)
+target_link_libraries(sbf_header_test PRIVATE opennova_sbf)
+target_include_directories(sbf_header_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME sbf_header COMMAND sbf_header_test)
+
+add_executable(sbf_parse_test sbf/sbf_parse_test.cpp)
+target_link_libraries(sbf_parse_test PRIVATE opennova_sbf)
+target_include_directories(sbf_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(sbf_parse_test PRIVATE
+    SBF_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/sbf")
+add_test(NAME sbf_parse COMMAND sbf_parse_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(sbf_decode_test sbf/sbf_decode_test.cpp)
+target_link_libraries(sbf_decode_test PRIVATE opennova_sbf)
+target_include_directories(sbf_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(sbf_decode_test PRIVATE
+    SBF_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/sbf")
+add_test(NAME sbf_decode COMMAND sbf_decode_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(sbf_compat_test sbf/sbf_compat_test.cpp)
+target_link_libraries(sbf_compat_test PRIVATE opennova_sbf)
+target_include_directories(sbf_compat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME sbf_compat COMMAND sbf_compat_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(sbf_encode_test sbf/sbf_encode_test.cpp)
+target_link_libraries(sbf_encode_test PRIVATE opennova_sbf)
+target_include_directories(sbf_encode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(sbf_encode_test PRIVATE
+    SBF_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/sbf")
+if(NOT MSVC)
+    target_link_libraries(sbf_encode_test PRIVATE m)
+endif()
+add_test(NAME sbf_encode COMMAND sbf_encode_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(sbf_roundtrip_test sbf/sbf_roundtrip_test.cpp)
+target_link_libraries(sbf_roundtrip_test PRIVATE opennova_sbf)
+target_include_directories(sbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(sbf_roundtrip_test PRIVATE
+    SBF_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/sbf")
+if(NOT MSVC)
+    target_link_libraries(sbf_roundtrip_test PRIVATE m)
+endif()
+add_test(NAME sbf_roundtrip COMMAND sbf_roundtrip_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# MUS tests
+add_executable(mus_header_test mus/mus_header_test.cpp)
+target_link_libraries(mus_header_test PRIVATE opennova_mus)
+target_include_directories(mus_header_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mus_header COMMAND mus_header_test)
+
+add_executable(mus_parse_test mus/mus_parse_test.cpp)
+target_link_libraries(mus_parse_test PRIVATE opennova_mus)
+target_include_directories(mus_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_parse_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_parse COMMAND mus_parse_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(mus_compat_test mus/mus_compat_test.cpp)
+target_link_libraries(mus_compat_test PRIVATE opennova_mus)
+target_include_directories(mus_compat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_compat_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_compat COMMAND mus_compat_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(mus_decompile_test mus/mus_decompile_test.cpp)
+target_link_libraries(mus_decompile_test PRIVATE opennova_mus)
+target_include_directories(mus_decompile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_decompile_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_decompile COMMAND mus_decompile_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(mus_compile_test mus/mus_compile_test.cpp)
+target_link_libraries(mus_compile_test PRIVATE opennova_mus)
+target_include_directories(mus_compile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mus_compile COMMAND mus_compile_test)
+
+add_executable(mus_roundtrip_test mus/mus_roundtrip_test.cpp)
+target_link_libraries(mus_roundtrip_test PRIVATE opennova_mus)
+target_include_directories(mus_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_roundtrip_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_roundtrip COMMAND mus_roundtrip_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(mus_names_roundtrip_test mus/mus_names_roundtrip_test.cpp)
+target_link_libraries(mus_names_roundtrip_test PRIVATE opennova_mus)
+target_include_directories(mus_names_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_names_roundtrip_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_names_roundtrip COMMAND mus_names_roundtrip_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Entry-section round-trip: the compiler hardcodes entry_section_index = 0, so a
+# faithful round-trip needs the original entry to be its lowest-offset section
+# (true for both stock bins). Pins that the recompiled entry names the same
+# section -- a drift the text round-trip and encode-idempotence cannot see.
+add_executable(mus_entry_roundtrip_test mus/mus_entry_roundtrip_test.cpp)
+target_link_libraries(mus_entry_roundtrip_test PRIVATE opennova_mus)
+target_include_directories(mus_entry_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_entry_roundtrip_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_entry_roundtrip COMMAND mus_entry_roundtrip_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Authored-program behavior: compile the canonical .mus TEXT the visual editor
+# emits (play, if/else, on-switch + default, enter-transition, assign, inc/dec,
+# method/volume) and assert the observable event stream on the VM. The companion
+# mus_diff_jointops.py (local RE tooling; docs/audio/mus-sbf-re.md) runs the SAME
+# corpus through the original Jointops handlers; this committed test locks the
+# behavior without that binary.
+add_executable(mus_authored_behavioral_test mus/mus_authored_behavioral_test.cpp)
+target_link_libraries(mus_authored_behavioral_test PRIVATE opennova_mus)
+target_include_directories(mus_authored_behavioral_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mus_authored_behavioral_test PRIVATE cxx_std_17)
+add_test(NAME mus_authored_behavioral COMMAND mus_authored_behavioral_test)
+
+add_executable(mus_ast_test mus/mus_ast_test.cpp)
+target_link_libraries(mus_ast_test PRIVATE opennova_mus)
+target_include_directories(mus_ast_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mus_ast_test PRIVATE cxx_std_17)
+target_compile_definitions(mus_ast_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_ast COMMAND mus_ast_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(mus_vm_test mus/mus_vm_test.cpp)
+target_link_libraries(mus_vm_test PRIVATE opennova_mus)
+target_include_directories(mus_vm_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_vm_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_vm COMMAND mus_vm_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(mus_vm_fixes_test mus/mus_vm_fixes_test.cpp)
+target_link_libraries(mus_vm_fixes_test PRIVATE opennova_mus)
+target_include_directories(mus_vm_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mus_vm_fixes COMMAND mus_vm_fixes_test)
+
+add_executable(mus_model_test mus/mus_model_test.cpp)
+target_link_libraries(mus_model_test PRIVATE opennova_mus)
+target_include_directories(mus_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_model_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_model COMMAND mus_model_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Write-path parity: the canonical re-encoded form is a byte-stable fixed point
+# (byte-identity to the ORIGINAL .bin is impossible -- editor debug info is not
+# reproduced). Gates the structured-edit write path; see the test file header.
+add_executable(mus_encode_idempotence_test mus/mus_encode_idempotence_test.cpp)
+target_link_libraries(mus_encode_idempotence_test PRIVATE opennova_mus)
+target_include_directories(mus_encode_idempotence_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mus_encode_idempotence_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_encode_idempotence COMMAND mus_encode_idempotence_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Structured play-edit parity: splicing a play into a section's decompiled text
+# adds exactly one model play with unchanged edges, and a no-op insert/remove is
+# byte-identical. Guards the editor's drag-to-add-play write path.
+add_executable(mus_structured_play_edit_test mus/mus_structured_play_edit_test.cpp)
+target_link_libraries(mus_structured_play_edit_test PRIVATE opennova_mus)
+target_include_directories(mus_structured_play_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mus_structured_play_edit_test PRIVATE cxx_std_17)
+target_compile_definitions(mus_structured_play_edit_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_structured_play_edit COMMAND mus_structured_play_edit_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Structured statement + section edit parity (Phase 2 authoring): top-level
+# statements are located by line span (mus_ast_emit_text_spans, the same emit the
+# editor's get_annotated_decompile bridge uses) then spliced/deleted/replaced/
+# reordered; section rename is bytecode-identical, referenced-delete is refused.
+add_executable(mus_structured_section_edit_test mus/mus_structured_section_edit_test.cpp)
+target_link_libraries(mus_structured_section_edit_test PRIVATE opennova_mus)
+target_include_directories(mus_structured_section_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mus_structured_section_edit_test PRIVATE cxx_std_17)
+target_compile_definitions(mus_structured_section_edit_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_structured_section_edit COMMAND mus_structured_section_edit_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # VFS tests (mount precedence, mount_game expansion override, SCR decode-on-read)
 add_executable(vfs_test vfs/vfs_test.cpp)
 target_link_libraries(vfs_test PRIVATE opennova_vfs opennova_pff)
 target_include_directories(vfs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(vfs_test PRIVATE cxx_std_17)
 add_test(NAME vfs COMMAND vfs_test)
+
+add_executable(vfs_mus_decode_test vfs/vfs_mus_decode_test.cpp)
+target_link_libraries(vfs_mus_decode_test PRIVATE opennova_vfs)
+target_include_directories(vfs_mus_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(vfs_mus_decode_test PRIVATE cxx_std_17)
+add_test(NAME vfs_mus_decode COMMAND vfs_mus_decode_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # BFC1 tests
 add_executable(bfc1_unit_test bfc1/bfc1_unit_test.cpp)
@@ -116,6 +314,11 @@ add_executable(resource_index_test resource_index/resource_index_test.cpp)
 target_link_libraries(resource_index_test PRIVATE opennova_resource_index)
 target_include_directories(resource_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index COMMAND resource_index_test)
+
+add_executable(resource_index_mus_test resource_index/resource_index_mus_test.cpp)
+target_link_libraries(resource_index_mus_test PRIVATE opennova_resource_index)
+target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME resource_index_mus COMMAND resource_index_mus_test)
 
 # OED object workspace/export tests
 add_executable(oed_build_model_test oed/build_model_test.cpp)

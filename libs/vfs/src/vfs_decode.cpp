@@ -69,7 +69,7 @@ bool decode_bfc1(std::vector<uint8_t> &data) {
 } // namespace
 
 bool vfs_decode_payload(std::vector<uint8_t> &data, int scr_policy) {
-    if (!decode_scr(data, scr_policy)) return false; // SCR first
+    if (!decode_scr(data, scr_policy)) return false; // SCR container first
     if (!decode_bfc1(data)) return false;            // then BFC1 (possibly over the decrypted bytes)
     return true;
 }
