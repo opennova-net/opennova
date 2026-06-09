@@ -394,6 +394,97 @@ func test_read_only_map_disables_add_state_with_reason():
 	assert_eq(lm._add_state_btn.tooltip_text, "Fix script errors first")
 
 
+func _crumb_texts(lm: Control) -> Array:
+	var out := []
+	for c in lm._crumb_segments.get_children():
+		if c is Button:
+			out.append(String((c as Button).text))
+	return out
+
+
+func test_drill_hops_record_a_breadcrumb_trail():
+	# Open Begin, then hop to Testmission (the "open ▸" path is the same
+	# _drill_into): the trail shows the whole journey and back walks it.
+	var lm := _make_live()
+	await get_tree().process_frame
+	lm._drill_into("Begin")
+	lm._drill_into("Testmission")
+	await get_tree().process_frame
+	assert_eq(_crumb_texts(lm), ["Map", "Begin", "Testmission"], "trail records every hop")
+	assert_false(lm._nav_back_btn.disabled, "back is available mid-trail")
+	lm._nav.go_back()
+	assert_eq(lm._logic_section_name, "Begin", "back returns to the previous state")
+	assert_false(lm._nav_fwd_btn.disabled, "forward becomes available after back")
+	lm._nav.go_forward()
+	assert_eq(lm._logic_section_name, "Testmission", "forward retraces the hop")
+
+
+func test_breadcrumb_segment_click_jumps_back():
+	var lm := _make_live()
+	await get_tree().process_frame
+	lm._drill_into("Begin")
+	lm._drill_into("Testmission")
+	await get_tree().process_frame
+	# Segment 0 is "Map": clicking it returns to the map but keeps forward history.
+	var segs: Array = []
+	for c in lm._crumb_segments.get_children():
+		if c is Button:
+			segs.append(c)
+	(segs[0] as Button).pressed.emit()
+	assert_true(lm.get_node("%SectionMap").visible, "Map segment click restores the map")
+	assert_eq(lm._logic_section_name, "", "no state open on the map")
+	assert_false(lm._nav_fwd_btn.disabled, "the drilled states stay reachable via forward")
+
+
+func test_follow_live_drills_replace_instead_of_flooding_the_trail():
+	# A transitioning VM (pin=false drills) must not grow the history with every
+	# state it enters -- the trail stays one hop deep and back lands on the map.
+	var lm := _make_live()
+	await get_tree().process_frame
+	lm._drill_into("Begin", false)
+	lm._drill_into("Testmission", false)
+	lm._drill_into("Missionnull", false)
+	await get_tree().process_frame
+	assert_eq(_crumb_texts(lm), ["Map", "Missionnull"], "follow-live replaces the current hop")
+	lm._nav.go_back()
+	assert_true(lm.get_node("%SectionMap").visible, "back from a followed state lands on the map")
+
+
+func test_states_sidebar_lists_map_and_every_state():
+	var lm := _make_live()
+	await get_tree().process_frame
+	var list: ItemList = lm.get_node("%StatesList")
+	assert_eq(list.item_count, 9, "map row + 8 jo_gamemus states")
+	assert_eq(String(list.get_item_metadata(0)), "", "row 0 is the map")
+	var star_rows := 0
+	for i in range(list.item_count):
+		if String(list.get_item_text(i)).contains("★"):
+			star_rows += 1
+	assert_eq(star_rows, 1, "exactly one state carries the start badge in the sidebar")
+
+
+func test_states_sidebar_click_navigates_and_mirrors_location():
+	var lm := _make_live()
+	await get_tree().process_frame
+	var list: ItemList = lm.get_node("%StatesList")
+	# Find Begin's row and select it the way a user would.
+	var begin_row := -1
+	for i in range(list.item_count):
+		if String(list.get_item_metadata(i)) == "Begin":
+			begin_row = i
+			break
+	assert_gt(begin_row, 0, "Begin present in the sidebar")
+	list.item_selected.emit(begin_row)
+	await get_tree().process_frame
+	assert_true(lm._logic_graph.visible, "sidebar click opens the state's blueprint")
+	assert_eq(lm._logic_section_name, "Begin")
+	assert_true(list.is_selected(begin_row), "sidebar selection mirrors the open state")
+	list.item_selected.emit(0)
+	await get_tree().process_frame
+	assert_true(lm.get_node("%SectionMap").visible, "the map row returns to the map")
+	assert_true(list.is_selected(0), "sidebar selection follows back to the map row")
+
+
 func _button_with_text(root: Node, text: String) -> Button:
 	if root == null:
 		return null
