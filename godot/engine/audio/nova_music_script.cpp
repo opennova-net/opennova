@@ -456,6 +456,52 @@ static const char *ast_switch_action_name(int inner_op) {
 
 static Array ast_stmts_to_array(const MusAstProgram *prog, const MusAstStmt *stmts, uint32_t count);
 
+// Structured expression tree -> the editor's MusExpr node-dict shape
+// (modtools/music/mus_expr.gd): kinds share the same integer values, so
+// MusExpr.serialize(dict) reproduces the canonical flat text byte-for-byte.
+static Dictionary ast_expr_to_dict(const MusAstExpr *e) {
+	Dictionary d;
+	if (e == nullptr) {
+		return d;
+	}
+	d["kind"] = (int64_t)e->kind;
+	switch (e->kind) {
+		case MUS_EXPR_LITERAL:
+			d["value"] = (int64_t)e->value;
+			break;
+		case MUS_EXPR_VARREF:
+			d["form"] = String(e->var_form);
+			d["index"] = (int64_t)e->var_index;
+			d["name"] = String(e->name);
+			break;
+		case MUS_EXPR_ME:
+			break;
+		case MUS_EXPR_BINOP:
+			d["op"] = String(e->op);
+			d["left"] = ast_expr_to_dict(e->left);
+			d["right"] = ast_expr_to_dict(e->right);
+			break;
+		case MUS_EXPR_UNOP:
+			d["op"] = String(e->op);
+			d["operand"] = ast_expr_to_dict(e->left);
+			break;
+		case MUS_EXPR_CALL:
+			d["intrinsic"] = String(e->name);
+			if (e->left != nullptr) {
+				d["arg"] = ast_expr_to_dict(e->left);
+			} else {
+				d["arg"] = Variant(); // null: no argument
+			}
+			break;
+		case MUS_EXPR_RAW:
+			d["text"] = String(e->name);
+			break;
+		default:
+			break;
+	}
+	return d;
+}
+
 // Resolve a section index to its name via the program's section table, or "".
 static String ast_section_name(const MusAstProgram *prog, int idx) {
 	if (prog != nullptr && idx >= 0 && (uint32_t)idx < prog->section_count) {
@@ -488,6 +534,9 @@ static Dictionary ast_stmt_to_dict(const MusAstProgram *prog, const MusAstStmt &
 			d["rhs"] = String(s.rhs_text ? s.rhs_text : "");
 			d["has_call"] = (bool)s.has_call;
 			d["call_name"] = String(s.call_name ? s.call_name : "");
+			if (s.rhs_tree != nullptr) {
+				d["rhs_tree"] = ast_expr_to_dict(s.rhs_tree);
+			}
 			break;
 		case MUS_AST_INCDEC:
 			d["var_name"] = String(s.var_name ? s.var_name : "");
@@ -499,10 +548,16 @@ static Dictionary ast_stmt_to_dict(const MusAstProgram *prog, const MusAstStmt &
 			d["expr"] = String(s.expr_text ? s.expr_text : "");
 			d["has_call"] = (bool)s.has_call;
 			d["call_name"] = String(s.call_name ? s.call_name : "");
+			if (s.expr_tree != nullptr) {
+				d["expr_tree"] = ast_expr_to_dict(s.expr_tree);
+			}
 			break;
 		case MUS_AST_BRANCH_COMMENT:
 			d["expr"] = String(s.expr_text ? s.expr_text : "");
 			d["target_section"] = (int64_t)s.target_section;
+			if (s.expr_tree != nullptr) {
+				d["expr_tree"] = ast_expr_to_dict(s.expr_tree);
+			}
 			break;
 		case MUS_AST_FRAME_ENTER:
 			// Frame setup (0x38): read-only annotation. Carry the locals dword
@@ -512,6 +567,9 @@ static Dictionary ast_stmt_to_dict(const MusAstProgram *prog, const MusAstStmt &
 			break;
 		case MUS_AST_IF:
 			d["expr"] = String(s.expr_text ? s.expr_text : "");
+			if (s.expr_tree != nullptr) {
+				d["expr_tree"] = ast_expr_to_dict(s.expr_tree);
+			}
 			d["then"] = ast_stmts_to_array(prog, s.then_body, s.then_count);
 			// else_body non-NULL marks an if/else (the else block exists even when empty).
 			d["else_present"] = (bool)(s.else_body != nullptr);
@@ -519,6 +577,9 @@ static Dictionary ast_stmt_to_dict(const MusAstProgram *prog, const MusAstStmt &
 			break;
 		case MUS_AST_SWITCH: {
 			d["expr"] = String(s.expr_text ? s.expr_text : "");
+			if (s.expr_tree != nullptr) {
+				d["expr_tree"] = ast_expr_to_dict(s.expr_tree);
+			}
 			d["action"] = String(ast_switch_action_name(s.switch_action));
 			Array targets;
 			for (uint32_t t = 0; t < s.target_count; ++t) {
