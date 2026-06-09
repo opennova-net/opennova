@@ -367,26 +367,38 @@ func test_edit_if_body_target_through_document():
 	assert_eq(then0, "enter Win000", "the if's then-branch transition now targets Win000")
 
 
-# --- frame-setup (0x38) renders locked (the IDA fidelity fix) ------------
+# --- frame-setup (0x38) is hidden engine plumbing ------------------------
 
-func test_frame_enter_renders_locked_no_tools():
-	# enter (0x38) is frame setup, not a transition: it renders as a read-only
-	# "Frame setup" node with NO ✎/✕/↑/↓ and NO "open ▸", even in an editable graph,
-	# so it can never be mutated (its operand is a frame size, not a section target).
+func test_frame_enter_is_hidden_and_offset_carries():
+	# enter (0x38) is frame setup, not an authored statement: it renders NO node at
+	# all. Its byte offset transfers to the first visible node (so the live
+	# highlight resolves while the pc sits on the hidden op), ordinals stay raw AST
+	# indices (the play is still ordinal 1), the first visible statement does not
+	# offer ↑ (ordinal 0 is the immovable hidden row), and the host can read the
+	# state's input count for its header.
 	var g := _egraph({
 		"index": 0, "name": "S", "statements": [
 			{"kind": "frame_enter", "code_offset": 0, "locals_count": 2, "text": "enter X"},
 			{"kind": "play", "code_offset": 2, "track": 0, "text": "play sound_0"},
+			{"kind": "play", "code_offset": 4, "track": 1, "text": "play sound_1"},
 		],
 	})
 	await get_tree().process_frame
-	var fe := _node_titled(g, "Frame setup")
-	assert_not_null(fe, "the 0x38 op renders as a 'Frame setup' node")
-	assert_null(_button_in(fe, "✕"), "frame setup carries no delete tool")
-	assert_null(_button_in(fe, "✎"), "frame setup carries no edit tool")
-	assert_null(_button_in(fe, "open ▸"), "frame setup is not a navigable to-state node")
-	# The sibling play still gets its tools, proving the lock is frame_enter-specific.
-	assert_not_null(_button_in(_node_titled(g, "Play"), "✕"), "a normal sibling still has tools")
+	assert_null(_node_titled(g, "Frame setup"), "the 0x38 op renders no node")
+	assert_eq(_nodes(g).size(), 2, "only the two plays render")
+	var first := _node_with_ordinal(g, 1)
+	assert_not_null(first, "the play after the hidden row keeps its raw ordinal (1)")
+	assert_eq(g.section_inputs_count(), 2, "the hidden frame op surfaces as an input count")
+	# Live highlight: a pc on the hidden op's offset lights the first visible node.
+	g.set_active_offset(0)
+	assert_eq(g._active_node, first, "the hidden offset carries onto the first visible node")
+	# Reorder affordance: the first VISIBLE statement must not offer ↑ (it would
+	# swap with the locked hidden row and the document would refuse).
+	var up := _button_in(first, "↑")
+	assert_not_null(up, "tool cluster present on the first visible statement")
+	assert_true(up.disabled, "↑ disabled on the first movable statement")
+	var second := _node_with_ordinal(g, 2)
+	assert_false(_button_in(second, "↑").disabled, "the next statement can still move up")
 
 
 func test_frame_enter_present_in_gamemus_and_uneditable():

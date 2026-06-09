@@ -1410,6 +1410,12 @@ func _update_breadcrumb_status(section_name: String) -> void:
 		parts.append("↻ loops to itself")
 	elif _section_is_unlinked(section_name):
 		parts.append("unlinked — nothing points here yet")
+	# The hidden frame-setup op means a caller hands this state values; say so in
+	# plain language instead of rendering engine plumbing as a node.
+	if _logic_graph != null and _logic_graph.has_method("section_inputs_count"):
+		var inputs: int = _logic_graph.section_inputs_count()
+		if inputs > 0:
+			parts.append("takes %d input%s from the caller" % [inputs, "" if inputs == 1 else "s"])
 	_breadcrumb_label.text = "   " + " · ".join(parts) if parts.size() > 0 else ""
 
 

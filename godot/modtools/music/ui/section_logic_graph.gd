@@ -17,8 +17,12 @@ extends GraphEdit
 # are edited statement-by-statement here, while a non-flat if (a nested if/switch in a
 # body) stays a read-only annotation -- none occurs in stock and the forms can't author
 # one, so no edit path is lost (there is no raw-script editor; it was removed).
-# The frame-setup op (0x38) renders as a locked, non-navigable note (it is engine
-# state setup, not a transition, and must never be edited as one).
+# The frame-setup op (0x38) is NOT rendered at all: it is engine plumbing (it
+# reserves the call-argument slots a `callvl` caller pushed), not a statement the
+# author placed, so the graph hides it. Its byte offset is carried onto the next
+# rendered node (live highlight still resolves at section entry), its ordinal
+# still counts (the write path addresses raw AST indices), and the section's
+# input count surfaces via section_inputs_count() for the host's header.
 #
 # Layout is deterministic (left-to-right flow by a monotonic column, branch depth
 # down the Y axis) so it never reshuffles and tests can assert topology. Runs of
@@ -59,7 +63,6 @@ const _KIND_STYLE := {
 	"if": ["◇ If", Color(1.00, 0.85, 0.45)],
 	"switch": ["⋔ On", Color(0.50, 0.85, 0.90)],
 	"branch_comment": ["⌥ Branch", Color(0.55, 0.55, 0.55)],
-	"frame_enter": ["▣ Frame setup", Color(0.52, 0.52, 0.52)],
 }
 
 const _EXEC_PIN := Color(0.85, 0.85, 0.85)   # neutral exec wire
@@ -84,6 +87,15 @@ var _section_dict: Dictionary = {}
 # Set of run-start ordinals the user has expanded (folded ×N -> individual rows).
 # Carries across a re-render; reset when a different section is shown.
 var _unfolded: Dictionary = {}
+# Byte offsets of hidden frame-setup (0x38) rows awaiting the next rendered node,
+# so set_active_offset still resolves while the VM pc sits on the hidden op.
+var _pending_offsets: Array = []
+# Sum of the hidden frame ops' locals counts: how many inputs a `callvl` caller
+# hands this state. Surfaced by the host's header, not by a node.
+var _section_inputs: int = 0
+# Ordinal of the first statement the user may actually move/edit (a hidden
+# leading frame op still owns ordinal 0, and the document refuses to touch it).
+var _first_movable_ordinal: int = 0
 
 # Stage 3 authoring context (set by the host via configure_authoring).
 var _editable: bool = false
@@ -119,12 +131,20 @@ func show_section(section: Dictionary, bank_names: Array) -> void:
 	_node_seq = 0
 	_offset_nodes = []
 	_active_node = null
+	_pending_offsets = []
 	clear_connections()
 	for c in get_children():
 		if c is GraphNode:
 			remove_child(c)
 			c.queue_free()
 	var stmts: Array = section.get("statements", [])
+	_section_inputs = 0
+	_first_movable_ordinal = 0
+	for i in range(stmts.size()):
+		if String((stmts[i] as Dictionary).get("kind", "")) == "frame_enter":
+			_section_inputs += int((stmts[i] as Dictionary).get("locals_count", 0))
+			if _first_movable_ordinal == i:
+				_first_movable_ordinal = i + 1
 	if _is_empty_section_body(stmts):
 		_build_empty_hint()
 	else:
@@ -134,6 +154,12 @@ func show_section(section: Dictionary, bank_names: Array) -> void:
 
 func current_section_index() -> int:
 	return _section_index
+
+
+# How many inputs the shown state takes from a caller (the hidden frame-setup
+# ops' locals counts). The host surfaces this in its header; 0 for most states.
+func section_inputs_count() -> int:
+	return _section_inputs
 
 
 # --- build ---------------------------------------------------------------
@@ -151,6 +177,14 @@ func _build_seq(stmts: Array, depth: int, parent_ordinal: int) -> Dictionary:
 	while i < stmts.size():
 		var s: Dictionary = stmts[i]
 		var kind := String(s.get("kind", ""))
+		# Frame setup (0x38) is engine plumbing, not an authored statement: skip the
+		# node entirely but bank its byte offset for the next rendered node (so the
+		# live highlight resolves while the pc sits on it) and keep counting i -- the
+		# write path addresses raw AST ordinals, so hiding must not renumber.
+		if kind == "frame_enter":
+			_pending_offsets.append(int(s.get("code_offset", -1)))
+			i += 1
+			continue
 		var ordinal := parent_ordinal if parent_ordinal >= 0 else i
 		var run := 1
 		if kind in _FOLDABLE:
@@ -189,10 +223,9 @@ func _build_seq(stmts: Array, depth: int, parent_ordinal: int) -> Dictionary:
 			built = _build_stmt(s, depth, ordinal)
 			i += 1
 		# Edit only unambiguous, individually-addressable statements: a top-level
-		# node that isn't a folded ×N run, and not the read-only frame-setup op
-		# (0x38) which the engine runs but the editor must never mutate. Folds +
-		# nested bodies stay read-only on the graph.
-		if _editable and top and run == 1 and kind != "frame_enter" and built.has("node"):
+		# node that isn't a folded ×N run. Folds + nested bodies stay read-only on
+		# the graph.
+		if _editable and top and run == 1 and built.has("node"):
 			_attach_tools(built["node"], s, ordinal, stmts.size())
 		if entry.is_empty():
 			entry = built["entry"]
@@ -209,14 +242,19 @@ func _rerender() -> void:
 		show_section(_section_dict, _bank_names)
 
 
+# Treat a section as empty when nothing AUTHORED remains: hidden frame-setup
+# rows and the trailing done don't count (a frame+done body is a callable that
+# does nothing yet -- show the add-your-first-statement hint, not a lone Done).
 func _is_empty_section_body(stmts: Array) -> bool:
-	if stmts.is_empty():
-		return true
-	if stmts.size() != 1:
-		return false
-	if not (stmts[0] is Dictionary):
-		return false
-	return String((stmts[0] as Dictionary).get("kind", "")) == "done"
+	var authored := 0
+	for s in stmts:
+		if not (s is Dictionary):
+			return false
+		var k := String((s as Dictionary).get("kind", ""))
+		if k == "frame_enter" or k == "done":
+			continue
+		authored += 1
+	return authored == 0
 
 
 # The ⊞ unfold / ⊟ fold affordance on a folded run's node. Toggles the run-start
@@ -287,29 +325,8 @@ func _build_stmt(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
 			return _build_switch(s, depth, ordinal)
 		"transition", "goto", "call":
 			return _build_jump(s, depth, ordinal)
-		"frame_enter":
-			return _build_frame_enter(s, depth, ordinal)
 		_:
 			return _build_simple(s, depth, ordinal, 1)
-
-
-# enter (0x38) = FRAME SETUP, not a transition. Render a muted, read-only node so
-# the op stays VISIBLE (the engine really runs it) but never looks navigable or
-# editable: its operand is a locals dword count, not a section index, so unlike a
-# real `enter`/`setstate` there is no "open ▸" and no tool cluster (the _build_seq
-# guard skips frame_enter). 0x38 does not move the IP, so flow continues -- a
-# non-terminal exec out pin.
-func _build_frame_enter(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
-	var gn := _new_node("frame_enter", ordinal, depth)
-	var n := int(s.get("locals_count", 0))
-	var body := Label.new()
-	body.text = "reserves %d local%s · read-only" % [n, "" if n == 1 else "s"]
-	body.add_theme_color_override("font_color", Color(0.55, 0.55, 0.55))
-	body.tooltip_text = "Frame setup (engine op 0x38): reserves local slots. Not a state change, and not editable -- its value is a frame size, not a target."
-	gn.add_child(body)
-	_register(gn, int(s.get("code_offset", -1)))
-	gn.set_slot(0, true, 0, _IN_PIN, true, 0, _EXEC_PIN)
-	return {"entry": [gn.name, 0], "exits": [[gn.name, 0]], "node": gn}
 
 
 # A single-row node (play/assign/incdec/expr/return/yield/nop/done/branch_comment).
@@ -455,6 +472,11 @@ func _build_branch(if_dict: Dictionary, if_ordinal: int, branch: String, depth: 
 	var flat := _if_flat_editable(if_dict)
 	for i in range(stmts.size()):
 		var st: Dictionary = stmts[i]
+		if String(st.get("kind", "")) == "frame_enter":
+			# Engine plumbing stays hidden inside bodies too (never occurs in
+			# stock, but a body row must not render as an editable statement).
+			_pending_offsets.append(int(st.get("code_offset", -1)))
+			continue
 		var built := _build_stmt(st, depth, if_ordinal)
 		if flat and built.has("node"):
 			_attach_branch_tools(built["node"], if_dict, if_ordinal, branch, i, st, stmts.size())
@@ -656,6 +678,12 @@ func _wire(from_pin: Array, to_pin: Array) -> void:
 
 
 func _register(gn: GraphNode, offset: int) -> void:
+	# Adopt any hidden frame-setup offsets banked since the last node, so the
+	# live highlight lights this (first visible) node while the pc is on them.
+	for off in _pending_offsets:
+		if int(off) >= 0:
+			_offset_nodes.append({"node": gn, "offset": int(off)})
+	_pending_offsets.clear()
 	if offset >= 0:
 		_offset_nodes.append({"node": gn, "offset": offset})
 
@@ -863,7 +891,10 @@ func _attach_tools(gn: GraphNode, s: Dictionary, ordinal: int, statement_count: 
 	var del := _tool_btn("✕", "Delete")
 	del.pressed.connect(func(): delete_statement_requested.emit(_section_index, ordinal))
 	box.add_child(del)
-	var can_move_up := ordinal > 0
+	# First MOVABLE ordinal, not 0: a hidden leading frame-setup row still owns
+	# ordinal 0 and the document refuses to swap with it -- without this guard the
+	# first visible statement would offer ↑ and fail with an unexplained flash.
+	var can_move_up := ordinal > _first_movable_ordinal
 	var up := _tool_btn("↑", "Move up" if can_move_up else "Already the first statement")
 	up.disabled = not can_move_up
 	if can_move_up:
