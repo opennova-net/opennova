@@ -8,13 +8,16 @@
 
 #include "audio/nova_music_director.h"
 #include "audio/nova_sbf_audio_stream.h"
+#include "lwf/nova_wav_loader.h"
 
 #include <godot_cpp/classes/audio_stream_player.hpp>
+#include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/classes/base_button.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
 
@@ -45,6 +48,10 @@ void NovaMnuMenu::set_stylesheet(const Ref<MnsStyleSheet> &p_sheet) {
 
 void NovaMnuMenu::set_text_resource(const Ref<RtxtStringFile> &p_text) {
 	text_resource_ = p_text;
+}
+
+void NovaMnuMenu::set_sound_profile(const Ref<NovaLwfData> &p_profile) {
+	sound_profile_ = p_profile;
 }
 
 void NovaMnuMenu::set_sound_bank(const Ref<NovaSbfBank> &p_bank) {
@@ -481,10 +488,85 @@ void NovaMnuMenu::ensure_sound_pool() {
 
 void NovaMnuMenu::play_widget_sound(const String &p_trigger, const String &p_file) {
 	emit_signal("sound_requested", p_file, p_trigger);
-	if (edit_mode_ || sound_bank_.is_null()) {
+	if (edit_mode_) {
 		return;
 	}
+	// Faithful path: the <SOUND> file is a .lwf profile whose set is named by the
+	// trigger (MOUSE_OVER / CLICK_SELECT / ...). Resolve set -> member -> .wav.
+	if (play_profile_sound(p_trigger)) {
+		return;
+	}
+	// Legacy fallback: an SBF bank keyed by trigger / file stem (pre-LWF wiring).
+	play_sbf_sound(p_trigger, p_file);
+}
 
+bool NovaMnuMenu::play_profile_sound(const String &p_trigger) {
+	if (sound_profile_.is_null() || resource_root_.is_null() || p_trigger.is_empty()) {
+		return false;
+	}
+	const String want = p_trigger.to_upper();
+	const int set_count = sound_profile_->get_set_count();
+	for (int si = 0; si < set_count; ++si) {
+		const Dictionary set_d = sound_profile_->get_set(si);
+		if (String(set_d.get("name", "")).to_upper() != want) {
+			continue;
+		}
+		// Audition the first member of the first non-empty layer (FIRST selection;
+		// deterministic). RANDOM/SEQUENTIAL variation is a later RE refinement.
+		const Array layers = set_d.get("layers", Array());
+		for (int li = 0; li < layers.size(); ++li) {
+			const Dictionary layer_d = layers[li];
+			const Array members = layer_d.get("members", Array());
+			if (members.size() > 0) {
+				return play_member_sound(Dictionary(members[0]));
+			}
+		}
+		return false; // set matched but carried no members
+	}
+	return false;
+}
+
+bool NovaMnuMenu::play_member_sound(const Dictionary &p_member) {
+	const String wav_path = p_member.get("wav_path", "");
+	if (wav_path.is_empty()) {
+		return false;
+	}
+	// LWF paths are Windows-style (e.g. "SFX\\MENU\\MSOVR_2.wav"); the resource
+	// root resolves the loose .wav by basename.
+	const String name = wav_path.replace("\\", "/").get_file();
+	if (name.is_empty()) {
+		return false;
+	}
+	const PackedByteArray bytes = resource_root_->read_file(name);
+	if (bytes.is_empty()) {
+		return false;
+	}
+	Ref<AudioStreamWAV> stream = NovaWavLoader::from_bytes(bytes);
+	if (stream.is_null()) {
+		return false;
+	}
+
+	ensure_sound_pool();
+	if (sound_players_.is_empty()) {
+		return false;
+	}
+	AudioStreamPlayer *player = sound_players_[next_sound_player_];
+	next_sound_player_ = (next_sound_player_ + 1) % sound_players_.size();
+	player->set_stream(stream);
+	const float base_pitch = (float)p_member.get("base_pitch", 1.0);
+	player->set_pitch_scale(base_pitch > 0.01f ? base_pitch : 1.0f);
+	const int volume = (int)p_member.get("volume", 255);
+	double lin = (double)volume / 255.0;
+	lin = lin < 0.0 ? 0.0 : (lin > 1.0 ? 1.0 : lin);
+	player->set_volume_db(volume > 0 ? (float)UtilityFunctions::linear_to_db(lin) : -80.0f);
+	player->play();
+	return true;
+}
+
+bool NovaMnuMenu::play_sbf_sound(const String &p_trigger, const String &p_file) {
+	if (sound_bank_.is_null()) {
+		return false;
+	}
 	// Prefer the trigger as the bank key (the reference keys sounds by trigger);
 	// fall back to the file's stem (e.g. "menu.lwf" -> "MENU").
 	StringName entry;
@@ -497,22 +579,23 @@ void NovaMnuMenu::play_widget_sound(const String &p_trigger, const String &p_fil
 		}
 	}
 	if (entry == StringName()) {
-		return;
+		return false;
 	}
 
 	Ref<NovaSbfAudioStream> stream = sound_bank_->get_stream(entry);
 	if (stream.is_null()) {
-		return;
+		return false;
 	}
 
 	ensure_sound_pool();
 	if (sound_players_.is_empty()) {
-		return;
+		return false;
 	}
 	AudioStreamPlayer *player = sound_players_[next_sound_player_];
 	next_sound_player_ = (next_sound_player_ + 1) % sound_players_.size();
 	player->set_stream(stream);
 	player->play();
+	return true;
 }
 
 void NovaMnuMenu::notify_widget_value(const String &p_widget_name, const String &p_kind,
@@ -529,6 +612,8 @@ void NovaMnuMenu::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_stylesheet"), &NovaMnuMenu::get_stylesheet);
 	ClassDB::bind_method(D_METHOD("set_text_resource", "text"), &NovaMnuMenu::set_text_resource);
 	ClassDB::bind_method(D_METHOD("get_text_resource"), &NovaMnuMenu::get_text_resource);
+	ClassDB::bind_method(D_METHOD("set_sound_profile", "profile"), &NovaMnuMenu::set_sound_profile);
+	ClassDB::bind_method(D_METHOD("get_sound_profile"), &NovaMnuMenu::get_sound_profile);
 	ClassDB::bind_method(D_METHOD("set_sound_bank", "bank"), &NovaMnuMenu::set_sound_bank);
 	ClassDB::bind_method(D_METHOD("get_sound_bank"), &NovaMnuMenu::get_sound_bank);
 	ClassDB::bind_method(D_METHOD("set_music_director", "director"), &NovaMnuMenu::set_music_director);

@@ -637,6 +637,69 @@ func test_play_widget_sound_without_bank_is_signal_only() -> void:
 	assert_null(menu.find_child("_MnuSound0", true, false), "no audio players without a bank")
 
 
+const MENU_SOUND_DIR := "res://../fixtures/menu_sound"  # menu.LWF + its loose .wav members
+
+
+# Build a menu wired to the real menu.lwf profile over the menu_sound fixtures
+# dir. Returns null when the fixtures/resource root are unavailable (caller skips).
+func _menu_with_profile() -> NovaMnuMenu:
+	var root := NovaResourceRoot.new()
+	if root.set_root_dir(ProjectSettings.globalize_path(MENU_SOUND_DIR)) != OK:
+		return null
+	var profile := NovaLwfData.new()
+	if profile.open_from_resource_root(root, "menu.LWF") != OK or profile.get_set_count() == 0:
+		return null
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	menu.set_edit_mode(false)
+	menu.set_resource_root(root)
+	menu.set_sound_profile(profile)
+	add_child_autofree(menu)
+	return menu
+
+
+func _has_playing_stream(menu: NovaMnuMenu) -> bool:
+	for child in menu.get_children():
+		if child is AudioStreamPlayer and (child as AudioStreamPlayer).stream != null:
+			return true
+	return false
+
+
+func test_lwf_profile_resolves_trigger_to_wav_and_plays() -> void:
+	# The faithful path: the trigger names a set in menu.lwf, whose member resolves
+	# to a loose .wav (MOUSE_OVER -> MSOVR_*.wav) that gets decoded onto the pool.
+	var menu := _menu_with_profile()
+	if menu == null:
+		pass_test("menu_sound fixtures unavailable")
+		return
+	watch_signals(menu)
+	menu.play_widget_sound("MOUSE_OVER", "menu.lwf")
+	assert_signal_emitted_with_parameters(menu, "sound_requested", ["menu.lwf", "MOUSE_OVER"])
+	assert_true(_has_playing_stream(menu), "MOUSE_OVER resolves menu.lwf -> a .wav and plays it")
+
+
+func test_lwf_profile_unknown_trigger_plays_nothing() -> void:
+	# An unknown trigger matches no set: emit the signal, but resolve to silence
+	# (no SBF fallback noise, no pooled player materialized).
+	var menu := _menu_with_profile()
+	if menu == null:
+		pass_test("menu_sound fixtures unavailable")
+		return
+	menu.play_widget_sound("NOT_A_TRIGGER", "menu.lwf")
+	assert_false(_has_playing_stream(menu), "an unknown trigger plays nothing")
+
+
+func test_lwf_profile_inert_in_edit_mode() -> void:
+	# Edit mode (the ONED preview) suppresses audio even with a valid profile.
+	var menu := _menu_with_profile()
+	if menu == null:
+		pass_test("menu_sound fixtures unavailable")
+		return
+	menu.set_edit_mode(true)
+	menu.play_widget_sound("MOUSE_OVER", "menu.lwf")
+	assert_false(_has_playing_stream(menu), "edit mode keeps the menu silent")
+
+
 func test_navigation_stack_clear_and_no_redundant_push() -> void:
 	var menu := _build_menu()
 	# Navigating to the already-current screen must not self-push.

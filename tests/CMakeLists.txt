@@ -106,6 +106,13 @@ target_link_libraries(lwf_roundtrip_test PRIVATE opennova_lwf)
 target_include_directories(lwf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME lwf_roundtrip COMMAND lwf_roundtrip_test)
 
+# The menu sound profile (fixtures/menu_sound/menu.LWF): trigger sets resolve to
+# loose .wav members (drives MNU hover/click via NovaMnuMenu).
+add_executable(menu_lwf_test lwf/menu_lwf_test.cpp)
+target_link_libraries(menu_lwf_test PRIVATE opennova_lwf)
+target_include_directories(menu_lwf_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_lwf COMMAND menu_lwf_test)
+
 # DBF dialog-bank tests: byte-exact round-trip + dlg-id -> def-id mapping over a
 # real JO fixture (fixtures/dbf/00TRg.DBF).
 add_executable(dbf_roundtrip_test dbf/dbf_roundtrip_test.cpp)

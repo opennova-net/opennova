@@ -38,6 +38,9 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 # name through the VFS instead. A blank value falls back to the first .mns found.
 @export var menu_stylesheet_file := "menu_style.mns"
 @export var menu_sound_bank_file := ""   # "" -> a .sbf whose name contains "menu", else first
+# Menu SFX profile: the .lwf the widgets' <SOUND> elements reference (hover/click).
+# "" -> a .lwf whose name contains "menu" (i.e. menu.lwf), else the first .lwf found.
+@export var menu_sound_profile_file := ""
 @export var menu_music_file := ""        # "" -> a .mus/.bin whose name contains "menu", else first
 @export var game_music_file := ""        # "" -> a .mus/.bin whose name contains "game", else first
 
@@ -83,6 +86,7 @@ var _root: NovaResourceRoot
 var _text: RtxtStringFile
 var _style: MnsStyleSheet
 var _sound_bank: NovaSbfBank
+var _sound_profile: NovaLwfData
 var _menu_music: NovaMusicScript
 var _game_music: NovaMusicScript
 
@@ -127,6 +131,7 @@ func _assemble_assets() -> void:
 	_text = _load_text(menu_text_file)
 	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
 	_sound_bank = _load_bank(_discover_path(menu_sound_bank_file, ".sbf", "menu"))
+	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))
 	_menu_music = _load_music(_discover_music(menu_music_file, "menu"))
 	_game_music = _load_music(_discover_music(game_music_file, "game"))
 	if _sound_bank != null:
@@ -141,8 +146,10 @@ func _assemble_assets() -> void:
 		_menu.set_stylesheet(_style)
 	if _text != null:
 		_menu.set_text_resource(_text)
-	if _sound_bank != null:
-		_menu.set_sound_bank(_sound_bank)
+	# Menu hover/click SFX come from the .lwf profile (set-by-trigger -> .wav). The
+	# SBF stays on the music director only; it is not the menu's SFX source.
+	if _sound_profile != null:
+		_menu.set_sound_profile(_sound_profile)
 	_menu.set_music_director(_director)
 	_menu.set_music_var_index(MUSIC_VAR_INDEX)
 	add_child(_menu)
@@ -550,6 +557,18 @@ func _load_bank(path: String) -> NovaSbfBank:
 	var b := NovaSbfBank.new()
 	b.load_from_path(path)
 	return b if b.get_entry_count() > 0 else null
+
+
+# The menu SFX profile (menu.lwf) loads by name through the VFS so it resolves
+# from PFF archives too; its members point at loose .wav files the menu resolves
+# on demand. Degrades to null (silent menu SFX) when absent.
+func _load_sound_profile(name: String) -> NovaLwfData:
+	if _root == null or name.is_empty():
+		return null
+	var d := NovaLwfData.new()
+	if d.open_from_resource_root(_root, name) != OK:
+		return null
+	return d if d.is_loaded() and d.get_set_count() > 0 else null
 
 
 # Music scripts carry an SCR encryption layer that only the registered loader

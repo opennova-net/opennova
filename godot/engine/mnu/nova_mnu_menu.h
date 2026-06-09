@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include "audio/nova_sbf_bank.h"
+#include "lwf/nova_lwf_data.h"
 #include "mns_stylesheet.h"
 #include "nova_mnu_document.h"
 #include "resource_index/nova_resource_root.h"
@@ -40,6 +41,11 @@ private:
 	Ref<NovaResourceRoot> resource_root_;
 	Ref<MnsStyleSheet> stylesheet_;
 	Ref<RtxtStringFile> text_resource_;
+	// Menu SFX come from a .lwf sound profile: the widget's <SOUND> trigger
+	// (MOUSE_OVER/CLICK_SELECT/...) names a set whose member points at a loose
+	// .wav (resolved through resource_root_). sound_bank_ is the legacy pre-LWF
+	// path (an SBF keyed by trigger/file-stem), kept only as a fallback.
+	Ref<NovaLwfData> sound_profile_;
 	Ref<NovaSbfBank> sound_bank_;
 	NovaMusicDirector *music_director_ = nullptr;
 	int music_var_index_ = 0;
@@ -76,6 +82,15 @@ private:
 	void on_screen_shown(const String &p_name);
 	void apply_music_for_screen(NovaMnuScreen *p_screen);
 	void ensure_sound_pool();
+	// Resolve a trigger to a set in sound_profile_ and play its first member's
+	// .wav through the pool; returns false (so the caller can fall back) when no
+	// profile, no matching set, or the wav can't be resolved/decoded.
+	bool play_profile_sound(const String &p_trigger);
+	// Decode a resolved member dict's .wav via the resource root and play it on
+	// the next pooled player with the member's pitch/volume. Returns true if it played.
+	bool play_member_sound(const Dictionary &p_member);
+	// Legacy SBF-keyed playback (pre-LWF). Returns true if it played.
+	bool play_sbf_sound(const String &p_trigger, const String &p_file);
 	// Nulls music_director_ if the host frees it out from under us (the menu does
 	// not own the director, so its pointer can otherwise dangle).
 	void on_director_exiting();
@@ -104,6 +119,11 @@ public:
 
 	void set_text_resource(const Ref<RtxtStringFile> &p_text);
 	Ref<RtxtStringFile> get_text_resource() const { return text_resource_; }
+
+	// Menu SFX profile (menu.lwf). When set, hover/click resolve through it
+	// (set-by-trigger -> member -> .wav) instead of the legacy SBF bank.
+	void set_sound_profile(const Ref<NovaLwfData> &p_profile);
+	Ref<NovaLwfData> get_sound_profile() const { return sound_profile_; }
 
 	void set_sound_bank(const Ref<NovaSbfBank> &p_bank);
 	Ref<NovaSbfBank> get_sound_bank() const { return sound_bank_; }
