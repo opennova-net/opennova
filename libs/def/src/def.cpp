@@ -780,6 +780,9 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         } else if (lower_match_key(lower, ll, "sound_profile", 13)) {
             consume_value_str(trimmed, tlen, 13, current.sound_profile, sizeof(current.sound_profile));
             parsed = 1;
+        /* [orig: ItemDef_ParseProperty @ 0x49eb00 -- "soundloop_" prefix @ 0x49fec4,
+           nightshot/duskshot/dawnshot @ 0x49fdee; the 7-slot range matches the
+           engine's Soundloop_1..7 sound-type table @ 0x7d0788] */
         } else if (lower_starts_with(lower, ll, "soundloop_", 10) && ll > 10) {
             char idx_char = lower[10];
             if (idx_char >= '1' && idx_char <= '7') {

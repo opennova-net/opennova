@@ -36,6 +36,8 @@ var _resource_root: NovaResourceRoot
 var _loaded: bool = false
 var _loaded_mission: NovaMissionData
 var _mission_stats: Dictionary = {}
+var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
+var _mission_audio: NovaMissionAudio
 
 
 func _ready() -> void:
@@ -120,6 +122,7 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 
 	_loaded_mission = mission
 	_place_mission_objects(mission)
+	_start_mission_audio(mission, bms_name)
 	_loaded = true
 	world_loaded.emit()
 	return OK
@@ -145,8 +148,8 @@ func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 func _place_mission_objects(mission: NovaMissionData) -> void:
 	if _resource_root == null or mission == null:
 		return
-	var placer := MissionObjectPlacer.new(_resource_root)
-	_mission_stats = placer.place(mission, self, { "environment_node": _env })
+	_placer = MissionObjectPlacer.new(_resource_root)
+	_mission_stats = _placer.place(mission, self, { "environment_node": _env })
 	print("NovaWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
 		int(_mission_stats.get("placed", 0)),
 		int(_mission_stats.get("batched", 0)),
@@ -173,8 +176,12 @@ func unload() -> void:
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
 	if container != null:
 		container.queue_free()
+	if _mission_audio != null:
+		_mission_audio.teardown()
 	_loaded = false
 	_loaded_mission = null
+	_mission_audio = null
+	_placer = null
 	_mission_stats = {}
 
 
@@ -236,7 +243,31 @@ func is_loaded() -> bool:
 	return _loaded
 
 
-## Drive per-frame foliage coverage around the viewer.
+## Drive per-frame foliage coverage around the viewer, then the mission audio's
+## voice culling.
 func tick(camera_pos: Vector3) -> void:
 	if _loaded and _dispatcher != null:
 		_dispatcher.dispatch(camera_pos)
+	if _loaded and _mission_audio != null:
+		_mission_audio.tick(camera_pos)
+
+
+# Place real ambient sounds at the mission's sound markers: load the co-named .LWF
+# + the global banks (engine slot order), resolve each marker to a sound set by
+# name, and spawn looping 3D voices. Reuses the placer's item database for the
+# item_id -> soundloop lookup. [orig: bank slots @ Game_StartMission 0x525448;
+# dialog bank @ DialogManager_LoadFromFile 0x44e7d4]
+func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
+	var item_db = _placer.get_item_db() if _placer != null else null
+	_mission_audio = NovaMissionAudio.new(_resource_root, item_db)
+	var stats := _mission_audio.setup(mission, bms_name, self)
+	print("NovaWorld: mission audio — %d/%d sound markers resolved, %d bank(s), %d voice(s)" % [
+		int(stats.get("markers_resolved", 0)),
+		int(stats.get("markers_total", 0)),
+		int(stats.get("banks_loaded", 0)),
+		int(stats.get("voices", 0)),
+	])
+
+
+func get_mission_audio() -> NovaMissionAudio:
+	return _mission_audio

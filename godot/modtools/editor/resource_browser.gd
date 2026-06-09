@@ -206,6 +206,8 @@ func _kind_label() -> String:
 			return "mission"
 		"strings":
 			return "strings"
+		"sound":
+			return "sound"
 		"object", "object_project", "object_model", "object_scene":
 			return "object"
 		"music", "sbf", "music_script":
