@@ -208,6 +208,8 @@ func _kind_label() -> String:
 			return "strings"
 		"object", "object_project", "object_model", "object_scene":
 			return "object"
+		"music", "sbf", "music_script":
+			return "music"
 		_:
 			return "resource"
 

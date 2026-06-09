@@ -56,3 +56,58 @@ func test_color_and_line_bind_push_and_emit() -> void:
 	line.text_submitted.emit("world")
 	assert_eq(color_writes, [Color(0, 1, 0, 1)], "color_changed should call the color setter.")
 	assert_eq(text_writes, ["world"], "text_submitted should call the line setter.")
+
+
+func test_option_sync_selects_matching_id_and_guards_echo() -> void:
+	var binder = FieldBinderScript.new()
+	var writes := []
+	var option := OptionButton.new()
+	add_child_autofree(option)
+	option.add_item("Clear"); option.set_item_id(0, 0)
+	option.add_item("Rain"); option.set_item_id(1, 5)
+	binder.bind_option(option, func(info): return int(info.get("weather", 0)), func(v): writes.append(v))
+	binder.sync_from({"weather": 5})
+	assert_eq(option.get_selected_id(), 5, "sync_from should select the item whose id matches the model.")
+	assert_eq(writes.size(), 0, "sync_from must not echo back through the setter.")
+	option.item_selected.emit(0)
+	assert_eq(writes, [0], "A user pick should call the setter with the chosen item id.")
+
+
+func test_option_sync_surfaces_value_absent_from_choices() -> void:
+	# A shipped mission can carry a header enum value outside the editor's curated list. The control
+	# must show that value as a row instead of rendering blank (selected = -1).
+	var binder = FieldBinderScript.new()
+	var option := OptionButton.new()
+	add_child_autofree(option)
+	option.add_item("Clear"); option.set_item_id(0, 0)
+	option.add_item("Rain"); option.set_item_id(1, 5)
+	binder.bind_option(option, func(info): return int(info.get("weather", 0)), func(_v): pass)
+	binder.sync_from({"weather": 9})
+	assert_eq(option.get_selected_id(), 9, "an out-of-range value should be surfaced as a selectable row.")
+	assert_eq(option.item_count, 3, "exactly one fallback row should be appended.")
+	# Re-syncing must not pile up duplicate fallback rows.
+	binder.sync_from({"weather": 11})
+	assert_eq(option.get_selected_id(), 11, "the fallback should track the current out-of-range value.")
+	assert_eq(option.item_count, 3, "the prior fallback row is replaced, not accumulated.")
+	# Returning to an in-range value drops the fallback row entirely.
+	binder.sync_from({"weather": 5})
+	assert_eq(option.get_selected_id(), 5, "an in-range value selects the real row.")
+	assert_eq(option.item_count, 2, "the fallback row is removed once the value is back in range.")
+
+
+func test_line_commits_on_focus_out() -> void:
+	# Leaving a field for another one WITHOUT pressing Enter must still persist the edit. Otherwise the
+	# next model `changed` re-syncs this now-unfocused LineEdit back to its stale model value and
+	# silently blanks the user's typing (the mission-header "Name blanks when you tab to Designer" bug).
+	var binder = FieldBinderScript.new()
+	var writes := []
+	var line := LineEdit.new()
+	add_child_autofree(line)
+	binder.bind_line(line, func(info): return String(info.get("name", "")), func(v): writes.append(v))
+	line.text = "typed but not submitted"
+	line.focus_exited.emit()
+	assert_eq(writes, ["typed but not submitted"], "focus-out should commit the current text once.")
+	# And a programmatic sync_from (which writes .text on unfocused fields) must not echo a commit.
+	binder.sync_from({"name": "from model"})
+	assert_eq(line.text, "from model", "sync_from pushes the model value.")
+	assert_eq(writes.size(), 1, "sync_from must not commit through the setter.")
