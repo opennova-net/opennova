@@ -1630,7 +1630,7 @@ func _on_sound(idx: int, sound_name: StringName, wait: bool) -> void:
 
 
 func _on_echo(arg: int) -> void:
-	_log_typed(EvType.ECHO, "echo %d" % arg)
+	_log_typed(EvType.ECHO, "debug message %d" % arg)
 
 
 # Emitted by the VM when a section runs to its terminal `done`. Treat as a

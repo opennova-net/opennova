@@ -20,16 +20,16 @@ const ExprBuilderClass = preload("res://modtools/music/ui/expr_builder.gd")
 # renders nop as nothing, so an authored nop has no text line and would vanish on
 # the next re-decompile (it couldn't then be deleted/reordered).
 const ADD_ITEMS := [
-	["→  enter a state", "transition"],
-	["↪  goto a label", "goto"],
-	["ƒ  call a state", "call"],
-	["⋔  on (selector) …", "switch"],
+	["→  go to a state", "transition"],
+	["↪  jump to a label", "goto"],
+	["ƒ  run a state and return", "call"],
+	["⋔  choose by value …", "switch"],
 	["◇  if / else", "if"],
 	["✎  set a variable", "assign"],
-	["±  increment / decrement", "incdec"],
-	["ƒ  call a method", "expr"],
-	["⏎  return", "return"],
-	["⏸  yield", "yield"],
+	["±  adjust a variable (+1 / -1)", "incdec"],
+	["ƒ  do an action (volume, flags, …)", "expr"],
+	["⏎  return to caller", "return"],
+	["⏸  wait", "yield"],
 ]
 
 var _section_names: PackedStringArray = PackedStringArray()

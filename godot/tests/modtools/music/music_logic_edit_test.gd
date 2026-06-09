@@ -165,7 +165,7 @@ func test_flat_if_body_statement_is_editable_in_place():
 		],
 	})
 	await get_tree().process_frame
-	var enter := _node_titled(g, "Enter")
+	var enter := _node_titled(g, "Go to state")
 	assert_not_null(enter, "nested enter node present")
 	assert_not_null(_button_in(enter, "✕"), "a flat if-body leaf now carries a delete tool")
 	assert_not_null(_button_in(enter, "✎"), "a flat if-body leaf now carries an edit tool")
@@ -250,7 +250,7 @@ func test_flat_if_branch_reorder_boundaries_disable_with_reason():
 	await get_tree().process_frame
 	var first := _node_titled(g, "Play")
 	var middle := _node_titled(g, "Set")
-	var last := _node_titled(g, "Enter")
+	var last := _node_titled(g, "Go to state")
 	assert_not_null(first, "first branch statement node present")
 	assert_not_null(middle, "middle branch statement node present")
 	assert_not_null(last, "last branch statement node present")

@@ -42,28 +42,10 @@ signal author_failed(message: String)
 
 const MusForms = preload("res://modtools/music/mus_forms.gd")
 const MusStmtText = preload("res://modtools/music/mus_stmt_text.gd")
+const MusDisplayNames = preload("res://modtools/music/mus_display_names.gd")
 
 const COL_W := 250.0
 const ROW_H := 130.0
-
-# glyph + accent colour per statement kind (mirrors the inspector's _ICON family
-# so the two surfaces read the same).
-const _KIND_STYLE := {
-	"play": ["♪ Play", Color(0.60, 0.90, 0.60)],
-	"transition": ["→ Enter", Color(0.55, 0.80, 1.00)],
-	"goto": ["↪ Goto", Color(0.55, 0.80, 1.00)],
-	"call": ["ƒ Call", Color(0.80, 0.65, 1.00)],
-	"return": ["⏎ Return", Color(0.70, 0.70, 0.70)],
-	"yield": ["⏸ Yield", Color(0.70, 0.70, 0.70)],
-	"nop": ["· Nop", Color(0.50, 0.50, 0.50)],
-	"done": ["▪ Done", Color(0.50, 0.50, 0.50)],
-	"assign": ["✎ Set", Color(1.00, 0.78, 0.40)],
-	"incdec": ["± Var", Color(1.00, 0.78, 0.40)],
-	"expr": ["ƒ Run", Color(0.80, 0.65, 1.00)],
-	"if": ["◇ If", Color(1.00, 0.85, 0.45)],
-	"switch": ["⋔ On", Color(0.50, 0.85, 0.90)],
-	"branch_comment": ["⌥ Branch", Color(0.55, 0.55, 0.55)],
-}
 
 const _EXEC_PIN := Color(0.85, 0.85, 0.85)   # neutral exec wire
 const _STATE_PIN := Color(0.55, 0.80, 1.00)  # blue: links to another state
@@ -341,8 +323,8 @@ func _build_simple(s: Dictionary, depth: int, ordinal: int, run: int) -> Diction
 	gn.add_child(body)
 	if bool(s.get("has_call", false)):
 		var b := Label.new()
-		b.text = "ƒ %s" % String(s.get("call_name", "calls a function"))
-		b.add_theme_color_override("font_color", _KIND_STYLE["call"][1])
+		b.text = "ƒ %s" % MusDisplayNames.pretty_expr(String(s.get("call_name", "calls a function")), _var_list)
+		b.add_theme_color_override("font_color", MusDisplayNames.stmt_color("call"))
 		gn.add_child(b)
 	_register(gn, int(s.get("code_offset", -1)))
 	var terminal := kind in _TERMINAL
@@ -387,7 +369,8 @@ func _build_if(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
 	# if from its bodies and replaces it as one row. (No stock if is non-flat.)
 	var flat := _if_flat_editable(s)
 	var cond := Label.new()
-	cond.text = "if (%s)" % _unwrap_outer_parens(String(s.get("expr", "")))
+	cond.text = "if (%s)" % MusDisplayNames.pretty_expr(
+		_unwrap_outer_parens(String(s.get("expr", ""))), _var_list)
 	gn.add_child(cond)
 	gn.add_child(_branch_header_row("✓ then ▸", Color(0.6, 0.9, 0.6), s, ordinal, "then", flat))
 	var else_present := bool(s.get("else_present", false))
@@ -609,7 +592,14 @@ func _build_switch(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
 	var gn := _new_node("switch", ordinal, depth)
 	var action := String(s.get("action", "enter"))
 	var head := Label.new()
-	head.text = "on (%s) → %s" % [_unwrap_outer_parens(String(s.get("expr", ""))), action]
+	var action_word := "go to"
+	if action == "play":
+		action_word = "play"
+	elif action == "goto":
+		action_word = "jump to"
+	head.text = "by (%s) → %s" % [MusDisplayNames.pretty_expr(
+		_unwrap_outer_parens(String(s.get("expr", ""))), _var_list), action_word]
+	head.tooltip_text = "The value picks the target: 0 picks the first, 1 the second, ..."
 	gn.add_child(head)
 	var targets: Array = s.get("targets", [])
 	gn.set_slot(0, true, 0, _IN_PIN, false, 0, _EXEC_PIN)
@@ -656,9 +646,9 @@ func _build_switch(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
 # --- node + wiring helpers ----------------------------------------------
 
 func _new_node(kind: String, ordinal: int, depth: int) -> GraphNode:
-	var style: Array = _KIND_STYLE.get(kind, ["•", Color(0.7, 0.7, 0.7)])
 	var gn := GraphNode.new()
-	gn.title = String(style[0])
+	gn.title = MusDisplayNames.stmt_title(kind)
+	gn.tooltip_text = MusDisplayNames.stmt_tooltip(kind)
 	gn.name = "N_%d" % _node_seq
 	gn.custom_minimum_size = Vector2(200, 0)
 	gn.add_theme_font_size_override("title_font_size", 14)
@@ -693,9 +683,11 @@ func _body_text(s: Dictionary, kind: String) -> String:
 		"play":
 			return _track_name(int(s.get("track", -1)))
 		"return", "yield", "nop", "done":
-			return String(_KIND_STYLE.get(kind, ["", Color()])[0])
+			return MusDisplayNames.stmt_title(kind)
 		_:
-			return String(s.get("text", ""))
+			# Display-only prettify: friendly function names + variable names. The
+			# canonical text stays in the AST dict for the write path.
+			return MusDisplayNames.pretty_expr(String(s.get("text", "")), _var_list)
 
 
 func _track_name(track: int) -> String:

@@ -10,6 +10,7 @@ extends VBoxContainer
 # compiler so a bad expression is caught before it reaches the file gate.
 
 const MusExpr = preload("res://modtools/music/mus_expr.gd")
+const MusDisplayNames = preload("res://modtools/music/mus_display_names.gd")
 
 signal expression_changed(text: String)
 
@@ -211,8 +212,12 @@ func _rebuild_body() -> void:
 			var row2 := HBoxContainer.new()
 			_intrinsic_opt = OptionButton.new()
 			for it in MusExpr.INTRINSICS:
-				_intrinsic_opt.add_item("%s  (%s)" % [MusExpr.surface(String(it["name"])), String(it["label"])])
-				_intrinsic_opt.set_item_metadata(_intrinsic_opt.item_count - 1, String(it["name"]))
+				var stored := String(it["name"])
+				# Friendly name first; the engine's surface mnemonic rides along in
+				# parentheses so scripts cross-referenced against originals still match up.
+				_intrinsic_opt.add_item("%s  (%s)" % [MusDisplayNames.intrinsic_label(stored), MusExpr.surface(stored)])
+				_intrinsic_opt.set_item_metadata(_intrinsic_opt.item_count - 1, stored)
+				_intrinsic_opt.get_popup().set_item_tooltip(_intrinsic_opt.item_count - 1, MusDisplayNames.intrinsic_tooltip(stored))
 			_intrinsic_opt.item_selected.connect(func(_i): _recompute())
 			row2.add_child(_intrinsic_opt)
 			_no_arg = CheckBox.new()
