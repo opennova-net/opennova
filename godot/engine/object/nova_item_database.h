@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include <unordered_map>
@@ -28,6 +29,11 @@ private:
 		String display_name;
 		String graphic;
 		String anim_def;
+		String sound_profile;
+		// items.def soundloop_1..7 — the looping ambient sound-set names for a
+		// "snd:"-prefixed `type marker` item (e.g. soundloop_1 LPNV_LIGHT). Time-of-day
+		// slots; the runtime plays the first non-empty one resolvable in the .lwf bank.
+		String soundloops[7];
 	};
 	std::unordered_map<int, Item> items;
 	String source_path;
@@ -69,6 +75,12 @@ public:
 	String get_anim_def(int id) const;
 	int get_item_type(int id) const;
 	String get_display_name(int id) const;
+	// items.def sound_profile (a sound-set name resolved against the loaded .lwf
+	// banks at runtime); empty if the item declares none.
+	String get_sound_profile(int id) const;
+	// items.def soundloop_1..7 as a 7-entry array (empty strings for unused slots).
+	// These are the looping ambient sound-set names for "snd:" marker items.
+	PackedStringArray get_sound_loops(int id) const;
 	Dictionary get_item(int id) const;
 
 	// Enumeration for UI (e.g. the mission editor's place-object palette). Both are

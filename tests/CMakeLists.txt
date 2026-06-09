@@ -72,6 +72,35 @@ target_link_libraries(mission_c_abi_test PRIVATE opennova_mission)
 target_include_directories(mission_c_abi_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_c_abi COMMAND mission_c_abi_test)
 
+# LWF sound-profile tests: byte-exact parse->encode round-trip + mutate-reread
+# over real JO fixtures (fixtures/lwf/00TRa.LWF + gamelocl.LWF).
+add_executable(lwf_roundtrip_test lwf/lwf_roundtrip_test.cpp)
+target_link_libraries(lwf_roundtrip_test PRIVATE opennova_lwf)
+target_include_directories(lwf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME lwf_roundtrip COMMAND lwf_roundtrip_test)
+
+# The menu sound profile (fixtures/menu_sound/menu.LWF): trigger sets resolve to
+# loose .wav members (drives MNU hover/click in the menu slice).
+add_executable(menu_lwf_test lwf/menu_lwf_test.cpp)
+target_link_libraries(menu_lwf_test PRIVATE opennova_lwf)
+target_include_directories(menu_lwf_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_lwf COMMAND menu_lwf_test)
+
+# DBF dialog-bank tests: byte-exact round-trip + dlg-id -> def-id mapping over a
+# real JO fixture (fixtures/dbf/00TRg.DBF).
+add_executable(dbf_roundtrip_test dbf/dbf_roundtrip_test.cpp)
+target_link_libraries(dbf_roundtrip_test PRIVATE opennova_dbf)
+target_include_directories(dbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME dbf_roundtrip COMMAND dbf_roundtrip_test)
+
+# Audio sound-set member selection (engine-faithful: sequential / random-anchor
+# cycle / random default, stream-pinned RNG), pushed down from nova_sound_bank.gd.
+add_executable(sound_selector_test audio/sound_selector_test.cpp)
+target_link_libraries(sound_selector_test PRIVATE opennova_audio)
+target_include_directories(sound_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(sound_selector_test PRIVATE cxx_std_17)
+add_test(NAME sound_selector COMMAND sound_selector_test)
+
 # PFF tests
 add_executable(pff_unit_test pff/pff_unit_test.cpp)
 target_link_libraries(pff_unit_test PRIVATE opennova_pff)

@@ -29,6 +29,9 @@ add_subdirectory(../../libs/sbf opennova_sbf)
 add_subdirectory(../../libs/mus opennova_mus)
 add_subdirectory(../../libs/def opennova_def)
 add_subdirectory(../../libs/mission opennova_mission)
+add_subdirectory(../../libs/lwf opennova_lwf)
+add_subdirectory(../../libs/dbf opennova_dbf)
+add_subdirectory(../../libs/audio opennova_audio)
 
 set(TARGET_NAME "opennova")
 
@@ -57,6 +60,10 @@ add_library(${TARGET_NAME} SHARED
     object/nova_object_shader_cache.cpp
     object/nova_item_database.cpp
     mission/nova_mission_data.cpp
+    lwf/nova_lwf_data.cpp
+    lwf/nova_wav_loader.cpp
+    audio/nova_sound_selector.cpp
+    dbf/nova_dbf_data.cpp
     rtxt/rtxt_string_file.cpp
     rtxt/rtxt_resource_format.cpp
     util/nova_data_format.cpp
@@ -110,6 +117,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_mus
     opennova_def
     opennova_mission
+    opennova_lwf
+    opennova_dbf
+    opennova_audio
 )
 
 # The bake worker thread in nova_terrain_build_job.cpp installs

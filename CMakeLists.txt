@@ -30,6 +30,9 @@ add_subdirectory(libs/resource_index)
 add_subdirectory(libs/sbf)
 add_subdirectory(libs/mus)
 add_subdirectory(libs/mission)
+add_subdirectory(libs/lwf)
+add_subdirectory(libs/dbf)
+add_subdirectory(libs/audio)
 
 set(OPENNOVA_CORE_TARGETS
     opennova_pcx
@@ -60,6 +63,7 @@ set(OPENNOVA_CORE_TARGETS
     opennova_sbf
     opennova_mus
     opennova_mission
+    opennova_audio
 )
 
 # --------------------------------------------------------------------------
