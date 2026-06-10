@@ -29,6 +29,9 @@ add_subdirectory(libs/vfs)
 add_subdirectory(libs/resource_index)
 add_subdirectory(libs/sbf)
 add_subdirectory(libs/mus)
+add_subdirectory(libs/mnu_xml)
+add_subdirectory(libs/mnu)
+add_subdirectory(libs/mns)
 add_subdirectory(libs/mission)
 add_subdirectory(libs/lwf)
 add_subdirectory(libs/dbf)
@@ -62,6 +65,9 @@ set(OPENNOVA_CORE_TARGETS
     opennova_resource_index
     opennova_sbf
     opennova_mus
+    opennova_mnu_xml
+    opennova_mnu
+    opennova_mns
     opennova_mission
     opennova_audio
 )

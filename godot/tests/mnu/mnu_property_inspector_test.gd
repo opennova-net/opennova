@@ -1,0 +1,370 @@
+extends GutTest
+
+# Phase 5: the property inspector's deep string integration. For a widget whose text
+# is a string-table key (type="id"), the inspector resolves the display text, flags an
+# unknown key, lets the user pick a key from the table (committing through the normal
+# edit path), and offers one-click jumps to the Strings / Fonts workspaces. Also covers
+# the standalone MnuStringPicker filtering + pick.
+
+const MnuPropertyInspectorScript = preload("res://modtools/mnu/mnu_property_inspector.gd")
+const MnuStringPickerScript = preload("res://modtools/mnu/mnu_string_picker.gd")
+const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
+
+
+# A string table with two known entries (keys uppercased to stay deterministic).
+func _make_table() -> RtxtStringFile:
+	var t := RtxtStringFile.new()
+	t.reset_empty()
+	var sec := t.add_section("default")
+	t.add_entry("ALPHA", "Alpha", sec, Vector2i())
+	t.add_entry("BRAVO", "Bravo", sec, Vector2i())
+	return t
+
+
+# A fixture document with one extra string-id widget under MAIN's root. Returns
+# [doc, widget_id].
+func _doc_with_id_widget(key: String) -> Array:
+	var doc := NovaMnuDocument.new()
+	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
+	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
+	var w := doc.add_widget(root, NovaMnuDocument.TYPE_STATIC, Rect2(10, 10, 100, 30))
+	doc.set_widget_string_type(w, "id")
+	doc.set_widget_text(w, key)
+	return [doc, w]
+
+
+func _all_text(node: Node) -> String:
+	var out := ""
+	if node is Label:
+		out += (node as Label).text + "\n"
+	elif node is LineEdit:
+		out += (node as LineEdit).text + "\n"
+	for c in node.get_children():
+		out += _all_text(c)
+	return out
+
+
+func _find_button(node: Node, text: String) -> Button:
+	if node is Button and (node as Button).text == text:
+		return node
+	for c in node.get_children():
+		var found := _find_button(c, text)
+		if found != null:
+			return found
+	return null
+
+
+func _find_row_button_with_text(node: Node, row_text: String, button_text: String) -> Button:
+	if node is HBoxContainer:
+		var has_row_text := false
+		var button: Button = null
+		for child in node.get_children():
+			if child is LineEdit and (child as LineEdit).text == row_text:
+				has_row_text = true
+			elif child is Button and (child as Button).text == button_text:
+				button = child
+		if has_row_text and button != null:
+			return button
+	for c in node.get_children():
+		var found := _find_row_button_with_text(c, row_text, button_text)
+		if found != null:
+			return found
+	return null
+
+
+func _inspector_for(doc: NovaMnuDocument, id: int, text_res: RtxtStringFile):
+	var inspector = MnuPropertyInspectorScript.new()
+	add_child_autofree(inspector)
+	await get_tree().process_frame
+	inspector.show_widget(doc, id, text_res)
+	await get_tree().process_frame
+	return inspector
+
+
+func test_inspector_shows_resolved_text_for_string_id() -> void:
+	var arr := _doc_with_id_widget("ALPHA")
+	var inspector = await _inspector_for(arr[0], arr[1], _make_table())
+	assert_string_contains(_all_text(inspector), "Alpha",
+		"The resolved display text is shown for a string id.")
+
+
+func test_inspector_flags_unresolved_key() -> void:
+	var arr := _doc_with_id_widget("MISSING_KEY")
+	var inspector = await _inspector_for(arr[0], arr[1], _make_table())
+	assert_string_contains(_all_text(inspector), "Not in string table",
+		"An unknown string id is flagged.")
+
+
+func test_inspector_string_helpers_hidden_without_table() -> void:
+	# No table loaded (no resource root): no resolved line, picker, or jump button.
+	var arr := _doc_with_id_widget("ALPHA")
+	var inspector = await _inspector_for(arr[0], arr[1], null)
+	assert_null(_find_button(inspector, "Pick string..."),
+		"The picker is hidden when no string table is loaded.")
+	assert_null(_find_button(inspector, "Edit in Strings"),
+		"The jump is hidden when no string table is loaded.")
+
+
+func test_inspector_string_jump_emits_key() -> void:
+	var arr := _doc_with_id_widget("ALPHA")
+	var inspector = await _inspector_for(arr[0], arr[1], _make_table())
+	var btn := _find_button(inspector, "Edit in Strings")
+	assert_not_null(btn, "The Edit in Strings button is present for a string id.")
+	watch_signals(inspector)
+	btn.pressed.emit()
+	assert_signal_emitted(inspector, "string_jump_requested", "Pressing jumps to Strings.")
+	assert_eq(get_signal_parameters(inspector, "string_jump_requested", 0)[0], "ALPHA",
+		"The jump carries the widget's string id.")
+
+
+func test_inspector_pick_commits_text_edit() -> void:
+	var arr := _doc_with_id_widget("ALPHA")
+	var inspector = await _inspector_for(arr[0], arr[1], _make_table())
+	var captured: Array = []
+	inspector.edit_requested.connect(func(e: Dictionary) -> void: captured.append(e))
+	# Drive the pick result directly (the popup itself is covered by the picker test).
+	inspector._picker_target_id = arr[1]
+	inspector._on_string_picked("BRAVO")
+	assert_eq(captured.size(), 1, "Picking commits exactly one edit.")
+	if captured.size() == 1:
+		var e: Dictionary = captured[0]
+		assert_eq(e.get("prop"), "text", "The edit sets the widget text.")
+		assert_eq(e.get("value"), "BRAVO", "The edit carries the chosen key.")
+		assert_eq(e.get("id"), arr[1], "The edit targets the selected widget.")
+
+
+func test_inspector_font_jump_emits_font() -> void:
+	var arr := _doc_with_id_widget("ALPHA")
+	var doc: NovaMnuDocument = arr[0]
+	var w: int = arr[1]
+	doc.set_widget_font(w, "Gunpl22b.fnt")
+	var inspector = await _inspector_for(doc, w, null)
+	var btn := _find_button(inspector, "Open in Fonts")
+	assert_not_null(btn, "The Open in Fonts button shows when a font is set.")
+	watch_signals(inspector)
+	btn.pressed.emit()
+	assert_signal_emitted(inspector, "font_jump_requested", "Pressing jumps to Fonts.")
+	assert_eq(get_signal_parameters(inspector, "font_jump_requested", 0)[0], "Gunpl22b.fnt",
+		"The jump carries the widget's font.")
+
+
+# --- Sounds section ------------------------------------------------------------
+
+# widgets.mnu MAIN root children: [Title, StartBtn, SoundChk, Difficulty, Version].
+# StartBtn carries a MOUSE_OVER sound; Title has none.
+func _widgets_doc() -> NovaMnuDocument:
+	var doc := NovaMnuDocument.new()
+	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
+	return doc
+
+
+func _main_child(doc: NovaMnuDocument, index: int) -> int:
+	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
+	return doc.get_child_ids(root)[index]
+
+
+func _find_option_with_item(node: Node, item_text: String) -> OptionButton:
+	if node is OptionButton:
+		var opt := node as OptionButton
+		for i in range(opt.item_count):
+			if opt.get_item_text(i) == item_text:
+				return opt
+	for c in node.get_children():
+		var found := _find_option_with_item(c, item_text)
+		if found != null:
+			return found
+	return null
+
+
+func _find_check_box(node: Node, text: String) -> CheckBox:
+	if node is CheckBox and (node as CheckBox).text == text:
+		return node
+	for c in node.get_children():
+		var found := _find_check_box(c, text)
+		if found != null:
+			return found
+	return null
+
+
+func test_inspector_shows_sound_rows() -> void:
+	var doc := _widgets_doc()
+	var inspector = await _inspector_for(doc, _main_child(doc, 1), null)  # StartBtn
+	var text := _all_text(inspector)
+	assert_string_contains(text, "Sounds", "the Sounds section heading shows")
+	assert_string_contains(text, "MOUSE_OVER", "the hover trigger shows")
+	assert_string_contains(text, "menu.lwf", "the sound file shows")
+
+
+func test_inspector_action_screen_target_is_pickable() -> void:
+	var doc := _widgets_doc()
+	var inspector = await _inspector_for(doc, _main_child(doc, 1), null)  # StartBtn -> OPTIONS
+	var captured: Array = []
+	inspector.edit_requested.connect(func(e: Dictionary) -> void: captured.append(e))
+	var opt := _find_option_with_item(inspector, "MAIN")
+	assert_not_null(opt, "same-menu screen action target is a picker over screen names")
+	if opt == null:
+		return
+	var idx := -1
+	for i in range(opt.item_count):
+		if opt.get_item_text(i) == "MAIN":
+			idx = i
+	assert_gte(idx, 0, "MAIN is a selectable screen target")
+	opt.select(idx)
+	opt.item_selected.emit(idx)
+	assert_eq(captured.size(), 1, "changing the target commits one edit")
+	if captured.size() == 1:
+		assert_eq(captured[0].get("prop"), "actions", "the edit targets the action list")
+		var actions: Array = captured[0].get("value")
+		assert_eq(String(actions[0]["target"]), "MAIN", "the action target changes to the picked screen")
+
+
+func test_inspector_url_action_external_browser_is_editable() -> void:
+	var doc := _widgets_doc()
+	var start := _main_child(doc, 1)
+	doc.set_widget_actions(start, [{
+		"type": "url",
+		"target": "www.novalogic.com",
+		"state": "",
+		"file": "",
+		"external_browser": false,
+	}])
+	var inspector = await _inspector_for(doc, start, null)
+	var captured: Array = []
+	inspector.edit_requested.connect(func(e: Dictionary) -> void: captured.append(e))
+	var external := _find_check_box(inspector, "External browser")
+	assert_not_null(external, "URL actions expose the preserved EXTERNAL_BROWSER flag")
+	if external == null:
+		return
+	external.button_pressed = true  # emits toggled
+	assert_eq(captured.size(), 1, "toggling EXTERNAL_BROWSER commits one action edit")
+	if captured.size() == 1:
+		assert_eq(captured[0].get("prop"), "actions", "the edit targets the action list")
+		var actions: Array = captured[0].get("value")
+		assert_true(bool(actions[0].get("external_browser", false)), "the flag is set in the emitted row")
+
+
+func test_inspector_url_action_controls_fit_side_panel() -> void:
+	var doc := _widgets_doc()
+	var start := _main_child(doc, 1)
+	doc.set_widget_actions(start, [{
+		"type": "url",
+		"target": "www.novalogic.com",
+		"state": "",
+		"file": "",
+		"external_browser": true,
+	}])
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(260, 600)
+	panel.size = Vector2(260, 600)
+	add_child_autofree(panel)
+	var inspector = MnuPropertyInspectorScript.new()
+	panel.add_child(inspector)
+	await get_tree().process_frame
+	inspector.show_widget(doc, start, null)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var external := _find_check_box(inspector, "External browser")
+	assert_not_null(external, "URL action checkbox is rendered in the side panel")
+	if external == null:
+		return
+	var panel_rect := panel.get_global_rect()
+	var row := external.get_parent()
+	assert_true(row is Control, "URL action controls live in a measurable row")
+	if not (row is Control):
+		return
+	for child in row.get_children():
+		if child is Control and (child as Control).visible:
+			var child_rect := (child as Control).get_global_rect()
+			assert_lte(child_rect.position.x + child_rect.size.x, panel_rect.position.x + panel_rect.size.x,
+				"URL action row control '%s' stays inside the inspector side panel" % child.name)
+
+
+func test_inspector_cross_menu_action_jump_emits_menu_target() -> void:
+	var doc := _widgets_doc()
+	var start := _main_child(doc, 1)
+	doc.set_widget_actions(start, [{
+		"type": "screen",
+		"target": "SINGLE_PLAYER",
+		"state": "",
+		"file": "sp.mnu",
+		"external_browser": false,
+	}])
+	var inspector = await _inspector_for(doc, start, null)
+	var jump := _find_button(inspector, "Open menu")
+	assert_not_null(jump, "cross-menu screen actions expose an Open menu jump")
+	if jump == null:
+		return
+	watch_signals(inspector)
+	jump.pressed.emit()
+	assert_signal_emitted(inspector, "menu_jump_requested", "pressing jumps to the target menu")
+	var args: Array = get_signal_parameters(inspector, "menu_jump_requested", 0)
+	assert_eq(args, ["sp.mnu", "SINGLE_PLAYER"], "the jump carries the menu file and target screen")
+
+
+func test_inspector_add_sound_emits_sounds_prop() -> void:
+	var doc := _widgets_doc()
+	var title := _main_child(doc, 0)  # Title: a static with no sounds
+	var inspector = await _inspector_for(doc, title, null)
+	var captured: Array = []
+	inspector.edit_requested.connect(func(e: Dictionary) -> void: captured.append(e))
+	var add_btn := _find_button(inspector, "Add sound")
+	assert_not_null(add_btn, "an Add sound button is present")
+	add_btn.pressed.emit()
+	assert_eq(captured.size(), 1, "adding commits exactly one edit")
+	if captured.size() == 1:
+		assert_eq(captured[0].get("prop"), "sounds", "the edit targets the sounds list")
+		assert_eq((captured[0].get("value") as Array).size(), 1, "one sound was appended")
+
+
+func test_inspector_remove_sound_emits_shorter_list() -> void:
+	var doc := _widgets_doc()
+	var inspector = await _inspector_for(doc, _main_child(doc, 1), null)  # StartBtn (1 sound)
+	var captured: Array = []
+	inspector.edit_requested.connect(func(e: Dictionary) -> void: captured.append(e))
+	var rm := _find_row_button_with_text(inspector, "menu.lwf", "✕")
+	assert_not_null(rm, "a remove button is present for the existing sound")
+	rm.pressed.emit()
+	assert_eq(captured.size(), 1, "removing commits one edit")
+	if captured.size() == 1:
+		assert_eq(captured[0].get("prop"), "sounds", "the edit targets the sounds list")
+		assert_eq((captured[0].get("value") as Array).size(), 0, "the sound was removed")
+
+
+func test_inspector_trigger_dropdown_from_profile_sets() -> void:
+	# When the workspace supplies the profile's set names, the trigger field becomes
+	# a dropdown over them (so the author picks a real trigger, not free text).
+	var doc := _widgets_doc()
+	var inspector = await _inspector_for(doc, _main_child(doc, 1), null)  # StartBtn
+	inspector.set_sound_sets(PackedStringArray(["MOUSE_OVER", "CLICK_SELECT", "CLICK_VALUE"]))
+	await get_tree().process_frame
+	var opt := _find_option_with_item(inspector, "CLICK_SELECT")
+	assert_not_null(opt, "the trigger field is a dropdown over the profile's sets")
+
+
+func test_inspector_sound_preview_emits_request() -> void:
+	var doc := _widgets_doc()
+	var inspector = await _inspector_for(doc, _main_child(doc, 1), null)  # StartBtn
+	watch_signals(inspector)
+	var play := _find_button(inspector, "▶")
+	assert_not_null(play, "a preview button is present for the existing sound")
+	play.pressed.emit()
+	assert_signal_emitted(inspector, "sound_preview_requested", "preview asks the workspace to play")
+	assert_eq(get_signal_parameters(inspector, "sound_preview_requested", 0)[0], "MOUSE_OVER",
+		"the preview carries the sound's trigger")
+
+
+func test_string_picker_filters_and_picks() -> void:
+	var picker = MnuStringPickerScript.new()
+	add_child_autofree(picker)
+	await get_tree().process_frame
+	picker.set_table(_make_table(), "")
+	assert_eq(picker.row_count(), 2, "All keys are listed initially.")
+	picker.filter("brav")
+	assert_eq(picker.row_count(), 1, "Filter narrows by key/text (case-insensitive).")
+	assert_eq(picker.key_at(0), "BRAVO", "The remaining row is the match.")
+	watch_signals(picker)
+	picker.choose(0)
+	assert_signal_emitted(picker, "picked", "Choosing a row emits picked.")
+	assert_eq(get_signal_parameters(picker, "picked", 0)[0], "BRAVO", "picked carries the chosen key.")
