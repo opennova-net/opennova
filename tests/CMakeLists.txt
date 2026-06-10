@@ -598,3 +598,36 @@ target_link_libraries(cbin_roundtrip_test PRIVATE opennova_cbin)
 target_include_directories(cbin_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(cbin_roundtrip_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME cbin_roundtrip COMMAND cbin_roundtrip_test)
+
+# MNU menu UI tests (forgiving XML parser, MNU AST + serialize roundtrip, MNS stylesheet)
+add_executable(mnu_xml_unit_test mnu_xml/mnu_xml_unit_test.cpp)
+target_link_libraries(mnu_xml_unit_test PRIVATE opennova_mnu_xml)
+target_include_directories(mnu_xml_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mnu_xml_unit COMMAND mnu_xml_unit_test)
+
+add_executable(mnu_unit_test mnu/mnu_unit_test.cpp)
+target_link_libraries(mnu_unit_test PRIVATE opennova_mnu)
+target_include_directories(mnu_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mnu_unit COMMAND mnu_unit_test)
+
+# Compat sweep over real shipped .mnu menus (committed fixtures required-pass,
+# developer Desktop set skip-if-absent). Reads fixtures/mnu/ so it runs from the
+# repo root, like sbf_compat.
+add_executable(mnu_compat_test mnu/mnu_compat_test.cpp)
+target_link_libraries(mnu_compat_test PRIVATE opennova_mnu)
+target_include_directories(mnu_compat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mnu_compat COMMAND mnu_compat_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Round-trip key-coverage: catches attributes/tags dropped at parse time, which
+# the idempotence sweep above cannot see (see ADR 0002). Reads fixtures/mnu/.
+add_executable(mnu_coverage_test mnu/mnu_coverage_test.cpp)
+target_link_libraries(mnu_coverage_test PRIVATE opennova_mnu)
+target_include_directories(mnu_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mnu_coverage COMMAND mnu_coverage_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(mns_parse_test mns/mns_parse_test.cpp)
+target_link_libraries(mns_parse_test PRIVATE opennova_mns)
+target_include_directories(mns_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mns_parse COMMAND mns_parse_test)
