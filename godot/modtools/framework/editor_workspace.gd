@@ -39,14 +39,18 @@ extends RefCounted
 #     export   : can_export / begin_export + get_export_flavors +
 #                get_export_dialog_* + get_export_progress_*
 #
-#   Edit:  can_undo / undo, can_redo / redo
-#   State: is_busy, has_unsaved_changes
+#   Edit + state: override get_editor_document() to return the domain
+#     document/controller owning edit history + dirty state; the base derives
+#     can_undo / can_redo / undo / redo / has_unsaved_changes from it (and
+#     folds is_busy() into the can_* pair). Workspaces whose dirty flag lives
+#     on a different object than their edit history (fonts/mnu) keep their own
+#     has_unsaved_changes override.
 #   Asset dock: uses_asset_dock, set_asset_dock, sync_asset_dock
 #   Placement: set WorkspaceDef.popup=true for popup workspaces (Environment);
 #              shows_tile_gizmo() to opt into the in-world tile gizmo.
 #
 # To register a new workspace see WorkspaceDef; to add a workflow inspector see
-# InspectorDef. Minimal example adapter: editor/mission_workspace.gd.
+# InspectorDef. Minimal example adapter: editor/credits_workspace.gd.
 
 var editor_shell: Node
 
@@ -225,8 +229,27 @@ func is_busy() -> bool:
 	return false
 
 
+# --- Domain document ------------------------------------------------------
+# The single domain document/controller that owns this workspace's edit history
+# and dirty state (a domain editor Node, a RefCounted document, or a controller —
+# duck-typed, so the base guards every call with has_method). Single-document
+# workspaces override only this; the base derives the edit + dirty hooks below.
+# Documents without an edit history (credits, object) still serve dirty through
+# it: can_undo/can_redo simply stay false.
+func get_editor_document() -> Object:
+	return null
+
+
 func has_unsaved_changes() -> bool:
-	return false
+	var doc := get_editor_document()
+	if doc == null:
+		return false
+	# Both dirty shapes exist today: a method (mission controller, music document)
+	# and a plain bool property (the EditorDocument family). Property reads on a
+	# doc with neither return null -> false.
+	if doc.has_method("is_dirty"):
+		return doc.is_dirty()
+	return bool(doc.get("is_dirty"))
 
 
 func can_new() -> bool:
@@ -356,17 +379,68 @@ func build_inspector(_host: Control) -> void:
 	pass
 
 
+# Undo/redo, derived from get_editor_document(). Availability folds in is_busy()
+# (terrain disables the buttons while an export runs); the actions themselves are
+# deliberately unguarded by busy, matching the long-standing terrain behavior.
 func can_undo() -> bool:
-	return false
+	var doc := get_editor_document()
+	return doc != null and not is_busy() and doc.has_method("can_undo") and doc.can_undo()
 
 
 func can_redo() -> bool:
-	return false
+	var doc := get_editor_document()
+	return doc != null and not is_busy() and doc.has_method("can_redo") and doc.can_redo()
 
 
 func undo() -> void:
-	pass
+	var doc := get_editor_document()
+	if doc != null and doc.has_method("undo"):
+		doc.undo()
 
 
 func redo() -> void:
-	pass
+	var doc := get_editor_document()
+	if doc != null and doc.has_method("redo"):
+		doc.redo()
+
+
+# --- Resource root (the shared VFS the shell mounts) -----------------------
+
+# The shell's mounted resource root, or null when no shell is bound (headless tests).
+func _resource_root() -> NovaResourceRoot:
+	if editor_shell != null and editor_shell.has_method("get_resource_root"):
+		return editor_shell.get_resource_root()
+	return null
+
+
+# Shell root, falling back to a fresh mount of the persisted resource directory.
+# Only fonts/mnu carry the fallback (their open-by-name paths must resolve without
+# a shell); the other workspaces stay shell-only on purpose — do not widen.
+func _resource_root_or_settings() -> NovaResourceRoot:
+	var root := _resource_root()
+	if root != null:
+		return root
+	var dir := NovaResourceDirSettings.get_resource_dir()
+	if dir.is_empty():
+		return null
+	var resources := NovaResourceRoot.new()
+	return resources if resources.set_root_dir(dir) == OK else null
+
+
+# VFS-open fallback shared by every open_file(): when `path` is not a loose file
+# on disk but resolves inside the mounted root (a name picked from the resource
+# browser), returns that root; null means "open from disk". Callers branch:
+#   var vfs := _vfs_root_for_open(path)
+#   if vfs != null:
+#       return editor.open_x_bytes(vfs.read_file(path), _vfs_display_path(vfs, path))
+#   return editor.open_x(path)
+func _vfs_root_for_open(path: String) -> NovaResourceRoot:
+	var resources := _resource_root()
+	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
+		return resources
+	return null
+
+
+# The display path an editor records for a VFS-opened file (the mounted dir + bare name).
+func _vfs_display_path(root: NovaResourceRoot, path: String) -> String:
+	return root.get_root_dir().path_join(path.get_file())

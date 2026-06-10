@@ -191,8 +191,9 @@ func _populate_inspector() -> void:
 	env_label.text = "scroll %.2f  spacing %d  center %d" % [resource.get_scroll_rate(), resource.get_vertical_space(), resource.get_center_x()]
 
 
-func has_unsaved_changes() -> bool:
-	return _document.is_dirty
+# The domain document the EditorWorkspace base derives undo/redo + dirty from.
+func get_editor_document() -> Object:
+	return _document
 
 
 func can_new() -> bool:
@@ -290,8 +291,3 @@ func _on_editor_request_edit_font(font_name: String) -> void:
 	if err != OK and editor_shell.has_method("show_status_message"):
 		editor_shell.show_status_message("Font not found: %s" % font_name, 5.0)
 
-
-func _resource_root() -> NovaResourceRoot:
-	if editor_shell != null and editor_shell.has_method("get_resource_root"):
-		return editor_shell.get_resource_root()
-	return null

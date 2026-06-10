@@ -233,10 +233,9 @@ func open_file(path: String) -> Error:
 	return err as Error
 
 
-func has_unsaved_changes() -> bool:
-	# Gates the shell's confirm-before-load-over once that guard is generalized; today
-	# it tracks edits made by dragging entities (see MissionController).
-	return _controller != null and _controller.is_dirty()
+# The domain document the EditorWorkspace base derives undo/redo + dirty from.
+func get_editor_document() -> Object:
+	return _controller
 
 
 # --- Save ---------------------------------------------------------------------
@@ -326,23 +325,6 @@ func _on_controller_status(message: String, is_error: bool) -> void:
 # undo history. The live trigger is the viewport Ctrl+Z / Ctrl+Y (handled in MissionController);
 # implementing the hooks makes undo/redo reachable for tests and a future shell toolbar with no
 # shell change. Mirrors strings_workspace.gd.
-
-func can_undo() -> bool:
-	return _controller != null and _controller.can_undo()
-
-
-func can_redo() -> bool:
-	return _controller != null and _controller.can_redo()
-
-
-func undo() -> void:
-	if _controller != null:
-		_controller.undo()
-
-
-func redo() -> void:
-	if _controller != null:
-		_controller.redo()
 
 
 # --- Inspector ----------------------------------------------------------------

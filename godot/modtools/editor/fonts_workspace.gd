@@ -196,17 +196,19 @@ func get_current_resource_path() -> String:
 
 
 func open_file(path: String) -> Error:
-	var resources := _resource_root()
+	# Fonts resolve through the settings fallback (open-by-name must work without a shell),
+	# so this keeps its own VFS branch over _resource_root_or_settings().
+	var resources := _resource_root_or_settings()
 	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
 		var bytes := resources.read_file(path)
-		return _document.open_fnt_bytes(bytes, resources.get_root_dir().path_join(path.get_file()))
+		return _document.open_fnt_bytes(bytes, _vfs_display_path(resources, path))
 	return _document.open_fnt(path)
 
 
 func open_font_name(font_name: String) -> Error:
 	if font_name.is_empty():
 		return ERR_INVALID_PARAMETER
-	var resources := _resource_root()
+	var resources := _resource_root_or_settings()
 	if resources == null or resources.get_root_dir().is_empty():
 		return ERR_DOES_NOT_EXIST
 	var filename := "%s.fnt" % font_name
@@ -214,16 +216,6 @@ func open_font_name(font_name: String) -> Error:
 	if not path.is_empty():
 		return open_file(path)
 	return open_file(filename) if resources.has_file(filename) else ERR_DOES_NOT_EXIST
-
-
-func _resource_root() -> NovaResourceRoot:
-	if editor_shell != null and editor_shell.has_method("get_resource_root"):
-		return editor_shell.get_resource_root()
-	var dir := NovaResourceDirSettings.get_resource_dir()
-	if dir.is_empty():
-		return null
-	var resources := NovaResourceRoot.new()
-	return resources if resources.set_root_dir(dir) == OK else null
 
 
 func can_save() -> bool:
@@ -258,19 +250,7 @@ func get_save_dialog_dir() -> String:
 	return _document.get_last_save_dir()
 
 
-func can_undo() -> bool:
-	return _editor != null and _editor.has_method("can_undo") and _editor.can_undo()
-
-
-func can_redo() -> bool:
-	return _editor != null and _editor.has_method("can_redo") and _editor.can_redo()
-
-
-func undo() -> void:
-	if _editor != null and _editor.has_method("undo"):
-		_editor.undo()
-
-
-func redo() -> void:
-	if _editor != null and _editor.has_method("redo"):
-		_editor.redo()
+# Undo/redo derive from the base via the editor control; dirty stays on the document
+# (the two live on different objects here), so has_unsaved_changes keeps its override.
+func get_editor_document() -> Object:
+	return _editor

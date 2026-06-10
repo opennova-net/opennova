@@ -179,8 +179,9 @@ func _sync_shell_title() -> void:
 
 # --- Document actions ---
 
-func has_unsaved_changes() -> bool:
-	return controller != null and controller.is_dirty
+# The domain document the EditorWorkspace base derives undo/redo + dirty from.
+func get_editor_document() -> Object:
+	return controller
 
 
 func can_new() -> bool:
@@ -227,18 +228,10 @@ func get_current_resource_path() -> String:
 
 func open_file(path: String) -> Error:
 	_ensure_editor()
-	var resources := _resource_root()
-	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
-		return controller.open_lwf_bytes(
-			resources.read_file(path),
-			resources.get_root_dir().path_join(path.get_file()))
+	var vfs := _vfs_root_for_open(path)
+	if vfs != null:
+		return controller.open_lwf_bytes(vfs.read_file(path), _vfs_display_path(vfs, path))
 	return controller.open_lwf(path)
-
-
-func _resource_root() -> NovaResourceRoot:
-	if editor_shell != null and editor_shell.has_method("get_resource_root"):
-		return editor_shell.get_resource_root()
-	return null
 
 
 func get_resource_root() -> NovaResourceRoot:
@@ -276,22 +269,3 @@ func get_save_dialog_title() -> String:
 func get_save_dialog_dir() -> String:
 	return controller.get_last_save_dir() if controller else ""
 
-
-# --- Undo / redo ---
-
-func can_undo() -> bool:
-	return controller != null and controller.can_undo()
-
-
-func can_redo() -> bool:
-	return controller != null and controller.can_redo()
-
-
-func undo() -> void:
-	if controller:
-		controller.undo()
-
-
-func redo() -> void:
-	if controller:
-		controller.redo()

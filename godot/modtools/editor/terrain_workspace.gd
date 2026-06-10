@@ -249,8 +249,9 @@ func get_export_progress_ratio() -> float:
 	return terrain_editor.get_export_progress_ratio() if terrain_editor != null and is_busy() else 0.0
 
 
-func has_unsaved_changes() -> bool:
-	return terrain_editor != null and terrain_editor.is_dirty
+# The domain document the EditorWorkspace base derives undo/redo + dirty from.
+func get_editor_document() -> Object:
+	return terrain_editor
 
 
 func can_new() -> bool:
@@ -374,24 +375,6 @@ func get_export_dialog_dir() -> String:
 	if terrain_editor.has_current_project_dir():
 		return terrain_editor.get_current_project_dir()
 	return terrain_editor.get_last_save_dir()
-
-
-func can_undo() -> bool:
-	return terrain_editor != null and not is_busy() and terrain_editor.can_undo()
-
-
-func can_redo() -> bool:
-	return terrain_editor != null and not is_busy() and terrain_editor.can_redo()
-
-
-func undo() -> void:
-	if terrain_editor:
-		terrain_editor.undo()
-
-
-func redo() -> void:
-	if terrain_editor:
-		terrain_editor.redo()
 
 
 func _workflow_for_tool(tool: int) -> int:

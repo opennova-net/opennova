@@ -50,6 +50,9 @@ inspectors are declared as typed registry rows:
   `EditorWorkspace` base class. It documents the full contract (identity,
   lifecycle, inspector, viewport, document actions, edit, asset dock) and gives
   every hook a safe default, so a workspace overrides only the tiers it needs.
+  A workspace returns its domain document/controller from
+  `get_editor_document()` and the base derives undo/redo and dirty state from
+  it; the base also owns the shared resource-root and VFS-open helpers.
 - [`framework/workspace_def.gd`](framework/workspace_def.gd): `WorkspaceDef`, one
   registry row per workspace (id, adapter script, popup flag, nav category).
 - [`framework/inspector_def.gd`](framework/inspector_def.gd): `InspectorDef`, one
@@ -87,5 +90,9 @@ the workflow rail and override `build_inspector(host)` instead.
 
 The editor binds to the shared C++ core through the GDExtension in
 `godot/engine/`; on-disk formats are parsed by the libraries under
-[`libs/`](../../libs). See the top-level [README](../../README.md) for the project
-overview and build steps.
+[`libs/`](../../libs). How the editor and the runtime share rendering and
+simulation code (the `edit_mode` runtime-node pattern, sampler seams, the one
+mission runtime) is documented in
+[docs/oned/editor-runtime-parity.md](../../docs/oned/editor-runtime-parity.md).
+See the top-level [README](../../README.md) for the project overview and build
+steps.
