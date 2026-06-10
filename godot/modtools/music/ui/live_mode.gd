@@ -227,6 +227,11 @@ func _ready() -> void:
 	_install_empty_state()
 	if _var_inspector.has_method("bind_director"):
 		_var_inspector.call("bind_director", _director)
+	# A variable rename must reach every surface that shows var names: the event
+	# log resolves per-line, but the drilled blueprint and its pickers cache the
+	# var list, so re-populate them.
+	if _var_inspector != null and _var_inspector.has_signal("names_changed"):
+		_var_inspector.connect("names_changed", _on_var_names_changed)
 	_apply_state_label(VM_STOPPED)
 	_refresh_map()
 	_refresh_button_state()
@@ -909,12 +914,23 @@ func _on_inspector_add_play(section_name: StringName, track: int) -> void:
 func _build_var_list() -> Array:
 	var out: Array = []
 	var sname := ""
+	var profile := ""
 	if _document != null and _document.script_loaded():
 		sname = String(_document.mus_script.get_default_script_name())
+		if _document.has_method("get_var_profile_path"):
+			profile = _document.get_var_profile_path()
 	for i in range(17):
-		var label := MusVarNames.label_for(sname, i) if sname != "" else "Var%02d" % i
+		var label := MusVarNames.label_for(sname, i, profile) if sname != "" else "Var%02d" % i
 		out.append({"token": "Var%02d" % i, "label": label})
 	return out
+
+
+# A variable's display name changed (profile sidecar): rebuild the surfaces
+# that cached the old label. Serialization is untouched (tokens only).
+func _on_var_names_changed() -> void:
+	_refresh_var_labels()
+	if _logic_graph != null and _logic_graph.visible and _logic_section_name != "":
+		_populate_logic_graph(_logic_section_name)
 
 
 # --- Phase 2 authoring intent handlers (route to the document, keep pinned) ---
