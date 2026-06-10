@@ -240,7 +240,7 @@ func test_edge_colors_distinct_by_kind():
 		"branch wire colour differs from a plain transition")
 
 
-func test_drill_into_swaps_map_for_logic_graph():
+func test_drill_into_swaps_map_for_program_view():
 	# Double-clicking a state (or calling _drill_into) replaces the center map with
 	# that section's logic-graph blueprint; Back restores the map.
 	var lm := _make_live()

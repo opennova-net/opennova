@@ -5,9 +5,9 @@ extends Control
 # STACK -- a scrollable, top-to-bottom list of sentence-style statement rows.
 # Sequential statements read in execution order; if/switch render as container
 # blocks with indented lanes (MusicStmtIfBlock / MusicStmtSwitchBlock), so
-# depth is indentation instead of graph sprawl. This replaces the GraphEdit
-# node-chain (section_logic_graph.gd): the state-machine MAP keeps its graph
-# (that metaphor fits BETWEEN states); inside a state, programs are lists.
+# depth is indentation instead of graph sprawl. This replaced the old GraphEdit
+# node-per-statement chain: the state-machine MAP keeps its graph (that
+# metaphor fits BETWEEN states); inside a state, programs are lists.
 #
 # Built purely from NovaMusicScript.get_program_ast(section). The view never
 # writes bytecode; it emits add/replace/delete/reorder/move intents the host

@@ -429,6 +429,45 @@ func test_e2e_lane_retarget_through_the_document():
 	assert_eq(String(rthen0.get("target_name", "")), original, "one undo restores it")
 
 
+func test_lane_add_offers_simple_kinds_only():
+	var v := _view()
+	v.show_section(_sec([_if_stmt()]), [])
+	var blk: MusicStmtIfBlock = v.top_level_rows()[0]
+	for item in blk._lane_add_items:
+		var k := String(item[1])
+		assert_false(k == "if" or k == "switch",
+			"bodies stay flat: no nested blocks in the lane palette")
+	assert_gt(blk._lane_add_items.size(), 0, "the lane palette still offers the leaf kinds")
+
+
+func test_e2e_delete_and_undo_through_the_document():
+	var doc := _doc()
+	var sname := StringName(doc.mus_script.get_default_script_name())
+	var snames := PackedStringArray()
+	for n in doc.mus_script.get_section_names(sname):
+		snames.append(String(n))
+	var v := _view(true, snames)
+	_wire(v, doc)
+	var original := doc.mus_script.get_decompiled_text(sname)
+	var sec := _doc_section(doc, "Lose000")
+	v.show_section(sec, [])
+	# Delete the first deletable row through its own ✕.
+	var target: Control = null
+	for r in v.top_level_rows():
+		var b := _find_button(r, "✕")
+		if b != null:
+			target = r
+			b.pressed.emit()
+			break
+	assert_not_null(target, "found a deletable row")
+	var after := _doc_section(doc, "Lose000")
+	assert_lt((after.get("statements", []) as Array).size(),
+		(sec.get("statements", []) as Array).size(), "the document lost the statement")
+	doc.undo()
+	assert_eq(doc.mus_script.get_decompiled_text(sname), original,
+		"one undo restores the canonical text byte-identically")
+
+
 func test_e2e_block_defaults_compile():
 	var doc := _doc()
 	var forms = MusForms.new()

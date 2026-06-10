@@ -2,10 +2,10 @@ extends RefCounted
 
 # Shared MUS authoring context: the "＋ Add" construct palette metadata, the
 # picker builders (section / variable / track) every editing surface shares,
-# and the two remaining DIALOG forms -- new-if creation (condition + first
-# action) and the switch target table (up to 64 rows; it doesn't fit a node).
-# Everything else edits INLINE on the blueprint node (section_logic_graph's
-# _begin_inline_edit), which routes through the same canonical producers.
+# and the canonical default lines ＋Add inserts (block_default_lines covers
+# if/switch, so creation needs no dialog -- everything edits in place on the
+# program view's rows). The legacy dialog forms below are scheduled for
+# deletion now that no surface opens them.
 #
 # Every producer routes through MusStmtText / MusExpr / the structured ExprRow
 # so the emitted .mus lines are canonical. The forms NEVER hand-assemble

@@ -146,7 +146,10 @@ func setup(stmt: Dictionary, p_ordinal: int, ctx: Dictionary, opts: Dictionary =
 	if kind in ["transition", "goto", "call"] and target != "" and _section_opt == null:
 		_box.add_child(_open_button(target))
 
-	if not read_only and kind not in READ_ONLY_KINDS:
+	# A collapsed ×N row carries no tools: deleting/moving it would act on ONE
+	# member of the run, which reads as acting on all N. Unfold first; each
+	# member then carries its own cluster (old-canvas parity).
+	if not read_only and kind not in READ_ONLY_KINDS and run == 1:
 		_build_tools()
 
 	gui_input.connect(_on_gui_input)

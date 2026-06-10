@@ -40,7 +40,7 @@ func test_track_drag_payload_empty_without_bank():
 	assert_true(bm._track_drag_payload(0).is_empty(), "no bank loaded -> no drag payload")
 
 
-func test_double_click_node_drills_into_logic_graph():
+func test_double_click_node_drills_into_program_view():
 	# Double-click drills into the state's logic-graph blueprint (the sole authoring
 	# surface; there is no raw-script drawer anymore).
 	var doc = MusicEditorDocument.new()

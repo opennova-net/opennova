@@ -272,6 +272,37 @@ func test_begin_tail_renders_behind_the_divider():
 
 # ---- empty state ----
 
+func test_caller_inputs_are_pickable_variables():
+	# Input slots join the variable list for pickers and expressions, named,
+	# with the canonical engine token beside them.
+	var v := _view()
+	v.configure_authoring(PackedStringArray(), [{"token": "Var00", "label": "Var00"}], null, [], false)
+	v.show_section(_sec([
+		{"kind": "frame_enter", "code_offset": 0, "locals_count": 2, "text": "enter S"},
+		_play(2, 0),
+	]), [])
+	var labels: Array = []
+	for entry in v._display_var_list():
+		labels.append(String(entry.get("label", "")))
+	assert_has(labels, "Input 1 (l_32)", "the 1st caller input is pickable")
+	assert_has(labels, "Input 2 (l_36)", "the 2nd caller input is pickable")
+
+
+func test_folded_run_carries_no_tools_until_unfolded():
+	var v := _view()
+	v.configure_authoring(PackedStringArray(["A"]), [], null, [], true)
+	var stmts := []
+	for i in range(4):
+		stmts.append(_play(i * 2, 0))
+	v.show_section(_sec(stmts), [])
+	var folded: Control = v.top_level_rows()[0]
+	assert_null(_find_button(folded, "✕"),
+		"deleting a collapsed run would act on one hidden member: unfold first")
+	_find_button(folded, "⊞ unfold").pressed.emit()
+	assert_not_null(_find_button(v.top_level_rows()[1], "✕"),
+		"unfolded members carry their own tools")
+
+
 func test_empty_callable_shows_hint_and_card():
 	var v := _view()
 	v.show_section(_sec([
