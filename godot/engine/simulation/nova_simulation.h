@@ -14,6 +14,8 @@
 #include <mission/promote.h>
 #include <terrain/height_field.h>
 #include <wac/wac_system.h>
+
+#include "wac/nova_wac_program.h"
 #include <world/ai.h>
 #include <world/world.h>
 
@@ -82,6 +84,9 @@ private:
 	std::unique_ptr<opennova::world::AiSystem> ai_;
 	std::unique_ptr<opennova::mission::BmsEventSystem> bms_;
 	std::unique_ptr<opennova::wac::WacSystem> wac_;
+	// The installed script program. Held as a Ref so it survives reset_world();
+	// finish_load() re-applies it onto the fresh WacSystem each (re)load.
+	Ref<NovaWacProgram> wac_program_;
 	opennova::world::World::Snapshot baseline_; // play-start state, for Stop -> restore
 	opennova::mission::PromoteResult promo_;
 	bool loaded_ = false;
@@ -132,6 +137,21 @@ public:
 	void restart();        // Stop: restore the play-start baseline (rewinds world + AI)
 	void set_tick_mode(int p_mode) { tick_mode_ = p_mode; }
 	int get_tick_mode() const { return tick_mode_; }
+
+	// --- WAC scripts ------------------------------------------------------
+	// Install a compiled program on the script VM (NovaWacProgram). Applied now if
+	// loaded and re-applied on every (re)load. Pass null to uninstall.
+	void set_wac_program(const Ref<NovaWacProgram> &p_program);
+	Ref<NovaWacProgram> get_wac_program() const { return wac_program_; }
+	// Compile `sources` against the LIVE promoted world (symbolic group/area names
+	// resolve through the registry) and install on success. False (program not
+	// installed) when compilation has errors; inspect via get_wac_program().
+	bool compile_and_set_wac(const PackedStringArray &p_sources);
+	// { loaded, paused, runs, event_count, code_size } for transport/debug UI.
+	Dictionary get_wac_state() const;
+	// Script-disable gate [orig: dword_C6EB28].
+	void set_wac_paused(bool p_paused);
+	bool is_wac_paused() const;
 
 	// Drain the World EffectLog as an Array of Dictionaries {kind, a, b, c, d, str} and clear
 	// it. Presentation-only (text/dialog/win/subgoal/show_waypoints/set_light); state mutation
