@@ -20,6 +20,12 @@ namespace godot {
 // Read lookups are case-insensitive. Mutating entries/sections keeps the section
 // string-count totals and the lookup map in sync, and emits a signal so the
 // editor can refresh without polling.
+//
+// Mutations also maintain the engine's grouping invariant — entries stay
+// contiguous per section, because the original derives entry indices from
+// accumulated section string_counts [orig: TextResource_FindEntryBySectionAndKey
+// @ 0x75D250]. Loading stays faithful: an ungrouped file is loaded as-is (so
+// unedited bytes save back exactly) and flagged via is_grouped().
 class RtxtStringFile : public Resource {
 	GDCLASS(RtxtStringFile, Resource)
 
@@ -27,6 +33,7 @@ private:
 	opennova::rtxt::File file_;
 
 	void _refresh();  // rebuild lookup + recompute section counts
+	int _section_insert_index(uint32_t p_section_index) const;
 
 protected:
 	static void _bind_methods();
@@ -37,6 +44,11 @@ public:
 	// --- Read (case-insensitive key lookup) ---
 	String get_string(const StringName &p_key) const;
 	bool has_string(const StringName &p_key) const;
+	// Engine-faithful section-scoped lookup (first matching section, first
+	// matching key within its contiguous run) [orig: 0x75D250 / 0x75D1E0].
+	String get_string_in_section(const String &p_section, const StringName &p_key) const;
+	bool has_string_in_section(const String &p_section, const StringName &p_key) const;
+	int find_entry_in_section(const String &p_section, const StringName &p_key) const;
 	Vector2i get_position(const StringName &p_key) const;
 	int get_section_index_for_key(const StringName &p_key) const;
 	PackedStringArray get_keys() const;
@@ -57,12 +69,18 @@ public:
 	int find_entry_by_key(const StringName &p_key) const;
 
 	// --- Entry mutations ---
+	// add_entry inserts at the end of the section's run and returns the new index.
 	int add_entry(const String &p_key, const String &p_text, int p_section_index, const Vector2i &p_position);
 	void remove_entry(int p_index);
 	void set_entry_key(int p_index, const String &p_key);
 	void set_entry_text(int p_index, const String &p_text);
 	void set_entry_position(int p_index, const Vector2i &p_position);
-	void set_entry_section_index(int p_index, int p_section_index);
+	// Moves the entry to the end of its new section's run; returns the new index.
+	int set_entry_section_index(int p_index, int p_section_index);
+
+	// --- Grouping invariant ---
+	bool is_grouped() const;
+	void normalize_grouping();
 
 	// --- Section CRUD ---
 	int add_section(const String &p_name);

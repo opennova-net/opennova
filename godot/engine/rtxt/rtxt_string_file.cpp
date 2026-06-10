@@ -12,11 +12,98 @@ using namespace godot;
 
 namespace {
 
+// Retail string tables are cp1252, not UTF-8 (67 of the 98 JO bins carry bytes
+// >= 0x80: curly quotes, accented characters). Decode UTF-8 when the bytes are
+// valid UTF-8 (covers ASCII and anything we wrote ourselves), otherwise fall
+// back to cp1252; encode back to cp1252 whenever every character fits so edits
+// to retail files keep the game-readable encoding. Unedited entries never pass
+// through String at all — parse/write preserve their bytes exactly.
+
+// Unicode codepoints for cp1252 bytes 0x80..0x9F (0x0000 marks unmapped bytes,
+// which pass through as their own codepoint).
+constexpr char32_t CP1252_80_9F[32] = {
+	0x20AC, 0x0000, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+	0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x0000, 0x017D, 0x0000,
+	0x0000, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+	0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x0000, 0x017E, 0x0178,
+};
+
+bool is_valid_utf8(const std::string &s) {
+	size_t i = 0;
+	while (i < s.size()) {
+		const unsigned char c = static_cast<unsigned char>(s[i]);
+		size_t len = 0;
+		if (c < 0x80) {
+			len = 1;
+		} else if ((c & 0xE0) == 0xC0 && c >= 0xC2) {
+			len = 2;
+		} else if ((c & 0xF0) == 0xE0) {
+			len = 3;
+		} else if ((c & 0xF8) == 0xF0 && c <= 0xF4) {
+			len = 4;
+		} else {
+			return false;
+		}
+		if (i + len > s.size()) {
+			return false;
+		}
+		for (size_t k = 1; k < len; ++k) {
+			if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) {
+				return false;
+			}
+		}
+		i += len;
+	}
+	return true;
+}
+
 String std_to_gd(const std::string &s) {
-	return String::utf8(s.c_str(), static_cast<int>(s.length()));
+	if (is_valid_utf8(s)) {
+		return String::utf8(s.c_str(), static_cast<int>(s.length()));
+	}
+	String out;
+	for (const char raw : s) {
+		const unsigned char c = static_cast<unsigned char>(raw);
+		char32_t cp = c;
+		if (c >= 0x80 && c <= 0x9F && CP1252_80_9F[c - 0x80] != 0) {
+			cp = CP1252_80_9F[c - 0x80];
+		}
+		out += cp;
+	}
+	return out;
 }
 
 std::string gd_to_std(const String &s) {
+	// Prefer cp1252 so edited entries in retail tables stay engine-readable.
+	std::string cp1252;
+	cp1252.reserve(static_cast<size_t>(s.length()));
+	bool fits = true;
+	for (int i = 0; i < s.length(); ++i) {
+		const char32_t cp = s[i];
+		if (cp < 0x80 || (cp >= 0xA0 && cp <= 0xFF)) {
+			cp1252.push_back(static_cast<char>(cp));
+			continue;
+		}
+		if (cp <= 0x9F && CP1252_80_9F[cp - 0x80] == 0) {
+			cp1252.push_back(static_cast<char>(cp));  // unmapped cp1252 byte passed through decode
+			continue;
+		}
+		bool mapped = false;
+		for (int k = 0; k < 32; ++k) {
+			if (CP1252_80_9F[k] == cp) {
+				cp1252.push_back(static_cast<char>(0x80 + k));
+				mapped = true;
+				break;
+			}
+		}
+		if (!mapped) {
+			fits = false;
+			break;
+		}
+	}
+	if (fits) {
+		return cp1252;
+	}
 	const CharString utf8 = s.utf8();
 	return std::string(utf8.get_data(), static_cast<size_t>(utf8.length()));
 }
@@ -51,6 +138,23 @@ String RtxtStringFile::get_string(const StringName &p_key) const {
 
 bool RtxtStringFile::has_string(const StringName &p_key) const {
 	return file_.has(gd_to_std(String(p_key)));
+}
+
+String RtxtStringFile::get_string_in_section(const String &p_section, const StringName &p_key) const {
+	return std_to_gd(file_.get_in_section(gd_to_std(p_section), gd_to_std(String(p_key))));
+}
+
+bool RtxtStringFile::has_string_in_section(const String &p_section, const StringName &p_key) const {
+	return file_.find_in_section(gd_to_std(p_section), gd_to_std(String(p_key))) != nullptr;
+}
+
+int RtxtStringFile::find_entry_in_section(const String &p_section, const StringName &p_key) const {
+	const opennova::rtxt::Entry *entry =
+			file_.find_in_section(gd_to_std(p_section), gd_to_std(String(p_key)));
+	if (entry == nullptr) {
+		return -1;
+	}
+	return static_cast<int>(entry - file_.entries.data());
 }
 
 Vector2i RtxtStringFile::get_position(const StringName &p_key) const {
@@ -159,10 +263,14 @@ int RtxtStringFile::add_entry(const String &p_key, const String &p_text, int p_s
 	entry.section_index = static_cast<uint32_t>(p_section_index < 0 ? 0 : p_section_index);
 	entry.position.x = static_cast<int16_t>(p_position.x);
 	entry.position.y = static_cast<int16_t>(p_position.y);
-	file_.entries.push_back(std::move(entry));
+	// Insert at the end of the section's contiguous run: the engine derives entry
+	// indices by accumulating section string_counts and requires grouped entries
+	// [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250].
+	const int index = _section_insert_index(entry.section_index);
+	file_.entries.insert(file_.entries.begin() + index, std::move(entry));
 	_refresh();
 	emit_signal("entries_structure_changed");
-	return static_cast<int>(file_.entries.size()) - 1;
+	return index;
 }
 
 void RtxtStringFile::remove_entry(int p_index) {
@@ -192,10 +300,47 @@ void RtxtStringFile::set_entry_position(int p_index, const Vector2i &p_position)
 	emit_signal("entry_text_changed", p_index);
 }
 
-void RtxtStringFile::set_entry_section_index(int p_index, int p_section_index) {
-	ERR_FAIL_INDEX(p_index, static_cast<int>(file_.entries.size()));
-	file_.entries[p_index].section_index = static_cast<uint32_t>(p_section_index < 0 ? 0 : p_section_index);
+int RtxtStringFile::set_entry_section_index(int p_index, int p_section_index) {
+	ERR_FAIL_INDEX_V(p_index, static_cast<int>(file_.entries.size()), -1);
+	const uint32_t target = static_cast<uint32_t>(p_section_index < 0 ? 0 : p_section_index);
+	if (file_.entries[p_index].section_index == target) {
+		return p_index;
+	}
+	// Move the entry to the end of its new section's run so the file stays
+	// grouped (see add_entry). Returns the entry's new index.
+	opennova::rtxt::Entry moved = file_.entries[p_index];
+	moved.section_index = target;
+	file_.entries.erase(file_.entries.begin() + p_index);
+	int index = _section_insert_index(target);
+	file_.entries.insert(file_.entries.begin() + index, std::move(moved));
 	_refresh();  // section totals change
+	emit_signal("entries_structure_changed");
+	return index;
+}
+
+int RtxtStringFile::_section_insert_index(uint32_t p_section_index) const {
+	// One past the last entry that belongs to a section <= the target: the end
+	// of the target section's run in a grouped file, and a sane append point in
+	// a not-yet-normalized one.
+	int index = 0;
+	for (size_t i = 0; i < file_.entries.size(); ++i) {
+		if (file_.entries[i].section_index <= p_section_index) {
+			index = static_cast<int>(i) + 1;
+		}
+	}
+	return index;
+}
+
+bool RtxtStringFile::is_grouped() const {
+	return file_.is_grouped();
+}
+
+void RtxtStringFile::normalize_grouping() {
+	if (file_.is_grouped()) {
+		return;
+	}
+	file_.normalize_grouping();
+	_refresh();
 	emit_signal("entries_structure_changed");
 }
 
@@ -236,6 +381,12 @@ void RtxtStringFile::remove_section(int p_index, int p_reassign_to) {
 		if (static_cast<int>(entry.section_index) > p_index) {
 			entry.section_index -= 1;
 		}
+	}
+
+	// Reassigning to a lower-numbered section can leave the moved run sitting
+	// after sections it now precedes numerically; restore the grouping invariant.
+	if (!file_.is_grouped()) {
+		file_.normalize_grouping();
 	}
 
 	_refresh();
@@ -334,6 +485,11 @@ void RtxtStringFile::set_native(const opennova::rtxt::File &p_file) {
 void RtxtStringFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_string", "key"), &RtxtStringFile::get_string);
 	ClassDB::bind_method(D_METHOD("has_string", "key"), &RtxtStringFile::has_string);
+	ClassDB::bind_method(D_METHOD("get_string_in_section", "section", "key"), &RtxtStringFile::get_string_in_section);
+	ClassDB::bind_method(D_METHOD("has_string_in_section", "section", "key"), &RtxtStringFile::has_string_in_section);
+	ClassDB::bind_method(D_METHOD("find_entry_in_section", "section", "key"), &RtxtStringFile::find_entry_in_section);
+	ClassDB::bind_method(D_METHOD("is_grouped"), &RtxtStringFile::is_grouped);
+	ClassDB::bind_method(D_METHOD("normalize_grouping"), &RtxtStringFile::normalize_grouping);
 	ClassDB::bind_method(D_METHOD("get_position", "key"), &RtxtStringFile::get_position);
 	ClassDB::bind_method(D_METHOD("get_section_index_for_key", "key"), &RtxtStringFile::get_section_index_for_key);
 	ClassDB::bind_method(D_METHOD("get_keys"), &RtxtStringFile::get_keys);
