@@ -48,6 +48,12 @@ public:
 	// flag, default "jo") selects the SCR decode key so demo data decodes correctly.
 	Error mount_runtime(const String &path, const String &expansion = String(),
 	                    bool allow_loose_override = false, const String &game_code = "jo");
+	// Global cache epoch (see util/engine_caches.h): bumped by every mount/clear on ANY
+	// root. GDScript cache holders compare it against the epoch they were built under and
+	// self-clear when it moved. bump_cache_epoch() lets the editor force-invalidate after
+	// editing files on disk without remounting.
+	static int64_t cache_epoch();
+	static void bump_cache_epoch();
 	// Expansion names discoverable under `<path>/expansion/` (each subdir with a matching
 	// <name>.pff). Independent of the currently mounted root, so the UI can list before mounting.
 	PackedStringArray list_expansions(const String &path) const;

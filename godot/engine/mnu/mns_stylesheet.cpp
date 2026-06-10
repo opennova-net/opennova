@@ -1,5 +1,7 @@
 #include "mns_stylesheet.h"
 
+#include "util/nova_string_convert.h"
+
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -12,14 +14,8 @@ using namespace godot;
 
 namespace {
 
-String std_to_gd(const std::string &s) {
-	return String::utf8(s.c_str(), static_cast<int>(s.length()));
-}
-
-std::string gd_to_std(const String &s) {
-	const CharString utf8 = s.utf8();
-	return std::string(utf8.get_data(), static_cast<size_t>(utf8.length()));
-}
+using opennova::to_gd;
+using opennova::to_std;
 
 std::string to_upper(const std::string &s) {
 	std::string out = s;
@@ -32,11 +28,11 @@ std::string to_upper(const std::string &s) {
 } // namespace
 
 String MnsStyleSheet::get_variable(const String &p_name) const {
-	return std_to_gd(sheet_.get(gd_to_std(p_name)));
+	return to_gd(sheet_.get(to_std(p_name)));
 }
 
 bool MnsStyleSheet::has_variable(const String &p_name) const {
-	return sheet_.has(gd_to_std(p_name));
+	return sheet_.has(to_std(p_name));
 }
 
 // [orig: NapiXML_ExpandVariablesInText @ 0x63a000]  ARCHITECTURE DIVERGENCE: the
@@ -46,7 +42,7 @@ bool MnsStyleSheet::has_variable(const String &p_name) const {
 // nova_mnu_builder.cpp substitute_var). Matching for the shipped corpus, which only
 // uses %VAR% in color/font. See notes/mnu/divergence-backlog.md.
 String MnsStyleSheet::substitute(const String &p_text) const {
-	return std_to_gd(sheet_.substitute(gd_to_std(p_text)));
+	return to_gd(sheet_.substitute(to_std(p_text)));
 }
 
 int MnsStyleSheet::get_variable_count() const {
@@ -56,18 +52,18 @@ int MnsStyleSheet::get_variable_count() const {
 Dictionary MnsStyleSheet::get_variables() const {
 	Dictionary out;
 	for (const auto &kv : sheet_.variables) {
-		out[std_to_gd(kv.first)] = std_to_gd(kv.second);
+		out[to_gd(kv.first)] = to_gd(kv.second);
 	}
 	return out;
 }
 
 void MnsStyleSheet::set_variable(const String &p_name, const String &p_value) {
-	sheet_.variables[to_upper(gd_to_std(p_name))] = gd_to_std(p_value);
+	sheet_.variables[to_upper(to_std(p_name))] = to_std(p_value);
 	emit_changed();
 }
 
 void MnsStyleSheet::remove_variable(const String &p_name) {
-	sheet_.variables.erase(to_upper(gd_to_std(p_name)));
+	sheet_.variables.erase(to_upper(to_std(p_name)));
 	emit_changed();
 }
 
@@ -76,7 +72,7 @@ void MnsStyleSheet::set_variables(const Dictionary &p_variables) {
 	const Array keys = p_variables.keys();
 	for (int i = 0; i < keys.size(); ++i) {
 		const String key = keys[i];
-		sheet_.variables[to_upper(gd_to_std(key))] = gd_to_std(p_variables[key]);
+		sheet_.variables[to_upper(to_std(key))] = to_std(p_variables[key]);
 	}
 	emit_changed();
 }

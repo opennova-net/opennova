@@ -1,5 +1,7 @@
 #include "nova_mnu_document.h"
 
+#include "util/nova_string_convert.h"
+
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -11,14 +13,8 @@ using namespace godot;
 
 namespace {
 
-String std_to_gd(const std::string &s) {
-	return String::utf8(s.c_str(), static_cast<int>(s.length()));
-}
-
-std::string gd_to_std(const String &s) {
-	const CharString utf8 = s.utf8();
-	return std::string(utf8.get_data(), static_cast<size_t>(utf8.length()));
-}
+using opennova::to_gd;
+using opennova::to_std;
 
 // --- M10 helpers: active item container + dict <-> struct converters ---
 
@@ -61,17 +57,17 @@ void sync_item_mirror(mnu::Window *w) {
 
 Dictionary item_to_dict(const mnu::Item &it) {
 	Dictionary d;
-	d["type"] = std_to_gd(it.type);
-	d["value"] = std_to_gd(it.value);
-	d["text"] = std_to_gd(it.text);
+	d["type"] = to_gd(it.type);
+	d["value"] = to_gd(it.value);
+	d["text"] = to_gd(it.text);
 	return d;
 }
 
 mnu::Item item_from_dict(const Dictionary &d) {
 	mnu::Item it;
-	it.type = gd_to_std(String(d.get("type", "")));
-	it.value = gd_to_std(String(d.get("value", "")));
-	it.text = gd_to_std(String(d.get("text", "")));
+	it.type = to_std(String(d.get("type", "")));
+	it.value = to_std(String(d.get("value", "")));
+	it.text = to_std(String(d.get("text", "")));
 	return it;
 }
 
@@ -87,10 +83,10 @@ Dictionary header_to_dict(const mnu::TableHeader &h) {
 	Dictionary d;
 	d["column"] = h.column;
 	d["width"] = h.width;
-	d["justify"] = std_to_gd(h.justify);
-	d["vjustify"] = std_to_gd(h.vjustify);
-	d["sort"] = std_to_gd(h.sort);
-	d["text"] = std_to_gd(h.text);
+	d["justify"] = to_gd(h.justify);
+	d["vjustify"] = to_gd(h.vjustify);
+	d["sort"] = to_gd(h.sort);
+	d["text"] = to_gd(h.text);
 	return d;
 }
 
@@ -98,50 +94,50 @@ mnu::TableHeader header_from_dict(const Dictionary &d) {
 	mnu::TableHeader h;
 	h.column = static_cast<int>(d.get("column", 0));
 	h.width = static_cast<int>(d.get("width", 0));
-	h.justify = gd_to_std(String(d.get("justify", "")));
-	h.vjustify = gd_to_std(String(d.get("vjustify", "")));
-	h.sort = gd_to_std(String(d.get("sort", "")));
-	h.text = gd_to_std(String(d.get("text", "")));
+	h.justify = to_std(String(d.get("justify", "")));
+	h.vjustify = to_std(String(d.get("vjustify", "")));
+	h.sort = to_std(String(d.get("sort", "")));
+	h.text = to_std(String(d.get("text", "")));
 	return h;
 }
 
 Dictionary body_to_dict(const mnu::TableBody &b) {
 	Dictionary d;
 	d["column"] = b.column;
-	d["justify"] = std_to_gd(b.justify);
-	d["vjustify"] = std_to_gd(b.vjustify);
+	d["justify"] = to_gd(b.justify);
+	d["vjustify"] = to_gd(b.vjustify);
 	d["bitmap_draw"] = b.bitmap_draw;
 	d["scale_bitmap"] = b.scale_bitmap;
-	d["bitmap_flags"] = std_to_gd(b.bitmap_flags);
+	d["bitmap_flags"] = to_gd(b.bitmap_flags);
 	return d;
 }
 
 mnu::TableBody body_from_dict(const Dictionary &d) {
 	mnu::TableBody b;
 	b.column = static_cast<int>(d.get("column", 0));
-	b.justify = gd_to_std(String(d.get("justify", "")));
-	b.vjustify = gd_to_std(String(d.get("vjustify", "")));
+	b.justify = to_std(String(d.get("justify", "")));
+	b.vjustify = to_std(String(d.get("vjustify", "")));
 	b.bitmap_draw = static_cast<bool>(d.get("bitmap_draw", false));
 	b.scale_bitmap = static_cast<bool>(d.get("scale_bitmap", false));
-	b.bitmap_flags = gd_to_std(String(d.get("bitmap_flags", "")));
+	b.bitmap_flags = to_std(String(d.get("bitmap_flags", "")));
 	return b;
 }
 
 Dictionary subst_to_dict(const mnu::TableSubst &s) {
 	Dictionary d;
 	d["column"] = s.column;
-	d["value"] = std_to_gd(s.value);
+	d["value"] = to_gd(s.value);
 	d["is_file"] = s.is_file;
-	d["file"] = std_to_gd(s.file);
+	d["file"] = to_gd(s.file);
 	return d;
 }
 
 mnu::TableSubst subst_from_dict(const Dictionary &d) {
 	mnu::TableSubst s;
 	s.column = static_cast<int>(d.get("column", 0));
-	s.value = gd_to_std(String(d.get("value", "")));
+	s.value = to_std(String(d.get("value", "")));
 	s.is_file = static_cast<bool>(d.get("is_file", false));
-	s.file = gd_to_std(String(d.get("file", "")));
+	s.file = to_std(String(d.get("file", "")));
 	return s;
 }
 
@@ -458,16 +454,16 @@ int NovaMnuDocument::get_widget_type(int p_id) const {
 }
 
 String NovaMnuDocument::get_widget_type_name(int p_type) const {
-	return std_to_gd(mnu::window_type_name(static_cast<mnu::WindowType>(p_type)));
+	return to_gd(mnu::window_type_name(static_cast<mnu::WindowType>(p_type)));
 }
 
 String NovaMnuDocument::get_widget_name(int p_id) const {
 	const Locator loc = locate(p_id);
 	if (loc.is_screen) {
-		return std_to_gd(doc_.screens[loc.screen_index].name);
+		return to_gd(doc_.screens[loc.screen_index].name);
 	}
 	const mnu::Window *w = window_at(loc);
-	return w ? std_to_gd(w->name) : String();
+	return w ? to_gd(w->name) : String();
 }
 
 Rect2 NovaMnuDocument::get_window_rect(int p_id) const {
@@ -491,7 +487,7 @@ String NovaMnuDocument::get_screen_name(int p_screen_id) const {
 	if (!loc.valid() || !loc.is_screen) {
 		return String();
 	}
-	return std_to_gd(doc_.screens[loc.screen_index].name);
+	return to_gd(doc_.screens[loc.screen_index].name);
 }
 
 int NovaMnuDocument::get_screen_music_var(int p_screen_id) const {
@@ -507,7 +503,7 @@ String NovaMnuDocument::get_screen_text_rsrc(int p_screen_id) const {
 	if (!loc.valid() || !loc.is_screen) {
 		return String();
 	}
-	return std_to_gd(doc_.screens[loc.screen_index].text_rsrc);
+	return to_gd(doc_.screens[loc.screen_index].text_rsrc);
 }
 
 String NovaMnuDocument::get_screen_cursor_file(int p_screen_id) const {
@@ -515,7 +511,7 @@ String NovaMnuDocument::get_screen_cursor_file(int p_screen_id) const {
 	if (!loc.valid() || !loc.is_screen) {
 		return String();
 	}
-	return std_to_gd(doc_.screens[loc.screen_index].cursor_file);
+	return to_gd(doc_.screens[loc.screen_index].cursor_file);
 }
 
 void NovaMnuDocument::set_screen_property(int p_screen_id, const String &p_key, const Variant &p_value) {
@@ -526,15 +522,15 @@ void NovaMnuDocument::set_screen_property(int p_screen_id, const String &p_key, 
 	mnu::Screen &s = doc_.screens[loc.screen_index];
 	const String key = p_key.to_lower();
 	if (key == "name") {
-		s.name = gd_to_std(p_value);
+		s.name = to_std(p_value);
 	} else if (key == "music_var") {
 		s.music_var = static_cast<int>(p_value);
 	} else if (key == "text_rsrc") {
-		s.text_rsrc = gd_to_std(p_value);
+		s.text_rsrc = to_std(p_value);
 	} else if (key == "cursor_file") {
-		s.cursor_file = gd_to_std(p_value);
+		s.cursor_file = to_std(p_value);
 	} else if (key == "cursor_flags") {
-		s.cursor_flags = gd_to_std(p_value);
+		s.cursor_flags = to_std(p_value);
 	} else {
 		return;
 	}
@@ -546,7 +542,7 @@ void NovaMnuDocument::set_screen_property(int p_screen_id, const String &p_key, 
 void NovaMnuDocument::set_widget_name(int p_id, const String &p_name) {
 	const Locator loc = locate(p_id);
 	if (loc.is_screen) {
-		doc_.screens[loc.screen_index].name = gd_to_std(p_name);
+		doc_.screens[loc.screen_index].name = to_std(p_name);
 		touch();
 		return;
 	}
@@ -554,7 +550,7 @@ void NovaMnuDocument::set_widget_name(int p_id, const String &p_name) {
 	if (!w) {
 		return;
 	}
-	w->name = gd_to_std(p_name);
+	w->name = to_std(p_name);
 	touch();
 }
 
@@ -574,7 +570,7 @@ void NovaMnuDocument::set_window_rect(int p_id, const Rect2 &p_rect) {
 
 String NovaMnuDocument::get_widget_text(int p_id) const {
 	const mnu::Window *w = window_at(locate(p_id));
-	return w ? std_to_gd(w->string_data.value) : String();
+	return w ? to_gd(w->string_data.value) : String();
 }
 
 void NovaMnuDocument::set_widget_text(int p_id, const String &p_text) {
@@ -582,13 +578,13 @@ void NovaMnuDocument::set_widget_text(int p_id, const String &p_text) {
 	if (!w) {
 		return;
 	}
-	w->string_data.value = gd_to_std(p_text);
+	w->string_data.value = to_std(p_text);
 	touch();
 }
 
 String NovaMnuDocument::get_widget_string_type(int p_id) const {
 	const mnu::Window *w = window_at(locate(p_id));
-	return w ? std_to_gd(w->string_data.type) : String();
+	return w ? to_gd(w->string_data.type) : String();
 }
 
 void NovaMnuDocument::set_widget_string_type(int p_id, const String &p_type) {
@@ -596,13 +592,13 @@ void NovaMnuDocument::set_widget_string_type(int p_id, const String &p_type) {
 	if (!w) {
 		return;
 	}
-	w->string_data.type = gd_to_std(p_type);
+	w->string_data.type = to_std(p_type);
 	touch();
 }
 
 String NovaMnuDocument::get_widget_font(int p_id) const {
 	const mnu::Window *w = window_at(locate(p_id));
-	return w ? std_to_gd(w->font.name) : String();
+	return w ? to_gd(w->font.name) : String();
 }
 
 void NovaMnuDocument::set_widget_font(int p_id, const String &p_font) {
@@ -610,13 +606,13 @@ void NovaMnuDocument::set_widget_font(int p_id, const String &p_font) {
 	if (!w) {
 		return;
 	}
-	w->font.name = gd_to_std(p_font);
+	w->font.name = to_std(p_font);
 	touch();
 }
 
 String NovaMnuDocument::get_widget_datasource(int p_id) const {
 	const mnu::Window *w = window_at(locate(p_id));
-	return w ? std_to_gd(w->datasource) : String();
+	return w ? to_gd(w->datasource) : String();
 }
 
 void NovaMnuDocument::set_widget_datasource(int p_id, const String &p_value) {
@@ -624,13 +620,13 @@ void NovaMnuDocument::set_widget_datasource(int p_id, const String &p_value) {
 	if (!w) {
 		return;
 	}
-	w->datasource = gd_to_std(p_value);
+	w->datasource = to_std(p_value);
 	touch();
 }
 
 String NovaMnuDocument::get_widget_orientation(int p_id) const {
 	const mnu::Window *w = window_at(locate(p_id));
-	return w ? std_to_gd(w->orientation) : String();
+	return w ? to_gd(w->orientation) : String();
 }
 
 void NovaMnuDocument::set_widget_orientation(int p_id, const String &p_value) {
@@ -638,7 +634,7 @@ void NovaMnuDocument::set_widget_orientation(int p_id, const String &p_value) {
 	if (!w) {
 		return;
 	}
-	w->orientation = gd_to_std(p_value);
+	w->orientation = to_std(p_value);
 	touch();
 }
 
@@ -650,9 +646,9 @@ TypedArray<Dictionary> NovaMnuDocument::get_widget_sounds(int p_id) const {
 	}
 	for (const mnu::Sound &s : w->sounds) {
 		Dictionary d;
-		d["state"] = std_to_gd(s.state);
-		d["trigger"] = std_to_gd(s.trigger);
-		d["file"] = std_to_gd(s.file);
+		d["state"] = to_gd(s.state);
+		d["trigger"] = to_gd(s.trigger);
+		d["file"] = to_gd(s.file);
 		out.push_back(d);
 	}
 	return out;
@@ -668,9 +664,9 @@ void NovaMnuDocument::set_widget_sounds(int p_id, const TypedArray<Dictionary> &
 	for (int i = 0; i < p_sounds.size(); ++i) {
 		const Dictionary d = p_sounds[i];
 		mnu::Sound s;
-		s.state = gd_to_std(String(d.get("state", "")));
-		s.trigger = gd_to_std(String(d.get("trigger", "")));
-		s.file = gd_to_std(String(d.get("file", "")));
+		s.state = to_std(String(d.get("state", "")));
+		s.trigger = to_std(String(d.get("trigger", "")));
+		s.file = to_std(String(d.get("file", "")));
 		next.push_back(s);
 	}
 	w->sounds = next;
@@ -685,10 +681,10 @@ TypedArray<Dictionary> NovaMnuDocument::get_widget_actions(int p_id) const {
 	}
 	for (const mnu::Action &a : w->actions) {
 		Dictionary d;
-		d["type"] = std_to_gd(a.type);
-		d["target"] = std_to_gd(a.target);
-		d["state"] = std_to_gd(a.state);
-		d["file"] = std_to_gd(a.file);
+		d["type"] = to_gd(a.type);
+		d["target"] = to_gd(a.target);
+		d["state"] = to_gd(a.state);
+		d["file"] = to_gd(a.file);
 		d["external_browser"] = a.external_browser;
 		out.push_back(d);
 	}
@@ -705,10 +701,10 @@ void NovaMnuDocument::set_widget_actions(int p_id, const TypedArray<Dictionary> 
 	for (int i = 0; i < p_actions.size(); ++i) {
 		const Dictionary d = p_actions[i];
 		mnu::Action a;
-		a.type = gd_to_std(String(d.get("type", "")));
-		a.target = gd_to_std(String(d.get("target", "")));
-		a.state = gd_to_std(String(d.get("state", "")));
-		a.file = gd_to_std(String(d.get("file", "")));
+		a.type = to_std(String(d.get("type", "")));
+		a.target = to_std(String(d.get("target", "")));
+		a.state = to_std(String(d.get("state", "")));
+		a.file = to_std(String(d.get("file", "")));
 		a.external_browser = static_cast<bool>(d.get("external_browser", false));
 		next.push_back(a);
 	}
@@ -959,21 +955,21 @@ String NovaMnuDocument::get_widget_color(int p_id, int p_slot) const {
 	const mnu::Font &f = w->font;
 	switch (p_slot) {
 		case COLOR_DEFAULT_FG:
-			return std_to_gd(f.default_fg);
+			return to_gd(f.default_fg);
 		case COLOR_DEFAULT_BG:
-			return std_to_gd(f.default_bg);
+			return to_gd(f.default_bg);
 		case COLOR_MOUSEOVER_FG:
-			return std_to_gd(f.mouseover_fg);
+			return to_gd(f.mouseover_fg);
 		case COLOR_MOUSEOVER_BG:
-			return std_to_gd(f.mouseover_bg);
+			return to_gd(f.mouseover_bg);
 		case COLOR_SELECTED_FG:
-			return std_to_gd(f.selected_fg);
+			return to_gd(f.selected_fg);
 		case COLOR_SELECTED_BG:
-			return std_to_gd(f.selected_bg);
+			return to_gd(f.selected_bg);
 		case COLOR_DISABLED_FG:
-			return std_to_gd(f.disabled_fg);
+			return to_gd(f.disabled_fg);
 		case COLOR_DISABLED_BG:
-			return std_to_gd(f.disabled_bg);
+			return to_gd(f.disabled_bg);
 		default:
 			return String();
 	}
@@ -985,7 +981,7 @@ void NovaMnuDocument::set_widget_color(int p_id, int p_slot, const String &p_val
 		return;
 	}
 	mnu::Font &f = w->font;
-	const std::string v = gd_to_std(p_value);
+	const std::string v = to_std(p_value);
 	switch (p_slot) {
 		case COLOR_DEFAULT_FG:
 			f.default_fg = v;
@@ -1025,7 +1021,7 @@ String NovaMnuDocument::get_widget_texture(int p_id, int p_slot) const {
 	const char *state = state_for_slot(p_slot);
 	for (const auto &app : w->appearances) {
 		if (app.state == state) {
-			return std_to_gd(app.value);
+			return to_gd(app.value);
 		}
 	}
 	return String();
@@ -1037,7 +1033,7 @@ void NovaMnuDocument::set_widget_texture(int p_id, int p_slot, const String &p_v
 		return;
 	}
 	mnu::Appearance *app = find_appearance(*w, state_for_slot(p_slot), true);
-	app->value = gd_to_std(p_value);
+	app->value = to_std(p_value);
 	touch();
 }
 
@@ -1168,7 +1164,7 @@ void NovaMnuDocument::delete_widget(int p_id) {
 
 int NovaMnuDocument::add_screen(const String &p_name) {
 	mnu::Screen screen;
-	screen.name = gd_to_std(p_name);
+	screen.name = to_std(p_name);
 	screen.root_window.name = "ROOT";
 	screen.root_window.type = mnu::WindowType::Window;
 	doc_.screens.push_back(std::move(screen));

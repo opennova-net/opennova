@@ -7,6 +7,9 @@ extends RefCounted
 static var _mesh_cache: Dictionary = {}
 static var _model_path_cache: Dictionary = {}
 static var _graphics_cache_by_root: Dictionary = {}
+# The global cache epoch (NovaResourceRoot.cache_epoch) the caches above were built
+# under; any root mount/rescan/clear moves it and the next access self-clears.
+static var _built_epoch: int = 0
 
 
 static func clear_cache() -> void:
@@ -15,9 +18,18 @@ static func clear_cache() -> void:
 	_graphics_cache_by_root.clear()
 
 
+static func _check_epoch() -> void:
+	var epoch := NovaResourceRoot.cache_epoch()
+	if epoch == _built_epoch:
+		return
+	_built_epoch = epoch
+	clear_cache()
+
+
 ## Enumerate all top-level *veg*.3di graphics in the resource root.
 ## Returns dictionaries with basename/model_path, sorted by basename.
 static func list_graphics(resource_root: NovaResourceRoot, force_refresh: bool = false) -> Array:
+	_check_epoch()
 	if resource_root == null or resource_root.get_root_dir().is_empty():
 		return []
 	var root_key := _root_key(resource_root)
@@ -65,6 +77,7 @@ static func resolve_slot_meshes(resource_root: NovaResourceRoot, defs: Array) ->
 ## Resolve a graphic name (e.g. "mveg5" or "mveg5.3di") to the first
 ## Mesh built from the matching top-level .3di. Returns null if not resolvable.
 static func load_mesh(resource_root: NovaResourceRoot, graphic: String) -> Mesh:
+	_check_epoch()
 	if resource_root == null or resource_root.get_root_dir().is_empty():
 		return null
 	var root_key := _root_key(resource_root)

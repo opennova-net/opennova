@@ -1,5 +1,7 @@
 #include "nova_mnu_builder.h"
 
+#include "util/nova_string_convert.h"
+
 #include "mnu_itemlist_common.h"
 #include "mnu_outline.h"
 #include "nova_mnu_button.h"
@@ -52,14 +54,8 @@ using namespace godot;
 
 namespace {
 
-String to_gd(const std::string &s) {
-	return String::utf8(s.c_str(), static_cast<int>(s.length()));
-}
-
-std::string to_std(const String &s) {
-	const CharString utf8 = s.utf8();
-	return std::string(utf8.get_data(), static_cast<size_t>(utf8.length()));
-}
+using opennova::to_gd;
+using opennova::to_std;
 
 // Case-insensitive std::string compare (matches the reference importer).
 bool iequals(const std::string &a, const std::string &b) {

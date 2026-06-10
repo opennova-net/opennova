@@ -7,18 +7,6 @@
 
 using namespace godot;
 
-namespace {
-
-bool bytes_look_like_dds(const PackedByteArray &bytes) {
-	return bytes.size() >= 4 &&
-			bytes[0] == 'D' &&
-			bytes[1] == 'D' &&
-			bytes[2] == 'S' &&
-			bytes[3] == ' ';
-}
-
-} // namespace
-
 PackedStringArray ResourceFormatLoaderNovaTexture::_get_recognized_extensions() const {
 	PackedStringArray exts;
 	exts.push_back("tga");
