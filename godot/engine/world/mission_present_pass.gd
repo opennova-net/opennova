@@ -22,7 +22,7 @@ extends RefCounted
 # Per-entity visual contract (NovaEntityVisual): the present pass is host-agnostic and drives each
 # resolved node through a small duck-typed surface (GDScript) that NovaObjectModel implements:
 #   transform (Node3D), set_part_phase(channel, phase), visible (Node3D), play_body_anim(slot).
-# has_method guards keep non-animated/static nodes untouched. See docs/adr/0003.
+# has_method guards keep non-animated/static nodes untouched. See docs/adr/0007.
 #
 # Targets resolve through ONE shared index (MissionEntityRegistry.resolve: bms_id primary, (kind,index)
 # fallback). Host-agnostic, RefCounted, preload-referenced (same convention as MissionObjectPlacer).
