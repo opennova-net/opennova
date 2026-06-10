@@ -18,7 +18,7 @@ const MusDisplayNames = preload("res://modtools/music/mus_display_names.gd")
 signal expr_changed(text: String)
 
 # Deepest cell level that may still open a nested expression / function call.
-const MAX_DEPTH := 3
+const MAX_DEPTH := 4
 
 var _var_list: Array = []   # [{token:String, label:String}]
 var _mus = null             # NovaMusicScript for validation (may be null)
@@ -33,7 +33,7 @@ var _suppress := false
 class ExprCell extends HBoxContainer:
 	signal changed
 
-	enum { M_NUM, M_VAR, M_ME, M_EXPR, M_CALL, M_RAW }
+	enum { M_NUM, M_VAR, M_ME, M_EXPR, M_CALL, M_UNOP, M_RAW }
 
 	var _vars: Array
 	var _mus = null
@@ -52,6 +52,10 @@ class ExprCell extends HBoxContainer:
 	var _fn: OptionButton = null
 	var _no_arg: CheckBox = null
 	var _arg: ExprCell = null
+	# unary mode (built lazily)
+	var _unop_box: HBoxContainer = null
+	var _unop: OptionButton = null
+	var _operand: ExprCell = null
 
 	func _init(vars: Array, mus, depth: int) -> void:
 		_vars = vars
@@ -65,7 +69,8 @@ class ExprCell extends HBoxContainer:
 		if depth < MAX_DEPTH:
 			_mode.add_item("Expression (A · B)", M_EXPR)
 			_mode.add_item("Function…", M_CALL)
-		_mode.add_item("Type…", M_RAW)
+			_mode.add_item("Not / negate…", M_UNOP)
+		_mode.add_item("Type it (advanced)", M_RAW)
 		add_child(_mode)
 		_num = SpinBox.new()
 		_num.min_value = -2147483648
@@ -149,6 +154,23 @@ class ExprCell extends HBoxContainer:
 		_call_box.add_child(_arg)
 		add_child(_call_box)
 
+	# Build the unary sub-row (op picker + one operand cell) once, on demand.
+	func _ensure_unop_box() -> void:
+		if _unop_box != null:
+			return
+		_unop_box = HBoxContainer.new()
+		_unop_box.add_theme_constant_override("separation", 3)
+		_unop = OptionButton.new()
+		for e in MusExpr.UNOPS:
+			_unop.add_item("%s  (%s)" % [String(e["op"]), String(e["label"])])
+			_unop.set_item_metadata(_unop.item_count - 1, String(e["op"]))
+		_unop.item_selected.connect(func(_i): changed.emit())
+		_unop_box.add_child(_unop)
+		_operand = ExprCell.new(_vars, _mus, _depth + 1)
+		_operand.changed.connect(func(): changed.emit())
+		_unop_box.add_child(_operand)
+		add_child(_unop_box)
+
 	func _sync() -> void:
 		var m := _selected_mode()
 		_num.visible = (m == M_NUM)
@@ -162,6 +184,10 @@ class ExprCell extends HBoxContainer:
 			_ensure_call_box()
 		if _call_box != null:
 			_call_box.visible = (m == M_CALL)
+		if m == M_UNOP:
+			_ensure_unop_box()
+		if _unop_box != null:
+			_unop_box.visible = (m == M_UNOP)
 
 	# The cell's MusExpr node dict (always serializable to compilable text).
 	func get_dict() -> Dictionary:
@@ -187,6 +213,11 @@ class ExprCell extends HBoxContainer:
 					stored = String(_fn.get_item_metadata(_fn.selected))
 				var arg = null if (_no_arg != null and _no_arg.button_pressed) else _arg.get_dict()
 				return MusExpr.call_node(stored, arg)
+			M_UNOP:
+				var uop := "!"
+				if _unop != null and _unop.selected >= 0:
+					uop = String(_unop.get_item_metadata(_unop.selected))
+				return MusExpr.unop(uop, _operand.get_dict())
 			M_RAW:
 				var t := _raw.text.strip_edges()
 				return MusExpr.raw(t if t != "" else "0")
@@ -239,8 +270,19 @@ class ExprCell extends HBoxContainer:
 					_no_arg.button_pressed = false
 					_arg.visible = true
 					_arg.seed(arg)
+			MusExpr.UNOP:
+				if _depth >= MAX_DEPTH:
+					_seed_raw_text(MusExpr.serialize(node))
+					return
+				_select_mode(M_UNOP)
+				var uop := String(node.get("op", "!"))
+				for i in range(_unop.item_count):
+					if String(_unop.get_item_metadata(i)) == uop:
+						_unop.select(i)
+						break
+				_operand.seed(node.get("operand", MusExpr.literal(0)))
 			_:
-				# UNOP / RAW / unknown: keep the exact canonical text.
+				# RAW / unknown: keep the exact canonical text.
 				_seed_raw_text(MusExpr.serialize(node))
 
 	func _seed_var_token(token: String) -> bool:

@@ -21,6 +21,7 @@ const ExprRowClass = preload("res://modtools/music/ui/expr_row.gd")
 # decompiler renders nop as nothing, so an authored nop has no text line and
 # would vanish on the next re-decompile (it couldn't then be deleted/reordered).
 const ADD_ITEMS := [
+	["♪  play a track", "play"],
 	["→  go to a state", "transition"],
 	["↪  jump to a label", "goto"],
 	["ƒ  run a state and return", "call"],
@@ -149,7 +150,7 @@ func make_track_option(selected_track: int) -> OptionButton:
 	if _bank_names.is_empty():
 		# No bank loaded: still let the user pick a slot index by number.
 		for i in range(8):
-			ob.add_item("sound_%d" % i)
+			ob.add_item("track %d" % i)
 	if selected_track >= 0 and selected_track < ob.item_count:
 		ob.select(selected_track)
 	return ob
@@ -369,7 +370,9 @@ func _tool_button(glyph: String, tip: String) -> Button:
 	return b
 
 
+# Display fallback for an in-bank entry with no name; the picker rows already
+# show the index, so "(unnamed)" reads better than the raw sound_N token.
 func _track_name(track: int) -> String:
 	if track >= 0 and track < _bank_names.size() and String(_bank_names[track]) != "":
 		return String(_bank_names[track])
-	return "sound_%d" % track
+	return "(unnamed)"

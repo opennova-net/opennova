@@ -145,14 +145,50 @@ static func intrinsic_tooltip(stored: String) -> String:
 	return String(e.get("tip", ""))
 
 
+# --- caller inputs (l_N locals at/above the frame base) ---------------------
+
+# The default `enter` frame base (byte offset where 0x38 banks the caller's
+# arguments); every stock script uses 0x20. NovaMusicScript.get_locals_frame_offset
+# supplies the per-script value.
+const DEFAULT_LOCALS_BASE := 32
+
+static var _local_re: RegEx = null
+
+
+# "Input K" for the local token at byte offset `off` when it sits on the frame's
+# 4-byte grid, else "" (a raw l_N below the base is not a caller input).
+static func input_label_for_offset(off: int, locals_base: int = DEFAULT_LOCALS_BASE) -> String:
+	if off < locals_base or (off - locals_base) % 4 != 0:
+		return ""
+	return "Input %d" % ((off - locals_base) / 4 + 1)
+
+
+# The canonical token for the state's (k+1)-th caller input (k 0-based).
+static func input_token(k: int, locals_base: int = DEFAULT_LOCALS_BASE) -> String:
+	return "l_%d" % (locals_base + 4 * k)
+
+
 # DISPLAY-ONLY prettifier for canonical expression/statement text: swaps the
-# intrinsic surface forms for their friendly labels and VarXX tokens for their
-# friendly names (when a profile named them). The result is for labels; it must
-# NEVER be fed back to the compiler -- the write path keeps the canonical text.
-static func pretty_expr(text: String, var_list: Array = []) -> String:
+# intrinsic surface forms for their friendly labels, caller-input locals
+# (l_<base+4k>) for "Input K", and VarXX tokens for their friendly names (when
+# a profile named them). The result is for labels; it must NEVER be fed back to
+# the compiler -- the write path keeps the canonical text.
+static func pretty_expr(text: String, var_list: Array = [], locals_base: int = DEFAULT_LOCALS_BASE) -> String:
 	var out := text
 	for r in _SURFACE_REWRITES:
 		out = out.replace(String(r[0]), String(r[1]))
+	if out.contains("l_"):
+		if _local_re == null:
+			_local_re = RegEx.new()
+			_local_re.compile("\\bl_(\\d+)\\b")
+		var rebuilt := ""
+		var pos := 0
+		for m in _local_re.search_all(out):
+			var label := input_label_for_offset(int(m.get_string(1)), locals_base)
+			rebuilt += out.substr(pos, m.get_start() - pos)
+			rebuilt += label if label != "" else m.get_string(0)
+			pos = m.get_end()
+		out = rebuilt + out.substr(pos)
 	for v in var_list:
 		var token := String(v.get("token", ""))
 		var label := String(v.get("label", ""))

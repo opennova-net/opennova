@@ -85,6 +85,9 @@ var _pending_offsets: Array = []
 # Sum of the hidden frame ops' locals counts: how many inputs a `callvl` caller
 # hands this state. Surfaced by the host's header, not by a node.
 var _section_inputs: int = 0
+# Byte offset where the frame op banks those inputs (l_<base+4k> = "Input k+1");
+# 0x20 for every stock script, read from the script when available.
+var _locals_base: int = MusDisplayNames.DEFAULT_LOCALS_BASE
 # Ordinal of the first statement the user may actually move/edit (a hidden
 # leading frame op still owns ordinal 0, and the document refuses to touch it).
 var _first_movable_ordinal: int = 0
@@ -130,7 +133,11 @@ func show_section(section: Dictionary, bank_names: Array) -> void:
 	_node_seq = 0
 	_offset_nodes = []
 	_active_node = null
-	_edit_node = null   # any rebuild cancels an open inline edit
+	# Any rebuild cancels an open inline edit. Apply/Cancel/takeover null the
+	# tracker first, so a still-set node here means an EXTERNAL re-render (undo,
+	# document change) ate the user's edit -- say so instead of failing silently.
+	var edit_discarded := _edit_node != null
+	_edit_node = null
 	_pending_offsets = []
 	clear_connections()
 	for c in get_children():
@@ -150,6 +157,8 @@ func show_section(section: Dictionary, bank_names: Array) -> void:
 	else:
 		_build_seq(stmts, 0, -1)
 	_fit_to_view()
+	if edit_discarded:
+		author_failed.emit("That change closed your open edit — press ✎ again to continue.")
 	_consume_pending_add_edit(stmts)
 
 
@@ -184,6 +193,20 @@ func current_section_index() -> int:
 # ops' locals counts). The host surfaces this in its header; 0 for most states.
 func section_inputs_count() -> int:
 	return _section_inputs
+
+
+# The picker/display variable list for the SHOWN section: the global VarXX list
+# plus one row per caller input ("Input 1 (l_32)"), so input slots read by name
+# in expressions AND are pickable in editors. Tokens stay canonical (l_N), so
+# nothing the compiler eats changes.
+func _display_var_list() -> Array:
+	if _section_inputs <= 0:
+		return _var_list
+	var out := _var_list.duplicate()
+	for k in range(_section_inputs):
+		var token := MusDisplayNames.input_token(k, _locals_base)
+		out.append({"token": token, "label": "Input %d (%s)" % [k + 1, token]})
+	return out
 
 
 # --- build ---------------------------------------------------------------
@@ -364,8 +387,13 @@ func _build_simple(s: Dictionary, depth: int, ordinal: int, run: int) -> Diction
 		body.text += "   ×%d" % run
 	gn.add_child(body)
 	if bool(s.get("has_call", false)):
+		# call_name is the STORED intrinsic name (e.g. "GSV") -- resolve it through
+		# the registry so the sublabel reads "ƒ Set volume", with the mnemonic and
+		# behaviour in the tooltip.
+		var stored := String(s.get("call_name", ""))
 		var b := Label.new()
-		b.text = "ƒ %s" % MusDisplayNames.pretty_expr(String(s.get("call_name", "calls a function")), _var_list)
+		b.text = "ƒ %s" % (MusDisplayNames.intrinsic_label(stored) if stored != "" else "calls a function")
+		b.tooltip_text = MusDisplayNames.intrinsic_tooltip(stored)
 		b.add_theme_color_override("font_color", MusDisplayNames.stmt_color("call"))
 		gn.add_child(b)
 	_register(gn, int(s.get("code_offset", -1)))
@@ -412,7 +440,7 @@ func _build_if(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
 	var flat := _if_flat_editable(s)
 	var cond := Label.new()
 	cond.text = "if (%s)" % MusDisplayNames.pretty_expr(
-		_unwrap_outer_parens(String(s.get("expr", ""))), _var_list)
+		_unwrap_outer_parens(String(s.get("expr", ""))), _display_var_list(), _locals_base)
 	gn.add_child(cond)
 	gn.add_child(_branch_header_row("✓ then ▸", Color(0.6, 0.9, 0.6), s, ordinal, "then", flat))
 	var else_present := bool(s.get("else_present", false))
@@ -645,8 +673,10 @@ func _build_switch(s: Dictionary, depth: int, ordinal: int) -> Dictionary:
 	elif action == "goto":
 		action_word = "jump to"
 	head.text = "by (%s) → %s" % [MusDisplayNames.pretty_expr(
-		_unwrap_outer_parens(String(s.get("expr", ""))), _var_list), action_word]
+		_unwrap_outer_parens(String(s.get("expr", ""))), _display_var_list(), _locals_base), action_word]
 	head.tooltip_text = "The value picks the target: 0 picks the first, 1 the second, ..."
+	if _section_inputs > 0:
+		head.tooltip_text += "\nInput N = the Nth value the caller hands this state (engine slot l_%d + 4 per input)." % _locals_base
 	gn.add_child(head)
 	var targets: Array = s.get("targets", [])
 	gn.set_slot(0, true, 0, _IN_PIN, false, 0, _EXEC_PIN)
@@ -732,15 +762,17 @@ func _body_text(s: Dictionary, kind: String) -> String:
 		"return", "yield", "nop", "done":
 			return MusDisplayNames.stmt_title(kind)
 		_:
-			# Display-only prettify: friendly function names + variable names. The
-			# canonical text stays in the AST dict for the write path.
-			return MusDisplayNames.pretty_expr(String(s.get("text", "")), _var_list)
+			# Display-only prettify: friendly function names + variable/input names.
+			# The canonical text stays in the AST dict for the write path.
+			return MusDisplayNames.pretty_expr(String(s.get("text", "")), _display_var_list(), _locals_base)
 
 
+# Display name for a track: the bank entry's name, else plain "track N" (the
+# canonical sound_N token is write-path-only; users shouldn't have to read it).
 func _track_name(track: int) -> String:
 	if track >= 0 and track < _bank_names.size() and String(_bank_names[track]) != "":
 		return String(_bank_names[track])
-	return "sound_%d" % track
+	return "track %d" % track
 
 
 func _same_simple(a: Dictionary, b: Dictionary) -> bool:
@@ -846,6 +878,10 @@ func configure_authoring(section_names: PackedStringArray, var_list: Array, mus,
 	_bank_names = bank_names
 	_editable = editable
 	_authoring_blocked_reason = blocked_reason
+	_locals_base = MusDisplayNames.DEFAULT_LOCALS_BASE
+	if _mus != null and _mus.has_method("get_locals_frame_offset") \
+			and _mus.has_method("get_default_script_name"):
+		_locals_base = int(_mus.get_locals_frame_offset(_mus.get_default_script_name()))
 	_forms.configure(section_names, var_list, mus, bank_names)
 	_ensure_add_menu()
 	if _add_menu != null:
@@ -1013,7 +1049,10 @@ func _begin_inline_edit(key: Dictionary, gn: GraphNode, kind: String, s: Diction
 	if not _editable or gn == null:
 		return
 	if _edit_node != null:
-		_rerender()   # cancel the other edit; this freed gn
+		# Deliberate takeover (the user clicked another ✎): drop the old edit
+		# quietly -- the discarded-edit notice is for EXTERNAL re-renders only.
+		_edit_node = null
+		_rerender()   # restore the other node; this freed gn
 		gn = _find_edit_node(key)
 		if gn == null:
 			return
@@ -1064,7 +1103,11 @@ func _end_inline_edit() -> void:
 # kind has no inline editor. Pickers snapshot their lists at build time so a
 # background configure() can't shift index->value under an open editor.
 func _build_inline_editor(kind: String, s: Dictionary) -> Dictionary:
-	_forms.configure(_section_names, _var_list, _mus, _bank_names)
+	# The shown section's display list (globals + this state's caller inputs) so
+	# pickers offer "Input 1 (l_32)" and expression rows seed input refs
+	# structurally. Tokens stay canonical, so produced lines are unchanged.
+	var dvars := _display_var_list()
+	_forms.configure(_section_names, dvars, _mus, _bank_names)
 	match kind:
 		"play":
 			var tob := _forms.make_track_option(int(s.get("track", -1)))
@@ -1096,7 +1139,7 @@ func _build_inline_editor(kind: String, s: Dictionary) -> Dictionary:
 		"assign":
 			var vob := _forms.make_var_option(String(s.get("var_name", "")), int(s.get("var_offset", -1)))
 			var er := ExprRowClass.new()
-			er.setup(_var_list, _mus)
+			er.setup(dvars, _mus)
 			if s.has("rhs_tree"):
 				er.set_expr(s.get("rhs_tree"))
 			else:
@@ -1106,7 +1149,7 @@ func _build_inline_editor(kind: String, s: Dictionary) -> Dictionary:
 			box3.add_child(vob)
 			box3.add_child(_edit_label("="))
 			box3.add_child(er)
-			var vlist := _var_list
+			var vlist := dvars
 			var produce3 := func() -> PackedStringArray:
 				return MusStmtText.assign(_forms.var_token_at(vob, vlist), er.get_expr_text())
 			return {"control": box3, "produce": produce3, "expr_row": er}
@@ -1119,13 +1162,13 @@ func _build_inline_editor(kind: String, s: Dictionary) -> Dictionary:
 			var box4 := HBoxContainer.new()
 			box4.add_child(vob2)
 			box4.add_child(dir)
-			var vlist2 := _var_list
+			var vlist2 := dvars
 			var produce4 := func() -> PackedStringArray:
 				return MusStmtText.incdec(_forms.var_token_at(vob2, vlist2), dir.get_selected_id() == 1)
 			return {"control": box4, "produce": produce4}
 		"expr":
 			var er2 := ExprRowClass.new()
-			er2.setup(_var_list, _mus)
+			er2.setup(dvars, _mus)
 			if s.has("expr_tree"):
 				er2.set_expr(s.get("expr_tree"))
 			else:
@@ -1135,7 +1178,7 @@ func _build_inline_editor(kind: String, s: Dictionary) -> Dictionary:
 			return {"control": er2, "produce": produce5, "expr_row": er2}
 		"if_cond":
 			var er3 := ExprRowClass.new()
-			er3.setup(_var_list, _mus)
+			er3.setup(dvars, _mus)
 			if s.has("expr_tree"):
 				er3.set_expr(s.get("expr_tree"))
 			else:

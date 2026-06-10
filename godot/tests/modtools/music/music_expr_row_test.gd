@@ -104,7 +104,9 @@ func test_too_deep_nesting_falls_back_to_canonical_text():
 	var deep := MusExpr.binop("+",
 		MusExpr.binop("*",
 			MusExpr.binop("-",
-				MusExpr.binop("/", MusExpr.literal(8), MusExpr.literal(2)),
+				MusExpr.binop("/",
+					MusExpr.binop("%", MusExpr.literal(9), MusExpr.literal(5)),
+					MusExpr.literal(2)),
 				MusExpr.literal(1)),
 			MusExpr.literal(3)),
 		MusExpr.literal(4))
@@ -114,10 +116,30 @@ func test_too_deep_nesting_falls_back_to_canonical_text():
 	assert_eq(r.get_expr_text(), want, "beyond-cap subtrees survive as exact text")
 
 
-func test_unop_falls_back_to_exact_text():
+func test_unop_seeds_structurally_and_round_trips():
+	# "not X" is a structured mode now, not a type-it fallback.
 	var r := _row()
 	r.set_expr(MusExpr.unop("!", MusExpr.varref("Var", 1)))
-	assert_eq(r.get_expr_text(), "!Var01", "unary opens as exact type-it text")
+	assert_eq(r.get_expr_text(), "!Var01", "unary text stays canonical")
+	var d: Dictionary = r.get_expr_dict()
+	assert_eq(int(d.get("kind", -1)), MusExpr.UNOP, "opens as a structured unary, not raw text")
+	assert_eq(String(d.get("op", "")), "!")
+	assert_eq(MusExpr.serialize(d.get("operand", {})), "Var01", "operand landed structurally")
+
+
+func test_caller_input_token_seeds_onto_variable_picker():
+	# A var list that carries input entries (the graph supplies them for states
+	# with caller inputs) makes an l_N reference structural, not type-it.
+	var vars := _vars()
+	vars.append({"token": "l_32", "label": "Input 1 (l_32)"})
+	var r: Control = ExprRowClass.new()
+	add_child_autofree(r)
+	r.setup(vars, null)
+	r.set_expr(MusExpr.binop("==", MusExpr.varref("l", 32), MusExpr.literal(2)))
+	assert_eq(r.get_expr_text(), "(l_32 == 2)", "the canonical token is unchanged")
+	var d: Dictionary = r.get_expr_dict()
+	assert_eq(int(d.get("kind", -1)), MusExpr.BINOP, "seeded structurally")
+	assert_eq(MusExpr.serialize(d.get("left", {})), "l_32", "lhs landed on the Input picker entry")
 
 
 func test_changed_signal_fires_on_edit():

@@ -30,6 +30,13 @@ func _walk(stmts: Array, pairs: Array) -> void:
 		_walk(s.get("else", []), pairs)
 
 
+func test_locals_frame_offset_exposed():
+	# The editor numbers caller inputs from this base ("Input 1" = l_32).
+	var ms := _load_script()
+	assert_eq(ms.get_locals_frame_offset(ms.get_default_script_name()), 32,
+		"stock scripts bank caller inputs at byte 32")
+
+
 func test_every_exposed_tree_serializes_to_its_canonical_text():
 	var ms := _load_script()
 	var ast: Array = ms.get_program_ast(ms.get_default_script_name())

@@ -256,6 +256,54 @@ func test_post_add_rerender_auto_opens_the_new_nodes_editor():
 		"and it is the freshly added assign")
 
 
+func test_add_play_via_palette_no_dialog_and_auto_edit():
+	# Plays are addable from the palette now (drag from the Tracks dock stays as
+	# the power path): the default line inserts immediately and the new node
+	# opens straight into its track picker.
+	var g := _egraph({"index": 2, "name": "S", "statements": []}, ["intro", "combat"])
+	await get_tree().process_frame
+	var added := []
+	g.add_statement_requested.connect(func(si, l): added.append([si, Array(l)]))
+	var play_id := -1
+	for i in range(MusForms.ADD_ITEMS.size()):
+		if String(MusForms.ADD_ITEMS[i][1]) == "play":
+			play_id = i
+	assert_gt(play_id, -1, "the palette offers a play item")
+	g._on_add_palette_id(play_id)
+	assert_null(_first_dialog(g), "no dialog for adding a play")
+	assert_eq(added, [[2, ["play sound_0"]]], "the canonical default line was inserted")
+	# Simulate the document round-trip: the new play opens mid-edit.
+	g.show_section({"index": 2, "name": "S", "statements": [
+		{"kind": "play", "code_offset": 0, "track": 0, "text": "play sound_0"},
+		{"kind": "done", "code_offset": 2, "text": "done"},
+	]}, ["intro", "combat"])
+	await get_tree().process_frame
+	var editing := _nodes_in_edit(g)
+	assert_eq(editing.size(), 1, "the new play opened straight into its editor")
+	assert_gt(_options_in(editing[0]).size(), 0, "with the track picker embedded")
+
+
+func test_external_rerender_announces_discarded_edit():
+	var section := {"index": 0, "name": "S", "statements": [
+		{"kind": "play", "code_offset": 0, "track": 0, "text": "play sound_0"},
+	]}
+	var g := _egraph(section, ["intro"])
+	await get_tree().process_frame
+	var flashes := []
+	g.author_failed.connect(func(msg): flashes.append(String(msg)))
+	_button_in(_node_titled(g, "Play"), "✎").pressed.emit()
+	# An external re-render (undo / document change) eats the edit: say so.
+	g.show_section(section, ["intro"])
+	await get_tree().process_frame
+	assert_eq(flashes.size(), 1, "the silent cancel is announced")
+	assert_string_contains(flashes[0], "closed your open edit")
+	# Apply/Cancel/takeover paths stay quiet.
+	flashes.clear()
+	_button_in(_node_titled(g, "Play"), "✎").pressed.emit()
+	_button_in(_nodes_in_edit(g)[0], "✕ Cancel").pressed.emit()
+	assert_eq(flashes, [], "a deliberate Cancel is not announced")
+
+
 func test_if_creation_still_uses_its_dialog():
 	var g := _egraph({"index": 4, "name": "S", "statements": []})
 	await get_tree().process_frame

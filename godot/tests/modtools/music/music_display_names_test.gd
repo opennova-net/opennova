@@ -68,3 +68,24 @@ func test_pretty_expr_swaps_var_tokens_for_short_friendly_names():
 func test_pretty_expr_handles_statement_lines_too():
 	var vars := [{"token": "Var05", "label": "Speed (Var05)"}]
 	assert_eq(MusDisplayNames.pretty_expr("Var05 = (Var05 + 1)", vars), "Speed = (Speed + 1)")
+
+
+func test_caller_input_labels():
+	assert_eq(MusDisplayNames.input_label_for_offset(32), "Input 1", "frame base = the 1st input")
+	assert_eq(MusDisplayNames.input_label_for_offset(36), "Input 2")
+	assert_eq(MusDisplayNames.input_label_for_offset(40), "Input 3")
+	assert_eq(MusDisplayNames.input_label_for_offset(4), "", "below the frame base is not an input")
+	assert_eq(MusDisplayNames.input_label_for_offset(34), "", "off the 4-byte grid is not an input")
+	assert_eq(MusDisplayNames.input_token(0), "l_32", "canonical token for input 1")
+	assert_eq(MusDisplayNames.input_token(1), "l_36")
+
+
+func test_pretty_expr_renders_caller_inputs_by_name():
+	# The gamemus Begin selector: the raw caller-input slot reads as Input 1.
+	assert_eq(MusDisplayNames.pretty_expr("(l_32)"), "(Input 1)")
+	assert_eq(MusDisplayNames.pretty_expr("(l_36 > 0)"), "(Input 2 > 0)")
+	# Non-input locals (below the frame base / off-grid) stay raw -- renaming
+	# them would claim a meaning they don't have.
+	assert_eq(MusDisplayNames.pretty_expr("(l_4 + l_33)"), "(l_4 + l_33)")
+	# A custom frame base shifts the numbering.
+	assert_eq(MusDisplayNames.pretty_expr("(l_48)", [], 48), "(Input 1)")

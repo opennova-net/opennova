@@ -549,7 +549,7 @@ func _refresh_map() -> void:
 			var badge := Label.new()
 			badge.text = badge_text
 			badge.add_theme_color_override("font_color", Color(0.72, 0.74, 0.82))
-			badge.tooltip_text = "Logic this state runs (◇ if · ⋔ switch · ✎ var · ƒ call). Double-click to open its blueprint."
+			badge.tooltip_text = "Logic this state runs (if blocks, choose-by-value, variable edits, function calls). Double-click to open its blueprint."
 			gn.add_child(badge)
 		if gn.get_child_count() == 0:
 			# Slot 0 needs a row; an idle / branch-only section plays nothing.
@@ -627,22 +627,23 @@ func _build_logic_summaries(script_name: StringName) -> Dictionary:
 	return out
 
 
-# Compact glyph summary of the LOGIC a section runs (◇ if · ⋔ switch · ✎ var ·
-# ƒ call), counts elided when zero, empty when the section is just plays/
-# transitions. Recurses if/switch bodies so nested logic still surfaces.
+# Compact WORD summary of the LOGIC a section runs ("2 if · 1 choose · 3 set"),
+# counts elided when zero, empty when the section is just plays/transitions.
+# Words, not glyphs: a glyph-only badge required memorizing the legend.
+# Recurses if/switch bodies so nested logic still surfaces.
 func _section_logic_badge(stmts: Array) -> String:
 	var c := {"if": 0, "switch": 0, "var": 0, "call": 0}
 	_count_logic(stmts, c)
 	var parts := PackedStringArray()
 	if c["if"] > 0:
-		parts.append("◇%d" % c["if"])
+		parts.append("%d if" % c["if"])
 	if c["switch"] > 0:
-		parts.append("⋔%d" % c["switch"])
+		parts.append("%d choose" % c["switch"])
 	if c["var"] > 0:
-		parts.append("✎%d" % c["var"])
+		parts.append("%d set" % c["var"])
 	if c["call"] > 0:
-		parts.append("ƒ%d" % c["call"])
-	return "  ".join(parts)
+		parts.append("%d call" % c["call"])
+	return " · ".join(parts)
 
 
 func _count_logic(stmts: Array, c: Dictionary) -> void:
@@ -840,7 +841,7 @@ func _bank_names() -> Array:
 func _track_name(names: Array, track: int) -> String:
 	if track >= 0 and track < names.size() and String(names[track]) != "":
 		return String(names[track])
-	return "sound_%d" % track
+	return "track %d" % track
 
 
 # Preview a bank track through our own MusicAudioPreview (a chip's ▶ button).
@@ -1543,17 +1544,25 @@ func _refresh_states_list() -> void:
 	for sec in model:
 		var section_name := String(sec.get("name", ""))
 		var label := section_name
+		var notes := PackedStringArray()
 		if bool(sec.get("is_entry", false)):
 			label += "  ★"
+			notes.append("★ the start state (playback begins here)")
 		if bool(sec.get("is_idle_loop", false)):
 			label += "  ↻"
+			notes.append("↻ loops to itself while waiting for the game")
 		if _last_state == VM_RUNNING and section_name == String(_current_section):
 			label = "▶ " + label
+			notes.append("▶ playing right now")
 		var idx := _states_list.add_item(label)
 		_states_list.set_item_metadata(idx, section_name)
 		if _section_is_unlinked_in_model(sec, incoming):
 			_states_list.set_item_custom_fg_color(idx, Color(0.66, 0.62, 0.52))
-			_states_list.set_item_tooltip(idx, UNLINKED_STATE_TOOLTIP)
+			notes.append(UNLINKED_STATE_TOOLTIP)
+		var tip := "Open %s's blueprint." % section_name
+		if notes.size() > 0:
+			tip += "\n" + "\n".join(notes)
+		_states_list.set_item_tooltip(idx, tip)
 	_refresh_states_selection()
 
 

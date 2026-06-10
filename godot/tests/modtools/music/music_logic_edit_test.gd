@@ -424,6 +424,99 @@ func test_frame_enter_present_in_gamemus_and_uneditable():
 	assert_eq(_stmt_count(doc, "Begin"), before, "frame_enter rejections were no-ops")
 
 
+# --- caller inputs read by name; intrinsics read friendly -----------------
+
+func test_switch_selector_reads_caller_input_by_name():
+	# The l_32 slot is the state's first caller input: the header must say so,
+	# not leak the raw engine token.
+	var g := _egraph({
+		"index": 0, "name": "S", "statements": [
+			{"kind": "frame_enter", "code_offset": 0, "locals_count": 1, "text": "enter X"},
+			{"kind": "switch", "code_offset": 2, "expr": "(l_32)", "action": "enter",
+				"targets": [{"name": "A", "section": 1, "track": -1}], "text": "on (l_32) enter A"},
+		],
+	})
+	await get_tree().process_frame
+	var sw := _node_titled(g, "Choose")
+	assert_not_null(sw, "switch node present")
+	var head := sw.get_child(0) as Label
+	assert_eq(head.text, "by (Input 1) → go to", "the caller-input slot reads by name")
+	assert_string_contains(head.tooltip_text, "value the caller hands this state",
+		"the tooltip explains what an Input is")
+
+
+func test_gamemus_begin_selector_reads_input_1():
+	# End-to-end on the shipped script: Begin's `on (l_32)` renders as Input 1.
+	var doc := _doc()
+	var begin := _section(doc, "Begin")
+	assert_false(begin.is_empty(), "Begin present")
+	var g = MusicSectionLogicGraph.new()
+	g.size = Vector2(960, 720)
+	add_child_autofree(g)
+	var sn := _sname(doc)
+	g.configure_authoring(doc.mus_script.get_section_names(sn), _vars(), doc.mus_script, [], true)
+	g.show_section(begin, [])
+	await get_tree().process_frame
+	var sw := _node_titled(g, "Choose")
+	assert_not_null(sw, "Begin's switch renders")
+	var head := sw.get_child(0) as Label
+	assert_string_contains(head.text, "Input 1", "the real gamemus selector reads by input name")
+	assert_false(head.text.contains("l_32"), "the raw engine token does not leak")
+
+
+func test_call_sublabel_uses_friendly_intrinsic_name():
+	# call_name is the STORED mnemonic; the sublabel must resolve it through the
+	# registry ("ƒ Feedback ..."), with the mnemonic surviving in the tooltip.
+	var g := _egraph({
+		"index": 0, "name": "S", "statements": [
+			{"kind": "expr", "code_offset": 0, "text": "FB(0)", "expr": "FB(0)",
+				"has_call": true, "call_name": "GFB"},
+		],
+	})
+	await get_tree().process_frame
+	var node := _node_titled(g, "Do action")
+	assert_not_null(node, "expr node present")
+	var sub: Label = null
+	for c in node.get_children():
+		if c is Label and String((c as Label).text).begins_with("ƒ "):
+			sub = c
+	assert_not_null(sub, "call sublabel present")
+	if sub == null:
+		return
+	assert_string_contains(sub.text, "Feedback", "sublabel reads the friendly name, not GFB")
+	assert_false(sub.text.contains("GFB"), "the raw mnemonic stays out of the label")
+	assert_string_contains(sub.tooltip_text, "GFB", "the mnemonic survives in the tooltip")
+
+
+func test_inputs_offered_in_variable_pickers():
+	# A state that takes caller inputs offers them in its editors' variable
+	# pickers as "Input N (l_NN)"; the token stays canonical.
+	var g := _egraph({
+		"index": 0, "name": "S", "statements": [
+			{"kind": "frame_enter", "code_offset": 0, "locals_count": 2, "text": "enter X"},
+			{"kind": "assign", "code_offset": 2, "text": "Var01 = 1",
+				"var_name": "Var01", "var_offset": 4, "is_local": false,
+				"rhs": "1", "has_call": false},
+		],
+	})
+	await get_tree().process_frame
+	var node := _node_with_ordinal(g, 1)
+	_button_in(node, "✎").pressed.emit()
+	var vob: OptionButton = null
+	var all := []
+	_descendants(node, all)
+	for c in all:
+		if c is OptionButton:
+			vob = c
+			break
+	assert_not_null(vob, "var picker embedded")
+	var labels := []
+	for i in range(vob.item_count):
+		labels.append(vob.get_item_text(i))
+	assert_true(labels.has("Input 1 (l_32)"), "the 1st caller input is pickable")
+	assert_true(labels.has("Input 2 (l_36)"), "the 2nd caller input is pickable")
+
+
 # --- folded ×N runs can be unfolded to edit one member -------------------
 
 func test_folded_run_unfolds_to_editable_members():

@@ -36,6 +36,7 @@ void NovaMusicScript::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_script", "name"), &NovaMusicScript::has_script);
 	ClassDB::bind_method(D_METHOD("get_script_names"), &NovaMusicScript::get_script_names);
 	ClassDB::bind_method(D_METHOD("get_section_names", "script_name"), &NovaMusicScript::get_section_names);
+	ClassDB::bind_method(D_METHOD("get_locals_frame_offset", "script_name"), &NovaMusicScript::get_locals_frame_offset);
 	ClassDB::bind_method(D_METHOD("get_intrinsic_names"), &NovaMusicScript::get_intrinsic_names);
 	ClassDB::bind_method(D_METHOD("get_decompiled_text", "script_name"), &NovaMusicScript::get_decompiled_text);
 	ClassDB::bind_method(D_METHOD("get_decompiled_text_with_bank", "script_name", "bank"), &NovaMusicScript::get_decompiled_text_with_bank);
@@ -164,6 +165,18 @@ PackedStringArray NovaMusicScript::get_section_names(const StringName &p_script_
 		break;
 	}
 	return out;
+}
+
+// Byte offset where the `enter` (0x38) frame op banks the caller's arguments
+// in the locals area: l_<base + 4k> is the state's (k+1)-th input. Stock files
+// use 0x20 [orig: AudioVM_Op_Enter @0x672C20 reads instance[+0x3C]]; the editor
+// uses this to render those slots as "Input N".
+int NovaMusicScript::get_locals_frame_offset(const StringName &p_script_name) const {
+	const MusScript *s = raw_script(String(p_script_name));
+	if (s == nullptr || s->locals_frame_offset == 0) {
+		return 0x20;
+	}
+	return (int)s->locals_frame_offset;
 }
 
 PackedStringArray NovaMusicScript::get_intrinsic_names() const {

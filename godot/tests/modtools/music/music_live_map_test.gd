@@ -218,16 +218,17 @@ func test_map_shows_blueprint_grid_and_minimap():
 
 
 func test_nodes_carry_a_logic_badge():
-	# A state that runs if/switch/var/call logic surfaces a glyph badge on its map
-	# node, so the logic that isn't a track chip is visible without opening it.
+	# A state that runs if/switch/var/call logic surfaces a WORD badge on its map
+	# node ("2 if · 1 choose"), so the logic that isn't a track chip is readable
+	# without opening it -- and without memorizing a glyph legend.
 	var lm := _make_live()
 	await get_tree().process_frame
 	var found := false
 	for n in _nodes(lm.get_node("%SectionMap")):
 		for t in _node_label_texts(n):
-			if t.contains("◇") or t.contains("⋔") or t.contains("✎") or t.contains("ƒ"):
+			if t.contains(" if") or t.contains(" choose") or t.contains(" set") or t.contains(" call"):
 				found = true
-	assert_true(found, "states that run logic surface a ◇/⋔/✎/ƒ badge on the map node")
+	assert_true(found, "states that run logic surface a word badge on the map node")
 
 
 func test_edge_colors_distinct_by_kind():
