@@ -42,6 +42,7 @@
 #include "fnt/fnt_resource_format.h"
 #include "fnt/fnt_import_plugin.h"
 #include "editor/opennova_editor_plugin.h"
+#include "editor/nova_edit_history.h"
 #include "rtxt/rtxt_string_file.h"
 #include "rtxt/rtxt_resource_format.h"
 #include "util/nova_data_format.h"
@@ -143,6 +144,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaSkeletalAnim);
 	GDREGISTER_CLASS(NovaMissionData);
 	GDREGISTER_CLASS(NovaSimulation);
+	GDREGISTER_CLASS(NovaEditHistory);
 	GDREGISTER_CLASS(NovaLwfData);
 	GDREGISTER_CLASS(NovaWavLoader);
 	GDREGISTER_CLASS(NovaSoundSelector);

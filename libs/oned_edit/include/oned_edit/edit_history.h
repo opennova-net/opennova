@@ -120,6 +120,33 @@ public:
 		return true;
 	}
 
+	// Pop the top undo step onto the redo stack and return it via `out`,
+	// WITHOUT touching any live document: the caller applies the snapshot
+	// itself (terrain's {before, after} deltas, the fnt/mnu op records).
+	// Discards any open begin() session first (same defence as swap_*).
+	// Returns false (and leaves `out` untouched) when there is nothing to undo.
+	bool pop_undo(Snapshot &out) {
+		if (undo_.empty()) {
+			return false;
+		}
+		discard_open_session();
+		out = undo_.back();
+		redo_.push_back(std::move(undo_.back()));
+		undo_.pop_back();
+		return true;
+	}
+
+	bool pop_redo(Snapshot &out) {
+		if (redo_.empty()) {
+			return false;
+		}
+		discard_open_session();
+		out = redo_.back();
+		undo_.push_back(std::move(redo_.back()));
+		redo_.pop_back();
+		return true;
+	}
+
 	// --- Dirty vs. a clean baseline --------------------------------------
 
 	// Adopt the current document as the clean baseline (call at open / save /
