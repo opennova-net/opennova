@@ -4,7 +4,10 @@ extends Camera3D
 ## Right click + move: look. Right click + WASD: fly.
 ## Right click + scroll: adjust fly speed. Shift: 3x speed boost.
 
-signal quit_requested
+# Esc was pressed. Host-neutral: the game shell maps it to pause/resume, the
+# terrain editor to its own quit flow, play-in-editor to Stop. The camera only
+# reports the key; it never decides what Esc means.
+signal escape_pressed
 
 @export var mouse_sensitivity: float = 0.003
 @export var orbit_sensitivity: float = 0.005
@@ -82,7 +85,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_update_orbit()
 
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		quit_requested.emit()
+		escape_pressed.emit()
 
 func _update_orbit() -> void:
 	var rot := Transform3D()

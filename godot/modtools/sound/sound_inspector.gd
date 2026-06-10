@@ -36,7 +36,7 @@ var _set_binder: FieldBinder
 var _layer_binder: FieldBinder
 var _member_binder: FieldBinder
 
-var _wav_dialog: FileDialog
+var _files: FileDialogHelper
 
 
 func setup(workspace) -> void:
@@ -240,20 +240,13 @@ func _on_play_member() -> void:
 # --- Wave file browse ---
 
 func _on_browse_wav() -> void:
-	if _wav_dialog == null:
-		_wav_dialog = FileDialog.new()
-		_wav_dialog.name = "SoundWavDialog"
-		_wav_dialog.access = FileDialog.ACCESS_FILESYSTEM
-		_wav_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-		_wav_dialog.filters = PackedStringArray(["*.wav,*.WAV ; Wave files"])
-		_wav_dialog.file_selected.connect(_on_wav_selected)
-		add_child(_wav_dialog)
+	if _files == null:
+		_files = FileDialogHelper.new(self)
+	var dir := ""
 	var root = _ws.get_resource_root() if _ws != null else null
 	if root != null and root.has_method("get_root_dir"):
-		var dir := String(root.get_root_dir())
-		if not dir.is_empty():
-			_wav_dialog.current_dir = dir
-	_wav_dialog.popup_centered(Vector2i(720, 520))
+		dir = String(root.get_root_dir())
+	_files.open("Choose a wave file", PackedStringArray(["*.wav,*.WAV ; Wave files"]), _on_wav_selected, dir)
 
 
 func _on_wav_selected(path: String) -> void:

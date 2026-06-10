@@ -236,20 +236,14 @@ func _on_align(justify: int) -> void:
 	(_entry as CbinTextEntry).set_justify(justify)
 	_refresh_align_buttons(justify)
 
+var _files: FileDialogHelper
+
+
 func _on_image_pick_pressed() -> void:
-	var dialog := FileDialog.new()
-	dialog.access = FileDialog.ACCESS_FILESYSTEM
-	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	dialog.current_dir = _resource_root.get_root_dir() if _resource_root != null else ""
-	dialog.add_filter("*.pcx,*.png,*.jpg,*.jpeg,*.tga ; Image")
-	dialog.file_selected.connect(func(path: String) -> void:
-		_on_image_pick_selected(path)
-		dialog.queue_free()
-	)
-	dialog.canceled.connect(dialog.queue_free)
-	dialog.close_requested.connect(dialog.queue_free)
-	add_child(dialog)
-	dialog.popup_centered_ratio(0.6)
+	if _files == null:
+		_files = FileDialogHelper.new(self)
+	var dir: String = _resource_root.get_root_dir() if _resource_root != null else ""
+	_files.open("Choose an image", PackedStringArray(["*.pcx,*.png,*.jpg,*.jpeg,*.tga ; Image"]), _on_image_pick_selected, dir)
 
 func _on_image_pick_selected(path: String) -> void:
 	var name := path.get_file()

@@ -221,20 +221,16 @@ func build_detail(box: VBoxContainer) -> void:
 	anim_frames_dialog.name = "MaterialAnimFramesDialog"
 	box.add_child(anim_frames_dialog)
 
-	var texture_dialog := FileDialog.new()
-	texture_dialog.name = "ObjectTextureFileDialog"
-	texture_dialog.access = FileDialog.ACCESS_FILESYSTEM
-	texture_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	texture_dialog.filters = PackedStringArray([
+	# One shared texture picker (parented to `box` so a rebuild frees it); the
+	# target slot rides each one-shot callback's capture instead of a pending dict.
+	var files := FileDialogHelper.new(box)
+	var texture_filters := PackedStringArray([
 		"*.tga,*.TGA,*.dds,*.DDS,*.mdt,*.MDT,*.pcx,*.PCX,*.png,*.PNG ; Object textures",
 		"*.jpg,*.JPG,*.jpeg,*.JPEG,*.bmp,*.BMP ; Image fallbacks",
 	])
-	texture_dialog.min_size = Vector2i(760, 520)
-	box.add_child(texture_dialog)
 
 	var selected := {"index": _selected_index}
 	var guard := SyncGuard.new()
-	var pending_slot := {"slot": -1}
 
 	var refresh_materials := func() -> void:
 		materials = object_editor.object_data.get_materials() if object_editor and object_editor.object_data else []
@@ -382,13 +378,16 @@ func build_detail(box: VBoxContainer) -> void:
 				apply_slot_name.call(slot_id, value)
 			)
 			texture_widget.browse_requested.connect(func(slot_id: int) -> void:
-				pending_slot["slot"] = slot_id
 				var source_dir := object_editor.object_data.get_source_dir() if object_editor and object_editor.object_data else ""
 				if source_dir.is_empty():
 					show_slot_message.call(slot_id, "Open an object before choosing a texture.")
 					return
-				texture_dialog.current_dir = source_dir
-				texture_dialog.popup_centered()
+				files.open("Choose a texture", texture_filters, func(path: String) -> void:
+					var file_name := _object_folder_filename(path)
+					if file_name.is_empty():
+						show_slot_message.call(slot_id, "Choose a file in the object folder.")
+						return
+					apply_slot_name.call(slot_id, file_name), source_dir)
 			)
 		if edit != null:
 			edit.text_submitted.connect(func(value: String, slot_id: int = slot) -> void:
@@ -413,16 +412,6 @@ func build_detail(box: VBoxContainer) -> void:
 					apply_slot_options.call(slot_id)
 			)
 
-	texture_dialog.file_selected.connect(func(path: String) -> void:
-		var slot := int(pending_slot.get("slot", -1))
-		if slot < 0:
-			return
-		var file_name := _object_folder_filename(path)
-		if file_name.is_empty():
-			show_slot_message.call(slot, "Choose a file in the object folder.")
-			return
-		apply_slot_name.call(slot, file_name)
-	)
 	alpha.value_changed.connect(func(value: float) -> void:
 		if not guard.active and selected["index"] >= 0:
 			object_editor.object_data.set_material_alpha_threshold(selected["index"], value)

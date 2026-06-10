@@ -19,6 +19,59 @@ func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
 	assert_eq(world.load_world(root), ERR_FILE_NOT_FOUND, "Runtime global root must contain full_00.env next to Dvxi5.trn.")
 
 
+func test_packaged_scene_instantiates_with_intact_wiring() -> void:
+	# nova_world.tscn is the embeddable world (the game instances it in
+	# main_game.tscn; play-in-editor instances it in a workspace viewport). Pin
+	# the extraction: every engine node is present and the intra-scene NodePaths
+	# survived the move out of main_game.tscn.
+	var packed := load("res://engine/world/nova_world.tscn") as PackedScene
+	assert_not_null(packed, "the packaged world scene loads")
+	var world := packed.instantiate()
+	add_child_autofree(world)
+	assert_true(world is NovaWorld, "the root carries the NovaWorld script")
+	for child_name in ["NovaTerrain", "NovaEnvironment", "NovaSky", "NovaWeather", "NovaWater", "NovaCelestial"]:
+		assert_not_null(world.get_node_or_null(child_name), "%s is in the packaged scene" % child_name)
+	assert_not_null(world.get_node_or_null("NovaTerrain/FoliageDispatcher"))
+	assert_not_null(world.get_node_or_null("NovaTerrain/TileOverlay"))
+	var terrain: NovaTerrain = world.get_node("NovaTerrain")
+	assert_eq(terrain.environment_path, NodePath("../NovaEnvironment"), "terrain env path survived extraction")
+	assert_eq(terrain.weather_path, NodePath("../NovaWeather"), "terrain weather path survived extraction")
+
+
+func test_load_mission_data_rejects_an_empty_document() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	var failures: Array = []
+	world.load_failed.connect(func(reason): failures.append(reason))
+	assert_eq(world.load_mission_data(null, "x.bms"), ERR_INVALID_PARAMETER)
+	assert_eq(world.load_mission_data(NovaMissionData.new(), "x.bms"), ERR_INVALID_PARAMETER,
+		"an unloaded document is rejected before any root resolution")
+	assert_eq(failures.size(), 2, "both rejections explain themselves via load_failed")
+
+
+func test_injected_root_bypasses_settings_mount() -> void:
+	# The editor injects its own mounted root; the load must resolve through it
+	# (and report ITS directory in errors) instead of mounting from settings.
+	var root_dir := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join("injected_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(root_dir)
+	var injected := NovaResourceRoot.new()
+	assert_eq(injected.set_root_dir(root_dir), OK)
+
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_resource_root(injected)
+
+	var failures: Array = []
+	world.load_failed.connect(func(reason): failures.append(String(reason)))
+	assert_eq(world.load_mission("missing.bms"), ERR_FILE_NOT_FOUND,
+		"the missing file resolves against the injected root")
+	assert_eq(failures.size(), 1)
+	assert_string_contains(failures[0], root_dir.get_file(),
+		"the error names the injected root's directory, proving no settings mount ran")
+
+
 func _make_world() -> NovaWorld:
 	var world := NovaWorld.new()
 	var terrain := NovaTerrain.new()

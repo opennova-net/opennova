@@ -16,7 +16,7 @@ var _italic: CheckBox
 var _outline: CheckBox
 var _shadow: CheckBox
 var _status: Label
-var _file_dialog: FileDialog
+var _files: FileDialogHelper
 
 
 func _init() -> void:
@@ -96,14 +96,9 @@ func _init() -> void:
 
 
 func _on_browse() -> void:
-	if _file_dialog == null:
-		_file_dialog = FileDialog.new()
-		_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
-		_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-		_file_dialog.add_filter("*.ttf,*.otf,*.ttc ; Fonts")
-		_file_dialog.file_selected.connect(_on_file_selected)
-		add_child(_file_dialog)
-	_file_dialog.popup_centered_ratio(0.6)
+	if _files == null:
+		_files = FileDialogHelper.new(self)
+	_files.open("Choose a font file", PackedStringArray(["*.ttf,*.otf,*.ttc ; Fonts"]), _on_file_selected)
 
 
 func _on_file_selected(path: String) -> void:

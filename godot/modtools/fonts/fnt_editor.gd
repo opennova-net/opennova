@@ -97,7 +97,7 @@ func select_char(char_code: int) -> void:
 		return
 	_selected_char = char_code
 	if _document != null and _document.resource != null:
-		var page := _document.resource.get_glyph_page(char_code)
+		var page: int = _document.resource.get_glyph_page(char_code)
 		if page >= 0:
 			_current_page = page
 	_refresh_atlas()
@@ -111,7 +111,7 @@ func paint_pixel(page: int, x: int, y: int, alpha: int = 255) -> Error:
 	var next_alpha := 0 if _active_tool == TOOL_ERASER else clampi(alpha, 0, 255)
 	if before == next_alpha:
 		return OK
-	var err := _document.resource.set_pixel_alpha(page, x, y, next_alpha)
+	var err: int = _document.resource.set_pixel_alpha(page, x, y, next_alpha)
 	if err != OK:
 		return err
 	var change := {"page": page, "x": x, "y": y, "before": before, "after": next_alpha}
@@ -126,8 +126,8 @@ func paint_pixel(page: int, x: int, y: int, alpha: int = 255) -> Error:
 func clear_glyph(char_code: int = _selected_char) -> Error:
 	if _document == null or _document.resource == null:
 		return ERR_UNAVAILABLE
-	var rect := _document.resource.get_glyph_rect(char_code)
-	var page := _document.resource.get_glyph_page(char_code)
+	var rect: Rect2i = _document.resource.get_glyph_rect(char_code)
+	var page: int = _document.resource.get_glyph_page(char_code)
 	if page < 0:
 		return ERR_INVALID_PARAMETER
 	var changes: Array[Dictionary] = []
@@ -150,8 +150,8 @@ func copy_glyph_alpha(char_code: int = _selected_char) -> void:
 	_clipboard_size = Vector2i.ZERO
 	if _document == null or _document.resource == null:
 		return
-	var rect := _document.resource.get_glyph_rect(char_code)
-	var page := _document.resource.get_glyph_page(char_code)
+	var rect: Rect2i = _document.resource.get_glyph_rect(char_code)
+	var page: int = _document.resource.get_glyph_page(char_code)
 	if page < 0 or rect.size.x <= 0 or rect.size.y <= 0:
 		return
 	_clipboard_size = rect.size
@@ -166,8 +166,8 @@ func copy_glyph_alpha(char_code: int = _selected_char) -> void:
 func paste_glyph_alpha(char_code: int = _selected_char) -> Error:
 	if _document == null or _document.resource == null or _clipboard.is_empty():
 		return ERR_UNAVAILABLE
-	var rect := _document.resource.get_glyph_rect(char_code)
-	var page := _document.resource.get_glyph_page(char_code)
+	var rect: Rect2i = _document.resource.get_glyph_rect(char_code)
+	var page: int = _document.resource.get_glyph_page(char_code)
 	if page < 0:
 		return ERR_INVALID_PARAMETER
 	var w = mini(rect.size.x, _clipboard_size.x)
@@ -302,10 +302,10 @@ func _apply_brush_line(a: Vector2i, b: Vector2i) -> void:
 func _apply_fill(src: Vector2i) -> void:
 	if _document == null or _document.resource == null:
 		return
-	var rect := _document.resource.get_glyph_rect(_selected_char)
+	var rect: Rect2i = _document.resource.get_glyph_rect(_selected_char)
 	if rect.size.x <= 0 or rect.size.y <= 0:
 		return
-	var page := _document.resource.get_glyph_page(_selected_char)
+	var page: int = _document.resource.get_glyph_page(_selected_char)
 	if page < 0 or not rect.has_point(src):
 		return
 	var target := int(_document.resource.get_pixel_alpha(page, src.x, src.y))
@@ -361,7 +361,7 @@ func _commit_move_drag() -> void:
 	if _move_delta == Vector2i.ZERO or old_rect.size.x <= 0 or old_rect.size.y <= 0:
 		_refresh_selection()
 		return
-	var page := _document.resource.get_glyph_page(_selected_char)
+	var page: int = _document.resource.get_glyph_page(_selected_char)
 	if page < 0:
 		_refresh_selection()
 		return
@@ -664,8 +664,8 @@ func _apply_glyph_meta() -> void:
 		return
 	var page := int(_glyph_page_spin.value)
 	var rect := Rect2i(int(_glyph_x_spin.value), int(_glyph_y_spin.value), int(_glyph_w_spin.value), int(_glyph_h_spin.value))
-	var old_rect := _document.resource.get_glyph_rect(_selected_char)
-	var old_page := _document.resource.get_glyph_page(_selected_char)
+	var old_rect: Rect2i = _document.resource.get_glyph_rect(_selected_char)
+	var old_page: int = _document.resource.get_glyph_page(_selected_char)
 	if rect == old_rect and page == old_page:
 		return
 	_document.resource.set_glyph_rect(_selected_char, page, rect)
@@ -710,7 +710,7 @@ func _refresh_atlas() -> void:
 	if _document == null or _document.resource == null:
 		_atlas_canvas.set_page_texture(null)
 		return
-	var pages := _document.resource.get_page_count()
+	var pages: int = _document.resource.get_page_count()
 	_page_spin.max_value = max(0, pages - 1)
 	_page_spin.set_value_no_signal(_current_page)
 	if _glyph_page_spin != null:
@@ -726,7 +726,7 @@ func refresh_atlas_texture() -> void:
 
 
 func _page_texture(page: int) -> Texture2D:
-	var image := _document.resource.get_page_image(page)
+	var image: Image = _document.resource.get_page_image(page)
 	if image == null:
 		return null
 	return ImageTexture.create_from_image(image)
@@ -737,8 +737,8 @@ func _refresh_selection() -> void:
 		_glyph_grid.select(_selected_char - FIRST_CHAR)
 	if _document == null or _document.resource == null or _glyph_inspector == null:
 		return
-	var rect := _document.resource.get_glyph_rect(_selected_char)
-	var page := _document.resource.get_glyph_page(_selected_char)
+	var rect: Rect2i = _document.resource.get_glyph_rect(_selected_char)
+	var page: int = _document.resource.get_glyph_page(_selected_char)
 	_suppress_inspector_signals = true
 	if _glyph_title != null:
 		_glyph_title.text = "Glyph %d  '%s'" % [_selected_char, _glyph_label(_selected_char)]
@@ -766,7 +766,7 @@ func _refresh_selection() -> void:
 func _refresh_sample() -> void:
 	if _sample_preview == null or _document == null or _document.resource == null:
 		return
-	var font := _document.resource.to_font_file()
+	var font: FontFile = _document.resource.to_font_file()
 	if font != null:
 		_sample_preview.add_theme_font_override("font", font)
 	if _sample_edit != null:
@@ -776,13 +776,13 @@ func _refresh_sample() -> void:
 func _glyph_thumbnail(code: int) -> Texture2D:
 	if _document == null or _document.resource == null:
 		return null
-	var rect := _document.resource.get_glyph_rect(code)
+	var rect: Rect2i = _document.resource.get_glyph_rect(code)
 	if rect.size.x <= 0 or rect.size.y <= 0:
 		return null
-	var page := _document.resource.get_glyph_page(code)
+	var page: int = _document.resource.get_glyph_page(code)
 	if page < 0:
 		return null
-	var img := _document.resource.get_page_image(page)
+	var img: Image = _document.resource.get_page_image(page)
 	if img == null:
 		return null
 	var clamped := rect.intersection(Rect2i(0, 0, img.get_width(), img.get_height()))

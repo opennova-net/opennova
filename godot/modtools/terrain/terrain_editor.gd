@@ -202,8 +202,8 @@ func _ready() -> void:
 	_init_foliage_preview()
 	_init_tile_overlay_preview()
 	_init_clone_marker()
-	if camera.has_signal("quit_requested"):
-		camera.connect("quit_requested", Callable(self, "request_quit_editor"))
+	if camera.has_signal("escape_pressed"):
+		camera.connect("escape_pressed", Callable(self, "request_quit_editor"))
 	_load_editor_state()
 	if workstation and workstation.has_method("set_editor"):
 		workstation.set_editor(self)

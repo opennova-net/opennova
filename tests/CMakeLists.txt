@@ -76,6 +76,11 @@ foreach(test items weapons ammo hudpos)
 endforeach()
 
 # Mission (BMS) tests
+add_executable(mission_authoring_test mission/mission_authoring_test.cpp)
+target_link_libraries(mission_authoring_test PRIVATE opennova_mission)
+target_include_directories(mission_authoring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_authoring COMMAND mission_authoring_test)
+
 add_executable(mission_bms_test mission/mission_bms_test.cpp)
 target_link_libraries(mission_bms_test PRIVATE opennova_mission)
 target_include_directories(mission_bms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
