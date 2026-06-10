@@ -240,9 +240,16 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 		value = trim(value);
 
 		if (key == "tod_begin") {
+			// The engine has no block-nesting state: tod_begin simply advances
+			// to the next slot, so tod_end is optional and a new tod_begin
+			// implicitly closes the open block (shipped FULL_03/FULL_05.ENV
+			// rely on this) [orig: TimeOfDay_ParseProperty @ 0x57c647].
 			if (in_tod) {
-				error = "Nested tod_begin at line " + std::to_string(line_number);
-				return false;
+				if (overflow_block) {
+					out.keyframes.back() = current;
+				} else {
+					out.keyframes.push_back(current);
+				}
 			}
 			in_tod = true;
 			skyfog_set = false;
@@ -260,16 +267,16 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 			continue;
 		}
 		if (key == "tod_end") {
-			if (!in_tod) {
-				error = "tod_end without tod_begin at line " + std::to_string(line_number);
-				return false;
+			// A stray tod_end just resets the engine's slot pointer to scratch;
+			// it is not an error [orig: TimeOfDay_ParseProperty @ 0x57c696].
+			if (in_tod) {
+				if (overflow_block) {
+					out.keyframes.back() = current;
+				} else {
+					out.keyframes.push_back(current);
+				}
+				in_tod = false;
 			}
-			if (overflow_block) {
-				out.keyframes.back() = current;
-			} else {
-				out.keyframes.push_back(current);
-			}
-			in_tod = false;
 			continue;
 		}
 
@@ -347,8 +354,12 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 	}
 
 	if (in_tod) {
-		error = "Unclosed tod_begin";
-		return false;
+		// An unterminated final block is still a counted slot in the engine.
+		if (overflow_block) {
+			out.keyframes.back() = current;
+		} else {
+			out.keyframes.push_back(current);
+		}
 	}
 
 	// Stable, matching the engine's bubble sort (duplicate times keep file order)

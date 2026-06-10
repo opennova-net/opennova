@@ -63,6 +63,10 @@ reflection"/"ambient G" in kong comments but are the current-time and TOD-rate s
   blocks do not allocate or store a time; their color lines keep writing into slot 16
   (@ 0x57c65b). Slots are never cleared between loads — colors a block does not set carry
   leftovers (engine quirk; benign because stock files set all 12).
+- **There is no block-nesting state: `tod_end` is optional.** `tod_begin` simply advances
+  the slot pointer (@ 0x57c647) and a stray `tod_end` resets it to scratch (@ 0x57c696) —
+  shipped `FULL_03.ENV` / `FULL_05.ENV` contain a `tod_begin` inside an unterminated block
+  and the engine accepts them. A reimpl that errors on "nested" blocks rejects retail data.
 - **Colors quantize at parse.** `Color_ScaleRGBAndPack @ 0x57f890`: each component
   `int(value * envscale)`, truncated, clamped to <= 255 (no lower clamp), packed. `envscale`
   (`Env_ParseEnvScale @ 0x840950`) is a parse-state float applied to every subsequent `*_rgb`
@@ -293,6 +297,15 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade | Documented; runtime port carries .env table only until weather/WAC work lands (overcast blend defaults 0 = pure .env, matching clear weather) |
 | 17 | Iris view-distance lighting curve | Deferred, consumer documented |
 | 18 | Earthquake / rain / wind oscillator rings | Weather-system scope; ported constants documented, wiring deferred with WAC weather |
+
+## Corpus sweep (retail JO:CA install, 2026-06-09)
+
+`tests/env/jo_env_sweep_test.cpp` (gated on `OPENNOVA_JO_DIR`): 10 `.env` files, all parse
+and survive save→reparse semantically. Distribution facts backing the divergence
+dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks author
+`fog_rgb` without `skyfog_rgb` (#9 moot in practice), 0 files exceed the 16-keyframe cap,
+0 author `water_height` (it comes from `.trn`/BMS), fog types used are only 2 (4 files) and
+3 (6 files), and all 10 set `advanced_clouds 1`.
 
 ## Open questions
 
