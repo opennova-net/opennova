@@ -348,3 +348,87 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
   fields.
 - Citations: all jodemo-era addresses and the dangling `engine_spec_env.md`
   reference re-anchored to retail; IDA renamed + commented across the cluster.
+
+---
+
+## Appendix: atmosphere parity audit (2026-06)
+
+Consolidated 2026-06-10 from `notes/audit_atmosphere_citations.md`,
+`notes/audit_atmosphere_gaps.md`, and `notes/audit_atmosphere_visual.md`. The audit preceded
+the 2026-06-09 grill above and fed it; this appendix preserves the jodemo→Jointops citation
+corrections, the addresses still pending verification, and the visual-parity check
+dispositions. Addresses marked jodemo are in `jodemo.exe`; everything else is Jointops retail.
+
+### Citation corrections (jodemo addresses mislabeled as Jointops)
+
+Central finding: the jodemo-era `engine_spec_env.md` (a dangling reference, never tracked)
+declared "Target binary: Jointops.exe" but cited jodemo addresses (`0x53xxxx` / `0x540B90` /
+`0x501FB0` / `0x5D0A90`). Function bodies are identical between the two images, so the C++
+port was behaviorally correct throughout — only the citations were wrong. Recovered retail
+addresses (verified by body comparison; 18 recites applied across `libs/env`, `libs/terrain`,
+and `godot/engine/environment`):
+
+| Old cite (jodemo, mislabeled) | Jointops retail | Note |
+|---|---|---|
+| `Terrain_SetDefaultEnvironmentValues @ 0x53E030` | `Environment_InitDefaults @ 0x57c010` | |
+| `sub_53E3F0` (keyword callback) | `TimeOfDay_ParseProperty @ 0x57c590` | called from the loader body |
+| `sub_53FA70` (loader) | `Environment_LoadTimeOfDayConfig @ 0x57db30` | body sequence verified: defaults reset (incl. `0xC0C0FF` seed), `.trn` pass, `.env` pass, snapshot copy |
+| `sub_53FCC0` (TOD interp) | `Environment_ComputeTimeOfDayColors @ 0x57de40` | |
+| `sub_540B90` (per-frame tick) | `Environment_UpdateWeatherTick @ 0x57e9b0` | |
+| `Terrain_CalcSunDirection @ 0x53F5D0` | `Environment_ComputeSunDirection @ 0x57d6d0` | fixed-point core; the float wrapper `Terrain_GetSunDirectionAsFloat @ 0x57d7f0` matches the float reimpl's shape (same core/wrapper pairing for the moon variant) |
+| `sub_501FB0` (line parser) | `File_ParseASCIIFile @ 0x53d810` | |
+| `Path_ReplaceExtension` (wrong helper name) | `Path_ReplaceOrAppendExtension @ 0x53c780` | |
+| `Terrain_SetEnvironmentData @ 0x53F840` | `Terrain_SetEnvironmentData @ 0x53f830` | off-by-16 in the old cite |
+| jodemo env globals `0xFF2xxx` (e.g. `dword_FF375C` snapshot, `flt_FF2B2C` iris) | `0x26c6xxx` state-block region | re-anchored per-global during the grill (see §Color state blocks) |
+
+Superseded audit verdict: the audit kept `Render_SetFogParams @ 0x54b4b0` as an exact retail
+match (kong confidence was already low — wrong signature). The grill then proved that function
+is an entity-pool sweeper (`Entity_DestroyUnreferencedPool4Entries`); the real fog setter is
+`Render_SetFogState @ 0x58a950` (§Fog policy).
+
+### Addresses still pending verification
+
+Terrain-side cites (`libs/terrain/lighting.h`) the audit could not confirm in the retail
+image and the env grill did not close (terrain-lighting / foliage scope):
+
+| Claimed cite | Status | Nearest known retail anchor |
+|---|---|---|
+| `Terrain_SetLightingColors @ 0x5C4B10` | VERIFY-pending | no fn at that address; `render_visibility_portal_traversal @ 0x5c4ae0` at −48. Entity/sector lighting was since anchored at `terrain_sector_compute_lighting @ 0x5c7550` (§iris) |
+| `Render_ConfigureFog @ 0x5F9890` | VERIFY-pending | unnamed `sub_5F98A0` at +16, body unconfirmed; the device fog path was since anchored at `CD3DDevice_SetFogParameters @ 0x677960` (§Fog policy) |
+| `Terrain_GetModulatedColorAtPos @ 0x5C5FE0` | VERIFY-pending | nearest `Entity_BuildProjectileTrailRay @ 0x5c6090` at +176 — likely a different function |
+| `Foliage_BuildGeometry @ 0x5BF5F0` | VERIFY-pending (foliage-audit scope) | nearest `build_shader_pass_name @ 0x5bf5d0` at −32 |
+| jodemo `sub_5D0A90` (terrain-init caller of the loader) | closed by the grill | `Terrain_LoadEnvironmentConfig @ 0x610940` (§BMS overrides) |
+
+### Gap-walk dispositions
+
+One row per §7 "Known Gaps" / §9 "Port Divergences" entry of the jodemo-era spec; all but one
+were closed by the grill sections above:
+
+| Gap | Disposition |
+|---|---|
+| §7.1 env CRC error strings ("bad sky/fog/water CRC", near `0x7480a0`) | Closed as intentional divergence: retail validates env state server-side (`server_handle_client_crc_validation @ 0x519110`, §BMS overrides); our parser does not gate load on CRC (assets are user-edited, not network-delivered) |
+| §7.2 fog D3D state slots | Closed: `Render_SetFogState @ 0x58a950` → `CD3DDevice_SetFogParameters @ 0x677960` mapping witnessed (§Fog policy); the jodemo-era curve claims (exp `ln(64)/end` for type 0, 0.5/0.25-scaled linear starts) were behaviorally correct |
+| §7.3 snapshot stride (`dword_FF375C`) | Closed: snapshot tables `Env_TrnSnapshotTable @ 0x26c7414` / `Env_EnvSnapshotTable @ 0x26c70d0`, keyframe count at +832 (§Load pipeline) |
+| §7.4 advanced-clouds render path | Closed: `advanced_clouds 0` is a single fixed-function pass with the dome material set to the cloud block color (§Sky dome) |
+| §7.5 unconsumed globals (`timeofday`, `iris_*`, `lightning/ceiling/floor/cloud_rgb`) | Closed: re-anchored to the `0x26c6xxx` state blocks with consumers identified — iris → entity/sector lighting, ceiling/floor → indoor ambient, cloud → `advanced_clouds 0` dome material, lightning → additive flash slots (§Color state blocks, §iris) |
+| §9.1 `.trn`/`.env` pair load order | Closed: two-pass loader documented (§Load pipeline) via `Terrain_LoadEnvironmentConfig @ 0x610940` |
+| §9.2 `terrain_rgb` reciprocal consumer | Closed: `EffectWorld_TickInstancesAndLightScale @ 0x5aa170` effect-brightness compensation (§iris / terrain_rgb) |
+
+New finding kept open from the audit: `Environment_UpdateWeatherTick @ 0x57e9b0` has signature
+`void(int waterHeight, int isReflection)`. The reimpl weather tick does not differentiate a
+reflection pass; whether those parameters drive a reflection-vs-main-pass rendering delta is
+unverified. Tracked.
+
+### Visual-parity check dispositions (sky / fog / weather / celestial)
+
+The planned A/B capture run (4 cameras × 4 curtimes via `scripts/ab_diff.py atmosphere`) was
+never executed — zero visual deltas were recorded. The five pre-flagged checks were
+dispositioned analytically by the grill instead:
+
+| Check | Disposition |
+|---|---|
+| Reflection-pass sky in water surfaces | **Open** — see the weather-tick `(waterHeight, isReflection)` finding above |
+| Fog-type curves (type 0 exponential, types 2/3 linear starts) | Closed numerically: device-layer mapping witnessed (§Fog policy) |
+| Sun position within ~1° of retail | Closed: sun/moon direction verdict **matching** (float-vs-fixed quantization sub-1e-4, §Verdicts) |
+| Sky horizon gradient (skybase → skybright → skyhighlight) | Closed: VS constant map verified and `nova_sky` aligned (§Sky dome) |
+| Cloud scroll rate | Closed: smoothed-rate accumulators × (1, 1, 2/3, 4/3) with `sky_speed << 10` parse scale (§Sky dome, §Format truths) |
