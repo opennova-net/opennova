@@ -3,11 +3,12 @@ class_name NovaEnvironment
 extends Node
 
 # Runtime/editor TOD state manager.
-# Engine equivalents:
-# - sub_540B90@0x540B90 advances time.
-# - [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] interpolates keyframe colors.
-# - Jointops.exe Render_SetFogParams@0x54B4B0 / Terrain_SetLightingColors@0x5C4B10
-#   push fog and terrain lighting state.
+# Engine equivalents (docs/env/env-tod-re.md):
+# - [orig: Environment_UpdateWeatherTick @ 0x57e9b0] advances time per tick.
+# - [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] interpolates keyframe
+#   colors and selects sun-vs-moon light by the hardcoded day-phase windows.
+# - [orig: Environment_ApplyFogAndAmbient @ 0x57e440] pushes fog state;
+#   fog/skyfog render colors are doubled with saturation (@ 0x57f17c).
 
 @export var environment_data: EnvFile:
 	set(value):
@@ -31,6 +32,9 @@ extends Node
 var _tod: Dictionary = {}
 var _sun_dir := Vector3(0.0, 0.70710678, 0.70710678)
 var _moon_dir := Vector3.ZERO
+var _light_dir := Vector3(0.0, 0.70710678, 0.70710678)
+var _is_night := false
+var _day_phase_blend := 1.0
 var _fill_light := Vector3(0.4, 0.45, 0.55)
 var _sun_light := Vector3(0.9, 0.85, 0.75)
 var _fog_color_rt := Vector3(0.5, 0.7, 0.9)
@@ -80,20 +84,35 @@ func _update_tod() -> void:
 		return
 	_sun_dir = environment_data.compute_sun_direction(time_of_day)
 	_moon_dir = environment_data.compute_moon_direction(time_of_day)
+	# The light source switches sun<->moon at the hardcoded 06:00/18:45
+	# boundaries [orig: Environment_GetLightDirectionFloat @ 0x57d870].
+	var phase: Dictionary = environment_data.get_day_phase(time_of_day)
+	_is_night = bool(phase.get("is_night", false))
+	_day_phase_blend = float(phase.get("blend", 1.0))
+	_light_dir = _moon_dir if _is_night else _sun_dir
 	_tod = environment_data.interpolate_time_of_day(time_of_day)
 	if not _tod.is_empty():
-		_sun_light = _tod.get("sun", _sun_light)
+		var light_key := "moon" if _is_night else "sun"
+		_sun_light = _tod.get(light_key, _sun_light)
 		_fill_light = _tod.get("ground", _fill_light)
-		_fog_color_rt = _tod.get("fog", _fog_color_rt)
+		# Fog render color is the keyframe color doubled, saturating
+		# [orig: Environment_UpdateWeatherTick @ 0x57f17c].
+		var fog_raw: Vector3 = _tod.get("fog", _fog_color_rt * 0.5)
+		_fog_color_rt = _double_vec3(fog_raw)
 	_fog_distance = environment_data.get_fog_level()
 	_write_shader_globals()
+
+
+static func _double_vec3(value: Vector3) -> Vector3:
+	var doubled := EnvFile.double_saturate_color(Color(value.x, value.y, value.z))
+	return Vector3(doubled.r, doubled.g, doubled.b)
 
 
 func _write_shader_globals() -> void:
 	RenderingServer.global_shader_parameter_set(&"opennova_fill_light", _fill_light)
 	RenderingServer.global_shader_parameter_set(&"opennova_sun_light", _sun_light)
 	RenderingServer.global_shader_parameter_set(&"opennova_sky_ambient", get_sky_ambient())
-	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", _sun_dir)
+	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", _light_dir)
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_color", _fog_color_rt)
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_end", get_fog_level())
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_start", get_fog_start())
@@ -143,7 +162,7 @@ func apply_terrain_uniforms(material: ShaderMaterial) -> void:
 	material.set_shader_parameter("u_sun_light", get_sun_light())
 	material.set_shader_parameter("u_fill_light", get_fill_light())
 	material.set_shader_parameter("u_sky_ambient", get_sky_ambient())
-	material.set_shader_parameter("u_sun_direction", get_sun_direction())
+	material.set_shader_parameter("u_sun_direction", get_light_direction())
 	material.set_shader_parameter("u_terrain_tint", get_terrain_lighting_attenuation())
 	material.set_shader_parameter("u_fog_color", get_fog_color())
 	material.set_shader_parameter("u_fog_end", get_fog_level())
@@ -181,6 +200,21 @@ func get_moon_direction() -> Vector3:
 	return _moon_dir
 
 
+## Sun by day, moon by night [orig: Environment_GetLightDirectionFloat @ 0x57d870].
+func get_light_direction() -> Vector3:
+	return _light_dir
+
+
+func is_night_phase() -> bool:
+	return _is_night
+
+
+## 0..1 ramp toward the current phase across the 20-minute sunrise/sunset
+## windows [orig: Environment_ComputeTimeOfDayColors @ 0x57de99].
+func get_day_phase_blend() -> float:
+	return _day_phase_blend
+
+
 func get_sun_color() -> Vector3:
 	return _tod.get("sun", Vector3.ZERO)
 
@@ -214,7 +248,9 @@ func get_secondary_ambient() -> Vector3:
 
 
 func get_skyfog_color() -> Vector3:
-	return _tod.get("skyfog", Vector3.ZERO)
+	# The clear/horizon color renders doubled like fog
+	# [orig: Environment_UpdateWeatherTick @ 0x57f190].
+	return _double_vec3(_tod.get("skyfog", Vector3.ZERO))
 
 
 func set_fill_light(value: Vector3) -> void:
@@ -238,6 +274,10 @@ func get_fog_level() -> float:
 
 
 func get_fog_start() -> float:
+	# Policy lives in libs/env env_render [orig: Render_SetFogState @ 0x58a950];
+	# overcast stays 0 until a weather system drives it.
+	if environment_data:
+		return environment_data.get_fog_start(0.0)
 	var fog_end := get_fog_level()
 	match get_fog_type():
 		2:
