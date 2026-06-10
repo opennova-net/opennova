@@ -10,7 +10,7 @@ extends RefCounted
 # No class_name (preload as a const), matching mus_stmt_text.gd / mus_expr.gd.
 
 # Statement kinds (NovaMusicScript.get_program_ast `kind` strings) -> how they
-# read on a blueprint node. Glyphs stay: they make the graph scannable and the
+# read on a program row. Glyphs stay: they make the canvas scannable and the
 # map badges use the same family.
 const STMT := {
 	"play": {
