@@ -33,12 +33,19 @@ public:
     // Bind a compiled program (sizes the per-event state). Resets temporal state.
     void load(const Program &program);
 
-    // Execute one logic tick against the world (caller supplies authority).
+    // Execute the program once against the world (caller supplies authority and
+    // the every-62nd-tick cadence; see WacSystem).
     void execute(opennova::world::World &world);
 
     bool loaded() const { return prog_ != nullptr; }
     const std::vector<EventState> &events() const { return events_; }
     int32_t accumulator() const { return acc_; }
+
+    // The WAC time base: completed program executions, NOT 62 Hz engine ticks. At
+    // the original cadence one execution ~= one second; `past(n)`/`elapse(n)` and
+    // the Ticks builtin count in these units. [orig: dword_C6EAD8 — the run counter
+    // sub_4F81A0 advances after each execution @0x4f81d3]
+    uint32_t time() const { return time_; }
 
 private:
     const Program *prog_ = nullptr;
@@ -46,6 +53,7 @@ private:
     uint32_t rng_seed_ = 0x12345633u; // [orig: dword_C6EA40 init]
     int32_t acc_ = 0;
     int cur_event_ = 0;
+    uint32_t time_ = 0; // [orig: dword_C6EAD8]
 
     int32_t read(opennova::world::World &w, uint32_t ref) const;
     void write(opennova::world::World &w, uint32_t ref, int32_t v) const;

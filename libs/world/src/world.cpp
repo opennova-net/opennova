@@ -409,7 +409,7 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     if (is_authority) {
         for (ISystem *s : systems_) s->tick(*this, ctx);
     }
-    ++logic_tick; // [orig: dword_C6EAD8 increments after execution, sub_4F81A0]
+    ++logic_tick; // [orig: current_tick @0x24c1968 advances once per frame tick]
 }
 
 World::Snapshot World::snapshot() const {
@@ -428,20 +428,6 @@ void World::restore(const Snapshot &s) {
     logic_tick = s.logic_tick;
     effects.clear();
     load_systems(); // systems re-init their per-mission state
-}
-
-// ----------------------------------------------------------------------------
-// TickService
-// ----------------------------------------------------------------------------
-
-bool TickService::advance_frame(World &world, bool is_authority) {
-    if (paused) return false;
-    if (++frame_accum_ >= kFramesPerLogicTick) {
-        frame_accum_ = 0;
-        world.run_logic_tick(is_authority);
-        return true;
-    }
-    return false;
 }
 
 } // namespace opennova::world

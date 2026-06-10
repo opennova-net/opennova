@@ -38,6 +38,7 @@ add_subdirectory(libs/mission)
 add_subdirectory(libs/lwf)
 add_subdirectory(libs/dbf)
 add_subdirectory(libs/audio)
+add_subdirectory(libs/oned_edit)
 
 set(OPENNOVA_CORE_TARGETS
     opennova_pcx

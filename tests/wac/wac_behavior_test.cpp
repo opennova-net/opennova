@@ -23,9 +23,30 @@ static World make_world() {
     return w;
 }
 
-// Run a program for `ticks` authoritative logic ticks.
-static void run(World &w, WacSystem &sys, int ticks) {
+// Run a program for `executions` VM executions. The VM self-gates to every 62nd
+// logic tick [orig: sub_4F81A0 @0x4f81b1], so one execution = 62 ticks; WAC time
+// units (past/elapse/Ticks) count executions, so the tests below keep reading in
+// "script steps".
+static void run(World &w, WacSystem &sys, int executions) {
+    const int ticks = executions * WacSystem::kTicksPerExecution;
     for (int i = 0; i < ticks; ++i) w.run_logic_tick(/*is_authority=*/true);
+}
+
+// The 62-tick divider itself: nothing executes before the 62nd tick.
+static void test_execution_cadence() {
+    World w = make_world();
+    WacSystem sys;
+    CompileEnv env;
+    sys.set_program(compile_source("if never() then set(v1,1) endif\n", env));
+    w.add_system(&sys);
+    w.load_systems();
+    for (int i = 0; i < WacSystem::kTicksPerExecution - 1; ++i)
+        w.run_logic_tick(/*is_authority=*/true);
+    CHECK(w.vars.get_mission(1) == 0); // 61 ticks: not yet
+    CHECK(sys.runs() == 0);
+    w.run_logic_tick(/*is_authority=*/true);
+    CHECK(w.vars.get_mission(1) == 1); // the 62nd tick executes the program
+    CHECK(sys.runs() == 1);
 }
 
 static void test_var_math() {
@@ -134,13 +155,16 @@ static void test_authority_gate() {
     sys.set_program(compile_source("if never() then set(v9,1) endif\n", env));
     w.add_system(&sys);
     w.load_systems();
-    w.run_logic_tick(/*is_authority=*/false); // non-authority: scripting skipped
+    // 62 non-authority ticks: the divider never advances, scripting skipped.
+    for (int i = 0; i < WacSystem::kTicksPerExecution; ++i)
+        w.run_logic_tick(/*is_authority=*/false);
     CHECK(w.vars.get_mission(9) == 0);
-    w.run_logic_tick(/*is_authority=*/true);
+    run(w, sys, 1); // one authoritative execution
     CHECK(w.vars.get_mission(9) == 1);
 }
 
 int main() {
+    test_execution_cadence();
     test_var_math();
     test_ssn_kill();
     test_temporal_past();
