@@ -22,21 +22,19 @@ from `EditorWorkstation._workspace_defs()` in
 |---|---|---|---|
 | World | Terrain | heightmaps, surface paint, foliage, tiles, layout (`.trn` / `.cpt` / `.til`) | [terrain/](terrain/README.md) |
 | World | Object | 3D object projects (`.3di` / `.3dp`) | [object/](object/README.md) |
-| World | Mission | missions (`.bms`): placement, waypoints, zones, events/scripting, live sim preview | see below |
+| World | Mission | missions: entities, waypoints, zones, BMS events, play in-editor (`.bms`) | [mission/](mission/README.md) |
 | Interface | Fonts | bitmap fonts (`.fnt`) | [fonts/](fonts/README.md) |
 | Interface | Credits | rolling credits (`.kda`) | [credits/](credits/README.md) |
 | Interface | Strings | localized string tables (RTXT) | [strings/](strings/README.md) |
 | Interface | Menu | menu screens (`.mnu` / `.mns`) | [mnu/](mnu/README.md) |
 | Audio | Music | interactive music (`.sbf` + `.bin` script) | [music/](music/README.md) |
-| Atmosphere | Sound | sound profiles (`.lwf` / `.dbf`) | [sound/](sound/README.md) |
-| Atmosphere | Environment | weather, lighting, time of day, sky/celestial (`.env`) | [docs/env/env-tod-re.md](../../docs/env/env-tod-re.md) |
+| Atmosphere | Sound | sound profiles (`.lwf`) | [sound/](sound/README.md) |
+| Atmosphere | Environment | weather, lighting, time of day, sky/celestial (`.env`) | [environment/](environment/README.md) |
 
-Mission edits `.bms` mission files over the Terrain workspace's loaded world:
-object placement with a transform gizmo, waypoint paths, area triggers, and
-event scripting, plus a live simulation preview that runs the same
-MissionRuntime + present pass the game does (the adapter is
-[`editor/mission_workspace.gd`](editor/mission_workspace.gd); the bulk lives in
-[`mission/`](mission/)).
+Mission edits `.bms` missions end to end: entities, waypoints, zones, and BMS
+event scripting, with play-in-editor through the same mission runtime and present
+pass the game host uses (one runtime; see
+[`docs/runtime-architecture.md`](../../docs/runtime-architecture.md)).
 
 Environment is a *popup* workspace: instead of swapping the main viewport it
 overlays a panel on the active Terrain or Object view, so lighting changes are
@@ -66,8 +64,8 @@ inspectors are declared as typed registry rows:
 
 ### Add a workspace
 1. Write an `EditorWorkspace` subclass implementing the hook tiers you need (see
-   the contract in `framework/editor_workspace.gd`; `editor/credits_workspace.gd`
-   is a compact single-pane example).
+   the contract in `framework/editor_workspace.gd`; `editor/fonts_workspace.gd`
+   is a minimal single-pane example).
 2. Add a `Workspace` enum entry in `editor/editor_workstation.gd`.
 3. Append one `WorkspaceDef.make(Workspace.X, XWorkspaceAdapter, is_popup, &"Category")`
    row to `_workspace_defs()`.
@@ -78,14 +76,14 @@ inspectors are declared as typed registry rows:
 2. Append one `InspectorDef.make(id, "Label", "Tooltip", Script)` row to the
    workspace's `_build_inspector_defs()`.
 
-Single-pane workspaces (Fonts, Credits, Strings, Environment) skip the workflow
-rail and override `build_inspector(host)` instead.
+Single-pane workspaces (Fonts, Credits, Strings, Sound, Menus, Environment) skip
+the workflow rail and override `build_inspector(host)` instead.
 
 ## Folder map
 
 | Path | Contents |
 |---|---|
-| `editor/` | the shell (`editor_workstation.gd`) plus the Terrain, Environment, Fonts, Credits, Mission, and Music adapters |
+| `editor/` | the shell (`editor_workstation.gd`), the resource browser and library, the PFF archive tool, the export dialog, plus the Terrain, Environment, Fonts, Credits, Mission, and Music adapters |
 | `framework/` | base classes and typed registries (`EditorWorkspace`, `WorkspaceDef`, `InspectorDef`) |
 | `terrain/`, `object/`, `mission/`, `fonts/`, `credits/`, `strings/`, `mnu/`, `music/`, `sound/`, `environment/` | one workspace module each (editor model, UI, inspectors) |
 | `tools/` | `screenshot_capture` automation helper (not a workspace) |
