@@ -655,3 +655,51 @@ add_executable(mns_parse_test mns/mns_parse_test.cpp)
 target_link_libraries(mns_parse_test PRIVATE opennova_mns)
 target_include_directories(mns_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mns_parse COMMAND mns_parse_test)
+
+# World runtime substrate: addressable entities (faithful find_by_net_id), shared
+# var store, entity-command primitives, tick service cadence, snapshot/restore.
+add_executable(world_test world/world_test.cpp)
+target_link_libraries(world_test PRIVATE opennova_world)
+target_include_directories(world_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(world_test PRIVATE cxx_std_17)
+add_test(NAME world COMMAND world_test)
+
+# AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
+# budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
+# and the trivial enter/exit/event handler ports.
+add_executable(ai_test world/ai_test.cpp)
+target_link_libraries(ai_test PRIVATE opennova_world)
+target_include_directories(ai_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ai_test PRIVATE cxx_std_17)
+add_test(NAME ai COMMAND ai_test)
+
+# Terrain-grounded movement: the shared height_field samplers, the 5-tap
+# calc_average_ground_height port (Entity_CalcAverageGroundHeight @0x457230) by hand
+# math, and the AiSystem ground clamp over a synthetic ramp atlas.
+add_executable(ground_height_test world/ground_height_test.cpp)
+target_link_libraries(ground_height_test PRIVATE opennova_world)
+target_include_directories(ground_height_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ground_height_test PRIVATE cxx_std_17)
+add_test(NAME ground_height COMMAND ground_height_test)
+
+# Infantry motor (Entity_UpdateInfantryAI @0x4b9910): body-turn clamp, turn-in-place
+# gates, alert/wounded gait selection + availability fallbacks, one-shot route
+# lifecycle, flag-table commit rules, gravity/landing/fall damage, slope slide —
+# each against the witnessed constants, over synthetic clips + height fields.
+add_executable(infantry_test world/infantry_test.cpp)
+target_link_libraries(infantry_test PRIVATE opennova_world)
+target_include_directories(infantry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(infantry_test PRIVATE cxx_std_17)
+add_test(NAME infantry COMMAND infantry_test)
+
+# WAC scripting: registry oracle (165-command ISA + 28 param types from the binary),
+# VM behavior (var math, entity mutation, temporal/edge firing, env, authority),
+# and a zero-crash parse over the real shipped .wac corpus (dirs via argv, else the
+# dev defaults; absent dirs skip).
+foreach(test registry_oracle behavior corpus)
+    add_executable(wac_${test}_test wac/wac_${test}_test.cpp)
+    target_link_libraries(wac_${test}_test PRIVATE opennova_wac)
+    target_include_directories(wac_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(wac_${test}_test PRIVATE cxx_std_17)
+    add_test(NAME wac_${test} COMMAND wac_${test}_test)
+endforeach()

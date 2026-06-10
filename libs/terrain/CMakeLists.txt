@@ -5,6 +5,7 @@ add_library(opennova_terrain STATIC
     src/cdep_constraint.cpp
     src/cpt_export.cpp
     src/depthmap.cpp
+    src/height_field.cpp
     src/lod.cpp
     src/lighting.cpp
     src/mesh_data.cpp
