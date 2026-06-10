@@ -191,7 +191,29 @@ func _lane_row_opts(branch: String, idx: int, body_len: int, read_only: bool) ->
 		"on_move": _move_in_branch.bind(branch, idx),
 		"can_up": idx > 0,
 		"can_down": idx < body_len - 1,
+		"on_drop_branch": _drop_branch_before.bind(branch, idx),
 	}
+
+
+# A lane sibling dropped ON a row lands above it: reorder the branch's text
+# list, then the usual whole-if regeneration.
+func _drop_branch_before(from_key: String, branch: String, before_idx: int) -> void:
+	var parts := from_key.rsplit(":", true, 1)
+	if parts.size() != 2 or not parts[1].is_valid_int():
+		return
+	var from_idx := int(parts[1])
+	if from_idx == before_idx:
+		return
+	var cur := _current_dict()
+	var then_t := _branch_texts(cur, "then")
+	var else_t := _branch_texts(cur, "else")
+	var target: Array = then_t if branch == "then" else else_t
+	if from_idx < 0 or from_idx >= target.size() or before_idx < 0 or before_idx > target.size():
+		return
+	var line: String = target[from_idx]
+	target.remove_at(from_idx)
+	target.insert(before_idx - 1 if from_idx < before_idx else before_idx, line)
+	_regen(String(cur.get("expr", "")), then_t, bool(cur.get("else_present", false)), else_t)
 
 
 func _replace_in_branch(lines: PackedStringArray, branch: String, idx: int) -> void:

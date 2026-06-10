@@ -110,7 +110,12 @@ func setup(stmt: Dictionary, p_ordinal: int, ctx: Dictionary, opts: Dictionary =
 	_badges = HBoxContainer.new()
 	_badges.add_theme_constant_override("separation", 6)
 	_box.add_child(_badges)
-	if run > 1:
+	# A folded run with a resize route gets the ×N badge as a count stepper:
+	# one document splice turns ×20 into ×3 (or ×24) without unfolding.
+	var has_stepper := run > 1 and opts.has("on_run_count") and not read_only
+	if has_stepper:
+		_build_run_stepper()
+	elif run > 1:
 		var xn := Label.new()
 		xn.text = "×%d" % run
 		xn.tooltip_text = "This step repeats %d times in a row." % run
@@ -371,6 +376,136 @@ func _on_tool_menu_id(id: int) -> void:
 		2:
 			if _opts.has("on_insert_above"):
 				(_opts["on_insert_above"] as Callable).call()
+
+
+# --- folded-run count stepper ----------------------------------------------
+
+var _run_spin: SpinBox = null
+
+func _build_run_stepper() -> void:
+	var xn := Button.new()
+	xn.text = "×%d" % run
+	xn.flat = true
+	xn.focus_mode = Control.FOCUS_NONE
+	xn.tooltip_text = "This step repeats %d times in a row. Click to change the count." % run
+	_badges.add_child(xn)
+	var stepper := HBoxContainer.new()
+	stepper.visible = false
+	_run_spin = SpinBox.new()
+	_run_spin.min_value = 1
+	_run_spin.max_value = 99
+	_run_spin.value = run
+	_run_spin.custom_minimum_size = Vector2(64, 0)
+	stepper.add_child(_run_spin)
+	var ok := Button.new()
+	ok.text = "✓"
+	ok.tooltip_text = "Apply the new repeat count (one undo step)."
+	ok.focus_mode = Control.FOCUS_NONE
+	ok.pressed.connect(func():
+		stepper.visible = false
+		xn.visible = true
+		var n := int(_run_spin.value)
+		if n != run and _opts.has("on_run_count"):
+			(_opts["on_run_count"] as Callable).call(n))
+	stepper.add_child(ok)
+	var cancel := Button.new()
+	cancel.text = "✕"
+	cancel.tooltip_text = "Keep ×%d." % run
+	cancel.focus_mode = Control.FOCUS_NONE
+	cancel.pressed.connect(func():
+		_run_spin.value = run
+		stepper.visible = false
+		xn.visible = true)
+	stepper.add_child(cancel)
+	_badges.add_child(stepper)
+	xn.pressed.connect(func():
+		xn.visible = false
+		stepper.visible = true
+		if _ctx.has("notify_edit_started"):
+			(_ctx["notify_edit_started"] as Callable).call())
+
+
+# --- drag to reorder + positional drops --------------------------------------
+
+# The drop-target accent (a brighter top edge = "lands above this row").
+var _drop_mark := false
+
+func _get_drag_data(_pos: Vector2):
+	# Folded runs move as members after unfolding; read-only rows don't move.
+	if read_only or run > 1 or not _opts.has("on_move"):
+		return null
+	var data := {}
+	if has_meta("branch_key"):
+		data = {"kind": "mus_branch_stmt", "branch_key": String(get_meta("branch_key"))}
+	else:
+		data = {"kind": "mus_stmt", "ordinal": ordinal}
+	# Tests drive this directly without a live GUI drag; the preview only
+	# exists for real pointer drags.
+	if get_viewport() != null and get_viewport().gui_is_dragging():
+		var prev := Label.new()
+		prev.text = "⠿ %s" % (_sentence.text if _sentence != null else MusDisplayNames.stmt_title(kind))
+		set_drag_preview(prev)
+	return data
+
+
+# Dropping ON a row lands ABOVE it: a moved row, a track from the dock, or a
+# lane sibling. Same-lane only for branch rows; the dispatch tail accepts
+# nothing (read_only covers it).
+func _can_drop_data(_pos: Vector2, data) -> bool:
+	var ok := _drop_kind_ok(data)
+	_set_drop_mark(ok)
+	return ok
+
+
+func _drop_kind_ok(data) -> bool:
+	if read_only or not (data is Dictionary):
+		return false
+	var k := String((data as Dictionary).get("kind", ""))
+	match k:
+		"mus_track":
+			return not has_meta("branch_key") and _opts.has("on_drop_track")
+		"mus_stmt":
+			return not has_meta("branch_key") and _opts.has("on_drop_move") \
+				and int((data as Dictionary).get("ordinal", -1)) != ordinal
+		"mus_branch_stmt":
+			if not has_meta("branch_key") or not _opts.has("on_drop_branch"):
+				return false
+			var mine := String(get_meta("branch_key"))
+			var theirs := String((data as Dictionary).get("branch_key", ""))
+			# Same if + same branch ("ord:branch:idx" minus the index), not self.
+			return mine != theirs \
+				and mine.rsplit(":", true, 1)[0] == theirs.rsplit(":", true, 1)[0]
+	return false
+
+
+func _drop_data(_pos: Vector2, data) -> void:
+	_set_drop_mark(false)
+	if not _drop_kind_ok(data):
+		return
+	var d: Dictionary = data
+	match String(d.get("kind", "")):
+		"mus_track":
+			(_opts["on_drop_track"] as Callable).call(int(d.get("index", -1)))
+		"mus_stmt":
+			(_opts["on_drop_move"] as Callable).call(int(d.get("ordinal", -1)))
+		"mus_branch_stmt":
+			(_opts["on_drop_branch"] as Callable).call(String(d.get("branch_key", "")))
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_DRAG_END:
+		_set_drop_mark(false)
+
+
+func _set_drop_mark(on: bool) -> void:
+	if on == _drop_mark:
+		return
+	_drop_mark = on
+	var sb := _row_style(MusDisplayNames.stmt_color(kind))
+	if on:
+		sb.border_width_top = 2
+		sb.border_color = Color(0.55, 0.8, 1.0)
+	add_theme_stylebox_override("panel", sb)
 
 
 # --- shared bits ----------------------------------------------------------

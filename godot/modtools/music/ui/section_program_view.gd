@@ -49,6 +49,7 @@ signal author_failed(message: String)
 signal inline_edit_started
 
 const MusForms = preload("res://modtools/music/mus_forms.gd")
+const MusStmtText = preload("res://modtools/music/mus_stmt_text.gd")
 const MusDisplayNames = preload("res://modtools/music/mus_display_names.gd")
 const StmtRowClass = preload("res://modtools/music/ui/stmt_row.gd")
 const IfBlockClass = preload("res://modtools/music/ui/stmt_if_block.gd")
@@ -181,6 +182,7 @@ func show_section(section: Dictionary, bank_names: Array) -> void:
 	if new_index != _section_index:
 		_unfolded.clear()  # expanded folds don't carry to a different state
 		_pending_add_edit = {}
+	var same_section := new_index == _section_index
 	_bank_names = bank_names
 	_section_index = new_index
 	_section_dict = section
@@ -188,6 +190,9 @@ func show_section(section: Dictionary, bank_names: Array) -> void:
 	_offset_rows = []
 	_active_row = null
 	_pending_offsets = []
+	# Keep the reader's place: a re-render of the SAME section (edit, undo,
+	# fold toggle) restores the scroll; a different section starts at the top.
+	var keep_scroll := _scroll.scroll_vertical if (same_section and _scroll != null) else 0
 	for c in _stack.get_children():
 		_stack.remove_child(c)
 		c.queue_free()
@@ -224,6 +229,10 @@ func show_section(section: Dictionary, bank_names: Array) -> void:
 	# gone (an external change -- undo, another edit -- ate it).
 	_resolve_popover_after_render()
 	_consume_pending_add_edit(stmts)
+	if keep_scroll > 0:
+		# The stack lays out next frame; restore once sizes exist.
+		_restore_scroll_to = keep_scroll
+		call_deferred("_apply_restored_scroll")
 
 
 # The index of the first top-level statement after which flow has left the
@@ -286,6 +295,8 @@ func _build_rows(stmts: Array, authored_end: int) -> void:
 				opts2["run"] = run
 				if run > 1:
 					opts2["fold_toggle"] = _fold_toggle(i, false, run)
+					if _editable and not in_tail:
+						opts2["on_run_count"] = _request_run_count.bind(i, run)
 				row = StmtRowClass.new().setup(s, i, ctx, opts2)
 		_stack.add_child(row)
 		_register(row, int(s.get("code_offset", -1)))
@@ -305,7 +316,23 @@ func _leaf_opts(stmts: Array, i: int, in_tail: bool) -> Dictionary:
 	opts["can_up"] = _can_swap(stmts, i, -1)
 	opts["can_down"] = _can_swap(stmts, i, 1)
 	opts["on_insert_above"] = _open_gap_palette.bind(i)
+	opts["on_drop_move"] = _request_move_before.bind(i)
+	opts["on_drop_track"] = _request_track_above.bind(i)
 	return opts
+
+
+func _request_move_before(from_ordinal: int, before_ordinal: int) -> void:
+	move_statement_requested.emit(_section_index, from_ordinal, before_ordinal)
+
+
+func _request_track_above(track: int, before_ordinal: int) -> void:
+	if track < 0:
+		return
+	insert_statement_at_requested.emit(_section_index, before_ordinal, MusStmtText.play(track))
+
+
+func _request_run_count(new_count: int, start_ordinal: int, old_count: int) -> void:
+	set_run_count_requested.emit(_section_index, start_ordinal, old_count, new_count)
 
 
 func _request_replace(lines: PackedStringArray, ordinal: int) -> void:
@@ -636,6 +663,14 @@ func set_active_offset(pc: int) -> void:
 func scroll_to_active() -> void:
 	if _active_row != null and is_instance_valid(_active_row) and _scroll != null:
 		_scroll.ensure_control_visible(_active_row)
+
+
+var _restore_scroll_to := 0
+
+func _apply_restored_scroll() -> void:
+	if _restore_scroll_to > 0 and _scroll != null:
+		_scroll.scroll_vertical = _restore_scroll_to
+	_restore_scroll_to = 0
 
 
 # --- host surface ----------------------------------------------------------

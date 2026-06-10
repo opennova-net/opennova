@@ -296,11 +296,21 @@ func test_folded_run_carries_no_tools_until_unfolded():
 		stmts.append(_play(i * 2, 0))
 	v.show_section(_sec(stmts), [])
 	var folded: Control = v.top_level_rows()[0]
-	assert_null(_find_button(folded, "✕"),
+	assert_null(_find_button_tipped(folded, "Delete this step"),
 		"deleting a collapsed run would act on one hidden member: unfold first")
 	_find_button(folded, "⊞ unfold").pressed.emit()
-	assert_not_null(_find_button(v.top_level_rows()[1], "✕"),
+	assert_not_null(_find_button_tipped(v.top_level_rows()[1], "Delete this step"),
 		"unfolded members carry their own tools")
+
+
+func _find_button_tipped(node: Node, tip: String) -> Button:
+	if node is Button and (node as Button).tooltip_text == tip:
+		return node
+	for c in node.get_children():
+		var b := _find_button_tipped(c, tip)
+		if b != null:
+			return b
+	return null
 
 
 func test_empty_callable_shows_hint_and_card():
