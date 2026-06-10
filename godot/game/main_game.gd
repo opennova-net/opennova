@@ -30,9 +30,10 @@ var _host_wired := false
 func _ready() -> void:
 	if _world == null or _camera == null or _menu_host == null:
 		return
-	# Esc toggles pause/resume in a world (the fly camera emits this on Escape).
-	if _camera.has_signal("quit_requested") and not _camera.is_connected("quit_requested", _on_camera_quit):
-		_camera.connect("quit_requested", _on_camera_quit)
+	# Esc toggles pause/resume in a world (the fly camera reports the key; the
+	# host decides what it means).
+	if _camera.has_signal("escape_pressed") and not _camera.is_connected("escape_pressed", _on_camera_escape):
+		_camera.connect("escape_pressed", _on_camera_escape)
 	var dir := ResourceDirSettings.get_resource_dir()
 	if dir.is_empty():
 		_request_resource_dir()
@@ -160,7 +161,7 @@ func _on_world_load_failed(reason: String) -> void:
 		_enter_menu(_root.get_root_dir())
 
 
-func _on_camera_quit() -> void:
+func _on_camera_escape() -> void:
 	# Esc: pause <-> resume while in a world; ignored in the main menu (EXIT quits).
 	if _state == State.WORLD:
 		_pause()
