@@ -169,7 +169,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 
 	_loaded_mission = mission
 	_place_mission_objects(mission)
-	_start_runtime(mission)
+	_start_runtime(mission, bms_name)
 	_start_mission_audio(mission, bms_name)
 	_loaded = true
 	world_loaded.emit()
@@ -354,7 +354,7 @@ func _route_mission_effects(effects: Array) -> void:
 # applied in-engine) + visibility onto its model. The game runs it at the faithful 62-frame cadence and
 # drives it explicitly from tick() (self_tick off); its drained side effects route through
 # _on_runtime_effects. A reload reuses this NovaWorld, so any prior runtime is freed in unload() first.
-func _start_runtime(mission: NovaMissionData) -> void:
+func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
 	_runtime = MissionRuntime.new()
 	_runtime.name = "MissionRuntime"
@@ -366,6 +366,7 @@ func _start_runtime(mission: NovaMissionData) -> void:
 		"tick_mode": NovaSimulation.TICK_DIVIDED,
 		"terrain": _terrain_data,
 		"resource_root": _resource_root,
+		"wac_basename": bms_name.get_basename(),
 	})
 	if _runtime.get_sim() == null:
 		push_warning("NovaWorld: failed to start mission runtime")

@@ -53,6 +53,18 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		var adm_name := String(options.get("infantry_adm", "E_STAND.adm"))
 		if int(_sim.set_infantry_anim_map(options["resource_root"], adm_name)) <= 0:
 			push_warning("MissionRuntime: no infantry clips from '%s' — AI soldiers will stand still." % adm_name)
+	# Mission WAC scripts: compile game.wac/server.wac/<mission>.wac through the host's
+	# resource root and install on the sim [orig: WacScript_InitAndLoad]. Absent files skip
+	# silently — a BMS-only mission leaves the VM unloaded and the script system early-outs.
+	# The VM self-gates to every 62nd tick inside the system [orig: dword_C6EAD4 / cmp 0x3E].
+	if options.get("resource_root") != null and options.has("wac_basename"):
+		var wac := NovaWacProgram.new()
+		var wac_err := int(wac.compile_from_resource_root(options["resource_root"], String(options["wac_basename"])))
+		if wac_err == OK:
+			_sim.set_wac_program(wac)
+		elif wac_err != ERR_DOES_NOT_EXIST:
+			push_warning("MissionRuntime: WAC for '%s' failed to compile (%d error(s)) — scripts disabled." % [
+				options["wac_basename"], wac.get_error_count()])
 	# The SIM is held off-tree (never add_child'd): only this driver advances it, and an off-tree
 	# node never self-ticks via _process; it is freed explicitly in _exit_tree (mirrors the old
 	# MissionSimDriver). This MissionRuntime node itself IS in the tree — its host adds it, and
