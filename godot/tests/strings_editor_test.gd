@@ -106,20 +106,87 @@ func test_committed_edit_emits_edited_not_structure() -> void:
 	assert_signal_not_emitted(doc, "structure_changed", "a live edit must not trigger a structural rebuild")
 
 
-func test_validation_flags_duplicate_and_empty() -> void:
+func test_validation_flags_in_section_duplicate_and_empty() -> void:
 	var doc = add_child_autofree(StringsEditorScript.new())
 	doc.add_section("s")
 	doc.add_entry("DUP", "a", 0, Vector2i())
-	doc.add_entry("dup", "b", 0, Vector2i())  # case-insensitive duplicate
+	doc.add_entry("dup", "b", 0, Vector2i())  # case-insensitive duplicate, same section
 	doc.add_entry("", "c", 0, Vector2i())     # empty key
 
 	var report: Dictionary = doc.validate()
 	assert_false(report["ok"], "duplicate + empty keys should fail validation")
 	var issues: Dictionary = report["issues_by_index"]
-	assert_true(issues.has(0) and issues.has(1), "both duplicate rows should be flagged")
+	assert_false(issues.has(0), "the FIRST occurrence is the one the game resolves — not an issue")
+	assert_true(issues.has(1), "the later in-section duplicate is unreachable in-game")
 	assert_true(issues.has(2), "the empty-key row should be flagged")
 	assert_string_contains(report["summary"], "duplicate")
 	assert_string_contains(report["summary"], "empty")
+
+
+func test_validation_allows_same_key_across_sections() -> void:
+	# Retail tables legitimately reuse one key in several sections (lookups are
+	# section-scoped, like the game's [orig: TextResource_FindEntryBySectionAndKey
+	# @ 0x75D250]); that must not be flagged.
+	var doc = add_child_autofree(StringsEditorScript.new())
+	doc.add_section("menu")
+	doc.add_section("hud")
+	doc.add_entry("SHARED", "menu text", 0, Vector2i())
+	doc.add_entry("SHARED", "hud text", 1, Vector2i())
+
+	var report: Dictionary = doc.validate()
+	assert_true(report["ok"], "cross-section key reuse is valid retail data: %s" % report["summary"])
+	assert_eq(doc.string_table.get_string_in_section("menu", "shared"), "menu text")
+	assert_eq(doc.string_table.get_string_in_section("HUD", "SHARED"), "hud text")
+
+
+func test_move_entry_to_section_keeps_grouping_and_undoes() -> void:
+	var doc = add_child_autofree(StringsEditorScript.new())
+	doc.add_section("a")
+	doc.add_section("b")
+	doc.add_entry("K1", "1", 0, Vector2i())
+	doc.add_entry("K2", "2", 0, Vector2i())
+	doc.add_entry("K3", "3", 1, Vector2i())
+
+	var new_index: int = doc.move_entry_to_section(0, 1)
+	assert_eq(new_index, 2, "moved entry should land at the end of its new section's run")
+	assert_eq(doc.selected_index, new_index, "selection should follow the moved entry")
+	assert_true(doc.string_table.is_grouped(), "moving must preserve the grouping invariant")
+	assert_eq(doc.string_table.get_entry_key(2), "K1")
+	assert_eq(doc.string_table.get_section_string_count(0), 1)
+	assert_eq(doc.string_table.get_section_string_count(1), 2)
+
+	doc.undo()
+	assert_eq(doc.string_table.get_entry_key(0), "K1", "undo should restore the original order")
+	assert_eq(doc.string_table.get_section_string_count(0), 2)
+
+
+func test_ungrouped_file_is_flagged_and_normalizable() -> void:
+	# Mutations keep tables grouped, so forge an ungrouped file by patching the
+	# section_index of the FIRST entry directly in the serialized bytes
+	# (entry i's section dword sits at 16 + 16*i + 8).
+	var doc = add_child_autofree(StringsEditorScript.new())
+	doc.add_section("a")
+	doc.add_section("b")
+	doc.add_entry("K1", "1", 0, Vector2i())
+	doc.add_entry("K2", "2", 0, Vector2i())
+	doc.add_entry("K3", "3", 1, Vector2i())
+	var bytes: PackedByteArray = doc.string_table.to_byte_array()
+	bytes[16 + 8] = 1  # first entry now claims section b while sitting before section a's run
+
+	var doc2 = add_child_autofree(StringsEditorScript.new())
+	assert_eq(doc2.open_strings_bytes(bytes, "user://forged.bin"), OK, "ungrouped files still load (faithful read)")
+	assert_false(doc2.string_table.is_grouped())
+	var report: Dictionary = doc2.validate()
+	assert_false(report["ok"], "ungrouped entries break the game's index-by-string-count lookup")
+	assert_false(bool(report["grouped"]))
+	assert_string_contains(report["summary"], "grouped")
+
+	doc2.normalize_grouping()
+	assert_true(doc2.string_table.is_grouped(), "normalize should restore grouping")
+	assert_eq(doc2.string_table.get_section_string_count(0), 1)
+	assert_eq(doc2.string_table.get_section_string_count(1), 2)
+	doc2.undo()
+	assert_false(doc2.string_table.is_grouped(), "normalize should be one undoable step")
 
 
 func test_csv_round_trip_preserves_text_with_commas_and_newlines() -> void:
@@ -173,6 +240,25 @@ func test_committed_fixture_loads_and_reserializes_byte_exact() -> void:
 	assert_eq(table.save_to_path(TMP_B), OK)
 	assert_eq(FileAccess.get_file_as_bytes(fixture), FileAccess.get_file_as_bytes(TMP_B),
 		"re-saving the unedited fixture should reproduce it byte-for-byte")
+
+
+func test_retail_fixture_cp1252_survives_string_roundtrip() -> void:
+	# 00tra.bin is a committed retail mission table whose text contains cp1252
+	# bytes (curly quotes etc.). Rewriting every entry's text/key through the
+	# Godot String layer must reproduce the file byte-for-byte — i.e. the
+	# cp1252 decode/encode in RtxtStringFile is lossless on real game data.
+	var fixture_path := ProjectSettings.globalize_path("res://").path_join("../fixtures/rtxt/00tra.bin")
+	assert_true(FileAccess.file_exists(fixture_path), "retail fixture should exist at %s" % fixture_path)
+	var original := FileAccess.get_file_as_bytes(fixture_path)
+	var table := RtxtStringFile.new()
+	assert_eq(table.load_from_byte_array(original), OK, "retail mission table should parse")
+	assert_eq(table.to_byte_array(), original, "unedited retail table should reserialize byte-for-byte")
+
+	for i in table.get_entry_count():
+		table.set_entry_text(i, table.get_entry_text(i))
+		table.set_entry_key(i, table.get_entry_key(i))
+	assert_eq(table.to_byte_array(), original,
+		"rewriting every entry through String must not corrupt cp1252 text")
 
 
 func test_nova_strings_singleton() -> void:

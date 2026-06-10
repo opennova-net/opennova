@@ -155,13 +155,13 @@ func _on_text_changed() -> void:
 func _on_section_selected(item_index: int) -> void:
 	if _loading or _current_index < 0:
 		return
-	# Bracket as one undo step; a structural rebuild would re-enter this dropdown's
-	# own signal, so we patch just the row instead of triggering a full rebuild.
+	# Moving an entry between sections is structural: the entry relocates to the
+	# end of its new section's run (the game reads entries by contiguous section
+	# runs). The document updates selected_index and emits structure_changed; the
+	# rebuild re-selects the moved row. Deferred so the rebuild does not happen
+	# from inside this dropdown's own signal handler.
 	var section_id := _section_option.get_item_id(item_index)
-	_doc.begin_edit()
-	_doc.set_entry_section_index_live(_current_index, section_id)
-	_doc.commit_edit()
-	_notify_row(_current_index)
+	_doc.call_deferred("move_entry_to_section", _current_index, section_id)
 
 
 func _wire_spin(spin: SpinBox) -> void:

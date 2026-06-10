@@ -15,6 +15,9 @@ var _search_edit: LineEdit
 var _section_filter: OptionButton
 var _section_name_edit: LineEdit
 var _validation_label: Label
+var _normalize_button: Button
+var _lookup_edit: LineEdit
+var _lookup_result: RichTextLabel
 var _import_dialog: FileDialog
 var _export_dialog: FileDialog
 var _rename_section_button: Button
@@ -71,6 +74,26 @@ func _ready() -> void:
 	ObjectUiHelpers.add_section_heading(box, "Validation")
 	_validation_label = ObjectUiHelpers.add_muted_label(box, "No issues")
 	_validation_label.name = "StringsValidationLabel"
+	_normalize_button = _add_button(box, "StringsNormalizeButton", "Group entries by section", _on_normalize)
+	_normalize_button.tooltip_text = "Reorder entries so each section's strings sit together, the layout the game requires."
+	_normalize_button.visible = false
+
+	ObjectUiHelpers.add_section_heading(box, "Lookup tester")
+	_lookup_edit = LineEdit.new()
+	_lookup_edit.name = "StringsLookupEdit"
+	_lookup_edit.placeholder_text = "section:key  (or just key)"
+	_lookup_edit.tooltip_text = "Resolve a string the way the game does: section-scoped, first match wins. A plain key searches all sections."
+	_lookup_edit.clear_button_enabled = true
+	_lookup_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_lookup_edit.text_changed.connect(func(_text): _refresh_lookup())
+	box.add_child(_lookup_edit)
+	_lookup_result = RichTextLabel.new()
+	_lookup_result.name = "StringsLookupResult"
+	_lookup_result.bbcode_enabled = true
+	_lookup_result.fit_content = true
+	_lookup_result.scroll_active = false
+	_lookup_result.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(_lookup_result)
 
 	ObjectUiHelpers.add_section_heading(box, "CSV")
 	var csv_buttons := HBoxContainer.new()
@@ -87,6 +110,7 @@ func refresh() -> void:
 		_doc = _ws.get_document()
 	_rebuild_section_filter()
 	_refresh_validation()
+	_refresh_lookup()
 	_update_section_buttons()
 
 
@@ -173,6 +197,44 @@ func _refresh_validation() -> void:
 	var report := _doc.validate()
 	_validation_label.text = String(report.get("summary", ""))
 	_validation_label.add_theme_color_override("font_color", OK_COLOR if report.get("ok", true) else ISSUE_COLOR)
+	if _normalize_button != null:
+		_normalize_button.visible = not bool(report.get("grouped", true))
+
+
+func _on_normalize() -> void:
+	if _doc != null:
+		_doc.normalize_grouping()
+
+
+# --- Lookup tester ---
+
+## Resolves "section:key" (or a bare key) against the open table with the
+## game's semantics — section-scoped first-match lookup, {hot} marker stripped
+## for display, and the engine's visible ??section:key?? marker on a scoped
+## miss.
+func _refresh_lookup() -> void:
+	if _lookup_edit == null or _lookup_result == null or _doc == null:
+		return
+	var query := _lookup_edit.text.strip_edges()
+	if query.is_empty():
+		_lookup_result.text = "[color=#888888]Type a lookup to preview the in-game result.[/color]"
+		return
+	var table := _doc.string_table
+	var colon := query.find(":")
+	if colon >= 0:
+		var section := query.substr(0, colon).strip_edges()
+		var key := query.substr(colon + 1).strip_edges()
+		if table.has_string_in_section(section, key):
+			var raw := String(table.get_string_in_section(section, key))
+			_lookup_result.text = "In-game: %s" % _escape_bbcode(RtxtStringFile.strip_hotkey(raw))
+		else:
+			_lookup_result.text = "[color=#ff9966]In-game: ??%s:%s??[/color]" % [_escape_bbcode(section), _escape_bbcode(key)]
+	else:
+		if table.has_string(query):
+			var raw := String(table.get_string(query))
+			_lookup_result.text = "In-game: %s" % _escape_bbcode(RtxtStringFile.strip_hotkey(raw))
+		else:
+			_lookup_result.text = "[color=#ff9966]Not found in any section (the game would show empty text).[/color]"
 
 
 # --- CSV ---
@@ -202,6 +264,10 @@ func _make_csv_dialog(mode: int) -> FileDialog:
 
 
 # --- Helpers ---
+
+func _escape_bbcode(text: String) -> String:
+	return text.replace("[", "[lb]")
+
 
 func _add_button(parent: Control, node_name: String, text: String, handler: Callable) -> Button:
 	var button := Button.new()
