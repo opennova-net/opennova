@@ -54,6 +54,7 @@ const StmtRowClass = preload("res://modtools/music/ui/stmt_row.gd")
 const IfBlockClass = preload("res://modtools/music/ui/stmt_if_block.gd")
 const SwitchBlockClass = preload("res://modtools/music/ui/stmt_switch_block.gd")
 const InputsCardClass = preload("res://modtools/music/ui/inputs_card.gd")
+const ExprPopoverClass = preload("res://modtools/music/ui/expr_popover.gd")
 
 const _ACTIVE_TINT := Color(0.55, 1.00, 0.55)
 # Kinds that may fold when identical+consecutive at the top level.
@@ -98,6 +99,10 @@ var _toolbar: HBoxContainer = null
 var _add_menu: MenuButton = null
 var _scroll: ScrollContainer = null
 var _stack: VBoxContainer = null
+# The one expression popover (one edit at a time; opening elsewhere
+# re-targets it). Lives on the VIEW so a row rebuild can't eat its state.
+var _popover: MusicExprPopover = null
+var _popover_apply: Callable = Callable()
 
 
 func _ready() -> void:
@@ -131,6 +136,13 @@ func _ready() -> void:
 	_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_stack.add_theme_constant_override("separation", 4)
 	_scroll.add_child(_stack)
+
+	# The popover floats over the stack (sibling of the layout root, added
+	# after it so it draws on top); it repositions itself on scroll.
+	_popover = ExprPopoverClass.new()
+	add_child(_popover)
+	_popover.applied.connect(_on_popover_applied)
+	_scroll.get_v_scroll_bar().value_changed.connect(func(_v): _popover.reposition())
 
 
 # Supply the context rows and the palette need + flip editing on/off. The host
@@ -206,6 +218,12 @@ func show_section(section: Dictionary, bank_names: Array) -> void:
 	else:
 		_build_rows(stmts, authored_end)
 
+	# An open popover outlives the rebuild (it is NOT a row child): re-anchor
+	# it to the surviving row, or close it with a notice when the statement is
+	# gone (an external change -- undo, another edit -- ate it).
+	_resolve_popover_after_render()
+	_consume_pending_add_edit(stmts)
+
 
 # The index of the first top-level statement after which flow has left the
 # state (or the section close, whichever comes first).
@@ -238,7 +256,6 @@ func _build_rows(stmts: Array, authored_end: int) -> void:
 			_stack.add_child(_build_dispatch_divider())
 			divider_added = true
 		var in_tail := divider_added
-		var row_opts := {"read_only": in_tail}
 
 		var run := 1
 		if kind in _FOLDABLE:
@@ -248,7 +265,7 @@ func _build_rows(stmts: Array, authored_end: int) -> void:
 			# Expanded run: every member is its own row with its own ordinal;
 			# the first carries the ⊟ collapse toggle.
 			for k in range(run):
-				var opts := row_opts.duplicate()
+				var opts := _leaf_opts(stmts, i + k, in_tail)
 				if k == 0:
 					opts["fold_toggle"] = _fold_toggle(i, true, run)
 				var member: Dictionary = stmts[i + k]
@@ -260,11 +277,11 @@ func _build_rows(stmts: Array, authored_end: int) -> void:
 		var row: Control
 		match kind:
 			"if":
-				row = IfBlockClass.new().setup(s, i, ctx, row_opts)
+				row = IfBlockClass.new().setup(s, i, ctx, _leaf_opts(stmts, i, in_tail))
 			"switch":
-				row = SwitchBlockClass.new().setup(s, i, ctx, row_opts)
+				row = SwitchBlockClass.new().setup(s, i, ctx, _leaf_opts(stmts, i, in_tail))
 			_:
-				var opts2 := row_opts.duplicate()
+				var opts2 := _leaf_opts(stmts, i, in_tail)
 				opts2["run"] = run
 				if run > 1:
 					opts2["fold_toggle"] = _fold_toggle(i, false, run)
@@ -272,6 +289,50 @@ func _build_rows(stmts: Array, authored_end: int) -> void:
 		_stack.add_child(row)
 		_register(row, int(s.get("code_offset", -1)))
 		i += run if run > 1 else 1
+
+
+# The intent callbacks one top-level row gets. A folded run only deletes /
+# moves as individual members after unfolding, so run handling stays in the
+# build loop; everything here addresses ONE raw ordinal.
+func _leaf_opts(stmts: Array, i: int, in_tail: bool) -> Dictionary:
+	var opts := {"read_only": in_tail}
+	if in_tail or not _editable:
+		return opts
+	opts["on_lines"] = _request_replace.bind(i)
+	opts["on_delete"] = _request_delete.bind(i)
+	opts["on_move"] = _request_move.bind(i)
+	opts["can_up"] = _can_swap(stmts, i, -1)
+	opts["can_down"] = _can_swap(stmts, i, 1)
+	opts["on_insert_above"] = _open_gap_palette.bind(i)
+	return opts
+
+
+func _request_replace(lines: PackedStringArray, ordinal: int) -> void:
+	replace_statement_requested.emit(_section_index, ordinal, lines)
+
+
+func _request_delete(ordinal: int) -> void:
+	delete_statement_requested.emit(_section_index, ordinal)
+
+
+func _request_move(dir: int, ordinal: int) -> void:
+	reorder_statement_requested.emit(_section_index, ordinal, dir)
+
+
+# Whether the row at i can swap with its neighbour: skip the zero-width nops
+# the document also steps over, refuse the locked rows (the section-closing
+# done, hidden frame setup) -- which is exactly what keeps a row from moving
+# across the dispatch boundary. Per-ROW, not a single first-movable index:
+# gamemus Begin's frame op sits MID-section.
+func _can_swap(stmts: Array, i: int, dir: int) -> bool:
+	var j := i + dir
+	while j >= 0 and j < stmts.size() \
+			and String((stmts[j] as Dictionary).get("kind", "")) == "nop":
+		j += dir
+	if j < 0 or j >= stmts.size():
+		return false
+	var k := String((stmts[j] as Dictionary).get("kind", ""))
+	return k != "done" and k != "frame_enter"
 
 
 func _row_ctx() -> Dictionary:
@@ -284,7 +345,97 @@ func _row_ctx() -> Dictionary:
 		"editable": _editable,
 		"register": Callable(self, "_register"),
 		"pend": Callable(self, "_pend_offset"),
+		"forms": _forms,
+		"open_expr": Callable(self, "_open_expr_popover"),
+		"notify_edit_started": Callable(self, "notify_edit_started"),
+		"stmt_at": Callable(self, "_stmt_at"),
 	}
+
+
+# The freshest AST dict for a top-level ordinal: blocks resolve through this
+# at mutation time so a delayed apply (popover) never resurrects stale bodies.
+# _section_dict is replaced by every show_section, which the host re-runs on
+# every document change.
+func _stmt_at(ordinal: int) -> Dictionary:
+	var stmts: Array = _section_dict.get("statements", [])
+	if ordinal >= 0 and ordinal < stmts.size():
+		return stmts[ordinal]
+	return {}
+
+
+# A picker/popover just opened: the host pins follow-live.
+func notify_edit_started() -> void:
+	inline_edit_started.emit()
+
+
+# --- the expression popover -------------------------------------------------
+
+func _open_expr_popover(anchor: Control, title: String, seed, key: Dictionary, on_apply: Callable) -> void:
+	notify_edit_started()
+	_popover_apply = on_apply
+	_popover.open_for(anchor, title, seed, _display_var_list(), _mus, key)
+
+
+func _on_popover_applied(text: String) -> void:
+	if _popover_apply.is_valid():
+		_popover_apply.call(text)
+	_popover_apply = Callable()
+
+
+# After a rebuild: keep an open popover alive by re-anchoring it to the row
+# that now renders its statement; close-with-notice when that statement is
+# gone. Apply/Cancel/takeover never get here with an open popover, so a close
+# here is always an EXTERNAL change eating the edit.
+func _resolve_popover_after_render() -> void:
+	if _popover == null or not _popover.is_open():
+		return
+	var key := _popover.key()
+	var anchor := _find_row_by_key(key)
+	if anchor != null:
+		_popover.reanchor(anchor)
+		# The rebuild freed the row the apply callback was bound to; rebind it
+		# to the surviving statement's NEW row so Apply still lands.
+		var rebound := _apply_callable_for(anchor, key)
+		if rebound.is_valid():
+			_popover_apply = rebound
+	else:
+		_popover.cancel()
+		_popover_apply = Callable()
+		author_failed.emit("That change closed your open edit — reopen it to continue.")
+
+
+# The apply route for a popover key against a (fresh) row instance: the same
+# method a chip click on that row would have bound.
+func _apply_callable_for(row: Control, key: Dictionary) -> Callable:
+	var slot := String(key.get("slot", ""))
+	match slot:
+		"cond":
+			if row is IfBlockClass:
+				return Callable(row, "_on_condition_applied")
+		"selector":
+			if row is SwitchBlockClass:
+				return Callable(row, "_on_selector_applied")
+		"rhs", "expr":
+			if row is StmtRowClass:
+				return Callable(row, "_on_expr_applied").bind(slot)
+	return Callable()
+
+
+# Locate the row/block for a popover key ({ordinal, kind, branch_key?}).
+func _find_row_by_key(key: Dictionary) -> Control:
+	var want_branch := String(key.get("branch_key", ""))
+	var want_ordinal := int(key.get("ordinal", -1))
+	var want_kind := String(key.get("kind", ""))
+	for r in top_level_rows():
+		if want_branch != "":
+			if r is IfBlockClass:
+				for lane_row in (r as MusicStmtIfBlock).then_rows() + (r as MusicStmtIfBlock).else_rows():
+					if lane_row.has_meta("branch_key") and String(lane_row.get_meta("branch_key")) == want_branch:
+						return lane_row
+			continue
+		if int(r.get_meta("ordinal")) == want_ordinal and String(r.get_meta("kind")) == want_kind:
+			return r
+	return null
 
 
 # Profile-named caller inputs for the SHOWN section ({0-based index -> label}).
@@ -503,22 +654,85 @@ func notify_selected(ordinal: int) -> void:
 
 # --- add palette -----------------------------------------------------------
 
+# The toolbar ＋ appends at the canonical anchor (before the first
+# terminator); a gap ⋮ "Insert step above" targets one row's gap.
 func _on_add_palette_id(id: int) -> void:
+	_add_kind_at(id, -1)
+
+
+func _open_gap_palette(before_ordinal: int) -> void:
+	if not _editable:
+		return
+	var pop := PopupMenu.new()
+	for i in range(MusForms.ADD_ITEMS.size()):
+		pop.add_item(String(MusForms.ADD_ITEMS[i][0]), i)
+	add_child(pop)
+	pop.id_pressed.connect(func(id: int): _add_kind_at(id, before_ordinal))
+	pop.popup_hide.connect(pop.queue_free)
+	pop.position = Vector2i(get_global_mouse_position())
+	pop.reset_size()
+	pop.popup()
+
+
+# Insert the picked kind's canonical default lines (no creation dialogs: even
+# if/switch land as editable defaults) and auto-open editing on the new row
+# after the re-render. before_ordinal -1 = the canonical append anchor.
+func _add_kind_at(id: int, before_ordinal: int) -> void:
 	if id < 0 or id >= MusForms.ADD_ITEMS.size():
 		return
 	var kind := String(MusForms.ADD_ITEMS[id][1])
+	var lines: PackedStringArray
 	if _forms.is_inputless(kind):
-		add_statement_requested.emit(_section_index, _forms.simple_lines(kind))
+		lines = _forms.simple_lines(kind)
+	else:
+		_forms.configure(_section_names, _var_list, _mus, _bank_names)
+		lines = _forms.default_lines(kind)
+		if lines.is_empty():
+			lines = _forms.block_default_lines(kind)
+	if lines.is_empty():
+		author_failed.emit("Fill in the fields first")
 		return
-	_forms.configure(_section_names, _var_list, _mus, _bank_names)
-	var defaults := _forms.default_lines(kind)
-	if defaults.is_empty() and _forms.has_method("block_default_lines"):
-		defaults = _forms.block_default_lines(kind)
-	if defaults.is_empty():
-		author_failed.emit("That step can't be added yet.")
+	if not _forms.is_inputless(kind):
+		_pending_add_edit = {"kind": kind, "line": String(lines[0])}
+	if before_ordinal < 0:
+		add_statement_requested.emit(_section_index, lines)
+	else:
+		insert_statement_at_requested.emit(_section_index, before_ordinal, lines)
+
+
+# After a ＋Add inserted its default and the document re-render brought us
+# back, find the new statement (last match of the inserted canonical text)
+# and put the user mid-edit: expression-shaped kinds open their popover; the
+# picker kinds mark the row (and Stage-8 scrolls to it). Skips silently when
+# the row folded into a ×N run (ambiguous) or the add was rejected.
+func _consume_pending_add_edit(stmts: Array) -> void:
+	if _pending_add_edit.is_empty() or not _editable:
 		return
-	_pending_add_edit = {"kind": kind, "line": String(defaults[0])}
-	add_statement_requested.emit(_section_index, defaults)
+	var want_kind := String(_pending_add_edit.get("kind", ""))
+	var want_line := String(_pending_add_edit.get("line", ""))
+	_pending_add_edit = {}
+	for i in range(stmts.size() - 1, -1, -1):
+		var st: Dictionary = stmts[i]
+		if String(st.get("kind", "")) != want_kind:
+			continue
+		if String(st.get("text", "")) != want_line:
+			continue
+		var row := _find_row_by_key({"ordinal": i, "kind": want_kind})
+		if row == null:
+			return  # folded into a run: nothing unambiguous to open
+		row.set_meta("auto_opened", true)
+		# Expression-shaped kinds land mid-edit through the row's OWN chip
+		# wiring (same apply path a click would take); picker kinds just mark
+		# the row -- their dropdowns are one click away and a popup stealing
+		# the pointer would be worse than none.
+		match want_kind:
+			"assign", "expr":
+				if row is StmtRowClass and (row as MusicStmtRow)._expr_chip != null:
+					(row as MusicStmtRow)._expr_chip.pressed.emit()
+			"if":
+				if row is IfBlockClass and (row as MusicStmtIfBlock)._cond_chip != null:
+					(row as MusicStmtIfBlock)._open_condition_popover()
+		return
 
 
 # --- introspection (tests + host) -------------------------------------------

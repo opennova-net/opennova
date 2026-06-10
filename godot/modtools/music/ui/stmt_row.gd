@@ -4,15 +4,23 @@ extends PanelContainer
 # One statement of a state's program, as a sentence-style row in the
 # block-stack canvas (MusicSectionProgramView). A row OWNS no document logic:
 # it renders a leaf statement (play / go-to / set / function call / ...) and
-# reports interactions back to the host view, which routes them through the
-# parity-gated document intents. if/switch render as container blocks
-# (MusicStmtIfBlock / MusicStmtSwitchBlock), not as this class.
+# reports interactions back through callbacks the builder supplied, which
+# route into the parity-gated document intents. if/switch render as container
+# blocks (MusicStmtIfBlock / MusicStmtSwitchBlock), not as this class.
 #
-# Anatomy (left to right): a kind-coloured glyph, the sentence ("Play
-# <track>", "Go to <state>", "Set volume(200)"), then badges (×N for a folded
-# run, "waits" for playw) and, for state references, an "open ▸" jump. The
-# canonical engine text lives in the tooltip; everything the user READS is the
-# MusDisplayNames prettified form.
+# EDITING IS THE ROW: when the script is editable, the sentence's values are
+# live controls -- the track / target-state / variable dropdowns commit the
+# canonical replacement line the moment a pick lands (one intent = one undo
+# step), and expression values are chips that open the anchored popover
+# (MusicExprPopover) with room to build. There is no edit mode to enter and
+# no Apply for atomic picks; expressions keep an explicit Apply in the
+# popover because they need validation.
+#
+# Anatomy: kind-coloured glyph · the sentence (labels + value controls) ·
+# badges (×N folded run, "waits") · open ▸ for state references · a trailing
+# ✕ / ⋮ tool cluster (delete, move, insert above). The canonical engine text
+# lives in tooltips; everything the user READS is the MusDisplayNames
+# prettified form.
 #
 # Meta contract (what the view and tests address rows by):
 #   "ordinal"    raw AST index (top-level rows; lane rows carry their parent's)
@@ -21,27 +29,49 @@ extends PanelContainer
 #   "branch_key" "ifOrdinal:branch:index" on rows inside an if lane
 
 const MusDisplayNames = preload("res://modtools/music/mus_display_names.gd")
+const MusStmtText = preload("res://modtools/music/mus_stmt_text.gd")
 
 # Rows the user can never edit or move (annotations / engine artifacts).
 const READ_ONLY_KINDS := ["branch_comment", "nop"]
+# Rows whose CONTENT has nothing to edit (the row still deletes/moves).
+const NO_CONTENT_EDIT := ["return", "yield"]
 
 var kind := ""
 var ordinal := -1
 var run := 1
 var read_only := false
 
+var _stmt: Dictionary = {}
+var _ctx: Dictionary = {}
+var _opts: Dictionary = {}
 var _glyph: Label = null
-var _sentence: Label = null
+var _sentence: Label = null      # read-only rendering only
 var _badges: HBoxContainer = null
-var _open_btn: Button = null
-var _host = null  # MusicSectionProgramView (duck-typed; lanes pass the view too)
+var _box: HBoxContainer = null
+var _host = null                 # MusicSectionProgramView
+# Live value controls (editable rendering), per kind:
+var _track_opt: OptionButton = null
+var _section_opt: OptionButton = null
+var _var_opt: OptionButton = null
+var _dir_opt: OptionButton = null
+var _expr_chip: Button = null
+var _snames_snapshot: PackedStringArray = PackedStringArray()
+var _vars_snapshot: Array = []
 
 
 # Build the row for one AST statement dict. `ctx` comes from the view:
 #   { "view", "bank_names", "display_vars", "locals_base", "input_names",
-#     "editable" }
-# `opts`: { "run": int, "branch_key": String, "read_only": bool }
+#     "editable", "forms", "open_expr", "notify_edit_started" }
+# `opts`: { "run", "branch_key", "read_only", "fold_toggle",
+#   "on_lines": Callable(PackedStringArray)   commit a canonical replacement
+#   "on_delete": Callable()                   remove this statement
+#   "on_move": Callable(dir: int)             move within its container
+#   "can_up" / "can_down": bool
+#   "on_insert_above": Callable()             top-level gap insert }
 func setup(stmt: Dictionary, p_ordinal: int, ctx: Dictionary, opts: Dictionary = {}) -> MusicStmtRow:
+	_stmt = stmt
+	_ctx = ctx
+	_opts = opts
 	kind = String(stmt.get("kind", ""))
 	ordinal = p_ordinal
 	run = int(opts.get("run", 1))
@@ -57,33 +87,29 @@ func setup(stmt: Dictionary, p_ordinal: int, ctx: Dictionary, opts: Dictionary =
 	add_theme_stylebox_override("panel", _row_style(MusDisplayNames.stmt_color(kind)))
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
-	var box := HBoxContainer.new()
-	box.add_theme_constant_override("separation", 8)
-	add_child(box)
+	_box = HBoxContainer.new()
+	_box.add_theme_constant_override("separation", 8)
+	add_child(_box)
 
 	_glyph = Label.new()
 	_glyph.text = _glyph_for(kind)
 	_glyph.add_theme_color_override("font_color", MusDisplayNames.stmt_color(kind))
 	_glyph.tooltip_text = MusDisplayNames.stmt_tooltip(kind)
 	_glyph.custom_minimum_size = Vector2(22, 0)
-	box.add_child(_glyph)
+	_box.add_child(_glyph)
 
-	_sentence = Label.new()
-	_sentence.text = _sentence_for(stmt, ctx)
-	_sentence.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_sentence.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	# Power users get the canonical engine line on hover; the row itself stays
-	# in plain language.
-	var canon := String(stmt.get("text", ""))
-	if canon != "":
-		_sentence.tooltip_text = canon
-	if kind == "nop" or kind == "branch_comment":
-		_sentence.add_theme_color_override("font_color", Color(0.55, 0.55, 0.58))
-	box.add_child(_sentence)
+	# A folded ×N run edits per-member after unfolding; the collapsed row is
+	# read-only except for its count badge (the view owns that affordance).
+	var content_editable := not read_only and run == 1 \
+		and kind not in NO_CONTENT_EDIT and _content_supported(stmt, ctx)
+	if content_editable:
+		_build_live_sentence(stmt, ctx)
+	else:
+		_build_static_sentence(stmt, ctx)
 
 	_badges = HBoxContainer.new()
 	_badges.add_theme_constant_override("separation", 6)
-	box.add_child(_badges)
+	_box.add_child(_badges)
 	if run > 1:
 		var xn := Label.new()
 		xn.text = "×%d" % run
@@ -117,26 +143,29 @@ func setup(stmt: Dictionary, p_ordinal: int, ctx: Dictionary, opts: Dictionary =
 		_badges.add_child(ft)
 
 	var target := String(stmt.get("target_name", ""))
-	if kind in ["transition", "goto", "call"] and target != "":
-		_open_btn = Button.new()
-		_open_btn.text = "open ▸"
-		_open_btn.tooltip_text = "Open %s" % target
-		_open_btn.focus_mode = Control.FOCUS_NONE
-		_open_btn.flat = true
-		_open_btn.pressed.connect(func():
-			if _host != null:
-				_host.notify_open(StringName(target)))
-		box.add_child(_open_btn)
+	if kind in ["transition", "goto", "call"] and target != "" and _section_opt == null:
+		_box.add_child(_open_button(target))
+
+	if not read_only and kind not in READ_ONLY_KINDS:
+		_build_tools()
 
 	gui_input.connect(_on_gui_input)
 	return self
 
 
-func _on_gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed \
-			and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
-		if _host != null:
-			_host.notify_selected(ordinal)
+# --- read-only rendering -----------------------------------------------------
+
+func _build_static_sentence(stmt: Dictionary, ctx: Dictionary) -> void:
+	_sentence = Label.new()
+	_sentence.text = _sentence_for(stmt, ctx)
+	_sentence.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_sentence.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	var canon := String(stmt.get("text", ""))
+	if canon != "":
+		_sentence.tooltip_text = canon
+	if kind == "nop" or kind == "branch_comment":
+		_sentence.add_theme_color_override("font_color", Color(0.55, 0.55, 0.58))
+	_box.add_child(_sentence)
 
 
 # The one-line sentence for a leaf kind. Friendly names everywhere: bank entry
@@ -144,9 +173,6 @@ func _on_gui_input(event: InputEvent) -> void:
 # variables / caller inputs) for everything expression-shaped.
 func _sentence_for(stmt: Dictionary, ctx: Dictionary) -> String:
 	var bank_names: Array = ctx.get("bank_names", [])
-	var dvars: Array = ctx.get("display_vars", [])
-	var base := int(ctx.get("locals_base", MusDisplayNames.DEFAULT_LOCALS_BASE))
-	var input_names: Dictionary = ctx.get("input_names", {})
 	match kind:
 		"play":
 			return "Play  %s" % track_label(int(stmt.get("track", -1)), bank_names)
@@ -162,12 +188,197 @@ func _sentence_for(stmt: Dictionary, ctx: Dictionary) -> String:
 			return "Wait for the engine's next music tick"
 		"nop":
 			return "(does nothing)"
-		"branch_comment":
-			return MusDisplayNames.pretty_expr(String(stmt.get("text", "")), dvars, base, input_names)
 		_:
-			# assign / expr: the prettified canonical line reads as the sentence
-			# ("Speed = (Speed + 1)", "Set volume(200)").
-			return MusDisplayNames.pretty_expr(String(stmt.get("text", "")), dvars, base, input_names)
+			# assign / expr / branch_comment: the prettified canonical line
+			# reads as the sentence ("Speed = (Speed + 1)", "Set volume(200)").
+			return _pretty(String(stmt.get("text", "")), ctx)
+
+
+# --- live (editable) rendering ------------------------------------------------
+
+# An assign/incdec to a local slot the picker can't represent (an off-grid
+# l_N) must not be retargeted blind; render it read-only instead.
+func _content_supported(stmt: Dictionary, ctx: Dictionary) -> bool:
+	if (kind == "assign" or kind == "incdec") and bool(stmt.get("is_local", false)):
+		var token := String(stmt.get("var_name", ""))
+		for v in ctx.get("display_vars", []):
+			if String(v.get("token", "")) == token:
+				return true
+		return false
+	return true
+
+
+func _build_live_sentence(stmt: Dictionary, ctx: Dictionary) -> void:
+	var forms = ctx.get("forms")
+	_snames_snapshot = PackedStringArray(forms.section_names())
+	_vars_snapshot = (ctx.get("display_vars", []) as Array).duplicate()
+	match kind:
+		"play":
+			_box.add_child(_word("Play"))
+			_track_opt = forms.make_track_option(int(stmt.get("track", -1)))
+			_wire_picker(_track_opt, func(idx: int): _commit(MusStmtText.play(idx)))
+			_box.add_child(_track_opt)
+			_spacer()
+		"transition", "goto", "call":
+			_box.add_child(_word({"transition": "Go to", "goto": "Jump to", "call": "Run"}[kind]))
+			_section_opt = forms.make_section_option(String(stmt.get("target_name", "")))
+			_wire_picker(_section_opt, _commit_target)
+			_box.add_child(_section_opt)
+			if kind == "call":
+				_box.add_child(_word(", then come back"))
+			var target := String(stmt.get("target_name", ""))
+			if target != "":
+				_box.add_child(_open_button(target))
+			_spacer()
+		"assign":
+			_box.add_child(_word("Set"))
+			_var_opt = forms.make_var_option(String(stmt.get("var_name", "")), int(stmt.get("var_offset", -1)))
+			_wire_picker(_var_opt, func(_idx: int): _commit_assign(String(stmt.get("rhs", "0"))))
+			_box.add_child(_var_opt)
+			_box.add_child(_word("="))
+			_expr_chip = _chip(_pretty(String(stmt.get("rhs", "")), ctx), String(stmt.get("rhs", "")))
+			_expr_chip.pressed.connect(func(): _open_expr_popover("Set the value", stmt.get("rhs_tree", {}), String(stmt.get("rhs", "0")), "rhs"))
+			_box.add_child(_expr_chip)
+			_spacer()
+		"incdec":
+			_var_opt = forms.make_var_option(String(stmt.get("var_name", "")), int(stmt.get("var_offset", -1)))
+			_wire_picker(_var_opt, func(_idx: int): _commit_incdec())
+			_box.add_child(_var_opt)
+			_dir_opt = OptionButton.new()
+			_dir_opt.add_item("+1", 1)
+			_dir_opt.add_item("-1", 0)
+			_dir_opt.select(0 if bool(stmt.get("is_inc", true)) else 1)
+			_wire_picker(_dir_opt, func(_idx: int): _commit_incdec())
+			_box.add_child(_dir_opt)
+			_spacer()
+		"expr":
+			_expr_chip = _chip(_pretty(String(stmt.get("expr", "")), ctx), String(stmt.get("expr", "")))
+			_expr_chip.pressed.connect(func(): _open_expr_popover("Edit the action", stmt.get("expr_tree", {}), String(stmt.get("expr", "0")), "expr"))
+			_expr_chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			_box.add_child(_expr_chip)
+		_:
+			_build_static_sentence(_stmt, ctx)
+
+
+func _commit(lines: PackedStringArray) -> void:
+	if _opts.has("on_lines"):
+		(_opts["on_lines"] as Callable).call(lines)
+
+
+func _commit_target(idx: int) -> void:
+	if idx < 0 or idx >= _snames_snapshot.size():
+		return
+	var name := _snames_snapshot[idx]
+	match kind:
+		"transition":
+			_commit(MusStmtText.enter(name))
+		"goto":
+			_commit(MusStmtText.goto_section(name))
+		"call":
+			_commit(MusStmtText.call_section(name))
+
+
+func _commit_assign(rhs: String) -> void:
+	_commit(MusStmtText.assign(_picked_var_token(), rhs))
+
+
+func _commit_incdec() -> void:
+	var is_inc: bool = _dir_opt == null or _dir_opt.get_selected_id() == 1
+	_commit(MusStmtText.incdec(_picked_var_token(), is_inc))
+
+
+func _picked_var_token() -> String:
+	var forms = _ctx.get("forms")
+	if _var_opt != null and forms != null:
+		return forms.var_token_at(_var_opt, _vars_snapshot)
+	return "Var00"
+
+
+func _open_expr_popover(title: String, tree, fallback_text: String, slot: String) -> void:
+	if not _ctx.has("open_expr"):
+		return
+	var seed = tree if (tree is Dictionary and not (tree as Dictionary).is_empty()) else fallback_text
+	var key := {"ordinal": ordinal, "kind": kind, "slot": slot}
+	if has_meta("branch_key"):
+		key["branch_key"] = get_meta("branch_key")
+	(_ctx["open_expr"] as Callable).call(self, title, seed, key, _on_expr_applied.bind(slot))
+
+
+func _on_expr_applied(text: String, slot: String) -> void:
+	match slot:
+		"rhs":
+			_commit_assign(text)
+		"expr":
+			_commit(MusStmtText.expr_stmt(text))
+
+
+# Dropdown plumbing shared by every picker: opening one pins follow-live (the
+# host must not re-render the row under an open popup), picking commits.
+func _wire_picker(ob: OptionButton, on_pick: Callable) -> void:
+	ob.focus_mode = Control.FOCUS_NONE
+	ob.get_popup().about_to_popup.connect(func():
+		if _ctx.has("notify_edit_started"):
+			(_ctx["notify_edit_started"] as Callable).call())
+	ob.item_selected.connect(on_pick)
+
+
+# --- tools ---------------------------------------------------------------
+
+func _build_tools() -> void:
+	var del := Button.new()
+	del.text = "✕"
+	del.tooltip_text = "Delete this step"
+	del.flat = true
+	del.focus_mode = Control.FOCUS_NONE
+	del.pressed.connect(func():
+		if _opts.has("on_delete"):
+			(_opts["on_delete"] as Callable).call())
+	_box.add_child(del)
+
+	var menu := MenuButton.new()
+	menu.text = "⋮"
+	menu.tooltip_text = "Move / insert"
+	menu.flat = true
+	menu.focus_mode = Control.FOCUS_NONE
+	var pop := menu.get_popup()
+	pop.add_item("Move up", 0)
+	pop.add_item("Move down", 1)
+	pop.set_item_disabled(0, not bool(_opts.get("can_up", false)))
+	pop.set_item_disabled(1, not bool(_opts.get("can_down", false)))
+	if _opts.has("on_insert_above"):
+		pop.add_separator()
+		pop.add_item("Insert step above…", 2)
+	pop.id_pressed.connect(_on_tool_menu_id)
+	_box.add_child(menu)
+
+
+func _on_tool_menu_id(id: int) -> void:
+	match id:
+		0:
+			if _opts.has("on_move"):
+				(_opts["on_move"] as Callable).call(-1)
+		1:
+			if _opts.has("on_move"):
+				(_opts["on_move"] as Callable).call(1)
+		2:
+			if _opts.has("on_insert_above"):
+				(_opts["on_insert_above"] as Callable).call()
+
+
+# --- shared bits ----------------------------------------------------------
+
+func _on_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed \
+			and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		if _host != null:
+			_host.notify_selected(ordinal)
+
+
+func _pretty(text: String, ctx: Dictionary) -> String:
+	return MusDisplayNames.pretty_expr(text,
+		ctx.get("display_vars", []),
+		int(ctx.get("locals_base", MusDisplayNames.DEFAULT_LOCALS_BASE)),
+		ctx.get("input_names", {}))
 
 
 func _target_label(stmt: Dictionary) -> String:
@@ -179,6 +390,40 @@ static func track_label(track: int, bank_names: Array) -> String:
 	if track >= 0 and track < bank_names.size() and String(bank_names[track]) != "":
 		return String(bank_names[track])
 	return "track %d" % track
+
+
+func _open_button(target: String) -> Button:
+	var open := Button.new()
+	open.text = "open ▸"
+	open.tooltip_text = "Open %s" % target
+	open.focus_mode = Control.FOCUS_NONE
+	open.flat = true
+	open.pressed.connect(func():
+		if _host != null:
+			_host.notify_open(StringName(target)))
+	return open
+
+
+func _word(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	return l
+
+
+# A value chip: reads as the pretty sentence fragment, opens the popover.
+func _chip(pretty_text: String, canonical: String) -> Button:
+	var b := Button.new()
+	b.text = pretty_text if pretty_text != "" else "…"
+	b.tooltip_text = "%s\nClick to edit." % canonical
+	b.focus_mode = Control.FOCUS_NONE
+	b.clip_text = true
+	return b
+
+
+func _spacer() -> void:
+	var sp := Control.new()
+	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_box.add_child(sp)
 
 
 func _glyph_for(k: String) -> String:

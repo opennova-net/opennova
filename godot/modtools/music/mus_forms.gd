@@ -108,6 +108,25 @@ func default_lines(kind: String) -> PackedStringArray:
 	return PackedStringArray()
 
 
+# Always-compilable default lines for the BLOCK kinds (if/switch), so the
+# program view's ＋Add can insert one immediately and let the user edit it in
+# place -- the block stack has no creation dialogs. The if ships with a
+# then-action (an empty body wouldn't survive the decompiler's if detection);
+# both seed Var00 == 0 / Var00 so they are inert until edited.
+func block_default_lines(kind: String) -> PackedStringArray:
+	match kind:
+		"if":
+			var then_body := PackedStringArray(["Echo(0)"])
+			if not _section_names.is_empty():
+				then_body = PackedStringArray(["enter %s" % _section_names[0]])
+			return MusStmtText.if_block("(Var00 == 0)", then_body, false, PackedStringArray())
+		"switch":
+			if _section_names.is_empty():
+				return PackedStringArray()
+			return MusStmtText.switch_stmt("Var00", "enter", PackedStringArray([_section_names[0]]))
+	return PackedStringArray()
+
+
 # ---- shared picker builders (used by the dialogs AND the inline editors) ----
 
 func make_section_option(selected_name: String) -> OptionButton:
