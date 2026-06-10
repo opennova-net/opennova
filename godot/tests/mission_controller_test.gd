@@ -383,14 +383,15 @@ func test_new_mission_palette_and_placement_work() -> void:
 func test_kind_for_item_type_matches_shipping_data() -> void:
 	# The empirically verified 1:1 mapping (185k entities across 114 JO missions). The
 	# non-obvious part is Decoration AND Foliage sharing the Building list with Building.
-	var c := MissionController.new(null)
-	assert_eq(c._kind_for_item_type(NovaItemDatabase.TYPE_PERSON), NovaMissionData.KIND_ORGANIC, "person -> organic")
-	assert_eq(c._kind_for_item_type(NovaItemDatabase.TYPE_BUILDING), NovaMissionData.KIND_BUILDING, "building -> building")
-	assert_eq(c._kind_for_item_type(NovaItemDatabase.TYPE_DECORATION), NovaMissionData.KIND_BUILDING, "decoration -> building")
-	assert_eq(c._kind_for_item_type(NovaItemDatabase.TYPE_FOLIAGE), NovaMissionData.KIND_BUILDING, "foliage -> building")
-	assert_eq(c._kind_for_item_type(NovaItemDatabase.TYPE_MARKER), NovaMissionData.KIND_MARKER, "marker -> marker")
+	# The table lives in the engine's authoring facade now (libs/mission authoring.h),
+	# exposed as the NovaMissionData.kind_for_item_type static.
+	assert_eq(NovaMissionData.kind_for_item_type(NovaItemDatabase.TYPE_PERSON), NovaMissionData.KIND_ORGANIC, "person -> organic")
+	assert_eq(NovaMissionData.kind_for_item_type(NovaItemDatabase.TYPE_BUILDING), NovaMissionData.KIND_BUILDING, "building -> building")
+	assert_eq(NovaMissionData.kind_for_item_type(NovaItemDatabase.TYPE_DECORATION), NovaMissionData.KIND_BUILDING, "decoration -> building")
+	assert_eq(NovaMissionData.kind_for_item_type(NovaItemDatabase.TYPE_FOLIAGE), NovaMissionData.KIND_BUILDING, "foliage -> building")
+	assert_eq(NovaMissionData.kind_for_item_type(NovaItemDatabase.TYPE_MARKER), NovaMissionData.KIND_MARKER, "marker -> marker")
 	for t in [NovaItemDatabase.TYPE_VEHICLE, NovaItemDatabase.TYPE_OBJECT, NovaItemDatabase.TYPE_POWERUP, NovaItemDatabase.TYPE_UNKNOWN]:
-		assert_eq(c._kind_for_item_type(t), NovaMissionData.KIND_ITEM, "type %d -> item" % t)
+		assert_eq(NovaMissionData.kind_for_item_type(t), NovaMissionData.KIND_ITEM, "type %d -> item" % t)
 
 
 func test_get_placeable_items_includes_markers() -> void:
@@ -1734,7 +1735,9 @@ func test_default_marker_item_id_is_the_engine_waypoint_type() -> void:
 	# player starts" bug. Reusing a path's OWN variant when that path already has markers is a
 	# separate, path-aware path (test_waypoint_marker_reuses_the_active_paths_existing_type).
 	var controller := _loaded_with_item_db()
-	assert_eq(controller._default_marker_item_id(), 106005,
+	# Path 127 is empty in the fixture: the policy (now in the engine facade) falls back
+	# to the canonical waypoint id, never an arbitrary scene marker's id.
+	assert_eq(controller._mission.marker_item_id_for_path(127), 106005,
 		"the canonical waypoint marker id (106005) is used, not a scene marker's id")
 
 

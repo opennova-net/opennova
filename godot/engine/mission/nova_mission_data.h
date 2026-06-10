@@ -184,6 +184,30 @@ public:
 	// Returns false if (kind, index) is out of range. Sets the dirty flag on success.
 	bool remove_entity(int kind, int index);
 
+	// --- Authoring facade (libs/mission authoring.h) ---------------------------
+	// The editing policies the editor used to hand-roll, as engine capabilities:
+	// the items.def-type -> entity-list table, the author-time Ground-userpoint
+	// bake [orig: sub_401A90, dfx2med.exe], and the path-consistent marker
+	// item-id policy. All geometry is mission (BMS) space; Godot hosts convert
+	// with MissionObjectPlacer's axis maps (godot_to_bms_position /
+	// ground_anchor_bms) before calling in.
+	//
+	// The KIND_* value a new placement of an items.def `type` lands in.
+	static int kind_for_item_type(int def_item_type);
+	// Place a new rotation-zero entity with its ground point at `ground_hit_bms`
+	// (unrotated anchor subtraction; markers ignore the anchor). Returns the new
+	// entity dictionary like add_entity, or {} when rejected. Dirty on success.
+	Dictionary place_entity_grounded(int item_id, int def_item_type, const Vector3 &ground_hit_bms, const Vector3 &ground_anchor_bms);
+	// Re-ground an existing entity at `ground_hit_bms`, keeping its rotation
+	// (full rotated bake). Returns false when (kind, index) is out of range.
+	bool move_entity_grounded(int kind, int index, const Vector3 &ground_hit_bms, const Vector3 &ground_anchor_bms);
+	// The item id a NEW marker on `path_index` should use: the path's own first
+	// marker's id, else the canonical waypoint id (106005).
+	int marker_item_id_for_path(int path_index) const;
+	// add_waypoint_marker with the item-id policy applied and the hit stored
+	// directly (markers have no anchor). Same return shape as add_waypoint_marker.
+	Dictionary add_path_marker_grounded(int path_index, const Vector3 &ground_hit_bms, int insert_index = -1);
+
 	// --- Waypoints ------------------------------------------------------------
 	// A mission carries 128 fixed waypoint paths; a path is an ordered list of marker
 	// indices (each an index into the KIND_MARKER entity list) plus flags (WP_FLAG_*).

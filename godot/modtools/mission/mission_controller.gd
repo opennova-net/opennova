@@ -197,8 +197,9 @@ var _marker_place_armed: bool = false
 # while 106001 = "start, player", 106178+ = "snd:" emitters, 100396+ = vehicle-spawn markers, etc. --
 # distinct marker types that must NOT be turned into waypoints. Seeding a new path marker by copying
 # whatever marker happened to be placed first (a player start) was the "waypoints become player
-# starts" bug. See _waypoint_marker_item_id_for_path / _default_marker_item_id.
-const WAYPOINT_MARKER_ITEM_ID := 106005
+# starts" bug. The id policy now lives in the engine's authoring facade
+# (libs/mission authoring.h: marker_item_id_for_path / kWaypointMarkerItemId),
+# exposed as NovaMissionData.marker_item_id_for_path / add_path_marker_grounded.
 # The live (container-local) position of a marker being dragged, written to the record on
 # release (the drag previews the gizmo only; the record is committed once, as one step).
 var _marker_drag_local: Vector3 = Vector3.ZERO
@@ -1715,23 +1716,23 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	if container == null:
 		return false
 	var db := _item_db()
-	var kind := _kind_for_item_type(db.get_item_type(item_id)) if db != null else NovaMissionData.KIND_ITEM
+	var item_type := db.get_item_type(item_id) if db != null else -1
+	var kind := NovaMissionData.kind_for_item_type(item_type)
 	# A readable label for the status line: the model name when resolvable, else the raw id.
 	var item_name: String = db.get_display_name(item_id) if db != null and db.has_item(item_id) else ""
 	if item_name.is_empty():
 		item_name = "item %d" % item_id
 	var local := container.global_transform.affine_inverse() * global_hit
-	# Bake the Ground userpoint into the stored position so the model's ground point lands at the
-	# cursor (render is direct). Mirrors the engine's author-time bake. [orig: sub_401A90, dfx2med.exe]
-	var ground := Vector3.ZERO
+	# The list selection + Ground-userpoint bake [orig: sub_401A90, dfx2med.exe] live in the
+	# engine's authoring facade; the editor only converts the hit/anchor to mission space.
+	var anchor_bms := Vector3.ZERO
 	if _placer != null and kind != NovaMissionData.KIND_MARKER:
-		ground = _placer.ground_anchor_godot(_placer.graphic_for(item_id))
-	var bms_pos := MissionObjectPlacer.godot_to_bms_position(local - ground)
+		anchor_bms = _placer.ground_anchor_bms(_placer.graphic_for(item_id))
 	# Placing is its own undo step: close any open session, then bracket the add with
 	# begin_edit/commit_edit (commit pushes one step iff the add changed the document).
 	_flush_edit()
 	_mission.begin_edit()
-	var record := _mission.add_entity(kind, item_id, bms_pos, Vector3.ZERO)
+	var record := _mission.place_entity_grounded(item_id, item_type, MissionObjectPlacer.godot_to_bms_position(local), anchor_bms)
 	if record.is_empty():
 		# Balance the begin_edit() bracket on the reject path (no-op step, the failed add changed
 		# nothing) so the open session does not leak into the next gesture.
@@ -1754,25 +1755,6 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	_report("Placed %s. Ctrl+Z to undo." % item_name)
 	return true
 
-
-# Map an items.def item type to the BMS entity-list kind a new placement lands in.
-# Empirically 1:1 and deterministic across 185k entities in 114 shipping JO missions:
-#   Person                        -> Organic
-#   Building / Decoration / Foliage -> Building   (all three share the Building list)
-#   Marker                        -> Marker       (mesh-less; excluded from the palette)
-#   Vehicle / Object / Powerup / Unknown -> Item
-# Decoration and Foliage going to the Building list (not Item) is the non-obvious part
-# and is the dominant case in real data (foliage + decoration are ~55% of all entities).
-func _kind_for_item_type(type: int) -> int:
-	match type:
-		NovaItemDatabase.TYPE_PERSON:
-			return NovaMissionData.KIND_ORGANIC
-		NovaItemDatabase.TYPE_BUILDING, NovaItemDatabase.TYPE_DECORATION, NovaItemDatabase.TYPE_FOLIAGE:
-			return NovaMissionData.KIND_BUILDING
-		NovaItemDatabase.TYPE_MARKER:
-			return NovaMissionData.KIND_MARKER
-		_:
-			return NovaMissionData.KIND_ITEM
 
 
 func _item_db() -> NovaItemDatabase:
@@ -2317,7 +2299,7 @@ func add_marker_to_active_path_at_world(global_hit: Vector3) -> bool:
 	var bms_pos := MissionObjectPlacer.godot_to_bms_position(local)
 	_flush_edit()
 	_mission.begin_edit()
-	var result := _mission.add_waypoint_marker(_selected_path_index, _waypoint_marker_item_id_for_path(_selected_path_index), bms_pos, Vector3.ZERO, -1)
+	var result := _mission.add_path_marker_grounded(_selected_path_index, bms_pos)
 	if result.is_empty():
 		_report("Could not add a waypoint marker.", true)
 		return false
@@ -2332,31 +2314,6 @@ func add_marker_to_active_path_at_world(global_hit: Vector3) -> bool:
 	mark_dirty()
 	return true
 
-
-# The item id for a NEW marker added to `path_index`. Reuse the type of the markers already on THAT
-# path, so a path authored with a specific waypoint variant (e.g. items.def 106026 "waypoint, mp,
-# alpha") stays consistent and shipped data round-trips with its own id. Crucially this looks only at
-# the path's OWN members -- never the whole scene -- so a player start / spawn / sound placed
-# elsewhere can never bleed into a waypoint (the old "copy markers[0]" bug). An empty path falls back
-# to the canonical "waypoint" type.
-func _waypoint_marker_item_id_for_path(path_index: int) -> int:
-	if _mission != null and path_index >= 0:
-		var path := _mission.get_waypoint_path(path_index)
-		var indices: PackedInt32Array = path.get("marker_indices", PackedInt32Array())
-		if not indices.is_empty():
-			var existing := _mission.get_entity(NovaMissionData.KIND_MARKER, int(indices[0]))
-			var id := int(existing.get("item_id", 0))
-			if id > 0:
-				return id
-	return _default_marker_item_id()
-
-
-# The canonical waypoint marker item id: the engine's "waypoint" type (BMS type_id 6005 = items.def
-# id 106005). Always 6005 so the saved record is a real waypoint the engine follows, whether or not
-# the loaded db carries a model for it (a mesh-less waypoint renders as a gizmo, which is correct).
-# NEVER an arbitrary marker copied from the scene.
-func _default_marker_item_id() -> int:
-	return WAYPOINT_MARKER_ITEM_ID
 
 
 # Raycast the terrain under the cursor and add a marker there; a miss (off the terrain) is
