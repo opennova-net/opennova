@@ -276,10 +276,9 @@ def _normal_tuple(n) -> Vec3:
 def flatten_collision(ir) -> list[FlatMesh]:
     """Build per-subobject FlatMesh from ``ir.collision[0]`` for the collision LOD.
 
-    OED's WriteCDTA / WriteCVRT / WriteCFAC / WriteCOBJ pipeline (audit:
-    notes/3di-pipeline/modsuperoed_cdta_audit.md) is pure pass-through from
-    ``lod->subobjects[i].verts/faces``, so the .ase mesh layout we hand it
-    becomes CDTA verbatim. The stock 3DI's collision chunk already encodes
+    OED's WriteCDTA / WriteCVRT / WriteCFAC / WriteCOBJ pipeline is pure
+    pass-through from ``lod->subobjects[i].verts/faces``, so the .ase mesh
+    layout we hand it becomes CDTA verbatim. The stock 3DI's collision chunk already encodes
     the artist's exact subobject layout, so emitting one ``.ase`` GEOMOBJECT
     per ``coll.objects[k]`` (= one OED subobject per IR collision object)
     reproduces stock CMDL.subObjCount, COBJ.vertCount/faceCount/normalCount,

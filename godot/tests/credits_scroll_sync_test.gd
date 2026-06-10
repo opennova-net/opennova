@@ -2,12 +2,23 @@ extends GutTest
 
 const CreditsEditorScene = preload("res://modtools/credits/credits_editor.tscn")
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
+const ResourceDirSettings = preload("res://engine/resource_index/resource_dir_settings.gd")
 const KDA_SOURCE_PATH := "res://../fixtures/cbin/nlist.reference.kda"
 const BINK_TEXTURE_PATH := "res://../fixtures/cbin/bink.tga"
 const FNT_PATH := "res://../fixtures/fnt/Serpen24.fnt"
 const TEMP_DIR := "user://test_credits_scroll_sync"
 
 var _kda_path: String = ""
+var _saved_resource_dir := ""
+
+
+func before_all() -> void:
+	_saved_resource_dir = ResourceDirSettings.get_resource_dir()
+	ResourceDirSettings.set_resource_dir("")
+
+
+func after_all() -> void:
+	ResourceDirSettings.set_resource_dir(_saved_resource_dir)
 
 
 func before_each() -> void:

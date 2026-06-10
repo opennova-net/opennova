@@ -23,11 +23,11 @@ String ResourceFormatLoaderCPT::_get_resource_type(const String &p_path) const {
 
 Variant ResourceFormatLoaderCPT::_load(const String &p_path, const String &p_original_path,
                                         bool p_use_sub_threads, int32_t p_cache_mode) const {
-	Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::READ);
-	if (f.is_null()) return Variant();
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(p_path, bytes)) return Variant();
 
 	Ref<NovaDataFile> res;
 	res.instantiate();
-	res->set_data(f->get_buffer(f->get_length()));
+	res->set_data(bytes);
 	return res;
 }
