@@ -70,8 +70,8 @@ func test_selecting_entry_seeks_preview() -> void:
 
 	var initial_offset := player.get_scroll_offset()
 	# Pick an entry deep into the list.
-	var target_index := mini(50, doc.resource.get_entry_count() - 1)
-	var target_entry := doc.resource.get_entry(target_index)
+	var target_index: int = mini(50, doc.resource.get_entry_count() - 1)
+	var target_entry: CbinEntry = doc.resource.get_entry(target_index)
 
 	block_list.select_entry(target_entry)
 	await get_tree().process_frame
@@ -186,7 +186,7 @@ func test_player_scroll_during_playback_updates_list_selection() -> void:
 
 	player.play()
 	await get_tree().process_frame
-	var deep_index := mini(40, doc.resource.get_entry_count() - 1)
+	var deep_index: int = mini(40, doc.resource.get_entry_count() - 1)
 	var deep_y := player.content_y_for_entry(deep_index) + player.get_size().y * 0.5
 	player.set_scroll_offset(deep_y)
 	await get_tree().process_frame
@@ -257,7 +257,7 @@ func test_editor_scroll_sync_uses_centered_card() -> void:
 	var block_list = editor.get_node("%BlockList")
 	var block_scroll: ScrollContainer = editor.get_node("%BlockScroll")
 	var target_index := 14
-	var target_entry := doc.resource.get_entry(target_index)
+	var target_entry: CbinEntry = doc.resource.get_entry(target_index)
 	var target_card: Control = block_list.card_for_entry(target_entry)
 	assert_not_null(target_card)
 
