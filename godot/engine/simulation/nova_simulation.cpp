@@ -1,5 +1,7 @@
 #include "simulation/nova_simulation.h"
 
+#include <wac/compiler.h>
+
 #include <cmath>
 #include <string>
 
@@ -154,6 +156,13 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	bms_->load(file.events, file.triggers, file.actions);
 	world_->ai = ai_.get();
 	opennova::mission::register_mission_systems(*world_, *wac_, *bms_, *ai_);
+	// Re-install the held script program onto the fresh WacSystem (reset_world
+	// recreated it). The 62-tick execution divider stays inside the system
+	// [orig: dword_C6EAD4 / cmp 0x3E]; a missing program leaves the VM unloaded
+	// and its tick early-outs, the BMS-only case.
+	if (wac_program_.is_valid() && wac_program_->is_ok()) {
+		wac_->set_program(wac_program_->native_program());
+	}
 	// PreMission events settle initial scripted state before the clock starts (AI is skipped on
 	// the pre-mission pass). Snapshot AFTER it so Stop restores the true play-start state.
 	world_->run_logic_tick(/*is_authority=*/true, /*pre_mission=*/true);
@@ -176,6 +185,12 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_tick_mode", "mode"), &NovaSimulation::set_tick_mode);
 	ClassDB::bind_method(D_METHOD("get_tick_mode"), &NovaSimulation::get_tick_mode);
 	ClassDB::bind_method(D_METHOD("drain_effects"), &NovaSimulation::drain_effects);
+	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
+	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
+	ClassDB::bind_method(D_METHOD("compile_and_set_wac", "sources"), &NovaSimulation::compile_and_set_wac);
+	ClassDB::bind_method(D_METHOD("get_wac_state"), &NovaSimulation::get_wac_state);
+	ClassDB::bind_method(D_METHOD("set_wac_paused", "paused"), &NovaSimulation::set_wac_paused);
+	ClassDB::bind_method(D_METHOD("is_wac_paused"), &NovaSimulation::is_wac_paused);
 	ClassDB::bind_method(D_METHOD("set_mission_variable", "index", "value"), &NovaSimulation::set_mission_variable);
 	ClassDB::bind_method(D_METHOD("get_mission_variable", "index"), &NovaSimulation::get_mission_variable);
 	ClassDB::bind_method(D_METHOD("has_event_fired", "index"), &NovaSimulation::has_event_fired);
@@ -305,6 +320,62 @@ Array NovaSimulation::drain_effects() {
 	}
 	world_->effects.clear();
 	return out;
+}
+
+void NovaSimulation::set_wac_program(const Ref<NovaWacProgram> &p_program) {
+	wac_program_ = p_program;
+	if (!loaded_ || !wac_) {
+		return; // finish_load applies it on the next load
+	}
+	if (wac_program_.is_valid() && wac_program_->is_ok()) {
+		wac_->set_program(wac_program_->native_program());
+	} else {
+		wac_->set_program(opennova::wac::Program());
+	}
+}
+
+bool NovaSimulation::compile_and_set_wac(const PackedStringArray &p_sources) {
+	ERR_FAIL_COND_V_MSG(!loaded_, false, "compile_and_set_wac needs a loaded world (the registry resolves symbolic names).");
+	std::vector<std::string> sources;
+	sources.reserve(static_cast<size_t>(p_sources.size()));
+	for (int64_t i = 0; i < p_sources.size(); ++i) {
+		const CharString utf8 = p_sources[i].utf8();
+		sources.emplace_back(utf8.get_data(), static_cast<size_t>(utf8.length()));
+	}
+	opennova::wac::CompileEnv env;
+	env.registry = &world_->registry;
+	opennova::wac::Program program = opennova::wac::compile_program(sources, env);
+	Ref<NovaWacProgram> holder;
+	holder.instantiate();
+	// Adopt the registry-compiled program into the holder so get_wac_program()
+	// exposes its diagnostics either way.
+	holder->adopt(std::move(program));
+	wac_program_ = holder;
+	if (!wac_program_->is_ok()) {
+		return false;
+	}
+	wac_->set_program(wac_program_->native_program());
+	return true;
+}
+
+Dictionary NovaSimulation::get_wac_state() const {
+	Dictionary out;
+	out["loaded"] = wac_ != nullptr && wac_->vm().loaded();
+	out["paused"] = wac_ != nullptr && wac_->paused;
+	out["runs"] = wac_ != nullptr ? static_cast<int64_t>(wac_->runs()) : 0;
+	out["event_count"] = wac_ != nullptr ? wac_->program().event_count : 0;
+	out["code_size"] = wac_ != nullptr ? static_cast<int>(wac_->program().code.size()) : 0;
+	return out;
+}
+
+void NovaSimulation::set_wac_paused(bool p_paused) {
+	if (wac_) {
+		wac_->paused = p_paused; // [orig: dword_C6EB28]
+	}
+}
+
+bool NovaSimulation::is_wac_paused() const {
+	return wac_ != nullptr && wac_->paused;
 }
 
 void NovaSimulation::set_mission_variable(int index, int value) {
