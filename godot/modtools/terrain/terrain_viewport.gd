@@ -76,6 +76,11 @@ func _build_viewport() -> void:
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_viewport.transparent_bg = false
 	_viewport.handle_input_locally = true
+	# Own physics world so the engine steps it: the mission workspace ray-picks placed
+	# objects via this viewport's World3D.direct_space_state, which only sees collision
+	# bodies if the world is stepped. A shared (default) SubViewport world is not stepped
+	# here, so picks silently miss. (Same pattern as object/veg_preview.gd.)
+	_viewport.own_world_3d = true
 	_container.add_child(_viewport)
 
 	_input_router = InputRouterScript.new()

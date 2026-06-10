@@ -28,7 +28,9 @@
 #include "object/nova_object_data.h"
 #include "object/nova_object_shader_cache.h"
 #include "object/nova_item_database.h"
+#include "object/nova_skeletal_anim.h"
 #include "mission/nova_mission_data.h"
+#include "simulation/nova_simulation.h"
 #include "lwf/nova_lwf_data.h"
 #include "lwf/nova_wav_loader.h"
 #include "audio/nova_sound_selector.h"
@@ -138,7 +140,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaObjectData);
 	GDREGISTER_CLASS(NovaObjectShaderCache);
 	GDREGISTER_CLASS(NovaItemDatabase);
+	GDREGISTER_CLASS(NovaSkeletalAnim);
 	GDREGISTER_CLASS(NovaMissionData);
+	GDREGISTER_CLASS(NovaSimulation);
 	GDREGISTER_CLASS(NovaLwfData);
 	GDREGISTER_CLASS(NovaWavLoader);
 	GDREGISTER_CLASS(NovaSoundSelector);

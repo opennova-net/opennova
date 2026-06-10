@@ -4,6 +4,8 @@ extends WorkflowInspector
 ## and per-control-register sliders. The export mask itself is coordinator
 ## state (used by begin_export); this inspector only builds its checkboxes.
 
+const CollisionHull = preload("res://engine/object/collision_hull.gd")
+
 
 func build_main(host: Control) -> void:
 	var box := _make_inspector_box(host)
@@ -36,6 +38,14 @@ func build_main(host: Control) -> void:
 	wire.button_pressed = _preview != null and _preview.is_wireframe()
 	playback.add_child(wire)
 
+	var collision := CheckBox.new()
+	collision.name = "PreviewCollisionCheck"
+	collision.text = "Collision"
+	collision.button_pressed = _preview != null and _preview.is_collision_visible()
+	# Only meaningful when the model carries collision volumes.
+	collision.disabled = _preview == null or not _preview.has_collision()
+	playback.add_child(collision)
+
 	play.toggled.connect(func(pressed: bool) -> void:
 		if _preview != null:
 			_preview.set_playing(pressed)
@@ -49,7 +59,13 @@ func build_main(host: Control) -> void:
 		if _preview != null:
 			_preview.set_wireframe(pressed)
 	)
+	collision.toggled.connect(func(pressed: bool) -> void:
+		if _preview != null:
+			_preview.set_collision_visible(pressed)
+	)
 
+	_build_animation_controls(box)
+	_build_collision_legend(box)
 	_build_export_mask_controls(box)
 
 	var ctrl_regs: Array = object_editor.object_data.get_control_registers() if object_editor and object_editor.object_data and object_editor.object_data.has_method("get_control_registers") else []
@@ -79,6 +95,193 @@ func build_main(host: Control) -> void:
 				if _preview != null:
 					_preview.set_ctrl_value(name, int(value))
 			)
+
+
+# Skeletal animation (.bad/.adm) preview -- the smoke test for the runtime skeletal
+# system. Pick a .adm (defaults to the model's basename), Load to bind it to the model
+# (builds the Skeleton3D + Skin when the model is skinned), then choose a clip to play.
+# Reads the .adm + its .bad clips from the mounted resource root by name (the VFS path),
+# so it works whether assets are loose or in PFF archives.
+func _build_animation_controls(box: VBoxContainer) -> void:
+	if _preview == null:
+		return
+	var label := Label.new()
+	label.text = "Skeletal animation (.adm)"
+	box.add_child(label)
+
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(row)
+
+	var name_edit := LineEdit.new()
+	name_edit.name = "AdmNameEdit"
+	name_edit.placeholder_text = "model.adm"
+	name_edit.text = _default_adm_name()
+	name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(name_edit)
+
+	var load_button := Button.new()
+	load_button.name = "AdmLoadButton"
+	load_button.text = "Load"
+	row.add_child(load_button)
+
+	var clip_picker := OptionButton.new()
+	clip_picker.name = "AdmClipPicker"
+	clip_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	clip_picker.disabled = true
+	box.add_child(clip_picker)
+
+	var status := Label.new()
+	status.name = "AdmStatusLabel"
+	status.theme_type_variation = &"Muted"
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(status)
+
+	# Load opens the in-app resource picker filtered to .adm (the chosen name fills the field and
+	# loads); typing a name + Enter still works as a fallback.
+	load_button.pressed.connect(func() -> void:
+		_open_picker("Open .adm animation", _scan_resource_files(".adm"), func(picked: String) -> void:
+			name_edit.text = picked.get_file()
+			_do_load_adm(name_edit.text.strip_edges(), clip_picker, status)
+		)
+	)
+	name_edit.text_submitted.connect(func(_text: String) -> void:
+		_do_load_adm(name_edit.text.strip_edges(), clip_picker, status)
+	)
+
+	clip_picker.item_selected.connect(func(index: int) -> void:
+		if _preview != null:
+			_preview.play_animation(clip_picker.get_item_text(index))
+	)
+
+	# Arms overlay: load a second .3di (e.g. ArmsG.3di) that rides the same .adm skeleton, so the
+	# first-person arms animate together with the model. Picks a .3di only; the .adm is shared.
+	var arms_row := HBoxContainer.new()
+	arms_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(arms_row)
+
+	var arms_load := Button.new()
+	arms_load.name = "ArmsLoadButton"
+	arms_load.text = "Load Arms"
+	arms_row.add_child(arms_load)
+
+	var arms_clear := Button.new()
+	arms_clear.name = "ArmsClearButton"
+	arms_clear.text = "Clear"
+	arms_row.add_child(arms_clear)
+
+	var arms_status := Label.new()
+	arms_status.name = "ArmsStatusLabel"
+	arms_status.theme_type_variation = &"Muted"
+	arms_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	arms_status.clip_text = true
+	arms_row.add_child(arms_status)
+
+	arms_load.pressed.connect(func() -> void:
+		_open_picker("Open arms .3di", _scan_resource_files(".3di"), func(picked: String) -> void:
+			if _preview == null:
+				return
+			var root: Variant = _ws.get_resource_root() if _ws != null and _ws.has_method("get_resource_root") else null
+			if _preview.load_arms(picked.get_file(), root):
+				arms_status.text = "Arms: %s" % picked.get_file()
+			else:
+				arms_status.text = "Arms failed: %s" % _preview.get_arms_error()
+		)
+	)
+	arms_clear.pressed.connect(func() -> void:
+		if _preview != null:
+			_preview.clear_arms()
+		arms_status.text = ""
+	)
+
+
+# Bind a .adm to the previewed model (builds the Skeleton3D + Skin), populate the clip picker, and
+# play the first clip. Shared by the resource picker and the typed-name (Enter) fallback.
+func _do_load_adm(adm_name: String, clip_picker: OptionButton, status: Label) -> void:
+	if _preview == null:
+		return
+	var root: Variant = _ws.get_resource_root() if _ws != null and _ws.has_method("get_resource_root") else null
+	var keys: PackedStringArray = _preview.load_animation_set(adm_name, root)
+	clip_picker.clear()
+	if keys.is_empty():
+		clip_picker.disabled = true
+		status.text = "No animations loaded: %s" % _preview.get_animation_error()
+		return
+	for k in keys:
+		clip_picker.add_item(k)
+	clip_picker.disabled = false
+	var skinned: bool = _preview.has_skeleton()
+	status.text = "%d clip(s) loaded%s" % [keys.size(), "" if skinned else "  (model has no skin to pose)"]
+	clip_picker.select(0)
+	_preview.play_animation(clip_picker.get_item_text(0))
+
+
+# Open the in-app resource picker (via the editor shell) over an explicit, scoped file list -- used
+# for .adm (which the resource index does not register) and the arms .3di. No-op if the shell lacks
+# the picker (keeps headless / tests safe).
+func _open_picker(title: String, files: PackedStringArray, on_pick: Callable) -> void:
+	var shell: Variant = _ws.editor_shell if _ws != null else null
+	if shell != null and shell.has_method("open_file_picker"):
+		shell.open_file_picker(title, files, on_pick)
+
+
+# Flat (top-level) basenames under the mounted resource root with the given suffix, for the scoped
+# picker. .adm is not indexed, so we scan the directory directly; the loaders read by basename.
+func _scan_resource_files(suffix: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	var root: Variant = _ws.get_resource_root() if _ws != null and _ws.has_method("get_resource_root") else null
+	if root == null:
+		return out
+	var dir := String(root.get_root_dir())
+	if dir.is_empty():
+		return out
+	var lower := suffix.to_lower()
+	for f in DirAccess.get_files_at(dir):
+		if String(f).to_lower().ends_with(lower):
+			out.push_back(f)
+	out.sort()
+	return out
+
+
+# Best-guess .adm name for the loaded model: its basename + ".adm" (the convention an
+# item .def follows -- graphic "US01" / anim_def "US01"). Blank for an unsaved model.
+func _default_adm_name() -> String:
+	if object_editor == null or object_editor.object_data == null:
+		return ""
+	var name := String(object_editor.object_data.get_object_name()).get_file().get_basename().strip_edges()
+	return "" if name.is_empty() or name == "untitled" else name + ".adm"
+
+
+# Color key for the collision overlay: one swatch + label per distinct collidable
+# type present in the loaded model, matching CollisionHull.color_for_type. Helps the
+# artist read which colored hull is which type when validating.
+func _build_collision_legend(box: VBoxContainer) -> void:
+	if object_editor == null or object_editor.object_data == null:
+		return
+	if not object_editor.object_data.has_method("get_collision_volumes"):
+		return
+	var volumes: Array = object_editor.object_data.get_collision_volumes()
+	if volumes.is_empty():
+		return
+	var seen: Dictionary = {}
+	for v in volumes:
+		seen[int((v as Dictionary).get("type", 0))] = true
+	var types := seen.keys()
+	types.sort()
+	var label := Label.new()
+	label.text = "Collision types"
+	box.add_child(label)
+	for t in types:
+		var row := HBoxContainer.new()
+		box.add_child(row)
+		var swatch := ColorRect.new()
+		swatch.color = CollisionHull.color_for_type(t)
+		swatch.custom_minimum_size = Vector2(16, 16)
+		row.add_child(swatch)
+		var name := CollisionHull.name_for_type(t)
+		var caption := Label.new()
+		caption.text = "Type %d (%s?)" % [t, name] if name != "" else "Type %d" % t
+		row.add_child(caption)
 
 
 func _build_export_mask_controls(box: VBoxContainer) -> void:

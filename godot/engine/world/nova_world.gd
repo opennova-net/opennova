@@ -11,9 +11,14 @@ extends Node3D
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 
 signal world_loaded()
 signal load_failed(reason: String)
+# Host-presentation side effects drained from the mission runtime's EffectLog each tick
+# (kind: "text"/"win"/"subgoal_*"/"show_waypoints"/"set_light"/"dialog"). Consumed by the HUD;
+# "dialog" is also routed straight to mission audio below.
+signal mission_effects(effects: Array)
 
 # A mission (.bms) to boot into. When set, the mission's header selects the
 # terrain + environment (terrain_file/env_file below are ignored) and its placed
@@ -35,6 +40,7 @@ var _terrain_data: NovaTerrainData
 var _resource_root: NovaResourceRoot
 var _loaded: bool = false
 var _loaded_mission: NovaMissionData
+var _runtime  # MissionRuntime: the one mission runtime driver (sim + present pass + index), DIVIDED cadence
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
 var _mission_audio: NovaMissionAudio
@@ -123,6 +129,7 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 
 	_loaded_mission = mission
 	_place_mission_objects(mission)
+	_start_runtime(mission)
 	_start_mission_audio(mission, bms_name)
 	_loaded = true
 	world_loaded.emit()
@@ -164,6 +171,14 @@ func get_loaded_mission() -> NovaMissionData:
 	return _loaded_mission
 
 
+func get_sim() -> NovaSimulation:
+	return _runtime.get_sim() if _runtime != null else null
+
+
+func get_runtime():
+	return _runtime
+
+
 func get_mission_stats() -> Dictionary:
 	return _mission_stats
 
@@ -183,6 +198,9 @@ func unload() -> void:
 		_env.environment_data.clear_mission_overrides()
 	_loaded = false
 	_loaded_mission = null
+	if _runtime != null:
+		_runtime.queue_free()  # frees its off-tree sim too (MissionRuntime._exit_tree)
+	_runtime = null
 	_mission_audio = null
 	_placer = null
 	_mission_stats = {}
@@ -265,20 +283,65 @@ func is_loaded() -> bool:
 	return _loaded
 
 
-## Drive per-frame foliage coverage around the viewer, then the mission audio's
-## voice culling.
+## The host per-frame order, faithful to the original main loop's server-tick-then-client-render:
+## foliage coverage around the viewer, then the mission runtime (MissionRuntime.tick advances the
+## logic at the 62-frame cadence, presents entity state onto the placed nodes, and drains side
+## effects), then the audio render pass. Effects come back through MissionRuntime.effects_drained.
 func tick(camera_pos: Vector3) -> void:
 	if _loaded and _dispatcher != null:
 		_dispatcher.dispatch(camera_pos)
+	if _loaded and _runtime != null:
+		_runtime.tick()
 	if _loaded and _mission_audio != null:
 		_mission_audio.tick(camera_pos)
 
 
+# Fire mission audio for presentation effects. PlayWavList actions surface as "dialog" effects
+# carrying the dialog/wav id in `a`; route them to the mission audio (which resolves the id through
+# the co-named .DBF and plays the LWF set). Other kinds are still emitted via mission_effects for
+# host consumers (HUD, etc.).
+func _route_mission_effects(effects: Array) -> void:
+	if _mission_audio == null:
+		return
+	for e in effects:
+		var eff: Dictionary = e
+		if String(eff.get("kind", "")) == "dialog":
+			_mission_audio.play_dialog(int(eff.get("a", 0)))
+
+
+# Start the shared mission runtime driver: it promotes the mission, builds the present index over the
+# placed MissionObjects, and each tick applies every entity's transform + part animations (PLAYPARTANIM,
+# applied in-engine) + visibility onto its model. The game runs it at the faithful 62-frame cadence and
+# drives it explicitly from tick() (self_tick off); its drained side effects route through
+# _on_runtime_effects. A reload reuses this NovaWorld, so any prior runtime is freed in unload() first.
+func _start_runtime(mission: NovaMissionData) -> void:
+	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
+	_runtime = MissionRuntime.new()
+	_runtime.name = "MissionRuntime"
+	add_child(_runtime)
+	# A mission with no AI still ticks (BMS events / WAC); only a promote failure leaves a null sim.
+	# Hand the loaded terrain to the runtime so promoted AI grounds on it (entities hug the terrain),
+	# and the resource root so soldiers resolve their .adm/.bad root-motion clips.
+	_runtime.setup(mission, container, {
+		"tick_mode": NovaSimulation.TICK_DIVIDED,
+		"terrain": _terrain_data,
+		"resource_root": _resource_root,
+	})
+	if _runtime.get_sim() == null:
+		push_warning("NovaWorld: failed to start mission runtime")
+	_runtime.effects_drained.connect(_on_runtime_effects)
+
+
+# Route the runtime's drained side effects: "dialog" actions to mission audio (resolved through the
+# co-named .DBF + LWF set), everything else out to host consumers (HUD) via mission_effects.
+func _on_runtime_effects(effects: Array) -> void:
+	_route_mission_effects(effects)
+	mission_effects.emit(effects)
+
+
 # Place real ambient sounds at the mission's sound markers: load the co-named .LWF
-# + the global banks (engine slot order), resolve each marker to a sound set by
-# name, and spawn looping 3D voices. Reuses the placer's item database for the
-# item_id -> soundloop lookup. [orig: bank slots @ Game_StartMission 0x525448;
-# dialog bank @ DialogManager_LoadFromFile 0x44e7d4]
+# + gamelocl.LWF, resolve each marker to a sound set by name, and spawn looping 3D
+# voices. Reuses the placer's item database for the item_id -> sound_profile lookup.
 func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 	var item_db = _placer.get_item_db() if _placer != null else null
 	_mission_audio = NovaMissionAudio.new(_resource_root, item_db)

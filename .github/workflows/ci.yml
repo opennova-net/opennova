@@ -4,7 +4,10 @@ on:
   push:
     branches: [master]
   pull_request:
-    branches: [master]
+    # Include unified-edit-history so PRs stacked on the Mission Workspace branch
+    # (e.g. the .lwf sound PR) get CI before that branch lands on master.
+    branches: [master, unified-edit-history]
+  workflow_dispatch:
 
 # On a PR, github.head_ref is the source branch, so a new push cancels the older
 # run (and prevents two runs racing to post the build-links comment). On push to

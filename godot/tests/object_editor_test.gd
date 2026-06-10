@@ -13,6 +13,10 @@ const DVAN_FIXTURE := "res://../fixtures/3dp/dapche2/dapche2.3di"
 const ARMRY_FIXTURE := "res://../fixtures/3dp/armry01/Armry01.3di"
 const ARMRY_TEXTURE_FIXTURE := "res://../fixtures/3dp/armry01/KArm1_O.TGA"
 const US01_PROJECT_FIXTURE := "res://../fixtures/3dp/US01_onimport/US01.3dp"
+# 3di3 fixtures for the placement ground-anchor: House ships a lowercase "ground"
+# userpoint; CharModel (skinned) has none, exercising the part-0 fallback.
+const HOUSE_3DI3_FIXTURE := "res://../fixtures/threedi/3di3/House.3di"
+const CHARMODEL_3DI3_FIXTURE := "res://../fixtures/threedi/3di3/CharModel.3di"
 const FULL_00_ENV := "res://../fixtures/env/full_00.env"
 const OUTPUT_DIR_NAME := "object_editor_export_test"
 const OED_UPDATE_NONE := 0
@@ -53,6 +57,41 @@ func test_object_data_opens_3di_as_ir_document() -> void:
 	assert_gt(int(summary.get("lod_count", 0)), 0, "Opened 3DI should expose LODs.")
 	assert_gt(int(summary.get("material_count", 0)), 0, "Opened 3DI should expose materials.")
 	assert_false(data.get_lod_surfaces(0).is_empty(), "Opened 3DI should expose preview mesh surfaces.")
+
+
+func test_ground_anchor_prefers_named_ground_userpoint() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(HOUSE_3DI3_FIXTURE)), OK,
+		"House.3di fixture should open.")
+	# House.3di ships a lowercase "ground" userpoint. get_ground_anchor must return
+	# exactly that position, proving the case-insensitive name match against "ground".
+	var expected := Vector3.INF
+	for i in range(data.get_user_point_count()):
+		var up := data.get_user_point_info(i)
+		if String(up.get("name", "")).to_lower() == "ground":
+			expected = up.get("position", Vector3.ZERO)
+			break
+	assert_ne(expected, Vector3.INF, "House.3di should contain a 'ground' userpoint.")
+	var anchor: Vector3 = data.get_ground_anchor(0)
+	assert_true(anchor.is_equal_approx(expected),
+		"Ground anchor should equal the 'ground' userpoint position.")
+
+
+func test_ground_anchor_falls_back_to_part0_center() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(CHARMODEL_3DI3_FIXTURE)), OK,
+		"CharModel.3di fixture should open.")
+	# CharModel has no "ground" userpoint, so the anchor falls back to part 0's center.
+	var has_ground := false
+	for i in range(data.get_user_point_count()):
+		if String(data.get_user_point_info(i).get("name", "")).to_lower() == "ground":
+			has_ground = true
+			break
+	assert_false(has_ground, "CharModel.3di is expected to have no 'ground' userpoint.")
+	# The fallback must return a finite point (it may legitimately be near origin); the
+	# exact value is pinned by the C++ unit test against a synthetic bounding center.
+	var anchor: Vector3 = data.get_ground_anchor(0)
+	assert_true(anchor.is_finite(), "Fallback ground anchor should be finite.")
 
 
 func test_object_shader_catalog_exposes_oed_slot_flags() -> void:

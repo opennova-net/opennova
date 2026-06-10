@@ -9,6 +9,7 @@ const TerrainEditorAssetDockScene = preload("res://modtools/terrain/ui/editor_as
 const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
 const EnvironmentInspectorScript = preload("res://modtools/environment/environment_inspector.gd")
 const QuadrantBoardScript = preload("res://modtools/terrain/ui/widgets/quadrant_board.gd")
+const MissionInspectorScript = preload("res://modtools/mission/mission_inspector.gd")
 const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const FIXTURE_CACHE_DIR := "opennova_test"
 
@@ -291,19 +292,31 @@ func test_mission_workspace_exposes_document_actions_and_inspector() -> void:
 
 	var actions_host: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
 	var inspector_host: Control = workstation.get_node("%InspectorHost")
+	var asset_dock: Control = workstation.get_node("%AssetDock")
 	assert_eq(workstation.get_node("%ProjectLabel").text, "Mission", "An unloaded Mission workspace owns the shell title while active.")
-	assert_false(workstation.get_node("%AssetDock").visible, "Terrain properties should hide outside the terrain workspace.")
+	assert_true(asset_dock.visible, "Mission authoring hosts its per-selection editor + Mission form in the shared right dock.")
 	assert_null(workstation.get_node_or_null("%FileMenu"), "Global File menu should be removed.")
 	assert_null(workstation.get_node_or_null("%SaveButton"), "Global Save button should be removed.")
 	assert_null(workstation.get_node_or_null("%ExportButton"), "Global Export button should be removed.")
-	# Authoring (Phase 1) lands Save / Save As alongside Open. The shell builds these
-	# buttons up front (before a mission is loaded); they sit disabled until there is a
-	# loaded / dirtied mission. The inspector replaces the old "Coming soon" stub.
+	# Authoring lands New (create-from-scratch) + Save / Save As alongside Open. The shell builds
+	# these buttons up front (before a mission is loaded); Save / Save As sit disabled until there
+	# is a loaded / dirtied mission. The real MissionInspector replaces the old "Coming soon" stub:
+	# its left pane (mode tabs + lists) mounts in %InspectorHost, while its Selection | Mission
+	# editor reparents into the shared right dock.
 	assert_true(actions_host.visible, "Mission should expose its document actions.")
-	assert_eq(_workspace_action_texts(actions_host), ["Open Mission...", "Save Mission", "Save Mission As..."],
-		"Mission exposes Open + Save + Save As once authoring lands.")
-	assert_true(_has_label_text(inspector_host, "Mission"), "Mission should show its inspector panel.")
+	assert_eq(_workspace_action_texts(actions_host), ["New Mission", "Open Mission...", "Save Mission", "Save Mission As..."],
+		"Mission exposes New + Open + Save + Save As once authoring lands.")
+	# The left pane mounts the real MissionInspector node (its Selection | Mission editor reparents
+	# into the dock). The prior workspace's inspector children are queue_free'd, which is deferred,
+	# so they can still coexist this same frame; find the inspector by script rather than by index.
+	var inspector: Node = null
+	for child in inspector_host.get_children():
+		if child.get_script() == MissionInspectorScript:
+			inspector = child
+			break
+	assert_not_null(inspector, "Mission should mount its real inspector panel in the left pane, not a placeholder.")
 	assert_false(_has_label_text(inspector_host, "Coming soon"), "The coming-soon stub should be gone.")
+	assert_gt(asset_dock.get_child_count(), 0, "Mission authoring mounts its Selection + Mission editor in the right dock.")
 
 
 func test_resource_index_lists_object_resources_without_glb_models() -> void:
@@ -353,6 +366,22 @@ func test_settings_viewport_popup_edits_resource_directory() -> void:
 
 	assert_eq(workstation.get_resource_root_dir(), root, "Settings should apply the resource directory.")
 	assert_eq(workstation.get_resource_index().get_resource_files("terrain").size(), 1, "Flat scans should include top-level terrain files.")
+
+
+# The resource browser renders rows in a Tree (Name / Type / Size / Modified).
+# Collect the visible row items in display order.
+func _browser_rows(list: Tree) -> Array:
+	var rows: Array = []
+	if list == null:
+		return rows
+	var root := list.get_root()
+	if root == null:
+		return rows
+	var child := root.get_first_child()
+	while child != null:
+		rows.append(child)
+		child = child.get_next()
+	return rows
 
 
 func _recent_option_index_for_path(recent: OptionButton, path: String) -> int:
@@ -436,7 +465,7 @@ func test_workspace_open_uses_resource_browser_without_filesystem_escape() -> vo
 	assert_not_null(dialog, "Open should create the in-editor resource browser.")
 	if dialog == null:
 		return
-	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	var list := dialog.find_child("ResourceBrowserList", true, false) as Tree
 	var dir_label := dialog.find_child("ResourceBrowserDirectoryLabel", true, false) as Label
 	var settings_shortcut := dialog.find_child("ResourceBrowserSettingsButton", true, false) as Button
 	assert_true(dialog.visible, "Resource browser should open instead of going straight to native file browsing.")
@@ -444,14 +473,42 @@ func test_workspace_open_uses_resource_browser_without_filesystem_escape() -> vo
 	assert_null(dialog.find_child("ResourceBrowserBrowseFilesButton", true, false), "Resource browser must not expose a native filesystem escape hatch.")
 	assert_not_null(dir_label, "Resource browser should show the active resource directory.")
 	assert_not_null(settings_shortcut, "Resource browser should include a Settings shortcut node.")
-	if list != null:
-		assert_eq(list.item_count, 1, "Terrain browser should list TRN files from the resource directory.")
-		assert_string_contains(list.get_item_text(0), "alpha", "Resource rows should show the matching terrain.")
+	var rows := _browser_rows(list)
+	assert_eq(rows.size(), 1, "Terrain browser should list TRN files from the resource directory.")
+	if rows.size() > 0:
+		assert_string_contains((rows[0] as TreeItem).get_text(0).to_lower(), "alpha", "Resource rows should show the matching terrain.")
 	if dir_label != null:
 		assert_string_contains(dir_label.text, root, "Directory label should show the configured root.")
 	if settings_shortcut != null:
 		assert_false(settings_shortcut.visible, "Settings shortcut should hide when resources are available.")
-	assert_true(dialog.get_ok_button().disabled, "Open should stay disabled until a resource is selected.")
+	assert_false(dialog.get_ok_button().disabled, "Open should be enabled once a row is auto-selected.")
+
+
+func test_resource_browser_open_button_opens_selection() -> void:
+	# Regression: AcceptDialog hides itself BEFORE emitting `confirmed`, so the OK
+	# ("Open") button must still open the auto-selected row. A visibility-gated
+	# guard once swallowed this, leaving only double-click (item_activated) working.
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var editor = autofree(TerrainEditorScript.new())
+	var root := _make_resource_fixture("resource_browser_ok_button")
+	workstation.set_editor(editor)
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK)
+	var workspace = workstation._get_active_workspace()
+	assert_not_null(workspace, "Terrain workspace should be active by default.")
+	if workspace == null:
+		return
+	var picked := {"path": ""}
+	workstation._resource_browser.open(workspace, func(p: String) -> void:
+		picked["path"] = p
+	)
+	var dialog := workstation.find_child("ResourceBrowserDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Browser should open.")
+	if dialog == null:
+		return
+	assert_true(dialog.visible, "Browser should be visible before confirming.")
+	dialog.get_ok_button().pressed.emit()
+	assert_false(picked["path"].is_empty(), "The Open button should open the auto-selected resource.")
+	assert_string_contains(picked["path"].to_lower(), "alpha", "Open should pass the selected resource path.")
 
 
 func test_fonts_workspace_open_uses_resource_browser() -> void:
@@ -471,11 +528,12 @@ func test_fonts_workspace_open_uses_resource_browser() -> void:
 	assert_not_null(dialog, "Font Open should use the shared resource browser.")
 	if dialog == null:
 		return
-	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	var list := dialog.find_child("ResourceBrowserList", true, false) as Tree
 	assert_not_null(list, "Font resource browser should include a list.")
-	if list != null:
-		assert_eq(list.item_count, 1, "Font browser should list FNT files from the resource directory.")
-		assert_string_contains(list.get_item_text(0), "alpha", "Font resource rows should show the matching file.")
+	var rows := _browser_rows(list)
+	assert_eq(rows.size(), 1, "Font browser should list FNT files from the resource directory.")
+	if rows.size() > 0:
+		assert_string_contains((rows[0] as TreeItem).get_text(0).to_lower(), "alpha", "Font resource rows should show the matching file.")
 
 
 func test_strings_workspace_open_uses_resource_browser() -> void:
@@ -495,11 +553,12 @@ func test_strings_workspace_open_uses_resource_browser() -> void:
 	assert_not_null(dialog, "Strings Open should use the shared resource browser.")
 	if dialog == null:
 		return
-	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	var list := dialog.find_child("ResourceBrowserList", true, false) as Tree
 	assert_not_null(list, "Strings resource browser should include a list.")
-	if list != null:
-		assert_eq(list.item_count, 1, "Strings browser should list RTXT BIN files from the resource directory.")
-		assert_string_contains(list.get_item_text(0), "alpha", "Strings resource rows should show the matching file.")
+	var rows := _browser_rows(list)
+	assert_eq(rows.size(), 1, "Strings browser should list RTXT BIN files from the resource directory.")
+	if rows.size() > 0:
+		assert_string_contains((rows[0] as TreeItem).get_text(0).to_lower(), "alpha", "Strings resource rows should show the matching file.")
 
 
 func test_workstation_opens_font_workspace_by_credits_font_name() -> void:
@@ -518,6 +577,32 @@ func test_workstation_opens_font_workspace_by_credits_font_name() -> void:
 		"The Fonts workspace title should show the opened font.")
 
 
+func test_workstation_opens_menu_workspace_by_action_target() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var root := ProjectSettings.globalize_path("res://../fixtures/mnu")
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK,
+		"Menu action integration should use the configured resource root.")
+
+	var err: Error = workstation.open_menu_workspace("sp.mnu", "SINGLE_PLAYER")
+	assert_eq(err, OK,
+		"A cross-menu action should open its declared target menu file.")
+	if err != OK:
+		return
+	await get_tree().process_frame
+
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.MNU,
+		"Opening a cross-menu action should switch to the Menus workspace.")
+	assert_eq(workstation.get_node("%ProjectLabel").text, "jo_sp",
+		"The Menus workspace title should show the opened menu.")
+	var ws = workstation._workspaces.get(EditorWorkstationScript.Workspace.MNU)
+	assert_not_null(ws, "The Menus workspace instance exists.")
+	if ws == null:
+		return
+	assert_eq(ws._document.current_path.get_file(), "jo_sp.mnu", "The action target should resolve to the matching menu resource.")
+	assert_eq(ws._document.resource.get_screen_name(ws._editor.get_selected_id()), "SINGLE_PLAYER",
+		"The target screen is selected in the Menus workspace.")
+
+
 func test_workspace_open_without_resource_dir_shows_empty_browser() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
@@ -534,12 +619,11 @@ func test_workspace_open_without_resource_dir_shows_empty_browser() -> void:
 	assert_not_null(dialog, "Open should still create the resource browser without a root.")
 	if dialog == null:
 		return
-	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	var list := dialog.find_child("ResourceBrowserList", true, false) as Tree
 	var hint := dialog.find_child("ResourceBrowserHint", true, false) as Label
 	var settings_shortcut := dialog.find_child("ResourceBrowserSettingsButton", true, false) as Button
 	assert_null(dialog.find_child("ResourceBrowserBrowseFilesButton", true, false), "Missing resource roots should be fixed through Settings, not arbitrary file browsing.")
-	if list != null:
-		assert_eq(list.item_count, 0, "No resource directory should produce no rows.")
+	assert_eq(_browser_rows(list).size(), 0, "No resource directory should produce no rows.")
 	if hint != null:
 		assert_string_contains(hint.text, "No resource directory selected", "Empty state should name the missing resource directory.")
 	if settings_shortcut != null:
@@ -610,11 +694,12 @@ func test_environment_open_uses_resource_browser() -> void:
 	assert_not_null(dialog, "Environment Open should use the shared resource browser.")
 	if dialog == null:
 		return
-	var list := dialog.find_child("ResourceBrowserList", true, false) as ItemList
+	var list := dialog.find_child("ResourceBrowserList", true, false) as Tree
 	assert_not_null(list, "Environment resource browser should include a list.")
-	if list != null:
-		assert_eq(list.item_count, 1, "Environment browser should list ENV files from the resource directory.")
-		assert_string_contains(list.get_item_text(0), "alpha", "Environment resource rows should show the matching file.")
+	var rows := _browser_rows(list)
+	assert_eq(rows.size(), 1, "Environment browser should list ENV files from the resource directory.")
+	if rows.size() > 0:
+		assert_string_contains((rows[0] as TreeItem).get_text(0).to_lower(), "alpha", "Environment resource rows should show the matching file.")
 
 
 func test_resource_settings_persist_in_editor_state() -> void:
@@ -873,8 +958,9 @@ func test_workstation_mounts_workspace_specific_right_docks() -> void:
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
 
-	assert_false(dock.visible, "Mission should hide the right dock host.")
-	assert_eq(dock.get_child_count(), 0, "Workspaces without a right dock should leave the shared host empty.")
+	assert_true(dock.visible, "Mission authoring shows the shared right dock for its per-selection editor + Mission form.")
+	assert_gt(dock.get_child_count(), 0, "Mission should mount its inspector detail content in the shared right dock.")
+	assert_null(_find_node_by_name(dock, "TerrainAssetDock"), "Switching from Object to Mission should clear the prior dock content.")
 
 
 func test_workspace_switching_mounts_terrain_and_mission_viewports() -> void:

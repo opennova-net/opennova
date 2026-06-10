@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -1050,6 +1051,9 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_light_field", "index", "key", "value"), &NovaObjectData::set_light_field);
 	ClassDB::bind_method(D_METHOD("get_user_point_count"), &NovaObjectData::get_user_point_count);
 	ClassDB::bind_method(D_METHOD("get_user_point_info", "index"), &NovaObjectData::get_user_point_info);
+	ClassDB::bind_method(D_METHOD("get_ground_anchor", "lod_index"), &NovaObjectData::get_ground_anchor, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("has_collision"), &NovaObjectData::has_collision);
+	ClassDB::bind_method(D_METHOD("get_collision_volumes"), &NovaObjectData::get_collision_volumes);
 	ClassDB::bind_method(D_METHOD("get_part_anim_count", "lod_index"), &NovaObjectData::get_part_anim_count);
 	ClassDB::bind_method(D_METHOD("get_part_animations", "lod_index"), &NovaObjectData::get_part_animations);
 	ClassDB::bind_method(D_METHOD("get_part_anim_editor_entries", "lod_index"), &NovaObjectData::get_part_anim_editor_entries);
@@ -1065,7 +1069,8 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_part_anim_field", "lod_index", "anim_index", "key", "value"), &NovaObjectData::set_part_anim_field);
 	ClassDB::bind_method(D_METHOD("set_part_anim_track_field", "lod_index", "anim_index", "track", "key", "value"), &NovaObjectData::set_part_anim_track_field);
 	ClassDB::bind_method(D_METHOD("get_render_lod_info", "lod_index"), &NovaObjectData::get_render_lod_info);
-	ClassDB::bind_method(D_METHOD("build_lod_submeshes", "lod_index"), &NovaObjectData::build_lod_submeshes);
+	ClassDB::bind_method(D_METHOD("build_lod_submeshes", "lod_index", "skeletal", "bone_count"), &NovaObjectData::build_lod_submeshes, DEFVAL(false), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("is_skinned", "lod_index"), &NovaObjectData::is_skinned);
 	ClassDB::bind_method(D_METHOD("eval_material_runtime", "index", "time_ms", "ctrl_values"), &NovaObjectData::eval_material_runtime);
 	ClassDB::bind_method(D_METHOD("compute_anim_frame", "index", "time_ms", "ctrl_values"), &NovaObjectData::compute_anim_frame);
 	ClassDB::bind_method(D_METHOD("evaluate_panm", "lod_index", "time_ms", "ctrl_values"), &NovaObjectData::evaluate_panm);
@@ -2199,11 +2204,92 @@ Dictionary NovaObjectData::get_user_point_info(int p_index) const {
 	return info;
 }
 
+Vector3 NovaObjectData::get_ground_anchor(int p_lod_index) const {
+	// The model-space point that should sit at a placed object's stored position:
+	// the "ground" userpoint if present, else part 0's bounding center (see
+	// threedi_ir_ground_anchor). The helper returns IR axis order; godot_vec3
+	// applies the single negate-x that maps it into render/model space, exactly as
+	// get_user_point_info / build_lod_submeshes do for userpoints and part origins.
+	if (!has_ir) {
+		return Vector3();
+	}
+	float anchor[3];
+	if (!threedi_ir_ground_anchor(&ir, p_lod_index, anchor)) {
+		return Vector3();
+	}
+	return godot_vec3(anchor);
+}
+
 int NovaObjectData::get_part_anim_count(int p_lod_index) const {
 	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
 		return 0;
 	}
 	return static_cast<int>(ir.lods[p_lod_index].part_animation_count);
+}
+
+bool NovaObjectData::has_collision() const {
+	return has_ir && ir.collision != nullptr && ir.collision->volume_count > 0;
+}
+
+Array NovaObjectData::get_collision_volumes() const {
+	// Expose the parsed collision bounding volumes (the engine's CB/CC collidable
+	// primitives) in Godot model-local space. Each volume carries its AABB plus the
+	// bounding planes that carve the convex region; callers build ConvexPolygonShape3D
+	// hulls from them (editor picking now, runtime collision later).
+	//
+	// Coordinate frame: unlike render geometry (RDTA, which the importer stores already
+	// converted to engine space, so the Godot boundary only needs godot_position's
+	// negate-x), collision geometry (CVRT) is stored in *workspace* space with no
+	// conversion -- confirmed in the OED exporter and validated here against the visual
+	// mesh AABB. RDTA reaches engine space via (-y, z, x); composing that with
+	// godot_position's negate-x gives the net workspace->Godot map (x, y, z) -> (y, z, x),
+	// a pure cyclic axis rotation. Applying it makes a hull placed at the same transform
+	// as the visual model coincide with it (empirically the best of the candidates: see
+	// the Object Editor "Collision" overlay).
+	Array out;
+	if (!has_ir || ir.collision == nullptr) {
+		return out;
+	}
+	const ThreediIRCollision *col = ir.collision;
+	for (size_t i = 0; i < col->volume_count; ++i) {
+		const ThreediIRCollisionVolume &v = col->volumes[i];
+		// (x, y, z) -> (y, z, x); the cyclic rotation has no sign flips, so min stays min.
+		const Vector3 gmin(v.min[1], v.min[2], v.min[0]);
+		const Vector3 gmax(v.max[1], v.max[2], v.max[0]);
+		Array planes;
+		// plane_start / plane_count come straight from the on-disk model with no clamp
+		// (threedi_ir_from_3di3), so a malformed file can make plane_count huge or plane_start out of
+		// range. Planes are contiguous, so clamp the window to [0, col->plane_count) and iterate that
+		// instead of spinning over billions of out-of-range indices; the arithmetic is 64-bit so
+		// plane_start + plane_count cannot signed-overflow.
+		const int64_t start = v.plane_start;
+		const int64_t plane_total = static_cast<int64_t>(col->plane_count);
+		const int64_t begin = start > 0 ? start : 0;
+		int64_t end = start + static_cast<int64_t>(v.plane_count);
+		if (end > plane_total) {
+			end = plane_total;
+		}
+		for (int64_t idx = begin; idx < end; ++idx) {
+			const ThreediIRCollisionPlane &pl = col->planes[static_cast<size_t>(idx)];
+			// The map is orthonormal, so the normal rotates the same way and the plane's
+			// perpendicular offset is preserved in magnitude. The stored convention is
+			// `normal.dot(p) + distance == 0` (offset is the *negated* signed distance,
+			// verified against the volume AABBs), whereas Godot's Plane(normal, d) means
+			// `normal.dot(p) == d`; hence the negation.
+			const Vector3 n(pl.normal[1], pl.normal[2], pl.normal[0]);
+			planes.push_back(Plane(n, -pl.distance));
+		}
+		Dictionary d;
+		d["type"] = v.type;
+		d["flags"] = v.flags;
+		d["min"] = gmin;
+		d["max"] = gmax;
+		d["planes"] = planes;
+		d["part_index"] = v.part_index;
+		d["object_index"] = v.object_index;
+		out.push_back(d);
+	}
+	return out;
 }
 
 Array NovaObjectData::get_part_anim_editor_entries(int p_lod_index) const {
@@ -2659,6 +2745,25 @@ Dictionary NovaObjectData::get_render_lod_info(int p_lod_index) const {
 	return info;
 }
 
+bool NovaObjectData::is_skinned(int p_lod_index) const {
+	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+		return false;
+	}
+	if (ir.mesh_type == THREEDI_IR_MESH_SKINNED) {
+		return true;
+	}
+	const ThreediIRLod &lod = ir.lods[p_lod_index];
+	if (lod.primitives == nullptr) {
+		return false;
+	}
+	for (size_t i = 0; i < lod.primitive_count; ++i) {
+		if (lod.primitives[i].bone_table_length > 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
 Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 	Array result;
 	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
@@ -2690,6 +2795,14 @@ Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 		PackedVector2Array uvs2;
 		PackedFloat32Array tangents;
 		PackedInt32Array indices;
+		// Per-vertex skinning, emitted only for skinned primitives. ARRAY_BONES carries 4
+		// *skeleton* bone indices (the per-vertex bone_indices are local indices into this
+		// primitive's bone_table, which maps local -> skeleton; we remap here so the host
+		// can bind one whole-skeleton Skin). ARRAY_WEIGHTS carries the 4 matching weights.
+		// [orig: the runtime skins via the .bad skeleton; bone_table is the per-strip remap.]
+		const bool skinned = prim.bone_table_length > 0;
+		PackedInt32Array bones;
+		PackedFloat32Array weights;
 		auto get_vertex = [&](uint16_t local_index) -> const ThreediIRVertex * {
 			const uint32_t src_index = prim.vertex_offset + static_cast<uint32_t>(local_index);
 			if (src_index >= lod.vertex_count) {
@@ -2711,6 +2824,29 @@ Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 				tangents.push_back(tangent.y);
 				tangents.push_back(tangent.z);
 				tangents.push_back(w);
+			}
+			if (skinned) {
+				for (int k = 0; k < 4; ++k) {
+					const int local = static_cast<int>(v.bone_indices[k]);
+					const int bone = (local >= 0 && local < prim.bone_table_length)
+							? static_cast<int>(prim.bone_table[local])
+							: 0;
+					bones.push_back(bone);
+				}
+				float w0 = v.bone_weights[0];
+				float w1 = v.bone_weights[1];
+				float w2 = v.bone_weights[2];
+				float w3 = v.bone_weights[3];
+				float sum = w0 + w1 + w2 + w3;
+				if (sum <= 1e-6f) {  // degenerate: pin fully to the first influence
+					w0 = 1.0f;
+					w1 = w2 = w3 = 0.0f;
+					sum = 1.0f;
+				}
+				weights.push_back(w0 / sum);
+				weights.push_back(w1 / sum);
+				weights.push_back(w2 / sum);
+				weights.push_back(w3 / sum);
 			}
 			indices.push_back(vertices.size() - 1);
 		};
@@ -2747,13 +2883,18 @@ Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 		if (!tangents.is_empty() && tangents.size() == vertices.size() * 4) {
 			surface["tangents"] = tangents;
 		}
+		if (skinned && bones.size() == vertices.size() * 4 && weights.size() == vertices.size() * 4) {
+			surface["bones"] = bones;
+			surface["weights"] = weights;
+			surface["is_skinned"] = true;
+		}
 		surface["indices"] = indices;
 		result.push_back(surface);
 	}
 	return result;
 }
 
-Array NovaObjectData::build_lod_submeshes(int p_lod_index) const {
+Array NovaObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bone_count) const {
 	Array result;
 	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
 		return result;
@@ -2779,6 +2920,36 @@ Array NovaObjectData::build_lod_submeshes(int p_lod_index) const {
 		const PackedFloat32Array tangents = surface.get("tangents", PackedFloat32Array());
 		if (!tangents.is_empty() && tangents.size() == vertices.size() * 4) {
 			arrays[Mesh::ARRAY_TANGENT] = tangents;
+		}
+		// Skinning arrays (4 bones + 4 weights per vertex). ArrayMesh requires both present
+		// together; only attach when both are valid for this surface's vertex count.
+		PackedInt32Array bones = surface.get("bones", PackedInt32Array());
+		PackedFloat32Array weights = surface.get("weights", PackedFloat32Array());
+		bool surface_skinned = bones.size() == vertices.size() * 4 && weights.size() == vertices.size() * 4;
+		// Rigid "fake skinning": when a skeleton will be applied (p_skeletal) but this surface
+		// has no per-vertex skin, fully weight every vertex (1.0) to a single bone = the part's
+		// subobject index. The .bad skeleton is authored so subobject i <-> bone i, so the rigid
+		// part follows that bone. [orig: rigid weapon parts ride a bone via fake skinning.]
+		if (!surface_skinned && p_skeletal) {
+			const int bone = p_bone_count > 0 ? CLAMP(part_index, 0, p_bone_count - 1) : MAX(part_index, 0);
+			const int vcount = static_cast<int>(vertices.size());
+			bones.resize(vcount * 4);
+			weights.resize(vcount * 4);
+			for (int v = 0; v < vcount; ++v) {
+				bones.set(v * 4 + 0, bone);
+				bones.set(v * 4 + 1, 0);
+				bones.set(v * 4 + 2, 0);
+				bones.set(v * 4 + 3, 0);
+				weights.set(v * 4 + 0, 1.0f);
+				weights.set(v * 4 + 1, 0.0f);
+				weights.set(v * 4 + 2, 0.0f);
+				weights.set(v * 4 + 3, 0.0f);
+			}
+			surface_skinned = true;
+		}
+		if (surface_skinned) {
+			arrays[Mesh::ARRAY_BONES] = bones;
+			arrays[Mesh::ARRAY_WEIGHTS] = weights;
 		}
 		arrays[Mesh::ARRAY_INDEX] = surface.get("indices", PackedInt32Array());
 
@@ -2806,6 +2977,7 @@ Array NovaObjectData::build_lod_submeshes(int p_lod_index) const {
 		entry["abs"] = abs;
 		entry["parent_index"] = parent_index;
 		entry["primitive_index"] = surface.get("primitive_index", i);
+		entry["is_skinned"] = surface_skinned;
 		result.push_back(entry);
 	}
 	return result;

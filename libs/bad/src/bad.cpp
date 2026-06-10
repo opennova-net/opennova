@@ -53,35 +53,18 @@ typedef struct {
 // API
 // --------------------------------------------------------------------------
 
-int bad_parse(const char *path, BadFile *out) {
-    FILE *f;
-    long file_len;
-    uint8_t *data = NULL;
-    size_t data_size;
+// Parse a BAD file already resident in memory. Does NOT take ownership of `data`
+// (the caller frees it) -- this is the entry the VFS path uses, since assets live
+// in PFF archives, not on disk.
+int bad_parse_buffer(const uint8_t *data, size_t data_size, BadFile *out) {
     uint32_t bone_stride, rot_stride, trans_stride;
     uint32_t event_stride;
     uint32_t i;
 
-    if (!path || !out) return -1;
+    if (!data || !out) return -1;
     memset(out, 0, sizeof(BadFile));
 
-    f = fopen(path, "rb");
-    if (!f) return -1;
-
-    fseek(f, 0, SEEK_END);
-    file_len = ftell(f);
-    if (file_len < 0) { fclose(f); return -1; }
-    fseek(f, 0, SEEK_SET);
-
-    data_size = (size_t)file_len;
-    if (data_size < 0x50) { fclose(f); return -1; }
-
-    data = (uint8_t *)malloc(data_size);
-    if (!data) { fclose(f); return -1; }
-    if (fread(data, 1, data_size, f) != data_size) {
-        free(data); fclose(f); return -1;
-    }
-    fclose(f);
+    if (data_size < 0x50) return -1;
 
     // Parse header
     out->version     = read_u32(data, 0x00);
@@ -104,17 +87,17 @@ int bad_parse(const char *path, BadFile *out) {
 
         // Bounds check channel and bone tables
         if (!in_range(channels_offset, (size_t)out->bone_count * CHANNEL_DISK_SIZE, data_size)) {
-            free(data); return -1;
+            return -1;
         }
         if (!in_range(bones_offset, (size_t)out->bone_count * bone_stride, data_size)) {
-            free(data); return -1;
+            return -1;
         }
 
         // ----- Channels -----
         out->num_channels = out->bone_count;
         if (out->num_channels > 0) {
             out->channels = (BadChannel *)calloc(out->num_channels, sizeof(BadChannel));
-            if (!out->channels) { free(data); bad_free(out); return -1; }
+            if (!out->channels) { bad_free(out); return -1; }
 
             for (i = 0; i < out->bone_count; ++i) {
                 size_t off = channels_offset + (size_t)i * CHANNEL_DISK_SIZE;
@@ -134,11 +117,11 @@ int bad_parse(const char *path, BadFile *out) {
                 {
                     size_t fl_size = (size_t)num_frames * sizeof(uint16_t);
                     if (!in_range(frame_len_off, fl_size, data_size)) {
-                        free(data); bad_free(out); return -1;
+                        bad_free(out); return -1;
                     }
                     out->channels[i].frame_lengths = (uint16_t *)malloc(fl_size);
                     if (!out->channels[i].frame_lengths) {
-                        free(data); bad_free(out); return -1;
+                        bad_free(out); return -1;
                     }
                     {
                         uint32_t j;
@@ -153,12 +136,12 @@ int bad_parse(const char *path, BadFile *out) {
                 {
                     size_t rot_size = (size_t)num_frames * rot_stride;
                     if (!in_range(rotation_off, rot_size, data_size)) {
-                        free(data); bad_free(out); return -1;
+                        bad_free(out); return -1;
                     }
                     out->channels[i].rotations = (BadQuaternion *)malloc(
                         (size_t)num_frames * sizeof(BadQuaternion));
                     if (!out->channels[i].rotations) {
-                        free(data); bad_free(out); return -1;
+                        bad_free(out); return -1;
                     }
                     {
                         uint32_t j;
@@ -178,7 +161,7 @@ int bad_parse(const char *path, BadFile *out) {
         out->num_bones = out->bone_count;
         if (out->num_bones > 0) {
             out->bones = (BadBone *)calloc(out->num_bones, sizeof(BadBone));
-            if (!out->bones) { free(data); bad_free(out); return -1; }
+            if (!out->bones) { bad_free(out); return -1; }
 
             for (i = 0; i < out->bone_count; ++i) {
                 size_t off = bones_offset + (size_t)i * bone_stride;
@@ -231,11 +214,11 @@ int bad_parse(const char *path, BadFile *out) {
             if (event_count > 0) {
                 if (!in_range(event_table_offset,
                               (size_t)event_count * event_stride, data_size)) {
-                    free(data); bad_free(out); return -1;
+                    bad_free(out); return -1;
                 }
                 out->events = (BadEvent *)malloc(
                     (size_t)event_count * sizeof(BadEvent));
-                if (!out->events) { free(data); bad_free(out); return -1; }
+                if (!out->events) { bad_free(out); return -1; }
 
                 for (i = 0; i < event_count; ++i) {
                     size_t off = event_table_offset + (size_t)i * event_stride;
@@ -257,11 +240,11 @@ int bad_parse(const char *path, BadFile *out) {
             size_t expected = sample_count * trans_stride;
 
             if (!in_range(trans_off, expected, data_size)) {
-                free(data); bad_free(out); return -1;
+                bad_free(out); return -1;
             }
             out->num_translations = sample_count;
             out->translations = (float (*)[3])malloc(sample_count * 3 * sizeof(float));
-            if (!out->translations) { free(data); bad_free(out); return -1; }
+            if (!out->translations) { bad_free(out); return -1; }
 
             {
                 size_t idx;
@@ -275,8 +258,37 @@ int bad_parse(const char *path, BadFile *out) {
         }
     }
 
-    free(data);
     return 0;
+}
+
+int bad_parse(const char *path, BadFile *out) {
+    FILE *f;
+    long file_len;
+    uint8_t *data;
+    size_t data_size;
+    int rc;
+
+    if (!path || !out) return -1;
+
+    f = fopen(path, "rb");
+    if (!f) return -1;
+
+    fseek(f, 0, SEEK_END);
+    file_len = ftell(f);
+    if (file_len < 0) { fclose(f); return -1; }
+    fseek(f, 0, SEEK_SET);
+    data_size = (size_t)file_len;
+
+    data = (uint8_t *)malloc(data_size ? data_size : 1);
+    if (!data) { fclose(f); return -1; }
+    if (data_size && fread(data, 1, data_size, f) != data_size) {
+        free(data); fclose(f); return -1;
+    }
+    fclose(f);
+
+    rc = bad_parse_buffer(data, data_size, out);
+    free(data);
+    return rc;
 }
 
 void bad_free(BadFile *bf) {

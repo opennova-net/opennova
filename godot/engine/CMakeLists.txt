@@ -12,6 +12,9 @@ add_subdirectory(../../libs/trn opennova_trn)
 add_subdirectory(../../libs/cpt opennova_cpt)
 add_subdirectory(../../libs/env opennova_env)
 add_subdirectory(../../libs/threedi opennova_threedi)
+add_subdirectory(../../libs/bad opennova_bad)
+add_subdirectory(../../libs/adm opennova_adm)
+add_subdirectory(../../libs/anim opennova_anim)
 add_subdirectory(../../libs/pff opennova_pff)
 add_subdirectory(../../libs/gameprofile opennova_gameprofile)
 add_subdirectory(../../libs/scr opennova_scr)
@@ -32,10 +35,12 @@ add_subdirectory(../../libs/mnu opennova_mnu)
 add_subdirectory(../../libs/mns opennova_mns)
 add_subdirectory(../../libs/def opennova_def)
 add_subdirectory(../../libs/world opennova_world)
+add_subdirectory(../../libs/wac opennova_wac)
 add_subdirectory(../../libs/mission opennova_mission)
 add_subdirectory(../../libs/lwf opennova_lwf)
 add_subdirectory(../../libs/dbf opennova_dbf)
 add_subdirectory(../../libs/audio opennova_audio)
+add_subdirectory(../../libs/oned_edit opennova_oned_edit)
 
 set(TARGET_NAME "opennova")
 
@@ -64,7 +69,10 @@ add_library(${TARGET_NAME} SHARED
     object/nova_object_data.cpp
     object/nova_object_shader_cache.cpp
     object/nova_item_database.cpp
+    object/nova_skeletal_anim.cpp
     mission/nova_mission_data.cpp
+    simulation/infantry_root_motion.cpp
+    simulation/nova_simulation.cpp
     lwf/nova_lwf_data.cpp
     lwf/nova_wav_loader.cpp
     audio/nova_sound_selector.cpp
@@ -131,6 +139,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_cbin
     opennova_env
     opennova_threedi
+    opennova_bad
+    opennova_adm
+    opennova_anim
     opennova_pff
     opennova_gameprofile
     opennova_rtxt
@@ -142,15 +153,19 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_vfs
     opennova_resource_index
     opennova_sbf
+    opennova_scr
     opennova_mus
     opennova_mnu_xml
     opennova_mnu
     opennova_mns
     opennova_def
+    opennova_world
+    opennova_wac
     opennova_mission
     opennova_lwf
     opennova_dbf
     opennova_audio
+    opennova_oned_edit
 )
 
 # The bake worker thread in nova_terrain_build_job.cpp installs
