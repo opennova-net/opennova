@@ -13,6 +13,7 @@ extends EditorWorkspace
 const TerrainViewportScript = preload("res://modtools/terrain/terrain_viewport.gd")
 const MissionControllerScript = preload("res://modtools/mission/mission_controller.gd")
 const MissionInspectorScript = preload("res://modtools/mission/mission_inspector.gd")
+const MissionPlayControllerScript = preload("res://modtools/mission/mission_play_controller.gd")
 
 var terrain_editor: Node
 var _controller  # MissionController
@@ -23,6 +24,13 @@ var _mount: ViewportMount
 # the inspector is built (or push it into an already-built inspector on a re-sync / teardown).
 var _inspector  # MissionInspector (preloaded, no class_name)
 var _detail_host: Control
+# --- Play-in-editor -------------------------------------------------------
+# A second viewport mount holding the play controller (the real game world in a
+# SubViewport). Play swaps it in for the edit viewport; Stop swaps back. The
+# edit world (terrain root, selection, undo) survives unmounted, untouched.
+var _play_mount: ViewportMount
+# The shell's viewport host, cached at mount so Play/Stop can swap mounts.
+var _viewport_host: Control
 
 
 func _init(value: Node = null) -> void:
@@ -40,6 +48,20 @@ func _ensure_mount() -> ViewportMount:
 	if _mount == null:
 		_mount = ViewportMount.new(&"MissionViewport", func() -> Control: return TerrainViewportScript.new())
 	return _mount
+
+
+func _ensure_play_mount() -> ViewportMount:
+	if _play_mount == null:
+		_play_mount = ViewportMount.new(&"MissionPlayViewport", func() -> Control:
+			var play := MissionPlayControllerScript.new()
+			play.stop_requested.connect(stop_play_mission)
+			play.status_reported.connect(_on_controller_status)
+			return play)
+	return _play_mount
+
+
+func _play_node():
+	return _play_mount.get_viewport_node() if _play_mount != null else null
 
 
 func set_terrain_editor(value: Node) -> void:
@@ -108,6 +130,8 @@ func activate() -> void:
 
 
 func deactivate() -> void:
+	if is_playing_mission():
+		stop_play_mission()
 	if _controller != null:
 		# End any half-finished drag and drop the placement tool before leaving, so a
 		# stray click after the user returns cannot resume either gesture.
@@ -122,6 +146,11 @@ func deactivate() -> void:
 func mount_viewport(host: Control) -> void:
 	if host == null or terrain_editor == null:
 		return
+	_viewport_host = host
+	# A workspace re-mount while playing (shell relayout) keeps the play view up.
+	if is_playing_mission():
+		_ensure_play_mount().mount(host)
+		return
 	var viewport := _ensure_mount().mount(host)
 	if viewport != null:
 		viewport.set_terrain_editor(terrain_editor)
@@ -132,6 +161,10 @@ func mount_viewport(host: Control) -> void:
 
 
 func unmount_viewport(_host: Control) -> void:
+	if is_playing_mission():
+		stop_play_mission()
+	if _play_mount != null:
+		_play_mount.unmount()
 	_detach_input_target()
 	if terrain_editor != null:
 		terrain_editor.set_viewport_active(false, false)
@@ -140,6 +173,11 @@ func unmount_viewport(_host: Control) -> void:
 
 
 func release_viewport() -> void:
+	if is_playing_mission():
+		stop_play_mission()
+	if _play_mount != null:
+		_play_mount.release()
+	_viewport_host = null
 	_detach_input_target()
 	if terrain_editor != null:
 		terrain_editor.set_viewport_active(false, false)
@@ -159,9 +197,75 @@ func _detach_input_target() -> void:
 
 
 func get_viewport_camera() -> Camera3D:
+	if is_playing_mission():
+		return _play_node().get_play_camera()
 	if terrain_editor != null and terrain_editor.has_method("get_editor_camera"):
 		return terrain_editor.get_editor_camera()
 	return null
+
+
+# --- Play-in-editor (PIE M4) ----------------------------------------------
+# Play boots the REAL game loop (nova_world.tscn + MissionRuntime at the game
+# cadence) over the OPEN in-memory mission in a play viewport that replaces the
+# edit viewport; the edit world survives unmounted. Structural input safety:
+# while playing, the edit input router is out of the tree.
+
+func is_playing_mission() -> bool:
+	var play = _play_node()
+	return play != null and play.is_playing()
+
+
+func can_play_mission() -> bool:
+	return _controller != null and _controller.is_loaded() and _viewport_host != null 		and editor_shell != null and editor_shell.has_method("get_resource_root")
+
+
+func play_mission() -> Error:
+	if is_playing_mission():
+		return ERR_BUSY
+	if not can_play_mission():
+		_on_controller_status("Open a mission (with the editor docked) before playing.", true)
+		return ERR_UNAVAILABLE
+	var root: NovaResourceRoot = editor_shell.get_resource_root()
+	if root == null:
+		_on_controller_status("No resource directory mounted to play from.", true)
+		return ERR_UNCONFIGURED
+	# End the in-place sim + any half-finished gesture, then swap viewports.
+	_controller.sim_stop()
+	_controller.cancel_drag()
+	_controller.disarm_placement()
+	_detach_input_target()
+	if terrain_editor != null:
+		terrain_editor.set_viewport_active(false, false)
+	if _mount != null:
+		_mount.unmount()
+	var play = _ensure_play_mount().mount(_viewport_host)
+	var bms_name: String = _controller.get_current_path().get_file()
+	if bms_name.is_empty():
+		bms_name = "untitled.bms"
+	var err: Error = play.start(_controller.get_mission(), bms_name, root)
+	if err != OK:
+		# Failed boot: swap straight back so the editor never strands viewport-less.
+		stop_play_mission()
+		return err
+	_sync_shell_title()
+	return OK
+
+
+func stop_play_mission() -> void:
+	var play = _play_node()
+	if play != null:
+		play.stop()
+	if _play_mount != null:
+		_play_mount.unmount()
+	# Remount the edit viewport exactly as mount_viewport does for a fresh switch.
+	if _viewport_host != null and terrain_editor != null:
+		var viewport := _ensure_mount().mount(_viewport_host)
+		if viewport != null:
+			viewport.set_terrain_editor(terrain_editor)
+			viewport.set_edit_input_enabled(false)
+			viewport.set_input_target(_controller)
+		terrain_editor.set_viewport_active(true, false)
+	_sync_shell_title()
 
 
 # --- New (create a mission from scratch) --------------------------------------
@@ -336,6 +440,9 @@ func build_inspector(host: Control) -> void:
 	# at 592), so it is already cached: the fresh inspector builds its editor + Mission form straight
 	# into the dock with no reparent.
 	_inspector.setup(_controller, _detail_host)
+	if _inspector.has_method("set_play_hooks"):
+		_inspector.set_play_hooks(Callable(self, "play_mission"), Callable(self, "is_playing_mission"),
+			Callable(self, "stop_play_mission"))
 
 
 # --- Asset dock (the right pane) ----------------------------------------------

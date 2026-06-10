@@ -134,6 +134,12 @@ var _mode_syncing: bool = false
 # Live-simulation transport (Play the mission): drives the controller's sim over the placed nodes.
 var _sim_bar: HBoxContainer
 var _sim_play_btn: Button
+# Play-in-editor hooks, injected by the workspace (the swap is a viewport concern
+# the inspector cannot own): play() -> Error, is_playing() -> bool, stop() -> void.
+var _play_mission_cb := Callable()
+var _is_playing_cb := Callable()
+var _stop_play_cb := Callable()
+var _play_mission_btn: Button
 var _sim_pause_btn: Button
 var _sim_step_btn: Button
 var _sim_stop_btn: Button
@@ -1282,6 +1288,35 @@ func _build_sim_bar() -> void:
 	_sim_stop_btn.pressed.connect(func() -> void:
 		if _controller != null: _controller.sim_stop())
 
+	_sim_bar.add_child(VSeparator.new())
+
+	# Play-in-editor: boots the REAL game loop over the open mission in a play
+	# viewport (the in-place Simulate above stays for quick in-context checks).
+	_play_mission_btn = Button.new()
+	_play_mission_btn.text = "Play Mission"
+	_play_mission_btn.tooltip_text = "Run the open mission with the real game loop in the viewport. Esc stops."
+	_prepare_sim_button(_play_mission_btn)
+	_sim_bar.add_child(_play_mission_btn)
+	_play_mission_btn.pressed.connect(_on_play_mission_pressed)
+
+
+# The workspace injects these after building the inspector; without them (tests,
+# headless) the Play Mission button simply hides.
+func set_play_hooks(play: Callable, is_playing: Callable, stop: Callable) -> void:
+	_play_mission_cb = play
+	_is_playing_cb = is_playing
+	_stop_play_cb = stop
+	_refresh_sim_bar()
+
+
+func _on_play_mission_pressed() -> void:
+	if _is_playing_cb.is_valid() and bool(_is_playing_cb.call()):
+		if _stop_play_cb.is_valid():
+			_stop_play_cb.call()
+	elif _play_mission_cb.is_valid():
+		_play_mission_cb.call()
+	_refresh_sim_bar()
+
 
 func _prepare_sim_button(button: Button) -> void:
 	button.custom_minimum_size = Vector2(0, 30)
@@ -1302,6 +1337,11 @@ func _refresh_sim_bar() -> void:
 	_sim_pause_btn.disabled = not playing
 	_sim_step_btn.disabled = not can or playing
 	_sim_stop_btn.disabled = not simming
+	if _play_mission_btn != null:
+		var pie_playing := _is_playing_cb.is_valid() and bool(_is_playing_cb.call())
+		_play_mission_btn.visible = _play_mission_cb.is_valid()
+		_play_mission_btn.text = "Stop Playing" if pie_playing else "Play Mission"
+		_play_mission_btn.disabled = not pie_playing and not can
 
 
 func _on_mode_tab_changed(tab: int) -> void:
