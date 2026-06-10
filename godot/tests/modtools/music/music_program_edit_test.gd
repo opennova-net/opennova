@@ -479,9 +479,9 @@ func test_e2e_block_defaults_compile():
 	var sec := _doc_section(doc, "Win000")
 	var sidx := int(sec.get("index", -1))
 	var before := (sec.get("statements", []) as Array).size()
-	assert_true(doc.insert_statement(sidx, forms.block_default_lines("if")),
+	assert_true(doc.insert_statement(sidx, forms.default_lines("if")),
 		"the default if block passes the compile gate")
-	assert_true(doc.insert_statement(sidx, forms.block_default_lines("switch")),
+	assert_true(doc.insert_statement(sidx, forms.default_lines("switch")),
 		"the default dispatch passes the compile gate")
 	var after := _doc_section(doc, "Win000")
 	var kinds := []

@@ -687,8 +687,6 @@ func _add_kind_at(id: int, before_ordinal: int) -> void:
 	else:
 		_forms.configure(_section_names, _var_list, _mus, _bank_names)
 		lines = _forms.default_lines(kind)
-		if lines.is_empty():
-			lines = _forms.block_default_lines(kind)
 	if lines.is_empty():
 		author_failed.emit("Fill in the fields first")
 		return
