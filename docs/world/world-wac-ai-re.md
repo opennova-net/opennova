@@ -3,8 +3,9 @@
 Binary: `Jointops.exe` (retail JO:CA, Steam), IDB `Jointops.exe.kong.i64`, imagebase 0x400000.
 Sessions: 2026-06-07 (WAC ISA + AI P1/P2, prior), 2026-06-08 (foundation), **2026-06-10 (entity-motor architecture grill — this record)**.
 Scope: `libs/world` (entity registry, var store, AI), `libs/wac` (VM), the mission-runtime bridge, and the
-locomotion/motor layer. Companion docs: `docs/mission/bms-event-runtime-re.md` (B2 slice, pending),
-ADR 0003 → renumbered 0007 (skeletal), `docs/CONTEXT.md` (main loop).
+locomotion/motor layer. Companion docs: `docs/mission/bms-event-runtime-re.md`,
+[ADR 0007](../adr/0007-skeletal-runtime-and-entity-visual.md) (skeletal),
+[`docs/runtime-architecture.md`](../runtime-architecture.md) (main loop).
 
 ## 1. The entity-motor architecture (discovered 2026-06-10)
 
