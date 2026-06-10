@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <iomanip>
@@ -77,9 +78,10 @@ std::string format_tod_time(int time) {
 }
 
 void assign_tod_color(Keyframe &keyframe, const std::string &key, const std::string &value, bool &skyfog_set) {
-	// sub_53E3F0 writes RGB values into the currently active TOD keyframe.
-	// fog_rgb also mirrors into skyfog_rgb until an explicit skyfog_rgb appears
-	// (engine_spec_env.md §8.1, sub_53E3F0@0x53e805).
+	// [orig: TimeOfDay_ParseProperty @ 0x57c590] writes RGB values into the
+	// currently active TOD keyframe. fog_rgb also mirrors into skyfog_rgb while
+	// skyfog still holds its 0xC0C0FF sentinel (@ 0x57c9b8); we model that with
+	// a per-keyframe flag — tracked divergence #9 in docs/env/env-tod-re.md.
 	if (key == "sun_rgb") {
 		parse_rgb(value, keyframe.sun);
 	} else if (key == "ground_rgb" || key == "ambient_rgb") {
@@ -111,29 +113,80 @@ void assign_tod_color(Keyframe &keyframe, const std::string &key, const std::str
 	}
 }
 
-Rgb lerp_rgb(const Rgb &a, const Rgb &b, float t) {
-	return {
-		a.r + (b.r - a.r) * t,
-		a.g + (b.g - a.g) * t,
-		a.b + (b.b - a.b) * t,
-	};
+// Digit-positional HHMM sanitizer: hours clamp to 23, minutes to 59
+// [orig: Environment_ParseTimeString @ 0x57c500].
+int sanitize_hhmm(int value) {
+	if (value < 0) {
+		return 0;
+	}
+	const int hours = std::min(value / 100, 23);
+	const int minutes = std::min(value % 100, 59);
+	return hours * 100 + minutes;
 }
 
-Rgb scale_rgb(const Rgb &color, float scale) {
-	return {
-		clamp_float(color.r * scale, 0.0f, 1.0f),
-		clamp_float(color.g * scale, 0.0f, 1.0f),
-		clamp_float(color.b * scale, 0.0f, 1.0f),
-	};
+// Quantize one channel the way the parser stores it: file byte scaled by
+// envscale, truncated, clamped to 255 [orig: Color_ScaleRGBAndPack @ 0x57f890].
+// (The original has no lower clamp and packs garbage for negative inputs; we
+// clamp at 0 — tracked divergence #11 in docs/env/env-tod-re.md.)
+int quantize_channel(float normalized, float envscale) {
+	const int byte_value = clamp_int(static_cast<int>(normalized * 255.0f + 0.5f), 0, 255);
+	const int scaled = static_cast<int>(static_cast<float>(byte_value) * envscale);
+	return clamp_int(scaled, 0, 255);
+}
+
+// Integer channel lerp with round-half-up [orig: Color_InterpolateRGB888 @ 0x57c2f0].
+int lerp_channel(int a, int b, int fraction_fp) {
+	return static_cast<int>((static_cast<int64_t>(fraction_fp) * (b - a) + (static_cast<int64_t>(a) << 16) + 0x8000) >> 16);
+}
+
+Rgb lerp_rgb_quantized(const Rgb &a, const Rgb &b, int fraction_fp, float envscale) {
+	Rgb out;
+	out.r = static_cast<float>(lerp_channel(quantize_channel(a.r, envscale), quantize_channel(b.r, envscale), fraction_fp)) / 255.0f;
+	out.g = static_cast<float>(lerp_channel(quantize_channel(a.g, envscale), quantize_channel(b.g, envscale), fraction_fp)) / 255.0f;
+	out.b = static_cast<float>(lerp_channel(quantize_channel(a.b, envscale), quantize_channel(b.b, envscale), fraction_fp)) / 255.0f;
+	return out;
 }
 
 } // namespace
 
+int hhmm_to_hours_fp(float hhmm) {
+	if (hhmm < 0.0f) {
+		return 0;
+	}
+	const int whole = static_cast<int>(hhmm);
+	int hours = whole / 100;
+	float minutes = hhmm - static_cast<float>(hours * 100);
+	if (hours > 23) {
+		hours = 23;
+	}
+	if (minutes > 59.0f) {
+		minutes = 59.0f;
+	}
+	// Integer-exact for whole minutes: (m << 16) / 60 truncates the same way.
+	return (hours << 16) + static_cast<int>(minutes * (65536.0f / 60.0f));
+}
+
 Config make_default_config() {
-	// Terrain_SetDefaultEnvironmentValues@0x53E030 resets the environment before
-	// file parsing. These defaults are authoring-friendly values based on FULL_00,
-	// with the same field coverage so new documents export as valid .env files.
+	// Authoring template for "New Environment": Config{} carries the engine's
+	// pre-parse defaults [orig: Environment_InitDefaults @ 0x57c010]; this
+	// overrides them with friendly FULL_00-style values, written explicitly to
+	// the file on save so the engine reads the authored intent.
 	Config cfg;
+	cfg.curtime = 1200;
+	cfg.fog_level = 1000.0f;
+	cfg.fog_type = 2;
+	cfg.water_rgb = {56.0f / 255.0f, 59.0f / 255.0f, 39.0f / 255.0f};
+	cfg.lightning_rgb = {85.0f / 255.0f, 85.0f / 255.0f, 90.0f / 255.0f};
+	cfg.ceiling_rgb = {55.0f / 255.0f, 55.0f / 255.0f, 55.0f / 255.0f};
+	cfg.floor_rgb = {25.0f / 255.0f, 25.0f / 255.0f, 25.0f / 255.0f};
+	cfg.sky_speed = 15.0f;
+	cfg.sky_height = 175.0f;
+	cfg.sky_map1 = "Cloud01.pcx";
+	cfg.sky_map2 = "Cloud01b.pcx";
+	cfg.star_3di.clear();
+	cfg.iris_percent = 15.0f;
+	cfg.iris_center = 1.0f;
+	cfg.advanced_clouds = 1;
 	cfg.keyframes = {
 		{0, {}, {14.0f / 255.0f, 29.0f / 255.0f, 45.0f / 255.0f}, {1.0f / 255.0f, 2.0f / 255.0f, 6.0f / 255.0f}, {35.0f / 255.0f, 36.0f / 255.0f, 59.0f / 255.0f}, {47.0f / 255.0f, 66.0f / 255.0f, 86.0f / 255.0f}, {1.0f / 255.0f, 2.0f / 255.0f, 6.0f / 255.0f}},
 		{1200, {170.0f / 255.0f, 170.0f / 255.0f, 167.0f / 255.0f}, {49.0f / 255.0f, 55.0f / 255.0f, 46.0f / 255.0f}, {77.0f / 255.0f, 91.0f / 255.0f, 138.0f / 255.0f}, {84.0f / 255.0f, 88.0f / 255.0f, 89.0f / 255.0f}, {}, {77.0f / 255.0f, 91.0f / 255.0f, 138.0f / 255.0f}},
@@ -151,14 +204,18 @@ Config make_default_config() {
 }
 
 bool load_env(std::istream &input, Config &out, std::string &error) {
-	// Semantic port of the line callback sub_53E3F0@0x53E3F0, invoked by
-	// sub_53FA70 after the generic line parser sub_501FB0 tokenizes .trn/.env.
-	// We do not emulate the fixed globals; Config is the typed equivalent.
+	// Semantic port of the line callback [orig: TimeOfDay_ParseProperty @ 0x57c590],
+	// invoked per tokenized line of .trn/.env. We do not emulate the fixed
+	// globals; Config is the typed equivalent. envscale stays a stored field and
+	// is applied at interpolation/engine-view time rather than baked into colors
+	// at parse — tracked divergence #8 in docs/env/env-tod-re.md (equivalent for
+	// files where envscale precedes all colors; the corpus sweep validates this).
 	error.clear();
 	out = Config();
 
 	std::string line;
 	bool in_tod = false;
+	bool overflow_block = false;
 	bool skyfog_set = false;
 	Keyframe current;
 	int line_number = 0;
@@ -183,23 +240,43 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 		value = trim(value);
 
 		if (key == "tod_begin") {
+			// The engine has no block-nesting state: tod_begin simply advances
+			// to the next slot, so tod_end is optional and a new tod_begin
+			// implicitly closes the open block (shipped FULL_03/FULL_05.ENV
+			// rely on this) [orig: TimeOfDay_ParseProperty @ 0x57c647].
 			if (in_tod) {
-				error = "Nested tod_begin at line " + std::to_string(line_number);
-				return false;
+				if (overflow_block) {
+					out.keyframes.back() = current;
+				} else {
+					out.keyframes.push_back(current);
+				}
 			}
 			in_tod = true;
 			skyfog_set = false;
-			current = Keyframe();
-			current.time = value.empty() ? 0 : clamp_int(std::atoi(value.c_str()), 0, 2359);
+			if (static_cast<int>(out.keyframes.size()) >= kMaxTodKeyframes) {
+				// The engine's 17th tod_begin neither allocates a slot nor stores
+				// its time; its color lines keep writing into slot 16
+				// [orig: TimeOfDay_ParseProperty @ 0x57c65b].
+				overflow_block = true;
+				current = out.keyframes.back();
+			} else {
+				overflow_block = false;
+				current = Keyframe();
+				current.time = value.empty() ? 0 : sanitize_hhmm(std::atoi(value.c_str()));
+			}
 			continue;
 		}
 		if (key == "tod_end") {
-			if (!in_tod) {
-				error = "tod_end without tod_begin at line " + std::to_string(line_number);
-				return false;
+			// A stray tod_end just resets the engine's slot pointer to scratch;
+			// it is not an error [orig: TimeOfDay_ParseProperty @ 0x57c696].
+			if (in_tod) {
+				if (overflow_block) {
+					out.keyframes.back() = current;
+				} else {
+					out.keyframes.push_back(current);
+				}
+				in_tod = false;
 			}
-			out.keyframes.push_back(current);
-			in_tod = false;
 			continue;
 		}
 
@@ -218,9 +295,12 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 		} else if (key == "envscale") {
 			out.envscale = static_cast<float>(std::atof(value.c_str()));
 		} else if (key == "curtime") {
-			out.curtime = clamp_int(std::atoi(value.c_str()), 0, 2359);
+			// [orig: TimeOfDay_ParseProperty @ 0x57d0b6] via Environment_ParseTimeString.
+			out.curtime = sanitize_hhmm(std::atoi(value.c_str()));
 		} else if (key == "fog_level") {
-			out.fog_level = static_cast<float>(std::atof(value.c_str()));
+			// Integer parse (atol truncation), stored <<16 by the engine
+			// [orig: TimeOfDay_ParseProperty @ 0x57cca3].
+			out.fog_level = static_cast<float>(std::atol(value.c_str()));
 		} else if (key == "fog_type") {
 			out.fog_type = std::atoi(value.c_str());
 		} else if (key == "terrain_rgb") {
@@ -228,7 +308,9 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 		} else if (key == "water_rgb") {
 			parse_rgb(value, out.water_rgb);
 		} else if (key == "water_height") {
-			out.water_height = static_cast<float>(std::atof(value.c_str()));
+			// Integer parse; engine stores <<15 (half world units in 16.16)
+			// [orig: TimeOfDay_ParseProperty @ 0x57cb4e].
+			out.water_height = static_cast<float>(std::atol(value.c_str()));
 			out.water_height_set = true;
 		} else if (key == "cloud_rgb") {
 			parse_rgb(value, out.cloud_rgb);
@@ -241,9 +323,11 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 		} else if (key == "floor_rgb") {
 			parse_rgb(value, out.floor_rgb);
 		} else if (key == "sky_speed") {
-			out.sky_speed = static_cast<float>(std::atof(value.c_str()));
+			// Integer parse; engine stores <<10 [orig: TimeOfDay_ParseProperty @ 0x57cbf1].
+			out.sky_speed = static_cast<float>(std::atol(value.c_str()));
 		} else if (key == "sky_height") {
-			out.sky_height = static_cast<float>(std::atof(value.c_str()));
+			// Integer parse; engine stores <<16 [orig: TimeOfDay_ParseProperty @ 0x57cbc3].
+			out.sky_height = static_cast<float>(std::atol(value.c_str()));
 		} else if (key == "sky_map1") {
 			out.sky_map1 = text;
 		} else if (key == "sky_map2") {
@@ -261,28 +345,37 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 		} else if (key == "iris_center") {
 			out.iris_center = static_cast<float>(std::atof(value.c_str()));
 		} else if (key == "water_murk") {
-			out.water_murk = clamp_float(static_cast<float>(std::atof(value.c_str())), 0.0f, 0.99f);
+			// Engine clamps only the top (no lower bound)
+			// [orig: TimeOfDay_ParseProperty @ 0x57cba9].
+			out.water_murk = std::min(static_cast<float>(std::atof(value.c_str())), 0.99f);
 		} else if (key == "advanced_clouds") {
 			out.advanced_clouds = std::atoi(value.c_str());
 		}
 	}
 
 	if (in_tod) {
-		error = "Unclosed tod_begin";
-		return false;
+		// An unterminated final block is still a counted slot in the engine.
+		if (overflow_block) {
+			out.keyframes.back() = current;
+		} else {
+			out.keyframes.push_back(current);
+		}
 	}
 
-	std::sort(out.keyframes.begin(), out.keyframes.end(), [](const Keyframe &a, const Keyframe &b) {
+	// Stable, matching the engine's bubble sort (duplicate times keep file order)
+	// [orig: Environment_SortAndSnapshotKeyframes @ 0x57c240].
+	std::stable_sort(out.keyframes.begin(), out.keyframes.end(), [](const Keyframe &a, const Keyframe &b) {
 		return a.time < b.time;
 	});
-	// Matches the post-parse TOD sort performed by sub_53FA70@0x53fc2e-0x53fca8.
 	return true;
 }
 
 bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
-	// No stock writer has been identified in the runtime path; the editor emits a
-	// normalized stock-style text file using the same keyword vocabulary parsed by
-	// sub_53E3F0 and CRLF line endings used by captured assets.
+	// No stock writer exists in the engine; the editor emits a normalized
+	// stock-style text file using the keyword vocabulary parsed by
+	// [orig: TimeOfDay_ParseProperty @ 0x57c590] and CRLF line endings used by
+	// shipped assets. (enviro_name is an authoring extension; the engine ignores
+	// unknown keywords.)
 	error.clear();
 
 	output << "enviro_name \"" << cfg.name << "\"" << NL;
@@ -326,7 +419,7 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 	output << "advanced_clouds " << cfg.advanced_clouds << NL;
 
 	std::vector<Keyframe> keyframes = cfg.keyframes;
-	std::sort(keyframes.begin(), keyframes.end(), [](const Keyframe &a, const Keyframe &b) {
+	std::stable_sort(keyframes.begin(), keyframes.end(), [](const Keyframe &a, const Keyframe &b) {
 		return a.time < b.time;
 	});
 
@@ -356,84 +449,85 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 }
 
 TodState interpolate_tod(const std::vector<Keyframe> &keyframes, float time, float envscale) {
-	// Per-frame color interpolation equivalent to sub_53FCC0@0x53FCC0.
-	// The original reads dword_FF375C after sub_53FA70 sorts/snapshots keyframes;
-	// this pure function keeps the same bracketing and midnight wrap behavior.
+	// Engine-faithful per-tick interpolation. Parameter space is 16.16 HOURS
+	// (a day = 0x180000), bracketing and fraction are integer math
+	// [orig: Environment_FindKeyframeSegment @ 0x57dd80], the channel lerp is the
+	// byte lerp with +0x8000 rounding [orig: Color_InterpolateRGB888 @ 0x57c2f0],
+	// and fractions above 63356 snap to 1.0 — an original source typo (65536
+	// transposed) preserved for parity [orig: Environment_LerpKeyframeSet @ 0x57c3c6].
 	TodState state;
 	if (keyframes.empty()) {
 		return state;
 	}
-	if (keyframes.size() == 1) {
-		const Keyframe &keyframe = keyframes.front();
-		state.sun = scale_rgb(keyframe.sun, envscale);
-		state.ground = scale_rgb(keyframe.ground, envscale);
-		state.fog = scale_rgb(keyframe.fog, envscale);
-		state.sky = scale_rgb(keyframe.sky, envscale);
-		state.moon = scale_rgb(keyframe.moon, envscale);
-		state.skyfog = scale_rgb(keyframe.skyfog, envscale);
-		state.skybase = scale_rgb(keyframe.skybase, envscale);
-		state.skybright = scale_rgb(keyframe.skybright, envscale);
-		state.skyhighlight = scale_rgb(keyframe.skyhighlight, envscale);
-		state.cloudbase = scale_rgb(keyframe.cloudbase, envscale);
-		state.cloudhighlight = scale_rgb(keyframe.cloudhighlight, envscale);
-		state.cloudedge = scale_rgb(keyframe.cloudedge, envscale);
-		return state;
-	}
 
 	std::vector<Keyframe> sorted = keyframes;
-	std::sort(sorted.begin(), sorted.end(), [](const Keyframe &a, const Keyframe &b) {
+	std::stable_sort(sorted.begin(), sorted.end(), [](const Keyframe &a, const Keyframe &b) {
 		return a.time < b.time;
 	});
 
-	int t = static_cast<int>(std::floor(time));
-	while (t < 0) {
-		t += 2400;
+	constexpr int kDay = 0x180000; // 24.0 hours in 16.16
+	int t = hhmm_to_hours_fp(time);
+	t %= kDay;
+
+	std::vector<int> times(sorted.size());
+	for (size_t i = 0; i < sorted.size(); ++i) {
+		times[i] = hhmm_to_hours_fp(static_cast<float>(sorted[i].time));
 	}
-	t %= 2400;
 
 	size_t lo = sorted.size() - 1;
 	size_t hi = 0;
-	for (size_t i = 0; i < sorted.size(); ++i) {
-		if (sorted[i].time <= t) {
-			lo = i;
+	if (t >= times.front()) {
+		for (size_t i = 0; i < sorted.size(); ++i) {
+			if (times[i] <= t) {
+				lo = i;
+				hi = (i + 1) % sorted.size();
+			}
 		}
-		if (sorted[i].time > t) {
-			hi = i;
-			break;
+	}
+
+	int duration = times[hi] - times[lo];
+	if (duration < 0) {
+		duration += kDay;
+	}
+	int fraction = 0;
+	if (duration != 0) {
+		int elapsed = t - times[lo];
+		if (elapsed < 0) {
+			elapsed += kDay;
 		}
+		fraction = static_cast<int>((static_cast<int64_t>(elapsed) << 16) / duration);
+	}
+	if (fraction < 0) {
+		fraction = 0;
+	} else if (fraction > 63356) {
+		fraction = 0x10000;
 	}
 
 	const Keyframe &a = sorted[lo];
 	const Keyframe &b = sorted[hi];
-	float range = static_cast<float>(b.time - a.time);
-	if (range <= 0.0f) {
-		range = static_cast<float>(2400 - a.time + b.time);
-	}
-	float elapsed = static_cast<float>(t - a.time);
-	if (elapsed < 0.0f) {
-		elapsed += 2400.0f;
-	}
-	const float fraction = range > 0.0f ? clamp_float(elapsed / range, 0.0f, 1.0f) : 0.0f;
-
-	state.sun = scale_rgb(lerp_rgb(a.sun, b.sun, fraction), envscale);
-	state.ground = scale_rgb(lerp_rgb(a.ground, b.ground, fraction), envscale);
-	state.fog = scale_rgb(lerp_rgb(a.fog, b.fog, fraction), envscale);
-	state.sky = scale_rgb(lerp_rgb(a.sky, b.sky, fraction), envscale);
-	state.moon = scale_rgb(lerp_rgb(a.moon, b.moon, fraction), envscale);
-	state.skyfog = scale_rgb(lerp_rgb(a.skyfog, b.skyfog, fraction), envscale);
-	state.skybase = scale_rgb(lerp_rgb(a.skybase, b.skybase, fraction), envscale);
-	state.skybright = scale_rgb(lerp_rgb(a.skybright, b.skybright, fraction), envscale);
-	state.skyhighlight = scale_rgb(lerp_rgb(a.skyhighlight, b.skyhighlight, fraction), envscale);
-	state.cloudbase = scale_rgb(lerp_rgb(a.cloudbase, b.cloudbase, fraction), envscale);
-	state.cloudhighlight = scale_rgb(lerp_rgb(a.cloudhighlight, b.cloudhighlight, fraction), envscale);
-	state.cloudedge = scale_rgb(lerp_rgb(a.cloudedge, b.cloudedge, fraction), envscale);
+	state.sun = lerp_rgb_quantized(a.sun, b.sun, fraction, envscale);
+	state.ground = lerp_rgb_quantized(a.ground, b.ground, fraction, envscale);
+	state.fog = lerp_rgb_quantized(a.fog, b.fog, fraction, envscale);
+	state.sky = lerp_rgb_quantized(a.sky, b.sky, fraction, envscale);
+	state.moon = lerp_rgb_quantized(a.moon, b.moon, fraction, envscale);
+	state.skyfog = lerp_rgb_quantized(a.skyfog, b.skyfog, fraction, envscale);
+	state.skybase = lerp_rgb_quantized(a.skybase, b.skybase, fraction, envscale);
+	state.skybright = lerp_rgb_quantized(a.skybright, b.skybright, fraction, envscale);
+	state.skyhighlight = lerp_rgb_quantized(a.skyhighlight, b.skyhighlight, fraction, envscale);
+	state.cloudbase = lerp_rgb_quantized(a.cloudbase, b.cloudbase, fraction, envscale);
+	state.cloudhighlight = lerp_rgb_quantized(a.cloudhighlight, b.cloudhighlight, fraction, envscale);
+	state.cloudedge = lerp_rgb_quantized(a.cloudedge, b.cloudedge, fraction, envscale);
 	return state;
 }
 
 Vec3 compute_sun_direction(float tod_time) {
-	// Terrain_CalcSunDirection@0x53F5D0 analogue. The constants are the
-	// normalized fixed-point direction components documented for the engine path.
-	const float angle = 2.0f * 3.14159265358979323846f * tod_time / 2400.0f;
+	// [orig: Environment_ComputeSunDirection @ 0x57d6d0] — angle = 2*pi * t/24h
+	// in HOURS space (the original reads curtime's high word, 1/256h steps and
+	// computes in 16.16 fixed; we keep floats — sub-1e-4 quantization divergence,
+	// documented in docs/env/env-tod-re.md). Fixed vector (0.9397 sin, 0.342,
+	// -0.9397 cos) swizzled by the float getter to (-0.342, -0.9397 cos, +0.9397 sin).
+	const float hours = static_cast<float>(hhmm_to_hours_fp(tod_time)) / 65536.0f;
+	const float angle = 2.0f * 3.14159265358979323846f * hours / 24.0f;
 	Vec3 dir;
 	dir.x = -22414.0f / 65536.0f;
 	dir.y = -(61583.0f / 65536.0f) * std::cos(angle);
@@ -448,9 +542,10 @@ Vec3 compute_sun_direction(float tod_time) {
 }
 
 Vec3 compute_moon_direction(float tod_time) {
-	// Moon direction mirrors the sun phase by 180 degrees, matching the runtime
-	// sky/TOD consumer described alongside Terrain_CalcSunDirection@0x53F5D0.
-	const float angle = 2.0f * 3.14159265358979323846f * tod_time / 2400.0f + 3.14159265358979323846f;
+	// [orig: Terrain_ComputeMoonDirection @ 0x57d760] — sun phase + pi, constants
+	// 56755/65536 = 0.866 and Y = 0x8000 = 0.5, hours space as for the sun.
+	const float hours = static_cast<float>(hhmm_to_hours_fp(tod_time)) / 65536.0f;
+	const float angle = 2.0f * 3.14159265358979323846f * hours / 24.0f + 3.14159265358979323846f;
 	Vec3 dir;
 	dir.x = -32768.0f / 65536.0f;
 	dir.y = -(56755.0f / 65536.0f) * std::cos(angle);

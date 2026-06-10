@@ -2,7 +2,8 @@ shader_type spatial;
 render_mode unshaded, cull_front;
 
 // Sky-dome shader fed by the ENV/TOD path:
-// sub_53FCC0@0x53FCC0 interpolates colors; the sky pass consumes skybase,
+// [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] interpolates colors and
+// [orig: render_skybox @ 0x579080] consumes them; the sky pass consumes skybase,
 // skybright, skyhighlight, cloudbase/highlight/edge, skyfog, sun, and moon.
 
 uniform vec3 u_sky_base = vec3(0.3, 0.4, 0.7);

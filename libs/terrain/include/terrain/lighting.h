@@ -12,10 +12,13 @@ namespace opennova::terrain {
 uint32_t terrain_light_color_from_ambient_diffuse_argb(uint32_t ambient_argb,
                                                        uint32_t diffuse_argb) noexcept;
 
-// Engine: Jointops.exe Render_SetFogParams@0x0054B4B0 ->
-// Render_ConfigureFog@0x005F9890.
+// Engine: [orig: Render_SetFogState @ 0x58a950] -> [orig:
+// CD3DDevice_SetFogParameters @ 0x677960] (re-anchored 2026-06-09; the old
+// 0x54B4B0/0x5F9890 citations were stale and wrong for the retail image —
+// see docs/env/env-tod-re.md).
 // fog_type 0 is exponential with density ln(64) / end. Types 1/2/3 are
-// linear; type 2 starts at 0.5*end and type 3 at 0.25*end.
+// linear; type 2 starts at 0.5*end and type 3 at 0.25*end (the engine also
+// scales those starts by (1 - overcast density); wired via libs/env).
 float terrain_fog_start_for_type(float fog_end, int fog_type) noexcept;
 float terrain_fog_factor_for_distance(float distance, float fog_end, int fog_type) noexcept;
 

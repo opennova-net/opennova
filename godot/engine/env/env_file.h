@@ -18,7 +18,8 @@ namespace godot {
 
 // Resource wrapper for a stock .env environment/TOD file.
 // Native data and all format behavior live in libs/env; this class is the
-// Godot-facing equivalent of sub_53FA70/sub_53E3F0 state plus save support.
+// Godot-facing equivalent of the [orig: Environment_LoadTimeOfDayConfig @ 0x57db30] /
+// [orig: TimeOfDay_ParseProperty @ 0x57c590] state plus save support (docs/env/env-tod-re.md).
 class EnvFile : public Resource {
 	GDCLASS(EnvFile, Resource)
 
@@ -58,6 +59,14 @@ private:
 	opennova::env::Config env;
 	bool loaded = false;
 	Ref<NovaResourceRoot> resource_root;
+
+	// Non-persistent BMS mission override layer [orig: Game_LoadTerrainDuringConnect
+	// @ 0x520710]: properties/getters show the overridden live view, while
+	// save_to_path/to_bytes always write the base captured at apply time — a
+	// mission-opened env can never save contaminated values. Clear overrides
+	// before document editing. See docs/env/env-tod-re.md.
+	opennova::env::Config env_base;
+	bool mission_overrides_active = false;
 
 	void _sync_env_from_properties();
 	void _sync_properties_from_env();
@@ -143,6 +152,39 @@ public:
 	Dictionary interpolate_time_of_day(float p_time) const;
 	Vector3 compute_sun_direction(float p_time) const;
 	Vector3 compute_moon_direction(float p_time) const;
+
+	// Engine fog policy [orig: Render_SetFogState @ 0x58a950 ->
+	// CD3DDevice_SetFogParameters @ 0x677960]; overcast is the 0..1 weather
+	// blend (0 while no weather system drives it).
+	float get_fog_start(float p_overcast = 0.0f) const;
+	float get_fog_density() const;
+	float get_fog_end_distance(float p_overcast = 0.0f) const;
+	float get_fog_end_underwater() const;
+
+	// Hardcoded sunrise/sunset windows; {"is_night": bool, "blend": float}
+	// [orig: Environment_ComputeTimeOfDayColors @ 0x57de99].
+	Dictionary get_day_phase(float p_time) const;
+
+	// Derived render colors [orig: Environment_UpdateWeatherTick tail].
+	static Color double_saturate_color(const Color &p_color);
+	static Color combine_terrain_light(const Color &p_light, const Color &p_sky);
+	static Color lit_water_color(const Color &p_water, const Color &p_light);
+
+	// Sun glare intensity from view-sun alignment and occlusion brightness
+	// [orig: compute_sun_glare_and_fog_blend @ 0x5ad610]; returns
+	// {"glare": 0..255, "fog_whiten": 0..40}.
+	static Dictionary compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness);
+
+	// BMS mission override layer. Recognized keys: water_height (float),
+	// fog_level (float), fog_color (Color), water_color (Color),
+	// water_murk (float), start_time (int HHMM).
+	void apply_mission_overrides(const Dictionary &p_overrides);
+	void clear_mission_overrides();
+	bool has_mission_overrides() const;
+
+	// Byte snapshots of the BASE config (CRLF .env text) for editor undo.
+	PackedByteArray to_bytes() const;
+	bool load_bytes(const PackedByteArray &p_bytes);
 };
 
 class EnvFileLoader : public ResourceFormatLoader {

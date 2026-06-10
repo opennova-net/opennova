@@ -506,6 +506,16 @@ target_include_directories(env_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(env_unit_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME env_unit COMMAND env_unit_test)
 
+add_executable(env_render_unit_test env/env_render_unit_test.cpp)
+target_link_libraries(env_render_unit_test PRIVATE opennova_env)
+target_include_directories(env_render_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME env_render_unit COMMAND env_render_unit_test)
+
+add_executable(jo_env_sweep_test env/jo_env_sweep_test.cpp)
+target_link_libraries(jo_env_sweep_test PRIVATE opennova_env opennova_vfs)
+target_include_directories(jo_env_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME env_jo_install COMMAND jo_env_sweep_test)
+
 # Terrain build foundation + parity tests ported from the canonical terrain reference.
 #   parametric_parity — byte-identical CPT output across Sample/Gradient/Checker64/Perlin fixtures
 #   crypto_roundtrip   — rotate_encrypt/decrypt round-trip

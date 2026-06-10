@@ -554,7 +554,12 @@ func test_object_preview_applies_environment_lighting_and_fog_uniforms() -> void
 	var tod := env.interpolate_time_of_day(1200.0)
 	_assert_vector3_close(material.get_shader_parameter("u_dir_light_color"), tod.get("sun", Vector3.ZERO), 0.01, "Preview should use environment sun lighting.")
 	_assert_vector3_close(material.get_shader_parameter("u_fill_light_color"), tod.get("ground", Vector3.ZERO), 0.01, "Preview should use environment fill lighting.")
-	_assert_vector3_close(material.get_shader_parameter("u_fog_color"), tod.get("fog", Vector3.ZERO), 0.01, "Preview should use environment fog color.")
+	# Fog render color is the keyframe color doubled-and-saturated, matching the
+	# engine [orig: Environment_UpdateWeatherTick @ 0x57f17c] — .env fog is
+	# authored at half intensity. See docs/env/env-tod-re.md.
+	var fog_raw: Vector3 = tod.get("fog", Vector3.ZERO)
+	var fog_doubled := EnvFile.double_saturate_color(Color(fog_raw.x, fog_raw.y, fog_raw.z))
+	_assert_vector3_close(material.get_shader_parameter("u_fog_color"), Vector3(fog_doubled.r, fog_doubled.g, fog_doubled.b), 0.01, "Preview should use the engine-doubled environment fog color.")
 	_assert_vector3_close(material.get_shader_parameter("u_dir_light_dir"), -env.compute_sun_direction(1200.0).normalized(), 0.01, "Preview should use environment sun direction.")
 	assert_true(bool(material.get_shader_parameter("u_fog_enabled")), "Loaded environments should enable object fog uniforms.")
 	assert_eq(int(material.get_shader_parameter("u_fog_type")), env.get_fog_type())

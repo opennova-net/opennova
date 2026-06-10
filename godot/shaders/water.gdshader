@@ -2,8 +2,8 @@ shader_type spatial;
 render_mode unshaded, blend_mix, cull_disabled;
 
 // Water pass consuming .env water_rgb/water_murk plus TOD fog output.
-// Engine equivalents: sub_53E3F0@0x53E3F0 parses the static water fields,
-// sub_53FCC0@0x53FCC0 supplies per-frame fog color.
+// Engine equivalents: [orig: TimeOfDay_ParseProperty @ 0x57c590] parses the static water fields,
+// [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] supplies per-frame fog color (docs/env/env-tod-re.md).
 
 uniform vec3 u_water_color = vec3(0.408, 0.314, 0.224);
 uniform float u_water_alpha = 0.6;
