@@ -24,11 +24,11 @@ This repo is the full toolchain: extract and edit assets with the importer, the 
 
 Three layers:
 
-- **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): workspaces for terrain, objects, fonts, credits, strings, and environment that write the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.3di`, `.fnt`, `.kda`, `.env`, …) directly.
-- **Core engine (`libs/`).** Format parsers, terrain LOD, foliage scatter, environment sampling. Also consumed by Python (`opennova_blender/`, `apps/importer/`) and Blender (`blender/`).
+- **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): workspaces for terrain, objects, missions, fonts, credits, strings, menus, music, sound, and environment that write the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.3di`, `.bms`, `.fnt`, `.kda`, `.mnu`, `.sbf`, `.lwf`, `.env`, …) directly.
+- **Core engine (`libs/`).** Format parsers plus the runtime systems: terrain LOD, foliage scatter, environment sampling, the world substrate with its WAC script VM, BMS event runtime, and AI, skeletal animation, audio selection, and the virtual file system. Also consumed by Python (`opennova_blender/`, `apps/importer/`) and Blender (`blender/`).
 - **Godot (`godot/engine/` + `godot/game/`).** GDExtension wrappers in `engine/` bind the core into Godot; `game/` is the runtime scene.
 
-All of this is pre-1.0 and under active development. Nothing here is production-ready. The asset pipeline (importer, Blender addon, and ONED) is the most exercised surface today; the Godot runtime loads exported scenes and runs the terrain and foliage systems; gameplay (player, missions, multiplayer) is still being built.
+All of this is pre-1.0 and under active development. Nothing here is production-ready. The asset pipeline (importer, Blender addon, and ONED) is the most exercised surface today; the Godot runtime loads exported scenes, runs the terrain and foliage systems, and simulates authored missions (WAC scripts, BMS events, AI). Player interaction and multiplayer are still being built.
 
 Pre-JO NovaLogic titles may sort of work by chance, but are not officially supported.
 
@@ -41,7 +41,7 @@ Pre-built binaries are available on the [Releases](../../releases) page:
 | **`opennova-asset-importer-windows-v<version>.exe`** | Standalone Windows importer for converting models to `.blend`, `.ase`, `.max`, and NovaLogic-compatible project files for tools like OED. | Run the exe directly, point it at your game directory, and select what to export. |
 | **`opennova-blender-ase-exporter-v<version>.zip`** | Blender 5.x ASE exporter addon with pre-built native libraries for Windows and Linux. | Install from Blender with `Edit > Preferences > Add-ons > Install`, then use `File > Export > Novalogic ASE (.ase)`. |
 | **`opennova-3ds-max-ase-exporter-windows-v<version>.mzp`** | 3ds Max plugin installer that adds NovaLogic ASE export. | Run the MZP in 3ds Max, restart 3ds Max, then use `File > Export > Novalogic ASE (.ase)`. |
-| **`opennova-modding-editor-windows-v<version>.zip`** | Standalone OpenNova Editor (ONED) for authoring terrain, environment, tile, and related mod data. | Extract the zip, then run `opennova-modtools.exe`. |
+| **`opennova-modding-editor-windows-v<version>.zip`** | Standalone OpenNova Editor (ONED) for authoring terrain, object, mission, interface, audio, and environment mod data. | Extract the zip, then run `opennova-modtools.exe`. |
 | **`opennova-game-runtime-windows-v<version>.zip`** | Godot-hosted OpenNova runtime for loading exported scenes and runtime systems. | Extract the zip, then run `opennova.exe`. |
 | **`opennova-modding-editor-macos-v<version>.zip`** | The ONED editor as a universal macOS app (Apple Silicon and Intel). | Unzip, move the `.app` to Applications, then open it. The app is ad-hoc signed, not notarized: right-click then `Open` the first time, or run `xattr -dr com.apple.quarantine` on the `.app`. |
 | **`opennova-game-runtime-macos-v<version>.zip`** | The OpenNova runtime as a universal macOS app (Apple Silicon and Intel). | Unzip, move the `.app` to Applications, then open it. Clear Gatekeeper the same way as the editor app. |
@@ -78,9 +78,10 @@ Exports the current scene to NovaLogic's ASCII Scene Export format. Supports mul
 
 The authoring layer for JO assets, organized into workspaces grouped by purpose:
 
-- **World**: Terrain (sculpt, paint, foliage, tiles, layout), Object (`.3di` model projects), and Mission (planned).
-- **Interface**: Fonts (`.fnt` bitmap fonts), Credits (`.kda` rolling credits), and Strings (RTXT string tables).
-- **Atmosphere**: Environment (`.env` weather, lighting, and time of day), a popup that overlays the active 3D view.
+- **World**: Terrain (sculpt, paint, foliage, tiles, layout), Object (`.3di` model projects), and Mission (`.bms` missions: entities, waypoints, zones, BMS event scripting, with play-in-editor on the engine's mission runtime).
+- **Interface**: Fonts (`.fnt` bitmap fonts), Credits (`.kda` rolling credits), Strings (RTXT string tables), and Menus (`.mnu` / `.mns` menu screens with a WYSIWYG canvas and interactive preview).
+- **Audio**: Music (interactive music: `.sbf` banks plus `.bin` music scripts).
+- **Atmosphere**: Sound (`.lwf` sound profiles) and Environment (`.env` weather, lighting, and time of day), a popup that overlays the active 3D view.
 
 Each workspace reads and writes the game's canonical formats directly. The packaged build opens to the Terrain workspace by default. See [`godot/modtools/README.md`](godot/modtools/README.md) for per-workspace docs and the editor's code-first framework.
 
@@ -88,14 +89,15 @@ Each workspace reads and writes the game's canonical formats directly. The packa
 
 | Path | Contents |
 |------|----------|
-| `libs/` | C/C++ format libraries (`adm`, `ase`, `bad`, `bfc1`, `cbin`, `cpt`, `def`, `env`, `fnt`, `pcx`, `pff`, `rtxt`, `scr`, `tdp`, `threedi`, `til`, `tpj`, `trn`) plus runtime and support subsystems (`foliage`, `oed`, `renderer`, `resource_index`, `terrain`). |
+| `libs/` | C/C++ engine libraries: format parsers, runtime systems, and editor support (38 libraries; see [C/C++ Libraries](#cc-libraries)). |
+| `docs/` | Tracked architecture and reverse-engineering records; start at [`docs/README.md`](docs/README.md). |
 | `apps/importer/` | `onimport` launcher and CLI compatibility shell. |
 | `opennova_jobs/` | Host-neutral import request/result/job models and validation. |
 | `opennova_qt_ui/` | Host-agnostic PySide6 importer dialog and pure UI helpers. |
 | `opennova_blender/` | Standalone Blender-backed importer backend for the Qt UI. |
 | `opennova_max/` | External 3ds Max batch helpers and Max-side export hooks. |
 | `blender/` | Blender 5.x addon (export side of the pipeline). |
-| `godot/` | Godot 4.6.1 host. `engine/` (GDExtension bindings to `libs/`), `modtools/` (the [OpenNova Editor](godot/modtools/README.md)), `game/` (runtime scene), `tests/` (GUT suite). |
+| `godot/` | Godot 4.6.1 host. `engine/` (GDExtension bindings to `libs/`), `modtools/` (the [OpenNova Editor](godot/modtools/README.md)), `game/` (runtime scene), `server/` (placeholder for a headless server host), `tests/` (GUT suite). |
 | `scripts/` | Build, test, and packaging scripts (sh + ps1). |
 | `tests/` | C++ test suite (ctest). Godot tests live under `godot/tests/`. |
 | `third_party/` | Vendored deps: godot-cpp, gut, modsuperoed. |
@@ -126,18 +128,38 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **cpt** | `.cpt` | Compiled terrain mesh, collision and render (DPTH and CDEP flavors). |
 | **tpj** | `.tpj` | Editable terrain project: a terrain config plus editor lock coordinates and project metadata. |
 | **cbin** | `.kda` | Rolling credits: obfuscated text compiled to a CBIN blob. |
+| **mnu** | `.mnu` | Menu screens: window tree, widgets, and Actions, with a round-trip writer that preserves the format superset. |
+| **mns** | `.mns` | Menu stylesheets: named style variables the menu screens reference. |
+| **mnu_xml** | | NovaLogic-flavored XML reader shared by the menu formats. |
+| **lwf** | `.lwf` | Sound profiles (LWF1): trigger sets of layered member sounds. |
+| **dbf** | `.dbf` | Dialog banks (DLG0): grouped dialog and voice entries. |
+| **sbf** | `.sbf` | Sound-buffer banks: the sample banks behind interactive music. |
+| **mus** | `.bin` | Interactive-music scripts (SCR0/MU01): parser, compiler, and VM. |
 | **scr** | | SCR decryption (multiple keys for different game editions). |
 | **bfc1** | | BFC1 decompression (zlib-based). |
 
-### Runtime and support subsystems
+### Engine runtime
 
 | Library | Description |
 |---------|-------------|
 | **terrain** | Terrain core: heightmap sampling, normals, sector mesh geometry, LOD. |
 | **foliage** | Procedural foliage scatter from the foliage map, distance cull, dispatch. |
 | **renderer** | Material classification and per-vertex/object light evaluation shared by runtime and editor. |
+| **world** | World substrate: entity registry and pools, variable store, AI with the infantry motor, and the logic tick. |
+| **wac** | WAC scripting: lexer, parser, compiler, and bytecode VM. |
+| **mission** | `.bms` missions: records and schema reflection, the BMS event runtime, and mission-to-world promotion. |
+| **anim** | Skeletal animation evaluator: samples `.bad` clips into per-bone transforms. |
+| **audio** | Sound-set member-selection state machine shared by the runtime and the editor. |
+| **vfs** | Virtual file system: loose directories and PFF archives behind one lookup, with SCR/BFC1 decode. |
+| **gameprofile** | Per-game profiles: one source of truth for game identity, archive keys, and SCR codec policy. |
+
+### Editor and tooling support
+
+| Library | Description |
+|---------|-------------|
 | **resource_index** | Indexes asset files under a root directory by kind, for the editor's Open dialogs. |
 | **oed** | OED export session: parse an ASE scene once, then export and re-export to `.3di`. |
+| **oned_edit** | Shared undo/redo edit-history core for the ONED workspaces. |
 
 ## Building
 
