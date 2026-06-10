@@ -2,8 +2,8 @@ extends GutTest
 
 ## Guarded end-to-end probe for mission DIALOG audio (the .dbf path) on real JO data
 ## (archive/JO_ASSETS_t). Loads 00TRg, confirms its .DBF dialog ids resolve to sound
-## sets the loaded banks contain, and that the IMA-ADPCM dialog wavs decode. Skips
-## without the data.
+## sets the loaded banks contain, and reports how many PlayDialog commands fire on
+## host-ungated ticks (pins the host-trigger-gating follow-up). Skips without the data.
 
 const NovaMissionAudioScript = preload("res://engine/world/nova_mission_audio.gd")
 
@@ -56,7 +56,18 @@ func test_00trg_mission_dialog_resolves() -> void:
 			assert_gt(stream.data.size(), 0, "decoded PCM is non-empty")
 			gut.p("z00gr100.wav (IMA-ADPCM) decoded: %d bytes 16-bit @ %d Hz" % [stream.data.size(), stream.mix_rate])
 
-	# (The mission-runtime diagnostic — counting "dialog" effects on ungated sim ticks —
-	# rides with the mission slice; PlayDialog routing from the runtime lands there.)
+	# Diagnostic: how many "dialog" effects fire on ungated ticks? (If zero, the mission's
+	# dialog is all host-trigger-gated -> the documented follow-up.)
+	var sim := NovaSimulation.new()
+	if sim.load_from_mission_data(mission):
+		var fired := 0
+		# 64 ticks = one full quarter-list event cycle (every normal event evaluated once).
+		for _frame in range(64):
+			sim.step()
+			for e in sim.drain_effects():
+				if String((e as Dictionary).get("kind", "")) == "dialog":
+					fired += 1
+		gut.p("dialog effects fired across one 64-tick event cycle: %d" % fired)
+	sim.free()
 
 	audio.teardown()

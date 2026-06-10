@@ -39,33 +39,22 @@ static void copy_trimmed(char *dst, size_t dst_size,
 // API
 // --------------------------------------------------------------------------
 
-int adm_parse(const char *path, AdmFile *out) {
-    FILE *f;
-    long file_len;
+// Parse a .adm from an in-memory buffer (does not take ownership of `bytes`).
+// Used by hosts that read assets from a VFS (PFF archive) rather than disk.
+int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out) {
     char *data = NULL;
     size_t data_size;
     size_t cap = 0;
     size_t line_start, pos;
 
-    if (!path || !out) return -1;
+    if (!bytes || !out) return -1;
     memset(out, 0, sizeof(AdmFile));
 
-    f = fopen(path, "rb");
-    if (!f) return -1;
-
-    fseek(f, 0, SEEK_END);
-    file_len = ftell(f);
-    if (file_len < 0) { fclose(f); return -1; }
-    fseek(f, 0, SEEK_SET);
-
-    data_size = (size_t)file_len;
-    // Allocate +1 for trailing newline sentinel
+    data_size = size;
+    // Working copy (+1 for the trailing newline sentinel); we mutate NULs -> newlines.
     data = (char *)malloc(data_size + 1);
-    if (!data) { fclose(f); return -1; }
-    if (data_size > 0 && fread(data, 1, data_size, f) != data_size) {
-        free(data); fclose(f); return -1;
-    }
-    fclose(f);
+    if (!data) return -1;
+    if (data_size > 0) memcpy(data, bytes, data_size);
 
     // Replace embedded NULs with newlines
     {
@@ -203,6 +192,36 @@ int adm_parse(const char *path, AdmFile *out) {
     }
 
     return 0;
+}
+
+int adm_parse(const char *path, AdmFile *out) {
+    FILE *f;
+    long file_len;
+    char *data;
+    size_t data_size;
+    int rc;
+
+    if (!path || !out) return -1;
+
+    f = fopen(path, "rb");
+    if (!f) return -1;
+
+    fseek(f, 0, SEEK_END);
+    file_len = ftell(f);
+    if (file_len < 0) { fclose(f); return -1; }
+    fseek(f, 0, SEEK_SET);
+    data_size = (size_t)file_len;
+
+    data = (char *)malloc(data_size ? data_size : 1);
+    if (!data) { fclose(f); return -1; }
+    if (data_size > 0 && fread(data, 1, data_size, f) != data_size) {
+        free(data); fclose(f); return -1;
+    }
+    fclose(f);
+
+    rc = adm_parse_buffer(data, data_size, out);
+    free(data);
+    return rc;
 }
 
 void adm_free(AdmFile *af) {

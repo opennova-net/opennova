@@ -1384,6 +1384,13 @@ func _open_resource_browser(workspace: EditorWorkspace, on_pick: Callable) -> vo
 	_resource_browser.open(workspace, on_pick)
 
 
+## Open the in-app resource picker over an explicit file list (kind-independent), for resource
+## types the C++ index does not register (e.g. .adm). Public so inspectors can offer a scoped
+## picker via the workspace's editor_shell. `on_pick` receives the chosen entry's name.
+func open_file_picker(title: String, files: PackedStringArray, on_pick: Callable) -> void:
+	_resource_browser.open_files(title, files, on_pick)
+
+
 # Resolves the active workspace's current resource path for the browser's
 # "(open)" marker; the environment popup retargets it to the environment
 # workspace. Stays on the shell (reads popup/workspace state) and is injected

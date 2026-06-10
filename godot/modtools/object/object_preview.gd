@@ -4,6 +4,7 @@ extends Control
 const FlyCameraScript = preload("res://engine/fly_camera.gd")
 const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd")
 const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
+const CollisionHull = preload("res://engine/object/collision_hull.gd")
 
 var object_data: NovaObjectData
 
@@ -16,17 +17,27 @@ var _environment: NovaEnvironment
 var _camera: Camera3D
 var _grid_material: StandardMaterial3D
 var _axis_material: StandardMaterial3D
+var _collision_materials: Dictionary = {}
 var _environment_file: EnvFile
 var _environment_time := 1200.0
 var _wireframe := false
 var _grid_visible := true
 var _axes_visible := true
+var _collision_visible := false
 var _has_framed := false
 
 var _material_defs: Dictionary = {}
 var _robj_nodes: Dictionary = {}
 var _surface_material_indices: PackedInt32Array = PackedInt32Array()
 var _surface_materials: Array = []
+
+var _skeletal                   # NovaSkeletalAnim, or null
+var _last_anim_error := ""
+
+var _arms_model                 # NovaObjectModel arms overlay, or null
+var _arms_data: NovaObjectData
+var _current_clip := ""         # active clip key, mirrored onto the arms overlay
+var _last_arms_error := ""
 
 
 func _ready() -> void:
@@ -47,6 +58,7 @@ func set_object_data(value: NovaObjectData) -> void:
 		_model.set_object_data(value)
 		_sync_model_debug_refs()
 		_refresh_preview_guides()
+		_refresh_collision_overlay()
 
 
 func get_object_model():
@@ -106,6 +118,7 @@ func _build_viewport() -> void:
 	_axis_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_axis_material.vertex_color_use_as_albedo = true
 	_axis_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+
 	_add_axis_gizmo()
 	set_wireframe(_wireframe)
 	_refresh_preview_guides()
@@ -118,11 +131,118 @@ func is_playing() -> bool:
 func set_playing(value: bool) -> void:
 	if _model != null:
 		_model.set_playing(value)
+	if _arms_model != null:
+		_arms_model.set_playing(value)
 
 
 func reset_animation_time() -> void:
 	if _model != null:
 		_model.reset_animation_time()
+	if _arms_model != null:
+		_arms_model.reset_animation_time()
+
+
+# --- Skeletal animation preview (.bad/.adm smoke test) --------------------------
+# Load a model's animation set from the mounted resource root (its .adm names the .bad
+# clips), bind it to the model (builds the Skeleton3D + Skin when the model is skinned),
+# and return the available clip keys. Empty on failure (see get_animation_error()).
+func load_animation_set(adm_name: String, resource_root) -> PackedStringArray:
+	_skeletal = null
+	_last_anim_error = ""
+	if _model == null:
+		_last_anim_error = "No model"
+		return PackedStringArray()
+	if resource_root == null:
+		_last_anim_error = "No resource directory mounted"
+		_model.set_skeletal_anim(null)
+		return PackedStringArray()
+	if adm_name.strip_edges().is_empty():
+		_last_anim_error = "Enter a .adm name"
+		_model.set_skeletal_anim(null)
+		return PackedStringArray()
+	var sk := NovaSkeletalAnim.new()
+	if not sk.load_from_resource_root(resource_root, adm_name):
+		_last_anim_error = sk.get_last_error()
+		_model.set_skeletal_anim(null)
+		return PackedStringArray()
+	_skeletal = sk
+	_model.set_skeletal_anim(sk)
+	if _arms_model != null:
+		_arms_model.set_skeletal_anim(sk)  # the arms overlay rides the same .adm skeleton
+	return sk.get_clip_keys()
+
+
+func play_animation(clip_key: String) -> void:
+	_current_clip = clip_key
+	if _model != null:
+		_model.play_body_clip(clip_key)
+	if _arms_model != null:
+		_arms_model.play_body_clip(clip_key)
+
+
+func clear_animation_set() -> void:
+	_skeletal = null
+	_current_clip = ""
+	if _model != null:
+		_model.set_skeletal_anim(null)
+	if _arms_model != null:
+		_arms_model.set_skeletal_anim(null)
+
+
+func get_animation_error() -> String:
+	return _last_anim_error
+
+
+func has_skeleton() -> bool:
+	return _model != null and _model.has_skeleton()
+
+
+# --- Arms overlay (first-person view model: skinned arms riding the same .adm skeleton) ---------
+# Load a SECOND .3di (e.g. ArmsG.3di) into a sibling model that shares the main model's
+# NovaSkeletalAnim, so the arms animate together with the weapon/body. Returns false on failure
+# (see get_arms_error()). With no .adm loaded yet the arms render static at rest; load_animation_set()
+# rebinds them when an .adm is loaded.
+func load_arms(arms_name: String, resource_root) -> bool:
+	_last_arms_error = ""
+	if resource_root == null:
+		_last_arms_error = "No resource directory mounted"
+		return false
+	if arms_name.strip_edges().is_empty():
+		_last_arms_error = "Pick a .3di"
+		return false
+	var data := NovaObjectData.new()
+	var err := data.open_from_resource_root(resource_root, arms_name)
+	if err != OK:
+		_last_arms_error = "Could not load %s (error %d)" % [arms_name, err]
+		return false
+	_arms_data = data
+	if _arms_model == null:
+		_arms_model = NovaObjectModelScript.new()
+		_arms_model.name = "NovaArmsModel"
+		_root.add_child(_arms_model)
+		_arms_model.set_environment_node(_environment)
+	_arms_model.set_object_data(data)
+	_arms_model.set_skeletal_anim(_skeletal)  # share the main model's .adm skeleton (may be null)
+	_arms_model.set_playing(_model.is_playing() if _model != null else true)
+	if not _current_clip.is_empty():
+		_arms_model.play_body_clip(_current_clip)
+	return true
+
+
+func clear_arms() -> void:
+	_arms_data = null
+	if _arms_model != null:
+		_root.remove_child(_arms_model)
+		_arms_model.queue_free()
+		_arms_model = null
+
+
+func has_arms() -> bool:
+	return _arms_model != null
+
+
+func get_arms_error() -> String:
+	return _last_arms_error
 
 
 func get_animation_time_ms() -> int:
@@ -172,6 +292,69 @@ func is_axes_visible() -> bool:
 func set_axes_visible(value: bool) -> void:
 	_axes_visible = value
 	_apply_guide_visibility()
+
+
+func is_collision_visible() -> bool:
+	return _collision_visible
+
+
+func set_collision_visible(value: bool) -> void:
+	_collision_visible = value
+	_refresh_collision_overlay()
+
+
+func has_collision() -> bool:
+	return object_data != null and object_data.has_method("has_collision") and object_data.has_collision()
+
+
+# Rebuild the collision-volume overlay: one ConvexPolygonShape3D per parsed
+# collision volume (the exact hulls mission picking will use), drawn via Godot's
+# own collision debug wireframe (Shape3D.get_debug_mesh) and colored by collidable
+# type. The hulls come back in model-local space (the (y,z,x) collision frame), so
+# parenting under _guide_root -- a sibling of the model at the same root transform --
+# lands them on the rendered model with no extra offset, which is the whole point of
+# validating here first.
+func _refresh_collision_overlay() -> void:
+	if _guide_root == null:
+		return
+	for child in _guide_root.get_children():
+		if child.name == "ObjectCollision":
+			_guide_root.remove_child(child)
+			child.free()
+	if not _collision_visible or object_data == null or not object_data.has_method("get_collision_volumes"):
+		return
+	var volumes: Array = object_data.get_collision_volumes()
+	if volumes.is_empty():
+		return
+	var root := Node3D.new()
+	root.name = "ObjectCollision"
+	_guide_root.add_child(root)
+	for v in volumes:
+		var pts: PackedVector3Array = CollisionHull.hull_points(v)
+		if pts.size() < 4:
+			continue
+		var shape := ConvexPolygonShape3D.new()
+		shape.points = pts
+		var mi := MeshInstance3D.new()
+		mi.mesh = shape.get_debug_mesh()
+		mi.material_override = _collision_material_for(int((v as Dictionary).get("type", 0)))
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(mi)
+
+
+# An unshaded, depth-test-off material colored by collidable type (cached per type
+# so all volumes of a type share one). Drawn through the model so enclosed volumes
+# stay visible.
+func _collision_material_for(type: int) -> StandardMaterial3D:
+	if _collision_materials.has(type):
+		return _collision_materials[type]
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = CollisionHull.color_for_type(type)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.no_depth_test = true
+	_collision_materials[type] = m
+	return m
 
 
 # Apply the current grid/axes visibility to the live guide nodes. The grid is

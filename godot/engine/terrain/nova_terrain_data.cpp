@@ -8,6 +8,7 @@
 #include <terrain/brush.h>
 #include <terrain/cdep_constraint.h>
 #include <terrain/coords.h>
+#include <terrain/height_field.h>
 #include <terrain/lighting.h>
 
 #include <godot_cpp/classes/image.hpp>
@@ -191,6 +192,24 @@ bool resolve_world_sample(const opennova::TrnConfig &trn,
 	out_sample.source_x = r.source_x;
 	out_sample.source_z = r.source_z;
 	return r.valid;
+}
+
+// Builds a portable TerrainHeightField over the loaded CPT depth buffer + TRN
+// sector layout, the shared libs/terrain sampler the runtime AI also uses. The
+// height samplers don't read water, so it's left default here; the AI-grounding
+// field (NovaSimulation::set_terrain_height_field) supplies the water plane.
+opennova::terrain::TerrainHeightField height_field_from(const opennova::CptFile &cpt,
+                                                        const opennova::TrnConfig &trn) {
+	opennova::terrain::TerrainHeightField field;
+	if (cpt.depth_buffer.empty()) {
+		return field;
+	}
+	field.heightmap = cpt.depth_buffer.data();
+	field.dim = static_cast<int>(std::sqrt(static_cast<double>(cpt.depth_buffer.size())));
+	field.layout.sector_grid = &trn.sector_grid[0][0];
+	field.layout.origin_x = trn.origin_x;
+	field.layout.origin_y = trn.origin_y;
+	return field;
 }
 
 // Builds the editor-mode sector layout from the GDScript-exposed members. The
@@ -1248,77 +1267,26 @@ Ref<Image> NovaTerrainData::heightmap_image_from_raw16(const PackedByteArray &p_
 	return Image::create_from_data(side, side, false, Image::FORMAT_RF, floats);
 }
 
+// The three height queries now delegate to the shared libs/terrain sampler
+// (terrain/height_field.h) so the runtime AI grounding + the editor sample one
+// implementation. Bodies were lifted verbatim into height_field.cpp; this class
+// keeps only the loaded-guard + world->Godot coordinate boundary.
 float NovaTerrainData::get_height(const Vector3 &p_world_pos) const {
 	if (!loaded || cpt.depth_buffer.empty()) return 0.0f;
-
-	// Port of gobj_trn_sample_height_bilinear (0x100314A1)
-	int hm_size = (int)std::sqrt((double)cpt.depth_buffer.size());
-	if (hm_size <= 0) return 0.0f;
-	int mask = hm_size - 1;
-	int ix = (int)std::floor(p_world_pos.x);
-	int iz = (int)std::floor(p_world_pos.z);
-	float fx = p_world_pos.x - (float)ix;
-	float fz = p_world_pos.z - (float)iz;
-	int x0 = ix & mask, x1 = (ix + 1) & mask;
-	int z0 = iz & mask, z1 = (iz + 1) & mask;
-	float h00 = (float)cpt.depth_buffer[z0 * hm_size + x0];
-	float h10 = (float)cpt.depth_buffer[z0 * hm_size + x1];
-	float h01 = (float)cpt.depth_buffer[z1 * hm_size + x0];
-	float h11 = (float)cpt.depth_buffer[z1 * hm_size + x1];
-	float top = h00 + (h10 - h00) * fx;
-	float bot = h01 + (h11 - h01) * fx;
-	return (top + (bot - top) * fz) / 256.0f;
+	return opennova::terrain::height_field_height_bilinear(height_field_from(cpt, trn),
+	                                                        p_world_pos.x, p_world_pos.z);
 }
 
 float NovaTerrainData::get_height_world(const Vector3 &p_world_pos) const {
-	// Engine: jodemo.exe terrain world->heightmap mapping used by
-	// Terrain_SampleHeightBilinear@0x5C6770 and Terrain_GetFoliageMapValue@0x5C65E0
-	// docs/engine_spec_terrain.md 5.2, docs/engine_spec_foliage.md 4.4.4
-	if (!loaded || cpt.depth_buffer.empty()) {
-		return 0.0f;
-	}
-
-	TerrainWorldSample sample;
-	if (!resolve_world_sample(trn, p_world_pos.x, p_world_pos.z, sample)) {
-		return 0.0f;
-	}
-
-	const int hm_size = 1024;
-	const int mask = hm_size - 1;
-	const int hx = static_cast<int>(std::floor(sample.source_x)) & mask;
-	const int hz = static_cast<int>(std::floor(sample.source_z)) & mask;
-	return cpt.depth_buffer[hz * hm_size + hx] / 256.0f;
+	if (!loaded || cpt.depth_buffer.empty()) return 0.0f;
+	return opennova::terrain::height_field_height_world(height_field_from(cpt, trn),
+	                                                     p_world_pos.x, p_world_pos.z);
 }
 
 float NovaTerrainData::get_height_world_bilinear(const Vector3 &p_world_pos) const {
-	// Engine: jodemo.exe Terrain_SampleHeightBilinear@0x5C6770
-	// docs/engine_spec_terrain.md 5.2
-	if (!loaded || cpt.depth_buffer.empty()) {
-		return 0.0f;
-	}
-
-	TerrainWorldSample sample;
-	if (!resolve_world_sample(trn, p_world_pos.x, p_world_pos.z, sample)) {
-		return 0.0f;
-	}
-
-	const int hm_size = 1024;
-	const int mask = hm_size - 1;
-	const int ix = static_cast<int>(std::floor(sample.source_x));
-	const int iz = static_cast<int>(std::floor(sample.source_z));
-	const float fx = sample.source_x - static_cast<float>(ix);
-	const float fz = sample.source_z - static_cast<float>(iz);
-	const int x0 = ix & mask;
-	const int x1 = (ix + 1) & mask;
-	const int z0 = iz & mask;
-	const int z1 = (iz + 1) & mask;
-	const float h00 = static_cast<float>(cpt.depth_buffer[z0 * hm_size + x0]);
-	const float h10 = static_cast<float>(cpt.depth_buffer[z0 * hm_size + x1]);
-	const float h01 = static_cast<float>(cpt.depth_buffer[z1 * hm_size + x0]);
-	const float h11 = static_cast<float>(cpt.depth_buffer[z1 * hm_size + x1]);
-	const float top = h00 + (h10 - h00) * fx;
-	const float bot = h01 + (h11 - h01) * fx;
-	return (top + (bot - top) * fz) / 256.0f;
+	if (!loaded || cpt.depth_buffer.empty()) return 0.0f;
+	return opennova::terrain::height_field_height_world_bilinear(height_field_from(cpt, trn),
+	                                                              p_world_pos.x, p_world_pos.z);
 }
 
 Color NovaTerrainData::get_colormap_color_world(float world_x, float world_z) const {

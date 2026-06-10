@@ -497,6 +497,15 @@ THREEDI_EXPORT int threedi_ir_read(const char *path, ThreediModelIR *out);
 // Returns 0 on success, -1 on error
 THREEDI_EXPORT int threedi_ir_to_3di3(const ThreediModelIR *ir, struct Threedi3di3 *out);
 
+// Compute a model's placement "ground anchor" — the point of the model that
+// should sit at an object's placed position. Resolution order:
+//   1. The first userpoint whose name matches "ground" case-insensitively.
+//   2. Otherwise parts[0].bounding_center of LOD `lod_index`.
+// The anchor is written to out[3] in the IR's native axis order (NOT swizzled):
+// callers apply their own axis convention (e.g. godot_vec3). Returns 1 when an
+// anchor was found, 0 otherwise (leaving out untouched).
+THREEDI_EXPORT int threedi_ir_ground_anchor(const ThreediModelIR *ir, int lod_index, float out[3]);
+
 #ifdef __cplusplus
 }
 #endif

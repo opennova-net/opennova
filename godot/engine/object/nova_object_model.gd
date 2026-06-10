@@ -30,11 +30,23 @@ var _surface_material_indices: PackedInt32Array = PackedInt32Array()
 var _surface_materials: Array[ShaderMaterial] = []
 var _anim_frames_by_mat: Dictionary = {}
 var _ctrl_values: Dictionary = {}
+var _part_anims: Dictionary = {}
 var _anim_time_ms: int = 0
 var _active_lod: int = 0
 var _is_playing := true
 var _model_bounds := AABB()
 var _environment_node: Node
+
+# Main-body skeletal animation (.bad/.adm via NovaSkeletalAnim). Distinct from PANM
+# (vehicle part channels above): this drives a Skeleton3D built from the .bad skeleton,
+# with the skinned meshes bound through a rest-derived Skin. _skeletal is null for static
+# / non-organic models, in which case nothing here runs and the model renders as before.
+var _skeletal                       # NovaSkeletalAnim, or null
+var _skeleton: Skeleton3D           # built in rebuild() when skinned + _skeletal loaded
+var _skeleton_skin: Skin
+var _anim_key := ""                 # active clip key (ADM key, e.g. "anim_walk")
+var _anim_time := 0.0               # playhead seconds into the active clip
+var _anim_playing := false
 
 
 func _ready() -> void:
@@ -47,6 +59,7 @@ func set_object_data(value: NovaObjectData) -> void:
 	if object_data != null and object_data.object_changed.is_connected(_on_object_changed):
 		object_data.object_changed.disconnect(_on_object_changed)
 	object_data = value
+	_part_anims.clear()
 	_active_lod = _clamp_lod_index(_active_lod)
 	if object_data != null and not object_data.object_changed.is_connected(_on_object_changed):
 		object_data.object_changed.connect(_on_object_changed, CONNECT_DEFERRED)
@@ -92,7 +105,63 @@ func set_playing(value: bool) -> void:
 
 func reset_animation_time() -> void:
 	_anim_time_ms = 0
+	_anim_time = 0.0
 	_apply_runtime_state(0.0)
+
+
+# --- Main-body skeletal animation (.bad/.adm) -----------------------------------
+# A NovaSkeletalAnim carries the parsed/sampled skeleton + clips for this model. Setting
+# it (then a skinned model) makes rebuild() build the Skeleton3D + Skin; play_body_clip
+# selects the active clip the per-frame pass poses. Both the object-editor preview and the
+# mission present pass drive these, so organic bodies animate from one path.
+func set_skeletal_anim(skeletal) -> void:
+	_skeletal = skeletal
+	_anim_key = ""
+	_anim_time = 0.0
+	_anim_playing = false
+	rebuild()
+
+
+func get_skeletal_anim():
+	return _skeletal
+
+
+func get_skeleton() -> Skeleton3D:
+	return _skeleton
+
+
+func has_skeleton() -> bool:
+	return _skeleton != null
+
+
+## Play a main-body clip by ADM key (e.g. "anim_walk"). No-op if no skeletal set / unknown.
+func play_body_clip(key: String) -> void:
+	if _skeletal == null or not _skeletal.has_clip(key):
+		return
+	_anim_key = key
+	_anim_time = 0.0
+	_anim_playing = true
+
+
+func stop_body_clip() -> void:
+	_anim_playing = false
+
+
+func get_active_body_clip() -> String:
+	return _anim_key
+
+
+## Play a main-body animation by canonical AI slot (opennova::world::BodyAnim). Resolves the
+## slot to a clip key via the loaded NovaSkeletalAnim (with idle/reset fallback) and plays it.
+## Idempotent: a repeated same-slot call (every present tick) does not restart a playing loop.
+## No-op without a skeletal set or for slot < 0. This is the present pass's body-anim entry point.
+func play_body_anim(slot: int) -> void:
+	if _skeletal == null or slot < 0:
+		return
+	var key: String = _skeletal.slot_to_key(slot)
+	if key.is_empty() or key == _anim_key:
+		return
+	play_body_clip(key)
 
 
 func get_animation_time_ms() -> int:
@@ -132,11 +201,133 @@ func get_ctrl_values() -> Dictionary:
 	return _ctrl_values.duplicate(true)
 
 
+# --- Part-animation channels (PLAYPARTANIM mission action) ---
+# [orig: Jointops Entity_ApplyCommand @0x43ab60 case 0x22] PLAYPARTANIM(channel, play_type, time):
+# ANIMNUM (channel) in {1,2} selects one of two part-anim channels (slot = channel-1); ANIMPLAYTYPE
+# +1/0/-1 = forward/stop/reverse; ANIMTIME seconds = how long the part takes to cross its full range.
+# The original stores a per-channel direction + per-tick rate on the AI struct and a per-frame consumer
+# sweeps a 16.16 phase (0..65536, full range in ANIMTIME at 62.5Hz), clamping at the ends; it is
+# velocity-from-current (it does NOT reset the phase). We drive part channel `slot` through the model's
+# PANM control register at index `slot`, value 0..65535 == that phase, fed to evaluate_panm() each frame.
+# See notes/mission/anim-ai-grill-2026-06-07.md.
+
+## Play a model part animation, mirroring the runtime PLAYPARTANIM action so editor preview and host
+## playback share one path. channel: 1 or 2. play_type: 1 play / 0 stop / -1 reverse. time_s: seconds
+## for the part to traverse its full range (ANIMTIME).
+func play_part_anim(channel: int, play_type: int, time_s: float) -> void:
+	var slot := channel - 1
+	if slot < 0 or slot > 1:
+		return  # the original validates channel in {1,2}; anything else is ignored
+	var register := _resolve_anim_channel_register(slot)
+	if register.is_empty():
+		return
+	if play_type == 0:
+		_part_anims.erase(register)  # Stop: freeze the part at its current value
+		return
+	var dir := 1 if play_type > 0 else -1
+	var speed := 65535.0 / time_s if time_s > 0.0 else 1.0e9  # full range crossed in time_s seconds
+	_part_anims[register] = {
+		"register": register,
+		"dir": dir,
+		"speed": speed,
+		"value": float(int(_ctrl_values.get(register, 0))),  # velocity from current (no reset)
+	}
+
+
+## Editor-preview convenience: seed the channel at its rest start (0 forward / max reverse) then play,
+## so a preview always shows the full motion from rest. The runtime uses play_part_anim directly
+## (velocity-from-current, faithful to the action); only the editor preview restarts.
+func restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
+	var slot := channel - 1
+	if slot < 0 or slot > 1:
+		return
+	var register := _resolve_anim_channel_register(slot)
+	# Stop (play_type == 0) must freeze the part where it is, so do NOT reseed the register: reseeding
+	# to 0 would jump the part to its 0 pose before play_part_anim's stop erases the channel. Only the
+	# forward/reverse previews seed a rest start (0 forward / max reverse).
+	if not register.is_empty() and play_type != 0:
+		_ctrl_values[register] = 0 if play_type >= 0 else 65535
+	play_part_anim(channel, play_type, time_s)
+
+
+## Pose a part channel directly to an engine-computed phase (0..65535 == 0..1 over the part's range).
+## The faithful runtime path: NovaSimulation/the AI brain integrates the PLAYPARTANIM phase in-engine
+## (Entity_ApplyCommand @0x43ab60 + the per-frame consumer), and the host just writes it to the PANM
+## control register here. Distinct from play_part_anim (the editor/object-preview host-side integrator).
+func set_part_phase(channel: int, phase: int) -> void:
+	var register := _resolve_anim_channel_register(channel - 1)
+	if register.is_empty():
+		return
+	_part_anims.erase(register)  # the engine owns this channel's phase; no host integrator on it
+	_ctrl_values[register] = clampi(phase, 0, 65535)
+
+
+## Stop a single channel's part animation (freeze in place); no-op if the channel is not animating.
+func stop_part_anim(channel: int) -> void:
+	var register := _resolve_anim_channel_register(channel - 1)
+	if not register.is_empty():
+		_part_anims.erase(register)
+
+
+func clear_part_anims() -> void:
+	_part_anims.clear()
+
+
+func get_active_part_anims() -> Dictionary:
+	return _part_anims.duplicate(true)
+
+
+# [orig: ANIMNUM channel (1/2) -> part-anim slot 0/1 -> the model's PANM control register at index `slot`.]
+func _resolve_anim_channel_register(slot: int) -> String:
+	if object_data == null or not object_data.has_method("get_control_registers"):
+		return ""
+	var regs: Array = object_data.get_control_registers()
+	if slot < 0 or slot >= regs.size():
+		return ""
+	return String((regs[slot] as Dictionary).get("name", ""))
+
+
+# Advance each active channel's phase toward its endpoint at the authored speed, clamping at [0,65535].
+# Writes straight into _ctrl_values (NOT set_ctrl_value, which would eagerly re-evaluate per channel);
+# the enclosing _apply_runtime_state applies the result once, in the same frame, to materials + PANM.
+func _advance_part_anims(delta: float) -> void:
+	if _part_anims.is_empty() or delta <= 0.0:
+		return
+	var finished: Array = []
+	for register in _part_anims.keys():
+		var anim: Dictionary = _part_anims[register]
+		var value := clampf(float(anim["value"]) + float(anim["speed"]) * float(anim["dir"]) * delta, 0.0, 65535.0)
+		anim["value"] = value
+		_ctrl_values[register] = int(round(value))
+		if (int(anim["dir"]) > 0 and value >= 65535.0) or (int(anim["dir"]) < 0 and value <= 0.0):
+			finished.append(register)  # reached the clamp endpoint; the part holds there
+	for register in finished:
+		_part_anims.erase(register)
+
+
+# Pose the Skeleton3D from the active main-body clip. Advances the playhead while playing,
+# evaluates the parent-local pose per bone (NovaSkeletalAnim, Godot space) and writes it as
+# the bone pose. With no active clip the bones stay at their reset (== bind) pose.
+func _advance_body_anim(delta: float) -> void:
+	if _skeleton == null or _skeletal == null or _anim_key.is_empty():
+		return
+	if _is_playing and _anim_playing:
+		_anim_time += delta
+	var pose: Array = _skeletal.eval_pose(_anim_key, _anim_time)
+	var count: int = mini(pose.size(), _skeleton.get_bone_count())
+	for i in range(count):
+		var t: Transform3D = pose[i]
+		_skeleton.set_bone_pose_position(i, t.origin)
+		_skeleton.set_bone_pose_rotation(i, t.basis.get_rotation_quaternion())
+
+
 func rebuild() -> void:
 	for child in get_children():
 		remove_child(child)
 		child.queue_free()
 	_robj_nodes.clear()
+	_skeleton = null
+	_skeleton_skin = null
 	_surface_material_indices.clear()
 	_surface_materials.clear()
 	_anim_frames_by_mat.clear()
@@ -148,7 +339,15 @@ func rebuild() -> void:
 
 	_material_defs = _build_material_defs()
 	_active_lod = _clamp_lod_index(_active_lod)
-	var submeshes: Array = object_data.build_lod_submeshes(_active_lod) if object_data.has_method("build_lod_submeshes") else []
+	# A loaded .adm drives the model: build a Skeleton3D from its .bad skeleton. This applies to
+	# BOTH per-vertex skinned models (organic bodies/arms) AND rigid models (first-person weapons) --
+	# rigid parts ride a bone via "fake skinning" (build_lod_submeshes(skeletal=true)). Without a
+	# .adm, no skeleton is built and the model renders static exactly as before.
+	var skeletal_mode: bool = _skeletal != null and _skeletal.is_loaded()
+	if skeletal_mode:
+		_build_skeleton()
+	var bone_count: int = _skeleton.get_bone_count() if skeletal_mode and _skeleton != null else 0
+	var submeshes: Array = object_data.build_lod_submeshes(_active_lod, skeletal_mode, bone_count) if object_data.has_method("build_lod_submeshes") else []
 	if submeshes.is_empty():
 		submeshes = _legacy_submeshes_from_surfaces(_active_lod)
 	for entry in submeshes:
@@ -158,12 +357,19 @@ func rebuild() -> void:
 			continue
 		var robj_index := int(submesh.get("robj_index", submesh.get("part_index", 0)))
 		var material_index := int(submesh.get("material_index", 0))
-		var node := _get_or_create_robj_node(robj_index)
 		var instance := MeshInstance3D.new()
 		instance.mesh = mesh
 		var material := _material_for_index(material_index)
 		instance.material_override = material
-		node.add_child(instance)
+		# Skinned + rigid-fake-skinned submeshes bind to the shared Skeleton3D; everything else
+		# stays under its render-object (Robj) part node so PANM part transforms keep working.
+		if skeletal_mode and _skeleton != null and bool(submesh.get("is_skinned", false)):
+			_skeleton.add_child(instance)
+			instance.skin = _skeleton_skin
+			instance.skeleton = instance.get_path_to(_skeleton)
+		else:
+			var node := _get_or_create_robj_node(robj_index)
+			node.add_child(instance)
 		_surface_material_indices.append(material_index)
 		_surface_materials.append(material)
 		_collect_anim_frames(material_index)
@@ -171,6 +377,29 @@ func rebuild() -> void:
 	_apply_robj_transforms()
 	_apply_runtime_state(0.0)
 	_set_model_bounds(_compute_transformed_mesh_bounds())
+
+
+# Build the Skeleton3D + rest-derived Skin from the loaded NovaSkeletalAnim. Bones come from
+# the .bad skeleton (names/parents/parent-local bind rest). The Skin binds each bone with its
+# global-rest inverse (create_skin_from_rest_transforms), so a skinned mesh renders exactly at
+# rest when the pose equals the rest -- making the rest render independent of the (animated)
+# coordinate convention. [orig: BoneFile_Load @0x40fff0 builds the runtime skeleton.]
+func _build_skeleton() -> void:
+	_skeleton = Skeleton3D.new()
+	_skeleton.name = "Skeleton3D"
+	add_child(_skeleton)
+	var bones: Array = _skeletal.get_skeleton_bones()
+	for b in bones:
+		_skeleton.add_bone(String((b as Dictionary).get("name", "bone")))
+	for i in range(bones.size()):
+		var bd: Dictionary = bones[i]
+		var parent := int(bd.get("parent_index", -1))
+		if parent >= 0 and parent < _skeleton.get_bone_count() and parent != i:
+			_skeleton.set_bone_parent(i, parent)
+		_skeleton.set_bone_rest(i, bd.get("rest", Transform3D()))
+	for i in range(_skeleton.get_bone_count()):
+		_skeleton.reset_bone_pose(i)
+	_skeleton_skin = _skeleton.create_skin_from_rest_transforms()
 
 
 func _on_object_changed() -> void:
@@ -274,6 +503,8 @@ func _apply_runtime_state(delta: float) -> void:
 		return
 	if _is_playing:
 		_anim_time_ms = (_anim_time_ms + int(delta * 1000.0)) & 0x7fffffff
+	_advance_part_anims(delta)
+	_advance_body_anim(delta)
 	for i in range(_surface_materials.size()):
 		var material := _surface_materials[i]
 		if material == null:

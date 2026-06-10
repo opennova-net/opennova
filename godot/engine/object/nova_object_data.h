@@ -112,6 +112,7 @@ public:
 
 	int get_material_count() const;
 	Array get_lod_surfaces(int p_lod_index) const;
+	bool is_skinned(int p_lod_index) const;
 	Array get_materials() const;
 	Dictionary get_material_info(int p_index) const;
 	bool set_material_field(int p_index, const String &p_key, const Variant &p_value);
@@ -130,6 +131,9 @@ public:
 	bool set_light_field(int p_index, const String &p_key, const Variant &p_value);
 	int get_user_point_count() const;
 	Dictionary get_user_point_info(int p_index) const;
+	Vector3 get_ground_anchor(int p_lod_index = 0) const;
+	bool has_collision() const;
+	Array get_collision_volumes() const;
 	int get_part_anim_count(int p_lod_index) const;
 	Array get_part_animations(int p_lod_index) const;
 	Array get_part_anim_editor_entries(int p_lod_index) const;
@@ -145,7 +149,7 @@ public:
 	bool set_part_anim_field(int p_lod_index, int p_anim_index, const String &p_key, const Variant &p_value);
 	bool set_part_anim_track_field(int p_lod_index, int p_anim_index, const String &p_track, const String &p_key, const Variant &p_value);
 	Dictionary get_render_lod_info(int p_lod_index) const;
-	Array build_lod_submeshes(int p_lod_index) const;
+	Array build_lod_submeshes(int p_lod_index, bool p_skeletal = false, int p_bone_count = 0) const;
 	Dictionary eval_material_runtime(int p_index, int p_time_ms, const Dictionary &p_ctrl_values) const;
 	int compute_anim_frame(int p_index, int p_time_ms, const Dictionary &p_ctrl_values) const;
 	Dictionary evaluate_panm(int p_lod_index, int p_time_ms, const Dictionary &p_ctrl_values) const;

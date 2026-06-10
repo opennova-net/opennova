@@ -29,6 +29,11 @@ foreach(test ctrl decode runtime wave)
     add_test(NAME threedi_panm_${test} COMMAND threedi_panm_${test}_test)
 endforeach()
 
+# Placement ground-anchor resolution (ground userpoint, else part-0 bounding center)
+add_executable(threedi_ground_anchor_test threedi/ground_anchor_test.cpp)
+target_link_libraries(threedi_ground_anchor_test PRIVATE opennova_threedi)
+target_include_directories(threedi_ground_anchor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_ground_anchor COMMAND threedi_ground_anchor_test)
 
 # ADM tests
 foreach(test comment trim_value parse write)
@@ -49,6 +54,13 @@ target_link_libraries(bad_roundtrip_test PRIVATE opennova_bad)
 target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
 
+# ANIM skeletal sampler (libs/anim): coordinate conventions, quaternion helpers, and
+# world<->local self-consistency on the real BINOC.bad fixture.
+add_executable(anim_sample_test anim/anim_sample_test.cpp)
+target_link_libraries(anim_sample_test PRIVATE opennova_anim opennova_bad)
+target_include_directories(anim_sample_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_sample_test PRIVATE cxx_std_17)
+add_test(NAME anim_sample COMMAND anim_sample_test)
 
 # DEF tests
 add_executable(def_comment_strip_test def/def_comment_strip_test.cpp)
@@ -95,7 +107,7 @@ target_include_directories(lwf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 add_test(NAME lwf_roundtrip COMMAND lwf_roundtrip_test)
 
 # The menu sound profile (fixtures/menu_sound/menu.LWF): trigger sets resolve to
-# loose .wav members (drives MNU hover/click in the menu slice).
+# loose .wav members (drives MNU hover/click via NovaMnuMenu).
 add_executable(menu_lwf_test lwf/menu_lwf_test.cpp)
 target_link_libraries(menu_lwf_test PRIVATE opennova_lwf)
 target_include_directories(menu_lwf_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -108,8 +120,8 @@ target_link_libraries(dbf_roundtrip_test PRIVATE opennova_dbf)
 target_include_directories(dbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME dbf_roundtrip COMMAND dbf_roundtrip_test)
 
-# Audio sound-set member selection (engine-faithful: sequential / random-anchor
-# cycle / random default, stream-pinned RNG), pushed down from nova_sound_bank.gd.
+# Audio sound-set member selection state machine (FIRST/RANDOM/SEQUENTIAL/RANDOM_SEQ),
+# pushed down from nova_sound_bank.gd into libs/audio.
 add_executable(sound_selector_test audio/sound_selector_test.cpp)
 target_link_libraries(sound_selector_test PRIVATE opennova_audio)
 target_include_directories(sound_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -713,6 +725,14 @@ target_include_directories(infantry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(infantry_test PRIVATE cxx_std_17)
 add_test(NAME infantry COMMAND infantry_test)
 
+# Root-motion track grill vs real JO clips (AnimMap_UpdateEntity @0x40b5f0): the .bad
+# events array is the per-frame root record; rec[3] = cumulative forward distance whose
+# 16.16 delta drives the infantry motor. Asset-gated: absent files skip (CI-safe).
+add_executable(root_motion_test anim/root_motion_test.cpp)
+target_link_libraries(root_motion_test PRIVATE opennova_bad)
+target_include_directories(root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(root_motion_test PRIVATE cxx_std_17)
+add_test(NAME root_motion COMMAND root_motion_test)
 
 # WAC scripting: registry oracle (165-command ISA + 28 param types from the binary),
 # VM behavior (var math, entity mutation, temporal/edge firing, env, authority),
