@@ -735,6 +735,21 @@ func _consume_pending_add_edit(stmts: Array) -> void:
 		return
 
 
+# --- Tracks-dock drag-drop ---------------------------------------------------
+
+# A track dragged from the Tracks dock drops anywhere on the view and lands a
+# play at the canonical anchor (Stage-8 carets make the gap positional).
+func _can_drop_data(_pos: Vector2, data) -> bool:
+	return _editable and data is Dictionary \
+		and String((data as Dictionary).get("kind", "")) == "mus_track"
+
+
+func _drop_data(_pos: Vector2, data) -> void:
+	if not _can_drop_data(_pos, data):
+		return
+	add_play_requested.emit(StringName(_section_name), int((data as Dictionary).get("index", -1)))
+
+
 # --- introspection (tests + host) -------------------------------------------
 
 # The stack's statement rows/blocks in program order (cards/dividers excluded).

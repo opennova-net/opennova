@@ -250,15 +250,12 @@ func test_drill_into_swaps_map_for_logic_graph():
 	var sec := String(begin.get_meta("section", ""))
 	lm._drill_into(sec)
 	await get_tree().process_frame
-	assert_true(lm._logic_graph.visible, "logic graph shown after drill-in")
+	assert_true(lm._program_view.visible, "program view shown after drill-in")
 	assert_false(lm.get_node("%SectionMap").visible, "map hidden while drilled in")
-	var lg_nodes := 0
-	for c in lm._logic_graph.get_children():
-		if c is GraphNode:
-			lg_nodes += 1
-	assert_gt(lg_nodes, 0, "logic graph built nodes for the section")
+	assert_gt((lm._program_view.top_level_rows() as Array).size(), 0,
+		"the program view built rows for the section")
 	lm._back_to_map()
-	assert_false(lm._logic_graph.visible, "Back hides the logic graph")
+	assert_false(lm._program_view.visible, "Back hides the program view")
 	assert_true(lm.get_node("%SectionMap").visible, "Back restores the map")
 
 
@@ -270,11 +267,11 @@ func test_new_project_opens_start_blueprint():
 	await get_tree().process_frame
 	lm._on_new_project_pressed()
 	await get_tree().process_frame
-	assert_true(lm._logic_graph.visible, "New music program opens the start state's blueprint")
+	assert_true(lm._program_view.visible, "New music program opens the start state's blueprint")
 	assert_false(lm.get_node("%SectionMap").visible, "map hides while the new start blueprint is open")
 	assert_eq(lm._logic_section_name, "Begin", "new projects drill into the generated Begin state")
-	assert_not_null(_node_titled(_nodes(lm._logic_graph), "Empty state"),
-		"the new start blueprint shows the first-action empty-state hint")
+	assert_not_null(lm._program_view.empty_hint(),
+		"the new start program shows the first-step empty-state hint")
 
 
 func test_added_state_is_badged_as_unlinked_until_connected():
@@ -288,7 +285,7 @@ func test_added_state_is_badged_as_unlinked_until_connected():
 	lm._back_to_map()
 	lm._on_add_state()
 	await get_tree().process_frame
-	assert_true(lm._logic_graph.visible, "Add State opens the new state's blueprint")
+	assert_true(lm._program_view.visible, "Add State opens the new state's blueprint")
 	assert_string_contains(lm._breadcrumb_label.text, "unlinked",
 		"new unreachable states are called out in the breadcrumb")
 	lm._back_to_map()
@@ -314,7 +311,7 @@ func test_map_node_has_direct_blueprint_button():
 		return
 	open_btn.pressed.emit()
 	await get_tree().process_frame
-	assert_true(lm._logic_graph.visible, "pressing the node button opens the blueprint")
+	assert_true(lm._program_view.visible, "pressing the node button opens the blueprint")
 	assert_eq(lm._logic_section_name, String(begin.get_meta("section", "")),
 		"button opens that state, not a hard-coded section")
 
@@ -377,11 +374,11 @@ func test_read_only_blueprint_keeps_add_palette_with_reason():
 	lm._document = ReadOnlyDocument.new()
 	lm._drill_into("Begin")
 	await get_tree().process_frame
-	var add_menu := _button_with_text(lm._logic_graph.get_menu_hbox(), "＋ Add")
-	assert_not_null(add_menu, "read-only blueprint still shows the Add palette")
+	var add_menu: MenuButton = lm._program_view.add_menu_button()
+	assert_not_null(add_menu, "read-only program view still shows the Add palette")
 	if add_menu == null:
 		return
-	assert_true(add_menu.disabled, "read-only blueprint disables Add instead of hiding it")
+	assert_true(add_menu.disabled, "read-only program view disables Add instead of hiding it")
 	assert_eq(add_menu.tooltip_text, "Fix script errors first")
 
 
@@ -477,7 +474,7 @@ func test_states_sidebar_click_navigates_and_mirrors_location():
 	assert_gt(begin_row, 0, "Begin present in the sidebar")
 	list.item_selected.emit(begin_row)
 	await get_tree().process_frame
-	assert_true(lm._logic_graph.visible, "sidebar click opens the state's blueprint")
+	assert_true(lm._program_view.visible, "sidebar click opens the state's blueprint")
 	assert_eq(lm._logic_section_name, "Begin")
 	assert_true(list.is_selected(begin_row), "sidebar selection mirrors the open state")
 	list.item_selected.emit(0)
@@ -498,7 +495,7 @@ func test_from_scratch_add_state_reachable_while_drilled():
 	await get_tree().process_frame
 	lm._on_new_project_pressed()
 	await get_tree().process_frame
-	assert_true(lm._logic_graph.visible, "from-scratch lands in Begin's blueprint")
+	assert_true(lm._program_view.visible, "from-scratch lands in Begin's blueprint")
 	assert_false(lm._map_toolbar.visible, "the map toolbar (old Add State home) is hidden here")
 	var side_add: Button = lm._sidebar_add_state_btn
 	assert_not_null(side_add, "the sidebar carries a pinned Add state button")

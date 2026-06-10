@@ -6,7 +6,8 @@ const MusicSectionGraphClass = preload("res://modtools/music/music_section_graph
 const MusVarNames = preload("res://modtools/music/mus_var_names.gd")
 const MusicAudioPreviewClass = preload("res://modtools/music/music_audio_preview.gd")
 const MusicTrackChipClass = preload("res://modtools/music/ui/track_chip.gd")
-const MusicSectionLogicGraphClass = preload("res://modtools/music/ui/section_logic_graph.gd")
+const MusicSectionProgramViewClass = preload("res://modtools/music/ui/section_program_view.gd")
+const MusInputNames = preload("res://modtools/music/mus_input_names.gd")
 const MusicNavClass = preload("res://modtools/music/ui/music_nav.gd")
 
 # Most breadcrumb segments rendered before the older hops collapse into "…".
@@ -116,8 +117,10 @@ var _last_log_count: int = 0
 @onready var _canvas: Control = %Canvas
 var _add_state_btn: Button
 var _sidebar_add_state_btn: Button
-# Level-2 drill-in: the section logic graph swaps into the center canvas (Stage 2).
-var _logic_graph: GraphEdit
+# Level-2 drill-in: the state's block-stack program view swaps into the
+# center canvas (the map keeps its GraphEdit; inside a state, programs are
+# vertical lists).
+var _program_view: Control
 # Where the user is + how they got there (trail, back/forward). Every drill,
 # back-to-map, breadcrumb click and sidebar click routes through this so the
 # canvas can never disagree with the trail.
@@ -185,8 +188,8 @@ func _on_document_changed() -> void:
 	# Re-populate from the new AST; if the section vanished (deleted, or renamed out
 	# from under the breadcrumb), scrub it from the trail -- the nav lands on the
 	# previous surviving location and announces it.
-	if _logic_graph != null and _logic_graph.visible and _logic_section_name != "":
-		if not _populate_logic_graph(_logic_section_name):
+	if _program_view != null and _program_view.visible and _logic_section_name != "":
+		if not _populate_program_view(_logic_section_name):
 			_nav.remove_section(_logic_section_name)
 		else:
 			_refresh_breadcrumb_action_state()
@@ -222,9 +225,9 @@ func _ready() -> void:
 	_nav.location_changed.connect(_on_nav_location_changed)
 	# The drill-in blueprint graph is now the sole authoring surface; the right-dock
 	# inspector and the raw-script drawer are both gone. All authoring intents
-	# (add/replace/delete/reorder/add-play) route from the graph in _install_logic_graph.
+	# (add/replace/delete/reorder/add-play) route from the graph in _install_program_view.
 	_install_add_state_button()
-	_install_logic_graph()
+	_install_program_view()
 	_install_empty_state()
 	if _var_inspector.has_method("bind_director"):
 		_var_inspector.call("bind_director", _director)
@@ -268,8 +271,8 @@ func _process(_delta: float) -> void:
 			_var_inspector.call("refresh_from_director")
 		_update_live_highlight(state)
 	else:
-		if _logic_graph != null:
-			_logic_graph.set_active_offset(-1)
+		if _program_view != null:
+			_program_view.set_active_offset(-1)
 
 
 func _on_start() -> void:
@@ -475,7 +478,7 @@ func _on_section(section_name: StringName) -> void:
 	_idle_ticks = 0
 	_refresh_map()
 	_refresh_now_playing()
-	if _follow_live and _logic_graph != null and _logic_graph.visible:
+	if _follow_live and _program_view != null and _program_view.visible:
 		_drill_into(String(section_name), false)
 	_log_typed(EvType.SECTION, "section -> %s" % section_name)
 
@@ -931,8 +934,8 @@ func _build_var_list() -> Array:
 # that cached the old label. Serialization is untouched (tokens only).
 func _on_var_names_changed() -> void:
 	_refresh_var_labels()
-	if _logic_graph != null and _logic_graph.visible and _logic_section_name != "":
-		_populate_logic_graph(_logic_section_name)
+	if _program_view != null and _program_view.visible and _logic_section_name != "":
+		_populate_program_view(_logic_section_name)
 
 
 # --- Phase 2 authoring intent handlers (route to the document, keep pinned) ---
@@ -969,15 +972,59 @@ func _on_inspector_reorder_statement(section_index: int, ordinal: int, direction
 		_flash_start_warning("Can't move it further")
 
 
+func _on_program_insert_at(section_index: int, before_ordinal: int, lines: PackedStringArray) -> void:
+	if _document == null or not _document.has_method("insert_statement_at"):
+		return
+	_follow_live = false
+	if not _document.insert_statement_at(section_index, before_ordinal, lines):
+		_flash_start_warning("Couldn't add it there")
+
+
+func _on_program_move(section_index: int, ordinal: int, before_ordinal: int) -> void:
+	if _document == null or not _document.has_method("move_statement"):
+		return
+	_follow_live = false
+	if not _document.move_statement(section_index, ordinal, before_ordinal):
+		_flash_start_warning("Can't move it there")
+
+
+func _on_program_run_count(section_index: int, start_ordinal: int, old_count: int, new_count: int) -> void:
+	if _document == null or not _document.has_method("set_run_count"):
+		return
+	_follow_live = false
+	if not _document.set_run_count(section_index, start_ordinal, old_count, new_count):
+		_flash_start_warning("Couldn't resize that run")
+
+
+# A caller-input label changed on the Inputs card: persist it in the profile
+# sidecar (display-only; the script keeps its l_N tokens) and rebuild the
+# surfaces that cached the old name.
+func _on_input_renamed(section_name: String, input_index: int, label: String) -> void:
+	if _document == null or not _document.script_loaded():
+		return
+	var profile_path := ""
+	if _document.has_method("get_var_profile_path"):
+		profile_path = _document.get_var_profile_path()
+	if profile_path == "":
+		return
+	var sname := String(_document.mus_script.get_default_script_name())
+	if MusInputNames.set_input_label(profile_path, sname, section_name, input_index, label) == OK:
+		_log_typed(EvType.SYSTEM, "input renamed: %s/%d -> %s" % [section_name, input_index + 1, label])
+		if _program_view != null and _program_view.visible and _logic_section_name != "":
+			_populate_program_view(_logic_section_name)
+
+
 # Light the drilled-in blueprint statement the VM pc is on, but only while the graph
 # shows the section that is actually running -- the pc is a global bytecode offset, so
 # another section's nodes would mis-bracket it.
 func _update_live_highlight(state: int) -> void:
-	if _logic_graph != null and _logic_graph.visible:
+	if _program_view != null and _program_view.visible:
 		if state == VM_RUNNING and _logic_section_name == String(_current_section):
-			_logic_graph.set_active_offset(_director.current_pc())
+			_program_view.set_active_offset(_director.current_pc())
+			if _follow_live and _program_view.has_method("scroll_to_active"):
+				_program_view.scroll_to_active()
 		else:
-			_logic_graph.set_active_offset(-1)
+			_program_view.set_active_offset(-1)
 
 
 # --- Add State (visual-first authoring slice) --------------------------
@@ -1141,7 +1188,7 @@ func _unique_state_name() -> String:
 # and the section logic graph. The map and the logic graph share the canvas
 # stack; only one is visible at a time. The nav bar stays up whenever a script
 # is loaded -- on the map it just reads "Map" -- so back/forward always work.
-func _install_logic_graph() -> void:
+func _install_program_view() -> void:
 	var col := get_node_or_null("%CenterCol")
 	var stack := get_node_or_null("%CanvasStack")
 	if col == null or stack == null:
@@ -1202,25 +1249,29 @@ func _install_logic_graph() -> void:
 	col.move_child(_breadcrumb, 0)
 	_rebuild_breadcrumb()
 
-	_logic_graph = MusicSectionLogicGraphClass.new()
-	_logic_graph.name = "LogicGraph"
-	_logic_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_logic_graph.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_logic_graph.visible = false
-	_logic_graph.open_section_requested.connect(func(n): _drill_into(String(n)))
-	# The blueprint's authoring intents route to the document's parity-gated, undoable
-	# write path (these handlers keep their _on_inspector_* names from when the inspector
-	# shared them; the inspector is gone, the graph is the sole emitter now).
-	_logic_graph.add_statement_requested.connect(_on_inspector_add_statement)
-	_logic_graph.replace_statement_requested.connect(_on_inspector_replace_statement)
-	_logic_graph.delete_statement_requested.connect(_on_inspector_delete_statement)
-	_logic_graph.reorder_statement_requested.connect(_on_inspector_reorder_statement)
-	_logic_graph.add_play_requested.connect(_on_inspector_add_play)
-	_logic_graph.author_failed.connect(func(msg: String): _flash_start_warning(msg))
-	# An open inline edit must not be yanked away by a VM transition re-drilling
-	# the canvas: pin follow-live for the duration (re-enable resumes following).
-	_logic_graph.inline_edit_started.connect(func(): _follow_live = false)
-	stack.add_child(_logic_graph)
+	_program_view = MusicSectionProgramViewClass.new()
+	_program_view.name = "ProgramView"
+	_program_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_program_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_program_view.visible = false
+	_program_view.open_section_requested.connect(func(n): _drill_into(String(n)))
+	# The program view's authoring intents route to the document's parity-gated,
+	# undoable write path (these handlers keep their _on_inspector_* names from
+	# when the inspector shared them; the view is the sole emitter now).
+	_program_view.add_statement_requested.connect(_on_inspector_add_statement)
+	_program_view.replace_statement_requested.connect(_on_inspector_replace_statement)
+	_program_view.delete_statement_requested.connect(_on_inspector_delete_statement)
+	_program_view.reorder_statement_requested.connect(_on_inspector_reorder_statement)
+	_program_view.insert_statement_at_requested.connect(_on_program_insert_at)
+	_program_view.move_statement_requested.connect(_on_program_move)
+	_program_view.set_run_count_requested.connect(_on_program_run_count)
+	_program_view.add_play_requested.connect(_on_inspector_add_play)
+	_program_view.input_renamed.connect(_on_input_renamed)
+	_program_view.author_failed.connect(func(msg: String): _flash_start_warning(msg))
+	# An open picker/popover must not be yanked away by a VM transition
+	# re-drilling the canvas: pin follow-live (re-enable resumes following).
+	_program_view.inline_edit_started.connect(func(): _follow_live = false)
+	stack.add_child(_program_view)
 
 
 # --- State-level operations (rename / delete), re-homed from the right inspector ---
@@ -1394,7 +1445,7 @@ func _do_delete_section(section_name: String) -> void:
 # keeps following and REPLACES the current trail entry so a transitioning VM
 # doesn't flood the history with every state it enters.
 func _drill_into(section_name: String, pin: bool = true) -> void:
-	if _logic_graph == null or _document == null or not _document.script_loaded():
+	if _program_view == null or _document == null or not _document.script_loaded():
 		return
 	if pin:
 		_follow_live = false
@@ -1407,21 +1458,21 @@ func _drill_into(section_name: String, pin: bool = true) -> void:
 # on the previous surviving location.
 func _on_nav_location_changed(entry: Dictionary) -> void:
 	if String(entry.get("kind", "")) == "map":
-		if _logic_graph != null:
-			_logic_graph.visible = false
+		if _program_view != null:
+			_program_view.visible = false
 		_logic_section_name = ""
 		_set_map_chrome_visible(true)
 		if _breadcrumb_label != null:
 			_breadcrumb_label.text = ""
 	else:
 		var section_name := String(entry.get("name", ""))
-		if not _populate_logic_graph(section_name):
+		if not _populate_program_view(section_name):
 			_nav.remove_section(section_name)
 			return
 		_logic_section_name = section_name
 		if _canvas != null:
 			_canvas.visible = true
-		_logic_graph.visible = true
+		_program_view.visible = true
 		_set_map_chrome_visible(false)
 		_update_breadcrumb_status(section_name)
 		_refresh_breadcrumb_action_state()
@@ -1442,12 +1493,8 @@ func _update_breadcrumb_status(section_name: String) -> void:
 		parts.append("↻ loops to itself")
 	elif _section_is_unlinked(section_name):
 		parts.append("unlinked — nothing points here yet")
-	# The hidden frame-setup op means a caller hands this state values; say so in
-	# plain language instead of rendering engine plumbing as a node.
-	if _logic_graph != null and _logic_graph.has_method("section_inputs_count"):
-		var inputs: int = _logic_graph.section_inputs_count()
-		if inputs > 0:
-			parts.append("takes %d input%s from the caller" % [inputs, "" if inputs == 1 else "s"])
+	# Caller inputs are explained ON the canvas now (the Inputs card / the
+	# engine-events divider), not as a breadcrumb badge.
 	_breadcrumb_label.text = "   " + " · ".join(parts) if parts.size() > 0 else ""
 
 
@@ -1634,17 +1681,31 @@ func _section_is_unlinked(section_name: String) -> bool:
 # configuring its authoring context FIRST so the per-node tools + ＋Add palette
 # match the script's current editability (can_author). Returns false if the
 # section no longer exists (e.g. an edit/undo renamed or removed it).
-func _populate_logic_graph(section_name: String) -> bool:
-	if _logic_graph == null or _document == null or not _document.script_loaded():
+func _populate_program_view(section_name: String) -> bool:
+	if _program_view == null or _document == null or not _document.script_loaded():
 		return false
 	var sn := StringName(_document.mus_script.get_default_script_name())
 	var ast: Array = _document.mus_script.get_program_ast(sn)
+	# Which states take caller inputs (hidden frame ops' locals counts): the
+	# view's call rows show a "hands it values" chip for their targets.
+	var inputs_by_section := {}
+	for sec in ast:
+		var total := 0
+		for st in sec.get("statements", []):
+			if String((st as Dictionary).get("kind", "")) == "frame_enter":
+				total += int((st as Dictionary).get("locals_count", 0))
+		if total > 0:
+			inputs_by_section[String(sec.get("name", ""))] = total
+	var profile_path := ""
+	if _document.has_method("get_var_profile_path"):
+		profile_path = _document.get_var_profile_path()
 	for sec in ast:
 		if String(sec.get("name", "")) == section_name:
 			var editable: bool = _document.has_method("can_author") and _document.can_author()
 			var section_names: PackedStringArray = _document.mus_script.get_section_names(sn)
-			_logic_graph.configure_authoring(section_names, _build_var_list(), _document.mus_script, _bank_names(), editable, _authoring_blocked_reason())
-			_logic_graph.show_section(sec, _bank_names())
+			_program_view.configure_authoring(section_names, _build_var_list(), _document.mus_script,
+				_bank_names(), editable, _authoring_blocked_reason(), profile_path, inputs_by_section)
+			_program_view.show_section(sec, _bank_names())
 			return true
 	return false
 

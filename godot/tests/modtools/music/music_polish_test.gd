@@ -56,7 +56,7 @@ func test_double_click_node_drills_into_logic_graph():
 	ev.double_click = true
 	lm._on_node_gui_input(ev, "Begin")
 	await get_tree().process_frame
-	assert_true(lm._logic_graph.visible, "double-clicking a state drills into its logic graph")
+	assert_true(lm._program_view.visible, "double-clicking a state drills into its logic graph")
 	assert_false(lm.get_node("%SectionMap").visible, "the map hides while drilled in")
 
 
