@@ -202,26 +202,7 @@ static func build_channel_card(parent: VBoxContainer, node_name: String) -> VBox
 
 
 static func make_inspector_box(host: Control) -> VBoxContainer:
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", PANEL_MARGIN)
-	margin.add_theme_constant_override("margin_top", PANEL_MARGIN)
-	margin.add_theme_constant_override("margin_right", PANEL_MARGIN)
-	margin.add_theme_constant_override("margin_bottom", PANEL_MARGIN)
-	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	host.add_child(margin)
-
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	margin.add_child(scroll)
-
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 8)
-	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(box)
-	return box
+	return UiBox.make_inspector_box(host)
 
 
 static func add_section_heading(parent: Control, text: String) -> Label:

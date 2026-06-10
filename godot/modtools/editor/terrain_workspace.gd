@@ -14,7 +14,6 @@ const DETAIL_LABELS := ["Detail A", "Detail B", "Detail C"]
 # while the terrain port is in progress.
 
 var terrain_editor: Node
-var _inspectors: Dictionary = {}
 var _asset_dock_host: Control
 var _asset_dock: Control
 var _mount: ViewportMount
@@ -211,12 +210,9 @@ func activate_workflow(workflow_id: int) -> void:
 
 
 func build_workflow_inspector(workflow_id: int, host: Control) -> void:
-	var def := _def_for(workflow_id)
-	if def == null or def.inspector_script == null:
+	var code_inspector := get_workflow_inspector(workflow_id)
+	if code_inspector == null:
 		return
-	if _inspectors.get(workflow_id) == null:
-		_inspectors[workflow_id] = def.inspector_script.new()
-	var code_inspector = _inspectors[workflow_id]
 	code_inspector.build_main(host)
 	code_inspector.set_editor(terrain_editor)
 

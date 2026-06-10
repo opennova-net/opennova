@@ -189,6 +189,29 @@ func _def_for(workflow_id: int) -> InspectorDef:
 	return null
 
 
+# Lazy per-workflow inspector cache (terrain and object both hand-rolled this):
+# one instance per InspectorDef row, created on first use and reused on every
+# workflow revisit. Override _instantiate_inspector when the inspector scripts
+# take constructor args (object's take the workspace).
+var _workflow_inspectors: Dictionary = {}
+
+
+func _instantiate_inspector(def: InspectorDef) -> Object:
+	return def.inspector_script.new()
+
+
+func get_workflow_inspector(workflow_id: int) -> Object:
+	var cached: Object = _workflow_inspectors.get(workflow_id)
+	if cached != null:
+		return cached
+	var def := _def_for(workflow_id)
+	if def == null or def.inspector_script == null:
+		return null
+	var inspector := _instantiate_inspector(def)
+	_workflow_inspectors[workflow_id] = inspector
+	return inspector
+
+
 func get_active_workflow_id() -> int:
 	return -1
 
