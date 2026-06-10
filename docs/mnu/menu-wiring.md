@@ -2,7 +2,7 @@
 
 How a `.mnu` menu drives navigation, fills its lists, and hands game behavior to the
 host. Terms (Menu, Screen, Window, Action, Command, Menu Host, Tab) are defined in
-[CONTEXT.md](../CONTEXT.md); the Action/Command split is [ADR 0001](adr/0001-mnu-action-command-boundary.md).
+[CONTEXT.md](../../CONTEXT.md); the Action/Command split is [ADR 0001](../adr/0001-mnu-action-command-boundary.md).
 
 ## Buttons and navigation: the `<ACTION>` element
 
