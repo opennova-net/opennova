@@ -1,4 +1,5 @@
 add_library(opennova_mission STATIC
+    src/authoring.cpp
     src/bms.cpp
     src/mission.cpp
     src/mission_schema.cpp

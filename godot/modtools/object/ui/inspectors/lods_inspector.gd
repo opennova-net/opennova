@@ -34,13 +34,6 @@ func build_main(host: Control) -> void:
 	replace_button.disabled = selected["index"] < 0
 	action_row.add_child(replace_button)
 
-	var scene_dialog := FileDialog.new()
-	scene_dialog.name = "ObjectLodSceneFileDialog"
-	scene_dialog.access = FileDialog.ACCESS_FILESYSTEM
-	scene_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	scene_dialog.filters = PackedStringArray(["*.ase,*.ASE ; ASE scene"])
-	box.add_child(scene_dialog)
-
 	var poly_lod := _add_spin_row(box, "ObjectPolyCollisionLod", "Collision LOD", 0, 7, 1)
 	_set_spin(poly_lod, int(summary.get("poly_collision_lod", 0)))
 	var threshold := _add_spin_row(box, "ObjectLodThreshold", "Threshold", 0, 100000, 0.1)
@@ -92,25 +85,25 @@ func build_main(host: Control) -> void:
 			data.set_project_field("poly_collision_lod", int(value))
 	)
 
-	var pending_replace := {"value": false}
+	# One shared picker; the replace-vs-add mode rides the one-shot callback's
+	# capture instead of a pending flag. Parented to `box` so a rebuild frees it.
+	var files := FileDialogHelper.new(box)
+	var pick_scene := func(replace_index: int) -> void:
+		files.open("Choose an ASE scene", PackedStringArray(["*.ase,*.ASE ; ASE scene"]),
+			func(path: String) -> void:
+				if _ws.add_lod_scene(path, replace_index) == OK:
+					var old_children := host.get_children()
+					for child in old_children:
+						host.remove_child(child)
+						child.queue_free()
+					build_main(host))
 	add_button.pressed.connect(func() -> void:
-		pending_replace["value"] = false
-		scene_dialog.popup_centered(Vector2i(760, 520))
+		pick_scene.call(-1)
 	)
 	replace_button.pressed.connect(func() -> void:
 		if selected["index"] < 0:
 			return
-		pending_replace["value"] = true
-		scene_dialog.popup_centered(Vector2i(760, 520))
-	)
-	scene_dialog.file_selected.connect(func(path: String) -> void:
-		var lod_index: int = int(selected["index"]) if bool(pending_replace["value"]) else -1
-		if _ws.add_lod_scene(path, lod_index) == OK:
-			var old_children := host.get_children()
-			for child in old_children:
-				host.remove_child(child)
-				child.queue_free()
-			build_main(host)
+		pick_scene.call(int(selected["index"]))
 	)
 
 	if not lods.is_empty():
