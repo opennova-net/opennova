@@ -51,7 +51,7 @@ func _control_registers() -> Array:
 
 
 func _rebuild_detail_dock() -> void:
-	_ws._rebuild_object_detail_dock()
+	_ws._ensure_detail_dock().rebuild()
 
 
 func _notify_shell() -> void:
