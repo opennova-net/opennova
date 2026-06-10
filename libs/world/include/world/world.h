@@ -216,7 +216,12 @@ public:
     AiSystem *ai = nullptr;    // non-owning; the host wires this to the AI system driving
                                // this world, so the AI-change command family can reach brains.
 
-    uint32_t logic_tick = 0;   // [orig: dword_C6EAD8]
+    // The engine tick counter: one logic tick per host frame at 62 Hz.
+    // [orig: current_tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.
+    //  Per-system cadences divide it: the WAC VM executes every 62nd tick
+    //  (sub_4F81A0 @0x4f81b1), the BMS normal-event quarter pass runs every 16th
+    //  (Server_TickUpdate @0x51d7e0), the AI motor staggers on 2/8/16 internally.]
+    uint32_t logic_tick = 0;
 
     void add_system(ISystem *sys);
     void load_systems();       // calls on_load for each
@@ -239,27 +244,6 @@ public:
 
 private:
     std::vector<ISystem *> systems_;
-};
-
-// ----------------------------------------------------------------------------
-// Host-frame -> logic-tick reducer. [orig: sub_4F81A0 runs the WAC program once
-// per 62 render frames (0x3E divider).] The editor drives the same service.
-// ----------------------------------------------------------------------------
-class TickService {
-public:
-    static constexpr int kFramesPerLogicTick = 0x3E; // 62
-
-    bool paused = false; // [orig: dword_C6EB28 script-disable gate]
-
-    // Advances the frame counter; runs a logic tick every kFramesPerLogicTick.
-    // Returns true if a logic tick fired this frame.
-    bool advance_frame(World &world, bool is_authority = true);
-
-    // Force a single logic tick (tests / editor Step).
-    void step(World &world, bool is_authority = true) { world.run_logic_tick(is_authority); }
-
-private:
-    int frame_accum_ = 0; // [orig: dword_C6EAD4]
 };
 
 } // namespace opennova::world

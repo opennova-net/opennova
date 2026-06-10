@@ -67,12 +67,10 @@ int main() {
     CHECK(w.vars.get_mission(5) == 0);
     CHECK(w.vars.get_global(3) == -7); // globals survive mission clear
 
-    // tick service: 62-frame divider.
-    TickService ts;
-    for (int i = 0; i < TickService::kFramesPerLogicTick - 1; ++i) {
-        CHECK(!ts.advance_frame(w));
-    }
-    CHECK(ts.advance_frame(w));
+    // logic tick = the 62 Hz engine tick; one call advances it by one. (The 62-tick
+    // WAC divider lives inside WacSystem, where the original keeps it — see
+    // wac_behavior_test.)
+    w.run_logic_tick();
     CHECK(w.logic_tick == 1);
 
     // snapshot / restore (editor play).

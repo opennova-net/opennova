@@ -29,6 +29,7 @@ void WacVm::load(const Program &program) {
     rng_seed_ = 0x12345633u;
     acc_ = 0;
     cur_event_ = 0;
+    time_ = 0;
 }
 
 uint32_t WacVm::next_rand() {
@@ -59,7 +60,7 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
             return w.vars.get_music(static_cast<int>(operand_index(ref)));
         case OperandKind::Builtin: {
             switch (static_cast<Builtin>(operand_index(ref))) {
-                case Builtin::Ticks: return static_cast<int32_t>(w.logic_tick);
+                case Builtin::Ticks: return static_cast<int32_t>(time_); // VM executions [orig: dword_C6EAD8]
                 case Builtin::Result: return acc_;
                 case Builtin::Health: return w.cached.local_health;
                 case Builtin::NearType: return w.cached.near_type;
@@ -108,10 +109,10 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // ---- temporal / event conditions ----
     if (ieq(n, "never")) return es.ever_fired ? 0 : 1;
     if (ieq(n, "previous")) return es.fired_count > 0 ? 1 : 0;
-    if (ieq(n, "past")) return static_cast<int32_t>(w.logic_tick) >= A(0) ? 1 : 0;
-    if (ieq(n, "ontick") || ieq(n, "onptick")) return static_cast<int32_t>(w.logic_tick) == A(0) ? 1 : 0;
+    if (ieq(n, "past")) return static_cast<int32_t>(time_) >= A(0) ? 1 : 0;
+    if (ieq(n, "ontick") || ieq(n, "onptick")) return static_cast<int32_t>(time_) == A(0) ? 1 : 0;
     if (ieq(n, "elapse") || ieq(n, "chain") || ieq(n, "before")) {
-        return (static_cast<int32_t>(w.logic_tick) - static_cast<int32_t>(es.last_fired_tick)) >= A(0) ? 1 : 0;
+        return (static_cast<int32_t>(time_) - static_cast<int32_t>(es.last_fired_tick)) >= A(0) ? 1 : 0;
     }
 
     // ---- group / entity state conditions ----
@@ -254,7 +255,7 @@ void WacVm::execute(opennova::world::World &w) {
                 EventState &es = ev(cur_event_);
                 bool cond = acc_ != 0;
                 if (cond && !es.active) {
-                    es.last_fired_tick = w.logic_tick;
+                    es.last_fired_tick = time_;
                     es.ever_fired = true;
                     es.active = true;
                     es.fired_count++;
@@ -270,7 +271,7 @@ void WacVm::execute(opennova::world::World &w) {
                 bool cond = acc_ != 0;
                 if (cond || !es.active) { es.active = cond; ip = operand; }
                 else {
-                    es.last_fired_tick = w.logic_tick;
+                    es.last_fired_tick = time_;
                     es.ever_fired = true;
                     es.active = cond;
                     ip += 1;
@@ -279,7 +280,7 @@ void WacVm::execute(opennova::world::World &w) {
             }
             case Op::MarkFired: {
                 EventState &es = ev(cur_event_);
-                es.last_fired_tick = w.logic_tick;
+                es.last_fired_tick = time_;
                 es.ever_fired = true;
                 es.fired_count++;
                 ip += 1;
@@ -312,6 +313,7 @@ void WacVm::execute(opennova::world::World &w) {
             }
         }
     }
+    ++time_; // advance the WAC time base after the run [orig: dword_C6EAD8 @0x4f81d3]
 }
 
 } // namespace opennova::wac
