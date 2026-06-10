@@ -152,6 +152,46 @@ static func known_indices(script_name: String, profile_path: String = "") -> Arr
 	return keys
 
 
+# Write (or clear, with an empty label) one var's friendly name in the editor
+# sidecar profile, read-merge-write so other vars' labels and control hints
+# survive. Display-only: serialization always uses the VarXX tokens, so a
+# rename can never change what compiles. A profile carrying a DIFFERENT
+# script's name is replaced outright (mirrors _profile_vars ignoring it).
+static func set_label(profile_path: String, script_name: String, var_index: int, label: String) -> int:
+	if profile_path == "" or var_index < 0 or var_index > 16:
+		return ERR_INVALID_PARAMETER
+	var profile := {}
+	if FileAccess.file_exists(profile_path):
+		var f := FileAccess.open(profile_path, FileAccess.READ)
+		if f != null:
+			var parsed = JSON.parse_string(f.get_as_text())
+			if parsed is Dictionary:
+				profile = parsed
+	var profile_script := String(profile.get("script_name", ""))
+	if profile_script != "" and profile_script != script_name:
+		profile = {}
+	profile["script_name"] = script_name
+	var vars: Dictionary = profile.get("vars", {}) if profile.get("vars", null) is Dictionary else {}
+	var key := str(var_index)
+	var entry: Dictionary = vars.get(key, {}) if vars.get(key, null) is Dictionary else {}
+	var clean := label.strip_edges()
+	if clean == "":
+		entry.erase("label")
+	else:
+		entry["label"] = clean
+	if entry.is_empty():
+		vars.erase(key)
+	else:
+		vars[key] = entry
+	profile["vars"] = vars
+	var out := FileAccess.open(profile_path, FileAccess.WRITE)
+	if out == null:
+		return FileAccess.get_open_error()
+	out.store_string(JSON.stringify(profile, "  "))
+	out.close()
+	return OK
+
+
 static func _profile_vars(script_name: String, profile_path: String) -> Dictionary:
 	if profile_path == "" or not FileAccess.file_exists(profile_path):
 		return {}

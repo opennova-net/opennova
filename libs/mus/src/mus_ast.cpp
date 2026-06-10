@@ -58,6 +58,8 @@ static MusAstStmt blank_stmt(int kind, uint32_t offset, uint32_t size) {
     s.expr_text = NULL;
     s.has_call = 0;
     s.call_name = NULL;
+    s.rhs_tree = NULL;
+    s.expr_tree = NULL;
     s.then_body = NULL;
     s.then_count = 0;
     s.else_body = NULL;
@@ -166,6 +168,7 @@ static int try_make_node(const Instruction *insts, int i, int end,
         *out = blank_stmt(MUS_AST_EXPR, inst->offset, inst->size);
         out->text = dup_str(expr);
         out->expr_text = dup_str(expr);
+        out->expr_tree = reconstruct_expression_tree(insts, es, i + 1, script);
         char mname[64];
         if (range_first_method(insts, es, i, script, mname, sizeof(mname))) {
             out->has_call = 1;
@@ -192,6 +195,9 @@ static int try_make_node(const Instruction *insts, int i, int end,
         out->var_offset = idx;
         out->is_local = is_local;
         out->rhs_text = dup_str(rhs);
+        /* Tree only when the RHS reconstructed cleanly (expr non-empty -- the
+           "?" placeholder stays text-only). */
+        out->rhs_tree = expr[0] ? reconstruct_expression_tree(insts, es, i, script) : NULL;
         char mname[64];
         if (range_first_method(insts, es, i, script, mname, sizeof(mname))) {
             out->has_call = 1;
@@ -247,6 +253,7 @@ static int try_make_node(const Instruction *insts, int i, int end,
         *out = blank_stmt(MUS_AST_BRANCH_COMMENT, inst->offset, inst->size);
         out->text = dup_str(line);
         out->expr_text = dup_str(expr);
+        out->expr_tree = reconstruct_expression_tree(insts, es, i, script);
         out->target_section = sidx;
         return 1;
     }
@@ -408,6 +415,9 @@ static int try_make_node(const Instruction *insts, int i, int end,
         *out = blank_stmt(MUS_AST_SWITCH, inst->offset, inst->size);
         out->text = dup_str(line);
         out->expr_text = dup_str(expr);
+        /* An empty reconstruction (text fell back to the "condition" placeholder)
+           naturally yields a NULL tree. */
+        out->expr_tree = reconstruct_expression_tree(insts, es, i, script);
         out->switch_action = inner_op;
         if (!tg.empty()) {
             out->targets = (MusAstSwitchTarget *)malloc(tg.size() * sizeof(MusAstSwitchTarget));
@@ -446,6 +456,7 @@ static MusAstStmt build_if_node(const Instruction *insts, int i, int end,
     MusAstStmt node = blank_stmt(MUS_AST_IF, insts[i].offset, if_size);
     node.text = dup_str(expr);
     node.expr_text = dup_str(expr);
+    node.expr_tree = reconstruct_expression_tree(insts, es, i + 1, script);
 
     if (block->type == CF_TYPE_IF) {
         int body_begin = -1, body_end_idx = -1;
@@ -549,11 +560,68 @@ static void free_stmt(MusAstStmt *s) {
     free(s->expr_text);
     free(s->call_name);
     free(s->targets);
+    expr_tree_free_rec(s->rhs_tree);
+    expr_tree_free_rec(s->expr_tree);
     free_stmt_array(s->then_body, s->then_count);
     free_stmt_array(s->else_body, s->else_count);
 }
 
 } // namespace
+
+/* ---- Structured expression tree: public render/free -------------------- */
+
+extern "C" void mus_expr_free(MusAstExpr *expr) {
+    expr_tree_free_rec(expr);
+}
+
+/* Render with the SAME per-level 256-char buffers and formats as
+   reconstruct_expression, so render(tree) reproduces the flat text
+   byte-for-byte (pinned by mus_expr_tree_test.cpp). */
+extern "C" int mus_expr_render(const MusAstExpr *expr, char *out, size_t out_capacity) {
+    if (!out || out_capacity == 0) return -1;
+    if (!expr) {
+        out[0] = 0;
+        return 0;
+    }
+    char a[256], b[256];
+    switch (expr->kind) {
+        case MUS_EXPR_LITERAL:
+            return snprintf(out, out_capacity, "%d", expr->value);
+        case MUS_EXPR_ME:
+            return snprintf(out, out_capacity, "Me");
+        case MUS_EXPR_VARREF:
+            if (strcmp(expr->var_form, "Var") == 0)
+                return snprintf(out, out_capacity, "Var%02d", expr->var_index);
+            if (strcmp(expr->var_form, "g") == 0)
+                return snprintf(out, out_capacity, "g_%d", expr->var_index);
+            if (strcmp(expr->var_form, "l") == 0)
+                return snprintf(out, out_capacity, "l_%d", expr->var_index);
+            return snprintf(out, out_capacity, "%s", expr->name);
+        case MUS_EXPR_RAW:
+            return snprintf(out, out_capacity, "%s", expr->name);
+        case MUS_EXPR_UNOP:
+            mus_expr_render(expr->left, a, sizeof(a));
+            return snprintf(out, out_capacity, "%s%s", expr->op, a);
+        case MUS_EXPR_BINOP:
+            mus_expr_render(expr->left, a, sizeof(a));
+            mus_expr_render(expr->right, b, sizeof(b));
+            return snprintf(out, out_capacity, "(%s %s %s)", a, expr->op, b);
+        case MUS_EXPR_CALL: {
+            char obj[16], mth[64];
+            split_method_name(expr->name, obj, sizeof(obj), mth, sizeof(mth));
+            if (expr->left) {
+                mus_expr_render(expr->left, a, sizeof(a));
+                if (obj[0]) return snprintf(out, out_capacity, "%s.%s(%s)", obj, mth, a);
+                return snprintf(out, out_capacity, "%s(%s)", mth, a);
+            }
+            if (obj[0]) return snprintf(out, out_capacity, "%s.%s()", obj, mth);
+            return snprintf(out, out_capacity, "%s()", mth);
+        }
+        default:
+            out[0] = 0;
+            return 0;
+    }
+}
 
 extern "C" MusAstProgram *mus_parse_to_ast(const MusScript *script) {
     if (!script) return NULL;

@@ -106,6 +106,7 @@ text = "No sound? The editor may be on a silent audio driver; the meter above st
 autowrap_mode = 2
 
 [node name="CenterCol" type="VBoxContainer" parent="Screen/Body"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -115,7 +116,34 @@ layout_mode = 2
 text = "Section map"
 tooltip_text = "Each box is a musical state. Arrows show how the script moves between them. While playing, the active state lights up. Single-click jumps there; double-click opens its blueprint; right-click to rename or delete."
 
-[node name="SectionMap" type="GraphEdit" parent="Screen/Body/CenterCol"]
+[node name="Canvas" type="HSplitContainer" parent="Screen/Body/CenterCol"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+split_offset = 170
+
+[node name="StatesPanel" type="VBoxContainer" parent="Screen/Body/CenterCol/Canvas"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+
+[node name="StatesHeader" type="Label" parent="Screen/Body/CenterCol/Canvas/StatesPanel"]
+layout_mode = 2
+text = "States"
+tooltip_text = "Every state in the music program. Click one to open it; you always know where you are, however deep you've drilled."
+
+[node name="StatesList" type="ItemList" parent="Screen/Body/CenterCol/Canvas/StatesPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="CanvasStack" type="VBoxContainer" parent="Screen/Body/CenterCol/Canvas"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="SectionMap" type="GraphEdit" parent="Screen/Body/CenterCol/Canvas/CanvasStack"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3

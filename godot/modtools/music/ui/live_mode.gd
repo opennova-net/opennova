@@ -6,7 +6,12 @@ const MusicSectionGraphClass = preload("res://modtools/music/music_section_graph
 const MusVarNames = preload("res://modtools/music/mus_var_names.gd")
 const MusicAudioPreviewClass = preload("res://modtools/music/music_audio_preview.gd")
 const MusicTrackChipClass = preload("res://modtools/music/ui/track_chip.gd")
-const MusicSectionLogicGraphClass = preload("res://modtools/music/ui/section_logic_graph.gd")
+const MusicSectionProgramViewClass = preload("res://modtools/music/ui/section_program_view.gd")
+const MusInputNames = preload("res://modtools/music/mus_input_names.gd")
+const MusicNavClass = preload("res://modtools/music/ui/music_nav.gd")
+
+# Most breadcrumb segments rendered before the older hops collapse into "…".
+const MAX_CRUMBS := 5
 
 # VM state values mirror libs/mus MusVMState.
 const VM_STOPPED := 0
@@ -59,7 +64,7 @@ const _EV_COLOR := {
 var _document: RefCounted
 var _director: NovaMusicDirector
 var _preview: Node  # MusicAudioPreview, for track-chip previews on the map
-# Auto-follow the live VM: when on, a section transition drills the blueprint to the
+# Auto-follow the live VM: when on, a section transition drills the program view to the
 # entered state. A manual node click pins a state (turns this off); Start/Stop re-arms.
 var _follow_live: bool = true
 var _current_section: StringName = &""
@@ -108,14 +113,26 @@ var _last_log_count: int = 0
 @onready var _filter_var: CheckBox = %FilterVar
 @onready var _filter_volume: CheckBox = %FilterVolume
 @onready var _map: GraphEdit = %SectionMap
+@onready var _states_list: ItemList = %StatesList
+@onready var _canvas: Control = %Canvas
 var _add_state_btn: Button
-# Level-2 drill-in: the section logic graph swaps into the center canvas (Stage 2).
-var _logic_graph: GraphEdit
+var _sidebar_add_state_btn: Button
+# Level-2 drill-in: the state's block-stack program view swaps into the
+# center canvas (the map keeps its GraphEdit; inside a state, programs are
+# vertical lists).
+var _program_view: Control
+# Where the user is + how they got there (trail, back/forward). Every drill,
+# back-to-map, breadcrumb click and sidebar click routes through this so the
+# canvas can never disagree with the trail.
+var _nav: RefCounted
 var _breadcrumb: HBoxContainer
 var _breadcrumb_label: Label
 var _breadcrumb_rename_btn: Button
 var _breadcrumb_delete_btn: Button
 var _follow_btn: CheckButton
+var _nav_back_btn: Button
+var _nav_fwd_btn: Button
+var _crumb_segments: HBoxContainer
 var _map_header: Control
 var _map_toolbar: Control
 # Centered "create or open" prompt shown when no project is loaded, so the blank
@@ -136,7 +153,12 @@ func bind_document(document: RefCounted) -> void:
 	if _document != null and _document.has_signal("compile_finished") \
 			and _document.compile_finished.is_connected(_on_compile_finished):
 		_document.compile_finished.disconnect(_on_compile_finished)
+	var had_document := _document != null
 	_document = document
+	# A different project's history is meaningless; forget it (initial bind has
+	# nothing to forget, so skip the reset churn there).
+	if had_document and _nav != null:
+		_nav.reset()
 	if _document != null:
 		_document.changed.connect(_on_document_changed)
 		# Surface compile failures on the always-visible transport label. Structured
@@ -161,15 +183,17 @@ func _on_document_changed() -> void:
 	_refresh_var_labels()
 	_refresh_jump_options()
 	_refresh_now_playing()
-	# If the user is drilled into a section's blueprint, an edit / undo / redo must
+	# If the user is drilled into a section's program, an edit / undo / redo must
 	# rebuild that graph too (document.changed only refreshes the map above).
 	# Re-populate from the new AST; if the section vanished (deleted, or renamed out
-	# from under the breadcrumb), fall back to the map.
-	if _logic_graph != null and _logic_graph.visible and _logic_section_name != "":
-		if not _populate_logic_graph(_logic_section_name):
-			_back_to_map()
+	# from under the breadcrumb), scrub it from the trail -- the nav lands on the
+	# previous surviving location and announces it.
+	if _program_view != null and _program_view.visible and _logic_section_name != "":
+		if not _populate_program_view(_logic_section_name):
+			_nav.remove_section(_logic_section_name)
 		else:
 			_refresh_breadcrumb_action_state()
+			_update_breadcrumb_status(_logic_section_name)
 
 
 func _ready() -> void:
@@ -195,14 +219,23 @@ func _ready() -> void:
 		_jump_option.item_selected.connect(_on_jump_selected)
 	if _map != null:
 		_map.node_selected.connect(_on_map_node_selected)
-	# The drill-in blueprint graph is now the sole authoring surface; the right-dock
+	if _states_list != null:
+		_states_list.item_selected.connect(_on_states_item_selected)
+	_nav = MusicNavClass.new()
+	_nav.location_changed.connect(_on_nav_location_changed)
+	# The drill-in program view is the sole authoring surface; the right-dock
 	# inspector and the raw-script drawer are both gone. All authoring intents
-	# (add/replace/delete/reorder/add-play) route from the graph in _install_logic_graph.
+	# (add/replace/delete/reorder/add-play) route from the graph in _install_program_view.
 	_install_add_state_button()
-	_install_logic_graph()
+	_install_program_view()
 	_install_empty_state()
 	if _var_inspector.has_method("bind_director"):
 		_var_inspector.call("bind_director", _director)
+	# A variable rename must reach every surface that shows var names: the event
+	# log resolves per-line, but the drilled program view and its pickers cache the
+	# var list, so re-populate them.
+	if _var_inspector != null and _var_inspector.has_signal("names_changed"):
+		_var_inspector.connect("names_changed", _on_var_names_changed)
 	_apply_state_label(VM_STOPPED)
 	_refresh_map()
 	_refresh_button_state()
@@ -238,8 +271,8 @@ func _process(_delta: float) -> void:
 			_var_inspector.call("refresh_from_director")
 		_update_live_highlight(state)
 	else:
-		if _logic_graph != null:
-			_logic_graph.set_active_offset(-1)
+		if _program_view != null:
+			_program_view.set_active_offset(-1)
 
 
 func _on_start() -> void:
@@ -439,13 +472,13 @@ func _on_section(section_name: StringName) -> void:
 			_refresh_now_playing()
 		return
 	# Real transition: reset idle, log it, rebuild the map + now-playing, and -- while
-	# auto-following and already drilled into a blueprint -- follow the VM into the
-	# entered state's blueprint so the live highlight tracks where it actually is.
+	# auto-following and already drilled into a state's program -- follow the VM into the
+	# entered state's program so the live highlight tracks where it actually is.
 	_current_section = section_name
 	_idle_ticks = 0
 	_refresh_map()
 	_refresh_now_playing()
-	if _follow_live and _logic_graph != null and _logic_graph.visible:
+	if _follow_live and _program_view != null and _program_view.visible:
 		_drill_into(String(section_name), false)
 	_log_typed(EvType.SECTION, "section -> %s" % section_name)
 
@@ -459,6 +492,7 @@ func _refresh_map() -> void:
 			c.free()
 	_refresh_empty_state()
 	if _document == null or not _document.script_loaded():
+		_refresh_states_list()
 		return
 	var script_name: StringName = StringName(_document.mus_script.get_default_script_name())
 	# Model-driven (opcode-level), not string-parsed: edges are correct, switch
@@ -512,20 +546,20 @@ func _refresh_map() -> void:
 			more.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 			gn.add_child(more)
 		# Logic badge: the if/switch/var/call summary the chips can't show. Only
-		# when the state actually runs logic; reads as "open me to see the blueprint".
+		# when the state actually runs logic; reads as "open me to see the program".
 		var badge_text: String = String(logic_by_index.get(idx, ""))
 		if badge_text != "":
 			var badge := Label.new()
 			badge.text = badge_text
 			badge.add_theme_color_override("font_color", Color(0.72, 0.74, 0.82))
-			badge.tooltip_text = "Logic this state runs (◇ if · ⋔ switch · ✎ var · ƒ call). Double-click to open its blueprint."
+			badge.tooltip_text = "Logic this state runs (if blocks, choose-by-value, variable edits, function calls). Double-click to open its program."
 			gn.add_child(badge)
 		if gn.get_child_count() == 0:
 			# Slot 0 needs a row; an idle / branch-only section plays nothing.
 			var spacer := Label.new()
 			spacer.text = " "
 			gn.add_child(spacer)
-		gn.add_child(_blueprint_button(section_name))
+		gn.add_child(_open_program_button(section_name))
 		# Output pin coloured by the dominant outgoing edge kind so a switch fan-out
 		# (cyan) reads apart from a plain transition (blue) / branch (gold). Input pin
 		# stays a muted neutral. GraphEdit tints each wire by its source pin colour.
@@ -549,13 +583,14 @@ func _refresh_map() -> void:
 	if sig != _fit_signature:
 		_fit_signature = sig
 		_fit_map_to_view()
+	_refresh_states_list()
 
 
-func _blueprint_button(section_name: String) -> Button:
+func _open_program_button(section_name: String) -> Button:
 	var b := Button.new()
 	b.name = "OpenBlueprintButton"
 	b.text = "Blueprint"
-	b.tooltip_text = "Open this state's editable blueprint."
+	b.tooltip_text = "Open this state's program."
 	b.focus_mode = Control.FOCUS_NONE
 	b.pressed.connect(func(): _drill_into(section_name))
 	return b
@@ -595,22 +630,23 @@ func _build_logic_summaries(script_name: StringName) -> Dictionary:
 	return out
 
 
-# Compact glyph summary of the LOGIC a section runs (◇ if · ⋔ switch · ✎ var ·
-# ƒ call), counts elided when zero, empty when the section is just plays/
-# transitions. Recurses if/switch bodies so nested logic still surfaces.
+# Compact WORD summary of the LOGIC a section runs ("2 if · 1 choose · 3 set"),
+# counts elided when zero, empty when the section is just plays/transitions.
+# Words, not glyphs: a glyph-only badge required memorizing the legend.
+# Recurses if/switch bodies so nested logic still surfaces.
 func _section_logic_badge(stmts: Array) -> String:
 	var c := {"if": 0, "switch": 0, "var": 0, "call": 0}
 	_count_logic(stmts, c)
 	var parts := PackedStringArray()
 	if c["if"] > 0:
-		parts.append("◇%d" % c["if"])
+		parts.append("%d if" % c["if"])
 	if c["switch"] > 0:
-		parts.append("⋔%d" % c["switch"])
+		parts.append("%d choose" % c["switch"])
 	if c["var"] > 0:
-		parts.append("✎%d" % c["var"])
+		parts.append("%d set" % c["var"])
 	if c["call"] > 0:
-		parts.append("ƒ%d" % c["call"])
-	return "  ".join(parts)
+		parts.append("%d call" % c["call"])
+	return " · ".join(parts)
 
 
 func _count_logic(stmts: Array, c: Dictionary) -> void:
@@ -808,7 +844,7 @@ func _bank_names() -> Array:
 func _track_name(names: Array, track: int) -> String:
 	if track >= 0 and track < names.size() and String(names[track]) != "":
 		return String(names[track])
-	return "sound_%d" % track
+	return "track %d" % track
 
 
 # Preview a bank track through our own MusicAudioPreview (a chip's ▶ button).
@@ -821,7 +857,7 @@ func _preview_track(track: int) -> void:
 
 
 # A map node was clicked. While RUNNING this jumps the VM there. Double-click drills
-# into the blueprint; right-click opens the state menu. No-ops the jump while stopped.
+# into the state's program; right-click opens the state menu. No-ops the jump while stopped.
 func _on_map_node_selected(node: Node) -> void:
 	if node == null:
 		return
@@ -830,7 +866,7 @@ func _on_map_node_selected(node: Node) -> void:
 		return
 	# Clicking the section that is currently playing keeps live auto-follow on;
 	# clicking a different one pins away from it (Start/Stop, or clicking the live
-	# state again, re-arms follow so a transition re-drills the blueprint).
+	# state again, re-arms follow so a transition re-drills the program view).
 	_follow_live = (_last_state == VM_RUNNING and sec == String(_current_section))
 	# While running, also jump the VM there.
 	if _last_state == VM_RUNNING:
@@ -853,7 +889,7 @@ func _on_compile_finished(success: bool, errors: Array) -> void:
 	_flash_start_warning(msg)
 
 
-# Double-clicking a state drills into its logic-graph blueprint. Single clicks fall
+# Double-clicking a state drills into its program. Single clicks fall
 # through to GraphEdit's node_selected (-> _on_map_node_selected). Right-click opens
 # the state context menu (rename / delete / open).
 func _on_node_gui_input(event: InputEvent, section_name: String) -> void:
@@ -865,9 +901,9 @@ func _on_node_gui_input(event: InputEvent, section_name: String) -> void:
 		_show_state_context_menu(section_name, event.global_position)
 
 
-# Drag-to-add-play from the Tracks dock onto a blueprint node. The document gates
+# Drag-to-add-play from the Tracks dock onto the program view. The document gates
 # this on can_edit_plays() and recompiles; document.changed rebuilds the map and
-# re-populates the drilled-in blueprint, so there's nothing else to refresh here.
+# re-populates the drilled-in program view, so there's nothing else to refresh here.
 func _on_inspector_add_play(section_name: StringName, track: int) -> void:
 	if _document == null or not _document.has_method("insert_play"):
 		return
@@ -883,12 +919,23 @@ func _on_inspector_add_play(section_name: StringName, track: int) -> void:
 func _build_var_list() -> Array:
 	var out: Array = []
 	var sname := ""
+	var profile := ""
 	if _document != null and _document.script_loaded():
 		sname = String(_document.mus_script.get_default_script_name())
+		if _document.has_method("get_var_profile_path"):
+			profile = _document.get_var_profile_path()
 	for i in range(17):
-		var label := MusVarNames.label_for(sname, i) if sname != "" else "Var%02d" % i
+		var label := MusVarNames.label_for(sname, i, profile) if sname != "" else "Var%02d" % i
 		out.append({"token": "Var%02d" % i, "label": label})
 	return out
+
+
+# A variable's display name changed (profile sidecar): rebuild the surfaces
+# that cached the old label. Serialization is untouched (tokens only).
+func _on_var_names_changed() -> void:
+	_refresh_var_labels()
+	if _program_view != null and _program_view.visible and _logic_section_name != "":
+		_populate_program_view(_logic_section_name)
 
 
 # --- Phase 2 authoring intent handlers (route to the document, keep pinned) ---
@@ -925,26 +972,71 @@ func _on_inspector_reorder_statement(section_index: int, ordinal: int, direction
 		_flash_start_warning("Can't move it further")
 
 
-# Light the drilled-in blueprint statement the VM pc is on, but only while the graph
+func _on_program_insert_at(section_index: int, before_ordinal: int, lines: PackedStringArray) -> void:
+	if _document == null or not _document.has_method("insert_statement_at"):
+		return
+	_follow_live = false
+	if not _document.insert_statement_at(section_index, before_ordinal, lines):
+		_flash_start_warning("Couldn't add it there")
+
+
+func _on_program_move(section_index: int, ordinal: int, before_ordinal: int) -> void:
+	if _document == null or not _document.has_method("move_statement"):
+		return
+	_follow_live = false
+	if not _document.move_statement(section_index, ordinal, before_ordinal):
+		_flash_start_warning("Can't move it there")
+
+
+func _on_program_run_count(section_index: int, start_ordinal: int, old_count: int, new_count: int) -> void:
+	if _document == null or not _document.has_method("set_run_count"):
+		return
+	_follow_live = false
+	if not _document.set_run_count(section_index, start_ordinal, old_count, new_count):
+		_flash_start_warning("Couldn't resize that run")
+
+
+# A caller-input label changed on the Inputs card: persist it in the profile
+# sidecar (display-only; the script keeps its l_N tokens) and rebuild the
+# surfaces that cached the old name.
+func _on_input_renamed(section_name: String, input_index: int, label: String) -> void:
+	if _document == null or not _document.script_loaded():
+		return
+	var profile_path := ""
+	if _document.has_method("get_var_profile_path"):
+		profile_path = _document.get_var_profile_path()
+	if profile_path == "":
+		return
+	var sname := String(_document.mus_script.get_default_script_name())
+	if MusInputNames.set_input_label(profile_path, sname, section_name, input_index, label) == OK:
+		_log_typed(EvType.SYSTEM, "input renamed: %s/%d -> %s" % [section_name, input_index + 1, label])
+		if _program_view != null and _program_view.visible and _logic_section_name != "":
+			_populate_program_view(_logic_section_name)
+
+
+# Light the drilled-in program-view statement the VM pc is on, but only while the graph
 # shows the section that is actually running -- the pc is a global bytecode offset, so
 # another section's nodes would mis-bracket it.
 func _update_live_highlight(state: int) -> void:
-	if _logic_graph != null and _logic_graph.visible:
+	if _program_view != null and _program_view.visible:
 		if state == VM_RUNNING and _logic_section_name == String(_current_section):
-			_logic_graph.set_active_offset(_director.current_pc())
+			_program_view.set_active_offset(_director.current_pc())
+			if _follow_live and _program_view.has_method("scroll_to_active"):
+				_program_view.scroll_to_active()
 		else:
-			_logic_graph.set_active_offset(-1)
+			_program_view.set_active_offset(-1)
 
 
 # --- Add State (visual-first authoring slice) --------------------------
 
-# Mount a "＋ Add State" button just above the section map. The loudest missing
-# affordance was that there was no visual way to add a section.
+# Mount the "＋ Add State" affordances: one on the map toolbar (hidden while a
+# program is open) and one pinned under the always-visible States sidebar --
+# a from-scratch project drops the user straight into Begin's program, where
+# the map toolbar is hidden, and "make a second state" must never require
+# knowing to navigate back first.
 func _install_add_state_button() -> void:
-	if _map == null:
-		return
-	var col := _map.get_parent()
-	if col == null:
+	var col := get_node_or_null("%CenterCol")
+	if col == null or _canvas == null:
 		return
 	var toolbar := HBoxContainer.new()
 	toolbar.name = "MapToolbar"
@@ -954,9 +1046,17 @@ func _install_add_state_button() -> void:
 	_add_state_btn.pressed.connect(_on_add_state)
 	toolbar.add_child(_add_state_btn)
 	col.add_child(toolbar)
-	col.move_child(toolbar, _map.get_index())
+	col.move_child(toolbar, _canvas.get_index())
 	_map_toolbar = toolbar
 	_map_header = col.get_node_or_null("MapHeader")
+	if _states_list != null and _states_list.get_parent() != null:
+		_sidebar_add_state_btn = Button.new()
+		_sidebar_add_state_btn.name = "SidebarAddState"
+		_sidebar_add_state_btn.text = "＋ Add state"
+		_sidebar_add_state_btn.tooltip_text = ADD_STATE_TOOLTIP
+		_sidebar_add_state_btn.focus_mode = Control.FOCUS_NONE
+		_sidebar_add_state_btn.pressed.connect(_on_add_state)
+		_states_list.get_parent().add_child(_sidebar_add_state_btn)
 
 
 # Centered welcome shown when nothing is loaded: a primary "create from scratch"
@@ -964,9 +1064,7 @@ func _install_add_state_button() -> void:
 # "＋ Add State" and the message "Open a project first" -- and no way to create one.
 # Mounted into the map's column; _refresh_empty_state toggles it vs the map chrome.
 func _install_empty_state() -> void:
-	if _map == null:
-		return
-	var col := _map.get_parent()
+	var col := get_node_or_null("%CenterCol")
 	if col == null:
 		return
 	var center := CenterContainer.new()
@@ -999,21 +1097,28 @@ func _install_empty_state() -> void:
 
 
 # Show the welcome prompt iff no script is loaded (hiding the map chrome behind
-# it); otherwise hide it and -- when on the map, not drilled into a blueprint --
-# restore the map chrome (the blueprint owns chrome visibility on its own).
+# it); otherwise hide it and -- when on the map, not drilled into a state's program --
+# restore the map chrome (the program view owns chrome visibility on its own).
 func _refresh_empty_state() -> void:
 	var empty: bool = _document == null or not _document.script_loaded()
 	if _empty_state != null:
 		_empty_state.visible = empty
 	if empty:
-		if _map != null:
-			_map.visible = false
+		if _canvas != null:
+			_canvas.visible = false
 		if _map_toolbar != null:
 			_map_toolbar.visible = false
 		if _map_header != null:
 			_map_header.visible = false
-	elif _logic_section_name == "":
-		_set_map_chrome_visible(true)
+		if _breadcrumb != null:
+			_breadcrumb.visible = false
+	else:
+		if _canvas != null:
+			_canvas.visible = true
+		if _breadcrumb != null:
+			_breadcrumb.visible = true
+		if _logic_section_name == "":
+			_set_map_chrome_visible(true)
 
 
 func _on_new_project_pressed() -> void:
@@ -1021,7 +1126,7 @@ func _on_new_project_pressed() -> void:
 		return
 	# Emits `changed` -> _on_document_changed -> _refresh_map, which hides this
 	# prompt and renders the new start state; then open that start state's
-	# blueprint so first-time authors land on the Add-statement hint immediately.
+	# program so first-time authors land on the add-step hint immediately.
 	var rc: int = _document.new_project()
 	if rc != OK:
 		_flash_start_warning("Could not create music project")
@@ -1059,7 +1164,7 @@ func _on_add_state() -> void:
 		return
 	_log_typed(EvType.SYSTEM, "added state %s" % new_name)
 	# add_section emitted `changed` -> the map already rebuilt; drill straight into
-	# the new state's blueprint so the user can start authoring it.
+	# the new state's program so the user can start authoring it.
 	_follow_live = false
 	_drill_into(new_name)
 
@@ -1077,31 +1182,45 @@ func _unique_state_name() -> String:
 	return "State_%d" % n
 
 
-# --- Level-2 logic graph (drill-in blueprint) --------------------------
+# --- Level-2 drill-in: the state's program view ------------------------
 
-# Mount the section logic graph + a Back breadcrumb into the center column,
-# hidden until the user drills into a state. The map and the logic graph share
-# the canvas; only one is visible at a time.
-func _install_logic_graph() -> void:
-	if _map == null:
-		return
-	var col := _map.get_parent()
-	if col == null:
+# Mount the navigation bar (back/forward + breadcrumb trail + state actions)
+# and the section logic graph. The map and the logic graph share the canvas
+# stack; only one is visible at a time. The nav bar stays up whenever a script
+# is loaded -- on the map it just reads "Map" -- so back/forward always work.
+func _install_program_view() -> void:
+	var col := get_node_or_null("%CenterCol")
+	var stack := get_node_or_null("%CanvasStack")
+	if col == null or stack == null:
 		return
 	_breadcrumb = HBoxContainer.new()
 	_breadcrumb.name = "LogicBreadcrumb"
-	var back := Button.new()
-	back.text = "◀ Map"
-	back.tooltip_text = "Back to the state map."
-	back.focus_mode = Control.FOCUS_NONE
-	back.pressed.connect(_back_to_map)
-	_breadcrumb.add_child(back)
+	_nav_back_btn = Button.new()
+	_nav_back_btn.text = "◀"
+	_nav_back_btn.tooltip_text = "Back (Alt+Left)."
+	_nav_back_btn.focus_mode = Control.FOCUS_NONE
+	_nav_back_btn.disabled = true
+	_nav_back_btn.pressed.connect(func(): _nav.go_back())
+	_breadcrumb.add_child(_nav_back_btn)
+	_nav_fwd_btn = Button.new()
+	_nav_fwd_btn.text = "▶"
+	_nav_fwd_btn.tooltip_text = "Forward (Alt+Right)."
+	_nav_fwd_btn.focus_mode = Control.FOCUS_NONE
+	_nav_fwd_btn.disabled = true
+	_nav_fwd_btn.pressed.connect(func(): _nav.go_forward())
+	_breadcrumb.add_child(_nav_fwd_btn)
+	_crumb_segments = HBoxContainer.new()
+	_crumb_segments.name = "CrumbTrail"
+	_crumb_segments.add_theme_constant_override("separation", 2)
+	_breadcrumb.add_child(_crumb_segments)
+	# Status badges for the open state (loops to itself / unlinked), not a title:
+	# the trail's last segment already names where you are.
 	_breadcrumb_label = Label.new()
-	_breadcrumb_label.add_theme_color_override("font_color", Color(0.85, 0.92, 1.0))
+	_breadcrumb_label.add_theme_color_override("font_color", Color(0.7, 0.74, 0.82))
 	_breadcrumb_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_breadcrumb.add_child(_breadcrumb_label)
 	# Rename / delete THIS state -- the state-level operations the right inspector
-	# used to own, now on the blueprint's own breadcrumb. They act on the drilled-in
+	# used to own, now on the program view's breadcrumb. They act on the drilled-in
 	# section and reuse the document's rename_section / delete_section.
 	_breadcrumb_rename_btn = Button.new()
 	_breadcrumb_rename_btn.text = "✎ Rename"
@@ -1115,7 +1234,7 @@ func _install_logic_graph() -> void:
 	_breadcrumb_delete_btn.focus_mode = Control.FOCUS_NONE
 	_breadcrumb_delete_btn.pressed.connect(_on_breadcrumb_delete)
 	_breadcrumb.add_child(_breadcrumb_delete_btn)
-	# Follow-live toggle: when on, a VM transition re-drills the blueprint into the
+	# Follow-live toggle: when on, a VM transition re-drills the program view into the
 	# entered state. A manual node click pins (turns this off); flipping it back on
 	# resumes following -- the explicit, visible control the auto-pin behaviour lacked.
 	_follow_btn = CheckButton.new()
@@ -1128,23 +1247,31 @@ func _install_logic_graph() -> void:
 	_breadcrumb.visible = false
 	col.add_child(_breadcrumb)
 	col.move_child(_breadcrumb, 0)
+	_rebuild_breadcrumb()
 
-	_logic_graph = MusicSectionLogicGraphClass.new()
-	_logic_graph.name = "LogicGraph"
-	_logic_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_logic_graph.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_logic_graph.visible = false
-	_logic_graph.open_section_requested.connect(func(n): _drill_into(String(n)))
-	# The blueprint's authoring intents route to the document's parity-gated, undoable
-	# write path (these handlers keep their _on_inspector_* names from when the inspector
-	# shared them; the inspector is gone, the graph is the sole emitter now).
-	_logic_graph.add_statement_requested.connect(_on_inspector_add_statement)
-	_logic_graph.replace_statement_requested.connect(_on_inspector_replace_statement)
-	_logic_graph.delete_statement_requested.connect(_on_inspector_delete_statement)
-	_logic_graph.reorder_statement_requested.connect(_on_inspector_reorder_statement)
-	_logic_graph.add_play_requested.connect(_on_inspector_add_play)
-	_logic_graph.author_failed.connect(func(msg: String): _flash_start_warning(msg))
-	col.add_child(_logic_graph)
+	_program_view = MusicSectionProgramViewClass.new()
+	_program_view.name = "ProgramView"
+	_program_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_program_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_program_view.visible = false
+	_program_view.open_section_requested.connect(func(n): _drill_into(String(n)))
+	# The program view's authoring intents route to the document's parity-gated,
+	# undoable write path (these handlers keep their _on_inspector_* names from
+	# when the inspector shared them; the view is the sole emitter now).
+	_program_view.add_statement_requested.connect(_on_inspector_add_statement)
+	_program_view.replace_statement_requested.connect(_on_inspector_replace_statement)
+	_program_view.delete_statement_requested.connect(_on_inspector_delete_statement)
+	_program_view.reorder_statement_requested.connect(_on_inspector_reorder_statement)
+	_program_view.insert_statement_at_requested.connect(_on_program_insert_at)
+	_program_view.move_statement_requested.connect(_on_program_move)
+	_program_view.set_run_count_requested.connect(_on_program_run_count)
+	_program_view.add_play_requested.connect(_on_inspector_add_play)
+	_program_view.input_renamed.connect(_on_input_renamed)
+	_program_view.author_failed.connect(func(msg: String): _flash_start_warning(msg))
+	# An open picker/popover must not be yanked away by a VM transition
+	# re-drilling the canvas: pin follow-live (re-enable resumes following).
+	_program_view.inline_edit_started.connect(func(): _follow_live = false)
+	stack.add_child(_program_view)
 
 
 # --- State-level operations (rename / delete), re-homed from the right inspector ---
@@ -1169,17 +1296,17 @@ func _on_breadcrumb_delete() -> void:
 
 func _on_follow_toggled(pressed: bool) -> void:
 	_follow_live = pressed
-	# Re-enabling while the VM is running snaps the blueprint to the live state now,
+	# Re-enabling while the VM is running snaps the program view to the live state now,
 	# rather than waiting for the next transition.
 	if pressed and _last_state == VM_RUNNING and String(_current_section) != "":
 		_drill_into(String(_current_section), false)
 
 
-# Right-click a state on the map: open its blueprint, rename it, or delete it.
+# Right-click a state on the map: open its program, rename it, or delete it.
 # Rename + delete need an editable (single-chunk, compiling) script.
 func _show_state_context_menu(section_name: String, global_pos: Vector2) -> void:
 	var pop := PopupMenu.new()
-	pop.add_item("Open blueprint", 0)
+	pop.add_item("Open program", 0)
 	pop.add_item("Rename state…", 1)
 	pop.add_item("Delete state", 2)
 	var can: bool = _document != null and _document.has_method("can_author") and _document.can_author()
@@ -1261,21 +1388,30 @@ func _do_rename_section(old_name: String, new_name: String) -> void:
 	if _document == null or not _document.has_method("rename_section"):
 		return
 	_follow_live = false
-	# If we're drilled into this state, re-point the breadcrumb to the new name
-	# BEFORE the rename so the post-change refresh re-populates the blueprint under
-	# it (instead of failing to find the old name and bouncing back to the map).
+	# If we're drilled into this state, re-point the shown-section name BEFORE the
+	# rename so the post-change refresh re-populates the program view under it
+	# (instead of failing to find the old name and bouncing back to the map).
 	var was_drilled := _logic_section_name == old_name
 	if was_drilled:
 		_logic_section_name = new_name
-		if _breadcrumb_label != null:
-			_breadcrumb_label.text = "  ▸  %s   (blueprint)" % new_name
 	if _document.rename_section(StringName(old_name), StringName(new_name)):
+		# Rewrite the trail only after the document accepted the rename, so a
+		# rejected rename can't corrupt history entries of an unrelated state
+		# that already carries the requested name.
+		_nav.rename_section(old_name, new_name)
+		# Caller-input labels are keyed by section name in the profile sidecar;
+		# carry them across the rename.
+		if _document.has_method("get_var_profile_path"):
+			var profile_path: String = _document.get_var_profile_path()
+			if profile_path != "":
+				MusInputNames.rename_section(profile_path,
+					String(_document.mus_script.get_default_script_name()), old_name, new_name)
+		_rebuild_breadcrumb()
+		_refresh_states_list()
 		_log_typed(EvType.SYSTEM, "renamed %s -> %s" % [old_name, new_name])
 	else:
 		if was_drilled:
 			_logic_section_name = old_name
-			if _breadcrumb_label != null:
-				_breadcrumb_label.text = "  ▸  %s   (blueprint)" % old_name
 		_flash_start_warning("Rename rejected (name taken/invalid)")
 
 
@@ -1301,35 +1437,210 @@ func _do_delete_section(section_name: String) -> void:
 	if _logic_section_name == section_name:
 		_back_to_map()
 	if _document.delete_section(StringName(section_name)):
+		# Scrub the dead state from the trail so back/forward can't revisit it.
+		_nav.remove_section(section_name)
+		_rebuild_breadcrumb()
 		_log_typed(EvType.SYSTEM, "deleted state %s" % section_name)
 	else:
 		_flash_start_warning("Can't delete: state is still referenced")
 
 
-# Drill into a state: swap the center canvas from the map to that section's logic
-# graph (statements as exec-flow nodes) with a Back breadcrumb. A manual drill
-# (double-click, "open ▸", Add State) pins (stops live auto-follow); a live-follow
-# drill from _on_section passes pin=false so the VM keeps re-drilling on transitions.
+# Drill into a state: navigate there; the nav announces the move and
+# _on_nav_location_changed swaps the canvas. A manual drill (double-click,
+# "open ▸", Add State, sidebar click) pins (stops live auto-follow) and pushes a
+# trail hop; a live-follow drill from _on_section passes pin=false, which both
+# keeps following and REPLACES the current trail entry so a transitioning VM
+# doesn't flood the history with every state it enters.
 func _drill_into(section_name: String, pin: bool = true) -> void:
-	if _logic_graph == null or _document == null or not _document.script_loaded():
-		return
-	if not _populate_logic_graph(section_name):
+	if _program_view == null or _document == null or not _document.script_loaded():
 		return
 	if pin:
 		_follow_live = false
-	_logic_section_name = section_name
-	_logic_graph.visible = true
-	_set_map_chrome_visible(false)
-	_breadcrumb.visible = true
-	# Surface the self-loop "idle" state on the blueprint too (the map shows ↻ idle on
-	# the node; without this the drilled-in view gave no hint why it loops in place).
-	var suffix := "(blueprint)"
+	_nav.navigate_to(MusicNavClass.section_entry(section_name), pin)
+
+
+# The single place the canvas reacts to navigation. Map: hide the program view and
+# restore the map chrome. Section: rebuild its program and swap it in; a stale
+# trail entry (the state vanished under the history) is scrubbed, which re-lands
+# on the previous surviving location.
+func _on_nav_location_changed(entry: Dictionary) -> void:
+	if String(entry.get("kind", "")) == "map":
+		if _program_view != null:
+			_program_view.visible = false
+		_logic_section_name = ""
+		_set_map_chrome_visible(true)
+		if _breadcrumb_label != null:
+			_breadcrumb_label.text = ""
+	else:
+		var section_name := String(entry.get("name", ""))
+		if not _populate_program_view(section_name):
+			_nav.remove_section(section_name)
+			return
+		_logic_section_name = section_name
+		if _canvas != null:
+			_canvas.visible = true
+		_program_view.visible = true
+		_set_map_chrome_visible(false)
+		_update_breadcrumb_status(section_name)
+		_refresh_breadcrumb_action_state()
+	if _breadcrumb != null and _document != null and _document.script_loaded():
+		_breadcrumb.visible = true
+	_rebuild_breadcrumb()
+	_refresh_states_selection()
+
+
+# Surface the open state's quirks next to the trail (the map shows the same
+# badges on its nodes; without this the drilled-in view gave no hint why a
+# state loops in place or can't be reached).
+func _update_breadcrumb_status(section_name: String) -> void:
+	if _breadcrumb_label == null:
+		return
+	var parts := PackedStringArray()
 	if _section_is_idle_loop(section_name):
-		suffix = "(blueprint · ↻ loops to itself)"
+		parts.append("↻ loops to itself")
 	elif _section_is_unlinked(section_name):
-		suffix = "(blueprint - unlinked)"
-	_breadcrumb_label.text = "  ▸  %s   %s" % [section_name, suffix]
-	_refresh_breadcrumb_action_state()
+		parts.append("unlinked — nothing points here yet")
+	# Caller inputs are explained ON the canvas now (the Inputs card / the
+	# engine-events divider), not as a breadcrumb badge.
+	_breadcrumb_label.text = "   " + " · ".join(parts) if parts.size() > 0 else ""
+
+
+# Rebuild the breadcrumb trail row: back/forward enablement, one clickable
+# segment per hop (older hops collapse into "…"), and the state-action buttons
+# (rename/delete/follow) only while a state is open.
+func _rebuild_breadcrumb() -> void:
+	if _crumb_segments == null or _nav == null:
+		return
+	for c in _crumb_segments.get_children():
+		_crumb_segments.remove_child(c)
+		c.queue_free()
+	var t: Array = _nav.trail()
+	var start := 0
+	if t.size() > MAX_CRUMBS:
+		start = t.size() - MAX_CRUMBS
+		var ell := Label.new()
+		ell.text = "…"
+		ell.tooltip_text = "%d earlier steps (use ◀ to walk back through them)" % start
+		ell.add_theme_color_override("font_color", Color(0.55, 0.58, 0.65))
+		_crumb_segments.add_child(ell)
+	for i in range(start, t.size()):
+		if _crumb_segments.get_child_count() > 0:
+			var sep := Label.new()
+			sep.text = "▸"
+			sep.add_theme_color_override("font_color", Color(0.5, 0.53, 0.6))
+			_crumb_segments.add_child(sep)
+		var e: Dictionary = t[i]
+		var seg := Button.new()
+		seg.text = "Map" if String(e.get("kind", "")) == "map" else String(e.get("name", ""))
+		seg.flat = true
+		seg.focus_mode = Control.FOCUS_NONE
+		if i == t.size() - 1:
+			seg.disabled = true
+			seg.tooltip_text = "You are here."
+			seg.add_theme_color_override("font_disabled_color", Color(0.9, 0.94, 1.0))
+		else:
+			seg.tooltip_text = "Go back to %s." % seg.text
+			var idx := i
+			seg.pressed.connect(func(): _nav.jump_to(idx))
+		_crumb_segments.add_child(seg)
+	if _nav_back_btn != null:
+		_nav_back_btn.disabled = not _nav.can_go_back()
+	if _nav_fwd_btn != null:
+		_nav_fwd_btn.disabled = not _nav.can_go_forward()
+	var on_section: bool = not _nav.is_on_map()
+	if _breadcrumb_rename_btn != null:
+		_breadcrumb_rename_btn.visible = on_section
+	if _breadcrumb_delete_btn != null:
+		_breadcrumb_delete_btn.visible = on_section
+	if _follow_btn != null:
+		_follow_btn.visible = on_section
+
+
+# Browser-style navigation keys/buttons, active while the workspace is on
+# screen: Alt+Left / Alt+Right and the mouse back/forward thumb buttons.
+func _unhandled_input(event: InputEvent) -> void:
+	if _nav == null or not is_visible_in_tree():
+		return
+	if event is InputEventKey and event.pressed and event.alt_pressed:
+		if event.keycode == KEY_LEFT:
+			_nav.go_back()
+			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_RIGHT:
+			_nav.go_forward()
+			get_viewport().set_input_as_handled()
+	elif event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_XBUTTON1:
+			_nav.go_back()
+			get_viewport().set_input_as_handled()
+		elif event.button_index == MOUSE_BUTTON_XBUTTON2:
+			_nav.go_forward()
+			get_viewport().set_input_as_handled()
+
+
+# --- States sidebar ------------------------------------------------------
+
+# Rebuild the always-visible state list (left of the canvas): the map row, then
+# one row per state with its badges and the live ▶ marker. Selection mirrors
+# the nav location so the user always knows where they are, however deep the
+# trail goes.
+func _refresh_states_list() -> void:
+	if _states_list == null:
+		return
+	_states_list.clear()
+	if _document == null or not _document.script_loaded():
+		return
+	_states_list.add_item("⌂ Map")
+	_states_list.set_item_metadata(0, "")
+	_states_list.set_item_tooltip(0, "The whole-program state map.")
+	var sn := StringName(_document.mus_script.get_default_script_name())
+	var model: Array = MusicSectionGraphClass.build(_document.mus_script, sn)
+	var incoming := _incoming_by_index(model)
+	for sec in model:
+		var section_name := String(sec.get("name", ""))
+		var label := section_name
+		var notes := PackedStringArray()
+		if bool(sec.get("is_entry", false)):
+			label += "  ★"
+			notes.append("★ the start state (playback begins here)")
+		if bool(sec.get("is_idle_loop", false)):
+			label += "  ↻"
+			notes.append("↻ loops to itself while waiting for the game")
+		if _last_state == VM_RUNNING and section_name == String(_current_section):
+			label = "▶ " + label
+			notes.append("▶ playing right now")
+		var idx := _states_list.add_item(label)
+		_states_list.set_item_metadata(idx, section_name)
+		if _section_is_unlinked_in_model(sec, incoming):
+			_states_list.set_item_custom_fg_color(idx, Color(0.66, 0.62, 0.52))
+			notes.append(UNLINKED_STATE_TOOLTIP)
+		var tip := "Open %s's program." % section_name
+		if notes.size() > 0:
+			tip += "\n" + "\n".join(notes)
+		_states_list.set_item_tooltip(idx, tip)
+	_refresh_states_selection()
+
+
+# Highlight the sidebar row for the current location without emitting
+# item_selected (select() is signal-less).
+func _refresh_states_selection() -> void:
+	if _states_list == null or _nav == null:
+		return
+	var target: String = _nav.current_section()  # "" = the map row
+	for i in range(_states_list.item_count):
+		if String(_states_list.get_item_metadata(i)) == target:
+			_states_list.select(i)
+			return
+	_states_list.deselect_all()
+
+
+func _on_states_item_selected(index: int) -> void:
+	if _states_list == null:
+		return
+	var section_name := String(_states_list.get_item_metadata(index))
+	if section_name == "":
+		_back_to_map()
+	else:
+		_drill_into(section_name)
 
 
 func _refresh_breadcrumb_action_state() -> void:
@@ -1377,28 +1688,39 @@ func _section_is_unlinked(section_name: String) -> bool:
 # configuring its authoring context FIRST so the per-node tools + ＋Add palette
 # match the script's current editability (can_author). Returns false if the
 # section no longer exists (e.g. an edit/undo renamed or removed it).
-func _populate_logic_graph(section_name: String) -> bool:
-	if _logic_graph == null or _document == null or not _document.script_loaded():
+func _populate_program_view(section_name: String) -> bool:
+	if _program_view == null or _document == null or not _document.script_loaded():
 		return false
 	var sn := StringName(_document.mus_script.get_default_script_name())
 	var ast: Array = _document.mus_script.get_program_ast(sn)
+	# Which states take caller inputs (hidden frame ops' locals counts): the
+	# view's call rows show a "hands it values" chip for their targets.
+	var inputs_by_section := {}
+	for sec in ast:
+		var total := 0
+		for st in sec.get("statements", []):
+			if String((st as Dictionary).get("kind", "")) == "frame_enter":
+				total += int((st as Dictionary).get("locals_count", 0))
+		if total > 0:
+			inputs_by_section[String(sec.get("name", ""))] = total
+	var profile_path := ""
+	if _document.has_method("get_var_profile_path"):
+		profile_path = _document.get_var_profile_path()
 	for sec in ast:
 		if String(sec.get("name", "")) == section_name:
 			var editable: bool = _document.has_method("can_author") and _document.can_author()
 			var section_names: PackedStringArray = _document.mus_script.get_section_names(sn)
-			_logic_graph.configure_authoring(section_names, _build_var_list(), _document.mus_script, _bank_names(), editable, _authoring_blocked_reason())
-			_logic_graph.show_section(sec, _bank_names())
+			_program_view.configure_authoring(section_names, _build_var_list(), _document.mus_script,
+				_bank_names(), editable, _authoring_blocked_reason(), profile_path, inputs_by_section)
+			_program_view.show_section(sec, _bank_names())
 			return true
 	return false
 
 
+# Navigate back to the map (a recorded hop, so forward can return).
 func _back_to_map() -> void:
-	if _logic_graph != null:
-		_logic_graph.visible = false
-	if _breadcrumb != null:
-		_breadcrumb.visible = false
-	_logic_section_name = ""
-	_set_map_chrome_visible(true)
+	if _nav != null:
+		_nav.navigate_to(MusicNavClass.map_entry())
 
 
 func _set_map_chrome_visible(v: bool) -> void:
@@ -1416,7 +1738,7 @@ func _on_sound(idx: int, sound_name: StringName, wait: bool) -> void:
 
 
 func _on_echo(arg: int) -> void:
-	_log_typed(EvType.ECHO, "echo %d" % arg)
+	_log_typed(EvType.ECHO, "debug message %d" % arg)
 
 
 # Emitted by the VM when a section runs to its terminal `done`. Treat as a
@@ -1619,9 +1941,11 @@ func _set_button_state(button: Button, enabled: bool, tooltip: String) -> void:
 
 
 func _refresh_add_state_button_state() -> void:
-	if _add_state_btn == null:
-		return
 	var reason := _authoring_blocked_reason()
 	var blocked := reason != ""
-	_add_state_btn.disabled = blocked
-	_add_state_btn.tooltip_text = reason if blocked else ADD_STATE_TOOLTIP
+	if _add_state_btn != null:
+		_add_state_btn.disabled = blocked
+		_add_state_btn.tooltip_text = reason if blocked else ADD_STATE_TOOLTIP
+	if _sidebar_add_state_btn != null:
+		_sidebar_add_state_btn.disabled = blocked
+		_sidebar_add_state_btn.tooltip_text = reason if blocked else ADD_STATE_TOOLTIP

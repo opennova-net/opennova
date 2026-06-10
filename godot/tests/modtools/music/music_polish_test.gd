@@ -40,7 +40,7 @@ func test_track_drag_payload_empty_without_bank():
 	assert_true(bm._track_drag_payload(0).is_empty(), "no bank loaded -> no drag payload")
 
 
-func test_double_click_node_drills_into_logic_graph():
+func test_double_click_node_drills_into_program_view():
 	# Double-click drills into the state's logic-graph blueprint (the sole authoring
 	# surface; there is no raw-script drawer anymore).
 	var doc = MusicEditorDocument.new()
@@ -56,7 +56,7 @@ func test_double_click_node_drills_into_logic_graph():
 	ev.double_click = true
 	lm._on_node_gui_input(ev, "Begin")
 	await get_tree().process_frame
-	assert_true(lm._logic_graph.visible, "double-clicking a state drills into its logic graph")
+	assert_true(lm._program_view.visible, "double-clicking a state drills into its logic graph")
 	assert_false(lm.get_node("%SectionMap").visible, "the map hides while drilled in")
 
 

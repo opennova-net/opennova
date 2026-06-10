@@ -39,6 +39,9 @@ public:
 	bool has_script(const StringName &p_name) const;
 	PackedStringArray get_script_names() const;
 	PackedStringArray get_section_names(const StringName &p_script_name) const;
+	// The `enter` (0x38) frame base: l_<base + 4k> is the state's (k+1)-th
+	// caller input. 0x20 for stock files; the editor renders those as "Input N".
+	int get_locals_frame_offset(const StringName &p_script_name) const;
 	PackedStringArray get_intrinsic_names() const;
 	String get_decompiled_text(const StringName &p_script_name);
 

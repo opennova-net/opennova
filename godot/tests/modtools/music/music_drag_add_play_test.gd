@@ -1,11 +1,10 @@
 extends GutTest
 
-# The blueprint graph's drag-to-add-play drop sink: gated by the editable flag (the
-# can_edit_plays parity gate), targets the shown state, and end-to-end through
-# live_mode it adds a play to the model. (The drop sink moved off the removed right
-# inspector onto the blueprint graph, now the sole per-statement authoring surface.)
+# The program view's drag-to-add-play drop sink: gated by the editable flag
+# (the can_edit_plays parity gate), targets the shown state, and end-to-end
+# through live_mode it adds a play to the model.
 
-const MusicSectionLogicGraph = preload("res://modtools/music/ui/section_logic_graph.gd")
+const MusicSectionProgramView = preload("res://modtools/music/ui/section_program_view.gd")
 const MusicEditorDocument = preload("res://modtools/music/music_editor_document.gd")
 const LiveModeScene = preload("res://modtools/music/ui/live_mode.tscn")
 const BANK_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"
@@ -25,7 +24,7 @@ func _section() -> Dictionary:
 
 
 func test_drop_sink_gated_by_editable():
-	var graph = MusicSectionLogicGraph.new()
+	var graph = MusicSectionProgramView.new()
 	add_child_autofree(graph)
 	await get_tree().process_frame
 	# configure_authoring sets the editable flag; show_section sets the section name.
@@ -44,7 +43,7 @@ func test_drop_sink_gated_by_editable():
 
 
 func test_drop_emits_add_play_for_shown_section():
-	var graph = MusicSectionLogicGraph.new()
+	var graph = MusicSectionProgramView.new()
 	add_child_autofree(graph)
 	await get_tree().process_frame
 	graph.configure_authoring(PackedStringArray(), [], null, [], true)
