@@ -31,6 +31,7 @@
 #include "object/nova_skeletal_anim.h"
 #include "mission/nova_mission_data.h"
 #include "simulation/nova_simulation.h"
+#include "wac/nova_wac_program.h"
 #include "lwf/nova_lwf_data.h"
 #include "lwf/nova_wav_loader.h"
 #include "audio/nova_sound_selector.h"
@@ -145,6 +146,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaMissionData);
 	GDREGISTER_CLASS(NovaSimulation);
 	GDREGISTER_CLASS(NovaEditHistory);
+	GDREGISTER_CLASS(NovaWacProgram);
 	GDREGISTER_CLASS(NovaLwfData);
 	GDREGISTER_CLASS(NovaWavLoader);
 	GDREGISTER_CLASS(NovaSoundSelector);

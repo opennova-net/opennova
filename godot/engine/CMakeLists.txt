@@ -73,6 +73,7 @@ add_library(${TARGET_NAME} SHARED
     mission/nova_mission_data.cpp
     simulation/infantry_root_motion.cpp
     simulation/nova_simulation.cpp
+    wac/nova_wac_program.cpp
     lwf/nova_lwf_data.cpp
     lwf/nova_wav_loader.cpp
     audio/nova_sound_selector.cpp
