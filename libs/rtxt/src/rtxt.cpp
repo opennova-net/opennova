@@ -105,6 +105,68 @@ bool File::has(const std::string &key) const {
   return lookup_.find(to_upper(key)) != lookup_.end();
 }
 
+const Entry *File::find_in_section(const std::string &section_name,
+                                   const std::string &key) const {
+  // [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250] — walk sections in
+  // order, first name match wins, accumulating preceding string_counts to find
+  // the section's first entry index. The engine never consults the entry's own
+  // section_index field; neither do we, so behaviour matches even on files
+  // that violate the grouping invariant.
+  std::string upper_section = to_upper(section_name);
+  size_t start_index = 0;
+  for (const auto &section : sections) {
+    if (to_upper(section.name) == upper_section) {
+      // [orig: TextResource_FindKeyInSection @ 0x75D1E0] — bounded key walk,
+      // first match wins, index validated against the header entry count.
+      std::string upper_key = to_upper(key);
+      for (uint32_t i = 0; i < section.string_count; ++i) {
+        size_t index = start_index + i;
+        if (index >= entries.size()) return nullptr;
+        if (to_upper(entries[index].key) == upper_key) {
+          return &entries[index];
+        }
+      }
+      return nullptr;
+    }
+    start_index += section.string_count;
+  }
+  return nullptr;
+}
+
+std::string File::get_in_section(const std::string &section_name,
+                                 const std::string &key) const {
+  const Entry *entry = find_in_section(section_name, key);
+  return entry ? entry->text : "";
+}
+
+bool File::is_grouped() const {
+  if (sections.empty()) return true;
+  std::vector<uint32_t> run_counts(sections.size(), 0);
+  uint32_t prev_section = 0;
+  for (const auto &entry : entries) {
+    if (entry.section_index >= sections.size()) return false;
+    if (entry.section_index < prev_section) return false;
+    prev_section = entry.section_index;
+    ++run_counts[entry.section_index];
+  }
+  for (size_t i = 0; i < sections.size(); ++i) {
+    if (run_counts[i] != sections[i].string_count) return false;
+  }
+  return true;
+}
+
+void File::normalize_grouping() {
+  std::stable_sort(entries.begin(), entries.end(),
+                   [](const Entry &a, const Entry &b) { return a.section_index < b.section_index; });
+  for (auto &section : sections) section.string_count = 0;
+  for (const auto &entry : entries) {
+    if (entry.section_index < sections.size()) {
+      ++sections[entry.section_index].string_count;
+    }
+  }
+  if (lookup_built_) build_lookup();
+}
+
 std::vector<const Entry *> File::get_section_entries(uint32_t section_index) const {
   std::vector<const Entry *> result;
   for (const auto &entry : entries) {
@@ -118,7 +180,9 @@ std::vector<const Entry *> File::get_section_entries(uint32_t section_index) con
 void File::build_lookup() {
   lookup_.clear();
   for (size_t i = 0; i < entries.size(); ++i) {
-    lookup_[to_upper(entries[i].key)] = i;
+    // First occurrence wins, matching the engine's forward key walk
+    // [orig: TextResource_FindEntryByKey @ 0x75D450].
+    lookup_.emplace(to_upper(entries[i].key), i);
   }
   lookup_built_ = true;
 }
@@ -316,10 +380,15 @@ bool write(const File &file, std::vector<uint8_t> &out, std::string &error) {
     text_data.push_back(0);  // Null terminator
   }
 
-  // Calculate positions.
+  // Calculate positions. The section meta block starts 4-byte aligned; the gap
+  // after the text blob is zero-padded (every retail file obeys this; the
+  // engine's allocator/fixup expects dword-aligned section rows).
   size_t entry_table_start = HEADER_SIZE;
   size_t entry_table_size = static_cast<size_t>(entry_count) * ENTRY_SIZE;
   size_t text_data_start = entry_table_start + entry_table_size;
+  while ((text_data_start + text_data.size()) % 4 != 0) {
+    text_data.push_back(0);
+  }
   size_t text_data_end = text_data_start + text_data.size();
 
   // Build section metadata.
@@ -328,34 +397,50 @@ bool write(const File &file, std::vector<uint8_t> &out, std::string &error) {
   // Section count.
   write_u32(section_meta, section_count);
 
-  // Section info entries (we'll fill name offsets later).
+  // Section info entries (first-key offsets filled in once keys are laid out).
   size_t section_info_start = section_meta.size();
   for (const auto &section : file.sections) {
-    write_u32(section_meta, 0);  // Name offset placeholder
+    write_u32(section_meta, 0);  // First-key offset placeholder
     write_u32(section_meta, section.string_count);
   }
 
-  // Section names and update offsets.
-  size_t names_base = section_meta.size();
-  for (size_t i = 0; i < file.sections.size(); ++i) {
-    uint32_t name_offset = static_cast<uint32_t>(section_meta.size() - names_base);
-    write_u32_at(section_meta, section_info_start + i * 8, name_offset);
-
-    for (char c : file.sections[i].name) {
+  // Section names (walked sequentially by the engine; no per-name offsets).
+  for (const auto &section : file.sections) {
+    for (char c : section.name) {
       section_meta.push_back(static_cast<uint8_t>(c));
     }
     section_meta.push_back(0);  // Null terminator
   }
 
-  // Key names.
-  for (const auto &entry : file.entries) {
-    for (char c : entry.key) {
-      section_meta.push_back(static_cast<uint8_t>(c));
+  // Key names, one per entry in entry order, and each section's first-key
+  // offset relative to (section_meta_offset + 4) — the engine rebases that
+  // field into a pointer to the section's first key
+  // [orig: TextResource_FixupPointers @ 0x75D050]. Sections claim consecutive
+  // key runs sized by string_count, so the offsets are prefix sums.
+  {
+    std::vector<uint32_t> key_offsets;  // per entry, relative to meta+4
+    key_offsets.reserve(entry_count);
+    for (const auto &entry : file.entries) {
+      key_offsets.push_back(static_cast<uint32_t>(section_meta.size() - 4));
+      for (char c : entry.key) {
+        section_meta.push_back(static_cast<uint8_t>(c));
+      }
+      section_meta.push_back(0);  // Null terminator
     }
-    section_meta.push_back(0);  // Null terminator
+    uint32_t keys_end = static_cast<uint32_t>(section_meta.size() - 4);
+    size_t first_entry = 0;
+    for (size_t i = 0; i < file.sections.size(); ++i) {
+      uint32_t off = first_entry < key_offsets.size()
+                         ? key_offsets[first_entry]
+                         : keys_end;  // empty trailing section points at the blob end
+      write_u32_at(section_meta, section_info_start + i * 8, off);
+      first_entry += file.sections[i].string_count;
+    }
   }
 
-  uint32_t section_meta_size = static_cast<uint32_t>(section_meta.size());
+  // Header field [+8] counts the meta block EXCLUDING the section_count dword
+  // (verified on all 98 retail bins; the engine never reads it).
+  uint32_t section_meta_size = static_cast<uint32_t>(section_meta.size() - 4);
 
   // Write header.
   write_u32(out, RTXT_MAGIC);

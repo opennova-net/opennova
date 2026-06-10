@@ -162,6 +162,36 @@ func rename_section(index: int, name: String) -> void:
 	structure_changed.emit()
 
 
+## Moves an entry to another section. Structural: the entry relocates to the end
+## of its new section's run (the game derives entry indices from contiguous
+## section runs, so order is part of the data). Returns the entry's new index.
+func move_entry_to_section(index: int, section_index: int) -> int:
+	if index < 0 or index >= string_table.get_entry_count():
+		return index
+	if string_table.get_entry_section_index(index) == section_index:
+		return index
+	_flush_edit()
+	_push_undo()
+	var new_index := string_table.set_entry_section_index(index, section_index)
+	selected_index = new_index
+	mark_dirty()
+	structure_changed.emit()
+	return new_index
+
+
+## Restores the on-disk grouping invariant (entries contiguous per section, in
+## section order) for tables loaded from files that violate it. One undo step.
+func normalize_grouping() -> void:
+	if string_table.is_grouped():
+		return
+	_flush_edit()
+	_push_undo()
+	string_table.normalize_grouping()
+	_clamp_selection()
+	mark_dirty()
+	structure_changed.emit()
+
+
 # --- Editing session (silent: model + dirty only, bracketed by begin/commit) ---
 
 func begin_edit() -> void:
@@ -198,9 +228,6 @@ func set_entry_key_live(index: int, key: String) -> void:
 	mark_dirty()
 
 
-func set_entry_section_index_live(index: int, section_index: int) -> void:
-	string_table.set_entry_section_index(index, section_index)
-	mark_dirty()
 
 
 # --- Undo / redo ---
@@ -238,50 +265,59 @@ func redo() -> void:
 # --- Validation ---
 
 ## Returns { "issues_by_index": { idx: Array[String] }, "summary": String,
-## "ok": bool }. Flags case-insensitive duplicate keys, empty keys, and entries
-## whose section index is out of range.
+## "ok": bool, "grouped": bool }.
+##
+## Validation mirrors how the game actually resolves strings: lookups are
+## scoped to one section and the FIRST key match wins, so the same key in two
+## DIFFERENT sections is legitimate retail data (8 shipped JO tables do this)
+## and is not flagged. A repeated key inside ONE section makes the later copy
+## unreachable in-game — flagged as a warning. Ungrouped entries break lookup
+## entirely (the engine derives entry indices from contiguous section runs) and
+## make the table invalid.
 func validate() -> Dictionary:
 	var issues: Dictionary = {}
-	var by_key: Dictionary = {}
 	var count := string_table.get_entry_count()
 	var section_count := string_table.get_section_count()
 	var duplicates := 0
 	var empties := 0
 	var bad_sections := 0
+	var seen_in_section: Dictionary = {}  # "section|KEY" -> first index
 
 	for i in count:
 		var upper := string_table.get_entry_key(i).strip_edges().to_upper()
+		var section := string_table.get_entry_section_index(i)
 		if upper.is_empty():
 			_add_issue(issues, i, "Empty key")
 			empties += 1
 		else:
-			if not by_key.has(upper):
-				by_key[upper] = []
-			(by_key[upper] as Array).append(i)
-		var section := string_table.get_entry_section_index(i)
+			var scoped := "%d|%s" % [section, upper]
+			if seen_in_section.has(scoped):
+				_add_issue(issues, i, "Duplicate key in section (unreachable in-game: first match wins)")
+				duplicates += 1
+			else:
+				seen_in_section[scoped] = i
 		if section < 0 or section >= section_count:
 			_add_issue(issues, i, "Invalid section")
 			bad_sections += 1
 
-	for upper in by_key:
-		var indices := by_key[upper] as Array
-		if indices.size() > 1:
-			for i in indices:
-				_add_issue(issues, i, "Duplicate key")
-				duplicates += 1
+	var grouped := string_table.is_grouped()
+	var parts: Array[String] = []
+	if not grouped:
+		parts.append("entries not grouped by section")
+	if duplicates > 0:
+		parts.append("%d duplicate in section" % duplicates)
+	if empties > 0:
+		parts.append("%d empty key" % empties)
+	if bad_sections > 0:
+		parts.append("%d bad section" % bad_sections)
+	var summary := "No issues" if parts.is_empty() else ", ".join(PackedStringArray(parts))
 
-	var summary := "No issues"
-	if not issues.is_empty():
-		var parts: Array[String] = []
-		if duplicates > 0:
-			parts.append("%d duplicate" % duplicates)
-		if empties > 0:
-			parts.append("%d empty key" % empties)
-		if bad_sections > 0:
-			parts.append("%d bad section" % bad_sections)
-		summary = ", ".join(PackedStringArray(parts))
-
-	return {"issues_by_index": issues, "summary": summary, "ok": issues.is_empty()}
+	return {
+		"issues_by_index": issues,
+		"summary": summary,
+		"ok": issues.is_empty() and grouped,
+		"grouped": grouped,
+	}
 
 
 # --- CSV import / export ---

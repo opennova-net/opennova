@@ -331,12 +331,26 @@ target_include_directories(scr_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME scr_unit COMMAND scr_unit_test)
 
 # RTXT localized string table tests
-foreach(test roundtrip byte_equal lookup strip_hotkey empty)
+foreach(test roundtrip byte_equal lookup strip_hotkey empty section_lookup)
     add_executable(rtxt_${test}_test rtxt/${test}_test.cpp)
     target_link_libraries(rtxt_${test}_test PRIVATE opennova_rtxt)
     target_include_directories(rtxt_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtxt)
     add_test(NAME rtxt_${test} COMMAND rtxt_${test}_test)
 endforeach()
+
+# RTXT parity against committed retail string tables (format invariants + byte roundtrip)
+add_executable(rtxt_real_parity_test rtxt/real_parity_test.cpp)
+target_link_libraries(rtxt_real_parity_test PRIVATE opennova_rtxt)
+target_include_directories(rtxt_real_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtxt)
+target_compile_definitions(rtxt_real_parity_test PRIVATE
+    RTXT_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/rtxt")
+add_test(NAME rtxt_real_parity COMMAND rtxt_real_parity_test)
+
+# Full-install RTXT sweep through the engine-faithful VFS (skips unless OPENNOVA_JO_DIR set)
+add_executable(rtxt_jo_install_sweep_test rtxt/jo_install_sweep_test.cpp)
+target_link_libraries(rtxt_jo_install_sweep_test PRIVATE opennova_rtxt opennova_vfs opennova_pff)
+target_include_directories(rtxt_jo_install_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtxt)
+add_test(NAME rtxt_jo_install_sweep COMMAND rtxt_jo_install_sweep_test)
 
 # Resource directory index tests
 add_executable(resource_index_test resource_index/resource_index_test.cpp)
