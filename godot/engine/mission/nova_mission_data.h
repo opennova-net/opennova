@@ -56,6 +56,8 @@ public:
 	String get_terrain_ref() const;
 	String get_environment_ref() const;
 	Dictionary get_info() const;
+	// EnvFile.apply_mission_overrides() payload from the attrib-gated header.
+	Dictionary get_environment_overrides() const;
 
 	int get_entity_count(int kind) const;
 	// Array of dictionaries; see entity_to_dictionary() for the fields.

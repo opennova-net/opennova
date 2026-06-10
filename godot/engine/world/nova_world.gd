@@ -116,6 +116,7 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 	if not _load_environment(env_name):
 		load_failed.emit("failed to load %s" % env_name)
 		return ERR_CANT_OPEN
+	_apply_mission_environment_overrides(mission)
 	if not _load_terrain(trn):
 		load_failed.emit("failed to load %s" % trn)
 		return ERR_CANT_OPEN
@@ -178,6 +179,8 @@ func unload() -> void:
 		container.queue_free()
 	if _mission_audio != null:
 		_mission_audio.teardown()
+	if _env != null and _env.environment_data != null:
+		_env.environment_data.clear_mission_overrides()
 	_loaded = false
 	_loaded_mission = null
 	_mission_audio = null
@@ -194,7 +197,26 @@ func _load_environment(env_path: String) -> bool:
 		return false
 	# NovaEnvironment's setter reloads + pushes shader globals on assignment.
 	_env.environment_data = env
+	var celestial := get_node_or_null("NovaCelestial")
+	if celestial != null and celestial.has_method("set_resource_root"):
+		celestial.set_resource_root(_resource_root)
 	return true
+
+
+## Apply the mission's attrib-gated water/fog overrides onto the loaded env via
+## EnvFile's non-persistent override layer [orig: Game_LoadTerrainDuringConnect
+## @ 0x520710]. The base .env is never mutated.
+func _apply_mission_environment_overrides(mission: NovaMissionData) -> void:
+	if _env == null or mission == null:
+		return
+	var env_data: EnvFile = _env.environment_data
+	if env_data == null:
+		return
+	var overrides: Dictionary = mission.get_environment_overrides()
+	if overrides.is_empty():
+		env_data.clear_mission_overrides()
+	else:
+		env_data.apply_mission_overrides(overrides)
 
 
 func _load_terrain(trn_path: String) -> bool:

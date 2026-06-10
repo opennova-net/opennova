@@ -1346,6 +1346,15 @@ MissionInfo MissionDocument::info() const {
 	out.max_saves = header.max_saves;
 	out.music = static_cast<int>(header.music);
 	out.reverb = static_cast<int>(header.reverb);
+	out.water_override = static_cast<int16_t>(header.water_override);
+	out.fog_override = static_cast<int>(header.fog_override);
+	out.fog_color[0] = header.fog_color[0];
+	out.fog_color[1] = header.fog_color[1];
+	out.fog_color[2] = header.fog_color[2];
+	out.water_color[0] = header.water_color[0];
+	out.water_color[1] = header.water_color[1];
+	out.water_color[2] = header.water_color[2];
+	out.water_murk = header.murk;
 	return out;
 }
 
