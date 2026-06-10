@@ -8,13 +8,13 @@
 [ext_resource type="Script" uid="uid://ba4ar1y0eklyp" path="res://engine/environment/nova_weather.gd" id="8_weather"]
 [ext_resource type="Script" uid="uid://dabwlp4s5mh65" path="res://engine/environment/nova_water.gd" id="9_water"]
 [ext_resource type="Script" path="res://engine/world/nova_world.gd" id="10_world"]
+[ext_resource type="Script" path="res://game/menu_shell.gd" id="11_menu"]
 
 [node name="MainGame" type="Node3D" unique_id=1969900999]
 script = ExtResource("4_main")
 
 [node name="World" type="Node3D" parent="."]
 script = ExtResource("10_world")
-mission_file = "00TRg.bms"
 
 [node name="NovaTerrain" type="NovaTerrain" parent="World" unique_id=1162114807]
 environment_path = NodePath("../NovaEnvironment")
@@ -44,6 +44,7 @@ water_height = 10.5
 
 [node name="Camera3D" type="Camera3D" parent="." unique_id=1908144657]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 71.472435, 0)
+current = true
 script = ExtResource("2_io4ac")
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1222701923]
@@ -55,3 +56,15 @@ layout_mode = 3
 offset_right = 40.0
 offset_bottom = 23.0
 text = "Runtime with engine-spec foliage (NovaFoliageDispatcher)"
+
+[node name="MenuLayer" type="CanvasLayer" parent="."]
+layer = 2
+
+[node name="MenuHost" type="Control" parent="MenuLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("11_menu")

@@ -9,10 +9,11 @@ const FontsWorkspaceAdapter = preload("res://modtools/editor/fonts_workspace.gd"
 const CreditsWorkspaceAdapter = preload("res://modtools/editor/credits_workspace.gd")
 const StringsWorkspaceAdapter = preload("res://modtools/strings/strings_workspace.gd")
 const SoundWorkspaceAdapter = preload("res://modtools/sound/sound_workspace.gd")
+const MnuWorkspaceAdapter = preload("res://modtools/mnu/mnu_workspace.gd")
 const MusicWorkspaceAdapter = preload("res://modtools/editor/music_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
 
-enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC, SOUND }
+enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC, SOUND, MNU }
 
 # Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
 # shows the non-popup ones in order. The enum below stays only as stable id
@@ -222,6 +223,7 @@ func _workspace_defs() -> Array:
 		WorkspaceDef.make(Workspace.FONTS, FontsWorkspaceAdapter, false, &"Interface"),
 		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter, false, &"Interface"),
 		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter, false, &"Interface"),
+		WorkspaceDef.make(Workspace.MNU, MnuWorkspaceAdapter, false, &"Interface"),
 		WorkspaceDef.make(Workspace.MUSIC, MusicWorkspaceAdapter, false, &"Audio"),
 		WorkspaceDef.make(Workspace.SOUND, SoundWorkspaceAdapter, false, &"Atmosphere"),
 		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true, &"Atmosphere"),
@@ -527,6 +529,117 @@ func open_font_workspace(font_name: String) -> Error:
 		sync_from_editor_state()
 	show_status_message("Opened font %s." % clean_name, 3.0)
 	return OK
+
+
+# Cross-jump used by the Menus workspace's "Edit in Strings": open the menu's resolved
+# text table in the Strings workspace and focus the given key. Mirrors
+# open_font_workspace. table_path is an absolute path (already resolved by the caller).
+func open_strings_workspace(table_path: String, key: String) -> Error:
+	_ensure_workspaces()
+	var workspace := _get_workspace(Workspace.STRINGS)
+	if workspace == null:
+		return ERR_UNAVAILABLE
+	var err: Error = int(workspace.call("open_strings_table", table_path, key))
+	if err != OK:
+		show_status_message("Could not open string table: %s" % table_path.get_file(), 5.0)
+		return err
+	if _active_workspace_id != Workspace.STRINGS:
+		set_active_workspace(Workspace.STRINGS)
+	else:
+		_refresh_workspace_surface()
+		sync_from_editor_state()
+	show_status_message("Editing string %s." % (key if not key.is_empty() else table_path.get_file()), 3.0)
+	return OK
+
+
+# Cross-jump used by the Menus workspace's cross-file ACTION rows. Resolve a
+# .mnu name/path against the configured resource root, open it in Menus, then
+# focus the target screen when supplied.
+func open_menu_workspace(file: String, screen: String = "") -> Error:
+	_ensure_workspaces()
+	var workspace := _get_workspace(Workspace.MNU)
+	if workspace == null:
+		return ERR_UNAVAILABLE
+	var path := _resolve_menu_action_path(file)
+	if path.is_empty():
+		show_status_message("Menu not found: %s" % file.strip_edges(), 5.0)
+		return ERR_FILE_NOT_FOUND
+	var err: Error = workspace.open_file(path)
+	if err != OK:
+		show_status_message("Could not open menu: %s" % path.get_file(), 5.0)
+		return err
+	if _active_workspace_id != Workspace.MNU:
+		set_active_workspace(Workspace.MNU)
+	else:
+		_refresh_workspace_surface()
+		sync_from_editor_state()
+	var target := screen.strip_edges()
+	if not target.is_empty() and workspace.has_method("focus_screen_named"):
+		var focus_err: Error = int(workspace.call("focus_screen_named", target))
+		if focus_err != OK:
+			show_status_message("Opened %s; screen not found: %s" % [path.get_file(), target], 5.0)
+			return focus_err
+	show_status_message("Opened menu %s%s." % [
+		path.get_file(),
+		" -> %s" % target if not target.is_empty() else "",
+	], 3.0)
+	return OK
+
+
+func _resolve_menu_action_path(file: String) -> String:
+	var clean := file.strip_edges().replace("\\", "/")
+	if clean.is_empty():
+		return ""
+	var candidates := _menu_action_path_candidates(clean)
+	for candidate_value in candidates:
+		var candidate := String(candidate_value)
+		if FileAccess.file_exists(candidate):
+			return candidate
+	var root := _resource_library.get_root_dir()
+	if not root.is_empty():
+		for candidate_value in candidates:
+			var candidate := String(candidate_value)
+			var direct := root.path_join(candidate)
+			if FileAccess.file_exists(direct):
+				return direct
+			var basename := root.path_join(candidate.get_file())
+			if FileAccess.file_exists(basename):
+				return basename
+	var index := _resource_library.get_index()
+	if _resource_library.get_root_dir().is_empty():
+		return ""
+	if index.get_root_dir().is_empty():
+		_scan_resource_root(false)
+	for entry_value in index.get_resource_files("menu"):
+		var entry := entry_value as Dictionary
+		var rel := String(entry.get("relative_path", "")).replace("\\", "/")
+		var logical := String(entry.get("logical_name", "")).replace("\\", "/")
+		for candidate_value in candidates:
+			var candidate := String(candidate_value)
+			var want := candidate.to_lower()
+			var want_file := candidate.get_file().to_lower()
+			if rel.to_lower() == want or rel.get_file().to_lower() == want_file \
+					or logical.to_lower() == want or logical.get_file().to_lower() == want_file:
+				var path := String(entry.get("path", ""))
+				if not path.is_empty():
+					return path
+	return ""
+
+
+func _menu_action_path_candidates(clean: String) -> Array:
+	var candidates := [clean]
+	var file_name := clean.get_file()
+	if file_name.is_empty() or file_name.begins_with("jo_"):
+		return candidates
+	var jo_name := "jo_%s" % file_name
+	var dir := clean.get_base_dir()
+	if not dir.is_empty():
+		var jo_relative := dir.path_join(jo_name)
+		if not candidates.has(jo_relative):
+			candidates.append(jo_relative)
+	if not candidates.has(jo_name):
+		candidates.append(jo_name)
+	return candidates
 
 
 func _get_workspace(workspace_id: int) -> EditorWorkspace:
