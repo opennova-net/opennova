@@ -206,7 +206,7 @@ func _refresh_add_buttons_enabled() -> void:
 func _refresh_empty_hint() -> void:
 	if _empty_hint == null:
 		return
-	var resource := _document.resource if _document != null else null
+	var resource: CbinCreditsResource = _document.resource if _document != null else null
 	var is_empty := resource == null or resource.get_entry_count() == 0
 	_empty_hint.visible = is_empty and _mode == Mode.VISUAL
 
@@ -300,7 +300,7 @@ func _on_player_scroll_offset_changed(_offset: float) -> void:
 	var idx := _player.entry_index_at_scroll_center()
 	if idx < 0:
 		return
-	var entry := _document.resource.get_entry(idx)
+	var entry: CbinEntry = _document.resource.get_entry(idx)
 	_sync_suppress = true
 	_block_list.select_entry(entry)
 	var card = _block_list.card_for_entry(entry)
@@ -345,7 +345,7 @@ func _scrub_preview(delta: float) -> void:
 func _max_preview_scroll_offset() -> float:
 	if _document == null or _document.resource == null or _document.resource.get_entry_count() == 0:
 		return _player.get_size().y
-	var last_idx := _document.resource.get_entry_count() - 1
+	var last_idx: int = _document.resource.get_entry_count() - 1
 	return maxf(_player.get_size().y, _player.content_y_for_entry(last_idx) + _player.get_size().y)
 
 func _center_visible_entry() -> CbinEntry:
@@ -357,7 +357,7 @@ func _center_visible_entry() -> CbinEntry:
 	var best_entry: CbinEntry = null
 	var best_distance := INF
 	for i in range(_document.resource.get_entry_count()):
-		var entry := _document.resource.get_entry(i)
+		var entry: CbinEntry = _document.resource.get_entry(i)
 		var card = _block_list.card_for_entry(entry)
 		if card == null:
 			continue
