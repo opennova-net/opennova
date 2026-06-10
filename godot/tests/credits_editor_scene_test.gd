@@ -4,10 +4,13 @@ const CreditsEditorScene = preload("res://modtools/credits/credits_editor.tscn")
 const CreditsEditorBlockCardScene = preload("res://modtools/credits/credits_editor_block_card.tscn")
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
 const CreditsWorkspaceScript = preload("res://modtools/editor/credits_workspace.gd")
+const ResourceDirSettings = preload("res://engine/resource_index/resource_dir_settings.gd")
 const KDA_PATH := "res://../fixtures/cbin/nlist.reference.kda"
 const CREDITS_FIXTURE_DIR := "res://../fixtures/cbin"
 const MINIMAL_SOURCE := "[ENV]\nscroll_rate=1.25\nvertical_space=18\ncenter_x=360\n\n[TEXT]\nApplied from source\n"
 const MALFORMED_SOURCE := "[ENV]\nscroll_rate=1.25\n\n[TEXT]\n~Fbad\n"
+
+var _saved_resource_dir := ""
 
 class FontOpenShell:
 	extends Node
@@ -17,6 +20,15 @@ class FontOpenShell:
 	func open_font_workspace(font_name: String) -> Error:
 		requested_font_name = font_name
 		return OK
+
+
+func before_all() -> void:
+	_saved_resource_dir = ResourceDirSettings.get_resource_dir()
+	ResourceDirSettings.set_resource_dir("")
+
+
+func after_all() -> void:
+	ResourceDirSettings.set_resource_dir(_saved_resource_dir)
 
 
 func test_block_card_scene_instantiates() -> void:
@@ -50,6 +62,10 @@ func test_editor_binds_document_and_loads_kda() -> void:
 	var editor = CreditsEditorScene.instantiate()
 	add_child_autofree(editor)
 	await get_tree().process_frame
+	# Keep this fixture test deterministic: otherwise cards resolve image/font
+	# names through the user's persisted resource directory, which can point at a
+	# large real game install and make headless runs environment-dependent.
+	editor.set_resource_root(null)
 
 	var doc: CreditsEditorDocument = autofree(CreditsEditorDocument.new())
 	editor.set_document(doc)

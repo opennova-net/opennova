@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include "util/nova_data_format.h"
 #include "util/texture_path_resolver.h"
 
 #include <env/env_render.h>
@@ -337,16 +338,14 @@ Error EnvFile::load() {
 		return ERR_INVALID_PARAMETER;
 	}
 
-	Ref<FileAccess> file = FileAccess::open(source_path, FileAccess::READ);
-	if (file.is_null()) {
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(source_path, bytes)) {
 		UtilityFunctions::printerr("[EnvFile] Cannot open: ", source_path);
 		return ERR_FILE_CANT_READ;
 	}
 
-	const String text = file->get_as_text();
-	file.unref();
-
-	std::istringstream input(std::string(text.utf8().get_data()));
+	std::string text(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
+	std::istringstream input(text);
 	std::string error;
 	env = opennova::env::Config();
 	if (!opennova::env::load_env(input, env, error)) {
@@ -618,17 +617,15 @@ PackedStringArray EnvFileLoader::_get_dependencies(const String &p_path, bool p_
 	(void)p_add_types;
 	PackedStringArray dependencies;
 
-	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ);
-	if (file.is_null()) {
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(p_path, bytes)) {
 		return dependencies;
 	}
 
-	const String text = file->get_as_text();
-	file.unref();
-
 	opennova::env::Config cfg;
 	std::string error;
-	std::istringstream input(std::string(text.utf8().get_data()));
+	std::string text(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
+	std::istringstream input(text);
 	if (!opennova::env::load_env(input, cfg, error)) {
 		return dependencies;
 	}

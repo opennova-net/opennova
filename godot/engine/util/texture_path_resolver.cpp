@@ -1,5 +1,6 @@
 #include "texture_path_resolver.h"
 
+#include "util/nova_data_format.h"
 #include "util/pcx_texture_bridge.h"
 
 #include <godot_cpp/classes/dir_access.hpp>
@@ -124,19 +125,22 @@ godot::Ref<godot::Texture2D> texture_from_image(godot::Ref<godot::Image> image) 
 godot::Ref<godot::Texture2D> load_existing_texture_path(const godot::String &path) {
 	const godot::String ext = path.get_extension().to_lower();
 
-	godot::Ref<godot::FileAccess> file = godot::FileAccess::open(path, godot::FileAccess::READ);
-	if (file.is_null()) {
+	godot::PackedByteArray bytes;
+	if (!godot::read_nova_payload_file(path, bytes)) {
 		return godot::Ref<godot::Texture2D>();
 	}
-	godot::PackedByteArray bytes = file->get_buffer(file->get_length());
-	file.unref();
 
 	if (ext == "pcx") {
 		return texture_from_image(decode_pcx_image(bytes.ptr(), bytes.size()));
 	}
 
 	if (ext == "dds" && bytes_look_like_dds(bytes)) {
-		return godot::ResourceLoader::get_singleton()->load(path, "ImageTexture", godot::ResourceLoader::CACHE_MODE_IGNORE);
+		godot::Ref<godot::Image> image;
+		image.instantiate();
+		if (image->load_dds_from_buffer(bytes) != godot::OK) {
+			return godot::Ref<godot::Texture2D>();
+		}
+		return texture_from_image(image);
 	}
 
 	if ((ext == "tga" || ext == "mdt" || ext == "dds") && !bytes_look_like_dds(bytes)) {

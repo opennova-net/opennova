@@ -2,6 +2,7 @@
 
 #include "cbin_credits_resource.h"
 #include "cbin_asset_lookup.h"
+#include "util/nova_data_format.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -69,16 +70,11 @@ Variant KdaResourceFormatLoader::_load(const String &p_path, const String &p_ori
 	(void)p_use_sub_threads;
 	(void)p_cache_mode;
 
-	// Read file data.
-	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ);
-	if (!file.is_valid()) {
+	PackedByteArray data;
+	if (!read_nova_payload_file(p_path, data)) {
 		UtilityFunctions::push_error("KdaResourceFormatLoader: Cannot open file: ", p_path);
 		return Variant();
 	}
-
-	int64_t file_size = file->get_length();
-	PackedByteArray data = file->get_buffer(file_size);
-	file->close();
 
 	// Check CBIN magic.
 	if (!cbin::is_cbin(data.ptr(), data.size())) {

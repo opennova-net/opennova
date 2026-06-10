@@ -1,11 +1,22 @@
 extends GutTest
 
 const CreditsWorkspaceScript = preload("res://modtools/editor/credits_workspace.gd")
+const ResourceDirSettings = preload("res://engine/resource_index/resource_dir_settings.gd")
 const KDA_SOURCE_PATH := "res://../fixtures/cbin/nlist.reference.kda"
 const TEMP_DIR := "user://test_credits_ws"
 const MINIMAL_SOURCE := "[ENV]\nscroll_rate=1.50\nvertical_space=21\ncenter_x=420\n\n[TEXT]\nSaved source edit\n"
 
 var _kda_path: String = ""
+var _saved_resource_dir := ""
+
+
+func before_all() -> void:
+	_saved_resource_dir = ResourceDirSettings.get_resource_dir()
+	ResourceDirSettings.set_resource_dir("")
+
+
+func after_all() -> void:
+	ResourceDirSettings.set_resource_dir(_saved_resource_dir)
 
 
 func before_each() -> void:

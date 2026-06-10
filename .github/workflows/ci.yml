@@ -265,7 +265,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $version = "${env:GODOT_VERSION}"
-          $bin = ".godot-bin/Godot_v${version}_win64.exe"
+          $bin = ".godot-bin/Godot_v${version}_win64_console.exe"
           if (-not (Test-Path $bin)) {
             New-Item -ItemType Directory -Force -Path .godot-bin | Out-Null
             $url = "https://github.com/godotengine/godot/releases/download/${version}/Godot_v${version}_win64.exe.zip"
@@ -305,7 +305,7 @@ jobs:
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64.exe"
+            GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             GODOT_BIN="${PWD}/.godot-bin/Godot.app/Contents/MacOS/Godot"
           else
@@ -330,7 +330,7 @@ jobs:
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64.exe"
+            export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             export GODOT_BIN="${PWD}/.godot-bin/Godot.app/Contents/MacOS/Godot"
           else
