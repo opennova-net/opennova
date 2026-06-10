@@ -485,6 +485,32 @@ func test_states_sidebar_click_navigates_and_mirrors_location():
 	assert_true(list.is_selected(0), "sidebar selection follows back to the map row")
 
 
+func test_from_scratch_add_state_reachable_while_drilled():
+	# A new project drops the user straight into Begin's blueprint, where the map
+	# toolbar (and its Add State button) is hidden. The sidebar's pinned Add state
+	# must carry the flow: press it, get State_1, land in its blueprint with the
+	# trail recording the hop -- no "go back to the map first" knowledge required.
+	var doc = MusicEditorDocument.new()
+	var lm: Control = LiveModeScene.instantiate()
+	add_child_autofree(lm)
+	lm.bind_document(doc)
+	await get_tree().process_frame
+	lm._on_new_project_pressed()
+	await get_tree().process_frame
+	assert_true(lm._logic_graph.visible, "from-scratch lands in Begin's blueprint")
+	assert_false(lm._map_toolbar.visible, "the map toolbar (old Add State home) is hidden here")
+	var side_add: Button = lm._sidebar_add_state_btn
+	assert_not_null(side_add, "the sidebar carries a pinned Add state button")
+	if side_add == null:
+		return
+	assert_true(side_add.is_visible_in_tree(), "sidebar Add state stays visible while drilled in")
+	assert_false(side_add.disabled, "and is enabled on a fresh editable project")
+	side_add.pressed.emit()
+	await get_tree().process_frame
+	assert_eq(lm._logic_section_name, "State_1", "pressing it creates and opens the new state")
+	assert_eq(_crumb_texts(lm), ["Map", "Begin", "State_1"], "the hop lands on the trail")
+
+
 func _button_with_text(root: Node, text: String) -> Button:
 	if root == null:
 		return null

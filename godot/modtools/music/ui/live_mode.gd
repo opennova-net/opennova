@@ -115,6 +115,7 @@ var _last_log_count: int = 0
 @onready var _states_list: ItemList = %StatesList
 @onready var _canvas: Control = %Canvas
 var _add_state_btn: Button
+var _sidebar_add_state_btn: Button
 # Level-2 drill-in: the section logic graph swaps into the center canvas (Stage 2).
 var _logic_graph: GraphEdit
 # Where the user is + how they got there (trail, back/forward). Every drill,
@@ -980,8 +981,11 @@ func _update_live_highlight(state: int) -> void:
 
 # --- Add State (visual-first authoring slice) --------------------------
 
-# Mount a "＋ Add State" button just above the canvas. The loudest missing
-# affordance was that there was no visual way to add a section.
+# Mount the "＋ Add State" affordances: one on the map toolbar (hidden while a
+# blueprint is open) and one pinned under the always-visible States sidebar --
+# a from-scratch project drops the user straight into Begin's blueprint, where
+# the map toolbar is hidden, and "make a second state" must never require
+# knowing to navigate back first.
 func _install_add_state_button() -> void:
 	var col := get_node_or_null("%CenterCol")
 	if col == null or _canvas == null:
@@ -997,6 +1001,14 @@ func _install_add_state_button() -> void:
 	col.move_child(toolbar, _canvas.get_index())
 	_map_toolbar = toolbar
 	_map_header = col.get_node_or_null("MapHeader")
+	if _states_list != null and _states_list.get_parent() != null:
+		_sidebar_add_state_btn = Button.new()
+		_sidebar_add_state_btn.name = "SidebarAddState"
+		_sidebar_add_state_btn.text = "＋ Add state"
+		_sidebar_add_state_btn.tooltip_text = ADD_STATE_TOOLTIP
+		_sidebar_add_state_btn.focus_mode = Control.FOCUS_NONE
+		_sidebar_add_state_btn.pressed.connect(_on_add_state)
+		_states_list.get_parent().add_child(_sidebar_add_state_btn)
 
 
 # Centered welcome shown when nothing is loaded: a primary "create from scratch"
@@ -1852,9 +1864,11 @@ func _set_button_state(button: Button, enabled: bool, tooltip: String) -> void:
 
 
 func _refresh_add_state_button_state() -> void:
-	if _add_state_btn == null:
-		return
 	var reason := _authoring_blocked_reason()
 	var blocked := reason != ""
-	_add_state_btn.disabled = blocked
-	_add_state_btn.tooltip_text = reason if blocked else ADD_STATE_TOOLTIP
+	if _add_state_btn != null:
+		_add_state_btn.disabled = blocked
+		_add_state_btn.tooltip_text = reason if blocked else ADD_STATE_TOOLTIP
+	if _sidebar_add_state_btn != null:
+		_sidebar_add_state_btn.disabled = blocked
+		_sidebar_add_state_btn.tooltip_text = reason if blocked else ADD_STATE_TOOLTIP
