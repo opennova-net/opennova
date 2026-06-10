@@ -2,7 +2,8 @@ class_name EditorWorkspace
 extends RefCounted
 
 # Generic editor shell contract. Domain adapters name their ported engine
-# equivalents, for example EnvironmentEditorWorkspace -> sub_53FA70/sub_53E3F0.
+# equivalents, for example EnvironmentEditorWorkspace -> Environment_LoadTimeOfDayConfig
+# @ 0x57db30 / TimeOfDay_ParseProperty @ 0x57c590 (Jointops retail).
 #
 # ============================================================================
 # CONTRACT — what a workspace must / may implement

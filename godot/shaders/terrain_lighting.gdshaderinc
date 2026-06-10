@@ -4,8 +4,9 @@
 // overlays differ, so the surface-shading and fog math live here once.
 //
 // This is the IDA-derived ps.1.4 dual-normal path (Jointops sub_60AAA0 /
-// gobj ps.1.1 v23 dual-normal, gobj.dll.c:42829-42840) plus
-// Render_ConfigureFog@0x005F9890. Keep it byte-for-byte authoritative.
+// gobj ps.1.1 v23 dual-normal, gobj.dll.c:42829-42840) plus the fog model from
+// [orig: Render_SetFogState @ 0x58a950 -> CD3DDevice_SetFogParameters @ 0x677960].
+// Keep it byte-for-byte authoritative.
 
 // --- Shared uniforms: terrain surface inputs + lighting + fog -----------------
 uniform sampler2D u_colormap : source_color, filter_linear, repeat_disable;
@@ -99,7 +100,7 @@ float jointops_fog_factor(float dist, float fog_start, float fog_end, int fog_ty
 }
 
 // Mix the configured fog color over `color` by world-space camera distance.
-// Jointops.exe Render_SetFogParams@0x0054B4B0 -> Render_ConfigureFog@0x005F9890.
+// [orig: Render_SetFogState @ 0x58a950 -> CD3DDevice_SetFogParameters @ 0x677960]
 vec3 apply_terrain_fog(vec3 color, vec3 world_pos, vec3 camera_pos) {
 	float dist = length(world_pos - camera_pos);
 	float fog_factor = jointops_fog_factor(dist, u_fog_start, u_fog_end, u_fog_type);

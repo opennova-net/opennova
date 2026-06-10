@@ -2,7 +2,8 @@ class_name EnvironmentEditorWorkspace
 extends EditorWorkspace
 
 # Shell adapter for the EnvFile document. The IDA-backed format/TOD behavior is
-# in libs/env (sub_53FA70, sub_53E3F0, sub_53FCC0); this file stays UI-only.
+# in libs/env (Environment_LoadTimeOfDayConfig @ 0x57db30, TimeOfDay_ParseProperty
+# @ 0x57c590, Environment_ComputeTimeOfDayColors @ 0x57de40); this file stays UI-only.
 
 const EnvironmentInspector = preload("res://modtools/environment/environment_inspector.gd")
 

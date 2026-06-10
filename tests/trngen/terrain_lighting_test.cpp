@@ -53,9 +53,9 @@ int main() {
 	if (!expect(terrain_average_four_argb(0x40010203u, 0x80050607u, 0xC0090A0Bu, 0xFF0D0E0Fu) == 0x9F070809u,
 	            "four-sample foliage color average should truncate each ARGB channel")) return 1;
 
-	// Jointops.exe Render_SetFogParams@0x0054B4B0 adjusts start distance for
-	// linear fog modes, then Render_ConfigureFog@0x005F9890 uses exp(-d*ln64/end)
-	// for mode 0 and linear fog otherwise.
+	// Jointops.exe Render_SetFogState@0x58a950 adjusts start distance for
+	// linear fog modes, then CD3DDevice_SetFogParameters@0x677960 uses
+	// exp(-d*ln64/end) for mode 0 and linear fog otherwise.
 	if (!expect(near(terrain_fog_start_for_type(1000.0f, 1), 0.5f), "fog type 1 keeps the caller's 0.5 start")) return 1;
 	if (!expect(near(terrain_fog_start_for_type(1000.0f, 2), 500.0f), "fog type 2 starts at half end")) return 1;
 	if (!expect(near(terrain_fog_start_for_type(1000.0f, 3), 250.0f), "fog type 3 starts at quarter end")) return 1;

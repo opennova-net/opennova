@@ -4,8 +4,9 @@ extends "res://modtools/editor/editor_document.gd"
 # Editor-side document controller for EnvFile.
 # Core ENV behavior stays in libs/env via EnvFile; this node owns authoring
 # state, active path, and live-preview time.
-# IDA equivalents are referenced in libs/env: sub_53FA70 loads/sorts,
-# sub_53E3F0 maps keywords, and sub_53FCC0 evaluates TOD colors.
+# IDA equivalents are referenced in libs/env: Environment_LoadTimeOfDayConfig @ 0x57db30
+# loads/sorts, TimeOfDay_ParseProperty @ 0x57c590 maps keywords, and
+# Environment_ComputeTimeOfDayColors @ 0x57de40 evaluates TOD colors.
 
 signal environment_changed(env_file: EnvFile, time_of_day: float)
 

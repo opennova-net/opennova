@@ -4,7 +4,8 @@ extends Node3D
 
 # Water plane preview/runtime adapter.
 # Engine equivalents: water color/height/murk consume globals parsed by
-# sub_53E3F0 and fog colors interpolated by sub_53FCC0.
+# [orig: TimeOfDay_ParseProperty @ 0x57c590] and fog colors interpolated by
+# [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] (docs/env/env-tod-re.md).
 
 @export var environment_path: NodePath
 @export var terrain_data: NovaTerrainData

@@ -5,7 +5,7 @@ extends Node
 # Runtime/editor TOD state manager.
 # Engine equivalents:
 # - sub_540B90@0x540B90 advances time.
-# - sub_53FCC0@0x53FCC0 interpolates keyframe colors.
+# - [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] interpolates keyframe colors.
 # - Jointops.exe Render_SetFogParams@0x54B4B0 / Terrain_SetLightingColors@0x5C4B10
 #   push fog and terrain lighting state.
 

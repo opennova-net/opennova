@@ -4,7 +4,8 @@ extends Node3D
 
 # Weather/light smoothing adapter.
 # Engine equivalents: sub_540B90@0x540B90 weather tick, with the wind PRNG,
-# lightning timers, and 1/8 color smoothing described in docs/engine_spec_env.md.
+# lightning timers, and 1/8 color smoothing of [orig: Environment_UpdateWeatherTick @ 0x57e9b0]
+# and [orig: interpolate_weather_color @ 0x57d9e0]; see docs/env/env-tod-re.md.
 
 @export var environment_path: NodePath
 @export_range(0, 100, 1) var wind_strength: float = 0.0:

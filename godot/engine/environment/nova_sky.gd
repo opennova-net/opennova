@@ -3,8 +3,9 @@ class_name NovaSky
 extends Node3D
 
 # Sky dome adapter for the environment subsystem.
-# Engine equivalents: sky-dome mesh/render path described in docs/engine_spec_env.md
-# §6.3 and fed by sub_53FCC0@0x53FCC0 interpolated TOD colors.
+# Engine equivalents: sky-dome mesh/render path of [orig: build_sky_dome_mesh @ 0x578db0]
+# and [orig: render_skybox @ 0x579080], fed by [orig: Environment_ComputeTimeOfDayColors @ 0x57de40]
+# interpolated TOD colors; see docs/env/env-tod-re.md.
 
 @export var environment_path: NodePath
 

@@ -9,8 +9,8 @@
 namespace godot {
 
 // Godot Resource adapter for opennova::env::Keyframe.
-// Engine equivalent: one 52-byte TOD entry populated by sub_53E3F0@0x53E3F0
-// and consumed by sub_53FCC0@0x53FCC0.
+// Engine equivalent: one 52-byte TOD entry populated by [orig: TimeOfDay_ParseProperty @ 0x57c590]
+// and consumed by [orig: Environment_ComputeTimeOfDayColors @ 0x57de40].
 class NovaEnvKeyframe : public Resource {
 	GDCLASS(NovaEnvKeyframe, Resource)
 
