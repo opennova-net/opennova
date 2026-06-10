@@ -141,3 +141,63 @@ Deferred (unwitnessed or out of bar; backlog, not blocking):
 - `GLB_TABLE/RADIOEDIT/LAN_LIST/GOPHER` runtime behavior (multiplayer-browser widgets;
   build as containers, behavior rides with the net workspace).
 - Real 3D globe; the table SCROLLBAR delegate `(*(tableWnd[244]+60)) @ 0x643b22`.
+
+---
+
+## Appendix: IDA correspondence (reverse citations)
+
+Consolidated from `notes/proposed-ida-edits.md` on 2026-06-10; reimpl symbols
+re-verified against the current sources and the Kong IDB on the same date.
+
+This is the symbol-authority record for the menu system: every original handler in
+`Jointops.exe` mapped to the reimplementation that answers for it. The forward leg
+already lives as `// [orig: Name @ 0xADDR]` markers in the reimpl sources; the
+matching `reimpl:` comments on the IDB entry addresses below are PROPOSED, not yet
+applied (the IDB is shared state — apply manually via `set_comments`, reversible).
+
+### Handler cross-links
+
+| Original | OpenNova |
+|---|---|
+| `UIScene_LoadAndParseContent @ 0x63c830` | menu load path: `NovaMnuDocument` + `godot/game/menu_shell.gd` |
+| `XML_ParseWithBOMDetection @ 0x76a690` | `mnu_xml::parse` + `skip_bom` — `libs/mnu_xml/src/mnu_xml.cpp` |
+| `XML_ParseCharEntity @ 0x769cc0` | `mnu_xml::decode_entity` — `libs/mnu_xml/src/mnu_xml.cpp` (faithful to the engine's non-standard policy: no `&apos;`, decimal-only `&#`, Latin-1 named set) |
+| `NapiXML_ExpandVariablesInText @ 0x63a000` | `MnsStyleSheet::substitute` — `godot/engine/mnu/mns_stylesheet.cpp` (per-field post-parse, not whole-buffer; D-MNU-1 / ADR 0005) |
+| `parse_scene_node_attributes @ 0x639630` | `mnu::parse_screen` — `libs/mnu/src/mnu.cpp` |
+| `CUIElement_ParseXMLDefinition @ 0x648120` | `mnu::parse_window` — `libs/mnu/src/mnu.cpp`; layout in `apply_position` — `godot/engine/mnu/nova_mnu_builder.cpp` |
+| `parse_edit_widget_xml_properties @ 0x661d10` | EDIT attrs (`NUMBER/MINVAL/MAXVAL/MAXCHAR/READONLY/PASSWORD`) in `mnu::parse_window` |
+| `sub_64AD90 @ 0x64ad90` (CHECKBOX attr parse) | CHECKBOX attrs (`AS_BUTTON/CHECKED`) in `mnu::parse_window` |
+| `CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0` | SCROLL `ORIENTATION` + `HEIGHT/WIDTH` thickness in `mnu::parse_window` |
+| `CUIScene_CreateWidgetByType @ 0x64f630` | `mnu::parse_type_string` / `window_type_name` — `libs/mnu/src/mnu.cpp` |
+| `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` | `mnu::parse_table_*` — `libs/mnu/src/mnu.cpp` |
+| `CListWnd_ParseXMLDefinition @ 0x645770` | `mnu::parse_listbox` — `libs/mnu/src/mnu.cpp` |
+| `CUIElement_DrawFrame @ 0x64a210` | `add_frame` — `godot/engine/mnu/nova_mnu_builder.cpp` (8 border pieces + tiled fill) |
+| `CUIWidget_HandleScriptedAction @ 0x649790` | `NovaMnuMenu::dispatch_action` — `godot/engine/mnu/nova_mnu_menu.cpp` |
+
+IDB state note (2026-06-10): `0x64ad90` is still unnamed (`sub_64AD90`) and `0x649790`
+currently folds into the `0x648120` function body (vtable-reached, no direct xrefs);
+naming/splitting them is part of the proposed edits.
+
+### Element struct fields (witnessed offsets)
+
+| Offset | Field |
+|---|---|
+| `+0xD0..+0xDC` | POSITION rect (`left/top/right/bottom`) |
+| `+0xF8` | `GLOBAL_VAR` flag `[orig: @ 0x648323]` |
+| `+0x124` | `FORM` index (int) `[orig: @ 0x6482a6]` |
+| `+0x284` | stencil `SIZE` |
+| `+0x288` | stencil `INSETX` (float) `[orig: @ 0x648717]` |
+| `+0x28C` | stencil `INSETY` (float) `[orig: @ 0x648756]` |
+| `+0x30C` (edit, this+780) | `PASSWORD` flag `[orig: @ 0x661d3b]` |
+
+### Inner divergence still open
+
+- Table HEADER `type="id"` `[orig: branch @ 0x64344a]` resolves the header text
+  through `CUIStringTable_LookupString @ 0x6434df`; the reimpl round-trips the `type`
+  attribute but performs no string-table lookup.
+
+Closed since the notes were taken (do not resurrect from `notes/`): the hardcoded
+16/24 stencil insets `[orig: @ 0x648717 / 0x648756]` and the texture/rect inversion
+`[orig: @ 0x647d40]` were fixed by the 2026-06-09 grill (see Layout and Frame above);
+`FORM`, `GLOBAL_VAR`, `PASSWORD`, and scroll `HEIGHT/WIDTH` are now parsed and
+round-tripped by `libs/mnu`.
