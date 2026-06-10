@@ -26,7 +26,10 @@ from `EditorWorkstation._workspace_defs()` in
 | Interface | Fonts | bitmap fonts (`.fnt`) | [fonts/](fonts/README.md) |
 | Interface | Credits | rolling credits (`.kda`) | [credits/](credits/README.md) |
 | Interface | Strings | localized string tables (RTXT) | [strings/](strings/README.md) |
-| Atmosphere | Environment | weather, lighting, time of day (`.env`) | [environment/](environment/README.md) |
+| Interface | Menu | menu screens (`.mnu` / `.mns`) | [mnu/](mnu/README.md) |
+| Audio | Music | interactive music (`.sbf` + `.bin` script) | [music/](music/README.md) |
+| Atmosphere | Sound | sound profiles (`.lwf` / `.dbf`) | [sound/](sound/README.md) |
+| Atmosphere | Environment | weather, lighting, time of day, sky/celestial (`.env`) | [docs/env/env-tod-re.md](../../docs/env/env-tod-re.md) |
 
 Mission is a registered placeholder
 ([`editor/mission_workspace.gd`](editor/mission_workspace.gd)): it holds a nav

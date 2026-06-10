@@ -292,8 +292,8 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 11 | Negative color components: original packs garbage (no lower clamp) | **Tracked decision**: clamp to 0 (no UB replication) |
 | 12 | Default sky_height raw-200 quirk (≈0.003 units) | Documented; reimpl default mirrors the quirk via comment, authoring template sets 175 |
 | 13 | `vertex_rgb` parsed by reimpl, ignored by retail JO | Keep parsing for round-trip; engine view ignores (modulator identity) |
-| 14 | Sun glare occlusion 8 jittered rays | Ship 1 ray + identical hysteresis (Phase 3, tracked) |
-| 15 | Thunder sounds on lightning timer epochs | Deferred (signal stub) |
+| 14 | Sun glare occlusion 8 jittered rays + ±16/frame hysteresis | **Partial**: `nova_celestial.gd` renders glare_3di additively at the sun with the `dot^32` intensity from `env_render::compute_sun_glare`; terrain-raycast occlusion held at full brightness (tracked) |
+| 15 | Thunder sounds on lightning timer epochs | Deferred (no signal wired); lightning flash colors are ported |
 | 16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade | Documented; runtime port carries .env table only until weather/WAC work lands (overcast blend defaults 0 = pure .env, matching clear weather) |
 | 17 | Iris view-distance lighting curve | Deferred, consumer documented |
 | 18 | Earthquake / rain / wind oscillator rings | Weather-system scope; ported constants documented, wiring deferred with WAC weather |
@@ -328,6 +328,23 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
 | Fog policy | **matching** (env_render port; overcast coupling included) |
 | Weather tick / smoothing / lightning | **divergent → ported constants** (16-channel model + integer smoothing in env_render; thunder + quake + rain wiring deferred, each tracked) |
 | Sky dome render | **divergent → aligned** (scroll/VS map/advanced_clouds=0 fixes in nova_sky; dome mesh constants verified against `build_sky_dome_mesh @ 0x578db0` recon) |
-| Celestial + glare | **new implementation** from witnessed model (Phase 3; 1-ray occlusion tracked) |
-| BMS overrides | **matching** application semantics (Phase 3 wiring) |
+| Celestial + glare | **new implementation** from witnessed model (`nova_celestial.gd`: sun/moon/star/glare 3DI at the sky, glare additive; occlusion held at full brightness, tracked) |
+| BMS overrides | **matching** application semantics via EnvFile's non-persistent override layer (runtime apply on load / clear on unload; base file never mutated) |
 | iris / terrain_rgb | **unknown → documented**, consumers identified, implementation deferred |
+
+## What this effort shipped (2026-06-09, branch `environment-workspace`)
+
+- `libs/env`: engine-faithful parse + 16.16-hours TOD interpolation; new
+  `env_render` module (fog policy, day phase, integer smoothing, lightning,
+  glare, derived colors, BMS overrides) with `env_render_unit_test` and the
+  `OPENNOVA_JO_DIR`-gated install sweep.
+- `godot/engine`: EnvFile fog/day-phase/glare/override/`to_bytes` surface +
+  `NovaColorSmoother`; engine-faithful `nova_environment`/`nova_sky`/
+  `nova_water`/`nova_weather`; new `nova_celestial` + two celestial shaders;
+  BMS override fields through `NovaMissionData`; runtime apply/clear in
+  `nova_world`.
+- `godot/modtools`: terrain preview unified onto `NovaWater` + `EditorWeather`
+  (PR #24 parity); Environment workspace undo/redo, save-path gate, and sky-model
+  fields.
+- Citations: all jodemo-era addresses and the dangling `engine_spec_env.md`
+  reference re-anchored to retail; IDA renamed + commented across the cluster.
