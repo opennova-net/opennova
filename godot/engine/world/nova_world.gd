@@ -2,11 +2,14 @@ class_name NovaWorld
 extends Node3D
 
 # Loads a playable world (terrain + environment + vegetation + foliage) from ONE
-# user-chosen resource directory and wires it onto the engine nodes it contains
-# (NovaTerrain, NovaEnvironment, NovaWater). The data core is shared engine code
+# resource root and wires it onto the engine nodes it contains (NovaTerrain,
+# NovaEnvironment, NovaWater). The data core is shared engine code
 # (NovaTerrainData, EnvFile, NovaFoliageDispatcher, VegAssets); this node is just
-# the orchestration both the runtime (game/main_game.tscn) and a future editor
-# "Play" mode go through — one loader, one resource dir, no fallbacks.
+# the orchestration both the runtime (game/main_game.tscn) and the editor's Play
+# mode go through — one loader, one root, no fallbacks. The scene lives in
+# nova_world.tscn so hosts instance it; the game mounts its root from the
+# persisted resource directory, the editor injects its own via
+# set_resource_root() and plays the live document via load_mission_data().
 
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
@@ -44,6 +47,31 @@ var _runtime  # MissionRuntime: the one mission runtime driver (sim + present pa
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
 var _mission_audio: NovaMissionAudio
+# A host-injected resource root (the editor's mounted VFS). When set, the load_*
+# entries skip the settings lookup + their own mount and resolve through it; the
+# game path (no injection) still mounts from the persisted resource directory.
+var _injected_root: NovaResourceRoot = null
+
+
+## Inject the resource root the next load resolves through (play-in-editor hands
+## the editor's root over so play uses exactly the assets being authored). Null
+## returns to the game's settings-driven mount.
+func set_resource_root(root: NovaResourceRoot) -> void:
+	_injected_root = root
+
+
+# The root a load resolves through: the injected one, else a fresh runtime mount of
+# `dir` (or the persisted resource directory when empty). Emits load_failed and
+# returns null when nothing resolves.
+func _resolve_root(dir: String) -> NovaResourceRoot:
+	if _injected_root != null:
+		return _injected_root
+	if dir.is_empty():
+		dir = ResourceDirSettings.get_resource_dir()
+	if dir.is_empty():
+		load_failed.emit("no resource directory set")
+		return null
+	return _mount_runtime_root(dir)
 
 
 func _ready() -> void:
@@ -59,19 +87,14 @@ func _ready() -> void:
 func load_world(dir: String = "") -> int:
 	if not mission_file.is_empty():
 		return load_mission(mission_file, dir)
-	if dir.is_empty():
-		dir = ResourceDirSettings.get_resource_dir()
-	if dir.is_empty():
-		load_failed.emit("no resource directory set")
-		return ERR_FILE_NOT_FOUND
-	var resource_root := _mount_runtime_root(dir)
+	var resource_root := _resolve_root(dir)
 	if resource_root == null:
 		return ERR_CANT_OPEN
 	if not resource_root.has_file(terrain_file):
-		load_failed.emit("%s not found in %s" % [terrain_file, dir])
+		load_failed.emit("%s not found in %s" % [terrain_file, resource_root.get_root_dir()])
 		return ERR_FILE_NOT_FOUND
 	if not resource_root.has_file(env_file):
-		load_failed.emit("%s not found in %s" % [env_file, dir])
+		load_failed.emit("%s not found in %s" % [env_file, resource_root.get_root_dir()])
 		return ERR_FILE_NOT_FOUND
 
 	_resource_root = resource_root
@@ -92,30 +115,47 @@ func load_world(dir: String = "") -> int:
 ## same path as load_world, then the mission's placed objects are populated into the
 ## world. Returns OK, or the same error codes as load_world.
 func load_mission(bms_name: String, dir: String = "") -> int:
-	if dir.is_empty():
-		dir = ResourceDirSettings.get_resource_dir()
-	if dir.is_empty():
-		load_failed.emit("no resource directory set")
-		return ERR_FILE_NOT_FOUND
-	var resource_root := _mount_runtime_root(dir)
+	var resource_root := _resolve_root(dir)
 	if resource_root == null:
 		return ERR_CANT_OPEN
-
 	if not resource_root.has_file(bms_name):
-		load_failed.emit("%s not found in %s" % [bms_name, dir])
+		load_failed.emit("%s not found in %s" % [bms_name, resource_root.get_root_dir()])
 		return ERR_FILE_NOT_FOUND
 	var mission := NovaMissionData.new()
 	if mission.open_from_resource_root(resource_root, bms_name) != OK:
 		load_failed.emit("failed to parse %s: %s" % [bms_name, mission.get_last_error()])
 		return ERR_CANT_OPEN
+	return _load_mission_internal(mission, bms_name, resource_root)
 
+
+## Load an IN-MEMORY mission (the editor's live document, unsaved edits included):
+## terrain + environment resolve from the injected (or mounted) root by the
+## mission's own header refs, then the one shared load path runs. `bms_name` is
+## the document's file name, used for the co-named audio lookups (.DBF/.LWF) and
+## error messages. This is the play-in-editor entry: the world renders exactly
+## the document being authored.
+func load_mission_data(mission: NovaMissionData, bms_name: String, dir: String = "") -> int:
+	if mission == null or not mission.is_loaded():
+		load_failed.emit("no mission document to load")
+		return ERR_INVALID_PARAMETER
+	var resource_root := _resolve_root(dir)
+	if resource_root == null:
+		return ERR_CANT_OPEN
+	return _load_mission_internal(mission, bms_name, resource_root)
+
+
+# The ONE mission load path — the file entry (load_mission) and the in-memory
+# entry (load_mission_data) converge here: resolve the header's terrain +
+# environment from `resource_root`, apply the mission's env overrides, build the
+# world, place objects, start the runtime + audio.
+func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource_root: NovaResourceRoot) -> int:
 	var trn := mission.get_terrain_ref() + ".trn"
 	if not resource_root.has_file(trn):
-		load_failed.emit("%s.trn (from %s) not found in %s" % [mission.get_terrain_ref(), bms_name, dir])
+		load_failed.emit("%s.trn (from %s) not found in %s" % [mission.get_terrain_ref(), bms_name, resource_root.get_root_dir()])
 		return ERR_FILE_NOT_FOUND
 	var env_name := mission.get_environment_ref() + ".env"
 	if not resource_root.has_file(env_name):
-		load_failed.emit("%s.env (from %s) not found in %s" % [mission.get_environment_ref(), bms_name, dir])
+		load_failed.emit("%s.env (from %s) not found in %s" % [mission.get_environment_ref(), bms_name, resource_root.get_root_dir()])
 		return ERR_FILE_NOT_FOUND
 
 	_resource_root = resource_root
