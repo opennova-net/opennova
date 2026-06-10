@@ -9,14 +9,20 @@ extends GraphEdit
 # now the SOLE per-statement authoring surface (the old right-dock inspector is gone).
 #
 # Editing: when configure_authoring() turns the graph editable, every TOP-LEVEL
-# statement node grows a ✎/✕/↑/↓ cluster and the toolbar gains a "＋ Add" palette,
-# all routed through the shared MusForms so the emitted lines are canonical. The
-# graph never writes bytecode; it emits add/replace/delete/reorder intents the host
-# (live_mode) hands to the document's parity-gated, undoable write path. A folded ×N
-# run can be expanded in place (⊞ unfold) to edit a single member; a flat if's bodies
-# are edited statement-by-statement here, while a non-flat if (a nested if/switch in a
-# body) stays a read-only annotation -- none occurs in stock and the forms can't author
-# one, so no edit path is lost (there is no raw-script editor; it was removed).
+# statement node grows a ✎/✕/↑/↓ cluster and the toolbar gains a "＋ Add" palette.
+# ✎ edits INLINE ON THE NODE: the body row swaps for kind-specific controls
+# (track picker, variable picker + expression row, section picker, condition
+# row) plus a ✓ Apply / ✕ Cancel row -- no modal for the common edits. Only the
+# switch target table (up to 64 rows) and new-if creation keep a dialog. One
+# node edits at a time; any re-render (undo, document change, follow-live)
+# cancels back to read mode. ＋Add inserts a sensible default line immediately
+# and opens the new node's editor, instead of front-loading a dialog.
+# The graph never writes bytecode; it emits add/replace/delete/reorder intents
+# the host (live_mode) hands to the document's parity-gated, undoable write
+# path. A folded ×N run can be expanded in place (⊞ unfold) to edit a single
+# member; a flat if's bodies are edited statement-by-statement here, while a
+# non-flat if (a nested if/switch in a body) stays a read-only annotation --
+# none occurs in stock, so no edit path is lost (there is no raw-script editor).
 # The frame-setup op (0x38) is NOT rendered at all: it is engine plumbing (it
 # reserves the call-argument slots a `callvl` caller pushed), not a statement the
 # author placed, so the graph hides it. Its byte offset is carried onto the next
@@ -39,10 +45,14 @@ signal delete_statement_requested(section_index: int, ordinal: int)
 signal reorder_statement_requested(section_index: int, ordinal: int, direction: int)
 signal add_play_requested(section_name: StringName, track: int)
 signal author_failed(message: String)
+# An inline edit just opened: the host pins follow-live so the VM can't yank
+# the canvas (and the edit with it) out from under the user.
+signal inline_edit_started
 
 const MusForms = preload("res://modtools/music/mus_forms.gd")
 const MusStmtText = preload("res://modtools/music/mus_stmt_text.gd")
 const MusDisplayNames = preload("res://modtools/music/mus_display_names.gd")
+const ExprRowClass = preload("res://modtools/music/ui/expr_row.gd")
 
 const COL_W := 250.0
 const ROW_H := 130.0
@@ -90,6 +100,12 @@ var _authoring_blocked_reason: String = ""
 # Items shown in the per-branch ＋Add popup (MusForms.ADD_ITEMS minus if/switch, so
 # bodies stay flat); set when the popup opens, read by _on_branch_add_id.
 var _branch_add_items: Array = []
+# The single node currently in inline-edit mode (null = none). Any re-render
+# clears it (cancel semantics); Apply routes through the parity-gated intents.
+var _edit_node: GraphNode = null
+# A ＋Add just inserted this default line: when the post-add re-render shows the
+# section again, auto-open the new node's inline editor. {kind, line} or {}.
+var _pending_add_edit: Dictionary = {}
 
 
 func _ready() -> void:
@@ -106,6 +122,7 @@ func show_section(section: Dictionary, bank_names: Array) -> void:
 	var new_index := int(section.get("index", -1))
 	if new_index != _section_index:
 		_unfolded.clear()   # a different section -- expanded folds don't carry over
+		_pending_add_edit = {}
 	_bank_names = bank_names
 	_section_index = new_index
 	_section_dict = section
@@ -113,6 +130,7 @@ func show_section(section: Dictionary, bank_names: Array) -> void:
 	_node_seq = 0
 	_offset_nodes = []
 	_active_node = null
+	_edit_node = null   # any rebuild cancels an open inline edit
 	_pending_offsets = []
 	clear_connections()
 	for c in get_children():
@@ -132,6 +150,30 @@ func show_section(section: Dictionary, bank_names: Array) -> void:
 	else:
 		_build_seq(stmts, 0, -1)
 	_fit_to_view()
+	_consume_pending_add_edit(stmts)
+
+
+# After a ＋Add inserted its default line and the document re-render brought us
+# back here, find the new statement (last top-level match of the inserted
+# canonical text) and open its inline editor so the user lands mid-edit instead
+# of hunting for the new node. Skips silently when the node folded into a ×N
+# run (ambiguous) or the add was rejected.
+func _consume_pending_add_edit(stmts: Array) -> void:
+	if _pending_add_edit.is_empty() or not _editable:
+		return
+	var want_kind := String(_pending_add_edit.get("kind", ""))
+	var want_line := String(_pending_add_edit.get("line", ""))
+	_pending_add_edit = {}
+	for i in range(stmts.size() - 1, -1, -1):
+		var st: Dictionary = stmts[i]
+		if String(st.get("kind", "")) != want_kind:
+			continue
+		if String(st.get("text", "")) != want_line:
+			continue
+		var gn := _find_edit_node({"ordinal": i})
+		if gn != null:
+			_open_edit_on(gn, want_kind, i, st)
+		return
 
 
 func current_section_index() -> int:
@@ -461,6 +503,10 @@ func _build_branch(if_dict: Dictionary, if_ordinal: int, branch: String, depth: 
 			_pending_offsets.append(int(st.get("code_offset", -1)))
 			continue
 		var built := _build_stmt(st, depth, if_ordinal)
+		if built.has("node"):
+			# Stamp the branch address so a (re-resolved) inline edit can find this
+			# node again after a re-render.
+			(built["node"] as GraphNode).set_meta("branch_key", "%d:%s:%d" % [if_ordinal, branch, i])
 		if flat and built.has("node"):
 			_attach_branch_tools(built["node"], if_dict, if_ordinal, branch, i, st, stmts.size())
 		if entry.is_empty():
@@ -477,7 +523,7 @@ func _attach_branch_tools(gn: GraphNode, if_dict: Dictionary, if_ordinal: int, b
 	box.add_theme_constant_override("separation", 2)
 	if kind != "return" and kind != "yield" and kind != "done" and kind != "nop":
 		var edit := _tool_btn("✎", "Edit")
-		edit.pressed.connect(func(): _open_branch_edit(if_dict, if_ordinal, branch, idx, st))
+		edit.pressed.connect(func(): _open_branch_edit(gn, if_dict, if_ordinal, branch, idx, st))
 		box.add_child(edit)
 	var del := _tool_btn("✕", "Delete")
 	del.pressed.connect(func(): _apply_branch_mutation(if_dict, if_ordinal, branch, idx, "delete", ""))
@@ -499,14 +545,13 @@ func _attach_branch_tools(gn: GraphNode, if_dict: Dictionary, if_ordinal: int, b
 	gn.add_child(box)
 
 
-func _open_branch_edit(if_dict: Dictionary, if_ordinal: int, branch: String, idx: int, st: Dictionary) -> void:
+# A flat-if body leaf edits inline on its own node, routed back through the
+# whole-if regenerate-and-replace path.
+func _open_branch_edit(gn: GraphNode, if_dict: Dictionary, if_ordinal: int, branch: String, idx: int, st: Dictionary) -> void:
 	var kind := String(st.get("kind", ""))
-	_forms.configure(_section_names, _var_list, _mus, _bank_names)
-	_forms.open_form(self, kind, st, true, func(lines: PackedStringArray):
-		if lines.is_empty():
-			author_failed.emit("Fill in the fields first")
-		else:
-			_apply_branch_mutation(if_dict, if_ordinal, branch, idx, "replace", String(lines[0])))
+	var on_apply := func(lines: PackedStringArray) -> void:
+		_apply_branch_mutation(if_dict, if_ordinal, branch, idx, "replace", String(lines[0]))
+	_begin_inline_edit({"branch": [if_ordinal, branch, idx]}, gn, kind, st, on_apply)
 
 
 func _open_branch_add(if_dict: Dictionary, if_ordinal: int, branch: String) -> void:
@@ -527,19 +572,21 @@ func _open_branch_add(if_dict: Dictionary, if_ordinal: int, branch: String) -> v
 	pop.popup()
 
 
+# A branch ＋Add appends the kind's canonical default line immediately (the
+# regenerated body's new leaf then carries its own ✎ for inline editing) -- no
+# dialog hop, matching the top-level add flow.
 func _on_branch_add_id(id: int, if_dict: Dictionary, if_ordinal: int, branch: String) -> void:
 	if id < 0 or id >= _branch_add_items.size():
 		return
 	var kind := String(_branch_add_items[id][1])
+	var lines: PackedStringArray
 	if _forms.is_inputless(kind):
-		var l := _forms.simple_lines(kind)
-		if not l.is_empty():
-			_apply_branch_mutation(if_dict, if_ordinal, branch, -1, "append", String(l[0]))
-		return
-	_forms.configure(_section_names, _var_list, _mus, _bank_names)
-	_forms.open_form(self, kind, {}, false, func(lines: PackedStringArray):
-		if not lines.is_empty():
-			_apply_branch_mutation(if_dict, if_ordinal, branch, -1, "append", String(lines[0])))
+		lines = _forms.simple_lines(kind)
+	else:
+		_forms.configure(_section_names, _var_list, _mus, _bank_names)
+		lines = _forms.default_lines(kind)
+	if not lines.is_empty():
+		_apply_branch_mutation(if_dict, if_ordinal, branch, -1, "append", String(lines[0]))
 
 
 # Apply a mutation to one branch's flat text list, then regenerate + replace the whole
@@ -831,6 +878,10 @@ func _ensure_add_menu() -> void:
 	get_menu_hbox().add_child(_add_menu)
 
 
+# ＋Add: inputless kinds insert directly; inline-editable kinds insert their
+# canonical DEFAULT line and auto-open the new node's editor on the post-add
+# re-render (no dialog hop); only if/switch creation keeps a dialog (they need
+# a condition / target table before a valid line exists).
 func _on_add_palette_id(id: int) -> void:
 	if id < 0 or id >= MusForms.ADD_ITEMS.size():
 		return
@@ -838,8 +889,13 @@ func _on_add_palette_id(id: int) -> void:
 	if _forms.is_inputless(kind):
 		add_statement_requested.emit(_section_index, _forms.simple_lines(kind))
 		return
-	var sidx := _section_index
 	_forms.configure(_section_names, _var_list, _mus, _bank_names)
+	var defaults := _forms.default_lines(kind)
+	if not defaults.is_empty():
+		_pending_add_edit = {"kind": kind, "line": String(defaults[0])}
+		add_statement_requested.emit(_section_index, defaults)
+		return
+	var sidx := _section_index
 	_forms.open_form(self, kind, {}, false, func(lines: PackedStringArray):
 		if lines.is_empty():
 			author_failed.emit("Fill in the fields first")
@@ -878,7 +934,7 @@ func _attach_tools(gn: GraphNode, s: Dictionary, ordinal: int, statement_count: 
 		has_edit = false
 	if has_edit:
 		var edit := _tool_btn("✎", "Edit")
-		edit.pressed.connect(func(): _open_edit(kind, ordinal, s))
+		edit.pressed.connect(func(): _open_edit_on(gn, kind, ordinal, s))
 		box.add_child(edit)
 	var del := _tool_btn("✕", "Delete")
 	del.pressed.connect(func(): delete_statement_requested.emit(_section_index, ordinal))
@@ -903,27 +959,205 @@ func _attach_tools(gn: GraphNode, s: Dictionary, ordinal: int, statement_count: 
 	gn.add_child(box)
 
 
-func _open_edit(kind: String, ordinal: int, s: Dictionary) -> void:
-	# A flat if's ✎ edits just its CONDITION in place; its body statements are edited
-	# on their own nodes. The whole if is regenerated from its bodies + the new
-	# condition and replaced as one row. (Non-flat ifs / branch_comments get no ✎, so
-	# _open_edit is only ever reached for a flat if or a form-backed leaf kind.)
-	if kind == "if":
+# ✎ on a top-level node. Everything edits inline except the switch target
+# table, which keeps its dialog (64 rows don't fit a node). A flat if's ✎
+# edits just its CONDITION inline; its body statements are edited on their own
+# nodes, and the whole if regenerates + replaces as one row.
+func _open_edit_on(gn: GraphNode, kind: String, ordinal: int, s: Dictionary) -> void:
+	if kind == "switch":
+		var sidx := _section_index
 		_forms.configure(_section_names, _var_list, _mus, _bank_names)
-		_forms.open_form(self, "condition", s, true, func(lines: PackedStringArray):
+		_forms.open_form(self, kind, s, true, func(lines: PackedStringArray):
 			if lines.is_empty():
-				author_failed.emit("Enter a condition")
+				author_failed.emit("Fill in the fields first")
 			else:
-				_emit_if_replace(s, ordinal, String(lines[0]),
-					_branch_texts(s, "then"), _branch_texts(s, "else")))
+				replace_statement_requested.emit(sidx, ordinal, lines))
 		return
-	var sidx := _section_index
-	_forms.configure(_section_names, _var_list, _mus, _bank_names)
-	_forms.open_form(self, kind, s, true, func(lines: PackedStringArray):
+	var sidx2 := _section_index
+	var on_apply := func(lines: PackedStringArray) -> void:
+		if kind == "if":
+			_emit_if_replace(s, ordinal, String(lines[0]),
+				_branch_texts(s, "then"), _branch_texts(s, "else"))
+		else:
+			replace_statement_requested.emit(sidx2, ordinal, lines)
+	_begin_inline_edit({"ordinal": ordinal}, gn,
+		"if_cond" if kind == "if" else kind, s, on_apply)
+
+
+# --- inline editing core --------------------------------------------------
+
+# Find the node a (re-resolved) edit should mount on: top-level by its ordinal
+# meta, branch leaves by the branch_key meta _build_branch stamps.
+func _find_edit_node(key: Dictionary) -> GraphNode:
+	if key.has("branch"):
+		var b: Array = key["branch"]
+		var bk := "%d:%s:%d" % [int(b[0]), String(b[1]), int(b[2])]
+		for c in get_children():
+			if c is GraphNode and String(c.get_meta("branch_key", "")) == bk:
+				return c
+		return null
+	var want := int(key.get("ordinal", -1))
+	for c in get_children():
+		if c is GraphNode and not c.has_meta("branch_key") \
+				and c.has_meta("ordinal") and int(c.get_meta("ordinal")) == want:
+			return c
+	return null
+
+
+# Swap `gn`'s body row (child 0) for the kind's inline editor AT THE SAME child
+# index -- GraphNode slots are keyed by child index, so the exec/branch pins
+# never move -- and append a slot-less ✓ Apply / ✕ Cancel row. One edit at a
+# time: opening a second restores the first (re-render) and re-resolves the
+# target on the fresh nodes via `key`.
+func _begin_inline_edit(key: Dictionary, gn: GraphNode, kind: String, s: Dictionary, on_apply: Callable) -> void:
+	if not _editable or gn == null:
+		return
+	if _edit_node != null:
+		_rerender()   # cancel the other edit; this freed gn
+		gn = _find_edit_node(key)
+		if gn == null:
+			return
+	var ed := _build_inline_editor(kind, s)
+	if ed.is_empty():
+		return
+	_edit_node = gn
+	inline_edit_started.emit()
+	var old := gn.get_child(0)
+	gn.remove_child(old)
+	old.queue_free()
+	gn.add_child(ed["control"])
+	gn.move_child(ed["control"], 0)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	var apply := Button.new()
+	apply.text = "✓ Apply"
+	apply.tooltip_text = "Apply this change (undoable)."
+	apply.focus_mode = Control.FOCUS_NONE
+	apply.pressed.connect(func():
+		var lines: PackedStringArray = ed["produce"].call()
 		if lines.is_empty():
 			author_failed.emit("Fill in the fields first")
-		else:
-			replace_statement_requested.emit(sidx, ordinal, lines))
+			return
+		if ed.has("expr_row") and not (ed["expr_row"] as Control).is_valid():
+			author_failed.emit("Fix the expression first")
+			return
+		on_apply.call(lines)
+		_end_inline_edit())
+	row.add_child(apply)
+	var cancel := Button.new()
+	cancel.text = "✕ Cancel"
+	cancel.tooltip_text = "Discard this change."
+	cancel.focus_mode = Control.FOCUS_NONE
+	cancel.pressed.connect(_end_inline_edit)
+	row.add_child(cancel)
+	gn.add_child(row)
+	gn.reset_size()
+
+
+func _end_inline_edit() -> void:
+	_edit_node = null
+	_rerender()
+
+
+# Kind-specific inline editor: {control, produce: Callable -> PackedStringArray,
+# expr_row?: the embedded ExprRow for pre-apply validation}. Empty when the
+# kind has no inline editor. Pickers snapshot their lists at build time so a
+# background configure() can't shift index->value under an open editor.
+func _build_inline_editor(kind: String, s: Dictionary) -> Dictionary:
+	_forms.configure(_section_names, _var_list, _mus, _bank_names)
+	match kind:
+		"play":
+			var tob := _forms.make_track_option(int(s.get("track", -1)))
+			var box := HBoxContainer.new()
+			box.add_child(_edit_label("Play"))
+			box.add_child(tob)
+			var produce := func() -> PackedStringArray:
+				if tob.selected < 0:
+					return PackedStringArray()
+				return MusStmtText.play(tob.selected)
+			return {"control": box, "produce": produce}
+		"transition", "goto", "call":
+			var ob := _forms.make_section_option(String(s.get("target_name", "")))
+			var snames := _section_names
+			var box2 := HBoxContainer.new()
+			box2.add_child(_edit_label({"transition": "Go to", "goto": "Jump to", "call": "Run"}[kind]))
+			box2.add_child(ob)
+			var produce2 := func() -> PackedStringArray:
+				if ob.selected < 0 or ob.selected >= snames.size():
+					return PackedStringArray()
+				match kind:
+					"goto":
+						return MusStmtText.goto_section(snames[ob.selected])
+					"call":
+						return MusStmtText.call_section(snames[ob.selected])
+					_:
+						return MusStmtText.enter(snames[ob.selected])
+			return {"control": box2, "produce": produce2}
+		"assign":
+			var vob := _forms.make_var_option(String(s.get("var_name", "")), int(s.get("var_offset", -1)))
+			var er := ExprRowClass.new()
+			er.setup(_var_list, _mus)
+			if s.has("rhs_tree"):
+				er.set_expr(s.get("rhs_tree"))
+			else:
+				er.set_expression_text(String(s.get("rhs", "0")))
+			var box3 := HBoxContainer.new()
+			box3.add_child(_edit_label("Set"))
+			box3.add_child(vob)
+			box3.add_child(_edit_label("="))
+			box3.add_child(er)
+			var vlist := _var_list
+			var produce3 := func() -> PackedStringArray:
+				return MusStmtText.assign(_forms.var_token_at(vob, vlist), er.get_expr_text())
+			return {"control": box3, "produce": produce3, "expr_row": er}
+		"incdec":
+			var vob2 := _forms.make_var_option(String(s.get("var_name", "")), int(s.get("var_offset", -1)))
+			var dir := OptionButton.new()
+			dir.add_item("+1  (increase)", 1)
+			dir.add_item("-1  (decrease)", 0)
+			dir.select(0 if bool(s.get("is_inc", true)) else 1)
+			var box4 := HBoxContainer.new()
+			box4.add_child(vob2)
+			box4.add_child(dir)
+			var vlist2 := _var_list
+			var produce4 := func() -> PackedStringArray:
+				return MusStmtText.incdec(_forms.var_token_at(vob2, vlist2), dir.get_selected_id() == 1)
+			return {"control": box4, "produce": produce4}
+		"expr":
+			var er2 := ExprRowClass.new()
+			er2.setup(_var_list, _mus)
+			if s.has("expr_tree"):
+				er2.set_expr(s.get("expr_tree"))
+			else:
+				er2.set_expression_text(String(s.get("expr", s.get("text", "0"))))
+			var produce5 := func() -> PackedStringArray:
+				return MusStmtText.expr_stmt(er2.get_expr_text())
+			return {"control": er2, "produce": produce5, "expr_row": er2}
+		"if_cond":
+			var er3 := ExprRowClass.new()
+			er3.setup(_var_list, _mus)
+			if s.has("expr_tree"):
+				er3.set_expr(s.get("expr_tree"))
+			else:
+				er3.set_expression_text(String(s.get("expr", "")))
+			var box5 := HBoxContainer.new()
+			box5.add_child(_edit_label("if ("))
+			box5.add_child(er3)
+			box5.add_child(_edit_label(")"))
+			var produce6 := func() -> PackedStringArray:
+				var t := er3.get_expr_text()
+				if t.strip_edges() == "":
+					return PackedStringArray()
+				return PackedStringArray([t])
+			return {"control": box5, "produce": produce6, "expr_row": er3}
+	return {}
+
+
+func _edit_label(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_color_override("font_color", Color(0.75, 0.8, 0.9))
+	return l
 
 
 func _tool_btn(glyph: String, tip: String) -> Button:

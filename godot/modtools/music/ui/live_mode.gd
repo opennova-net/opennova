@@ -1188,6 +1188,9 @@ func _install_logic_graph() -> void:
 	_logic_graph.reorder_statement_requested.connect(_on_inspector_reorder_statement)
 	_logic_graph.add_play_requested.connect(_on_inspector_add_play)
 	_logic_graph.author_failed.connect(func(msg: String): _flash_start_warning(msg))
+	# An open inline edit must not be yanked away by a VM transition re-drilling
+	# the canvas: pin follow-live for the duration (re-enable resumes following).
+	_logic_graph.inline_edit_started.connect(func(): _follow_live = false)
 	stack.add_child(_logic_graph)
 
 

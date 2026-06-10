@@ -268,9 +268,9 @@ func test_flat_if_branch_reorder_boundaries_disable_with_reason():
 	assert_eq(last_down.tooltip_text, "Already the last branch statement")
 
 
-func test_flat_if_header_edits_condition():
-	# Phase B: a flat if's ✎ edits its CONDITION in place (a small expression dialog);
-	# its body statements are edited on their own nodes. There is no raw drawer.
+func test_flat_if_header_edits_condition_inline():
+	# A flat if's ✎ edits its CONDITION inline on the node (an embedded expression
+	# row + Apply/Cancel); its body statements are edited on their own nodes.
 	var g := _egraph({
 		"index": 7, "name": "Branchy", "statements": [
 			{"kind": "if", "code_offset": 0, "expr": "(Var01 == 0)", "else_present": false,
@@ -278,8 +278,11 @@ func test_flat_if_header_edits_condition():
 		],
 	})
 	await get_tree().process_frame
-	_button_in(_node_titled(g, "If"), "✎").pressed.emit()
-	assert_not_null(_first_dialog(g), "the if ✎ opens a condition editor dialog")
+	var if_node := _node_titled(g, "If")
+	_button_in(if_node, "✎").pressed.emit()
+	assert_null(_first_dialog(g), "no modal opens for a condition edit")
+	assert_not_null(_button_in(if_node, "✓ Apply"), "the if node grew an inline Apply")
+	assert_not_null(_button_in(if_node, "✕ Cancel"), "and an inline Cancel")
 
 
 # --- if regeneration: the whole block is rebuilt from its (edited) body texts ----
@@ -599,9 +602,11 @@ func test_drop_emits_add_play_for_shown_section():
 	assert_eq(int(got["track"]), 5, "drop carries the dropped track index")
 
 
-# --- shared forms produce byte-identical canonical lines (guards the lift) ---
+# --- the remaining dialog form (if creation) stays canonical ----------------
+# (transition/assign/play/etc. now edit inline; music_inline_edit_test.gd
+# covers their canonical lines and open-time list capture.)
 
-func test_forms_emit_canonical_transition_line():
+func test_if_creation_form_emits_canonical_block():
 	var doc := _doc()
 	var forms = MusForms.new()
 	forms.configure(PackedStringArray(["A", "B"]), _vars(), doc.mus_script, [])
@@ -609,51 +614,15 @@ func test_forms_emit_canonical_transition_line():
 	add_child_autofree(host)
 	await get_tree().process_frame
 	var captured := []
-	forms.open_form(host, "transition", {}, false, func(lines): captured.append(Array(lines)))
+	forms.open_form(host, "if", {}, false, func(lines): captured.append(Array(lines)))
 	var dlg := _first_dialog(host)
-	assert_not_null(dlg, "transition form opened a dialog")
-	var ob := _first_option(dlg)
-	assert_not_null(ob, "transition form has a section picker")
-	ob.select(1)  # -> "B"
+	assert_not_null(dlg, "if creation keeps a dialog (a valid line needs a condition first)")
+	if dlg == null:
+		return
+	# Defaults: condition 0, then-action -> enter A (first section).
 	dlg.confirmed.emit()
-	assert_eq(captured, [["enter B"]], "the shared form emits the canonical 'enter B' line")
-
-
-func test_forms_emit_canonical_assign_line():
-	var doc := _doc()
-	var forms = MusForms.new()
-	forms.configure(PackedStringArray([]), _vars(), doc.mus_script, [])
-	var host := Control.new()
-	add_child_autofree(host)
-	await get_tree().process_frame
-	var captured := []
-	forms.open_form(host, "assign", {}, false, func(lines): captured.append(Array(lines)))
-	var dlg := _first_dialog(host)
-	assert_not_null(dlg, "assign form opened a dialog")
-	# Defaults: var picker -> Var00, expression -> the literal 0.
-	dlg.confirmed.emit()
-	assert_eq(captured, [["Var00 = 0"]], "the shared form emits the canonical 'Var00 = 0' line")
-
-
-func test_form_resolves_against_list_captured_at_open():
-	# A form's output must resolve against the section list that was current when it
-	# OPENED, even if configure() runs again (a background document.changed) before
-	# the user confirms -- otherwise the picked index would resolve against a
-	# different list (silent wrong-target). Guards the producer-time context capture.
-	var forms = MusForms.new()
-	forms.configure(PackedStringArray(["A", "B", "C"]), _vars(), null, [])
-	var host := Control.new()
-	add_child_autofree(host)
-	await get_tree().process_frame
-	var captured := []
-	forms.open_form(host, "transition", {}, false, func(lines): captured.append(Array(lines)))
-	var dlg := _first_dialog(host)
-	var ob := _first_option(dlg)
-	ob.select(2)  # -> "C" in the list the dialog opened with
-	# A background reconfigure swaps the section list out from under the open dialog.
-	forms.configure(PackedStringArray(["X", "Y"]), _vars(), null, [])
-	dlg.confirmed.emit()
-	assert_eq(captured, [["enter C"]], "producer resolves the index against the open-time list, not the reconfigured one")
+	assert_eq(captured, [["if (0)", "{", "    enter A", "}"]],
+		"the if form emits the canonical block")
 
 
 func _first_dialog(host: Node) -> AcceptDialog:
