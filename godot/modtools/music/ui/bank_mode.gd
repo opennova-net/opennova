@@ -349,15 +349,8 @@ func _on_replace_wav_pressed() -> void:
 	var idx := _selected_index()
 	if idx < 0:
 		return
-	var dialog := FileDialog.new()
-	dialog.access = FileDialog.ACCESS_FILESYSTEM
-	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	dialog.add_filter("*.wav", "WAV audio")
-	dialog.file_selected.connect(func(path: String): _replace_wav(idx, path); dialog.queue_free())
-	dialog.canceled.connect(dialog.queue_free)
-	dialog.close_requested.connect(dialog.queue_free)
-	add_child(dialog)
-	dialog.popup_centered_ratio(0.6)
+	_ensure_files().open("Choose a WAV", PackedStringArray(["*.wav ; WAV audio"]),
+		func(path: String): _replace_wav(idx, path))
 
 
 func _replace_wav(idx: int, path: String) -> void:
@@ -373,15 +366,16 @@ func _replace_wav(idx: int, path: String) -> void:
 func _on_add_pressed() -> void:
 	if _document == null:
 		return
-	var dialog := FileDialog.new()
-	dialog.access = FileDialog.ACCESS_FILESYSTEM
-	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	dialog.add_filter("*.wav", "WAV audio")
-	dialog.file_selected.connect(func(path: String): _on_add_path_selected(path); dialog.queue_free())
-	dialog.canceled.connect(dialog.queue_free)
-	dialog.close_requested.connect(dialog.queue_free)
-	add_child(dialog)
-	dialog.popup_centered_ratio(0.6)
+	_ensure_files().open("Choose a WAV", PackedStringArray(["*.wav ; WAV audio"]), _on_add_path_selected)
+
+
+var _files: FileDialogHelper
+
+
+func _ensure_files() -> FileDialogHelper:
+	if _files == null:
+		_files = FileDialogHelper.new(self)
+	return _files
 
 
 func _on_add_path_selected(path: String) -> void:
