@@ -89,3 +89,15 @@ func test_pretty_expr_renders_caller_inputs_by_name():
 	assert_eq(MusDisplayNames.pretty_expr("(l_4 + l_33)"), "(l_4 + l_33)")
 	# A custom frame base shifts the numbering.
 	assert_eq(MusDisplayNames.pretty_expr("(l_48)", [], 48), "(Input 1)")
+
+
+func test_pretty_expr_uses_the_sections_named_inputs():
+	# A profile-named input reads by its name; unnamed slots keep "Input K".
+	var names := {0: "Mission event"}
+	assert_eq(MusDisplayNames.pretty_expr("(l_32)", [], 32, names), "(Mission event)")
+	assert_eq(MusDisplayNames.pretty_expr("(l_36 > 0)", [], 32, names), "(Input 2 > 0)",
+		"only the named slot changes")
+	# Off-grid locals are not inputs, named or not.
+	assert_eq(MusDisplayNames.pretty_expr("(l_33)", [], 32, names), "(l_33)")
+	# Omitting the argument keeps every existing call site byte-identical.
+	assert_eq(MusDisplayNames.pretty_expr("(l_32)"), "(Input 1)")

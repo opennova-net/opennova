@@ -170,10 +170,11 @@ static func input_token(k: int, locals_base: int = DEFAULT_LOCALS_BASE) -> Strin
 
 # DISPLAY-ONLY prettifier for canonical expression/statement text: swaps the
 # intrinsic surface forms for their friendly labels, caller-input locals
-# (l_<base+4k>) for "Input K", and VarXX tokens for their friendly names (when
+# (l_<base+4k>) for "Input K" (or the section's named input from `input_names`,
+# {0-based index -> label}), and VarXX tokens for their friendly names (when
 # a profile named them). The result is for labels; it must NEVER be fed back to
 # the compiler -- the write path keeps the canonical text.
-static func pretty_expr(text: String, var_list: Array = [], locals_base: int = DEFAULT_LOCALS_BASE) -> String:
+static func pretty_expr(text: String, var_list: Array = [], locals_base: int = DEFAULT_LOCALS_BASE, input_names: Dictionary = {}) -> String:
 	var out := text
 	for r in _SURFACE_REWRITES:
 		out = out.replace(String(r[0]), String(r[1]))
@@ -184,7 +185,12 @@ static func pretty_expr(text: String, var_list: Array = [], locals_base: int = D
 		var rebuilt := ""
 		var pos := 0
 		for m in _local_re.search_all(out):
-			var label := input_label_for_offset(int(m.get_string(1)), locals_base)
+			var off := int(m.get_string(1))
+			var label := input_label_for_offset(off, locals_base)
+			if label != "":
+				var k := (off - locals_base) / 4
+				if input_names.has(k):
+					label = String(input_names[k])
 			rebuilt += out.substr(pos, m.get_start() - pos)
 			rebuilt += label if label != "" else m.get_string(0)
 			pos = m.get_end()
