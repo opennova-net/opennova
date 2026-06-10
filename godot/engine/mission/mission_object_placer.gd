@@ -470,6 +470,14 @@ func ground_anchor_godot(graphic: String) -> Vector3:
 	return _ground_anchor_for(graphic, _load_object_data(graphic))
 
 
+# The model-local ground anchor mapped to mission (BMS) axes, for the engine's
+# authoring facade (NovaMissionData.place_entity_grounded / move_entity_grounded).
+# The (x, y, z) -> (x, -z, y) axis map is linear, so it is valid on offset
+# vectors like the anchor, not just points.
+func ground_anchor_bms(graphic: String) -> Vector3:
+	return godot_to_bms_position(ground_anchor_godot(graphic))
+
+
 # Public: the model graphic for an items.def id (or "" if unresolved), so the editor can resolve a
 # fresh placement's anchor without reaching into the private item-db cache.
 func graphic_for(item_id: int) -> String:
