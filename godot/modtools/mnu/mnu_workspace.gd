@@ -81,7 +81,7 @@ func mount_viewport(host: Control) -> void:
 	if _editor.get_parent() == null:
 		host.add_child(_editor)
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_editor.set_resource_root(_resource_root())
+	_editor.set_resource_root(_resource_root_or_settings())
 	_editor.set_document(_document)
 
 
@@ -221,7 +221,7 @@ func _on_sound_preview(trigger: String, file: String) -> void:
 	var want := trigger.to_upper()
 	for si in range(profile.get_set_count()):
 		if String(profile.get_set(si).get("name", "")).to_upper() == want:
-			_ensure_preview().preview_set(profile, _resource_root(), si)
+			_ensure_preview().preview_set(profile, _resource_root_or_settings(), si)
 			return
 	_status("Trigger '%s' is not a set in %s." % [trigger, name])
 
@@ -233,7 +233,7 @@ func _profile_for(name: String):
 	if _profiles.has(key):
 		return _profiles[key]
 	var profile = null
-	var root := _resource_root()
+	var root := _resource_root_or_settings()
 	if root != null:
 		var d := NovaLwfData.new()
 		if d.open_from_resource_root(root, name) == OK and d.is_loaded() and d.get_set_count() > 0:
@@ -272,16 +272,6 @@ func _disconnect_inspector(inspector: Control) -> void:
 		inspector.menu_jump_requested.disconnect(_on_menu_jump)
 	if inspector.sound_preview_requested.is_connected(_on_sound_preview):
 		inspector.sound_preview_requested.disconnect(_on_sound_preview)
-
-
-func _resource_root() -> NovaResourceRoot:
-	if editor_shell != null and editor_shell.has_method("get_resource_root"):
-		return editor_shell.get_resource_root()
-	var dir := NovaResourceDirSettings.get_resource_dir()
-	if dir.is_empty():
-		return null
-	var resources := NovaResourceRoot.new()
-	return resources if resources.set_root_dir(dir) == OK else null
 
 
 func has_unsaved_changes() -> bool:
@@ -383,22 +373,8 @@ func get_save_dialog_dir() -> String:
 	return _document.get_last_save_dir()
 
 
-# Undo lives in the editor (shared by inspector commits + future canvas gestures);
-# the shell drives it through these hooks. Delegated defensively so it is safe
-# before mount / after release.
-func can_undo() -> bool:
-	return _editor != null and _editor.has_method("can_undo") and _editor.can_undo()
-
-
-func can_redo() -> bool:
-	return _editor != null and _editor.has_method("can_redo") and _editor.can_redo()
-
-
-func undo() -> void:
-	if _editor != null and _editor.has_method("undo"):
-		_editor.undo()
-
-
-func redo() -> void:
-	if _editor != null and _editor.has_method("redo"):
-		_editor.redo()
+# Undo lives in the editor (shared by inspector commits + canvas gestures) while
+# dirty stays on the document, so has_unsaved_changes keeps its override and the
+# base derives undo/redo from the editor control.
+func get_editor_document() -> Object:
+	return _editor

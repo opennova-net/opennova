@@ -214,8 +214,9 @@ func _sync_shell_title() -> void:
 
 # --- Document actions ---
 
-func has_unsaved_changes() -> bool:
-	return strings_editor != null and strings_editor.is_dirty
+# The domain document the EditorWorkspace base derives undo/redo + dirty from.
+func get_editor_document() -> Object:
+	return strings_editor
 
 
 func can_new() -> bool:
@@ -262,10 +263,10 @@ func get_current_resource_path() -> String:
 
 func open_file(path: String) -> Error:
 	_ensure_editor()
-	var resources := _resource_root()
+	var vfs := _vfs_root_for_open(path)
 	var err: Error
-	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
-		err = strings_editor.open_strings_bytes(resources.read_file(path), resources.get_root_dir().path_join(path.get_file()))
+	if vfs != null:
+		err = strings_editor.open_strings_bytes(vfs.read_file(path), _vfs_display_path(vfs, path))
 	else:
 		err = strings_editor.open_strings(path)
 	if err == OK:
@@ -291,12 +292,6 @@ func open_strings_table(path: String, key: String) -> Error:
 		if idx >= 0:
 			strings_editor.selected_index = idx
 	return err
-
-
-func _resource_root() -> NovaResourceRoot:
-	if editor_shell != null and editor_shell.has_method("get_resource_root"):
-		return editor_shell.get_resource_root()
-	return null
 
 
 func can_save() -> bool:
@@ -336,22 +331,3 @@ func get_save_dialog_title() -> String:
 func get_save_dialog_dir() -> String:
 	return strings_editor.get_last_save_dir() if strings_editor else ""
 
-
-# --- Undo / redo ---
-
-func can_undo() -> bool:
-	return strings_editor != null and strings_editor.can_undo()
-
-
-func can_redo() -> bool:
-	return strings_editor != null and strings_editor.can_redo()
-
-
-func undo() -> void:
-	if strings_editor:
-		strings_editor.undo()
-
-
-func redo() -> void:
-	if strings_editor:
-		strings_editor.redo()

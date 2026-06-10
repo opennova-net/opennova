@@ -173,32 +173,15 @@ func get_save_dialog_dir() -> String:
 	return ""
 
 
-func has_unsaved_changes() -> bool:
-	return _document != null and _document.is_dirty()
+# The domain document the EditorWorkspace base derives undo/redo + dirty from.
+func get_editor_document() -> Object:
+	return _document
 
 
-# --- Edit: undo / redo capability hooks (matching Mission / MNU). One unified
-# screen means one consolidated edit history on the document: bank reorder /
-# rename (and the structured play edits added later) all push do/undo pairs onto
-# the same stack, reachable regardless of which dock has focus. The Bank panel
-# repaints off the document's `changed` signal, which the undo callables emit,
-# so the track list refreshes without extra wiring here.
-func can_undo() -> bool:
-	return _document != null and _document.can_undo()
-
-
-func can_redo() -> bool:
-	return _document != null and _document.can_redo()
-
-
-func undo() -> void:
-	if _document != null:
-		_document.undo()
-
-
-func redo() -> void:
-	if _document != null:
-		_document.redo()
+# One unified screen means one consolidated edit history on the document: bank
+# reorder / rename and the structured play edits all push do/undo pairs onto the
+# same stack, reachable regardless of which dock has focus. The Bank panel
+# repaints off the document's `changed` signal, which the undo callables emit.
 
 
 func get_current_resource_path() -> String:

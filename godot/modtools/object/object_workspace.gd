@@ -198,8 +198,9 @@ func build_workflow_inspector(workflow_id: int, host: Control) -> void:
 	_sync_object_detail_dock_mount()
 
 
-func has_unsaved_changes() -> bool:
-	return object_editor != null and object_editor.is_dirty
+# The domain document the EditorWorkspace base derives undo/redo + dirty from.
+func get_editor_document() -> Object:
+	return object_editor
 
 
 func can_new() -> bool:
@@ -251,20 +252,14 @@ func get_current_resource_path() -> String:
 
 func open_file(path: String) -> Error:
 	_ensure_object_editor()
-	var resources := _resource_root()
+	var vfs := _vfs_root_for_open(path)
 	var err := OK
-	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
-		err = object_editor.open_object_from_resource_root(resources, path)
+	if vfs != null:
+		err = object_editor.open_object_from_resource_root(vfs, path)
 	else:
 		err = object_editor.open_object(path)
 	_sync_shell()
 	return err
-
-
-func _resource_root() -> NovaResourceRoot:
-	if editor_shell != null and editor_shell.has_method("get_resource_root"):
-		return editor_shell.get_resource_root()
-	return null
 
 
 ## The mounted game resource root (VFS), if the shell provides one. Used by the preview

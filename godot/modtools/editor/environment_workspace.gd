@@ -95,20 +95,15 @@ func get_current_resource_path() -> String:
 func open_file(path: String) -> Error:
 	if environment_editor == null:
 		return ERR_UNAVAILABLE
-	var resources := _resource_root()
-	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
-		return environment_editor.open_env_from_resource_root(resources, path)
+	var vfs := _vfs_root_for_open(path)
+	if vfs != null:
+		return environment_editor.open_env_from_resource_root(vfs, path)
 	return environment_editor.open_env(path)
 
 
-func _resource_root() -> NovaResourceRoot:
-	if editor_shell != null and editor_shell.has_method("get_resource_root"):
-		return editor_shell.get_resource_root()
-	return null
-
-
-func has_unsaved_changes() -> bool:
-	return environment_editor != null and environment_editor.is_dirty
+# The domain document the EditorWorkspace base derives undo/redo + dirty from.
+func get_editor_document() -> Object:
+	return environment_editor
 
 
 func can_save() -> bool:
@@ -143,24 +138,6 @@ func get_save_dialog_title() -> String:
 
 func get_save_dialog_dir() -> String:
 	return environment_editor.get_last_save_dir() if environment_editor else ""
-
-
-func can_undo() -> bool:
-	return environment_editor != null and environment_editor.can_undo()
-
-
-func can_redo() -> bool:
-	return environment_editor != null and environment_editor.can_redo()
-
-
-func undo() -> void:
-	if environment_editor:
-		environment_editor.undo()
-
-
-func redo() -> void:
-	if environment_editor:
-		environment_editor.redo()
 
 
 func build_inspector(host: Control) -> void:
