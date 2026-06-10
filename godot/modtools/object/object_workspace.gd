@@ -26,13 +26,11 @@ var environment_editor
 var _active_workflow_id: int = Workflow.PREVIEW
 var _preview: ObjectPreview
 var _mount: ViewportMount
-var _asset_dock_host: Control
-var _object_detail_dock: Control
-# The object_data instance the detail dock was last built for. A re-mount rebuilds
-# only when this changes (a different object was opened/created), so transient
-# editor-state syncs (time-of-day drags) and in-place value edits never rebuild.
-var _object_detail_dock_object_id: int = 0
-var _inspectors: Dictionary = {}
+# The asset-dock detail pane, hosted by the framework's DetailDockHost: it owns
+# the lazy panel, the conditional mount, and the rebuild-only-on-real-change
+# policy (a routine editor-state sync — e.g. a time-of-day drag — must never
+# tear the pane down; that was the TOD lag).
+var _detail_dock: DetailDockHost
 var _export_update_mask: int = OED_UPDATE_NONE
 # Preview guide visibility, driven by the shell's View settings. Stored here so a
 # re-mounted preview (ViewportMount rebuilds it) inherits the current choice.
@@ -161,23 +159,24 @@ func uses_asset_dock() -> bool:
 
 
 func set_asset_dock(dock: Control) -> void:
-	var host_changed := dock != _asset_dock_host
-	_asset_dock_host = dock
-	if dock == null:
-		_free_object_detail_dock()
-		return
-	# A genuine (re)host builds the dock; the shell re-calls set_asset_dock with the
-	# same host on every editor-state sync (e.g. each time-of-day drag step), and
-	# that must NOT tear down and rebuild the dock (that was the TOD lag). Object
-	# data changes refresh content through the inspector's refresh() via _sync_shell.
-	if host_changed:
-		_sync_object_detail_dock_mount()
-	else:
-		_ensure_object_detail_dock_mounted()
+	_ensure_detail_dock().set_host(dock)
 
 
 func sync_asset_dock() -> void:
-	_ensure_object_detail_dock_mounted()
+	_ensure_detail_dock().ensure_mounted()
+
+
+func _ensure_detail_dock() -> DetailDockHost:
+	if _detail_dock == null:
+		_detail_dock = DetailDockHost.new(&"ObjectDetailDock", &"ObjectDetailDockBox",
+			_active_workflow_uses_detail_dock,
+			func(box: Control) -> void:
+				var inspector := _inspector_for(_active_workflow_id)
+				if inspector != null and inspector.has_detail():
+					inspector.build_detail(box),
+			func() -> int:
+				return object_editor.object_data.get_instance_id() if object_editor != null and object_editor.object_data != null else 0)
+	return _detail_dock
 
 
 func get_active_workflow_id() -> int:
@@ -186,7 +185,7 @@ func get_active_workflow_id() -> int:
 
 func activate_workflow(workflow_id: int) -> void:
 	_active_workflow_id = workflow_id
-	_sync_object_detail_dock_mount()
+	_ensure_detail_dock().sync_mount()
 
 
 func build_workflow_inspector(workflow_id: int, host: Control) -> void:
@@ -195,7 +194,7 @@ func build_workflow_inspector(workflow_id: int, host: Control) -> void:
 	var inspector := _inspector_for(workflow_id)
 	if inspector != null:
 		inspector.build_main(host)
-	_sync_object_detail_dock_mount()
+	_ensure_detail_dock().sync_mount()
 
 
 # The domain document the EditorWorkspace base derives undo/redo + dirty from.
@@ -352,23 +351,19 @@ func _build_inspector_defs() -> Array:
 	]
 
 
-func _ensure_inspectors() -> void:
-	for def in _ensure_inspector_defs():
-		var inspector_def := def as InspectorDef
-		if _inspectors.get(inspector_def.id) == null:
-			_inspectors[inspector_def.id] = inspector_def.inspector_script.new(self)
+# Object inspectors take the workspace in their constructor.
+func _instantiate_inspector(def: InspectorDef) -> Object:
+	return def.inspector_script.new(self)
 
 
 func _inspector_for(workflow_id: int) -> WorkflowInspector:
-	_ensure_inspectors()
-	var inspector = _inspectors.get(workflow_id)
+	var inspector := get_workflow_inspector(workflow_id)
 	if inspector == null:
-		inspector = _inspectors.get(Workflow.PREVIEW)
+		inspector = get_workflow_inspector(Workflow.PREVIEW)
 	return inspector
 
 
 func _ensure_object_editor() -> void:
-	_ensure_inspectors()
 	if object_editor != null:
 		return
 	object_editor = ObjectEditorScript.new()
@@ -390,7 +385,7 @@ func _sync_shell() -> void:
 	if active_inspector != null and active_inspector.has_detail():
 		active_inspector.refresh()
 	else:
-		_rebuild_object_detail_dock()
+		_ensure_detail_dock().rebuild()
 	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
 		editor_shell.sync_from_editor_state()
 
@@ -431,91 +426,3 @@ func _get_oed_dirty_mask() -> int:
 func _active_workflow_uses_detail_dock() -> bool:
 	var inspector := _inspector_for(_active_workflow_id)
 	return inspector != null and inspector.has_detail()
-
-
-func _free_object_detail_dock() -> void:
-	_object_detail_dock_object_id = 0
-	if _object_detail_dock == null:
-		return
-	if is_instance_valid(_object_detail_dock):
-		var parent := _object_detail_dock.get_parent()
-		if parent != null:
-			parent.remove_child(_object_detail_dock)
-		_object_detail_dock.free()
-	_object_detail_dock = null
-
-
-func _ensure_object_detail_dock() -> void:
-	if _asset_dock_host == null or not _active_workflow_uses_detail_dock():
-		return
-	if _object_detail_dock == null or not is_instance_valid(_object_detail_dock):
-		_object_detail_dock = PanelContainer.new()
-		_object_detail_dock.name = "ObjectDetailDock"
-		_object_detail_dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_object_detail_dock.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	if _object_detail_dock.get_parent() != _asset_dock_host:
-		var old_parent := _object_detail_dock.get_parent()
-		if old_parent != null:
-			old_parent.remove_child(_object_detail_dock)
-		_asset_dock_host.add_child(_object_detail_dock)
-
-
-func _sync_object_detail_dock_mount() -> void:
-	if not _active_workflow_uses_detail_dock():
-		_free_object_detail_dock()
-		return
-	_ensure_object_detail_dock()
-	_rebuild_object_detail_dock()
-
-
-func _ensure_object_detail_dock_mounted() -> void:
-	# Keep the detail dock parented for the active workflow without rebuilding it on
-	# routine re-mounts (every editor-state sync, e.g. a time-of-day drag). Rebuild
-	# only when it is empty or a different object was opened/created; workflow
-	# switches still rebuild via _sync_object_detail_dock_mount.
-	if not _active_workflow_uses_detail_dock():
-		_free_object_detail_dock()
-		return
-	_ensure_object_detail_dock()
-	if _object_detail_dock == null:
-		return
-	var current_object_id := object_editor.object_data.get_instance_id() if object_editor != null and object_editor.object_data != null else 0
-	if _object_detail_dock.get_child_count() == 0 or current_object_id != _object_detail_dock_object_id:
-		_rebuild_object_detail_dock()
-
-
-func _rebuild_object_detail_dock() -> void:
-	if not _active_workflow_uses_detail_dock():
-		_free_object_detail_dock()
-		return
-	if _object_detail_dock == null or not is_instance_valid(_object_detail_dock):
-		return
-	for child in _object_detail_dock.get_children():
-		_object_detail_dock.remove_child(child)
-		child.free()
-
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", ObjectUiHelpers.PANEL_MARGIN)
-	margin.add_theme_constant_override("margin_top", ObjectUiHelpers.PANEL_MARGIN)
-	margin.add_theme_constant_override("margin_right", ObjectUiHelpers.PANEL_MARGIN)
-	margin.add_theme_constant_override("margin_bottom", ObjectUiHelpers.PANEL_MARGIN)
-	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_object_detail_dock.add_child(margin)
-
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = 0
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	margin.add_child(scroll)
-
-	var box := VBoxContainer.new()
-	box.name = "ObjectDetailDockBox"
-	box.add_theme_constant_override("separation", 10)
-	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(box)
-
-	var inspector := _inspector_for(_active_workflow_id)
-	if inspector != null and inspector.has_detail():
-		inspector.build_detail(box)
-	_object_detail_dock_object_id = object_editor.object_data.get_instance_id() if object_editor != null and object_editor.object_data != null else 0
