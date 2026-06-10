@@ -34,8 +34,8 @@ powers the tools.
 ## A deep editor
 
 The OpenNova Editor (ONED) is where you author the data the engine runs. Today it
-focuses on creating individual assets: terrain, 3D objects, fonts, credits, strings,
-environment, and missions. The longer-term goal is depth:
+focuses on creating individual assets: terrain, 3D objects, missions, fonts, credits,
+strings, menus, music, sound profiles, and environment. The longer-term goal is depth:
 
 - **An asset dependency graph.** NovaLogic assets reference each other (a `.3di`
   points at its textures, a `.def` points at a `.3di` and its `.bad` animations, a
@@ -61,13 +61,17 @@ OpenNova.
 
 Multiplayer is an ultimate goal, but the in-match networking has barely been looked
 at. The nearer priority is a faithful reimplementation of NovaWorld, the matchmaking
-and server backend (PR #37), so the original games keep working as their official
-services age out. Broader gameplay netcode comes later.
+and server backend, so the original games keep working as their official services
+age out. The protocol reverse engineering is recorded in
+[docs/net/novaworld-net-re.md](docs/net/novaworld-net-re.md); an initial
+implementation landed once and was reverted while that work matures. Broader
+gameplay netcode comes later.
 
 ## Where we are today
 
 OpenNova is pre-1.0 and under active development. The asset pipeline and the editor
-are the most exercised surfaces; the runtime loads exported scenes and runs the
-terrain and foliage systems; gameplay is still being built. Nothing here is
+are the most exercised surfaces; the runtime loads exported scenes, runs the terrain
+and foliage systems, and simulates authored missions (WAC scripts, BMS events, AI);
+player interaction and multiplayer are still being built. Nothing here is
 production-ready. See the [README](README.md) for current capabilities, downloads,
 and build steps.

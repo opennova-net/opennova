@@ -3,8 +3,9 @@
 Binary: `Jointops.exe` (retail JO:CA, Steam), IDB `Jointops.exe.kong.i64`, imagebase 0x400000.
 Sessions: 2026-06-07 (WAC ISA + AI P1/P2, prior), 2026-06-08 (foundation), **2026-06-10 (entity-motor architecture grill — this record)**.
 Scope: `libs/world` (entity registry, var store, AI), `libs/wac` (VM), the mission-runtime bridge, and the
-locomotion/motor layer. Companion docs: `docs/mission/bms-event-runtime-re.md` (B2 slice, pending),
-ADR 0003 → renumbered 0007 (skeletal), `docs/CONTEXT.md` (main loop).
+locomotion/motor layer. Companion docs: `docs/mission/bms-event-runtime-re.md`,
+[ADR 0007](../adr/0007-skeletal-runtime-and-entity-visual.md) (skeletal),
+[`docs/runtime-architecture.md`](../runtime-architecture.md) (main loop).
 
 ## 1. The entity-motor architecture (discovered 2026-06-10)
 
@@ -273,3 +274,288 @@ Defined: `0x4680a0`, `0x490310` (9.2 KB, jump tables had broken auto-analysis), 
 stubs. Reverse-link + truth comments on 0x4b9910, 0x457bd0, 0x4581b0, 0x490310, 0x466db0, 0x4680a0,
 0x82abc8. Root-motion pass: truth comments on the 0x40b5f0 out-transform block (0x40b82f) + function
 comments on 0x40b5f0/0x40b230 recording the .bad-events record identity and the pinned scales.
+
+---
+
+*Appendices 7–12 consolidated 2026-06-10 from scratch notes `notes/mission/ai-driver-grill-2026-06-08.md`,
+`notes/mission/anim-ai-grill-2026-06-07.md`, `notes/mission/mount-emplacement-2026-06-08.md`,
+`notes/mission/phase4-coord-migration-2026-06-08.md`, `notes/mission/terrain-grounding-2026-06-08.md`,
+`notes/mission/waypoint-slot-model-2026-06-07.md`, `notes/object-placement-grill.md`. Addresses are
+Jointops.exe retail unless marked `dfx2med.exe` (the DFX2 mission editor, imagebase 0x400000).*
+
+## 7. Appendix: AI driver + spawn-state grill (2026-06-08)
+
+### 7.1 Spawn never sets state 16 — the 0→16 transition fires at the first AI tick
+- `Entity_InitVehicleAI @ 0x460200`: allocates the 812-byte brain (`unk_AED380` stride 812), loads the
+  AI profile, copies geometry, inits `ai[4]=ai[5]=ai[6]` from a saved field (fallback, effectively 0),
+  scans the model user-points for weapon bones (`prim`/`bullet01`/`bullet02`/`flare`). **No state 16.**
+- `Entity_SpawnFromBMSRecord @ 0x40e9f0`: for AI items (itemdef flag 0x100000) allocates the AiSlot
+  (entity+104) and fills accuracy/engagement/FOV; when BMS record byte 79 is nonzero it sets
+  `slot[140] = 1` (follow-path flag), `slot[148] = record[79]` (path number), `slot[152] = wp_number`.
+  Still no state 16.
+- ⇒ The 0 → 16 (GROUND_FOLLOWWP) transition fires at the **first AI tick** — the state-0 tick handler
+  reads `slot[140]` — never at spawn. Our promote force-set of `kCurState=16` (gated by
+  `opts.patrol_on_spawn`) is a tracked deviation; the faithful port routes through a state-0 handler
+  that reads the follow flag.
+
+### 7.2 Heading convention — RESOLVED: engine heading = 90 − yaw
+Spawn writes `entityData[4] = (90 − bmsYawDeg) · kBamPerDegree` (`kBamPerDegree = 11930464 = 2^32/360`),
+so the **engine heading is `90 − yaw`**, not yaw (closes the long-open "90-yaw vs 180-yaw" item). The
+waypoint mover writes `kWorkHeading = atan2(dY, dX)` — an ENGINE-frame bearing.
+
+**The bug this exposed:** our brain heading was inconsistent between parked and moving — the spawn seed
+stored mission-frame yaw while the mover stored engine-frame bearing, and the present pass fed both to
+`bms_to_godot_basis` as if they were mission yaw. A unit moving +Y (north) rendered as `90 − bearing`
+and faced east: a direction-dependent error, not a constant offset.
+
+**Fix (shipped):** store `heading` in the ENGINE frame everywhere, matching the original — seed
+`(90 − yaw) · kBamPerDegree` (promote), mount pose `(90 − occ.yaw)`, and convert back once at the
+present boundary (`mission_yaw = 90 − heading / kBamPerDegree`). The Godot host basis
+(`MissionObjectPlacer.bms_to_godot_basis`) already applies the faithful `RotY(90 − v)` plus a
+`RotY(90)` .3di model-forward correction (net `RotY(180 − v)`) where `v` is the MISSION yaw — the
+`90 − yaw` belongs in the basis builder, never doubled into the seed.
+
+### 7.3 Pitch/roll spawn scaling
+`entityData[5]/[6] = deg · 2^32/360` — same BAM scaling as heading, **no 90 offset**.
+
+### 7.4 Movement-step layer (the fuller ground mover — port deferred)
+- `AI_UpdateMovementTarget @ 0x460e40` is the REAL ground waypoint mover (vs our lean
+  `AI_UpdateWaypointMovement @ 0x457bd0` port): calls `AIWaypoint_UpdateTarget`, advances the node with
+  the same loop/one-shot logic we ported, sets X/Y from the node (mode 1 bone / mode 3 literal), and
+  drives the VERTICAL: `brain[131] = nodeZ` when `aiComp[108]` (= profile+14, set in
+  `Entity_InitVehicleAI`), else ground via `Entity_CalcAverageGroundHeight(e, 0x200000)` plus the def
+  heightOffset (`def[20]==2` selects the raw offset), floored at `def[232] + ground`
+  (= `max(targetZ, ground)`); then heading = bearing + near-target speed halving.
+- `AI_ProcessMovementStep @ 0x466db0` pins X/Y to the current pos, sets
+  `brain[131] = Entity_CalcAverageGroundHeight(e, 0x50000) + 0x50000` unconditionally, with the 372/744
+  phase counters. This session labeled it "the vehicle mover" — **superseded by §1.3**, which
+  identified it as a directional **death-fall mover** (move-step ids 0–3); the mechanics stand.
+- Dispatcher facts confirmed: SM dispatcher `0x4581b0` (24-row table @ 0x815238), per-frame budget gate
+  `AI_BeginUpdate @ 0x457b40` (cap 496); dispatch event args 0=update / 1=spawn / 4=death. The
+  then-open "per-entity driver near 0x462120" lead was later resolved by §1.1: those are the
+  event-callback thunks for `cbot/cpln/ctrn`.
+
+## 8. Appendix: animation selection from item-type ADM (2026-06-07)
+
+Editor-side addresses below are `dfx2med.exe`; runtime dispatch addresses are Jointops.exe.
+
+### 8.1 There is no per-entity animation field
+The per-entity properties dialog (`Med_ObjectPropertiesDialog @ 0x4096d0`, dfx2med — mirrored by our
+Selection panel) has **no animation control**. Per-entity animation comes from exactly two places:
+1. **The item-type ADM**: graphic-def offset **+180** holds the `.adm` name — proven by the
+   asset-manifest exporter (`sub_44EE10`, dfx2med), which prints the `%s.adm` listing from def+180.
+   ADM is plaintext key/value; `anim_<name>` keys map names → `.bad` clips. Surfaced as `anim_def` in
+   `NovaItemDatabase`. Runtime entry points: `AnimMap_LoadAdmFile @ 0x40cc40`,
+   `AnimMap_PlayAnimBySlot @ 0x40bda0`, `AnimMap_FindSlotByName @ 0x40cfa0`.
+2. **The PLAYPARTANIM mission action** (AI sub-type 34) — the vehicle/emplacement PART system (§8.4).
+
+### 8.2 AI action sub-type param domains
+Action types CHANGE_GROUP_AI(3), AREA_AI_RED(12), AREA_AI_BLUE(13), CHANGE_SINGLE_AI(21) share the AI
+sub-type table (`Med_ActionSubTypeName @ 0x445EE0`, dfx2med). Record layout: `action_sub_type` is its
+own dword; **param1 = target** (group / unit-SSN / zone), **param2/3/4 = the sub-type's slots 0/1/2**.
+Per-sub-type slots from `Med_AiSubTypeParams @ 0x44A920` (dfx2med):
+
+| sub | token | slots (widget) |
+|----|-------|----------------|
+| 2 | GUARD_BIT | BitToggle |
+| 5/6/22 | RED/GREEN/YELLOW_ALERT | (no param) |
+| 8 | ACCURACY_100 | IntSmall (0..100) |
+| 15/16/17/21 | BLIND/BERSERK/CLIMBER/COWARD _BIT | BitToggle |
+| 26/27 | DRIVESKILL/AIMSKILL | Fsm enum @ 0x5e6498 |
+| 28 | AISETSTATE | Fsm enum @ 0x5e64c8: 1 FSMFORMATION / 2 FSMRTB / 3 FSMPRETTY / 4 FSMLAND / 5 FSMFOLLOWWP |
+| 29/30 | COMBAT/PATROL SPEEDKMH | IntGeneric (0..999) |
+| 31/44 | FIND_AND_USE / TARGETSSN | entity-SSN picker |
+| 32/33 | AIUSEWPZ / AICLEARWPZ | (no param) |
+| 34 | **PLAYPARTANIM** | 0=ANIMNUM IntGeneric; 1=ANIMPLAYTYPE enum @ 0x5e64f8 (1 play / 0 stop / −1 reverse); 2=ANIMTIME fixed-sec |
+| 37 | HUDITEM | 0=enum @ 0x5e6414 (ns `off_5B5800`); 1=TICKS IntGeneric |
+| 39 | TMATESTATUS | BitToggle |
+| 40 | AINODEPATH_BIT | BitToggle |
+| 41 | ATTACKDISTANCE_VALUE | IntGeneric |
+| 42 | ENGAGEDISTANCE | 0=MIN, 1=MAX (IntGeneric) |
+| 43 | INDESTRUCTABLE_BIT | BitToggle |
+| 45 | STARTFIRING_BIT | BitToggle |
+| 46 | FIRING_ANGLE | int 0 down to −359 (degrees) |
+
+Widget domains (decompiled, dfx2med): IntGeneric = raw 0..999 (no <<16; runtime shifts at eval);
+IntSmall = 0..100; BitToggle = {0,1}; ANIMTIME = raw 16.16 seconds shown "%2.4f", step 256, range
+0..327424 (~0..5 s).
+
+Runtime dispatch (Jointops): `EventAction_Dispatch @ 0x4542e0` switches on action_type (record +1 type,
++2 sub_type, +3 param1, +4..+6 param2..4); case 3 → `Entity_HandleAlertCommand`, case 0x15 →
+`Entity_HandleAlertStateEvent @ 0x43dee0`. AI sub-type dispatcher = `Entity_ApplyCommand @ 0x43ab60`:
+5/6/0x16 = alerts (stance ai+136 = 2/0/1), 8 = ACCURACY (`ai+40 = 100 − param2`), 0x1C = AISETSTATE
+(queues AI event 7), 0x1D/0x1E = combat/patrol speed (events 10/11).
+
+### 8.3 ANIMNUM is a part-anim CHANNEL, not an animation name/index
+**Durable warning:** `Entity_ApplyCommand` case 0x22 validates ANIMNUM ∈ {1,2} — it selects one of two
+model part-anim channels (slot = channel − 1); any other value is a no-op. The animation content is the
+model's PANM. Do NOT wire ANIMNUM to `off_8135F0` — that is the separate infantry full-body table
+(§3.4, AI-state-driven via `Script_ForceAnimation @ 0x4f2610` / `Entity_UpdateInfantryAI @ 0x4b9910`).
+ONED therefore exposes ANIMNUM as a plain "Part #" raw int (the speculative name-picker was removed).
+
+### 8.4 PLAYPARTANIM contract (case 0x22, exact rate formula)
+- Stores per-channel **direction** (`play_type` ∈ {−1,0,+1}) at `comp+436+4·slot` and a **rate** at
+  `comp+444+4·slot`; `comp` = the 812-byte AI struct at entity[25].
+- Rate derivation: `seconds = ANIMTIME / 65536` (confirms param4 raw = sec·65536);
+  `rate = ftol((0.016 / seconds) · 65536)`, min 1 — i.e. **1048.576/seconds 16.16-phase units per
+  62.5 Hz tick**, so the phase crosses its full 0..1.0 range in exactly `seconds`. Constants verified
+  IEEE-754 LE: `flt_7C3310 = 1/65536`, `flt_7C3B40 = 0.016 (= 1/62.5)`, `flt_7C32BC = 65536`.
+- Writes ONLY direction + rate — it never resets the phase. PLAYPARTANIM is **velocity control from
+  the current position** ("start moving part c at this speed/dir; play_type 0 = halt"), not
+  reset-and-sweep.
+- Channel defaults come from the object/vehicle def (`Entity_CopyVehicleDefToAIComp @ 0x45ddf9`:
+  def+764..784 → comp+436..456) — objects can ship an idle part-anim (radar-dish spin).
+- It never calls AnimMap: the part system (turret yaw / barrel pitch / dish) is DISTINCT from the
+  infantry full-body ADM/BAD system.
+- Port contract (`NovaObjectModel.play_part_anim(channel, play_type, time_s)`): channel ∈ {1,2} → PANM
+  control register index `slot`; value 0..65535 = the 16.16 phase; speed = 65535/time_s per second
+  (delta-based); velocity from CURRENT value; **endpoint = clamp [0,65535]** (one-shot; continuous-spin
+  wrap is the def-default idle case, flagged as a possible per-part refinement — the consumer's
+  clamp-vs-wrap was not captured).
+
+### 8.5 bmsi attribute flags (checkbox dialog)
+Flag label table @ 0x5b1c84 (dfx2med): REFLECTIVE, INDESTRUCTABLE, GUARDING, BLIND, **DEAF**,
+**IGNORE_FOOTSTEPS**, NAVIGATION_WAYPT, MULTIPLAYER. Confirmed bit positions (our
+`BmsiAttributeFlags`): Blind=0, Guarding=1, Multiplayer=6, Indestructible=21, NavigationWaypoint=22,
+Reflective=23. **OPEN:** DEAF/IGNORE_FOOTSTEPS bit positions need the dialog's CheckDlgButton
+load/save handlers (deep in the 0x4ffd-byte `Med_ObjectPropertiesDialog`); until decoded the editor
+preserves unknown bits verbatim (merge-on-write), like event flags.
+
+## 9. Appendix: mount/emplacement mechanics (2026-06-08)
+
+### 9.1 Verified chain (AttachToEmplaced, action 37)
+- `EventAction_Dispatch @ 0x4542e0` case 0x25: reads ONLY param1 (the occupant SSN), resolves it via
+  `EntityPool_FindByNetId`, calls `WacScript_TryMountEntityToVehicle`. The gun/vehicle is found
+  IMPLICITLY inside the mount fn.
+- `WacScript_TryMountEntityToVehicle @ 0x4f70f0`: validate handle (≠0xFFFF, pool<5, slot<capacity);
+  gate alive/model present; require `occupant-model+144` (a pre-established hierarchy link to the
+  vehicle) and not-already-mounted (`entity->pad8[8] == 0`). Then
+  `seatBone = Entity_FindBestSeatSlot(entity, *(model+144), &outEntity)` (outEntity = the chosen
+  seat-owner, possibly a child) → `Entity_AttachToVehicleSeat`. The attach-failure path clears
+  `Flags & ~0x40` (the mounted bit).
+- `Entity_FindBestSeatSlot @ 0x4351f0` (CONFIRMED EXACT): sentinel `bestWeight = 65536000`; iterates
+  the vehicle + its child entities (vehicle+444/+448), 10 slots each; `boneIdx = model[605+slot]`
+  (0 = empty); occupant u16 at `vehicle[400+2·slot]` (free if 0xFFFF or == playerHandle). Seat-bone
+  NAME classification (bone record stride 48, name at +32): `sitex` → 1 passenger, `ctrlx` → 2
+  controller (vehicle entity only), `drvrx` → 5 driver (vehicle entity only), `UseGun` → 3 gunner;
+  else skip. Player-class gate: model+148 == 124 ⇒ ctrl-only; == 123 ⇒ anything but passenger.
+  **Weights (LOWER wins):** ctrl/drvr `0x2000` < gunner `0x20000` < on-vehicle passenger `0x200000` <
+  child-entity passenger `0x2000000`.
+- True occupant pose comes from the seat bone transform (`Entity_GetBoneTransformAndOrientation @
+  0x4b0c50`, `Entity_SerializeMountedVehicleState @ 0x460560`); mounted-pose anim states (emplaced
+  67–75, sit_N, driver lean) are §4.15.
+
+### 9.2 Port (libs/world + libs/mission) and tracked deviations
+Shipped: `Entity.seats` + occupant refs riding the registry value-copy (`World::Snapshot` ⇒ Play→Stop
+rewinds mounts for free); `EntityCommands::{find_best_seat, mount, mount_best, dismount,
+find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4359f0; `pose_mounted_occupant`
+(occ.pos = veh.pos + rotate(seat_local, veh.yaw), gunner yaw = veh.yaw − yaw_offset);
+`AiSystem::pose_if_mounted` skips SM + locomotion and auto-dismounts when the vehicle is gone;
+event-runtime case 0x25 → `mount_best(param1)`. Deviations (NOT silently absorbed):
+1. **Proximity proxy vs occupant-model+144.** The original's vehicle is the occupant's model hierarchy
+   link; we pick the nearest free-seat entity within 20 units (`kMountRadius`). Faithful for a soldier
+   placed on its gun; wrong if two guns overlap.
+2. **`is_emplacement_item` table is EMPTY.** The original reads `UseGun` from the model's seat bones
+   (model[605..]); we don't load model bones in promotion, so the data-driven auto-seed of real
+   missions waits on the items.def emplacement set. Mechanism complete + tested.
+3. **Child-entity seat traversal + the player-class 123/124 gate** deferred (single-entity seats only).
+4. **Seat-local pose stand-in** — seat_local/yaw_offset default 0 (gunner at the gun origin) until the
+   true bone transform is read.
+
+## 10. Appendix: coordinate frames + terrain grounding (2026-06-08)
+
+### 10.1 The BMS↔Godot convention lives in GDScript (and the godot-cpp Basis trap)
+Mission frame is Z-up; the Godot host is Y-up. The conversion is single-sourced in GDScript
+(`MissionObjectPlacer` statics, used by both present + placer): basis =
+`Basis(UP, 90−yaw) · Basis(BACK, −pitch) · Basis(RIGHT, roll) · Basis(UP, 90)` (engine heading +
+.3di model-forward correction; see §7.2 for the 90−yaw truth).
+
+**Durable warning:** a C++ migration (`NovaMissionGeometry`) was REVERTED because godot-cpp's
+`Basis(Vector3 axis, real_t angle)` diverges from godot-core for **negative-component axes**: with the
+pitch axis `BACK = (0,0,−1)`, a 30° pitch produced fwd = (0, **+0.5**, −0.866) in C++ vs the
+engine-faithful (0, **−0.5**, −0.866) in GDScript — an exact Y sign flip, same formula, same constants.
+Yaw (UP) and roll (RIGHT) terms matched, so yaw-only tests pass and hide it. If revisited: build the
+C++ basis from explicit double-precision rotation matrices (or Quaternion) and add a C++/GDScript
+parity test over a (pitch, yaw, roll) grid BEFORE wiring callers.
+
+Also noted: the editor's ground sampling (`sample_world_height`) reads the live editable FORMAT_RF
+Image while the runtime samples `cpt.depth_buffer` via the portable `TerrainHeightField` — two data
+sources; unifying needs a shared sampler (open).
+
+### 10.2 Ground sampling chain — `Entity_CalcAverageGroundHeight @ 0x457230` (CONFIRMED EXACT)
+5-tap weighted ground height, `(entity, sampleRadius)`:
+- N/S taps at (0, ±r), E/W at (±r, 0), C at center; `max` = highest positive tap (C included);
+- `result = (N + S + E + W + 2·(C + 2·max)) / 10`, floored at C;
+- water clamp: `if (*(entity+368) && worldY > result) result = worldY` (worldY @ 0x26C6454);
+- def offset: `result += dead ? def+0x30 : def+0x2C`, where
+  `dead = ((entity+36 & 2) || entity+286 <= 0) && entity+52`;
+- radius 0 path: center tap only.
+
+**Decompile-lossiness warning (durable):** the per-tap samplers `sub_4142C0` / `sub_414320` decompile
+as if they ignore the dx/dy offsets and return a flat field — WRONG. Disasm + the pointer write-back
+show each builds `pos = {x+dx, y+dy, z + 0x10000 − 0x300000}` (a ray from z+1.0 down to z−47.0) and
+calls `raycast_entity_collision @ 0x413760`, which writes the sampled ground height back into `pos.z`
+(returned in eax) — the 5 taps DO sample 5 distinct columns. `sub_414320` additionally stores the
+raycast collision-object at record+40. The real sampler is
+`Terrain_RaycastHeightmapHiRes_0 @ 0x60e710`: a LoRes pass, then back/forward step + 8-iteration
+bisection refine (the per-step terrain samples are inlined FPU the decompiler dropped to
+`null_stub()`); for a near-vertical down-ray this equals the bilinear heightmap column height.
+
+### 10.3 The vertical assignment + our port
+Both movers recompute `brain[131]` from the sampler EVERY tick: `0x466db0` sets
+`ground(0x50000) + 0x50000`; `0x460e40` sets `max(nodeZ-or-ground+heightOffset, def[232]+ground)`
+(§7.4). Our lean `AI_UpdateWaypointMovement @ 0x457bd0` port never wrote `brain[131]` — the root cause
+of the floating-AI bug. Shipped: portable `terrain/height_field` (the three `NovaTerrainData`
+samplers lifted verbatim, NovaTerrainData delegates); `world::calc_average_ground_height` (the
+0x457230 math, 16.16); `AiSystem::apply_ground_clamp` SETs `brain[131]` + snaps
+`pos[2] = ground + 0x50000` (SET not max — the lean mover leaves brain[131] stale; a max would strand
+a float); `NovaSimulation::set_terrain_height_field` wired in game + editor preview. Tracked
+deviations: (1) bilinear column height vs the hi-res along-ray bisection (faithful for grounding);
+(2) GroundClearance def fields (def+0x2C/+0x30, def+216/+232, the aiComp[108] node-Z gate) default 0
+until those def fields are RE'd; (3) pos[2] snaps (no climb-rate physics); (4) water clamp wired off
+in the binding (water_height units vs the 16.16 worldY unverified; sampler + calc support it).
+
+## 11. Appendix: waypoint slot model (2026-06-07)
+
+- `waypoint_id` (BMS entity record **byte 79**) is a fixed path NUMBER, 0..127. dfx2med
+  `Med_ParamWaypointList @ 0x449c60` lists path numbers 1..127 (0 = None), each backed by a 127-entry
+  name array (stride 1548); the packer `Med_PackEntityRecord @ 0x44c8e0` writes byte 79. Our parser
+  stores exactly **128 positional waypoint records** (`kWaypointRecordCount`), so array index == path
+  number. Byte 78 = group/parent ref.
+- Jointops reads byte 79 only as the follow-path inside the AI block (`Entity_SpawnFromBMSRecord @
+  0x40e9f0`, itemdef flag 0x100000): `slot[140]=1; slot[148]=record[79]; slot[152]=wp_number` (§7.1).
+  Note the infantry think reserves channel ids **123–127 as commands** (§3.2), so usable mission path
+  ids are 1..122 even though the editor lists 1..127.
+- **Attachment is RUNTIME state, not a BMS byte**: mount/attach is `entity+364` set at runtime
+  (`Entity_ToggleVehicleMount @ 0x436950`, `find_entity_mounted_on_vehicle @ 0x4359f0`). "Attached To
+  SSN" / "ATTACH_TO_EMPLACED" are trigger/action name-table entries (PlayerAttachedToSsn = trigger 38,
+  AttachToEmplaced = action 37), not entity-dialog fields.
+- A `waypoint_id` pointing at an EMPTY slot (0 markers) is valid leftover data — units that man a gun
+  or ride a vehicle never path-follow, and the game ignores it (the "Value 125" inspector mystery; not
+  a read/write bug, byte-exact round-trip holds). The inspector now labels such values
+  "Path N (no markers)".
+
+## 12. Appendix: entity placement — Ground userpoint (dfx2med.exe)
+
+Question: does the engine apply the model's "Ground" userpoint at render/load, or only at author-time
+placement? All addresses dfx2med.exe.
+
+- Userpoint lookup `sub_459C70(model_userpoints, "Ground")` → struct with x/y/z at +0/+4/+8;
+  `"Ground"` string @ 0x5b145c, referenced by `sub_401A90`, `sub_44D920`, `sub_43BAD0`.
+- **`sub_401A90` — the place-object dialog (DECISIVE; proposed rename `Med_PlaceObjectDialogProc`).**
+  Spawns the picked item via `sub_455900`, then ONCE subtracts the full **unrotated** 3-vector from
+  the entity position (@ 0x401f6e; same in the scatter/multi-place loop @ 0x4021fe). The bake lands
+  in the STORED position at placement; nothing applies a Ground offset at render (else the engine
+  would double-count its own bake).
+- `sub_44D920` / `sub_43BAD0` (callers `sub_440FD0`, `sub_468850`): a separate **vertical-only**
+  terrain-conform — only the height component (+8) subtracted from a terrain height.
+- **Verdict:** the Ground userpoint is an **author-time bake into the stored position**; stored
+  positions render **directly**. Render-time anchoring on load is wrong.
+- Fix (landed in PR #52): render stored positions directly (anchor_inv dropped from static batch,
+  animated transform, place_single, pick colliders, drag visual); bake the Ground anchor at
+  **terrain-drop only** (`place_entity_at_world` fresh insert + `_move_selected_to_world` drag) as
+  `stored_bms = cursor_bms − godot_to_bms_position(get_ground_anchor())`, with the placer's position
+  map `godot_vec3 = (−x, y, z)`; markers and the free gizmo translate unchanged. Load+save stays
+  byte-identical (we never bake on load). Open visual check: whether the self-consistent bake
+  byte-matches the engine's raw subtraction depends on the model↔entity axis consistency of our
+  import pipeline — verify by loading an original `.bms` and checking objects sit on terrain.
