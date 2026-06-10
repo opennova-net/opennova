@@ -1,0 +1,3575 @@
+{
+ "source": "Jointops.exe WAC command table @ 0x82D290 (165 x 44-byte records); argc/call_conv derived per WacScript_InitAndLoad classification loop",
+ "count": 165,
+ "param_types": {
+  "0": "null",
+  "1": "value",
+  "2": "number",
+  "3": "red",
+  "4": "green",
+  "5": "blue",
+  "6": "distance",
+  "7": "heading",
+  "8": "seconds",
+  "9": "hour",
+  "10": "meters",
+  "11": "ssn",
+  "12": "group",
+  "13": "team",
+  "14": "area",
+  "15": "target",
+  "16": "wplist",
+  "17": "text",
+  "18": "filename",
+  "19": "soundset",
+  "20": "texttoken",
+  "21": "face",
+  "22": "fx",
+  "23": "ammo",
+  "24": "anim",
+  "25": "cheat",
+  "26": "ifname",
+  "27": "variable"
+ },
+ "commands": [
+  {
+   "index": 0,
+   "name": "elapse",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    8,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "seconds"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ECEF0",
+   "handler_name": "loc_4ECEF0"
+  },
+  {
+   "index": 1,
+   "name": "never",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [],
+   "argc": 0,
+   "call_conv": 0,
+   "handler_ea": "0x4ED2E0",
+   "handler_name": "0x4ED2E0"
+  },
+  {
+   "index": 2,
+   "name": "previous",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [],
+   "argc": 0,
+   "call_conv": 0,
+   "handler_ea": "0x4ECF90",
+   "handler_name": "0x4ECF90"
+  },
+  {
+   "index": 3,
+   "name": "chain",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    8,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "seconds"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ECF20",
+   "handler_name": "0x4ECF20"
+  },
+  {
+   "index": 4,
+   "name": "past",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    8,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "seconds"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED010",
+   "handler_name": "0x4ED010"
+  },
+  {
+   "index": 5,
+   "name": "before",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    8,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "seconds"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED030",
+   "handler_name": "0x4ED030"
+  },
+  {
+   "index": 6,
+   "name": "ontick",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    8,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "seconds"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ECFF0",
+   "handler_name": "0x4ECFF0"
+  },
+  {
+   "index": 7,
+   "name": "groupdead",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED1A0",
+   "handler_name": "0x4ED1A0"
+  },
+  {
+   "index": 8,
+   "name": "groupalive",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED1C0",
+   "handler_name": "0x4ED1C0"
+  },
+  {
+   "index": 9,
+   "name": "dooropen",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F70A0",
+   "handler_name": "sub_4F70A0"
+  },
+  {
+   "index": 10,
+   "name": "SSNcritical",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F1BF0",
+   "handler_name": "0x4F1BF0"
+  },
+  {
+   "index": 11,
+   "name": "SSNexists",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F1A70",
+   "handler_name": "0x4F1A70"
+  },
+  {
+   "index": 12,
+   "name": "SSNdead",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F1AC0",
+   "handler_name": "0x4F1AC0"
+  },
+  {
+   "index": 13,
+   "name": "SSNalive",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F1B20",
+   "handler_name": "0x4F1B20"
+  },
+  {
+   "index": 14,
+   "name": "SSNwounded",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F1B80",
+   "handler_name": "0x4F1B80"
+  },
+  {
+   "index": 15,
+   "name": "SSNride",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F7000",
+   "handler_name": "0x4F7000"
+  },
+  {
+   "index": 16,
+   "name": "SSNonSSN",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    11,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "ssn"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F19A0",
+   "handler_name": "Entity_IsInVehicleChain"
+  },
+  {
+   "index": 17,
+   "name": "SSNnearSSN",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    11,
+    6,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "ssn",
+    "distance"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4F14C0",
+   "handler_name": "Entity_CheckProximity"
+  },
+  {
+   "index": 18,
+   "name": "SSNlosSSN",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    11,
+    6,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "ssn",
+    "distance"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4F15E0",
+   "handler_name": "Entity_DrawConnectionLine"
+  },
+  {
+   "index": 19,
+   "name": "SSNseesSSN",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    11,
+    6,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "ssn",
+    "distance"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4F17C0",
+   "handler_name": "Entity_CheckLineOfSight"
+  },
+  {
+   "index": 20,
+   "name": "SSNarea",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    14,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "area"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F1020",
+   "handler_name": "0x4F1020"
+  },
+  {
+   "index": 21,
+   "name": "SSNarea3D",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    14,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "area"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F0F60",
+   "handler_name": "0x4F0F60"
+  },
+  {
+   "index": 22,
+   "name": "SSNloc",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F0E90",
+   "handler_name": "0x4F0E90"
+  },
+  {
+   "index": 23,
+   "name": "SSNLeadSSN2SSN",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    11,
+    11,
+    6
+   ],
+   "param_type_names": [
+    "ssn",
+    "ssn",
+    "ssn",
+    "distance"
+   ],
+   "argc": 4,
+   "call_conv": 4,
+   "handler_ea": "0x4F12E0",
+   "handler_name": "Entity_CompareDistancesToTarget"
+  },
+  {
+   "index": 24,
+   "name": "reset",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    26,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ifname"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED300",
+   "handler_name": "0x4ED300"
+  },
+  {
+   "index": 25,
+   "name": "Gkill",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    12,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "group"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F1F40",
+   "handler_name": "sub_4F1F40"
+  },
+  {
+   "index": 26,
+   "name": "Gremove",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    12,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "group"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F1F80",
+   "handler_name": "sub_4F1F80"
+  },
+  {
+   "index": 27,
+   "name": "Gsetaccuracy",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    2,
+    2,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "number",
+    "number"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4F7BE0",
+   "handler_name": "0x4F7BE0"
+  },
+  {
+   "index": 28,
+   "name": "GtoWP",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    16,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "wplist"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4ED3D0",
+   "handler_name": "TextResource_GetMissionString"
+  },
+  {
+   "index": 29,
+   "name": "kill",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4EDC90",
+   "handler_name": "0x4EDC90"
+  },
+  {
+   "index": 30,
+   "name": "remove",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4EDCA0",
+   "handler_name": "0x4EDCA0"
+  },
+  {
+   "index": 31,
+   "name": "teleport",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    15,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "target"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4EE170",
+   "handler_name": "0x4EE170"
+  },
+  {
+   "index": 32,
+   "name": "GroupMin",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    6,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "distance"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F7C50",
+   "handler_name": "WacScript_SetEntityAITarget"
+  },
+  {
+   "index": 33,
+   "name": "GroupMax",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    6,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "distance"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F7CA0",
+   "handler_name": "WacScript_SetEntityAlertState"
+  },
+  {
+   "index": 34,
+   "name": "GroupAtt",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    6,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "distance"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F7CF0",
+   "handler_name": "WacScript_SetEntityAIAction"
+  },
+  {
+   "index": 35,
+   "name": "GroupSpawn",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F7AE0",
+   "handler_name": "WacScript_SetEntityWaypoint"
+  },
+  {
+   "index": 36,
+   "name": "GroupHP",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F7B30",
+   "handler_name": "WacScript_SetEntityTeamSlot"
+  },
+  {
+   "index": 37,
+   "name": "opendoors",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F7D40",
+   "handler_name": "WacScript_SendWeaponDetachEvent"
+  },
+  {
+   "index": 38,
+   "name": "closedoors",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F7DA0",
+   "handler_name": "Entity_SendWeaponEvent8ToPool2"
+  },
+  {
+   "index": 39,
+   "name": "text",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    17,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "text"
+   ],
+   "argc": 1,
+   "call_conv": 5,
+   "handler_ea": "0x4EDB50",
+   "handler_name": "Chat_AddSystemMessage"
+  },
+  {
+   "index": 40,
+   "name": "wave",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    18,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "filename"
+   ],
+   "argc": 1,
+   "call_conv": 5,
+   "handler_ea": "0x4ED610",
+   "handler_name": "0x4ED610"
+  },
+  {
+   "index": 41,
+   "name": "hideSSN",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F7750",
+   "handler_name": "0x4F7750"
+  },
+  {
+   "index": 42,
+   "name": "unhideSSN",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F77B0",
+   "handler_name": "0x4F77B0"
+  },
+  {
+   "index": 43,
+   "name": "disableSSN",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F7690",
+   "handler_name": "0x4F7690"
+  },
+  {
+   "index": 44,
+   "name": "enableSSN",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F76F0",
+   "handler_name": "0x4F76F0"
+  },
+  {
+   "index": 45,
+   "name": "holdSSN",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F7810",
+   "handler_name": "0x4F7810"
+  },
+  {
+   "index": 46,
+   "name": "unholdSSN",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F7870",
+   "handler_name": "0x4F7870"
+  },
+  {
+   "index": 47,
+   "name": "setaccuracy",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    2,
+    2,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "number",
+    "number"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4F2070",
+   "handler_name": "0x4F2070"
+  },
+  {
+   "index": 48,
+   "name": "SSNtoWP",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    16,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "wplist"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F1CE0",
+   "handler_name": "0x4F1CE0"
+  },
+  {
+   "index": 49,
+   "name": "killSSN",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F1E40",
+   "handler_name": "Entity_ResetWeaponState"
+  },
+  {
+   "index": 50,
+   "name": "removeSSN",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F1EE0",
+   "handler_name": "0x4F1EE0"
+  },
+  {
+   "index": 51,
+   "name": "teleSSN",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    11,
+    15,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "target"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F7E00",
+   "handler_name": "0x4F7E00"
+  },
+  {
+   "index": 52,
+   "name": "SSNwave",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    11,
+    18,
+    6,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "filename",
+    "distance"
+   ],
+   "argc": 3,
+   "call_conv": 10,
+   "handler_ea": "0x4F78D0",
+   "handler_name": "sub_4F78D0"
+  },
+  {
+   "index": 53,
+   "name": "SSNradio",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    11,
+    18,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "filename"
+   ],
+   "argc": 2,
+   "call_conv": 9,
+   "handler_ea": "0x4F79B0",
+   "handler_name": "0x4F79B0"
+  },
+  {
+   "index": 54,
+   "name": "SS2SSN",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    19,
+    11,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "soundset",
+    "ssn"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F1DD0",
+   "handler_name": "0x4F1DD0"
+  },
+  {
+   "index": 55,
+   "name": "SSNanim",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    24,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "anim"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F7630",
+   "handler_name": "0x4F7630"
+  },
+  {
+   "index": 56,
+   "name": "SSNMin",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    6,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "distance"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F2010",
+   "handler_name": "0x4F2010"
+  },
+  {
+   "index": 57,
+   "name": "SSNMax",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    6,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "distance"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F2210",
+   "handler_name": "0x4F2210"
+  },
+  {
+   "index": 58,
+   "name": "SSNAtt",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    6,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "distance"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F2270",
+   "handler_name": "0x4F2270"
+  },
+  {
+   "index": 59,
+   "name": "SSNSpawn",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F7A80",
+   "handler_name": "0x4F7A80"
+  },
+  {
+   "index": 60,
+   "name": "SSNHP",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F2100",
+   "handler_name": "0x4F2100"
+  },
+  {
+   "index": 61,
+   "name": "SSNADDHP",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F2170",
+   "handler_name": "0x4F2170"
+  },
+  {
+   "index": 62,
+   "name": "ssn2ssn",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    11,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "ssn"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F7330",
+   "handler_name": "0x4F7330"
+  },
+  {
+   "index": 63,
+   "name": "ssnrelease",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F7420",
+   "handler_name": "0x4F7420"
+  },
+  {
+   "index": 64,
+   "name": "ssnface",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    21,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "face"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F1C60",
+   "handler_name": "0x4F1C60"
+  },
+  {
+   "index": 65,
+   "name": "ssnturn",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    7,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "heading"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F72B0",
+   "handler_name": "0x4F72B0"
+  },
+  {
+   "index": 66,
+   "name": "ssnguard",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F71C0",
+   "handler_name": "0x4F71C0"
+  },
+  {
+   "index": 67,
+   "name": "ssnname",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    20,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "texttoken"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F7230",
+   "handler_name": "0x4F7230"
+  },
+  {
+   "index": 68,
+   "name": "ssnpspd",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F7570",
+   "handler_name": "WacScript_SendAIEvent11ToEntity"
+  },
+  {
+   "index": 69,
+   "name": "ssncspd",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F74B0",
+   "handler_name": "WacScript_SendAIEvent10ToEntity"
+  },
+  {
+   "index": 70,
+   "name": "ssnuse",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F70F0",
+   "handler_name": "WacScript_TryMountEntityToVehicle"
+  },
+  {
+   "index": 71,
+   "name": "set",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    27,
+    1,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "variable",
+    "value"
+   ],
+   "argc": 2,
+   "call_conv": 6,
+   "handler_ea": "0x4ED520",
+   "handler_name": "sub_4ED520"
+  },
+  {
+   "index": 72,
+   "name": "add",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    27,
+    1,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "variable",
+    "value"
+   ],
+   "argc": 2,
+   "call_conv": 6,
+   "handler_ea": "0x4ED530",
+   "handler_name": "sub_4ED530"
+  },
+  {
+   "index": 73,
+   "name": "sub",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    27,
+    1,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "variable",
+    "value"
+   ],
+   "argc": 2,
+   "call_conv": 6,
+   "handler_ea": "0x4ED540",
+   "handler_name": "sub_4ED540"
+  },
+  {
+   "index": 74,
+   "name": "inc",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    27,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "variable"
+   ],
+   "argc": 1,
+   "call_conv": 5,
+   "handler_ea": "0x4ED550",
+   "handler_name": "TextResource_LoadMissionText"
+  },
+  {
+   "index": 75,
+   "name": "dec",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    27,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "variable"
+   ],
+   "argc": 1,
+   "call_conv": 5,
+   "handler_ea": "0x4ED560",
+   "handler_name": "sub_4ED560"
+  },
+  {
+   "index": 76,
+   "name": "store",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    27,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "variable"
+   ],
+   "argc": 1,
+   "call_conv": 5,
+   "handler_ea": "0x4ED580",
+   "handler_name": "sub_4ED580"
+  },
+  {
+   "index": 77,
+   "name": "load",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    1,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "value"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED570",
+   "handler_name": "sub_4ED570"
+  },
+  {
+   "index": 78,
+   "name": "TOD",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    9,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "hour"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4EDC70",
+   "handler_name": "0x4EDC70"
+  },
+  {
+   "index": 79,
+   "name": "targetfx",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    15,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "target"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4EE190",
+   "handler_name": "0x4EE190"
+  },
+  {
+   "index": 80,
+   "name": "ammo2tgt",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    23,
+    15,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ammo",
+    "target"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F8100",
+   "handler_name": "CSoundChannelPool_AllocChannel"
+  },
+  {
+   "index": 81,
+   "name": "fx2tgt",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    22,
+    15,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "fx",
+    "target"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F7FD0",
+   "handler_name": "WacScript_PlaySoundAtEmitter"
+  },
+  {
+   "index": 82,
+   "name": "ammoarea",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    23,
+    14,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ammo",
+    "area"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4EE240",
+   "handler_name": "Script_SpawnEffectInArea"
+  },
+  {
+   "index": 83,
+   "name": "sound2tgt",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    19,
+    15,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "soundset",
+    "target"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F7F60",
+   "handler_name": "sub_4F7F60"
+  },
+  {
+   "index": 84,
+   "name": "flash",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [],
+   "argc": 0,
+   "call_conv": 0,
+   "handler_ea": "0x4ED500",
+   "handler_name": "sub_4ED500"
+  },
+  {
+   "index": 85,
+   "name": "farflash",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [],
+   "argc": 0,
+   "call_conv": 0,
+   "handler_ea": "0x4ED510",
+   "handler_name": "TextResource_GetStringOrDefault"
+  },
+  {
+   "index": 86,
+   "name": "quake",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED4C0",
+   "handler_name": "sub_4ED4C0"
+  },
+  {
+   "index": 87,
+   "name": "win",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    13,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "team"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED4A0",
+   "handler_name": "0x4ED4A0"
+  },
+  {
+   "index": 88,
+   "name": "lose",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    13,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "team"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED3F0",
+   "handler_name": "0x4ED3F0"
+  },
+  {
+   "index": 89,
+   "name": "music",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED910",
+   "handler_name": "Sbf_StartEntry"
+  },
+  {
+   "index": 90,
+   "name": "skyspeed",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4EDEB0",
+   "handler_name": "sub_4EDEB0"
+  },
+  {
+   "index": 91,
+   "name": "skyheight",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4EDEC0",
+   "handler_name": "sub_4EDEC0"
+  },
+  {
+   "index": 92,
+   "name": "fogtype",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4EDED0",
+   "handler_name": "sub_4EDED0"
+  },
+  {
+   "index": 93,
+   "name": "fogdist",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    6,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "distance"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4EE100",
+   "handler_name": "0x4EE100"
+  },
+  {
+   "index": 94,
+   "name": "movefog",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    6,
+    8,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "distance",
+    "seconds"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4EE0A0",
+   "handler_name": "0x4EE0A0"
+  },
+  {
+   "index": 95,
+   "name": "rain",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    8,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "seconds"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4EDF60",
+   "handler_name": "0x4EDF60"
+  },
+  {
+   "index": 96,
+   "name": "snow",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    8,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "seconds"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4EDFD0",
+   "handler_name": "0x4EDFD0"
+  },
+  {
+   "index": 97,
+   "name": "overcast",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    8,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "seconds"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4EE040",
+   "handler_name": "0x4EE040"
+  },
+  {
+   "index": 98,
+   "name": "Help",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [],
+   "argc": 0,
+   "call_conv": 0,
+   "handler_ea": "0x4F6DE0",
+   "handler_name": "0x4F6DE0"
+  },
+  {
+   "index": 99,
+   "name": "text#",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    17,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "text",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 6,
+   "handler_ea": "0x4EDB70",
+   "handler_name": "Chat_AddFormattedIntMessage"
+  },
+  {
+   "index": 100,
+   "name": "consol",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    17,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "text"
+   ],
+   "argc": 1,
+   "call_conv": 5,
+   "handler_ea": "0x4EDBE0",
+   "handler_name": "0x4EDBE0"
+  },
+  {
+   "index": 101,
+   "name": "consol#",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    17,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "text",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 6,
+   "handler_ea": "0x4EDC00",
+   "handler_name": "sub_4EDC00"
+  },
+  {
+   "index": 102,
+   "name": "sound",
+   "flags": 12,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    19,
+    6,
+    7,
+    0
+   ],
+   "param_type_names": [
+    "soundset",
+    "distance",
+    "heading"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4ED590",
+   "handler_name": "0x4ED590"
+  },
+  {
+   "index": 103,
+   "name": "forceanim",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    24,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "anim"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F2610",
+   "handler_name": "Script_ForceAnimation"
+  },
+  {
+   "index": 104,
+   "name": "tele",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F22D0",
+   "handler_name": "0x4F22D0"
+  },
+  {
+   "index": 105,
+   "name": "fall",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [],
+   "argc": 0,
+   "call_conv": 0,
+   "handler_ea": "0x4ED4E0",
+   "handler_name": "Cheat_RaiseLocalPlayerZ"
+  },
+  {
+   "index": 106,
+   "name": "fov",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4EDEA0",
+   "handler_name": "sub_4EDEA0"
+  },
+  {
+   "index": 107,
+   "name": "squadevent",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED070",
+   "handler_name": "0x4ED070"
+  },
+  {
+   "index": 108,
+   "name": "random",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED280",
+   "handler_name": "0x4ED280"
+  },
+  {
+   "index": 109,
+   "name": "outside",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [],
+   "argc": 0,
+   "call_conv": 0,
+   "handler_ea": "0x4ED050",
+   "handler_name": "0x4ED050"
+  },
+  {
+   "index": 110,
+   "name": "location",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED190",
+   "handler_name": "0x4ED190"
+  },
+  {
+   "index": 111,
+   "name": "area",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    14,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "area"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED0C0",
+   "handler_name": "0x4ED0C0"
+  },
+  {
+   "index": 112,
+   "name": "area3D",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    14,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "area"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED120",
+   "handler_name": "0x4ED120"
+  },
+  {
+   "index": 113,
+   "name": "waveready",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [],
+   "argc": 0,
+   "call_conv": 0,
+   "handler_ea": "0x4ED380",
+   "handler_name": "0x4ED380"
+  },
+  {
+   "index": 114,
+   "name": "weaponfired",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED360",
+   "handler_name": "0x4ED360"
+  },
+  {
+   "index": 115,
+   "name": "event",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED1E0",
+   "handler_name": "0x4ED1E0"
+  },
+  {
+   "index": 116,
+   "name": "meride",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F1260",
+   "handler_name": "Entity_IsInLocalPlayerMountChain"
+  },
+  {
+   "index": 117,
+   "name": "meattached",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F10D0",
+   "handler_name": "Entity_IsOccupantOfLocalVehicle"
+  },
+  {
+   "index": 118,
+   "name": "medrive",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F1150",
+   "handler_name": "Entity_IsInVehicleWithLocalPlayer"
+  },
+  {
+   "index": 119,
+   "name": "meongun",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F11E0",
+   "handler_name": "Entity_IsLocalPlayerVehicleDriver"
+  },
+  {
+   "index": 120,
+   "name": "ammorain",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    23,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ammo"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4EE1A0",
+   "handler_name": "Script_SpawnRandomEffectNearPlayer"
+  },
+  {
+   "index": 121,
+   "name": "fxrain",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    22,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "fx"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4EE3E0",
+   "handler_name": "sub_4EE3E0"
+  },
+  {
+   "index": 122,
+   "name": "lightning",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    3,
+    4,
+    5,
+    0
+   ],
+   "param_type_names": [
+    "red",
+    "green",
+    "blue"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4EDE20",
+   "handler_name": "Script_SetLightningColor"
+  },
+  {
+   "index": 123,
+   "name": "face",
+   "flags": 12,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    21,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "face"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED5D0",
+   "handler_name": "0x4ED5D0"
+  },
+  {
+   "index": 124,
+   "name": "anim",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    24,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "anim"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED5B0",
+   "handler_name": "0x4ED5B0"
+  },
+  {
+   "index": 125,
+   "name": "sunfade",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    8,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "seconds"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4EDF10",
+   "handler_name": "0x4EDF10"
+  },
+  {
+   "index": 126,
+   "name": "gain",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    3,
+    4,
+    5,
+    0
+   ],
+   "param_type_names": [
+    "red",
+    "green",
+    "blue"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4EDD30",
+   "handler_name": "0x4EDD30"
+  },
+  {
+   "index": 127,
+   "name": "squadclear",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [],
+   "argc": 0,
+   "call_conv": 0,
+   "handler_ea": "0x4ED390",
+   "handler_name": "sub_4ED390"
+  },
+  {
+   "index": 128,
+   "name": "blockfire",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4EE140",
+   "handler_name": "0x4EE140"
+  },
+  {
+   "index": 129,
+   "name": "colorfade",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4EDCB0",
+   "handler_name": "sub_4EDCB0"
+  },
+  {
+   "index": 130,
+   "name": "sun",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    3,
+    4,
+    5,
+    0
+   ],
+   "param_type_names": [
+    "red",
+    "green",
+    "blue"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4EDCD0",
+   "handler_name": "0x4EDCD0"
+  },
+  {
+   "index": 131,
+   "name": "sky",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    3,
+    4,
+    5,
+    0
+   ],
+   "param_type_names": [
+    "red",
+    "green",
+    "blue"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4EDD00",
+   "handler_name": "0x4EDD00"
+  },
+  {
+   "index": 132,
+   "name": "ground",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    3,
+    4,
+    5,
+    0
+   ],
+   "param_type_names": [
+    "red",
+    "green",
+    "blue"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4EDD60",
+   "handler_name": "0x4EDD60"
+  },
+  {
+   "index": 133,
+   "name": "floor",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    3,
+    4,
+    5,
+    0
+   ],
+   "param_type_names": [
+    "red",
+    "green",
+    "blue"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4EDDF0",
+   "handler_name": "0x4EDDF0"
+  },
+  {
+   "index": 134,
+   "name": "ceiling",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    3,
+    4,
+    5,
+    0
+   ],
+   "param_type_names": [
+    "red",
+    "green",
+    "blue"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4EDDC0",
+   "handler_name": "0x4EDDC0"
+  },
+  {
+   "index": 135,
+   "name": "cloud",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    3,
+    4,
+    5,
+    0
+   ],
+   "param_type_names": [
+    "red",
+    "green",
+    "blue"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4EDD90",
+   "handler_name": "0x4EDD90"
+  },
+  {
+   "index": 136,
+   "name": "fogcolor",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    3,
+    4,
+    5,
+    0
+   ],
+   "param_type_names": [
+    "red",
+    "green",
+    "blue"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4EDE40",
+   "handler_name": "0x4EDE40"
+  },
+  {
+   "index": 137,
+   "name": "fog",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    3,
+    4,
+    5,
+    0
+   ],
+   "param_type_names": [
+    "red",
+    "green",
+    "blue"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4EDE40",
+   "handler_name": "0x4EDE40"
+  },
+  {
+   "index": 138,
+   "name": "skyfogcolor",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    3,
+    4,
+    5,
+    0
+   ],
+   "param_type_names": [
+    "red",
+    "green",
+    "blue"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4EDE70",
+   "handler_name": "0x4EDE70"
+  },
+  {
+   "index": 139,
+   "name": "skyfog",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    3,
+    4,
+    5,
+    0
+   ],
+   "param_type_names": [
+    "red",
+    "green",
+    "blue"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4EDE70",
+   "handler_name": "0x4EDE70"
+  },
+  {
+   "index": 140,
+   "name": "crash",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    3,
+    4,
+    5,
+    4
+   ],
+   "param_type_names": [
+    "red",
+    "green",
+    "blue",
+    "green"
+   ],
+   "argc": 4,
+   "call_conv": 4,
+   "handler_ea": "0x4EDE70",
+   "handler_name": "0x4EDE70"
+  },
+  {
+   "index": 141,
+   "name": "eq",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4ED220",
+   "handler_name": "0x4ED220"
+  },
+  {
+   "index": 142,
+   "name": "ne",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4ED230",
+   "handler_name": "0x4ED230"
+  },
+  {
+   "index": 143,
+   "name": "lt",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4ED240",
+   "handler_name": "0x4ED240"
+  },
+  {
+   "index": 144,
+   "name": "gt",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4ED250",
+   "handler_name": "0x4ED250"
+  },
+  {
+   "index": 145,
+   "name": "le",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4ED260",
+   "handler_name": "0x4ED260"
+  },
+  {
+   "index": 146,
+   "name": "ge",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4ED270",
+   "handler_name": "0x4ED270"
+  },
+  {
+   "index": 147,
+   "name": "true",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED200",
+   "handler_name": "0x4ED200"
+  },
+  {
+   "index": 148,
+   "name": "false",
+   "flags": 4,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4ED210",
+   "handler_name": "0x4ED210"
+  },
+  {
+   "index": 149,
+   "name": "onptick",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    8,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "seconds"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F0E10",
+   "handler_name": "0x4F0E10"
+  },
+  {
+   "index": 150,
+   "name": "ptext",
+   "flags": 18,
+   "is_condition": false,
+   "targets_entity": true,
+   "replicated": true,
+   "param_types": [
+    17,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "text"
+   ],
+   "argc": 1,
+   "call_conv": 5,
+   "handler_ea": "0x4EDB50",
+   "handler_name": "Chat_AddSystemMessage"
+  },
+  {
+   "index": 151,
+   "name": "pwave",
+   "flags": 18,
+   "is_condition": false,
+   "targets_entity": true,
+   "replicated": true,
+   "param_types": [
+    18,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "filename"
+   ],
+   "argc": 1,
+   "call_conv": 5,
+   "handler_ea": "0x4ED610",
+   "handler_name": "0x4ED610"
+  },
+  {
+   "index": 152,
+   "name": "pconsol",
+   "flags": 18,
+   "is_condition": false,
+   "targets_entity": true,
+   "replicated": true,
+   "param_types": [
+    17,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "text"
+   ],
+   "argc": 1,
+   "call_conv": 5,
+   "handler_ea": "0x4EDBE0",
+   "handler_name": "0x4EDBE0"
+  },
+  {
+   "index": 153,
+   "name": "pisgold",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [],
+   "argc": 0,
+   "call_conv": 0,
+   "handler_ea": "0x4F0AF0",
+   "handler_name": "0x4F0AF0"
+  },
+  {
+   "index": 154,
+   "name": "AddExp",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    2,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn",
+    "number"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F2690",
+   "handler_name": "0x4F2690"
+  },
+  {
+   "index": 155,
+   "name": "IsPSPallteam",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4EE4B0",
+   "handler_name": "0x4EE4B0"
+  },
+  {
+   "index": 156,
+   "name": "dropflare",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    11,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "ssn"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F2710",
+   "handler_name": "0x4F2710"
+  },
+  {
+   "index": 157,
+   "name": "ammo2ssn",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    23,
+    11,
+    11,
+    0
+   ],
+   "param_type_names": [
+    "ammo",
+    "ssn",
+    "ssn"
+   ],
+   "argc": 3,
+   "call_conv": 3,
+   "handler_ea": "0x4F24E0",
+   "handler_name": "WacScript_EntityFireAtTarget"
+  },
+  {
+   "index": 158,
+   "name": "fx2ssn",
+   "flags": 10,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": true,
+   "param_types": [
+    22,
+    11,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "fx",
+    "ssn"
+   ],
+   "argc": 2,
+   "call_conv": 2,
+   "handler_ea": "0x4F23A0",
+   "handler_name": "WacScript_SpawnSoundAtEntity"
+  },
+  {
+   "index": 159,
+   "name": "piskills",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F0B60",
+   "handler_name": "0x4F0B60"
+  },
+  {
+   "index": 160,
+   "name": "ppunt",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [],
+   "argc": 0,
+   "call_conv": 0,
+   "handler_ea": "0x4F0DA0",
+   "handler_name": "0x4F0DA0"
+  },
+  {
+   "index": 161,
+   "name": "pkillpunt",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [],
+   "argc": 0,
+   "call_conv": 0,
+   "handler_ea": "0x4F0D30",
+   "handler_name": "0x4F0D30"
+  },
+  {
+   "index": 162,
+   "name": "pisvar",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F0BD0",
+   "handler_name": "0x4F0BD0"
+  },
+  {
+   "index": 163,
+   "name": "psetvar",
+   "flags": 2,
+   "is_condition": false,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    2,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "number"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F0CB0",
+   "handler_name": "0x4F0CB0"
+  },
+  {
+   "index": 164,
+   "name": "pisteam",
+   "flags": 1,
+   "is_condition": true,
+   "targets_entity": false,
+   "replicated": false,
+   "param_types": [
+    13,
+    0,
+    0,
+    0
+   ],
+   "param_type_names": [
+    "team"
+   ],
+   "argc": 1,
+   "call_conv": 1,
+   "handler_ea": "0x4F0C50",
+   "handler_name": "0x4F0C50"
+  }
+ ]
+}
