@@ -4,7 +4,8 @@ extends Node3D
 
 # Water plane preview/runtime adapter.
 # Engine equivalents: water color/height/murk consume globals parsed by
-# sub_53E3F0 and fog colors interpolated by sub_53FCC0.
+# [orig: TimeOfDay_ParseProperty @ 0x57c590] and fog colors interpolated by
+# [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] (docs/env/env-tod-re.md).
 
 @export var environment_path: NodePath
 @export var terrain_data: NovaTerrainData
@@ -14,6 +15,16 @@ extends Node3D
 		if mesh_instance:
 			mesh_instance.position.y = water_height
 @export_range(0, 1, 0.01) var water_alpha: float = 0.6
+
+# When set (not NaN), the host drives water height directly and the env/terrain
+# fallback is ignored — the terrain editor authors height through its document.
+var _height_override: float = NAN
+
+
+func set_height_override(value: float) -> void:
+	_height_override = value
+	if not is_nan(value):
+		water_height = value
 
 var mesh_instance: MeshInstance3D
 var water_material: ShaderMaterial
@@ -106,8 +117,16 @@ func _process(delta: float) -> void:
 	var env := _cached_env
 	if env and env.has_method("is_loaded") and env.is_loaded():
 		_apply_environment_water_height()
-		water_material.set_shader_parameter("u_water_color", env.get_water_color())
-		water_material.set_shader_parameter("u_scroll_speed", env.get_sky_speed() * 0.000229)
+		# Water renders lit: water_rgb x (light*0.707 + sky) x 2, saturating
+		# [orig: Environment_UpdateWeatherTick @ 0x57f16b].
+		var water: Vector3 = env.get_water_color()
+		var light: Vector3 = env.get_sun_light()
+		var sky: Vector3 = env.get_sky_ambient()
+		var combined := EnvFile.combine_terrain_light(
+				Color(light.x, light.y, light.z), Color(sky.x, sky.y, sky.z))
+		var lit := EnvFile.lit_water_color(Color(water.x, water.y, water.z), combined)
+		water_material.set_shader_parameter("u_water_color", Vector3(lit.r, lit.g, lit.b))
+		water_material.set_shader_parameter("u_scroll_speed", env.get_sky_speed() * (1024.0 * 62.0 / 268435456.0))
 		var fog_end: float = env.get_fog_level()
 		var fog_start: float = env.get_fog_start() if env.has_method("get_fog_start") else 0.5
 		water_material.set_shader_parameter("u_fog_color", env.get_fog_color())
@@ -120,9 +139,15 @@ func _process(delta: float) -> void:
 
 
 func _apply_environment_water_height() -> void:
+	if not is_nan(_height_override):
+		water_height = _height_override
+		return
 	var env := _cached_env
 	if env and env.has_method("has_water_height") and env.has_water_height():
-		water_height = float(env.get_water_height())
+		# .env water_height is stored <<15 by the engine — half world units,
+		# same convention as the terrain fallback above
+		# [orig: TimeOfDay_ParseProperty @ 0x57cb4e].
+		water_height = float(env.get_water_height()) * 0.5
 	elif _terrain_fallback_water_height != 0.0:
 		water_height = _terrain_fallback_water_height
 

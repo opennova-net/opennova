@@ -1,5 +1,6 @@
 add_library(opennova_env STATIC
     src/env.cpp
+    src/env_render.cpp
 )
 
 target_include_directories(opennova_env

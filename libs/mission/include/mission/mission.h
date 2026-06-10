@@ -51,6 +51,15 @@ struct MissionInfo {
 	int max_saves = 0;
 	int music = 0;
 	int reverb = 0;
+	// Per-mission environment overrides, gated by attrib_flags bits
+	// (WaterOverrideEnable 0x1, FogDistanceOverrideEnable 0x2,
+	// FogColorOverrideEnable 0x4). Applied at load via EnvFile's override layer;
+	// see docs/env/env-tod-re.md [orig: Game_LoadTerrainDuringConnect @ 0x520710].
+	int water_override = 0;     // s16 half-world-units; engine shifts <<15
+	int fog_override = 0;       // fog distance, world units
+	int fog_color[3] = {0, 0, 0};
+	int water_color[3] = {0, 0, 0};
+	int water_murk = 0;         // 0..255 byte; engine multiplies by 0.01
 };
 
 struct EntityTransform {

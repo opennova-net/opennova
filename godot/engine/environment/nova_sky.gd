@@ -3,8 +3,9 @@ class_name NovaSky
 extends Node3D
 
 # Sky dome adapter for the environment subsystem.
-# Engine equivalents: sky-dome mesh/render path described in docs/engine_spec_env.md
-# §6.3 and fed by sub_53FCC0@0x53FCC0 interpolated TOD colors.
+# Engine equivalents: sky-dome mesh/render path of [orig: build_sky_dome_mesh @ 0x578db0]
+# and [orig: render_skybox @ 0x579080], fed by [orig: Environment_ComputeTimeOfDayColors @ 0x57de40]
+# interpolated TOD colors; see docs/env/env-tod-re.md.
 
 @export var environment_path: NodePath
 
@@ -101,17 +102,19 @@ func _process(delta: float) -> void:
 	if env and env.has_method("is_loaded") and env.is_loaded():
 		var env_data: EnvFile = env.get_environment_data()
 		if env_data and env_data.get_advanced_clouds() == 0:
-			var fog_color: Vector3 = env.get_fog_color()
-			sky_material.set_shader_parameter("u_sky_base", fog_color)
-			sky_material.set_shader_parameter("u_sky_bright", fog_color)
-			sky_material.set_shader_parameter("u_sky_highlight", fog_color)
-			sky_material.set_shader_parameter("u_horizon_color", fog_color)
-			sky_material.set_shader_parameter("u_ground_fog_color", fog_color)
-			sky_material.set_shader_parameter("u_secondary_ambient", fog_color)
-			sky_material.set_shader_parameter("u_cloud_tint", fog_color)
+			# The fixed-function fallback draws the dome in a single pass with
+			# the material set to the CLOUD color, textures still bound
+			# [orig: render_skybox @ 0x579b42].
+			var cloud_color: Vector3 = env.get_cloud_tint()
+			sky_material.set_shader_parameter("u_sky_base", cloud_color)
+			sky_material.set_shader_parameter("u_sky_bright", cloud_color)
+			sky_material.set_shader_parameter("u_sky_highlight", cloud_color)
+			sky_material.set_shader_parameter("u_horizon_color", cloud_color)
+			sky_material.set_shader_parameter("u_ground_fog_color", cloud_color)
+			sky_material.set_shader_parameter("u_secondary_ambient", cloud_color)
+			sky_material.set_shader_parameter("u_cloud_tint", cloud_color)
 			sky_material.set_shader_parameter("u_sun_color", Vector3.ZERO)
 			sky_material.set_shader_parameter("u_moon_color", Vector3.ZERO)
-			sky_material.set_shader_parameter("u_has_clouds", false)
 		else:
 			sky_material.set_shader_parameter("u_sky_base", env.get_sky_base())
 			sky_material.set_shader_parameter("u_sky_bright", env.get_sky_bright())
@@ -130,7 +133,7 @@ func _process(delta: float) -> void:
 		sky_height = env.get_sky_height()
 		sky_material.set_shader_parameter("u_sky_height", sky_height)
 
-		if not clouds_set and env_data and env_data.get_advanced_clouds() != 0:
+		if not clouds_set and env_data:
 			var tex1: Texture2D = env.get_sky_map1_tex()
 			var tex2: Texture2D = env.get_sky_map2_tex()
 			if tex1 or tex2:
@@ -139,12 +142,21 @@ func _process(delta: float) -> void:
 				sky_material.set_shader_parameter("u_has_clouds", true)
 				clouds_set = true
 
-	var factor := sky_speed * 0.000229
+	# Cloud scroll [orig: render_skybox @ 0x5791de + Environment_UpdateWeatherTick
+	# @ 0x57f1a5]: accumulators advance at rate x {1, 1, 2/3, 4/3} per 62 Hz tick
+	# (rate = sky_speed << 10), and UVs are (camera + acc) / 2^28 for layer 1 and
+	# / 2^29 for layer 2 (half UV scale, anisotropic 4/3 U / 2/3 V drift).
+	var factor := sky_speed * (1024.0 * 62.0 / 268435456.0)
 	sky_scroll1 += delta * factor
-	sky_scroll2_x += delta * factor * (2.0 / 3.0)
-	sky_scroll2_y += delta * factor * (4.0 / 3.0)
-	sky_material.set_shader_parameter("u_scroll_offset1", Vector2(sky_scroll1, sky_scroll1))
-	sky_material.set_shader_parameter("u_scroll_offset2", Vector2(sky_scroll2_x, sky_scroll2_y))
+	sky_scroll2_x += delta * factor * (4.0 / 3.0) * 0.5
+	sky_scroll2_y += delta * factor * (2.0 / 3.0) * 0.5
+	var cam_anchor := Vector2.ZERO
+	if _cached_cam:
+		cam_anchor = Vector2(_cached_cam.global_position.x, _cached_cam.global_position.z)
+	const UV_PER_UNIT_L1 := 0.000244140625 # 2^-28 on 16.16 world coords
+	const UV_PER_UNIT_L2 := 0.0001220703125 # 2^-29
+	sky_material.set_shader_parameter("u_scroll_offset1", cam_anchor * UV_PER_UNIT_L1 + Vector2(sky_scroll1, sky_scroll1))
+	sky_material.set_shader_parameter("u_scroll_offset2", cam_anchor * UV_PER_UNIT_L2 + Vector2(sky_scroll2_x, sky_scroll2_y))
 
 
 func _find_camera() -> Camera3D:

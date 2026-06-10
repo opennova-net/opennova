@@ -5,6 +5,8 @@
 
 #include "util/texture_path_resolver.h"
 
+#include <env/env_render.h>
+
 #include <algorithm>
 #include <sstream>
 
@@ -63,6 +65,21 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("compute_moon_direction", "time"), &EnvFile::compute_moon_direction);
 	ClassDB::bind_method(D_METHOD("has_water_height"), &EnvFile::has_water_height);
 	ClassDB::bind_method(D_METHOD("_on_keyframe_changed"), &EnvFile::_on_keyframe_changed);
+
+	ClassDB::bind_method(D_METHOD("get_fog_start", "overcast"), &EnvFile::get_fog_start, DEFVAL(0.0f));
+	ClassDB::bind_method(D_METHOD("get_fog_density"), &EnvFile::get_fog_density);
+	ClassDB::bind_method(D_METHOD("get_fog_end_distance", "overcast"), &EnvFile::get_fog_end_distance, DEFVAL(0.0f));
+	ClassDB::bind_method(D_METHOD("get_fog_end_underwater"), &EnvFile::get_fog_end_underwater);
+	ClassDB::bind_method(D_METHOD("get_day_phase", "time"), &EnvFile::get_day_phase);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("double_saturate_color", "color"), &EnvFile::double_saturate_color);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("combine_terrain_light", "light", "sky"), &EnvFile::combine_terrain_light);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("lit_water_color", "water", "light"), &EnvFile::lit_water_color);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("compute_sun_glare", "view_dot_sun", "occlusion_brightness"), &EnvFile::compute_sun_glare);
+	ClassDB::bind_method(D_METHOD("apply_mission_overrides", "overrides"), &EnvFile::apply_mission_overrides);
+	ClassDB::bind_method(D_METHOD("clear_mission_overrides"), &EnvFile::clear_mission_overrides);
+	ClassDB::bind_method(D_METHOD("has_mission_overrides"), &EnvFile::has_mission_overrides);
+	ClassDB::bind_method(D_METHOD("to_bytes"), &EnvFile::to_bytes);
+	ClassDB::bind_method(D_METHOD("load_bytes", "bytes"), &EnvFile::load_bytes);
 
 #define BIND_PROP(type, name, setter, getter, hint, hint_string) \
 	ClassDB::bind_method(D_METHOD(#setter, "value"), &EnvFile::setter); \
@@ -241,7 +258,7 @@ void EnvFile::_sync_env_from_properties() {
 			env.keyframes.push_back(keyframe->to_native());
 		}
 	}
-	std::sort(env.keyframes.begin(), env.keyframes.end(), [](const opennova::env::Keyframe &a, const opennova::env::Keyframe &b) {
+	std::stable_sort(env.keyframes.begin(), env.keyframes.end(), [](const opennova::env::Keyframe &a, const opennova::env::Keyframe &b) {
 		return a.time < b.time;
 	});
 }
@@ -314,6 +331,7 @@ void EnvFile::_load_sky_textures() {
 
 Error EnvFile::load() {
 	loaded = false;
+	mission_overrides_active = false;
 	resource_root.unref();
 	if (source_path.is_empty()) {
 		return ERR_INVALID_PARAMETER;
@@ -345,6 +363,7 @@ Error EnvFile::load() {
 
 Error EnvFile::load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name) {
 	loaded = false;
+	mission_overrides_active = false;
 	resource_root.unref();
 	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
 		return ERR_INVALID_PARAMETER;
@@ -378,10 +397,14 @@ Error EnvFile::load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_r
 }
 
 Error EnvFile::save_to_path(const String &p_path) {
-	_sync_env_from_properties();
+	if (!mission_overrides_active) {
+		_sync_env_from_properties();
+	}
 	std::ostringstream output;
 	std::string error;
-	if (!opennova::env::save_env(output, env, error)) {
+	// Mission overrides are a live-view layer; the file always gets the base.
+	const opennova::env::Config &to_save = mission_overrides_active ? env_base : env;
+	if (!opennova::env::save_env(output, to_save, error)) {
 		UtilityFunctions::printerr("[EnvFile] Save failed: ", error.c_str());
 		return ERR_FILE_CANT_WRITE;
 	}
@@ -398,6 +421,7 @@ Error EnvFile::save_to_path(const String &p_path) {
 
 void EnvFile::reset_to_default() {
 	env = opennova::env::make_default_config();
+	mission_overrides_active = false;
 	source_path = String();
 	_sync_properties_from_env();
 	loaded = true;
@@ -434,6 +458,142 @@ Vector3 EnvFile::compute_sun_direction(float p_time) const {
 
 Vector3 EnvFile::compute_moon_direction(float p_time) const {
 	return to_vector3(opennova::env::compute_moon_direction(p_time));
+}
+
+float EnvFile::get_fog_start(float p_overcast) const {
+	const float end = get_fog_end_distance(p_overcast);
+	return opennova::env::compute_fog_params(fog_type, end, p_overcast).start;
+}
+
+float EnvFile::get_fog_density() const {
+	return opennova::env::compute_fog_params(fog_type, fog_level, 0.0f).exp_density;
+}
+
+float EnvFile::get_fog_end_distance(float p_overcast) const {
+	return opennova::env::fog_end_above_water(fog_level, p_overcast);
+}
+
+float EnvFile::get_fog_end_underwater() const {
+	return opennova::env::fog_end_underwater(water_murk);
+}
+
+Dictionary EnvFile::get_day_phase(float p_time) const {
+	const opennova::env::DayPhase phase = opennova::env::compute_day_phase(p_time);
+	Dictionary result;
+	result["is_night"] = phase.is_night;
+	result["blend"] = phase.blend;
+	return result;
+}
+
+Color EnvFile::double_saturate_color(const Color &p_color) {
+	return to_color(opennova::env::double_saturate(to_rgb(p_color)));
+}
+
+Color EnvFile::combine_terrain_light(const Color &p_light, const Color &p_sky) {
+	return to_color(opennova::env::combine_terrain_light(to_rgb(p_light), to_rgb(p_sky)));
+}
+
+Color EnvFile::lit_water_color(const Color &p_water, const Color &p_light) {
+	return to_color(opennova::env::lit_water_color(to_rgb(p_water), to_rgb(p_light)));
+}
+
+Dictionary EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness) {
+	const opennova::env::GlareResult glare = opennova::env::compute_sun_glare(p_view_dot_sun, p_occlusion_brightness);
+	Dictionary result;
+	result["glare"] = glare.glare;
+	result["fog_whiten"] = glare.fog_whiten;
+	return result;
+}
+
+void EnvFile::apply_mission_overrides(const Dictionary &p_overrides) {
+	if (!mission_overrides_active) {
+		_sync_env_from_properties();
+		env_base = env;
+	}
+	opennova::env::BmsEnvOverrides overrides;
+	if (p_overrides.has("water_height")) {
+		overrides.has_water_height = true;
+		overrides.water_height = static_cast<float>(p_overrides["water_height"]);
+	}
+	if (p_overrides.has("fog_level")) {
+		overrides.has_fog_level = true;
+		overrides.fog_level = static_cast<float>(p_overrides["fog_level"]);
+	}
+	if (p_overrides.has("fog_color")) {
+		overrides.has_fog_color = true;
+		overrides.fog_color = to_rgb(p_overrides["fog_color"]);
+	}
+	if (p_overrides.has("water_color")) {
+		overrides.has_water_color = true;
+		overrides.water_color = to_rgb(p_overrides["water_color"]);
+	}
+	if (p_overrides.has("water_murk")) {
+		overrides.has_water_murk = true;
+		overrides.water_murk = static_cast<float>(p_overrides["water_murk"]);
+	}
+	if (p_overrides.has("start_time")) {
+		overrides.has_start_time = true;
+		overrides.start_time = static_cast<int>(p_overrides["start_time"]);
+	}
+	env = env_base;
+	opennova::env::apply_bms_overrides(env, overrides);
+	mission_overrides_active = true;
+	_sync_properties_from_env();
+	emit_signal("environment_changed");
+	emit_changed();
+}
+
+void EnvFile::clear_mission_overrides() {
+	if (!mission_overrides_active) {
+		return;
+	}
+	env = env_base;
+	mission_overrides_active = false;
+	_sync_properties_from_env();
+	emit_signal("environment_changed");
+	emit_changed();
+}
+
+bool EnvFile::has_mission_overrides() const {
+	return mission_overrides_active;
+}
+
+PackedByteArray EnvFile::to_bytes() const {
+	std::ostringstream output;
+	std::string error;
+	const opennova::env::Config &to_save = mission_overrides_active ? env_base : env;
+	PackedByteArray bytes;
+	if (!opennova::env::save_env(output, to_save, error)) {
+		return bytes;
+	}
+	const std::string content = output.str();
+	bytes.resize(static_cast<int64_t>(content.size()));
+	memcpy(bytes.ptrw(), content.data(), content.size());
+	return bytes;
+}
+
+bool EnvFile::load_bytes(const PackedByteArray &p_bytes) {
+	std::string text(reinterpret_cast<const char *>(p_bytes.ptr()), static_cast<size_t>(p_bytes.size()));
+	std::istringstream input(text);
+	std::string error;
+	opennova::env::Config parsed;
+	if (!opennova::env::load_env(input, parsed, error)) {
+		UtilityFunctions::printerr("[EnvFile] load_bytes: ", error.c_str());
+		return false;
+	}
+	// Re-resolve sky textures only when the names changed — undo snapshots must
+	// not hit the disk per step.
+	const bool maps_changed = parsed.sky_map1 != env.sky_map1 || parsed.sky_map2 != env.sky_map2;
+	env = parsed;
+	mission_overrides_active = false;
+	_sync_properties_from_env();
+	if (maps_changed) {
+		_load_sky_textures();
+	}
+	loaded = true;
+	emit_signal("environment_changed");
+	emit_changed();
+	return true;
 }
 
 PackedStringArray EnvFileLoader::_get_recognized_extensions() const {

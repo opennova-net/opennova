@@ -37,6 +37,7 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_terrain_ref"), &NovaMissionData::get_terrain_ref);
 	ClassDB::bind_method(D_METHOD("get_environment_ref"), &NovaMissionData::get_environment_ref);
 	ClassDB::bind_method(D_METHOD("get_info"), &NovaMissionData::get_info);
+	ClassDB::bind_method(D_METHOD("get_environment_overrides"), &NovaMissionData::get_environment_overrides);
 	ClassDB::bind_method(D_METHOD("get_entity_count", "kind"), &NovaMissionData::get_entity_count);
 	ClassDB::bind_method(D_METHOD("get_entities", "kind"), &NovaMissionData::get_entities);
 	ClassDB::bind_method(D_METHOD("get_entity", "kind", "index"), &NovaMissionData::get_entity);
@@ -136,6 +137,38 @@ Dictionary NovaMissionData::get_info() const {
 	out["max_saves"] = info.max_saves;
 	out["music"] = info.music;
 	out["reverb"] = info.reverb;
+	out["water_override"] = info.water_override;
+	out["fog_override"] = info.fog_override;
+	out["fog_color"] = Color(info.fog_color[0] / 255.0f, info.fog_color[1] / 255.0f, info.fog_color[2] / 255.0f);
+	out["water_color"] = Color(info.water_color[0] / 255.0f, info.water_color[1] / 255.0f, info.water_color[2] / 255.0f);
+	out["water_murk"] = info.water_murk;
+	out["has_water_override"] = (info.attrib_flags & 0x1) != 0;
+	out["has_fog_distance_override"] = (info.attrib_flags & 0x2) != 0;
+	out["has_fog_color_override"] = (info.attrib_flags & 0x4) != 0;
+	return out;
+}
+
+Dictionary NovaMissionData::get_environment_overrides() const {
+	// Builds the EnvFile.apply_mission_overrides() payload from the attrib-gated
+	// header fields [orig: Game_LoadTerrainDuringConnect @ 0x520710 +
+	// Game_StartMission @ 0x525371]. Keys present only when their gate is set.
+	const opennova::mission::MissionInfo info = document.info();
+	Dictionary out;
+	if ((info.attrib_flags & 0x1) != 0) {
+		out["water_height"] = static_cast<float>(info.water_override); // engine half-units
+	}
+	if ((info.attrib_flags & 0x2) != 0) {
+		out["fog_level"] = static_cast<float>(info.fog_override);
+	}
+	if ((info.attrib_flags & 0x4) != 0) {
+		out["fog_color"] = Color(info.fog_color[0] / 255.0f, info.fog_color[1] / 255.0f, info.fog_color[2] / 255.0f);
+	}
+	if (info.water_color[0] != 0 || info.water_color[1] != 0 || info.water_color[2] != 0) {
+		out["water_color"] = Color(info.water_color[0] / 255.0f, info.water_color[1] / 255.0f, info.water_color[2] / 255.0f);
+	}
+	if (info.water_murk != 0) {
+		out["water_murk"] = info.water_murk * 0.01f;
+	}
 	return out;
 }
 

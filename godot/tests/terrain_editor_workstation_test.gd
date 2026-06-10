@@ -577,7 +577,13 @@ func test_environment_sun_popup_exposes_env_document_controls() -> void:
 	workstation.sync_from_editor_state()
 
 	assert_eq(workstation.get_node("%EnvironmentPopupTitle").text, "storm_test*", "Environment edits should dirty the popup document title.")
-	assert_false(save_button.disabled, "Dirty environments should enable Save.")
+	# Save now requires a path (mirrors fonts/credits): a dirty-but-unsaved env
+	# keeps Save disabled and routes through Save As until a path is set.
+	assert_true(save_button.disabled, "Dirty environments without a path should still gate Save behind Save As.")
+
+	environment_editor.set_current_path("user://env_popup_test.env")
+	workstation.sync_from_editor_state()
+	assert_false(save_button.disabled, "Dirty environments with a path should enable Save.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.ENVIRONMENT)
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "The old Environment workspace id should open the popup instead of changing workspaces.")
