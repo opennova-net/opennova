@@ -9,16 +9,9 @@ render_mode unshaded, depth_draw_never, depth_test_disabled, cull_disabled, blen
 uniform sampler2D u_diffuse : source_color, filter_linear_mipmap;
 uniform vec3 u_tint = vec3(1.0, 1.0, 1.0);
 uniform float u_opacity = 1.0;
-uniform bool u_additive = false;
 
 void fragment() {
 	vec4 tex = texture(u_diffuse, UV);
 	ALBEDO = tex.rgb * u_tint;
-	if (u_additive) {
-		// Additive bodies (glare) write their own light; alpha stays 1 and the
-		// blend mode is overridden to add by the host material.
-		ALPHA = 1.0;
-	} else {
-		ALPHA = tex.a * u_opacity;
-	}
+	ALPHA = tex.a * u_opacity;
 }

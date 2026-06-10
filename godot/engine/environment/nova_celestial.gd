@@ -12,6 +12,7 @@ extends Node3D
 
 const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd")
 const CelestialShader = preload("res://shaders/celestial.gdshader")
+const CelestialAdditiveShader = preload("res://shaders/celestial_additive.gdshader")
 
 # Render-priority ladder so the transparent sky pass composites dome < bodies <
 # glare regardless of distance (all unshaded + depth disabled).
@@ -54,6 +55,7 @@ func _rebuild_if_needed() -> void:
 		"sun": { "name": env_data.get_sun_3di(), "additive": false, "priority": PRIORITY_SUN, "tint": "sun" },
 		"moon": { "name": env_data.get_moon_3di(), "additive": false, "priority": PRIORITY_MOON, "tint": "moon" },
 		"star": { "name": env_data.get_star_3di(), "additive": true, "priority": PRIORITY_STAR, "tint": "sky" },
+		"glare": { "name": env_data.get_glare_3di(), "additive": true, "priority": PRIORITY_GLARE, "tint": "sun" },
 	}
 	# Rebuild only when the set of names actually changed (undo/scrub safe).
 	var signature := {}
@@ -101,10 +103,10 @@ func _load_object_data(graphic: String) -> NovaObjectData:
 
 func _make_celestial_material(additive: bool, priority: int) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
-	material.shader = CelestialShader
+	material.shader = CelestialAdditiveShader if additive else CelestialShader
 	material.render_priority = priority
-	material.set_shader_parameter("u_additive", additive)
 	if additive:
+		# Engine layer alpha 0x2000/0x10000; glare overrides this per-frame.
 		material.set_shader_parameter("u_opacity", float(0x2000) / 65536.0)
 	return material
 
@@ -153,6 +155,10 @@ func _process(_delta: float) -> void:
 	if env_data:
 		height_scale = max(0.1, env_data.get_sky_height() / 175.69)
 
+	var cam_forward := Vector3.FORWARD
+	if _cached_cam:
+		cam_forward = -_cached_cam.global_transform.basis.z
+
 	for key in _bodies:
 		var body: Dictionary = _bodies[key]
 		var model: Node3D = body["model"]
@@ -161,11 +167,20 @@ func _process(_delta: float) -> void:
 		model.global_position = Vector3(cam_pos.x, 0.0, cam_pos.z) + dir * dist
 		var tint: Vector3 = _tint_for(env, body["tint"])
 		body["material"].set_shader_parameter("u_tint", tint)
-		# Hide the sun below the horizon and the moon above it.
 		if key == "sun":
 			model.visible = sun_dir.y > -0.1
 		elif key == "moon":
 			model.visible = moon_dir.y > -0.1
+		elif key == "glare":
+			# Glare brightness follows the view-sun alignment (dot^32). Occlusion
+			# is held at full brightness here; the engine's 8-ray terrain
+			# occlusion + ±16/frame hysteresis is a tracked deferral
+			# [orig: render_skybox_sun_glow @ 0x5acd00], see docs/env/env-tod-re.md.
+			var dot := cam_forward.dot(sun_dir)
+			var glare: Dictionary = EnvFile.compute_sun_glare(dot, 255)
+			var intensity := float(glare.get("glare", 0)) / 255.0
+			model.visible = sun_dir.y > -0.1 and intensity > 0.004
+			body["material"].set_shader_parameter("u_opacity", intensity)
 
 
 func _tint_for(env: Node, tint_key: String) -> Vector3:

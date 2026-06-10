@@ -74,6 +74,7 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_static_method("EnvFile", D_METHOD("double_saturate_color", "color"), &EnvFile::double_saturate_color);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("combine_terrain_light", "light", "sky"), &EnvFile::combine_terrain_light);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("lit_water_color", "water", "light"), &EnvFile::lit_water_color);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("compute_sun_glare", "view_dot_sun", "occlusion_brightness"), &EnvFile::compute_sun_glare);
 	ClassDB::bind_method(D_METHOD("apply_mission_overrides", "overrides"), &EnvFile::apply_mission_overrides);
 	ClassDB::bind_method(D_METHOD("clear_mission_overrides"), &EnvFile::clear_mission_overrides);
 	ClassDB::bind_method(D_METHOD("has_mission_overrides"), &EnvFile::has_mission_overrides);
@@ -494,6 +495,14 @@ Color EnvFile::combine_terrain_light(const Color &p_light, const Color &p_sky) {
 
 Color EnvFile::lit_water_color(const Color &p_water, const Color &p_light) {
 	return to_color(opennova::env::lit_water_color(to_rgb(p_water), to_rgb(p_light)));
+}
+
+Dictionary EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness) {
+	const opennova::env::GlareResult glare = opennova::env::compute_sun_glare(p_view_dot_sun, p_occlusion_brightness);
+	Dictionary result;
+	result["glare"] = glare.glare;
+	result["fog_whiten"] = glare.fog_whiten;
+	return result;
 }
 
 void EnvFile::apply_mission_overrides(const Dictionary &p_overrides) {

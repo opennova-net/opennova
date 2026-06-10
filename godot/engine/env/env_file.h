@@ -170,6 +170,11 @@ public:
 	static Color combine_terrain_light(const Color &p_light, const Color &p_sky);
 	static Color lit_water_color(const Color &p_water, const Color &p_light);
 
+	// Sun glare intensity from view-sun alignment and occlusion brightness
+	// [orig: compute_sun_glare_and_fog_blend @ 0x5ad610]; returns
+	// {"glare": 0..255, "fog_whiten": 0..40}.
+	static Dictionary compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness);
+
 	// BMS mission override layer. Recognized keys: water_height (float),
 	// fog_level (float), fog_color (Color), water_color (Color),
 	// water_murk (float), start_time (int HHMM).
