@@ -21,7 +21,6 @@ signal structure_changed
 signal selection_changed
 signal edited
 
-const UNDO_LIMIT := 100
 const DEFAULT_FILENAME := "sound.lwf"
 
 # Selection node kinds.
@@ -36,10 +35,6 @@ var data: NovaLwfData
 # means nothing selected (set/layer/member are -1).
 var selection: Dictionary = {"kind": SEL_NONE, "set": -1, "layer": -1, "member": -1}
 
-var _undo_stack: Array[PackedByteArray] = []
-var _redo_stack: Array[PackedByteArray] = []
-var _pending_snapshot: PackedByteArray = PackedByteArray()
-var _editing: bool = false
 
 
 func _init() -> void:
@@ -58,7 +53,7 @@ func new_profile(mark_dirty_state: bool = true) -> void:
 	data.mark_clean()
 	_select(SEL_SET, si, -1, -1, false)
 	set_current_path("")
-	_clear_history()
+	clear_history()
 	is_dirty = mark_dirty_state
 	structure_changed.emit()
 
@@ -83,7 +78,7 @@ func _finish_open(path: String) -> Error:
 		_select(SEL_NONE, -1, -1, -1, false)
 	set_current_path(path)
 	remember_open_path(path)
-	_clear_history()
+	clear_history()
 	mark_clean()
 	structure_changed.emit()
 	return OK
@@ -92,7 +87,7 @@ func _finish_open(path: String) -> Error:
 func save_current() -> Error:
 	if current_path.is_empty() or current_path.get_extension().to_lower() != "lwf":
 		return ERR_INVALID_PARAMETER
-	_flush_edit()
+	flush_edit()
 	var err := data.save_file(current_path)
 	if err == OK:
 		mark_clean()
@@ -103,7 +98,7 @@ func save_current() -> Error:
 func save_as(dir_path: String) -> Error:
 	if dir_path.is_empty():
 		return ERR_INVALID_PARAMETER
-	_flush_edit()
+	flush_edit()
 	var mkdir_err := DirAccess.make_dir_recursive_absolute(dir_path)
 	if mkdir_err != OK:
 		return mkdir_err
@@ -149,7 +144,7 @@ func clear_selection() -> void:
 
 
 func _select(kind: int, si: int, li: int, mi: int, emit: bool) -> void:
-	_flush_edit()
+	flush_edit()
 	selection = {"kind": kind, "set": si, "layer": li, "member": mi}
 	if emit:
 		selection_changed.emit()
@@ -158,8 +153,8 @@ func _select(kind: int, si: int, li: int, mi: int, emit: bool) -> void:
 # --- Structural mutations (one undo step each; observers rebuild) ---
 
 func add_set() -> int:
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	var idx := data.add_set()
 	mark_dirty()
 	_select(SEL_SET, idx, -1, -1, false)
@@ -170,8 +165,8 @@ func add_set() -> int:
 func remove_set(si: int) -> void:
 	if si < 0 or si >= data.get_set_count():
 		return
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	data.remove_set(si)
 	mark_dirty()
 	_clamp_selection()
@@ -179,8 +174,8 @@ func remove_set(si: int) -> void:
 
 
 func move_set(from_index: int, to_index: int) -> void:
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	data.move_set(from_index, to_index)
 	mark_dirty()
 	_select(SEL_SET, clampi(to_index, 0, maxi(0, data.get_set_count() - 1)), -1, -1, false)
@@ -190,8 +185,8 @@ func move_set(from_index: int, to_index: int) -> void:
 func add_layer(si: int) -> int:
 	if si < 0 or si >= data.get_set_count():
 		return -1
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	var idx := data.add_layer(si)
 	mark_dirty()
 	_select(SEL_LAYER, si, idx, -1, false)
@@ -200,8 +195,8 @@ func add_layer(si: int) -> int:
 
 
 func remove_layer(si: int, li: int) -> void:
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	data.remove_layer(si, li)
 	mark_dirty()
 	_clamp_selection()
@@ -209,8 +204,8 @@ func remove_layer(si: int, li: int) -> void:
 
 
 func move_layer(si: int, from_index: int, to_index: int) -> void:
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	data.move_layer(si, from_index, to_index)
 	mark_dirty()
 	structure_changed.emit()
@@ -219,8 +214,8 @@ func move_layer(si: int, from_index: int, to_index: int) -> void:
 func add_member(si: int, li: int) -> int:
 	if si < 0 or li < 0:
 		return -1
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	var idx := data.add_member(si, li)
 	mark_dirty()
 	_select(SEL_MEMBER, si, li, idx, false)
@@ -229,8 +224,8 @@ func add_member(si: int, li: int) -> int:
 
 
 func remove_member(si: int, li: int, mi: int) -> void:
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	data.remove_member(si, li, mi)
 	mark_dirty()
 	_clamp_selection()
@@ -238,8 +233,8 @@ func remove_member(si: int, li: int, mi: int) -> void:
 
 
 func move_member(si: int, li: int, from_index: int, to_index: int) -> void:
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	data.move_member(si, li, from_index, to_index)
 	mark_dirty()
 	structure_changed.emit()
@@ -247,23 +242,23 @@ func move_member(si: int, li: int, from_index: int, to_index: int) -> void:
 
 # --- Scalar editing session (silent: model + dirty only) ---
 
-func begin_edit() -> void:
-	if not _editing:
-		_pending_snapshot = data.to_bytes()
-		_editing = true
+# Editing session + undo/redo: the shared EditorDocument snapshot history.
+# The hooks supply this domain's snapshot shape (NovaLwfData bytes) + signals.
+
+func _snapshot() -> Variant:
+	return data.to_bytes() if data != null else null
 
 
-func commit_edit() -> void:
-	if not _editing:
-		return
-	_editing = false
-	var now := data.to_bytes()
-	if now != _pending_snapshot:
-		_undo_stack.append(_pending_snapshot)
-		_trim_undo()
-		_redo_stack.clear()
-		mark_dirty()
+func _apply_snapshot(snap: Variant) -> void:
+	data.load_bytes(snap)
+
+
+func _history_applied(kind: String) -> void:
+	if kind == "commit":
 		edited.emit()
+	elif kind == "undo" or kind == "redo":
+		_clamp_selection()
+		structure_changed.emit()
 
 
 func set_set_field_live(si: int, key: String, value: Variant) -> void:
@@ -297,64 +292,12 @@ func set_member_field_live(si: int, li: int, mi: int, key: String, value: Varian
 
 # --- Undo / redo ---
 
-func can_undo() -> bool:
-	return not _undo_stack.is_empty()
-
-
-func can_redo() -> bool:
-	return not _redo_stack.is_empty()
-
-
-func undo() -> void:
-	_flush_edit()
-	if _undo_stack.is_empty():
-		return
-	_redo_stack.append(data.to_bytes())
-	data.load_bytes(_undo_stack.pop_back())
-	mark_dirty()
-	_clamp_selection()
-	structure_changed.emit()
-
-
-func redo() -> void:
-	_flush_edit()
-	if _redo_stack.is_empty():
-		return
-	_undo_stack.append(data.to_bytes())
-	data.load_bytes(_redo_stack.pop_back())
-	mark_dirty()
-	_clamp_selection()
-	structure_changed.emit()
-
-
 # --- Internal ---
-
-func _flush_edit() -> void:
-	commit_edit()
-
 
 func _export_filename() -> String:
 	if not current_path.is_empty():
 		return current_path.get_file()
 	return DEFAULT_FILENAME
-
-
-func _push_undo() -> void:
-	_undo_stack.append(data.to_bytes())
-	_trim_undo()
-	_redo_stack.clear()
-
-
-func _trim_undo() -> void:
-	while _undo_stack.size() > UNDO_LIMIT:
-		_undo_stack.pop_front()
-
-
-func _clear_history() -> void:
-	_undo_stack.clear()
-	_redo_stack.clear()
-	_editing = false
-	_pending_snapshot = PackedByteArray()
 
 
 # Re-clamp the selection to still-valid indices after a removal / reload, then

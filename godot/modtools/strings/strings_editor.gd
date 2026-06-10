@@ -20,16 +20,11 @@ extends "res://modtools/editor/editor_document.gd"
 signal structure_changed
 signal edited
 
-const UNDO_LIMIT := 100
 const DEFAULT_FILENAME := "strings.bin"
 
 var string_table: RtxtStringFile
 var selected_index: int = -1
 
-var _undo_stack: Array[PackedByteArray] = []
-var _redo_stack: Array[PackedByteArray] = []
-var _pending_snapshot: PackedByteArray = PackedByteArray()
-var _editing: bool = false
 
 
 func _init() -> void:
@@ -43,7 +38,7 @@ func new_table(mark_dirty_state: bool = true) -> void:
 	string_table.reset_empty()
 	selected_index = -1
 	set_current_path("")
-	_clear_history()
+	clear_history()
 	is_dirty = mark_dirty_state
 	structure_changed.emit()
 
@@ -66,7 +61,7 @@ func _finish_open_strings(path: String) -> Error:
 	selected_index = -1 if string_table.get_entry_count() == 0 else 0
 	set_current_path(path)
 	remember_open_path(path)
-	_clear_history()
+	clear_history()
 	mark_clean()
 	structure_changed.emit()
 	return OK
@@ -75,7 +70,7 @@ func _finish_open_strings(path: String) -> Error:
 func save_current() -> Error:
 	if current_path.is_empty() or current_path.get_extension().to_lower() != "bin":
 		return ERR_INVALID_PARAMETER
-	_flush_edit()
+	flush_edit()
 	var err := string_table.save_to_path(current_path)
 	if err == OK:
 		mark_clean()
@@ -86,7 +81,7 @@ func save_current() -> Error:
 func save_as(dir_path: String) -> Error:
 	if dir_path.is_empty():
 		return ERR_INVALID_PARAMETER
-	_flush_edit()
+	flush_edit()
 	var mkdir_err := DirAccess.make_dir_recursive_absolute(dir_path)
 	if mkdir_err != OK:
 		return mkdir_err
@@ -116,8 +111,8 @@ func get_status_context() -> String:
 # --- Structural mutations (one undo step each; observers rebuild) ---
 
 func add_entry(key: String, text: String, section_index: int, position: Vector2i = Vector2i()) -> int:
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	var idx := string_table.add_entry(key, text, section_index, position)
 	selected_index = idx
 	mark_dirty()
@@ -128,8 +123,8 @@ func add_entry(key: String, text: String, section_index: int, position: Vector2i
 func remove_entry(index: int) -> void:
 	if index < 0 or index >= string_table.get_entry_count():
 		return
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	string_table.remove_entry(index)
 	_clamp_selection()
 	mark_dirty()
@@ -137,8 +132,8 @@ func remove_entry(index: int) -> void:
 
 
 func add_section(name: String) -> int:
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	var idx := string_table.add_section(name)
 	mark_dirty()
 	structure_changed.emit()
@@ -146,8 +141,8 @@ func add_section(name: String) -> int:
 
 
 func remove_section(index: int, reassign_to: int = -1) -> void:
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	string_table.remove_section(index, reassign_to)
 	_clamp_selection()
 	mark_dirty()
@@ -155,8 +150,8 @@ func remove_section(index: int, reassign_to: int = -1) -> void:
 
 
 func rename_section(index: int, name: String) -> void:
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	string_table.rename_section(index, name)
 	mark_dirty()
 	structure_changed.emit()
@@ -170,8 +165,8 @@ func move_entry_to_section(index: int, section_index: int) -> int:
 		return index
 	if string_table.get_entry_section_index(index) == section_index:
 		return index
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	var new_index := string_table.set_entry_section_index(index, section_index)
 	selected_index = new_index
 	mark_dirty()
@@ -184,33 +179,32 @@ func move_entry_to_section(index: int, section_index: int) -> int:
 func normalize_grouping() -> void:
 	if string_table.is_grouped():
 		return
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	string_table.normalize_grouping()
 	_clamp_selection()
 	mark_dirty()
 	structure_changed.emit()
 
 
-# --- Editing session (silent: model + dirty only, bracketed by begin/commit) ---
+# --- Editing session + undo/redo: the shared EditorDocument snapshot history
+# (NovaEditHistory over libs/oned_edit). The hooks below give it this domain's
+# snapshot shape and signals; the bracket/undo/redo mechanics live in the base.
 
-func begin_edit() -> void:
-	if not _editing:
-		_pending_snapshot = string_table.to_byte_array()
-		_editing = true
+func _snapshot() -> Variant:
+	return string_table.to_byte_array() if string_table != null else null
 
 
-func commit_edit() -> void:
-	if not _editing:
-		return
-	_editing = false
-	var now := string_table.to_byte_array()
-	if now != _pending_snapshot:
-		_undo_stack.append(_pending_snapshot)
-		_trim_undo()
-		_redo_stack.clear()
-		mark_dirty()
+func _apply_snapshot(snap: Variant) -> void:
+	string_table.load_from_byte_array(snap)
+
+
+func _history_applied(kind: String) -> void:
+	if kind == "commit":
 		edited.emit()
+	elif kind == "undo" or kind == "redo":
+		_clamp_selection()
+		structure_changed.emit()
 
 
 func set_entry_text_live(index: int, text: String) -> void:
@@ -228,38 +222,6 @@ func set_entry_key_live(index: int, key: String) -> void:
 	mark_dirty()
 
 
-
-
-# --- Undo / redo ---
-
-func can_undo() -> bool:
-	return not _undo_stack.is_empty()
-
-
-func can_redo() -> bool:
-	return not _redo_stack.is_empty()
-
-
-func undo() -> void:
-	_flush_edit()
-	if _undo_stack.is_empty():
-		return
-	_redo_stack.append(string_table.to_byte_array())
-	string_table.load_from_byte_array(_undo_stack.pop_back())
-	_clamp_selection()
-	mark_dirty()
-	structure_changed.emit()
-
-
-func redo() -> void:
-	_flush_edit()
-	if _redo_stack.is_empty():
-		return
-	_undo_stack.append(string_table.to_byte_array())
-	string_table.load_from_byte_array(_redo_stack.pop_back())
-	_clamp_selection()
-	mark_dirty()
-	structure_changed.emit()
 
 
 # --- Validation ---
@@ -325,7 +287,7 @@ func validate() -> Dictionary:
 # literal \n / \r so each entry stays on one CSV line.
 
 func export_csv(path: String) -> Error:
-	_flush_edit()
+	flush_edit()
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
 		return FileAccess.get_open_error()
@@ -350,8 +312,8 @@ func import_csv(path: String) -> Error:
 	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:
 		return FileAccess.get_open_error()
-	_flush_edit()
-	_push_undo()
+	flush_edit()
+	record_undo_step()
 	string_table.reset_empty()
 	var section_indices: Dictionary = {}  # section_name -> index
 	var first := true
@@ -383,34 +345,10 @@ func import_csv(path: String) -> Error:
 
 # --- Internal ---
 
-func _flush_edit() -> void:
-	# Commit any open editing session so its model changes land as a discrete undo
-	# step before a structural mutation snapshots state.
-	commit_edit()
-
-
 func _export_filename() -> String:
 	if not current_path.is_empty():
 		return current_path.get_file()
 	return DEFAULT_FILENAME
-
-
-func _push_undo() -> void:
-	_undo_stack.append(string_table.to_byte_array())
-	_trim_undo()
-	_redo_stack.clear()
-
-
-func _trim_undo() -> void:
-	while _undo_stack.size() > UNDO_LIMIT:
-		_undo_stack.pop_front()
-
-
-func _clear_history() -> void:
-	_undo_stack.clear()
-	_redo_stack.clear()
-	_editing = false
-	_pending_snapshot = PackedByteArray()
 
 
 func _clamp_selection() -> void:
