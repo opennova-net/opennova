@@ -88,6 +88,7 @@ add_library(${TARGET_NAME} SHARED
     resource_index/nova_resource_root.cpp
     pff/nova_pff_archive.cpp
     editor/opennova_editor_plugin.cpp
+    editor/nova_edit_history.cpp
     fnt/nova_fnt_resource.cpp
     fnt/fnt_resource_format.cpp
     fnt/fnt_import_plugin.cpp

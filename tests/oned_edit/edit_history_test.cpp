@@ -120,6 +120,61 @@ int main() {
 		TEST_EXPECT(!h.can_redo());
 	}
 
+	// --- pop_undo/pop_redo: caller-applied steps move between stacks ----
+	{
+		EditHistory<int> h;
+		int step = -1;
+		TEST_EXPECT(!h.pop_undo(step)); // empty history: nothing to pop
+		TEST_EXPECT(!h.pop_redo(step));
+		TEST_EXPECT(step == -1);        // out untouched on failure
+
+		h.push(10);
+		h.push(20);
+		TEST_EXPECT(h.pop_undo(step)); TEST_EXPECT(step == 20);
+		TEST_EXPECT(h.pop_undo(step)); TEST_EXPECT(step == 10);
+		TEST_EXPECT(!h.can_undo());
+		TEST_EXPECT(!h.pop_undo(step)); // drained; out keeps last value
+		TEST_EXPECT(step == 10);
+
+		// The same snapshots come back in order from the redo side.
+		TEST_EXPECT(h.pop_redo(step)); TEST_EXPECT(step == 10);
+		TEST_EXPECT(h.pop_redo(step)); TEST_EXPECT(step == 20);
+		TEST_EXPECT(!h.can_redo());
+		TEST_EXPECT(h.undo_depth() == 2); // both steps live on the undo stack again
+
+		// A fresh push after popping clears the redo tail (branching).
+		TEST_EXPECT(h.pop_undo(step));
+		TEST_EXPECT(h.can_redo());
+		h.push(30);
+		TEST_EXPECT(!h.can_redo());
+	}
+
+	// --- pop_undo discards an open begin() session -----------------------
+	{
+		EditHistory<int> h;
+		int doc = 1;
+		h.begin(doc); doc = 2; h.commit(doc); // one recorded step
+		h.begin(doc);                          // open session, pending = 2
+		int step = 0;
+		TEST_EXPECT(h.pop_undo(step));         // pops AND drops the session
+		TEST_EXPECT(step == 1);
+		doc = 9;
+		TEST_EXPECT(!h.commit(doc));           // session was discarded: inert
+		TEST_EXPECT(h.can_redo());             // and the redo entry survived
+	}
+
+	// --- pop_undo respects the cap (oldest dropped by push) -------------
+	{
+		EditHistory<int> h(2);
+		h.push(1);
+		h.push(2);
+		h.push(3); // cap 2: keeps [2, 3]
+		int step = 0;
+		TEST_EXPECT(h.pop_undo(step)); TEST_EXPECT(step == 3);
+		TEST_EXPECT(h.pop_undo(step)); TEST_EXPECT(step == 2);
+		TEST_EXPECT(!h.pop_undo(step));
+	}
+
 	// --- exact dirty vs. a clean baseline, surviving cap-trim -----------
 	{
 		EditHistory<int> h(2);
