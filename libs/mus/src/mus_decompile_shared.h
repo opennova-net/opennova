@@ -18,12 +18,14 @@
    spelling so mus_decompile.cpp needed only an #include + deletion of the moved
    definitions, with no reference renames. */
 
+#include "mus/ast.h"  /* MusAstExpr (the structured expression twin) */
 #include "mus/mus.h"
 
 #include "mus_decode.h"  /* Instruction, kOps, disassemble() */
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ---- Operand helpers (match Python resolve_* lambdas) ---- */
@@ -337,6 +339,137 @@ static void reconstruct_expression(const Instruction *insts, int start, int end_
         ++i;
     }
     snprintf(out, out_cap, "%s", stk_peek(&stk));
+}
+
+/* ---- Structured expression tree (the node twin of reconstruct_expression) ----
+
+   The SAME opcode walk as reconstruct_expression above, pushing MusAstExpr
+   nodes instead of rendered strings. Kept adjacent so the two can never drift:
+   any change to the string walk must be mirrored here (mus_expr_tree_test.cpp
+   pins render(tree) == flat text over every shipped script). Divergence
+   policy: where the string walk degrades gracefully into placeholder text
+   ("?op?" on underflow, silent drop past 32 entries), the tree builder yields
+   NULL instead -- a guessed tree would invite a structured edit of garbage,
+   while NULL makes the editor fall back to the flat-text escape. */
+
+static inline MusAstExpr *expr_node_alloc(int kind) {
+    MusAstExpr *e = (MusAstExpr *)calloc(1, sizeof(MusAstExpr));
+    if (e) e->kind = kind;
+    return e;
+}
+
+static inline void expr_tree_free_rec(MusAstExpr *e) {
+    if (!e) return;
+    expr_tree_free_rec(e->left);
+    expr_tree_free_rec(e->right);
+    free(e);
+}
+
+/* VARREF node with resolve_global_into's exact precedence: editor-named
+   variable wins, then the MDEdit Var00..Var15 window, then raw g_N. */
+static inline MusAstExpr *expr_node_global(int idx, const MusVariable *vars,
+                                           uint32_t var_count) {
+    MusAstExpr *e = expr_node_alloc(MUS_EXPR_VARREF);
+    if (!e) return NULL;
+    for (uint32_t i = 0; i < var_count; ++i) {
+        if ((int)vars[i].byte_offset == idx) {
+            snprintf(e->var_form, sizeof(e->var_form), "named");
+            e->var_index = idx;
+            snprintf(e->name, sizeof(e->name), "%s", vars[i].name);
+            return e;
+        }
+    }
+    if (idx >= 0 && idx <= 60) {
+        snprintf(e->var_form, sizeof(e->var_form), "Var");
+        e->var_index = idx / 4;
+        return e;
+    }
+    snprintf(e->var_form, sizeof(e->var_form), "g");
+    e->var_index = idx;
+    return e;
+}
+
+static inline MusAstExpr *reconstruct_expression_tree(const Instruction *insts,
+                                                      int start, int end_excl,
+                                                      const MusScript *script) {
+    MusAstExpr *stk[32];
+    int top = 0;
+    int ok = 1;
+    char tmp[64];
+    int i = start;
+    while (i < end_excl) {
+        const Instruction *inst = &insts[i];
+        const char *m = inst->mnemonic;
+        if (!m) break;
+
+        MusAstExpr *node = NULL;
+        if (strcmp(m, "push") == 0) {
+            node = expr_node_alloc(MUS_EXPR_LITERAL);
+            if (node) node->value = (inst->operand_count > 0) ? inst->operands[0] : 0;
+        } else if (strcmp(m, "push_g") == 0) {
+            int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
+            node = expr_node_global(idx, script->variables, script->variable_count);
+        } else if (strcmp(m, "push_l") == 0) {
+            node = expr_node_alloc(MUS_EXPR_VARREF);
+            if (node) {
+                snprintf(node->var_form, sizeof(node->var_form), "l");
+                node->var_index = (inst->operand_count > 0) ? inst->operands[0] : 0;
+            }
+        } else if (strcmp(m, "push_me") == 0) {
+            node = expr_node_alloc(MUS_EXPR_ME);
+        } else if (strcmp(m, "pushstr") == 0) {
+            int v = (inst->operand_count > 0) ? inst->operands[0] : 0;
+            node = expr_node_alloc(MUS_EXPR_RAW);
+            if (node) {
+                snprintf(tmp, sizeof(tmp), "\"str_%04X\"", (unsigned)v);
+                snprintf(node->name, sizeof(node->name), "%s", tmp);
+            }
+        } else if (binop_str(m)) {
+            if (top < 2) { ok = 0; break; }   /* string walk renders "?op?"; tree bails */
+            node = expr_node_alloc(MUS_EXPR_BINOP);
+            if (node) {
+                snprintf(node->op, sizeof(node->op), "%s", binop_str(m));
+                node->right = stk[--top];
+                node->left = stk[--top];
+            }
+        } else if (unaryop_str(m)) {
+            if (top < 1) { ok = 0; break; }
+            node = expr_node_alloc(MUS_EXPR_UNOP);
+            if (node) {
+                snprintf(node->op, sizeof(node->op), "%s", unaryop_str(m));
+                node->left = stk[--top];
+            }
+        } else if (strcmp(m, "method") == 0) {
+            int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
+            node = expr_node_alloc(MUS_EXPR_CALL);
+            if (node) {
+                resolve_method_into(node->name, sizeof(node->name), idx,
+                                    script->intrinsic_names, script->intrinsic_count);
+                if (top >= 1) node->left = stk[--top];   /* arg is optional */
+            }
+        } else if (strcmp(m, "empty") == 0 || is_expr_end_op(m)) {
+            break;   /* expression ended; return what's on top */
+        } else {
+            break;   /* unknown op: stop, mirror the string walk's bail-out */
+        }
+
+        if (node == NULL) { ok = 0; break; }   /* OOM */
+        if (top >= 32) {                       /* string walk drops silently; tree bails */
+            expr_tree_free_rec(node);
+            ok = 0;
+            break;
+        }
+        stk[top++] = node;
+        ++i;
+    }
+
+    if (!ok || top == 0) {
+        for (int k = 0; k < top; ++k) expr_tree_free_rec(stk[k]);
+        return NULL;
+    }
+    MusAstExpr *result = stk[top - 1];
+    for (int k = 0; k < top - 1; ++k) expr_tree_free_rec(stk[k]);
+    return result;
 }
 
 /* find_expr_start: scan backwards to find where this expression began. */

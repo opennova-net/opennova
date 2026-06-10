@@ -1,6 +1,10 @@
 class_name MusicVarInspector
 extends Control
 
+# A variable was renamed (the profile sidecar changed): hosts refresh every
+# other surface that shows var names (blueprint bodies, pickers, event log).
+signal names_changed
+
 const MusVarNames = preload("res://modtools/music/mus_var_names.gd")
 
 var _director: NovaMusicDirector
@@ -80,7 +84,23 @@ func _add_row(i: int) -> void:
 	name_label.text = MusVarNames.label_for(_script_name, i, _profile_path)
 	var tip := _tooltip_for(i, name_label.text, meta)
 	name_label.tooltip_text = tip
-	_grid.add_child(name_label)
+	# Name cell: label + a ✎ rename affordance (writes the display name to the
+	# project's profile sidecar; the stored script keeps its VarXX tokens).
+	var name_cell := HBoxContainer.new()
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_cell.add_child(name_label)
+	var rename := Button.new()
+	rename.text = "✎"
+	rename.flat = true
+	rename.focus_mode = Control.FOCUS_NONE
+	if _profile_path == "":
+		rename.disabled = true
+		rename.tooltip_text = "Save the project first to name its variables."
+	else:
+		rename.tooltip_text = "Give this variable a friendly name (display only; the file keeps Var%02d)." % i
+		rename.pressed.connect(func(): _open_rename_popup(i))
+	name_cell.add_child(rename)
+	_grid.add_child(name_cell)
 	var entry: Dictionary = _make_control(i, meta)
 	entry["name_label"] = name_label
 	(entry["control"] as Control).tooltip_text = tip
@@ -228,6 +248,46 @@ func refresh_from_director() -> void:
 	for var_index in _controls.keys():
 		var entry: Dictionary = _controls[var_index]
 		(entry["setter"] as Callable).call(_director.get_var(int(var_index)))
+
+
+# One-line rename popup: the new display name (empty clears the custom name and
+# falls back to the built-in / raw form). Writes through MusVarNames.set_label,
+# rebuilds the rows, and announces names_changed for the host's other surfaces.
+func _open_rename_popup(var_index: int) -> void:
+	var dlg := ConfirmationDialog.new()
+	dlg.title = "Name Var%02d" % var_index
+	dlg.min_size = Vector2i(320, 110)
+	var box := VBoxContainer.new()
+	dlg.add_child(box)
+	var lbl := Label.new()
+	lbl.text = "Friendly name (leave empty to clear):"
+	box.add_child(lbl)
+	var edit := LineEdit.new()
+	edit.name = "VarNameEdit"
+	edit.max_length = 24
+	# Prefill with the current label's short form so an existing name edits
+	# instead of retyping ("Speed (Var05)" -> "Speed"; raw "Var05" -> empty).
+	var current := MusVarNames.label_for(_script_name, var_index, _profile_path)
+	var suffix := " (Var%02d)" % var_index
+	if current.ends_with(suffix):
+		edit.text = current.substr(0, current.length() - suffix.length())
+	box.add_child(edit)
+	add_child(dlg)
+	dlg.confirmed.connect(func():
+		_apply_rename(var_index, edit.text)
+		dlg.queue_free())
+	dlg.canceled.connect(dlg.queue_free)
+	dlg.close_requested.connect(dlg.queue_free)
+	dlg.popup_centered()
+	edit.select_all()
+	edit.grab_focus()
+
+
+func _apply_rename(var_index: int, label: String) -> void:
+	if MusVarNames.set_label(_profile_path, _script_name, var_index, label) != OK:
+		return
+	_build_rows()
+	names_changed.emit()
 
 
 # --- Test / introspection helpers --------------------------------------

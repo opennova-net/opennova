@@ -948,6 +948,145 @@ func reorder_statement(section_index: int, ordinal: int, direction: int) -> bool
 	return _commit_edit(text, next)
 
 
+# Index into the section's ordered rows for `ordinal`, or -1.
+func _row_pos(srows: Array, ordinal: int) -> int:
+	for i in range(srows.size()):
+		if int(srows[i].get("ordinal", -1)) == ordinal:
+			return i
+	return -1
+
+
+# Position of the section's first flow terminator (where the authored region
+# ends). Insert/move gaps exist up to and including this row; past it is the
+# section close / engine-dispatch tail.
+func _first_terminator_pos(srows: Array) -> int:
+	for i in range(srows.size()):
+		if int(srows[i].get("kind", -1)) in _TERMINATOR_KINDS:
+			return i
+	return srows.size()
+
+
+# Insert statement lines into the gap ABOVE the row at `before_ordinal`
+# (the program view's insertion carets). -1 falls back to the canonical
+# append anchor. Gaps past the first terminator (the dispatch tail) and the
+# hidden frame-setup row are not insertion targets.
+func insert_statement_at(section_index: int, before_ordinal: int, lines: PackedStringArray) -> bool:
+	if not can_author() or lines.is_empty():
+		return false
+	if before_ordinal < 0:
+		return insert_statement(section_index, lines)
+	var ann := _annotated()
+	if ann.is_empty():
+		return false
+	var text := String(ann.get("text", ""))
+	var srows := _rows_for_section(ann.get("rows", []), section_index)
+	var pos := _row_pos(srows, before_ordinal)
+	if pos < 0 or pos > _first_terminator_pos(srows):
+		return false
+	if int(srows[pos].get("kind", -1)) == _K_FRAME_ENTER:
+		return false
+	var at := int(srows[pos].get("line_start", -1))
+	if at < 0:
+		return false
+	var next := _splice_lines(text, at, lines)
+	if next == text:
+		return false
+	return _commit_edit(text, next)
+
+
+# Cut one statement and re-insert it before another (the program view's
+# drag-reorder). `before_ordinal` -1 = the canonical append anchor. Locked rows
+# don't move; nothing moves into the dispatch tail; a no-op move returns false.
+func move_statement(section_index: int, ordinal: int, before_ordinal: int) -> bool:
+	if not can_author() or ordinal == before_ordinal:
+		return false
+	var ann := _annotated()
+	if ann.is_empty():
+		return false
+	var text := String(ann.get("text", ""))
+	var srows := _rows_for_section(ann.get("rows", []), section_index)
+	var pos := _row_pos(srows, ordinal)
+	if pos < 0:
+		return false
+	var row: Dictionary = srows[pos]
+	if int(row.get("kind", -1)) in _LOCKED_KINDS:
+		return false
+	var term := _first_terminator_pos(srows)
+	if pos > term:
+		return false
+	var ls := int(row.get("line_start", -1))
+	var le := int(row.get("line_end", -1))
+	if ls < 0 or le <= ls:
+		return false
+	var at := -1
+	if before_ordinal < 0:
+		at = _anchor_line(srows)
+	else:
+		var tpos := _row_pos(srows, before_ordinal)
+		if tpos < 0 or tpos > term:
+			return false
+		if int(srows[tpos].get("kind", -1)) == _K_FRAME_ENTER:
+			return false
+		at = int(srows[tpos].get("line_start", -1))
+	if at < 0 or (at > ls and at < le):
+		return false
+	var arr := text.split("\n")
+	var moved := arr.slice(ls, le)
+	var rest := PackedStringArray()
+	rest.append_array(arr.slice(0, ls))
+	rest.append_array(arr.slice(le, arr.size()))
+	var dst := at if at <= ls else at - (le - ls)
+	var out := PackedStringArray()
+	out.append_array(rest.slice(0, dst))
+	out.append_array(moved)
+	out.append_array(rest.slice(dst, rest.size()))
+	var next := "\n".join(out)
+	if next == text:
+		return false
+	return _commit_edit(text, next)
+
+
+# Resize a folded run: `old_count` consecutive, identical, single-line rows
+# starting at `start_ordinal` become `new_count` copies of the same line. One
+# splice = one undo entry, whether the run grows or shrinks.
+func set_run_count(section_index: int, start_ordinal: int, old_count: int, new_count: int) -> bool:
+	if not can_author() or old_count < 1 or new_count < 1 or new_count == old_count:
+		return false
+	var ann := _annotated()
+	if ann.is_empty():
+		return false
+	var text := String(ann.get("text", ""))
+	var srows := _rows_for_section(ann.get("rows", []), section_index)
+	var pos := _row_pos(srows, start_ordinal)
+	if pos < 0 or pos + old_count > srows.size():
+		return false
+	var arr := text.split("\n")
+	var first: Dictionary = srows[pos]
+	var ls := int(first.get("line_start", -1))
+	if ls < 0 or int(first.get("line_end", -1)) != ls + 1:
+		return false
+	var line := arr[ls]
+	for i in range(old_count):
+		var r: Dictionary = srows[pos + i]
+		if int(r.get("ordinal", -1)) != start_ordinal + i:
+			return false  # a hidden row interrupts the run
+		if int(r.get("kind", -1)) in _LOCKED_KINDS:
+			return false
+		if int(r.get("line_start", -1)) != ls + i or int(r.get("line_end", -1)) != ls + i + 1:
+			return false  # multi-line or non-adjacent: not a foldable run
+		if arr[ls + i] != line:
+			return false  # not identical
+	var out := PackedStringArray()
+	out.append_array(arr.slice(0, ls))
+	for i in range(new_count):
+		out.append(line)
+	out.append_array(arr.slice(ls + old_count, arr.size()))
+	var next := "\n".join(out)
+	if next == text:
+		return false
+	return _commit_edit(text, next)
+
+
 # Rename a section everywhere it is a section reference (its section/declsection
 # headers + every enter/goto/call/on target). Produces identical runtime bytecode
 # (names live only in the editor-debug string table), so this is always safe when

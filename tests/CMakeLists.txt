@@ -247,6 +247,15 @@ target_compile_definitions(mus_ast_test PRIVATE
 add_test(NAME mus_ast COMMAND mus_ast_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(mus_expr_tree_test mus/mus_expr_tree_test.cpp)
+target_link_libraries(mus_expr_tree_test PRIVATE opennova_mus)
+target_include_directories(mus_expr_tree_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mus_expr_tree_test PRIVATE cxx_std_17)
+target_compile_definitions(mus_expr_tree_test PRIVATE
+    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
+add_test(NAME mus_expr_tree COMMAND mus_expr_tree_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(mus_vm_test mus/mus_vm_test.cpp)
 target_link_libraries(mus_vm_test PRIVATE opennova_mus)
 target_include_directories(mus_vm_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

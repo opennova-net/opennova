@@ -61,6 +61,53 @@ typedef enum MusAstStmtKind {
                                 @0x672C70 which seeks pc + halts.] */
 } MusAstStmtKind;
 
+/* Structured expression tree (editor-facing).
+
+   The structured twin of reconstruct_expression (mus_decompile_shared.h): the
+   SAME opcode walk, pushing nodes instead of rendered strings, so the editor
+   can offer per-operand structured editing instead of re-parsing text.
+   mus_expr_render() reproduces the flat rendered text BYTE-IDENTICALLY (pinned
+   by mus_expr_tree_test.cpp over the shipped scripts), and the emitter never
+   reads the tree -- the stored flat text remains the authority for emission,
+   so byte-identity of the .mus round-trip is untouched.
+
+   On any reconstruction surprise (stack underflow, unknown op) the builder
+   yields NULL rather than a guessed tree; statements then carry flat text only
+   and the editor falls back to its type-it escape. Kinds and field shapes
+   mirror the editor's MusExpr node dictionaries (modtools/music/mus_expr.gd)
+   1:1 so the binding can hand trees across without translation. */
+typedef enum MusAstExprKind {
+    MUS_EXPR_LITERAL = 0,   /* value                                     */
+    MUS_EXPR_VARREF  = 1,   /* var_form + var_index (+ name when "named") */
+    MUS_EXPR_ME      = 2,   /* the Me register                           */
+    MUS_EXPR_BINOP   = 3,   /* op, left, right -> "(l op r)"             */
+    MUS_EXPR_UNOP    = 4,   /* op, left        -> "<op>operand"          */
+    MUS_EXPR_CALL    = 5,   /* name = stored intrinsic, left = arg/NULL  */
+    MUS_EXPR_RAW     = 6,   /* name = pre-rendered token (pushstr)       */
+} MusAstExprKind;
+
+typedef struct MusAstExpr MusAstExpr;
+struct MusAstExpr {
+    int  kind;          /* MusAstExprKind */
+    int  value;         /* LITERAL: the constant */
+    char var_form[8];   /* VARREF: "Var" | "g" | "l" | "named" */
+    int  var_index;     /* VARREF: VarNN number / g byte offset / local index */
+    char name[64];      /* VARREF "named": rendered name; CALL: stored
+                           intrinsic ("GSV"); RAW: rendered token */
+    char op[4];         /* BINOP / UNOP operator text */
+    MusAstExpr *left;   /* BINOP lhs / UNOP operand / CALL arg (NULL = no arg) */
+    MusAstExpr *right;  /* BINOP rhs */
+};
+
+/* Render a tree back to the decompiler's flat text form. Same two-pass-free
+   contract as snprintf: always NUL-terminates (cap > 0), returns the number of
+   characters that would have been written (excluding NUL). NULL renders "". */
+int mus_expr_render(const MusAstExpr *expr, char *out, size_t out_capacity);
+
+/* Free a tree (recursively). Idempotent on NULL. Trees owned by a
+   MusAstProgram are freed by mus_program_free; only free trees you detached. */
+void mus_expr_free(MusAstExpr *expr);
+
 /* One target of an on-switch (tablexec). */
 typedef struct MusAstSwitchTarget {
     char name[MUS_SECTION_NAME_SIZE];  /* rendered token (section / play / label) */
@@ -92,6 +139,13 @@ struct MusAstStmt {
     char    *expr_text;       /* EXPR/IF/SWITCH: the (condition) expression      */
     int      has_call;        /* EXPR/ASSIGN: expression contains a method call  */
     char    *call_name;       /* EXPR/ASSIGN: combined intrinsic name (first), or NULL */
+
+    /* Structured twins of rhs_text / expr_text, or NULL when reconstruction hit
+       a surprise (the flat text is then the only form). NEVER read by the
+       emitter -- display/editing only. mus_expr_render(tree) == the flat text,
+       byte-for-byte (mus_expr_tree_test.cpp). */
+    MusAstExpr *rhs_tree;     /* ASSIGN                                          */
+    MusAstExpr *expr_tree;    /* EXPR/IF/SWITCH (selector)/BRANCH_COMMENT        */
 
     /* --- IF children --- */
     MusAstStmt *then_body;
