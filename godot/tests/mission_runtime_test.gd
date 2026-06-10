@@ -72,6 +72,21 @@ func test_stop_restores_authored_transform() -> void:
 		"Stop restored the authored node transform")
 
 
+func test_divided_mode_ticks_and_steps_like_the_game() -> void:
+	# DIVIDED is the game's mode: one logic tick per host frame (the engine's own dividers — WAC
+	# every 62nd tick, BMS quarter-pass every 16th — gate inside the systems). The editor preview
+	# now runs this mode too, so tick() and Step must both advance + present under it.
+	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
+	assert_true(rt.tick(), "a DIVIDED tick advances one logic tick")
+	rt.step_once()
+	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
+	assert_true((w.model as Node3D).position.is_equal_approx(sim_pos),
+		"Step under DIVIDED presents the sim state onto the node")
+
+
 func test_effects_drained_signal_fires() -> void:
 	# A mission runtime drains side effects each tick; the host listens on effects_drained. Build an
 	# unconditional OutputText event and confirm the signal carries it.
