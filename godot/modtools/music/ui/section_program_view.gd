@@ -211,7 +211,8 @@ func show_section(section: Dictionary, bank_names: Array) -> void:
 			leading = false
 
 	if _leading_inputs > 0:
-		_stack.add_child(InputsCardClass.new().setup(_leading_inputs, _locals_base, _input_names()))
+		_stack.add_child(InputsCardClass.new().setup(_leading_inputs, _locals_base,
+			_input_names(), _editable, _on_card_input_renamed))
 
 	if _is_empty_section_body(stmts):
 		_stack.add_child(_build_empty_hint())
@@ -368,6 +369,12 @@ func notify_edit_started() -> void:
 	inline_edit_started.emit()
 
 
+# The Inputs card committed a rename: the host persists it (sidecar) and
+# re-populates, so the new name reaches the pickers and sentences too.
+func _on_card_input_renamed(input_index: int, label: String) -> void:
+	input_renamed.emit(_section_name, input_index, label)
+
+
 # --- the expression popover -------------------------------------------------
 
 func _open_expr_popover(anchor: Control, title: String, seed, key: Dictionary, on_apply: Callable) -> void:
@@ -444,6 +451,22 @@ func _input_names() -> Dictionary:
 			or not _mus.has_method("get_default_script_name"):
 		return {}
 	return MusInputNames.labels_for(String(_mus.get_default_script_name()), _section_name, _profile_path)
+
+
+# The "hands it: …" chip text for a call row's target, "" when the target
+# takes no inputs. The VALUES aren't statically recoverable (the engine pops
+# them at runtime), so the chip names the slots the callee declares.
+func callee_inputs_text(target: String) -> String:
+	var count := int(_inputs_by_section.get(target, 0))
+	if count <= 0:
+		return ""
+	var names := {}
+	if _profile_path != "" and _mus != null and _mus.has_method("get_default_script_name"):
+		names = MusInputNames.labels_for(String(_mus.get_default_script_name()), target, _profile_path)
+	var slots := []
+	for k in range(count):
+		slots.append(String(names.get(k, "Input %d" % (k + 1))))
+	return "hands it: %s" % ", ".join(slots)
 
 
 func _fold_toggle(start_ordinal: int, expanded: bool, run: int) -> Dictionary:

@@ -1399,6 +1399,13 @@ func _do_rename_section(old_name: String, new_name: String) -> void:
 		# rejected rename can't corrupt history entries of an unrelated state
 		# that already carries the requested name.
 		_nav.rename_section(old_name, new_name)
+		# Caller-input labels are keyed by section name in the profile sidecar;
+		# carry them across the rename.
+		if _document.has_method("get_var_profile_path"):
+			var profile_path: String = _document.get_var_profile_path()
+			if profile_path != "":
+				MusInputNames.rename_section(profile_path,
+					String(_document.mus_script.get_default_script_name()), old_name, new_name)
 		_rebuild_breadcrumb()
 		_refresh_states_list()
 		_log_typed(EvType.SYSTEM, "renamed %s -> %s" % [old_name, new_name])

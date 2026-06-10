@@ -184,7 +184,9 @@ func _sentence_for(stmt: Dictionary, ctx: Dictionary) -> String:
 		"goto":
 			return "Jump to  %s" % _target_label(stmt)
 		"call":
-			return "Run  %s, then come back" % _target_label(stmt)
+			var hand := _callee_hand_text(stmt)
+			var base := "Run  %s, then come back" % _target_label(stmt)
+			return base if hand == "" else "%s  (%s)" % [base, hand]
 		"return":
 			return "Return to wherever this state was run from"
 		"yield":
@@ -229,6 +231,9 @@ func _build_live_sentence(stmt: Dictionary, ctx: Dictionary) -> void:
 			_box.add_child(_section_opt)
 			if kind == "call":
 				_box.add_child(_word(", then come back"))
+				var hand := _callee_hand_label(stmt)
+				if hand != null:
+					_box.add_child(hand)
 			var target := String(stmt.get("target_name", ""))
 			if target != "":
 				_box.add_child(_open_button(target))
@@ -387,6 +392,26 @@ func _pretty(text: String, ctx: Dictionary) -> String:
 func _target_label(stmt: Dictionary) -> String:
 	var t := String(stmt.get("target_name", ""))
 	return t if t != "" else "(unresolved)"
+
+
+# "hands it: <input names>" for a call to a state that takes inputs; "" else.
+func _callee_hand_text(stmt: Dictionary) -> String:
+	if kind != "call" or _host == null or not _host.has_method("callee_inputs_text"):
+		return ""
+	return String(_host.callee_inputs_text(String(stmt.get("target_name", ""))))
+
+
+func _callee_hand_label(stmt: Dictionary) -> Label:
+	var text := _callee_hand_text(stmt)
+	if text == "":
+		return null
+	var l := Label.new()
+	l.text = text
+	l.add_theme_color_override("font_color", Color(0.62, 0.72, 0.9))
+	l.add_theme_font_size_override("font_size", 11)
+	l.tooltip_text = "The values themselves are pushed at runtime; these are the slots %s declares." \
+		% String(stmt.get("target_name", ""))
+	return l
 
 
 static func track_label(track: int, bank_names: Array) -> String:

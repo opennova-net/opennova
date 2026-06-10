@@ -327,6 +327,107 @@ func test_read_only_add_is_disabled_with_the_reason():
 	assert_eq(hint_add.tooltip_text, "Fix script errors first")
 
 
+# ---- the inputs story (naming, call chips) ----
+
+const INPUTS_PROFILE := "user://music_progview_profile.json"
+
+
+class StubMus:
+	extends RefCounted
+
+	func get_default_script_name() -> StringName:
+		return &"gamescript"
+
+	func get_locals_frame_offset(_n) -> int:
+		return 32
+
+
+func _rm_profile() -> void:
+	var abs := ProjectSettings.globalize_path(INPUTS_PROFILE)
+	if FileAccess.file_exists(abs):
+		DirAccess.remove_absolute(abs)
+
+
+func test_named_inputs_reach_card_pickers_and_sentences():
+	_rm_profile()
+	MusInputNames.set_input_label(INPUTS_PROFILE, "gamescript", "S", 0, "Mission event")
+	var v := _view()
+	v.configure_authoring(PackedStringArray(["S"]), [], StubMus.new(), [], true, "", INPUTS_PROFILE)
+	v.show_section(_sec([
+		{"kind": "frame_enter", "code_offset": 0, "locals_count": 2, "text": "enter S"},
+		{"kind": "switch", "code_offset": 2, "expr": "l_32", "action": "enter",
+			"text": "on (l_32) enter S", "targets": [{"name": "S", "section": 0, "track": -1}]},
+	], 0, "S"), [])
+	# The card edits the name in place.
+	var card := v.inputs_card()
+	assert_not_null(card)
+	var first_edit: LineEdit = null
+	for c in (card as MusicInputsCard).input_rows()[0].get_children():
+		if c is LineEdit:
+			first_edit = c
+	assert_not_null(first_edit, "editable card renders name fields")
+	assert_eq(first_edit.text, "Mission event", "the sidecar name seeds the field")
+	# The selector sentence reads by the name, and the slot stays pickable
+	# under it.
+	var blk: MusicStmtSwitchBlock = v.top_level_rows()[0]
+	assert_string_contains(blk._selector_chip.text, "Mission event",
+		"sentences read the named input")
+	var labels: Array = []
+	for entry in v._display_var_list():
+		labels.append(String(entry.get("label", "")))
+	assert_has(labels, "Mission event (l_32)", "the named slot is pickable")
+	assert_has(labels, "Input 2 (l_36)", "unnamed slots keep the generic name")
+	_rm_profile()
+
+
+func test_card_rename_emits_through_the_view():
+	var v := _view()
+	v.configure_authoring(PackedStringArray(), [], null, [], true)
+	v.show_section(_sec([
+		{"kind": "frame_enter", "code_offset": 0, "locals_count": 1, "text": "enter S"},
+		_play(2, 0),
+	], 0, "Callee"), [])
+	watch_signals(v)
+	var card := v.inputs_card()
+	var edit: LineEdit = null
+	for c in (card as MusicInputsCard).input_rows()[0].get_children():
+		if c is LineEdit:
+			edit = c
+	assert_not_null(edit)
+	edit.text = "Outcome"
+	edit.text_submitted.emit("Outcome")
+	assert_signal_emitted_with_parameters(v, "input_renamed", ["Callee", 0, "Outcome"])
+
+
+func test_call_rows_say_what_the_callee_takes():
+	var v := _view()
+	v.configure_authoring(PackedStringArray(["Sub"]), [], null, [], true, "", "", {"Sub": 2})
+	v.show_section(_sec([
+		{"kind": "call", "code_offset": 0, "target_name": "Sub", "target_section": 1,
+			"text": "call Sub"},
+		_play(2, 0),
+	]), [])
+	var row: Control = v.top_level_rows()[0]
+	var hand: Label = null
+	for c in row.get_child(0).get_children():
+		if c is Label and (c as Label).text.begins_with("hands it"):
+			hand = c
+	assert_not_null(hand, "a call to an inputs-taking state carries the chip")
+	assert_eq(hand.text, "hands it: Input 1, Input 2")
+	# A call to a no-inputs state carries none.
+	v.configure_authoring(PackedStringArray(["Sub"]), [], null, [], true, "", "", {})
+	v.show_section(_sec([
+		{"kind": "call", "code_offset": 0, "target_name": "Sub", "target_section": 1,
+			"text": "call Sub"},
+		_play(2, 0),
+	]), [])
+	var none: Label = null
+	for c in (v.top_level_rows()[0] as Control).get_child(0).get_children():
+		if c is Label and (c as Label).text.begins_with("hands it"):
+			none = c
+	assert_null(none, "no chip when the callee declares no inputs")
+
+
 # ---- interaction signals ----
 
 func test_row_click_selects_statement():

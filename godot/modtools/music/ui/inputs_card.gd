@@ -8,17 +8,20 @@ extends PanelContainer
 # tooltips. Engine-dispatch payloads (a frame op in a section's tail, like
 # gamemus Begin's) are explained by the dispatch divider instead, not here.
 #
-# Stage 7 makes the names editable (MusInputNames sidecar); until then the
-# card renders read-only labels.
+# Editable mode renders each name as a LineEdit: committing one reports
+# through on_rename (the host persists it in the .music_profile.json sidecar;
+# display-only -- the script keeps its l_N tokens).
 
 const MusDisplayNames = preload("res://modtools/music/mus_display_names.gd")
 
 var _rows: VBoxContainer = null
+var _on_rename: Callable = Callable()
 
 
 # count: how many values the caller hands this state. names: {0-based index ->
-# label} from the profile sidecar.
-func setup(count: int, locals_base: int, names: Dictionary = {}) -> MusicInputsCard:
+# label} from the profile sidecar. on_rename: Callable(index, label).
+func setup(count: int, locals_base: int, names: Dictionary = {}, editable: bool = false, on_rename: Callable = Callable()) -> MusicInputsCard:
+	_on_rename = on_rename if editable else Callable()
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(0.12, 0.15, 0.20)
 	sb.border_color = Color(0.45, 0.60, 0.85)
@@ -60,11 +63,28 @@ func _input_row(k: int, locals_base: int, names: Dictionary) -> Control:
 	num.text = "%d." % (k + 1)
 	num.add_theme_color_override("font_color", Color(0.6, 0.65, 0.72))
 	row.add_child(num)
-	var name := Label.new()
-	name.text = String(names.get(k, MusDisplayNames.input_label_for_offset(locals_base + 4 * k, locals_base)))
-	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name.tooltip_text = "Engine slot %s" % MusDisplayNames.input_token(k, locals_base)
-	row.add_child(name)
+	var default_label := MusDisplayNames.input_label_for_offset(locals_base + 4 * k, locals_base)
+	var tip := "Engine slot %s" % MusDisplayNames.input_token(k, locals_base)
+	if _on_rename.is_valid():
+		var initial := String(names.get(k, ""))
+		var edit := LineEdit.new()
+		edit.text = initial
+		edit.placeholder_text = default_label
+		edit.tooltip_text = tip + "\nName what the caller hands here (display-only)."
+		edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		edit.text_submitted.connect(func(t: String):
+			if t != initial:
+				_on_rename.call(k, t))
+		edit.focus_exited.connect(func():
+			if edit.text != initial:
+				_on_rename.call(k, edit.text))
+		row.add_child(edit)
+	else:
+		var name := Label.new()
+		name.text = String(names.get(k, default_label))
+		name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name.tooltip_text = tip
+		row.add_child(name)
 	return row
 
 
