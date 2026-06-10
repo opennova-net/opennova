@@ -157,7 +157,7 @@ func _populate_inspector() -> void:
 	var dirty := "*" if _document.is_dirty else ""
 	file_label.text = "%s%s" % [name, dirty]
 
-	var resource := _document.resource
+	var resource: CbinCreditsResource = _document.resource
 	if resource == null:
 		entries_label.text = ""
 		missing_label.visible = false
