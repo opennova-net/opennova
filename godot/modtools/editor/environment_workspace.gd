@@ -112,7 +112,9 @@ func has_unsaved_changes() -> bool:
 
 
 func can_save() -> bool:
-	return environment_editor != null and environment_editor.is_dirty
+	# Save needs a path; without one the action is Save As (mirror fonts/credits).
+	return environment_editor != null and environment_editor.is_dirty \
+		and not String(environment_editor.current_path).is_empty()
 
 
 func get_save_action_label() -> String:
@@ -141,6 +143,24 @@ func get_save_dialog_title() -> String:
 
 func get_save_dialog_dir() -> String:
 	return environment_editor.get_last_save_dir() if environment_editor else ""
+
+
+func can_undo() -> bool:
+	return environment_editor != null and environment_editor.can_undo()
+
+
+func can_redo() -> bool:
+	return environment_editor != null and environment_editor.can_redo()
+
+
+func undo() -> void:
+	if environment_editor:
+		environment_editor.undo()
+
+
+func redo() -> void:
+	if environment_editor:
+		environment_editor.redo()
 
 
 func build_inspector(host: Control) -> void:

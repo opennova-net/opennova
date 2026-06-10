@@ -46,3 +46,61 @@ func test_environment_editor_exports_current_env_file() -> void:
 
 	assert_eq(err, OK, "Environment editor should export the active EnvFile.")
 	assert_true(FileAccess.file_exists(dir_path.path_join("storm_test.env")), "Export should use a sanitized .env filename.")
+
+
+func test_undo_redo_reverts_scalar_edit() -> void:
+	var editor = add_child_autofree(EnvironmentEditorScript.new())
+	editor.create_default_environment(false)
+	assert_false(editor.can_undo(), "A fresh document should have no undo history.")
+
+	editor.begin_edit()
+	editor.env_file.set_fog_level(321.0)
+	editor.commit_edit()
+
+	assert_true(editor.can_undo(), "Committing an edit should push an undo step.")
+	assert_almost_eq(editor.env_file.get_fog_level(), 321.0, 0.5, "Edit should apply before undo.")
+
+	editor.undo()
+	assert_almost_eq(editor.env_file.get_fog_level(), 1000.0, 0.5, "Undo should restore the prior fog level.")
+	assert_true(editor.can_redo(), "Undo should make a redo step available.")
+
+	editor.redo()
+	assert_almost_eq(editor.env_file.get_fog_level(), 321.0, 0.5, "Redo should reapply the edit.")
+
+
+func test_unchanged_edit_burst_pushes_no_step() -> void:
+	var editor = add_child_autofree(EnvironmentEditorScript.new())
+	editor.create_default_environment(false)
+	editor.begin_edit()
+	# No mutation between begin and commit.
+	editor.commit_edit()
+	assert_false(editor.can_undo(), "A no-op editing burst should not push an undo step.")
+
+
+func test_structural_keyframe_change_is_one_undo_step() -> void:
+	var editor = add_child_autofree(EnvironmentEditorScript.new())
+	editor.create_default_environment(false)
+	var before: int = editor.env_file.get_tod_keyframes().size()
+
+	editor.push_undo_step(func():
+		var frames: Array = editor.env_file.get_tod_keyframes()
+		var kf := NovaEnvKeyframe.new()
+		kf.set_time(900)
+		frames.append(kf)
+		editor.env_file.set_tod_keyframes(frames))
+
+	assert_eq(editor.env_file.get_tod_keyframes().size(), before + 1, "Structural mutation should apply.")
+	editor.undo()
+	assert_eq(editor.env_file.get_tod_keyframes().size(), before, "Undo should remove the added keyframe.")
+
+
+func test_history_clears_on_open_and_new() -> void:
+	var editor = add_child_autofree(EnvironmentEditorScript.new())
+	editor.create_default_environment(false)
+	editor.begin_edit()
+	editor.env_file.set_fog_level(123.0)
+	editor.commit_edit()
+	assert_true(editor.can_undo(), "Edit should be undoable before reset.")
+
+	editor.create_default_environment(false)
+	assert_false(editor.can_undo(), "Creating a new document should clear undo history.")

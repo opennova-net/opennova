@@ -20,6 +20,10 @@ var _cloud_tint: ColorPickerButton
 var _envscale: SpinBox
 var _sky_speed: SpinBox
 var _sky_height: SpinBox
+var _sun_model: LineEdit
+var _moon_model: LineEdit
+var _glare_model: LineEdit
+var _star_model: LineEdit
 var _keyframe_list: ItemList
 var _selected_time: SpinBox
 var _color_buttons: Dictionary = {}
@@ -63,6 +67,8 @@ func _build_ui() -> void:
 	_name_edit = LineEdit.new()
 	_name_edit.placeholder_text = "Name"
 	_name_edit.text_changed.connect(_on_name_changed)
+	_name_edit.focus_exited.connect(_commit_edit)
+	_name_edit.text_submitted.connect(func(_t): _commit_edit())
 	box.add_child(_name_edit)
 
 	box.add_child(_make_separator())
@@ -76,6 +82,7 @@ func _build_ui() -> void:
 	_time_slider.step = 1
 	_time_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_time_slider.value_changed.connect(_on_time_changed)
+	_time_slider.drag_ended.connect(func(_c): _commit_edit())
 	time_row.add_child(_time_slider)
 	_time_spin = SpinBox.new()
 	_time_spin.min_value = 0
@@ -100,6 +107,18 @@ func _build_ui() -> void:
 	_terrain_tint = _add_color(atmosphere, "Terrain", _on_terrain_tint_changed)
 	_water_color = _add_color(atmosphere, "Water", _on_water_color_changed)
 	_cloud_tint = _add_color(atmosphere, "Clouds", _on_cloud_tint_changed)
+
+	box.add_child(_make_separator())
+	box.add_child(_make_heading("Sky Models"))
+	var models := GridContainer.new()
+	models.columns = 2
+	models.add_theme_constant_override("h_separation", 8)
+	models.add_theme_constant_override("v_separation", 8)
+	box.add_child(models)
+	_sun_model = _add_line_edit(models, "Sun", _on_sun_model_changed)
+	_moon_model = _add_line_edit(models, "Moon", _on_moon_model_changed)
+	_glare_model = _add_line_edit(models, "Glare", _on_glare_model_changed)
+	_star_model = _add_line_edit(models, "Star", _on_star_model_changed)
 
 	box.add_child(_make_separator())
 	box.add_child(_make_heading("TOD Keyframes"))
@@ -152,6 +171,10 @@ func sync_from_editor() -> void:
 	_terrain_tint.color = env.get_terrain_tint()
 	_water_color.color = env.get_water_color()
 	_cloud_tint.color = env.get_cloud_tint()
+	_sun_model.text = env.get_sun_3di()
+	_moon_model.text = env.get_moon_3di()
+	_glare_model.text = env.get_glare_3di()
+	_star_model.text = env.get_star_3di()
 	_sync_keyframe_list()
 	_sync_selected_keyframe()
 	_syncing = false
@@ -194,6 +217,8 @@ func _add_spin(parent: Control, label_text: String, min_value: float, max_value:
 	spin.step = step
 	spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	spin.value_changed.connect(callback)
+	# Focus-out closes the editing burst so one drag/typed value = one undo step.
+	spin.get_line_edit().focus_exited.connect(_commit_edit)
 	parent.add_child(spin)
 	return spin
 
@@ -206,8 +231,24 @@ func _add_color(parent: Control, label_text: String, callback: Callable) -> Colo
 	var button := ColorPickerButton.new()
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.color_changed.connect(callback)
+	# Closing the picker popup commits the whole color edit as one undo step.
+	button.popup_closed.connect(_commit_edit)
 	parent.add_child(button)
 	return button
+
+
+func _add_line_edit(parent: Control, label_text: String, callback: Callable) -> LineEdit:
+	var label := Label.new()
+	label.text = label_text
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	parent.add_child(label)
+	var edit := LineEdit.new()
+	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	edit.text_changed.connect(callback)
+	edit.focus_exited.connect(_commit_edit)
+	edit.text_submitted.connect(func(_t): _commit_edit())
+	parent.add_child(edit)
+	return edit
 
 
 func _add_keyframe_color(parent: Control, property_name: String, label_text: String) -> void:
@@ -253,56 +294,102 @@ func _mark_env_changed() -> void:
 		_editor.state_changed.emit()
 
 
+# Open the editing burst before mutating env_file; the commit triggers wired in
+# _build_ui (focus-out / picker-close / slider drag-end) close it as one step.
+func _begin_edit() -> void:
+	if _editor and _editor.has_method("begin_edit"):
+		_editor.begin_edit()
+
+
+func _commit_edit() -> void:
+	if _editor and _editor.has_method("commit_edit"):
+		_editor.commit_edit()
+
+
 func _on_name_changed(text: String) -> void:
 	if _syncing or _editor == null:
 		return
+	_begin_edit()
 	_editor.env_file.set_env_name(text)
 
 
 func _on_time_changed(value: float) -> void:
 	if _syncing or _editor == null:
 		return
+	_begin_edit()
 	_editor.set_time_of_day(value)
 
 
 func _on_envscale_changed(value: float) -> void:
 	if not _syncing:
+		_begin_edit()
 		_editor.env_file.set_envscale(value)
 
 
 func _on_fog_level_changed(value: float) -> void:
 	if not _syncing:
+		_begin_edit()
 		_editor.env_file.set_fog_level(value)
 
 
 func _on_fog_type_changed(value: float) -> void:
 	if not _syncing:
+		_begin_edit()
 		_editor.env_file.set_fog_type(int(value))
 
 
 func _on_sky_speed_changed(value: float) -> void:
 	if not _syncing:
+		_begin_edit()
 		_editor.env_file.set_sky_speed(value)
 
 
 func _on_sky_height_changed(value: float) -> void:
 	if not _syncing:
+		_begin_edit()
 		_editor.env_file.set_sky_height(value)
 
 
 func _on_terrain_tint_changed(color: Color) -> void:
 	if not _syncing:
+		_begin_edit()
 		_editor.env_file.set_terrain_tint(color)
 
 
 func _on_water_color_changed(color: Color) -> void:
 	if not _syncing:
+		_begin_edit()
 		_editor.env_file.set_water_color(color)
 
 
 func _on_cloud_tint_changed(color: Color) -> void:
 	if not _syncing:
+		_begin_edit()
 		_editor.env_file.set_cloud_tint(color)
+
+
+func _on_sun_model_changed(text: String) -> void:
+	if not _syncing:
+		_begin_edit()
+		_editor.env_file.set_sun_3di(text)
+
+
+func _on_moon_model_changed(text: String) -> void:
+	if not _syncing:
+		_begin_edit()
+		_editor.env_file.set_moon_3di(text)
+
+
+func _on_glare_model_changed(text: String) -> void:
+	if not _syncing:
+		_begin_edit()
+		_editor.env_file.set_glare_3di(text)
+
+
+func _on_star_model_changed(text: String) -> void:
+	if not _syncing:
+		_begin_edit()
+		_editor.env_file.set_star_3di(text)
 
 
 func _on_keyframe_selected(index: int) -> void:
@@ -317,6 +404,7 @@ func _on_selected_time_changed(value: float) -> void:
 		return
 	var keyframe := _current_keyframe()
 	if keyframe:
+		_begin_edit()
 		keyframe.set_time(int(value))
 		sync_from_editor()
 
@@ -326,34 +414,39 @@ func _on_keyframe_color_changed(color: Color, property_name: String) -> void:
 		return
 	var keyframe := _current_keyframe()
 	if keyframe:
+		_begin_edit()
 		keyframe.set(property_name, color)
 		_mark_env_changed()
 
 
 func _on_add_keyframe() -> void:
-	var keyframes := _keyframes()
-	var keyframe := NovaEnvKeyframe.new()
-	keyframe.set_time(int(_editor.time_of_day if _editor else 1200))
-	if not keyframes.is_empty():
-		_copy_keyframe(keyframes[clampi(_selected_keyframe, 0, keyframes.size() - 1)], keyframe)
+	if _editor == null:
+		return
+	_editor.push_undo_step(func():
+		var keyframes := _keyframes()
+		var keyframe := NovaEnvKeyframe.new()
 		keyframe.set_time(int(_editor.time_of_day))
-	keyframes.append(keyframe)
-	_selected_keyframe = keyframes.size() - 1
-	_editor.env_file.set_tod_keyframes(keyframes)
+		if not keyframes.is_empty():
+			_copy_keyframe(keyframes[clampi(_selected_keyframe, 0, keyframes.size() - 1)], keyframe)
+			keyframe.set_time(int(_editor.time_of_day))
+		keyframes.append(keyframe)
+		_selected_keyframe = keyframes.size() - 1
+		_editor.env_file.set_tod_keyframes(keyframes))
 	sync_from_editor()
 
 
 func _on_duplicate_keyframe() -> void:
-	var keyframes := _keyframes()
 	var source := _current_keyframe()
-	if source == null:
+	if source == null or _editor == null:
 		return
-	var duplicate := NovaEnvKeyframe.new()
-	_copy_keyframe(source, duplicate)
-	duplicate.set_time(clampi(source.get_time() + 100, 0, 2359))
-	keyframes.append(duplicate)
-	_selected_keyframe = keyframes.size() - 1
-	_editor.env_file.set_tod_keyframes(keyframes)
+	_editor.push_undo_step(func():
+		var keyframes := _keyframes()
+		var duplicate := NovaEnvKeyframe.new()
+		_copy_keyframe(source, duplicate)
+		duplicate.set_time(clampi(source.get_time() + 100, 0, 2359))
+		keyframes.append(duplicate)
+		_selected_keyframe = keyframes.size() - 1
+		_editor.env_file.set_tod_keyframes(keyframes))
 	sync_from_editor()
 
 
@@ -375,9 +468,11 @@ func _copy_keyframe(source: NovaEnvKeyframe, target: NovaEnvKeyframe) -> void:
 
 func _on_remove_keyframe() -> void:
 	var keyframes := _keyframes()
-	if keyframes.size() <= 1 or _selected_keyframe < 0:
+	if keyframes.size() <= 1 or _selected_keyframe < 0 or _editor == null:
 		return
-	keyframes.remove_at(_selected_keyframe)
-	_selected_keyframe = mini(_selected_keyframe, keyframes.size() - 1)
-	_editor.env_file.set_tod_keyframes(keyframes)
+	_editor.push_undo_step(func():
+		var frames := _keyframes()
+		frames.remove_at(_selected_keyframe)
+		_selected_keyframe = mini(_selected_keyframe, frames.size() - 1)
+		_editor.env_file.set_tod_keyframes(frames))
 	sync_from_editor()
