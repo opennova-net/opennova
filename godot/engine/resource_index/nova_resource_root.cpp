@@ -2,6 +2,7 @@
 
 #include "cbin/cbin_asset_lookup.h"
 #include "fnt/nova_fnt_resource.h"
+#include "util/engine_caches.h"
 #include "util/texture_path_resolver.h"
 
 #include <gameprofile/gameprofile.h>
@@ -31,6 +32,8 @@ bool is_flat_filename(const String &name) {
 
 void NovaResourceRoot::_bind_methods() {
 	ClassDB::bind_static_method("NovaResourceRoot", D_METHOD("is_valid_root", "path"), &NovaResourceRoot::is_valid_root);
+	ClassDB::bind_static_method("NovaResourceRoot", D_METHOD("cache_epoch"), &NovaResourceRoot::cache_epoch);
+	ClassDB::bind_static_method("NovaResourceRoot", D_METHOD("bump_cache_epoch"), &NovaResourceRoot::bump_cache_epoch);
 	ClassDB::bind_method(D_METHOD("set_root_dir", "path"), &NovaResourceRoot::set_root_dir);
 	ClassDB::bind_method(D_METHOD("mount_runtime", "path", "expansion", "allow_loose_override", "game_code"),
 			&NovaResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false), DEFVAL("jo"));
@@ -115,8 +118,10 @@ Error NovaResourceRoot::mount_with_mode(const String &path, const String &expans
 		const String &game_code) {
 	// The resolver's per-session caches are keyed to the previous root; drop them so a
 	// new (or re-scanned) resource directory is read fresh. scan_root() in the editor
-	// routes through here too, so a rescan picks up on-disk edits.
+	// routes through here too, so a rescan picks up on-disk edits. The epoch bump tells
+	// GDScript-side cache holders (placer, veg assets) the same thing.
 	opennova::clear_texture_resolver_caches();
+	opennova::bump_cache_epoch();
 	const String clean = normalize_dir(path);
 	if (clean.is_empty()) {
 		root_dir_ = String();
@@ -165,7 +170,17 @@ void NovaResourceRoot::clear() {
 	root_dir_ = String();
 	last_error_ = String();
 	opennova::clear_texture_resolver_caches();
+	opennova::bump_cache_epoch();
 	index_.clear();
+}
+
+int64_t NovaResourceRoot::cache_epoch() {
+	return static_cast<int64_t>(opennova::cache_epoch());
+}
+
+void NovaResourceRoot::bump_cache_epoch() {
+	opennova::clear_texture_resolver_caches();
+	opennova::bump_cache_epoch();
 }
 
 String NovaResourceRoot::resolve_file(const String &name) {

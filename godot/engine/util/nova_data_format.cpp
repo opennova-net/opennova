@@ -24,6 +24,14 @@ bool godot::decode_nova_payload_bytes(PackedByteArray &p_bytes) {
 	return true;
 }
 
+bool godot::bytes_look_like_dds(const PackedByteArray &p_bytes) {
+	return p_bytes.size() >= 4 &&
+			p_bytes[0] == 'D' &&
+			p_bytes[1] == 'D' &&
+			p_bytes[2] == 'S' &&
+			p_bytes[3] == ' ';
+}
+
 bool godot::read_nova_payload_file(const String &p_path, PackedByteArray &r_bytes) {
 	r_bytes = PackedByteArray();
 	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ);

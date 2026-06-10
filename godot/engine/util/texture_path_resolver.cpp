@@ -100,14 +100,6 @@ const std::unordered_map<std::string, godot::String> &get_lowercase_dir_index(co
 	return inserted.first->second;
 }
 
-bool bytes_look_like_dds(const godot::PackedByteArray &bytes) {
-	return bytes.size() >= 4 &&
-			bytes[0] == 'D' &&
-			bytes[1] == 'D' &&
-			bytes[2] == 'S' &&
-			bytes[3] == ' ';
-}
-
 godot::Ref<godot::Texture2D> texture_from_image(godot::Ref<godot::Image> image) {
 	if (image.is_null() || image->is_empty()) {
 		return godot::Ref<godot::Texture2D>();
@@ -134,7 +126,7 @@ godot::Ref<godot::Texture2D> load_existing_texture_path(const godot::String &pat
 		return texture_from_image(decode_pcx_image(bytes.ptr(), bytes.size()));
 	}
 
-	if (ext == "dds" && bytes_look_like_dds(bytes)) {
+	if (ext == "dds" && godot::bytes_look_like_dds(bytes)) {
 		godot::Ref<godot::Image> image;
 		image.instantiate();
 		if (image->load_dds_from_buffer(bytes) != godot::OK) {
@@ -143,7 +135,7 @@ godot::Ref<godot::Texture2D> load_existing_texture_path(const godot::String &pat
 		return texture_from_image(image);
 	}
 
-	if ((ext == "tga" || ext == "mdt" || ext == "dds") && !bytes_look_like_dds(bytes)) {
+	if ((ext == "tga" || ext == "mdt" || ext == "dds") && !godot::bytes_look_like_dds(bytes)) {
 		if (bytes.size() < 18) {
 			return godot::Ref<godot::Texture2D>();
 		}
@@ -289,7 +281,7 @@ godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filena
 	// that exists only inside a .pff (no filesystem path) still loads. Keyed on the magic,
 	// not the extension, so a mis-named entry still routes here. texture_from_image()
 	// decompresses the BC payload before generating mipmaps.
-	if (bytes_look_like_dds(bytes)) {
+	if (godot::bytes_look_like_dds(bytes)) {
 		godot::Ref<godot::Image> image;
 		image.instantiate();
 		if (image->load_dds_from_buffer(bytes) != godot::OK) {
@@ -298,7 +290,7 @@ godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filena
 		return texture_from_image(image);
 	}
 
-	if ((ext == "tga" || ext == "mdt" || ext == "dds") && !bytes_look_like_dds(bytes)) {
+	if ((ext == "tga" || ext == "mdt" || ext == "dds") && !godot::bytes_look_like_dds(bytes)) {
 		if (bytes.size() < 18) {
 			return godot::Ref<godot::Texture2D>();
 		}

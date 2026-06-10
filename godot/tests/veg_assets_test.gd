@@ -1,7 +1,6 @@
 extends GutTest
 
 const VegAssetsScript = preload("res://engine/terrain/veg_assets.gd")
-const VegAssetsShim = preload("res://modtools/terrain/veg_assets.gd")
 const SOURCE_OBJECT := "res://../fixtures/3dp/Bird1/Bird1.3di"
 
 
@@ -54,15 +53,31 @@ func test_resolve_slot_meshes_preserves_slots_and_loads_known_graphic() -> void:
 	assert_true(meshes[1] is Mesh, "Resolver should load the mesh for a known .3di graphic.")
 
 
-func test_modtools_veg_assets_class_forwards_to_shared_implementation() -> void:
-	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	var graphics := VegAssetsShim.list_graphics(resource_root)
+func test_cache_epoch_is_monotonic_and_bumped_by_mount() -> void:
+	var before := NovaResourceRoot.cache_epoch()
+	NovaResourceRoot.bump_cache_epoch()
+	assert_gt(NovaResourceRoot.cache_epoch(), before, "Explicit bump should advance the epoch.")
 
-	assert_gt(graphics.size(), 0, "The compatibility VegAssets class should expose shared asset listing.")
-	assert_true(
-		VegAssetsShim.load_mesh(resource_root, "Mveg6") is Mesh,
-		"The compatibility VegAssets class should expose shared mesh loading."
-	)
+	var at_bump := NovaResourceRoot.cache_epoch()
+	_prepare_veg_fixture("Mveg6.3di")  # set_root_dir routes through mount_with_mode
+	assert_gt(NovaResourceRoot.cache_epoch(), at_bump, "Any root mount should advance the epoch.")
+
+
+func test_caches_self_clear_when_epoch_moves() -> void:
+	var resource_root := _prepare_veg_fixture("Mveg6.3di")
+	VegAssetsScript.list_graphics(resource_root, true)
+	assert_false(VegAssetsScript._graphics_cache_by_root.is_empty(),
+		"Listing should fill the graphics cache.")
+
+	# Any mount/rescan/clear in the process (game + editor coexist) bumps the
+	# global epoch; the next cache access self-clears before refilling, so a
+	# rescanned resource dir is never served a stale listing or mesh.
+	NovaResourceRoot.bump_cache_epoch()
+	VegAssetsScript._check_epoch()
+	assert_true(VegAssetsScript._graphics_cache_by_root.is_empty(),
+		"An epoch move should drop the listing cache on next access.")
+	assert_true(VegAssetsScript._mesh_cache.is_empty(),
+		"An epoch move should drop the mesh cache on next access.")
 
 
 func _prepare_veg_fixture(filename: String) -> NovaResourceRoot:

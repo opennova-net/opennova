@@ -1,5 +1,7 @@
 #include "object/nova_object_data.h"
 
+#include "util/nova_string_convert.h"
+
 #include <ase/ase_parser.h>
 #include <oed/material_descriptor.h>
 #include <oed/types.h>
@@ -30,17 +32,14 @@ using namespace godot;
 
 namespace {
 
-std::string to_utf8(const String &value) {
-	const CharString utf8 = value.utf8();
-	return std::string(utf8.get_data(), static_cast<size_t>(utf8.length()));
-}
+using opennova::to_std;
 
 std::string to_native_path(const String &path) {
 	String global = path;
 	if (ProjectSettings::get_singleton() != nullptr) {
 		global = ProjectSettings::get_singleton()->globalize_path(path);
 	}
-	return to_utf8(global);
+	return to_std(global);
 }
 
 String from_native(const char *value) {
@@ -811,7 +810,7 @@ bool resolve_control_register_index(const ThreediModelIR &ir, const String &name
 		out_reg = -1;
 		return true;
 	}
-	const std::string needle = to_utf8(name);
+	const std::string needle = to_std(name);
 	for (size_t i = 0; i < ir.control_register_count; ++i) {
 		if (needle == ir.control_registers[i].name) {
 			out_reg = static_cast<int32_t>(i);
@@ -834,7 +833,7 @@ void set_ir_texture_slot(ThreediIRMaterial &mat, int slot, int frame, const Stri
 				std::memset(&mat.textures[mat.texture_count - 1], 0, sizeof(ThreediIRMaterialTexture));
 				--mat.texture_count;
 			} else {
-				copy_cstr(tex.name, sizeof(tex.name), to_utf8(filename).c_str());
+				copy_cstr(tex.name, sizeof(tex.name), to_std(filename).c_str());
 				tex.slot = static_cast<uint8_t>(slot);
 				tex.frame = static_cast<uint8_t>(frame);
 				tex.flags |= flags;
@@ -848,7 +847,7 @@ void set_ir_texture_slot(ThreediIRMaterial &mat, int slot, int frame, const Stri
 	}
 	ThreediIRMaterialTexture &tex = mat.textures[mat.texture_count++];
 	std::memset(&tex, 0, sizeof(tex));
-	copy_cstr(tex.name, sizeof(tex.name), to_utf8(filename).c_str());
+	copy_cstr(tex.name, sizeof(tex.name), to_std(filename).c_str());
 	tex.slot = static_cast<uint8_t>(slot);
 	tex.type = (slot == THREEDI_IR_TEX_SLOT_NORMAL || slot == THREEDI_IR_TEX_SLOT_NORMAL_B) ? 4 : 0;
 	tex.flags = flags;
@@ -869,7 +868,7 @@ std::unordered_map<std::string, uint16_t> control_values_from_dict(const Diction
 	const Array keys = dict.keys();
 	for (int i = 0; i < keys.size(); ++i) {
 		const String key = keys[i];
-		values[to_utf8(key)] = static_cast<uint16_t>(std::clamp(static_cast<int>(dict[keys[i]]), 0, 65535));
+		values[to_std(key)] = static_cast<uint16_t>(std::clamp(static_cast<int>(dict[keys[i]]), 0, 65535));
 	}
 	return values;
 }
@@ -1170,7 +1169,7 @@ void NovaObjectData::_notify_object_changed(uint8_t p_update_mask) {
 void NovaObjectData::reset_empty(const String &p_name) {
 	_clear();
 	object_name = sanitized_basename(p_name);
-	copy_cstr(ir.name, sizeof(ir.name), to_utf8(object_name).c_str());
+	copy_cstr(ir.name, sizeof(ir.name), to_std(object_name).c_str());
 	has_ir = true;
 	_notify_object_changed();
 }
@@ -1212,7 +1211,7 @@ Error NovaObjectData::set_lod_scene(int p_lod_index, const String &p_path) {
 	}
 
 	TdpLod &lod = source_project.lods[lod_index];
-	copy_cstr(lod.scene_file, sizeof(lod.scene_file), to_utf8(p_path.get_file()).c_str());
+	copy_cstr(lod.scene_file, sizeof(lod.scene_file), to_std(p_path.get_file()).c_str());
 	set_default_project_lod_fields(lod);
 	if (lod_index == 0 && (object_name.is_empty() || object_name == "untitled")) {
 		object_name = filename_stem(p_path);
@@ -1353,7 +1352,7 @@ Error NovaObjectData::_open_ase(const String &p_path) {
 	_clear();
 	tdp_init(&source_project);
 	copy_cstr(source_project.lods[0].scene_file, sizeof(source_project.lods[0].scene_file),
-			to_utf8(p_path.get_file()).c_str());
+			to_std(p_path.get_file()).c_str());
 	source_project.lods[0].attributes = 5;
 	copy_cstr(source_project.lods[0].render_function, sizeof(source_project.lods[0].render_function), "gnrc");
 	source_project.lods[0].threshold = 0.0f;
@@ -1692,7 +1691,7 @@ bool NovaObjectData::set_lod_field(int p_lod_index, const String &p_key, const V
 	if (key == "attributes") {
 		lod.attributes = static_cast<int32_t>(p_value);
 	} else if (key == "render_function") {
-		copy_cstr(lod.render_function, sizeof(lod.render_function), to_utf8(String(p_value)).c_str());
+		copy_cstr(lod.render_function, sizeof(lod.render_function), to_std(String(p_value)).c_str());
 	} else if (key == "threshold") {
 		lod.threshold = static_cast<float>(p_value);
 	} else {
@@ -1867,7 +1866,7 @@ bool NovaObjectData::set_material_field(int p_index, const String &p_key, const 
 	};
 
 	if (key == "shader_tag" || key == "name") {
-		copy_cstr(mat.shader_name, sizeof(mat.shader_name), to_utf8(String(p_value)).c_str());
+		copy_cstr(mat.shader_name, sizeof(mat.shader_name), to_std(String(p_value)).c_str());
 		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
@@ -3028,7 +3027,7 @@ Dictionary NovaObjectData::evaluate_panm(int p_lod_index, int p_time_ms, const D
 	const Array keys = p_ctrl_values.keys();
 	for (int i = 0; i < keys.size(); ++i) {
 		const String key = keys[i];
-		const std::string name = to_utf8(key);
+		const std::string name = to_std(key);
 		for (size_t r = 0; r < ir.control_register_count && r < 256; ++r) {
 			if (name == ir.control_registers[r].name) {
 				ctrl_table[r * 2] = static_cast<uint16_t>(std::clamp(static_cast<int>(p_ctrl_values[keys[i]]), 0, 65535));
@@ -3151,7 +3150,7 @@ Error NovaObjectData::set_material_shader(int p_material_index, const String &p_
 		return ERR_INVALID_PARAMETER;
 	}
 	copy_cstr(ir.materials[p_material_index].shader_name, sizeof(ir.materials[p_material_index].shader_name),
-			to_utf8(p_shader_name).c_str());
+			to_std(p_shader_name).c_str());
 	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
@@ -3168,7 +3167,7 @@ Error NovaObjectData::set_material_texture(int p_material_index, int p_texture_i
 		material.texture_count = static_cast<uint32_t>(p_texture_index + 1);
 	}
 	copy_cstr(material.textures[p_texture_index].name, sizeof(material.textures[p_texture_index].name),
-			to_utf8(p_texture_name).c_str());
+			to_std(p_texture_name).c_str());
 	if (material.textures[p_texture_index].slot == 0) {
 		material.textures[p_texture_index].slot = THREEDI_IR_TEX_SLOT_DIFFUSE;
 	}
@@ -3209,7 +3208,7 @@ Error NovaObjectData::set_material_texture_slot(int p_material_index, int p_slot
 	}
 
 	ThreediIRMaterialTexture &texture = material.textures[texture_index];
-	copy_cstr(texture.name, sizeof(texture.name), to_utf8(p_texture_name.get_file()).c_str());
+	copy_cstr(texture.name, sizeof(texture.name), to_std(p_texture_name.get_file()).c_str());
 	texture.slot = static_cast<uint8_t>(p_slot);
 	if (p_slot == THREEDI_IR_TEX_SLOT_NORMAL || p_slot == THREEDI_IR_TEX_SLOT_NORMAL_B) {
 		const String texture_name = p_texture_name.to_lower();

@@ -64,10 +64,30 @@ var _anchor_cache: Dictionary = {}
 # editor's pickable bodies; see collision_shapes_for). Computed once per graphic.
 var _collision_shapes_cache: Dictionary = {}
 
+# The global cache epoch (NovaResourceRoot.cache_epoch) the caches above were built
+# under. Any root mount/rescan/clear bumps the epoch; the next cache access then
+# self-clears, so a rescanned resource dir is never served stale models/anchors/hulls.
+var _built_epoch: int = 0
+
 
 func _init(p_resource_root: NovaResourceRoot = null, p_item_db: NovaItemDatabase = null) -> void:
 	resource_root = p_resource_root
 	item_db = p_item_db
+
+
+# Drop every derived cache when the resource-root epoch has moved since they were
+# filled. Called at the top of the cache-reading entry points (place / place_single /
+# ground_anchor_godot / collision_shapes_for); cheap when the epoch is unchanged.
+func _check_epoch() -> void:
+	var epoch := NovaResourceRoot.cache_epoch()
+	if epoch == _built_epoch:
+		return
+	_built_epoch = epoch
+	_object_data_cache.clear()
+	_skeletal_cache.clear()
+	_static_batch_cache.clear()
+	_anchor_cache.clear()
+	_collision_shapes_cache.clear()
 
 
 # --- Coordinate conversion (BMS is Z-up; Godot is Y-up) -----------------------
@@ -122,6 +142,7 @@ static func godot_to_bms_position(p: Vector3) -> Vector3:
 ## `options` may carry "environment_node" (a NovaEnvironment) used for lighting.
 ## Returns a stats Dictionary (placed/batched/animated/unresolved/...).
 func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -> Dictionary:
+	_check_epoch()
 	var stats := {
 		"placed": 0,
 		"batched": 0,
@@ -278,6 +299,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 ## index for the new entity (this path is editor-only and always picks).
 ## Returns a small delta stats dict: { placed, batched, animated, batches, unresolved }.
 func place_single(mission: NovaMissionData, container: Node3D, kind: int, index: int, env_node: Node = null) -> Dictionary:
+	_check_epoch()
 	var delta := { "placed": 0, "batched": 0, "animated": 0, "batches": 0, "unresolved": 0 }
 	if mission == null or container == null or resource_root == null:
 		return delta
@@ -467,6 +489,7 @@ func _ground_anchor_for(graphic: String, data: NovaObjectData) -> Vector3:
 # Public: the Godot model-local ground anchor for `graphic` (resolves + caches the model). The editor
 # subtracts this from a terrain-drop position (converted to BMS axes) for the author-time ground bake.
 func ground_anchor_godot(graphic: String) -> Vector3:
+	_check_epoch()
 	return _ground_anchor_for(graphic, _load_object_data(graphic))
 
 
@@ -484,6 +507,7 @@ func graphic_for(item_id: int) -> String:
 # Models with no collision volumes fall back to a single box hull from the visual
 # model AABB so every placed entity stays pickable (never worse than the old AABB pick).
 func collision_shapes_for(graphic: String) -> Array:
+	_check_epoch()
 	if _collision_shapes_cache.has(graphic):
 		return _collision_shapes_cache[graphic]
 	var shapes: Array = []

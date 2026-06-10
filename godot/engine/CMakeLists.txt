@@ -79,6 +79,7 @@ add_library(${TARGET_NAME} SHARED
     dbf/nova_dbf_data.cpp
     rtxt/rtxt_string_file.cpp
     rtxt/rtxt_resource_format.cpp
+    util/engine_caches.cpp
     util/nova_data_format.cpp
     util/nova_paths.cpp
     util/nova_texture_format.cpp
