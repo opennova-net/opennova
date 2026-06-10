@@ -10,6 +10,16 @@ extends Node3D
 # nova_world.tscn so hosts instance it; the game mounts its root from the
 # persisted resource directory, the editor injects its own via
 # set_resource_root() and plays the live document via load_mission_data().
+#
+# HOST CONTRACT (duck-typed on purpose — two hosts do not justify a formal
+# interface): a host instances nova_world.tscn, optionally injects a root,
+# calls one load_* entry, then
+#   * drives tick(camera_position) once per frame while playing (foliage ->
+#     runtime logic+present -> audio, in that order; pausing = not ticking),
+#   * provides the camera that position comes from,
+#   * consumes mission_effects (HUD text / win / waypoints / dialog routing),
+#   * calls unload() to tear the played world down (placed objects, runtime,
+#     audio, env overrides) before loading another mission or leaving.
 
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")

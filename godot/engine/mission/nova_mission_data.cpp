@@ -2,6 +2,8 @@
 
 #include "resource_index/nova_resource_root.h"
 
+#include <mission/authoring.h>
+
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -88,6 +90,11 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_game_mode"), &NovaMissionData::get_game_mode);
 	ClassDB::bind_method(D_METHOD("set_game_mode", "bit"), &NovaMissionData::set_game_mode);
 	ClassDB::bind_method(D_METHOD("add_entity", "kind", "item_id", "position", "rotation_deg"), &NovaMissionData::add_entity);
+	ClassDB::bind_static_method("NovaMissionData", D_METHOD("kind_for_item_type", "def_item_type"), &NovaMissionData::kind_for_item_type);
+	ClassDB::bind_method(D_METHOD("place_entity_grounded", "item_id", "def_item_type", "ground_hit_bms", "ground_anchor_bms"), &NovaMissionData::place_entity_grounded);
+	ClassDB::bind_method(D_METHOD("move_entity_grounded", "kind", "index", "ground_hit_bms", "ground_anchor_bms"), &NovaMissionData::move_entity_grounded);
+	ClassDB::bind_method(D_METHOD("marker_item_id_for_path", "path_index"), &NovaMissionData::marker_item_id_for_path);
+	ClassDB::bind_method(D_METHOD("add_path_marker_grounded", "path_index", "ground_hit_bms", "insert_index"), &NovaMissionData::add_path_marker_grounded, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("remove_entity", "kind", "index"), &NovaMissionData::remove_entity);
 
 	ClassDB::bind_method(D_METHOD("get_waypoint_summaries"), &NovaMissionData::get_waypoint_summaries);
@@ -487,6 +494,58 @@ Dictionary NovaMissionData::add_entity(int kind, int item_id, const Vector3 &pos
 	}
 	modified = true;
 	return entity_to_dictionary(record);
+}
+
+int NovaMissionData::kind_for_item_type(int def_item_type) {
+	return static_cast<int>(opennova::mission::authoring::entity_kind_for_item_type(def_item_type));
+}
+
+Dictionary NovaMissionData::place_entity_grounded(int item_id, int def_item_type, const Vector3 &ground_hit_bms, const Vector3 &ground_anchor_bms) {
+	const float hit[3] = {ground_hit_bms.x, ground_hit_bms.y, ground_hit_bms.z};
+	const float anchor[3] = {ground_anchor_bms.x, ground_anchor_bms.y, ground_anchor_bms.z};
+	opennova::mission::EntityRecord record;
+	if (!opennova::mission::authoring::place_entity_grounded(document, item_id, def_item_type, hit, anchor, &record)) {
+		return Dictionary();
+	}
+	modified = true;
+	return entity_to_dictionary(record);
+}
+
+bool NovaMissionData::move_entity_grounded(int kind, int index, const Vector3 &ground_hit_bms, const Vector3 &ground_anchor_bms) {
+	if (index < 0) {
+		return false;
+	}
+	const float hit[3] = {ground_hit_bms.x, ground_hit_bms.y, ground_hit_bms.z};
+	const float anchor[3] = {ground_anchor_bms.x, ground_anchor_bms.y, ground_anchor_bms.z};
+	if (!opennova::mission::authoring::move_entity_grounded(document, to_native_kind(kind), static_cast<size_t>(index), hit, anchor)) {
+		return false;
+	}
+	modified = true;
+	return true;
+}
+
+int NovaMissionData::marker_item_id_for_path(int path_index) const {
+	if (path_index < 0) {
+		return opennova::mission::authoring::kWaypointMarkerItemId;
+	}
+	return opennova::mission::authoring::marker_item_id_for_path(document, static_cast<size_t>(path_index));
+}
+
+Dictionary NovaMissionData::add_path_marker_grounded(int path_index, const Vector3 &ground_hit_bms, int insert_index) {
+	if (path_index < 0) {
+		return Dictionary();
+	}
+	const float hit[3] = {ground_hit_bms.x, ground_hit_bms.y, ground_hit_bms.z};
+	opennova::mission::EntityRecord marker;
+	opennova::mission::WaypointPath path;
+	if (!opennova::mission::authoring::add_path_marker_grounded(document, static_cast<size_t>(path_index), hit, insert_index, &marker, &path)) {
+		return Dictionary();
+	}
+	modified = true;
+	Dictionary out;
+	out["marker"] = entity_to_dictionary(marker);
+	out["path"] = waypoint_path_to_dictionary(path);
+	return out;
 }
 
 bool NovaMissionData::remove_entity(int kind, int index) {

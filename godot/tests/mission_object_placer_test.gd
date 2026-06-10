@@ -1,6 +1,6 @@
 extends GutTest
 
-# Phase 4: MissionObjectPlacer. Covers the asset-free pieces that must be exactly
+# Phase 4: Placer. Covers the asset-free pieces that must be exactly
 # right (BMS -> Godot coordinate conversion, cross-checked against the equivalent
 # Basis) and the graceful resolution-miss path (fixtures ship items.def but no
 # .3di, so nothing resolves to a model and the placer must place zero without
@@ -239,3 +239,44 @@ func test_place_single_is_a_noop_on_null_inputs() -> void:
 	var delta: Dictionary = placer.place_single(null, null, NovaMissionData.KIND_ITEM, 0)
 	assert_eq(int(delta.get("placed", -1)), 0, "null inputs place nothing")
 	assert_eq(int(delta.get("unresolved", 0)), 0, "and do not falsely count an unresolved")
+
+
+# --- Engine-facade bake parity --------------------------------------------------
+# The authoring facade (libs/mission authoring.h) bakes the Ground anchor in mission
+# space with the conjugated engine matrix [orig: sub_401A90, dfx2med.exe;
+# Math_BuildFixedPointMatrixFromEulerAngles @ 0x613F40 + the .3di import's
+# model-forward correction]; the editor's live drag bakes in Godot space with
+# bms_to_godot_basis. The two MUST agree, or an anchored object would shift between
+# the drag preview and the committed record.
+func test_ground_bake_parity_with_engine_facade() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var rec: Dictionary = md.add_entity(NovaMissionData.KIND_BUILDING, 102001, Vector3.ZERO, Vector3.ZERO)
+	assert_false(rec.is_empty(), "seed entity added")
+	var index := int(rec["index"])
+
+	var anchor_godot := Vector3(0.75, 0.5, -1.25)
+	var anchor_bms := Placer.godot_to_bms_position(anchor_godot)
+	var hit_godot := Vector3(33.0, 8.0, -21.0)
+	var hit_bms := Placer.godot_to_bms_position(hit_godot)
+
+	# Integer-degree rotations only (the format stores integer degrees).
+	for rot in [Vector3.ZERO, Vector3(0, 90, 0), Vector3(15, 0, 0), Vector3(0, 0, 30),
+			Vector3(10, 45, -20), Vector3(-35, 220, 75), Vector3(90, 0, 0)]:
+		assert_true(md.set_entity_transform(NovaMissionData.KIND_BUILDING, index, hit_bms, rot))
+		assert_true(md.move_entity_grounded(NovaMissionData.KIND_BUILDING, index, hit_bms, anchor_bms),
+			"facade re-grounds at rot %s" % rot)
+		var moved: Dictionary = md.get_entity(NovaMissionData.KIND_BUILDING, index)
+		var stored_bms: Vector3 = moved["position"]
+		assert_eq(moved["rotation_deg"], rot, "rotation preserved")
+		# The editor's Godot-space bake of the same gesture:
+		var expected_godot := hit_godot - Placer.bms_to_godot_basis(rot) * anchor_godot
+		var expected_bms := Placer.godot_to_bms_position(expected_godot)
+		assert_true(stored_bms.is_equal_approx(expected_bms),
+			"facade bake == editor bake at rot %s (facade %s vs editor %s)" % [rot, stored_bms, expected_bms])
+
+
+func test_ground_anchor_bms_is_the_axis_remap() -> void:
+	# ground_anchor_bms is godot_to_bms_position applied to the anchor offset — linear,
+	# so valid on offset vectors. Pin the remap so the facade's anchor input stays correct.
+	assert_eq(Placer.godot_to_bms_position(Vector3(1, 2, 3)), Vector3(1, -3, 2))

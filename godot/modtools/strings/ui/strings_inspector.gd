@@ -18,8 +18,7 @@ var _validation_label: Label
 var _normalize_button: Button
 var _lookup_edit: LineEdit
 var _lookup_result: RichTextLabel
-var _import_dialog: FileDialog
-var _export_dialog: FileDialog
+var _files: FileDialogHelper
 var _rename_section_button: Button
 var _remove_section_button: Button
 
@@ -240,27 +239,19 @@ func _refresh_lookup() -> void:
 # --- CSV ---
 
 func _on_import_csv() -> void:
-	if _import_dialog == null:
-		_import_dialog = _make_csv_dialog(FileDialog.FILE_MODE_OPEN_FILE)
-		_import_dialog.file_selected.connect(func(path): if _doc != null: _doc.import_csv(path))
-	_import_dialog.popup_centered_ratio(0.6)
+	_ensure_files().open("Import CSV", PackedStringArray(["*.csv ; CSV"]),
+		func(path): if _doc != null: _doc.import_csv(path))
 
 
 func _on_export_csv() -> void:
-	if _export_dialog == null:
-		_export_dialog = _make_csv_dialog(FileDialog.FILE_MODE_SAVE_FILE)
-		_export_dialog.file_selected.connect(func(path): if _doc != null: _doc.export_csv(path))
-	_export_dialog.current_file = "strings.csv"
-	_export_dialog.popup_centered_ratio(0.6)
+	_ensure_files().save_file("Export CSV", PackedStringArray(["*.csv ; CSV"]), "strings.csv",
+		func(path): if _doc != null: _doc.export_csv(path))
 
 
-func _make_csv_dialog(mode: int) -> FileDialog:
-	var dialog := FileDialog.new()
-	dialog.file_mode = mode
-	dialog.access = FileDialog.ACCESS_FILESYSTEM
-	dialog.add_filter("*.csv", "CSV")
-	add_child(dialog)
-	return dialog
+func _ensure_files() -> FileDialogHelper:
+	if _files == null:
+		_files = FileDialogHelper.new(self)
+	return _files
 
 
 # --- Helpers ---
