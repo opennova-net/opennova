@@ -6,6 +6,20 @@ extends GutTest
 const EditorWorkstationScene = preload("res://modtools/editor/editor_workstation.tscn")
 const EditorWorkstationScript = preload("res://modtools/editor/editor_workstation.gd")
 
+const STATE_PATH := "user://strings_editor_state.cfg"
+
+
+func before_each() -> void:
+	# Session restore reads this on activate; stale state from another test (or a
+	# real editor run sharing user://) would change what opens.
+	if FileAccess.file_exists(STATE_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_PATH))
+
+
+func after_all() -> void:
+	if FileAccess.file_exists(STATE_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_PATH))
+
 
 func test_strings_workspace_in_rail() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
@@ -103,6 +117,54 @@ func test_detail_panel_content_fills_panel() -> void:
 	var wrapper: Control = detail.get_child(0)
 	assert_almost_eq(wrapper.size.x, detail.size.x, 2.0, "content wrapper should fill the panel width")
 	assert_gt(wrapper.size.y, 80.0, "content wrapper should fill the panel height, not collapse")
+
+
+func test_session_restore_reopens_last_file() -> void:
+	# First session: open the fixture (which persists the session state).
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
+	await get_tree().process_frame
+	var ws = workstation._get_workspace(EditorWorkstationScript.Workspace.STRINGS)
+	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
+	workstation.queue_free()
+	await get_tree().process_frame
+
+	# Second session: activating the workspace should reopen the last file.
+	var workstation2 = add_child_autofree(EditorWorkstationScene.instantiate())
+	workstation2.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
+	await get_tree().process_frame
+	var ws2 = workstation2._get_workspace(EditorWorkstationScript.Workspace.STRINGS)
+	assert_eq(ws2.strings_editor.current_path, "res://fixtures/strings/menu.bin",
+		"the last opened table should be restored on activate")
+	assert_eq(ws2.strings_editor.string_table.get_entry_count(), 6)
+	assert_false(ws2.strings_editor.is_dirty, "a restored table starts clean")
+
+
+func test_inspector_lookup_tester_resolves_like_the_game() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
+	await get_tree().process_frame
+	var ws = workstation._get_workspace(EditorWorkstationScript.Workspace.STRINGS)
+	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
+	await get_tree().process_frame
+
+	var lookup: LineEdit = workstation.find_child("StringsLookupEdit", true, false)
+	var result: RichTextLabel = workstation.find_child("StringsLookupResult", true, false)
+	assert_not_null(lookup, "the inspector should host the lookup tester")
+	assert_not_null(result, "the lookup tester should have a result readout")
+
+	lookup.text = "menu_main:BTN_NEW_GAME"
+	lookup.text_changed.emit(lookup.text)
+	assert_string_contains(result.text, "New Game", "a scoped hit should preview the in-game text ({hot} stripped)")
+
+	lookup.text = "hud:BTN_NEW_GAME"
+	lookup.text_changed.emit(lookup.text)
+	assert_string_contains(result.text, "??hud:BTN_NEW_GAME??",
+		"a scoped miss should show the engine's ?? marker")
+
+	var normalize: Button = workstation.find_child("StringsNormalizeButton", true, false)
+	assert_not_null(normalize, "the normalize affordance should exist")
+	assert_false(normalize.visible, "normalize stays hidden while the table is grouped")
 
 
 func _find_button_by_text(root: Node, text: String) -> Button:

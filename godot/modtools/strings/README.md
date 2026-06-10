@@ -11,10 +11,25 @@ key, its text (with an optional `{hot}` accelerator marker), a screen position
 hint, and a section. The Strings workspace shows a searchable, sortable table with
 a section filter, and an always-visible detail editor that sits in a split next to
 the table rather than in a separate dock, so you can edit the selected entry
-directly. Entries are validated (duplicate or empty keys, bad section references).
-CSV import and export round-trip the whole table for translators. New / Open /
-Save / Save As are in the action bar; CSV import and export are in the left
-inspector. This is a pure data editor: no 3D view and no asset dock.
+directly. The table opens in file order — the order entries sit in on disk, which
+is how the game reads them; click a column to sort, and a third click returns to
+file order.
+
+The game looks text up by section: it finds the section by name, then takes the
+first key match inside it. Validation mirrors that — the same key may appear in
+several sections (the shipped game does this), a repeated key inside one section
+warns that the later copy can never be reached, and entries that drift out of
+their section's run are an error with a one-click "Group entries by section" fix.
+Moving an entry to a different section relocates it to that section's end, keeping
+the file shaped the way the game expects. The lookup tester in the left inspector
+resolves `section:key` exactly like the game, including the visible
+`??section:key??` marker for missing text.
+
+CSV import and export round-trip the whole table for translators. Tables saved
+unedited reproduce their original bytes exactly, including the original game's
+cp1252 accented text. New / Open / Save / Save As are in the action bar; the
+workspace reopens your last table when you return. This is a pure data editor: no
+3D view and no asset dock.
 
 ## Formats
 
@@ -41,3 +56,4 @@ visible and opts out of the right asset dock.
 
 - Editor framework: [`../README.md`](../README.md).
 - Project overview: [top-level README](../../../README.md).
+- Format and engine-behaviour record: [`docs/interface/rtxt-strings-re.md`](../../../docs/interface/rtxt-strings-re.md).

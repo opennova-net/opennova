@@ -15,11 +15,15 @@ const StringsEditorScript = preload("res://modtools/strings/strings_editor.gd")
 const StringsEditorViewScript = preload("res://modtools/strings/ui/strings_editor_view.gd")
 const StringsInspectorScript = preload("res://modtools/strings/ui/strings_inspector.gd")
 
+## Session state (last open file), restored on activate like the music workspace.
+const STATE_PATH := "user://strings_editor_state.cfg"
+
 var strings_editor: StringsEditor
 
 var _mount: ViewportMount
 var _view: Control
 var _inspector: Control
+var _state_restored: bool = false
 
 var _search: String = ""
 var _section_filter: int = -1  # -1 = all sections
@@ -60,10 +64,36 @@ func get_status_context() -> String:
 
 func activate() -> void:
 	_ensure_editor()
+	_restore_state()
 
 
 func deactivate() -> void:
-	pass
+	_save_state()
+
+
+func _restore_state() -> void:
+	# Reopen the last edited table once per session, and only while the document
+	# is still pristine (no path, no edits) so it never clobbers user work.
+	if _state_restored:
+		return
+	_state_restored = true
+	if strings_editor == null or strings_editor.is_dirty or not strings_editor.current_path.is_empty():
+		return
+	var cfg := ConfigFile.new()
+	if cfg.load(STATE_PATH) != OK:
+		return
+	var path: String = cfg.get_value("session", "last_path", "")
+	if not path.is_empty() and FileAccess.file_exists(path):
+		strings_editor.open_strings(path)
+
+
+func _save_state() -> void:
+	if strings_editor == null:
+		return
+	var cfg := ConfigFile.new()
+	cfg.load(STATE_PATH)  # keep unrelated values if the file exists
+	cfg.set_value("session", "last_path", strings_editor.current_path)
+	cfg.save(STATE_PATH)
 
 
 func _ensure_editor() -> void:
@@ -233,9 +263,14 @@ func get_current_resource_path() -> String:
 func open_file(path: String) -> Error:
 	_ensure_editor()
 	var resources := _resource_root()
+	var err: Error
 	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
-		return strings_editor.open_strings_bytes(resources.read_file(path), resources.get_root_dir().path_join(path.get_file()))
-	return strings_editor.open_strings(path)
+		err = strings_editor.open_strings_bytes(resources.read_file(path), resources.get_root_dir().path_join(path.get_file()))
+	else:
+		err = strings_editor.open_strings(path)
+	if err == OK:
+		_save_state()
+	return err
 
 
 func _resource_root() -> NovaResourceRoot:
@@ -261,11 +296,17 @@ func get_save_as_action_label() -> String:
 
 
 func save_current() -> Error:
-	return strings_editor.save_current() if strings_editor else ERR_UNAVAILABLE
+	var err := strings_editor.save_current() if strings_editor else ERR_UNAVAILABLE
+	if err == OK:
+		_save_state()
+	return err
 
 
 func save_as(dir_path: String) -> Error:
-	return strings_editor.save_as(dir_path) if strings_editor else ERR_UNAVAILABLE
+	var err := strings_editor.save_as(dir_path) if strings_editor else ERR_UNAVAILABLE
+	if err == OK:
+		_save_state()
+	return err
 
 
 func get_save_dialog_title() -> String:

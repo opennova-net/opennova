@@ -11,6 +11,11 @@ signal delete_requested(index: int)
 const COL_KEY := 0
 const COL_TEXT := 1
 const COL_SECTION := 2
+## Sentinel sort column: file order — rows appear exactly as they sit in the
+## .bin, which is meaningful data here (the game reads entries by contiguous
+## section runs). Clicking a column header cycles ascending -> descending ->
+## back to file order.
+const SORT_FILE_ORDER := -1
 const TEXT_PREVIEW_LIMIT := 90
 const ISSUE_COLOR := Color(1.0, 0.55, 0.55)
 
@@ -18,7 +23,7 @@ var _doc: StringsEditor
 var _tree: Tree
 var _search: String = ""
 var _section_filter: int = -1
-var _sort_column: int = COL_KEY
+var _sort_column: int = SORT_FILE_ORDER
 var _sort_ascending: bool = true
 var _issues: Dictionary = {}
 var _selecting: bool = false
@@ -162,6 +167,8 @@ func _filtered_indices() -> Array:
 
 
 func _sort_indices(indices: Array) -> void:
+	if _sort_column == SORT_FILE_ORDER:
+		return  # _filtered_indices already walks entries in file order
 	var table = _doc.string_table
 	var ascending := _sort_ascending
 	var column := _sort_column
@@ -203,7 +210,11 @@ func _on_item_selected() -> void:
 
 func _on_column_title_clicked(column: int, _mouse_button_index: int) -> void:
 	if column == _sort_column:
-		_sort_ascending = not _sort_ascending
+		if _sort_ascending:
+			_sort_ascending = false
+		else:
+			_sort_column = SORT_FILE_ORDER  # third click returns to file order
+			_sort_ascending = true
 	else:
 		_sort_column = column
 		_sort_ascending = true
