@@ -10,10 +10,13 @@ extends Node
 # [orig: sub_4F81A0 runs the logic systems; the client then renders the entities. Terrain/foliage/audio
 #  are host render passes the caller composes around this.]
 #
-# Cadence is the sim's tick mode: DIVIDED (62 render frames per logic tick, game) or EVERY_PROCESS
-# (one per frame, editor preview). The driver can self-tick via _process (editor) or be driven by an
-# explicit tick() call so a host can order it against its other passes (game). Stop rewinds the world
-# (World::restore) AND restores the authored node transforms captured at setup.
+# Cadence: both tick modes run ONE logic tick per call (the original's 62 Hz engine tick) — the
+# engine's dividers gate INSIDE the systems (the WAC VM fires every 62nd tick, the BMS evaluator
+# quarter-passes every 16th). TICK_DIVIDED is the game mode (advance_frame, the faithful host-frame
+# entry); TICK_EVERY_PROCESS calls step() directly (tests). The game and the editor preview both run
+# DIVIDED with the sim's default loco_scale. The driver can self-tick via _process (editor) or be
+# driven by an explicit tick() call so a host can order it against its other passes (game). Stop
+# rewinds the world (World::restore) AND restores the authored node transforms captured at setup.
 
 signal effects_drained(effects: Array)
 
@@ -50,8 +53,10 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		var adm_name := String(options.get("infantry_adm", "E_STAND.adm"))
 		if int(_sim.set_infantry_anim_map(options["resource_root"], adm_name)) <= 0:
 			push_warning("MissionRuntime: no infantry clips from '%s' — AI soldiers will stand still." % adm_name)
-	# Held OFF-tree (not add_child'd): only this driver advances it, and an off-tree node never
-	# self-ticks via _process. Freed explicitly in _exit_tree (mirrors the old MissionSimDriver).
+	# The SIM is held off-tree (never add_child'd): only this driver advances it, and an off-tree
+	# node never self-ticks via _process; it is freed explicitly in _exit_tree (mirrors the old
+	# MissionSimDriver). This MissionRuntime node itself IS in the tree — its host adds it, and
+	# self_tick only decides whether _process here calls tick() or the host does.
 	_self_tick = bool(options.get("self_tick", false))
 	_index = MissionEntityRegistry.new()
 	_index.build(container, mission)
@@ -114,7 +119,8 @@ func pause() -> void:
 	_playing = false
 
 
-## One manual tick (editor Step): present without running the self-tick loop.
+## One manual tick (editor Step): one logic tick + present, without running the self-tick loop.
+## Both tick modes advance one logic tick per call, so Step behaves identically under DIVIDED.
 func step_once() -> void:
 	_playing = false
 	tick()

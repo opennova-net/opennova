@@ -652,6 +652,8 @@ func _flush_edit() -> void:
 func _edit_step(do: Callable, err := "", on_success := Callable()) -> bool:
 	if _mission == null:
 		return false
+	if _reject_edit_while_simulating():
+		return false
 	_flush_edit()
 	_mission.begin_edit()
 	var result: Variant = do.call()
@@ -691,6 +693,8 @@ func redo() -> void:
 # _restoring guards re-entrancy: a restore -> rebake -> `changed` -> inspector roundtrip must not recurse.
 func _restore_step(is_undo: bool) -> void:
 	if _restoring:
+		return
+	if _reject_edit_while_simulating():
 		return
 	cancel_drag()
 	if _mission == null:
@@ -767,6 +771,21 @@ func _consume_viewport_key() -> void:
 
 func handle_viewport_input(event: InputEvent) -> void:
 	if _mission == null or terrain_editor == null:
+		return
+	# Live simulation: the present pass writes the placed nodes' transforms every tick, so no
+	# pick / drag / gizmo / place / hover gesture may start, and the keyboard mutators (undo /
+	# redo / delete) are locked out too. Report on a discrete attempt (a click or a mutating
+	# key), stay silent on hover/motion, and let everything else fall to the camera.
+	if is_simulating():
+		if event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
+			_reject_edit_while_simulating()
+		elif event is InputEventKey:
+			var sim_key := event as InputEventKey
+			var is_mutator := (sim_key.ctrl_pressed and sim_key.keycode in [KEY_Z, KEY_Y]) \
+				or sim_key.keycode in [KEY_DELETE, KEY_BACKSPACE]
+			if sim_key.pressed and not sim_key.echo and is_mutator and not _gui_focus_blocks_shortcut():
+				_reject_edit_while_simulating()
+				_consume_viewport_key()
 		return
 	# Scripting mode is panel-driven and the viewport is inert in it (see Mode docs): swallow all
 	# pointer events so a stray click cannot select, drag, or hover-pick an object, while still
@@ -1086,6 +1105,7 @@ func _refresh_gizmo() -> void:
 	if container == null:
 		return
 	var want := _gizmo_enabled and _mode == Mode.OBJECTS and not is_placement_armed() \
+		and not is_simulating() \
 		and not _selected_ref.is_empty() and int(_selected_ref.get("kind", -1)) != NovaMissionData.KIND_MARKER
 	if not want:
 		if _gizmo != null and is_instance_valid(_gizmo):
@@ -1431,6 +1451,8 @@ func _apply_selected_xform(xform: Transform3D) -> void:
 func _commit_selected_transform() -> void:
 	if _selected_ref.is_empty() or _mission == null:
 		return
+	if _reject_edit_while_simulating():
+		return
 	var bms_pos := MissionObjectPlacer.godot_to_bms_position(_selected_xform.origin)
 	if _mission.set_entity_transform(int(_selected_ref["kind"]), int(_selected_ref["index"]), bms_pos, _selected_rotation_deg):
 		# A marker's gizmo was preview-moved; rebuild the overlay so its pickable AABB tracks the
@@ -1687,6 +1709,8 @@ func get_placement_item_id() -> int:
 func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	if _mission == null:
 		return false
+	if _reject_edit_while_simulating():
+		return false
 	var container := _objects_container()
 	if container == null:
 		return false
@@ -1798,6 +1822,8 @@ func _render_placed_entity(kind: int, index: int) -> void:
 # inspector's Delete button and the viewport Delete key share one path.
 func delete_selected() -> bool:
 	if _selected_ref.is_empty() or _mission == null:
+		return false
+	if _reject_edit_while_simulating():
 		return false
 	var kind := int(_selected_ref["kind"])
 	var index := int(_selected_ref["index"])
@@ -2377,6 +2403,8 @@ func move_selected_marker(delta: int) -> void:
 func delete_selected_marker() -> bool:
 	if _mission == null or _selected_marker.is_empty():
 		return false
+	if _reject_edit_while_simulating():
+		return false
 	var marker_index := int(_selected_marker["marker_index"])
 	_flush_edit()
 	_mission.begin_edit()
@@ -2644,6 +2672,8 @@ func set_selected_zone_flags(active: bool, constrain_z: bool) -> void:
 func delete_selected_area_trigger() -> bool:
 	if _mission == null or _selected_zone_index < 0:
 		return false
+	if _reject_edit_while_simulating():
+		return false
 	_flush_edit()
 	_mission.begin_edit()
 	if not _mission.remove_area_trigger(_selected_zone_index):
@@ -2864,6 +2894,8 @@ func add_event_default() -> int:
 # lib). Structural, so the selection clamps to the shrunken list. One undo step. False if none selected.
 func delete_selected_event() -> bool:
 	if _mission == null or get_selected_event_index() < 0:
+		return false
+	if _reject_edit_while_simulating():
 		return false
 	_flush_edit()
 	_mission.begin_edit()
@@ -3310,14 +3342,26 @@ func _objects_container() -> Node3D:
 
 # --- Live simulation ("Play the mission") -------------------------------------
 # Promote the loaded mission into a libs/world World + AI through the shared MissionRuntime (the same
-# driver + present pass the game runs), in EVERY_PROCESS mode so the preview is snappy. Read-only over
-# the mission data: Stop rewinds the world and restores the authored node transforms.
+# driver + present pass the game runs), at the same DIVIDED cadence the game runs, so the preview IS
+# the game's pacing. Read-only over the mission data: Stop rewinds the world and restores the
+# authored node transforms. While simulating, editing is locked out (see
+# _reject_edit_while_simulating): the present pass owns the placed nodes' transforms every tick, so
+# letting a gizmo drag or inspector write race it would leave two writers fighting over one node.
 
 func can_simulate() -> bool:
 	return is_loaded() and _objects_container() != null
 
 func is_simulating() -> bool:
 	return _sim_driver != null and is_instance_valid(_sim_driver)
+
+# One gate for every mutating entry point (viewport gestures, inspector setters, undo/redo,
+# delete/place): while the sim runs, reject the edit with a status line instead of racing the
+# present pass. Returns true when the caller must bail.
+func _reject_edit_while_simulating() -> bool:
+	if not is_simulating():
+		return false
+	_report("Stop the simulation to edit.", true)
+	return true
 
 func is_sim_playing() -> bool:
 	return is_simulating() and _sim_driver.is_playing()
@@ -3331,21 +3375,25 @@ func _ensure_sim_driver() -> bool:
 	if container == null:
 		_report("Load a mission on a terrain before simulating.", true)
 		return false
-	# Entering sim mode ends any half-finished edit gesture / armed tool.
+	# Entering sim mode ends any half-finished edit gesture / armed tool, and hides the
+	# hover box + transform gizmo (the present pass owns the nodes now).
 	cancel_drag()
 	disarm_placement()
+	_clear_hover()
 	_sim_driver = MissionRuntime.new()
 	_sim_driver.name = "MissionRuntime"
 	container.add_child(_sim_driver)
-	# EVERY_PROCESS (one tick per frame) + self_tick so the driver runs itself while playing; loco_scale
-	# 4096 paces AI movement for the snappy preview. The driver builds its present index over `container`.
-	# Pass the editor's loaded terrain so the preview grounds AI exactly like the game runtime, and the
-	# resource root so soldiers get their .adm/.bad root-motion clips (without them they stand still).
+	# TICK_DIVIDED + self_tick + the sim's default loco_scale: the exact options the game's
+	# NovaWorld path runs, so the preview IS the game's pacing. The old EVERY_PROCESS +
+	# loco_scale 4096 combo (32768/8, a slowed compensation for uncapped editor fps) was an
+	# editor-only divergence. The driver builds its present index over `container`. Pass the
+	# editor's loaded terrain so the preview grounds AI exactly like the game runtime, and the
+	# resource root so soldiers get their .adm/.bad root-motion clips (without them they stand
+	# still).
 	var terrain_data = terrain_editor.get_data() if terrain_editor != null and terrain_editor.has_method("get_data") else null
 	var sim_root = terrain_editor.get_resource_root() if terrain_editor != null and terrain_editor.has_method("get_resource_root") else null
 	if int(_sim_driver.setup(_mission, container, {
-			"tick_mode": NovaSimulation.TICK_EVERY_PROCESS,
-			"loco_scale": 4096,
+			"tick_mode": NovaSimulation.TICK_DIVIDED,
 			"self_tick": true,
 			"terrain": terrain_data,
 			"resource_root": sim_root,
@@ -3353,6 +3401,7 @@ func _ensure_sim_driver() -> bool:
 		sim_stop()
 		_report("No AI entities to simulate in this mission.", false)
 		return false
+	_refresh_gizmo()
 	return true
 
 func sim_play() -> void:
@@ -3379,6 +3428,8 @@ func sim_stop() -> void:
 	_sim_driver.stop()
 	_sim_driver.queue_free()
 	_sim_driver = null
+	# Editing is unlocked again: bring the transform gizmo back for the surviving selection.
+	_refresh_gizmo()
 	changed.emit()
 
 
