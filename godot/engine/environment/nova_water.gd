@@ -16,6 +16,16 @@ extends Node3D
 			mesh_instance.position.y = water_height
 @export_range(0, 1, 0.01) var water_alpha: float = 0.6
 
+# When set (not NaN), the host drives water height directly and the env/terrain
+# fallback is ignored — the terrain editor authors height through its document.
+var _height_override: float = NAN
+
+
+func set_height_override(value: float) -> void:
+	_height_override = value
+	if not is_nan(value):
+		water_height = value
+
 var mesh_instance: MeshInstance3D
 var water_material: ShaderMaterial
 var elapsed_time: float = 0.0
@@ -129,6 +139,9 @@ func _process(delta: float) -> void:
 
 
 func _apply_environment_water_height() -> void:
+	if not is_nan(_height_override):
+		water_height = _height_override
+		return
 	var env := _cached_env
 	if env and env.has_method("has_water_height") and env.has_water_height():
 		# .env water_height is stored <<15 by the engine — half world units,

@@ -25,6 +25,8 @@ const TerrainTileOverlayPreview = preload("res://modtools/terrain/terrain_tile_o
 const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
 const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
 const NovaSkyScript = preload("res://engine/environment/nova_sky.gd")
+const NovaWaterScript = preload("res://engine/environment/nova_water.gd")
+const NovaWeatherScript = preload("res://engine/environment/nova_weather.gd")
 const DEFAULT_SECTOR_PATTERN := [
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,
@@ -151,9 +153,8 @@ var _export_output_dir: String = ""
 
 var _clone_source_marker: MeshInstance3D
 
-var _water_instance: MeshInstance3D
-var _water_plane_mesh: PlaneMesh
-var _water_material: StandardMaterial3D
+var _water_node: Node3D
+var _weather_node: Node3D
 var water_visible: bool = true
 var sector_overlay_visible: bool = false
 
@@ -196,8 +197,8 @@ func _ready() -> void:
 	_configure_editor_window()
 	camera.position = Vector3(512, 80, 600)
 	camera.rotation_degrees = Vector3(-30, 0, 0)
-	_init_water_plane()
 	_init_environment_preview()
+	_init_water_plane()
 	_init_foliage_preview()
 	_init_tile_overlay_preview()
 	_init_clone_marker()
@@ -269,22 +270,16 @@ func _init_foliage_preview() -> void:
 
 
 func _init_water_plane() -> void:
-	_water_plane_mesh = PlaneMesh.new()
-	_water_plane_mesh.size = Vector2(1024.0, 1024.0)
-
-	_water_material = StandardMaterial3D.new()
-	_water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_water_material.albedo_color = Color(0.13, 0.34, 0.55, 0.55)
-	_water_material.metallic = 0.1
-	_water_material.roughness = 0.2
-	_water_material.cull_mode = BaseMaterial3D.CULL_DISABLED
-
-	_water_instance = MeshInstance3D.new()
-	_water_instance.name = "WaterPlane"
-	_water_instance.mesh = _water_plane_mesh
-	_water_instance.material_override = _water_material
-	_water_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	terrain_world_root.add_child(_water_instance)
+	# Runtime parity (deferred from PR #24): the editor preview renders the same
+	# NovaWater (water.gdshader, env-derived lit color) the runtime uses, instead
+	# of a bespoke plane with a hardcoded color. Height stays document-driven via
+	# the override hook.
+	_water_node = Node3D.new()
+	_water_node.name = "WaterPlane"
+	_water_node.set_script(NovaWaterScript)
+	_water_node.environment_path = NodePath("../EditorEnvironment")
+	terrain_world_root.add_child(_water_node)
+	_water_node.set_height_override(float(get_water_height()))
 
 
 func _init_environment_preview() -> void:
@@ -303,6 +298,15 @@ func _init_environment_preview() -> void:
 	_sky_node.environment_path = NodePath("../EditorEnvironment")
 	terrain_world_root.add_child(_sky_node)
 
+	# Runtime parity: the same weather smoothing that runs in-game also runs in
+	# the preview, so scrubbing/playing TOD matches play. The tick is O(1) so it
+	# does not affect brush perf; discrete scrubs call resync_colors() to snap.
+	_weather_node = Node3D.new()
+	_weather_node.name = "EditorWeather"
+	_weather_node.set_script(NovaWeatherScript)
+	_weather_node.environment_path = NodePath("../EditorEnvironment")
+	terrain_world_root.add_child(_weather_node)
+
 	if not environment_editor.environment_changed.is_connected(_on_environment_editor_changed):
 		environment_editor.environment_changed.connect(_on_environment_editor_changed)
 	if not environment_editor.state_changed.is_connected(_on_environment_state_changed):
@@ -319,6 +323,10 @@ func _on_environment_editor_changed(env_file: EnvFile, preview_time: float) -> v
 	if _environment_node:
 		_environment_node.environment_data = env_file
 		_environment_node.time_of_day = preview_time
+	# A discrete TOD scrub or document edit must snap the weather smoother,
+	# otherwise the preview lags behind the slider.
+	if _weather_node and _weather_node.has_method("resync_colors"):
+		_weather_node.resync_colors()
 	_apply_environment_to_preview()
 	if workstation and workstation.has_method("sync_from_editor_state"):
 		workstation.sync_from_editor_state()
@@ -331,33 +339,21 @@ func _apply_environment_to_preview() -> void:
 	if material:
 		# Same env -> terrain-uniform push the runtime uses (NovaEnvironment owns it).
 		_environment_node.apply_terrain_uniforms(material)
-	if _water_material:
-		var water: Vector3 = _environment_node.get_water_color()
-		var alpha := 0.55
-		if environment_editor and environment_editor.env_file:
-			alpha = environment_editor.env_file.get_water_murk()
-		_water_material.albedo_color = Color(water.x, water.y, water.z, alpha)
+	# Water color/height/murk now come from the NovaWater node (env-driven),
+	# matching the runtime; nothing hardcoded here.
 
 
 func _update_water_plane() -> void:
-	if _water_instance == null:
+	if _water_node == null:
 		return
 	var has_bounds := false
-	var center_x := 0.0
-	var center_z := 0.0
 	if terrain_mesh:
 		var bounds: AABB = terrain_mesh.get_world_bounds()
 		has_bounds = bounds.size.x > 0.0 and bounds.size.z > 0.0
-		if has_bounds:
-			var margin := 0.2
-			_water_plane_mesh.size = Vector2(
-				bounds.size.x * (1.0 + margin),
-				bounds.size.z * (1.0 + margin)
-			)
-			center_x = bounds.position.x + bounds.size.x * 0.5
-			center_z = bounds.position.z + bounds.size.z * 0.5
-	_water_instance.position = Vector3(center_x, float(get_water_height()), center_z)
-	_water_instance.visible = water_visible and has_bounds
+	# Document drives height; NovaWater follows the camera and renders the
+	# env-derived lit water color + murk alpha.
+	_water_node.set_height_override(float(get_water_height()))
+	_water_node.visible = water_visible and has_bounds
 	_apply_environment_to_preview()
 
 
