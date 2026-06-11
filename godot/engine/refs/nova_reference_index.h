@@ -24,8 +24,12 @@ namespace godot {
 // with { status: "found"|"missing"|"unprobed", target_path } by probing
 // kind-specific candidate names through the root — textures reuse
 // texture_candidate_filenames (the cached resolver's fallback list), header
-// refs get their engine extension appended, and name-table kinds that are not
-// files (sound_profile) stay "unprobed" rather than reporting a fake miss.
+// refs get their engine extension appended (terrain/.trn, environment/.env,
+// object_model/.3di, font/.fnt, anim_def/.adm, menu/.mnu, sound/.lwf,
+// strings verbatim-then-.bin, datasource verbatim), and name-table kinds that
+// are not files (sound_profile = a set inside a bank, string_id = a key
+// inside a string table) stay "unprobed" rather than reporting a fake miss —
+// per-key statusing belongs to callers holding the table context.
 class NovaReferenceIndex : public RefCounted {
 	GDCLASS(NovaReferenceIndex, RefCounted)
 

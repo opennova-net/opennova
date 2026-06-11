@@ -43,7 +43,27 @@ std::vector<String> candidates_for(const String &target_kind, const String &targ
 		out.push_back(has_extension(target_name) ? target_name : target_name + String(".adm"));
 	} else if (target_kind == String("item_defs")) {
 		out.push_back(target_name);
+	} else if (target_kind == String("menu")) {
+		out.push_back(has_extension(target_name) ? target_name : target_name + String(".mnu"));
+	} else if (target_kind == String("sound")) {
+		// A .lwf bank FILE (mnu <SOUND> elements name the bank; the trigger is a
+		// set inside it). Distinct from "sound_profile", which is a named set and
+		// stays unprobed.
+		out.push_back(has_extension(target_name) ? target_name : target_name + String(".lwf"));
+	} else if (target_kind == String("strings")) {
+		// text_rsrc values carry their extension in retail (menutxt.BIN); probe
+		// verbatim first, with a .bin fallback for extensionless authoring.
+		out.push_back(target_name);
+		if (!has_extension(target_name)) {
+			out.push_back(target_name + String(".bin"));
+		}
+	} else if (target_kind == String("datasource")) {
+		// Runtime resolves datasource names verbatim through the root.
+		out.push_back(target_name);
 	}
+	// "string_id" deliberately has no candidates: a key resolves against a
+	// string TABLE, which a flat (kind, name) probe cannot know - callers with
+	// table context (the editor's string widgets) status keys themselves.
 	return out;
 }
 

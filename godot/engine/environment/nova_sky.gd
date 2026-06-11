@@ -93,8 +93,10 @@ func _process(delta: float) -> void:
 	if not _cached_cam or not _cached_cam.is_inside_tree():
 		_cached_cam = _find_camera()
 	if _cached_cam and mesh_instance:
+		# The dome follows the camera in xz and rides at HALF the camera height
+		# [orig: render_skybox @ 0x5790d0 - world translation z = camHeight >> 1].
 		var cam_pos := _cached_cam.global_position
-		mesh_instance.global_position = Vector3(cam_pos.x, 0.0, cam_pos.z)
+		mesh_instance.global_position = Vector3(cam_pos.x, cam_pos.y * 0.5, cam_pos.z)
 
 	var sky_speed := 15.0
 	var sky_height := 175.0
@@ -102,33 +104,31 @@ func _process(delta: float) -> void:
 	if env and env.has_method("is_loaded") and env.is_loaded():
 		var env_data: EnvFile = env.get_environment_data()
 		if env_data and env_data.get_advanced_clouds() == 0:
-			# The fixed-function fallback draws the dome in a single pass with
-			# the material set to the CLOUD color, textures still bound
-			# [orig: render_skybox @ 0x579b42].
-			var cloud_color: Vector3 = env.get_cloud_tint()
-			sky_material.set_shader_parameter("u_sky_base", cloud_color)
-			sky_material.set_shader_parameter("u_sky_bright", cloud_color)
-			sky_material.set_shader_parameter("u_sky_highlight", cloud_color)
-			sky_material.set_shader_parameter("u_horizon_color", cloud_color)
-			sky_material.set_shader_parameter("u_ground_fog_color", cloud_color)
-			sky_material.set_shader_parameter("u_secondary_ambient", cloud_color)
-			sky_material.set_shader_parameter("u_cloud_tint", cloud_color)
-			sky_material.set_shader_parameter("u_sun_color", Vector3.ZERO)
-			sky_material.set_shader_parameter("u_moon_color", Vector3.ZERO)
+			# Flat cloud-color dome: the original applies the pass-1 NULL-texture
+			# effect with material ambient = cloud_rgb against D3DRS_AMBIENT
+			# 0xFFFFFF - the only render path that reads cloud_rgb
+			# [orig: render_skybox @ 0x579b42..0x579bb6].
+			sky_material.set_shader_parameter("u_flat_pass", true)
+			sky_material.set_shader_parameter("u_flat_color", env.get_cloud_tint())
 		else:
+			sky_material.set_shader_parameter("u_flat_pass", false)
 			sky_material.set_shader_parameter("u_sky_base", env.get_sky_base())
 			sky_material.set_shader_parameter("u_sky_bright", env.get_sky_bright())
 			sky_material.set_shader_parameter("u_sky_highlight", env.get_sky_highlight())
-			sky_material.set_shader_parameter("u_horizon_color", env.get_horizon_color())
-			sky_material.set_shader_parameter("u_ground_fog_color", env.get_ground_fog_color())
-			sky_material.set_shader_parameter("u_secondary_ambient", env.get_secondary_ambient())
-			sky_material.set_shader_parameter("u_cloud_tint", env.get_cloud_tint())
-			sky_material.set_shader_parameter("u_sun_color", env.get_sun_color())
-			sky_material.set_shader_parameter("u_moon_color", env.get_moon_color())
+			sky_material.set_shader_parameter("u_cloud_base", env.get_cloud_base())
+			sky_material.set_shader_parameter("u_cloud_highlight", env.get_cloud_highlight())
+			sky_material.set_shader_parameter("u_cloud_edge", env.get_cloud_edge())
 
+		# Pass 1 is always sun-driven; the cloud pass follows the active light,
+		# moon at night [orig: render_skybox @ 0x579287 Terrain_GetSunDirectionAsFloat
+		# vs @ 0x579291 Environment_GetLightDirectionFloat].
 		sky_material.set_shader_parameter("u_sun_dir", env.get_sun_direction())
-		sky_material.set_shader_parameter("u_moon_dir", env.get_moon_direction())
-		sky_material.set_shader_parameter("u_clear_color", env.get_skyfog_color())
+		sky_material.set_shader_parameter("u_light_dir", env.get_light_direction())
+		# The dome fogs with the same scene fog state as terrain - the active fog
+		# block color, no dome-specific derivation
+		# [orig: CD3DDevice_SetActiveFogColor @ 0x677040].
+		sky_material.set_shader_parameter("u_fog_color", env.get_fog_color())
+		sky_material.set_shader_parameter("u_fog_end", env.get_fog_level())
 		sky_speed = env.get_sky_speed()
 		sky_height = env.get_sky_height()
 		sky_material.set_shader_parameter("u_sky_height", sky_height)

@@ -200,6 +200,7 @@ static void test_can_extract_dispatch() {
     EXPECT_TRUE(opennova::refs::can_extract("C:/game/ITEMS.DEF"));
     EXPECT_TRUE(opennova::refs::can_extract("model.3DI"));
     EXPECT_TRUE(opennova::refs::can_extract("ash_i5b.bms"));
+    EXPECT_TRUE(opennova::refs::can_extract("jo_main.MNU"));
     EXPECT_TRUE(!opennova::refs::can_extract("weapon.def"));
     EXPECT_TRUE(!opennova::refs::can_extract("texture.tga"));
     EXPECT_TRUE(!opennova::refs::can_extract("noext"));
