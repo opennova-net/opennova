@@ -130,6 +130,13 @@ func test_material_edit_on_a_shared_data_does_not_leak_across_models() -> void:
 	var b: Node3D = add_child_autofree(NovaObjectModelScript.new())
 	a.set_object_data(data)
 	b.set_object_data(data)
+	# Snapshot the pre-edit meshes: the post-edit assertions below would all hold
+	# on this initial shared state too, so PROVING the deferred rebuild + cache
+	# invalidation happened requires the post-edit RIDs to be disjoint from these.
+	var pre_edit_rids: Array = []
+	for mi in _mesh_instances(a):
+		pre_edit_rids.append((mi as MeshInstance3D).mesh.get_rid())
+	assert_false(pre_edit_rids.is_empty(), "the models built render meshes before the edit")
 	# An edit notifies object_changed (deferred) -> both models rebuild from the
 	# fresh cache; their material overrides must remain distinct objects.
 	data.set_material_field(0, "rgb_gen_rate", 2.0)
@@ -140,6 +147,8 @@ func test_material_edit_on_a_shared_data_does_not_leak_across_models() -> void:
 	for i in range(mini(a_meshes.size(), b_meshes.size())):
 		var mi_a := a_meshes[i] as MeshInstance3D
 		var mi_b := b_meshes[i] as MeshInstance3D
+		assert_false(pre_edit_rids.has(mi_a.mesh.get_rid()),
+			"the deferred rebuild really happened: post-edit meshes are FRESH, not the pre-edit set")
 		assert_eq(mi_a.mesh.get_rid(), mi_b.mesh.get_rid(),
 			"post-edit rebuilds still share the (fresh) meshes")
 		if mi_a.material_override != null:
