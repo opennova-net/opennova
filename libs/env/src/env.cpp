@@ -210,6 +210,17 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 	// is applied at interpolation/engine-view time rather than baked into colors
 	// at parse — tracked divergence #8 in docs/env/env-tod-re.md (equivalent for
 	// files where envscale precedes all colors; the corpus sweep validates this).
+	//
+	// Load pipeline context (C6 grill, [orig: Environment_LoadTimeOfDayConfig
+	// @ 0x57db30]): the retail loader runs this parser over the .trn/.env FIRST,
+	// and overcast.def is NEVER a fallback — on .trn success it ALWAYS parses
+	// additively into the overcast keyframe table (the keyframe count is not
+	// reset between passes); a missing/failed .trn aborts the whole TOD load with
+	// no .env pass, and a NULL map name goes straight to overcast.def. At runtime
+	// the overcast blend cross-fades the .env-table colors against the overcast
+	// table. This reimpl carries the .env table only — overcast blend 0 (clear
+	// weather, pure .env) until weather scripting drives it; a future overcast
+	// cross-fade must parse overcast.def additively per the order above.
 	error.clear();
 	out = Config();
 
