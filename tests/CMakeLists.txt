@@ -794,3 +794,11 @@ foreach(test threedi mission)
     target_compile_features(refs_${test}_test PRIVATE cxx_std_17)
     add_test(NAME refs_${test} COMMAND refs_${test}_test)
 endforeach()
+
+# refs: the whole-root RefGraph (referrers inverse, (size,mtime) memo, fail-soft
+# errors, broken-reference validation) over an in-memory file map.
+add_executable(ref_graph_test refs/ref_graph_test.cpp)
+target_link_libraries(ref_graph_test PRIVATE opennova_refs opennova_env opennova_cbin)
+target_include_directories(ref_graph_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ref_graph_test PRIVATE cxx_std_17)
+add_test(NAME ref_graph COMMAND ref_graph_test)
