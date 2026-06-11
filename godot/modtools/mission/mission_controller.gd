@@ -32,6 +32,10 @@ const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
 const OBJECTS_CONTAINER := "MissionObjects"
 
+# Deviation tolerance passed to BOTH the re-ground dry-run count and the apply, so
+# the "terrain changed under N objects" prompt and the move share one policy.
+const REGROUND_EPSILON := 0.01
+
 # AI-change action family + the PLAYPARTANIM sub-type, for resolving a scripting action's target to a
 # live model for in-editor preview. Mirrors the runtime present pass. [orig: Entity_ApplyCommand case 0x22]
 const _ACT_CHANGE_GROUP_AI := 3
@@ -53,6 +57,23 @@ var _current_path: String = ""
 # The resolved .trn path the loaded mission mounted, so a later terrain swap in the
 # Terrain workspace can be detected (see reconcile_with_terrain()).
 var _loaded_trn_path: String = ""
+# The terrain height revision captured when the mission loaded (or when drift was
+# last acknowledged / re-grounded), so reconcile_with_terrain can detect height
+# edits made under the loaded mission. -1 = no revision available (stub editors
+# without get_height_revision).
+var _loaded_height_revision: int = -1
+# Surface height under each entity's ground point when the mission was last in a
+# known-grounded state (load / new / applied re-ground), keyed by the quantized BMS
+# ground point. The drift scan compares the CURRENT surface against this memo and
+# only re-grounds entities whose ground actually moved — an entity authored off the
+# surface on purpose (waypoint markers carry flight altitude for flying AIs, see
+# docs/world/world-wac-ai-re.md §7.4; objects can be raised via the inspector) is
+# never counted or touched while the terrain under it is unchanged. Keyed by ground
+# POSITION, not entity index, so adds/removes/drags cannot mis-attribute a row: a
+# new or moved entity simply has no row and rides through to the engine's own
+# deviation check. NOT cleared on decline (acknowledge_terrain_drift), so the
+# manual re-ground keeps seeing the drift after the prompt was waved away.
+var _ground_baseline: Dictionary = {}
 var _last_open_dir: String = ""
 var _stats: Dictionary = {}
 var _last_status: String = ""
@@ -459,6 +480,7 @@ func open_mission(bms_path: String) -> Error:
 	_mission = mission
 	_current_path = bms_path
 	_loaded_trn_path = trn_path
+	_record_ground_state()
 	_last_open_dir = bms_path.get_base_dir()
 	# A fresh undo history for this document, and a clean baseline so the freshly-opened mission
 	# is not dirty (and undoing back to it later clears the `*`).
@@ -518,6 +540,7 @@ func new_mission() -> Error:
 	_mission = mission
 	_current_path = ""          # no file yet; Save routes through Save As
 	_loaded_trn_path = trn_path
+	_record_ground_state()
 	# Empty undo history and a clean baseline: the new mission is not dirty until the first edit
 	# (Save As is always available regardless). mark_clean must follow create_default so the
 	# baseline is the empty mission.
@@ -552,6 +575,8 @@ func clear() -> void:
 	_mission = null
 	_current_path = ""
 	_loaded_trn_path = ""
+	_loaded_height_revision = -1
+	_ground_baseline = {}
 	_stats = {}
 	_notify_changed()
 
@@ -561,11 +586,157 @@ func clear() -> void:
 # longer belong to the mounted world. Drop the mission so its objects / metadata
 # stop describing a world that is no longer there; re-opening shows it on its own
 # terrain again. Called when the Mission workspace regains focus.
-func reconcile_with_terrain() -> void:
+#
+# When the SAME terrain is still mounted but its heights were edited since the
+# mission loaded (or since drift was last resolved), returns how many entities'
+# ground points no longer sit on the surface — the workspace prompts to re-ground
+# on a non-zero count. Returns 0 on the swap/clear and no-drift paths.
+func reconcile_with_terrain() -> int:
 	if _mission == null or terrain_editor == null or not terrain_editor.has_method("get_current_trn_path"):
-		return
+		return 0
 	if String(terrain_editor.get_current_trn_path()) != _loaded_trn_path:
 		clear()
+		return 0
+	# Same terrain file: detect height edits made under the loaded mission. The
+	# revision gate keeps the common no-edit activate at zero cost (no request
+	# build, no sampling).
+	if _loaded_height_revision < 0 or not terrain_editor.has_method("get_height_revision"):
+		return 0
+	if int(terrain_editor.get_height_revision()) == _loaded_height_revision:
+		return 0
+	var count := _count_terrain_drift()
+	if count == 0:
+		# The height edits missed every object; settle on the new revision so
+		# later activates skip the scan.
+		_record_height_revision()
+	return count
+
+
+func _record_height_revision() -> void:
+	if terrain_editor != null and terrain_editor.has_method("get_height_revision"):
+		_loaded_height_revision = int(terrain_editor.get_height_revision())
+	else:
+		_loaded_height_revision = -1
+
+
+# Adopt the current terrain + entity layout as the known-grounded reference: the
+# height revision plus the surface memo under every entity's ground point.
+func _record_ground_state() -> void:
+	_record_height_revision()
+	_ground_baseline = {}
+	for r in _build_reground_requests():
+		var request: Dictionary = r
+		var hit: Vector3 = request["ground_hit_bms"]
+		_ground_baseline[_ground_key(hit)] = hit.z
+
+
+# Quantize a BMS ground point to centimetres for the baseline memo. The same
+# unmoved entity reproduces the same key bit-for-bit (the builder is
+# deterministic); colliding keys are harmless because the value only depends on
+# the position being sampled.
+static func _ground_key(hit_bms: Vector3) -> Vector2i:
+	return Vector2i(roundi(hit_bms.x * 100.0), roundi(hit_bms.y * 100.0))
+
+
+# The re-ground request set restricted to entities whose ground SURFACE moved
+# since the baseline. A row whose sampled height still matches its memo is an
+# entity sitting at an author-chosen offset over unchanged terrain — excluded, so
+# a bulk re-ground can never flatten it. Rows without a memo (placed or dragged
+# since the baseline) ride through to the engine's own deviation check, which
+# skips them unless they are genuinely off the surface.
+func _drifted_requests() -> Array:
+	var requests: Array = []
+	for r in _build_reground_requests():
+		var request: Dictionary = r
+		var hit: Vector3 = request["ground_hit_bms"]
+		var key := _ground_key(hit)
+		if _ground_baseline.has(key) and absf(hit.z - float(_ground_baseline[key])) <= REGROUND_EPSILON:
+			continue
+		requests.append(request)
+	return requests
+
+
+# Dry-run count through the engine's re-ground policy: the prompt count and the
+# apply share one request set and one epsilon, so the count can never lie.
+func _count_terrain_drift() -> int:
+	var requests := _drifted_requests()
+	if requests.is_empty():
+		return 0
+	return _mission.reground_entities(requests, REGROUND_EPSILON, false)
+
+
+## Snap every entity whose ground moved back onto the terrain surface as ONE undo
+## step, then re-bake the world. Returns how many entities moved. Adopts the new
+## ground state afterwards (the drift is resolved). Serves both the activate-time
+## prompt and the inspector's manual button; entities authored off the surface on
+## purpose are protected by the baseline filter (see _ground_baseline).
+func reground_drifted() -> int:
+	if _mission == null:
+		return 0
+	if _reject_edit_while_simulating():
+		return 0
+	var requests := _drifted_requests()
+	_flush_edit()
+	_mission.begin_edit()
+	var moved := _mission.reground_entities(requests, REGROUND_EPSILON, true)
+	_mission.commit_edit() # pushes one step only if something actually moved
+	_record_ground_state()
+	if moved > 0:
+		_rebake_objects()
+		mark_dirty()
+		_report("Re-grounded %d object%s." % [moved, "" if moved == 1 else "s"])
+	else:
+		_report("No objects needed re-grounding.")
+	return moved
+
+
+## Decline path for the activate-time prompt: adopt the current height revision so
+## the prompt stays quiet until the NEXT height edit. The surface memo is kept, so
+## the drift stays visible to the manual re-ground button (declining the question
+## is not the same as calling the layout grounded). An undo of an applied re-ground
+## likewise re-arms only the manual path.
+func acknowledge_terrain_drift() -> void:
+	_record_height_revision()
+
+
+# One re-ground request per entity, sampling the terrain under each entity's ROTATED
+# ground anchor. The engine bakes position = hit - R*anchor (authoring.cpp
+# bake_ground_transform, with R including the Rz(90) model-forward correction even at
+# zero rotation), and bms_to_godot_basis is the exact conjugate of that R (parity
+# pinned by mission_object_placer_test.gd) — so adding the rotated anchor back on
+# first, mirroring the drop bake in _move_selected_to_world (basis * ground offset),
+# makes the apply a pure z re-ground: x/y are preserved exactly and an entity
+# already on the surface never counts as drifted. Unresolved items (no items.def
+# row -> unknown anchor) and off-terrain samples (NAN) are skipped; markers ground
+# their own origin (anchor ZERO, the engine stores the hit directly).
+func _build_reground_requests() -> Array:
+	var requests: Array = []
+	if _mission == null or _placer == null:
+		return requests
+	if terrain_editor == null or not terrain_editor.has_method("sample_height_world"):
+		return requests
+	for e in _mission.get_all_entities():
+		var entity: Dictionary = e
+		var kind := int(entity.get("kind", -1))
+		var ground_godot: Vector3 = MissionObjectPlacer.bms_to_godot_position(entity.get("position", Vector3.ZERO))
+		var anchor_bms := Vector3.ZERO
+		if kind != NovaMissionData.KIND_MARKER:
+			var graphic: String = _placer.graphic_for(int(entity.get("item_id", 0)))
+			if graphic.is_empty():
+				continue
+			var anchor_godot: Vector3 = _placer.ground_anchor_godot(graphic)
+			anchor_bms = MissionObjectPlacer.godot_to_bms_position(anchor_godot)
+			ground_godot += MissionObjectPlacer.bms_to_godot_basis(entity.get("rotation_deg", Vector3.ZERO)) * anchor_godot
+		var height: float = terrain_editor.sample_height_world(ground_godot.x, ground_godot.z)
+		if is_nan(height):
+			continue
+		requests.append({
+			"kind": kind,
+			"index": int(entity.get("index", -1)),
+			"ground_hit_bms": MissionObjectPlacer.godot_to_bms_position(Vector3(ground_godot.x, height, ground_godot.z)),
+			"ground_anchor_bms": anchor_bms,
+		})
+	return requests
 
 
 # The MissionObjects container hangs under the shared terrain world root, so it is

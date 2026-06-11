@@ -183,6 +183,13 @@ class FakeController:
 	func is_simulating() -> bool:
 		return simulating
 
+	# B8: the Mission-tab bulk re-ground button delegates here.
+	var reground_calls := 0
+
+	func reground_drifted() -> int:
+		reground_calls += 1
+		return 0
+
 	func is_sim_playing() -> bool:
 		return sim_playing
 
@@ -2286,3 +2293,25 @@ func test_split_set_detail_host_null_evacuates_without_freeing() -> void:
 	var parent_before: Node = ctx.inspector._detail_root.get_parent()
 	ctx.inspector.set_detail_host(ctx.dock)
 	assert_eq(ctx.inspector._detail_root.get_parent(), parent_before, "same-host re-mount does not thrash the subtree")
+
+
+# --- B8: Mission-tab bulk re-ground button --------------------------------------
+
+func test_reground_button_shows_with_a_mission_and_delegates() -> void:
+	var ctx := _make({})
+	var button := ctx.inspector.find_child("MissionRegroundAll", true, false) as Button
+	assert_not_null(button, "the Re-ground button is built up front")
+	assert_false(button.visible, "and hidden while no mission is loaded")
+
+	ctx.fake.mission_ref = NovaMissionData.new()
+	ctx.fake.changed.emit()
+	assert_true(button.visible, "a loaded mission shows the button")
+	assert_false(button.disabled, "enabled while not simulating")
+
+	button.pressed.emit()
+	assert_eq(ctx.fake.reground_calls, 1, "the press delegates to the controller once")
+
+	# Editing is locked during a live simulation; the button greys out with it.
+	ctx.fake.simulating = true
+	ctx.fake.changed.emit()
+	assert_true(button.disabled, "disabled while the simulation runs")

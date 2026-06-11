@@ -632,6 +632,24 @@ func get_data() -> NovaTerrainData:
 	return _data
 
 
+# World-space height of the LIVE editable surface under (world_x, world_z) — the
+# same image-backed bilinear sample the placement/drag raycasts ground on
+# (EditorTerrainMesh.sample_world_height over the edited heightmap). NOT the baked
+# CPT sampler (NovaTerrainData.get_height_world*): height brushes mutate only the
+# editable image, so the baked buffer is stale the moment _height_revision moves
+# (and absent entirely on never-exported project terrains). Returns NAN when no
+# terrain is live or the point is off the mesh; the Mission workspace's re-ground
+# skips those entities rather than grounding them to a bogus height. Duck-typed
+# so the mission tests' headless stub can fake the surface.
+func sample_height_world(world_x: float, world_z: float) -> float:
+	if terrain_mesh == null:
+		return NAN
+	var height := terrain_mesh.sample_world_height(world_x, world_z)
+	if height == INVALID_HEIGHT:
+		return NAN
+	return height
+
+
 func get_environment_editor():
 	return environment_editor
 
