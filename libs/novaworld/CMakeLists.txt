@@ -5,6 +5,7 @@ add_library(opennova_novaworld STATIC
     src/lobby_update.cpp
     src/session_hello.cpp
     src/protocol_message.cpp
+    src/client_session.cpp
     src/game_session.cpp
     src/game_server_runtime.cpp
     src/gsb.cpp

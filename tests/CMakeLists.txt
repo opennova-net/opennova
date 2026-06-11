@@ -935,6 +935,13 @@ target_link_libraries(lobby_session_test PRIVATE opennova_novaworld opennova_nap
 target_include_directories(lobby_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME lobby_session COMMAND lobby_session_test)
 
+# ADR 0010 Phase 1 — ClientSession handshake (hk echo + 0x83 verify) driven
+# in-process against the real server-side parsers/builders + LobbySession.
+add_executable(client_session_loopback_test novaworld/client_session_loopback_test.cpp)
+target_link_libraries(client_session_loopback_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto)
+target_include_directories(client_session_loopback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME client_session_loopback COMMAND client_session_loopback_test)
+
 # Backend schema regression — applies the actual backend/migrations/* and
 # backend/seed/* the standalone server uses, so SQL syntax errors and seed
 # regressions break CI before they break the running server.

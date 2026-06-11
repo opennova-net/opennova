@@ -867,6 +867,35 @@ there (not yet on master).
   done; the legacy `NW*.dll` HTTP routes (§2) followed; full retail end-to-end join (spawn
   flow, §5) was still being chased.
 
+### 7.1 Client session state machine (ADR 0010, Phase 1)
+
+The client direction of the session flow is a Godot-free state machine,
+`libs/novaworld/client_session.{h,cpp}` — the mirror of `LobbySession`/
+`nw_udp_listener.cpp` with request and response inverted. The `NovaWorldClient`
+GDExtension binding (`godot/engine/network/`) is now a thin socket pump: the
+gate leg yields the NW UDP host:port, then `ClientSession` runs
+`HELLO → AUTH → {ClientConnected → ServerStartVerify → ClientRequestVerifyResult →
+ServerVerifyResult} → Verified`.
+
+Two client-direction parsers were added (inverses of the existing serializers):
+`parse_server_hello` (recovers the host key `HK` the client must echo) and
+`parse_server_auth` (recovers `CR`/`SK`/server `SCRK` + the CS/CU control
+fields). Phase 1 closed two stubs in the old binding: the hardcoded
+`send_session_join(/*server_hk=*/0)` (now echoes `ServerHello.HK` in
+`ClientAuth.HK`) and the empty `0x83` handler (now decodes the lobby stream and
+drives the verify handshake to `ServerVerifyResult`). The inner-stream crypto is
+symmetric: the client encrypts its `0x43` with its own `SCRK`, decrypts inbound
+`0x83` with the server's `SCRK`; outbound `session_id` = the server `SK`.
+
+Verified offline by `tests/novaworld/client_session_loopback_test.cpp`, which
+drives `ClientSession` against the real server-side parsers/builders +
+`LobbySession` in-process and asserts the `HK` echo and the
+`Verified`/`SessIdString` outcome. The client direction has **not** had a fresh
+IDA witness this pass — the `HK` echo and verify framing are inferred from the
+already-anchored `HandleClientHello`/`HandleClientJoin` (Wave 1, §8) and the
+container set (§3). Live-smoke vs `gs.novaworld.net` and the host/join legs are
+ADR 0010 Phases 2-5.
+
 ## 8. Equivalence verdicts (grill log)
 
 Per-system verdicts from grilling the reimplementation against retail

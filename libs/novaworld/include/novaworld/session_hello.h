@@ -100,6 +100,14 @@ ServerHello build_server_hello(const ClientHello &client,
 // Serialize a ServerHello to flat-TLV bytes.
 std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg);
 
+// Parse a ServerHello TLV payload (the bytes AFTER the 0x81 opcode and
+// AFTER NWU-decryption). The client uses this to recover the server's host
+// key `hk` (which it must echo in ClientAuth.hk) plus the reflected
+// IP/port. Inverse of server_hello_to_bytes; ignores unknown tags and is
+// tolerant of either the matchmaking field set (with PL) or the
+// game-server set (SF/P1/P2/NP/MP + SUS1/SUS2). Returns true on success.
+bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out);
+
 // ---- ClientAuth / ServerAuth (novaworld-service auth step) -------------
 //
 // NOTE ON NAMING: onnet calls these "ClientJoin" / "ServerJoin". That's
@@ -184,5 +192,14 @@ ServerAuth build_server_auth(const ClientAuth &client,
 // Serialize a ServerAuth to flat-TLV bytes (ready to opcode-prefix +
 // NWU-encrypt + CRC-envelope).
 std::vector<uint8_t> server_auth_to_bytes(const ServerAuth &msg);
+
+// Parse a ServerAuth TLV payload (the bytes AFTER the 0x82 opcode and
+// AFTER NWU-decryption). The client uses this to recover the connection
+// result `cr` (1 = accepted), the server key `sk` (which becomes the
+// session_id on the client's outbound 0x43 ProtocolMessages), and the
+// server-side `scrk` (which decrypts inbound 0x83 ProtocolMessages). Also
+// recovers the CS/CU control fields for round-trip fidelity. Inverse of
+// server_auth_to_bytes; ignores unknown tags. Returns true on success.
+bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out);
 
 } // namespace opennova

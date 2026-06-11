@@ -7,13 +7,12 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <napi/envelope.h>
-#include <novacrypto/nwu.h>
+#include <novaworld/client_session.h>
 #include <novaworld/gate_probe.h>
 #include <novaworld/gate_response.h>
-#include <novaworld/session_hello.h>
-#include <novaworld/session_keys.h>
 
 #include <cstring>
+#include <memory>
 #include <random>
 #include <string>
 #include <vector>
@@ -115,7 +114,7 @@ void NovaWorldClient::start() {
 	server_info_.clear();
 	client_index_ = pick_random_uint32();
 	client_key_ = pick_random_uint32();
-	server_host_key_ = 0;
+	session_.reset();
 	nw_udp_port_ = 0;
 	nw_udp_host_ = String();
 	handshake_elapsed_ = 0.0;
@@ -136,9 +135,11 @@ void NovaWorldClient::start() {
 }
 
 void NovaWorldClient::stop() {
-	if (state_ == STATE_CONNECTED || state_ == STATE_SESSION_HELLO || state_ == STATE_SESSION_JOIN) {
-		send_session_goodbye();
+	if (session_ && nw_socket_.is_valid() &&
+	    (state_ == STATE_CONNECTED || state_ == STATE_SESSION_HELLO || state_ == STATE_SESSION_JOIN)) {
+		send_nw_datagram(session_->build_goodbye());
 	}
+	session_.reset();
 	if (gate_socket_.is_valid()) {
 		gate_socket_->close();
 		gate_socket_.unref();
@@ -167,7 +168,9 @@ void NovaWorldClient::_process(double delta) {
 	tick_accum_ += delta;
 	if (state_ == STATE_CONNECTED && tick_accum_ >= heartbeat_interval_s_) {
 		tick_accum_ = 0.0;
-		send_session_heartbeat();
+		if (session_) {
+			send_nw_datagram(session_->build_heartbeat());
+		}
 	}
 
 	if (state_ == STATE_GATE_PROBING || state_ == STATE_SESSION_HELLO || state_ == STATE_SESSION_JOIN) {
@@ -185,7 +188,8 @@ void NovaWorldClient::send_gate_probe() {
 	auto probe = opennova::gate_probe_build(opennova::GATE_PROBE_TAG_JOINTOPS);
 	// Wrap the NWU payload in the LSB-scatter CRC envelope the gate expects.
 	// Retail does the same; the server strips it via napi_envelope_decode, and
-	// without it the gate logs "bad envelope". (Mirrors encode_session_outbound.)
+	// without it the gate logs "bad envelope". (Same envelope the session
+	// channel uses in libs/novaworld/client_session.)
 	std::vector<uint8_t> packet(probe.size() + 4);
 	size_t out_size = 0;
 	if (opennova::napi_envelope_encode(probe.data(), probe.size(),
@@ -206,7 +210,7 @@ void NovaWorldClient::poll_gate() {
 		auto bytes = from_pba(packet);
 
 		// The server wraps the response in the LSB-scatter CRC envelope; strip
-		// it before decrypt+parse (mirrors decode_session_inbound).
+		// it before decrypt+parse (same envelope the session channel uses).
 		std::vector<uint8_t> inner(bytes.size());
 		size_t inner_size = 0;
 		if (opennova::napi_envelope_decode(bytes.data(), bytes.size(),
@@ -247,157 +251,80 @@ void NovaWorldClient::poll_gate() {
 			return;
 		}
 
-		enter_state(STATE_SESSION_HELLO);
-		handshake_elapsed_ = 0.0;
-		send_session_hello();
+		begin_session();
 	}
 }
 
-namespace {
+// Create the session state machine and send its ClientHello. Called once the
+// gate response yields the NW UDP host:port.
+void NovaWorldClient::begin_session() {
+	opennova::ClientSession::Config cfg;
+	cfg.client_index = client_index_;
+	cfg.client_key = client_key_;
+	session_ = std::make_unique<opennova::ClientSession>(cfg);
 
-// Encode an outbound NW-UDP datagram. Same flow as the standalone server's
-// nw_udp_listener.cpp encode_outbound() helper but client-side.
-std::vector<uint8_t> encode_session_outbound(uint8_t opcode, std::vector<uint8_t> body) {
-	if (!body.empty()) {
-		// Client-side encrypt is our nwu_decrypt (names swapped vs onnet).
-		opennova::nwu_decrypt(body.data(), body.size(), opennova::SESSION_NWU_KEY);
-	}
-	std::vector<uint8_t> with_opcode;
-	with_opcode.reserve(1 + body.size());
-	with_opcode.push_back(opcode);
-	with_opcode.insert(with_opcode.end(), body.begin(), body.end());
-	std::vector<uint8_t> packet(with_opcode.size() + 4);
-	size_t out_size = 0;
-	if (opennova::napi_envelope_encode(with_opcode.data(), with_opcode.size(),
-	                                   packet.data(), packet.size(), &out_size) != 0) {
-		return {};
-	}
-	packet.resize(out_size);
-	return packet;
+	enter_state(STATE_SESSION_HELLO);
+	handshake_elapsed_ = 0.0;
+	send_nw_datagram(session_->start());
 }
 
-bool decode_session_inbound(const uint8_t *raw, size_t raw_len,
-                            uint8_t &opcode_out, std::vector<uint8_t> &body_out) {
-	std::vector<uint8_t> stripped(raw_len);
-	size_t out_size = 0;
-	if (opennova::napi_envelope_decode(raw, raw_len, stripped.data(), stripped.size(),
-	                                   &out_size) != 0) {
-		return false;
-	}
-	stripped.resize(out_size);
-	if (stripped.empty()) return false;
-	opcode_out = stripped[0];
-	body_out.assign(stripped.begin() + 1, stripped.end());
-	if (!body_out.empty()) {
-		// Client-side decrypt is our nwu_encrypt (names swapped vs onnet).
-		opennova::nwu_encrypt(body_out.data(), body_out.size(), opennova::SESSION_NWU_KEY);
-	}
-	return true;
-}
-
-} // namespace
-
-void NovaWorldClient::send_session_hello() {
-	if (!nw_socket_.is_valid()) return;
-
-	opennova::ClientHello hello;
-	hello.nvs  = "OpenNova Godot Client 0.1";
-	hello.co   = "OpenNova";
-	hello.ap   = "OpennovaGodotClient.exe";
-	hello.bdat = "Apr 27 2026 00:00:00";
-	hello.pn   = "NOVAWORLDUDP";
-	hello.pv1  = "0.0.0 2/10/2004 EM";
-	hello.pv2  = "1";
-	hello.ci   = client_index_;
-	hello.eip  = 0;
-	hello.epn  = 0;
-
-	auto body = opennova::client_hello_to_bytes(hello);
-	auto packet = encode_session_outbound(opennova::SESSION_OPCODE_CLIENT_HELLO,
-	                                      std::move(body));
+void NovaWorldClient::send_nw_datagram(const std::vector<uint8_t> &dg) {
+	if (!nw_socket_.is_valid() || dg.empty()) return;
 	nw_socket_->set_dest_address(nw_udp_host_, nw_udp_port_);
-	nw_socket_->put_packet(to_pba(packet));
-}
-
-void NovaWorldClient::send_session_join(uint32_t server_hk) {
-	if (!nw_socket_.is_valid()) return;
-
-	opennova::ClientAuth auth;
-	auth.ci   = client_index_;
-	auth.hk   = server_hk;
-	auth.ck   = client_key_;
-	auth.na   = "jop:cus2"; // gate tag echo (per memory reference_gate_tags)
-	auth.sip  = 0;
-	auth.spn  = 0;
-	// Client SCRK: 62 ASCII chars deterministic from ck. Real retail uses a
-	// random per-session value; this is fine for dev.
-	auth.scrk.reserve(62);
-	for (int i = 0; i < 62; ++i) {
-		auth.scrk.push_back(static_cast<char>('a' + (((auth.ck >> (i % 28)) ^ i) % 26)));
-	}
-
-	auto body = opennova::client_auth_to_bytes(auth);
-	auto packet = encode_session_outbound(opennova::SESSION_OPCODE_CLIENT_AUTH,
-	                                      std::move(body));
-	nw_socket_->set_dest_address(nw_udp_host_, nw_udp_port_);
-	nw_socket_->put_packet(to_pba(packet));
-}
-
-void NovaWorldClient::send_session_heartbeat() {
-	if (!nw_socket_.is_valid()) return;
-	std::vector<uint8_t> body;
-	auto packet = encode_session_outbound(opennova::SESSION_OPCODE_PROTOCOL_MESSAGE,
-	                                      std::move(body));
-	nw_socket_->set_dest_address(nw_udp_host_, nw_udp_port_);
-	nw_socket_->put_packet(to_pba(packet));
-}
-
-void NovaWorldClient::send_session_goodbye() {
-	if (!nw_socket_.is_valid()) return;
-	std::vector<uint8_t> body(4);
-	std::memcpy(body.data(), &client_index_, 4);
-	auto packet = encode_session_outbound(opennova::SESSION_OPCODE_CLIENT_GOODBYE,
-	                                      std::move(body));
-	nw_socket_->set_dest_address(nw_udp_host_, nw_udp_port_);
-	nw_socket_->put_packet(to_pba(packet));
+	nw_socket_->put_packet(to_pba(dg));
 }
 
 void NovaWorldClient::poll_session() {
-	if (!nw_socket_.is_valid()) return;
+	if (!nw_socket_.is_valid() || !session_) return;
 
 	while (nw_socket_->get_available_packet_count() > 0) {
 		auto packet = nw_socket_->get_packet();
 		auto bytes = from_pba(packet);
 
-		uint8_t opcode = 0;
-		std::vector<uint8_t> body;
-		if (!decode_session_inbound(bytes.data(), bytes.size(), opcode, body)) {
-			emit_signal("error_occurred", String("bad NW UDP envelope"));
-			continue;
+		// Hand the datagram to the protocol state machine; send whatever it
+		// asks us to. All NWU/CRC/TLV/scrk handling lives in client_session.
+		std::vector<std::vector<uint8_t>> replies;
+		const bool ok = session_->handle_datagram(bytes.data(), bytes.size(), replies);
+		for (const auto &dg : replies) {
+			send_nw_datagram(dg);
 		}
+		if (!ok) {
+			enter_state(STATE_ERROR, String(session_->last_error().c_str()));
+			return;
+		}
+		sync_session_state();
+	}
+}
 
-		switch (opcode) {
-		case opennova::SESSION_OPCODE_SERVER_HELLO:
-			if (state_ == STATE_SESSION_HELLO) {
-				enter_state(STATE_SESSION_JOIN);
-				handshake_elapsed_ = 0.0;
-				send_session_join(/*server_hk=*/0);
-			}
-			break;
-		case opennova::SESSION_OPCODE_SERVER_AUTH:
-			if (state_ == STATE_SESSION_JOIN) {
-				enter_state(STATE_CONNECTED);
-				handshake_elapsed_ = 0.0;
-				tick_accum_ = 0.0;
-			}
-			break;
-		case opennova::SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
-			// In-session traffic. Layer-4 dispatch lands here once we wire
-			// it up. For the first pass we just note the keep-alive.
-			break;
-		default:
-			break;
+// Map the libs-side session state onto our public State + signals. CONNECTED
+// means the lobby verify handshake completed (ServerVerifyResult) — that's
+// when the panel enables Host-a-Game.
+void NovaWorldClient::sync_session_state() {
+	if (!session_) return;
+	using S = opennova::ClientSession::State;
+	switch (session_->state()) {
+	case S::Hello:
+		enter_state(STATE_SESSION_HELLO);
+		break;
+	case S::Auth:
+	case S::Verifying:
+		if (state_ != STATE_SESSION_JOIN) {
+			enter_state(STATE_SESSION_JOIN);
+			handshake_elapsed_ = 0.0;
 		}
+		break;
+	case S::Verified:
+		if (state_ != STATE_CONNECTED) {
+			enter_state(STATE_CONNECTED);
+			handshake_elapsed_ = 0.0;
+			tick_accum_ = 0.0;
+		}
+		break;
+	case S::Error:
+		enter_state(STATE_ERROR, String(session_->last_error().c_str()));
+		break;
+	default:
+		break;
 	}
 }
 

@@ -307,6 +307,74 @@ std::vector<uint8_t> server_auth_to_bytes(const ServerAuth &msg) {
 	return buf;
 }
 
+namespace {
+
+// Decode one CU inner blob: `0x03 <name>\0 <LE16 value_len_incl_NUL>
+// <value>\0` (inverse of append_cu_field). Tolerant — returns false if the
+// shape doesn't hold so the caller can skip it.
+bool parse_cu_inner(const uint8_t *data, size_t len,
+                    std::string &out_name, std::string &out_value) {
+	if (len < 1 || data[0] != 0x03) return false;
+	size_t p = 1;
+	const size_t name_start = p;
+	while (p < len && data[p] != 0) ++p;
+	if (p >= len) return false; // no NUL terminator
+	out_name.assign(reinterpret_cast<const char *>(data + name_start), p - name_start);
+	++p; // skip name NUL
+	if (p + 2 > len) return false;
+	const uint16_t vlen = static_cast<uint16_t>(data[p]) |
+			(static_cast<uint16_t>(data[p + 1]) << 8);
+	p += 2;
+	if (p + vlen > len) return false;
+	out_value = strip_nul(data + p, vlen);
+	return true;
+}
+
+} // namespace
+
+bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
+	if (!data) return false;
+	out = ServerAuth{};
+	out.client_cs.clear();
+	out.server_cs.clear();
+	out.cu.clear();
+	size_t pos = 0;
+	while (pos < len) {
+		std::string name;
+		const uint8_t *value = nullptr;
+		uint16_t size = 0;
+		const size_t next = read_tlv_field(data, len, pos, name, value, size);
+		if (next == static_cast<size_t>(-1)) break;
+		if      (name == "CI")  out.ci  = read_u32_le(value, size);
+		else if (name == "MI")  out.mi  = read_u32_le(value, size);
+		else if (name == "CK")  out.ck  = read_u32_le(value, size);
+		else if (name == "CR")  out.cr  = read_u32_le(value, size);
+		else if (name == "SK")  out.sk  = read_u32_le(value, size);
+		else if (name == "CS" && size == 6) {
+			// [direction][field_index][LE uint32]. direction 1 = client, 0 = server.
+			const uint8_t direction = value[0];
+			CsField f{value[1], read_u32_le(value + 2, 4)};
+			if (direction == 1) out.client_cs.push_back(f);
+			else                out.server_cs.push_back(f);
+		}
+		else if (name == "CU") {
+			std::string cu_name, cu_value;
+			if (parse_cu_inner(value, size, cu_name, cu_value)) {
+				out.cu.emplace_back(std::move(cu_name), std::move(cu_value));
+			}
+		}
+		else if (name == "SCRK") out.scrk = strip_nul(value, size);
+		else if (name == "NA")   out.na   = strip_nul(value, size);
+		else if (name == "RIP")  out.rip  = read_u32_le(value, size);
+		else if (name == "RPN")  out.rpn  = read_u32_le(value, size);
+		// Unknown tags intentionally ignored.
+		pos = next;
+	}
+	// Minimum sanity: a real ServerAuth carries a server SCRK the client
+	// needs to decrypt subsequent session traffic.
+	return !out.scrk.empty();
+}
+
 // ---- ServerHello serializer (restored below) ---------------------------
 
 std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg) {
@@ -372,6 +440,49 @@ std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg) {
 	append_u32_field(buf, "EIP", msg.eip);
 	append_u32_field(buf, "EPN", msg.epn);
 	return buf;
+}
+
+bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
+	if (!data) return false;
+	out = ServerHello{};
+	bool saw_hk = false;
+	size_t pos = 0;
+	while (pos < len) {
+		std::string name;
+		const uint8_t *value = nullptr;
+		uint16_t size = 0;
+		const size_t next = read_tlv_field(data, len, pos, name, value, size);
+		if (next == static_cast<size_t>(-1)) break;
+		if      (name == "CI")   out.ci   = read_u32_le(value, size);
+		else if (name == "CO")   out.co   = strip_nul(value, size);
+		else if (name == "AP")   out.ap   = strip_nul(value, size);
+		else if (name == "BDAT") out.bdat = strip_nul(value, size);
+		else if (name == "UT")   out.ut   = read_u32_le(value, size);
+		else if (name == "PN")   out.pn   = strip_nul(value, size);
+		else if (name == "PG" && size == 16) std::memcpy(out.pg.data(), value, 16);
+		else if (name == "PV1")  out.pv1  = strip_nul(value, size);
+		else if (name == "PV2")  out.pv2  = strip_nul(value, size);
+		else if (name == "PV3")  out.pv3  = strip_nul(value, size);
+		else if (name == "HK") { out.hk = read_u32_le(value, size); saw_hk = true; }
+		else if (name == "SN")   out.sn   = strip_nul(value, size);
+		else if (name == "PL")   out.pl   = strip_nul(value, size);
+		else if (name == "SF") { out.sf = read_u32_le(value, size); out.is_game_server = true; }
+		else if (name == "P1")   out.p1   = read_u32_le(value, size);
+		else if (name == "P2")   out.p2   = read_u32_le(value, size);
+		else if (name == "NP")   out.np   = read_u32_le(value, size);
+		else if (name == "MP")   out.mp   = read_u32_le(value, size);
+		else if (name == "NC")   out.nc   = read_u32_le(value, size);
+		else if (name == "RIP")  out.rip  = read_u32_le(value, size);
+		else if (name == "RPN")  out.rpn  = read_u32_le(value, size);
+		else if (name == "SUS1") out.sus1 = strip_nul(value, size);
+		else if (name == "SUS2") out.sus2 = strip_nul(value, size);
+		else if (name == "EIP")  out.eip  = read_u32_le(value, size);
+		else if (name == "EPN")  out.epn  = read_u32_le(value, size);
+		// Unknown tags intentionally ignored.
+		pos = next;
+	}
+	// The host key is the one field the client must echo back in ClientAuth.
+	return saw_hk;
 }
 
 } // namespace opennova

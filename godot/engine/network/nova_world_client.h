@@ -6,7 +6,11 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <novaworld/client_session.h>
+
 #include <cstdint>
+#include <memory>
+#include <vector>
 
 namespace godot {
 
@@ -72,12 +76,13 @@ protected:
 	static void _bind_methods();
 
 private:
-	// Wire helpers.
+	// Wire helpers. The gate leg stays here (it yields the session host:port);
+	// the session protocol lives in libs/novaworld/client_session — this
+	// binding is the socket pump (PacketPeerUDP + signals).
 	void send_gate_probe();
-	void send_session_hello();
-	void send_session_join(uint32_t server_hk);
-	void send_session_heartbeat();
-	void send_session_goodbye();
+	void begin_session();                                   // create ClientSession, send ClientHello
+	void send_nw_datagram(const std::vector<uint8_t> &dg);  // put_packet on the NW socket
+	void sync_session_state();                              // ClientSession::State -> our State + signals
 
 	void poll_gate();
 	void poll_session();
@@ -94,10 +99,10 @@ private:
 	Dictionary server_info_;
 	Ref<PacketPeerUDP> gate_socket_;
 	Ref<PacketPeerUDP> nw_socket_;
+	std::unique_ptr<opennova::ClientSession> session_;  // owns the session protocol
 
 	uint32_t client_index_ = 0;       // ci — generated at start()
 	uint32_t client_key_ = 0;         // ck — generated at start()
-	uint32_t server_host_key_ = 0;    // hk — received in ServerHello
 	uint16_t nw_udp_port_ = 0;        // populated from gate response
 	String nw_udp_host_;              // populated from gate response
 	double tick_accum_ = 0.0;
