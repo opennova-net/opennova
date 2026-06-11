@@ -33,6 +33,7 @@ var _visible_entries: Array = []
 var _current_path := ""
 var _sort_column := COLUMN_NAME
 var _sort_ascending := true
+var _drag_payload_provider := Callable()
 
 
 func _init() -> void:
@@ -133,6 +134,44 @@ func get_selected_entry() -> Dictionary:
 		return {}
 	var entry := item.get_metadata(COLUMN_NAME) as Dictionary
 	return entry if entry != null else {}
+
+
+## Make rows draggable: the provider receives a row's entry Dictionary and
+## returns its drag data (or null for non-draggable rows). Opt-in only - the
+## persistent pane calls this; the modal picker never does, so a dialog row
+## can't start a system drag out from under its input grab.
+func enable_drag_source(payload_provider: Callable) -> void:
+	_drag_payload_provider = payload_provider
+	tree.set_drag_forwarding(_get_tree_drag_data, Callable(), Callable())
+
+
+func _get_tree_drag_data(at_position: Vector2) -> Variant:
+	if not _drag_payload_provider.is_valid():
+		return null
+	var item := tree.get_item_at_position(at_position)
+	if item == null:
+		# A LIVE drag gesture that misses every row (column titles, the blank
+		# area below the list) must stay inert - falling back to the selection
+		# there would start a drag of a row the user never grabbed. The
+		# selected-row fallback only serves headless tests, which call this
+		# directly (no GUI drag in flight) with Vector2.ZERO.
+		if get_viewport() != null and get_viewport().gui_is_dragging():
+			return null
+		item = tree.get_selected()
+	if item == null:
+		return null
+	var entry := item.get_metadata(COLUMN_NAME) as Dictionary
+	if entry == null or entry.is_empty():
+		return null
+	var data: Variant = _drag_payload_provider.call(entry)
+	if data == null:
+		return null
+	# Previews only attach during a live GUI drag; tests call this directly.
+	if get_viewport() != null and get_viewport().gui_is_dragging():
+		var preview := Label.new()
+		preview.text = String(entry.get("display_name", ""))
+		tree.set_drag_preview(preview)
+	return data
 
 
 func get_visible_count() -> int:
