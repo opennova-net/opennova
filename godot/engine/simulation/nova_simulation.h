@@ -3,7 +3,10 @@
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -163,6 +166,32 @@ public:
 	int get_mission_variable(int index) const;
 	bool has_event_fired(int index) const;
 	int get_event_count() const;
+
+	// --- Read-only introspection (debug overlay / tooling) -----------------
+	// The world's logic tick counter [orig: current_tick @0x24c1968]. The
+	// pre-mission pass in finish_load already advanced it once, so a freshly
+	// loaded mission reads 1 — consumers should track deltas, not absolutes.
+	int64_t get_logic_tick() const;
+	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 /
+	// M0..M15 [orig: dword_C6B240 / dword_C6BA40 / music bank]): ONE packed call
+	// for a low-Hz overlay refresh instead of hundreds of boxed scalar reads.
+	// Always bank-sized; all zeros when no mission is loaded.
+	PackedInt32Array get_mission_variables_snapshot() const;
+	PackedInt32Array get_global_variables_snapshot() const;
+	PackedInt32Array get_music_variables_snapshot() const;
+	// Globals (G#) round out the scalar var API (mission V# already bound).
+	void set_global_variable(int index, int value);
+	int get_global_variable(int index) const;
+	// [i] = 1 when event i has fired (active latch + delay elapsed): the bulk
+	// form of has_event_fired for an event readout. Empty when unloaded.
+	PackedByteArray get_fired_events_snapshot() const;
+	// Scalars-only detail card for ONE selected entity ({} when invalid).
+	// Dictionary/String allocation is fine at selected-entity-only low-Hz use;
+	// the per-tick present loop has get_present_snapshot instead.
+	Dictionary get_entity_debug(int p_index) const;
+	// Human-readable AI state name, "?" for the id gaps
+	// [orig: Entity_LookupAIStateName @0x455cc0].
+	static String ai_state_name(int p_state);
 
 	// Entity query. The (kind, index) pair lets the editor map a sim entity back to its placed
 	// mission record + its already-rendered node (MissionController._pickable).

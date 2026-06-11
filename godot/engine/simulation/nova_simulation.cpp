@@ -195,6 +195,15 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mission_variable", "index"), &NovaSimulation::get_mission_variable);
 	ClassDB::bind_method(D_METHOD("has_event_fired", "index"), &NovaSimulation::has_event_fired);
 	ClassDB::bind_method(D_METHOD("get_event_count"), &NovaSimulation::get_event_count);
+	ClassDB::bind_method(D_METHOD("get_logic_tick"), &NovaSimulation::get_logic_tick);
+	ClassDB::bind_method(D_METHOD("get_mission_variables_snapshot"), &NovaSimulation::get_mission_variables_snapshot);
+	ClassDB::bind_method(D_METHOD("get_global_variables_snapshot"), &NovaSimulation::get_global_variables_snapshot);
+	ClassDB::bind_method(D_METHOD("get_music_variables_snapshot"), &NovaSimulation::get_music_variables_snapshot);
+	ClassDB::bind_method(D_METHOD("set_global_variable", "index", "value"), &NovaSimulation::set_global_variable);
+	ClassDB::bind_method(D_METHOD("get_global_variable", "index"), &NovaSimulation::get_global_variable);
+	ClassDB::bind_method(D_METHOD("get_fired_events_snapshot"), &NovaSimulation::get_fired_events_snapshot);
+	ClassDB::bind_method(D_METHOD("get_entity_debug", "index"), &NovaSimulation::get_entity_debug);
+	ClassDB::bind_static_method("NovaSimulation", D_METHOD("ai_state_name", "state"), &NovaSimulation::ai_state_name);
 	ClassDB::bind_method(D_METHOD("get_entity_count"), &NovaSimulation::get_entity_count);
 	ClassDB::bind_method(D_METHOD("get_entity_kind", "index"), &NovaSimulation::get_entity_kind);
 	ClassDB::bind_method(D_METHOD("get_entity_index", "index"), &NovaSimulation::get_entity_index);
@@ -395,6 +404,106 @@ bool NovaSimulation::has_event_fired(int index) const {
 
 int NovaSimulation::get_event_count() const {
 	return bms_ ? static_cast<int>(bms_->events().size()) : 0;
+}
+
+int64_t NovaSimulation::get_logic_tick() const {
+	// uint32 -> int64 keeps long sessions sign-safe on the GDScript side.
+	return world_ ? static_cast<int64_t>(world_->logic_tick) : 0;
+}
+
+namespace {
+PackedInt32Array snapshot_bank(const opennova::world::World *world, int count,
+                               int32_t (opennova::world::ScriptVarStore::*getter)(int) const) {
+	PackedInt32Array out;
+	out.resize(count);
+	int32_t *w = out.ptrw();
+	for (int i = 0; i < count; ++i) {
+		w[i] = world ? (world->vars.*getter)(i) : 0;
+	}
+	return out;
+}
+} // namespace
+
+PackedInt32Array NovaSimulation::get_mission_variables_snapshot() const {
+	return snapshot_bank(world_.get(), opennova::world::ScriptVarStore::kMissionVars,
+	                     &opennova::world::ScriptVarStore::get_mission);
+}
+
+PackedInt32Array NovaSimulation::get_global_variables_snapshot() const {
+	return snapshot_bank(world_.get(), opennova::world::ScriptVarStore::kGlobalVars,
+	                     &opennova::world::ScriptVarStore::get_global);
+}
+
+PackedInt32Array NovaSimulation::get_music_variables_snapshot() const {
+	return snapshot_bank(world_.get(), opennova::world::ScriptVarStore::kMusicVars,
+	                     &opennova::world::ScriptVarStore::get_music);
+}
+
+void NovaSimulation::set_global_variable(int index, int value) {
+	if (world_) world_->vars.set_global(index, value);
+}
+
+int NovaSimulation::get_global_variable(int index) const {
+	return world_ ? world_->vars.get_global(index) : 0;
+}
+
+PackedByteArray NovaSimulation::get_fired_events_snapshot() const {
+	PackedByteArray out;
+	if (!bms_) return out;
+	const size_t count = bms_->events().size();
+	out.resize(static_cast<int64_t>(count));
+	uint8_t *w = out.ptrw();
+	for (size_t i = 0; i < count; ++i) {
+		w[i] = bms_->event_fired(i) ? 1 : 0;
+	}
+	return out;
+}
+
+Dictionary NovaSimulation::get_entity_debug(int p_index) const {
+	Dictionary out;
+	if (!ai_ || !world_) return out;
+	AiEntity *e = ai_->at(p_index);
+	if (!e) return out;
+	const opennova::world::Entity *ent = world_->registry.get(e->handle);
+	if (ent) {
+		out["kind"] = static_cast<int>(ent->spawn_origin >> 24);
+		out["index"] = static_cast<int>(ent->spawn_origin & 0xFFFFFF);
+		out["bms_id"] = ent->bms_id;
+		out["item_id"] = ent->item_id;
+		out["name"] = String(ent->name.c_str());
+		out["group_id"] = static_cast<int>(ent->group_id);
+		out["waypoint_id"] = static_cast<int>(ent->waypoint_id);
+		out["wp_number"] = ent->wp_number;
+		out["health"] = ent->health;
+		out["alive"] = ent->alive;
+		out["hidden"] = ent->hidden;
+		out["held"] = ent->held;
+		out["disabled"] = ent->disabled;
+		out["anim_slot"] = ent->anim_slot;
+	}
+	out["net_id"] = e->net_id;
+	out["team"] = static_cast<int>(e->team);
+	// The AI-side entity+286 mirror; diverges from the registry health under
+	// some damage paths, so the card shows both.
+	out["ai_health"] = static_cast<int>(e->health);
+	out["position"] = get_entity_position(p_index);
+	out["yaw_deg"] = get_entity_yaw_deg(p_index);
+	const int state = e->brain.f[AiBrain::kCurState];
+	out["state"] = state;
+	out["state_name"] = ai_state_name(state);
+	out["pending_state"] = e->brain.f[AiBrain::kPendState];
+	out["alert"] = e->brain.f[AiBrain::kAlert];
+	out["wp_channel"] = e->brain.f[AiBrain::kWpChannel];
+	out["wp_node"] = e->brain.f[AiBrain::kWpNode];
+	out["wp_distance"] = e->brain.f[AiBrain::kWpDistance];
+	out["out_speed"] = e->brain.f[AiBrain::kOutSpeed];
+	out["infantry"] = e->inf.active;
+	out["infantry_move_mode"] = e->inf.move_mode;
+	return out;
+}
+
+String NovaSimulation::ai_state_name(int p_state) {
+	return String(opennova::world::ai_state_name(p_state));
 }
 
 int NovaSimulation::get_entity_count() const {
