@@ -1,0 +1,96 @@
+<HTML>
+<HEAD>
+<META NAME="Author" CONTENT="Eric Milota">
+<TITLE>NovaWorld Login</TITLE>
+</HEAD>
+<BODY TEXT="#FFFFFF" BGCOLOR="#3A6BBB" LINK="#FFFF00" VLINK="#FFFF00" ALINK="#CCCC00"">
+
+<center>
+<FONT SIZE=+2>Please login to play on NovaWorld<br></FONT>
+<br>
+<FORM ACTION="NWLogin.dll" METHOD="POST">
+
+<TABLE>
+<TR>
+<TD width=150>Account name:</TD>
+<TD width=260><INPUT TYPE="text" MAXLENGTH=16 NAME="Name" VALUE=""></TD>
+</TR>
+<TR>
+<TD>Account password:</TD>
+<TD><INPUT TYPE="password" MAXLENGTH=16 NAME="Password"></TD>
+</TR>
+<TR>
+<TD></TD>
+<TD><INPUT TYPE="SUBMIT" VALUE="  OK  "></TD>
+</TR>
+</TABLE><br clear=all>
+<IB3_FORM value="1">
+<INPUT TYPE="hidden" name="success" 	VALUE="dfx2_0_main.htm">
+<INPUT TYPE="hidden" name="failure" 	VALUE="dfx2_0_login.htm">
+<INPUT TYPE="hidden" name="enterkey" 	VALUE="dfx2_0_term.htm">
+<INPUT TYPE="hidden" name="msgbase" 	VALUE="dfx2_0_msg.htm">
+<INPUT TYPE="hidden" name="relay" 	VALUE="dfx2_0_relay.htm">
+<INPUT TYPE="hidden" name="nodb"	VALUE="dfx2_0_nodb.htm">
+<INPUT TYPE="hidden" name="needtoagree"	VALUE="dfx2_0_needtoagree.htm">
+<INPUT TYPE="hidden" name="pfid" 	VALUE="38">
+<INPUT TYPE="hidden" name="rememberlogin" VALUE="1">
+<!--<INPUT TYPE="hidden" name="rememberlogindata" VALUE="">-->
+<INPUT TYPE="hidden" name="charglsvssrequest" VALUE="[dfx]kills">
+</IB3_FORM>
+</FORM>
+<br>
+</center>
+If you don't have a NovaWorld account, <A HREF="dfx2_0_reg.htm">click here</a><BR>
+Forgot your account info, <a href="dfx2_0_getl.htm">click here</a><BR>
+To delete an existing account, <A HREF="dfx2_0_delb.htm">click here</a><BR>
+<br>
+
+<center><font size=+1 color=#ffff00>ESRB Notice:  Game Experience May Change During Online Play.</font></center><br>
+
+<center><font color=#ffff00>Accounts with no activity for 90 days are subject to deletion. Accounts with no CD Keys on them for 2 days are subject for deletion.</font></center><br>
+<center><font color=#ffff00>* * * Active duty military personnel may reactivate their account at any time by emailing support@novalogic.com. * * *</font></center><br>
+
+<br>
+<br><center><CENTER><font face="ARIAL"><font size=-2>&copy;2005 NovaLogic, Inc.</font></center>
+<center><font size="-4">Rev NW2.0.0</font></center>
+</BODY>
+</HTML>
+<IB3_SUBST name="@HELP_STRING@">
+Create Account: 
+
+If you do not have a NovaWorld account, you will need to create one in order to connect to NovaWorld.  Clicking 'Create Account' will bring you to NovaWorld.com's easy breezy account creation system.
+
+Please note that you must have a valid email address in order to create a NovaWorld account. This email address is what will allow you to retrieve your account name or password in case you forget them.
+
+All information you fill out will not be shared nor sold to third parties. This is for NovaLogic's private use.
+
+
+Once you have created an account, please go back and login with the newly created account name and password.  You may be requested to add an expansion key.
+
+A message will appear stating if you are successful. If a message appears stating the key is already in use, please contact Technical Support at http://www.novalogic.com/support.asp .  Please state if the CD was new or used, include the CD Key in question, and your account name.
+
+If you encounter any other error messages during this process, please follow the steps above and contact Technical Support.
+
+
+Forgotten Name:
+
+If you have forgotten your account login name, enter the email address that you signed up for the account with.  Your account login name will be sent to this email address.
+
+If you no longer are able to access the email account you signed up for the account with, please contact Technical Support at http://www.novalogic.com/support.asp.  Please CD Key of your product to verify the account, and your account name.
+
+
+Forgotten Password:
+
+If you have forgotten your password, enter the email address that you signed up for the account with.Your password will be sent to this email address.
+
+If you no longer are able to access the email account you signed up for the account with, please contact Technical Support at http://www.novalogic.com/support.asp.  Please CD Key of your product to verify the account, and your account name.
+
+
+Remember Me:
+
+If you do not wish to log in to NovaWorld every time, you may select the "Remember Me" option to be automatically logged in.  Please only do this if you use a private computer. You will be held accountable for your account's actions, regardless of who is in front of the computer using, or abusing, it.</IB3_SUBST>
+<IB3_TEMPLATE file="dfx2_0_login.mnx">
+<IB3_SUBST name="@NAME@"></IB3_SUBST>
+<IB3_SUBST name="@MOTD1@">	Welcome to NovaWorld.
+	Please log in or create an account.
+</IB3_SUBST>

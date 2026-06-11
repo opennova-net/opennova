@@ -1,8 +1,10 @@
 # NovaWorld networking - protocol + struct RE record
 
 > **Status**: the NovaWorld web/UDP stack (libs/novacrypto, libs/napi, libs/novaworld, the
-> standalone server app, and the web portal) landed in PR #37 and was reverted in PR #50 while
-> it matured. This protocol RE is the durable record to reland from.
+> standalone server app, and the web portal) landed in PR #37, was reverted in PR #50 while
+> it matured, and is now **relanded on the `web-nw-for-real-master` integration branch**
+> (see `plan/`). This protocol RE remains the durable wire record; §8 will accumulate
+> per-system equivalence verdicts as the IDA grill proceeds.
 
 Consolidated 2026-06-10 from `notes/novaworld_protocol_matrix.md`, `notes/dispatcher_table.md`,
 `notes/dispatcher_findings.md`, `notes/spawn_gate_24C1928.md`, `notes/tag_cross_capture_diff.md`,
@@ -836,11 +838,11 @@ class flag relevant to §5.6 is `ItemDef[+84] & 0x100000`. Open ItemDef follow-u
 recursion guard vs `Entity_InitFromItemDef` itself), `+0x158` → `entity[+452]`, 28 unknown
 bytes after `armorMax`.
 
-## 7. Planned architecture (unlanded)
+## 7. Landed architecture
 
-The design that shipped in PR #37 and was reverted in PR #50. The `web/` and
-`apps/novaworld_server/` paths do **not** exist on master; this section records the reverted
-design, not current code.
+The design that shipped in PR #37, was reverted in PR #50, and is relanded on the
+`web-nw-for-real-master` integration branch. `web/` and `apps/novaworld_server/` exist
+there (not yet on master).
 
 - **One standalone C++ server binary, three listeners**: gate UDP :7597, HTTP :8080 (the
   `/api/*` routes plus the bundled Vue web portal from `web/dist/`), NW UDP :64206. Shared
