@@ -86,4 +86,24 @@ struct GsbServerEntry {
 // `application/octet-stream`).
 std::vector<uint8_t> gsb_build_response(const std::vector<GsbServerEntry> &servers);
 
+// Decoded GSB response — what the client recovers from the wire blob.
+struct GsbResponse {
+	int total_servers = 0;   // FLDS "TotalServers" (informational summary)
+	int total_players = 0;   // FLDS "TotalPlayers"
+	std::vector<std::string> field_names;   // SVRS(fields) — the column order
+	std::vector<GsbServerEntry> servers;    // SVRS(servers) — the rows
+};
+
+// Parse a GSB response blob (the HTTP body of `/<game>.gsb`) into rows — the
+// client-side inverse of gsb_build_response. Mirrors how the retail IB3
+// browser decodes the format: each chunk payload is decrypted with the
+// SUBTRACT chain (our nwu_encrypt) under GSB_NWU_KEY, and each server row is
+// read positionally against the field-name table in the SVRS(fields) chunk
+// (field lookup is case-insensitive). The GSB row carries no port (only the
+// rid + IPv4 octets), so GsbServerEntry::port is left 0. Returns true on a
+// well-formed blob ("GSB " header through the XXXX terminator), false on a
+// short/corrupt buffer. Ported against onnw/gsb.py + the anchored
+// gsb_build_response (docs/net/novaworld-net-re.md §2, NW-G2).
+bool gsb_parse_response(const uint8_t *data, size_t len, GsbResponse &out);
+
 } // namespace opennova

@@ -1,9 +1,13 @@
 #pragma once
 
+#include <godot_cpp/classes/http_request.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/packet_peer_udp.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include <novaworld/client_session.h>
@@ -68,6 +72,12 @@ public:
 	bool is_session_active() const { return state_ == STATE_CONNECTED; }
 	Dictionary get_server_info() const;
 
+	// Server browser (ADR 0010 Phase 2). The list is fetched over HTTP from
+	// the GSB endpoint once the session is verified; rows arrive asynchronously
+	// (watch the `server_list_updated` signal, then read get_server_rows()).
+	Array get_server_rows() const;
+	void refresh_server_list();   // re-fetch the GSB now (also auto-fired on connect)
+
 	// Engine hooks.
 	void _ready() override;
 	void _process(double delta) override;
@@ -87,6 +97,14 @@ private:
 	void poll_gate();
 	void poll_session();
 
+	// Server-browser HTTP leg. request_server_list() issues the GSB GET; the
+	// completion callback parses it via libs/novaworld/gsb and caches rows.
+	void request_server_list();
+	void on_gsb_request_completed(int result, int response_code,
+	                              const PackedStringArray &headers,
+	                              const PackedByteArray &body);
+	String gsb_url() const;       // OpenNova GSB URL from the gate's startup_url
+
 	void enter_state(State next, const String &reason = String());
 
 	// Config.
@@ -100,6 +118,11 @@ private:
 	Ref<PacketPeerUDP> gate_socket_;
 	Ref<PacketPeerUDP> nw_socket_;
 	std::unique_ptr<opennova::ClientSession> session_;  // owns the session protocol
+
+	// Server browser.
+	HTTPRequest *browser_http_ = nullptr;   // child node, created in start()
+	Array server_rows_;                     // cached GSB rows (Array of Dictionary)
+	bool gsb_request_in_flight_ = false;
 
 	uint32_t client_index_ = 0;       // ci — generated at start()
 	uint32_t client_key_ = 0;         // ck — generated at start()

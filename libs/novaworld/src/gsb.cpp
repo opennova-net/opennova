@@ -201,6 +201,205 @@ std::vector<uint8_t> build_servers_payload(const std::vector<GsbServerEntry> &se
 
 } // namespace
 
+namespace {
+
+// ---- GSB parse (client-direction inverse of the builder) ----------------
+
+bool read_u16_le(const uint8_t *data, size_t len, size_t &pos, uint16_t &out) {
+	if (pos + 2 > len) return false;
+	out = static_cast<uint16_t>(data[pos]) | (static_cast<uint16_t>(data[pos + 1]) << 8);
+	pos += 2;
+	return true;
+}
+
+bool read_u32_le(const uint8_t *data, size_t len, size_t &pos, uint32_t &out) {
+	if (pos + 4 > len) return false;
+	out = static_cast<uint32_t>(data[pos]) | (static_cast<uint32_t>(data[pos + 1]) << 8) |
+	      (static_cast<uint32_t>(data[pos + 2]) << 16) | (static_cast<uint32_t>(data[pos + 3]) << 24);
+	pos += 4;
+	return true;
+}
+
+// Read a NUL-terminated ASCII string from a decrypted payload.
+bool read_cstr(const std::vector<uint8_t> &buf, size_t &pos, std::string &out) {
+	const size_t start = pos;
+	while (pos < buf.size() && buf[pos] != 0x00) ++pos;
+	if (pos >= buf.size()) return false; // no terminator
+	out.assign(reinterpret_cast<const char *>(buf.data() + start), pos - start);
+	++pos; // skip the NUL
+	return true;
+}
+
+// One decrypted chunk: 4-byte magic + the SUBTRACT-chain-decrypted payload.
+struct GsbChunk {
+	char magic[4];
+	std::vector<uint8_t> payload;
+};
+
+// Read one chunk at `pos`: [u32 LE enc_len][enc_len bytes][4-byte magic].
+// Decrypts the payload in place with the SUBTRACT chain (our nwu_encrypt) —
+// the inverse of append_chunk's nwu_decrypt.
+bool read_chunk(const uint8_t *data, size_t len, size_t &pos, GsbChunk &out) {
+	uint32_t enc_len = 0;
+	if (!read_u32_le(data, len, pos, enc_len)) return false;
+	// Bounds check in 64-bit so the wire-controlled enc_len can't wrap the
+	// addition on a 32-bit build (an attacker-forged enc_len near UINT32_MAX
+	// would otherwise slip past `pos + enc_len + 4 > len` and OOB-read the
+	// payload assign below). gsb_parse_response runs on server-supplied bytes.
+	if (static_cast<uint64_t>(pos) + enc_len + 4u > static_cast<uint64_t>(len)) {
+		return false; // payload + 4-byte magic must fit
+	}
+	out.payload.assign(data + pos, data + pos + enc_len);
+	pos += enc_len;
+	if (!out.payload.empty()) {
+		nwu_encrypt(out.payload.data(), out.payload.size(), GSB_NWU_KEY);
+	}
+	std::memcpy(out.magic, data + pos, 4);
+	pos += 4;
+	return true;
+}
+
+bool magic_is(const GsbChunk &c, const char (&tag)[5]) {
+	return c.magic[0] == tag[0] && c.magic[1] == tag[1] &&
+	       c.magic[2] == tag[2] && c.magic[3] == tag[3];
+}
+
+std::string to_lower(std::string s) {
+	for (char &c : s) {
+		if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+	}
+	return s;
+}
+
+int parse_int_or_zero(const std::string &s) {
+	try { return std::stoi(s); } catch (...) { return 0; }
+}
+
+// Assign one positional field value into the entry, keyed by the field name
+// from the SVRS(fields) table (case-insensitive — the retail browser folds
+// case on lookup). Unknown field names are ignored.
+void assign_field(GsbServerEntry &e, const std::string &name, const std::string &value) {
+	const std::string key = to_lower(name);
+	if      (key == "servername")  e.server_name  = value;
+	else if (key == "gametype")    e.game_type    = value;
+	else if (key == "missionname") e.mission_name = value;
+	else if (key == "region")      e.region       = value;
+	else if (key == "players")     e.players      = parse_int_or_zero(value);
+	else if (key == "maxplayers")  e.max_players  = parse_int_or_zero(value);
+	else if (key == "dedicated")   e.dedicated    = value;
+	else if (key == "timeleft")    e.time_left    = value;
+	else if (key == "password")    e.password     = value;
+	else if (key == "country")     e.country      = value;
+	else if (key == "msg")         e.msg          = value;
+	else if (key == "age")         e.age          = value;
+	else if (key == "timeofday")   e.time_of_day  = value;
+	else if (key == "stat")        e.stat         = value;
+	else if (key == "levelrange")  e.level_range  = value;
+	else if (key == "locked")      e.locked       = value;
+	else if (key == "tracers")     e.tracers      = value;
+	else if (key == "skins")       e.skins        = value;
+	else if (key == "bbmode")      e.bb_mode      = value;
+	else if (key == "mod")         e.mod          = value;
+	else if (key == "pix")         e.pix          = value;
+	else if (key == "pbserver")    e.pb_server    = value;
+	else if (key == "ver1")        e.ver1         = value;
+	else if (key == "exp")         e.exp          = value;
+	else if (key == "expbits")     e.exp_bits     = value;
+	else if (key == "joicon2")     e.joicon2      = value;
+	// Unknown field names intentionally ignored.
+}
+
+// FLDS summary: [u16 count][count × (key cstr, value cstr)].
+void parse_summary(const std::vector<uint8_t> &payload, GsbResponse &out) {
+	size_t pos = 0;
+	uint16_t count = 0;
+	if (!read_u16_le(payload.data(), payload.size(), pos, count)) return;
+	for (uint16_t i = 0; i < count; ++i) {
+		std::string key, value;
+		if (!read_cstr(payload, pos, key)) return;
+		if (!read_cstr(payload, pos, value)) return;
+		const std::string lk = to_lower(key);
+		if (lk == "totalservers") out.total_servers = parse_int_or_zero(value);
+		else if (lk == "totalplayers") out.total_players = parse_int_or_zero(value);
+	}
+}
+
+// SVRS(fields): [u16 count][count × field-name cstr].
+bool parse_fields(const std::vector<uint8_t> &payload, std::vector<std::string> &names) {
+	size_t pos = 0;
+	uint16_t count = 0;
+	if (!read_u16_le(payload.data(), payload.size(), pos, count)) return false;
+	names.clear();
+	names.reserve(count);
+	for (uint16_t i = 0; i < count; ++i) {
+		std::string name;
+		if (!read_cstr(payload, pos, name)) return false;
+		names.push_back(std::move(name));
+	}
+	return true;
+}
+
+// SVRS(servers): [u16 count][count × ([u32 rid][4 ip][N values][u16 marker])],
+// where N == field_names.size() and values are read positionally.
+bool parse_servers(const std::vector<uint8_t> &payload,
+                   const std::vector<std::string> &field_names,
+                   std::vector<GsbServerEntry> &servers) {
+	size_t pos = 0;
+	uint16_t count = 0;
+	if (!read_u16_le(payload.data(), payload.size(), pos, count)) return false;
+	servers.clear();
+	servers.reserve(count);
+	for (uint16_t i = 0; i < count; ++i) {
+		GsbServerEntry e{};
+		if (!read_u32_le(payload.data(), payload.size(), pos, e.rid)) return false;
+		if (pos + 4 > payload.size()) return false;
+		e.ip = {payload[pos], payload[pos + 1], payload[pos + 2], payload[pos + 3]};
+		pos += 4;
+		for (const std::string &name : field_names) {
+			std::string value;
+			if (!read_cstr(payload, pos, value)) return false;
+			assign_field(e, name, value);
+		}
+		uint16_t marker = 0;
+		if (!read_u16_le(payload.data(), payload.size(), pos, marker)) return false;
+		servers.push_back(std::move(e));
+	}
+	return true;
+}
+
+} // namespace
+
+bool gsb_parse_response(const uint8_t *data, size_t len, GsbResponse &out) {
+	out = GsbResponse{};
+	if (!data || len < 4) return false;
+	if (data[0] != 'G' || data[1] != 'S' || data[2] != 'B' || data[3] != ' ') return false;
+
+	size_t pos = 4;
+	int svrs_seen = 0;
+	bool reached_terminator = false;
+	while (pos < len) {
+		GsbChunk chunk;
+		if (!read_chunk(data, len, pos, chunk)) return false;
+		if (magic_is(chunk, "IVAR")) {
+			// Opaque init block — ignored (see build_ivar_payload).
+		} else if (magic_is(chunk, "FLDS")) {
+			parse_summary(chunk.payload, out);
+		} else if (magic_is(chunk, "SVRS")) {
+			if (svrs_seen == 0) {
+				if (!parse_fields(chunk.payload, out.field_names)) return false;
+			} else {
+				if (!parse_servers(chunk.payload, out.field_names, out.servers)) return false;
+			}
+			++svrs_seen;
+		} else if (magic_is(chunk, "XXXX")) {
+			reached_terminator = true;
+			break;
+		}
+		// Unknown chunk tags are walked past (read_chunk advanced the cursor).
+	}
+	return reached_terminator;
+}
+
 std::vector<uint8_t> gsb_build_response(const std::vector<GsbServerEntry> &servers) {
 	std::vector<uint8_t> out;
 	out.reserve(512 + 256 * servers.size());

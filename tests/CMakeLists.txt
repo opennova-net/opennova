@@ -880,6 +880,12 @@ target_link_libraries(gsb_roundtrip_test PRIVATE opennova_novaworld opennova_nov
 target_include_directories(gsb_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gsb_roundtrip COMMAND gsb_roundtrip_test)
 
+# ADR 0010 Phase 2 — gsb_parse_response is the exact client inverse of the builder.
+add_executable(gsb_parse_roundtrip_test novaworld/gsb_parse_roundtrip_test.cpp)
+target_link_libraries(gsb_parse_roundtrip_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(gsb_parse_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gsb_parse_roundtrip COMMAND gsb_parse_roundtrip_test)
+
 add_executable(protocol_message_test novaworld/protocol_message_test.cpp)
 target_link_libraries(protocol_message_test PRIVATE opennova_novaworld opennova_novacrypto)
 target_include_directories(protocol_message_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

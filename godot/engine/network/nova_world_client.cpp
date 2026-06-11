@@ -1,8 +1,12 @@
 #include "nova_world_client.h"
 
+#include <godot_cpp/classes/http_request.hpp>
 #include <godot_cpp/classes/ip.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/core/memory.hpp>
+#include <godot_cpp/variant/callable.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -10,7 +14,9 @@
 #include <novaworld/client_session.h>
 #include <novaworld/gate_probe.h>
 #include <novaworld/gate_response.h>
+#include <novaworld/gsb.h>
 
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <random>
@@ -74,12 +80,19 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_state"), &NovaWorldClient::get_state);
 	ClassDB::bind_method(D_METHOD("is_session_active"), &NovaWorldClient::is_session_active);
 	ClassDB::bind_method(D_METHOD("get_server_info"), &NovaWorldClient::get_server_info);
+	ClassDB::bind_method(D_METHOD("get_server_rows"), &NovaWorldClient::get_server_rows);
+	ClassDB::bind_method(D_METHOD("refresh_server_list"), &NovaWorldClient::refresh_server_list);
+	// Bound so the HTTPRequest.request_completed signal can target it.
+	ClassDB::bind_method(
+		D_METHOD("on_gsb_request_completed", "result", "response_code", "headers", "body"),
+		&NovaWorldClient::on_gsb_request_completed);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "host"),     "set_host", "get_host");
 	ADD_PROPERTY(PropertyInfo(Variant::INT,    "gate_port"), "set_gate_port", "get_gate_port");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "player_name"), "set_player_name", "get_player_name");
 
 	ADD_SIGNAL(MethodInfo("server_info_received", PropertyInfo(Variant::DICTIONARY, "info")));
+	ADD_SIGNAL(MethodInfo("server_list_updated", PropertyInfo(Variant::ARRAY, "rows")));
 	ADD_SIGNAL(MethodInfo("connected"));
 	ADD_SIGNAL(MethodInfo("disconnected", PropertyInfo(Variant::STRING, "reason")));
 	ADD_SIGNAL(MethodInfo("error_occurred", PropertyInfo(Variant::STRING, "message")));
@@ -112,12 +125,23 @@ void NovaWorldClient::start() {
 		return;
 	}
 	server_info_.clear();
+	server_rows_.clear();
+	gsb_request_in_flight_ = false;
 	client_index_ = pick_random_uint32();
 	client_key_ = pick_random_uint32();
 	session_.reset();
 	nw_udp_port_ = 0;
 	nw_udp_host_ = String();
 	handshake_elapsed_ = 0.0;
+
+	// The server-browser HTTP fetcher is a child node (Phase 2). Created once
+	// and reused; its request_completed signal drives on_gsb_request_completed.
+	if (browser_http_ == nullptr) {
+		browser_http_ = memnew(HTTPRequest);
+		add_child(browser_http_);
+		browser_http_->connect("request_completed",
+		                       Callable(this, "on_gsb_request_completed"));
+	}
 
 	gate_socket_.instantiate();
 	nw_socket_.instantiate();
@@ -140,6 +164,10 @@ void NovaWorldClient::stop() {
 		send_nw_datagram(session_->build_goodbye());
 	}
 	session_.reset();
+	if (browser_http_ != nullptr) {
+		browser_http_->cancel_request();
+	}
+	gsb_request_in_flight_ = false;
 	if (gate_socket_.is_valid()) {
 		gate_socket_->close();
 		gate_socket_.unref();
@@ -318,6 +346,8 @@ void NovaWorldClient::sync_session_state() {
 			enter_state(STATE_CONNECTED);
 			handshake_elapsed_ = 0.0;
 			tick_accum_ = 0.0;
+			// Session is lobby-ready — fetch the server browser (Phase 2).
+			request_server_list();
 		}
 		break;
 	case S::Error:
@@ -326,6 +356,99 @@ void NovaWorldClient::sync_session_state() {
 	default:
 		break;
 	}
+}
+
+// ---- Server browser (GSB over HTTP) — ADR 0010 Phase 2 ------------------
+
+Array NovaWorldClient::get_server_rows() const {
+	return server_rows_;
+}
+
+void NovaWorldClient::refresh_server_list() {
+	request_server_list();
+}
+
+// The GSB blob is served at <startup_url>/jop_2.gsb. The retail client GETs a
+// server-provided browser URL (NW-G3 — the path is not a client literal); for
+// OpenNova we derive it from the gate response's STARTUPURL so the same path
+// works for both the OpenNova and real-NovaWorld targets.
+String NovaWorldClient::gsb_url() const {
+	if (!server_info_.has("startup_url")) {
+		return String();
+	}
+	String base = server_info_["startup_url"];
+	if (base.is_empty()) {
+		return String();
+	}
+	if (base.ends_with("/")) {
+		base = base.substr(0, base.length() - 1);
+	}
+	return base + "/jop_2.gsb";
+}
+
+void NovaWorldClient::request_server_list() {
+	if (browser_http_ == nullptr) {
+		return;
+	}
+	const String url = gsb_url();
+	if (url.is_empty()) {
+		return; // no startup_url yet — nothing to fetch
+	}
+	if (gsb_request_in_flight_) {
+		browser_http_->cancel_request();
+	}
+	const Error err = browser_http_->request(url);
+	if (err != OK) {
+		gsb_request_in_flight_ = false;
+		UtilityFunctions::print(String("[NovaWorldClient] GSB request did not start: ") + url);
+		return;
+	}
+	gsb_request_in_flight_ = true;
+}
+
+void NovaWorldClient::on_gsb_request_completed(int result, int response_code,
+                                               const PackedStringArray &headers,
+                                               const PackedByteArray &body) {
+	(void)headers;
+	gsb_request_in_flight_ = false;
+
+	if (result != HTTPRequest::RESULT_SUCCESS || response_code != 200) {
+		UtilityFunctions::print(String("[NovaWorldClient] GSB fetch failed result=")
+			+ String::num_int64(result) + " code=" + String::num_int64(response_code));
+		return;
+	}
+
+	opennova::GsbResponse parsed;
+	if (!opennova::gsb_parse_response(reinterpret_cast<const uint8_t *>(body.ptr()),
+	                                  static_cast<size_t>(body.size()), parsed)) {
+		UtilityFunctions::print(String("[NovaWorldClient] GSB parse failed (")
+			+ String::num_int64(body.size()) + " bytes)");
+		return;
+	}
+
+	Array rows;
+	for (const auto &s : parsed.servers) {
+		Dictionary row;
+		row["rid"] = static_cast<int64_t>(s.rid);
+		row["name"] = String(s.server_name.c_str());
+		row["game_type"] = String(s.game_type.c_str());
+		row["mission_name"] = String(s.mission_name.c_str());
+		row["players"] = s.players;
+		row["max_players"] = s.max_players;
+		row["dedicated"] = String(s.dedicated.c_str());
+		row["password"] = String(s.password.c_str());
+		row["country"] = String(s.country.c_str());
+		row["region"] = String(s.region.c_str());
+		char ip_buf[32];
+		std::snprintf(ip_buf, sizeof(ip_buf), "%u.%u.%u.%u",
+		              s.ip[0], s.ip[1], s.ip[2], s.ip[3]);
+		row["ip"] = String(ip_buf);
+		rows.push_back(row);
+	}
+	server_rows_ = rows;
+	UtilityFunctions::print(String("[NovaWorldClient] server browser: ")
+		+ String::num_int64(rows.size()) + " server(s)");
+	emit_signal("server_list_updated", server_rows_);
 }
 
 void NovaWorldClient::enter_state(State next, const String &reason) {

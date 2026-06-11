@@ -98,6 +98,8 @@ func _create_client() -> void:
 	_client.connected.connect(_on_connected)
 	_client.disconnected.connect(_on_disconnected)
 	_client.error_occurred.connect(_on_error)
+	if _client.has_signal("server_list_updated"):
+		_client.server_list_updated.connect(_on_server_list_updated)
 	_client.start()
 
 
@@ -158,16 +160,35 @@ func _on_error(message: String) -> void:
 	_host_button.disabled = true
 
 
-# Fill the browser from the server list. The live row source (GSB) lands with
-# the browse leg of the client session; until then this reflects what the
-# client exposes.
+# Fill the browser from the GSB server list. Rows arrive asynchronously over
+# HTTP once the session is verified; the client re-emits server_list_updated
+# whenever it refetches, and connecting/refreshing both call through here.
 func _refresh_servers() -> void:
 	_server_list.clear()
 	if _client != null and _client.has_method("get_server_rows"):
 		for row in _client.get_server_rows():
-			_server_list.add_item(String(row.get("name", "server")))
+			_server_list.add_item(_format_server_row(row))
 	if _server_list.item_count == 0:
 		_server_list.add_item("No games are being hosted yet.")
+
+
+# "ServerName  (3/16)  AAS  [locked]" — name, occupancy, game type, and a lock
+# marker when the server is passworded or locked.
+func _format_server_row(row: Dictionary) -> String:
+	var name := String(row.get("name", "server"))
+	var players := int(row.get("players", 0))
+	var max_players := int(row.get("max_players", 0))
+	var label := "%s  (%d/%d)" % [name, players, max_players]
+	var game_type := String(row.get("game_type", ""))
+	if not game_type.is_empty():
+		label += "  " + game_type
+	if String(row.get("password", "N")) == "Y" or String(row.get("locked", "N")) == "Y":
+		label += "  [locked]"
+	return label
+
+
+func _on_server_list_updated(_rows: Array) -> void:
+	_refresh_servers()
 
 
 func _on_host_pressed() -> void:

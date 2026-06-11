@@ -953,6 +953,8 @@ grill item NW-L1, deferred to wave 2 (needs the dfx2.exe IDB).
 | System (reimpl) | Original | Verdict | Notes |
 |---|---|---|---|
 | GSB builder (`libs/novaworld/gsb.cpp`) | retail GSB chunk strings | **matching (retail)** | NW-G2: retail `Jointops.exe` contains the `SVRS` (@0x63d793) and `FLDS` (@0x63d7b1) chunk strings and lacks `GLB `/`PLYR`. Our builder emits `IVAR`/`FLDS`/`SVRS`/`XXXX` — the GSB format — so it matches the **retail** client. |
+| GSB parser (`libs/novaworld/gsb.cpp::gsb_parse_response`) | retail GSB chunk-tag pool `SVRS`/`GSB `/`FLDS` @0x63d793–0x63d7b1 | **matching (retail)** | NW-G3: client-direction inverse of the anchored builder (ADR 0010 Phase 2). The retail response header `"GSB "` is at 0x63d7a5, adjacent to the parser's tag pool; our parser checks the same header, decrypts each chunk with the SUBTRACT chain, and reads rows positionally against the SVRS field table. Verified by `gsb_parse_roundtrip` (build→parse is byte-faithful). |
+| GSB **request** URL (client GET) | *(no binary literal)* | **matching by construction (OpenNova)** | NW-G3: `.gsb` / `jop_2.gsb` / `GSB_SERVER` / `?a=1` are **absent** as string literals in retail `Jointops.exe`. The client does not construct the GSB path/query — it issues a plain HTTP GET of a URL handed to it at runtime in the server-sent menu (the `GSB_SERVER` template substitution our `http_listener` produces). For OpenNova we control that URL, so the request matches by construction. |
 
 #### NW-G2 — GSB (retail) vs GLB (demo) is a per-binary split
 
@@ -968,6 +970,37 @@ and, if demo support is wanted, a separate demo GSB/GLB builder. Deferred with
 NW-L1 (the DFX2 gate hostname, also a different-binary item) to a wave-2
 follow-up that loads those IDBs. The retail path — the one that matters for the
 deploy target — is matching.
+
+#### NW-G3 — GSB client parser + request (ADR 0010 Phase 2)
+
+Two client-direction findings, grilled while landing the Godot client's server
+browser:
+
+1. **Response parser.** `gsb_parse_response` (`libs/novaworld/gsb.cpp`) is the
+   exact inverse of the anchored `gsb_build_response`: it checks the `"GSB "`
+   header (retail @0x63d7a5, adjacent to the parser's chunk-tag pool `SVRS`
+   @0x63d793 / `FLDS` @0x63d7b1), decrypts each chunk payload with the SUBTRACT
+   chain (our `nwu_encrypt`) under `GSB_NWU_KEY`, and reads each server row
+   positionally against the field-name table in the SVRS(fields) chunk (lookup
+   is case-insensitive, as the retail browser folds case). The GSB row carries
+   only `rid` + the four IPv4 octets — **no port** — so the parser leaves
+   `port = 0` (host:port for the actual join arrives via a later leg). Locked by
+   `gsb_parse_roundtrip` (build→parse byte-faithful). An anchoring IDA comment
+   is on 0x63d7a5.
+
+2. **Request URL.** A string sweep of retail `Jointops.exe` for `.gsb`,
+   `jop_2.gsb`, `GSB_SERVER`, and `?a=1` finds **none of them** — the only GSB
+   string in the image is the `"GSB "` response header. So the client does not
+   build the browser URL: it issues a plain HTTP GET of a URL supplied at
+   runtime by the server, the `GSB_SERVER` template/menu substitution our
+   `http_listener` already produces (`http://<host>:<port>/jop_2.gsb`). The
+   `?a=1` seen in captures is part of that server-provided URL, passed through
+   verbatim. For OpenNova we own both ends of that URL, so the request is
+   **matching by construction**; our Godot client GETs the OpenNova GSB URL
+   (derived from the configured host + `/jop_2.gsb`). **Open (real-NW only):**
+   whether the engine's shared HTTP client attaches the login cookies
+   (`NWHANDLE`/`PCID`) to the GSB fetch is coupled to the login flow and is
+   carried into Phase 3 (EPASK login); OpenNova's `handle_gsb` ignores cookies.
 
 ### Wave 3 — login/session crypto (2026-06-11)
 
