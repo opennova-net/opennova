@@ -1374,7 +1374,11 @@ func _refresh_sim_bar() -> void:
 	var can: bool = supported and _controller.can_simulate()
 	var simming: bool = supported and _controller.is_simulating()
 	var playing: bool = supported and _controller.is_sim_playing()
-	_sim_bar.visible = can or simming
+	# The bar also stays up whenever the Debug toggle is wired: it is the
+	# overlay's ONLY close affordance in the editor, so it must remain reachable
+	# with no mission open (the perf tab works without a sim) and while an
+	# overlay is still up after the mission underneath it cleared.
+	_sim_bar.visible = can or simming or _debug_toggle_cb.is_valid()
 	_sim_play_btn.disabled = not can or playing
 	_sim_pause_btn.disabled = not playing
 	_sim_step_btn.disabled = not can or playing

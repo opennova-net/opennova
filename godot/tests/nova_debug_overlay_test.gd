@@ -108,6 +108,37 @@ func test_transport_buttons_drive_the_runtime() -> void:
 	assert_string_contains(overlay._tick_label.text, "paused", "the tick line reads the transport")
 
 
+func test_transport_presses_announce_themselves() -> void:
+	# The overlay drives the runtime DIRECTLY (it is host-neutral); hosts whose
+	# own UI mirrors transport state (the editor sim bar) need to hear about it.
+	var rt := _make_runtime()
+	var overlay := _make_overlay()
+	overlay.set_runtime(rt)
+	overlay.toggle()
+	watch_signals(overlay)
+
+	overlay._play_button.pressed.emit()
+	assert_signal_emitted_with_parameters(overlay, "transport_used", ["play"])
+	overlay._pause_button.pressed.emit()
+	assert_signal_emitted_with_parameters(overlay, "transport_used", ["pause"])
+	overlay._step_button.pressed.emit()
+	assert_signal_emitted_with_parameters(overlay, "transport_used", ["step"])
+	overlay._stop_button.pressed.emit()
+	assert_signal_emitted_with_parameters(overlay, "transport_used", ["stop"])
+	overlay._wac_pause_check.toggled.emit(true)
+	assert_signal_emitted_with_parameters(overlay, "transport_used", ["wac_pause"])
+
+
+func test_transport_signal_stays_quiet_without_a_runtime() -> void:
+	var overlay := _make_overlay()
+	overlay.toggle()
+	watch_signals(overlay)
+	overlay._play_button.pressed.emit()
+	overlay._stop_button.pressed.emit()
+	assert_signal_not_emitted(overlay, "transport_used",
+		"a press with nothing to act on announces nothing")
+
+
 func test_vars_pane_filters_and_gates_writes() -> void:
 	var rt := _make_runtime()
 	var overlay := _make_overlay()

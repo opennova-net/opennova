@@ -236,11 +236,17 @@ func test_workspace_switch_dismisses_the_prompt_without_answering() -> void:
 
 class StubDebugController:
 	extends RefCounted
-	# Only what _debug_runtime_source touches; the real controller is replaced
-	# wholesale so no mission/terrain needs standing up.
+	# Only what _debug_runtime_source / _on_overlay_transport touch; the real
+	# controller is replaced wholesale so no mission/terrain needs standing up.
 	var sim_runtime: Object = null
+	var stop_calls := 0
+	var notify_calls := 0
 	func get_sim_runtime():
 		return sim_runtime
+	func sim_stop() -> void:
+		stop_calls += 1
+	func notify_sim_transport_changed() -> void:
+		notify_calls += 1
 
 
 class StubPlayNode:
@@ -275,6 +281,9 @@ func test_debug_button_summons_a_locked_overlay_over_the_shell() -> void:
 	var btn := host.find_child("MissionDebugBtn", true, false) as Button
 	assert_not_null(btn, "build_inspector wires the Debug toggle through set_debug_hooks")
 	assert_true(btn.visible, "valid hooks show the toggle")
+	var bar := host.find_child("MissionSimBar", true, false) as Control
+	assert_true(bar != null and bar.visible,
+		"the sim bar stays up with no mission so the Debug toggle is actually REACHABLE — it is the overlay's only close affordance in the editor")
 
 	btn.button_pressed = true  # user press (emits toggled)
 	var overlay = shell.find_child("MissionDebugOverlay", true, false)
@@ -336,6 +345,47 @@ func test_debug_runtime_source_prefers_pie_then_sim() -> void:
 	stub_controller.sim_runtime = null
 	assert_null(ws._debug_runtime_source(),
 		"idle editor -> null (the overlay shows its no-mission state)")
+
+
+func test_overlay_transport_relays_to_the_controller() -> void:
+	# The overlay drives the runtime directly (it is host-neutral), bypassing
+	# the controller's sim_* methods whose `changed` is all the sim bar listens
+	# to. The workspace relay keeps them in step: Stop completes the editor-side
+	# stop (frees the driver -> editing unlocks), everything else re-emits
+	# changed via notify_sim_transport_changed.
+	var ws := _shelled_workspace()
+	var stub_controller := StubDebugController.new()
+	ws._controller = stub_controller
+
+	ws._on_overlay_transport("pause")
+	assert_eq(stub_controller.notify_calls, 1, "pause relays a changed re-emit")
+	ws._on_overlay_transport("play")
+	ws._on_overlay_transport("step")
+	ws._on_overlay_transport("wac_pause")
+	assert_eq(stub_controller.notify_calls, 4, "play/step/script-pause relay too")
+	assert_eq(stub_controller.stop_calls, 0)
+
+	ws._on_overlay_transport("stop")
+	assert_eq(stub_controller.stop_calls, 1,
+		"overlay Stop completes the editor stop (sim_stop frees the driver, unlocking edits)")
+	assert_eq(stub_controller.notify_calls, 4, "...and does not double-notify")
+
+	# The summoned overlay is WIRED to the relay (not just the method existing).
+	ws.toggle_debug_overlay()
+	assert_true(ws._debug_overlay.transport_used.is_connected(ws._on_overlay_transport),
+		"the summoned overlay's transport_used feeds the relay")
+
+	# PIE: the play world owns its transport; the editor controller must not hear it.
+	var stub_play := StubPlayNode.new()
+	stub_play.playing = true
+	var play_host := Control.new()
+	add_child_autofree(play_host)
+	ws._play_mount = ViewportMount.new(&"MissionPlayViewport", func() -> Control: return stub_play)
+	ws._play_mount.mount(play_host)
+	ws._on_overlay_transport("stop")
+	ws._on_overlay_transport("pause")
+	assert_eq(stub_controller.stop_calls, 1, "PIE transport never reaches the in-place controller")
+	assert_eq(stub_controller.notify_calls, 4)
 
 
 func test_deactivate_hides_the_overlay_and_release_frees_it() -> void:

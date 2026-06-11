@@ -344,10 +344,13 @@ func toggle_debug_overlay() -> void:
 	if _debug_overlay == null or not is_instance_valid(_debug_overlay):
 		_debug_overlay = NovaDebugOverlay.new()
 		_debug_overlay.name = "MissionDebugOverlay"
-		# One-way lock BEFORE the first refresh can build rows: the editor's
-		# overlay observes the live mission, it never writes into it.
+		# One-way lock BEFORE the first refresh can build rows: mission VARIABLES
+		# stay read-only from the editor's overlay. The Sim-tab transport stays
+		# live by design (the button tooltip advertises it) — its presses relay
+		# through _on_overlay_transport so the controller stays in step.
 		_debug_overlay.lock_writes("Editing is off while simulating from the editor.")
 		_debug_overlay.set_runtime_source(Callable(self, "_debug_runtime_source"))
+		_debug_overlay.transport_used.connect(_on_overlay_transport)
 		editor_shell.add_child(_debug_overlay)
 	_debug_overlay.toggle()
 
@@ -365,6 +368,24 @@ func _debug_runtime_source():
 		var world = _play_node().get_world()
 		return world.get_runtime() if world != null else null
 	return _controller.get_sim_runtime() if _controller != null else null
+
+
+# The overlay drives the live runtime DIRECTLY (it is host-neutral and only
+# knows a runtime), so its transport presses bypass MissionController's
+# sim_play/sim_pause/sim_stop — whose `changed` signal is the only thing the
+# editor sim bar refreshes on. Relay: Stop completes the editor-side stop
+# (sim_stop frees the driver, unlocking edits and restoring the gizmo — the
+# overlay's runtime.stop() alone left is_simulating() true over a visually
+# stopped world); everything else just re-emits changed via the controller.
+func _on_overlay_transport(action: String) -> void:
+	if is_playing_mission():
+		return  # PIE: the play world owns its transport; no editor sim bar involved
+	if _controller == null:
+		return
+	if action == "stop":
+		_controller.sim_stop()
+	elif _controller.has_method("notify_sim_transport_changed"):
+		_controller.notify_sim_transport_changed()
 
 
 # --- New (create a mission from scratch) --------------------------------------

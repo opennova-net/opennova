@@ -12,6 +12,12 @@ extends CanvasLayer
 ## frame; the entity list reads ONE packed snapshot per refresh and only the
 ## selected entity pays for the scalar detail card.
 
+## Fired after a Sim-tab transport press (play/pause/step/stop) or the script
+## pause toggle acted on the runtime. Hosts whose own UI mirrors the runtime's
+## transport state (the editor sim bar) listen and re-read; hosts without one
+## (the game's F3 overlay) ignore it.
+signal transport_used(action: String)
+
 const REFRESH_INTERVAL := 0.25
 const PANEL_WIDTH := 380.0
 
@@ -499,6 +505,7 @@ func _on_play_pressed() -> void:
 	if runtime != null:
 		runtime.play()
 		_refresh()
+		transport_used.emit("play")
 
 
 func _on_pause_pressed() -> void:
@@ -506,6 +513,7 @@ func _on_pause_pressed() -> void:
 	if runtime != null:
 		runtime.pause()
 		_refresh()
+		transport_used.emit("pause")
 
 
 func _on_step_pressed() -> void:
@@ -513,6 +521,7 @@ func _on_step_pressed() -> void:
 	if runtime != null:
 		runtime.step_once()
 		_refresh()
+		transport_used.emit("step")
 
 
 func _on_stop_pressed() -> void:
@@ -520,12 +529,14 @@ func _on_stop_pressed() -> void:
 	if runtime != null:
 		runtime.stop()
 		_refresh()
+		transport_used.emit("stop")
 
 
 func _on_wac_pause_toggled(pressed: bool) -> void:
 	var sim := _resolve_sim(_resolve_runtime())
 	if sim != null:
 		sim.set_wac_paused(pressed)
+		transport_used.emit("wac_pause")
 
 
 func _on_vars_filter_toggled(_pressed: bool) -> void:

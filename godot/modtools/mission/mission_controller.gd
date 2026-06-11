@@ -3612,6 +3612,16 @@ func sim_stop() -> void:
 	changed.emit()
 
 
+## The debug overlay (C12) drives the live sim driver directly — it is
+## host-neutral and bypasses the sim_* methods above. The workspace relays its
+## play/pause/step presses here so `changed` still fires and the sim bar
+## re-reads the driver state. (Overlay Stop relays to sim_stop() instead: it
+## must also free the driver to unlock editing.)
+func notify_sim_transport_changed() -> void:
+	if is_simulating():
+		changed.emit()
+
+
 func _clear_objects() -> void:
 	var container := _objects_container()
 	if container != null and container.get_parent() != null:
