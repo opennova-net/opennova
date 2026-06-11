@@ -1,27 +1,38 @@
+class_name TransformGizmo3D
 extends Node3D
 
-# In-world transform gizmo for the selected mission entity (ONED Mission workspace).
+# Framework in-world transform gizmo (translate + rotate), domain-agnostic.
 #
 # An ImGuizmo-style "universal" gizmo: three world-aligned translate arrows (X/Y/Z) and
-# three rotate rings (one per authored angle: pitch / yaw / roll). It owns only geometry,
-# screen-space hit-testing, and PURE drag-delta math -- it knows nothing about the mission
-# document. The controller picks a handle, feeds mouse rays in, and applies the returned
-# delta through its existing _apply_selected_xform / _commit_selected_transform spine.
+# three rotate rings (one per authored angle component). It owns only geometry,
+# screen-space hit-testing, and PURE drag-delta math -- it knows nothing about any
+# document. The host picks a handle, feeds mouse rays in, and applies the returned
+# delta through its own commit spine; selection/picking stays host policy (mission
+# keeps its physics-pick bodies, see editor-runtime parity rule 3: editor interaction
+# attaches AROUND shared nodes).
 #
-# Lives as a child of the MissionObjects container (so it frees with a re-bake) and is
-# referenced via preload (no class_name), the same convention as the marker / waypoint /
-# area-trigger overlays.
+# Rotation frame: the host's authored angles may be nested in an euler convention with
+# no closed-form inverse (mission's bms_to_godot_basis is
+# RotY(90-yaw)*RotZ(-pitch)*RotX(roll)*RotY(90)), so each ring's world rotation axis is
+# derived numerically (finite difference) from the current authored degrees through the
+# injected `basis_builder` -- see _compute_ring_axes. A ring drag maps its swept angle
+# back to a delta on exactly that one authored component, so the host's commit path
+# needs no new code. The default builder is a plain euler Basis (authored X/Y/Z degrees
+# about the world axes).
 #
 # Constant on-screen size: _process scales the node by camera distance, so the gizmo stays
 # a roughly fixed pixel size. Geometry constants below are in BASE units (pre-scale).
-#
-# Rotation frame: there is no godot->bms rotation inverse, and pitch/roll are nested inside
-# MissionObjectPlacer.bms_to_godot_basis (RotY(90-yaw)*RotZ(-pitch)*RotX(roll)*RotY(90)), so
-# each ring's world rotation axis is derived numerically (finite difference) from the current
-# authored degrees -- see _compute_ring_axes. A ring drag maps its swept angle back to a delta
-# on exactly that one authored component, so the commit path needs no new code.
 
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+# authored degrees (Vector3) -> Basis. Hosts with a domain rotation convention inject
+# theirs (mission: MissionObjectPlacer.bms_to_godot_basis); unset falls back to the
+# plain euler default.
+var basis_builder: Callable = Callable()
+
+# Optional snapping, off by default (0.0): translate deltas snap to multiples of
+# translate_snap (world units along the grabbed axis); ring deltas snap to multiples
+# of rotate_snap_deg (authored degrees).
+var translate_snap: float = 0.0
+var rotate_snap_deg: float = 0.0
 
 # Geometry (BASE units; node scale renders these at a constant pixel size).
 const ARROW_LEN := 1.0
@@ -226,10 +237,10 @@ func update(cam: Camera3D, mouse_pos: Vector2) -> Dictionary:
 	# delta and stall the drag.
 	if String(_drag.get("part", "")) == "translate":
 		var t: float = (hit - _drag_o0).dot(_drag_axis_world)
-		return { "translate": _drag_axis_world * (t - _drag_t0) }
+		return { "translate": _drag_axis_world * _snap_translate(t - _drag_t0) }
 	var v: Vector3 = hit - _drag_o0
 	if v.length() < 1e-4 or _drag_v0.length() < 1e-4:
-		return { "rotate_deg": rad_to_deg(_drag_angle) / _drag_sens }
+		return { "rotate_deg": _snap_rotate(rad_to_deg(_drag_angle) / _drag_sens) }
 	# Signed sweep about the ring axis, accumulated + unwrapped so a single drag can pass +/-180 deg
 	# without atan2 flipping the sign, then mapped back to authored degrees via the sensitivity.
 	var ang := atan2(_drag_axis_world.dot(_drag_v0.cross(v)), _drag_v0.dot(v))
@@ -240,7 +251,15 @@ func update(cam: Camera3D, mouse_pos: Vector2) -> Dictionary:
 		step += TAU
 	_drag_angle += step
 	_drag_prev_ang = ang
-	return { "rotate_deg": rad_to_deg(_drag_angle) / _drag_sens }
+	return { "rotate_deg": _snap_rotate(rad_to_deg(_drag_angle) / _drag_sens) }
+
+
+func _snap_translate(t: float) -> float:
+	return snappedf(t, translate_snap) if translate_snap > 0.0 else t
+
+
+func _snap_rotate(deg: float) -> float:
+	return snappedf(deg, rotate_snap_deg) if rotate_snap_deg > 0.0 else deg
 
 
 func end_drag() -> void:
@@ -268,10 +287,17 @@ func _viewport_camera() -> Camera3D:
 	return vp.get_camera_3d() if vp != null else null
 
 
+# The injected authored-degrees -> Basis convention, defaulting to plain euler.
+func _build_basis(rot_deg: Vector3) -> Basis:
+	if basis_builder.is_valid():
+		return basis_builder.call(rot_deg)
+	return Basis.from_euler(Vector3(deg_to_rad(rot_deg.x), deg_to_rad(rot_deg.y), deg_to_rad(rot_deg.z)))
+
+
 # Derive each rotate ring's world axis + per-degree sensitivity from the authored degrees by
 # finite difference, so the rings stay correct for any orientation without an euler inverse.
 func _compute_ring_axes(rot_deg: Vector3) -> void:
-	var b0 := MissionObjectPlacer.bms_to_godot_basis(rot_deg)
+	var b0 := _build_basis(rot_deg)
 	var b0i := b0.inverse()
 	var delta := 1.0  # degrees
 	for i in 3:
@@ -282,7 +308,7 @@ func _compute_ring_axes(rot_deg: Vector3) -> void:
 			r.y += delta
 		else:
 			r.z += delta
-		var db := MissionObjectPlacer.bms_to_godot_basis(r) * b0i
+		var db := _build_basis(r) * b0i
 		var q := db.get_rotation_quaternion()
 		var ang := q.get_angle()
 		var ax := q.get_axis()

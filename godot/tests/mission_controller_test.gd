@@ -44,7 +44,7 @@ class StubTerrainEditor:
 	func get_current_trn_path() -> String:
 		return current_trn_path
 
-	func open_trn(path: String) -> Error:
+	func open_trn(path: String, _timeline: PerfTimeline = null) -> Error:
 		# Mirror the real TerrainEditor: a successful open records the current .trn.
 		opened_trn = path
 		if open_trn_result == OK:
@@ -169,6 +169,28 @@ func _loaded_with_selection() -> MissionController:
 	assert_gt(buildings.size(), 0, "the fixture places buildings to select")
 	controller._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
 	return controller
+
+
+func test_open_mission_records_a_perf_timeline() -> void:
+	var stub := StubTerrainEditor.new()
+	stub.resource_root = _dvxi5_root()
+	stub.world_root = Node3D.new()
+	add_child_autofree(stub.world_root)
+	add_child_autofree(stub)
+	var controller := MissionController.new(stub)
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK, "the fixture mission opens")
+
+	var timeline: PerfTimeline = PerfTimeline.latest()
+	assert_not_null(timeline, "a successful open finishes a timeline into the ring")
+	assert_string_contains(timeline.label, BMS_PATH.get_file(), "the timeline names the mission")
+	var names := Array(timeline.span_names())
+	# Controller stages + the placer's sub-stages. The stub's open_trn ignores its
+	# timeline, so the real terrain sub-spans are covered by the terrain editor, not here.
+	for expected in ["parse", "terrain", "environment", "objects", "overlays",
+			"bucket_entities", "static_batches", "pick_colliders", "animated_models"]:
+		assert_has(names, expected, "the load records the %s span" % expected)
+	assert_string_contains(controller.get_last_status(), "(",
+		"the load status carries the timing brief")
 
 
 func test_set_game_mode_is_single_select_and_undoable() -> void:

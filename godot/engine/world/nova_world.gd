@@ -168,19 +168,33 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 		load_failed.emit("%s.env (from %s) not found in %s" % [mission.get_environment_ref(), bms_name, resource_root.get_root_dir()])
 		return ERR_FILE_NOT_FOUND
 
+	# Same stage attribution as the editor's mission open, so the two hosts'
+	# load costs stay comparable (one timeline ring serves both).
+	var timeline := PerfTimeline.begin("Mission load %s" % bms_name)
 	_resource_root = resource_root
+	timeline.span("environment")
 	if not _load_environment(env_name):
 		load_failed.emit("failed to load %s" % env_name)
 		return ERR_CANT_OPEN
 	_apply_mission_environment_overrides(mission)
+	timeline.end_span()
+	timeline.span("terrain")
 	if not _load_terrain(trn):
 		load_failed.emit("failed to load %s" % trn)
 		return ERR_CANT_OPEN
+	timeline.end_span()
 
 	_loaded_mission = mission
-	_place_mission_objects(mission)
+	timeline.span("objects")
+	_place_mission_objects(mission, timeline)
+	timeline.end_span()
+	timeline.span("runtime")
 	_start_runtime(mission, bms_name)
+	timeline.end_span()
+	timeline.span("audio")
 	_start_mission_audio(mission, bms_name)
+	timeline.end_span()
+	timeline.finish()
 	_loaded = true
 	world_loaded.emit()
 	return OK
@@ -203,11 +217,14 @@ func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 
 # Populate the world with the mission's placed objects under a MissionObjects node.
 # Shares the host-agnostic placer with the editor Mission workspace.
-func _place_mission_objects(mission: NovaMissionData) -> void:
+func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = null) -> void:
 	if _resource_root == null or mission == null:
 		return
 	_placer = MissionObjectPlacer.new(_resource_root)
-	_mission_stats = _placer.place(mission, self, { "environment_node": _env })
+	var options := { "environment_node": _env }
+	if timeline != null:
+		options["timeline"] = timeline
+	_mission_stats = _placer.place(mission, self, options)
 	print("NovaWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
 		int(_mission_stats.get("placed", 0)),
 		int(_mission_stats.get("batched", 0)),

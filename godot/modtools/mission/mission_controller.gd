@@ -26,7 +26,7 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const MissionWaypointOverlay := preload("res://engine/mission/mission_waypoint_overlay.gd")
 const MissionAreaTriggerOverlay := preload("res://engine/mission/mission_area_trigger_overlay.gd")
 const MissionMarkerOverlay := preload("res://engine/mission/mission_marker_overlay.gd")
-const MissionGizmo := preload("res://engine/mission/mission_gizmo.gd")
+const MissionGizmo := preload("res://modtools/framework/transform_gizmo_3d.gd")
 const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
@@ -102,7 +102,7 @@ var _pick_debug := false
 # drag + numeric edits, so undo + the inspector stay in sync. Objects only (markers keep
 # their terrain-drag). The node lives under the MissionObjects container, so it frees with a
 # re-bake; the ref is dropped in _reset_selection_state and lazily rebuilt in _refresh_gizmo.
-var _gizmo  # MissionGizmo (preloaded, no class_name)
+var _gizmo  # TransformGizmo3D (framework), bms basis_builder injected
 var _gizmo_enabled := true
 # Active handle drag: { part, axis } while a gizmo handle is held, else empty. The selection's
 # transform at grab time is snapshotted so every motion applies an absolute delta (no drift).
@@ -393,10 +393,16 @@ func open_mission(bms_path: String) -> Error:
 		_last_status = "Set a resource directory before opening a mission."
 		return ERR_UNCONFIGURED
 
+	# Wall-clock attribution per load stage; the abandoned timeline of a failed
+	# open never reaches the ring (only finish() retains it).
+	var timeline := PerfTimeline.begin("Mission load %s" % bms_path.get_file())
+
+	timeline.span("parse")
 	var mission := NovaMissionData.new()
 	if mission.open_file(bms_path) != OK:
 		_last_status = "Could not read %s: %s" % [bms_path.get_file(), mission.get_last_error()]
 		return ERR_CANT_OPEN
+	timeline.end_span()
 
 	# The mission header selects the world: resolve its terrain (required) and
 	# environment (optional) from the user's resource directory, case-insensitive.
@@ -409,7 +415,8 @@ func open_mission(bms_path: String) -> Error:
 	# Loading the referenced terrain is an atomic dependency of opening the mission,
 	# not a separate user action, so it goes straight to open_trn rather than the
 	# terrain editor's dirty-guarded request_open_trn.
-	var trn_err := int(terrain_editor.open_trn(trn_path))
+	timeline.span("terrain")
+	var trn_err := int(terrain_editor.open_trn(trn_path, timeline))
 	if trn_err != OK:
 		# open_trn already replaced the editor's terrain with an empty one, so any
 		# previously-loaded mission now describes a world that is gone. Drop it
@@ -417,9 +424,14 @@ func open_mission(bms_path: String) -> Error:
 		clear()
 		_last_status = "Could not load %s.trn (error %d)." % [terrain_ref, trn_err]
 		return trn_err as Error
+	timeline.end_span()
 
+	timeline.span("environment")
 	var env_note := _load_environment(mission, resource_root)
-	_place_objects(mission, resource_root)
+	timeline.end_span()
+	timeline.span("objects")
+	_place_objects(mission, resource_root, timeline)
+	timeline.end_span()
 
 	_mission = mission
 	_current_path = bms_path
@@ -437,8 +449,11 @@ func open_mission(bms_path: String) -> Error:
 	# Focus the first zone when reopening already in area-trigger mode, mirroring set_mode (and the
 	# waypoint branch above), so the Triggers panel is not empty after an open.
 	_selected_zone_index = 0 if (_mode == Mode.AREA_TRIGGERS and mission.get_area_trigger_count() > 0) else -1
+	timeline.span("overlays")
 	_refresh_active_overlay()
-	_last_status = _describe_load(mission, bms_path, env_note)
+	timeline.end_span()
+	timeline.finish()
+	_last_status = "%s (%s)" % [_describe_load(mission, bms_path, env_note), timeline.brief(3)]
 	_notify_changed()
 	return OK
 
@@ -982,11 +997,12 @@ func _on_left_release() -> void:
 
 
 # --- Transform gizmo ----------------------------------------------------------
-# The in-world gizmo (engine/mission/mission_gizmo.gd) draws translate arrows + rotate rings on
-# the selected object and returns drag deltas; the controller applies them through the same
-# _apply_selected_xform / _commit_selected_transform spine as the terrain drag + numeric edits, so
-# undo + the inspector stay in lockstep. Objects only (markers keep their terrain-drag). The node
-# is a child of the MissionObjects container so it frees with a re-bake.
+# The in-world gizmo (framework TransformGizmo3D, bms basis_builder injected) draws translate
+# arrows + rotate rings on the selected object and returns drag deltas; the controller applies
+# them through the same _apply_selected_xform / _commit_selected_transform spine as the terrain
+# drag + numeric edits, so undo + the inspector stay in lockstep. Objects only (markers keep
+# their terrain-drag). The node is a child of the MissionObjects container so it frees with a
+# re-bake.
 
 func is_gizmo_enabled() -> bool:
 	return _gizmo_enabled
@@ -1115,6 +1131,9 @@ func _refresh_gizmo() -> void:
 	if _gizmo == null or not is_instance_valid(_gizmo):
 		_gizmo = MissionGizmo.new()
 		_gizmo.name = "MissionTransformGizmo"
+		# Mission's authored angles are nested BMS euler, not plain euler: the rings must
+		# derive their axes through the same basis the placer renders with.
+		_gizmo.basis_builder = MissionObjectPlacer.bms_to_godot_basis
 		container.add_child(_gizmo)
 	_gizmo.visible = true
 	_gizmo.show_for(_selected_xform.origin, _selected_rotation_deg)
@@ -3257,7 +3276,7 @@ func _load_environment(mission: NovaMissionData, resource_root: NovaResourceRoot
 	return note
 
 
-func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot) -> void:
+func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot, timeline: PerfTimeline = null) -> void:
 	_stats = {}
 	# A fresh placement replaces the container (and the old selection box with it), so
 	# drop any stale selection refs before re-harvesting the pickable index.
@@ -3276,6 +3295,8 @@ func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot) -
 	var env_node := _environment_node()
 	if env_node != null:
 		options["environment_node"] = env_node
+	if timeline != null:
+		options["timeline"] = timeline
 	_stats = _placer.place(mission, world_root, options)
 	_pickable = _placer.pickable_records
 	# The placer created the pick colliders with the world; refresh the debug overlay if on.
