@@ -42,11 +42,19 @@ add_subdirectory(../../libs/lwf opennova_lwf)
 add_subdirectory(../../libs/dbf opennova_dbf)
 add_subdirectory(../../libs/audio opennova_audio)
 add_subdirectory(../../libs/oned_edit opennova_oned_edit)
+add_subdirectory(../../libs/novacrypto opennova_novacrypto)
+add_subdirectory(../../libs/napi opennova_napi)
+# novaworld depends on sqlite (db/), so pull sqlite in too. The Godot
+# extension only uses the protocol bits, but linking the whole library is
+# fine — the .a is small.
+add_subdirectory(../../third_party/sqlite opennova_sqlite)
+add_subdirectory(../../libs/novaworld opennova_novaworld)
 
 set(TARGET_NAME "opennova")
 
 add_library(${TARGET_NAME} SHARED
     register_types.cpp
+    network/nova_world_client.cpp
     terrain/nova_terrain.cpp
     terrain/nova_terrain_build_job.cpp
     terrain/nova_terrain_data.cpp
@@ -172,6 +180,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_dbf
     opennova_audio
     opennova_oned_edit
+    opennova_novacrypto
+    opennova_napi
+    opennova_novaworld
 )
 
 # The bake worker thread in nova_terrain_build_job.cpp installs
