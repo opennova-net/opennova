@@ -30,6 +30,7 @@ const AXES_VISIBLE_KEY := "axes_visible"
 var _index: RefCounted
 var _resource_root: NovaResourceRoot = NovaResourceRoot.new()
 var _root_dir: String = ""
+var _reference_index: NovaReferenceIndex
 
 
 func ensure_index() -> void:
@@ -40,6 +41,17 @@ func ensure_index() -> void:
 func get_index() -> RefCounted:
 	ensure_index()
 	return _index
+
+
+# The whole-editor reference index (libs/refs over the mounted root): one
+# instance per library so every link widget / referrers panel shares the same
+# lazily-built graph. It self-invalidates against the root's cache epoch, so a
+# rescan or directory change never serves stale edges.
+func get_reference_index() -> NovaReferenceIndex:
+	if _reference_index == null:
+		_reference_index = NovaReferenceIndex.new()
+		_reference_index.set_resource_root(_resource_root)
+	return _reference_index
 
 
 func get_root_dir() -> String:
