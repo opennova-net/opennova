@@ -1,4 +1,4 @@
-class_name NovaWorld
+class_name GameWorld
 extends Node3D
 
 # Loads a playable world (terrain + environment + vegetation + foliage) from ONE
@@ -7,12 +7,12 @@ extends Node3D
 # (NovaTerrainData, EnvFile, NovaFoliageDispatcher, VegAssets); this node is just
 # the orchestration both the runtime (game/main_game.tscn) and the editor's Play
 # mode go through — one loader, one root, no fallbacks. The scene lives in
-# nova_world.tscn so hosts instance it; the game mounts its root from the
+# game_world.tscn so hosts instance it; the game mounts its root from the
 # persisted resource directory, the editor injects its own via
 # set_resource_root() and plays the live document via load_mission_data().
 #
 # HOST CONTRACT (duck-typed on purpose — two hosts do not justify a formal
-# interface): a host instances nova_world.tscn, optionally injects a root,
+# interface): a host instances game_world.tscn, optionally injects a root,
 # calls one load_* entry, then
 #   * drives tick(camera_position) once per frame while playing (foliage ->
 #     runtime logic+present -> audio, in that order; pausing = not ticking),
@@ -225,7 +225,7 @@ func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = n
 	if timeline != null:
 		options["timeline"] = timeline
 	_mission_stats = _placer.place(mission, self, options)
-	print("NovaWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
+	print("GameWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
 		int(_mission_stats.get("placed", 0)),
 		int(_mission_stats.get("batched", 0)),
 		int(_mission_stats.get("animated", 0)),
@@ -278,7 +278,7 @@ func _load_environment(env_path: String) -> bool:
 		return true
 	var env := EnvFile.new()
 	if env.load_from_resource_root(_resource_root, env_path) != OK:
-		push_warning("NovaWorld: failed to load environment '%s'" % env_path)
+		push_warning("GameWorld: failed to load environment '%s'" % env_path)
 		return false
 	# NovaEnvironment's setter reloads + pushes shader globals on assignment.
 	_env.environment_data = env
@@ -380,7 +380,7 @@ func _route_mission_effects(effects: Array) -> void:
 # placed MissionObjects, and each tick applies every entity's transform + part animations (PLAYPARTANIM,
 # applied in-engine) + visibility onto its model. The game runs it at the faithful 62-frame cadence and
 # drives it explicitly from tick() (self_tick off); its drained side effects route through
-# _on_runtime_effects. A reload reuses this NovaWorld, so any prior runtime is freed in unload() first.
+# _on_runtime_effects. A reload reuses this GameWorld, so any prior runtime is freed in unload() first.
 func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
 	_runtime = MissionRuntime.new()
@@ -396,7 +396,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 		"wac_basename": bms_name.get_basename(),
 	})
 	if _runtime.get_sim() == null:
-		push_warning("NovaWorld: failed to start mission runtime")
+		push_warning("GameWorld: failed to start mission runtime")
 	_runtime.effects_drained.connect(_on_runtime_effects)
 
 
@@ -414,7 +414,7 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 	var item_db = _placer.get_item_db() if _placer != null else null
 	_mission_audio = NovaMissionAudio.new(_resource_root, item_db)
 	var stats := _mission_audio.setup(mission, bms_name, self)
-	print("NovaWorld: mission audio — %d/%d sound markers resolved, %d bank(s), %d voice(s)" % [
+	print("GameWorld: mission audio — %d/%d sound markers resolved, %d bank(s), %d voice(s)" % [
 		int(stats.get("markers_resolved", 0)),
 		int(stats.get("markers_total", 0)),
 		int(stats.get("banks_loaded", 0)),

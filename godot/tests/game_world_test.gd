@@ -1,6 +1,6 @@
 extends GutTest
 
-const WORLD_TEST_ROOT := "nova_world_test"
+const WORLD_TEST_ROOT := "game_world_test"
 
 
 func after_each() -> void:
@@ -20,15 +20,15 @@ func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
 
 
 func test_packaged_scene_instantiates_with_intact_wiring() -> void:
-	# nova_world.tscn is the embeddable world (the game instances it in
+	# game_world.tscn is the embeddable world (the game instances it in
 	# main_game.tscn; play-in-editor instances it in a workspace viewport). Pin
 	# the extraction: every engine node is present and the intra-scene NodePaths
 	# survived the move out of main_game.tscn.
-	var packed := load("res://engine/world/nova_world.tscn") as PackedScene
+	var packed := load("res://engine/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate()
 	add_child_autofree(world)
-	assert_true(world is NovaWorld, "the root carries the NovaWorld script")
+	assert_true(world is GameWorld, "the root carries the GameWorld script")
 	for child_name in ["NovaTerrain", "NovaEnvironment", "NovaSky", "NovaWeather", "NovaWater", "NovaCelestial"]:
 		assert_not_null(world.get_node_or_null(child_name), "%s is in the packaged scene" % child_name)
 	assert_not_null(world.get_node_or_null("NovaTerrain/FoliageDispatcher"))
@@ -72,8 +72,8 @@ func test_injected_root_bypasses_settings_mount() -> void:
 		"the error names the injected root's directory, proving no settings mount ran")
 
 
-func _make_world() -> NovaWorld:
-	var world := NovaWorld.new()
+func _make_world() -> GameWorld:
+	var world := GameWorld.new()
 	var terrain := NovaTerrain.new()
 	terrain.name = "NovaTerrain"
 	world.add_child(terrain)

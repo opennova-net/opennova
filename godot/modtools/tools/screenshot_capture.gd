@@ -39,7 +39,7 @@ const SETTLE_FRAMES_3D := 48
 const OUT_DIR := "res://../screenshots"
 
 # Asset names, resolved case-insensitively against the resource dir at runtime.
-# Dvxi5.trn / full_00.env are the runtime's hardcoded world files (NovaWorld).
+# Dvxi5.trn / full_00.env are the runtime's hardcoded world files (GameWorld).
 const TERRAIN_NAME := "Dvxi5.trn"
 const ENV_NAME := "full_00.env"
 const FONT_NAME := "Serpen36"  # bare basename; the fonts workspace appends .fnt

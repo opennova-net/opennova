@@ -1,7 +1,7 @@
 extends SceneTree
 
 # Headless validation of the main_game.tscn runtime pipeline. Loads the scene,
-# points the shared NovaWorld at an explicit resource dir (a synthesized one-root
+# points the shared GameWorld at an explicit resource dir (a synthesized one-root
 # fixture by default, or a dir passed via `-- <dir>`), waits for NovaTerrainData,
 # moves the camera onto a painted foliage point, then verifies the foliage
 # dispatcher is using broad camera-grid coverage. There is no runtime fallback;
@@ -30,7 +30,7 @@ func _run() -> void:
 	root.add_child(scene)
 	# main_game._ready already ran load_world() (no-op headless without a config
 	# dir); drive the shared world loader directly at our chosen dir, no persist.
-	var world: NovaWorld = scene.get_node_or_null("World")
+	var world: GameWorld = scene.get_node_or_null("World")
 	if world != null:
 		world.load_world(dir)
 

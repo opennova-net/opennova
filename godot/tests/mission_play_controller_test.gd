@@ -1,7 +1,7 @@
 extends GutTest
 
 # MissionPlayController: the play-in-editor host — the real game world
-# (nova_world.tscn) in an editor-owned SubViewport. Headless coverage is the
+# (game_world.tscn) in an editor-owned SubViewport. Headless coverage is the
 # state machine and rejection paths (a successful boot needs real game assets:
 # terrain + env + models; see screenshot_capture's mission_play target and the
 # manual A/B against the standalone game).
@@ -57,7 +57,7 @@ func test_start_rejects_missing_root() -> void:
 
 func test_failed_world_boot_leaves_a_clean_stopped_state() -> void:
 	# The dvxi5 fixture has the terrain but no .env, so the real mission load
-	# fails inside NovaWorld; the controller must come back not-playing with the
+	# fails inside GameWorld; the controller must come back not-playing with the
 	# failure surfaced, ready for the workspace to swap the edit viewport back.
 	var play = _make_play()
 	await get_tree().process_frame

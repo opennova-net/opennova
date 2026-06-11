@@ -7,7 +7,7 @@ extends RefCounted
 # terrain + environment from the shared resource root, load them through the
 # terrain editor (read-only viewport), then run the host-agnostic
 # MissionObjectPlacer under the terrain editor's world root. The resolve + place
-# logic is the same piece the runtime uses (NovaWorld.load_mission); this is the
+# logic is the same piece the runtime uses (GameWorld.load_mission); this is the
 # thin editor binding around it.
 #
 # Read-only for now: mission authoring (place / move / save entities) is deferred,
@@ -3385,7 +3385,7 @@ func _ensure_sim_driver() -> bool:
 	_sim_driver.name = "MissionRuntime"
 	container.add_child(_sim_driver)
 	# TICK_DIVIDED + self_tick + the sim's default loco_scale: the exact options the game's
-	# NovaWorld path runs, so the preview IS the game's pacing. The old EVERY_PROCESS +
+	# GameWorld path runs, so the preview IS the game's pacing. The old EVERY_PROCESS +
 	# loco_scale 4096 combo (32768/8, a slowed compensation for uncapped editor fps) was an
 	# editor-only divergence. The driver builds its present index over `container`. Pass the
 	# editor's loaded terrain so the preview grounds AI exactly like the game runtime, and the

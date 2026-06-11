@@ -1,7 +1,7 @@
 extends Node3D
 
 # Runtime shell: boots into the game's menu front-end (NovaMenuHost, driving the
-# .mnu menu set + audio from the chosen resource dir) and hands off to a NovaWorld
+# .mnu menu set + audio from the chosen resource dir) and hands off to a GameWorld
 # when the player starts a mission, with pause + return-to-menu on demand. The
 # engine ships no game data; everything (menus, audio, terrain, missions) loads
 # from the chosen resource dir. The first-launch directory picker lives here
@@ -16,7 +16,7 @@ const CHANGE_DIR_KEY := KEY_F9
 
 enum State { MENU, WORLD, PAUSED }
 
-@onready var _world: NovaWorld = $World
+@onready var _world: GameWorld = $World
 @onready var _camera: Camera3D = $Camera3D
 @onready var _hud: CanvasLayer = $HUD
 @onready var _menu_host = $MenuLayer/MenuHost
