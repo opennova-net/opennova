@@ -125,6 +125,22 @@ func bind_option(option: OptionButton, getter: Callable, setter: Callable, optio
 	return option
 
 
+func bind_link(widget: Object, getter: Callable, setter: Callable) -> Object:
+	# Duck-typed link-widget contract, so this binder stays host-neutral while the
+	# widget itself (e.g. the editor's ResourceRefWidget) lives with its host:
+	# the widget exposes set_value(String) / get_value() and a value_changed(String)
+	# signal, set_value MUST NOT emit value_changed, and the widget owns its own
+	# skip-while-typing behavior (mirroring bind_line's focused-skip).
+	_bindings.append(func(info):
+		var v: String = getter.call(info)
+		if widget.get_value() != v:
+			widget.set_value(v))
+	widget.value_changed.connect(func(value: String):
+		if not _guard.active:
+			setter.call(value))
+	return widget
+
+
 func sync_from(info: Dictionary) -> void:
 	_guard.run(func() -> void:
 		for apply in _bindings:

@@ -82,11 +82,20 @@ func open(workspace: EditorWorkspace, on_pick: Callable) -> void:
 			workspace.get_open_dialog_dir()
 		)
 		return
-	_ensure_dialog()
-	_kind = kind
-	_title = workspace.get_open_dialog_title()
+	# _filters/_current_dir only feed the no-kind file-dialog fallback above;
+	# the indexed path ignores them, so workspace opens keep their behavior.
 	_filters = workspace.get_open_dialog_filters()
 	_current_dir = workspace.get_open_dialog_dir()
+	open_kind(kind, workspace.get_open_dialog_title(), on_pick)
+
+
+## Open the indexed picker over every resource of `kind`, independent of any
+## workspace — the entry point for link widgets ("pick a terrain") and other
+## callers that know the kind but have no open-dialog contract.
+func open_kind(kind: String, title: String, on_pick: Callable) -> void:
+	_ensure_dialog()
+	_kind = kind
+	_title = title
 	_open_action = on_pick
 	_picked = false
 	_search.text = ""
