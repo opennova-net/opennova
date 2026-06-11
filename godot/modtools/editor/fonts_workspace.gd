@@ -123,14 +123,19 @@ func _make_inspector() -> Control:
 		var shell: Object = editor_shell
 		var strip := ReferenceStrip.new()
 		strip.name = "UsedByStrip"
+		# Kind filter: referrer buckets are name-keyed, and the bare stem the
+		# credits reference fonts by shares its namespace with every other
+		# extensionless name in the graph. Source paths are VFS-logical;
+		# disk-only workspaces (menus, credits — exactly the files that use
+		# fonts) need them resolved before the jump.
 		strip.configure("font", {
 			"referrers": func(name: String) -> Array:
 				return shell.get_reference_index().referrers_of(name),
 			"is_ready": func() -> bool:
 				return shell.get_reference_index().is_built(),
 			"jump": func(kind: String, path: String) -> void:
-				shell.open_in_workspace(kind, path),
-		})
+				shell.open_in_workspace(kind, ReferenceStrip.resolve_source_path(shell, path)),
+		}, PackedStringArray(["font"]))
 		box.add_child(strip)
 
 	return margin

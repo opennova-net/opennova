@@ -31,7 +31,9 @@ class RefShell:
 
 	func open_kind_picker(kind: String, _title: String, on_pick: Callable) -> void:
 		picked_kind = kind
-		on_pick.call("C:/res/Serpen24.fnt")
+		# Picks a DIFFERENT font than the entry already has - a same-value pick
+		# would early-return in _commit and make the commit assertion vacuous.
+		on_pick.call("C:/res/Gunpl27b.fnt")
 
 	func open_in_workspace(kind: String, path: String, _focus: Dictionary = {}) -> Error:
 		jumped.append([kind, path])
@@ -119,13 +121,13 @@ func test_credits_workspace_injects_font_link_services_on_mount() -> void:
 
 	font_ref.browse_button.pressed.emit()
 	assert_eq(shell.picked_kind, "font", "browsing routes through the shell kind picker")
-	assert_eq(entry.get_font_name(), "Serpen24",
-		"a pick commits the basename back onto the entry")
+	assert_eq(entry.get_font_name(), "Gunpl27b",
+		"a pick commits the picked font's basename back onto the entry")
 
 	assert_true(font_ref.jump_button.visible and not font_ref.jump_button.disabled,
 		"a resolvable font offers the jump")
 	font_ref.jump_button.pressed.emit()
-	assert_eq(shell.jumped, [["font", "C:/res/Serpen24.fnt"]],
+	assert_eq(shell.jumped, [["font", "C:/res/Gunpl27b.fnt"]],
 		"the jump rides open_in_workspace with the resolved path (relay chain retired)")
 
 

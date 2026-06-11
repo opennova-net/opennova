@@ -63,9 +63,13 @@ func mount_viewport(host: Control) -> void:
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
 	if _editor.has_method("set_resource_root"):
 		_editor.set_resource_root(_resource_root())
+	# Guard all three methods services_from_shell wires (resolve/pick/jump):
+	# a partial shell must get no services rather than a jump button whose
+	# press is a missing-method error.
 	if _editor.has_method("set_reference_services") and editor_shell != null \
 			and editor_shell.has_method("get_reference_index") \
-			and editor_shell.has_method("open_kind_picker"):
+			and editor_shell.has_method("open_kind_picker") \
+			and editor_shell.has_method("open_in_workspace"):
 		_editor.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
 	_editor.set_document(_document)
 

@@ -32,8 +32,17 @@ func _services(edges_by_key: Dictionary, log: Dictionary, ready := false) -> Dic
 	}
 
 
-func _edge(source_path: String, source_kind: String, site: String) -> Dictionary:
-	return {"source_path": source_path, "source_kind": source_kind, "site": site}
+func _edge(source_path: String, source_kind: String, site: String,
+		target_kind := "font") -> Dictionary:
+	return {"source_path": source_path, "source_kind": source_kind, "site": site,
+		"target_kind": target_kind}
+
+
+# The find press defers its query by one frame (so the busy state actually
+# paints); two awaited frames make the resume order test-independent.
+func _await_scan() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
 
 
 func _row_buttons(strip: ReferenceStrip) -> Array:
@@ -60,7 +69,13 @@ func test_find_uses_queries_all_keys_once_and_renders_deduped_rows() -> void:
 	strip.set_target(PackedStringArray(["arial12b.fnt", "arial12b"]))
 	strip.find_button.pressed.emit()
 	assert_eq(strip.find_button.text, "Scanning…", "the busy state paints before the scan")
-	await get_tree().process_frame
+	assert_true(strip.find_button.disabled, "...with the button disabled against double-presses")
+	assert_eq(log.get("queries", []), [],
+		"the scan defers a full frame so the busy state can draw first")
+	strip.refresh()
+	assert_eq(strip.find_button.text, "Scanning…",
+		"a refresh landing mid-scan must not repaint the button back to Find uses")
+	await _await_scan()
 
 	assert_eq(log["queries"], ["arial12b.fnt", "arial12b"], "every key spelling queries exactly once")
 	assert_false(strip.find_button.visible, "the button retires after the first query")
@@ -100,7 +115,7 @@ func test_live_strip_requeries_on_set_target() -> void:
 	}, log))
 	strip.set_target(PackedStringArray(["alpha"]))
 	strip.find_button.pressed.emit()
-	await get_tree().process_frame
+	await _await_scan()
 	assert_eq(log["queries"], ["alpha"])
 
 	strip.set_target(PackedStringArray(["bravo"]))
@@ -132,6 +147,74 @@ func test_hides_without_services_or_target() -> void:
 	assert_true(strip.visible, "a target brings it back")
 
 
+func test_allowed_kinds_filter_drops_wrong_kind_rows() -> void:
+	# Referrer buckets are name-keyed: a bare stem like "arial12b" is shared
+	# with every extensionless namespace in the graph (terrain headers, 3di
+	# textures, string keys). The filter keeps collisions out of the rows AND
+	# out of the "(n places)" counts.
+	var log := {}
+	var strip: ReferenceStrip = ReferenceStripScript.new()
+	add_child_autofree(strip)
+	strip.configure("font", _services({
+		"arial12b": [
+			_edge("nlist.kda", "credits", "entry[3]", "font"),
+			_edge("alpha.bms", "mission", "header.terrain", "terrain"),
+			_edge("nlist.kda", "credits", "entry[9]", "datasource"),
+		],
+	}, log, true), PackedStringArray(["font"]))
+	strip.set_target(PackedStringArray(["arial12b"]))
+	var buttons := _row_buttons(strip)
+	assert_eq(buttons.size(), 1, "only the font edge renders a row")
+	assert_eq(String((buttons[0] as Button).text), "nlist.kda",
+		"the same-file wrong-kind edge must not inflate the place count")
+
+
+func test_duplicate_keys_query_once() -> void:
+	# An extensionless document has file == stem; querying the same bucket
+	# twice would double-count every site.
+	var log := {}
+	var strip := _make_strip(_services({
+		"menutxt": [_edge("main.mnu", "menu", "text_rsrc", "strings")],
+	}, log, true))
+	strip.set_target(PackedStringArray(["menutxt", "menutxt"]))
+	assert_eq(log["queries"], ["menutxt"], "duplicate key spellings collapse to one query")
+	var buttons := _row_buttons(strip)
+	assert_eq(buttons.size(), 1)
+	assert_eq(String((buttons[0] as Button).text), "main.mnu",
+		"one site stays one site, never (2 places)")
+
+
+class RootShell:
+	extends RefCounted
+	var root: NovaResourceRoot
+	func get_resource_root() -> NovaResourceRoot:
+		return root
+
+
+func test_resolve_source_path_translates_logical_names() -> void:
+	# Referrer edges carry VFS-logical names, but several workspaces open from
+	# disk only - the adopters' jump services translate through the shell root.
+	_remove_dir_recursive(ROOT_DIR)
+	DirAccess.make_dir_recursive_absolute(ROOT_DIR)
+	var f := FileAccess.open(ROOT_DIR.path_join("main.mnu"), FileAccess.WRITE)
+	f.store_string("<SCREEN><NAME>M</NAME><WINDOW type=\"window\" name=\"R\"></WINDOW></SCREEN>")
+	f.close()
+	var shell := RootShell.new()
+	shell.root = NovaResourceRoot.new()
+	assert_eq(shell.root.set_root_dir(ROOT_DIR), OK)
+
+	var resolved: String = ReferenceStripScript.resolve_source_path(shell, "main.mnu")
+	assert_ne(resolved, "main.mnu", "a mounted logical name resolves to its disk path")
+	assert_true(resolved.replace("\\", "/").to_lower().ends_with("main.mnu"))
+	assert_true(FileAccess.file_exists(resolved), "...and that path actually opens")
+
+	assert_eq(ReferenceStripScript.resolve_source_path(shell, "ghost.mnu"), "ghost.mnu",
+		"unknown names pass through untouched")
+	assert_eq(ReferenceStripScript.resolve_source_path(RefCounted.new(), "main.mnu"), "main.mnu",
+		"a shell without a resource root passes through")
+	_remove_dir_recursive(ROOT_DIR)
+
+
 func test_real_index_first_query_builds_and_merges_extension_and_stem_keys() -> void:
 	_remove_dir_recursive(ROOT_DIR)
 	DirAccess.make_dir_recursive_absolute(ROOT_DIR)
@@ -155,7 +238,7 @@ func test_real_index_first_query_builds_and_merges_extension_and_stem_keys() -> 
 	assert_true(strip.find_button.visible)
 
 	strip.find_button.pressed.emit()
-	await get_tree().process_frame
+	await _await_scan()
 	assert_true(index.is_built(), "the explicit ask builds the graph")
 	assert_eq(_row_buttons(strip).size(), 1,
 		"the .fnt and stem spellings merge into one main.mnu row")

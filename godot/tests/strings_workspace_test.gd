@@ -98,6 +98,72 @@ func test_inspector_offers_used_by_for_the_open_table_without_index_build() -> v
 		"opening a table must never trigger the whole-root reference scan")
 
 
+class UsedByShell:
+	extends Node
+
+	class IndexStub:
+		extends RefCounted
+		var queries: Array = []
+		func referrers_of(name: String) -> Array:
+			queries.append(name)
+			return []
+		func is_built() -> bool:
+			return false
+
+	var index := IndexStub.new()
+
+	func get_reference_index() -> IndexStub:
+		return index
+
+	func open_in_workspace(_kind: String, _path: String, _focus: Dictionary = {}) -> Error:
+		return OK
+
+
+func test_used_by_queries_table_spellings_and_retargets_on_tab_switch() -> void:
+	var workspace_script := preload("res://modtools/strings/strings_workspace.gd")
+	var shell: UsedByShell = add_child_autofree(UsedByShell.new())
+	var ws = autofree(workspace_script.new())
+	ws.set_editor_shell(shell)
+	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
+
+	var host := Control.new()
+	add_child_autofree(host)
+	ws.build_inspector(host)
+	await get_tree().process_frame
+
+	var strip = host.find_child("StringsUsedByStrip", true, false)
+	assert_not_null(strip, "the stub shell offers the index, so the strip mounts")
+	if strip == null:
+		return
+	strip.find_button.pressed.emit()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_eq(shell.index.queries.slice(0, 2), ["menu.bin", "menu"],
+		"the explicit ask queries the table's verbatim file AND its bare stem (menus keep the extension)")
+
+	# Tabs: a second table activates and the live strip retargets immediately.
+	# (Refresh fan-out may query more than once; what matters is WHICH table.)
+	var copy_dir := "user://test_strings_used_by"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(copy_dir))
+	var copy_path := copy_dir + "/other.bin"
+	DirAccess.copy_absolute(ProjectSettings.globalize_path("res://fixtures/strings/menu.bin"),
+		ProjectSettings.globalize_path(copy_path))
+	var before := (shell.index.queries as Array).size()
+	assert_eq(ws.open_file(copy_path), OK, "a second table opens in its own tab")
+	var since: Array = shell.index.queries.slice(before)
+	assert_has(since, "other.bin", "the live strip re-queries with the new table's file name")
+	assert_has(since, "other", "...and its bare stem")
+
+	before = (shell.index.queries as Array).size()
+	ws.activate_document(0)
+	since = shell.index.queries.slice(before)
+	assert_has(since, "menu.bin", "switching back retargets the strip to the first table")
+	assert_has(since, "menu", "...both spellings again")
+
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(copy_path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(copy_dir))
+
+
 func test_section_filter_scopes_rows() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)

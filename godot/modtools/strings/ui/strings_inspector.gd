@@ -108,14 +108,18 @@ func _ready() -> void:
 			and shell.has_method("open_in_workspace"):
 		_used_by_strip = ReferenceStrip.new()
 		_used_by_strip.name = "StringsUsedByStrip"
+		# Kind filter: referrer buckets are name-keyed, so the bare-stem query
+		# would otherwise pick up same-named targets of other kinds. Source
+		# paths are VFS-logical; the menus that use tables open from disk only,
+		# so resolve before jumping.
 		_used_by_strip.configure("text table", {
 			"referrers": func(name: String) -> Array:
 				return shell.get_reference_index().referrers_of(name),
 			"is_ready": func() -> bool:
 				return shell.get_reference_index().is_built(),
 			"jump": func(kind: String, path: String) -> void:
-				shell.open_in_workspace(kind, path),
-		})
+				shell.open_in_workspace(kind, ReferenceStrip.resolve_source_path(shell, path)),
+		}, PackedStringArray(["strings"]))
 		box.add_child(_used_by_strip)
 
 	refresh()

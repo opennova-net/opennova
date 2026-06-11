@@ -27,10 +27,14 @@ var empty_label: Label
 
 var _noun := "file"
 var _services: Dictionary = {}
+var _allowed_kinds := PackedStringArray()
 var _keys := PackedStringArray()
 # True once a referrers query has run (user asked, or the graph pre-existed):
 # from then on retargets refresh live.
 var _live := false
+# True between the Find-uses press and the query: keeps a refresh()/retarget
+# landing in that window from repainting the button back to "Find uses".
+var _scanning := false
 
 
 func _init() -> void:
@@ -67,13 +71,21 @@ func _init() -> void:
 
 ## services (all Callables, any subset; missing referrers/is_ready hides the strip):
 ##   "referrers": Callable(name: String) -> Array of reference-edge Dictionaries
-##                ({source_path, source_kind, site, ...})
+##                ({source_path, source_kind, target_kind, site, ...})
 ##   "is_ready":  Callable() -> bool — whether the whole-root graph is already
 ##                built (querying then is free, so the strip skips the button)
 ##   "jump":      Callable(kind: String, path: String) — open a source file
-func configure(noun: String, services: Dictionary = {}) -> void:
+##
+## allowed_kinds: target_kind values that count as uses of this target. The
+## graph indexes referrers by NAME alone, and bare-stem queries share buckets
+## with every extensionless namespace (terrain headers, 3di textures, string
+## keys) — without the filter a name collision renders wrong-kind rows and
+## inflates "(n places)" counts. Empty = accept everything.
+func configure(noun: String, services: Dictionary = {},
+		allowed_kinds: PackedStringArray = PackedStringArray()) -> void:
 	_noun = noun
 	_services = services
+	_allowed_kinds = allowed_kinds
 	find_button.tooltip_text = \
 			"Looks through the resource folder for files that use this %s." % _noun
 	_refresh_state()
@@ -97,6 +109,8 @@ func _service(service_name: String) -> Callable:
 
 
 func _refresh_state() -> void:
+	if _scanning:
+		return
 	var referrers := _service("referrers")
 	var is_ready := _service("is_ready")
 	if not referrers.is_valid() or not is_ready.is_valid() or _keys.is_empty():
@@ -116,13 +130,16 @@ func _refresh_state() -> void:
 
 
 func _on_find_pressed() -> void:
-	# Paint the busy state before the synchronous whole-root scan runs.
+	if _scanning:
+		return
+	# A full frame (not call_deferred, which still runs before this frame's
+	# draw) so the busy state actually paints before the synchronous
+	# whole-root scan blocks.
+	_scanning = true
 	find_button.disabled = true
 	find_button.text = "Scanning…"
-	call_deferred("_run_first_query")
-
-
-func _run_first_query() -> void:
+	await get_tree().process_frame
+	_scanning = false
 	_live = true
 	find_button.visible = false
 	_populate()
@@ -137,13 +154,20 @@ func _populate() -> void:
 	_clear_rows()
 	var referrers := _service("referrers")
 	# Merge every key's edges, deduped per source file (lowercase — the VFS is
-	# case-insensitive). The graph lowercases queries itself, keys pass raw.
+	# case-insensitive). The graph lowercases queries itself, keys pass raw;
+	# duplicate keys (an extensionless document's file == stem) query once or
+	# the same sites would double-count.
 	var merged: Dictionary = {}
+	var seen_keys: Dictionary = {}
 	for key in _keys:
-		if String(key).is_empty():
+		if String(key).is_empty() or seen_keys.has(String(key).to_lower()):
 			continue
+		seen_keys[String(key).to_lower()] = true
 		for edge_value in referrers.call(String(key)):
 			var edge := edge_value as Dictionary
+			if not _allowed_kinds.is_empty() \
+					and not _allowed_kinds.has(String(edge.get("target_kind", ""))):
+				continue
 			var source_path := String(edge.get("source_path", ""))
 			if source_path.is_empty():
 				continue
@@ -187,3 +211,17 @@ func _on_row_pressed(kind: String, path: String) -> void:
 	var jump := _service("jump")
 	if jump.is_valid():
 		jump.call(_JUMP_KIND.get(kind, kind), path)
+
+
+## Referrer edges carry VFS-logical source names (the graph is built from the
+## index's logical listing, never absolute paths) — but several workspaces
+## open from disk only. Adopters route their jump service through this to
+## translate when the shell can; the name passes through untouched otherwise.
+static func resolve_source_path(shell: Object, path: String) -> String:
+	if shell == null or not shell.has_method("get_resource_root"):
+		return path
+	var resources: Variant = shell.get_resource_root()
+	if resources == null:
+		return path
+	var resolved := String(resources.resolve_file(path))
+	return resolved if not resolved.is_empty() else path
