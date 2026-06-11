@@ -20,10 +20,15 @@ var _cloud_tint: ColorPickerButton
 var _envscale: SpinBox
 var _sky_speed: SpinBox
 var _sky_height: SpinBox
-var _sun_model: LineEdit
-var _moon_model: LineEdit
-var _glare_model: LineEdit
-var _star_model: LineEdit
+var _sun_model: ResourceRefWidget
+var _moon_model: ResourceRefWidget
+var _glare_model: ResourceRefWidget
+var _star_model: ResourceRefWidget
+var _sky_map1: TextureRefWidget
+var _sky_map2: TextureRefWidget
+# Link-widget services (resolve/pick/jump from the shell); they arrive after
+# the workspace builds this inspector, so the setter re-configures live widgets.
+var _ref_services: Dictionary = {}
 var _keyframe_list: ItemList
 var _selected_time: SpinBox
 var _color_buttons: Dictionary = {}
@@ -109,16 +114,26 @@ func _build_ui() -> void:
 	_cloud_tint = _add_color(atmosphere, "Clouds", _on_cloud_tint_changed)
 
 	box.add_child(_make_separator())
+	box.add_child(_make_heading("Sky"))
+	var sky := GridContainer.new()
+	sky.columns = 2
+	sky.add_theme_constant_override("h_separation", 8)
+	sky.add_theme_constant_override("v_separation", 8)
+	box.add_child(sky)
+	_sky_map1 = _add_sky_map(sky, "Cloud map 1", func(v: String) -> void: _editor.env_file.set_sky_map1(v))
+	_sky_map2 = _add_sky_map(sky, "Cloud map 2", func(v: String) -> void: _editor.env_file.set_sky_map2(v))
+
+	box.add_child(_make_separator())
 	box.add_child(_make_heading("Sky Models"))
 	var models := GridContainer.new()
 	models.columns = 2
 	models.add_theme_constant_override("h_separation", 8)
 	models.add_theme_constant_override("v_separation", 8)
 	box.add_child(models)
-	_sun_model = _add_line_edit(models, "Sun", _on_sun_model_changed)
-	_moon_model = _add_line_edit(models, "Moon", _on_moon_model_changed)
-	_glare_model = _add_line_edit(models, "Glare", _on_glare_model_changed)
-	_star_model = _add_line_edit(models, "Star", _on_star_model_changed)
+	_sun_model = _add_model_ref(models, "Sun", func(v: String) -> void: _editor.env_file.set_sun_3di(v))
+	_moon_model = _add_model_ref(models, "Moon", func(v: String) -> void: _editor.env_file.set_moon_3di(v))
+	_glare_model = _add_model_ref(models, "Glare", func(v: String) -> void: _editor.env_file.set_glare_3di(v))
+	_star_model = _add_model_ref(models, "Star", func(v: String) -> void: _editor.env_file.set_star_3di(v))
 
 	box.add_child(_make_separator())
 	box.add_child(_make_heading("TOD Keyframes"))
@@ -171,10 +186,16 @@ func sync_from_editor() -> void:
 	_terrain_tint.color = env.get_terrain_tint()
 	_water_color.color = env.get_water_color()
 	_cloud_tint.color = env.get_cloud_tint()
-	_sun_model.text = env.get_sun_3di()
-	_moon_model.text = env.get_moon_3di()
-	_glare_model.text = env.get_glare_3di()
-	_star_model.text = env.get_star_3di()
+	_sun_model.set_value(env.get_sun_3di())
+	_moon_model.set_value(env.get_moon_3di())
+	_glare_model.set_value(env.get_glare_3di())
+	_star_model.set_value(env.get_star_3di())
+	# Push feed: preview exactly the textures the sky renders (resolved by the
+	# same C++ path — resource root or the .env's own folder).
+	_sky_map1.set_value(env.get_sky_map1())
+	_sky_map1.set_preview_texture(env.get_sky_map1_tex())
+	_sky_map2.set_value(env.get_sky_map2())
+	_sky_map2.set_preview_texture(env.get_sky_map2_tex())
 	_sync_keyframe_list()
 	_sync_selected_keyframe()
 	_syncing = false
@@ -237,18 +258,58 @@ func _add_color(parent: Control, label_text: String, callback: Callable) -> Colo
 	return button
 
 
-func _add_line_edit(parent: Control, label_text: String, callback: Callable) -> LineEdit:
+func _add_grid_label(parent: Control, label_text: String) -> void:
 	var label := Label.new()
 	label.text = label_text
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	parent.add_child(label)
-	var edit := LineEdit.new()
-	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	edit.text_changed.connect(callback)
-	edit.focus_exited.connect(_commit_edit)
-	edit.text_submitted.connect(func(_t): _commit_edit())
-	parent.add_child(edit)
-	return edit
+
+
+## A 3DI model reference row (badge + browse + jump into the Object workspace).
+## Link-widget commits are discrete (Enter / focus-out / pick / clear), so each
+## one is its own undo step — no begin/commit burst bookkeeping.
+func _add_model_ref(parent: Control, label_text: String, commit: Callable) -> ResourceRefWidget:
+	_add_grid_label(parent, label_text)
+	var widget := ResourceRefWidget.new()
+	widget.name = "EnvModel" + label_text
+	widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	widget.configure("object_model", label_text, _ref_services)
+	widget.value_changed.connect(func(value: String) -> void:
+		if _syncing or _editor == null or _editor.env_file == null:
+			return
+		_editor.push_undo_step(func() -> void: commit.call(value)))
+	parent.add_child(widget)
+	return widget
+
+
+## A cloud-map texture row with an always-on preview. The preview uses the push
+## feed (sync_from_editor hands over the texture the sky actually renders).
+func _add_sky_map(parent: Control, label_text: String, commit: Callable) -> TextureRefWidget:
+	_add_grid_label(parent, label_text)
+	var widget := TextureRefWidget.new()
+	widget.name = "EnvSkyMap" + label_text.replace(" ", "")
+	widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	widget.configure("texture", label_text, _ref_services)
+	widget.value_changed.connect(func(value: String) -> void:
+		if _syncing or _editor == null or _editor.env_file == null:
+			return
+		_editor.push_undo_step(func() -> void: commit.call(value)))
+	parent.add_child(widget)
+	return widget
+
+
+## Wires the link widgets' resolve/pick/jump Callables (see
+## ResourceRefWidget.services_from_shell). Idempotent; safe before or after
+## the form is built.
+func set_reference_services(services: Dictionary) -> void:
+	_ref_services = services
+	if _sun_model != null and is_instance_valid(_sun_model):
+		_sun_model.configure("object_model", "Sun", services)
+		_moon_model.configure("object_model", "Moon", services)
+		_glare_model.configure("object_model", "Glare", services)
+		_star_model.configure("object_model", "Star", services)
+		_sky_map1.configure("texture", "Cloud map 1", services)
+		_sky_map2.configure("texture", "Cloud map 2", services)
 
 
 func _add_keyframe_color(parent: Control, property_name: String, label_text: String) -> void:
@@ -366,30 +427,6 @@ func _on_cloud_tint_changed(color: Color) -> void:
 	if not _syncing:
 		_begin_edit()
 		_editor.env_file.set_cloud_tint(color)
-
-
-func _on_sun_model_changed(text: String) -> void:
-	if not _syncing:
-		_begin_edit()
-		_editor.env_file.set_sun_3di(text)
-
-
-func _on_moon_model_changed(text: String) -> void:
-	if not _syncing:
-		_begin_edit()
-		_editor.env_file.set_moon_3di(text)
-
-
-func _on_glare_model_changed(text: String) -> void:
-	if not _syncing:
-		_begin_edit()
-		_editor.env_file.set_glare_3di(text)
-
-
-func _on_star_model_changed(text: String) -> void:
-	if not _syncing:
-		_begin_edit()
-		_editor.env_file.set_star_3di(text)
 
 
 func _on_keyframe_selected(index: int) -> void:

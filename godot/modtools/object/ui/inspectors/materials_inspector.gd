@@ -161,6 +161,12 @@ func build_detail(box: VBoxContainer) -> void:
 		texture_widget.name = "TextureSlot%dWidget" % slot
 		texture_widget.configure(slot)
 		texture_widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		# Thumbnail loads through the object data's own resolution path (resource
+		# root or the model's source folder) — the same lookup the renderer uses.
+		texture_widget.set_preview_loader(func(name: String) -> Texture2D:
+			if object_editor == null or object_editor.object_data == null:
+				return null
+			return object_editor.object_data.load_texture_name(name))
 		row.add_child(texture_widget)
 
 		var options_row := HBoxContainer.new()
