@@ -12,6 +12,10 @@ This record supersedes the jodemo-era citations (`0x53E030`/`0x53E3F0`/`0x53FA70
 `0x53F5D0`) and the never-written `engine_spec_env.md`; those addresses do not exist in the
 retail image.
 
+Which of these fields the reimplementation's renderer actually consumes today — and which
+remain parsed-but-deferred — is tracked per field in
+[env-honored-matrix.md](env-honored-matrix.md).
+
 ---
 
 ## Correspondence map
