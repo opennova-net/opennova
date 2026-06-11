@@ -1,0 +1,2 @@
+# Nightly SQLite backup at 03:00 UTC. Output goes to crond -l 8 (stderr).
+0 3 * * * /backup/backup.sh

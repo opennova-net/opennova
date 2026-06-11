@@ -155,6 +155,11 @@ cmd_app() {
 
 cmd_backup() {
   require_op
+  # The backup S3 bucket comes from terraform output.
+  terraform -chdir="$TF_DIR" workspace select "$WORKSPACE" >/dev/null 2>&1 || true
+  BACKUP_BUCKET="$(terraform -chdir="$TF_DIR" output -raw backup_bucket_name 2>/dev/null || true)"
+  [ -n "$BACKUP_BUCKET" ] || die "no backup_bucket_name output; run 'infra apply' first"
+  export BACKUP_BUCKET
   case "${1:-now}" in
     now)  remote_compose; docker compose "${COMPOSE_ARGS[@]}" run --rm backup /backup/backup.sh ;;
     list) remote_compose; docker compose "${COMPOSE_ARGS[@]}" run --rm backup /backup/list.sh ;;

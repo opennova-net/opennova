@@ -25,3 +25,22 @@ services:
     network_mode: host
     env_file:
       - ../env/app.prod.env
+
+  # Nightly SQLite snapshot -> S3, plus the on-demand backup/list/restore the
+  # deploy toolbox runs. AWS creds come from the instance IAM role (IMDSv2);
+  # no keys in the container. Reads the DB from the shared nw_data volume.
+  backup:
+    image: ${BACKUP_IMAGE:-opennova-backup:local}
+    build:
+      context: ../backup
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      # rw so `restore` can write the db back (server must be down first);
+      # backup/list only read.
+      - nw_data:/data
+    environment:
+      DATABASE_PATH: /data/novaworld.db
+      BACKUP_BUCKET: ${BACKUP_BUCKET:?set BACKUP_BUCKET (the backups S3 bucket from terraform output)}
+      BACKUP_PREFIX: ${BACKUP_PREFIX:-novaworld}
