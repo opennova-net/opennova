@@ -68,6 +68,11 @@ public:
 	PackedByteArray read_file(const String &name) const;
 	Ref<Texture2D> load_texture(const String &name) const;
 	Ref<Resource> load_font(const String &name) const;
+
+	// C++ siblings only (not bound): direct read access to the underlying index
+	// so NovaReferenceIndex can list entries with their size/mtime stamps
+	// without Variant-boxing the whole listing through GDScript dictionaries.
+	const opennova::ResourceIndex &native_index() const { return index_; }
 };
 
 } // namespace godot

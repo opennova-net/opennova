@@ -34,6 +34,7 @@ add_subdirectory(../../libs/mnu_xml opennova_mnu_xml)
 add_subdirectory(../../libs/mnu opennova_mnu)
 add_subdirectory(../../libs/mns opennova_mns)
 add_subdirectory(../../libs/def opennova_def)
+add_subdirectory(../../libs/refs opennova_refs)
 add_subdirectory(../../libs/world opennova_world)
 add_subdirectory(../../libs/wac opennova_wac)
 add_subdirectory(../../libs/mission opennova_mission)
@@ -87,6 +88,7 @@ add_library(${TARGET_NAME} SHARED
     util/pcx_texture_bridge.cpp
     util/texture_path_resolver.cpp
     resource_index/nova_resource_index.cpp
+    refs/nova_reference_index.cpp
     resource_index/nova_resource_root.cpp
     pff/nova_pff_archive.cpp
     editor/opennova_editor_plugin.cpp
@@ -133,6 +135,7 @@ target_include_directories(${TARGET_NAME} PRIVATE
 target_link_libraries(${TARGET_NAME} PRIVATE
     godot-cpp
     opennova_pcx
+    opennova_refs
     opennova_fnt
     opennova_foliage
     opennova_til
