@@ -68,6 +68,11 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 @export var mod_desc_names := PackedStringArray([
 	"MOD_DESC", "MOD_DESCRIPTION",
 ])
+# Controls that open NovaWorld (online multiplayer). The shipped JO main menu
+# carries an NW_MULTI_PLAYER button and jo_mp.mnu a NOVAWORLD window/screen.
+@export var novaworld_control_names := PackedStringArray([
+	"NW_MULTI_PLAYER", "NOVAWORLD", "NOVAWORLD_LOGIN", "INTERNET_GAME",
+])
 
 # Host -> main_game intents. The host never loads a world or quits the app
 # itself; it translates menu activity into these and lets main_game decide.
@@ -75,6 +80,9 @@ signal start_requested(bms_name: String)
 signal exit_to_desktop_requested()
 signal return_to_menu_requested()
 signal resume_requested()
+# The player chose NovaWorld (online multiplayer) from the menu. main_game
+# opens the NovaWorld panel; the host stays out of the networking itself.
+signal novaworld_requested()
 # Emitted when the player activates an expansion/mod in Options. The choice is also
 # mounted onto the live root and persisted (read back at the next launch/world load
 # by main_game.gd), so it affects gameplay, not just the menu.
@@ -240,6 +248,7 @@ func _wire_named_controls() -> void:
 		_connect_named(start_control_names, _on_apply_selected_mod)
 	_connect_named(exit_control_names, _on_exit_control)
 	_connect_named(return_control_names, _on_return_control)
+	_connect_named(novaworld_control_names, _on_novaworld_control)
 
 
 func _connect_named(names: PackedStringArray, handler: Callable) -> void:
@@ -417,6 +426,10 @@ func _on_exit_control() -> void:
 
 func _on_return_control() -> void:
 	return_to_menu_requested.emit()
+
+
+func _on_novaworld_control() -> void:
+	novaworld_requested.emit()
 
 
 func _on_mission_activated(index: int) -> void:
