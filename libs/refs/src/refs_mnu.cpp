@@ -2,12 +2,12 @@
 // string keys, datasources.
 //
 // Field model follows libs/mnu structs, with the runtime's own consumption
-// rules: image appearances and font names resolve through the .mns stylesheet
-// when written as %VAR% (never file names — skipped, mirroring the builder's
-// has_images predicate), a SOUND element's FILE names a .lwf bank (the trigger
-// is a set INSIDE it, so the bank is the file-level edge), and string keys
-// (STRING/ITEM/HEADER type="id") are emitted as "string_id" edges with no file
-// semantics — per-key statusing needs the resolving table, which is the
+// rules: %VAR% values in ANY field resolve through the .mns stylesheet (the
+// original expands them over the raw buffer before the XML parse), so they
+// are never emitted as edges; a SOUND element's FILE names a .lwf bank (the
+// trigger is a set INSIDE it, so the bank is the file-level edge); and string
+// keys (STRING/ITEM/HEADER type="id") are emitted as "string_id" edges with no
+// file semantics — per-key statusing needs the resolving table, which is the
 // caller's context (the resolve() layer reports them "unprobed").
 #include <string>
 #include <vector>
@@ -20,9 +20,19 @@ namespace opennova::refs::detail {
 namespace {
 
 // %VAR% stylesheet indirection (e.g. %DEF_FONTNAME_LG%, %TRIM_COLOR%): resolves
-// through menu_style.mns at runtime, not to an asset name.
+// through menu_style.mns at runtime, not to an asset name. The original
+// expands variables over the WHOLE raw buffer before the XML parse
+// [orig: NapiXML_ExpandVariablesInText @ 0x63a000], so any field can carry
+// one - an unexpanded %NAME% is never a literal reference, whatever the slot.
 bool is_style_variable(const std::string& value) {
     return !value.empty() && value.front() == '%';
+}
+
+// Every emission funnels through here so the %VAR% skip is universal.
+void add_ref(EdgeSink& sink, const std::string& value, const char* kind, const std::string& site) {
+    if (!is_style_variable(value)) {
+        sink.add(value, kind, site);
+    }
 }
 
 // Attribute tokens are authored in mixed case; the runtime compares
@@ -34,8 +44,8 @@ bool token_is(const std::string& value, const char* want) {
 void add_appearances(EdgeSink& sink, const std::vector<mnu::Appearance>& appearances,
                      const std::string& site) {
     for (const mnu::Appearance& appearance : appearances) {
-        if (token_is(appearance.type, "image") && !is_style_variable(appearance.value)) {
-            sink.add(appearance.value, "texture", site);
+        if (token_is(appearance.type, "image")) {
+            add_ref(sink, appearance.value, "texture", site);
         }
     }
 }
@@ -44,16 +54,16 @@ void add_sounds(EdgeSink& sink, const std::vector<mnu::Sound>& sounds, const std
     for (const mnu::Sound& sound : sounds) {
         // File-less SOUND nodes never play in the original (docs/mnu/menu-re.md
         // D-MNU-3); EdgeSink already drops empty names.
-        sink.add(sound.file, "sound", site + ".sound[" + sound.trigger + "]");
+        add_ref(sink, sound.file, "sound", site + ".sound[" + sound.trigger + "]");
     }
 }
 
 void add_items(EdgeSink& sink, const mnu::Items& items, const std::string& site) {
     for (const mnu::Item& item : items.items) {
-        if (token_is(item.type, "image") && !is_style_variable(item.text)) {
-            sink.add(item.text, "texture", site + ".item");
+        if (token_is(item.type, "image")) {
+            add_ref(sink, item.text, "texture", site + ".item");
         } else if (token_is(item.type, "id")) {
-            sink.add(item.text, "string_id", site + ".item");
+            add_ref(sink, item.text, "string_id", site + ".item");
         }
     }
 }
@@ -73,23 +83,21 @@ void walk_window(EdgeSink& sink, const mnu::Window& window, const std::string& p
         // A cross-file screen action names the target .mnu; the screen name
         // inside it stays site detail (entry-level granularity comes later).
         if (token_is(action.type, "screen") && !action.file.empty()) {
-            sink.add(action.file, "menu", site + ".action[" + action.target + "]");
+            add_ref(sink, action.file, "menu", site + ".action[" + action.target + "]");
         }
     }
 
     if (token_is(window.string_data.type, "id")) {
-        sink.add(window.string_data.value, "string_id", site + ".string");
+        add_ref(sink, window.string_data.value, "string_id", site + ".string");
     }
-    if (!is_style_variable(window.font.name)) {
-        sink.add(window.font.name, "font", site + ".font");
-    }
+    add_ref(sink, window.font.name, "font", site + ".font");
 
-    sink.add(window.frame.stencil, "texture", site + ".frame.stencil");
-    sink.add(window.frame.brush, "texture", site + ".frame.brush");
-    sink.add(window.frame.monogram, "texture", site + ".frame.monogram");
-    sink.add(window.cursor.file, "texture", site + ".cursor");
-    sink.add(window.text_rsrc, "strings", site + ".text_rsrc");
-    sink.add(window.datasource, "datasource", site + ".datasource");
+    add_ref(sink, window.frame.stencil, "texture", site + ".frame.stencil");
+    add_ref(sink, window.frame.brush, "texture", site + ".frame.brush");
+    add_ref(sink, window.frame.monogram, "texture", site + ".frame.monogram");
+    add_ref(sink, window.cursor.file, "texture", site + ".cursor");
+    add_ref(sink, window.text_rsrc, "strings", site + ".text_rsrc");
+    add_ref(sink, window.datasource, "datasource", site + ".datasource");
 
     add_items(sink, window.items, site);
     add_items(sink, window.list_box.items, site + ".list_box");
@@ -104,12 +112,12 @@ void walk_window(EdgeSink& sink, const mnu::Window& window, const std::string& p
         // type="id" headers resolve through the string table
         // [orig: CUIStringTable_LookupString, see mnu.h TableHeader].
         if (token_is(header.type, "id")) {
-            sink.add(header.text, "string_id", site + ".table.header");
+            add_ref(sink, header.text, "string_id", site + ".table.header");
         }
     }
     for (const mnu::TableSubst& subst : window.table_data.column.substitutions) {
         if (subst.is_file) {
-            sink.add(subst.file, "texture", site + ".table.subst");
+            add_ref(sink, subst.file, "texture", site + ".table.subst");
         }
     }
     add_appearances(sink, window.table_data.scrollbar.track, site + ".table.scrollbar");
@@ -136,8 +144,8 @@ bool extract_mnu(const std::string& source_path, const uint8_t* data, size_t siz
         const std::string site = "screen[" + screen.name + "]";
         // The parser lifts a root-window TEXT_RSRC onto the screen; reading
         // both is duplicate-safe (EdgeSink dedupes on kind+name).
-        sink.add(screen.text_rsrc, "strings", site + ".text_rsrc");
-        sink.add(screen.cursor_file, "texture", site + ".cursor");
+        add_ref(sink, screen.text_rsrc, "strings", site + ".text_rsrc");
+        add_ref(sink, screen.cursor_file, "texture", site + ".cursor");
         walk_window(sink, screen.root_window, site);
     }
     return true;

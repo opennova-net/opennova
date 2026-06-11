@@ -118,6 +118,36 @@ static void test_all_widgets_edges() {
     EXPECT_TRUE(find_edge(edges, "font", "%DEF_FONTNAME%") == nullptr);
 }
 
+static void test_style_variables_never_edge_in_any_field() {
+    // The original expands %VAR% over the whole raw buffer BEFORE the XML
+    // parse [orig: NapiXML_ExpandVariablesInText @ 0x63a000], so a stylesheet
+    // variable is legal in ANY field and is never a literal reference - not
+    // just in appearances/fonts. A menu authored entirely with variables must
+    // extract zero edges.
+    const std::string body =
+        "<SCREEN><NAME>VARS</NAME>"
+        "<WINDOW type=\"window\" name=\"ROOT\">"
+        "<TEXT_RSRC>%TXT%</TEXT_RSRC>"
+        "<CURSOR><FILE>%CURSOR_ART%</FILE></CURSOR>"
+        "<APPEARANCE type=\"image\" state=\"default\">%BG_IMG%</APPEARANCE>"
+        "<FRAME><STENCIL>%MENU_FRAME%</STENCIL><BRUSH>%MENU_BRUSH%</BRUSH></FRAME>"
+        "<DATASOURCE>%DS%</DATASOURCE>"
+        "<WINDOW type=\"button\" name=\"GO\">"
+        "<ACTION type=\"screen\" file=\"%NEXT_MENU%\">SUB</ACTION>"
+        "<SOUND state=\"selected\" trigger=\"CLICK_SELECT\">%SND_BANK%</SOUND>"
+        "<STRING type=\"id\" justify=\"LEFT\">%BTN_KEY%</STRING>"
+        "<FONT><NAME>%DEF_FONTNAME%</NAME></FONT>"
+        "</WINDOW></WINDOW></SCREEN>";
+    std::vector<Reference> edges;
+    std::string error;
+    EXPECT_TRUE(opennova::refs::extract(
+        "vars.mnu", reinterpret_cast<const uint8_t*>(body.data()), body.size(), edges, error));
+    for (const Reference& r : edges) {
+        std::cerr << "phantom edge: " << r.target_kind << "|" << r.target_name << std::endl;
+    }
+    EXPECT_TRUE(edges.empty());
+}
+
 static void test_malformed_mnu_fails_soft() {
     // The parser is lenient (malformed-XML fixups), so use bytes that cannot
     // parse at all; either a clean failure with an error, or zero edges - never
@@ -135,6 +165,7 @@ static void test_malformed_mnu_fails_soft() {
 int main() {
     test_jo_main_edges();
     test_all_widgets_edges();
+    test_style_variables_never_edge_in_any_field();
     test_malformed_mnu_fails_soft();
     if (fail_count > 0) {
         std::cerr << fail_count << " failure(s)" << std::endl;
