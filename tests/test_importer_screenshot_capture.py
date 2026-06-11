@@ -10,6 +10,33 @@ try:
 except ImportError as exc:
     pytest.skip(f"PySide6 Qt widgets are unavailable: {exc}", allow_module_level=True)
 
+EXPECTED_README_SCREENSHOTS = [
+    "screenshots/importer.png",
+    "screenshots/overview.png",
+    "screenshots/object.png",
+    "screenshots/mission.png",
+    "screenshots/fonts.png",
+    "screenshots/credits.png",
+    "screenshots/strings.png",
+    "screenshots/menus.png",
+    "screenshots/music.png",
+    "screenshots/sound.png",
+    "screenshots/environment.png",
+]
+
+EXPECTED_EDITOR_CAPTURE_TARGETS = {
+    "overview.png": "TERRAIN",
+    "object.png": "OBJECT",
+    "mission.png": "MISSION",
+    "fonts.png": "FONTS",
+    "credits.png": "CREDITS",
+    "strings.png": "STRINGS",
+    "menus.png": "MNU",
+    "music.png": "MUSIC",
+    "sound.png": "SOUND",
+    "environment.png": "ENVIRONMENT",
+}
+
 
 @pytest.fixture
 def qt_app():
@@ -81,9 +108,68 @@ def test_shared_screenshot_scripts_search_parent_godot_bins():
     assert "find_godot_bin" in sh
 
 
+def test_shared_screenshot_scripts_refresh_godot_script_cache():
+    root = Path(__file__).resolve().parents[1]
+
+    ps1 = (root / "scripts" / "capture_screenshots.ps1").read_text(encoding="utf-8")
+    sh = (root / "scripts" / "capture_screenshots.sh").read_text(encoding="utf-8")
+
+    assert "--import" in ps1
+    assert "--import" in sh
+
+
+def test_shared_screenshot_scripts_verify_editor_outputs_are_fresh():
+    root = Path(__file__).resolve().parents[1]
+
+    ps1 = (root / "scripts" / "capture_screenshots.ps1").read_text(encoding="utf-8")
+    sh = (root / "scripts" / "capture_screenshots.sh").read_text(encoding="utf-8")
+
+    assert "LastWriteTime" in ps1
+    assert "-nt" in sh
+    assert "overview.png" in ps1
+    assert "environment.png" in sh
+
+
 def test_readme_references_importer_screenshot():
     root = Path(__file__).resolve().parents[1]
 
     readme = (root / "README.md").read_text(encoding="utf-8")
 
     assert "screenshots/importer.png" in readme
+
+
+def test_readme_references_all_workspace_screenshots():
+    root = Path(__file__).resolve().parents[1]
+
+    readme = (root / "README.md").read_text(encoding="utf-8")
+
+    for screenshot in EXPECTED_README_SCREENSHOTS:
+        assert screenshot in readme
+
+
+def test_godot_capture_script_targets_all_editor_workspaces():
+    root = Path(__file__).resolve().parents[1]
+
+    script = (root / "godot" / "modtools" / "tools" / "screenshot_capture.gd").read_text(encoding="utf-8")
+
+    for filename, workspace in EXPECTED_EDITOR_CAPTURE_TARGETS.items():
+        assert filename in script
+        assert f"EditorWorkstation.Workspace.{workspace}" in script
+
+
+def test_godot_capture_script_uses_maximized_window():
+    root = Path(__file__).resolve().parents[1]
+
+    script = (root / "godot" / "modtools" / "tools" / "screenshot_capture.gd").read_text(encoding="utf-8")
+
+    assert "Window.MODE_MAXIMIZED" in script
+    assert "_maximize_window" in script
+
+
+def test_godot_capture_script_has_repo_fixture_fallbacks():
+    root = Path(__file__).resolve().parents[1]
+
+    script = (root / "godot" / "modtools" / "tools" / "screenshot_capture.gd").read_text(encoding="utf-8")
+
+    assert "fixtures/mus/jo_gamemus.bin" in script
+    assert "fixtures/lwf/00TRa.LWF" in script

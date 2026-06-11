@@ -7,18 +7,81 @@ This repo is the full toolchain: extract and edit assets with the importer, the 
 ## Screenshots
 
 <p align="center">
-  <a href="screenshots/overview.png">
-    <img src="screenshots/overview.png" alt="OpenNova editor overview" width="900">
+  <strong>Asset importer</strong><br>
+  <a href="screenshots/importer.png">
+    <img src="screenshots/importer.png" alt="OpenNova asset importer" width="900">
   </a>
 </p>
 
-| Asset importer | Object editing |
-|---|---|
-| [<img src="screenshots/importer.png" alt="OpenNova asset importer" width="420">](screenshots/importer.png) | [<img src="screenshots/object.png" alt="Object editing in OpenNova" width="420">](screenshots/object.png) |
-| Font editing | Credits editing |
-| [<img src="screenshots/fonts.png" alt="Font editing in OpenNova" width="420">](screenshots/fonts.png) | [<img src="screenshots/credits.png" alt="Credits editing in OpenNova" width="420">](screenshots/credits.png) |
-| Strings editing | |
-| [<img src="screenshots/strings.png" alt="Strings editing in OpenNova" width="420">](screenshots/strings.png) | |
+<p align="center">
+  <strong>Terrain workspace</strong><br>
+  <a href="screenshots/overview.png">
+    <img src="screenshots/overview.png" alt="Terrain editing in OpenNova" width="900">
+  </a>
+</p>
+
+<p align="center">
+  <strong>Object workspace</strong><br>
+  <a href="screenshots/object.png">
+    <img src="screenshots/object.png" alt="Object editing in OpenNova" width="900">
+  </a>
+</p>
+
+<p align="center">
+  <strong>Mission workspace</strong><br>
+  <a href="screenshots/mission.png">
+    <img src="screenshots/mission.png" alt="Mission editing in OpenNova" width="900">
+  </a>
+</p>
+
+<p align="center">
+  <strong>Fonts workspace</strong><br>
+  <a href="screenshots/fonts.png">
+    <img src="screenshots/fonts.png" alt="Font editing in OpenNova" width="900">
+  </a>
+</p>
+
+<p align="center">
+  <strong>Credits workspace</strong><br>
+  <a href="screenshots/credits.png">
+    <img src="screenshots/credits.png" alt="Credits editing in OpenNova" width="900">
+  </a>
+</p>
+
+<p align="center">
+  <strong>Strings workspace</strong><br>
+  <a href="screenshots/strings.png">
+    <img src="screenshots/strings.png" alt="Strings editing in OpenNova" width="900">
+  </a>
+</p>
+
+<p align="center">
+  <strong>Menus workspace</strong><br>
+  <a href="screenshots/menus.png">
+    <img src="screenshots/menus.png" alt="Menu editing in OpenNova" width="900">
+  </a>
+</p>
+
+<p align="center">
+  <strong>Music workspace</strong><br>
+  <a href="screenshots/music.png">
+    <img src="screenshots/music.png" alt="Music editing in OpenNova" width="900">
+  </a>
+</p>
+
+<p align="center">
+  <strong>Sound workspace</strong><br>
+  <a href="screenshots/sound.png">
+    <img src="screenshots/sound.png" alt="Sound editing in OpenNova" width="900">
+  </a>
+</p>
+
+<p align="center">
+  <strong>Environment workspace</strong><br>
+  <a href="screenshots/environment.png">
+    <img src="screenshots/environment.png" alt="Environment editing in OpenNova" width="900">
+  </a>
+</p>
 
 ## Architecture
 

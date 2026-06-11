@@ -28,9 +28,14 @@ function Find-GodotBinary {
 
     $Dir = (Resolve-Path $StartDir).Path
     while ($Dir) {
-        $Candidate = Join-Path $Dir ".godot-bin\Godot_v4.6.1-stable_win64.exe"
-        if (Test-Path $Candidate) {
-            return $Candidate
+        $Candidates = @(
+            (Join-Path $Dir ".godot-bin\Godot_v4.6.1-stable_win64_console.exe"),
+            (Join-Path $Dir ".godot-bin\Godot_v4.6.1-stable_win64.exe")
+        )
+        foreach ($Candidate in $Candidates) {
+            if (Test-Path $Candidate) {
+                return $Candidate
+            }
         }
         $Parent = Split-Path -Parent $Dir
         if (-not $Parent -or $Parent -eq $Dir) {
@@ -39,6 +44,34 @@ function Find-GodotBinary {
         $Dir = $Parent
     }
     return ""
+}
+
+$EditorScreenshots = @(
+    "overview.png",
+    "object.png",
+    "mission.png",
+    "fonts.png",
+    "credits.png",
+    "strings.png",
+    "menus.png",
+    "music.png",
+    "sound.png",
+    "environment.png"
+)
+
+function Assert-EditorScreenshotsFresh {
+    param([datetime] $StartedAt)
+
+    foreach ($Name in $EditorScreenshots) {
+        $Path = Join-Path "$ROOT\screenshots" $Name
+        if (-not (Test-Path $Path)) {
+            Write-Error "editor screenshot '$Name' was not written"
+        }
+        $Item = Get-Item $Path
+        if ($Item.LastWriteTime -lt $StartedAt) {
+            Write-Error "editor screenshot '$Name' was not refreshed"
+        }
+    }
 }
 
 $GODOT_BIN = $env:GODOT_BIN
@@ -56,12 +89,22 @@ if (-not (Test-Path $env:NOVA_RESOURCE_DIR)) {
     Write-Error "NOVA_RESOURCE_DIR '$($env:NOVA_RESOURCE_DIR)' does not exist"
 }
 
+# Refresh Godot's ignored script-class cache before running the scene directly.
+# Otherwise a stale godot/.godot cache can make workspace scripts fail to load.
+& $GODOT_BIN --path "$ROOT\godot" --import
+$ImportExitCode = $LASTEXITCODE
+if ($null -ne $ImportExitCode -and $ImportExitCode -ne 0) {
+    Write-Error "Godot import warm-up failed (exit $ImportExitCode)"
+}
+
+$EditorCaptureStartedAt = Get-Date
 & $GODOT_BIN --path "$ROOT\godot" --resolution 1600x900 `
     "res://modtools/tools/screenshot_capture.tscn"
 $EditorExitCode = $LASTEXITCODE
 if ($null -ne $EditorExitCode -and $EditorExitCode -ne 0) {
     Write-Error "editor screenshot capture failed (exit $EditorExitCode)"
 }
+Assert-EditorScreenshotsFresh $EditorCaptureStartedAt
 
 Push-Location $ROOT
 try {

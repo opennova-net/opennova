@@ -24,6 +24,7 @@ find_godot_bin() {
   local dir="$1"
   while [[ -n "$dir" && "$dir" != "/" ]]; do
     for candidate in \
+      "$dir/.godot-bin/Godot_v4.6.1-stable_win64_console.exe" \
       "$dir/.godot-bin/Godot_v4.6.1-stable_win64.exe" \
       "$dir/.godot-bin/Godot_v4.6.1-stable_linux.x86_64" \
       "$dir/.godot-bin/Godot_v4.6.1-stable_macos.universal"
@@ -54,8 +55,39 @@ if [[ -z "${GODOT_BIN:-}" || ! -x "$GODOT_BIN" ]]; then
   exit 1
 fi
 
+editor_screenshots=(
+  overview.png
+  object.png
+  mission.png
+  fonts.png
+  credits.png
+  strings.png
+  menus.png
+  music.png
+  sound.png
+  environment.png
+)
+
+"$GODOT_BIN" --path "$root/godot" --import
+
+capture_stamp="$(mktemp)"
+touch "$capture_stamp"
+trap 'rm -f "$capture_stamp"' EXIT
+
 "$GODOT_BIN" --path "$root/godot" --resolution 1600x900 \
   res://modtools/tools/screenshot_capture.tscn
+
+for name in "${editor_screenshots[@]}"; do
+  path="$root/screenshots/$name"
+  if [[ ! -s "$path" ]]; then
+    echo "error: editor screenshot '$name' was not written" >&2
+    exit 1
+  fi
+  if [[ ! "$path" -nt "$capture_stamp" ]]; then
+    echo "error: editor screenshot '$name' was not refreshed" >&2
+    exit 1
+  fi
+done
 
 (
   cd "$root"
