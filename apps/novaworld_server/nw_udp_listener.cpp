@@ -13,6 +13,7 @@
 #include <novaworld/protocol_message.h>
 #include <novaworld/session_hello.h>
 #include <novaworld/session_keys.h>
+#include <novaworld/unknown_tracker.h>
 
 #include <chrono>
 #include <cstdio>
@@ -33,6 +34,14 @@ uint64_t now_ms() {
 	using namespace std::chrono;
 	return static_cast<uint64_t>(
 		duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
+// "0x41"-style signature for the unknown tracker. Width follows the value so
+// a 1-byte opcode reads "0x41" and a wider tag reads "0x0123".
+std::string hex_sig(uint32_t value, int min_width = 2) {
+	char buf[16];
+	std::snprintf(buf, sizeof(buf), "0x%0*x", min_width, value);
+	return buf;
 }
 
 // Pack the IP so the LE-serialized uint32 (TLV-encoded by
@@ -327,6 +336,10 @@ void NwUdpListener::run_loop() {
 			if (hello.pn != "NOVAWORLDUDP") {
 				std::fprintf(stderr, "[nwudp] %s — refusing PN='%s'\n",
 				             client_label.c_str(), hello.pn.c_str());
+				if (tracker_) {
+					tracker_->record("pn", hello.pn, body.data(), body.size(),
+					                 client_label, now_ms());
+				}
 				break;
 			}
 			Connection conn;
@@ -457,7 +470,17 @@ void NwUdpListener::run_loop() {
 				            pm.flags.frag_cont ? 1 : 0,
 				            pm.flags.frag_end ? 1 : 0);
 				if (pm.flags.settings_update) continue; // socket tuning, ignore
-				if (pm.full_tag != 0) continue;          // only Layer-4 lobby
+				if (pm.full_tag != 0) {
+					// Non-zero full message type = a container/protocol
+					// selector we have no Layer-4 handler for. Record the
+					// hex tag so /api/unknowns surfaces what retail sent.
+					if (tracker_) {
+						tracker_->record("ptype", hex_sig(pm.full_tag, 3),
+						                 pm.payload.data(), pm.payload.size(),
+						                 client_label, now_ms());
+					}
+					continue;                            // only Layer-4 lobby
+				}
 
 				// Fragment reassembly: multi-packet payloads (e.g.
 				// ClientRequestVerifyResult @ ~3.4 KB) span 2-3 SESSION
@@ -510,6 +533,17 @@ void NwUdpListener::run_loop() {
 						std::printf("[nwudp] %s SESSION recv name=%s -> %zu replies\n",
 						            client_label.c_str(), result.label.c_str(),
 						            result.reply_containers.size());
+						// lobby_session.cpp returns "unknown:<name>" for any
+						// container it has no handler for (lobby_session.cpp:258).
+						static constexpr char kUnknownPrefix[] = "unknown:";
+						if (tracker_ &&
+						    result.label.rfind(kUnknownPrefix, 0) == 0) {
+							const std::string name =
+								result.label.substr(sizeof(kUnknownPrefix) - 1);
+							tracker_->record("container", name,
+							                 assembled.data(), assembled.size(),
+							                 client_label, now_ms());
+						}
 					}
 					for (auto &reply_container : result.reply_containers) {
 						std::vector<NapiMessage> root_stream{std::move(reply_container)};
@@ -582,6 +616,10 @@ void NwUdpListener::run_loop() {
 		default:
 			std::fprintf(stderr, "[nwudp] %s — unhandled opcode 0x%02x\n",
 			             client_label.c_str(), opcode);
+			if (tracker_) {
+				tracker_->record("nwu", hex_sig(opcode), body.data(), body.size(),
+				                 client_label, now_ms());
+			}
 			break;
 		}
 	}

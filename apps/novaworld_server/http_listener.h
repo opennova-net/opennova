@@ -13,6 +13,7 @@
 
 namespace opennova {
 class ConnectionManager;
+class UnknownTracker;
 namespace db { class Database; }
 } // namespace opennova
 
@@ -36,6 +37,11 @@ public:
 	HttpListener(ConnectionManager &manager, db::Database &db,
 	             NwUdpListener &nw_udp, SessionStore &sessions);
 	~HttpListener();
+
+	// Optional unknown-message tracker. When set, the catch-all 404 path
+	// records "http" sightings ("<METHOD> /<path>") and /api/unknowns serves
+	// the live snapshot. Null is safe (the routes degrade to empty / no-op).
+	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
 
 	HttpListener(const HttpListener &) = delete;
 	HttpListener &operator=(const HttpListener &) = delete;
@@ -74,6 +80,9 @@ private:
 	opennova::EpaskParams epask_params_;
 	// Counter for periodic LoginSession TTL sweeps (every Nth POST).
 	std::atomic<uint64_t> login_post_counter_{0};
+	// Optional unknown-message tracker (set via set_unknown_tracker). Read
+	// by /api/unknowns; written by the catch-all 404 path. Null in tests.
+	opennova::UnknownTracker *tracker_ = nullptr;
 };
 
 } // namespace opennova::server

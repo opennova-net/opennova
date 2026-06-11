@@ -5,6 +5,10 @@
 #include <string>
 #include <thread>
 
+namespace opennova {
+class UnknownTracker;
+}
+
 namespace opennova::server {
 
 struct ServerConfig;
@@ -22,6 +26,11 @@ public:
 
 	GateListener(const GateListener &) = delete;
 	GateListener &operator=(const GateListener &) = delete;
+
+	// Optional unknown-message tracker. When set, gate probes carrying a
+	// tag we don't recognize (not jop:cus2 / jopd:cus4 / dfx2 variants) are
+	// recorded (deduped) for /api/unknowns. Null is safe.
+	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
 
 	// Bind the UDP socket and spawn the receive loop. Returns false if
 	// the socket couldn't be bound (port in use, perms, etc.) — main()
@@ -43,6 +52,7 @@ private:
 	std::string public_host_;
 	uint16_t nw_udp_port_ = 0;
 	uint16_t http_port_   = 0;
+	opennova::UnknownTracker *tracker_ = nullptr;
 };
 
 } // namespace opennova::server

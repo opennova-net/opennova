@@ -952,3 +952,11 @@ target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_definitions(backend_schema_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME backend_schema COMMAND backend_schema_test)
 
+# Unknown-message tracker: record/dedup, sample cap, flush/upsert against the
+# real 0004 migration (OPENNOVA_SOURCE_DIR for the SQL on disk), snapshot.
+add_executable(unknown_tracker_test novaworld/unknown_tracker_test.cpp)
+target_link_libraries(unknown_tracker_test PRIVATE opennova_novaworld)
+target_include_directories(unknown_tracker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(unknown_tracker_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME unknown_tracker COMMAND unknown_tracker_test)
+

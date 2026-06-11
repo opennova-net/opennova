@@ -17,6 +17,7 @@
 #include <novaworld/connection/manager.h>
 #include <novaworld/db/sqlite.h>
 #include <novaworld/host_repository.h>
+#include <novaworld/unknown_tracker.h>
 
 #include <atomic>
 #include <chrono>
@@ -122,8 +123,14 @@ int main() {
 		            c.addr.port, c.pn.c_str());
 	});
 
+	// --- Unknown-message tracker (shared across listeners) ----------------
+	// Listener threads record() sightings of anything we don't handle; the
+	// main tick loop flushes them into unknown_messages (never per-packet).
+	UnknownTracker unknown_tracker;
+
 	// --- Listeners --------------------------------------------------------
 	GateListener gate;
+	gate.set_unknown_tracker(&unknown_tracker);
 	if (!gate.start(config)) {
 		std::fprintf(stderr, "[boot] FATAL: gate listener start failed\n");
 		return 1;
@@ -131,6 +138,7 @@ int main() {
 
 	NwUdpListener nwudp(manager);
 	nwudp.set_database(dbh.get());
+	nwudp.set_unknown_tracker(&unknown_tracker);
 	// Phase I.2: drop stale active_hosts rows from the previous server
 	// run before accepting new connections (the UDP HELLO from any
 	// surviving retail process will fail anyway, so its prior row is
@@ -170,6 +178,7 @@ int main() {
 #ifdef OPENNOVA_HTTP_ENABLED
 	SessionStore sessions;
 	HttpListener http(manager, *dbh, nwudp, sessions);
+	http.set_unknown_tracker(&unknown_tracker);
 	if (!http.start(config)) {
 		std::fprintf(stderr, "[boot] FATAL: HTTP listener start failed\n");
 		gate.stop();
@@ -190,6 +199,13 @@ int main() {
 			duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
 		if (auto dropped = manager.tick(now); dropped > 0) {
 			std::printf("[tick] expired %zu connection(s)\n", dropped);
+		}
+		// Flush any unknown-message sightings the listener threads recorded
+		// since the last tick into unknown_messages (deduped upsert).
+		try {
+			unknown_tracker.flush(*dbh);
+		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[tick] WARN unknown_tracker flush: %s\n", e.what());
 		}
 	}
 

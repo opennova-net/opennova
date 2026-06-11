@@ -6,7 +6,9 @@
 #include <napi/envelope.h>
 #include <novacrypto/nwu.h>
 #include <novaworld/gate_probe.h>
+#include <novaworld/unknown_tracker.h>
 
+#include <chrono>
 #include <cstdio>
 #include <ctime>
 #include <sstream>
@@ -186,6 +188,15 @@ void GateListener::run_loop() {
 			std::fprintf(stderr, "[gate] %s:%u — unknown tag '%s'; ignoring\n",
 			             opennova::net::endpoint_to_string(from).c_str(),
 			             from.port, tag.c_str());
+			if (tracker_) {
+				using namespace std::chrono;
+				const auto gate_now = static_cast<uint64_t>(
+					duration_cast<milliseconds>(
+						steady_clock::now().time_since_epoch()).count());
+				tracker_->record("gate", tag, plain.data(), plain.size(),
+				                 opennova::net::endpoint_to_string(from),
+				                 gate_now);
+			}
 			continue;
 		}
 
