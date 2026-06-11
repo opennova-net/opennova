@@ -193,6 +193,9 @@ var _at_delete_button: Button
 var _props_toggle: CheckButton
 var _props_box: VBoxContainer
 var _props_binder: FieldBinder
+# Mission-tab bulk re-ground (B8): the manual twin of the workspace's activate-time
+# "terrain changed under N objects" prompt.
+var _reground_button: Button
 
 # --- Cached option lists (group / waypoint-path / entity pickers) --------------
 # get_group_options / get_waypoint_path_options / get_all_entities each walk + marshal every entity
@@ -345,6 +348,7 @@ func setup(controller, detail_host: Control = null) -> void:
 		_build_scripting_panel()     # LEFT list + DOCK detail
 		_build_selection_empty()     # DOCK: Selection standby label (last in the page)
 		_build_props_panel()         # DOCK: Mission
+		_build_reground_button()     # DOCK: Mission
 		_build_loadout_panel()       # DOCK: Mission
 		_build_groups_panel()        # DOCK: Mission
 		_box = VBoxContainer.new()
@@ -481,6 +485,7 @@ func _refresh() -> void:
 	_refresh_area_trigger_panel()
 	_refresh_scripting_panel()
 	_refresh_props_panel()
+	_refresh_reground_button()
 	_refresh_loadout_panel()
 	_refresh_groups_panel()
 	# Mode gating: the object panels show only in Objects mode; the waypoint / trigger panels
@@ -2574,6 +2579,31 @@ func _build_props_panel() -> void:
 	ObjectUiHelpers.add_section_heading(_props_box, "Audio")
 	_add_props_spin("music", "Music track", 0.0, 1000000.0)
 	_add_props_spin("reverb", "Reverb", 0.0, 1000000.0)
+
+
+# DOCK: Mission — the manual twin of the workspace's activate-time re-ground prompt
+# (terrain heights edited under the mission, undo of an applied re-ground, declined
+# prompt: this button reaches the same one-undo-step bulk re-ground any time).
+func _build_reground_button() -> void:
+	_reground_button = Button.new()
+	_reground_button.name = "MissionRegroundAll"
+	_reground_button.text = "Re-ground objects"
+	_reground_button.tooltip_text = "Snap objects the terrain moved out from under back onto the surface (one undo step). Objects placed above the ground on purpose are left alone."
+	_reground_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_reground_button.visible = false
+	_mission_content.add_child(_reground_button)
+	_reground_button.pressed.connect(func() -> void:
+		if _controller != null and _controller.has_method("reground_drifted"):
+			_controller.reground_drifted())
+
+
+func _refresh_reground_button() -> void:
+	if _reground_button == null:
+		return
+	var mission: NovaMissionData = _controller.get_mission() if _controller != null else null
+	_reground_button.visible = mission != null and _controller.has_method("reground_drifted")
+	_reground_button.disabled = _controller != null and _controller.has_method("is_simulating") \
+		and _controller.is_simulating()
 
 
 func _add_props_line(field: String, label: String, tooltip: String = "") -> LineEdit:
