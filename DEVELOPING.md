@@ -133,15 +133,22 @@ Overridable env vars (defaults in parentheses): `ONNET_PUBLIC_HOST` (`127.0.0.1`
 
 ## Test with retail Joint Operations
 
-Build the launcher (.NET 8, Windows; it needs administrator rights because editing the
-hosts file is its whole job):
+Build and run the launcher locally (.NET 8, Windows). It requests administrator rights
+(editing the hosts file is its whole job), so run it from an elevated terminal or accept the
+UAC prompt at startup:
 
 ```bash
-dotnet build launcher/OpenNovaLauncher.sln -c Release
-dotnet publish launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj -c Release -r win-x64
+dotnet build launcher/OpenNovaLauncher.sln -c Debug    # or -c Release
+dotnet test  launcher/OpenNovaLauncher.sln             # the xunit suite (optional)
+dotnet run --project launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj
 ```
 
-Run the published `OpenNovaLauncher.exe`, then:
+`dotnet run` builds and launches `OpenNovaLauncher.exe` from the build output under
+`launcher/src/OpenNovaLauncher/bin/`; you can also run that exe directly. The single-file
+distributable (`dotnet publish ... -r win-x64`) is a packaging step you do not need for local
+dev (see [`launcher/README.md`](launcher/README.md)).
+
+Then, in the launcher:
 
 1. **Preferences**: enable **"Developer mode (redirect to 127.0.0.1)"**.
 2. Register your Joint Operations install directory.
