@@ -726,3 +726,31 @@ jobs:
               // failing CI. Same-repo branch PRs (the normal path here) always work.
               core.warning(`Could not post build-links comment (forked PR or token lacks pull-requests:write?): ${err.message}`);
             }
+
+  # Build + test the OpenNova launcher (launcher/, C# WinForms, hosts-file
+  # redirection model). Publishes the single-file exe as an artifact; the
+  # release flow (launcher-publish workflow) handles distribution.
+  launcher:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          submodules: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Test
+        run: dotnet test launcher/OpenNovaLauncher.sln -c Release --nologo
+
+      - name: Publish single-file exe
+        run: dotnet publish launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj -c Release -r win-x64
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenNovaLauncher-win-x64
+          if-no-files-found: error
+          path: launcher/src/OpenNovaLauncher/bin/Release/net8.0-windows/win-x64/publish/OpenNovaLauncher.exe
