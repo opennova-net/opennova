@@ -266,16 +266,18 @@ func _refresh() -> void:
 	var sim := _resolve_sim(runtime)
 	var live := sim != null
 	_status_label.visible = not live
-	# The tabs stay usable without a sim: the panes that need one clear to
-	# their empty states (their handlers already null-check the runtime), so a
-	# pane fed by host-wide state (the perf ring) keeps working from the menu.
+	# The perf pane is fed by HOST-WIDE state (the PerfTimeline ring + live
+	# monitors), not the sim — it refreshes regardless, so "that load was slow,
+	# let me look" works from the menu after returning from a mission.
+	_perf_pane.refresh()
+	# The other tabs stay usable without a sim too: the panes that need one
+	# clear to their empty states (their handlers already null-check).
 	if not live:
 		_clear_live_panes()
 		return
 	_refresh_entities(sim)
 	_refresh_sim(runtime, sim)
 	_refresh_vars(sim)
-	_perf_pane.refresh()
 
 
 func _clear_live_panes() -> void:

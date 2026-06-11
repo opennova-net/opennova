@@ -118,7 +118,7 @@ func render_timeline(timeline: PerfTimeline) -> void:
 	var root := span_tree.create_item()
 	var total := span_tree.create_item(root)
 	total.set_text(0, timeline.label if not timeline.label.is_empty() else "total")
-	total.set_text(1, "%.1f ms" % timeline.total_ms())
+	total.set_text(1, _fmt_duration(timeline.total_ms()))
 	# Parent each span by walking the depth stack: a span of depth d nests
 	# under the most recent span of depth d-1.
 	var stack: Array = [total]
@@ -132,12 +132,19 @@ func render_timeline(timeline: PerfTimeline) -> void:
 		item.set_text(0, String(span["name"]))
 		var end_us := int(span["end_us"])
 		if end_us > 0:
-			item.set_text(1, "%.1f ms" % (float(end_us - int(span["start_us"])) / 1000.0))
+			item.set_text(1, _fmt_duration(float(end_us - int(span["start_us"])) / 1000.0))
 		else:
 			item.set_text(1, "…")
 		stack.push_back(item)
 	# Collapsing is the reader's choice; start fully expanded.
 	total.set_collapsed_recursive(false)
+
+
+# Seconds for the big stages, milliseconds below - the same convention the
+# ring's summary labels use, so the tree and the dropdown agree (a 50s load's
+# stages would otherwise clip the fixed time column).
+static func _fmt_duration(ms: float) -> String:
+	return ("%.1f s" % (ms / 1000.0)) if ms >= 1000.0 else ("%.1f ms" % ms)
 
 
 func _render_selected() -> void:

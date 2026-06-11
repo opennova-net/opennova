@@ -115,6 +115,30 @@ func test_steady_state_refresh_never_rebuilds_the_tree() -> void:
 		"an unchanged ring keeps the same tree items (no per-refresh rebuild)")
 
 
+func test_refresh_is_the_overlays_entry_point() -> void:
+	# refresh() is what the overlay actually calls each cycle: ring + monitors.
+	var pane := _make_pane()
+	var _timeline := _fabricate("perf pane refresh entry")
+	pane.refresh()
+	assert_gt(pane.history_option.item_count, 0, "refresh pulls the static ring")
+	assert_has(_tree_texts(pane.span_tree), "perf pane refresh entry",
+		"...rendering the newest load by default")
+	assert_false((pane.monitor_labels["fps"] as Label).text.is_empty(),
+		"...and the live monitors")
+
+
+func test_overlay_refreshes_perf_without_a_live_sim() -> void:
+	# The ring is host-wide state: "that load was slow, let me look" must work
+	# from the menu, after the mission (and its runtime) are gone.
+	var overlay = add_child_autofree(OverlayScript.new())
+	var _timeline := _fabricate("perf pane menu state")
+	overlay.toggle()
+	assert_true(overlay._status_label.visible, "no sim - the overlay says so")
+	assert_true(overlay._tabs.visible, "...but the tabs stay usable")
+	assert_has(_tree_texts(overlay._perf_pane.span_tree), "perf pane menu state",
+		"the perf pane renders the retained load with no runtime at all")
+
+
 func test_overlay_grows_a_perf_tab() -> void:
 	var overlay = add_child_autofree(OverlayScript.new())
 	var perf = overlay._tabs.get_node_or_null("Perf")
