@@ -38,6 +38,8 @@ extends RefCounted
 #     save     : can_save / save_current, can_save_as / save_as + get_save_dialog_*
 #     export   : can_export / begin_export + get_export_flavors +
 #                get_export_dialog_* + get_export_progress_*
+#     jump     : focus_reference(focus) — focus an element after a cross-workspace
+#                jump (shell open_in_workspace); keys are workspace-defined
 #
 #   Edit + state: override get_editor_document() to return the domain
 #     document/controller owning edit history + dirty state; the base derives
@@ -325,6 +327,15 @@ func get_current_resource_path() -> String:
 
 func open_file(_path: String) -> Error:
 	return ERR_UNAVAILABLE
+
+
+# Focus an element of the open document after a cross-workspace jump: the shell's
+# open_in_workspace(kind, path, focus) forwards its focus Dictionary here once the
+# target file is open. Keys are workspace-defined (strings: {"key"}, menus:
+# {"screen"}); a workspace documents its keys on the override. Default: nothing
+# to focus.
+func focus_reference(_focus: Dictionary) -> Error:
+	return OK
 
 
 # Workspaces with deferred/in-progress edits (e.g. a source text buffer not yet
