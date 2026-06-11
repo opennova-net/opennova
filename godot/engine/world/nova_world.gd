@@ -357,7 +357,11 @@ func is_loaded() -> bool:
 func tick(camera_pos: Vector3) -> void:
 	if _loaded and _dispatcher != null:
 		_dispatcher.dispatch(camera_pos)
-	if _loaded and _runtime != null:
+	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
+	# in both hosts: the debug overlay's Pause/Step work in the game too, not
+	# just the editor preview. _start_runtime calls play(), so normal missions
+	# run exactly as before.
+	if _loaded and _runtime != null and _runtime.is_playing():
 		_runtime.tick()
 	if _loaded and _mission_audio != null:
 		_mission_audio.tick(camera_pos)
@@ -398,6 +402,9 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	if _runtime.get_sim() == null:
 		push_warning("NovaWorld: failed to start mission runtime")
 	_runtime.effects_drained.connect(_on_runtime_effects)
+	# The game starts running (tick() gates on is_playing, so the overlay's
+	# transport can pause/step a live mission).
+	_runtime.play()
 
 
 # Route the runtime's drained side effects: "dialog" actions to mission audio (resolved through the
