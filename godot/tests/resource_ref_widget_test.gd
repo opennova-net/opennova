@@ -156,7 +156,34 @@ func test_drop_rejects_foreign_kind_and_foreign_data() -> void:
 	w._drop_data(Vector2.ZERO, foreign_kind)
 	assert_false(w._can_drop_data(Vector2.ZERO, {"card": 3}),
 		"non-payload dictionaries (e.g. card reorder drags) are rejected")
+	w._drop_data(Vector2.ZERO, {"card": 3})
 	assert_eq(emissions, [], "rejected drops never commit")
+
+
+func test_empty_payload_kinds_never_match() -> void:
+	var w := _make_widget()  # deliberately NOT configured: _kind is ""
+	var emissions := []
+	w.value_changed.connect(func(v: String) -> void: emissions.append(v))
+	var kindless := LinkPayloadScript.make("", "bravo.trn", "").to_drag_data()
+	assert_false(w._can_drop_data(Vector2.ZERO, kindless),
+		"a kindless payload is malformed, not a wildcard - even an unconfigured row rejects it")
+	w._drop_data(Vector2.ZERO, kindless)
+	assert_eq(emissions, [], "and it never commits")
+
+
+func test_empty_payload_fields_never_clear_the_value() -> void:
+	var w := _make_widget()
+	var emissions := []
+	w.value_changed.connect(func(v: String) -> void: emissions.append(v))
+	w.configure("terrain", "Terrain")
+	w.set_value("bravo")
+	w._drop_data(Vector2.ZERO, _terrain_payload("", ""))
+	assert_eq(emissions, [], "an all-empty payload must not commit (it would clear the field)")
+	assert_eq(w.get_value(), "bravo", "the bound value survives a malformed drop")
+
+	# Name empty but path set: the path is the fallback identity source.
+	w._drop_data(Vector2.ZERO, _terrain_payload("", "C:/res/alpha.trn"))
+	assert_eq(emissions, ["alpha"], "a name-less payload falls back to the normalized path")
 
 
 func test_drop_with_the_same_value_stays_silent() -> void:
@@ -189,14 +216,31 @@ func test_drop_accepts_image_texture_equivalence() -> void:
 		"and the reverse")
 
 
-func test_dropped_plain_text_commits_into_the_field() -> void:
+func test_plain_text_drops_defer_to_the_fields_native_insert() -> void:
+	# LineEdit::drop_data runs the forwarded drop AND THEN its native caret
+	# insert for String data, so a forwarded String handler would double-apply
+	# (commit + mangled re-insert + a second corrupt commit on focus-out).
+	# Contract: Strings are never payload drops; the field's forwarders return
+	# false / no-op so the native insert handles text exactly once, committing
+	# on Enter/focus-out like typing.
 	var w := _make_widget()
 	var emissions := []
 	w.value_changed.connect(func(v: String) -> void: emissions.append(v))
 	w.configure("terrain", "Terrain")
-	assert_true(w._can_drop_data(Vector2.ZERO, "bravo"), "plain text drops are accepted")
-	w._drop_data(Vector2.ZERO, "bravo")
-	assert_eq(emissions, ["bravo"], "the text commits through the same path as a typed value")
+	w.set_value("bravo")
+	assert_false(w._can_drop_data(Vector2.ZERO, "alpha"),
+		"the widget-level handlers reject plain text outright")
+	assert_false(w._can_drop_data_on_field(Vector2.ZERO, "alpha"),
+		"the field's can_drop defers Strings to LineEdit's native fallback")
+	w._drop_data_on_field(Vector2.ZERO, "alpha")
+	assert_eq(emissions, [], "the forwarded drop no-ops for Strings (native insert owns them)")
+	assert_eq(w.get_value(), "bravo", "the bound value is untouched")
+
+	# Payloads still route through the field's forwarders unchanged.
+	assert_true(w._can_drop_data_on_field(Vector2.ZERO, _terrain_payload("alpha.trn")),
+		"payload drops on the field keep working")
+	w._drop_data_on_field(Vector2.ZERO, _terrain_payload("alpha.trn"))
+	assert_eq(emissions, ["alpha"], "and commit exactly once")
 
 
 func test_drop_respects_read_only_field() -> void:

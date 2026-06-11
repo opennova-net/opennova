@@ -43,10 +43,14 @@ Targets:
 
 - `ResourceRefWidget` (and `TextureRefWidget`, which delegates): accepts a
   payload whose kind matches the widget's configured kind exactly, plus the
-  `texture`/`image` spelling equivalence. The committed value rides the same
+  `texture`/`image` spelling equivalence. Empty kinds never match (a kindless
+  payload is malformed, not a wildcard). The committed value rides the same
   `_commit` path as picks: one `value_changed` emission, silent on same-value.
-  Plain `String` drops also commit (replacing LineEdit's native insert-at-caret,
-  which would bypass the commit path).
+  Plain `String` drops are NOT payload drops: the name field defers them to
+  LineEdit's native caret insert (committing on Enter/focus-out like typing)
+  — LineEdit runs the forwarded drop AND its native insert for String data,
+  so a forwarded String handler would double-apply. The other drop surfaces
+  reject Strings outright.
 - `StringRefWidget` deliberately adds nothing: its inner row is configured
   kind `string_id`, which the pane never produces, so file drops are rejected
   by kind matching alone. Per-key drops between string widgets work through

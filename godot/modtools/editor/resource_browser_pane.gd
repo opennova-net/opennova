@@ -159,14 +159,13 @@ func _on_entry_activated(entry: Dictionary) -> void:
 	_open_entry.call(_JUMP_KIND.get(kind, kind), path)
 
 
-# Rows drag as LinkPayloads. The name keeps its extension (display_name is
-# stem-stripped, and extension-keeping widgets commit the file name verbatim);
-# the kind stays the index's own vocabulary - _JUMP_KIND is workspace-jump
-# vocabulary, drop targets match on reference kinds.
+# Rows drag as LinkPayloads. The name keeps its extension (extension-keeping
+# widgets commit the file name verbatim), so a row without a relative_path is
+# vetoed rather than falling back to the stem-stripped display_name; the kind
+# stays the index's own vocabulary - _JUMP_KIND is workspace-jump vocabulary,
+# drop targets match on reference kinds.
 func _drag_payload_for_entry(entry: Dictionary) -> Variant:
 	var file_name := String(entry.get("relative_path", "")).get_file()
-	if file_name.is_empty():
-		file_name = String(entry.get("display_name", ""))
 	if file_name.is_empty():
 		return null
 	var path := String(entry.get("path", ""))

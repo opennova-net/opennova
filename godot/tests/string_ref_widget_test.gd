@@ -138,3 +138,22 @@ func test_drop_rejects_table_file_payloads() -> void:
 		"a strings-table payload misses a string-key row")
 	widget.ref_row._drop_data(Vector2.ZERO, table_file)
 	assert_eq(emitted, [], "and never commits")
+
+
+func test_key_payloads_drop_between_string_widgets_keeping_dots() -> void:
+	# Widget-to-widget key drags ride the inherited handler. The committed
+	# value must be the KEY verbatim: the identity value_from_path override is
+	# load-bearing here - the default basename strip would mangle a dotted key
+	# like "BTN.OK" into "BTN".
+	var widget := _make_widget(_table_services())
+	var emitted: Array = []
+	widget.value_changed.connect(func(v: String) -> void: emitted.append(v))
+	# Per the contract, a string_id payload's path may carry the KEY (the
+	# jump-gate backfill), never trust it as a location.
+	var key_payload := LinkPayload.make("string_id", "BTN.OK", "BTN.OK").to_drag_data()
+	assert_true(widget.ref_row._can_drop_data(Vector2.ZERO, key_payload),
+		"key payloads match the string_id row")
+	widget.ref_row._drop_data(Vector2.ZERO, key_payload)
+	assert_eq(emitted, ["BTN.OK"], "the key commits verbatim, dots intact")
+	assert_eq(widget.preview.text, "Not in string table",
+		"the preview re-resolves the dropped key against the TARGET's table")

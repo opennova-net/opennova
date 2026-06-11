@@ -100,12 +100,19 @@ func _init() -> void:
 	add_child(clear_button)
 
 	# The GUI drop walk stops at MOUSE_FILTER_STOP children, so the row's own
-	# drop virtuals only cover the gaps between them: the name field and badge
-	# forward to the same handlers. The field's drag callable stays empty so
-	# click-drag text selection keeps working; the badge's reuses the drag
-	# source it already is.
-	name_edit.set_drag_forwarding(Callable(), _can_drop_data, _drop_data)
+	# drop virtuals only cover the gaps between them: every child forwards to
+	# the same payload handlers. The field gets a dedicated pair that DEFERS
+	# plain-String drops to LineEdit's native caret insert - LineEdit::drop_data
+	# always runs the forwarded drop AND THEN the native insert for String data,
+	# so handling Strings here would double-apply (commit + mangled re-insert,
+	# then a second corrupt commit on focus-out). The field's drag callable
+	# stays empty so native selected-text drags keep working; the badge's
+	# reuses the drag source it already is.
+	name_edit.set_drag_forwarding(Callable(), _can_drop_data_on_field, _drop_data_on_field)
 	badge.set_drag_forwarding(_get_drag_data, _can_drop_data, _drop_data)
+	browse_button.set_drag_forwarding(Callable(), _can_drop_data, _drop_data)
+	jump_button.set_drag_forwarding(Callable(), _can_drop_data, _drop_data)
+	clear_button.set_drag_forwarding(Callable(), _can_drop_data, _drop_data)
 
 
 ## services: { "resolve": Callable(kind, name) -> {status, path},
@@ -186,22 +193,17 @@ func _get_drag_data(_at: Vector2) -> Variant:
 	return LinkPayload.make(_kind, _current, _resolved_path).to_drag_data()
 
 
+## Payload drops only: plain text belongs to the name field's native caret
+## insert (committing on Enter/focus-out like typing), never to these handlers.
 func _can_drop_data(_at: Vector2, data: Variant) -> bool:
 	if not name_edit.editable:
 		return false
-	if data is String:
-		# Plain text drops commit into the field (replacing LineEdit's native
-		# insert-at-caret, which would bypass the commit path).
-		return true
 	var payload: LinkPayload = LinkPayload.from_drag_data(data)
 	return payload != null and _accepts_payload_kind(payload.kind)
 
 
 func _drop_data(_at: Vector2, data: Variant) -> void:
 	if not name_edit.editable:
-		return
-	if data is String:
-		_commit(_value_from_path.call(String(data)))
 		return
 	var payload: LinkPayload = LinkPayload.from_drag_data(data)
 	if payload == null or not _accepts_payload_kind(payload.kind):
@@ -215,7 +217,26 @@ func _drop_data(_at: Vector2, data: Variant) -> void:
 	_commit(_value_from_path.call(source))
 
 
+# The field's forwarded pair: String drops return false so LineEdit's native
+# can_drop fallback accepts them, and no-op the drop because LineEdit runs the
+# forwarded drop unconditionally before its native insert.
+func _can_drop_data_on_field(at: Vector2, data: Variant) -> bool:
+	if data is String:
+		return false
+	return _can_drop_data(at, data)
+
+
+func _drop_data_on_field(at: Vector2, data: Variant) -> void:
+	if data is String:
+		return
+	_drop_data(at, data)
+
+
 func _accepts_payload_kind(payload_kind: String) -> bool:
+	# An empty kind never matches - not even an unconfigured widget's empty
+	# _kind (a kindless payload is malformed, not a wildcard).
+	if payload_kind.is_empty():
+		return false
 	if payload_kind == _kind:
 		return true
 	var equivalents: Array = _KIND_EQUIVALENTS.get(_kind, [])

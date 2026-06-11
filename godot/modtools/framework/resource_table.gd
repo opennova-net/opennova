@@ -150,8 +150,13 @@ func _get_tree_drag_data(at_position: Vector2) -> Variant:
 		return null
 	var item := tree.get_item_at_position(at_position)
 	if item == null:
-		# Headless tests call this directly with Vector2.ZERO; fall back to the
-		# selected row, which is what a live drag grabs anyway.
+		# A LIVE drag gesture that misses every row (column titles, the blank
+		# area below the list) must stay inert - falling back to the selection
+		# there would start a drag of a row the user never grabbed. The
+		# selected-row fallback only serves headless tests, which call this
+		# directly (no GUI drag in flight) with Vector2.ZERO.
+		if get_viewport() != null and get_viewport().gui_is_dragging():
+			return null
 		item = tree.get_selected()
 	if item == null:
 		return null
