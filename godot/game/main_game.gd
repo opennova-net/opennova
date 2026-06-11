@@ -8,11 +8,14 @@ extends Node3D
 # (runtime-only); headless probes set the dir explicitly and never block on it.
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
 # wrong / menu-less folder can be re-picked without restarting. Front-end only.
 const CHANGE_DIR_KEY := KEY_F9
+# The mission debug overlay (entities / sim transport / script variables).
+const DEBUG_OVERLAY_KEY := KEY_F3
 
 enum State { MENU, WORLD, PAUSED }
 
@@ -25,6 +28,7 @@ var _picker: FileDialog
 var _root: NovaResourceRoot
 var _state: int = State.MENU
 var _host_wired := false
+var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
 
 
 func _ready() -> void:
@@ -51,6 +55,27 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key.keycode == CHANGE_DIR_KEY and _can_summon_dir_picker():
 		_request_resource_dir()
 		get_viewport().set_input_as_handled()
+		return
+	if key.keycode == DEBUG_OVERLAY_KEY:
+		_toggle_debug_overlay()
+		get_viewport().set_input_as_handled()
+
+
+# F3: the mission debug overlay over the live runtime. Built lazily; without a
+# running mission it just reports so (the runtime source re-resolves per
+# refresh, so reloads and menu round-trips never leave it stale).
+func _toggle_debug_overlay() -> void:
+	if _debug_overlay == null:
+		_debug_overlay = DebugOverlayScript.new()
+		_debug_overlay.name = "DebugOverlay"
+		var host: Node = _hud if _hud != null else self
+		host.add_child(_debug_overlay)
+		_debug_overlay.set_runtime_source(_current_runtime)
+	_debug_overlay.toggle()
+
+
+func _current_runtime():
+	return _world.get_runtime() if _world != null else null
 
 
 # Whether the folder picker may be summoned right now: only from the menu front-end

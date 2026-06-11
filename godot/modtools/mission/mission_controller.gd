@@ -3538,6 +3538,13 @@ func _reject_edit_while_simulating() -> bool:
 func is_sim_playing() -> bool:
 	return is_simulating() and _sim_driver.is_playing()
 
+
+# The live MissionRuntime while simulating (null otherwise) — the seam the
+# debug overlay's runtime source resolves through, same shape as
+# NovaWorld.get_runtime() on the game side.
+func get_sim_runtime() -> Node:
+	return _sim_driver if is_simulating() else null
+
 func _ensure_sim_driver() -> bool:
 	if is_simulating():
 		return true
