@@ -6,32 +6,36 @@ const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_s
 
 signal entries_reordered
 signal selection_changed(entry)
-signal request_edit_font(font_name)
 
 var _resource: CbinCreditsResource
 var _vbox: VBoxContainer
-var _font_options: PackedStringArray = PackedStringArray()
 var _entry_to_card: Dictionary = {}  # CbinEntry -> CreditsEditorBlockCard
 var _reconcile_pending: bool = false
 var _selected_entry: CbinEntry
 var _selection_emit_pending: bool = false
 var _resource_root: NovaResourceRoot
+var _ref_services: Dictionary = {}
 
 func _ready() -> void:
 	_vbox = self
 	if _resource_root == null:
 		_resource_root = _coerce_resource_root("")
-	_refresh_font_options()
 
 func set_resource_root_dir(path: String) -> void:
 	_resource_root = _coerce_resource_root(path)
-	_refresh_font_options()
 	_reconcile()
 
 func set_resource_root(value: NovaResourceRoot) -> void:
 	_resource_root = value
-	_refresh_font_options()
 	_reconcile()
+
+## The shell's resolve/pick/jump trio for the cards' font link rows.
+func set_reference_services(services: Dictionary) -> void:
+	_ref_services = services
+	for entry in _entry_to_card.keys():
+		var card: CreditsEditorBlockCard = _entry_to_card[entry]
+		if is_instance_valid(card):
+			card.set_reference_services(services)
 
 func set_resource(value: CbinCreditsResource) -> void:
 	if _resource == value:
@@ -41,7 +45,6 @@ func set_resource(value: CbinCreditsResource) -> void:
 	_resource = value
 	if _resource:
 		_resource.entries_structure_changed.connect(_schedule_reconcile)
-	_refresh_font_options()
 	_reconcile()
 
 func _schedule_reconcile() -> void:
@@ -53,26 +56,6 @@ func _schedule_reconcile() -> void:
 func _do_deferred_reconcile() -> void:
 	_reconcile_pending = false
 	_reconcile()
-
-func _refresh_font_options() -> void:
-	_font_options = PackedStringArray()
-	if _resource_root != null:
-		for path in _resource_root.list_files(".fnt"):
-			_append_font_option(String(path).get_file().get_basename())
-	if _resource != null:
-		for i in range(_resource.get_entry_count()):
-			var entry := _resource.get_entry(i)
-			if entry is CbinTextEntry:
-				_append_font_option((entry as CbinTextEntry).get_font_name())
-
-func _append_font_option(name: String) -> void:
-	if name.is_empty():
-		return
-	for existing in _font_options:
-		if existing == name:
-			return
-	_font_options.append(name)
-
 
 func _coerce_resource_root(path: String) -> NovaResourceRoot:
 	var dir := path.strip_edges()
@@ -107,8 +90,6 @@ func _reconcile() -> void:
 		_set_selected_entry(null, false)
 		return
 
-	_refresh_font_options()
-
 	# Clear selection if its entry was removed
 	if _selected_entry != null and not live.has(_selected_entry):
 		_set_selected_entry(null, true)
@@ -124,9 +105,8 @@ func _reconcile() -> void:
 			_vbox.add_child(card)
 			card.request_delete.connect(_on_card_delete)
 			card.request_select.connect(_on_card_select)
-			card.request_edit_font.connect(_on_card_request_edit_font)
 			_entry_to_card[entry] = card
-		card.bind(entry, _font_options, _resource_root)
+		card.bind(entry, _resource_root, _ref_services)
 		if _vbox.get_child(i) != card:
 			_vbox.move_child(card, i)
 
@@ -203,10 +183,6 @@ func move_selected(delta: int) -> bool:
 
 func _on_card_select(card: CreditsEditorBlockCard) -> void:
 	select_entry(card.get_entry())
-
-
-func _on_card_request_edit_font(font_name: String) -> void:
-	request_edit_font.emit(font_name)
 
 
 func _refresh_selection_visual() -> void:

@@ -17,6 +17,11 @@ signal value_changed(value: String)
 ## workspace answers open_in_workspace as "object".
 const _JUMP_KIND := {"object_model": "object", "object_scene": "object", "object_project": "object"}
 
+## Drop-accept equivalences beyond an exact kind match: the extractors emit
+## both spellings for picture files, so a row configured either way accepts
+## either payload.
+const _KIND_EQUIVALENTS := {"texture": ["image"], "image": ["texture"]}
+
 var name_edit: LineEdit
 var badge: Label
 var browse_button: Button
@@ -93,6 +98,21 @@ func _init() -> void:
 	clear_button.focus_mode = Control.FOCUS_NONE
 	clear_button.pressed.connect(func() -> void: _commit(""))
 	add_child(clear_button)
+
+	# The GUI drop walk stops at MOUSE_FILTER_STOP children, so the row's own
+	# drop virtuals only cover the gaps between them: every child forwards to
+	# the same payload handlers. The field gets a dedicated pair that DEFERS
+	# plain-String drops to LineEdit's native caret insert - LineEdit::drop_data
+	# always runs the forwarded drop AND THEN the native insert for String data,
+	# so handling Strings here would double-apply (commit + mangled re-insert,
+	# then a second corrupt commit on focus-out). The field's drag callable
+	# stays empty so native selected-text drags keep working; the badge's
+	# reuses the drag source it already is.
+	name_edit.set_drag_forwarding(Callable(), _can_drop_data_on_field, _drop_data_on_field)
+	badge.set_drag_forwarding(_get_drag_data, _can_drop_data, _drop_data)
+	browse_button.set_drag_forwarding(Callable(), _can_drop_data, _drop_data)
+	jump_button.set_drag_forwarding(Callable(), _can_drop_data, _drop_data)
+	clear_button.set_drag_forwarding(Callable(), _can_drop_data, _drop_data)
 
 
 ## services: { "resolve": Callable(kind, name) -> {status, path},
@@ -171,6 +191,56 @@ func _get_drag_data(_at: Vector2) -> Variant:
 		preview.text = _current
 		set_drag_preview(preview)
 	return LinkPayload.make(_kind, _current, _resolved_path).to_drag_data()
+
+
+## Payload drops only: plain text belongs to the name field's native caret
+## insert (committing on Enter/focus-out like typing), never to these handlers.
+func _can_drop_data(_at: Vector2, data: Variant) -> bool:
+	if not name_edit.editable:
+		return false
+	var payload: LinkPayload = LinkPayload.from_drag_data(data)
+	return payload != null and _accepts_payload_kind(payload.kind)
+
+
+func _drop_data(_at: Vector2, data: Variant) -> void:
+	if not name_edit.editable:
+		return
+	var payload: LinkPayload = LinkPayload.from_drag_data(data)
+	if payload == null or not _accepts_payload_kind(payload.kind):
+		return
+	# The payload name is the identity a drop commits (file name for file
+	# kinds); path is advisory-only. Routing through _value_from_path makes a
+	# drop behave exactly like a browse pick.
+	var source := payload.name if not payload.name.is_empty() else payload.path
+	if source.is_empty():
+		return
+	_commit(_value_from_path.call(source))
+
+
+# The field's forwarded pair: String drops return false so LineEdit's native
+# can_drop fallback accepts them, and no-op the drop because LineEdit runs the
+# forwarded drop unconditionally before its native insert.
+func _can_drop_data_on_field(at: Vector2, data: Variant) -> bool:
+	if data is String:
+		return false
+	return _can_drop_data(at, data)
+
+
+func _drop_data_on_field(at: Vector2, data: Variant) -> void:
+	if data is String:
+		return
+	_drop_data(at, data)
+
+
+func _accepts_payload_kind(payload_kind: String) -> bool:
+	# An empty kind never matches - not even an unconfigured widget's empty
+	# _kind (a kindless payload is malformed, not a wildcard).
+	if payload_kind.is_empty():
+		return false
+	if payload_kind == _kind:
+		return true
+	var equivalents: Array = _KIND_EQUIVALENTS.get(_kind, [])
+	return equivalents.has(payload_kind)
 
 
 func _commit(text: String) -> void:

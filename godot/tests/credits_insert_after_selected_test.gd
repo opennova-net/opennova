@@ -111,7 +111,7 @@ func test_card_click_emits_request_select() -> void:
 	var card = CreditsEditorBlockCardScene.instantiate()
 	add_child_autofree(card)
 	var entry := CbinTextEntry.new()
-	card.bind(entry, PackedStringArray())
+	card.bind(entry)
 	await get_tree().process_frame
 
 	var got := []

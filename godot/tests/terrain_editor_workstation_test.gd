@@ -10,6 +10,7 @@ const EnvironmentEditorScript = preload("res://modtools/environment/environment_
 const EnvironmentInspectorScript = preload("res://modtools/environment/environment_inspector.gd")
 const QuadrantBoardScript = preload("res://modtools/terrain/ui/widgets/quadrant_board.gd")
 const MissionInspectorScript = preload("res://modtools/mission/mission_inspector.gd")
+const LinkPayloadScript = preload("res://modtools/framework/links/link_payload.gd")
 const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const FIXTURE_CACHE_DIR := "opennova_test"
 
@@ -1790,11 +1791,69 @@ func test_browser_pane_never_impersonates_the_modal_dialog() -> void:
 	var dialog: Node = workstation.find_child("ResourceBrowserDialog", true, false)
 	assert_not_null(dialog, "the modal still builds on demand")
 	if dialog != null:
-		assert_not_null(dialog.find_child("ResourceBrowserList", true, false),
-			"the modal's tree keeps its pinned name")
+		var modal_tree: Node = dialog.find_child("ResourceBrowserList", true, false)
+		assert_not_null(modal_tree, "the modal's tree keeps its pinned name")
 		assert_not_null(dialog.find_child("ResourceBrowserSearch", true, false),
 			"the modal's search keeps its pinned name")
+		if modal_tree != null:
+			# Pin the provider itself, not just one empty-list call: a wired
+			# provider on a row-less list would also return null and hide the
+			# regression.
+			assert_false(modal_tree.get_parent()._drag_payload_provider.is_valid(),
+				"the modal's table never enables a drag provider (drag-out is the pane's affordance)")
+			assert_null(modal_tree.get_parent()._get_tree_drag_data(Vector2.ZERO),
+				"and produces no drag data")
 		(dialog as Window).hide()
+
+
+func test_browser_pane_rows_drag_as_link_payloads() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	var root := _make_resource_fixture("pane_drag")
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK)
+	workstation._set_browser_pane_visible(true)
+	var pane = workstation._browser_pane
+
+	var fonts_index := -1
+	for i in pane.kind_option.item_count:
+		if pane.kind_option.get_item_text(i) == "Fonts":
+			fonts_index = i
+	assert_gt(fonts_index, -1, "the kind dropdown offers Fonts")
+	pane.kind_option.select(fonts_index)
+	pane.kind_option.item_selected.emit(fonts_index)
+	assert_eq(pane.table.get_visible_count(), 1, "the Fonts filter shows the fixture font")
+
+	# The refresh auto-selects the row; the headless drag rides that selection.
+	var data: Variant = pane.table._get_tree_drag_data(Vector2.ZERO)
+	var payload := LinkPayloadScript.from_drag_data(data)
+	assert_not_null(payload, "a pane row drags as a LinkPayload")
+	if payload != null:
+		assert_eq(payload.kind, "font", "the payload carries the row's kind")
+		assert_eq(payload.name, "alpha.fnt", "the payload name keeps the extension")
+		assert_true(payload.path.to_lower().ends_with("alpha.fnt"), "the path points at the file")
+
+	# An object row pins the vocabulary rule for real: "object_project" is a
+	# kind _JUMP_KIND translates for jumps, so a payload dragging as "object"
+	# would expose the regression "font" (identical in both vocabularies) cannot.
+	pane.kind_option.select(0)  # back to All
+	pane.kind_option.item_selected.emit(0)
+	var project_row: TreeItem = null
+	var row := pane.table.tree.get_root().get_first_child() as TreeItem
+	while row != null:
+		var entry := row.get_metadata(0) as Dictionary
+		if entry != null and String(entry.get("relative_path", "")) == "alpha.3dp":
+			project_row = row
+			break
+		row = row.get_next()
+	assert_not_null(project_row, "the All filter lists the fixture object project")
+	if project_row == null:
+		return
+	project_row.select(0)
+	var object_payload := LinkPayloadScript.from_drag_data(pane.table._get_tree_drag_data(Vector2.ZERO))
+	assert_not_null(object_payload, "the object row drags as a LinkPayload")
+	if object_payload != null:
+		assert_eq(object_payload.kind, "object_project",
+			"the payload keeps the index's reference-kind vocabulary (never the jump alias)")
 
 
 func test_right_split_hides_when_dock_and_pane_are_both_hidden() -> void:
