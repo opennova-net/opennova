@@ -21,6 +21,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly NotifyIcon _notifyIcon;
     private readonly ContextMenuStrip _contextMenu;
     private readonly ToolStripMenuItem _launchMenuItem;
+    private readonly ToolStripMenuItem _redirectionMenuItem;
     private readonly ToolStripSeparator _menuSeparator;
     private readonly ToolStripMenuItem _preferencesMenuItem;
     private readonly ToolStripMenuItem _exitMenuItem;
@@ -50,6 +51,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
             Enabled = false
         };
         _expansionsMenuItem = new ToolStripMenuItem("Expansions...", null, OnExpansionsClicked);
+        // Quick on/off for our hosts-file redirect, without opening Preferences.
+        // Checkmark reflects whether the launcher is managing the redirect.
+        _redirectionMenuItem = new ToolStripMenuItem("Redirect to OpenNova", null, OnToggleRedirectionClicked)
+        {
+            ToolTipText = "Toggle OpenNova's NovaWorld hosts-file redirect on or off."
+        };
         _preferencesMenuItem = new ToolStripMenuItem("Preferences", null, OnPreferencesClicked);
         _exitMenuItem = new ToolStripMenuItem("Exit", null, OnExitClicked);
 
@@ -59,6 +66,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             _launchMenuItem,
             _expansionsMenuItem,
+            _redirectionMenuItem,
             _preferencesMenuItem,
             _menuSeparator,
             _exitMenuItem
@@ -285,6 +293,28 @@ internal sealed class TrayApplicationContext : ApplicationContext
         UpdateMenuState();
     }
 
+    // Tray quick-toggle: flip whether the launcher manages the NovaWorld redirect.
+    // On -> resolve + write the hosts block; off -> remove it. Same effect as the
+    // Preferences checkbox, one click from the tray.
+    private async void OnToggleRedirectionClicked(object? sender, EventArgs e)
+    {
+        var enable = !_settings.RedirectionEnabled;
+        _settings.RedirectionEnabled = enable;
+        await SaveSettingsAsync();
+
+        if (enable)
+        {
+            await SyncRedirectionAsync(silent: false);
+        }
+        else
+        {
+            _hostsFileService.Remove();
+            _lastHostsState = HostsRedirectState.Disabled;
+        }
+
+        UpdateMenuState();
+    }
+
     private string DescribeRedirectionState()
     {
         if (!_settings.RedirectionEnabled)
@@ -337,6 +367,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _launchMenuItem.Enabled = hasConfiguredGame && !_deploymentInProgress && !launcherUpdatePending;
         _expansionsMenuItem.Enabled = _supportedGames.Count > 0;
+        _redirectionMenuItem.Checked = _settings.RedirectionEnabled;
 
         var status = launcherUpdatePending
             ? "Launcher update required"
@@ -463,16 +494,16 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 Tag = installation
             };
 
-            var canLaunch = HostsReadyForLaunch && !_deploymentInProgress && !_launcherAutoUpdateService.IsUpdateAvailable;
+            var canLaunch = !_deploymentInProgress && !_launcherAutoUpdateService.IsUpdateAvailable;
             menuItem.Enabled = canLaunch;
 
-            if (!HostsReadyForLaunch)
-            {
-                menuItem.ToolTipText = RedirectionOffMessage;
-            }
-            else if (_deploymentInProgress)
+            if (_deploymentInProgress)
             {
                 menuItem.ToolTipText = "Deployment in progress. Please wait.";
+            }
+            else if (!HostsReadyForLaunch)
+            {
+                menuItem.ToolTipText = "Redirect is off — you'll pick OpenNova or the original NovaWorld at launch.";
             }
 
             _launchMenuItem.DropDownItems.Add(menuItem);
@@ -500,39 +531,55 @@ internal sealed class TrayApplicationContext : ApplicationContext
             return;
         }
 
-        if (!_settings.RedirectionEnabled)
-        {
-            ShowBalloon("NovaWorld redirection is off", RedirectionOffMessage);
-            return;
-        }
-
-        // Re-resolve the server IP and repair the hosts block before every launch.
-        var ready = await SyncRedirectionAsync(silent: false);
-        UpdateMenuState();
-        if (!ready)
-        {
-            return;
-        }
-
+        // The launch dialog (in TryLaunchGameAsync) lets the player pick OpenNova
+        // (default, applies the redirect) or the original NovaWorld (skips it), so
+        // launching is no longer gated on the redirect being active up front.
         await TryLaunchGameAsync(installation);
     }
 
-    private Task TryLaunchGameAsync(GameInstallation installation)
+    private async Task TryLaunchGameAsync(GameInstallation installation)
     {
         if (!File.Exists(installation.ExecutablePath))
         {
             ShowBalloon("Game missing", $"Could not find {installation.Definition.ExecutableName} in the configured directory.");
             UpdateMenuState();
-            return Task.CompletedTask;
+            return;
         }
 
         if (!TryPromptForLaunchOptions(
                 installation,
                 out var selectedExpansionSlug,
                 out var launchWindowed,
-                out var allowManyInstances))
+                out var allowManyInstances,
+                out var useRealNovaWorld))
         {
-            return Task.CompletedTask;
+            return;
+        }
+
+        // Point the game at the right NovaWorld before it starts.
+        if (useRealNovaWorld)
+        {
+            // Original NovaWorld: clear our managed hosts block so the real
+            // hostnames resolve normally. Re-applied next time you launch OpenNova.
+            _hostsFileService.Remove();
+            _lastHostsState = HostsRedirectState.Disabled;
+            UpdateMenuState();
+        }
+        else
+        {
+            // OpenNova: make sure the redirect is on and pointing at the current IP.
+            if (!_settings.RedirectionEnabled)
+            {
+                _settings.RedirectionEnabled = true;
+                await SaveSettingsAsync();
+            }
+
+            var ready = await SyncRedirectionAsync(silent: false);
+            UpdateMenuState();
+            if (!ready)
+            {
+                return;
+            }
         }
 
         string? advancedArgs = null;
@@ -552,19 +599,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             ShowBalloon("Launch failed", $"Could not launch {installation.Definition.DisplayName}: {ex.Message}");
         }
-
-        return Task.CompletedTask;
     }
 
     private bool TryPromptForLaunchOptions(
         GameInstallation installation,
         out string? expansionSlug,
         out bool launchWindowed,
-        out bool allowManyInstances)
+        out bool allowManyInstances,
+        out bool useRealNovaWorld)
     {
         expansionSlug = null;
         launchWindowed = true;
         allowManyInstances = true;
+        useRealNovaWorld = false;
 
         _settings.InstalledExpansions.TryGetValue(installation.Definition.Slug, out var installedMap);
 
@@ -614,6 +661,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         expansionSlug = dialog.SelectedExpansionSlug;
         launchWindowed = dialog.LaunchWindowed;
         allowManyInstances = dialog.AllowManyInstances;
+        useRealNovaWorld = dialog.UseRealNovaWorld;
         return true;
     }
 

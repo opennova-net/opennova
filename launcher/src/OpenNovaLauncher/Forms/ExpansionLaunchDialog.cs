@@ -80,6 +80,7 @@ internal sealed partial class ExpansionLaunchDialog : Form
     public string? SelectedExpansionSlug { get; private set; }
     public bool LaunchWindowed => windowedCheckBox.Checked;
     public bool AllowManyInstances => allowManyInstancesCheckBox.Checked;
+    public bool UseRealNovaWorld => useRealNovaWorldCheckBox.Checked;
 
     private void LaunchButton_Click(object sender, EventArgs e)
     {

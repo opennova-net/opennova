@@ -22,9 +22,9 @@ Everything outside the markers is preserved byte for byte. The launcher refreshe
 
 The hosts entries stay in place while the toggle is on, including across launcher restarts. They are removed when you turn the toggle off or click "Remove hosts entries" in Preferences.
 
-## Launch gating
+## Launching
 
-Launching is strictly gated on the redirection being active. If redirection is off, the hosts file cannot be written, or another program has its own entries for the NovaWorld hostnames, the launch items are disabled with a plain explanation. There is no option to launch against the original NovaWorld through this launcher.
+Launch is always available from the tray. When you launch, a dialog lets you pick **OpenNova** (the default: the launcher refreshes the server address and writes the hosts redirect first) or the **original NovaWorld** (the launcher clears its managed hosts block so the game reaches NovaLogic's servers for that session; it is re-applied the next time you launch OpenNova). The right-click menu also has a **Redirect to OpenNova** toggle to turn the launcher's hosts management on or off without opening Preferences.
 
 If a conflicting entry from another tool is found, the launcher asks before removing it, and removes only the lines that mention the NovaWorld hostnames.
 

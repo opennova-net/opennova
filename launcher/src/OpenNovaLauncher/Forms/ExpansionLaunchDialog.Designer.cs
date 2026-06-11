@@ -39,6 +39,7 @@ namespace OpenNova.Launcher.Forms
             optionsFlow = new System.Windows.Forms.FlowLayoutPanel();
             windowedCheckBox = new System.Windows.Forms.CheckBox();
             allowManyInstancesCheckBox = new System.Windows.Forms.CheckBox();
+            useRealNovaWorldCheckBox = new System.Windows.Forms.CheckBox();
             buttonsFlow = new System.Windows.Forms.FlowLayoutPanel();
             cancelButton = new System.Windows.Forms.Button();
             launchButton = new System.Windows.Forms.Button();
@@ -131,6 +132,7 @@ namespace OpenNova.Launcher.Forms
             optionsFlow.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
             optionsFlow.Controls.Add(windowedCheckBox);
             optionsFlow.Controls.Add(allowManyInstancesCheckBox);
+            optionsFlow.Controls.Add(useRealNovaWorldCheckBox);
             optionsFlow.Dock = System.Windows.Forms.DockStyle.Fill;
             optionsFlow.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
             optionsFlow.Location = new System.Drawing.Point(0, 0);
@@ -162,6 +164,15 @@ namespace OpenNova.Launcher.Forms
             allowManyInstancesCheckBox.TabIndex = 1;
             allowManyInstancesCheckBox.Text = "Allow many instances";
             allowManyInstancesCheckBox.UseVisualStyleBackColor = true;
+            //
+            // useRealNovaWorldCheckBox
+            //
+            useRealNovaWorldCheckBox.AutoSize = true;
+            useRealNovaWorldCheckBox.Margin = new System.Windows.Forms.Padding(3, 3, 12, 3);
+            useRealNovaWorldCheckBox.Name = "useRealNovaWorldCheckBox";
+            useRealNovaWorldCheckBox.TabIndex = 2;
+            useRealNovaWorldCheckBox.Text = "Use the original NovaWorld (skip OpenNova redirect)";
+            useRealNovaWorldCheckBox.UseVisualStyleBackColor = true;
             //
             // buttonsFlow
             //
@@ -236,6 +247,7 @@ namespace OpenNova.Launcher.Forms
         private System.Windows.Forms.FlowLayoutPanel optionsFlow;
         private System.Windows.Forms.CheckBox windowedCheckBox;
         private System.Windows.Forms.CheckBox allowManyInstancesCheckBox;
+        private System.Windows.Forms.CheckBox useRealNovaWorldCheckBox;
         private System.Windows.Forms.FlowLayoutPanel buttonsFlow;
         private System.Windows.Forms.Button cancelButton;
         private System.Windows.Forms.Button launchButton;
