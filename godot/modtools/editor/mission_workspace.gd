@@ -443,6 +443,8 @@ func build_inspector(host: Control) -> void:
 	if _inspector.has_method("set_play_hooks"):
 		_inspector.set_play_hooks(Callable(self, "play_mission"), Callable(self, "is_playing_mission"),
 			Callable(self, "stop_play_mission"))
+	if editor_shell != null and _inspector.has_method("set_reference_services"):
+		_inspector.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
 
 
 # --- Asset dock (the right pane) ----------------------------------------------

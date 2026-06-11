@@ -1379,6 +1379,63 @@ func test_editing_name_commits_through_set_header_string() -> void:
 	assert_eq(ctx.fake.header_string_calls[0][1], "Renamed", "value carried through")
 
 
+func test_props_form_shows_world_ref_widgets() -> void:
+	var ctx := _make({})
+	ctx.fake.mission_ref = _loaded_mission_for_props()
+	ctx.inspector._refresh()
+	var terrain := ctx.inspector.find_child("MissionProp_terrain", true, false) as ResourceRefWidget
+	var env := ctx.inspector.find_child("MissionProp_environment", true, false) as ResourceRefWidget
+	assert_not_null(terrain, "the terrain link widget is built")
+	assert_not_null(env, "the environment link widget is built")
+	assert_eq(terrain.get_value(), ctx.fake.mission_ref.get_terrain_ref(),
+		"the terrain widget reads the header ref")
+	assert_eq(env.get_value(), ctx.fake.mission_ref.get_environment_ref(),
+		"the environment widget reads the header ref")
+
+
+func test_editing_terrain_ref_commits_through_set_header_string() -> void:
+	var ctx := _make({})
+	ctx.fake.mission_ref = _loaded_mission_for_props()
+	ctx.inspector._refresh()
+	var terrain := ctx.inspector.find_child("MissionProp_terrain", true, false) as ResourceRefWidget
+	terrain.name_edit.text = "newmap"
+	terrain.name_edit.text_submitted.emit("newmap")
+	assert_eq(ctx.fake.header_string_calls.size(), 1, "one header_string commit")
+	assert_eq(ctx.fake.header_string_calls[0][0], "terrain", "field is terrain")
+	assert_eq(ctx.fake.header_string_calls[0][1], "newmap", "value carried through")
+
+
+func test_editing_environment_ref_commits_through_set_header_string() -> void:
+	var ctx := _make({})
+	ctx.fake.mission_ref = _loaded_mission_for_props()
+	ctx.inspector._refresh()
+	var env := ctx.inspector.find_child("MissionProp_environment", true, false) as ResourceRefWidget
+	env.name_edit.text = "storm_01"
+	env.name_edit.text_submitted.emit("storm_01")
+	assert_eq(ctx.fake.header_string_calls.size(), 1, "one header_string commit")
+	assert_eq(ctx.fake.header_string_calls[0][0], "environment", "field is environment")
+	assert_eq(ctx.fake.header_string_calls[0][1], "storm_01", "value carried through")
+
+
+func test_reference_services_enable_browse_on_world_widgets() -> void:
+	var ctx := _make({})
+	ctx.fake.mission_ref = _loaded_mission_for_props()
+	ctx.inspector._refresh()
+	var terrain := ctx.inspector.find_child("MissionProp_terrain", true, false) as ResourceRefWidget
+	assert_false(terrain.browse_button.visible, "no services yet: browse hidden")
+	# Services arrive after the form is built (the workspace injects them
+	# post-build); the setter must re-configure the live widgets.
+	ctx.inspector.set_reference_services({
+		"resolve": func(_kind: String, _name: String) -> Dictionary:
+			return {"status": "found", "path": "C:/res/x.trn"},
+		"pick": func(_kind: String, _title: String, _on_pick: Callable) -> void:
+			pass,
+	})
+	assert_true(terrain.browse_button.visible, "services injected: browse shows")
+	assert_true(terrain.badge.visible, "services injected: badge resolves")
+	assert_eq(terrain.badge.text, "●", "fake resolve reports found")
+
+
 func test_changing_climate_commits_through_set_header_int() -> void:
 	var ctx := _make({})
 	ctx.fake.mission_ref = _loaded_mission_for_props()
