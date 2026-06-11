@@ -34,7 +34,13 @@ var _section_filter: int = -1  # -1 = all sections
 
 
 func _init() -> void:
-	_tabs.changed.connect(func() -> void: documents_changed.emit())
+	# A named method, not a lambda: a lambda touching a member signal captures
+	# self strongly and would cycle workspace <-> tab set (both RefCounted).
+	_tabs.changed.connect(_on_tabs_changed)
+
+
+func _on_tabs_changed() -> void:
+	documents_changed.emit()
 
 
 func set_editor_shell(value: Node) -> void:
@@ -112,8 +118,14 @@ func _save_state() -> void:
 	cfg.load(STATE_PATH)  # keep unrelated values if the file exists
 	# last_path stays for back-compat with pre-tab session files.
 	cfg.set_value("session", "last_path", strings_editor.current_path)
-	cfg.set_value("session", "open_paths", _tabs.open_paths())
-	cfg.set_value("session", "active_index", _tabs.get_active_index())
+	var open := _tabs.open_paths()
+	cfg.set_value("session", "open_paths", open)
+	# active_index is stored in open_paths space: pathless (Untitled) tabs are
+	# not persisted, so a full-list index would drift past them on restore.
+	var active := -1
+	if not strings_editor.current_path.is_empty():
+		active = open.find(strings_editor.current_path)
+	cfg.set_value("session", "active_index", active)
 	cfg.save(STATE_PATH)
 
 
