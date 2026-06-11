@@ -284,6 +284,7 @@ func test_action_and_toggle_buttons_have_icons() -> void:
 		assert_not_null(btn.icon, "action button '%s' should carry its action icon" % btn.text)
 	assert_not_null(workstation._settings_toggle_button.icon, "settings toggle keeps an icon")
 	assert_not_null(workstation._camera_toggle_button.icon, "camera toggle keeps an icon")
+	assert_not_null(workstation._browser_toggle_button.icon, "browser toggle carries its icon")
 
 
 func test_workspace_ribbon_exposes_scroll_affordance_when_overflowing() -> void:
@@ -1679,3 +1680,110 @@ func test_split_layout_applies_persisted_offsets_on_load() -> void:
 	var second_right := second.get_node("%CenterRightSplit") as SplitContainer
 	assert_eq(second_body.split_offset, target_left, "A new shell should restore the persisted left split offset.")
 	assert_eq(second_right.split_offset, target_right, "A new shell should restore the persisted right split offset.")
+
+
+# --- Resource Browser pane (A10) --------------------------------------------------
+
+func test_browser_pane_defaults_hidden_and_toggles_without_closing_popovers() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	var host := workstation.get_node("%ResourceBrowserPaneHost") as Control
+	var toggle := workstation.get_node("%BrowserToggleButton") as Button
+	assert_false(host.visible, "the pane defaults hidden (protects the 1024x640 window floor)")
+	assert_false(toggle.button_pressed, "the toggle starts unpressed")
+
+	workstation._set_settings_popup_visible(true)
+	toggle.button_pressed = true
+	assert_true(host.visible, "the toggle shows the pane")
+	assert_true(workstation.get_node("%SettingsPopup").visible,
+		"a dock toggle must not close popovers (it is not in the mutual-exclusion chain)")
+	workstation._set_settings_popup_visible(false)
+
+	toggle.button_pressed = false
+	assert_false(host.visible, "the toggle hides the pane again")
+
+
+func test_browser_pane_lists_and_filters_by_kind() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	var root := _make_resource_fixture("pane_filter")
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK)
+	workstation._set_browser_pane_visible(true)
+	var pane = workstation._browser_pane
+	assert_not_null(pane, "showing the pane builds it lazily")
+	assert_eq(pane.table.get_visible_count(), 8,
+		"the All filter lists every recognized fixture resource")
+
+	var fonts_index := -1
+	for i in pane.kind_option.item_count:
+		if pane.kind_option.get_item_text(i) == "Fonts":
+			fonts_index = i
+	assert_gt(fonts_index, -1, "the kind dropdown offers Fonts")
+	pane.kind_option.select(fonts_index)
+	pane.kind_option.item_selected.emit(fonts_index)
+	assert_eq(pane.table.get_visible_count(), 1, "the kind filter narrows to the one font")
+
+
+func test_browser_pane_double_click_jumps_through_open_in_workspace() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	var root := ProjectSettings.globalize_path("res://../fixtures/fnt")
+	assert_eq(workstation._set_resource_root_dir(root, false, true), OK)
+	workstation._set_browser_pane_visible(true)
+	var pane = workstation._browser_pane
+
+	var fonts_index := -1
+	for i in pane.kind_option.item_count:
+		if pane.kind_option.get_item_text(i) == "Fonts":
+			fonts_index = i
+	pane.kind_option.select(fonts_index)
+	pane.kind_option.item_selected.emit(fonts_index)
+	assert_gt(pane.table.get_visible_count(), 0, "the fixtures root lists fonts")
+
+	# The refresh auto-selects the first row; activation must ride the shared
+	# cross-jump spine (open_in_workspace), not a private open path.
+	pane.table.tree.item_activated.emit()
+	await get_tree().process_frame
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.FONTS,
+		"activating a font row lands in the Fonts workspace")
+
+
+func test_browser_pane_visibility_and_split_persist() -> void:
+	var first = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	first._set_browser_pane_visible(true)
+	first._right_split.split_offset = -123
+	first._save_browser_state()
+	first.queue_free()
+	await get_tree().process_frame
+
+	var second = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	assert_true((second.get_node("%ResourceBrowserPaneHost") as Control).visible,
+		"a fresh shell restores the pane's visibility")
+	assert_true((second.get_node("%BrowserToggleButton") as Button).button_pressed,
+		"...with the toggle pressed to match")
+	assert_eq((second.get_node("%RightSplit") as SplitContainer).split_offset, -123,
+		"...and the persisted pane split offset")
+
+
+func test_browser_pane_never_impersonates_the_modal_dialog() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	assert_null(workstation.find_child("ResourceBrowserDialog", true, false),
+		"no modal dialog exists until a picker opens")
+	workstation._set_browser_pane_visible(true)
+	assert_null(workstation.find_child("ResourceBrowserDialog", true, false),
+		"showing the pane never builds the modal")
+	assert_null(workstation.find_child("ResourceBrowserList", true, false),
+		"the pane's list uses its own name; the pinned modal lookups stay unambiguous")
+
+	workstation.open_kind_picker("terrain", "Choose a terrain", func(_path: String) -> void: pass)
+	var dialog: Node = workstation.find_child("ResourceBrowserDialog", true, false)
+	assert_not_null(dialog, "the modal still builds on demand")
+	if dialog != null:
+		assert_not_null(dialog.find_child("ResourceBrowserList", true, false),
+			"the modal's tree keeps its pinned name")
+		assert_not_null(dialog.find_child("ResourceBrowserSearch", true, false),
+			"the modal's search keeps its pinned name")
+		(dialog as Window).hide()

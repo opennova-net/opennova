@@ -22,6 +22,8 @@ const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 const LAYOUT_STATE_SECTION := "layout"
 const LEFT_SPLIT_KEY := "left_split_offset"
 const RIGHT_SPLIT_KEY := "right_split_offset"
+const BROWSER_SPLIT_KEY := "browser_split_offset"
+const BROWSER_VISIBLE_KEY := "browser_pane_visible"
 # View options (3D preview guides), persisted in their own section.
 const VIEW_STATE_SECTION := "view"
 const GRID_VISIBLE_KEY := "grid_visible"
@@ -177,6 +179,28 @@ func save_layout_state(left_offset: int, right_offset: int) -> void:
 	config.load(STATE_CONFIG_PATH)
 	config.set_value(LAYOUT_STATE_SECTION, LEFT_SPLIT_KEY, left_offset)
 	config.set_value(LAYOUT_STATE_SECTION, RIGHT_SPLIT_KEY, right_offset)
+	config.save(STATE_CONFIG_PATH)
+
+
+# Persisted Resource Browser pane state (visibility + its split offset),
+# separate from save_layout_state so that call keeps its pinned two-argument
+# signature. Offset presence is explicit (offsets can be negative).
+func load_browser_state() -> Dictionary:
+	var config := ConfigFile.new()
+	if config.load(STATE_CONFIG_PATH) != OK:
+		return {"visible": false, "has_split": false, "split": 0}
+	return {
+		"visible": bool(config.get_value(LAYOUT_STATE_SECTION, BROWSER_VISIBLE_KEY, false)),
+		"has_split": config.has_section_key(LAYOUT_STATE_SECTION, BROWSER_SPLIT_KEY),
+		"split": int(config.get_value(LAYOUT_STATE_SECTION, BROWSER_SPLIT_KEY, 0)),
+	}
+
+
+func save_browser_state(visible: bool, split_offset: int) -> void:
+	var config := ConfigFile.new()
+	config.load(STATE_CONFIG_PATH)
+	config.set_value(LAYOUT_STATE_SECTION, BROWSER_VISIBLE_KEY, visible)
+	config.set_value(LAYOUT_STATE_SECTION, BROWSER_SPLIT_KEY, split_offset)
 	config.save(STATE_CONFIG_PATH)
 
 

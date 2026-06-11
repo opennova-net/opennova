@@ -108,6 +108,15 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 4
 
+[node name="BrowserToggleButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow/GlobalButtonRail"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+focus_mode = 0
+toggle_mode = true
+tooltip_text = "Resources"
+flat = false
+
 [node name="CameraToggleButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow/GlobalButtonRail"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(36, 36)
@@ -497,9 +506,24 @@ button_pressed = true
 text = "Show axes"
 tooltip_text = "Show the origin axis gizmo in the 3D preview."
 
-[node name="AssetDock" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit"]
+[node name="RightSplit" type="HSplitContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 1
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="AssetDock" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/RightSplit"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+size_flags_horizontal = 1
+size_flags_vertical = 3
+
+[node name="ResourceBrowserPaneHost" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/RightSplit"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(260, 0)
 layout_mode = 2
 size_flags_horizontal = 1
 size_flags_vertical = 3
