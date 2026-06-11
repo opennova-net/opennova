@@ -61,7 +61,7 @@ func test_text_edit_caret_preserved_during_rapid_typing() -> void:
 
 	var entry := CbinTextEntry.new()
 	entry.set_text("")
-	card.bind(entry, PackedStringArray())
+	card.bind(entry)
 	await get_tree().process_frame
 
 	var text_edit: LineEdit = card.get_node("%TextEdit")

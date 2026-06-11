@@ -35,14 +35,9 @@ unique_name_in_owner = true
 size_flags_horizontal = 3
 placeholder_text = "Text"
 
-[node name="FontPicker" type="OptionButton" parent="Row/TextPanel"]
+[node name="FontRefHost" type="HBoxContainer" parent="Row/TextPanel"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(128, 0)
-
-[node name="FontEditButton" type="Button" parent="Row/TextPanel"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(46, 0)
-text = "Edit"
+custom_minimum_size = Vector2(190, 0)
 
 [node name="TextColorPicker" type="ColorPickerButton" parent="Row/TextPanel"]
 unique_name_in_owner = true
@@ -143,4 +138,3 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(32, 0)
 text = "X"
 
-[connection signal="pressed" from="Row/TextPanel/FontEditButton" to="." method="_on_font_edit_pressed"]
