@@ -997,10 +997,12 @@ func _sync_asset_dock_for_workspace(workspace: EditorWorkspace) -> void:
 		_clear_asset_dock_children()
 		_asset_dock.visible = false
 		_asset_dock_workspace_id = -1
+		_sync_right_split_visibility()
 		return
 	_asset_dock.visible = true
 	workspace.set_asset_dock(_asset_dock)
 	_asset_dock_workspace_id = _active_workspace_id
+	_sync_right_split_visibility()
 
 
 func _clear_asset_dock_children() -> void:
@@ -1100,7 +1102,12 @@ func _wire_browser_pane() -> void:
 		_browser_pane_host.visible = true
 		if _browser_toggle_button != null:
 			_browser_toggle_button.set_pressed_no_signal(true)
-		_browser_pane.refresh()
+		# Refresh now only when no root is configured (nothing will scan later);
+		# with a root, _ready's scan fills the pane through _refresh_browser_pane
+		# - an eager refresh here would lazy-scan and double the startup index walk.
+		if _resource_library.get_root_dir().is_empty():
+			_browser_pane.refresh()
+	_sync_right_split_visibility()
 
 
 func _ensure_browser_pane() -> void:
@@ -1128,9 +1135,20 @@ func _set_browser_pane_visible(active: bool) -> void:
 	_browser_pane_host.visible = active
 	if _browser_toggle_button != null:
 		_browser_toggle_button.set_pressed_no_signal(active)
+	_sync_right_split_visibility()
 	if active and _browser_pane != null:
 		_browser_pane.refresh()
 	_save_browser_state()
+
+
+# With both children hidden, RightSplit itself hides so dockless workspaces
+# keep the pre-pane behavior: no live divider, and the persisted right offset
+# stays inert (CenterRightSplit sees one visible child).
+func _sync_right_split_visibility() -> void:
+	if _right_split == null:
+		return
+	_right_split.visible = (_asset_dock != null and _asset_dock.visible) \
+			or (_browser_pane_host != null and _browser_pane_host.visible)
 
 
 func _save_browser_state() -> void:

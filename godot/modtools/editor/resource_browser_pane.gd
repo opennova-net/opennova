@@ -45,6 +45,10 @@ var _get_root_dir: Callable
 var _scan_root: Callable
 var _current_resource_path: Callable
 var _open_entry: Callable
+# The lazy _scan_root call below re-enters refresh() through the shell's
+# post-scan hook; the guard makes that inner call a no-op (the outer pass
+# finishes against the freshly scanned index).
+var _refreshing := false
 
 
 func _init() -> void:
@@ -112,8 +116,9 @@ func current_kind() -> String:
 ## Re-pull the index listing for the active kind. Called on show, on kind
 ## change, and by the shell after a root change/rescan.
 func refresh() -> void:
-	if not _get_index.is_valid():
+	if not _get_index.is_valid() or _refreshing:
 		return
+	_refreshing = true
 	var entries: Array = []
 	var index = _get_index.call()
 	var root := String(_get_root_dir.call())
@@ -126,6 +131,7 @@ func refresh() -> void:
 	if _current_resource_path.is_valid():
 		current = String(_current_resource_path.call(current_kind()))
 	table.set_entries(entries, current)
+	_refreshing = false
 
 
 func _refresh_hint() -> void:

@@ -1787,3 +1787,25 @@ func test_browser_pane_never_impersonates_the_modal_dialog() -> void:
 		assert_not_null(dialog.find_child("ResourceBrowserSearch", true, false),
 			"the modal's search keeps its pinned name")
 		(dialog as Window).hide()
+
+
+func test_right_split_hides_when_dock_and_pane_are_both_hidden() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	var right_split := workstation.get_node("%RightSplit") as Control
+
+	# A dockless workspace with the pane off keeps the pre-pane behavior: one
+	# visible CenterRightSplit child, no live divider, persisted offset inert.
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
+	await get_tree().process_frame
+	assert_false(right_split.visible,
+		"a dockless workspace with the pane hidden hides the right split entirely")
+
+	workstation._set_browser_pane_visible(true)
+	assert_true(right_split.visible, "showing the pane brings the split back")
+	workstation._set_browser_pane_visible(false)
+	assert_false(right_split.visible, "hiding it again re-hides the split")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
+	await get_tree().process_frame
+	assert_true(right_split.visible, "a dock-using workspace shows the split")
