@@ -118,20 +118,6 @@ from the vault into a tmpfs, and drives the remote docker engine over
 
 A backup sidecar also runs nightly (see `deploy/backup/`).
 
-## Staging
-
-Every command takes `DEPLOY_ENV=staging`, which uses a separate terraform
-workspace (no Elastic IP, `staging.` / `nw-staging.` DNS records) and a
-`tfstate-staging` document, so you can rehearse the whole flow without touching
-prod:
-
-```bash
-DEPLOY_ENV=staging ./deploy/run.sh infra apply
-DEPLOY_ENV=staging ./deploy/run.sh app deploy
-# ... smoke test ...
-DEPLOY_ENV=staging ./deploy/run.sh infra destroy
-```
-
 ## The launcher
 
 Players install the launcher (published from CI to `downloads.<domain>`). It

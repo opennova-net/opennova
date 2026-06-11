@@ -57,7 +57,7 @@ variable "auto_subnet_cidr" {
 }
 
 variable "instance_name" {
-  description = "Base name tag for resources. The non-default Terraform workspace name is appended automatically (e.g. opennova-server-staging)."
+  description = "Base name tag for resources."
   type        = string
   default     = "opennova-server"
 }
@@ -99,7 +99,7 @@ variable "ami_id" {
 }
 
 variable "allocate_eip" {
-  description = "Whether to allocate and associate an Elastic IP. Ignored (forced off) in non-default workspaces — staging instances use their ephemeral public IP."
+  description = "Whether to allocate and associate an Elastic IP."
   type        = bool
   default     = true
 }
@@ -125,7 +125,7 @@ variable "cloudflare_zone_id" {
 }
 
 variable "cloudflare_domain" {
-  description = "Domain name (e.g. 'example.com'). Default workspace creates @, www, and nw records; other workspaces create <workspace> and nw-<workspace>."
+  description = "Domain name (e.g. 'example.com'). Creates @, www, and nw records."
   type        = string
   default     = ""
 }
@@ -137,18 +137,18 @@ variable "cloudflare_web_proxied" {
 }
 
 variable "downloads_bucket_name" {
-  description = "S3 bucket name for launcher distribution (e.g. downloads.example.com). Shared infrastructure: only managed in the default workspace."
+  description = "S3 bucket name for launcher distribution (e.g. downloads.example.com)."
   type        = string
 }
 
 variable "backup_bucket_name" {
-  description = "S3 bucket for automated database backups. The bucket itself is only managed in the default workspace; other workspaces grant their instance role access to the same bucket by name."
+  description = "S3 bucket for automated database backups."
   type        = string
   default     = "opennova-backups"
 }
 
 variable "create_ci_user" {
-  description = "Whether to provision an IAM user/access key for GitHub Actions launcher uploads (default workspace only)"
+  description = "Whether to provision an IAM user/access key for GitHub Actions launcher uploads"
   type        = bool
   default     = true
 }

@@ -19,7 +19,6 @@ services:
       - /run/secrets
     environment:
       OP_SERVICE_ACCOUNT_TOKEN: ${OP_SERVICE_ACCOUNT_TOKEN:?set OP_SERVICE_ACCOUNT_TOKEN to your 1Password service-account token}
-      DEPLOY_ENV: ${DEPLOY_ENV:-prod}
       OP_VAULT: ${OP_VAULT:-OpenNova-Deploy}
       # Lets the toolbox drive the remote docker engine over SSH.
       TARGET_HOST: ${TARGET_HOST:-}

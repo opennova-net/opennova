@@ -5,7 +5,7 @@
 #   export OP_SERVICE_ACCOUNT_TOKEN=ops_...
 #   ./deploy/run.sh secrets check
 #   ./deploy/run.sh infra plan
-#   DEPLOY_ENV=staging ./deploy/run.sh infra apply
+#   ./deploy/run.sh infra apply
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -16,12 +16,11 @@ downloads_bucket_name = "downloads.example.com"
 backup_bucket_name    = "example-opennova-backups"
 create_ci_user        = true
 
-allocate_eip = true # forced off automatically in non-default workspaces
+allocate_eip = true
 
 # Cloudflare DNS (optional but recommended)
 # cloudflare_zone_id = "your-zone-id"   # Domain Overview > Zone ID
-# cloudflare_domain  = "example.com"    # creates @, www, nw (default workspace)
-#                                       # or <ws>, nw-<ws> (other workspaces)
+# cloudflare_domain  = "example.com"    # creates @, www, nw records
 # cloudflare_web_proxied = true         # web records behind Cloudflare TLS;
 #                                       # the nw record is always unproxied
 

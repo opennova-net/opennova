@@ -46,8 +46,8 @@ DEPLOY.md
 | `aws` | access_key_id, secret_access_key, region |
 | `cloudflare` | api_token, zone_id, domain |
 | `ssh` | 1Password-generated key pair |
-| `app-prod` / `app-staging` | nwu_key, nw_udp_key, admin_api_token, admin_basic_auth_user, admin_basic_auth_password |
-| `tfstate-prod` / `tfstate-staging` | terraform state as Documents (`state push`/`state pull`) |
+| `app-prod` | admin_api_token, admin_basic_auth_user, admin_basic_auth_password |
+| `tfstate` | terraform state as a Document (`state push`/`state pull`) |
 
 ## Operator UX
 
@@ -58,7 +58,6 @@ export OP_SERVICE_ACCOUNT_TOKEN=ops_...
 ./deploy/run.sh app deploy [--tag <sha>|--build]
 ./deploy/run.sh app status|logs|restart|down
 ./deploy/run.sh backup now|list
-DEPLOY_ENV=staging ./deploy/run.sh ...
 ```
 
 `app deploy`: pull state, read the instance IP from terraform output, `op read` the SSH
@@ -72,7 +71,6 @@ key into tmpfs, `op inject` the app env, then drive
   `@`/`www` stay Cloudflare-proxied for web TLS; game traffic is unproxied.
 - IMDSv2 required; backup bucket lifecycle (90 days); user_data installs docker +
   compose plugin only.
-- Staging workspace: `staging.`/`nw-staging.` records, no EIP, ephemeral.
 - Keep: downloads bucket + ACM + CloudFront (`downloads.<domain>`), launcher-ci IAM
   user whose keys go to GitHub secrets for the launcher publish flow.
 

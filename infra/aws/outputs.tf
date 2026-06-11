@@ -13,11 +13,6 @@ output "public_dns" {
   description = "Public DNS name of the instance"
 }
 
-output "workspace" {
-  value       = terraform.workspace
-  description = "Terraform workspace this state belongs to"
-}
-
 output "web_domain" {
   value       = length(cloudflare_record.web_root) > 0 ? cloudflare_record.web_root[0].hostname : null
   description = "Web root DNS record"
@@ -30,7 +25,7 @@ output "nw_domain" {
 
 output "downloads_bucket_name" {
   value       = length(aws_s3_bucket.downloads) > 0 ? aws_s3_bucket.downloads[0].bucket : null
-  description = "Public S3 bucket hosting launcher downloads (default workspace only)"
+  description = "Public S3 bucket hosting launcher downloads"
 }
 
 output "backup_bucket_name" {

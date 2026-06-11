@@ -3,7 +3,7 @@
 #
 #   $env:OP_SERVICE_ACCOUNT_TOKEN = "ops_..."
 #   .\deploy\run.ps1 secrets check
-#   $env:DEPLOY_ENV = "staging"; .\deploy\run.ps1 infra apply
+#   .\deploy\run.ps1 infra apply
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 docker compose -f "$here\docker-compose.deploy.yml" run --rm deploy @args

@@ -31,7 +31,7 @@ Updated: 2026-06-11.
 | 19 | client session + menu wiring milestone | A | MERGED | |
 | 20 | in-match net seam ADR | A | MERGED | |
 | — | grill wave 3: novacrypto NW-C1..C4 (EPASK/PUBcrypto/url_cipher/NWU) | A | MERGED | `edbb6c33`, all MATCHING byte-exact vs retail; RE doc §8 + correspondence §5.1-5.4 |
-| 21 | staging end-to-end + cutover | B | **runbook ready, pending operator** | [`pr21-cutover-runbook.md`](pr21-cutover-runbook.md); needs AWS + 1P vault + Cloudflare + docker host |
+| 21 | production deploy + cutover | B | **runbook ready, pending operator** | [`pr21-cutover-runbook.md`](pr21-cutover-runbook.md); needs AWS + 1P vault + Cloudflare + docker host |
 
 Final step after PR 21: merge **#136** → `master`.
 
@@ -43,9 +43,10 @@ Final step after PR 21: merge **#136** → `master`.
 | 2026-06-10 | SQLite; fresh database at cutover (no user migration from the old postgres) |
 | 2026-06-10 | Launcher stays C# WinForms; hook deleted; hosts-file redirection; admin required; toggle off means launch disabled (strict, no escape hatch) |
 | 2026-06-10 | Secrets via 1Password service-account token + op CLI in the deploy container |
-| 2026-06-10 | Cutover: fresh EC2 + EIP, staging smoke, Cloudflare DNS flip; old box retires |
+| 2026-06-10 | Cutover: fresh EC2 + EIP, Cloudflare DNS, smoke test; old box retires |
 | 2026-06-10 | World-sim scene rename target: `GameWorld` |
 | 2026-06-11 | grill wave 3: novacrypto verified vs retail using opennova-int Python as production-proven second witness; NK/CK = url_cipher and BK = literal "986119" (the earlier "NK/CK/BK = PUBcrypto" was a mislabel) |
+| 2026-06-11 | Dropped the staging environment / terraform-workspace concept — single prod environment (staging can be re-added later) |
 
 ## Verification milestones
 
@@ -56,8 +57,8 @@ Final step after PR 21: merge **#136** → `master`.
 - [x] Unknowns API shows JOINTOPERATIONS PN sightings when a match starts (PR 9)
 - [x] Two-client menu milestone through our game shell (PR 19)
 - [x] novacrypto byte-exact vs retail: NWU + EPASK + PUBcrypto + url_cipher (grill wave 3)
-- [ ] Staging deploy from a docker-only machine; backup verified; destroy clean (PR 21)
-- [ ] Prod cutover: DNS flip, launcher resolves new IP, old box retired (PR 21)
+- [ ] Production deploy from a docker-only machine: infra apply, app deploy, backup verified (PR 21)
+- [ ] Retail JO smoke over the internet; `nw.<domain>` resolves to the EIP and the launcher connects (PR 21)
 
 ## Grill items carried
 

@@ -7,26 +7,16 @@
 #
 # Subcommands:
 #   secrets check                 dry-run every op:// reference
-#   infra plan|apply|destroy      terraform (workspace = $DEPLOY_ENV)
+#   infra plan|apply|destroy      terraform
 #   app deploy [--tag SHA]        pull GHCR images + compose up on the target
 #   app status|logs [svc]|restart|down
 #   backup now|list               trigger / list the sqlite backups
 #   state push|pull               terraform state <-> 1Password document
 #
-# DEPLOY_ENV (default prod) selects the terraform workspace and vault
-# item suffix. OP_VAULT (default OpenNova-Deploy) names the vault.
+# OP_VAULT (default OpenNova-Deploy) names the vault.
 set -euo pipefail
 
 VAULT="${OP_VAULT:-OpenNova-Deploy}"
-ENVNAME="${DEPLOY_ENV:-prod}"
-# main.tf treats the "default" workspace as prod (EIP + shared singletons:
-# downloads bucket/CDN, backups bucket, CI user). So prod -> default, and
-# any other env -> a same-named workspace (no EIP, suffixed resources).
-if [ "$ENVNAME" = "prod" ]; then
-  WORKSPACE="default"
-else
-  WORKSPACE="$ENVNAME"
-fi
 SECRETS_DIR="/run/secrets"
 TF_DIR="/workspace/infra/aws"
 COMPOSE_DIR="/workspace/deploy/compose"
@@ -64,15 +54,12 @@ target_ip() {
     printf '%s' "$TARGET_HOST"
     return
   fi
-  terraform -chdir="$TF_DIR" workspace select "$WORKSPACE" >/dev/null 2>&1 || true
   terraform -chdir="$TF_DIR" output -raw public_ip 2>/dev/null \
     || die "no public_ip output; run 'infra apply' first or set TARGET_HOST"
 }
 
 tf_init() {
   terraform -chdir="$TF_DIR" init -input=false >/dev/null
-  terraform -chdir="$TF_DIR" workspace select "$WORKSPACE" >/dev/null 2>&1 \
-    || terraform -chdir="$TF_DIR" workspace new "$WORKSPACE" >/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -156,7 +143,6 @@ cmd_app() {
 cmd_backup() {
   require_op
   # The backup S3 bucket comes from terraform output.
-  terraform -chdir="$TF_DIR" workspace select "$WORKSPACE" >/dev/null 2>&1 || true
   BACKUP_BUCKET="$(terraform -chdir="$TF_DIR" output -raw backup_bucket_name 2>/dev/null || true)"
   [ -n "$BACKUP_BUCKET" ] || die "no backup_bucket_name output; run 'infra apply' first"
   export BACKUP_BUCKET
@@ -169,15 +155,8 @@ cmd_backup() {
 
 cmd_state() {
   require_op
-  local doc="tfstate-${ENVNAME}"
-  # local backend: the default workspace stores top-level terraform.tfstate;
-  # any named workspace stores under terraform.tfstate.d/<name>/.
-  local statefile
-  if [ "$WORKSPACE" = "default" ]; then
-    statefile="$TF_DIR/terraform.tfstate"
-  else
-    statefile="$TF_DIR/terraform.tfstate.d/$WORKSPACE/terraform.tfstate"
-  fi
+  local doc="tfstate"
+  local statefile="$TF_DIR/terraform.tfstate"
   case "${1:-pull}" in
     pull) log "pulling state '$doc' from vault…"
           mkdir -p "$(dirname "$statefile")"

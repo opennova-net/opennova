@@ -9,10 +9,6 @@
 #   - the backups bucket gets a lifecycle policy (expire after 90 days)
 #   - user_data installs docker + the compose plugin ONLY (the target host
 #     needs no other dependency; deploys drive it over DOCKER_HOST=ssh://)
-#   - Terraform workspaces model staging: non-default workspaces get
-#     suffixed resource names, no EIP, `<workspace>` / `nw-<workspace>`
-#     DNS records, and skip the shared (account-singleton) resources
-#     (downloads bucket + CDN + ACM, backups bucket, CI user).
 
 terraform {
   required_version = ">= 1.6.0"
@@ -47,19 +43,17 @@ data "aws_availability_zones" "available" {
 }
 
 locals {
-  is_default_workspace = terraform.workspace == "default"
-  name                 = local.is_default_workspace ? var.instance_name : "${var.instance_name}-${terraform.workspace}"
+  name = var.instance_name
 
-  # Shared, account-singleton resources live only in the default workspace.
-  manage_shared = local.is_default_workspace
+  # Single environment: the account-singleton resources are always managed.
+  manage_shared = true
 
-  # Staging instances are ephemeral; never burn an EIP on them.
-  allocate_eip = local.is_default_workspace ? var.allocate_eip : false
+  allocate_eip = var.allocate_eip
 
   dns_enabled           = var.cloudflare_zone_id != "" && var.cloudflare_domain != ""
-  dns_root_name         = local.is_default_workspace ? "@" : terraform.workspace
-  dns_nw_name           = local.is_default_workspace ? "nw" : "nw-${terraform.workspace}"
-  downloads_dns_enabled = local.dns_enabled && local.manage_shared
+  dns_root_name         = "@"
+  dns_nw_name           = "nw"
+  downloads_dns_enabled = local.dns_enabled
 
   public_ip = local.allocate_eip ? aws_eip.server[0].public_ip : aws_instance.server.public_ip
 }
@@ -284,8 +278,7 @@ resource "aws_eip" "server" {
 # Cloudflare DNS
 # ---------------------------------------------------------------------------
 
-# Web root: example.com in the default workspace, <workspace>.example.com
-# elsewhere. Proxied by default so the site gets Cloudflare TLS.
+# Web root (example.com / www). Proxied by default so the site gets Cloudflare TLS.
 resource "cloudflare_record" "web_root" {
   count   = local.dns_enabled ? 1 : 0
   zone_id = var.cloudflare_zone_id
@@ -295,11 +288,11 @@ resource "cloudflare_record" "web_root" {
   ttl     = var.cloudflare_web_proxied ? 1 : 300
   proxied = var.cloudflare_web_proxied
 
-  comment = "Managed by Terraform - OpenNova web (${terraform.workspace})"
+  comment = "Managed by Terraform - OpenNova web"
 }
 
 resource "cloudflare_record" "web_www" {
-  count   = local.dns_enabled && local.is_default_workspace ? 1 : 0
+  count   = local.dns_enabled ? 1 : 0
   zone_id = var.cloudflare_zone_id
   name    = "www"
   content = local.public_ip
@@ -321,11 +314,11 @@ resource "cloudflare_record" "nw" {
   ttl     = 300
   proxied = false
 
-  comment = "Managed by Terraform - NovaWorld server anchor (${terraform.workspace})"
+  comment = "Managed by Terraform - NovaWorld server anchor"
 }
 
 # ---------------------------------------------------------------------------
-# Downloads bucket + CDN (shared; default workspace only)
+# Downloads bucket + CDN (shared)
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "downloads" {
@@ -443,7 +436,7 @@ resource "aws_iam_access_key" "launcher_ci" {
 }
 
 # ---------------------------------------------------------------------------
-# Backups bucket (shared; default workspace only) + per-workspace instance role
+# Backups bucket (shared) + instance role
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "backups" {
@@ -528,8 +521,8 @@ resource "aws_iam_role" "backup" {
   })
 }
 
-# Built from the bucket NAME (not the resource) so staging workspaces can
-# grant access to the shared bucket they do not manage.
+# Built from the bucket NAME (not the resource) so the instance role can
+# reference the bucket directly.
 data "aws_iam_policy_document" "backup_bucket" {
   statement {
     effect    = "Allow"
@@ -565,7 +558,7 @@ resource "aws_iam_instance_profile" "backup" {
 }
 
 # ---------------------------------------------------------------------------
-# ACM cert + CloudFront for the downloads domain (shared; default workspace)
+# ACM cert + CloudFront for the downloads domain (shared)
 # ---------------------------------------------------------------------------
 
 resource "aws_acm_certificate" "downloads" {
