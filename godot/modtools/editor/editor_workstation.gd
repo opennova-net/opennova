@@ -217,16 +217,16 @@ func _workspace_defs() -> Array:
 	# Categories group the nav list; array order is the within-category order and
 	# the order categories first appear (World, Interface, Atmosphere).
 	return [
-		WorkspaceDef.make(Workspace.TERRAIN, TerrainWorkspaceAdapter, false, &"World"),
-		WorkspaceDef.make(Workspace.OBJECT, ObjectWorkspaceAdapter, false, &"World"),
-		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter, false, &"World"),
-		WorkspaceDef.make(Workspace.FONTS, FontsWorkspaceAdapter, false, &"Interface"),
-		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter, false, &"Interface"),
-		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter, false, &"Interface"),
-		WorkspaceDef.make(Workspace.MNU, MnuWorkspaceAdapter, false, &"Interface"),
-		WorkspaceDef.make(Workspace.MUSIC, MusicWorkspaceAdapter, false, &"Audio"),
-		WorkspaceDef.make(Workspace.SOUND, SoundWorkspaceAdapter, false, &"Atmosphere"),
-		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true, &"Atmosphere"),
+		WorkspaceDef.make(Workspace.TERRAIN, TerrainWorkspaceAdapter, false, &"World", &"terrain"),
+		WorkspaceDef.make(Workspace.OBJECT, ObjectWorkspaceAdapter, false, &"World", &"object"),
+		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter, false, &"World", &"mission"),
+		WorkspaceDef.make(Workspace.FONTS, FontsWorkspaceAdapter, false, &"Interface", &"fonts"),
+		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter, false, &"Interface", &"credits"),
+		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter, false, &"Interface", &"strings"),
+		WorkspaceDef.make(Workspace.MNU, MnuWorkspaceAdapter, false, &"Interface", &"menu"),
+		WorkspaceDef.make(Workspace.MUSIC, MusicWorkspaceAdapter, false, &"Audio", &"music"),
+		WorkspaceDef.make(Workspace.SOUND, SoundWorkspaceAdapter, false, &"Atmosphere", &"sound"),
+		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true, &"Atmosphere", &"environment"),
 	]
 
 
@@ -282,7 +282,7 @@ func _build_workspace_rail() -> void:
 			# Faint accent fill so the active row reads as filled, not just outlined.
 			btn.add_theme_stylebox_override("pressed", active_style)
 			btn.add_theme_stylebox_override("hover_pressed", active_style)
-			# Icon hook point for the future icon pass (def.icon_id -> btn.icon).
+			btn.icon = EditorIconLibrary.resolve(def.icon_id)
 			if def.popup:
 				# A popup row toggles its panel rather than swapping the viewport.
 				btn.toggled.connect(_on_popup_workspace_toggled.bind(def.id))
@@ -297,11 +297,11 @@ func _build_workspace_rail() -> void:
 
 func _wire_workspace_scroll_affordance() -> void:
 	if _workspace_scroll_left_button != null:
-		_workspace_scroll_left_button.icon = _build_workspace_scroll_icon(-1)
+		_workspace_scroll_left_button.icon = EditorIconLibrary.resolve(&"scroll_left")
 		if not _workspace_scroll_left_button.pressed.is_connected(_on_workspace_scroll_left_pressed):
 			_workspace_scroll_left_button.pressed.connect(_on_workspace_scroll_left_pressed)
 	if _workspace_scroll_right_button != null:
-		_workspace_scroll_right_button.icon = _build_workspace_scroll_icon(1)
+		_workspace_scroll_right_button.icon = EditorIconLibrary.resolve(&"scroll_right")
 		if not _workspace_scroll_right_button.pressed.is_connected(_on_workspace_scroll_right_pressed):
 			_workspace_scroll_right_button.pressed.connect(_on_workspace_scroll_right_pressed)
 	if _workspace_scroll != null:
@@ -417,6 +417,7 @@ func _rebuild_action_buttons(
 		var action_id := int(action_def["id"])
 		btn.name = name_prefix + _workspace_action_button_name(action_id)
 		btn.text = String(action_def["label"])
+		btn.icon = EditorIconLibrary.resolve(_workspace_action_icon_id(action_id))
 		btn.focus_mode = Control.FOCUS_NONE
 		if host is HBoxContainer:
 			btn.custom_minimum_size = Vector2(112, min_height)
@@ -451,6 +452,22 @@ func _workspace_action_button_name(action_id: int) -> String:
 			return "ExportActionButton"
 		_:
 			return "WorkspaceActionButton"
+
+
+func _workspace_action_icon_id(action_id: int) -> StringName:
+	match action_id:
+		WorkspaceAction.NEW:
+			return &"action_new"
+		WorkspaceAction.OPEN:
+			return &"action_open"
+		WorkspaceAction.SAVE:
+			return &"action_save"
+		WorkspaceAction.SAVE_AS:
+			return &"action_save_as"
+		WorkspaceAction.EXPORT:
+			return &"action_export"
+		_:
+			return &""
 
 
 func _refresh_workspace_actions_state() -> void:
@@ -835,7 +852,7 @@ func _wire_camera_popup() -> void:
 		if not _camera_popup.close_requested.is_connected(_on_camera_popup_close_pressed):
 			_camera_popup.close_requested.connect(_on_camera_popup_close_pressed)
 	if _camera_toggle_button != null and not _camera_toggle_button.toggled.is_connected(_on_camera_toggle_toggled):
-		_camera_toggle_button.icon = _build_camera_icon()
+		_camera_toggle_button.icon = EditorIconLibrary.resolve(&"camera")
 		_camera_toggle_button.toggled.connect(_on_camera_toggle_toggled)
 	_refresh_camera_popup_state()
 
@@ -848,7 +865,7 @@ func _wire_environment_popup() -> void:
 		if not _environment_popup.close_requested.is_connected(_on_environment_popup_close_pressed):
 			_environment_popup.close_requested.connect(_on_environment_popup_close_pressed)
 	if _environment_toggle_button != null and not _environment_toggle_button.toggled.is_connected(_on_environment_toggle_toggled):
-		_environment_toggle_button.icon = _build_sun_icon()
+		_environment_toggle_button.icon = EditorIconLibrary.resolve(&"environment")
 		_environment_toggle_button.toggled.connect(_on_environment_toggle_toggled)
 	_refresh_environment_popup_state()
 
@@ -861,7 +878,7 @@ func _wire_settings_popup() -> void:
 		if not _settings_popup.close_requested.is_connected(_on_settings_popup_close_pressed):
 			_settings_popup.close_requested.connect(_on_settings_popup_close_pressed)
 	if _settings_toggle_button != null and not _settings_toggle_button.toggled.is_connected(_on_settings_toggle_toggled):
-		_settings_toggle_button.icon = _build_settings_icon()
+		_settings_toggle_button.icon = EditorIconLibrary.resolve(&"settings")
 		_settings_toggle_button.toggled.connect(_on_settings_toggle_toggled)
 	if _settings_browse_resource_dir_button != null and not _settings_browse_resource_dir_button.pressed.is_connected(_on_settings_browse_resource_dir_pressed):
 		_settings_browse_resource_dir_button.pressed.connect(_on_settings_browse_resource_dir_pressed)
@@ -885,75 +902,6 @@ func _on_settings_pff_tool_pressed() -> void:
 	# then open the tool seeded at the configured resource directory.
 	_set_settings_popup_visible(false)
 	_pff_tool.open(_preferred_resource_root_dir())
-
-
-func _build_camera_icon() -> Texture2D:
-	var image := Image.create(20, 20, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.0, 0.0, 0.0, 0.0))
-	var color := Color(0.8941, 0.8941, 0.9059, 1.0)
-	var center := Vector2(9.5, 10.5)
-	for y in 20:
-		for x in 20:
-			var body := x >= 4 and x <= 14 and y >= 7 and y <= 14
-			var top := x >= 6 and x <= 11 and y >= 5 and y <= 7
-			var side := x >= 15 and x <= 17 and y >= 8 and y <= 12
-			var lens := Vector2(float(x), float(y)).distance_to(center)
-			if body or top or side or lens <= 2.2:
-				image.set_pixel(x, y, color)
-	return ImageTexture.create_from_image(image)
-
-
-func _build_sun_icon() -> Texture2D:
-	var image := Image.create(20, 20, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.0, 0.0, 0.0, 0.0))
-	var color := Color(0.8941, 0.8941, 0.9059, 1.0)
-	var center := Vector2(9.5, 9.5)
-	for y in 20:
-		for x in 20:
-			var p := Vector2(float(x), float(y))
-			var d := p.distance_to(center)
-			var cardinal_ray := (absf(p.x - center.x) < 0.75 and (p.y < 4.0 or p.y > 15.0)) or (absf(p.y - center.y) < 0.75 and (p.x < 4.0 or p.x > 15.0))
-			var diag_a := absf((p.x - center.x) - (p.y - center.y)) < 0.75 and d > 6.2 and d < 9.5
-			var diag_b := absf((p.x - center.x) + (p.y - center.y)) < 0.75 and d > 6.2 and d < 9.5
-			if d <= 3.0 or (d >= 4.15 and d <= 5.1) or cardinal_ray or diag_a or diag_b:
-				image.set_pixel(x, y, color)
-	return ImageTexture.create_from_image(image)
-
-
-func _build_settings_icon() -> Texture2D:
-	var image := Image.create(20, 20, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.0, 0.0, 0.0, 0.0))
-	var color := Color(0.8941, 0.8941, 0.9059, 1.0)
-	var center := Vector2(9.5, 9.5)
-	for y in 20:
-		for x in 20:
-			var p := Vector2(float(x), float(y))
-			var d := p.distance_to(center)
-			var ring := d >= 4.2 and d <= 6.0
-			var hub := d <= 2.0
-			var tooth_horizontal := y >= 8 and y <= 11 and (x <= 4 or x >= 15)
-			var tooth_vertical := x >= 8 and x <= 11 and (y <= 4 or y >= 15)
-			var diag_a := absf((p.x - center.x) - (p.y - center.y)) < 1.0 and d >= 6.0 and d <= 8.4
-			var diag_b := absf((p.x - center.x) + (p.y - center.y)) < 1.0 and d >= 6.0 and d <= 8.4
-			if hub or ring or tooth_horizontal or tooth_vertical or diag_a or diag_b:
-				image.set_pixel(x, y, color)
-	return ImageTexture.create_from_image(image)
-
-
-func _build_workspace_scroll_icon(direction: int) -> Texture2D:
-	var image := Image.create(20, 20, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.0, 0.0, 0.0, 0.0))
-	var color := Color(0.8941, 0.8941, 0.9059, 1.0)
-	for step in 7:
-		var top_x := 12 - step if direction < 0 else 7 + step
-		var lower_x := 6 + step if direction < 0 else 13 - step
-		var top_y := 5 + step
-		var lower_y := 10 + step
-		for dx in 2:
-			for dy in 2:
-				image.set_pixel(clampi(top_x + dx, 0, 19), clampi(top_y + dy, 0, 19), color)
-				image.set_pixel(clampi(lower_x + dx, 0, 19), clampi(lower_y + dy, 0, 19), color)
-	return ImageTexture.create_from_image(image)
 
 
 func _unhandled_input(event: InputEvent) -> void:

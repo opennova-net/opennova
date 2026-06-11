@@ -227,6 +227,44 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 		"Credits should expose save-as for a fresh resource.")
 
 
+func test_every_workspace_rail_button_has_an_icon() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var workspace_rail: BoxContainer = workstation.get_node("%WorkspaceRail")
+	var checked := 0
+	for child in workspace_rail.get_children():
+		if child is Button:
+			assert_not_null((child as Button).icon,
+				"rail button '%s' should carry its workspace icon" % (child as Button).text)
+			checked += 1
+	assert_eq(checked, 10, "all ten workspace rows checked")
+
+
+func test_icon_library_resolves_every_registered_icon_id() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	for def_v in workstation._workspace_defs():
+		var def: WorkspaceDef = def_v
+		assert_true(def.icon_id != &"", "every workspace registry row declares an icon id")
+		assert_not_null(EditorIconLibrary.resolve(def.icon_id),
+			"icon id '%s' should resolve to a texture" % String(def.icon_id))
+	assert_null(EditorIconLibrary.resolve(&"no_such_icon"),
+		"an unknown id degrades to text-only, never errors")
+	assert_null(EditorIconLibrary.resolve(&""), "the empty id resolves to null")
+
+
+func test_action_and_toggle_buttons_have_icons() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	# Action buttons rebuild on a workspace switch (_refresh_workspace_surface).
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.CREDITS)
+	await get_tree().process_frame
+	var buttons: Dictionary = workstation._workspace_action_buttons
+	assert_gt(buttons.size(), 0, "the active workspace exposes at least one action button")
+	for action_id in buttons:
+		var btn := buttons[action_id] as Button
+		assert_not_null(btn.icon, "action button '%s' should carry its action icon" % btn.text)
+	assert_not_null(workstation._settings_toggle_button.icon, "settings toggle keeps an icon")
+	assert_not_null(workstation._camera_toggle_button.icon, "camera toggle keeps an icon")
+
+
 func test_workspace_ribbon_exposes_scroll_affordance_when_overflowing() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	workstation.set_size(Vector2(900, 600))
