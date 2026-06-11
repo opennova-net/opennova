@@ -185,8 +185,28 @@ IMPL_SET_GET(iris_percent, set_iris_percent, get_iris_percent, float, float)
 IMPL_SET_GET(iris_center, set_iris_center, get_iris_center, float, float)
 IMPL_SET_GET(sky_speed, set_sky_speed, get_sky_speed, float, float)
 IMPL_SET_GET(sky_height, set_sky_height, get_sky_height, float, float)
-IMPL_SET_GET(sky_map1, set_sky_map1, get_sky_map1, const String &, String)
-IMPL_SET_GET(sky_map2, set_sky_map2, get_sky_map2, const String &, String)
+// The sky-map setters re-resolve the cached textures so the live sky (and any
+// editor preview) tracks the edit; load_bytes/load are otherwise the only
+// resolution points. Diff-guarded: undo snapshot replays with an unchanged
+// name must not hit the disk.
+void EnvFile::set_sky_map1(const String &p_value) {
+	if (sky_map1 == p_value) {
+		return;
+	}
+	sky_map1 = p_value;
+	_load_sky_textures();
+	_notify_environment_changed();
+}
+String EnvFile::get_sky_map1() const { return sky_map1; }
+void EnvFile::set_sky_map2(const String &p_value) {
+	if (sky_map2 == p_value) {
+		return;
+	}
+	sky_map2 = p_value;
+	_load_sky_textures();
+	_notify_environment_changed();
+}
+String EnvFile::get_sky_map2() const { return sky_map2; }
 IMPL_SET_GET(sun_3di, set_sun_3di, get_sun_3di, const String &, String)
 IMPL_SET_GET(moon_3di, set_moon_3di, get_moon_3di, const String &, String)
 IMPL_SET_GET(glare_3di, set_glare_3di, get_glare_3di, const String &, String)
