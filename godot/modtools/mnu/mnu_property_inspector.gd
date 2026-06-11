@@ -111,6 +111,9 @@ func show_selection(doc: NovaMnuDocument, ids: PackedInt32Array, text_res: RtxtS
 func _rebuild() -> void:
 	for child in get_children():
 		child.queue_free()
+	# The picker (a direct child) dies with the rows above; drop any pending
+	# pick consumer with it so a stale callable never outlives its widget.
+	_picker_on_pick = Callable()
 	_box = MnuUiHelpersScript.make_inspector_box(self)
 
 	if _multi_ids.size() > 1:

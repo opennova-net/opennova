@@ -51,7 +51,10 @@ func _init() -> void:
 	name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_edit.text_submitted.connect(func(value: String) -> void: _commit(value))
 	name_edit.focus_exited.connect(func() -> void:
-		if name_edit.text != _shown:
+		# A focus_exited fired while the row is being torn down (inspector
+		# rebuild) must not commit the in-flight text - mirrors the host
+		# inspectors' _wire_text teardown skip.
+		if name_edit.is_inside_tree() and name_edit.text != _shown:
 			_commit(name_edit.text))
 	add_child(name_edit)
 

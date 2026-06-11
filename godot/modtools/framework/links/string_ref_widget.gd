@@ -16,8 +16,12 @@ var ref_row: ResourceRefWidget
 var preview: Label
 
 var _services: Dictionary = {}
-# The resolved table path, captured from the last resolve - the jump service
-# receives it so the Strings workspace opens the right table.
+# The resolved table path, captured from the last LIVE resolve - the jump
+# service receives it so the Strings workspace opens the right table. Reuse
+# hazard for future adopters: the inner row memoizes resolves on (value,
+# epoch), so a widget reused across a TABLE change with the same key would
+# keep a stale path - reconfigure (or rebuild) the widget when the backing
+# table changes, as the MNU inspector's per-rebuild construction does.
 var _table_path := ""
 
 
@@ -59,7 +63,9 @@ func configure(display_label: String, services: Dictionary = {}) -> void:
 			# The inner row gates its jump on a non-empty resolved path; for
 			# keys the path is auxiliary (the jump service carries the key and
 			# the workspace re-resolves the table), so backfill it with the key
-			# when the provider does not know the table's path.
+			# when the provider does not know the table's path. Consequence: a
+			# string_id LinkPayload's path field may be the KEY, not a file
+			# path - drop targets must not trust it as a location.
 			if not result.is_empty() and _table_path.is_empty():
 				var patched := result.duplicate()
 				patched["path"] = key
