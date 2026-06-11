@@ -23,6 +23,9 @@ func _init() -> void:
 	add_child(ref_row)
 	preview = TexturePreviewBox.new()
 	preview.name = "TextureRefPreview"
+	# The preview box is a MOUSE_FILTER_STOP panel; forward so drops over the
+	# image land on the row's handlers instead of dying inside it.
+	preview.set_drag_forwarding(Callable(), _can_drop_data, _drop_data)
 	add_child(preview)
 
 
@@ -41,6 +44,16 @@ func set_value(text: String) -> void:
 
 func get_value() -> String:
 	return ref_row.get_value()
+
+
+# Drops anywhere on the widget (including the preview box) land on the row's
+# handlers, so a dropped payload commits exactly like a pick.
+func _can_drop_data(at: Vector2, data: Variant) -> bool:
+	return ref_row._can_drop_data(at, data)
+
+
+func _drop_data(at: Vector2, data: Variant) -> void:
+	ref_row._drop_data(at, data)
 
 
 func set_preview_loader(loader: Callable) -> void:
