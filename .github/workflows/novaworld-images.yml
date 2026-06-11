@@ -52,6 +52,14 @@ jobs:
           submodules: recursive
           lfs: false
 
+      # nwmsg_replay_test reads the captured .nwmsg parity fixtures, which are
+      # LFS-tracked (fixtures/** in .gitattributes). The rest of the net stack
+      # consumes no LFS assets, so pull only this subtree to keep checkout fast.
+      - name: Materialize net parity fixtures (LFS)
+        run: |
+          git lfs install --local
+          git lfs pull --include="fixtures/novaworld/**"
+
       - name: Configure + build net targets (HTTP on)
         run: |
           cmake -S . -B build-server -DCMAKE_BUILD_TYPE=Release -DBUILD_NOVAWORLD_HTTP=ON

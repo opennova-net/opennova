@@ -7,10 +7,12 @@
 
 #include "../common/test_expect.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 #ifndef OPENNOVA_SOURCE_DIR
 #error "OPENNOVA_SOURCE_DIR must be set by CMake"
@@ -66,9 +68,19 @@ int test_seed_populates_games_and_expansions() {
 	Database db(":memory:");
 	run_migrations(db, migrations);
 
+	// Apply seeds in filename order, matching the server's apply_seed()
+	// (main.cpp). directory_iterator yields entries in an unspecified order
+	// that differs across filesystems (sorted on NTFS, inode-order on ext4),
+	// and 0002_dev_users.sql seeds player_game_access whose rows FK-reference
+	// the games created by 0001_*; out of order, INSERT OR IGNORE silently
+	// drops them.
+	std::vector<std::filesystem::path> seeds;
 	for (const auto &entry : std::filesystem::directory_iterator(seed_dir)) {
-		if (entry.path().extension() != ".sql") continue;
-		db.exec_script(read_file(entry.path()));
+		if (entry.path().extension() == ".sql") seeds.push_back(entry.path());
+	}
+	std::sort(seeds.begin(), seeds.end());
+	for (const auto &p : seeds) {
+		db.exec_script(read_file(p));
 	}
 
 	auto games = db.query("SELECT slug, gate_tag FROM games ORDER BY slug;");
@@ -129,6 +141,7 @@ int test_seed_is_idempotent() {
 	for (const auto &e : std::filesystem::directory_iterator(seed_dir)) {
 		if (e.path().extension() == ".sql") seeds.push_back(e.path());
 	}
+	std::sort(seeds.begin(), seeds.end());  // deterministic, FK-safe order
 
 	// Run the seed twice; INSERT OR IGNORE should keep counts stable.
 	for (int pass = 0; pass < 2; ++pass) {
