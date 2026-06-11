@@ -124,3 +124,17 @@ func test_value_changed_forwards_once_from_inner_row() -> void:
 	widget.ref_row.name_edit.text = "BRAVO"
 	widget.ref_row.name_edit.text_submitted.emit("BRAVO")
 	assert_eq(emitted, ["BRAVO"], "an inner-row commit forwards exactly once")
+
+
+func test_drop_rejects_table_file_payloads() -> void:
+	# The browser pane drags string TABLES (kind "strings", a file); a key row
+	# is kind "string_id", which the pane never produces - so file drops are
+	# rejected by kind matching alone, with no string-widget drop code.
+	var widget := _make_widget(_table_services())
+	var emitted: Array = []
+	widget.value_changed.connect(func(v: String) -> void: emitted.append(v))
+	var table_file := LinkPayload.make("strings", "menutxt.BIN", "C:/res/menutxt.BIN").to_drag_data()
+	assert_false(widget.ref_row._can_drop_data(Vector2.ZERO, table_file),
+		"a strings-table payload misses a string-key row")
+	widget.ref_row._drop_data(Vector2.ZERO, table_file)
+	assert_eq(emitted, [], "and never commits")

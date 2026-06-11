@@ -90,6 +90,7 @@ func _init() -> void:
 	table.search.name = "BrowserPaneSearch"
 	table.entry_activated.connect(_on_entry_activated)
 	table.list_changed.connect(func(_visible_count: int) -> void: _refresh_hint())
+	table.enable_drag_source(_drag_payload_for_entry)
 	add_child(table)
 
 
@@ -156,3 +157,19 @@ func _on_entry_activated(entry: Dictionary) -> void:
 		return
 	var kind := String(entry.get("kind", ""))
 	_open_entry.call(_JUMP_KIND.get(kind, kind), path)
+
+
+# Rows drag as LinkPayloads. The name keeps its extension (display_name is
+# stem-stripped, and extension-keeping widgets commit the file name verbatim);
+# the kind stays the index's own vocabulary - _JUMP_KIND is workspace-jump
+# vocabulary, drop targets match on reference kinds.
+func _drag_payload_for_entry(entry: Dictionary) -> Variant:
+	var file_name := String(entry.get("relative_path", "")).get_file()
+	if file_name.is_empty():
+		file_name = String(entry.get("display_name", ""))
+	if file_name.is_empty():
+		return null
+	var path := String(entry.get("path", ""))
+	if path.is_empty():
+		path = String(entry.get("logical_name", ""))
+	return LinkPayload.make(String(entry.get("kind", "")), file_name, path).to_drag_data()

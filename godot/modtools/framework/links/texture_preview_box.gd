@@ -24,17 +24,22 @@ func _init() -> void:
 	_checker.name = "PreviewChecker"
 	_checker.texture = _ensure_checker()
 	_checker.stretch_mode = TextureRect.STRETCH_TILE
+	# The display layers never take mouse events themselves; hosts that accept
+	# drops over the preview need the walk to reach the box (and beyond).
+	_checker.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_checker)
 	_preview = TextureRect.new()
 	_preview.name = "PreviewImage"
 	_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_preview)
 	_missing_label = Label.new()
 	_missing_label.name = "PreviewMissing"
 	_missing_label.text = "?"
 	_missing_label.tooltip_text = "Not found in the resource folder."
-	_missing_label.mouse_filter = Control.MOUSE_FILTER_STOP
+	# PASS (not STOP) keeps the tooltip while letting drops fall through to the box.
+	_missing_label.mouse_filter = Control.MOUSE_FILTER_PASS
 	_missing_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_missing_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_missing_label.visible = false

@@ -128,3 +128,84 @@ func test_focus_out_with_unchanged_text_does_not_commit() -> void:
 	w.set_value("dvxi5")
 	w.name_edit.focus_exited.emit()
 	assert_eq(emissions, [], "leaving the field without editing must not re-commit")
+
+
+func _terrain_payload(name: String, path := "") -> Dictionary:
+	return LinkPayloadScript.make("terrain", name, path).to_drag_data()
+
+
+func test_drop_with_matching_kind_commits_like_a_pick() -> void:
+	var w := _make_widget()
+	var emissions := []
+	w.value_changed.connect(func(v: String) -> void: emissions.append(v))
+	w.configure("terrain", "Terrain")
+	var data := _terrain_payload("bravo.trn", "C:/res/bravo.trn")
+	assert_true(w._can_drop_data(Vector2.ZERO, data), "a matching-kind payload is accepted")
+	w._drop_data(Vector2.ZERO, data)
+	assert_eq(emissions, ["bravo"],
+		"the drop commits through value_from_path exactly once (basename, like a pick)")
+
+
+func test_drop_rejects_foreign_kind_and_foreign_data() -> void:
+	var w := _make_widget()
+	var emissions := []
+	w.value_changed.connect(func(v: String) -> void: emissions.append(v))
+	w.configure("terrain", "Terrain")
+	var foreign_kind := LinkPayloadScript.make("font", "Arial12b.fnt", "").to_drag_data()
+	assert_false(w._can_drop_data(Vector2.ZERO, foreign_kind), "a font payload misses a terrain row")
+	w._drop_data(Vector2.ZERO, foreign_kind)
+	assert_false(w._can_drop_data(Vector2.ZERO, {"card": 3}),
+		"non-payload dictionaries (e.g. card reorder drags) are rejected")
+	assert_eq(emissions, [], "rejected drops never commit")
+
+
+func test_drop_with_the_same_value_stays_silent() -> void:
+	var w := _make_widget()
+	var emissions := []
+	w.value_changed.connect(func(v: String) -> void: emissions.append(v))
+	w.configure("terrain", "Terrain")
+	w.set_value("bravo")
+	w._drop_data(Vector2.ZERO, _terrain_payload("bravo.trn"))
+	assert_eq(emissions, [], "a drop that resolves to the current value must not emit")
+
+
+func test_drop_honors_value_from_path_override() -> void:
+	var w := _make_widget()
+	var emissions := []
+	w.value_changed.connect(func(v: String) -> void: emissions.append(v))
+	w.set_value_from_path(func(path: String) -> String: return path.get_file())
+	w.configure("texture", "Cloud map")
+	w._drop_data(Vector2.ZERO, LinkPayloadScript.make("texture", "cloud01.pcx", "").to_drag_data())
+	assert_eq(emissions, ["cloud01.pcx"], "extension-keeping adopters keep the extension on drops too")
+
+
+func test_drop_accepts_image_texture_equivalence() -> void:
+	var w := _make_widget()
+	w.configure("texture", "Cloud map")
+	assert_true(w._can_drop_data(Vector2.ZERO, LinkPayloadScript.make("image", "a.tga", "").to_drag_data()),
+		"a texture row accepts the extractors' 'image' spelling")
+	w.configure("image", "Picture")
+	assert_true(w._can_drop_data(Vector2.ZERO, LinkPayloadScript.make("texture", "a.tga", "").to_drag_data()),
+		"and the reverse")
+
+
+func test_dropped_plain_text_commits_into_the_field() -> void:
+	var w := _make_widget()
+	var emissions := []
+	w.value_changed.connect(func(v: String) -> void: emissions.append(v))
+	w.configure("terrain", "Terrain")
+	assert_true(w._can_drop_data(Vector2.ZERO, "bravo"), "plain text drops are accepted")
+	w._drop_data(Vector2.ZERO, "bravo")
+	assert_eq(emissions, ["bravo"], "the text commits through the same path as a typed value")
+
+
+func test_drop_respects_read_only_field() -> void:
+	var w := _make_widget()
+	var emissions := []
+	w.value_changed.connect(func(v: String) -> void: emissions.append(v))
+	w.configure("terrain", "Terrain")
+	w.name_edit.editable = false
+	assert_false(w._can_drop_data(Vector2.ZERO, _terrain_payload("bravo.trn")),
+		"a read-only field accepts nothing")
+	w._drop_data(Vector2.ZERO, _terrain_payload("bravo.trn"))
+	assert_eq(emissions, [], "and never commits")
