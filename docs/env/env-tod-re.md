@@ -7,7 +7,9 @@ the reverse-engineering record behind `libs/env` (format + TOD math), the `EnvFi
 / `NovaCelestial` runtime.
 
 Reverse-engineered from `Jointops.exe` (Joint Operations: Combined Arms, imagebase `0x400000`,
-IDB `Jointops.exe.kong.i64`), grilled 2026-06-09. All addresses are absolute in that image.
+IDB `Jointops.exe.kong.i64`), grilled 2026-06-09; consumer/combine grill (C6) 2026-06-11
+closed targets G1–G6 of [env-honored-matrix.md](env-honored-matrix.md) — see the C6 appendix
+for the per-target session record. All addresses are absolute in that image.
 This record supersedes the jodemo-era citations (`0x53E030`/`0x53E3F0`/`0x53FA70`/`0x53FCC0`/
 `0x53F5D0`) and the never-written `engine_spec_env.md`; those addresses do not exist in the
 retail image.
@@ -108,13 +110,26 @@ sun `0x646440`, sky `0x404064`, ground `0x202020`, fog/skyfog `0xC0C0FF`.
 
 ## Load pipeline (`Environment_LoadTimeOfDayConfig @ 0x57db30`)
 
-Two parse passes share the parser and the 16 slots:
+Two parse passes share the parser and the 16 slots. **`overcast.def` is not a fallback**
+(C6 grill, hand-read at @ 0x57dbca/0x57dbf5; `File_ParseASCIIFile @ 0x53d810` returns 0 on
+success, which is what made the decompiler's nesting look ambiguous):
 
-1. `<map>.trn` (fallback `overcast.def` when absent/failing) → snapshot into
+1. `<mapName>` + extension `trn` (inline ext string @ 0x7d7950) **must exist and parse, or
+   the function returns early** — no overcast.def, no `.env` pass, no snapshot updates at
+   all (@ 0x57dbcc..0x57dbde). On `.trn` success, `overcast.def` **always** parses next
+   when present (inline name @ 0x7d7940), **appending into the same 16 slots** —
+   `Env_TodParseCount` is *not* reset between the two parses — so its `tod_begin` blocks
+   continue after the `.trn`'s. Stock JO `.trn` files carry no TOD blocks, which is why
+   overcast.def is the de facto first table. A NULL mapName jumps straight to the
+   overcast.def parse (@ 0x57db98 → 0x57dbf7). The combined set snapshots into
    `Env_TrnSnapshotTable @ 0x26c7414` (stable bubble sort by time, count at +832;
    `Environment_SortAndSnapshotKeyframes @ 0x57c240`).
-2. keyframe count resets, then `<env>.env` → snapshot into
-   `Env_EnvSnapshotTable @ 0x26c70d0`.
+2. slot pointer + keyframe count reset, then `<env>.env` → on parse success (or
+   missing/empty env name) the scratch keyframe's colors seed the 12 color blocks'
+   parsed targets (@ 0x57dce0 — this is how "naked" color lines outside `tod_begin`
+   become static targets) and the table snapshots into `Env_EnvSnapshotTable @ 0x26c70d0`.
+   An `.env` parse *failure* skips the seeding and snapshot — the previous env table
+   persists stale.
 
 The runtime blend (`Env_OvercastBlend @ 0x26c6894`, spring-damped toward
 `Env_OvercastBlendTarget`) interpolates the final TOD colors **between the .env snapshot and
@@ -161,9 +176,11 @@ cloudbase `0x26c674c`, cloudhighlight `0x26c6780`, cloudedge `0x26c67b4`, plus s
 `+0x80000` rounding; then `[0] = ([0] + additive) × ModulatorBlock × rainFactor` where
 `rainFactor = max(0, 0x8000 - Env_RainIntensity)`. Modulator chain: every block multiplies by
 the modulator block; the modulator multiplies by modulator2; modulator2 by constant `0x404040`
-(identity in 6.6). The modulator's target is the player's terrain-light sample
+(identity in 6.6). The modulator's target is the player's **iris auto-exposure sample**
 (`compute_ambient_light_along_direction @ 0x5c7a00`, replicated to gray via ×0x10101 in
-`Environment_ApplyFogAndAmbient @ 0x57e533`) — that is the indoor/under-cover dimming.
+`Environment_ApplyFogAndAmbient @ 0x57e533`, chased over 62 ticks via
+`ColorBlock_SetStepDeltas @ 0x57d940`) — indoor/under-cover dimming and night-brightening
+are the same mechanism; the full curve is in §Iris auto-exposure below.
 
 `Environment_UpdateWeatherTick @ 0x57e9b0`, per 62 Hz tick:
 
@@ -177,8 +194,19 @@ the modulator block; the modulator multiplies by modulator2; modulator2 by const
   (`intensity -= rate`, clamp 0).
 - **Two lightning sequencers** (`Environment_SetLightningFlash @ 0x57d320` scales
   `lightning_rgb` into the additive slots — sky >>8, fog/skyfog >>9, ground >>10):
-  timer A at ticks 10/6/4/2 → flash 200/255/200/255, at 0 → flash 0 + thunder sound;
-  timer B at 31/28/26/24/23/22/20 → 200/150/200/150/100/50/0, at 0 → second thunder.
+  timer A at ticks 10/6/4/2 → flash 200/255/200/255, at 0 → flash 0 + thunder; timer B at
+  31/28/26/24/23/22/20 → 200/150/200/150/100/50/0, at 0 → second thunder. **Thunder wiring
+  (C6)**: epoch 0 calls `sub_527B90 → SoundBank_PlayTriggerEntries @ 0x75ccd0` on the bank
+  at `dword_24E0914` — sequencer A fires trigger id **0** (param 0x10000, @ 0x57ecfb),
+  sequencer B trigger id **0x80** (param 0xA0000, @ 0x57edc4), gated on
+  `g_napi_np_ctx.is_mp_session_peer`. **Starters**: the net text command **`SETFLASH1 [n]`**
+  (`NapiNPClientMsg_HandleTextCommand @ 0x429ec9`: timer A = atol(arg), default 16; the
+  host applies locally and sprintf-broadcasts `"SETFLASH1 16"` @ 0x4d2b6a) — this is the
+  retail trigger path. Two orphaned debug hooks exist (`Env_TriggerLightningFlashA
+  @ 0x4ed500` = 16, `Env_TriggerLightningFlashB @ 0x4ed510` = 32, zero callers); **no
+  `SETFLASH2` exists, so sequencer B is unreachable in retail play**. Rain/wind carry no
+  `.env` keywords (parser keyword set enumerated in the 2026-06-09 grill) — weather
+  intensity is command/WAC-driven, not `.env`-tunable.
 - Scalar smoothers: spring-dampers `(d + 31) >> 5` with accel and absolute clamps (fog
   distance `Env_FogDistCurrent ← Env_FogDistTarget`, overcast blend, two more) and
   eighth-snaps `(d + 7) >> 3` with overshoot snap (sky height, cloud scroll rate, one more).
@@ -194,6 +222,63 @@ the modulator block; the modulator multiplies by modulator2; modulator2 by const
 into the active target [11], snaps fog distance/sky height/scroll rate/overcast targets from
 the parsed values, zeroes quake/lightning/rain, and seeds the weather PRNG with a constant —
 weather is deterministic per mission start.
+
+## Environment_ApplyFogAndAmbient walk (C6)
+
+`Environment_ApplyFogAndAmbient @ 0x57e440` is the per-**pass** environment push, called from
+every scene renderer (`render_main_scene @ 0x5c164c`, `terrain_scene_render @ 0x5d07f6`,
+`Render_ProcessMainSceneFrame @ 0x5ca3ce/0x5ca841`, `Terrain_RenderSceneWithReflection
+@ 0x5c949f`, `Render_RadarCompassOverlay @ 0x5c98b6`, `render_cinematic_multiview @ 0x570adb`)
+with `(is_underwater, is_alternate_fog)`; `is_underwater = g_view_pos_z <
+Env_WaterHeightFixed` at most sites. Complete ordered walk:
+
+| # | Site | Action |
+|---|---|---|
+| 1 | @ 0x57e44c | `end = Environment_GetFogEndDistance(is_underwater)` (murk-derived when underwater) |
+| 2 | @ 0x57e458 | `Render_UnpackModulatorToLightScale(modulator[0])` → `Render_LightScaleRGB @ 0x8409f4..fc` = modulator color ÷ 64 — **the application point of the iris auto-exposure**: these floats are a shader constant (consumed in `apply_shader_parameters @ 0x58e05d`); 64 = 1.0 gain |
+| 3 | @ 0x57e464 | `EffectWorld_UnpackModulatorToAmbientScale(modulator[0])` → `EffectWorld_AmbientScaleRGB @ 0x840b24..2c` (foliage + effects renderers) |
+| 4 | @ 0x57e471–0x57e4ad | device fog color ← underwater ? `Env_WaterColorLit` : `is_alternate_fog` ? `0x808080` : fog block `[0]`; fog type ← underwater ? 1 : `Env_FogType` |
+| 5 | @ 0x57e4c3–0x57e4db | `Render_SetFogState(0.5, end/65536, type, Env_OvercastBlend/65536)` |
+| 6 | @ 0x57e4ee | `Env_FogEndApplied = end` |
+| 7 | @ 0x57e4f4–0x57e505 | smoothed sky height pushed on change → `Terrain_PushSkyDomeHeightFloat @ 0x610920` → `sub_579070` (dome) |
+| 8 | @ 0x57e512–0x57e538 | if local player && `dword_C6EAFC`: `modulator.target[11] = 0x10101 × compute_ambient_light_along_direction(player)`, then `ColorBlock_SetStepDeltas(modulator, 62)` — exposure reaches the new target in 62 ticks (1 s) |
+
+**Ceiling/floor application points** (the G4 question): (a) the **indoor branch of the
+exposure sample** — `terrain_sector_compute_lighting @ 0x5c7646..0x5c76fe` substitutes
+ceiling block `[1]` (@ 0x26c6474) for sky and floor block `[1]` (@ 0x26c64dc) for ground,
+with directional zeroed, when the position is under cover; and (b) the derived
+`Env_CeilingFloorBlend @ 0x26c67f0` (= 0.707·ceiling + 0.707·floor, weather tick
+@ 0x57f110) is stored by `render_emitter_effect @ 0x5f7163` into the effect world at
++0x3EC **beside** the outdoor `Env_TerrainLightCombined` at +0x3E8 — the indoor vs outdoor
+ambient pair for particles/effects.
+
+## Iris auto-exposure (C6 — the iris_percent / iris_center consumer)
+
+`terrain_sector_compute_lighting @ 0x5c7550` *returns* the iris gain (int 0..255; the
+x87 tail was invisible until the IDB's void return type was fixed). Inputs: directional =
+light block `[1]` × visibleRays/8 (3 sun-occlusion raycasts, level 8..5; zero indoors),
+sky = sky block `[1]` (ceiling indoors), ground = ground block `[1]` (floor indoors), each
+÷255; light direction from `Environment_GetLightDirectionFloat`. Exact curve (constants
+@ 0x7c333c = 0.25, @ 0x7c3b94 = 0.5, @ 0x7c3dd0 = 64.0, @ 0x7c4654 = 100.0,
+@ 0x7c56a8 = 0.01, @ 0x7d4b2c = 0.707, @ 0x7ca29c = 255.0):
+
+```
+lum(C)   = 0.25·(C.r + C.b) + 0.5·C.g
+dirLum   = lum(directional);  skyLum = lum(sky);  gndLum = lum(ground)
+vertLum  = dirY·dirLum + skyLum
+horizLum = sqrt(dirX² + dirZ²)·dirLum + 0.707·(skyLum + gndLum)
+m        = max(dirLum, skyLum, gndLum, vertLum, horizLum)
+base     = iris_center × 64.0
+gain     = 0.01 · ( iris_percent · base/(2m) + (100 − iris_percent) · base )
+return clamp((int)gain, 0, 255)        // 64 = identity (6.6 fixed, modulator units)
+```
+
+At defaults (50 / 1.25): `gain = 40 + 20/m` — ≈60 in bright sun (m≈1), rising toward the
+255 clamp in darkness. `compute_ambient_light_along_direction @ 0x5c7a00` averages the
+gain at **3 points marched from the camera-ray hit back toward the camera**
+(`(s0+s1+s2)/3`), and that average becomes the modulator target (walk row 8 above) — so
+iris is the engine's **global auto-exposure**, scaling *every* color block (sky, fog,
+light, clouds…) through the modulator chain, not a niche terrain curve.
 
 ## Fog policy (`Render_SetFogState @ 0x58a950` → `CD3DDevice_SetFogParameters @ 0x677960`)
 
@@ -217,19 +302,68 @@ comes from water murk**: `(1 − 0.992·(1 − (1−m)(2−m)/2)) × 200` units 
 the fog color switches to the lit water color. A "white fog" pass uses constant `0x808080`.
 The applied fog distance also feeds the far clip/culling and the sky dome fog factor.
 
-## Sky dome (`render_skybox @ 0x579080`)
+## Sky dome (`render_skybox @ 0x579080`) — full combine recovered (C6)
 
-Dome = 441 vertices / 800 triangles (21×21), drawn twice (cloud layer 1, then layer 2) in the
-shader path. Cloud UVs: layer 1 `(camera + scrollAcc1x) / 2^28`; layer 2
-`(camera + scrollAcc[4/3 for U, 2/3 for V]) / 2^29` (half UV scale = clouds 2× larger, with
-anisotropic shear). VS constants: c0-3 UV scroll matrix, c4-7 world, c8 sky highlight float
-mirror, c9 `[fogDist×0.9/65536, 0, 1, 0]`, c10 `[0, 0.5, 1, 0.25]`, c11 skybase, c12
-(skybright − skybase), c13/c14 sun (pass 1) or moon (pass 2) world position = camera +
-direction × 2000 (normalized variants), c15 skyhighlight, c16-23 the two UV matrices, c24
-cloudbase, c25 (cloudhighlight − cloudbase), c26 cloudedge, c27 cloudhighlight.
-**`advanced_clouds 0` renders a single fixed-function pass with the dome material set to the
-cloud block color** (not fog). A white-sky variant forces colors to 1.0/0.9.
-`Environment_ApplyFogAndAmbient` pushes the smoothed sky height to the dome
+Dome = 441 vertices / 800 triangles (21×21 grid, FVF `0x212` = XYZ|NORMAL|TEX2, stride 40,
+`build_sky_dome_mesh @ 0x578db0`). The shader path draws the dome **twice — but the two
+passes are NOT one-per-cloud-layer** (pre-C6 misreading): pass 1 is a **textureless sky
+gradient**, pass 2 draws **both cloud layers in one multi-stage pass**, alpha-blended over
+it. Both vertex shaders are embedded as `vs_1_1` *source text* (`SkyVS_GradientPassSource
+@ 0x7d7338`, `SkyVS_CloudPassSource @ 0x7d6fc0`) and assembled at runtime with the
+statically-linked `D3DXAssembleShader` in `terrain_init_rendering_resources @ 0x5789e0`
+(handles → sky+116 / sky+120).
+
+**VS constants** (uploads @ 0x579709..0x579868, both passes): c0-3 WVP, c4-7 world,
+**c8 = eye world position** (fog reference — the pre-C6 "sky highlight float mirror" label
+was wrong; @ 0x27219f0), c9 `[fogDist×0.9/65536, 0, 1, 0]`, c10 `[0, 0.5, 1, 0.25]`,
+c11 skybase, c12 (skybright − skybase), c13 = normalized sun direction (pass 1) / active
+light direction, moon at night (pass 2), c14 = the same point at camera + dir×2000 pushed
+through the view-proj transform and normalized (clip-space proximity reference),
+c15 skyhighlight, c16-19 / c20-23 the two UV scroll matrices (layer 1 `(camera +
+scrollAcc1x)/2^28`; layer 2 `(camera + scrollAcc[4/3 U, 2/3 V])/2^29`), c24 cloudbase,
+c25 (cloudhighlight − cloudbase) — **uploaded but read by neither shader (dead)**,
+c26 cloudedge, c27 cloudhighlight.
+
+**Pass 1 — sky gradient** (VS `SkyVS_GradientPassSource`, raw UVs, no texture — its effect
+is created with `CEffect_SetTextureParam(NULL)`):
+
+```
+t      = 0.5·dot(domeNormal_world, sunDir[c13]) + 0.5      // THE gradient driver
+sky    = c11 + c12·t                                       // skybase → skybright toward the sun side
+prox   = max(dot(normalize(clipPos), c14), 0)
+oD0    = lerp(sky, skyhighlight[c15], prox⁸)               // sun-proximity highlight
+oFog   = 1 − dist(worldPos, eye[c8]) / (0.9·fogDist)
+```
+
+**Pass 2 — clouds** (VS `SkyVS_CloudPassSource`, both scrolled UV sets; per-vertex):
+
+```
+sky    = c11 + c12·t                                       // same gradient
+oD1    = lerp(sky, cloudedge[c26], prox⁴)                  // "sky behind the clouds"
+ramp   = lerp(cloudbase[c24], cloudedge[c26], prox⁴)
+oD0    = lerp(ramp, cloudhighlight[c27], prox⁸)            // the cloud color ramp
+```
+
+Pixel stage = fixed-function TSS (no pixel shader is ever bound). Stage table decoded
+against `RenderState_ApplyToDevice @ 0x681920` (D3DTOP/D3DTA literals); blend =
+srcAlpha/invSrcAlpha, capability-gated at effect build (@ 0x5789e0):
+
+- *Capable hw* (ps ≥ 3 or DOT3+MULTIPLYADD caps), 3 stages:
+  `s0 color = tex0, alpha = tex0.a` → `s1 color = tex1·current·2, alpha = tex1.a·current.a·2`
+  → `s2 color = LERP(current, oD0_cloudRamp, oD1_skyBehind), alpha = current.a²·2`.
+  Per fragment: `rgb = density·cloudRamp + (1−density)·skyBehind` with
+  `density = tex0·tex1·2`, blended onto pass 1 by `α = (tex0.a·tex1.a·2)²·2`.
+- *Basic hw*, 2 stages: `s0 color = oD0 (flat cloud ramp), alpha = tex0.a` →
+  `s1 color = current, alpha = tex1.a·current.a` — texture *colors* unused, alphas drive
+  the blend.
+
+**`advanced_clouds 0`** renders a single fixed-function pass with the cloud block color in
+the dome **material's ambient** slot against `SetRenderState(D3DRS_AMBIENT, 0xFFFFFF)`
+(@ 0x579b42..0x579bb6) — and that is the **only** render path that reads `cloud_rgb`
+(`Env_CloudBlock @ 0x26c64a4` xref sweep: render path reads exist solely in that branch;
+the keyframed path's cloud colors come exclusively from the cloudbase/cloudedge/
+cloudhighlight blocks). A white-sky variant forces sky colors to 1.0 and cloud colors
+to 0.9. `Environment_ApplyFogAndAmbient` pushes the smoothed sky height to the dome
 (`@ 0x57e4f7`) only when it changes.
 
 ## Celestial bodies (`EffectWorld_LoadCelestialModels @ 0x5adc50`)
@@ -264,20 +398,37 @@ In a network session the server-synced time + TOD rate replace the local start T
 (`server_handle_client_crc_validation @ 0x519110`). The terrain and environment names feed
 `Terrain_LoadEnvironmentConfig @ 0x610940` → `Environment_LoadTimeOfDayConfig`.
 
-## iris_percent / iris_center and terrain_rgb (documented, deferred)
+## iris_percent / iris_center and terrain_rgb — consumers pinned (C6)
 
-- The only iris consumer is **entity/sector lighting** (`terrain_sector_compute_lighting`,
-  reads @ 0x5c7954 / 0x5c79a6): a view-distance response curve — clamp against
-  `iris_center × k`, divide, scale by `iris_percent`, `(100 − x) × 0.01` shaping (constants
-  100.0 @ 0x7c4654, 0.01 @ 0x7c56a8, 0.707 @ 0x7d4b2c). It is **not** a sun-glare/exposure
-  effect. Implementation deferred; exact curve left as an open question.
-- `terrain_rgb` packs raw into `Env_TerrainColorPacked @ 0x26c67f4` and a reciprocal
-  `32640/component` (clamp 255, 128-if-zero) into `Env_TerrainColorRecip @ 0x26c67f8`; the
-  witnessed reciprocal consumer is the **effects system** (`EffectWorld_TickInstancesAndLightScale
-  @ 0x5aa170`: float scale = recip × 1/128 per channel) — effect brightness compensation
-  against the terrain tint. Entity lighting outdoors uses the light/sky/ground blocks with a
-  3-raycast sun occlusion (ambient level 8→5); indoors directional = 0, ambient = ceiling
-  block, ground = floor block.
+- **Iris**: the pre-C6 reading ("a view-distance response curve, not an exposure effect")
+  was **wrong on both counts** — the recovered curve (§Iris auto-exposure above) is the
+  engine's global auto-exposure, fed by scene luminance, applied through the modulator
+  chain to every color block and to the `Render_LightScaleRGB` shader constant.
+  Implementation still deferred (reimpl has no modulator chain yet); the curve is now
+  spec-complete with unit-testable constants.
+- **`terrain_rgb` is NOT terrain-inert** (pre-C6 hypothesis refuted by the @ 0x26c67f4
+  xref sweep). The packed color is pushed at terrain init — *after* the env parse, so the
+  file's value is live (`Game_LoadTerrainDuringConnect` orders `Terrain_LoadEnvironmentConfig
+  @ 0x52073b` before `Terrain_Init @ 0x52076f`) — via `PolyTrn_SetTerrainTintColors
+  @ 0x605e20` into two renderer globals: full tint `0x31a1824` and half tint `0x31a1828`
+  (`(c>>1)&0x7f7f7f`). Witnessed consumers:
+  - `PolyTrn_InitTextures @ 0x60b8cb` (from `Game_StartMission`): **bakes the tint into
+    the generated terrain textures** per texel (`channel × value >> 12`).
+  - `PolyTrn_RenderTile @ 0x60df0d` (every frame via `PolyTrn_RenderFrame @ 0x60eac0` ←
+    `render_main_scene`): half tint = the **terrain water quad vertex color**.
+  - `sample_terrain_lightmap @ 0x606030` (from `generate_foliage_instances_0`): lightmap
+    texel × `channel/128` (128 = identity; the default `0xFFFFFF` ≈ ×2 saturating gain —
+    lightmaps are authored ≤128 nominal) — **foliage instance tinting**.
+  - Vestigial: a runtime getter/setter pair (`Env_GetTerrainColorPacked @ 0x57d4b0`,
+    setter @ 0x57d4c0) with **zero callers**, and a `(color & 0xC0C0C0) != 0xC0C0C0` mode
+    flag write in `Terrain_Init @ 0x60fc66` whose target (`0x31beae8`) is never read.
+- `terrain_rgb`'s reciprocal `32640/component` (clamp 255, 128-if-zero) in
+  `Env_TerrainColorRecip @ 0x26c67f8` has exactly one consumer — **confirmed sole** by the
+  C6 xref sweep: `EffectWorld_TickInstancesAndLightScale @ 0x5aa170` (float scale =
+  recip × 1/128 per channel), effect brightness compensation against the terrain tint.
+- Entity lighting outdoors uses the light/sky/ground blocks with a 3-raycast sun occlusion
+  (ambient level 8→5); indoors directional = 0, ambient = ceiling block, ground = floor
+  block (these are the iris exposure inputs — §Iris auto-exposure).
 
 ## Divergences (reimpl vs original)
 
@@ -297,10 +448,12 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 12 | Default sky_height raw-200 quirk (≈0.003 units) | Documented; reimpl default mirrors the quirk via comment, authoring template sets 175 |
 | 13 | `vertex_rgb` parsed by reimpl, ignored by retail JO | Keep parsing for round-trip; engine view ignores (modulator identity) |
 | 14 | Sun glare occlusion 8 jittered rays + ±16/frame hysteresis | **Partial**: `nova_celestial.gd` renders glare_3di additively at the sun with the `dot^32` intensity from `env_render::compute_sun_glare`; terrain-raycast occlusion held at full brightness (tracked) |
-| 15 | Thunder sounds on lightning timer epochs | Deferred (no signal wired); lightning flash colors are ported |
-| 16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade | Documented; runtime port carries .env table only until weather/WAC work lands (overcast blend defaults 0 = pure .env, matching clear weather) |
-| 17 | Iris view-distance lighting curve | Deferred, consumer documented |
+| 15 | Thunder sounds on lightning timer epochs | Deferred; **fully specced by C6** (SoundBank trigger 0 / 0x80 on bank `dword_24E0914`, `SETFLASH1` net-command start; sequencer B unreachable in retail) — wiring lands with WAC weather |
+| 16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade | Documented; **C6 corrected the precedence**: overcast.def is additive-after-success (and the sole table for NULL map), never a fallback; a missing/failed `.trn` aborts the whole TOD load. Runtime port carries .env table only until weather/WAC work lands (overcast blend defaults 0 = pure .env, matching clear weather) |
+| 17 | Iris auto-exposure (modulator gain) | Deferred; **curve + consumer chain fully recovered by C6** (§Iris auto-exposure) — reimpl has no modulator chain; building it is the prerequisite |
 | 18 | Earthquake / rain / wind oscillator rings | Weather-system scope; ported constants documented, wiring deferred with WAC weather |
+| 19 | `terrain_rgb` terrain-stack consumers (texture bake ×v>>12, water quad half-tint, foliage lightmap ×/128) | **New from C6 (G3)** — reimpl renders none of them (`get_terrain_lighting_attenuation` returns identity); refutes the earlier "terrain-inert" hypothesis. C7+ decides which consumers to port alongside the PolyTrn-equivalent paths |
+| 20 | Sky dome combine | **Recovered by C6 (G1)**: `sky.gdshader`'s fragment stage is an invented approximation of the real two-pass spec (§Sky dome) — realignment is the C7 headline. `u_cloud_tint` in the keyframed path is a fabrication to delete (cloud_rgb is advanced_clouds=0-only); the dead c25 upload need not be replicated |
 
 ## Corpus sweep (retail JO:CA install, 2026-06-09)
 
@@ -313,14 +466,18 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
 
 ## Open questions
 
-- Exact iris response curve (x87 tail of `terrain_sector_compute_lighting @ 0x5c7930..0x5c79f4`).
 - `Terrain_Init` attrib-bit-0x100000 water flag semantics.
 - Day/night `timeofday` enum mapping order (dawn/day/dusk/night → 1/2/3/4-or-0) — classification
   only, no gradient impact.
-- Whether `overcast.def` also loads after a successful `.trn` TOD parse or only as fallback
-  (decompiler control-flow ambiguity at @ 0x57dbeb); stock JO terrains appear to carry no TOD
-  blocks in `.trn`, making overcast.def the de facto first table.
 - `dword_26C6450` "TOD minutes elapsed" consumer.
+- Pass-1 sky-gradient effect's exact stage table (`sub_679030` looks the effect up by name;
+  with no texture bound the dome flat-shades oD0 — the sensible diffuse passthrough — but
+  the named effect's TSS rows were not dumped). Cosmetic-only for C7.
+- What `CD3DDevice_SetFogAndBlendMode(obj, 8)` mode 8 selects for the dome passes
+  (fog-mode family; the alpha blend itself is in the material stage table).
+- Closed by C6: iris curve (§Iris auto-exposure), overcast precedence (§Load pipeline),
+  terrain_rgb consumers (§iris/terrain_rgb), sky combine (§Sky dome), thunder wiring
+  (§weather tick).
 
 ## Verdicts
 
@@ -330,11 +487,13 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
 | TOD keyframe interpolation | **matching** (integer-faithful, hours space) |
 | Sun/moon direction math | **matching** (float-vs-fixed quantization noted, sub-1e-4) |
 | Fog policy | **matching** (env_render port; overcast coupling included) |
-| Weather tick / smoothing / lightning | **divergent → ported constants** (16-channel model + integer smoothing in env_render; thunder + quake + rain wiring deferred, each tracked) |
-| Sky dome render | **divergent → aligned** (scroll/VS map/advanced_clouds=0 fixes in nova_sky; dome mesh constants verified against `build_sky_dome_mesh @ 0x578db0` recon) |
+| Weather tick / smoothing / lightning | **divergent → ported constants** (16-channel model + integer smoothing in env_render; thunder + quake + rain wiring deferred, each tracked; thunder spec complete per C6) |
+| Sky dome render: scroll / VS constants / mesh / advanced_clouds=0 | **matching** (verified against `build_sky_dome_mesh @ 0x578db0` + the C6 constant map) |
+| Sky dome per-fragment combine | **divergent — recovered (C6)**: real spec = two passes (gradient + dual-layer clouds, §Sky dome); `sky.gdshader` remains an approximation until C7 ports it (divergence #20) |
 | Celestial + glare | **new implementation** from witnessed model (`nova_celestial.gd`: sun/moon/star/glare 3DI at the sky, glare additive; occlusion held at full brightness, tracked) |
 | BMS overrides | **matching** application semantics via EnvFile's non-persistent override layer (runtime apply on load / clear on unload; base file never mutated) |
-| iris / terrain_rgb | **unknown → documented**, consumers identified, implementation deferred |
+| iris / terrain_rgb | **divergent — consumers recovered (C6)**: iris = global auto-exposure (curve spec-complete), terrain_rgb = live terrain-stack tint (bake/water/foliage); both unimplemented in the reimpl, tracked as divergences #17/#19 |
+| Load pipeline overcast precedence | **matching** after C6 correction (additive-after-success; reimpl two-table model documented, overcast blend at 0 pending weather work) |
 
 ## What this effort shipped (2026-06-09, branch `environment-workspace`)
 
@@ -436,3 +595,48 @@ dispositioned analytically by the grill instead:
 | Sun position within ~1° of retail | Closed: sun/moon direction verdict **matching** (float-vs-fixed quantization sub-1e-4, §Verdicts) |
 | Sky horizon gradient (skybase → skybright → skyhighlight) | Closed: VS constant map verified and `nova_sky` aligned (§Sky dome) |
 | Cloud scroll rate | Closed: smoothed-rate accumulators × (1, 1, 2/3, 4/3) with `sky_speed << 10` parse scale (§Sky dome, §Format truths) |
+
+---
+
+## Appendix: C6 consumer/combine grill session record (2026-06-11)
+
+Closed all six grill targets from [env-honored-matrix.md](env-honored-matrix.md); no
+target ended inconclusive. Doc-only slice: no reimplementation changes (the fix wave is
+roadmap slice C7).
+
+### Per-target verdicts
+
+| Target | Question | Verdict | Evidence | C7 action |
+|---|---|---|---|---|
+| G1 sky combine | how c11/c12/c15/c24-c27 combine per fragment; cloud_rgb scope | **recovered** — embedded vs_1_1 sources + TSS tables decoded; two-pass spec | §Sky dome | rewrite `sky.gdshader` fragment + `nova_sky.gd` uniforms from the spec; delete keyframed-path `u_cloud_tint`; skip dead c25 |
+| G2 iris curve | exact x87 tail shaping | **recovered** — closed-form auto-exposure gain, 64 = identity | §Iris auto-exposure | spec ready for a future `env_render::iris_exposure_gain` with pinned constants; needs the modulator chain first (divergence #17) |
+| G3 terrain_rgb consumers | any consumer beyond the effects reciprocal? | **refuted "terrain-inert"** — texture bake, water quads, foliage tint, all live | §iris/terrain_rgb | matrix row stays PARTIAL with the bigger gap; port decision per consumer (divergence #19); recip sole-consumer claim now *confirmed* |
+| G4 ApplyFogAndAmbient | full state walk; ceiling/floor points; 0x5c7a00 wiring | **complete** — 8-row walk table; exposure application point = `Render_LightScaleRGB` shader constant | §Environment_ApplyFogAndAmbient walk | informs C7 fog/exposure plumbing; ceiling/floor wire-or-delete now decidable (keep: they are live exposure inputs + effect ambient) |
+| G5 overcast precedence | fallback or always-after? | **corrected** — never a fallback; additive after `.trn` success (no count reset); missing/failed `.trn` aborts all | §Load pipeline | comment-level in `libs/env`; future overcast cross-fade uses the corrected order |
+| G6 thunder/oscillators | epoch→sound mapping; .env tunables | **feeder complete** — trigger ids 0/0x80, bank `dword_24E0914`, `SETFLASH1` net command; sequencer B unreachable; no rain/wind `.env` keywords | §weather tick | consumed by the WAC weather wave, not C7 |
+
+### IDB edits applied (sanctioned-grill policy; verify-before-edit; `idb_save` checkpoints)
+
+| Addr | Old | New | Evidence |
+|---|---|---|---|
+| 0x605e20 | `sub_605E20` | `PolyTrn_SetTerrainTintColors` | writes both tint globals; three witnessed consumers |
+| 0x57d4b0 | `sub_57D4B0` | `Env_GetTerrainColorPacked` | 2-insn getter |
+| 0x31a1824 | `dword_31A1824` | `PolyTrn_TerrainTintFull` | consumer sweep |
+| 0x31a1828 | `flt_31A1828` | `PolyTrn_TerrainTintHalf` | `(c>>1)&0x7f7f7f` packing (was mistyped float) |
+| 0x57d940 | `sub_57D940` | `ColorBlock_SetStepDeltas` | per-channel `|target−current|/frames` body |
+| 0x58db30 | `Render_UnpackFogColor` | `Render_UnpackModulatorToLightScale` | input = modulator block value; output consumed by `apply_shader_parameters` (old kong name wrong) |
+| 0x5aaef0 | `CEffectWorld_UnpackAmbientLightColor` | `EffectWorld_UnpackModulatorToAmbientScale` | same shape, foliage/effects consumers |
+| 0x610920 | `sub_610920` | `Terrain_PushSkyDomeHeightFloat` | 16.16→float → `sub_579070` |
+| 0x8409f4-fc | `flt_8409F4..` | `Render_LightScaleR/G/B` | modulator÷64 shader constant |
+| 0x840b24-2c | `flt_840B24..` | `EffectWorld_AmbientScaleR/G/B` | effects/foliage gain |
+| 0x7d7338 | `aVs11DclPositio` | `SkyVS_GradientPassSource` | embedded vs_1_1 source, pass 1 |
+| 0x7d6fc0 | `aVs11DclPositio_0` | `SkyVS_CloudPassSource` | embedded vs_1_1 source, pass 2 |
+| 0x4ed500 | `sub_4ED500` | `Env_TriggerLightningFlashA` | body sets timer A = 16 (old kong comment "font size" wrong) |
+| 0x4ed510 | `TextResource_GetStringOrDefault` | `Env_TriggerLightningFlashB` | 2-insn body sets timer B = 32 — prior kong name provably wrong |
+| 0x5c7550 | return type `void` → `int` | (type fix) | tail-calls `_ftol2_sse`; fix made Hex-Rays recover the whole iris tail |
+
+Plus explanatory comments at 0x57db30/0x57dbca/0x57dbf5/0x57dbf7/0x57dce0 (loader),
+0x60fc66/0x57d4c0/0x606030 (terrain tint), 0x5c7550/0x5c7a00 (exposure), 0x57e440/0x57d940/
+0x5f7163 (walk), 0x5789e0/0x579080/0x27219f0 (sky), 0x4ed500/0x4ed510/0x57ecfb/0x57edc4/
+0x429ec9 (lightning). No speculative renames were left applied; everything above is
+witnessed in the listed bodies.
