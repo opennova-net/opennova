@@ -34,6 +34,11 @@ var _viewport_host: Control
 # The live "Terrain changed under N objects" confirm (see _prompt_reground), so a
 # re-activate while it is open cannot stack a second one.
 var _reground_dialog: ConfirmationDialog
+# The mission debug overlay summoned over the editor (lazily built on the first
+# toggle, parented under the shell like _prompt_reground's dialog). Variable
+# edits are write-locked for its whole life; the runtime source follows the
+# active mode per refresh (see _debug_runtime_source).
+var _debug_overlay: NovaDebugOverlay
 
 
 func _init(value: Node = null) -> void:
@@ -182,6 +187,11 @@ func deactivate() -> void:
 	if _reground_dialog != null and is_instance_valid(_reground_dialog):
 		_reground_dialog.queue_free()
 	_reground_dialog = null
+	# The debug overlay is mission-scoped UI; hide it (toggle pauses its refresh
+	# timer too) so it never floats over another workspace. It re-summons in one
+	# click and keeps its tab/filter state.
+	if is_debug_overlay_open():
+		_debug_overlay.toggle()
 	if is_playing_mission():
 		stop_play_mission()
 	if _controller != null:
@@ -229,6 +239,9 @@ func release_viewport() -> void:
 		stop_play_mission()
 	if _play_mount != null:
 		_play_mount.release()
+	if _debug_overlay != null and is_instance_valid(_debug_overlay):
+		_debug_overlay.queue_free()
+	_debug_overlay = null
 	_viewport_host = null
 	_detach_input_target()
 	if terrain_editor != null:
@@ -318,6 +331,40 @@ func stop_play_mission() -> void:
 			viewport.set_input_target(_controller)
 		terrain_editor.set_viewport_active(true, false)
 	_sync_shell_title()
+
+
+# --- Mission debug overlay (C12) -------------------------------------------
+# The same NovaDebugOverlay the game summons with F3, mounted over the editor
+# shell with variable edits locked. The runtime source is re-resolved on every
+# overlay refresh, so Play/Stop/sim restarts need no rewiring here.
+
+func toggle_debug_overlay() -> void:
+	if editor_shell == null:
+		return  # headless host: nothing to float the overlay over
+	if _debug_overlay == null or not is_instance_valid(_debug_overlay):
+		_debug_overlay = NovaDebugOverlay.new()
+		_debug_overlay.name = "MissionDebugOverlay"
+		# One-way lock BEFORE the first refresh can build rows: the editor's
+		# overlay observes the live mission, it never writes into it.
+		_debug_overlay.lock_writes("Editing is off while simulating from the editor.")
+		_debug_overlay.set_runtime_source(Callable(self, "_debug_runtime_source"))
+		editor_shell.add_child(_debug_overlay)
+	_debug_overlay.toggle()
+
+
+func is_debug_overlay_open() -> bool:
+	return _debug_overlay != null and is_instance_valid(_debug_overlay) and _debug_overlay.visible
+
+
+# The overlay's runtime supplier. PIE first: Play Mission boots the real game
+# world (play_mission() sim_stops the in-place driver before swapping, so the
+# two can never BOTH be live); otherwise the in-place Simulate driver, which is
+# null while idle (the overlay shows its no-mission state).
+func _debug_runtime_source():
+	if is_playing_mission():
+		var world = _play_node().get_world()
+		return world.get_runtime() if world != null else null
+	return _controller.get_sim_runtime() if _controller != null else null
 
 
 # --- New (create a mission from scratch) --------------------------------------
@@ -495,6 +542,9 @@ func build_inspector(host: Control) -> void:
 	if _inspector.has_method("set_play_hooks"):
 		_inspector.set_play_hooks(Callable(self, "play_mission"), Callable(self, "is_playing_mission"),
 			Callable(self, "stop_play_mission"))
+	if _inspector.has_method("set_debug_hooks"):
+		_inspector.set_debug_hooks(Callable(self, "toggle_debug_overlay"),
+			Callable(self, "is_debug_overlay_open"))
 	if editor_shell != null and _inspector.has_method("set_reference_services"):
 		_inspector.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
 

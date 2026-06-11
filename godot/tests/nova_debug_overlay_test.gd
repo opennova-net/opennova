@@ -139,6 +139,54 @@ func test_vars_pane_filters_and_gates_writes() -> void:
 		"with edits off a submit is ignored (defense in depth)")
 
 
+func test_lock_writes_is_one_way_and_beats_a_forced_toggle() -> void:
+	# The editor mounts the overlay with lock_writes() (C12): the toggle goes
+	# off + disabled with the host's tooltip, rows never build as fields, and a
+	# submit is ignored even if something re-presses the toggle programmatically.
+	var rt := _make_runtime()
+	var overlay := _make_overlay()
+	overlay.set_runtime(rt)
+	rt.get_sim().set_mission_variable(5, 42)
+	overlay.lock_writes("Editing is off while simulating from the editor.")
+	overlay.toggle()
+
+	assert_true(overlay._writes_check.disabled, "the lock disables the edits toggle")
+	assert_false(overlay._writes_check.button_pressed)
+	assert_string_contains(overlay._writes_check.tooltip_text, "simulating from the editor",
+		"the host's artist-facing reason becomes the tooltip")
+	assert_null(overlay._vars_rows.get_node_or_null("VarRow_V5/VarEdit_V5"),
+		"locked rows render read-only")
+
+	# Defense in depth: force the toggle back on (bypassing disabled) - rows
+	# must STILL build read-only, and a direct submit must still be ignored.
+	overlay._writes_check.set_pressed_no_signal(true)
+	overlay.refresh_now()
+	assert_null(overlay._vars_rows.get_node_or_null("VarRow_V5/VarEdit_V5"),
+		"a forced toggle cannot re-arm row building")
+	overlay._on_var_submitted("123", 5)
+	assert_eq(rt.get_sim().get_mission_variable(5), 42,
+		"a forced submit is ignored while locked")
+
+
+func test_lock_writes_drops_existing_edit_rows() -> void:
+	# Locking AFTER rows were built as fields (the overlay outlives a host mode
+	# change) downgrades them on the next refresh.
+	var rt := _make_runtime()
+	var overlay := _make_overlay()
+	overlay.set_runtime(rt)
+	rt.get_sim().set_mission_variable(5, 42)
+	overlay.toggle()
+	overlay._writes_check.button_pressed = true
+	overlay._writes_check.toggled.emit(true)
+	assert_not_null(overlay._vars_rows.get_node_or_null("VarRow_V5/VarEdit_V5"))
+
+	overlay.lock_writes("Read-only here.")
+	assert_null(overlay._vars_rows.get_node_or_null("VarRow_V5/VarEdit_V5"),
+		"the lock's refresh rebuilds the rows read-only")
+	overlay._on_var_submitted("123", 5)
+	assert_eq(rt.get_sim().get_mission_variable(5), 42)
+
+
 func test_vars_rebuild_defers_while_an_edit_is_in_progress() -> void:
 	# With the changed-only filter, a var flipping zero<->nonzero on a running
 	# mission changes the visible SET - the rebuild must never destroy a
