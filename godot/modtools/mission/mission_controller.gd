@@ -26,7 +26,7 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const MissionWaypointOverlay := preload("res://engine/mission/mission_waypoint_overlay.gd")
 const MissionAreaTriggerOverlay := preload("res://engine/mission/mission_area_trigger_overlay.gd")
 const MissionMarkerOverlay := preload("res://engine/mission/mission_marker_overlay.gd")
-const MissionGizmo := preload("res://engine/mission/mission_gizmo.gd")
+const MissionGizmo := preload("res://modtools/framework/transform_gizmo_3d.gd")
 const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
@@ -102,7 +102,7 @@ var _pick_debug := false
 # drag + numeric edits, so undo + the inspector stay in sync. Objects only (markers keep
 # their terrain-drag). The node lives under the MissionObjects container, so it frees with a
 # re-bake; the ref is dropped in _reset_selection_state and lazily rebuilt in _refresh_gizmo.
-var _gizmo  # MissionGizmo (preloaded, no class_name)
+var _gizmo  # TransformGizmo3D (framework), bms basis_builder injected
 var _gizmo_enabled := true
 # Active handle drag: { part, axis } while a gizmo handle is held, else empty. The selection's
 # transform at grab time is snapshotted so every motion applies an absolute delta (no drift).
@@ -982,11 +982,12 @@ func _on_left_release() -> void:
 
 
 # --- Transform gizmo ----------------------------------------------------------
-# The in-world gizmo (engine/mission/mission_gizmo.gd) draws translate arrows + rotate rings on
-# the selected object and returns drag deltas; the controller applies them through the same
-# _apply_selected_xform / _commit_selected_transform spine as the terrain drag + numeric edits, so
-# undo + the inspector stay in lockstep. Objects only (markers keep their terrain-drag). The node
-# is a child of the MissionObjects container so it frees with a re-bake.
+# The in-world gizmo (framework TransformGizmo3D, bms basis_builder injected) draws translate
+# arrows + rotate rings on the selected object and returns drag deltas; the controller applies
+# them through the same _apply_selected_xform / _commit_selected_transform spine as the terrain
+# drag + numeric edits, so undo + the inspector stay in lockstep. Objects only (markers keep
+# their terrain-drag). The node is a child of the MissionObjects container so it frees with a
+# re-bake.
 
 func is_gizmo_enabled() -> bool:
 	return _gizmo_enabled
@@ -1115,6 +1116,9 @@ func _refresh_gizmo() -> void:
 	if _gizmo == null or not is_instance_valid(_gizmo):
 		_gizmo = MissionGizmo.new()
 		_gizmo.name = "MissionTransformGizmo"
+		# Mission's authored angles are nested BMS euler, not plain euler: the rings must
+		# derive their axes through the same basis the placer renders with.
+		_gizmo.basis_builder = MissionObjectPlacer.bms_to_godot_basis
 		container.add_child(_gizmo)
 	_gizmo.visible = true
 	_gizmo.show_for(_selected_xform.origin, _selected_rotation_deg)
