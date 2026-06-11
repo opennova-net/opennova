@@ -7,16 +7,19 @@ extends PanelContainer
 ##   - one top-right anchor formula (pinned below the shell top bar),
 ##   - one close affordance (standard glyph, no focus steal) that emits
 ##     close_requested,
+##   - one pop-out affordance (same styling) that emits detach_requested,
 ##   - one open/close/is_open API.
 ## The popover's content stays as ordinary scene children; this script only owns
-## placement, visibility, and the close signal, so the existing content nodes
-## (and their unique names) are untouched.
+## placement, visibility, and the close/detach signals, so the existing content
+## nodes (and their unique names) are untouched.
 
 signal close_requested
+signal detach_requested
 
 const ANCHOR_TOP_OFFSET := 56.0
 const EDGE_MARGIN := 12.0
 const CLOSE_GLYPH := "✕"
+const DETACH_GLYPH := "⧉"
 
 
 # Pin the popover to the top-right of the workstation, `min_width` wide, just
@@ -47,6 +50,21 @@ func bind_close(button: Button) -> void:
 
 func _on_close_pressed() -> void:
 	close_requested.emit()
+
+
+# Standardize a popover's pop-out button (glyph + no focus) and route its press
+# through detach_requested; the shell decides what actually floats.
+func bind_detach(button: Button) -> void:
+	if button == null:
+		return
+	button.text = DETACH_GLYPH
+	button.focus_mode = Control.FOCUS_NONE
+	if not button.pressed.is_connected(_on_detach_pressed):
+		button.pressed.connect(_on_detach_pressed)
+
+
+func _on_detach_pressed() -> void:
+	detach_requested.emit()
 
 
 func open() -> void:

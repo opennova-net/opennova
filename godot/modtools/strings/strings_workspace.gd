@@ -252,8 +252,10 @@ func release_viewport() -> void:
 func build_inspector(host: Control) -> void:
 	_ensure_editor()
 	_inspector = StringsInspectorScript.new()
-	host.add_child(_inspector)
+	# setup() precedes the tree entry: _ready builds shell-dependent sections
+	# (the Used-by strip), so the workspace ref must already be there.
 	_inspector.setup(self)
+	host.add_child(_inspector)
 	_inspector.refresh()
 
 
