@@ -255,9 +255,16 @@ func _sync_transport_controls() -> bool:
 	var sk = _skeletal()
 	var key := _selected_clip_key()
 	var length: float = sk.get_clip_length(key) if sk != null and not key.is_empty() else 0.0
-	_scrub_slider.max_value = maxf(length, 0.01)
+	var max_len := maxf(length, 0.01)
+	# Park the value inside the NEW range (no signal) BEFORE setting max:
+	# Range.set_max re-clamps the held value and EMITS value_changed, so a
+	# shrink while the slider still holds the previous clip's position would
+	# fire a phantom user scrub — a freshly selected one-shot clip would jump
+	# straight to its final frame. (While a drag is in progress the clip cannot
+	# have changed, so max is unchanged and set_max cannot clamp.)
 	if not _slider_dragging:
-		_scrub_slider.set_value_no_signal(_preview.get_animation_playhead())
+		_scrub_slider.set_value_no_signal(clampf(_preview.get_animation_playhead(), 0.0, max_len))
+	_scrub_slider.max_value = max_len
 	var playing: bool = _preview.is_playing()
 	_play_button.set_pressed_no_signal(playing)
 	_play_button.text = "Pause" if playing else "Play"

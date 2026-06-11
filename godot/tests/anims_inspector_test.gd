@@ -104,6 +104,47 @@ func test_selecting_a_clip_plays_it_and_scrub_poses_while_paused() -> void:
 	assert_string_contains(time_label.text, "/", "the readout shows playhead / length")
 
 
+func test_selecting_a_shorter_clip_fires_no_phantom_scrub() -> void:
+	# Range.set_max re-clamps the held value and EMITS value_changed: if the
+	# transport resync shrank max while the slider still held the previous
+	# clip's position, that emission scrubbed the freshly selected clip (a
+	# one-shot would freeze at its final frame). Pin the mechanism: switching
+	# from a longer to a shorter clip fires NO scrub and the new clip's
+	# playhead stays at 0 (where play_animation put it).
+	var parts := _anims_workspace()
+	var preview: ObjectPreview = parts.preview
+	var keys: PackedStringArray = parts.keys
+	var sk = preview.get_skeletal_anim()
+	var longer := -1
+	var shorter := -1
+	for i in range(keys.size()):
+		for j in range(keys.size()):
+			if sk.get_clip_length(String(keys[i])) > sk.get_clip_length(String(keys[j])) + 0.01:
+				longer = i
+				shorter = j
+	if longer < 0:
+		pass_test("All fixture clips share one length; the shrink path cannot be exercised here.")
+		return
+
+	var list := (parts.host as Control).find_child("AnimsClipList", true, false) as ItemList
+	var slider := (parts.dock as Control).find_child("AnimsScrubSlider", true, false) as HSlider
+	preview.set_playing(false)
+	list.select(longer)
+	list.item_selected.emit(longer)
+	# Scrub the longer clip past the shorter clip's length (slider holds it).
+	slider.value = sk.get_clip_length(String(keys[longer])) - 0.01
+
+	var phantom_scrubs: Array = []
+	slider.value_changed.connect(func(v: float) -> void: phantom_scrubs.append(v))
+	list.select(shorter)
+	list.item_selected.emit(shorter)
+	assert_eq(phantom_scrubs, [], "shrinking the slider range must not fire a user scrub")
+	assert_almost_eq(preview.get_animation_playhead(), 0.0, 0.001,
+		"the freshly selected clip starts at 0, not scrubbed to its end")
+	assert_almost_eq(slider.max_value, sk.get_clip_length(String(keys[shorter])), 0.001)
+	assert_lte(slider.value, slider.max_value)
+
+
 func test_play_pause_reset_wiring() -> void:
 	var parts := _anims_workspace()
 	var preview: ObjectPreview = parts.preview
