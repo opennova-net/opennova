@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# OpenNova NovaWorld deploy orchestrator. Runs inside the deploy toolbox
+# container (deploy/Dockerfile). The operator supplies only
+# OP_SERVICE_ACCOUNT_TOKEN; every other secret is read from the 1Password
+# vault at run time and rendered to a tmpfs (/run/secrets) that never
+# touches disk.
+#
+# Subcommands:
+#   secrets check                 dry-run every op:// reference
+#   infra plan|apply|destroy      terraform (workspace = $DEPLOY_ENV)
+#   app deploy [--tag SHA]        pull GHCR images + compose up on the target
+#   app status|logs [svc]|restart|down
+#   backup now|list               trigger / list the sqlite backups
+#   state push|pull               terraform state <-> 1Password document
+#
+# DEPLOY_ENV (default prod) selects the terraform workspace and vault
+# item suffix. OP_VAULT (default OpenNova-Deploy) names the vault.
+set -euo pipefail
+
+VAULT="${OP_VAULT:-OpenNova-Deploy}"
+ENVNAME="${DEPLOY_ENV:-prod}"
+# main.tf treats the "default" workspace as prod (EIP + shared singletons:
+# downloads bucket/CDN, backups bucket, CI user). So prod -> default, and
+# any other env -> a same-named workspace (no EIP, suffixed resources).
+if [ "$ENVNAME" = "prod" ]; then
+  WORKSPACE="default"
+else
+  WORKSPACE="$ENVNAME"
+fi
+SECRETS_DIR="/run/secrets"
+TF_DIR="/workspace/infra/aws"
+COMPOSE_DIR="/workspace/deploy/compose"
+TF_ENV_TPL="/workspace/deploy/env/terraform.env.tpl"
+APP_ENV_TPL="/workspace/deploy/env/app.prod.env.tpl"
+
+log()  { printf '\033[1;36m[deploy]\033[0m %s\n' "$*"; }
+err()  { printf '\033[1;31m[deploy:error]\033[0m %s\n' "$*" >&2; }
+die()  { err "$*"; exit 1; }
+
+require_op() {
+  [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || die "OP_SERVICE_ACCOUNT_TOKEN is not set"
+  op whoami >/dev/null 2>&1 || die "1Password auth failed (check OP_SERVICE_ACCOUNT_TOKEN)"
+}
+
+# Render an op:// template to a tmpfs file (0600). Echoes the path.
+inject() {
+  local tpl="$1" out="$2"
+  op inject -i "$tpl" -o "$out" -f >/dev/null
+  chmod 600 "$out"
+  printf '%s' "$out"
+}
+
+# Read the SSH private key from the vault to a tmpfs file; echo the path.
+ssh_key_file() {
+  local key="$SECRETS_DIR/ssh_key"
+  op read "op://$VAULT/ssh/private key?ssh-format=openssh" > "$key"
+  chmod 600 "$key"
+  printf '%s' "$key"
+}
+
+# Resolve the target host IP: explicit override, else terraform output.
+target_ip() {
+  if [ -n "${TARGET_HOST:-}" ]; then
+    printf '%s' "$TARGET_HOST"
+    return
+  fi
+  terraform -chdir="$TF_DIR" workspace select "$WORKSPACE" >/dev/null 2>&1 || true
+  terraform -chdir="$TF_DIR" output -raw public_ip 2>/dev/null \
+    || die "no public_ip output; run 'infra apply' first or set TARGET_HOST"
+}
+
+tf_init() {
+  terraform -chdir="$TF_DIR" init -input=false >/dev/null
+  terraform -chdir="$TF_DIR" workspace select "$WORKSPACE" >/dev/null 2>&1 \
+    || terraform -chdir="$TF_DIR" workspace new "$WORKSPACE" >/dev/null
+}
+
+# ---------------------------------------------------------------------------
+cmd_secrets() {
+  require_op
+  case "${1:-check}" in
+    check)
+      log "checking vault '$VAULT' references (dry run)…"
+      op inject -i "$TF_ENV_TPL"  -o /dev/null && log "  terraform.env.tpl OK"
+      op inject -i "$APP_ENV_TPL" -o /dev/null && log "  app.prod.env.tpl  OK"
+      op read "op://$VAULT/ssh/private key?ssh-format=openssh" >/dev/null \
+        && log "  ssh private key   OK"
+      log "all references resolved."
+      ;;
+    *) die "unknown: secrets $1 (try: check)" ;;
+  esac
+}
+
+cmd_infra() {
+  require_op
+  cmd_state pull
+  tf_init
+  local action="${1:-plan}"
+  log "terraform $action (workspace=$WORKSPACE)…"
+  # op run injects AWS + Cloudflare + ssh pubkey as env for the terraform run.
+  case "$action" in
+    plan)    op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" plan -input=false ;;
+    apply)   op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" apply -input=false -auto-approve
+             cmd_state push ;;
+    destroy) op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" destroy -input=false -auto-approve
+             cmd_state push ;;
+    *) die "unknown: infra $action (try: plan|apply|destroy)" ;;
+  esac
+}
+
+# Build the compose invocation for the remote host (DOCKER_HOST=ssh://).
+remote_compose() {
+  local ip key app_env
+  ip="$(target_ip)"
+  key="$(ssh_key_file)"
+  app_env="$(inject "$APP_ENV_TPL" "$SECRETS_DIR/app.prod.env")"
+  export DOCKER_HOST="ssh://ubuntu@${ip}"
+  export GIT_SSH_COMMAND="ssh -i $key -o StrictHostKeyChecking=accept-new"
+  # docker's ssh transport reads the key via the ssh binary; point it there.
+  export DOCKER_SSH_OPTS="-i $key -o StrictHostKeyChecking=accept-new"
+  # compose files + env, evaluated against the remote engine.
+  COMPOSE_ARGS=(-f "$COMPOSE_DIR/docker-compose.yml"
+                -f "$COMPOSE_DIR/docker-compose.prod.yml"
+                --env-file "$COMPOSE_DIR/../env/app.prod.env"
+                --env-file "$app_env")
+}
+
+cmd_app() {
+  require_op
+  local action="${1:-status}"; shift || true
+  case "$action" in
+    deploy)
+      local tag="latest"
+      [ "${1:-}" = "--tag" ] && { tag="$2"; shift 2; }
+      local owner repo
+      owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
+      export SERVER_IMAGE="ghcr.io/${owner}/novaworld-server:${tag}"
+      export WEB_IMAGE="ghcr.io/${owner}/novaworld-web:${tag}"
+      remote_compose
+      log "deploying $SERVER_IMAGE + $WEB_IMAGE to $(target_ip)…"
+      ssh -i "$(ssh_key_file)" -o StrictHostKeyChecking=accept-new \
+        "ubuntu@$(target_ip)" "docker --version" >/dev/null \
+        || die "cannot reach docker on the target over SSH"
+      docker compose "${COMPOSE_ARGS[@]}" pull
+      docker compose "${COMPOSE_ARGS[@]}" up -d --remove-orphans
+      log "deploy complete."
+      ;;
+    status)  remote_compose; docker compose "${COMPOSE_ARGS[@]}" ps ;;
+    logs)    remote_compose; docker compose "${COMPOSE_ARGS[@]}" logs --tail=200 "${1:-}" ;;
+    restart) remote_compose; docker compose "${COMPOSE_ARGS[@]}" restart "${1:-}" ;;
+    down)    remote_compose; docker compose "${COMPOSE_ARGS[@]}" down ;;
+    *) die "unknown: app $action (try: deploy|status|logs|restart|down)" ;;
+  esac
+}
+
+cmd_backup() {
+  require_op
+  case "${1:-now}" in
+    now)  remote_compose; docker compose "${COMPOSE_ARGS[@]}" run --rm backup /backup/backup.sh ;;
+    list) remote_compose; docker compose "${COMPOSE_ARGS[@]}" run --rm backup /backup/list.sh ;;
+    *) die "unknown: backup $1 (try: now|list)" ;;
+  esac
+}
+
+cmd_state() {
+  require_op
+  local doc="tfstate-${ENVNAME}"
+  # local backend: the default workspace stores top-level terraform.tfstate;
+  # any named workspace stores under terraform.tfstate.d/<name>/.
+  local statefile
+  if [ "$WORKSPACE" = "default" ]; then
+    statefile="$TF_DIR/terraform.tfstate"
+  else
+    statefile="$TF_DIR/terraform.tfstate.d/$WORKSPACE/terraform.tfstate"
+  fi
+  case "${1:-pull}" in
+    pull) log "pulling state '$doc' from vault…"
+          mkdir -p "$(dirname "$statefile")"
+          op document get "$doc" --vault "$VAULT" --out-file "$statefile" 2>/dev/null \
+            && log "wrote $statefile" || log "no remote state yet (first run)" ;;
+    push) log "pushing state to vault document '$doc'…"
+          [ -f "$statefile" ] || die "no local state at $statefile"
+          if op document get "$doc" --vault "$VAULT" >/dev/null 2>&1; then
+            op document edit "$doc" "$statefile" --vault "$VAULT"
+          else
+            op document create "$statefile" --title "$doc" --vault "$VAULT"
+          fi
+          log "state pushed." ;;
+    *) die "unknown: state $1 (try: pull|push)" ;;
+  esac
+}
+
+usage() {
+  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+main() {
+  local group="${1:-help}"; shift || true
+  case "$group" in
+    secrets) cmd_secrets "$@" ;;
+    infra)   cmd_infra "$@" ;;
+    app)     cmd_app "$@" ;;
+    backup)  cmd_backup "$@" ;;
+    state)   cmd_state "$@" ;;
+    help|-h|--help) usage ;;
+    *) err "unknown command: $group"; usage; exit 1 ;;
+  esac
+}
+
+main "$@"

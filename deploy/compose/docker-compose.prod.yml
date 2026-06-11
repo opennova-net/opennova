@@ -1,0 +1,27 @@
+# Prod overlay: pull the published GHCR images (no build on the target),
+# use host networking so the game UDP ports are reachable directly, and
+# inject the vault-sourced app secrets. Layered on docker-compose.yml.
+#
+# Driven remotely by the deploy toolbox over DOCKER_HOST=ssh://; the
+# operator never SSHes by hand.
+
+services:
+  novaworld:
+    image: ${SERVER_IMAGE:?set SERVER_IMAGE to the ghcr.io/...:tag to deploy}
+    pull_policy: always
+    build: !reset null
+    network_mode: host
+    env_file:
+      - ../env/app.prod.env
+    environment:
+      # app.prod.env supplies ONNET_PUBLIC_HOST; the vault-injected file
+      # (mounted by the toolbox) supplies ADMIN_API_TOKEN.
+      DATABASE_PATH: /data/novaworld.db
+
+  web:
+    image: ${WEB_IMAGE:?set WEB_IMAGE to the ghcr.io/...:tag to deploy}
+    pull_policy: always
+    build: !reset null
+    network_mode: host
+    env_file:
+      - ../env/app.prod.env
