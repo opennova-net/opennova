@@ -93,6 +93,7 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_static_method("NovaMissionData", D_METHOD("kind_for_item_type", "def_item_type"), &NovaMissionData::kind_for_item_type);
 	ClassDB::bind_method(D_METHOD("place_entity_grounded", "item_id", "def_item_type", "ground_hit_bms", "ground_anchor_bms"), &NovaMissionData::place_entity_grounded);
 	ClassDB::bind_method(D_METHOD("move_entity_grounded", "kind", "index", "ground_hit_bms", "ground_anchor_bms"), &NovaMissionData::move_entity_grounded);
+	ClassDB::bind_method(D_METHOD("reground_entities", "requests", "epsilon", "apply"), &NovaMissionData::reground_entities, DEFVAL(0.01f), DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("marker_item_id_for_path", "path_index"), &NovaMissionData::marker_item_id_for_path);
 	ClassDB::bind_method(D_METHOD("add_path_marker_grounded", "path_index", "ground_hit_bms", "insert_index"), &NovaMissionData::add_path_marker_grounded, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("remove_entity", "kind", "index"), &NovaMissionData::remove_entity);
@@ -522,6 +523,36 @@ bool NovaMissionData::move_entity_grounded(int kind, int index, const Vector3 &g
 	}
 	modified = true;
 	return true;
+}
+
+int NovaMissionData::reground_entities(const Array &requests, float epsilon, bool apply) {
+	std::vector<opennova::mission::authoring::RegroundRequest> rows;
+	rows.reserve(static_cast<size_t>(requests.size()));
+	for (int i = 0; i < requests.size(); i++) {
+		const Dictionary request = requests[i];
+		const int index = int(request.get("index", -1));
+		if (index < 0) {
+			continue;
+		}
+		opennova::mission::authoring::RegroundRequest row;
+		row.kind = to_native_kind(int(request.get("kind", -1)));
+		row.index = static_cast<size_t>(index);
+		const Vector3 hit = request.get("ground_hit_bms", Vector3());
+		const Vector3 anchor = request.get("ground_anchor_bms", Vector3());
+		row.ground_hit_bms[0] = hit.x;
+		row.ground_hit_bms[1] = hit.y;
+		row.ground_hit_bms[2] = hit.z;
+		row.ground_anchor_bms[0] = anchor.x;
+		row.ground_anchor_bms[1] = anchor.y;
+		row.ground_anchor_bms[2] = anchor.z;
+		rows.push_back(row);
+	}
+	const size_t moved = opennova::mission::authoring::reground_entities(
+			document, rows.data(), rows.size(), epsilon, apply);
+	if (apply && moved > 0) {
+		modified = true;
+	}
+	return static_cast<int>(moved);
 }
 
 int NovaMissionData::marker_item_id_for_path(int path_index) const {

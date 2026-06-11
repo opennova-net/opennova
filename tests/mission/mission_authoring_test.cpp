@@ -173,5 +173,74 @@ int main() {
 		TEST_EXPECT(near(second.transform.y, 2.0));
 	}
 
+	// --- reground_entities: dry-run count, rotated bake, epsilon skip ------
+	{
+		MissionDocument doc;
+		doc.create_default();
+		const float anchor[3] = {1.0f, 2.0f, 3.0f};
+		const float hit_old[3] = {100.0f, 50.0f, 10.0f};
+		// Two buildings on the old ground (one yawed after placement) + a marker.
+		EntityRecord a, b, m;
+		TEST_EXPECT(authoring::place_entity_grounded(doc, 102001, 4, hit_old, anchor, &a));
+		TEST_EXPECT(authoring::place_entity_grounded(doc, 102001, 4, hit_old, anchor, &b));
+		EntityTransform with_yaw = b.transform;
+		with_yaw.yaw = 90;
+		TEST_EXPECT(doc.set_entity_transform(EntityKind::Building, b.index, with_yaw));
+		TEST_EXPECT(authoring::place_entity_grounded(doc, 106005, 1, hit_old, anchor, &m));
+
+		// The terrain rose under everything: ground z 10 -> 14.
+		authoring::RegroundRequest reqs[3];
+		reqs[0].kind = EntityKind::Building;
+		reqs[0].index = a.index;
+		reqs[1].kind = EntityKind::Building;
+		reqs[1].index = b.index;
+		reqs[2].kind = EntityKind::Marker;
+		reqs[2].index = m.index;
+		for (authoring::RegroundRequest &request : reqs) {
+			request.ground_hit_bms[0] = 100.0f;
+			request.ground_hit_bms[1] = 50.0f;
+			request.ground_hit_bms[2] = 14.0f;
+			for (int i = 0; i < 3; ++i) {
+				request.ground_anchor_bms[i] = anchor[i];
+			}
+		}
+
+		// Dry run: counts every drifted entity without writing a thing.
+		TEST_EXPECT(authoring::reground_entities(doc, reqs, 3, 0.01f, false) == 3);
+		EntityRecord untouched;
+		TEST_EXPECT(doc.get_entity(EntityKind::Building, a.index, untouched));
+		TEST_EXPECT(near(untouched.transform.z, 10.0 - 3.0));
+
+		// Apply: zero-rot bake (anchor -> (-1,-2,3)), yaw-90 bake (-> (-2,1,3)),
+		// marker stores the hit directly; all rotations kept.
+		TEST_EXPECT(authoring::reground_entities(doc, reqs, 3) == 3);
+		EntityRecord moved_a, moved_b, moved_m;
+		TEST_EXPECT(doc.get_entity(EntityKind::Building, a.index, moved_a));
+		TEST_EXPECT(near(moved_a.transform.x, 101.0));
+		TEST_EXPECT(near(moved_a.transform.y, 52.0));
+		TEST_EXPECT(near(moved_a.transform.z, 11.0));
+		TEST_EXPECT(doc.get_entity(EntityKind::Building, b.index, moved_b));
+		TEST_EXPECT(moved_b.transform.yaw == 90);
+		TEST_EXPECT(near(moved_b.transform.x, 102.0));
+		TEST_EXPECT(near(moved_b.transform.y, 49.0));
+		TEST_EXPECT(near(moved_b.transform.z, 11.0));
+		TEST_EXPECT(doc.get_entity(EntityKind::Marker, m.index, moved_m));
+		TEST_EXPECT(near(moved_m.transform.x, 100.0));
+		TEST_EXPECT(near(moved_m.transform.y, 50.0));
+		TEST_EXPECT(near(moved_m.transform.z, 14.0));
+
+		// Everything now sits on the new ground: both count and apply are no-ops.
+		TEST_EXPECT(authoring::reground_entities(doc, reqs, 3, 0.01f, false) == 0);
+		TEST_EXPECT(authoring::reground_entities(doc, reqs, 3) == 0);
+
+		// Unknown entities are skipped rows, never errors.
+		authoring::RegroundRequest missing;
+		missing.kind = EntityKind::Organic;
+		missing.index = 99;
+		TEST_EXPECT(authoring::reground_entities(doc, &missing, 1) == 0);
+		// And a null request list is a zero, not a crash.
+		TEST_EXPECT(authoring::reground_entities(doc, nullptr, 5) == 0);
+	}
+
 	return 0;
 }

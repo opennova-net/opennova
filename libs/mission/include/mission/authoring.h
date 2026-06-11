@@ -91,6 +91,31 @@ bool add_path_marker_grounded(MissionDocument &doc,
                               EntityRecord *out_marker = nullptr,
                               WaypointPath *out_path = nullptr);
 
+// One row of a bulk re-ground: the entity, its NEW ground hit (mission space,
+// from the host's height sampling), and its model-local ground anchor.
+struct RegroundRequest {
+	EntityKind kind = EntityKind::Item;
+	size_t index = 0;
+	float ground_hit_bms[3] = {0.0f, 0.0f, 0.0f};
+	float ground_anchor_bms[3] = {0.0f, 0.0f, 0.0f};
+};
+
+// Bulk re-ground after a terrain height change: for each request, bake the
+// grounded origin (rotation kept; markers store the hit directly — the same
+// policy as move_entity_grounded) and move the entity when the baked origin
+// deviates from the stored one by more than `epsilon` on any axis.
+// Within-epsilon rows are skipped, so a no-op terrain edit moves nothing and
+// an entity already on the new ground does not churn the document. With
+// apply = false nothing is written and the return value is the would-move
+// count — the host's "terrain changed under N objects" prompt and the apply
+// share one policy, so the count can never lie. Returns the number of
+// entities moved (or that would move).
+size_t reground_entities(MissionDocument &doc,
+                         const RegroundRequest *requests,
+                         size_t count,
+                         float epsilon = 0.01f,
+                         bool apply = true);
+
 } // namespace opennova::mission::authoring
 
 #endif // OPENNOVA_MISSION_AUTHORING_H

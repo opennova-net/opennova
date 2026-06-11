@@ -205,17 +205,30 @@ func open_file(path: String) -> Error:
 	return _document.open_fnt(path)
 
 
-func open_font_name(font_name: String) -> Error:
+# Resolve a bare font name (credits/menus reference fonts by name) to an openable
+# path inside the configured resource root; "" when the root is unset or the font
+# is missing. Split from open_font_name so the shell's open_font_workspace
+# forwarder can resolve first and ride the generic open_in_workspace jump.
+func resolve_font_file(font_name: String) -> String:
 	if font_name.is_empty():
-		return ERR_INVALID_PARAMETER
+		return ""
 	var resources := _resource_root_or_settings()
 	if resources == null or resources.get_root_dir().is_empty():
-		return ERR_DOES_NOT_EXIST
+		return ""
 	var filename := "%s.fnt" % font_name
 	var path := resources.resolve_file(filename)
 	if not path.is_empty():
-		return open_file(path)
-	return open_file(filename) if resources.has_file(filename) else ERR_DOES_NOT_EXIST
+		return path
+	return filename if resources.has_file(filename) else ""
+
+
+func open_font_name(font_name: String) -> Error:
+	if font_name.is_empty():
+		return ERR_INVALID_PARAMETER
+	var path := resolve_font_file(font_name)
+	if path.is_empty():
+		return ERR_DOES_NOT_EXIST
+	return open_file(path)
 
 
 func can_save() -> bool:

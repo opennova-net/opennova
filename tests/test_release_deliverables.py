@@ -170,6 +170,15 @@ def test_release_validator_rejects_unexpected_dist_files(tmp_path: Path) -> None
 def test_release_workflow_validates_and_publishes_staged_assets() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     release_step = workflow.split("- name: Create GitHub Release", 1)[1]
+    package_jobs = [
+        "package-addon",
+        "package-max-mzp",
+        "package-importer",
+        "package-godot-windows-editor",
+        "package-godot-windows-runtime",
+        "package-godot-macos-editor",
+        "package-godot-macos-runtime",
+    ]
 
     assert "scripts/validate_release_deliverables.py" in workflow
     assert "GITHUB_REF_NAME" in workflow
@@ -177,6 +186,17 @@ def test_release_workflow_validates_and_publishes_staged_assets() -> None:
     assert "dist/*.zip" not in release_step
     assert "dist/opennova_max-v*.mzp" not in release_step
     assert "dist/onimport-v*.exe" not in release_step
+
+    for package_job in package_jobs:
+        body = _workflow_job(workflow, package_job)
+        assert "uses: actions/upload-artifact@v7" in body
+        assert "archive: false" in body
+        assert "if-no-files-found: error" in body
+        assert "artifact_id:" in body
+
+    release_job = _workflow_job(workflow, "release")
+    assert "uses: actions/download-artifact@v8" in release_job
+    assert "artifact-ids:" in release_job
 
 
 def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> None:
@@ -238,6 +258,7 @@ def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> Non
     assert "dist/onimport.exe" not in workflow
     assert "dist/opennova-modtools-windows.zip" not in workflow
     assert "dist/opennova-runtime-windows.zip" not in workflow
+    assert "opennova_release_assets" not in workflow
 
 
 def test_windows_godot_tests_use_console_binary_for_bash_runner() -> None:
@@ -291,10 +312,27 @@ def test_ci_builds_gdextension_once_per_os_and_caches_with_sccache() -> None:
         # No consumer recompiles the GDExtension inline.
         assert "cmake -S godot/engine" not in body
 
-    # validate-deliverables downloads every artifact into dist/, so it must scope
-    # the download to the deliverables (opennova_*) and skip the gdext_* build
-    # artifacts, which the validator rejects as unexpected files in dist/.
-    assert "pattern: opennova_*" in _workflow_job(workflow, "validate-deliverables")
+    for job in [
+        "package-addon",
+        "package-max-mzp",
+        "package-importer",
+        "package-godot-windows-editor",
+        "package-godot-windows-runtime",
+        "package-godot-macos-editor",
+        "package-godot-macos-runtime",
+    ]:
+        body = _workflow_job(workflow, job)
+        assert "uses: actions/upload-artifact@v7" in body
+        assert "archive: false" in body
+        assert "if-no-files-found: error" in body
+        assert "artifact_id:" in body
+
+    # validate-deliverables downloads the exact package artifact IDs into dist/,
+    # avoiding both gdext_* build artifacts and GitHub's wrapper zip format.
+    validate_job = _workflow_job(workflow, "validate-deliverables")
+    assert "uses: actions/download-artifact@v8" in validate_job
+    assert "artifact-ids:" in validate_job
+    assert "pattern: opennova_*" not in validate_job
 
 
 def test_godot_test_wrapper_allows_fixture_inner_classes() -> None:

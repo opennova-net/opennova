@@ -31,6 +31,9 @@ class StubTerrainEditor:
 	var opened_trn: String = ""
 	var open_trn_result: Error = OK
 	var current_trn_path: String = ""
+	# Mirrors the real TerrainEditor's dirty flag (the same-clean-terrain remount
+	# skip reads it duck-typed).
+	var is_dirty := false
 	# Placement raycast seam (Phase 3): the controller grounds a placed object via these.
 	var terrain_hit: Vector3 = Vector3(64.0, 10.0, -64.0)
 	var terrain_hit_valid: bool = true
@@ -44,7 +47,7 @@ class StubTerrainEditor:
 	func get_current_trn_path() -> String:
 		return current_trn_path
 
-	func open_trn(path: String) -> Error:
+	func open_trn(path: String, _timeline: PerfTimeline = null) -> Error:
 		# Mirror the real TerrainEditor: a successful open records the current .trn.
 		opened_trn = path
 		if open_trn_result == OK:
@@ -169,6 +172,69 @@ func _loaded_with_selection() -> MissionController:
 	assert_gt(buildings.size(), 0, "the fixture places buildings to select")
 	controller._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
 	return controller
+
+
+func _stub_with_dvxi5() -> StubTerrainEditor:
+	var stub := StubTerrainEditor.new()
+	stub.resource_root = _dvxi5_root()
+	stub.world_root = Node3D.new()
+	add_child_autofree(stub.world_root)
+	add_child_autofree(stub)
+	return stub
+
+
+func test_reopen_on_same_clean_terrain_skips_remount() -> void:
+	var stub := _stub_with_dvxi5()
+	var controller := MissionController.new(stub)
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
+	assert_ne(stub.opened_trn, "", "the first open mounts the terrain")
+	stub.opened_trn = ""
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
+	assert_eq(stub.opened_trn, "", "a clean same-terrain reopen skips the remount")
+	assert_true(controller.is_loaded(), "the mission still loads fully on the skip path")
+
+
+func test_same_terrain_skip_is_case_insensitive_and_adopts_editor_form() -> void:
+	var stub := _stub_with_dvxi5()
+	var controller := MissionController.new(stub)
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
+	# The terrain editor's recorded path differs only by case/slashes from what
+	# resolve_file returns; the skip must still match, and the controller must
+	# adopt the editor's form so reconcile_with_terrain's exact compare holds.
+	stub.current_trn_path = stub.current_trn_path.to_upper().replace("/", "\\")
+	stub.opened_trn = ""
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
+	assert_eq(stub.opened_trn, "", "a case/slash difference is not a terrain swap")
+	assert_eq(controller._loaded_trn_path, stub.current_trn_path,
+		"the controller records the editor's own path form")
+
+
+func test_dirty_terrain_always_remounts() -> void:
+	var stub := _stub_with_dvxi5()
+	var controller := MissionController.new(stub)
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
+	stub.is_dirty = true
+	stub.opened_trn = ""
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
+	assert_ne(stub.opened_trn, "", "unsaved terrain edits force the reload (predictable semantics)")
+
+
+func test_open_mission_records_a_perf_timeline() -> void:
+	var stub := _stub_with_dvxi5()
+	var controller := MissionController.new(stub)
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK, "the fixture mission opens")
+
+	var timeline: PerfTimeline = PerfTimeline.latest()
+	assert_not_null(timeline, "a successful open finishes a timeline into the ring")
+	assert_string_contains(timeline.label, BMS_PATH.get_file(), "the timeline names the mission")
+	var names := Array(timeline.span_names())
+	# Controller stages + the placer's sub-stages. The stub's open_trn ignores its
+	# timeline, so the real terrain sub-spans are covered by the terrain editor, not here.
+	for expected in ["parse", "terrain", "environment", "objects", "overlays",
+			"bucket_entities", "static_batches", "pick_colliders", "animated_models"]:
+		assert_has(names, expected, "the load records the %s span" % expected)
+	assert_string_contains(controller.get_last_status(), "(",
+		"the load status carries the timing brief")
 
 
 func test_set_game_mode_is_single_select_and_undoable() -> void:
@@ -1034,6 +1100,10 @@ func test_failed_terrain_load_clears_prior_mission() -> void:
 
 	# A second open whose terrain resolves but fails to load wipes the editor's
 	# terrain; the controller must not keep describing the now-gone prior mission.
+	# The mounted terrain is made foreign first so the same-clean-terrain remount
+	# skip cannot satisfy the open (a matching clean mount would never re-enter
+	# open_trn, which is the point of that skip).
+	stub.current_trn_path = "swapped/elsewhere.trn"
 	stub.open_trn_result = ERR_CANT_OPEN
 	var err := controller.open_mission(_abs(BMS_PATH))
 	assert_eq(err, ERR_CANT_OPEN, "a terrain load failure surfaces as the open error")

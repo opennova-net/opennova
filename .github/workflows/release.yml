@@ -39,6 +39,8 @@ jobs:
 
   package-addon:
     runs-on: ubuntu-latest
+    outputs:
+      artifact_id: ${{ steps.upload_blender.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,14 +59,18 @@ jobs:
       - name: Package addon
         run: scripts/package_addon.sh
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload Blender addon package
+        id: upload_blender
+        uses: actions/upload-artifact@v7
         with:
-          name: opennova_blender
           path: dist/opennova_blender-v*.zip
+          archive: false
+          if-no-files-found: error
 
   package-max-mzp:
     runs-on: windows-latest
+    outputs:
+      artifact_id: ${{ steps.upload_max.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,14 +91,18 @@ jobs:
         shell: pwsh
         run: scripts/package_max_mzp.ps1
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload 3ds Max package
+        id: upload_max
+        uses: actions/upload-artifact@v7
         with:
-          name: opennova_max
           path: dist/opennova_max-v*.mzp
+          archive: false
+          if-no-files-found: error
 
   package-importer:
     runs-on: windows-latest
+    outputs:
+      artifact_id: ${{ steps.upload_importer.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -113,14 +123,18 @@ jobs:
         shell: pwsh
         run: scripts/package_importer_windows.ps1
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload importer package
+        id: upload_importer
+        uses: actions/upload-artifact@v7
         with:
-          name: opennova_importer
           path: dist/onimport-v*.exe
+          archive: false
+          if-no-files-found: error
 
   package-godot-windows-editor:
     runs-on: windows-latest
+    outputs:
+      artifact_id: ${{ steps.upload_modtools.outputs.artifact-id }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -154,13 +168,17 @@ jobs:
         run: scripts/package_godot_editor_windows.ps1
 
       - name: Upload opennova-modtools Windows zip
-        uses: actions/upload-artifact@v4
+        id: upload_modtools
+        uses: actions/upload-artifact@v7
         with:
-          name: opennova_modtools_windows
           path: dist/opennova-modtools-windows-v*.zip
+          archive: false
+          if-no-files-found: error
 
   package-godot-windows-runtime:
     runs-on: windows-latest
+    outputs:
+      artifact_id: ${{ steps.upload_runtime.outputs.artifact-id }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -194,13 +212,17 @@ jobs:
         run: scripts/package_godot_runtime_windows.ps1
 
       - name: Upload opennova runtime Windows zip
-        uses: actions/upload-artifact@v4
+        id: upload_runtime
+        uses: actions/upload-artifact@v7
         with:
-          name: opennova_runtime_windows
           path: dist/opennova-runtime-windows-v*.zip
+          archive: false
+          if-no-files-found: error
 
   package-godot-macos-editor:
     runs-on: macos-latest
+    outputs:
+      artifact_id: ${{ steps.upload_modtools_macos.outputs.artifact-id }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -234,13 +256,17 @@ jobs:
         run: scripts/package_godot_editor_macos.sh
 
       - name: Upload opennova-modtools macOS zip
-        uses: actions/upload-artifact@v4
+        id: upload_modtools_macos
+        uses: actions/upload-artifact@v7
         with:
-          name: opennova_modtools_macos
           path: dist/opennova-modtools-macos-v*.zip
+          archive: false
+          if-no-files-found: error
 
   package-godot-macos-runtime:
     runs-on: macos-latest
+    outputs:
+      artifact_id: ${{ steps.upload_runtime_macos.outputs.artifact-id }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -274,10 +300,12 @@ jobs:
         run: scripts/package_godot_runtime_macos.sh
 
       - name: Upload opennova runtime macOS zip
-        uses: actions/upload-artifact@v4
+        id: upload_runtime_macos
+        uses: actions/upload-artifact@v7
         with:
-          name: opennova_runtime_macos
           path: dist/opennova-runtime-macos-v*.zip
+          archive: false
+          if-no-files-found: error
 
   release:
     runs-on: ubuntu-latest
@@ -292,9 +320,17 @@ jobs:
           python-version: '3.11'
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
+          artifact-ids: >-
+            ${{ needs.package-addon.outputs.artifact_id }},
+            ${{ needs.package-max-mzp.outputs.artifact_id }},
+            ${{ needs.package-importer.outputs.artifact_id }},
+            ${{ needs.package-godot-windows-editor.outputs.artifact_id }},
+            ${{ needs.package-godot-windows-runtime.outputs.artifact_id }},
+            ${{ needs.package-godot-macos-editor.outputs.artifact_id }},
+            ${{ needs.package-godot-macos-runtime.outputs.artifact_id }}
           merge-multiple: true
 
       - name: Validate release deliverables

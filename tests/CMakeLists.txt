@@ -776,3 +776,21 @@ target_link_libraries(mount_test PRIVATE opennova_mission opennova_world)
 target_include_directories(mount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mount_test PRIVATE cxx_std_17)
 add_test(NAME mission_mount COMMAND mount_test)
+
+# Cross-resource reference extraction: env/credits/items.def extractors, the
+# extension+magic dispatch, edge dedup, and fail-soft on malformed input.
+add_executable(refs_extract_test refs/refs_extract_test.cpp)
+target_link_libraries(refs_extract_test PRIVATE opennova_refs opennova_env opennova_cbin opennova_def)
+target_include_directories(refs_extract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(refs_extract_test PRIVATE cxx_std_17)
+add_test(NAME refs_extract COMMAND refs_extract_test)
+
+# refs: .3di material-texture and .bms header/item extractors against the
+# committed retail fixtures (self-consistent vs each format's own parser).
+foreach(test threedi mission)
+    add_executable(refs_${test}_test refs/refs_${test}_test.cpp)
+    target_link_libraries(refs_${test}_test PRIVATE opennova_refs opennova_threedi opennova_mission)
+    target_include_directories(refs_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(refs_${test}_test PRIVATE cxx_std_17)
+    add_test(NAME refs_${test} COMMAND refs_${test}_test)
+endforeach()

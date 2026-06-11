@@ -325,6 +325,12 @@ func open_file(path: String) -> Error:
 	return _document.open_mnu(path)
 
 
+# Cross-jump focus hook (EditorWorkspace.focus_reference): {"screen": String}
+# selects the named screen.
+func focus_reference(focus: Dictionary) -> Error:
+	return focus_screen_named(String(focus.get("screen", "")))
+
+
 func focus_screen_named(screen_name: String) -> Error:
 	var name := screen_name.strip_edges()
 	if name.is_empty():
