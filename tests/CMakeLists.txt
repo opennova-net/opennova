@@ -946,6 +946,13 @@ target_include_directories(nwmsg_replay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_definitions(nwmsg_replay_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
 add_test(NAME nwmsg_replay COMMAND nwmsg_replay_test)
 
+# Host-row staleness backstop sweep (prune_stale_hosts).
+add_executable(host_prune_test novaworld/host_prune_test.cpp)
+target_link_libraries(host_prune_test PRIVATE opennova_novaworld)
+target_include_directories(host_prune_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(host_prune_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME host_prune COMMAND host_prune_test)
+
 add_executable(backend_schema_test novaworld/backend_schema_test.cpp)
 target_link_libraries(backend_schema_test PRIVATE opennova_novaworld)
 target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

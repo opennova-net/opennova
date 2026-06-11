@@ -51,6 +51,8 @@ ServerConfig ServerConfig::from_env() {
 
 	c.heartbeat_timeout_ms = getenv_u64("HEARTBEAT_TIMEOUT_MS", c.heartbeat_timeout_ms);
 	c.tick_interval_ms     = getenv_u64("TICK_INTERVAL_MS",     c.tick_interval_ms);
+	c.host_sweep_interval_ms = getenv_u64("HOST_SWEEP_INTERVAL_MS", c.host_sweep_interval_ms);
+	c.host_stale_window_ms   = getenv_u64("HOST_STALE_WINDOW_MS",   c.host_stale_window_ms);
 
 	if (auto v = getenv_safe("ADMIN_API_TOKEN"))     c.admin_api_token = v;
 

@@ -72,6 +72,11 @@ void update_host(db::Database &db, const HostRow &row);
 void remove_host_by_rid(db::Database &db, uint32_t rid);
 void remove_host_by_peer(db::Database &db, const std::string &peer_ip, int peer_port);
 
+// Backstop sweep: delete active_hosts whose updated_at is older than
+// `window_seconds` (crash orphans the normal teardown missed). Returns the
+// number of rows removed. host_players cascade. policy, not wire-witnessed.
+int prune_stale_hosts(db::Database &db, int64_t window_seconds);
+
 void add_player(db::Database &db, const PlayerRow &row);
 void remove_player_by_peer(db::Database &db, const std::string &peer_ip, int peer_port);
 

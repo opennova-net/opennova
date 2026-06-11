@@ -122,6 +122,20 @@ void remove_host_by_peer(opennova::db::Database &db,
 	        {str(peer_ip), i64(peer_port)});
 }
 
+int prune_stale_hosts(opennova::db::Database &db, int64_t window_seconds) {
+	// policy: a backstop for rows the normal teardown (GOODBYE /
+	// ClientStopHosting / heartbeat-timeout -> erase_lobby_state) somehow
+	// missed (a DB write that landed while its in-memory lobby_state was
+	// already gone). `updated_at` is refreshed on every ClientHostUpdate
+	// heartbeat, so anything older than the window is a crash orphan.
+	// host_players rows cascade-delete (ON DELETE CASCADE; sqlite is built
+	// with DEFAULT_FOREIGN_KEYS=1).
+	const std::string modifier = "-" + std::to_string(window_seconds) + " seconds";
+	db.exec("DELETE FROM active_hosts WHERE updated_at < datetime('now', ?);",
+	        {str(modifier)});
+	return db.changes();
+}
+
 void add_player(opennova::db::Database &db, const PlayerRow &p) {
 	db.exec(
 		"INSERT OR REPLACE INTO host_players ("
