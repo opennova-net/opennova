@@ -28,14 +28,16 @@ namespace opennova::refs {
 // so a credits file naming one font 500 times yields one edge.
 struct Reference {
     std::string source_path;  // the name/path handed to extract(), verbatim
-    std::string source_kind;  // "environment" | "credits" | "item_defs" (matches resource_index vocabulary where one exists)
+    std::string source_kind;  // "environment" | "credits" | "item_defs" | "menu" | ... (matches resource_index vocabulary where one exists)
     std::string target_name;  // referenced asset name as written in the source
-    std::string target_kind;  // "texture" | "object_model" | "anim_def" | "sound_profile" | "font" | "image"
+    std::string target_kind;  // "texture" | "object_model" | "anim_def" | "sound_profile" | "font" |
+                              // "image" | "menu" | "sound" (.lwf bank file) | "strings" (table file) |
+                              // "string_id" (key INSIDE a table - no file semantics) | "datasource"
     std::string site;         // where in the source ("sky_map1", "entry[3].font", "item 451 graphic")
 };
 
 // True when `name` (by extension or well-known filename, case-insensitive on
-// the basename) has an extractor: *.env, *.kda, items.def.
+// the basename) has an extractor: *.env, *.kda, *.3di, *.bms, *.mnu, items.def.
 bool can_extract(const std::string& name);
 
 // Extract `source_path`'s outgoing references from its bytes into `out`

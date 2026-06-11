@@ -460,10 +460,9 @@ SpinButton parse_spinbutton(const mnu_xml::Node *spin_node) {
 }
 
 // Parse table HEADER element.
-// [orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0]  DIVERGENCE: the original
-// HEADER also carries type="id" (branch @0x64344a) and resolves the header text via
-// CUIStringTable_LookupString @0x6434df; this reimpl neither parses nor serializes
-// HEADER type, so it is dropped on round-trip. See notes/mnu/divergence-backlog.md.
+// [orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0]. type="id" headers
+// resolve their text via CUIStringTable_LookupString @ 0x6434df; the attribute
+// is parsed below (the refs extractor's string_id emission depends on it).
 TableHeader parse_table_header(const mnu_xml::Node *node) {
   TableHeader header;
   if (!node) return header;
