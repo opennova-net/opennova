@@ -31,6 +31,9 @@ var _detail_host: Control
 var _play_mount: ViewportMount
 # The shell's viewport host, cached at mount so Play/Stop can swap mounts.
 var _viewport_host: Control
+# The live "Terrain changed under N objects" confirm (see _prompt_reground), so a
+# re-activate while it is open cannot stack a second one.
+var _reground_dialog: ConfirmationDialog
 
 
 func _init(value: Node = null) -> void:
@@ -121,15 +124,64 @@ func shows_camera_status() -> bool:
 
 func activate() -> void:
 	if _controller != null:
-		# Drop a loaded mission whose terrain was changed under it from the Terrain
-		# workspace before re-showing its objects (else they float over a new world).
-		_controller.reconcile_with_terrain()
+		# Drop a loaded mission whose terrain was swapped out underneath from the
+		# Terrain workspace before re-showing its objects (else they float over a new
+		# world). On the SAME terrain, a non-zero return means height edits left that
+		# many objects off the ground — offer the one-step re-ground.
+		var drift: int = _controller.reconcile_with_terrain()
 		_controller.set_objects_visible(true)
+		if drift > 0:
+			_prompt_reground(drift)
 	if terrain_editor != null and _mount != null and _mount.is_mounted():
 		terrain_editor.set_viewport_active(true, false)
 
 
+# Terrain heights changed under the loaded mission (same .trn): offer the bulk
+# re-ground. A transient ConfirmationDialog parented to the shell (the music
+# workspace's deactivate prompt pattern), with the shell theme set EXPLICITLY —
+# an embedded Window does not resolve the in-tree theme through the Control
+# parent chain (see the shell's _ensure_unsaved_dialog comment) — and exclusive
+# like the shell's own confirms. Escape/X emit `canceled`, so every dismissal
+# lands on the decline path (acknowledge: quiet until the next height edit).
+func _prompt_reground(count: int) -> void:
+	if editor_shell == null:
+		return  # headless host: the inspector's manual Re-ground button still covers it
+	if _reground_dialog != null and is_instance_valid(_reground_dialog):
+		return
+	var dialog := ConfirmationDialog.new()
+	dialog.name = "MissionRegroundDialog"
+	dialog.title = "Terrain changed"
+	dialog.dialog_text = "Terrain changed under %d object%s.\nRe-ground them to the new surface?" % [count, "" if count == 1 else "s"]
+	dialog.exclusive = true
+	if editor_shell is Control and (editor_shell as Control).theme != null:
+		dialog.theme = (editor_shell as Control).theme
+	dialog.get_ok_button().text = "Re-ground"
+	dialog.get_cancel_button().text = "Leave as-is"
+	dialog.confirmed.connect(func() -> void:
+		# The is_loaded guard covers a stale confirm: a dialog that lost modality
+		# (another exclusive sibling was up) can be answered after the mission was
+		# cleared or swapped underneath it.
+		if _controller.is_loaded():
+			_controller.reground_drifted()  # reports "Re-grounded N..." via status_reported
+		_reground_dialog = null
+		dialog.queue_free())
+	dialog.canceled.connect(func() -> void:
+		_controller.acknowledge_terrain_drift()
+		_reground_dialog = null
+		dialog.queue_free())
+	_reground_dialog = dialog
+	editor_shell.add_child(dialog)
+	dialog.popup_centered()
+
+
 func deactivate() -> void:
+	# Leaving the workspace dismisses the re-ground question without answering it:
+	# the revision is NOT adopted, so the prompt re-poses on the next activate
+	# (unlike the explicit "Leave as-is"). Also keeps the dialog from floating over
+	# other workspaces or colliding with their own exclusive prompts.
+	if _reground_dialog != null and is_instance_valid(_reground_dialog):
+		_reground_dialog.queue_free()
+	_reground_dialog = null
 	if is_playing_mission():
 		stop_play_mission()
 	if _controller != null:
