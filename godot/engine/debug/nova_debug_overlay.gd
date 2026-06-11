@@ -12,6 +12,12 @@ extends CanvasLayer
 ## frame; the entity list reads ONE packed snapshot per refresh and only the
 ## selected entity pays for the scalar detail card.
 
+## Fired after a Sim-tab transport press (play/pause/step/stop) or the script
+## pause toggle acted on the runtime. Hosts whose own UI mirrors the runtime's
+## transport state (the editor sim bar) listen and re-read; hosts without one
+## (the game's F3 overlay) ignore it.
+signal transport_used(action: String)
+
 const REFRESH_INTERVAL := 0.25
 const PANEL_WIDTH := 380.0
 
@@ -38,6 +44,7 @@ var _wac_pause_check: CheckBox
 # Vars pane
 var _nonzero_check: CheckBox
 var _writes_check: CheckButton
+var _writes_locked := false
 var _vars_rows: VBoxContainer
 # (bank, index) key -> the row's value Control, so steady-state refreshes
 # update text in place instead of rebuilding ~800 rows.
@@ -79,6 +86,21 @@ func set_runtime(runtime) -> void:
 func toggle() -> void:
 	visible = not visible
 	_sync_timer()
+	if visible:
+		_refresh()
+
+
+## One-way lock on the variable-edit toggle, for hosts that must not let the
+## overlay mutate the live sim (the editor summons it over a mission preview).
+## `reason` is the caller's artist-facing tooltip copy. Deliberately no
+## unlock: a locked overlay stays read-only for its whole life, so a host
+## mode change can never silently re-arm edits.
+func lock_writes(reason: String) -> void:
+	_writes_locked = true
+	_writes_check.set_pressed_no_signal(false)
+	_writes_check.disabled = true
+	if not reason.is_empty():
+		_writes_check.tooltip_text = reason
 	if visible:
 		_refresh()
 
@@ -386,7 +408,7 @@ func _refresh_vars(sim: Object) -> void:
 		["M", sim.get_music_variables_snapshot(), false],
 	]
 	var nonzero_only: bool = _nonzero_check.button_pressed
-	var writable: bool = _writes_check.button_pressed
+	var writable: bool = _writes_check.button_pressed and not _writes_locked
 
 	# Decide what should be visible, then rebuild only when that set (or the
 	# writes mode) changed; otherwise update values in place.
@@ -483,6 +505,7 @@ func _on_play_pressed() -> void:
 	if runtime != null:
 		runtime.play()
 		_refresh()
+		transport_used.emit("play")
 
 
 func _on_pause_pressed() -> void:
@@ -490,6 +513,7 @@ func _on_pause_pressed() -> void:
 	if runtime != null:
 		runtime.pause()
 		_refresh()
+		transport_used.emit("pause")
 
 
 func _on_step_pressed() -> void:
@@ -497,6 +521,7 @@ func _on_step_pressed() -> void:
 	if runtime != null:
 		runtime.step_once()
 		_refresh()
+		transport_used.emit("step")
 
 
 func _on_stop_pressed() -> void:
@@ -504,12 +529,14 @@ func _on_stop_pressed() -> void:
 	if runtime != null:
 		runtime.stop()
 		_refresh()
+		transport_used.emit("stop")
 
 
 func _on_wac_pause_toggled(pressed: bool) -> void:
 	var sim := _resolve_sim(_resolve_runtime())
 	if sim != null:
 		sim.set_wac_paused(pressed)
+		transport_used.emit("wac_pause")
 
 
 func _on_vars_filter_toggled(_pressed: bool) -> void:
@@ -517,7 +544,9 @@ func _on_vars_filter_toggled(_pressed: bool) -> void:
 
 
 func _on_var_submitted(text: String, index: int) -> void:
-	if not _writes_check.button_pressed:
+	# Re-check the lock at submit time (not just at row build): rows built
+	# before lock_writes() would otherwise still commit on Enter.
+	if _writes_locked or not _writes_check.button_pressed:
 		return
 	var sim := _resolve_sim(_resolve_runtime())
 	if sim != null and text.is_valid_int():

@@ -139,7 +139,11 @@ var _sim_play_btn: Button
 var _play_mission_cb := Callable()
 var _is_playing_cb := Callable()
 var _stop_play_cb := Callable()
+# Debug-overlay hooks, same injection pattern: toggle() -> void, is_open() -> bool.
+var _debug_toggle_cb := Callable()
+var _debug_is_open_cb := Callable()
 var _play_mission_btn: Button
+var _debug_btn: Button
 var _sim_pause_btn: Button
 var _sim_step_btn: Button
 var _sim_stop_btn: Button
@@ -1310,6 +1314,17 @@ func _build_sim_bar() -> void:
 	_sim_bar.add_child(_play_mission_btn)
 	_play_mission_btn.pressed.connect(_on_play_mission_pressed)
 
+	# Mission debug panel: summons the engine debug overlay over the editor
+	# (read-only there — the workspace locks variable edits before mounting).
+	_debug_btn = Button.new()
+	_debug_btn.name = "MissionDebugBtn"
+	_debug_btn.toggle_mode = true
+	_debug_btn.text = "Debug"
+	_debug_btn.tooltip_text = "Open the mission debug panel: live units, sim transport, and script variables."
+	_prepare_sim_button(_debug_btn)
+	_sim_bar.add_child(_debug_btn)
+	_debug_btn.toggled.connect(_on_debug_toggled)
+
 
 # The workspace injects these after building the inspector; without them (tests,
 # headless) the Play Mission button simply hides.
@@ -1317,6 +1332,22 @@ func set_play_hooks(play: Callable, is_playing: Callable, stop: Callable) -> voi
 	_play_mission_cb = play
 	_is_playing_cb = is_playing
 	_stop_play_cb = stop
+	_refresh_sim_bar()
+
+
+# Same injection pattern as set_play_hooks: the Debug toggle hides until the
+# workspace hands over the overlay summon + open-state query.
+func set_debug_hooks(toggle: Callable, is_open: Callable) -> void:
+	_debug_toggle_cb = toggle
+	_debug_is_open_cb = is_open
+	_refresh_sim_bar()
+
+
+func _on_debug_toggled(_pressed: bool) -> void:
+	if _debug_toggle_cb.is_valid():
+		_debug_toggle_cb.call()
+	# Re-sync from the real open state: a summon that could not mount (no shell)
+	# must not leave the toggle latched on.
 	_refresh_sim_bar()
 
 
@@ -1343,7 +1374,11 @@ func _refresh_sim_bar() -> void:
 	var can: bool = supported and _controller.can_simulate()
 	var simming: bool = supported and _controller.is_simulating()
 	var playing: bool = supported and _controller.is_sim_playing()
-	_sim_bar.visible = can or simming
+	# The bar also stays up whenever the Debug toggle is wired: it is the
+	# overlay's ONLY close affordance in the editor, so it must remain reachable
+	# with no mission open (the perf tab works without a sim) and while an
+	# overlay is still up after the mission underneath it cleared.
+	_sim_bar.visible = can or simming or _debug_toggle_cb.is_valid()
 	_sim_play_btn.disabled = not can or playing
 	_sim_pause_btn.disabled = not playing
 	_sim_step_btn.disabled = not can or playing
@@ -1353,6 +1388,13 @@ func _refresh_sim_bar() -> void:
 		_play_mission_btn.visible = _play_mission_cb.is_valid()
 		_play_mission_btn.text = "Stop Playing" if pie_playing else "Play Mission"
 		_play_mission_btn.disabled = not pie_playing and not can
+	if _debug_btn != null:
+		# Stays enabled regardless of sim state: the overlay is useful without a
+		# live sim (perf tab, last mission's spans). Pressed state rides this
+		# refresh (controller.changed), so no polling.
+		_debug_btn.visible = _debug_toggle_cb.is_valid()
+		if _debug_is_open_cb.is_valid():
+			_debug_btn.set_pressed_no_signal(bool(_debug_is_open_cb.call()))
 
 
 func _on_mode_tab_changed(tab: int) -> void:
