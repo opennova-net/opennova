@@ -96,7 +96,14 @@ var _workspace_buttons: Dictionary = {}
 # pressed state mirrors popup visibility instead of the active-id refresh loop.
 var _popup_workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
+# Top-bar overflow ("More") menu holding the secondary document actions
+# (Save As / Export). Only the horizontal top-bar host builds one; the
+# environment popup's vertical list keeps full buttons.
+var _workspace_overflow_button: MenuButton
 var _environment_action_buttons: Dictionary = {}
+# Last applied shell title; the label min-width is recomputed only when the
+# title text actually changes (this runs from the per-frame status refresh).
+var _project_label_title_cache := ""
 var _asset_dock_workspace_id: int = -1
 var _camera_settings_panel: Control
 var _resource_library := EditorResourceLibrary.new()
@@ -382,12 +389,14 @@ func _on_popup_workspace_toggled(workspace_id: int, pressed: bool) -> void:
 
 
 func _action_defs_for_workspace(workspace: EditorWorkspace) -> Array:
+	# "overflow" marks the secondary actions the horizontal top bar folds into
+	# the More menu; vertical hosts (environment popup) ignore it.
 	var action_defs := [
-		{"id": WorkspaceAction.NEW, "visible": workspace.has_new_action(), "label": workspace.get_new_action_label()},
-		{"id": WorkspaceAction.OPEN, "visible": workspace.has_open_action(), "label": workspace.get_open_action_label()},
-		{"id": WorkspaceAction.SAVE, "visible": workspace.has_save_action(), "label": workspace.get_save_action_label()},
-		{"id": WorkspaceAction.SAVE_AS, "visible": workspace.has_save_as_action(), "label": workspace.get_save_as_action_label()},
-		{"id": WorkspaceAction.EXPORT, "visible": workspace.has_export_action(), "label": workspace.get_export_action_label()},
+		{"id": WorkspaceAction.NEW, "visible": workspace.has_new_action(), "label": workspace.get_new_action_label(), "overflow": false},
+		{"id": WorkspaceAction.OPEN, "visible": workspace.has_open_action(), "label": workspace.get_open_action_label(), "overflow": false},
+		{"id": WorkspaceAction.SAVE, "visible": workspace.has_save_action(), "label": workspace.get_save_action_label(), "overflow": false},
+		{"id": WorkspaceAction.SAVE_AS, "visible": workspace.has_save_as_action(), "label": workspace.get_save_as_action_label(), "overflow": true},
+		{"id": WorkspaceAction.EXPORT, "visible": workspace.has_export_action(), "label": workspace.get_export_action_label(), "overflow": true},
 	]
 	return action_defs
 
@@ -404,14 +413,21 @@ func _rebuild_action_buttons(
 		host.remove_child(child)
 		child.free()
 	buttons.clear()
+	# The freed children included the previous More menu (top-bar host only).
+	if host is HBoxContainer:
+		_workspace_overflow_button = null
 
 	if workspace == null:
 		host.visible = false
 		return
 
 	var action_defs := _action_defs_for_workspace(workspace)
+	var overflow_defs: Array = []
 	for action_def in action_defs:
 		if not bool(action_def["visible"]):
+			continue
+		if host is HBoxContainer and bool(action_def.get("overflow", false)):
+			overflow_defs.append(action_def)
 			continue
 		var btn := Button.new()
 		var action_id := int(action_def["id"])
@@ -429,7 +445,11 @@ func _rebuild_action_buttons(
 		host.add_child(btn)
 		buttons[action_id] = btn
 
-	host.visible = not buttons.is_empty()
+	if not overflow_defs.is_empty():
+		_workspace_overflow_button = _make_overflow_button(overflow_defs, on_pressed, name_prefix, min_height)
+		host.add_child(_workspace_overflow_button)
+
+	host.visible = not buttons.is_empty() or (host is HBoxContainer and _workspace_overflow_button != null)
 	_refresh_action_buttons_state(workspace, buttons)
 
 
@@ -494,6 +514,55 @@ func _refresh_action_buttons_state(workspace: EditorWorkspace, buttons: Dictiona
 				btn.disabled = busy or workspace == null or not workspace.can_save_as()
 			WorkspaceAction.EXPORT:
 				btn.disabled = busy or workspace == null or not workspace.can_export()
+
+
+func _make_overflow_button(overflow_defs: Array, on_pressed: Callable, name_prefix: String, min_height: float) -> MenuButton:
+	var more := MenuButton.new()
+	more.name = name_prefix + "MoreActionsButton"
+	more.text = "More"
+	more.tooltip_text = "More document actions"
+	more.icon = EditorIconLibrary.resolve(&"action_more")
+	more.focus_mode = Control.FOCUS_NONE
+	more.flat = false
+	more.custom_minimum_size = Vector2(0, min_height)
+	more.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var popup := more.get_popup()
+	# The popup is a native Window; it does not inherit the shell theme.
+	if theme != null:
+		popup.theme = theme
+	for action_def in overflow_defs:
+		var action_id := int(action_def["id"])
+		popup.add_icon_item(EditorIconLibrary.resolve(_workspace_action_icon_id(action_id)), String(action_def["label"]), action_id)
+	# PopupMenu.id_pressed hands over the item id, which is the WorkspaceAction
+	# value, so the menu routes through the same handler as the buttons.
+	popup.id_pressed.connect(on_pressed)
+	# Items are only actionable while the popup is open; refreshing their
+	# disabled state on about_to_popup keeps gating out of the per-frame poll.
+	popup.about_to_popup.connect(_refresh_workspace_overflow_state)
+	return more
+
+
+func _refresh_workspace_overflow_state() -> void:
+	if _workspace_overflow_button == null or not is_instance_valid(_workspace_overflow_button):
+		return
+	var workspace := _get_active_workspace()
+	var busy := _any_workspace_busy()
+	var popup := _workspace_overflow_button.get_popup()
+	for i in popup.item_count:
+		var disabled := busy or workspace == null
+		if not disabled:
+			match popup.get_item_id(i):
+				WorkspaceAction.NEW:
+					disabled = not workspace.can_new()
+				WorkspaceAction.OPEN:
+					disabled = not workspace.can_open()
+				WorkspaceAction.SAVE:
+					disabled = not workspace.can_save()
+				WorkspaceAction.SAVE_AS:
+					disabled = not workspace.can_save_as()
+				WorkspaceAction.EXPORT:
+					disabled = not workspace.can_export()
+		popup.set_item_disabled(i, disabled)
 
 
 func _on_workspace_pressed(workspace_id: int) -> void:
@@ -1583,10 +1652,20 @@ func _swap_workflow_inspector(workspace: EditorWorkspace, workflow_id: int) -> v
 
 func _refresh_project_label() -> void:
 	var workspace := _get_active_workspace()
-	if workspace == null:
-		_project_label.text = "OpenNova Terrain Editor"
+	var title := "OpenNova Terrain Editor" if workspace == null else workspace.get_project_title()
+	if title == _project_label_title_cache:
 		return
-	_project_label.text = workspace.get_project_title()
+	_project_label_title_cache = title
+	_project_label.text = title
+	# Size the label to its text instead of a fixed column: short titles stop
+	# wasting rail width, long ones clip at a cap so the 1024px shell still
+	# fits every top-bar group.
+	var font := _project_label.get_theme_font(&"font")
+	var font_size := _project_label.get_theme_font_size(&"font_size")
+	if font == null:
+		return
+	var text_width := font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+	_project_label.custom_minimum_size.x = clampf(text_width + 8.0, 120.0, 320.0)
 
 
 func show_status_message(text: String, duration: float = 4.0) -> void:

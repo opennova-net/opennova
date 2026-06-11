@@ -108,6 +108,25 @@ func _find_button_by_text_deep(root: Node, text: String) -> Button:
 	return null
 
 
+func _overflow_popup(host: Node) -> PopupMenu:
+	var more := host.find_child("MoreActionsButton", true, false) as MenuButton
+	return null if more == null else more.get_popup()
+
+
+func _overflow_item_texts(popup: PopupMenu) -> Array:
+	var texts := []
+	for i in popup.item_count:
+		texts.append(popup.get_item_text(i))
+	return texts
+
+
+func _overflow_item_disabled(popup: PopupMenu, text: String) -> bool:
+	for i in popup.item_count:
+		if popup.get_item_text(i) == text:
+			return popup.is_item_disabled(i)
+	return true
+
+
 func _has_label_text(root: Node, text: String) -> bool:
 	if root is Label and (root as Label).text == text:
 		return true
@@ -223,8 +242,10 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 		"Fresh Credits workspace should own the shell title while active.")
 	assert_true(_workspace_action_texts(actions_host).has("Open Credits..."),
 		"Credits should expose an open action.")
-	assert_true(_workspace_action_texts(actions_host).has("Save Credits As..."),
-		"Credits should expose save-as for a fresh resource.")
+	var credits_overflow := _overflow_popup(actions_host)
+	assert_not_null(credits_overflow, "Credits should fold secondary actions into the More menu.")
+	assert_true(_overflow_item_texts(credits_overflow).has("Save Credits As..."),
+		"Credits should keep save-as reachable from the More menu.")
 
 
 func test_every_workspace_rail_button_has_an_icon() -> void:
@@ -342,8 +363,10 @@ func test_mission_workspace_exposes_document_actions_and_inspector() -> void:
 	# its left pane (mode tabs + lists) mounts in %InspectorHost, while its Selection | Mission
 	# editor reparents into the shared right dock.
 	assert_true(actions_host.visible, "Mission should expose its document actions.")
-	assert_eq(_workspace_action_texts(actions_host), ["New Mission", "Open Mission...", "Save Mission", "Save Mission As..."],
-		"Mission exposes New + Open + Save + Save As once authoring lands.")
+	assert_eq(_workspace_action_texts(actions_host), ["New Mission", "Open Mission...", "Save Mission", "More"],
+		"Mission exposes New + Open + Save as buttons, with the secondary actions folded into More.")
+	assert_true(_overflow_item_texts(_overflow_popup(actions_host)).has("Save Mission As..."),
+		"Mission keeps Save As reachable from the More menu.")
 	# The left pane mounts the real MissionInspector node (its Selection | Mission editor reparents
 	# into the dock). The prior workspace's inspector children are queue_free'd, which is deferred,
 	# so they can still coexist this same frame; find the inspector by script rather than by index.
@@ -927,12 +950,16 @@ func test_terrain_workspace_exposes_project_save_and_export_actions() -> void:
 
 	var actions_host: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
 	var save_button := _find_button_by_text(actions_host, "Save Project")
-	var export_button := _find_button_by_text(actions_host, "Export Terrain...")
-	assert_eq(_workspace_action_texts(actions_host), ["New Terrain", "Open Terrain...", "Save Project", "Save Project As...", "Export Terrain..."], "Terrain should expose project actions and a distinct export action.")
+	var overflow := _overflow_popup(actions_host)
+	assert_eq(_workspace_action_texts(actions_host), ["New Terrain", "Open Terrain...", "Save Project", "More"], "Terrain should expose primary actions as buttons and fold the rest into More.")
 	assert_not_null(save_button, "Terrain should expose Save Project.")
-	assert_not_null(export_button, "Terrain should expose Export Terrain.")
+	assert_not_null(overflow, "Terrain should expose a More menu for the secondary actions.")
+	assert_eq(_overflow_item_texts(overflow), ["Save Project As...", "Export Terrain..."], "More holds Save As and Export in action order.")
 	assert_false(save_button.disabled, "Dirty terrain projects should enable Save Project.")
-	assert_false(export_button.disabled, "Terrain export should be available when the editor is idle.")
+	# Menu items refresh their gating when the popup is about to show.
+	overflow.about_to_popup.emit()
+	assert_false(_overflow_item_disabled(overflow, "Save Project As..."), "Save As should be available when the editor is idle.")
+	assert_false(_overflow_item_disabled(overflow, "Export Terrain..."), "Terrain export should be available when the editor is idle.")
 
 
 func test_switching_workspaces_preserves_terrain_dirty_state() -> void:
@@ -1223,6 +1250,17 @@ func test_workstation_uses_clip_text_for_long_labels() -> void:
 	assert_true(project_label.clip_text, "Project label should clip rather than forcing the top bar wider.")
 	assert_true(status_context_label.clip_text, "Status context should clip instead of forcing horizontal overflow.")
 	assert_true(status_camera_label.clip_text, "Status camera text should clip instead of forcing horizontal overflow.")
+
+
+func test_project_label_sizes_to_title_instead_of_fixed_column() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var project_label: Label = workstation.get_node("%ProjectLabel")
+	assert_eq(project_label.text, "Terrain", "The default workspace owns the shell title.")
+	assert_eq(project_label.custom_minimum_size.x, 120.0,
+		"A short title should rest at the floor width instead of reserving a fixed 180px column.")
 
 
 func test_pressing_layout_mode_restores_edit_sectors_tool() -> void:
