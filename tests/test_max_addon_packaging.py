@@ -85,7 +85,10 @@ def test_ci_ships_blender_zip_and_max_mzp() -> None:
     assert "opennova_max" in ci
     assert "dist/opennova_max-v*.mzp" in ci
     assert "validate-deliverables:" in ci
-    assert "dist/release-assets/*" in ci
+    assert "actions/download-artifact@v8" in ci
+    assert "artifact-ids:" in ci
+    assert "merge-multiple: true" in ci
+    assert "dist/release-assets/*" not in ci
 
 
 def test_release_ships_blender_zip_and_max_mzp() -> None:
