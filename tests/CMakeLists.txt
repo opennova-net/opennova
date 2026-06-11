@@ -871,7 +871,7 @@ target_include_directories(lobby_update_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 add_test(NAME lobby_update COMMAND lobby_update_test)
 
 add_executable(gate_server_loopback_test novaworld/gate_server_loopback_test.cpp)
-target_link_libraries(gate_server_loopback_test PRIVATE opennova_novaworld opennova_novacrypto opennova_app_common)
+target_link_libraries(gate_server_loopback_test PRIVATE opennova_novaworld opennova_novacrypto opennova_napi opennova_app_common)
 target_include_directories(gate_server_loopback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gate_server_loopback COMMAND gate_server_loopback_test)
 

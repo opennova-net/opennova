@@ -183,8 +183,19 @@ void NovaWorldClient::send_gate_probe() {
 	if (!gate_socket_.is_valid()) return;
 
 	auto probe = opennova::gate_probe_build(opennova::GATE_PROBE_TAG_JOINTOPS);
+	// Wrap the NWU payload in the LSB-scatter CRC envelope the gate expects.
+	// Retail does the same; the server strips it via napi_envelope_decode, and
+	// without it the gate logs "bad envelope". (Mirrors encode_session_outbound.)
+	std::vector<uint8_t> packet(probe.size() + 4);
+	size_t out_size = 0;
+	if (opennova::napi_envelope_encode(probe.data(), probe.size(),
+	                                   packet.data(), packet.size(), &out_size) != 0) {
+		enter_state(STATE_ERROR, String("gate probe envelope encode failed"));
+		return;
+	}
+	packet.resize(out_size);
 	gate_socket_->set_dest_address(host_, gate_port_);
-	gate_socket_->put_packet(to_pba(probe));
+	gate_socket_->put_packet(to_pba(packet));
 }
 
 void NovaWorldClient::poll_gate() {
@@ -194,8 +205,19 @@ void NovaWorldClient::poll_gate() {
 		auto packet = gate_socket_->get_packet();
 		auto bytes = from_pba(packet);
 
+		// The server wraps the response in the LSB-scatter CRC envelope; strip
+		// it before decrypt+parse (mirrors decode_session_inbound).
+		std::vector<uint8_t> inner(bytes.size());
+		size_t inner_size = 0;
+		if (opennova::napi_envelope_decode(bytes.data(), bytes.size(),
+		                                   inner.data(), inner.size(), &inner_size) != 0) {
+			emit_signal("error_occurred", String("bad gate envelope"));
+			continue;
+		}
+		inner.resize(inner_size);
+
 		opennova::GateResponse parsed;
-		if (!opennova::gate_response_decrypt_and_parse(bytes.data(), bytes.size(), parsed)) {
+		if (!opennova::gate_response_decrypt_and_parse(inner.data(), inner.size(), parsed)) {
 			emit_signal("error_occurred", String("bad gate response"));
 			continue;
 		}
