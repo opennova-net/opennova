@@ -93,13 +93,27 @@ Layouts, RNG, and the divergence catalog live in
 | `def.cpp` soundloop_1..7 / nightshot/dawnshot/duskshot (`libs/def`) | `ItemDef_ParseProperty` | `0x49eb00` | items.def marker sound keys | "soundloop_" @ 0x49fec4, time-of-day @ 0x49fdee; 7-name table @ 0x7d0788 | matching |
 | `NovaMnuMenu` sound profile | menu bank load + UI bank collection | `0x5613bf` / `0x652b40` | "menu.lwf" → `g_MenuSoundBank` @ 0x25DC3E0; per-element add-or-ref from `CUIElement_ParseXMLDefinition` @ 0x648ada | call sites | matching — closed by the 2026-06-09 menu-slice grill ([menu-re.md](mnu/menu-re.md), Sound section); `.pwf` banks still unwitnessed |
 
-## 5. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
+## 5. NovaWorld net function table (gate + session, grill wave 1, 2026-06-11)
+
+Verdicts and the NW-G1/NW-L2 findings live in
+[net/novaworld-net-re.md §8](net/novaworld-net-re.md).
+
+| reimpl symbol (file) | original | addr | role | evidence | status |
+|---|---|---|---|---|---|
+| `gate_response_parse` (`libs/novaworld/src/gate_response.cpp`) | `CNapiGateManager_ProcessResponse` | `0x4ced20` | parse `VAR`-tagged gate response; 19-key set; POST IP/port required | per-key `Napi_StrCaseEqual`; "NO NW POST IP/PORT" @ 0x4cf5xx | divergent → fixed (6 keys added; CUS/PVT flagged; addr citation corrected from 0x4ad330) |
+| `build_gate_response` (`apps/novaworld_server/gate_listener.cpp`) | `CNapiGateManager_ProcessResponse` (emit side) | `0x4ced20` | emit gate response w/ required POSTIPADDRESS/POSTIPPORT | required-field gate `dword_B5F490`/`B5F494` | matching |
+| gate-manager defaults (§6.7 struct) | `CNapiGateManager_InitDefaults` | `0x4d1460` | `gs.novaworld.net` @+8, 7597 @+72, `jop:cus2` @+76 | `Napi_CopyString` literals | matching |
+| (base init, not reimplemented) | `CNapiGateManager_Init` | `0x633f90` | base default `novaworld.net` @+64, overridden by InitDefaults | `Napi_CopyString` @ 0x634021 | confirm-only |
+| `session_hello.cpp` TLV reads | `NapiNPProtocol_HandleClientHello` | `0x6213b0` | NVS/CO/AP/BDAT/PN/PG/PV1/PV2 + retail PV3/PM/CI/EIP/EPN/ET | per-tag `Napi_StrCaseEqual`; NWU key @ 0x7DFC50; version @ 0x7DFCF0 | matching |
+| `lobby_session.cpp` dispatch | NOVAWORLDUDP containers (§3) | — | all 10 containers + replies | `lobby_session_test`; §3 | matching (spot-checked) |
+
+## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 
 `UI_DispatchScreenEvent @ 0x54e6a0`, `UI_ShowPreGameMenuByState @ 0x568d10`,
 `UI_RegisterOptionsCallbacks @ 0x55d610`, `Expansion_SwitchTo @ 0x5688c0`,
 `Expansion_ReloadAllAssets @ 0x568370`.
 
-## 6. Reading the tables
+## 7. Reading the tables
 
 - **addr** is the join key — names drift across IDB passes, addresses don't.
 - MNU tag literals are UTF-16 wide; to re-locate one after an IDB rebuild, search

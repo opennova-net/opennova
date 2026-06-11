@@ -102,6 +102,13 @@ int atoi_loose(std::string_view s) {
 
 } // namespace
 
+// [orig: CNapiGateManager_ProcessResponse @ 0x4ced20]
+// Retail gates on `readResult >= 3 && Napi_StrCaseEqual(tokens[0], "VAR")`
+// per line, then on the success path REQUIRES POSTIPADDRESS (dword_B5F490;
+// "NO NW POST IP" -> state -9) and POSTIPPORT (dword_B5F494; "NO NW POST
+// PORT" -> -9) unless the junction bypass `dword_B5FD2C` is set. This
+// parser absorbs the same 19 keys; the caller enforces the post-ip/port
+// requirement.
 bool gate_response_parse(std::string_view body, GateResponse &out) {
 	out = GateResponse{};
 
@@ -133,6 +140,8 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 			if (parse_int(tokens[2], v) && v >= 0 && v <= 65535) {
 				out.post_port = static_cast<uint16_t>(v);
 			}
+		} else if (ieq(key, "LOBBYNAME")) {
+			out.lobby_name = std::string(value);
 		} else if (ieq(key, "METIPADDRESS")) {
 			out.met_ip = std::string(value);
 		} else if (ieq(key, "METIPPORT")) {
@@ -161,6 +170,16 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 			if (parse_int(tokens[2], v) && v >= 0 && v <= 65535) {
 				out.reflected_port = static_cast<uint16_t>(v);
 			}
+		} else if (ieq(key, "USEJUNCTION")) {
+			out.use_junction = atoi_loose(value);
+		} else if (ieq(key, "CLEARJUNCTION")) {
+			out.clear_junction = atoi_loose(value);
+		} else if (ieq(key, "GLSVSSREQUEST")) {
+			out.glsvss_request = std::string(value);
+		} else if (ieq(key, "GLSVSSRIMS")) {
+			out.glsvss_rims = atoi_loose(value);
+		} else if (ieq(key, "GLSVSSAGRMS")) {
+			out.glsvss_agrms = atoi_loose(value);
 		} else if (ieq(key, "CUS")) {
 			out.cus = std::string(value);
 		} else if (ieq(key, "PVT")) {

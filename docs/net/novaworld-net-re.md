@@ -866,3 +866,55 @@ there (not yet on master).
   Layer-4 session dispatch, web portal build, DB migrations, and the Godot client demo were
   done; the legacy `NW*.dll` HTTP routes (§2) followed; full retail end-to-end join (spawn
   flow, §5) was still being chased.
+
+## 8. Equivalence verdicts (grill log)
+
+Per-system verdicts from grilling the reimplementation against retail
+`Jointops.exe` (Kong IDB). Each row cites the original entry point. Verdict:
+**matching** | **divergent → fixed** | **divergent (accepted)** | **unknown**.
+
+### Wave 1 — gate protocol + session envelope (2026-06-11)
+
+| System (reimpl) | Original | Verdict | Notes |
+|---|---|---|---|
+| Gate response emit (`apps/novaworld_server/gate_listener.cpp::build_gate_response`) | `CNapiGateManager_ProcessResponse @ 0x4ced20` | **matching** | Emits the required POSTIPADDRESS/POSTIPPORT (see NW-G1); the wire shape (`GATEPROTOCOL "1.0"` + `VAR "k" "v"` CRLF lines) is what the retail parser consumes. |
+| Gate response parse (`libs/novaworld/gate_response.cpp`) | `CNapiGateManager_ProcessResponse @ 0x4ced20` | **divergent → fixed** | The parser was missing 6 of retail's 19 keys (LOBBYNAME, USEJUNCTION, CLEARJUNCTION, GLSVSSREQUEST, GLSVSSRIMS, GLSVSSAGRMS) and carried 2 non-retail keys (CUS, PVT). Missing keys added; CUS/PVT kept as flagged tolerant extras. The header's address citation was wrong (`0x4ad330` is `SaveFile_WriteFullState`); corrected to `0x4ced20`. |
+| Gate manager defaults (`§6.7` struct) | `CNapiGateManager_InitDefaults @ 0x4d1460` | **matching** | hostname `gs.novaworld.net` @ +8, port 7597 @ +72, tag `jop:cus2` @ +76 — exactly the §6.7 layout. Note: the base `CNapiGateManager_Init @ 0x633f90` defaults to `novaworld.net` @ +64 / port @ +192; the game layer's `InitDefaults` overrides it, so the effective retail gate host is `gs.novaworld.net`. |
+| Session HELLO TLV (`libs/novaworld/session_hello.cpp`) | `NapiNPProtocol_HandleClientHello @ 0x6213B0` | **matching** | Flat TLV tag set confirmed: NVS, CO, AP, BDAT, PN (game id), PG (16-byte key), PV1, PV2 — plus retail-only validated/echo tags PV3/PM/CI/EIP/EPN/ET. Retail validates NVS == the Milota version string `"NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic"`, PN == server game id, PG == server key (16 B), PV1 == server build. SESSION NWU key `"asdfj2349857qu23rija;sdlvzx09caweklrj1234hldfj"` @ 0x7DFC50 confirmed. |
+| Session containers (`libs/novaworld/lobby_session.cpp`) | NOVAWORLDUDP dispatch (§3) | **matching (spot-checked)** | All ten containers dispatched with the documented replies (§3); covered by `lobby_session_test`. Field-for-field read order vs retail handlers deferred to a wave-1 follow-up where it matters for a specific reply. |
+
+#### NW-G1 — POSTIPADDRESS / POSTIPPORT are required (resolved)
+
+The standing question (jodemo requires them; onnet omits them yet works on retail JO)
+is resolved by `CNapiGateManager_ProcessResponse @ 0x4ced20`. After tokenizing the
+response, retail:
+
+1. fails to state `-9` if `parsedFieldCount == 0` (no recognized VAR line);
+2. computes a junction/direct-connect bypass `dword_B5FD2C` from command-line flags
+   (`dword_B5F928`, `dword_B4C71C`, overridable by `dword_829F88`);
+3. **unless that bypass is set**, fails to `-9` with "NO NW POST IP" if `dword_B5F490`
+   (POSTIPADDRESS) is unset, then "NO NW POST PORT" if `dword_B5F494` (POSTIPPORT) is
+   unset.
+
+So retail genuinely requires both VARs on the normal (non-junction) path — the same as
+jodemo. onnet's omission was a bug; the PR #37 stack adding them
+(`gate_listener.cpp`) was the correct fix and is what we reland. Command-line overrides
+(`dword_B4C6B0`/`dword_B4C6B4`) can supply the POST IP/port directly, which is the only
+way the fields become optional.
+
+#### NW-L2 — NovaLogic hostnames the client contacts (launcher hosts set)
+
+String sweep of retail `Jointops.exe` for the launcher's redirect set:
+
+| String | Where | Role | Redirect? |
+|---|---|---|---|
+| `gs.novaworld.net` @ 0x7cc368 | `CNapiGateManager_InitDefaults @ 0x4d1460` (+8) | **effective gate host**, port 7597 | **yes** (the one the launcher must map) |
+| `novaworld.net` @ 0x7e052c | `CNapiGateManager_Init @ 0x633f90` (+64) | base-default gate host, overridden by InitDefaults | optional (belt-and-braces) |
+| `http://www.novaworld2.com` / `.../patch/%d` @ 0x7dc144/0x7dc160 | `sub_5C7240` | patch / update URL | **no** (outside matchmaking; we do not manage patches) |
+| `http://%s` @ 0x7cc3e8 | `CNapiGameSession_OnNovaWorldConnected @ 0x4d1570` | startup-URL format (domain comes from the gate response) | n/a (not a hostname) |
+
+Conclusion: redirecting **`gs.novaworld.net`** is sufficient for the JO matchmaking flow;
+adding `novaworld.net` is harmless belt-and-braces. The launcher's server-driven
+redirect set (default `["gs.novaworld.net"]`) is correct; `novaworld.net` can be added
+server-side without a launcher release. DFX2's gate host (`dfx2:0:cus:buffy` tag) is
+grill item NW-L1, deferred to wave 2 (needs the dfx2.exe IDB).

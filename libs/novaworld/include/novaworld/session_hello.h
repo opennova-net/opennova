@@ -15,6 +15,12 @@ namespace opennova {
 //
 // Distinct from the napi container TLV (0x02/0x03/0x04/0x05) — no markers
 // or containers here, just a flat list of named fields.
+//
+// READ side confirmed against [orig: NapiNPProtocol_HandleClientHello @
+// 0x6213B0] (grill wave 1, docs/net/novaworld-net-re.md §8): retail reads
+// tags NVS/CO/AP/BDAT/PN/PG/PV1/PV2 (plus PV3/PM/CI/EIP/EPN/ET) and
+// validates NVS == the Milota version string @ 0x7DFCF0, PN == server game
+// id, PG == server key (16 B). SESSION NWU key @ 0x7DFC50.
 
 // ClientHello, sent C2S as opcode 0x41 payload. Fields from
 // NapiNPSession_SendDescription's TLV writes plus onnet's parser.
