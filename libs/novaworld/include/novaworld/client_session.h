@@ -61,7 +61,11 @@ public:
 		std::string pv2  = "1";
 	};
 
-	explicit ClientSession(Config config = {});
+	// Two constructors rather than a `Config config = {}` default argument:
+	// GCC/clang reject `= {}` for this aggregate-with-NSDMIs (MSVC accepts it),
+	// which broke the Linux/macOS CI builds.
+	ClientSession();
+	explicit ClientSession(Config config);
 
 	// Begin the handshake. Returns the ClientHello datagram to send (envelope
 	// + NWU already applied — ready for the wire). Transitions Idle -> Hello.

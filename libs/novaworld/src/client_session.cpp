@@ -81,6 +81,8 @@ std::string make_client_scrk(uint32_t seed) {
 
 } // namespace
 
+ClientSession::ClientSession() : ClientSession(Config{}) {}
+
 ClientSession::ClientSession(Config config)
 	: cfg_(std::move(config)),
 	  client_scrk_(make_client_scrk(cfg_.client_key)) {}

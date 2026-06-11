@@ -100,6 +100,32 @@ bool check_ignores_unknown_and_malformed() {
 	return true;
 }
 
+// The REAL gate (and our server's gate_listener.cpp) quote every key and
+// value: `VAR "POSTIPADDRESS" "127.0.0.1"`. Retail's tokenizer
+// (String_TokenizeQuotedToArray @ 0x616d60) strips the quotes; ours must too,
+// or the parse rejects the reply and the client logs "bad gate response".
+bool check_quoted_response() {
+	const std::string body =
+			"GATEPROTOCOL \"1.0\"\r\n"                        // non-VAR line, skipped
+			"VAR \"POSTIPADDRESS\" \"127.0.0.1\"\r\n"
+			"VAR \"POSTIPPORT\" \"7597\"\r\n"
+			"VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n"
+			"VAR \"STARTUPURL\" \"http://127.0.0.1:8080\"\r\n"
+			"VAR \"LOBBYNAME\" \"jop 2 consumer\"\r\n"        // value with internal space
+			"VAR \"CUS\" \"\"\r\n";                            // empty quoted value
+	opennova::GateResponse r;
+	if (!expect(opennova::gate_response_parse(body, r), "quoted gate response parses")) return false;
+	if (!expect(r.var_count == 6, "6 quoted VARs absorbed (GATEPROTOCOL skipped)")) return false;
+	if (!expect((r.post_ip == std::array<uint8_t, 4>{127, 0, 0, 1}),
+			"quoted POSTIPADDRESS -> 127.0.0.1")) return false;
+	if (!expect(r.post_port == 7597, "quoted POSTIPPORT -> 7597")) return false;
+	if (!expect(r.udp_novaworld == "127.0.0.1:64206", "quoted UDPNOVAWORLD stripped")) return false;
+	if (!expect(r.startup_url == "http://127.0.0.1:8080", "quoted STARTUPURL stripped")) return false;
+	if (!expect(r.lobby_name == "jop 2 consumer", "quoted value keeps its internal space")) return false;
+	if (!expect(r.cus.empty(), "empty quoted value -> empty string")) return false;
+	return true;
+}
+
 bool check_empty_returns_false() {
 	opennova::GateResponse r;
 	if (!expect(!opennova::gate_response_parse("", r), "empty response returns false")) return false;
@@ -114,8 +140,9 @@ int main() {
 	if (!check_minimal_response()) return 1;
 	if (!check_all_known_keys()) return 1;
 	if (!check_case_insensitive_keys()) return 1;
+	if (!check_quoted_response()) return 1;
 	if (!check_ignores_unknown_and_malformed()) return 1;
 	if (!check_empty_returns_false()) return 1;
-	std::printf("OK: gate response KV parser (19 retail VARs + CUS/PVT extras)\n");
+	std::printf("OK: gate response KV parser (quoted + unquoted; 19 retail VARs + CUS/PVT)\n");
 	return 0;
 }

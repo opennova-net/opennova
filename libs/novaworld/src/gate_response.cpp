@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <string>
 #include <vector>
 
 namespace opennova {
@@ -23,17 +24,43 @@ bool ieq(std::string_view a, std::string_view b) {
 bool is_line_break(char c) { return c == '\n' || c == '\r'; }
 bool is_ws(char c) { return c == ' ' || c == '\t'; }
 
-// Split one line into whitespace-separated tokens. Empty / all-whitespace
-// lines yield zero tokens.
-std::vector<std::string_view> tokenize_line(std::string_view line) {
-	std::vector<std::string_view> tokens;
-	size_t i = 0;
-	while (i < line.size()) {
-		while (i < line.size() && is_ws(line[i])) ++i;
-		if (i >= line.size()) break;
-		const size_t start = i;
-		while (i < line.size() && !is_ws(line[i])) ++i;
-		tokens.emplace_back(line.substr(start, i - start));
+// Quote-aware tokenizer, mirroring [orig: String_TokenizeQuotedToArray @
+// 0x616d60]: whitespace separates tokens OUTSIDE quotes; a `"` toggles
+// in-quote state and is NOT copied (so surrounding quotes are stripped);
+// whitespace inside quotes stays part of the token; every other char
+// (including `\`, which retail copies as-is) is copied literally. A token
+// begins at the first non-whitespace char — an opening quote starts a
+// (possibly empty) token, so `""` yields one empty token.
+//
+// The real gate quotes its VAR lines (`VAR "POSTIPADDRESS" "127.0.0.1"`); a
+// whitespace-only split left the quotes attached to the key (`"POSTIPADDRESS"`),
+// so no key matched and every real-gate reply was rejected as "bad gate
+// response". Tokens are owned (retail copies into a buffer too) because
+// quote-stripped tokens are not contiguous in the source line.
+std::vector<std::string> tokenize_line(std::string_view line) {
+	std::vector<std::string> tokens;
+	std::string cur;
+	bool in_quote = false;
+	bool in_token = false;
+	for (const char c : line) {
+		if (!is_ws(c) || in_quote) {
+			if (!in_token) {
+				in_token = true;
+				cur.clear();
+			}
+			if (c == '"') {
+				in_quote = !in_quote;
+			} else {
+				cur.push_back(c);
+			}
+		} else if (in_token) {
+			tokens.push_back(std::move(cur));
+			cur.clear();
+			in_token = false;
+		}
+	}
+	if (in_token) {
+		tokens.push_back(std::move(cur));
 	}
 	return tokens;
 }
@@ -102,12 +129,14 @@ int atoi_loose(std::string_view s) {
 
 } // namespace
 
-// [orig: CNapiGateManager_ProcessResponse @ 0x4ced20]
+// [orig: CNapiGateManager_ProcessResponse @ 0x4ced20], tokenized by
+// [orig: String_TokenizeQuotedToArray @ 0x616d60] — quote-aware, strips the
+// double-quotes the real gate wraps around every key and value.
 // Retail gates on `readResult >= 3 && Napi_StrCaseEqual(tokens[0], "VAR")`
 // per line, then on the success path REQUIRES POSTIPADDRESS (dword_B5F490;
 // "NO NW POST IP" -> state -9) and POSTIPPORT (dword_B5F494; "NO NW POST
 // PORT" -> -9) unless the junction bypass `dword_B5FD2C` is set. This
-// parser absorbs the same 19 keys; the caller enforces the post-ip/port
+// parser absorbs the same keys; the caller enforces the post-ip/port
 // requirement.
 bool gate_response_parse(std::string_view body, GateResponse &out) {
 	out = GateResponse{};
@@ -126,18 +155,18 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 			continue; // matches `v7 >= 3 && str1 == "VAR"` gate in the binary
 		}
 
-		const std::string_view key = tokens[1];
-		// Reconstruct the full value as the rest of the line after the
-		// second token. This preserves embedded whitespace in e.g. URLs.
-		const size_t value_start = static_cast<size_t>(tokens[2].data() - line.data());
-		const std::string_view value = line.substr(value_start);
+		const std::string &key = tokens[1];
+		// Retail passes tokenValue (= tokens[2]) straight to the field
+		// handlers; quoting makes the whole value a single token (internal
+		// whitespace preserved), so there is no rest-of-line splice.
+		const std::string &value = tokens[2];
 
 		bool matched = true;
 		if (ieq(key, "POSTIPADDRESS")) {
-			parse_ipv4(tokens[2], out.post_ip);
+			parse_ipv4(value, out.post_ip);
 		} else if (ieq(key, "POSTIPPORT")) {
 			int v = 0;
-			if (parse_int(tokens[2], v) && v >= 0 && v <= 65535) {
+			if (parse_int(value, v) && v >= 0 && v <= 65535) {
 				out.post_port = static_cast<uint16_t>(v);
 			}
 		} else if (ieq(key, "LOBBYNAME")) {
@@ -146,7 +175,7 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 			out.met_ip = std::string(value);
 		} else if (ieq(key, "METIPPORT")) {
 			int v = 0;
-			if (parse_int(tokens[2], v) && v >= 0 && v <= 65535) {
+			if (parse_int(value, v) && v >= 0 && v <= 65535) {
 				out.met_port = static_cast<uint16_t>(v);
 			}
 		} else if (ieq(key, "METLABEL")) {
@@ -164,10 +193,10 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		} else if (ieq(key, "UDPCODE2")) {
 			out.udp_code2 = std::string(value);
 		} else if (ieq(key, "REFLECTEDIPADDRESS")) {
-			parse_ipv4(tokens[2], out.reflected_ip);
+			parse_ipv4(value, out.reflected_ip);
 		} else if (ieq(key, "REFLECTEDPORTNUMBER")) {
 			int v = 0;
-			if (parse_int(tokens[2], v) && v >= 0 && v <= 65535) {
+			if (parse_int(value, v) && v >= 0 && v <= 65535) {
 				out.reflected_port = static_cast<uint16_t>(v);
 			}
 		} else if (ieq(key, "USEJUNCTION")) {

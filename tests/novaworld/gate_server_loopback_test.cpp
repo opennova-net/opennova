@@ -73,11 +73,15 @@ int main() {
 		if (!expect(probe.is_valid() && server_port != 0, "ephemeral bind")) return 1;
 	}
 
+	// Quote keys + values exactly as the real gate (and our own
+	// gate_listener.cpp) emit them — the parser must strip the quotes
+	// (String_TokenizeQuotedToArray @ 0x616d60). A prior unquoted body here
+	// masked the "bad gate response" bug against real NovaWorld.
 	const std::string response_body =
-			"VAR POSTIPADDRESS 127.0.0.1\r\n"
-			"VAR POSTIPPORT 7597\r\n"
-			"VAR UDPNOVAWORLD 127.0.0.1:64206\r\n"
-			"VAR STARTUPURL http://127.0.0.1:8080\r\n";
+			"VAR \"POSTIPADDRESS\" \"127.0.0.1\"\r\n"
+			"VAR \"POSTIPPORT\" \"7597\"\r\n"
+			"VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n"
+			"VAR \"STARTUPURL\" \"http://127.0.0.1:8080\"\r\n";
 
 	// Kick off the server in a background thread.
 	std::thread server_thread([&] { serve_one_probe(server_port, response_body); });
