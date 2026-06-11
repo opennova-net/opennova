@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OpenNova.Launcher</RootNamespace>
+    <AssemblyName>OpenNovaLauncher</AssemblyName>
+    <ApplicationIcon>Assets\onlauncher.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.2.0</Version>
+    <FileVersion>0.2.0.0</FileVersion>
+    <AssemblyVersion>0.2.0.0</AssemblyVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\onlauncher.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\onlauncher-512.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Forms\PreferencesForm.Designer.cs">
+      <DependentUpon>PreferencesForm.cs</DependentUpon>
+    </Compile>
+    <EmbeddedResource Update="Forms\PreferencesForm.resx">
+      <DependentUpon>PreferencesForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <Compile Update="Forms\ExpansionManagerForm.Designer.cs">
+      <DependentUpon>ExpansionManagerForm.cs</DependentUpon>
+    </Compile>
+    <EmbeddedResource Update="Forms\ExpansionManagerForm.resx">
+      <DependentUpon>ExpansionManagerForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <Compile Update="Forms\ExpansionLaunchDialog.Designer.cs">
+      <DependentUpon>ExpansionLaunchDialog.cs</DependentUpon>
+    </Compile>
+    <EmbeddedResource Update="Forms\ExpansionLaunchDialog.resx">
+      <DependentUpon>ExpansionLaunchDialog.cs</DependentUpon>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AutoUpdater.NET.Official" Version="1.8.3" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+</Project>
