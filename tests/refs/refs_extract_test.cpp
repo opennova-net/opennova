@@ -186,7 +186,7 @@ static void test_unrecognized_is_success_with_no_edges() {
     std::vector<Reference> out;
     std::string error;
     const uint8_t junk[] = {1, 2, 3};
-    EXPECT_TRUE(opennova::refs::extract("model.3di", junk, sizeof(junk), out, error));
+    EXPECT_TRUE(opennova::refs::extract("texture.tga", junk, sizeof(junk), out, error));
     EXPECT_EQ_SZ(out.size(), 0u);
     // weapon.def has no extractor yet — only items.def dispatches.
     EXPECT_TRUE(opennova::refs::extract("weapon.def", junk, sizeof(junk), out, error));
@@ -198,8 +198,10 @@ static void test_can_extract_dispatch() {
     EXPECT_TRUE(opennova::refs::can_extract("FOO.ENV"));
     EXPECT_TRUE(opennova::refs::can_extract("sub/dir\\credits.KDA"));
     EXPECT_TRUE(opennova::refs::can_extract("C:/game/ITEMS.DEF"));
+    EXPECT_TRUE(opennova::refs::can_extract("model.3DI"));
+    EXPECT_TRUE(opennova::refs::can_extract("ash_i5b.bms"));
     EXPECT_TRUE(!opennova::refs::can_extract("weapon.def"));
-    EXPECT_TRUE(!opennova::refs::can_extract("model.3di"));
+    EXPECT_TRUE(!opennova::refs::can_extract("texture.tga"));
     EXPECT_TRUE(!opennova::refs::can_extract("noext"));
 }
 

@@ -44,5 +44,9 @@ bool extract_credits(const std::string& source_path, const uint8_t* data, size_t
                      std::vector<Reference>& out, std::string& error);
 bool extract_items_def(const std::string& source_path, const uint8_t* data, size_t size,
                        std::vector<Reference>& out, std::string& error);
+bool extract_threedi(const std::string& source_path, const uint8_t* data, size_t size,
+                     std::vector<Reference>& out, std::string& error);
+bool extract_mission(const std::string& source_path, const uint8_t* data, size_t size,
+                     std::vector<Reference>& out, std::string& error);
 
 }  // namespace opennova::refs::detail
