@@ -43,7 +43,6 @@ theme_override_constants/separation = 8
 
 [node name="ProjectLabel" type="Label" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(180, 0)
 layout_mode = 2
 size_flags_horizontal = 0
 theme_type_variation = &"Heading"
