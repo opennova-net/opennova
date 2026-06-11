@@ -380,6 +380,21 @@ func get_mission_title() -> String:
 
 # --- Open ---------------------------------------------------------------------
 
+# True when `trn_path` already IS the mounted terrain (case-insensitive,
+# slash-normalized — resolve_file and a user's own open can disagree on form)
+# and that terrain has no unsaved edits. Dirty never matches, so the reload
+# there preserves today's semantics; the dirty read is duck-typed because the
+# headless test stub carries no is_dirty.
+func _is_same_clean_terrain(trn_path: String) -> bool:
+	if not terrain_editor.has_method("get_current_trn_path"):
+		return false
+	if bool(terrain_editor.get("is_dirty")):
+		return false
+	var current := String(terrain_editor.get_current_trn_path())
+	if current.is_empty():
+		return false
+	return current.replace("\\", "/").to_lower() == trn_path.replace("\\", "/").to_lower()
+
 ## Open a .bms: parse it, resolve + load its referenced terrain and environment
 ## through the terrain editor, then place its objects under the shared world root.
 ## Returns OK, or an error code; get_last_status() carries a human-facing reason.
@@ -414,16 +429,24 @@ func open_mission(bms_path: String) -> Error:
 
 	# Loading the referenced terrain is an atomic dependency of opening the mission,
 	# not a separate user action, so it goes straight to open_trn rather than the
-	# terrain editor's dirty-guarded request_open_trn.
+	# terrain editor's dirty-guarded request_open_trn. When the resolved .trn is
+	# already the mounted terrain and it carries no unsaved edits, the remount is
+	# skipped — the dominant browse-missions-on-one-map flow pays the terrain build
+	# once. A dirty terrain always reloads (predictable authoring semantics).
 	timeline.span("terrain")
-	var trn_err := int(terrain_editor.open_trn(trn_path, timeline))
-	if trn_err != OK:
-		# open_trn already replaced the editor's terrain with an empty one, so any
-		# previously-loaded mission now describes a world that is gone. Drop it
-		# rather than leaving stale objects / metadata over a blanked terrain.
-		clear()
-		_last_status = "Could not load %s.trn (error %d)." % [terrain_ref, trn_err]
-		return trn_err as Error
+	if _is_same_clean_terrain(trn_path):
+		# Adopt the editor's own path form so reconcile_with_terrain's exact
+		# compare cannot mistake a case/slash difference for a terrain swap.
+		trn_path = String(terrain_editor.get_current_trn_path())
+	else:
+		var trn_err := int(terrain_editor.open_trn(trn_path, timeline))
+		if trn_err != OK:
+			# open_trn already replaced the editor's terrain with an empty one, so any
+			# previously-loaded mission now describes a world that is gone. Drop it
+			# rather than leaving stale objects / metadata over a blanked terrain.
+			clear()
+			_last_status = "Could not load %s.trn (error %d)." % [terrain_ref, trn_err]
+			return trn_err as Error
 	timeline.end_span()
 
 	timeline.span("environment")
