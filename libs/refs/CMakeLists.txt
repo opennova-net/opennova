@@ -5,6 +5,7 @@ add_library(opennova_refs STATIC
     src/refs_def.cpp
     src/refs_threedi.cpp
     src/refs_mission.cpp
+    src/ref_graph.cpp
 )
 
 target_include_directories(opennova_refs
