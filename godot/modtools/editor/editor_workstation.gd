@@ -68,6 +68,9 @@ const _RECENT_CLEAR_META := "::clear::"
 @onready var _settings_axes_toggle: CheckBox = %SettingsAxesToggle
 @onready var _settings_pff_tool_button: Button = %SettingsPffToolButton
 @onready var _asset_dock: Control = %AssetDock
+@onready var _right_split: SplitContainer = %RightSplit
+@onready var _browser_toggle_button: Button = %BrowserToggleButton
+@onready var _browser_pane_host: PanelContainer = %ResourceBrowserPaneHost
 @onready var _status_bar: PanelContainer = %StatusBar
 @onready var _status_tool_label: Label = %StatusToolLabel
 @onready var _status_context_label: Label = %StatusContextLabel
@@ -134,6 +137,8 @@ var _cdep_dialog: ConfirmationDialog
 var _export_dialog: ExportFlavorDialog
 var _cdep_fix_callback: Callable = Callable()
 var _resource_browser := EditorResourceBrowser.new()
+# The persistent Resource Browser pane (lazy: built on first show).
+var _browser_pane: ResourceBrowserPane
 var _pff_tool := EditorPffTool.new()
 var _file_dialogs: FileDialogHelper
 
@@ -163,6 +168,7 @@ func _ready() -> void:
 	_wire_settings_popup()
 	_wire_tile_gizmo()
 	_wire_splits()
+	_wire_browser_pane()
 	_apply_window_min_size()
 	_project_label.clip_text = true
 	_status_context_label.clip_text = true
@@ -991,10 +997,12 @@ func _sync_asset_dock_for_workspace(workspace: EditorWorkspace) -> void:
 		_clear_asset_dock_children()
 		_asset_dock.visible = false
 		_asset_dock_workspace_id = -1
+		_sync_right_split_visibility()
 		return
 	_asset_dock.visible = true
 	workspace.set_asset_dock(_asset_dock)
 	_asset_dock_workspace_id = _active_workspace_id
+	_sync_right_split_visibility()
 
 
 func _clear_asset_dock_children() -> void:
@@ -1073,6 +1081,87 @@ func _save_split_layout() -> void:
 	if _body_row == null or _center_right_split == null:
 		return
 	_resource_library.save_layout_state(_body_row.split_offset, _center_right_split.split_offset)
+
+
+# The Resource Browser pane is a DOCK, not a popover: it never joins the
+# camera/environment/settings mutual exclusion or the Escape handler, and its
+# visibility + split width persist across sessions.
+func _wire_browser_pane() -> void:
+	if _browser_toggle_button != null:
+		_browser_toggle_button.icon = EditorIconLibrary.resolve(&"browser")
+		_browser_toggle_button.toggled.connect(_set_browser_pane_visible)
+	if _right_split != null and not _right_split.drag_ended.is_connected(_save_browser_state):
+		_right_split.drag_ended.connect(_save_browser_state)
+	# Startup restore is a read-only apply (mirrors _apply_split_layout): test
+	# instantiations must never persist a layout they did not change.
+	var state := _resource_library.load_browser_state()
+	if _right_split != null and bool(state["has_split"]):
+		_right_split.split_offset = int(state["split"])
+	if bool(state["visible"]) and _browser_pane_host != null:
+		_ensure_browser_pane()
+		_browser_pane_host.visible = true
+		if _browser_toggle_button != null:
+			_browser_toggle_button.set_pressed_no_signal(true)
+		# Refresh now only when no root is configured (nothing will scan later);
+		# with a root, _ready's scan fills the pane through _refresh_browser_pane
+		# - an eager refresh here would lazy-scan and double the startup index walk.
+		if _resource_library.get_root_dir().is_empty():
+			_browser_pane.refresh()
+	_sync_right_split_visibility()
+
+
+func _ensure_browser_pane() -> void:
+	if _browser_pane != null and is_instance_valid(_browser_pane):
+		return
+	_browser_pane = ResourceBrowserPane.new()
+	_browser_pane.name = "ResourceBrowserPane"
+	# Capabilities only - the pane's double-click rides the same cross-jump
+	# spine as the link widgets (open_in_workspace), never a private open path.
+	_browser_pane.setup(
+		func() -> RefCounted: return _resource_library.get_index(),
+		func() -> String: return _resource_library.get_root_dir(),
+		func() -> void: _scan_resource_root(false),
+		_current_resource_path_for_browser,
+		func(kind: String, path: String) -> void: open_in_workspace(kind, path)
+	)
+	_browser_pane_host.add_child(_browser_pane)
+
+
+func _set_browser_pane_visible(active: bool) -> void:
+	if _browser_pane_host == null:
+		return
+	if active:
+		_ensure_browser_pane()
+	_browser_pane_host.visible = active
+	if _browser_toggle_button != null:
+		_browser_toggle_button.set_pressed_no_signal(active)
+	_sync_right_split_visibility()
+	if active and _browser_pane != null:
+		_browser_pane.refresh()
+	_save_browser_state()
+
+
+# With both children hidden, RightSplit itself hides so dockless workspaces
+# keep the pre-pane behavior: no live divider, and the persisted right offset
+# stays inert (CenterRightSplit sees one visible child).
+func _sync_right_split_visibility() -> void:
+	if _right_split == null:
+		return
+	_right_split.visible = (_asset_dock != null and _asset_dock.visible) \
+			or (_browser_pane_host != null and _browser_pane_host.visible)
+
+
+func _save_browser_state() -> void:
+	if _browser_pane_host == null or _right_split == null:
+		return
+	_resource_library.save_browser_state(_browser_pane_host.visible, _right_split.split_offset)
+
+
+# Keep a visible pane truthful after the root changes or a rescan.
+func _refresh_browser_pane() -> void:
+	if _browser_pane != null and is_instance_valid(_browser_pane) \
+			and _browser_pane_host != null and _browser_pane_host.visible:
+		_browser_pane.refresh()
 
 
 func _wire_camera_popup() -> void:
@@ -1462,6 +1551,7 @@ func _set_resource_root_dir(path: String, persist: bool, scan: bool) -> Error:
 	var result := _resource_library.set_root_dir(path, persist, scan)
 	_show_resource_status(result)
 	_sync_settings_popup_state()
+	_refresh_browser_pane()
 	return int(result["err"])
 
 
@@ -1473,6 +1563,7 @@ func _scan_resource_root(show_message: bool) -> Error:
 	if show_message:
 		_show_resource_status(result)
 	_sync_settings_popup_state()
+	_refresh_browser_pane()
 	return int(result["err"])
 
 
