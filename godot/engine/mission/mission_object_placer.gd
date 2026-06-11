@@ -158,9 +158,12 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	_ensure_item_db()
 
 	var env_node: Node = options.get("environment_node", null)
+	# Optional load-stage attribution (the editor's mission open passes one).
+	var timeline: PerfTimeline = options.get("timeline", null) as PerfTimeline
 	var container := _ensure_container(parent)
 
 	# Bucket entities by graphic, split static vs animated.
+	PerfTimeline.span_on(timeline, "bucket_entities")
 	var static_by_graphic: Dictionary = {}  # graphic -> Array[Transform3D]
 	# Parallel to static_by_graphic (same slot order); only filled in edit_mode so the
 	# pickable index can map a MultiMesh instance back to its mission entity.
@@ -204,13 +207,18 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 					"index": int(entity.get("index", -1)),
 				})
 
+	PerfTimeline.end_on(timeline)
+
 	# Static: one MultiMeshInstance3D per (graphic, submesh).
+	PerfTimeline.span_on(timeline, "static_batches")
+	var resolved_graphics: Array = []
 	for graphic in static_by_graphic.keys():
 		var xforms: Array = static_by_graphic[graphic]
 		var batches := _get_static_batches(graphic, env_node, container)
 		if batches.is_empty():
 			stats.unresolved += xforms.size()
 			continue
+		resolved_graphics.append(graphic)
 		stats.graphics += 1
 		for batch in batches:
 			var mm := MultiMesh.new()
@@ -231,14 +239,24 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				_record_static_batch(graphic, static_refs_by_graphic.get(graphic, []), mm, mmi, offset, batch["mesh"])
 		stats.batched += xforms.size()
 		stats.placed += xforms.size()
-		# One pick collider per entity (not per submesh): collision is whole-model.
-		if edit_mode:
+	PerfTimeline.end_on(timeline)
+
+	# One pick collider per static entity (not per submesh): collision is
+	# whole-model. A separate pass (rather than inline with each graphic's
+	# batches) so the timeline can attribute collider cost on its own; the pick
+	# bodies are addressed by name ("Pick_<kind>_<index>"), never by child order.
+	if edit_mode:
+		PerfTimeline.span_on(timeline, "pick_colliders")
+		for graphic in resolved_graphics:
+			var xforms: Array = static_by_graphic[graphic]
 			var prefs: Array = static_refs_by_graphic.get(graphic, [])
 			for i in range(xforms.size()):
 				var pref: Dictionary = prefs[i] if i < prefs.size() else {}
 				add_pick_collider(container, int(pref.get("kind", -1)), int(pref.get("index", -1)), graphic, xforms[i])
+		PerfTimeline.end_on(timeline)
 
 	# Animated: an individual NovaObjectModel per entity.
+	PerfTimeline.span_on(timeline, "animated_models")
 	for a in animated:
 		var data := _load_object_data(a["graphic"])
 		if data == null:
@@ -283,6 +301,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			add_pick_collider(container, int(ref["kind"]), int(ref["index"]), a["graphic"], a["xform"])
 		stats.animated += 1
 		stats.placed += 1
+	PerfTimeline.end_on(timeline)
 
 	return stats
 

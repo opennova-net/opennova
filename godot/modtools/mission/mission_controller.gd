@@ -393,10 +393,16 @@ func open_mission(bms_path: String) -> Error:
 		_last_status = "Set a resource directory before opening a mission."
 		return ERR_UNCONFIGURED
 
+	# Wall-clock attribution per load stage; the abandoned timeline of a failed
+	# open never reaches the ring (only finish() retains it).
+	var timeline := PerfTimeline.begin("Mission load %s" % bms_path.get_file())
+
+	timeline.span("parse")
 	var mission := NovaMissionData.new()
 	if mission.open_file(bms_path) != OK:
 		_last_status = "Could not read %s: %s" % [bms_path.get_file(), mission.get_last_error()]
 		return ERR_CANT_OPEN
+	timeline.end_span()
 
 	# The mission header selects the world: resolve its terrain (required) and
 	# environment (optional) from the user's resource directory, case-insensitive.
@@ -409,7 +415,8 @@ func open_mission(bms_path: String) -> Error:
 	# Loading the referenced terrain is an atomic dependency of opening the mission,
 	# not a separate user action, so it goes straight to open_trn rather than the
 	# terrain editor's dirty-guarded request_open_trn.
-	var trn_err := int(terrain_editor.open_trn(trn_path))
+	timeline.span("terrain")
+	var trn_err := int(terrain_editor.open_trn(trn_path, timeline))
 	if trn_err != OK:
 		# open_trn already replaced the editor's terrain with an empty one, so any
 		# previously-loaded mission now describes a world that is gone. Drop it
@@ -417,9 +424,14 @@ func open_mission(bms_path: String) -> Error:
 		clear()
 		_last_status = "Could not load %s.trn (error %d)." % [terrain_ref, trn_err]
 		return trn_err as Error
+	timeline.end_span()
 
+	timeline.span("environment")
 	var env_note := _load_environment(mission, resource_root)
-	_place_objects(mission, resource_root)
+	timeline.end_span()
+	timeline.span("objects")
+	_place_objects(mission, resource_root, timeline)
+	timeline.end_span()
 
 	_mission = mission
 	_current_path = bms_path
@@ -437,8 +449,11 @@ func open_mission(bms_path: String) -> Error:
 	# Focus the first zone when reopening already in area-trigger mode, mirroring set_mode (and the
 	# waypoint branch above), so the Triggers panel is not empty after an open.
 	_selected_zone_index = 0 if (_mode == Mode.AREA_TRIGGERS and mission.get_area_trigger_count() > 0) else -1
+	timeline.span("overlays")
 	_refresh_active_overlay()
-	_last_status = _describe_load(mission, bms_path, env_note)
+	timeline.end_span()
+	timeline.finish()
+	_last_status = "%s (%s)" % [_describe_load(mission, bms_path, env_note), timeline.brief(3)]
 	_notify_changed()
 	return OK
 
@@ -3261,7 +3276,7 @@ func _load_environment(mission: NovaMissionData, resource_root: NovaResourceRoot
 	return note
 
 
-func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot) -> void:
+func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot, timeline: PerfTimeline = null) -> void:
 	_stats = {}
 	# A fresh placement replaces the container (and the old selection box with it), so
 	# drop any stale selection refs before re-harvesting the pickable index.
@@ -3280,6 +3295,8 @@ func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot) -
 	var env_node := _environment_node()
 	if env_node != null:
 		options["environment_node"] = env_node
+	if timeline != null:
+		options["timeline"] = timeline
 	_stats = _placer.place(mission, world_root, options)
 	_pickable = _placer.pickable_records
 	# The placer created the pick colliders with the world; refresh the debug overlay if on.

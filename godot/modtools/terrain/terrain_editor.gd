@@ -2064,19 +2064,21 @@ func new_terrain() -> void:
 	_sync_hud_from_editor()
 
 
-func open_trn(trn_path: String) -> Error:
+func open_trn(trn_path: String, timeline: PerfTimeline = null) -> Error:
 	if is_export_running():
 		return ERR_BUSY
 	var resources := get_resource_root()
 	if not FileAccess.file_exists(trn_path) and resources != null and resources.has_file(trn_path):
-		return _open_trn_from_resource_root(resources, trn_path)
+		return _open_trn_from_resource_root(resources, trn_path, timeline)
 	_brush_session.clear_history()
 	clear_clone_source()
+	PerfTimeline.span_on(timeline, "trn_data")
 	_data = NovaTerrainData.new()
 	_data.set_trn_path(trn_path)
 	var err := _data.load()
 	if err != OK:
 		return err
+	PerfTimeline.end_on(timeline)
 
 	texture_files = {}
 	_apply_default_visual_state(false)
@@ -2089,6 +2091,7 @@ func open_trn(trn_path: String) -> Error:
 	var dir_path := trn_path.get_base_dir()
 	var depth_path := dir_path + "/" + _data.get_terrain_name() + "_depth.raw"
 	var depth_bytes: PackedByteArray
+	PerfTimeline.span_on(timeline, "heightmap")
 	if FileAccess.file_exists(depth_path):
 		var depth_file := FileAccess.open(depth_path, FileAccess.READ)
 		if depth_file:
@@ -2098,10 +2101,15 @@ func open_trn(trn_path: String) -> Error:
 		_set_heightmap_image(_build_heightmap_from_raw16(depth_bytes))
 	else:
 		_set_heightmap_image(_build_heightmap_from_data())
+	PerfTimeline.end_on(timeline)
 
+	PerfTimeline.span_on(timeline, "textures")
 	_apply_loaded_textures_from_data()
+	PerfTimeline.end_on(timeline)
+	PerfTimeline.span_on(timeline, "sectors")
 	var normalized := _normalize_sector_layout_if_needed()
 	_sync_sector_layout(true)
+	PerfTimeline.end_on(timeline)
 	_document.capture_trn_resource(_data)
 	_document.load_tileinfo_from_dir(dir_path)
 	var normalized_tileinfo := _normalize_loaded_tileinfo_if_needed()
@@ -2124,28 +2132,36 @@ func open_trn(trn_path: String) -> Error:
 	return OK
 
 
-func _open_trn_from_resource_root(resources: NovaResourceRoot, trn_name: String) -> Error:
+func _open_trn_from_resource_root(resources: NovaResourceRoot, trn_name: String, timeline: PerfTimeline = null) -> Error:
 	if resources == null:
 		return ERR_INVALID_PARAMETER
 	_brush_session.clear_history()
 	clear_clone_source()
+	PerfTimeline.span_on(timeline, "trn_data")
 	_data = NovaTerrainData.new()
 	var err := _data.load_from_resource_root(resources, trn_name)
 	if err != OK:
 		return err
+	PerfTimeline.end_on(timeline)
 
 	texture_files = {}
 	_apply_default_visual_state(false)
 
+	PerfTimeline.span_on(timeline, "heightmap")
 	var depth_bytes := resources.read_file("%s_depth.raw" % _data.get_terrain_name())
 	if depth_bytes.size() == HM_SIZE * HM_SIZE * 2:
 		_set_heightmap_image(_build_heightmap_from_raw16(depth_bytes))
 	else:
 		_set_heightmap_image(_build_heightmap_from_data())
+	PerfTimeline.end_on(timeline)
 
+	PerfTimeline.span_on(timeline, "textures")
 	_apply_loaded_textures_from_data()
+	PerfTimeline.end_on(timeline)
+	PerfTimeline.span_on(timeline, "sectors")
 	var normalized := _normalize_sector_layout_if_needed()
 	_sync_sector_layout(true)
+	PerfTimeline.end_on(timeline)
 	_document.capture_trn_resource(_data)
 	var tileinfo := _data.get_tileinfo_resource()
 	if tileinfo != null:
