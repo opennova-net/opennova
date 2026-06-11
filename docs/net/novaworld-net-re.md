@@ -918,3 +918,24 @@ adding `novaworld.net` is harmless belt-and-braces. The launcher's server-driven
 redirect set (default `["gs.novaworld.net"]`) is correct; `novaworld.net` can be added
 server-side without a launcher release. DFX2's gate host (`dfx2:0:cus:buffy` tag) is
 grill item NW-L1, deferred to wave 2 (needs the dfx2.exe IDB).
+
+### Wave 2 — server-browser format (partial, 2026-06-11)
+
+| System (reimpl) | Original | Verdict | Notes |
+|---|---|---|---|
+| GSB builder (`libs/novaworld/gsb.cpp`) | retail GSB chunk strings | **matching (retail)** | NW-G2: retail `Jointops.exe` contains the `SVRS` (@0x63d793) and `FLDS` (@0x63d7b1) chunk strings and lacks `GLB `/`PLYR`. Our builder emits `IVAR`/`FLDS`/`SVRS`/`XXXX` — the GSB format — so it matches the **retail** client. |
+
+#### NW-G2 — GSB (retail) vs GLB (demo) is a per-binary split
+
+The standing disagreement (the Phase C.2 note records the browser format as
+`GLB `/`FIEL`/`DATA`/`PLYR`, "NOT onnet's `GSB `/`SVRS`/`FLDS`") resolves as a
+**per-binary difference**, not a bug: that GLB layout was witnessed against
+*jodemo* (the Joint Operations demo), while retail `Jointops.exe` (JO:CA, the
+deploy target) uses the GSB chunk format our `gsb.cpp` already emits. String
+evidence in the retail image: `SVRS`, `FLDS` present; `GLB `, `PLYR` absent.
+
+Open: a definitive jodemo-side GLB spec (chunk-by-chunk) needs the jodemo IDB
+and, if demo support is wanted, a separate demo GSB/GLB builder. Deferred with
+NW-L1 (the DFX2 gate hostname, also a different-binary item) to a wave-2
+follow-up that loads those IDBs. The retail path — the one that matters for the
+deploy target — is matching.

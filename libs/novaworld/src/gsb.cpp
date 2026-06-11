@@ -7,6 +7,15 @@
 
 namespace opennova {
 
+// NW-G2 (grill wave 2, 2026-06-11): retail Jointops.exe (JO:CA) parses the
+// GSB-style chunk format — the strings "SVRS" (@0x63d793) and "FLDS"
+// (@0x63d7b1) are present, and "GLB "/"PLYR"/"FIEL"-as-a-chunk are absent.
+// Our builder below emits IVAR/FLDS/SVRS/XXXX, which matches retail. The
+// earlier note (project_net_phase_c2_visibility) that the browser uses
+// "GLB /FIEL/DATA/PLYR" is the *jodemo* demo binary's separate format; if
+// demo support matters it needs the jodemo IDB and a distinct builder.
+// Verdict: MATCHING for retail. See docs/net/novaworld-net-re.md §8.
+
 namespace {
 
 // Mirrors onnw/gsb.py::FIELD_NAMES (26 fields, order matters — the client's
