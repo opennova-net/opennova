@@ -79,6 +79,25 @@ func test_open_populates_table() -> void:
 	assert_eq(root.get_child_count(), 6, "all six fixture entries should be listed after open")
 
 
+func test_inspector_offers_used_by_for_the_open_table_without_index_build() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
+	await get_tree().process_frame
+	var ws = workstation._get_workspace(EditorWorkstationScript.Workspace.STRINGS)
+	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
+	await get_tree().process_frame
+
+	var strip = workstation.find_child("StringsUsedByStrip", true, false)
+	assert_not_null(strip, "the inspector mounts a Used-by strip for the open table")
+	if strip == null:
+		return
+	assert_true(strip.visible, "an open table targets the strip")
+	assert_true(strip.find_button.visible,
+		"the strip waits for an explicit ask instead of scanning the whole root")
+	assert_false(workstation.get_reference_index().is_built(),
+		"opening a table must never trigger the whole-root reference scan")
+
+
 func test_section_filter_scopes_rows() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)

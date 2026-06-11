@@ -12,13 +12,29 @@ const MALFORMED_SOURCE := "[ENV]\nscroll_rate=1.25\n\n[TEXT]\n~Fbad\n"
 
 var _saved_resource_dir := ""
 
-class FontOpenShell:
+class RefIndexStub:
+	extends RefCounted
+
+	func resolve(_kind: String, name: String) -> Dictionary:
+		return {"status": "found", "path": "C:/res/%s.fnt" % name}
+
+
+class RefShell:
 	extends Node
 
-	var requested_font_name := ""
+	var index := RefIndexStub.new()
+	var picked_kind := ""
+	var jumped: Array = []
 
-	func open_font_workspace(font_name: String) -> Error:
-		requested_font_name = font_name
+	func get_reference_index() -> RefIndexStub:
+		return index
+
+	func open_kind_picker(kind: String, _title: String, on_pick: Callable) -> void:
+		picked_kind = kind
+		on_pick.call("C:/res/Serpen24.fnt")
+
+	func open_in_workspace(kind: String, path: String, _focus: Dictionary = {}) -> Error:
+		jumped.append([kind, path])
 		return OK
 
 
@@ -75,19 +91,42 @@ func test_editor_binds_document_and_loads_kda() -> void:
 	assert_gt(doc.resource.get_entry_count(), 0, "fixture has entries")
 
 
-func test_credits_workspace_forwards_font_edit_requests_to_editor_shell() -> void:
+func test_credits_workspace_injects_font_link_services_on_mount() -> void:
 	var workspace = autofree(CreditsWorkspaceScript.new())
-	var shell: FontOpenShell = add_child_autofree(FontOpenShell.new())
+	var shell: RefShell = add_child_autofree(RefShell.new())
 	var host: Control = add_child_autofree(Control.new())
 	workspace.set_editor_shell(shell)
 	workspace.mount_viewport(host)
 	await get_tree().process_frame
 
 	var editor: Node = host.get_child(0)
-	editor.request_edit_font.emit("Serpen24")
+	editor.set_resource_root(null)
+	var doc: Object = workspace.get_editor_document()
+	var entry := CbinTextEntry.new()
+	entry.set_text("Hello")
+	entry.set_font_name("Serpen24")
+	doc.resource.add_entry(entry)
+	await get_tree().process_frame
+	await get_tree().process_frame
 
-	assert_eq(shell.requested_font_name, "Serpen24",
-		"Credits workspace should forward edit-font requests into the Fonts workspace shell hook.")
+	var font_ref: Node = editor.find_child("FontRef", true, false)
+	assert_not_null(font_ref, "text cards carry a font link row")
+	if font_ref == null:
+		return
+	assert_eq(font_ref.get_value(), "Serpen24", "the row reads the entry's font name")
+	assert_true(font_ref.browse_button.visible,
+		"the shell's pick service reaches the card (services threaded down the chain)")
+
+	font_ref.browse_button.pressed.emit()
+	assert_eq(shell.picked_kind, "font", "browsing routes through the shell kind picker")
+	assert_eq(entry.get_font_name(), "Serpen24",
+		"a pick commits the basename back onto the entry")
+
+	assert_true(font_ref.jump_button.visible and not font_ref.jump_button.disabled,
+		"a resolvable font offers the jump")
+	font_ref.jump_button.pressed.emit()
+	assert_eq(shell.jumped, [["font", "C:/res/Serpen24.fnt"]],
+		"the jump rides open_in_workspace with the resolved path (relay chain retired)")
 
 
 func test_block_card_binds_text_entry() -> void:
@@ -104,11 +143,11 @@ func test_block_card_binds_text_entry() -> void:
 	# workaround.
 	var center: int = CbinEntry.CBIN_JUSTIFY_CENTER
 	entry.set_justify(center)
-	card.bind(entry, PackedStringArray())
+	card.bind(entry)
 	assert_eq(card.get_entry(), entry)
 
 
-func test_block_card_requests_edit_for_selected_text_font() -> void:
+func test_block_card_font_row_binds_and_commits_font_name() -> void:
 	var card = CreditsEditorBlockCardScene.instantiate()
 	add_child_autofree(card)
 	await get_tree().process_frame
@@ -116,18 +155,21 @@ func test_block_card_requests_edit_for_selected_text_font() -> void:
 	var entry := CbinTextEntry.new()
 	entry.set_text("Hello")
 	entry.set_font_name("Serpen24")
-	card.bind(entry, PackedStringArray(["Serpen24"]))
+	card.bind(entry)
 	await get_tree().process_frame
 
-	var requested := {"font_name": ""}
-	card.connect("request_edit_font", func(font_name: String) -> void:
-		requested["font_name"] = font_name
-	)
-	var edit_button: Button = card.get_node("%FontEditButton")
-	assert_false(edit_button.disabled, "Text cards with a selected font should enable font editing.")
-	edit_button.emit_signal("pressed")
+	var font_ref: Node = card.find_child("FontRef", true, false)
+	assert_not_null(font_ref, "text cards carry a font link row")
+	if font_ref == null:
+		return
+	assert_eq(font_ref.get_value(), "Serpen24", "binding reads the entry's font silently")
 
-	assert_eq(String(requested["font_name"]), "Serpen24", "Font edit action should emit the selected Nova font name.")
+	font_ref.name_edit.text = "Gunpl27b"
+	font_ref.name_edit.text_submitted.emit("Gunpl27b")
+	assert_eq(entry.get_font_name(), "Gunpl27b", "a typed commit writes the font name")
+
+	font_ref.clear_button.pressed.emit()
+	assert_eq(entry.get_font_name(), "", "clearing falls back to the game's default font")
 
 
 func test_block_card_binds_newline_as_compact_spacer() -> void:
@@ -135,7 +177,7 @@ func test_block_card_binds_newline_as_compact_spacer() -> void:
 	add_child_autofree(card)
 	await get_tree().process_frame
 
-	card.bind(CbinNewlineEntry.new(), PackedStringArray())
+	card.bind(CbinNewlineEntry.new())
 	await get_tree().process_frame
 
 	var type_chip: Label = card.get_node("%TypeChip")
@@ -209,7 +251,7 @@ func test_block_card_missing_image_name_commits_on_focus_loss() -> void:
 	await get_tree().process_frame
 
 	var entry := CbinImageEntry.new()
-	card.bind(entry, PackedStringArray(), ProjectSettings.globalize_path(CREDITS_FIXTURE_DIR))
+	card.bind(entry, ProjectSettings.globalize_path(CREDITS_FIXTURE_DIR))
 	await get_tree().process_frame
 
 	var path_edit: LineEdit = card.get_node("%ImagePathEdit")
@@ -226,7 +268,7 @@ func test_block_card_image_path_uses_case_and_extension_fallback() -> void:
 	await get_tree().process_frame
 
 	var entry := CbinImageEntry.new()
-	card.bind(entry, PackedStringArray(), ProjectSettings.globalize_path(CREDITS_FIXTURE_DIR))
+	card.bind(entry, ProjectSettings.globalize_path(CREDITS_FIXTURE_DIR))
 	await get_tree().process_frame
 
 	var path_edit: LineEdit = card.get_node("%ImagePathEdit")

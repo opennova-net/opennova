@@ -4,8 +4,6 @@ extends Control
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
 const PREVIEW_WHEEL_PIXELS := 48.0
 
-signal request_edit_font(font_name)
-
 enum Mode { VISUAL, SOURCE }
 
 @onready var _visual_button: Button = %VisualButton
@@ -34,6 +32,7 @@ var _sync_suppress := false
 var _preview_resource: CbinCreditsResource
 var _preview_paused := false
 var _resource_root: NovaResourceRoot
+var _ref_services: Dictionary = {}
 
 func set_document(value: CreditsEditorDocument) -> void:
 	if _document == value:
@@ -57,6 +56,13 @@ func set_resource_root(value: NovaResourceRoot) -> void:
 	_resource_root = value
 	if _block_list != null and _block_list.has_method("set_resource_root"):
 		_block_list.set_resource_root(_resource_root)
+
+## The shell's resolve/pick/jump trio for the cards' font link rows. Safe to
+## call before _ready (mount order); _ready re-applies the stored services.
+func set_reference_services(services: Dictionary) -> void:
+	_ref_services = services
+	if _block_list != null and _block_list.has_method("set_reference_services"):
+		_block_list.set_reference_services(services)
 
 func flush_pending_edits() -> Error:
 	if _mode == Mode.SOURCE and _source_view_host != null and _source_view_host.has_method("apply_pending"):
@@ -116,8 +122,8 @@ func _ready() -> void:
 	_block_list.selection_changed.connect(_on_block_list_selection_changed)
 	if _block_list.has_method("set_resource_root"):
 		_block_list.set_resource_root(_resource_root)
-	if _block_list.has_signal("request_edit_font"):
-		_block_list.connect("request_edit_font", Callable(self, "_on_block_list_request_edit_font"))
+	if not _ref_services.is_empty() and _block_list.has_method("set_reference_services"):
+		_block_list.set_reference_services(_ref_services)
 	if _source_view_host.has_signal("pending_edits_changed"):
 		_source_view_host.pending_edits_changed.connect(_on_source_pending_edits_changed)
 	_player.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -318,9 +324,6 @@ func _on_block_list_selection_changed(entry) -> void:
 		return
 	_seek_player_to_entry(idx)
 
-
-func _on_block_list_request_edit_font(font_name: String) -> void:
-	request_edit_font.emit(font_name)
 
 func _on_player_gui_input(event: InputEvent) -> void:
 	if _document == null or _document.resource == null:
