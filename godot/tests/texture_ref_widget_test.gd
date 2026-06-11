@@ -6,6 +6,7 @@ extends GutTest
 # placeholder, and the push-overrides-pull rule.
 
 const TextureRefWidgetScript := preload("res://modtools/framework/links/texture_ref_widget.gd")
+const LinkPayloadScript := preload("res://modtools/framework/links/link_payload.gd")
 
 
 func _make_widget() -> TextureRefWidget:
@@ -72,6 +73,33 @@ func test_clear_resets_preview() -> void:
 	w.ref_row.clear_button.pressed.emit()
 	assert_null(w.preview.get_texture(), "clearing the value empties the preview")
 	assert_false(w.preview._missing_label.visible, "an empty value shows the bare checker, not a missing mark")
+
+
+func test_drop_accepts_image_flavored_payloads_and_keeps_extension() -> void:
+	var w := _make_widget()
+	var emissions := []
+	w.value_changed.connect(func(v: String) -> void: emissions.append(v))
+	w.configure("texture", "Cloud map")
+	var data := LinkPayloadScript.make("image", "cloud02.pcx", "C:/res/cloud02.pcx").to_drag_data()
+	assert_true(w._can_drop_data(Vector2.ZERO, data),
+		"the widget-level handlers accept image payloads")
+	w._drop_data(Vector2.ZERO, data)
+	assert_eq(emissions, ["cloud02.pcx"], "the drop commits the file name with extension, once")
+	assert_eq(w.get_value(), "cloud02.pcx")
+
+
+func test_preview_box_lets_the_drop_walk_through() -> void:
+	# The handlers above are only reachable over the preview image if the box's
+	# display layers don't eat the walk: the TextureRects must IGNORE mouse,
+	# the missing-mark keeps its tooltip via PASS (not STOP), and the panel
+	# itself forwards to the row's handlers.
+	var w := _make_widget()
+	assert_eq(w.preview._checker.mouse_filter, Control.MOUSE_FILTER_IGNORE,
+		"the checkerboard never takes mouse events")
+	assert_eq(w.preview._preview.mouse_filter, Control.MOUSE_FILTER_IGNORE,
+		"the image layer never takes mouse events")
+	assert_eq(w.preview._missing_label.mouse_filter, Control.MOUSE_FILTER_PASS,
+		"the not-found mark keeps its tooltip but passes drops through")
 
 
 func test_configure_strips_jump_but_keeps_resolve_and_pick() -> void:

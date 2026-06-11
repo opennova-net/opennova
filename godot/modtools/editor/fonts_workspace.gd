@@ -115,6 +115,29 @@ func _make_inspector() -> Control:
 	meta_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(meta_label)
 
+	# "Used by" rides the shell's reference index; headless hosts get no strip.
+	if editor_shell != null and editor_shell.has_method("get_reference_index") \
+			and editor_shell.has_method("open_in_workspace"):
+		# Capture the shell into a local so the service lambdas don't hold this
+		# RefCounted workspace through a member access.
+		var shell: Object = editor_shell
+		var strip := ReferenceStrip.new()
+		strip.name = "UsedByStrip"
+		# Kind filter: referrer buckets are name-keyed, and the bare stem the
+		# credits reference fonts by shares its namespace with every other
+		# extensionless name in the graph. Source paths are VFS-logical;
+		# disk-only workspaces (menus, credits — exactly the files that use
+		# fonts) need them resolved before the jump.
+		strip.configure("font", {
+			"referrers": func(name: String) -> Array:
+				return shell.get_reference_index().referrers_of(name),
+			"is_ready": func() -> bool:
+				return shell.get_reference_index().is_built(),
+			"jump": func(kind: String, path: String) -> void:
+				shell.open_in_workspace(kind, ReferenceStrip.resolve_source_path(shell, path)),
+		}, PackedStringArray(["font"]))
+		box.add_child(strip)
+
 	return margin
 
 
@@ -132,6 +155,17 @@ func _populate_inspector() -> void:
 		name = _document.current_path.get_file().get_basename()
 	var dirty := "*" if _document.is_dirty else ""
 	font_label.text = "%s%s" % [name, dirty]
+
+	var strip := box.get_node_or_null("UsedByStrip")
+	if strip != null:
+		var keys := PackedStringArray()
+		if not _document.current_path.is_empty():
+			# Menus reference fonts with the extension ("arial12b.fnt"),
+			# credits reference them bare ("arial12b") - query both spellings.
+			var file := _document.current_path.get_file()
+			keys.append(file)
+			keys.append(file.get_basename())
+		strip.set_target(keys)
 
 	if _document.resource == null:
 		meta_label.text = ""

@@ -77,3 +77,31 @@ func test_selection_changed_reports_emptiness() -> void:
 	assert_eq(states.back(), false, "an empty list reports no selection")
 	table.set_entries(_entries())
 	assert_eq(states.back(), true, "a populated list auto-selects the first row")
+
+
+func test_drag_source_is_opt_in_and_returns_nothing_by_default() -> void:
+	var table := _make_table()
+	table.set_entries(_entries())
+	assert_null(table._get_tree_drag_data(Vector2.ZERO),
+		"without enable_drag_source the table never produces drag data (the modal stays a non-source)")
+
+
+func test_enabled_drag_packs_the_selected_rows_payload() -> void:
+	var table := _make_table()
+	var provided: Array = []
+	table.enable_drag_source(func(entry: Dictionary) -> Variant:
+		provided.append(entry)
+		if String(entry.get("display_name", "")) == "bravo.trn":
+			return null  # the provider can veto rows
+		return {"from": String(entry.get("relative_path", ""))})
+	table.set_entries(_entries())
+	# set_entries auto-selects the first sorted row (alpha.env); Vector2.ZERO
+	# misses every row, exercising the headless selected-row fallback.
+	var data: Variant = table._get_tree_drag_data(Vector2.ZERO)
+	assert_eq(data, {"from": "alpha.env"}, "the provider's data for the selected row is the drag data")
+	assert_eq(provided.size(), 1, "the provider runs once per drag")
+
+	var root := table.tree.get_root()
+	var second := root.get_first_child().get_next()
+	second.select(ResourceTableScript.COLUMN_NAME)
+	assert_null(table._get_tree_drag_data(Vector2.ZERO), "a provider null vetoes the drag")
