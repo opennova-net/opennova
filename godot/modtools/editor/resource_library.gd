@@ -28,6 +28,9 @@ const BROWSER_VISIBLE_KEY := "browser_pane_visible"
 const VIEW_STATE_SECTION := "view"
 const GRID_VISIBLE_KEY := "grid_visible"
 const AXES_VISIBLE_KEY := "axes_visible"
+# Detachable panels: per-panel docked flag + floating rect ("<id>_docked",
+# "<id>_rect"). Ids in use: "camera", "environment"; "assets" reserved.
+const PANELS_STATE_SECTION := "panels"
 
 var _index: RefCounted
 var _resource_root: NovaResourceRoot = NovaResourceRoot.new()
@@ -201,6 +204,30 @@ func save_browser_state(visible: bool, split_offset: int) -> void:
 	config.load(STATE_CONFIG_PATH)
 	config.set_value(LAYOUT_STATE_SECTION, BROWSER_VISIBLE_KEY, visible)
 	config.set_value(LAYOUT_STATE_SECTION, BROWSER_SPLIT_KEY, split_offset)
+	config.save(STATE_CONFIG_PATH)
+
+
+# Persisted detachable-panel state: per panel, whether it should open docked
+# and the floating window's last rect. Rect presence is explicit (positions can
+# be negative on multi-monitor setups); rect validity (still on a screen) is
+# the caller's concern at apply time.
+func load_panel_state(panel_id: String) -> Dictionary:
+	var config := ConfigFile.new()
+	if config.load(STATE_CONFIG_PATH) != OK:
+		return {"docked": true, "has_rect": false, "rect": Rect2i()}
+	var rect_key := "%s_rect" % panel_id
+	return {
+		"docked": bool(config.get_value(PANELS_STATE_SECTION, "%s_docked" % panel_id, true)),
+		"has_rect": config.has_section_key(PANELS_STATE_SECTION, rect_key),
+		"rect": config.get_value(PANELS_STATE_SECTION, rect_key, Rect2i()) as Rect2i,
+	}
+
+
+func save_panel_state(panel_id: String, docked: bool, rect: Rect2i) -> void:
+	var config := ConfigFile.new()
+	config.load(STATE_CONFIG_PATH)
+	config.set_value(PANELS_STATE_SECTION, "%s_docked" % panel_id, docked)
+	config.set_value(PANELS_STATE_SECTION, "%s_rect" % panel_id, rect)
 	config.save(STATE_CONFIG_PATH)
 
 

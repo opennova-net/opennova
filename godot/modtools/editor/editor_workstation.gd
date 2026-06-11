@@ -46,11 +46,15 @@ const _RECENT_CLEAR_META := "::clear::"
 @onready var _camera_toggle_button: Button = %CameraToggleButton
 @onready var _camera_popup: PopoverPanel = %CameraPopup
 @onready var _camera_popup_close: Button = %CameraPopupClose
+@onready var _camera_popup_detach: Button = %CameraPopupDetach
+@onready var _camera_popup_content: Control = %CameraPopupContent
 @onready var _camera_settings_host: Control = %CameraSettingsHost
 @onready var _environment_toggle_button: Button = %EnvironmentToggleButton
 @onready var _environment_popup: PopoverPanel = %EnvironmentPopup
 @onready var _environment_popup_title: Label = %EnvironmentPopupTitle
 @onready var _environment_popup_close: Button = %EnvironmentPopupClose
+@onready var _environment_popup_detach: Button = %EnvironmentPopupDetach
+@onready var _environment_popup_content: Control = %EnvironmentPopupContent
 @onready var _environment_actions_host: VBoxContainer = %EnvironmentActionsHost
 @onready var _environment_inspector_host: Control = %EnvironmentInspectorHost
 @onready var _settings_toggle_button: Button = %SettingsToggleButton
@@ -141,6 +145,13 @@ var _resource_browser := EditorResourceBrowser.new()
 var _browser_pane: ResourceBrowserPane
 var _pff_tool := EditorPffTool.new()
 var _file_dialogs: FileDialogHelper
+# Detachable panels (B6): the camera/environment popovers can pop their
+# content into floating windows. State machines live in the hosts; the cached
+# restore dicts make persisted "open floating" decisions without re-reading
+# the config per toggle (the save handlers keep them current).
+var _camera_panel_host: DetachablePanelHost
+var _environment_panel_host: DetachablePanelHost
+var _panel_restore: Dictionary = {}
 
 
 func _ready() -> void:
@@ -186,6 +197,11 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	# Quit-while-floating remembers the preference + rect for the next session.
+	if _camera_panel_host != null:
+		_camera_panel_host.save_now()
+	if _environment_panel_host != null:
+		_environment_panel_host.save_now()
 	for workspace in _workspaces.values():
 		(workspace as EditorWorkspace).release_viewport()
 	_clear_viewport_host()
@@ -200,6 +216,9 @@ func set_editor(value: Node) -> void:
 	if _environment_workspace != null:
 		_environment_workspace.bind_to_editor(value)
 	_reset_environment_popup_content()
+	# A floating environment window must not sit empty until its next toggle.
+	if _environment_panel_host != null and _environment_panel_host.is_floating():
+		_ensure_environment_popup_content()
 	_sync_camera_popup_editor()
 	_remount_active_workspace_viewport()
 	_refresh_workspace_surface()
@@ -1169,8 +1188,18 @@ func _wire_camera_popup() -> void:
 		_camera_popup.visible = false
 		_camera_popup.apply_anchor(320.0)
 		_camera_popup.bind_close(_camera_popup_close)
+		_camera_popup.bind_detach(_camera_popup_detach)
 		if not _camera_popup.close_requested.is_connected(_on_camera_popup_close_pressed):
 			_camera_popup.close_requested.connect(_on_camera_popup_close_pressed)
+		if not _camera_popup.detach_requested.is_connected(_detach_camera_panel):
+			_camera_popup.detach_requested.connect(_detach_camera_panel)
+	if _camera_panel_host == null and _camera_popup_content != null:
+		_camera_panel_host = DetachablePanelHost.new(&"camera", "Camera", Vector2i(344, 320))
+		_camera_panel_host.setup(_camera_popup_content, self, _save_camera_panel_state)
+		_camera_panel_host.floating_changed.connect(_on_camera_floating_changed)
+		# Read-only startup apply: remember the preference, never spawn windows
+		# at launch (the floating preference applies on the next open).
+		_panel_restore["camera"] = _resource_library.load_panel_state("camera")
 	if _camera_toggle_button != null and not _camera_toggle_button.toggled.is_connected(_on_camera_toggle_toggled):
 		_camera_toggle_button.icon = EditorIconLibrary.resolve(&"camera")
 		_camera_toggle_button.toggled.connect(_on_camera_toggle_toggled)
@@ -1182,12 +1211,78 @@ func _wire_environment_popup() -> void:
 		_environment_popup.visible = false
 		_environment_popup.apply_anchor(400.0)
 		_environment_popup.bind_close(_environment_popup_close)
+		_environment_popup.bind_detach(_environment_popup_detach)
 		if not _environment_popup.close_requested.is_connected(_on_environment_popup_close_pressed):
 			_environment_popup.close_requested.connect(_on_environment_popup_close_pressed)
+		if not _environment_popup.detach_requested.is_connected(_detach_environment_panel):
+			_environment_popup.detach_requested.connect(_detach_environment_panel)
+	if _environment_panel_host == null and _environment_popup_content != null:
+		_environment_panel_host = DetachablePanelHost.new(&"environment", "Environment", Vector2i(424, 480))
+		_environment_panel_host.setup(_environment_popup_content, self, _save_environment_panel_state)
+		_environment_panel_host.floating_changed.connect(_on_environment_floating_changed)
+		_panel_restore["environment"] = _resource_library.load_panel_state("environment")
 	if _environment_toggle_button != null and not _environment_toggle_button.toggled.is_connected(_on_environment_toggle_toggled):
 		_environment_toggle_button.icon = EditorIconLibrary.resolve(&"environment")
 		_environment_toggle_button.toggled.connect(_on_environment_toggle_toggled)
 	_refresh_environment_popup_state()
+
+
+# --- Detachable panels (B6) ---
+
+func _save_camera_panel_state(docked: bool, rect: Rect2i) -> void:
+	_panel_restore["camera"] = {"docked": docked, "has_rect": true, "rect": rect}
+	_resource_library.save_panel_state("camera", docked, rect)
+
+
+func _save_environment_panel_state(docked: bool, rect: Rect2i) -> void:
+	_panel_restore["environment"] = {"docked": docked, "has_rect": true, "rect": rect}
+	_resource_library.save_panel_state("environment", docked, rect)
+
+
+func _panel_restore_for(panel_id: String) -> Dictionary:
+	return _panel_restore.get(panel_id, {"docked": true, "has_rect": false, "rect": Rect2i()})
+
+
+# The window opens where it was last seen (clamped to a visible screen at
+# apply time); first detach derives a rect from where the popover sits.
+func _panel_detach_rect(panel_id: String, popover: PopoverPanel) -> Rect2i:
+	var restore := _panel_restore_for(panel_id)
+	if bool(restore.get("has_rect", false)):
+		return restore.get("rect", Rect2i()) as Rect2i
+	return DetachablePanelHost.screen_rect_for(popover)
+
+
+func _detach_camera_panel() -> void:
+	if _camera_panel_host == null or _camera_panel_host.is_floating():
+		return
+	# Content must exist before it floats (the popover may never have opened).
+	_ensure_camera_popup_content()
+	_camera_panel_host.detach(_panel_detach_rect("camera", _camera_popup))
+	if _camera_popup != null:
+		_camera_popup.close()
+	_refresh_camera_popup_state()
+
+
+func _detach_environment_panel() -> void:
+	if _environment_panel_host == null or _environment_panel_host.is_floating():
+		return
+	_ensure_environment_popup_content()
+	_environment_panel_host.detach(_panel_detach_rect("environment", _environment_popup))
+	if _environment_popup != null:
+		_environment_popup.close()
+	_refresh_environment_popup_state()
+
+
+func _on_camera_floating_changed(floating: bool) -> void:
+	if _camera_toggle_button != null:
+		_camera_toggle_button.set_pressed_no_signal(floating)
+
+
+func _on_environment_floating_changed(floating: bool) -> void:
+	if _environment_toggle_button != null:
+		_environment_toggle_button.set_pressed_no_signal(floating)
+	if _popup_workspace_buttons.has(Workspace.ENVIRONMENT):
+		(_popup_workspace_buttons[Workspace.ENVIRONMENT] as Button).set_pressed_no_signal(floating)
 
 
 func _wire_settings_popup() -> void:
@@ -1255,8 +1350,22 @@ func _on_camera_popup_close_pressed() -> void:
 func _set_camera_popup_visible(active: bool) -> void:
 	if _camera_popup == null:
 		return
+	# A floating panel is not a popover: the toggle raises its window, and the
+	# siblings' mutual-exclusion calls (active=false) must leave it alone.
+	if _camera_panel_host != null and _camera_panel_host.is_floating():
+		if active:
+			_ensure_camera_popup_content()
+			_camera_panel_host.focus_window()
+		if _camera_toggle_button != null:
+			_camera_toggle_button.set_pressed_no_signal(true)
+		return
 	if active and _get_editor_camera() == null:
 		active = false
+	# The remembered floating preference applies on open, never at launch.
+	if active and _camera_panel_host != null \
+			and not bool(_panel_restore_for("camera").get("docked", true)):
+		_detach_camera_panel()
+		return
 	if active:
 		_set_environment_popup_visible(false)
 		_set_settings_popup_visible(false)
@@ -1285,13 +1394,21 @@ func _sync_camera_popup_editor() -> void:
 
 func _refresh_camera_popup_state() -> void:
 	var has_camera := _get_editor_camera() != null
+	var floating := _camera_panel_host != null and _camera_panel_host.is_floating()
+	# A floating camera panel whose camera disappeared re-docks (mirrors the
+	# docked popover's force-close below).
+	if floating and not has_camera:
+		_camera_panel_host.redock()
+		floating = false
 	if _camera_toggle_button != null:
 		_camera_toggle_button.disabled = not has_camera
 		if not has_camera:
 			_camera_toggle_button.set_pressed_no_signal(false)
+		elif floating:
+			_camera_toggle_button.set_pressed_no_signal(true)
 	if _camera_popup != null and _camera_popup.visible and not has_camera:
 		_camera_popup.visible = false
-	if _camera_popup != null and _camera_popup.visible:
+	if (_camera_popup != null and _camera_popup.visible) or floating:
 		_ensure_camera_popup_content()
 		if _camera_settings_panel != null and _camera_settings_panel.has_method("sync_from_editor_state"):
 			_camera_settings_panel.sync_from_editor_state()
@@ -1328,6 +1445,22 @@ func show_environment_dialog() -> void:
 
 func _set_environment_popup_visible(active: bool) -> void:
 	if _environment_popup == null:
+		return
+	# A floating panel is not a popover: the toggle raises its window, and the
+	# siblings' mutual-exclusion calls (active=false) must leave it alone.
+	if _environment_panel_host != null and _environment_panel_host.is_floating():
+		if active:
+			_ensure_environment_popup_content()
+			_environment_panel_host.focus_window()
+		if _environment_toggle_button != null:
+			_environment_toggle_button.set_pressed_no_signal(true)
+		if _popup_workspace_buttons.has(Workspace.ENVIRONMENT):
+			(_popup_workspace_buttons[Workspace.ENVIRONMENT] as Button).set_pressed_no_signal(true)
+		return
+	# The remembered floating preference applies on open, never at launch.
+	if active and _environment_panel_host != null \
+			and not bool(_panel_restore_for("environment").get("docked", true)):
+		_detach_environment_panel()
 		return
 	if active:
 		_set_camera_popup_visible(false)
@@ -1372,8 +1505,12 @@ func _ensure_environment_popup_content() -> void:
 
 
 func _refresh_environment_popup_state() -> void:
+	var title := _environment_workspace.get_project_title() if _environment_workspace != null else "Environment"
 	if _environment_popup_title != null:
-		_environment_popup_title.text = _environment_workspace.get_project_title() if _environment_workspace != null else "Environment"
+		_environment_popup_title.text = title
+	if _environment_panel_host != null and _environment_panel_host.is_floating():
+		# The dirty "*" reaches the floating window through its OS title.
+		_environment_panel_host.set_window_title("Environment — %s" % title)
 	_refresh_action_buttons_state(_environment_workspace, _environment_action_buttons)
 
 

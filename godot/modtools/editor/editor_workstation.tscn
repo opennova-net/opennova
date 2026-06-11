@@ -287,6 +287,14 @@ text = "Camera"
 vertical_alignment = 1
 clip_text = true
 
+[node name="CameraPopupDetach" type="Button" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(34, 30)
+focus_mode = 0
+text = "⧉"
+tooltip_text = "Pop out camera settings into a floating window"
+
 [node name="CameraPopupClose" type="Button" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupHeader"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -295,7 +303,14 @@ focus_mode = 0
 text = "X"
 tooltip_text = "Close camera settings"
 
-[node name="CameraSettingsHost" type="VBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox"]
+[node name="CameraPopupContent" type="VBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="CameraSettingsHost" type="VBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupContent"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -342,6 +357,14 @@ text = "Environment"
 vertical_alignment = 1
 clip_text = true
 
+[node name="EnvironmentPopupDetach" type="Button" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(34, 30)
+focus_mode = 0
+text = "⧉"
+tooltip_text = "Pop out the environment editor into a floating window"
+
 [node name="EnvironmentPopupClose" type="Button" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupHeader"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -350,12 +373,19 @@ focus_mode = 0
 text = "X"
 tooltip_text = "Close environment editor"
 
-[node name="EnvironmentActionsHost" type="VBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+[node name="EnvironmentPopupContent" type="VBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="EnvironmentActionsHost" type="VBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="EnvironmentInspectorHost" type="PanelContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+[node name="EnvironmentInspectorHost" type="PanelContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupContent"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3

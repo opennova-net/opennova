@@ -1809,3 +1809,195 @@ func test_right_split_hides_when_dock_and_pane_are_both_hidden() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	await get_tree().process_frame
 	assert_true(right_split.visible, "a dock-using workspace shows the split")
+
+
+# --- Detachable panels (B6) ---
+
+func _detach_environment(workstation) -> void:
+	workstation.get_node("%EnvironmentPopupDetach").pressed.emit()
+
+
+# Floating panels persist on _exit_tree (quit-while-floating), which would land
+# AFTER after_each restores the shared config; tearing down inside the test
+# keeps that write under the restore.
+func _teardown(workstation) -> void:
+	workstation.queue_free()
+	await get_tree().process_frame
+
+
+func _attach_environment_document(workstation) -> Node:
+	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
+	environment_editor.create_default_environment(false)
+	workstation._environment_workspace.set_environment_editor(environment_editor)
+	return environment_editor
+
+
+func test_environment_detach_button_pops_content_into_window() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	_attach_environment_document(workstation)
+	workstation._set_environment_popup_visible(true)
+	assert_true(workstation.get_node("%EnvironmentPopup").visible, "popover opens docked first")
+
+	_detach_environment(workstation)
+	assert_false(workstation.get_node("%EnvironmentPopup").visible,
+		"the popover chrome hides when its content floats")
+	var inspector_host: Control = workstation.get_node("%EnvironmentInspectorHost")
+	assert_true(inspector_host.get_window() != workstation.get_window(),
+		"the environment content now lives in its own Window")
+	assert_true((workstation.get_node("%EnvironmentToggleButton") as Button).button_pressed,
+		"the rail toggle stays pressed while floating")
+	assert_gt(workstation.get_node("%EnvironmentActionsHost").get_child_count(), 0,
+		"the floating panel carries the document actions")
+	assert_gt(inspector_host.get_child_count(), 0,
+		"...and the environment inspector")
+	await _teardown(workstation)
+
+
+func test_detached_panel_is_exempt_from_popover_mutual_exclusion() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	_detach_environment(workstation)
+	assert_true(workstation._environment_panel_host.is_floating())
+
+	workstation._set_settings_popup_visible(true)
+	assert_true(workstation.get_node("%SettingsPopup").visible, "the settings popover opens")
+	assert_true(workstation._environment_panel_host.is_floating(),
+		"opening a sibling popover must not re-dock or hide the floating panel")
+	workstation._set_settings_popup_visible(false)
+	await _teardown(workstation)
+
+
+func test_toggle_focuses_detached_window_instead_of_closing() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	_detach_environment(workstation)
+
+	# The rail toggle while floating raises the window; it never closes or
+	# re-docks (re-docking has its own gesture: the window close button).
+	workstation._set_environment_popup_visible(true)
+	assert_true(workstation._environment_panel_host.is_floating(), "still floating after toggle-on")
+	workstation._set_environment_popup_visible(false)
+	assert_true(workstation._environment_panel_host.is_floating(), "still floating after toggle-off")
+	assert_true((workstation.get_node("%EnvironmentToggleButton") as Button).button_pressed,
+		"the toggle re-presses to mirror the floating state")
+	await _teardown(workstation)
+
+
+func test_window_close_redocks_environment_content() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	_attach_environment_document(workstation)
+	workstation._set_environment_popup_visible(true)
+	var actions_before: int = workstation.get_node("%EnvironmentActionsHost").get_child_count()
+	assert_gt(actions_before, 0, "the docked popover carries document actions")
+	_detach_environment(workstation)
+	var window: Window = workstation._environment_panel_host.get_window()
+
+	window.close_requested.emit()
+	assert_false(workstation._environment_panel_host.is_floating(), "the window close re-docks")
+	var content: Control = workstation.get_node("%EnvironmentPopupContent")
+	assert_eq(content.get_parent().name, "EnvironmentPopupBox",
+		"the content returns to the popover box")
+	assert_false(workstation.get_node("%EnvironmentPopup").visible,
+		"the popover stays closed after a re-dock")
+	assert_false((workstation.get_node("%EnvironmentToggleButton") as Button).button_pressed,
+		"the toggle releases")
+
+	workstation._set_environment_popup_visible(true)
+	assert_true(workstation.get_node("%EnvironmentPopup").visible, "the toggle reopens it docked")
+	assert_eq(workstation.get_node("%EnvironmentActionsHost").get_child_count(), actions_before,
+		"reopening must not duplicate the action buttons")
+	await _teardown(workstation)
+
+
+func test_detached_environment_window_title_tracks_project_title() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	_detach_environment(workstation)
+	workstation._refresh_environment_popup_state()
+	var window: Window = workstation._environment_panel_host.get_window()
+	assert_string_contains(window.title, "Environment — ",
+		"the floating window titles itself with the document name")
+	await _teardown(workstation)
+
+
+func test_panel_state_round_trips_through_panels_section() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	var library = workstation._resource_library
+
+	var fresh: Dictionary = library.load_panel_state("environment")
+	assert_true(bool(fresh.get("docked", false)), "panels default docked")
+	assert_false(bool(fresh.get("has_rect", true)), "no rect until one is saved")
+
+	library.save_layout_state(123, -207)
+	library.save_panel_state("environment", false, Rect2i(-5, -7, 400, 600))
+	var loaded: Dictionary = library.load_panel_state("environment")
+	assert_false(bool(loaded.get("docked", true)))
+	assert_true(bool(loaded.get("has_rect", false)))
+	assert_eq(loaded.get("rect"), Rect2i(-5, -7, 400, 600),
+		"negative window positions round-trip (multi-monitor)")
+	var layout: Dictionary = library.load_layout_state()
+	assert_eq(int(layout.get("left", 0)), 123, "panel saves never clobber the layout section")
+	assert_eq(int(layout.get("right", 0)), -207)
+
+
+func test_persisted_floating_preference_applies_on_next_open() -> void:
+	var first = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	_detach_environment(first)
+	assert_true(first._environment_panel_host.is_floating())
+	first.queue_free()
+	await get_tree().process_frame
+
+	var second = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	assert_false(second._environment_panel_host.is_floating(),
+		"a fresh shell always starts docked - no windows at launch")
+	second._set_environment_popup_visible(true)
+	assert_true(second._environment_panel_host.is_floating(),
+		"the remembered floating preference applies on the next open")
+	assert_false(second.get_node("%EnvironmentPopup").visible,
+		"the popover never flashes on a floating open")
+	await _teardown(second)
+
+
+func test_escape_ignores_detached_panels() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	_detach_environment(workstation)
+	workstation._set_settings_popup_visible(true)
+
+	var escape := InputEventKey.new()
+	escape.keycode = KEY_ESCAPE
+	escape.pressed = true
+	workstation._unhandled_input(escape)
+	assert_false(workstation.get_node("%SettingsPopup").visible, "Escape closes the docked popover")
+	assert_true(workstation._environment_panel_host.is_floating(),
+		"...but never touches a floating panel")
+
+	workstation._unhandled_input(escape)
+	assert_true(workstation._environment_panel_host.is_floating(),
+		"a second Escape still leaves the floating panel alone")
+	await _teardown(workstation)
+
+
+func test_set_editor_rebuilds_content_inside_detached_window() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	var environment_editor = _attach_environment_document(workstation)
+	_detach_environment(workstation)
+	assert_gt(workstation.get_node("%EnvironmentActionsHost").get_child_count(), 0)
+
+	# set_editor resets the environment popup content; a floating window must
+	# get its content rebuilt immediately, not sit empty until the next toggle.
+	var editor = autofree(TerrainEditorScript.new())
+	editor.environment_editor = environment_editor
+	workstation.set_editor(editor)
+	assert_true(workstation._environment_panel_host.is_floating(), "the panel keeps floating")
+	assert_gt(workstation.get_node("%EnvironmentActionsHost").get_child_count(), 0,
+		"the rebuilt actions land inside the floating window")
+	assert_gt((workstation.get_node("%EnvironmentInspectorHost") as Control).get_child_count(), 0,
+		"...with the rebuilt inspector")
+	await _teardown(workstation)
