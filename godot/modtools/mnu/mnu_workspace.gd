@@ -37,20 +37,28 @@ var _profiles: Dictionary = {}   # lower-case .lwf name -> NovaLwfData (or null 
 
 
 func _init() -> void:
-	_tabs.changed.connect(func() -> void: documents_changed.emit())
+	# A named method, not a lambda: a lambda touching a member signal captures
+	# self strongly and would cycle workspace <-> tab set (both RefCounted).
+	_tabs.changed.connect(_on_tabs_changed)
 	_document = _create_document()
 	_tabs.add(_document)
+
+
+func _on_tabs_changed() -> void:
+	documents_changed.emit()
 
 
 func _create_document():
 	var doc = MnuEditorDocumentScript.new()
 	# One channel covers dirty flips, label changes after save-as, and
 	# save-clears: EditorResourceDocument emits state_changed for all of them.
-	doc.state_changed.connect(_on_doc_state_changed.bind(doc))
+	# No .bind(doc): binding the doc into its own signal's callable would make
+	# the RefCounted document reference itself and leak on close/failed open.
+	doc.state_changed.connect(_on_doc_state_changed)
 	return doc
 
 
-func _on_doc_state_changed(_doc) -> void:
+func _on_doc_state_changed() -> void:
 	_tabs.notify_changed()
 
 
@@ -85,7 +93,9 @@ func deactivate() -> void:
 func _restore_state() -> void:
 	# Reopen the last session's tabs once per session, and only while the
 	# workspace is still pristine (one tab, no path, no edits) so it never
-	# clobbers user work (including cross-jump opens, which land before activate).
+	# clobbers user work. A cross-jump open lands BEFORE activate and both skips
+	# the restore and (via its _save_state) replaces the saved session with the
+	# jumped-to menu - the session always reflects the tabs actually open.
 	if _state_restored:
 		return
 	_state_restored = true
@@ -106,8 +116,17 @@ func _restore_state() -> void:
 func _save_state() -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(STATE_PATH)  # keep unrelated values if the file exists
-	cfg.set_value("session", "open_paths", _tabs.open_paths())
-	cfg.set_value("session", "active_index", _tabs.get_active_index())
+	var open := _tabs.open_paths()
+	cfg.set_value("session", "open_paths", open)
+	# active_index is stored in open_paths space: pathless (Untitled) tabs are
+	# not persisted, so a full-list index would drift past them on restore.
+	var active := -1
+	var active_doc = _tabs.get_active()
+	if active_doc != null:
+		var path := String(active_doc.get("current_path"))
+		if not path.is_empty():
+			active = open.find(path)
+	cfg.set_value("session", "active_index", active)
 	cfg.save(STATE_PATH)
 
 
@@ -192,6 +211,7 @@ func get_status_context() -> String:
 func mount_viewport(host: Control) -> void:
 	if host == null:
 		return
+	var created := false
 	if _editor == null:
 		_editor = MnuEditorScript.new()
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -199,11 +219,17 @@ func mount_viewport(host: Control) -> void:
 		_editor.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		_editor.widget_selected.connect(_on_widget_selected)
 		_editor.selection_changed.connect(_on_selection_changed)
+		created = true
 	if _editor.get_parent() == null:
 		host.add_child(_editor)
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_editor.set_resource_root(_resource_root_or_settings())
 	_editor.set_document(_document)
+	if created:
+		# A fresh editor starts with empty stacks; pick up any history parked
+		# for the active tab. (A REMOUNT must not touch the live stacks -
+		# set_document early-returns for the same document.)
+		_editor.restore_history(_histories.get(_document, {}))
 
 
 func unmount_viewport(_host: Control) -> void:

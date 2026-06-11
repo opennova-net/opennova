@@ -147,6 +147,21 @@ func test_session_restore_reopens_all_tabs_and_active_index() -> void:
 	assert_eq(ws2._document.current_path, FIXTURE, "the alias points at the restored active tab")
 
 
+func test_session_active_index_skips_untitled_tabs() -> void:
+	var ws = autofree(MnuWorkspaceScript.new())
+	ws._document.mark_dirty()  # the seeded Untitled tab holds work (unpersisted)
+	assert_eq(ws.open_file(FIXTURE), OK)  # full-list index 1
+	assert_eq(ws.open_file(SECOND), OK)  # full-list index 2
+	assert_eq(ws.activate_document(1), OK)  # FIXTURE active
+	ws.deactivate()
+
+	var ws2 = autofree(MnuWorkspaceScript.new())
+	ws2.activate()
+	assert_eq(ws2.get_document_tabs().size(), 2, "only pathful tabs persist")
+	assert_eq(ws2._document.current_path, FIXTURE,
+		"active_index is stored in open_paths space - Untitled tabs cannot drift it")
+
+
 func test_cross_jump_lands_in_the_existing_tab() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var root := ProjectSettings.globalize_path("res://../fixtures/mnu")
