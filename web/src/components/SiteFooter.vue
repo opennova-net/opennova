@@ -2,7 +2,7 @@
   <footer class="border-t border-white/5 bg-slate-950/80 py-8">
     <div class="mx-auto flex max-w-6xl flex-col gap-1 px-6 text-[0.65rem] text-slate-500 sm:flex-row sm:items-center sm:justify-between">
       <p class="tracking-[0.18em] uppercase">
-        Fan-run preservation project — not endorsed by THQ Nordic; original rights remain with their owners.
+        Fan-run preservation project, not endorsed by THQ Nordic; original rights remain with their owners.
       </p>
       <div class="flex items-center gap-4 tracking-[0.18em] uppercase">
         <a

@@ -3,7 +3,7 @@
     <div class="mx-auto max-w-3xl rounded-3xl border border-white/5 bg-white/5 p-8 shadow-2xl">
       <h1 class="text-3xl font-semibold text-white">Register</h1>
       <p class="mt-2 text-sm text-slate-400">
-        Pick a handle and a password. The server auto-generates your PCID.
+        Pick a handle and a password. That is what you log in with in-game.
       </p>
       <form class="mt-8 grid gap-6" @submit.prevent="handleSubmit">
         <label class="grid gap-2 text-sm text-slate-200">

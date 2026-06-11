@@ -94,7 +94,7 @@
       </div>
 
       <p v-if="!groupedExpansions.length" class="text-center text-sm text-slate-400">
-        No curated expansions are published right now—new releases will appear here once they pass review.
+        No curated expansions are published right now. New releases will appear here once they pass review.
       </p>
     </div>
   </section>
