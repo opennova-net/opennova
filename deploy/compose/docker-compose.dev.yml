@@ -1,0 +1,24 @@
+# Dev overlay: publish the game + web ports to the host and load the
+# committed dev env. On a Windows + WSL2 docker host the published ports
+# reach the Windows host, so a retail JO process on the same machine (with
+# the launcher in dev mode pointing hosts at 127.0.0.1) connects straight
+# through.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+services:
+  novaworld:
+    env_file:
+      - ../env/app.dev.env
+    ports:
+      - "7597:7597/udp"      # novaworld_gate
+      - "64206:64206/udp"    # NovaWorld UDP
+      - "8080:8080/tcp"      # HTTP / API
+
+  web:
+    ports:
+      - "8088:80"            # portal at http://localhost:8088
+    extra_hosts:
+      # nginx.conf proxies /api to host.docker.internal:8080, which the
+      # dev server publishes above.
+      - "host.docker.internal:host-gateway"

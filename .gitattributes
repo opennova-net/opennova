@@ -17,3 +17,7 @@ screenshots/** filter=lfs diff=lfs merge=lfs -text -eol
 godot/game/assets/** -text -eol
 godot/modtools/assets/** -text -eol
 apps/novaworld_server/static/** -text -eol
+
+# Deploy env files are read inside Linux containers — keep them LF, not the
+# CRLF the *.env rule above would impose. Last-match precedence wins.
+deploy/env/*.env text eol=lf
