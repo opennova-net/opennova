@@ -12,6 +12,7 @@
 
 namespace opennova {
 class ConnectionManager;
+class UnknownTracker;
 namespace db { class Database; }
 }
 
@@ -65,6 +66,12 @@ public:
 	// removes the corresponding rows.
 	void set_database(opennova::db::Database *db) { db_ = db; lobby_session_.set_database(db); }
 
+	// Optional unknown-message tracker. When set, unhandled opcodes,
+	// non-NOVAWORLDUDP PN strings, unhandled protocol-message types, and
+	// "unknown:" lobby containers are recorded (deduped) for /api/unknowns
+	// + the unknown_messages table. Null is safe (every hook is guarded).
+	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
+
 	NwUdpListener(const NwUdpListener &) = delete;
 	NwUdpListener &operator=(const NwUdpListener &) = delete;
 
@@ -110,6 +117,7 @@ private:
 	mutable std::mutex lobby_states_mu_;
 	std::unordered_map<PeerAddr, LobbyConnState, PeerAddrHash> lobby_states_;
 	opennova::db::Database *db_ = nullptr;
+	opennova::UnknownTracker *tracker_ = nullptr;
 };
 
 } // namespace opennova::server

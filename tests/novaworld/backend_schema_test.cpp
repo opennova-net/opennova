@@ -49,7 +49,7 @@ int test_migrations_create_expected_tables() {
 		"active_hosts", "active_user_sessions",
 		"expansion_files", "expansion_releases", "expansions",
 		"games", "host_players", "hosts", "player_game_access",
-		"players", "server_status"
+		"players", "server_status", "unknown_messages"
 	};
 	TEST_EXPECT(rows.size() == expected.size());
 	for (size_t i = 0; i < expected.size(); ++i) {

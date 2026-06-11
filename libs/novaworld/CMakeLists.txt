@@ -14,6 +14,7 @@ add_library(opennova_novaworld STATIC
     src/db/sqlite.cpp
     src/lobby_session.cpp
     src/host_repository.cpp
+    src/unknown_tracker.cpp
 )
 
 target_include_directories(opennova_novaworld

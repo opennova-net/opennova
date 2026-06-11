@@ -12,6 +12,7 @@
 #include <novaworld/db/sqlite.h>
 #include <novaworld/gsb.h>
 #include <novaworld/host_repository.h>
+#include <novaworld/unknown_tracker.h>
 
 #include <crow.h>
 
@@ -249,6 +250,19 @@ crow::json::wvalue value_to_json(const opennova::db::Value &v) {
 	return crow::json::wvalue();
 }
 
+// Lowercase hex of a byte buffer (for /api/unknowns sample_hex). Empty in,
+// empty out.
+std::string bytes_to_hex(const std::vector<uint8_t> &bytes) {
+	static constexpr char kHex[] = "0123456789abcdef";
+	std::string out;
+	out.reserve(bytes.size() * 2);
+	for (uint8_t b : bytes) {
+		out.push_back(kHex[(b >> 4) & 0xf]);
+		out.push_back(kHex[b & 0xf]);
+	}
+	return out;
+}
+
 crow::json::wvalue rows_to_json(const std::vector<opennova::db::Row> &rows) {
 	crow::json::wvalue out = crow::json::wvalue::list();
 	for (size_t i = 0; i < rows.size(); ++i) {
@@ -293,6 +307,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	const std::string templates_dir = config.templates_dir.string();
 	const std::string static_dir    = config.static_dir.string();
 	const std::string admin_token   = config.admin_api_token;
+	const std::string public_host   = config.public_host;
 	std::printf("[http] admin api %s\n",
 	            admin_token.empty() ? "DISABLED (set ADMIN_API_TOKEN to enable)"
 	                                : "ENABLED");
@@ -880,6 +895,52 @@ bool HttpListener::start(const ServerConfig &config) {
 		crow::json::wvalue out;
 		out["status"] = "ok";
 		return out;
+	});
+
+	// Live unknown-message snapshot (in-memory, reflects THIS run — the
+	// durable cross-run record is the unknown_messages table). Optional
+	// ?channel= filter. Each entry carries the first captured sample as
+	// lowercase hex so reverse-engineering can eyeball the bytes.
+	CROW_ROUTE(app, "/api/unknowns")([this](const crow::request &req) {
+		const std::string channel_filter =
+			req.url_params.get("channel") ? req.url_params.get("channel") : "";
+		std::vector<crow::json::wvalue> arr;
+		if (tracker_) {
+			for (const auto &s : tracker_->snapshot()) {
+				if (!channel_filter.empty() && s.channel != channel_filter) continue;
+				crow::json::wvalue e;
+				e["channel"]       = s.channel;
+				e["signature"]     = s.signature;
+				e["count"]         = static_cast<int64_t>(s.count);
+				e["first_seen_ms"] = static_cast<int64_t>(s.first_seen_ms);
+				e["last_seen_ms"]  = static_cast<int64_t>(s.last_seen_ms);
+				e["sample_meta"]   = s.sample_meta;
+				e["sample_hex"]    = bytes_to_hex(s.sample);
+				arr.push_back(std::move(e));
+			}
+		}
+		crow::json::wvalue out;
+		out["count"]    = arr.size();
+		out["unknowns"] = std::move(arr);
+		crow::response res(200);
+		res.body = out.dump();
+		res.set_header("Content-Type", "application/json");
+		return res;
+	});
+
+	// Server-info for the launcher's ServerEndpointResolver: the public host
+	// the client should redirect NovaWorld traffic to, plus the legacy
+	// hostnames its hosts-file shim rewrites.
+	CROW_ROUTE(app, "/api/server-info")([public_host]() {
+		crow::json::wvalue out;
+		out["novaworld_ip"] = public_host;
+		std::vector<crow::json::wvalue> hostnames;
+		hostnames.push_back(std::string("gs.novaworld.net"));
+		out["redirect_hostnames"] = std::move(hostnames);
+		crow::response res(200);
+		res.body = out.dump();
+		res.set_header("Content-Type", "application/json");
+		return res;
 	});
 
 	// ----- Phase E.1: Legacy NW*.dll login chain ---------------------------
@@ -1944,8 +2005,28 @@ bool HttpListener::start(const ServerConfig &config) {
 		return res;
 	});
 
-	CROW_ROUTE(app, "/<path>")([web_dist, static_dir, templates_dir](const std::string &subpath) {
+	CROW_ROUTE(app, "/<path>")(
+	    [web_dist, static_dir, templates_dir, this](const crow::request &req,
+	                                                const std::string &subpath) {
 		crow::response res;
+		// Record a 404 miss (method + path, query stripped) into the unknown
+		// tracker so /api/unknowns + unknown_messages surface what retail
+		// asked for that we don't serve. The request body is the sample.
+		auto record_http_404 = [&]() {
+			if (!tracker_) return;
+			std::string sig = crow::method_name(req.method);
+			sig += " /";
+			sig += subpath;  // already query-stripped by Crow's route match
+			using namespace std::chrono;
+			const auto http_now = static_cast<uint64_t>(
+				duration_cast<milliseconds>(
+					steady_clock::now().time_since_epoch()).count());
+			const auto *body_ptr =
+				reinterpret_cast<const uint8_t *>(req.body.data());
+			tracker_->record("http", sig, body_ptr, req.body.size(),
+			                 req.remote_ip_address, http_now);
+		};
+
 		// Defensive: reject anything that tries to escape the roots.
 		if (subpath.find("..") != std::string::npos) {
 			res.code = 400;
@@ -1962,6 +2043,7 @@ bool HttpListener::start(const ServerConfig &config) {
 				res.body = read_file_text(path);
 				return res;
 			}
+			record_http_404();
 			res.code = 404;
 			return res;
 		}
@@ -1986,6 +2068,7 @@ bool HttpListener::start(const ServerConfig &config) {
 		if (!std::filesystem::exists(path) || !std::filesystem::is_regular_file(path)) {
 			std::printf("[http] 404 /%s (no match in static/, templates/, web/dist/)\n",
 			            subpath.c_str());
+			record_http_404();
 			res.code = 404;
 			res.body = "not found: " + subpath;
 			res.set_header("Content-Type", "text/plain");
