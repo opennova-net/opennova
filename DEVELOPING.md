@@ -105,7 +105,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 | gate | `7597/udp` | client bootstrap probe (answers with the server address) |
 | NovaWorld UDP | `64206/udp` | NAPI session + in-match traffic (HELLO/JOIN/SESSION/GOODBYE) |
 | HTTP / API | `8080/tcp` | `/api/*`, `/api/server-info`, the legacy `NW*.dll` routes |
-| web portal | `http://localhost:8088` | the Vue site (nginx proxies `/api` to the server) |
+| web UI (Vite) | `http://localhost:5173` | the Vue site with **hot-reload**; Vite proxies `/api` to the server |
 
 Dev values come from `deploy/env/app.dev.env` (committed, non-secret): `ONNET_PUBLIC_HOST=127.0.0.1`,
 `admin`/`admin` basic auth, `ADMIN_API_TOKEN=dev-admin-token`. Sanity check and DB reset:
@@ -114,6 +114,20 @@ Dev values come from `deploy/env/app.dev.env` (committed, non-secret): `ONNET_PU
 curl http://127.0.0.1:8080/api/server-info
 docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v   # wipe the SQLite volume
 ```
+
+### Fast iteration
+
+Avoid rebuilding images to test changes:
+
+- **Web (Vue):** the dev stack runs the Vite dev server, so edits under `web/` hot-reload live at
+  `http://localhost:5173` with no rebuild. (Even lighter: skip the web container and run Vite on the
+  host — `cd web && npm install && npm run dev` — it proxies `/api` to `127.0.0.1:8080`.)
+- **Server (C++):** the dockerized server is for "I just need the backend up." For active server work,
+  run the local binary (below) and rebuild incrementally with `cmake --build build` (only the changed
+  objects, seconds). To refresh just the server image in the stack: `docker compose ... up -d --build novaworld`.
+- **Ports at a glance:** `5173` = web UI (dev/HMR), `8080` = API/server, `8088` = nginx (only the
+  prod-parity build). Hitting `http://localhost:8080/` shows an "API server" note — that is expected;
+  the dev UI is at `:5173`.
 
 **Without Docker**, build and run the server binary directly. It reads its config from
 env vars (`apps/novaworld_server/server_config.cpp`), and the defaults boot a fresh

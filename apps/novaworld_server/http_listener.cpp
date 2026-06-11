@@ -1996,7 +1996,11 @@ bool HttpListener::start(const ServerConfig &config) {
 		const auto path = web_dist / "index.html";
 		if (!std::filesystem::exists(path)) {
 			res.code = 404;
-			res.body = "web/dist/index.html missing — run `npm run build` in web/";
+			res.body =
+			    "This is the OpenNova NovaWorld API server (port 8080).\n"
+			    "In dev the web UI is served by Vite at http://localhost:5173 (hot-reload).\n"
+			    "web/dist is only populated for the all-in-one prod build "
+			    "(run `npm run build` in web/).\n";
 			return res;
 		}
 		res.code = 200;

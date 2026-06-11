@@ -1,10 +1,11 @@
-# Dev overlay: publish the game + web ports to the host and load the
-# committed dev env. On a Windows + WSL2 docker host the published ports
-# reach the Windows host, so a retail JO process on the same machine (with
-# the launcher in dev mode pointing hosts at 127.0.0.1) connects straight
-# through.
+# Dev overlay: publish the game ports to the host, load the committed dev
+# env, and serve the web UI via Vite with hot-reload (no image rebuild on
+# web changes). On a Windows + WSL2 docker host the published ports reach
+# the Windows host, so a retail JO process on the same machine (with the
+# launcher in dev mode pointing hosts at 127.0.0.1) connects straight through.
 #
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#   # then open the web UI at http://localhost:5173 (Vite, hot-reload)
 
 services:
   novaworld:
@@ -15,10 +16,20 @@ services:
       - "64206:64206/udp"    # NovaWorld UDP
       - "8080:8080/tcp"      # HTTP / API
 
+  # Web UI via the Vite dev server. Edits to web/ hot-reload live at
+  # http://localhost:5173 with no rebuild. Vite proxies /api to the novaworld
+  # server on the compose network (see web/vite.config.ts; its polling watch
+  # makes file changes reliable on WSL2). The nginx image (base web + the prod
+  # overlay) is the production path and is left untouched.
   web:
+    image: node:21-alpine
+    build: !reset null
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    volumes:
+      - ../../web:/app
+      - /app/node_modules    # container-owned; keep the host bind-mount off node_modules
     ports:
-      - "8088:80"            # portal at http://localhost:8088
-    extra_hosts:
-      # nginx.conf proxies /api to host.docker.internal:8080, which the
-      # dev server publishes above.
-      - "host.docker.internal:host-gateway"
+      - "5173:5173"
+    environment:
+      VITE_API_TARGET: http://novaworld:8080
