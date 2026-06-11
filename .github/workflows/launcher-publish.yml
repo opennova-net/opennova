@@ -1,0 +1,126 @@
+name: Launcher publish
+
+# Publishes the OpenNova launcher. On a launcher-v* tag (or manual dispatch)
+# it builds the single-file exe and attaches it to a GitHub Release — that
+# path needs no secrets, so a fork can cut its own release. If AWS launcher-
+# CI secrets are configured it also uploads to downloads.<domain> and writes
+# the version.json (AutoUpdater.NET) + app.json (web download box) manifests.
+
+on:
+  push:
+    tags: ['launcher-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 0.2.0); defaults to the csproj version'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          submodules: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          v="${{ github.event.inputs.version }}"
+          if [ -z "$v" ] && [[ "${{ github.ref }}" == refs/tags/launcher-v* ]]; then
+            v="${GITHUB_REF#refs/tags/launcher-v}"
+          fi
+          if [ -z "$v" ]; then
+            v="$(grep -oPm1 '(?<=<Version>)[^<]+' launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj)"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Launcher version: $v"
+
+      - name: Test
+        run: dotnet test launcher/OpenNovaLauncher.sln -c Release --nologo
+
+      - name: Publish single-file exe
+        run: dotnet publish launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj -c Release -r win-x64
+
+      - name: Stage artifact
+        id: stage
+        shell: bash
+        run: |
+          src="launcher/src/OpenNovaLauncher/bin/Release/net8.0-windows/win-x64/publish/OpenNovaLauncher.exe"
+          test -f "$src"
+          mkdir -p out
+          cp "$src" "out/OpenNovaLauncher.exe"
+          size=$(wc -c < "$src")
+          echo "size=$size" >> "$GITHUB_OUTPUT"
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/launcher-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/OpenNovaLauncher.exe
+          tag_name: ${{ github.ref_name }}
+          name: Launcher ${{ steps.ver.outputs.version }}
+          fail_on_unmatched_files: true
+
+      # ---- optional S3 + manifests (only if launcher-CI AWS keys are set) ----
+      - name: Check for AWS secrets
+        id: awscheck
+        shell: bash
+        env:
+          AWS_KEY: ${{ secrets.LAUNCHER_AWS_ACCESS_KEY_ID }}
+        run: |
+          if [ -n "$AWS_KEY" ]; then echo "have=true" >> "$GITHUB_OUTPUT"; else echo "have=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Write manifests
+        if: steps.awscheck.outputs.have == 'true'
+        shell: bash
+        env:
+          DOMAIN: ${{ vars.DOWNLOADS_DOMAIN }}
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          dom="${DOMAIN:-downloads.opennova.net}"
+          url="https://${dom}/launcher/OpenNovaLauncher.exe"
+          # AutoUpdater.NET manifest
+          cat > out/version.json <<JSON
+          { "version": "$v", "url": "$url", "mandatory": false }
+          JSON
+          # Web landing download box (web/src/api/downloads.ts normalizeManifest)
+          cat > out/app.json <<JSON
+          { "version": "$v", "download_url": "$url", "filename": "OpenNovaLauncher.exe", "size": ${{ steps.stage.outputs.size }} }
+          JSON
+
+      - name: Configure AWS credentials
+        if: steps.awscheck.outputs.have == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.LAUNCHER_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.LAUNCHER_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Upload to S3
+        if: steps.awscheck.outputs.have == 'true'
+        shell: bash
+        env:
+          BUCKET: ${{ vars.DOWNLOADS_BUCKET }}
+        run: |
+          : "${BUCKET:?set the DOWNLOADS_BUCKET repo variable}"
+          # Archive the previous exe so a bad release can be rolled back.
+          if aws s3 ls "s3://${BUCKET}/launcher/OpenNovaLauncher.exe" >/dev/null 2>&1; then
+            prev="$(aws s3api head-object --bucket "$BUCKET" --key launcher/OpenNovaLauncher.exe --query 'Metadata.version' --output text 2>/dev/null || echo previous)"
+            aws s3 cp "s3://${BUCKET}/launcher/OpenNovaLauncher.exe" \
+                      "s3://${BUCKET}/launcher/archive/OpenNovaLauncher-${prev}.exe" --only-show-errors || true
+          fi
+          aws s3 cp out/OpenNovaLauncher.exe "s3://${BUCKET}/launcher/OpenNovaLauncher.exe" \
+            --metadata "version=${{ steps.ver.outputs.version }}" --only-show-errors
+          aws s3 cp out/version.json "s3://${BUCKET}/launcher/version.json" --content-type application/json --only-show-errors
+          aws s3 cp out/app.json     "s3://${BUCKET}/launcher/app.json"     --content-type application/json --only-show-errors
+          echo "Published launcher ${{ steps.ver.outputs.version }} to s3://${BUCKET}/launcher/"
