@@ -55,6 +55,37 @@ func test_env_interpolation_and_export_round_trip() -> void:
 	assert_eq(reloaded.get_tod_keyframes().size(), env.get_tod_keyframes().size(), "TOD keyframes should survive export.")
 
 
+func test_set_sky_map_reresolves_cached_texture() -> void:
+	var env := _load_full_00()
+	var before := env.get_sky_map1_tex()
+	assert_not_null(before, "fixture sky map resolves at load")
+
+	env.set_sky_map1(env.get_sky_map2())
+
+	var after := env.get_sky_map1_tex()
+	assert_not_null(after, "the setter re-resolves against the fixture folder")
+	assert_ne(after, before, "the cached texture follows the edit instead of going stale")
+
+
+func test_set_sky_map_to_missing_name_clears_texture() -> void:
+	var env := _load_full_00()
+	assert_not_null(env.get_sky_map1_tex(), "fixture sky map resolves at load")
+
+	env.set_sky_map1("no_such_cloud.pcx")
+
+	assert_null(env.get_sky_map1_tex(), "an unresolvable name clears the cached texture (truthful preview)")
+
+
+func test_set_sky_map_with_unchanged_name_keeps_texture_instance() -> void:
+	var env := _load_full_00()
+	var before := env.get_sky_map1_tex()
+
+	env.set_sky_map1(env.get_sky_map1())
+
+	assert_eq(env.get_sky_map1_tex(), before,
+		"the diff guard must not hit the disk for an unchanged name (undo snapshot replays)")
+
+
 # --- Engine-faithful surfaces from the environment-workspace effort ----------
 
 
