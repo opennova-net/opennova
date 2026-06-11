@@ -275,23 +275,31 @@ func open_file(path: String) -> Error:
 
 
 # Cross-jump target for the Menus workspace's "Edit in Strings": open the given table
-# (when not already open) and focus a key by filtering the table to it and selecting
-# its entry. Runs before the shell mounts this workspace's viewport, so the search is
-# stashed and applied when mount_viewport builds the view. Returns the open Error (OK
-# when only focusing an already-open table).
+# (when not already open) and focus a key. Returns the open Error (OK when only
+# focusing an already-open table).
 func open_strings_table(path: String, key: String) -> Error:
 	_ensure_editor()
-	var err: Error = OK
 	if not path.is_empty() and path != strings_editor.current_path:
-		err = strings_editor.open_strings(path)
+		var err := strings_editor.open_strings(path)
 		if err != OK:
 			return err
-	if not key.is_empty():
-		set_search(key)
-		var idx := strings_editor.string_table.find_entry_by_key(key)
-		if idx >= 0:
-			strings_editor.selected_index = idx
-	return err
+	return focus_reference({"key": key})
+
+
+# Cross-jump focus hook (EditorWorkspace.focus_reference): {"key": String} filters
+# the table to the key and selects its entry. Runs before the shell mounts this
+# workspace's viewport, so the search is stashed and applied when mount_viewport
+# builds the view.
+func focus_reference(focus: Dictionary) -> Error:
+	var key := String(focus.get("key", ""))
+	if key.is_empty():
+		return OK
+	_ensure_editor()
+	set_search(key)
+	var idx := strings_editor.string_table.find_entry_by_key(key)
+	if idx >= 0:
+		strings_editor.selected_index = idx
+	return OK
 
 
 func can_save() -> bool:

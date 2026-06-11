@@ -510,6 +510,72 @@ func get_active_workspace_id() -> int:
 	return _active_workspace_id
 
 
+# Generic cross-workspace jump: open `path` in the workspace that declares `kind`
+# (EditorWorkspace.get_open_resource_kind), then forward `focus` to its
+# focus_reference hook. Capability-driven so the shell never grows per-type jump
+# methods; the font/strings/menu jumps below are forwarders over this, and link
+# widgets call it directly. A path equal to the workspace's current document skips
+# the reopen, so focus-only jumps cannot drop unsaved edits.
+func open_in_workspace(kind: String, path: String, focus: Dictionary = {}) -> Error:
+	_ensure_workspaces()
+	var workspace_id := _workspace_id_for_resource_kind(kind)
+	if workspace_id == -1:
+		return ERR_UNAVAILABLE
+	var workspace := _workspace_for_id(workspace_id)
+	var clean_path := path.strip_edges()
+	if clean_path.is_empty():
+		return ERR_INVALID_PARAMETER
+	if clean_path != String(workspace.get_current_resource_path()):
+		var err: Error = workspace.open_file(clean_path)
+		if err != OK:
+			show_status_message("Could not open %s." % clean_path.get_file(), 5.0)
+			return err
+	if _active_workspace_id != workspace_id:
+		set_active_workspace(workspace_id)
+	else:
+		_refresh_workspace_surface()
+		sync_from_editor_state()
+	if not focus.is_empty():
+		var focus_err: Error = workspace.focus_reference(focus)
+		if focus_err != OK:
+			var parts := PackedStringArray()
+			for value in focus.values():
+				parts.append(str(value))
+			show_status_message("Opened %s; not found: %s" % [clean_path.get_file(), ", ".join(parts)], 5.0)
+			return focus_err
+	return OK
+
+
+# The registry id of the workspace declaring `kind` as its open-resource kind
+# (-1 when no workspace does). Covers the popup workspace too, so jumps can
+# target Environment.
+func _workspace_id_for_resource_kind(kind: String) -> int:
+	if kind.is_empty():
+		return -1
+	for def_v in _workspace_defs_cache:
+		var def := def_v as WorkspaceDef
+		var workspace := _workspace_for_id(def.id)
+		if workspace != null and String(workspace.get_open_resource_kind()) == kind:
+			return def.id
+	return -1
+
+
+# _get_workspace covers the main-rail workspaces; popup workspaces live outside
+# _workspaces (see _ensure_workspaces), so jump targets resolve through this.
+func _workspace_for_id(workspace_id: int) -> EditorWorkspace:
+	var workspace := _get_workspace(workspace_id)
+	if workspace != null:
+		return workspace
+	for def_v in _workspace_defs_cache:
+		var def := def_v as WorkspaceDef
+		if def.id == workspace_id and def.popup:
+			return _environment_workspace
+	return null
+
+
+# Cross-jump used by the Credits and Menus workspaces' font references. Fonts open
+# by NAME, so resolution stays on the Fonts workspace (resolve_font_file); the open
+# itself rides open_in_workspace.
 func open_font_workspace(font_name: String) -> Error:
 	_ensure_workspaces()
 	var workspace := _get_workspace(Workspace.FONTS)
@@ -518,36 +584,24 @@ func open_font_workspace(font_name: String) -> Error:
 	var clean_name := font_name.strip_edges()
 	if clean_name.is_empty():
 		return ERR_INVALID_PARAMETER
-	var err: Error = int(workspace.call("open_font_name", clean_name))
-	if err != OK:
+	var path := String(workspace.call("resolve_font_file", clean_name))
+	if path.is_empty():
 		show_status_message("Font not found: %s" % clean_name, 5.0)
+		return ERR_DOES_NOT_EXIST
+	var err := open_in_workspace("font", path)
+	if err != OK:
 		return err
-	if _active_workspace_id != Workspace.FONTS:
-		set_active_workspace(Workspace.FONTS)
-	else:
-		_refresh_workspace_surface()
-		sync_from_editor_state()
 	show_status_message("Opened font %s." % clean_name, 3.0)
 	return OK
 
 
 # Cross-jump used by the Menus workspace's "Edit in Strings": open the menu's resolved
-# text table in the Strings workspace and focus the given key. Mirrors
-# open_font_workspace. table_path is an absolute path (already resolved by the caller).
+# text table in the Strings workspace and focus the given key. table_path is an
+# absolute path (already resolved by the caller).
 func open_strings_workspace(table_path: String, key: String) -> Error:
-	_ensure_workspaces()
-	var workspace := _get_workspace(Workspace.STRINGS)
-	if workspace == null:
-		return ERR_UNAVAILABLE
-	var err: Error = int(workspace.call("open_strings_table", table_path, key))
+	var err := open_in_workspace("strings", table_path, {"key": key})
 	if err != OK:
-		show_status_message("Could not open string table: %s" % table_path.get_file(), 5.0)
 		return err
-	if _active_workspace_id != Workspace.STRINGS:
-		set_active_workspace(Workspace.STRINGS)
-	else:
-		_refresh_workspace_surface()
-		sync_from_editor_state()
 	show_status_message("Editing string %s." % (key if not key.is_empty() else table_path.get_file()), 3.0)
 	return OK
 
@@ -556,29 +610,14 @@ func open_strings_workspace(table_path: String, key: String) -> Error:
 # .mnu name/path against the configured resource root, open it in Menus, then
 # focus the target screen when supplied.
 func open_menu_workspace(file: String, screen: String = "") -> Error:
-	_ensure_workspaces()
-	var workspace := _get_workspace(Workspace.MNU)
-	if workspace == null:
-		return ERR_UNAVAILABLE
 	var path := _resolve_menu_action_path(file)
 	if path.is_empty():
 		show_status_message("Menu not found: %s" % file.strip_edges(), 5.0)
 		return ERR_FILE_NOT_FOUND
-	var err: Error = workspace.open_file(path)
-	if err != OK:
-		show_status_message("Could not open menu: %s" % path.get_file(), 5.0)
-		return err
-	if _active_workspace_id != Workspace.MNU:
-		set_active_workspace(Workspace.MNU)
-	else:
-		_refresh_workspace_surface()
-		sync_from_editor_state()
 	var target := screen.strip_edges()
-	if not target.is_empty() and workspace.has_method("focus_screen_named"):
-		var focus_err: Error = int(workspace.call("focus_screen_named", target))
-		if focus_err != OK:
-			show_status_message("Opened %s; screen not found: %s" % [path.get_file(), target], 5.0)
-			return focus_err
+	var err := open_in_workspace("menu", path, {"screen": target} if not target.is_empty() else {})
+	if err != OK:
+		return err
 	show_status_message("Opened menu %s%s." % [
 		path.get_file(),
 		" -> %s" % target if not target.is_empty() else "",
