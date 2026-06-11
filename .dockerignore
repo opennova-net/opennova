@@ -1,0 +1,23 @@
+# Keep the server image build context lean. The Dockerfile only needs
+# libs/, backend/, third_party/, apps/, and the root CMakeLists.
+.git
+build/
+build-*/
+**/build/
+**/.godot/
+godot/bin/
+godot/exports/
+.godot-bin/
+node_modules/
+**/node_modules/
+web/dist/
+launcher/**/bin/
+launcher/**/obj/
+.venv/
+__pycache__/
+*.pyc
+.scratch/
+notes/
+fixtures/
+screenshots/
+infra/aws/.terraform/
