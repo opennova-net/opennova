@@ -86,6 +86,8 @@ func _wire_host() -> void:
 	_menu_host.exit_to_desktop_requested.connect(_on_exit_to_desktop)
 	_menu_host.return_to_menu_requested.connect(_on_return_to_menu)
 	_menu_host.resume_requested.connect(_on_resume)
+	if _menu_host.has_signal("novaworld_requested"):
+		_menu_host.novaworld_requested.connect(_on_novaworld_requested)
 
 
 # --- Resource dir picker (first launch) ---------------------------------------
@@ -135,6 +137,28 @@ func _cleanup_picker() -> void:
 	if _picker != null:
 		_picker.queue_free()
 		_picker = null
+
+
+# --- NovaWorld (online multiplayer) ------------------------------------------
+
+var _novaworld_panel: NovaWorldPanel
+
+func _on_novaworld_requested() -> void:
+	if _novaworld_panel != null:
+		return
+	_novaworld_panel = NovaWorldPanel.new()
+	# Dev default: localhost. A prod build sets the server host from the
+	# resolved server IP before showing the panel.
+	_menu_host.hide_menu()
+	$MenuLayer.add_child(_novaworld_panel)
+	_novaworld_panel.closed.connect(_on_novaworld_closed)
+
+
+func _on_novaworld_closed() -> void:
+	if _novaworld_panel != null:
+		_novaworld_panel.queue_free()
+		_novaworld_panel = null
+	_menu_host.show_menu()
 
 
 # --- Menu <-> world transitions ----------------------------------------------
