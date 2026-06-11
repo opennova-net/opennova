@@ -46,6 +46,9 @@ var _var_rows_signature := ""
 
 var _status_label: Label
 
+# Perf pane (C11): the PerfTimeline ring + live monitors.
+var _perf_pane: DebugPerfPane
+
 
 func _init() -> void:
 	layer = 90
@@ -127,6 +130,13 @@ func _build_panel() -> void:
 	_build_entities_tab()
 	_build_sim_tab()
 	_build_vars_tab()
+	_build_perf_tab()
+
+
+func _build_perf_tab() -> void:
+	_perf_pane = DebugPerfPane.new()
+	_perf_pane.name = "Perf"
+	_tabs.add_child(_perf_pane)
 
 
 func _build_entities_tab() -> void:
@@ -256,9 +266,12 @@ func _refresh() -> void:
 	var sim := _resolve_sim(runtime)
 	var live := sim != null
 	_status_label.visible = not live
-	# The tabs stay usable without a sim: the panes that need one clear to
-	# their empty states (their handlers already null-check the runtime), so a
-	# pane fed by host-wide state (the perf ring) keeps working from the menu.
+	# The perf pane is fed by HOST-WIDE state (the PerfTimeline ring + live
+	# monitors), not the sim — it refreshes regardless, so "that load was slow,
+	# let me look" works from the menu after returning from a mission.
+	_perf_pane.refresh()
+	# The other tabs stay usable without a sim too: the panes that need one
+	# clear to their empty states (their handlers already null-check).
 	if not live:
 		_clear_live_panes()
 		return
