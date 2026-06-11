@@ -58,7 +58,9 @@ func test_without_runtime_reports_no_mission() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	assert_true(overlay._status_label.visible, "no source - the overlay says so")
-	assert_false(overlay._tabs.visible)
+	assert_true(overlay._tabs.visible,
+		"the tabs stay usable (the perf pane works from host-wide state, no sim needed)")
+	assert_eq(overlay._entity_list.item_count, 0, "the sim-fed panes sit empty")
 
 	overlay.set_runtime_source(func(): return null)
 	overlay.refresh_now()
@@ -78,6 +80,7 @@ func test_runtime_source_survives_reloads() -> void:
 	holder["rt"] = null
 	overlay.refresh_now()
 	assert_true(overlay._status_label.visible, "a freed runtime degrades to the empty state")
+	assert_eq(overlay._entity_list.item_count, 0, "...and clears the dead sim's rows")
 
 	holder["rt"] = _make_runtime()
 	overlay.refresh_now()
@@ -136,6 +139,38 @@ func test_vars_pane_filters_and_gates_writes() -> void:
 		"with edits off a submit is ignored (defense in depth)")
 
 
+func test_vars_rebuild_defers_while_an_edit_is_in_progress() -> void:
+	# With the changed-only filter, a var flipping zero<->nonzero on a running
+	# mission changes the visible SET - the rebuild must never destroy a
+	# LineEdit mid-typing; it lands on the next refresh after the field blurs.
+	var rt := _make_runtime()
+	var overlay := _make_overlay()
+	overlay.set_runtime(rt)
+	rt.get_sim().set_mission_variable(5, 42)
+	overlay.toggle()
+	overlay._writes_check.button_pressed = true
+	overlay._writes_check.toggled.emit(true)
+	var edit := overlay._vars_rows.get_node_or_null("VarRow_V5/VarEdit_V5") as LineEdit
+	assert_not_null(edit)
+	if edit == null:
+		return
+	edit.grab_focus()
+	edit.text = "12"  # in-flight typing
+
+	rt.get_sim().set_mission_variable(7, 1)  # the visible set changes underneath
+	overlay.refresh_now()
+	assert_true(is_instance_valid(edit) and edit.has_focus(),
+		"the rebuild defers while the edit is in progress")
+	assert_eq(edit.text, "12", "...keeping the typed text")
+	assert_null(overlay._vars_rows.get_node_or_null("VarRow_V7"),
+		"the stale set survives one cycle by design")
+
+	edit.release_focus()
+	overlay.refresh_now()
+	assert_not_null(overlay._vars_rows.get_node_or_null("VarRow_V7"),
+		"the deferred rebuild lands after the blur")
+
+
 func test_entity_detail_card_follows_selection() -> void:
 	var rt := _make_runtime()
 	var overlay := _make_overlay()
@@ -166,13 +201,24 @@ func test_refresh_timer_pauses_while_hidden() -> void:
 
 
 # --- The game host's F3 seam --------------------------------------------------
-# The real scene, with the resource dir cleared so _ready stops at the headless
-# picker guard instead of mounting whatever game folder this machine has.
+# The real scene, with the resource dir cleared (before_all/after_all, so an
+# aborted test can never leave the user's real setting blank) - _ready then
+# stops at the headless picker guard instead of mounting a real game folder.
+
+const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+var _saved_resource_dir := ""
+
+
+func before_all() -> void:
+	_saved_resource_dir = ResourceDirSettings.get_resource_dir()
+	ResourceDirSettings.set_resource_dir("")
+
+
+func after_all() -> void:
+	ResourceDirSettings.set_resource_dir(_saved_resource_dir)
+
 
 func test_main_game_f3_toggles_overlay_lazily() -> void:
-	var settings := preload("res://engine/resource_index/resource_dir_settings.gd")
-	var saved_dir: String = settings.get_resource_dir()
-	settings.set_resource_dir("")
 	var game = add_child_autofree(preload("res://game/main_game.tscn").instantiate())
 	await get_tree().process_frame
 
@@ -184,5 +230,3 @@ func test_main_game_f3_toggles_overlay_lazily() -> void:
 		"without a running mission it reports so instead of erroring")
 	game._toggle_debug_overlay()
 	assert_false(game._debug_overlay.visible, "the second toggle hides, never rebuilds")
-
-	settings.set_resource_dir(saved_dir)

@@ -256,12 +256,32 @@ func _refresh() -> void:
 	var sim := _resolve_sim(runtime)
 	var live := sim != null
 	_status_label.visible = not live
-	_tabs.visible = live
+	# The tabs stay usable without a sim: the panes that need one clear to
+	# their empty states (their handlers already null-check the runtime), so a
+	# pane fed by host-wide state (the perf ring) keeps working from the menu.
 	if not live:
+		_clear_live_panes()
 		return
 	_refresh_entities(sim)
 	_refresh_sim(runtime, sim)
 	_refresh_vars(sim)
+
+
+func _clear_live_panes() -> void:
+	if _entity_list.item_count > 0:
+		_entity_list.clear()
+	_selected_entity = -1
+	_entity_detail.text = "Select a unit to see its details."
+	_tick_label.text = ""
+	_entities_label.text = ""
+	_events_label.text = ""
+	_wac_label.text = ""
+	if _var_rows_signature != "":
+		_var_rows_signature = ""
+		_var_controls.clear()
+		for child in _vars_rows.get_children():
+			_vars_rows.remove_child(child)
+			child.queue_free()
 
 
 func _refresh_entities(sim: Object) -> void:
@@ -368,6 +388,13 @@ func _refresh_vars(sim: Object) -> void:
 	for entry in desired:
 		signature += "|%s%d" % [entry[0], entry[1]]
 
+	# Never rebuild out from under an edit in progress: with the changed-only
+	# filter on a RUNNING mission, vars flip zero<->nonzero routinely, and the
+	# rebuild would drop focus and in-flight text. The stale set survives one
+	# refresh cycle; the rebuild lands after the field blurs.
+	if signature != _var_rows_signature and _any_var_edit_focused():
+		return
+
 	if signature != _var_rows_signature:
 		_var_rows_signature = signature
 		_var_controls.clear()
@@ -396,6 +423,13 @@ func _refresh_vars(sim: Object) -> void:
 				edit.text = str(int(entry[2]))
 		elif control is Label:
 			(control as Label).text = str(int(entry[2]))
+
+
+func _any_var_edit_focused() -> bool:
+	for control in _var_controls.values():
+		if control is LineEdit and (control as LineEdit).has_focus():
+			return true
+	return false
 
 
 func _add_var_row(bank: String, index: int, value: int, writable: bool) -> void:
