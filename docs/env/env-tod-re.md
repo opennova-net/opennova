@@ -305,13 +305,19 @@ The applied fog distance also feeds the far clip/culling and the sky dome fog fa
 ## Sky dome (`render_skybox @ 0x579080`) — full combine recovered (C6)
 
 Dome = 441 vertices / 800 triangles (21×21 grid, FVF `0x212` = XYZ|NORMAL|TEX2, stride 40,
-`build_sky_dome_mesh @ 0x578db0`). The shader path draws the dome **twice — but the two
-passes are NOT one-per-cloud-layer** (pre-C6 misreading): pass 1 is a **textureless sky
-gradient**, pass 2 draws **both cloud layers in one multi-stage pass**, alpha-blended over
-it. Both vertex shaders are embedded as `vs_1_1` *source text* (`SkyVS_GradientPassSource
-@ 0x7d7338`, `SkyVS_CloudPassSource @ 0x7d6fc0`) and assembled at runtime with the
-statically-linked `D3DXAssembleShader` in `terrain_init_rendering_resources @ 0x5789e0`
-(handles → sky+116 / sky+120).
+`build_sky_dome_mesh @ 0x578db0`). C7 pre-port reads pinned the builder's remaining
+unknowns: the height scale `v14 = skyHeight/175.69` stretches **Y only** (x/z stay at the
+1024-unit rim radius, @ 0x578ed4), and the **dome normal is the builder's anisotropic
+normal `normalize(x, y_scaled/v14², z)`** — equivalently `normalize(x, y_unscaled/v14, z)`
+— *not* the normalized vertex direction (@ 0x578fbb..0x579023). The dome's world
+translation is the camera position with **height halved** (`camHeight >> 1`,
+@ 0x5790b2..0x5790d7) — the dome rides up at half the camera's vertical rate. The shader
+path draws the dome **twice — but the two passes are NOT one-per-cloud-layer** (pre-C6
+misreading): pass 1 is a **textureless sky gradient**, pass 2 draws **both cloud layers in
+one multi-stage pass**, alpha-blended over it. Both vertex shaders are embedded as `vs_1_1`
+*source text* (`SkyVS_GradientPassSource @ 0x7d7338`, `SkyVS_CloudPassSource @ 0x7d6fc0`)
+and assembled at runtime with the statically-linked `D3DXAssembleShader` in
+`terrain_init_rendering_resources @ 0x5789e0` (handles → sky+116 / sky+120).
 
 **VS constants** (uploads @ 0x579709..0x579868, both passes): c0-3 WVP, c4-7 world,
 **c8 = eye world position** (fog reference — the pre-C6 "sky highlight float mirror" label
@@ -330,10 +336,13 @@ is created with `CEffect_SetTextureParam(NULL)`):
 ```
 t      = 0.5·dot(domeNormal_world, sunDir[c13]) + 0.5      // THE gradient driver
 sky    = c11 + c12·t                                       // skybase → skybright toward the sun side
-prox   = max(dot(normalize(clipPos), c14), 0)
+prox   = max(dp3(normalize(clipPos.xyz), c14.xyz), 0)      // 3-component; w excluded on both sides
 oD0    = lerp(sky, skyhighlight[c15], prox⁸)               // sun-proximity highlight
 oFog   = 1 − dist(worldPos, eye[c8]) / (0.9·fogDist)
 ```
+
+(C7 precision pin: the source text normalizes `clipPos.xyz` with `dp3/rsq/mul` and the
+proximity dot is itself a `dp3` — both strictly 3-component, w never participates.)
 
 **Pass 2 — clouds** (VS `SkyVS_CloudPassSource`, both scrolled UV sets; per-vertex):
 
@@ -362,9 +371,20 @@ the dome **material's ambient** slot against `SetRenderState(D3DRS_AMBIENT, 0xFF
 (@ 0x579b42..0x579bb6) — and that is the **only** render path that reads `cloud_rgb`
 (`Env_CloudBlock @ 0x26c64a4` xref sweep: render path reads exist solely in that branch;
 the keyframed path's cloud colors come exclusively from the cloudbase/cloudedge/
-cloudhighlight blocks). A white-sky variant forces sky colors to 1.0 and cloud colors
-to 0.9. `Environment_ApplyFogAndAmbient` pushes the smoothed sky height to the dome
-(`@ 0x57e4f7`) only when it changes.
+cloudhighlight blocks). C7 correction: the flat path applies the **pass-1 effect** —
+created with `CEffect_SetTextureParam(NULL)` — so it is **textureless** (the earlier
+"textures still bound" reimpl comment was wrong). A white-sky variant forces sky colors
+to 1.0 and cloud colors to 0.9. `Environment_ApplyFogAndAmbient` pushes the smoothed sky
+height to the dome (`@ 0x57e4f7`) only when it changes.
+
+**Dome fog color (C7 close-out).** There is no dome-specific fog color derivation: both
+dome draws run with VS-fog modes (`CD3DDevice_SetFogAndBlendMode(.., 8)` zeroes
+FOGTABLEMODE/FOGVERTEXMODE so the VS `oFog` output drives the fixed fog blend) against the
+shared scene `D3DRS_FOGCOLOR`, whose value is the **active fog block dword verbatim** —
+`CD3DDevice_SetActiveFogColor @ 0x677040` stores `Env_FogBlock` (above water) /
+`Env_WaterColorLit` (underwater) / literal `0x808080` (white-fog pass), and
+`CD3DDevice_SetFogAndBlendMode @ 0x677740` pushes it untransformed. The dome therefore
+fogs with exactly the same color as terrain.
 
 ## Celestial bodies (`EffectWorld_LoadCelestialModels @ 0x5adc50`)
 
@@ -453,7 +473,7 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 17 | Iris auto-exposure (modulator gain) | Deferred; **curve + consumer chain fully recovered by C6** (§Iris auto-exposure) — reimpl has no modulator chain; building it is the prerequisite |
 | 18 | Earthquake / rain / wind oscillator rings | Weather-system scope; ported constants documented, wiring deferred with WAC weather |
 | 19 | `terrain_rgb` terrain-stack consumers (texture bake ×v>>12, water quad half-tint, foliage lightmap ×/128) | **New from C6 (G3)** — reimpl renders none of them (`get_terrain_lighting_attenuation` returns identity); refutes the earlier "terrain-inert" hypothesis. C7+ decides which consumers to port alongside the PolyTrn-equivalent paths |
-| 20 | Sky dome combine | **Recovered by C6 (G1)**: `sky.gdshader`'s fragment stage is an invented approximation of the real two-pass spec (§Sky dome) — realignment is the C7 headline. `u_cloud_tint` in the keyframed path is a fabrication to delete (cloud_rgb is advanced_clouds=0-only); the dead c25 upload need not be replicated |
+| 20 | Sky dome combine | **Fixed by C7**: `sky.gdshader` + `nova_sky.gd` rewritten as a structural port of the recovered two-pass spec (§Sky dome) — gradient/cloud lerp chains, dp3 clip-space proximity, builder-formula dome normals computed in the vertex stage, Y-only height scale, half-camera-height anchor, textureless `advanced_clouds 0` flat pass, VS dome fog against the shared scene fog color. The fabricated keyframed-path `u_cloud_tint` is deleted; the dead c25 upload is not replicated. Residual cosmetic caveat: the clip-space prox dot is computed in Godot's clip conventions (reverse-Z), not D3D's — same construction, slightly different z scale; tracked for visual A/B |
 
 ## Corpus sweep (retail JO:CA install, 2026-06-09)
 
@@ -473,11 +493,14 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
 - Pass-1 sky-gradient effect's exact stage table (`sub_679030` looks the effect up by name;
   with no texture bound the dome flat-shades oD0 — the sensible diffuse passthrough — but
   the named effect's TSS rows were not dumped). Cosmetic-only for C7.
-- What `CD3DDevice_SetFogAndBlendMode(obj, 8)` mode 8 selects for the dome passes
-  (fog-mode family; the alpha blend itself is in the material stage table).
 - Closed by C6: iris curve (§Iris auto-exposure), overcast precedence (§Load pipeline),
   terrain_rgb consumers (§iris/terrain_rgb), sky combine (§Sky dome), thunder wiring
   (§weather tick).
+- Closed by the C7 pre-port reads: dome mesh normals + Y-only scale (§Sky dome),
+  half-camera-height dome anchor, dp3 form of the clip-space proximity, and
+  `SetFogAndBlendMode` mode 8 = VS-fog (table/vertex fog modes zeroed so the shader's
+  `oFog` drives the blend) with FOGCOLOR = active fog block value (§Sky dome, dome fog
+  close-out).
 
 ## Verdicts
 
@@ -489,7 +512,7 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
 | Fog policy | **matching** (env_render port; overcast coupling included) |
 | Weather tick / smoothing / lightning | **divergent → ported constants** (16-channel model + integer smoothing in env_render; thunder + quake + rain wiring deferred, each tracked; thunder spec complete per C6) |
 | Sky dome render: scroll / VS constants / mesh / advanced_clouds=0 | **matching** (verified against `build_sky_dome_mesh @ 0x578db0` + the C6 constant map) |
-| Sky dome per-fragment combine | **divergent — recovered (C6)**: real spec = two passes (gradient + dual-layer clouds, §Sky dome); `sky.gdshader` remains an approximation until C7 ports it (divergence #20) |
+| Sky dome per-fragment combine | **matching** (C7): structural port of the recovered two-pass spec (§Sky dome) folded into one Godot pass; clip-convention prox caveat tracked under divergence #20 |
 | Celestial + glare | **new implementation** from witnessed model (`nova_celestial.gd`: sun/moon/star/glare 3DI at the sky, glare additive; occlusion held at full brightness, tracked) |
 | BMS overrides | **matching** application semantics via EnvFile's non-persistent override layer (runtime apply on load / clear on unload; base file never mutated) |
 | iris / terrain_rgb | **divergent — consumers recovered (C6)**: iris = global auto-exposure (curve spec-complete), terrain_rgb = live terrain-stack tint (bake/water/foliage); both unimplemented in the reimpl, tracked as divergences #17/#19 |
@@ -640,3 +663,36 @@ Plus explanatory comments at 0x57db30/0x57dbca/0x57dbf5/0x57dbf7/0x57dce0 (loade
 0x5f7163 (walk), 0x5789e0/0x579080/0x27219f0 (sky), 0x4ed500/0x4ed510/0x57ecfb/0x57edc4/
 0x429ec9 (lightning). No speculative renames were left applied; everything above is
 witnessed in the listed bodies.
+
+---
+
+## Appendix: C7 pre-port grill addendum (2026-06-11)
+
+Targeted reads that closed the C6 record's three port-blocking open questions before the
+`sky.gdshader` rewrite (all findings woven into §Sky dome above):
+
+1. **Dome normals + scale** — full read of `build_sky_dome_mesh @ 0x578db0`: normal =
+   `normalize(x, y_scaled/v14², z)` with `v14 = skyHeight/175.69`; height scale is Y-only.
+   The reimpl computes the exact formula in the vertex stage (no baked normals needed,
+   height changes need no mesh rebuild).
+2. **prox dot form** — both embedded vs_1_1 sources normalize `clipPos.xyz` and take a
+   `dp3` against `c14.xyz`: strictly 3-component.
+3. **Dome fog color** — `D3DRS_FOGCOLOR` receives the active fog block value verbatim
+   (`CD3DDevice_SetActiveFogColor @ 0x677040` → `CD3DDevice_SetFogAndBlendMode
+   @ 0x677740`); mode 8 = VS-fog (table/vertex modes zeroed, `oFog` drives the blend).
+   No dome-specific color derivation exists.
+
+Bonus corrections: dome world anchor = camera with height halved (`@ 0x5790b2..0x5790d7`);
+`advanced_clouds 0` flat pass is textureless (pass-1 NULL-texture effect).
+
+### IDB edits applied
+
+| Addr | Old | New | Evidence |
+|---|---|---|---|
+| 0x57e440 | `sub_57E440` | `Environment_ApplyFogAndAmbient` | re-applied C6 walk identity (rename had not stuck) |
+| 0x677040 | `sub_677040` | `CD3DDevice_SetActiveFogColor` | sole writer of the FOGCOLOR source value |
+| 0x3265718 | `dword_3265718` | `CD3DDevice_PendingFogColor` | read/write pattern in `SetFogAndBlendMode` |
+| 0x326579C | `dword_326579C` | `CD3DDevice_AppliedFogColor` | redundant-state cache compare |
+
+Plus comments at 0x578fbb (normal formula), 0x5790d0 (half-height anchor), 0x579b42
+(textureless flat pass), 0x677040 (fog color path).

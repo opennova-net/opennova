@@ -1,23 +1,31 @@
 shader_type spatial;
 render_mode unshaded, cull_front;
 
-// Sky-dome shader fed by the ENV/TOD path:
-// [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] interpolates colors and
-// [orig: render_skybox @ 0x579080] consumes them; the sky pass consumes skybase,
-// skybright, skyhighlight, cloudbase/highlight/edge, skyfog, sun, and moon.
+// Sky-dome shader: structural port of the original two-pass dome combine
+// [orig: render_skybox @ 0x579080], folded into one Godot pass:
+//   pass 1 - textureless sky gradient, always sun-driven
+//            [orig: SkyVS_GradientPassSource @ 0x7d7338]
+//   pass 2 - both cloud layers in one multi-stage pass, driven by the ACTIVE
+//            light (sun by day, moon at night), alpha-blended over pass 1
+//            [orig: SkyVS_CloudPassSource @ 0x7d6fc0 + the 3-stage TSS table
+//            decoded against RenderState_ApplyToDevice @ 0x681920]
+// advanced_clouds=0 instead draws a flat cloud-color dome with the pass-1
+// (NULL-texture) effect: material ambient = cloud_rgb against
+// D3DRS_AMBIENT 0xFFFFFF [orig: render_skybox @ 0x579b42..0x579bb6].
+// Full spec: docs/env/env-tod-re.md "Sky dome".
 
-uniform vec3 u_sky_base = vec3(0.3, 0.4, 0.7);
-uniform vec3 u_sky_bright = vec3(0.5, 0.6, 0.9);
-uniform vec3 u_sky_highlight = vec3(1.0, 0.95, 0.8);
-uniform vec3 u_horizon_color = vec3(0.7, 0.75, 0.8);
-uniform vec3 u_ground_fog_color = vec3(0.6, 0.65, 0.7);
-uniform vec3 u_secondary_ambient = vec3(0.3, 0.35, 0.4);
-uniform vec3 u_cloud_tint = vec3(0.5, 0.5, 0.5);
-uniform vec3 u_sun_dir = vec3(0.0, 1.0, 0.0);
-uniform vec3 u_moon_dir = vec3(0.0, -1.0, 0.0);
-uniform vec3 u_sun_color = vec3(1.0, 0.9, 0.7);
-uniform vec3 u_moon_color = vec3(0.3, 0.35, 0.5);
-uniform vec3 u_clear_color = vec3(0.5, 0.6, 0.8);
+uniform vec3 u_sky_base = vec3(0.3, 0.4, 0.7); // c11 skybase
+uniform vec3 u_sky_bright = vec3(0.5, 0.6, 0.9); // c11 + c12
+uniform vec3 u_sky_highlight = vec3(1.0, 0.95, 0.8); // c15
+uniform vec3 u_cloud_base = vec3(0.7, 0.75, 0.8); // c24
+uniform vec3 u_cloud_highlight = vec3(0.6, 0.65, 0.7); // c27
+uniform vec3 u_cloud_edge = vec3(0.3, 0.35, 0.4); // c26
+uniform vec3 u_sun_dir = vec3(0.0, 1.0, 0.0); // pass-1 c13/c14 direction
+uniform vec3 u_light_dir = vec3(0.0, 1.0, 0.0); // pass-2 c13/c14 direction
+uniform vec3 u_fog_color = vec3(0.5, 0.7, 0.9); // D3DRS_FOGCOLOR (scene fog)
+uniform float u_fog_end = 1000.0; // world-unit fog end distance
+uniform bool u_flat_pass = false; // advanced_clouds == 0
+uniform vec3 u_flat_color = vec3(0.5, 0.5, 0.5); // cloud_rgb, flat path only
 
 uniform sampler2D u_cloud_tex1 : filter_linear_mipmap, repeat_enable;
 uniform sampler2D u_cloud_tex2 : filter_linear_mipmap, repeat_enable;
@@ -26,48 +34,99 @@ uniform vec2 u_scroll_offset1 = vec2(0.0);
 uniform vec2 u_scroll_offset2 = vec2(0.0);
 uniform float u_sky_height = 175.0;
 
-varying vec3 v_world_pos;
-varying float v_elevation;
+varying vec3 v_pass1; // pass-1 oD0: gradient + sun-proximity highlight
+varying vec3 v_cloud_ramp; // pass-2 oD0
+varying vec3 v_sky_behind; // pass-2 oD1
+varying float v_fog; // oFog = 1 - dist/(0.9*fogEnd)
 varying vec2 v_uv1;
 varying vec2 v_uv2;
 
+
+// Clip-space proximity of this vertex to a direction: the original transforms
+// (eye + dir*2000) through view-proj and dp3's the normalized xyz of both
+// [orig: SkyVS dp3 r5, r4, c14; c14 upload @ 0x57960e..0x579641].
+float prox_to(vec3 clip_dir, vec3 eye, vec3 dir, mat4 view_proj) {
+	vec4 ref_clip = view_proj * vec4(eye + dir * 2000.0, 1.0);
+	return max(dot(clip_dir, normalize(ref_clip.xyz)), 0.0);
+}
+
+
 void vertex() {
+	// Y-only dome scale: the mesh bakes the 175.69-unit reference dome and only
+	// the height stretches with sky_height; x/z stay at the 1024-unit rim
+	// [orig: build_sky_dome_mesh @ 0x578ed4 - v14 = skyHeight / (3072 - sqrt(8388608))].
 	float height_scale = u_sky_height / 175.69;
-	vec3 scaled = VERTEX * height_scale;
-	v_world_pos = (MODEL_MATRIX * vec4(scaled, 1.0)).xyz;
-	v_elevation = clamp(scaled.y / u_sky_height, 0.0, 1.0);
-	v_uv1 = UV;
-	v_uv2 = UV2;
+	vec3 scaled = vec3(VERTEX.x, VERTEX.y * height_scale, VERTEX.z);
+
+	// Dome normal: the builder's anisotropic normal, NOT the vertex direction -
+	// normalize(x, y_unscaled/scale, z) [orig: build_sky_dome_mesh @ 0x578fbb].
+	// The dome never rotates, so the world normal equals the local normal.
+	vec3 dome_normal = normalize(vec3(VERTEX.x, VERTEX.y / height_scale, VERTEX.z));
+
+	vec3 world_pos = (MODEL_MATRIX * vec4(scaled, 1.0)).xyz;
+	vec3 eye = INV_VIEW_MATRIX[3].xyz;
+	mat4 view_proj = PROJECTION_MATRIX * VIEW_MATRIX;
+	vec4 clip = PROJECTION_MATRIX * MODELVIEW_MATRIX * vec4(scaled, 1.0);
+	vec3 clip_dir = normalize(clip.xyz);
+
+	// Gradient driver t = 0.5*dot(N_world, dir) + 0.5; pass 1 always uses the
+	// sun, pass 2 the active light [orig: SkyVS m3x3 v3,c4 / dp3 ..,c13 / mad].
+	float t_sun = 0.5 * dot(dome_normal, u_sun_dir) + 0.5;
+	float t_light = 0.5 * dot(dome_normal, u_light_dir) + 0.5;
+	vec3 sky_sun = u_sky_base + (u_sky_bright - u_sky_base) * t_sun;
+	vec3 sky_light = u_sky_base + (u_sky_bright - u_sky_base) * t_light;
+
+	float prox_sun = prox_to(clip_dir, eye, u_sun_dir, view_proj);
+	float prox_light = prox_to(clip_dir, eye, u_light_dir, view_proj);
+	float p4_sun = prox_sun * prox_sun * prox_sun * prox_sun;
+	float p8_sun = p4_sun * p4_sun;
+	float p4_light = prox_light * prox_light * prox_light * prox_light;
+	float p8_light = p4_light * p4_light;
+
+	v_pass1 = mix(sky_sun, u_sky_highlight, p8_sun);
+	v_sky_behind = mix(sky_light, u_cloud_edge, p4_light);
+	v_cloud_ramp = mix(mix(u_cloud_base, u_cloud_edge, p4_light), u_cloud_highlight, p8_light);
+
+	// Per-vertex dome fog [orig: SkyVS oFog = 1 - dist(world, eye)/(0.9*fogDist),
+	// c9 upload @ 0x5792c2].
+	v_fog = 1.0 - distance(world_pos, eye) / (0.9 * u_fog_end);
+
+	v_uv1 = UV + u_scroll_offset1;
+	v_uv2 = UV2 + u_scroll_offset2;
 	VERTEX = scaled;
 }
 
-void fragment() {
-	vec3 view_dir = normalize(v_world_pos - CAMERA_POSITION_WORLD);
-	float sun_facing = max(dot(view_dir, u_sun_dir), 0.0);
-	sun_facing = sun_facing * 0.5 + 0.5;
-	vec3 zenith_color = u_sky_base + (u_sky_bright - u_sky_base) * sun_facing;
-	float fog_blend = 1.0 - smoothstep(0.0, 0.1, v_elevation);
-	vec3 horizon_color = mix(u_horizon_color, u_ground_fog_color, fog_blend);
-	zenith_color += u_secondary_ambient * 0.5;
-	float elev_blend = smoothstep(0.0, 0.4, v_elevation);
-	vec3 sky = mix(horizon_color, zenith_color, elev_blend);
 
-	if (u_has_clouds) {
-		float cloud1 = texture(u_cloud_tex1, v_uv1 + u_scroll_offset1).r;
-		float cloud2 = texture(u_cloud_tex2, v_uv2 + u_scroll_offset2).r;
-		float cloud_density = cloud1 * 0.7 + cloud2 * 0.3;
-		vec3 cloud_color = mix(u_horizon_color, u_ground_fog_color, cloud_density);
-		cloud_color *= u_cloud_tint * 2.0;
-		float cloud_fade = smoothstep(0.05, 0.3, v_elevation);
-		sky = mix(sky, cloud_color, cloud_density * cloud_fade * 0.8);
+void fragment() {
+	vec3 col;
+	if (u_flat_pass) {
+		// advanced_clouds == 0: flat cloud-color dome, no texture
+		// [orig: render_skybox @ 0x579b42].
+		col = u_flat_color;
+	} else {
+		col = v_pass1;
+		if (u_has_clouds) {
+			// 3-stage TSS cloud combine [orig: effect build @ 0x5789e0]:
+			//   s1 color = tex0*tex1*2 (per-channel density, saturated)
+			//   s2 color = LERP(density, cloudRamp, skyBehind)
+			//   s1 alpha = tex0.a*tex1.a*2, s2 alpha = current^2*2 (each saturated)
+			// blended over pass 1 with srcAlpha/invSrcAlpha.
+			vec4 c0 = texture(u_cloud_tex1, v_uv1);
+			vec4 c1 = texture(u_cloud_tex2, v_uv2);
+			vec3 density = min(c0.rgb * c1.rgb * 2.0, vec3(1.0));
+			vec3 cloud_rgb = density * v_cloud_ramp + (1.0 - density) * v_sky_behind;
+			float a1 = min(c0.a * c1.a * 2.0, 1.0);
+			float a2 = min(a1 * a1 * 2.0, 1.0);
+			col = mix(col, cloud_rgb, a2);
+		}
 	}
 
-	float sun_dot = max(dot(view_dir, u_sun_dir), 0.0);
-	sky += u_sky_highlight * pow(sun_dot, 64.0) * 2.0;
-	sky += u_sun_color * pow(sun_dot, 4.0) * 0.15;
-	float moon_dot = max(dot(view_dir, u_moon_dir), 0.0);
-	sky += u_moon_color * pow(moon_dot, 48.0);
-	float clear_blend = 1.0 - smoothstep(0.0, 0.05, v_elevation);
-	sky = mix(sky, u_clear_color, clear_blend);
-	ALBEDO = sky;
+	// Vertex fog against the shared scene fog color: the dome fogs with the same
+	// D3DRS_FOGCOLOR as terrain - the active fog block value, no dome-specific
+	// derivation [orig: CD3DDevice_SetActiveFogColor @ 0x677040 ->
+	// CD3DDevice_SetFogAndBlendMode @ 0x677740].
+	if (u_fog_end > 0.0) {
+		col = mix(u_fog_color, col, clamp(v_fog, 0.0, 1.0));
+	}
+	ALBEDO = col;
 }
