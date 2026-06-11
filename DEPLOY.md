@@ -22,8 +22,9 @@ service-account token.
 
 ## 1. Create the vault
 
-Create a vault named `OpenNova-Deploy` and a service account with read (and
-write, for terraform state) access to it. Then create these items (paste-ready):
+Create a vault named `OpenNova-Deploy` (the service account comes in step 2; it
+needs read + write + create access, the write/create for the terraform-state
+documents). Then create these items (paste-ready):
 
 ```bash
 op vault create OpenNova-Deploy
@@ -49,7 +50,25 @@ op item create --vault OpenNova-Deploy --title ssh --category 'SSH Key'
 The `op://` reference paths the toolbox reads are listed in
 `deploy/env/terraform.env.tpl` and `deploy/env/app.prod.env.tpl`.
 
-## 2. Point the toolbox at your vault
+## 2. Mint the service-account token
+
+The toolbox authenticates with a single 1Password **service account** — no
+interactive login on the deploy host. Create one scoped to this vault with
+**read + write + create** items (write/create are required so terraform state
+can be stored as vault documents):
+
+```bash
+# signed in to your own 1Password account as an owner/admin:
+op service-account create opennova-deploy \
+  --vault 'OpenNova-Deploy:read_items,write_items,create_items' --expires-in 90d
+# prints the ops_... token ONCE — store it somewhere safe (e.g. a personal 1P item).
+```
+
+Web alternative: **Developer → Service Accounts → Create**, grant the
+`OpenNova-Deploy` vault Read/Write/Create, and copy the `ops_...` token. (Service
+accounts need a paid 1Password plan with the feature enabled.)
+
+Point the toolbox at the token and verify:
 
 ```bash
 export OP_SERVICE_ACCOUNT_TOKEN=ops_...        # the only secret you handle

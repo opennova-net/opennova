@@ -13,19 +13,57 @@ Goal: rehearse the whole stack on a throwaway **staging** environment against a 
 over the internet, use that as the gate to **merge #136**, then **cut prod over** (fresh EC2+EIP,
 deploy, Cloudflare DNS flip) and retire any old box.
 
-## Prerequisites (one-time)
+## One-time operator setup
 
-- **Docker** on your deploy machine — the only dependency; the toolbox (op CLI + terraform +
-  docker client) runs in a container (`deploy/run.sh` → `deploy/docker-compose.deploy.yml`).
-- **1Password vault `OpenNova-Deploy`** + a service-account token. Items per [`DEPLOY.md`](../DEPLOY.md)
-  §1: `aws`, `cloudflare` (api_token + zone_id + domain), `ghcr` (owner), `app-prod`, `ssh`. For
-  the staging rehearsal either add an `app-staging` item or reuse `app-prod` (the app env template
-  is shared).
-- **AWS account**; **Cloudflare-managed domain**.
-- **GHCR images public**: server+web images are built by `.github/workflows/novaworld-images.yml`;
-  make the two packages public once so the target pulls without credentials (else `app deploy`
-  fails on the remote pull).
-- `export OP_SERVICE_ACCOUNT_TOKEN=ops_...` — the only secret you ever handle.
+Provision these once. Paste-ready `op` commands are in [`DEPLOY.md`](../DEPLOY.md) §1–§2; the exact
+schema the toolbox expects is below.
+
+### a. The deploy machine — Docker only
+The toolbox (op CLI + terraform + docker client) runs in a container (`deploy/run.sh` →
+`deploy/docker-compose.deploy.yml`). Nothing else is installed locally; the EC2 target runs only
+docker + sshd.
+
+### b. The 1Password vault `OpenNova-Deploy`
+Create the vault and these items. **Field names are exact** — the toolbox reads literal
+`op://OpenNova-Deploy/<item>/<field>` paths (defined in `deploy/env/terraform.env.tpl` and
+`deploy/env/app.prod.env.tpl`); a mismatched label fails `secrets check`.
+
+| item | 1P category | fields (exact) | used for |
+|---|---|---|---|
+| `aws` | API Credential | `access_key_id`, `secret_access_key`, `region` | terraform AWS provider |
+| `cloudflare` | API Credential | `api_token`, `zone_id`, `domain` | terraform Cloudflare DNS |
+| `ssh` | SSH Key | auto-generated `public key`, `private key` | EC2 key pair (public) + `app deploy` over `ssh://` (private) |
+| `app-prod` | Server | `admin_api_token`, `admin_basic_auth_user`, `admin_basic_auth_password` | server/web admin gate — **also used for staging** (the app env template is shared) |
+| `ghcr` | Secure Note | `owner` | image pull `ghcr.io/<owner>/novaworld-{server,web}` |
+
+- `aws`: an IAM access key that can manage VPC / EC2 / EIP / S3 / CloudFront / IAM in your account.
+- `cloudflare`: `api_token` = a token with **Zone · DNS · Edit** on your zone; `zone_id` from the
+  domain's Overview page; `domain` = your apex (e.g. `example.com`).
+- `ssh`: a 1Password-generated **SSH Key** item — it auto-creates both `public key` and
+  `private key` fields; nothing to fill in.
+- You do **not** pre-create any terraform-state item: the toolbox stores state as the
+  `tfstate-prod` / `tfstate-staging` *documents* on first `infra apply` — which is why the service
+  account below needs write/create access.
+
+### c. The service-account token (`ops_...`)
+The toolbox authenticates with one 1Password **service account** scoped to the vault with
+**read + write + create** (write/create for the state documents). It is the only secret you ever
+handle:
+
+```bash
+op service-account create opennova-deploy \
+  --vault 'OpenNova-Deploy:read_items,write_items,create_items' --expires-in 90d
+# prints the ops_... token ONCE — store it somewhere safe.
+export OP_SERVICE_ACCOUNT_TOKEN=ops_...
+./deploy/run.sh secrets check        # green = every item/field path resolves before you spend on infra
+```
+(Web alternative: **Developer → Service Accounts → Create**, grant `OpenNova-Deploy`
+Read/Write/Create, copy the `ops_...` token. Service accounts need a paid 1Password plan.)
+
+### d. GHCR packages public
+The server+web images are built to GHCR by `.github/workflows/novaworld-images.yml`. Make the two
+packages public once so the target host pulls them without credentials (else `app deploy` fails on
+the remote pull).
 
 ## Phase A — Staging rehearsal (separate workspace, no EIP, throwaway)
 
