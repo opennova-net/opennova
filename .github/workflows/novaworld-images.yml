@@ -1,0 +1,138 @@
+name: NovaWorld images
+
+# Builds and publishes the NovaWorld server + web portal container images to
+# GHCR. The deploy toolbox (deploy/) pulls these so a third party can deploy
+# without building locally. Image names: ghcr.io/<owner>/novaworld-server and
+# ghcr.io/<owner>/novaworld-web.
+
+on:
+  push:
+    branches: [master, web-nw-for-real-master]
+    paths:
+      - 'apps/novaworld_server/**'
+      - 'libs/novacrypto/**'
+      - 'libs/napi/**'
+      - 'libs/novaworld/**'
+      - 'libs/bms/**'
+      - 'apps/common/**'
+      - 'backend/**'
+      - 'third_party/sqlite/**'
+      - 'third_party/bcrypt/**'
+      - 'web/**'
+      - 'tests/novacrypto/**'
+      - 'tests/napi/**'
+      - 'tests/novaworld/**'
+      - 'tests/bms/**'
+      - '.github/workflows/novaworld-images.yml'
+  pull_request:
+    branches: [master, web-nw-for-real-master]
+    paths:
+      - 'apps/novaworld_server/**'
+      - 'libs/novaworld/**'
+      - 'libs/napi/**'
+      - 'libs/novacrypto/**'
+      - 'backend/**'
+      - 'web/**'
+      - '.github/workflows/novaworld-images.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: nw-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Gate the image builds on the net scope passing with the HTTP layer ON,
+  # on Linux (the deploy target). This is the same flag set the server image
+  # uses, so a green here means the image will build.
+  http-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false
+
+      - name: Configure + build net targets (HTTP on)
+        run: |
+          cmake -S . -B build-server -DCMAKE_BUILD_TYPE=Release -DBUILD_NOVAWORLD_HTTP=ON
+          cmake --build build-server -j "$(nproc)" --target \
+            opennova_novaworld_server \
+            url_cipher_test crc32_test nwu_test pubcrypto_test epask_test \
+            envelope_test tlv_test session_test \
+            registration_url_test gate_response_test gate_probe_test lobby_update_test \
+            gate_server_loopback_test gsb_roundtrip_test protocol_message_test \
+            game_session_test game_server_runtime_test replication_min_test \
+            bms_spawn_points_test connection_registry_test connection_manager_test \
+            db_sqlite_test session_hello_roundtrip_test lobby_session_test \
+            backend_schema_test unknown_tracker_test nwmsg_replay_test
+
+      - name: Run net ctests
+        run: |
+          ctest --test-dir build-server --output-on-failure -R \
+            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|game_session|game_server_runtime|replication_min|bms_spawn_points|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|unknown_tracker|nwmsg_replay)$"
+
+  images:
+    needs: http-tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Only log in + push on push events (PRs from forks can't push to GHCR).
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata (server)
+        id: meta_server
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/novaworld-server
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+
+      - name: Build + push server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/novaworld_server/Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta_server.outputs.tags }}
+          labels: ${{ steps.meta_server.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image metadata (web)
+        id: meta_web
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/novaworld-web
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+
+      - name: Build + push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: web
+          file: web/Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta_web.outputs.tags }}
+          labels: ${{ steps.meta_web.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
