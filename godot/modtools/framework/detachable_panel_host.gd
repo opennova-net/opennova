@@ -74,7 +74,10 @@ func detach(screen_rect: Rect2i = Rect2i()) -> void:
 	_window = _make_window()
 	_window_parent.add_child(_window)
 	var margin := _window.get_node("PanelWrap/ContentMargin") as MarginContainer
-	_content.reparent(margin)
+	# keep_global_transform=false: the old viewport's coordinates must not
+	# carry into the window's small viewport (the container re-lays out either
+	# way, but the carried rect would survive until the deferred sort).
+	_content.reparent(margin, false)
 	_content.visible = true
 	if _window.force_native:
 		_window.position = rect.position
@@ -91,20 +94,22 @@ func detach(screen_rect: Rect2i = Rect2i()) -> void:
 
 
 ## The one way back: close the window, return the content to its dock slot.
-## Wired to the window's close button; callers may also force it (e.g. the
-## panel's subject disappeared).
-func redock() -> void:
+## Wired to the window's close button. Callers forcing a re-dock for reasons
+## of their own (the panel's subject disappeared) pass persist=false so a
+## TRANSIENT condition never overwrites the user's floating preference.
+func redock(persist := true) -> void:
 	if not is_floating():
 		return
-	var rect := Rect2i(_window.position, _window.size)
+	var rect := _window_screen_rect()
 	if _content != null and is_instance_valid(_content) \
 			and _dock_parent != null and is_instance_valid(_dock_parent):
-		_content.reparent(_dock_parent)
+		_content.reparent(_dock_parent, false)
 		_dock_parent.move_child(_content, clampi(_dock_index, 0, _dock_parent.get_child_count() - 1))
 	var window := _window
 	_window = null
 	window.queue_free()
-	_save(true, rect)
+	if persist:
+		_save(true, rect)
 	floating_changed.emit(false)
 
 
@@ -115,14 +120,27 @@ func focus_window() -> void:
 
 
 func set_window_title(title: String) -> void:
-	if is_floating():
+	# The change guard is load-bearing: callers push from per-frame state
+	# refreshes, and Window.set_title has no same-value early-out (a native
+	# window would take an OS call per frame).
+	if is_floating() and _window.title != title:
 		_window.title = title
 
 
 ## Persist the current state explicitly (shell teardown while floating).
 func save_now() -> void:
 	if is_floating():
-		_save(false, Rect2i(_window.position, _window.size))
+		_save(false, _window_screen_rect())
+
+
+# The window's rect in SCREEN coordinates regardless of mode: an embedded
+# window's position is viewport-relative, the inverse of the offset detach()
+# applied, so persisted rects stay in one coordinate space.
+func _window_screen_rect() -> Rect2i:
+	var pos := _window.position
+	if not _window.force_native and _window.is_inside_tree():
+		pos += _window.get_tree().root.position
+	return Rect2i(pos, _window.size)
 
 
 func _save(docked: bool, rect: Rect2i) -> void:
@@ -178,18 +196,27 @@ static func native_windows_supported() -> bool:
 	return DisplayServer.has_feature(DisplayServer.FEATURE_SUBWINDOWS)
 
 
-## Nudge `rect` fully onto whichever screen it touches; when it touches none
-## (stale multi-monitor state), land it near the fallback area instead.
+## Nudge `rect` fully onto the screen holding MOST of it (a window straddling
+## two monitors lands on the bigger share, not whichever has the lower index);
+## when it touches none (stale multi-monitor state), land it near the fallback.
 static func clamp_rect_to_screens(rect: Rect2i, fallback: Rect2i) -> Rect2i:
+	var best := Rect2i()
+	var best_area := 0
 	for i in DisplayServer.get_screen_count():
 		var usable := DisplayServer.screen_get_usable_rect(i)
-		if usable.size.x <= 0 or usable.size.y <= 0 or not usable.intersects(rect):
+		if usable.size.x <= 0 or usable.size.y <= 0:
 			continue
+		var overlap := usable.intersection(rect)
+		var area := overlap.size.x * overlap.size.y
+		if area > best_area:
+			best_area = area
+			best = usable
+	if best_area > 0:
 		var out := rect
-		out.position.x = clampi(out.position.x, usable.position.x,
-				maxi(usable.position.x, usable.end.x - out.size.x))
-		out.position.y = clampi(out.position.y, usable.position.y,
-				maxi(usable.position.y, usable.end.y - out.size.y))
+		out.position.x = clampi(out.position.x, best.position.x,
+				maxi(best.position.x, best.end.x - out.size.x))
+		out.position.y = clampi(out.position.y, best.position.y,
+				maxi(best.position.y, best.end.y - out.size.y))
 		return out
 	var moved := rect
 	moved.position = fallback.position + Vector2i(48, 48)

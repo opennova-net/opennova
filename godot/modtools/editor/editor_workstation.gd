@@ -1396,9 +1396,11 @@ func _refresh_camera_popup_state() -> void:
 	var has_camera := _get_editor_camera() != null
 	var floating := _camera_panel_host != null and _camera_panel_host.is_floating()
 	# A floating camera panel whose camera disappeared re-docks (mirrors the
-	# docked popover's force-close below).
+	# docked popover's force-close below). persist=false: a transient
+	# camera-null (editor rebind) must not overwrite the user's floating
+	# preference - the next open with a camera floats again.
 	if floating and not has_camera:
-		_camera_panel_host.redock()
+		_camera_panel_host.redock(false)
 		floating = false
 	if _camera_toggle_button != null:
 		_camera_toggle_button.disabled = not has_camera
@@ -1817,7 +1819,12 @@ func get_reference_index() -> NovaReferenceIndex:
 # into EditorResourceBrowser as a capability callable.
 func _current_resource_path_for_browser(kind: String) -> String:
 	var workspace := _get_active_workspace()
-	if _environment_popup != null and _environment_popup.visible and kind == "environment":
+	# The environment panel counts as open whether docked OR floating - the
+	# popover hides while the content floats, but its document is still the
+	# one the "(open)" marker should follow.
+	var environment_open := (_environment_popup != null and _environment_popup.visible) \
+			or (_environment_panel_host != null and _environment_panel_host.is_floating())
+	if environment_open and kind == "environment":
 		workspace = _environment_workspace
 	if workspace != null:
 		return workspace.get_current_resource_path()

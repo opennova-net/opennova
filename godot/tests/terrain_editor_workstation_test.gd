@@ -41,6 +41,14 @@ func before_each() -> void:
 
 
 func after_each() -> void:
+	# A shell freed by GUT's autofree dies AFTER this hook - and a floating
+	# panel's _exit_tree persists state, which would re-pollute the config we
+	# restore below (a runtime error mid-test skips the in-body teardown). Kill
+	# any lingering children NOW so their exit-time writes land first.
+	for child in get_children():
+		if child is TerrainEditor or (child is Control and child.get_script() == EditorWorkstationScript):
+			child.queue_free()
+	await get_tree().process_frame
 	# Persistence tests write user://terrain_editor_state.cfg; restore it so they
 	# never leak a temp resource directory into the real editor's saved state.
 	if _had_state_config:
@@ -1923,6 +1931,10 @@ func test_detached_environment_window_title_tracks_project_title() -> void:
 
 
 func test_panel_state_round_trips_through_panels_section() -> void:
+	# Start from a clean slate: the per-test snapshot already protects the real
+	# config, and the REAL config may legitimately hold a user's panel state.
+	if FileAccess.file_exists(STATE_CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
 	var library = workstation._resource_library
@@ -1948,6 +1960,10 @@ func test_persisted_floating_preference_applies_on_next_open() -> void:
 	await get_tree().process_frame
 	_detach_environment(first)
 	assert_true(first._environment_panel_host.is_floating())
+	# Move the window after the detach-time save: only the EXIT-time save_now
+	# can carry this rect forward, which is what pins it.
+	var moved_window: Window = first._environment_panel_host.get_window()
+	moved_window.size = Vector2i(515, 537)
 	first.queue_free()
 	await get_tree().process_frame
 
@@ -1960,6 +1976,8 @@ func test_persisted_floating_preference_applies_on_next_open() -> void:
 		"the remembered floating preference applies on the next open")
 	assert_false(second.get_node("%EnvironmentPopup").visible,
 		"the popover never flashes on a floating open")
+	assert_eq(second._environment_panel_host.get_window().size, Vector2i(515, 537),
+		"the window reopens at its quit-time size (exit-time save_now + rect reapply)")
 	await _teardown(second)
 
 
@@ -2001,3 +2019,45 @@ func test_set_editor_rebuilds_content_inside_detached_window() -> void:
 	assert_gt((workstation.get_node("%EnvironmentInspectorHost") as Control).get_child_count(), 0,
 		"...with the rebuilt inspector")
 	await _teardown(workstation)
+
+
+func test_floating_environment_still_owns_the_open_marker() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+	var environment_editor = _attach_environment_document(workstation)
+	environment_editor.set_current_path("user://b6_marker_test.env")
+	_detach_environment(workstation)
+
+	assert_eq(workstation._current_resource_path_for_browser("environment"),
+		"user://b6_marker_test.env",
+		"a floating environment panel still retargets the browser's (open) marker")
+	await _teardown(workstation)
+
+
+func test_camera_panel_detaches_and_force_redocks_keeping_the_preference() -> void:
+	# The camera panel shares the host machinery but has its own shell guards:
+	# detach needs a live camera, and losing the camera force-redocks WITHOUT
+	# erasing the user's floating preference (transient editor rebinds).
+	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	await get_tree().process_frame
+	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+
+	workstation._set_camera_popup_visible(true)
+	assert_true((workstation.get_node("%CameraPopup") as Control).visible,
+		"the camera popover opens docked (the editor scene has a camera)")
+	workstation.get_node("%CameraPopupDetach").pressed.emit()
+	assert_true(workstation._camera_panel_host.is_floating(), "the camera panel floats")
+	assert_false((workstation.get_node("%CameraPopup") as Control).visible)
+	assert_false(bool(workstation._panel_restore_for("camera").get("docked", true)),
+		"detach remembers the floating preference")
+
+	# The camera disappears (editor rebind): force-redock, preference intact.
+	var saved_camera = editor.camera
+	editor.camera = null
+	workstation._refresh_camera_popup_state()
+	editor.camera = saved_camera
+	assert_false(workstation._camera_panel_host.is_floating(),
+		"losing the camera re-docks the floating panel")
+	assert_false(bool(workstation._panel_restore_for("camera").get("docked", true)),
+		"...without overwriting the remembered floating preference")
+	await _teardown(editor)

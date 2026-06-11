@@ -135,6 +135,20 @@ func test_save_state_fires_on_detach_redock_and_save_now() -> void:
 	assert_eq(saves.size(), 3, "save_now while docked has nothing to add (re-dock already saved)")
 
 
+func test_forced_redock_never_overwrites_the_floating_preference() -> void:
+	# Callers force a re-dock for transient reasons (the panel's subject
+	# disappeared); that must not erase the user's deliberate pop-out.
+	var dock := _make_dock()
+	var saves: Array = []
+	var host := _make_host(dock, saves)
+	host.detach(Rect2i(100, 100, 400, 300))
+	assert_eq(saves.size(), 1)
+
+	host.redock(false)
+	assert_false(host.is_floating(), "the forced re-dock still re-docks")
+	assert_eq(saves.size(), 1, "...but writes nothing (the floating preference survives)")
+
+
 func test_offscreen_rect_moves_onto_usable_space() -> void:
 	var fallback := Rect2i(0, 0, 1280, 720)
 	var off := Rect2i(100000, 100000, 400, 300)
