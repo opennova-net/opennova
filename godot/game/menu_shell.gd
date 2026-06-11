@@ -4,7 +4,7 @@ extends Control
 # Runtime menu shell: drives a live NovaMnuMenu (the same engine node the ONED
 # Menus workspace previews, here with edit_mode off so it is fully interactive)
 # and a NovaMusicDirector, loading the game's .mnu menu set + audio from the
-# user's resource directory. It is the runtime counterpart to NovaWorld: NovaWorld
+# user's resource directory. It is the runtime counterpart to GameWorld: GameWorld
 # turns a resource dir into a playable world, this turns it into the playable
 # menu front-end, and main_game.gd hands off between the two.
 #
