@@ -59,6 +59,14 @@ struct ServerConfig {
 	// Tick interval for the connection manager's expire pass.
 	uint64_t tick_interval_ms = 500;
 
+	// policy: backstop sweep of crash-orphaned active_hosts rows. Cadence
+	// = how often the sweep runs; window = how stale (no ClientHostUpdate
+	// heartbeat) a host row must be before it's pruned. The normal teardown
+	// (GOODBYE / StopHosting / heartbeat-timeout) handles the common case;
+	// this only catches rows that slipped through.
+	uint64_t host_sweep_interval_ms = 30000;
+	uint64_t host_stale_window_ms   = 300000;
+
 	// Bearer token for /api/admin/* endpoints. When unset (default), the
 	// admin endpoints are CLOSED — they always return 401. Set via
 	// ADMIN_API_TOKEN env var to enable. Tokens are compared with a

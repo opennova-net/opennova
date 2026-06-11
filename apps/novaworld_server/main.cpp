@@ -191,6 +191,7 @@ int main() {
 	std::printf("[boot] ready. Ctrl+C to stop.\n");
 
 	// --- Main loop: tick the connection manager ---------------------------
+	uint64_t last_host_sweep_ms = 0;
 	while (!g_shutdown.load()) {
 		std::this_thread::sleep_for(
 			std::chrono::milliseconds(config.tick_interval_ms));
@@ -206,6 +207,21 @@ int main() {
 			unknown_tracker.flush(*dbh);
 		} catch (const db::SqliteError &e) {
 			std::fprintf(stderr, "[tick] WARN unknown_tracker flush: %s\n", e.what());
+		}
+
+		// policy: throttled backstop sweep of crash-orphaned host rows the
+		// normal GOODBYE/StopHosting/timeout teardown missed.
+		if (now - last_host_sweep_ms >= config.host_sweep_interval_ms) {
+			last_host_sweep_ms = now;
+			try {
+				const int pruned = hostdb::prune_stale_hosts(
+					*dbh, static_cast<int64_t>(config.host_stale_window_ms / 1000));
+				if (pruned > 0) {
+					std::printf("[sweep] pruned %d stale host row(s)\n", pruned);
+				}
+			} catch (const db::SqliteError &e) {
+				std::fprintf(stderr, "[sweep] WARN prune_stale_hosts: %s\n", e.what());
+			}
 		}
 	}
 
