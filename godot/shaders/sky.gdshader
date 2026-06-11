@@ -55,7 +55,8 @@ void vertex() {
 	// Y-only dome scale: the mesh bakes the 175.69-unit reference dome and only
 	// the height stretches with sky_height; x/z stay at the 1024-unit rim
 	// [orig: build_sky_dome_mesh @ 0x578ed4 - v14 = skyHeight / (3072 - sqrt(8388608))].
-	float height_scale = u_sky_height / 175.69;
+	// (epsilon floor: a hand-authored sky_height 0 must not NaN-poison the dome)
+	float height_scale = max(u_sky_height, 0.01) / 175.69;
 	vec3 scaled = vec3(VERTEX.x, VERTEX.y * height_scale, VERTEX.z);
 
 	// Dome normal: the builder's anisotropic normal, NOT the vertex direction -
@@ -89,7 +90,9 @@ void vertex() {
 
 	// Per-vertex dome fog [orig: SkyVS oFog = 1 - dist(world, eye)/(0.9*fogDist),
 	// c9 upload @ 0x5792c2].
-	v_fog = 1.0 - distance(world_pos, eye) / (0.9 * u_fog_end);
+	// (divisor floor keeps the varying defined when fog is off; the fragment
+	// guard never reads it in that case)
+	v_fog = 1.0 - distance(world_pos, eye) / max(0.9 * u_fog_end, 0.001);
 
 	v_uv1 = UV + u_scroll_offset1;
 	v_uv2 = UV2 + u_scroll_offset2;

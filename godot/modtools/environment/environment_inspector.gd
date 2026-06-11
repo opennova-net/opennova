@@ -125,7 +125,7 @@ func _build_ui() -> void:
 	_sky_speed = _add_spin(atmosphere, "Sky speed", 0, 100, 1, _on_sky_speed_changed)
 	_sky_height = _add_spin(atmosphere, "Sky height", 10, 500, 1, _on_sky_height_changed)
 	_terrain_tint = _add_color(atmosphere, "Terrain", _on_terrain_tint_changed, "terrain_tint")
-	_water_color = _add_color(atmosphere, "Water", _on_water_color_changed)
+	_water_color = _add_color(atmosphere, "Water", _on_water_color_changed, "water_color")
 	_cloud_tint = _add_color(atmosphere, "Clouds", _on_cloud_tint_changed, "cloud_tint")
 
 	box.add_child(_make_separator())
@@ -157,13 +157,14 @@ func _build_ui() -> void:
 	advanced.add_theme_constant_override("h_separation", 8)
 	advanced.add_theme_constant_override("v_separation", 8)
 	box.add_child(advanced)
-	_water_murk = _add_spin(advanced, "Water murk", 0.0, 1.0, 0.01, _on_water_murk_changed, "water_murk")
+	# Murk caps at 0.99 like the engine clamp (original has only the <= 0.99 top).
+	_water_murk = _add_spin(advanced, "Water murk", 0.0, 0.99, 0.01, _on_water_murk_changed, "water_murk")
 	_lightning_color = _add_color(advanced, "Lightning", _on_lightning_color_changed, "lightning_color")
 	_ceiling_color = _add_color(advanced, "Ceiling", _on_ceiling_color_changed, "ceiling_color")
 	_floor_color = _add_color(advanced, "Floor", _on_floor_color_changed, "floor_color")
 	_vertex_tint = _add_color(advanced, "Vertex tint", _on_vertex_tint_changed, "vertex_tint")
 	_iris_percent = _add_spin(advanced, "Iris percent", 0.0, 100.0, 0.1, _on_iris_percent_changed, "iris_percent")
-	_iris_center = _add_spin(advanced, "Iris center", 0.0, 4.0, 0.01, _on_iris_center_changed, "iris_center")
+	_iris_center = _add_spin(advanced, "Iris center", 0.0, 5.0, 0.01, _on_iris_center_changed, "iris_center")
 
 	box.add_child(_make_separator())
 	box.add_child(_make_heading("TOD Keyframes"))

@@ -40,9 +40,17 @@ func test_unconsumed_fields_carry_badge() -> void:
 
 func test_honored_fields_carry_no_badge() -> void:
 	var ctx := _make()
-	assert_not_null(_find_label(ctx.inspector, "Water"), "honored rows keep their plain label")
-	assert_null(_find_label(ctx.inspector, "Water " + EnvironmentInspectorScript.BADGE_PARTIAL),
+	# Clouds and Water are both FIELD-WIRED rows whose table status is honored -
+	# they must keep a plain label (a pin on an unwired row would stay green even
+	# if every status grew a badge).
+	var clouds := _find_label(ctx.inspector, "Clouds")
+	assert_not_null(clouds, "honored rows keep their plain label")
+	assert_null(_find_label(ctx.inspector, "Clouds " + EnvironmentInspectorScript.BADGE_PARTIAL),
 		"honored rows are not badged")
+	assert_not_null(_find_label(ctx.inspector, "Water"), "water_color is honored and unbadged")
+	if clouds != null:
+		assert_false(clouds.tooltip_text.is_empty(),
+			"honored-with-scope rows still explain their caveat in the tooltip")
 
 
 func test_advanced_rows_sync_from_env() -> void:

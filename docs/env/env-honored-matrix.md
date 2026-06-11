@@ -68,7 +68,7 @@ original's 63356 snap quirk) are HONORED — [orig: Environment_SortAndSnapshotK
 | `ground` | fill/ambient light → shader globals | HONORED | |
 | `fog` | doubled (`double_saturate`) → fog uniforms | HONORED | [orig: Environment_ApplyFogAndAmbient @ 0x57f17c]. |
 | `sky` | sky ambient → shader globals | HONORED | |
-| `skyfog` | doubled → horizon/clear color | HONORED | Sentinel-mirror (0xC0C0FF leftover-slot bleed) deliberately not replicated. |
+| `skyfog` | doubled via `get_skyfog_color()`; consumer pending | PARTIAL | **Flipped by C7**: the old dome shader abused skyfog as an invented sub-horizon mix, which C7 deleted; the *witnessed* consumer is the frame CLEAR color (cross-faded skyfog↔fog at low fog distance, env-tod-re.md §Fog policy) and is not wired yet — host scenes choose their own background (divergence #21). Sentinel-mirror (0xC0C0FF leftover-slot bleed) deliberately not replicated. |
 | `skybase` | `NovaSky` → `u_sky_base` | HONORED | Dome combine ported by C7 — see below. |
 | `skybright` | `NovaSky` → `u_sky_bright` | HONORED | |
 | `skyhighlight` | `NovaSky` → `u_sky_highlight` | HONORED | |
@@ -122,5 +122,5 @@ consumption table — field → honored | partial | unconsumed, with the origina
 and a plain-language note — and the Environment inspector badges PARTIAL (◐) and
 UNCONSUMED (○) rows with tooltips instead of silently accepting edits. C7 also added
 the previously-unexposed fields (water murk, lightning, ceiling/floor, vertex tint,
-iris) as badged Advanced rows. The table mirrors this matrix; rows in both flip only
-with a citation from the grill record.
+iris) as editable Advanced rows, badged where deferred. The table mirrors this matrix;
+rows in both flip only with a citation from the grill record.

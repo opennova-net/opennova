@@ -254,8 +254,10 @@ func get_cloud_edge() -> Vector3:
 
 
 func get_skyfog_color() -> Vector3:
-	# The clear/horizon color renders doubled like fog
-	# [orig: Environment_UpdateWeatherTick @ 0x57f190].
+	# The clear/horizon color, doubled like fog [orig: Environment_UpdateWeatherTick
+	# @ 0x57f190]. Its witnessed consumer is the FRAME CLEAR color (cross-faded
+	# skyfog<->fog at low fog distance), which no host wires yet - tracked as
+	# divergence #21 in docs/env/env-tod-re.md; this getter is the API for it.
 	return _double_vec3(_tod.get("skyfog", Vector3.ZERO))
 
 
