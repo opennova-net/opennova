@@ -1,12 +1,18 @@
 extends GutTest
 
-# Exercises the transform gizmo's pure math (engine/mission/mission_gizmo.gd) headlessly: ring-axis
-# derivation, screen-space handle hit-testing, axis-constrained translate, and ring rotation. A real
-# Camera3D in an own-world SubViewport drives project/unproject, so the projection path is the real
-# one. The gizmo is placed at the origin and viewed straight down (-Y), which puts the X/Z translate
-# axes and the yaw ring in the y=0 plane, making the expected world points easy to state.
+# Exercises the framework transform gizmo's pure math
+# (modtools/framework/transform_gizmo_3d.gd) headlessly: ring-axis derivation,
+# screen-space handle hit-testing, axis-constrained translate, ring rotation, and snapping.
+# A real Camera3D in an own-world SubViewport drives project/unproject, so the projection
+# path is the real one. The gizmo is placed at the origin and viewed straight down (-Y),
+# which puts the X/Z translate axes and the yaw ring in the y=0 plane, making the expected
+# world points easy to state.
+#
+# The fixture injects mission's bms basis_builder, so every pre-lift assertion still runs
+# against the mission rotation convention — the lift is behavior-preserving by these tests.
+# The default (plain euler) builder has its own cases at the bottom.
 
-const MissionGizmo = preload("res://engine/mission/mission_gizmo.gd")
+const MissionGizmo = preload("res://modtools/framework/transform_gizmo_3d.gd")
 const MissionObjectPlacer = preload("res://engine/mission/mission_object_placer.gd")
 
 var _sub: SubViewport
@@ -27,6 +33,7 @@ func before_each() -> void:
 	_cam.current = true
 	_sub.add_child(_cam)
 	_giz = MissionGizmo.new()
+	_giz.basis_builder = MissionObjectPlacer.bms_to_godot_basis
 	_sub.add_child(_giz)
 	_giz.visible = true
 	_giz.show_for(Vector3.ZERO, Vector3.ZERO)
@@ -190,3 +197,62 @@ func _assert_rotates_about(base: Vector3, applied: Vector3, axis: Vector3, expec
 	var dq := (MissionObjectPlacer.bms_to_godot_basis(applied) * MissionObjectPlacer.bms_to_godot_basis(base).inverse()).get_rotation_quaternion()
 	assert_gt(dq.get_axis().dot(axis), 0.0, "object rotates the same way the cursor swept")
 	assert_almost_eq(rad_to_deg(dq.get_angle()), expect_deg, 0.5)
+
+
+# --- Default (plain euler) basis builder + snapping -----------------------------
+
+func test_default_builder_ring_axes_are_world_axes() -> void:
+	# With no basis_builder injected and no authored rotation, each ring spins about its
+	# matching world axis with unit sensitivity — the framework default needs no domain.
+	var giz := MissionGizmo.new()
+	_sub.add_child(giz)
+	giz.show_for(Vector3.ZERO, Vector3.ZERO)
+	for i in 3:
+		var expected: Vector3 = [Vector3.RIGHT, Vector3.UP, Vector3.BACK][i]
+		assert_almost_eq(absf((giz._ring_axis[i] as Vector3).dot(expected)), 1.0, 0.001)
+		assert_almost_eq(float(giz._ring_sens[i]), 1.0, 0.01)
+	giz.free()
+
+
+func test_default_builder_rings_parallel_to_injected_at_identity() -> void:
+	# At zero authored rotation both conventions spin each ring about the same world
+	# LINE — the bms convention's axes point the opposite way (e.g. +yaw is a -Y
+	# rotation via RotY(90 - yaw)) with the sign packed into the axis, so the
+	# invariant is parallelism, not equality. Ring geometry (the visible circles)
+	# is therefore identical across builders.
+	var giz := MissionGizmo.new()
+	_sub.add_child(giz)
+	giz.show_for(Vector3.ZERO, Vector3.ZERO)
+	for i in 3:
+		var dot := absf((giz._ring_axis[i] as Vector3).dot(_giz._ring_axis[i] as Vector3))
+		assert_almost_eq(dot, 1.0, 0.001)
+	giz.free()
+
+
+func test_translate_snap_quantizes_axis_delta() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_giz.translate_snap = 2.0
+	_giz.begin({ "part": "translate", "axis": 0 }, _cam, _cam.unproject_position(Vector3(5, 0, 3)))
+	var d: Dictionary = _giz.update(_cam, _cam.unproject_position(Vector3(10.7, 0, 3)))
+	# Raw delta ~5.7 snaps to the nearest multiple of 2.
+	assert_almost_eq((d["translate"] as Vector3).x, 6.0, 0.001)
+
+
+func test_rotate_snap_quantizes_swept_degrees() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_giz.rotate_snap_deg = 15.0
+	_giz.begin({ "part": "rotate", "axis": 1 }, _cam, _cam.unproject_position(Vector3(10, 0, 0)))
+	var d: Dictionary = _giz.update(_cam, _cam.unproject_position(Vector3(10.0 * cos(deg_to_rad(100.0)), 0.0, 10.0 * sin(deg_to_rad(100.0)))))
+	# Raw sweep ~100 deg snaps to the nearest multiple of 15.
+	assert_almost_eq(absf(float(d["rotate_deg"])), 105.0, 0.001)
+
+
+func test_snaps_default_off() -> void:
+	# Fresh gizmo: both snaps are 0.0 = disabled, so deltas pass through unquantized
+	# (the mission adoption relies on this being inert).
+	var giz := MissionGizmo.new()
+	assert_eq(giz.translate_snap, 0.0)
+	assert_eq(giz.rotate_snap_deg, 0.0)
+	giz.free()
