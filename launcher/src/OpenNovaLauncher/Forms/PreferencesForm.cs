@@ -12,30 +12,17 @@ public sealed partial class PreferencesForm : Form
 {
     private readonly Dictionary<string, TextBox> _directoryInputs = new(StringComparer.OrdinalIgnoreCase);
     private readonly IReadOnlyList<GameDefinition> _supportedGames;
-    private readonly Func<string>? _redirectionStatusProvider;
-    private readonly Action? _removeHostsEntries;
 
     public PreferencesForm(
         IReadOnlyList<GameDefinition> supportedGames,
-        IReadOnlyDictionary<string, string> currentDirectories,
-        bool redirectionEnabled,
-        bool devModeEnabled,
-        Func<string>? redirectionStatusProvider = null,
-        Action? removeHostsEntries = null)
+        IReadOnlyDictionary<string, string> currentDirectories)
     {
         InitializeComponent();
 
         _supportedGames = supportedGames ?? GameCatalog.SupportedGames;
-        _redirectionStatusProvider = redirectionStatusProvider;
-        _removeHostsEntries = removeHostsEntries;
 
         toolTip.ShowAlways = true;
         PopulateGameRows(currentDirectories ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
-
-        redirectionCheckBox.Checked = redirectionEnabled;
-        devModeCheckBox.Checked = devModeEnabled;
-        removeHostsButton.Click += RemoveHostsButtonOnClick;
-        RefreshRedirectionStatus();
 
         versionLabel.Text = $"Version {GetAssemblyVersion()}";
     }
@@ -58,26 +45,10 @@ public sealed partial class PreferencesForm : Form
         }
     }
 
-    public bool RedirectionEnabled => redirectionCheckBox.Checked;
-
-    public bool DevModeEnabled => devModeCheckBox.Checked;
-
     public event EventHandler? CheckForUpdatesRequested
     {
         add => checkUpdatesButton.Click += value;
         remove => checkUpdatesButton.Click -= value;
-    }
-
-    private void RefreshRedirectionStatus()
-    {
-        redirectionStatusLabel.Text = _redirectionStatusProvider?.Invoke()
-            ?? "Redirection status unavailable.";
-    }
-
-    private void RemoveHostsButtonOnClick(object? sender, EventArgs e)
-    {
-        _removeHostsEntries?.Invoke();
-        RefreshRedirectionStatus();
     }
 
     private void PopulateGameRows(IReadOnlyDictionary<string, string> currentDirectories)

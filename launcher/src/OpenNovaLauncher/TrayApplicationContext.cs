@@ -22,6 +22,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ContextMenuStrip _contextMenu;
     private readonly ToolStripMenuItem _launchMenuItem;
     private readonly ToolStripMenuItem _redirectionMenuItem;
+    private readonly ToolStripMenuItem _devModeMenuItem;
     private readonly ToolStripSeparator _menuSeparator;
     private readonly ToolStripMenuItem _preferencesMenuItem;
     private readonly ToolStripMenuItem _exitMenuItem;
@@ -57,6 +58,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             ToolTipText = "Toggle OpenNova's NovaWorld hosts-file redirect on or off."
         };
+        _devModeMenuItem = new ToolStripMenuItem("Developer mode (127.0.0.1)", null, OnToggleDevModeClicked)
+        {
+            ToolTipText = "Point the redirect at a NovaWorld server on this machine instead of OpenNova."
+        };
         _preferencesMenuItem = new ToolStripMenuItem("Preferences", null, OnPreferencesClicked);
         _exitMenuItem = new ToolStripMenuItem("Exit", null, OnExitClicked);
 
@@ -67,6 +72,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _launchMenuItem,
             _expansionsMenuItem,
             _redirectionMenuItem,
+            _devModeMenuItem,
             _preferencesMenuItem,
             _menuSeparator,
             _exitMenuItem
@@ -248,13 +254,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private async void OnPreferencesClicked(object? sender, EventArgs e)
     {
-        using var form = new PreferencesForm(
-            _supportedGames,
-            _settings.GameDirectories,
-            _settings.RedirectionEnabled,
-            _settings.DevMode,
-            DescribeRedirectionState,
-            RemoveHostsEntries);
+        using var form = new PreferencesForm(_supportedGames, _settings.GameDirectories);
         form.CheckForUpdatesRequested += OnCheckForUpdatesRequested;
 
         var dialogResult = form.ShowDialog();
@@ -266,30 +266,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         _settings.GameDirectories = new Dictionary<string, string>(form.SelectedDirectories, StringComparer.OrdinalIgnoreCase);
-
-        var redirectionChanged = _settings.RedirectionEnabled != form.RedirectionEnabled;
-        var devModeChanged = _settings.DevMode != form.DevModeEnabled;
-        _settings.RedirectionEnabled = form.RedirectionEnabled;
-        _settings.DevMode = form.DevModeEnabled;
-
         await SaveSettingsAsync();
-
-        if (!_settings.RedirectionEnabled)
-        {
-            if (redirectionChanged)
-            {
-                // Hosts entries persist while the toggle is on; removing them is
-                // an explicit user action (toggle off, or the Remove button).
-                _hostsFileService.Remove();
-            }
-
-            _lastHostsState = HostsRedirectState.Disabled;
-        }
-        else if (redirectionChanged || devModeChanged)
-        {
-            await SyncRedirectionAsync(silent: false);
-        }
-
         UpdateMenuState();
     }
 
@@ -315,34 +292,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
         UpdateMenuState();
     }
 
-    private string DescribeRedirectionState()
+    // Tray quick-toggle: developer mode points the redirect at a NovaWorld server
+    // on this machine (127.0.0.1) instead of resolving the OpenNova server.
+    private async void OnToggleDevModeClicked(object? sender, EventArgs e)
     {
-        if (!_settings.RedirectionEnabled)
+        _settings.DevMode = !_settings.DevMode;
+        await SaveSettingsAsync();
+
+        // Re-resolve against the new target if the redirect is currently active.
+        if (_settings.RedirectionEnabled)
         {
-            return "Redirection is off. Your game connects to the standard NovaWorld addresses.";
+            await SyncRedirectionAsync(silent: false);
         }
 
-        var endpoint = _currentEndpoint;
-        if (endpoint == null)
-        {
-            return "Redirection is on, but the OpenNova server address has not been found yet.";
-        }
-
-        var state = _hostsFileService.GetState(BuildDesiredRedirects(endpoint));
-        return state switch
-        {
-            HostsRedirectState.Enabled => $"Redirection is on. Your game connects to OpenNova at {endpoint.IPv4}.",
-            HostsRedirectState.EnabledStaleIp => "Redirection is on, but the saved address is out of date. It will be refreshed before the next launch.",
-            HostsRedirectState.ForeignConflict => "Another program added its own entries for these names. The launcher will ask before fixing this at launch.",
-            HostsRedirectState.Inaccessible => "Windows is blocking changes to the hosts file.",
-            _ => "Redirection is on. The hosts entries will be written before the next launch.",
-        };
-    }
-
-    private void RemoveHostsEntries()
-    {
-        _hostsFileService.Remove();
-        _lastHostsState = HostsRedirectState.Disabled;
         UpdateMenuState();
     }
 
@@ -368,6 +330,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _launchMenuItem.Enabled = hasConfiguredGame && !_deploymentInProgress && !launcherUpdatePending;
         _expansionsMenuItem.Enabled = _supportedGames.Count > 0;
         _redirectionMenuItem.Checked = _settings.RedirectionEnabled;
+        _devModeMenuItem.Checked = _settings.DevMode;
 
         var status = launcherUpdatePending
             ? "Launcher update required"

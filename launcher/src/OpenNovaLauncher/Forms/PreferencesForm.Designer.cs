@@ -29,12 +29,6 @@ partial class PreferencesForm
         labelDfx2 = new Label();
         textBoxDfx2 = new TextBox();
         buttonBrowseDfx2 = new Button();
-        redirectionGroupBox = new GroupBox();
-        redirectionLayout = new TableLayoutPanel();
-        redirectionCheckBox = new CheckBox();
-        devModeCheckBox = new CheckBox();
-        redirectionStatusLabel = new Label();
-        removeHostsButton = new Button();
         statusPanel = new FlowLayoutPanel();
         checkUpdatesButton = new Button();
         versionLabel = new Label();
@@ -45,8 +39,6 @@ partial class PreferencesForm
         mainLayout.SuspendLayout();
         directoriesPanel.SuspendLayout();
         tableLayoutPanelGames.SuspendLayout();
-        redirectionGroupBox.SuspendLayout();
-        redirectionLayout.SuspendLayout();
         statusPanel.SuspendLayout();
         buttonsPanel.SuspendLayout();
         SuspendLayout();
@@ -57,18 +49,16 @@ partial class PreferencesForm
         mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         mainLayout.Controls.Add(headerLabel, 0, 0);
         mainLayout.Controls.Add(directoriesPanel, 0, 1);
-        mainLayout.Controls.Add(redirectionGroupBox, 0, 2);
-        mainLayout.Controls.Add(statusPanel, 0, 3);
-        mainLayout.Controls.Add(buttonsPanel, 0, 4);
+        mainLayout.Controls.Add(statusPanel, 0, 2);
+        mainLayout.Controls.Add(buttonsPanel, 0, 3);
         mainLayout.Dock = DockStyle.Fill;
         mainLayout.Location = new Point(0, 0);
         mainLayout.Margin = new Padding(0);
         mainLayout.Name = "mainLayout";
         mainLayout.Padding = new Padding(16, 16, 16, 12);
-        mainLayout.RowCount = 5;
+        mainLayout.RowCount = 4;
         mainLayout.RowStyles.Add(new RowStyle());
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        mainLayout.RowStyles.Add(new RowStyle());
         mainLayout.RowStyles.Add(new RowStyle());
         mainLayout.RowStyles.Add(new RowStyle());
         mainLayout.Size = new Size(580, 460);
@@ -171,80 +161,6 @@ partial class PreferencesForm
         buttonBrowseDfx2.Text = "Browse…";
         buttonBrowseDfx2.UseVisualStyleBackColor = true;
         //
-        // redirectionGroupBox
-        //
-        redirectionGroupBox.AutoSize = true;
-        redirectionGroupBox.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        redirectionGroupBox.Controls.Add(redirectionLayout);
-        redirectionGroupBox.Dock = DockStyle.Fill;
-        redirectionGroupBox.Margin = new Padding(0, 12, 0, 0);
-        redirectionGroupBox.Name = "redirectionGroupBox";
-        redirectionGroupBox.Padding = new Padding(10, 4, 10, 8);
-        redirectionGroupBox.TabIndex = 2;
-        redirectionGroupBox.TabStop = false;
-        redirectionGroupBox.Text = "NovaWorld redirection";
-        //
-        // redirectionLayout
-        //
-        redirectionLayout.AutoSize = true;
-        redirectionLayout.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        redirectionLayout.ColumnCount = 2;
-        redirectionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        redirectionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        redirectionLayout.Controls.Add(redirectionCheckBox, 0, 0);
-        redirectionLayout.Controls.Add(devModeCheckBox, 0, 1);
-        redirectionLayout.Controls.Add(redirectionStatusLabel, 0, 2);
-        redirectionLayout.Controls.Add(removeHostsButton, 1, 2);
-        redirectionLayout.Dock = DockStyle.Fill;
-        redirectionLayout.Margin = new Padding(0);
-        redirectionLayout.Name = "redirectionLayout";
-        redirectionLayout.RowCount = 3;
-        redirectionLayout.RowStyles.Add(new RowStyle());
-        redirectionLayout.RowStyles.Add(new RowStyle());
-        redirectionLayout.RowStyles.Add(new RowStyle());
-        redirectionLayout.TabIndex = 0;
-        //
-        // redirectionCheckBox
-        //
-        redirectionCheckBox.AutoSize = true;
-        redirectionCheckBox.Margin = new Padding(3, 6, 3, 3);
-        redirectionCheckBox.Name = "redirectionCheckBox";
-        redirectionCheckBox.TabIndex = 0;
-        redirectionCheckBox.Text = "Manage NovaWorld redirection";
-        redirectionCheckBox.UseVisualStyleBackColor = true;
-        redirectionLayout.SetColumnSpan(redirectionCheckBox, 2);
-        //
-        // devModeCheckBox
-        //
-        devModeCheckBox.AutoSize = true;
-        devModeCheckBox.Margin = new Padding(3, 3, 3, 3);
-        devModeCheckBox.Name = "devModeCheckBox";
-        devModeCheckBox.TabIndex = 1;
-        devModeCheckBox.Text = "Developer mode (redirect to 127.0.0.1)";
-        devModeCheckBox.UseVisualStyleBackColor = true;
-        redirectionLayout.SetColumnSpan(devModeCheckBox, 2);
-        //
-        // redirectionStatusLabel
-        //
-        redirectionStatusLabel.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-        redirectionStatusLabel.AutoSize = true;
-        redirectionStatusLabel.ForeColor = Color.DimGray;
-        redirectionStatusLabel.Margin = new Padding(3, 8, 6, 3);
-        redirectionStatusLabel.Name = "redirectionStatusLabel";
-        redirectionStatusLabel.TabIndex = 2;
-        redirectionStatusLabel.Text = "Redirection status unavailable.";
-        //
-        // removeHostsButton
-        //
-        removeHostsButton.AutoSize = true;
-        removeHostsButton.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        removeHostsButton.Anchor = AnchorStyles.Right;
-        removeHostsButton.Margin = new Padding(6, 4, 3, 3);
-        removeHostsButton.Name = "removeHostsButton";
-        removeHostsButton.TabIndex = 3;
-        removeHostsButton.Text = "Remove hosts entries";
-        removeHostsButton.UseVisualStyleBackColor = true;
-        //
         // statusPanel
         //
         statusPanel.AutoSize = true;
@@ -331,10 +247,6 @@ partial class PreferencesForm
         directoriesPanel.PerformLayout();
         tableLayoutPanelGames.ResumeLayout(false);
         tableLayoutPanelGames.PerformLayout();
-        redirectionGroupBox.ResumeLayout(false);
-        redirectionGroupBox.PerformLayout();
-        redirectionLayout.ResumeLayout(false);
-        redirectionLayout.PerformLayout();
         statusPanel.ResumeLayout(false);
         statusPanel.PerformLayout();
         buttonsPanel.ResumeLayout(false);
@@ -351,12 +263,6 @@ partial class PreferencesForm
     private System.Windows.Forms.Label labelDfx2;
     private System.Windows.Forms.TextBox textBoxDfx2;
     private System.Windows.Forms.Button buttonBrowseDfx2;
-    private System.Windows.Forms.GroupBox redirectionGroupBox;
-    private System.Windows.Forms.TableLayoutPanel redirectionLayout;
-    private System.Windows.Forms.CheckBox redirectionCheckBox;
-    private System.Windows.Forms.CheckBox devModeCheckBox;
-    private System.Windows.Forms.Label redirectionStatusLabel;
-    private System.Windows.Forms.Button removeHostsButton;
     private System.Windows.Forms.FlowLayoutPanel statusPanel;
     private System.Windows.Forms.Button checkUpdatesButton;
     private System.Windows.Forms.Label versionLabel;

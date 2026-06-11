@@ -7,7 +7,7 @@ OpenNova Launcher supports JO and newer titles (Joint Operations: Typhoon Rising
 ## How it works
 
 1. You register your game install directories in Preferences.
-2. You turn on "Manage NovaWorld redirection".
+2. You turn on **Redirect to OpenNova** in the tray menu.
 3. The launcher resolves the current OpenNova server address (backend `/server-info`, falling back to a cached address, then a DNS lookup of `nw.opennova.net`) and writes a managed block into `%SystemRoot%\System32\drivers\etc\hosts`:
 
    ```
@@ -20,7 +20,7 @@ OpenNova Launcher supports JO and newer titles (Joint Operations: Typhoon Rising
 
 Everything outside the markers is preserved byte for byte. The launcher refreshes the address before every launch and rewrites the block only when it is stale. The DNS cache is flushed after each change so it takes effect immediately.
 
-The hosts entries stay in place while the toggle is on, including across launcher restarts. They are removed when you turn the toggle off or click "Remove hosts entries" in Preferences.
+The hosts entries stay in place while the toggle is on, including across launcher restarts. They are removed when you turn **Redirect to OpenNova** off in the tray menu.
 
 ## Launching
 
@@ -38,7 +38,7 @@ Windows Defender flags some hosts-file edits as `SettingsModifier:Win32/HostsFil
 
 ## Developer mode
 
-"Developer mode (redirect to 127.0.0.1)" in Preferences points the NovaWorld hostnames at your local machine instead of the OpenNova servers, for testing a locally hosted server. It only changes the hosts redirect target; the launcher still talks to the production backend API for catalogs and updates (override with `ONLAUNCHER_API_BASE_URL` if needed).
+**Developer mode (127.0.0.1)** in the tray menu points the NovaWorld hostnames at your local machine instead of the OpenNova servers, for testing a locally hosted server. It only changes the hosts redirect target; the launcher still talks to the production backend API for catalogs and updates (override with `ONLAUNCHER_API_BASE_URL` if needed).
 
 ## Settings
 
