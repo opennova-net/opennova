@@ -105,7 +105,10 @@ func _ready() -> void:
 
 
 func refresh() -> void:
-	if _doc == null and _ws != null:
+	# Re-fetch unconditionally: with document tabs the workspace's active
+	# document changes under us, and a cached _doc would keep filtering and
+	# validating a background tab.
+	if _ws != null:
 		_doc = _ws.get_document()
 	_rebuild_section_filter()
 	_refresh_validation()

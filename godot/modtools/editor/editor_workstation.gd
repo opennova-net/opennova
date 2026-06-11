@@ -41,6 +41,8 @@ const _RECENT_CLEAR_META := "::clear::"
 @onready var _inspector_host: Control = %InspectorHost
 @onready var _viewport_lane: Control = %ViewportLane
 @onready var _viewport_host: Control = %ViewportHost
+@onready var _document_tab_strip: PanelContainer = %DocumentTabStrip
+@onready var _document_tab_row: HBoxContainer = %DocumentTabRow
 @onready var _camera_toggle_button: Button = %CameraToggleButton
 @onready var _camera_popup: PopoverPanel = %CameraPopup
 @onready var _camera_popup_close: Button = %CameraPopupClose
@@ -121,6 +123,13 @@ var _export_ui_active: bool = false
 var _pending_export_dir: String = ""
 var _overlay_tween: Tween
 var _unsaved_dialog: ConfirmationDialog
+# When set, the unsaved-changes dialog routes Save/Discard/Cancel here instead
+# of the terrain editor's pending-action flow (prompt_unsaved_for vs the legacy
+# prompt_unsaved_changes). Cleared before each invocation, so a stale callable
+# can never hijack a later prompt.
+var _unsaved_on_save := Callable()
+var _unsaved_on_discard := Callable()
+var _unsaved_on_cancel := Callable()
 var _cdep_dialog: ConfirmationDialog
 var _export_dialog: ExportFlavorDialog
 var _cdep_fix_callback: Callable = Callable()
@@ -249,6 +258,9 @@ func _ensure_workspaces() -> void:
 		elif not _workspaces.has(def.id):
 			var workspace: EditorWorkspace = def.adapter_script.new()
 			workspace.set_editor_shell(self)
+			# The tab strip is signal-driven: rebuilt only from documents_changed
+			# (and workspace switches), never from the per-frame shell poll.
+			workspace.documents_changed.connect(_on_workspace_documents_changed.bind(def.id))
 			_workspaces[def.id] = workspace
 
 
@@ -850,8 +862,119 @@ func _refresh_workspace_surface() -> void:
 		_refresh_workflow_from_workspace()
 	else:
 		_show_workspace_inspector(workspace)
+	_rebuild_document_tabs()
 	_refresh_workspace_buttons()
 	_refresh_workspace_scroll_affordance.call_deferred()
+
+
+# --- Document tabs (multi-document workspaces) -----------------------------
+# One strip above the viewport, hidden unless the active workspace opts into
+# the document-tab tier. Rebuilds are signal-driven: documents_changed for the
+# active workspace, plus the workspace-switch surface refresh.
+
+func _on_workspace_documents_changed(workspace_id: int) -> void:
+	if workspace_id == _active_workspace_id:
+		_rebuild_document_tabs()
+
+
+func _rebuild_document_tabs() -> void:
+	if _document_tab_row == null:
+		return
+	# queue_free, not free: a rebuild is usually triggered FROM a tab/close
+	# button's own pressed emission, and freeing the emitting button is an error
+	# (locked object). Detach immediately so the new row builds clean.
+	for child in _document_tab_row.get_children():
+		_document_tab_row.remove_child(child)
+		child.queue_free()
+	var workspace := _get_active_workspace()
+	if workspace == null or not workspace.supports_document_tabs():
+		_document_tab_strip.visible = false
+		return
+	var tabs: Array = workspace.get_document_tabs()
+	var active := workspace.get_active_document_index()
+	var active_style := _make_workspace_active_stylebox()
+	for i in tabs.size():
+		var tab: Dictionary = tabs[i]
+		var label := String(tab.get("label", "Untitled"))
+		var btn := Button.new()
+		btn.name = "DocumentTab%d" % i
+		btn.toggle_mode = true
+		btn.text = label + ("*" if bool(tab.get("dirty", false)) else "")
+		btn.tooltip_text = String(tab.get("tooltip", label))
+		btn.clip_text = true
+		btn.custom_minimum_size = Vector2(96, 28)
+		btn.focus_mode = Control.FOCUS_NONE
+		if i == active:
+			btn.add_theme_stylebox_override("normal", active_style)
+			btn.set_pressed_no_signal(true)
+		btn.pressed.connect(_on_document_tab_pressed.bind(i))
+		_document_tab_row.add_child(btn)
+		var close := Button.new()
+		close.name = "DocumentTabClose%d" % i
+		close.text = PopoverPanel.CLOSE_GLYPH
+		close.tooltip_text = "Close %s" % label
+		close.custom_minimum_size = Vector2(24, 28)
+		close.focus_mode = Control.FOCUS_NONE
+		close.pressed.connect(_on_document_tab_close_pressed.bind(i))
+		_document_tab_row.add_child(close)
+	_document_tab_strip.visible = not tabs.is_empty()
+
+
+func _on_document_tab_pressed(index: int) -> void:
+	var workspace := _get_active_workspace()
+	if workspace == null:
+		return
+	if index == workspace.get_active_document_index():
+		# Re-pressing the active tab must not untoggle it visually.
+		_rebuild_document_tabs()
+		return
+	workspace.activate_document(index)
+	sync_from_editor_state()
+
+
+func _on_document_tab_close_pressed(index: int) -> void:
+	var workspace := _get_active_workspace()
+	if workspace == null:
+		return
+	var tabs: Array = workspace.get_document_tabs()
+	if index < 0 or index >= tabs.size():
+		return
+	if not bool((tabs[index] as Dictionary).get("dirty", false)):
+		workspace.close_document(index)
+		sync_from_editor_state()
+		return
+	# Activate first so the user sees what is at stake — and so the close target
+	# stays well-defined across the async prompt/save-as: every follow-up acts on
+	# the ACTIVE document, immune to index shifts.
+	workspace.activate_document(index)
+	_rebuild_document_tabs()
+	prompt_unsaved_for(
+		func() -> void: _save_then_close_active_document(workspace),
+		func() -> void: _close_active_document(workspace))
+
+
+func _close_active_document(workspace: EditorWorkspace) -> void:
+	var idx := workspace.get_active_document_index()
+	if idx >= 0:
+		workspace.close_document(idx)
+	sync_from_editor_state()
+
+
+func _save_then_close_active_document(workspace: EditorWorkspace) -> void:
+	var err := workspace.save_current()
+	if err == OK:
+		_close_active_document(workspace)
+		return
+	if err == ERR_INVALID_PARAMETER:
+		# No path yet: route through Save As; close only on success.
+		_open_dir_dialog(workspace.get_save_dialog_title(), func(dir_path: String) -> void:
+			if workspace.save_as(dir_path) == OK:
+				_close_active_document(workspace)
+			else:
+				show_status_message("Save failed — keeping the tab open.", 6.0),
+			_preferred_save_dir(workspace))
+		return
+	show_status_message("Save failed (error %d) — keeping the tab open." % err, 6.0)
 
 
 func _sync_asset_dock_for_workspace(workspace: EditorWorkspace) -> void:
@@ -1769,9 +1892,45 @@ func _on_tile_gizmo_delete_pressed() -> void:
 
 
 func prompt_unsaved_changes(_action_name: String) -> void:
+	# Legacy entry: clears the callables so the dialog routes Save/Discard/Cancel
+	# to the terrain editor's pending-action flow (the dispatchers' fallback).
+	_unsaved_on_save = Callable()
+	_unsaved_on_discard = Callable()
+	_unsaved_on_cancel = Callable()
 	_ensure_unsaved_dialog()
 	_unsaved_dialog.popup_centered()
 	show_status_message("Save or discard your changes to continue.", 6.0)
+
+
+## Pops the shared unsaved-changes dialog with caller-supplied outcomes (e.g. a
+## document tab close: save-then-close / close / keep). Same dialog, same
+## buttons — only the routing differs from prompt_unsaved_changes.
+func prompt_unsaved_for(on_save: Callable, on_discard: Callable, on_cancel := Callable()) -> void:
+	_unsaved_on_save = on_save
+	_unsaved_on_discard = on_discard
+	_unsaved_on_cancel = on_cancel
+	_ensure_unsaved_dialog()
+	_unsaved_dialog.popup_centered()
+	show_status_message("Save or discard your changes to continue.", 6.0)
+
+
+func _take_unsaved_callable(which: StringName) -> Callable:
+	var cb := Callable()
+	match which:
+		&"save":
+			cb = _unsaved_on_save
+		&"discard":
+			cb = _unsaved_on_discard
+		&"cancel":
+			cb = _unsaved_on_cancel
+	_unsaved_on_save = Callable()
+	_unsaved_on_discard = Callable()
+	_unsaved_on_cancel = Callable()
+	return cb
+
+
+func _has_unsaved_callables() -> bool:
+	return _unsaved_on_save.is_valid() or _unsaved_on_discard.is_valid() or _unsaved_on_cancel.is_valid()
 
 
 func prompt_save_directory_for_pending_action(_action_name: String) -> void:
@@ -1795,16 +1954,31 @@ func prompt_cdep_violations(count: int, on_fix_callback: Callable) -> void:
 
 
 func _on_prompt_save_changes() -> void:
+	if _has_unsaved_callables():
+		var cb := _take_unsaved_callable(&"save")
+		if cb.is_valid():
+			cb.call()
+		return
 	if editor:
 		editor.confirm_pending_action_save()
 
 
 func _on_prompt_discard_changes() -> void:
+	if _has_unsaved_callables():
+		var cb := _take_unsaved_callable(&"discard")
+		if cb.is_valid():
+			cb.call()
+		return
 	if editor:
 		editor.confirm_pending_action_discard()
 
 
 func _on_prompt_keep_editing() -> void:
+	if _has_unsaved_callables():
+		var cb := _take_unsaved_callable(&"cancel")
+		if cb.is_valid():
+			cb.call()
+		return
 	if editor:
 		editor.cancel_pending_action()
 
