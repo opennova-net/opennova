@@ -95,23 +95,32 @@ func test_inspector_flags_unresolved_key() -> void:
 		"An unknown string id is flagged.")
 
 
+func _text_ref_widget(inspector: Node) -> StringRefWidget:
+	return inspector.find_child("MnuWidgetTextRef", true, false) as StringRefWidget
+
+
 func test_inspector_string_helpers_hidden_without_table() -> void:
-	# No table loaded (no resource root): no resolved line, picker, or jump button.
+	# No table loaded (no resource root): the key widget degrades to a plain
+	# field - no badge, picker, jump, or resolved preview.
 	var arr := _doc_with_id_widget("ALPHA")
 	var inspector = await _inspector_for(arr[0], arr[1], null)
-	assert_null(_find_button(inspector, "Pick string..."),
-		"The picker is hidden when no string table is loaded.")
-	assert_null(_find_button(inspector, "Edit in Strings"),
-		"The jump is hidden when no string table is loaded.")
+	var widget := _text_ref_widget(inspector)
+	assert_not_null(widget, "The string-id text row is the link widget.")
+	assert_false(widget.ref_row.badge.visible, "The badge is hidden when no string table is loaded.")
+	assert_false(widget.ref_row.browse_button.visible, "The picker is hidden when no string table is loaded.")
+	assert_false(widget.ref_row.jump_button.visible, "The jump is hidden when no string table is loaded.")
+	assert_false(widget.preview.visible, "No resolved line without a table.")
+	assert_eq(widget.get_value(), "ALPHA", "The raw key stays editable.")
 
 
 func test_inspector_string_jump_emits_key() -> void:
 	var arr := _doc_with_id_widget("ALPHA")
 	var inspector = await _inspector_for(arr[0], arr[1], _make_table())
-	var btn := _find_button(inspector, "Edit in Strings")
-	assert_not_null(btn, "The Edit in Strings button is present for a string id.")
+	var widget := _text_ref_widget(inspector)
+	assert_not_null(widget, "The string-id text row is the link widget.")
+	assert_true(widget.ref_row.jump_button.visible, "The Strings jump is offered for a string id.")
 	watch_signals(inspector)
-	btn.pressed.emit()
+	widget.ref_row.jump_button.pressed.emit()
 	assert_signal_emitted(inspector, "string_jump_requested", "Pressing jumps to Strings.")
 	assert_eq(get_signal_parameters(inspector, "string_jump_requested", 0)[0], "ALPHA",
 		"The jump carries the widget's string id.")
@@ -122,8 +131,10 @@ func test_inspector_pick_commits_text_edit() -> void:
 	var inspector = await _inspector_for(arr[0], arr[1], _make_table())
 	var captured: Array = []
 	inspector.edit_requested.connect(func(e: Dictionary) -> void: captured.append(e))
-	# Drive the pick result directly (the popup itself is covered by the picker test).
-	inspector._picker_target_id = arr[1]
+	var widget := _text_ref_widget(inspector)
+	# Browse routes through the pick service into the real picker; drive the
+	# pick result directly (the popup itself is covered by the picker test).
+	widget.ref_row.browse_button.pressed.emit()
 	inspector._on_string_picked("BRAVO")
 	assert_eq(captured.size(), 1, "Picking commits exactly one edit.")
 	if captured.size() == 1:
@@ -131,6 +142,24 @@ func test_inspector_pick_commits_text_edit() -> void:
 		assert_eq(e.get("prop"), "text", "The edit sets the widget text.")
 		assert_eq(e.get("value"), "BRAVO", "The edit carries the chosen key.")
 		assert_eq(e.get("id"), arr[1], "The edit targets the selected widget.")
+	assert_eq(widget.get_value(), "BRAVO", "The widget shows the picked key without a rebuild.")
+
+
+func test_screen_text_rsrc_is_a_link_widget() -> void:
+	var doc := NovaMnuDocument.new()
+	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
+	var screen_id: int = doc.get_screen_ids()[0]
+	var inspector = await _inspector_for(doc, screen_id, null)
+	var widget := inspector.find_child("MnuScreenTextRsrc", true, false) as ResourceRefWidget
+	assert_not_null(widget, "The screen's Text resource row is a file link widget.")
+	assert_eq(widget.get_value(), doc.get_screen_text_rsrc(screen_id), "The row reads the screen value.")
+	var captured: Array = []
+	inspector.edit_requested.connect(func(e: Dictionary) -> void: captured.append(e))
+	widget.name_edit.text = "other.BIN"
+	widget.name_edit.text_submitted.emit("other.BIN")
+	assert_eq(captured.size(), 1, "Editing the table name commits one edit.")
+	if captured.size() == 1:
+		assert_eq(captured[0].get("prop"), "text_rsrc", "The edit targets the screen's text_rsrc.")
 
 
 func test_inspector_font_jump_emits_font() -> void:

@@ -37,6 +37,10 @@ var _memo_result: Dictionary = {}
 # Turns a picked browser path into the stored value. Header refs store bare
 # names; texture-flavored adopters override to keep the extension.
 var _value_from_path := func(path: String) -> String: return path.get_file().get_basename()
+# Status copy overrides for adopters whose targets are not resource-folder
+# files (string keys); empty = the default resource-folder wording.
+var _browse_copy := ""
+var _missing_copy := ""
 
 
 func _init() -> void:
@@ -99,7 +103,8 @@ func configure(kind: String, display_label: String, services: Dictionary = {}) -
 	_services = services
 	name_edit.placeholder_text = "(none)"
 	browse_button.visible = _service("pick").is_valid()
-	browse_button.tooltip_text = "Choose a %s from the resource folder." % _label.to_lower()
+	browse_button.tooltip_text = _browse_copy if not _browse_copy.is_empty() \
+			else "Choose a %s from the resource folder." % _label.to_lower()
 	jump_button.tooltip_text = "Open this %s in its editor." % _label.to_lower()
 	_memo_value = ""
 	_memo_epoch = -1
@@ -127,6 +132,13 @@ func get_value() -> String:
 
 func set_value_from_path(cb: Callable) -> void:
 	_value_from_path = cb
+
+
+## Override the resource-folder-flavored tooltips for adopters whose targets
+## live elsewhere (string keys in a table). Call before configure().
+func set_status_copy(browse_tooltip: String, missing_tooltip: String) -> void:
+	_browse_copy = browse_tooltip
+	_missing_copy = missing_tooltip
 
 
 ## Force a re-resolve (e.g. after the resource folder was rescanned).
@@ -219,7 +231,8 @@ func _refresh_status_ui() -> void:
 			jump_button.disabled = false
 		"missing":
 			badge.text = "!"
-			badge.tooltip_text = "Not in the resource folder. The game won't find this."
+			badge.tooltip_text = _missing_copy if not _missing_copy.is_empty() \
+					else "Not in the resource folder. The game won't find this."
 			jump_button.disabled = true
 		_:
 			badge.text = "?"

@@ -271,6 +271,10 @@ func build_inspector(host: Control) -> void:
 	# Preview a widget's sound through the menu .lwf profile (reuses the Sound
 	# workspace's audition player); the inspector lists triggers from the same profile.
 	_inspector.sound_preview_requested.connect(_on_sound_preview)
+	# Shell link-widget services for FILE references (the screen's text_rsrc);
+	# string KEYS resolve through the loaded table instead.
+	if editor_shell != null and _inspector.has_method("set_reference_services"):
+		_inspector.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
 	host.add_child(_inspector)
 	# Populate from the editor's current selection. Subsequent selection changes
 	# (user + document reloads, which re-select the first screen) reach the
@@ -284,7 +288,7 @@ func _populate_inspector() -> void:
 		return
 	if _editor != null:
 		_selected_id = _editor.get_selected_id()
-	_inspector.show_widget(_document.resource, _selected_id, _text_resource())
+	_inspector.show_widget(_document.resource, _selected_id, _text_resource(), _text_resource_path())
 	_apply_sound_sets()
 
 
@@ -305,7 +309,7 @@ func _apply_sound_sets() -> void:
 func _on_widget_selected(id: int) -> void:
 	_selected_id = id
 	if _inspector != null and is_instance_valid(_inspector):
-		_inspector.show_widget(_document.resource, id, _text_resource())
+		_inspector.show_widget(_document.resource, id, _text_resource(), _text_resource_path())
 
 
 # A multi-selection (>1 widget) drives the inspector's read-only summary view; the
@@ -314,13 +318,18 @@ func _on_selection_changed(ids: PackedInt32Array) -> void:
 	if ids.size() > 0:
 		_selected_id = ids[ids.size() - 1]
 	if _inspector != null and is_instance_valid(_inspector):
-		_inspector.show_selection(_document.resource, ids, _text_resource())
+		_inspector.show_selection(_document.resource, ids, _text_resource(), _text_resource_path())
 
 
 # The string table the editor resolved for the open menu (null when none loaded), so
 # the inspector can show resolved text + drive the picker.
 func _text_resource() -> RtxtStringFile:
 	return _editor.get_text_resource() if _editor != null and is_instance_valid(_editor) else null
+
+
+# Its resolved path - the string widgets' badge tooltip and Strings jump target.
+func _text_resource_path() -> String:
+	return _editor.get_text_resource_path() if _editor != null and is_instance_valid(_editor) else ""
 
 
 func _on_inspector_edit(edit: Dictionary) -> void:

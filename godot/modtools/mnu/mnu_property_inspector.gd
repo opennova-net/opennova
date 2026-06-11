@@ -44,10 +44,17 @@ var _selected_id := -1
 var _multi_ids: PackedInt32Array = PackedInt32Array()
 var _box: VBoxContainer
 # The resolved string table for the open menu (passed by the workspace from the
-# editor). Null when none is loaded; the string-id helpers then stay hidden.
+# editor) and its path (for the string widgets' jump/badge). Null/empty when
+# none is loaded; the string-key helpers then stay hidden.
 var _text_resource: RtxtStringFile
+var _text_resource_path := ""
+# Shell link-widget services (resolve/pick/jump) for FILE references like the
+# screen's text_rsrc; string KEYS resolve through the table above instead.
+var _ref_services: Dictionary = {}
 var _picker: PopupPanel
-var _picker_target_id := -1
+# The pending pick consumer (a StringRefWidget's on_pick); picker results
+# route through it so the widget commits exactly one edit.
+var _picker_on_pick: Callable = Callable()
 # Sound-set names from the open menu's .lwf profile (set by the workspace). When
 # present, the per-sound trigger field becomes a dropdown over the real sets.
 var _sound_sets: PackedStringArray = PackedStringArray()
@@ -59,11 +66,20 @@ func _ready() -> void:
 	_rebuild()
 
 
-func show_widget(doc: NovaMnuDocument, id: int, text_res: RtxtStringFile = null) -> void:
+func show_widget(doc: NovaMnuDocument, id: int, text_res: RtxtStringFile = null, text_res_path: String = "") -> void:
 	_document = doc
 	_selected_id = id
 	_multi_ids = PackedInt32Array()
 	_text_resource = text_res
+	_text_resource_path = text_res_path
+	if is_node_ready():
+		_rebuild()
+
+
+## Wires the shell link-widget services (see ResourceRefWidget.services_from_shell).
+## Idempotent; safe before or after the form is built.
+func set_reference_services(services: Dictionary) -> void:
+	_ref_services = services
 	if is_node_ready():
 		_rebuild()
 
@@ -79,14 +95,15 @@ func set_sound_sets(sets: PackedStringArray) -> void:
 
 # Show a summary for a multi-selection (>1 widget). Zero or one id delegates to the
 # normal single-node view. The workspace routes the editor's selection_changed here.
-func show_selection(doc: NovaMnuDocument, ids: PackedInt32Array, text_res: RtxtStringFile = null) -> void:
+func show_selection(doc: NovaMnuDocument, ids: PackedInt32Array, text_res: RtxtStringFile = null, text_res_path: String = "") -> void:
 	if ids.size() <= 1:
-		show_widget(doc, ids[0] if ids.size() == 1 else -1, text_res)
+		show_widget(doc, ids[0] if ids.size() == 1 else -1, text_res, text_res_path)
 		return
 	_document = doc
 	_selected_id = -1
 	_multi_ids = ids
 	_text_resource = text_res
+	_text_resource_path = text_res_path
 	if is_node_ready():
 		_rebuild()
 
@@ -141,9 +158,21 @@ func _build_screen_rows(id: int) -> void:
 	music_spin.value_changed.connect(func(v: float) -> void:
 		_emit({"target": "screen", "id": id, "prop": "music_var", "value": int(v)}))
 
-	var rsrc_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Text resource", _document.get_screen_text_rsrc(id))
-	_wire_text(rsrc_edit, {"target": "screen", "id": id, "prop": "text_rsrc"})
-	# Make the string-table linkage explicit: does the named resource actually resolve?
+	# The screen's string table is a FILE reference: badge + browse resolve the
+	# named .bin against the resource folder, jump opens it in Strings.
+	var rsrc_row := MnuUiHelpersScript._row(_box)
+	rsrc_row.add_child(MnuUiHelpersScript._key_label("Text resource"))
+	var rsrc_widget := ResourceRefWidget.new()
+	rsrc_widget.name = "MnuScreenTextRsrc"
+	rsrc_widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# text_rsrc names carry their extension (menutxt.BIN); keep it on pick.
+	rsrc_widget.set_value_from_path(func(path: String) -> String: return path.get_file())
+	rsrc_widget.configure("strings", "string table", _ref_services)
+	rsrc_widget.set_value(_document.get_screen_text_rsrc(id))
+	rsrc_widget.value_changed.connect(func(value: String) -> void:
+		_emit({"target": "screen", "id": id, "prop": "text_rsrc", "value": value}))
+	rsrc_row.add_child(rsrc_widget)
+	# Make the live linkage explicit: is the named table the one actually loaded?
 	if not _document.get_screen_text_rsrc(id).is_empty():
 		if _text_resource != null:
 			MnuUiHelpersScript.add_muted(_box, "loaded: %d strings" % _text_resource.get_entry_count())
@@ -172,16 +201,18 @@ func _build_widget_rows(id: int) -> void:
 	var sz = MnuUiHelpersScript.add_spin_pair_row(_box, "Size", int(rect.size.x), int(rect.size.y), 0, SIZE_MAX)
 	_wire_rect(id, pos[0], pos[1], sz[0], sz[1])
 
-	var text_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Text", _document.get_widget_text(id))
-	_wire_text(text_edit, {"target": "widget", "id": id, "prop": "text"})
 	var is_id := _document.get_widget_string_type(id) == "id"
+	if is_id:
+		# The text IS a string-table key: one link widget carries the key field,
+		# the found/missing badge, the table picker, the Strings jump, and the
+		# resolved-text preview - all gated on a table actually being loaded.
+		_build_string_ref_row(id)
+	else:
+		var text_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Text", _document.get_widget_text(id))
+		_wire_text(text_edit, {"target": "widget", "id": id, "prop": "text"})
 	var id_check := MnuUiHelpersScript.add_check_row(_box, "Text is a string id", is_id)
 	id_check.toggled.connect(func(pressed: bool) -> void:
 		_emit({"target": "widget", "id": id, "prop": "string_type", "value": "id" if pressed else ""}))
-	# When the text is a string-table key, show what it resolves to and offer a picker
-	# plus a jump into the Strings workspace (only when a table is actually loaded).
-	if is_id:
-		_build_string_id_rows(id)
 
 	var font_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Font", _document.get_widget_font(id))
 	_wire_text(font_edit, {"target": "widget", "id": id, "prop": "font"})
@@ -227,52 +258,72 @@ func _build_widget_rows(id: int) -> void:
 		_build_table_section(id)
 
 
-# Shown under the Text field when the widget's text is a string-table key: the
-# resolved display text (or a not-found cue), a picker to choose a key from the
-# table, and a one-click jump to edit it in the Strings workspace. All gated on a
-# table actually being loaded (no resource root -> no table -> nothing extra, so the
-# behavior matches today's raw-key view).
-func _build_string_id_rows(id: int) -> void:
+# The Text row for a string-table key: a StringRefWidget resolving against the
+# loaded table. With no table the widget degrades to a plain key field (no
+# badge/picker/jump/preview), matching the old raw-key behavior.
+func _build_string_ref_row(id: int) -> void:
+	var row := MnuUiHelpersScript._row(_box)
+	row.add_child(MnuUiHelpersScript._key_label("Text"))
+	var widget := StringRefWidget.new()
+	widget.name = "MnuWidgetTextRef"
+	widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	widget.configure("string", _string_key_services())
+	widget.set_value(_document.get_widget_text(id))
+	widget.value_changed.connect(func(value: String) -> void:
+		_emit({"target": "widget", "id": id, "prop": "text", "value": value}))
+	row.add_child(widget)
+
+
+# String-KEY services over the loaded table (context-local - never the shell's
+# file services). Empty when no table is loaded, which hides every affordance.
+func _string_key_services() -> Dictionary:
 	if _text_resource == null:
-		return
-	var key := _document.get_widget_text(id)
+		return {}
+	return {
+		"resolve": _resolve_string_key,
+		"pick": _pick_string_key,
+		"jump": _jump_string_key,
+	}
+
+
+func _resolve_string_key(key: String) -> Dictionary:
+	if _text_resource == null or key.is_empty():
+		return {}
 	if _text_resource.has_string(key):
-		MnuUiHelpersScript.add_muted(_box, "= \"%s\"" % _text_resource.get_string(key))
-	else:
-		MnuUiHelpersScript.add_muted(_box, "No string id set" if key.is_empty() else "Not in string table")
-	var row := HBoxContainer.new()
-	_box.add_child(row)
-	var pick_btn := Button.new()
-	pick_btn.text = "Pick string..."
-	pick_btn.tooltip_text = "Choose a string id from the loaded table"
-	pick_btn.pressed.connect(func() -> void: _open_string_picker(id))
-	row.add_child(pick_btn)
-	var jump_btn := Button.new()
-	jump_btn.text = "Edit in Strings"
-	jump_btn.tooltip_text = "Open this string in the Strings workspace"
-	jump_btn.pressed.connect(func() -> void: string_jump_requested.emit(_document.get_widget_text(id)))
-	row.add_child(jump_btn)
+		return {
+			"status": "found",
+			"path": _text_resource_path,
+			"text": RtxtStringFile.strip_hotkey(_text_resource.get_string(key)),
+		}
+	return {"status": "missing", "path": _text_resource_path, "text": ""}
 
 
-func _open_string_picker(id: int) -> void:
-	if _text_resource == null or _document == null or not _document.widget_exists(id):
+func _pick_string_key(current_key: String, on_pick: Callable) -> void:
+	_open_string_picker(on_pick, current_key)
+
+
+func _jump_string_key(key: String, _table_path: String) -> void:
+	string_jump_requested.emit(key)
+
+
+func _open_string_picker(on_pick: Callable, current_key: String) -> void:
+	if _text_resource == null:
 		return
 	if _picker == null or not is_instance_valid(_picker):
 		_picker = MnuStringPickerScript.new()
 		add_child(_picker)
 		_picker.picked.connect(_on_string_picked)
-	_picker_target_id = id
-	_picker.open_for(_text_resource, _document.get_widget_text(id))
+	_picker_on_pick = on_pick
+	_picker.open_for(_text_resource, current_key)
 
 
 func _on_string_picked(key: String) -> void:
-	if _picker_target_id < 0 or _document == null or not _document.widget_exists(_picker_target_id):
-		return
-	# Commit through the normal edit path so it folds into the MNU undo stack. That
-	# edit applies silently (no re-selection), so rebuild here to refresh the resolved
-	# line + key field.
-	_emit({"target": "widget", "id": _picker_target_id, "prop": "text", "value": key})
-	_rebuild()
+	# Route the result back to the widget that asked; its commit emits exactly
+	# one edit through the normal path and refreshes its own preview (no rebuild
+	# needed - the edit applies silently, so the widget keeps focus/state).
+	if _picker_on_pick.is_valid():
+		_picker_on_pick.call(key)
+	_picker_on_pick = Callable()
 
 
 # Color/texture sections show every populated slot as an editable row, then offer
