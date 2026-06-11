@@ -40,11 +40,14 @@ bool fixtures_match_python() {
 		const std::string decrypted = opennova::epask_decrypt(c.ciphertext, params);
 		if (!expect_eq(decrypted, c.plaintext, "decrypt fixture")) return false;
 
-		// Round-trip via our own encrypt to make sure encrypt + decrypt is
-		// stable (we can't compare encrypt against Python because the
-		// nwu_encrypt/nwu_decrypt label-swap means our encrypt path differs
-		// in intermediate state — only the decrypt result needs to match).
+		// Encrypt direction is ALSO byte-comparable to Python: the
+		// nwu_encrypt/nwu_decrypt label-swap is a pure naming inversion of
+		// identical byte transforms, so our epask_encrypt reproduces Python's
+		// ciphertext exactly. Confirmed in grill wave 3 (NW-C2) against retail
+		// (sub_6669A0@0x6669a0) and by compiling this source against the
+		// production-proven onnw Python — the two agree byte-for-byte.
 		const std::string ct = opennova::epask_encrypt(c.plaintext, params);
+		if (!expect_eq(ct, c.ciphertext, "encrypt fixture")) return false;
 		const std::string back = opennova::epask_decrypt(ct, params);
 		if (!expect_eq(back, c.plaintext, "round-trip")) return false;
 	}

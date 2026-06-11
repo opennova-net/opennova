@@ -122,6 +122,40 @@ Re-anchored to retail (was jodemo-only). Verdict + NW-C1 in [§8](net/novaworld-
 | `scramble_with_lcg` (`nwu.cpp`) | `Crypto_AddLCG` | `0x6183b0` | `state=u16(mult·state+1); buf[i]+=state` | — | matching |
 | `reverse_in_place` (`nwu.cpp`) | `NapiNP_ReverseBuffer` | `0x618210` | `len>>1` front/back swaps | — | matching |
 
+## 5.2 EPASK login-form encrypt (grill wave 3, 2026-06-11)
+
+NW-C2 in [§8](net/novaworld-net-re.md). Polymorphic edit-widget `+0x38` dispatch resolved.
+
+| reimpl symbol (file) | original | addr | role | evidence | status |
+|---|---|---|---|---|---|
+| `epask_encrypt` (`libs/novacrypto/src/epask.cpp`) | `sub_6669A0` | `0x6669a0` | NWU → modexp → NWU → A-P | golden vectors == test fixtures | matching (byte-exact) |
+| `modexp_encrypt` (`epask.cpp`) | `sub_666600` / `modular_exponentiation` | `0x666600` / `0x666470` | `pow(byte+2,exp,mod)`, 32-bit LE/byte | `+2` byte-confirmed | matching |
+| `encode_ap` (`epask.cpp`) | `NapiNP_EncodeToHexAlpha` | `0x666570` | A-P low-nibble-first | — | matching |
+| `epask_from_string` (`epask.cpp`) | `parse_colon_delimited_string` | `0x666710` | `exp:mod:key` split | — | matching |
+| (EPASK NWU copy) | `NapiNP_EncryptBufferAlt` | `0x6668e0` | UI-module NWU ADD chain | == `0x6187b0` | matching |
+| call site | `build_form_field_query_string` ← `build_url_and_submit_request` | `0x657760` ← `0x63e3f0` | edit-widget vtable `+0x38`; `?EPASK=`, out buf `8·len` | — | matching |
+
+## 5.3 PUBcrypto PUB* fields (grill wave 3, 2026-06-11)
+
+NW-C3 in [§8](net/novaworld-net-re.md). Proves `ticket_transform` == NWU.
+
+| reimpl symbol (file) | original | addr | role | evidence | status |
+|---|---|---|---|---|---|
+| `encode_pub_value` (`libs/novacrypto/src/pubcrypto.cpp`) | `NapiNP_EncryptAndEncodeToHexAlpha` | `0x618fd0` | CRC-append → NWU → A-P (single key) | — | matching (byte-exact) |
+| `decode_pub_value` (`pubcrypto.cpp`) | `NapiNP_DecodeEncryptedString` | `0x619130` | inverse, right-to-left keys | — | matching |
+| `crc32_be` (`pubcrypto.cpp`) | `NapiNP_ComputeCRC` | `0x618770` | CRC-32/MPEG-2, table `dword_849938` | check value `0x0376E6E7` | matching |
+| `ticket_transform` (`pubcrypto.cpp`) | `NapiNP_EncryptBuffer`/`DecryptBuffer` | `0x6187b0` / `0x618880` | inlined NWU copy | proven identical | matching |
+
+## 5.4 url_cipher NK/CK join tokens (grill wave 3, 2026-06-11)
+
+NW-C4 in [§8](net/novaworld-net-re.md). Re-anchored to retail (was jodemo-only).
+
+| reimpl symbol (file) | original | addr | role | evidence | status |
+|---|---|---|---|---|---|
+| `url_cipher_decode` (`libs/novacrypto/src/url_cipher.cpp`) | `parse_connection_query_string` | `0x54dfb0` | `plain=cipher-key+'0'`, `'&'`-terminated | — | matching (byte-exact) |
+| `URL_CIPHER_KEY_NK` | `aDiheijefhgcdjc` | `0x7d3f30` | `"diheijefhgcdjcgcjcfbd"` | byte-identical | matching |
+| `URL_CIPHER_KEY_CK` | `aCfhdcegjigecje` | `0x7d3f04` | `"cfhdcegjigecjehcgjdhe"` | byte-identical | matching |
+
 ## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 
 `UI_DispatchScreenEvent @ 0x54e6a0`, `UI_ShowPreGameMenuByState @ 0x568d10`,

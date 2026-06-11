@@ -8,6 +8,9 @@ constexpr char TERMINATOR = '&';
 
 } // namespace
 
+// [orig: parse_connection_query_string @ 0x54dfb0 (retail) — NK=/CK= loops: plain[i]=cipher[i]-key[i]+'0',
+//        '&'(38)-terminated. Keys NK@0x7d3f30, CK@0x7d3f04. grill wave 3 NW-C4, MATCHING.
+//        (jodemo: Auth_ParseRegistrationURL@0x514c40, keys 0x74d8a0/0x74d874.)]
 std::string url_cipher_decode(std::string_view cipher, std::string_view key) {
 	std::string out;
 	if (key.empty()) {

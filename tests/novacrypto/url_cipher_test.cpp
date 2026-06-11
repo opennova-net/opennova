@@ -96,6 +96,24 @@ bool check_key_wrap() {
 	return true;
 }
 
+// Multi-byte golden vectors from the production-proven onnw _encode_token
+// (grill wave 3 NW-C4): NK = host:port, CK = app_id. Byte-identical to retail
+// parse_connection_query_string@0x54dfb0 and to the onnw Python reference.
+// e.g. NK[0]: '1'(49) + 'd'(100) - '0'(48) = 101 = 'e'.
+bool check_python_golden_vectors() {
+	using opennova::url_cipher_decode;
+	using opennova::url_cipher_encode;
+	using opennova::URL_CIPHER_KEY_CK;
+	using opennova::URL_CIPHER_KEY_NK;
+	if (!expect(url_cipher_encode("127.0.0.1:7597", URL_CIPHER_KEY_NK) == "ekocihediqjisj",
+	            "NK golden vector: 127.0.0.1:7597 -> ekocihediqjisj")) return false;
+	if (!expect(url_cipher_encode("12345", URL_CIPHER_KEY_CK) == "dhkhh",
+	            "CK golden vector: 12345 -> dhkhh")) return false;
+	if (!expect(url_cipher_decode("ekocihediqjisj", URL_CIPHER_KEY_NK) == "127.0.0.1:7597",
+	            "NK golden vector decodes back")) return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -105,6 +123,7 @@ int main() {
 	if (!check_ampersand_terminator()) return 1;
 	if (!check_empty_cases()) return 1;
 	if (!check_key_wrap()) return 1;
+	if (!check_python_golden_vectors()) return 1;
 	std::printf("OK: url_cipher roundtrips + byte vector + '&' terminator\n");
 	return 0;
 }

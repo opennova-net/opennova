@@ -28,6 +28,7 @@ uint32_t key_fold(const std::string &key) {
 
 // Big-endian CRC-32/MPEG-2 over plaintext. Same polynomial/table as the
 // NAPI envelope's CRC, just used here without the LSB-scatter wrapping.
+// [orig: NapiNP_ComputeCRC @ 0x618770 (retail) — CRC-32/MPEG-2, table dword_849938, no final xor]
 uint32_t crc32_be(const std::vector<uint8_t> &data) {
 	uint32_t crc = 0xFFFFFFFFu;
 	for (uint8_t byte : data) {
@@ -80,6 +81,8 @@ void phase_keycycle(std::vector<uint8_t> &buf, const std::string &key, bool subt
 	}
 }
 
+// [orig: == NWU NapiNP_EncryptBuffer@0x6187b0 / NapiNP_DecryptBuffer@0x618880 (retail). Python's
+//        _ticket_transform is an inlined NWU copy; proven byte-identical to the NWU cipher (NW-C3).]
 void ticket_transform(std::vector<uint8_t> &data, const std::string &key, bool decrypt) {
 	if (data.empty() || key.empty()) return;
 
@@ -137,6 +140,8 @@ std::vector<uint8_t> decode_ap(const std::string &encoded) {
 
 } // namespace
 
+// [orig: NapiNP_EncryptAndEncodeToHexAlpha @ 0x618fd0 (retail), single-key path: CRC32-append
+//        -> NWU-encrypt -> A-P. grill wave 3 NW-C3, MATCHING. (Multi-key form = Python remember-cookie.)]
 std::string encode_pub_value(const std::vector<uint8_t> &plaintext,
                              const std::string &pcid_key) {
 	if (pcid_key.empty()) {
@@ -159,6 +164,7 @@ std::string encode_pub_value(const std::string &plaintext, const std::string &pc
 		std::vector<uint8_t>(plaintext.begin(), plaintext.end()), pcid_key);
 }
 
+// [orig: NapiNP_DecodeEncryptedString @ 0x619130 (retail) — A-P decode -> per-key NWU-decrypt + CRC check]
 std::vector<uint8_t> decode_pub_value(const std::string &encoded,
                                       const std::string &pcid_key) {
 	if (pcid_key.empty()) {

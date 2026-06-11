@@ -945,8 +945,9 @@ deploy target — is matching.
 | System (reimpl) | Original | Verdict | Notes |
 |---|---|---|---|
 | NWU cipher (`libs/novacrypto/src/nwu.cpp`) | `NapiNP_EncryptBuffer @ 0x6187b0` / `NapiNP_DecryptBuffer @ 0x618880` (retail) | **matching (byte-exact, retail)** | NW-C1: re-grilled against retail (was jodemo-anchored only). All six primitives + the seed + the 3-step derive + the 4-phase order match. Name-swap confirmed at byte level. Fixed a doc bug: the LCG multiplier `78665521` is `0x04B05731`, not `0x04B02631` as commented. |
-| EPASK login-form encrypt (`libs/novacrypto/src/epask.cpp`) | client login submit `build_url_and_submit_request @ 0x63e3f0` | **unknown (anchored, deferred)** | NW-C2: the client reads the server-issued `EPASK` key (`exp:mod:key`) from the CookieJar and appends `?EPASK=<key>` + per-field params; each field is encrypted via the input-widget vtable method at `+0x38`. The modexp/A-P encrypt routine is behind that vtable and needs a widget-class trace to pin byte-for-byte. |
-| PUBcrypto join cookies (`libs/novacrypto/src/pubcrypto.cpp`) | (CookieJar consumers; `CookieJar_SaveToFile @ 0x64ee60`) | **unknown (deferred)** | NW-C3: `NK`/`CK`/`BK`/`PUBPCID`/`.joi` are **not** literal strings in retail — the client stores join cookies via the generic CookieJar, so the decode needs a cookie-jar dataflow trace rather than a string anchor. |
+| EPASK login-form encrypt (`libs/novacrypto/src/epask.cpp`) | `sub_6669A0 @ 0x6669a0` (core) ← edit-widget vtable `+0x38` `build_form_field_query_string @ 0x657760` ← `build_url_and_submit_request @ 0x63e3f0` | **matching (byte-exact, retail)** | NW-C2: polymorphic dispatch resolved. Core = NWU-add → modexp `pow(byte+2,exp,mod)` 4-byte LE (`sub_666600 @ 0x666600`) → NWU-add → A-P low-first (`NapiNP_EncodeToHexAlpha @ 0x666570`); `exp:mod:key` split (`parse_colon_delimited_string @ 0x666710`); the NWU copy `NapiNP_EncryptBufferAlt @ 0x6668e0` is byte-identical to `0x6187b0`. Golden vectors equal the test's own ciphertext fixtures. |
+| PUBcrypto `PUB*` join fields (`libs/novacrypto/src/pubcrypto.cpp`) | `NapiNP_EncryptAndEncodeToHexAlpha @ 0x618fd0` (encode) / `NapiNP_DecodeEncryptedString @ 0x619130` (decode) | **matching (byte-exact, retail)** | NW-C3: PUB encode = CRC32-append (`NapiNP_ComputeCRC @ 0x618770`, MPEG-2) → NWU-encrypt → A-P. Single-key path == `encode_pub_value`; because the encrypt step *is* `0x6187b0`, this proves `ticket_transform` == NWU. The colon-key multi-layer form is the Python remember-cookie (out of our scope). |
+| url_cipher `NK`/`CK` join tokens (`libs/novacrypto/src/url_cipher.cpp`) | `parse_connection_query_string @ 0x54dfb0` | **matching (byte-exact, retail)** | NW-C4: `plain[i] = cipher[i] - key[i] + '0'`, `'&'`(38)-terminated; keys NK@`0x7d3f30` `"diheijefhgcdjcgcjcfbd"`, CK@`0x7d3f04` `"cfhdcegjigecjehcgjdhe"` (jodemo: `Auth_ParseRegistrationURL @ 0x514c40`, keys `0x74d8a0`/`0x74d874`). `BK` is the literal `"986119"`, not a cipher. |
 
 #### NW-C1 — NWU cipher is byte-exact in retail (resolved)
 
@@ -967,6 +968,47 @@ The three NWU keys are all confirmed against retail: gate `"GATEAPI"`, GSB
 `"3209452104342624532341"`, and session-payload (opcode 0x47/0x87)
 `"asdfj2349857qu23rija;sdlvzx09caweklrj1234hldfj"` @ `0x7DFC50`. Verdict: matching.
 
-NW-C2 (EPASK modexp) and NW-C3 (PUBcrypto decode) remain a wave-3 follow-up; both
-require tracing past polymorphic widget/cookie dispatch rather than a string or constant
-anchor.
+#### NW-C2 — EPASK login-form encrypt is byte-exact in retail (resolved)
+
+The client login submit (`build_url_and_submit_request @ 0x63e3f0`) reads the server-issued
+`EPASK` cookie (`exp:mod:key`), forms `<url>?EPASK=<key>`, and dispatches each form field
+through the widget vtable `+0x38`. For the text/password EDIT widget that slot is
+`build_form_field_query_string @ 0x657760`, which sizes its output at `8·len`
+(= modexp ×4 · A-P ×2) and calls the EPASK core `sub_6669A0 @ 0x6669a0`:
+
+1. `NapiNP_EncryptBufferAlt @ 0x6668e0` — NWU ADD chain (key-add, reverse, progression-add,
+   LCG-add; multiplier `0x5731`, reverse-flag mult `0x31`), byte-identical to `0x6187b0`.
+2. `sub_666600 @ 0x666600` — per byte, `modular_exponentiation(byte + 2, exp, mod)`
+   (`@ 0x666470`) stored as a 32-bit little-endian word. The `+2` and 4-byte expansion match
+   `epask.cpp::modexp_encrypt` exactly (guard: `modulus > 258`).
+3. `NapiNP_EncryptBufferAlt` again on the expanded buffer.
+4. `NapiNP_EncodeToHexAlpha @ 0x666570` — A-P low-nibble-first (`'A'+lo` then `'A'+hi`).
+
+`exp:mod:key` is split by `parse_colon_delimited_string @ 0x666710` (== `epask_from_string`).
+The brute-force modexp *decrypt* is server-side (absent from the client); our `epask_decrypt`
+is that server half. Verdict: matching.
+
+#### NW-C3 — PUBcrypto `PUB*` fields are byte-exact in retail (resolved)
+
+`NapiNP_EncryptAndEncodeToHexAlpha @ 0x618fd0` is `encode_pub_value` for a single key:
+append `NapiNP_ComputeCRC @ 0x618770` (CRC-32/MPEG-2: init `-1`, MSB-first, no final xor,
+table `dword_849938`) little-endian, then `NapiNP_EncryptBuffer @ 0x6187b0` (NWU), then A-P
+low-first; `NapiNP_DecodeEncryptedString @ 0x619130` is the inverse. Because the encrypt step
+*is* `0x6187b0`, this proves `pubcrypto.cpp::ticket_transform` == NWU (the Python
+`_ticket_transform` is an inlined NWU copy). The colon-separated multi-key form of `0x618fd0`
+is the Python remember-cookie, which we do not port. Verdict: matching.
+
+#### NW-C4 — url_cipher `NK`/`CK` tokens are byte-exact in retail (resolved)
+
+`parse_connection_query_string @ 0x54dfb0` decodes the join-redirect query: `NK=`/`CK=` run
+through `plain[i] = cipher[i] - key[i] + '0'`, stopping at the first `'&'` (38); `NI`/`NP`/`BK`/`LN`/`GS`
+are copied verbatim. Keys (retail): NK `"diheijefhgcdjcgcjcfbd"` @ `0x7d3f30`, CK
+`"cfhdcegjigecjehcgjdhe"` @ `0x7d3f04` — byte-identical to `url_cipher.h` (jodemo had them at
+`0x74d8a0`/`0x74d874` under `Auth_ParseRegistrationURL @ 0x514c40`). `url_cipher_decode`
+matches; `url_cipher_encode` is the inverse used server-side. `BK` is the constant `"986119"`,
+not a cipher. Verdict: matching.
+
+All of wave 3 (NW-C1..C4) is now matching byte-exact against retail; equivalence was
+additionally proven by compiling the actual `libs/novacrypto` sources and byte-comparing to
+the production-proven `opennova-int` Python on golden vectors, plus an adversarial
+from-scratch re-derivation.

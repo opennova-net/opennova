@@ -66,6 +66,7 @@ std::vector<uint8_t> decode_ap(const std::string &s) {
 	return out;
 }
 
+// [orig: NapiNP_EncodeToHexAlpha @ 0x666570 (retail) — A-P, low nibble first ('A'+lo, 'A'+hi)]
 std::string encode_ap(const std::vector<uint8_t> &data) {
 	std::string out;
 	out.reserve(data.size() * 2);
@@ -108,6 +109,8 @@ std::vector<uint8_t> modexp_decrypt_bf(const std::vector<uint8_t> &data,
 	return out;
 }
 
+// [orig: sub_666600 @ 0x666600 (retail) — per byte modular_exponentiation(byte+2,exp,mod)
+//        @ 0x666470, stored as a 32-bit little-endian word. The "+2" is byte-confirmed.]
 std::vector<uint8_t> modexp_encrypt(const std::vector<uint8_t> &data,
                                     uint32_t exponent, uint32_t modulus) {
 	std::vector<uint8_t> out;
@@ -175,6 +178,7 @@ std::string epask_to_string(const EpaskParams &p) {
 	return std::to_string(p.exponent) + ":" + std::to_string(p.modulus) + ":" + p.key;
 }
 
+// [orig: parse_colon_delimited_string @ 0x666710 (retail) — splits 'exp:mod:key']
 EpaskParams epask_from_string(const std::string &s) {
 	const auto first = s.find(':');
 	if (first == std::string::npos) {
@@ -214,6 +218,10 @@ std::string epask_decrypt(const std::string &ciphertext, const EpaskParams &para
 }
 
 std::string epask_encrypt(const std::string &plaintext, const EpaskParams &params) {
+	// [orig: sub_6669A0 @ 0x6669a0 (retail) — NWU(NapiNP_EncryptBufferAlt@0x6668e0, == 0x6187b0)
+	//        -> modexp(sub_666600) -> NWU -> A-P(NapiNP_EncodeToHexAlpha@0x666570). Dispatched from the
+	//        edit-widget vtable +0x38 build_form_field_query_string@0x657760 (out buf = 8*len) <-
+	//        build_url_and_submit_request@0x63e3f0 ("?EPASK=exp:mod:key"). grill wave 3 NW-C2, MATCHING.]
 	// Mirror onnw/protocol/crypto.py::epask_encrypt:
 	//   step1 = nwu_encrypt(plaintext, key)
 	//   step2 = epask_modexp_encrypt(step1, exp, mod)

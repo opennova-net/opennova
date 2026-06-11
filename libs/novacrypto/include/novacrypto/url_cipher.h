@@ -6,10 +6,11 @@
 
 namespace opennova {
 
-// ASCII key strings for the NovaWorld registration-URL cipher, referenced
-// only from Auth_ParseRegistrationURL@0x514c40. Literals verified at:
-//   NK cipher key @ 0x74d8a0 (used for NK= field)
-//   CK cipher key @ 0x74d874 (used for CK= field)
+// ASCII key strings for the NovaWorld registration-URL cipher. Witnessed at:
+//   jodemo  Auth_ParseRegistrationURL@0x514c40 — NK key @ 0x74d8a0, CK key @ 0x74d874
+//   retail  parse_connection_query_string@0x54dfb0 — NK key @ 0x7d3f30, CK key @ 0x7d3f04
+// Re-grilled byte-exact in retail Jointops.exe (2026-06-11, grill wave 3 NW-C4): the NK=/CK=
+// decode loops run plain[i] = cipher[i] - key[i] + '0' and stop at the first '&' (38).
 inline constexpr const char *URL_CIPHER_KEY_NK = "diheijefhgcdjcgcjcfbd";
 inline constexpr const char *URL_CIPHER_KEY_CK = "cfhdcegjigecjehcgjdhe";
 

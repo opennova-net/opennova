@@ -51,6 +51,22 @@ bool fixtures_match_python() {
 	const std::vector<uint8_t> hello_bytes = {'h','e','l','l','o'};
 	if (!expect_eq_bytes(decoded, hello_bytes, "hello round-trip")) return false;
 
+	// Hardening vector (grill wave 3 NW-C3): a 20-byte IP:port payload — the only
+	// fixture long enough to exercise multiple pseudorandom/sequential rounds with
+	// ASCII byte diversity. Byte-identical to retail (NapiNP_EncryptAndEncodeToHexAlpha
+	// @0x618fd0) and onnw Python.
+	const std::vector<uint8_t> endpoint_plain = {
+		'1','9','2','.','1','6','8','.','1','.','1','0','0',':','1','7','4','7','1', 0x00,
+	};
+	if (!expect_eq(opennova::encode_pub_value(endpoint_plain,
+	               "NGPAIIAHFONBCAHJEEPDLEHGOMOIBOIN"),
+	               "OMIJONGKJMCOJOCCGJKCIPMOHBAIKAAMLKKMMBDJEDDCNCIG",
+	               "endpoint encoding")) return false;
+	const auto endpoint_decoded = opennova::decode_pub_value(
+		"OMIJONGKJMCOJOCCGJKCIPMOHBAIKAAMLKKMMBDJEDDCNCIG",
+		"NGPAIIAHFONBCAHJEEPDLEHGOMOIBOIN");
+	if (!expect_eq_bytes(endpoint_decoded, endpoint_plain, "endpoint round-trip")) return false;
+
 	return true;
 }
 
