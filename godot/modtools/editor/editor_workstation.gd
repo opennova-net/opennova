@@ -1447,6 +1447,19 @@ func open_file_picker(title: String, files: PackedStringArray, on_pick: Callable
 	_resource_browser.open_files(title, files, on_pick)
 
 
+## Open the indexed resource picker over every resource of `kind`. The browse
+## affordance behind link widgets (ResourceRefWidget.services_from_shell);
+## `on_pick` receives the chosen resource's path.
+func open_kind_picker(kind: String, title: String, on_pick: Callable) -> void:
+	_resource_browser.open_kind(kind, title, on_pick)
+
+
+## The shared reference index over the resource root — link widgets resolve
+## their validity badges through this.
+func get_reference_index() -> NovaReferenceIndex:
+	return _resource_library.get_reference_index()
+
+
 # Resolves the active workspace's current resource path for the browser's
 # "(open)" marker; the environment popup retargets it to the environment
 # workspace. Stays on the shell (reads popup/workspace state) and is injected

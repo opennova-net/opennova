@@ -33,3 +33,24 @@ func test_surface_only_history_restore_does_not_bump() -> void:
 		"after_value": {},
 	}, true)
 	assert_eq(editor.get_height_revision(), rev, "surface-only edits never signal height drift")
+
+
+func test_sample_height_world_reads_the_live_editable_surface() -> void:
+	# The re-ground sampler must read the surface the revision counter describes:
+	# the LIVE editable heightmap (what brushes mutate and placement raycasts
+	# ground on), never the baked CPT — which height edits leave stale and which a
+	# never-exported project terrain does not have at all.
+	var editor = add_child_autofree(TerrainEditorScene.instantiate())
+	await get_tree().process_frame
+	editor.new_terrain()
+	# A fresh terrain's active region is centred on the world origin.
+	assert_almost_eq(editor.sample_height_world(0.0, 0.0), editor.DEFAULT_HEIGHT, 0.01,
+		"a fresh project terrain (no baked CPT exists yet) samples the live surface")
+	assert_true(is_nan(editor.sample_height_world(50000.0, 50000.0)),
+		"off the terrain -> NAN (re-ground callers skip, never ground to a bogus height)")
+
+	# Mutate the live heightmap image directly: the seam must see the edit with no
+	# export/re-bake in between.
+	editor.terrain_mesh.get_heightmap_image().fill(Color(35.0, 0.0, 0.0))
+	assert_almost_eq(editor.sample_height_world(0.0, 0.0), 35.0, 0.01,
+		"height edits are visible to the re-ground sampler immediately")

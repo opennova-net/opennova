@@ -193,6 +193,15 @@ var _at_delete_button: Button
 var _props_toggle: CheckButton
 var _props_box: VBoxContainer
 var _props_binder: FieldBinder
+# Link-widget services (resolve/pick/jump Callables from the shell). They arrive
+# AFTER setup() builds the form (the workspace injects them post-build), so the
+# setter re-configures the already-built widgets.
+var _ref_services: Dictionary = {}
+var _terrain_ref_widget: ResourceRefWidget
+var _env_ref_widget: ResourceRefWidget
+# Mission-tab bulk re-ground (B8): the manual twin of the workspace's activate-time
+# "terrain changed under N objects" prompt.
+var _reground_button: Button
 
 # --- Cached option lists (group / waypoint-path / entity pickers) --------------
 # get_group_options / get_waypoint_path_options / get_all_entities each walk + marshal every entity
@@ -345,6 +354,7 @@ func setup(controller, detail_host: Control = null) -> void:
 		_build_scripting_panel()     # LEFT list + DOCK detail
 		_build_selection_empty()     # DOCK: Selection standby label (last in the page)
 		_build_props_panel()         # DOCK: Mission
+		_build_reground_button()     # DOCK: Mission
 		_build_loadout_panel()       # DOCK: Mission
 		_build_groups_panel()        # DOCK: Mission
 		_box = VBoxContainer.new()
@@ -481,6 +491,7 @@ func _refresh() -> void:
 	_refresh_area_trigger_panel()
 	_refresh_scripting_panel()
 	_refresh_props_panel()
+	_refresh_reground_button()
 	_refresh_loadout_panel()
 	_refresh_groups_panel()
 	# Mode gating: the object panels show only in Objects mode; the waypoint / trigger panels
@@ -2558,6 +2569,10 @@ func _build_props_panel() -> void:
 	_add_props_line("designer", "Designer", "Mission author.")
 	_add_props_line("briefing", "Briefing", "Mission briefing text.")
 	ObjectUiHelpers.add_section_heading(_props_box, "World")
+	_terrain_ref_widget = _add_props_ref("terrain", "terrain", "Terrain",
+		"The ground this mission is built on. The world reloads onto the new terrain the next time the mission is opened.")
+	_env_ref_widget = _add_props_ref("environment", "environment", "Environment",
+		"Sky, light, and weather for this mission. Takes effect the next time the mission is opened.")
 	_add_props_option("climate", "Climate", [[0, "Desert"], [1, "Jungle"], [2, "Snow"]])
 	_add_props_option("weather", "Weather", [[0, "Nice day"], [1, "Rainy"], [2, "Snow"]])
 	_add_props_option("mission_type", "Type", [[1, "Normal"], [2, "Combat vehicle"], [3, "Tenth Mountain"]])
@@ -2574,6 +2589,31 @@ func _build_props_panel() -> void:
 	ObjectUiHelpers.add_section_heading(_props_box, "Audio")
 	_add_props_spin("music", "Music track", 0.0, 1000000.0)
 	_add_props_spin("reverb", "Reverb", 0.0, 1000000.0)
+
+
+# DOCK: Mission — the manual twin of the workspace's activate-time re-ground prompt
+# (terrain heights edited under the mission, undo of an applied re-ground, declined
+# prompt: this button reaches the same one-undo-step bulk re-ground any time).
+func _build_reground_button() -> void:
+	_reground_button = Button.new()
+	_reground_button.name = "MissionRegroundAll"
+	_reground_button.text = "Re-ground objects"
+	_reground_button.tooltip_text = "Snap objects the terrain moved out from under back onto the surface (one undo step). Objects placed above the ground on purpose are left alone."
+	_reground_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_reground_button.visible = false
+	_mission_content.add_child(_reground_button)
+	_reground_button.pressed.connect(func() -> void:
+		if _controller != null and _controller.has_method("reground_drifted"):
+			_controller.reground_drifted())
+
+
+func _refresh_reground_button() -> void:
+	if _reground_button == null:
+		return
+	var mission: NovaMissionData = _controller.get_mission() if _controller != null else null
+	_reground_button.visible = mission != null and _controller.has_method("reground_drifted")
+	_reground_button.disabled = _controller != null and _controller.has_method("is_simulating") \
+		and _controller.is_simulating()
 
 
 func _add_props_line(field: String, label: String, tooltip: String = "") -> LineEdit:
@@ -2594,6 +2634,38 @@ func _add_props_line(field: String, label: String, tooltip: String = "") -> Line
 		func(info) -> String: return String(info.get(field, "")),
 		func(text: String) -> void: _set_header_string(field, text))
 	return line
+
+
+func _add_props_ref(field: String, kind: String, label: String, tooltip: String = "") -> ResourceRefWidget:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_props_box.add_child(row)
+	var lbl := Label.new()
+	lbl.text = label
+	lbl.tooltip_text = tooltip if not tooltip.is_empty() else label
+	lbl.clip_text = true
+	lbl.custom_minimum_size = Vector2(96, 0)
+	row.add_child(lbl)
+	var widget := ResourceRefWidget.new()
+	widget.name = "MissionProp_" + field
+	widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	widget.configure(kind, label, _ref_services)
+	row.add_child(widget)
+	_props_binder.bind_link(widget,
+		func(info) -> String: return String(info.get(field, "")),
+		func(text: String) -> void: _set_header_string(field, text))
+	return widget
+
+
+## Wires the link widgets' resolve/pick/jump Callables (see
+## ResourceRefWidget.services_from_shell). Idempotent; safe before or after
+## the form is built.
+func set_reference_services(services: Dictionary) -> void:
+	_ref_services = services
+	if _terrain_ref_widget != null and is_instance_valid(_terrain_ref_widget):
+		_terrain_ref_widget.configure("terrain", "Terrain", services)
+	if _env_ref_widget != null and is_instance_valid(_env_ref_widget):
+		_env_ref_widget.configure("environment", "Environment", services)
 
 
 func _add_props_option(field: String, label: String, choices: Array) -> OptionButton:
@@ -3035,7 +3107,6 @@ func _rebuild_summary() -> void:
 		sig = [
 			mission.get_instance_id(),
 			mission.get_mission_name(), mission.get_designer(),
-			mission.get_terrain_ref(), mission.get_environment_ref(),
 			int(info.get("climate", 0)), int(info.get("weather", 0)),
 			selection.is_empty(),
 			int(stats.get("placed", 0)), int(stats.get("batched", 0)), int(stats.get("batches", 0)),
@@ -3071,8 +3142,8 @@ func _rebuild_summary() -> void:
 
 	_add_separator()
 	_add_heading("World")
-	_add_row("Terrain", _nonempty(mission.get_terrain_ref(), "(none)"))
-	_add_row("Environment", _nonempty(mission.get_environment_ref(), "(none)"))
+	# Terrain/environment moved from read-only rows here into editable link
+	# widgets in the Mission properties form (the World section above).
 	_add_row("Climate", str(int(info.get("climate", 0))))
 	_add_row("Weather", str(int(info.get("weather", 0))))
 
