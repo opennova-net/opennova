@@ -51,13 +51,22 @@ public:
 		uint32_t client_key = 1;     // ck — caller-chosen (binding: random)
 		std::string na = "jop:cus2"; // gate tag echo (memory reference_gate_tags)
 
-		// ClientHello identity strings (cosmetic; the server validates only PN).
-		std::string nvs  = "OpenNova Godot Client 0.1";
+		// ClientHello identity. The real NovaWorld server VALIDATES four fields
+		// in HandleClientHello @ 0x6213B0 and silently drops the ClientHello
+		// (no ServerHello -> client times out) unless they match exactly:
+		//   NVS  == the Milota NAPI-protocol version string (it is the protocol
+		//           version, NOT client identity),
+		//   PN   == the server game id "NOVAWORLDUDP",
+		//   PV1  == "0.0.0 2/10/2004 EM",
+		//   PG   == the 16-byte protocol GUID (added in build_client_hello).
+		// CO/AP/BDAT are read but never validated, so they stay our identity.
+		// All four constants are from CNapiGameSession_InitNPConnection @ 0x4d3be0.
+		std::string nvs  = "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic";
 		std::string co   = "OpenNova";
 		std::string ap   = "OpennovaGodotClient.exe";
-		std::string bdat = "Apr 27 2026 00:00:00";
-		std::string pn   = "NOVAWORLDUDP";
-		std::string pv1  = "0.0.0 2/10/2004 EM";
+		std::string bdat = "Jul 21 2009 18:54:41";  // retail BDAT (free field)
+		std::string pn   = "NOVAWORLDUDP";           // validated == server game id
+		std::string pv1  = "0.0.0 2/10/2004 EM";     // validated == server PV1
 		std::string pv2  = "1";
 	};
 

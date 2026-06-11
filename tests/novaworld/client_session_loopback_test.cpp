@@ -23,6 +23,7 @@
 #include <napi/tlv.h>
 #include <novacrypto/nwu.h>
 
+#include <array>
 #include <cstdio>
 #include <cstdint>
 #include <string>
@@ -108,6 +109,15 @@ struct MiniServer {
 			if (!expect(parse_client_hello(body.data(), body.size(), hello),
 			            "server parses ClientHello")) return {};
 			expect(hello.pn == "NOVAWORLDUDP", "ClientHello PN == NOVAWORLDUDP");
+			// Real NovaWorld (HandleClientHello @ 0x6213B0) validates NVS + PG;
+			// pin them so the retail-faithful identity can't regress.
+			expect(hello.nvs == "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic",
+			       "ClientHello NVS == Milota version string");
+			expect(hello.pg_present, "ClientHello carries PG");
+			expect((hello.pg == std::array<uint8_t, 16>{
+			            0xF2, 0x0C, 0xEE, 0xD8, 0xCE, 0xE4, 0x8D, 0x44,
+			            0x90, 0xB4, 0x1D, 0x42, 0xB3, 0x64, 0xAB, 0x71}),
+			       "ClientHello PG == NOVAWORLDUDP protocol GUID");
 			ServerHello reply = build_server_hello(hello, 0x7F000001u, 5000);
 			reply.hk = advertised_hk;  // pin a known, non-default host key
 			return server_encode_outbound(SESSION_OPCODE_SERVER_HELLO,

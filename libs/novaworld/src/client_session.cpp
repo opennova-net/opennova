@@ -113,6 +113,30 @@ std::vector<uint8_t> ClientSession::build_client_hello() {
 	hello.ci   = cfg_.client_index;
 	hello.eip  = 0;
 	hello.epn  = 0;
+
+	// PG — the 16-byte NOVAWORLDUDP protocol GUID the real server validates
+	// (HandleClientHello @ 0x6213B0 compares 16 bytes at proto+284). Built by
+	// CNapiGameSession_InitNPConnection @ 0x4d3be0 via
+	//   sub_62E750(dst, -655487758, 58574, 17549, 144,180,29,66,179,100,171,113)
+	// which lays out [u32 version LE][u16 port_a LE][u16 port_b LE][8 bytes].
+	// Compute from those literals so the byte order is exact regardless of host.
+	{
+		const uint32_t version = static_cast<uint32_t>(-655487758);  // 0xD8EE0CF2
+		const uint16_t port_a = 58574;  // 0xE4CE
+		const uint16_t port_b = 17549;  // 0x448D
+		hello.pg[0] = static_cast<uint8_t>(version & 0xFFu);
+		hello.pg[1] = static_cast<uint8_t>((version >> 8) & 0xFFu);
+		hello.pg[2] = static_cast<uint8_t>((version >> 16) & 0xFFu);
+		hello.pg[3] = static_cast<uint8_t>((version >> 24) & 0xFFu);
+		hello.pg[4] = static_cast<uint8_t>(port_a & 0xFFu);
+		hello.pg[5] = static_cast<uint8_t>((port_a >> 8) & 0xFFu);
+		hello.pg[6] = static_cast<uint8_t>(port_b & 0xFFu);
+		hello.pg[7] = static_cast<uint8_t>((port_b >> 8) & 0xFFu);
+		hello.pg[8] = 144; hello.pg[9] = 180; hello.pg[10] = 29; hello.pg[11] = 66;
+		hello.pg[12] = 179; hello.pg[13] = 100; hello.pg[14] = 171; hello.pg[15] = 113;
+		hello.pg_present = true;
+	}
+
 	return encode_session_outbound(SESSION_OPCODE_CLIENT_HELLO,
 	                               client_hello_to_bytes(hello));
 }
