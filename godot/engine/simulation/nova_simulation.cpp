@@ -464,23 +464,27 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	if (!ai_ || !world_) return out;
 	AiEntity *e = ai_->at(p_index);
 	if (!e) return out;
+	// A scripted remove (VaporizeSingle / removeSSN) despawns the registry slot
+	// while the AiEntity stays in the AI pool, so the registry block emits TYPED
+	// DEFAULTS rather than dropping keys - the card's shape is stable whether
+	// the entity is whole or registry-despawned.
 	const opennova::world::Entity *ent = world_->registry.get(e->handle);
-	if (ent) {
-		out["kind"] = static_cast<int>(ent->spawn_origin >> 24);
-		out["index"] = static_cast<int>(ent->spawn_origin & 0xFFFFFF);
-		out["bms_id"] = ent->bms_id;
-		out["item_id"] = ent->item_id;
-		out["name"] = String(ent->name.c_str());
-		out["group_id"] = static_cast<int>(ent->group_id);
-		out["waypoint_id"] = static_cast<int>(ent->waypoint_id);
-		out["wp_number"] = ent->wp_number;
-		out["health"] = ent->health;
-		out["alive"] = ent->alive;
-		out["hidden"] = ent->hidden;
-		out["held"] = ent->held;
-		out["disabled"] = ent->disabled;
-		out["anim_slot"] = ent->anim_slot;
-	}
+	out["kind"] = ent ? static_cast<int>(ent->spawn_origin >> 24) : -1;
+	out["index"] = ent ? static_cast<int>(ent->spawn_origin & 0xFFFFFF) : -1;
+	out["bms_id"] = ent ? ent->bms_id : 0;
+	out["item_id"] = ent ? ent->item_id : 0;
+	// NOTE: retail BMS names are Windows-1252; non-ASCII bytes will read as
+	// invalid UTF-8 here. Names are ASCII in practice; revisit if mojibake shows.
+	out["name"] = ent ? String(ent->name.c_str()) : String();
+	out["group_id"] = ent ? static_cast<int>(ent->group_id) : 0;
+	out["waypoint_id"] = ent ? static_cast<int>(ent->waypoint_id) : 0;
+	out["wp_number"] = ent ? ent->wp_number : 0;
+	out["health"] = ent ? ent->health : 0;
+	out["alive"] = ent ? ent->alive : false;
+	out["hidden"] = ent ? ent->hidden : false;
+	out["held"] = ent ? ent->held : false;
+	out["disabled"] = ent ? ent->disabled : false;
+	out["anim_slot"] = ent ? ent->anim_slot : -1;
 	out["net_id"] = e->net_id;
 	out["team"] = static_cast<int>(e->team);
 	// The AI-side entity+286 mirror; diverges from the registry health under

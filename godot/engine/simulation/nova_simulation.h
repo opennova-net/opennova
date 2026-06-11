@@ -185,9 +185,12 @@ public:
 	// [i] = 1 when event i has fired (active latch + delay elapsed): the bulk
 	// form of has_event_fired for an event readout. Empty when unloaded.
 	PackedByteArray get_fired_events_snapshot() const;
-	// Scalars-only detail card for ONE selected entity ({} when invalid).
-	// Dictionary/String allocation is fine at selected-entity-only low-Hz use;
-	// the per-tick present loop has get_present_snapshot instead.
+	// Scalars-only detail card for ONE selected entity ({} when the index is
+	// invalid). The key set is STABLE: a registry-despawned entity (scripted
+	// remove) still carries every key, with typed defaults for the registry
+	// half (kind/index -1, alive false, empty name, ...). Dictionary/String
+	// allocation is fine at selected-entity-only low-Hz use; the per-tick
+	// present loop has get_present_snapshot instead.
 	Dictionary get_entity_debug(int p_index) const;
 	// Human-readable AI state name, "?" for the id gaps
 	// [orig: Entity_LookupAIStateName @0x455cc0].

@@ -209,6 +209,35 @@ func test_entity_debug_card_carries_named_scalars() -> void:
 	sim.free()
 
 
+func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
+	# VaporizeSingle (action 22) despawns the registry slot while the AI entity
+	# stays in the pool - the card must keep a STABLE key set with typed
+	# defaults for the registry half, never a partial dictionary.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	md.add_entity(3, 0, Vector3(0, 0, 0), Vector3.ZERO)
+	var probe := NovaSimulation.new()
+	assert_true(probe.load_from_mission_data(md))
+	var ssn := probe.get_entity_net_id(0)
+	probe.free()
+
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, {"action_type": 22, "param1": ssn}).is_empty())
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	for _i in range(16):
+		sim.step()
+
+	var card: Dictionary = sim.get_entity_debug(0)
+	assert_false(card.is_empty(), "the AI entity outlives its registry slot")
+	assert_true(card.has("kind") and card.has("alive") and card.has("name"),
+		"the registry half keeps its keys")
+	assert_eq(int(card["kind"]), -1, "...with typed defaults (kind -1)")
+	assert_false(bool(card["alive"]), "...alive false")
+	assert_eq(int(card["net_id"]), ssn, "the AI half still reports its scalars")
+	sim.free()
+
+
 func test_ai_state_name_static_lookup() -> void:
 	assert_eq(NovaSimulation.ai_state_name(16), "GROUND_FOLLOWWP")
 	assert_eq(NovaSimulation.ai_state_name(13), "?", "id gaps read as unknowns")
