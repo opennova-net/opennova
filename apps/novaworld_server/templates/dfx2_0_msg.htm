@@ -1,0 +1,43 @@
+<html>
+<head>
+<META NAME="Author" CONTENT="Eric Milota">
+<title>NovaWorld Message</title>
+</head>
+
+<BODY TEXT="#FFFFFF" BGCOLOR="#3A6BBB" LINK="#FFFF00" VLINK="#FF0000" ALINK="#00FFFF">
+
+<br>
+
+<center>
+<font size=+3><b>NovaWorld Message</b></font>
+</center>
+<br>
+
+<center>
+<table width=500>
+<td>
+<font face=arial>
+<IB3_SUBST name="@GENERIC@">
+
+</IB3_SUBST><br>
+<IB3_FORM value="1">
+
+</IB3_FORM>
+</font>
+</td>
+</table>
+</center>
+<br>
+<center>
+
+<br><font face="ARIAL" size=-2>&copy;2005 NovaLogic, Inc.</font>
+<center><font size="-4">Rev NW2.0.0</font></center>
+</center>
+
+</body>
+</html>
+
+<IB3_COND name="@OPTIONAL_BUTTON@" if="EXISTS NWServerAutoForm" then="SHOWN" else="HIDDEN"></IB3_COND>
+<IB3_DEFINE name="@TARGET@" source="NWServerAutoForm"></IB3_DEFINE>
+<IB3_DEFINE name="@NAME@" source="NWServerSubmitContinueButton"></IB3_DEFINE>
+<IB3_TEMPLATE file="dfx2_0_msg.mnx">
