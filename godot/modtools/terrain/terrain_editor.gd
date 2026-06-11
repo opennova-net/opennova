@@ -179,6 +179,17 @@ var is_dirty: bool:
 		_document.is_dirty = value
 		_mark_ui_state_changed()
 
+# Monotonic count of terrain HEIGHT changes — strokes, undo/redo of height
+# snapshots, and every full heightmap replacement (new/open/import). Blendmap/
+# colormap/foliage-only edits never bump it. The Mission workspace captures it
+# at load and compares on reconcile to detect that placed objects may have
+# drifted off the ground (editor-depth roadmap, re-ground mechanic).
+var _height_revision := 0
+
+
+func get_height_revision() -> int:
+	return _height_revision
+
 var _last_open_dir: String = ""
 var _last_save_dir: String = ""
 var _last_export_dir: String = ""
@@ -1799,6 +1810,7 @@ func _apply_brush_stroke(delta: float) -> void:
 	var result := _brush_session.apply_brush_stroke(delta, _hover_hit, _hover_hit_valid, terrain_mesh, _data)
 	if result["changed_heightmap"]:
 		terrain_mesh.set_heightmap(_heightmap_image)
+		_height_revision += 1
 		_mark_tile_overlay_dirty()
 	if result["changed_blendmap"]:
 		_blendmap_tex.update(_blendmap_image)
@@ -1864,6 +1876,7 @@ func _apply_history_snapshot(snapshot: Dictionary, is_undo: bool) -> void:
 	var result := _brush_session.apply_history_snapshot(snapshot, is_undo, _heightmap_image, _blendmap_image, _colormap_image)
 	if result["changed_heightmap"]:
 		terrain_mesh.set_heightmap(_heightmap_image)
+		_height_revision += 1
 		_mark_tile_overlay_dirty()
 	if result["changed_blendmap"]:
 		_blendmap_tex.update(_blendmap_image)
@@ -2411,6 +2424,7 @@ func _build_heightmap_from_raw16(raw_bytes: PackedByteArray) -> Image:
 func _set_heightmap_image(image: Image) -> void:
 	_document.set_heightmap_image(image)
 	terrain_mesh.set_heightmap(_heightmap_image)
+	_height_revision += 1
 	_mark_foliage_preview_dirty()
 	_mark_tile_overlay_dirty()
 

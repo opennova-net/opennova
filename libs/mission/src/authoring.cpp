@@ -163,4 +163,42 @@ bool add_path_marker_grounded(MissionDocument &doc,
 	                               out_path);
 }
 
+size_t reground_entities(MissionDocument &doc,
+                         const RegroundRequest *requests,
+                         size_t count,
+                         float epsilon,
+                         bool apply) {
+	if (requests == nullptr) {
+		return 0;
+	}
+	size_t moved = 0;
+	for (size_t i = 0; i < count; ++i) {
+		const RegroundRequest &request = requests[i];
+		EntityRecord record;
+		if (!doc.get_entity(request.kind, request.index, record)) {
+			continue;
+		}
+		// The same target move_entity_grounded would write: markers store the
+		// hit directly, everything else gets the rotated-anchor bake.
+		EntityTransform hit = record.transform; // keep pitch/yaw/roll
+		hit.x = request.ground_hit_bms[0];
+		hit.y = request.ground_hit_bms[1];
+		hit.z = request.ground_hit_bms[2];
+		const EntityTransform target = request.kind == EntityKind::Marker
+		                                       ? hit
+		                                       : bake_ground_transform(hit, request.ground_anchor_bms);
+		const float dx = target.x - record.transform.x;
+		const float dy = target.y - record.transform.y;
+		const float dz = target.z - record.transform.z;
+		if (std::fabs(dx) <= epsilon && std::fabs(dy) <= epsilon && std::fabs(dz) <= epsilon) {
+			continue;
+		}
+		if (apply && !doc.set_entity_transform(request.kind, request.index, target)) {
+			continue;
+		}
+		moved++;
+	}
+	return moved;
+}
+
 } // namespace opennova::mission::authoring

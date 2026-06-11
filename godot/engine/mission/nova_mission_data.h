@@ -201,6 +201,14 @@ public:
 	// Re-ground an existing entity at `ground_hit_bms`, keeping its rotation
 	// (full rotated bake). Returns false when (kind, index) is out of range.
 	bool move_entity_grounded(int kind, int index, const Vector3 &ground_hit_bms, const Vector3 &ground_anchor_bms);
+	// Bulk re-ground after a terrain height change. Each request Dictionary
+	// carries { kind, index, ground_hit_bms: Vector3, ground_anchor_bms: Vector3 };
+	// rows whose baked origin is within `epsilon` of the stored one are skipped
+	// (markers store the hit directly, like move_entity_grounded). apply = false
+	// counts the would-move rows without writing, so the host's prompt count and
+	// the apply share one policy. Returns the moved (or would-move) count; dirty
+	// only when something actually moved.
+	int reground_entities(const Array &requests, float epsilon = 0.01f, bool apply = true);
 	// The item id a NEW marker on `path_index` should use: the path's own first
 	// marker's id, else the canonical waypoint id (106005).
 	int marker_item_id_for_path(int path_index) const;
