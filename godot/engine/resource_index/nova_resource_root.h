@@ -10,6 +10,10 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+
 #include <resource_index/resource_index.h>
 
 namespace godot {
@@ -20,6 +24,24 @@ class NovaResourceRoot : public RefCounted {
 	String root_dir_;
 	String last_error_;
 	opennova::ResourceIndex index_;
+
+	// resolve_file memo: lowercased flat name -> on-disk path (empty = case-variant
+	// duplicates, an error per the resolve contract). Built from ONE directory walk
+	// per cache epoch; resolve_file used to walk the whole root per call, and mission
+	// loads resolve thousands of texture names against multi-thousand-file roots.
+	// Snapshot-at-epoch matches the index_-backed listings: on-disk edits surface via
+	// scan/mount or bump_cache_epoch(), exactly as documented above cache_epoch().
+	mutable std::unordered_map<std::string, String> resolve_memo_;
+	mutable uint64_t resolve_memo_epoch_ = 0;
+	mutable bool resolve_memo_built_ = false;
+
+	// Decoded-texture cache for the packed (PFF) fallback in load_texture. The loose
+	// path already memoizes inside util/texture_path_resolver; PFF-resident textures
+	// used to re-extract + re-decode on every call. Negative results cache too — the
+	// material resolvers probe load_texture for names resolve_file can't see, and a
+	// miss costs the full candidate scan. Same epoch self-clear as the memo above.
+	mutable std::unordered_map<std::string, Ref<Texture2D>> packed_texture_cache_;
+	mutable uint64_t packed_texture_cache_epoch_ = 0;
 
 	static bool has_virtual_scheme(const String &path);
 	static String to_native_path(const String &path);

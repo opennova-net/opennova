@@ -113,6 +113,89 @@ func test_model_skeletal_methods_no_op_without_set() -> void:
 	assert_eq(model.get_active_body_clip(), "", "No active clip without a skeletal set.")
 
 
+func _loaded_skeletal() -> NovaSkeletalAnim:
+	var sk := NovaSkeletalAnim.new()
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	assert_true(sk.load_from_resource_root(root, "soldier.adm"),
+		"soldier.adm fixture loads: %s" % sk.get_last_error())
+	return sk
+
+
+func _bone_poses(skel: Skeleton3D) -> Array:
+	var out: Array = []
+	for i in range(skel.get_bone_count()):
+		out.append(Transform3D(Basis(skel.get_bone_pose_rotation(i)), skel.get_bone_pose_position(i)))
+	return out
+
+
+func test_scrub_while_paused_moves_playhead_and_pose() -> void:
+	# The ANIMS workflow's scrub seam: set_animation_time poses the skeleton
+	# IMMEDIATELY even while paused. SHED is rigid, so it fake-skins into a real
+	# Skeleton3D headless (no render needed for bone poses).
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(_loaded_skeletal())
+	model.set_object_data(_open(SHED))
+	assert_true(model.has_skeleton(), "the rigid model fake-skins into a Skeleton3D")
+	model.set_playing(false)  # paused scrubbing is the point
+	model.play_body_clip("anim_walk_forward")
+
+	var sk = model.get_skeletal_anim()
+	var mid: float = sk.get_clip_length("anim_walk_forward") * 0.5
+	# The fixture clips carry root-motion data, not visually-moving bones, so
+	# pin the IMMEDIATE re-pose by vandalizing a bone pose first: the scrub must
+	# overwrite it with eval_pose's value without waiting for a frame tick.
+	var skel: Skeleton3D = model.get_skeleton()
+	skel.set_bone_pose_position(0, Vector3(123.0, 456.0, 789.0))
+	model.set_animation_time(mid)
+	assert_almost_eq(model.get_animation_time(), mid, 0.001, "the playhead followed the scrub")
+	var expected: Transform3D = sk.eval_pose("anim_walk_forward", mid)[0]
+	assert_ne(skel.get_bone_pose_position(0), Vector3(123.0, 456.0, 789.0),
+		"a paused scrub re-posed the skeleton (no frame tick needed)")
+	assert_true(skel.get_bone_pose_position(0).is_equal_approx(expected.origin),
+		"...with eval_pose's transform at the scrubbed playhead")
+
+
+func test_set_animation_time_wraps_or_clamps_per_clip() -> void:
+	# Mirrors eval_pose's own branch (loop: fmod over the clip; one-shot: clamp)
+	# so the stored playhead and the rendered pose can never disagree. Branch on
+	# the fixture clip's REAL loop flag rather than assuming it.
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(_loaded_skeletal())
+	model.set_object_data(_open(SHED))
+	model.play_body_clip("anim_walk_forward")
+	var sk = model.get_skeletal_anim()
+	var length: float = sk.get_clip_length("anim_walk_forward")
+	assert_gt(length, 0.0, "the fixture clip has a length")
+
+	model.set_animation_time(length + 0.25)
+	if sk.is_clip_looping("anim_walk_forward"):
+		assert_almost_eq(model.get_animation_time(), fposmod(length + 0.25, length), 0.001,
+			"looping clips wrap past the end")
+	else:
+		assert_almost_eq(model.get_animation_time(), length, 0.001, "one-shots clamp at the end")
+
+	model.set_animation_time(-0.5)
+	if sk.is_clip_looping("anim_walk_forward"):
+		assert_almost_eq(model.get_animation_time(), fposmod(-0.5, length), 0.001,
+			"negative scrubs wrap from the end")
+	else:
+		assert_almost_eq(model.get_animation_time(), 0.0, 0.001, "one-shots clamp at zero")
+
+
+func test_scrub_no_ops_without_skeletal_or_clip() -> void:
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_animation_time(1.0)  # no skeletal set: must not crash
+	assert_eq(model.get_animation_time(), 0.0, "no skeletal -> playhead reads 0")
+	model.set_skeletal_anim(_loaded_skeletal())
+	model.set_object_data(_open(SHED))
+	model.set_animation_time(1.0)  # skeletal set, but no ACTIVE clip
+	assert_eq(model.get_animation_time(), 0.0, "no active clip -> scrub is a no-op")
+
+
 func test_object_preview_arms_overlay() -> void:
 	# Public-API check for the arms overlay (object_preview.load_arms/clear_arms). No .adm is needed
 	# -- with none loaded the arms render static at rest, a valid loaded state. Uses the committed

@@ -22,10 +22,21 @@ const TEMP_DIR := "user://test_mnu_workspace"
 
 func before_each() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(TEMP_DIR))
+	_remove_session_file()
 
 
 func after_each() -> void:
 	_cleanup_dir(TEMP_DIR)
+	_remove_session_file()
+
+
+# Workspace open/save/close now persist the tab session; keep it out of the
+# shared user:// state (B4 convention) so tests neither leak into the dev
+# editor nor into each other.
+func _remove_session_file() -> void:
+	var state := MnuWorkspaceScript.STATE_PATH
+	if FileAccess.file_exists(state):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(state))
 
 
 func _cleanup_dir(dir_path: String) -> void:

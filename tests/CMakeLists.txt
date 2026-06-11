@@ -785,11 +785,12 @@ target_include_directories(refs_extract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_features(refs_extract_test PRIVATE cxx_std_17)
 add_test(NAME refs_extract COMMAND refs_extract_test)
 
-# refs: .3di material-texture and .bms header/item extractors against the
-# committed retail fixtures (self-consistent vs each format's own parser).
-foreach(test threedi mission)
+# refs: .3di material-texture, .bms header/item, and .mnu menu-asset extractors
+# against the committed retail fixtures (self-consistent vs each format's own
+# parser).
+foreach(test threedi mission mnu)
     add_executable(refs_${test}_test refs/refs_${test}_test.cpp)
-    target_link_libraries(refs_${test}_test PRIVATE opennova_refs opennova_threedi opennova_mission)
+    target_link_libraries(refs_${test}_test PRIVATE opennova_refs opennova_threedi opennova_mission opennova_mnu)
     target_include_directories(refs_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(refs_${test}_test PRIVATE cxx_std_17)
     add_test(NAME refs_${test} COMMAND refs_${test}_test)

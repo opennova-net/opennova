@@ -724,6 +724,27 @@ func _resolve_existing_selection(id: int) -> int:
 
 # --- Undo / redo ----------------------------------------------------------------
 
+## Detach the current undo/redo history so the workspace can stash it per tab
+## across document rebinds (set_document clears the live stacks). The op dicts
+## are pure data, so they survive being parked.
+func take_history() -> Dictionary:
+	var history := {"undo": _undo_stack.duplicate(), "redo": _redo_stack.duplicate()}
+	_undo_stack.clear()
+	_redo_stack.clear()
+	return history
+
+
+## Restore a take_history() stash for the (just-bound) document; an empty
+## dictionary leaves the cleared stacks as-is.
+func restore_history(history: Dictionary) -> void:
+	_undo_stack.clear()
+	_redo_stack.clear()
+	if history.has("undo"):
+		_undo_stack.assign(history["undo"])
+	if history.has("redo"):
+		_redo_stack.assign(history["redo"])
+
+
 func can_undo() -> bool:
 	return not _undo_stack.is_empty()
 

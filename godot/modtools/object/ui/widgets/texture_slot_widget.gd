@@ -5,6 +5,7 @@ signal value_changed(slot_id: int, filename: String)
 signal browse_requested(slot_id: int)
 
 var slot_id := 0
+var thumb: TexturePreviewBox
 var line_edit: LineEdit
 var browse_button: Button
 var clear_button: Button
@@ -13,6 +14,9 @@ var _current := ""
 
 func _init() -> void:
 	add_theme_constant_override("separation", 4)
+	thumb = TexturePreviewBox.new()
+	thumb.set_box_size(Vector2(40, 40))
+	add_child(thumb)
 	line_edit = LineEdit.new()
 	line_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	line_edit.placeholder_text = "Filename in object folder"
@@ -36,20 +40,29 @@ func _init() -> void:
 
 func configure(p_slot_id: int) -> void:
 	slot_id = p_slot_id
+	thumb.name = "TextureSlot%dThumb" % slot_id
 	line_edit.name = "TextureSlot%dName" % slot_id
 	browse_button.name = "TextureSlot%dBrowse" % slot_id
 	clear_button.name = "TextureSlot%dClear" % slot_id
 
 
+## loader(name) -> Texture2D feeds the thumbnail (memoized by name inside the
+## preview box — texture decode is not cached upstream).
+func set_preview_loader(loader: Callable) -> void:
+	thumb.set_loader(loader)
+
+
 func set_value(filename: String) -> void:
 	_current = filename
 	line_edit.text = filename
+	thumb.show_name(filename)
 
 
 func set_slot_enabled(enabled: bool) -> void:
 	line_edit.editable = enabled
 	browse_button.disabled = not enabled
 	clear_button.disabled = not enabled or _current.is_empty()
+	thumb.modulate = Color(1, 1, 1, 1.0 if enabled else 0.45)
 
 
 func set_placeholder(text: String) -> void:
@@ -62,4 +75,5 @@ func _commit(filename: String) -> void:
 	_current = filename
 	line_edit.text = filename
 	clear_button.disabled = filename.is_empty()
+	thumb.show_name(filename)
 	value_changed.emit(slot_id, filename)

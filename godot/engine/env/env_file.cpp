@@ -76,6 +76,7 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_static_method("EnvFile", D_METHOD("combine_terrain_light", "light", "sky"), &EnvFile::combine_terrain_light);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("lit_water_color", "water", "light"), &EnvFile::lit_water_color);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("compute_sun_glare", "view_dot_sun", "occlusion_brightness"), &EnvFile::compute_sun_glare);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("get_field_consumption"), &EnvFile::get_field_consumption);
 	ClassDB::bind_method(D_METHOD("apply_mission_overrides", "overrides"), &EnvFile::apply_mission_overrides);
 	ClassDB::bind_method(D_METHOD("clear_mission_overrides"), &EnvFile::clear_mission_overrides);
 	ClassDB::bind_method(D_METHOD("has_mission_overrides"), &EnvFile::has_mission_overrides);
@@ -185,8 +186,28 @@ IMPL_SET_GET(iris_percent, set_iris_percent, get_iris_percent, float, float)
 IMPL_SET_GET(iris_center, set_iris_center, get_iris_center, float, float)
 IMPL_SET_GET(sky_speed, set_sky_speed, get_sky_speed, float, float)
 IMPL_SET_GET(sky_height, set_sky_height, get_sky_height, float, float)
-IMPL_SET_GET(sky_map1, set_sky_map1, get_sky_map1, const String &, String)
-IMPL_SET_GET(sky_map2, set_sky_map2, get_sky_map2, const String &, String)
+// The sky-map setters re-resolve the cached textures so the live sky (and any
+// editor preview) tracks the edit; load_bytes/load are otherwise the only
+// resolution points. Diff-guarded: undo snapshot replays with an unchanged
+// name must not hit the disk.
+void EnvFile::set_sky_map1(const String &p_value) {
+	if (sky_map1 == p_value) {
+		return;
+	}
+	sky_map1 = p_value;
+	_load_sky_textures();
+	_notify_environment_changed();
+}
+String EnvFile::get_sky_map1() const { return sky_map1; }
+void EnvFile::set_sky_map2(const String &p_value) {
+	if (sky_map2 == p_value) {
+		return;
+	}
+	sky_map2 = p_value;
+	_load_sky_textures();
+	_notify_environment_changed();
+}
+String EnvFile::get_sky_map2() const { return sky_map2; }
 IMPL_SET_GET(sun_3di, set_sun_3di, get_sun_3di, const String &, String)
 IMPL_SET_GET(moon_3di, set_moon_3di, get_moon_3di, const String &, String)
 IMPL_SET_GET(glare_3di, set_glare_3di, get_glare_3di, const String &, String)
@@ -502,6 +523,58 @@ Dictionary EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brig
 	result["glare"] = glare.glare;
 	result["fog_whiten"] = glare.fog_whiten;
 	return result;
+}
+
+Dictionary EnvFile::get_field_consumption() {
+	Dictionary table;
+	const auto add = [&table](const char *p_field, const char *p_status, bool p_faithful, const char *p_anchor, const char *p_note) {
+		Dictionary row;
+		row["status"] = String(p_status);
+		row["faithful"] = p_faithful;
+		row["anchor"] = String(p_anchor);
+		row["note"] = String(p_note);
+		table[String(p_field)] = row;
+	};
+
+	add("env_name", "unconsumed", true, "authoring extension; no retail keyword",
+			"A label for this file. The game never reads it.");
+	add("timeofday", "unconsumed", true, "classification string only",
+			"A label for this file. The game never reads it.");
+	add("curtime", "honored", false, "Environment_SetCurrentTime @ 0x57c4b0", "");
+	add("envscale", "honored", false, "Env_ParseEnvScale @ 0x840950", "");
+	add("fog_level", "honored", false, "Render_SetFogState @ 0x58a950", "");
+	add("fog_type", "honored", false, "Render_SetFogState @ 0x58a950", "");
+	add("terrain_tint", "partial", false,
+			"PolyTrn_InitTextures @ 0x60b8cb; PolyTrn_RenderTile @ 0x60df0d; sample_terrain_lightmap @ 0x606030",
+			"In the game this tints the ground, shoreline water, and plants. That part of the picture isn't built yet, so edits won't show in the preview.");
+	add("vertex_tint", "unconsumed", true, "vestigial; retail modulator identity",
+			"The game itself never uses this value; it's kept so files save back unchanged.");
+	add("water_color", "honored", false, "TimeOfDay_ParseProperty @ 0x57c590", "");
+	add("water_height", "honored", false, "water_height << 15 parse", "");
+	add("water_murk", "honored", false, "Environment_SetWaterMurk @ 0x57d4f0", "");
+	add("iris_percent", "unconsumed", false, "terrain_sector_compute_lighting @ 0x5c7550",
+			"The game's automatic exposure - how the view brightens in dark scenes. Not built yet, so edits won't show in the preview.");
+	add("iris_center", "unconsumed", false, "terrain_sector_compute_lighting @ 0x5c7550",
+			"The game's automatic exposure - how the view brightens in dark scenes. Not built yet, so edits won't show in the preview.");
+	add("ceiling_color", "partial", false, "indoor exposure inputs @ 0x5c7646; Env_CeilingFloorBlend @ 0x5f7163",
+			"Indoor light color. It takes effect when indoor lighting is built.");
+	add("floor_color", "partial", false, "indoor exposure inputs @ 0x5c7646; Env_CeilingFloorBlend @ 0x5f7163",
+			"Indoor light color. It takes effect when indoor lighting is built.");
+	add("lightning_color", "partial", false, "Environment_SetLightningFlash @ 0x57d320",
+			"Lightning flash color. Storms aren't triggered yet, so flashes don't fire in the preview.");
+	add("cloud_tint", "honored", false, "render_skybox @ 0x579b42",
+			"Colors the whole sky only when advanced clouds are off. With advanced clouds on, the sky uses the cloud keyframe colors instead.");
+	add("sky_speed", "honored", false, "render_skybox @ 0x5791de", "");
+	add("sky_height", "honored", false, "build_sky_dome_mesh @ 0x578db0", "");
+	add("sky_map1", "honored", false, "Path_ReplaceOrAppendExtension @ 0x57cc4b", "");
+	add("sky_map2", "honored", false, "Path_ReplaceOrAppendExtension @ 0x57cc4b", "");
+	add("advanced_clouds", "honored", false, "render_skybox fixed-function pass @ 0x579b42", "");
+	add("sun_3di", "honored", false, "EffectWorld_LoadCelestialModels @ 0x5adc50", "");
+	add("moon_3di", "honored", false, "EffectWorld_LoadCelestialModels @ 0x5adc50", "");
+	add("star_3di", "honored", false, "EffectWorld_LoadCelestialModels @ 0x5adc50", "");
+	add("glare_3di", "partial", false, "render_skybox_sun_glow @ 0x5acd00",
+			"The sun glare always shows at full strength; hills don't block it yet.");
+	return table;
 }
 
 void EnvFile::apply_mission_overrides(const Dictionary &p_overrides) {

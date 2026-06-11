@@ -271,12 +271,15 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		container.add_child(model)
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
+		# Load the entity's body-animation set (.adm) BEFORE the data: setting it
+		# first is a no-op rebuild (no data yet), so set_object_data below does
+		# the ONE skeletal-keyed mesh build - the old order built a static-keyed
+		# set first and threw it away, doubling every animated entity's cost.
+		# Rigid weapon parts fake-skin; no anim_def -> stays static.
+		_apply_skeletal_anim(model, int(a.get("item_id", 0)))
 		# Drive the build explicitly (not via _ready) so it is independent of when
 		# place() runs relative to the main loop; matches the static template path.
 		model.set_object_data(data)
-		# Load the entity's body-animation set (.adm) so its Skeleton3D builds and the present
-		# pass can drive walk/idle; rigid weapon parts fake-skin. No anim_def -> stays static.
-		_apply_skeletal_anim(model, int(a.get("item_id", 0)))
 		# Tag identity on the node in BOTH runtime + editor so MissionEntityRegistry can resolve
 		# SSN/group/zone host-action targets (e.g. PLAYPARTANIM) back to this live model. Picking +
 		# colliders stay editor-only.
@@ -346,8 +349,10 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		container.add_child(model)
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
-		model.set_object_data(data)
+		# Skeletal set first = no-op rebuild; set_object_data does the one
+		# skeletal-keyed build (same ordering rationale as place()).
 		_apply_skeletal_anim(model, item_id)
+		model.set_object_data(data)
 		var ref := {
 			"kind": kind,
 			"index": index,

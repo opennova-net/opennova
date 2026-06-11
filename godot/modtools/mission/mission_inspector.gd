@@ -139,7 +139,11 @@ var _sim_play_btn: Button
 var _play_mission_cb := Callable()
 var _is_playing_cb := Callable()
 var _stop_play_cb := Callable()
+# Debug-overlay hooks, same injection pattern: toggle() -> void, is_open() -> bool.
+var _debug_toggle_cb := Callable()
+var _debug_is_open_cb := Callable()
 var _play_mission_btn: Button
+var _debug_btn: Button
 var _sim_pause_btn: Button
 var _sim_step_btn: Button
 var _sim_stop_btn: Button
@@ -193,6 +197,15 @@ var _at_delete_button: Button
 var _props_toggle: CheckButton
 var _props_box: VBoxContainer
 var _props_binder: FieldBinder
+# Link-widget services (resolve/pick/jump Callables from the shell). They arrive
+# AFTER setup() builds the form (the workspace injects them post-build), so the
+# setter re-configures the already-built widgets.
+var _ref_services: Dictionary = {}
+var _terrain_ref_widget: ResourceRefWidget
+var _env_ref_widget: ResourceRefWidget
+# Mission-tab bulk re-ground (B8): the manual twin of the workspace's activate-time
+# "terrain changed under N objects" prompt.
+var _reground_button: Button
 
 # --- Cached option lists (group / waypoint-path / entity pickers) --------------
 # get_group_options / get_waypoint_path_options / get_all_entities each walk + marshal every entity
@@ -345,6 +358,7 @@ func setup(controller, detail_host: Control = null) -> void:
 		_build_scripting_panel()     # LEFT list + DOCK detail
 		_build_selection_empty()     # DOCK: Selection standby label (last in the page)
 		_build_props_panel()         # DOCK: Mission
+		_build_reground_button()     # DOCK: Mission
 		_build_loadout_panel()       # DOCK: Mission
 		_build_groups_panel()        # DOCK: Mission
 		_box = VBoxContainer.new()
@@ -481,6 +495,7 @@ func _refresh() -> void:
 	_refresh_area_trigger_panel()
 	_refresh_scripting_panel()
 	_refresh_props_panel()
+	_refresh_reground_button()
 	_refresh_loadout_panel()
 	_refresh_groups_panel()
 	# Mode gating: the object panels show only in Objects mode; the waypoint / trigger panels
@@ -1299,6 +1314,17 @@ func _build_sim_bar() -> void:
 	_sim_bar.add_child(_play_mission_btn)
 	_play_mission_btn.pressed.connect(_on_play_mission_pressed)
 
+	# Mission debug panel: summons the engine debug overlay over the editor
+	# (read-only there — the workspace locks variable edits before mounting).
+	_debug_btn = Button.new()
+	_debug_btn.name = "MissionDebugBtn"
+	_debug_btn.toggle_mode = true
+	_debug_btn.text = "Debug"
+	_debug_btn.tooltip_text = "Open the mission debug panel: live units, sim transport, and script variables."
+	_prepare_sim_button(_debug_btn)
+	_sim_bar.add_child(_debug_btn)
+	_debug_btn.toggled.connect(_on_debug_toggled)
+
 
 # The workspace injects these after building the inspector; without them (tests,
 # headless) the Play Mission button simply hides.
@@ -1306,6 +1332,22 @@ func set_play_hooks(play: Callable, is_playing: Callable, stop: Callable) -> voi
 	_play_mission_cb = play
 	_is_playing_cb = is_playing
 	_stop_play_cb = stop
+	_refresh_sim_bar()
+
+
+# Same injection pattern as set_play_hooks: the Debug toggle hides until the
+# workspace hands over the overlay summon + open-state query.
+func set_debug_hooks(toggle: Callable, is_open: Callable) -> void:
+	_debug_toggle_cb = toggle
+	_debug_is_open_cb = is_open
+	_refresh_sim_bar()
+
+
+func _on_debug_toggled(_pressed: bool) -> void:
+	if _debug_toggle_cb.is_valid():
+		_debug_toggle_cb.call()
+	# Re-sync from the real open state: a summon that could not mount (no shell)
+	# must not leave the toggle latched on.
 	_refresh_sim_bar()
 
 
@@ -1332,7 +1374,11 @@ func _refresh_sim_bar() -> void:
 	var can: bool = supported and _controller.can_simulate()
 	var simming: bool = supported and _controller.is_simulating()
 	var playing: bool = supported and _controller.is_sim_playing()
-	_sim_bar.visible = can or simming
+	# The bar also stays up whenever the Debug toggle is wired: it is the
+	# overlay's ONLY close affordance in the editor, so it must remain reachable
+	# with no mission open (the perf tab works without a sim) and while an
+	# overlay is still up after the mission underneath it cleared.
+	_sim_bar.visible = can or simming or _debug_toggle_cb.is_valid()
 	_sim_play_btn.disabled = not can or playing
 	_sim_pause_btn.disabled = not playing
 	_sim_step_btn.disabled = not can or playing
@@ -1342,6 +1388,13 @@ func _refresh_sim_bar() -> void:
 		_play_mission_btn.visible = _play_mission_cb.is_valid()
 		_play_mission_btn.text = "Stop Playing" if pie_playing else "Play Mission"
 		_play_mission_btn.disabled = not pie_playing and not can
+	if _debug_btn != null:
+		# Stays enabled regardless of sim state: the overlay is useful without a
+		# live sim (perf tab, last mission's spans). Pressed state rides this
+		# refresh (controller.changed), so no polling.
+		_debug_btn.visible = _debug_toggle_cb.is_valid()
+		if _debug_is_open_cb.is_valid():
+			_debug_btn.set_pressed_no_signal(bool(_debug_is_open_cb.call()))
 
 
 func _on_mode_tab_changed(tab: int) -> void:
@@ -2558,6 +2611,10 @@ func _build_props_panel() -> void:
 	_add_props_line("designer", "Designer", "Mission author.")
 	_add_props_line("briefing", "Briefing", "Mission briefing text.")
 	ObjectUiHelpers.add_section_heading(_props_box, "World")
+	_terrain_ref_widget = _add_props_ref("terrain", "terrain", "Terrain",
+		"The ground this mission is built on. The world reloads onto the new terrain the next time the mission is opened.")
+	_env_ref_widget = _add_props_ref("environment", "environment", "Environment",
+		"Sky, light, and weather for this mission. Takes effect the next time the mission is opened.")
 	_add_props_option("climate", "Climate", [[0, "Desert"], [1, "Jungle"], [2, "Snow"]])
 	_add_props_option("weather", "Weather", [[0, "Nice day"], [1, "Rainy"], [2, "Snow"]])
 	_add_props_option("mission_type", "Type", [[1, "Normal"], [2, "Combat vehicle"], [3, "Tenth Mountain"]])
@@ -2574,6 +2631,31 @@ func _build_props_panel() -> void:
 	ObjectUiHelpers.add_section_heading(_props_box, "Audio")
 	_add_props_spin("music", "Music track", 0.0, 1000000.0)
 	_add_props_spin("reverb", "Reverb", 0.0, 1000000.0)
+
+
+# DOCK: Mission — the manual twin of the workspace's activate-time re-ground prompt
+# (terrain heights edited under the mission, undo of an applied re-ground, declined
+# prompt: this button reaches the same one-undo-step bulk re-ground any time).
+func _build_reground_button() -> void:
+	_reground_button = Button.new()
+	_reground_button.name = "MissionRegroundAll"
+	_reground_button.text = "Re-ground objects"
+	_reground_button.tooltip_text = "Snap objects the terrain moved out from under back onto the surface (one undo step). Objects placed above the ground on purpose are left alone."
+	_reground_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_reground_button.visible = false
+	_mission_content.add_child(_reground_button)
+	_reground_button.pressed.connect(func() -> void:
+		if _controller != null and _controller.has_method("reground_drifted"):
+			_controller.reground_drifted())
+
+
+func _refresh_reground_button() -> void:
+	if _reground_button == null:
+		return
+	var mission: NovaMissionData = _controller.get_mission() if _controller != null else null
+	_reground_button.visible = mission != null and _controller.has_method("reground_drifted")
+	_reground_button.disabled = _controller != null and _controller.has_method("is_simulating") \
+		and _controller.is_simulating()
 
 
 func _add_props_line(field: String, label: String, tooltip: String = "") -> LineEdit:
@@ -2594,6 +2676,38 @@ func _add_props_line(field: String, label: String, tooltip: String = "") -> Line
 		func(info) -> String: return String(info.get(field, "")),
 		func(text: String) -> void: _set_header_string(field, text))
 	return line
+
+
+func _add_props_ref(field: String, kind: String, label: String, tooltip: String = "") -> ResourceRefWidget:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_props_box.add_child(row)
+	var lbl := Label.new()
+	lbl.text = label
+	lbl.tooltip_text = tooltip if not tooltip.is_empty() else label
+	lbl.clip_text = true
+	lbl.custom_minimum_size = Vector2(96, 0)
+	row.add_child(lbl)
+	var widget := ResourceRefWidget.new()
+	widget.name = "MissionProp_" + field
+	widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	widget.configure(kind, label, _ref_services)
+	row.add_child(widget)
+	_props_binder.bind_link(widget,
+		func(info) -> String: return String(info.get(field, "")),
+		func(text: String) -> void: _set_header_string(field, text))
+	return widget
+
+
+## Wires the link widgets' resolve/pick/jump Callables (see
+## ResourceRefWidget.services_from_shell). Idempotent; safe before or after
+## the form is built.
+func set_reference_services(services: Dictionary) -> void:
+	_ref_services = services
+	if _terrain_ref_widget != null and is_instance_valid(_terrain_ref_widget):
+		_terrain_ref_widget.configure("terrain", "Terrain", services)
+	if _env_ref_widget != null and is_instance_valid(_env_ref_widget):
+		_env_ref_widget.configure("environment", "Environment", services)
 
 
 func _add_props_option(field: String, label: String, choices: Array) -> OptionButton:
@@ -3035,7 +3149,6 @@ func _rebuild_summary() -> void:
 		sig = [
 			mission.get_instance_id(),
 			mission.get_mission_name(), mission.get_designer(),
-			mission.get_terrain_ref(), mission.get_environment_ref(),
 			int(info.get("climate", 0)), int(info.get("weather", 0)),
 			selection.is_empty(),
 			int(stats.get("placed", 0)), int(stats.get("batched", 0)), int(stats.get("batches", 0)),
@@ -3071,8 +3184,8 @@ func _rebuild_summary() -> void:
 
 	_add_separator()
 	_add_heading("World")
-	_add_row("Terrain", _nonempty(mission.get_terrain_ref(), "(none)"))
-	_add_row("Environment", _nonempty(mission.get_environment_ref(), "(none)"))
+	# Terrain/environment moved from read-only rows here into editable link
+	# widgets in the Mission properties form (the World section above).
 	_add_row("Climate", str(int(info.get("climate", 0))))
 	_add_row("Weather", str(int(info.get("weather", 0))))
 

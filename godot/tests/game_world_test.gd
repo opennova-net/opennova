@@ -7,6 +7,44 @@ func after_each() -> void:
 	_remove_dir_recursive(OS.get_cache_dir().path_join(WORLD_TEST_ROOT))
 
 
+class TransportRuntimeStub:
+	extends Node
+	var ticks := 0
+	var _playing := false
+	func is_playing() -> bool:
+		return _playing
+	func play() -> void:
+		_playing = true
+	func pause() -> void:
+		_playing = false
+	func tick() -> bool:
+		ticks += 1
+		return true
+
+
+func test_tick_gates_the_runtime_on_its_transport() -> void:
+	# The game host's tick must respect MissionRuntime's play flag - the debug
+	# overlay's Pause/Step work on a live mission BECAUSE this gate exists
+	# (before it, play()/pause() were inert in the game).
+	var world := _make_world()
+	add_child_autofree(world)
+	var runtime := TransportRuntimeStub.new()
+	add_child_autofree(runtime)
+	world._runtime = runtime
+	world._loaded = true
+
+	world.tick(Vector3.ZERO)
+	assert_eq(runtime.ticks, 0, "a paused runtime never ticks")
+	runtime.play()
+	world.tick(Vector3.ZERO)
+	assert_eq(runtime.ticks, 1, "a playing runtime ticks once per host frame")
+	runtime.pause()
+	world.tick(Vector3.ZERO)
+	assert_eq(runtime.ticks, 1, "pausing stops it again")
+	world._runtime = null
+	world._loaded = false
+
+
 func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
 	var root := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join("missing_env_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(root)

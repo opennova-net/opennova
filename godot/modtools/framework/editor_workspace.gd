@@ -265,6 +265,43 @@ func get_editor_document() -> Object:
 	return null
 
 
+# --- Documents (multi-document tabs) ---------------------------------------
+# A workspace that holds N open documents opts in by overriding this tier; the
+# shell then shows a tab strip above the viewport. get_editor_document() must
+# keep returning the ACTIVE document so the save/undo/dirty wiring above stays
+# untouched. The strip is rebuilt ONLY from documents_changed and workspace
+# switches — never from the per-frame shell poll — so tabbed workspaces emit it
+# on every membership/active/label/dirty change (DocumentTabSet does this).
+
+## Emitted by multi-document workspaces when the tab set changes (membership,
+## active index, labels, dirty badges). Single-document workspaces never emit it.
+signal documents_changed
+
+
+func supports_document_tabs() -> bool:
+	return false
+
+
+## One Dictionary per open document: {"label": String, "dirty": bool,
+## "path": String, "tooltip": String}.
+func get_document_tabs() -> Array:
+	return []
+
+
+func get_active_document_index() -> int:
+	return -1
+
+
+func activate_document(_index: int) -> Error:
+	return ERR_UNAVAILABLE
+
+
+## Closes unconditionally — the dirty guard (save/discard/keep prompt) lives in
+## the shell, which resolves it BEFORE calling this.
+func close_document(_index: int) -> Error:
+	return ERR_UNAVAILABLE
+
+
 func has_unsaved_changes() -> bool:
 	var doc := get_editor_document()
 	if doc == null:

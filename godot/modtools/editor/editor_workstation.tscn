@@ -43,7 +43,6 @@ theme_override_constants/separation = 8
 
 [node name="ProjectLabel" type="Label" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(180, 0)
 layout_mode = 2
 size_flags_horizontal = 0
 theme_type_variation = &"Heading"
@@ -108,6 +107,15 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 4
+
+[node name="BrowserToggleButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow/GlobalButtonRail"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+focus_mode = 0
+toggle_mode = true
+tooltip_text = "Resources"
+flat = false
 
 [node name="CameraToggleButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow/GlobalButtonRail"]
 unique_name_in_owner = true
@@ -196,14 +204,37 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 clip_contents = true
 
-[node name="ViewportHost" type="Control" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane"]
-unique_name_in_owner = true
+[node name="ViewportColumn" type="VBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="DocumentTabStrip" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportColumn"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+
+[node name="DocumentTabMargin" type="MarginContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportColumn/DocumentTabStrip"]
+layout_mode = 2
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 2
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 2
+
+[node name="DocumentTabRow" type="HBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportColumn/DocumentTabStrip/DocumentTabMargin"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ViewportHost" type="Control" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
 mouse_filter = 2
 
 [node name="TopPopoverLayer" type="Control" parent="."]
@@ -256,6 +287,14 @@ text = "Camera"
 vertical_alignment = 1
 clip_text = true
 
+[node name="CameraPopupDetach" type="Button" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(34, 30)
+focus_mode = 0
+text = "⧉"
+tooltip_text = "Pop out camera settings into a floating window"
+
 [node name="CameraPopupClose" type="Button" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupHeader"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -264,7 +303,14 @@ focus_mode = 0
 text = "X"
 tooltip_text = "Close camera settings"
 
-[node name="CameraSettingsHost" type="VBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox"]
+[node name="CameraPopupContent" type="VBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="CameraSettingsHost" type="VBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupContent"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -311,6 +357,14 @@ text = "Environment"
 vertical_alignment = 1
 clip_text = true
 
+[node name="EnvironmentPopupDetach" type="Button" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(34, 30)
+focus_mode = 0
+text = "⧉"
+tooltip_text = "Pop out the environment editor into a floating window"
+
 [node name="EnvironmentPopupClose" type="Button" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupHeader"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -319,12 +373,19 @@ focus_mode = 0
 text = "X"
 tooltip_text = "Close environment editor"
 
-[node name="EnvironmentActionsHost" type="VBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+[node name="EnvironmentPopupContent" type="VBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="EnvironmentActionsHost" type="VBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="EnvironmentInspectorHost" type="PanelContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox"]
+[node name="EnvironmentInspectorHost" type="PanelContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupContent"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -475,9 +536,24 @@ button_pressed = true
 text = "Show axes"
 tooltip_text = "Show the origin axis gizmo in the 3D preview."
 
-[node name="AssetDock" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit"]
+[node name="RightSplit" type="HSplitContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 1
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="AssetDock" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/RightSplit"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+size_flags_horizontal = 1
+size_flags_vertical = 3
+
+[node name="ResourceBrowserPaneHost" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/RightSplit"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(260, 0)
 layout_mode = 2
 size_flags_horizontal = 1
 size_flags_vertical = 3

@@ -95,6 +95,10 @@ static func load_mesh(resource_root: NovaResourceRoot, graphic: String) -> Mesh:
 	var data := NovaObjectData.new()
 	if data.open_from_resource_root(resource_root, model_path) != OK:
 		return null
+	# The surface_set_material below MUTATES the returned mesh - only safe
+	# because this NovaObjectData is private and dropped right after (its
+	# submesh cache dies with it). Never route this through a SHARED data
+	# instance: build_lod_submeshes hands out shared ArrayMesh refs there.
 	var submeshes: Array = data.build_lod_submeshes(0)
 	var mesh: Mesh = null
 	if not submeshes.is_empty():

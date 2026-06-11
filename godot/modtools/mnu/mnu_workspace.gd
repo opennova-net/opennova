@@ -1,11 +1,11 @@
 class_name MnuEditorWorkspace
 extends EditorWorkspace
 
-# Single-pane adapter for the Menus workspace (mirrors fonts_workspace.gd). The
-# main viewport hosts the MnuEditor (widget tree + WYSIWYG preview); the right
-# dock hosts the read-only property inspector. The adapter forwards the editor's
-# selection to the inspector so the two shell regions stay in sync. M6 is
-# read-only browse; M7 adds property edit + undo, M8 adds canvas gestures.
+# Adapter for the Menus workspace. The main viewport hosts one shared MnuEditor
+# (widget tree + WYSIWYG preview) rebound across document tabs; the right dock
+# hosts the property inspector. The adapter forwards the editor's selection to
+# the inspector so the two shell regions stay in sync, and owns the
+# DocumentTabSet (multi-menu tabs, Strings-pilot pattern).
 
 const MnuEditorDocumentScript = preload("res://modtools/mnu/mnu_editor_document.gd")
 const MnuEditorScript = preload("res://modtools/mnu/mnu_editor.gd")
@@ -16,7 +16,17 @@ const SoundPreviewPlayerScript = preload("res://modtools/sound/sound_preview_pla
 # valid triggers and the source for the inspector's trigger dropdown + preview.
 const MENU_SOUND_PROFILE := "menu.lwf"
 
+## Session state (open tabs + active), restored on activate like Strings.
+const STATE_PATH := "user://mnu_editor_state.cfg"
+
+# The ACTIVE document. Multi-document state lives in _tabs; this alias always
+# points at the active tab's document (its name is load-bearing for tests).
 var _document   # MnuEditorDocument
+var _tabs := DocumentTabSet.new()
+# Per-tab undo history, keyed by document. The shared MnuEditor owns the live
+# stacks and clears them on set_document, so tab switches stash/restore here.
+var _histories: Dictionary = {}
+var _state_restored: bool = false
 var _editor: Control
 var _inspector: Control
 var _selected_id := -1
@@ -27,7 +37,137 @@ var _profiles: Dictionary = {}   # lower-case .lwf name -> NovaLwfData (or null 
 
 
 func _init() -> void:
-	_document = MnuEditorDocumentScript.new()
+	# A named method, not a lambda: a lambda touching a member signal captures
+	# self strongly and would cycle workspace <-> tab set (both RefCounted).
+	_tabs.changed.connect(_on_tabs_changed)
+	_document = _create_document()
+	_tabs.add(_document)
+
+
+func _on_tabs_changed() -> void:
+	documents_changed.emit()
+
+
+func _create_document():
+	var doc = MnuEditorDocumentScript.new()
+	# One channel covers dirty flips, label changes after save-as, and
+	# save-clears: EditorResourceDocument emits state_changed for all of them.
+	# No .bind(doc): binding the doc into its own signal's callable would make
+	# the RefCounted document reference itself and leak on close/failed open.
+	doc.state_changed.connect(_on_doc_state_changed)
+	return doc
+
+
+func _on_doc_state_changed() -> void:
+	_tabs.notify_changed()
+
+
+## Repoint the alias + the shared editor/inspector at the active tab's document,
+## stashing the outgoing document's undo history (the editor clears its stacks
+## on set_document) and restoring the incoming one's.
+func _bind_active_document() -> void:
+	var active = _tabs.get_active()
+	if active == null or active == _document:
+		return
+	if _editor != null and is_instance_valid(_editor) and _document != null \
+			and _tabs.index_of(_document) >= 0:
+		# Only stash documents still open: a just-closed tab's history dies with it.
+		_histories[_document] = _editor.take_history()
+	_document = active
+	if _editor != null and is_instance_valid(_editor):
+		_editor.set_document(_document)
+		_editor.restore_history(_histories.get(_document, {}))
+	_populate_inspector()
+
+
+# --- Session persistence ---
+
+func activate() -> void:
+	_restore_state()
+
+
+func deactivate() -> void:
+	_save_state()
+
+
+func _restore_state() -> void:
+	# Reopen the last session's tabs once per session, and only while the
+	# workspace is still pristine (one tab, no path, no edits) so it never
+	# clobbers user work. A cross-jump open lands BEFORE activate and both skips
+	# the restore and (via its _save_state) replaces the saved session with the
+	# jumped-to menu - the session always reflects the tabs actually open.
+	if _state_restored:
+		return
+	_state_restored = true
+	if _tabs.count() != 1 or _document.is_dirty or not _document.current_path.is_empty():
+		return
+	var cfg := ConfigFile.new()
+	if cfg.load(STATE_PATH) != OK:
+		return
+	var paths: PackedStringArray = cfg.get_value("session", "open_paths", PackedStringArray())
+	for path in paths:
+		if not path.is_empty() and FileAccess.file_exists(path):
+			open_file(path)
+	var active := int(cfg.get_value("session", "active_index", _tabs.count() - 1))
+	if active >= 0 and active < _tabs.count():
+		activate_document(active)
+
+
+func _save_state() -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(STATE_PATH)  # keep unrelated values if the file exists
+	var open := _tabs.open_paths()
+	cfg.set_value("session", "open_paths", open)
+	# active_index is stored in open_paths space: pathless (Untitled) tabs are
+	# not persisted, so a full-list index would drift past them on restore.
+	var active := -1
+	var active_doc = _tabs.get_active()
+	if active_doc != null:
+		var path := String(active_doc.get("current_path"))
+		if not path.is_empty():
+			active = open.find(path)
+	cfg.set_value("session", "active_index", active)
+	cfg.save(STATE_PATH)
+
+
+# --- Document tabs (EditorWorkspace tier) ---
+
+func supports_document_tabs() -> bool:
+	return true
+
+
+func get_document_tabs() -> Array:
+	return _tabs.tabs()
+
+
+func get_active_document_index() -> int:
+	return _tabs.get_active_index()
+
+
+func activate_document(index: int) -> Error:
+	var err := _tabs.set_active(index)
+	if err != OK:
+		return err
+	_bind_active_document()
+	_save_state()
+	return OK
+
+
+func close_document(index: int) -> Error:
+	var doc = _tabs.get_at(index)
+	if doc == null:
+		return ERR_INVALID_PARAMETER
+	var was_active := index == _tabs.get_active_index()
+	_tabs.remove_at(index)
+	_histories.erase(doc)
+	if _tabs.count() == 0:
+		# The workspace never holds zero documents: seed a fresh pristine menu.
+		_tabs.add(_create_document())
+		was_active = true
+	if was_active:
+		_bind_active_document()
+	_save_state()
+	return OK
 
 
 func get_workspace_id() -> String:
@@ -71,6 +211,7 @@ func get_status_context() -> String:
 func mount_viewport(host: Control) -> void:
 	if host == null:
 		return
+	var created := false
 	if _editor == null:
 		_editor = MnuEditorScript.new()
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -78,11 +219,17 @@ func mount_viewport(host: Control) -> void:
 		_editor.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		_editor.widget_selected.connect(_on_widget_selected)
 		_editor.selection_changed.connect(_on_selection_changed)
+		created = true
 	if _editor.get_parent() == null:
 		host.add_child(_editor)
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_editor.set_resource_root(_resource_root_or_settings())
 	_editor.set_document(_document)
+	if created:
+		# A fresh editor starts with empty stacks; pick up any history parked
+		# for the active tab. (A REMOUNT must not touch the live stacks -
+		# set_document early-returns for the same document.)
+		_editor.restore_history(_histories.get(_document, {}))
 
 
 func unmount_viewport(_host: Control) -> void:
@@ -124,6 +271,10 @@ func build_inspector(host: Control) -> void:
 	# Preview a widget's sound through the menu .lwf profile (reuses the Sound
 	# workspace's audition player); the inspector lists triggers from the same profile.
 	_inspector.sound_preview_requested.connect(_on_sound_preview)
+	# Shell link-widget services for FILE references (the screen's text_rsrc);
+	# string KEYS resolve through the loaded table instead.
+	if editor_shell != null and _inspector.has_method("set_reference_services"):
+		_inspector.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
 	host.add_child(_inspector)
 	# Populate from the editor's current selection. Subsequent selection changes
 	# (user + document reloads, which re-select the first screen) reach the
@@ -137,7 +288,7 @@ func _populate_inspector() -> void:
 		return
 	if _editor != null:
 		_selected_id = _editor.get_selected_id()
-	_inspector.show_widget(_document.resource, _selected_id, _text_resource())
+	_inspector.show_widget(_document.resource, _selected_id, _text_resource(), _text_resource_path())
 	_apply_sound_sets()
 
 
@@ -158,7 +309,7 @@ func _apply_sound_sets() -> void:
 func _on_widget_selected(id: int) -> void:
 	_selected_id = id
 	if _inspector != null and is_instance_valid(_inspector):
-		_inspector.show_widget(_document.resource, id, _text_resource())
+		_inspector.show_widget(_document.resource, id, _text_resource(), _text_resource_path())
 
 
 # A multi-selection (>1 widget) drives the inspector's read-only summary view; the
@@ -167,13 +318,18 @@ func _on_selection_changed(ids: PackedInt32Array) -> void:
 	if ids.size() > 0:
 		_selected_id = ids[ids.size() - 1]
 	if _inspector != null and is_instance_valid(_inspector):
-		_inspector.show_selection(_document.resource, ids, _text_resource())
+		_inspector.show_selection(_document.resource, ids, _text_resource(), _text_resource_path())
 
 
 # The string table the editor resolved for the open menu (null when none loaded), so
 # the inspector can show resolved text + drive the picker.
 func _text_resource() -> RtxtStringFile:
 	return _editor.get_text_resource() if _editor != null and is_instance_valid(_editor) else null
+
+
+# Its resolved path - the string widgets' badge tooltip and Strings jump target.
+func _text_resource_path() -> String:
+	return _editor.get_text_resource_path() if _editor != null and is_instance_valid(_editor) else ""
 
 
 func _on_inspector_edit(edit: Dictionary) -> void:
@@ -274,8 +430,12 @@ func _disconnect_inspector(inspector: Control) -> void:
 		inspector.sound_preview_requested.disconnect(_on_sound_preview)
 
 
+## Any open tab with unsaved work counts, not just the active one.
 func has_unsaved_changes() -> bool:
-	return _document.is_dirty
+	for row in _tabs.tabs():
+		if bool((row as Dictionary).get("dirty", false)):
+			return true
+	return false
 
 
 func can_new() -> bool:
@@ -287,6 +447,11 @@ func get_new_action_label() -> String:
 
 
 func new_current() -> Error:
+	# Reuse a pristine active tab; otherwise the new menu gets its own tab and
+	# the current one (with its unsaved work) stays open beside it.
+	if _document.is_dirty or not _document.current_path.is_empty():
+		_tabs.add(_create_document())
+		_bind_active_document()
 	return _document.create_new()
 
 
@@ -322,7 +487,27 @@ func get_current_resource_path() -> String:
 
 
 func open_file(path: String) -> Error:
-	return _document.open_mnu(path)
+	# Tab-aware: a menu that is already open activates its tab — unsaved edits
+	# intact — instead of reopening. (Menus open from disk only; no VFS branch.)
+	var existing := _tabs.index_of_path(path)
+	if existing >= 0:
+		return activate_document(existing)
+	# A pristine active document (fresh workspace, just-seeded tab) is reused so
+	# the first open does not leave a stray Untitled tab.
+	var reuse: bool = not _document.is_dirty and _document.current_path.is_empty()
+	var target = _document if reuse else _create_document()
+	var err: Error = target.open_mnu(path)
+	if err != OK:
+		# open_mnu validates before adopting, so a failed open on a new document
+		# just drops it (RefCounted) with the current tab untouched.
+		return err
+	if reuse:
+		_tabs.notify_changed()
+	else:
+		_tabs.add(target)
+		_bind_active_document()
+	_save_state()
+	return err
 
 
 # Cross-jump focus hook (EditorWorkspace.focus_reference): {"screen": String}
@@ -364,11 +549,23 @@ func get_save_as_action_label() -> String:
 
 
 func save_current() -> Error:
-	return _document.save_current()
+	# The shell's dirty-close Save flow routes to Save As only on
+	# ERR_INVALID_PARAMETER; the document base returns ERR_UNAVAILABLE for a
+	# pathless save, so translate at the workspace boundary (the document-level
+	# contract stays pinned for fonts/credits).
+	if _document.current_path.is_empty():
+		return ERR_INVALID_PARAMETER
+	var err: Error = _document.save_current()
+	if err == OK:
+		_save_state()
+	return err
 
 
 func save_as(dir_path: String) -> Error:
-	return _document.save_as(dir_path)
+	var err: Error = _document.save_as(dir_path)
+	if err == OK:
+		_save_state()
+	return err
 
 
 func get_save_dialog_title() -> String:
