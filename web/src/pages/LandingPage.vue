@@ -6,8 +6,8 @@
           <p class="text-sm uppercase tracking-[0.3em] text-brand-200">NovaWorld revived</p>
           <h1 class="mt-4 text-4xl font-bold text-white sm:text-5xl lg:text-6xl">Play Joint Ops & Delta Force Xtreme 2 online again.</h1>
           <p class="mt-6 max-w-2xl text-lg text-slate-300">
-            OpenNova restores and preserves the classic Novalogic gaming experience. Our launcher applies game-improving patches for you, and ships an expansion manager with a
-            curated catalog so the games stay balanced and stable.
+            OpenNova restores and preserves the classic NovaLogic multiplayer experience. The launcher points your game at OpenNova's NovaWorld servers and manages expansions for
+            you. Your game files stay stock.
           </p>
           <div class="mt-8 flex flex-wrap gap-4">
             <RouterLink to="/lobby" class="rounded-full bg-brand-500 px-6 py-3 font-semibold text-white shadow-lg transition hover:bg-brand-400">
@@ -28,7 +28,7 @@
           <div class="relative rounded-3xl border border-white/5 bg-gradient-to-br from-brand-500/10 via-slate-900 to-slate-950 p-6 shadow-2xl">
             <h2 class="text-xl font-semibold text-white">Download the Launcher</h2>
             <p class="mt-2 text-sm text-slate-300">
-              Self-contained Windows build with automatic patches, and expansion management.
+              Self-contained Windows build with NovaWorld server redirection and expansion management.
             </p>
 
             <div v-if="downloadChips.length" class="mt-4 flex flex-wrap gap-2">
@@ -76,9 +76,9 @@
         <div class="flex-1 space-y-6">
           <div class="max-w-2xl">
             <p class="text-sm font-semibold uppercase tracking-[0.3em] text-brand-200">Install OpenNova</p>
-            <h2 class="mt-3 text-3xl font-semibold text-white sm:text-4xl">Fixes the multiplayer, upgrades the game.</h2>
+            <h2 class="mt-3 text-3xl font-semibold text-white sm:text-4xl">Fixes the multiplayer, keeps the game stock.</h2>
             <p class="mt-4 text-base text-slate-300">
-              No fussing, no manual patches—just launch, pick your expansion, and jump in.
+              No patched executables and no injected code. Launch, pick your expansion, and jump in.
             </p>
           </div>
           <div class="grid gap-4 md:grid-cols-2">
@@ -128,7 +128,7 @@
       <div class="mx-auto max-w-4xl rounded-3xl border border-white/5 bg-white/5 p-8 text-center">
         <h2 class="text-3xl font-semibold text-white">Ready to drop in?</h2>
         <p class="mt-3 text-base text-slate-300">
-          Download the launcher, sign in with your OpenNova credentials, and we’ll handle the patches and expansions from there.
+          Download the launcher, sign in with your OpenNova credentials, and it handles the server redirection and expansions from there.
         </p>
         <div class="mt-6 flex flex-wrap justify-center gap-4">
           <a
@@ -188,8 +188,8 @@ const featureHighlights = [
     description: 'Joint Ops & DFX2 matchmaking all from the game client.',
   },
   {
-    title: 'Automatic patches',
-    description: 'Bigger maps, higher texture limits, and modern tick rate applied for you.',
+    title: 'Nothing modified',
+    description: 'A single hosts entry redirects matchmaking. No patched executables, no injected code.',
   },
   {
     title: 'Expansion manager built-in',
@@ -247,7 +247,7 @@ const launcherDescription = computed(() => {
   if (launcherManifest.value?.description) {
     return launcherManifest.value.description;
   }
-  return 'Grab the OpenNova Launcher for quick updates, and seamless patches';
+  return 'Grab the OpenNova Launcher for quick updates and painless setup';
 });
 
 const releaseNotesPreview = computed(() => {

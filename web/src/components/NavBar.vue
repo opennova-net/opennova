@@ -14,7 +14,7 @@
       <nav class="hidden items-center gap-6 text-sm uppercase tracking-wider text-slate-200 md:flex">
         <RouterLink class="hover:text-white transition" to="/lobby">Lobbies</RouterLink>
         <RouterLink class="hover:text-white transition" to="/expansions">Expansions</RouterLink>
-        <RouterLink class="hover:text-white transition" to="/mod-tools">Mod Tools</RouterLink>
+        <RouterLink class="hover:text-white transition" to="/mod-tools">Tools</RouterLink>
         <RouterLink class="hover:text-white transition" to="/admin/users">Admin</RouterLink>
         <RouterLink
           class="rounded-full border border-brand-200 px-4 py-1 text-brand-50 transition hover:bg-brand-500 hover:text-white"
