@@ -30,6 +30,12 @@ namespace {
 //
 // `public_host` is the IP/host the server advertises; `nw_udp_port` and
 // `http_port` are the ports clients should redirect to.
+//
+// POSTIPADDRESS + POSTIPPORT are REQUIRED: the retail parser
+// [orig: CNapiGateManager_ProcessResponse @ 0x4ced20] fails the gate to
+// state -9 ("NO NW POST IP" / "NO NW POST PORT") without them, unless the
+// junction bypass is set. Emitting them here is the load-bearing fix that
+// onnet was missing (grilled 2026-06-11; docs/net/novaworld-net-re.md §8).
 std::string build_gate_response(const std::string &public_host,
                                 uint16_t nw_udp_port,
                                 uint16_t http_port,

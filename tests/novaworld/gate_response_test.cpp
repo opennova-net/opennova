@@ -43,11 +43,23 @@ bool check_all_known_keys() {
 			"VAR UDPCODE2 xyz789\n"
 			"VAR REFLECTEDIPADDRESS 203.0.113.7\n"
 			"VAR REFLECTEDPORTNUMBER 55555\n"
+			"VAR LOBBYNAME jop_2_consumer\n"
+			"VAR USEJUNCTION 1\n"
+			"VAR CLEARJUNCTION 0\n"
+			"VAR GLSVSSREQUEST briefing-req\n"
+			"VAR GLSVSSRIMS 3\n"
+			"VAR GLSVSSAGRMS 4\n"
 			"VAR CUS custom-tier-4\n"
 			"VAR PVT private-flag\n";
 	opennova::GateResponse r;
 	if (!expect(opennova::gate_response_parse(body, r), "full response parses")) return false;
-	if (!expect(r.var_count == 15, "15 VARs absorbed")) return false;
+	if (!expect(r.var_count == 21, "21 VARs absorbed")) return false;
+	if (!expect(r.lobby_name == "jop_2_consumer", "LOBBYNAME")) return false;
+	if (!expect(r.use_junction == 1, "USEJUNCTION")) return false;
+	if (!expect(r.clear_junction == 0, "CLEARJUNCTION")) return false;
+	if (!expect(r.glsvss_request == "briefing-req", "GLSVSSREQUEST")) return false;
+	if (!expect(r.glsvss_rims == 3, "GLSVSSRIMS")) return false;
+	if (!expect(r.glsvss_agrms == 4, "GLSVSSAGRMS")) return false;
 	if (!expect(r.met_ip == "10.1.2.3", "METIPADDRESS")) return false;
 	if (!expect(r.met_port == 8081, "METIPPORT")) return false;
 	if (!expect(r.met_label == "some-label", "METLABEL")) return false;
@@ -104,6 +116,6 @@ int main() {
 	if (!check_case_insensitive_keys()) return 1;
 	if (!check_ignores_unknown_and_malformed()) return 1;
 	if (!check_empty_returns_false()) return 1;
-	std::printf("OK: gate response KV parser (14 witnessed + CUS/PVT VARs)\n");
+	std::printf("OK: gate response KV parser (19 retail VARs + CUS/PVT extras)\n");
 	return 0;
 }
