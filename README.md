@@ -6,19 +6,19 @@ This repo is the full toolchain: extract and edit assets with the importer, the 
 
 ## Screenshots
 
-<p align="center">
-  <a href="screenshots/overview.png">
-    <img src="screenshots/overview.png" alt="OpenNova editor overview" width="900">
-  </a>
-</p>
-
-| Asset importer | Object editing |
+| Asset importer | Terrain workspace |
 |---|---|
-| [<img src="screenshots/importer.png" alt="OpenNova asset importer" width="420">](screenshots/importer.png) | [<img src="screenshots/object.png" alt="Object editing in OpenNova" width="420">](screenshots/object.png) |
-| Font editing | Credits editing |
+| [<img src="screenshots/importer.png" alt="OpenNova asset importer" width="420">](screenshots/importer.png) | [<img src="screenshots/overview.png" alt="Terrain editing in OpenNova" width="420">](screenshots/overview.png) |
+| Object workspace | Mission workspace |
+| [<img src="screenshots/object.png" alt="Object editing in OpenNova" width="420">](screenshots/object.png) | [<img src="screenshots/mission.png" alt="Mission editing in OpenNova" width="420">](screenshots/mission.png) |
+| Fonts workspace | Credits workspace |
 | [<img src="screenshots/fonts.png" alt="Font editing in OpenNova" width="420">](screenshots/fonts.png) | [<img src="screenshots/credits.png" alt="Credits editing in OpenNova" width="420">](screenshots/credits.png) |
-| Strings editing | |
-| [<img src="screenshots/strings.png" alt="Strings editing in OpenNova" width="420">](screenshots/strings.png) | |
+| Strings workspace | Menus workspace |
+| [<img src="screenshots/strings.png" alt="Strings editing in OpenNova" width="420">](screenshots/strings.png) | [<img src="screenshots/menus.png" alt="Menu editing in OpenNova" width="420">](screenshots/menus.png) |
+| Music workspace | Sound workspace |
+| [<img src="screenshots/music.png" alt="Music editing in OpenNova" width="420">](screenshots/music.png) | [<img src="screenshots/sound.png" alt="Sound editing in OpenNova" width="420">](screenshots/sound.png) |
+| Environment workspace | |
+| [<img src="screenshots/environment.png" alt="Environment editing in OpenNova" width="420">](screenshots/environment.png) | |
 
 ## Architecture
 

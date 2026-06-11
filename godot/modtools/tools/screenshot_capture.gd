@@ -2,8 +2,8 @@ extends Node
 
 ## Headless-ish screenshot driver for the OpenNova Editor (ONED).
 ##
-## Instances the editor scene, forces a deterministic window size, then for each
-## target workspace: switches to it, opens a representative fixture, lets the
+## Instances the editor scene, maximizes the window, then for each target
+## workspace: switches to it, opens a representative fixture, lets the
 ## frame settle, and writes a PNG of the composited window to <repo>/screenshots/.
 ## The README references those PNGs, so re-running this keeps the docs in sync
 ## with the editor.
@@ -17,7 +17,9 @@ extends Node
 ## resource-root model the runtime and editor use), NOT from bundled fixtures.
 ## The directory is taken from $NOVA_RESOURCE_DIR, falling back to the editor's
 ## persisted resource dir. It must hold Dvxi5.trn (with its sibling textures),
-## full_00.env, the font, credits, the strings table, and the object below.
+## full_00.env, the font, credits, strings table, object, mission, menu, music,
+## and sound assets below. Music and sound fall back to committed repo fixtures
+## when the external resource root does not include valid representative files.
 ##
 ## Must run with a real rendering window: --headless does not render, so the
 ## captured viewport texture would be blank.
@@ -25,7 +27,6 @@ extends Node
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const EditorScene := preload("res://modtools/terrain/terrain_editor.tscn")
 
-const WINDOW_SIZE := Vector2i(1600, 900)
 # Generous settle budget: lets Control layout, the deferred split layout, and the
 # UPDATE_ALWAYS sub-viewports redraw at their new size before we grab the frame.
 const SETTLE_FRAMES := 16
@@ -46,15 +47,28 @@ const CREDITS_NAME := "nlist.kda"
 const STRINGS_NAME := "GAMETEXT.bin"
 # A textured object that frames well from the 3/4 vantage _frame_object() uses.
 const OBJECT_NAME := "MH53.3di"
+const MISSION_NAME := "00TRa.bms"
+const MENU_NAME := "main.mnu"
+const MUSIC_NAME := "jo_gamemus.bin"
+const SOUND_NAME := "00TRa.LWF"
+const FALLBACK_ASSETS := {
+	MUSIC_NAME: "res://../fixtures/mus/jo_gamemus.bin",
+	SOUND_NAME: "res://../fixtures/lwf/00TRa.LWF",
+}
 
 # [workspace_id, asset_name, out_filename]. The asset is resolved from the
 # resource dir and opened before the workspace is activated.
 var _shots: Array = [
 	[EditorWorkstation.Workspace.TERRAIN, TERRAIN_NAME, "overview.png"],
 	[EditorWorkstation.Workspace.OBJECT, OBJECT_NAME, "object.png"],
+	[EditorWorkstation.Workspace.MISSION, MISSION_NAME, "mission.png"],
 	[EditorWorkstation.Workspace.FONTS, FONT_NAME, "fonts.png"],
 	[EditorWorkstation.Workspace.CREDITS, CREDITS_NAME, "credits.png"],
 	[EditorWorkstation.Workspace.STRINGS, STRINGS_NAME, "strings.png"],
+	[EditorWorkstation.Workspace.MNU, MENU_NAME, "menus.png"],
+	[EditorWorkstation.Workspace.MUSIC, MUSIC_NAME, "music.png"],
+	[EditorWorkstation.Workspace.SOUND, SOUND_NAME, "sound.png"],
+	[EditorWorkstation.Workspace.ENVIRONMENT, ENV_NAME, "environment.png"],
 ]
 
 var _editor: TerrainEditor
@@ -74,7 +88,7 @@ func _ready() -> void:
 	if _root.is_empty():
 		_root = ResourceDirSettings.get_resource_dir()
 	if not ResourceDirSettings.is_valid_root(_root):
-		push_error("[capture] no valid resource dir; set NOVA_RESOURCE_DIR")
+		_fail("[capture] no valid resource dir; set NOVA_RESOURCE_DIR")
 		get_tree().quit(1)
 		return
 	# Persist before instancing so the workstation seeds VegAssets + scans the
@@ -86,7 +100,9 @@ func _ready() -> void:
 	add_child(_editor)
 	# Let the editor's _ready run (window config, new_terrain, workstation bind).
 	await get_tree().process_frame
-	_force_window_size()
+	_maximize_window()
+	for _i in 8:
+		await get_tree().process_frame
 	_workstation = _editor.workstation
 	# Re-apply the root explicitly: re-seeds VegAssets search roots and rescans,
 	# so foliage .3di resolve from the dir regardless of _ready ordering.
@@ -98,13 +114,19 @@ func _ready() -> void:
 	if _editor.environment_editor != null:
 		var env_path := NovaPaths.resolve_file(_root, ENV_NAME)
 		if env_path.is_empty():
-			push_error("[capture] %s not found in %s" % [ENV_NAME, _root])
+			_fail("[capture] %s not found in %s" % [ENV_NAME, _root])
+			get_tree().quit(1)
+			return
 		else:
 			var env_err: int = _editor.environment_editor.open_env(env_path)
 			if env_err != OK:
-				push_error("[capture] open_env failed (%d): %s" % [env_err, env_path])
+				_fail("[capture] open_env failed (%d): %s" % [env_err, env_path])
+				get_tree().quit(1)
+				return
 
-	await _run_all()
+	if not await _run_all():
+		get_tree().quit(1)
+		return
 	await _capture_mission_play()
 
 	print("[capture] done -> ", _out_abs)
@@ -144,43 +166,61 @@ func _capture_mission_play() -> void:
 	ws.stop_play_mission()
 
 
-func _force_window_size() -> void:
+func _maximize_window() -> void:
 	var w := get_window()
-	w.mode = Window.MODE_WINDOWED
 	w.min_size = Vector2i.ZERO  # drop the editor's 1366x768 floor
-	w.size = WINDOW_SIZE
-	w.position = Vector2i(40, 40)
+	w.mode = Window.MODE_MAXIMIZED
 
 
-func _run_all() -> void:
+func _run_all() -> bool:
 	for shot in _shots:
 		var ws_id: int = shot[0]
 		var asset_name: String = shot[1]
 		var out_name: String = shot[2]
 		var is_3d: bool = ws_id == EditorWorkstation.Workspace.TERRAIN \
-			or ws_id == EditorWorkstation.Workspace.OBJECT
+			or ws_id == EditorWorkstation.Workspace.OBJECT \
+			or ws_id == EditorWorkstation.Workspace.MISSION \
+			or ws_id == EditorWorkstation.Workspace.ENVIRONMENT
 
 		# Open the asset BEFORE activating the workspace: set_active_workspace()
 		# rebuilds the workflow inspectors, so opening first means they're built
 		# against already-loaded data (otherwise summaries render stale/empty).
-		var ws: EditorWorkspace = _workstation._workspaces.get(ws_id)
+		var ws: EditorWorkspace = _workspace_for_capture(ws_id)
 		if ws == null:
-			push_error("[capture] no workspace for %s" % out_name)
+			_fail("[capture] no workspace for %s" % out_name)
+			return false
 		elif ws_id == EditorWorkstation.Workspace.FONTS:
 			# Fonts has a by-name opener that resolves <name>.fnt from the root.
 			var ferr: int = int(ws.call("open_font_name", asset_name))
 			if ferr != OK:
-				push_error("[capture] open_font_name failed (%d): %s" % [ferr, asset_name])
+				_fail("[capture] open_font_name failed (%d): %s" % [ferr, asset_name])
+				return false
+		elif ws_id == EditorWorkstation.Workspace.ENVIRONMENT:
+			# Environment is a popup workspace; keep Terrain mounted behind it so
+			# the screenshot shows both the full app chrome and the live scene.
+			_workstation.set_active_workspace(EditorWorkstation.Workspace.TERRAIN)
+			await get_tree().process_frame
+			var env_path := _resolve_asset(asset_name)
+			if env_path.is_empty():
+				_fail("[capture] %s not found in %s" % [asset_name, _root])
+				return false
+			else:
+				var env_open_err: int = ws.open_file(env_path)
+				if env_open_err != OK:
+					_fail("[capture] open_file failed (%d): %s" % [env_open_err, env_path])
+					return false
 		else:
 			# Resolve the asset case-insensitively against the resource dir and
 			# hand the workspace a real OS path (open_file accepts absolute paths).
-			var path := NovaPaths.resolve_file(_root, asset_name)
+			var path := _resolve_asset(asset_name)
 			if path.is_empty():
-				push_error("[capture] %s not found in %s" % [asset_name, _root])
+				_fail("[capture] %s not found in %s" % [asset_name, _root])
+				return false
 			else:
 				var err: int = ws.open_file(path)
 				if err != OK:
-					push_error("[capture] open_file failed (%d): %s" % [err, path])
+					_fail("[capture] open_file failed (%d): %s" % [err, path])
+					return false
 
 		_workstation.set_active_workspace(ws_id)
 		# One frame for the viewport mount + activate() to take effect.
@@ -195,8 +235,12 @@ func _run_all() -> void:
 
 		if ws_id == EditorWorkstation.Workspace.TERRAIN:
 			_frame_terrain()
+		elif ws_id == EditorWorkstation.Workspace.MISSION:
+			_frame_terrain()
 		elif ws_id == EditorWorkstation.Workspace.OBJECT:
 			_frame_object(ws)
+		elif ws_id == EditorWorkstation.Workspace.ENVIRONMENT:
+			_frame_terrain()
 		elif ws_id == EditorWorkstation.Workspace.CREDITS:
 			_balance_credits_split(ws)
 
@@ -205,7 +249,26 @@ func _run_all() -> void:
 			for _i in 6:
 				await get_tree().process_frame
 
-		await _capture(out_name)
+		if not await _capture(out_name):
+			return false
+	return true
+
+
+func _workspace_for_capture(workspace_id: int) -> EditorWorkspace:
+	if workspace_id == EditorWorkstation.Workspace.ENVIRONMENT:
+		return _workstation._environment_workspace
+	return _workstation._workspaces.get(workspace_id)
+
+
+func _resolve_asset(asset_name: String) -> String:
+	var path := NovaPaths.resolve_file(_root, asset_name)
+	if not path.is_empty():
+		return path
+	var fallback := String(FALLBACK_ASSETS.get(asset_name, ""))
+	if fallback.is_empty():
+		return ""
+	var abs := ProjectSettings.globalize_path(fallback)
+	return abs if FileAccess.file_exists(abs) else ""
 
 
 # Park the fly camera inside the sky dome, looking across the terrain toward the
@@ -275,16 +338,22 @@ func _balance_credits_split(ws: EditorWorkspace) -> void:
 		split.split_offset = -40
 
 
-func _capture(out_name: String) -> void:
+func _capture(out_name: String) -> bool:
 	# Grab the frame after the GPU has finished drawing it.
 	await RenderingServer.frame_post_draw
 	var img := get_tree().root.get_texture().get_image()
 	if img == null:
-		push_error("[capture] null viewport image for %s" % out_name)
-		return
+		_fail("[capture] null viewport image for %s" % out_name)
+		return false
 	var path := _out_abs.path_join(out_name)
 	var err := img.save_png(path)
 	if err != OK:
-		push_error("[capture] save_png failed (%d): %s" % [err, path])
+		_fail("[capture] save_png failed (%d): %s" % [err, path])
+		return false
 	else:
 		print("[capture] wrote ", path)
+	return true
+
+
+func _fail(message: String) -> void:
+	push_error(message)
