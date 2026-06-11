@@ -17,6 +17,33 @@ func _items_abs() -> String:
 	return ProjectSettings.globalize_path(ITEMS_PATH)
 
 
+func test_reground_entities_counts_and_applies_with_one_policy() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.create_default(), OK)
+	var placed: Dictionary = m.place_entity_grounded(102001, 4, Vector3(100, 50, 10), Vector3(1, 2, 3))
+	assert_false(placed.is_empty(), "the fixture entity places")
+	var request := {
+		"kind": int(placed["kind"]),
+		"index": int(placed["index"]),
+		"ground_hit_bms": Vector3(100, 50, 14),  # the terrain rose 4 under it
+		"ground_anchor_bms": Vector3(1, 2, 3),
+	}
+	m.mark_clean()
+	# Dry run counts the drift without writing or dirtying.
+	assert_eq(m.reground_entities([request], 0.01, false), 1, "dry run reports the drifted entity")
+	assert_false(m.is_dirty(), "a dry run never dirties the document")
+	# Apply moves it (zero-rotation bake keeps x/y offsets, lifts z), dirties once.
+	assert_eq(m.reground_entities([request]), 1, "apply moves the drifted entity")
+	assert_true(m.is_dirty(), "an applied re-ground dirties the document")
+	var moved: Dictionary = m.get_entity(int(placed["kind"]), int(placed["index"]))
+	assert_almost_eq((moved["position"] as Vector3).z, 11.0, 0.001, "grounded on the raised terrain (14 - anchor z)")
+	# Now everything is on the new ground: both count and apply are no-ops.
+	assert_eq(m.reground_entities([request], 0.01, false), 0, "no drift after the apply")
+	assert_eq(m.reground_entities([request]), 0)
+	# Malformed rows are skipped, never errors.
+	assert_eq(m.reground_entities([{ "kind": 0, "index": -1 }, {}]), 0)
+
+
 func test_mission_data_parses_header_and_entities() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK, "ash_i5b.reference.bms should parse")
