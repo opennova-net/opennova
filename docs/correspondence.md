@@ -107,6 +107,21 @@ Verdicts and the NW-G1/NW-L2 findings live in
 | `session_hello.cpp` TLV reads | `NapiNPProtocol_HandleClientHello` | `0x6213b0` | NVS/CO/AP/BDAT/PN/PG/PV1/PV2 + retail PV3/PM/CI/EIP/EPN/ET | per-tag `Napi_StrCaseEqual`; NWU key @ 0x7DFC50; version @ 0x7DFCF0 | matching |
 | `lobby_session.cpp` dispatch | NOVAWORLDUDP containers (§3) | — | all 10 containers + replies | `lobby_session_test`; §3 | matching (spot-checked) |
 
+## 5.1 NWU cipher (grill wave 3, 2026-06-11)
+
+Re-anchored to retail (was jodemo-only). Verdict + NW-C1 in [§8](net/novaworld-net-re.md).
+
+| reimpl symbol (file) | original | addr | role | evidence | status |
+|---|---|---|---|---|---|
+| `nwu_decrypt` (`libs/novacrypto/src/nwu.cpp`) | `NapiNP_EncryptBuffer` | `0x6187b0` | ADD chain (retail "encrypt") | 4-phase add: key→reverse→prog→LCG | matching (byte-exact) |
+| `nwu_encrypt` (`nwu.cpp`) | `NapiNP_DecryptBuffer` | `0x618880` | SUBTRACT chain (retail "decrypt") | inverse of 0x6187b0 | matching (byte-exact) |
+| `nwu_compute_seed` (`nwu.cpp`) | `NapiNP_ComputeKeySeed` | `0x618430` | seed: null→3252, Σ(i+key[i]²)+len+50 | signed key bytes | matching |
+| `clcg_init`/`LCGState` (`nwu.cpp`) | `NapiPRNG_Init` | `0x62e430` | LCG `{state,mult,counter}`, mult 78665521 (`0x04B05731`) | struct + multiplier | matching (doc hex fixed) |
+| `add_with_keystring` (`nwu.cpp`) | `Crypto_AddWithKey` | `0x6182d0` | `buf[i]+=key[i%klen]` | — | matching |
+| `add_with_progression` (`nwu.cpp`) | `Crypto_AddProgressive` | `0x618250` | `buf[i]+=seed+i; seed+=step` | — | matching |
+| `scramble_with_lcg` (`nwu.cpp`) | `Crypto_AddLCG` | `0x6183b0` | `state=u16(mult·state+1); buf[i]+=state` | — | matching |
+| `reverse_in_place` (`nwu.cpp`) | `NapiNP_ReverseBuffer` | `0x618210` | `len>>1` front/back swaps | — | matching |
+
 ## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 
 `UI_DispatchScreenEvent @ 0x54e6a0`, `UI_ShowPreGameMenuByState @ 0x568d10`,

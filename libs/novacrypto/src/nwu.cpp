@@ -159,6 +159,7 @@ NwuDerived nwu_derive(uint32_t seed) {
 } // namespace
 
 uint32_t nwu_compute_seed(std::string_view key) {
+	// [orig: NapiNP_ComputeKeySeed @ 0x618430 (retail) | Crypto_ComputeSeed @ 0x5e5160 (demo)]
 	// Mirrors Crypto_ComputeSeed@0x5e5160: sum of (i + key[i]*key[i]) +
 	// keylen + 50. Null-key sentinel (3252) is not reachable via string_view,
 	// but we return it on empty to preserve the 'no key provided' signal.
@@ -176,6 +177,8 @@ uint32_t nwu_compute_seed(std::string_view key) {
 }
 
 size_t nwu_encrypt(uint8_t *buf, size_t len, std::string_view key) {
+	// [orig: NapiNP_DecryptBuffer @ 0x618880 (retail) | Crypto_DecryptBuffer @ 0x5e5230 (demo)]
+	// SUBTRACT chain. Retail/onnet call this the *decrypt* entry (name-swap).
 	if (!buf || len == 0 || key.empty()) {
 		return 0;
 	}
@@ -191,6 +194,8 @@ size_t nwu_encrypt(uint8_t *buf, size_t len, std::string_view key) {
 }
 
 size_t nwu_decrypt(uint8_t *buf, size_t len, std::string_view key) {
+	// [orig: NapiNP_EncryptBuffer @ 0x6187b0 (retail) | PFF_EncryptBuffer @ 0x5e5300 (demo)]
+	// ADD chain. Retail/onnet call this the *encrypt* entry (name-swap).
 	if (!buf || len == 0 || key.empty()) {
 		return 0;
 	}

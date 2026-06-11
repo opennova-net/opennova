@@ -939,3 +939,34 @@ and, if demo support is wanted, a separate demo GSB/GLB builder. Deferred with
 NW-L1 (the DFX2 gate hostname, also a different-binary item) to a wave-2
 follow-up that loads those IDBs. The retail path — the one that matters for the
 deploy target — is matching.
+
+### Wave 3 — login/session crypto (2026-06-11)
+
+| System (reimpl) | Original | Verdict | Notes |
+|---|---|---|---|
+| NWU cipher (`libs/novacrypto/src/nwu.cpp`) | `NapiNP_EncryptBuffer @ 0x6187b0` / `NapiNP_DecryptBuffer @ 0x618880` (retail) | **matching (byte-exact, retail)** | NW-C1: re-grilled against retail (was jodemo-anchored only). All six primitives + the seed + the 3-step derive + the 4-phase order match. Name-swap confirmed at byte level. Fixed a doc bug: the LCG multiplier `78665521` is `0x04B05731`, not `0x04B02631` as commented. |
+| EPASK login-form encrypt (`libs/novacrypto/src/epask.cpp`) | client login submit `build_url_and_submit_request @ 0x63e3f0` | **unknown (anchored, deferred)** | NW-C2: the client reads the server-issued `EPASK` key (`exp:mod:key`) from the CookieJar and appends `?EPASK=<key>` + per-field params; each field is encrypted via the input-widget vtable method at `+0x38`. The modexp/A-P encrypt routine is behind that vtable and needs a widget-class trace to pin byte-for-byte. |
+| PUBcrypto join cookies (`libs/novacrypto/src/pubcrypto.cpp`) | (CookieJar consumers; `CookieJar_SaveToFile @ 0x64ee60`) | **unknown (deferred)** | NW-C3: `NK`/`CK`/`BK`/`PUBPCID`/`.joi` are **not** literal strings in retail — the client stores join cookies via the generic CookieJar, so the decode needs a cookie-jar dataflow trace rather than a string anchor. |
+
+#### NW-C1 — NWU cipher is byte-exact in retail (resolved)
+
+The core keyed cipher under EPASK, PUBcrypto, GSB, the gate, and session payloads.
+Verified primitive-by-primitive against retail `Jointops.exe`:
+
+- `NapiNP_ComputeKeySeed @ 0x618430` — `null → 3252`; `Σ(i + key[i]²) + len + 50`, key
+  bytes signed. Exact match to `nwu_compute_seed`.
+- `NapiPRNG_Init @ 0x62e430` — LCG struct `{state@0, multiplier@4, counter@8}`, multiplier
+  `78665521` (`0x04B05731`); only the low 16 bits (`0x5731`) participate.
+- `Crypto_AddWithKey @ 0x6182d0` — `buf[i] += key[i % klen]` (ADD), so retail
+  *EncryptBuffer* is the ADD chain = our `nwu_decrypt`. Confirms the name-swap.
+- `Crypto_AddProgressive @ 0x618250` — `buf[i] += seed+i; seed += step`.
+- `Crypto_AddLCG @ 0x6183b0` — `state = u16(mult·state + 1); buf[i] += state`.
+- `NapiNP_ReverseBuffer @ 0x618210` — `len>>1` front/back swaps.
+
+The three NWU keys are all confirmed against retail: gate `"GATEAPI"`, GSB
+`"3209452104342624532341"`, and session-payload (opcode 0x47/0x87)
+`"asdfj2349857qu23rija;sdlvzx09caweklrj1234hldfj"` @ `0x7DFC50`. Verdict: matching.
+
+NW-C2 (EPASK modexp) and NW-C3 (PUBcrypto decode) remain a wave-3 follow-up; both
+require tracing past polymorphic widget/cookie dispatch rather than a string or constant
+anchor.
