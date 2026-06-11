@@ -46,6 +46,9 @@ var _var_rows_signature := ""
 
 var _status_label: Label
 
+# Perf pane (C11): the PerfTimeline ring + live monitors.
+var _perf_pane: DebugPerfPane
+
 
 func _init() -> void:
 	layer = 90
@@ -127,6 +130,13 @@ func _build_panel() -> void:
 	_build_entities_tab()
 	_build_sim_tab()
 	_build_vars_tab()
+	_build_perf_tab()
+
+
+func _build_perf_tab() -> void:
+	_perf_pane = DebugPerfPane.new()
+	_perf_pane.name = "Perf"
+	_tabs.add_child(_perf_pane)
 
 
 func _build_entities_tab() -> void:
@@ -265,6 +275,7 @@ func _refresh() -> void:
 	_refresh_entities(sim)
 	_refresh_sim(runtime, sim)
 	_refresh_vars(sim)
+	_perf_pane.refresh()
 
 
 func _clear_live_panes() -> void:
