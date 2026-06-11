@@ -827,12 +827,15 @@ bool HttpListener::start(const ServerConfig &config) {
 			std::vector<crow::json::wvalue> arr;
 			for (const auto &x : catalog::list_expansions(db_)) {
 				crow::json::wvalue e;
-				e["slug"]         = x.slug;
-				e["display_name"] = x.display_name;
-				e["summary"]      = x.summary;
-				e["version"]      = x.version;
-				e["featured"]     = x.featured;
-				e["game_slug"]    = x.game_slug;
+				// camelCase to match the web type + /api/games (the frontend
+				// reads displayName/gameSlug; snake_case here showed up as a
+				// localeCompare-on-undefined crash on the Expansions page).
+				e["slug"]        = x.slug;
+				e["displayName"] = x.display_name;
+				e["summary"]     = x.summary;
+				e["version"]     = x.version;
+				e["featured"]    = x.featured;
+				e["gameSlug"]    = x.game_slug;
 				arr.push_back(std::move(e));
 			}
 			out["expansions"] = std::move(arr);

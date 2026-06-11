@@ -50,11 +50,11 @@
                   <dt class="text-xs uppercase tracking-widest text-slate-500">Version</dt>
                   <dd class="font-mono text-sm text-white">{{ expansion.version }}</dd>
                 </div>
-                <div>
+                <div v-if="expansion.install?.target">
                   <dt class="text-xs uppercase tracking-widest text-slate-500">Install Target</dt>
                   <dd class="font-mono text-sm text-white">{{ expansion.install.target }}</dd>
                 </div>
-                <div>
+                <div v-if="expansion.packageType">
                   <dt class="text-xs uppercase tracking-widest text-slate-500">Package</dt>
                   <dd class="text-sm">{{ expansion.packageType }}</dd>
                 </div>
@@ -129,7 +129,7 @@ onMounted(async () => {
     ]);
 
     games.value = gameResponse.games ?? [];
-    standaloneExpansions.value = expansionList.filter((expansion) => !expansion.game);
+    standaloneExpansions.value = expansionList.filter((expansion) => !expansion.gameSlug);
   } catch (error) {
     console.error('Failed to load expansions', error);
     errorMessage.value = 'Unable to load expansions right now. Please try again later.';
@@ -184,7 +184,7 @@ function sortExpansions(list: readonly ExpansionSummary[]): ExpansionSummary[] {
     if (featuredDelta !== 0) {
       return featuredDelta;
     }
-    return a.displayName.localeCompare(b.displayName);
+    return (a.displayName ?? '').localeCompare(b.displayName ?? '');
   });
 }
 </script>

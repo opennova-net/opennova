@@ -15,14 +15,14 @@ export interface ExpansionSummary {
   displayName: string;
   summary?: string | null;
   version: string;
-  packageType: string;
+  packageType?: string;
   featured: boolean;
-  install: {
+  install?: {
     target: string;
   };
   releaseNotes?: string | null;
-  game: ExpansionGameSummary | null;
-  files: ExpansionFileSummary[];
+  gameSlug?: string | null;
+  files?: ExpansionFileSummary[];
 }
 
 export interface ExpansionsResponse {
