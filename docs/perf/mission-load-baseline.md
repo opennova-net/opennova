@@ -70,15 +70,61 @@ cost either way.
    lifecycle hygiene, not load time — schedule on those merits or not at all.
 5. Terrain, environment, parse, overlays: all under 250 ms — leave alone.
 
+## After the wave-6 perf slice (2026-06-11)
+
+Same machine, same protocol (second, OS-warm run; Debug GDExtension),
+captured after the perf slice landed three changes:
+
+1. **`NovaResourceRoot.resolve_file` memo** — the dominant cost. Every call
+   walked the *entire* root directory (`DirAccess` listing, ~10k entries for
+   a retail extract), and `NovaObjectData.get_materials()` resolves every
+   texture of every material through it on every model rebuild. CP15 spent
+   ~23 s of its load in these walks. Now one walk per cache epoch feeds a
+   name→path memo (case-variant duplicates poison their key, preserving the
+   duplicate-name error). A companion decoded-texture cache backs
+   `load_texture`'s packed-PFF fallback, which re-extracted + re-decoded per
+   call on runtime mounts.
+2. **`NovaObjectData` submesh cache** — `build_lod_submeshes` results are
+   memoized per `(lod, skeletal, bone_count)`; cache hits hand out the same
+   `ArrayMesh` refs (entry dictionaries deep-copied, so callers can't taint
+   the cache). The mission placer shares one `NovaObjectData` per graphic,
+   so N animated soldiers now share meshes instead of paying N mesh builds.
+   Materials stay per-instance (runtime shader params are per-entity).
+3. **Placer build-order fix** — `_apply_skeletal_anim` now runs *before*
+   `set_object_data`, so each animated entity does one skeletal-keyed build
+   instead of building a static-keyed mesh set first and throwing it away.
+
+| Span | CP15 before | CP15 after | ASH before | ASH after | 03TR before | 03TR after |
+|---|---:|---:|---:|---:|---:|---:|
+| **total** | 50,624 | **5,134** | 9,782 | **1,274** | 21,245 | **3,764** |
+| objects | 50,279 | 4,779 | 9,479 | 1,024 | 20,959 | 3,525 |
+| &nbsp;&nbsp;static_batches | 6,452 | 520 | 9,186 | 743 | 4,467 | 391 |
+| &nbsp;&nbsp;pick_colliders | 160 | 159 | 234 | 219 | 227 | 208 |
+| &nbsp;&nbsp;animated_models | 43,636 | **4,068** | 0 | 0 | 16,192 | **2,859** |
+
+CP15 `animated_models` 43.6 s → 4.1 s (10.7x) against the slice's <9 s
+acceptance gate; whole-mission opens are 5.6–9.9x faster.
+
+**Where the remaining animated cost lives:** ~3.3 s of CP15's 4.1 s is 15
+distinct `.adm` body-animation sets loading at ~220 ms each
+(`NovaSkeletalAnim.load_from_resource_root`, cached per `.adm` by the
+placer — the cost is intrinsic first-load parsing, once per distinct
+animation set per mission open). If a future slice wants it, the lead is
+sharing parsed clip/skeleton data across `.adm` sets, not more caching at
+the placer layer.
+
 ## Reproduction
 
 ```text
-# /tmp/perf_capture.gd: SceneTree script — instantiate
-# res://modtools/terrain/terrain_editor.tscn, _set_resource_root_dir(<assets>),
-# open_in_workspace("mission", <path>) per mission, then dump
-# PerfTimeline.latest().spans().
-Godot_v4.6.1-stable_win64_console.exe --headless --path godot -s perf_capture.gd
+# Committed probe (the capture above): instantiates the real editor main
+# scene, mounts JO_ASSETS_DIR, opens each mission through
+# open_in_workspace("mission", path), dumps PerfTimeline spans.
+JO_ASSETS_DIR=<retail loose extract> \
+Godot_v4.6.1-stable_win64_console.exe --headless --path godot \
+    --script res://tests/mission_load_perf_probe.gd
 ```
 
-The same data is visible interactively in the debug overlay's Perf tab
-(C11) after any mission load, in either host.
+Record the second run of a session (OS-warm); override the mission list
+with JO_PROBE_MISSIONS=a.bms,b.bms when needed. The same data is visible
+interactively in the debug overlay's Perf tab (C11) after any mission load,
+in either host.

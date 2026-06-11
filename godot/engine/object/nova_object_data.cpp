@@ -1122,6 +1122,7 @@ void NovaObjectData::_clear() {
 	_clear_oed_session();
 	_clear_source_model();
 	_clear_source_project();
+	submesh_cache.clear();
 	threedi_ir_free(&ir);
 	threedi_ir_init(&ir);
 	has_ir = false;
@@ -1160,6 +1161,10 @@ uint8_t NovaObjectData::_normalize_oed_update_mask(int p_update_mask) const {
 }
 
 void NovaObjectData::_notify_object_changed(uint8_t p_update_mask) {
+	// Every document mutation (all OED setters, opens, LOD/scene swaps) funnels
+	// through here or _clear() — the memoized submesh builds die with the data
+	// they were built from.
+	submesh_cache.clear();
 	last_oed_update_mask = p_update_mask & UPDATE_ALL;
 	_mark_oed_dirty(p_update_mask);
 	emit_signal("object_changed");
@@ -2893,10 +2898,25 @@ Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 	return result;
 }
 
+uint64_t NovaObjectData::_submesh_cache_key(int p_lod_index, bool p_skeletal, int p_bone_count) {
+	return static_cast<uint64_t>(p_lod_index) |
+			(static_cast<uint64_t>(p_skeletal ? 1 : 0) << 16) |
+			(static_cast<uint64_t>(p_bone_count) << 24);
+}
+
 Array NovaObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bone_count) const {
 	Array result;
 	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
 		return result;
+	}
+	// Memo hit: hand back a deep copy of the ENTRY dictionaries (so a caller's
+	// edits never taint the cache) whose ArrayMesh refs stay SHARED —
+	// Array::duplicate(true) does not duplicate Resources, and that sharing is
+	// the point: N models from one data render one set of meshes.
+	const uint64_t cache_key = _submesh_cache_key(p_lod_index, p_skeletal, p_bone_count);
+	const auto cached = submesh_cache.find(cache_key);
+	if (cached != submesh_cache.end()) {
+		return cached->second.duplicate(true);
 	}
 	const ThreediIRLod &lod = ir.lods[p_lod_index];
 	const Array surfaces = get_lod_surfaces(p_lod_index);
@@ -2979,7 +2999,10 @@ Array NovaObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int 
 		entry["is_skinned"] = surface_skinned;
 		result.push_back(entry);
 	}
-	return result;
+	// Keep the pristine copy; the caller gets its own entry dictionaries. The
+	// empty early-outs above are deliberately NOT cached.
+	submesh_cache.emplace(cache_key, result);
+	return result.duplicate(true);
 }
 
 Dictionary NovaObjectData::eval_material_runtime(int p_index, int p_time_ms, const Dictionary &p_ctrl_values) const {
