@@ -162,3 +162,27 @@ func test_double_saturate_and_lit_water_helpers() -> void:
 	var mid := Color(0.5, 0.5, 0.5)
 	var lit := EnvFile.lit_water_color(mid, mid)
 	assert_almost_eq(lit.r, 0.5, 0.02, "water*light>>7 is identity at mid-gray.")
+
+
+func test_field_consumption_table_mirrors_the_matrix() -> void:
+	var table := EnvFile.get_field_consumption()
+	assert_false(table.is_empty(), "the consumption table is populated")
+
+	var terrain: Dictionary = table.get("terrain_tint", {})
+	assert_eq(String(terrain.get("status", "")), "partial", "terrain_tint is partial (divergence #19)")
+	assert_string_contains(String(terrain.get("anchor", "")), "0x60b8cb", "anchored to the bake consumer")
+	assert_false(String(terrain.get("note", "")).is_empty(), "deferred rows explain themselves")
+
+	assert_eq(String((table.get("iris_percent", {}) as Dictionary).get("status", "")), "unconsumed",
+		"iris is unconsumed until the modulator chain lands (divergence #17)")
+	assert_false(bool((table.get("iris_percent", {}) as Dictionary).get("faithful", true)),
+		"iris is a real gap, not a faithful no-op")
+	assert_true(bool((table.get("vertex_tint", {}) as Dictionary).get("faithful", false)),
+		"vertex_tint is faithfully unconsumed (retail ignores it too)")
+
+	var cloud: Dictionary = table.get("cloud_tint", {})
+	assert_eq(String(cloud.get("status", "")), "honored", "cloud_tint is honored after the C7 flat pass")
+	assert_false(String(cloud.get("note", "")).is_empty(), "honored-with-scope rows keep their caveat")
+
+	assert_eq(String((table.get("fog_level", {}) as Dictionary).get("status", "")), "honored",
+		"plainly honored fields are in the table too")

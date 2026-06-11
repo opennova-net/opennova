@@ -1,7 +1,8 @@
 # Environment honored-matrix: which `.env` fields the renderer actually consumes
 
-The Environment workspace exposes every `env::Config` field, but not every field
-reaches a visible render input yet. This matrix classifies each editor-exposed field
+The Environment workspace exposes nearly every `env::Config` field (water height still
+arrives via terrain/BMS rather than the inspector), but not every field reaches a
+visible render input yet. This matrix classifies each editor-exposed field
 so authors (and the editor UI) can tell a live control from a parsed-but-deferred one,
 and so renderer changes flip rows only with citations. It is the audit behind the
 editor-depth roadmap's environment fidelity work; the reverse-engineering record it
@@ -49,7 +50,7 @@ runtime nodes (`NovaEnvironment` / `NovaSky` / `NovaWater` / `NovaWeather` /
 | `sky_height` | `NovaSky` dome scale → `u_sky_height`; celestial dome distance | HONORED | [orig: build_sky_dome_mesh @ 0x578db0; Environment_ApplyFogAndAmbient @ 0x57e4f7] | Default carries the original raw-200 quirk. |
 | `sky_map1` / `sky_map2` | `NovaSky` → `u_cloud_tex1/2` | HONORED | [orig: Path_ReplaceOrAppendExtension @ 0x57cc4b (.pcx coercion)] | Coercion handled by the texture resolver, not at parse. |
 | `advanced_clouds` | `NovaSky` mode switch | HONORED | [orig: render_skybox fixed-function pass @ 0x579b42] | 0 forces the dome to `cloud_tint`; ≠0 takes the keyframed-color path. |
-| `cloud_tint` (`cloud_rgb`) | `NovaSky` → `u_cloud_tint` | PARTIAL | [orig: dome material AMBIENT vs D3DRS_AMBIENT=white @ 0x579b42..0x579bb6; xref sweep of Env_CloudBlock @ 0x26c64a4] | **Scope witnessed (C6, G1)**: `cloud_rgb` colors the dome *only* in the `advanced_clouds 0` fixed-function pass; the keyframed/shader path's cloud colors come exclusively from the cloudbase/cloudedge/cloudhighlight blocks. Our `cloud_color *= u_cloud_tint * 2.0` in the keyframed path is a **fabrication — C7 deletes it**. |
+| `cloud_tint` (`cloud_rgb`) | `NovaSky` → `u_flat_color` (flat pass only) | HONORED | [orig: dome material AMBIENT vs D3DRS_AMBIENT=white @ 0x579b42..0x579bb6; xref sweep of Env_CloudBlock @ 0x26c64a4] | **Flipped by C7**: `cloud_rgb` now colors the dome *only* in the `advanced_clouds 0` flat pass (textureless, per the C7 pre-port read), exactly the witnessed scope. The fabricated keyframed-path `u_cloud_tint * 2.0` is deleted. |
 | `sun_3di` / `moon_3di` / `star_3di` | `NovaCelestial` model load + placement + keyframe tint | HONORED | [orig: EffectWorld_LoadCelestialModels @ 0x5adc50] | |
 | `glare_3di` | `NovaCelestial` additive overlay, intensity from `compute_sun_glare` | PARTIAL | [orig: render_skybox_sun_glow @ 0x5acd00; compute_sun_glare_and_fog_blend @ 0x5ad610] | Intensity formula (dot³², ×192, clamp 255) matches; the 8-jittered-ray terrain **occlusion is held at full brightness** (tracked divergence). |
 
@@ -67,28 +68,29 @@ original's 63356 snap quirk) are HONORED — [orig: Environment_SortAndSnapshotK
 | `ground` | fill/ambient light → shader globals | HONORED | |
 | `fog` | doubled (`double_saturate`) → fog uniforms | HONORED | [orig: Environment_ApplyFogAndAmbient @ 0x57f17c]. |
 | `sky` | sky ambient → shader globals | HONORED | |
-| `skyfog` | doubled → horizon/clear color | HONORED | Sentinel-mirror (0xC0C0FF leftover-slot bleed) deliberately not replicated. |
-| `skybase` | `NovaSky` → `u_sky_base` | PARTIAL | Consumed in the dome combine — see below. |
-| `skybright` | `NovaSky` → `u_sky_bright` | PARTIAL | |
-| `skyhighlight` | `NovaSky` → `u_sky_highlight` | PARTIAL | |
-| `cloudbase` | `NovaSky` → `u_horizon_color` | PARTIAL | |
-| `cloudhighlight` | `NovaSky` → `u_ground_fog_color` | PARTIAL | |
-| `cloudedge` | `NovaSky` → `u_secondary_ambient` | PARTIAL | |
+| `skyfog` | doubled via `get_skyfog_color()`; consumer pending | PARTIAL | **Flipped by C7**: the old dome shader abused skyfog as an invented sub-horizon mix, which C7 deleted; the *witnessed* consumer is the frame CLEAR color (cross-faded skyfog↔fog at low fog distance, env-tod-re.md §Fog policy) and is not wired yet — host scenes choose their own background (divergence #21). Sentinel-mirror (0xC0C0FF leftover-slot bleed) deliberately not replicated. |
+| `skybase` | `NovaSky` → `u_sky_base` | HONORED | Dome combine ported by C7 — see below. |
+| `skybright` | `NovaSky` → `u_sky_bright` | HONORED | |
+| `skyhighlight` | `NovaSky` → `u_sky_highlight` | HONORED | |
+| `cloudbase` | `NovaSky` → `u_cloud_base` | HONORED | |
+| `cloudhighlight` | `NovaSky` → `u_cloud_highlight` | HONORED | |
+| `cloudedge` | `NovaSky` → `u_cloud_edge` | HONORED | |
 
-**Why the six dome colors are PARTIAL.** All six are interpolated and pushed as
-uniforms, but `sky.gdshader`'s fragment combine is an **approximation, not a port** —
-and the true combine is now **fully recovered** (C6 grill, G1; spec in
-[env-tod-re.md](env-tod-re.md) §Sky dome): two passes — a textureless gradient dome
-(`oD0 = lerp(skybase + (skybright−skybase)·(0.5·dot(N,sunDir)+0.5), skyhighlight,
-prox⁸)`) under a dual-layer cloud pass (`oD0 = lerp(lerp(cloudbase, cloudedge, prox⁴),
-cloudhighlight, prox⁸)`, `oD1 = lerp(skyGradient, cloudedge, prox⁴)`, color =
-`lerp(tex0·tex1·2, oD0, oD1)` on capable hardware, srcAlpha/invSrcAlpha onto the dome).
-Every exponent/scale in our current shader (`pow 64`, `pow 4`, `pow 48`, `* 2.0`,
-`* 0.15`, `* 0.8`, cloud mix `0.7/0.3`, elevation smoothsteps) is an invention the
-recovered spec replaces. This is why environment color edits can look "not honored":
-the sliders feed real uniforms, but the combine does not respond the way the original
-dome would. **Porting the recovered spec is the C7 headline** (env-tod-re.md
-divergence #20); rows flip to HONORED only when it lands.
+**Why the six dome colors are HONORED (flipped by C7).** `sky.gdshader` +
+`nova_sky.gd` are now a structural port of the recovered combine (C6 grill, G1; spec in
+[env-tod-re.md](env-tod-re.md) §Sky dome), folded into one Godot pass: the textureless
+gradient (`oD0 = lerp(skybase + (skybright−skybase)·(0.5·dot(N,sunDir)+0.5),
+skyhighlight, prox⁸)`) under the dual-layer cloud combine (`rgb = density·cloudRamp +
+(1−density)·skyBehind` with `density = tex0·tex1·2`, ramp/skyBehind from the
+cloudbase/cloudedge/cloudhighlight lerp chain, blended by `α = (tex0.a·tex1.a·2)²·2`),
+with the builder-formula dome normals, Y-only height scale, half-camera-height anchor,
+dp3 clip-space proximity, and VS dome fog against the shared scene fog color. Every
+invented term of the old shader (`pow 64/4/48` glows, `u_cloud_tint·2`, elevation
+smoothsteps, clear-color floor mix) is deleted. Residual caveat (tracked under
+env-tod-re.md divergence #20): the clip-space proximity dot runs in Godot's clip
+conventions rather than D3D's — same construction, slightly different z scale; pending
+a visual A/B against retail. Sun/moon glow no longer comes from the dome shader at all —
+celestial bodies are `NovaCelestial`'s job, as in the original.
 
 ## BMS mission overrides
 
@@ -106,17 +108,19 @@ is the fix wave's (C7) work-order list:
 
 | Target | Disposition | Where | C7 work order |
 |---|---|---|---|
-| G1 sky dome combine | **closed — recovered** (embedded vs_1_1 sources + TSS tables; cloud_rgb = fixed-function-only) | env-tod-re.md §Sky dome | Rewrite `sky.gdshader` fragment + `nova_sky.gd` uniform plumbing from the spec; delete keyframed-path `u_cloud_tint`; c25 upload is dead — don't replicate |
+| G1 sky dome combine | **closed — recovered**, then **ported by C7** (embedded vs_1_1 sources + TSS tables; cloud_rgb = fixed-function-only) | env-tod-re.md §Sky dome + C7 addendum | DONE: `sky.gdshader` + `nova_sky.gd` rewritten from the spec; keyframed-path `u_cloud_tint` deleted; dead c25 not replicated; dome rows flipped HONORED |
 | G2 iris curve | **closed — recovered** (global auto-exposure, 64 = identity) | env-tod-re.md §Iris auto-exposure | Spec ready; requires the modulator chain — defer implementation, keep UNCONSUMED badge |
 | G3 terrain_rgb consumers | **closed — refuted terrain-inert** (bake / water quads / foliage all live) | env-tod-re.md §iris/terrain_rgb | Row stays PARTIAL with the real gap named; per-consumer port decisions ride the terrain/foliage work, not C7 |
 | G4 ApplyFogAndAmbient walk | **closed — complete** (8-row walk; exposure → `Render_LightScaleRGB` shader constant) | env-tod-re.md §…walk | Ceiling/floor: **keep** (live exposure inputs + effects indoor ambient); badge as deferred-consumer, do not delete |
 | G5 overcast precedence | **closed — corrected** (additive after `.trn` success; never a fallback; missing `.trn` aborts) | env-tod-re.md §Load pipeline | Comment-level in `libs/env`; future overcast cross-fade uses corrected order |
 | G6 thunder/oscillators | **closed — feeder** (`SETFLASH1`, trigger ids 0/0x80, sequencer B unreachable; no `.env` rain/wind keywords) | env-tod-re.md §weather tick | Hand to the WAC weather wave (not C7) |
 
-## Editor follow-up
+## Editor follow-up (shipped by C7)
 
-The fix wave (roadmap slice C7) adds an engine-side consumption table on `EnvFile`
-(field → honored | deferred, with the original anchor) so the Environment inspector
-can badge UNCONSUMED/PARTIAL fields as "not yet consumed by the renderer" instead of
-silently accepting edits. Rows in this matrix flip only with a citation from the
-grill record.
+`EnvFile.get_field_consumption()` (godot/engine/env/env_file.cpp) is the engine-side
+consumption table — field → honored | partial | unconsumed, with the original anchor
+and a plain-language note — and the Environment inspector badges PARTIAL (◐) and
+UNCONSUMED (○) rows with tooltips instead of silently accepting edits. C7 also added
+the previously-unexposed fields (water murk, lightning, ceiling/floor, vertex tint,
+iris) as editable Advanced rows, badged where deferred. The table mirrors this matrix;
+rows in both flip only with a citation from the grill record.
