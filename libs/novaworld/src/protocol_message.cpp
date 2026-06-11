@@ -143,7 +143,12 @@ bool append_protocol_message(std::vector<uint8_t> &out,
 		return false;
 	}
 	uint8_t flags_raw = msg.flags.raw;
-	if (flags_raw == 0) {
+	// Retail emits zero-flag messages (no length field, empty payload) —
+	// e.g. the S2C 0x1C stub in every BMS-state bundle (witnessed in the
+	// 2026-04-26 capture runs, fixtures/novaworld/run_*/bundle_1c_*.nwmsg).
+	// Honor that shape; only auto-pick a length flag when there is a
+	// payload that needs one.
+	if (flags_raw == 0 && !msg.payload.empty()) {
 		flags_raw = msg.payload.size() > 0xFFu ? 0x40u : 0x20u;
 	}
 	ProtocolMessageFlags flags = decode_flags(flags_raw);

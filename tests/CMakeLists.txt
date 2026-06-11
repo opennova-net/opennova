@@ -938,6 +938,14 @@ add_test(NAME lobby_session COMMAND lobby_session_test)
 # Backend schema regression — applies the actual backend/migrations/* and
 # backend/seed/* the standalone server uses, so SQL syntax errors and seed
 # regressions break CI before they break the running server.
+# Retail-capture replay — pins the ProtocolMessage codec and the RE-doc
+# §5.4/§5.5 BMS-bundle facts against the 2026-04-26 live JO captures.
+add_executable(nwmsg_replay_test novaworld/nwmsg_replay_test.cpp)
+target_link_libraries(nwmsg_replay_test PRIVATE opennova_novaworld)
+target_include_directories(nwmsg_replay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nwmsg_replay_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
+add_test(NAME nwmsg_replay COMMAND nwmsg_replay_test)
+
 add_executable(backend_schema_test novaworld/backend_schema_test.cpp)
 target_link_libraries(backend_schema_test PRIVATE opennova_novaworld)
 target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
