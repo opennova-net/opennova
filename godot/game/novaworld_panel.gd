@@ -24,9 +24,12 @@ var _status_label: Label
 var _server_list: ItemList
 var _host_button: Button
 var _close_button: Button
+var _target_option: OptionButton
+var _target: int = NovaWorldSettings.Target.OPENNOVA
 
 
 func _ready() -> void:
+	_target = NovaWorldSettings.load_target()
 	_build_ui()
 	_create_client()
 
@@ -45,6 +48,18 @@ func _build_ui() -> void:
 	var title := Label.new()
 	title.text = "NovaWorld"
 	box.add_child(title)
+
+	var target_row := HBoxContainer.new()
+	box.add_child(target_row)
+	var target_label := Label.new()
+	target_label.text = "Server:"
+	target_row.add_child(target_label)
+	_target_option = OptionButton.new()
+	_target_option.add_item("OpenNova", NovaWorldSettings.Target.OPENNOVA)
+	_target_option.add_item("Original NovaWorld", NovaWorldSettings.Target.REAL)
+	_target_option.select(_target_option.get_item_index(_target))
+	_target_option.item_selected.connect(_on_target_selected)
+	target_row.add_child(_target_option)
 
 	_status_label = Label.new()
 	_status_label.text = "Connecting..."
@@ -76,7 +91,7 @@ func _create_client() -> void:
 		return
 	_client = ClassDB.instantiate("NovaWorldClient")
 	add_child(_client)
-	_client.host = server_host
+	_client.host = _resolved_host()
 	_client.gate_port = gate_port
 	_client.player_name = player_name
 	_client.state_changed.connect(_on_state_changed)
@@ -84,6 +99,31 @@ func _create_client() -> void:
 	_client.disconnected.connect(_on_disconnected)
 	_client.error_occurred.connect(_on_error)
 	_client.start()
+
+
+# OpenNova uses the configured/injected server_host (dev: localhost). "Original
+# NovaWorld" points the same client at NovaLogic's live gate (gs.novaworld.net).
+func _resolved_host() -> String:
+	if _target == NovaWorldSettings.Target.REAL:
+		return NovaWorldSettings.REAL_NOVAWORLD_HOST
+	return server_host
+
+
+func _on_target_selected(index: int) -> void:
+	_target = _target_option.get_item_id(index)
+	NovaWorldSettings.save_target(_target)
+	_reconnect()
+
+
+func _reconnect() -> void:
+	if _client != null:
+		_client.stop()
+		_client.queue_free()
+		_client = null
+	if _host_button != null:
+		_host_button.disabled = true
+	_set_status("Connecting...")
+	_create_client()
 
 
 func _set_status(text: String) -> void:
