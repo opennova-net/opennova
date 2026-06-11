@@ -14,6 +14,9 @@
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/variant.hpp>
 
+#include <cstdint>
+#include <unordered_map>
+
 #include <oed/oed.h>
 #include <tdp/tdp.h>
 #include <threedi/threedi_3di3.h>
@@ -51,6 +54,17 @@ private:
 	String object_name = "untitled";
 	String last_error;
 	Ref<NovaResourceRoot> resource_root;
+
+	// Memoized build_lod_submeshes results, keyed (lod | skeletal | bone_count).
+	// Entries hold SHARED Ref<ArrayMesh> refs: every model instance built from
+	// one NovaObjectData renders the same meshes (the mission placer shares one
+	// data per graphic, so N animated entities stop paying N mesh builds).
+	// Consumers must never mutate the meshes — materials apply via
+	// MeshInstance3D.material_override. Cleared by _clear() and
+	// _notify_object_changed(), the two funnels every document mutation passes
+	// through. Main-thread only, like the rest of this class.
+	mutable std::unordered_map<uint64_t, Array> submesh_cache;
+	static uint64_t _submesh_cache_key(int p_lod_index, bool p_skeletal, int p_bone_count);
 
 	void _clear();
 	void _clear_oed_session();
