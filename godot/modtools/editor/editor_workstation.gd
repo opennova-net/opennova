@@ -70,6 +70,9 @@ const _RECENT_CLEAR_META := "::clear::"
 @onready var _settings_view_section: VBoxContainer = %SettingsViewSection
 @onready var _settings_grid_toggle: CheckBox = %SettingsGridToggle
 @onready var _settings_axes_toggle: CheckBox = %SettingsAxesToggle
+@onready var _settings_mcp_toggle: CheckBox = %SettingsMcpToggle
+@onready var _settings_mcp_port_edit: LineEdit = %SettingsMcpPortEdit
+@onready var _settings_mcp_status_label: Label = %SettingsMcpStatusLabel
 @onready var _settings_pff_tool_button: Button = %SettingsPffToolButton
 @onready var _asset_dock: Control = %AssetDock
 @onready var _right_split: SplitContainer = %RightSplit
@@ -1309,6 +1312,10 @@ func _wire_settings_popup() -> void:
 		_settings_axes_toggle.toggled.connect(_on_settings_axes_toggled)
 	if _settings_pff_tool_button != null and not _settings_pff_tool_button.pressed.is_connected(_on_settings_pff_tool_pressed):
 		_settings_pff_tool_button.pressed.connect(_on_settings_pff_tool_pressed)
+	if _settings_mcp_toggle != null and not _settings_mcp_toggle.toggled.is_connected(_on_settings_mcp_toggled):
+		_settings_mcp_toggle.toggled.connect(_on_settings_mcp_toggled)
+	if _settings_mcp_port_edit != null and not _settings_mcp_port_edit.text_submitted.is_connected(_on_settings_mcp_port_submitted):
+		_settings_mcp_port_edit.text_submitted.connect(_on_settings_mcp_port_submitted)
 	_sync_settings_popup_state()
 
 
@@ -1550,6 +1557,46 @@ func _sync_settings_popup_state() -> void:
 	if _settings_view_section != null:
 		var workspace := _get_active_workspace()
 		_settings_view_section.visible = workspace != null and workspace.shows_view_guides()
+	_sync_settings_mcp_state()
+
+
+# Reflect the MCP service's live state into the Settings popup (toggle, port,
+# status line). The service lives on the TerrainEditor root; runtime builds
+# have none and the controls simply show Stopped/disabled.
+func _sync_settings_mcp_state() -> void:
+	var service := _mcp_service()
+	if _settings_mcp_toggle != null:
+		_settings_mcp_toggle.set_pressed_no_signal(service != null and service.is_running())
+		_settings_mcp_toggle.disabled = service == null
+	if _settings_mcp_port_edit != null and not _settings_mcp_port_edit.has_focus():
+		_settings_mcp_port_edit.text = str(McpSettings.get_port())
+	if _settings_mcp_status_label != null:
+		_settings_mcp_status_label.text = service.get_status_text() if service != null else "Unavailable in this build"
+
+
+func _mcp_service() -> Node:
+	return editor.get("mcp_service") if editor != null else null
+
+
+func _on_settings_mcp_toggled(pressed: bool) -> void:
+	var service := _mcp_service()
+	if service != null:
+		service.set_enabled(pressed)
+	_sync_settings_mcp_state()
+
+
+func _on_settings_mcp_port_submitted(text: String) -> void:
+	var service := _mcp_service()
+	if not text.is_valid_int():
+		show_status_message("MCP port must be a number (1024-65535).", 5.0)
+		_sync_settings_mcp_state()
+		return
+	var port := clampi(text.to_int(), 1024, 65535)
+	if service != null:
+		service.apply_port(port)
+	else:
+		McpSettings.set_port(port)
+	_sync_settings_mcp_state()
 
 
 func _on_settings_browse_resource_dir_pressed() -> void:
@@ -2027,6 +2074,9 @@ func _refresh_project_label() -> void:
 
 
 func show_status_message(text: String, duration: float = 4.0) -> void:
+	# Mirror into the MCP log hub so connected agents see what the human sees
+	# (static no-op while no agent server is running).
+	McpLogHub.note_status(text)
 	_message_text = text
 	_message_until = Time.get_ticks_msec() / 1000.0 + duration
 
