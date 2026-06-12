@@ -2049,8 +2049,11 @@ func _refresh_status() -> void:
 		_status_tool_label.theme_type_variation = &""
 
 	_status_context_label.text = workspace.get_status_context()
-	if workspace != null and workspace.shows_camera_status() and editor and editor.camera:
-		var pos: Vector3 = editor.camera.global_position
+	# The capability hook, not the legacy terrain-global editor.camera: each
+	# workspace reports its own active camera (mission's follows play mode).
+	var status_camera: Camera3D = workspace.get_viewport_camera() if workspace.shows_camera_status() else null
+	if status_camera != null:
+		var pos: Vector3 = status_camera.global_position
 		_status_camera_label.text = "%.0f, %.0f, %.0f" % [pos.x, pos.y, pos.z]
 	else:
 		_status_camera_label.text = ""
@@ -2309,7 +2312,11 @@ func _ensure_export_dialog() -> void:
 
 
 func on_export_started(_dir_path: String) -> void:
-	show_status_message("Exporting terrain...", 30.0)
+	# The workspace hook, not a hard-coded "Exporting terrain..." — any
+	# exporting workspace announces itself (the same title the progress
+	# overlay shows).
+	var workspace := _get_active_workspace()
+	show_status_message(workspace.get_export_progress_title() if workspace != null else "Exporting...", 30.0)
 	_set_export_ui_active(true)
 	_sync_export_progress()
 

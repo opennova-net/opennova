@@ -167,7 +167,8 @@ size_t reground_entities(MissionDocument &doc,
                          const RegroundRequest *requests,
                          size_t count,
                          float epsilon,
-                         bool apply) {
+                         bool apply,
+                         std::vector<size_t> *out_moved_rows) {
 	if (requests == nullptr) {
 		return 0;
 	}
@@ -195,6 +196,9 @@ size_t reground_entities(MissionDocument &doc,
 		}
 		if (apply && !doc.set_entity_transform(request.kind, request.index, target)) {
 			continue;
+		}
+		if (out_moved_rows != nullptr) {
+			out_moved_rows->push_back(i);
 		}
 		moved++;
 	}
