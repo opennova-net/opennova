@@ -1521,3 +1521,75 @@ func test_mnu_adapter_routes_menu_jump_to_shell() -> void:
 	ws._on_menu_jump("sp.mnu", "SINGLE_PLAYER")
 	assert_eq(shell.menu_calls, [["sp.mnu", "SINGLE_PLAYER"]],
 		"The menu jump reaches the shell with the target menu and screen.")
+
+
+# --- MCP seams: add_widgets_batch / named add_screen_action / save_as_path -----
+# The menu MCP tools drive the editor through these; they reuse the snapshot
+# undo machinery so agent batches behave like single gestures.
+
+func test_add_widgets_batch_is_one_undo_step_with_props() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var editordoc = pair[1]
+	var doc: NovaMnuDocument = editordoc.resource
+	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
+	var before_children := doc.get_child_ids(root).size()
+
+	var results: Array = ed.add_widgets_batch([
+		{ "parent": root, "type": NovaMnuDocument.TYPE_BUTTON, "rect": Rect2(10, 10, 100, 24),
+			"props": { "name": "BatchBtn", "text": "Press" } },
+		{ "parent": root, "type": NovaMnuDocument.TYPE_STATIC, "rect": Rect2(10, 40, 100, 24),
+			"props": { "name": "BatchLabel" } },
+		{ "parent": 999999, "type": NovaMnuDocument.TYPE_BUTTON, "rect": Rect2(0, 0, 10, 10) },
+	])
+	assert_eq(results.size(), 3)
+	assert_true(bool(results[0]["ok"]))
+	assert_true(bool(results[1]["ok"]))
+	assert_false(bool(results[2]["ok"]), "A bad parent row reports ok=false without aborting the batch.")
+	assert_eq(doc.get_child_ids(root).size(), before_children + 2)
+	var btn := int(results[0]["id"])
+	assert_eq(doc.get_widget_name(btn), "BatchBtn", "Initial props applied.")
+	assert_eq(doc.get_widget_text(btn), "Press")
+	assert_almost_eq(doc.get_window_rect(btn).position.x, 10.0, 0.01)
+	assert_eq(ed.get_selected_id(), int(results[1]["id"]), "The last added widget is selected.")
+
+	ed.undo()
+	assert_false(doc.widget_exists(btn), "ONE undo removes the whole batch (props included).")
+	assert_eq(doc.get_child_ids(root).size(), before_children)
+	ed.redo()
+	assert_true(doc.widget_exists(btn), "Redo restores the batch with the same ids.")
+	await get_tree().process_frame
+
+
+func test_add_screen_action_accepts_a_custom_name() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var editordoc = pair[1]
+	var doc: NovaMnuDocument = editordoc.resource
+	var named: int = ed.add_screen_action("CUSTOM_SCREEN")
+	assert_gt(named, 0)
+	assert_eq(doc.get_screen_name(named), "CUSTOM_SCREEN")
+	var defaulted: int = ed.add_screen_action()
+	assert_gt(defaulted, 0)
+	assert_true(doc.get_screen_name(defaulted).begins_with("SCREEN"), "No name keeps the unique default.")
+	ed.undo()
+	assert_false(doc.widget_exists(defaulted), "Each add is one undo step.")
+	assert_true(doc.widget_exists(named))
+	await get_tree().process_frame
+
+
+func test_document_save_as_path_adopts_path_and_validates() -> void:
+	var editordoc = MnuEditorDocumentScript.new()
+	editordoc.open_mnu(FIXTURE)
+	assert_eq(editordoc.save_as_path("wrong.txt"), ERR_INVALID_PARAMETER, "Extension must match the document type.")
+	var dir := OS.get_cache_dir().path_join("opennova_mnu_seam_test")
+	var path := dir.path_join("renamed_menu.mnu")
+	editordoc.mark_dirty()
+	assert_eq(editordoc.save_as_path(path), OK)
+	assert_true(FileAccess.file_exists(path), "The file lands exactly where named.")
+	assert_eq(editordoc.current_path, path, "The path is adopted as current.")
+	assert_false(editordoc.is_dirty, "The save marks the document clean.")
+	var reloaded := NovaMnuDocument.new()
+	assert_eq(reloaded.load_from_bytes(FileAccess.get_file_as_bytes(path)), OK, "The saved menu round-trips.")
+	DirAccess.remove_absolute(path)
+	DirAccess.remove_absolute(dir)

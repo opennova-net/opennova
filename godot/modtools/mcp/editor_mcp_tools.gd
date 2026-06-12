@@ -22,9 +22,10 @@ Conventions:
 - After anything surprising, call get_logs — engine errors and editor status messages land there.
 
 Typical flows:
-- Study assets: list_assets(kind=...) -> describe_asset(path) / analyze_mission(path) -> read_file for raw bytes.
+- Study assets: list_assets(kind=...) -> describe_asset(path) / analyze_mission(path) / analyze_menu(path) -> read_file for raw bytes.
 - Author a mission: open_in_workspace(workspace="mission", path=...) -> list_items -> place_entities (grounded for you) -> edit_waypoint_path -> set_mission_header -> set_camera + screenshot to inspect. Repair floating/sunken layouts with reground_mission.
 - Watch it run: sim_control(action="play") -> get_sim_state / screenshot -> sim_control(action="stop") before editing again.
+- Author a menu: open_in_workspace(workspace="mnu", path=...) or menu_tabs(op="new") -> get_menu -> add_menu_widgets / edit_menu_widget / set_widget_actions -> menu_screenshot to look -> preview_menu to click through the navigation. describe_api(topic="menus") has the vocabulary.
 
 Be a good guest: narrate risky operations with show_status_message; the human's unsaved work matters."""
 
@@ -43,7 +44,18 @@ The terrain/mission views share an orbit camera (distance is about radius x 1.35
 
 Ids: terrain, object, mission, fonts, credits, strings, mnu, music, sound, environment (a popup over the active 3D view).
 
-open_in_workspace is the one open path; undo/redo route per-workspace; dirty state and capabilities are in get_editor_state. The mission workspace hosts the authoring tools (list_items, place_entities, edit_mission_entity, edit_waypoint_path, set_mission_header, reground_mission, sim_control) — open a mission there first. describe_api(name=...) reflects engine classes and live editor objects when you need a result shape explained.""",
+open_in_workspace is the one open path; undo/redo route per-workspace; dirty state and capabilities are in get_editor_state. The mission workspace hosts the mission tools (list_items, place_entities, edit_mission_entity, edit_waypoint_path, set_mission_header, reground_mission, sim_control) — open a mission there first. The mnu workspace hosts the menu tools (get_menu, menu_tabs, add_menu_widgets, edit_menu_widget, set_widget_actions, edit_widget_items, preview_menu, menu_screenshot) and is MULTIDOC: tabs via menu_tabs, and undo/redo act on the ACTIVE tab (each tab keeps its own history). describe_api(name=...) reflects engine classes and live editor objects when you need a result shape explained.""",
+	"menus": """# Menu authoring (the Menus workspace, .mnu)
+
+Vocabulary: a MENU is one .mnu document; a SCREEN is a full-canvas layout (one visible at a time; navigation moves between them); every tree node is a WINDOW; a WIDGET is a Window of a specific type (BUTTON, LIST, TABLE, ...). An ACTION is behavior the file itself expresses — navigate to a screen/menu, show/hide a window, pop, URL — wired with set_widget_actions. A COMMAND is game behavior the engine binds to a widget's NAME (start mission, apply settings): names are hooks, so reuse shipped names exactly and never rename shipped widgets casually.
+
+Conventions:
+- Rects are [x, y, w, h] in menu-space pixels (typically a 640x480 board), parent-relative; child order is z-order. edit_menu_widget move_rects does layout passes in one undo step.
+- text + string_type: "id" means text is a key into the screen's text_rsrc string table (.bin); "" means a literal.
+- Color/font values like %TITLE_COLOR% are stylesheet (menu_style.mns) references — preserve them verbatim.
+- The "Tab" pattern: sibling buttons whose window Actions hide each other's panels and show their own.
+
+Menus are MULTIDOC: tabs via menu_tabs/get_menu; undo/redo act on the ACTIVE tab. The Interactive preview (preview_menu) plays the menu sandboxed — pressing widgets walks the real navigation; all editing tools are locked until op="off". Look at the board with menu_screenshot; study shipped menus with analyze_menu.""",
 }
 
 const WORKSPACE_TO_KIND := {
@@ -79,7 +91,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"duration_s": { "type": "number", "default": 4.0 },
 			}, ["text"]), Callable(self, "_tool_show_status"))
 	registry.register(_def("describe_api",
-			"Read-only API reference: with no args, lists topics, engine classes (Nova*), and live editor objects. name: methods/properties/constants of a class (\"NovaMissionData\") or live object (\"shell\", \"editor\", \"mission_controller\", \"runtime\", \"sim\", \"camera\", \"resource_root\", \"workspace:strings\") — useful for understanding result shapes. topic: a guide (\"coordinates\", \"camera\", \"workspaces\").",
+			"Read-only API reference: with no args, lists topics, engine classes (Nova*), and live editor objects. name: methods/properties/constants of a class (\"NovaMissionData\") or live object (\"shell\", \"editor\", \"mission_controller\", \"runtime\", \"sim\", \"camera\", \"resource_root\", \"workspace:strings\") — useful for understanding result shapes. topic: a guide (\"coordinates\", \"camera\", \"workspaces\", \"menus\").",
 			{
 				"name": { "type": "string", "description": "Class or live-object name." },
 				"topic": { "type": "string", "description": "Guide topic." },
@@ -192,7 +204,7 @@ func _tool_editor_state(_args: Dictionary, ctx: McpToolContext) -> Variant:
 func _workspace_state(ws: Variant) -> Dictionary:
 	if ws == null:
 		return {}
-	return {
+	var out := {
 		"id": String(ws.get_workspace_id()),
 		"label": String(ws.get_workspace_label()),
 		"open_path": String(ws.get_current_resource_path()),
@@ -207,6 +219,9 @@ func _workspace_state(ws: Variant) -> Dictionary:
 			"undo": bool(ws.can_undo()), "redo": bool(ws.can_redo()),
 		},
 	}
+	if ws.supports_document_tabs():
+		out["documents"] = { "tabs": ws.get_document_tabs(), "active": ws.get_active_document_index() }
+	return out
 
 
 func _mission_state(ctx: McpToolContext) -> Dictionary:

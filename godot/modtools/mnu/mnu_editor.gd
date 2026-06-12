@@ -534,6 +534,42 @@ func add_widget_action(type: int) -> int:
 	return new_id
 
 
+# Add N widgets (each with optional initial properties) as ONE undo step — the
+# programmatic batch counterpart of add_widget_action, for callers that know
+# parent/rect up front (the MCP add_menu_widgets tool, future duplicate/paste).
+# rows = [{parent: int, type: int, rect: Rect2, props: {prop -> value}}]; props
+# use the slot-less _write_prop vocabulary (name/text/string_type/font/flags/
+# group/...). Returns one {ok, id?} per row, in order. Mirrors apply_rect_batch's
+# snapshot-undo shape; a row whose add is rejected reports ok=false and the
+# batch continues (validation belongs to the caller).
+func add_widgets_batch(rows: Array) -> Array:
+	var results: Array = []
+	var doc := _document_resource()
+	if doc == null or rows.is_empty():
+		return results
+	var before := doc.capture_state()
+	var sel_before := _selected_id
+	var last_id := -1
+	_suppress_select_emit = true
+	for row_v in rows:
+		var row: Dictionary = row_v
+		var new_id := doc.add_widget(int(row.get("parent", -1)), int(row.get("type", -1)),
+				row.get("rect", NEW_WIDGET_RECT))
+		if new_id < 0:
+			results.append({ "ok": false })
+			continue
+		var props: Dictionary = row.get("props", {})
+		for prop in props:
+			_write_prop(doc, "widget", new_id, String(prop), -1, props[prop])
+		results.append({ "ok": true, "id": new_id })
+		last_id = new_id
+	_suppress_select_emit = false
+	if _push_struct("add_widgets_batch", before, sel_before,
+			last_id if last_id >= 0 else sel_before) and last_id >= 0:
+		select_widget(last_id)
+	return results
+
+
 func delete_selection_action() -> void:
 	var doc := _document_resource()
 	if doc == null or _selected_id < 0 or not doc.widget_exists(_selected_id):
@@ -583,14 +619,17 @@ func _unique_screen_name() -> String:
 	return "SCREEN_%d" % n
 
 
-func add_screen_action() -> int:
+# custom_name lets programmatic callers (the MCP edit_menu_screen tool) name the
+# screen up front; they own uniqueness (duplicates alias show/delete-by-name).
+# The toolbar passes nothing and keeps the unique default.
+func add_screen_action(custom_name := "") -> int:
 	var doc := _document_resource()
 	if doc == null:
 		return -1
 	var before := doc.capture_state()
 	var sel_before := _selected_id
 	_suppress_select_emit = true
-	var sid := doc.add_screen(_unique_screen_name())
+	var sid := doc.add_screen(custom_name if not custom_name.is_empty() else _unique_screen_name())
 	_suppress_select_emit = false
 	if sid < 0:
 		return -1

@@ -15,6 +15,9 @@ const BUILTIN_TOOLS := [
 	"edit_mission_entity", "edit_waypoint_path", "set_mission_header",
 	"reground_mission", "analyze_mission", "save_mission",
 	"sim_control", "get_sim_state",
+	"get_menu", "menu_tabs", "edit_menu_screen", "add_menu_widgets",
+	"edit_menu_widget", "set_widget_actions", "edit_widget_items",
+	"preview_menu", "menu_screenshot", "analyze_menu", "save_menu",
 ]
 
 var _saved_state_config := PackedByteArray()

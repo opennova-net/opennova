@@ -160,6 +160,37 @@ func _minimal_args(name: String) -> Dictionary:
 	return {}
 
 
+func test_menu_tools_error_actionably_without_a_workspace() -> void:
+	# The stub shell has no Menus workspace; every menu tool must point the
+	# agent at open_in_workspace instead of failing obscurely.
+	for name in ["get_menu", "menu_tabs", "edit_menu_screen", "add_menu_widgets",
+			"edit_menu_widget", "set_widget_actions", "edit_widget_items",
+			"preview_menu", "menu_screenshot", "save_menu"]:
+		var result: McpToolResult = await _call(name, _minimal_menu_args(name))
+		assert_true(result.is_error, "%s without the workspace is an error" % name)
+	var analyzed: McpToolResult = await _call("analyze_menu", { "path": "no_such.mnu" })
+	assert_true(analyzed.is_error, "analyze_menu with an unresolvable path errors")
+
+
+func _minimal_menu_args(name: String) -> Dictionary:
+	match name:
+		"menu_tabs":
+			return { "op": "new" }
+		"edit_menu_screen":
+			return { "add": { "name": "X" } }
+		"add_menu_widgets":
+			return { "rows": [{ "parent": 0, "type": "BUTTON", "rect": [0, 0, 1, 1] }] }
+		"edit_menu_widget":
+			return { "delete": 1 }
+		"set_widget_actions":
+			return { "id": 1, "actions": [] }
+		"edit_widget_items":
+			return { "id": 1, "op": "item_add", "row": {} }
+		"preview_menu":
+			return { "op": "status" }
+	return {}
+
+
 func test_get_sim_state_inactive_shape() -> void:
 	var result: McpToolResult = await _call("get_sim_state")
 	assert_false(result.is_error)

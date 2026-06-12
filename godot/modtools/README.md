@@ -102,6 +102,11 @@ sink objects by guessing heights), `set_mission_header` (environment changes
 re-apply the preview, mission fog/water overrides included), `reground_mission`
 repair, the sim transport (`sim_control` / `get_sim_state`), camera +
 screenshot, undo/redo, and `save_mission` (only ever on explicit request).
+Menu authoring is first-class too: `get_menu` / `analyze_menu` to study,
+`add_menu_widgets` / `edit_menu_widget` / `set_widget_actions` /
+`edit_widget_items` to build (snapshot-undo batches, validated Action wiring),
+`menu_screenshot` for the WYSIWYG board, and `preview_menu` — the Interactive
+preview where pressing a widget walks the real navigation, sandboxed.
 There is **no script or code execution** on this surface.
 
 It speaks MCP Streamable HTTP on `http://127.0.0.1:8975/mcp` and starts with
