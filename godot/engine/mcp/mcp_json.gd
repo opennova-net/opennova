@@ -2,7 +2,7 @@ class_name McpJson
 extends RefCounted
 
 ## Variant → JSON-safe sanitizer for MCP tool results. Agents get back whatever
-## a tool handler (or their own execute_script code) returns, so this has to
+## a tool handler returns, so this has to
 ## turn ANY engine value into something JSON.stringify can encode without
 ## errors and without flooding the context window: math types become arrays,
 ## nodes become path stubs, collections and strings are capped with explicit

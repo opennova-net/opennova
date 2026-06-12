@@ -10,8 +10,11 @@ const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const BUILTIN_TOOLS := [
 	"get_editor_state", "get_logs", "show_status_message", "describe_api",
 	"list_assets", "read_file", "describe_asset", "open_in_workspace",
-	"screenshot", "execute_script", "define_tool", "list_custom_tools",
-	"delete_custom_tool",
+	"screenshot", "set_camera", "undo", "redo",
+	"list_items", "sample_terrain", "place_entities", "get_mission_entities",
+	"edit_mission_entity", "edit_waypoint_path", "set_mission_header",
+	"reground_mission", "analyze_mission", "save_mission",
+	"sim_control", "get_sim_state",
 ]
 
 var _saved_state_config := PackedByteArray()

@@ -44,12 +44,8 @@ set -e
 
 # GUT exits 0 even when scripts fail to parse (e.g. missing GDExtension
 # classes), because unparseable scripts are silently dropped from the
-# collector rather than counted as failures. Catch that here. Parse errors
-# from runtime-compiled scripts (gdscript:// resources — the MCP
-# execute_script tests compile intentionally broken agent code) are expected
-# and tracked per-test by GUT itself; only file-backed (res://) parse errors
-# are collection failures.
-if grep -A1 -E 'SCRIPT ERROR: Parse Error' "$log" | grep -E 'at: ' | grep -v 'gdscript://' | grep -q .; then
+# collector rather than counted as failures. Catch that here.
+if grep -qE 'SCRIPT ERROR: Parse Error' "$log"; then
   echo "error: GDScript parse errors detected during test collection" >&2
   exit 1
 fi

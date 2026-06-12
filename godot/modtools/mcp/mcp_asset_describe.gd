@@ -4,7 +4,7 @@ extends RefCounted
 ## Per-format JSON summaries for the describe_asset tool: dispatch on file
 ## type, load through the same GDExtension classes the workspaces use, and
 ## return a bounded structure. Kinds without a serializer yet return file
-## stats plus an honest pointer at read_file / execute_script instead of
+## stats plus an honest pointer at read_file / describe_api instead of
 ## pretending.
 ##
 ## Loads are defensive (has_method guards, get_last_error surfaced) — a bad
@@ -62,6 +62,21 @@ static func resolve(ctx: McpToolContext, raw: String) -> Dictionary:
 	var hint := "No resource directory is mounted — set one in Settings." if root == null \
 			else "Not found as an absolute path or in the mounted resource root."
 	return { "ok": false, "error": "Could not resolve '%s'. %s List candidates with list_assets." % [clean, hint] }
+
+
+## Resolve `raw_path` and open it on `loader` (open_file for loose paths,
+## open_from_resource_root for archived names) — the shared open path for tools
+## that load a document class themselves (analyze_mission). Returns
+## { ok, name?, path?, error? }.
+static func open_data(loader: Object, ctx: McpToolContext, raw_path: String) -> Dictionary:
+	var resolved := resolve(ctx, raw_path)
+	if not resolved["ok"]:
+		return resolved
+	var err := _open_via(loader, ctx, resolved)
+	if err != OK:
+		var detail := String(loader.get_last_error()) if loader.has_method("get_last_error") else ""
+		return { "ok": false, "error": "Failed to open %s (%s). %s" % [resolved["name"], error_string(err), detail] }
+	return resolved
 
 
 ## The file's bytes through whichever side resolved it (disk or VFS/PFF).
@@ -328,7 +343,7 @@ static func _describe_stats(out: Dictionary, resolved: Dictionary, kind: String)
 			size = file.get_length()
 			file.close()
 	out["data"] = { "size_bytes": size }
-	out["summary"] = "%s — no structured describe yet for this kind; use read_file for bytes or execute_script with the matching Nova* class (see describe_api)." % kind
+	out["summary"] = "%s — no structured describe yet for this kind; read_file returns the raw bytes (describe_api documents the matching Nova* class)." % kind
 
 
 # open_file for loose paths, open_from_resource_root for archived names —

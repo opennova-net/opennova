@@ -92,11 +92,17 @@ the workflow rail and override `build_inspector(host)` instead.
 ## Agent server (MCP)
 
 ONED embeds an [MCP](https://modelcontextprotocol.io) server so AI agents can
-inspect and drive the editor: list and describe game assets (missions, models,
-fonts, menus, strings, environments — through loose dirs and PFF archives),
-open them in workspaces, take screenshots of the viewport, tail the editor
-log, and run GDScript in-process (`execute_script`); repeated snippets can be
-promoted to persistent named tools with `define_tool`.
+inspect and drive the editor through a **fixed, curated tool catalog** that
+routes every operation through the editor's own code paths: list/describe game
+assets (through loose dirs and PFF archives), `analyze_mission` for studying a
+mission's composition, grounded mission authoring (`place_entities`,
+`edit_mission_entity`, `edit_waypoint_path` — the tools sample the terrain and
+bake ground anchors exactly like click-placement, so agents can never float or
+sink objects by guessing heights), `set_mission_header` (environment changes
+re-apply the preview, mission fog/water overrides included), `reground_mission`
+repair, the sim transport (`sim_control` / `get_sim_state`), camera +
+screenshot, undo/redo, and `save_mission` (only ever on explicit request).
+There is **no script or code execution** on this surface.
 
 It speaks MCP Streamable HTTP on `http://127.0.0.1:8975/mcp` and starts with
 the editor by default (never in headless runs). The repo's `.mcp.json` points
@@ -107,17 +113,18 @@ stdio-only clients can bridge via `npx mcp-remote`. Controls:
   with a live status line. The choice persists.
 - Launch flags: `--mcp-port N` (use a different port this launch),
   `--mcp-off` (don't start it).
-- `user://oned_mcp/server.json` records the live URL; agent-defined tools
-  persist under `user://oned_mcp/tools/`.
+- `user://oned_mcp/server.json` records the live URL while running.
 
-Security note: `execute_script` and custom tools are arbitrary local code
-execution **by design** — that is what makes the server useful. It binds
-loopback only and rejects non-local `Origin`/`Host` headers, but any process
-on the same machine can connect; disable it in Settings if that is not
-acceptable on a shared machine.
+Security note: the catalog is fixed and code-execution-free, but any local
+process that can reach the loopback port can still drive the editor's
+documents (non-local `Origin`/`Host` headers are rejected). Disable it in
+Settings on shared machines. Known preview difference vs the game: the
+editor's time-of-day is an authoring control; the game derives it from the
+mission's `start_time`.
 
 Code: transport/protocol core in `godot/engine/mcp/` (host-agnostic), ONED
-tool catalog + service in `mcp/`.
+tool catalog + service in `mcp/` (`editor_mcp_tools.gd` editor-wide,
+`editor_mcp_mission_tools.gd` mission authoring).
 
 The editor binds to the shared C++ core through the GDExtension in
 `godot/engine/`; on-disk formats are parsed by the libraries under

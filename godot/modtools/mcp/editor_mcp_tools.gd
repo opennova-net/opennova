@@ -1,72 +1,49 @@
 class_name EditorMcpTools
 extends RefCounted
 
-## The built-in MCP tool catalog for ONED: thin handlers over the editor's
+## The editor-wide MCP tool catalog for ONED: thin handlers over the editor's
 ## existing surface (EditorWorkstation facade, EditorWorkspace capability
-## hooks, the Nova* GDExtension classes) plus the scripting escape hatch.
-## Descriptions are agent-facing prompt text — they carry the conventions
-## (path resolution, dirty rules) so every tool teaches the protocol.
+## hooks, the Nova* GDExtension classes). Mission authoring lives in
+## EditorMcpMissionTools. Descriptions are agent-facing prompt text — they
+## carry the conventions (path resolution, dirty rules) so every tool teaches
+## the protocol. The surface is a fixed, curated catalog: every mutation
+## routes through the editor's own code paths, and there is no script/code
+## execution.
 
 const INSTRUCTIONS := """ONED — the OpenNova editor (Godot-hosted). You are connected to a live editor a human may be watching.
 
-Start with get_editor_state: it reports the mounted resource root, every workspace (open document, dirty, capabilities), the active workspace, and a log cursor.
+Start with get_editor_state: the mounted resource root, every workspace (open document, dirty, capabilities), the active workspace, mission/sim status, and a log cursor.
 
 Conventions:
-- Paths: pass a bare resource name ("alpha.bms", resolved case-insensitively in the mounted resource root, including inside PFF archives) or an absolute path. Results carry the resolved path.
-- After anything surprising, call get_logs — engine errors, script errors, and editor status messages land there.
-- Edits mark documents dirty in the editor; NEVER save unless the user asked.
+- Paths: a bare resource name ("alpha.bms", resolved case-insensitively in the mounted resource root, including inside PFF archives) or an absolute path. Results carry the resolved path.
+- Coordinates: tools take WORLD-space x/z (y is up) and ground everything on the terrain for you — never guess or supply heights. Entity records read back are BMS mission-space (z up); describe_api(topic="coordinates") has the mapping.
+- Edits mark documents dirty and are undoable (undo/redo tools). NEVER save unless the user explicitly asked — saving is save_mission's job alone.
+- The running simulation locks every editing tool: sim_control(action="stop") first.
+- After anything surprising, call get_logs — engine errors and editor status messages land there.
 
 Typical flows:
-- Inspect assets: list_assets(kind=...) -> describe_asset(path) -> read_file(path) for raw bytes.
-- Look at something: open_in_workspace(workspace=..., path=...) -> screenshot(target="viewport"). Aim the camera first via execute_script (recipe: describe_api(topic="camera")).
-- No tool fits? describe_api() indexes engine classes, live editor objects, and topic guides; execute_script runs GDScript inside the editor with ctx (shell, workspaces, mission, sim, resource root). Promote a repeated snippet into a named tool with define_tool — it persists across editor restarts.
+- Study assets: list_assets(kind=...) -> describe_asset(path) / analyze_mission(path) -> read_file for raw bytes.
+- Author a mission: open_in_workspace(workspace="mission", path=...) -> list_items -> place_entities (grounded for you) -> edit_waypoint_path -> set_mission_header -> set_camera + screenshot to inspect. Repair floating/sunken layouts with reground_mission.
+- Watch it run: sim_control(action="play") -> get_sim_state / screenshot -> sim_control(action="stop") before editing again.
 
-Be a good guest: announce risky operations with show_status_message; the human's unsaved work matters."""
+Be a good guest: narrate risky operations with show_status_message; the human's unsaved work matters."""
 
 const TOPICS := {
-	"ctx": """# ctx — the scripting context (execute_script and custom tools)
-
-`func run(ctx):` for execute_script; `func run(ctx, args):` for define_tool code.
-
-- ctx.shell — EditorWorkstation (the editor facade: open_in_workspace, show_status_message, get_resource_root, set_resource_root_dir, get_editor_camera, ...)
-- ctx.editor — TerrainEditor, the app root node
-- ctx.tree — the SceneTree; ctx.find_node("pattern") searches under its root
-- ctx.root() — NovaResourceRoot (resolve_file/list_files/read_file through loose dirs + PFFs); ctx.index() — NovaResourceIndex
-- ctx.workspace(id="") — an EditorWorkspace by string id (empty = active). Ids: terrain, object, mission, fonts, credits, strings, mnu, music, sound, environment. Hooks: open_file, save_current, can_undo/undo, has_unsaved_changes, get_current_resource_path, get_editor_document, get_viewport_camera.
-- ctx.mission() — the MissionController (mission document + selection + sim transport) or null
-- ctx.runtime() / ctx.sim() — the live MissionRuntime / NovaSimulation when simulating or playing-in-editor, else null
-- ctx.camera() — the active 3D Camera3D or null
-- ctx.log(value) — append to the result's logs; ctx.image(img) — attach an Image to the result; ctx.status(text) — editor status bar
-- await ctx.frames(n) — yield n process frames; ctx.cancelled — poll between awaits in long loops
-- ctx.args — the tool call's raw arguments
-
-Return any JSON-able value; it is sanitized (Vector3 -> [x,y,z], Node -> path stub).""",
 	"coordinates": """# Coordinate spaces
 
-- BMS mission space (the .bms records, NovaMissionData entity dicts, MissionController.set_selected_position): {x, y, z} with z = up.
-- Godot world space (cameras, Node3D transforms, terrain sampling): [x, y, z] with y = up.
-
-get_all_entities()/get_entity() positions are BMS. Cameras and anything in the scene tree are Godot world. The mission scene's object container applies the mapping; when you need exact conversion, reflect the mission surface with describe_api(name="mission_controller") and work through its selection/placement methods, which all take BMS positions.""",
+- Tool INPUTS are Godot world space: x/z across the map, y up. Placement, marker, and camera tools sample the terrain for y — you never supply it.
+- Entity records in results (get_mission_entities, analyze_mission) are BMS mission space, as stored in the .bms: {x, y, z} with z up.
+- Mapping: world = (bms.x, bms.z, -bms.y); bms = (world.x, -world.z, world.y). Tools label which space each position is in; entity results also carry a world_position echo.""",
 	"camera": """# Aiming the editor camera (then screenshot)
 
-The terrain/mission 3D views share a FlyCamera with a public framing helper:
+set_camera does it all: frame_entity={kind,index} (select + frame a mission entity), frame_point={x,z,radius,...} (orbit a terrain point at its ground height — radius is roughly how much terrain stays in view), or position+look_at for an exact pose. Then screenshot(target="viewport").
 
-	func run(ctx):
-		var cam := ctx.camera()
-		if cam == null: return "no 3D camera — open terrain/mission/object first"
-		# frame_bounds_custom(center, radius, distance_scale=1.35, max_distance=1200, yaw=0.0, pitch=-0.55)
-		cam.frame_bounds_custom(Vector3(512, 30, 512), 60.0, 1.2, 2000.0, 0.6, -0.7)
-		await ctx.frames(2)
-		return { "position": cam.global_position, "rotation_deg": cam.rotation_degrees }
-
-Then call screenshot(target="viewport"). Object-workspace preview cameras lack frame_bounds_custom — set global_position and call look_at() instead.""",
+The terrain/mission views share an orbit camera (distance is about radius x 1.35, pitch default about -32 degrees). Object-workspace preview cameras only support position+look_at.""",
 	"workspaces": """# Workspaces
 
 Ids: terrain, object, mission, fonts, credits, strings, mnu, music, sound, environment (a popup over the active 3D view).
 
-Every workspace implements the same capability contract (modtools/framework/editor_workspace.gd): can_new/can_open/can_save/can_save_as/can_export gate new_current/open_file(path)/save_current/save_as(dir)/begin_export; has_unsaved_changes(), is_busy(), get_current_resource_path(), can_undo/undo/can_redo/redo, get_editor_document() (the domain document/controller), get_viewport_camera().
-
-open_in_workspace (the tool) is the supported open path. For everything else: execute_script with ctx.workspace(id). The mission document is a MissionController — describe_api(name="mission_controller") lists its sim transport (sim_play/sim_pause/sim_step/sim_stop), selection, and entity editing methods.""",
+open_in_workspace is the one open path; undo/redo route per-workspace; dirty state and capabilities are in get_editor_state. The mission workspace hosts the authoring tools (list_items, place_entities, edit_mission_entity, edit_waypoint_path, set_mission_header, reground_mission, sim_control) — open a mission there first. describe_api(name=...) reflects engine classes and live editor objects when you need a result shape explained.""",
 }
 
 const WORKSPACE_TO_KIND := {
@@ -89,7 +66,7 @@ func register_all(registry: McpToolRegistry) -> void:
 			"Deep snapshot of the ONED editor: version, mounted resource root, every workspace (open document, dirty, capabilities), the active workspace, mission/sim status, camera pose, recent perf lines, and a log cursor. Call this first in a session and after any surprising result.",
 			{}), Callable(self, "_tool_editor_state"))
 	registry.register(_def("get_logs",
-			"Editor log since a cursor: server/script/status entries plus engine lines (print, push_warning, push_error, script errors) tailed from Godot's log file. Omit cursor to resume from this session's last read (first call: recent tail). Use after any failed or surprising operation.",
+			"Editor log since a cursor: server/status entries plus engine lines (print, push_warning, push_error) tailed from Godot's log file. Omit cursor to resume from this session's last read (first call: recent tail). Use after any failed or surprising operation.",
 			{
 				"cursor": { "type": "integer", "description": "Resume after this seq (from a previous next_cursor or get_editor_state.log_cursor). Omit to resume the session cursor." },
 				"limit": { "type": "integer", "default": 200, "minimum": 1, "maximum": 1000 },
@@ -102,7 +79,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"duration_s": { "type": "number", "default": 4.0 },
 			}, ["text"]), Callable(self, "_tool_show_status"))
 	registry.register(_def("describe_api",
-			"API reference for scripting. No args: lists topics, engine classes (Nova*), and live editor objects. name: methods/properties/constants of a class (\"NovaMissionData\") or live object (\"shell\", \"editor\", \"mission_controller\", \"runtime\", \"sim\", \"camera\", \"resource_root\", \"workspace:strings\"). topic: a guide (\"ctx\", \"coordinates\", \"camera\", \"workspaces\").",
+			"Read-only API reference: with no args, lists topics, engine classes (Nova*), and live editor objects. name: methods/properties/constants of a class (\"NovaMissionData\") or live object (\"shell\", \"editor\", \"mission_controller\", \"runtime\", \"sim\", \"camera\", \"resource_root\", \"workspace:strings\") — useful for understanding result shapes. topic: a guide (\"coordinates\", \"camera\", \"workspaces\").",
 			{
 				"name": { "type": "string", "description": "Class or live-object name." },
 				"topic": { "type": "string", "description": "Guide topic." },
@@ -138,6 +115,26 @@ func register_all(registry: McpToolRegistry) -> void:
 				"discard": { "type": "boolean", "default": false, "description": "Allow replacing an unsaved document." },
 				"focus": { "type": "object", "description": "Workspace-defined focus target (e.g. {\"key\": ...} for strings)." },
 			}, ["workspace", "path"], { "timeout_ms": 120000 }), Callable(self, "_tool_open_in_workspace"))
+	registry.register(_def("set_camera",
+			"Aim the editor's 3D camera, then screenshot to see the result. One mode per call: frame_entity={kind, index} selects and frames a mission entity; frame_point={x, z, radius?, yaw_deg?, pitch_deg?} orbits a world-space terrain point at its ground height (radius is roughly how much terrain stays in view, default 60); position=[x,y,z] with look_at=[x,y,z] sets an exact pose. Works in terrain/mission/object 3D views; object-preview cameras support only position+look_at. Returns the resulting pose.",
+			{
+				"frame_entity": { "type": "object", "properties": { "kind": { "type": "integer" }, "index": { "type": "integer" } } },
+				"frame_point": { "type": "object", "properties": { "x": { "type": "number" }, "z": { "type": "number" }, "radius": { "type": "number", "default": 60 }, "yaw_deg": { "type": "number", "default": 0 }, "pitch_deg": { "type": "number", "default": -32 } } },
+				"position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+				"look_at": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+			}), Callable(self, "_tool_set_camera"))
+	registry.register(_def("undo",
+			"Undo the last edit in a workspace (default: the active one) — mission edits, terrain strokes, whatever that workspace's history holds. steps repeats it. Mission undo is rejected while the simulation runs (sim_control stop first). Returns what remains undoable.",
+			{
+				"workspace": { "type": "string", "default": "" },
+				"steps": { "type": "integer", "default": 1, "minimum": 1, "maximum": 50 },
+			}), Callable(self, "_tool_undo"))
+	registry.register(_def("redo",
+			"Redo previously undone edits in a workspace (default: the active one). steps repeats it.",
+			{
+				"workspace": { "type": "string", "default": "" },
+				"steps": { "type": "integer", "default": 1, "minimum": 1, "maximum": 50 },
+			}), Callable(self, "_tool_redo"))
 	registry.register(_def("screenshot",
 			"Capture the editor as an image. target=\"viewport\": the 3D view (what the camera sees; falls back to the window in 2D workspaces). target=\"window\": the whole editor UI. Returns the image plus a caption (workspace, document, camera pose). Aim first — see describe_api(topic=\"camera\").",
 			{
@@ -146,27 +143,6 @@ func register_all(registry: McpToolRegistry) -> void:
 				"format": { "type": "string", "enum": ["webp", "png"], "default": "webp" },
 				"quality": { "type": "number", "default": 0.8 },
 			}, [], { "timeout_ms": 30000 }), Callable(self, "_tool_screenshot"))
-	registry.register(_def("execute_script",
-			"Run GDScript inside the live editor — the escape hatch when no tool fits. Send the body of `func run(ctx):` (or a full script defining run). ctx exposes the editor (describe_api(topic=\"ctx\")); code may await (e.g. `await ctx.frames(2)`). Returns the run's value, ctx.log lines, and any captured script errors. Mutations bypass tool-level guards — prefer dedicated tools when they exist. A loop that never awaits blocks the editor until it ends; mind timeout_ms.",
-			{
-				"code": { "type": "string" },
-				"timeout_ms": { "type": "integer", "default": 10000, "minimum": 100, "maximum": 300000 },
-			}, ["code"], { "timeout_ms": 310000 }), Callable(self, "_tool_execute_script"))
-	registry.register(_def("define_tool",
-			"Register a persistent custom tool from GDScript, so a repeated probe becomes a one-call tool that survives editor restarts. code defines `func run(ctx, args):` (or is a bare body, wrapped). The new tool is callable immediately via tools/call; it appears in tools/list when your client next refreshes (this server cannot push notifications). description and input_schema flow verbatim into the catalog — write them as prompt text.",
-			{
-				"name": { "type": "string", "description": "lowercase snake_case, 3-48 chars" },
-				"description": { "type": "string" },
-				"input_schema": { "type": "object", "description": "JSON Schema for the tool's arguments (documentation; not enforced)." },
-				"code": { "type": "string" },
-				"overwrite": { "type": "boolean", "default": false },
-			}, ["name", "description", "code"]), Callable(self, "_tool_define_tool"))
-	registry.register(_def("list_custom_tools",
-			"List agent-defined tools: name, description, backing file, load state, and call count.",
-			{}, [], { "serial": false }), Callable(self, "_tool_list_custom_tools"))
-	registry.register(_def("delete_custom_tool",
-			"Unregister an agent-defined tool and delete its backing file.",
-			{ "name": { "type": "string" } }, ["name"]), Callable(self, "_tool_delete_custom_tool"))
 
 
 static func _def(name: String, description: String, properties := {}, required: Array = [], extra := {}) -> Dictionary:
@@ -405,7 +381,7 @@ static func _live_object(ctx: McpToolContext, name: String) -> Variant:
 func _tool_list_assets(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var shell := ctx.shell
 	if shell == null or ctx.root() == null:
-		return McpToolResult.error("No resource directory mounted — set one in the editor's Settings (gear) popup, or via execute_script: ctx.shell.set_resource_root_dir(\"D:/Games/JO\").")
+		return McpToolResult.error("No resource directory mounted — set one in the editor's Settings (gear) popup.")
 	if shell.has_method("_ensure_resource_index"):
 		shell._ensure_resource_index()
 	var index: Variant = ctx.index()
@@ -553,43 +529,95 @@ func _screenshot_context(ctx: McpToolContext) -> String:
 	return " ".join(parts)
 
 
-func _tool_execute_script(args: Dictionary, ctx: McpToolContext) -> Variant:
-	var compiled := McpScriptRunner.compile(String(args.get("code", "")))
-	if not compiled["ok"]:
-		return McpToolResult.error("Script failed to compile:\n%s" % "\n".join(PackedStringArray(
-				compiled["compile_errors"].map(func(e): return String(e)))))
-	var timeout := clampi(int(args.get("timeout_ms", McpScriptRunner.DEFAULT_TIMEOUT_MS)),
-			McpScriptRunner.MIN_TIMEOUT_MS, McpScriptRunner.MAX_TIMEOUT_MS)
-	var outcome: Dictionary = await McpScriptRunner.execute(compiled["script"], ctx, timeout)
-	return McpScriptRunner.result_from_outcome(outcome)
-
-
-func _tool_define_tool(args: Dictionary, ctx: McpToolContext) -> Variant:
-	var schema: Dictionary = args.get("input_schema", {}) if args.get("input_schema") is Dictionary else {}
-	var outcome: Dictionary = service.dynamic_tools.define(
-			String(args.get("name", "")), String(args.get("description", "")),
-			schema, String(args.get("code", "")), bool(args.get("overwrite", false)))
-	if not outcome["ok"]:
-		return McpToolResult.error("define_tool failed:\n%s" % "\n".join(PackedStringArray(
-				outcome["errors"].map(func(e): return String(e)))))
-	ctx.log("custom tool '%s' registered" % args.get("name", ""))
+func _tool_set_camera(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var camera := ctx.camera()
+	if camera == null:
+		return McpToolResult.error("No 3D camera in the active workspace — open terrain/mission/object first (open_in_workspace).")
+	var note := ""
+	if args.get("frame_entity") is Dictionary:
+		var target: Dictionary = args["frame_entity"]
+		var controller: Variant = ctx.mission()
+		if controller == null or not controller.has_method("select_object"):
+			return McpToolResult.error("frame_entity needs an open mission — open_in_workspace(workspace=\"mission\", ...) first.")
+		controller.select_object(int(target.get("kind", -1)), int(target.get("index", -1)))
+		if (controller.get_selection_summary() as Dictionary).is_empty():
+			return McpToolResult.error("No entity at (kind=%s, index=%s) — get_mission_entities lists them." % [target.get("kind"), target.get("index")])
+		controller.focus_selection_in_view()
+	elif args.get("frame_point") is Dictionary:
+		var point: Dictionary = args["frame_point"]
+		var x := float(point.get("x", 0.0))
+		var z := float(point.get("z", 0.0))
+		var height := 0.0
+		if ctx.editor != null and ctx.editor.has_method("sample_height_world"):
+			var sampled: float = ctx.editor.sample_height_world(x, z)
+			if is_nan(sampled):
+				note = "point is off the terrain; framed at height 0. "
+			else:
+				height = sampled
+		if camera.has_method("frame_bounds_custom"):
+			camera.frame_bounds_custom(Vector3(x, height, z), float(point.get("radius", 60.0)), 1.35, 4000.0,
+					deg_to_rad(float(point.get("yaw_deg", 0.0))), deg_to_rad(float(point.get("pitch_deg", -32.0))))
+		else:
+			var center := Vector3(x, height, z)
+			camera.global_position = center + Vector3(0, 40, 60)
+			camera.look_at(center)
+	elif args.get("position") is Array and args.get("look_at") is Array:
+		var pos: Array = args["position"]
+		var aim: Array = args["look_at"]
+		var pos_v := Vector3(float(pos[0]), float(pos[1]), float(pos[2]))
+		var aim_v := Vector3(float(aim[0]), float(aim[1]), float(aim[2]))
+		if pos_v.distance_to(aim_v) < 0.01:
+			return McpToolResult.error("position and look_at coincide.")
+		if camera.has_method("frame_bounds_custom"):
+			# Route through the orbit state so subsequent human orbiting does not
+			# snap: distance/yaw/pitch derived from the requested pose.
+			var to_cam := pos_v - aim_v
+			var yaw := atan2(to_cam.x, to_cam.z)
+			var pitch := -asin(clampf(to_cam.normalized().y, -1.0, 1.0))
+			camera.frame_bounds_custom(aim_v, to_cam.length(), 1.0, 100000.0, yaw, pitch)
+		else:
+			camera.global_position = pos_v
+			camera.look_at(aim_v)
+	else:
+		return McpToolResult.error("Pass exactly one mode: frame_entity, frame_point, or position+look_at.")
+	await ctx.frames(1)
 	return {
-		"ok": true,
-		"tool": args.get("name", ""),
-		"path": outcome["path"],
-		"note": "Callable right now via tools/call. It appears in tools/list when your client next refreshes the list (this server has no push notifications). Persisted across editor restarts; manage with list_custom_tools / delete_custom_tool.",
+		"position": camera.global_position,
+		"rotation_deg": camera.rotation_degrees,
+		"note": note,
+		"hint": "screenshot(target=\"viewport\") shows this view.",
 	}
 
 
-func _tool_list_custom_tools(_args: Dictionary, _ctx: McpToolContext) -> Variant:
-	return { "tools": service.dynamic_tools.list() }
+func _tool_undo(args: Dictionary, ctx: McpToolContext) -> Variant:
+	return await _undo_redo(args, ctx, true)
 
 
-func _tool_delete_custom_tool(args: Dictionary, _ctx: McpToolContext) -> Variant:
-	var name := String(args.get("name", ""))
-	var err: Error = service.dynamic_tools.delete(name)
-	if err == ERR_DOES_NOT_EXIST:
-		return McpToolResult.error("No custom tool named '%s' — see list_custom_tools." % name)
-	if err != OK:
-		return McpToolResult.error("Delete failed (%s)." % error_string(err))
-	return { "ok": true, "deleted": name }
+func _tool_redo(args: Dictionary, ctx: McpToolContext) -> Variant:
+	return await _undo_redo(args, ctx, false)
+
+
+func _undo_redo(args: Dictionary, ctx: McpToolContext, is_undo: bool) -> Variant:
+	var ws: Variant = ctx.workspace(String(args.get("workspace", "")))
+	if ws == null:
+		return McpToolResult.error("Unknown workspace '%s' — get_editor_state lists ids; empty means the active one." % args.get("workspace", ""))
+	var performed := 0
+	for i in range(clampi(int(args.get("steps", 1)), 1, 50)):
+		if is_undo:
+			if not ws.can_undo():
+				break
+			ws.undo()
+		else:
+			if not ws.can_redo():
+				break
+			ws.redo()
+		performed += 1
+		await ctx.frames(1)
+	return {
+		"performed": performed,
+		"can_undo": ws.can_undo(),
+		"can_redo": ws.can_redo(),
+		"workspace": String(ws.get_workspace_id()),
+	}
+
+

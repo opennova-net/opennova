@@ -2,21 +2,22 @@ class_name EditorMcpService
 extends Node
 
 ## ONED's embedded MCP (agent) service: owns the McpServer node, the log hub,
-## the built-in tool catalog, and the persisted agent-defined tools. Started
-## by TerrainEditor at boot (per McpSettings — on by default, off headless or
-## with --mcp-off), toggled from the Settings popup.
+## and the curated tool catalog (editor-wide tools + mission authoring).
+## Started by TerrainEditor at boot (per McpSettings — on by default, off
+## headless or with --mcp-off), toggled from the Settings popup.
 ##
-## Security posture, stated plainly: execute_script and custom tools are
-## arbitrary local code execution by design. The server binds 127.0.0.1 only
-## and rejects non-local Origin/Host headers, but anything on this machine
-## that can POST to the port can drive the editor.
+## Security posture: the tool surface is a FIXED, curated catalog routed
+## through the editor's own code paths — there is no script or code
+## execution. The server binds 127.0.0.1 only and rejects non-local
+## Origin/Host headers; any local process can still drive the editor's
+## documents, so disable it in Settings on shared machines.
 
 const SERVER_JSON_PATH := "user://oned_mcp/server.json"
 
 var server: McpServer
 var log_hub: McpLogHub
-var dynamic_tools: McpDynamicTools
 var tool_host: EditorMcpTools
+var mission_tool_host: EditorMcpMissionTools
 var editor: Node = null
 var shell: Node = null
 
@@ -38,10 +39,8 @@ func setup(editor_node: Node, shell_node: Node) -> void:
 	add_child(server)
 	tool_host = EditorMcpTools.new(self)
 	tool_host.register_all(server.registry)
-	dynamic_tools = McpDynamicTools.new(server.registry)
-	var report := dynamic_tools.load_all()
-	for failure: Dictionary in report["failed"]:
-		log_hub.note("server", "warn", "custom tool %s failed to load: %s" % [failure["file"], failure["errors"]])
+	mission_tool_host = EditorMcpMissionTools.new(self)
+	mission_tool_host.register_all(server.registry)
 	if McpSettings.resolve_enabled():
 		start(McpSettings.resolve_port())
 
