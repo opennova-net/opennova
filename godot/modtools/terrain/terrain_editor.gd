@@ -152,6 +152,10 @@ var _export_job: NovaTerrainBuildJob
 var _export_output_dir: String = ""
 
 var _clone_source_marker: MeshInstance3D
+# World-origin axes gizmo for the shell's View > Show axes toggle (the
+# shows_view_guides hook). Hidden by default; the shell pushes its persisted
+# state on every workspace activation.
+var _axes_gizmo: MeshInstance3D
 
 var _water_node: Node3D
 var _weather_node: Node3D
@@ -213,6 +217,7 @@ func _ready() -> void:
 	_init_foliage_preview()
 	_init_tile_overlay_preview()
 	_init_clone_marker()
+	_init_axes_gizmo()
 	if camera.has_signal("escape_pressed"):
 		camera.connect("escape_pressed", Callable(self, "request_quit_editor"))
 	_load_editor_state()
@@ -266,6 +271,45 @@ func _init_clone_marker() -> void:
 	_clone_source_marker.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_clone_source_marker.visible = false
 	terrain_world_root.add_child(_clone_source_marker)
+
+
+# X red / Y green / Z blue line gizmo at the world origin, unshaded and
+# depth-free (the clone-marker material recipe) so it reads over sculpted
+# heights. The surface-following sector overlay serves as the grid guide; this
+# covers the axes half of shows_view_guides.
+func _init_axes_gizmo() -> void:
+	var axis_length := 64.0
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = true
+	mat.no_depth_test = true
+	var mesh := ImmediateMesh.new()
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES, mat)
+	mesh.surface_set_color(Color(0.95, 0.25, 0.25))
+	mesh.surface_add_vertex(Vector3.ZERO)
+	mesh.surface_add_vertex(Vector3(axis_length, 0.0, 0.0))
+	mesh.surface_set_color(Color(0.35, 0.9, 0.35))
+	mesh.surface_add_vertex(Vector3.ZERO)
+	mesh.surface_add_vertex(Vector3(0.0, axis_length, 0.0))
+	mesh.surface_set_color(Color(0.3, 0.55, 1.0))
+	mesh.surface_add_vertex(Vector3.ZERO)
+	mesh.surface_add_vertex(Vector3(0.0, 0.0, axis_length))
+	mesh.surface_end()
+	_axes_gizmo = MeshInstance3D.new()
+	_axes_gizmo.name = "AxesGizmo"
+	_axes_gizmo.mesh = mesh
+	_axes_gizmo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_axes_gizmo.visible = false
+	terrain_world_root.add_child(_axes_gizmo)
+
+
+func is_axes_visible() -> bool:
+	return _axes_gizmo != null and _axes_gizmo.visible
+
+
+func set_axes_visible(visible: bool) -> void:
+	if _axes_gizmo != null:
+		_axes_gizmo.visible = visible
 
 
 func _init_tile_overlay_preview() -> void:
