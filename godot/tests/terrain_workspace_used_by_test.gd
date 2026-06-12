@@ -123,7 +123,7 @@ func test_asset_dock_without_shell_mounts_no_strip() -> void:
 	workspace.set_asset_dock(null)
 
 
-func test_view_guides_drive_sector_overlay_and_axes() -> void:
+func test_view_guides_drive_grid_guide_and_axes() -> void:
 	var editor = add_child_autofree(TerrainEditorScene.instantiate())
 	await get_tree().process_frame
 
@@ -131,10 +131,14 @@ func test_view_guides_drive_sector_overlay_and_axes() -> void:
 	assert_true(workspace.shows_view_guides(), "terrain offers the View grid/axes toggles")
 
 	workspace.set_grid_visible(true)
-	assert_true(editor.is_sector_overlay_visible(),
-		"the grid toggle drives the surface-following sector overlay")
+	assert_true(editor.is_grid_guide_visible(),
+		"the grid toggle draws the neutral surface-following sector-line guide")
+	assert_false(editor.is_sector_overlay_visible(),
+		"...and NEVER the Layout workflow's colored sector diagnostic " +
+		"(the shell pushes Show-grid on every activation - mapping it to the " +
+		"overlay washed the whole map in sector tints)")
 	workspace.set_grid_visible(false)
-	assert_false(editor.is_sector_overlay_visible())
+	assert_false(editor.is_grid_guide_visible())
 
 	workspace.set_axes_visible(true)
 	assert_true(editor.is_axes_visible(), "the axes toggle shows the origin gizmo")

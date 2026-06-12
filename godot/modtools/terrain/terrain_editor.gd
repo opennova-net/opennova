@@ -161,6 +161,11 @@ var _water_node: Node3D
 var _weather_node: Node3D
 var water_visible: bool = true
 var sector_overlay_visible: bool = false
+# The shell's View > Show grid guide: thin neutral sector-boundary lines
+# (u_show_grid). Owned by the View toggle alone — the Layout inspector's
+# checkbox owns sector_overlay_visible (the colored diagnostic) and the two
+# never share state.
+var grid_guide_visible: bool = false
 
 var environment_editor
 var _environment_node: Node
@@ -572,6 +577,7 @@ func _sync_surface_overlay_state(material: ShaderMaterial) -> void:
 		preview_color = TerrainEditorSurfacePaint.get_surface_color(preview_index, _document.get_surface_palette_bytes())
 	material.set_shader_parameter("u_show_surface_overlay", overlay_enabled)
 	material.set_shader_parameter("u_show_sector_overlay", sector_overlay_visible)
+	material.set_shader_parameter("u_show_grid", grid_guide_visible)
 	material.set_shader_parameter("u_brush_color", preview_color)
 
 
@@ -1003,6 +1009,19 @@ func set_sector_overlay_visible(visible: bool) -> void:
 	if sector_overlay_visible == visible:
 		return
 	sector_overlay_visible = visible
+	if terrain_mesh:
+		_sync_surface_overlay_state(_get_material())
+	_mark_ui_state_changed()
+
+
+func is_grid_guide_visible() -> bool:
+	return grid_guide_visible
+
+
+func set_grid_guide_visible(visible: bool) -> void:
+	if grid_guide_visible == visible:
+		return
+	grid_guide_visible = visible
 	if terrain_mesh:
 		_sync_surface_overlay_state(_get_material())
 	_mark_ui_state_changed()

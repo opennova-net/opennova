@@ -54,18 +54,18 @@ func shows_tile_gizmo() -> bool:
 
 
 # View guides: a flat y=0 reference grid would be buried under (or float
-# through) sculpted heights, so the shell's grid toggle drives the terrain's
-# surface-following sector overlay instead; axes are a world-origin gizmo. The
-# Layout inspector's own sector-overlay checkbox stays — the shell re-pushes
-# its persisted value on every activation, making the View setting
-# authoritative across visits (the same ownership the object workspace has).
+# through) sculpted heights, so the shell's grid toggle draws thin NEUTRAL
+# sector-boundary lines that follow the surface (u_show_grid); axes are a
+# world-origin gizmo. Deliberately NOT the Layout workflow's sector overlay —
+# that is a colored per-sector diagnostic (tint fill + rainbow edges) owned by
+# the Layout checkbox alone, and the two states never touch.
 func shows_view_guides() -> bool:
 	return true
 
 
 func set_grid_visible(value: bool) -> void:
-	if terrain_editor != null and terrain_editor.has_method("set_sector_overlay_visible"):
-		terrain_editor.set_sector_overlay_visible(value)
+	if terrain_editor != null and terrain_editor.has_method("set_grid_guide_visible"):
+		terrain_editor.set_grid_guide_visible(value)
 
 
 func set_axes_visible(value: bool) -> void:
