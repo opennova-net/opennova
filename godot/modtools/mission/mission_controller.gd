@@ -74,6 +74,18 @@ var _loaded_height_revision: int = -1
 # deviation check. NOT cleared on decline (acknowledge_terrain_drift), so the
 # manual re-ground keeps seeing the drift after the prompt was waved away.
 var _ground_baseline: Dictionary = {}
+# Cached _build_reground_requests() rows plus the token they were built under, so
+# one drift cycle (activate-time count -> prompt apply -> baseline re-record)
+# walks + samples the world ONCE instead of three times. Validity is a token
+# compare, not mutation hooks: any object edit moves object_records_revision
+# (positions are record bytes), any height edit moves the terrain height
+# revision, any resource rescan moves NovaResourceRoot.cache_epoch (the anchors),
+# and a mission swap changes the instance id. An empty token never matches, so
+# nothing is cached while a build precondition is missing. The rows are
+# UNFILTERED — the _ground_baseline filter stays per-call, so the
+# decline-then-manual semantics above are untouched.
+var _reground_requests_cache: Array = []
+var _reground_cache_token: Array = []
 var _last_open_dir: String = ""
 var _stats: Dictionary = {}
 var _last_status: String = ""
@@ -577,6 +589,8 @@ func clear() -> void:
 	_loaded_trn_path = ""
 	_loaded_height_revision = -1
 	_ground_baseline = {}
+	_reground_requests_cache = []
+	_reground_cache_token = []
 	_stats = {}
 	_notify_changed()
 
@@ -604,11 +618,17 @@ func reconcile_with_terrain() -> int:
 		return 0
 	if int(terrain_editor.get_height_revision()) == _loaded_height_revision:
 		return 0
-	var count := _count_terrain_drift()
+	# Wall-clock attribution for the post-edit drift scan (the workspace-switch
+	# hitch): created only past the revision gate, so the common no-edit activate
+	# stays unmeasured and free. finish() retains it in the PerfTimeline ring for
+	# the debug overlay's perf pane; the scan has no status line of its own.
+	var timeline := PerfTimeline.begin("Mission drift scan")
+	var count := _count_terrain_drift(timeline)
 	if count == 0:
 		# The height edits missed every object; settle on the new revision so
 		# later activates skip the scan.
 		_record_height_revision()
+	timeline.finish()
 	return count
 
 
@@ -619,12 +639,39 @@ func _record_height_revision() -> void:
 		_loaded_height_revision = -1
 
 
+# The validity token for _reground_requests_cache (see the cache comment at the
+# declaration). Empty when a build precondition is missing — never cached, every
+# call rebuilds, exactly the pre-cache behavior.
+func _reground_token() -> Array:
+	if _mission == null or _placer == null or terrain_editor == null \
+			or not terrain_editor.has_method("sample_height_world") \
+			or not terrain_editor.has_method("get_height_revision"):
+		return []
+	return [
+		_mission.get_instance_id(),
+		_mission.object_records_revision(),
+		int(terrain_editor.get_height_revision()),
+		NovaResourceRoot.cache_epoch(),
+	]
+
+
+# The full (unfiltered) re-ground request set, built at most once per token.
+func _reground_requests_cached() -> Array:
+	var token := _reground_token()
+	if token.is_empty():
+		return _build_reground_requests()
+	if token != _reground_cache_token:
+		_reground_requests_cache = _build_reground_requests()
+		_reground_cache_token = token
+	return _reground_requests_cache
+
+
 # Adopt the current terrain + entity layout as the known-grounded reference: the
 # height revision plus the surface memo under every entity's ground point.
 func _record_ground_state() -> void:
 	_record_height_revision()
 	_ground_baseline = {}
-	for r in _build_reground_requests():
+	for r in _reground_requests_cached():
 		var request: Dictionary = r
 		var hit: Vector3 = request["ground_hit_bms"]
 		_ground_baseline[_ground_key(hit)] = hit.z
@@ -646,7 +693,7 @@ static func _ground_key(hit_bms: Vector3) -> Vector2i:
 # skips them unless they are genuinely off the surface.
 func _drifted_requests() -> Array:
 	var requests: Array = []
-	for r in _build_reground_requests():
+	for r in _reground_requests_cached():
 		var request: Dictionary = r
 		var hit: Vector3 = request["ground_hit_bms"]
 		var key := _ground_key(hit)
@@ -657,12 +704,18 @@ func _drifted_requests() -> Array:
 
 
 # Dry-run count through the engine's re-ground policy: the prompt count and the
-# apply share one request set and one epsilon, so the count can never lie.
-func _count_terrain_drift() -> int:
+# apply share one request set and one epsilon (literally one token-keyed cached
+# build, see _reground_requests_cached), so the count can never lie.
+func _count_terrain_drift(timeline: PerfTimeline = null) -> int:
+	PerfTimeline.span_on(timeline, "requests")
 	var requests := _drifted_requests()
+	PerfTimeline.end_on(timeline)
 	if requests.is_empty():
 		return 0
-	return _mission.reground_entities(requests, REGROUND_EPSILON, false)
+	PerfTimeline.span_on(timeline, "count")
+	var count: int = _mission.reground_entities(requests, REGROUND_EPSILON, false)
+	PerfTimeline.end_on(timeline)
+	return count
 
 
 ## Snap every entity whose ground moved back onto the terrain surface as ONE undo
@@ -675,17 +728,33 @@ func reground_drifted() -> int:
 		return 0
 	if _reject_edit_while_simulating():
 		return 0
+	var timeline := PerfTimeline.begin("Mission re-ground")
+	timeline.span("requests")
 	var requests := _drifted_requests()
+	timeline.end_span()
 	_flush_edit()
 	_mission.begin_edit()
-	var moved := _mission.reground_entities(requests, REGROUND_EPSILON, true)
+	timeline.span("apply")
+	var moved: int = _mission.reground_entities(requests, REGROUND_EPSILON, true)
+	timeline.end_span()
 	_mission.commit_edit() # pushes one step only if something actually moved
+	# The apply is pure-z (x/y preserved exactly by the conjugate bake, see
+	# _build_reground_requests) and the surface did not change, so the cached rows
+	# are byte-valid for the post-apply document; re-key the token so the baseline
+	# re-record below reuses them instead of re-marshalling + resampling the world.
+	_reground_cache_token = _reground_token()
+	timeline.span("baseline")
 	_record_ground_state()
+	timeline.end_span()
 	if moved > 0:
+		timeline.span("rebake")
 		_rebake_objects()
+		timeline.end_span()
 		mark_dirty()
-		_report("Re-grounded %d object%s." % [moved, "" if moved == 1 else "s"])
+		timeline.finish()
+		_report("Re-grounded %d object%s (%s)." % [moved, "" if moved == 1 else "s", timeline.brief(3)])
 	else:
+		timeline.finish()
 		_report("No objects needed re-grounding.")
 	return moved
 

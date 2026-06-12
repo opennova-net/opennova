@@ -45,6 +45,9 @@ class StubTerrainEditor:
 	var height_revision := 0
 	var sample_height := 10.0
 	var sample_slope_x := 0.0
+	# Request-cache observability: how many times the controller sampled the
+	# surface (one drift cycle must sample each entity once, not three times).
+	var sample_calls := 0
 
 	func get_resource_root() -> NovaResourceRoot:
 		return resource_root
@@ -53,6 +56,7 @@ class StubTerrainEditor:
 		return height_revision
 
 	func sample_height_world(world_x: float, _world_z: float) -> float:
+		sample_calls += 1
 		return sample_height + sample_slope_x * world_x
 
 	func get_terrain_world_root() -> Node3D:
@@ -1294,6 +1298,41 @@ func test_reground_only_touches_entities_whose_ground_moved() -> void:
 		"A re-grounds onto the moved surface")
 	assert_almost_eq((mission.get_entity(kind, index_b)["position"] as Vector3).z, 30.0, 0.01,
 		"B keeps its authored altitude — its ground never moved")
+
+
+func test_reground_cycle_samples_each_entity_once() -> void:
+	# The request-cache perf contract: one drift cycle (activate-time count ->
+	# apply -> baseline re-record) builds the request set ONCE — count, apply, and
+	# baseline share the cached rows, so the surface is sampled exactly once per
+	# entity instead of three times.
+	var controller := _new_with_item_db()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
+	_stub_drift(controller, 42.0)
+	var stub: StubTerrainEditor = controller.terrain_editor
+	stub.sample_calls = 0
+	assert_eq(controller.reconcile_with_terrain(), 1, "precondition: the entity drifts")
+	assert_eq(controller.reground_drifted(), 1)
+	assert_eq(stub.sample_calls, 1,
+		"one entity, one sample: the cycle shares one cached request build")
+	assert_eq(controller.reconcile_with_terrain(), 0, "the applied re-ground settles the drift")
+
+
+func test_reground_cache_invalidated_by_an_entity_edit() -> void:
+	# The cache token includes object_records_revision, so an entity placed
+	# between the prompt count and the apply forces a rebuild and the apply sees
+	# it (a stale cache would silently skip the newcomer).
+	var controller := _new_with_item_db()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
+	_stub_drift(controller, 42.0)
+	assert_eq(controller.reconcile_with_terrain(), 1)
+	# The newcomer grounds at its own placement height (BMS z = 10), off the moved
+	# surface (42) with no baseline memo, so the engine's deviation check moves it.
+	assert_true(controller.place_entity_at_world(102001, Vector3(80, 10, -80)))
+	var stub: StubTerrainEditor = controller.terrain_editor
+	stub.sample_calls = 0
+	assert_eq(controller.reground_drifted(), 2,
+		"the post-count placement re-grounds too — the edit re-keyed the cache")
+	assert_eq(stub.sample_calls, 2, "the rebuild samples both entities")
 
 
 # Bump the stub's height revision and set its surface base height (slope kept):
