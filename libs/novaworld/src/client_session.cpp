@@ -188,17 +188,7 @@ std::vector<uint8_t> ClientSession::build_client_auth() {
 }
 
 std::vector<uint8_t> ClientSession::build_lobby_packet(const NapiMessage &container) {
-	// Retail / real NovaWorld wrap every lobby message in an EMPTY-NAMED root
-	// container — onnet's build_response_message: Container(name="",
-	// children=[msg]) — and the receiver reads root.children[0]. Without the
-	// wrapper the original server does root.children[0] on our childless
-	// container, finds nothing, and silently drops the packet (no reply). This
-	// is the NW-S4 fix: our own server tolerates the unwrapped form (so the
-	// loopback never caught it), but the strict original requires the root.
-	NapiMessage root;
-	root.name.clear();
-	root.children.push_back(container);
-	std::vector<NapiMessage> stream{std::move(root)};
+	std::vector<NapiMessage> stream{container};
 	std::vector<uint8_t> stream_bytes(napi_stream_size(stream));
 	size_t stream_size = 0;
 	if (napi_stream_encode(stream, stream_bytes.data(), stream_bytes.size(),
@@ -326,16 +316,7 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 			continue;
 		}
 		for (const auto &container : containers) {
-			// Retail / real NW wrap the lobby message in an empty-named root
-			// container (NW-S4); unwrap to the actual message(s). Tolerate the
-			// historical unwrapped form too (our own server still emits it).
-			if (container.name.empty() && !container.children.empty()) {
-				for (const auto &child : container.children) {
-					dispatch_server_container(child, out);
-				}
-			} else {
-				dispatch_server_container(container, out);
-			}
+			dispatch_server_container(container, out);
 		}
 	}
 }

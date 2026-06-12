@@ -512,21 +512,7 @@ void NwUdpListener::run_loop() {
 					continue;
 				}
 				std::printf("[nwudp]     parsed %zu container(s)\n", outer_messages.size());
-				// Retail / real NW wrap each lobby message in an empty-named
-				// root container (onnet build_response_message; NW-S4). Flatten
-				// to the actual messages so the now-wrapped client (and retail)
-				// dispatch correctly; tolerate the historical unwrapped form.
-				std::vector<NapiMessage> lobby_messages;
-				for (auto &root : outer_messages) {
-					if (root.name.empty() && !root.children.empty()) {
-						for (auto &child : root.children) {
-							lobby_messages.push_back(std::move(child));
-						}
-					} else {
-						lobby_messages.push_back(std::move(root));
-					}
-				}
-				for (const auto &outer : lobby_messages) {
+				for (const auto &outer : outer_messages) {
 					// onnet wraps the actual message inside a root container,
 					// so each top-level message we get IS the lobby message
 					// (its name is the message kind).
