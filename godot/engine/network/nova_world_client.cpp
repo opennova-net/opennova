@@ -331,10 +331,28 @@ void NovaWorldClient::begin_session() {
 	send_nw_datagram(session_->start());
 }
 
+// Short name for a ClientSession::State int (for the handshake diagnostics).
+static const char *cs_state_name(int s) {
+	switch (s) {
+	case 0: return "idle";    case 1: return "hello";    case 2: return "auth";
+	case 3: return "verifying"; case 4: return "verified"; case 5: return "closed";
+	case 6: return "error";   default: return "?";
+	}
+}
+
 void NovaWorldClient::send_nw_datagram(const std::vector<uint8_t> &dg) {
 	if (!nw_socket_.is_valid() || dg.empty()) return;
 	nw_socket_->set_dest_address(nw_udp_host_, nw_udp_port_);
 	nw_socket_->put_packet(to_pba(dg));
+	// Diagnostics (NW-S3): which datagram, where to, and our source port —
+	// the server keys its session by our (ip, port), so a changing local_port
+	// between the ClientHello and ClientAuth would make the server drop the
+	// join with no reply (opennova-int handle_client_join: "No session found").
+	UtilityFunctions::print(String("[NovaWorldClient] >> sent ")
+	    + String::num_int64(static_cast<int64_t>(dg.size())) + "B to " + nw_udp_host_ + ":"
+	    + String::num_int64(static_cast<int64_t>(nw_udp_port_)) + " local_port="
+	    + String::num_int64(static_cast<int64_t>(nw_socket_->get_local_port()))
+	    + " state=" + cs_state_name(session_ ? static_cast<int>(session_->state()) : -1));
 }
 
 void NovaWorldClient::poll_session() {
@@ -343,11 +361,45 @@ void NovaWorldClient::poll_session() {
 	while (nw_socket_->get_available_packet_count() > 0) {
 		auto packet = nw_socket_->get_packet();
 		auto bytes = from_pba(packet);
+		const String src_ip = nw_socket_->get_packet_ip();
+		const int src_port = nw_socket_->get_packet_port();
+		const int state_before = static_cast<int>(session_->state());
+
+		// Peek the plaintext session opcode (read-only; handle_datagram
+		// re-decodes independently). 0x81=ServerHello, 0x82=ServerAuth,
+		// 0x83=ServerProtocolMessage. Tells us exactly what the server sent.
+		char op_buf[8] = "0x??";
+		{
+			std::vector<uint8_t> stripped(bytes.size());
+			size_t ssz = 0;
+			if (opennova::napi_envelope_decode(bytes.data(), bytes.size(),
+			        stripped.data(), stripped.size(), &ssz) == 0 && ssz >= 1) {
+				std::snprintf(op_buf, sizeof(op_buf), "0x%02x", stripped[0]);
+			} else {
+				std::snprintf(op_buf, sizeof(op_buf), "BADENV");
+			}
+		}
 
 		// Hand the datagram to the protocol state machine; send whatever it
 		// asks us to. All NWU/CRC/TLV/scrk handling lives in client_session.
 		std::vector<std::vector<uint8_t>> replies;
 		const bool ok = session_->handle_datagram(bytes.data(), bytes.size(), replies);
+		const int state_after = static_cast<int>(session_->state());
+
+		// Diagnostics: a recv line for every inbound datagram. If state doesn't
+		// advance (e.g. auth->auth) with ok=1 and replies=0, the datagram was
+		// an unexpected opcode the session ignored; if no recv line appears
+		// after the ClientAuth send, the server sent nothing (or it was lost).
+		String msg = String("[NovaWorldClient] << recv ")
+		    + String::num_int64(static_cast<int64_t>(bytes.size())) + "B op=" + String(op_buf)
+		    + " from " + src_ip + ":"
+		    + String::num_int64(static_cast<int64_t>(src_port)) + " state "
+		    + cs_state_name(state_before) + "->" + cs_state_name(state_after)
+		    + " ok=" + (ok ? "1" : "0") + " replies="
+		    + String::num_int64(static_cast<int64_t>(replies.size()));
+		if (!ok) msg += String(" err='") + String(session_->last_error().c_str()) + "'";
+		UtilityFunctions::print(msg);
+
 		for (const auto &dg : replies) {
 			send_nw_datagram(dg);
 		}
