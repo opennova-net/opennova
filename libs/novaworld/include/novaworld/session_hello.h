@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace opennova {
@@ -161,6 +162,33 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out);
 // validates it in HandleClientJoin @ 0x62B750 and drops the join without it
 // (the original "real NW never sends ServerAuth" bug — RE doc NW-S2).
 std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg);
+
+// ---- ClientAuth CU chunks (NW-S3) --------------------------------------
+//
+// The retail client carries a set of named CU chunks in its 0x42 join,
+// built from CNapiGameSession_ConnectToNovaWorld @ 0x4d4640's var list
+// (Application, BuildDateAndTime, Debug, CountryName, Language,
+// TimeZoneBias, GateTag, MetTag, UdpCode1, UdpCode2, MaxPacketSize) and
+// emitted by NapiNPConnection_SendClientHello @ 0x61fe20. The last codes
+// (UdpCode1/UdpCode2) are session-auth tokens the gate issues
+// (gate VAR keys UDPCODE1/UDPCODE2 -> ProcessResponse @ 0x4ced20); the live
+// NW server's join callbacks (cb_server_0/cb_server_1) validate the join
+// against them. These chunks are NOT required by the OpenNova server (its
+// callbacks are permissive) but ARE required to authenticate against live
+// NovaLogic NW (see docs/net §8 NW-S3).
+//
+// Wire shape of one CU chunk's value (the inner bytes after the "CU" flat-TLV
+// name+size), mirroring NapiNPChunk_Create @ 0x624720 + SendClientHello's
+// writer: [type:1B][name + NUL][LE16 data_len][value + NUL], where
+// data_len = value.size()+1 (retail stores strlen(value)+1). `type` is 1 or 2
+// (the only values HandleClientJoin @ 0x62B750's CU loop accepts).
+std::vector<uint8_t> make_client_cu_chunk(uint8_t type, std::string_view name,
+                                          std::string_view value);
+
+// Decode one CU chunk produced by make_client_cu_chunk (inverse). Returns
+// false if the shape doesn't hold; out_value has the trailing NUL stripped.
+bool parse_client_cu_chunk(const uint8_t *data, size_t len, uint8_t &out_type,
+                           std::string &out_name, std::string &out_value);
 
 // Control-setting entry — (direction_byte, field_index, uint32 value).
 // CLIENT_* direction=1, SERVER_* direction=0. Values are currently from

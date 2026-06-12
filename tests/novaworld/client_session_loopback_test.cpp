@@ -238,10 +238,27 @@ void test_parser_roundtrip() {
 	ca_id.pv2 = "1";
 	ca_id.hk = 0x0FE0E112u;
 	ca_id.scrk = "CLIENTSCRK0123456789";
+	// NW-S3 CU chunks: the gate-issued session-auth codes + a binary one.
+	ca_id.cu.push_back(make_client_cu_chunk(1, "UdpCode1", "1234567890"));
+	ca_id.cu.push_back(make_client_cu_chunk(2, "UdpCode2", "0987654321"));
 	auto ca_bytes = client_auth_to_bytes(ca_id);
 	ClientAuth ca_parsed;
 	expect(parse_client_auth(ca_bytes.data(), ca_bytes.size(), ca_parsed),
 	       "parse_client_auth succeeds on round-trip");
+	// The CU blobs survive the flat-TLV round-trip and decode to name/value.
+	if (expect(ca_parsed.cu.size() == 2, "parse_client_auth recovers 2 CU chunks")) {
+		uint8_t cu_type = 0; std::string cu_name, cu_value;
+		expect(parse_client_cu_chunk(ca_parsed.cu[0].data(), ca_parsed.cu[0].size(),
+		                             cu_type, cu_name, cu_value),
+		       "CU[0] decodes");
+		expect(cu_type == 1 && cu_name == "UdpCode1" && cu_value == "1234567890",
+		       "CU[0] = type1 UdpCode1=1234567890");
+		expect(parse_client_cu_chunk(ca_parsed.cu[1].data(), ca_parsed.cu[1].size(),
+		                             cu_type, cu_name, cu_value),
+		       "CU[1] decodes");
+		expect(cu_type == 2 && cu_name == "UdpCode2" && cu_value == "0987654321",
+		       "CU[1] = type2 UdpCode2=0987654321");
+	}
 	expect(ca_parsed.nvs == ca_id.nvs, "parse_client_auth recovers NVS");
 	expect(ca_parsed.pn == "NOVAWORLDUDP", "parse_client_auth recovers PN");
 	expect(ca_parsed.pg_present && ca_parsed.pg == ca_id.pg, "parse_client_auth recovers PG");

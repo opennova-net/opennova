@@ -174,6 +174,15 @@ std::vector<uint8_t> ClientSession::build_client_auth() {
 	auth.sip  = 0;
 	auth.spn  = 0;
 	auth.scrk = client_scrk_;
+
+	// CU chunks (NW-S3) — the gate-issued session-auth codes + client env the
+	// live NW server validates. Empty for the OpenNova server (permissive
+	// callbacks); the binding fills cfg_.cu_vars from the gate response when
+	// targeting live NW.
+	for (const auto &v : cfg_.cu_vars) {
+		auth.cu.push_back(make_client_cu_chunk(v.type, v.name, v.value));
+	}
+
 	return encode_session_outbound(SESSION_OPCODE_CLIENT_AUTH,
 	                               client_auth_to_bytes(auth));
 }

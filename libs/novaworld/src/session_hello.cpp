@@ -234,6 +234,41 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	return buf;
 }
 
+std::vector<uint8_t> make_client_cu_chunk(uint8_t type, std::string_view name,
+                                          std::string_view value) {
+	// [type:1B][name + NUL][LE16 data_len][value + NUL], data_len = value.size()+1.
+	std::vector<uint8_t> blob;
+	blob.reserve(1 + name.size() + 1 + 2 + value.size() + 1);
+	blob.push_back(type);
+	blob.insert(blob.end(), name.begin(), name.end());
+	blob.push_back(0);
+	const uint16_t data_len = static_cast<uint16_t>(value.size() + 1);
+	blob.push_back(static_cast<uint8_t>(data_len & 0xFFu));
+	blob.push_back(static_cast<uint8_t>((data_len >> 8) & 0xFFu));
+	blob.insert(blob.end(), value.begin(), value.end());
+	blob.push_back(0);
+	return blob;
+}
+
+bool parse_client_cu_chunk(const uint8_t *data, size_t len, uint8_t &out_type,
+                           std::string &out_name, std::string &out_value) {
+	if (!data || len < 1) return false;
+	out_type = data[0];
+	size_t p = 1;
+	const size_t name_start = p;
+	while (p < len && data[p] != 0) ++p;
+	if (p >= len) return false; // no name NUL
+	out_name.assign(reinterpret_cast<const char *>(data + name_start), p - name_start);
+	++p; // skip name NUL
+	if (p + 2 > len) return false;
+	const uint16_t data_len = static_cast<uint16_t>(data[p]) |
+			(static_cast<uint16_t>(data[p + 1]) << 8);
+	p += 2;
+	if (p + data_len > len) return false;
+	out_value = strip_nul(data + p, data_len);
+	return true;
+}
+
 // Values copied from onnet's nwu_protocol.py (CLIENT_CS_FIELD_VALUES /
 // SERVER_CS_FIELD_VALUES). [UNVERIFIED — from onnet, not IDA]: the
 // binary's CS builder has not yet been located; confirm via xref to the

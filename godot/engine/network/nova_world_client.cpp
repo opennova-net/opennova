@@ -262,7 +262,17 @@ void NovaWorldClient::poll_gate() {
 		info["post_port"] = parsed.post_port;
 		info["startup_url"] = String(parsed.startup_url.c_str());
 		info["udp_novaworld"] = String(parsed.udp_novaworld.c_str());
+		// NW-S3: the gate-issued session-auth codes the 0x42 join must carry as
+		// CU chunks (UDPCODE1/UDPCODE2 -> UdpCode1/UdpCode2). On live NW these
+		// are issued only to an authenticated request (web login); their
+		// presence/absence here tells us whether login is the remaining blocker.
+		info["udp_code1"] = String(parsed.udp_code1.c_str());
+		info["udp_code2"] = String(parsed.udp_code2.c_str());
+		info["met_label"] = String(parsed.met_label.c_str());
 		server_info_ = info;
+		UtilityFunctions::print(String("[NovaWorldClient] gate response: udp_code1='")
+		    + String(parsed.udp_code1.c_str()) + "' udp_code2='"
+		    + String(parsed.udp_code2.c_str()) + "' (empty => live NW likely needs login)");
 		emit_signal("server_info_received", info);
 
 		// Parse "host:port" out of UDPNOVAWORLD.
@@ -289,6 +299,31 @@ void NovaWorldClient::begin_session() {
 	opennova::ClientSession::Config cfg;
 	cfg.client_index = client_index_;
 	cfg.client_key = client_key_;
+
+	// NW-S3: carry the retail CU-chunk set in the 0x42 join. UdpCode1/UdpCode2
+	// are the gate-issued session-auth codes live NW's join callbacks validate;
+	// the rest is client env. Harmless to the OpenNova server (permissive
+	// callbacks). Best-effort values — the locale/MetTag set is provisional
+	// pending a live /connectlog capture; the auth-critical UdpCode1/2 come
+	// straight from the gate response.
+	auto cu_from_info = [&](const char *cu_name, const char *info_key) {
+		if (server_info_.has(info_key)) {
+			String v = server_info_[info_key];
+			std::string val(v.utf8().get_data());
+			if (!val.empty()) cfg.cu_vars.push_back({cu_name, val, 1});
+		}
+	};
+	cfg.cu_vars.push_back({"Application", "OpennovaGodotClient.exe", 1});
+	cfg.cu_vars.push_back({"BuildDateAndTime", "Jul 21 2009 18:54:41", 1});
+	cfg.cu_vars.push_back({"Debug", "0", 1});
+	cfg.cu_vars.push_back({"GateTag", cfg.na, 1});
+	cu_from_info("MetTag", "met_label");
+	cu_from_info("UdpCode1", "udp_code1");
+	cu_from_info("UdpCode2", "udp_code2");
+	cfg.cu_vars.push_back({"MaxPacketSize", "1300", 1});
+	UtilityFunctions::print(String("[NovaWorldClient] 0x42 join carries ")
+	    + String::num_int64(static_cast<int64_t>(cfg.cu_vars.size())) + " CU chunks");
+
 	session_ = std::make_unique<opennova::ClientSession>(cfg);
 
 	enter_state(STATE_SESSION_HELLO);

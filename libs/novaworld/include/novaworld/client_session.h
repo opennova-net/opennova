@@ -68,6 +68,22 @@ public:
 		std::string pn   = "NOVAWORLDUDP";           // validated == server game id
 		std::string pv1  = "0.0.0 2/10/2004 EM";     // validated == server PV1
 		std::string pv2  = "1";
+
+		// CU chunks to emit in the ClientAuth (NW-S3). The retail client sends
+		// a named var set (Application/BuildDateAndTime/Debug/CountryName/
+		// Language/TimeZoneBias/GateTag/MetTag/UdpCode1/UdpCode2/MaxPacketSize)
+		// from CNapiGameSession_ConnectToNovaWorld @ 0x4d4640; UdpCode1/UdpCode2
+		// are the gate-issued session-auth codes (gate VARs UDPCODE1/UDPCODE2)
+		// that live NW's join callbacks validate. Empty by default (the OpenNova
+		// server doesn't require them); the binding populates it from the gate
+		// response + client env when targeting live NW. Each is emitted as a
+		// CU flat-TLV whose value is make_client_cu_chunk(type, name, value).
+		struct CuVar {
+			std::string name;
+			std::string value;
+			uint8_t type = 1;  // 1 or 2 (HandleClientJoin's CU loop accepts both)
+		};
+		std::vector<CuVar> cu_vars;
 	};
 
 	// Two constructors rather than a `Config config = {}` default argument:
