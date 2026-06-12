@@ -398,6 +398,17 @@ void NovaWorldClient::poll_session() {
 		    + " ok=" + (ok ? "1" : "0") + " replies="
 		    + String::num_int64(static_cast<int64_t>(replies.size()));
 		if (!ok) msg += String(" err='") + String(session_->last_error().c_str()) + "'";
+		// After the 0x82 ServerAuth, expose the parsed server SK + scrk: the SK
+		// becomes the session_id on our outbound 0x43, and opennova-int's 0x43
+		// handler DROPS the packet (no reply) unless that session_id == the SK
+		// it issued. A zero/garbage SK here would explain the missing 0x83.
+		{
+			char sk_buf[40];
+			std::snprintf(sk_buf, sizeof(sk_buf), " server_sk=0x%08x sscrk=%dB",
+			              static_cast<unsigned>(session_->server_key()),
+			              static_cast<int>(session_->server_scrk().size()));
+			msg += String(sk_buf);
+		}
 		UtilityFunctions::print(msg);
 
 		for (const auto &dg : replies) {
