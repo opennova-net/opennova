@@ -162,7 +162,17 @@ struct MiniServer {
 				size_t consumed = 0;
 				if (napi_stream_decode(pm.payload.data(), pm.payload.size(),
 				                       containers, &consumed) != 0) continue;
-				for (const auto &outer : containers) {
+				// NW-S4: the client wraps each lobby message in an empty-named
+				// root container; unwrap to the actual message(s).
+				std::vector<NapiMessage> lobby_msgs;
+				for (auto &root : containers) {
+					if (root.name.empty() && !root.children.empty()) {
+						for (auto &child : root.children) lobby_msgs.push_back(std::move(child));
+					} else {
+						lobby_msgs.push_back(std::move(root));
+					}
+				}
+				for (const auto &outer : lobby_msgs) {
 					auto result = session.dispatch(outer, lobby, "127.0.0.1", 5000);
 					for (auto &reply_container : result.reply_containers) {
 						std::vector<NapiMessage> stream{std::move(reply_container)};

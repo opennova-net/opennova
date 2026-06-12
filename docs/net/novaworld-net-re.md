@@ -986,6 +986,30 @@ path) when launched with `/connectlog`. One retail launch against the same live 
 the exact VAR set the gate returns (incl. whether `UDPCODE1/2` are present) and resolves any
 remaining unknowns (`UdpCode1/2` source `byte_B5F8E8`/`B5F908` had no writer xref).
 
+#### NW-S4 — lobby messages are wrapped in an empty-named root container
+
+Against the real server (`.204`, a faithful target our emulator reproduces — the
+retail client completes the whole flow against the emulator), the Godot client's AUTH
+now succeeds (real `ServerAuth 0x82`, `SK`+61-byte `SCRK` parsed correctly) but the
+**lobby-verify leg** stalled: the client sent `ClientConnected` (`0x43`) and the server
+never replied with `ServerStartVerify` (`0x83`).
+
+Cause: retail / real NW wrap **every** lobby message in an **empty-named root
+container** — `Container(name="", children=[msg])` (onnet `build_response_message`,
+`novaworldudp.py:35`); the receiver reads `root.children[0]` (`_handle_message`,
+`novaworldudp.py:91`). Our `build_lobby_packet` emitted the message as the top-level
+container (no wrapper), so the original did `root.children[0]` on a childless container,
+hit `if not root.children: return []`, and dropped the packet with no reply. This was
+invisible to our own stack: OpenNova client↔server both used the unwrapped form, so the
+loopback and `lobby_session_test` agreed and never caught it.
+
+Fix: `build_lobby_packet` (client) now wraps each lobby container in the empty-named
+root; the inbound `0x83` handler (`on_server_protocol_message`) and the server's `0x43`
+dispatch (`nw_udp_listener.cpp`) **flatten** the empty-named root to the actual
+message(s), tolerating the historical unwrapped form for back-compat. Loopback +
+`lobby_session` stay green (both ends now wrapped). Verified live: the client should now
+get `ServerStartVerify` from the original and proceed through the verify handshake.
+
 #### NW-G1 — POSTIPADDRESS / POSTIPPORT are required (resolved)
 
 The standing question (jodemo requires them; onnet omits them yet works on retail JO)
