@@ -959,6 +959,33 @@ for completing the UDP AUTH, not a post-connect step. (`OnNovaWorldConnected @ 0
 *after* SessionInit and fills a separate in-game credential form; that is distinct from the
 pre-connect web login that authorizes the join.)
 
+**The auth chain, end to end (de-risk grill, 2026-06-11):**
+1. `UDPCODE1`/`UDPCODE2` — the session-auth codes the 0x42 join carries as `UdpCode1`/`UdpCode2`
+   CU chunks — are **gate-response VAR keys**, parsed in `ProcessResponse @ 0x4ced20`
+   (`UDPCODE1 → CMissionInfo_SetGateTag`, `UDPCODE2 → CMissionInfo_SetMetTag`). Our
+   `gate_response.cpp` already parses both. So they come from the **gate**, not a separate endpoint.
+2. The gate issues them only to an **authenticated** request. Authentication is a **web-form login**
+   through the in-game browser (`CUIBrowser` @ `dword_2551100`): `load_persistent_login_credentials
+   @ 0x557330` fills the `NAME` (username) + password fields; persisted creds live in
+   `PERSISTENTREMEMBERLOGINDATA`, decrypted by `NapiNP_DecodeEncryptedKeyValue @ 0x619470` with key
+   `"SLHALI289SZ79210987ZS:OCV789YHK2QJ3HSKDJHVS978THYG23"`. (EPASK crypto = NW-C2.)
+3. So **live-NW Phase 3 = web login → gate issues `UDPCODE1/2` → emit them (+ env vars) as CU chunks
+   in the 0x42.** Our gate parser already captures `UDPCODE1/2`; the missing pieces are (a) the web
+   login that makes the gate issue them and (b) attaching the CU-chunk set to `ClientAuth`.
+
+**Scope note — product vs parity.** This entire auth chain is required only to impersonate a retail
+client against **live NovaLogic NW** (parity testing). The OpenNova **product** path is OpenNova
+client ↔ the OpenNova server (`apps/novaworld_server`), whose `cb_server_0`/`cb_server_1` are
+permissive — there the full handshake already reaches `Verified` (`client_session_loopback_test`).
+The `session_join` timeout is therefore expected against live NW and is **not** a blocker for the
+OpenNova-server path; it gates only the retail-impersonation parity scenario.
+
+Empirical ground truth available cheaply: retail JO logs the entire gate dialogue to
+`_connectlog.txt` (every `GATE LINE #NN [...]`, set by `ProcessResponse`'s `g_ConnectLogEnabled`
+path) when launched with `/connectlog`. One retail launch against the same live endpoint captures
+the exact VAR set the gate returns (incl. whether `UDPCODE1/2` are present) and resolves any
+remaining unknowns (`UdpCode1/2` source `byte_B5F8E8`/`B5F908` had no writer xref).
+
 #### NW-G1 — POSTIPADDRESS / POSTIPPORT are required (resolved)
 
 The standing question (jodemo requires them; onnet omits them yet works on retail JO)
