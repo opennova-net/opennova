@@ -36,7 +36,7 @@ func test_dvxi5_import_then_export_matches_fixture_bytes() -> void:
 	var editor = add_child_autofree(TerrainEditorScene.instantiate())
 
 	assert_eq(editor.open_trn(_fixture_path("Dvxi5.trn")), OK, "Dvxi5 fixture should import through the editor.")
-	assert_false(editor.is_document_dirty(), "A no-edit import should remain clean before export.")
+	assert_false(editor.is_dirty, "A no-edit import should remain clean before export.")
 
 	var err: Error = editor.export_terrain(_output_dir(), TerrainEditor.ExportFlavor.DFX_JO)
 	assert_eq(err, OK, "Dvxi5 fixture should export through the real editor pipeline.")

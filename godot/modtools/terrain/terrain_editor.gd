@@ -515,7 +515,7 @@ func set_tool(tool: Tool) -> void:
 	current_tool = tool
 	flatten_target_set = false
 	_sync_surface_overlay_state(_get_material())
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func _sync_surface_overlay_state(material: ShaderMaterial) -> void:
@@ -548,7 +548,7 @@ func set_paint_color(color: Color) -> void:
 	if paint_color == color:
 		return
 	paint_color = color
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func get_paint_color() -> Color:
@@ -569,7 +569,7 @@ func set_terrain_name_value(value: String) -> void:
 		return
 	_data.set_terrain_name(next_value)
 	is_dirty = true
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func get_detail_density() -> int:
@@ -584,7 +584,7 @@ func set_detail_density_value(value: int) -> void:
 	_data.set_detail_density(value)
 	_document.sync_material_from_data(_get_material())
 	is_dirty = true
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func get_detail_density2() -> int:
@@ -598,7 +598,7 @@ func set_detail_density2_value(value: int) -> void:
 		return
 	_data.set_detail_density2(value)
 	is_dirty = true
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func get_wrap_x_enabled() -> bool:
@@ -612,7 +612,7 @@ func set_wrap_x_enabled(enabled: bool) -> void:
 		return
 	_data.set_wrap_x(enabled)
 	is_dirty = true
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func get_wrap_y_enabled() -> bool:
@@ -626,7 +626,7 @@ func set_wrap_y_enabled(enabled: bool) -> void:
 		return
 	_data.set_wrap_y(enabled)
 	is_dirty = true
-	_update_hud()
+	_mark_ui_state_changed()
 
 func get_data() -> NovaTerrainData:
 	return _data
@@ -692,20 +692,6 @@ func set_viewport_mouse_position(position: Vector2) -> void:
 	_viewport_mouse_position = position
 
 
-func get_metadata_summary() -> Dictionary:
-	var foliage_summary: Array = []
-	for def in _document.foliage_defs:
-		if def != null:
-			foliage_summary.append(def.to_dictionary())
-	return {
-		"charmap": _document.get_slot_filename("charmap"),
-		"foliagemap": _document.get_slot_filename("foliagemap"),
-		"tilestrip": _document.get_slot_filename("tilestrip"),
-		"tileinfo": _document.tileinfo_filename,
-		"foliage_defs": foliage_summary,
-	}
-
-
 func get_surface_types() -> Array:
 	return TerrainEditorSurfacePaint.get_surface_types()
 
@@ -719,7 +705,7 @@ func set_selected_surface_index(value: int) -> void:
 	if selected_surface_index == next:
 		return
 	selected_surface_index = next
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func get_surface_palette_bytes() -> PackedByteArray:
@@ -749,7 +735,7 @@ func add_foliage_def() -> void:
 	_push_foliage_defs_history(before_state, after_state)
 	is_dirty = true
 	_mark_foliage_preview_dirty()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 
 
 func remove_foliage_def(index: int) -> void:
@@ -764,7 +750,7 @@ func remove_foliage_def(index: int) -> void:
 	_push_foliage_defs_history(before_state, after_state)
 	is_dirty = true
 	_mark_foliage_preview_dirty()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 
 
 func set_foliage_def_field(index: int, field: String, value: Variant) -> void:
@@ -807,17 +793,13 @@ func set_foliage_def_field(index: int, field: String, value: Variant) -> void:
 	_push_foliage_defs_history(before_state, after_state)
 	is_dirty = true
 	_mark_foliage_preview_dirty()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 
 
 func save_project_to_current_dir() -> Error:
 	if _document.current_project_dir.is_empty():
 		return ERR_INVALID_PARAMETER
 	return save_project(_document.current_project_dir)
-
-
-func get_current_tool() -> Tool:
-	return current_tool
 
 
 func get_paint_detail_channel() -> int:
@@ -831,7 +813,7 @@ func set_brush_radius_value(value: float) -> void:
 	if is_equal_approx(brush_radius, next):
 		return
 	brush_radius = next
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func set_brush_strength_value(value: float) -> void:
@@ -841,7 +823,7 @@ func set_brush_strength_value(value: float) -> void:
 	if is_equal_approx(brush_strength, next):
 		return
 	brush_strength = next
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func set_brush_hardness_value(value: float) -> void:
@@ -851,11 +833,7 @@ func set_brush_hardness_value(value: float) -> void:
 	if is_equal_approx(brush_hardness, next):
 		return
 	brush_hardness = next
-	_update_hud()
-
-
-func set_shader_flag(param: String, value: bool) -> void:
-	_get_material().set_shader_parameter(param, value)
+	_mark_ui_state_changed()
 
 
 func get_sector_count() -> int:
@@ -955,7 +933,7 @@ func set_water_visible(visible: bool) -> void:
 		return
 	water_visible = visible
 	_update_water_plane()
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func is_sector_overlay_visible() -> bool:
@@ -968,7 +946,7 @@ func set_sector_overlay_visible(visible: bool) -> void:
 	sector_overlay_visible = visible
 	if terrain_mesh:
 		_sync_surface_overlay_state(_get_material())
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func is_export_running() -> bool:
@@ -1035,7 +1013,7 @@ func set_sector_cell(row: int, col: int, value: int) -> bool:
 	var next := clampi(value, 0, 4)
 	_active_sector_cell = Vector2i(row, col)
 	if grid[idx] == next:
-		_update_hud()
+		_mark_ui_state_changed()
 		return false
 	grid[idx] = next
 	_data.set_sector_grid(grid)
@@ -1080,7 +1058,7 @@ func set_selected_foliage_def_index(index: int) -> void:
 	if _document.selected_foliage_def_index == before:
 		return
 	_mark_foliage_preview_dirty()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 
 
 func get_selected_foliage_def() -> NovaTerrainFoliageDef:
@@ -1136,7 +1114,7 @@ func clear_tileinfo_selection() -> void:
 	_document.clear_tileinfo_selection()
 	_tile_interaction_mode = TileInteractionMode.PLACE
 	_mark_tile_overlay_dirty()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 
 
 func select_tileinfo_entry(index: int, focus_camera: bool = false) -> void:
@@ -1147,7 +1125,7 @@ func select_tileinfo_entry(index: int, focus_camera: bool = false) -> void:
 	_document.set_tileinfo_selected_index(index, false)
 	_tile_interaction_mode = TileInteractionMode.EDIT_SELECTED
 	_mark_tile_overlay_dirty()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 	if focus_camera:
 		focus_selected_tileinfo_entry()
 
@@ -1162,7 +1140,7 @@ func set_tile_stamp_tile_index(value: int) -> void:
 	if _document.get_tile_stamp_tile_index() == clampi(value, 0, 255):
 		return
 	_document.set_tile_stamp_tile_index(value)
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 
 
 func get_tile_stamp_flags() -> int:
@@ -1181,7 +1159,7 @@ func set_tile_stamp_flags(value: int) -> void:
 	if _document.get_tile_stamp_flags() == normalized:
 		return
 	_document.set_tile_stamp_flags(value)
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 
 
 func apply_tile_stamp_to_selected_entry() -> bool:
@@ -1257,7 +1235,7 @@ func load_texture_slot(slot_id: String, path: String) -> void:
 			_mark_tile_overlay_dirty()
 		elif slot_id == "foliagemap":
 			_mark_foliage_preview_dirty()
-		_sync_hud_from_editor()
+		_mark_ui_state_changed()
 
 
 func reset_texture_slot(slot_id: String) -> void:
@@ -1269,7 +1247,7 @@ func reset_texture_slot(slot_id: String) -> void:
 		_mark_tile_overlay_dirty()
 	elif slot_id == "foliagemap":
 		_mark_foliage_preview_dirty()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 
 
 func load_tileinfo(path: String) -> void:
@@ -1279,7 +1257,7 @@ func load_tileinfo(path: String) -> void:
 		_normalize_loaded_tileinfo_if_needed()
 		is_dirty = true
 		_mark_tile_overlay_dirty()
-		_sync_hud_from_editor()
+		_mark_ui_state_changed()
 
 
 func new_tileinfo() -> void:
@@ -1288,7 +1266,7 @@ func new_tileinfo() -> void:
 	_document.new_tileinfo()
 	is_dirty = true
 	_mark_tile_overlay_dirty()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 
 
 func reset_tileinfo() -> void:
@@ -1297,7 +1275,7 @@ func reset_tileinfo() -> void:
 	_document.reset_tileinfo()
 	is_dirty = _document.is_dirty
 	_mark_tile_overlay_dirty()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 
 
 func _tile_cell_from_world(world_x: float, world_z: float) -> Vector2i:
@@ -1343,7 +1321,7 @@ func _finalize_tileinfo_edit(before_state: Dictionary, changed: bool) -> bool:
 	_push_tileinfo_history(before_state, after_state)
 	is_dirty = _document.is_dirty
 	_mark_tile_overlay_dirty()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 	return true
 
 
@@ -1452,7 +1430,7 @@ func _eyedrop_foliage_at_hover() -> bool:
 		return false
 	_document.set_selected_foliage_def_index(def_index)
 	_mark_foliage_preview_dirty()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 	return true
 
 
@@ -1569,7 +1547,7 @@ func _eyedrop_surface_at_hover() -> bool:
 	var map_x := surface_map.map_x_from_heightmap_x(source.x)
 	var map_y := surface_map.map_y_from_heightmap_y(source.y)
 	selected_surface_index = surface_map.get_index(map_x, map_y)
-	_update_hud()
+	_mark_ui_state_changed()
 	return true
 
 
@@ -1578,14 +1556,14 @@ func _set_clone_source(world_pos: Vector3) -> void:
 	if _clone_source_marker:
 		_clone_source_marker.position = world_pos
 		_clone_source_marker.visible = true
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func clear_clone_source() -> void:
 	_brush_session.clear_clone_source()
 	if _clone_source_marker:
 		_clone_source_marker.visible = false
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func has_clone_source() -> bool:
@@ -1649,7 +1627,7 @@ func _on_primary_start() -> void:
 	if current_tool == Tool.CLONE_COLOR:
 		if Input.is_key_pressed(KEY_CTRL) and _hover_hit_valid:
 			_set_clone_source(_hover_hit)
-			_update_hud()
+			_mark_ui_state_changed()
 			return
 		if not _brush_session.has_clone_source() or not _hover_hit_valid:
 			return
@@ -1660,7 +1638,7 @@ func _on_primary_start() -> void:
 		var source := terrain_mesh.world_to_source_coords(_hover_hit.x, _hover_hit.z)
 		if source.x >= 0.0:
 			paint_color = _data.brush_sample_colormap(source.x, source.y)
-			_update_hud()
+			_mark_ui_state_changed()
 		return
 	_brush_session.begin_brush_drag(_source_image_for_kind(_brush_session.history_kind_for_tool(current_tool)), Input.is_key_pressed(KEY_CTRL))
 
@@ -1673,7 +1651,7 @@ func _on_primary_end() -> void:
 			var after_state := _document.capture_surface_map_history_state()
 			_push_surface_map_history(_surface_map_stroke_before, after_state)
 			is_dirty = true
-			_sync_hud_from_editor()
+			_mark_ui_state_changed()
 		_surface_map_stroke_before = {}
 		_surface_map_stroke_changed = false
 		return
@@ -1685,7 +1663,7 @@ func _on_primary_end() -> void:
 			_push_foliage_map_history(_foliage_map_stroke_before, after_state)
 			is_dirty = true
 			_mark_foliage_preview_dirty()
-			_sync_hud_from_editor()
+			_mark_ui_state_changed()
 		_foliage_map_stroke_before = {}
 		_foliage_map_stroke_changed = false
 		return
@@ -1865,21 +1843,21 @@ func _apply_history_snapshot(snapshot: Dictionary, is_undo: bool) -> void:
 		var surface_state: Dictionary = snapshot.get("before_value", {}) if is_undo else snapshot.get("after_value", {})
 		_document.restore_surface_map_history_state(_get_material(), surface_state)
 		is_dirty = true
-		_sync_hud_from_editor()
+		_mark_ui_state_changed()
 		return
 	if int(snapshot.get("kind", -1)) == TerrainEditHistory.Kind.TILEINFO:
 		var state: Dictionary = snapshot.get("before_value", {}) if is_undo else snapshot.get("after_value", {})
 		_document.restore_tileinfo_history_state(state)
 		is_dirty = true
 		_mark_tile_overlay_dirty()
-		_sync_hud_from_editor()
+		_mark_ui_state_changed()
 		return
 	if int(snapshot.get("kind", -1)) == TerrainEditHistory.Kind.FOLIAGEMAP:
 		var state: Dictionary = snapshot.get("before_value", {}) if is_undo else snapshot.get("after_value", {})
 		_document.restore_foliage_map_history_state(state)
 		is_dirty = true
 		_mark_foliage_preview_dirty()
-		_sync_hud_from_editor()
+		_mark_ui_state_changed()
 		return
 	if int(snapshot.get("kind", -1)) == TerrainEditHistory.Kind.FOLIAGE_DEFS:
 		var defs_state: Variant = snapshot.get("before_value", {}) if is_undo else snapshot.get("after_value", {})
@@ -1889,7 +1867,7 @@ func _apply_history_snapshot(snapshot: Dictionary, is_undo: bool) -> void:
 			_document.restore_foliage_defs_history_state(defs_state)
 		is_dirty = true
 		_mark_foliage_preview_dirty()
-		_sync_hud_from_editor()
+		_mark_ui_state_changed()
 		return
 	var result := _brush_session.apply_history_snapshot(snapshot, is_undo, _heightmap_image, _blendmap_image, _colormap_image)
 	if result["changed_heightmap"]:
@@ -1915,14 +1893,6 @@ func _source_image_for_kind(kind: int) -> Image:
 	return null
 
 
-func _update_hud() -> void:
-	_mark_ui_state_changed()
-
-
-func _sync_hud_from_editor() -> void:
-	_mark_ui_state_changed()
-
-
 func get_ui_state_version() -> int:
 	return _ui_state_version
 
@@ -1932,10 +1902,6 @@ func _mark_ui_state_changed() -> void:
 	ui_state_changed.emit(_ui_state_version)
 	if workstation and workstation.has_method("sync_from_editor_state"):
 		workstation.sync_from_editor_state()
-
-
-func is_document_dirty() -> bool:
-	return is_dirty
 
 
 func has_pending_unsaved_action() -> bool:
@@ -2092,7 +2058,7 @@ func new_terrain() -> void:
 	_sync_sector_layout(true)
 	_mark_foliage_preview_dirty()
 	is_dirty = false
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 
 
 func open_trn(trn_path: String, timeline: PerfTimeline = null) -> Error:
@@ -2157,8 +2123,8 @@ func open_trn(trn_path: String, timeline: PerfTimeline = null) -> Error:
 
 	is_dirty = normalized or normalized_tileinfo
 	_mark_foliage_preview_dirty()
-	_update_hud()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
+	_mark_ui_state_changed()
 	_check_loaded_cdep_violations()
 	return OK
 
@@ -2207,8 +2173,8 @@ func _open_trn_from_resource_root(resources: NovaResourceRoot, trn_name: String,
 
 	is_dirty = normalized or normalized_tileinfo
 	_mark_foliage_preview_dirty()
-	_update_hud()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
+	_mark_ui_state_changed()
 	_check_loaded_cdep_violations()
 	return OK
 
@@ -2255,8 +2221,8 @@ func save_project(dir_path: String) -> Error:
 	_document.current_trn_path = dir_path + "/" + name + ".trn"
 	_remember_save_dir(dir_path)
 	is_dirty = false
-	_update_hud()
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
+	_mark_ui_state_changed()
 	return OK
 
 
@@ -2369,7 +2335,7 @@ func export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO) -> Er
 		return err
 
 	_remember_export_dir(output_dir)
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 	return OK
 
 
@@ -2411,14 +2377,14 @@ func _finish_export_job() -> void:
 
 	if workstation and workstation.has_method("on_export_completed"):
 		workstation.on_export_completed(err, message)
-	_sync_hud_from_editor()
+	_mark_ui_state_changed()
 
 
 func _create_default_document(terrain_name: String) -> void:
 	_document.create_default_document(terrain_name, _get_material(), _build_default_sector_grid())
 	_active_sector_cell = Vector2i(-1, -1)
 	selected_surface_index = TerrainEditorSurfacePaint.DEFAULT_SURFACE_INDEX
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func _apply_default_visual_state(sync_data: bool = true) -> void:
@@ -2479,7 +2445,7 @@ func _sync_sector_layout(reframe_camera: bool) -> void:
 	_mark_tile_overlay_dirty()
 	if reframe_camera:
 		_frame_camera_to_terrain()
-	_update_hud()
+	_mark_ui_state_changed()
 
 
 func _is_brush_preview_tool() -> bool:
