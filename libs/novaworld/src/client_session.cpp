@@ -146,6 +146,7 @@ std::vector<uint8_t> ClientSession::start() {
 	server_sk_ = 0;
 	server_scrk_.clear();
 	server_nwuid_.clear();
+	server_web_domain_.clear();
 	sess_id_string_.clear();
 	last_error_.clear();
 	// Outbound 0x43 seq is 1-based, matching genuine NovaWorld: the retail
@@ -358,7 +359,9 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body,
 	// 9729 -> 10166. CNapiGameSession_OnNovaWorldConnected @ 0x4d1570 reads it from
 	// the SessionInit CU and installs it as the NWUID browser form field.
 	for (const auto &kv : sa.cu) {
-		if (kv.first == "NWUID") { server_nwuid_ = kv.second; break; }
+		if (kv.first == "NWUID") server_nwuid_ = kv.second;
+		else if (kv.first == "NovaworldWebDomainNameAndPortNumber")
+			server_web_domain_ = kv.second;
 	}
 
 	// Kick off the lobby verify handshake with a bare ClientConnected

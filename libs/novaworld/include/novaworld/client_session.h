@@ -154,6 +154,12 @@ public:
 	uint32_t server_key() const { return server_sk_; }
 	const std::string &client_scrk() const { return client_scrk_; }
 	const std::string &server_scrk() const { return server_scrk_; }
+	// The NovaworldWebDomainNameAndPortNumber CU delivered in the ServerSessionInit
+	// (0x82), e.g. "207.178.209.204:80". On live NW the gate's startupurl carries a
+	// "[domainname]" placeholder; this is the real web host the client substitutes
+	// for the HTTP login/GSB/join legs. Empty until the SessionInit is parsed.
+	const std::string &server_web_domain() const { return server_web_domain_; }
+	const std::string &server_nwuid() const { return server_nwuid_; }
 	const std::string &sess_id_string() const { return sess_id_string_; }
 	const std::string &last_error() const { return last_error_; }
 
@@ -186,6 +192,7 @@ private:
 	std::string client_scrk_;      // we generate; encrypts our 0x43 inner stream
 	std::string server_scrk_;      // ServerAuth.scrk; decrypts inbound 0x83 inner
 	std::string server_nwuid_;     // ServerSessionInit NWUID — echoed in the verify
+	std::string server_web_domain_;// ServerSessionInit NovaworldWebDomainNameAndPortNumber
 	std::string sess_id_string_;   // ServerVerifyResult.SessIdString
 	std::string last_error_;
 

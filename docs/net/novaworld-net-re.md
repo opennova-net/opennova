@@ -1294,3 +1294,63 @@ gated on them). The OpenNova-server loopback (`client_session_loopback_test`, no
 the verify structure + NWUID echo) stays green: it keeps `verify_cookie_vars` empty for a bare
 verify, which the permissive server accepts. Oracle: `nw204_lobby_decode_test`. There is **no
 CD-key boundary** for the lobby VALIDATE — the milestone is reachable without credentials.
+
+**Live result (2026-06-12):** our client reached **CONNECTED/VALIDATED against the real `.204`**
+(`~/Desktop/capture_opennova.pcapng`): `0x41(259)→0x81(293)→0x42(617)→0x82(650)→settings 0x83(42)
+→ClientConnected(40)+ack(18)→ServerStartVerify(42)→verify(882)→ServerVerifyResult(151)→` 2 s
+keepalives. The seq/ack fix was the whole story.
+
+### Wave 6 — the authenticated web flow vs real `.204` (2026-06-12)
+
+After the lobby VALIDATE the client browses/joins over HTTP to the NovaWorld **web host**. The
+exact contract is witnessed in the user's retail capture (`~/Desktop/capture.pcapng`, HTTP to
+`207.178.209.204:80`), not inferred. Sequence (UI-asset `*.mnx`/`*.tga` GETs omitted):
+
+1. `GET /nwprepare.dll?ver1=3&ver2=2345&cc=us&gt=jop:cus2&url=jop_2_start.htm` → Set-Cookie
+   `YOURIP/VER1=3/VER2=2345/GT=jop:cus2/CC=us/EPASK=<exp:mod:key>`.
+2. `GET /NWStart.dll?MSGBASE=…&IN=jop_2_main.htm&OUT=jop_2_login.htm&verfile=jop_2.ver&…&junction=…`
+   → Set-Cookie `USEJUNCTION=0`. **Required** (frame 12178).
+3. `POST /NWLogin.dll` → Set-Cookie `LOGINSESSIONTAG` (+ empty NWHANDLE/PCID/…).
+4. `GET /NWLogin.dll` (poll, repeat) → Set-Cookie `NWHANDLE=ljim, PCID=A-A02-085D18, NWH/NWI/NWV/
+   NWD/EXPBITS, PERSISTENT…` once the auth completes (frame 39723).
+5. `GET /jop_2.gsb?a=1` → binary `GSB ` blob.
+6. `GET /NWJoin.dll?needexpkey=…&success=jop_2_join.joi&failure=…&relay=…&msgbase=…&nodb=…&pfid=28&
+   mode=Login&rid=<RID>` → Set-Cookie `NWJOINSESSIONTAG`; then `GET /NWJoin.dll` → `.joi`
+   `[NK&CK&NI&NP&BK]`.
+
+Findings (witnessed, correcting prior inference):
+- **The web host comes from the UDP SessionInit**, CU `NovaworldWebDomainNameAndPortNumber`
+  (= `207.178.209.204:80`). The gate's `startupurl` carries a literal `[domainname]` (plus
+  `[VER1]/[VER2]/[CC]/[GT]`) the client substitutes. `OnNovaWorldConnected @ 0x4d1570` installs
+  this domain.
+- **Every login form field is EPASK-encrypted EXCEPT the echoed `EPASK` bundle** — not just
+  NAME/PASSWORD but pfid/needtoagree/nodb/relay/msgbase/enterkey/failure/success too. (The earlier
+  "hidden fields plaintext" read — NW-S5/B — is **refuted** by the capture; that was the source of
+  the server's benign "non-A-P decrypt" warnings against our plaintext fields.)
+- **The login POST carries the CD-key/hardware identity as HTTP cookies** — the SAME set as the
+  UDP verify var-list (CountryName/Language/TimeZoneBias/MyInstalledExpBits/NWUID/NWCDKIID=""/
+  NWCDKIIDEXP1=""/NWPSSK/NWUSID/NWHWI) — set by the client (browser form fields), plus the
+  prepare/NWStart cookies. Login is **POST then poll** `GET /NWLogin.dll` until NWHANDLE/PCID
+  populate.
+- **Login is for the account/GSB leg, not the lobby verify** (the lobby VALIDATEs before any HTTP).
+  The user's account (`ljim`) authenticates against live `.204`, so its account backend is alive.
+
+**Landed (this wave):** the binding extracts the SessionInit web domain (`server_web_domain()`),
+`http_base()` uses it when the gate `startupurl` is templated (the OpenNova concrete path is
+byte-unchanged), `resolve_startup_url()` substitutes the placeholders, the login chain adds the
+NWStart step + seeds the identity cookies + POSTs the all-encrypted body (`build_login_post_body`,
+per-field encrypt) + polls NWLogin, the GSB fetch adds `?a=1`, and NWJoin uses the full witnessed
+phase-1 query. `http_login_test` gains an all-encrypted-body case; 20/20 scoped net ctest green;
+GDExtension builds clean.
+
+**CONFIRMED LIVE against `.204` (2026-06-12, `~/Desktop/capture_opennova2.pcapng`):** the full
+out-game flow ran end to end — `GET /jop_2.gsb?a=1` (unauth on connect, 7 real servers) →
+`GET /nwprepare.dll?ver1=3&cc=us&gt=jop:cus2` (substituted template) → `GET /NWStart.dll` →
+`POST /NWLogin.dll` (all-encrypted) → two `GET /NWLogin.dll?tag=…` polls → auth as **ljim**
+(`PCID A-A02-085D18`, matching the retail capture) → authenticated `jop_2.gsb` → two-phase
+`NWJoin.dll?rid=167782351` → `.joi` → a **270-byte JointOperations ClientHello to the real game
+host `207.178.209.204:3875`** (proto switch). The OpenNova client now logs in, browses, and joins
+on genuine NovaLogic NovaWorld. (Confirmed: `.204`'s GSB is fetchable unauthenticated; the lobby
+verify needs no login; the account login is for identity/join.) Minor follow-up: GSB server names
+carrying a Latin-1 `©` (0xA9) trip a Godot UTF-8 warning — decode GSB strings Latin-1→UTF-8 for
+display. The JointOperations session stops at the hello (ADR 0009 in-match seam — no gameplay yet).

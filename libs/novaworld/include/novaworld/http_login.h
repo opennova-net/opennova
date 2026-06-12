@@ -20,8 +20,13 @@
 //   * POST builder GopherWebWidget_SendHttpPost @ 0x658b30 sends
 //     `Content-type: application/x-www-form-urlencoded` with the field body
 //     assembled by the form widgets (build_form_field_query_string @ 0x657760).
-//   * EDIT-widget field values (NAME, PASSWORD) are EPASK-encrypted; hidden
-//     fields and the echoed EPASK public key travel plaintext.
+//   * The echoed EPASK public key travels plaintext; EVERY other field is
+//     EPASK-encrypted — not just NAME/PASSWORD but the hidden fields too (pfid,
+//     needtoagree, nodb, relay, msgbase, enterkey, failure, success, ...).
+//     Witnessed directly in the genuine .204 capture (POST /NWLogin.dll body,
+//     all values A-P-encoded). The binding builds this via build_login_post_body
+//     with per-field encrypt=true; build_credentials_post_body below keeps the
+//     hidden fields plaintext for the permissive OpenNova-server path only.
 //   * The EPASK bundle arrives as a Set-Cookie at /nwprepare.dll, is stored in
 //     the cookie jar (CookieJar_UpdateFromURL @ 0x64e630), and is read back by
 //     name (sub_64EA90 @ 0x64ea90).

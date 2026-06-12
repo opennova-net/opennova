@@ -173,6 +173,45 @@ int main() {
 		check(count == 1, "no duplicate NWHANDLE after update");
 	}
 
+	// ---- 3. Real-NW login body: EVERY field EPASK-encrypted except EPASK ----
+	// Mirrors the genuine .204 POST /NWLogin.dll body (capture frame 27663), built
+	// the way the binding builds it (build_login_post_body with per-field encrypt).
+	{
+		const std::string name = "ljim", password = "secret";
+		const std::vector<LoginFormField> fields = {
+		    {"EPASK", epask_to_string(pub), false},
+		    {"NAME", name, true},
+		    {"PASSWORD", password, true},
+		    {"rememberlogindata", "", false},
+		    {"rememberlogin", "0", true},
+		    {"pfid", "28", true},
+		    {"needtoagree", "jop_2_needtoagree.htm", true},
+		    {"nodb", "jop_2_nodb.htm", true},
+		    {"relay", "jop_2_relay.htm", true},
+		    {"msgbase", "jop_2_msg.htm", true},
+		    {"enterkey", "jop_2_key.htm", true},
+		    {"failure", "jop_2_login.htm", true},
+		    {"success", "jop_2_main.htm", true},
+		};
+		const std::string body = build_login_post_body(pub, fields);
+		const auto form = parse_form_body(body);
+
+		check(form.at("EPASK") == epask_to_string(pub), "EPASK echoed plaintext");
+		check(epask_decrypt(form.at("NAME"), pub) == name, "NAME decrypts");
+		check(epask_decrypt(form.at("PASSWORD"), pub) == password, "PASSWORD decrypts");
+		// The hidden fields are encrypted on the wire and decrypt to their values.
+		check(form.at("pfid") != "28" && epask_decrypt(form.at("pfid"), pub) == "28",
+		      "pfid is encrypted and decrypts to 28");
+		check(epask_decrypt(form.at("needtoagree"), pub) == "jop_2_needtoagree.htm",
+		      "needtoagree decrypts");
+		check(epask_decrypt(form.at("success"), pub) == "jop_2_main.htm",
+		      "success decrypts");
+		check(epask_decrypt(form.at("failure"), pub) == "jop_2_login.htm",
+		      "failure decrypts");
+		// rememberlogindata is the lone empty plaintext passthrough (matches retail).
+		check(form.at("rememberlogindata").empty(), "rememberlogindata empty plaintext");
+	}
+
 	if (g_failures == 0) {
 		std::printf("http_login: all checks passed\n");
 		return 0;

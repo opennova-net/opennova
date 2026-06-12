@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace godot {
@@ -130,6 +131,7 @@ private:
 	void on_login_request_completed(int result, int response_code,
 	                                const PackedStringArray &headers,
 	                                const PackedByteArray &body);
+	void send_login_post();         // build the encrypted credential POST + send
 	// Join HTTP chain (ADR 0010 Phase 5).
 	void on_join_request_completed(int result, int response_code,
 	                               const PackedStringArray &headers,
@@ -138,7 +140,15 @@ private:
 	// the proto-switch boundary.
 	void send_jointops_hello(const String &host, uint16_t port);
 
-	String http_base() const;     // scheme://host:port from the gate's startup_url
+	String http_base() const;     // scheme://host:port: SessionInit web domain (real NW) or startup_url
+	// Resolve the gate's startupurl template ([domainname]/[VER1]/[VER2]/[CC]/[GT])
+	// into a concrete prepare URL. On the OpenNova server (concrete startupurl) this
+	// is an identity pass-through; on real NW it substitutes the placeholders.
+	String resolve_startup_url() const;
+	// Seed the CD-key/hardware identity (CountryName..NWHWI — the same set as the UDP
+	// verify var-list) into the cookie jar; the real-NW login POST carries them as
+	// cookies (witnessed in the .204 capture). NWUID comes from the SessionInit.
+	void seed_identity_cookies();
 	PackedStringArray request_headers(bool form_content_type) const;  // Cookie + optional form CT
 	void merge_response_cookies(const PackedStringArray &headers);     // store Set-Cookie lines
 
@@ -156,6 +166,11 @@ private:
 	Ref<PacketPeerUDP> nw_socket_;
 	std::unique_ptr<opennova::ClientSession> session_;  // owns the session protocol
 
+	// The CD-key/hardware identity set (CountryName..NWHWI), built once in
+	// begin_session and used for BOTH the UDP verify var-list and the HTTP login
+	// cookies. NWUID is left empty here and filled from the SessionInit at use.
+	std::vector<std::pair<std::string, std::string>> identity_vars_;
+
 	// Server browser.
 	HTTPRequest *browser_http_ = nullptr;   // child node, created in start()
 	Array server_rows_;                     // cached GSB rows (Array of Dictionary)
@@ -167,8 +182,13 @@ private:
 	HTTPRequest *join_http_ = nullptr;
 	opennova::CookieJar cookie_jar_;        // EPASK + NWHANDLE/PCID/LOGINSESSIONTAG...
 	opennova::EpaskParams epask_;           // bundle from the prepare Set-Cookie
-	enum LoginStep { LOGIN_IDLE = 0, LOGIN_PREPARE, LOGIN_POST, LOGIN_RELAY };
+	// Real-NW login chain (witnessed in the .204 capture): prepare GET (EPASK) ->
+	// NWStart GET (USEJUNCTION) -> NWLogin POST (encrypted form) -> poll NWLogin
+	// GET until NWHANDLE/PCID populate. Against the OpenNova server the NWStart +
+	// poll are harmless (it answers the POST directly).
+	enum LoginStep { LOGIN_IDLE = 0, LOGIN_PREPARE, LOGIN_NWSTART, LOGIN_POST, LOGIN_POLL };
 	LoginStep login_step_ = LOGIN_IDLE;
+	int login_poll_count_ = 0;              // bounded NWLogin.dll GET polls
 	String login_user_;
 	String login_pass_;
 	String nwhandle_;                       // captured on login success
@@ -186,6 +206,9 @@ private:
 	uint32_t client_key_ = 0;         // ck — generated at start()
 	uint16_t nw_udp_port_ = 0;        // populated from gate response
 	String nw_udp_host_;              // populated from gate response
+	String nw_web_domain_;            // NovaworldWebDomainNameAndPortNumber from the
+	                                  // SessionInit (real NW); the HTTP login/GSB/join
+	                                  // host that replaces the startupurl [domainname]
 	double tick_accum_ = 0.0;
 	double heartbeat_interval_s_ = 2.0;
 	double handshake_timeout_s_ = 5.0;

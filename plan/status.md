@@ -14,15 +14,22 @@ Our own runtime client against both targets (OpenNova server / original NovaWorl
 - Against **our** server the client reaches Verified/CONNECTED end-to-end (re-verified
   2026-06-12 on the trunk tip: 20/20 net ctests, live boot, HTTP `server-info`/`unknowns`/GSB smoke).
 - Against **original NovaWorld** (`gs.novaworld.net` = 207.178.209.201; web/asset host
-  207.178.209.204 — NovaLogic's boxes, **not ours**; they are the target we emulate) the
-  client previously stalled after `ClientConnected`. **NW-S5 fixed 2026-06-12** from a real
-  `.204` capture (RE doc Wave 5): login is not a verify prereq, the lobby verify is not
-  credential-gated, and the stall was a DSP seq/ack bug (0-based seq + un-acked settings
-  packet). Client now uses 1-based seq + header-only acks + the full verify `Cookie` var-list
-  (NWUID echoed); join CU set matched to retail (11 chunks, type=2). Offline-proven by
-  `nw204_lobby_decode` (the capture oracle) and `client_session_loopback` verify-parity;
-  **live `.204` re-test pending** (user runs the instrumented client; diff its wire vs
-  `fixtures/novaworld/nw204_lobby.hexcap`).
+  207.178.209.204 — NovaLogic's boxes, **not ours**; they are the target we emulate) the client
+  now **reaches CONNECTED/VALIDATED over the lobby UDP session — confirmed LIVE 2026-06-12**
+  (`~/Desktop/capture_opennova.pcapng`: full `0x41→…→ServerVerifyResult→` keepalives). NW-S5 was a
+  DSP seq/ack bug, not a login/CD-key gate (RE doc Wave 5): 1-based seq + header-only acks + the
+  full verify `Cookie` var-list (NWUID echoed) + retail-matched join CU set fixed it. Oracle
+  `nw204_lobby_decode`; parity in `client_session_loopback`.
+- **Authenticated web flow vs real `.204` (login → GSB → join) — CONFIRMED LIVE 2026-06-12**
+  (RE doc Wave 6; `~/Desktop/capture_opennova2.pcapng`). The out-game client logged in as **ljim**
+  (PCID `A-A02-085D18`), browsed **7 real servers** (GSB is unauthenticated on `.204`), ran the
+  two-phase NWJoin, and sent a JointOperations ClientHello to the real game host `.204:3875` —
+  the full multiplayer entry flow against genuine NovaLogic NovaWorld. Built from the retail HTTP
+  contract: SessionInit web-domain extraction + `startupurl` template substitution, NWStart step,
+  all-fields-EPASK-encrypted login POST + NWLogin poll, identity-cookie seeding, `jop_2.gsb?a=1`,
+  full NWJoin query. 20/20 scoped net ctest green; GDExtension builds clean. The JointOperations
+  session stops at the hello (ADR 0009 in-match seam — no gameplay yet). Minor follow-up: decode
+  GSB server-name strings Latin-1→UTF-8 (a `©`/0xA9 name trips a Godot UTF-8 warning).
 - Phase 3 (EPASK account login) **LANDED 2026-06-12** against our own server: the binding
   HTTP login chain (prepare GET → login POST → relay GET, cookie jar) + panel username/password
   fields. Session-only (no persistence).
