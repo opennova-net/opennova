@@ -75,7 +75,8 @@ static func compile(code: String) -> Dictionary:
 			break
 		source = retyped
 	for i in range(diagnostics.size()):
-		if String(diagnostics[i]).contains("Cannot infer the type"):
+		var text := String(diagnostics[i])
+		if text.contains("Cannot infer the type") or text.contains("inferred from a Variant value"):
 			diagnostics.append("Hint: this project escalates inference-from-Variant to an error — declare such variables explicitly: `var x: Variant = ...`.")
 			break
 	return { "ok": false, "compile_errors": diagnostics, "line_offset": offset }
@@ -206,7 +207,10 @@ static func _auto_type_inference_failures(source: String, diagnostics: Array) ->
 	var changed := false
 	for diagnostic in diagnostics:
 		var text := String(diagnostic)
-		if not text.contains("Cannot infer the type"):
+		# GDScript emits two inference diagnostics: a hard "Cannot infer the
+		# type ..." and the escalated INFERENCE_ON_VARIANT warning "... is
+		# being inferred from a Variant value ...". Both are fixed the same way.
+		if not (text.contains("Cannot infer the type") or text.contains("inferred from a Variant value")):
 			continue
 		var found := line_regex.search(text)
 		if found == null:
