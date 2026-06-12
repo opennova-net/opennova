@@ -8,7 +8,10 @@ extends RefCounted
 ## nodes become path stubs, collections and strings are capped with explicit
 ## truncation markers, and cycles are cut by the depth limit.
 
-const MAX_DEPTH := 8
+# Deep enough for honestly-nested tool data (menu widget trees easily reach
+# depth 9+: screens → tree → children → window → ... → rect array) while still
+# cutting accidental cycles fast.
+const MAX_DEPTH := 24
 const MAX_ENTRIES := 200
 const MAX_STRING := 8192
 

@@ -37,7 +37,7 @@ func test_string_name_and_node_path_become_strings() -> void:
 
 func test_depth_cap() -> void:
 	var nested: Variant = "leaf"
-	for i in range(12):
+	for i in range(McpJson.MAX_DEPTH + 4):
 		nested = [nested]
 	var out: Variant = McpJson.sanitize(nested)
 	for i in range(McpJson.MAX_DEPTH + 1):
