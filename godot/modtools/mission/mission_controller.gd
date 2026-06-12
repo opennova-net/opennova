@@ -865,6 +865,12 @@ func _build_reground_requests() -> Array:
 		return requests
 	if terrain_editor == null or not terrain_editor.has_method("sample_height_world"):
 		return requests
+	# Pass 1: walk the entities, resolving each one's rotated ground point (and
+	# skipping unresolved graphics); the sample points land in a parallel packed
+	# array so the surface query is ONE batched call, not ~6 boundary crossings
+	# per entity.
+	var rows: Array = []
+	var points := PackedVector2Array()
 	for e in _mission.get_all_entities():
 		var entity: Dictionary = e
 		var kind := int(entity.get("kind", -1))
@@ -877,18 +883,41 @@ func _build_reground_requests() -> Array:
 			var anchor_godot: Vector3 = _placer.ground_anchor_godot(graphic)
 			anchor_bms = MissionObjectPlacer.godot_to_bms_position(anchor_godot)
 			ground_godot += MissionObjectPlacer.bms_to_godot_basis(entity.get("rotation_deg", Vector3.ZERO)) * anchor_godot
-		var height: float = terrain_editor.sample_height_world(ground_godot.x, ground_godot.z)
-		if is_nan(height):
-			continue
-		requests.append({
+		rows.append({
 			"kind": kind,
 			"index": int(entity.get("index", -1)),
+			"ground_godot": ground_godot,
+			"anchor_bms": anchor_bms,
+			"rotation_deg": entity.get("rotation_deg", Vector3.ZERO),
+		})
+		points.append(Vector2(ground_godot.x, ground_godot.z))
+	# Pass 2: sample — batched when the editor offers it, else the scalar loop so
+	# any duck-typed host (a headless stub faking the surface) keeps working.
+	var heights: PackedFloat32Array
+	if terrain_editor.has_method("sample_heights_world"):
+		heights = terrain_editor.sample_heights_world(points)
+	else:
+		heights = PackedFloat32Array()
+		heights.resize(points.size())
+		for i in points.size():
+			heights[i] = terrain_editor.sample_height_world(points[i].x, points[i].y)
+	# Pass 3: assemble, dropping off-terrain rows (NAN) exactly as the per-point
+	# builder did.
+	for i in rows.size():
+		var height := heights[i]
+		if is_nan(height):
+			continue
+		var row: Dictionary = rows[i]
+		var ground_godot: Vector3 = row["ground_godot"]
+		requests.append({
+			"kind": row["kind"],
+			"index": row["index"],
 			"ground_hit_bms": MissionObjectPlacer.godot_to_bms_position(Vector3(ground_godot.x, height, ground_godot.z)),
-			"ground_anchor_bms": anchor_bms,
+			"ground_anchor_bms": row["anchor_bms"],
 			# Not read by the engine (its parser ignores unknown keys); carried for
 			# the targeted world update, which rebuilds the moved entities'
 			# container-local transforms without re-marshalling them.
-			"rotation_deg": entity.get("rotation_deg", Vector3.ZERO),
+			"rotation_deg": row["rotation_deg"],
 		})
 	return requests
 

@@ -83,3 +83,27 @@ mesh-less, their gizmos live in the overlay — ~29 ms of the span):
 Interactively the gap is wider than 6-7x: the old re-bake also tore down and
 recreated ~2,000 RenderingServer MultiMesh instances and PhysicsServer pick
 bodies per apply; the targeted path touches only existing objects.
+
+## After the batch height sampler (same protocol, same session)
+
+`NovaTerrainData.sample_heights_world_live` collapses the ~6 boundary
+crossings per entity to one call per build (parity with the scalar sampler
+pinned by terrain_height_revision_test). The honest result: the cache-miss
+build stays ~31-34 ms — it is **marshal-bound** (`get_all_entities`'s
+per-entity Dictionary walk), and the sampling it removed was only a few ms
+at this entity count. The batch call still pays off as headroom (debug
+builds, larger missions) and as the one C++ sampler future per-point loops
+(foliage/tile previews) can adopt — but it does not move these numbers,
+which is exactly why the deeper C++ request-build pushdown stays shelved:
+the scan runs once per height-edit-then-activate and already fits in two
+frames.
+
+| | CP15 | ASH_I1gA | 03TR |
+|---|---:|---:|---:|
+| drift scan total | 36 | 36 | 34 |
+| re-ground total | 38 | 44 | 37 |
+
+End to end, the user-facing flow on a ~2,100-entity retail mission went
+from ~370-460 ms of CPU (3x build + count + apply + full re-bake) to
+~70-80 ms (scan 34-36 + apply 37-44), with the interactive hitch from
+instance/body recreation gone entirely.

@@ -59,6 +59,15 @@ class StubTerrainEditor:
 		sample_calls += 1
 		return sample_height + sample_slope_x * world_x
 
+	# The batch seam the request builder prefers; loops the scalar fake so the
+	# per-point sample_calls accounting stays meaningful.
+	func sample_heights_world(points: PackedVector2Array) -> PackedFloat32Array:
+		var out := PackedFloat32Array()
+		out.resize(points.size())
+		for i in points.size():
+			out[i] = sample_height_world(points[i].x, points[i].y)
+		return out
+
 	func get_terrain_world_root() -> Node3D:
 		return world_root
 

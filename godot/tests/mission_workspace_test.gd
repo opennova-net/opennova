@@ -145,6 +145,14 @@ class RegroundStubEditor:
 	func sample_height_world(_world_x: float, _world_z: float) -> float:
 		return sample_height
 
+	# The batch seam the request builder prefers; loops the scalar fake.
+	func sample_heights_world(points: PackedVector2Array) -> PackedFloat32Array:
+		var out := PackedFloat32Array()
+		out.resize(points.size())
+		for i in points.size():
+			out[i] = sample_height_world(points[i].x, points[i].y)
+		return out
+
 	func set_viewport_active(_active: bool, _grab_focus: bool) -> void:
 		pass  # deactivate() pokes the viewport; nothing to do headless
 
