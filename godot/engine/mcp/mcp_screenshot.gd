@@ -20,8 +20,11 @@ const MAX_DIM := 4096
 
 
 ## Grab one drawn frame from `viewport` and encode it. opts: region (Rect2i,
-## image pixels), max_dim, format ("webp"|"png"), quality. Returns
-## { ok, bytes, mime, width, height, warning? } or { ok: false, error }.
+## image pixels), region_control (Control — resolved to a region AFTER the
+## drawn frame and against the real image size, so layout still settling when
+## the capture starts cannot skew the crop), max_dim, format ("webp"|"png"),
+## quality. Returns { ok, bytes, mime, width, height, warning? } or
+## { ok: false, error }.
 static func capture(viewport: Viewport, opts := {}) -> Dictionary:
 	if DisplayServer.get_name() == "headless":
 		return { "ok": false, "error": "No rendering in headless mode — screenshots need the windowed editor." }
@@ -45,6 +48,10 @@ static func capture(viewport: Viewport, opts := {}) -> Dictionary:
 	var image := texture.get_image() if texture != null else null
 	if image == null or image.is_empty():
 		return { "ok": false, "error": "Viewport returned no image." }
+	var region_control: Variant = opts.get("region_control")
+	if region_control is Control and is_instance_valid(region_control):
+		opts = opts.duplicate()
+		opts["region"] = region_for_control(region_control, image.get_size())
 	return encode(image, opts)
 
 
@@ -90,7 +97,8 @@ static func encode(image: Image, opts := {}) -> Dictionary:
 
 ## Map a Control's on-screen rect to captured-image pixels (the window image
 ## and the window can differ in size under scaling). Compute AFTER the draw
-## await so layout changes mid-capture cannot skew it.
+## await so layout changes mid-capture cannot skew it — capture() does this
+## for you when you pass the control as opts.region_control.
 static func region_for_control(control: Control, image_size: Vector2i) -> Rect2i:
 	var window := control.get_window()
 	if window == null:

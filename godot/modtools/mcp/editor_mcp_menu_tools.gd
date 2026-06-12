@@ -887,7 +887,7 @@ func _tool_menu_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if window == null:
 		return McpToolResult.error("No window to capture from.")
 	var outcome: Dictionary = await McpScreenshot.capture(window, {
-		"region": McpScreenshot.region_for_control(canvas, Vector2i(window.size)),
+		"region_control": canvas,
 		"max_dim": int(args.get("max_dim", 1280)),
 		"format": String(args.get("format", "webp")),
 		"quality": float(args.get("quality", 0.8)),
