@@ -1317,6 +1317,86 @@ func test_reground_cycle_samples_each_entity_once() -> void:
 	assert_eq(controller.reconcile_with_terrain(), 0, "the applied re-ground settles the drift")
 
 
+func test_targeted_reground_updates_placed_nodes_in_place() -> void:
+	# The targeted-apply contract: a bulk re-ground rewrites the moved entities'
+	# placed-world records in place — no full re-bake, so the pickable index
+	# keeps its identity and the membership revision stays put — and the node
+	# rises by exactly the surface delta (x/z preserved: pure-z). Asserted on the
+	# animated-node record: the static branch is the same one-line absolute
+	# write, but the headless RenderingServer does not round-trip MultiMesh
+	# buffers, so a static record rides along for execution coverage only.
+	var controller := _new_with_item_db()
+	var mission := controller.get_mission()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
+	var kind := NovaMissionData.KIND_BUILDING
+	var index := int(mission.get_entities(kind)[0]["index"])
+
+	# Fabricate the placed-world records the placer would have built (headless
+	# cannot resolve the model) — the white-box seam, like _anchor_cache above.
+	var entity: Dictionary = mission.get_entity(kind, index)
+	var xform0: Transform3D = Placer.entity_transform(entity["position"], entity["rotation_deg"])
+	var node := Node3D.new()
+	add_child_autofree(node)
+	node.transform = xform0
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.instance_count = 1
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	add_child_autofree(mmi)
+	controller._pickable = [
+		{ "kind": kind, "index": index, "animated": true,
+			"node": node, "offset": Transform3D.IDENTITY, "graphic": "stub" },
+		{ "kind": kind, "index": index, "animated": false,
+			"mm": mm, "mmi": mmi, "slot": 0, "offset": Transform3D.IDENTITY,
+			"graphic": "stub" },
+	]
+	var pickable_before: Array = controller._pickable
+	var rev_before := controller.get_membership_revision()
+
+	_stub_drift(controller, 42.0)
+	assert_eq(controller.reconcile_with_terrain(), 1)
+	assert_eq(controller.reground_drifted(), 1)
+
+	assert_almost_eq(node.transform.origin.y, 42.0, 0.01, "the node rises onto the new surface")
+	assert_almost_eq(node.transform.origin.x, xform0.origin.x, 0.01, "x preserved (pure-z)")
+	assert_almost_eq(node.transform.origin.z, xform0.origin.z, 0.01, "z preserved (pure-z)")
+	assert_true(is_same(controller._pickable, pickable_before),
+		"no re-bake: the pickable index keeps its identity")
+	assert_eq(controller.get_membership_revision(), rev_before,
+		"a re-ground is not a membership change")
+
+
+func test_targeted_reground_falls_back_when_a_record_is_freed() -> void:
+	# A pickable record whose backing node was freed mid-flight must not crash or
+	# half-update: the targeted path reports failure and the full re-bake
+	# rebuilds the world from the (already re-grounded) document.
+	var controller := _new_with_item_db()
+	var mission := controller.get_mission()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
+	var kind := NovaMissionData.KIND_BUILDING
+	var index := int(mission.get_entities(kind)[0]["index"])
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.instance_count = 1
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.free()
+	controller._pickable = [{
+		"kind": kind, "index": index, "animated": false,
+		"mm": mm, "mmi": mmi, "slot": 0, "offset": Transform3D.IDENTITY,
+		"graphic": "stub",
+	}]
+	var pickable_before: Array = controller._pickable
+
+	_stub_drift(controller, 42.0)
+	assert_eq(controller.reground_drifted(), 1)
+	assert_false(is_same(controller._pickable, pickable_before),
+		"the fallback re-bake rebuilt the pickable index")
+	assert_almost_eq((mission.get_entity(kind, index)["position"] as Vector3).z, 42.0, 0.01,
+		"the document is re-grounded either way")
+
+
 func test_reground_cache_invalidated_by_an_entity_edit() -> void:
 	# The cache token includes object_records_revision, so an entity placed
 	# between the prompt count and the apply forces a rebuild and the apply sees

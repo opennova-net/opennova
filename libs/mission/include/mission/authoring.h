@@ -2,6 +2,7 @@
 #define OPENNOVA_MISSION_AUTHORING_H
 
 #include <cstddef>
+#include <vector>
 
 #include "mission/mission.h"
 
@@ -109,12 +110,16 @@ struct RegroundRequest {
 // apply = false nothing is written and the return value is the would-move
 // count — the host's "terrain changed under N objects" prompt and the apply
 // share one policy, so the count can never lie. Returns the number of
-// entities moved (or that would move).
+// entities moved (or that would move). `out_moved_rows`, when non-null,
+// receives the indices into `requests` of the moved (or would-move) rows in
+// request order, so a host can update its placed world in place instead of
+// rebuilding it.
 size_t reground_entities(MissionDocument &doc,
                          const RegroundRequest *requests,
                          size_t count,
                          float epsilon = 0.01f,
-                         bool apply = true);
+                         bool apply = true,
+                         std::vector<size_t> *out_moved_rows = nullptr);
 
 } // namespace opennova::mission::authoring
 

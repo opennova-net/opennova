@@ -65,3 +65,21 @@ the per-cycle floor.
    heightmap collapses the sampling to one call. Worth taking while the
    seams are open; the deeper C++ request-build pushdown sketched in the
    plan is **not** justified by these numbers.
+
+## After the targeted apply (same protocol, same session)
+
+The in-place update replaced the re-bake; `update` covers the slot/node/pick
+writes for every moved entity plus the marker-overlay refresh (markers are
+mesh-less, their gizmos live in the overlay — ~29 ms of the span):
+
+| Span | CP15 | ASH_I1gA | 03TR |
+|---|---:|---:|---:|
+| **re-ground total** | **46** (was 343) | **48** (was 262) | **44** (was 312) |
+| &nbsp;&nbsp;requests (cache hit) | 2 | 3 | 2 |
+| &nbsp;&nbsp;apply (engine bake + moved-row report) | 4 | 5 | 4 |
+| &nbsp;&nbsp;baseline | 1 | 1 | 1 |
+| &nbsp;&nbsp;**update (in-place, no re-bake)** | **38** | **38** | **36** |
+
+Interactively the gap is wider than 6-7x: the old re-bake also tore down and
+recreated ~2,000 RenderingServer MultiMesh instances and PhysicsServer pick
+bodies per apply; the targeted path touches only existing objects.

@@ -719,10 +719,13 @@ func _count_terrain_drift(timeline: PerfTimeline = null) -> int:
 
 
 ## Snap every entity whose ground moved back onto the terrain surface as ONE undo
-## step, then re-bake the world. Returns how many entities moved. Adopts the new
-## ground state afterwards (the drift is resolved). Serves both the activate-time
-## prompt and the inspector's manual button; entities authored off the surface on
-## purpose are protected by the baseline filter (see _ground_baseline).
+## step, then update the moved entities' placed world in place (a re-ground is a
+## pure-z move of existing entities — no membership change — so re-baking every
+## placed object would be waste; an unmappable record falls back to the full
+## re-bake). Returns how many entities moved. Adopts the new ground state
+## afterwards (the drift is resolved). Serves both the activate-time prompt and
+## the inspector's manual button; entities authored off the surface on purpose
+## are protected by the baseline filter (see _ground_baseline).
 func reground_drifted() -> int:
 	if _mission == null:
 		return 0
@@ -735,7 +738,8 @@ func reground_drifted() -> int:
 	_flush_edit()
 	_mission.begin_edit()
 	timeline.span("apply")
-	var moved: int = _mission.reground_entities(requests, REGROUND_EPSILON, true)
+	var result: Dictionary = _mission.reground_entities_apply(requests, REGROUND_EPSILON)
+	var moved := int(result.get("moved", 0))
 	timeline.end_span()
 	_mission.commit_edit() # pushes one step only if something actually moved
 	# The apply is pure-z (x/y preserved exactly by the conjugate bake, see
@@ -747,8 +751,11 @@ func reground_drifted() -> int:
 	_record_ground_state()
 	timeline.end_span()
 	if moved > 0:
-		timeline.span("rebake")
-		_rebake_objects()
+		timeline.span("update")
+		if not _apply_reground_world_update(requests,
+				result.get("rows", PackedInt32Array()),
+				result.get("positions", PackedVector3Array())):
+			_rebake_objects()
 		timeline.end_span()
 		mark_dirty()
 		timeline.finish()
@@ -759,11 +766,85 @@ func reground_drifted() -> int:
 	return moved
 
 
+# Post-apply world sync for a bulk re-ground: rewrite only the moved entities'
+# MultiMesh slots / animated nodes / pick bodies in place — the same absolute
+# writes _apply_selected_xform does for the selection — instead of re-baking
+# every placed object. A re-ground changes no membership, so _stats,
+# _membership_rev, and the inspector's option caches all stay valid (none hold
+# positions); the preview registry's entity_ref positions go stale exactly as
+# they do after a drag and refresh on the next re-bake. A moved entity with
+# zero pickable records is skipped, not a failure: the placer found it
+# unresolved at place time, so nothing is rendered for it (this also keeps
+# headless hosts on the targeted path). Returns false when a matched record's
+# backing node was freed underneath us — the caller falls back to the full
+# re-bake, which rebuilds everything from the document.
+func _apply_reground_world_update(requests: Array, moved_rows: PackedInt32Array,
+		new_positions_bms: PackedVector3Array) -> bool:
+	# Container-local transform per moved entity, keyed "kind:index". Rotation is
+	# unchanged by a re-ground; the row carried it so nothing is re-marshalled.
+	var moved: Dictionary = {}
+	var any_marker := false
+	for n in moved_rows.size():
+		var request: Dictionary = requests[moved_rows[n]]
+		var kind := int(request.get("kind", -1))
+		if kind == NovaMissionData.KIND_MARKER:
+			any_marker = true
+		moved["%d:%d" % [kind, int(request.get("index", -1))]] = MissionObjectPlacer.entity_transform(
+				new_positions_bms[n], request.get("rotation_deg", Vector3.ZERO))
+	for r in _pickable:
+		var rec: Dictionary = r
+		var key := "%d:%d" % [int(rec["kind"]), int(rec["index"])]
+		if not moved.has(key):
+			continue
+		var xform: Transform3D = moved[key]
+		if bool(rec.get("animated", false)):
+			var node = rec.get("node")
+			if node == null or not is_instance_valid(node):
+				return false
+			node.transform = xform * (rec.get("offset", Transform3D.IDENTITY) as Transform3D)
+		else:
+			var mmi = rec.get("mmi")
+			if mmi == null or not is_instance_valid(mmi):
+				return false
+			var mm: MultiMesh = rec["mm"]
+			mm.set_instance_transform(int(rec["slot"]), xform * (rec["offset"] as Transform3D))
+	# Pick bodies sit at the entity transform directly (the drag path's lockstep
+	# write); a missing body is normal (markers, shapeless or unresolved models).
+	var container := _objects_container()
+	if container != null:
+		for n in moved_rows.size():
+			var request: Dictionary = requests[moved_rows[n]]
+			var kind := int(request.get("kind", -1))
+			if kind == NovaMissionData.KIND_MARKER:
+				continue
+			var index := int(request.get("index", -1))
+			var body := container.get_node_or_null(NodePath("Pick_%d_%d" % [kind, index])) as Node3D
+			if body != null:
+				body.transform = moved["%d:%d" % [kind, index]]
+	# A selected entity re-syncs its box / gizmo / bound collider through the one
+	# shared writer (rotation unchanged: pure-z). The selection SURVIVES a
+	# targeted re-ground — only the re-bake fallback still drops it.
+	if not _selected_ref.is_empty():
+		var sel_key := "%d:%d" % [int(_selected_ref.get("kind", -1)), int(_selected_ref.get("index", -1))]
+		if moved.has(sel_key):
+			_apply_selected_xform(moved[sel_key])
+	# Markers are mesh-less; their gizmos live in the active mode's overlay.
+	if any_marker:
+		_refresh_active_overlay()
+	if _pick_debug:
+		_refresh_pick_debug()
+	return true
+
+
 ## Decline path for the activate-time prompt: adopt the current height revision so
 ## the prompt stays quiet until the NEXT height edit. The surface memo is kept, so
 ## the drift stays visible to the manual re-ground button (declining the question
-## is not the same as calling the layout grounded). An undo of an applied re-ground
-## likewise re-arms only the manual path.
+## is not the same as calling the layout grounded). NOTE an undo of an APPLIED
+## re-ground re-arms neither path today: the apply adopted the new surface as the
+## baseline, so the restored pre-apply positions read as authored offsets over
+## unchanged terrain until the next height edit. Re-arming after undo (tagging the
+## re-ground's undo step and dropping its baseline rows on restore) is an open
+## follow-up.
 func acknowledge_terrain_drift() -> void:
 	_record_height_revision()
 
@@ -804,6 +885,10 @@ func _build_reground_requests() -> Array:
 			"index": int(entity.get("index", -1)),
 			"ground_hit_bms": MissionObjectPlacer.godot_to_bms_position(Vector3(ground_godot.x, height, ground_godot.z)),
 			"ground_anchor_bms": anchor_bms,
+			# Not read by the engine (its parser ignores unknown keys); carried for
+			# the targeted world update, which rebuilds the moved entities'
+			# container-local transforms without re-marshalling them.
+			"rotation_deg": entity.get("rotation_deg", Vector3.ZERO),
 		})
 	return requests
 
@@ -2139,7 +2224,9 @@ func _rebake_objects() -> void:
 	_reset_selection_state()
 	# A re-bake is the universal choke point for entity-set changes (add / remove / place / delete /
 	# marker edits, and undo/redo whose object signature differs), so bump the membership revision here
-	# to invalidate the inspector's cached group / waypoint-path / entity pickers.
+	# to invalidate the inspector's cached group / waypoint-path / entity pickers. (A bulk re-ground is
+	# NOT a membership change — it moves existing entities in place and skips both the re-bake and this
+	# bump; see _apply_reground_world_update.)
 	_membership_rev += 1
 	var options: Dictionary = {}
 	var env_node := _environment_node()

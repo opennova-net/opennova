@@ -205,15 +205,21 @@ int main() {
 			}
 		}
 
-		// Dry run: counts every drifted entity without writing a thing.
-		TEST_EXPECT(authoring::reground_entities(doc, reqs, 3, 0.01f, false) == 3);
+		// Dry run: counts every drifted entity without writing a thing, and
+		// reports the would-move rows (indices into reqs, request order).
+		std::vector<size_t> would_move;
+		TEST_EXPECT(authoring::reground_entities(doc, reqs, 3, 0.01f, false, &would_move) == 3);
+		TEST_EXPECT(would_move == (std::vector<size_t>{0, 1, 2}));
 		EntityRecord untouched;
 		TEST_EXPECT(doc.get_entity(EntityKind::Building, a.index, untouched));
 		TEST_EXPECT(near(untouched.transform.z, 10.0 - 3.0));
 
 		// Apply: zero-rot bake (anchor -> (-1,-2,3)), yaw-90 bake (-> (-2,1,3)),
-		// marker stores the hit directly; all rotations kept.
-		TEST_EXPECT(authoring::reground_entities(doc, reqs, 3) == 3);
+		// marker stores the hit directly; all rotations kept. The moved-row
+		// report matches the count.
+		std::vector<size_t> moved_rows;
+		TEST_EXPECT(authoring::reground_entities(doc, reqs, 3, 0.01f, true, &moved_rows) == 3);
+		TEST_EXPECT(moved_rows == (std::vector<size_t>{0, 1, 2}));
 		EntityRecord moved_a, moved_b, moved_m;
 		TEST_EXPECT(doc.get_entity(EntityKind::Building, a.index, moved_a));
 		TEST_EXPECT(near(moved_a.transform.x, 101.0));
@@ -229,15 +235,19 @@ int main() {
 		TEST_EXPECT(near(moved_m.transform.y, 50.0));
 		TEST_EXPECT(near(moved_m.transform.z, 14.0));
 
-		// Everything now sits on the new ground: both count and apply are no-ops.
-		TEST_EXPECT(authoring::reground_entities(doc, reqs, 3, 0.01f, false) == 0);
+		// Everything now sits on the new ground: both count and apply are no-ops,
+		// and the moved-row report is empty (within-epsilon rows never appear).
+		moved_rows.clear();
+		TEST_EXPECT(authoring::reground_entities(doc, reqs, 3, 0.01f, false, &moved_rows) == 0);
+		TEST_EXPECT(moved_rows.empty());
 		TEST_EXPECT(authoring::reground_entities(doc, reqs, 3) == 0);
 
-		// Unknown entities are skipped rows, never errors.
+		// Unknown entities are skipped rows, never errors — and never reported.
 		authoring::RegroundRequest missing;
 		missing.kind = EntityKind::Organic;
 		missing.index = 99;
-		TEST_EXPECT(authoring::reground_entities(doc, &missing, 1) == 0);
+		TEST_EXPECT(authoring::reground_entities(doc, &missing, 1, 0.01f, true, &moved_rows) == 0);
+		TEST_EXPECT(moved_rows.empty());
 		// And a null request list is a zero, not a crash.
 		TEST_EXPECT(authoring::reground_entities(doc, nullptr, 5) == 0);
 	}

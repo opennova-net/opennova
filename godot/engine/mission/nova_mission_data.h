@@ -209,6 +209,14 @@ public:
 	// the apply share one policy. Returns the moved (or would-move) count; dirty
 	// only when something actually moved.
 	int reground_entities(const Array &requests, float epsilon = 0.01f, bool apply = true);
+	// Apply-mode bulk re-ground that also reports WHICH rows moved, so the host
+	// can update its placed world in place instead of re-baking it. Returns
+	// { "moved": int, "rows": PackedInt32Array, "positions": PackedVector3Array }
+	// where rows are indices into the CALLER'S `requests` Array (the parser skips
+	// index < 0 rows, so engine row i is not requests[i] in general) and
+	// positions are the post-bake BMS origins parallel to rows, read back from
+	// the document after the write — exactly what it now stores.
+	Dictionary reground_entities_apply(const Array &requests, float epsilon = 0.01f);
 	// The item id a NEW marker on `path_index` should use: the path's own first
 	// marker's id, else the canonical waypoint id (106005).
 	int marker_item_id_for_path(int path_index) const;
