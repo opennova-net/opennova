@@ -917,6 +917,48 @@ Per-system verdicts from grilling the reimplementation against retail
 | ClientAuth identity (`libs/novaworld/session_hello.cpp::client_auth_to_bytes` + `client_session.cpp::build_client_auth`) — **client direction** | `HandleClientJoin @ 0x62B750` validation + client builder `NapiNPConnection_SendClientHello @ 0x61fe20` | **divergent → fixed** | NW-S2 (**2026-06-11**): after the NW-S1 hello fix the client advanced `session_hello → session_join` but timed out — real NW never sent `ServerAuth(0x82)`. `HandleClientJoin @ 0x62B750` re-runs the **same** identity gate as the hello and silently `return 0`s (no ServerAuth) unless `NVS==Milota && PN==proto+220 && PG==proto+284(16 B) && PV1==proto+300`; its `is_server` branch additionally requires `HK==proto+1332` (the echo), `PV2==proto+364` (`"1"`), and a non-empty `NA`. Our `client_auth_to_bytes` emitted **only** `CI/HK/CK/NA/SIP/SPN/SCRK/CU` — the entire identity block was missing, so the gate failed. Retail's own `0x42` builder is `NapiNPConnection_SendClientHello @ 0x61fe20` (a Kong **misnomer** — `packet_type=66='B'`=0x42, not the hello), which emits `NVS/CO/AP/BDAT/[DE]/PN/PG/PV1/PV2/[PV3]` ahead of `CI/HK/CK/NA/[PW]/SIP/SPN/CU/SCRK/[NF/DCNT/RCNT]`, identity sourced from `CNapiGameSession_InitNPConnection @ 0x4d3be0` (`CO="NovaLogic Inc, Calabasas CA U.S.A."`, `BDAT="Jul 21 2009 18:54:41"`, `PV2="1"` @ +364). The fix emits the identity block in retail order (each tag gated on non-empty/non-zero, as retail does), reusing the same `Config` values that already pass the hello gate. `parse_client_auth` made symmetric. Pinned in `client_session_loopback_test` (identity-block assertions) + a `client_auth_to_bytes`↔`parse_client_auth` round-trip in `session_hello_roundtrip_test`. (Reference is IDA only — `opennova-int` is server-only.) Proposed IDB rename recorded: `0x61fe20 → NapiNPConnection_SendClientJoin`. |
 | Session containers (`libs/novaworld/lobby_session.cpp`) | NOVAWORLDUDP dispatch (§3) | **matching (spot-checked)** | All ten containers dispatched with the documented replies (§3); covered by `lobby_session_test`. Field-for-field read order vs retail handlers deferred to a wave-1 follow-up where it matters for a specific reply. |
 
+#### NW-S3 — the 0x42 join is protocol-complete; real NW gates acceptance on an authenticated session
+
+After NW-S2 the client still times out in `session_join` against live NW. Grilling the
+server-side accept path (retail `Jointops.exe`, which contains the host/server code) shows
+**the protocol handshake itself is now correct and would be answered on the first 0x42** — the
+remaining gate is account/session authentication that lives in the NW *server's* callbacks,
+which are not in this binary:
+
+- `HandleClientHello @ 0x6213B0` replies via `NapiNPProtocol_SendServerInfoPacket @ 0x6204b0`
+  with **opcode 0x81** (so our `parse_server_hello` on 0x81 is right). It writes the `HK` tag =
+  `proto->host_key` at **offset 0x534 (=1332)**. `HandleClientHello`'s version gate is *identical*
+  to `HandleClientJoin`'s (NVS/PN/PG/PV1) — and our `0x41` already passes it (we receive the
+  ServerInfo), which independently proves our flat-TLV encoding and NVS/PN/PG/PV1 values are
+  correct.
+- `HandleClientJoin @ 0x62B750` echo-checks the client `HK` against `proto[333]` = `proto+1332`
+  = the same `host_key` it advertised. So **the HK echo is sound** (we read and re-send it). PV2
+  is checked vs `proto+364` (`"1"`, a protocol constant despite the `max_players_string` Kong
+  name) and NA must be non-empty — both satisfied.
+- A *fresh, accepted* join sends `ServerSessionInit` **inline on the first 0x42**, no retransmit:
+  `NapiNPConnection_OnStateChange @ 0x626060` (state 1) calls `cb_server_1` (`proto+724`) and, if
+  it returns ≥ 0, `NapiNPConnection_SendSessionInit @ 0x620ef0`. Earlier, `HandleClientJoin`
+  itself runs `cb_server_0` (`proto+720`); on `< 0` it destroys the connection and stores the
+  reply tag **`NP.C:PCCR:ILC`** ("Illegal Login Callback"). These two callbacks are the
+  account-auth gate and live in the NW **server** binary — not witnessable here.
+- The retail client carries the auth/session context the server expects:
+  `CNapiGameSession_ConnectToNovaWorld @ 0x4d4640` builds the connection's CU var list via
+  `CNapiVarList_SetOrCreate` — **`Application`, `BuildDateAndTime`, `Debug`, `CountryName`,
+  `Language`, `TimeZoneBias`, `GateTag`, `MetTag`, `UdpCode1`, `UdpCode2`, `MaxPacketSize`** —
+  which `NapiNPConnection_SendClientHello @ 0x61fe20` emits as `CU` chunks in the 0x42. `MetTag`
+  (`byte_B5F4BC`) is set by the **gate handler** `CNapiGateManager_ProcessResponse @ 0x4ced20`,
+  and `InitNPConnection @ 0x4d3be0` pulls login cookies (`CookieJar_GetCookiesForURL`). Our client
+  sends **no CU chunks** and holds **no authenticated session**.
+
+**Verdict: unknown → blocked on auth.** The bare NP handshake (gate → hello → join) is necessary
+but not sufficient for live NW: the matchmaking server rejects an unauthenticated join in
+`cb_server_0`/`cb_server_1`. Completing AUTH requires the **HTTP account login (ADR 0010 Phase 3,
+NWLogin/EPASK)** — which establishes the session cookie and the `MetTag`/`UdpCode*` values — plus
+emitting the retail CU-chunk set in the 0x42. This **reorders the ADR**: login is a *prerequisite*
+for completing the UDP AUTH, not a post-connect step. (`OnNovaWorldConnected @ 0x4d1570` fires
+*after* SessionInit and fills a separate in-game credential form; that is distinct from the
+pre-connect web login that authorizes the join.)
+
 #### NW-G1 — POSTIPADDRESS / POSTIPPORT are required (resolved)
 
 The standing question (jodemo requires them; onnet omits them yet works on retail JO)
