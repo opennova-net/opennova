@@ -127,6 +127,20 @@ struct MiniServer {
 			ClientAuth auth;
 			if (!expect(parse_client_auth(body.data(), body.size(), auth),
 			            "server parses ClientAuth")) return {};
+			// Real NovaWorld re-runs the version gate on the 0x42 join
+			// (HandleClientJoin @ 0x62B750) and silently drops it (no
+			// ServerAuth -> session_join timeout) unless the identity block is
+			// present: NVS/PN/PG/PV1 + PV2. Pin that the client re-sends it.
+			expect(auth.nvs == "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic",
+			       "ClientAuth NVS == Milota version string");
+			expect(auth.pn == "NOVAWORLDUDP", "ClientAuth PN == NOVAWORLDUDP");
+			expect(auth.pg_present, "ClientAuth carries PG");
+			expect((auth.pg == std::array<uint8_t, 16>{
+			            0xF2, 0x0C, 0xEE, 0xD8, 0xCE, 0xE4, 0x8D, 0x44,
+			            0x90, 0xB4, 0x1D, 0x42, 0xB3, 0x64, 0xAB, 0x71}),
+			       "ClientAuth PG == NOVAWORLDUDP protocol GUID");
+			expect(auth.pv1 == "0.0.0 2/10/2004 EM", "ClientAuth PV1 == retail PV1");
+			expect(auth.pv2 == "1", "ClientAuth PV2 == retail PV2 (is_server gate)");
 			last_client_hk = auth.hk;
 			client_scrk = auth.scrk;
 			ServerAuth reply = build_server_auth(auth, 0x7F000001u, 5000,
@@ -207,6 +221,38 @@ void test_parser_roundtrip() {
 	ca.ci = 0x11223344u;
 	ca.ck = 0x55667788u;
 	ca.na = "jop:cus2";
+
+	// client_auth_to_bytes <-> parse_client_auth round-trip, including the
+	// identity block the real server validates (NW-S2). Locks the serializer
+	// and parser as exact inverses for the 0x42 join.
+	ClientAuth ca_id = ca;
+	ca_id.nvs = "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic";
+	ca_id.co = "OpenNova";
+	ca_id.ap = "OpennovaGodotClient.exe";
+	ca_id.bdat = "Jul 21 2009 18:54:41";
+	ca_id.pn = "NOVAWORLDUDP";
+	ca_id.pg = std::array<uint8_t, 16>{0xF2, 0x0C, 0xEE, 0xD8, 0xCE, 0xE4, 0x8D, 0x44,
+	                                   0x90, 0xB4, 0x1D, 0x42, 0xB3, 0x64, 0xAB, 0x71};
+	ca_id.pg_present = true;
+	ca_id.pv1 = "0.0.0 2/10/2004 EM";
+	ca_id.pv2 = "1";
+	ca_id.hk = 0x0FE0E112u;
+	ca_id.scrk = "CLIENTSCRK0123456789";
+	auto ca_bytes = client_auth_to_bytes(ca_id);
+	ClientAuth ca_parsed;
+	expect(parse_client_auth(ca_bytes.data(), ca_bytes.size(), ca_parsed),
+	       "parse_client_auth succeeds on round-trip");
+	expect(ca_parsed.nvs == ca_id.nvs, "parse_client_auth recovers NVS");
+	expect(ca_parsed.pn == "NOVAWORLDUDP", "parse_client_auth recovers PN");
+	expect(ca_parsed.pg_present && ca_parsed.pg == ca_id.pg, "parse_client_auth recovers PG");
+	expect(ca_parsed.pv1 == ca_id.pv1, "parse_client_auth recovers PV1");
+	expect(ca_parsed.pv2 == "1", "parse_client_auth recovers PV2");
+	expect(ca_parsed.ci == ca_id.ci, "parse_client_auth recovers CI");
+	expect(ca_parsed.hk == ca_id.hk, "parse_client_auth recovers HK");
+	expect(ca_parsed.ck == ca_id.ck, "parse_client_auth recovers CK");
+	expect(ca_parsed.na == "jop:cus2", "parse_client_auth recovers NA");
+	expect(ca_parsed.scrk == ca_id.scrk, "parse_client_auth recovers SCRK");
+
 	ServerAuth sa = build_server_auth(ca, 0x7F000001u, 5000, 0xDEADBEEFu, "MYSCRK61");
 	auto sa_bytes = server_auth_to_bytes(sa);
 	ServerAuth sa_parsed;

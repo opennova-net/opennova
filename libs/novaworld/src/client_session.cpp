@@ -5,6 +5,7 @@
 #include <novacrypto/nwu.h>
 #include <novaworld/session_keys.h>
 
+#include <array>
 #include <utility>
 
 namespace opennova {
@@ -79,6 +80,30 @@ std::string make_client_scrk(uint32_t seed) {
 	return out;
 }
 
+// The 16-byte NOVAWORLDUDP protocol GUID the real server validates (16 bytes
+// at proto+284 in BOTH HandleClientHello @ 0x6213B0 and HandleClientJoin @
+// 0x62B750). Built by CNapiGameSession_InitNPConnection @ 0x4d3be0 via
+//   sub_62E750(dst, -655487758, 58574, 17549, 144,180,29,66,179,100,171,113)
+// which lays out [u32 version LE][u16 port_a LE][u16 port_b LE][8 bytes].
+// Computed from those literals so the byte order is exact regardless of host.
+std::array<uint8_t, 16> novaworldudp_pg() {
+	std::array<uint8_t, 16> pg{};
+	const uint32_t version = static_cast<uint32_t>(-655487758);  // 0xD8EE0CF2
+	const uint16_t port_a = 58574;  // 0xE4CE
+	const uint16_t port_b = 17549;  // 0x448D
+	pg[0] = static_cast<uint8_t>(version & 0xFFu);
+	pg[1] = static_cast<uint8_t>((version >> 8) & 0xFFu);
+	pg[2] = static_cast<uint8_t>((version >> 16) & 0xFFu);
+	pg[3] = static_cast<uint8_t>((version >> 24) & 0xFFu);
+	pg[4] = static_cast<uint8_t>(port_a & 0xFFu);
+	pg[5] = static_cast<uint8_t>((port_a >> 8) & 0xFFu);
+	pg[6] = static_cast<uint8_t>(port_b & 0xFFu);
+	pg[7] = static_cast<uint8_t>((port_b >> 8) & 0xFFu);
+	pg[8] = 144; pg[9] = 180; pg[10] = 29; pg[11] = 66;
+	pg[12] = 179; pg[13] = 100; pg[14] = 171; pg[15] = 113;
+	return pg;
+}
+
 } // namespace
 
 ClientSession::ClientSession() : ClientSession(Config{}) {}
@@ -115,27 +140,9 @@ std::vector<uint8_t> ClientSession::build_client_hello() {
 	hello.epn  = 0;
 
 	// PG — the 16-byte NOVAWORLDUDP protocol GUID the real server validates
-	// (HandleClientHello @ 0x6213B0 compares 16 bytes at proto+284). Built by
-	// CNapiGameSession_InitNPConnection @ 0x4d3be0 via
-	//   sub_62E750(dst, -655487758, 58574, 17549, 144,180,29,66,179,100,171,113)
-	// which lays out [u32 version LE][u16 port_a LE][u16 port_b LE][8 bytes].
-	// Compute from those literals so the byte order is exact regardless of host.
-	{
-		const uint32_t version = static_cast<uint32_t>(-655487758);  // 0xD8EE0CF2
-		const uint16_t port_a = 58574;  // 0xE4CE
-		const uint16_t port_b = 17549;  // 0x448D
-		hello.pg[0] = static_cast<uint8_t>(version & 0xFFu);
-		hello.pg[1] = static_cast<uint8_t>((version >> 8) & 0xFFu);
-		hello.pg[2] = static_cast<uint8_t>((version >> 16) & 0xFFu);
-		hello.pg[3] = static_cast<uint8_t>((version >> 24) & 0xFFu);
-		hello.pg[4] = static_cast<uint8_t>(port_a & 0xFFu);
-		hello.pg[5] = static_cast<uint8_t>((port_a >> 8) & 0xFFu);
-		hello.pg[6] = static_cast<uint8_t>(port_b & 0xFFu);
-		hello.pg[7] = static_cast<uint8_t>((port_b >> 8) & 0xFFu);
-		hello.pg[8] = 144; hello.pg[9] = 180; hello.pg[10] = 29; hello.pg[11] = 66;
-		hello.pg[12] = 179; hello.pg[13] = 100; hello.pg[14] = 171; hello.pg[15] = 113;
-		hello.pg_present = true;
-	}
+	// (HandleClientHello @ 0x6213B0 compares 16 bytes at proto+284).
+	hello.pg = novaworldudp_pg();
+	hello.pg_present = true;
 
 	return encode_session_outbound(SESSION_OPCODE_CLIENT_HELLO,
 	                               client_hello_to_bytes(hello));
@@ -143,6 +150,23 @@ std::vector<uint8_t> ClientSession::build_client_hello() {
 
 std::vector<uint8_t> ClientSession::build_client_auth() {
 	ClientAuth auth;
+	// Identity block — the real server re-validates NVS/PN/PG/PV1 (and PV2 in
+	// its is_server branch) on the 0x42 join exactly as it does on the 0x41
+	// hello (HandleClientJoin @ 0x62B750). Without it real NW silently drops
+	// the join (return 0) and never sends ServerAuth -> session_join timeout.
+	// Same values as build_client_hello: retail's 0x42 builder
+	// (NapiNPConnection_SendClientHello @ 0x61fe20) emits one shared identity
+	// block sourced from the same protocol config.
+	auth.nvs  = cfg_.nvs;
+	auth.co   = cfg_.co;
+	auth.ap   = cfg_.ap;
+	auth.bdat = cfg_.bdat;
+	auth.pn   = cfg_.pn;
+	auth.pg   = novaworldudp_pg();
+	auth.pg_present = true;
+	auth.pv1  = cfg_.pv1;
+	auth.pv2  = cfg_.pv2;
+
 	auth.ci   = cfg_.client_index;
 	auth.hk   = server_hk_;   // [Phase 1] echo ServerHello.hk (was hardcoded 0)
 	auth.ck   = cfg_.client_key;

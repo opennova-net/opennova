@@ -120,23 +120,46 @@ bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out);
 // Opcodes: `0x42` ClientAuth (C→S), `0x82` ServerAuth (S→C).
 
 struct ClientAuth {
+	// Identity block — REQUIRED on the wire. The real NovaWorld server re-runs
+	// the SAME version gate on the 0x42 join that it runs on the 0x41 hello:
+	// NapiNPProtocol_HandleClientJoin @ 0x62B750 silently drops the join
+	// (return 0 -> no ServerAuth -> the client times out in session_join)
+	// unless NVS == the Milota string && PN == proto+220 && PG == proto+284
+	// (16 B) && PV1 == proto+300; its is_server branch additionally rejects
+	// unless PV2 == proto+364 ("1"). Retail's own 0x42 builder
+	// (NapiNPConnection_SendClientHello @ 0x61fe20 — a Kong misnomer; the
+	// packet type is 0x42='B', not 0x41) emits this whole identity block
+	// ahead of the auth fields, with the same values as the ClientHello.
+	// [orig: gate @ 0x62b750, builder @ 0x61fe20, identity @ 0x4d3be0]
+	std::string nvs;  // NAPI version string (== Milota @ 0x7DFCF0; gate-checked)
+	std::string co;   // Company (parsed, never validated — free)
+	std::string ap;   // Application (free)
+	std::string bdat; // Build date (free)
+	std::string pn;   // Protocol name "NOVAWORLDUDP" (== proto+220; gate-checked)
+	std::array<uint8_t, 16> pg{};  // Protocol GUID (== proto+284, 16 B; gate-checked)
+	bool pg_present = false;
+	std::string pv1;  // Protocol Version 1 "0.0.0 2/10/2004 EM" (== proto+300; gate)
+	std::string pv2;  // Protocol Version 2 "1" (== proto+364; is_server-checked)
+
 	uint32_t ci = 0;   // Client Index (echo from Hello)
-	uint32_t hk = 0;   // Host Key (echo from ServerHello)
+	uint32_t hk = 0;   // Host Key (echo from ServerHello; checked == proto+1332)
 	uint32_t ck = 0;   // Client Key (client-generated)
-	std::string na;    // Name / alias (e.g. "jop:cus2")
-	uint32_t sip = 0;  // Source IP
-	uint32_t spn = 0;  // Source Port Number
+	std::string na;    // Name / alias (e.g. "jop:cus2") — must be NON-EMPTY (else reject 5)
+	uint32_t sip = 0;  // Source IP (retail omits the tag when 0)
+	uint32_t spn = 0;  // Source Port Number (retail omits the tag when 0)
 	std::string scrk;  // Client-side Session CRypto Key
 	std::vector<std::vector<uint8_t>> cu; // Custom/User blobs (raw bytes, unparsed)
 };
 
 bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out);
 
-// Serialize a ClientAuth back to flat-TLV bytes (inverse of
-// parse_client_auth). Field order: CI, HK, CK, NA, SIP, SPN, SCRK,
-// followed by any CU blobs in order. Note: retail jodemo also re-emits
-// the ClientHello header fields (NVS/CO/AP/...) inside its ClientAuth
-// payload — we don't, since the server's parser ignores them anyway.
+// Serialize a ClientAuth to flat-TLV bytes (inverse of parse_client_auth).
+// Field order mirrors retail's 0x42 builder NapiNPConnection_SendClientHello
+// @ 0x61fe20: the identity block NVS/CO/AP/BDAT/PN/PG/PV1/PV2 FIRST, then
+// CI/HK/CK/NA, SIP/SPN (each omitted when 0, as retail does), the CU blobs,
+// and SCRK last. The identity block is MANDATORY: the real NovaWorld server
+// validates it in HandleClientJoin @ 0x62B750 and drops the join without it
+// (the original "real NW never sends ServerAuth" bug — RE doc NW-S2).
 std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg);
 
 // Control-setting entry — (direction_byte, field_index, uint32 value).

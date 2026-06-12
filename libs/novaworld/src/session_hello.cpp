@@ -173,16 +173,30 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		uint16_t size = 0;
 		const size_t next = read_tlv_field(data, len, pos, name, value, size);
 		if (next == static_cast<size_t>(-1)) break;
-		if (name == "CI") out.ci = read_u32_le(value, size);
-		else if (name == "HK") out.hk = read_u32_le(value, size);
-		else if (name == "CK") out.ck = read_u32_le(value, size);
-		else if (name == "NA") out.na = strip_nul(value, size);
-		else if (name == "SIP") out.sip = read_u32_le(value, size);
-		else if (name == "SPN") out.spn = read_u32_le(value, size);
+		// Identity block — the real server validates these in HandleClientJoin
+		// @ 0x62B750 (NVS/PN/PG/PV1 + PV2); parse them so the round-trip is
+		// exact and our own server records what the client claimed.
+		if      (name == "NVS")  out.nvs  = strip_nul(value, size);
+		else if (name == "CO")   out.co   = strip_nul(value, size);
+		else if (name == "AP")   out.ap   = strip_nul(value, size);
+		else if (name == "BDAT") out.bdat = strip_nul(value, size);
+		else if (name == "PN")   out.pn   = strip_nul(value, size);
+		else if (name == "PG" && size == 16) {
+			std::memcpy(out.pg.data(), value, 16);
+			out.pg_present = true;
+		}
+		else if (name == "PV1")  out.pv1  = strip_nul(value, size);
+		else if (name == "PV2")  out.pv2  = strip_nul(value, size);
+		// Auth fields.
+		else if (name == "CI")   out.ci   = read_u32_le(value, size);
+		else if (name == "HK")   out.hk   = read_u32_le(value, size);
+		else if (name == "CK")   out.ck   = read_u32_le(value, size);
+		else if (name == "NA")   out.na   = strip_nul(value, size);
+		else if (name == "SIP")  out.sip  = read_u32_le(value, size);
+		else if (name == "SPN")  out.spn  = read_u32_le(value, size);
 		else if (name == "SCRK") out.scrk = strip_nul(value, size);
-		else if (name == "CU") out.cu.emplace_back(value, value + size);
-		// Ignore anything else (jodemo re-sends NVS/CO/AP/BDAT/PN/PG/... here
-		// too; onnet's parser doesn't consume them and neither do we).
+		else if (name == "CU")   out.cu.emplace_back(value, value + size);
+		// Unknown tags (DE/PV3/PW/NF/DCNT/RCNT/etc.) intentionally ignored.
 		pos = next;
 	}
 	// Minimum sanity: CK should be nonzero for a valid ClientAuth.
@@ -191,17 +205,32 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 
 std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	std::vector<uint8_t> buf;
-	buf.reserve(256);
-	append_u32_field(buf, "CI",  msg.ci);
-	append_u32_field(buf, "HK",  msg.hk);
-	append_u32_field(buf, "CK",  msg.ck);
+	buf.reserve(512);
+	// Identity block first, in retail's 0x42 order (NapiNPConnection_
+	// SendClientHello @ 0x61fe20). NVS/PN/PG/PV1/PV2 are validated by the real
+	// server in HandleClientJoin @ 0x62B750; CO/AP/BDAT are free but retail
+	// still emits them. Omit a string tag when empty / PG when absent, exactly
+	// as the retail builder gates each NapiNP_WriteTLV on a non-empty field.
+	if (!msg.nvs.empty())  append_string_field(buf, "NVS",  msg.nvs);
+	if (!msg.co.empty())   append_string_field(buf, "CO",   msg.co);
+	if (!msg.ap.empty())   append_string_field(buf, "AP",   msg.ap);
+	if (!msg.bdat.empty()) append_string_field(buf, "BDAT", msg.bdat);
+	if (!msg.pn.empty())   append_string_field(buf, "PN",   msg.pn);
+	if (msg.pg_present)    append_bytes_field(buf, "PG", msg.pg.data(), msg.pg.size());
+	if (!msg.pv1.empty())  append_string_field(buf, "PV1",  msg.pv1);
+	if (!msg.pv2.empty())  append_string_field(buf, "PV2",  msg.pv2);
+	// Auth fields. SIP/SPN are written only when nonzero (retail gates them on
+	// node+48 / node+52 being set). SCRK comes after the CU blobs, as in retail.
+	append_u32_field(buf, "CI", msg.ci);
+	append_u32_field(buf, "HK", msg.hk);
+	append_u32_field(buf, "CK", msg.ck);
 	if (!msg.na.empty()) append_string_field(buf, "NA", msg.na);
-	append_u32_field(buf, "SIP", msg.sip);
-	append_u32_field(buf, "SPN", msg.spn);
-	if (!msg.scrk.empty()) append_string_field(buf, "SCRK", msg.scrk);
+	if (msg.sip) append_u32_field(buf, "SIP", msg.sip);
+	if (msg.spn) append_u32_field(buf, "SPN", msg.spn);
 	for (const auto &blob : msg.cu) {
 		append_bytes_field(buf, "CU", blob.data(), blob.size());
 	}
+	if (!msg.scrk.empty()) append_string_field(buf, "SCRK", msg.scrk);
 	return buf;
 }
 
