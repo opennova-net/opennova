@@ -1,5 +1,7 @@
 // Unit tests for threedi_ir_ground_anchor: the placement anchor resolution used
-// by the mission editor / runtime (ground userpoint, else part-0 bounding center).
+// by the mission editor / runtime (ground userpoint, else the model ORIGIN —
+// shipped missions place userpoint-less models with origin exactly on the
+// terrain; an earlier bounding-center fallback buried them by half a model).
 // Synthetic IR only — no fixtures, no allocation/free (the helper is read-only).
 
 #include <stdio.h>
@@ -62,7 +64,10 @@ int main(void) {
               "ground userpoint position returned verbatim (IR order)");
     }
 
-    // 2. No ground userpoint -> bounding center of part 0 (not part 1).
+    // 2. No ground userpoint -> the model ORIGIN, never a part center: shipped
+    //    missions place such models with origin exactly on the terrain, so any
+    //    geometric fallback would mis-ground them (the old part-0 bounding
+    //    center buried models by their center height).
     {
         ThreediModelIR ir;
         memset(&ir, 0, sizeof(ir));
@@ -76,10 +81,10 @@ int main(void) {
 
         ThreediIRPart parts[2];
         memset(parts, 0, sizeof(parts));
-        parts[0].bounding_center[0] = 4.0f;
+        parts[0].bounding_center[0] = 4.0f; // present, must be IGNORED
         parts[0].bounding_center[1] = 5.0f;
         parts[0].bounding_center[2] = 6.0f;
-        parts[1].bounding_center[0] = 99.0f; // must use part 0
+        parts[1].bounding_center[0] = 99.0f;
         ThreediIRLod lod;
         memset(&lod, 0, sizeof(lod));
         lod.parts = parts;
@@ -87,39 +92,42 @@ int main(void) {
         ir.lods = &lod;
         ir.lod_count = 1;
 
-        float out[3] = {0.0f, 0.0f, 0.0f};
-        check(threedi_ir_ground_anchor(&ir, 0, out) == 1, "fallback to part 0 center");
-        check(approx(out[0], 4.0f) && approx(out[1], 5.0f) && approx(out[2], 6.0f),
-              "part 0 bounding center returned verbatim");
+        float out[3] = {9.0f, 9.0f, 9.0f};
+        check(threedi_ir_ground_anchor(&ir, 0, out) == 1, "userpoint-less model still anchors");
+        check(approx(out[0], 0.0f) && approx(out[1], 0.0f) && approx(out[2], 0.0f),
+              "the fallback anchor is the model origin, not part geometry");
     }
 
-    // 3. Empty model -> no anchor; out left untouched.
+    // 3. Empty model -> origin anchor too (an anchor always exists for a valid IR).
     {
         ThreediModelIR ir;
         memset(&ir, 0, sizeof(ir));
         float out[3] = {42.0f, 42.0f, 42.0f};
-        check(threedi_ir_ground_anchor(&ir, 0, out) == 0, "empty model has no anchor");
-        check(approx(out[0], 42.0f) && approx(out[1], 42.0f) && approx(out[2], 42.0f),
-              "out left untouched when no anchor found");
+        check(threedi_ir_ground_anchor(&ir, 0, out) == 1, "empty model anchors at its origin");
+        check(approx(out[0], 0.0f) && approx(out[1], 0.0f) && approx(out[2], 0.0f),
+              "empty model anchor is the origin");
     }
 
-    // 4. Out-of-range LOD and no userpoint -> no fallback.
+    // 4. The lod argument is ABI baggage: any value yields the same answer.
     {
         ThreediModelIR ir;
         memset(&ir, 0, sizeof(ir));
         ThreediIRPart part;
         memset(&part, 0, sizeof(part));
+        part.bounding_center[1] = 8.0f;
         ThreediIRLod lod;
         memset(&lod, 0, sizeof(lod));
         lod.parts = &part;
         lod.part_count = 1;
         ir.lods = &lod;
         ir.lod_count = 1;
-        float out[3] = {0.0f, 0.0f, 0.0f};
-        check(threedi_ir_ground_anchor(&ir, 5, out) == 0, "out-of-range lod yields no fallback");
+        float out[3] = {9.0f, 9.0f, 9.0f};
+        check(threedi_ir_ground_anchor(&ir, 5, out) == 1, "out-of-range lod still anchors");
+        check(approx(out[1], 0.0f), "and still at the origin");
     }
 
-    // 5. A name that merely starts with "ground" must NOT match.
+    // 5. A name that merely starts with "ground" must NOT match — proven by the
+    //    anchor landing on the origin fallback, not the userpoint's position.
     {
         ThreediModelIR ir;
         memset(&ir, 0, sizeof(ir));
@@ -129,8 +137,9 @@ int main(void) {
         up.position[0] = 1.0f;
         ir.userpoints = &up;
         ir.userpoint_count = 1;
-        float out[3] = {0.0f, 0.0f, 0.0f};
-        check(threedi_ir_ground_anchor(&ir, 0, out) == 0, "'groundzero' must not match 'ground'");
+        float out[3] = {9.0f, 9.0f, 9.0f};
+        check(threedi_ir_ground_anchor(&ir, 0, out) == 1, "'groundzero' model still anchors");
+        check(approx(out[0], 0.0f), "'groundzero' must not match 'ground' (origin fallback used)");
     }
 
     if (failures == 0) {

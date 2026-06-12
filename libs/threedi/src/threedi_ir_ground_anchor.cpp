@@ -5,7 +5,13 @@
 // rather than the model origin. This computes that reference point:
 //   1. The first userpoint named "ground" (case-insensitive — shipped assets use
 //      lowercase "ground" while authoring/spec language says "Ground").
-//   2. Otherwise the bounding-sphere center of part 0 in the rendered LOD.
+//   2. Otherwise the model ORIGIN. Shipped JO missions place userpoint-less
+//      models (Jungle Tree #7, the M939 trucks, Beach Hut #1, Power Generator
+//      Housing, ...) with origin − terrain_height == 0 exactly, while models
+//      WITH a ground userpoint sit at −anchor — i.e. the original tool grounds
+//      the userpoint when present and the origin otherwise. An earlier fallback
+//      here (part-0 bounding-sphere center) buried every userpoint-less model
+//      by its center height.
 //
 // Returned verbatim in the IR's native axis order so callers apply their own
 // coordinate convention exactly once (see NovaObjectData::get_ground_anchor,
@@ -39,6 +45,7 @@ static int name_matches_ignore_case(const char *name, size_t name_cap, const cha
 }
 
 int threedi_ir_ground_anchor(const ThreediModelIR *ir, int lod_index, float out[3]) {
+    (void)lod_index; // kept for ABI stability; the fallback no longer reads LOD data
     if (!ir || !out) {
         return 0;
     }
@@ -54,16 +61,10 @@ int threedi_ir_ground_anchor(const ThreediModelIR *ir, int lod_index, float out[
         }
     }
 
-    // 2. Fallback: bounding-sphere center of part 0 in the rendered LOD.
-    if (lod_index >= 0 && (size_t)lod_index < ir->lod_count) {
-        const ThreediIRLod *lod = &ir->lods[lod_index];
-        if (lod->parts && lod->part_count > 0) {
-            out[0] = lod->parts[0].bounding_center[0];
-            out[1] = lod->parts[0].bounding_center[1];
-            out[2] = lod->parts[0].bounding_center[2];
-            return 1;
-        }
-    }
-
-    return 0;
+    // 2. Fallback: the model origin — what the original tool grounds when no
+    //    userpoint exists (see file comment for the shipped-data evidence).
+    out[0] = 0.0f;
+    out[1] = 0.0f;
+    out[2] = 0.0f;
+    return 1;
 }
