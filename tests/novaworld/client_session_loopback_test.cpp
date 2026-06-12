@@ -80,6 +80,34 @@ std::vector<uint8_t> server_encode_outbound(uint8_t opcode, std::vector<uint8_t>
 	return packet;
 }
 
+// Decode a client 0x43 datagram (envelope + outer NWU + inner SCRK) into its
+// lobby containers — used to assert the verify request's structure (NW-S5).
+bool decode_client_containers(const std::vector<uint8_t> &raw,
+                              const std::string &client_scrk,
+                              std::vector<NapiMessage> &out) {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	if (!server_decode_inbound(raw, opcode, body)) return false;
+	if (opcode != SESSION_OPCODE_PROTOCOL_MESSAGE) return false;
+	ProtocolPacketHeader hdr;
+	std::vector<ProtocolMessage> msgs;
+	if (!decode_protocol_packet_plaintext(body.data(), body.size(), client_scrk,
+	                                      hdr, msgs)) {
+		return false;
+	}
+	for (const auto &pm : msgs) {
+		if (pm.flags.settings_update || pm.full_tag != 0) continue;
+		size_t consumed = 0;
+		std::vector<NapiMessage> cs;
+		if (napi_stream_decode(pm.payload.data(), pm.payload.size(), cs,
+		                       &consumed) != 0) {
+			continue;
+		}
+		for (auto &c : cs) out.push_back(std::move(c));
+	}
+	return true;
+}
+
 // A tiny stateful server: enough of nw_udp_listener.cpp to answer one
 // client's handshake. Returns the reply datagram (or empty for none).
 struct MiniServer {
@@ -88,6 +116,7 @@ struct MiniServer {
 	                                        // struct default) fails the echo check.
 	uint32_t server_sk = 0xC0FFEE42u;
 	std::string server_scrk = "ZZSERVERSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC"; // 61 chars
+	std::string nwuid = "feedfacecafebeef0011223344556677889900aabbccddeeff0011223344"; // SessionInit NWUID the client must echo
 	std::string client_scrk;               // learned from ClientAuth
 	uint32_t last_client_hk = 0;           // captured for the echo assertion
 	uint32_t next_seq = 0;
@@ -144,7 +173,9 @@ struct MiniServer {
 			last_client_hk = auth.hk;
 			client_scrk = auth.scrk;
 			ServerAuth reply = build_server_auth(auth, 0x7F000001u, 5000,
-			                                     server_sk, server_scrk);
+			                                     server_sk, server_scrk,
+			                                     "NWServer", "http://127.0.0.1:8080",
+			                                     nwuid);
 			return server_encode_outbound(SESSION_OPCODE_SERVER_AUTH,
 			                              server_auth_to_bytes(reply));
 		}
@@ -297,6 +328,16 @@ int main() {
 	ClientSession::Config cfg;
 	cfg.client_index = 0x00000001u;
 	cfg.client_key   = 0x0BADF00Du;
+	// NW-S5: configure the verify "Cookie" var-list so the verify request carries
+	// the witnessed structure. NWUID is left empty -> the client must echo it from
+	// the ServerSessionInit; NWCDKIID empty mirrors retail (verify is not
+	// CD-key-gated). Asserted on d_verify_req below.
+	cfg.verify_cookie_vars = {
+	    {"CountryName", "United States"},
+	    {"NWUID", ""},
+	    {"NWCDKIID", ""},
+	    {"NWPSSK", "ABCDEFGHIJKLMNOPQRSTUVW"},
+	};
 	ClientSession client(cfg);
 
 	// 1) ClientHello.
@@ -342,6 +383,46 @@ int main() {
 	expect(client.state() == ClientSession::State::Verifying, "client still Verifying after ServerStartVerify");
 	if (!expect(out.size() == 1, "ServerStartVerify yields one reply (ClientRequestVerifyResult)")) return 1;
 	auto d_verify_req = out[0];
+
+	// NW-S5 parity — the verify request carries SessIdString + a "Cookie"
+	// var-list of ClientVar{VarFNum,VarName,VarValue}, with NWUID echoed from the
+	// ServerSessionInit (matches the genuine .204 capture, frame 10166).
+	{
+		std::vector<NapiMessage> vcs;
+		expect(decode_client_containers(d_verify_req, server.client_scrk, vcs),
+		       "verify request decodes");
+		if (expect(vcs.size() == 1 && vcs[0].name == "ClientRequestVerifyResult",
+		           "verify container is ClientRequestVerifyResult")) {
+			const auto &req = vcs[0];
+			bool has_sid = false;
+			for (const auto &f : req.fields)
+				if (f.name == "SessIdString") has_sid = true;
+			expect(has_sid, "verify carries SessIdString field");
+			if (expect(req.children.size() == 1 &&
+			               req.children[0].name == "ClientVarList",
+			           "verify carries ClientVarList child")) {
+				const auto &vl = req.children[0];
+				bool cookie = false;
+				for (const auto &f : vl.fields)
+					if (f.name == "VarList" &&
+					    std::string(f.data.begin(), f.data.end()) == "Cookie")
+						cookie = true;
+				expect(cookie, "var-list name is Cookie");
+				expect(vl.children.size() == 4, "var-list has 4 ClientVar entries");
+				std::string nwuid_value;
+				for (const auto &cv : vl.children) {
+					std::string vn, vv;
+					for (const auto &f : cv.fields) {
+						if (f.name == "VarName") vn.assign(f.data.begin(), f.data.end());
+						if (f.name == "VarValue") vv.assign(f.data.begin(), f.data.end());
+					}
+					if (vn == "NWUID") nwuid_value = vv;
+				}
+				expect(nwuid_value == server.nwuid,
+				       "NWUID echoes the SessionInit NWUID");
+			}
+		}
+	}
 
 	// 6) ServerVerifyResult -> client reaches Verified with the session token.
 	auto s_verify_result = server.respond(d_verify_req);

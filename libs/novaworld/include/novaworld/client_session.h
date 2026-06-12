@@ -4,8 +4,10 @@
 #include <novaworld/protocol_message.h>
 #include <novaworld/session_hello.h>
 
+#include <array>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace opennova {
@@ -69,6 +71,13 @@ public:
 		std::string pv1  = "0.0.0 2/10/2004 EM";     // validated == server PV1
 		std::string pv2  = "1";
 
+		// The 16-byte protocol GUID emitted as PG in the hello and the auth. By
+		// default (use_default_pg) the builder picks the GUID for `pn`:
+		// NOVAWORLDUDP -> the lobby GUID, JointOperations -> the game GUID. Set
+		// `pg` + use_default_pg=false to override with explicit bytes.
+		std::array<uint8_t, 16> pg{};
+		bool use_default_pg = true;
+
 		// CU chunks to emit in the ClientAuth (NW-S3). The retail client sends
 		// a named var set (Application/BuildDateAndTime/Debug/CountryName/
 		// Language/TimeZoneBias/GateTag/MetTag/UdpCode1/UdpCode2/MaxPacketSize)
@@ -84,6 +93,31 @@ public:
 			uint8_t type = 1;  // 1 or 2 (HandleClientJoin's CU loop accepts both)
 		};
 		std::vector<CuVar> cu_vars;
+
+		// Verify-request "Cookie" var-list (NW-S5, witnessed byte-for-byte in the
+		// genuine .204 capture, fixtures/novaworld/nw204_lobby.hexcap frame 10166).
+		// CNapiGameSession_SendVerifyRequest @ 0x4d3620 serializes session+388 as a
+		// "Cookie" var-list, filled by CNapiSession_ReadLocaleInfo @ 0x4ce390 from
+		// the browser form fields CNapiGameSession_OnNovaWorldConnected @ 0x4d1570
+		// set. Each (name, value) becomes a ClientVar{VarFNum="0",VarName,VarValue}
+		// child of a ClientVarList(VarList="Cookie") inside the
+		// ClientRequestVerifyResult. The retail set (in order) is CountryName,
+		// Language, TimeZoneBias, MyInstalledExpBits, NWUID, NWCDKIID, NWCDKIIDEXP1,
+		// NWPSSK, NWUSID, NWHWI — and on the wire NWCDKIID/NWCDKIIDEXP1 are EMPTY
+		// yet the live server still returns Success=1, so the lobby verify is NOT
+		// credential-gated. Empty here -> a bare ClientRequestVerifyResult (the
+		// OpenNova server is permissive). The entry named "NWUID" with an empty
+		// value is filled at runtime from the ServerSessionInit's NWUID (echo).
+		std::vector<std::pair<std::string, std::string>> verify_cookie_vars;
+
+		// Preset for the in-match game session: the ClientHello the client sends
+		// to a host after NWJoin, which flips the connection protocol from the
+		// lobby (NOVAWORLDUDP) to the game (JointOperations). PN/PV1/PG are the
+		// JointOperations identity. NOTE: PG/PV1 are PROVISIONAL pending the
+		// StartPlaying @ 0x4d45e0 grill — sufficient to cross the proto boundary
+		// (our server rejects on PN alone) but not yet retail-valid for a real
+		// host. See docs/adr/0010 + docs/net/novaworld-net-re.md.
+		static Config jointoperations();
 	};
 
 	// Two constructors rather than a `Config config = {}` default argument:
@@ -129,6 +163,10 @@ private:
 	// Wrap a single lobby container (by name; fields/children optional) as a
 	// 0x43 ProtocolMessage stream + header, ready for the wire.
 	std::vector<uint8_t> build_lobby_packet(const NapiMessage &container);
+	// Build the ClientRequestVerifyResult: a SessIdString field plus, when
+	// cfg_.verify_cookie_vars is set, the "Cookie" var-list (NW-S5, NWUID echoed
+	// from the ServerSessionInit). Bare when no cookie vars are configured.
+	std::vector<uint8_t> build_verify_request();
 
 	void on_server_hello(const std::vector<uint8_t> &body,
 	                     std::vector<std::vector<uint8_t>> &out);
@@ -147,6 +185,7 @@ private:
 	uint32_t server_sk_ = 0;       // ServerAuth.sk — session_id on our 0x43s
 	std::string client_scrk_;      // we generate; encrypts our 0x43 inner stream
 	std::string server_scrk_;      // ServerAuth.scrk; decrypts inbound 0x83 inner
+	std::string server_nwuid_;     // ServerSessionInit NWUID — echoed in the verify
 	std::string sess_id_string_;   // ServerVerifyResult.SessIdString
 	std::string last_error_;
 

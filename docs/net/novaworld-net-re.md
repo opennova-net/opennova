@@ -1148,3 +1148,149 @@ All of wave 3 (NW-C1..C4) is now matching byte-exact against retail; equivalence
 additionally proven by compiling the actual `libs/novacrypto` sources and byte-comparing to
 the production-proven `opennova-int` Python on golden vectors, plus an adversarial
 from-scratch re-derivation.
+
+### Wave 4 — client verify leg + Phase-3 login contract (2026-06-12)
+
+Context: our Godot client completes gate → hello → AUTH against **genuine NovaLogic
+NovaWorld** (`gs.novaworld.net` = 207.178.209.201; web/asset host 207.178.209.204 — these
+are NovaLogic's boxes, the parity target, **not** anything we deploy), but its
+`ClientConnected` (0x43) draws no `ServerStartVerify` (0x83). Against the OpenNova server the
+same client reaches `Verified`. This grill establishes why, and pins the still-un-witnessed
+Phase-3 (login) wire contract. IDA: retail `Jointops.exe` (kong IDB).
+
+#### NW-S5 — the verify leg needs the HTTP login first; our `ClientConnected` body is already correct
+
+- **`ClientConnected` is bare in retail too.** `CNapiGameSession_SendClientConnected @ 0x4cfe30`
+  builds a statement named `"ClientConnected"` with **zero fields**, queued via
+  `NapiNPConnection_QueueMessage @ 0x628640`. Our `client_session.cpp` `on_server_auth` emits the
+  same bare container — **matching**. (The old source comment claiming retail "re-sends identity
+  here" was wrong and has been corrected.)
+- **Timing divergence.** Retail does **not** send `ClientConnected` on `ServerAuth`. The only
+  caller is `CNapiGameSession_ProcessPeriodicUpdate @ 0x4d4400`, gated on
+  `np_conn_state == 5 && session_state == 2` — i.e. only after the NP layer's `ServerSessionInit`
+  has completed and `CNapiGameSession_OnNovaWorldConnected @ 0x4d1570` has run (it sets session
+  state 2 at its tail). Our `ClientSession` fires it the instant it parses `ServerAuth` (state
+  `Verifying`). Permissive against the OpenNova server; premature against live NW.
+- **Missing login→verify bridge.** Retail's `ClientRequestVerifyResult` builder
+  `CNapiGameSession_SendVerifyRequest @ 0x4d3620` attaches **`SessIdString`** (from `session+1148`,
+  empty on the first pass) **and a `"Cookie"` var-list** serialized from `session+388`, which
+  `CNapiSession_ReadLocaleInfo @ 0x4ce390` fills from the HTTP login cookie jar. Our client sends a
+  **bare** `ClientRequestVerifyResult`. The read side (`ServerVerifyResult` →
+  `CNapiGameSession_HandleConnectVerifyResponse @ 0x4d5800`: `atol(Success)` ≠ 0 → copy
+  `SessIdString` → state 4 → dispatch `StartHosting`/`StartPlaying` by `session+296`) matches ours.
+- **Root cause.** Both divergences trace to the same prerequisite: the verify leg on live NW
+  carries login-derived cookies the client only has after the HTTP account login. The
+  `ServerStartVerify`/`ServerVerifyResult` *server* gate lives in the NW server binary (not
+  `Jointops.exe`), so the exact precondition is not directly witnessable, but the client
+  unconditionally carries the login `Cookie` var-list into the verify request. **NW-S5 is therefore
+  a consequence of NW-S3: it resolves once Phase 3 (login) lands.** This **supersedes the reverted
+  NW-S4 empty-root-wrapper hypothesis**, which was a wrong guess (the capture that motivated it is a
+  §4 host-join, not the §3 lobby verify leg — see §5.8).
+
+#### NW-S5/B — Phase-3 login wire contract (client-direction, now witnessed)
+
+- **Submit method = POST.** The primary `NAME`/`PASSWORD` login is the `FORM_POST` widget →
+  `GopherWebWidget_SendHttpPost @ 0x658b30`: `POST <path> HTTP/1.0`,
+  `Content-type: application/x-www-form-urlencoded`, body assembled by
+  `build_form_field_query_string @ 0x657760` (EDIT-widget values EPASK-encrypted; hidden fields and
+  the echoed `EPASK` public key plaintext). The `?EPASK=` **GET** path
+  (`build_url_and_submit_request @ 0x63e3f0`, `HandleScriptedAction` case 4) is a *secondary/express*
+  action, **not** the main login — an earlier note over-attributed it. This matches the
+  POST-then-GET-relay model in `apps/novaworld_server` and `onnw`.
+- **EPASK source.** The `exp:mod:key` bundle arrives as a `Set-Cookie` on the prepare/start page,
+  stored in the jar (`CookieJar_UpdateFromURL @ 0x64e630`), read back by name
+  (`sub_64EA90 @ 0x64ea90`), and echoed as the plaintext `EPASK` form field.
+- **Cookies ride every request, subnet-keyed (resolves the ADR 0010 Phase-2 open question).** Both
+  the GET (`CUIBrowser_SendHTTPRequest @ 0x658840`) and POST builders truncate the request host to
+  its subnet (`Network_TruncateIPToSubnet @ 0x62dfe0`) and emit `Cookie: name=value;` for **every**
+  jar entry on that subnet — so on live NW the `.gsb` server-browser fetch **does** carry
+  `NWHANDLE`/`PCID`/`LOGINSESSIONTAG`. (Kong misnames: `0x61e150 "CookieJar_GetCookiesForURL"` does
+  not touch cookies; the real read is `sub_64EA40 @ 0x64ea40`.)
+- **No post-login gate re-probe.** `UdpCode1`/`UdpCode2` (`byte_B5F8E8`/`byte_B5F908`) are written
+  only by the gate-response handler and read only by `ConnectToNovaWorld @ 0x4d4640`; login feeds
+  the UDP session indirectly — its cookies make the (authenticated) gate request return
+  `UDPCODE1/2` into the join CU, and ride the verify `Cookie` var-list — not via a second gate
+  exchange.
+
+Status: `libs/novaworld/http_login.{h,cpp}` now carries the Godot-free pieces of this contract
+(`build_credentials_post_body`, `parse_set_cookie_values`, `CookieJar`), proven against the
+server's own decode path by `tests/novaworld/http_login_test` (ctest `http_login`). The remaining
+Phase-3 work is host-side: the binding's HTTP login chain (prepare GET → login POST → relay GET,
+cookie capture) and the panel's credential fields. Rename proposals from this grill:
+`notes/grill-nws5-ida-renames.md`.
+
+> **SUPERSEDED by Wave 5 (below).** Wave 4's "the verify leg needs the HTTP login first" /
+> "the verify `Cookie` var-list is lifted from the login cookie jar" conclusion was an
+> *inference* (the verify server gate is not in `Jointops.exe`). A full packet capture of a
+> **successful** retail session against the real `.204` then refuted it: login is **not** a
+> verify prerequisite, and the verify `Cookie` var-list is CD-key/hardware identity (with the
+> CD-key fields **empty**), not login cookies. The Phase-3 HTTP login work above is still
+> correct and still needed — for the **account/GSB** leg that follows VALIDATE — just not for
+> reaching VALIDATE. Same correction applies to NW-S3's "blocked on auth" verdict (§8 Wave 1).
+
+### Wave 5 — the genuine .204 lobby, captured end to end (2026-06-12)
+
+The standing diagnosis (Wave 4 NW-S5, Wave 1 NW-S3) held that completing the lobby verify
+against live NW required an authenticated session (web login → gate-issued `UdpCode1/2` →
+verify `Cookie` jar). That was inference; the verify server gate lives in the NW server binary,
+not `Jointops.exe`. A **full Wireshark capture of a successful retail JO session against the
+real `207.178.209.204:64206`** (`fixtures/novaworld/nw204_lobby.hexcap`, frames 8538–10651;
+retail's own `_connectlog.txt`) settles it empirically. Decoded byte-for-byte through this
+repo's own libs by `tests/novaworld/nw204_lobby_decode_test` (ctest `nw204_lobby_decode`) — no
+re-implemented crypto, so the output is ground truth.
+
+The lobby exchange (raw UDP payload bytes; `cooked` = after the 4-byte CRC envelope):
+
+| frame | dir | bytes | op | meaning |
+|---|---|---|---|---|
+| 8538 | C→S | 274 | 0x41 | ClientHello (`NVS`=Milota, `PN`=NOVAWORLDUDP, `AP`="JOINTOPS.EXE") |
+| 8933 | S→C | 313 | 0x81 | ServerHello (`SN`="NWServer") |
+| 8977 | C→S | 641 | 0x42 | ClientAuth/Join — 11 CU chunks, **all type=2** |
+| 9729 | S→C | 650 | 0x82 | **ServerSessionInit** (`CR`=1, `SK`, 61-char SCRK, NWUID CU) |
+| 9730 | S→C | 42  | 0x83 | two `settings_update` (CS config) messages, **not** ServerStartVerify |
+| 9739 | C→S | 18  | 0x43 | header-only **ack** (seq=1, ack=1) |
+| 9778 | C→S | 40  | 0x43 | ClientConnected (seq=2) — bare "ClientConnected" statement |
+| 10163 | S→C | 42 | 0x83 | **ServerStartVerify** (seq=2) |
+| 10166 | C→S | 896 | 0x43 | **ClientRequestVerifyResult** (seq=3) — the 892B verify |
+| 10620 | S→C | 151 | 0x83 | **ServerVerifyResult** `Success=1` (+ `ConnectCommands` var-list) |
+| 10651 | C→S | 18 | 0x43 | header-only ack (seq=4) → VALIDATED |
+
+Established facts (all witnessed in the capture, IDA where noted):
+
+1. **Login is NOT a verify prerequisite.** Retail reaches VALIDATED (connectlog "YIPPEE WE ARE
+   CONNECTED AND VALIDATED") *before* its first `nwprepare.dll` GET. The gate returned the
+   literal placeholders `udpcode1="abc"` / `udpcode2="xyz"` — the same ones our client gets — and
+   retail still validated. The HTTP login is for the **account/GSB** leg that follows, not the
+   lobby verify. (Refutes Wave 1 NW-S3 and Wave 4 NW-S5.)
+2. **0x82 is `ServerSessionInit`, not "ServerAuth".** `NapiNPConnection_SendSessionInit @
+   0x620ef0` emits opcode 0x82 (`-126`) carrying CI/SK/CS×30/CU/SCRK/NA/RIP/RPN; the client
+   receiver is `NapiNP_HandleServerJoinResponse @ 0x629840` (`CR`=`byte_7DFDE8`≠0 ⇒ success ⇒
+   `conn_state=5` → `OnStateChange @ 0x626060` → `OnNovaWorldConnected @ 0x4d1570`). Our code
+   keeps the legacy "ServerAuth" name for opcode 0x82; it is the SessionInit.
+3. **The verify `Cookie` var-list is CD-key/hardware identity, and the lobby verify is NOT
+   credential-gated.** The 892B `ClientRequestVerifyResult` (frame 10166) decodes to
+   `SessIdString=""` + a `ClientVarList(VarList="Cookie")` of `ClientVar{VarFNum="0",VarName,
+   VarValue}`: CountryName/Language/TimeZoneBias, MyInstalledExpBits, **NWUID** (echoed from the
+   SessionInit's NWUID CU), **NWCDKIID=""**, **NWCDKIIDEXP1=""**, NWPSSK/NWUSID (hardware
+   fingerprints), NWHWI (GPU$mem$res). The CD-key fields are **empty** on the wire yet the server
+   returns `Success=1`. So the verify is registration/telemetry, not a CD-key check. Source:
+   `CNapiGameSession_SendVerifyRequest @ 0x4d3620` + `CNapiSession_ReadLocaleInfo @ 0x4ce390`
+   reading the browser form fields `OnNovaWorldConnected @ 0x4d1570` set.
+4. **The real stall was the DSP seq/ack layer.** Retail's outbound 0x43 seq is **1-based**
+   (1,2,3,4) and it sends explicit header-only **acks** (frame 9739 after the settings 0x83;
+   frame 10651 after VerifyResult). Our client started seq at 0 — making `ack=0` ambiguous with
+   "acked nothing" — and never acked the settings packet, so the peer's reliable layer stalled
+   after SessionInit (matching the observed "0x82 received, then timeout"). ClientConnected
+   timing (`ProcessPeriodicUpdate @ 0x4d4400` gates it on `conn_state==5 && session==2`) is a
+   secondary, non-blocking divergence.
+
+**Fixes landed (this wave).** `client_session.{h,cpp}`: 1-based outbound seq; header-only ack for
+any inbound 0x83 that delivered content but drew no substantive reply (settings, VerifyResult);
+`build_verify_request()` emits the full `Cookie` var-list from `Config::verify_cookie_vars`, with
+NWUID echoed from the SessionInit; opcode-0x82 NWUID extraction in `on_server_auth`. The binding
+(`nova_world_client.cpp`) sends the retail join CU set (11 chunks, type=2) and populates the
+verify identity (CD-key fields empty, NWHWI/locale best-effort telemetry — the verify is not
+gated on them). The OpenNova-server loopback (`client_session_loopback_test`, now also asserting
+the verify structure + NWUID echo) stays green: it keeps `verify_cookie_vars` empty for a bare
+verify, which the permissive server accepts. Oracle: `nw204_lobby_decode_test`. There is **no
+CD-key boundary** for the lobby VALIDATE — the milestone is reachable without credentials.

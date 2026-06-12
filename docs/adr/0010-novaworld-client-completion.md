@@ -70,10 +70,18 @@ here.
      that fills the panel list. Grill NW-G3 (`docs/net/novaworld-net-re.md` §8): the client GSB
      *request* URL is not a binary literal — the client GETs a server-provided URL, so OpenNova
      matches by construction (the cookie question for real NW is carried to Phase 3).
-   - **Phase 3 — EPASK account login (the real-NW gate).** Client HTTP: read the EPASK `exp:mod:key`
-     from the login page → POST `/NWLogin.dll` with `epask_encrypt(NAME/PASSWORD)` (NW-C2) + the form
-     fields → parse `NWHANDLE`/`PCID` cookies (`onnw/controllers/nova_world/login.py` mirror). Needed
-     for any authenticated action on real NovaWorld (real account).
+   - **Phase 3 — EPASK account login (the real-NW gate). [protocol core landed; host wiring pending]**
+     Client HTTP: read the EPASK `exp:mod:key` from the login page → POST `/NWLogin.dll` with
+     `epask_encrypt(NAME/PASSWORD)` (NW-C2) + the form fields → parse `NWHANDLE`/`PCID` cookies
+     (`onnw/controllers/nova_world/login.py` mirror). Needed for any authenticated action on real
+     NovaWorld (real account). The Godot-free pieces — `build_credentials_post_body`,
+     `parse_set_cookie_values`, `CookieJar` — landed as `libs/novaworld/http_login.{h,cpp}`, verified by
+     `tests/novaworld/http_login_test` against the server's own decode path. The wire contract is
+     witnessed (grill NW-S5/B): POST `application/x-www-form-urlencoded`, cookies ride every subnet-keyed
+     request including the GSB fetch. Remaining: the binding's HTTP login chain (prepare GET → login POST
+     → relay GET, cookie capture) and the panel's credential fields. (This Phase-3 login is for the
+     **account/GSB** leg; it is NOT required to reach the lobby VALIDATE — see the NW-S5 correction
+     below.)
    - **Phase 4 — Host-a-game.** HTTP host-register (`NWHost.dll`, `onnw/.../host.py`) + UDP
      `ClientHostRequest`/`ClientHostUpdate` (builders exist) → parse `ServerHostResult`.
    - **Phase 5 — Join.** HTTP join (`NWJoin.dll`, `onnw/.../join.py`: PUB\* via NW-C3, NK/CK via
@@ -91,10 +99,23 @@ here.
   echo (P1, landed); and the client GSB request (P2, NW-G3 — the `.gsb` URL is not a binary literal,
   so the client GETs a server-provided URL). All crypto and server-direction parsing are anchored to
   retail.
-- **Still to witness (client direction):** the retail client's
-  `NWLogin` POST sequence and cookie handling (P3 — including whether the shared HTTP client attaches
-  `NWHANDLE`/`PCID` to the GSB fetch on real NW), and the host/join HTTP→UDP handoffs (P4/P5). Nothing
-  is blocked on un-grilled crypto.
+- **P3 witnessed (grill NW-S5/B, 2026-06-12; see `docs/net/novaworld-net-re.md` Wave 4):** the login
+  submit is a **POST** of `application/x-www-form-urlencoded` to `NWLogin.dll`
+  (`GopherWebWidget_SendHttpPost @ 0x658b30`) with EPASK-encrypted `NAME`/`PASSWORD` and a plaintext
+  echoed `EPASK` bundle; the bundle arrives as a `Set-Cookie`; **and the shared HTTP client attaches
+  every subnet-keyed cookie — including `NWHANDLE`/`PCID` — to the GSB fetch (the open question above is
+  resolved: yes).** The Godot-free helpers now live in `libs/novaworld/http_login`.
+- **NW-S5 CORRECTED by Wave 5 (2026-06-12; see `docs/net/novaworld-net-re.md` Wave 5).** A full
+  capture of a *successful* retail session against the real `.204` refuted the Wave-4 inference
+  that the verify-leg stall needed the HTTP login. Login is **not** a lobby-verify prerequisite
+  (retail validates with placeholder udpcodes, before any HTTP), and the verify `Cookie` var-list
+  is **CD-key/hardware identity with the CD-key fields empty** — not login cookies — so the lobby
+  verify is **not credential-gated**. The actual stall was a DSP **seq/ack** bug in our client
+  (0-based outbound seq + an un-acked settings packet). Fixed in `client_session.{h,cpp}`
+  (1-based seq, header-only acks, full verify var-list with NWUID echoed). Oracle:
+  `tests/novaworld/nw204_lobby_decode_test`.
+- **Still to witness (client direction):** the host/join HTTP→UDP handoffs (P4/P5). Nothing is blocked
+  on un-grilled crypto.
 
 ## Consequences
 

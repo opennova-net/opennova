@@ -1,0 +1,139 @@
+#include <novaworld/http_login.h>
+
+#include <novacrypto/epask.h>
+
+namespace opennova {
+
+std::string build_login_post_body(const EpaskParams &pub,
+                                  const std::vector<LoginFormField> &fields) {
+	std::string body;
+	for (const auto &f : fields) {
+		if (!body.empty()) body.push_back('&');
+		body += f.name;
+		body.push_back('=');
+		body += f.encrypt ? epask_encrypt(f.value, pub) : f.value;
+	}
+	return body;
+}
+
+std::string build_credentials_post_body(
+    const EpaskParams &pub, const std::string &name, const std::string &password,
+    const std::vector<std::pair<std::string, std::string>> &hidden) {
+	std::vector<LoginFormField> fields;
+	fields.reserve(hidden.size() + 3);
+	// The echoed public key the server uses to decrypt the rest of the body.
+	fields.push_back({"EPASK", epask_to_string(pub), false});
+	// The two EDIT-widget credentials, encrypted under the bundle.
+	fields.push_back({"NAME", name, true});
+	fields.push_back({"PASSWORD", password, true});
+	// IB3_FORM passthrough fields, plaintext, in caller order.
+	for (const auto &kv : hidden) {
+		fields.push_back({kv.first, kv.second, false});
+	}
+	return build_login_post_body(pub, fields);
+}
+
+std::vector<std::pair<std::string, std::string>>
+parse_set_cookie_values(const std::vector<std::string> &set_cookie_values) {
+	std::vector<std::pair<std::string, std::string>> out;
+	for (const auto &line : set_cookie_values) {
+		// Take the leading "name=value" pair, before the first attribute ';'.
+		const auto semi = line.find(';');
+		const std::string pair =
+		    semi == std::string::npos ? line : line.substr(0, semi);
+		const auto eq = pair.find('=');
+		if (eq == std::string::npos) continue;
+		// Trim surrounding whitespace from the name (some servers emit
+		// "Set-Cookie: NAME=..."); values are taken verbatim.
+		size_t name_begin = 0;
+		while (name_begin < eq && (pair[name_begin] == ' ' || pair[name_begin] == '\t')) {
+			++name_begin;
+		}
+		size_t name_end = eq;
+		while (name_end > name_begin &&
+		       (pair[name_end - 1] == ' ' || pair[name_end - 1] == '\t')) {
+			--name_end;
+		}
+		if (name_end == name_begin) continue;
+		out.emplace_back(pair.substr(name_begin, name_end - name_begin),
+		                 pair.substr(eq + 1));
+	}
+	return out;
+}
+
+JoiConnection parse_joi_connection_string(const std::string &body) {
+	JoiConnection out;
+	// Isolate the first bracketed run: [ ... ].
+	const auto open = body.find('[');
+	if (open == std::string::npos) return out;
+	const auto close = body.find(']', open + 1);
+	if (close == std::string::npos) return out;
+	std::string inner = body.substr(open + 1, close - open - 1);
+
+	// Split on '&' into KEY=VALUE pairs (trim surrounding whitespace/newlines on
+	// each field, which the template wraps the <TITLE> contents with).
+	size_t pos = 0;
+	while (pos <= inner.size()) {
+		const auto amp = inner.find('&', pos);
+		const auto end = amp == std::string::npos ? inner.size() : amp;
+		std::string field = inner.substr(pos, end - pos);
+		// Trim ASCII whitespace from both ends.
+		size_t b = 0, e = field.size();
+		while (b < e && (field[b] == ' ' || field[b] == '\t' || field[b] == '\r' ||
+		                 field[b] == '\n')) {
+			++b;
+		}
+		while (e > b && (field[e - 1] == ' ' || field[e - 1] == '\t' ||
+		                 field[e - 1] == '\r' || field[e - 1] == '\n')) {
+			--e;
+		}
+		field = field.substr(b, e - b);
+		const auto eq = field.find('=');
+		if (eq != std::string::npos) {
+			const std::string key = field.substr(0, eq);
+			const std::string value = field.substr(eq + 1);
+			if (key == "NK") out.nk = value;
+			else if (key == "CK") out.ck = value;
+			else if (key == "NI") out.ni = value;
+			else if (key == "NP") out.np = value;
+			else if (key == "BK") out.bk = value;
+		}
+		if (amp == std::string::npos) break;
+		pos = amp + 1;
+	}
+	out.ok = !out.ni.empty() && !out.np.empty();
+	return out;
+}
+
+void CookieJar::set(const std::string &name, const std::string &value) {
+	auto it = values_.find(name);
+	if (it == values_.end()) {
+		order_.push_back(name);
+	}
+	values_[name] = value;
+}
+
+void CookieJar::merge_set_cookie_values(
+    const std::vector<std::string> &set_cookie_values) {
+	for (const auto &kv : parse_set_cookie_values(set_cookie_values)) {
+		set(kv.first, kv.second);
+	}
+}
+
+const std::string *CookieJar::find(const std::string &name) const {
+	auto it = values_.find(name);
+	return it == values_.end() ? nullptr : &it->second;
+}
+
+std::string CookieJar::cookie_header() const {
+	std::string out;
+	for (const auto &name : order_) {
+		if (!out.empty()) out += "; ";
+		out += name;
+		out.push_back('=');
+		out += values_.at(name);
+	}
+	return out;
+}
+
+} // namespace opennova

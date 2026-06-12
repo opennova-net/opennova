@@ -16,6 +16,7 @@ add_library(opennova_novaworld STATIC
     src/lobby_session.cpp
     src/host_repository.cpp
     src/unknown_tracker.cpp
+    src/http_login.cpp
 )
 
 target_include_directories(opennova_novaworld

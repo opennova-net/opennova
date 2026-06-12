@@ -949,6 +949,38 @@ target_link_libraries(client_session_loopback_test PRIVATE opennova_novaworld op
 target_include_directories(client_session_loopback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME client_session_loopback COMMAND client_session_loopback_test)
 
+# ADR 0010 Phase 3 — EPASK account-login wire format. Builds the NWLogin.dll
+# credential POST body with the login helpers and decodes it through a copy of
+# the server's parse_form_body + EPASK path, then checks the cookie jar carries
+# NWHANDLE/PCID onto the later GSB fetch (grill NW-S5/B3).
+add_executable(http_login_test novaworld/http_login_test.cpp)
+target_link_libraries(http_login_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(http_login_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME http_login COMMAND http_login_test)
+
+# ADR 0010 Phase 5 — the NWJoin .joi connection-string parser (host address +
+# tokens) and url_cipher NK round-trip.
+add_executable(joi_parse_test novaworld/joi_parse_test.cpp)
+target_link_libraries(joi_parse_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(joi_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME joi_parse COMMAND joi_parse_test)
+
+# ADR 0010 Phase 5 — the JointOperations ClientHello (proto switch): PN flips to
+# JointOperations with a distinct PG; the NOVAWORLDUDP path is unchanged.
+add_executable(jointops_hello_test novaworld/jointops_hello_test.cpp)
+target_link_libraries(jointops_hello_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto)
+target_include_directories(jointops_hello_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME jointops_hello COMMAND jointops_hello_test)
+
+# ADR 0010 real-NW parity — decodes the genuine .204 lobby capture (the oracle):
+# envelope + outer NWU + per-session SCRK, dumps every container so our builders
+# can be matched field for field. fixtures/novaworld/nw204_lobby.hexcap.
+add_executable(nw204_lobby_decode_test novaworld/nw204_lobby_decode_test.cpp)
+target_link_libraries(nw204_lobby_decode_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto)
+target_include_directories(nw204_lobby_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nw204_lobby_decode_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
+add_test(NAME nw204_lobby_decode COMMAND nw204_lobby_decode_test)
+
 # Backend schema regression — applies the actual backend/migrations/* and
 # backend/seed/* the standalone server uses, so SQL syntax errors and seed
 # regressions break CI before they break the running server.

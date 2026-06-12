@@ -104,7 +104,35 @@ std::array<uint8_t, 16> novaworldudp_pg() {
 	return pg;
 }
 
+// The 16-byte JointOperations (in-match game) protocol GUID. PROVISIONAL: the
+// real bytes live in the game-session connect path (CNapiGameSession_StartPlaying
+// @ 0x4d45e0 / the InitNPConnection sibling that builds the host connection),
+// not yet grilled (IDA MCP was down). This placeholder is distinct from the
+// NOVAWORLDUDP GUID and deterministic, which is all the local milestone needs:
+// our server rejects the join hello on PN ("JointOperations" != "NOVAWORLDUDP")
+// before it ever inspects PG. Replace with the witnessed bytes for real-host
+// parity; see docs/net/novaworld-net-re.md.
+std::array<uint8_t, 16> jointoperations_pg() {
+	// ASCII "JO-PROVIS-PG\0\0\0\0" — visibly a placeholder in a hex dump.
+	return {'J', 'O', '-', 'P', 'R', 'O', 'V', 'I', 'S', '-', 'P', 'G', 0, 0, 0, 0};
+}
+
+// Pick the PG GUID that matches the protocol name carried in the hello/auth.
+std::array<uint8_t, 16> pg_for_pn(const std::string &pn) {
+	if (pn == "JointOperations") return jointoperations_pg();
+	return novaworldudp_pg();
+}
+
 } // namespace
+
+ClientSession::Config ClientSession::Config::jointoperations() {
+	Config c;
+	c.pn  = "JointOperations";       // flips the session to the in-match game protocol
+	c.pv1 = "0.0.0 2/10/2004 EM";    // PROVISIONAL — real JO PV1 pending the 0x4d45e0 grill
+	c.pg  = jointoperations_pg();    // PROVISIONAL placeholder GUID
+	c.use_default_pg = false;        // use the explicit JO pg above
+	return c;
+}
 
 ClientSession::ClientSession() : ClientSession(Config{}) {}
 
@@ -117,9 +145,14 @@ std::vector<uint8_t> ClientSession::start() {
 	server_hk_ = 0;
 	server_sk_ = 0;
 	server_scrk_.clear();
+	server_nwuid_.clear();
 	sess_id_string_.clear();
 	last_error_.clear();
-	next_outbound_seq_ = 0;
+	// Outbound 0x43 seq is 1-based, matching genuine NovaWorld: the retail
+	// client's first protocol packet is seq=1 (capture frame 9739). Starting at
+	// 0 makes ack=0 ambiguous with "acked nothing" in the peer's reliable-delivery
+	// layer, which stalls the verify exchange against live NW (NW-S5).
+	next_outbound_seq_ = 1;
 	last_inbound_seq_ = 0;
 	sent_verify_request_ = false;
 	reassembly_ = ProtocolReassemblyState{};
@@ -139,9 +172,10 @@ std::vector<uint8_t> ClientSession::build_client_hello() {
 	hello.eip  = 0;
 	hello.epn  = 0;
 
-	// PG — the 16-byte NOVAWORLDUDP protocol GUID the real server validates
-	// (HandleClientHello @ 0x6213B0 compares 16 bytes at proto+284).
-	hello.pg = novaworldudp_pg();
+	// PG — the 16-byte protocol GUID the real server validates (HandleClientHello
+	// @ 0x6213B0 compares 16 bytes at proto+284). Defaults to the GUID for `pn`
+	// (NOVAWORLDUDP lobby vs JointOperations game); an explicit cfg_.pg overrides.
+	hello.pg = cfg_.use_default_pg ? pg_for_pn(cfg_.pn) : cfg_.pg;
 	hello.pg_present = true;
 
 	return encode_session_outbound(SESSION_OPCODE_CLIENT_HELLO,
@@ -162,7 +196,7 @@ std::vector<uint8_t> ClientSession::build_client_auth() {
 	auth.ap   = cfg_.ap;
 	auth.bdat = cfg_.bdat;
 	auth.pn   = cfg_.pn;
-	auth.pg   = novaworldudp_pg();
+	auth.pg   = cfg_.use_default_pg ? pg_for_pn(cfg_.pn) : cfg_.pg;
 	auth.pg_present = true;
 	auth.pv1  = cfg_.pv1;
 	auth.pv2  = cfg_.pv2;
@@ -224,6 +258,44 @@ std::vector<uint8_t> ClientSession::build_lobby_packet(const NapiMessage &contai
 	                               std::move(body_out));
 }
 
+std::vector<uint8_t> ClientSession::build_verify_request() {
+	// ClientRequestVerifyResult: SessIdString (empty on the first pass) + the
+	// "Cookie" var-list when configured. Witnessed in the genuine .204 capture
+	// (frame 10166): a ClientVarList(VarList="Cookie") child whose ClientVar
+	// children each carry VarFNum="0" / VarName / VarValue. NWUID is echoed from
+	// the ServerSessionInit. CNapiGameSession_SendVerifyRequest @ 0x4d3620.
+	auto str_field = [](const char *name, const std::string &value) {
+		NapiField f;
+		f.name = name;
+		f.data.assign(value.begin(), value.end());
+		return f;
+	};
+
+	NapiMessage req;
+	req.name = "ClientRequestVerifyResult";
+	req.fields.push_back(str_field("SessIdString", sess_id_string_));
+
+	if (!cfg_.verify_cookie_vars.empty()) {
+		NapiMessage var_list;
+		var_list.name = "ClientVarList";
+		var_list.fields.push_back(str_field("VarList", "Cookie"));
+		for (const auto &kv : cfg_.verify_cookie_vars) {
+			const std::string &value =
+			    (kv.first == "NWUID" && kv.second.empty()) ? server_nwuid_
+			                                               : kv.second;
+			NapiMessage var;
+			var.name = "ClientVar";
+			var.fields.push_back(str_field("VarFNum", "0"));
+			var.fields.push_back(str_field("VarName", kv.first));
+			var.fields.push_back(str_field("VarValue", value));
+			var_list.children.push_back(std::move(var));
+		}
+		req.children.push_back(std::move(var_list));
+	}
+
+	return build_lobby_packet(req);
+}
+
 bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
                                     std::vector<std::vector<uint8_t>> &out) {
 	uint8_t opcode = 0;
@@ -280,9 +352,22 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body,
 	state_ = State::Verifying;
 	sent_verify_request_ = false;
 
-	// Kick off the lobby verify handshake. The server's handle_client_connected
-	// ignores the container body, so a bare ClientConnected suffices for
-	// OpenNova; retail re-sends identity here (a later parity refinement).
+	// The 0x82 is ServerSessionInit (NapiNPConnection_SendSessionInit @ 0x620ef0,
+	// opcode 0x82), not a distinct "ServerAuth". It carries the NWUID the client
+	// must echo back in the verify "Cookie" var-list (NWUID entry); capture frame
+	// 9729 -> 10166. CNapiGameSession_OnNovaWorldConnected @ 0x4d1570 reads it from
+	// the SessionInit CU and installs it as the NWUID browser form field.
+	for (const auto &kv : sa.cu) {
+		if (kv.first == "NWUID") { server_nwuid_ = kv.second; break; }
+	}
+
+	// Kick off the lobby verify handshake with a bare ClientConnected
+	// (CNapiGameSession_SendClientConnected @ 0x4cfe30 — a "ClientConnected"
+	// statement with zero fields; capture frame 9778). Retail emits this from its
+	// periodic-update tick after conn_state==5 && session==2; we emit it on the
+	// SessionInit, which is functionally the same point (and the only point that
+	// keeps the permissive OpenNova-server loopback moving, since that server
+	// answers ClientConnected directly with ServerStartVerify).
 	NapiMessage connected;
 	connected.name = "ClientConnected";
 	out.push_back(build_lobby_packet(connected));
@@ -299,6 +384,8 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 	}
 	last_inbound_seq_ = hdr.seq_num;
 
+	const size_t out_before = out.size();
+	const bool had_messages = !messages.empty();
 	for (const auto &pm : messages) {
 		if (pm.flags.settings_update) continue;   // socket tuning, ignore
 		if (pm.full_tag != 0) continue;           // only layer-4 lobby containers
@@ -319,6 +406,17 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 			dispatch_server_container(container, out);
 		}
 	}
+
+	// Acknowledge inbound data packets the genuine NovaWorld way: its reliable
+	// layer expects a 0x43 carrying ack == the seq it just sent. When a packet
+	// delivered content but drew no substantive reply (the settings-update
+	// packet, capture frame 9730; or the terminal ServerVerifyResult, frame
+	// 10620), emit a header-only ack so the peer advances — retail's p#1 and p#4.
+	// A packet that already produced a reply (ServerStartVerify -> the verify
+	// request) carries the ack itself, so no extra ack is sent.
+	if (had_messages && out.size() == out_before) {
+		out.push_back(build_heartbeat());
+	}
 }
 
 void ClientSession::dispatch_server_container(const NapiMessage &container,
@@ -326,9 +424,7 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 	if (container.name == "ServerStartVerify") {
 		if (!sent_verify_request_) {
 			sent_verify_request_ = true;
-			NapiMessage req;
-			req.name = "ClientRequestVerifyResult";
-			out.push_back(build_lobby_packet(req));
+			out.push_back(build_verify_request());
 		}
 		return;
 	}

@@ -10,7 +10,9 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <novacrypto/epask.h>
 #include <novaworld/client_session.h>
+#include <novaworld/http_login.h>
 
 #include <cstdint>
 #include <memory>
@@ -49,6 +51,12 @@ public:
 		STATE_CONNECTED,
 		STATE_DISCONNECTED,
 		STATE_ERROR,
+		// Join legs (ADD only at the end — existing values must stay stable for
+		// GDScript). STATE_JOINING: NWJoin HTTP in flight. STATE_IN_GAME_HELLO:
+		// the JointOperations ClientHello has been sent to the host — the proto
+		// switch boundary (terminal for this milestone; no in-match gameplay).
+		STATE_JOINING,
+		STATE_IN_GAME_HELLO,
 	};
 
 	NovaWorldClient();
@@ -78,6 +86,19 @@ public:
 	Array get_server_rows() const;
 	void refresh_server_list();   // re-fetch the GSB now (also auto-fired on connect)
 
+	// Account login (ADR 0010 Phase 3). Runs the EPASK HTTP login chain
+	// (prepare GET -> login POST -> relay GET) and fills the cookie jar the
+	// client carries onto every later request. Emits login_succeeded /
+	// login_failed. Session-only (nothing persisted).
+	void login(const String &username, const String &password);
+
+	// Join a hosted game (ADR 0010 Phase 5). Runs the NWJoin.dll HTTP handshake
+	// for the GSB row's `rid`, resolves the host address, and opens a session to
+	// the host with PN="JointOperations" — flipping the connection protocol from
+	// the lobby to the in-match game. Stops at the JointOperations ClientHello
+	// (the proto-switch boundary); emits joined_game(host, port).
+	void join(int rid);
+
 	// Engine hooks.
 	void _ready() override;
 	void _process(double delta) override;
@@ -105,6 +126,22 @@ private:
 	                              const PackedByteArray &body);
 	String gsb_url() const;       // OpenNova GSB URL from the gate's startup_url
 
+	// Account login HTTP chain (ADR 0010 Phase 3).
+	void on_login_request_completed(int result, int response_code,
+	                                const PackedStringArray &headers,
+	                                const PackedByteArray &body);
+	// Join HTTP chain (ADR 0010 Phase 5).
+	void on_join_request_completed(int result, int response_code,
+	                               const PackedStringArray &headers,
+	                               const PackedByteArray &body);
+	// Open a UDP session to the host and send the JointOperations ClientHello —
+	// the proto-switch boundary.
+	void send_jointops_hello(const String &host, uint16_t port);
+
+	String http_base() const;     // scheme://host:port from the gate's startup_url
+	PackedStringArray request_headers(bool form_content_type) const;  // Cookie + optional form CT
+	void merge_response_cookies(const PackedStringArray &headers);     // store Set-Cookie lines
+
 	void enter_state(State next, const String &reason = String());
 
 	// Config.
@@ -123,6 +160,27 @@ private:
 	HTTPRequest *browser_http_ = nullptr;   // child node, created in start()
 	Array server_rows_;                     // cached GSB rows (Array of Dictionary)
 	bool gsb_request_in_flight_ = false;
+
+	// Account login + join (ADR 0010 Phase 3/5). Separate child HTTPRequests so
+	// the multi-leg login/join sequences don't race the GSB fetch.
+	HTTPRequest *login_http_ = nullptr;
+	HTTPRequest *join_http_ = nullptr;
+	opennova::CookieJar cookie_jar_;        // EPASK + NWHANDLE/PCID/LOGINSESSIONTAG...
+	opennova::EpaskParams epask_;           // bundle from the prepare Set-Cookie
+	enum LoginStep { LOGIN_IDLE = 0, LOGIN_PREPARE, LOGIN_POST, LOGIN_RELAY };
+	LoginStep login_step_ = LOGIN_IDLE;
+	String login_user_;
+	String login_pass_;
+	String nwhandle_;                       // captured on login success
+	String pcid_;
+	enum JoinStep { JOIN_IDLE = 0, JOIN_FIRST, JOIN_SECOND };
+	JoinStep join_step_ = JOIN_IDLE;
+	int join_rid_ = 0;
+
+	// In-match game session (PN=JointOperations). The third UDP socket; we send
+	// one ClientHello to the host and stop (the proto-switch milestone boundary).
+	Ref<PacketPeerUDP> game_socket_;
+	std::unique_ptr<opennova::ClientSession> game_session_;
 
 	uint32_t client_index_ = 0;       // ci — generated at start()
 	uint32_t client_key_ = 0;         // ck — generated at start()

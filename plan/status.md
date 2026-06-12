@@ -2,9 +2,41 @@
 
 Integration trunk: `web-nw-for-real-master`. All 20 PRs below are **MERGED** to the trunk; the
 single integration PR **#136** (`web-nw-for-real-master` → `master`) is **OPEN**.
-Updated: 2026-06-11.
+Updated: 2026-06-12.
 
 **Remaining: PR 21 (operator-run cutover).** Runbook: [`pr21-cutover-runbook.md`](pr21-cutover-runbook.md).
+
+## Client completion (ADR 0010)
+
+Our own runtime client against both targets (OpenNova server / original NovaWorld):
+
+- Phases 0–2 done on the trunk: endpoint picker, gate→hello→auth→verify session, GSB browse.
+- Against **our** server the client reaches Verified/CONNECTED end-to-end (re-verified
+  2026-06-12 on the trunk tip: 20/20 net ctests, live boot, HTTP `server-info`/`unknowns`/GSB smoke).
+- Against **original NovaWorld** (`gs.novaworld.net` = 207.178.209.201; web/asset host
+  207.178.209.204 — NovaLogic's boxes, **not ours**; they are the target we emulate) the
+  client previously stalled after `ClientConnected`. **NW-S5 fixed 2026-06-12** from a real
+  `.204` capture (RE doc Wave 5): login is not a verify prereq, the lobby verify is not
+  credential-gated, and the stall was a DSP seq/ack bug (0-based seq + un-acked settings
+  packet). Client now uses 1-based seq + header-only acks + the full verify `Cookie` var-list
+  (NWUID echoed); join CU set matched to retail (11 chunks, type=2). Offline-proven by
+  `nw204_lobby_decode` (the capture oracle) and `client_session_loopback` verify-parity;
+  **live `.204` re-test pending** (user runs the instrumented client; diff its wire vs
+  `fixtures/novaworld/nw204_lobby.hexcap`).
+- Phase 3 (EPASK account login) **LANDED 2026-06-12** against our own server: the binding
+  HTTP login chain (prepare GET → login POST → relay GET, cookie jar) + panel username/password
+  fields. Session-only (no persistence).
+- Phase 5 (join) **reached the proto-switch boundary 2026-06-12**: the out-game client logs in,
+  browses the GSB, clicks Join → NWJoin two-phase → decodes the host address → opens a session
+  to the host with `PN="JointOperations"`, flipping the connection protocol from NOVAWORLDUDP to
+  JointOperations. Stops at that ClientHello (no in-match gameplay; ADR 0009 seam). Verified end
+  to end with a headless driver against the local server: the server logged `NWLogin → auth ok`,
+  `NWJoin (second call) rid=1`, and `[nwudp] refusing PN='JointOperations'`, and
+  `GET /api/unknowns` shows the `pn:JointOperations` sighting with the full ClientHello. Plan +
+  detail in [`phase3-host-wiring.md`] and the `we-need-to-get-gentle-owl` plan. **Provisional:**
+  the JointOperations PG GUID/PV1 are placeholders ("JO-PROVIS-PG") pending the
+  `StartPlaying @ 0x4d45e0` grill — sufficient to cross the boundary locally (our server rejects
+  on PN alone), needed only for a real retail host.
 
 ## PR sequence
 
@@ -47,6 +79,7 @@ Final step after PR 21: merge **#136** → `master`.
 | 2026-06-10 | World-sim scene rename target: `GameWorld` |
 | 2026-06-11 | grill wave 3: novacrypto verified vs retail using opennova-int Python as production-proven second witness; NK/CK = url_cipher and BK = literal "986119" (the earlier "NK/CK/BK = PUBcrypto" was a mislabel) |
 | 2026-06-11 | Dropped the staging environment / terraform-workspace concept — single prod environment (staging can be re-added later) |
+| 2026-06-12 | `207.178.209.201/.204` (gs.novaworld.net + web host) confirmed as **genuine NovaLogic NovaWorld** — we do not control them; they are the parity target. An earlier "stale build of our emulator" reading was wrong (the live gate really does issue `abc`/`xyz` udpcodes pre-login; opennova-int's "stubs" mirror sniffed reality) |
 
 ## Verification milestones
 
@@ -74,3 +107,4 @@ is unaffected by them.
 | NW-L1 | DFX2 gate hostname (dfx2.exe) | 7 | deferred (needs dfx2.exe IDB) |
 | NW-L2 | Non-gate novalogic/novaworld URLs (news, MOTD) | 7 | resolved in PR 7 |
 | NW-C1..C4 | NWU / EPASK / PUBcrypto / url_cipher byte-exact vs retail | wave 3 | **resolved** (`edbb6c33`) |
+| NW-S5 | Genuine NW sends no `ServerStartVerify`/validation after our `ClientConnected` (gate/hello/SessionInit fine) | client P3 | **fixed** (2026-06-12, RE doc Wave 5): a real `.204` capture (`fixtures/novaworld/nw204_lobby.hexcap`) refuted the Wave-4 "needs HTTP login" inference. Login is NOT a verify prereq; the verify is not credential-gated (CD-key fields empty on the wire, `Success=1`). Real cause = DSP seq/ack: our outbound 0x43 seq was 0-based and we never acked the settings packet. Fixed: 1-based seq + header-only acks + full `Cookie` var-list (NWUID echoed). Oracle `nw204_lobby_decode`; parity in `client_session_loopback`. Supersedes Wave-4 NW-S5 and reverted NW-S4. |

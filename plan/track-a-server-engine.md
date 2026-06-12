@@ -109,6 +109,32 @@ LIST widget. Copy stays artist-facing.
 novaworld_browser renders live rows, and Host a Game registers a row a second client
 sees. Login uses the dev seed user until the HTTP login leg is grilled.
 
+## Client completion — ADR 0010 (post-merge, on the trunk)
+
+Phases 0-2 (endpoint picker, gate→hello→auth→verify session, GSB browse) landed with the
+merge. Status 2026-06-12:
+
+- **OpenNova target works end to end.** Our client reaches `Verified`/`CONNECTED` against
+  `apps/novaworld_server` (loopback ctest + a live local run). This is the product path.
+- **Real-NovaWorld target: NW-S5.** Against genuine NovaLogic NovaWorld (`gs.novaworld.net`
+  = 207.178.209.201; web/asset host .204 — NovaLogic's boxes, the parity target, *not* ours)
+  the client completes gate/hello/AUTH but the verify leg stalls (no `ServerStartVerify` after
+  `ClientConnected`). Grill NW-S5 (RE doc Wave 4) found the cause is the missing HTTP login:
+  our `ClientConnected` body is already correct (retail's is bare too), but retail (a) emits it
+  only after `ServerSessionInit` and (b) carries a login-cookie `Cookie` var-list in the verify
+  request. So NW-S5 resolves once Phase 3 lands; the reverted NW-S4 "empty-root-wrapper" guess is
+  superseded.
+- **Phase 3 — EPASK login.** Wire contract witnessed (NW-S5/B): the login is a POST of
+  `application/x-www-form-urlencoded` to `NWLogin.dll` with EPASK-encrypted NAME/PASSWORD; the
+  EPASK bundle is a Set-Cookie; the engine attaches all subnet-keyed cookies to *every* request,
+  GSB fetch included (resolves the ADR Phase-2 open question). The Godot-free core landed:
+  `libs/novaworld/http_login.{h,cpp}` (`build_credentials_post_body`, `parse_set_cookie_values`,
+  `CookieJar`) with `tests/novaworld/http_login_test` proving the body round-trips through the
+  server's decode path. **Remaining (host-side, needs the user's live real-NW test):** the
+  binding's HTTP login chain (prepare GET → login POST → relay GET, cookie capture, feeding the
+  verify `Cookie` var-list + join CU) and the panel's credential fields. Open product decisions:
+  credential storage and whether login is offered/required per target.
+
 ## In-match seam (PR 20, design only)
 
 ADR: PN=JOINTOPERATIONS gameplay traffic enters the single World tick as a

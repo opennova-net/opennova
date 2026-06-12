@@ -387,6 +387,79 @@ bool HttpListener::start(const ServerConfig &config) {
 		return res;
 	});
 
+	// Dev/test helper: inject an active_hosts row so the GSB browser shows a
+	// joinable game without a live host process. Bearer-gated (CLOSED unless
+	// ADMIN_API_TOKEN is set), so prod is unaffected. Defaults point the host at
+	// this server's own NW UDP port (127.0.0.1:64206) so a joining OpenNova
+	// client's JointOperations hello lands on our nw_udp_listener and is recorded
+	// on the unknown-tracker pn: channel — the proto-switch proof. The row is
+	// wiped on the next boot (clear_all) and by the stale-host sweep; re-inject
+	// per run. See plan/phase3-host-wiring + we-need-to-get-gentle-owl.
+	CROW_ROUTE(app, "/api/admin/hosts").methods("POST"_method)(
+	    [this, admin_authorized, public_host](const crow::request &req) {
+		if (!admin_authorized(req)) {
+			crow::response res(401);
+			res.body = "unauthorized";
+			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
+			return res;
+		}
+		auto body = crow::json::load(req.body);
+		auto str_or = [&](const char *k, const char *fallback) {
+			return (body && body.has(k)) ? std::string(body[k].s()) : std::string(fallback);
+		};
+		auto int_or = [&](const char *k, int fallback) {
+			return (body && body.has(k)) ? static_cast<int>(body[k].i()) : fallback;
+		};
+
+		hostdb::HostRow row;
+		row.rid          = static_cast<uint32_t>(int_or("rid", 1));
+		row.gsid         = str_or("gsid", "dev-gsid-1");
+		row.game         = str_or("game", "jop_2_consumer");
+		row.app_id       = str_or("app_id", "20");
+		row.server_name  = str_or("server_name", "DEV Joinable");
+		row.host_ip      = str_or("host_ip", public_host.empty() ? "127.0.0.1" : public_host.c_str());
+		row.host_port    = int_or("host_port", 64206);
+		row.host_key     = str_or("host_key", "DEVHOSTKEY0000000000000000000000000000000000");
+		row.pcid_key     = str_or("pcid_key", "00000000000000000000");
+		row.player_count = int_or("player_count", 0);
+		row.max_players  = int_or("max_players", 16);
+		row.region       = str_or("region", "dev");
+		row.game_type    = str_or("game_type", "AAS");
+		row.mission_name = str_or("mission_name", "DEV Mission");
+		row.country      = str_or("country", "US");
+		row.password     = str_or("password", "");
+		row.locked       = str_or("locked", "0");
+		row.dedicated    = str_or("dedicated", "0");
+		row.exp_bits     = str_or("exp_bits", "3");
+		row.peer_ip      = row.host_ip;
+		row.peer_port    = row.host_port;
+
+		try {
+			hostdb::upsert_host(db_, row);
+		} catch (const std::exception &e) {
+			crow::response res(500);
+			crow::json::wvalue out;
+			out["error"] = "upsert_failed";
+			out["message"] = e.what();
+			res.body = out.dump();
+			res.set_header("Content-Type", "application/json");
+			return res;
+		}
+		std::printf("[http] POST /api/admin/hosts injected rid=%u host=%s:%d game=%s\n",
+		            static_cast<unsigned>(row.rid), row.host_ip.c_str(), row.host_port,
+		            row.game.c_str());
+		crow::json::wvalue out;
+		out["rid"] = static_cast<int>(row.rid);
+		out["host_ip"] = row.host_ip;
+		out["host_port"] = row.host_port;
+		out["game"] = row.game;
+		out["server_name"] = row.server_name;
+		crow::response res(201);
+		res.body = out.dump();
+		res.set_header("Content-Type", "application/json");
+		return res;
+	});
+
 	CROW_ROUTE(app, "/api/lobbies")([this]() {
 		// Phase I.4: game-centric format mirroring onnet's api.py:21-49.
 		// {"games":[{"slug","displayName","hosts":[...]}]}
