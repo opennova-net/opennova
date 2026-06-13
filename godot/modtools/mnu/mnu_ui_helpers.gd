@@ -118,8 +118,10 @@ static func add_color_edit_row(parent: Control, key: String, raw: String) -> Arr
 	return [swatch, edit]
 
 
-static func refresh_swatch(swatch: ColorRect, raw: String) -> void:
-	var parsed = color_from_mnu(raw)
+# Optional stylesheet: a %VAR% raw value resolves through it first, so the
+# swatch can show the themed color instead of going transparent.
+static func refresh_swatch(swatch: ColorRect, raw: String, sheet = null) -> void:
+	var parsed = resolve_color_token(raw, sheet)
 	swatch.color = parsed if parsed != null else Color(0, 0, 0, 0)
 
 
@@ -154,12 +156,63 @@ static func add_check_row(parent: Control, label: String, pressed: bool) -> Chec
 
 # Parse an MNU color token into a Color, or null when it is a %VAR% reference,
 # empty, or not valid hex (so the caller can render it as "unresolved").
+# MNU colors are AARRGGBB (8 digits) or RRGGBB (6, opaque) — NOT Godot's HTML
+# RRGGBBAA, so the pairs are read by hand [orig: the menu color parser reads
+# the dword as 0xAARRGGBB, see libs/mnu color handling].
 static func color_from_mnu(raw: String):
 	var token := raw.strip_edges()
+	if token.begins_with("#"):
+		token = token.substr(1)
 	if token.is_empty() or token.begins_with("%"):
 		return null
-	if not token.begins_with("#"):
-		token = "#" + token
-	if not Color.html_is_valid(token):
+	if not ((token.length() == 6 or token.length() == 8) and token.is_valid_hex_number(false)):
 		return null
-	return Color.html(token)
+	var a := 255
+	if token.length() == 8:
+		a = token.substr(0, 2).hex_to_int()
+		token = token.substr(2)
+	var r := token.substr(0, 2).hex_to_int()
+	var g := token.substr(2, 2).hex_to_int()
+	var b := token.substr(4, 2).hex_to_int()
+	return Color(r / 255.0, g / 255.0, b / 255.0, a / 255.0)
+
+
+# Format a Color as an MNU hex token (uppercase). force_alpha=false drops the
+# alpha pair for fully opaque colors, keeping 6-digit-authored values 6-digit.
+static func color_to_mnu(color: Color, force_alpha := true) -> String:
+	var rgb := "%02X%02X%02X" % [
+		roundi(color.r * 255.0), roundi(color.g * 255.0), roundi(color.b * 255.0),
+	]
+	if not force_alpha and color.a >= 1.0:
+		return rgb
+	return "%02X%s" % [roundi(color.a * 255.0), rgb]
+
+
+# Resolve a raw color token to a Color: a %VAR% goes through the stylesheet
+# first (when one is loaded), then the literal hex parse. Null = unresolved.
+static func resolve_color_token(raw: String, sheet = null):
+	var token := raw.strip_edges()
+	if token.begins_with("%") and sheet != null:
+		token = String(sheet.substitute(token))
+	return color_from_mnu(token)
+
+
+# Compact "%" dropdown over stylesheet variables: each row shows "NAME  (value)";
+# picking one calls on_pick(name). Returns null (no affordance at all) when
+# there are no variables to offer, so callers can skip appending it.
+static func add_var_menu_button(parent: Control, variables: Array, on_pick: Callable) -> MenuButton:
+	if variables.is_empty():
+		return null
+	var btn := MenuButton.new()
+	btn.text = "%"
+	btn.tooltip_text = "Use a style variable from the menu stylesheet"
+	btn.flat = false
+	var popup := btn.get_popup()
+	for i in variables.size():
+		var row := variables[i] as Dictionary
+		popup.add_item("%s  (%s)" % [String(row.get("name", "")), String(row.get("value", ""))], i)
+	popup.id_pressed.connect(func(id: int) -> void:
+		var row := variables[id] as Dictionary
+		on_pick.call(String(row.get("name", ""))))
+	parent.add_child(btn)
+	return btn
