@@ -6,7 +6,7 @@ extends GutTest
 # create a mission from scratch") against regressions in the full editor wiring. Mirrors the
 # real-terrain setup in terrain_editor_import_export_test.gd.
 
-const TerrainEditorScene = preload("res://modtools/terrain/terrain_editor.tscn")
+const EditorMainScene = preload("res://modtools/editor/editor_main.tscn")
 const MissionWorkspace := preload("res://modtools/editor/mission_workspace.gd")
 
 const DVXI5_TRN := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
@@ -29,7 +29,7 @@ func after_each() -> void:
 
 
 func test_new_mission_end_to_end_on_a_real_terrain() -> void:
-	var editor = add_child_autofree(TerrainEditorScene.instantiate())
+	var editor = add_child_autofree(EditorMainScene.instantiate())
 	assert_eq(editor.open_trn(_abs(DVXI5_TRN)), OK, "the real dvxi5 terrain loads through the editor")
 
 	# The New Mission flow the shell drives: can_new lights the button, new_current creates it.

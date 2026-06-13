@@ -118,7 +118,7 @@ func get_status_context() -> String:
 	if _controller != null and _controller.is_loaded():
 		var stats: Dictionary = _controller.get_stats()
 		return "%s, %d objects" % [_controller.get_mission_title(), int(stats.get("placed", 0))]
-	return "Open a .bms mission to load its world."
+	return "Open a mission to load its world."
 
 
 func shows_camera_status() -> bool:

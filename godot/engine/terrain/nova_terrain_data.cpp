@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cstring>
 #include <cmath>
+#include <limits>
 #include <sstream>
 
 using namespace godot;
@@ -290,6 +291,7 @@ void NovaTerrainData::_bind_methods() {
 	                     &NovaTerrainData::get_modulated_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("world_to_source_coords", "world_x", "world_z"), &NovaTerrainData::world_to_source_coords);
+	ClassDB::bind_method(D_METHOD("sample_heights_world_live", "world_xz"), &NovaTerrainData::sample_heights_world_live);
 	ClassDB::bind_method(D_METHOD("world_to_cell_source_coords", "world_x", "world_z", "row", "col"),
 	                     &NovaTerrainData::world_to_cell_source_coords);
 	ClassDB::bind_method(D_METHOD("get_cell_atlas_rect", "row", "col"), &NovaTerrainData::get_cell_atlas_rect);
@@ -1340,6 +1342,64 @@ Vector2 NovaTerrainData::world_to_source_coords(double world_x, double world_z) 
 		return Vector2(-1.0f, -1.0f);
 	}
 	return Vector2(static_cast<real_t>(r.source_x), static_cast<real_t>(r.source_z));
+}
+
+PackedFloat32Array NovaTerrainData::sample_heights_world_live(const PackedVector2Array &world_xz) const {
+	PackedFloat32Array out;
+	out.resize(world_xz.size());
+	float *out_ptr = out.ptrw();
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	// No editable image / no layout: every point is off the live surface. The
+	// FORMAT_RF guard matches extract_heightmap_floats (the brushes' contract).
+	if (heightmap_image.is_null() || heightmap_image->get_format() != Image::FORMAT_RF ||
+	        sector_grid.size() < 256) {
+		for (int i = 0; i < world_xz.size(); ++i) {
+			out_ptr[i] = nan;
+		}
+		return out;
+	}
+	const int w = heightmap_image->get_width();
+	const int h = heightmap_image->get_height();
+	const PackedByteArray pixels = heightmap_image->get_data();
+	if (w <= 0 || h <= 0 || pixels.size() < static_cast<int64_t>(w) * h * 4) {
+		for (int i = 0; i < world_xz.size(); ++i) {
+			out_ptr[i] = nan;
+		}
+		return out;
+	}
+	// One layout for the whole batch (the scalar path rebuilds it per call); one
+	// pointer over the float32 mip-0 instead of a get_pixel Variant call per tap.
+	const opennova::terrain::SectorLayout layout =
+	        editor_layout_from(sector_grid, origin_x, origin_y, sector_count, sector_rows);
+	const float *heights = reinterpret_cast<const float *>(pixels.ptr());
+	const Vector2 *points = world_xz.ptr();
+	for (int i = 0; i < world_xz.size(); ++i) {
+		const opennova::terrain::CoordsResult<double> r = opennova::terrain::coords_world_to_source<double>(
+		        layout, points[i].x, points[i].y, opennova::terrain::coords_editor_options());
+		if (!r.valid) {
+			out_ptr[i] = nan;
+			continue;
+		}
+		// Round the source coords through float32 first — the scalar path hands
+		// GDScript a float32 Vector2 — then mirror _sample_source_height: floor,
+		// edge clamp, clamped fractions, bilinear in 64-bit.
+		const double source_x = static_cast<double>(static_cast<float>(r.source_x));
+		const double source_z = static_cast<double>(static_cast<float>(r.source_z));
+		const int x0 = std::clamp(static_cast<int>(std::floor(source_x)), 0, w - 1);
+		const int z0 = std::clamp(static_cast<int>(std::floor(source_z)), 0, h - 1);
+		const int x1 = std::min(x0 + 1, w - 1);
+		const int z1 = std::min(z0 + 1, h - 1);
+		const double fx = std::clamp(source_x - static_cast<double>(x0), 0.0, 1.0);
+		const double fz = std::clamp(source_z - static_cast<double>(z0), 0.0, 1.0);
+		const double h00 = heights[static_cast<size_t>(z0) * w + x0];
+		const double h10 = heights[static_cast<size_t>(z0) * w + x1];
+		const double h01 = heights[static_cast<size_t>(z1) * w + x0];
+		const double h11 = heights[static_cast<size_t>(z1) * w + x1];
+		const double hx0 = h00 + (h10 - h00) * fx;
+		const double hx1 = h01 + (h11 - h01) * fx;
+		out_ptr[i] = static_cast<float>(hx0 + (hx1 - hx0) * fz);
+	}
+	return out;
 }
 
 Vector2 NovaTerrainData::world_to_cell_source_coords(double world_x, double world_z, int row, int col) const {

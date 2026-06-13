@@ -38,6 +38,11 @@ var _resource_root: NovaResourceRoot
 var _text_resource: RtxtStringFile
 var _text_resource_path: String = ""
 var _stylesheet: MnsStyleSheet
+# Distinct %VAR% tokens in the open menu that the loaded stylesheet does not
+# define (all of them, when none loads). Recomputed per preview refresh and
+# cached: the shell polls status per frame. The original engine FAILS on an
+# unknown variable at expansion, so these surface in the status bar.
+var _unresolved_var_count := 0
 var _tree        # MnuWidgetTree
 var _canvas      # MnuCanvas
 var _selected_id := -1
@@ -270,6 +275,7 @@ func _refresh_preview() -> void:
 	var doc := _document_resource()
 	_resolve_text_resource(doc)  # refresh the cached table + path
 	_resolve_stylesheet_resource()
+	_recount_unresolved_vars(doc)
 	_canvas.set_menu(doc, _resource_root, _text_resource, _stylesheet)
 
 
@@ -300,6 +306,10 @@ func _resolve_text_resource(doc: NovaMnuDocument) -> void:
 		continue
 
 
+# Re-reads the canonical stylesheet from the root on every preview refresh,
+# which also runs on every viewport mount (set_resource_root) - so edits saved
+# in the Menu Styles workspace appear here on the next workspace switch with no
+# extra wiring.
 func _resolve_stylesheet_resource() -> void:
 	_stylesheet = null
 	if _resource_root == null or _resource_root.get_root_dir().is_empty():
@@ -310,6 +320,49 @@ func _resolve_stylesheet_resource() -> void:
 	var sheet := MnsStyleSheet.new()
 	if sheet.load_from_bytes(bytes) == OK:
 		_stylesheet = sheet
+
+
+# The loaded stylesheet (null when the root carries none); the inspector uses
+# it to resolve %VAR% swatches and offer variable dropdowns.
+func get_stylesheet() -> MnsStyleSheet:
+	return _stylesheet
+
+
+func get_unresolved_var_count() -> int:
+	return _unresolved_var_count
+
+
+# Walk every widget's color/texture/font fields for whole-field %VAR% tokens
+# and count the DISTINCT names the stylesheet cannot resolve.
+func _recount_unresolved_vars(doc: NovaMnuDocument) -> void:
+	_unresolved_var_count = 0
+	if doc == null:
+		return
+	var missing: Dictionary = {}
+	var pending: Array[int] = []
+	for screen_id in doc.get_screen_ids():
+		pending.append(screen_id)
+	while not pending.is_empty():
+		var id: int = pending.pop_back()
+		for child_id in doc.get_child_ids(id):
+			pending.append(child_id)
+		if doc.is_screen(id):
+			continue # screens are containers; the styled fields live on widgets
+		for slot in range(8):
+			_note_unresolved_token(doc.get_widget_color(id, slot), missing)
+		for slot in range(4):
+			_note_unresolved_token(doc.get_widget_texture(id, slot), missing)
+		_note_unresolved_token(doc.get_widget_font(id), missing)
+	_unresolved_var_count = missing.size()
+
+
+func _note_unresolved_token(raw: String, missing: Dictionary) -> void:
+	var token := raw.strip_edges()
+	if token.length() < 3 or not token.begins_with("%") or not token.ends_with("%"):
+		return
+	var name := token.substr(1, token.length() - 2)
+	if _stylesheet == null or not _stylesheet.has_variable(name):
+		missing[name.to_upper()] = true
 
 
 func get_text_resource() -> RtxtStringFile:

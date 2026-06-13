@@ -688,6 +688,15 @@ target_link_libraries(mns_parse_test PRIVATE opennova_mns)
 target_include_directories(mns_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mns_parse COMMAND mns_parse_test)
 
+# Lossless MNS document model (ADR 0009): byte round-trip on the real shipped
+# menu_style.mns, minimal-delta edit stability, diagnostics. Reads
+# fixtures/mns/ so it runs from the repo root, like mnu_compat.
+add_executable(mns_document_test mns/mns_document_test.cpp)
+target_link_libraries(mns_document_test PRIVATE opennova_mns)
+target_include_directories(mns_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mns_document COMMAND mns_document_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # Shared editor undo/redo core (header-only opennova::edit::EditHistory)
 add_executable(oned_edit_edit_history_test oned_edit/edit_history_test.cpp)
 target_link_libraries(oned_edit_edit_history_test PRIVATE opennova_oned_edit)

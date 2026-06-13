@@ -234,6 +234,16 @@ public:
 	// GDScript callers branch on); get_cell_atlas_rect returns a zero Rect2i.
 	Vector2 world_to_source_coords(double world_x, double world_z) const;
 	Vector2 world_to_cell_source_coords(double world_x, double world_z, int row, int col) const;
+	// Batch bilinear height sample of the LIVE editable heightmap (the FORMAT_RF
+	// Image the brushes mutate in place) — NOT the baked CPT, which height edits
+	// leave stale (see get_height_world_bilinear vs terrain_editor.
+	// sample_height_world). One float per input (world_x, world_z) pair; NAN when
+	// the point is off the active sectors or no editable image is mounted. The
+	// per-point math mirrors world_to_source_coords + EditorTerrainMesh.
+	// _sample_source_height exactly (editor-mode remap, float32 source coords,
+	// edge-clamped bilinear) so the scalar and batch samplers can never disagree;
+	// the sector layout is built once for the whole batch.
+	PackedFloat32Array sample_heights_world_live(const PackedVector2Array &world_xz) const;
 	Rect2i get_cell_atlas_rect(int row, int col) const;
 	int get_tile_count() const;
 

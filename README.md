@@ -89,7 +89,7 @@ Each workspace reads and writes the game's canonical formats directly. The packa
 
 | Path | Contents |
 |------|----------|
-| `libs/` | C/C++ engine libraries: format parsers, runtime systems, and editor support (38 libraries; see [C/C++ Libraries](#cc-libraries)). |
+| `libs/` | C/C++ engine libraries: format parsers, runtime systems, and editor support (39 libraries; see [C/C++ Libraries](#cc-libraries)). |
 | `docs/` | Tracked architecture and reverse-engineering records; start at [`docs/README.md`](docs/README.md). |
 | `apps/importer/` | `onimport` launcher and CLI compatibility shell. |
 | `opennova_jobs/` | Host-neutral import request/result/job models and validation. |

@@ -312,6 +312,90 @@ func test_mns_stylesheet() -> void:
 	assert_eq(sheet.substitute("%UNKNOWN%"), "%UNKNOWN%", "unknown var left as-is")
 
 
+# --- MNS document surface (lossless model behind MnsStyleSheet, ADR 0009) -------
+
+func _real_mns_bytes() -> PackedByteArray:
+	return FileAccess.get_file_as_bytes("res://../fixtures/mns/menu_style.mns")
+
+
+func test_mns_entries_expose_document_order() -> void:
+	var sheet := MnsStyleSheet.new()
+	assert_eq(sheet.load_from_bytes(_real_mns_bytes()), OK, "real stylesheet loads")
+	var entries := sheet.get_entries()
+	assert_eq(entries.size(), 12, "12 defines in the shipped file")
+	assert_eq(sheet.get_entry_count(), 12, "entry count matches")
+	var first := entries[0] as Dictionary
+	assert_eq(String(first.get("name", "")), "DEF_FONTNAME", "authored case, document order")
+	assert_eq(int(first.get("line", 0)), 40, "1-based physical line after the 38-line header + blank")
+	assert_eq(int(first.get("group", -1)), 0, "first blank-separated group")
+	var last := entries[11] as Dictionary
+	assert_eq(String(last.get("name", "")), "DEF_IMAGE_DEFAULT_BG", "last define")
+	assert_eq(int(last.get("group", -1)), 4, "five groups in the shipped file")
+
+
+func test_mns_diagnostics_report_line_and_severity() -> void:
+	var sheet := MnsStyleSheet.new()
+	sheet.set_source_text("FOO a\nFOO b\n#if 2\nBAR c\n")
+	var diagnostics := sheet.get_diagnostics()
+	assert_gt(diagnostics.size(), 0, "problems surface as diagnostics")
+	var codes := PackedStringArray()
+	for diag_value in diagnostics:
+		var diag := diag_value as Dictionary
+		codes.append(String(diag.get("code", "")))
+		assert_gt(int(diag.get("line", 0)), 0, "diagnostics carry 1-based lines")
+		assert_true(String(diag.get("severity", "")) in ["error", "warning"], "severity is error|warning")
+	assert_has(codes, "duplicate-name", "duplicate names are diagnosed")
+	assert_has(codes, "bad-if-arg", "a non-0/1 #if argument is diagnosed")
+	assert_eq(sheet.get_variable("FOO"), "b", "the parse stays lenient: last duplicate wins")
+
+
+func test_mns_source_text_round_trip_byte_faithful() -> void:
+	var original := _real_mns_bytes()
+	var sheet := MnsStyleSheet.new()
+	assert_eq(sheet.load_from_bytes(original), OK)
+	assert_eq(sheet.to_byte_array(), original, "untouched load -> serialize is byte-identical")
+	sheet.set_source_text(sheet.get_source_text())
+	assert_eq(sheet.to_byte_array(), original, "source get -> set round-trips byte-identically")
+
+
+func test_mns_set_variable_preserves_layout_and_emits_changed() -> void:
+	var sheet := MnsStyleSheet.new()
+	assert_eq(sheet.load_from_bytes(_real_mns_bytes()), OK)
+	watch_signals(sheet)
+	sheet.set_variable("DEF_TEXT_FG", "11223344")
+	assert_signal_emit_count(sheet, "changed", 1, "a real edit emits changed once")
+	sheet.set_variable("DEF_TEXT_FG", "11223344")
+	assert_signal_emit_count(sheet, "changed", 1, "an equal value is a no-op (no dirty flip)")
+
+	var original := _real_mns_bytes().get_string_from_utf8().split("\n")
+	var edited := sheet.to_byte_array().get_string_from_utf8().split("\n")
+	assert_eq(edited.size(), original.size(), "line count unchanged")
+	var diffs := 0
+	for i in original.size():
+		if edited[i] != original[i]:
+			diffs += 1
+	assert_eq(diffs, 1, "a value edit changes exactly its own line (tabs + comments survive)")
+
+
+func test_mns_entry_add_rename_remove_move() -> void:
+	var sheet := MnsStyleSheet.new()
+	sheet.set_source_text("A 1\nB 2\nC 3\n")
+	assert_true(sheet.add_variable("MID", "x", "A"), "insert after a named entry")
+	assert_eq(String((sheet.get_entries()[1] as Dictionary).get("name", "")), "MID", "MID landed after A")
+	assert_false(sheet.add_variable("mid", "y"), "duplicate names reject (case-insensitive)")
+	assert_true(sheet.rename_variable("MID", "MIDDLE"), "rename")
+	assert_false(sheet.rename_variable("MIDDLE", "B"), "rename collisions reject")
+	assert_true(sheet.set_inline_comment("MIDDLE", "the middle one"), "comment attaches")
+	assert_string_contains(String(sheet.get_source_text()), "// the middle one", "comment rendered")
+	assert_true(sheet.move_variable("C", 0), "move to the front")
+	assert_eq(String((sheet.get_entries()[0] as Dictionary).get("name", "")), "C", "C now first")
+	sheet.remove_variable("MIDDLE")
+	assert_false(sheet.has_variable("MIDDLE"), "removed")
+	assert_true(sheet.is_valid_variable_name("DEF_TEXT_FG"), "name validation binds")
+	assert_false(sheet.is_valid_variable_name("BAD NAME"), "whitespace rejects")
+	assert_false(sheet.is_valid_variable_value("a//b"), "values cannot carry comment starts")
+
+
 # --- M10.1: item-row authoring (list / multi / spinlist / combo) ----------------
 
 func _load_all_widgets() -> NovaMnuDocument:

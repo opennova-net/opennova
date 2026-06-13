@@ -33,9 +33,10 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 @export var ingame_menu_file := "game.mnu"
 @export var menu_text_file := "menutxt.BIN"
 # The menu stylesheet has a fixed canonical name the original engine looks for
-# ("named menu_style.mns for the game to find it"). It is usually PFF-archived and
-# is NOT a "recognized kind", so list_files(".mns") never surfaces it; load it by
-# name through the VFS instead. A blank value falls back to the first .mns found.
+# ("named menu_style.mns for the game to find it"). It is usually PFF-archived;
+# .mns is indexed as the "menu_style" kind (so list_files and the editor's
+# browsers surface it), but the engine contract stays the canonical NAME loaded
+# through the VFS. A blank value falls back to the first .mns found.
 @export var menu_stylesheet_file := "menu_style.mns"
 @export var menu_sound_bank_file := ""   # "" -> a .sbf whose name contains "menu", else first
 # Menu SFX profile: the .lwf the widgets' <SOUND> elements reference (hover/click).

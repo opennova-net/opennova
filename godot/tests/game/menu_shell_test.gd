@@ -250,9 +250,10 @@ func test_play_screen_accept_still_launches() -> void:
 	DirAccess.remove_absolute(dir)
 
 
-# The menu stylesheet (menu_style.mns) is PFF-archived and is not a "recognized kind",
-# so list_files(".mns") never surfaces it. The host must load it by its canonical name
-# through the VFS; otherwise %DEF_TEXT_*% colors (incl. the button hover colour) never
+# The menu stylesheet (menu_style.mns) ships PFF-archived. It is indexed as the
+# "menu_style" kind (so list_files surfaces it for editor browsing), but the host
+# still loads it by its canonical name through the VFS -- the engine contract is the
+# fixed file name; otherwise %DEF_TEXT_*% colors (incl. the button hover colour) never
 # resolve and mouse-over has no visible effect. Regression for that hover fix.
 func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 	var dir := OS.get_temp_dir().path_join("menu_shell_style_%d" % Time.get_ticks_usec())
@@ -269,7 +270,10 @@ func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 		DirAccess.remove_absolute(dir.path_join("aa_base.pff"))
 		DirAccess.remove_absolute(dir)
 		return
-	assert_eq(root.list_files(".mns").size(), 0, "precondition: .mns is not surfaced by list_files")
+	var listed := root.list_files(".mns")
+	assert_eq(listed.size(), 1, ".mns is a recognized kind (menu_style), so list_files surfaces it")
+	if listed.size() == 1:
+		assert_eq(String(listed[0]).to_lower(), "menu_style.mns", "the archived stylesheet is listed by name")
 	var host = MenuHostScript.new()
 	host.size = Vector2(800, 600)
 	add_child_autofree(host)

@@ -25,7 +25,7 @@ extends Node
 ## captured viewport texture would be blank.
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const EditorScene := preload("res://modtools/terrain/terrain_editor.tscn")
+const EditorScene := preload("res://modtools/editor/editor_main.tscn")
 
 # Generous settle budget: lets Control layout, the deferred split layout, and the
 # UPDATE_ALWAYS sub-viewports redraw at their new size before we grab the frame.

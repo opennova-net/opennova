@@ -1,7 +1,7 @@
 extends GutTest
 
 const TerrainEditorScript = preload("res://modtools/terrain/terrain_editor.gd")
-const TerrainEditorScene = preload("res://modtools/terrain/terrain_editor.tscn")
+const EditorMainScene = preload("res://modtools/editor/editor_main.tscn")
 const EditorWorkstationScene = preload("res://modtools/editor/editor_workstation.tscn")
 const EditorWorkstationScript = preload("res://modtools/editor/editor_workstation.gd")
 const TerrainWorkspaceScript = preload("res://modtools/editor/terrain_workspace.gd")
@@ -220,35 +220,40 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 	var top_bar := workstation.get_node_or_null("%TopBar") as PanelContainer
 	assert_not_null(top_bar, "Shell should expose a top bar for global workspace controls.")
 	var workspace_rail: BoxContainer = workstation.get_node("%WorkspaceRail")
-	assert_true(top_bar.is_ancestor_of(workspace_rail), "Workspace navigation should live in the top bar.")
-	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Terrain should remain the default workspace.")
+	assert_false(top_bar.is_ancestor_of(workspace_rail), "The workspace dock bar moved out of the top bar into the body.")
+	var workspace_bar := workstation.get_node_or_null("%WorkspaceBar") as PanelContainer
+	assert_not_null(workspace_bar, "Shell should expose the vertical workspace dock bar.")
+	if workspace_bar != null:
+		assert_true(workspace_bar.is_ancestor_of(workspace_rail), "The workspace rail lives inside the dock bar.")
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.MISSION, "Mission should be the default workspace.")
 
 	var row_texts := []
 	for child in workspace_rail.get_children():
 		if child is Button:
-			row_texts.append((child as Button).text)
-	assert_eq(row_texts, ["Terrain", "Object", "Mission", "Fonts", "Credits", "Strings", "Menus", "Music", "Sound", "Environment"],
-		"The nav should list every workspace as a full-width row, with Environment promoted from the sun button.")
+			var bar_label := child.find_child("BarButtonLabel", true, false) as Label
+			row_texts.append(bar_label.text if bar_label != null else "")
+	assert_eq(row_texts, ["Mission", "Terrain", "Object", "Fonts", "Credits", "Strings", "Menus", "Menu Styles", "Music", "Sound"],
+		"The bar should list every viewport workspace; Environment stays on its top-bar toggle, not the bar.")
 
-	assert_false(_has_label_text(workspace_rail, "World"), "Top-bar workspace groups should use separators, not inline category words.")
-	assert_false(_has_label_text(workspace_rail, "Interface"), "Top-bar workspace groups should not read like a sentence.")
-	assert_gte(_direct_child_count_of_type(workspace_rail, "VSeparator"), 2,
-		"Top-bar workspace groups should keep visual separation between World, Interface, Audio, and Atmosphere.")
+	assert_false(_has_label_text(workspace_rail, "World"), "Workspace groups should use separators, not inline category words.")
+	assert_false(_has_label_text(workspace_rail, "Interface"), "Workspace groups should not read like a sentence.")
+	assert_gte(_direct_child_count_of_type(workspace_rail, "HSeparator"), 2,
+		"The vertical bar should keep visual separation between World, Interface, Audio, and Atmosphere.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.CREDITS)
 	await get_tree().process_frame
 
 	var actions_host: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
 	assert_true(top_bar.is_ancestor_of(actions_host), "Workspace document actions should live in the top bar.")
-	assert_null(top_bar.find_child("TopSpacer", true, false),
-		"Top bar should let the workspace scroller absorb empty width instead of inserting a gap between actions and global buttons.")
+	assert_not_null(top_bar.find_child("ContextSpacer", true, false),
+		"Top bar uses an expanding spacer to push the document actions and global buttons to the right.")
 	var global_buttons := workstation.get_node("%GlobalButtonRail") as BoxContainer
 	assert_true(actions_host.get_index() < global_buttons.get_index(),
 		"Document actions should sit immediately before the global icon buttons on the right.")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.CREDITS,
 		"Credits should become the active workspace.")
-	assert_eq(workstation.get_node("%ProjectLabel").text, "untitled",
-		"Fresh Credits workspace should own the shell title while active.")
+	assert_eq(workstation.get_node("%ContextDocLabel").text, "untitled",
+		"Fresh Credits workspace should show its untitled document in the context header.")
 	assert_true(_workspace_action_texts(actions_host).has("Open Credits..."),
 		"Credits should expose an open action.")
 	var credits_overflow := _overflow_popup(actions_host)
@@ -263,8 +268,10 @@ func test_every_workspace_rail_button_has_an_icon() -> void:
 	var checked := 0
 	for child in workspace_rail.get_children():
 		if child is Button:
-			assert_not_null((child as Button).icon,
-				"rail button '%s' should carry its workspace icon" % (child as Button).text)
+			var icon_rect := child.find_child("BarButtonIcon", true, false) as TextureRect
+			assert_not_null(icon_rect, "each dock button stacks a TextureRect icon over its label")
+			if icon_rect != null:
+				assert_not_null(icon_rect.texture, "the dock button icon should resolve to a workspace texture")
 			checked += 1
 	assert_eq(checked, 10, "all ten workspace rows checked")
 
@@ -296,62 +303,6 @@ func test_action_and_toggle_buttons_have_icons() -> void:
 	assert_not_null(workstation._browser_toggle_button.icon, "browser toggle carries its icon")
 
 
-func test_workspace_ribbon_exposes_scroll_affordance_when_overflowing() -> void:
-	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	workstation.set_size(Vector2(900, 600))
-	await get_tree().process_frame
-	await get_tree().process_frame
-
-	var scroll := workstation.get_node("%WorkspaceScroll") as ScrollContainer
-	var left := workstation.get_node_or_null("%WorkspaceScrollLeftButton") as Button
-	var right := workstation.get_node_or_null("%WorkspaceScrollRightButton") as Button
-	assert_not_null(left, "Overflowing workspace ribbon should expose a left scroll arrow.")
-	assert_not_null(right, "Overflowing workspace ribbon should expose a right scroll arrow.")
-	if left == null or right == null:
-		return
-
-	assert_true(left.visible, "Overflow arrows should be visible when the workspace ribbon is clipped.")
-	assert_true(right.visible, "Overflow arrows should make hidden workspaces discoverable.")
-	assert_true(left.disabled, "Left arrow should start disabled at the beginning of the ribbon.")
-	assert_false(right.disabled, "Right arrow should be enabled when there are hidden workspaces to the right.")
-
-	var before := scroll.scroll_horizontal
-	right.pressed.emit()
-	await get_tree().process_frame
-
-	assert_gt(scroll.scroll_horizontal, before, "Right arrow should advance the workspace ribbon scroll position.")
-	assert_false(left.disabled, "Left arrow should enable after scrolling right.")
-
-
-func test_workspace_ribbon_hides_scroll_affordance_when_everything_fits() -> void:
-	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	workstation.set_size(Vector2(2200, 900))
-	await get_tree().process_frame
-	await get_tree().process_frame
-
-	var left := workstation.get_node_or_null("%WorkspaceScrollLeftButton") as Button
-	var right := workstation.get_node_or_null("%WorkspaceScrollRightButton") as Button
-	assert_not_null(left, "Workspace ribbon should include a left scroll arrow node.")
-	assert_not_null(right, "Workspace ribbon should include a right scroll arrow node.")
-	if left == null or right == null:
-		return
-
-	assert_false(left.visible, "Left overflow arrow should hide when all workspaces fit.")
-	assert_false(right.visible, "Right overflow arrow should hide when all workspaces fit.")
-
-
-func test_workspace_ribbon_does_not_force_top_bar_to_clip_at_mid_width() -> void:
-	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	workstation.set_size(Vector2(1366, 768))
-	await get_tree().process_frame
-	await get_tree().process_frame
-
-	var settings := workstation.get_node("%SettingsToggleButton") as Button
-	var shell_right: float = workstation.get_global_rect().end.x
-	assert_lte(settings.get_global_rect().end.x, shell_right + 0.5,
-		"The top bar should keep global controls visible by letting the workspace ribbon scroll first.")
-
-
 func test_mission_workspace_exposes_document_actions_and_inspector() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
@@ -362,7 +313,8 @@ func test_mission_workspace_exposes_document_actions_and_inspector() -> void:
 	var actions_host: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
 	var inspector_host: Control = workstation.get_node("%InspectorHost")
 	var asset_dock: Control = workstation.get_node("%AssetDock")
-	assert_eq(workstation.get_node("%ProjectLabel").text, "Mission", "An unloaded Mission workspace owns the shell title while active.")
+	assert_eq(workstation.get_node("%ContextWorkspaceLabel").text, "Mission", "An unloaded Mission workspace names itself in the context header.")
+	assert_eq(workstation.get_node("%ContextDocLabel").text, "", "With no mission open the doc half stays empty (no 'Mission / Mission').")
 	assert_true(asset_dock.visible, "Mission authoring hosts its per-selection editor + Mission form in the shared right dock.")
 	assert_null(workstation.get_node_or_null("%FileMenu"), "Global File menu should be removed.")
 	assert_null(workstation.get_node_or_null("%SaveButton"), "Global Save button should be removed.")
@@ -524,6 +476,7 @@ func test_workspace_open_uses_resource_browser_without_filesystem_escape() -> vo
 	var editor = autofree(TerrainEditorScript.new())
 	var root := _make_resource_fixture("resource_browser_terrain")
 	workstation.set_editor(editor)
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should use the configured resource directory.")
 
 	var open_button := _find_button_by_text(workstation.get_node("%WorkspaceActionsHost"), "Open Terrain...")
@@ -644,7 +597,7 @@ func test_workstation_opens_font_workspace_by_credits_font_name() -> void:
 
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.FONTS,
 		"Opening a credits font should switch to the Fonts workspace.")
-	assert_eq(workstation.get_node("%ProjectLabel").text, "Serpen24",
+	assert_eq(workstation.get_node("%ContextDocLabel").text, "Serpen24",
 		"The Fonts workspace title should show the opened font.")
 
 
@@ -663,7 +616,7 @@ func test_workstation_opens_menu_workspace_by_action_target() -> void:
 
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.MNU,
 		"Opening a cross-menu action should switch to the Menus workspace.")
-	assert_eq(workstation.get_node("%ProjectLabel").text, "jo_sp",
+	assert_eq(workstation.get_node("%ContextDocLabel").text, "jo_sp",
 		"The Menus workspace title should show the opened menu.")
 	var ws = workstation._workspaces.get(EditorWorkstationScript.Workspace.MNU)
 	assert_not_null(ws, "The Menus workspace instance exists.")
@@ -678,6 +631,7 @@ func test_workspace_open_without_resource_dir_shows_empty_browser() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
 	workstation.set_editor(editor)
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	assert_eq(workstation._set_resource_root_dir("", false, false), OK, "Test should clear the resource directory without persisting it.")
 
 	var open_button := _find_button_by_text(workstation.get_node("%WorkspaceActionsHost"), "Open Terrain...")
@@ -719,8 +673,8 @@ func test_environment_sun_popup_exposes_env_document_controls() -> void:
 	var inspector := inspector_host.get_child(inspector_host.get_child_count() - 1)
 	assert_true(popup.visible, "The sun button should show the environment popup.")
 	assert_true(sun_button.button_pressed, "The sun button should stay pressed while the popup is visible.")
-	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Opening environment should not switch the active workspace.")
-	assert_eq(workstation.get_node("%ProjectLabel").text, "Terrain", "Terrain should keep shell title ownership when no terrain editor is set.")
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.MISSION, "Opening environment should not switch the active workspace.")
+	assert_eq(workstation.get_node("%ContextWorkspaceLabel").text, "Mission", "Mission keeps its context-header name when no mission is loaded.")
 	assert_eq(workstation.get_node("%EnvironmentPopupTitle").text, "untitled", "Environment should own the popup title.")
 	assert_eq(_workspace_action_texts(actions_host), ["New Environment", "Open Environment...", "Save Environment", "Save Environment As..."], "Environment popup should expose document actions without a separate export.")
 	assert_not_null(save_button, "Environment popup should expose Save Environment.")
@@ -741,7 +695,7 @@ func test_environment_sun_popup_exposes_env_document_controls() -> void:
 	assert_false(save_button.disabled, "Dirty environments with a path should enable Save.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.ENVIRONMENT)
-	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "The old Environment workspace id should open the popup instead of changing workspaces.")
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.MISSION, "The old Environment workspace id should open the popup instead of changing workspaces.")
 
 
 func test_environment_open_uses_resource_browser() -> void:
@@ -824,7 +778,7 @@ func test_resource_root_inside_user_data_is_rejected_on_load() -> void:
 
 
 func test_camera_button_exposes_global_viewport_settings() -> void:
-	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
 	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
 
@@ -846,7 +800,7 @@ func test_camera_button_exposes_global_viewport_settings() -> void:
 	var far_plane_spin: SpinBox = settings_panel.get_node("%FarPlaneSpin")
 	assert_true(popup.visible, "The camera button should show the camera popup.")
 	assert_true(camera_button.button_pressed, "The camera button should stay pressed while the popup is visible.")
-	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.TERRAIN, "Opening camera settings should not switch workspaces.")
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.MISSION, "Opening camera settings should not switch workspaces.")
 
 	fly_speed_spin.value_changed.emit(72.0)
 	near_plane_spin.value_changed.emit(0.25)
@@ -865,7 +819,7 @@ func test_camera_button_exposes_global_viewport_settings() -> void:
 
 
 func test_camera_button_targets_object_preview_camera_when_object_is_active() -> void:
-	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
 	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
 	var host: Control = workstation.get_node("%ViewportHost")
@@ -900,7 +854,7 @@ func test_camera_button_targets_object_preview_camera_when_object_is_active() ->
 
 
 func test_object_workspace_uses_only_global_environment_viewport_button() -> void:
-	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
 	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
 	var host: Control = workstation.get_node("%ViewportHost")
@@ -921,7 +875,7 @@ func test_object_workspace_uses_only_global_environment_viewport_button() -> voi
 
 
 func test_viewport_popups_are_mutually_exclusive_and_escape_closes_active_popup() -> void:
-	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
 	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
 	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
@@ -957,6 +911,7 @@ func test_terrain_workspace_exposes_project_save_and_export_actions() -> void:
 	editor.is_dirty = true
 
 	workstation.set_editor(editor)
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 
 	var actions_host: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
 	var save_button := _find_button_by_text(actions_host, "Save Project")
@@ -982,7 +937,7 @@ func test_switching_workspaces_preserves_terrain_dirty_state() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 
 	assert_true(editor.is_dirty, "Switching placeholder domains should not reset terrain document state.")
-	assert_eq(workstation.get_node("%ProjectLabel").text, "untitled*", "Returning to Terrain should restore the terrain project title and dirty marker.")
+	assert_eq(workstation.get_node("%ContextDocLabel").text, "untitled*", "Returning to Terrain should restore the terrain project title and dirty marker.")
 	assert_true(workstation.get_node("%AssetDock").visible, "Terrain properties should return when Terrain is active.")
 
 
@@ -990,6 +945,7 @@ func test_workstation_mounts_workspace_specific_right_docks() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
 	workstation.set_editor(editor)
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 
 	var dock: Control = workstation.get_node("%AssetDock")
 	assert_true(dock.visible, "Terrain should show the shared right dock host.")
@@ -1039,12 +995,20 @@ func test_workstation_mounts_workspace_specific_right_docks() -> void:
 
 
 func test_workspace_switching_mounts_terrain_and_mission_viewports() -> void:
-	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
 	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
 	var host: Control = workstation.get_node("%ViewportHost")
 
-	assert_eq(host.get_child_count(), 1, "Terrain should own the viewport host by default.")
+	assert_eq(host.get_child_count(), 1, "Mission should own the viewport host by default.")
+	assert_eq(host.get_child(0).name, "MissionViewport", "Mission should mount its read-only terrain viewport by default.")
+	assert_true(editor.is_viewport_active(), "Mission should keep the loaded terrain visible.")
+	assert_false(editor.is_viewport_edit_input_active(), "Mission should disable terrain brush and shortcut input.")
+
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
+	await get_tree().process_frame
+
+	assert_eq(host.get_child_count(), 1, "Terrain should replace Mission as the only viewport owner.")
 	assert_eq(host.get_child(0).name, "TerrainViewport", "Terrain should mount through TerrainViewport.")
 	assert_true(editor.is_viewport_active(), "Terrain editor rendering should be active while Terrain owns the viewport.")
 	assert_true(editor.is_viewport_edit_input_active(), "Terrain should enable terrain edit input.")
@@ -1052,18 +1016,10 @@ func test_workspace_switching_mounts_terrain_and_mission_viewports() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
 	await get_tree().process_frame
 
-	assert_eq(host.get_child_count(), 1, "Mission should replace Terrain as the only viewport owner.")
-	assert_eq(host.get_child(0).name, "MissionViewport", "Mission should mount its read-only terrain viewport.")
-	assert_true(editor.is_viewport_active(), "Mission should keep the loaded terrain visible.")
-	assert_false(editor.is_viewport_edit_input_active(), "Mission should disable terrain brush and shortcut input.")
-
-	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
-	await get_tree().process_frame
-
-	assert_eq(host.get_child_count(), 1, "Returning to Terrain should still leave one viewport owner.")
-	assert_eq(host.get_child(0).name, "TerrainViewport", "TerrainViewport should remount when Terrain becomes active again.")
-	assert_true(editor.is_viewport_active(), "Terrain editor rendering should reactivate when Terrain owns the viewport.")
-	assert_true(editor.is_viewport_edit_input_active(), "Terrain edit input should reactivate when Terrain owns the viewport.")
+	assert_eq(host.get_child_count(), 1, "Returning to Mission should still leave one viewport owner.")
+	assert_eq(host.get_child(0).name, "MissionViewport", "MissionViewport should remount when Mission becomes active again.")
+	assert_true(editor.is_viewport_active(), "Mission should keep the terrain visible when it owns the viewport again.")
+	assert_false(editor.is_viewport_edit_input_active(), "Terrain edit input should stay off while Mission owns the viewport.")
 
 
 func test_workstation_tracks_mode_from_editor_tool() -> void:
@@ -1075,6 +1031,7 @@ func test_workstation_tracks_mode_from_editor_tool() -> void:
 	editor.brush_hardness = 0.3
 
 	workstation.set_editor(editor)
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	workstation.sync_from_editor_state()
 
 	assert_eq(workstation._current_workflow_id, TerrainWorkspaceScript.Workflow.SCATTER, "Workstation should switch to Foliage mode when the editor tool is foliage paint.")
@@ -1253,24 +1210,26 @@ func test_sculpt_inspector_syncs_from_editor_ui_state_signal() -> void:
 func test_workstation_uses_clip_text_for_long_labels() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
-	var project_label: Label = workstation.get_node("%ProjectLabel")
+	var doc_label: Label = workstation.get_node("%ContextDocLabel")
 	var status_context_label: Label = workstation.get_node("%StatusContextLabel")
 	var status_camera_label: Label = workstation.get_node("%StatusCameraLabel")
 
-	assert_true(project_label.clip_text, "Project label should clip rather than forcing the top bar wider.")
+	assert_true(doc_label.clip_text, "Context document label should clip rather than forcing the top bar wider.")
 	assert_true(status_context_label.clip_text, "Status context should clip instead of forcing horizontal overflow.")
 	assert_true(status_camera_label.clip_text, "Status camera text should clip instead of forcing horizontal overflow.")
 
 
-func test_project_label_sizes_to_title_instead_of_fixed_column() -> void:
+func test_context_header_names_workspace_and_leaves_doc_blank_when_empty() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	var project_label: Label = workstation.get_node("%ProjectLabel")
-	assert_eq(project_label.text, "Terrain", "The default workspace owns the shell title.")
-	assert_eq(project_label.custom_minimum_size.x, 120.0,
-		"A short title should rest at the floor width instead of reserving a fixed 180px column.")
+	var ws_label: Label = workstation.get_node("%ContextWorkspaceLabel")
+	var doc_label: Label = workstation.get_node("%ContextDocLabel")
+	assert_eq(ws_label.text, "Mission", "The default workspace names itself in the context header.")
+	assert_eq(doc_label.text, "", "With nothing open the document half stays blank.")
+	assert_eq(doc_label.custom_minimum_size.x, 0.0,
+		"An empty document label reserves no width instead of a fixed column.")
 
 
 func test_pressing_layout_mode_restores_edit_sectors_tool() -> void:
@@ -1279,6 +1238,7 @@ func test_pressing_layout_mode_restores_edit_sectors_tool() -> void:
 	editor.current_tool = TerrainEditorScript.Tool.PAINT_DETAIL
 
 	workstation.set_editor(editor)
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	workstation._on_workflow_pressed(TerrainWorkspaceScript.Workflow.LAYOUT)
 
 	assert_eq(editor.current_tool, TerrainEditorScript.Tool.EDIT_SECTORS, "Selecting Layout should restore the sector editing tool.")
@@ -1543,6 +1503,7 @@ func test_resource_browser_uses_theme_not_handcoded_styleboxes() -> void:
 	var editor = autofree(TerrainEditorScript.new())
 	var root := _make_resource_fixture("resource_browser_theme")
 	workstation.set_editor(editor)
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index the configured resource directory.")
 
 	var open_button := _find_button_by_text(workstation.get_node("%WorkspaceActionsHost"), "Open Terrain...")
@@ -1597,7 +1558,7 @@ func test_file_and_dir_dialogs_share_one_native_dialog() -> void:
 func test_body_row_uses_nested_hsplit_containers_for_resizable_docks() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
-	var body: Node = workstation.get_node_or_null("WorkstationLayout/BodyRow")
+	var body: Node = workstation.get_node_or_null("%BodyRow")
 	assert_not_null(body, "Shell should keep a BodyRow row.")
 	assert_true(body is HSplitContainer, "BodyRow should be an HSplitContainer so the left dock can be dragged.")
 	var center_right: Node = workstation.get_node_or_null("%CenterRightSplit")
@@ -2097,7 +2058,7 @@ func test_camera_panel_detaches_and_force_redocks_keeping_the_preference() -> vo
 	# The camera panel shares the host machinery but has its own shell guards:
 	# detach needs a live camera, and losing the camera force-redocks WITHOUT
 	# erasing the user's floating preference (transient editor rebinds).
-	var editor: TerrainEditor = add_child_autofree(TerrainEditorScene.instantiate())
+	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
 	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
 

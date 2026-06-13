@@ -53,6 +53,26 @@ func shows_tile_gizmo() -> bool:
 	return true
 
 
+# View guides: a flat y=0 reference grid would be buried under (or float
+# through) sculpted heights, so the shell's grid toggle draws thin NEUTRAL
+# sector-boundary lines that follow the surface (u_show_grid); axes are a
+# world-origin gizmo. Deliberately NOT the Layout workflow's sector overlay —
+# that is a colored per-sector diagnostic (tint fill + rainbow edges) owned by
+# the Layout checkbox alone, and the two states never touch.
+func shows_view_guides() -> bool:
+	return true
+
+
+func set_grid_visible(value: bool) -> void:
+	if terrain_editor != null and terrain_editor.has_method("set_grid_guide_visible"):
+		terrain_editor.set_grid_guide_visible(value)
+
+
+func set_axes_visible(value: bool) -> void:
+	if terrain_editor != null and terrain_editor.has_method("set_axes_visible"):
+		terrain_editor.set_axes_visible(value)
+
+
 func get_export_flavors() -> Array:
 	return [
 		{"id": ExportFlavor.BHD, "label": "BHD"},
@@ -179,6 +199,24 @@ func set_asset_dock(dock: Control) -> void:
 	_asset_dock_host.add_child(_asset_dock)
 	if _asset_dock.has_method("set_editor"):
 		_asset_dock.set_editor(terrain_editor)
+	# "Used by" (which missions sit on this terrain) rides the shell's reference
+	# index; headless hosts get no strip. Injected here because the dock is the
+	# one terrain surface built with editor_shell in scope (the workflow
+	# inspectors receive only the terrain editor).
+	if _asset_dock.has_method("set_reference_services") and editor_shell != null \
+			and editor_shell.has_method("get_reference_index") \
+			and editor_shell.has_method("open_in_workspace"):
+		# Capture the shell into a local so the service lambdas don't hold this
+		# RefCounted workspace through a member access.
+		var shell: Object = editor_shell
+		_asset_dock.set_reference_services({
+			"referrers": func(name: String) -> Array:
+				return shell.get_reference_index().referrers_of(name),
+			"is_ready": func() -> bool:
+				return shell.get_reference_index().is_built(),
+			"jump": func(kind: String, path: String) -> void:
+				shell.open_in_workspace(kind, ReferenceStrip.resolve_source_path(shell, path)),
+		})
 
 
 func sync_asset_dock() -> void:

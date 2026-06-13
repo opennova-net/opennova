@@ -113,6 +113,48 @@ literal). OpenNova keeps raw tokens in the document and expands per consumed fie
 build time (colors/fonts/textures/text) - see ADR 0005. Documented gap: host variables
 in non-themed fields need a host var map plumbed into the builder.
 
+## MNS stylesheet format `[orig: sub_552500, ref'd from UIScene_LoadAndParseContent @ 0x63c830]`
+
+The substitution table lives in `menu_style.mns` ("named menu_style.mns for the game
+to find it"), loaded by canonical name when menus initialize. The format's
+authoritative specification is NovaLogic's own 38-line comment header in the shipped
+file (vendored byte-exact at `fixtures/mns/menu_style.mns`); the loader itself is
+unwitnessed in IDA so far - the reimplementation (`mns::Document::parse`,
+`libs/mns/src/mns_document.cpp`) is built from that in-file spec plus
+current-behavior compatibility, with a grill session as the open follow-up.
+
+Spec rules implemented (2026-06-12 pass; the old parser violated the first two):
+`NAME value` pairs, value from the first non-whitespace after the name to the last
+non-whitespace on the line; `//` comments anywhere, including after a value;
+`\` continuations (whitespace before the backslash is part of the value; a comment
+may follow the backslash; a name alone followed by `\` starts its value on the next
+line); `\\` escapes a literal backslash in values; names exclude whitespace and the
+six `% < > # \ /`; nestable `#if 0|1` / `#else` / `#endif`.
+
+The model is lossless (ADR 0009): typed node fields exactly partition the file's
+bytes, so an untouched parse -> serialize is byte-identical and an edited value
+changes only its own line. `Document::flatten()` is the runtime view the existing
+`mns::StyleSheet` API serves (last duplicate wins, evaluated conditionals).
+
+Divergences (each lenient-with-diagnostic where the spec says "error"; the parse
+never fails on shipped data):
+
+- **D-MNS-1 (duplicate names):** the spec calls duplicates an error (debug-build
+  reporting only); the reimpl keeps last-wins flatten behavior and emits a
+  `duplicate-name` error diagnostic the editor surfaces.
+- **D-MNS-2 (unknown `%VAR%`):** the spec calls an unmatched tagged macro a failure;
+  the substitution layer keeps it literal (cross-ref D-MNU-1 / ADR 0005 - the host
+  var list means stylesheet-side strictness would misfire), and the Menus workspace
+  counts unresolved tokens in its status bar instead.
+- **D-MNS-3 (`#if` argument):** only `0`/`1` are valid per spec; any other token is
+  truthy in the reimpl (legacy-parser behavior, pinned) plus a `bad-if-arg`
+  diagnostic.
+- **D-MNS-4 (inactive-region scanning):** inside an evaluated-false region the
+  scanner is line-based and continuations are not honored, while an ACTIVE define's
+  continuation consumes even a `#endif`-looking next line (legacy `read_value`
+  precedence, pinned by `tests/mns/mns_document_test.cpp`). Unwitnessed in the
+  binary; flagged for the grill.
+
 ## Verdict
 
 **matching** (after this grill) on: type factory + unknown-token preservation, the
@@ -160,6 +202,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | Original | OpenNova |
 |---|---|
 | `UIScene_LoadAndParseContent @ 0x63c830` | menu load path: `NovaMnuDocument` + `godot/game/menu_shell.gd` |
+| `sub_552500` (.mns stylesheet load, ref'd from `0x63c830`) | `mns::Document::parse` — `libs/mns/src/mns_document.cpp` (lossless model, ADR 0009; loader unwitnessed, built from the in-file spec — D-MNS-1..4) |
 | `XML_ParseWithBOMDetection @ 0x76a690` | `mnu_xml::parse` + `skip_bom` — `libs/mnu_xml/src/mnu_xml.cpp` |
 | `XML_ParseCharEntity @ 0x769cc0` | `mnu_xml::decode_entity` — `libs/mnu_xml/src/mnu_xml.cpp` (faithful to the engine's non-standard policy: no `&apos;`, decimal-only `&#`, Latin-1 named set) |
 | `NapiXML_ExpandVariablesInText @ 0x63a000` | `MnsStyleSheet::substitute` — `godot/engine/mnu/mns_stylesheet.cpp` (per-field post-parse, not whole-buffer; D-MNU-1 / ADR 0005) |

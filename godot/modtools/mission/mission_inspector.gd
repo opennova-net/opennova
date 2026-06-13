@@ -3167,7 +3167,7 @@ func _rebuild_summary() -> void:
 
 	if mission == null:
 		_add_heading("Mission")
-		_add_body("Open a .bms mission to load its terrain, environment, and placed objects.")
+		_add_body("Open a mission to load its terrain, environment, and placed objects.")
 		return
 
 	_add_heading(_nonempty(mission.get_mission_name(), "Untitled mission"))

@@ -9,12 +9,16 @@ the ADRs under `docs/adr/` (specific decisions).
 The original engine runs, per frame, roughly:
 
 ```
-input  ->  net  ->  Server_TickUpdate / sub_4F81A0  ->  client entity render  ->  audio
-                    (the mission logic tick)             (draw each entity)
+input  ->  net  ->  Game_ProcessMainFrame (62 Hz engine tick)   ->  client entity render  ->  audio
+                    (per-system dividers: WAC / BMS events / AI)    (draw each entity)
 ```
 
-`sub_4F81A0` runs the script/AI logic once per **62 render frames** (the `0x3E` divider);
-the client then renders the entity pool, then audio mixes. OpenNova mirrors this shape.
+The engine tick is `Game_ProcessMainFrame @0x5263f0` (62 Hz; `current_tick @0x24c1968`).
+Dividers are **per system**, inside each system: the WAC VM (`sub_4F81A0 @0x4f81a0`)
+executes once per **62 ticks** (the `0x3E` divider), normal BMS events run a 16-tick gate
+over a quarter cursor, and the AI/entity motor runs every tick — witnessed in
+[bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §1.6. The client then renders
+the entity pool, then audio mixes. OpenNova mirrors this shape.
 
 ## How OpenNova maps onto it
 
@@ -23,7 +27,7 @@ main_game.gd / editor _process
   -> GameWorld.tick(camera)                         host frame (game)
        foliage dispatch                             client render pass
        MissionRuntime.tick()                        == the server tick + entity render:
-         NovaSimulation.advance_frame()               logic tick @ 62-frame divider  [sub_4F81A0]
+         NovaSimulation.advance_frame()               engine tick; per-system dividers  [Game_ProcessMainFrame @0x5263f0]
            World.run_logic_tick()                      WAC -> BMS -> AI over one world
          MissionPresentPass.present()                  draw each entity (transform/PANM/visibility)
          drain effects -> effects_drained             host-presentation side effects
@@ -38,9 +42,12 @@ one runtime, one present pass, one entity index — see [ADR 0006](adr/0006-unif
 
 ## Layers
 
-- **Logic (portable C++)** — `libs/world` `World` + `TickService` (`kFramesPerLogicTick = 0x3E`) +
-  `ISystem`s (WAC VM, BMS events, AI) over one shared registry + var store + `EffectLog`.
-  `World::run_logic_tick` is the faithful port of `sub_4F81A0`. Already consolidated; not re-touched.
+- **Logic (portable C++)** — `libs/world` `World` + `ISystem`s (WAC VM, BMS events, AI) over one
+  shared registry + var store + `EffectLog`. `World::logic_tick` is the 62 Hz engine tick
+  (`Game_ProcessMainFrame @0x5263f0`, `current_tick @0x24c1968`); dividers live inside each system —
+  the WAC VM runs once per 62 ticks (`WacSystem::kTicksPerExecution`, the `0x3E` divider of
+  `sub_4F81A0`), BMS events run a 16-tick gate over a quarter cursor, and the AI motor runs every
+  tick (witnessed in [bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §1.6/§2).
 - **Binding (C++ GDExtension)** — `NovaSimulation` wraps the World, exposes transport
   (`step`/`advance_frame`/`restart`), `drain_effects`, and **one batched present snapshot**
   (`get_present_snapshot()` → a flat `PackedFloat32Array`, `PF_*` field layout) so the per-tick
@@ -81,7 +88,9 @@ one runtime, one present pass, one entity index — see [ADR 0006](adr/0006-unif
   `off_8135F0` slot table, two-channel upper/lower-body blend, aim/lean overlays, fixed-tick playhead.
 - Present transform is **yaw-only**; pitch/roll are reserved fields in the snapshot (`PF_PITCH_DEG`/
   `PF_ROLL_DEG`, emitted as 0) gated behind a basis-parity check.
-- No inter-tick interpolation for the game's 62-frame cadence (entities step once per logic tick).
+- No inter-tick interpolation (entities step once per engine tick); the game host currently runs
+  one tick per host frame — the fixed-62 Hz accumulator is a tracked seam
+  ([bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §2, slice D).
 - Audio: reverb preset table (`Audio_LoadReverbDefs @0x766d80`) and MUS music
   (`AudioVM_OpenMusicContext @0x6722a0`) are seams; dialog-id resolution stays host-side (it is bound
   to `NovaDbfData`).
