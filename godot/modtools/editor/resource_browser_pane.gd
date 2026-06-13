@@ -32,6 +32,7 @@ const _KIND_FILTERS := [
 	["Credits", "credits"],
 	["Strings", "strings"],
 	["Menus", "menu"],
+	["Menu styles", "menu_style"],
 	["Music", "music"],
 	["Sounds", "sound"],
 ]

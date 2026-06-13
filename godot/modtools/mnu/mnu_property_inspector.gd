@@ -23,6 +23,8 @@ signal edit_requested(edit: Dictionary)
 signal string_jump_requested(key: String)
 signal font_jump_requested(font: String)
 signal menu_jump_requested(file: String, screen: String)
+# Edit a %VAR% the selected widget references, in the Menu Styles workspace.
+signal style_jump_requested(variable: String)
 # Audition a widget's sound: the workspace resolves (trigger -> set in the menu .lwf
 # -> member -> .wav) and plays it, reusing the Sound workspace's preview player.
 signal sound_preview_requested(trigger: String, file: String)
@@ -30,6 +32,7 @@ signal sound_preview_requested(trigger: String, file: String)
 const MnuUiHelpersScript = preload("res://modtools/mnu/mnu_ui_helpers.gd")
 const MnuListEditorScript = preload("res://modtools/mnu/mnu_list_editor.gd")
 const MnuStringPickerScript = preload("res://modtools/mnu/mnu_string_picker.gd")
+const MnsVariableTableScript = preload("res://modtools/mnu/mns_variable_table.gd")
 
 # Position spins span negative coords (a widget can sit off the authoring board);
 # sizes never do.
@@ -58,6 +61,10 @@ var _picker_on_pick: Callable = Callable()
 # Sound-set names from the open menu's .lwf profile (set by the workspace). When
 # present, the per-sound trigger field becomes a dropdown over the real sets.
 var _sound_sets: PackedStringArray = PackedStringArray()
+# The menu stylesheet the editor resolved (set by the workspace; null when the
+# root carries none). Color/texture/font rows resolve %VAR% swatches through it
+# and offer a dropdown over its type-matching variables.
+var _stylesheet: MnsStyleSheet
 
 
 func _ready() -> void:
@@ -91,6 +98,12 @@ func set_sound_sets(sets: PackedStringArray) -> void:
 	_sound_sets = sets
 	if is_node_ready() and _selected_id >= 0:
 		_rebuild()
+
+
+# The resolved menu stylesheet (or null). No rebuild here: the workspace always
+# follows with show_widget/show_selection, which rebuilds with it in hand.
+func set_stylesheet(sheet: MnsStyleSheet) -> void:
+	_stylesheet = sheet
 
 
 # Show a summary for a multi-selection (>1 widget). Zero or one id delegates to the
@@ -217,13 +230,20 @@ func _build_widget_rows(id: int) -> void:
 	id_check.toggled.connect(func(pressed: bool) -> void:
 		_emit({"target": "widget", "id": id, "prop": "string_type", "value": "id" if pressed else ""}))
 
-	var font_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Font", _document.get_widget_font(id))
+	var font_raw := _document.get_widget_font(id)
+	var font_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Font", font_raw)
 	_wire_text(font_edit, {"target": "widget", "id": id, "prop": "font"})
-	if not _document.get_widget_font(id).is_empty():
+	_append_style_var_menu(font_edit, "font", {"target": "widget", "id": id, "prop": "font"})
+	_append_style_jump(font_edit, font_raw)
+	if not font_raw.is_empty():
 		var font_jump := Button.new()
 		font_jump.text = "Open in Fonts"
 		font_jump.tooltip_text = "Open this font in the Fonts workspace"
-		font_jump.pressed.connect(func() -> void: font_jump_requested.emit(font_edit.text))
+		# A %VAR% font resolves through the stylesheet before the jump (the
+		# token itself names no file); the basename strips a .fnt the menus
+		# author with, so the Fonts workspace's name resolution lands.
+		font_jump.pressed.connect(func() -> void:
+			font_jump_requested.emit(_resolve_style_token(font_edit.text).get_basename()))
 		_box.add_child(font_jump)
 
 	# Type-specific scalar template fields (M9). Authoring of the richer nested
@@ -356,10 +376,15 @@ func _build_color_section(id: int) -> void:
 		var pair = MnuUiHelpersScript.add_color_edit_row(_box, String(slot[0]), raw)
 		var swatch: ColorRect = pair[0]
 		var edit: LineEdit = pair[1]
+		# The stylesheet resolves %VAR% values, so a themed color previews as
+		# its real color instead of a transparent "unresolved" swatch.
+		MnuUiHelpersScript.refresh_swatch(swatch, raw, _stylesheet)
 		edit.text_changed.connect(func(text: String) -> void:
 			if is_instance_valid(swatch):
-				MnuUiHelpersScript.refresh_swatch(swatch, text))
+				MnuUiHelpersScript.refresh_swatch(swatch, text, _stylesheet))
 		_wire_text(edit, {"target": "widget", "id": id, "prop": "color", "slot": slot_index})
+		_append_style_var_menu(edit, "color", {"target": "widget", "id": id, "prop": "color", "slot": slot_index}, swatch)
+		_append_style_jump(edit, raw)
 	_build_add_slot(id, "Add color", empty, "color", "FFFFFF")
 
 
@@ -380,6 +405,8 @@ func _build_texture_section(id: int) -> void:
 			continue
 		var edit := MnuUiHelpersScript.add_text_edit_row(_box, String(slot[0]), raw)
 		_wire_text(edit, {"target": "widget", "id": id, "prop": "texture", "slot": slot_index})
+		_append_style_var_menu(edit, "image", {"target": "widget", "id": id, "prop": "texture", "slot": slot_index})
+		_append_style_jump(edit, raw)
 	# A new texture seeds a visible placeholder filename the author then repoints at
 	# a real .tga (textures have no neutral default the way a color has white).
 	_build_add_slot(id, "Add texture", empty, "texture", "texture.tga")
@@ -815,6 +842,76 @@ func _build_table_section(id: int) -> void:
 # fires while the field is being rebuilt or torn down (no longer in the tree, or
 # already freed) is skipped: the captured control is mid-teardown and the row
 # already reflects the document.
+# --- Stylesheet awareness ---------------------------------------------------
+
+# Stylesheet variables whose value parses as `value_type` ("color"/"font"/
+# "image"/"text"), as {name, value} rows for the "%" dropdown.
+func _style_vars_of_type(value_type: String) -> Array:
+	if _stylesheet == null:
+		return []
+	var out: Array = []
+	for entry_value in _stylesheet.get_entries():
+		var entry := entry_value as Dictionary
+		var value := String(entry.get("value", ""))
+		if MnsVariableTableScript.infer_type(value) == value_type:
+			out.append({"name": String(entry.get("name", "")), "value": value})
+	return out
+
+
+# The variable name when `raw` is a whole-field %NAME% token, else "".
+func _style_token_name(raw: String) -> String:
+	var token := raw.strip_edges()
+	if token.length() < 3 or not token.begins_with("%") or not token.ends_with("%"):
+		return ""
+	return token.substr(1, token.length() - 2)
+
+
+# A %VAR% resolves through the stylesheet (when loaded); literals pass through.
+func _resolve_style_token(raw: String) -> String:
+	if _stylesheet != null and not _style_token_name(raw).is_empty():
+		return String(_stylesheet.substitute(raw.strip_edges()))
+	return raw
+
+
+# Append the "%" variable dropdown to `edit`'s row: picking a variable writes
+# the %NAME% token (preserved on save - the document keeps raw tokens, ADR
+# 0005) and commits through the normal edit path. No stylesheet or no
+# type-matching variables -> no affordance.
+func _append_style_var_menu(edit: LineEdit, value_type: String, base: Dictionary, swatch: ColorRect = null) -> void:
+	var row := edit.get_parent() as HBoxContainer
+	if row == null:
+		return
+	MnuUiHelpersScript.add_var_menu_button(row, _style_vars_of_type(value_type), func(name: String) -> void:
+		if not is_instance_valid(edit) or not edit.is_inside_tree():
+			return
+		var token := "%" + name + "%"
+		edit.text = token
+		edit.tooltip_text = token
+		# Programmatic .text writes do not emit text_changed; refresh the
+		# swatch by hand so the picked color previews immediately.
+		if swatch != null and is_instance_valid(swatch):
+			MnuUiHelpersScript.refresh_swatch(swatch, token, _stylesheet)
+		var e := base.duplicate()
+		e["value"] = token
+		_emit(e))
+
+
+# When the current value IS a %VAR% token, offer the jump into Menu Styles.
+func _append_style_jump(edit: LineEdit, raw: String) -> void:
+	var name := _style_token_name(raw)
+	if name.is_empty():
+		return
+	var row := edit.get_parent() as HBoxContainer
+	if row == null:
+		return
+	var jump := Button.new()
+	jump.text = "Edit style"
+	jump.tooltip_text = "Edit %s in the Menu Styles workspace" % name
+	jump.pressed.connect(func() -> void:
+		style_jump_requested.emit(name))
+	row.add_child(jump)
+
+
 func _wire_text(edit: LineEdit, base: Dictionary) -> void:
 	var commit := func() -> void:
 		if not is_instance_valid(edit) or not edit.is_inside_tree():
