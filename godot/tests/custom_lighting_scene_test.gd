@@ -2,7 +2,7 @@ extends GutTest
 
 const SCENE_PATHS := [
 	"res://game/main_game.tscn",
-	"res://modtools/terrain/terrain_editor.tscn",
+	"res://modtools/editor/editor_main.tscn",
 ]
 
 

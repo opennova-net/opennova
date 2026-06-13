@@ -245,6 +245,8 @@ func _kind_label() -> String:
 			return "credits"
 		"menu":
 			return "menu"
+		"menu_style":
+			return "menu style"
 		"object", "object_project", "object_model", "object_scene":
 			return "object"
 		"music", "sbf", "music_script":

@@ -173,8 +173,8 @@ func test_inspector_font_jump_emits_font() -> void:
 	watch_signals(inspector)
 	btn.pressed.emit()
 	assert_signal_emitted(inspector, "font_jump_requested", "Pressing jumps to Fonts.")
-	assert_eq(get_signal_parameters(inspector, "font_jump_requested", 0)[0], "Gunpl22b.fnt",
-		"The jump carries the widget's font.")
+	assert_eq(get_signal_parameters(inspector, "font_jump_requested", 0)[0], "Gunpl22b",
+		"The jump carries the font basename — the .fnt is stripped (intentional, #156) so the Fonts workspace name resolution lands.")
 
 
 # --- Sounds section ------------------------------------------------------------

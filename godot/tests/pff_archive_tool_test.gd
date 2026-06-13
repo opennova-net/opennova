@@ -91,6 +91,28 @@ func test_extract_all_covers_all_open_archives() -> void:
 	assert_eq(FileAccess.get_file_as_string(out.path_join("dup.txt")), "BBB", "non-active archive covered + last-write-wins")
 
 
+func test_extraction_notifies_shell_with_destination() -> void:
+	var t := _new_tool()
+	var root := _pff_dir()
+	var path := root.path_join("notify.pff")
+	_write_pff(path, [{"name": "a.txt", "bytes": "AAA"}])
+	t._on_archives_picked(PackedStringArray([path]))
+	t._on_extract_all_pressed()
+	var out := root.path_join("out")
+	DirAccess.make_dir_recursive_absolute(out)
+	(_cap["open_dir"] as Callable).call(out)
+	while t._busy:
+		await get_tree().process_frame
+	assert_eq(String(_cap.get("extracted_dir", "")), out, "Shell is told where files landed.")
+
+	# A run that writes nothing (bogus selected name) must not notify.
+	_cap.erase("extracted_dir")
+	t._do_extract(PackedStringArray(["missing.txt"]), out)
+	while t._busy:
+		await get_tree().process_frame
+	assert_false(_cap.has("extracted_dir"), "No notification when nothing was written.")
+
+
 func test_extract_reports_raw_fallback() -> void:
 	var t := _new_tool()
 	var root := _pff_dir()
@@ -118,7 +140,7 @@ func _new_tool() -> EditorPffTool:
 	var host := Control.new()
 	add_child_autofree(host)
 	var t := EditorPffTool.new()
-	t.setup(host, _stub_open_files, _stub_open_dir, _stub_show_status)
+	t.setup(host, _stub_open_files, _stub_open_dir, _stub_show_status, _stub_on_extracted)
 	t._ensure_dialog()
 	return t
 
@@ -143,6 +165,10 @@ func _stub_open_dir(_title, on_pick, _dir) -> void:
 
 func _stub_show_status(_text) -> void:
 	pass
+
+
+func _stub_on_extracted(dir: String) -> void:
+	_cap["extracted_dir"] = dir
 
 
 # ---------------------------------------------------------------------------

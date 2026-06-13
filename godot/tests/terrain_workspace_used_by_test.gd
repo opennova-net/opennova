@@ -8,7 +8,7 @@ extends GutTest
 # sculpted heights). Pins the lazy-scan contract (no query until the explicit
 # ask), the key spellings, the mission jump, and the shell-less fallback.
 
-const TerrainEditorScene = preload("res://modtools/terrain/terrain_editor.tscn")
+const EditorMainScene = preload("res://modtools/editor/editor_main.tscn")
 const TerrainWorkspaceScript = preload("res://modtools/editor/terrain_workspace.gd")
 
 
@@ -53,7 +53,7 @@ func test_asset_dock_offers_used_by_without_triggering_index_build() -> void:
 	ref_file.store_string("existence is what resolve_file probes")
 	ref_file.close()
 
-	var editor = add_child_autofree(TerrainEditorScene.instantiate())
+	var editor = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
 	assert_eq(editor.open_trn(_fixture_trn()), OK, "the dvxi5 fixture opens")
 
@@ -106,7 +106,7 @@ func test_asset_dock_offers_used_by_without_triggering_index_build() -> void:
 
 
 func test_asset_dock_without_shell_mounts_no_strip() -> void:
-	var editor = add_child_autofree(TerrainEditorScene.instantiate())
+	var editor = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
 
 	var workspace = autofree(TerrainWorkspaceScript.new(editor))
@@ -124,7 +124,7 @@ func test_asset_dock_without_shell_mounts_no_strip() -> void:
 
 
 func test_view_guides_drive_grid_guide_and_axes() -> void:
-	var editor = add_child_autofree(TerrainEditorScene.instantiate())
+	var editor = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
 
 	var workspace = autofree(TerrainWorkspaceScript.new(editor))

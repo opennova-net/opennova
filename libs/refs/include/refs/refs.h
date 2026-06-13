@@ -32,7 +32,8 @@ struct Reference {
     std::string target_name;  // referenced asset name as written in the source
     std::string target_kind;  // "texture" | "object_model" | "anim_def" | "sound_profile" | "font" |
                               // "image" | "menu" | "sound" (.lwf bank file) | "strings" (table file) |
-                              // "string_id" (key INSIDE a table - no file semantics) | "datasource"
+                              // "string_id" (key INSIDE a table - no file semantics) | "datasource" |
+                              // "style_var" (menu_style.mns variable - no file semantics)
     std::string site;         // where in the source ("sky_map1", "entry[3].font", "item 451 graphic")
 };
 

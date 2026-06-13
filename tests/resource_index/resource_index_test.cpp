@@ -108,6 +108,7 @@ int main() {
 	write_file(root / "finale.kda", "kda");
 	write_file(root / "Serpen24.fnt", "fnt");
 	write_file(root / "main.mnu", "mnu");
+	write_file(root / "menu_style.mns", "DEF_TEXT_FG FFFFFFFF");
 	write_file(root / "missions" / "first.bms", "bms");
 	write_file(root / "models" / "tree.glb", "glb");
 	write_file(root / "models" / "tree.3di", "3di");
@@ -122,10 +123,11 @@ int main() {
 
 	TEST_EXPECT(index.scan(root.string()));
 	const std::vector<opennova::ResourceFileEntry> all_files = index.resource_files("*");
-	TEST_EXPECT(all_files.size() == 12);
+	TEST_EXPECT(all_files.size() == 13);
 	TEST_EXPECT(has_relative_path(all_files, "Alpha.TRN"));
 	TEST_EXPECT(has_relative_path(all_files, "Menus.BIN"));
 	TEST_EXPECT(has_relative_path(all_files, "main.mnu"));
+	TEST_EXPECT(has_relative_path(all_files, "menu_style.mns"));
 	TEST_EXPECT(has_relative_path(all_files, "jo_gamemus.sbf"));
 	TEST_EXPECT(has_relative_path(all_files, "jo_gamemus.bin"));
 	TEST_EXPECT(has_relative_path(all_files, "first.bms"));
@@ -160,6 +162,9 @@ int main() {
 	TEST_EXPECT(index.resource_files("strings").size() == 1);
 	TEST_EXPECT(index.resource_files("menu").size() == 1);
 	TEST_EXPECT(index.resource_files("mnu").size() == 1);  // alias normalizes to "menu"
+	TEST_EXPECT(index.resource_files("menu_style").size() == 1);
+	TEST_EXPECT(index.resource_files("mns").size() == 1);  // alias normalizes to "menu_style"
+	TEST_EXPECT(index.resource_files("menu_style")[0].display_name == "menu_style");
 	TEST_EXPECT(index.resource_files("glb").empty());
 	TEST_EXPECT(index.resource_files("bms").size() == 1);
 	TEST_EXPECT(index.resource_files("trn").size() == 1);
@@ -207,7 +212,7 @@ int main() {
 	TEST_EXPECT(as_string(bytes) == "archived model");
 	TEST_EXPECT(!index.read_file("missing.trn", bytes));
 
-	TEST_EXPECT(mounted_files.size() == 15);
+	TEST_EXPECT(mounted_files.size() == 16);
 	TEST_EXPECT(has_relative_path(mounted_files, "Archive.env"));
 	TEST_EXPECT(has_relative_path(mounted_files, "MenusP.BIN"));
 	TEST_EXPECT(has_relative_path(mounted_files, "Patch.3DI"));

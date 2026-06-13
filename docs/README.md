@@ -1,9 +1,10 @@
 # OpenNova documentation
 
 Tracked golden docs: architecture maps, decision records (ADRs), and
-reverse-engineering records. Scratch RE work lives in the untracked `notes/`
-directory and graduates here once it is durable; `old_docs/` is a gitignored
-read-only archive of retired material.
+reverse-engineering records — kept pristine, representing the best current
+understanding of the original engine. RE findings land here directly, and
+git history is the only archive: everything an agent or contributor needs
+for the full picture is tracked in this repo.
 
 Conventions: original-engine functions are cited inline as
 `[orig: Name @ 0xADDR]` (addresses are `Jointops.exe` retail unless a doc says
@@ -15,6 +16,7 @@ behavior is summarized and cited.
 
 | Doc | What it covers |
 |---|---|
+| [`engine-primer.md`](engine-primer.md) | Start here: the original engine in one read — binaries/IDBs, engine-wide conventions (fixed-point, coordinates, the 62 Hz tick), subsystem index, and the research toolbox |
 | [`runtime-architecture.md`](runtime-architecture.md) | How a mission runs: the consolidated logic tick, present pass, and audio pass, mapped onto the original main loop |
 | [`correspondence.md`](correspondence.md) | The cross-system parity matrix: which original function each reimplementation corresponds to, with verdicts |
 | [`perf/mission-load-baseline.md`](perf/mission-load-baseline.md) | Recorded mission-load timings (PerfTimeline) and the verdict that gates the perf push-down slices |

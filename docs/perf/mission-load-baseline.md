@@ -17,7 +17,7 @@ were *contingent on these numbers*).
   decode) read slower than a release build in absolute terms; the *ratios*
   are what this doc decides on.
 - **Method:** a headless `SceneTree` probe instantiates the real editor main
-  scene (`modtools/terrain/terrain_editor.tscn`), sets the resource root to
+  scene (`modtools/editor/editor_main.tscn`), sets the resource root to
   a retail JO loose-asset dir, and opens each mission through
   `open_in_workspace("mission", path)` — the exact interactive path, so the
   `mission_controller.open_mission` timeline prints unmodified.

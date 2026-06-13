@@ -203,6 +203,9 @@ func get_status_context() -> String:
 		var unresolved: int = _editor.get_unresolved_asset_count()
 		if unresolved > 0:
 			context += ", %d unresolved asset(s)" % unresolved
+		var unresolved_vars: int = _editor.get_unresolved_var_count()
+		if unresolved_vars > 0:
+			context += ", %d style variable(s) unresolved" % unresolved_vars
 		if _editor.is_selection_off_board():
 			context += ", selection off-board"
 	return context
@@ -268,6 +271,7 @@ func build_inspector(host: Control) -> void:
 	_inspector.string_jump_requested.connect(_on_string_jump)
 	_inspector.font_jump_requested.connect(_on_font_jump)
 	_inspector.menu_jump_requested.connect(_on_menu_jump)
+	_inspector.style_jump_requested.connect(_on_style_jump)
 	# Preview a widget's sound through the menu .lwf profile (reuses the Sound
 	# workspace's audition player); the inspector lists triggers from the same profile.
 	_inspector.sound_preview_requested.connect(_on_sound_preview)
@@ -288,8 +292,17 @@ func _populate_inspector() -> void:
 		return
 	if _editor != null:
 		_selected_id = _editor.get_selected_id()
+	_apply_stylesheet()
 	_inspector.show_widget(_document.resource, _selected_id, _text_resource(), _text_resource_path())
 	_apply_sound_sets()
+
+
+# Hand the inspector the editor's resolved stylesheet so %VAR% swatches render
+# their themed colors and the rows offer the variable dropdowns.
+func _apply_stylesheet() -> void:
+	if _inspector == null or not is_instance_valid(_inspector):
+		return
+	_inspector.set_stylesheet(_editor.get_stylesheet() if _editor != null and is_instance_valid(_editor) else null)
 
 
 # Feed the inspector the menu profile's set names so its Sounds trigger field
@@ -309,6 +322,7 @@ func _apply_sound_sets() -> void:
 func _on_widget_selected(id: int) -> void:
 	_selected_id = id
 	if _inspector != null and is_instance_valid(_inspector):
+		_apply_stylesheet()
 		_inspector.show_widget(_document.resource, id, _text_resource(), _text_resource_path())
 
 
@@ -318,6 +332,7 @@ func _on_selection_changed(ids: PackedInt32Array) -> void:
 	if ids.size() > 0:
 		_selected_id = ids[ids.size() - 1]
 	if _inspector != null and is_instance_valid(_inspector):
+		_apply_stylesheet()
 		_inspector.show_selection(_document.resource, ids, _text_resource(), _text_resource_path())
 
 
@@ -363,6 +378,12 @@ func _on_font_jump(font: String) -> void:
 func _on_menu_jump(file: String, screen: String) -> void:
 	if editor_shell != null and editor_shell.has_method("open_menu_workspace"):
 		editor_shell.open_menu_workspace(file, screen)
+
+
+# Jump to the Menu Styles workspace focused on a %VAR% the widget references.
+func _on_style_jump(variable: String) -> void:
+	if editor_shell != null and editor_shell.has_method("open_menu_styles_workspace"):
+		editor_shell.open_menu_styles_workspace(variable)
 
 
 # Audition a widget's sound: resolve the trigger to a set in its .lwf profile and
@@ -426,6 +447,8 @@ func _disconnect_inspector(inspector: Control) -> void:
 		inspector.font_jump_requested.disconnect(_on_font_jump)
 	if inspector.menu_jump_requested.is_connected(_on_menu_jump):
 		inspector.menu_jump_requested.disconnect(_on_menu_jump)
+	if inspector.style_jump_requested.is_connected(_on_style_jump):
+		inspector.style_jump_requested.disconnect(_on_style_jump)
 	if inspector.sound_preview_requested.is_connected(_on_sound_preview):
 		inspector.sound_preview_requested.disconnect(_on_sound_preview)
 
