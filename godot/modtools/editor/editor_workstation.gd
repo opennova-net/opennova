@@ -170,7 +170,8 @@ func _ready() -> void:
 		self,
 		_open_files_dialog,
 		_open_dir_dialog,
-		show_status_message
+		show_status_message,
+		_on_pff_extracted
 	)
 	_build_workspace_rail()
 	_wire_workspace_scroll_affordance()
@@ -1317,6 +1318,19 @@ func _on_settings_pff_tool_pressed() -> void:
 	# then open the tool seeded at the configured resource directory.
 	_set_settings_popup_visible(false)
 	_pff_tool.open(_preferred_resource_root_dir())
+
+
+func _on_pff_extracted(dir: String) -> void:
+	# The quick-open index is only built at startup/root-change, so files extracted
+	# into the configured resource root would stay invisible until a restart. Rescan
+	# for the user. Exact-root match only: the loose scan is top-level-only by design,
+	# so a subfolder extraction would not be picked up by a rescan anyway.
+	var root := _resource_library.get_root_dir()
+	if root.is_empty():
+		return
+	if _resource_library.canonical_key(dir) != _resource_library.canonical_key(root):
+		return
+	_scan_resource_root(false)
 
 
 func _unhandled_input(event: InputEvent) -> void:

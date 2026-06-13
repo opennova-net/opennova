@@ -46,6 +46,25 @@ func test_read_entry_raw_and_decoded() -> void:
 	assert_eq(arc.read_entry("missing.txt", true).size(), 0, "Missing entry yields empty bytes.")
 
 
+func test_plaintext_scr0_music_script_survives_decode() -> void:
+	# Plaintext MUS scripts carry their own "SCR0" magic, which is NOT an encrypted SCR
+	# container (those are "SCR" + version byte <= 2). The decode path must pass the bytes
+	# through unchanged; a build without the scr_is_scr version guard stripped the 4-byte
+	# header and "decrypted" the payload, silently corrupting every extracted music script.
+	var root := _pff_dir()
+	var mus := "SCR0".to_ascii_buffer()
+	mus.append_array(PackedByteArray([0, 1, 0, 0, 42, 7, 99, 1, 2, 3]))
+	var path := root.path_join("mus.pff")
+	_write_pff(path, [{"name": "gamemus.bin", "bytes": mus}])
+	var arc := NovaPffArchive.new()
+	assert_eq(arc.open(path), OK)
+
+	assert_eq(arc.read_entry("gamemus.bin", true), mus, "Decoded read returns plaintext SCR0 byte-identical.")
+	var out := root.path_join("gamemus.out")
+	assert_eq(arc.extract_to_status("gamemus.bin", out, true), 0, "SCR0 pass-through counts as decoded, not raw fallback.")
+	assert_eq(FileAccess.get_file_as_bytes(out), mus, "Extracted file keeps its header and exact payload bytes.")
+
+
 func test_extract_to_and_extract_all() -> void:
 	var root := _pff_dir()
 	var path := root.path_join("extract.pff")
