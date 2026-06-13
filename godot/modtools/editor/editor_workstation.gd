@@ -26,6 +26,8 @@ enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 # dropdown; real entries carry their path, the disabled placeholder carries "".
 const _RECENT_CLEAR_META := "::clear::"
 
+@onready var _nav_back_button: Button = %NavBackButton
+@onready var _nav_forward_button: Button = %NavForwardButton
 @onready var _project_label: Label = %ProjectLabel
 @onready var _top_bar: PanelContainer = %TopBar
 @onready var _body_row: SplitContainer = %BodyRow
@@ -148,6 +150,11 @@ var _file_dialogs: FileDialogHelper
 var _camera_panel_host: DetachablePanelHost
 var _environment_panel_host: DetachablePanelHost
 var _panel_restore: Dictionary = {}
+# Browser-style Back/Forward over departure snapshots (see EditorNavHistory).
+# History records only at the user navigation entry points
+# (_on_workspace_pressed, open_in_workspace); direct set_active_workspace /
+# open_file calls (tools, tests, the restore path itself) bypass it.
+var _nav_history := EditorNavHistory.new()
 
 
 func _ready() -> void:
@@ -170,6 +177,7 @@ func _ready() -> void:
 	)
 	_build_workspace_rail()
 	_wire_workspace_scroll_affordance()
+	_wire_nav_buttons()
 	_wire_camera_popup()
 	_wire_environment_popup()
 	_wire_settings_popup()
@@ -349,6 +357,22 @@ func _wire_workspace_scroll_affordance() -> void:
 	if _workspace_rail != null and not _workspace_rail.resized.is_connected(_on_workspace_scroll_resized):
 		_workspace_rail.resized.connect(_on_workspace_scroll_resized)
 	_refresh_workspace_scroll_affordance.call_deferred()
+
+
+func _wire_nav_buttons() -> void:
+	if _nav_back_button != null:
+		_nav_back_button.icon = EditorIconLibrary.resolve(&"nav_back")
+		if _nav_back_button.icon == null:
+			_nav_back_button.text = "<"
+		if not _nav_back_button.pressed.is_connected(go_back):
+			_nav_back_button.pressed.connect(go_back)
+	if _nav_forward_button != null:
+		_nav_forward_button.icon = EditorIconLibrary.resolve(&"nav_forward")
+		if _nav_forward_button.icon == null:
+			_nav_forward_button.text = ">"
+		if not _nav_forward_button.pressed.is_connected(go_forward):
+			_nav_forward_button.pressed.connect(go_forward)
+	_refresh_nav_buttons()
 
 
 func _on_workspace_scroll_left_pressed() -> void:
@@ -591,9 +615,14 @@ func _refresh_workspace_overflow_state() -> void:
 
 
 func _on_workspace_pressed(workspace_id: int) -> void:
+	var from := _location_snapshot()
 	set_active_workspace(workspace_id)
+	_record_nav_departure(from)
 
 
+# Direct calls bypass the Back/Forward history (tools, tests, the restore path
+# itself); user navigation records through _on_workspace_pressed and
+# open_in_workspace.
 func set_active_workspace(workspace_id: int) -> void:
 	if workspace_id == Workspace.ENVIRONMENT:
 		_set_environment_popup_visible(true)
@@ -636,6 +665,7 @@ func open_in_workspace(kind: String, path: String, focus: Dictionary = {}) -> Er
 	var clean_path := path.strip_edges()
 	if clean_path.is_empty():
 		return ERR_INVALID_PARAMETER
+	var from := _location_snapshot()
 	if clean_path != String(workspace.get_current_resource_path()):
 		var err: Error = workspace.open_file(clean_path)
 		if err != OK:
@@ -646,6 +676,8 @@ func open_in_workspace(kind: String, path: String, focus: Dictionary = {}) -> Er
 	else:
 		_refresh_workspace_surface()
 		sync_from_editor_state()
+	# A focus miss below still navigated, so the departure records either way.
+	_record_nav_departure(from)
 	if not focus.is_empty():
 		var focus_err: Error = workspace.focus_reference(focus)
 		if focus_err != OK:
@@ -734,6 +766,101 @@ func open_menu_workspace(file: String, screen: String = "") -> Error:
 		" -> %s" % target if not target.is_empty() else "",
 	], 3.0)
 	return OK
+
+
+# --- Global navigation history (Back/Forward) --------------------------------
+
+# Where the user is right now, as a history entry: the active workspace and its
+# open document ("" when none). Captured lazily at departure, so everything
+# beyond the path (selection, tabs, camera) keeps living in the persistent
+# workspace instance itself.
+func _location_snapshot() -> Dictionary:
+	var workspace := _get_active_workspace()
+	var path := String(workspace.get_current_resource_path()) if workspace != null else ""
+	return {"workspace_id": _active_workspace_id, "path": path}
+
+
+# Record `from` if the navigation that just ran actually moved the user.
+# Same-location jumps (focus-only, failed opens, the Environment popup) leave
+# the location unchanged and record nothing.
+func _record_nav_departure(from: Dictionary) -> void:
+	if EditorNavHistory.same(from, _location_snapshot()):
+		return
+	_nav_history.record(from)
+	_refresh_nav_buttons()
+
+
+func go_back() -> void:
+	if _any_workspace_busy() or not _nav_history.can_go_back():
+		return
+	var current := _location_snapshot()
+	var entry := _nav_history.peek_back()
+	if _navigate_to(entry) == OK:
+		_nav_history.commit_back(current)
+	else:
+		_nav_history.drop_back()
+		show_status_message("Could not open %s." % String(entry.get("path", "")).get_file(), 5.0)
+	_refresh_nav_buttons()
+
+
+func go_forward() -> void:
+	if _any_workspace_busy() or not _nav_history.can_go_forward():
+		return
+	var current := _location_snapshot()
+	var entry := _nav_history.peek_forward()
+	if _navigate_to(entry) == OK:
+		_nav_history.commit_forward(current)
+	else:
+		_nav_history.drop_forward()
+		show_status_message("Could not open %s." % String(entry.get("path", "")).get_file(), 5.0)
+	_refresh_nav_buttons()
+
+
+# Restore a history entry: reopen its document if it changed, then switch
+# workspaces. Resolves through _get_workspace (never _workspace_for_id) so a
+# corrupt entry cannot route to the Environment popup. Mirrors
+# open_in_workspace's same-path skip, so returning to a still-open document
+# keeps selection, tabs, and undo intact — and a failed reopen returns before
+# any workspace switch, leaving the user where they were.
+func _navigate_to(entry: Dictionary) -> Error:
+	var workspace_id := int(entry.get("workspace_id", -1))
+	var workspace := _get_workspace(workspace_id)
+	if workspace == null:
+		return ERR_UNAVAILABLE
+	var entry_path := String(entry.get("path", ""))
+	if not entry_path.is_empty() and entry_path != String(workspace.get_current_resource_path()):
+		var err: Error = workspace.open_file(entry_path)
+		if err != OK:
+			return err
+	if _active_workspace_id != workspace_id:
+		set_active_workspace(workspace_id)
+	else:
+		_refresh_workspace_surface()
+		sync_from_editor_state()
+	return OK
+
+
+func _refresh_nav_buttons() -> void:
+	var busy := _any_workspace_busy()
+	if _nav_back_button != null:
+		_nav_back_button.disabled = busy or not _nav_history.can_go_back()
+		_nav_back_button.tooltip_text = _nav_tooltip("Back", _nav_history.peek_back())
+	if _nav_forward_button != null:
+		_nav_forward_button.disabled = busy or not _nav_history.can_go_forward()
+		_nav_forward_button.tooltip_text = _nav_tooltip("Forward", _nav_history.peek_forward())
+
+
+func _nav_tooltip(verb: String, entry: Dictionary) -> String:
+	if entry.is_empty():
+		return verb
+	var workspace := _get_workspace(int(entry.get("workspace_id", -1)))
+	var label := String(workspace.get_workspace_label()) if workspace != null else ""
+	if label.is_empty():
+		return verb
+	var file := String(entry.get("path", "")).get_file()
+	if file.is_empty():
+		return "%s to %s" % [verb, label]
+	return "%s to %s (%s)" % [verb, label, file]
 
 
 func _resolve_menu_action_path(file: String) -> String:
@@ -850,6 +977,7 @@ func _refresh_workspace_buttons() -> void:
 		var btn: Button = _workspace_buttons[workspace_id]
 		btn.set_pressed_no_signal(workspace_id == _active_workspace_id)
 		btn.disabled = busy
+	_refresh_nav_buttons()
 
 
 func _refresh_workspace_surface() -> void:
@@ -1318,6 +1446,25 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 			if _settings_popup != null and _settings_popup.visible:
 				_set_settings_popup_visible(false)
+				get_viewport().set_input_as_handled()
+		# Global Back/Forward. A workspace-local navigation that uses the same
+		# gestures wins while its view is on screen (Music's canvas nav,
+		# live_mode.gd) — descendants see unhandled input first.
+		elif key.pressed and not key.is_echo() and key.alt_pressed:
+			if key.keycode == KEY_LEFT:
+				go_back()
+				get_viewport().set_input_as_handled()
+			elif key.keycode == KEY_RIGHT:
+				go_forward()
+				get_viewport().set_input_as_handled()
+	elif event is InputEventMouseButton:
+		var mouse := event as InputEventMouseButton
+		if mouse.pressed:
+			if mouse.button_index == MOUSE_BUTTON_XBUTTON1:
+				go_back()
+				get_viewport().set_input_as_handled()
+			elif mouse.button_index == MOUSE_BUTTON_XBUTTON2:
+				go_forward()
 				get_viewport().set_input_as_handled()
 
 
