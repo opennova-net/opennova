@@ -1,6 +1,6 @@
 ---
 name: grill-ida
-description: Grilling session that challenges a reimplemented system against the original binary witnessed in IDA Pro via the ida-pro-mcp server. Finds the reimpl code and the corresponding original functions, decompiles the originals, and interrogates every behavioral divergence — constants, struct layout, control flow, fixed-point scaling, edge cases — updating IDA, the source, and session notes inline, ending in a per-system verdict that lands via the re-doc skill. Use when verifying a reimplemented system matches the original, when re-verifying after a divergence fix, or when a TODO says something needs an IDA grill. For a new question about the original engine with no reimpl to verify, use engine-research instead.
+description: Grilling session that challenges a reimplemented system against the original binary witnessed in IDA Pro via the ida-pro-mcp server. Finds the reimpl code and the corresponding original functions, decompiles the originals, and interrogates every behavioral divergence — constants, struct layout, control flow, fixed-point scaling, edge cases — updating IDA, the source, and the tracked RE record inline, ending in a per-system verdict landed via the re-doc skill. Use when verifying a reimplemented system matches the original, when re-verifying after a divergence fix, or when a TODO says something needs an IDA grill. For a new question about the original engine with no reimpl to verify, use engine-research instead.
 argument-hint: "system name (e.g. 'bms loader', 'sound stack', 'terrain LOD')"
 ---
 
@@ -42,7 +42,7 @@ LIFECYCLE.md §3) before trusting any address.
 
 In order: the system's rows and tables in `docs/correspondence.md`; the
 domain's `docs/<domain>/<system>-re.md`; `[orig:` markers in the reimpl
-source; any `.scratch/<domain>/` drafts. Prior grilled work is input, not
+source. Prior grilled work is input, not
 suspect: trust but spot-check (LIFECYCLE.md §1), never re-derive. Each grill
 must end with more anchored pairings, more grilled axes, and higher
 confidence than it started with.
@@ -104,12 +104,13 @@ understanding), announcing every edit on its own line:
    one marker per definition). Fix confirmed divergences in code when the
    fix is unambiguous; otherwise record them for the verdict. Divergence
    comments cite the record: `docs/<domain>/<system>-re.md (D-...)`.
-3. **Session notes** — `.scratch/<domain>/<system>-grill.md` (gitignored;
-   never committed): correspondence rows drafted in the
-   docs/correspondence.md column shape, each divergence with its axis +
-   address, the IDB-change log, open questions. Raw decompilation may be
-   pasted here and ONLY here — no decompiled code ever lands in tracked
-   files (docs/README.md rule).
+3. **The tracked record** — landed via `re-doc` before the session ends:
+   correspondence rows in the docs/correspondence.md column shape, each
+   divergence with its axis + address, the IDB-change log, and open
+   questions as explicit unknown/follow-up entries. `docs/` stays pristine
+   — it is the best current understanding of the original engine. Raw
+   decompilation never lands in any file; quote it in the conversation
+   only (docs/README.md rule).
 
 ## 4. Verdict and handoff
 
@@ -120,8 +121,8 @@ code / not grillable**, or **divergent** with every divergence cited to an
 address. Kept divergences get stable `D-<DOMAIN>-n` ids when the record
 lands — existing ids are never renumbered; gaps are documented, not closed.
 
-Close the audit trail (rows drafted, markers inserted, IDB changes, final
-`idb_save`), then invoke `re-doc` to land the golden record, the
-`docs/correspondence.md` rows, and the cross-file updates. Done = verdict
-stated with addresses, notes written, IDB saved, and the re-doc handoff
-made — a grill that ends without the handoff is not done.
+Close the audit trail (markers inserted, IDB changes, final `idb_save`),
+then invoke `re-doc` to land the golden record, the `docs/correspondence.md`
+rows, and the cross-file updates — in the same session. Done = verdict
+stated with addresses, the record landed via re-doc, and the IDB saved —
+a grill that ends without landing is not done.

@@ -163,7 +163,7 @@ Order of operations when you need an engine truth:
    must land in the tracked docs. Two skills drive it:
    - **How does the original do X?** → the `engine-research` skill
      (`.claude/skills/engine-research/`): hunts the function from strings/data/
-     callgraph, witnesses the behavior, records `[orig:]` findings in `.scratch/`.
+     callgraph, witnesses the behavior, and lands durable findings via `re-doc`.
    - **Does our reimplementation match?** → the `grill-ida` skill
      (`.claude/skills/grill-ida/`): interrogates reimpl vs binary axis by axis and
      ends in a per-system verdict, landed via the `re-doc` skill.
@@ -195,14 +195,18 @@ Research flows one way into the tree ([docs/README.md](README.md) conventions):
 
 - Implementing "our own version" of engine behavior is never allowed — every system
   is a faithful port of the witnessed original unless a tracked decision (ADR or an
-  RE-record divergence entry) says otherwise. The exclusion is CRT/OS/platform
-  primitives (`strcpy`/`sprintf`/`memcpy`, D3D, file I/O): those map to standard-
-  library or host equivalents rather than being ported.
-- Scratch exploration lives in the gitignored `.scratch/` — never committed.
+  RE-record divergence entry) says otherwise. "Implement X" therefore always means
+  witness-then-port: establish how the original did X — its behavior and its look —
+  through the research path in §5 before writing any of it. The exclusion is
+  CRT/OS/platform primitives (`strcpy`/`sprintf`/`memcpy`, D3D, file I/O): those map
+  to standard-library or host equivalents rather than being ported.
+- There is no scratch directory: `docs/` is kept pristine — the best current
+  understanding of the original engine — and durable findings land there the same
+  session they are witnessed; ephemeral working state stays in the session.
 - Ports cite their witness inline at the port site: `[orig: Name @ 0xADDR]`.
-- Durable findings graduate into the domain RE record — the `re-doc` skill authors
+- Durable findings land in the domain RE record — the `re-doc` skill authors
   the house format (verdict table, witness map, stable `D-<DOMAIN>-n` divergence
-  catalog) — or into an ADR when the finding is a decision.
+  catalog) — or in an ADR when the finding is a decision.
 - No raw decompiled code is ever committed; behavior is summarized and cited.
 - Divergence from the original is a tracked decision, never an accident
   ([GOALS.md](../GOALS.md)).

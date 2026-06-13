@@ -27,7 +27,7 @@ All commands are Git Bash, inside the current worktree only.
 - LFS hazard: anything under `fixtures/**` must land as LFS pointers — after
   staging, check `git lfs status` and the staged diff (a pointer file is a few
   lines of text; megabytes of binary in the diff means LFS missed it).
-- Never commit scratch (`.scratch/`); edit only inside the worktree.
+- Edit only inside the worktree.
 
 ## 3. Local green bar (before every push)
 

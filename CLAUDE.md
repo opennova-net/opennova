@@ -17,8 +17,9 @@ easier to relay than to rediscover.
 - `apps/importer/` — Python + native FFI importer behind `onimport.exe`; `blender/` and
   `opennova_max/` are the DCC export plugins; `pyopennova/` is the Python FFI layer.
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
-- `docs/` — tracked golden docs (ADRs, RE records). Scratch work goes in the gitignored
-  `.scratch/`; nothing scratch is ever committed.
+- `docs/` — tracked golden docs (ADRs, RE records), kept pristine: they represent the
+  best current understanding of the original engine. RE findings land there directly
+  (via the `re-doc` skill) — there is no scratch directory.
 - `third_party/` — vendored submodules (godot-cpp, gut, modsuperoed); never edit in
   place — bump submodules upstream.
 
@@ -60,7 +61,10 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 - This is a faithful reimplementation — parity, not reinterpretation ([GOALS.md](GOALS.md)).
   Implementing "our own version" of engine behavior is never allowed: port the witnessed
   original as a structural translation and cite it inline (`[orig: Name @ 0xADDR]`) unless a
-  tracked decision (ADR / RE-record divergence entry) says otherwise. Excluded: CRT/OS/platform
+  tracked decision (ADR / RE-record divergence entry) says otherwise. A request to
+  "implement X" (the HUD, a weapon, an effect) is a request to first understand how the
+  original engine did X — its behavior AND its look — via the `engine-research`/`grill-ida`
+  skills, then port that; it is never a request to invent an X. Excluded: CRT/OS/platform
   primitives (strcpy/sprintf, D3D, file I/O) — use standard or host equivalents. Engine-wide
   conventions (binaries/IDBs, fixed-point, coordinates, the 62 Hz tick) are in
   [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).

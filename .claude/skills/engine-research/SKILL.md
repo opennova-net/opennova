@@ -1,6 +1,6 @@
 ---
 name: engine-research
-description: Answers a new question about how the original engine works. Finds the relevant original functions in IDA via the ida-pro-mcp server — string xrefs, data refs, callgraph walks from known anchors, byte signatures — witnesses the behavior, and records findings with [orig: Name @ 0xADDR] citations in gitignored .scratch/<domain>/. Use when asking how the original engine does something not yet witnessed, hunting an unknown function, struct, or data table, or scoping a system before reimplementing it. To verify an existing reimplementation against the binary, use grill-ida instead.
+description: Answers a new question about how the original engine works. Finds the relevant original functions in IDA via the ida-pro-mcp server — string xrefs, data refs, callgraph walks from known anchors, byte signatures — witnesses the behavior, and lands durable findings with [orig: Name @ 0xADDR] citations into the tracked RE records via the re-doc skill. Use when asking how the original engine does something not yet witnessed, hunting an unknown function, struct, or data table, or when asked to IMPLEMENT an engine feature whose original behavior isn't witnessed yet — "implement the HUD" means research the original HUD (behavior and look) first, then port; never invent one. To verify an existing reimplementation against the binary, use grill-ida instead.
 argument-hint: "question (e.g. 'how does the original pick terrain LOD?')"
 ---
 
@@ -20,17 +20,17 @@ IDB. Engine-wide conventions and the full toolbox: `docs/engine-primer.md`.
 State the question in one sentence, plus what would count as an answer.
 Then check, in order: `docs/correspondence.md` (the anchor index — named
 originals with addresses); the domain's `docs/<domain>/*-re.md`; `[orig:`
-markers near the relevant reimpl code (grep `libs/ godot/ apps/`);
-`CONTEXT.md` for vocabulary; and `.scratch/<domain>/`. If the answer is
-already recorded, cite it and stop. Partial hits become the anchors for
-step 3.
+markers near the relevant reimpl code (grep `libs/ godot/ apps/`); and
+`CONTEXT.md` for vocabulary. If the answer is already recorded, cite it and
+stop. Partial hits become the anchors for step 3.
 
 ## 2. Preconditions
 
 Requires the optional ida-pro-mcp server (maintainer's machine only). If
-`mcp__ida-pro-mcp__*` tools are missing or `server_health` fails: STOP,
-record the open question in `.scratch/<domain>/open-questions.md` so it is not
-lost, and tell the user what to start. When up: `list_instances` →
+`mcp__ida-pro-mcp__*` tools are missing or `server_health` fails: STOP and
+report the open question to the user so it is not lost (durable open
+questions belong in the RE record's unknown/follow-up entries, via
+`re-doc`), and say what to start. When up: `list_instances` →
 `select_instance` → `survey_binary` (minimal detail), and confirm the repo
 pin from `docs/correspondence.md`: retail `Jointops.exe`, imagebase
 `0x400000`, IDB `Jointops.exe.kong.i64`. On any other image (demo, other
@@ -87,26 +87,28 @@ pseudocode — re-`decompile` the function and its callers rather than
 trusting a view captured before the retype. After renames, re-pull before
 quoting names in notes.
 
-## 6. Record in notes, then route
+## 6. Land the findings
 
-Findings land in `.scratch/<domain>/<topic>.md` (gitignored, never
-committed): the question, the answer, every claim cited
-`[orig: Name @ 0xADDR]` with its confidence, and the open threads.
-Decompilation excerpts are allowed in `.scratch/` only — never in anything
-tracked. Then route:
+Durable knowledge lands in tracked docs the same session it is witnessed —
+there is no scratch directory, and `docs/` stays pristine as the best
+current understanding of the original engine:
 
 - Findings shaping code being written now → inline `[orig: …]` citations
   at the port site; the port itself is a faithful structural translation
   of what was witnessed (CLAUDE.md conventions), never a from-scratch
   reinterpretation.
-- Durable system knowledge → graduate via the `re-doc` skill: a
+- Durable system knowledge → the `re-doc` skill: a
   `docs/<domain>/<system>-re.md` record and/or `docs/correspondence.md`
-  rows. Originals with no reimpl can land as confirm-only rows.
+  rows. Originals with no reimpl can land as confirm-only rows; open
+  threads land as the record's explicit unknown/follow-up entries.
 - Spawned implementation work → a TODO.md entry naming the addresses.
+
+Raw decompilation never lands in any file — quote it in the conversation
+only (docs/README.md rule).
 
 ## Done
 
 The question is answered with addresses — or explicitly unresolved, with
-what was ruled out and the next lead — findings are in `.scratch/<domain>/`,
-any IDB writes are logged and saved, and the routing (inline cite /
-re-doc / TODO) is stated.
+what was ruled out landed as the record's follow-up entries — durable
+findings are landed via `re-doc`, any IDB writes are logged and saved, and
+the routing (inline cite / record / TODO) is stated.
