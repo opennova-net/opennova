@@ -116,7 +116,7 @@ guessed → probable before a single write happens.
 **Shared-state rule (this repo).** `Jointops.exe.kong.i64` is the maintainer's curated IDB.
 Auto-names (`sub_`, `dword_`, `loc_`) rename directly at **anchored** confidence, each announced as
 an audit line (§6). Changing any **human-curated name**, and any **probable**-confidence type edit,
-is a **proposal** — in conversation when interactive, in `notes/<domain>/ida-proposals.md` when not
+is a **proposal** — in conversation when interactive, in `.scratch/<domain>/ida-proposals.md` when not
 — applied only on the user's OK. Log every applied change in the session notes; the landed RE
 record carries an "IDB changes made during the session" section (shape: `docs/audio/mus-sbf-re.md`).
 
@@ -194,10 +194,10 @@ notes ← row     scr_decrypt ↔ Scr_DecryptBuffer @ 0x53D090  status=matching
 At session end, close the trail with a final report:
 
 ```
-notes ← notes/<domain>/<system>-grill.md   verdict drafted (rows +N, divergences M)
-code  ← N markers inserted
-IDA   ← R renames, T types, C comments     (logged in notes); idb_save (final)
-docs  ← handoff: /re-doc                   (record + correspondence rows + index sync)
+scratch ← .scratch/<domain>/<system>-grill.md   verdict drafted (rows +N, divergences M)
+code    ← N markers inserted
+IDA     ← R renames, T types, C comments        (logged in scratch); idb_save (final)
+docs    ← handoff: /re-doc                      (record + correspondence rows + index sync)
 ```
 
 ---

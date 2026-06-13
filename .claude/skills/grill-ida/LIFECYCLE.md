@@ -19,7 +19,7 @@ A grilling session writes durable state as it goes (notes, markers, IDB annotati
 resumption is a read problem, not a recovery problem:
 
 1. Read `docs/<domain>/<system>-re.md`, the system's rows and tables in
-   `docs/correspondence.md`, and any unlanded `notes/<domain>/` scratch from a prior session.
+   `docs/correspondence.md`, and any unlanded `.scratch/<domain>/` drafts from a prior session.
 2. **Verify the binary first** — the `docs/correspondence.md` header pins (retail `Jointops.exe`,
    imagebase `0x400000`, IDB `Jointops.exe.kong.i64`) against `survey_binary`. A mismatch means a
    rebuilt IDB or the wrong instance: stop and resolve (§3) before trusting any address.
@@ -97,5 +97,5 @@ confidence:
 `docs/correspondence.md` is shared across systems, and agent work happens in worktrees
 (`.claude/worktrees/`). Convention: **one system per worktree**, and tracked-doc rows land only at
 `re-doc` time — so the conflict surface is the landing PR, not the session. Draft rows in
-`notes/<domain>/` (untracked, conflict-free) until then. If two landings race, rows are
+`.scratch/<domain>/` (gitignored, conflict-free) until then. If two landings race, rows are
 independent: sort by address and dedupe at merge.

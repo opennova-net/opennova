@@ -163,7 +163,7 @@ Order of operations when you need an engine truth:
    must land in the tracked docs. Two skills drive it:
    - **How does the original do X?** → the `engine-research` skill
      (`.claude/skills/engine-research/`): hunts the function from strings/data/
-     callgraph, witnesses the behavior, records `[orig:]` findings in `notes/`.
+     callgraph, witnesses the behavior, records `[orig:]` findings in `.scratch/`.
    - **Does our reimplementation match?** → the `grill-ida` skill
      (`.claude/skills/grill-ida/`): interrogates reimpl vs binary axis by axis and
      ends in a per-system verdict, landed via the `re-doc` skill.
@@ -198,7 +198,7 @@ Research flows one way into the tree ([docs/README.md](README.md) conventions):
   RE-record divergence entry) says otherwise. The exclusion is CRT/OS/platform
   primitives (`strcpy`/`sprintf`/`memcpy`, D3D, file I/O): those map to standard-
   library or host equivalents rather than being ported.
-- Scratch exploration lives in untracked `notes/` — never committed.
+- Scratch exploration lives in the gitignored `.scratch/` — never committed.
 - Ports cite their witness inline at the port site: `[orig: Name @ 0xADDR]`.
 - Durable findings graduate into the domain RE record — the `re-doc` skill authors
   the house format (verdict table, witness map, stable `D-<DOMAIN>-n` divergence

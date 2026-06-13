@@ -1,6 +1,5 @@
 # Scratch/working files
 .scratch/
-notes/
 
 # Claude Code: track shared project config (settings.json, skills, commands,
 # CLAUDE.md files); keep machine-local state and worktrees out. Negations only

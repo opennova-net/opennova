@@ -17,8 +17,8 @@ easier to relay than to rediscover.
 - `apps/importer/` — Python + native FFI importer behind `onimport.exe`; `blender/` and
   `opennova_max/` are the DCC export plugins; `pyopennova/` is the Python FFI layer.
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
-- `docs/` — tracked golden docs (ADRs, RE records). `notes/` — untracked scratch; never
-  commit it.
+- `docs/` — tracked golden docs (ADRs, RE records). Scratch work goes in the gitignored
+  `.scratch/`; nothing scratch is ever committed.
 - `third_party/` — vendored submodules (godot-cpp, gut, modsuperoed); never edit in
   place — bump submodules upstream.
 

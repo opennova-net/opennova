@@ -1,6 +1,6 @@
 ---
 name: engine-research
-description: Answers a new question about how the original engine works. Finds the relevant original functions in IDA via the ida-pro-mcp server — string xrefs, data refs, callgraph walks from known anchors, byte signatures — witnesses the behavior, and records findings with [orig: Name @ 0xADDR] citations in untracked notes/<domain>/. Use when asking how the original engine does something not yet witnessed, hunting an unknown function, struct, or data table, or scoping a system before reimplementing it. To verify an existing reimplementation against the binary, use grill-ida instead.
+description: Answers a new question about how the original engine works. Finds the relevant original functions in IDA via the ida-pro-mcp server — string xrefs, data refs, callgraph walks from known anchors, byte signatures — witnesses the behavior, and records findings with [orig: Name @ 0xADDR] citations in gitignored .scratch/<domain>/. Use when asking how the original engine does something not yet witnessed, hunting an unknown function, struct, or data table, or scoping a system before reimplementing it. To verify an existing reimplementation against the binary, use grill-ida instead.
 argument-hint: "question (e.g. 'how does the original pick terrain LOD?')"
 ---
 
@@ -21,7 +21,7 @@ State the question in one sentence, plus what would count as an answer.
 Then check, in order: `docs/correspondence.md` (the anchor index — named
 originals with addresses); the domain's `docs/<domain>/*-re.md`; `[orig:`
 markers near the relevant reimpl code (grep `libs/ godot/ apps/`);
-`CONTEXT.md` for vocabulary; and `notes/<domain>/`. If the answer is
+`CONTEXT.md` for vocabulary; and `.scratch/<domain>/`. If the answer is
 already recorded, cite it and stop. Partial hits become the anchors for
 step 3.
 
@@ -29,7 +29,7 @@ step 3.
 
 Requires the optional ida-pro-mcp server (maintainer's machine only). If
 `mcp__ida-pro-mcp__*` tools are missing or `server_health` fails: STOP,
-record the open question in `notes/<domain>/open-questions.md` so it is not
+record the open question in `.scratch/<domain>/open-questions.md` so it is not
 lost, and tell the user what to start. When up: `list_instances` →
 `select_instance` → `survey_binary` (minimal detail), and confirm the repo
 pin from `docs/correspondence.md`: retail `Jointops.exe`, imagebase
@@ -89,10 +89,11 @@ quoting names in notes.
 
 ## 6. Record in notes, then route
 
-Findings land in `notes/<domain>/<topic>.md` (untracked, never committed):
-the question, the answer, every claim cited `[orig: Name @ 0xADDR]` with
-its confidence, and the open threads. Decompilation excerpts are allowed in
-notes/ only — never in anything tracked. Then route:
+Findings land in `.scratch/<domain>/<topic>.md` (gitignored, never
+committed): the question, the answer, every claim cited
+`[orig: Name @ 0xADDR]` with its confidence, and the open threads.
+Decompilation excerpts are allowed in `.scratch/` only — never in anything
+tracked. Then route:
 
 - Findings shaping code being written now → inline `[orig: …]` citations
   at the port site; the port itself is a faithful structural translation
@@ -106,6 +107,6 @@ notes/ only — never in anything tracked. Then route:
 ## Done
 
 The question is answered with addresses — or explicitly unresolved, with
-what was ruled out and the next lead — findings are in `notes/<domain>/`,
+what was ruled out and the next lead — findings are in `.scratch/<domain>/`,
 any IDB writes are logged and saved, and the routing (inline cite /
 re-doc / TODO) is stated.

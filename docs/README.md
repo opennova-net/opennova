@@ -1,9 +1,9 @@
 # OpenNova documentation
 
 Tracked golden docs: architecture maps, decision records (ADRs), and
-reverse-engineering records. Scratch RE work lives in the untracked `notes/`
-directory and graduates here once it is durable; `old_docs/` is a gitignored
-read-only archive of retired material.
+reverse-engineering records. RE findings land here directly once durable
+(scratch drafts live in the gitignored `.scratch/`); `old_docs/` is a
+gitignored read-only archive of retired material.
 
 Conventions: original-engine functions are cited inline as
 `[orig: Name @ 0xADDR]` (addresses are `Jointops.exe` retail unless a doc says

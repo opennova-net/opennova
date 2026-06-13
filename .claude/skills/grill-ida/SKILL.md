@@ -42,7 +42,7 @@ LIFECYCLE.md §3) before trusting any address.
 
 In order: the system's rows and tables in `docs/correspondence.md`; the
 domain's `docs/<domain>/<system>-re.md`; `[orig:` markers in the reimpl
-source; any `notes/<domain>/` scratch. Prior grilled work is input, not
+source; any `.scratch/<domain>/` drafts. Prior grilled work is input, not
 suspect: trust but spot-check (LIFECYCLE.md §1), never re-derive. Each grill
 must end with more anchored pairings, more grilled axes, and higher
 confidence than it started with.
@@ -104,8 +104,8 @@ understanding), announcing every edit on its own line:
    one marker per definition). Fix confirmed divergences in code when the
    fix is unambiguous; otherwise record them for the verdict. Divergence
    comments cite the record: `docs/<domain>/<system>-re.md (D-...)`.
-3. **Session notes** — `notes/<domain>/<system>-grill.md` (untracked;
-   never commit `notes/`): correspondence rows drafted in the
+3. **Session notes** — `.scratch/<domain>/<system>-grill.md` (gitignored;
+   never committed): correspondence rows drafted in the
    docs/correspondence.md column shape, each divergence with its axis +
    address, the IDB-change log, open questions. Raw decompilation may be
    pasted here and ONLY here — no decompiled code ever lands in tracked

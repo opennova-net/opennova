@@ -1,12 +1,12 @@
 ---
 name: re-doc
-description: Authors or refreshes a golden reverse-engineering record under docs/<domain>/<system>-re.md in this repo's exact format — verdict table, witness map with [orig] citations, stable D-<DOMAIN>-n divergence catalog, and the cross-file index updates. Use after a grill/IDA verification session, or when graduating RE findings from untracked notes/ into tracked docs.
+description: Authors or refreshes a golden reverse-engineering record under docs/<domain>/<system>-re.md in this repo's exact format — verdict table, witness map with [orig] citations, stable D-<DOMAIN>-n divergence catalog, and the cross-file index updates. Use after a grill/IDA verification session, or when graduating RE findings from scratch drafts into tracked docs.
 ---
 
 # Land a golden RE record
 
 Inputs: the grilled system, and the evidence — a grill-ida transcript or
-untracked `notes/<domain>/*.md` scratch, code comments citing D-IDs, and the
+gitignored `.scratch/<domain>/*.md` drafts, code comments citing D-IDs, and the
 ctests that pin behavior. Read `docs/README.md` (conventions + index) and the
 richest exemplar `docs/audio/mus-sbf-re.md` before writing. ADR exemplar, for
 when a policy decision crystallised: `docs/adr/0008-pff-writer-policy.md`.
@@ -39,8 +39,8 @@ when a policy decision crystallised: `docs/adr/0008-pff-writer-policy.md`.
    doc and vice versa.
 4. New ADR if a policy decision emerged: next number in `docs/adr/`, linked
    from the docs README ADR table.
-5. `notes/<domain>/` scratch that graduated here can be pruned; `notes/` is
-   untracked and is never committed either way.
+5. `.scratch/<domain>/` drafts that graduated here can be pruned; `.scratch/`
+   is gitignored and is never committed either way.
 
 ## Verify before declaring done
 
@@ -54,6 +54,6 @@ when a policy decision crystallised: `docs/adr/0008-pff-writer-policy.md`.
 Done = doc landed in the format above, the cross-file updates applied, and the
 evidence tests pass. This skill is the landing half: the project `grill-ida`
 skill produces verification evidence and inline source/IDA fixes,
-`engine-research` produces original-engine findings in `notes/`; `re-doc`
+`engine-research` produces original-engine findings in `.scratch/`; `re-doc`
 defines what the committed record must contain. End grill sessions by invoking
 this skill.
