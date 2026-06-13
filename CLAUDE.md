@@ -57,10 +57,13 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 - `libs/` libraries: CMake target `opennova_<domain>`, C++ namespace `opennova`, flat
   domain-prefixed C ABI (consumed by `apps/importer/` and `godot/engine/`). The shared FFI
   target is `opennova_shared` (`opennova.dll` / `libopennova.so`).
-- This is a faithful reimplementation verified against the original binaries. Port as
-  structural translation and cite the original inline: `[orig: Name @ 0xADDR]`.
-  Divergence from the original is a tracked, documented decision — RE-doc conventions are
-  in [docs/README.md](docs/README.md).
+- This is a faithful reimplementation — parity, not reinterpretation ([GOALS.md](GOALS.md)).
+  Implementing "our own version" of engine behavior is never allowed: port the witnessed
+  original as a structural translation and cite it inline (`[orig: Name @ 0xADDR]`) unless a
+  tracked decision (ADR / RE-record divergence entry) says otherwise. Excluded: CRT/OS/platform
+  primitives (strcpy/sprintf, D3D, file I/O) — use standard or host equivalents. Engine-wide
+  conventions (binaries/IDBs, fixed-point, coordinates, the 62 Hz tick) are in
+  [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
 - Rendering targets the original fixed-function look, not PBR.
@@ -83,6 +86,9 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 ## Deeper docs
 
 - [docs/README.md](docs/README.md) — documentation index: ADRs, RE records by domain.
+- [docs/engine-primer.md](docs/engine-primer.md) — what the original engine is: binaries
+  and IDBs, engine-wide conventions, subsystem index, and how to research it. Read it
+  before engine work.
 - [CONTEXT.md](CONTEXT.md) — the project glossary; use its canonical vocabulary.
 - [docs/runtime-architecture.md](docs/runtime-architecture.md) — how a mission runs. Read
   it plus the ADRs before touching `mission_runtime.gd` / `mission_present_pass.gd` /
@@ -92,4 +98,4 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 - Directory-scoped agent rules: `libs/CLAUDE.md`, `godot/engine/CLAUDE.md`,
   `godot/modtools/CLAUDE.md`, `godot/tests/CLAUDE.md`.
 - Project skills in `.claude/skills/`: `gut`, `oned-run`, `new-format-lib`, `re-doc`,
-  `extract-pr`.
+  `extract-pr`, `grill-ida`, `engine-research`.
