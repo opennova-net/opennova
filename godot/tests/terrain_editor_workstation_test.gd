@@ -227,7 +227,7 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 	for child in workspace_rail.get_children():
 		if child is Button:
 			row_texts.append((child as Button).text)
-	assert_eq(row_texts, ["Mission", "Terrain", "Object", "Fonts", "Credits", "Strings", "Menus", "Music", "Sound"],
+	assert_eq(row_texts, ["Mission", "Terrain", "Object", "Fonts", "Credits", "Strings", "Menus", "Menu Styles", "Music", "Sound"],
 		"The nav should list every viewport workspace; Environment stays on its top-bar toggle, not the rail.")
 
 	assert_false(_has_label_text(workspace_rail, "World"), "Top-bar workspace groups should use separators, not inline category words.")
@@ -266,7 +266,7 @@ func test_every_workspace_rail_button_has_an_icon() -> void:
 			assert_not_null((child as Button).icon,
 				"rail button '%s' should carry its workspace icon" % (child as Button).text)
 			checked += 1
-	assert_eq(checked, 9, "all nine workspace rows checked")
+	assert_eq(checked, 10, "all ten workspace rows checked")
 
 
 func test_icon_library_resolves_every_registered_icon_id() -> void:
