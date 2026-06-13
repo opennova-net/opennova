@@ -289,7 +289,7 @@ func _after_save(err: Error) -> Error:
 		return err
 	var root := _resource_root()
 	if root != null and not _document.current_path.is_empty():
-		var name := _document.current_path.get_file()
+		var name := String(_document.current_path).get_file()
 		if not root.has_file(name) and editor_shell != null \
 				and editor_shell.has_method("rescan_resource_root"):
 			editor_shell.rescan_resource_root()
@@ -303,7 +303,7 @@ func get_save_dialog_title() -> String:
 # Default to the resource root: a loose menu_style.mns there shadows any
 # PFF-archived one at runtime, which is the canonical modder flow.
 func get_save_dialog_dir() -> String:
-	var last := _document.get_last_save_dir()
+	var last := String(_document.get_last_save_dir())
 	if not last.is_empty():
 		return last
 	var root := _resource_root()
