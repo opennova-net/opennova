@@ -1,7 +1,14 @@
-# Scratch/working files
-.scratch/
-.claude/
-notes/
+# Claude Code: track shared project config (settings.json, skills, commands,
+# CLAUDE.md files); keep machine-local state and worktrees out. Negations only
+# work because the exclusion is `.claude/*` (children), not `.claude/` (dir).
+.claude/*
+!.claude/settings.json
+!.claude/skills/
+!.claude/commands/
+!.claude/agents/
+# belt-and-suspenders: keep these ignored even if the negations above widen
+.claude/worktrees/
+.claude/settings.local.json
 
 # Build artifacts
 build/
@@ -64,8 +71,6 @@ dist/
 Thumbs.db
 TODO
 
-RE/
-
 # Godot
 godot/.godot/
 *.TMP
@@ -73,6 +78,5 @@ godot/exports/
 .godot-bin/
 godot/addons/gut/
 
-old_docs/
-CLAUDE.md
+CLAUDE.local.md
 .superpowers/
