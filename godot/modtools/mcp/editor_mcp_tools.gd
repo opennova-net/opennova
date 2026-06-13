@@ -50,12 +50,17 @@ open_in_workspace is the one open path; undo/redo route per-workspace; dirty sta
 Vocabulary: a MENU is one .mnu document; a SCREEN is a full-canvas layout (one visible at a time; navigation moves between them); every tree node is a WINDOW; a WIDGET is a Window of a specific type (BUTTON, LIST, TABLE, ...). An ACTION is behavior the file itself expresses — navigate to a screen/menu, show/hide a window, pop, URL — wired with set_widget_actions. A COMMAND is game behavior the engine binds to a widget's NAME (start mission, apply settings): names are hooks, so reuse shipped names exactly and never rename shipped widgets casually.
 
 Conventions:
-- Rects are [x, y, w, h] in menu-space pixels (typically a 640x480 board), parent-relative; child order is z-order. edit_menu_widget move_rects does layout passes in one undo step.
+- Rects are [x, y, w, h] in menu-space pixels (typically a 640x480 board), parent-relative; child order is z-order. edit_menu_widget move_rects does layout passes in one undo step. A null/-1 w or h is AUTO-SIZE (the engine stretches a widget's appearance art across an explicit width, so box-art toggles and auto-height labels omit it).
 - text + string_type: "id" means text is a key into the screen's text_rsrc string table (.bin); "" means a literal.
-- Color/font values like %TITLE_COLOR% are stylesheet (menu_style.mns) references — preserve them verbatim.
+- Color/font values like %TITLE_COLOR% are stylesheet (menu_style.mns) references — preserve them verbatim. Text with no FG color (own or inherited from an ancestor FONT) renders unreadable in the game — statics want a literal hex (e.g. c4c4c4), pressables the %DEF_TEXT_*% vars.
 - The "Tab" pattern: sibling buttons whose window Actions hide each other's panels and show their own.
 
-Menus are MULTIDOC: tabs via menu_tabs/get_menu; undo/redo act on the ACTIVE tab. The Interactive preview (preview_menu) plays the menu sandboxed — pressing widgets walks the real navigation; all editing tools are locked until op="off". Look at the board with menu_screenshot; study shipped menus with analyze_menu.""",
+Game-shaping (the original engine is strict where the editor preview is forgiving — analyze_menu's game_safety audits all of this, and the build tools apply most of it for you):
+- A screen action MUST carry file= even to navigate within the same .mnu — set_widget_actions auto-fills the menu's own filename (save an Untitled tab first).
+- New screens get a game-shaped root automatically (a MAIN window, full position, an appearance row); edit_menu_screen add/set takes background (an image .tga backdrop — without it the root is engine-painted, so a video underneath shows through) and frame ({stencil, brush, monogram} that DRAW_FRAME panels render with).
+- Pressables carry per-state APPEARANCE rows: text buttons four empty ones (auto-added), box toggles need image rows (map_state 0..3 state-strip art like btn5.tga) — author them with the appearances prop.
+
+Menus are MULTIDOC: tabs via menu_tabs/get_menu; undo/redo act on the ACTIVE tab. The Interactive preview (preview_menu) plays the menu sandboxed — pressing widgets walks the real navigation; all editing tools are locked until op="off". Look at the board with menu_screenshot; study shipped menus (and audit your own) with analyze_menu.""",
 }
 
 const WORKSPACE_TO_KIND := {

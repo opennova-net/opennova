@@ -487,10 +487,17 @@ func get_current_resource_path() -> String:
 
 
 func open_file(path: String) -> Error:
-	# Tab-aware: a menu that is already open activates its tab — unsaved edits
-	# intact — instead of reopening. (Menus open from disk only; no VFS branch.)
+	# Tab-aware: a menu that is already open activates its tab. A CLEAN tab
+	# reloads from disk first (the file may have changed underneath — externally
+	# edited or rewritten by another tool); unsaved edits stay intact and win.
+	# (Menus open from disk only; no VFS branch.)
 	var existing := _tabs.index_of_path(path)
 	if existing >= 0:
+		var open_doc: Variant = _tabs.get_at(existing)
+		if open_doc != null and not open_doc.is_dirty:
+			var reload_err: Error = open_doc.open_mnu(path)
+			if reload_err != OK:
+				return reload_err
 		return activate_document(existing)
 	# A pristine active document (fresh workspace, just-seeded tab) is reused so
 	# the first open does not leave a stray Untitled tab.

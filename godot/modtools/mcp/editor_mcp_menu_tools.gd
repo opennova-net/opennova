@@ -15,6 +15,13 @@ const RECT_CAP := 100
 const WIDGET_PROPS: Array[String] = [
 	"name", "rect", "text", "string_type", "font", "flags", "group",
 	"datasource", "orientation", "table_count", "table_spacing",
+	"appearances", "frame",
+]
+# Widget types the original engine expects APPEARANCE state rows on (every
+# shipped pressable carries them; text buttons use four EMPTY state rows).
+const PRESSABLE_TYPES: Array[String] = ["BUTTON", "GOTO", "CHECKBOX", "RADIO", "COMBOBOX", "SPINLIST", "MULTI"]
+const EMPTY_STATE_APPEARANCES: Array = [
+	{ "state": "default" }, { "state": "mouseover" }, { "state": "selected" }, { "state": "disabled" },
 ]
 const SCREEN_PROPS: Array[String] = ["name", "music_var", "text_rsrc", "cursor_file"]
 const ACTION_TYPES: Array[String] = ["screen", "window", "pop_screen", "pop", "url", "quit_game", "quit"]
@@ -55,26 +62,27 @@ func register_all(registry: McpToolRegistry) -> void:
 				"discard": { "type": "boolean", "default": false },
 			}, ["op"]), Callable(self, "_tool_menu_tabs"))
 	registry.register(_def("edit_menu_screen",
-			"One Screen operation per call. add={name}: a new empty Screen (names must be unique — Screens are addressed by name for navigation, show and delete). delete={screen}: shows then deletes that Screen and everything on it (refused for the last one). set={screen, props}: props from {name, music_var (int), text_rsrc (.bin string-table file that \"id\"-type texts key into), cursor_file} — one undo step per field. show={screen}: makes that Screen visible on the authoring canvas and selects it (menu_screenshot captures what show displays). screen = a Screen name or id from get_menu. Marks the menu dirty (except show); never save unless asked.",
+			"One Screen operation per call. add={name, background?, frame?}: a new Screen with a game-shaped root (a MAIN window with full position and an appearance row — the original engine crashes without them); text_rsrc/cursor/music_var auto-copy from the first Screen. background = a .tga drawn as the root's backdrop (e.g. letterbox.tga, what shipped screens use over the main menu); WITHOUT it the root keeps type=\"custom\" — an ENGINE-painted backdrop, which on the main menu means the bink video shows through. frame = {stencil, stencil_size?, brush, monogram?} border assets that DRAW_FRAME children render with (options.mnu uses BORDER2.tga/BOXTILE.tga/MONOGRAM.tga). delete={screen}: shows then deletes that Screen and everything on it (refused for the last one). set={screen, props}: props from {name, music_var (int), text_rsrc, cursor_file, background, frame} — one undo step per field. show={screen}: makes that Screen visible on the authoring canvas and selects it. screen = a Screen name or id from get_menu. Marks the menu dirty (except show); never save unless asked.",
 			{
-				"add": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] },
+				"add": { "type": "object", "properties": { "name": { "type": "string" }, "background": { "type": "string" }, "frame": { "type": "object" } }, "required": ["name"] },
 				"delete": { "type": ["string", "integer"] },
 				"set": { "type": "object", "properties": { "screen": { "type": ["integer", "string"] }, "props": { "type": "object" } }, "required": ["screen", "props"] },
 				"show": { "type": ["string", "integer"] },
 			}), Callable(self, "_tool_edit_screen"))
 	registry.register(_def("add_menu_widgets",
-			"BATCH-create Windows with initial properties — the whole batch is ONE undo step. rows: [{parent (a widget id, or a Screen name/id to add at that Screen's root), type (widget type NAME: WINDOW, STATIC, BUTTON, EDIT, MULTILINE_EDIT, LIST, CHECKBOX, RADIO, COMBOBOX, SCROLL, TABLE, SPINLIST, MULTI, MAP, GLOBE, LABEL, GOTO, MARQUEE_WND), rect [x,y,w,h] (menu-space pixels, parent-relative; later siblings draw on top), name?, text?, string_type? (\"id\"=string-table key, \"\"=literal), font? (.fnt name), flags? (int bitmask), group? (radio group)}]. NAMES are Command hooks — the engine matches widget names to game behavior; when reproducing shipped menus reuse their exact names. The batch validates up front: an unknown type or parent rejects the whole call. Max 50 rows. Wire navigation afterwards with set_widget_actions. Marks the menu dirty.",
+			"BATCH-create Windows with initial properties — the whole batch is ONE undo step. rows: [{parent (a widget id, or a Screen name/id to add at that Screen's root), type (widget type NAME: WINDOW, STATIC, BUTTON, EDIT, MULTILINE_EDIT, LIST, CHECKBOX, RADIO, COMBOBOX, SCROLL, TABLE, SPINLIST, MULTI, MAP, GLOBE, LABEL, GOTO, MARQUEE_WND), rect [x,y,w,h] (menu-space pixels, parent-relative; later siblings draw on top; w/h null or -1 = AUTO-SIZE, which box-art toggles and labels need — an explicit width STRETCHES appearance art in the game), name?, text?, string_type? (\"id\"=string-table key, \"\"=literal), font? (.fnt name), flags? (int bitmask), group? (radio group), appearances? (per-state rows [{state, type?, value?, map_state?, height?}])}]. Game-proven shaping: BUTTON/GOTO rows without appearances get the four EMPTY state rows shipped text buttons carry; CHECKBOX/RADIO need image rows (map_state 0..3 state-strip art like btn5.tga) or the game draws nothing — pass appearances; give text colors via font %DEF_TEXT_*% vars or edit_menu_widget color (colorless text renders unreadable in the game); a RADIO's own text clips to its art — pair an art-only radio with a sibling label STATIC instead. NAMES are Command hooks — reuse shipped names exactly when reproducing shipped menus. The batch validates up front: an unknown type or parent rejects the whole call. Max 50 rows. Wire navigation afterwards with set_widget_actions. Marks the menu dirty.",
 			{
 				"rows": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "object", "properties": {
 					"parent": { "type": ["integer", "string"] },
 					"type": { "type": "string" },
-					"rect": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
+					"rect": { "type": "array", "items": { "type": ["number", "null"] }, "minItems": 4, "maxItems": 4 },
 					"name": { "type": "string" }, "text": { "type": "string" }, "string_type": { "type": "string" },
 					"font": { "type": "string" }, "flags": { "type": "integer" }, "group": { "type": "integer" },
+					"appearances": { "type": "array", "items": { "type": "object" } },
 				}, "required": ["parent", "type", "rect"] } },
 			}, ["rows"], { "timeout_ms": 60000 }), Callable(self, "_tool_add_widgets"))
 	registry.register(_def("edit_menu_widget",
-			"Edit existing Windows — exactly one op per call. set={id, props}: props from {name (CAUTION: names are Command hooks — renaming a shipped widget can sever its game behavior), rect [x,y,w,h], text, string_type, font, flags (1 Hidden, 2 Disabled, 4 Checked, 8 Draw Frame, 16 Modal, 32 Read Only), group, datasource, orientation (HORIZONTAL|VERTICAL), color {slot 0-7 or name default_fg/default_bg/mouseover_fg/mouseover_bg/selected_fg/selected_bg/disabled_fg/disabled_bg, value}, texture {slot 0-3 or name default/mouseover/selected/disabled, value}, table_count, table_spacing} — one undo step per field; values like %TITLE_COLOR% are stylesheet references, preserve them verbatim. Actions/sounds belong to set_widget_actions. move_rects={rows:[{id, rect}]}: a layout pass — up to 100 rects in ONE undo step. reparent={id, parent (widget id or Screen name), index}: moves a Window in the tree (index = position among the new parent's children = z-order). delete={id}: removes the Window and its subtree (Screens and a Screen's root window are not deletable — Screens go through edit_menu_screen). Marks the menu dirty.",
+			"Edit existing Windows — exactly one op per call. set={id, props}: props from {name (CAUTION: names are Command hooks — renaming a shipped widget can sever its game behavior), rect [x,y,w,h] (w/h null or -1 = auto-size), text, string_type, font, flags (1 Hidden, 2 Disabled, 4 Checked, 8 Draw Frame, 16 Modal, 32 Read Only), group, datasource, orientation (HORIZONTAL|VERTICAL), color {slot 0-7 or name default_fg/default_bg/mouseover_fg/mouseover_bg/selected_fg/selected_bg/disabled_fg/disabled_bg, value}, texture {slot 0-3 or name default/mouseover/selected/disabled, value}, appearances [{state, type?, value?, map_state?, height?}] (REPLACES all per-state rows — the only way to author shipped empty-state rows or custom/backdrop rows; the slot setters always write type=\"image\"), frame {stencil, stencil_size?, brush, monogram?} (border assets DRAW_FRAME children render with — normally on a screen's root window), table_count, table_spacing} — one undo step per field; values like %TITLE_COLOR% are stylesheet references, preserve them verbatim. Actions/sounds belong to set_widget_actions. move_rects={rows:[{id, rect}]}: a layout pass — up to 100 rects in ONE undo step. reparent={id, parent (widget id or Screen name), index}: moves a Window in the tree (index = position among the new parent's children = z-order). delete={id}: removes the Window and its subtree (Screens and a Screen's root window are not deletable — Screens go through edit_menu_screen). Marks the menu dirty.",
 			{
 				"set": { "type": "object", "properties": { "id": { "type": "integer" }, "props": { "type": "object" } }, "required": ["id", "props"] },
 				"move_rects": { "type": "object", "properties": { "rows": { "type": "array", "maxItems": 100, "items": { "type": "object", "properties": { "id": { "type": "integer" }, "rect": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 } }, "required": ["id", "rect"] } } }, "required": ["rows"] },
@@ -82,7 +90,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"delete": { "type": "integer" },
 			}), Callable(self, "_tool_edit_widget"))
 	registry.register(_def("set_widget_actions",
-			"REPLACE a Window's Action list and/or sound list — the navigation and audio wiring. Actions are the ENTIRE behavior vocabulary the .mnu format carries; anything else a button does is a Command the engine binds to the widget's NAME. actions: full replacement list of [{type: \"screen\" (navigate; target=Screen name; file=another .mnu for a cross-menu jump) | \"window\" (show/hide a named Window on the same Screen — the Tab pattern; target=widget name, state=SHOW|HIDE|TOGGLE) | \"pop_screen\" (back) | \"url\" (target=address, external_browser?) | \"quit_game\", target?, state?, file?, external_browser?}]. Actions run in order on press. Validation: in-document screen targets must exist (error lists Screens); cross-file and unmatched window targets warn. sounds: full replacement list of [{state, trigger, file}] — triggers are sound-set names in the menu .lwf (MOUSE_OVER, CLICK_SELECT, ...). Each list replace is one undo step. Marks the menu dirty.",
+			"REPLACE a Window's Action list and/or sound list — the navigation and audio wiring. Actions are the ENTIRE behavior vocabulary the .mnu format carries; anything else a button does is a Command the engine binds to the widget's NAME. actions: full replacement list of [{type: \"screen\" (navigate; target=Screen name; file=another .mnu for a cross-menu jump) | \"window\" (show/hide a named Window on the same Screen — the Tab pattern; target=widget name, state=SHOW|HIDE|TOGGLE) | \"pop_screen\" (back) | \"url\" (target=address, external_browser?) | \"quit_game\", target?, state?, file?, external_browser?}]. Actions run in order on press. The game REQUIRES file= on every screen action (even a same-screen-file jump — an empty file crashes the original engine): for a target in THIS document with no file, the tool auto-fills the menu's own filename; an Untitled tab is allowed but warns (save_menu, then re-wire to bake it — analyze_menu's game_safety flags it meanwhile). Validation: in-document screen targets must exist (error lists Screens); cross-file and unmatched window targets warn; type tokens are case-insensitive (shipped files use SCREEN/POP_SCREEN), stored canonical lowercase. sounds: full replacement list of [{state, trigger, file}] — triggers are sound-set names in the menu .lwf (MOUSE_OVER, CLICK_SELECT, ...). Each list replace is one undo step. Marks the menu dirty.",
 			{
 				"id": { "type": "integer" },
 				"actions": { "type": "array", "items": { "type": "object", "properties": {
@@ -118,8 +126,11 @@ func register_all(registry: McpToolRegistry) -> void:
 				"format": { "type": "string", "enum": ["webp", "png"], "default": "webp" },
 				"quality": { "type": "number", "default": 0.8 },
 			}, [], { "timeout_ms": 30000 }), Callable(self, "_tool_menu_screenshot"))
+	# NOTE: the result's game_safety block applies corpus rules proven against the
+	# original engine (crash + visual classes from live debugging) — treat its
+	# errors as must-fix before a file ships to the game.
 	registry.register(_def("analyze_menu",
-			"Composition study of a Menu — the open one (no args, active tab) or ANY .mnu by name/path (read-only; nothing opens in the editor). Returns menu_size, per-Screen summaries, a widget-type histogram, the Action graph (Screen -> Screen edges incl. cross-file jumps and pops, plus per-Screen window show/hide counts), fonts in use, the text_rsrc string tables with id-key/literal text counts, and likely Command hooks — named pressable widgets WITHOUT authored Actions, where the engine binds game behavior by name. Use it to study a shipped menu (jo_main, jo_options, ...) before authoring in its style.",
+			"Composition study of a Menu — the open one (no args, active tab) or ANY .mnu by name/path (read-only; nothing opens in the editor). Returns menu_size, per-Screen summaries, a widget-type histogram, the Action graph (Screen -> Screen edges incl. cross-file jumps and pops, plus per-Screen window show/hide counts), fonts in use, the text_rsrc string tables with id-key/literal text counts, likely Command hooks — named pressable widgets WITHOUT authored Actions, where the engine binds game behavior by name — and game_safety: findings from corpus rules proven against the ORIGINAL game engine (screen actions without file= and malformed screen roots crash it; missing text colors/appearance rows/frame assets render wrong). Fix every game_safety error before a save ships to the game; use the study output to author in a shipped menu's style.",
 			{
 				"path": { "type": "string" },
 				"top": { "type": "integer", "default": 15, "minimum": 1, "maximum": 50 },
@@ -209,11 +220,25 @@ func _type_table() -> Dictionary:
 	return table
 
 
+# [x, y, w, h] in menu pixels; w/h may be null or -1 for auto-size (the writer
+# then omits RIGHT/BOTTOM — how shipped menus size art toggles and labels).
 func _rect_from(value: Variant) -> Variant:
 	if not (value is Array) or (value as Array).size() != 4:
 		return null
 	var a: Array = value
-	return Rect2(float(a[0]), float(a[1]), float(a[2]), float(a[3]))
+	if not (a[0] is float or a[0] is int) or not (a[1] is float or a[1] is int):
+		return null
+	var w := -1.0
+	if a[2] is float or a[2] is int:
+		w = float(a[2])
+	elif a[2] != null:
+		return null
+	var h := -1.0
+	if a[3] is float or a[3] is int:
+		h = float(a[3])
+	elif a[3] != null:
+		return null
+	return Rect2(float(a[0]), float(a[1]), w, h)
 
 
 static func _rect_out(rect: Rect2) -> Array:
@@ -372,6 +397,15 @@ func _widget_card(resource: Variant, id: int) -> Dictionary:
 		if not value.is_empty():
 			textures[TEXTURE_SLOTS[slot]] = value
 	card["textures"] = textures
+	card["appearances"] = resource.get_widget_appearances(id)
+	var rect_flags := int(resource.get_window_rect_flags(id))
+	if (rect_flags & NovaMnuDocument.RECT_HAS_RIGHT) == 0:
+		card["auto_width"] = true
+	if (rect_flags & NovaMnuDocument.RECT_HAS_BOTTOM) == 0:
+		card["auto_height"] = true
+	var frame: Dictionary = resource.get_window_frame(id)
+	if not String(frame.get("stencil", "")).is_empty() or not String(frame.get("brush", "")).is_empty():
+		card["frame"] = frame
 	if resource.get_item_count(id) > 0:
 		card["items"] = resource.get_items(id)
 	if int(resource.get_table_column_count(id)) > 0:
@@ -444,7 +478,32 @@ func _tool_edit_screen(args: Dictionary, ctx: McpToolContext) -> Variant:
 			var sid: int = editor.add_screen_action(name)
 			if sid < 0:
 				return McpToolResult.error("Screen add rejected.")
-			return { "ok": true, "op": "add", "screen_id": sid, "name": name, "screens": _screen_names(resource), "dirty": gate["doc"].get("is_dirty") }
+			# Game-shaped completion: every shipped screen carries TEXT_RSRC,
+			# CURSOR and a MUSICVAR — copy them from the first screen so the new
+			# one is valid in the original engine out of the box.
+			var screen_ids: Array = resource.get_screen_ids()
+			if screen_ids.size() > 1 and int(screen_ids[0]) != sid:
+				var first := int(screen_ids[0])
+				var copies := {
+					"music_var": resource.get_screen_music_var(first),
+					"text_rsrc": String(resource.get_screen_text_rsrc(first)),
+					"cursor": String(resource.get_screen_cursor_file(first)),
+				}
+				for prop in copies:
+					if copies[prop] is String and String(copies[prop]).is_empty():
+						continue
+					editor.apply_edit({ "target": "screen", "id": sid, "prop": prop, "value": copies[prop] })
+			var root_id := int(resource.get_screen_root_id(sid))
+			var background := String((args["add"] as Dictionary).get("background", ""))
+			if not background.is_empty():
+				# An image backdrop covers whatever plays underneath (the main
+				# menu's engine-painted bink shows through a "custom" root).
+				editor.apply_edit({ "target": "widget", "id": root_id, "prop": "appearances",
+						"value": [{ "state": "default", "type": "image", "value": background }] })
+			var frame_spec: Variant = (args["add"] as Dictionary).get("frame")
+			if frame_spec is Dictionary and not (frame_spec as Dictionary).is_empty():
+				editor.apply_edit({ "target": "widget", "id": root_id, "prop": "frame", "value": frame_spec })
+			return { "ok": true, "op": "add", "screen_id": sid, "root_id": root_id, "name": name, "screens": _screen_names(resource), "dirty": gate["doc"].get("is_dirty") }
 		"delete":
 			var sid := _resolve_screen(resource, args["delete"])
 			if sid < 0:
@@ -467,18 +526,30 @@ func _tool_edit_screen(args: Dictionary, ctx: McpToolContext) -> Variant:
 				return McpToolResult.error("No Screen '%s'. Screens: %s" % [spec.get("screen"), ", ".join(_screen_names(resource))])
 			var props: Dictionary = spec.get("props", {}) if spec.get("props") is Dictionary else {}
 			if props.is_empty():
-				return McpToolResult.error("set.props is required: {name | music_var | text_rsrc | cursor_file -> value}.")
+				return McpToolResult.error("set.props is required: {name | music_var | text_rsrc | cursor_file | background | frame -> value}.")
 			for key in props:
-				if not SCREEN_PROPS.has(String(key)):
-					return McpToolResult.error("Unknown screen prop '%s'. Valid: %s" % [key, ", ".join(SCREEN_PROPS)])
+				var key_name := String(key)
+				if not SCREEN_PROPS.has(key_name) and key_name != "background" and key_name != "frame":
+					return McpToolResult.error("Unknown screen prop '%s'. Valid: %s, background, frame" % [key, ", ".join(SCREEN_PROPS)])
 			if props.has("name"):
 				var new_name := String(props["name"])
 				var existing := _screen_id_named(resource, new_name)
 				if existing >= 0 and existing != sid:
 					return McpToolResult.error("A Screen named '%s' already exists." % new_name)
+			var root_id := int(resource.get_screen_root_id(sid))
 			for key in props:
-				var prop := "cursor" if String(key) == "cursor_file" else String(key)
-				editor.apply_edit({ "target": "screen", "id": sid, "prop": prop, "value": props[key] })
+				match String(key):
+					"background":
+						editor.apply_edit({ "target": "widget", "id": root_id, "prop": "appearances",
+								"value": [{ "state": "default", "type": "image", "value": String(props[key]) }] })
+					"frame":
+						if not (props[key] is Dictionary):
+							return McpToolResult.error("frame must be an object: {stencil, stencil_size?, brush, monogram?}.")
+						editor.apply_edit({ "target": "widget", "id": root_id, "prop": "frame", "value": props[key] })
+					"cursor_file":
+						editor.apply_edit({ "target": "screen", "id": sid, "prop": "cursor", "value": props[key] })
+					_:
+						editor.apply_edit({ "target": "screen", "id": sid, "prop": String(key), "value": props[key] })
 			return { "ok": true, "op": "set", "screen_id": sid, "name": resource.get_screen_name(sid), "dirty": gate["doc"].get("is_dirty") }
 		"show":
 			var sid := _resolve_screen(resource, args["show"])
@@ -504,6 +575,7 @@ func _tool_add_widgets(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if rows.size() > ROW_CAP:
 		return McpToolResult.error("Too many rows (%d) — max %d per call." % [rows.size(), ROW_CAP])
 	var types := _type_table()
+	var warnings: Array = []
 	var seam_rows: Array = []
 	for i in range(rows.size()):
 		var row: Dictionary = rows[i]
@@ -522,11 +594,22 @@ func _tool_add_widgets(args: Dictionary, ctx: McpToolContext) -> Variant:
 				return McpToolResult.error("Row %d: no Screen named '%s'. Screens: %s" % [i, parent, ", ".join(_screen_names(resource))])
 		var rect: Variant = _rect_from(row.get("rect"))
 		if rect == null:
-			return McpToolResult.error("Row %d: rect must be [x, y, w, h]." % i)
+			return McpToolResult.error("Row %d: rect must be [x, y, w, h] (w/h may be null or -1 for auto-size)." % i)
 		var props := {}
 		for key in ["name", "text", "string_type", "font", "flags", "group"]:
 			if row.has(key):
 				props[key] = row[key]
+		# Game-safety shaping (proven in the real engine): every shipped pressable
+		# carries APPEARANCE state rows — text buttons use four EMPTY rows; box
+		# toggles need image rows (map_state 0..3 art) the caller must pick.
+		if row.get("appearances") is Array and not (row.get("appearances") as Array).is_empty():
+			props["appearances"] = row.get("appearances")
+		elif type_name == "BUTTON" or type_name == "GOTO":
+			props["appearances"] = EMPTY_STATE_APPEARANCES.duplicate(true)
+		elif PRESSABLE_TYPES.has(type_name):
+			warnings.append("row %d: %s has no appearance rows — the game draws its box from APPEARANCE image rows (map_state 0..3, e.g. btn5.tga); pass row.appearances" % [i, type_name])
+		if type_name == "RADIO" and not String(row.get("text", "")).is_empty():
+			warnings.append("row %d: the game clips a radio's own label to its art width — author the label as a sibling STATIC (the shipped pattern: art-only radio + label static)" % i)
 		seam_rows.append({ "parent": parent_id, "type": types[type_name], "rect": rect, "props": props })
 	var results: Array = editor.add_widgets_batch(seam_rows)
 	await ctx.frames(1)
@@ -537,7 +620,7 @@ func _tool_add_widgets(args: Dictionary, ctx: McpToolContext) -> Variant:
 			ids.append(result["id"])
 			added += 1
 	return { "added": added, "failed": results.size() - added, "ids": ids, "rows": results,
-			"undo_steps": 1, "dirty": gate["doc"].get("is_dirty") }
+			"warnings": warnings, "undo_steps": 1, "dirty": gate["doc"].get("is_dirty") }
 
 
 func _tool_edit_widget(args: Dictionary, ctx: McpToolContext) -> Variant:
@@ -586,8 +669,16 @@ func _tool_edit_widget(args: Dictionary, ctx: McpToolContext) -> Variant:
 					"rect":
 						var rect: Variant = _rect_from(props[key])
 						if rect == null:
-							return McpToolResult.error("rect must be [x, y, w, h].")
+							return McpToolResult.error("rect must be [x, y, w, h] (w/h may be null or -1 for auto-size).")
 						editor.apply_edit({ "target": "widget", "id": id, "prop": "rect", "value": rect })
+					"appearances":
+						if not (props[key] is Array):
+							return McpToolResult.error("appearances must be a list of rows: [{state, type?, value?, map_state?, height?}, ...] (replaces all rows; empty-state rows = text button, image rows with map_state 0..3 = state-strip art).")
+						editor.apply_edit({ "target": "widget", "id": id, "prop": "appearances", "value": props[key] })
+					"frame":
+						if not (props[key] is Dictionary):
+							return McpToolResult.error("frame must be an object: {stencil, stencil_size?, brush, monogram?} — DRAW_FRAME children render with the nearest ancestor's frame (put it on the screen's root window).")
+						editor.apply_edit({ "target": "widget", "id": id, "prop": "frame", "value": props[key] })
 					_:
 						editor.apply_edit({ "target": "widget", "id": id, "prop": name, "value": props[key] })
 			return { "ok": true, "op": "set", "widget": _widget_card(resource, id), "dirty": gate["doc"].get("is_dirty") }
@@ -674,11 +765,13 @@ func _tool_set_actions(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if args.has("actions"):
 		var actions: Array = args.get("actions", []) if args.get("actions") is Array else []
 		var screen_of := _owning_screen(resource, id)
+		var own_file := String(gate["doc"].get("current_path")).get_file()
 		for i in range(actions.size()):
 			var action: Dictionary = actions[i]
 			var type := String(action.get("type", "")).to_lower()
 			if not ACTION_TYPES.has(type):
 				return McpToolResult.error("Action %d: unknown type '%s'. Types: %s" % [i, action.get("type"), ", ".join(ACTION_TYPES)])
+			action["type"] = type # shipped files carry SCREEN/POP_SCREEN too; store canonical lowercase
 			match type:
 				"screen":
 					var file := String(action.get("file", ""))
@@ -686,7 +779,17 @@ func _tool_set_actions(args: Dictionary, ctx: McpToolContext) -> Variant:
 					if file.is_empty():
 						if _screen_id_named(resource, target) < 0:
 							return McpToolResult.error("Action %d: no Screen named '%s' in this Menu. Screens: %s (cross-menu jumps need file=<other.mnu>)." % [i, target, ", ".join(_screen_names(resource))])
-					else:
+						# The game requires file= on EVERY screen action — shipped
+						# same-file jumps name their own file (mp.mnu does); an empty
+						# file crashed the original engine. The in-editor preview
+						# navigates same-file regardless, so an Untitled tab is
+						# allowed with a warning and analyze_menu flags it until saved.
+						if own_file.is_empty():
+							warnings.append("action %d: this tab is Untitled — leaving file= empty; the GAME needs file= on screen actions, so save_menu then re-wire to auto-fill it (analyze_menu flags it meanwhile)" % i)
+						else:
+							action["file"] = own_file
+							warnings.append("action %d: file auto-filled to '%s' (the game crashes on screen actions without file=)" % [i, own_file])
+					elif own_file.is_empty() or file.nocasecmp_to(own_file) != 0:
 						warnings.append("action %d: cross-menu target %s/%s not validated (jumps are host policy)" % [i, file, target])
 				"window":
 					var state := String(action.get("state", "")).to_lower()
@@ -967,12 +1070,36 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var text_files := {}
 	var widget_total := 0
 	var screens: Array = []
-	for sid in resource.get_screen_ids():
+	var safety: Array = []
+	var all_screen_ids: Array = resource.get_screen_ids()
+	for sid in all_screen_ids:
 		var screen_name := String(resource.get_screen_name(sid))
 		var rsrc := String(resource.get_screen_text_rsrc(sid))
 		if not rsrc.is_empty():
 			text_files[rsrc] = true
-		var stack: Array = [resource.get_screen_root_id(sid)]
+		# Screen-root shape rules, each one a proven original-engine incident:
+		# a root without full POSITION + an APPEARANCE row crashed it; "custom"
+		# on a covering screen let the main menu's bink video show through.
+		var root_id := int(resource.get_screen_root_id(sid))
+		var root_apps: Array = resource.get_widget_appearances(root_id)
+		if int(resource.get_window_rect_flags(root_id)) != 15:
+			safety.append({ "level": "error", "rule": "root_position", "screen": screen_name,
+					"detail": "the root window needs a full 4-corner POSITION — the original engine crashes on a screen whose root has none" })
+		if root_apps.is_empty():
+			safety.append({ "level": "error", "rule": "root_appearance", "screen": screen_name,
+					"detail": "the root window needs an APPEARANCE row (type=\"custom\" engine backdrop, or type=\"image\" art like letterbox.tga)" })
+		if String(resource.get_widget_name(root_id)) != "MAIN":
+			safety.append({ "level": "warn", "rule": "root_name", "screen": screen_name,
+					"detail": "every shipped screen root is named MAIN; '%s' is unproven in the original engine" % resource.get_widget_name(root_id) })
+		if sid != int(all_screen_ids[0]):
+			for app: Dictionary in root_apps:
+				if String(app.get("type", "")) == "custom":
+					safety.append({ "level": "info", "rule": "custom_backdrop", "screen": screen_name,
+							"detail": "type=\"custom\" root appearance is an ENGINE-painted backdrop — whatever plays underneath (e.g. the main menu bink) shows through; covering screens use an image background" })
+		var root_frame: Dictionary = resource.get_window_frame(root_id)
+		var screen_has_frame: bool = not String(root_frame.get("stencil", "")).is_empty() \
+				or not String(root_frame.get("brush", "")).is_empty()
+		var stack: Array = [root_id]
 		var count := 0
 		while not stack.is_empty():
 			var id := int(stack.pop_front())
@@ -983,7 +1110,8 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 			var font := String(resource.get_widget_font(id))
 			if not font.is_empty():
 				fonts[font] = int(fonts.get(font, 0)) + 1
-			if not String(resource.get_widget_text(id)).is_empty():
+			var widget_text := String(resource.get_widget_text(id))
+			if not widget_text.is_empty():
 				if String(resource.get_widget_string_type(id)) == "id":
 					id_keys += 1
 				else:
@@ -998,6 +1126,9 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 					var file := String(action.get("file", ""))
 					if not file.is_empty():
 						cross_files[file] = true
+					else:
+						safety.append({ "level": "error", "rule": "screen_action_file", "screen": screen_name, "widget": id, "name": name,
+								"detail": "screen actions REQUIRE file= even for same-file jumps (the original engine crashes without it; set_widget_actions auto-fills it)" })
 				elif a_type == "window":
 					window_wiring[screen_name] = int(window_wiring.get(screen_name, 0)) + 1
 				elif a_type.begins_with("pop"):
@@ -1007,6 +1138,29 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 				if w_type == NovaMnuDocument.TYPE_BUTTON or w_type == NovaMnuDocument.TYPE_CHECKBOX \
 						or w_type == NovaMnuDocument.TYPE_RADIO or w_type == NovaMnuDocument.TYPE_GOTO:
 					command_hooks[name] = int(command_hooks.get(name, 0)) + 1
+			# Widget-shape rules (F4/F5/F8). Each one is calibrated to shipped data:
+			# only flag what shipped menus NEVER do, so analyze stays quiet on the
+			# game's own files (the false-positive gate). The narrower visual nits
+			# from the demo — a label clipped by narrow radio art, art stretched by
+			# a width — are NOT here: shipped tabs/toggles do exactly those and
+			# render fine, so they live only as advisories in add_menu_widgets.
+			if id != root_id:
+				var apps: Array = resource.get_widget_appearances(id)
+				if PRESSABLE_TYPES.has(type_name) and apps.is_empty():
+					safety.append({ "level": "warn", "rule": "pressable_appearance", "screen": screen_name, "widget": id, "name": name,
+							"detail": "%s has no APPEARANCE rows — shipped pressables always carry them (empty state rows = text button; image map_state rows = box art)" % type_name })
+				if not widget_text.is_empty() and not _has_text_color(resource, id):
+					safety.append({ "level": "warn", "rule": "text_color", "screen": screen_name, "widget": id, "name": name,
+							"detail": "text with no FG color (own or inherited) renders unreadable dark red in the game — set color default_fg (statics: c4c4c4; pressables: %DEF_TEXT_FG% etc.)" })
+				if (int(resource.get_widget_flags(id)) & 8) != 0 and not screen_has_frame:
+					safety.append({ "level": "warn", "rule": "draw_frame_assets", "screen": screen_name, "widget": id, "name": name,
+							"detail": "DRAW_FRAME draws nothing without FRAME assets on the screen root — set edit_menu_screen props.frame {stencil, brush, monogram}" })
+				if type_name == "LIST" and not bool(resource.widget_has_scrollbar(id)):
+					safety.append({ "level": "warn", "rule": "list_scrollbar", "screen": screen_name, "widget": id, "name": name,
+							"detail": "every shipped LIST carries a SCROLLBAR subtree; one without is unproven in the original engine (not yet authorable here — prefer statics)" })
+				if type_name == "SPINLIST" and not bool(resource.widget_has_spin_arrows(id)):
+					safety.append({ "level": "warn", "rule": "spinlist_arrows", "screen": screen_name, "widget": id, "name": name,
+							"detail": "every shipped SPINLIST carries SPINUP/SPINDOWN arrow structures; one without is unproven in the original engine (not yet authorable here)" })
 			for child in resource.get_child_ids(id):
 				stack.append(child)
 		screens.append({ "name": screen_name, "widgets": count })
@@ -1015,6 +1169,12 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 		hooks.append([command_hooks[name], name])
 	hooks.sort_custom(func(a, b): return a[0] > b[0])
 	var size: Vector2i = resource.get_menu_size()
+	var safety_errors := 0
+	var safety_warnings := 0
+	for finding: Dictionary in safety:
+		match String(finding.get("level", "")):
+			"error": safety_errors += 1
+			"warn": safety_warnings += 1
 	return {
 		"source": source,
 		"menu_size": [size.x, size.y],
@@ -1027,7 +1187,21 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 		"fonts": fonts,
 		"strings": { "text_rsrc_files": text_files.keys(), "id_keys": id_keys, "literal_texts": literals },
 		"command_hooks": hooks.slice(0, top).map(func(row): return { "name": row[1], "count": row[0] }),
+		"game_safety": { "errors": safety_errors, "warnings": safety_warnings,
+				"findings": safety.slice(0, 100) },
 	}
+
+
+# True when a text-bearing widget gets a default FG color from itself or any
+# ancestor FONT block (%VAR% stylesheet refs count) — without one the original
+# engine renders text in an unreadable dark red.
+func _has_text_color(resource: Variant, id: int) -> bool:
+	var current := id
+	while current >= 0 and resource.widget_exists(current) and not resource.is_screen(current):
+		if not String(resource.get_widget_color(current, 0)).is_empty():
+			return true
+		current = resource.get_parent_id(current)
+	return false
 
 
 func _tool_save(args: Dictionary, ctx: McpToolContext) -> Variant:

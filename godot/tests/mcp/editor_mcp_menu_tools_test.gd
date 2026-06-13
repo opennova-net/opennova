@@ -93,7 +93,11 @@ func test_headline_authoring_and_preview_loop() -> void:
 	var wired: McpToolResult = await _call("set_widget_actions", { "id": button_id,
 			"actions": [{ "type": "screen", "target": "SECOND" }] })
 	assert_false(wired.is_error, str(wired.content))
-	assert_eq((wired.structured["warnings"] as Array).size(), 0)
+	# This menu is Untitled, so the same-file action wires with an empty file= and
+	# a single "save before shipping" warning (the preview still navigates it).
+	var warns: Array = wired.structured["warnings"]
+	assert_true(warns.is_empty() or String(warns[0]).contains("Untitled"),
+			"Only the expected Untitled file= note, if any: %s" % [warns])
 
 	# Read back: the tree carries the button with its action.
 	var menu: McpToolResult = await _call("get_menu", { "detail": "full" })
@@ -404,3 +408,118 @@ func test_malformed_arg_shapes_error_instead_of_silently_passing() -> void:
 	var bad_press: McpToolResult = await _call("preview_menu", { "op": "press", "widget": [1] })
 	assert_true(bad_press.is_error, "press with an array widget ref errors")
 	await _call("preview_menu", { "op": "off" })
+
+
+func test_screen_add_is_game_shaped_with_background_and_copies_props() -> void:
+	# Give screen 1 the shipped per-screen props, then add a second screen and
+	# expect them copied plus a game-shaped root with an image backdrop + frame.
+	var first := String(_resource().get_screen_name(_resource().get_screen_ids()[0]))
+	var seeded: McpToolResult = await _call("edit_menu_screen", { "set": { "screen": first, "props": {
+		"music_var": 7, "text_rsrc": "menutxt.BIN", "cursor_file": "newarow1.tga" } } })
+	assert_false(seeded.is_error, str(seeded.content))
+	var added: McpToolResult = await _call("edit_menu_screen", { "add": { "name": "SHAPED",
+			"background": "letterbox.tga",
+			"frame": { "stencil": "BORDER2.tga", "stencil_size": 32, "brush": "BOXTILE.tga" } } })
+	assert_false(added.is_error, str(added.content))
+	var sid := int(added.structured["screen_id"])
+	var root_id := int(added.structured["root_id"])
+	assert_eq(int(_resource().get_screen_music_var(sid)), 7, "music_var copied from screen 1")
+	assert_eq(String(_resource().get_screen_text_rsrc(sid)), "menutxt.BIN", "text_rsrc copied")
+	assert_eq(String(_resource().get_screen_cursor_file(sid)), "newarow1.tga", "cursor copied")
+	assert_eq(String(_resource().get_widget_name(root_id)), "MAIN")
+	var apps: Array = _resource().get_widget_appearances(root_id)
+	assert_eq(apps.size(), 1)
+	assert_eq(String(apps[0]["type"]), "image", "background swaps the custom row for an image backdrop")
+	assert_eq(String(apps[0]["value"]), "letterbox.tga")
+	assert_eq(String(_resource().get_window_frame(root_id)["brush"]), "BOXTILE.tga")
+	# The widget card surfaces the new structure for copying.
+	var card: McpToolResult = await _call("get_menu", { "widget": root_id })
+	assert_true((card.structured["appearances"] as Array).size() == 1)
+	assert_true(card.structured.has("frame"))
+
+
+func test_screen_actions_auto_fill_their_own_file() -> void:
+	# The game requires file= on every screen action (same-file jumps name their
+	# own file — mp.mnu's proven pattern); Untitled documents must save first.
+	var added_screen: McpToolResult = await _call("edit_menu_screen", { "add": { "name": "SECOND" } })
+	assert_false(added_screen.is_error)
+	var first := String(_resource().get_screen_name(_resource().get_screen_ids()[0]))
+	var added: McpToolResult = await _call("add_menu_widgets", { "rows": [
+		{ "parent": first, "type": "BUTTON", "rect": [10, 10, 100, 25], "name": "Jump" },
+	] })
+	var btn := int(added.structured["ids"][0])
+
+	# Untitled: the action is allowed (the in-editor preview navigates same-file)
+	# but file= stays empty with a warning — the game needs it before shipping.
+	var untitled: McpToolResult = await _call("set_widget_actions", { "id": btn,
+			"actions": [{ "type": "screen", "target": "SECOND" }] })
+	assert_false(untitled.is_error, str(untitled.content))
+	assert_eq(String((untitled.structured["actions"] as Array)[0]["file"]), "", "Untitled leaves file empty")
+	assert_true(String("\n".join(PackedStringArray(untitled.structured["warnings"]))).contains("Untitled"))
+
+	# Saved: re-wiring auto-fills the action with the menu's own filename.
+	var saved: McpToolResult = await _call("save_menu", { "path": _abs(SAVE_DIR).path_join("autofill.mnu") })
+	assert_false(saved.is_error, str(saved.content))
+	var wired: McpToolResult = await _call("set_widget_actions", { "id": btn,
+			"actions": [{ "type": "SCREEN", "target": "SECOND" }] })
+	assert_false(wired.is_error, str(wired.content))
+	var action: Dictionary = (wired.structured["actions"] as Array)[0]
+	assert_eq(String(action["file"]), "autofill.mnu", "file auto-filled with the menu's own name")
+	assert_eq(String(action["type"]), "screen", "shipped-case token stored canonical lowercase")
+	assert_true(String("\n".join(PackedStringArray(wired.structured["warnings"]))).contains("auto-filled"))
+
+
+func test_add_widgets_appearance_defaults_and_game_warnings() -> void:
+	var first := String(_resource().get_screen_name(_resource().get_screen_ids()[0]))
+	var added: McpToolResult = await _call("add_menu_widgets", { "rows": [
+		{ "parent": first, "type": "BUTTON", "rect": [10, 10, 100, 25], "name": "PlainBtn" },
+		{ "parent": first, "type": "CHECKBOX", "rect": [10, 40, null, 25], "name": "BareChk" },
+		{ "parent": first, "type": "RADIO", "rect": [10, 70, null, 25], "name": "LabeledRad", "text": "Oops" },
+	] })
+	assert_false(added.is_error, str(added.content))
+	var btn := int(added.structured["ids"][0])
+	var rows: Array = _resource().get_widget_appearances(btn)
+	assert_eq(rows.size(), 4, "Buttons default to the four shipped empty state rows.")
+	assert_eq(String(rows[0]["state"]), "default")
+	assert_eq(String(rows[0]["type"]), "")
+	var chk := int(added.structured["ids"][1])
+	assert_eq((_resource().get_widget_appearances(chk) as Array).size(), 0, "Toggles get no silent default art.")
+	assert_eq(_resource().get_window_rect_flags(chk) & NovaMnuDocument.RECT_HAS_RIGHT, 0, "null width = auto-size")
+	var warnings := String("\n".join(PackedStringArray(added.structured["warnings"])))
+	assert_true(warnings.contains("CHECKBOX"), "Bare toggle art warning")
+	assert_true(warnings.contains("sibling STATIC"), "Radio-label warning teaches the shipped pattern")
+
+
+func test_game_safety_flags_broken_shapes() -> void:
+	# Author the pre-fix OPENNOVA shapes straight onto the resource (the tools
+	# refuse them now) and expect the analyzer to call each one out.
+	var first_sid := int(_resource().get_screen_ids()[0])
+	var root := int(_resource().get_screen_root_id(first_sid))
+	var bad_btn := int(_resource().add_widget(root, NovaMnuDocument.TYPE_BUTTON, Rect2(10, 10, 100, 0)))
+	_resource().set_widget_name(bad_btn, "BadJump")
+	_resource().set_widget_text(bad_btn, "Crash me")
+	_resource().set_widget_actions(bad_btn, [{ "type": "screen", "target": "NOWHERE", "file": "", "state": "" }])
+	var bad_list := int(_resource().add_widget(root, NovaMnuDocument.TYPE_LIST, Rect2(10, 40, 200, 100)))
+	_resource().set_widget_name(bad_list, "BareList")
+
+	var analyzed: McpToolResult = await _call("analyze_menu")
+	assert_false(analyzed.is_error, str(analyzed.content))
+	var safety: Dictionary = analyzed.structured["game_safety"]
+	assert_gt(int(safety["errors"]), 0, "The crash-class rules fire")
+	var rules := {}
+	for finding: Dictionary in safety["findings"]:
+		rules[String(finding["rule"])] = true
+	assert_true(rules.has("screen_action_file"), "empty file= on a screen action (the crash)")
+	assert_true(rules.has("pressable_appearance"), "pressable without appearance rows")
+	assert_true(rules.has("text_color"), "uncolored text")
+	assert_true(rules.has("list_scrollbar"), "scrollbar-less list")
+
+
+func test_game_safety_is_quiet_on_shipped_menus() -> void:
+	# False-positive gate: a shipped menu must analyze with ZERO errors (warns
+	# are tolerated only if absent here — keep shipped files fully quiet).
+	var analyzed: McpToolResult = await _call("analyze_menu", { "path": _abs(JO_OPTIONS) })
+	assert_false(analyzed.is_error, str(analyzed.content))
+	var safety: Dictionary = analyzed.structured["game_safety"]
+	assert_eq(int(safety["errors"]), 0, "No errors on jo_options.mnu: %s" % [safety["findings"]])
+	assert_eq(int(safety["warnings"]), 0, "No warnings on jo_options.mnu: %s" % [safety["findings"]])

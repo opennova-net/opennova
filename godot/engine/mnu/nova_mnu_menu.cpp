@@ -442,7 +442,12 @@ bool NovaMnuMenu::dispatch_action(const String &p_type, const String &p_target,
 		return handle_window_action(p_target, p_window_state);
 	}
 	if (type == "screen") {
-		if (p_file.is_empty()) {
+		// Shipped menus spell same-file jumps with their own filename
+		// (mp.mnu: <ACTION type="SCREEN" file="mp.mnu">MULTI_PLAYER_HOST</ACTION>;
+		// a screen action with NO file at all crashes the original engine), so a
+		// file matching this menu's own name is same-file navigation.
+		if (p_file.is_empty() ||
+				(!menu_file_.is_empty() && p_file.nocasecmp_to(menu_file_) == 0)) {
 			return navigate_to_screen(p_target);
 		}
 		// Cross-.mnu jumps are host policy; the interactive preview has no host to load
@@ -714,6 +719,8 @@ void NovaMnuMenu::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("navigate_to_screen", "name"), &NovaMnuMenu::navigate_to_screen);
 	ClassDB::bind_method(D_METHOD("pop_screen"), &NovaMnuMenu::pop_screen);
 	ClassDB::bind_method(D_METHOD("navigate_to_menu", "file", "target_screen"), &NovaMnuMenu::navigate_to_menu);
+	ClassDB::bind_method(D_METHOD("set_menu_file", "file"), &NovaMnuMenu::set_menu_file);
+	ClassDB::bind_method(D_METHOD("get_menu_file"), &NovaMnuMenu::get_menu_file);
 	ClassDB::bind_method(D_METHOD("quit_game"), &NovaMnuMenu::quit_game);
 	ClassDB::bind_method(D_METHOD("handle_window_action", "target", "state"), &NovaMnuMenu::handle_window_action);
 	ClassDB::bind_method(D_METHOD("dispatch_action", "type", "target", "file", "window_state"),

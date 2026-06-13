@@ -270,7 +270,10 @@ func _refresh_preview() -> void:
 	var doc := _document_resource()
 	_resolve_text_resource(doc)  # refresh the cached table + path
 	_resolve_stylesheet_resource()
-	_canvas.set_menu(doc, _resource_root, _text_resource, _stylesheet)
+	var menu_file := ""
+	if _document != null:
+		menu_file = String(_document.get("current_path")).get_file()
+	_canvas.set_menu(doc, _resource_root, _text_resource, _stylesheet, menu_file)
 
 
 # Best-effort: resolve the document's first non-empty screen text resource through
@@ -869,6 +872,8 @@ func _read_prop(doc: NovaMnuDocument, target: String, id: int, prop: String, slo
 		"flags": return doc.get_widget_flags(id)
 		"sounds": return doc.get_widget_sounds(id)
 		"actions": return doc.get_widget_actions(id)
+		"appearances": return doc.get_widget_appearances(id)
+		"frame": return doc.get_window_frame(id)
 		"table_count": return doc.get_table_column_count(id)
 		"table_spacing": return doc.get_table_column_spacing(id)
 	return null
@@ -896,6 +901,8 @@ func _write_prop(doc: NovaMnuDocument, target: String, id: int, prop: String, sl
 		"flags": doc.set_widget_flags(id, int(value))
 		"sounds": doc.set_widget_sounds(id, value)
 		"actions": doc.set_widget_actions(id, value)
+		"appearances": doc.set_widget_appearances(id, value)
+		"frame": doc.set_window_frame(id, value)
 		"table_count": doc.set_table_column_count(id, int(value))
 		"table_spacing": doc.set_table_column_spacing(id, int(value))
 

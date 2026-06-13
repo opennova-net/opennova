@@ -176,6 +176,9 @@ func open_menu(file: String, target_screen: String) -> bool:
 	_current_file = file
 	_selected_mission = ""
 	_menu_size = Vector2(doc.get_menu_size())
+	# Shipped same-file screen jumps name their own file (mp.mnu does); the menu
+	# routes them as in-menu navigation by comparing against its own basename.
+	_menu.set_menu_file(file.get_file())
 	_menu.menu = doc  # in-tree -> rebuilds synchronously, fires screen/music signals
 	if not target_screen.is_empty():
 		_menu.show_screen(target_screen)

@@ -106,8 +106,14 @@ Menu authoring is first-class too: `get_menu` / `analyze_menu` to study,
 `add_menu_widgets` / `edit_menu_widget` / `set_widget_actions` /
 `edit_widget_items` to build (snapshot-undo batches, validated Action wiring),
 `menu_screenshot` for the WYSIWYG board, and `preview_menu` — the Interactive
-preview where pressing a widget walks the real navigation, sandboxed.
-There is **no script or code execution** on this surface.
+preview where pressing a widget walks the real navigation, sandboxed. The menu
+tools encode the conventions the original NovaLogic engine requires — new
+screens get a game-shaped root, `set_widget_actions` auto-fills the `file=` the
+engine demands on screen jumps, widgets carry their state appearance rows — and
+`analyze_menu` reports a `game_safety` audit (the crash-class and render-class
+rules learned by debugging an authored menu against the real game), so a file
+that previews cleanly also runs in the shipped engine. There is **no script or
+code execution** on this surface.
 
 It speaks MCP Streamable HTTP on `http://127.0.0.1:8975/mcp` and starts with
 the editor by default (never in headless runs). The repo's `.mcp.json` points

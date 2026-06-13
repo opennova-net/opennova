@@ -1593,3 +1593,149 @@ func test_document_save_as_path_adopts_path_and_validates() -> void:
 	assert_eq(reloaded.load_from_bytes(FileAccess.get_file_as_bytes(path)), OK, "The saved menu round-trips.")
 	DirAccess.remove_absolute(path)
 	DirAccess.remove_absolute(dir)
+
+
+func test_add_screen_creates_a_game_shaped_root() -> void:
+	# The original engine crashes on a screen whose root lacks a full POSITION
+	# and an APPEARANCE row; shipped roots are always named MAIN.
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var editordoc = pair[1]
+	var doc: NovaMnuDocument = editordoc.resource
+	var sid: int = ed.add_screen_action("SHAPED")
+	var root := doc.get_screen_root_id(sid)
+	assert_eq(doc.get_widget_name(root), "MAIN", "Shipped screens always name the root MAIN.")
+	var rect := doc.get_window_rect(root)
+	assert_eq(rect, Rect2(0, 0, 800, 600), "Full-canvas root position.")
+	assert_eq(doc.get_window_rect_flags(root), 15, "All four POSITION corners explicit.")
+	var apps: Array = doc.get_widget_appearances(root)
+	assert_eq(apps.size(), 1, "One appearance row on the fresh root.")
+	assert_eq(String(apps[0]["type"]), "custom", "Engine-backdrop row by default.")
+	assert_eq(String(apps[0]["state"]), "default")
+	await get_tree().process_frame
+
+
+func test_appearances_and_frame_round_trip_through_apply_edit() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var editordoc = pair[1]
+	var doc: NovaMnuDocument = editordoc.resource
+	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
+	var results: Array = ed.add_widgets_batch([
+		{ "parent": root, "type": NovaMnuDocument.TYPE_BUTTON, "rect": Rect2(10, 10, 100, 24),
+			"props": { "name": "AppBtn", "appearances": [
+				{ "state": "default" }, { "state": "mouseover" },
+			] } },
+	])
+	var btn := int(results[0]["id"])
+	var rows: Array = doc.get_widget_appearances(btn)
+	assert_eq(rows.size(), 2, "Batch props can seed appearance rows.")
+	assert_eq(String(rows[0]["state"]), "default")
+	assert_eq(String(rows[0]["type"]), "", "Empty-state rows carry no type (the shipped text-button shape).")
+
+	ed.apply_edit({ "target": "widget", "id": btn, "prop": "appearances", "value": [
+		{ "state": "default", "type": "image", "value": "btn5.tga", "map_state": 0, "height": 24 },
+	] })
+	rows = doc.get_widget_appearances(btn)
+	assert_eq(rows.size(), 1, "apply_edit replaces the whole row list.")
+	assert_eq(String(rows[0]["value"]), "btn5.tga")
+	assert_eq(int(rows[0]["map_state"]), 0)
+	ed.undo()
+	assert_eq((doc.get_widget_appearances(btn) as Array).size(), 2, "Appearances undo per edit.")
+
+	# Use a fresh screen's root — add_screen makes one with NO frame, so the undo
+	# target is unambiguous (the fixture root already ships its own frame).
+	var fresh := int(ed.add_screen_action("FRAMED"))
+	var fresh_root := int(doc.get_screen_root_id(fresh))
+	assert_eq(String(doc.get_window_frame(fresh_root)["stencil"]), "", "Fresh roots have no frame.")
+	ed.apply_edit({ "target": "widget", "id": fresh_root, "prop": "frame", "value": {
+		"stencil": "BORDER2.tga", "stencil_size": 32, "brush": "BOXTILE.tga", "monogram": "MONOGRAM.tga",
+	} })
+	var frame: Dictionary = doc.get_window_frame(fresh_root)
+	assert_eq(String(frame["stencil"]), "BORDER2.tga")
+	assert_eq(int(frame["stencil_size"]), 32)
+	assert_eq(String(frame["brush"]), "BOXTILE.tga")
+	ed.undo()
+	assert_eq(String(doc.get_window_frame(fresh_root)["stencil"]), "", "Frame undoes.")
+	await get_tree().process_frame
+
+
+func test_auto_size_rects_omit_extents_on_disk() -> void:
+	# Shipped box-art toggles omit RIGHT (the engine stretches art across an
+	# explicit width); a negative rect extent authors that shape.
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var editordoc = pair[1]
+	var doc: NovaMnuDocument = editordoc.resource
+	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
+	var results: Array = ed.add_widgets_batch([
+		{ "parent": root, "type": NovaMnuDocument.TYPE_CHECKBOX, "rect": Rect2(20, 20, -1, 25),
+			"props": { "name": "AutoChk" } },
+	])
+	var chk := int(results[0]["id"])
+	var flags := doc.get_window_rect_flags(chk)
+	assert_eq(flags & NovaMnuDocument.RECT_HAS_RIGHT, 0, "Auto width leaves RIGHT unset.")
+	assert_ne(flags & NovaMnuDocument.RECT_HAS_BOTTOM, 0, "Explicit height keeps BOTTOM.")
+
+	var dir := OS.get_cache_dir().path_join("opennova_mnu_autosize_test")
+	var path := dir.path_join("autosize.mnu")
+	editordoc.mark_dirty()
+	assert_eq(editordoc.save_as_path(path), OK)
+	var text := FileAccess.get_file_as_string(path)
+	var at := text.find("AutoChk")
+	assert_gt(at, 0)
+	# Slice exactly AutoChk's own element (to its closing tag) — a wider window
+	# would spill into the next screen's root, which legitimately has RIGHT.
+	var block := text.substr(at, text.find("</WINDOW>", at) - at)
+	assert_false(block.contains("<RIGHT>"), "The writer omits RIGHT for auto width.")
+	assert_true(block.contains("<BOTTOM>"), "Explicit height still writes BOTTOM.")
+	DirAccess.remove_absolute(path)
+	DirAccess.remove_absolute(dir)
+	await get_tree().process_frame
+
+
+func test_reopening_a_clean_tab_reloads_from_disk() -> void:
+	# An externally rewritten file (another tool, a hand edit) must not be
+	# shadowed by a stale clean tab; unsaved edits still win.
+	var ws = autofree(MnuWorkspaceScript.new())
+	var host := Control.new()
+	host.size = Vector2(800, 600)
+	add_child_autofree(host)
+	ws.mount_viewport(host)
+	await get_tree().process_frame
+
+	var dir := OS.get_cache_dir().path_join("opennova_mnu_reload_test")
+	DirAccess.make_dir_recursive_absolute(dir)
+	var path := dir.path_join("reload_probe.mnu")
+	var v1 := "<SCREEN><NAME>ONE</NAME><WINDOW type=\"window\" name=\"MAIN\"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION></WINDOW></SCREEN>"
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(v1)
+	f.close()
+	assert_eq(int(ws.open_file(path)), OK)
+	var doc = ws.get("_document")
+	assert_eq(String(doc.resource.get_screen_name(doc.resource.get_screen_ids()[0])), "ONE")
+
+	# Rewrite on disk; reopening the CLEAN tab picks up the new content.
+	f = FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(v1.replace("ONE", "TWO"))
+	f.close()
+	assert_eq(int(ws.open_file(path)), OK)
+	doc = ws.get("_document")
+	assert_eq(String(doc.resource.get_screen_name(doc.resource.get_screen_ids()[0])), "TWO",
+			"A clean tab reloads from disk.")
+
+	# Dirty the tab; another reopen keeps the unsaved edits.
+	var ed = ws.get_editor_document()
+	ed.apply_edit({ "target": "screen", "id": doc.resource.get_screen_ids()[0], "prop": "name", "value": "EDITED" })
+	assert_true(bool(doc.is_dirty))
+	f = FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(v1.replace("ONE", "THREE"))
+	f.close()
+	assert_eq(int(ws.open_file(path)), OK)
+	doc = ws.get("_document")
+	assert_eq(String(doc.resource.get_screen_name(doc.resource.get_screen_ids()[0])), "EDITED",
+			"Unsaved edits win over the on-disk rewrite.")
+	DirAccess.remove_absolute(path)
+	DirAccess.remove_absolute(dir)
+	ws.release_viewport()
+	await get_tree().process_frame

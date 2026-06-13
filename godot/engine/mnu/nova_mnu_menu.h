@@ -86,6 +86,11 @@ private:
 	bool build_on_ready_ = true;
 	int unresolved_asset_count_ = 0;
 
+	// This menu's own .mnu basename (e.g. "main.mnu"), set by the host that
+	// built it. Shipped screen actions spell same-file jumps with their own
+	// filename, so dispatch compares against this (case-insensitive).
+	String menu_file_;
+
 	// Within-menu back navigation stack of screen names (cross-.mnu jumps are
 	// host policy, emitted as menu_requested rather than pushed here).
 	Vector<String> nav_stack_;
@@ -181,6 +186,10 @@ public:
 
 	void set_build_on_ready(bool p_value) { build_on_ready_ = p_value; }
 	bool get_build_on_ready() const { return build_on_ready_; }
+
+	// The menu's own .mnu basename for self-file screen actions (see menu_file_).
+	void set_menu_file(const String &p_file) { menu_file_ = p_file; }
+	String get_menu_file() const { return menu_file_; }
 
 	// --- Build ---
 	// build() emits screen_changed / music_changed for the initial screen, so a
