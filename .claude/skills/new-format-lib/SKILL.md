@@ -18,6 +18,9 @@ roundtrip), `libs/refs` (most recent conventions).
 - Behavior taken from the original binary gets inline `[orig: Name @ 0xADDR]`
   citations (retail Jointops.exe unless stated; conventions in
   `docs/README.md`). RE findings land via the `re-doc` skill.
+- Witness the original loader first with the `engine-research` skill; after the
+  port, verify with `grill-ida` — the port is a faithful translation, never our
+  own version (CLAUDE.md conventions).
 
 ## 1. Library skeleton
 

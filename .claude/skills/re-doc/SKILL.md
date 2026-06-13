@@ -52,7 +52,8 @@ when a policy decision crystallised: `docs/adr/0008-pff-writer-policy.md`.
   without the original transcript.
 
 Done = doc landed in the format above, the cross-file updates applied, and the
-evidence tests pass. This skill is the landing half of a grill: the user-level
-`grill-ida` skill produces the evidence and inline source/IDA fixes; `re-doc`
+evidence tests pass. This skill is the landing half: the project `grill-ida`
+skill produces verification evidence and inline source/IDA fixes,
+`engine-research` produces original-engine findings in `notes/`; `re-doc`
 defines what the committed record must contain. End grill sessions by invoking
 this skill.
