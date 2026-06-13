@@ -26,7 +26,7 @@ func _init() -> void:
 	if not missions_env.is_empty():
 		missions = missions_env.split(",", false)
 
-	var scene := load("res://modtools/terrain/terrain_editor.tscn") as PackedScene
+	var scene := load("res://modtools/editor/editor_main.tscn") as PackedScene
 	var editor = scene.instantiate()
 	root.add_child(editor)
 	await process_frame

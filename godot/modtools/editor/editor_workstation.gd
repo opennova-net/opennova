@@ -95,7 +95,7 @@ const _RECENT_CLEAR_META := "::clear::"
 @onready var _progress_counts_label: Label = %ProgressCountsLabel
 
 var editor: Node
-var _active_workspace_id: int = Workspace.TERRAIN
+var _active_workspace_id: int = Workspace.MISSION
 var _workspaces: Dictionary = {}
 var _workspace_defs_cache: Array = []
 var _environment_workspace: EnvironmentEditorWorkspace
@@ -258,9 +258,9 @@ func _workspace_defs() -> Array:
 	# Categories group the nav list; array order is the within-category order and
 	# the order categories first appear (World, Interface, Atmosphere).
 	return [
+		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter, false, &"World", &"mission"),
 		WorkspaceDef.make(Workspace.TERRAIN, TerrainWorkspaceAdapter, false, &"World", &"terrain"),
 		WorkspaceDef.make(Workspace.OBJECT, ObjectWorkspaceAdapter, false, &"World", &"object"),
-		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter, false, &"World", &"mission"),
 		WorkspaceDef.make(Workspace.FONTS, FontsWorkspaceAdapter, false, &"Interface", &"fonts"),
 		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter, false, &"Interface", &"credits"),
 		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter, false, &"Interface", &"strings"),

@@ -5,7 +5,7 @@
 [ext_resource type="Script" uid="uid://bh7gceflcrkfx" path="res://engine/fly_camera.gd" id="3"]
 [ext_resource type="PackedScene" path="res://modtools/editor/editor_workstation.tscn" id="5_workstation"]
 
-[node name="TerrainEditorScene" type="Node3D" unique_id=1000621177]
+[node name="EditorMain" type="Node3D" unique_id=1000621177]
 script = ExtResource("1")
 
 [node name="TerrainWorldRoot" type="Node3D" parent="."]
