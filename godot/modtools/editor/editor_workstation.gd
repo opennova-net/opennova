@@ -100,10 +100,6 @@ var _workspaces: Dictionary = {}
 var _workspace_defs_cache: Array = []
 var _environment_workspace: EnvironmentEditorWorkspace
 var _workspace_buttons: Dictionary = {}
-# Popup workspaces (Environment) keep their nav buttons here, separate from
-# _workspace_buttons, because they never become _active_workspace_id; their
-# pressed state mirrors popup visibility instead of the active-id refresh loop.
-var _popup_workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
 # Top-bar overflow ("More") menu holding the secondary document actions
 # (Save As / Export). Only the horizontal top-bar host builds one; the
@@ -295,11 +291,14 @@ func _ensure_workspaces() -> void:
 func _build_workspace_rail() -> void:
 	var active_style := _make_workspace_active_stylebox()
 	# Bucket defs by category, preserving array order within each bucket and the
-	# order categories first appear in the registry.
+	# order categories first appear in the registry. Popup workspaces
+	# (Environment) live on their top-bar toggle button, not the rail.
 	var buckets: Dictionary = {}
 	var category_order: Array = []
 	for def_v in _workspace_defs_cache:
 		var def := def_v as WorkspaceDef
+		if def.popup:
+			continue
 		if not buckets.has(def.category):
 			buckets[def.category] = []
 			category_order.append(def.category)
@@ -311,9 +310,7 @@ func _build_workspace_rail() -> void:
 			_workspace_rail.add_child(separator)
 		for def_v in buckets[category]:
 			var def := def_v as WorkspaceDef
-			# Popup workspaces (Environment) are not in _workspaces; their single
-			# instance lives in _environment_workspace.
-			var workspace: EditorWorkspace = _environment_workspace if def.popup else _get_workspace(def.id)
+			var workspace: EditorWorkspace = _get_workspace(def.id)
 			var btn := Button.new()
 			btn.text = workspace.get_workspace_label() if workspace != null else "Workspace"
 			btn.tooltip_text = workspace.get_workspace_tooltip() if workspace != null else ""
@@ -327,13 +324,8 @@ func _build_workspace_rail() -> void:
 			btn.add_theme_stylebox_override("pressed", active_style)
 			btn.add_theme_stylebox_override("hover_pressed", active_style)
 			btn.icon = EditorIconLibrary.resolve(def.icon_id)
-			if def.popup:
-				# A popup row toggles its panel rather than swapping the viewport.
-				btn.toggled.connect(_on_popup_workspace_toggled.bind(def.id))
-				_popup_workspace_buttons[def.id] = btn
-			else:
-				btn.pressed.connect(_on_workspace_pressed.bind(def.id))
-				_workspace_buttons[def.id] = btn
+			btn.pressed.connect(_on_workspace_pressed.bind(def.id))
+			_workspace_buttons[def.id] = btn
 			_workspace_rail.add_child(btn)
 	_refresh_workspace_buttons()
 	_refresh_workspace_scroll_affordance.call_deferred()
@@ -419,10 +411,6 @@ func _make_workspace_active_stylebox() -> StyleBoxFlat:
 	sb.content_margin_bottom = 6.0
 	return sb
 
-
-func _on_popup_workspace_toggled(workspace_id: int, pressed: bool) -> void:
-	if workspace_id == Workspace.ENVIRONMENT:
-		_set_environment_popup_visible(pressed)
 
 
 func _action_defs_for_workspace(workspace: EditorWorkspace) -> Array:
@@ -862,10 +850,6 @@ func _refresh_workspace_buttons() -> void:
 		var btn: Button = _workspace_buttons[workspace_id]
 		btn.set_pressed_no_signal(workspace_id == _active_workspace_id)
 		btn.disabled = busy
-	# Popup rows never become _active_workspace_id; their pressed state is driven
-	# by popup visibility in _set_environment_popup_visible, so only sync busy here.
-	for workspace_id in _popup_workspace_buttons:
-		(_popup_workspace_buttons[workspace_id] as Button).disabled = busy
 
 
 func _refresh_workspace_surface() -> void:
@@ -1281,8 +1265,6 @@ func _on_camera_floating_changed(floating: bool) -> void:
 func _on_environment_floating_changed(floating: bool) -> void:
 	if _environment_toggle_button != null:
 		_environment_toggle_button.set_pressed_no_signal(floating)
-	if _popup_workspace_buttons.has(Workspace.ENVIRONMENT):
-		(_popup_workspace_buttons[Workspace.ENVIRONMENT] as Button).set_pressed_no_signal(floating)
 
 
 func _wire_settings_popup() -> void:
@@ -1456,8 +1438,6 @@ func _set_environment_popup_visible(active: bool) -> void:
 			_environment_panel_host.focus_window()
 		if _environment_toggle_button != null:
 			_environment_toggle_button.set_pressed_no_signal(true)
-		if _popup_workspace_buttons.has(Workspace.ENVIRONMENT):
-			(_popup_workspace_buttons[Workspace.ENVIRONMENT] as Button).set_pressed_no_signal(true)
 		return
 	# The remembered floating preference applies on open, never at launch.
 	if active and _environment_panel_host != null \
@@ -1470,9 +1450,6 @@ func _set_environment_popup_visible(active: bool) -> void:
 	_environment_popup.visible = active
 	if _environment_toggle_button != null:
 		_environment_toggle_button.set_pressed_no_signal(active)
-	# Keep the Environment nav row in sync with the in-viewport sun toggle.
-	if _popup_workspace_buttons.has(Workspace.ENVIRONMENT):
-		(_popup_workspace_buttons[Workspace.ENVIRONMENT] as Button).set_pressed_no_signal(active)
 	if active:
 		_ensure_environment_popup_content()
 	_refresh_environment_popup_state()
