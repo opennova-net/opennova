@@ -321,6 +321,11 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	} else if (state.host_port == 0) {
 		state.host_port = remote_port;
 	}
+	// Reflection override (dev/NAT): force a locally reachable host endpoint so
+	// joiners can connect, instead of the observed docker-gateway source.
+	// [cf onnw/novaworldudp.py:186,274 — ONNET_CLIENT_REFLECT_IP/PORT]
+	if (!reflect_ip_.empty()) state.host_ip   = reflect_ip_;
+	if (reflect_port_ != 0)   state.host_port = reflect_port_;
 
 	state.server_name  = host_info.count("ServerName") ? host_info["ServerName"] : state.server_name;
 	state.player_count = host_info.count("Players")    ? parse_int_safe(host_info["Players"]) : state.player_count;
@@ -329,6 +334,25 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	                  : host_info.count("Country") ? host_info["Country"]
 	                                               : (state.region.empty() ? std::string("us") : state.region);
 	refresh_gsb_fields(state, host_setup, host_info);
+
+	// Diagnostic for the host/join "stuck on Enumerating" symptom: show what
+	// endpoint the server OBSERVED for the host (UDP source) vs. what the host
+	// ADVERTISED (Host.ServerIP / ServerPortNumber) vs. what we STORED. Under a
+	// docker-bridge dev setup the observed source is the proxy gateway
+	// (172.x:ephemeral) and retail usually advertises neither, so the stored
+	// endpoint is unreachable by a joiner. Host networking lets the server see
+	// the real client endpoint (the prod path). [cf onnw/novaworldudp.py:182-194]
+	{
+		std::string host_keys;
+		for (const auto &kv : host_info) { host_keys += kv.first; host_keys += ' '; }
+		std::printf("[lobby] host-addr request observed=%s:%u advertised ServerIP=%s "
+		            "ServerPortNumber(Host)=%s ServerPortNumber(Setup)=%s stored=%s:%d Host{ %s}\n",
+		            remote_ip.c_str(), static_cast<unsigned>(remote_port),
+		            host_info.count("ServerIP") ? host_info["ServerIP"].c_str() : "(absent)",
+		            host_info.count("ServerPortNumber") ? host_info["ServerPortNumber"].c_str() : "(absent)",
+		            host_setup.count("ServerPortNumber") ? host_setup["ServerPortNumber"].c_str() : "(absent)",
+		            state.host_ip.c_str(), state.host_port, host_keys.c_str());
+	}
 
 	NapiMessage reply;
 	reply.name = "ServerHostResult";
@@ -384,10 +408,19 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 	refresh_gsb_fields(state, host_setup, host_vars);
 
 	if (state.host_ip.empty()) state.host_ip = remote_ip;
+	// Reflection override (dev/NAT) — same as the host-request path.
+	if (!reflect_ip_.empty()) state.host_ip   = reflect_ip_;
+	if (reflect_port_ != 0)   state.host_port = reflect_port_;
 
 	std::printf("[lobby] update rid=%u players=%d/%d server_name='%s'\n",
 	            state.rid, state.player_count, state.max_players,
 	            state.server_name.c_str());
+	std::printf("[lobby] host-addr update observed=%s advertised ServerIP=%s "
+	            "ServerPortNumber=%s stored=%s:%d\n",
+	            remote_ip.c_str(),
+	            host_vars.count("ServerIP") ? host_vars.at("ServerIP").c_str() : "(absent)",
+	            host_vars.count("ServerPortNumber") ? host_vars.at("ServerPortNumber").c_str() : "(absent)",
+	            state.host_ip.c_str(), state.host_port);
 
 	// Phase I.2: keep DB row in sync. We don't have peer_port in the
 	// update handler signature; pass 0 — the row already exists from the

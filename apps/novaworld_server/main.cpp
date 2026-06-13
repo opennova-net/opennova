@@ -140,6 +140,11 @@ int main() {
 
 	NwUdpListener nwudp(manager);
 	nwudp.set_database(dbh.get());
+	// The endpoint advertised to joiners uses the client's NOVAWORLD session port
+	// (client_reflect_novaworld_port, 32768), NOT the gate port
+	// (client_reflect_gate_port, 49152 — that's only the gate's
+	// ReflectedPortNumber). See server_config.h.
+	nwudp.set_reflect_endpoint(config.client_reflect_ip, config.client_reflect_novaworld_port);
 	nwudp.set_unknown_tracker(&unknown_tracker);
 	// Phase I.2: drop stale active_hosts rows from the previous server
 	// run before accepting new connections (the UDP HELLO from any

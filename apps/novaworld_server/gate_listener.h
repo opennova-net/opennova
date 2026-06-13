@@ -52,6 +52,10 @@ private:
 	std::string public_host_;
 	uint16_t nw_udp_port_ = 0;
 	uint16_t http_port_   = 0;
+	// Reflection override (ONNET_CLIENT_REFLECT_IP/PORT). When set, advertised
+	// as ReflectedIpAddress/Port instead of the observed source. 0 port = unset.
+	std::string reflect_ip_;
+	uint16_t reflect_port_ = 0;
 	opennova::UnknownTracker *tracker_ = nullptr;
 };
 

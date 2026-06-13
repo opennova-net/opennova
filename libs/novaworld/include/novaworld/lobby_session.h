@@ -82,6 +82,17 @@ public:
 	// that don't bring up sqlite).
 	void set_database(opennova::db::Database *db) { db_ = db; }
 
+	// Reflection override for the advertised game-host endpoint (dev/NAT). When
+	// set, ClientHostRequest / ClientHostUpdate force host_ip / host_port to
+	// these instead of trusting the observed UDP source (the docker gateway
+	// behind a bridge), so joiners get a reachable endpoint. `port` is the
+	// client's NovaWorld session port (game.cfg mpnovaworldport, 32768). Empty
+	// ip / 0 port == unset (prod default — real source observation).
+	void set_reflect_endpoint(std::string ip, uint16_t port) {
+		reflect_ip_ = std::move(ip);
+		reflect_port_ = port;
+	}
+
 	// Dispatch one inbound lobby message. `inner_message` is the outer
 	// container's first child (the actual ClientConnected / ClientHostRequest /
 	// etc.). `state` is the caller-owned per-connection state.
@@ -113,6 +124,8 @@ private:
 	std::function<std::string(const std::string&)> gsid_gen_;
 	std::function<uint32_t(const std::string&)> rid_gen_;
 	opennova::db::Database *db_ = nullptr;  // optional, null in tests
+	std::string reflect_ip_;                // ONNET_CLIENT_REFLECT_IP (empty=unset)
+	uint16_t    reflect_port_ = 0;          // client NovaWorld session port (0=unset)
 };
 
 } // namespace opennova

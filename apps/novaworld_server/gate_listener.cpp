@@ -41,8 +41,8 @@ namespace {
 std::string build_gate_response(const std::string &public_host,
                                 uint16_t nw_udp_port,
                                 uint16_t http_port,
-                                const std::string &client_ip,
-                                uint16_t client_port) {
+                                const std::string &reflected_ip,
+                                uint16_t reflected_port) {
 	auto append_var = [](std::ostringstream &os, const char *key, const std::string &value) {
 		os << "VAR \"" << key << "\" \"" << value << "\"\r\n";
 	};
@@ -64,8 +64,8 @@ std::string build_gate_response(const std::string &public_host,
 	           "/nwprepare.dll?ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=jop_2_start.htm");
 	append_var(os, "usejunction", "0");
 	append_var(os, "clearjunction", "0");
-	append_var(os, "ReflectedIpAddress", client_ip);
-	append_var(os, "ReflectedPortNumber", std::to_string(client_port));
+	append_var(os, "ReflectedIpAddress", reflected_ip);
+	append_var(os, "ReflectedPortNumber", std::to_string(reflected_port));
 
 	const std::time_t now = std::time(nullptr);
 	std::tm tm{};
@@ -126,6 +126,9 @@ bool GateListener::start(const ServerConfig &config) {
 	public_host_    = config.public_host;
 	nw_udp_port_    = config.nw_udp_port;
 	http_port_      = config.http_port;
+
+	reflect_ip_   = config.client_reflect_ip;
+	reflect_port_ = config.client_reflect_gate_port;
 
 	stop_requested_.store(false);
 	running_.store(true);
@@ -203,9 +206,17 @@ void GateListener::run_loop() {
 		const std::string client_ip =
 			std::to_string(from.ip[0]) + "." + std::to_string(from.ip[1]) + "." +
 			std::to_string(from.ip[2]) + "." + std::to_string(from.ip[3]);
+		// Reflection override (dev/NAT): tell the client its reachable endpoint
+		// is the configured reflect addr, not the observed source (the docker
+		// gateway behind a bridge). Empty/0 => advertise the observed source
+		// (the prod path). [cf onnw/gate_server.py:24-25]
+		const std::string reflected_ip =
+			reflect_ip_.empty() ? client_ip : reflect_ip_;
+		const uint16_t reflected_port =
+			reflect_port_ != 0 ? reflect_port_ : from.port;
 		const std::string body = build_gate_response(public_host_, nw_udp_port_,
-		                                             http_port_, client_ip,
-		                                             from.port);
+		                                             http_port_, reflected_ip,
+		                                             reflected_port);
 
 		std::vector<uint8_t> reply_inner(body.begin(), body.end());
 		opennova::nwu_decrypt(reply_inner.data(), reply_inner.size(),

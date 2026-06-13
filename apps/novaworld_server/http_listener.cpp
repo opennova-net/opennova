@@ -884,13 +884,17 @@ bool HttpListener::start(const ServerConfig &config) {
 			std::vector<crow::json::wvalue> arr;
 			for (const auto &g : catalog::list_games(db_)) {
 				crow::json::wvalue e;
-				e["slug"]            = g.slug;
-				e["display_name"]    = g.display_name;
-				e["lobby_name"]      = g.lobby_name;
-				e["gate_tag"]        = g.gate_tag;
-				e["executable_name"] = g.executable_name;
-				e["ver1"]            = g.ver1;
-				e["ver2"]            = g.ver2;
+				// camelCase to match the web GameSummary type (the Expansions
+				// page reads game.displayName; snake_case here left it undefined
+				// and crashed the group sort on localeCompare). Mirrors the
+				// /api/expansions + /api/lobbies casing.
+				e["slug"]           = g.slug;
+				e["displayName"]    = g.display_name;
+				e["lobbyName"]      = g.lobby_name;
+				e["gateTag"]        = g.gate_tag;
+				e["executableName"] = g.executable_name;
+				e["ver1"]           = g.ver1;
+				e["ver2"]           = g.ver2;
 				arr.push_back(std::move(e));
 			}
 			out["games"] = std::move(arr);
@@ -1278,11 +1282,15 @@ bool HttpListener::start(const ServerConfig &config) {
 			if (!access->exp_bits.empty()) {
 				effective_exp_bits = access->exp_bits;
 			}
-			if (has_active_user_session(db_, user->id)) {
-				std::printf("[http] POST /NWLogin.dll rejected: user %lld already active\n",
-				            static_cast<long long>(user->id));
-				return render_login_message("This NovaWorld account is already logged in.");
-			}
+			// Re-login supersedes a prior session rather than being rejected.
+			// Retail has no witnessed "already logged in" gate — the active-user
+			// row is cleared on /NWLogout.dll, not used to block login
+			// (docs/net/novaworld-net-re.md:55). A hard reject here stranded the
+			// account whenever a prior session ended without a clean logout
+			// (client crash / GOODBYE-less exit): the orphaned row blocked every
+			// retry until the 2h TTL sweep. register_active_user_session() below
+			// is INSERT OR REPLACE on the user_id PK, so the stale row is simply
+			// overwritten by this fresh login.
 		}
 		s.user_id  = user->id;
 		s.username = user->username;

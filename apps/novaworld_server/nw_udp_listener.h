@@ -66,6 +66,12 @@ public:
 	// removes the corresponding rows.
 	void set_database(opennova::db::Database *db) { db_ = db; lobby_session_.set_database(db); }
 
+	// Forward the reflect-endpoint override (the client's NovaWorld session
+	// IP:port we advertise to joiners) to the lobby session.
+	void set_reflect_endpoint(std::string ip, uint16_t port) {
+		lobby_session_.set_reflect_endpoint(std::move(ip), port);
+	}
+
 	// Optional unknown-message tracker. When set, unhandled opcodes,
 	// non-NOVAWORLDUDP PN strings, unhandled protocol-message types, and
 	// "unknown:" lobby containers are recorded (deduped) for /api/unknowns

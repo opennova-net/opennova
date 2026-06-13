@@ -73,6 +73,25 @@ struct ServerConfig {
 	// constant-time string compare in `auth.cpp`.
 	std::string admin_api_token;
 
+	// Reflection override for the host/join flow (dev/NAT). NovaWorld tells a
+	// hosting client its reachable endpoint and advertises it to joiners. On the
+	// open internet the observed UDP source IS that endpoint, but behind a docker
+	// bridge the observed source is the proxy gateway (172.x:ephemeral) —
+	// unreachable by a joiner, the "stuck on Enumerating" symptom. When set,
+	// these force a locally reachable value. Leave empty/0 in prod. Port 0 == unset.
+	//
+	// TWO ports, mirroring onnet's separate gate / nw_udp processes (and JO
+	// game.cfg). The IP is shared by both. Each port is the retail client's LOCAL
+	// UDP port for that socket (docker hides the real source, so we set them):
+	//   client_reflect_gate_port      = game.cfg mpgateserverlocalport (49152);
+	//     echoed back to the client as the gate's ReflectedPortNumber.
+	//   client_reflect_novaworld_port = game.cfg mpnovaworldport (32768); the game
+	//     host's session socket, advertised to joiners as the endpoint they dial
+	//     to enumerate/join.
+	std::string client_reflect_ip;                  // shared: gate ReflectedIpAddress + advertised host IP
+	uint16_t    client_reflect_gate_port = 0;       // ONNET_CLIENT_REFLECT_GATE_PORT
+	uint16_t    client_reflect_novaworld_port = 0;  // ONNET_CLIENT_REFLECT_NOVAWORLD_PORT
+
 	// Build a config by reading env vars, falling back to the defaults
 	// above for anything not set.
 	static ServerConfig from_env();
