@@ -27,7 +27,8 @@ func test_strings_workspace_in_rail() -> void:
 	var row_texts := []
 	for child in rail.get_children():
 		if child is Button:
-			row_texts.append((child as Button).text)
+			var bar_label := child.find_child("BarButtonLabel", true, false) as Label
+			row_texts.append(bar_label.text if bar_label != null else "")
 	assert_true(row_texts.has("Strings"), "Strings should join the workspace nav.")
 	assert_eq(row_texts[5], "Strings", "Strings should be the last switchable workspace row.")
 

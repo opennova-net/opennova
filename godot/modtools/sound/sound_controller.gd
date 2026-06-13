@@ -121,7 +121,7 @@ func get_project_title() -> String:
 
 func get_status_context() -> String:
 	if data == null:
-		return "No sound profile loaded"
+		return "No sound profile open."
 	return "%d sound sets" % data.get_set_count()
 
 

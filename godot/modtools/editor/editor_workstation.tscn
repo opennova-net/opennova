@@ -62,56 +62,26 @@ flat = false
 [node name="TopNavSeparator" type="VSeparator" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
 layout_mode = 2
 
-[node name="ProjectLabel" type="Label" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+[node name="ContextWorkspaceLabel" type="Label" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 0
 theme_type_variation = &"Heading"
-text = "OpenNova Terrain Editor"
+text = "Mission"
 vertical_alignment = 1
 clip_text = true
 
-[node name="TopProjectSeparator" type="VSeparator" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
-layout_mode = 2
-
-[node name="WorkspaceScrollLeftButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
+[node name="ContextDocLabel" type="Label" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
 unique_name_in_owner = true
-visible = false
-custom_minimum_size = Vector2(30, 36)
 layout_mode = 2
-focus_mode = 0
-tooltip_text = "Scroll workspaces left"
+size_flags_horizontal = 0
+theme_type_variation = &"Muted"
+vertical_alignment = 1
+clip_text = true
 
-[node name="WorkspaceScrollSlot" type="Control" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
-custom_minimum_size = Vector2(96, 36)
+[node name="ContextSpacer" type="Control" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-
-[node name="WorkspaceScroll" type="ScrollContainer" parent="WorkstationLayout/TopBar/TopMargin/TopRow/WorkspaceScrollSlot"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 36)
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-size_flags_horizontal = 3
-vertical_scroll_mode = 0
-
-[node name="WorkspaceRail" type="HBoxContainer" parent="WorkstationLayout/TopBar/TopMargin/TopRow/WorkspaceScrollSlot/WorkspaceScroll"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_constants/separation = 4
-
-[node name="WorkspaceScrollRightButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
-unique_name_in_owner = true
-visible = false
-custom_minimum_size = Vector2(30, 36)
-layout_mode = 2
-focus_mode = 0
-tooltip_text = "Scroll workspaces right"
 
 [node name="TopActionSeparator" type="VSeparator" parent="WorkstationLayout/TopBar/TopMargin/TopRow"]
 layout_mode = 2
@@ -165,59 +135,85 @@ toggle_mode = true
 tooltip_text = "Settings"
 flat = false
 
-[node name="BodyRow" type="HSplitContainer" parent="WorkstationLayout"]
+[node name="BodyLane" type="HBoxContainer" parent="WorkstationLayout"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
+theme_override_constants/separation = 0
+
+[node name="WorkspaceBar" type="PanelContainer" parent="WorkstationLayout/BodyLane"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="BarMargin" type="MarginContainer" parent="WorkstationLayout/BodyLane/WorkspaceBar"]
+layout_mode = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 8
+
+[node name="WorkspaceRail" type="VBoxContainer" parent="WorkstationLayout/BodyLane/WorkspaceBar/BarMargin"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_constants/separation = 6
+
+[node name="BodyRow" type="HSplitContainer" parent="WorkstationLayout/BodyLane"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
 theme_override_constants/separation = 8
 
-[node name="LeftLane" type="PanelContainer" parent="WorkstationLayout/BodyRow"]
+[node name="LeftLane" type="PanelContainer" parent="WorkstationLayout/BodyLane/BodyRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(240, 0)
 layout_mode = 2
 size_flags_horizontal = 1
 size_flags_vertical = 3
 
-[node name="LeftMargin" type="MarginContainer" parent="WorkstationLayout/BodyRow/LeftLane"]
+[node name="LeftMargin" type="MarginContainer" parent="WorkstationLayout/BodyLane/BodyRow/LeftLane"]
 layout_mode = 2
 theme_override_constants/margin_left = 10
 theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 10
 
-[node name="LeftBox" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin"]
+[node name="LeftBox" type="VBoxContainer" parent="WorkstationLayout/BodyLane/BodyRow/LeftLane/LeftMargin"]
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 10
 
-[node name="ModesLabel" type="Label" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+[node name="ModesLabel" type="Label" parent="WorkstationLayout/BodyLane/BodyRow/LeftLane/LeftMargin/LeftBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"Heading"
 text = "Workflows"
 
-[node name="ModeRail" type="VBoxContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+[node name="ModeRail" type="VBoxContainer" parent="WorkstationLayout/BodyLane/BodyRow/LeftLane/LeftMargin/LeftBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="InspectorSeparator" type="HSeparator" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+[node name="InspectorSeparator" type="HSeparator" parent="WorkstationLayout/BodyLane/BodyRow/LeftLane/LeftMargin/LeftBox"]
 layout_mode = 2
 
-[node name="InspectorHost" type="PanelContainer" parent="WorkstationLayout/BodyRow/LeftLane/LeftMargin/LeftBox"]
+[node name="InspectorHost" type="PanelContainer" parent="WorkstationLayout/BodyLane/BodyRow/LeftLane/LeftMargin/LeftBox"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="CenterRightSplit" type="HSplitContainer" parent="WorkstationLayout/BodyRow"]
+[node name="CenterRightSplit" type="HSplitContainer" parent="WorkstationLayout/BodyLane/BodyRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 8
 
-[node name="ViewportLane" type="Control" parent="WorkstationLayout/BodyRow/CenterRightSplit"]
+[node name="ViewportLane" type="Control" parent="WorkstationLayout/BodyLane/BodyRow/CenterRightSplit"]
 unique_name_in_owner = true
 layout_mode = 2
 mouse_filter = 2
@@ -225,7 +221,7 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 clip_contents = true
 
-[node name="ViewportColumn" type="VBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane"]
+[node name="ViewportColumn" type="VBoxContainer" parent="WorkstationLayout/BodyLane/BodyRow/CenterRightSplit/ViewportLane"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -235,24 +231,24 @@ grow_vertical = 2
 mouse_filter = 2
 theme_override_constants/separation = 0
 
-[node name="DocumentTabStrip" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportColumn"]
+[node name="DocumentTabStrip" type="PanelContainer" parent="WorkstationLayout/BodyLane/BodyRow/CenterRightSplit/ViewportLane/ViewportColumn"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 
-[node name="DocumentTabMargin" type="MarginContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportColumn/DocumentTabStrip"]
+[node name="DocumentTabMargin" type="MarginContainer" parent="WorkstationLayout/BodyLane/BodyRow/CenterRightSplit/ViewportLane/ViewportColumn/DocumentTabStrip"]
 layout_mode = 2
 theme_override_constants/margin_left = 4
 theme_override_constants/margin_top = 2
 theme_override_constants/margin_right = 4
 theme_override_constants/margin_bottom = 2
 
-[node name="DocumentTabRow" type="HBoxContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportColumn/DocumentTabStrip/DocumentTabMargin"]
+[node name="DocumentTabRow" type="HBoxContainer" parent="WorkstationLayout/BodyLane/BodyRow/CenterRightSplit/ViewportLane/ViewportColumn/DocumentTabStrip/DocumentTabMargin"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="ViewportHost" type="Control" parent="WorkstationLayout/BodyRow/CenterRightSplit/ViewportLane/ViewportColumn"]
+[node name="ViewportHost" type="Control" parent="WorkstationLayout/BodyLane/BodyRow/CenterRightSplit/ViewportLane/ViewportColumn"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
@@ -557,21 +553,21 @@ button_pressed = true
 text = "Show axes"
 tooltip_text = "Show the origin axis gizmo in the 3D preview."
 
-[node name="RightSplit" type="HSplitContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit"]
+[node name="RightSplit" type="HSplitContainer" parent="WorkstationLayout/BodyLane/BodyRow/CenterRightSplit"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 1
 size_flags_vertical = 3
 theme_override_constants/separation = 8
 
-[node name="AssetDock" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/RightSplit"]
+[node name="AssetDock" type="PanelContainer" parent="WorkstationLayout/BodyLane/BodyRow/CenterRightSplit/RightSplit"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(280, 0)
 layout_mode = 2
 size_flags_horizontal = 1
 size_flags_vertical = 3
 
-[node name="ResourceBrowserPaneHost" type="PanelContainer" parent="WorkstationLayout/BodyRow/CenterRightSplit/RightSplit"]
+[node name="ResourceBrowserPaneHost" type="PanelContainer" parent="WorkstationLayout/BodyLane/BodyRow/CenterRightSplit/RightSplit"]
 unique_name_in_owner = true
 visible = false
 custom_minimum_size = Vector2(260, 0)
