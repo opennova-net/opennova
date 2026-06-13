@@ -247,8 +247,8 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason) 
 		rid = it->second.lobby.rid;
 		if (was_hosting) {
 			std::printf("[lobby] stopped addr=%u.%u.%u.%u:%u rid=%u server_name='%s' reason=%s\n",
-			            (peer.ip >> 24) & 0xff, (peer.ip >> 16) & 0xff,
-			            (peer.ip >>  8) & 0xff,  peer.ip        & 0xff,
+			             peer.ip        & 0xff, (peer.ip >>  8) & 0xff,
+			            (peer.ip >> 16) & 0xff, (peer.ip >> 24) & 0xff,
 			            peer.port, it->second.lobby.rid,
 			            it->second.lobby.server_name.c_str(), reason);
 		}
@@ -260,10 +260,14 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason) 
 	// joining peer's own host_players entry is keyed by peer addr.
 	if (db_) {
 		try {
+			// PeerAddr.ip is LE (ip_to_le) — read low->high so the dotted
+			// string matches the peer_ip stored at add_player time (built
+			// from the network-order octets), or remove_player_by_peer won't
+			// match and host_players rows leak until the host row cascades.
 			char ip_buf[32];
 			std::snprintf(ip_buf, sizeof(ip_buf), "%u.%u.%u.%u",
-			              (peer.ip >> 24) & 0xff, (peer.ip >> 16) & 0xff,
-			              (peer.ip >>  8) & 0xff,  peer.ip        & 0xff);
+			               peer.ip        & 0xff, (peer.ip >>  8) & 0xff,
+			              (peer.ip >> 16) & 0xff, (peer.ip >> 24) & 0xff);
 			if (was_hosting && rid != 0) {
 				hostdb::remove_host_by_rid(*db_, rid);
 			}

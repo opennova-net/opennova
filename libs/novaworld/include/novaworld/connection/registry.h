@@ -12,7 +12,9 @@ namespace opennova {
 
 // Identifies a remote UDP peer. NovaLogic protocol is IPv4-only on the wire.
 struct PeerAddr {
-	uint32_t ip = 0;    // network byte order (htonl(a.b.c.d) == 0xAABBCCDD for A.B.C.D)
+	uint32_t ip = 0;    // LE octet packing: a.b.c.d -> a | b<<8 | c<<16 | d<<24
+	                    // (octet 0 in the low byte; see ip_to_le in
+	                    // nw_udp_listener.cpp). Format low->high to print a.b.c.d.
 	uint16_t port = 0;
 
 	bool operator==(const PeerAddr &other) const {

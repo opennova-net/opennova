@@ -7,6 +7,7 @@
       </span>
     </div>
     <p class="mt-2 text-sm text-slate-300">{{ host.region || 'Unknown region' }}</p>
+    <p class="mt-1 text-xs font-mono text-slate-500" v-if="host.hostIp">{{ host.hostIp }}:{{ host.hostPort }}</p>
     <p class="mt-4 text-sm text-slate-400" v-if="host.message">{{ host.message }}</p>
   </div>
 </template>

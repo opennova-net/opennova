@@ -117,7 +117,9 @@ int test_seed_populates_games_and_expansions() {
 		"FROM player_game_access a JOIN players p ON p.id = a.user_id "
 		"ORDER BY p.username, a.game_slug;"
 	);
-	TEST_EXPECT(access.size() == 2);
+	// foo + test + test1/test2/test3 (the extra three are dev accounts for
+	// concurrent multi-client local testing; password 'test', same access).
+	TEST_EXPECT(access.size() == 5);
 	TEST_EXPECT(access[0].as_text(0).value() == "foo");
 	TEST_EXPECT(access[0].as_text(1).value() == "jop_2_consumer");
 	TEST_EXPECT(access[0].as_text(2).value() == "active");
@@ -126,6 +128,11 @@ int test_seed_populates_games_and_expansions() {
 	TEST_EXPECT(access[1].as_text(1).value() == "jop_2_consumer");
 	TEST_EXPECT(access[1].as_text(2).value() == "active");
 	TEST_EXPECT(access[1].as_text(3).value() == "3");
+	TEST_EXPECT(access[2].as_text(0).value() == "test1");
+	TEST_EXPECT(access[2].as_text(1).value() == "jop_2_consumer");
+	TEST_EXPECT(access[2].as_text(2).value() == "active");
+	TEST_EXPECT(access[3].as_text(0).value() == "test2");
+	TEST_EXPECT(access[4].as_text(0).value() == "test3");
 	return 0;
 }
 

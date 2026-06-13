@@ -116,10 +116,12 @@ int main() {
 	// --- Connection manager (shared across listeners) ---------------------
 	ConnectionManager manager(config.heartbeat_timeout_ms);
 	manager.on_added([](const Connection &c) {
+		// PeerAddr.ip is LE (ip_to_le packs octet 0 into the low byte), so
+		// read low->high to print a.b.c.d instead of d.c.b.a.
 		std::printf("[conn] added id=0x%08x addr=%u.%u.%u.%u:%u pn=%s\n",
 		            c.id,
-		            (c.addr.ip >> 24) & 0xff, (c.addr.ip >> 16) & 0xff,
-		            (c.addr.ip >>  8) & 0xff,  c.addr.ip        & 0xff,
+		             c.addr.ip        & 0xff, (c.addr.ip >>  8) & 0xff,
+		            (c.addr.ip >> 16) & 0xff, (c.addr.ip >> 24) & 0xff,
 		            c.addr.port, c.pn.c_str());
 	});
 

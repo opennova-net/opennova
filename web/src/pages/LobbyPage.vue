@@ -44,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue';
+import { onMounted, onUnmounted, reactive } from 'vue';
 import LobbyCard from '../components/LobbyCard.vue';
 import { fetchLobbies } from '../api/lobbies';
 import type { LobbyGroup } from '../types/lobby';
@@ -55,20 +55,41 @@ const state = reactive({
   error: ''
 });
 
-const load = async () => {
-  state.loading = true;
-  state.error = '';
+const load = async (background = false) => {
+  // Background polls update the list in place: don't toggle the loading
+  // skeleton or wipe the list on a transient fetch error, or the page would
+  // flash "Loading lobbies..." every poll interval.
+  if (!background) {
+    state.loading = true;
+    state.error = '';
+  }
   try {
     const { games } = await fetchLobbies();
     state.games = games;
+    if (background) state.error = '';
   } catch (error) {
-    state.error = 'Unable to load lobbies right now. Please try again shortly.';
+    if (!background) {
+      state.error = 'Unable to load lobbies right now. Please try again shortly.';
+    }
   } finally {
-    state.loading = false;
+    if (!background) state.loading = false;
   }
 };
 
 const refresh = () => load();
 
-onMounted(load);
+// Poll so a game hosted after the page is open appears without a manual
+// refresh. The in-game flow registers the host seconds after login, long
+// after the initial onMounted fetch would have run.
+const POLL_INTERVAL_MS = 5000;
+let pollTimer: ReturnType<typeof setInterval> | undefined;
+
+onMounted(() => {
+  load();
+  pollTimer = setInterval(() => load(true), POLL_INTERVAL_MS);
+});
+
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer);
+});
 </script>

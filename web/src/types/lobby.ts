@@ -1,6 +1,8 @@
 export interface LobbyHost {
   id: number;
   serverName: string;
+  hostIp?: string | null;
+  hostPort?: number | null;
   region?: string | null;
   players: number;
   maxPlayers: number;

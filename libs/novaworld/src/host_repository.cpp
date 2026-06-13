@@ -162,6 +162,18 @@ std::vector<HostRow> list_hosts(opennova::db::Database &db) {
 	return out;
 }
 
+std::vector<HostRow> list_hosts_by_game(opennova::db::Database &db,
+                                        const std::string &game) {
+	const std::string sql =
+		std::string("SELECT ") + HOST_COLUMNS +
+		" FROM active_hosts WHERE game=? ORDER BY created_at;";
+	auto rows = db.query(sql, {str(game)});
+	std::vector<HostRow> out;
+	out.reserve(rows.size());
+	for (const auto &r : rows) out.push_back(row_to_host(r));
+	return out;
+}
+
 std::optional<HostRow> find_host_by_rid(opennova::db::Database &db, uint32_t rid) {
 	const std::string sql =
 		std::string("SELECT ") + HOST_COLUMNS +

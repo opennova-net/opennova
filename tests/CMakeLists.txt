@@ -1008,6 +1008,13 @@ target_include_directories(host_prune_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(host_prune_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME host_prune COMMAND host_prune_test)
 
+# End-to-end host register -> read-back (the path /api/lobbies + /jop_2.gsb use).
+add_executable(host_register_list_test novaworld/host_register_list_test.cpp)
+target_link_libraries(host_register_list_test PRIVATE opennova_novaworld opennova_napi)
+target_include_directories(host_register_list_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(host_register_list_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME host_register_list COMMAND host_register_list_test)
+
 add_executable(backend_schema_test novaworld/backend_schema_test.cpp)
 target_link_libraries(backend_schema_test PRIVATE opennova_novaworld)
 target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

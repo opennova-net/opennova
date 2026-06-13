@@ -476,14 +476,19 @@ bool HttpListener::start(const ServerConfig &config) {
 				std::vector<crow::json::wvalue> hosts;
 				for (const auto &h : host_rows) {
 					if (h.game != g.slug) continue;
+					// camelCase to match the web LobbyHost type + the
+					// /api/expansions convention (snake_case here rendered
+					// every host as "Unnamed Server 0/0" — the Vue card reads
+					// serverName/maxPlayers). hostIp/hostPort surface the join
+					// address so a host is identifiable, not just named.
 					crow::json::wvalue hj;
-					hj["rid"]          = h.rid;
-					hj["server_name"]  = h.server_name;
-					hj["host_ip"]      = h.host_ip;
-					hj["host_port"]    = h.host_port;
-					hj["players"]      = h.player_count;
-					hj["max_players"]  = h.max_players;
-					hj["region"]       = h.region;
+					hj["id"]          = h.rid;
+					hj["serverName"]  = h.server_name;
+					hj["hostIp"]      = h.host_ip;
+					hj["hostPort"]    = h.host_port;
+					hj["players"]     = h.player_count;
+					hj["maxPlayers"]  = h.max_players;
+					hj["region"]      = h.region;
 					hosts.push_back(std::move(hj));
 				}
 				game["hosts"] = std::move(hosts);
@@ -539,10 +544,11 @@ bool HttpListener::start(const ServerConfig &config) {
 			e["identity"]      = c.identity;
 			e["created_ms"]    = c.created_ms;
 			e["last_seen_ms"]  = c.last_seen_ms;
-			e["addr"]          = std::to_string((c.addr.ip >> 24) & 0xff) + "." +
-			                     std::to_string((c.addr.ip >> 16) & 0xff) + "." +
+			// PeerAddr.ip is LE (ip_to_le) — read low->high for a.b.c.d.
+			e["addr"]          = std::to_string( c.addr.ip         & 0xff) + "." +
 			                     std::to_string((c.addr.ip >>  8) & 0xff) + "." +
-			                     std::to_string(c.addr.ip         & 0xff) + ":" +
+			                     std::to_string((c.addr.ip >> 16) & 0xff) + "." +
+			                     std::to_string((c.addr.ip >> 24) & 0xff) + ":" +
 			                     std::to_string(c.addr.port);
 			entries.push_back(std::move(e));
 		}
@@ -1453,11 +1459,13 @@ bool HttpListener::start(const ServerConfig &config) {
 	// connection that issued ClientHostRequest in the lobby session). Wire
 	// format from libs/novaworld/include/novaworld/gsb.h is byte-exact with
 	// onnet's onnw/gsb.py, so retail's IB3 browser parser accepts it.
-	auto handle_gsb = [this]() {
-		// Phase I.2: backed by active_hosts.
+	auto handle_gsb = [this](const std::string &game_slug) {
+		// Phase I.2: backed by active_hosts, filtered to the requested game
+		// (onnet serves each *.gsb from a per-game query — without the filter
+		// a DFX2 host would leak into the JO browser and vice versa).
 		std::vector<opennova::GsbServerEntry> entries;
 		try {
-			auto rows = hostdb::list_hosts(db_);
+			auto rows = hostdb::list_hosts_by_game(db_, game_slug);
 			entries.reserve(rows.size());
 			for (const auto &h : rows) {
 				opennova::GsbServerEntry e;
@@ -1493,15 +1501,15 @@ bool HttpListener::start(const ServerConfig &config) {
 			std::fprintf(stderr, "[http] GSB list failed: %s\n", e.what());
 		}
 		const auto blob = opennova::gsb_build_response(entries);
-		std::printf("[http] GET /*.gsb -> %zu hosts, %zu bytes\n",
-		            entries.size(), blob.size());
+		std::printf("[http] GET /*.gsb (%s) -> %zu hosts, %zu bytes\n",
+		            game_slug.c_str(), entries.size(), blob.size());
 		crow::response res(200);
 		res.set_header("Content-Type", "application/octet-stream");
 		res.body.assign(blob.begin(), blob.end());
 		return res;
 	};
-	CROW_ROUTE(app, "/jop_2.gsb")(handle_gsb);
-	CROW_ROUTE(app, "/dfx2_0.gsb")(handle_gsb);
+	CROW_ROUTE(app, "/jop_2.gsb")([handle_gsb]() { return handle_gsb("jop_2_consumer"); });
+	CROW_ROUTE(app, "/dfx2_0.gsb")([handle_gsb]() { return handle_gsb("dfx2_consumer"); });
 
 	// ----- Phase E.3: /NWJoin.dll two-phase relay -------------------------
 	// Mirror onnet's onnw/controllers/nova_world/join.py.

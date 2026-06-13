@@ -81,6 +81,10 @@ void add_player(db::Database &db, const PlayerRow &row);
 void remove_player_by_peer(db::Database &db, const std::string &peer_ip, int peer_port);
 
 std::vector<HostRow>   list_hosts(db::Database &db);
+// Hosts for one game slug (active_hosts.game == game). Mirrors onnet's
+// per-game GSB query (onnw/hosts.py::fetch_hosts_by_game) so /jop_2.gsb and
+// /dfx2_0.gsb don't cross-contaminate. Uses idx_active_hosts_game.
+std::vector<HostRow>   list_hosts_by_game(db::Database &db, const std::string &game);
 std::optional<HostRow> find_host_by_rid(db::Database &db, uint32_t rid);
 std::vector<PlayerRow> list_players(db::Database &db, uint32_t host_rid);
 

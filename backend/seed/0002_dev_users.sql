@@ -1,13 +1,15 @@
--- Dev-only seed for two playable accounts. After Phase H, retail's POST
--- to /NWLogin.dll EPASK-decrypts NAME/PASSWORD and looks them up against
+-- Dev-only seed for a handful of playable accounts. After Phase H, retail's
+-- POST to /NWLogin.dll EPASK-decrypts NAME/PASSWORD and looks them up against
 -- this table. Round-robin assignment is the curl-walkthrough fallback
 -- (no EPASK form field, no auth attempted).
 --
 -- password_hash is bcrypt $2b$10$ — generated via:
 --   python -c "import bcrypt; print(bcrypt.hashpw(b'test', bcrypt.gensalt(rounds=10)).decode())"
--- For dev, the cleartext passwords are intentionally simple: 'test' for
--- the test user, 'foo' for the foo user. To rotate, regenerate via the
--- one-liner above and replace the values below.
+-- For dev, the cleartext passwords are intentionally simple: 'test' for the
+-- test user, 'foo' for the foo user. test1/test2/test3 reuse the 'test' hash
+-- (so their password is also 'test') — they exist so two+ retail clients can
+-- log in concurrently on one box to exercise host+browse (one process hosts,
+-- the others browse). To rotate, regenerate via the one-liner above.
 --
 -- PCIDs are the 8-hex-char Player Connection IDs that retail uses to
 -- disambiguate accounts; nwhandle is the in-game display name.
@@ -18,10 +20,19 @@ VALUES
      '00000002', '1', 'TestPlayer'),
     ('foo',
      '$2b$10$M0sIsGDx7nXPWw9toIMIa.2RxXZm39nROt2kjsoyi9QUN9Q7x2SIC',
-     '00000003', '1', 'FooPlayer');
+     '00000003', '1', 'FooPlayer'),
+    ('test1',
+     '$2b$10$biA28xC5Ka.QKKUOKWJGSuCFOfX8D51XkHIZUurZzstBCNQRfXCMS',
+     '00000004', '1', 'TestPlayer1'),
+    ('test2',
+     '$2b$10$biA28xC5Ka.QKKUOKWJGSuCFOfX8D51XkHIZUurZzstBCNQRfXCMS',
+     '00000005', '1', 'TestPlayer2'),
+    ('test3',
+     '$2b$10$biA28xC5Ka.QKKUOKWJGSuCFOfX8D51XkHIZUurZzstBCNQRfXCMS',
+     '00000006', '1', 'TestPlayer3');
 
 INSERT OR IGNORE INTO player_game_access (user_id, game_slug, status, exp_bits)
 SELECT p.id, g.slug, 'active', g.exp_bits
 FROM players p
 JOIN games g ON g.slug = 'jop_2_consumer'
-WHERE p.username IN ('test', 'foo');
+WHERE p.username IN ('test', 'foo', 'test1', 'test2', 'test3');
