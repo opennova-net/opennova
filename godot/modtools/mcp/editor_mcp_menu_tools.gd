@@ -176,12 +176,15 @@ func _screen_id_named(resource: Variant, name: String) -> int:
 	return -1
 
 
-# A screen by name or id; -1 when absent.
+# A screen by name or id; -1 when absent or when the ref is not a name/id at
+# all (an object/array here would otherwise stringify and "miss" silently).
 func _resolve_screen(resource: Variant, value: Variant) -> int:
 	if value is int or value is float:
 		var sid := int(value)
 		return sid if resource.widget_exists(sid) and resource.is_screen(sid) else -1
-	return _screen_id_named(resource, String(value))
+	if value is String or value is StringName:
+		return _screen_id_named(resource, String(value))
+	return -1
 
 
 func _screen_names(resource: Variant) -> PackedStringArray:
@@ -431,6 +434,8 @@ func _tool_edit_screen(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var resource: Variant = gate["resource"]
 	match op:
 		"add":
+			if not (args["add"] is Dictionary):
+				return McpToolResult.error("add must be an object: {name: \"...\"}.")
 			var name := String((args["add"] as Dictionary).get("name", "")).strip_edges()
 			if name.is_empty():
 				return McpToolResult.error("add.name is required.")
@@ -454,6 +459,8 @@ func _tool_edit_screen(args: Dictionary, ctx: McpToolContext) -> Variant:
 				return McpToolResult.error("Screen delete rejected.")
 			return { "ok": true, "op": "delete", "screens": _screen_names(resource), "dirty": gate["doc"].get("is_dirty") }
 		"set":
+			if not (args["set"] is Dictionary):
+				return McpToolResult.error("set must be an object: {screen, props: {...}}.")
 			var spec: Dictionary = args["set"]
 			var sid := _resolve_screen(resource, spec.get("screen"))
 			if sid < 0:
@@ -547,6 +554,8 @@ func _tool_edit_widget(args: Dictionary, ctx: McpToolContext) -> Variant:
 		return McpToolResult.error("Exactly one op per call (set | move_rects | reparent | delete); got: %s" % [ops])
 	match String(ops[0]):
 		"set":
+			if not (args["set"] is Dictionary):
+				return McpToolResult.error("set must be an object: {id, props: {...}}.")
 			var spec: Dictionary = args["set"]
 			var id := int(spec.get("id", -1))
 			if not resource.widget_exists(id):
@@ -583,11 +592,16 @@ func _tool_edit_widget(args: Dictionary, ctx: McpToolContext) -> Variant:
 						editor.apply_edit({ "target": "widget", "id": id, "prop": name, "value": props[key] })
 			return { "ok": true, "op": "set", "widget": _widget_card(resource, id), "dirty": gate["doc"].get("is_dirty") }
 		"move_rects":
-			var rows: Array = (args["move_rects"] as Dictionary).get("rows", [])
+			if not (args["move_rects"] is Dictionary):
+				return McpToolResult.error("move_rects must be an object: {rows: [{id, rect}, ...]}.")
+			var rows: Array = (args["move_rects"] as Dictionary).get("rows", []) if (args["move_rects"] as Dictionary).get("rows") is Array else []
 			if rows.is_empty() or rows.size() > RECT_CAP:
 				return McpToolResult.error("move_rects.rows must hold 1..%d rows." % RECT_CAP)
 			var edits: Array = []
-			for row: Dictionary in rows:
+			for row_variant: Variant in rows:
+				if not (row_variant is Dictionary):
+					return McpToolResult.error("Each move_rects row must be an object {id, rect}.")
+				var row: Dictionary = row_variant
 				var id := int(row.get("id", -1))
 				if not resource.widget_exists(id) or resource.is_screen(id):
 					return McpToolResult.error("No movable widget %d." % id)
@@ -598,11 +612,15 @@ func _tool_edit_widget(args: Dictionary, ctx: McpToolContext) -> Variant:
 			editor.apply_rect_batch(edits)
 			return { "ok": true, "op": "move_rects", "moved": edits.size(), "undo_steps": 1, "dirty": gate["doc"].get("is_dirty") }
 		"reparent":
+			if not (args["reparent"] is Dictionary):
+				return McpToolResult.error("reparent must be an object: {id, parent, index?}.")
 			var spec: Dictionary = args["reparent"]
 			var id := int(spec.get("id", -1))
 			if not resource.widget_exists(id):
 				return McpToolResult.error("No widget %d." % id)
 			var parent: Variant = spec.get("parent")
+			if not (parent is int or parent is float or parent is String or parent is StringName):
+				return McpToolResult.error("reparent.parent must be a widget id or a Screen name.")
 			var parent_id := int(parent) if (parent is int or parent is float) else _screen_id_named(resource, String(parent))
 			if parent_id < 0 or not resource.widget_exists(parent_id):
 				return McpToolResult.error("No reparent target '%s'." % [parent])
@@ -615,6 +633,8 @@ func _tool_edit_widget(args: Dictionary, ctx: McpToolContext) -> Variant:
 				return McpToolResult.error("Reparent rejected (cycle, root window, or unknown target).")
 			return { "ok": true, "op": "reparent", "parent": resource.get_parent_id(id), "dirty": gate["doc"].get("is_dirty") }
 		"delete":
+			if not (args["delete"] is int or args["delete"] is float):
+				return McpToolResult.error("delete must be a widget id (get_menu lists ids).")
 			var id := int(args["delete"])
 			if not resource.widget_exists(id):
 				return McpToolResult.error("No widget %d." % id)
@@ -709,6 +729,14 @@ func _tool_edit_items(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if not resource.widget_exists(id) or resource.is_screen(id):
 		return McpToolResult.error("No widget %d — get_menu lists ids." % id)
 	var op := String(args.get("op", ""))
+	if op != "set_table" and not LIST_OPS.has(op):
+		return McpToolResult.error("Unknown op '%s'. Ops: %s, set_table" % [op, ", ".join(LIST_OPS)])
+	# header_*/body_*/subst_*/set_table edit TABLE columns; on any other widget
+	# type the document silently ignores them — refuse loudly instead.
+	if not op.begins_with("item_"):
+		var tname := String(resource.get_widget_type_name(resource.get_widget_type(id))).to_upper()
+		if tname != "TABLE":
+			return McpToolResult.error("%s edits TABLE columns, but widget %d is a %s — List/Combo/SpinList/Multi rows are edited with item_add / item_remove / item_move / item_field." % [op, id, tname])
 	if op == "set_table":
 		if args.has("count"):
 			editor.apply_edit({ "target": "widget", "id": id, "prop": "table_count", "value": int(args["count"]) })
@@ -716,8 +744,6 @@ func _tool_edit_items(args: Dictionary, ctx: McpToolContext) -> Variant:
 			editor.apply_edit({ "target": "widget", "id": id, "prop": "table_spacing", "value": int(args["spacing"]) })
 		return { "ok": true, "op": op, "count": resource.get_table_column_count(id),
 				"spacing": resource.get_table_column_spacing(id), "dirty": gate["doc"].get("is_dirty") }
-	if not LIST_OPS.has(op):
-		return McpToolResult.error("Unknown op '%s'. Ops: %s, set_table" % [op, ", ".join(LIST_OPS)])
 	var sizes := {
 		"item": resource.get_items(id).size(),
 		"header": resource.get_table_headers(id).size(),
@@ -790,7 +816,10 @@ func _tool_preview(args: Dictionary, ctx: McpToolContext) -> Variant:
 		"show":
 			if not canvas.is_interactive():
 				return McpToolResult.error("The preview is not playing — preview_menu(op=\"on\") first (authoring-canvas screens switch with edit_menu_screen show).")
-			var name := String(args.get("screen", ""))
+			var screen_ref: Variant = args.get("screen", "")
+			if not (screen_ref is String or screen_ref is StringName):
+				return McpToolResult.error("show needs screen as a name string.")
+			var name := String(screen_ref)
 			if _screen_id_named(resource, name) < 0:
 				return McpToolResult.error("No Screen named '%s'. Screens: %s" % [name, ", ".join(_screen_names(resource))])
 			var preview: Variant = canvas.get("_preview")
@@ -830,11 +859,13 @@ func _preview_press(args: Dictionary, ctx: McpToolContext, gate: Dictionary) -> 
 	var id := -1
 	if target is int or target is float:
 		id = int(target)
-	else:
+	elif target is String or target is StringName:
 		var visible := _screen_id_named(resource, String(canvas.get_visible_screen_name()))
 		id = _find_widget_named(resource, String(target), visible)
 		if id < 0:
 			id = _find_widget_named(resource, String(target))
+	else:
+		return McpToolResult.error("press widget must be an id or a name string.")
 	if id < 0 or not resource.widget_exists(id):
 		return McpToolResult.error("No widget '%s' — get_menu lists names and ids." % [target])
 	var controls: Dictionary = canvas.get("_id_to_control") if canvas.get("_id_to_control") is Dictionary else {}
@@ -876,6 +907,8 @@ func _tool_menu_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 		return McpToolResult.error("The Menus workspace is not the active one — open_in_workspace(workspace=\"mnu\", path=<the open menu>) switches to it.")
 	if not canvas.is_visible_in_tree():
 		return McpToolResult.error("The Menus canvas is not on screen.")
+	if args.has("screen") and not (args["screen"] is String):
+		return McpToolResult.error("screen must be a name string.")
 	if args.has("screen") and not String(args["screen"]).is_empty():
 		if canvas.is_interactive():
 			return McpToolResult.error("The preview is playing — navigate with preview_menu(op=\"show\") and call menu_screenshot with no screen arg.")

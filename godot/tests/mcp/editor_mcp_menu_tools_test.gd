@@ -359,3 +359,48 @@ func test_get_menu_on_all_widgets_fixture() -> void:
 	assert_gt((menu.structured["screens"] as Array).size(), 0)
 	var first_tree: Dictionary = menu.structured["screens"][0]["tree"]
 	assert_true(first_tree.has("children"), "The fixture tree is populated.")
+
+
+func test_table_ops_refuse_non_table_widgets() -> void:
+	# header_*/body_*/subst_*/set_table are TABLE-column ops; the document
+	# silently ignores them on other widget types, so the tool must refuse.
+	var first := String(_resource().get_screen_name(_resource().get_screen_ids()[0]))
+	var added: McpToolResult = await _call("add_menu_widgets", { "rows": [
+		{ "parent": first, "type": "SPINLIST", "rect": [10, 10, 200, 20], "name": "Spin" },
+	] })
+	var spin_id := int(added.structured["ids"][0])
+	for op in ["header_add", "body_add", "subst_add"]:
+		var refused: McpToolResult = await _call("edit_widget_items", { "id": spin_id, "op": op, "row": { "text": "x" } })
+		assert_true(refused.is_error, "%s on a SPINLIST is an error" % op)
+		assert_true(String(refused.content[0]["text"]).contains("TABLE"), "%s names the type rule" % op)
+		assert_true(String(refused.content[0]["text"]).contains("item_add"), "%s points at the item_* family" % op)
+	var sized: McpToolResult = await _call("edit_widget_items", { "id": spin_id, "op": "set_table", "count": 3 })
+	assert_true(sized.is_error, "set_table on a SPINLIST is an error")
+	var item: McpToolResult = await _call("edit_widget_items", { "id": spin_id, "op": "item_add", "row": { "text": "Low" } })
+	assert_false(item.is_error, "item_* stays the right verb for SPINLIST rows")
+	assert_eq((item.structured["items"] as Array).size(), 1)
+
+
+func test_malformed_arg_shapes_error_instead_of_silently_passing() -> void:
+	# Wrapping a screen ref in an object used to come back ok:true while doing
+	# nothing; every op now rejects wrong-shaped args with an actionable error.
+	var shown: McpToolResult = await _call("edit_menu_screen", { "show": { "screen": "STARTUP" } })
+	assert_true(shown.is_error, "show with an object ref errors")
+	var deleted: McpToolResult = await _call("edit_menu_screen", { "delete": { "screen": "STARTUP" } })
+	assert_true(deleted.is_error, "delete with an object ref errors")
+	var set_str: McpToolResult = await _call("edit_menu_screen", { "set": "STARTUP" })
+	assert_true(set_str.is_error, "set with a bare string errors")
+	var add_str: McpToolResult = await _call("edit_menu_screen", { "add": "X" })
+	assert_true(add_str.is_error, "add with a bare string errors")
+	var widget_del: McpToolResult = await _call("edit_menu_widget", { "delete": { "id": 3 } })
+	assert_true(widget_del.is_error, "widget delete with an object errors")
+	var widget_set: McpToolResult = await _call("edit_menu_widget", { "set": "name" })
+	assert_true(widget_set.is_error, "widget set with a bare string errors")
+	var moved: McpToolResult = await _call("edit_menu_widget", { "move_rects": { "rows": ["x"] } })
+	assert_true(moved.is_error, "non-object move_rects rows error")
+	await _call("preview_menu", { "op": "on" })
+	var bad_show: McpToolResult = await _call("preview_menu", { "op": "show", "screen": { "name": "X" } })
+	assert_true(bad_show.is_error, "preview show with an object screen errors")
+	var bad_press: McpToolResult = await _call("preview_menu", { "op": "press", "widget": [1] })
+	assert_true(bad_press.is_error, "press with an array widget ref errors")
+	await _call("preview_menu", { "op": "off" })
