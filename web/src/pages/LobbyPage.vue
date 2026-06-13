@@ -3,11 +3,11 @@
     <div class="mx-auto max-w-6xl">
       <header class="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p class="text-sm uppercase tracking-[0.3em] text-brand-200">Game Browser</p>
-          <h1 class="text-3xl font-semibold text-white">Lobbies</h1>
+          <p class="text-sm uppercase tracking-[0.3em] text-accent">Game Browser</p>
+          <h1 class="text-3xl font-semibold text-ink">Lobbies</h1>
         </div>
         <button
-          class="rounded-full border border-white/10 px-5 py-2 text-sm text-white hover:border-brand-200"
+          class="rounded-control border border-border px-5 py-2 text-sm text-ink hover:border-accent"
           @click="refresh"
           :disabled="state.loading"
         >
@@ -16,23 +16,23 @@
         </button>
       </header>
 
-      <div v-if="state.error" class="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
+      <div v-if="state.error" class="mt-6 rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
         {{ state.error }}
       </div>
 
-      <div v-if="state.loading && !state.error" class="mt-12 animate-pulse rounded-3xl border border-white/5 bg-white/5 p-8 text-center text-slate-300">
+      <div v-if="state.loading && !state.error" class="mt-12 animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
         Loading lobbies...
       </div>
 
       <div v-if="!state.loading && !state.error" class="mt-10 space-y-10">
-        <div v-if="state.games.length === 0" class="rounded-3xl border border-white/5 bg-white/5 p-8 text-center text-slate-300">
+        <div v-if="state.games.length === 0" class="rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
           No active lobbies right now. Be the first to host!
         </div>
 
         <div v-for="group in state.games" :key="group.slug" class="space-y-4">
           <div class="flex items-center justify-between">
-            <h2 class="text-2xl font-semibold text-white">{{ group.displayName }}</h2>
-            <span class="text-sm text-slate-400">{{ group.hosts.length }} active host(s)</span>
+            <h2 class="text-2xl font-semibold text-ink">{{ group.displayName }}</h2>
+            <span class="text-sm text-ink-muted">{{ group.hosts.length }} active host(s)</span>
           </div>
           <div class="grid gap-4 md:grid-cols-2">
             <LobbyCard v-for="host in group.hosts" :key="host.id" :host="host" />

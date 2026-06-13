@@ -1,25 +1,25 @@
 <template>
   <section class="mx-auto max-w-5xl px-6 pb-20">
     <header class="py-12 text-center">
-      <h1 class="text-3xl font-semibold tracking-tight text-white md:text-4xl">Curated Game Expansions</h1>
-      <p class="mt-3 text-base text-slate-300 md:text-lg">
+      <h1 class="text-3xl font-semibold tracking-tight text-ink md:text-4xl">Curated Game Expansions</h1>
+      <p class="mt-3 text-base text-ink-muted md:text-lg">
         Every release listed here has been reviewed by the OpenNova team for quality, compatibility, and balance.
       </p>
     </header>
 
     <div v-if="isLoading" class="flex justify-center py-16">
-      <span class="text-sm uppercase tracking-widest text-slate-400">Loading expansions…</span>
+      <span class="text-sm uppercase tracking-widest text-ink-muted">Loading expansions…</span>
     </div>
 
-    <div v-else-if="errorMessage" class="rounded-lg border border-red-500/40 bg-red-500/10 p-6 text-red-200">
+    <div v-else-if="errorMessage" class="rounded-panel border border-danger/40 bg-danger/10 p-6 text-danger">
       {{ errorMessage }}
     </div>
 
     <div v-else class="space-y-12">
       <div v-for="group in groupedExpansions" :key="group.key" class="space-y-4">
         <div class="flex items-baseline justify-between">
-          <h2 class="text-xl font-semibold text-white">{{ group.title }}</h2>
-          <p v-if="group.slug" class="text-xs uppercase tracking-widest text-slate-500">
+          <h2 class="text-xl font-semibold text-ink">{{ group.title }}</h2>
+          <p v-if="group.slug" class="text-xs uppercase tracking-widest text-ink-muted">
             {{ group.slug }}
           </p>
         </div>
@@ -28,34 +28,34 @@
           <article
             v-for="expansion in group.expansions"
             :key="expansion.slug"
-            class="flex h-full flex-col rounded-xl border border-white/10 bg-slate-900/70 p-5 shadow-sm"
+            class="flex h-full flex-col rounded-panel border border-border bg-panel p-5"
           >
             <div class="flex flex-1 flex-col gap-3">
               <div class="flex items-start justify-between gap-3">
-                <h3 class="text-lg font-semibold text-brand-100">{{ expansion.displayName }}</h3>
+                <h3 class="text-lg font-semibold text-accent">{{ expansion.displayName }}</h3>
                 <span
                   v-if="expansion.featured"
-                  class="inline-flex items-center gap-1 rounded-full bg-brand-200 px-3 py-0.5 text-xs font-semibold uppercase tracking-widest text-slate-900 shadow-brand"
+                  class="inline-flex items-center gap-1 rounded-control bg-accent px-3 py-0.5 text-xs font-semibold uppercase tracking-widest text-on-accent"
                 >
                   <span aria-hidden="true">★</span>
                   Featured
                 </span>
               </div>
-              <p v-if="expansion.summary" class="text-sm text-slate-300">
+              <p v-if="expansion.summary" class="text-sm text-ink-muted">
                 {{ expansion.summary }}
               </p>
 
-              <dl class="grid grid-cols-2 gap-3 text-sm text-slate-300">
+              <dl class="grid grid-cols-2 gap-3 text-sm text-ink-muted">
                 <div>
-                  <dt class="text-xs uppercase tracking-widest text-slate-500">Version</dt>
-                  <dd class="font-mono text-sm text-white">{{ expansion.version }}</dd>
+                  <dt class="text-xs uppercase tracking-widest text-ink-muted">Version</dt>
+                  <dd class="font-mono text-sm text-ink">{{ expansion.version }}</dd>
                 </div>
                 <div v-if="expansion.install?.target">
-                  <dt class="text-xs uppercase tracking-widest text-slate-500">Install Target</dt>
-                  <dd class="font-mono text-sm text-white">{{ expansion.install.target }}</dd>
+                  <dt class="text-xs uppercase tracking-widest text-ink-muted">Install Target</dt>
+                  <dd class="font-mono text-sm text-ink">{{ expansion.install.target }}</dd>
                 </div>
                 <div v-if="expansion.packageType">
-                  <dt class="text-xs uppercase tracking-widest text-slate-500">Package</dt>
+                  <dt class="text-xs uppercase tracking-widest text-ink-muted">Package</dt>
                   <dd class="text-sm">{{ expansion.packageType }}</dd>
                 </div>
               </dl>
@@ -63,7 +63,7 @@
               <div v-if="hasReleaseNotes(expansion)" class="mt-3 text-sm">
                 <button
                   type="button"
-                  class="inline-flex items-center rounded-md border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-brand-100 transition hover:bg-white/10"
+                  class="inline-flex items-center rounded-control border border-border bg-raised px-3 py-1 text-xs font-semibold uppercase tracking-widest text-accent transition hover:bg-hover"
                   @click="toggleNotes(expansion.slug)"
                 >
                   <span v-if="isNotesOpen(expansion.slug)">Hide release notes</span>
@@ -71,7 +71,7 @@
                 </button>
                 <div
                   v-if="isNotesOpen(expansion.slug)"
-                  class="mt-2 whitespace-pre-wrap rounded-md border border-white/10 bg-slate-950/70 p-3 text-slate-200"
+                  class="mt-2 whitespace-pre-wrap rounded-panel border border-border bg-surface p-3 text-ink"
                 >
                   {{ expansion.releaseNotes }}
                 </div>
@@ -80,7 +80,7 @@
               <RouterLink
                 v-if="hasDetailPage(expansion.slug)"
                 :to="detailPath(expansion.slug)"
-                class="mt-auto inline-flex items-center justify-center rounded-md bg-brand-200 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-brand-100"
+                class="mt-auto inline-flex items-center justify-center rounded-control bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-accent/90"
               >
                 View expansion details
               </RouterLink>
@@ -88,12 +88,12 @@
           </article>
         </div>
 
-        <div v-else class="rounded-lg border border-white/10 bg-slate-900/70 p-6 text-sm text-slate-300">
+        <div v-else class="rounded-panel border border-border bg-panel p-6 text-sm text-ink-muted">
           No curated expansions are available for this title yet. Check back as we review new submissions.
         </div>
       </div>
 
-      <p v-if="!groupedExpansions.length" class="text-center text-sm text-slate-400">
+      <p v-if="!groupedExpansions.length" class="text-center text-sm text-ink-muted">
         No curated expansions are published right now. New releases will appear here once they pass review.
       </p>
     </div>
@@ -155,7 +155,7 @@ const groupedExpansions = computed<ExpansionGroup[]>(() => {
     });
   }
 
-  return groups.sort((a, b) => a.title.localeCompare(b.title));
+  return groups.sort((a, b) => (a.title ?? '').localeCompare(b.title ?? ''));
 });
 
 function hasReleaseNotes(expansion: ExpansionSummary): boolean {
@@ -188,9 +188,3 @@ function sortExpansions(list: readonly ExpansionSummary[]): ExpansionSummary[] {
   });
 }
 </script>
-
-<style scoped>
-.shadow-brand {
-  box-shadow: 0 6px 14px rgba(34, 197, 94, 0.25);
-}
-</style>

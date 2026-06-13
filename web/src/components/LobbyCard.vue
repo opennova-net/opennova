@@ -1,14 +1,14 @@
 <template>
-  <div class="rounded-3xl border border-white/5 bg-white/5 p-5 shadow-xl">
+  <div class="rounded-panel border border-border bg-panel p-5">
     <div class="flex items-center justify-between">
-      <p class="text-lg font-semibold text-white">{{ host.serverName || 'Unnamed Server' }}</p>
-      <span class="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-brand-100">
+      <p class="text-lg font-semibold text-ink">{{ host.serverName || 'Unnamed Server' }}</p>
+      <span class="rounded-control bg-hover px-3 py-1 text-xs font-semibold text-accent">
         {{ host.players }} / {{ host.maxPlayers || 0 }}
       </span>
     </div>
-    <p class="mt-2 text-sm text-slate-300">{{ host.region || 'Unknown region' }}</p>
-    <p class="mt-1 text-xs font-mono text-slate-500" v-if="host.hostIp">{{ host.hostIp }}:{{ host.hostPort }}</p>
-    <p class="mt-4 text-sm text-slate-400" v-if="host.message">{{ host.message }}</p>
+    <p class="mt-2 text-sm text-ink-muted">{{ host.region || 'Unknown region' }}</p>
+    <p class="mt-1 text-xs font-mono text-ink-muted" v-if="host.hostIp">{{ host.hostIp }}:{{ host.hostPort }}</p>
+    <p class="mt-4 text-sm text-ink-muted" v-if="host.message">{{ host.message }}</p>
   </div>
 </template>
 

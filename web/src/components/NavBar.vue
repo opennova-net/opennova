@@ -1,23 +1,23 @@
 <template>
-  <header class="fixed inset-x-0 top-0 z-20 border-b border-white/5 bg-slate-950/70 backdrop-blur">
+  <header class="fixed inset-x-0 top-0 z-20 border-b border-border bg-surface/95">
     <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
       <div class="flex items-center gap-3">
-        <RouterLink to="/" class="text-lg font-semibold tracking-wide text-white" aria-label="OpenNova home">
-          Open<span class="text-brand-200">Nova</span>
+        <RouterLink to="/" class="text-lg font-semibold tracking-wide text-ink" aria-label="OpenNova home">
+          Open<span class="text-accent">Nova</span>
         </RouterLink>
         <span
-          class="inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-green-300 shadow-[0_0_0_4px_rgba(34,197,94,0.25)]"
+          class="inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-online"
           title="Online"
         ></span>
       </div>
 
-      <nav class="hidden items-center gap-6 text-sm uppercase tracking-wider text-slate-200 md:flex">
-        <RouterLink class="hover:text-white transition" to="/lobby">Lobbies</RouterLink>
-        <RouterLink class="hover:text-white transition" to="/expansions">Expansions</RouterLink>
-        <RouterLink class="hover:text-white transition" to="/mod-tools">Tools</RouterLink>
-        <RouterLink class="hover:text-white transition" to="/admin/users">Admin</RouterLink>
+      <nav class="hidden items-center gap-6 text-sm uppercase tracking-wider text-ink md:flex">
+        <RouterLink class="hover:text-ink-bright transition" to="/lobby">Lobbies</RouterLink>
+        <RouterLink class="hover:text-ink-bright transition" to="/expansions">Expansions</RouterLink>
+        <RouterLink class="hover:text-ink-bright transition" to="/mod-tools">Tools</RouterLink>
+        <RouterLink class="hover:text-ink-bright transition" to="/admin/users">Admin</RouterLink>
         <RouterLink
-          class="rounded-full border border-brand-200 px-4 py-1 text-brand-50 transition hover:bg-brand-500 hover:text-white"
+          class="rounded-control border border-accent px-4 py-1 text-accent transition hover:bg-accent hover:text-on-accent"
           to="/register"
         >
           Register
@@ -25,7 +25,7 @@
       </nav>
 
       <button
-        class="inline-flex items-center justify-center rounded-md border border-white/20 p-2 text-slate-100 transition hover:border-white md:hidden"
+        class="inline-flex items-center justify-center rounded-control border border-border-strong p-2 text-ink transition hover:bg-hover md:hidden"
         type="button"
         :aria-expanded="isMenuOpen.toString()"
         aria-controls="primary-navigation"
@@ -68,15 +68,15 @@
       <nav
         v-if="isMenuOpen"
         id="primary-navigation"
-        class="border-t border-white/5 bg-slate-950/95 px-4 pb-4 pt-2 shadow-lg shadow-slate-900/40 md:hidden"
+        class="border-t border-border bg-surface/95 px-4 pb-4 pt-2 md:hidden"
       >
-        <div class="flex flex-col gap-2 text-sm uppercase tracking-[0.2em] text-slate-200">
-          <RouterLink class="rounded-md px-3 py-2 hover:bg-white/5" to="/lobby" @click="closeMenu">Lobbies</RouterLink>
-          <RouterLink class="rounded-md px-3 py-2 hover:bg-white/5" to="/expansions" @click="closeMenu">Expansions</RouterLink>
-          <RouterLink class="rounded-md px-3 py-2 hover:bg-white/5" to="/mod-tools" @click="closeMenu">Mod Tools</RouterLink>
-          <RouterLink class="rounded-md px-3 py-2 hover:bg-white/5" to="/admin/users" @click="closeMenu">Admin</RouterLink>
+        <div class="flex flex-col gap-2 text-sm uppercase tracking-[0.2em] text-ink">
+          <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/lobby" @click="closeMenu">Lobbies</RouterLink>
+          <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/expansions" @click="closeMenu">Expansions</RouterLink>
+          <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/mod-tools" @click="closeMenu">Mod Tools</RouterLink>
+          <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/admin/users" @click="closeMenu">Admin</RouterLink>
           <RouterLink
-            class="rounded-full border border-brand-200 px-4 py-2 text-center text-brand-50 transition hover:bg-brand-500 hover:text-white"
+            class="rounded-control border border-accent px-4 py-2 text-center text-accent transition hover:bg-accent hover:text-on-accent"
             to="/register"
             @click="closeMenu"
           >

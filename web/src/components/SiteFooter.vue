@@ -1,6 +1,6 @@
 <template>
-  <footer class="border-t border-white/5 bg-slate-950/80 py-8">
-    <div class="mx-auto flex max-w-6xl flex-col gap-1 px-6 text-[0.65rem] text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+  <footer class="border-t border-border bg-surface/80 py-8">
+    <div class="mx-auto flex max-w-6xl flex-col gap-1 px-6 text-[0.65rem] text-ink-muted sm:flex-row sm:items-center sm:justify-between">
       <p class="tracking-[0.18em] uppercase">
         Fan-run preservation project, not endorsed by THQ Nordic; original rights remain with their owners.
       </p>
@@ -9,7 +9,7 @@
           href="https://github.com/opennova-net/"
           target="_blank"
           rel="noopener"
-          class="hover:text-white transition"
+          class="hover:text-ink-bright transition"
         >
           GitHub
         </a>
@@ -17,7 +17,7 @@
           href="https://discord.gg/comingsoon"
           target="_blank"
           rel="noopener"
-          class="hover:text-white transition"
+          class="hover:text-ink-bright transition"
         >
           Discord
         </a>
