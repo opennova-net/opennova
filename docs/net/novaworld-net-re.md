@@ -1386,7 +1386,7 @@ confirmed in passes 1–2 plus the C4/C5/D1 set in pass 3; 11 claims refuted.
 | C1 http-login-build | partial | all 3 reported claims refuted; POST/all-encrypted model correct |
 | C2 cookie-jar | partial | one-`Cookie:`-header-per-cookie (D-NET-30) |
 | C3 login-orchestration | partial | markup-derived URLs (D-NET-31) + shared cookie fix |
-| C4 gsb-parse | **divergent** | **wrong chunk format — browse vs real NW is broken (D-NET-32..36)** |
+| C4 gsb-parse | **matching** | format fixed + byte-verified vs genuine `.204` (D-NET-32..36) |
 | C5 joi-regurl | partial | documentation only; ':' separator + HOSTKEY trim confirmed |
 | D1 join-handoff | **divergent** | JO hello PV1 + dial-from-NK (D-NET-47..49) |
 | D2 client-play-request | **divergent** | **CurrentlyPlaying + ClientVarList wrap (HIGH); unparseable by our own server (D-NET-37..39)** |
@@ -1448,11 +1448,13 @@ session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
 - **D-NET-30** [MED, TRACKED] emit one `Cookie:` header per cookie (retail `Cookie: name=value;` per entry); jar keyed by subnet-truncated host. [orig: CUIBrowser_SendHTTPRequest @ 0x658840 / Network_TruncateIPToSubnet @ 0x62dfe0]
 - **D-NET-31** [LOW, DOC] login URLs/params are markup-derived (`nw_startup.mnx`), not C literals; `[CC]`/`[GT]` tokens and the `[domainname]` lower-casing are non-retail. [orig: gate STARTUPURL via 0x4ced20]
 
-`gsb.cpp` (C4) — DIVERGENT, **server browser vs real NW is broken**:
-- **D-NET-32** [HIGH, TRACKED] no bare "GSB " file header — "GSB " (0x20425347) is the FIRST chunk's TAG (reset/init; payload dword0==0x10000). [orig: NapiGameList_ProcessEncryptedResponse @ 0x63d740]
-- **D-NET-33** [HIGH, TRACKED] chunk layout is `[tag:4 @+0][len:u32 @+4][payload @+8]`, advance len+8 — magic is a PREFIX, not the suffix we emit. [orig: 0x63d740 (@ 0x63d78b / 0x63d76c / 0x63d781)]
-- **D-NET-34** [HIGH, TRACKED] tags: GSB =init, FLDS=field-names, SVRS=rows, XXXX=terminator; drop the invented IVAR tag and the TotalServers/TotalPlayers summary (no wire source). [orig: 0x63d740]
-- **D-NET-35** [HIGH, TRACKED] SVRS row = `[u32 ip][u32 port]` then N positional NUL-terminated values (FLDS-keyed) then `[u16 playerCount]` then playerCount NUL-term player names; we misread the row header and drop the player list. [orig: 0x63d740 (@ 0x63da60..)]
+`gsb.cpp` (C4) — FIXED, **byte-verified against the genuine `.204` blob**
+(`fixtures/novaworld/nw204_jop_2.gsb`, `gsb_real204_decode_test` — 8 servers, 26
+FLDS columns, decoded through the XXXX terminator):
+- **D-NET-32** [HIGH, FIXED] no bare "GSB " file header — "GSB " (0x20425347) is the FIRST chunk's TAG (reset/init; payload dword0==0x00010000). [orig: NapiGameList_ProcessEncryptedResponse @ 0x63d740]
+- **D-NET-33** [HIGH, FIXED] chunk layout is `[magic:4 @+0][len:u32 @+4][payload @+8]`, advance len+8 — magic is a PREFIX, not the suffix we emitted. [orig: 0x63d740 (@ 0x63d78b / 0x63d76c / 0x63d781)]
+- **D-NET-34** [HIGH, FIXED] tags: GSB =init, FLDS=field-names, SVRS=rows, XXXX=terminator; dropped the bogus FLDS-as-summary/TotalServers chunk. The 26 FLDS column names+order are confirmed IDENTICAL to retail. (`.204` also sends an "IVAR" chunk between GSB and FLDS, but the retail parser — and ours — ignore unknown tags, so the builder omits it harmlessly.) [orig: 0x63d740]
+- **D-NET-35** [HIGH, FIXED] SVRS row = `[u32 rid][u32 port]` then 26 positional NUL-term values (FLDS-keyed) then `[u16 playerCount]` then player names. The first u32 is the host id / join `rid` — retail's "serverIP" is a misnomer; the `.204` values (e.g. 0x0A0027A0 = 167782304, in the Wave-6 join-`rid` range) are NOT IPv4, the host IP arrives via the NK join token. We previously misread it as an IP and dropped the player list. [orig: 0x63d740 (@ 0x63da60..)]
 - **D-NET-36** [LOW, DISPLAY] GSB strings are Latin-1 — transcode to UTF-8 at the Godot display layer, not the parser. [orig: 0x63d740]
 
 `napi/session.cpp` (D2 ClientPlayRequest) — DIVERGENT, **unparseable by our own server**:
@@ -1491,10 +1493,14 @@ mechanism (sub_62E750 has no in-match caller); D2 ServerVar order (0x4d0660 is t
 serializer; no Server serializer exists in this binary); B4 url-cipher i≥22 (unverified — IDA was
 down; unreachable for realistic payloads).
 
-**Fixes applied this session** (build clean; 22/22 scoped net ctest green incl. `nw204_lobby_decode`):
-D-NET-1, D-NET-2, D-NET-4 (`session_hello.cpp`), D-NET-19 (`client_session.cpp`).
+**Fixes applied** (build clean; scoped net ctest green incl. `nw204_lobby_decode` + the new
+`gsb_real204_decode`):
+- Wave-7 grill commit: D-NET-1, D-NET-2, D-NET-4 (`session_hello.cpp`), D-NET-19 (`client_session.cpp`).
+- GSB rewrite: D-NET-32..36 (`gsb.cpp`/`gsb.h`, server emit + binding consume) — retail chunk
+  framing + row layout, byte-verified against the genuine `.204` blob via the new
+  `gsb_real204_decode_test` oracle (fixtures/novaworld/nw204_jop_2.gsb). Server browse against
+  real NovaWorld now produces a retail-parseable list.
 
-**High-value follow-up backlog (tracked rewrites):** GSB chunk format (D-NET-32..35) — server
-browse against real NovaWorld is currently broken; A6 dispatch flags (D-NET-5/6); D2 ClientVarList
+**High-value follow-up backlog (tracked rewrites):** A6 dispatch flags (D-NET-5/6); D2 ClientVarList
 wrapping (D-NET-37/38) — current builder output is unparseable by our own server; D3 host
 registration overhaul (D-NET-40..46). Each carries its `[orig]` anchor and corrected behavior above.

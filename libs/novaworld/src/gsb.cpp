@@ -7,20 +7,20 @@
 
 namespace opennova {
 
-// NW-G2 (grill wave 2, 2026-06-11): retail Jointops.exe (JO:CA) parses the
-// GSB-style chunk format — the strings "SVRS" (@0x63d793) and "FLDS"
-// (@0x63d7b1) are present, and "GLB "/"PLYR"/"FIEL"-as-a-chunk are absent.
-// Our builder below emits IVAR/FLDS/SVRS/XXXX, which matches retail. The
-// earlier note (project_net_phase_c2_visibility) that the browser uses
-// "GLB /FIEL/DATA/PLYR" is the *jodemo* demo binary's separate format; if
-// demo support matters it needs the jodemo IDB and a distinct builder.
-// Verdict: MATCHING for retail. See docs/net/novaworld-net-re.md §8.
+// Witnessed against the retail GSB parser NapiGameList_ProcessEncryptedResponse
+// @ 0x63d740 (docs/net/novaworld-net-re.md §8 Wave 7). The blob is a flat chunk
+// stream [magic:4][u32 LE len][payload], advance len+8 — magic is a PREFIX and
+// "GSB " is the first chunk's tag, NOT a bare file header (D-NET-32/33). Chunk
+// roles: "GSB "=init (payload dword0==0x00010000), "FLDS"=field names,
+// "SVRS"=server rows, "XXXX"=terminator (D-NET-34). Row =
+// [u32 ip][u32 port][N values][u16 player_count][player names] (D-NET-35).
 
 namespace {
 
-// Mirrors onnw/gsb.py::FIELD_NAMES (26 fields, order matters — the client's
-// browser UI reads the server row as a positional list keyed against the
-// FIELDS definition sent in the preceding SVRS chunk).
+// FLDS column set — 26 columns, witnessed byte-for-byte against the genuine
+// .204 GSB blob (fixtures/novaworld/nw204_jop_2.gsb, gsb_real204_decode_test):
+// the names AND order below match retail exactly. The join `rid` is NOT a column
+// — it is the row's first u32 (see build_servers_payload / parse_servers).
 inline const char *const GSB_FIELD_NAMES[] = {
 		"ServerName",   //  0
 		"GameType",     //  1
@@ -69,37 +69,25 @@ void push_ascii_cstr(std::vector<uint8_t> &buf, const std::string &s) {
 	buf.push_back(0x00);
 }
 
-// Mirrors onnw/gsb.py::_pack_chunk: encrypt the payload with the 22-digit
-// GSB NWU key, then prefix the encrypted length and suffix the 4-byte magic
-// tag that identifies the chunk kind.
-//
-// NOTE on encrypt-vs-decrypt direction: the function names `nwu_encrypt` /
-// `nwu_decrypt` in this codebase mirror jodemo.exe's naming
-// (`PFF_EncryptBuffer` = our nwu_encrypt = SUBTRACT chain; `Crypto_DecryptBuffer`
-// = our nwu_decrypt = ADD chain). Onnet's Python names `nwu_encrypt` and
-// `nwu_decrypt` are SWAPPED relative to ours: onnet's `nwu_encrypt` is the
-// ADD chain (== our `nwu_decrypt`), and onnet's `nwu_decrypt` is the SUBTRACT
-// chain (== our `nwu_encrypt`).
-//
-// Onnet's `_pack_chunk` calls `nwu_encrypt(payload)` — i.e. ADD chain. To
-// match byte-for-byte we call `nwu_decrypt` here. Retail decodes by applying
-// the SUBTRACT chain (== onnet's `nwu_decrypt` == our `nwu_encrypt`).
+// Emit one chunk: [4-byte magic PREFIX][u32 LE payload_length][encrypted payload].
+// The payload is encrypted with the ADD chain (our nwu_decrypt == retail
+// NapiNP_EncryptBuffer @ 0x6187b0); the retail parser decodes with the inverse
+// SUBTRACT chain (NapiNP_DecryptBuffer @ 0x618880 == our nwu_encrypt).
 void append_chunk(std::vector<uint8_t> &out,
-                  std::vector<uint8_t> payload,
-                  const char magic[4]) {
+                  const char magic[4],
+                  std::vector<uint8_t> payload) {
 	if (!payload.empty()) {
 		nwu_decrypt(payload.data(), payload.size(), GSB_NWU_KEY);
 	}
-	push_u32_le(out, static_cast<uint32_t>(payload.size()));
-	out.insert(out.end(), payload.begin(), payload.end());
 	out.push_back(static_cast<uint8_t>(magic[0]));
 	out.push_back(static_cast<uint8_t>(magic[1]));
 	out.push_back(static_cast<uint8_t>(magic[2]));
 	out.push_back(static_cast<uint8_t>(magic[3]));
+	push_u32_le(out, static_cast<uint32_t>(payload.size()));
+	out.insert(out.end(), payload.begin(), payload.end());
 }
 
-// Pull a field value out of a GsbServerEntry keyed by the FIELD_NAMES
-// index. The mapping is hand-kept in sync with FIELD_NAMES above.
+// Pull a field value out of a GsbServerEntry keyed by the FIELD_NAMES index.
 std::string field_value(const GsbServerEntry &s, size_t idx) {
 	auto int_s = [](int v) { return std::to_string(v); };
 	switch (idx) {
@@ -133,13 +121,12 @@ std::string field_value(const GsbServerEntry &s, size_t idx) {
 	}
 }
 
-// IVAR chunk — opaque fixed blob that onnet ships verbatim. The bytes
-// aren't independently verified beyond "onnet uses this literal and
-// retail accepts it" (`onnw/gsb.py::_build_ivar_chunk`). Looks like a
-// mini KV header: version/timestamp/"jop_2\0" plus padding.
-std::vector<uint8_t> build_ivar_payload() {
+// "GSB " init/reset chunk payload — the retail parser only checks that it begins
+// with the u32 0x00010000 (@ 0x63d8f2); the trailing bytes are a version/date +
+// "jop_2" blob it ignores. (Was the onnet "IVAR" chunk.)
+std::vector<uint8_t> build_init_payload() {
 	static const uint8_t RAW[] = {
-		0x00, 0x00, 0x01, 0x00,
+		0x00, 0x00, 0x01, 0x00,   // u32 0x00010000 (required prefix)
 		0xe9, 0x07, 0x0a, 0x0a,
 		0x13, 0x20, 0x30, 0x00,
 		0x00, 0x05,
@@ -149,23 +136,7 @@ std::vector<uint8_t> build_ivar_payload() {
 	return std::vector<uint8_t>(RAW, RAW + sizeof(RAW));
 }
 
-// FLDS chunk — summary KV block (TotalServers / TotalPlayers).
-std::vector<uint8_t> build_summary_payload(const std::vector<GsbServerEntry> &servers) {
-	int total_players = 0;
-	for (const auto &s : servers) {
-		total_players += s.players;
-	}
-	std::vector<uint8_t> payload;
-	push_u16_le(payload, 2);
-	push_ascii_cstr(payload, "TotalServers");
-	push_ascii_cstr(payload, std::to_string(servers.size()));
-	push_ascii_cstr(payload, "TotalPlayers");
-	push_ascii_cstr(payload, std::to_string(total_players));
-	return payload;
-}
-
-// SVRS (fields) chunk — field-name table. Content is a LE u16 count
-// followed by the null-terminated field names in FIELD_NAMES order.
+// FLDS chunk — field-name table: [u16 LE count][count × NUL-term name].
 std::vector<uint8_t> build_fields_payload() {
 	std::vector<uint8_t> payload;
 	push_u16_le(payload, static_cast<uint16_t>(GSB_FIELD_COUNT));
@@ -175,26 +146,24 @@ std::vector<uint8_t> build_fields_payload() {
 	return payload;
 }
 
-// SVRS (servers) chunk — per-server rows.
-//
-// Row layout (per onnw/gsb.py::_build_servers_chunk):
-//   [u32 LE rid]
-//   [4 bytes ip (big-endian octets)]
-//   [FIELD_COUNT × (ASCII value + 0x00)]
-//   [u16 LE 0]  — trailing marker
+// SVRS chunk — per-server rows.
+//   [u16 LE server_count]
+//   per server: [u32 LE rid][u32 LE port]
+//               [field_count × (ASCII value + NUL)]   (FIELD_NAMES order)
+//               [u16 LE player_count][player_count × (player name + NUL)]
 std::vector<uint8_t> build_servers_payload(const std::vector<GsbServerEntry> &servers) {
 	std::vector<uint8_t> payload;
 	push_u16_le(payload, static_cast<uint16_t>(servers.size()));
 	for (const auto &s : servers) {
-		push_u32_le(payload, s.rid);
-		payload.push_back(s.ip[0]);
-		payload.push_back(s.ip[1]);
-		payload.push_back(s.ip[2]);
-		payload.push_back(s.ip[3]);
+		push_u32_le(payload, s.rid);   // host id (the /NWJoin.dll?rid= value)
+		push_u32_le(payload, static_cast<uint32_t>(s.port));
 		for (size_t i = 0; i < GSB_FIELD_COUNT; ++i) {
 			push_ascii_cstr(payload, field_value(s, i));
 		}
-		push_u16_le(payload, 0);
+		push_u16_le(payload, static_cast<uint16_t>(s.player_names.size()));
+		for (const auto &name : s.player_names) {
+			push_ascii_cstr(payload, name);
+		}
 	}
 	return payload;
 }
@@ -236,26 +205,26 @@ struct GsbChunk {
 	std::vector<uint8_t> payload;
 };
 
-// Read one chunk at `pos`: [u32 LE enc_len][enc_len bytes][4-byte magic].
-// Decrypts the payload in place with the SUBTRACT chain (our nwu_encrypt) —
-// the inverse of append_chunk's nwu_decrypt.
+// Read one chunk at `pos`: [4-byte magic][u32 LE len][len bytes].
+// Decrypts the payload in place with the SUBTRACT chain (our nwu_encrypt) — the
+// inverse of append_chunk's nwu_decrypt.
 bool read_chunk(const uint8_t *data, size_t len, size_t &pos, GsbChunk &out) {
-	uint32_t enc_len = 0;
-	if (!read_u32_le(data, len, pos, enc_len)) return false;
-	// Bounds check in 64-bit so the wire-controlled enc_len can't wrap the
-	// addition on a 32-bit build (an attacker-forged enc_len near UINT32_MAX
-	// would otherwise slip past `pos + enc_len + 4 > len` and OOB-read the
-	// payload assign below). gsb_parse_response runs on server-supplied bytes.
-	if (static_cast<uint64_t>(pos) + enc_len + 4u > static_cast<uint64_t>(len)) {
-		return false; // payload + 4-byte magic must fit
+	if (pos + 8 > len) return false; // need magic(4) + length(4)
+	std::memcpy(out.magic, data + pos, 4);
+	pos += 4;
+	uint32_t payload_len = 0;
+	if (!read_u32_le(data, len, pos, payload_len)) return false;
+	// Bounds check in 64-bit so a wire-controlled payload_len near UINT32_MAX
+	// can't wrap the addition on a 32-bit build and slip an OOB read past the
+	// `pos + payload_len > len` test. gsb_parse_response runs on server bytes.
+	if (static_cast<uint64_t>(pos) + payload_len > static_cast<uint64_t>(len)) {
+		return false;
 	}
-	out.payload.assign(data + pos, data + pos + enc_len);
-	pos += enc_len;
+	out.payload.assign(data + pos, data + pos + payload_len);
+	pos += payload_len;
 	if (!out.payload.empty()) {
 		nwu_encrypt(out.payload.data(), out.payload.size(), GSB_NWU_KEY);
 	}
-	std::memcpy(out.magic, data + pos, 4);
-	pos += 4;
 	return true;
 }
 
@@ -275,9 +244,8 @@ int parse_int_or_zero(const std::string &s) {
 	try { return std::stoi(s); } catch (...) { return 0; }
 }
 
-// Assign one positional field value into the entry, keyed by the field name
-// from the SVRS(fields) table (case-insensitive — the retail browser folds
-// case on lookup). Unknown field names are ignored.
+// Assign one positional field value into the entry, keyed by the field name from
+// the FLDS table (case-insensitive — the retail browser folds case on lookup).
 void assign_field(GsbServerEntry &e, const std::string &name, const std::string &value) {
 	const std::string key = to_lower(name);
 	if      (key == "servername")  e.server_name  = value;
@@ -309,22 +277,7 @@ void assign_field(GsbServerEntry &e, const std::string &name, const std::string 
 	// Unknown field names intentionally ignored.
 }
 
-// FLDS summary: [u16 count][count × (key cstr, value cstr)].
-void parse_summary(const std::vector<uint8_t> &payload, GsbResponse &out) {
-	size_t pos = 0;
-	uint16_t count = 0;
-	if (!read_u16_le(payload.data(), payload.size(), pos, count)) return;
-	for (uint16_t i = 0; i < count; ++i) {
-		std::string key, value;
-		if (!read_cstr(payload, pos, key)) return;
-		if (!read_cstr(payload, pos, value)) return;
-		const std::string lk = to_lower(key);
-		if (lk == "totalservers") out.total_servers = parse_int_or_zero(value);
-		else if (lk == "totalplayers") out.total_players = parse_int_or_zero(value);
-	}
-}
-
-// SVRS(fields): [u16 count][count × field-name cstr].
+// FLDS: [u16 count][count × field-name cstr].
 bool parse_fields(const std::vector<uint8_t> &payload, std::vector<std::string> &names) {
 	size_t pos = 0;
 	uint16_t count = 0;
@@ -339,7 +292,7 @@ bool parse_fields(const std::vector<uint8_t> &payload, std::vector<std::string> 
 	return true;
 }
 
-// SVRS(servers): [u16 count][count × ([u32 rid][4 ip][N values][u16 marker])],
+// SVRS: [u16 count][count × ([u32 rid][u32 port][N values][u16 player_count][names])],
 // where N == field_names.size() and values are read positionally.
 bool parse_servers(const std::vector<uint8_t> &payload,
                    const std::vector<std::string> &field_names,
@@ -351,17 +304,23 @@ bool parse_servers(const std::vector<uint8_t> &payload,
 	servers.reserve(count);
 	for (uint16_t i = 0; i < count; ++i) {
 		GsbServerEntry e{};
-		if (!read_u32_le(payload.data(), payload.size(), pos, e.rid)) return false;
-		if (pos + 4 > payload.size()) return false;
-		e.ip = {payload[pos], payload[pos + 1], payload[pos + 2], payload[pos + 3]};
-		pos += 4;
+		if (!read_u32_le(payload.data(), payload.size(), pos, e.rid)) return false;  // host id
+		uint32_t port = 0;
+		if (!read_u32_le(payload.data(), payload.size(), pos, port)) return false;
+		e.port = static_cast<uint16_t>(port & 0xFFFFu);
 		for (const std::string &name : field_names) {
 			std::string value;
 			if (!read_cstr(payload, pos, value)) return false;
 			assign_field(e, name, value);
 		}
-		uint16_t marker = 0;
-		if (!read_u16_le(payload.data(), payload.size(), pos, marker)) return false;
+		uint16_t player_count = 0;
+		if (!read_u16_le(payload.data(), payload.size(), pos, player_count)) return false;
+		e.player_names.reserve(player_count);
+		for (uint16_t p = 0; p < player_count; ++p) {
+			std::string name;
+			if (!read_cstr(payload, pos, name)) return false;
+			e.player_names.push_back(std::move(name));
+		}
 		servers.push_back(std::move(e));
 	}
 	return true;
@@ -371,50 +330,44 @@ bool parse_servers(const std::vector<uint8_t> &payload,
 
 bool gsb_parse_response(const uint8_t *data, size_t len, GsbResponse &out) {
 	out = GsbResponse{};
-	if (!data || len < 4) return false;
-	if (data[0] != 'G' || data[1] != 'S' || data[2] != 'B' || data[3] != ' ') return false;
+	if (!data || len < 8) return false; // need at least one chunk header
 
-	size_t pos = 4;
-	int svrs_seen = 0;
+	size_t pos = 0;
 	bool reached_terminator = false;
 	while (pos < len) {
 		GsbChunk chunk;
 		if (!read_chunk(data, len, pos, chunk)) return false;
-		if (magic_is(chunk, "IVAR")) {
-			// Opaque init block — ignored (see build_ivar_payload).
+		if (magic_is(chunk, "GSB ")) {
+			// Init/reset record (payload dword0 == 0x00010000) — no data to keep.
 		} else if (magic_is(chunk, "FLDS")) {
-			parse_summary(chunk.payload, out);
+			if (!parse_fields(chunk.payload, out.field_names)) return false;
 		} else if (magic_is(chunk, "SVRS")) {
-			if (svrs_seen == 0) {
-				if (!parse_fields(chunk.payload, out.field_names)) return false;
-			} else {
-				if (!parse_servers(chunk.payload, out.field_names, out.servers)) return false;
-			}
-			++svrs_seen;
+			if (!parse_servers(chunk.payload, out.field_names, out.servers)) return false;
 		} else if (magic_is(chunk, "XXXX")) {
 			reached_terminator = true;
 			break;
 		}
 		// Unknown chunk tags are walked past (read_chunk advanced the cursor).
 	}
-	return reached_terminator;
+	if (!reached_terminator) return false;
+
+	out.total_servers = static_cast<int>(out.servers.size());
+	out.total_players = 0;
+	for (const auto &s : out.servers) {
+		out.total_players += static_cast<int>(s.player_names.size());
+	}
+	return true;
 }
 
 std::vector<uint8_t> gsb_build_response(const std::vector<GsbServerEntry> &servers) {
 	std::vector<uint8_t> out;
 	out.reserve(512 + 256 * servers.size());
 
-	// 4-byte unencrypted header.
-	out.push_back('G');
-	out.push_back('S');
-	out.push_back('B');
-	out.push_back(' ');
-
-	append_chunk(out, build_ivar_payload(),           "IVAR");
-	append_chunk(out, build_summary_payload(servers), "FLDS");
-	append_chunk(out, build_fields_payload(),         "SVRS");
-	append_chunk(out, build_servers_payload(servers), "SVRS");
-	append_chunk(out, {},                             "XXXX");
+	// Flat chunk stream — no bare header; "GSB " is the first chunk's tag.
+	append_chunk(out, "GSB ", build_init_payload());
+	append_chunk(out, "FLDS", build_fields_payload());
+	append_chunk(out, "SVRS", build_servers_payload(servers));
+	append_chunk(out, "XXXX", {});
 
 	return out;
 }

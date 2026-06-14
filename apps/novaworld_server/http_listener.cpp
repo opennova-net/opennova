@@ -1525,13 +1525,10 @@ bool HttpListener::start(const ServerConfig &config) {
 			entries.reserve(rows.size());
 			for (const auto &h : rows) {
 				opennova::GsbServerEntry e;
-				e.rid  = h.rid;
-				unsigned a=0, b=0, c=0, d=0;
-				if (sscanf(h.host_ip.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
-					e.ip = {static_cast<uint8_t>(a), static_cast<uint8_t>(b),
-					        static_cast<uint8_t>(c), static_cast<uint8_t>(d)};
-				}
-				e.port         = static_cast<uint16_t>(h.host_port);
+				e.rid  = h.rid;   // host id — the GSB row's first u32 (the join rid)
+				e.port = static_cast<uint16_t>(h.host_port);
+				// (No host IP in the browse list — the joiner resolves it from
+				//  the NK token returned by /NWJoin.dll?rid=<rid>.)
 				e.server_name  = h.server_name.empty() ? std::string("Unnamed Server") : h.server_name;
 				e.players      = h.player_count;
 				e.max_players  = h.max_players;
