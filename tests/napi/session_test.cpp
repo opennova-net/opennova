@@ -2,6 +2,7 @@
 #include <napi/tlv.h>
 
 #include <cstdio>
+#include <string>
 #include <vector>
 
 namespace {
@@ -12,6 +13,14 @@ bool expect(bool condition, const char *message) {
 	}
 	std::fprintf(stderr, "FAIL: %s\n", message);
 	return false;
+}
+
+// Read a field's value (as a string) from a container by name.
+std::string field_str(const opennova::NapiMessage &m, const char *name) {
+	for (const auto &f : m.fields) {
+		if (f.name == name) return std::string(f.data.begin(), f.data.end());
+	}
+	return {};
 }
 
 // Error → NWEC string mapping matches jodemo's CNapiGameSession_ConnectOrHost
@@ -91,11 +100,33 @@ bool check_handshake_names() {
 	if (!expect(hu.children[0].name == "Host", "child 0 Host")) return false;
 	if (!expect(hu.children[1].name == "PlayerList", "child 1 PlayerList")) return false;
 
-	auto pr = make_client_play_request(NapiMessage{}, NapiMessage{});
+	// ClientPlayRequest = a top-level CurrentlyPlaying field, then the Cookie and
+	// PlaySetup var-lists (each a ClientVarList carrying a VarList field + ClientVar
+	// children), Cookie FIRST. [orig: CNapiGameSession_SendPlayRequest @ 0x4d3920 /
+	// NapiStatement_SerializeVarList @ 0x4d0660]
+	using opennova::ClientVar;
+	auto pr = make_client_play_request(
+		7,
+		{{0, "NWUID", "abc"}, {0, "NWHWI", "gpu"}},  // Cookie vars
+		{{0, "Mission", "ASH_G11A"}});               // PlaySetup vars
 	if (!expect(pr.name == "ClientPlayRequest", "ClientPlayRequest name")) return false;
-	if (!expect(pr.children.size() == 2, "2 children")) return false;
-	if (!expect(pr.children[0].name == "PlaySetup", "child 0 PlaySetup")) return false;
-	if (!expect(pr.children[1].name == "Cookie", "child 1 Cookie")) return false;
+	if (!expect(pr.fields.size() == 1 && pr.fields[0].name == "CurrentlyPlaying",
+			"top-level CurrentlyPlaying field")) return false;
+	if (!expect(field_str(pr, "CurrentlyPlaying") == "7", "CurrentlyPlaying == \"7\"")) return false;
+	if (!expect(pr.children.size() == 2, "2 var-lists")) return false;
+	if (!expect(pr.children[0].name == "ClientVarList" &&
+			field_str(pr.children[0], "VarList") == "Cookie",
+			"child 0 ClientVarList(Cookie)")) return false;
+	if (!expect(pr.children[1].name == "ClientVarList" &&
+			field_str(pr.children[1], "VarList") == "PlaySetup",
+			"child 1 ClientVarList(PlaySetup)")) return false;
+	// Cookie var-list carries two ClientVar children (VarFNum/VarName/VarValue).
+	if (!expect(pr.children[0].children.size() == 2, "Cookie has 2 ClientVar")) return false;
+	if (!expect(pr.children[0].children[0].name == "ClientVar", "Cookie child is ClientVar")) return false;
+	if (!expect(field_str(pr.children[0].children[0], "VarName") == "NWUID" &&
+			field_str(pr.children[0].children[0], "VarValue") == "abc" &&
+			field_str(pr.children[0].children[0], "VarFNum") == "0",
+			"first Cookie ClientVar VarFNum/VarName/VarValue")) return false;
 	return true;
 }
 

@@ -15,7 +15,8 @@ namespace opennova {
 //   CNapiGameSession_SendConnected@0x4add40  ("ClientConnected" sender)
 //   CNapiGameSession_SendHostRequest@0x4af7d0 ("ClientHostRequest")
 //   CNetClient_SendHostUpdate@0x4af8b0       ("ClientHostUpdate")
-//   CNapiGameSession_SendPlayRequest@0x4af990 ("ClientPlayRequest")
+//   CNapiGameSession_SendPlayRequest@0x4d3920 ("ClientPlayRequest", retail —
+//     the prior 0x4af990 citation was Entity_CheckTripleLOS, a wrong anchor)
 //   CNapiGameSession_SendStopHosting@0x4ae320 ("ClientStopHosting")
 //   CNapiGameSession_SendStopPlaying@0x4ae3b0 ("ClientStopPlaying")
 //   CNapiNetwork_RandomizeTimeout@0x4a6d50   (1000-9999ms random timeout)
@@ -80,6 +81,28 @@ NapiMessage make_client_host_request(NapiMessage host_setup,
                                      NapiMessage host,
                                      NapiMessage player_list);
 NapiMessage make_client_host_update(NapiMessage host, NapiMessage player_list);
-NapiMessage make_client_play_request(NapiMessage play_setup, NapiMessage cookie);
+
+// One ClientVar entry inside a ClientVarList: VarFNum (a field number) + VarName
+// + VarValue — the wire shape NapiStatement_SerializeVarList @ 0x4d0660 emits
+// and our server (lobby_session extract_var_lists) parses.
+struct ClientVar {
+	int fnum = 0;
+	std::string name;
+	std::string value;
+};
+
+// Build a "ClientVarList" container: a "VarList" field carrying the list name
+// ("Cookie"/"PlaySetup"/...) then one "ClientVar" child per entry (VarFNum/
+// VarName/VarValue). [orig: NapiStatement_SerializeVarList @ 0x4d0660]
+NapiMessage make_client_var_list(const std::string &list_name,
+                                 const std::vector<ClientVar> &vars);
+
+// ClientPlayRequest: a top-level "CurrentlyPlaying" field (decimal of the flag)
+// FIRST, then the "Cookie" var-list, then the "PlaySetup" var-list, in that
+// order — NOT two containers literally named PlaySetup/Cookie.
+// [orig: CNapiGameSession_SendPlayRequest @ 0x4d3920]
+NapiMessage make_client_play_request(int currently_playing,
+                                     const std::vector<ClientVar> &cookie,
+                                     const std::vector<ClientVar> &play_setup);
 
 } // namespace opennova

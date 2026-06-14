@@ -1,5 +1,8 @@
 #include <napi/session.h>
 
+#include <string>
+#include <utility>
+
 namespace opennova {
 
 std::string novaworld_error_tag(NovaWorldError err) {
@@ -84,13 +87,53 @@ NapiMessage make_client_host_update(NapiMessage host, NapiMessage player_list) {
 	return m;
 }
 
-NapiMessage make_client_play_request(NapiMessage play_setup, NapiMessage cookie) {
+// [orig: NapiStatement_SerializeVarList @ 0x4d0660] — a "ClientVarList" parent
+// carrying a "VarList" param (the list name), then one "ClientVar" child per
+// entry with VarFNum / VarName / VarValue. Mirrors the verify-request var-list
+// builder in client_session.cpp and is the shape lobby_session::extract_var_lists
+// parses.
+NapiMessage make_client_var_list(const std::string &list_name,
+                                 const std::vector<ClientVar> &vars) {
+	NapiMessage list;
+	list.name = "ClientVarList";
+	NapiField var_list;
+	var_list.name = "VarList";
+	var_list.data.assign(list_name.begin(), list_name.end());
+	list.fields.push_back(std::move(var_list));
+	for (const auto &v : vars) {
+		NapiMessage entry;
+		entry.name = "ClientVar";
+		auto add = [&entry](const char *name, const std::string &value) {
+			NapiField f;
+			f.name = name;
+			f.data.assign(value.begin(), value.end());
+			entry.fields.push_back(std::move(f));
+		};
+		add("VarFNum", std::to_string(v.fnum));
+		add("VarName", v.name);
+		add("VarValue", v.value);
+		list.children.push_back(std::move(entry));
+	}
+	return list;
+}
+
+// [orig: CNapiGameSession_SendPlayRequest @ 0x4d3920] — a top-level
+// CurrentlyPlaying param (decimal of the flag) FIRST, then the Cookie var-list,
+// then the PlaySetup var-list. The earlier builder emitted two containers
+// literally named PlaySetup/Cookie with no CurrentlyPlaying — output our own
+// server (extract_var_lists, which keys on "ClientVarList") could not parse.
+NapiMessage make_client_play_request(int currently_playing,
+                                     const std::vector<ClientVar> &cookie,
+                                     const std::vector<ClientVar> &play_setup) {
 	NapiMessage m;
 	m.name = "ClientPlayRequest";
-	play_setup.name = "PlaySetup";
-	cookie.name = "Cookie";
-	m.children.push_back(std::move(play_setup));
-	m.children.push_back(std::move(cookie));
+	NapiField cp;
+	cp.name = "CurrentlyPlaying";
+	const std::string cp_str = std::to_string(currently_playing);
+	cp.data.assign(cp_str.begin(), cp_str.end());
+	m.fields.push_back(std::move(cp));
+	m.children.push_back(make_client_var_list("Cookie", cookie));
+	m.children.push_back(make_client_var_list("PlaySetup", play_setup));
 	return m;
 }
 

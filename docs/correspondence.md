@@ -173,7 +173,8 @@ Newly-grilled originals (join key = addr):
 | `NapiNPConnection_ParseMessages` | `0x625bc0` | LEN8/LEN16 precedence | D-NET-6 | tracked |
 | `CNapiGameSession_HandleConnectVerifyResponse` | `0x4d5800` | Success = atol != 0 | D-NET-19 | fixed |
 | `NapiGameList_ProcessEncryptedResponse` | `0x63d740` | GSB chunk format (prefix magic) | D-NET-32..35 | divergent |
-| `CNapiGameSession_SendPlayRequest` | `0x4d3920` | ClientPlayRequest shape | D-NET-37..39 | divergent |
+| `CNapiGameSession_SendPlayRequest` | `0x4d3920` | ClientPlayRequest shape (CurrentlyPlaying + ClientVarList) | D-NET-37..39 | fixed |
+| `NapiStatement_SerializeVarList` | `0x4d0660` | ClientVarList(VarList)+ClientVar(VarFNum/VarName/VarValue) | D-NET-38 | fixed |
 | `Lobby_UpdateServerInfo` | `0x4fe8c0` | host-registration blob | D-NET-40..46 | divergent |
 | `String_SanitizeForLobby` | `0x4fe750` | lobby field sanitize | D-NET-41 | tracked |
 

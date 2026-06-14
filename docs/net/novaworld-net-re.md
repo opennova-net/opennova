@@ -1389,7 +1389,7 @@ confirmed in passes 1–2 plus the C4/C5/D1 set in pass 3; 11 claims refuted.
 | C4 gsb-parse | **matching** | format fixed + byte-verified vs genuine `.204` (D-NET-32..36) |
 | C5 joi-regurl | partial | documentation only; ':' separator + HOSTKEY trim confirmed |
 | D1 join-handoff | **divergent** | JO hello PV1 + dial-from-NK (D-NET-47..49) |
-| D2 client-play-request | **divergent** | **CurrentlyPlaying + ClientVarList wrap (HIGH); unparseable by our own server (D-NET-37..39)** |
+| D2 client-play-request | **matching** | CurrentlyPlaying + ClientVarList wrap fixed; parseable by our server (D-NET-37..39) |
 | D3 host-registration | **divergent** | fabricated DELETE path + sanitize + key set + tokens (D-NET-40..46) |
 
 The cryptographic + framing foundation re-confirmed byte-exact (NW-C1..C4, CRC32, NAPI
@@ -1457,10 +1457,10 @@ FLDS columns, decoded through the XXXX terminator):
 - **D-NET-35** [HIGH, FIXED] SVRS row = `[u32 rid][u32 port]` then 26 positional NUL-term values (FLDS-keyed) then `[u16 playerCount]` then player names. The first u32 is the host id / join `rid` — retail's "serverIP" is a misnomer; the `.204` values (e.g. 0x0A0027A0 = 167782304, in the Wave-6 join-`rid` range) are NOT IPv4, the host IP arrives via the NK join token. We previously misread it as an IP and dropped the player list. [orig: 0x63d740 (@ 0x63da60..)]
 - **D-NET-36** [LOW, DISPLAY] GSB strings are Latin-1 — transcode to UTF-8 at the Godot display layer, not the parser. [orig: 0x63d740]
 
-`napi/session.cpp` (D2 ClientPlayRequest) — DIVERGENT, **unparseable by our own server**:
-- **D-NET-37** [HIGH, TRACKED] `make_client_play_request` missing top-level `CurrentlyPlaying="%ld"` field. [orig: CNapiGameSession_SendPlayRequest @ 0x4d3920]
-- **D-NET-38** [HIGH, TRACKED] var-lists must be wrapped as `ClientVarList` containers (VarList field + ClientVar children), not literally renamed; same for `make_client_host_request`. [orig: NapiStatement_SerializeVarList @ 0x4d0660]
-- **D-NET-39** [MED, TRACKED] var-list child order: Cookie before PlaySetup. (Also fix the stale `session.h` `SendPlayRequest @ 0x4af990` → `0x4d3920`.) [orig: 0x4d3920]
+`napi/session.cpp` (D2 ClientPlayRequest) — FIXED (now parseable by our own server):
+- **D-NET-37** [HIGH, FIXED] `make_client_play_request` now emits the top-level `CurrentlyPlaying` field (decimal of the flag) FIRST. [orig: CNapiGameSession_SendPlayRequest @ 0x4d3920]
+- **D-NET-38** [HIGH, FIXED] var-lists are wrapped as `ClientVarList` containers (a `VarList` field carrying the list name + `ClientVar` children with VarFNum/VarName/VarValue) via the new `make_client_var_list` helper — the shape `extract_var_lists` parses. (`make_client_host_request` still needs the same treatment — tracked under D3/host.) [orig: NapiStatement_SerializeVarList @ 0x4d0660]
+- **D-NET-39** [MED, FIXED] var-list child order is Cookie then PlaySetup; the stale `session.h` `SendPlayRequest @ 0x4af990` citation corrected to `0x4d3920`. Locked by `session_test`. [orig: 0x4d3920]
 
 `lobby_update.cpp` (D3 host registration) — DIVERGENT:
 - **D-NET-40** [HIGH, TRACKED] remove the fabricated `is_delete` / "Port = -1 DELETE" / 4×-send path (no such string in the binary; single SendUDPPacket). Teardown is a separate mechanism (likely ClientStopHosting TLV @ 0x4d04e0). Also fix header anchor 0x4d2e10 → 0x4fe8c0. [orig: Lobby_UpdateServerInfo @ 0x4fe8c0]
@@ -1501,6 +1501,7 @@ down; unreachable for realistic payloads).
   `gsb_real204_decode_test` oracle (fixtures/novaworld/nw204_jop_2.gsb). Server browse against
   real NovaWorld now produces a retail-parseable list.
 
-**High-value follow-up backlog (tracked rewrites):** A6 dispatch flags (D-NET-5/6); D2 ClientVarList
-wrapping (D-NET-37/38) — current builder output is unparseable by our own server; D3 host
-registration overhaul (D-NET-40..46). Each carries its `[orig]` anchor and corrected behavior above.
+**High-value follow-up backlog (tracked rewrites):** A6 dispatch flags (D-NET-5/6 — `0x80`
+selector + LEN8/16 precedence); D3 host registration overhaul (D-NET-40..46), which also includes
+giving `make_client_host_request` the same `ClientVarList` wrapping `make_client_play_request` now
+has (D-NET-38). Each carries its `[orig]` anchor and corrected behavior above.
