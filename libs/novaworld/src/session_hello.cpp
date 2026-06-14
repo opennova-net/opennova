@@ -219,11 +219,13 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	if (msg.pg_present)    append_bytes_field(buf, "PG", msg.pg.data(), msg.pg.size());
 	if (!msg.pv1.empty())  append_string_field(buf, "PV1",  msg.pv1);
 	if (!msg.pv2.empty())  append_string_field(buf, "PV2",  msg.pv2);
-	// Auth fields. SIP/SPN are written only when nonzero (retail gates them on
-	// node+48 / node+52 being set). SCRK comes after the CU blobs, as in retail.
-	append_u32_field(buf, "CI", msg.ci);
-	append_u32_field(buf, "HK", msg.hk);
-	append_u32_field(buf, "CK", msg.ck);
+	// Auth fields. Retail (NapiNPConnection_SendClientHello @ 0x61fe20) gates
+	// CI (node+20), HK (node+1488), CK (node+332), SIP (node+48) and SPN
+	// (node+52) each on non-zero — emit only when set, to byte-match the 0x42.
+	// [orig: NapiNPConnection_SendClientHello @ 0x61fe20]. SCRK comes after CU.
+	if (msg.ci) append_u32_field(buf, "CI", msg.ci);
+	if (msg.hk) append_u32_field(buf, "HK", msg.hk);
+	if (msg.ck) append_u32_field(buf, "CK", msg.ck);
 	if (!msg.na.empty()) append_string_field(buf, "NA", msg.na);
 	if (msg.sip) append_u32_field(buf, "SIP", msg.sip);
 	if (msg.spn) append_u32_field(buf, "SPN", msg.spn);
@@ -269,27 +271,26 @@ bool parse_client_cu_chunk(const uint8_t *data, size_t len, uint8_t &out_type,
 	return true;
 }
 
-// Values copied from onnet's nwu_protocol.py (CLIENT_CS_FIELD_VALUES /
-// SERVER_CS_FIELD_VALUES). [UNVERIFIED — from onnet, not IDA]: the
-// binary's CS builder has not yet been located; confirm via xref to the
-// `CS` literal once we have a bigger capture corpus.
-std::vector<CsField> default_client_cs_fields() {
+// Engine CS template, witnessed in IDA: CNapiGameSession_InitNPConnection writes
+// two IDENTICAL 15-entry [field_index]=timeout_ms blocks (dir1 @ proto+3652,
+// dir0 @ proto+3712); NapiNPConnection_Create copies them into the connection and
+// SendSessionInit emits cs_dirN[i].timeout_ms verbatim. Both directions are
+// identical — there is NO client/server difference at index 12. index13 is the
+// runtime MTU (dword_25509F0, clamp 100..0x10000, default 1300).
+// [orig: CNapiGameSession_InitNPConnection @ 0x4d3e1f / NapiNPConnection_Create @ 0x62acb0 / NapiNPConnection_SendSessionInit @ 0x620ef0]
+// (Prior values were onnet-derived guesses, wrong at idx 4/8/9/10/12/13 —
+//  docs/net/novaworld-net-re.md D-NET-1.)
+static std::vector<CsField> engine_cs_fields() {
 	return {
 		{0, 240000u}, {1, 4u}, {2, 0u}, {3, 0u},
-		{4, 30000u}, {5, 1000u}, {6, 0xFFFFFFFFu}, {7, 0u},
-		{8, 4096u}, {9, 4u}, {10, 32u}, {11, 500u},
-		{12, 1u}, {13, 1000u}, {14, 0xFFFFFFFFu},
+		{4, 60000u}, {5, 1000u}, {6, 0xFFFFFFFFu}, {7, 0u},
+		{8, 2048u}, {9, 128u}, {10, 100u}, {11, 500u},
+		{12, 1u}, {13, 1300u}, {14, 0xFFFFFFFFu},
 	};
 }
 
-std::vector<CsField> default_server_cs_fields() {
-	return {
-		{0, 240000u}, {1, 4u}, {2, 0u}, {3, 0u},
-		{4, 30000u}, {5, 1000u}, {6, 0xFFFFFFFFu}, {7, 0u},
-		{8, 4096u}, {9, 4u}, {10, 32u}, {11, 500u},
-		{12, 4u}, {13, 1000u}, {14, 0xFFFFFFFFu},
-	};
-}
+std::vector<CsField> default_client_cs_fields() { return engine_cs_fields(); }
+std::vector<CsField> default_server_cs_fields() { return engine_cs_fields(); }
 
 ServerAuth build_server_auth(const ClientAuth &client,
                              uint32_t client_ip_net,
@@ -366,8 +367,11 @@ std::vector<uint8_t> server_auth_to_bytes(const ServerAuth &msg) {
 	}
 	append_string_field(buf, "SCRK", msg.scrk);
 	append_string_field(buf, "NA", msg.na);
-	append_u32_field(buf, "RIP", msg.rip);
-	append_u32_field(buf, "RPN", msg.rpn);
+	// RIP/RPN gated on non-zero, mirroring SIP/SPN: SendSessionInit emits RIP
+	// only when peer_addr!=0 and RPN only when peer_port!=0.
+	// [orig: NapiNPConnection_SendSessionInit @ 0x620ef0 (@ 0x62121e / 0x621242)]
+	if (msg.rip) append_u32_field(buf, "RIP", msg.rip);
+	if (msg.rpn) append_u32_field(buf, "RPN", msg.rpn);
 	return buf;
 }
 

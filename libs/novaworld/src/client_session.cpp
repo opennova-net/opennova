@@ -6,6 +6,7 @@
 #include <novaworld/session_keys.h>
 
 #include <array>
+#include <cstdlib>
 #include <utility>
 
 namespace opennova {
@@ -437,7 +438,10 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			if (f.name == "Success") success = field_to_string(f);
 			else if (f.name == "SessIdString") sess = field_to_string(f);
 		}
-		if (success == "1") {
+		// Retail parses Success with atol() and treats ANY non-zero integer as
+		// success (leading-whitespace/sign tolerant), not an exact "1" match.
+		// [orig: CNapiGameSession_HandleConnectVerifyResponse @ 0x4d5800 (atol @ 0x76ab0a)]
+		if (std::strtol(success.c_str(), nullptr, 10) != 0) {
 			sess_id_string_ = sess;
 			state_ = State::Verified;
 		} else {

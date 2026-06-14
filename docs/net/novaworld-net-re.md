@@ -1354,3 +1354,147 @@ on genuine NovaLogic NovaWorld. (Confirmed: `.204`'s GSB is fetchable unauthenti
 verify needs no login; the account login is for identity/join.) Minor follow-up: GSB server names
 carrying a Latin-1 `©` (0xA9) trip a Godot UTF-8 warning — decode GSB strings Latin-1→UTF-8 for
 display. The JointOperations session stops at the hello (ADR 0009 in-match seam — no gameplay yet).
+
+### Wave 7 — full client↔NovaWorld parity sweep (2026-06-14)
+
+Exhaustive 3-pass grill of all 24 client systems (`libs/novaworld` + `libs/novacrypto` +
+`libs/napi` + the `NovaWorldClient` binding) against retail `Jointops.exe` (kong IDB). Each
+reported divergence was adversarially re-verified by an independent skeptic that re-decompiled
+the cited address (read-only multi-agent grill → refutation → this record). 35 divergences
+confirmed in passes 1–2 plus the C4/C5/D1 set in pass 3; 11 claims refuted.
+
+**Verdict table (24 systems)** — matching 9 · partial 11 · divergent 4
+
+| System | Verdict | Note |
+|---|---|---|
+| A1 gate-probe | **matching** | crypto chain byte-verified end to end |
+| A2 gate-response | partial | 7 parser-leniency divergences (D-NET-9..15) |
+| A3 clienthello | partial | ServerHello two-branch model + PL fiction (D-NET-16..18) |
+| A4 clientauth | partial | CS-table (HIGH) + gating + JFC/JFP/JFS (D-NET-1..4) |
+| A5 client-session-fsm | partial | Success atol, Cookie parent, ClientConnected timing (D-NET-19..22) |
+| A6 protocol-message | partial | **0x80 selector + LEN8/16 (HIGH)**, frag reset (D-NET-5..8) |
+| A7 verify-containers | partial | Success atol (= D-NET-19); verify-cookie claim refuted |
+| A8 web-domain | **matching** | SessionInit CU web-domain install confirmed |
+| A9 session-timing | partial | timeout value/citation, NWEC13 default (D-NET-23..25) |
+| B1 nwu | **matching** | byte-exact (NW-C1) |
+| B2 epask | **matching** | byte-exact (NW-C2); 2 edge-case-only notes (D-NET-26/27) |
+| B3 pubcrypto | **matching** | byte-exact (NW-C3) |
+| B4 url-cipher | **matching** | byte-exact (NW-C4) |
+| B5 crc32-table | **matching** | table identical @0x849938, check 0x0376E6E7 |
+| B6 napi-tlv | **matching** | builder-layer length guard only (D-NET-28) |
+| B7 napi-envelope | **matching** | 4-byte mode exact; var-header mode out of scope (D-NET-29) |
+| C1 http-login-build | partial | all 3 reported claims refuted; POST/all-encrypted model correct |
+| C2 cookie-jar | partial | one-`Cookie:`-header-per-cookie (D-NET-30) |
+| C3 login-orchestration | partial | markup-derived URLs (D-NET-31) + shared cookie fix |
+| C4 gsb-parse | **divergent** | **wrong chunk format — browse vs real NW is broken (D-NET-32..36)** |
+| C5 joi-regurl | partial | documentation only; ':' separator + HOSTKEY trim confirmed |
+| D1 join-handoff | **divergent** | JO hello PV1 + dial-from-NK (D-NET-47..49) |
+| D2 client-play-request | **divergent** | **CurrentlyPlaying + ClientVarList wrap (HIGH); unparseable by our own server (D-NET-37..39)** |
+| D3 host-registration | **divergent** | fabricated DELETE path + sanitize + key set + tokens (D-NET-40..46) |
+
+The cryptographic + framing foundation re-confirmed byte-exact (NW-C1..C4, CRC32, NAPI
+TLV/envelope) — no code change. Defects concentrate in GSB (C4), the join/host client-direction
+builders (D1/D2/D3), and the protocol-message dispatch flags (A6).
+
+**Divergence catalog (D-NET-n; stable IDs, never renumbered).** Status: FIXED = applied this
+session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
+
+`session_hello.cpp` (A4 ClientAuth/ServerSessionInit 0x42/0x82):
+- **D-NET-1** [HIGH, FIXED] CS field default tables were onnet guesses, wrong at idx 4/8/9/10/12/13. Engine template (IDENTICAL both directions): `{0:240000,1:4,4:60000,5:1000,6:0xFFFFFFFF,8:2048,9:128,10:100,11:500,12:1,13:MTU(1300),14:0xFFFFFFFF}`. [orig: CNapiGameSession_InitNPConnection @ 0x4d3e1f / NapiNPConnection_Create @ 0x62acb0 / NapiNPConnection_SendSessionInit @ 0x620ef0]
+- **D-NET-2** [LOW, FIXED] CI/HK/CK were emitted unconditionally; retail gates each on non-zero (like SIP/SPN). [orig: NapiNPConnection_SendClientHello @ 0x61fe20]
+- **D-NET-3** [LOW, TRACKED] `parse_server_auth` ignores JFC/JFP/JFS rejected-join fields (failure code/param/string); the `!scrk.empty()` success gate misclassifies a legit SCRK-less rejection as malformed. [orig: NapiNP_HandleServerJoinResponse @ 0x629840]
+- **D-NET-4** [LOW, FIXED] RIP/RPN were emitted unconditionally; retail gates on peer_addr/peer_port != 0. [orig: NapiNPConnection_SendSessionInit @ 0x620ef0]
+
+`protocol_message.cpp` (A6):
+- **D-NET-5** [HIGH, TRACKED] high-table/include-seq selector is flag bit **0x80**, not 0x01; `full_tag = (flags&0x80?0x100:0)|tag`; wire bit 0x01 is unused/reserved. [orig: NapiNPConnection_DispatchMessage @ 0x622570 / NapiNPProtocol_FindMsgInfo @ 0x61e380 / NapiNP_WriteMessageRecord @ 0x61da90]
+- **D-NET-6** [HIGH, TRACKED] LEN8(0x20)/LEN16(0x40) parse precedence inverted — retail tests LEN8 FIRST. [orig: NapiNPConnection_ParseMessages @ 0x625bc0]
+- **D-NET-7** [MED, TRACKED] reassembly must clear the buffer on the FIRST fragment (`(flags&6)==4`) before appending. [orig: NapiNPConnection_DispatchMessage @ 0x622570 / NapiBuffer_SetLength @ 0x634220]
+- **D-NET-8** [LOW, TRACKED] truncated inner stream: retail substitutes 0 for missing fields and still dispatches; we bail. [orig: NapiNPConnection_ParseMessages @ 0x625bc0]
+
+`gate_response.cpp` (A2):
+- **D-NET-9** [MED, TRACKED] port fields need full literal parse (char/hex/octal/binary/decimal, in order). [orig: NapiScript_ParseLiteralValue @ 0x62db00]
+- **D-NET-10** [MED, TRACKED] store full 32-bit port; drop the [0,65535] reject (retail stores verbatim, presence = non-zero). [orig: CNapiGateManager_ProcessResponse @ 0x4ced20 (@ 0x4cf1ae)]
+- **D-NET-11** [MED, TRACKED] IPv4 octets >255 accepted (mask to uint8), not rejected. [orig: Network_ParseIPv4AddressOctets @ 0x62dc10]
+- **D-NET-12** [LOW, TRACKED] IPv4 parse stops after the 4th octet, ignores trailing chars. [orig: 0x62dc10]
+- **D-NET-13** [LOW, TRACKED] remove CUS/PVT phantom keys (exactly 19 real keys; CUS/PVT counted-but-ignored). [orig: 0x4ced20]
+- **D-NET-14** [LOW, TRACKED] `is_ws` should match `isspace` (add \v 0x0B, \f 0x0C). [orig: String_TokenizeQuotedToArray @ 0x616d60]
+- **D-NET-15** [LOW, TRACKED] `atoi_loose` must skip leading whitespace (atol semantics). [orig: 0x4ced20 (atol @ 0x76ab0a)]
+
+`session_hello.cpp` (A3 ClientHello/ServerHello):
+- **D-NET-16** [MED, TRACKED] drop the is_game_server two-branch ServerHello model; emit SF UNCONDITIONALLY (0/1 flag); remove the fabricated PL tag; gate P1/P2/NP/MP on nonzero. [orig: NapiNPProtocol_SendServerInfoPacket @ 0x6204b0]
+- **D-NET-17** [LOW, TRACKED] ClientHello DE/PV3/PM/ET fields unmodeled (gated off for the stock client, so byte-correct for the common case). [orig: NapiNPSession_SendAnnouncePacket @ 0x61fa00]
+- **D-NET-18** [LOW, TRACKED] `server_hello_to_bytes` order: gate UT on nonzero, SF unconditional, never PL. [orig: 0x6204b0]
+
+`client_session.cpp` (A5/A7):
+- **D-NET-19** [MED, FIXED] `Success` compared as exact "1"; retail uses `atol(Success) != 0`. [orig: CNapiGameSession_HandleConnectVerifyResponse @ 0x4d5800]
+- **D-NET-20** [MED, TRACKED] `build_verify_request` must emit the `ClientVarList(VarList="Cookie")` parent unconditionally (retail SerializeVarList includeAll=1). [orig: CNapiGameSession_SendVerifyRequest @ 0x4d3620 / NapiStatement_SerializeVarList @ 0x4d0660]
+- **D-NET-21** [LOW, TRACKED] ClientConnected emitted synchronously; retail waits one periodic tick (conn_state==5 && session_state==2). [orig: CNapiGameSession_ProcessPeriodicUpdate @ 0x4d4400]
+- **D-NET-22** [LOW, BINDING] the verify Cookie var-list is data-driven (locale + NW* identity) from client env — registry/Win32 glue belongs in the Godot binding, not `libs/`. Also fix the `client_session.h:99-110` comment. [orig: CNapiSession_ReadLocaleInfo @ 0x4ce390 / CNapiGameSession_SendLocaleAndVerify @ 0x4d57e0]
+
+`napi/session.{h,cpp}` (A9):
+- **D-NET-23** [MED, TRACKED] `SESSION_CONNECT_TIMEOUT_MS` mis-cited: ConnectOrHost poll is 60000ms (0xEA60); 20000ms (0x4E20) is the periodic-update background timeout. [orig: CNapiGameSession_ConnectOrHost @ 0x4d4f10 / ProcessPeriodicUpdate @ 0x4d4400]
+- **D-NET-24** [LOW, TRACKED] `SESSION_HANDSHAKE_RETRANSMIT_MS` is actually a 1300-byte message chunk size, not a ms interval — rename. [orig: NapiNPConnection_QueueMessage @ 0x628640]
+- **D-NET-25** [LOW, TRACKED] add Reject1009→NWEC14; unknown-reject default → NWEC13 (currently NWEC02). [orig: CNapiGameSession_ConnectOrHost @ 0x4d4f10]
+
+`novacrypto/epask.cpp` (B2, edge-case only):
+- **D-NET-26** [LOW, TRACKED] `epask_from_string` should use `_atoi64` semantics (return 0, no throw). [orig: parse_colon_delimited_string @ 0x666710]
+- **D-NET-27** [LOW, TRACKED] `epask_encrypt` should truncate plaintext at first NUL (strlen). [orig: sub_6669A0 @ 0x6669a0]
+
+`napi` tlv/envelope (B6/B7):
+- **D-NET-28** [LOW, TRACKED] enforce name length [1,63] and data length [0,4095] at the novaworld builder layer (not the TLV codec). [orig: NapiStatementParam_Create @ 0x632b30]
+- **D-NET-29** [LOW, SCOPE] envelope variable-header (first-dword==0) decode mode unsupported — documented scope decision. [orig: NapiNP_UnpackPacket @ 0x62ca20]
+
+`http_login.cpp` + binding (C2/C3):
+- **D-NET-30** [MED, TRACKED] emit one `Cookie:` header per cookie (retail `Cookie: name=value;` per entry); jar keyed by subnet-truncated host. [orig: CUIBrowser_SendHTTPRequest @ 0x658840 / Network_TruncateIPToSubnet @ 0x62dfe0]
+- **D-NET-31** [LOW, DOC] login URLs/params are markup-derived (`nw_startup.mnx`), not C literals; `[CC]`/`[GT]` tokens and the `[domainname]` lower-casing are non-retail. [orig: gate STARTUPURL via 0x4ced20]
+
+`gsb.cpp` (C4) — DIVERGENT, **server browser vs real NW is broken**:
+- **D-NET-32** [HIGH, TRACKED] no bare "GSB " file header — "GSB " (0x20425347) is the FIRST chunk's TAG (reset/init; payload dword0==0x10000). [orig: NapiGameList_ProcessEncryptedResponse @ 0x63d740]
+- **D-NET-33** [HIGH, TRACKED] chunk layout is `[tag:4 @+0][len:u32 @+4][payload @+8]`, advance len+8 — magic is a PREFIX, not the suffix we emit. [orig: 0x63d740 (@ 0x63d78b / 0x63d76c / 0x63d781)]
+- **D-NET-34** [HIGH, TRACKED] tags: GSB =init, FLDS=field-names, SVRS=rows, XXXX=terminator; drop the invented IVAR tag and the TotalServers/TotalPlayers summary (no wire source). [orig: 0x63d740]
+- **D-NET-35** [HIGH, TRACKED] SVRS row = `[u32 ip][u32 port]` then N positional NUL-terminated values (FLDS-keyed) then `[u16 playerCount]` then playerCount NUL-term player names; we misread the row header and drop the player list. [orig: 0x63d740 (@ 0x63da60..)]
+- **D-NET-36** [LOW, DISPLAY] GSB strings are Latin-1 — transcode to UTF-8 at the Godot display layer, not the parser. [orig: 0x63d740]
+
+`napi/session.cpp` (D2 ClientPlayRequest) — DIVERGENT, **unparseable by our own server**:
+- **D-NET-37** [HIGH, TRACKED] `make_client_play_request` missing top-level `CurrentlyPlaying="%ld"` field. [orig: CNapiGameSession_SendPlayRequest @ 0x4d3920]
+- **D-NET-38** [HIGH, TRACKED] var-lists must be wrapped as `ClientVarList` containers (VarList field + ClientVar children), not literally renamed; same for `make_client_host_request`. [orig: NapiStatement_SerializeVarList @ 0x4d0660]
+- **D-NET-39** [MED, TRACKED] var-list child order: Cookie before PlaySetup. (Also fix the stale `session.h` `SendPlayRequest @ 0x4af990` → `0x4d3920`.) [orig: 0x4d3920]
+
+`lobby_update.cpp` (D3 host registration) — DIVERGENT:
+- **D-NET-40** [HIGH, TRACKED] remove the fabricated `is_delete` / "Port = -1 DELETE" / 4×-send path (no such string in the binary; single SendUDPPacket). Teardown is a separate mechanism (likely ClientStopHosting TLV @ 0x4d04e0). Also fix header anchor 0x4d2e10 → 0x4fe8c0. [orig: Lobby_UpdateServerInfo @ 0x4fe8c0]
+- **D-NET-41** [HIGH, TRACKED] sanitize HostKey + every key/value/player name: ' '/'?'/'@'/'=' → '+', empty → "---" (NOT lobby_name). [orig: String_SanitizeForLobby @ 0x4fe750]
+- **D-NET-42** [HIGH, TRACKED] key set: drop HostDID/AccessCodeList; add Mod/Msg/GCC; rename Uptime→Age, TimezoneBias→TZB; gate CountryName/Lang/TZB on dword_B5F4E4; match the exact VarList order. [orig: 0x4fe8c0]
+- **D-NET-43** [HIGH, TRACKED] booleans via STRNOVA11/12 tokens (not "Yes"/"No"); Ver1="3"/Ver2="2345" (not "1"/"2780"). [orig: 0x4fe8c0 (@ 0x4ff3e0)]
+- **D-NET-44** [MED, TRACKED] two spaces before HostKey; drive keys from an ordered VarList (LobbyName first, re-emitted). [orig: 0x4fe8c0 (@ 0x4ff4e1)]
+- **D-NET-45** [MED, TRACKED] Stat="N" always; LevelRange always emitted as a single space. [orig: 0x4fe8c0 (~0x4ff215)]
+- **D-NET-46** [MED, TRACKED] model the gated ` p=<player>` suffix (bare ` p=` fallback), after all ` k = v` pairs. [orig: 0x4fe8c0 (@ 0x4ff560)]
+
+`client_session.cpp` + binding (D1 join handoff) — DIVERGENT (ADR 0009 in-match seam):
+- **D-NET-47** [MED, TRACKED] JointOperations game-host hello PV1 must be "0.0.0 1/12/2004 EM" (NOT the lobby PV1 "0.0.0 2/10/2004 EM"); wrong PV1 = hard reject. PN "JOINTOPERATIONS". [orig: CNapiNetwork_Init @ 0x4ca4a0 / NapiNPProtocol_HandleClientJoin @ 0x62B750]
+- **D-NET-48** [LOW, TRACKED] dial the host from DECODED NK (url-cipher, split ':'), not plaintext NI/NP (NI/NP feed only the proxy slots). [orig: parse_connection_query_string @ 0x54dfb0 / CNapiGameSession_ConnectOrHost @ 0x4d4f10]
+- **D-NET-49** [OPEN] `jointoperations_pg()` is a placeholder; the in-match PG (16B @ proto+284) is unwitnessed (source `NapiNPVarBlock_Copy @ 0x4ca7af`, not sub_62E750). Re-discover.
+
+C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
+confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;
+over-length field clamp is low-priority. No code change required.
+
+**Refuted (evaluated, NOT divergences — do not "fix"):** A4 DE/PV3/PW (dead-in-retail for any
+NW join, byte-identical); A7 verify-cookie carries locale+identity and already matches the .204
+capture; A1 `0x04B0ED91` (decompiler comment misread; real immediate 0x04B05731 already matches);
+A1 demo-vs-retail anchor (doc-cite only); A3 CI/EIP/EPN/PN gating (cited the ANNOUNCE path, not
+ClientHello); A8 `[domainname]` guard (byte-identical on the real-NW path); B6 decoder bounds
+(both memory-safe, identical consumed bytes); B7 signedness (host/CRT type artifact, identical
+for reachable inputs); C1 ×3 (EPASK query-vs-form, GET-vs-POST, per-field-vs-per-widget — all
+byte-identical / already settled NW-S5/B); C2 cookie-name trim + subnet jar (behavior-preserving
+for the witnessed flow); C3 remember-login (unimplemented feature, unverified); D1 jointoperations_pg
+mechanism (sub_62E750 has no in-match caller); D2 ServerVar order (0x4d0660 is the client
+serializer; no Server serializer exists in this binary); B4 url-cipher i≥22 (unverified — IDA was
+down; unreachable for realistic payloads).
+
+**Fixes applied this session** (build clean; 22/22 scoped net ctest green incl. `nw204_lobby_decode`):
+D-NET-1, D-NET-2, D-NET-4 (`session_hello.cpp`), D-NET-19 (`client_session.cpp`).
+
+**High-value follow-up backlog (tracked rewrites):** GSB chunk format (D-NET-32..35) — server
+browse against real NovaWorld is currently broken; A6 dispatch flags (D-NET-5/6); D2 ClientVarList
+wrapping (D-NET-37/38) — current builder output is unparseable by our own server; D3 host
+registration overhaul (D-NET-40..46). Each carries its `[orig]` anchor and corrected behavior above.

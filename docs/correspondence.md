@@ -157,6 +157,28 @@ NW-C4 in [§8](net/novaworld-net-re.md). Re-anchored to retail (was jodemo-only)
 | `URL_CIPHER_KEY_NK` | `aDiheijefhgcdjc` | `0x7d3f30` | `"diheijefhgcdjcgcjcfbd"` | byte-identical | matching |
 | `URL_CIPHER_KEY_CK` | `aCfhdcegjigecje` | `0x7d3f04` | `"cfhdcegjigecjehcgjdhe"` | byte-identical | matching |
 
+## 5.5 Full client parity sweep (grill wave 7, 2026-06-14)
+
+All 24 client systems re-grilled (3 passes, adversarially verified). Verdict table + the full
+`D-NET-1..49` catalog live in [§8 "Wave 7"](net/novaworld-net-re.md) — not repeated here.
+Newly-grilled originals (join key = addr):
+
+| original | addr | role | D-NET | status |
+|---|---|---|---|---|
+| `CNapiGameSession_InitNPConnection` | `0x4d3e1f` | CS field template (identical both dirs) | D-NET-1 | fixed |
+| `NapiNPConnection_SendClientHello` | `0x61fe20` | 0x42 builder; CI/HK/CK gate | D-NET-2 | fixed |
+| `NapiNP_HandleServerJoinResponse` | `0x629840` | JFC/JFP/JFS rejected-join read | D-NET-3 | tracked |
+| `NapiNPConnection_SendSessionInit` | `0x620ef0` | 0x82 builder; RIP/RPN gate | D-NET-4 | fixed |
+| `NapiNPConnection_DispatchMessage` | `0x622570` | high-table 0x80 selector | D-NET-5 | tracked |
+| `NapiNPConnection_ParseMessages` | `0x625bc0` | LEN8/LEN16 precedence | D-NET-6 | tracked |
+| `CNapiGameSession_HandleConnectVerifyResponse` | `0x4d5800` | Success = atol != 0 | D-NET-19 | fixed |
+| `NapiGameList_ProcessEncryptedResponse` | `0x63d740` | GSB chunk format (prefix magic) | D-NET-32..35 | divergent |
+| `CNapiGameSession_SendPlayRequest` | `0x4d3920` | ClientPlayRequest shape | D-NET-37..39 | divergent |
+| `Lobby_UpdateServerInfo` | `0x4fe8c0` | host-registration blob | D-NET-40..46 | divergent |
+| `String_SanitizeForLobby` | `0x4fe750` | lobby field sanitize | D-NET-41 | tracked |
+
+Crypto/TLV/envelope (NW-C1..C4, CRC32, NAPI TLV/envelope) re-confirmed byte-exact — no change.
+
 ## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 
 `UI_DispatchScreenEvent @ 0x54e6a0`, `UI_ShowPreGameMenuByState @ 0x568d10`,
