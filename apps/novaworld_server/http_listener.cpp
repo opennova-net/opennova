@@ -46,19 +46,46 @@ std::map<std::string, std::string> parse_cookie_header(std::string_view header) 
 	std::map<std::string, std::string> out;
 	size_t pos = 0;
 	while (pos < header.size()) {
-		while (pos < header.size() && (header[pos] == ';' || header[pos] == ' ')) ++pos;
+		// Cookie pairs are separated by ';' OR ','. Retail's IB3 client uses
+		// commas (RFC 2965 style); splitting on ';' alone swallows every pair
+		// after the first into one value (e.g. NWHANDLE hidden inside the
+		// NWJOINSESSIONTAG value), so the joiner can't be identified at
+		// /NWJoin.dll -> empty PUBPCID -> "login information is absent (GDC024)".
+		// werkzeug (onnet) splits on both — match it.
+		while (pos < header.size() &&
+		       (header[pos] == ';' || header[pos] == ',' || header[pos] == ' ')) ++pos;
 		const auto eq = header.find('=', pos);
 		if (eq == std::string_view::npos) break;
-		const auto end = header.find(';', eq + 1);
+		const auto end = header.find_first_of(";,", eq + 1);
 		const auto val_end = (end == std::string_view::npos) ? header.size() : end;
 		std::string name(header.substr(pos, eq - pos));
 		std::string value(header.substr(eq + 1, val_end - eq - 1));
-		// Trim leading lstrip-comma matching onnet's _normalized_cookies.
+		// Defensive: strip any leftover leading comma (onnet's lstrip(",")).
 		while (!name.empty() && name.front() == ',') name.erase(0, 1);
 		out.emplace(std::move(name), std::move(value));
 		pos = val_end + 1;
 	}
 	return out;
+}
+
+// Crow stores request headers in a case-INSENSITIVE multimap and
+// get_header_value() returns only the FIRST match. Retail's IB3 client sends
+// each cookie as its OWN "Cookie:" header, so reading a single header silently
+// drops every other cookie — at /NWJoin.dll that loses NWHANDLE, the joiner
+// can't be identified, PUBPCID comes out empty and the client reports "login
+// info invalid or expired" (host/login happen to work because the one cookie
+// Crow returns is the session tag they need). werkzeug (onnet) merges every
+// Cookie header into request.cookies; match it by concatenating them all here
+// before parsing. [verified: 3 separate Cookie: headers -> Crow exposes 1]
+std::string request_cookie_header(const crow::request &req) {
+	std::string combined;
+	const auto range = req.headers.equal_range("Cookie");
+	for (auto it = range.first; it != range.second; ++it) {
+		if (it->second.empty()) continue;
+		if (!combined.empty()) combined += "; ";
+		combined += it->second;
+	}
+	return combined;
 }
 
 std::string url_decode(std::string_view s) {
@@ -1045,7 +1072,7 @@ bool HttpListener::start(const ServerConfig &config) {
 		const std::string epask = opennova::epask_to_string(epask_params_);
 		std::printf("[http] GET %s url=%s gt=%s ver=%s/%s cookies=[%s]\n",
 		            req.url.c_str(), url.c_str(), gt.c_str(), ver1.c_str(), ver2.c_str(),
-		            cookie_summary(req.get_header_value("Cookie")).c_str());
+		            cookie_summary(request_cookie_header(req)).c_str());
 
 		TemplateVars vars{
 			{"HOST_URL",     "http://127.0.0.1:8080/nwhost.dll"},
@@ -1072,12 +1099,12 @@ bool HttpListener::start(const ServerConfig &config) {
 		const std::string in_p   = req.url_params.get("IN")      ? req.url_params.get("IN")      : "jop_2_main.htm";
 		const std::string out_p  = req.url_params.get("OUT")     ? req.url_params.get("OUT")     : "jop_2_login.htm";
 		const std::string msgbase = req.url_params.get("MSGBASE")? req.url_params.get("MSGBASE") : "jop_2_msg.htm";
-		const auto cookies = parse_cookie_header(req.get_header_value("Cookie"));
+		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		const auto epask = cookies.count("EPASK") ? cookies.at("EPASK") : opennova::epask_to_string(epask_params_);
 
 		std::printf("[http] GET %s IN=%s OUT=%s MSGBASE=%s cookies=[%s]\n",
 		            req.url.c_str(), in_p.c_str(), out_p.c_str(), msgbase.c_str(),
-		            cookie_summary(req.get_header_value("Cookie")).c_str());
+		            cookie_summary(request_cookie_header(req)).c_str());
 
 		// Hardcoded version-OK; render OUT (the login page).
 		TemplateVars vars{
@@ -1123,7 +1150,7 @@ bool HttpListener::start(const ServerConfig &config) {
 		}
 
 		const auto form = parse_form_body(req.body);
-		const auto cookies = parse_cookie_header(req.get_header_value("Cookie"));
+		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		auto pick = [&](const char *name) {
 			auto it = form.find(name);
 			return it == form.end() ? std::string() : it->second;
@@ -1345,14 +1372,19 @@ bool HttpListener::start(const ServerConfig &config) {
 		            sessions_.get_login(tag).value().success.c_str(),
 		            tag.c_str());
 
-		// Retail's IB3 HTTP/1.0 client doesn't reliably persist cookies
-		// from a POST response into the next GET — verified 2026-04-27 in
-		// _connectlog where the relay-refresh GET arrived without
-		// LOGINSESSIONTAG. Workaround: encode the session tag into the
-		// refresh URL itself so retail's META-refresh loop carries it.
+		// Relay refresh target is the BARE "NWLogin.dll" — matching onnet AND
+		// the genuine NovaLogic server (Wireshark capture, docs/net/
+		// novaworld-net-re.md:1303-1352: retail polls plain `GET /NWLogin.dll`
+		// and its LOGINSESSIONTAG cookie round-trips, then the server plants
+		// NWHANDLE/PCID). The prior `?tag=` workaround (for a supposed HTTP/1.0
+		// cookie drop the capture shows the real client does NOT have on the
+		// bare URL) re-routed the completion GET so retail never stored the
+		// identity cookies — they never reached /NWJoin.dll, leaving PUBPCID
+		// empty ("login information is absent (GDC024)"). The handler still
+		// falls back to the LOGINSESSIONTAG cookie to recover the tag.
 		TemplateVars vars{
 			{"MESSAGE",          "Contacting login databases..."},
-			{"REFRESH_ENDPOINT", "NWLogin.dll?tag=" + tag},
+			{"REFRESH_ENDPOINT", "NWLogin.dll"},
 			{"HOST_URL",         "http://127.0.0.1:8080/nwhost.dll"},
 			{"GSB_SERVER",       "http://127.0.0.1:8080/jop_2.gsb"},
 			{"JOINLAN_URL",      ""},
@@ -1382,7 +1414,7 @@ bool HttpListener::start(const ServerConfig &config) {
 		if (req.url_params.get("tag")) {
 			tag = req.url_params.get("tag");
 		} else {
-			const auto cookies = parse_cookie_header(req.get_header_value("Cookie"));
+			const auto cookies = parse_cookie_header(request_cookie_header(req));
 			auto tag_it = cookies.find("LOGINSESSIONTAG");
 			if (tag_it != cookies.end()) tag = tag_it->second;
 		}
@@ -1455,6 +1487,22 @@ bool HttpListener::start(const ServerConfig &config) {
 		add_cookie(res, "CHAR",     session->nwhandle.empty() ? "DevUser"    : session->nwhandle);
 		add_cookie(res, "PCID",     session->pcid.empty()     ? "00000001"   : session->pcid);
 		add_cookie(res, "EXPBITS",  session->exp_bits.empty() ? "3" : session->exp_bits);
+
+		// Echo the client's persistent/express-login cookies back so retail's
+		// logged-in state stays valid and these survive to later requests —
+		// notably the joiner's identity at /NWJoin.dll. Without this the joiner
+		// fails with "Logging information is missing or invalid" (its PUB* join
+		// cookies come out empty because no identity carried over). Echo only
+		// what the client sent. Mirrors onnw/controllers/nova_world/login.py:159-171.
+		{
+			const auto req_cookies = parse_cookie_header(request_cookie_header(req));
+			for (const char *name : {"PERSISTENTREMEMBERLOGINDATA",
+			                         "PERSISTENTEXPRESSLOGINDATA",
+			                         "NWI", "NWV", "NWD", "STATSDISPLAYCHID"}) {
+				auto it = req_cookies.find(name);
+				if (it != req_cookies.end()) add_cookie(res, name, it->second);
+			}
+		}
 
 		sessions_.erase_login(tag);
 		return res;
@@ -1529,7 +1577,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	//                                             NK/CK, render .joi
 	//                                             success template.
 	auto handle_join = [this, templates_dir](const crow::request &req) {
-		const auto cookies = parse_cookie_header(req.get_header_value("Cookie"));
+		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		// Same HTTP/1.0 cookie-loss workaround as /NWLogin.dll: prefer
 		// ?tag= URL param (we set it in REFRESH_ENDPOINT below) and fall
 		// back to NWJOINSESSIONTAG cookie for clients that preserve it.
@@ -1562,18 +1610,18 @@ bool HttpListener::start(const ServerConfig &config) {
 			const std::string relay_template = s.relay;
 			sessions_.put_join(tag, std::move(s));
 
-			std::printf("[http] /NWJoin.dll (first call) rid=%s success=%s -> tag %s\n",
+			std::printf("[http] /NWJoin.dll (first call) rid=%s success=%s -> tag %s cookies=[%s]\n",
 			            req.url_params.get("rid") ? req.url_params.get("rid") : "(none)",
 			            req.url_params.get("success") ? req.url_params.get("success") : "(default)",
-			            tag.c_str());
+			            tag.c_str(),
+			            cookie_summary(request_cookie_header(req)).c_str());
 
-			// REFRESH_ENDPOINT carries the tag in the URL because
-			// retail's IB3 (HTTP/1.0) drops cookies between the relay
-			// page and its META-refresh follow-up — same bug + fix as
-			// /NWLogin.dll relay (fixed 2026-04-27).
+			// Bare "NWJoin.dll" refresh — matches onnet and the genuine server;
+			// the NWJOINSESSIONTAG cookie carries the tag (see the /NWLogin.dll
+			// relay note above re: dropping the divergent `?tag=` workaround).
 			TemplateVars vars{
 				{"MESSAGE",          "Contacting game server...."},
-				{"REFRESH_ENDPOINT", "NWJoin.dll?tag=" + tag},
+				{"REFRESH_ENDPOINT", "NWJoin.dll"},
 				{"HOST_URL",         "http://127.0.0.1:8080/nwhost.dll"},
 				{"GSB_SERVER",       "http://127.0.0.1:8080/jop_2.gsb"},
 				{"JOINLAN_URL",      ""},
@@ -1588,6 +1636,14 @@ bool HttpListener::start(const ServerConfig &config) {
 		}
 
 		// Second call — tag came either from ?tag= or NWJOINSESSIONTAG.
+		// Diagnostic (join-failure triage): show how the tag arrived (proves the
+		// NWJOINSESSIONTAG cookie round-trips on the bare refresh URL) and the
+		// full inbound cookie set — NWHANDLE / PERSISTENTEXPRESSLOGINDATA decide
+		// the joiner identity that PUBPCID is encoded from.
+		std::printf("[http] /NWJoin.dll (second call) tag=%s (from %s) cookies=[%s]\n",
+		            tag_from_request.c_str(),
+		            req.url_params.get("tag") ? "query" : "cookie",
+		            cookie_summary(request_cookie_header(req)).c_str());
 		const auto session = sessions_.get_join(tag_from_request);
 		if (!session) {
 			std::printf("[http] /NWJoin.dll (second call) WARN unknown tag '%s'\n",
@@ -1749,10 +1805,10 @@ bool HttpListener::start(const ServerConfig &config) {
 			}
 			if (host_pcid_key.empty()) {
 				std::fprintf(stderr, "[http] /NWJoin.dll WARN host pcid_key missing — PUB* cookies will be empty (joiner cookies=[%s])\n",
-				             cookie_summary(req.get_header_value("Cookie")).c_str());
+				             cookie_summary(request_cookie_header(req)).c_str());
 			} else if (joiner_pcid.empty()) {
 				std::fprintf(stderr, "[http] /NWJoin.dll WARN no joiner identity — PUB* cookies will be empty (joiner cookies=[%s])\n",
-				             cookie_summary(req.get_header_value("Cookie")).c_str());
+				             cookie_summary(request_cookie_header(req)).c_str());
 			} else {
 				try {
 					std::vector<uint8_t> pcid_plain(joiner_pcid.begin(), joiner_pcid.end());
@@ -1817,7 +1873,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	// UDP side keeps running until GOODBYE/heartbeat-timeout — that's the
 	// protocol's contract; logout here is HTTP-only.
 	auto handle_logout = [this, templates_dir](const crow::request &req) {
-		const auto cookies = parse_cookie_header(req.get_header_value("Cookie"));
+		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		std::string tag;
 		if (req.url_params.get("tag")) {
 			tag = req.url_params.get("tag");
@@ -1905,7 +1961,7 @@ bool HttpListener::start(const ServerConfig &config) {
 		// Resolve identity. Best-effort — if neither cookie resolves we
 		// just render with empty identity vars (the template can still
 		// be served for unauthenticated paths).
-		const auto cookies = parse_cookie_header(req.get_header_value("Cookie"));
+		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		std::optional<UserRecord> user;
 		if (auto it = cookies.find("NWHANDLE"); it != cookies.end() && !it->second.empty()) {
 			user = get_user_by_username(db_, it->second);
@@ -1963,7 +2019,8 @@ bool HttpListener::start(const ServerConfig &config) {
 	//   First call (no NWJOINSESSIONTAG cookie OR ?tag= query):
 	//     - generate session + 48-char A-P host_key (24 random bytes nibble-encoded)
 	//     - store HostSession with default templates (jop_2_host2.htm etc.)
-	//     - render relay template with REFRESH_ENDPOINT="NWHost.dll?tag=<tag>"
+	//     - render relay template with REFRESH_ENDPOINT="NWHost.dll" (bare; the
+	//       NWJOINSESSIONTAG cookie carries the tag — matches onnet/genuine)
 	//   Second call (tag in query or cookie):
 	//     - render success template (jop_2_host2.htm) with {{HOSTKEY}} substituted
 	//       so retail's IB3 parser extracts <TITLE>[HOSTKEY=...&]</TITLE>
@@ -1986,7 +2043,7 @@ bool HttpListener::start(const ServerConfig &config) {
 		if (req.url_params.get("tag")) {
 			tag = req.url_params.get("tag");
 		} else {
-			const auto cookies = parse_cookie_header(req.get_header_value("Cookie"));
+			const auto cookies = parse_cookie_header(request_cookie_header(req));
 			auto it = cookies.find("NWJOINSESSIONTAG");
 			if (it != cookies.end()) tag = it->second;
 		}
@@ -2023,7 +2080,7 @@ bool HttpListener::start(const ServerConfig &config) {
 
 			TemplateVars vars{
 				{"MESSAGE",          "Contacting NovaWorld...."},
-				{"REFRESH_ENDPOINT", "NWHost.dll?tag=" + new_tag},
+				{"REFRESH_ENDPOINT", "NWHost.dll"},
 				{"HOST_URL",         "http://127.0.0.1:8080/nwhost.dll"},
 				{"GSB_SERVER",       "http://127.0.0.1:8080/jop_2.gsb"},
 				{"JOINLAN_URL",      ""},

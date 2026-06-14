@@ -377,6 +377,12 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	// Phase I.2: persist to DB so /jop_2.gsb + /api/hosts query SQL
 	// rather than the in-memory snapshot. db_ is null in tests.
 	if (db_) {
+		// Diagnostic (join-failure triage): a ClientHostRequest re-sent AFTER a
+		// PCIDKey-bearing update would, via INSERT OR REPLACE, wipe the stored
+		// pcid_key back to empty (onnet's upsert preserves it). Watch this go
+		// non-empty -> empty across requests.
+		std::printf("[lobby] host request upsert rid=%u pcid_key=%zuB host_key=%zuB\n",
+		            state.rid, state.pcid_key.size(), state.host_key.size());
 		try {
 			hostdb::upsert_host(*db_,
 				hostdb::row_from_lobby(state, remote_ip, remote_port));
@@ -396,6 +402,16 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 	const auto host_vars = state.last_host_update["Host"];
 	if (host_vars.count("HostKey"))         state.host_key  = host_vars.at("HostKey");
 	if (host_vars.count("PCIDKey"))         state.pcid_key  = host_vars.at("PCIDKey");
+	{
+		// Diagnostic (join-failure triage): does the host's ClientHostUpdate
+		// actually carry PCIDKey? If pcid_key stays empty here, the join emits
+		// an empty PUBPCID and the retail client reports "login info invalid or
+		// expired". Dump the Host var keys + the resolved key lengths.
+		std::string update_keys;
+		for (const auto &kv : host_vars) { update_keys += kv.first; update_keys += ' '; }
+		std::printf("[lobby] host update vars Host{ %s} host_key=%zuB pcid_key=%zuB\n",
+		            update_keys.c_str(), state.host_key.size(), state.pcid_key.size());
+	}
 	if (host_vars.count("ServerIP"))        state.host_ip   = host_vars.at("ServerIP");
 	if (host_vars.count("ServerPortNumber"))state.host_port = parse_int_safe(host_vars.at("ServerPortNumber"));
 	if (host_vars.count("ServerName"))      state.server_name = host_vars.at("ServerName");
