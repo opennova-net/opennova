@@ -84,6 +84,13 @@ func present() -> void:
 # Position is already Godot-space (x, z, -y); rotation is mission-space degrees. Build the basis
 # through the ONE placement convention (MissionObjectPlacer.bms_to_godot_basis) so a sim-driven entity
 # sits exactly where placement would put it. Yaw-only today (pitch/roll arrive at 0; reserved seam).
+#
+# Position is already Godot-space (x, z, -y); rotation is mission-space degrees. Build the basis
+# through the ONE placement convention (MissionObjectPlacer.bms_to_godot_basis) so a sim-driven entity
+# sits exactly where placement would put it. The sim already settled pos[2] to the model origin
+# (ground + the capsule_bottom foot offset), so the model draws at pos with NO render-side lift --
+# matching the original, which places the model origin at the entity position [orig:
+# Math_BuildFixedPointToFloatMatrix4x4 @0x612200, no Z bias]. Yaw-only today (pitch/roll arrive at 0).
 func _apply_transform(node, snap: PackedFloat32Array, base: int) -> void:
 	var pos := Vector3(
 		snap[base + NovaSimulation.PF_POS_X],

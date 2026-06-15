@@ -711,8 +711,12 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field, con
     return result;
 }
 
-// Drive the vertical off the terrain sampler. See the header. Snap model for the un-reversed
-// vertical driver: SET kWorkPosZ + the entity's pos[2] to ground + ground_stand_offset.
+// Drive the vertical off the terrain sampler. See the header. The mover's vertical TARGET keeps
+// the +ground_stand_offset clearance (kWorkPosZ, [orig: brain[131] = ground + 0x50000]); the
+// RENDER position (entity pos[2]) is the ground-contact point itself, and the present pass lifts
+// the model by its 3DI ground anchor so the model's feet land there -- mirroring the static
+// author-time bake (sub_401A90). Copying the +0x50000 target into pos[2] too (the old code) made
+// sim-driven models render ~a body high. See D-INF-6 / D-PLR-2.
 void AiSystem::apply_ground_clamp(AiEntity &e) {
     if (terrain == nullptr) return;
     GroundClearance clearance = ground_clearance;
@@ -720,9 +724,8 @@ void AiSystem::apply_ground_clamp(AiEntity &e) {
     clearance.use_dead = (e.health <= 0);                     // [orig: health<=0 dead path]
     const int32_t ground = calc_average_ground_height(*terrain, e.pos, 0x50000, clearance);
     if (ground == INT32_MIN) return;                          // no terrain coverage -> leave Z
-    const int32_t z = ground + ground_stand_offset;           // [orig: brain[131] = ground + 0x50000]
-    e.brain.f[AiBrain::kWorkPosZ] = z;                        // mover output field stays faithful
-    e.pos[2] = z;                                             // snap the entity onto the ground
+    e.brain.f[AiBrain::kWorkPosZ] = ground + ground_stand_offset; // mover target [orig: brain[131] = ground + 0x50000]
+    e.pos[2] = ground;                                        // render = ground contact (anchor lifts the model)
 }
 
 // Kinematic locomotion over the mover output. The brain decides a target (kWorkPos*), a heading

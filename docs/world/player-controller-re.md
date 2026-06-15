@@ -420,15 +420,31 @@ for the local player) — structurally identical to the AI motor's `0x4bf7f2`
 block. There is **no** AI-style fixed `+0x50000` stand offset inside org2; the
 settle is penetration/force-based via the shared helper.
 
-**Our port grounds feet-on-terrain (no `+0x50000`) for BOTH the player and the AI
-infantry motor.** Our soldier `.3di` models import feet-origin (the witness:
-statically-placed soldiers render correct), so the original's `+0x50000` mover
-stand clearance — which it pairs with origin-above-feet models — floated our
-soldiers ~1 body when applied to the rendered entity Z. Our infantry grounding now
-omits it (`tick_infantry`, `floor_z = inf.ground_cache`; see world-wac-ai-re.md
-**D-INF-6**), matching this player path. OPEN (IDA follow-up): whether
-`brain[131] = ground + 0x50000` is the entity's actual `pos[2]` or only the mover's
-look-ahead target Z (→ mis-port correction rather than a divergence).
+**Our port settles `pos[2]` (the model origin) to `ground + capsule_bottom` for the
+player AND the AI infantry — WITNESSED end-to-end.** The shared settle resolver
+`Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0` returns `(pos[2] − entityRadius)
+− ground` and the on-foot caller pushes `pos[2]` up by it [orig: org2 `@0x4b7cf9`,
+org1 `@0x4bf7fa`]; `entityRadius` is the **current anim frame's collision-capsule
+bottom** (`capsule_bottom × 65536`, the origin→feet offset) fed from the `.bad`/`.adm`
+root record [orig: `AnimMap_UpdateEntity @0x40b82f` out_transform[3]; out_transform[4]
+= `capsule_top × 65536 + 0x2000` = `entityRadiusDelta`]. So the capsule bottom rests
+on the terrain and the waist-origin model's feet land on the ground, with **no
+render-side lift** — the model draws at `pos[2]` [orig:
+`Math_BuildFixedPointToFloatMatrix4x4 @0x612200`, no Z bias]. It is **stance-aware**:
+crouch/prone clips carry a smaller `capsule_bottom`, lowering feet *and* the eye.
+Our port: `RootMotionFrame` carries `capsule_bottom`/`capsule_top`; `tick_player` (and
+`tick_infantry`) floor `pos[2] = ground_cache + frame.capsule_bottom`. The `+0x50000`
+is the death-fall mover's vertical TARGET (`kWorkPosZ`), not a render Z [orig:
+`AI_ProcessMovementStep @0x466db0`]. The persons-get-no-`def`-offset note still holds
+(`Entity_CalcAverageGroundHeight @0x457230` adds `brain+0x2C` only with a combat brain
++ husk, and that slot is 0 for infantry / absent for the player). FP camera: with
+`pos[2]` now the waist (= `ground + capsule_bottom`), `eye = pos[2] + kEyeHeight`
+(`kEyeHeight = 0x10000`) lands at head height [orig: `Camera_ComputeThirdPersonView
+@0x437e8f` `g_view_pos_z += 0x10000`] — the earlier "camera at the feet" was the
+missing capsule term, now fixed. Symptom history: `+0x50000` on `pos[2]` floated
+soldiers ~1 body; dropping it (no capsule term) sank them waist-deep; a
+`get_ground_anchor` render lift was a no-op (anchor ≈ 0); the capsule settle is the
+witnessed fix. See world-wac-ai-re.md **D-INF-6**.
 
 **Retraction (V-F3).** The wave-2 V-F3 note claimed our `libs/world/infantry.cpp`
 "mis-cites `0x4b2bd0` as the player path" and that the player uses `0x479600` —

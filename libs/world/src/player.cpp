@@ -117,17 +117,19 @@ void AiSystem::tick_player(AiEntity &e, World &world, uint32_t logic_tick) {
     }
 
     // ---- Gravity (-208/tick x1, terminal -32768) + ground settle ----
-    // [orig: @0x4b7ac8 / 0x4b7c77 / 0x4b7ce0 gravity; settle + fall damage via the shared
-    // resolver @0x4b2bd0 (byte-identical to the AI block @0x4bf7f2).] The player settles to
-    // the resolver height WITHOUT the AI mover's +0x50000 stand offset (D-PLR-2); the eye
-    // height is added by the camera (M4), not the body. Terrain-free (unit-test) worlds keep
-    // the authored Z, like the infantry motor.
+    // [orig: @0x4b7ac8 / 0x4b7c77 / 0x4b7ce0 gravity; settle + fall damage via the shared resolver
+    // @0x4b2bd0, org2 call @0x4b7cf9.] pos[2] (the model origin) settles to ground + capsule_bottom
+    // so the capsule bottom (origin->feet, the current anim frame's value) rests on the terrain --
+    // the witnessed settle (entityRadius = the .bad capsule_bottom*65536; see infantry.cpp / D-PLR-2 /
+    // D-INF-6). The model draws at pos[2] (no render lift); the FP eye = pos[2] + kEyeHeight then lands
+    // at head height because pos[2] is the waist. Stance-aware via the per-frame capsule. Terrain-free
+    // (unit-test) worlds keep the authored Z, like the infantry motor.
     if (terrain != nullptr) {
         p.vel[2] -= kPlayerGravityStep;
         if (p.vel[2] < kTerminalVelZ) p.vel[2] = kTerminalVelZ;
         e.pos[2] += p.vel[2];
         if (p.ground_cache_valid && p.ground_cache != INT32_MIN) {
-            const int32_t floor_z = p.ground_cache; // no +0x50000 (D-PLR-2)
+            const int32_t floor_z = p.ground_cache + frame.capsule_bottom; // capsule bottom rests on terrain
             if (e.pos[2] <= floor_z) {
                 if (fall_damage_scale > 0 && p.vel[2] <= -1057 * fall_damage_scale) {
                     int32_t excess = (-1057 * fall_damage_scale) - p.vel[2];

@@ -264,9 +264,11 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			continue
 		var model: Node3D = NovaObjectModelScript.new()
 		model.name = "Anim_%s_%d" % [a["graphic"], stats.animated]
-		# Render the model origin at the entity's stored position directly. The engine bakes the
-		# Ground userpoint into the stored position once, at author-time (place / terrain-drag), not
-		# at render -- so a loaded .bms renders at its stored coords verbatim. [orig: sub_401A90, dfx2med.exe]
+		# Render the model origin at the entity's stored position. The engine places a model's origin
+		# at the entity position with no render-side vertical lift [orig:
+		# Math_BuildFixedPointToFloatMatrix4x4 @0x612200]; a live entity's feet meet the ground because
+		# the motor settles pos[2] to ground + the capsule foot offset (D-INF-6), and a placed entity's
+		# authored Z already is its origin. The "Ground" userpoint is baked in at author-time [orig: sub_401A90].
 		model.transform = a["xform"] as Transform3D
 		container.add_child(model)
 		if env_node != null and model.has_method("set_environment_node"):
@@ -345,6 +347,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			return delta
 		var model: Node3D = NovaObjectModelScript.new()
 		model.name = "Anim_%s_k%d_i%d" % [graphic, kind, index]
+		# Render origin at the stored position; no render-side lift (see place()). [orig: @0x612200]
 		model.transform = xform
 		container.add_child(model)
 		if env_node != null and model.has_method("set_environment_node"):

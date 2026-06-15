@@ -366,8 +366,15 @@ void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32
 // clearance the movers add on top (brain[131] = ground + 0x50000) is NOT here; it
 // lives in AiSystem::apply_ground_clamp.
 struct GroundClearance {
-    int32_t alive_offset = 0;  // [orig: def+0x2C] added to ground when alive
-    int32_t dead_offset = 0;   // [orig: def+0x30] added when dead / flagged
+    // [orig: Entity_CalcAverageGroundHeight @0x457230 adds *(brain+0x2C) alive / *(brain+0x30) dead,
+    // gated by a combat brain (entity+100) AND a husk model (entity+52)]. brain+0x2C/+0x30 are AI
+    // brain slots, left 0 for infantry (Entity_InitVehicleAI @0x460200 never writes them) and absent
+    // for the player (entity+100 == 0). So these stay 0 here -> NO vertical offset for persons, which
+    // is faithful: a soldier's pos[2] is the bare terrain contact, and its waist-origin model is
+    // grounded RENDER-side (the host lifts the rendered origin by the model foot offset). The nonzero
+    // AI-vehicle/heli case (from-def slots) is unmodeled. See D-INF-6 / D-PLR-2.
+    int32_t alive_offset = 0;
+    int32_t dead_offset = 0;
     bool use_dead = false;     // [orig: (entity+36 & 2) || health<=0, gated by entity+52]
     bool has_physics = false;  // [orig: entity+368 != 0] enables the worldY water clamp
 };
@@ -467,12 +474,13 @@ public:
     // every step; see apply_ground_clamp.]
     const terrain::TerrainHeightField *terrain = nullptr;
     GroundClearance ground_clearance{};
-    // [orig: the +0x50000 the movers add after grounding — AI_ProcessMovementStep @0x466db0
-    // brain[131] = ground + 0x50000; AI_UpdateMovementTarget @0x460e40 adds def heightOffset.]
-    // NOTE: the INFANTRY motor (tick_infantry) no longer adds this — our soldier .3di models
-    // import feet-origin (correct static placement is the witness), so the original's stand
-    // clearance over-lifted them ~1 body (D-INF). Still used by the vehicle/SM path
-    // (apply_ground_clamp); revisit if vehicles float too.
+    // [orig: AI_ProcessMovementStep @0x466db0 brain[131] = ground + 0x50000.] This is the death-fall
+    // mover's vertical look-ahead TARGET (kWorkPosZ), NOT the render Z: apply_ground_clamp stores
+    // ground+offset into kWorkPosZ but sets the entity's render pos[2] to the bare ground contact
+    // (the original adds no vertical offset to persons — see GroundClearance above). The old code
+    // copied this target into pos[2] too, rendering sim-driven models ~1 body high. Waist-origin models
+    // are grounded RENDER-side (the host lifts the rendered origin by the model foot offset), not by a
+    // sim-Z offset. See D-INF-6 / D-PLR-2.
     int32_t ground_stand_offset = 0x50000; // 5.0 in 16.16
 
     // ---- Infantry motor (org1 soldiers; docs/world/world-wac-ai-re.md §3) ----

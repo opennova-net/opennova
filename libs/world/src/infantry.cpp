@@ -423,14 +423,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
         e.pos[2] += 2 * inf.vel[2];
         if (terrain != nullptr && inf.ground_cache_valid && inf.ground_cache != INT32_MIN) {
-            // Ground feet-on-terrain. The original's +0x50000 mover stand clearance
-            // [orig: AI_ProcessMovementStep @0x466db0 brain[131] = ground + 0x50000] is
-            // OMITTED here: our soldier .3di models import feet-origin (proven by correct
-            // static placement), whereas the original pairs that offset with origin-above-feet
-            // models, so adding it floated soldiers ~1 body. The player motor grounds the same
-            // way (player.cpp). See docs/world/world-wac-ai-re.md (D-INF) — the IDA follow-up
-            // confirms whether brain[131] is the entity Z or just the mover target.
-            const int32_t floor_z = inf.ground_cache;
+            // Ground the FEET on the terrain: pos[2] (the model origin) settles to ground +
+            // capsule_bottom, so the capsule bottom (origin->feet, the current frame's value) rests
+            // on the terrain and the waist-origin model's feet land exactly on the ground. This is
+            // the witnessed settle [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0 returns
+            // (pos[2]-entityRadius)-ground; the org1 call @0x4bf7fa pushes pos[2] up by it], where
+            // entityRadius = the .bad capsule_bottom*65536 the anim updater feeds it [orig:
+            // AnimMap_UpdateEntity @0x40b82f out_transform[3]]. Stance-aware: crouch/prone clips carry
+            // a smaller capsule_bottom. No render-side lift (the model draws at pos[2]). See D-INF-6.
+            const int32_t floor_z = inf.ground_cache + frame.capsule_bottom;
             if (e.pos[2] <= floor_z) {
                 // Landing. Fall damage [orig: dump 5152 — vel_z <= -1057*scale ->
                 // health -= (excess) >> 4]; horizontal slide stops on contact (D-INF-3).

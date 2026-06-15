@@ -267,16 +267,27 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     zeroes on contact; the airborne anim overlay waits on the entity+36 flags.
   - **D-INF-4** computed sin/cos tables (trunc(f(idx)·2^22)) for the runtime-built originals.
   - **D-INF-5** idle look-at system + its spotting side effects (§4.13) — rides the combat pass.
-  - **D-INF-6** the infantry grounding OMITS the `+0x50000` mover stand clearance: it grounds the
-    entity Z to the resampled terrain height (`floor_z = inf.ground_cache`), not `ground + 0x50000`
-    [orig: `AI_ProcessMovementStep @0x466db0` `brain[131] = ground + 0x50000`]. Our soldier `.3di`
-    models import **feet-origin** (the witness: statically-placed soldiers render correct, and the
-    static placer puts the model origin at its stored position verbatim — `[orig: sub_401A90]`),
-    whereas the original pairs the stand clearance with origin-above-feet models, so adding it
-    floated soldiers ~1 body. The player motor (player-controller-re.md, D-PLR-2) grounds the same
-    way. OPEN (IDA follow-up): confirm whether `brain[131] = ground + 0x50000` is the entity's
-    actual `pos[2]` or only the mover's look-ahead target Z (→ then this is a mis-port correction,
-    not a divergence). The vehicle/SM path (`apply_ground_clamp`) still adds the offset.
+  - **D-INF-6** infantry/player grounding settles `pos[2]` (the model origin) to **`ground +
+    capsule_bottom`**, so the entity's collision-capsule bottom (the origin→feet offset) rests on the
+    terrain and a waist-origin model's feet land exactly on the ground. WITNESSED end-to-end:
+    `Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0` returns `(pos[2] − entityRadius) − ground` and
+    the on-foot caller pushes `pos[2]` up by it [orig: org2 `@0x4b7cf9`, org1 `@0x4bf7fa`]; `entityRadius`
+    is the **current animation frame's `capsule_bottom × 65536`**, fed from the `.bad`/`.adm` root record
+    [orig: `AnimMap_UpdateEntity @0x40b82f`, out_transform[3]; `entityRadiusDelta` = out_transform[4] =
+    `capsule_top × 65536 + 0x2000`]. The model renders at `pos[2]` with **no render-side lift**
+    [orig: `Math_BuildFixedPointToFloatMatrix4x4 @0x612200` writes the translation with no Z bias].
+    Stance-aware: crouch/prone are different clips with a smaller `capsule_bottom`, so feet *and* the FP
+    eye (keyed off `pos[2]`) lower automatically. Our port: `RootMotionFrame` now carries `capsule_bottom`
+    (= `entityRadius`) and `capsule_top`; `tick_infantry`/`tick_player` floor `pos[2] = ground_cache +
+    frame.capsule_bottom`. The `+0x50000` [orig: `AI_ProcessMovementStep @0x466db0` `brain[131] = ground +
+    0x50000`] is the death-fall mover's vertical TARGET (`kWorkPosZ`), not a render Z — our prior
+    `e.pos[2] = ground + 0x50000` was a mis-port (corrected). The persons-get-no-`def`-offset finding
+    still holds: `Entity_CalcAverageGroundHeight @0x457230` adds `*(brain+0x2C)` only with a combat brain
+    (`entity+100`) AND a husk model (`entity+52`); `brain+0x2C` is the AI weapon-range slot, left 0 for
+    infantry (`Entity_InitVehicleAI @0x460200`) and the player has no brain — the capsule, not that slot,
+    is what grounds persons. Symptom history: `+0x50000` on `pos[2]` floated soldiers ~1 body; dropping it
+    (no capsule term) sank them waist-deep; a `get_ground_anchor` render lift was a no-op (anchor ≈ 0 for
+    soldiers); the capsule settle is the witnessed fix. See player-controller-re.md **D-PLR-2**.
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
 - **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):

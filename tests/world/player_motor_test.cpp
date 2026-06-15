@@ -48,6 +48,7 @@ struct Field {
 // root motion. (The M2 motor rotates the forward clip by the move-direction offset.)
 struct TestSource : IRootMotionSource {
     int32_t step = 0x4000;
+    int32_t capsule_bottom = 0;  // origin->feet foot offset emitted each frame (settle floor)
     bool has_clip(int id) const override {
         return id == anim_state::kWalkForward || id == anim_state::kIdle;
     }
@@ -55,6 +56,7 @@ struct TestSource : IRootMotionSource {
         ++phase;
         out = RootMotionFrame{};
         if (id == anim_state::kWalkForward) out.dx = step;
+        out.capsule_bottom = capsule_bottom;
         return has_clip(id);
     }
 };
@@ -143,9 +145,10 @@ int main() {
         CHECK(e->pos[0] == 0 && e->pos[1] == 0);
     }
 
-    // ---- gravity: falls to the resolver height (NO +0x50000), reaches terminal, fall damage ----
-    // [orig: gravity @0x4b7ac8; settle + fall damage @0x4b2bd0 / 0x4b7cf4.] Player floor =
-    // ground_cache (fx(50) here), unlike the AI's ground_cache + 0x50000 (D-PLR-2).
+    // ---- gravity: falls to ground + capsule_bottom, reaches terminal, fall damage ----
+    // [orig: gravity @0x4b7ac8; settle + fall damage @0x4b2bd0 / 0x4b7cf9.] The settle floors pos[2]
+    // to ground + the clip's capsule_bottom (origin->feet); this source emits capsule_bottom = 0, so
+    // floor = ground here. (D-PLR-2 / D-INF-6.)
     {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); }); // 50u everywhere
         const int32_t floor_z = fx(50);
@@ -190,6 +193,27 @@ int main() {
         run_ticks(ai, w, 0, 20);
         CHECK(e->pos[2] == floor_z);
         CHECK(e->health == 100);
+    }
+
+    // ---- settle floors pos[2] to ground + capsule_bottom; the FP eye is +1.0u above that origin ----
+    // [orig: settle @0x4b2bd0 with entityRadius = the .bad capsule_bottom*65536; eye lift @0x437e8f
+    //  (+0x10000). pos[2] is the model origin (waist), so eye = origin + 1.0u lands at head height.]
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+        TestSource csrc;
+        csrc.capsule_bottom = fx(1); // 1.0u origin->feet, emitted every frame (incl. idle)
+        World w; AiSystem ai;
+        ai.terrain = &flat.field;
+        ai.fall_damage_scale = 0;
+        ai.root_motion = &csrc;
+        AiEntity *e = player(ai);
+        e->pos[0] = fx(100);
+        e->pos[1] = fx(100);
+        e->pos[2] = fx(200); // falls and settles onto the capsule bottom
+        ai.set_player_input(PlayerInputCommand{});
+        run_ticks(ai, w, 0, 1200);
+        CHECK(e->pos[2] == fx(50) + fx(1));                    // ground + capsule_bottom (feet on terrain)
+        CHECK(e->player.camera.eye[2] == e->pos[2] + 0x10000); // FP eye = origin + kEyeHeight (1.0u)
     }
 
     if (failures == 0) std::printf("player_motor_test: OK\n");

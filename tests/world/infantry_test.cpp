@@ -40,9 +40,10 @@ constexpr int32_t fx(double units) { return static_cast<int32_t>(units * 65536.0
 // Constants under test (mirrors of the cited values in infantry.cpp).
 constexpr int32_t kClamp = 69273360;       // body turn clamp / tick
 constexpr int32_t kTerminal = -32768;      // terminal fall velocity
-constexpr int32_t kFloorStand = 0;         // infantry grounds feet-on-terrain; the original's
-                                           // +0x50000 mover stand offset is omitted for our
-                                           // feet-origin soldier models (infantry.cpp / D-INF)
+constexpr int32_t kFloorStand = 0;         // the test source emits capsule_bottom = 0, so the
+                                           // settle floor = ground + 0. A live soldier's floor is
+                                           // ground + the clip's capsule_bottom (origin->feet, the
+                                           // witnessed settle entityRadius); see infantry.cpp / D-INF-6.
 
 // A 512x512 height field with a caller-supplied raw16 column function (uniform in the
 // second axis where not stated). Same wiring as tests/world/ground_height_test.cpp.
@@ -70,6 +71,8 @@ struct Field {
 struct TestSource : IRootMotionSource {
     std::set<int> clips;
     int32_t step = 0x4000;
+    int32_t capsule_bottom = 0;  // origin->feet foot offset emitted each frame; the settle
+                                 // floors pos[2] to ground + this (witnessed entityRadius).
 
     static bool gait(int id) {
         return id == anim_state::kWalkForward || id == anim_state::kRunForward ||
@@ -82,6 +85,7 @@ struct TestSource : IRootMotionSource {
         ++phase;
         out = RootMotionFrame{};
         if (gait(id)) out.dx = step;
+        out.capsule_bottom = capsule_bottom;
         return true;
     }
 };
@@ -544,6 +548,29 @@ int main() {
         CHECK(e->pitch <= 656175520);           // ...never past the clamped slope
         CHECK(e->pos[2] < fx(100) + kFloorStand);        // followed the ground down
         CHECK(e->pos[2] > fx(90) + kFloorStand);
+    }
+
+    // ---- witnessed settle: pos[2] floors to ground + the clip's capsule_bottom ----
+    // [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0 settles so pos[2]-entityRadius ==
+    //  terrain; entityRadius = the .bad capsule_bottom*65536 (AnimMap_UpdateEntity @0x40b82f).] The
+    //  model origin (waist) sits capsule_bottom above the terrain so the feet rest on it. D-INF-6.
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+        TestSource csrc;
+        csrc.clips = {anim_state::kIdle}; // a stationary soldier resolves to kIdle (see above)
+        csrc.capsule_bottom = fx(1);      // 1.0u origin->feet, emitted every frame
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        ai.fall_damage_scale = 0;
+        ai.root_motion = &csrc;
+        AiEntity *e = soldier(ai);
+        e->pos[0] = fx(100);
+        e->pos[1] = fx(100);
+        e->pos[2] = fx(200); // start above; falls and settles onto the capsule bottom
+        run_ticks(ai, w, 0, 600);
+        CHECK(e->inf.anim_state == anim_state::kIdle);
+        CHECK(e->pos[2] == fx(50) + fx(1)); // ground + capsule_bottom (feet on terrain)
     }
 
     if (failures == 0) std::printf("infantry_test: OK\n");

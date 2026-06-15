@@ -106,12 +106,24 @@ uint32_t infantry_anim_flags(int state);
 //   dz = delta(lerp(capsule_bottom) * 65536)  [flt_7C32BC; prev stored per entity,
 //        reset on climb 32..35 / death_grenade 176..179 — ~0 in gaits, lifts in climbs]
 //   events = trigger (lower keyframe, unlerped)
+//   capsule_bottom = lerp(capsule_bottom) * 65536       [orig: out_transform[3]]
+//   capsule_top    = lerp(capsule_top) * 65536 + 0x2000 [orig: out_transform[4]]
 // Grilled against real clips in tests/anim/root_motion_test.cpp.
+//
+// capsule_bottom / capsule_top are the per-frame collision capsule the on-foot motor hands the
+// shared settle resolver as `entityRadius` / `entityRadiusDelta` [orig:
+// Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0; call @0x4b7cf9 (org2) / @0x4bf7fa (org1)].
+// The settle grounds the FEET: pos[2] = ground + capsule_bottom (capsule_bottom is the positive
+// origin->feet distance, ~1.0u standing; smaller crouched/prone since those are other clips — so
+// grounding + the FP eye are stance-aware automatically). The model renders at pos[2] with no extra
+// lift. See docs/world/world-wac-ai-re.md (D-INF-6).
 struct RootMotionFrame {
     int32_t dx = 0;
     int32_t dy = 0;
     int32_t dz = 0;
     uint32_t events = 0;
+    int32_t capsule_bottom = 0; // [orig: out_transform[3] = entityRadius] origin->feet, 16.16
+    int32_t capsule_top = 0;    // [orig: out_transform[4] = entityRadiusDelta] top + 0x2000, 16.16
 };
 
 // Clip provider keyed by anim state id. `phase` is the per-entity playhead in

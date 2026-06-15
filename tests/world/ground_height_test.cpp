@@ -115,7 +115,8 @@ int main() {
         CHECK(calc_average_ground_height(bad, pos, 0x50000, gc) == INT32_MIN);
     }
 
-    // ---- AiSystem::apply_ground_clamp drives pos[2] = ground + stand_offset ----
+    // ---- apply_ground_clamp: render pos[2] = ground contact; mover target kWorkPosZ keeps +offset ----
+    // The present pass lifts the model by its ground anchor, so pos[2] is the bare contact (D-INF-6).
     {
         AiSystem sys;
         sys.terrain = &f;
@@ -125,15 +126,15 @@ int main() {
         e.pos[1] = 0;
         e.pos[2] = fx(9999); // start floating
         sys.apply_ground_clamp(e);
-        // ground 417792 + stand 0x50000 (327680) = 745472.
-        CHECK(e.pos[2] == 745472);
-        CHECK(e.brain.f[AiBrain::kWorkPosZ] == 745472);
+        // ground (5-tap avg at x=100) = 417792; render pos = ground, mover target = ground + 0x50000.
+        CHECK(e.pos[2] == 417792);
+        CHECK(e.brain.f[AiBrain::kWorkPosZ] == 417792 + 327680);
 
         // Slope-tracking: a different column gives a different grounded Z.
         e.pos[0] = fx(300);
         e.pos[2] = 0;
         sys.apply_ground_clamp(e);
-        CHECK(e.pos[2] > 745472); // x=300 is higher up the ramp than x=100
+        CHECK(e.pos[2] > 417792); // x=300 is higher up the ramp than x=100
     }
 
     // ---- null terrain leaves Z untouched ----
@@ -162,8 +163,9 @@ int main() {
         sys.tick(w, ctx);
         // ground at x=200: center/N/S 12.5u(819200), E(205)=839680, W(195)=798720, max=839680.
         // result=(819200*3? no: N+S+E+W=819200+819200+839680+798720)=3276800; +2*(819200+2*839680)=4997120
-        //   => 8273920/10 = 827392; +327680 = 1155072.
-        CHECK(e.pos[2] == 1155072);
+        //   => 8273920/10 = 827392. Render pos[2] is the bare contact (no +offset; D-INF-6).
+        CHECK(e.pos[2] == 827392);
+        CHECK(e.brain.f[AiBrain::kWorkPosZ] == 827392 + 327680); // mover target keeps the clearance
     }
 
     if (failures == 0) std::printf("ground_height_test: OK\n");
