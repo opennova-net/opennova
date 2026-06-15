@@ -126,6 +126,36 @@ records, re-read as one `68*n + 52` blob @ 0x44e79d. A mission `PlayWavList` act
 dialog id; the group's lines name the sound definitions (sets) to play from the dialog bank
 (`ActionSlot_PlaySound @ 0x4010c0` for the positional action path).
 
+## Dialog playback is serialized — one channel at a time (grilled 2026-06-15)
+
+A `PlayWavList` mission action does not play immediately; it **enqueues** a dialog,
+and a per-frame updater plays the queue **one audio channel at a time**:
+
+- `EventAction_Dispatch @ 0x4542e0` (PlayWavList case @0x454461) -> `Dialog_PlayByIndex
+  @ 0x527ae0` formats the id as `"dlg%03i"` -> `Dialog_PlayByName @ 0x44d9f0` (matches the
+  loaded dialog group by name, locale-suffixed first) -> `Dialog_Register @ 0x44d980`.
+- `Dialog_Register` appends to a 256-entry queue (`dword_A89600` / count `dword_A895F8`)
+  and claims one of 16 active slots (`dword_A8A248[]` data ptr, `dword_A8A24C[]` line/entry
+  index, `dword_A8A250[]` countdown timer; active count `dword_A8A244`).
+- `Dialog_UpdatePlayback @ 0x44e470` runs each frame. For each active slot it only loads
+  and advances to the next clip when **no dialog channel is currently sounding** — the gate
+  `!dword_A895FC || !AudioChannel_ValidateHandle(dword_A89DFC[dword_A895FC])` (@0x44e53a).
+  `dword_A895FC` is the single live dialog channel index, set by `Dialog_LoadAudioClip
+  @ 0x44dcc0`. A dialog *group* advances through its line records (entry index `+28` count)
+  one line per free-channel cycle, with an inter-line countdown derived from the line byte
+  `+53`. So **dialog never overlaps dialog**: lines within a group and across queued groups
+  play strictly sequentially.
+- The pre-mission pass (`EventTrigger_UpdateAllWithFlag2 @ 0x454dc0`) dispatches actions
+  through the **same** `EventTrigger_UpdateEntry @ 0x454c30` as normal events, so a
+  PreMission `PlayWavList` *is* registered at mission start in the original — it just plays
+  back serially through the one dialog channel, not all at once.
+
+### Divergence
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-SND-4 | `NovaMissionAudio.play_dialog` **enqueues** the resolved line set-name(s) and plays them one at a time, starting the next on the previous voice's `finished` (`_dialog_queue` + `spawn_oneshot_2d`) | one dialog channel, `dword_A895FC`-gated, advanced by `Dialog_UpdatePlayback` | host-side serialization that reproduces the observable behavior (no dialog overlap). The prior host played every drained `dialog` effect immediately and non-blocking, so a mission's PreMission/early `PlayWavList` actions blared simultaneously at t=0. We do not model the 16-active-slot table or the per-line countdown timing (host presents on stream `finished`); the *id -> "dlg%03d" -> .DBF group lines* resolution matches the engine's `"dlg%03i"` path. |
+
 ## items.def marker sounds
 
 `ItemDef_ParseProperty @ 0x49eb00` parses the marker-item sound keys: `soundloop_1..7`
@@ -141,6 +171,10 @@ the loaded banks. Entity-attached sounds use a separate composite-name path
 (algorithm + seed + scaling), name-keyed case-insensitive set resolution, items.def soundloop
 semantics, and the global bank-slot order are all engine-witnessed and implemented faithfully.
 
+- dialog playback serialization (grilled 2026-06-15): the engine plays one dialog channel
+  at a time (`Dialog_Register @0x44d980` queue, `Dialog_UpdatePlayback @0x44e470` gate); the
+  host reproduces this with a FIFO queue (D-SND-4) instead of firing every `PlayWavList` at
+  once.
 - divergence (bank scope / D-SND-1): merged chain vs dialog-scoped co-named bank — accepted.
 - divergence (coverage / D-SND-2): expansion bank slots not loaded — host follow-up.
 - divergence (strictness / D-SND-3): parser rejects out-of-range single_index, >8 counts, bad
