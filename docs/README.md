@@ -33,6 +33,7 @@ behavior is summarized and cited.
 | [0006](adr/0006-unified-mission-runtime-present-pass.md) | One mission runtime, one present pass, one entity index for game and editor |
 | [0007](adr/0007-skeletal-runtime-and-entity-visual.md) | Skeletal `.bad`/`.adm` runtime and the `NovaEntityVisual` contract |
 | [0008](adr/0008-pff-writer-policy.md) | PFF writer: zero timestamp/checksum for new entries, verbatim for retained |
+| [0009](adr/0009-avatars-writer-policy.md) | Avatars.def writer: from-scratch canonical output; lossless + idempotent round-trip, not byte-exact vs the hand-authored file |
 
 ## RE records by domain
 
@@ -47,6 +48,7 @@ behavior is summarized and cited.
 | Mission | [`mission/bms-event-runtime-re.md`](mission/bms-event-runtime-re.md) | landed |
 | Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | unlanded: stack landed in PR #37, reverted in PR #50 |
 | Particles | [`particles/ptl-format-re.md`](particles/ptl-format-re.md) | redesign in flight in a worktree |
+| Player info | [`playerinfo/avatars-re.md`](playerinfo/avatars-re.md) | landed (engine-research, read-only; reimpl pending) |
 | 3DI | [`threedi/3di-gp-format-re.md`](threedi/3di-gp-format-re.md) | landed (`libs/threedi`) |
 | 3DI | [`threedi/3di-lw-format-re.md`](threedi/3di-lw-format-re.md) | unlanded: Land Warrior import, PR #45 closed |
 | World | [`world/world-wac-ai-re.md`](world/world-wac-ai-re.md) | landed |
