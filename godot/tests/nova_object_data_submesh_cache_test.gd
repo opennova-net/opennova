@@ -154,3 +154,84 @@ func test_material_edit_on_a_shared_data_does_not_leak_across_models() -> void:
 		if mi_a.material_override != null:
 			assert_ne(mi_a.material_override, mi_b.material_override,
 				"...with materials still per-instance")
+
+
+# --- Geometry batching ---------------------------------------------------------
+# build_lod_submeshes merges primitives sharing (part, material, skinned, alpha)
+# into one ArrayMesh surface, mirroring how the original engine draws a part's
+# strips as offset runs over a shared pooled buffer (docs/renderer/renderer-re.md
+# section Geometry batching; D-RENDER-15). get_lod_surfaces() stays per-primitive
+# (collision/preview rely on it) - only the render build merges.
+
+func _total_surface_vertices(surfaces: Array) -> int:
+	var n := 0
+	for s in surfaces:
+		n += ((s as Dictionary).get("vertices", PackedVector3Array()) as PackedVector3Array).size()
+	return n
+
+
+func _total_mesh_vertices(submeshes: Array) -> int:
+	var n := 0
+	for entry in submeshes:
+		var mesh := (entry as Dictionary).get("mesh") as ArrayMesh
+		if mesh != null and mesh.get_surface_count() > 0:
+			n += mesh.surface_get_array_len(0)
+	return n
+
+
+# Distinct (part, material) pairs across the per-primitive surfaces. The real merge
+# refines this by (skinned, alpha, tangents), so the merged count is bounded below
+# by this and above by the primitive count.
+func _coarse_group_count(surfaces: Array) -> int:
+	var keys := {}
+	for s in surfaces:
+		var d := s as Dictionary
+		keys["%d|%d" % [int(d.get("part_index", -1)), int(d.get("material_array_index", d.get("material_index", -1)))]] = true
+	return keys.size()
+
+
+func _assert_one_entry_per_group(submeshes: Array, label: String) -> void:
+	var seen := {}
+	for entry in submeshes:
+		var d := entry as Dictionary
+		var key := "%d|%d|%s|%s" % [
+			int(d.get("part_index", -1)), int(d.get("material_index", -1)),
+			str(bool(d.get("is_skinned", false))), str(bool(d.get("is_alpha", false)))]
+		assert_false(seen.has(key),
+			"%s: (part,material,skin,alpha)=%s must collapse to ONE submesh" % [label, key])
+		seen[key] = true
+
+
+func test_build_merges_primitives_losslessly() -> void:
+	for path in [SHED, CHARMODEL]:
+		var data := _open(path)
+		var surfaces := data.get_lod_surfaces(0)
+		var submeshes := data.build_lod_submeshes(0)
+		assert_false(submeshes.is_empty(), "%s built submeshes" % path)
+		# Lossless: the merge concatenates, never dropping or duplicating geometry.
+		assert_eq(_total_mesh_vertices(submeshes), _total_surface_vertices(surfaces),
+			"%s: merged vertex total equals the per-primitive total" % path)
+		# Fully grouped: no two entries share a (part, material, skin, alpha) key.
+		_assert_one_entry_per_group(submeshes, path)
+		# A refinement of the coarse (part, material) grouping, bounded by prim count.
+		var coarse := _coarse_group_count(surfaces)
+		assert_true(submeshes.size() >= coarse,
+			"%s: merged count %d >= coarse (part,material) groups %d" % [path, submeshes.size(), coarse])
+		assert_true(submeshes.size() <= surfaces.size(),
+			"%s: merged count %d <= primitive count %d" % [path, submeshes.size(), surfaces.size()])
+		gut.p("%s: %d primitives -> %d merged submeshes (coarse %d)" % [path, surfaces.size(), submeshes.size(), coarse])
+
+
+func test_skeletal_build_merges_losslessly() -> void:
+	var data := _open(CHARMODEL)
+	var surfaces := data.get_lod_surfaces(0)
+	var submeshes := data.build_lod_submeshes(0, true, 8)
+	assert_false(submeshes.is_empty(), "skeletal build produced submeshes")
+	assert_eq(_total_mesh_vertices(submeshes), _total_surface_vertices(surfaces),
+		"skeletal merge preserves the vertex total")
+	_assert_one_entry_per_group(submeshes, "CharModel skeletal")
+	var any_skinned := false
+	for entry in submeshes:
+		if bool((entry as Dictionary).get("is_skinned", false)):
+			any_skinned = true
+	assert_true(any_skinned, "the skeletal build marks skinned submeshes")

@@ -2920,38 +2920,61 @@ Array NovaObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int 
 	}
 	const ThreediIRLod &lod = ir.lods[p_lod_index];
 	const Array surfaces = get_lod_surfaces(p_lod_index);
+	// Merge primitives that share (part, material, skinned-ness, opaque/alpha, vertex
+	// format) into one ArrayMesh surface, mirroring how the original engine draws a
+	// part's strips as offset runs over a shared pooled buffer with change-gated state
+	// (see docs/renderer/renderer-re.md §Geometry batching; D-RENDER-15). The
+	// boundaries that stay split map to the engine's per-draw uniforms / the host node
+	// model: part (each Robj owns a PANM transform), skinned-vs-rigid (Skeleton3D vs
+	// Robj), material/shader, and opaque-vs-alpha (transparency order). Tangent presence
+	// is part of the key = the engine's per-LOD vertex declaration. get_lod_surfaces()
+	// emits fully-expanded surfaces (3 fresh verts per triangle), so a merge is array
+	// concatenation and a flat 0..N-1 index list.
+	struct MergeGroup {
+		int part_index = 0;
+		int material_array_index = 0;
+		bool skinned = false;
+		bool is_alpha = false;
+		bool has_tangents = false;
+		int source_material_index = 0;
+		int64_t first_primitive_index = 0;
+		PackedVector3Array vertices;
+		PackedVector3Array normals;
+		PackedVector2Array uvs;
+		PackedVector2Array uvs2;
+		PackedFloat32Array tangents;
+		PackedInt32Array bones;
+		PackedFloat32Array weights;
+	};
+	std::vector<MergeGroup> groups;
+
 	for (int i = 0; i < surfaces.size(); ++i) {
 		const Dictionary surface = surfaces[i];
-		const int part_index = static_cast<int>(surface.get("part_index", 0));
-		const int material_array_index = static_cast<int>(surface.get("material_array_index", surface.get("material_index", 0)));
-
 		const PackedVector3Array vertices = surface.get("vertices", PackedVector3Array());
 		if (vertices.is_empty()) {
 			continue;
 		}
-
-		Array arrays;
-		arrays.resize(Mesh::ARRAY_MAX);
-		arrays[Mesh::ARRAY_VERTEX] = vertices;
-		arrays[Mesh::ARRAY_NORMAL] = surface.get("normals", PackedVector3Array());
-		arrays[Mesh::ARRAY_TEX_UV] = surface.get("uvs", PackedVector2Array());
-		arrays[Mesh::ARRAY_TEX_UV2] = surface.get("uvs2", PackedVector2Array());
+		const int vcount = static_cast<int>(vertices.size());
+		const int part_index = static_cast<int>(surface.get("part_index", 0));
+		const int material_array_index = static_cast<int>(surface.get("material_array_index", surface.get("material_index", 0)));
+		const int source_material_index = static_cast<int>(surface.get("material_index", material_array_index));
+		const PackedVector3Array normals = surface.get("normals", PackedVector3Array());
+		const PackedVector2Array uvs = surface.get("uvs", PackedVector2Array());
+		const PackedVector2Array uvs2 = surface.get("uvs2", PackedVector2Array());
 		const PackedFloat32Array tangents = surface.get("tangents", PackedFloat32Array());
-		if (!tangents.is_empty() && tangents.size() == vertices.size() * 4) {
-			arrays[Mesh::ARRAY_TANGENT] = tangents;
-		}
-		// Skinning arrays (4 bones + 4 weights per vertex). ArrayMesh requires both present
-		// together; only attach when both are valid for this surface's vertex count.
+		const bool has_tangents = !tangents.is_empty() && tangents.size() == vcount * 4;
+
+		// Resolve final skinning (incl. rigid "fake skinning") before grouping, since it
+		// decides both the vertex format and the bone data we concatenate. Fake skinning:
+		// when a skeleton will be applied (p_skeletal) but this surface has no per-vertex
+		// skin, fully weight every vertex (1.0) to a single bone = the part's subobject
+		// index (the .bad skeleton is authored so subobject i <-> bone i, so the rigid
+		// part follows that bone). [orig: rigid weapon parts ride a bone via fake skinning.]
 		PackedInt32Array bones = surface.get("bones", PackedInt32Array());
 		PackedFloat32Array weights = surface.get("weights", PackedFloat32Array());
-		bool surface_skinned = bones.size() == vertices.size() * 4 && weights.size() == vertices.size() * 4;
-		// Rigid "fake skinning": when a skeleton will be applied (p_skeletal) but this surface
-		// has no per-vertex skin, fully weight every vertex (1.0) to a single bone = the part's
-		// subobject index. The .bad skeleton is authored so subobject i <-> bone i, so the rigid
-		// part follows that bone. [orig: rigid weapon parts ride a bone via fake skinning.]
+		bool surface_skinned = bones.size() == vcount * 4 && weights.size() == vcount * 4;
 		if (!surface_skinned && p_skeletal) {
 			const int bone = p_bone_count > 0 ? CLAMP(part_index, 0, p_bone_count - 1) : MAX(part_index, 0);
-			const int vcount = static_cast<int>(vertices.size());
 			bones.resize(vcount * 4);
 			weights.resize(vcount * 4);
 			for (int v = 0; v < vcount; ++v) {
@@ -2966,37 +2989,96 @@ Array NovaObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int 
 			}
 			surface_skinned = true;
 		}
-		if (surface_skinned) {
-			arrays[Mesh::ARRAY_BONES] = bones;
-			arrays[Mesh::ARRAY_WEIGHTS] = weights;
+
+		const size_t prim_index = static_cast<size_t>(static_cast<int64_t>(surface.get("primitive_index", 0)));
+		const bool is_alpha = prim_index < lod.primitive_count ? primitive_is_alpha(lod, prim_index) : false;
+
+		MergeGroup *group = nullptr;
+		for (MergeGroup &candidate : groups) {
+			if (candidate.part_index == part_index &&
+					candidate.material_array_index == material_array_index &&
+					candidate.skinned == surface_skinned &&
+					candidate.is_alpha == is_alpha &&
+					candidate.has_tangents == has_tangents) {
+				group = &candidate;
+				break;
+			}
 		}
-		arrays[Mesh::ARRAY_INDEX] = surface.get("indices", PackedInt32Array());
+		if (group == nullptr) {
+			groups.emplace_back();
+			group = &groups.back();
+			group->part_index = part_index;
+			group->material_array_index = material_array_index;
+			group->skinned = surface_skinned;
+			group->is_alpha = is_alpha;
+			group->has_tangents = has_tangents;
+			group->source_material_index = source_material_index;
+			group->first_primitive_index = static_cast<int64_t>(surface.get("primitive_index", i));
+		}
+		group->vertices.append_array(vertices);
+		group->normals.append_array(normals);
+		group->uvs.append_array(uvs);
+		group->uvs2.append_array(uvs2);
+		if (has_tangents) {
+			group->tangents.append_array(tangents);
+		}
+		if (surface_skinned) {
+			group->bones.append_array(bones);
+			group->weights.append_array(weights);
+		}
+	}
+
+	for (const MergeGroup &group : groups) {
+		const int vcount = static_cast<int>(group.vertices.size());
+		if (vcount == 0) {
+			continue;
+		}
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		arrays[Mesh::ARRAY_VERTEX] = group.vertices;
+		arrays[Mesh::ARRAY_NORMAL] = group.normals;
+		arrays[Mesh::ARRAY_TEX_UV] = group.uvs;
+		arrays[Mesh::ARRAY_TEX_UV2] = group.uvs2;
+		// ArrayMesh requires tangents / bones+weights present together for the whole
+		// surface; the merge key guarantees the group is format-homogeneous.
+		if (group.has_tangents && group.tangents.size() == vcount * 4) {
+			arrays[Mesh::ARRAY_TANGENT] = group.tangents;
+		}
+		if (group.skinned && group.bones.size() == vcount * 4 && group.weights.size() == vcount * 4) {
+			arrays[Mesh::ARRAY_BONES] = group.bones;
+			arrays[Mesh::ARRAY_WEIGHTS] = group.weights;
+		}
+		PackedInt32Array indices;
+		indices.resize(vcount);
+		for (int v = 0; v < vcount; ++v) {
+			indices.set(v, v);
+		}
+		arrays[Mesh::ARRAY_INDEX] = indices;
 
 		Ref<ArrayMesh> mesh;
 		mesh.instantiate();
 		mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
-		mesh->surface_set_name(0, vformat("material_%d", material_array_index));
+		mesh->surface_set_name(0, vformat("material_%d", group.material_array_index));
 
 		Vector3 abs = Vector3();
 		int parent_index = -1;
-		if (part_index >= 0 && static_cast<size_t>(part_index) < lod.part_count) {
-			const ThreediIRPart &part = lod.parts[part_index];
+		if (group.part_index >= 0 && static_cast<size_t>(group.part_index) < lod.part_count) {
+			const ThreediIRPart &part = lod.parts[group.part_index];
 			abs = godot_vec3(part.abs_position);
 			parent_index = part.parent_index;
 		}
 
-		const size_t prim_index = static_cast<size_t>(static_cast<int64_t>(surface.get("primitive_index", 0)));
 		Dictionary entry;
-		entry["robj_index"] = part_index;
-		entry["part_index"] = part_index;
-		entry["material_index"] = material_array_index;
-		entry["source_material_index"] = surface.get("material_index", material_array_index);
-		entry["is_alpha"] = prim_index < lod.primitive_count ? primitive_is_alpha(lod, prim_index) : false;
+		entry["robj_index"] = group.part_index;
+		entry["part_index"] = group.part_index;
+		entry["material_index"] = group.material_array_index;
+		entry["source_material_index"] = group.source_material_index;
+		entry["is_alpha"] = group.is_alpha;
 		entry["mesh"] = mesh;
 		entry["abs"] = abs;
 		entry["parent_index"] = parent_index;
-		entry["primitive_index"] = surface.get("primitive_index", i);
-		entry["is_skinned"] = surface_skinned;
+		entry["primitive_index"] = group.first_primitive_index;
+		entry["is_skinned"] = group.skinned;
 		result.push_back(entry);
 	}
 	// Keep the pristine copy; the caller gets its own entry dictionaries. The
