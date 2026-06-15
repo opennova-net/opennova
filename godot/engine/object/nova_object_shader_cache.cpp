@@ -48,7 +48,11 @@ Ref<Shader> NovaObjectShaderCache::get_shader_for_key(int32_t key) {
 	}
 	Ref<Shader> shader;
 	shader.instantiate();
-	const std::string code = renderer::compose_object_shader_glsl(ukey);
+	// Prelude (shader_type + render_mode + #define block) from libs/renderer,
+	// then the shared macro über-shader body. The body switches on the OBJ_*
+	// defines to pick the family shading ported from the original .fx effects.
+	std::string code = renderer::compose_object_shader_prelude(ukey);
+	code += "#include \"res://shaders/object/object.gdshaderinc\"\n";
 	shader->set_code(String(code.c_str()));
 	cache[ukey] = shader;
 	return shader;

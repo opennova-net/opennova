@@ -198,59 +198,62 @@ int main() {
 		       "key decodes Opaque blend");
 	}
 
-	// 13. GLSL composer emits sane shader source for each family.
+	// 13. The shader prelude maps the key to render_mode + OBJ_* defines. The
+	// per-family shading math now lives in godot/shaders/object/*.gdshaderinc
+	// (selected by these defines); it is validated visually, not by string-grep.
 	{
 		const auto fk = build_object_shader_key(classify_object_material("FF_ST_OP", 0, 0, 0, 128));
-		const std::string ff_glsl = compose_object_shader_glsl(fk);
-		expect(contains(ff_glsl, "shader_type spatial"), "FF GLSL is spatial");
-		expect(contains(ff_glsl, "obj_ff_lighting"), "FF GLSL uses ff lighting helper");
-		expect(contains(ff_glsl, "cull_back"), "FF cull_back default");
+		const std::string ff = compose_object_shader_prelude(fk);
+		expect(contains(ff, "shader_type spatial"), "FF prelude is spatial");
+		expect(contains(ff, "render_mode unshaded"), "FF prelude is unshaded");
+		expect(contains(ff, "#define OBJ_FAMILY_FIXEDFUNCTION"), "FF family define");
+		expect(contains(ff, "#define OBJ_BLEND_OPAQUE"), "FF opaque blend define");
+		expect(contains(ff, "cull_back"), "FF cull_back default");
 
 		const auto mk = build_object_shader_key(classify_object_material("FF_MT_OP", 0, 0, 0, 128));
-		const std::string mt_glsl = compose_object_shader_glsl(mk);
-		expect(contains(mt_glsl, "texture(u_detail, v_uv2)"),
-		       "Multi-texture GLSL samples detail maps from secondary UVs");
-		expect(!contains(mt_glsl, "v_uv * 4.0"),
-		       "Multi-texture GLSL should not re-scale baked detail UVs");
+		const std::string mt = compose_object_shader_prelude(mk);
+		expect(contains(mt, "#define OBJ_DETAIL"),
+		       "Multi-texture FF enables the detail define");
 
 		const auto gk = build_object_shader_key(classify_object_material("FFP_GLASS", 0, 0, 1, 128));
-		const std::string glass_glsl = compose_object_shader_glsl(gk);
-		expect(contains(glass_glsl, "blend_add"), "Glass emits additive render mode");
-		expect(contains(glass_glsl, "u_reflect_color"), "Glass exposes reflect color");
-		expect(contains(glass_glsl, "fresnel"), "Glass fragment computes fresnel");
-		expect(!contains(glass_glsl, "ALPHA ="), "Additive glass does not write AlphaBlend opacity");
+		const std::string glass = compose_object_shader_prelude(gk);
+		expect(contains(glass, "blend_add"), "Glass emits additive render mode");
+		expect(contains(glass, "#define OBJ_FAMILY_GLASS"), "Glass family define");
+		expect(contains(glass, "#define OBJ_GLASS"), "Glass capability define");
+		expect(!contains(glass, "#define OBJ_BLEND_ALPHABLEND"),
+		       "Additive glass does not request AlphaBlend opacity");
 
 		const auto lk = build_object_shader_key(classify_object_material("VS_FLAG", 0, 0, 0, 128));
-		const std::string flag_glsl = compose_object_shader_glsl(lk);
-		expect(contains(flag_glsl, "u_wind_amount"), "Flag exposes wind amount");
-		expect(contains(flag_glsl, "TIME"), "Flag uses TIME for sway");
+		expect(contains(compose_object_shader_prelude(lk), "#define OBJ_FAMILY_FLAG"),
+		       "Flag family define");
 
 		const auto pk = build_object_shader_key(classify_object_material("VS_PHONGT", 0, 0, 0, 128));
-		const std::string phong_glsl = compose_object_shader_glsl(pk);
-		expect(contains(phong_glsl, "u_normal_map"), "Phong samples normal map");
-		expect(contains(phong_glsl, "spec"), "Phong has specular term");
+		const std::string phong = compose_object_shader_prelude(pk);
+		expect(contains(phong, "#define OBJ_FAMILY_PHONG"), "Phong family define");
+		expect(contains(phong, "#define OBJ_NORMAL_MAP"), "Phong samples a normal map");
+		expect(contains(phong, "#define OBJ_SPECULAR"), "Phong has a specular term");
 
 		const auto skinned_key = build_object_shader_key(classify_object_material("VS_SKBUMPDIFFT2", 0, 0, 0, 128));
-		const std::string skinned_glsl = compose_object_shader_glsl(skinned_key);
-		expect(contains(skinned_glsl, "depth_draw_opaque"),
-		       "Skinned bump/detail GLSL writes depth as opaque");
-		expect(!contains(skinned_glsl, "ALPHA ="),
-		       "Skinned bump/detail GLSL does not use texture alpha as opacity");
+		const std::string skinned = compose_object_shader_prelude(skinned_key);
+		expect(contains(skinned, "depth_draw_opaque"),
+		       "Skinned bump/detail writes depth as opaque");
+		expect(!contains(skinned, "#define OBJ_BLEND_ALPHABLEND"),
+		       "Skinned bump/detail does not request AlphaBlend opacity");
 
 		ObjectMaterialClassification normal_b_cls;
 		normal_b_cls.family = ObjectShaderFamily::Dot3;
 		normal_b_cls.needs_normal_map = true;
 		normal_b_cls.normal_uses_uv2 = true;
 		normal_b_cls.normal_space = ObjectNormalSpace::Tangent;
-		const std::string normal_b_glsl = compose_object_shader_glsl(build_object_shader_key(normal_b_cls));
-		expect(contains(normal_b_glsl, "texture(u_normal_map, v_uv2)"),
-		       "Normal-B GLSL samples normal maps from secondary UVs");
+		const std::string normal_b = compose_object_shader_prelude(build_object_shader_key(normal_b_cls));
+		expect(contains(normal_b, "#define OBJ_NORMAL_UV2"),
+		       "Normal-B enables the secondary-UV normal define");
 
 		const auto two_sided_key = build_object_shader_key(classify_object_material(
 			"FF_ST_OP", THREEDI_MATERIAL_FLAG_TWO_SIDED, 0, 0, 128));
-		const std::string two_sided_glsl = compose_object_shader_glsl(two_sided_key);
-		expect(contains(two_sided_glsl, "cull_disabled"),
-		       "two-sided emits cull_disabled");
+		const std::string two_sided = compose_object_shader_prelude(two_sided_key);
+		expect(contains(two_sided, "cull_disabled"), "two-sided emits cull_disabled");
+		expect(contains(two_sided, "#define OBJ_TWO_SIDED"), "two-sided define");
 	}
 
 	std::cerr << "renderer_material_classify_test ok\n";

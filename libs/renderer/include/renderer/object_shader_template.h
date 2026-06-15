@@ -1,16 +1,18 @@
 #pragma once
 
-// GLSL source generator for object materials.  Pure C++ - produces shader
-// strings the runtime/server can also consume (e.g. for headless texture
-// validation, server-side dry-run rendering, or porting to a different
-// engine without depending on Godot's Shader resource type).
+// Object-material shader assembler.  Pure C++, no Godot types: it emits the
+// per-key `shader_type`/`render_mode` line and the `#define` block that
+// specialises the macro über-shader body.  The body itself (the per-family
+// shading math, ported faithfully from the original engine's `.fx` effects)
+// lives in real, editable Godot shader files under
+// `godot/shaders/object/` (`_object_baseinc.gdshaderinc` + `object.gdshaderinc`),
+// mirroring how the original factors one shared header + macro-permuted bodies.
 //
-// The Godot side (godot/engine/object/nova_object_shader_cache.cpp) wraps
-// these strings into Godot Shader resources and caches them per key.
+// The Godot side (godot/engine/object/nova_object_shader_cache.cpp) prepends
+// this prelude to a `#include "res://shaders/object/object.gdshaderinc"` line,
+// wraps the result in a Godot Shader resource, and caches it per key.
 //
-// Mirrors opennova-godot-new/src/model/nova_shader_cache.cpp's compose_*
-// helpers, simplified to a single Normal-pass (no per-light passes - that
-// belongs to the runtime layer and gets a separate composer when added).
+// Witness map + divergence catalog: docs/renderer/renderer-re.md (D-RENDER-*).
 
 #include "renderer/material_classify.h"
 
@@ -46,11 +48,12 @@ ObjectShaderKey build_object_shader_key(const ObjectMaterialClassification &cls)
 ObjectShaderFamily decode_object_shader_family(ObjectShaderKey key);
 ObjectBlendMode decode_object_shader_blend(ObjectShaderKey key);
 
-// Compose the Godot-flavoured GLSL source for a key.  The output uses
-// `shader_type spatial;` and Godot-specific built-ins (CAMERA_POSITION_WORLD,
-// MODEL_MATRIX, ALBEDO, ALPHA, TIME).  The runtime/server uses are expected
-// to be either rendering through Godot or syntactically replacing those
-// built-ins for their target backend.
-std::string compose_object_shader_glsl(ObjectShaderKey key);
+// Compose the per-key shader prelude: the `shader_type spatial;` +
+// `render_mode …;` line followed by the `#define OBJ_*` block the body switches
+// on.  The caller appends the `#include` of the shared body to make a complete
+// Godot shader.  `compose_object_shader_defines` returns just the `#define`
+// block (exposed for testing the key->define mapping).
+std::string compose_object_shader_prelude(ObjectShaderKey key);
+std::string compose_object_shader_defines(ObjectShaderKey key);
 
 } // namespace renderer

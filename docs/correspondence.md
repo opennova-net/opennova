@@ -25,6 +25,7 @@ the row links to the authoritative record.
 | RTXT string tables (`libs/rtxt`, NovaStrings) | 2026-06-09 | **matching** at byte level (98/98 retail bins roundtrip; D-RTXT-4 strictness retained) | [rtxt-strings-re.md](interface/rtxt-strings-re.md) |
 | BMS event runtime + mission→world promotion (`libs/mission` event_runtime/promote) | 2026-06-10 | **MATCHING** (D-EVT-1..4) | [bms-event-runtime-re.md](mission/bms-event-runtime-re.md) |
 | World / WAC VM / AI + infantry motor (`libs/world`, `libs/wac`) | 2026-06-07..10 | **MATCHING** (infantry D-INF-1..5; vehicle/HELO movement physics are tracked `not_yet_ported` stubs) | [world-wac-ai-re.md](world/world-wac-ai-re.md) — carries its own correspondence map (§2 there) |
+| Object renderer / `.fx` effect system (`libs/renderer`, `godot/engine/object`) | 2026-06-14 | **engine-research**: effect load + macro über-shader + lighting math **witnessed**; current GLSL builder **divergent** (invented lighting, D-RENDER-1..11); faithful port in flight | [renderer/renderer-re.md](renderer/renderer-re.md) |
 | `.bms` mission loader (`libs/mission/src/bms.cpp`) | 2026-06-02 (+ 2026-06-08 foundation pass) | per function — §3 below | this page |
 
 ## 2. MNU function table (format grill 2026-06-01)
