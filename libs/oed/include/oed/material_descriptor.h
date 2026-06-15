@@ -110,9 +110,32 @@ inline constexpr size_t kMaterialDescriptorTableCount =
 static_assert(kMaterialDescriptorTableCount == kMaterialInfoTableCount,
               "Material descriptor table must mirror kMaterialInfoTable");
 
+// ASCII case-insensitive full-string equality, mirroring the engine's registry
+// match: HLSLEffect_FindByName @ 0x5ade70 resolves a .3di material's shader tag
+// against the loaded effect names with stricmp, not a case-sensitive compare.
+// Equality requires both strings to terminate together (a prefix never matches),
+// exactly like stricmp. Shader tags are ASCII, so a byte-wise tolower suffices.
+inline bool material_tag_iequals(std::string_view tag, const char* name) {
+  std::size_t i = 0;
+  for (; i < tag.size(); ++i) {
+    const char raw = name[i];
+    if (raw == '\0') {
+      return false;  // name shorter than tag
+    }
+    char a = tag[i];
+    char b = raw;
+    if (a >= 'A' && a <= 'Z') a = static_cast<char>(a + ('a' - 'A'));
+    if (b >= 'A' && b <= 'Z') b = static_cast<char>(b + ('a' - 'A'));
+    if (a != b) {
+      return false;
+    }
+  }
+  return name[i] == '\0';  // both ended together
+}
+
 inline const MaterialDescriptorRecord* find_material_descriptor(std::string_view shader_tag) {
   for (size_t i = 0; i < kMaterialDescriptorTableCount; ++i) {
-    if (shader_tag == kMaterialDescriptorTable[i].name) {
+    if (material_tag_iequals(shader_tag, kMaterialDescriptorTable[i].name)) {
       return &kMaterialDescriptorTable[i];
     }
   }

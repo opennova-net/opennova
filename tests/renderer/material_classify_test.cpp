@@ -68,6 +68,27 @@ int main() {
 		expect(!cls.is_two_sided, "FF_ST_OP not two-sided when flags=0");
 	}
 
+	// 1b. Tag matching is case-INSENSITIVE, mirroring the engine's registry
+	// lookup (HLSLEffect_FindByName @ 0x5ade70 uses stricmp; D-RENDER-13). A
+	// lowercase / mixed-case .3di tag must resolve to the canonical descriptor
+	// instead of silently falling back to unknown.
+	{
+		for (const char *tag : { "ff_st_op", "Ff_St_Op", "FF_ST_OP" }) {
+			const auto cls = classify_object_material(tag, 0, 0, 0, 128);
+			expect(cls.known_shader, std::string("case-insensitive tag resolves: ") + tag);
+			expect(cls.family == ObjectShaderFamily::FixedFunction,
+			       std::string("case-insensitive tag keeps family: ") + tag);
+		}
+		// stricmp semantics: a prefix or an over-long tag is NOT a match.
+		expect(!classify_object_material("FF_ST", 0, 0, 0, 128).known_shader,
+		       "a prefix of a tag does not match");
+		expect(!classify_object_material("FF_ST_OPX", 0, 0, 0, 128).known_shader,
+		       "an over-long tag does not match");
+		// The #UV suffix variant still resolves case-insensitively.
+		expect(classify_object_material("vs_phongt#uv", 0, 0, 0, 128).known_shader,
+		       "case-insensitive match includes the #UV suffix variant");
+	}
+
 	// 2. FF_ST_AB - alpha-blended FF.
 	{
 		const auto cls = classify_object_material("FF_ST_AB", 0, 0, 0, 128);
