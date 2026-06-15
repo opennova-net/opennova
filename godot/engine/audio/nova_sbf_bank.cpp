@@ -35,6 +35,7 @@ void NovaSbfBank::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_stream", "name"), &NovaSbfBank::get_stream);
 	ClassDB::bind_method(D_METHOD("get_stream_at", "index"), &NovaSbfBank::get_stream_at);
 	ClassDB::bind_method(D_METHOD("load_from_path", "path"), &NovaSbfBank::load_from_path);
+	ClassDB::bind_method(D_METHOD("load_from_bytes", "bytes", "source"), &NovaSbfBank::load_from_bytes);
 	ClassDB::bind_static_method("NovaSbfBank", D_METHOD("create_empty"), &NovaSbfBank::create_empty);
 	ClassDB::bind_method(D_METHOD("get_raw_file_bytes"), &NovaSbfBank::get_raw_file_bytes);
 	ClassDB::bind_method(D_METHOD("set_entry_pcm", "index", "samples"), &NovaSbfBank::set_entry_pcm);
@@ -69,6 +70,30 @@ void NovaSbfBank::load_from_path(const String &p_path) {
 	}
 	if (sbf_open_memory(&_arc, _file_bytes.ptr(), (size_t)_file_bytes.size()) != 0) {
 		UtilityFunctions::printerr("NovaSbfBank: sbf_open_memory failed for ", p_path);
+		_file_bytes = PackedByteArray();
+		return;
+	}
+	_opened = true;
+}
+
+void NovaSbfBank::load_from_bytes(const PackedByteArray &p_bytes, const String &p_source) {
+	if (_opened) {
+		sbf_close(&_arc);
+		_opened = false;
+	}
+	source_path = p_source;
+	// The bytes are already vfs_decode_payload'd by the caller (read_file); do
+	// not decode again. _file_bytes must outlive _arc (sbf_open_memory points the
+	// entry index into it until sbf_close), so hold a copy.
+	_file_bytes = p_bytes;
+
+	if (_file_bytes.size() <= 0) {
+		UtilityFunctions::printerr("NovaSbfBank: empty bytes for ", p_source);
+		_file_bytes = PackedByteArray();
+		return;
+	}
+	if (sbf_open_memory(&_arc, _file_bytes.ptr(), (size_t)_file_bytes.size()) != 0) {
+		UtilityFunctions::printerr("NovaSbfBank: sbf_open_memory failed for ", p_source);
 		_file_bytes = PackedByteArray();
 		return;
 	}

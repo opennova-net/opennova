@@ -29,6 +29,13 @@ public:
 	// for tests / fixtures that bypass the loader.
 	void load_from_path(const String &p_path);
 
+	// Load from already-decoded bytes (e.g. NovaResourceRoot::read_file, which
+	// applies the same vfs_decode_payload load_from_path's read does, but resolves
+	// through the full PFF/loose/expansion mount stack by name). Lets the runtime
+	// menu shell load a PFF-archived bank that has no loose disk path. `p_source`
+	// is only a label for diagnostics / the saver's source_path.
+	void load_from_bytes(const PackedByteArray &p_bytes, const String &p_source);
+
 	// Factory: a fresh, empty, editable bank (zero entries) ready for add_entry()
 	// and save. Mirrors the in-memory state a loaded archive has but with no
 	// entries, so the music editor can author a sound bank from scratch. The
