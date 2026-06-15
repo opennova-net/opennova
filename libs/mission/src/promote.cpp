@@ -158,6 +158,18 @@ void init_infantry(AiEntity &ae, const bms::Entity &e) {
     }
 }
 
+// Designate an organic as the local human player (entity class org2 — the input-driven twin
+// of org1). [orig: the player soldier's items.def declares move_function org2 ->
+// Entity_UpdateInfantryPhysics @0x4b40e0; Player_InitLocalPlayer @0x4b1060 marks a pool-0
+// organic with the PLAYER flag + g_local_player_entity.] org2 shares the entity layout +
+// ground/root-motion with the AI motor, so at spawn only the active flag differs (the
+// default loadout/avatar seed lands with the weapons milestone); inf stays inactive so the
+// dispatch routes this entity to tick_player, not tick_infantry.
+void init_player(AiEntity &ae, const bms::Entity &e) {
+    (void)e;
+    ae.player.active = true;
+}
+
 } // namespace
 
 PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
@@ -240,7 +252,8 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable) {
         uint32_t idx = 0;
         for (const bms::Entity &e : vec) {
-            uint32_t origin = (static_cast<uint32_t>(kind) << 24) | (idx & 0xFFFFFF);
+            const uint32_t this_idx = idx;
+            uint32_t origin = (static_cast<uint32_t>(kind) << 24) | (this_idx & 0xFFFFFF);
             ++idx;
             Entity seed = make_seed(e, kind, static_cast<uint16_t>(e.id), origin);
             EntityHandle h = world.registry.spawn(pool_for_kind(kind), seed);
@@ -254,9 +267,18 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
                 AiEntity &ae = *ai.at(ai_idx);
                 init_brain(ae, e, opts, ai);
                 if (kind == EntityKind::Organic) {
-                    // Soldiers run the infantry motor, not the vehicle SM.
-                    // [orig: g_EntityClassPhysicsTable "org1" -> Entity_UpdateInfantryAI]
-                    init_infantry(ae, e);
+                    if (opts.local_player_organic_index >= 0 &&
+                        static_cast<int>(this_idx) == opts.local_player_organic_index) {
+                        // This organic is the local human player (entity class org2, the
+                        // input-driven motor) rather than an AI soldier (org1).
+                        // [orig: items.def move_function org2 -> Entity_UpdateInfantryPhysics]
+                        init_player(ae, e);
+                        ai.set_local_player(ai_idx);
+                    } else {
+                        // AI soldiers run the infantry motor (org1), not the vehicle SM.
+                        // [orig: g_EntityClassPhysicsTable "org1" -> Entity_UpdateInfantryAI]
+                        init_infantry(ae, e);
+                    }
                 }
                 ae.net_id = seed.net_id;
                 ae.relmat_id = seed.net_id; // provisional relation-matrix id (net layer = later)

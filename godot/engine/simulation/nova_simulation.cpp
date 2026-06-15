@@ -219,6 +219,10 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_hidden", "index"), &NovaSimulation::get_entity_hidden);
 	ClassDB::bind_method(D_METHOD("get_present_snapshot"), &NovaSimulation::get_present_snapshot);
 	ClassDB::bind_method(D_METHOD("get_present_stride"), &NovaSimulation::get_present_stride);
+	ClassDB::bind_method(D_METHOD("set_player_input", "cmd"), &NovaSimulation::set_player_input);
+	ClassDB::bind_method(D_METHOD("designate_local_player", "index"), &NovaSimulation::designate_local_player);
+	ClassDB::bind_method(D_METHOD("get_local_player_index"), &NovaSimulation::get_local_player_index);
+	ClassDB::bind_method(D_METHOD("get_player_camera"), &NovaSimulation::get_player_camera);
 	ClassDB::bind_method(D_METHOD("set_terrain_height_field", "terrain"), &NovaSimulation::set_terrain_height_field);
 	ClassDB::bind_method(D_METHOD("set_infantry_anim_map", "resource_root", "adm_name"), &NovaSimulation::set_infantry_anim_map);
 	ClassDB::bind_method(D_METHOD("get_infantry_clip_count"), &NovaSimulation::get_infantry_clip_count);
@@ -560,6 +564,61 @@ float NovaSimulation::get_entity_yaw_deg(int p_index) const {
 	AiEntity *e = ai_->at(p_index);
 	if (!e) return 0.0f;
 	return static_cast<float>(90.0 - static_cast<double>(e->heading) / kBamPerDegree);
+}
+
+// --- Local player (org2) drive + readback ---------------------------------
+void NovaSimulation::set_player_input(const Dictionary &p_cmd) {
+	if (!ai_) return;
+	opennova::world::PlayerInputCommand cmd;
+	cmd.move_dir = static_cast<int>(static_cast<int64_t>(p_cmd.get("move_dir", 0)));
+	cmd.is_moving = static_cast<bool>(p_cmd.get("is_moving", false));
+	cmd.crouch = static_cast<bool>(p_cmd.get("crouch", false));
+	cmd.prone = static_cast<bool>(p_cmd.get("prone", false));
+	cmd.fire = static_cast<bool>(p_cmd.get("fire", false));
+	cmd.aim = static_cast<bool>(p_cmd.get("aim", false));
+	cmd.jump = static_cast<bool>(p_cmd.get("jump", false));
+	cmd.use = static_cast<bool>(p_cmd.get("use", false));
+	cmd.reload = static_cast<bool>(p_cmd.get("reload", false));
+	cmd.lean_left = static_cast<bool>(p_cmd.get("lean_left", false));
+	cmd.lean_right = static_cast<bool>(p_cmd.get("lean_right", false));
+	cmd.look_yaw_delta = static_cast<int32_t>(static_cast<int64_t>(p_cmd.get("look_yaw_delta", 0)));
+	cmd.look_pitch_delta = static_cast<int32_t>(static_cast<int64_t>(p_cmd.get("look_pitch_delta", 0)));
+	ai_->set_player_input(cmd);
+}
+
+bool NovaSimulation::designate_local_player(int p_index) {
+	if (!ai_) return false;
+	AiEntity *e = ai_->at(p_index);
+	if (!e) return false;
+	e->inf.active = false;   // stop the AI motor for this entity
+	e->player.active = true; // input-driven org2 player motor
+	ai_->set_local_player(p_index);
+	return true;
+}
+
+int NovaSimulation::get_local_player_index() const {
+	return ai_ ? ai_->local_player_index() : -1;
+}
+
+PackedFloat32Array NovaSimulation::get_player_camera() const {
+	PackedFloat32Array out;
+	if (!ai_) return out;
+	const int idx = ai_->local_player_index();
+	if (idx < 0) return out;
+	AiEntity *e = ai_->at(idx);
+	if (!e) return out;
+	const opennova::world::PlayerCamera &cam = e->player.camera;
+	out.resize(6);
+	// Eye: engine (x, y, z) 16.16 -> Godot (x, z, -y) world units (same remap as positions).
+	out[0] = static_cast<float>(cam.eye[0] / kFixed16);
+	out[1] = static_cast<float>(cam.eye[2] / kFixed16);
+	out[2] = static_cast<float>(-cam.eye[1] / kFixed16);
+	// Angles: mission degrees (yaw = 90 - engine heading, like get_entity_yaw_deg; pitch/roll
+	// direct). The host builds the basis via MissionObjectPlacer.
+	out[3] = static_cast<float>(90.0 - static_cast<double>(cam.view_yaw) / kBamPerDegree);
+	out[4] = static_cast<float>(static_cast<double>(cam.view_pitch) / kBamPerDegree);
+	out[5] = static_cast<float>(static_cast<double>(cam.view_roll) / kBamPerDegree);
+	return out;
 }
 
 int NovaSimulation::get_entity_state(int p_index) const {

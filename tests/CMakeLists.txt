@@ -739,6 +739,31 @@ target_include_directories(infantry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(infantry_test PRIVATE cxx_std_17)
 add_test(NAME infantry COMMAND infantry_test)
 
+# Local-player motor (Entity_UpdateInfantryPhysics @0x4b40e0, the org2 input-driven twin
+# of the AI motor): M1 dispatch + input model + look apply (yaw unclamped, pitch clamp
+# +/-80/+/-40 crouched). Later milestones extend it (locomotion/gravity/ground, recoil).
+add_executable(player_input_test world/player_input_test.cpp)
+target_link_libraries(player_input_test PRIVATE opennova_world)
+target_include_directories(player_input_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(player_input_test PRIVATE cxx_std_17)
+add_test(NAME player_input COMMAND player_input_test)
+
+# Local-player motor M2: root-motion locomotion (8-way world integration), gravity -208/x1
+# to terminal -32768, ground settle (no +0x50000 mover offset), fall damage.
+add_executable(player_motor_test world/player_motor_test.cpp)
+target_link_libraries(player_motor_test PRIVATE opennova_world)
+target_include_directories(player_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(player_motor_test PRIVATE cxx_std_17)
+add_test(NAME player_motor COMMAND player_motor_test)
+
+# Local-player M3/M4: stance derivation (stand/crouch/prone) + first-person camera
+# composition (foot eye-height; view angles from the body euler).
+add_executable(player_camera_test world/player_camera_test.cpp)
+target_link_libraries(player_camera_test PRIVATE opennova_world)
+target_include_directories(player_camera_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(player_camera_test PRIVATE cxx_std_17)
+add_test(NAME player_camera COMMAND player_camera_test)
+
 # Root-motion track grill vs real JO clips (AnimMap_UpdateEntity @0x40b5f0): the .bad
 # events array is the per-frame root record; rec[3] = cumulative forward distance whose
 # 16.16 delta drives the infantry motor. Asset-gated: absent files skip (CI-safe).

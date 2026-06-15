@@ -33,6 +33,18 @@ Records `{char name[8]; void (*fn)(Entity*)}`, the **per-frame motor** per class
 | `cveh/ctank/cbike/cbot/catv/ctrn` | `Entity_DispatchPhysics_* @ 0x48ef90..0x48f060` | each tests `def+0x8DC`, routes into the shared `Entity_UpdateVehiclePhysics` family (slope cos², gravity −324/tick, surface-normal steering, pool collision) |
 | projectiles/effects | shell/missile/flare physics | out of scope |
 
+> The **local human player** on foot runs the **sibling organic motor** `org2 →
+> Entity_UpdateInfantryPhysics @ 0x4b40e0` (continuation `@ 0x4b434f`) — the
+> input-driven twin of this AI motor (`org1`). It shares this motor's
+> ground/collision/fall-damage helper (`Entity_ProcessCollisionAndPlatformPhysics
+> @ 0x4b2bd0`), entity layout, and root-motion locomotion; it differs in gravity
+> cadence (player `−208`/tick ×1 vs AI `−416`/2-ticks ×2, net-equal), the lack of the
+> `±69273360` turn clamp (player look is yaw-unclamped, pitch-clamped `±80°`/`±40°`
+> crouched in the input handler), and a player-only superstructure (mouse-look, sway,
+> recoil, FP camera, net prediction). `cbike → 0x483fe0` is a controllable *bike*, not
+> the player. Full grill: the sibling record
+> [player-controller-re.md](player-controller-re.md).
+
 ### 1.3 Consequence for OpenNova (the reframing verdict)
 Our `libs/world` AI port (24-row SM @ 0x815238, states 16–18, `AI_BeginUpdate @ 0x457b40`,
 `AI_UpdateWaypointMovement @ 0x457bd0`, targeting/combat P1/P2) is a **byte-exact port of the

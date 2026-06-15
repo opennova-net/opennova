@@ -9,6 +9,8 @@ extends Node3D
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
+const PlayerInputScript := preload("res://game/player_input.gd")
+const PlayerCameraScript := preload("res://game/player_camera.gd")
 
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
@@ -30,6 +32,12 @@ var _state: int = State.MENU
 var _host_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
 
+# Local-player first-person path. Activated on mission load when the sim exposes the player
+# API and the mission has an organic to control; otherwise the free-fly $Camera3D stays current.
+var _player_input          # PlayerInput node (the device reader), created in _ready
+var _player_cam: Camera3D  # PlayerCamera, created on first activation
+var _player_active := false
+
 
 func _ready() -> void:
 	if _world == null or _camera == null or _menu_host == null:
@@ -38,6 +46,10 @@ func _ready() -> void:
 	# host decides what it means).
 	if _camera.has_signal("escape_pressed") and not _camera.is_connected("escape_pressed", _on_camera_escape):
 		_camera.connect("escape_pressed", _on_camera_escape)
+	_player_input = PlayerInputScript.new()
+	_player_input.name = "PlayerInput"
+	add_child(_player_input)
+	_player_input.set_enabled(false)
 	var dir := ResourceDirSettings.get_resource_dir()
 	if dir.is_empty():
 		_request_resource_dir()
@@ -202,6 +214,44 @@ func _on_start_requested(bms_name: String) -> void:
 
 func _on_world_loaded() -> void:
 	_menu_host.enter_game_music()
+	_try_activate_player()
+
+
+# Designate the first organic as the local human player and switch to first-person. No-op
+# (the free-fly camera stays current) when the sim lacks the player API (e.g. an un-rebuilt
+# GDExtension) or the mission has no AI organic to control. [orig: the local player is a
+# pool-0 organic with the PLAYER flag, designated at connect / Player_InitLocalPlayer @0x4b1060.]
+func _try_activate_player() -> void:
+	var sim = _world.get_sim()
+	if sim == null or not sim.has_method("designate_local_player"):
+		return
+	if sim.get_entity_count() <= 0:
+		return
+	if not sim.designate_local_player(0):
+		return
+	_player_active = true
+	if _player_cam == null:
+		_player_cam = PlayerCameraScript.new()
+		_player_cam.name = "PlayerCamera"
+		add_child(_player_cam)
+	_player_cam.apply_from_sim(sim)
+	_player_cam.current = true
+	_player_input.reset()
+	_player_input.set_enabled(true)
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	print("MainGame: local player = organic 0 (first-person); mouse captured, Esc to release")
+
+
+func _deactivate_player() -> void:
+	if not _player_active:
+		return
+	_player_active = false
+	_player_input.set_enabled(false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	if _player_cam != null:
+		_player_cam.current = false
+	if _camera != null:
+		_camera.current = true
 
 
 func _on_world_load_failed(reason: String) -> void:
@@ -220,6 +270,9 @@ func _on_camera_escape() -> void:
 
 func _pause() -> void:
 	_state = State.PAUSED
+	if _player_active:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		_player_input.set_enabled(false)
 	_menu_host.open_ingame_menu()  # game.mnu overlay over the kept-loaded world
 	_menu_host.show_menu()
 
@@ -229,9 +282,14 @@ func _on_resume() -> void:
 		return
 	_menu_host.hide_menu()
 	_state = State.WORLD
+	if _player_active:
+		_player_input.reset()  # the paused interval contributes no accumulated look
+		_player_input.set_enabled(true)
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func _on_return_to_menu() -> void:
+	_deactivate_player()
 	_world.unload()
 	if _root != null:
 		_enter_menu(_root.get_root_dir())
@@ -258,4 +316,12 @@ func _set_hud_visible(v: bool) -> void:
 # which stays in MENU) keep dispatching foliage.
 func _process(_delta: float) -> void:
 	if _state != State.PAUSED and _world.is_loaded():
-		_world.tick(_camera.global_position)
+		var sim = _world.get_sim()
+		# Drain the local player's input into the sim BEFORE it advances this frame.
+		if _player_active and sim != null:
+			_player_input.drain_into(sim)
+		var cull_pos: Vector3 = _player_cam.global_position if (_player_active and _player_cam != null) else _camera.global_position
+		_world.tick(cull_pos)
+		# Drive the first-person camera from the post-tick eye transform.
+		if _player_active and _player_cam != null and sim != null:
+			_player_cam.apply_from_sim(sim)

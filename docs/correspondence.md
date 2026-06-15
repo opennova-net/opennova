@@ -180,6 +180,48 @@ Newly-grilled originals (join key = addr):
 
 Crypto/TLV/envelope (NW-C1..C4, CRC32, NAPI TLV/envelope) re-confirmed byte-exact — no change.
 
+## 5.6 Local-player controller (research grill, 2026-06-14; motor identity corrected 2026-06-14)
+
+Read-only grill; **no reimplementation yet** — these are the originals a faithful
+port will translate, keyed by address. Behavior, layouts, and the `D-PLR-1..10`
+deferral ledger live in [player-controller-re.md](world/player-controller-re.md);
+not repeated here. Verdict = how well **witnessed** (witnessed / partial /
+unwitnessed), per the R-question grill.
+
+> **Correction (2026-06-14).** The first pass keyed the player motor to
+> `cbike` / `0x483fe0`. That is the **bike / light-vehicle** motor; the on-foot
+> player runs **`org2 → Entity_UpdateInfantryPhysics @ 0x4b40e0`** (sibling of the
+> AI motor `org1 @ 0x4b9910`). Rows below are corrected.
+
+| original | addr | role | R | verdict |
+|---|---|---|---|---|
+| `Entity_UpdateInfantryPhysics` (org2) | `0x4b40e0` | **the on-foot local-player motor** (root-motion locomotion, gravity `−208`/×1, shared ground `0x4b2bd0`); sibling of AI `org1 @ 0x4b9910`; continuation `0x4b434f` | R1/R2/R3 | witnessed (core + player superstructure) |
+| `Entity_ProcessCollisionAndPlatformPhysics` | `0x4b2bd0` | ground/water/platform resolver + settle + airborne + fall damage — **shared by org2 and the AI motor** (3 org2 call sites; our `infantry.cpp` cite is correct) | R2 | witnessed |
+| `Math_FloatTranslationToFixedPoint16` | `0x4ad480` | extracts the locomotion clip's root-motion translation (mat[14]→X, −mat[12]→Y, mat[13]→Z, 16.16) — the per-tick body displacement | R2 | witnessed |
+| `Camera_ComputeThirdPersonView` | `0x437d10` | seeds the view globals from entity pos `+0x04/+0x08/+0x0C` & euler `+0x10/+0x14/+0x18`; eye-height `+0x10000` | R8 | witnessed |
+| `Input_HandleActionBinding_0` | `0x4e0420` | **look application** (mouse delta → yaw/pitch); view-pitch clamp `±80°` standing / `±40°` crouched; no on-foot yaw clamp | D-PLR-5 | witnessed |
+| `Entity_UpdatePlayerInfantryMovement` | `0x483fe0` | **cbike bike motor (NOT the player)** — 8-way switch, forward accumulator, gravity `0x4928b0`, ground `0x479600`; out of scope | — | witnessed (re-attributed: bike) |
+| `Entity_DispatchPhysics_cbike` | `0x48eff0` | `cbike` class trampoline; sole xref tail-calling the bike motor 0x483fe0 | R1 | witnessed |
+| `EntityDef_LookupPhysicsCallback` | `0x4a9240` | stricmp class tag → physics cb at `ItemDef+344` | R1 | witnessed |
+| `g_EntityClassPhysicsTable` | `0x82abc8` | class-name → physics cb; 34 rows, 12B stride `{name[8]; cb}` (count `dword_82AD60`@`0x82ad60`=`0x22`); `org2→0x4b40e0` player, `org1→0x4b9910` AI, `cbike→0x48eff0` bike | R1 | witnessed |
+| `Entity_UpdateAllEntities` | `0x4c2100` | per-tick driver; calls `(*(entity+0x1C4))(entity)` per pool-0 entity (player = org2) | R1 | witnessed |
+| `Entity_DispatchPhysicsUpdate` (`catv`) | `0x48f010` | ATV handler — NOT the player path (R1 refuted-as-stated) | R1 | witnessed (refutes hypothesis) |
+| `Player_PackInputStateToEntity` | `0x4df450` | discrete + analog input → entity `+0x12C` flags / `+0x130..0x133` axes | R5/R8 | witnessed |
+| org2 inline gravity | `0x4b7ac8`/`0x4b7c77`/`0x4b7ce0` | `vel_z(+0xA0) += −208`/tick, platform/water gate `0x108000`, terminal `−32768`, `pos_z += vel_z×1`; net-equal to the AI `−416`/×2 (NOT `0x4928b0`) | R3/D-PLR-4 | witnessed |
+| `Player_UpdateFirstPersonCamera` | `0x4dd380` | FP eye transform (bone offset, velocity lead, prone drop [vestigial-ratio, effectively constant], ADS override) | R8 | witnessed |
+| `Entity_GetCameraTransform` | `0x4b8c00` | per-entity camera query; pulls the FP cam fn | R8 | witnessed |
+| `Player_ResetCameraAndMovementState` | `0x4de1f0` | clears camera/movement smoothing block | R8 | witnessed |
+| `NapiNPServerMsg_HandleStanceChange` | `0x501c60` | authority stance message (codes 169/170/172) → `+0x12C` bits 8/9 | R8 | partial (code→bit pairing to re-verify) |
+| `AnimMap_FindSlotByName` | `0x40cfa0` | anim name → slot (bound `0xFC`=252) | R9 | witnessed |
+| `off_8135F0` | `0x8135f0` | 252-entry shared anim clip-name table (`+"EOF"`+NULL) | R9 | witnessed (R9 confirmed) |
+| `Entity_ComputeAnimSlotIndex` | `0x43a690` | per-tick death-slot selector (only runtime arithmetic index) | R9 | witnessed |
+| `Player_InitLocalPlayer` | `0x4b1060` | offline local-player designation + default `WPN_M4AUTO` seed | R5 | partial (in-session site unlocated) |
+| `g_local_player_entity` | `0xb75fc8` | local human player `GamePlayerEntity*` | R5 | witnessed |
+| `NapiNPClientMsg_HandleWeaponLoadoutSync` | `0x4290e0` | msg 0x5A: avatar class `+0x294` + loadout → `weaponSlotArrayBase`@`0xb75fd4` | R5 | witnessed |
+| `Player_SelectWeaponSlot` | `0x4dd680` | writes `EquippedSlot`@`+0x118` from cached slot `+0x308` | R5 | witnessed |
+| `AmmoDef_ParseProperty` (`recoil`) | `0x40a2d0` | 3 recoil bytes → def `+0xE3/+0xE4/+0xE5` | R10 | partial (application site unwitnessed) |
+| `Input_HandleActionBinding_0` (intent bits) | `0x4e0420` | action id → `dword_B3B728` intent bits (movement-bit map still partial) | — | partial |
+
 ## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 
 `UI_DispatchScreenEvent @ 0x54e6a0`, `UI_ShowPreGameMenuByState @ 0x568d10`,

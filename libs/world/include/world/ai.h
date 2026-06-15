@@ -32,6 +32,7 @@
 #include "terrain/height_field.h"
 #include "world/entity.h"
 #include "world/infantry.h"
+#include "world/player.h"
 #include "world/world.h"
 
 namespace opennova::world {
@@ -251,6 +252,11 @@ struct AiEntity {
     // by AiSystem::tick_infantry [orig: Entity_UpdateInfantryAI @0x4b9910] instead of the
     // vehicle state machine; promote routes BMS organics here. See world/infantry.h.
     InfantryState inf;
+
+    // Local-player motor state (org2-class on-foot player). When player.active the entity
+    // is driven by AiSystem::tick_player [orig: Entity_UpdateInfantryPhysics @0x4b40e0] —
+    // the input-driven twin of the AI motor above. See world/player.h.
+    PlayerState player;
 };
 
 // A resolved AI target — the fields the engagement bookkeeping reads off the target entity.
@@ -567,12 +573,38 @@ public:
     // Slope sampling + slide [orig: every-8 block, 4 probes around the entity].
     void infantry_slope_slide(AiEntity &e);
 
+    // ---- Local-player motor [orig: Entity_UpdateInfantryPhysics @0x4b40e0] ----
+    // Per-tick update for player.active entities (the input-driven org2 twin of the AI
+    // motor). Built incrementally: M1 = look apply (yaw + pitch clamp); M2 = root-motion
+    // locomotion + gravity/ground; M5 = recoil/aim. Reuses the infantry ground/root-motion
+    // helpers; the command is PlayerState::input (latched by the host each tick).
+    void tick_player(AiEntity &e, World &world, uint32_t logic_tick);
+    // Map the resolved input to a locomotion anim state, and (M2 approximation, D-PLR-11)
+    // a body-relative move-direction offset (BAM) the integrator rotates the forward clip's
+    // root motion by — until the per-direction .adm clips are wired. Returns the anim state.
+    int player_select_anim(const PlayerInputCommand &cmd, int32_t &move_offset) const;
+    // Compose the first-person eye transform (engine frame) from the entity pose.
+    // [orig: Camera_ComputeThirdPersonView @0x437d10 (mode-0 foot eye height) +
+    // Player_UpdateFirstPersonCamera @0x4dd380.] M4 ports the foot eye-height stage; the
+    // weapon-bone offset / velocity lead / prone drop (stage 2, need the equipped weapon def)
+    // are a refinement. Filled into PlayerState::camera at the tail of tick_player.
+    PlayerCamera compute_player_camera(const AiEntity &e) const;
+
+    // Designate / address the local player (the org2 entity the host drives). The original
+    // marks it with the PLAYER flag (entity+0x24 & 0x100) + g_local_player_entity identity
+    // [orig: Player_FindLocalPlayerEntity @0x4e0090]; we track its AI index. -1 = none.
+    void set_local_player(int ai_index) { local_player_index_ = ai_index; }
+    int local_player_index() const { return local_player_index_; }
+    // Latch the resolved input on the local player for the next tick. No-op if none.
+    void set_player_input(const PlayerInputCommand &cmd);
+
     const StateRow &row(int32_t state) const;
 
 private:
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)
     bool baseline_captured_ = false;
+    int local_player_index_ = -1;          // AI index of the org2 local player, or -1
 };
 
 } // namespace opennova::world

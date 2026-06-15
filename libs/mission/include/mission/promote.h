@@ -39,6 +39,13 @@ struct PromoteOptions {
     // spawn. With this false, entities stay in state 0 (faithful init, no movement).
     bool patrol_on_spawn = true;
 
+    // Designate the Nth organic (0-based, file order) as the local human player — entity
+    // class org2, driven by AiSystem::tick_player — instead of an AI soldier (org1). -1 =
+    // none (all organics are AI, the current/default behavior). [orig: the player soldier's
+    // items.def declares move_function org2 vs org1 for AI bots; runtime designation is by
+    // the PLAYER flag + g_local_player_entity @0x4e0090.]
+    int local_player_organic_index = -1;
+
     size_t actor_pool_capacity = 1024;
     size_t marker_pool_capacity = 4096;
 };

@@ -4,6 +4,7 @@ add_library(opennova_world STATIC
     src/ai.cpp
     src/infantry.cpp
     src/infantry_tables.cpp
+    src/player.cpp
 )
 
 target_include_directories(opennova_world

@@ -227,6 +227,22 @@ public:
 	PackedFloat32Array get_present_snapshot() const;
 	int get_present_stride() const { return PF_STRIDE; }
 
+	// --- Local player (org2) drive + readback -----------------------------
+	// Latch the resolved input for the next tick. Keys mirror PlayerInputCommand:
+	// move_dir(int), is_moving/crouch/prone/fire/aim/jump/use/reload/lean_left/lean_right
+	// (bool), look_yaw_delta/look_pitch_delta (int, pre-scaled BAM). [orig: the per-tick
+	// input pack Player_PackInputStateToEntity @0x4df450 + the look apply @0x4e0420.]
+	void set_player_input(const Dictionary &p_cmd);
+	// Designate the entity at p_index (a get_entity_* index) as the local human player:
+	// flips it from the AI motor (org1) to the input-driven player motor (org2). Returns
+	// false if the index is invalid. [orig: the PLAYER flag + g_local_player_entity @0x4e0090.]
+	bool designate_local_player(int p_index);
+	int get_local_player_index() const; // AI index of the local player, -1 = none (free-fly)
+	// First-person eye transform: [eye_x, eye_y, eye_z (Godot world units), yaw_deg,
+	// pitch_deg, roll_deg (mission degrees)]; EMPTY when no local player. Same conventions as
+	// the present snapshot, so the host builds the basis via MissionObjectPlacer.
+	PackedFloat32Array get_player_camera() const;
+
 	// Wire the terrain the AI grounds on (the host's loaded NovaTerrainData). Copies the depth
 	// buffer + sector layout so the portable height field outlives the source and survives reload.
 	// Null/unloaded clears grounding (entities keep their authored Z). The editor preview and the

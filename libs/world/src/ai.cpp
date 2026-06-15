@@ -548,6 +548,13 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             advance_part_anim(e);
             continue;
         }
+        if (e.player.active) {
+            // org2-class local player: the input-driven infantry motor replaces the
+            // vehicle SM + kinematic locomotion for this entity. [orig:
+            // g_EntityClassPhysicsTable row "org2" -> Entity_UpdateInfantryPhysics @0x4b40e0]
+            tick_player(e, world, ctx.logic_tick);
+            continue;
+        }
         if (e.inf.active) {
             // org1-class soldier: the infantry motor replaces the vehicle SM + kinematic
             // locomotion for this entity. [orig: g_EntityClassPhysicsTable row "org1" ->
