@@ -148,6 +148,25 @@ static void test_paren_less_and_effects() {
     CHECK(w.effects.count("flash") == 1);
 }
 
+// WAC scripted voice: wave/pwave route to a "dialog_wav" effect carrying the
+// filename so the host can play it [orig: wave/pwave @0x4ED610]. Without the
+// explicit handler they fall through to the default case as an unrouted "wave".
+static void test_wac_wave_emits_dialog_wav() {
+    World w = make_world();
+    WacSystem sys;
+    CompileEnv env;
+    sys.set_program(compile_source("if never then wave(brief1) endif\n", env));
+    w.add_system(&sys);
+    w.load_systems();
+    run(w, sys, 1);
+    CHECK(w.effects.count("dialog_wav") == 1);
+    CHECK(w.effects.count("wave") == 0); // not the unrouted default-case kind
+    bool carried_filename = false;
+    for (const Effect &e : w.effects.entries())
+        if (e.kind == "dialog_wav" && e.str == "brief1") carried_filename = true;
+    CHECK(carried_filename);
+}
+
 static void test_authority_gate() {
     World w = make_world();
     WacSystem sys;

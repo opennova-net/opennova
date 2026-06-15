@@ -156,6 +156,30 @@ and a per-frame updater plays the queue **one audio channel at a time**:
 |---|---|---|---|
 | D-SND-4 | `NovaMissionAudio.play_dialog` **enqueues** the resolved line set-name(s) and plays them one at a time, starting the next on the previous voice's `finished` (`_dialog_queue` + `spawn_oneshot_2d`) | one dialog channel, `dword_A895FC`-gated, advanced by `Dialog_UpdatePlayback` | host-side serialization that reproduces the observable behavior (no dialog overlap). The prior host played every drained `dialog` effect immediately and non-blocking, so a mission's PreMission/early `PlayWavList` actions blared simultaneously at t=0. We do not model the 16-active-slot table or the per-line countdown timing (host presents on stream `finished`); the *id -> "dlg%03d" -> .DBF group lines* resolution matches the engine's `"dlg%03i"` path. |
 
+## WAC scripted voice — `wave` / `pwave` (grilled 2026-06-15)
+
+A WAC mission script triggers voice/wav lines separately from the BMS `PlayWavList`
+dialog system. The `wave` (op `0x0a`) and `pwave` (op `0x12`) commands both target
+`sub_4ED610`:
+
+- guards on `g_local_player_entity` (no-op without a local player, like
+  `Dialog_PlayByName`);
+- `AudioChannel_ResetByHandle(dword_C6EC30)` — **resets the single scripted-voice
+  channel first**, so a new `wave` *interrupts* the previous one (it is NOT a queue);
+- `Audio_LoadWavFileFromArchive @0x766480` loads the named `.wav` from the archive (RIFF
+  fmt/data, 8-bit→signed / 16-bit / IMA-ADPCM, `'AOA1'`), then plays it with pan/volume.
+
+So `wave` is a **separate interrupting channel** (`dword_C6EC30`) from the `.DBF` dialog
+channel (`dword_A895FC`); the two can sound at once and `wave` does not serialize with
+`PlayWavList`. `pwave` is the network-broadcast twin (same handler). The filename is a
+direct `.wav` name, not a `.DBF` dialog id.
+
+### Divergence
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-SND-5 | WAC `wave`/`pwave` emit a `"dialog_wav"` effect carrying the filename; the host (`NovaMissionAudio.play_dialog_wav` / `play_wac_wave`) reads the wav through the VFS, decodes via `NovaWavLoader`, and plays it on a single `_wac_voice` `AudioStreamPlayer` that `play()` restarts (interrupt-on-new) | `sub_4ED610` resets `dword_C6EC30` then plays the loaded wav | host-side reproduction of the single interrupting voice channel. Previously WAC `wave`/`pwave` fell through `vm.cpp`'s default case to an unrouted `kind="wave"` effect and never played. Scope: `wave`/`pwave`; positional `SSNwave`/`SSNradio` (voice at an entity) remain a tracked follow-up. |
+
 ## items.def marker sounds
 
 `ItemDef_ParseProperty @ 0x49eb00` parses the marker-item sound keys: `soundloop_1..7`

@@ -51,6 +51,12 @@ var _stats: Dictionary = {}
 # play them one after another instead of firing every PlayWavList at once.
 var _dialog_queue: Array = []  # pending set names (resolved group lines), FIFO
 var _dialog_voice: AudioStreamPlayer = null  # currently-playing dialog voice, or null
+# WAC wave/pwave plays a .wav by filename on a single dedicated channel that the
+# engine resets before each play [orig: wave @0x4ed610 resets dword_C6EC30], so a
+# new scripted voice interrupts the previous one. This is a separate channel from
+# the .DBF dialog queue (they can overlap), not serialized with it.
+var _wac_voice: AudioStreamPlayer = null
+var _wac_wav_cache: Dictionary = {}  # filename(lower) -> AudioStreamWAV (or null)
 
 
 func _init(resource_root, item_db) -> void:
@@ -194,6 +200,45 @@ func _on_dialog_finished() -> void:
 	_pump_dialog_queue()
 
 
+## Play a WAC-scripted voice .wav by filename [orig: wave/pwave @0x4ed610]. Loads it
+## from the VFS and plays it non-positional on a single dedicated channel that
+## REPLACES any currently-playing wave (the engine resets the channel before each
+## play), so a new scripted line interrupts the previous one. Independent of the
+## .DBF dialog queue (they may overlap). Returns true if the wav resolved and played.
+func play_wac_wave(filename: String) -> bool:
+	if _audio_root == null or _resource_root == null or filename.is_empty():
+		return false
+	var stream := _resolve_wav(filename)
+	if stream == null:
+		push_warning("NovaMissionAudio: WAC wave '%s' did not resolve" % filename)
+		return false
+	if _wac_voice == null or not is_instance_valid(_wac_voice):
+		_wac_voice = AudioStreamPlayer.new()
+		if AudioServer.get_bus_index(VOICE_BUS) >= 0:
+			_wac_voice.bus = VOICE_BUS
+		_audio_root.add_child(_wac_voice)
+	_wac_voice.stream = stream
+	_wac_voice.play()  # play() on an active player restarts it -> interrupts the previous wave
+	return true
+
+
+# Resolve + cache a .wav by filename through the VFS (tolerates a missing .wav
+# extension). Returns the decoded AudioStreamWAV, or null.
+func _resolve_wav(filename: String) -> AudioStreamWAV:
+	var key := filename.to_lower()
+	if _wac_wav_cache.has(key):
+		return _wac_wav_cache[key]
+	# Explicit type: _resource_root is untyped, so := cannot infer read_file's return.
+	var bytes: PackedByteArray = _resource_root.read_file(filename)
+	if bytes.is_empty() and not key.ends_with(".wav"):
+		bytes = _resource_root.read_file(filename + ".wav")
+	var stream: AudioStreamWAV = null
+	if not bytes.is_empty():
+		stream = NovaWavLoader.from_bytes(bytes)
+	_wac_wav_cache[key] = stream
+	return stream
+
+
 ## Pause ambient voices outside the cull radius around the listener; resume inside.
 ## Godot's max_distance already silences far voices; this also frees their mixing.
 func tick(camera_pos: Vector3) -> void:
@@ -209,10 +254,12 @@ func tick(camera_pos: Vector3) -> void:
 
 
 func teardown() -> void:
-	# Dropping _audio_root frees the dialog voice node too; just drop our refs so a
-	# late `finished` after teardown can't pump a freed queue.
+	# Dropping _audio_root frees the dialog + wac voice nodes too; just drop our refs
+	# so a late `finished` after teardown can't pump a freed queue.
 	_dialog_queue.clear()
 	_dialog_voice = null
+	_wac_voice = null
+	_wac_wav_cache.clear()
 	if _audio_root != null and is_instance_valid(_audio_root):
 		_audio_root.queue_free()
 	_audio_root = null
