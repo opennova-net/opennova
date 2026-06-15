@@ -469,6 +469,10 @@ public:
     GroundClearance ground_clearance{};
     // [orig: the +0x50000 the movers add after grounding — AI_ProcessMovementStep @0x466db0
     // brain[131] = ground + 0x50000; AI_UpdateMovementTarget @0x460e40 adds def heightOffset.]
+    // NOTE: the INFANTRY motor (tick_infantry) no longer adds this — our soldier .3di models
+    // import feet-origin (correct static placement is the witness), so the original's stand
+    // clearance over-lifted them ~1 body (D-INF). Still used by the vehicle/SM path
+    // (apply_ground_clamp); revisit if vehicles float too.
     int32_t ground_stand_offset = 0x50000; // 5.0 in 16.16
 
     // ---- Infantry motor (org1 soldiers; docs/world/world-wac-ai-re.md §3) ----

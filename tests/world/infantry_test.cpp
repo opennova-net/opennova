@@ -40,7 +40,9 @@ constexpr int32_t fx(double units) { return static_cast<int32_t>(units * 65536.0
 // Constants under test (mirrors of the cited values in infantry.cpp).
 constexpr int32_t kClamp = 69273360;       // body turn clamp / tick
 constexpr int32_t kTerminal = -32768;      // terminal fall velocity
-constexpr int32_t kFloorStand = 0x50000;   // AiSystem::ground_stand_offset default
+constexpr int32_t kFloorStand = 0;         // infantry grounds feet-on-terrain; the original's
+                                           // +0x50000 mover stand offset is omitted for our
+                                           // feet-origin soldier models (infantry.cpp / D-INF)
 
 // A 512x512 height field with a caller-supplied raw16 column function (uniform in the
 // second axis where not stated). Same wiring as tests/world/ground_height_test.cpp.

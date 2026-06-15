@@ -267,6 +267,16 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     zeroes on contact; the airborne anim overlay waits on the entity+36 flags.
   - **D-INF-4** computed sin/cos tables (trunc(f(idx)·2^22)) for the runtime-built originals.
   - **D-INF-5** idle look-at system + its spotting side effects (§4.13) — rides the combat pass.
+  - **D-INF-6** the infantry grounding OMITS the `+0x50000` mover stand clearance: it grounds the
+    entity Z to the resampled terrain height (`floor_z = inf.ground_cache`), not `ground + 0x50000`
+    [orig: `AI_ProcessMovementStep @0x466db0` `brain[131] = ground + 0x50000`]. Our soldier `.3di`
+    models import **feet-origin** (the witness: statically-placed soldiers render correct, and the
+    static placer puts the model origin at its stored position verbatim — `[orig: sub_401A90]`),
+    whereas the original pairs the stand clearance with origin-above-feet models, so adding it
+    floated soldiers ~1 body. The player motor (player-controller-re.md, D-PLR-2) grounds the same
+    way. OPEN (IDA follow-up): confirm whether `brain[131] = ground + 0x50000` is the entity's
+    actual `pos[2]` or only the mover's look-ahead target Z (→ then this is a mis-port correction,
+    not a divergence). The vehicle/SM path (`apply_ground_clamp`) still adds the offset.
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
 - **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):

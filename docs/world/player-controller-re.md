@@ -420,6 +420,16 @@ for the local player) — structurally identical to the AI motor's `0x4bf7f2`
 block. There is **no** AI-style fixed `+0x50000` stand offset inside org2; the
 settle is penetration/force-based via the shared helper.
 
+**Our port grounds feet-on-terrain (no `+0x50000`) for BOTH the player and the AI
+infantry motor.** Our soldier `.3di` models import feet-origin (the witness:
+statically-placed soldiers render correct), so the original's `+0x50000` mover
+stand clearance — which it pairs with origin-above-feet models — floated our
+soldiers ~1 body when applied to the rendered entity Z. Our infantry grounding now
+omits it (`tick_infantry`, `floor_z = inf.ground_cache`; see world-wac-ai-re.md
+**D-INF-6**), matching this player path. OPEN (IDA follow-up): whether
+`brain[131] = ground + 0x50000` is the entity's actual `pos[2]` or only the mover's
+look-ahead target Z (→ mis-port correction rather than a divergence).
+
 **Retraction (V-F3).** The wave-2 V-F3 note claimed our `libs/world/infantry.cpp`
 "mis-cites `0x4b2bd0` as the player path" and that the player uses `0x479600` —
 that conclusion came from the cbike misID; V-F3 examined the **bike**. The real

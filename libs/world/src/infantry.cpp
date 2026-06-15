@@ -423,7 +423,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
         e.pos[2] += 2 * inf.vel[2];
         if (terrain != nullptr && inf.ground_cache_valid && inf.ground_cache != INT32_MIN) {
-            const int32_t floor_z = inf.ground_cache + ground_stand_offset;
+            // Ground feet-on-terrain. The original's +0x50000 mover stand clearance
+            // [orig: AI_ProcessMovementStep @0x466db0 brain[131] = ground + 0x50000] is
+            // OMITTED here: our soldier .3di models import feet-origin (proven by correct
+            // static placement), whereas the original pairs that offset with origin-above-feet
+            // models, so adding it floated soldiers ~1 body. The player motor grounds the same
+            // way (player.cpp). See docs/world/world-wac-ai-re.md (D-INF) — the IDA follow-up
+            // confirms whether brain[131] is the entity Z or just the mover target.
+            const int32_t floor_z = inf.ground_cache;
             if (e.pos[2] <= floor_z) {
                 // Landing. Fall damage [orig: dump 5152 — vel_z <= -1057*scale ->
                 // health -= (excess) >> 4]; horizontal slide stops on contact (D-INF-3).
