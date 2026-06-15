@@ -73,8 +73,12 @@ func test_startup_drives_music_var() -> void:
 		pass_test("temp resource root unavailable")
 		_cleanup(dir)
 		return
-	# jo_main STARTUP declares MUSICVAR 1; the menu pushes it into the director var.
-	assert_eq(host.get_music_director().get_var(0), 1, "STARTUP MUSICVAR -> director var 0")
+	# jo_main STARTUP declares MUSICVAR 1; the menu pushes it into the menumus
+	# discriminator var. menumus reads var INDEX 2 (golden test); at index 0 the
+	# MUSICVAR was inert and the menu played the wrong section. Track the shell's
+	# constant so this stays in sync.
+	var idx: int = MenuHostScript.MUSIC_VAR_INDEX
+	assert_eq(host.get_music_director().get_var(idx), 1, "STARTUP MUSICVAR -> director var %d" % idx)
 	_cleanup(dir)
 
 

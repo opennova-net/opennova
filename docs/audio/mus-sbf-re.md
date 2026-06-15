@@ -49,6 +49,28 @@ still playing (`_active_play->is_playing()`), reproducing the
 rather than a byte counter (host-idiomatic), and stream one music context at a time as the
 original does.
 
+## Music state variable selection — the host sets the section discriminator (grilled 2026-06-15)
+
+The MUS scripts are var-driven state machines: a "discriminator" global selects which
+section/track loop plays, and its var **index is per-script** (golden test
+`tests/mus/mus_vm_test.cpp` `test_vm_jo_behavioral`):
+- **gamemus → var index 1** (`var1=0` → `Multiplayerstart` loops `P0`; `var1=1` → silent
+  `Missionnull`).
+- **menumus → var index 2** (`var2=0` → `P1 P2` then a `P0` loop; `var2=1` → `P1 P2` then the
+  `P2..P8` theme loop; `var2=2` → `P2`+volume loop).
+
+The original starts each context with the var at 0: `AudioVM_InitMenuMusicStreaming @0x56aa60`
+opens the menumus context (`g_path_menu_sbf` + `g_path_menu_bin` via
+`AudioVM_OpenMusicContext @0x6722a0`) and sets volume only — **no initial var**. The selecting
+var is set later by the host when a `.mnu` screen is shown (its `MUSICVAR` → the discriminator
+var). The JO main-menu screen `STARTUP` has `MUSICVAR=1`, selecting the menumus `var2=1` theme.
+
+### Divergence D-MUS-VAR / fix
+
+| ID | Ours | Original | Why / consequence |
+| --- | --- | --- | --- |
+| D-MUS-VAR | the runtime pushed the screen `MUSICVAR` to var **index 0** (`menu_shell.gd MUSIC_VAR_INDEX` / `nova_mnu_menu.cpp music_var_index_`), so menumus' `var2` stayed 0 | the host sets the discriminator var the script actually reads (menumus `var2`, gamemus `var1`) | at index 0 the screen `MUSICVAR` was inert; the menu always ran the `var2=0` path (`P1,P2` then a `P0` loop) instead of the screen's `MUSICVAR=1` theme (`P2..P8`). Fixed: `MUSIC_VAR_INDEX = 2`; the shell pushes it synchronously in `setup()` (before the director's first `_process` tick) so the VM starts in the selected section. Mission-driven gamemus `var1` transitions remain a follow-up. |
+
 ## SCR container codec — witness map (grill of 2026-06-09)
 
 Jointops.exe has exactly **two** SCR decrypt sites, both delegating to one

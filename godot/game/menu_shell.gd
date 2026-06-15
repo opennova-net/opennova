@@ -19,9 +19,15 @@ extends Control
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
-# Menu var index the director uses for the current-screen MUSICVAR (matches the
-# menu's set_music_var_index default and the engine tests' set_var(0, ...) path).
-const MUSIC_VAR_INDEX := 0
+# Var index the director sets to the current screen's MUSICVAR. The menumus MUS
+# script reads its section discriminator at var INDEX 2 (golden test
+# tests/mus/mus_vm_test.cpp drives "jo_menumus.bin" via var 2; gamemus uses var 1),
+# so the screen MUSICVAR must land at var2 — at index 0 it was inert and the VM
+# always ran the var2=0 path (P1,P2 then a P0 loop) instead of the screen's section
+# (the main menu's MUSICVAR=1 selects the P2..P8 theme). setup() pushes it
+# synchronously (open_menu rebuilds in-tree) before the director's first _process
+# tick, so the VM starts in the right section.
+const MUSIC_VAR_INDEX := 2
 
 # Friendly labels for known expansions. The list item + persisted key stay the raw
 # folder name (e.g. "jox01"); unknown expansions display their raw folder name.
