@@ -200,6 +200,12 @@ uint32_t NovaTerrain::get_collision_mask() const { return collision_mask; }
 void NovaTerrain::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PROCESS) {
 		if (!built) return;
+		// The patch pool is a raw RenderingServer instance set (instance_create +
+		// instance_set_scenario), NOT scene-tree nodes, so Node3D.visible does not
+		// gate it. When the terrain (or an ancestor — the runtime hides the whole
+		// World behind the menu) is hidden, skip the LOD dispatch so it never
+		// re-shows a patch; NOTIFICATION_VISIBILITY_CHANGED already forced them off.
+		if (!is_visible_in_tree()) return;
 
 		const auto& trn = terrain_data->get_trn();
 
@@ -433,6 +439,23 @@ void NovaTerrain::_notification(int p_what) {
 		cached_env_node = nullptr;
 		cached_weather_node = nullptr;
 		terrain_node_cache_valid = false;
+	} else if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
+		// Propagate node visibility to the raw RenderingServer patch pool, which is
+		// not part of the scene tree and so does not inherit Node3D.visible. Without
+		// this the terrain keeps drawing behind the main menu after returning from a
+		// mission (the runtime hides the World node, not these instances). Child
+		// nodes (FoliageDispatcher, TileOverlay) inherit visibility normally.
+		RenderingServer* rs = RenderingServer::get_singleton();
+		if (rs) {
+			const bool vis = is_visible_in_tree();
+			for (int i = 0; i < PATCH_POOL_SIZE; ++i) {
+				if (patch_instances[i].is_valid()) {
+					// Honour the live per-patch LOD state when shown; force all off
+					// when hidden. The next visible NOTIFICATION_PROCESS re-dispatches.
+					rs->instance_set_visible(patch_instances[i], vis && patch_visible[i]);
+				}
+			}
+		}
 	}
 }
 
