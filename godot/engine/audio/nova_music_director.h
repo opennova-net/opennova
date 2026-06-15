@@ -93,6 +93,12 @@ private:
 	Vector<AudioStreamPlayer *> _players;
 	int _next_player = 0;
 	bool _vm_running = false;
+	// The player streaming the track the VM's last `play` started. The VM is only
+	// advanced once this track finishes (matching the original's pacing in
+	// audio_stream_update @0x671c60, which steps the script only when the stream's
+	// remaining bytes reach 0). Without this the VM re-fires `play` every frame and
+	// restarts the SBF stream ~60x/sec -> a low buzz.
+	AudioStreamPlayer *_active_play = nullptr;
 };
 
 } // namespace godot
