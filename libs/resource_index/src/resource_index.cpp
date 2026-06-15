@@ -73,6 +73,14 @@ std::string extension_for_name(const std::string &name) {
 
 std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, bool is_scr_bin) {
 	const std::string extension = extension_for_name(name);
+	// Avatars.def is the singular player-character database, browsable + openable in
+	// the Avatars workspace. Matched by NAME, not extension: the .def extension is
+	// shared with weapon/items/ammo/hudpos.def, which the engine consumes by name at
+	// runtime and which stay unbrowsable (like .dbf). [orig: CAvatarDefs_Init @ 0x57b180
+	// opens "Avatars.def" by exact name]
+	if (to_lower_ascii(fs::path(name).filename().string()) == "avatars.def") {
+		return "avatar";
+	}
 	if (extension == ".bms") {
 		return "mission";
 	}
