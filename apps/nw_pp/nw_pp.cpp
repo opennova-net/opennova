@@ -1,12 +1,19 @@
 // nw_pp — NovaWorld in-game packet pretty-printer.
 //
-// Reads a hexcap (the format `tools/net/pcap_to_hexcap.py` produces, also
-// the env-var input for `nw_ingame_histogram_test`) and emits one line per
-// outer datagram plus one structured block per inner protocol message. Drives
-// the SAME outer-decode pipeline as `nw_ingame_histogram_test` and
-// `nw_ingame_pool_records_test` — envelope CRC → outer NWU → per-session
+// Reads a pcap/pcapng OR a hexcap (the format `tools/net/pcap_to_hexcap.py`
+// produces; the env-var input for `nw_ingame_histogram_test`) and emits one
+// line per outer datagram plus one structured block per inner protocol
+// message. Drives the SAME outer-decode pipeline as `nw_ingame_histogram_test`
+// and `nw_ingame_pool_records_test` — envelope CRC → outer NWU → per-session
 // SCRK → 0x43/0x83 → reassembly — so what it prints is the exact byte stream
 // the shipping libs see, not a parallel re-implementation.
+//
+// Input format is auto-detected from the path suffix: `.pcap` / `.pcapng`
+// are parsed natively (no Wireshark / tshark required) for the loopback-UDP
+// subset of the link-layer space — Ethernet, BSD-loopback (NULL/LOOP),
+// raw-IP, IPv4 only. IP fragmentation is not reassembled (loopback MTU is
+// 65535 so we don't see it in practice; fragments are dropped with a
+// stderr warning). Anything else is read as hexcap text.
 //
 // Tag-specific decoders live in `libs/novaworld/include/novaworld/ingame_decode.h`
 // (shared with `nw_ingame_pool_records_test` and the future real handlers).
@@ -14,9 +21,9 @@
 // land there and a printer for them lands here.
 //
 // CLI:
-//   nw_pp <hexcap-path>                 # all frames
-//   nw_pp <hexcap-path> 0x0d 0x20       # filter to listed S2C tags
-//   NW_INGAME_HEXCAP=<path> nw_pp       # env-driven (matches test convention)
+//   nw_pp <capture-path>                # pcapng/pcap/hexcap all accepted
+//   nw_pp <capture-path> 0x0d 0x20      # filter to listed S2C tags
+//   NW_INGAME_HEXCAP=<hexcap> nw_pp     # env-driven, hexcap only (test contract)
 
 #include <napi/envelope.h>
 #include <napi/tlv.h>
@@ -31,6 +38,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -62,6 +70,237 @@ bool hex_to_bytes(const std::string &hex, std::vector<uint8_t> &out) {
 	}
 	return true;
 }
+
+bool ends_with_icase(const std::string &s, const char *suffix) {
+	const size_t sl = std::strlen(suffix);
+	if (s.size() < sl) return false;
+	for (size_t i = 0; i < sl; ++i) {
+		const char a = std::tolower(static_cast<unsigned char>(s[s.size() - sl + i]));
+		const char b = std::tolower(static_cast<unsigned char>(suffix[i]));
+		if (a != b) return false;
+	}
+	return true;
+}
+
+bool is_pcap_path(const std::string &p) {
+	return ends_with_icase(p, ".pcap") || ends_with_icase(p, ".pcapng");
+}
+
+// Native pcap / pcapng reader for the loopback-UDP slice we care about.
+//
+// Spec sources:
+//   pcap legacy   — wireshark.org/docs/man-pages/pcap-savefile.html
+//   pcapng        — github.com/pcapng/pcapng (PCAP Next Generation block
+//                   format spec). We only need Section Header Block (SHB,
+//                   type 0x0A0D0D0A), Interface Description Block (IDB,
+//                   type 0x00000001), and Enhanced Packet Block (EPB,
+//                   type 0x00000006). Simple Packet Blocks (0x3) and
+//                   legacy Packet Blocks (0x2) are tolerated.
+//   linktype enum — tcpdump.org/linktypes.html
+//
+// We strip the data-link header to expose the IPv4 header, parse the UDP
+// header out of that, and emit (srcport, frame_index, udp_payload). IP
+// fragments are dropped (loopback MTU = 65535 so they're not expected).
+
+namespace pcap_io {
+
+constexpr uint32_t PCAP_MAGIC_LE   = 0xa1b2c3d4u;
+constexpr uint32_t PCAP_MAGIC_BE   = 0xd4c3b2a1u;
+constexpr uint32_t PCAP_MAGIC_NSEC_LE = 0xa1b23c4du;  // nanosecond ts
+constexpr uint32_t PCAP_MAGIC_NSEC_BE = 0x4d3cb2a1u;
+
+constexpr uint32_t PCAPNG_BLOCK_SHB = 0x0a0d0d0au;
+constexpr uint32_t PCAPNG_BLOCK_IDB = 0x00000001u;
+constexpr uint32_t PCAPNG_BLOCK_EPB = 0x00000006u;
+constexpr uint32_t PCAPNG_BLOCK_SPB = 0x00000003u;
+constexpr uint32_t PCAPNG_BLOCK_PB  = 0x00000002u;
+
+constexpr uint32_t LINKTYPE_NULL     = 0;    // BSD loopback: 4-byte AF_xxx (host order)
+constexpr uint32_t LINKTYPE_ETHERNET = 1;    // 14-byte Ethernet II header
+constexpr uint32_t LINKTYPE_RAW      = 101;  // raw IP
+constexpr uint32_t LINKTYPE_LOOP     = 108;  // OpenBSD loopback: 4-byte AF_xxx (BE)
+constexpr uint32_t LINKTYPE_IPV4     = 228;  // raw IPv4
+
+constexpr uint16_t AF_INET_LINUX = 2;        // most ports
+constexpr uint16_t AF_INET_DARWIN = 2;       // same value on macOS
+
+uint16_t read_u16_le(const uint8_t *p) {
+	return uint16_t(p[0]) | uint16_t(p[1]) << 8;
+}
+uint32_t read_u32_le(const uint8_t *p) {
+	return uint32_t(p[0]) | uint32_t(p[1]) << 8 |
+	       uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
+}
+uint32_t read_u32_be(const uint8_t *p) {
+	return uint32_t(p[3]) | uint32_t(p[2]) << 8 |
+	       uint32_t(p[1]) << 16 | uint32_t(p[0]) << 24;
+}
+uint16_t read_u16_be(const uint8_t *p) {
+	return uint16_t(p[1]) | uint16_t(p[0]) << 8;
+}
+
+// Peel the data-link header. Returns the offset into `frame` where the
+// IPv4 header starts, or -1 if not IPv4 / unsupported linktype.
+int strip_link_header(uint32_t linktype, const uint8_t *frame, size_t len) {
+	switch (linktype) {
+	case LINKTYPE_NULL:
+	case LINKTYPE_LOOP: {
+		if (len < 4) return -1;
+		// NULL: host byte order; LOOP: big-endian. The AF value is small
+		// (2 = AF_INET) so we can detect by checking both orders.
+		uint32_t af_le = read_u32_le(frame);
+		uint32_t af_be = read_u32_be(frame);
+		uint32_t af = (af_le < 256) ? af_le : af_be;
+		if (af != AF_INET_LINUX) return -1;
+		return 4;
+	}
+	case LINKTYPE_ETHERNET: {
+		if (len < 14) return -1;
+		const uint16_t ethertype = read_u16_be(frame + 12);
+		if (ethertype != 0x0800) return -1;  // not IPv4
+		return 14;
+	}
+	case LINKTYPE_RAW:
+	case LINKTYPE_IPV4:
+		return 0;
+	default:
+		return -1;
+	}
+}
+
+// Read the whole file into a buffer (capture files are typically <100 MiB
+// and fit easily; the alternative would be streaming, which complicates
+// pcapng block traversal).
+bool slurp(const std::string &path, std::vector<uint8_t> &out) {
+	std::ifstream f(path, std::ios::binary | std::ios::ate);
+	if (!f) return false;
+	const std::streamsize n = f.tellg();
+	if (n < 0) return false;
+	out.resize(size_t(n));
+	f.seekg(0);
+	f.read(reinterpret_cast<char *>(out.data()), n);
+	return f.good() || f.eof();
+}
+
+// Per-extracted-UDP-datagram callback. (srcport, frame_index, payload).
+using UdpCb = std::function<void(int, int, const uint8_t *, size_t)>;
+
+void extract_ipv4_udp(const uint8_t *pkt, size_t len, uint32_t linktype,
+                       int frame_index, UdpCb &cb,
+                       int &fragments_dropped) {
+	const int ip_off = strip_link_header(linktype, pkt, len);
+	if (ip_off < 0 || size_t(ip_off) + 20 > len) return;
+	const uint8_t *ip = pkt + ip_off;
+	// IPv4: low nibble of byte 0 is IHL in 32-bit words.
+	if ((ip[0] >> 4) != 4) return;
+	const size_t ihl = size_t(ip[0] & 0x0F) * 4;
+	if (ihl < 20 || size_t(ip_off) + ihl > len) return;
+	if (ip[9] != 17) return;  // not UDP
+	// IP fragmentation: drop if fragment offset != 0 or MF flag set.
+	const uint16_t flags_frag = read_u16_be(ip + 6);
+	const uint16_t frag_offset = flags_frag & 0x1FFF;
+	const bool mf = (flags_frag & 0x2000) != 0;
+	if (frag_offset != 0 || mf) { fragments_dropped++; return; }
+	const uint16_t ip_total_len = read_u16_be(ip + 2);
+	const size_t udp_off = size_t(ip_off) + ihl;
+	if (udp_off + 8 > len) return;
+	const uint8_t *udp = pkt + udp_off;
+	const uint16_t srcport = read_u16_be(udp + 0);
+	const uint16_t udp_len = read_u16_be(udp + 4);
+	if (udp_len < 8) return;
+	// Trust UDP length over captured length when it's plausible (truncates
+	// trailing pad bytes some link layers add).
+	const size_t payload_off = udp_off + 8;
+	size_t payload_len = udp_len - 8;
+	const size_t cap_avail = (ip_off + ip_total_len <= int(len))
+	                          ? size_t(ip_off + ip_total_len - int(udp_off + 8))
+	                          : (len - payload_off);
+	if (payload_len > cap_avail) payload_len = cap_avail;
+	if (payload_off + payload_len > len) return;
+	cb(int(srcport), frame_index, pkt + payload_off, payload_len);
+}
+
+bool load(const std::string &path, UdpCb cb) {
+	std::vector<uint8_t> buf;
+	if (!slurp(path, buf)) {
+		std::fprintf(stderr, "FAILED to read %s\n", path.c_str());
+		return false;
+	}
+	if (buf.size() < 24) return false;
+
+	const uint32_t magic_le = read_u32_le(buf.data());
+	int fragments_dropped = 0;
+	int frame_index = 0;
+
+	// Legacy pcap?
+	if (magic_le == PCAP_MAGIC_LE || magic_le == PCAP_MAGIC_BE ||
+	    magic_le == PCAP_MAGIC_NSEC_LE || magic_le == PCAP_MAGIC_NSEC_BE) {
+		const bool be = (magic_le == PCAP_MAGIC_BE ||
+		                 magic_le == PCAP_MAGIC_NSEC_BE);
+		auto r32 = [&](const uint8_t *p) {
+			return be ? read_u32_be(p) : read_u32_le(p);
+		};
+		const uint32_t linktype = r32(buf.data() + 20);
+		size_t off = 24;
+		while (off + 16 <= buf.size()) {
+			const uint32_t incl_len = r32(buf.data() + off + 8);
+			if (off + 16 + incl_len > buf.size()) break;
+			frame_index++;
+			extract_ipv4_udp(buf.data() + off + 16, incl_len, linktype,
+			                 frame_index, cb, fragments_dropped);
+			off += 16 + incl_len;
+		}
+	} else if (read_u32_le(buf.data()) == PCAPNG_BLOCK_SHB) {
+		// pcapng. Byte-order magic in the SHB body tells us endianness.
+		// We support little-endian captures (the dominant case) — big-
+		// endian would mirror but we haven't seen one in practice.
+		if (buf.size() < 28) return false;
+		const uint32_t bom = read_u32_le(buf.data() + 8);
+		if (bom != 0x1A2B3C4Du) {
+			std::fprintf(stderr, "big-endian pcapng not supported\n");
+			return false;
+		}
+		uint32_t cur_linktype = LINKTYPE_ETHERNET;
+		size_t off = 0;
+		while (off + 8 <= buf.size()) {
+			const uint32_t btype = read_u32_le(buf.data() + off);
+			const uint32_t blen = read_u32_le(buf.data() + off + 4);
+			if (blen < 12 || off + blen > buf.size()) break;
+			const uint8_t *body = buf.data() + off + 8;
+			const size_t body_len = blen - 12;  // minus type+len*2
+			if (btype == PCAPNG_BLOCK_IDB && body_len >= 8) {
+				cur_linktype = read_u32_le(body) & 0xFFFF;
+			} else if (btype == PCAPNG_BLOCK_EPB && body_len >= 20) {
+				// EPB: interface_id(4) ts_high(4) ts_low(4) cap_len(4)
+				//      pkt_len(4) data(cap_len, padded to 4) options
+				const uint32_t cap_len = read_u32_le(body + 12);
+				if (20 + cap_len <= body_len) {
+					frame_index++;
+					extract_ipv4_udp(body + 20, cap_len, cur_linktype,
+					                 frame_index, cb, fragments_dropped);
+				}
+			} else if (btype == PCAPNG_BLOCK_SPB && body_len >= 4) {
+				const uint32_t pkt_len = read_u32_le(body);
+				if (4 + pkt_len <= body_len) {
+					frame_index++;
+					extract_ipv4_udp(body + 4, pkt_len, cur_linktype,
+					                 frame_index, cb, fragments_dropped);
+				}
+			}
+			off += blen;
+		}
+	} else {
+		std::fprintf(stderr, "%s: not a pcap or pcapng file\n", path.c_str());
+		return false;
+	}
+
+	if (fragments_dropped > 0)
+		std::fprintf(stderr, "warning: dropped %d IP-fragment packet(s)\n",
+		             fragments_dropped);
+	return true;
+}
+
+} // namespace pcap_io
 
 bool decode_outer(const std::vector<uint8_t> &raw, uint8_t &opcode,
                   std::vector<uint8_t> &body) {
@@ -243,27 +482,42 @@ int main(int argc, char *argv[]) {
 	if (!path) path = std::getenv("NW_INGAME_HEXCAP");
 	if (!path || !*path) {
 		std::fprintf(stderr,
-		             "usage: nw_pp <hexcap> [0xNN ...]\n"
-		             "       or set NW_INGAME_HEXCAP\n");
-		return 1;
-	}
-	std::ifstream file(path);
-	if (!file) {
-		std::fprintf(stderr, "FAILED to open %s\n", path);
+		             "usage: nw_pp <capture-path> [0xNN ...]\n"
+		             "       path is a .pcap / .pcapng (parsed natively)\n"
+		             "       or a hexcap text file (one '<srcport> <frame> "
+		             "<hex>' per line)\n"
+		             "       NW_INGAME_HEXCAP env supplies a hexcap path\n");
 		return 1;
 	}
 
 	std::vector<Datagram> dgrams;
-	std::string line;
-	while (std::getline(file, line)) {
-		if (!line.empty() && line.back() == '\r') line.pop_back();
-		if (line.empty() || line[0] == '#') continue;
-		std::istringstream ls(line);
-		Datagram d;
-		std::string hex;
-		if (!(ls >> d.srcport >> d.frame >> hex)) continue;
-		if (!hex_to_bytes(hex, d.bytes)) continue;
-		dgrams.push_back(std::move(d));
+	if (is_pcap_path(path)) {
+		const bool ok = pcap_io::load(path,
+			[&dgrams](int srcport, int frame, const uint8_t *p, size_t n) {
+				Datagram d;
+				d.srcport = srcport;
+				d.frame = frame;
+				d.bytes.assign(p, p + n);
+				dgrams.push_back(std::move(d));
+			});
+		if (!ok) return 1;
+	} else {
+		std::ifstream file(path);
+		if (!file) {
+			std::fprintf(stderr, "FAILED to open %s\n", path);
+			return 1;
+		}
+		std::string line;
+		while (std::getline(file, line)) {
+			if (!line.empty() && line.back() == '\r') line.pop_back();
+			if (line.empty() || line[0] == '#') continue;
+			std::istringstream ls(line);
+			Datagram d;
+			std::string hex;
+			if (!(ls >> d.srcport >> d.frame >> hex)) continue;
+			if (!hex_to_bytes(hex, d.bytes)) continue;
+			dgrams.push_back(std::move(d));
+		}
 	}
 	std::fprintf(stderr, "loaded %zu datagrams from %s\n", dgrams.size(), path);
 	if (!tag_filter.empty()) {
