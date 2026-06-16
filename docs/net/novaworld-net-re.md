@@ -206,7 +206,7 @@ sweep; blank = not yet characterized.
 | 0x0A | 0x42FEC0 | `NapiNPClientMsg_0x00A` | **per-frame local-player + world-state update** (multiplexed player/timer/env/gametype + health + weapon-hit loop); full field map §5.9. Defined 2026-06-16 (was undefined — data blob mis-marked at 0x430000) |
 | 0x0B | 0x422660 | `_0x00B` | copies the 616-byte BMS header into `byte_A761D0` (field map §5.4) |
 | 0x0C | 0x42E730 | `_0x00C` | full entity spawn batch (~1 KB); parses name fields inline (no opt-in trailer) |
-| 0x0D | 0x432C40 | `_0x00D` | pool-entity spawn batch; sets `dword_A82370=3`; per-entity flag-driven layout: u16 count + {u16 flags, u16 slot_id, cstr name, conditional u32/u8 fields per flag bit, always 3×u32 pos, conditional team byte (`flags&0x10`), bone-attach byte}; `flags&0x20` writes entity[+36]; AI-flagged item defs require the `flags&0x800` trailer (§5.6) |
+| 0x0D | 0x432C40 | `_0x00D` | pool-entity spawn batch; sets `dword_A82370=3`; `[u16 count]` header + per-entity record per the §5.11 field map (always: 2×u16 flags+slot, u16 type, cstr name, 3×i32 pos, u8 team byte → entity+290; conditional fields gated by every flag bit 0x01-0x8000); AI-flagged item defs (`ItemDef[+84] & 0x100000`) require the `flags & 0x800` trailer = **`[u32][u32][cstring ai_name]`** (§5.6/§5.11) |
 | 0x0F | 0x42E200 | `_0x00F` | **WORLD-STATE-LOAD** (no descriptive Kong name; any "game-start" label is misleading): 4×i32 (sessionId, X, Y, Z), 3×i16 fixed-point angles, u8 flags, team scores, player count, waypoint + team names; sets `dword_81474C=0` (load-bearing input/heartbeat gate); client replies with the C2S burst 0x22 0x23 0x28 0x29 0x2D 0x32; ~624 B, sometimes fragmented in retail |
 | 0x10 | 0x433400 | `_0x010` | static entity batch (pool 2): u16 start_idx, u16 count, flag-driven per-entity records; 612-644 B in retail, every frame; **full field map §5.9** |
 | 0x11 | 0x4226E0 | `_0x011` | one-line stub: `dword_A82358=1` (unblocks WaitForDisconnect); retail only ever ships it bundled last with 0x0B (§5.5) |
@@ -223,7 +223,7 @@ sweep; blank = not yet characterized.
 | 0x1D | 0x430840 | `_0x01D` | **spawn-success gate**: sets `dword_24C1928=1` before any payload parse when `is_authority==0` (§5.2) |
 | 0x1E | 0x426270 | `_0x01E` (`NetPacket_HandleGameEvent`) | 8-byte game event; does not unblock movement directly |
 | 0x1F | 0x427CB0 | `_0x01F` | |
-| 0x20 | 0x425C00 | `_0x020` | bulk pool-3 entity sync; sets `dword_A82370=5`; u16 start_idx + u16 count + per-entity {u16 type_id, u8 flags, 3×u32 pos, u32 (f&1), u32 (f&2), u16→entity[+290] (f&4), u16→entity[+124], u8 team (f&8), u16 (f&0x10), u8 (f&0x20)}; allocates pool-3 entries |
+| 0x20 | 0x425C00 | `_0x020` | bulk pool-3 entity sync; sets `dword_A82370=5`; `[u16 start_idx][u16 count]` header + per-entity record per the §5.12 field map (u16 type_id; `type_id==0` ⇒ empty-slot sentinel, no body; else u8 flags + 3×i32 pos always, then u32 parent (f&1), u32 orient (f&2), u16 ammo (f&4), u16 netHandle ALWAYS, u8 team (f&8), u16 weaponType (f&0x10), u8 score (f&0x20)); allocates pool-3 entries |
 | 0x21 | 0x430B10 | `_HandleSpawnEffect` | |
 | 0x22 | 0x42EC90 | `_0x022` | part of the 0x0F reply ecosystem |
 | 0x23 | 0x4F81E0 | `_0x023` | part of the 0x0F reply ecosystem |
@@ -526,13 +526,18 @@ at minimum strictly after 0x0B.
 ### 5.6 Tag 0x0D — local-player spawn dead end (durable warning)
 
 Do **not** use S2C 0x0D to spawn the local player. Verified by live crash + decompile
-(2026-04-25):
+(2026-04-25) and corrected by the §5.11 grill (2026-06-16):
 
 - When the record's item def has the AI flag (`ItemDef[+84] & 0x100000` — true for player
   infantry type_id `0x14B9`), the handler `[orig: NapiNPClientMsg_0x00D @ 0x432C40]` runs an
-  `Entity_AllocateAISlot` path that string-copies from pointers populated **only** by the
-  optional `flags & 0x800` trailer block (`[u16][u32][cstring ai_name]`). Without the trailer
-  those pointers are NULL → access violation at handler+0x730 (`0x433370`).
+  `Entity_AllocateAISlot @ 0x40D2C0` path that string-copies from pointers populated **only**
+  by the optional `flags & 0x800` trailer block. Without the trailer those pointers are NULL →
+  access violation at handler+0x730 (`0x433370`).
+- The trailer layout is **`[u32 aiProfile1][u32 aiProfile2][cstring aiName]`** (cross-witnessed
+  in 195 of 437 retail 0x0D records from the 2026-06-16b loopback — full table §5.11). An
+  earlier note here recorded the first field as a `u16`; that was wrong — both pointer/integer
+  fields are read with `cursor += 2` on a `uint16_t*`, which advances 4 wire bytes each (D-NET-52).
+  `aiProfile1` lands at `aiSlot+16`, `aiProfile2` at `aiSlot+20`, `aiName` at `aiSlot+156`.
 - Retail's S2C 0x0D records always use vehicle/AI type_ids (`0x04bf`, `0x050b`, ...) with
   flags like `0x1c21`/`0x1071` — bit `0x800` always set, never the local-player template.
   Tag 0x0C does not crash on the same type_id because it parses name fields inline.
@@ -764,9 +769,115 @@ state.
 **Open follow-ups (§5.9 + §5.10):** vehicle/AI/weapon-class callbacks at `ItemDef+356` still
 TBD (out of scope: this RE pass scoped to `0x14B9` infantry). Compact-record velocity fields
 witnessed for tag 0x10 (§5.9, entity+16/20/24 with flag gating) but not exercised in the 0x0A
-trailing record — likely class-specific. Pool-entity messages 0x0D (AI-flag `0x800` trailer
-layout) and 0x20 (full record map) — handlers `NapiNPClientMsg_0x00D @ 0x432C40` and
-`NapiNPClientMsg_0x020 @ 0x425C00` — Stage C of the planned grill, capture samples in hand.
+trailing record — likely class-specific. Pool-entity messages 0x0D and 0x20 — closed in
+§5.11 / §5.12 below (Stage C, 2026-06-16, same loopback as §5.10).
+
+### 5.11 Tag 0x0D — pool-entity spawn batch (loopback capture 2026-06-16b)
+
+`[orig: NapiNPClientMsg_0x00D @ 0x432C40]`. Pool-entity spawn (vehicles, AI, ground items;
+pool resolved from the high nibble of the slot id). The handler raises `dword_A82370 ≥ 3`
+on entry (§5.1) then reads a `[u16 entityCount]` header and loops; every record is
+zeroed (`memset(entity, 0, 0x2B4)`) before fill. Cross-witnessed against 437 records over
+37 retail payloads in the 2026-06-16b loopback (`nw_ingame_pool_records_test`, body
+consumed exactly on every payload).
+
+| off (within record) | bytes | field | gate | landing |
+|---|---|---|---|---|
+| 0 | 2 | spawnFlags | always | (gates all conditional fields below) |
+| 2 | 2 | entitySlotId (`pool<<12\|slot`) | always | pool resolve via `g_pool_list`; `0xFFFF` and `(s&0xF000)>=0x5000` end the batch |
+| 4 | 2 | itemTypeId | always | `ItemList_FindIndexByTypeId @ 0x49E100` → entity+28 / `entity+32 = gItemDefs[idx]` |
+| 6 | cstr | entityName | always | cstring read+skip; copied to `entity+244` later if AI-flagged |
+| — | 4 | entityFlags | `spawnFlags & 0x0020` | entity+36 (bit 1 = movement gate; §5.6) |
+| — | 4 | posX | always | entity+4 (i32 16.16 world) |
+| — | 4 | posY | always | entity+8 |
+| — | 4 | posZ | always | entity+12 |
+| — | 4 | velX | `spawnFlags & 0x0001` | entity+16 |
+| — | 4 | velY | `spawnFlags & 0x0002` | entity+20 |
+| — | 4 | velZ | `spawnFlags & 0x0004` | entity+24 |
+| — | 4 | sectionMask | `spawnFlags & 0x0008` | entity+308 |
+| — | 1 | orientByte | `spawnFlags & 0x0010` | entity+354 |
+| — | 2 | parentHandle | `spawnFlags & 0x0100` | resolved → entity+368 (pool ptr) |
+| — | 2 | targetHandle | `spawnFlags & 0x0200` | resolved → entity+40 (pool ptr) |
+| — | 1 | weaponSlotMask | `spawnFlags & 0x0400` | (the weapon block; reads u16 per set bit, 0xFFFF on a set bit skips storage but still consumes the wire u16) |
+| — | 2 ea | weaponHandle\[bit\] | `mask & (1<<bit)` (bits 0..7) | entity+400+2·bit (capped at +414); 0xFFFF skips storage |
+| — | 2 | extraHandle0 | inside `0x0400` block | entity+416 |
+| — | 2 | extraHandle1 | inside `0x0400` block | entity+418 |
+| — | 1 | teamByte | always | entity+290 (u16 zero-ext) |
+| — | 4 | aiProfile1 | `spawnFlags & 0x0800` | trailer → aiSlot+16 |
+| — | 4 | aiProfile2 | `spawnFlags & 0x0800` | trailer → aiSlot+20 |
+| — | cstr | aiName | `spawnFlags & 0x0800` | trailer → aiSlot+156 |
+| — | 1 | alertByte | `spawnFlags & 0x0040` | entity+533 |
+| — | 1 | actionByte | `spawnFlags & 0x0080` | entity+532 |
+| — | 1 | weaponTypeByte | `spawnFlags & 0x1000` | entity+176 |
+| — | 1 | healthByte | `spawnFlags & 0x2000` | entity+538 |
+| — | 2 | healthShort | `spawnFlags & 0x2000` (extra read) | entity+350 |
+| — | 2 | healthShort (alt) | `(spawnFlags & 0x8000) && !(0x2000)` | entity+350 |
+| — | 1 | difficultyByte | `spawnFlags & 0x4000` | entity+624 |
+
+**Weapon block precise shape:** the `0x400` branch first reads the u8 mask. If `mask == 0`
+the block ends — `extraHandle0/1` are NOT consumed. Otherwise it walks bits 0..7 and reads
+one u16 per set bit, then unconditionally consumes `extraHandle0/1`. So minimal-mask block =
+3 B (`u8 mask + 2× u16 extras`); maximal = 19 B. When `0x400` is NOT set, `entity+416/+418`
+are written `0xFFFF/0xFFFF` in-memory and nothing is read from the wire.
+
+**AI trailer correction (D-NET-52):** every conditional field of the trailer is a 4-byte
+read (`cursor += 2` on a `uint16_t*` advances 4 bytes; hex-rays renders the value type as
+`uint16_t*`, but the wire is u32). 195 of 437 records in the loopback carry the trailer;
+all match this 4+4+cstring shape exactly.
+
+**Cross-witness numbers (`nw_ingame_pool_records_test` vs the 2026-06-16b loopback):**
+
+- 37 payloads, sizes 226..550 B, modal 543 B; 437 entities total (max 20 per payload).
+- Body consumed EXACTLY for every payload (`leftover_bytes = 0`).
+- Flag bits observed: `0x3EF7` (every bit except 0x0008, 0x0100, 0x4000, 0x8000).
+- AI trailer presence: 195/437 records (≈45%), matching §5.6's "always set on retail
+  vehicle/AI templates" — Stage C's payloads include a mix of static-prop spawns (no
+  trailer) and AI/vehicle spawns (trailer).
+
+### 5.12 Tag 0x20 — bulk pool-3 entity sync (loopback capture 2026-06-16b)
+
+`[orig: NapiNPClientMsg_0x020 @ 0x425C00]`. Bulk pool-3 sync (markers / waypoints /
+nav-nodes; pool 3 in the engine primer's pool taxonomy). The handler raises
+`dword_A82370 ≥ 5` (§5.1) then reads a `[u16 startIndex][u16 entityCount]` header. For
+each i in `[0, entityCount)` it calls `Pool_GetEntryUnchecked(3, startIndex + i)` and
+`memset(entitySlot, 0, 0x2B4)` (the pool-3 record stride is 692 B, but the handler only
+clears the first 692 — wait, it clears 0x2B4 = 692 B exactly).
+
+Cross-witnessed against 792 records over 29 retail payloads in the same loopback
+(`nw_ingame_pool_records_test`, body consumed exactly on every payload).
+
+| off | bytes | field | gate | landing |
+|---|---|---|---|---|
+| 0 | 2 | itemTypeId | always | `0` ⇒ empty-slot sentinel: record body ends here, advance to next slot |
+| 2 | 1 | flagsByte | non-empty | (gates conditional fields below) |
+| 3 | 4 | posX | non-empty | entitySlot+4 (i32 16.16 world) |
+| 7 | 4 | posY | non-empty | entitySlot+8 |
+| 11 | 4 | posZ | non-empty | entitySlot+12 |
+| — | 4 | parentHandle | `flags & 0x01` | entitySlot+16 |
+| — | 4 | orientationVal | `flags & 0x02` | entitySlot+0 |
+| — | 2 | ammoCount | `flags & 0x04` | entitySlot+290 |
+| — | 2 | netHandle | non-empty (ALWAYS) | entitySlot+124 (zero-ext to u32) |
+| — | 1 | teamByte | `flags & 0x08` | entitySlot+354 |
+| — | 2 | weaponType | `flags & 0x10` | entitySlot+640 |
+| — | 1 | scoreByte | `flags & 0x20` | entitySlot+672 (zero-ext to u32) |
+
+After per-record reads, `ItemList_FindIndexByTypeId` fills `entitySlot+28/+32/+452/+456`
+(the def index, def pointer, modelFlags, second flag field — same shape as 0x0D). When the
+loop exits, `Pool_UpdateMaxUsed(3, startIndex + entityCount)` finalizes the pool's high-water.
+
+The `netHandle` field at +124 lines up with the AI-navigation marker references documented
+in `docs/world/world-wac-ai-re.md:89-92` (target nodes resolved as
+`Pool_GetEntryUnchecked(3, ·)`), and `+290` is the same ammo/team slot tags 0x10 and 0x0D
+use (per-tag semantic — Hex-Rays auto-named).
+
+**Cross-witness numbers:**
+
+- 29 payloads, sizes 533..634 B, modal 625 B; 792 entities total (max 30 per payload).
+- Body consumed EXACTLY for every payload.
+- Flag bits observed: `0x1F` (all five gated bits 0x01..0x10 used; 0x20 score-byte
+  NOT seen in this capture — only present on entities with non-default score state).
+- Zero `itemTypeId==0` empty-slot sentinels in this load-phase capture (all records
+  carry a body).
 
 ## 6. Struct reference
 
@@ -1691,6 +1802,12 @@ FLDS columns, decoded through the XXXX terminator):
 `replication_min.cpp` + `game_session.cpp` (in-match player state — §5.10):
 - **D-NET-50** [HIGH, TRACKED] `build_tag_0a_world_reference` ships a 623-byte verbatim retail blob (`kRetailTag0aPayload`) with only bytes 0-11 patched. The real S2C 0x0A trailer is per-entity 18-byte **compact (type-11) records** — positions 16-bit compressed via `Network_CompressFixedPoint`, NOT raw i32, and vehicle-local when mounted. Replace with a field-driven builder per §5.10 case 1 (full table there). [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 1 / NapiNPClientMsg_0x00A @ 0x42FEC0 event loop]
 - **D-NET-51** [HIGH, TRACKED] `handle_tag_0c_player_input` reads position as raw i32 at offsets 7/11/15, treating the whole body as raw position. The real C2S 0x0C body is the fixed **43-byte extended (type-10)** format from §5.10: 5-B header, then vehicleHandle/posX/posY/posZ (i32 16.16, vehicle-local if mounted), heading/pitch (i16 BAM), state bytes, anim defs, and 4×(weapon_id,counter) anti-cheat pairs. Replace with a field-driven parser per §5.10 case 4. [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 4 / dispatch_entity_packet_callback @ 0x4D6A80]
+
+`replication_min.cpp` + `game_session.cpp` (pool-entity spawn/sync — §5.11/§5.12):
+- **D-NET-52** [DOC, FIXED] §5.6 trailer layout previously read `[u16][u32][cstring]`. The retail handler reads `aiProfile1` and `aiProfile2` with `cursor += 2` on a `uint16_t*` — both fields are **4 wire bytes** (the Hex-Rays render shows `uint16_t*` as the value type, but the cursor advance and the destination slot writes are `_DWORD`). Cross-witnessed against 195/437 trailer-carrying 0x0D records in the 2026-06-16b loopback. Update §5.6 + §5.11 (this commit). [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x43311e / 0x433131)]
+- **D-NET-53** [HIGH, TRACKED] `build_tag_0d_spawn_points @ replication_min.cpp:484` emits two unconditional `u16 weapon_slot` zeros (lines 524-525) before the trailing `u8 bone_attach`. Retail's handler only reads the weapon block when `flags & 0x400` is set, and the builder uses `flags = 0x30` — so those 4 bytes corrupt alignment exactly as the §5.6 warning describes for the (quarantined) `build_tag_0d_local_player_spawn` sibling. With >1 spawn point in a batch, the second and subsequent records would be misaligned and the receiver would either drop them or crash. Drop the two `push_u16(buf, 0)` writes; the `u8` after them is the always-byte that lands at entity+290, not a "bone_attach". [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x4330b1 — weapon block gated by `spawnFlags & 0x400`)]
+- **D-NET-54** [LOW, DOC] In-source field-table comments at `replication_min.cpp:417-422` (and the mirror at line 524-526) label the always-byte at +290 "bone_attach byte" and `flags&0x10` as "team". Per §5.11 the always-byte is unnamed in retail (Hex-Rays calls it `teamByte`; field is at +290), and `flags&0x10` writes `orientByte` to +354. Update the in-source comments to match §5.11. Wire-emitted bytes are unchanged by this fix — comment-only. [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x432e29 = flags&0x10 → +354; @ 0x43310a = unconditional u8 → +290)]
+- **D-NET-55** [HIGH, TRACKED] No `build_tag_20_pool3_sync` builder exists; `game_session.cpp` dispatch (around lines 1023-1075) has no inbound `handle_tag_20_*` either — every S2C 0x20 falls through to `handle_unknown_or_passive_tag`. Pool-3 markers / waypoints / nav-nodes are therefore not registered into the client's pool 3, which blocks AI navigation, target markers, and any spawn-select markers that resolve via pool 3. §5.12 has the full record map; the builder needs a `[u16 start_idx][u16 count]` header + per-entity flag-driven serializer matching the witnessed 29-payload / 792-entity loopback shape. [orig: NapiNPClientMsg_0x020 @ 0x425C00]
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;

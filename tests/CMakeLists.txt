@@ -1007,6 +1007,14 @@ target_link_libraries(nw_ingame_histogram_test PRIVATE opennova_novaworld openno
 target_include_directories(nw_ingame_histogram_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_ingame_histogram COMMAND nw_ingame_histogram_test)
 
+# Pool-records byte-witness — walks every S2C 0x0D and 0x20 payload in the
+# same hexcap and asserts the §5.11/§5.12 field maps consume the wire exactly.
+# Asset-gated on NW_INGAME_HEXCAP, identical pipeline to the histogram test.
+add_executable(nw_ingame_pool_records_test novaworld/nw_ingame_pool_records_test.cpp)
+target_link_libraries(nw_ingame_pool_records_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto)
+target_include_directories(nw_ingame_pool_records_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_ingame_pool_records COMMAND nw_ingame_pool_records_test)
+
 # Backend schema regression — applies the actual backend/migrations/* and
 # backend/seed/* the standalone server uses, so SQL syntax errors and seed
 # regressions break CI before they break the running server.
