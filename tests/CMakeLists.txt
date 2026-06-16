@@ -1023,6 +1023,13 @@ target_link_libraries(nw_ingame_compact_records_test PRIVATE opennova_novaworld)
 target_include_directories(nw_ingame_compact_records_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_ingame_compact_records COMMAND nw_ingame_compact_records_test)
 
+# C2S 0x0C extended (type-10) uplink decoder — §5.10. Byte vectors embedded
+# verbatim from the 3-player loopback pcap (host_and_join…_threeplayers…).
+add_executable(nw_ingame_c2s_uplink_test novaworld/nw_ingame_c2s_uplink_test.cpp)
+target_link_libraries(nw_ingame_c2s_uplink_test PRIVATE opennova_novaworld)
+target_include_directories(nw_ingame_c2s_uplink_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_ingame_c2s_uplink COMMAND nw_ingame_c2s_uplink_test)
+
 # Backend schema regression — applies the actual backend/migrations/* and
 # backend/seed/* the standalone server uses, so SQL syntax errors and seed
 # regressions break CI before they break the running server.

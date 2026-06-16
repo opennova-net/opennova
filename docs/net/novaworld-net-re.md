@@ -341,6 +341,7 @@ This is what a reimplemented server must **handle**.
 | 0x0C | 0x501C30 | entity sub-packet: `[u16 handle][u16 itemTypeId][u8 sub_op][payload]` → per-type callback at `entity_def+356`; §5.9 |
 | 0x0D | 0x513760 | replication frame ACK |
 | 0x0E | 0x519AF0 | |
+| 0x06 | 0x513310 | client-fired-round — fixed 45 B (§5.16); host validates shooter authority + ammo via Server_ValidateAndFireRound and may emit S2C 0x0A trailing weapon-hit (§5.9.1) |
 | 0x0F | 0x514180 | client input frame (movement + buttons; ~33 ms cadence); len-2 form is the spawn-point query seen in the fallback spawn-menu loop |
 | 0x13 | 0x514330 | |
 | 0x14 | 0x501E00 | |
@@ -353,7 +354,7 @@ This is what a reimplemented server must **handle**.
 | 0x1C | 0x501D40 | |
 | 0x1D | 0x501C60 | |
 | 0x20 | 0x501F70 | |
-| 0x21 | 0x502050 | checksum reply (response to S2C 0x30/0x31) |
+| 0x21 | 0x502050 | anti-cheat CRC reply (§5.17) — reads u8 player_index + u32 expected_crc; host XORs computed CRC against per-connection salt at `playerCtx+89924`, mismatch logs "ACRC" + sends "PUNT ACRC" |
 | 0x22 | 0x514C90 | member of the client reply burst to S2C 0x0F / 0x4D |
 | 0x23 | 0x514D50 | burst member |
 | 0x24 | 0x514DC0 | |
@@ -388,8 +389,8 @@ This is what a reimplemented server must **handle**.
 | 0x44 | 0x510AE0 | |
 | 0x45 | 0x510C00 | |
 | 0x46 | 0x510D20 | |
-| 0x47 | 0x510ED0 | semantics unknown (client sends; C2S decompile sweep pending) |
-| 0x48 | 0x510F30 | semantics unknown (sweep pending) |
+| 0x47 | 0x510ED0 | client requests host re-broadcast its entity state — host serializes via sub_510890 and emits **S2C 0x75** to all sessions with NapiNPServer_SendFiltered(filter=1, flag=0x20). Confirmed in loopback: C f=715 0x47→S f=716 0x75. |
+| 0x48 | 0x510F30 | server-side no-op stub (handler body is empty). 4-byte payload observed in capture (`03 00 00 00`) is read off the wire and discarded. The `NapiNPClientMsg_0x048 @ 0x4284b0` exists on the client side for the inverse S2C 0x48 path, but no S2C 0x48 was observed in the 3-player capture. |
 | 0x49 | 0x510F40 | |
 | 0x4B | 0x510DC0 | |
 | 0x4C | 0x5111B0 | |
@@ -410,7 +411,11 @@ This is what a reimplemented server must **handle**.
 - Opcode handlers `0x6213B0`..`0x624340` mostly lack descriptive names.
 - msg_id values `0x86`/`0x87`/`0x88+` observed in the client-table tail; dispatch assignment
   unclear (possibly dead entries).
-- Phase B (full C2S decompile sweep) was never done; priority candidates 0x47, 0x48.
+- Phase B (full C2S decompile sweep): 0x47 / 0x48 / 0x06 / 0x21 / 0x0C-extended landed
+  (§5.10, §5.16, §5.17, plus the 0x47/0x48 entries above) against the 3-player loopback
+  pcap. Remaining C2S candidates without field maps yet: 0x22 / 0x23 / 0x28 / 0x29 (the
+  "burst-member" replies; tiny 3 B payloads in capture), 0x0F (no samples in the 3-player
+  capture), 0x33 / 0x37 (file-chunk re-request replies; need a C2S 0x60 / 0x64 flow).
 
 ## 5. Tag-level findings (audited against retail captures)
 
@@ -1087,6 +1092,113 @@ fixed compact record like §5.13/§5.14. Decoded skeleton lives in the IDA
 record; full field map deferred until a capture carrying live guided-weapon
 traffic exists (the 2026-06-16b loopback has none — no rockets fired during
 the on-foot/in-buggy session).
+
+### 5.16 C2S 0x06 — client-fired-round (3-player loopback 2026-06-16d)
+
+`[orig: NapiNPServerMsg_0x006_ClientFiredRound @ 0x513310]`. Fixed **45 B** body. The
+joiner reports a discrete weapon-fire event: origin, direction, target, body part hit,
+and a 5-u16 muzzle-offset block the host applies to the shooter entity's local
+coordinate frame (entity+1..6) before running `Server_ValidateAndFireRound @ 0x50BAA0`.
+On success, when `fire_flags & 1 == 0` (primary fire), the host advances the shooter's
+ammo-tick counter at `playerSlot+0x178D8` by `AdmDef_GetEntryByIndex(adm_index)[276]`
+(reload-cooldown ticks).
+
+| off | bytes | field | landing (host receiver) |
+|---|---|---|---|
+| 0 | 4 | `current_tick` (u32 LE) | tick anchor — compared against `playerSlot+0x178D8` for cooldown gate |
+| 4 | 2 | `shooter_handle` (u16 LE, `pool<<12\|slot`) | pool resolve via `g_pool_list`; `0xFFFF` or `(h&0xF000)>=0x5000` rejects |
+| 6 | 1 | `fire_flags` (u8) | bit 0 = "alt fire" (skips ammo decrement); → `dest[3]` |
+| 7 | 1 | `adm_index` (u8) | `AdmDef_GetEntryByIndex @ 0x53FC80` key (action-descriptor — same index space as §5.9.1 weapon-hit `adm_index`) |
+| 8 | 4 | `pos_x` (i32 LE, 16.16) | shooter world position at fire moment (entity+4 + map origin); → `dest[4]` |
+| 12 | 4 | `pos_y` | → `dest[5]` |
+| 16 | 4 | `pos_z` | → `dest[6]` |
+| 20 | 4 | `dir_x` (i32 LE) | fire direction — host applies `<< 16` (`dir_x_shifted`); wire is raw i32 LE; → `dest[7]` |
+| 24 | 4 | `dir_y` | same `<< 16` shift; → `dest[8]` |
+| 28 | 2 | `target_handle` (u16 LE) | hit entity; `0xFFFF` = no specific target; → `dest[16]` |
+| 30 | 2 | `hit_part` (u16 LE) | body-part / collision sub-section index; → `dest[17]` |
+| 32 | 1 | `extra_byte1` (u8) | → `dest[18]` |
+| 33 | 1 | `extra_byte2` (u8) | → `dword_C86FB4` (last-fire global) → `dest[19]` |
+| 34 | 1 | `misc_byte` (u8) | → `LOBYTE(dest[20])` |
+| 35 | 2 | `base_offset` (u16 LE) | applied to `shooter_entity[1]` before validate — relative muzzle x-base |
+| 37 | 2 | `offset_x` (u16 LE) | applied to `shooter_entity[2]` |
+| 39 | 2 | `offset_y` (u16 LE) | applied to `shooter_entity[3]` |
+| 41 | 2 | `offset_z` (u16 LE) | applied to `shooter_entity[4]` |
+| 43 | 2 | `offset_w` (u16 LE) | applied to `shooter_entity[5]` |
+
+**Cross-witness against `host_and_join_game_on_opennovaworld_loopback_threeplayers_more_gameplay.pcapng`:**
+- f=2057 (adm=7, fire_flags=0x02): `tick=15532061 pos=(-444.8, -413.2, 14.5) hit_part=1025`.
+- f=2061 (adm=7, +7 ticks ≈ 113 ms): `tick=15532068`, hit_part increments to 1026 — a monotonic
+  fire-counter / shot-sequence carried in `hit_part`.
+- f=2278: weapon switch → `adm=61, fire_flags=0x32` (alt fire bit set), distinct muzzle-offset
+  signature. The byte-witness pin is `tests/novaworld/nw_ingame_c2s_uplink_test::test_client_fired_round`.
+
+**Open follow-up:** `Server_ValidateAndFireRound` (sub_50BAA0) decompile would resolve how
+`current_tick` gates the ammo-cooldown check and what `dest[2]` / `dest[9]` are seeded for.
+Not pursued in this round.
+
+### 5.17 C2S 0x21 — anti-cheat CRC reply (3-player loopback 2026-06-16d)
+
+`[orig: handle_anti_cheat_crc_check @ 0x502050]`. Sent in response to S2C 0x30 (`0x5029B0`) /
+S2C 0x31 (`0x5024A0`) anti-cheat challenges. Effective wire shape is **5 B** (`u8 player_index
++ u32 expected_crc`), but every observed reply has 4 trailing zero bytes the handler never
+reads — `len=9 B` is the protocol layer's framing minimum, not a payload requirement.
+
+| off | bytes | field | landing (host receiver) |
+|---|---|---|---|
+| 0 | 1 | `player_index` (u8) | record index into the 276-stride `dest[]` player array; out-of-range early-returns |
+| 1 | 4 | `expected_crc` (u32 LE) | client's claim for `CRC_ComputeCustomTable(dest+idx*276, 276) ^ playerCtx[89924]` |
+| 5 | 4 | (trailing zeros) | observed-zero — handler does not advance the cursor past byte 5 |
+
+Host's validation [orig: 0x5020D5..0x5021CD]:
+1. Snapshot 6 volatile fields (`+64/+68/+72/+76/+104/+112`) of `dest[player_index*276]`.
+2. Zero them.
+3. `CRC_ComputeCustomTable @ 0x53C820` over the 276-B record.
+4. Restore the 6 fields.
+5. Compare `(computed_crc XOR playerCtx[89924])` against `expected_crc`.
+6. On mismatch — and only if `playerCtx[5] == 0 && playerCtx[96483] == 0 && playerCtx[89896]
+   == 0 && dword_B4C698 == 0` — call `Server_WritePuntLog(playerCtx, "ACRC", ...)` and, if
+   `playerCtx[96481] == 0`, send chat message `"PUNT ACRC"` via
+   `CNapiNPConnection_SendChatMessage @ 0x4C7EF0` to disconnect the cheater.
+
+**Cross-witness:** f=2101 (`player=18 expected_crc=0x42a13f29`), f=2388 / f=2694 (player=56,
+both `0x82c31207` — the second is a re-issued challenge against the same record). Byte-witness:
+`tests/novaworld/nw_ingame_c2s_uplink_test::test_client_checksum_reply`.
+
+### 5.18 C2S 0x47 / 0x48 — request entity-state broadcast + stub (3-player loopback 2026-06-16d)
+
+Resolved targets of the now-retired "Phase B sweep pending" TODO.
+
+**C2S 0x47** `[orig: NapiNPServerMsg_0x047_SendEntityState @ 0x510ED0]`. **Header-only, 0 B
+payload**. Acts as a request to host: "re-broadcast the sender's entity state to everyone".
+Host pulls the sender's player struct (`connection+352 → +192`), seeds the global
+`g_napi_msg_payload_buf` with `entityPtr` at offset 1128 and length-tag 32 at offset 1126,
+calls `sub_510890` to serialize 4096 B, then `NapiNPServer_SendFiltered(..., 0x75u, 1, 0,
+buf, len)` — i.e. **emits S2C 0x75 to every session** (filter=1, send_flag=0).
+
+Confirmed in the loopback: `C f=715 0x47 → S f=716 0x75 (len=2: "00 02")` and similarly at
+f=717 / f=719. The 4 C2S 0x47 events observed in the 3-player capture each triggered
+exactly one S2C 0x75 broadcast.
+
+**C2S 0x48** `[orig: NapiNPServerMsg_0x048 @ 0x510F30]`. Server-side **empty stub** — the
+function body is `void f() {}`. The 4-byte payload observed in capture (`03 00 00 00`,
+plausibly a client-side counter) is read off the wire by the protocol framing and discarded.
+
+The mirror `NapiNPClientMsg_0x048 @ 0x4284B0` exists on the client side — S2C 0x48 has a
+non-trivial handler — but no S2C 0x48 was emitted in the 3-player capture, so its semantics
+remain TBD. **Open follow-up:** decompile `NapiNPClientMsg_0x048 @ 0x4284B0` if a future
+capture surfaces an S2C 0x48 frame.
+
+### Cross-witness append for §5.10 — 3-player loopback 2026-06-16d
+
+The C2S 0x0C extended (type-10) field map decoded against the 2026-06-16b 2-player capture
+is independently confirmed against the 3-player capture by
+`tests/novaworld/nw_ingame_c2s_uplink_test::test_extended_uplink_stationary_on_foot`. Frame
+1905 (joiner s2, on-foot, stationary near `(-441.7, 376.7, 11.9)`) hits every field
+exactly: vehicle_handle = 0xFFFF, posXYZ = i32 16.16 LE world coords, heading = `0x382D`
+(i16), pitch = 0, four `(weapon_id, fire_counter)` pairs all non-zero (mid-game state with
+the player having fired all four loadout slots). The vehicle-mounted branch is exercised
+from f=2053 onward when the joiner mounts handle `0x1033` (pool 1 / slot 51) and positions
+flip to vehicle-LOCAL small-magnitude i32s — same wire shape, different host interpretation.
 
 ## 6. Struct reference
 

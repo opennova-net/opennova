@@ -267,6 +267,103 @@ bool decode_infantry_compact_record(const uint8_t *body, size_t len,
 	return consumed == 14;
 }
 
+// 5-B entity-packet sub-header used by S2C 0x0C and C2S 0x0C alike.
+// [orig: dispatch_entity_packet_callback @ 0x4D6A80] reads it on the host side;
+// [orig: Pool_SerializeEntityViaVTable @ 0x4D64E0] writes it on the sender side.
+bool decode_entity_packet_sub_header(const uint8_t *body, size_t len,
+                                     EntityPacketSubHeader &out,
+                                     size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.handle       = c.u16();
+	out.item_type_id = c.u16();
+	out.sub_op       = c.u8();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 5;
+}
+
+// §5.10 player extended uplink (mode 3/4, format 10). 43 B fixed body — i.e. the
+// 48 B C2S 0x0C frame minus the 5 B sub-header. Cross-witnessed against the
+// 2026-06-16b loopback frames cited in docs/net/novaworld-net-re.md §5.10.
+// [orig: NetPacket_SerializePlayerState case 3/4 @ 0x4C09C0]
+bool decode_player_extended_uplink(const uint8_t *body, size_t len,
+                                   PlayerExtendedUplink &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.vehicle_handle = c.u16();
+	out.pos_x          = int32_t(c.u32());
+	out.pos_y          = int32_t(c.u32());
+	out.pos_z          = int32_t(c.u32());
+	out.heading        = int16_t(c.u16());
+	out.pitch          = int16_t(c.u16());
+	out.reserved_18    = c.u8();
+	out.anim_slot_low  = c.u8();
+	out.flags_xor      = c.u8();
+	out.anim_def_1     = c.u8();
+	out.anim_def_2     = c.u8();
+	out.anim_def_3     = c.u8();
+	out.reserved_24    = c.u8();
+	out.stat_byte_0    = c.u8();
+	out.stat_byte_1    = c.u8();
+	out.weapon_id_0    = c.u16();
+	out.fire_counter_0 = c.u16();
+	out.weapon_id_1    = c.u16();
+	out.fire_counter_1 = c.u16();
+	out.weapon_id_2    = c.u16();
+	out.fire_counter_2 = c.u16();
+	out.weapon_id_3    = c.u16();
+	out.fire_counter_3 = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 43;
+}
+
+// C2S 0x06 client-fired-round. 45 B fixed.
+// [orig: NapiNPServerMsg_0x006_ClientFiredRound @ 0x513310]
+bool decode_client_fired_round(const uint8_t *body, size_t len,
+                               ClientFiredRound &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.current_tick    = c.u32();
+	out.shooter_handle  = c.u16();
+	out.fire_flags      = c.u8();
+	out.adm_index       = c.u8();
+	out.pos_x           = int32_t(c.u32());
+	out.pos_y           = int32_t(c.u32());
+	out.pos_z           = int32_t(c.u32());
+	out.dir_x           = int32_t(c.u32());
+	out.dir_y           = int32_t(c.u32());
+	out.target_handle   = c.u16();
+	out.hit_part        = c.u16();
+	out.extra_byte1     = c.u8();
+	out.extra_byte2     = c.u8();
+	out.misc_byte       = c.u8();
+	out.base_offset     = c.u16();
+	out.offset_x        = c.u16();
+	out.offset_y        = c.u16();
+	out.offset_z        = c.u16();
+	out.offset_w        = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 45;
+}
+
+// C2S 0x21 anti-cheat CRC reply. Handler reads u8 + u32 = 5 B effective; the
+// 9-B body observed in capture has 4 trailing zero bytes that the handler
+// never touches. We expose `consumed` so the caller can see the 5 vs 9 split.
+// [orig: handle_anti_cheat_crc_check @ 0x502050]
+bool decode_client_checksum_reply(const uint8_t *body, size_t len,
+                                  ClientChecksumReply &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.player_index = c.u8();
+	out.expected_crc = c.u32();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 5;
+}
+
 // §5.9.1 weapon-hit record. 17-20 B variable by flags gate (0x80, 0x40).
 // [orig: NetPacket_DeserializeWeaponHit @ 0x42F270]
 bool decode_weapon_hit_record(const uint8_t *body, size_t len,

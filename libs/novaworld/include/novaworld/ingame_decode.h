@@ -263,4 +263,127 @@ bool decode_infantry_compact_record(const uint8_t *body, size_t len,
 bool decode_weapon_hit_record(const uint8_t *body, size_t len,
                               WeaponHitRecord &out, size_t &consumed);
 
+// ===========================================================================
+// C2S 0x0C — per-entity client-to-host packet. Outer body starts with a 5-byte
+// sub-header `[u16 handle][u16 itemTypeId][u8 sub_op]` written by
+// [orig: Pool_SerializeEntityViaVTable @ 0x4D64E0] and parsed by
+// [orig: dispatch_entity_packet_callback @ 0x4D6A80]. `sub_op` selects the
+// per-entity callback's mode:
+//   0x0A (=10) → extended (type-10) — case 3/4, joiner uplink, §5.10 "Tag 0x0C body"
+//   0x0B (=11) → compact (type-11)  — case 1/2, S2C 0x0A trailing-record format
+// The compact decoders already exist above (PlayerCompactRecord +
+// VehicleCompactRecord + InfantryCompactRecord); the extended uplink lands here.
+// ===========================================================================
+
+struct EntityPacketSubHeader {
+	uint16_t handle = 0;        // pool<<12|slot of the entity this packet describes
+	uint16_t item_type_id = 0;  // (items.def id − 100000); §5.10b dispatch key
+	uint8_t  sub_op = 0;        // 0x0A=extended (type 10), 0x0B=compact (type 11)
+};
+
+// Decode the 5-byte sub-header. Returns true iff the read fit; on success
+// `consumed` is 5.
+bool decode_entity_packet_sub_header(const uint8_t *body, size_t len,
+                                     EntityPacketSubHeader &out,
+                                     size_t &consumed);
+
+// §5.10 extended (type-10) player uplink body — 43 B fixed. Decoded by
+// [orig: NetPacket_SerializePlayerState case 3/4 @ 0x4C09C0]. Joiner sends one
+// of these per frame for its own player entity. Two reserved bytes are read by
+// the receiver and discarded (cursor-advance only) — stored here for the
+// re-emitter's benefit.
+//
+// Position fields are 16.16 fixed-point. Vehicle-LOCAL when `vehicle_handle !=
+// 0xFFFF` (the host's case-4 path adds map origin only on the unmounted branch).
+//
+// The 8 trailing u16 pairs are the host-validated anti-cheat block: 4 ×
+// (weapon_id, fire_counter). The host compares these against its own per-slot
+// counters to detect shot/hit tally tampering.
+struct PlayerExtendedUplink {
+	uint16_t vehicle_handle = 0xFFFF;  // pool<<12|slot; 0xFFFF=none
+	int32_t  pos_x = 0;                // entity+0x234 / +4 (vehicle-local if mounted, else world + map_origin)
+	int32_t  pos_y = 0;                // entity+0x238 / +8
+	int32_t  pos_z = 0;                // entity+0x23C / +0xC
+	int16_t  heading = 0;              // entity+0x240 (sign-ext ×0x10000 = 32-bit BAM)
+	int16_t  pitch   = 0;              // entity+0x244 (sign-ext ×0x10000)
+	uint8_t  reserved_18 = 0;          // cursor advance, no read on host
+	uint8_t  anim_slot_low = 0;        // entity+0x12C low byte
+	uint8_t  flags_xor = 0;            // bits 2-4 XOR'd into entity+0x24
+	uint8_t  anim_def_1 = 0;           // entity+0x130
+	uint8_t  anim_def_2 = 0;           // entity+0x131
+	uint8_t  anim_def_3 = 0;           // entity+0x132
+	uint8_t  reserved_24 = 0;          // read into AL, discarded
+	uint8_t  stat_byte_0 = 0;          // playerSlot+0x15F78
+	uint8_t  stat_byte_1 = 0;          // playerSlot+0x15F79
+
+	// Anti-cheat block: 4 × (weapon_id_u16, fire_counter_u16). On the wire
+	// every counter is a u16; the host stores it zero-extended into a u32
+	// field (playerSlot+0x17094 / +0x17098 / +0x1709C / +0x170A0).
+	uint16_t weapon_id_0 = 0;          // playerSlot+0x1708A
+	uint16_t fire_counter_0 = 0;       // playerSlot+0x17094 (zero-ext)
+	uint16_t weapon_id_1 = 0;          // playerSlot+0x1708C
+	uint16_t fire_counter_1 = 0;       // playerSlot+0x17098 (zero-ext)
+	uint16_t weapon_id_2 = 0;          // playerSlot+0x1708E
+	uint16_t fire_counter_2 = 0;       // playerSlot+0x1709C (zero-ext)
+	uint16_t weapon_id_3 = 0;          // playerSlot+0x17090
+	uint16_t fire_counter_3 = 0;       // playerSlot+0x170A0 (zero-ext)
+};
+
+// Decode a 43-B extended uplink body (the bytes AFTER the 5-byte sub-header).
+// Returns true iff 43 B were consumed cleanly.
+bool decode_player_extended_uplink(const uint8_t *body, size_t len,
+                                   PlayerExtendedUplink &out, size_t &consumed);
+
+// ===========================================================================
+// C2S 0x06 — "client fired round". Fixed 45 B. Joiner reports a single
+// weapon-fire event (origin + direction + target + body part hit + muzzle
+// offset block). Server validates against the shooter's authority + ammo
+// state and runs Server_ValidateAndFireRound (which may emit S2C 0x0A trailing
+// weapon-hit records, §5.9.1, when validation succeeds).
+// [orig: NapiNPServerMsg_0x006_ClientFiredRound @ 0x513310]
+// ===========================================================================
+
+struct ClientFiredRound {
+	uint32_t current_tick = 0;        // server-side game tick anchor
+	uint16_t shooter_handle = 0xFFFF; // pool<<12|slot; >= 0x5000 high nibble = invalid
+	uint8_t  fire_flags = 0;          // bit 0 set → "alt fire" path (ammo not deducted)
+	uint8_t  adm_index = 0;           // AdmDef_GetEntryByIndex key — action descriptor (§5.9.1 shares this)
+	int32_t  pos_x = 0;               // fire origin world coords (i32 LE, 16.16)
+	int32_t  pos_y = 0;
+	int32_t  pos_z = 0;
+	int32_t  dir_x = 0;               // direction (host shifts << 16 to BAM-extend); wire is raw i32 LE
+	int32_t  dir_y = 0;
+	uint16_t target_handle = 0xFFFF;  // 0xFFFF = no target
+	uint16_t hit_part = 0;            // body part / collision sub-section
+	uint8_t  extra_byte1 = 0;         // → dest[18] / extra_val1
+	uint8_t  extra_byte2 = 0;         // → dword_C86FB4 global (last-fire context)
+	uint8_t  misc_byte = 0;           // → LOBYTE(dest[20])
+	uint16_t base_offset = 0;         // dest[10] += this — muzzle offset on entity coords
+	uint16_t offset_x = 0;            // dest[11] += this
+	uint16_t offset_y = 0;            // dest[12] += this
+	uint16_t offset_z = 0;            // dest[13] += this
+	uint16_t offset_w = 0;            // dest[14] += this
+};
+
+bool decode_client_fired_round(const uint8_t *body, size_t len,
+                               ClientFiredRound &out, size_t &consumed);
+
+// ===========================================================================
+// C2S 0x21 — anti-cheat CRC reply. Fixed 9 B (effective 5; trailing 4 B are
+// observed-zero in capture and discarded by the handler). Sent in response to
+// S2C 0x30 / 0x31 challenges. Host re-computes CRC over the indexed 276-byte
+// player record (with 6 volatile fields temporarily zeroed), XORs against a
+// per-connection salt (`playerCtx+89924`), and compares against the reply's
+// `expected_crc`. Mismatch logs "ACRC" and disconnects with "PUNT ACRC".
+// [orig: handle_anti_cheat_crc_check @ 0x502050]
+// ===========================================================================
+
+struct ClientChecksumReply {
+	uint8_t  player_index = 0;      // index into the 276-stride player array
+	uint32_t expected_crc = 0;      // u32 LE; host XORs computed CRC vs salt before compare
+};
+
+bool decode_client_checksum_reply(const uint8_t *body, size_t len,
+                                  ClientChecksumReply &out, size_t &consumed);
+
 } // namespace opennova

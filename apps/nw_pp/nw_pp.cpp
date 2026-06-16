@@ -393,9 +393,9 @@ const char *tag_label(char dir, int tag) {
 		switch (tag) {
 			case 0x00: return "JOIN";
 			case 0x06: return "fired-round";
-			case 0x0C: return "entity-input";            // §5.9
+			case 0x0C: return "entity-uplink";            // §5.10 (extended type-10)
 			case 0x0D: return "replication-ack";
-			case 0x0F: return "input-frame";
+			case 0x0F: return "spawn-query";              // §5.9 (len-2 = spawn-point query)
 			case 0x16: return "chat";
 			case 0x21: return "checksum-reply";
 			case 0x22: return "burst";
@@ -403,6 +403,9 @@ const char *tag_label(char dir, int tag) {
 			case 0x28: return "burst";
 			case 0x29: return "burst";
 			case 0x2C: return "rtt-consumed";
+			case 0x47: return "ping";                     // observed len=0 header-only
+			case 0x48: return "client-ack";               // observed 4 B
+			case 0x4C: return "client-state-byte";        // observed 1 B (=0x01)
 			default: return nullptr;
 		}
 	}
@@ -703,6 +706,121 @@ void print_infantry_compact_record(const InfantryCompactRecord &r) {
 	            unsigned(r.anim_byte));
 }
 
+void print_player_extended_uplink(const PlayerExtendedUplink &r) {
+	std::printf("            extended: vehHdl=%s pos=(%.1f, %.1f, %.1f) "
+	            "hdg=%d pitch=%d animLow=0x%02x flagsXor=0x%02x "
+	            "animDef=(%u,%u,%u) stat=(0x%02x,0x%02x)\n",
+	            handle_str(r.vehicle_handle).c_str(),
+	            fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z),
+	            int(r.heading), int(r.pitch),
+	            unsigned(r.anim_slot_low), unsigned(r.flags_xor),
+	            unsigned(r.anim_def_1), unsigned(r.anim_def_2),
+	            unsigned(r.anim_def_3),
+	            unsigned(r.stat_byte_0), unsigned(r.stat_byte_1));
+	std::printf("            weapons: "
+	            "(id=0x%04x ctr=%u) (id=0x%04x ctr=%u) "
+	            "(id=0x%04x ctr=%u) (id=0x%04x ctr=%u)\n",
+	            unsigned(r.weapon_id_0), unsigned(r.fire_counter_0),
+	            unsigned(r.weapon_id_1), unsigned(r.fire_counter_1),
+	            unsigned(r.weapon_id_2), unsigned(r.fire_counter_2),
+	            unsigned(r.weapon_id_3), unsigned(r.fire_counter_3));
+}
+
+// C2S 0x0C — joiner per-frame uplink. Parses the 5-byte sub-header and
+// dispatches on `sub_op`: 0x0A → extended (player only, §5.10 case 3/4),
+// 0x0B → compact (would be S2C-shaped; not expected on C2S). Other classes
+// reject modes 3/4 with return −1 (§5.10b line 886), so on C2S we should only
+// ever see player+extended in practice.
+void print_tag_0c_c2s(const std::vector<uint8_t> &body) {
+	EntityPacketSubHeader hdr;
+	size_t consumed = 0;
+	if (!decode_entity_packet_sub_header(body.data(), body.size(), hdr,
+	                                     consumed)) {
+		std::printf("        [0x0C C2S] sub-header decode failed (len=%zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x0C C2S] hdl=%s type=%s sub_op=0x%02x(%s) (%zu B body)\n",
+	            handle_str(hdr.handle).c_str(),
+	            type_str(hdr.item_type_id).c_str(),
+	            unsigned(hdr.sub_op),
+	            hdr.sub_op == 0x0A ? "extended" :
+	            hdr.sub_op == 0x0B ? "compact" : "?",
+	            body.size() - consumed);
+	const uint8_t *rest = body.data() + consumed;
+	const size_t   rest_len = body.size() - consumed;
+	if (hdr.sub_op == 0x0A) {
+		PlayerExtendedUplink r;
+		size_t used = 0;
+		if (decode_player_extended_uplink(rest, rest_len, r, used)) {
+			print_player_extended_uplink(r);
+			if (used < rest_len)
+				std::printf("            trailing %zu B: %s\n",
+				            rest_len - used,
+				            to_hex_sample(rest + used, rest_len - used).c_str());
+		} else {
+			std::printf("            extended decode failed (consumed=%zu of %zu): %s\n",
+			            used, rest_len,
+			            to_hex_sample(rest, rest_len).c_str());
+		}
+	} else if (hdr.sub_op == 0x0B) {
+		PlayerCompactRecord r;
+		size_t used = 0;
+		if (decode_player_compact_record(rest, rest_len, r, used)) {
+			print_player_compact_record(r);
+		} else {
+			std::printf("            compact decode failed (consumed=%zu of %zu): %s\n",
+			            used, rest_len,
+			            to_hex_sample(rest, rest_len).c_str());
+		}
+	} else if (rest_len) {
+		std::printf("            unknown sub_op, raw: %s\n",
+		            to_hex_sample(rest, rest_len).c_str());
+	}
+}
+
+void print_tag_06_c2s(const std::vector<uint8_t> &body) {
+	ClientFiredRound r;
+	size_t used = 0;
+	if (!decode_client_fired_round(body.data(), body.size(), r, used)) {
+		std::printf("        [0x06 C2S] decode failed (consumed=%zu of %zu): %s\n",
+		            used, body.size(),
+		            to_hex_sample(body.data(), body.size()).c_str());
+		return;
+	}
+	std::printf("        [0x06 C2S] tick=%u shooter=%s flags=0x%02x adm=%u "
+	            "pos=(%.1f, %.1f, %.1f) dir=(%.4f, %.4f) target=%s hit_part=%u "
+	            "extras=(0x%02x,0x%02x,0x%02x) muzzle=(off=0x%04x x=0x%04x y=0x%04x z=0x%04x w=0x%04x)\n",
+	            r.current_tick, handle_str(r.shooter_handle).c_str(),
+	            unsigned(r.fire_flags), unsigned(r.adm_index),
+	            fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z),
+	            fp16(r.dir_x), fp16(r.dir_y),
+	            handle_str(r.target_handle).c_str(), unsigned(r.hit_part),
+	            unsigned(r.extra_byte1), unsigned(r.extra_byte2),
+	            unsigned(r.misc_byte),
+	            unsigned(r.base_offset), unsigned(r.offset_x),
+	            unsigned(r.offset_y), unsigned(r.offset_z),
+	            unsigned(r.offset_w));
+}
+
+void print_tag_21_c2s(const std::vector<uint8_t> &body) {
+	ClientChecksumReply r;
+	size_t used = 0;
+	if (!decode_client_checksum_reply(body.data(), body.size(), r, used)) {
+		std::printf("        [0x21 C2S] decode failed (need 5 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x21 C2S] player=%u expected_crc=0x%08x",
+	            unsigned(r.player_index), r.expected_crc);
+	if (body.size() > used) {
+		std::printf(" trailing %zu B: %s",
+		            body.size() - used,
+		            to_hex_sample(body.data() + used, body.size() - used).c_str());
+	}
+	std::printf("\n");
+}
+
 void print_weapon_hit_record(const WeaponHitRecord &r) {
 	std::printf("            weapon-hit: flags=0x%02x adm=%u sub=%u target=%s "
 	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%04x pitch=0x%04x dmgExtra=0x%04x",
@@ -941,6 +1059,9 @@ void print_payload(char dir, int frame, int tag,
 	if (dir == 'S' && tag == 0x0A) print_tag_0a(payload);
 	else if (dir == 'S' && tag == 0x0D) print_tag_0d(payload);
 	else if (dir == 'S' && tag == 0x20) print_tag_20(payload);
+	else if (dir == 'C' && tag == 0x0C) print_tag_0c_c2s(payload);
+	else if (dir == 'C' && tag == 0x06) print_tag_06_c2s(payload);
+	else if (dir == 'C' && tag == 0x21) print_tag_21_c2s(payload);
 	else if (!payload.empty()) std::printf("        %s\n",
 	                                       to_hex_sample(payload.data(),
 	                                                     payload.size()).c_str());
