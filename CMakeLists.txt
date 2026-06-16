@@ -91,6 +91,10 @@ add_subdirectory(apps/common)
 # Standalone novaworld server — gate UDP + NW UDP (+ HTTP when BUILD_NOVAWORLD_HTTP).
 add_subdirectory(apps/novaworld_server)
 
+# nw_pp — in-game packet pretty-printer for RE sanity-check (reads the
+# `NW_INGAME_HEXCAP`-style hexcap and dumps decoded tags).
+add_subdirectory(apps/nw_pp)
+
 set(OPENNOVA_CORE_TARGETS
     opennova_pcx
     opennova_fnt
