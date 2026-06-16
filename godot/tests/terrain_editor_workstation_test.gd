@@ -232,7 +232,7 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 		if child is Button:
 			var bar_label := child.find_child("BarButtonLabel", true, false) as Label
 			row_texts.append(bar_label.text if bar_label != null else "")
-	assert_eq(row_texts, ["Mission", "Terrain", "Object", "Fonts", "Credits", "Strings", "Menus", "Menu Styles", "Music", "Sound"],
+	assert_eq(row_texts, ["Mission", "Terrain", "Object", "Fonts", "Credits", "Strings", "Menus", "Music", "Sound"],
 		"The bar should list every viewport workspace; Environment stays on its top-bar toggle, not the bar.")
 
 	assert_false(_has_label_text(workspace_rail, "World"), "Workspace groups should use separators, not inline category words.")
@@ -273,7 +273,7 @@ func test_every_workspace_rail_button_has_an_icon() -> void:
 			if icon_rect != null:
 				assert_not_null(icon_rect.texture, "the dock button icon should resolve to a workspace texture")
 			checked += 1
-	assert_eq(checked, 10, "all ten workspace rows checked")
+	assert_eq(checked, 9, "all nine workspace rows checked")
 
 
 func test_icon_library_resolves_every_registered_icon_id() -> void:

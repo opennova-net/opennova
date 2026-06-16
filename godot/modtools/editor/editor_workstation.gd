@@ -10,11 +10,10 @@ const CreditsWorkspaceAdapter = preload("res://modtools/editor/credits_workspace
 const StringsWorkspaceAdapter = preload("res://modtools/strings/strings_workspace.gd")
 const SoundWorkspaceAdapter = preload("res://modtools/sound/sound_workspace.gd")
 const MnuWorkspaceAdapter = preload("res://modtools/mnu/mnu_workspace.gd")
-const MnsWorkspaceAdapter = preload("res://modtools/mnu/mns_workspace.gd")
 const MusicWorkspaceAdapter = preload("res://modtools/editor/music_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
 
-enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC, SOUND, MNU, MNU_STYLES }
+enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC, SOUND, MNU }
 
 # Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
 # shows the non-popup ones in order. The enum below stays only as stable id
@@ -318,7 +317,6 @@ func _workspace_defs() -> Array:
 		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter, false, &"Interface", &"credits"),
 		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter, false, &"Interface", &"strings"),
 		WorkspaceDef.make(Workspace.MNU, MnuWorkspaceAdapter, false, &"Interface", &"menu"),
-		WorkspaceDef.make(Workspace.MNU_STYLES, MnsWorkspaceAdapter, false, &"Interface", &"menu_style"),
 		WorkspaceDef.make(Workspace.MUSIC, MusicWorkspaceAdapter, false, &"Audio", &"music"),
 		WorkspaceDef.make(Workspace.SOUND, SoundWorkspaceAdapter, false, &"Atmosphere", &"sound"),
 		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true, &"Atmosphere", &"environment"),
@@ -736,17 +734,22 @@ func open_in_workspace(kind: String, path: String, focus: Dictionary = {}) -> Er
 	return OK
 
 
-# The registry id of the workspace declaring `kind` as its open-resource kind
-# (-1 when no workspace does). Covers the popup workspace too, so jumps can
-# target Environment.
+# The registry id of the workspace declaring `kind` as one of its open-resource
+# kinds (-1 when no workspace does). Covers the popup workspace too, so jumps
+# can target Environment. A workspace can claim multiple kinds via
+# get_open_resource_kinds() (Menus claims both "menu" and "menu_style" since the
+# stylesheet merged in).
 func _workspace_id_for_resource_kind(kind: String) -> int:
 	if kind.is_empty():
 		return -1
 	for def_v in _workspace_defs_cache:
 		var def := def_v as WorkspaceDef
 		var workspace := _workspace_for_id(def.id)
-		if workspace != null and String(workspace.get_open_resource_kind()) == kind:
-			return def.id
+		if workspace == null:
+			continue
+		for claimed in workspace.get_open_resource_kinds():
+			if String(claimed) == kind:
+				return def.id
 	return -1
 
 
@@ -908,42 +911,6 @@ func _nav_tooltip(verb: String, entry: Dictionary) -> String:
 	if file.is_empty():
 		return "%s to %s" % [verb, label]
 	return "%s to %s (%s)" % [verb, label, file]
-
-
-# Cross-jump used by the Menus inspector's "Edit style": open the menu
-# stylesheet in Menu Styles and focus the given variable. With no stylesheet in
-# the resource folder the user still lands in the workspace (where New seeds
-# one) with a status hint.
-func open_menu_styles_workspace(variable: String = "") -> Error:
-	_ensure_workspaces()
-	var path := _resolve_menu_stylesheet_path()
-	if path.is_empty():
-		show_status_message("No menu_style.mns in the resource folder. Create one in Menu Styles.", 5.0)
-		set_active_workspace(Workspace.MNU_STYLES)
-		return ERR_FILE_NOT_FOUND
-	var clean := variable.strip_edges()
-	var focus := {"variable": clean} if not clean.is_empty() else {}
-	var err := open_in_workspace("menu_style", path, focus)
-	if err != OK:
-		return err
-	show_status_message("Editing style %s." % (clean if not clean.is_empty() else path.get_file()), 3.0)
-	return OK
-
-
-# The canonical stylesheet, as an openable path: loose file first, then the
-# VFS bare name (the workspace's open_file VFS branch reads it), then any
-# indexed .mns entry.
-func _resolve_menu_stylesheet_path() -> String:
-	var root := _resource_library.get_resource_root()
-	if root == null or root.get_root_dir().is_empty():
-		return ""
-	var resolved := String(root.resolve_file("menu_style.mns"))
-	if not resolved.is_empty():
-		return resolved
-	if root.has_file("menu_style.mns"):
-		return "menu_style.mns"
-	var listed := root.list_files(".mns")
-	return String(listed[0]) if listed.size() > 0 else ""
 
 
 # Re-index the resource folder (the browser pane consumes this as an injected
