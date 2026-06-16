@@ -620,18 +620,26 @@ header; the rest is client-side.
 |---|---|---|
 | ref0/ref1/ref2 | 3× i32 | tick/reference header → dword_A822E4/E8/EC |
 | flags1 | u8 | `0x04`→loadprog `dword_A8235C=10`; `0x02`→`byte_A860DC`; `0x01`→death/spectator (camera reset, `CameraOffset.Z=0xD000`, spawn-gate `dword_24C1928`) |
-| flags2 | u8 | low 2 bits select a sub-block |
-| sub-block 0 | `==0`: 6× u8 + u8 (`0xFF` sentinel) + i32 | player aim/state → dword_A85B5C… |
-| sub-block 1 | `==1`: 4× u8 + i16 | `dword_24C1958 = 62 × i16` (62 Hz timer; `-1` if negative) |
-| sub-block 2 (ENV) | `==2`: u16,u16,u16,u8,u8,u8,u8,u8 | `Env_FogDistTarget=u16<<16`, `Env_FogDistAccelClamp=u16<<8`, `Env_CurTimeFixed24=u16<<13` (TOD), `Env_QuakeTicks`, `Env_CloudScrollRateTarget=u8<<10`, u8<<8, `Env_OvercastBlendTarget=u8<<8`, u8 |
-| sub-block 3 | `==3 && g_GameType&0x20000`: 4× i32 | dword_AC86E8… |
-| pflags | u8 | `<<8`, player pad7 flag bits |
-| mountHandle | u16 | vehicle-mount handle (`pool<<12\|slot`; `0xFFFF`=none) |
-| health | i16 | → `g_local_player_entity->Health` (drop triggers damage flash) |
-| event loop | trailing `[u8 tag]…` | `tag==2`→`NetPacket_DeserializeWeaponHit`; `tag==1`→ entity handle + itemTypeId lookup → per-item callback; ends at `tag==0`/EOB |
+| flags2 | u8 | low 2 bits select sub-block; bit 3 (`0x08`) gates a 6 B vehicle-passenger record after the fixed tail (joiner-as-passenger; only the `(flags2 & 0xF) == 8` exact value triggers it — i.e. sub-block 0 + passenger bit) [orig: 0x430459] |
+| sub-block 0 | `==0`: 6× u8 + u8 (`0xFF` sentinel) + i32, 11 B | player aim/state → dword_A85B5C… [orig: 0x430054..0x43012E] |
+| sub-block 1 | `==1`: 4× u8 + i16, 6 B | `dword_24C1958 = 62 × i16` (62 Hz timer; `-1` if negative) [orig: 0x430191..0x430210] |
+| sub-block 2 (ENV) | `==2`: u16,u16,u16,u8,u8,u8,u8,u8, 11 B | `Env_FogDistTarget=u16<<16`, `Env_FogDistAccelClamp=u16<<8`, `Env_CurTimeFixed24=u16<<13` (TOD), `Env_QuakeTicks`, `Env_CloudScrollRateTarget=u8<<10`, u8<<8, `Env_OvercastBlendTarget=u8<<8`, u8 [orig: 0x430253..0x430341] |
+| sub-block 3 | `==3 && g_GameType & 0x20000`: 4× i32, 16 B (else 0 B) | dword_AC86E8… — gate is wire-invisible; receivers without the bit set skip these 16 bytes entirely [orig: 0x430361..0x4303C8] |
+| state_flag_byte | u8 | bit 0→`dword_B76484`, bit 1→`dword_B76480`, bits 0/1→`g_local_player_entity.pad7[12]` bits 8/9 (the `<<8` of older notes was the receiver's internal shift, not a wire-format detail) [orig: 0x4303E5] |
+| mountHandle | u16 | vehicle-mount handle (`pool<<12\|slot`; `0xFFFF`=none) [orig: 0x430408] |
+| health | i16 | → `g_local_player_entity->Health` (drop triggers damage flash) [orig: 0x430428] |
+| state_word | i16 | → `*(WORD*)g_local_player_entity->pad7` (packed state) — bytes 6/7 of the 7 B tail; previously misread as two separate `hdr_trail_a/b` bytes [orig: 0x430442] |
+| **passenger record (conditional, `(flags2 & 0xF) == 8`)** | 6 B (or 2 B early-skip) | — |
+| passenger_handle | u16 | passenger entity handle; `0xFFFF` early-skips the next 4 B [orig: 0x430474] |
+| seat_yaw | u16 | rider body yaw [orig: 0x4304C3] |
+| seat_pitch | u16 | rider body pitch [orig: 0x4304DC] |
+| event loop | trailing `[u8 tag]…` | tags exactly `{0,1,2}` — `cmp eax,2 / jg` at `0x4306DA` treats any tag ≥3 as silent terminator (same exit as `tag==0`); `tag==1`→`[u16 handle][u16 typeId]` then per-class callback (§5.10b); `tag==2`→§5.9.1 weapon-hit; ends at `tag==0`/EOB/tag≥3 [orig: 0x4306A1, handle@0x43070C, typeId@0x43076B] |
 
 (The handler was undefined in the IDB — a data blob mis-marked at the `0x430000` page boundary;
-defined 2026-06-16.)
+defined 2026-06-16. Sub-block + tail field maps fully witnessed 2026-06-16c via
+`NapiNPClientMsg_0x00A` grill: the previously empirical `hdr_trail_a/b` 2-byte trailer is refuted
+— it's the high half of the `state_word i16`. The `(flags2 & 0xF) == 8` vehicle-passenger record
+appears 4× in the 2026-06-16b loopback capture, all on sub-block 0 frames.)
 
 **Tag 0x0C (C2S) — entity sub-packet** `[orig: NapiNPServerMsg_0x00C @ 0x501C30 →
 dispatch_entity_packet_callback @ 0x4D6A80]`. The joiner's per-frame uplink for an entity it
@@ -780,12 +788,29 @@ them; player callback's compact path doesn't either).
 Stage C2 (2026-06-16): the player callback decoded in §5.10 is one of a wider
 family. The dispatch is data-driven: a 24-byte class-table entry at
 `g_entity_class_table @ 0x813000` holds `{char tag[8]; void* fn[4]}` per entity
-class, where `fn[3]` is the network-serialize callback. The items.def
-`ai_function` / `move_function` / `render_function` / `disk_function` directives
-on each item select a class (e.g. `move_function cveh`), so all items sharing
-that class tag share the same callback.
+class. `fn[3]` is the network-serialize callback (slot semantics:
+`fn[0]`=damage/death/per-tick, `fn[1]`=init-from-def/model-binding,
+`fn[2]`=network spawn-state companion, `fn[3]`=wire serialize). The table has
+**41 entries × 24 B = 0x3D8 bytes** (terminator at `0x8133D8`).
 
-Network-serialize callbacks observed in the table:
+The items.def `ai_function` / `move_function` / `render_function` / `disk_function`
+directives on each item select a class (e.g. `move_function cveh`), and at
+items.def load time the engine copies the matching `fn[3]` into `ItemDef+0x164`.
+**At packet-dispatch time the class table is bypassed.** The 0x0A receiver
+inlines `ItemList_FindIndexByTypeId`'s algorithm at `0x430786..0x4307A2` —
+linear scan of `gItemDefs @ 0xB46250` (stride 2780, count @ `0xB46254`,
+comparing `.id` at `gItemDefs[i] + 0x50`) — then invokes
+`(*(void(*)(stream))(gItemDefs[idx] + 0x164))(stream)` directly at
+`0x430814..0x430828`. No 4-character tag indirection per packet.
+
+**Desync detection** [orig: 0x4307C4]: receiver runs a consistency check after
+the callback — if `entity.defPtr != gItemDefs + idx*2780` OR
+`defPtr->id != wire_typeId` OR `entity.defIndex != idx`, it queues reliable
+message 0x0F via `CNapiNetwork_QueueReliableMessage @ 0x4C4FA0` (mode 1,
+payload = entity handle).
+
+Network-serialize callbacks observed in the table (14 networked entries with
+`fn[3] != 0`):
 
 | class tag | callback | wire user | wire formats |
 |---|---|---|---|
@@ -794,13 +819,18 @@ Network-serialize callbacks observed in the table:
 | `CHel` / `cveh` / `cbot` / `cpln` / `ctrn` | `Entity_SerializeMountedVehicleState @ 0x460560` | vehicles + AI ground/air units | compact only — §5.13 |
 | `rokt` / `stng` / `hlfr` / `jvln` / `arty` | `Entity_SerializeGuidedMissileState @ 0x447C50` | guided weapons (rockets, missiles, artillery) | 4 modes × 6 sub-fields delta codec — §5.15 (TBD) |
 
+**Non-networked entries (27 with `fn[3] == 0`)**, kept in the table for the
+other `fn[]` slots (damage / init / spawn-companion): `null`, `brrl`, `envs`,
+`ewep`, `ele0`, `gnrc`, `gnrl`, `gnl2`, `flag`, `squib`, `nade`, `schl`,
+`clym`, `vmne`, `lndm`, `bldg`, `bld2`, `cran`, `door`, `target`, `emit`,
+`towr`, `tree`, `palm`, `psec`, `pwrp`, `aflr`, `gflr`. These never appear in
+S2C 0x0A trailers — they're either static (client-side spawn-only) or
+replicated via tag 0x0D / 0x10 batches.
+
 The player gets BOTH formats because it both sends C2S 0x0C (extended uplink)
 and is replicated to other clients in S2C 0x0A trailers (compact). Vehicles /
 AI / weapons are server-pushed only: their callbacks reject modes 3/4
-(extended) with `return -1`. The class table itself only matters when the
-0x0A receiver walks an event-loop record and needs to know "which N bytes is
-this entity's compact record" — at decode time we resolve via
-`ItemList_FindIndexByTypeId(wireType) → gItemDefs[idx]` and read `+356`.
+(extended) with `return -1`.
 
 ### 5.11 Tag 0x0D — pool-entity spawn batch (loopback capture 2026-06-16b)
 
