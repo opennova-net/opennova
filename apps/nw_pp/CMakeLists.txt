@@ -16,6 +16,8 @@ target_link_libraries(nw_pp
         opennova_novaworld
         opennova_napi
         opennova_novacrypto
+        opennova_def
+        opennova_scr
 )
 
 target_compile_features(nw_pp PRIVATE cxx_std_17)

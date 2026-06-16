@@ -25,6 +25,7 @@
 //   nw_pp <capture-path> 0x0d 0x20      # filter to listed S2C tags
 //   NW_INGAME_HEXCAP=<hexcap> nw_pp     # env-driven, hexcap only (test contract)
 
+#include <def/def.h>
 #include <napi/envelope.h>
 #include <napi/tlv.h>
 #include <novacrypto/nwu.h>
@@ -32,6 +33,7 @@
 #include <novaworld/protocol_message.h>
 #include <novaworld/session_hello.h>
 #include <novaworld/session_keys.h>
+#include <scr/scr.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -42,6 +44,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace opennova;
@@ -331,19 +334,159 @@ std::string to_hex_sample(const uint8_t *p, size_t n, size_t cap = 48) {
 
 double fp16(int32_t v) { return double(v) / 65536.0; }
 
+// Pool taxonomy from docs/engine-primer.md + docs/world/world-wac-ai-re.md:
+// 0=organics (player + dynamic spawned units), 1=items (vehicles, spawn
+// points, props), 2=buildings/static, 3=markers (waypoints, nav, objectives).
+const char *pool_label(unsigned p) {
+	switch (p) {
+		case 0: return "organics";
+		case 1: return "items";
+		case 2: return "buildings";
+		case 3: return "markers";
+		default: return "?";
+	}
+}
+
 std::string handle_str(uint16_t h) {
-	char buf[24];
+	char buf[40];
 	if (h == 0xFFFF) std::snprintf(buf, sizeof(buf), "0xFFFF=none");
-	else std::snprintf(buf, sizeof(buf), "0x%04x p%u/s%u", h,
-	                   unsigned(h >> 12), unsigned(h & 0xFFF));
+	else std::snprintf(buf, sizeof(buf), "0x%04x p%u(%s)/s%u", h,
+	                   unsigned(h >> 12), pool_label(unsigned(h >> 12)),
+	                   unsigned(h & 0xFFF));
 	return buf;
 }
 
+// Tag labels from docs/net/novaworld-net-re.md §4 dispatch tables. Short
+// human names just to orient the reader of nw_pp output; not exhaustive,
+// just the tags we've seen flow in real captures.
+const char *tag_label(char dir, int tag) {
+	if (dir == 'S') {
+		switch (tag) {
+			case 0x00: return "init";
+			case 0x02: return "post-handshake";
+			case 0x0A: return "per-frame-update";       // §5.9
+			case 0x0B: return "BMS-header";              // §5.4
+			case 0x0C: return "entity-spawn-batch";
+			case 0x0D: return "pool-spawn";              // §5.11
+			case 0x0F: return "world-state-load";
+			case 0x10: return "static-entity-batch";    // §5.9
+			case 0x16: return "player-list";
+			case 0x1A: return "wait-for-game-start-ack";
+			case 0x1D: return "spawn-success-gate";      // §5.2
+			case 0x1E: return "game-event";
+			case 0x20: return "pool3-sync";              // §5.12
+			case 0x26: return "kill-sync";
+			case 0x40: return "capture-zone-state";
+			case 0x45: return "terrain-load";
+			case 0x46: return "player-sync";
+			case 0x4E: return "kill-by-slot";
+			case 0x57: return "rtt-echo";
+			case 0x5A: return "weapon-loadout";
+			case 0x60: return "file-chunk";
+			case 0x61: return "session-key";
+			case 0x64: return "mission-chunk";
+			case 0x6F: return "cinematic-camera";
+			case 0x7B: return "full-player-info";
+			default: return nullptr;
+		}
+	} else {
+		switch (tag) {
+			case 0x00: return "JOIN";
+			case 0x06: return "fired-round";
+			case 0x0C: return "entity-input";            // §5.9
+			case 0x0D: return "replication-ack";
+			case 0x0F: return "input-frame";
+			case 0x16: return "chat";
+			case 0x21: return "checksum-reply";
+			case 0x22: return "burst";
+			case 0x23: return "burst";
+			case 0x28: return "burst";
+			case 0x29: return "burst";
+			case 0x2C: return "rtt-consumed";
+			default: return nullptr;
+		}
+	}
+}
+
+// ItemDef.id → display_name resolution. Populated when --items <path> is
+// given on the CLI. Resolves type_ids in 0x0D / 0x20 record dumps so the
+// reader sees "type=0x04bd [d_5ton truck]" instead of just a hex id.
+std::unordered_map<int, std::string> g_item_names;
+
+std::string type_str(uint16_t type) {
+	// display_name field is 128 bytes in DefItemDef; a 192-byte stack
+	// buffer comfortably holds the longest name + the "0xNNNN[...]" wrap.
+	char buf[192];
+	auto it = g_item_names.find(int(type));
+	if (it == g_item_names.end()) {
+		std::snprintf(buf, sizeof(buf), "0x%04x", type);
+		return buf;
+	}
+	std::snprintf(buf, sizeof(buf), "0x%04x[%s]", type, it->second.c_str());
+	return buf;
+}
+
+// Load items.def into g_item_names. Accepts plaintext or SCR-encrypted
+// input — the libs/scr decryptor expects the SCR magic in the first 3
+// bytes, otherwise we treat the file as plaintext .def. Returns count
+// of items loaded, 0 on any failure.
+size_t load_items_def(const char *path) {
+	std::ifstream f(path, std::ios::binary | std::ios::ate);
+	if (!f) {
+		std::fprintf(stderr, "items: failed to open %s\n", path);
+		return 0;
+	}
+	const std::streamsize n = f.tellg();
+	if (n <= 0) return 0;
+	std::vector<uint8_t> raw(static_cast<size_t>(n));
+	f.seekg(0);
+	if (!f.read(reinterpret_cast<char *>(raw.data()), n)) return 0;
+
+	const uint8_t *plain = raw.data();
+	size_t plain_size = raw.size();
+	std::vector<uint8_t> decrypted;
+	if (scr_is_scr(raw.data(), raw.size())) {
+		decrypted.resize(raw.size());
+		size_t out_size = decrypted.size();
+		if (scr_decrypt_buf(raw.data(), raw.size(), decrypted.data(),
+		                    &out_size, SCR_KEY_JO_DFX2) != 0) {
+			std::fprintf(stderr, "items: SCR decrypt failed for %s\n", path);
+			return 0;
+		}
+		decrypted.resize(out_size);
+		plain = decrypted.data();
+		plain_size = decrypted.size();
+	}
+
+	DefItemsFile items{};
+	if (def_parse_items_memory(plain, plain_size, &items) != 0) {
+		std::fprintf(stderr, "items: def_parse_items_memory failed\n");
+		return 0;
+	}
+	// The wire `itemTypeId` is `items.def.id - 100000` (cross-witnessed
+	// 2026-06-16: wire 0x050b=1291 ↔ items.def `id 101291` "Drivable Dune
+	// Buggy", wire 0x14B9=5305 ↔ id 105305 "Player #1 (Multiplayer)",
+	// wire 0x04b0=1200 ↔ id 101200 "Drivable Indonesian LCT"). Engine
+	// loader presumably folds the 100000 offset out before storing the
+	// runtime `gItemDefs[i].id` field that `ItemList_FindIndexByTypeId
+	// @ 0x49E100` compares against.
+	for (size_t i = 0; i < items.count; ++i) {
+		const DefItemDef &it = items.entries[i];
+		const int wire_id = it.id - 100000;
+		if (wire_id >= 0 && wire_id < 0x10000)
+			g_item_names[wire_id] = it.display_name;
+	}
+	const size_t loaded = items.count;
+	def_free_items(&items);
+	return loaded;
+}
+
 void print_pool_spawn_record(int index, const PoolSpawnRecord &r) {
-	std::printf("        record %d flags=0x%04x slot=%s type=0x%04x "
+	std::printf("        record %d flags=0x%04x slot=%s type=%s "
 	            "name=%-12s pos=(%.1f, %.1f, %.1f)",
 	            index, r.spawn_flags, handle_str(r.slot_id).c_str(),
-	            r.item_type_id, ("\"" + r.entity_name + "\"").c_str(),
+	            type_str(r.item_type_id).c_str(),
+	            ("\"" + r.entity_name + "\"").c_str(),
 	            fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z));
 	if (r.spawn_flags & 0x0020) std::printf(" entity36=0x%08x", r.entity_flags);
 	if (r.spawn_flags & 0x0001) std::printf(" velX");
@@ -385,10 +528,10 @@ void print_pool3_sync_record(uint16_t slot_idx, const Pool3SyncRecord &r) {
 		            unsigned(slot_idx));
 		return;
 	}
-	std::printf("        slot %u type=0x%04x flags=0x%02x "
+	std::printf("        slot %u type=%s flags=0x%02x "
 	            "pos=(%.1f, %.1f, %.1f)",
-	            unsigned(slot_idx), r.item_type_id, r.flags_byte,
-	            fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z));
+	            unsigned(slot_idx), type_str(r.item_type_id).c_str(),
+	            r.flags_byte, fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z));
 	if (r.flags_byte & 0x01) std::printf(" parent=0x%08x", r.parent_handle);
 	if (r.flags_byte & 0x02) std::printf(" orient=0x%08x", r.orientation_val);
 	if (r.flags_byte & 0x04) std::printf(" ammo=%u", unsigned(r.ammo_count));
@@ -430,7 +573,9 @@ struct DirState {
 
 void print_payload(char dir, int frame, int tag,
                    const std::vector<uint8_t> &payload) {
-	std::printf("[%c f=%-4d tag=0x%02x len=%zu]\n", dir, frame, tag,
+	const char *label = tag_label(dir, tag);
+	std::printf("[%c f=%-4d tag=0x%02x%s%s%s len=%zu]\n", dir, frame, tag,
+	            label ? "[" : "", label ? label : "", label ? "]" : "",
 	            payload.size());
 	if (dir == 'S' && tag == 0x0D) print_tag_0d(payload);
 	else if (dir == 'S' && tag == 0x20) print_tag_20(payload);
@@ -470,24 +615,35 @@ void process_protocol(const std::vector<uint8_t> &body, const std::string &scrk,
 
 int main(int argc, char *argv[]) {
 	const char *path = nullptr;
+	const char *items_path = nullptr;
 	std::set<int> tag_filter;
 	for (int i = 1; i < argc; ++i) {
 		const char *a = argv[i];
-		if (a[0] == '0' && (a[1] == 'x' || a[1] == 'X')) {
+		if (std::strcmp(a, "--items") == 0 && i + 1 < argc) {
+			items_path = argv[++i];
+		} else if (a[0] == '0' && (a[1] == 'x' || a[1] == 'X')) {
 			tag_filter.insert(int(std::strtol(a, nullptr, 16)));
 		} else if (!path) {
 			path = a;
 		}
 	}
 	if (!path) path = std::getenv("NW_INGAME_HEXCAP");
+	if (!items_path) items_path = std::getenv("NW_PP_ITEMS");
 	if (!path || !*path) {
 		std::fprintf(stderr,
-		             "usage: nw_pp <capture-path> [0xNN ...]\n"
+		             "usage: nw_pp <capture-path> [--items <items.def>] [0xNN ...]\n"
 		             "       path is a .pcap / .pcapng (parsed natively)\n"
 		             "       or a hexcap text file (one '<srcport> <frame> "
 		             "<hex>' per line)\n"
-		             "       NW_INGAME_HEXCAP env supplies a hexcap path\n");
+		             "       NW_INGAME_HEXCAP env supplies a hexcap path\n"
+		             "       --items / NW_PP_ITEMS gives a JO items.def "
+		             "(plaintext or SCR-encrypted with the JO/DFX2 key)\n"
+		             "       so type_ids in 0x0D/0x20 records show as names\n");
 		return 1;
+	}
+	if (items_path && *items_path) {
+		const size_t n = load_items_def(items_path);
+		std::fprintf(stderr, "loaded %zu item names from %s\n", n, items_path);
 	}
 
 	std::vector<Datagram> dgrams;
