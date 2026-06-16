@@ -413,6 +413,64 @@ const char *tag_label(char dir, int tag) {
 // reader sees "type=0x04bd [d_5ton truck]" instead of just a hex id.
 std::unordered_map<int, std::string> g_item_names;
 
+// Per-item §5.10b dispatch class — selects which compact decoder runs on a
+// tag==1 record inside S2C 0x0A's trailing event loop. Keyed by wire_id
+// (items.def id − 100000). Populated alongside `g_item_names` in
+// `load_items_def`. Unmapped item ids print as "(class=Unknown, raw N B)"
+// and halt the walker (fail closed — we don't know how many bytes to skip).
+enum class EntityClass {
+	Unknown,
+	Player,    // §5.10  18 B fixed
+	Infantry,  // §5.14  14 B fixed
+	Vehicle,   // §5.13  15 B mounted / 21 B unmounted (data-dependent)
+	Guided,    // §5.15  variable-length delta codec (deferred)
+};
+std::unordered_map<uint16_t, EntityClass> g_item_class;
+
+// Map a 4-char items.def class-tag string (case-sensitive — the §5.10b table
+// is exact-match) to its EntityClass. Drives `g_item_class` population in
+// `load_items_def`.
+//
+// Direct witnesses (§5.10b):
+//   plyr → Player
+//   org0, org1 → Infantry
+//   CHel, cveh, cbot, cpln, ctrn → Vehicle
+//   rokt, stng, hlfr, jvln, arty → Guided
+//
+// Tags that *appear* as items.def directive values but aren't in §5.10b
+// (e.g. ctank, catv, cbike from move_function) are inferred by family but
+// not yet IDA-witnessed; default them to Unknown until an items.def survey
+// or a class-table read confirms.
+EntityClass class_from_tag(const char *tag) {
+	if (!tag || tag[0] == '\0') return EntityClass::Unknown;
+	if (std::strcmp(tag, "plyr") == 0) return EntityClass::Player;
+	if (std::strcmp(tag, "org0") == 0 ||
+	    std::strcmp(tag, "org1") == 0) return EntityClass::Infantry;
+	if (std::strcmp(tag, "cveh") == 0 ||
+	    std::strcmp(tag, "chel") == 0 ||
+	    std::strcmp(tag, "CHel") == 0 ||
+	    std::strcmp(tag, "cbot") == 0 ||
+	    std::strcmp(tag, "cpln") == 0 ||
+	    std::strcmp(tag, "ctrn") == 0) return EntityClass::Vehicle;
+	if (std::strcmp(tag, "rokt") == 0 ||
+	    std::strcmp(tag, "stng") == 0 ||
+	    std::strcmp(tag, "hlfr") == 0 ||
+	    std::strcmp(tag, "jvln") == 0 ||
+	    std::strcmp(tag, "arty") == 0 ||
+	    std::strcmp(tag, "arti") == 0) return EntityClass::Guided;
+	return EntityClass::Unknown;
+}
+
+const char *class_name(EntityClass c) {
+	switch (c) {
+		case EntityClass::Player:   return "Player";
+		case EntityClass::Infantry: return "Infantry";
+		case EntityClass::Vehicle:  return "Vehicle";
+		case EntityClass::Guided:   return "Guided";
+		default:                    return "Unknown";
+	}
+}
+
 std::string type_str(uint16_t type) {
 	// display_name field is 128 bytes in DefItemDef; a 192-byte stack
 	// buffer comfortably holds the longest name + the "0xNNNN[...]" wrap.
@@ -473,8 +531,21 @@ size_t load_items_def(const char *path) {
 	for (size_t i = 0; i < items.count; ++i) {
 		const DefItemDef &it = items.entries[i];
 		const int wire_id = it.id - 100000;
-		if (wire_id >= 0 && wire_id < 0x10000)
+		if (wire_id >= 0 && wire_id < 0x10000) {
 			g_item_names[wire_id] = it.display_name;
+			// §5.10b: the engine reads ItemDef+356 to dispatch the per-entity
+			// network-serialize callback; that field is seeded from one of the
+			// 4 *_function class-tag directives at items.def load time. We
+			// haven't IDA-witnessed which directive specifically — but the
+			// player has `ai_function plyr` (matching the documented `plyr →
+			// SerializePlayerState` callback), so ai_function is the primary
+			// signal. Fall back to move_function for items that omit it.
+			EntityClass cls = class_from_tag(it.ai_function);
+			if (cls == EntityClass::Unknown)
+				cls = class_from_tag(it.move_function);
+			if (cls != EntityClass::Unknown)
+				g_item_class[uint16_t(wire_id)] = cls;
+		}
 	}
 	const size_t loaded = items.count;
 	def_free_items(&items);
@@ -564,6 +635,255 @@ void print_tag_20(const std::vector<uint8_t> &body) {
 		                        batch.records[i]);
 }
 
+// Tiny bounds-checked cursor for the 0x0A header walk. Mirrors the Cursor in
+// libs/novaworld/src/ingame_decode.cpp; kept local here so nw_pp doesn't drag
+// the libs' internal cursor type into a public header.
+struct PpCursor {
+	const uint8_t *p;
+	const uint8_t *end;
+	bool ok = true;
+	uint8_t  u8()  { if (!ok || p + 1 > end) { ok = false; return 0; }
+	                 return *p++; }
+	uint16_t u16() { if (!ok || p + 2 > end) { ok = false; return 0; }
+	                 uint16_t v = uint16_t(p[0]) | uint16_t(p[1]) << 8;
+	                 p += 2; return v; }
+	int16_t  i16() { return int16_t(u16()); }
+	uint32_t u32() { if (!ok || p + 4 > end) { ok = false; return 0; }
+	                 uint32_t v = uint32_t(p[0]) | uint32_t(p[1]) << 8 |
+	                              uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
+	                 p += 4; return v; }
+	int32_t  i32() { return int32_t(u32()); }
+	void     skip(size_t n) { if (!ok || p + n > end) { ok = false; return; }
+	                          p += n; }
+};
+
+void print_player_compact_record(const PlayerCompactRecord &r) {
+	std::printf("            player: vehBone=%u seat=%u vehHdl=%s "
+	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%02x pitch=0x%02x "
+	            "anim=%u state=0x%02x weapAnim=%u prio=%u animDef=%u health=0x%02x\n",
+	            unsigned(r.vehicle_bone), unsigned(r.seat_type),
+	            handle_str(r.vehicle_handle).c_str(),
+	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
+	            unsigned(r.pos_z_compressed),
+	            unsigned(r.yaw_byte), unsigned(r.pitch_byte),
+	            unsigned(r.anim_slot_low), unsigned(r.state_flags),
+	            unsigned(r.weapon_anim_state), unsigned(r.priority),
+	            unsigned(r.anim_def_index), unsigned(r.health_class_byte));
+}
+
+void print_vehicle_compact_record(const VehicleCompactRecord &r) {
+	std::printf("            vehicle: parent=%s pos=(0x%04x,0x%04x,0x%04x) "
+	            "yawHigh=%d flags=0x%02x %s",
+	            handle_str(r.parent_slot_handle).c_str(),
+	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
+	            unsigned(r.pos_z_compressed), int(r.yaw_high),
+	            unsigned(r.flags_byte), r.is_mounted ? "MOUNTED" : "unmounted");
+	if (r.is_mounted) {
+		std::printf(" secHdg=0x%04x", unsigned(r.secondary_heading));
+	} else {
+		std::printf(" weap=(x=0x%04x y=0x%04x z=0x%04x hdg=0x%04x)",
+		            unsigned(r.weapon_x_compressed),
+		            unsigned(r.weapon_y_raw),
+		            unsigned(r.weapon_z_compressed),
+		            unsigned(r.weapon_heading_compressed));
+	}
+	std::printf(" finalHdg=0x%04x\n", unsigned(r.final_heading));
+}
+
+void print_infantry_compact_record(const InfantryCompactRecord &r) {
+	std::printf("            infantry: seatBone=%u vehHdl=%s "
+	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%02x flags=0x%02x "
+	            "pitch=0x%02x aimYaw=0x%02x anim=0x%02x\n",
+	            unsigned(r.seat_bone_idx),
+	            handle_str(r.vehicle_slot_handle).c_str(),
+	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
+	            unsigned(r.pos_z_compressed),
+	            unsigned(r.yaw_byte), unsigned(r.flags_byte),
+	            unsigned(r.pitch_byte), unsigned(r.aim_yaw_byte),
+	            unsigned(r.anim_byte));
+}
+
+// Walk a S2C 0x0A body: fixed header per §5.9 plus trailing event loop.
+// Event tags: 0=EOB, 1=per-entity compact record, 2=weapon-hit. Fails closed
+// on any unknown tag — prints the offset and stops.
+void print_tag_0a(const std::vector<uint8_t> &body) {
+	PpCursor c{body.data(), body.data() + body.size(), true};
+
+	// Fixed header per §5.9 (line 615): 3× i32 refs, flags1, flags2 (sub-block
+	// selector in low 2 bits), variable sub-block, pflags, mountHandle (u16),
+	// health (i16).
+	const int32_t ref0 = c.i32();
+	const int32_t ref1 = c.i32();
+	const int32_t ref2 = c.i32();
+	const uint8_t flags1 = c.u8();
+	const uint8_t flags2 = c.u8();
+	const unsigned sub_idx = unsigned(flags2 & 0x03);
+
+	std::printf("        [0x0A] refs=(0x%08x,0x%08x,0x%08x) flags1=0x%02x "
+	            "flags2=0x%02x sub=%u\n",
+	            uint32_t(ref0), uint32_t(ref1), uint32_t(ref2),
+	            unsigned(flags1), unsigned(flags2), sub_idx);
+
+	// Witnessed sub-block sizes (sub=2 ENV decodes cleanly and matches the
+	// §5.9 field list). Sub=0/1/3 sizes are still per the §5.9 table but the
+	// observed sub=1/sub=3 payloads on the 2026-06-16b loopback look bigger
+	// than the table suggests — exact widths need a grill-ida pass against
+	// `NapiNPClientMsg_0x00A @ 0x42FEC0`. Sub=3's 4×i32 branch is gated by
+	// `g_GameType & 0x20000` (wire-invisible); skipping 0 B by default
+	// matches non-objective gametypes.
+	bool sub_decoded = false;
+	switch (sub_idx) {
+		case 0:
+			c.skip(11);  // 6× u8 + u8 sentinel + i32 per §5.9
+			sub_decoded = true;
+			break;
+		case 1:
+			c.skip(6);   // 4× u8 + i16 per §5.9 (suspect: wire seems wider)
+			break;
+		case 2: {
+			const uint16_t fog_dist     = c.u16();
+			const uint16_t fog_accel    = c.u16();
+			const uint16_t tod_fixed    = c.u16();
+			const uint8_t  quake_ticks  = c.u8();
+			const uint8_t  cloud_scroll = c.u8();
+			const uint8_t  cloud_byte2  = c.u8();
+			const uint8_t  overcast     = c.u8();
+			const uint8_t  env_trail    = c.u8();
+			std::printf("            env: fogDist=0x%04x fogAccel=0x%04x "
+			            "todFixed=0x%04x quake=%u clouds=(0x%02x,0x%02x) "
+			            "overcast=0x%02x trail=0x%02x\n",
+			            unsigned(fog_dist), unsigned(fog_accel),
+			            unsigned(tod_fixed), unsigned(quake_ticks),
+			            unsigned(cloud_scroll), unsigned(cloud_byte2),
+			            unsigned(overcast), unsigned(env_trail));
+			sub_decoded = true;
+			break;
+		}
+		case 3:
+			// Gated on `g_GameType & 0x20000`; default to skip 0 B (the
+			// common case) and rely on the post-header event-loop scan
+			// catching a stale alignment.
+			break;
+	}
+
+	const uint8_t  pflags = c.u8();
+	const uint16_t mount  = c.u16();
+	const int16_t  health = c.i16();
+	if (!c.ok) {
+		std::printf("            header: underrun before pflags\n");
+		return;
+	}
+	// Witnessed empirically against the 2026-06-16b loopback: two trailing
+	// bytes after health gate the event-loop start. In most captured frames
+	// they're (0x00, 0x00) and the next byte is the event tag (1/2) with a
+	// plausible handle/typeId, decoding 1383 records cleanly (61 Player + 1322
+	// Vehicle). A minority of sub=2 frames have (0xFF, 0x01) here and the
+	// player record starts 1 byte later — possibly a variable-length flag-byte
+	// field. TODO grill-ida: decompile `NapiNPClientMsg_0x00A @ 0x42FEC0` and
+	// name them precisely.
+	const uint8_t hdr_trail_a = c.u8();
+	const uint8_t hdr_trail_b = c.u8();
+	std::printf("            header: pflags=0x%02x mount=%s health=%d "
+	            "trail=(0x%02x,0x%02x)\n",
+	            unsigned(pflags), handle_str(mount).c_str(), int(health),
+	            unsigned(hdr_trail_a), unsigned(hdr_trail_b));
+
+	// Wire-alignment trip: sub != 0/2 sub-block widths are not fully witnessed.
+	// If the post-header bytes don't look like a plausible event loop (health
+	// out of [0, 200] AND tag isn't 0/1/2), warn the user the rest is suspect
+	// before we start dispatching against possibly-stale offsets.
+	if (!sub_decoded) {
+		std::printf("            (sub=%u sub-block width unwitnessed — event "
+		            "loop alignment TBD per §5.9 / NapiNPClientMsg_0x00A IDA "
+		            "witness)\n", sub_idx);
+	}
+
+	// Event loop. Tag==0 EOB, tag==1 per-entity, tag==2 weapon-hit.
+	// We assume `[u8 tag][u16 handle][u16 typeId]<compact-record>` for tag==1
+	// — header order not pinned in §5.9 line 631; confirm via IDA decompile
+	// of NapiNPClientMsg_0x00A @ 0x42FEC0 event loop body if records misalign.
+	int rec_idx = 0;
+	while (c.ok && c.p < c.end) {
+		const size_t tag_off = size_t(c.p - body.data());
+		const uint8_t tag = c.u8();
+		if (tag == 0) {
+			std::printf("            [eob] %zu B leftover\n",
+			            size_t(c.end - c.p));
+			return;
+		}
+		if (tag == 2) {
+			// §5.9: NetPacket_DeserializeWeaponHit. Field map not in docs yet;
+			// hex-dump the remainder and stop the walker.
+			std::printf("            tag=0x02 weapon-hit @+%zu (§5.9 — field "
+			            "map deferred) %zu B remaining\n",
+			            tag_off, size_t(c.end - c.p));
+			return;
+		}
+		if (tag == 1) {
+			const uint16_t handle  = c.u16();
+			const uint16_t type_id = c.u16();
+			if (!c.ok) {
+				std::printf("            tag=0x01 @+%zu underrun in record "
+				            "header\n", tag_off);
+				return;
+			}
+			auto it = g_item_class.find(type_id);
+			const EntityClass cls = (it == g_item_class.end())
+			                         ? EntityClass::Unknown : it->second;
+			const size_t avail = size_t(c.end - c.p);
+			std::printf("            rec %d @+%zu hdl=%s type=%s class=%s\n",
+			            rec_idx, tag_off, handle_str(handle).c_str(),
+			            type_str(type_id).c_str(), class_name(cls));
+			rec_idx++;
+			size_t consumed = 0;
+			bool ok = false;
+			switch (cls) {
+				case EntityClass::Player: {
+					PlayerCompactRecord r;
+					ok = decode_player_compact_record(c.p, avail, r, consumed);
+					if (ok) print_player_compact_record(r);
+					break;
+				}
+				case EntityClass::Vehicle: {
+					VehicleCompactRecord r;
+					ok = decode_vehicle_compact_record(c.p, avail, r, consumed);
+					if (ok) print_vehicle_compact_record(r);
+					break;
+				}
+				case EntityClass::Infantry: {
+					InfantryCompactRecord r;
+					ok = decode_infantry_compact_record(c.p, avail, r, consumed);
+					if (ok) print_infantry_compact_record(r);
+					break;
+				}
+				case EntityClass::Guided:
+				case EntityClass::Unknown:
+				default:
+					// Either guided (§5.15 deferred — variable-length delta
+					// codec) or unknown class — both fail closed since we
+					// don't know how many bytes to skip.
+					std::printf("            (no fixed decoder, %zu B remain) "
+					            "halting walker — %s\n", avail,
+					            to_hex_sample(c.p, avail).c_str());
+					return;
+			}
+			if (!ok) {
+				std::printf("            DECODE FAILED (consumed=%zu, avail=%zu) — "
+				            "halting walker\n", consumed, avail);
+				return;
+			}
+			c.p += consumed;
+			continue;
+		}
+		// Unknown event tag — fail closed.
+		std::printf("            tag=0x%02x @+%zu UNKNOWN — halting walker, "
+		            "%zu B remaining: %s\n", unsigned(tag), tag_off,
+		            size_t(c.end - c.p),
+		            to_hex_sample(c.p, size_t(c.end - c.p)).c_str());
+		return;
+	}
+}
+
 struct DirState {
 	ProtocolReassemblyState rs;
 	bool have_pending = false;
@@ -577,7 +897,8 @@ void print_payload(char dir, int frame, int tag,
 	std::printf("[%c f=%-4d tag=0x%02x%s%s%s len=%zu]\n", dir, frame, tag,
 	            label ? "[" : "", label ? label : "", label ? "]" : "",
 	            payload.size());
-	if (dir == 'S' && tag == 0x0D) print_tag_0d(payload);
+	if (dir == 'S' && tag == 0x0A) print_tag_0a(payload);
+	else if (dir == 'S' && tag == 0x0D) print_tag_0d(payload);
 	else if (dir == 'S' && tag == 0x20) print_tag_20(payload);
 	else if (!payload.empty()) std::printf("        %s\n",
 	                                       to_hex_sample(payload.data(),
