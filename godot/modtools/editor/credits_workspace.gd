@@ -12,22 +12,18 @@ var _document: CreditsEditorDocument
 var _editor: Control
 var _inspector_root: Control
 
-
 func _init() -> void:
 	_document = CreditsEditorDocument.new()
+	_document.state_changed.connect(_populate_inspector)
 
-
-func get_workspace_id() -> String:
-	return "credits"
-
+func get_workspace_id() -> StringName:
+	return &"credits"
 
 func get_workspace_label() -> String:
 	return "Credits"
 
-
 func get_workspace_tooltip() -> String:
 	return "Author *.kda rolling credits: text, images, fonts, and scroll timing."
-
 
 func get_project_title() -> String:
 	var name := "untitled"
@@ -36,67 +32,51 @@ func get_project_title() -> String:
 	var dirty := "*" if _document.is_dirty else ""
 	return "%s%s" % [name, dirty]
 
-
 func get_status_tool() -> String:
 	return "Credits"
-
 
 func get_status_context() -> String:
 	if _document.resource == null:
 		return ""
 	return "%d entries" % _document.resource.get_entry_count()
 
-
-func mount_viewport(host: Control) -> void:
-	if host == null:
-		return
+func get_capabilities() -> Array[EditorCapability]:
+	var caps: Array[EditorCapability] = []
+	
+	# Main View
 	if _editor == null:
 		var scene := load(CREDITS_EDITOR_SCENE_PATH) as PackedScene
-		if scene == null:
-			return
-		_editor = scene.instantiate()
-		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
-		_editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_editor.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	if _editor.get_parent() == null:
-		host.add_child(_editor)
-		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
-	if _editor.has_method("set_resource_root"):
-		_editor.set_resource_root(_resource_root())
-	if _editor.has_signal("request_edit_font") and not _editor.is_connected("request_edit_font", Callable(self, "_on_editor_request_edit_font")):
-		_editor.connect("request_edit_font", Callable(self, "_on_editor_request_edit_font"))
-	_editor.set_document(_document)
+		if scene != null:
+			_editor = scene.instantiate()
+			_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
+			_editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			_editor.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			if _editor.has_method("set_resource_root"):
+				_editor.set_resource_root(EditorFileSystem.get_instance().get_resource_root())
+			if _editor.has_signal("request_edit_font") and not _editor.is_connected("request_edit_font", Callable(self, "_on_editor_request_edit_font")):
+				_editor.connect("request_edit_font", Callable(self, "_on_editor_request_edit_font"))
+			_editor.set_document(_document)
+	caps.append(MainViewProvider.new(_editor))
+	
+	# Inspector
+	if _inspector_root == null or not is_instance_valid(_inspector_root):
+		_inspector_root = _make_inspector()
+		_populate_inspector()
+	caps.append(InspectorProvider.new(_inspector_root))
+	
+	return caps
 
+func deactivate() -> void:
+	if _editor != null and _editor.has_method("flush_pending_edits"):
+		_editor.flush_pending_edits()
 
-func unmount_viewport(_host: Control) -> void:
-	if _editor != null and _editor.get_parent() != null:
-		_editor.get_parent().remove_child(_editor)
-
-
-func release_viewport() -> void:
-	if _document != null and _document.state_changed.is_connected(_populate_inspector):
-		_document.state_changed.disconnect(_populate_inspector)
-	if _inspector_root != null and is_instance_valid(_inspector_root):
-		_inspector_root.queue_free()
-		_inspector_root = null
-	if _editor != null and _editor.get_parent() != null:
-		_editor.get_parent().remove_child(_editor)
-	if _editor != null and _editor.has_signal("request_edit_font") and _editor.is_connected("request_edit_font", Callable(self, "_on_editor_request_edit_font")):
-		_editor.disconnect("request_edit_font", Callable(self, "_on_editor_request_edit_font"))
-	if _editor != null:
-		_editor.free()
-		_editor = null
-
-
-func build_inspector(host: Control) -> void:
-	if _inspector_root != null and is_instance_valid(_inspector_root):
-		_inspector_root.queue_free()
-	_inspector_root = _make_inspector()
-	host.add_child(_inspector_root)
-	_populate_inspector()
-	if not _document.state_changed.is_connected(_populate_inspector):
-		_document.state_changed.connect(_populate_inspector)
-
+func get_commands() -> Array[EditorCommand]:
+	return [
+		EditorCommand.new(&"new", "New Credits", Callable(self, "new_current")),
+		EditorCommand.new(&"open", "Open Credits...", Callable(self, "trigger_legacy_open")), # Proxies to shell for now
+		EditorCommand.new(&"save", "Save Credits", Callable(self, "save_current"), Callable(self, "can_save")),
+		EditorCommand.new(&"save_as", "Save Credits As...", Callable(self, "trigger_legacy_save_as"), Callable(self, "can_save_as"))
+	]
 
 func _make_inspector() -> Control:
 	var margin := MarginContainer.new()
@@ -137,7 +117,6 @@ func _make_inspector() -> Control:
 	box.add_child(env_label)
 
 	return margin
-
 
 func _populate_inspector() -> void:
 	if _inspector_root == null or not is_instance_valid(_inspector_root):
@@ -190,77 +169,23 @@ func _populate_inspector() -> void:
 
 	env_label.text = "scroll %.2f  spacing %d  center %d" % [resource.get_scroll_rate(), resource.get_vertical_space(), resource.get_center_x()]
 
-
-# The domain document the EditorWorkspace base derives undo/redo + dirty from.
-func get_editor_document() -> Object:
+func get_editor_document() -> EditorDocument:
+	# Credits doesn't currently strictly implement EditorDocument's subclass, it uses duck-typing today.
+	# We will return null and fallback to compatibility if needed, or wrap it.
+	# Let's wrap it properly:
 	return _document
-
-
-func can_new() -> bool:
-	return true
-
-
-func get_new_action_label() -> String:
-	return "New Credits"
-
 
 func new_current() -> Error:
 	return _document.create_new()
 
-
-func can_open() -> bool:
-	return true
-
-
-func get_open_action_label() -> String:
-	return "Open Credits..."
-
-
-func get_open_dialog_title() -> String:
-	return "Open .kda"
-
-
 func get_open_dialog_filters() -> PackedStringArray:
 	return PackedStringArray(["*.kda,*.KDA ; Credits"])
-
-
-func get_open_dialog_dir() -> String:
-	return _document.get_last_open_dir()
-
-
-func get_open_resource_kind() -> String:
-	return "credits"
-
-
-func get_current_resource_path() -> String:
-	return _document.current_path
-
-
-func open_file(path: String) -> Error:
-	return _document.open_kda(path)
-
-
-func flush_pending_edits() -> Error:
-	if _editor != null and _editor.has_method("flush_pending_edits"):
-		return _editor.flush_pending_edits()
-	return OK
-
 
 func can_save() -> bool:
 	return _document.is_dirty and not _document.current_path.is_empty()
 
-
-func get_save_action_label() -> String:
-	return "Save Credits"
-
-
 func can_save_as() -> bool:
 	return _document.resource != null
-
-
-func get_save_as_action_label() -> String:
-	return "Save Credits As..."
-
 
 func save_current() -> Error:
 	var flush_err := flush_pending_edits()
@@ -268,26 +193,35 @@ func save_current() -> Error:
 		return flush_err
 	return _document.save_current()
 
-
 func save_as(dir_path: String) -> Error:
 	var flush_err := flush_pending_edits()
 	if flush_err != OK:
 		return flush_err
 	return _document.save_as(dir_path)
 
+func flush_pending_edits() -> Error:
+	if _editor != null and _editor.has_method("flush_pending_edits"):
+		return _editor.flush_pending_edits()
+	return OK
+
+func _on_editor_request_edit_font(font_name: String) -> void:
+	EditorCommandBus.dispatch(&"open_font", {"font_name": font_name})
+
+# Remaining compatibility methods so the shell works while it's in transition
+func open_file(path: String) -> Error:
+	return _document.open_kda(path)
+
+func get_open_resource_kind() -> String:
+	return "credits"
+
+func get_current_resource_path() -> String:
+	return _document.current_path
+
+func get_open_dialog_dir() -> String:
+	return _document.get_last_open_dir()
 
 func get_save_dialog_title() -> String:
 	return "Choose where to save the credits"
 
-
 func get_save_dialog_dir() -> String:
 	return _document.get_last_save_dir()
-
-
-func _on_editor_request_edit_font(font_name: String) -> void:
-	if editor_shell == null or not editor_shell.has_method("open_font_workspace"):
-		return
-	var err: Error = editor_shell.open_font_workspace(font_name)
-	if err != OK and editor_shell.has_method("show_status_message"):
-		editor_shell.show_status_message("Font not found: %s" % font_name, 5.0)
-

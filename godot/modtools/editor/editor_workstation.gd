@@ -1,24 +1,7 @@
 class_name EditorWorkstation
 extends Control
 
-const TerrainWorkspaceAdapter = preload("res://modtools/editor/terrain_workspace.gd")
-const EnvironmentWorkspaceAdapter = preload("res://modtools/editor/environment_workspace.gd")
-const ObjectWorkspaceAdapter = preload("res://modtools/object/object_workspace.gd")
-const MissionWorkspaceAdapter = preload("res://modtools/editor/mission_workspace.gd")
-const FontsWorkspaceAdapter = preload("res://modtools/editor/fonts_workspace.gd")
-const CreditsWorkspaceAdapter = preload("res://modtools/editor/credits_workspace.gd")
-const StringsWorkspaceAdapter = preload("res://modtools/strings/strings_workspace.gd")
-const SoundWorkspaceAdapter = preload("res://modtools/sound/sound_workspace.gd")
-const MnuWorkspaceAdapter = preload("res://modtools/mnu/mnu_workspace.gd")
-const MusicWorkspaceAdapter = preload("res://modtools/editor/music_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
-
-enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC, SOUND, MNU }
-
-# Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
-# shows the non-popup ones in order. The enum below stays only as stable id
-# constants and for the two genuine per-workspace branches (env popup, tile gizmo).
-
 
 enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 
@@ -86,9 +69,8 @@ const _RECENT_CLEAR_META := "::clear::"
 @onready var _progress_counts_label: Label = %ProgressCountsLabel
 
 var editor: Node
-var _active_workspace_id: int = Workspace.TERRAIN
+var _active_workspace_id: StringName = &"terrain"
 var _workspaces: Dictionary = {}
-var _workspace_defs_cache: Array = []
 var _environment_workspace: EnvironmentEditorWorkspace
 var _workspace_buttons: Dictionary = {}
 # Popup workspaces (Environment) keep their nav buttons here, separate from
@@ -97,17 +79,17 @@ var _workspace_buttons: Dictionary = {}
 var _popup_workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
 var _environment_action_buttons: Dictionary = {}
-var _asset_dock_workspace_id: int = -1
+var _asset_dock_workspace_id: StringName = &""
 var _camera_settings_panel: Control
 var _resource_library := EditorResourceLibrary.new()
 # 3D-preview guide visibility, shared across guide-capable workspaces and pushed
 # to the active one. Loaded from / saved to the editor-state config.
 var _view_grid_visible: bool = true
 var _view_axes_visible: bool = true
-var _mounted_workspace_id: int = -1
+var _mounted_workspace_id: StringName = &""
 var _current_workflow_id: int = -1
 var _workflow_buttons: Dictionary = {}
-var _inspector_workspace_id: int = -1
+var _inspector_workspace_id: StringName = &""
 var _message_text: String = ""
 var _message_until: float = 0.0
 var _export_ui_active: bool = false
@@ -213,28 +195,22 @@ func _process(_delta: float) -> void:
 	_refresh_tile_gizmo()
 
 
-func _workspace_defs() -> Array:
-	# Categories group the nav list; array order is the within-category order and
-	# the order categories first appear (World, Interface, Atmosphere).
-	return [
-		WorkspaceDef.make(Workspace.TERRAIN, TerrainWorkspaceAdapter, false, &"World", &"terrain"),
-		WorkspaceDef.make(Workspace.OBJECT, ObjectWorkspaceAdapter, false, &"World", &"object"),
-		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter, false, &"World", &"mission"),
-		WorkspaceDef.make(Workspace.FONTS, FontsWorkspaceAdapter, false, &"Interface", &"fonts"),
-		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter, false, &"Interface", &"credits"),
-		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter, false, &"Interface", &"strings"),
-		WorkspaceDef.make(Workspace.MNU, MnuWorkspaceAdapter, false, &"Interface", &"menu"),
-		WorkspaceDef.make(Workspace.MUSIC, MusicWorkspaceAdapter, false, &"Audio", &"music"),
-		WorkspaceDef.make(Workspace.SOUND, SoundWorkspaceAdapter, false, &"Atmosphere", &"sound"),
-		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true, &"Atmosphere", &"environment"),
-	]
-
-
 func _ensure_workspaces() -> void:
-	if _workspace_defs_cache.is_empty():
-		_workspace_defs_cache = _workspace_defs()
-	for def_v in _workspace_defs_cache:
-		var def := def_v as WorkspaceDef
+	# Workspaces are registered to WorkspaceRegistry
+	# For now, to keep the shell working, we will manually register them here until they self-register.
+	if WorkspaceRegistry.get_all_workspaces().is_empty():
+		WorkspaceRegistry.register_workspace(&"terrain", WorkspaceDef.make(&"terrain", preload("res://modtools/editor/terrain_workspace.gd"), false, &"World", &"terrain"))
+		WorkspaceRegistry.register_workspace(&"object", WorkspaceDef.make(&"object", preload("res://modtools/object/object_workspace.gd"), false, &"World", &"object"))
+		WorkspaceRegistry.register_workspace(&"mission", WorkspaceDef.make(&"mission", preload("res://modtools/editor/mission_workspace.gd"), false, &"World", &"mission"))
+		WorkspaceRegistry.register_workspace(&"fonts", WorkspaceDef.make(&"fonts", preload("res://modtools/editor/fonts_workspace.gd"), false, &"Interface", &"fonts"))
+		WorkspaceRegistry.register_workspace(&"credits", WorkspaceDef.make(&"credits", preload("res://modtools/editor/credits_workspace.gd"), false, &"Interface", &"credits"))
+		WorkspaceRegistry.register_workspace(&"strings", WorkspaceDef.make(&"strings", preload("res://modtools/strings/strings_workspace.gd"), false, &"Interface", &"strings"))
+		WorkspaceRegistry.register_workspace(&"menu", WorkspaceDef.make(&"menu", preload("res://modtools/mnu/mnu_workspace.gd"), false, &"Interface", &"menu"))
+		WorkspaceRegistry.register_workspace(&"music", WorkspaceDef.make(&"music", preload("res://modtools/editor/music_workspace.gd"), false, &"Audio", &"music"))
+		WorkspaceRegistry.register_workspace(&"sound", WorkspaceDef.make(&"sound", preload("res://modtools/sound/sound_workspace.gd"), false, &"Atmosphere", &"sound"))
+		WorkspaceRegistry.register_workspace(&"environment", WorkspaceDef.make(&"environment", preload("res://modtools/editor/environment_workspace.gd"), true, &"Atmosphere", &"environment"))
+
+	for def in WorkspaceRegistry.get_all_workspaces():
 		if def.popup:
 			if _environment_workspace == null:
 				_environment_workspace = def.adapter_script.new()
@@ -254,8 +230,7 @@ func _build_workspace_rail() -> void:
 	# order categories first appear in the registry.
 	var buckets: Dictionary = {}
 	var category_order: Array = []
-	for def_v in _workspace_defs_cache:
-		var def := def_v as WorkspaceDef
+	for def in WorkspaceRegistry.get_all_workspaces():
 		if not buckets.has(def.category):
 			buckets[def.category] = []
 			category_order.append(def.category)
@@ -265,8 +240,7 @@ func _build_workspace_rail() -> void:
 			var separator := VSeparator.new()
 			separator.custom_minimum_size = Vector2(8, 34)
 			_workspace_rail.add_child(separator)
-		for def_v in buckets[category]:
-			var def := def_v as WorkspaceDef
+		for def in buckets[category]:
 			# Popup workspaces (Environment) are not in _workspaces; their single
 			# instance lives in _environment_workspace.
 			var workspace: EditorWorkspace = _environment_workspace if def.popup else _get_workspace(def.id)
@@ -376,8 +350,8 @@ func _make_workspace_active_stylebox() -> StyleBoxFlat:
 	return sb
 
 
-func _on_popup_workspace_toggled(workspace_id: int, pressed: bool) -> void:
-	if workspace_id == Workspace.ENVIRONMENT:
+func _on_popup_workspace_toggled(workspace_id: StringName, pressed: bool) -> void:
+	if workspace_id == &"environment":
 		_set_environment_popup_visible(pressed)
 
 
@@ -496,12 +470,12 @@ func _refresh_action_buttons_state(workspace: EditorWorkspace, buttons: Dictiona
 				btn.disabled = busy or workspace == null or not workspace.can_export()
 
 
-func _on_workspace_pressed(workspace_id: int) -> void:
+func _on_workspace_pressed(workspace_id: StringName) -> void:
 	set_active_workspace(workspace_id)
 
 
-func set_active_workspace(workspace_id: int) -> void:
-	if workspace_id == Workspace.ENVIRONMENT:
+func set_active_workspace(workspace_id: StringName) -> void:
+	if workspace_id == &"environment":
 		_set_environment_popup_visible(true)
 		_refresh_workspace_buttons()
 		return
@@ -523,7 +497,7 @@ func set_active_workspace(workspace_id: int) -> void:
 	sync_from_editor_state()
 
 
-func get_active_workspace_id() -> int:
+func get_active_workspace_id() -> StringName:
 	return _active_workspace_id
 
 
@@ -536,7 +510,7 @@ func get_active_workspace_id() -> int:
 func open_in_workspace(kind: String, path: String, focus: Dictionary = {}) -> Error:
 	_ensure_workspaces()
 	var workspace_id := _workspace_id_for_resource_kind(kind)
-	if workspace_id == -1:
+	if workspace_id == &"":
 		return ERR_UNAVAILABLE
 	var workspace := _workspace_for_id(workspace_id)
 	var clean_path := path.strip_edges()
@@ -564,147 +538,34 @@ func open_in_workspace(kind: String, path: String, focus: Dictionary = {}) -> Er
 
 
 # The registry id of the workspace declaring `kind` as its open-resource kind
-# (-1 when no workspace does). Covers the popup workspace too, so jumps can
+# (&"" when no workspace does). Covers the popup workspace too, so jumps can
 # target Environment.
-func _workspace_id_for_resource_kind(kind: String) -> int:
+func _workspace_id_for_resource_kind(kind: String) -> StringName:
 	if kind.is_empty():
-		return -1
-	for def_v in _workspace_defs_cache:
-		var def := def_v as WorkspaceDef
+		return &""
+	for def in WorkspaceRegistry.get_all_workspaces():
 		var workspace := _workspace_for_id(def.id)
 		if workspace != null and String(workspace.get_open_resource_kind()) == kind:
 			return def.id
-	return -1
+	return &""
 
 
 # _get_workspace covers the main-rail workspaces; popup workspaces live outside
 # _workspaces (see _ensure_workspaces), so jump targets resolve through this.
-func _workspace_for_id(workspace_id: int) -> EditorWorkspace:
+func _workspace_for_id(workspace_id: StringName) -> EditorWorkspace:
 	var workspace := _get_workspace(workspace_id)
 	if workspace != null:
 		return workspace
-	for def_v in _workspace_defs_cache:
-		var def := def_v as WorkspaceDef
+	for def in WorkspaceRegistry.get_all_workspaces():
 		if def.id == workspace_id and def.popup:
 			return _environment_workspace
 	return null
 
-
-# Cross-jump used by the Credits and Menus workspaces' font references. Fonts open
-# by NAME, so resolution stays on the Fonts workspace (resolve_font_file); the open
-# itself rides open_in_workspace.
-func open_font_workspace(font_name: String) -> Error:
-	_ensure_workspaces()
-	var workspace := _get_workspace(Workspace.FONTS)
-	if workspace == null:
-		return ERR_UNAVAILABLE
-	var clean_name := font_name.strip_edges()
-	if clean_name.is_empty():
-		return ERR_INVALID_PARAMETER
-	var path := String(workspace.call("resolve_font_file", clean_name))
-	if path.is_empty():
-		show_status_message("Font not found: %s" % clean_name, 5.0)
-		return ERR_DOES_NOT_EXIST
-	var err := open_in_workspace("font", path)
-	if err != OK:
-		return err
-	show_status_message("Opened font %s." % clean_name, 3.0)
-	return OK
-
-
-# Cross-jump used by the Menus workspace's "Edit in Strings": open the menu's resolved
-# text table in the Strings workspace and focus the given key. table_path is an
-# absolute path (already resolved by the caller).
-func open_strings_workspace(table_path: String, key: String) -> Error:
-	var err := open_in_workspace("strings", table_path, {"key": key})
-	if err != OK:
-		return err
-	show_status_message("Editing string %s." % (key if not key.is_empty() else table_path.get_file()), 3.0)
-	return OK
-
-
-# Cross-jump used by the Menus workspace's cross-file ACTION rows. Resolve a
-# .mnu name/path against the configured resource root, open it in Menus, then
-# focus the target screen when supplied.
-func open_menu_workspace(file: String, screen: String = "") -> Error:
-	var path := _resolve_menu_action_path(file)
-	if path.is_empty():
-		show_status_message("Menu not found: %s" % file.strip_edges(), 5.0)
-		return ERR_FILE_NOT_FOUND
-	var target := screen.strip_edges()
-	var err := open_in_workspace("menu", path, {"screen": target} if not target.is_empty() else {})
-	if err != OK:
-		return err
-	show_status_message("Opened menu %s%s." % [
-		path.get_file(),
-		" -> %s" % target if not target.is_empty() else "",
-	], 3.0)
-	return OK
-
-
-func _resolve_menu_action_path(file: String) -> String:
-	var clean := file.strip_edges().replace("\\", "/")
-	if clean.is_empty():
-		return ""
-	var candidates := _menu_action_path_candidates(clean)
-	for candidate_value in candidates:
-		var candidate := String(candidate_value)
-		if FileAccess.file_exists(candidate):
-			return candidate
-	var root := _resource_library.get_root_dir()
-	if not root.is_empty():
-		for candidate_value in candidates:
-			var candidate := String(candidate_value)
-			var direct := root.path_join(candidate)
-			if FileAccess.file_exists(direct):
-				return direct
-			var basename := root.path_join(candidate.get_file())
-			if FileAccess.file_exists(basename):
-				return basename
-	var index := _resource_library.get_index()
-	if _resource_library.get_root_dir().is_empty():
-		return ""
-	if index.get_root_dir().is_empty():
-		_scan_resource_root(false)
-	for entry_value in index.get_resource_files("menu"):
-		var entry := entry_value as Dictionary
-		var rel := String(entry.get("relative_path", "")).replace("\\", "/")
-		var logical := String(entry.get("logical_name", "")).replace("\\", "/")
-		for candidate_value in candidates:
-			var candidate := String(candidate_value)
-			var want := candidate.to_lower()
-			var want_file := candidate.get_file().to_lower()
-			if rel.to_lower() == want or rel.get_file().to_lower() == want_file \
-					or logical.to_lower() == want or logical.get_file().to_lower() == want_file:
-				var path := String(entry.get("path", ""))
-				if not path.is_empty():
-					return path
-	return ""
-
-
-func _menu_action_path_candidates(clean: String) -> Array:
-	var candidates := [clean]
-	var file_name := clean.get_file()
-	if file_name.is_empty() or file_name.begins_with("jo_"):
-		return candidates
-	var jo_name := "jo_%s" % file_name
-	var dir := clean.get_base_dir()
-	if not dir.is_empty():
-		var jo_relative := dir.path_join(jo_name)
-		if not candidates.has(jo_relative):
-			candidates.append(jo_relative)
-	if not candidates.has(jo_name):
-		candidates.append(jo_name)
-	return candidates
-
-
-func _get_workspace(workspace_id: int) -> EditorWorkspace:
+func _get_workspace(workspace_id: StringName) -> EditorWorkspace:
 	return _workspaces.get(workspace_id) as EditorWorkspace
-
 
 func _get_active_workspace() -> EditorWorkspace:
 	return _get_workspace(_active_workspace_id)
-
 
 func _mount_active_workspace_viewport() -> void:
 	if _viewport_host == null:
@@ -718,14 +579,14 @@ func _mount_active_workspace_viewport() -> void:
 	_mounted_workspace_id = _active_workspace_id
 
 
-func _unmount_workspace_viewport(workspace_id: int, workspace: EditorWorkspace) -> void:
+func _unmount_workspace_viewport(workspace_id: StringName, workspace: EditorWorkspace) -> void:
 	if _viewport_host == null:
 		return
 	if workspace != null:
 		workspace.unmount_viewport(_viewport_host)
 	_clear_viewport_host()
 	if _mounted_workspace_id == workspace_id:
-		_mounted_workspace_id = -1
+		_mounted_workspace_id = &""
 
 
 func _remount_active_workspace_viewport() -> void:
@@ -776,7 +637,7 @@ func _refresh_workspace_surface() -> void:
 	_sync_asset_dock_for_workspace(workspace)
 	_rebuild_workflow_rail(workflows)
 	if has_workflows:
-		_inspector_workspace_id = -1
+		_inspector_workspace_id = &""
 		_current_workflow_id = -1
 		_refresh_workflow_from_workspace()
 	else:
@@ -786,19 +647,19 @@ func _refresh_workspace_surface() -> void:
 
 
 func _sync_asset_dock_for_workspace(workspace: EditorWorkspace) -> void:
-	if _asset_dock_workspace_id != -1 and _asset_dock_workspace_id != _active_workspace_id:
+	if _asset_dock_workspace_id != &"" and _asset_dock_workspace_id != _active_workspace_id:
 		var old_workspace := _get_workspace(_asset_dock_workspace_id)
 		if old_workspace != null:
 			old_workspace.set_asset_dock(null)
 		_clear_asset_dock_children()
-		_asset_dock_workspace_id = -1
+		_asset_dock_workspace_id = &""
 	var show_dock := workspace != null and workspace.uses_asset_dock()
 	if not show_dock:
 		if _asset_dock_workspace_id == _active_workspace_id and workspace != null:
 			workspace.set_asset_dock(null)
 		_clear_asset_dock_children()
 		_asset_dock.visible = false
-		_asset_dock_workspace_id = -1
+		_asset_dock_workspace_id = &""
 		return
 	_asset_dock.visible = true
 	workspace.set_asset_dock(_asset_dock)
@@ -1055,8 +916,8 @@ func _set_environment_popup_visible(active: bool) -> void:
 	if _environment_toggle_button != null:
 		_environment_toggle_button.set_pressed_no_signal(active)
 	# Keep the Environment nav row in sync with the in-viewport sun toggle.
-	if _popup_workspace_buttons.has(Workspace.ENVIRONMENT):
-		(_popup_workspace_buttons[Workspace.ENVIRONMENT] as Button).set_pressed_no_signal(active)
+	if _popup_workspace_buttons.has(&"environment"):
+		(_popup_workspace_buttons[&"environment"] as Button).set_pressed_no_signal(active)
 	if active:
 		_ensure_environment_popup_content()
 	_refresh_environment_popup_state()
@@ -1613,7 +1474,7 @@ func _refresh_tile_gizmo() -> void:
 		return
 	_tile_gizmo.visible = false
 	var active_workspace := _get_active_workspace()
-	if active_workspace == null or not active_workspace.shows_tile_gizmo() or editor == null or _current_workflow_id != TerrainWorkspaceAdapter.Workflow.STAMP or not editor.has_selected_tileinfo_entry():
+	if active_workspace == null or not active_workspace.shows_tile_gizmo() or editor == null or _current_workflow_id != preload("res://modtools/editor/terrain_workspace.gd").Workflow.STAMP or not editor.has_selected_tileinfo_entry():
 		return
 
 	var camera: Camera3D = editor.get_editor_camera()

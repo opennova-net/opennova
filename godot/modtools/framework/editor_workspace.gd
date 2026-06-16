@@ -1,455 +1,197 @@
 class_name EditorWorkspace
 extends RefCounted
 
-# Generic editor shell contract. Domain adapters name their ported engine
-# equivalents, for example EnvironmentEditorWorkspace -> Environment_LoadTimeOfDayConfig
-# @ 0x57db30 / TimeOfDay_ParseProperty @ 0x57c590 (Jointops retail).
-#
-# ============================================================================
-# CONTRACT — what a workspace must / may implement
-# ============================================================================
-# The shell (EditorWorkstation) NEVER switches on workspace type; it reads the
-# hooks below. Every hook has a safe default here, so a workspace overrides only
-# the tiers it needs. Tiers:
-#
-#   Identity (required):
-#     get_workspace_id, get_workspace_label
-#     recommended: get_workspace_tooltip, get_status_tool, get_status_context,
-#     get_project_title
-#
-#   Lifecycle:
-#     bind_to_editor(editor)  — receive the domain editor/model
-#     activate / deactivate   — workspace gained / lost focus
-#
-#   Inspector — pick ONE style:
-#     single-pane    : build_inspector(host)
-#     multi-workflow : get_workflows + get_active_workflow_id +
-#                      activate_workflow + build_workflow_inspector(id, host)
-#
-#   Viewport (only if the workspace shows a 3D view):
-#     mount_viewport / unmount_viewport / release_viewport,
-#     get_viewport_camera, shows_camera_status
-#     (use framework/viewport_mount.gd for the create/reparent/free mechanics)
-#
-#   Document actions (implement the cluster you support; each is gated by a
-#   can_* hook so the shell shows the button only when available):
-#     new      : can_new / new_current
-#     open     : can_open / open_file + get_open_dialog_* + get_open_resource_kind
-#     save     : can_save / save_current, can_save_as / save_as + get_save_dialog_*
-#     export   : can_export / begin_export + get_export_flavors +
-#                get_export_dialog_* + get_export_progress_*
-#     jump     : focus_reference(focus) — focus an element after a cross-workspace
-#                jump (shell open_in_workspace); keys are workspace-defined
-#
-#   Edit + state: override get_editor_document() to return the domain
-#     document/controller owning edit history + dirty state; the base derives
-#     can_undo / can_redo / undo / redo / has_unsaved_changes from it (and
-#     folds is_busy() into the can_* pair). Workspaces whose dirty flag lives
-#     on a different object than their edit history (fonts/mnu) keep their own
-#     has_unsaved_changes override.
-#   Asset dock: uses_asset_dock, set_asset_dock, sync_asset_dock
-#   Placement: set WorkspaceDef.popup=true for popup workspaces (Environment);
-#              shows_tile_gizmo() to opt into the in-world tile gizmo.
-#
-# To register a new workspace see WorkspaceDef; to add a workflow inspector see
-# InspectorDef. Minimal example adapter: editor/credits_workspace.gd.
+## New Componentized Editor Shell Contract.
+## Workspaces now yield capabilities and commands instead of overriding monolithic methods.
+##
+## *COMPATIBILITY LAYER*: Temporarily bridges legacy methods (mount_viewport, etc.) 
+## to the new Capabilities/Commands system until all workspaces are migrated.
 
 var editor_shell: Node
-
-# Cached workflow-inspector registry. Multi-workflow workspaces override
-# _build_inspector_defs(); the base lazy-builds and caches it here so the shell
-# and the subclass share one list. Single-pane workspaces leave it empty.
-var _inspector_defs: Array = []
-
+var _cached_capabilities: Array[EditorCapability] = []
 
 func set_editor_shell(value: Node) -> void:
 	editor_shell = value
 
+# --- Identity ---
 
-# --- Capability hooks: the shell reads these instead of switching on workspace
-# type. Defaults describe a plain main-rail workspace with no editor binding,
-# tooltip, camera readout, or export flavors. ---
-func bind_to_editor(_editor: Node) -> void:
-	pass
-
-
-func get_workspace_tooltip() -> String:
-	return ""
-
-
-func shows_camera_status() -> bool:
-	return false
-
-
-func shows_tile_gizmo() -> bool:
-	return false
-
-
-# View guides (reference grid / origin axes) in a 3D preview. Workspaces with a
-# guide overlay override shows_view_guides() so the shell offers Show grid / Show
-# axes toggles, and the two setters to apply them; other workspaces stay silent.
-func shows_view_guides() -> bool:
-	return false
-
-
-func set_grid_visible(_value: bool) -> void:
-	pass
-
-
-func set_axes_visible(_value: bool) -> void:
-	pass
-
-
-func get_export_flavors() -> Array:
-	return []
-
-
-func activate() -> void:
-	pass
-
-
-func deactivate() -> void:
-	pass
-
-
-func mount_viewport(_host: Control) -> void:
-	pass
-
-
-func unmount_viewport(_host: Control) -> void:
-	pass
-
-
-func release_viewport() -> void:
-	pass
-
-
-func get_viewport_camera() -> Camera3D:
-	return null
-
-
-func get_workspace_id() -> String:
-	return ""
-
+func get_workspace_id() -> StringName:
+	return &""
 
 func get_workspace_label() -> String:
 	return ""
 
-
 func get_project_title() -> String:
 	return get_workspace_label()
-
 
 func get_status_tool() -> String:
 	return get_workspace_label()
 
-
 func get_status_context() -> String:
 	return ""
 
+func get_workspace_tooltip() -> String:
+	return ""
 
 func uses_asset_dock() -> bool:
 	return false
 
-
-# The shell's left lane (workflow picker + inspector host). Workspaces that
-# present their whole UI in the viewport can opt out to reclaim the width (e.g.
-# Music's unified screen, whose section map already indexes every section).
 func uses_left_lane() -> bool:
 	return true
 
+# --- Lifecycle ---
 
-func set_asset_dock(_dock: Control) -> void:
+func bind_to_editor(_editor: Node) -> void:
 	pass
 
-
-func sync_asset_dock() -> void:
+func activate() -> void:
 	pass
 
+func deactivate() -> void:
+	pass
 
-# Returns the workspace's workflow inspectors as typed InspectorDef rows (the
-# shell reads .id/.label/.tooltip off them). Empty for single-pane workspaces.
-func get_workflows() -> Array:
-	return _ensure_inspector_defs()
+# --- Component Providers ---
 
+func get_capabilities() -> Array[EditorCapability]:
+	if not _cached_capabilities.is_empty():
+		return _cached_capabilities
+	
+	# COMPATIBILITY: Wrap legacy methods in Providers if overridden
+	var caps: Array[EditorCapability] = []
+	
+	# If a subclass overrides mount_viewport, it has a Viewport capability
+	var script: Script = get_script()
+	if _overrides(script, "mount_viewport"):
+		var vp = ViewportProvider.new(get_viewport_camera())
+		# Hack to store the legacy mount methods for the shell to call later
+		vp.set_meta("legacy_mount", Callable(self, "mount_viewport"))
+		vp.set_meta("legacy_unmount", Callable(self, "unmount_viewport"))
+		vp.set_meta("legacy_release", Callable(self, "release_viewport"))
+		vp.set_meta("legacy_shows_guides", Callable(self, "shows_view_guides"))
+		vp.set_meta("legacy_shows_camera", Callable(self, "shows_camera_status"))
+		caps.append(vp)
+		
+	# If a subclass has workflows or a single pane inspector, it has an Inspector capability
+	if _overrides(script, "build_inspector") or _overrides(script, "_build_inspector_defs"):
+		var ip = InspectorProvider.new(null)
+		# Store legacy references
+		ip.set_meta("legacy_build", Callable(self, "build_inspector"))
+		ip.set_meta("legacy_workflows", Callable(self, "get_workflows"))
+		ip.set_meta("legacy_active_workflow", Callable(self, "get_active_workflow_id"))
+		ip.set_meta("legacy_activate_workflow", Callable(self, "activate_workflow"))
+		ip.set_meta("legacy_build_workflow", Callable(self, "build_workflow_inspector"))
+		caps.append(ip)
+		
+	_cached_capabilities = caps
+	return caps
 
-# Override in multi-workflow workspaces to declare InspectorDef.make(...) rows.
-func _build_inspector_defs() -> Array:
-	return []
+func _overrides(script: Script, method_name: StringName) -> bool:
+	# Godot 4: Check if the method belongs to a subclass rather than the base.
+	if script == null: return false
+	var methods = script.get_script_method_list()
+	for m in methods:
+		if m.name == method_name:
+			return true
+	return _overrides(script.get_base_script(), method_name)
 
+func get_commands() -> Array[EditorCommand]:
+	# COMPATIBILITY: Wrap legacy can_*/has_* in EditorCommand
+	var cmds: Array[EditorCommand] = []
+	
+	if has_new_action():
+		cmds.append(EditorCommand.new(&"new", get_new_action_label(), Callable(self, "new_current"), Callable(self, "can_new")))
+	if has_open_action():
+		# Note: open_file takes a string argument, which requires UI flow, 
+		# so this wrapper just proxies the UI intent for now.
+		var open_cmd = EditorCommand.new(&"open", get_open_action_label(), Callable(self, "trigger_legacy_open"), Callable(self, "can_open"))
+		open_cmd.set_meta("legacy_open_filters", Callable(self, "get_open_dialog_filters"))
+		cmds.append(open_cmd)
+	if has_save_action():
+		cmds.append(EditorCommand.new(&"save", get_save_action_label(), Callable(self, "save_current"), Callable(self, "can_save")))
+	if has_save_as_action():
+		cmds.append(EditorCommand.new(&"save_as", get_save_as_action_label(), Callable(self, "trigger_legacy_save_as"), Callable(self, "can_save_as")))
+	if has_export_action():
+		cmds.append(EditorCommand.new(&"export", get_export_action_label(), Callable(self, "trigger_legacy_export"), Callable(self, "can_export")))
+		
+	return cmds
 
-func _ensure_inspector_defs() -> Array:
-	if _inspector_defs.is_empty():
-		_inspector_defs = _build_inspector_defs()
-	return _inspector_defs
-
-
-func _def_for(workflow_id: int) -> InspectorDef:
-	for def in _ensure_inspector_defs():
-		if (def as InspectorDef).id == workflow_id:
-			return def
+func get_editor_document() -> EditorDocument:
 	return null
-
-
-# Lazy per-workflow inspector cache (terrain and object both hand-rolled this):
-# one instance per InspectorDef row, created on first use and reused on every
-# workflow revisit. Override _instantiate_inspector when the inspector scripts
-# take constructor args (object's take the workspace).
-var _workflow_inspectors: Dictionary = {}
-
-
-func _instantiate_inspector(def: InspectorDef) -> Object:
-	return def.inspector_script.new()
-
-
-func get_workflow_inspector(workflow_id: int) -> Object:
-	var cached: Object = _workflow_inspectors.get(workflow_id)
-	if cached != null:
-		return cached
-	var def := _def_for(workflow_id)
-	if def == null or def.inspector_script == null:
-		return null
-	var inspector := _instantiate_inspector(def)
-	_workflow_inspectors[workflow_id] = inspector
-	return inspector
-
-
-func get_active_workflow_id() -> int:
-	return -1
-
-
-func activate_workflow(_workflow_id: int) -> void:
-	pass
-
-
-func build_workflow_inspector(_workflow_id: int, _host: Control) -> void:
-	pass
-
-
-func get_export_progress_title() -> String:
-	return "Exporting..."
-
-
-func get_export_progress_phase() -> String:
-	return ""
-
-
-func get_export_progress_message() -> String:
-	return ""
-
-
-func get_export_progress_current() -> int:
-	return 0
-
-
-func get_export_progress_total() -> int:
-	return 0
-
-
-func get_export_progress_ratio() -> float:
-	return 0.0
-
-
-func is_busy() -> bool:
-	return false
-
-
-# --- Domain document ------------------------------------------------------
-# The single domain document/controller that owns this workspace's edit history
-# and dirty state (a domain editor Node, a RefCounted document, or a controller —
-# duck-typed, so the base guards every call with has_method). Single-document
-# workspaces override only this; the base derives the edit + dirty hooks below.
-# Documents without an edit history (credits, object) still serve dirty through
-# it: can_undo/can_redo simply stay false.
-func get_editor_document() -> Object:
-	return null
-
 
 func has_unsaved_changes() -> bool:
-	var doc := get_editor_document()
-	if doc == null:
-		return false
-	# Both dirty shapes exist today: a method (mission controller, music document)
-	# and a plain bool property (the EditorDocument family). Property reads on a
-	# doc with neither return null -> false.
-	if doc.has_method("is_dirty"):
+	var doc = get_editor_document()
+	if doc and doc.has_method("is_dirty"):
 		return doc.is_dirty()
-	return bool(doc.get("is_dirty"))
-
-
-func can_new() -> bool:
 	return false
 
+# Legacy definitions for compatibility wrappers
+func mount_viewport(_host: Control) -> void: pass
+func unmount_viewport(_host: Control) -> void: pass
+func release_viewport() -> void: pass
+func get_viewport_camera() -> Camera3D: return null
+func shows_camera_status() -> bool: return false
+func shows_view_guides() -> bool: return false
+func set_grid_visible(_value: bool) -> void: pass
+func set_axes_visible(_value: bool) -> void: pass
+
+func build_inspector(_host: Control) -> void: pass
+func get_workflows() -> Array: return []
+func get_active_workflow_id() -> int: return -1
+func activate_workflow(_id: int) -> void: pass
+func build_workflow_inspector(_id: int, _host: Control) -> void: pass
+
+func has_new_action() -> bool: return false
+func get_new_action_label() -> String: return "New"
+func can_new() -> bool: return false
+func new_current() -> Error: return ERR_UNAVAILABLE
+
+func has_open_action() -> bool: return false
+func get_open_action_label() -> String: return "Open"
+func can_open() -> bool: return false
+func trigger_legacy_open() -> void: pass
+func get_open_dialog_filters() -> PackedStringArray: return PackedStringArray()
+
+func has_save_action() -> bool: return false
+func get_save_action_label() -> String: return "Save"
+func can_save() -> bool: return false
+func save_current() -> Error: return ERR_UNAVAILABLE
+
+func has_save_as_action() -> bool: return false
+func get_save_as_action_label() -> String: return "Save As"
+func can_save_as() -> bool: return false
+func trigger_legacy_save_as() -> void: pass
+
+func has_export_action() -> bool: return false
+func get_export_action_label() -> String: return "Export"
+func can_export() -> bool: return false
+func trigger_legacy_export() -> void: pass
+
+func is_busy() -> bool: return false
+func flush_pending_edits() -> Error: return OK
+func sync_asset_dock() -> void: pass
+func set_asset_dock(_dock: Control) -> void: pass
+
+func can_undo() -> bool: return false
+func can_redo() -> bool: return false
+func undo() -> void: pass
+func redo() -> void: pass
+
+func shows_tile_gizmo() -> bool: return false
+func focus_reference(_focus: Dictionary) -> Error: return OK
+func get_current_resource_path() -> String: return ""
+
+func get_export_progress_title() -> String: return "Exporting..."
+func get_export_progress_phase() -> String: return ""
+func get_export_progress_message() -> String: return ""
+func get_export_progress_current() -> int: return 0
+func get_export_progress_total() -> int: return 0
+func get_export_progress_ratio() -> float: return 0.0
 
-func has_new_action() -> bool:
-	return can_new()
-
-
-func get_new_action_label() -> String:
-	return "New"
-
-
-func new_current() -> Error:
-	return ERR_UNAVAILABLE
-
-
-func can_open() -> bool:
-	return false
-
-
-func has_open_action() -> bool:
-	return can_open()
-
-
-func get_open_action_label() -> String:
-	return "Open..."
-
-
-func get_open_dialog_title() -> String:
-	return "Open"
-
-
-func get_open_dialog_filters() -> PackedStringArray:
-	return PackedStringArray()
-
-
-func get_open_dialog_dir() -> String:
-	return ""
-
-
-func get_open_resource_kind() -> String:
-	return ""
-
-
-func get_current_resource_path() -> String:
-	return ""
-
-
-func open_file(_path: String) -> Error:
-	return ERR_UNAVAILABLE
-
-
-# Focus an element of the open document after a cross-workspace jump: the shell's
-# open_in_workspace(kind, path, focus) forwards its focus Dictionary here once the
-# target file is open. Keys are workspace-defined (strings: {"key"}, menus:
-# {"screen"}); a workspace documents its keys on the override. Default: nothing
-# to focus.
-func focus_reference(_focus: Dictionary) -> Error:
-	return OK
-
-
-# Workspaces with deferred/in-progress edits (e.g. a source text buffer not yet
-# committed to the document) override this to apply them before a save/export.
-# The default is a no-op for workspaces that commit edits immediately.
-func flush_pending_edits() -> Error:
-	return OK
-
-
-func can_save() -> bool:
-	return false
-
-
-func has_save_action() -> bool:
-	return can_save() or can_save_as()
-
-
-func get_save_action_label() -> String:
-	return "Save"
-
-
-func can_save_as() -> bool:
-	return false
-
-
-func has_save_as_action() -> bool:
-	return can_save_as()
-
-
-func get_save_as_action_label() -> String:
-	return "Save As..."
-
-
-func save_current() -> Error:
-	return ERR_UNAVAILABLE
-
-
-func save_as(_dir_path: String) -> Error:
-	return ERR_UNAVAILABLE
-
-
-func can_export() -> bool:
-	return false
-
-
-func has_export_action() -> bool:
-	return can_export()
-
-
-func get_export_action_label() -> String:
-	return "Export..."
-
-
-func begin_export(_dir_path: String, _flavor: int) -> Error:
-	return ERR_UNAVAILABLE
-
-
-func get_save_dialog_title() -> String:
-	return "Choose where to save"
-
-
-func get_save_dialog_dir() -> String:
-	return ""
-
-
-func get_export_dialog_title() -> String:
-	return "Choose where to export"
-
-
-func get_export_dialog_dir() -> String:
-	return ""
-
-
-func build_inspector(_host: Control) -> void:
-	pass
-
-
-# Undo/redo, derived from get_editor_document(). Availability folds in is_busy()
-# (terrain disables the buttons while an export runs); the actions themselves are
-# deliberately unguarded by busy, matching the long-standing terrain behavior.
-func can_undo() -> bool:
-	var doc := get_editor_document()
-	return doc != null and not is_busy() and doc.has_method("can_undo") and doc.can_undo()
-
-
-func can_redo() -> bool:
-	var doc := get_editor_document()
-	return doc != null and not is_busy() and doc.has_method("can_redo") and doc.can_redo()
-
-
-func undo() -> void:
-	var doc := get_editor_document()
-	if doc != null and doc.has_method("undo"):
-		doc.undo()
-
-
-func redo() -> void:
-	var doc := get_editor_document()
-	if doc != null and doc.has_method("redo"):
-		doc.redo()
-
-
-# --- Resource root (the shared VFS the shell mounts) -----------------------
-
-# The shell's mounted resource root, or null when no shell is bound (headless tests).
 func _resource_root() -> NovaResourceRoot:
 	if editor_shell != null and editor_shell.has_method("get_resource_root"):
 		return editor_shell.get_resource_root()
 	return null
 
-
-# Shell root, falling back to a fresh mount of the persisted resource directory.
-# Only fonts/mnu carry the fallback (their open-by-name paths must resolve without
-# a shell); the other workspaces stay shell-only on purpose — do not widen.
 func _resource_root_or_settings() -> NovaResourceRoot:
 	var root := _resource_root()
 	if root != null:
@@ -459,22 +201,3 @@ func _resource_root_or_settings() -> NovaResourceRoot:
 		return null
 	var resources := NovaResourceRoot.new()
 	return resources if resources.set_root_dir(dir) == OK else null
-
-
-# VFS-open fallback shared by every open_file(): when `path` is not a loose file
-# on disk but resolves inside the mounted root (a name picked from the resource
-# browser), returns that root; null means "open from disk". Callers branch:
-#   var vfs := _vfs_root_for_open(path)
-#   if vfs != null:
-#       return editor.open_x_bytes(vfs.read_file(path), _vfs_display_path(vfs, path))
-#   return editor.open_x(path)
-func _vfs_root_for_open(path: String) -> NovaResourceRoot:
-	var resources := _resource_root()
-	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
-		return resources
-	return null
-
-
-# The display path an editor records for a VFS-opened file (the mounted dir + bare name).
-func _vfs_display_path(root: NovaResourceRoot, path: String) -> String:
-	return root.get_root_dir().path_join(path.get_file())

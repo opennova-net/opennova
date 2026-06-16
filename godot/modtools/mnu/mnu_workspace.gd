@@ -28,6 +28,76 @@ var _profiles: Dictionary = {}   # lower-case .lwf name -> NovaLwfData (or null 
 
 func _init() -> void:
 	_document = MnuEditorDocumentScript.new()
+	EditorCommandBus.get_instance().command_requested.connect(_on_command_requested)
+
+func _on_command_requested(command_name: StringName, payload: Dictionary) -> void:
+	if command_name == &"open_menu":
+		var file: String = payload.get("file", "")
+		var screen: String = payload.get("screen", "")
+		var path := _resolve_menu_action_path(file)
+		if path.is_empty():
+			if editor_shell != null and editor_shell.has_method("show_status_message"):
+				editor_shell.show_status_message("Menu not found: %s" % file.strip_edges(), 5.0)
+			return
+		
+		var err: Error = ERR_UNAVAILABLE
+		if editor_shell != null and editor_shell.has_method("open_in_workspace"):
+			err = editor_shell.open_in_workspace("menu", path, {"screen": screen} if not screen.is_empty() else {})
+		
+		if err == OK and editor_shell != null and editor_shell.has_method("show_status_message"):
+			editor_shell.show_status_message("Opened menu %s%s." % [
+				path.get_file(),
+				" -> %s" % screen if not screen.is_empty() else "",
+			], 3.0)
+
+func _resolve_menu_action_path(file: String) -> String:
+	var clean := file.strip_edges().replace("\\", "/")
+	if clean.is_empty():
+		return ""
+	var candidates := _menu_action_path_candidates(clean)
+	for candidate_value in candidates:
+		var candidate := String(candidate_value)
+		if FileAccess.file_exists(candidate):
+			return candidate
+	var resources := EditorFileSystem.get_instance().get_resource_root_or_settings()
+	if resources != null:
+		var root := resources.get_root_dir()
+		if not root.is_empty():
+			for candidate_value in candidates:
+				var candidate := String(candidate_value)
+				var direct := root.path_join(candidate)
+				if FileAccess.file_exists(direct):
+					return direct
+				var basename := root.path_join(candidate.get_file())
+				if FileAccess.file_exists(basename):
+					return basename
+	# Note: Mnu workspace does not currently have access to EditorResourceLibrary's
+	# full index. As a temporary bridge, we fallback to shell's _resource_browser.
+	if editor_shell != null and editor_shell.get("_resource_browser") != null:
+		var browser = editor_shell.get("_resource_browser")
+		if clean.get_extension() == "mnu":
+			var path := browser.resolve_file(clean)
+			if not path.is_empty():
+				return path
+		var path := browser.resolve_file(clean + ".mnu")
+		if not path.is_empty():
+			return path
+	return ""
+
+func _menu_action_path_candidates(clean: String) -> Array:
+	var candidates := [clean]
+	var file_name := clean.get_file()
+	if file_name.is_empty() or file_name.begins_with("jo_"):
+		return candidates
+	var jo_name := "jo_%s" % file_name
+	var dir := clean.get_base_dir()
+	if not dir.is_empty():
+		var jo_relative := dir.path_join(jo_name)
+		if not candidates.has(jo_relative):
+			candidates.append(jo_relative)
+	if not candidates.has(jo_name):
+		candidates.append(jo_name)
+	return candidates
 
 
 func get_workspace_id() -> String:

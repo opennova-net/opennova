@@ -23,6 +23,21 @@ var strings_editor: StringsEditor
 var _mount: ViewportMount
 var _view: Control
 var _inspector: Control
+
+func _init() -> void:
+	EditorCommandBus.get_instance().command_requested.connect(_on_command_requested)
+
+func _on_command_requested(command_name: StringName, payload: Dictionary) -> void:
+	if command_name == &"open_strings":
+		var table_path: String = payload.get("table_path", "")
+		var key: String = payload.get("key", "")
+		
+		var err: Error = ERR_UNAVAILABLE
+		if editor_shell != null and editor_shell.has_method("open_in_workspace"):
+			err = editor_shell.open_in_workspace("strings", table_path, {"key": key})
+			
+		if err == OK and editor_shell != null and editor_shell.has_method("show_status_message"):
+			editor_shell.show_status_message("Editing string %s." % (key if not key.is_empty() else table_path.get_file()), 3.0)
 var _state_restored: bool = false
 
 var _search: String = ""

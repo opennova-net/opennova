@@ -1,5 +1,5 @@
 class_name EditorResourceDocument
-extends RefCounted
+extends EditorDocument
 
 # Shared open/save/dirty lifecycle for the RefCounted resource documents (fonts
 # .fnt, menus .mnu, credits .kda) that previously each carried a verbatim copy
@@ -12,16 +12,10 @@ extends RefCounted
 
 signal resource_loaded(resource)
 signal resource_changed
-signal state_changed
 
 # Untyped on purpose (GDScript cannot re-type a base var per subclass); the
 # typed entry points and consumers carry the concrete Resource type.
 var resource
-var current_path: String = ""
-var is_dirty: bool = false
-
-var _last_open_dir: String = ""
-var _last_save_dir: String = ""
 
 
 func _init() -> void:
@@ -117,33 +111,3 @@ func _on_resource_changed() -> void:
 	mark_dirty()
 	resource_changed.emit()
 	state_changed.emit()
-
-
-# --- Path / dirty / remembered dirs --------------------------------------------
-
-func set_current_path(path: String) -> void:
-	current_path = path
-
-
-func mark_dirty() -> void:
-	is_dirty = true
-
-
-func mark_clean() -> void:
-	is_dirty = false
-
-
-func remember_open_path(path: String) -> void:
-	_last_open_dir = path.get_base_dir()
-
-
-func remember_save_dir(dir_path: String) -> void:
-	_last_save_dir = dir_path
-
-
-func get_last_open_dir() -> String:
-	return _last_open_dir
-
-
-func get_last_save_dir() -> String:
-	return _last_save_dir

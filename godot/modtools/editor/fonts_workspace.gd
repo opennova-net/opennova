@@ -8,22 +8,30 @@ var _document: FntEditorDocument
 var _editor: Control
 var _inspector_root: Control
 
-
 func _init() -> void:
 	_document = FntEditorDocument.new()
+	EditorCommandBus.get_instance().command_requested.connect(_on_command_requested)
 
+func _on_command_requested(command_name: StringName, payload: Dictionary) -> void:
+	if command_name == &"open_font":
+		var font_name: String = payload.get("font_name", "")
+		if font_name.is_empty(): return
+		var err := open_font_name(font_name)
+		if err == OK and editor_shell != null and editor_shell.has_method("set_active_workspace"):
+			editor_shell.set_active_workspace(get_workspace_id())
+		if err != OK and editor_shell != null and editor_shell.has_method("show_status_message"):
+			editor_shell.show_status_message("Font not found: %s" % font_name, 5.0)
+		elif err == OK and editor_shell != null and editor_shell.has_method("show_status_message"):
+			editor_shell.show_status_message("Opened font %s." % font_name, 3.0)
 
-func get_workspace_id() -> String:
-	return "fonts"
-
+func get_workspace_id() -> StringName:
+	return &"fonts"
 
 func get_workspace_label() -> String:
 	return "Fonts"
 
-
 func get_workspace_tooltip() -> String:
 	return "Edit Nova *.fnt bitmap fonts: glyphs, pages, and shadow offset."
-
 
 func get_project_title() -> String:
 	var name := "untitled"
@@ -32,10 +40,8 @@ func get_project_title() -> String:
 	var dirty := "*" if _document.is_dirty else ""
 	return "%s%s" % [name, dirty]
 
-
 func get_status_tool() -> String:
 	return "Fonts"
-
 
 func get_status_context() -> String:
 	if _document.resource == null:
@@ -45,48 +51,33 @@ func get_status_context() -> String:
 		_document.resource.get_glyph_count(),
 	]
 
-
-func mount_viewport(host: Control) -> void:
-	if host == null:
-		return
+func get_capabilities() -> Array[EditorCapability]:
+	var caps: Array[EditorCapability] = []
+	
 	if _editor == null:
 		_editor = FntEditorScript.new()
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
 		_editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_editor.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	if _editor.get_parent() == null:
-		host.add_child(_editor)
-		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_editor.set_document(_document)
+		_editor.set_document(_document)
+	caps.append(MainViewProvider.new(_editor))
+	
+	if _inspector_root == null or not is_instance_valid(_inspector_root):
+		_inspector_root = _make_inspector()
+		_populate_inspector()
+		if not _document.state_changed.is_connected(_populate_inspector):
+			_document.state_changed.connect(_populate_inspector)
+	caps.append(InspectorProvider.new(_inspector_root))
+	
+	return caps
 
-
-func unmount_viewport(_host: Control) -> void:
-	if _editor != null and _editor.get_parent() != null:
-		_editor.get_parent().remove_child(_editor)
-
-
-func release_viewport() -> void:
-	if _document != null and _document.state_changed.is_connected(_populate_inspector):
-		_document.state_changed.disconnect(_populate_inspector)
-	if _inspector_root != null and is_instance_valid(_inspector_root):
-		_inspector_root.queue_free()
-		_inspector_root = null
-	if _editor != null and _editor.get_parent() != null:
-		_editor.get_parent().remove_child(_editor)
-	if _editor != null:
-		_editor.free()
-		_editor = null
-
-
-func build_inspector(host: Control) -> void:
-	if _inspector_root != null and is_instance_valid(_inspector_root):
-		_inspector_root.queue_free()
-	_inspector_root = _make_inspector()
-	host.add_child(_inspector_root)
-	_populate_inspector()
-	if not _document.state_changed.is_connected(_populate_inspector):
-		_document.state_changed.connect(_populate_inspector)
-
+func get_commands() -> Array[EditorCommand]:
+	return [
+		EditorCommand.new(&"new", "New Font", Callable(self, "new_current")),
+		EditorCommand.new(&"open", "Open Font...", Callable(self, "trigger_legacy_open")),
+		EditorCommand.new(&"save", "Save Font", Callable(self, "save_current"), Callable(self, "can_save")),
+		EditorCommand.new(&"save_as", "Save Font As...", Callable(self, "trigger_legacy_save_as"), Callable(self, "can_save_as"))
+	]
 
 func _make_inspector() -> Control:
 	var margin := MarginContainer.new()
@@ -116,7 +107,6 @@ func _make_inspector() -> Control:
 	box.add_child(meta_label)
 
 	return margin
-
 
 func _populate_inspector() -> void:
 	if _inspector_root == null or not is_instance_valid(_inspector_root):
@@ -150,69 +140,31 @@ func _populate_inspector() -> void:
 			res.get_shadow_offset(),
 		]
 
-
-func has_unsaved_changes() -> bool:
-	return _document.is_dirty
-
-
-func can_new() -> bool:
-	return true
-
-
-func get_new_action_label() -> String:
-	return "New Font"
-
+func get_editor_document() -> EditorDocument:
+	return _document
 
 func new_current() -> Error:
 	return _document.create_new()
 
-
-func can_open() -> bool:
-	return true
-
-
-func get_open_action_label() -> String:
-	return "Open Font..."
-
-
-func get_open_dialog_title() -> String:
-	return "Open .fnt"
-
-
 func get_open_dialog_filters() -> PackedStringArray:
 	return PackedStringArray(["*.fnt,*.FNT ; Nova fonts"])
 
+func can_save() -> bool:
+	return _document.is_dirty and not _document.current_path.is_empty()
 
-func get_open_dialog_dir() -> String:
-	return _document.get_last_open_dir()
+func can_save_as() -> bool:
+	return _document.resource != null
 
+func save_current() -> Error:
+	return _document.save_current()
 
-func get_open_resource_kind() -> String:
-	return "font"
+func save_as(dir_path: String) -> Error:
+	return _document.save_as(dir_path)
 
-
-func get_current_resource_path() -> String:
-	return _document.current_path
-
-
-func open_file(path: String) -> Error:
-	# Fonts resolve through the settings fallback (open-by-name must work without a shell),
-	# so this keeps its own VFS branch over _resource_root_or_settings().
-	var resources := _resource_root_or_settings()
-	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
-		var bytes := resources.read_file(path)
-		return _document.open_fnt_bytes(bytes, _vfs_display_path(resources, path))
-	return _document.open_fnt(path)
-
-
-# Resolve a bare font name (credits/menus reference fonts by name) to an openable
-# path inside the configured resource root; "" when the root is unset or the font
-# is missing. Split from open_font_name so the shell's open_font_workspace
-# forwarder can resolve first and ride the generic open_in_workspace jump.
 func resolve_font_file(font_name: String) -> String:
 	if font_name.is_empty():
 		return ""
-	var resources := _resource_root_or_settings()
+	var resources := EditorFileSystem.get_instance().get_resource_root_or_settings()
 	if resources == null or resources.get_root_dir().is_empty():
 		return ""
 	var filename := "%s.fnt" % font_name
@@ -220,7 +172,6 @@ func resolve_font_file(font_name: String) -> String:
 	if not path.is_empty():
 		return path
 	return filename if resources.has_file(filename) else ""
-
 
 func open_font_name(font_name: String) -> Error:
 	if font_name.is_empty():
@@ -230,40 +181,24 @@ func open_font_name(font_name: String) -> Error:
 		return ERR_DOES_NOT_EXIST
 	return open_file(path)
 
+func open_file(path: String) -> Error:
+	var resources := EditorFileSystem.get_instance().get_resource_root_or_settings()
+	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
+		var bytes := resources.read_file(path)
+		return _document.open_fnt_bytes(bytes, EditorFileSystem.get_instance().get_vfs_display_path(resources, path))
+	return _document.open_fnt(path)
 
-func can_save() -> bool:
-	return _document.is_dirty and not _document.current_path.is_empty()
+func get_open_resource_kind() -> String:
+	return "font"
 
+func get_current_resource_path() -> String:
+	return _document.current_path
 
-func get_save_action_label() -> String:
-	return "Save Font"
-
-
-func can_save_as() -> bool:
-	return _document.resource != null
-
-
-func get_save_as_action_label() -> String:
-	return "Save Font As..."
-
-
-func save_current() -> Error:
-	return _document.save_current()
-
-
-func save_as(dir_path: String) -> Error:
-	return _document.save_as(dir_path)
-
+func get_open_dialog_dir() -> String:
+	return _document.get_last_open_dir()
 
 func get_save_dialog_title() -> String:
 	return "Choose where to save the font"
 
-
 func get_save_dialog_dir() -> String:
 	return _document.get_last_save_dir()
-
-
-# Undo/redo derive from the base via the editor control; dirty stays on the document
-# (the two live on different objects here), so has_unsaved_changes keeps its override.
-func get_editor_document() -> Object:
-	return _editor

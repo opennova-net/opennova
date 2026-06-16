@@ -1,5 +1,5 @@
 class_name EditorDocument
-extends Node
+extends RefCounted
 
 # Shared document state for editor-side authoring controllers. No direct IDA
 # equivalent; this is editor-only glue around ported data/model classes.
