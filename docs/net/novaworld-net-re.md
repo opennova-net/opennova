@@ -203,12 +203,12 @@ sweep; blank = not yet characterized.
 | 0x06 | 0x432BC0 | `_HandleChatCommand` | server→client chat |
 | 0x07 | 0x422730 | `_0x007` | per-frame keep-alive stub |
 | 0x08 | 0x4281D0 | `_0x008` | game-state snapshot / delta entity updates (~2 KB) |
-| 0x0A | 0x42FEC0 | (no IDA function defined; valid prolog) | 604 B in capture7 |
+| 0x0A | 0x42FEC0 | `NapiNPClientMsg_0x00A` | **per-frame local-player + world-state update** (multiplexed player/timer/env/gametype + health + weapon-hit loop); full field map §5.9. Defined 2026-06-16 (was undefined — data blob mis-marked at 0x430000) |
 | 0x0B | 0x422660 | `_0x00B` | copies the 616-byte BMS header into `byte_A761D0` (field map §5.4) |
 | 0x0C | 0x42E730 | `_0x00C` | full entity spawn batch (~1 KB); parses name fields inline (no opt-in trailer) |
 | 0x0D | 0x432C40 | `_0x00D` | pool-entity spawn batch; sets `dword_A82370=3`; per-entity flag-driven layout: u16 count + {u16 flags, u16 slot_id, cstr name, conditional u32/u8 fields per flag bit, always 3×u32 pos, conditional team byte (`flags&0x10`), bone-attach byte}; `flags&0x20` writes entity[+36]; AI-flagged item defs require the `flags&0x800` trailer (§5.6) |
 | 0x0F | 0x42E200 | `_0x00F` | **WORLD-STATE-LOAD** (no descriptive Kong name; any "game-start" label is misleading): 4×i32 (sessionId, X, Y, Z), 3×i16 fixed-point angles, u8 flags, team scores, player count, waypoint + team names; sets `dword_81474C=0` (load-bearing input/heartbeat gate); client replies with the C2S burst 0x22 0x23 0x28 0x29 0x2D 0x32; ~624 B, sometimes fragmented in retail |
-| 0x10 | 0x433400 | `_0x010` | static entity batch (pool 2): u16 start_idx, u16 count, flag-driven per-entity records; 612-644 B in retail, every frame |
+| 0x10 | 0x433400 | `_0x010` | static entity batch (pool 2): u16 start_idx, u16 count, flag-driven per-entity records; 612-644 B in retail, every frame; **full field map §5.9** |
 | 0x11 | 0x4226E0 | `_0x011` | one-line stub: `dword_A82358=1` (unblocks WaitForDisconnect); retail only ever ships it bundled last with 0x0B (§5.5) |
 | 0x12 | 0x425EE0 | `_0x012` | |
 | 0x13 | 0x42EB50 | `_0x013` | |
@@ -338,7 +338,7 @@ This is what a reimplemented server must **handle**.
 | 0x09 | 0x513200 | client checksum response |
 | 0x0A | 0x513260 | |
 | 0x0B | 0x51AB10 | |
-| 0x0C | 0x501C30 | |
+| 0x0C | 0x501C30 | entity sub-packet: `[u16 handle][u16 itemTypeId][u8 sub_op][payload]` → per-type callback at `entity_def+356`; §5.9 |
 | 0x0D | 0x513760 | replication frame ACK |
 | 0x0E | 0x519AF0 | |
 | 0x0F | 0x514180 | client input frame (movement + buttons; ~33 ms cadence); len-2 form is the spawn-point query seen in the fallback spawn-menu loop |
@@ -550,11 +550,89 @@ inert); the reverted stack emitted it speculatively and it was marked for remova
 
 ### 5.8 Wire-format verification gaps
 
-Tags emitted by the reverted stack but never byte-compared against retail: 0x0A (604 B
-retail), 0x10 (612-644 B; flag layout), 0x16 (per-player record layout), 0x46 (bitfield read
-order), 0x60 and 0x64 (file-transfer chunks; a format error makes the client request
-retransmits forever). Cross-capture diffs still pending for 0x0F, 0x10, 0x60, 0x64, 0x7B
-(+13-byte size delta vs the reverted builder).
+Tags emitted by the reverted stack but never byte-compared against retail: 0x16 (per-player
+record layout), 0x46 (bitfield read order), 0x60 and 0x64 (file-transfer chunks; a format error
+makes the client request retransmits forever). **0x0A and 0x10 are now witnessed end to end —
+see §5.9.** Cross-capture diffs still pending for 0x0F, 0x60, 0x64, 0x7B (+13-byte size delta vs
+the reverted builder).
+
+### 5.9 Core in-game replication loop — field maps (loopback capture 2026-06-16)
+
+Witness source: a clean loopback capture of a real host+join+play session (both `Jointops.exe`
+instances on one host; in-game session `:32768` host ↔ `:32769` joiner, `PN="JOINTOPERATIONS"`,
+map "AS - Laba-Laba Archipelago" / `ASH_I1EA.BMS`). Decoded end to end through the shipping libs
+by `tests/novaworld/nw_ingame_histogram_test.cpp` (envelope → outer NWU → per-session SCRK →
+0x43/0x83 → msg_id dispatch): **0 decode failures over 439 datagrams**, both 61-char SCRKs
+recovered. Confirms the JointOperations hello carries `PV1="0.0.0 1/12/2004 EM"` (vs the lobby's
+`2/10/2004` — D-NET-47) and that S2C 0x0B is the 616-byte `42 4d 53 13` BMS header (§5.4), here
+for `ASH_I1EA.BMS`. Observed phases: **load** (0x0B → pools 0x10/0x0D/0x20 → 0x45) then
+**gameplay** (per-frame 0x0A ↔ C2S 0x0C, plus 0x40/0x6F, RTT 0x57↔0x2C, 0x26).
+
+**Entity handle encoding — `(pool << 12) | slot`.** Every in-match entity reference is a `u16`:
+high 4 bits select the pool, low 12 the slot, resolved as
+`g_pool_list[h>>12].base + g_pool_list[h>>12].stride * (h & 0xFFF)`
+`[orig: dispatch_entity_packet_callback @ 0x4D6A80; NapiNPClientMsg_0x00A @ 0x42FEC0]`. `0xFFFF`
+= "none"; `(h & 0xF000) >= 0x5000` is treated as invalid.
+
+**Tag 0x10 (S2C) — static entity batch** `[orig: NapiNPClientMsg_0x010 @ 0x433400]`. Pool-2
+batch; each entity is zeroed before fill. Header `[u16 startIndex][u16 entityCount]`, then per
+entity:
+
+| Field | Type | Presence | Stored |
+|---|---|---|---|
+| itemTypeId | u16 | always (`0` ⇒ empty slot, record ends) | — |
+| fieldFlags | u16 | always | — |
+| posX/Y/Z | 3× i32 | always | entity+4/+8/+12 (16.16 world) |
+| velX / velY / velZ | i32 | `flags & 0x01 / 0x02 / 0x04` | entity+16/+20/+24 |
+| sectionMask | i32 | `flags & 0x08` | entity+308 |
+| team | u8 | `flags & 0x10` | entity+354 |
+| parentSlot | i32 | `flags & 0x20` | entity+36 |
+| ammoCount | u8 | **always** | entity+290 (u16) |
+| boneA / boneB | u8 | `flags & 0x40 / 0x80` | entity+533 / +532 |
+| scoreFlag | u8 | `flags & 0x100` | entity+624 (i32) |
+| weaponByte | u8 | **always** | entity+538 |
+| attachRef | u16 | `weaponByte != 0 \|\| flags & 0x200` | entity+350 |
+
+Then `ItemList_FindIndexByTypeId` resolves the def (health → entity+452) and allocates
+section/action slots. Cross-witnessed: capture record 0 = itemType `0x044a`, flags `0xa1`, pos
+`(-2189.6, 1626.9, 25.2)` world units; the next record `0x044c` lands exactly where the layout
+predicts.
+
+**Tag 0x0A (S2C) — per-frame local-player + world-state update** `[orig: NapiNPClientMsg_0x00A @
+0x42FEC0]`. NOT a generic entity snapshot. The host (authority) returns right after the 12-byte
+header; the rest is client-side.
+
+| Field | Type | Notes |
+|---|---|---|
+| ref0/ref1/ref2 | 3× i32 | tick/reference header → dword_A822E4/E8/EC |
+| flags1 | u8 | `0x04`→loadprog `dword_A8235C=10`; `0x02`→`byte_A860DC`; `0x01`→death/spectator (camera reset, `CameraOffset.Z=0xD000`, spawn-gate `dword_24C1928`) |
+| flags2 | u8 | low 2 bits select a sub-block |
+| sub-block 0 | `==0`: 6× u8 + u8 (`0xFF` sentinel) + i32 | player aim/state → dword_A85B5C… |
+| sub-block 1 | `==1`: 4× u8 + i16 | `dword_24C1958 = 62 × i16` (62 Hz timer; `-1` if negative) |
+| sub-block 2 (ENV) | `==2`: u16,u16,u16,u8,u8,u8,u8,u8 | `Env_FogDistTarget=u16<<16`, `Env_FogDistAccelClamp=u16<<8`, `Env_CurTimeFixed24=u16<<13` (TOD), `Env_QuakeTicks`, `Env_CloudScrollRateTarget=u8<<10`, u8<<8, `Env_OvercastBlendTarget=u8<<8`, u8 |
+| sub-block 3 | `==3 && g_GameType&0x20000`: 4× i32 | dword_AC86E8… |
+| pflags | u8 | `<<8`, player pad7 flag bits |
+| mountHandle | u16 | vehicle-mount handle (`pool<<12\|slot`; `0xFFFF`=none) |
+| health | i16 | → `g_local_player_entity->Health` (drop triggers damage flash) |
+| event loop | trailing `[u8 tag]…` | `tag==2`→`NetPacket_DeserializeWeaponHit`; `tag==1`→ entity handle + itemTypeId lookup → per-item callback; ends at `tag==0`/EOB |
+
+(The handler was undefined in the IDB — a data blob mis-marked at the `0x430000` page boundary;
+defined 2026-06-16.)
+
+**Tag 0x0C (C2S) — entity sub-packet** `[orig: NapiNPServerMsg_0x00C @ 0x501C30 →
+dispatch_entity_packet_callback @ 0x4D6A80]`. The joiner's per-frame uplink for an entity it
+owns; authority-gated, ownership-checked, then dispatched to the entity-type callback at
+`entity_def+356`.
+
+| Field | Type | Notes |
+|---|---|---|
+| entityHandle | u16 | `pool<<12\|slot`; server verifies it equals the sender's owned entity |
+| itemTypeId | u16 | e.g. `0x14B9` = player infantry (§5.6) |
+| sub_opcode | u8 | selects the per-type sub-handler |
+| payload | `len-5` B | → entity-type callback (the tick/position block shared with 0x0A) |
+
+The per-entity-type callback (`entity_def+356`, runtime-resolved) is the next layer; its field
+map is per item class and not yet witnessed.
 
 ## 6. Struct reference
 

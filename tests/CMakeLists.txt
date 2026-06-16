@@ -998,6 +998,15 @@ target_include_directories(nw204_lobby_decode_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_definitions(nw204_lobby_decode_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
 add_test(NAME nw204_lobby_decode COMMAND nw204_lobby_decode_test)
 
+# In-game JOINTOPERATIONS surveyor — decodes a loopback host+join+play capture
+# and histograms the in-match NAPI messages per (direction, msg_id) so the
+# high-volume tags can be RE'd against §4. Asset-gated on env NW_INGAME_HEXCAP
+# (skips cleanly when unset); same decode pipeline as nw204_lobby_decode.
+add_executable(nw_ingame_histogram_test novaworld/nw_ingame_histogram_test.cpp)
+target_link_libraries(nw_ingame_histogram_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto)
+target_include_directories(nw_ingame_histogram_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_ingame_histogram COMMAND nw_ingame_histogram_test)
+
 # Backend schema regression — applies the actual backend/migrations/* and
 # backend/seed/* the standalone server uses, so SQL syntax errors and seed
 # regressions break CI before they break the running server.
