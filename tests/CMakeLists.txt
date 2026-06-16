@@ -1015,6 +1015,14 @@ target_link_libraries(nw_ingame_pool_records_test PRIVATE opennova_novaworld ope
 target_include_directories(nw_ingame_pool_records_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_ingame_pool_records COMMAND nw_ingame_pool_records_test)
 
+# Per-entity compact-record decoders — §5.10 player / §5.13 vehicle / §5.14
+# infantry. Hand-built input vectors mirror the wire layout; no capture
+# dependency, so the test runs unconditionally in CI.
+add_executable(nw_ingame_compact_records_test novaworld/nw_ingame_compact_records_test.cpp)
+target_link_libraries(nw_ingame_compact_records_test PRIVATE opennova_novaworld)
+target_include_directories(nw_ingame_compact_records_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_ingame_compact_records COMMAND nw_ingame_compact_records_test)
+
 # Backend schema regression — applies the actual backend/migrations/* and
 # backend/seed/* the standalone server uses, so SQL syntax errors and seed
 # regressions break CI before they break the running server.

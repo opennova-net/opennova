@@ -148,4 +148,90 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
                               Pool3SyncBatch &out);
 
+// ===========================================================================
+// Per-entity compact records — appear inside S2C 0x0A's trailing event loop,
+// `tag==1` branch. Each record is decoded by a callback selected per item
+// type from the §5.10b entity-class dispatch table. Three of the four
+// witnessed callbacks land here; the fourth (guided weapons, §5.15) is a
+// variable-length delta codec deferred until a capture carries projectile
+// traffic.
+//
+// Convention divergence from decode_pool_*_batch: these consume a PREFIX of a
+// larger event-loop buffer, so they emit `consumed` (the exact byte count
+// taken) and return true only when the body had enough room AND the read
+// finished cleanly. Callers advance their cursor by `consumed`.
+// ===========================================================================
+
+// One §5.10 compact record (18 B fixed). Decoded by
+// [orig: NetPacket_SerializePlayerState case 1/2 @ 0x4C09C0]. Used by items
+// with `ai_function plyr` — the local player.
+struct PlayerCompactRecord {
+	uint8_t  vehicle_bone = 0;        // entity+0x157
+	uint8_t  seat_type = 0;           // local seat-type byte
+	uint16_t vehicle_handle = 0xFFFF; // pool<<12|slot, 0xFFFF=none
+	uint16_t pos_x_compressed = 0;    // entity+4   (vehicle-local if mounted)
+	uint16_t pos_y_compressed = 0;    // entity+8
+	uint16_t pos_z_compressed = 0;    // entity+0xC
+	uint8_t  yaw_byte = 0;            // entity+0x14 (high byte of 32-bit BAM)
+	uint8_t  pitch_byte = 0;
+	uint8_t  anim_slot_low = 0;       // entity+0x12C
+	uint8_t  state_flags = 0;         // entity+0x24 (bit 2 = spawning, bit 4 = mounted)
+	uint8_t  weapon_anim_state = 0;   // entity+0x2B8 / 0x2BC
+	uint8_t  priority = 0;            // entity+0x377
+	uint8_t  anim_def_index = 0;      // entity+0x2B0
+	uint8_t  health_class_byte = 0;   // → Entity_SetHealthFromDifficultyByte
+};
+
+// One §5.13 compact record (15 B mounted / 21 B unmounted). Decoded by
+// [orig: Entity_SerializeMountedVehicleState @ 0x460560]. Used by items with
+// `ai_function` in {CHel, cveh, cbot, cpln, ctrn} — controllable vehicles
+// and AI ground/air units sharing the vehicle network callback.
+struct VehicleCompactRecord {
+	uint16_t parent_slot_handle = 0xFFFF; // pool<<12|slot, 0xFFFF=none
+	uint16_t pos_x_compressed = 0;        // entity+4   (vehicle-local if parent != none)
+	uint16_t pos_y_compressed = 0;        // entity+8
+	uint16_t pos_z_compressed = 0;        // entity+12
+	int16_t  yaw_high = 0;                // entity+16 (BAM high i16 (v+0x8000)>>16)
+	uint8_t  flags_byte = 0;              // entity+36 low byte
+	bool     is_mounted = false;          // (flags_byte & 4) != 0
+
+	// Mounted branch (is_mounted = true):
+	uint16_t secondary_heading = 0;       // entity+24, valid iff is_mounted
+
+	// Unmounted branch (is_mounted = false):
+	uint16_t weapon_x_compressed = 0;     // entity+160
+	uint16_t weapon_y_raw = 0;            // entity+286 (raw u16, not compressed)
+	uint16_t weapon_z_compressed = 0;     // vehicleData[136] = entity+544
+	uint16_t weapon_heading_compressed = 0;// vehicleData[135] = entity+540
+
+	// Always present, both branches:
+	uint16_t final_heading = 0;           // entity+20 (mounted) or vehicleData[132]=entity+528
+};
+
+// One §5.14 compact record (14 B fixed). Decoded by
+// [orig: NetPacket_SerializeInfantryEntityState @ 0x4C0320]. Used by items
+// with `ai_function` in {org0, org1} — AI infantry / organic pool-0 entities
+// that aren't the player.
+struct InfantryCompactRecord {
+	uint8_t  seat_bone_idx = 0;            // entity+343 if mounted else 0
+	uint16_t vehicle_slot_handle = 0xFFFF; // pool<<12|slot, 0xFFFF=none
+	uint16_t pos_x_compressed = 0;         // entity+4 (vehicle-local if parent set)
+	uint16_t pos_y_compressed = 0;
+	uint16_t pos_z_compressed = 0;
+	uint8_t  yaw_byte = 0;                 // entity+16 BAM high (v+0x800000)>>24
+	uint8_t  flags_byte = 0;               // entity+36
+	uint8_t  pitch_byte = 0;               // entity+748
+	uint8_t  aim_yaw_byte = 0;             // entity+720
+	uint8_t  anim_byte = 0;                // entity+696 if non-zero else entity+700
+};
+
+bool decode_player_compact_record(const uint8_t *body, size_t len,
+                                  PlayerCompactRecord &out, size_t &consumed);
+
+bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
+                                   VehicleCompactRecord &out, size_t &consumed);
+
+bool decode_infantry_compact_record(const uint8_t *body, size_t len,
+                                    InfantryCompactRecord &out, size_t &consumed);
+
 } // namespace opennova

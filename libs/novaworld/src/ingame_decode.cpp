@@ -189,4 +189,82 @@ bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
 	return (c.p == c.end);
 }
 
+// ===========================================================================
+// Per-entity compact records inside S2C 0x0A trailing event-loop tag==1.
+// Field tables: docs/net/novaworld-net-re.md §5.10 / §5.13 / §5.14.
+// ===========================================================================
+
+// §5.10 player compact record (mode 2, format 11). 18 B fixed.
+// [orig: NetPacket_SerializePlayerState case 1/2 @ 0x4C09C0]
+bool decode_player_compact_record(const uint8_t *body, size_t len,
+                                  PlayerCompactRecord &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.vehicle_bone      = c.u8();
+	out.seat_type         = c.u8();
+	out.vehicle_handle    = c.u16();
+	out.pos_x_compressed  = c.u16();
+	out.pos_y_compressed  = c.u16();
+	out.pos_z_compressed  = c.u16();
+	out.yaw_byte          = c.u8();
+	out.pitch_byte        = c.u8();
+	out.anim_slot_low     = c.u8();
+	out.state_flags       = c.u8();
+	out.weapon_anim_state = c.u8();
+	out.priority          = c.u8();
+	out.anim_def_index    = c.u8();
+	out.health_class_byte = c.u8();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 18;
+}
+
+// §5.13 vehicle compact record (mode 2, format 11). 15 B mounted / 21 B not.
+// [orig: Entity_SerializeMountedVehicleState @ 0x460560]
+bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
+                                   VehicleCompactRecord &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.parent_slot_handle = c.u16();
+	out.pos_x_compressed   = c.u16();
+	out.pos_y_compressed   = c.u16();
+	out.pos_z_compressed   = c.u16();
+	out.yaw_high           = int16_t(c.u16());
+	out.flags_byte         = c.u8();
+	out.is_mounted         = (out.flags_byte & 0x04) != 0;
+	if (out.is_mounted) {
+		out.secondary_heading = c.u16();
+	} else {
+		out.weapon_x_compressed       = c.u16();
+		out.weapon_y_raw              = c.u16();
+		out.weapon_z_compressed       = c.u16();
+		out.weapon_heading_compressed = c.u16();
+	}
+	out.final_heading = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == (out.is_mounted ? size_t(15) : size_t(21));
+}
+
+// §5.14 infantry / AI compact record (mode 2, format 11). 14 B fixed.
+// [orig: NetPacket_SerializeInfantryEntityState @ 0x4C0320]
+bool decode_infantry_compact_record(const uint8_t *body, size_t len,
+                                    InfantryCompactRecord &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.seat_bone_idx       = c.u8();
+	out.vehicle_slot_handle = c.u16();
+	out.pos_x_compressed    = c.u16();
+	out.pos_y_compressed    = c.u16();
+	out.pos_z_compressed    = c.u16();
+	out.yaw_byte            = c.u8();
+	out.flags_byte          = c.u8();
+	out.pitch_byte          = c.u8();
+	out.aim_yaw_byte        = c.u8();
+	out.anim_byte           = c.u8();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 14;
+}
+
 } // namespace opennova
