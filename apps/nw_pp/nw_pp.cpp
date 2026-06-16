@@ -8,26 +8,24 @@
 // SCRK → 0x43/0x83 → reassembly — so what it prints is the exact byte stream
 // the shipping libs see, not a parallel re-implementation.
 //
-// Pretty-print depth per tag:
-//   S 0x0D  pool-entity spawn batch       — full §5.11 field map per record
-//   S 0x20  bulk pool-3 entity sync       — full §5.12 field map per record
-//   any other tag                         — header + hex sample (truncated)
-//
-// As we RE more tags we add their decoders here, alongside §5.x growth.
+// Tag-specific decoders live in `libs/novaworld/include/novaworld/ingame_decode.h`
+// (shared with `nw_ingame_pool_records_test` and the future real handlers).
+// As new tags get field maps in docs/net/novaworld-net-re.md, their decoders
+// land there and a printer for them lands here.
 //
 // CLI:
 //   nw_pp <hexcap-path>                 # all frames
 //   nw_pp <hexcap-path> 0x0d 0x20       # filter to listed S2C tags
-//   NW_INGAME_HEXCAP=<path> nw_pp       # env-driven (matches the test convention)
+//   NW_INGAME_HEXCAP=<path> nw_pp       # env-driven (matches test convention)
 
 #include <napi/envelope.h>
 #include <napi/tlv.h>
 #include <novacrypto/nwu.h>
+#include <novaworld/ingame_decode.h>
 #include <novaworld/protocol_message.h>
 #include <novaworld/session_hello.h>
 #include <novaworld/session_keys.h>
 
-#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -92,42 +90,7 @@ std::string to_hex_sample(const uint8_t *p, size_t n, size_t cap = 48) {
 	return s;
 }
 
-// 16.16 fixed-point → decimal world units.
 double fp16(int32_t v) { return double(v) / 65536.0; }
-
-struct Cursor {
-	const uint8_t *p = nullptr;
-	const uint8_t *end = nullptr;
-	bool ok = true;
-
-	size_t pos(const uint8_t *base) const { return size_t(p - base); }
-	size_t remaining() const { return ok ? size_t(end - p) : 0; }
-
-	uint8_t u8() {
-		if (!ok || p + 1 > end) { ok = false; return 0; }
-		return *p++;
-	}
-	uint16_t u16() {
-		if (!ok || p + 2 > end) { ok = false; return 0; }
-		uint16_t v = uint16_t(p[0]) | uint16_t(p[1]) << 8; p += 2; return v;
-	}
-	uint32_t u32() {
-		if (!ok || p + 4 > end) { ok = false; return 0; }
-		uint32_t v = uint32_t(p[0]) | uint32_t(p[1]) << 8 |
-		             uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
-		p += 4; return v;
-	}
-	std::string cstr() {
-		std::string s;
-		while (ok && p < end) {
-			uint8_t c = *p++;
-			if (c == 0) return s;
-			s.push_back(char(c));
-		}
-		ok = false;
-		return s;
-	}
-};
 
 std::string handle_str(uint16_t h) {
 	char buf[24];
@@ -137,142 +100,86 @@ std::string handle_str(uint16_t h) {
 	return buf;
 }
 
-// Decode + print one S2C 0x0D payload per the §5.11 field map.
-void print_tag_0d(const std::vector<uint8_t> &body) {
-	Cursor c{body.data(), body.data() + body.size(), true};
-	const uint8_t *base = body.data();
-	int16_t entityCount = int16_t(c.u16());
-	std::printf("        [0x0D] entityCount=%d (body %zu B)\n",
-	            int(entityCount), body.size());
-	if (entityCount <= 0) return;
-	for (int i = 0; i < entityCount; ++i) {
-		const size_t rec_off = c.pos(base);
-		const uint16_t flags = c.u16();
-		const uint16_t slot = c.u16();
-		if (!c.ok) {
-			std::printf("        record %d @+%zu TRUNCATED (header)\n",
-			            i, rec_off);
-			return;
-		}
-		if (slot == 0xFFFF || (slot & 0xF000) >= 0x5000) {
-			std::printf("        record %d @+%zu sentinel slot=%s "
-			            "(end-of-batch)\n", i, rec_off, handle_str(slot).c_str());
-			return;
-		}
-		const uint16_t type = c.u16();
-		std::string name = c.cstr();
-		uint32_t entity36 = 0;
-		if (flags & 0x0020) entity36 = c.u32();
-		const int32_t px = int32_t(c.u32());
-		const int32_t py = int32_t(c.u32());
-		const int32_t pz = int32_t(c.u32());
-		if (!c.ok) {
-			std::printf("        record %d @+%zu TRUNCATED (position)\n",
-			            i, rec_off);
-			return;
-		}
-		std::printf("        record %d @+%zu flags=0x%04x slot=%s type=0x%04x "
-		            "name=%-12s pos=(%.1f, %.1f, %.1f)",
-		            i, rec_off, flags, handle_str(slot).c_str(), type,
-		            ("\"" + name + "\"").c_str(), fp16(px), fp16(py), fp16(pz));
-		if (flags & 0x0020) std::printf(" entity36=0x%08x", entity36);
-		if (flags & 0x0001) { (void)c.u32(); std::printf(" velX"); }
-		if (flags & 0x0002) { (void)c.u32(); std::printf(" velY"); }
-		if (flags & 0x0004) { (void)c.u32(); std::printf(" velZ"); }
-		if (flags & 0x0008) { (void)c.u32(); std::printf(" sectionMask"); }
-		if (flags & 0x0010) { std::printf(" orient=0x%02x", c.u8()); }
-		if (flags & 0x0100) { std::printf(" parent=%s", handle_str(c.u16()).c_str()); }
-		if (flags & 0x0200) { std::printf(" target=%s", handle_str(c.u16()).c_str()); }
-		if (flags & 0x0400) {
-			const uint8_t mask = c.u8();
-			std::printf(" weapMask=0x%02x", mask);
-			if (mask) {
-				int wcount = 0;
-				for (int b = 0; b < 8; ++b) if (mask & (1u << b)) {
-					(void)c.u16(); wcount++;
-				}
-				(void)c.u16(); (void)c.u16(); // extraHandle0/1
-				std::printf(" weapons=%d+2extra", wcount);
-			}
-		}
-		const uint8_t teamByte = c.u8(); std::printf(" team=0x%02x", teamByte);
-		if (flags & 0x0800) {
-			const uint32_t aiP1 = c.u32();
-			const uint32_t aiP2 = c.u32();
-			std::string aiName = c.cstr();
-			std::printf(" AItrailer{p1=0x%08x p2=0x%08x name=\"%s\"}",
-			            aiP1, aiP2, aiName.c_str());
-		}
-		if (flags & 0x0040) std::printf(" alert=0x%02x", c.u8());
-		if (flags & 0x0080) std::printf(" action=0x%02x", c.u8());
-		if (flags & 0x1000) std::printf(" weapType=0x%02x", c.u8());
-		if (flags & 0x2000) {
-			(void)c.u8(); (void)c.u16(); std::printf(" health[+s]");
-		} else if (flags & 0x8000) {
-			(void)c.u16(); std::printf(" healthShort");
-		}
-		if (flags & 0x4000) std::printf(" diff=0x%02x", c.u8());
-		std::printf("\n");
-		if (!c.ok) {
-			std::printf("        record %d truncated mid-field\n", i);
-			return;
+void print_pool_spawn_record(int index, const PoolSpawnRecord &r) {
+	std::printf("        record %d flags=0x%04x slot=%s type=0x%04x "
+	            "name=%-12s pos=(%.1f, %.1f, %.1f)",
+	            index, r.spawn_flags, handle_str(r.slot_id).c_str(),
+	            r.item_type_id, ("\"" + r.entity_name + "\"").c_str(),
+	            fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z));
+	if (r.spawn_flags & 0x0020) std::printf(" entity36=0x%08x", r.entity_flags);
+	if (r.spawn_flags & 0x0001) std::printf(" velX");
+	if (r.spawn_flags & 0x0002) std::printf(" velY");
+	if (r.spawn_flags & 0x0004) std::printf(" velZ");
+	if (r.spawn_flags & 0x0008) std::printf(" sectionMask");
+	if (r.spawn_flags & 0x0010) std::printf(" orient=0x%02x", r.orient_byte);
+	if (r.spawn_flags & 0x0100)
+		std::printf(" parent=%s", handle_str(r.parent_handle).c_str());
+	if (r.spawn_flags & 0x0200)
+		std::printf(" target=%s", handle_str(r.target_handle).c_str());
+	if (r.spawn_flags & 0x0400) {
+		std::printf(" weapMask=0x%02x", r.weapon_mask);
+		if (r.weapon_mask) {
+			int wcount = 0;
+			for (int b = 0; b < 8; ++b) if (r.weapon_mask & (1u << b)) wcount++;
+			std::printf(" weapons=%d+2extra", wcount);
 		}
 	}
-	if (c.remaining() > 0)
-		std::printf("        WARNING: %zu trailing bytes\n", c.remaining());
+	std::printf(" team=0x%02x", r.team_byte);
+	if (r.spawn_flags & 0x0800)
+		std::printf(" AItrailer{p1=0x%08x p2=0x%08x name=\"%s\"}",
+		            r.ai_profile_1, r.ai_profile_2, r.ai_name.c_str());
+	if (r.spawn_flags & 0x0040) std::printf(" alert=0x%02x", r.alert_byte);
+	if (r.spawn_flags & 0x0080) std::printf(" action=0x%02x", r.action_byte);
+	if (r.spawn_flags & 0x1000)
+		std::printf(" weapType=0x%02x", r.weapon_type_byte);
+	if (r.spawn_flags & 0x2000)
+		std::printf(" health=0x%02x/0x%04x", r.health_byte, r.health_short);
+	else if (r.spawn_flags & 0x8000)
+		std::printf(" healthShort=0x%04x", r.health_short);
+	if (r.spawn_flags & 0x4000) std::printf(" diff=0x%02x", r.difficulty_byte);
+	std::printf("\n");
 }
 
-// Decode + print one S2C 0x20 payload per the §5.12 field map.
-void print_tag_20(const std::vector<uint8_t> &body) {
-	Cursor c{body.data(), body.data() + body.size(), true};
-	const uint8_t *base = body.data();
-	const uint16_t startIdx = c.u16();
-	const int16_t entityCount = int16_t(c.u16());
-	std::printf("        [0x20] startIdx=%u entityCount=%d (body %zu B)\n",
-	            unsigned(startIdx), int(entityCount), body.size());
-	if (entityCount <= 0) return;
-	for (int i = 0; i < entityCount; ++i) {
-		const size_t rec_off = c.pos(base);
-		const uint16_t type = c.u16();
-		if (!c.ok) {
-			std::printf("        slot %u TRUNCATED (type)\n",
-			            unsigned(startIdx) + i);
-			return;
-		}
-		if (type == 0) {
-			std::printf("        slot %u @+%zu type=0 (empty-slot sentinel)\n",
-			            unsigned(startIdx) + i, rec_off);
-			continue;
-		}
-		const uint8_t flags = c.u8();
-		const int32_t px = int32_t(c.u32());
-		const int32_t py = int32_t(c.u32());
-		const int32_t pz = int32_t(c.u32());
-		if (!c.ok) {
-			std::printf("        slot %u @+%zu TRUNCATED (position)\n",
-			            unsigned(startIdx) + i, rec_off);
-			return;
-		}
-		std::printf("        slot %u @+%zu type=0x%04x flags=0x%02x "
-		            "pos=(%.1f, %.1f, %.1f)",
-		            unsigned(startIdx) + i, rec_off, type, flags,
-		            fp16(px), fp16(py), fp16(pz));
-		if (flags & 0x01) std::printf(" parent=0x%08x", c.u32());
-		if (flags & 0x02) std::printf(" orient=0x%08x", c.u32());
-		if (flags & 0x04) std::printf(" ammo=%u", unsigned(c.u16()));
-		std::printf(" net=%s", handle_str(c.u16()).c_str());
-		if (flags & 0x08) std::printf(" team=0x%02x", c.u8());
-		if (flags & 0x10) std::printf(" weapType=0x%04x", c.u16());
-		if (flags & 0x20) std::printf(" score=0x%02x", c.u8());
-		std::printf("\n");
-		if (!c.ok) {
-			std::printf("        slot %u truncated mid-field\n",
-			            unsigned(startIdx) + i);
-			return;
-		}
+void print_pool3_sync_record(uint16_t slot_idx, const Pool3SyncRecord &r) {
+	if (r.is_empty_slot) {
+		std::printf("        slot %u type=0 (empty-slot sentinel)\n",
+		            unsigned(slot_idx));
+		return;
 	}
-	if (c.remaining() > 0)
-		std::printf("        WARNING: %zu trailing bytes\n", c.remaining());
+	std::printf("        slot %u type=0x%04x flags=0x%02x "
+	            "pos=(%.1f, %.1f, %.1f)",
+	            unsigned(slot_idx), r.item_type_id, r.flags_byte,
+	            fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z));
+	if (r.flags_byte & 0x01) std::printf(" parent=0x%08x", r.parent_handle);
+	if (r.flags_byte & 0x02) std::printf(" orient=0x%08x", r.orientation_val);
+	if (r.flags_byte & 0x04) std::printf(" ammo=%u", unsigned(r.ammo_count));
+	std::printf(" net=%s", handle_str(r.net_handle).c_str());
+	if (r.flags_byte & 0x08) std::printf(" team=0x%02x", r.team_byte);
+	if (r.flags_byte & 0x10) std::printf(" weapType=0x%04x", r.weapon_type);
+	if (r.flags_byte & 0x20) std::printf(" score=0x%02x", r.score_byte);
+	std::printf("\n");
+}
+
+void print_tag_0d(const std::vector<uint8_t> &body) {
+	PoolSpawnBatch batch;
+	const bool clean = decode_pool_spawn_batch(body.data(), body.size(), batch);
+	std::printf("        [0x0D] entityCount=%d (body %zu B%s%s)\n",
+	            int(batch.entity_count), body.size(),
+	            batch.sentinel_ended_early ? ", sentinel-ended" : "",
+	            clean ? "" : ", DECODE INCOMPLETE");
+	for (size_t i = 0; i < batch.records.size(); ++i)
+		print_pool_spawn_record(int(i), batch.records[i]);
+}
+
+void print_tag_20(const std::vector<uint8_t> &body) {
+	Pool3SyncBatch batch;
+	const bool clean = decode_pool3_sync_batch(body.data(), body.size(), batch);
+	std::printf("        [0x20] startIdx=%u entityCount=%d (body %zu B%s)\n",
+	            unsigned(batch.start_index), int(batch.entity_count),
+	            body.size(), clean ? "" : ", DECODE INCOMPLETE");
+	for (size_t i = 0; i < batch.records.size(); ++i)
+		print_pool3_sync_record(uint16_t(batch.start_index + i),
+		                        batch.records[i]);
 }
 
 struct DirState {
