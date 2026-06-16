@@ -142,6 +142,13 @@ typedef struct DefItemDef {
     char dawnshot[128];
     char duskshot[128];
     char dayshot[128];
+    /* §5.10b dispatch tags. ai_function on the player is `plyr` (witnessed
+       on items.def id 105305 = wire 0x14B9, matching the orig SerializePlayerState
+       callback), so ai_function is the field that drives ItemDef+356 lookup. */
+    char ai_function[16];
+    char move_function[16];
+    char render_function[16];
+    char disk_function[16];
     char (*raw_lines)[512];
     size_t raw_lines_count;
 } DefItemDef;

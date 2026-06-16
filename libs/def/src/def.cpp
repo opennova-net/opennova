@@ -815,6 +815,18 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             while (end < vl && !isspace((unsigned char)v[end])) ++end;
             safe_copy(current.dayshot, sizeof(current.dayshot), v, end);
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "ai_function", 11)) {
+            consume_value_str(trimmed, tlen, 11, current.ai_function, sizeof(current.ai_function));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "move_function", 13)) {
+            consume_value_str(trimmed, tlen, 13, current.move_function, sizeof(current.move_function));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "render_function", 15)) {
+            consume_value_str(trimmed, tlen, 15, current.render_function, sizeof(current.render_function));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "disk_function", 13)) {
+            consume_value_str(trimmed, tlen, 13, current.disk_function, sizeof(current.disk_function));
+            parsed = 1;
         }
 
         if (!parsed) {
