@@ -21,10 +21,10 @@ var _selected_index := -1
 
 # Detail fields (rebuilt per selection).
 var _name_edit: LineEdit
-var _display_edit: LineEdit
-var _graphic_edit: LineEdit
-var _graphic_j_edit: LineEdit
-var _graphic_s_edit: LineEdit
+var _display_edit: StringRefWidget
+var _graphic_edit: ResourceRefWidget
+var _graphic_j_edit: ResourceRefWidget
+var _graphic_s_edit: ResourceRefWidget
 var _camo_r: SpinBox
 var _camo_g: SpinBox
 var _camo_b: SpinBox
@@ -132,10 +132,10 @@ func _rebuild_detail() -> void:
 		return
 
 	_name_edit = _add_text_field("Name", String(part.get("name", "")))
-	_display_edit = _add_text_field("Display name", String(part.get("display_name", "")))
+	_display_edit = _add_string_ref_field("Display name", String(part.get("display_name", "")))
 	_graphic_edit = _add_graphic_field("Graphic", String(part.get("graphic", "")))
-	_graphic_j_edit = _add_text_field("Graphic (J)", String(part.get("graphic_j", "")))
-	_graphic_s_edit = _add_text_field("Graphic (S)", String(part.get("graphic_s", "")))
+	_graphic_j_edit = _add_graphic_field("Graphic (J)", String(part.get("graphic_j", "")), "PartGraphicJRef")
+	_graphic_s_edit = _add_graphic_field("Graphic (S)", String(part.get("graphic_s", "")), "PartGraphicSRef")
 
 	var camo: Array = part.get("camo", [0, 0, 0])
 	var camo_row := HBoxContainer.new()
@@ -203,29 +203,42 @@ func _add_text_field(label_text: String, value: String) -> LineEdit:
 	return edit
 
 
-# A graphic field with a `.3di` resource picker (reuses the shell file picker over
-# a scoped scan, mirroring the object anims inspector). Typing a name works too.
-func _add_graphic_field(label_text: String, value: String) -> LineEdit:
+# An Avatars display-name key. The key resolves through the "Avatars" string
+# table at runtime; the widget still degrades to a plain key field when no string
+# table service is available in headless tests.
+func _add_string_ref_field(label_text: String, value: String) -> StringRefWidget:
 	var row := HBoxContainer.new()
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var label := Label.new()
 	label.text = label_text
 	label.custom_minimum_size = Vector2(96, 0)
 	row.add_child(label)
-	var edit := LineEdit.new()
-	edit.name = "PartGraphicEdit"
-	edit.text = value
-	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(edit)
-	var pick := Button.new()
-	pick.name = "PartGraphicPickButton"
-	pick.text = "..."
-	row.add_child(pick)
+	var widget := StringRefWidget.new()
+	widget.name = "PartDisplayRef"
+	widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	widget.configure("Avatar string")
+	widget.set_value(value)
+	row.add_child(widget)
 	_detail_box.add_child(row)
-	pick.pressed.connect(func() -> void:
-		_open_picker("Pick part .3di", _scan_resource_files(".3di"), func(picked: String) -> void:
-			edit.text = picked.get_file()))
-	return edit
+	return widget
+
+
+func _add_graphic_field(label_text: String, value: String, node_name: String = "PartGraphicRef") -> ResourceRefWidget:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var label := Label.new()
+	label.text = label_text
+	label.custom_minimum_size = Vector2(96, 0)
+	row.add_child(label)
+	var widget := ResourceRefWidget.new()
+	widget.name = node_name
+	widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	widget.set_value_from_path(func(path: String) -> String: return path.get_file())
+	widget.configure("object_model", label_text, _resource_ref_services())
+	widget.set_value(value)
+	row.add_child(widget)
+	_detail_box.add_child(row)
+	return widget
 
 
 func _make_byte_spin(value: int) -> SpinBox:
@@ -255,10 +268,10 @@ func _commit_part() -> void:
 		var entry: Dictionary = entry_v
 		if int(entry.get("kind", -1)) == _kind_const() and String(entry.get("name", "")) == original_name:
 			entry["name"] = _name_edit.text.strip_edges()
-			entry["display_name"] = _display_edit.text.strip_edges()
-			entry["graphic"] = _graphic_edit.text.strip_edges()
-			entry["graphic_j"] = _graphic_j_edit.text.strip_edges()
-			entry["graphic_s"] = _graphic_s_edit.text.strip_edges()
+			entry["display_name"] = _display_edit.get_value().strip_edges()
+			entry["graphic"] = _graphic_edit.get_value().strip_edges()
+			entry["graphic_j"] = _graphic_j_edit.get_value().strip_edges()
+			entry["graphic_s"] = _graphic_s_edit.get_value().strip_edges()
 			entry["camo"] = [int(_camo_r.value), int(_camo_g.value), int(_camo_b.value)]
 			entry["voice"] = int(_voice_spin.value)
 			entry["sex"] = _sex_option.get_selected_id() if _sex_option.get_selected_id() >= 0 else _sex_option.selected
@@ -267,25 +280,28 @@ func _commit_part() -> void:
 	_refresh_list()
 
 
-# --- Pickers (mirror the object anims inspector) ------------------------------
+func focus_part(kind: int, name: String) -> Error:
+	_selected_kind = clampi(kind, 0, KINDS.size() - 1)
+	var names := _part_names()
+	var found := -1
+	for i in range(names.size()):
+		if String(names[i]).nocasecmp_to(name) == 0:
+			found = i
+			break
+	if found < 0:
+		return ERR_DOES_NOT_EXIST
+	_selected_index = found
+	if _kind_option != null and is_instance_valid(_kind_option):
+		_kind_option.select(_selected_kind)
+	_refresh_list()
+	_rebuild_detail()
+	return OK
 
-func _open_picker(title: String, files: PackedStringArray, on_pick: Callable) -> void:
+
+func _resource_ref_services() -> Dictionary:
 	var shell: Variant = _ws.editor_shell if _ws != null else null
-	if shell != null and shell.has_method("open_file_picker"):
-		shell.open_file_picker(title, files, on_pick)
-
-
-func _scan_resource_files(suffix: String) -> PackedStringArray:
-	var out := PackedStringArray()
-	var root: Variant = _ws.get_resource_root() if _ws != null and _ws.has_method("get_resource_root") else null
-	if root == null:
-		return out
-	var dir := String(root.get_root_dir())
-	if dir.is_empty():
-		return out
-	var lower := suffix.to_lower()
-	for f in DirAccess.get_files_at(dir):
-		if String(f).to_lower().ends_with(lower):
-			out.push_back(f)
-	out.sort()
-	return out
+	if shell != null and shell.has_method("get_reference_index") \
+			and shell.has_method("open_kind_picker") \
+			and shell.has_method("open_in_workspace"):
+		return ResourceRefWidget.services_from_shell(shell)
+	return {}

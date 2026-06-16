@@ -42,6 +42,9 @@ func _init() -> void:
 func _on_document_state_changed() -> void:
 	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
 		editor_shell.sync_from_editor_state()
+	var inspector := get_workflow_inspector(_active_workflow_id)
+	if inspector != null and inspector.has_method("refresh"):
+		inspector.refresh()
 
 
 # --- Identity -----------------------------------------------------------------
@@ -78,8 +81,12 @@ func get_status_tool() -> String:
 func get_status_context() -> String:
 	if document.resource == null or not document.resource.is_loaded():
 		return "No Avatars.def loaded"
-	return "%d part(s), %d nationalities" % [
+	var text := "%d part(s), %d nationalities" % [
 		document.resource.get_part_count(), document.resource.get_nationality_count()]
+	var issues := document.resource.get_diagnostics().size() if document.resource.has_method("get_diagnostics") else 0
+	if issues > 0:
+		text += ", %d issue%s" % [issues, "" if issues == 1 else "s"]
+	return text
 
 
 # --- Domain document (drives dirty/undo via the base) -------------------------
@@ -231,6 +238,39 @@ func apply_model(model: Dictionary) -> void:
 		return
 	document.resource.set_model(model)
 	_show_default_combo()
+
+
+func focus_reference(focus: Dictionary) -> Error:
+	var database = db()
+	if database == null or not database.is_loaded() or focus.is_empty():
+		return OK
+	if focus.has("part"):
+		var kind := int(focus.get("kind", focus.get("part_kind", NovaAvatarDatabase.PART_HEAD)))
+		var name := String(focus.get("part", ""))
+		if name.is_empty() or database.get_part(kind, name).is_empty():
+			return ERR_DOES_NOT_EXIST
+		activate_workflow(Workflow.PARTS)
+		var parts := get_workflow_inspector(Workflow.PARTS)
+		if parts != null and parts.has_method("focus_part"):
+			return parts.focus_part(kind, name)
+		return OK
+	if focus.has("nat") and focus.has("div") and focus.has("combo"):
+		var nat := int(focus["nat"])
+		var div := int(focus["div"])
+		var combo := int(focus["combo"])
+		if nat < 0 or nat >= database.get_nationality_count():
+			return ERR_DOES_NOT_EXIST
+		if div < 0 or div >= database.get_division_count(nat):
+			return ERR_DOES_NOT_EXIST
+		if combo < 0 or combo >= database.get_combo_count(nat, div):
+			return ERR_DOES_NOT_EXIST
+		activate_workflow(Workflow.TREE)
+		var tree := get_workflow_inspector(Workflow.TREE)
+		if tree != null and tree.has_method("focus_combo"):
+			tree.focus_combo(nat, div, combo)
+		show_combo(nat, div, combo)
+		return OK
+	return OK
 
 
 # --- Document actions ---------------------------------------------------------

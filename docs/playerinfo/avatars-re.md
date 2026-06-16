@@ -7,19 +7,19 @@ composed into `combo` entries under a `nationality → division` tree) and the
 `Jointops.exe.kong.i64`, imagebase `0x400000`). All addresses below are that
 binary's.
 
-**Status: witnessed (read-only), reimplementation pending.** No `libs/`
-counterpart exists yet — this record is the format/behavior specification a
-faithful `libs/avatars` + `NovaAvatarDatabase` will be ported from, and the
-committed home for the `D-PLAYERINFO-…` catalog that the future code comments
-will cite as `docs/playerinfo/avatars-re.md (D-PLAYERINFO-…)`.
+**Status: implemented and IDA-grilled for the parser/data model/editor bridge
+(2026-06-16).** `libs/avatars`, `NovaAvatarDatabase`, and the ONED Avatars
+workspace now implement the witnessed loader semantics below. The runtime
+combo -> spawned-player 3D model binding remains unwitnessed/open as
+**D-PLAYERINFO-1**.
 
 ## Verdict table
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
-| `Avatars.def` grammar + parser | **witnessed — port pending** | full decompile of `CAvatarDefs_ParseConfigLine @ 0x57a3f0`; keyword/brace state machine, all field stores cited |
-| Avatar object layout (combo / nationality / division / part structs) | **witnessed — port pending** | three allocators decompiled (`@ 0x579f40` / `@ 0x579ff0` / `@ 0x579e10`); offsets read off field stores; caps off loop/`memset` bounds |
-| `PLAYER_INFO` menu consumption | **witnessed — port pending** | `PlayerInfo_PopulateNationalityList @ 0x55d8c0`, `PlayerInfo_PopulateDivisionList @ 0x55da50`, `populate_avatar_combo_list @ 0x560210` decompiled; accessor surface + RTXT string-table resolution + alignment-as-team-filter |
+| `Avatars.def` grammar + parser | **matching** | full decompile of `CAvatarDefs_ParseConfigLine @ 0x57a3f0`; implementation re-verified on 2026-06-16 for part cap, duplicate slots, byte truncation, parse-time combo resolution, and required/optional combo refs |
+| Avatar object layout (combo / nationality / division / part structs) | **matching** | allocators decompiled (`@ 0x579f40` / `@ 0x579ff0` / `@ 0x579e10`); `libs/avatars` keeps writer reference names but stores parse-time denormalized part snapshots for runtime/editor consumers |
+| `PLAYER_INFO` menu consumption | **matching (read-only grill)** | `PlayerInfo_PopulateNationalityList @ 0x55d8c0`, `PlayerInfo_PopulateDivisionList @ 0x55da50`, `populate_avatar_combo_list @ 0x560210` decompiled; ONED editor exposes the same tree, alignment, and resolved-combo data but does not implement the in-game menu UI |
 | combo → spawned-player 3D model binding | **unwitnessed (time-boxed)** | consumer set identified but not traced — see **D-PLAYERINFO-1** follow-up |
 | second `AvatarDefs_Init` path (`@ 0x53d281`/`@ 0x53d2b4`) | **unwitnessed** | flagged follow-up; different buffer sizes, also parses `Avatars.def` |
 
@@ -226,6 +226,28 @@ stable.
 | D-PLAYERINFO-4 | combo retains only denormalized part data, not the part names/indices | the runtime struct cannot reproduce the `combo <id> <head> <body> <arms>` line. The reimpl's authoring model must *additionally* keep the three reference names to round-trip the writer — a superset; runtime behavior is unchanged. |
 | D-PLAYERINFO-5 | nationality list filtered by `alignment` vs `teamIndex` (good→0, evil→1) | the menu population is team-aware; the host port must reproduce the filter and order. |
 | D-PLAYERINFO-6 | `nationality`/`division` id token: `if (*idStr > '9') ++idStr;` then `atol` | a single leading non-digit character is skipped before parsing the numeric id. The reimpl parser must mirror this lenient id read. |
+
+## Implementation grill notes (2026-06-16)
+
+`libs/avatars` was re-checked against IDA after PR #162's first implementation.
+The following axes are now pinned by native tests and surfaced through
+`NovaAvatarDatabase` diagnostics:
+
+- `combo` resolution is parse-time, not deferred: head/body must resolve against
+  already-defined parts or the combo is skipped; arms is optional and becomes an
+  absent arms snapshot when unresolved.
+- Duplicate part names resolve as the original loops do: the last prior matching
+  part wins for the combo snapshot, and later duplicates do not mutate an
+  already-created combo.
+- Duplicate nationality/division slots are ignored with diagnostics; they do not
+  create extra authoring entries.
+- `camo` and `voice` are byte fields; parsed values keep the low 8 bits.
+- The 512-part guard aborts before dispatching another meaningful top-level line,
+  matching `0x57a456`. The 128-combo allocator cap at `0x579e10` is retained as a
+  safe parse error rather than reproducing the original null/overflow hazard.
+
+IDB changes made during this fix pass: none. The IDB remained read-only; proposed
+renames/types below still await maintainer approval.
 
 ## Follow-ups / open questions
 

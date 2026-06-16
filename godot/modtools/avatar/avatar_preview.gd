@@ -22,6 +22,7 @@ const SLOTS := ["head", "body", "arms"]
 var _resource_root  # NovaResourceRoot, or null (headless / no shell)
 
 var _viewport_container: SubViewportContainer
+var _status_label: Label
 var _viewport: SubViewport
 var _root: Node3D
 var _guide_root: Node3D
@@ -37,6 +38,7 @@ var _has_framed := false
 var _part_models: Dictionary = {}
 # Camo tint requested per combo, applied to all part models (see apply_camo).
 var _camo := Vector3.ONE
+var _missing_parts := PackedStringArray()
 
 
 func _ready() -> void:
@@ -59,6 +61,16 @@ func _build_viewport() -> void:
 	_viewport_container.stretch = true
 	_viewport_container.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(_viewport_container)
+
+	_status_label = Label.new()
+	_status_label.name = "AvatarPreviewStatus"
+	_status_label.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_status_label.position = Vector2(12, 10)
+	_status_label.custom_minimum_size = Vector2(320, 0)
+	_status_label.theme_type_variation = &"Muted"
+	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status_label.visible = false
+	add_child(_status_label)
 
 	_viewport = SubViewport.new()
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
@@ -107,6 +119,7 @@ func _build_viewport() -> void:
 # Re-frames the camera on the composed bounds.
 func load_combo(combo: Dictionary) -> void:
 	clear()
+	_missing_parts = PackedStringArray()
 	for slot in SLOTS:
 		var part: Variant = combo.get(slot, null)
 		if part == null or not (part is Dictionary):
@@ -120,17 +133,23 @@ func load_combo(combo: Dictionary) -> void:
 		var camo: Array = (head as Dictionary).get("camo", [])
 		if camo.size() == 3:
 			apply_camo(Vector3(float(camo[0]), float(camo[1]), float(camo[2])) / 255.0)
+	_refresh_status_label()
 	_refresh_preview_guides()
 
 
 # Load one part .3di by basename into a sibling NovaObjectModel under the root.
 # No resource root, an empty name, or a load failure leaves the slot empty.
 func _load_part(slot: String, graphic: String) -> void:
-	if _resource_root == null or graphic.is_empty():
+	if graphic.is_empty():
+		_missing_parts.append("%s: empty graphic" % slot)
+		return
+	if _resource_root == null:
+		_missing_parts.append("%s: no resource root" % slot)
 		return
 	var data := NovaObjectData.new()
 	if data.open_from_resource_root(_resource_root, graphic) != OK:
-		return  # missing / unknown graphic: skip this slot silently
+		_missing_parts.append("%s: %s not found" % [slot, graphic])
+		return
 	var model = NovaObjectModelScript.new()
 	model.name = "AvatarPart_%s" % slot
 	_root.add_child(model)
@@ -173,6 +192,18 @@ func clear() -> void:
 	_part_models.clear()
 	_camo = Vector3.ONE
 	_has_framed = false
+	_missing_parts = PackedStringArray()
+	_refresh_status_label()
+
+
+func _refresh_status_label() -> void:
+	if _status_label == null or not is_instance_valid(_status_label):
+		return
+	if _missing_parts.is_empty():
+		_status_label.visible = false
+		return
+	_status_label.text = "Missing: %s" % "; ".join(_missing_parts)
+	_status_label.visible = true
 
 
 func get_editor_camera() -> Camera3D:

@@ -9,9 +9,9 @@
  *
  * Model note: the original runtime DENORMALIZES each combo's resolved part data
  * into the combo and drops the referenced part names (docs/playerinfo/avatars-re.md
- * D-PLAYERINFO-4). This authoring model instead keeps the head/body/arms NAME
- * references (parts live in `parts`), a round-trippable superset; the runtime
- * resolve happens in the binding layer.
+ * D-PLAYERINFO-4). This authoring model keeps the head/body/arms NAME
+ * references for writing, but also stores parse-time resolved snapshots so
+ * consumers see the same duplicate/forward-reference behavior as the original.
  */
 
 #ifndef AVATARS_H
@@ -58,6 +58,18 @@ enum AvatarAlignment {
     AVATAR_ALIGN_EVIL = 1
 };
 
+enum AvatarDiagnosticSeverity {
+    AVATAR_DIAG_WARNING = 1,
+    AVATAR_DIAG_ERROR = 2
+};
+
+typedef struct AvatarDiagnostic {
+    size_t line;              /* 1-based source line; 0 when synthesized */
+    int severity;             /* AvatarDiagnosticSeverity */
+    char code[32];            /* stable machine-readable code */
+    char message[192];        /* short human-readable summary */
+} AvatarDiagnostic;
+
 /* ========================================================================= */
 /* Part: `define head|body|arms <name> { ... }`                              */
 /* ========================================================================= */
@@ -76,6 +88,18 @@ typedef struct AvatarPart {
     size_t raw_lines_count;
 } AvatarPart;
 
+typedef struct AvatarPartSnapshot {
+    int kind;                 /* AvatarPartKind */
+    char name[64];
+    char display_name[64];
+    char graphic[128];
+    char graphic_j[128];
+    char graphic_s[128];
+    int camo[3];
+    int voice;
+    int sex;
+} AvatarPartSnapshot;
+
 /* ========================================================================= */
 /* Combo: `combo <id> <head> <body> <arms>` (arms optional)                  */
 /* ========================================================================= */
@@ -86,6 +110,10 @@ typedef struct AvatarCombo {
     char head_name[64];       /* reference part names (D-PLAYERINFO-4)           [orig @ 0x57a804..0x57a809] */
     char body_name[64];
     char arms_name[64];       /* empty if the combo has no arms */
+    AvatarPartSnapshot head;  /* parse-time resolved part snapshots */
+    AvatarPartSnapshot body;
+    AvatarPartSnapshot arms;
+    int has_arms;
 } AvatarCombo;
 
 /* ========================================================================= */
@@ -129,6 +157,8 @@ typedef struct AvatarsFile {
     size_t parts_count;
     AvatarNationality *nationalities;
     size_t nationalities_count;
+    AvatarDiagnostic *diagnostics;
+    size_t diagnostics_count;
 } AvatarsFile;
 
 /* ========================================================================= */

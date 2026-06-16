@@ -159,6 +159,14 @@ func _build_combo_card(combo: Dictionary, combo_index: int) -> void:
 	var head_opt := _build_part_dropdown(card, "Head", NovaAvatarDatabase.PART_HEAD, String(combo.get("head_name", "")), false)
 	var body_opt := _build_part_dropdown(card, "Body", NovaAvatarDatabase.PART_BODY, String(combo.get("body_name", "")), false)
 	var arms_opt := _build_part_dropdown(card, "Arms", NovaAvatarDatabase.PART_ARMS, String(combo.get("arms_name", "")), true)
+	var issues := _combo_issues(combo)
+	if not issues.is_empty():
+		var issue := Label.new()
+		issue.name = "ComboIssueLabel"
+		issue.theme_type_variation = &"Muted"
+		issue.text = "Issue: %s" % "; ".join(issues)
+		issue.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		card.add_child(issue)
 
 	var apply := Button.new()
 	apply.name = "ComboApplyButton"
@@ -199,6 +207,17 @@ func _build_part_dropdown(card: VBoxContainer, label_text: String, kind: int, cu
 	row.add_child(opt)
 	card.add_child(row)
 	return opt
+
+
+func _combo_issues(combo: Dictionary) -> PackedStringArray:
+	var out := PackedStringArray()
+	if not combo.has("head") or String((combo.get("head", {}) as Dictionary).get("name", "")).is_empty():
+		out.append("head unresolved")
+	if not combo.has("body") or String((combo.get("body", {}) as Dictionary).get("name", "")).is_empty():
+		out.append("body unresolved")
+	if not String(combo.get("arms_name", "")).is_empty() and not bool(combo.get("has_arms", false)):
+		out.append("arms unresolved")
+	return out
 
 
 func _selected_part_name(opt: OptionButton) -> String:

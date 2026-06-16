@@ -40,6 +40,7 @@ void NovaAvatarDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaAvatarDatabase::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &NovaAvatarDatabase::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaAvatarDatabase::get_last_error);
+	ClassDB::bind_method(D_METHOD("get_diagnostics"), &NovaAvatarDatabase::get_diagnostics);
 	ClassDB::bind_method(D_METHOD("get_part_count"), &NovaAvatarDatabase::get_part_count);
 	ClassDB::bind_method(D_METHOD("get_nationality_count"), &NovaAvatarDatabase::get_nationality_count);
 	ClassDB::bind_method(D_METHOD("get_part_names", "kind"), &NovaAvatarDatabase::get_part_names);
@@ -61,6 +62,8 @@ void NovaAvatarDatabase::_bind_methods() {
 	BIND_CONSTANT(SEX_FEMALE);
 	BIND_CONSTANT(ALIGN_GOOD);
 	BIND_CONSTANT(ALIGN_EVIL);
+	BIND_CONSTANT(DIAG_WARNING);
+	BIND_CONSTANT(DIAG_ERROR);
 
 	ADD_SIGNAL(MethodInfo("changed"));
 }
@@ -68,6 +71,7 @@ void NovaAvatarDatabase::_bind_methods() {
 void NovaAvatarDatabase::clear() {
 	parts.clear();
 	nationalities.clear();
+	diagnostics.clear();
 	loaded = false;
 }
 
@@ -119,22 +123,71 @@ void NovaAvatarDatabase::adopt_parsed(const void *avatars_file) {
 				c.head_name = String(sc.head_name);
 				c.body_name = String(sc.body_name);
 				c.arms_name = String(sc.arms_name);
+				c.head = part_from_snapshot(&sc.head);
+				c.body = part_from_snapshot(&sc.body);
+				c.arms = part_from_snapshot(&sc.arms);
+				c.has_arms = sc.has_arms != 0;
 				d.combos.push_back(c);
 			}
 			n.divisions.push_back(std::move(d));
 		}
 		nationalities.push_back(std::move(n));
 	}
+	diagnostics.reserve(f->diagnostics_count);
+	for (size_t i = 0; i < f->diagnostics_count; ++i) {
+		const AvatarDiagnostic &sd = f->diagnostics[i];
+		Diagnostic d;
+		d.line = static_cast<int>(sd.line);
+		d.severity = sd.severity;
+		d.code = String(sd.code);
+		d.message = String(sd.message);
+		diagnostics.push_back(d);
+	}
 	loaded = true;
 }
 
 const NovaAvatarDatabase::Part *NovaAvatarDatabase::find_part(int kind, const String &name) const {
-	for (const Part &p : parts) {
+	for (auto it = parts.rbegin(); it != parts.rend(); ++it) {
+		const Part &p = *it;
 		if (p.kind == kind && p.name.nocasecmp_to(name) == 0) {
 			return &p;
 		}
 	}
 	return nullptr;
+}
+
+NovaAvatarDatabase::Part NovaAvatarDatabase::part_from_snapshot(const void *avatar_part_snapshot) const {
+	const AvatarPartSnapshot *sp = static_cast<const AvatarPartSnapshot *>(avatar_part_snapshot);
+	Part p;
+	p.kind = sp->kind;
+	p.name = String(sp->name);
+	p.display_name = String(sp->display_name);
+	p.graphic = String(sp->graphic);
+	p.graphic_j = String(sp->graphic_j);
+	p.graphic_s = String(sp->graphic_s);
+	p.camo[0] = sp->camo[0];
+	p.camo[1] = sp->camo[1];
+	p.camo[2] = sp->camo[2];
+	p.voice = sp->voice;
+	p.sex = sp->sex;
+	return p;
+}
+
+void NovaAvatarDatabase::resolve_combo_snapshots(Combo &combo) {
+	if (const Part *p = find_part(PART_HEAD, combo.head_name)) {
+		combo.head = *p;
+	}
+	if (const Part *p = find_part(PART_BODY, combo.body_name)) {
+		combo.body = *p;
+	}
+	combo.has_arms = false;
+	combo.arms = Part();
+	if (!combo.arms_name.is_empty()) {
+		if (const Part *p = find_part(PART_ARMS, combo.arms_name)) {
+			combo.arms = *p;
+			combo.has_arms = true;
+		}
+	}
 }
 
 Error NovaAvatarDatabase::load(const String &path) {
@@ -299,6 +352,14 @@ String NovaAvatarDatabase::get_last_error() const {
 	return last_error;
 }
 
+Array NovaAvatarDatabase::get_diagnostics() const {
+	Array out;
+	for (const Diagnostic &d : diagnostics) {
+		out.push_back(diagnostic_dict(d));
+	}
+	return out;
+}
+
 int NovaAvatarDatabase::get_part_count() const {
 	return static_cast<int>(parts.size());
 }
@@ -323,6 +384,15 @@ Dictionary NovaAvatarDatabase::part_dict(const Part &p) const {
 	d["voice"] = p.voice;
 	d["sex"] = p.sex;
 	return d;
+}
+
+Dictionary NovaAvatarDatabase::diagnostic_dict(const Diagnostic &d) const {
+	Dictionary out;
+	out["line"] = d.line;
+	out["severity"] = d.severity;
+	out["code"] = d.code;
+	out["message"] = d.message;
+	return out;
 }
 
 PackedStringArray NovaAvatarDatabase::get_part_names(int kind) const {
@@ -436,6 +506,12 @@ Dictionary NovaAvatarDatabase::get_combo(int nat_index, int div_index, int combo
 	out["head_name"] = c.head_name;
 	out["body_name"] = c.body_name;
 	out["arms_name"] = c.arms_name;
+	out["head"] = part_dict(c.head);
+	out["body"] = part_dict(c.body);
+	if (c.has_arms) {
+		out["arms"] = part_dict(c.arms);
+	}
+	out["has_arms"] = c.has_arms;
 	return out;
 }
 
@@ -443,20 +519,6 @@ Dictionary NovaAvatarDatabase::resolve_combo(int nat_index, int div_index, int c
 	Dictionary out = get_combo(nat_index, div_index, combo_index);
 	if (out.is_empty()) {
 		return out;
-	}
-	const String head = out["head_name"];
-	const String body = out["body_name"];
-	const String arms = out["arms_name"];
-	if (const Part *p = find_part(PART_HEAD, head)) {
-		out["head"] = part_dict(*p);
-	}
-	if (const Part *p = find_part(PART_BODY, body)) {
-		out["body"] = part_dict(*p);
-	}
-	if (!arms.is_empty()) {
-		if (const Part *p = find_part(PART_ARMS, arms)) {
-			out["arms"] = part_dict(*p);
-		}
 	}
 	// alignment comes from the owning nationality (D-PLAYERINFO copies it into the combo).
 	const Dictionary nat = get_nationality(nat_index);
@@ -497,6 +559,12 @@ Dictionary NovaAvatarDatabase::get_model() const {
 				cd["head_name"] = c.head_name;
 				cd["body_name"] = c.body_name;
 				cd["arms_name"] = c.arms_name;
+				cd["head"] = part_dict(c.head);
+				cd["body"] = part_dict(c.body);
+				if (c.has_arms) {
+					cd["arms"] = part_dict(c.arms);
+				}
+				cd["has_arms"] = c.has_arms;
 				carr.push_back(cd);
 			}
 			dd["combos"] = carr;
@@ -556,6 +624,7 @@ void NovaAvatarDatabase::set_model(const Dictionary &model) {
 				c.head_name = dict_str(cd, "head_name");
 				c.body_name = dict_str(cd, "body_name");
 				c.arms_name = dict_str(cd, "arms_name");
+				resolve_combo_snapshots(c);
 				d.combos.push_back(c);
 			}
 			n.divisions.push_back(std::move(d));

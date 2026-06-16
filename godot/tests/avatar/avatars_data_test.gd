@@ -14,6 +14,15 @@ func _load() -> NovaAvatarDatabase:
 	return db
 
 
+func _write_temp_avatars(name: String, text: String) -> String:
+	var path := ProjectSettings.globalize_path("user://%s" % name)
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "temp avatar file opens for write")
+	file.store_string(text)
+	file.close()
+	return path
+
+
 func test_load_counts_and_spot_values() -> void:
 	var db := _load()
 	assert_true(db.is_loaded(), "is_loaded after load")
@@ -51,6 +60,37 @@ func test_tree_and_resolve() -> void:
 	assert_eq(String(head.get("graphic", "")), "Boonie.3di", "resolved head graphic")
 	assert_true(resolved.has("body"), "body part reference resolved")
 	assert_eq(int(resolved.get("alignment", -1)), NovaAvatarDatabase.ALIGN_GOOD)
+
+
+func test_resolve_combo_uses_parse_time_snapshots() -> void:
+	var path := _write_temp_avatars("avatars_snapshot_test.def",
+		"define head HEAD_A\n{\n\tgraphic old_head.3di\n}\n"
+		+ "define body BODY_A\n{\n\tgraphic body.3di\n}\n"
+		+ "define head HEAD_A\n{\n\tgraphic new_head.3di\n}\n"
+		+ "nationality N00 AV_NAT\n{\n\talignment good\n\tdivision D00 AV_DIV\n\t{\n"
+		+ "\t\tcombo 001 HEAD_A BODY_A\n\t}\n}\n"
+		+ "define head HEAD_A\n{\n\tgraphic too_late.3di\n}\n")
+	var db := NovaAvatarDatabase.new()
+	assert_eq(db.load(path), OK)
+	var resolved: Dictionary = db.resolve_combo(0, 0, 0)
+	var head: Dictionary = resolved.get("head", {})
+	assert_eq(String(head.get("graphic", "")), "new_head.3di", "last prior duplicate wins")
+	DirAccess.remove_absolute(path)
+
+
+func test_diagnostics_expose_skipped_combo_references() -> void:
+	var path := _write_temp_avatars("avatars_diagnostics_test.def",
+		"define body BODY_A\n{\n\tgraphic body.3di\n}\n"
+		+ "nationality N00 AV_NAT\n{\n\talignment good\n\tdivision D00 AV_DIV\n\t{\n"
+		+ "\t\tcombo 001 MISSING_HEAD BODY_A\n\t}\n}\n")
+	var db := NovaAvatarDatabase.new()
+	assert_eq(db.load(path), OK)
+	assert_eq(db.get_combo_count(0, 0), 0, "unresolved required combo is skipped")
+	var diagnostics: Array = db.get_diagnostics()
+	assert_gt(diagnostics.size(), 0)
+	assert_eq(String(diagnostics[0].get("code", "")), "combo_missing_head")
+	assert_eq(int(diagnostics[0].get("severity", 0)), NovaAvatarDatabase.DIAG_WARNING)
+	DirAccess.remove_absolute(path)
 
 
 func test_model_roundtrip_and_save() -> void:

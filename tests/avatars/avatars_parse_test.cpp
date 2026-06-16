@@ -3,6 +3,7 @@
 // Joint Operations + JOX extract (Desktop/REVX02/AVATARS.DEF). Pins the parser
 // against the witnessed grammar (docs/playerinfo/avatars-re.md): part pool,
 // nationality -> division -> combo tree, trailing flags, quoted values.
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -22,6 +23,12 @@ const AvatarNationality *find_nat(const AvatarsFile &f, const char *raw_id) {
     for (size_t i = 0; i < f.nationalities_count; ++i)
         if (std::strcmp(f.nationalities[i].raw_id, raw_id) == 0) return &f.nationalities[i];
     return nullptr;
+}
+
+bool has_diag(const AvatarsFile &f, const char *code) {
+    for (size_t i = 0; i < f.diagnostics_count; ++i)
+        if (std::strcmp(f.diagnostics[i].code, code) == 0) return true;
+    return false;
 }
 
 } // namespace
@@ -105,5 +112,119 @@ int main() {
     TEST_EXPECT(us->divisions[2].flags[0] == '\0');
 
     avatars_free(&f);
+
+    {
+        const char src[] =
+            "define head HEAD_A\n{\n\tgraphic old_head.3di\n}\n"
+            "define body BODY_A\n{\n\tgraphic body.3di\n}\n"
+            "define head HEAD_A\n{\n\tgraphic new_head.3di\n}\n"
+            "nationality N00 AV_NAT\n{\n\talignment good\n\tdivision D00 AV_DIV\n\t{\n"
+            "\t\tcombo 001 HEAD_A BODY_A\n"
+            "\t}\n}\n"
+            "define head HEAD_A\n{\n\tgraphic too_late.3di\n}\n";
+        AvatarsFile model;
+        TEST_EXPECT(avatars_parse_memory(src, sizeof(src) - 1, &model) == 0);
+        TEST_EXPECT(model.nationalities_count == 1);
+        TEST_EXPECT(model.nationalities[0].divisions_count == 1);
+        TEST_EXPECT(model.nationalities[0].divisions[0].combos_count == 1);
+        const AvatarCombo &combo = model.nationalities[0].divisions[0].combos[0];
+        TEST_EXPECT(std::strcmp(combo.head_name, "HEAD_A") == 0);
+        TEST_EXPECT(std::strcmp(combo.head.graphic, "new_head.3di") == 0);
+        TEST_EXPECT(std::strcmp(combo.body.graphic, "body.3di") == 0);
+        TEST_EXPECT(std::strcmp(combo.arms.name, "") == 0);
+        TEST_EXPECT(combo.has_arms == 0);
+        avatars_free(&model);
+    }
+
+    {
+        const char src[] =
+            "define body BODY_A\n{\n\tgraphic body.3di\n}\n"
+            "nationality N00 AV_NAT\n{\n\talignment good\n\tdivision D00 AV_DIV\n\t{\n"
+            "\t\tcombo 001 MISSING_HEAD BODY_A\n"
+            "\t\tcombo 002 LATER_HEAD BODY_A\n"
+            "\t}\n}\n"
+            "define head LATER_HEAD\n{\n\tgraphic later.3di\n}\n";
+        AvatarsFile model;
+        TEST_EXPECT(avatars_parse_memory(src, sizeof(src) - 1, &model) == 0);
+        TEST_EXPECT(model.nationalities_count == 1);
+        TEST_EXPECT(model.nationalities[0].divisions_count == 1);
+        TEST_EXPECT(model.nationalities[0].divisions[0].combos_count == 0);
+        TEST_EXPECT(has_diag(model, "combo_missing_head"));
+        avatars_free(&model);
+    }
+
+    {
+        const char src[] =
+            "define head HEAD_A\n{\n\tgraphic head.3di\n}\n"
+            "define body BODY_A\n{\n\tgraphic body.3di\n}\n"
+            "nationality N00 AV_NAT\n{\n\talignment good\n\tdivision D00 AV_DIV\n\t{\n"
+            "\t\tcombo 001 HEAD_A BODY_A MISSING_ARMS\n"
+            "\t}\n}\n";
+        AvatarsFile model;
+        TEST_EXPECT(avatars_parse_memory(src, sizeof(src) - 1, &model) == 0);
+        TEST_EXPECT(model.nationalities[0].divisions[0].combos_count == 1);
+        const AvatarCombo &combo = model.nationalities[0].divisions[0].combos[0];
+        TEST_EXPECT(combo.has_arms == 0);
+        TEST_EXPECT(combo.arms_name[0] == '\0');
+        TEST_EXPECT(has_diag(model, "combo_missing_arms"));
+        avatars_free(&model);
+    }
+
+    {
+        const char src[] =
+            "nationality N00 FIRST\n{\n\tdivision D00 FIRST_DIV\n\t{\n\t}\n"
+            "\tdivision D00 DUP_DIV\n\t{\n\t}\n}\n"
+            "nationality N00 DUP_NAT\n{\n}\n";
+        AvatarsFile model;
+        TEST_EXPECT(avatars_parse_memory(src, sizeof(src) - 1, &model) == 0);
+        TEST_EXPECT(model.nationalities_count == 1);
+        TEST_EXPECT(std::strcmp(model.nationalities[0].name_key, "FIRST") == 0);
+        TEST_EXPECT(model.nationalities[0].divisions_count == 1);
+        TEST_EXPECT(std::strcmp(model.nationalities[0].divisions[0].name_key, "FIRST_DIV") == 0);
+        TEST_EXPECT(has_diag(model, "duplicate_nationality"));
+        TEST_EXPECT(has_diag(model, "duplicate_division"));
+        avatars_free(&model);
+    }
+
+    {
+        const char src[] =
+            "define head HEAD_A\n{\n\tcamo 256 -1 511\n\tvoice 260\n}\n";
+        AvatarsFile model;
+        TEST_EXPECT(avatars_parse_memory(src, sizeof(src) - 1, &model) == 0);
+        TEST_EXPECT(model.parts_count == 1);
+        TEST_EXPECT(model.parts[0].camo[0] == 0);
+        TEST_EXPECT(model.parts[0].camo[1] == 255);
+        TEST_EXPECT(model.parts[0].camo[2] == 255);
+        TEST_EXPECT(model.parts[0].voice == 4);
+        avatars_free(&model);
+    }
+
+    {
+        std::string src;
+        for (int i = 0; i < 512; ++i) {
+            char line[128];
+            std::snprintf(line, sizeof(line), "define head H%03d\n{\n}\n", i);
+            src += line;
+        }
+        src += "nationality N00 AV_NAT\n{\n}\n";
+        AvatarsFile model;
+        TEST_EXPECT(avatars_parse_memory(src.data(), src.size(), &model) != 0);
+    }
+
+    {
+        std::string src =
+            "define head HEAD_A\n{\n}\n"
+            "define body BODY_A\n{\n}\n"
+            "nationality N00 AV_NAT\n{\n\tdivision D00 AV_DIV\n\t{\n";
+        for (int i = 0; i < 129; ++i) {
+            char line[96];
+            std::snprintf(line, sizeof(line), "\t\tcombo %03d HEAD_A BODY_A\n", i);
+            src += line;
+        }
+        src += "\t}\n}\n";
+        AvatarsFile model;
+        TEST_EXPECT(avatars_parse_memory(src.data(), src.size(), &model) != 0);
+    }
+
     return 0;
 }

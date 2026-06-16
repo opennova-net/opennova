@@ -63,15 +63,21 @@ int main() {
     avatars_free_buffer(b2);
 
     // --- From-scratch construction (the writer never depends on parsed input) ---
-    AvatarPart part;
-    std::memset(&part, 0, sizeof(part));
-    part.kind = AVATAR_PART_HEAD;
-    SETSTR(part.name, "TEST_HEAD");
-    SETSTR(part.display_name, "Test Face"); // contains a space -> writer must quote it
-    SETSTR(part.graphic, "test.3di");
-    part.camo[0] = 1; part.camo[1] = 2; part.camo[2] = 3;
-    part.voice = 7;
-    part.sex = AVATAR_SEX_FEMALE;
+    AvatarPart parts[2];
+    std::memset(parts, 0, sizeof(parts));
+    parts[0].kind = AVATAR_PART_HEAD;
+    SETSTR(parts[0].name, "TEST_HEAD");
+    SETSTR(parts[0].display_name, "Test Face"); // contains a space -> writer must quote it
+    SETSTR(parts[0].graphic, "test_head.3di");
+    parts[0].camo[0] = 1; parts[0].camo[1] = 2; parts[0].camo[2] = 3;
+    parts[0].voice = 7;
+    parts[0].sex = AVATAR_SEX_FEMALE;
+
+    parts[1].kind = AVATAR_PART_BODY;
+    SETSTR(parts[1].name, "TEST_BODY");
+    SETSTR(parts[1].display_name, "Test Body");
+    SETSTR(parts[1].graphic, "test_body.3di");
+    parts[1].sex = AVATAR_SEX_FEMALE;
 
     AvatarCombo combo;
     std::memset(&combo, 0, sizeof(combo));
@@ -101,8 +107,8 @@ int main() {
 
     AvatarsFile fs;
     std::memset(&fs, 0, sizeof(fs));
-    fs.parts = &part;
-    fs.parts_count = 1;
+    fs.parts = parts;
+    fs.parts_count = 2;
     fs.nationalities = &nat;
     fs.nationalities_count = 1;
 
@@ -112,7 +118,7 @@ int main() {
 
     AvatarsFile fp;
     TEST_EXPECT(avatars_parse_memory(fb, fn, &fp) == 0);
-    TEST_EXPECT(fp.parts_count == 1);
+    TEST_EXPECT(fp.parts_count == 2);
     TEST_EXPECT(std::strcmp(fp.parts[0].name, "TEST_HEAD") == 0);
     TEST_EXPECT(std::strcmp(fp.parts[0].display_name, "Test Face") == 0); // quote round-trip
     TEST_EXPECT(fp.parts[0].sex == AVATAR_SEX_FEMALE);
@@ -127,6 +133,7 @@ int main() {
     TEST_EXPECT(std::strcmp(rc->head_name, "TEST_HEAD") == 0);
     TEST_EXPECT(std::strcmp(rc->body_name, "TEST_BODY") == 0);
     TEST_EXPECT(rc->arms_name[0] == '\0');
+    TEST_EXPECT(std::strcmp(rc->body.graphic, "test_body.3di") == 0);
 
     avatars_free(&fp);
     avatars_free_buffer(fb);

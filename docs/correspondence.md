@@ -25,7 +25,7 @@ the row links to the authoritative record.
 | RTXT string tables (`libs/rtxt`, NovaStrings) | 2026-06-09 | **matching** at byte level (98/98 retail bins roundtrip; D-RTXT-4 strictness retained) | [rtxt-strings-re.md](interface/rtxt-strings-re.md) |
 | BMS event runtime + mission→world promotion (`libs/mission` event_runtime/promote) | 2026-06-10 | **MATCHING** (D-EVT-1..4) | [bms-event-runtime-re.md](mission/bms-event-runtime-re.md) |
 | World / WAC VM / AI + infantry motor (`libs/world`, `libs/wac`) | 2026-06-07..10 | **MATCHING** (infantry D-INF-1..5; vehicle/HELO movement physics are tracked `not_yet_ported` stubs) | [world-wac-ai-re.md](world/world-wac-ai-re.md) — carries its own correspondence map (§2 there) |
-| Avatars.def / player-info avatar selection (`libs/avatars` + `NovaAvatarDatabase`, planned) | 2026-06-15 (engine-research, read-only) | **witnessed — reimpl pending** (D-PLAYERINFO-1..6; combo→model binding open) | [avatars-re.md](playerinfo/avatars-re.md) |
+| Avatars.def / player-info avatar selection (`libs/avatars` + `NovaAvatarDatabase`) | 2026-06-15 engine research + 2026-06-16 implementation grill | **matching for parser/data model/editor bridge** (D-PLAYERINFO-1 combo→spawned-player binding still open; combo overflow handled as safe error) | [avatars-re.md](playerinfo/avatars-re.md) |
 | `.bms` mission loader (`libs/mission/src/bms.cpp`) | 2026-06-02 (+ 2026-06-08 foundation pass) | per function — §3 below | this page |
 
 ## 2. MNU function table (format grill 2026-06-01)

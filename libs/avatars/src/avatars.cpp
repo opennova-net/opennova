@@ -153,6 +153,10 @@ static int tok_int(const Token *t) {
     return (int)strtol(buf, NULL, 10);
 }
 
+static int tok_byte(const Token *t) {
+    return tok_int(t) & 0xff;
+}
+
 /* Lenient numeric id: skip a single leading non-digit char before atol.
  * [orig: CAvatarDefs_ParseConfigLine @ 0x57a62b / @ 0x57a751] (D-PLAYERINFO-6). */
 static int tok_lenient_id(const Token *t) {
@@ -178,6 +182,66 @@ static void join_flags(const Token *tokens, int n, int first, char *dst, size_t 
         off += cp;
     }
     if (off < dst_size) dst[off] = '\0'; else dst[dst_size - 1] = '\0';
+}
+
+static int cstr_ieq(const char *a, const char *b) {
+    while (*a && *b) {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
+        ++a;
+        ++b;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static void push_diag(AvatarsFile *out, size_t *diag_cap, size_t line, int severity,
+                      const char *code, const char *message) {
+    AvatarDiagnostic d;
+    memset(&d, 0, sizeof(d));
+    d.line = line;
+    d.severity = severity;
+    snprintf(d.code, sizeof(d.code), "%s", code);
+    snprintf(d.message, sizeof(d.message), "%s", message);
+    DA_PUSH(out->diagnostics, out->diagnostics_count, *diag_cap, d);
+}
+
+static void part_to_snapshot(const AvatarPart *p, AvatarPartSnapshot *out) {
+    memset(out, 0, sizeof(*out));
+    if (!p) return;
+    out->kind = p->kind;
+    snprintf(out->name, sizeof(out->name), "%s", p->name);
+    snprintf(out->display_name, sizeof(out->display_name), "%s", p->display_name);
+    snprintf(out->graphic, sizeof(out->graphic), "%s", p->graphic);
+    snprintf(out->graphic_j, sizeof(out->graphic_j), "%s", p->graphic_j);
+    snprintf(out->graphic_s, sizeof(out->graphic_s), "%s", p->graphic_s);
+    out->camo[0] = p->camo[0];
+    out->camo[1] = p->camo[1];
+    out->camo[2] = p->camo[2];
+    out->voice = p->voice;
+    out->sex = p->sex;
+}
+
+static const AvatarPart *find_prior_part(const AvatarsFile *out, int kind, const char *name) {
+    for (size_t i = out->parts_count; i > 0; --i) {
+        const AvatarPart *p = &out->parts[i - 1];
+        if (p->kind == kind && cstr_ieq(p->name, name)) {
+            return p;
+        }
+    }
+    return NULL;
+}
+
+static int has_nationality_slot(const AvatarsFile *out, int id) {
+    for (size_t i = 0; i < out->nationalities_count; ++i) {
+        if (out->nationalities[i].id == id) return 1;
+    }
+    return 0;
+}
+
+static int has_division_slot(const AvatarNationality *nat, int id) {
+    for (size_t i = 0; i < nat->divisions_count; ++i) {
+        if (nat->divisions[i].id == id) return 1;
+    }
+    return 0;
 }
 
 /* ========================================================================= */
@@ -210,7 +274,8 @@ static void free_nationality(AvatarNationality *n) {
 static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out) {
     memset(out, 0, sizeof(*out));
 
-    size_t parts_cap = 0, nats_cap = 0;
+    size_t parts_cap = 0, nats_cap = 0, diag_cap = 0;
+    size_t valid_combo_count = 0;
 
     /* Builder locals (ownership transfers into the file arrays on block close). */
     AvatarPart cur_part;
@@ -231,8 +296,10 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out) {
     LineIter it = { buf, buf_len, 0 };
     const char *line;
     size_t line_len;
+    size_t line_no = 0;
 
     while (next_line(&it, &line, &line_len)) {
+        ++line_no;
         size_t tlen;
         const char *trimmed = trim_span(line, line_len, &tlen);
         if (tlen == 0) continue; /* blank */
@@ -271,6 +338,13 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out) {
             continue;
         }
 
+        /* [orig: CAvatarDefs_ParseConfigLine @ 0x57a456] checks the global
+         * 512-part guard before dispatching another meaningful top-level line. */
+        if (scope == SC_TOP && out->parts_count >= 512) {
+            error = 1;
+            goto done;
+        }
+
         switch (scope) {
         case SC_TOP:
             if (tok_ieq(&tok[0], "define") && n >= 3) {
@@ -280,7 +354,6 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out) {
                 else if (tok_ieq(&tok[1], "body")) kind = AVATAR_PART_BODY;
                 else if (tok_ieq(&tok[1], "arms")) kind = AVATAR_PART_ARMS;
                 if (kind < 0) { pending = SC_SKIP; break; }
-                if (out->parts_count >= 512) { error = 1; goto done; } /* D-PLAYERINFO-2 */
                 memset(&cur_part, 0, sizeof(cur_part));
                 cur_part.kind = kind;
                 tok_copy(&tok[2], cur_part.name, sizeof(cur_part.name)); /* [orig @ 0x57a4ed] */
@@ -289,6 +362,12 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out) {
                 /* [orig @ 0x57a615] */
                 int id = tok_lenient_id(&tok[1]);
                 if (id < 0 || id > 31) { pending = SC_SKIP; break; } /* error state 7 */
+                if (has_nationality_slot(out, id)) {
+                    push_diag(out, &diag_cap, line_no, AVATAR_DIAG_WARNING, "duplicate_nationality",
+                              "duplicate nationality slot ignored");
+                    pending = SC_SKIP;
+                    break;
+                }
                 memset(&cur_nat, 0, sizeof(cur_nat));
                 cur_nat_div_cap = 0;
                 cur_nat.id = id;
@@ -314,11 +393,11 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out) {
             } else if (tok_ieq(&tok[0], "graphic_s") && n >= 2) {
                 tok_copy(&tok[1], cur_part.graphic_s, sizeof(cur_part.graphic_s));
             } else if (tok_ieq(&tok[0], "camo") && n >= 4) {
-                cur_part.camo[0] = tok_int(&tok[1]);
-                cur_part.camo[1] = tok_int(&tok[2]);
-                cur_part.camo[2] = tok_int(&tok[3]);
+                cur_part.camo[0] = tok_byte(&tok[1]);
+                cur_part.camo[1] = tok_byte(&tok[2]);
+                cur_part.camo[2] = tok_byte(&tok[3]);
             } else if (tok_ieq(&tok[0], "voice") && n >= 2) {
-                cur_part.voice = tok_int(&tok[1]);
+                cur_part.voice = tok_byte(&tok[1]);
             } else if (tok_ieq(&tok[0], "sex") && n >= 2) {
                 cur_part.sex = tok_ieq(&tok[1], "f") ? AVATAR_SEX_FEMALE : AVATAR_SEX_MALE;
             } else {
@@ -335,6 +414,12 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out) {
                 /* [orig @ 0x57a73b] */
                 int id = tok_lenient_id(&tok[1]);
                 if (id < 0 || id > 15) { pending = SC_SKIP; break; } /* error state 8 */
+                if (has_division_slot(&cur_nat, id)) {
+                    push_diag(out, &diag_cap, line_no, AVATAR_DIAG_WARNING, "duplicate_division",
+                              "duplicate division slot ignored");
+                    pending = SC_SKIP;
+                    break;
+                }
                 memset(&cur_div, 0, sizeof(cur_div));
                 cur_div_combo_cap = 0;
                 cur_div.id = id;
@@ -356,8 +441,39 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out) {
                 c.id = tok_lenient_id(&tok[1]);
                 tok_copy(&tok[2], c.head_name, sizeof(c.head_name));
                 tok_copy(&tok[3], c.body_name, sizeof(c.body_name));
-                if (n >= 5) tok_copy(&tok[4], c.arms_name, sizeof(c.arms_name));
+                char arms_name[64] = { 0 };
+                if (n >= 5) tok_copy(&tok[4], arms_name, sizeof(arms_name));
+                const AvatarPart *head = find_prior_part(out, AVATAR_PART_HEAD, c.head_name);
+                const AvatarPart *body = find_prior_part(out, AVATAR_PART_BODY, c.body_name);
+                if (!head) {
+                    push_diag(out, &diag_cap, line_no, AVATAR_DIAG_WARNING, "combo_missing_head",
+                              "combo ignored because its head part is not defined yet");
+                    break;
+                }
+                if (!body) {
+                    push_diag(out, &diag_cap, line_no, AVATAR_DIAG_WARNING, "combo_missing_body",
+                              "combo ignored because its body part is not defined yet");
+                    break;
+                }
+                if (valid_combo_count >= 128) {
+                    error = 1;
+                    goto done;
+                }
+                part_to_snapshot(head, &c.head);
+                part_to_snapshot(body, &c.body);
+                if (arms_name[0]) {
+                    const AvatarPart *arms = find_prior_part(out, AVATAR_PART_ARMS, arms_name);
+                    if (arms) {
+                        snprintf(c.arms_name, sizeof(c.arms_name), "%s", arms_name);
+                        part_to_snapshot(arms, &c.arms);
+                        c.has_arms = 1;
+                    } else {
+                        push_diag(out, &diag_cap, line_no, AVATAR_DIAG_WARNING, "combo_missing_arms",
+                                  "combo kept without arms because its arms part is not defined yet");
+                    }
+                }
                 DA_PUSH(cur_div.combos, cur_div.combos_count, cur_div_combo_cap, c);
+                ++valid_combo_count;
             } else {
                 push_raw_line(&cur_div.raw_lines, &cur_div.raw_lines_count, trimmed, tlen);
             }
@@ -402,6 +518,7 @@ extern "C" void avatars_free(AvatarsFile *file) {
     free(file->parts);
     for (size_t i = 0; i < file->nationalities_count; ++i) free_nationality(&file->nationalities[i]);
     free(file->nationalities);
+    free(file->diagnostics);
     memset(file, 0, sizeof(*file));
 }
 

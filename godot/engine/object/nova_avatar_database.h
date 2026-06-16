@@ -40,6 +40,10 @@ private:
 		String head_name;
 		String body_name;
 		String arms_name;
+		Part head;
+		Part body;
+		Part arms;
+		bool has_arms = false;
 	};
 	struct Division {
 		String raw_id;
@@ -57,9 +61,16 @@ private:
 		bool has_alignment = false;
 		std::vector<Division> divisions;
 	};
+	struct Diagnostic {
+		int line = 0;
+		int severity = 0;
+		String code;
+		String message;
+	};
 
 	std::vector<Part> parts;
 	std::vector<Nationality> nationalities;
+	std::vector<Diagnostic> diagnostics;
 	String source_path;
 	String last_error;
 	bool loaded = false;
@@ -67,7 +78,10 @@ private:
 	void clear();
 	void adopt_parsed(const void *avatars_file); // const AvatarsFile*
 	const Part *find_part(int kind, const String &name) const; // case-insensitive
+	Part part_from_snapshot(const void *avatar_part_snapshot) const; // const AvatarPartSnapshot*
+	void resolve_combo_snapshots(Combo &combo);
 	Dictionary part_dict(const Part &p) const;
+	Dictionary diagnostic_dict(const Diagnostic &d) const;
 
 protected:
 	static void _bind_methods();
@@ -79,6 +93,8 @@ public:
 	enum { SEX_MALE = 0, SEX_FEMALE = 1 };
 	// AvatarAlignment (the PLAYER_INFO team filter: good -> team 0, evil -> team 1).
 	enum { ALIGN_GOOD = 0, ALIGN_EVIL = 1 };
+	// AvatarDiagnosticSeverity.
+	enum { DIAG_WARNING = 1, DIAG_ERROR = 2 };
 
 	// Load Avatars.def from an absolute/res path (decrypts if needed) or via the
 	// mounted resource root (VFS/PFF). Both emit "changed".
@@ -93,6 +109,7 @@ public:
 	bool is_loaded() const;
 	String get_source_path() const;
 	String get_last_error() const;
+	Array get_diagnostics() const;
 
 	int get_part_count() const;
 	int get_nationality_count() const;
