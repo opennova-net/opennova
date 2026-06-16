@@ -83,7 +83,7 @@ func get_status_context() -> String:
 		return "No Avatars.def loaded"
 	var text := "%d part(s), %d nationalities" % [
 		document.resource.get_part_count(), document.resource.get_nationality_count()]
-	var issues := document.resource.get_diagnostics().size() if document.resource.has_method("get_diagnostics") else 0
+	var issues: int = document.resource.get_diagnostics().size() if document.resource.has_method("get_diagnostics") else 0
 	if issues > 0:
 		text += ", %d issue%s" % [issues, "" if issues == 1 else "s"]
 	return text
