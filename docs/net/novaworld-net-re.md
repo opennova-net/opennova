@@ -568,6 +568,15 @@ recovered. Confirms the JointOperations hello carries `PV1="0.0.0 1/12/2004 EM"`
 for `ASH_I1EA.BMS`. Observed phases: **load** (0x0B → pools 0x10/0x0D/0x20 → 0x45) then
 **gameplay** (per-frame 0x0A ↔ C2S 0x0C, plus 0x40/0x6F, RTT 0x57↔0x2C, 0x26).
 
+**Second capture, 2026-06-16b** (witness source for §5.10): host+join+play brokered by our
+NovaWorld matchmaking (`PN=NOVAWORLDUDP` for the lobby session → `PN=JOINTOPERATIONS` for the
+in-match session), both peers retail `Jointops.exe`, same Laba-Laba map. 527 datagrams,
+**0 decode failures**, both 61-char SCRKs recovered. The joiner spent the session on foot
+AND in a vehicle (handle `0x108b` = pool 1 / slot 139) — provides the cross-witness oracle
+for the per-entity-type callback (§5.10), including its world-vs-vehicle-local position branch.
+A reusable `tshark`-backed converter ships at `tools/net/pcap_to_hexcap.py` so any future
+`.pcapng` produces the hexcap format `nw_ingame_histogram_test` consumes.
+
 **Entity handle encoding — `(pool << 12) | slot`.** Every in-match entity reference is a `u16`:
 high 4 bits select the pool, low 12 the slot, resolved as
 `g_pool_list[h>>12].base + g_pool_list[h>>12].stride * (h & 0xFFF)`
@@ -628,11 +637,136 @@ owns; authority-gated, ownership-checked, then dispatched to the entity-type cal
 |---|---|---|
 | entityHandle | u16 | `pool<<12\|slot`; server verifies it equals the sender's owned entity |
 | itemTypeId | u16 | e.g. `0x14B9` = player infantry (§5.6) |
-| sub_opcode | u8 | selects the per-type sub-handler |
-| payload | `len-5` B | → entity-type callback (the tick/position block shared with 0x0A) |
+| sub_opcode | u8 | format tag: `10`=extended (this packet's path), `11`=compact (§5.10) |
+| payload | `len-5` B | → entity-type callback at `entity_def+356` (§5.10 — player-class fully witnessed) |
 
-The per-entity-type callback (`entity_def+356`, runtime-resolved) is the next layer; its field
-map is per item class and not yet witnessed.
+The per-entity-type callback at `ItemDef+356` is fully decoded in §5.10 for the player/infantry
+class; other classes (vehicle/AI/weapon) still TBD.
+
+### 5.10 Per-entity-type serialize callback at `ItemDef+356` (loopback capture 2026-06-16b)
+
+Resolves §5.9's open thread. For the player/infantry class (`ItemDef.id == 0x14B9`, id @
+`ItemDef+0x50`), the callback pointer at `ItemDef+356` (= `0x164`, inside `ItemDef.pad_130[52]`)
+is **`NetPacket_SerializePlayerState @ 0x4C09C0`** — one function with a 4-way switch on
+`ctx.mode` (`[esi+0x18]`):
+
+| mode | sense | format | wire user |
+|---|---|---|---|
+| 1 | write compact | type 11 | server → S2C 0x0A trailing event-loop `tag==1` per-entity record |
+| 2 | read compact | type 11 | client ← same record |
+| 3 | write extended | type 10 | joiner → C2S 0x0C body |
+| 4 | read extended | type 10 | host ← same |
+
+Both directions share one callback; the `sub_opcode` in the §5.9 tag-0x0C header (or the
+literal `format` field the calling context stamps for 0x0A) selects compact vs extended. The
+5-byte wire header is unchanged: `[u16 handle][u16 itemTypeId][u8 sub_op]` written by
+`Pool_SerializeEntityViaVTable @ 0x4D64E0` (send) and parsed by
+`dispatch_entity_packet_callback @ 0x4D6A80` (receive). Capture cross-witness: every C 0x0C
+sample starts `01 00 b9 14 0a` — handle pool 0 / slot 1 = joiner, type `0x14B9`, sub_op `0x0A`
+(= 10 = extended). ✓
+
+Callback context struct (built by `dispatch_entity_packet_callback` and `Pool_SerializeEntityViaVTable`):
+
+| off | field | notes |
+|---|---|---|
+| +0x00..+0x0C | buf_start / buf_size / buf_end / cursor | classic stream context |
+| +0x10 | trunc_flag | set to 1 on under-read / overflow |
+| +0x14 | entity | the entity instance (player struct) |
+| +0x18 | mode | switch target (1/2/3/4) |
+| +0x1C | format | validated: 10 or 11 — must match mode |
+| +0x20 | owner_ctx / 0 | host: joiner's per-connection player struct (anti-cheat block target); send: 0 |
+
+**Position-on-wire primitives** [orig: `Network_CompressFixedPoint @ 0x4C2780` /
+`Network_DecompressFixedPoint @ 0x4C27E0` / `Entity_TransformWorldToLocal @ 0x43BB50` /
+`Entity_TransformLocalToWorld @ 0x43BD00`]. The compressor packs an i32 16.16 into a `u16`:
+sign=bit0, exponent=bits1-3, mantissa=bits4-15. World→wire is delta from
+`dword_C867A4 / C867A8 / C867AC` (map origin); when mounted, position is vehicle-LOCAL
+instead (the case-3/4 vehicle branch transforms via `Entity_TransformWorldToLocal` before
+the cursor write).
+
+#### Tag 0x0A trailing record — compact (type-11) [orig: `NetPacket_SerializePlayerState` case 1/2]
+
+Inside §5.9 tag-0x0A's event loop (`tag==1` branch): the lookup
+`ItemList_FindIndexByTypeId @ 0x49E100` on the wire `u16 itemTypeId` indexes
+`gItemDefs @ 0xB46250` (stride `2780`), then `(*pad_130[52])(stream)` runs this case with
+`mode=2, format=11`. **18 B per record** (no-vehicle path):
+
+| off | bytes | field | landing |
+|---|---|---|---|
+| 0 | 1 | vehicleBone | entity+0x157 |
+| 1 | 1 | seatType (0/1/2) | local seat-type byte |
+| 2 | 2 | vehicleHandle (`0xFFFF`=none) | pool resolve |
+| 4 | 2 | posX *compressed* | `DecompressFixedPoint` → entity+4 (vehicle-local if mounted, else world + `C867A4`) |
+| 6 | 2 | posY | → entity+8 (+ `C867A8`) |
+| 8 | 2 | posZ | → entity+0xC (+ `C867AC`) |
+| 10 | 1 | yaw byte | `(entity+0x14 + 0x800000) >> 24` |
+| 11 | 1 | pitch byte | (same shape) |
+| 12 | 1 | anim slot low | → entity+0x12C |
+| 13 | 1 | state flags | bit `0x02` = spawning, bit `0x04` = mounted; → entity+0x24 |
+| 14 | 1 | weapon-anim state | → entity+0x2B8 / 0x2BC |
+| 15 | 1 | priority | → entity+0x377 |
+| 16 | 1 | anim def index | → entity+0x2B0 |
+| 17 | 1 | health classification | `Entity_SetHealthFromDifficultyByte @ 0x4AD580` |
+
+**Spawn hook (load-bearing):** when `state flags & 2` is set AND the entity is the local
+player, the engine fires `Game_InitNewRound @ 0x422740` + `Entity_ResetToSpawnState @ 0x4B9610`
+— the "actually spawned" signal the client interprets. The case-1 write side is the inverse:
+position via `Network_CompressFixedPoint(entity+4..C − mapOrigin)`, vehicle-local via
+`Entity_TransformWorldToLocal` when a parent vehicle is attached.
+
+#### Tag 0x0C body — extended (type-10) [orig: `NetPacket_SerializePlayerState` case 3/4]
+
+Fixed **43 B body** (5-B header + 43 B = 48 B total — every captured C 0x0C frame in
+2026-06-16b is exactly 48 B). The joiner's per-frame uplink for its own player entity,
+including a host-validated anti-cheat block:
+
+| off | bytes | field | landing (host receiver, case 4) |
+|---|---|---|---|
+| 0 | 2 | vehicleHandle (`0xFFFF`=none; `(h&0xF000)>=0x5000` invalid) | pool resolve via `g_pool_list` |
+| 2 | 4 | posX (i32 LE, 16.16; vehicle-local if mounted) | smooth-target entity+0x234 (+ map origin if no vehicle) |
+| 6 | 4 | posY | entity+0x238 |
+| 10 | 4 | posZ | entity+0x23C |
+| 14 | 2 | heading (i16 LE, sign-ext ×0x10000) | entity+0x240 / +0x10 (32-bit BAM) |
+| 16 | 2 | pitch (i16 LE, sign-ext ×0x10000) | entity+0x244 / +0x14 |
+| 18 | 1 | RESERVED — cursor advance, no read | — |
+| 19 | 1 | anim slot low | entity+0x12C (low byte only) |
+| 20 | 1 | flagsXor (mask `0x1C` — bits 2-4 only) | XOR'd into entity+0x24 |
+| 21 | 1 | anim def 1 | entity+0x130 |
+| 22 | 1 | anim def 2 | entity+0x131 |
+| 23 | 1 | anim def 3 | entity+0x132 |
+| 24 | 1 | RESERVED — read into AL, discarded | — |
+| 25 | 1 | stat byte 0 | playerSlot+0x15F78 |
+| 26 | 1 | stat byte 1 | playerSlot+0x15F79 |
+| 27 | 2 | weapon id 0 | playerSlot+0x1708A |
+| 29 | 2 | counter 0 (u16 → zero-ext u32) | playerSlot+0x17094 |
+| 31 | 2 | weapon id 1 | playerSlot+0x1708C |
+| 33 | 2 | counter 1 (u32) | playerSlot+0x17098 |
+| 35 | 2 | weapon id 2 | playerSlot+0x1708E |
+| 37 | 2 | counter 2 (u32) | playerSlot+0x1709C |
+| 39 | 2 | weapon id 3 | playerSlot+0x17090 |
+| 41 | 2 | counter 3 (u32) | playerSlot+0x170A0 |
+
+The 8 trailing u16s form **4 pairs of `(weapon_id, fire_counter)`** — the host's anti-cheat
+ground truth for shot/hit tallies. `playerSlot` = `packetCtx+0x20` = the joiner's
+per-connection player struct (`connectionCtx+0x160 → playerObj+0xC0`, set by
+`NapiNPServerMsg_0x00C`). The case-3 send path mirrors this layout from the joiner's local
+state.
+
+**Cross-witnessed against the 2026-06-16b capture** (joiner=`32769`, host=`32768`):
+- Frame, joiner stationary: vehHdl `ff ff` (none); posX `8f be b0 05` = `0x05b0be8f` / 65536
+  = **1457.0** / posY `04 b5 47 fa` = **-1484.0** / posZ `d7 bc 1f 00` = **31.7**. Plausible
+  Laba-Laba southern-half ground coord. ✓
+- Frame ~30 later, joiner running: Δy ≈ +1261 units in 16.16 world. Monotonic motion. ✓
+- Frame, joiner mounted on vehicle handle `0x108b` (pool 1 slot 139): posX/Y read as
+  vehicle-LOCAL small i32s; heading goes to zero, attitude carried by the vehicle frame. ✓
+- Consecutive in-vehicle frames: posZ-local Δ = -7758. ✓
+
+**Open follow-ups (§5.9 + §5.10):** vehicle/AI/weapon-class callbacks at `ItemDef+356` still
+TBD (out of scope: this RE pass scoped to `0x14B9` infantry). Compact-record velocity fields
+witnessed for tag 0x10 (§5.9, entity+16/20/24 with flag gating) but not exercised in the 0x0A
+trailing record — likely class-specific. Pool-entity messages 0x0D (AI-flag `0x800` trailer
+layout) and 0x20 (full record map) — handlers `NapiNPClientMsg_0x00D @ 0x432C40` and
+`NapiNPClientMsg_0x020 @ 0x425C00` — Stage C of the planned grill, capture samples in hand.
 
 ## 6. Struct reference
 
@@ -1553,6 +1687,10 @@ FLDS columns, decoded through the XXXX terminator):
 - **D-NET-47** [MED, TRACKED] JointOperations game-host hello PV1 must be "0.0.0 1/12/2004 EM" (NOT the lobby PV1 "0.0.0 2/10/2004 EM"); wrong PV1 = hard reject. PN "JOINTOPERATIONS". [orig: CNapiNetwork_Init @ 0x4ca4a0 / NapiNPProtocol_HandleClientJoin @ 0x62B750]
 - **D-NET-48** [LOW, TRACKED] dial the host from DECODED NK (url-cipher, split ':'), not plaintext NI/NP (NI/NP feed only the proxy slots). [orig: parse_connection_query_string @ 0x54dfb0 / CNapiGameSession_ConnectOrHost @ 0x4d4f10]
 - **D-NET-49** [OPEN] `jointoperations_pg()` is a placeholder; the in-match PG (16B @ proto+284) is unwitnessed (source `NapiNPVarBlock_Copy @ 0x4ca7af`, not sub_62E750). Re-discover.
+
+`replication_min.cpp` + `game_session.cpp` (in-match player state — §5.10):
+- **D-NET-50** [HIGH, TRACKED] `build_tag_0a_world_reference` ships a 623-byte verbatim retail blob (`kRetailTag0aPayload`) with only bytes 0-11 patched. The real S2C 0x0A trailer is per-entity 18-byte **compact (type-11) records** — positions 16-bit compressed via `Network_CompressFixedPoint`, NOT raw i32, and vehicle-local when mounted. Replace with a field-driven builder per §5.10 case 1 (full table there). [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 1 / NapiNPClientMsg_0x00A @ 0x42FEC0 event loop]
+- **D-NET-51** [HIGH, TRACKED] `handle_tag_0c_player_input` reads position as raw i32 at offsets 7/11/15, treating the whole body as raw position. The real C2S 0x0C body is the fixed **43-byte extended (type-10)** format from §5.10: 5-B header, then vehicleHandle/posX/posY/posZ (i32 16.16, vehicle-local if mounted), heading/pitch (i16 BAM), state bytes, anim defs, and 4×(weapon_id,counter) anti-cheat pairs. Replace with a field-driven parser per §5.10 case 4. [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 4 / dispatch_entity_packet_callback @ 0x4D6A80]
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;
