@@ -709,9 +709,11 @@ void print_infantry_compact_record(const InfantryCompactRecord &r) {
 void print_tag_0a(const std::vector<uint8_t> &body) {
 	PpCursor c{body.data(), body.data() + body.size(), true};
 
-	// Fixed header per §5.9 (line 615): 3× i32 refs, flags1, flags2 (sub-block
-	// selector in low 2 bits), variable sub-block, pflags, mountHandle (u16),
-	// health (i16).
+	// Fixed header per §5.9: 3× i32 refs (tick anchors), flags1, flags2 (low
+	// 2 bits = sub-block selector, bit 3 = vehicle-passenger record gate),
+	// variable sub-block (cases 0-3, all IDA-witnessed), then the 7 B fixed
+	// tail (state_flag_byte u8 / mount u16 / health i16 / state_word i16)
+	// and optional 6 B vehicle-passenger record.
 	const int32_t ref0 = c.i32();
 	const int32_t ref1 = c.i32();
 	const int32_t ref2 = c.i32();
@@ -724,21 +726,19 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 	            uint32_t(ref0), uint32_t(ref1), uint32_t(ref2),
 	            unsigned(flags1), unsigned(flags2), sub_idx);
 
-	// Witnessed sub-block sizes (sub=2 ENV decodes cleanly and matches the
-	// §5.9 field list). Sub=0/1/3 sizes are still per the §5.9 table but the
-	// observed sub=1/sub=3 payloads on the 2026-06-16b loopback look bigger
-	// than the table suggests — exact widths need a grill-ida pass against
-	// `NapiNPClientMsg_0x00A @ 0x42FEC0`. Sub=3's 4×i32 branch is gated by
-	// `g_GameType & 0x20000` (wire-invisible); skipping 0 B by default
-	// matches non-objective gametypes.
-	bool sub_decoded = false;
+	// All four sub-block widths IDA-witnessed in NapiNPClientMsg_0x00A
+	// (2026-06-16 grill): case 0 = 11 B (6× u8 + u8 sentinel + i32),
+	// case 1 = 6 B (4× u8 + i16), case 2 = 11 B (3× u16 + 5× u8 ENV),
+	// case 3 = 16 B or 0 B gated by `g_GameType & 0x20000`. Sub=3's gate is
+	// wire-invisible — skipping 0 B matches non-objective gametypes; on an
+	// objective-bit-set capture, sub=3 frames will misalign and the walker
+	// will fail closed on an unknown event tag.
 	switch (sub_idx) {
 		case 0:
-			c.skip(11);  // 6× u8 + u8 sentinel + i32 per §5.9
-			sub_decoded = true;
+			c.skip(11);  // 6× u8 + u8 sentinel + i32 [orig: 0x430054..0x43012E]
 			break;
 		case 1:
-			c.skip(6);   // 4× u8 + i16 per §5.9 (suspect: wire seems wider)
+			c.skip(6);   // 4× u8 + i16 [orig: 0x430191..0x430210]
 			break;
 		case 2: {
 			const uint16_t fog_dist     = c.u16();
@@ -756,7 +756,6 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 			            unsigned(tod_fixed), unsigned(quake_ticks),
 			            unsigned(cloud_scroll), unsigned(cloud_byte2),
 			            unsigned(overcast), unsigned(env_trail));
-			sub_decoded = true;
 			break;
 		}
 		case 3:
@@ -766,42 +765,59 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 			break;
 	}
 
-	const uint8_t  pflags = c.u8();
-	const uint16_t mount  = c.u16();
-	const int16_t  health = c.i16();
+	// §5.9 post-dispatch fixed tail — 7 B always, IDA-witnessed:
+	//   state_flag_byte u8  [0x4303E5] bit 0→dword_B76484, bit 1→dword_B76480,
+	//                                  bits 0/1→g_local_player_entity.pad7[12] bits 8/9
+	//   mountHandle     u16 [0x430408] vehicle-mount handle (pool<<12|slot, 0xFFFF=none)
+	//   health          i16 [0x430428] → g_local_player_entity->Health
+	//   state_word      i16 [0x430442] → *(WORD*)g_local_player_entity->pad7
+	// (The trailing i16 was previously read as two separate bytes — refuted
+	// by the 0x430442 grill; bytes 6-7 are the high half of a single i16.)
+	const uint8_t  state_flag_byte = c.u8();
+	const uint16_t mount           = c.u16();
+	const int16_t  health          = c.i16();
+	const int16_t  state_word      = c.i16();
 	if (!c.ok) {
-		std::printf("            header: underrun before pflags\n");
+		std::printf("            header: underrun in tail (state/mount/health/state_word)\n");
 		return;
 	}
-	// Witnessed empirically against the 2026-06-16b loopback: two trailing
-	// bytes after health gate the event-loop start. In most captured frames
-	// they're (0x00, 0x00) and the next byte is the event tag (1/2) with a
-	// plausible handle/typeId, decoding 1383 records cleanly (61 Player + 1322
-	// Vehicle). A minority of sub=2 frames have (0xFF, 0x01) here and the
-	// player record starts 1 byte later — possibly a variable-length flag-byte
-	// field. TODO grill-ida: decompile `NapiNPClientMsg_0x00A @ 0x42FEC0` and
-	// name them precisely.
-	const uint8_t hdr_trail_a = c.u8();
-	const uint8_t hdr_trail_b = c.u8();
-	std::printf("            header: pflags=0x%02x mount=%s health=%d "
-	            "trail=(0x%02x,0x%02x)\n",
-	            unsigned(pflags), handle_str(mount).c_str(), int(health),
-	            unsigned(hdr_trail_a), unsigned(hdr_trail_b));
+	std::printf("            header: state=0x%02x mount=%s health=%d "
+	            "state_word=0x%04x\n",
+	            unsigned(state_flag_byte), handle_str(mount).c_str(),
+	            int(health), unsigned(uint16_t(state_word)));
 
-	// Wire-alignment trip: sub != 0/2 sub-block widths are not fully witnessed.
-	// If the post-header bytes don't look like a plausible event loop (health
-	// out of [0, 200] AND tag isn't 0/1/2), warn the user the rest is suspect
-	// before we start dispatching against possibly-stale offsets.
-	if (!sub_decoded) {
-		std::printf("            (sub=%u sub-block width unwitnessed — event "
-		            "loop alignment TBD per §5.9 / NapiNPClientMsg_0x00A IDA "
-		            "witness)\n", sub_idx);
+	// Conditional vehicle-passenger record [orig: 0x430459 —
+	// `if ((flags2 & 0xF) != 8) goto skip`]. Only fires when sub-block was
+	// case 0 AND bit 3 of flags2 is set (joiner is mounted as a passenger,
+	// not driver). Wire layout: u16 passenger_handle [0x430474] (0xFFFF
+	// early-skips seat_yaw/pitch), u16 seat_yaw [0x4304C3], u16 seat_pitch
+	// [0x4304DC].
+	if ((flags2 & 0xF) == 8) {
+		const uint16_t passenger_handle = c.u16();
+		if (!c.ok) {
+			std::printf("            passenger: underrun before handle\n");
+			return;
+		}
+		if (passenger_handle == 0xFFFF) {
+			std::printf("            passenger: hdl=ffff (no seat yaw/pitch)\n");
+		} else {
+			const uint16_t seat_yaw   = c.u16();
+			const uint16_t seat_pitch = c.u16();
+			if (!c.ok) {
+				std::printf("            passenger: underrun in seat yaw/pitch\n");
+				return;
+			}
+			std::printf("            passenger: hdl=%s seat_yaw=0x%04x "
+			            "seat_pitch=0x%04x\n",
+			            handle_str(passenger_handle).c_str(),
+			            unsigned(seat_yaw), unsigned(seat_pitch));
+		}
 	}
 
-	// Event loop. Tag==0 EOB, tag==1 per-entity, tag==2 weapon-hit.
-	// We assume `[u8 tag][u16 handle][u16 typeId]<compact-record>` for tag==1
-	// — header order not pinned in §5.9 line 631; confirm via IDA decompile
-	// of NapiNPClientMsg_0x00A @ 0x42FEC0 event loop body if records misalign.
+	// Event loop [orig: 0x4306A1..0x4307A2]. Tags hard-capped at {0,1,2} —
+	// `cmp eax,2 / jg` at 0x4306DA treats tag ≥3 as silent terminator (same
+	// exit as tag==0). For tag==1 the wire order is `[u8 tag][u16 handle]
+	// [u16 typeId]<compact-record>` confirmed at 0x43070C / 0x43076B.
 	int rec_idx = 0;
 	while (c.ok && c.p < c.end) {
 		const size_t tag_off = size_t(c.p - body.data());
