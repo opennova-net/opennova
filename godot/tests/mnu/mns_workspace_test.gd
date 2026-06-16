@@ -1,17 +1,19 @@
 extends GutTest
 
-# The Menu Styles ONED workspace: document lifecycle over MnsStyleSheet
-# (lossless load/save), the editor's snapshot undo/redo, the grouped variable
-# table + source view, the inspector population, cross-jump focus, and the
-# byte-faithfulness keystone (open the real shipped menu_style.mns, save it
-# untouched, get identical bytes).
+# Styles-tab behavior on the merged Menus workspace (formerly the standalone
+# Menu Styles workspace): document lifecycle over MnsStyleSheet (lossless
+# load/save), the editor's snapshot undo/redo, the grouped variable table,
+# the inspector population, cross-jump focus, and the byte-faithfulness
+# keystone (open the real shipped menu_style.mns, save it untouched, get
+# identical bytes). Plus a check that style_jump from the per-widget inspector
+# stays IN-workspace by activating the Styles dock tab and selecting the
+# variable.
 
 const MnsEditorDocumentScript = preload("res://modtools/mnu/mns_editor_document.gd")
 const MnsEditorScript = preload("res://modtools/mnu/mns_editor.gd")
 const MnsInspectorScript = preload("res://modtools/mnu/mns_inspector.gd")
-const MnsWorkspaceScript = preload("res://modtools/mnu/mns_workspace.gd")
-const MnsPreviewScript = preload("res://modtools/mnu/mns_preview.gd")
 const MnsVariableTableScript = preload("res://modtools/mnu/mns_variable_table.gd")
+const MnuEditorWorkspaceScript = preload("res://modtools/mnu/mnu_workspace.gd")
 
 const FIXTURE := "res://../fixtures/mns/test_style.mns"
 const REAL_FIXTURE := "res://../fixtures/mns/menu_style.mns"
@@ -42,9 +44,12 @@ func _cleanup_dir(dir_path: String) -> void:
 	DirAccess.remove_absolute(abs)
 
 
-# A workspace with its editor mounted into the tree (most behavior lives there).
+# A workspace with its editor mounted into the tree, in STYLES dock-tab mode so
+# save/new/open and undo target the .mns document. Tests can override via
+# ws._dock_tab when they need the Properties side.
 func _mounted_workspace() -> Array:
-	var ws = MnsWorkspaceScript.new()
+	var ws = MnuEditorWorkspaceScript.new()
+	ws._dock_tab = MnuEditorWorkspaceScript.DockTab.STYLES
 	var host := Control.new()
 	add_child_autofree(host)
 	ws.mount_viewport(host)
@@ -65,17 +70,19 @@ func _collect_text(node: Node) -> String:
 
 
 func test_workspace_id_and_label() -> void:
-	var ws = MnsWorkspaceScript.new()
-	assert_eq(ws.get_workspace_id(), "mns", "workspace id")
-	assert_eq(ws.get_workspace_label(), "Menu Styles", "workspace label")
+	var ws = MnuEditorWorkspaceScript.new()
+	assert_eq(ws.get_workspace_id(), "mnu", "workspace id")
+	assert_eq(ws.get_workspace_label(), "Menus", "workspace label")
 	ws.release_viewport()
 
 
 func test_open_uses_indexed_quick_open_browser() -> void:
-	var ws = MnsWorkspaceScript.new()
+	var ws = MnuEditorWorkspaceScript.new()
 	assert_true(ws.can_open(), "workspace can open")
-	assert_eq(ws.get_open_resource_kind(), "menu_style",
-		"a non-empty kind routes Open through the indexed quick-open browser")
+	var kinds := ws.get_open_resource_kinds()
+	assert_true(kinds.has("menu"), "claims the menu kind for .mnu quick-open")
+	assert_true(kinds.has("menu_style"),
+		"claims the menu_style kind too — quick-open of a .mns lands here")
 	ws.release_viewport()
 
 
@@ -104,7 +111,7 @@ func test_set_value_dirty_undo_redo() -> void:
 	var pair := _mounted_workspace()
 	var ws = pair[0]
 	assert_eq(ws.open_file(FIXTURE), OK)
-	var sheet: MnsStyleSheet = ws._document.resource
+	var sheet: MnsStyleSheet = ws._mns_document.resource
 	var editor = ws.get_editor_document()
 	var original := String(sheet.get_variable("DEF_TEXT_FG"))
 
@@ -125,7 +132,7 @@ func test_rename_undo_restores_byte_identical_source() -> void:
 	var pair := _mounted_workspace()
 	var ws = pair[0]
 	assert_eq(ws.open_file(FIXTURE), OK)
-	var sheet: MnsStyleSheet = ws._document.resource
+	var sheet: MnsStyleSheet = ws._mns_document.resource
 	var editor = ws.get_editor_document()
 	var before := String(sheet.get_source_text())
 
@@ -142,7 +149,7 @@ func test_add_remove_variable_round_trip() -> void:
 	var pair := _mounted_workspace()
 	var ws = pair[0]
 	assert_eq(ws.open_file(FIXTURE), OK)
-	var sheet: MnsStyleSheet = ws._document.resource
+	var sheet: MnsStyleSheet = ws._mns_document.resource
 	var editor = ws.get_editor_document()
 
 	editor.apply_edit({"op": "add", "name": "MY_COLOR", "value": "FF102030"})
@@ -198,9 +205,25 @@ func test_focus_reference_selects_variable() -> void:
 	var ws = pair[0]
 	assert_eq(ws.open_file(FIXTURE), OK)
 	assert_eq(ws.focus_reference({"variable": "TRIM_COLOR"}), OK, "known variable focuses")
-	assert_eq(ws.get_editor_document().get_selected_variable(), "TRIM_COLOR", "selection landed")
+	assert_eq(ws._mns_editor.get_selected_variable(), "TRIM_COLOR", "selection landed")
 	assert_eq(ws.focus_reference({"variable": "NOPE"}), ERR_DOES_NOT_EXIST, "unknown variable reports")
 	assert_eq(ws.focus_reference({}), OK, "empty focus is a no-op")
+	ws.release_viewport()
+
+
+# The %VAR% "Edit style" jump stays in-workspace: it activates the Styles dock
+# tab and selects the variable, never crossing a shell boundary.
+func test_style_jump_activates_styles_tab_locally() -> void:
+	var pair := _mounted_workspace()
+	var ws = pair[0]
+	assert_eq(ws.open_file(FIXTURE), OK)
+	# Start the workspace on Properties; the jump should flip it to Styles.
+	ws._dock_tab = MnuEditorWorkspaceScript.DockTab.PROPERTIES
+	ws._on_style_jump("TRIM_COLOR")
+	assert_eq(ws._dock_tab, MnuEditorWorkspaceScript.DockTab.STYLES,
+		"a style jump activates the Styles dock tab")
+	assert_eq(ws._mns_editor.get_selected_variable(), "TRIM_COLOR",
+		"the named variable is selected")
 	ws.release_viewport()
 
 
@@ -208,7 +231,7 @@ func test_source_apply_routes_through_undo() -> void:
 	var pair := _mounted_workspace()
 	var ws = pair[0]
 	assert_eq(ws.open_file(FIXTURE), OK)
-	var sheet: MnsStyleSheet = ws._document.resource
+	var sheet: MnsStyleSheet = ws._mns_document.resource
 	var editor = ws.get_editor_document()
 	var before := String(sheet.get_source_text())
 
@@ -226,7 +249,7 @@ func test_new_seeds_commented_template() -> void:
 	assert_eq(ws.new_current(), OK, "New seeds a fresh stylesheet")
 	assert_false(ws.has_unsaved_changes(), "fresh document is clean")
 	assert_eq(ws.get_current_resource_path(), "", "fresh document is pathless")
-	var source := String(ws._document.resource.get_source_text())
+	var source := String(ws._mns_document.resource.get_source_text())
 	assert_true(source.begins_with("//"), "template opens with a comment header")
 	assert_eq(ws.save_current(), ERR_INVALID_PARAMETER,
 		"pathless save routes the shell to Save As")
@@ -240,7 +263,10 @@ func test_inspector_populates_for_selection() -> void:
 	add_child_autofree(dock)
 	assert_eq(ws.open_file(FIXTURE), OK)
 	ws.build_inspector(dock)
-	var text := _collect_text(dock)
+	# The Styles tab page hosts the per-variable inspector below the editor.
+	var styles_page: Control = ws._styles_page
+	assert_not_null(styles_page, "Styles tab page exists")
+	var text := _collect_text(styles_page)
 	assert_string_contains(text, "DEF_FONTNAME", "inspector shows the selected variable")
 	assert_string_contains(text, "Delete variable", "inspector offers delete")
 	ws.release_viewport()
@@ -259,19 +285,3 @@ func test_variable_table_groups_and_header() -> void:
 	assert_string_contains(text, "DEF_FONTNAME", "rows render the variables")
 	table.select_name("TRIM_COLOR")
 	assert_eq(table.get_selected_name(), "TRIM_COLOR", "selection by name")
-
-
-func test_preview_renders_menu_through_stylesheet() -> void:
-	var sheet := MnsStyleSheet.new()
-	sheet.load_from_bytes(FileAccess.get_file_as_bytes(REAL_FIXTURE))
-	var preview = MnsPreviewScript.new()
-	add_child_autofree(preview)
-	preview.size = Vector2(320, 240)
-	# Absolute fixture path through the stub lister: no resource root needed.
-	var menu_path := ProjectSettings.globalize_path(MENU_FIXTURE)
-	preview.configure(null, func() -> PackedStringArray:
-		return PackedStringArray([menu_path]))
-	preview.set_stylesheet(sheet)
-	await wait_seconds(0.4)  # past the 0.25s debounce
-	assert_not_null(preview.get_menu_node(), "the picked menu rendered")
-	assert_true(preview.get_menu_node().get_child_count() > 0, "menu built screens")

@@ -143,7 +143,7 @@ theme_override_constants/separation = 0
 
 [node name="WorkspaceBar" type="PanelContainer" parent="WorkstationLayout/BodyLane"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(64, 0)
+custom_minimum_size = Vector2(96, 0)
 layout_mode = 2
 size_flags_vertical = 3
 
