@@ -766,11 +766,41 @@ state.
   vehicle-LOCAL small i32s; heading goes to zero, attitude carried by the vehicle frame. ✓
 - Consecutive in-vehicle frames: posZ-local Δ = -7758. ✓
 
-**Open follow-ups (§5.9 + §5.10):** vehicle/AI/weapon-class callbacks at `ItemDef+356` still
-TBD (out of scope: this RE pass scoped to `0x14B9` infantry). Compact-record velocity fields
-witnessed for tag 0x10 (§5.9, entity+16/20/24 with flag gating) but not exercised in the 0x0A
-trailing record — likely class-specific. Pool-entity messages 0x0D and 0x20 — closed in
-§5.11 / §5.12 below (Stage C, 2026-06-16, same loopback as §5.10).
+**Open follow-ups (§5.9 + §5.10):** Pool-entity messages 0x0D and 0x20 closed in §5.11 / §5.12
+(Stage C). The vehicle / AI-infantry / weapon-class callbacks at `ItemDef+356` — flagged here
+as "TBD" — are decoded in §5.10b (dispatch table) plus §5.13 (vehicle compact),
+§5.14 (AI infantry compact) and §5.15 (guided weapons; structural sketch only, full
+field map deferred until a capture carries live projectile traffic). Compact-record velocity
+fields witnessed for tag 0x10 (§5.9, entity+16/20/24 with flag gating) but not exercised in
+the 0x0A trailing record — confirmed class-specific (no vehicle / infantry callback writes
+them; player callback's compact path doesn't either).
+
+### 5.10b Per-entity-type callback at `ItemDef+356` — class dispatch table
+
+Stage C2 (2026-06-16): the player callback decoded in §5.10 is one of a wider
+family. The dispatch is data-driven: a 24-byte class-table entry at
+`g_entity_class_table @ 0x813000` holds `{char tag[8]; void* fn[4]}` per entity
+class, where `fn[3]` is the network-serialize callback. The items.def
+`ai_function` / `move_function` / `render_function` / `disk_function` directives
+on each item select a class (e.g. `move_function cveh`), so all items sharing
+that class tag share the same callback.
+
+Network-serialize callbacks observed in the table:
+
+| class tag | callback | wire user | wire formats |
+|---|---|---|---|
+| `plyr` | `NetPacket_SerializePlayerState @ 0x4C09C0` | player infantry | both compact (type 11) and extended (type 10) — §5.10 |
+| `org0` / `org1` | `NetPacket_SerializeInfantryEntityState @ 0x4C0320` | AI infantry / organic | compact only — §5.14 |
+| `CHel` / `cveh` / `cbot` / `cpln` / `ctrn` | `Entity_SerializeMountedVehicleState @ 0x460560` | vehicles + AI ground/air units | compact only — §5.13 |
+| `rokt` / `stng` / `hlfr` / `jvln` / `arty` | `Entity_SerializeGuidedMissileState @ 0x447C50` | guided weapons (rockets, missiles, artillery) | 4 modes × 6 sub-fields delta codec — §5.15 (TBD) |
+
+The player gets BOTH formats because it both sends C2S 0x0C (extended uplink)
+and is replicated to other clients in S2C 0x0A trailers (compact). Vehicles /
+AI / weapons are server-pushed only: their callbacks reject modes 3/4
+(extended) with `return -1`. The class table itself only matters when the
+0x0A receiver walks an event-loop record and needs to know "which N bytes is
+this entity's compact record" — at decode time we resolve via
+`ItemList_FindIndexByTypeId(wireType) → gItemDefs[idx]` and read `+356`.
 
 ### 5.11 Tag 0x0D — pool-entity spawn batch (loopback capture 2026-06-16b)
 
@@ -878,6 +908,87 @@ use (per-tag semantic — Hex-Rays auto-named).
   NOT seen in this capture — only present on entities with non-default score state).
 - Zero `itemTypeId==0` empty-slot sentinels in this load-phase capture (all records
   carry a body).
+
+### 5.13 Vehicle compact record (S2C 0x0A trailing event)
+
+`[orig: Entity_SerializeMountedVehicleState @ 0x460560]`. Used by every item
+whose entity class tag is `CHel` / `cveh` / `cbot` / `cpln` / `ctrn` (per
+§5.10b dispatch table). Both write (mode 1) and read (mode 2) paths handle
+format type 11 only — the callback rejects modes 3/4 (extended), so vehicles
+never appear in a C2S 0x0C body. They're host-pushed inside the S2C 0x0A
+trailing event-loop `tag==1` record.
+
+The write side branches first on whether the entity has an attached parent
+(`entity+40`) — if so, position is vehicle-LOCAL (via
+`Entity_TransformWorldToLocal`), otherwise world-relative to the map origin
+`dword_C867A4..AC`. Then on `flagsByte & 4` (mounted bit): if set, only a
+small heading block follows; if clear, the full weapon/turret block follows.
+
+| off | bytes | field | gate | landing |
+|---|---|---|---|---|
+| 0 | 2 | parentSlotHandle | always | `(pool<<12)|slot` or `0xFFFF`=none |
+| 2 | 2 | posX compressed | always | entity+4 (vehicle-local if parent ≠ none) |
+| 4 | 2 | posY compressed | always | entity+8 |
+| 6 | 2 | posZ compressed | always | entity+12 |
+| 8 | 2 | yawHigh (i16 BAM `(v+0x8000)>>16`) | always | entity+16 |
+| 10 | 1 | flagsByte | always | entity+36 (low byte) |
+| 11 | 2 | secondaryHeading | `flagsByte & 4` | entity+24 (mounted case ends here) |
+| 11 | 2 | weaponX compressed | NOT `flagsByte & 4` | entity+160 |
+| 13 | 2 | weaponY raw u16 | NOT `flagsByte & 4` | entity+286 |
+| 15 | 2 | weaponZ compressed | NOT `flagsByte & 4` | vehicleData[136] = entity+544 |
+| 17 | 2 | weaponHeading compressed | NOT `flagsByte & 4` | vehicleData[135] = entity+540 |
+| 13 or 19 | 2 | finalHeading (i16 BAM high) | always | entity+20 (mounted) or vehicleData[132]=entity+528 |
+
+Total: **15 B** when mounted (`flagsByte & 4`), **21 B** when not.
+
+`vehicleData` is `*(_DWORD **)(entity + 100)` — an auxiliary state buffer
+attached to mounted vehicles for weapon-aim tracking.
+
+### 5.14 Infantry / AI compact record (S2C 0x0A trailing event)
+
+`[orig: NetPacket_SerializeInfantryEntityState @ 0x4C0320]`. Used by items
+whose entity class tag is `org0` / `org1` — AI infantry units and any other
+"organic" pool-0 entity that isn't the player. Like §5.13, modes 1/2 only
+(type 11), modes 3/4 rejected. Used in S2C 0x0A trailing `tag==1`.
+
+The write side picks the parent vehicle from `entity+364` (mount slot) if set,
+otherwise `entity+40` (general parent). Position is vehicle-local when a
+parent exists, world-relative otherwise.
+
+| off | bytes | field | landing |
+|---|---|---|---|
+| 0 | 1 | seatBoneIdx | entity+343 if mounted, else 0 |
+| 1 | 2 | vehicleSlotHandle | `(pool<<12)|slot` resolved from `entity+364`/`+40`, `0xFFFF`=none |
+| 3 | 2 | posX compressed | entity+4 (vehicle-local if parent set) |
+| 5 | 2 | posY compressed | entity+8 |
+| 7 | 2 | posZ compressed | entity+12 |
+| 9 | 1 | yawByte (BAM high `(v+0x800000)>>24`) | entity+16 |
+| 10 | 1 | flagsByte | entity+36 |
+| 11 | 1 | pitchByte (clamped delta entity+748 vs entity+16, BAM high) | entity+748 |
+| 12 | 1 | aimYawByte (BAM high of entity+720) | entity+720 |
+| 13 | 1 | animByte | entity+696 if non-zero else entity+700 |
+
+Total: **14 B** per record (fixed).
+
+The read side runs an animation-state machine through a lookup table
+`dword_8139E8[]` indexed by animState — non-zero bits 4 / 0x20 in the table
+entry select whether to write +696 vs +700 — and handles a special path
+through `Entity_TryAttachOrDetach` when `flagsByte & 2` flips. None of that
+affects the wire layout.
+
+### 5.15 Guided weapon record — TBD (delta codec)
+
+`[orig: Entity_SerializeGuidedMissileState @ 0x447C50]`. Used by item classes
+`rokt` / `stng` / `hlfr` / `jvln` / `arty` (rockets, Stinger / Hellfire /
+Javelin / artillery). Structurally different from §5.10 / §5.13 / §5.14: a 4×6
+matrix of modes × sub-fields (`packetCtx[6]` ∈ {1,2,3,4} crossed with
+`packetCtx[7]` ∈ {1..6}) — full-write / full-read / delta-write / delta-apply
+across six field-groups (status, target handle, position, type+pos,
+attach-offsets). Used for projectile-in-flight state replication, not a single
+fixed compact record like §5.13/§5.14. Decoded skeleton lives in the IDA
+record; full field map deferred until a capture carrying live guided-weapon
+traffic exists (the 2026-06-16b loopback has none — no rockets fired during
+the on-foot/in-buggy session).
 
 ## 6. Struct reference
 
