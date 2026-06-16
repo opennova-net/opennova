@@ -267,4 +267,34 @@ bool decode_infantry_compact_record(const uint8_t *body, size_t len,
 	return consumed == 14;
 }
 
+// §5.9.1 weapon-hit record. 17-20 B variable by flags gate (0x80, 0x40).
+// [orig: NetPacket_DeserializeWeaponHit @ 0x42F270]
+bool decode_weapon_hit_record(const uint8_t *body, size_t len,
+                              WeaponHitRecord &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.flags        = c.u8();
+	out.adm_index    = c.u8();
+	out.hit_subtype  = c.u8();
+	if (out.flags & 0x80) {
+		out.parent_byte = c.u8();
+	}
+	out.target_handle = c.u16();
+	if (out.flags & 0x40) {
+		out.weapon_handle = c.u16();
+	}
+	out.damage_extra_raw = c.u16();
+	out.pos_x_compressed = c.u16();
+	out.pos_y_compressed = c.u16();
+	out.pos_z_compressed = c.u16();
+	out.yaw_bam_high     = c.u16();
+	out.pitch_bam_high   = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	const size_t expected = 17
+		+ (out.has_parent_byte() ? 1u : 0u)
+		+ (out.has_weapon_handle() ? 2u : 0u);
+	return consumed == expected;
+}
+
 } // namespace opennova

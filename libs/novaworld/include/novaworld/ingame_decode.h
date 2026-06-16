@@ -225,6 +225,32 @@ struct InfantryCompactRecord {
 	uint8_t  anim_byte = 0;                // entity+696 if non-zero else entity+700
 };
 
+// One §5.9.1 weapon-hit record. Decoded by
+// [orig: NetPacket_DeserializeWeaponHit @ 0x42F270]. Sole sender is the tag==2
+// branch of the S2C 0x0A event loop [0x4306EF]. Variable length 17-20 B by
+// `flags` gate bits:
+//   17 B if flags == 0
+//   18 B if (flags & 0x80) — adds parent_byte
+//   19 B if (flags & 0x40) — adds weapon_handle
+//   20 B if (flags & 0xC0) — adds both
+struct WeaponHitRecord {
+	uint8_t  flags = 0;              // gate byte; 0x80 → parent_byte, 0x40 → weapon_handle
+	uint8_t  adm_index = 0;          // → AdmDef_GetEntryByIndex (action descriptor index)
+	uint8_t  hit_subtype = 0;        // → dword_A822E0 (last-hit subtype global)
+	uint8_t  parent_byte = 0;        // present iff (flags & 0x80)
+	uint16_t target_handle = 0xFFFF; // (pool<<12)|slot of the hit entity; 0xFFFF=no target
+	uint16_t weapon_handle = 0xFFFF; // present iff (flags & 0x40); 0xFFFF=sentinel
+	uint16_t damage_extra_raw = 0;   // raw u16 → word_B7C670 (damage/radius/weapon-extra)
+	uint16_t pos_x_compressed = 0;   // Network_DecompressFixedPoint → position[0] + dword_A822E4
+	uint16_t pos_y_compressed = 0;   // → position[1] + dword_A822E8
+	uint16_t pos_z_compressed = 0;   // → position[2] + dword_A822EC
+	uint16_t yaw_bam_high = 0;       // raw u16 (interpreted as BAM high half via << 16)
+	uint16_t pitch_bam_high = 0;     // raw u16 (interpreted as BAM high half via << 16)
+
+	bool has_parent_byte() const { return (flags & 0x80) != 0; }
+	bool has_weapon_handle() const { return (flags & 0x40) != 0; }
+};
+
 bool decode_player_compact_record(const uint8_t *body, size_t len,
                                   PlayerCompactRecord &out, size_t &consumed);
 
@@ -233,5 +259,8 @@ bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
 
 bool decode_infantry_compact_record(const uint8_t *body, size_t len,
                                     InfantryCompactRecord &out, size_t &consumed);
+
+bool decode_weapon_hit_record(const uint8_t *body, size_t len,
+                              WeaponHitRecord &out, size_t &consumed);
 
 } // namespace opennova

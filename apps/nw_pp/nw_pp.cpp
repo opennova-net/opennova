@@ -703,6 +703,20 @@ void print_infantry_compact_record(const InfantryCompactRecord &r) {
 	            unsigned(r.anim_byte));
 }
 
+void print_weapon_hit_record(const WeaponHitRecord &r) {
+	std::printf("            weapon-hit: flags=0x%02x adm=%u sub=%u target=%s "
+	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%04x pitch=0x%04x dmgExtra=0x%04x",
+	            unsigned(r.flags), unsigned(r.adm_index),
+	            unsigned(r.hit_subtype), handle_str(r.target_handle).c_str(),
+	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
+	            unsigned(r.pos_z_compressed),
+	            unsigned(r.yaw_bam_high), unsigned(r.pitch_bam_high),
+	            unsigned(r.damage_extra_raw));
+	if (r.has_parent_byte())   std::printf(" parent=0x%02x", unsigned(r.parent_byte));
+	if (r.has_weapon_handle()) std::printf(" weap=%s", handle_str(r.weapon_handle).c_str());
+	std::printf("\n");
+}
+
 // Walk a S2C 0x0A body: fixed header per §5.9 plus trailing event loop.
 // Event tags: 0=EOB, 1=per-entity compact record, 2=weapon-hit. Fails closed
 // on any unknown tag — prints the offset and stops.
@@ -828,11 +842,22 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 			return;
 		}
 		if (tag == 2) {
-			// §5.9: NetPacket_DeserializeWeaponHit. Field map not in docs yet;
-			// hex-dump the remainder and stop the walker.
-			std::printf("            tag=0x02 weapon-hit @+%zu (§5.9 — field "
-			            "map deferred) %zu B remaining\n",
-			            tag_off, size_t(c.end - c.p));
+			// §5.9.1 weapon-hit. Variable length 17-20 B by flags gate.
+			// Event loop continues past hits (not a terminator).
+			const size_t avail = size_t(c.end - c.p);
+			WeaponHitRecord r;
+			size_t consumed = 0;
+			if (decode_weapon_hit_record(c.p, avail, r, consumed)) {
+				std::printf("            tag=0x02 weapon-hit @+%zu (%zu B)\n",
+				            tag_off, consumed);
+				print_weapon_hit_record(r);
+				c.p += consumed;
+				continue;
+			}
+			std::printf("            tag=0x02 weapon-hit @+%zu DECODE FAILED "
+			            "(consumed=%zu, avail=%zu) — halting, %s\n",
+			            tag_off, consumed, avail,
+			            to_hex_sample(c.p, avail).c_str());
 			return;
 		}
 		if (tag == 1) {

@@ -641,6 +641,60 @@ defined 2026-06-16. Sub-block + tail field maps fully witnessed 2026-06-16c via
 — it's the high half of the `state_word i16`. The `(flags2 & 0xF) == 8` vehicle-passenger record
 appears 4× in the 2026-06-16b loopback capture, all on sub-block 0 frames.)
 
+#### 5.9.1 Weapon-hit record (event-loop `tag==2`) — wire decoded 2026-06-16d
+
+The trailing event loop's `tag==2` branch is the projectile/melee impact record. Decoded by
+`NetPacket_DeserializeWeaponHit @ 0x42F270` — sole receiver, called from `0x4306EF` inside
+`NapiNPClientMsg_0x00A`. The record is 17-20 B, variable by `flags` gate bits `0x80` / `0x40`:
+
+| Field | Bytes | Gate | Landing |
+|---|---|---|---|
+| `flags` | u8 | always | local; bits 0x80 → `parent_byte` present, 0x40 → `weapon_handle` present, low bits 0x01/0x02 gate downstream damage-processing branches (not wire reads) [orig: 0x42f2a8] |
+| `adm_index` | u8 | always | → `AdmDef_GetEntryByIndex(adm_index)` resolves the action-descriptor entry [orig: 0x42f2ca] |
+| `hit_subtype` | u8 | always | → `dword_A822E0` (last-hit subtype global; categorises the hit) [orig: 0x42f2e2] |
+| `parent_byte` | u8 | `flags & 0x80` | `pos_z_decompressed` local → `hitDataPtr[5]` low byte; bone/seat index for the parent of the hit [orig: 0x42f30a] |
+| `target_handle` | u16 | always | `(pool<<12)\|slot` of the hit entity; `0xFFFF` = no target (early `return result`); validated against `g_pool_list` capacity [orig: 0x42f337] |
+| `weapon_handle` | u16 | `flags & 0x40` | parent-weapon sub-handle stored at `entity_link+12` for AI damage attribution; `0xFFFF` = sentinel (no parent weapon) [orig: 0x42f359] |
+| `damage_extra_raw` | u16 | always | raw u16 → `word_B7C670` global (weapon-extra slot; observed as a monotonic per-shot counter in the 2026-06-16d capture) [orig: 0x42f37e] |
+| `pos_x_compressed` | u16 | always | `Network_DecompressFixedPoint(.) + dword_A822E4` → `position[0]` (impact world X) [orig: 0x42f39c] |
+| `pos_y_compressed` | u16 | always | `+ dword_A822E8` → `position[1]` [orig: 0x42f3c7] |
+| `pos_z_compressed` | u16 | always | `+ dword_A822EC` → `position[2]` [orig: 0x42f3f2] |
+| `yaw_bam_high` | u16 | always | raw u16 reinterpreted as the high 16 bits of a 32-bit BAM (`raw << 16`); impact heading [orig: 0x42f41f] |
+| `pitch_bam_high` | u16 | always | raw u16 reinterpreted as BAM high word; impact pitch [orig: 0x42f43c] |
+
+**Closed byte-sum table by flags combination:**
+
+| flags & 0xC0 | parent_byte? | weapon_handle? | total |
+|---|---|---|---|
+| `0x00` | no | no | **17 B** |
+| `0x80` | yes (+1) | no | **18 B** |
+| `0x40` | no | yes (+2) | **19 B** |
+| `0xC0` | yes (+1) | yes (+2) | **20 B** |
+
+After deserialization the receiver dispatches into the action-descriptor execution path:
+`flags & 1` enters projectile-impact, `flags & 2` enters direct-damage; both ultimately call
+`RoundData_ProcessHit` with the (`position`, `entity_ptr`, `adm_index`, `flags`, `hit_subtype`,
+`parent_byte`) tuple. The yaw/pitch BAM words feed FOV-cone sound playback at the impact site.
+
+**Cross-witness (capture `host_and_join_game_on_opennovaworld_loopback_threeplayers_more_gameplay.pcapng`,
+2026-06-16d).** 20 weapon-hit records across 672 0x0A frames, all decoded byte-exact, zero
+walker halts. Observed flag bytes: `{0x02, 0x12, 0x22, 0x32}` (none with 0x80/0x40 set — all
+17 B minimum). Two distinct (`adm_index`, `hit_subtype`) tuples: `(68, 12)` × 13 hits, target
+`p0/s1`; `(7, 12)` × 7 hits, target `p0/s0`. `damage_extra_raw` increments monotonically per
+shot in each weapon's sequence (`0x020b…0x0217`, `0x0005…0x0006`), suggesting a per-weapon
+shot-id counter rather than damage value. Sample wire bytes — first record (17 B):
+
+```
+02 44 0c 01 00 0b 02 9a 44 38 6d d6 ea bc 73 02 f9
+flags=02 adm=44(=68) sub=0c(=12) target=0x0001 dmgExtra=0x020b
+pos=(0x449a,0x6d38,0xead6) yaw_BAM=0x73bc pitch_BAM=0xf902
+```
+
+The decoder is bounds-checked end-to-end (libs/novaworld §5.9.1
+`decode_weapon_hit_record`) and the nw_pp walker advances past tag==2 records to keep decoding
+the rest of the frame — previously the walker halted on the first hit per frame, masking
+subsequent records.
+
 **Tag 0x0C (C2S) — entity sub-packet** `[orig: NapiNPServerMsg_0x00C @ 0x501C30 →
 dispatch_entity_packet_callback @ 0x4D6A80]`. The joiner's per-frame uplink for an entity it
 owns; authority-gated, ownership-checked, then dispatched to the entity-type callback at
@@ -973,6 +1027,20 @@ Total: **15 B** when mounted (`flagsByte & 4`), **21 B** when not.
 
 `vehicleData` is `*(_DWORD **)(entity + 100)` — an auxiliary state buffer
 attached to mounted vehicles for weapon-aim tracking.
+
+**Euler-triple footnote (2026-06-16d IDA grill).** `yawHigh` at wire offset 8
+isn't a standalone yaw — it's the Z component of a position-block Euler triple
+landing at `entity+576`, fed to `Math_BuildFixedPointMatrixFromEulerAngles`
+together with the mounted-branch reads. In the mounted case, the two i16s
+labelled here `secondaryHeading` (off=11) and `finalHeading` (off=13) actually
+land at `entity+584` and `entity+580` respectively as the Y and X components
+of a rider-body Euler triple. In the unmounted case, the field labelled
+`weaponY raw u16` is more precisely the turret-pitch raw i16 (lands at
+`entity+286` as a raw word, not via decompress); the remaining three
+compressed u16s feed `vehicleData[177/178/179]` (weapon Y/Z + final heading
+BAM). The byte counts and read order in this table are byte-exact — a fuller
+field rename pass is tracked separately to avoid churning §5.13 callers in the
+same commit as §5.9.1.
 
 ### 5.14 Infantry / AI compact record (S2C 0x0A trailing event)
 
