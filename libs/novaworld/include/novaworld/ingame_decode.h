@@ -172,8 +172,8 @@ struct PlayerCompactRecord {
 	uint16_t pos_x_compressed = 0;    // entity+4   (vehicle-local if mounted)
 	uint16_t pos_y_compressed = 0;    // entity+8
 	uint16_t pos_z_compressed = 0;    // entity+0xC
-	uint8_t  yaw_byte = 0;            // entity+0x14 (high byte of 32-bit BAM)
-	uint8_t  pitch_byte = 0;
+	uint8_t  yaw_byte = 0;            // high byte of 32-bit BAM -> entity+0x10 (heading) on read [D-NET-57]
+	uint8_t  pitch_byte = 0;          // -> entity+0x14 (pitch) on read [D-NET-57]
 	uint8_t  anim_slot_low = 0;       // entity+0x12C
 	uint8_t  state_flags = 0;         // entity+0x24 (bit 2 = spawning, bit 4 = mounted)
 	uint8_t  weapon_anim_state = 0;   // entity+0x2B8 / 0x2BC
