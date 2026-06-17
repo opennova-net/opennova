@@ -41,12 +41,13 @@ Variant ResourceFormatLoaderNovaTexture::_load(const String &p_path, const Strin
 
 	if (ext == "pcx") {
 		img = opennova::decode_pcx_image(bytes.ptr(), bytes.size());
-	} else if (ext == "dds" && bytes_look_like_dds(bytes)) {
+	} else if (bytes_look_like_dds(bytes)) {
+		// DDS payload by magic, regardless of extension (NovaLogic ships DDS under .tga names).
 		img.instantiate();
 		if (img->load_dds_from_buffer(bytes) != OK)
 			return Variant();
 	} else {
-		// .tga, .dds, .mdt — all TGA format in NovaLogic assets
+		// .tga / .mdt — TGA format in NovaLogic assets
 		if (bytes.size() < 18)
 			return Variant();
 		img.instantiate();

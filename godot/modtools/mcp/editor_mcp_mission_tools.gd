@@ -22,6 +22,7 @@ const HEADER_STRINGS: Array[String] = ["mission_name", "designer", "briefing", "
 const HEADER_INTS: Array[String] = [
 	"climate", "weather", "mission_type", "attrib_flags", "start_time", "minutes_per_day",
 	"player_health", "max_saves", "music", "reverb", "wind_speed", "wind_direction",
+	"water_override", "fog_override",
 ]
 
 var service: Node
@@ -91,7 +92,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"marker_index": { "type": "integer" },
 			}, ["op"]), Callable(self, "_tool_waypoints"))
 	registry.register(_def("set_mission_header",
-			"Set mission header fields; fields is a {name -> value} map, one undo step per field. Strings: mission_name, designer, briefing, environment (.env basename — the editor preview reloads to match the game, including the mission's fog/water overrides), terrain (terrain basename — does NOT reload the loaded terrain; avoid unless asked). Ints: climate, weather, mission_type, attrib_flags, start_time, minutes_per_day, player_health, max_saves, music, reverb, wind_speed, wind_direction. Unknown fields are rejected up front with this list.",
+			"Set mission header fields; fields is a {name -> value} map, one undo step per field. Strings: mission_name, designer, briefing, environment (.env basename — the editor preview reloads to match the game, including the mission's fog/water overrides), terrain (terrain basename — does NOT reload the loaded terrain; avoid unless asked). Ints: climate, weather, mission_type, attrib_flags, start_time, minutes_per_day, player_health, max_saves, music, reverb, wind_speed, wind_direction, water_override (s16 half-units), fog_override (fog distance). The two *_override values only take effect when their attrib_flags bit is set (water 0x1, fog-distance 0x2) — set both, or the value is dormant (and an enabled bit with a 0 value fogs the map out). Unknown fields are rejected up front with this list.",
 			{ "fields": { "type": "object" } }, ["fields"]), Callable(self, "_tool_set_header"))
 	registry.register(_def("reground_mission",
 			"Repair: snap EVERY entity back onto the terrain surface in one undo step. Use when objects float or sink (placed at guessed heights, or terrain edits moved the ground). Unlike the editor's drift prompt this does not skip rows whose terrain never changed, so it fixes mis-grounded missions — but entities deliberately authored off the ground get planted too; warn the user if that may apply. Rejected while simulating.",
