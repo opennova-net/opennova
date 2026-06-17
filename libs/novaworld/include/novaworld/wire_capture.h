@@ -1,0 +1,49 @@
+#pragma once
+
+// The NovaWorld outer-decode pipeline, run over a whole capture.
+//
+// Every in-match consumer — nw_pp, the cross-validation harnesses, and the
+// replay-timeline builder — needs the same chain to get from raw UDP datagrams
+// to per-tag inner payloads: NAPI envelope (CRC strip) -> outer NWU transform
+// -> recover each side's SCRK from the ClientAuth/ServerAuth handshake -> 0x43/
+// 0x83 session opcode -> SCRK-decrypt the protocol packet -> reassemble
+// fragmented protocol messages -> emit (dir, tag, payload). That chain used to
+// be copy-pasted into each consumer; this is the one shared implementation.
+//
+// See docs/net/novaworld-net-re.md §3 (outer stack) and §4 (tag dispatch).
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace opennova {
+
+// A capture datagram reduced to what the in-game decode needs: the UDP payload
+// (the NAPI envelope onward) and its 1-based capture order. Deliberately
+// decoupled from apps/common's PcapDatagram so libs/ stays free of app-layer
+// dependencies — callers map their own datagram type onto this.
+struct CaptureDatagram {
+	int frame_index = 0;
+	std::vector<uint8_t> payload;
+};
+
+// One fully-decoded in-game protocol message: the reassembled inner body a
+// per-tag decoder (ingame_decode.h) consumes, tagged with its direction and the
+// capture frame the message STARTED on (the first fragment, matching nw_pp).
+struct InGameMessage {
+	int frame_index = 0;          // first-fragment capture order
+	char dir = '?';               // 'C' = client->server, 'S' = server->client
+	uint16_t tag = 0;             // protocol full_tag; the low byte is the dispatch tag
+	bool settings_update = false; // ProtocolMessage.flags.settings_update
+	std::vector<uint8_t> payload; // reassembled inner body
+};
+
+// Drive the outer-decode pipeline over `datagrams` (in capture order) and return
+// the ordered stream of reassembled in-game messages. SCRK is recovered from the
+// handshake as it streams by, so the datagrams must include the ClientAuth /
+// ServerAuth packets for protocol messages to decrypt (a mid-session capture
+// without them yields no protocol messages — the same limitation nw_pp has).
+std::vector<InGameMessage>
+decode_capture_to_messages(const std::vector<CaptureDatagram> &datagrams);
+
+} // namespace opennova

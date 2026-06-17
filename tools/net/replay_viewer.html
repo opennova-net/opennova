@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenNova — NovaWorld capture replay</title>
+<!--
+  Standalone top-down replay viewer for a NovaWorld in-game capture.
+
+  Input is the JSON produced by:
+      nw_pp <capture.pcapng> --items <items.def> --replay-json out.json
+  (see apps/nw_pp + libs/novaworld/replay_timeline). Drag that file onto the
+  window (or use "Load JSON"). No build, no server, no dependencies — open this
+  file in any browser.
+
+  Coordinates: positions are world meters (x = east, y = north); heading is
+  degrees. Spawn samples are the authoritative world layout (validated against
+  the authored mission by tests/novaworld/nw_pool_groundtruth_test); C2S 0x0C
+  uplink samples are the joiner's per-frame motion. "Anchor tracks to spawn"
+  reconciles the uplink world+origin frame with the spawn world frame (a no-op
+  when the map origin is zero, as in the dvxi5 probe capture).
+-->
+<style>
+  :root {
+    --bg: #1b1c1e;
+    --panel: #232427;
+    --panel2: #2b2d31;
+    --line: #3a3d42;
+    --ink: #e6e7e9;
+    --muted: #9aa0a6;
+    --orange: #ff7a18;
+    --orange-dim: #c75f12;
+    --blue: #4a90ff;
+    --red: #ff5a5a;
+    --neutral: #b6bcc2;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 13px/1.45 "Segoe UI", system-ui, sans-serif; }
+  #app { display: flex; height: 100%; }
+  #side { width: 290px; flex: 0 0 290px; background: var(--panel); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; overflow-y: auto; }
+  #stage { position: relative; flex: 1 1 auto; }
+  canvas { display: block; width: 100%; height: 100%; background: #151618; cursor: grab; }
+  canvas.drag { cursor: grabbing; }
+  h1 { font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--orange);
+    margin: 0; padding: 14px 14px 10px; border-bottom: 1px solid var(--line); }
+  h1 small { display: block; color: var(--muted); letter-spacing: .04em; text-transform: none;
+    font-size: 11px; margin-top: 3px; }
+  .sec { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .sec h2 { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+    margin: 0 0 8px; }
+  button, label.btn { background: var(--panel2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 5px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
+  button:hover, label.btn:hover { border-color: var(--orange-dim); }
+  button.primary { background: var(--orange); color: #1b1c1e; border-color: var(--orange); font-weight: 600; }
+  button.primary:hover { background: #ff8c3a; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row + .row { margin-top: 8px; }
+  input[type=range] { width: 100%; accent-color: var(--orange); }
+  select { background: var(--panel2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 5px; padding: 4px 6px; }
+  label.chk { display: flex; gap: 7px; align-items: center; cursor: pointer; user-select: none; }
+  label.chk input { accent-color: var(--orange); }
+  .kv { display: flex; justify-content: space-between; color: var(--muted); }
+  .kv b { color: var(--ink); font-weight: 600; }
+  .legend div { display: flex; align-items: center; gap: 8px; margin: 4px 0; color: var(--muted); }
+  .sw { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 12px; }
+  #framelabel { font-variant-numeric: tabular-nums; color: var(--orange); font-weight: 600; }
+  #drop { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(255,122,24,.10); border: 2px dashed var(--orange); color: var(--orange);
+    font-size: 18px; letter-spacing: .05em; pointer-events: none; }
+  #stage.over #drop { display: flex; }
+  #hint { position: absolute; left: 12px; bottom: 10px; color: var(--muted); font-size: 11px;
+    background: rgba(21,22,24,.7); padding: 4px 8px; border-radius: 5px; }
+  .tag { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <h1>NovaWorld Replay<small id="capname">no capture loaded</small></h1>
+
+    <div class="sec">
+      <div class="row">
+        <label class="btn">Load JSON<input id="file" type="file" accept=".json,application/json" hidden></label>
+        <button id="fit">Fit</button>
+      </div>
+      <div class="row" style="margin-top:6px;color:var(--muted);font-size:11px">
+        Export with <span class="tag">nw_pp … --replay-json</span>, then drop the file here.
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Playback</h2>
+      <div class="row">
+        <button id="play" class="primary">▶ Play</button>
+        <select id="speed" title="playback speed">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+          <option value="4">4×</option>
+          <option value="8">8×</option>
+        </select>
+        <span id="framelabel">—</span>
+      </div>
+      <div class="row"><input id="scrub" type="range" min="0" max="100" value="0" step="1"></div>
+    </div>
+
+    <div class="sec">
+      <h2>Display</h2>
+      <label class="chk"><input id="opt-labels" type="checkbox" checked> Entity labels</label>
+      <label class="chk" style="margin-top:6px"><input id="opt-trails" type="checkbox" checked> Motion trails</label>
+      <label class="chk" style="margin-top:6px"><input id="opt-anchors" type="checkbox" checked> Spawn anchors (authored layout)</label>
+      <label class="chk" style="margin-top:6px"><input id="opt-anchorfix" type="checkbox" checked> Anchor tracks to spawn</label>
+      <label class="chk" style="margin-top:6px"><input id="opt-grid" type="checkbox" checked> World grid</label>
+    </div>
+
+    <div class="sec">
+      <h2>Teams</h2>
+      <div class="legend">
+        <div><span class="sw" style="background:var(--blue)"></span> Blue (team 1)</div>
+        <div><span class="sw" style="background:var(--red)"></span> Red (team 2)</div>
+        <div><span class="sw" style="background:var(--neutral)"></span> Neutral / none</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Categories</h2>
+      <div class="legend" id="catlegend"></div>
+    </div>
+
+    <div class="sec">
+      <h2>Capture</h2>
+      <div class="kv"><span>Entities</span><b id="st-ent">0</b></div>
+      <div class="kv"><span>Frames</span><b id="st-frames">—</b></div>
+      <div class="kv"><span>Moving (tracked)</span><b id="st-moving">0</b></div>
+    </div>
+  </aside>
+
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="drop">drop replay JSON</div>
+    <div id="hint">drag to pan · wheel to zoom · space to play/pause</div>
+  </div>
+</div>
+
+<script>
+"use strict";
+(() => {
+  const TEAM = { 1: "#4a90ff", 2: "#ff5a5a" };
+  const NEUTRAL = "#b6bcc2";
+  // shape drawn per coarse category from the exporter (category_for in nw_pp).
+  const CATS = {
+    player:   { shape: "ring",     label: "Player" },
+    infantry: { shape: "circle",   label: "Infantry" },
+    organic:  { shape: "circle",   label: "Organic" },
+    vehicle:  { shape: "triangle", label: "Vehicle" },
+    item:     { shape: "square",   label: "Item" },
+    building:  { shape: "square",  label: "Building" },
+    marker:   { shape: "diamond",  label: "Marker" },
+    guided:   { shape: "triangle", label: "Guided" },
+    unknown:  { shape: "circle",   label: "Unknown" },
+  };
+
+  const cv = document.getElementById("cv");
+  const ctx = cv.getContext("2d");
+  const stage = document.getElementById("stage");
+  const el = (id) => document.getElementById(id);
+
+  let DATA = null;       // parsed JSON
+  let ENTS = [];         // prepared entities
+  let bounds = null;     // world bounds {minx,maxx,miny,maxy}
+  let view = { scale: 1, ox: 0, oy: 0 };   // world->screen
+  let frame = 0, fmin = 0, fmax = 0;
+  let playing = false, lastT = 0;
+
+  const opt = {
+    labels:   el("opt-labels"),
+    trails:   el("opt-trails"),
+    anchors:  el("opt-anchors"),
+    anchorfix:el("opt-anchorfix"),
+    grid:     el("opt-grid"),
+  };
+
+  function teamColor(t) { return TEAM[t] || NEUTRAL; }
+
+  // Reconcile a track's uplink frame with the spawn frame: shift uplink samples
+  // so the first uplink lands on the spawn position (a no-op when origin == 0).
+  function prepare(d) {
+    const ents = [];
+    for (const e of d.entities) {
+      const spawn = e.spawn;
+      let off = { x: 0, y: 0 };
+      if (opt.anchorfix.checked && spawn) {
+        const firstUp = (e.track || []).find(s => s.src === "uplink");
+        if (firstUp) off = { x: spawn.x - firstUp.x, y: spawn.y - firstUp.y };
+      }
+      const track = (e.track || []).map(s => ({
+        f: s.f,
+        x: s.src === "uplink" ? s.x + off.x : s.x,
+        y: s.src === "uplink" ? s.y + off.y : s.y,
+        h: s.h, src: s.src,
+      }));
+      track.sort((a, b) => a.f - b.f);
+      ents.push({
+        handle: e.handle, pool: e.pool, type_id: e.type_id,
+        name: e.name || (d.items && d.items[e.type_id]) || ("type " + e.type_id),
+        cat: (CATS[e.category] ? e.category : "unknown"),
+        team: e.team, spawn, track,
+        // moves if it has >1 per-frame sample (C2S 0x0C uplink or S2C 0x0A motion)
+        moving: track.filter(s => s.src === "uplink" || s.src === "frameupdate").length > 1,
+      });
+    }
+    return ents;
+  }
+
+  function computeBounds(ents) {
+    let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+    const acc = (x, y) => { if (x < minx) minx = x; if (x > maxx) maxx = x;
+                            if (y < miny) miny = y; if (y > maxy) maxy = y; };
+    for (const e of ents) {
+      if (e.spawn) acc(e.spawn.x, e.spawn.y);
+      for (const s of e.track) acc(s.x, s.y);
+    }
+    if (!isFinite(minx)) { minx = -100; maxx = 100; miny = -100; maxy = 100; }
+    return { minx, maxx, miny, maxy };
+  }
+
+  function fitView() {
+    if (!bounds) return;
+    const w = cv.width, h = cv.height, pad = 60;
+    const bw = Math.max(1, bounds.maxx - bounds.minx);
+    const bh = Math.max(1, bounds.maxy - bounds.miny);
+    const s = Math.min((w - 2 * pad) / bw, (h - 2 * pad) / bh);
+    view.scale = s;
+    const cx = (bounds.minx + bounds.maxx) / 2, cy = (bounds.miny + bounds.maxy) / 2;
+    view.ox = w / 2 - cx * s;
+    view.oy = h / 2 + cy * s;   // flip y (north up)
+    draw();
+  }
+
+  // world -> screen (y flips so north is up)
+  function sx(x) { return x * view.scale + view.ox; }
+  function sy(y) { return -y * view.scale + view.oy; }
+
+  function posAt(e, cf) {
+    const t = e.track;
+    if (!t.length) return e.spawn ? { x: e.spawn.x, y: e.spawn.y, h: e.spawn.h } : null;
+    if (cf <= t[0].f) return { x: t[0].x, y: t[0].y, h: t[0].h };
+    let i = 0;
+    while (i < t.length - 1 && t[i + 1].f <= cf) i++;
+    if (i >= t.length - 1) return { x: t[i].x, y: t[i].y, h: t[i].h };
+    const a = t[i], b = t[i + 1];
+    const u = (cf - a.f) / Math.max(1, b.f - a.f);
+    return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, h: (u < 0.5 ? a.h : b.h) };
+  }
+
+  function drawGrid() {
+    if (!opt.grid.checked || !bounds) return;
+    // pick a round spacing giving ~8-14 lines across the wider span
+    const span = Math.max(bounds.maxx - bounds.minx, bounds.maxy - bounds.miny);
+    const raw = span / 10;
+    const pow = Math.pow(10, Math.floor(Math.log10(Math.max(1, raw))));
+    const step = (raw / pow >= 5 ? 5 : raw / pow >= 2 ? 2 : 1) * pow;
+    ctx.lineWidth = 1; ctx.strokeStyle = "#26282c"; ctx.fillStyle = "#54585e";
+    ctx.font = "10px Segoe UI";
+    const x0 = Math.floor(bounds.minx / step) * step, x1 = bounds.maxx + step;
+    const y0 = Math.floor(bounds.miny / step) * step, y1 = bounds.maxy + step;
+    for (let x = x0; x <= x1; x += step) {
+      ctx.beginPath(); ctx.moveTo(sx(x), 0); ctx.lineTo(sx(x), cv.height); ctx.stroke();
+      ctx.fillText(x.toFixed(0), sx(x) + 2, cv.height - 4);
+    }
+    for (let y = y0; y <= y1; y += step) {
+      ctx.beginPath(); ctx.moveTo(0, sy(y)); ctx.lineTo(cv.width, sy(y)); ctx.stroke();
+      ctx.fillText(y.toFixed(0), 4, sy(y) - 2);
+    }
+    // axes
+    ctx.strokeStyle = "#33363b";
+    ctx.beginPath(); ctx.moveTo(0, sy(0)); ctx.lineTo(cv.width, sy(0)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx(0), 0); ctx.lineTo(sx(0), cv.height); ctx.stroke();
+  }
+
+  function markerPath(cat, x, y, r) {
+    ctx.beginPath();
+    const sh = (CATS[cat] || CATS.unknown).shape;
+    if (sh === "circle" || sh === "ring") { ctx.arc(x, y, r, 0, Math.PI * 2); }
+    else if (sh === "square") { ctx.rect(x - r, y - r, 2 * r, 2 * r); }
+    else if (sh === "diamond") { ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); }
+    else if (sh === "triangle") { ctx.moveTo(x, y - r); ctx.lineTo(x + r, y + r); ctx.lineTo(x - r, y + r); ctx.closePath(); }
+    else { ctx.arc(x, y, r, 0, Math.PI * 2); }
+  }
+
+  function draw() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = "#151618"; ctx.fillRect(0, 0, cv.width, cv.height);
+    drawGrid();
+    if (!ENTS.length) return;
+
+    // trails (under markers)
+    if (opt.trails.checked) {
+      for (const e of ENTS) {
+        if (!e.moving) continue;
+        ctx.lineWidth = 2; ctx.strokeStyle = teamColor(e.team) + "66";
+        ctx.beginPath();
+        let started = false;
+        for (const s of e.track) {
+          if (s.f > frame) break;
+          const X = sx(s.x), Y = sy(s.y);
+          if (!started) { ctx.moveTo(X, Y); started = true; } else ctx.lineTo(X, Y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // spawn anchors (authored layout)
+    if (opt.anchors.checked) {
+      for (const e of ENTS) {
+        if (!e.spawn) continue;
+        const X = sx(e.spawn.x), Y = sy(e.spawn.y);
+        ctx.lineWidth = 1; ctx.strokeStyle = teamColor(e.team) + "55";
+        ctx.beginPath(); ctx.arc(X, Y, 9, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+
+    // live markers
+    for (const e of ENTS) {
+      const p = posAt(e, frame);
+      if (!p) continue;
+      const X = sx(p.x), Y = sy(p.y);
+      const col = teamColor(e.team);
+      const r = e.cat === "player" ? 7 : 5;
+      markerPath(e.cat, X, Y, r);
+      ctx.fillStyle = col; ctx.globalAlpha = 0.92; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.lineWidth = 1.5; ctx.strokeStyle = "#101113"; ctx.stroke();
+      if ((CATS[e.cat] || {}).shape === "ring") {
+        ctx.beginPath(); ctx.arc(X, Y, r + 3, 0, Math.PI * 2);
+        ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
+      }
+      // heading tick (world degrees: +x east, +y north)
+      if (p.h !== null && p.h !== undefined) {
+        const a = p.h * Math.PI / 180;
+        ctx.beginPath(); ctx.moveTo(X, Y);
+        ctx.lineTo(X + Math.cos(a) * (r + 7), Y - Math.sin(a) * (r + 7));
+        ctx.strokeStyle = "#f5f6f7"; ctx.lineWidth = 1.5; ctx.stroke();
+      }
+      if (opt.labels.checked) {
+        ctx.fillStyle = "#cfd2d6"; ctx.font = "11px Segoe UI";
+        ctx.fillText(e.name, X + 9, Y - 7);
+      }
+    }
+  }
+
+  // ---- timeline / animation -----
+  function setFrame(f) {
+    frame = Math.max(fmin, Math.min(fmax, f));
+    el("scrub").value = String(frame);
+    el("framelabel").textContent = `f ${frame} / ${fmax}`;
+    draw();
+  }
+  function tick(t) {
+    if (playing) {
+      if (!lastT) lastT = t;
+      const dt = (t - lastT) / 1000; lastT = t;
+      const fps = 120 * parseFloat(el("speed").value); // capture-frames advanced / sec
+      let nf = frame + fps * dt;
+      if (nf >= fmax) { nf = fmin; }            // loop
+      setFrame(Math.round(nf));
+    } else lastT = 0;
+    requestAnimationFrame(tick);
+  }
+
+  function setPlaying(p) {
+    playing = p; lastT = 0;
+    el("play").textContent = p ? "⏸ Pause" : "▶ Play";
+  }
+
+  // ---- load -----
+  function load(json) {
+    DATA = json;
+    ENTS = prepare(json);
+    bounds = computeBounds(ENTS);
+    fmin = json.meta ? json.meta.first_frame : 0;
+    fmax = json.meta ? json.meta.last_frame : 100;
+    if (!(fmax > fmin)) fmax = fmin + 1;
+    el("scrub").min = String(fmin); el("scrub").max = String(fmax);
+    el("capname").textContent = (json.meta && json.meta.capture) || "loaded";
+    el("st-ent").textContent = String(ENTS.length);
+    el("st-frames").textContent = `${fmin} – ${fmax}`;
+    el("st-moving").textContent = String(ENTS.filter(e => e.moving).length);
+    // category legend (only the categories present)
+    const present = [...new Set(ENTS.map(e => e.cat))];
+    el("catlegend").innerHTML = present.map(c =>
+      `<div><span class="sw" style="background:#7d828a;border-radius:${(CATS[c]||{}).shape==='circle'||(CATS[c]||{}).shape==='ring'?'50%':'3px'}"></span> ${(CATS[c]||CATS.unknown).label}</div>`
+    ).join("");
+    resize(); fitView(); setFrame(fmin);
+  }
+
+  function loadFile(file) {
+    const r = new FileReader();
+    r.onload = () => { try { load(JSON.parse(r.result)); } catch (e) { alert("Bad JSON: " + e.message); } };
+    r.readAsText(file);
+  }
+
+  // ---- canvas sizing / interaction -----
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    cv.width = Math.floor(stage.clientWidth * dpr);
+    cv.height = Math.floor(stage.clientHeight * dpr);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    draw();
+  }
+  window.addEventListener("resize", () => { resize(); });
+
+  let dragging = false, lastX = 0, lastY = 0;
+  cv.addEventListener("mousedown", e => { dragging = true; lastX = e.clientX; lastY = e.clientY; cv.classList.add("drag"); });
+  window.addEventListener("mouseup", () => { dragging = false; cv.classList.remove("drag"); });
+  window.addEventListener("mousemove", e => {
+    if (!dragging) return;
+    const dpr = window.devicePixelRatio || 1;
+    view.ox += (e.clientX - lastX) * dpr; view.oy += (e.clientY - lastY) * dpr;
+    lastX = e.clientX; lastY = e.clientY; draw();
+  });
+  cv.addEventListener("wheel", e => {
+    e.preventDefault();
+    const dpr = window.devicePixelRatio || 1;
+    const mx = e.offsetX * dpr, my = e.offsetY * dpr;
+    const k = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    // zoom about cursor
+    view.ox = mx - (mx - view.ox) * k;
+    view.oy = my - (my - view.oy) * k;
+    view.scale *= k; draw();
+  }, { passive: false });
+
+  // ---- drag & drop -----
+  ["dragenter", "dragover"].forEach(ev => stage.addEventListener(ev, e => { e.preventDefault(); stage.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(ev => stage.addEventListener(ev, e => { e.preventDefault(); if (ev !== "dragover") stage.classList.remove("over"); }));
+  stage.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) loadFile(f); });
+
+  // ---- controls -----
+  el("file").addEventListener("change", e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+  el("fit").addEventListener("click", fitView);
+  el("play").addEventListener("click", () => setPlaying(!playing));
+  el("scrub").addEventListener("input", e => { setPlaying(false); setFrame(parseInt(e.target.value, 10)); });
+  Object.values(opt).forEach(c => c.addEventListener("change", () => { if (DATA) { ENTS = prepare(DATA); draw(); } }));
+  window.addEventListener("keydown", e => {
+    if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
+  });
+
+  resize();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

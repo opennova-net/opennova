@@ -1,5 +1,7 @@
 #include "novaworld/ingame_decode.h"
 
+#include <cstring>
+
 // Decoders for S2C 0x0D / 0x20 — see docs/net/novaworld-net-re.md §5.11/§5.12.
 // Cross-witnessed byte-exact against the 2026-06-16b loopback by
 // nw_ingame_pool_records_test (437 × 0x0D / 792 × 0x20 records, zero
@@ -32,6 +34,12 @@ struct Cursor {
 		uint32_t v = uint32_t(p[0]) | uint32_t(p[1]) << 8 |
 		             uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
 		p += 4; return v;
+	}
+	int16_t i16() { return int16_t(u16()); }
+	int32_t i32() { return int32_t(u32()); }
+	void skip(size_t n) {
+		if (!ok || p + n > end) { ok = false; p = end; return; }
+		p += n;
 	}
 	std::string cstr() {
 		std::string s;
@@ -483,6 +491,110 @@ bool decode_weapon_hit_record(const uint8_t *body, size_t len,
 		+ (out.has_parent_byte() ? 1u : 0u)
 		+ (out.has_weapon_handle() ? 2u : 0u);
 	return consumed == expected;
+}
+
+// §5.10b class dispatch — exact 4-char match (the table is case-sensitive).
+// Direct witnesses: plyr→Player; org0/org1→Infantry; cveh/CHel/cbot/cpln/ctrn→
+// Vehicle; rokt/stng/hlfr/jvln/arty→Guided. Unwitnessed tags default Unknown.
+EntityClass class_from_tag(const char *tag) {
+	if (!tag || tag[0] == '\0') return EntityClass::Unknown;
+	if (std::strcmp(tag, "plyr") == 0) return EntityClass::Player;
+	if (std::strcmp(tag, "org0") == 0 || std::strcmp(tag, "org1") == 0)
+		return EntityClass::Infantry;
+	if (std::strcmp(tag, "cveh") == 0 || std::strcmp(tag, "chel") == 0 ||
+	    std::strcmp(tag, "CHel") == 0 || std::strcmp(tag, "cbot") == 0 ||
+	    std::strcmp(tag, "cpln") == 0 || std::strcmp(tag, "ctrn") == 0)
+		return EntityClass::Vehicle;
+	if (std::strcmp(tag, "rokt") == 0 || std::strcmp(tag, "stng") == 0 ||
+	    std::strcmp(tag, "hlfr") == 0 || std::strcmp(tag, "jvln") == 0 ||
+	    std::strcmp(tag, "arty") == 0 || std::strcmp(tag, "arti") == 0)
+		return EntityClass::Guided;
+	return EntityClass::Unknown;
+}
+
+// Walk a S2C 0x0A body into a FrameUpdate. Structural port of the retail handler
+// [orig: NapiNPClientMsg_0x00A @ 0x42FEC0] (the same walk nw_pp's print_tag_0a
+// performs, returning data instead of printing). Sub-block widths IDA-witnessed:
+// case 0 = 11 B, 1 = 6 B, 2 = 11 B (ENV), 3 = 0 B (objective-gametype gated).
+bool decode_frame_update(const uint8_t *body, size_t len,
+                         const std::function<EntityClass(uint16_t)> &class_of,
+                         FrameUpdate &out) {
+	Cursor c{body, body + len, true};
+
+	// 12-byte reference header -> the position anchor (dword_A822E4/E8/EC).
+	out.anchor_x = c.i32();
+	out.anchor_y = c.i32();
+	out.anchor_z = c.i32();
+	c.u8(); // flags1 (loadprog / death-spectator signals — not needed here)
+	const uint8_t flags2 = c.u8();
+	switch (flags2 & 0x03) {
+	case 0: c.skip(11); break;
+	case 1: c.skip(6); break;
+	case 2: c.skip(11); break;
+	default: break; // case 3: 0 B
+	}
+
+	// 7-byte fixed tail: state_flag u8, mount u16, health i16, state_word i16.
+	c.u8();
+	out.mount_handle = c.u16();
+	c.i16();
+	c.i16();
+	if (!c.ok) return false;
+
+	// Conditional vehicle-passenger record (sub-block 0 + flags2 bit 3 set).
+	if ((flags2 & 0x0F) == 8) {
+		const uint16_t passenger_handle = c.u16();
+		if (!c.ok) return false;
+		if (passenger_handle != 0xFFFF) {
+			c.u16(); // seat_yaw
+			c.u16(); // seat_pitch
+		}
+	}
+
+	// Event loop: tag 0 = EOB, 1 = per-entity compact, 2 = weapon-hit (skipped).
+	while (c.ok && c.p < c.end) {
+		const uint8_t tag = c.u8();
+		if (tag == 0) return true;
+		if (tag == 2) {
+			WeaponHitRecord wh;
+			size_t consumed = 0;
+			if (!decode_weapon_hit_record(c.p, size_t(c.end - c.p), wh, consumed))
+				return false;
+			c.p += consumed;
+			continue;
+		}
+		if (tag == 1) {
+			FrameUpdateRecord rec;
+			rec.handle = c.u16();
+			rec.type_id = c.u16();
+			if (!c.ok) return false;
+			rec.cls = class_of ? class_of(rec.type_id) : EntityClass::Unknown;
+			const size_t avail = size_t(c.end - c.p);
+			size_t consumed = 0;
+			bool ok = false;
+			switch (rec.cls) {
+			case EntityClass::Player:
+				ok = decode_player_compact_record(c.p, avail, rec.player, consumed);
+				break;
+			case EntityClass::Vehicle:
+				ok = decode_vehicle_compact_record(c.p, avail, rec.vehicle, consumed);
+				break;
+			case EntityClass::Infantry:
+				ok = decode_infantry_compact_record(c.p, avail, rec.infantry, consumed);
+				break;
+			default:
+				// Guided (§5.15 deferred) or Unknown: record width unknown —
+				// fail closed (we can't safely advance the cursor).
+				return false;
+			}
+			if (!ok) return false;
+			c.p += consumed;
+			out.records.push_back(std::move(rec));
+			continue;
+		}
+		return false; // unknown event tag — fail closed
+	}
+	return c.ok;
 }
 
 } // namespace opennova

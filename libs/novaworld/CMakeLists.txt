@@ -12,6 +12,8 @@ add_library(opennova_novaworld STATIC
     src/replication_min.cpp
     src/ingame_decode.cpp
     src/ingame_encode.cpp
+    src/wire_capture.cpp
+    src/replay_timeline.cpp
     src/serverlog_decode.cpp
     src/connection/registry.cpp
     src/connection/manager.cpp

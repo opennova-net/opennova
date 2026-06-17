@@ -34,6 +34,8 @@
 #include <novaworld/protocol_message.h>
 #include <novaworld/session_hello.h>
 #include <novaworld/session_keys.h>
+#include <novaworld/wire_capture.h>
+#include <novaworld/replay_timeline.h>
 #include <scr/scr.h>
 
 #include "pcap_reader.h"
@@ -95,21 +97,8 @@ bool is_pcap_path(const std::string &p) {
 bool is_sph_path(const std::string &p) { return ends_with_icase(p, ".sph"); }
 
 // pcap/pcapng reading is shared with the test suite: apps/common/pcap_reader.h
-
-bool decode_outer(const std::vector<uint8_t> &raw, uint8_t &opcode,
-                  std::vector<uint8_t> &body) {
-	std::vector<uint8_t> stripped(raw.size());
-	size_t out = 0;
-	if (napi_envelope_decode(raw.data(), raw.size(), stripped.data(),
-	                         stripped.size(), &out) != 0)
-		return false;
-	stripped.resize(out);
-	if (stripped.empty()) return false;
-	opcode = stripped[0];
-	body.assign(stripped.begin() + 1, stripped.end());
-	if (!body.empty()) nwu_encrypt(body.data(), body.size(), SESSION_NWU_KEY);
-	return true;
-}
+// The outer-decode pipeline (envelope -> NWU -> SCRK -> 0x43/0x83 -> reassembly)
+// is shared too: libs/novaworld/wire_capture.h decode_capture_to_messages.
 
 std::string to_hex_sample(const uint8_t *p, size_t n, size_t cap = 48) {
 	std::string s;
@@ -208,52 +197,12 @@ const char *tag_label(char dir, int tag) {
 std::unordered_map<int, std::string> g_item_names;
 
 // Per-item §5.10b dispatch class — selects which compact decoder runs on a
-// tag==1 record inside S2C 0x0A's trailing event loop. Keyed by wire_id
-// (items.def id − 100000). Populated alongside `g_item_names` in
-// `load_items_def`. Unmapped item ids print as "(class=Unknown, raw N B)"
-// and halt the walker (fail closed — we don't know how many bytes to skip).
-enum class EntityClass {
-	Unknown,
-	Player,    // §5.10  18 B fixed
-	Infantry,  // §5.14  14 B fixed
-	Vehicle,   // §5.13  15 B mounted / 21 B unmounted (data-dependent)
-	Guided,    // §5.15  variable-length delta codec (deferred)
-};
+// tag==1 record inside S2C 0x0A's trailing event loop. The EntityClass enum and
+// class_from_tag() now live in libs/novaworld/ingame_decode.h (shared with the
+// decode_frame_update walker). This map is the wire_id → class table, populated
+// from items.def in load_items_def; an unmapped id leaves the walker unable to
+// size a record (fail closed). Keyed by wire_id (items.def id − 100000).
 std::unordered_map<uint16_t, EntityClass> g_item_class;
-
-// Map a 4-char items.def class-tag string (case-sensitive — the §5.10b table
-// is exact-match) to its EntityClass. Drives `g_item_class` population in
-// `load_items_def`.
-//
-// Direct witnesses (§5.10b):
-//   plyr → Player
-//   org0, org1 → Infantry
-//   CHel, cveh, cbot, cpln, ctrn → Vehicle
-//   rokt, stng, hlfr, jvln, arty → Guided
-//
-// Tags that *appear* as items.def directive values but aren't in §5.10b
-// (e.g. ctank, catv, cbike from move_function) are inferred by family but
-// not yet IDA-witnessed; default them to Unknown until an items.def survey
-// or a class-table read confirms.
-EntityClass class_from_tag(const char *tag) {
-	if (!tag || tag[0] == '\0') return EntityClass::Unknown;
-	if (std::strcmp(tag, "plyr") == 0) return EntityClass::Player;
-	if (std::strcmp(tag, "org0") == 0 ||
-	    std::strcmp(tag, "org1") == 0) return EntityClass::Infantry;
-	if (std::strcmp(tag, "cveh") == 0 ||
-	    std::strcmp(tag, "chel") == 0 ||
-	    std::strcmp(tag, "CHel") == 0 ||
-	    std::strcmp(tag, "cbot") == 0 ||
-	    std::strcmp(tag, "cpln") == 0 ||
-	    std::strcmp(tag, "ctrn") == 0) return EntityClass::Vehicle;
-	if (std::strcmp(tag, "rokt") == 0 ||
-	    std::strcmp(tag, "stng") == 0 ||
-	    std::strcmp(tag, "hlfr") == 0 ||
-	    std::strcmp(tag, "jvln") == 0 ||
-	    std::strcmp(tag, "arty") == 0 ||
-	    std::strcmp(tag, "arti") == 0) return EntityClass::Guided;
-	return EntityClass::Unknown;
-}
 
 const char *class_name(EntityClass c) {
 	switch (c) {
@@ -878,13 +827,6 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 	}
 }
 
-struct DirState {
-	ProtocolReassemblyState rs;
-	bool have_pending = false;
-	int pending_tag = 0;
-	int pending_first_frame = 0;
-};
-
 void print_payload(char dir, int frame, int tag,
                    const std::vector<uint8_t> &payload) {
 	const char *label = tag_label(dir, tag);
@@ -902,33 +844,6 @@ void print_payload(char dir, int frame, int tag,
 	else if (!payload.empty()) std::printf("        %s\n",
 	                                       to_hex_sample(payload.data(),
 	                                                     payload.size()).c_str());
-}
-
-void process_protocol(const std::vector<uint8_t> &body, const std::string &scrk,
-                      char dir, DirState &st, int frame,
-                      const std::set<int> &tag_filter) {
-	if (scrk.empty()) return;
-	ProtocolPacketHeader hdr;
-	std::vector<ProtocolMessage> msgs;
-	if (!decode_protocol_packet_plaintext(body.data(), body.size(), scrk, hdr,
-	                                      msgs))
-		return;
-	for (const auto &pm : msgs) {
-		int tag = int(pm.full_tag);
-		if (pm.flags.settings_update) tag |= 0x1000;
-		if (!st.have_pending) {
-			st.pending_tag = tag;
-			st.pending_first_frame = frame;
-			st.have_pending = true;
-		}
-		std::vector<uint8_t> assembled;
-		if (!reassemble_protocol_payload(st.rs, pm, assembled)) continue;
-		if (tag_filter.empty() ||
-		    tag_filter.count(st.pending_tag & 0xFF))
-			print_payload(dir, st.pending_first_frame, st.pending_tag,
-			              assembled);
-		st.have_pending = false;
-	}
 }
 
 // ---- /PROFILE .sph server-log mode -----------------------------------------
@@ -987,16 +902,154 @@ int run_server_log(const char *path) {
 	return clean ? 0 : 2;
 }
 
+// ---- --replay-json export mode ---------------------------------------------
+// Build the replay timeline (libs/novaworld) from the capture and emit a single
+// self-contained JSON document the standalone 2D viewer (tools/net/
+// replay_viewer.html) loads directly. Positions are world meters; heading is
+// degrees. The viewer anchors uplink tracks to each entity's spawn for display.
+
+std::string json_escape(const std::string &s) {
+	std::string o;
+	for (char c : s) {
+		switch (c) {
+		case '"': o += "\\\""; break;
+		case '\\': o += "\\\\"; break;
+		case '\n': o += "\\n"; break;
+		case '\r': o += "\\r"; break;
+		case '\t': o += "\\t"; break;
+		default:
+			if (static_cast<unsigned char>(c) < 0x20) {
+				char b[8];
+				std::snprintf(b, sizeof(b), "\\u%04x", static_cast<unsigned char>(c));
+				o += b;
+			} else {
+				o += c;
+			}
+		}
+	}
+	return o;
+}
+
+// Coarse display category: prefer the §5.10b entity class (when items.def was
+// loaded), else fall back to the pool taxonomy. Drives the viewer's shape/legend.
+const char *category_for(uint16_t type_id, uint8_t pool) {
+	auto it = g_item_class.find(type_id);
+	if (it != g_item_class.end()) {
+		switch (it->second) {
+		case EntityClass::Player:   return "player";
+		case EntityClass::Infantry: return "infantry";
+		case EntityClass::Vehicle:  return "vehicle";
+		case EntityClass::Guided:   return "guided";
+		default: break;
+		}
+	}
+	switch (pool) {
+	case 0: return "organic";
+	case 1: return "item";
+	case 2: return "building";
+	case 3: return "marker";
+	default: return "unknown";
+	}
+}
+
+std::string basename_of(const std::string &p) {
+	const size_t s = p.find_last_of("/\\");
+	return s == std::string::npos ? p : p.substr(s + 1);
+}
+
+void write_sample_json(std::ostream &o, const ReplaySample &s, bool with_src) {
+	o << "{\"f\":" << s.frame_index << ",\"x\":" << fp16(s.x) << ",\"y\":"
+	  << fp16(s.y) << ",\"z\":" << fp16(s.z) << ",\"h\":";
+	if (s.has_heading) o << s.heading_deg; else o << "null";
+	if (with_src) {
+		const char *src =
+		    s.source == ReplaySampleSource::ClientUplink ? "uplink"
+		    : s.source == ReplaySampleSource::FrameUpdate ? "frameupdate"
+		                                                  : "spawn";
+		o << ",\"src\":\"" << src << "\"";
+	}
+	o << "}";
+}
+
+int run_replay_json(const std::vector<CaptureDatagram> &caps,
+                    const std::string &capture_path, const char *out_path) {
+	// Resolve a wire type_id to its §5.10b compact class so the S2C 0x0A
+	// per-frame motion can be walked (needs items.def — pass --items).
+	auto class_of = [](uint16_t t) -> EntityClass {
+		auto it = g_item_class.find(t);
+		return it == g_item_class.end() ? EntityClass::Unknown : it->second;
+	};
+	const ReplayTimeline tl =
+	    build_replay_timeline(decode_capture_to_messages(caps), class_of);
+	std::ofstream o(out_path);
+	if (!o) {
+		std::fprintf(stderr, "FAILED to open %s for write\n", out_path);
+		return 1;
+	}
+	o.setf(std::ios::fixed);
+	o.precision(3);
+	o << "{\n  \"meta\": {\"capture\":\"" << json_escape(basename_of(capture_path))
+	  << "\",\"first_frame\":" << tl.first_frame << ",\"last_frame\":"
+	  << tl.last_frame << ",\"entity_count\":" << tl.entities.size()
+	  << ",\"note\":\"positions=world meters; heading=degrees; uplink samples are "
+	     "world+origin (viewer anchors them to spawn for display)\"},\n";
+	// type_id -> display name (populated only when --items gave an items.def).
+	{
+		std::set<uint16_t> types;
+		for (const auto &e : tl.entities) types.insert(e.type_id);
+		o << "  \"items\": {";
+		bool first = true;
+		for (uint16_t t : types) {
+			if (!first) o << ",";
+			first = false;
+			auto it = g_item_names.find(int(t));
+			o << "\"" << t << "\":\""
+			  << (it != g_item_names.end() ? json_escape(it->second) : "") << "\"";
+		}
+		o << "},\n";
+	}
+	o << "  \"entities\": [\n";
+	for (size_t i = 0; i < tl.entities.size(); ++i) {
+		const ReplayEntity &e = tl.entities[i];
+		char tagbuf[8];
+		std::snprintf(tagbuf, sizeof(tagbuf), "0x%02x",
+		              static_cast<unsigned char>(e.spawn_tag));
+		o << "    {\"handle\":" << e.handle << ",\"pool\":" << unsigned(e.pool)
+		  << ",\"type_id\":" << e.type_id << ",\"name\":\"" << json_escape(e.name)
+		  << "\",\"category\":\"" << category_for(e.type_id, e.pool)
+		  << "\",\"team\":";
+		if (e.team_known) o << e.team; else o << "null";
+		o << ",\"net_id\":" << e.net_id << ",\"spawn_tag\":\"" << tagbuf
+		  << "\",\"spawn\":";
+		if (e.has_spawn) write_sample_json(o, e.spawn, false); else o << "null";
+		o << ",\"track\":[";
+		for (size_t j = 0; j < e.track.size(); ++j) {
+			if (j) o << ",";
+			write_sample_json(o, e.track[j], true);
+		}
+		o << "]}";
+		if (i + 1 < tl.entities.size()) o << ",";
+		o << "\n";
+	}
+	o << "  ]\n}\n";
+	std::fprintf(stderr, "wrote %zu entities (frames %d..%d) to %s\n",
+	             tl.entities.size(), tl.first_frame, tl.last_frame, out_path);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
 	const char *path = nullptr;
 	const char *items_path = nullptr;
+	const char *replay_json_out = nullptr;
 	std::set<int> tag_filter;
 	for (int i = 1; i < argc; ++i) {
 		const char *a = argv[i];
 		if (std::strcmp(a, "--items") == 0 && i + 1 < argc) {
 			items_path = argv[++i];
+		} else if (std::strcmp(a, "--replay-json") == 0 && i + 1 < argc) {
+			replay_json_out = argv[++i];
 		} else if (a[0] == '0' && (a[1] == 'x' || a[1] == 'X')) {
 			tag_filter.insert(int(std::strtol(a, nullptr, 16)));
 		} else if (!path) {
@@ -1014,7 +1067,9 @@ int main(int argc, char *argv[]) {
 		             "       NW_INGAME_HEXCAP env supplies a hexcap path\n"
 		             "       --items / NW_PP_ITEMS gives a JO items.def "
 		             "(plaintext or SCR-encrypted with the JO/DFX2 key)\n"
-		             "       so type_ids in 0x0D/0x20 records show as names\n");
+		             "       so type_ids in 0x0D/0x20 records show as names\n"
+		             "       --replay-json <out> writes a replay-timeline JSON "
+		             "for tools/net/replay_viewer.html instead of printing\n");
 		return 1;
 	}
 	if (is_sph_path(path)) return run_server_log(path);
@@ -1063,36 +1118,21 @@ int main(int argc, char *argv[]) {
 		std::fprintf(stderr, "\n");
 	}
 
-	std::string client_scrk, server_scrk;
-	DirState cstate, sstate;
-	for (const auto &d : dgrams) {
-		uint8_t op = 0;
-		std::vector<uint8_t> body;
-		if (!decode_outer(d.bytes, op, body)) continue;
-		switch (op) {
-		case SESSION_OPCODE_CLIENT_AUTH: {
-			ClientAuth a;
-			if (parse_client_auth(body.data(), body.size(), a))
-				client_scrk = a.scrk;
-			break;
-		}
-		case SESSION_OPCODE_SERVER_AUTH: {
-			ServerAuth a;
-			if (parse_server_auth(body.data(), body.size(), a))
-				server_scrk = a.scrk;
-			break;
-		}
-		case SESSION_OPCODE_PROTOCOL_MESSAGE:
-			process_protocol(body, client_scrk, 'C', cstate, d.frame,
-			                 tag_filter);
-			break;
-		case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
-			process_protocol(body, server_scrk, 'S', sstate, d.frame,
-			                 tag_filter);
-			break;
-		default:
-			break;
-		}
+	// Drive the shared outer-decode pipeline, then print each reassembled
+	// message (the per-tag dispatch lives in print_payload). Display tag keeps
+	// the historical 0x1000 settings-update bit; the filter matches the low byte.
+	std::vector<CaptureDatagram> caps;
+	caps.reserve(dgrams.size());
+	for (auto &d : dgrams) caps.push_back({d.frame, std::move(d.bytes)});
+
+	// --replay-json: build the timeline and emit the viewer document, then exit.
+	if (replay_json_out && *replay_json_out)
+		return run_replay_json(caps, path, replay_json_out);
+
+	for (const auto &m : decode_capture_to_messages(caps)) {
+		if (!tag_filter.empty() && !tag_filter.count(m.tag & 0xFF)) continue;
+		const int display_tag = int(m.tag) | (m.settings_update ? 0x1000 : 0);
+		print_payload(m.dir, m.frame_index, display_tag, m.payload);
 	}
 	return 0;
 }

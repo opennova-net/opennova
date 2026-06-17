@@ -1046,6 +1046,15 @@ target_link_libraries(nw_pool_decode_unit_test PRIVATE opennova_novaworld openno
 target_include_directories(nw_pool_decode_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_pool_decode_unit COMMAND nw_pool_decode_unit_test)
 
+# Replay-timeline assembler regression — crafts an inline capture (auth pair +
+# spawn + C2S 0x0C uplinks), drives the shared outer-decode pipeline
+# (decode_capture_to_messages) into build_replay_timeline, and asserts the
+# assembled entities + tracks. No capture fixtures, so it runs in CI.
+add_executable(nw_replay_timeline_test novaworld/nw_replay_timeline_test.cpp)
+target_link_libraries(nw_replay_timeline_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_include_directories(nw_replay_timeline_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_replay_timeline COMMAND nw_replay_timeline_test)
+
 # Per-entity compact-record decoders — §5.10 player / §5.13 vehicle / §5.14
 # infantry. Hand-built input vectors mirror the wire layout; no capture
 # dependency, so the test runs unconditionally in CI.

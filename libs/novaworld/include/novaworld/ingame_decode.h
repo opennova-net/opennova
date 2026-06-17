@@ -26,10 +26,38 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
 namespace opennova {
+
+// §5.10b per-item dispatch class — selects which compact decoder a tag==1 record
+// in the S2C 0x0A event loop uses. Seeded from the item's *_function class-tag in
+// items.def (ai_function, else move_function) at load time. [orig: ItemDef+356]
+enum class EntityClass : uint8_t {
+	Unknown = 0,
+	Player,   // §5.10  18 B fixed
+	Infantry, // §5.14  14 B fixed
+	Vehicle,  // §5.13  15 B mounted / 21 B unmounted
+	Guided,   // §5.15  variable-length delta codec (deferred)
+};
+
+// Map a 4-char items.def class-tag (case-sensitive §5.10b match) to its class.
+EntityClass class_from_tag(const char *tag);
+
+// Decompress a 16-bit network-compressed fixed-point value back to i32 16.16.
+// Faithful port of [orig: Network_DecompressFixedPoint @ 0x4C27E0]:
+//   sign = (bit0 of c) sign-extended; magnitude = mantissa(bits 4-15) shifted
+//   left by exponent((bits 1-3)|1); result = sign ^ magnitude.
+// Compact-record positions ride the wire compressed; the world coordinate is
+// network_decompress_fixedpoint(c) + the per-message anchor (the S2C 0x0A header
+// refs, §5.9) when unmounted, or vehicle-local (parent transform) when mounted.
+inline int32_t network_decompress_fixedpoint(uint16_t c) {
+	const int32_t sign = int32_t((uint32_t(c) << 31) | (uint32_t(c) >> 1)) >> 31;
+	const int32_t mag = int32_t(uint32_t(c & 0xFFF0) << ((c & 0x0E) | 1));
+	return sign ^ mag;
+}
 
 // One record from a S2C 0x0D pool-entity spawn batch (§5.11).
 struct PoolSpawnRecord {
@@ -336,6 +364,43 @@ bool decode_infantry_compact_record(const uint8_t *body, size_t len,
 
 bool decode_weapon_hit_record(const uint8_t *body, size_t len,
                               WeaponHitRecord &out, size_t &consumed);
+
+// ===========================================================================
+// S2C 0x0A per-frame update — the whole message, walked into structured form.
+// [orig: NapiNPClientMsg_0x00A @ 0x42FEC0]. The 12-byte header's three i32 refs
+// are stored into dword_A822E4/E8/EC (verbatim; the per-message position anchor)
+// and the trailing event loop carries one compact record per nearby entity,
+// each prefixed by `[u8 tag=1][u16 handle][u16 typeId]`. The compact decoder is
+// selected by the type's EntityClass (§5.10b), so the per-record width is
+// class-dependent — the caller must supply a type_id→class resolver.
+// ===========================================================================
+
+// One tag==1 event-loop record: the entity it updates + its per-class compact.
+struct FrameUpdateRecord {
+	uint16_t handle = 0;   // (pool<<12)|slot of the updated entity
+	uint16_t type_id = 0;  // wire itemTypeId
+	EntityClass cls = EntityClass::Unknown;
+	PlayerCompactRecord   player{};   // valid iff cls == Player
+	VehicleCompactRecord  vehicle{};  // valid iff cls == Vehicle
+	InfantryCompactRecord infantry{}; // valid iff cls == Infantry
+};
+
+struct FrameUpdate {
+	// Header refs (dword_A822E4/E8/EC) — the i32 16.16 world anchor each compact
+	// record's decompressed position is added to (when unmounted).
+	int32_t anchor_x = 0, anchor_y = 0, anchor_z = 0;
+	uint16_t mount_handle = 0xFFFF; // local-player vehicle-mount (header tail)
+	std::vector<FrameUpdateRecord> records;
+};
+
+// Walk a S2C 0x0A body into a FrameUpdate. `class_of` maps a wire type_id to its
+// compact dispatch class (built from items.def). Returns true iff the walk
+// reached the event-loop terminator (tag 0) or end cleanly; on any short read /
+// unknown class it stops, leaving the records decoded so far in `out`. Weapon-hit
+// (tag==2) records are consumed but not stored (motion-irrelevant here).
+bool decode_frame_update(const uint8_t *body, size_t len,
+                         const std::function<EntityClass(uint16_t)> &class_of,
+                         FrameUpdate &out);
 
 // ===========================================================================
 // C2S 0x0C — per-entity client-to-host packet. Outer body starts with a 5-byte

@@ -18,12 +18,8 @@
 // green; the decoder regression coverage that runs without the capture lives in
 // the inline-pcap unit tests (nw_pool_decode_unit_test).
 
-#include <napi/envelope.h>
-#include <novacrypto/nwu.h>
 #include <novaworld/ingame_decode.h>
-#include <novaworld/protocol_message.h>
-#include <novaworld/session_hello.h>
-#include <novaworld/session_keys.h>
+#include <novaworld/wire_capture.h>
 
 #include "pcap_reader.h"
 
@@ -100,56 +96,32 @@ uint32_t expected_bam(int facing_deg) {
 	return uint32_t((uint64_t(deg) << 32) / 360);
 }
 
-bool decode_outer(const std::vector<uint8_t> &raw, uint8_t &opcode,
-                  std::vector<uint8_t> &body) {
-	std::vector<uint8_t> stripped(raw.size());
-	size_t out = 0;
-	if (napi_envelope_decode(raw.data(), raw.size(), stripped.data(),
-	                         stripped.size(), &out) != 0)
-		return false;
-	stripped.resize(out);
-	if (stripped.empty()) return false;
-	opcode = stripped[0];
-	body.assign(stripped.begin() + 1, stripped.end());
-	if (!body.empty()) nwu_encrypt(body.data(), body.size(), SESSION_NWU_KEY);
-	return true;
-}
-
 std::vector<PoolSpawnRecord> g_spawn_0d;     // collected S2C 0x0D records
 std::vector<Pool3SyncRecord> g_sync_20;      // collected S2C 0x20 records
 std::vector<OrganicSpawnRecord> g_spawn_0c;  // collected S2C 0x0C records (has_body)
 int g_0c_batches = 0, g_0c_clean = 0;        // byte-exact-consume witness for 0x0C
 
-void process_protocol(const std::vector<uint8_t> &body, const std::string &scrk,
-                      ProtocolReassemblyState &rs) {
-	if (scrk.empty()) return;
-	ProtocolPacketHeader hdr;
-	std::vector<ProtocolMessage> msgs;
-	if (!decode_protocol_packet_plaintext(body.data(), body.size(), scrk, hdr, msgs))
-		return;
-	for (const auto &pm : msgs) {
-		std::vector<uint8_t> assembled;
-		if (!reassemble_protocol_payload(rs, pm, assembled)) continue;
-		if (pm.flags.settings_update) continue;
-		const int tag = int(pm.full_tag);
-		if (tag == 0x0D) {
-			PoolSpawnBatch batch;
-			decode_pool_spawn_batch(assembled.data(), assembled.size(), batch);
-			for (auto &r : batch.records) g_spawn_0d.push_back(r);
-		} else if (tag == 0x20) {
-			Pool3SyncBatch batch;
-			decode_pool3_sync_batch(assembled.data(), assembled.size(), batch);
-			for (auto &r : batch.records)
-				if (!r.is_empty_slot) g_sync_20.push_back(r);
-		} else if (tag == 0x0C) {
-			OrganicSpawnBatch batch;
-			const bool clean =
-			    decode_organic_spawn_batch(assembled.data(), assembled.size(), batch);
-			g_0c_batches++;
-			if (clean) g_0c_clean++;
-			for (auto &r : batch.records)
-				if (r.has_body) g_spawn_0c.push_back(r);
-		}
+// Collect the pool records carried by one decoded S2C message. The outer stack
+// (envelope -> NWU -> SCRK -> reassembly) is handled by the shared
+// decode_capture_to_messages; this is just the per-tag fan-out.
+void collect(int tag, const std::vector<uint8_t> &assembled) {
+	if (tag == 0x0D) {
+		PoolSpawnBatch batch;
+		decode_pool_spawn_batch(assembled.data(), assembled.size(), batch);
+		for (auto &r : batch.records) g_spawn_0d.push_back(r);
+	} else if (tag == 0x20) {
+		Pool3SyncBatch batch;
+		decode_pool3_sync_batch(assembled.data(), assembled.size(), batch);
+		for (auto &r : batch.records)
+			if (!r.is_empty_slot) g_sync_20.push_back(r);
+	} else if (tag == 0x0C) {
+		OrganicSpawnBatch batch;
+		const bool clean =
+		    decode_organic_spawn_batch(assembled.data(), assembled.size(), batch);
+		g_0c_batches++;
+		if (clean) g_0c_clean++;
+		for (auto &r : batch.records)
+			if (r.has_body) g_spawn_0c.push_back(r);
 	}
 }
 
@@ -189,31 +161,12 @@ int main() {
 	            manifest_path.c_str());
 	std::printf("loaded %zu datagrams from %s\n", pkts.size(), pcap_path.c_str());
 
-	// --- decode: recover SCRK then collect S2C 0x0D / 0x20 --------------------
-	std::string client_scrk, server_scrk;
-	ProtocolReassemblyState s_rs;
-	for (const auto &pk : pkts) {
-		uint8_t op = 0;
-		std::vector<uint8_t> body;
-		if (!decode_outer(pk.payload, op, body)) continue;
-		switch (op) {
-		case SESSION_OPCODE_CLIENT_AUTH: {
-			ClientAuth a;
-			if (parse_client_auth(body.data(), body.size(), a)) client_scrk = a.scrk;
-			break;
-		}
-		case SESSION_OPCODE_SERVER_AUTH: {
-			ServerAuth a;
-			if (parse_server_auth(body.data(), body.size(), a)) server_scrk = a.scrk;
-			break;
-		}
-		case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
-			process_protocol(body, server_scrk, s_rs);
-			break;
-		default:
-			break;
-		}
-	}
+	// --- decode via the shared pipeline, then collect S2C 0x0D / 0x20 / 0x0C ---
+	std::vector<CaptureDatagram> caps;
+	caps.reserve(pkts.size());
+	for (auto &pk : pkts) caps.push_back({pk.frame_index, std::move(pk.payload)});
+	for (const auto &m : decode_capture_to_messages(caps))
+		if (m.dir == 'S' && !m.settings_update) collect(int(m.tag), m.payload);
 	std::printf("collected %zu x 0x0D, %zu x 0x20, %zu x 0x0C records "
 	            "(%d/%d 0x0C batches consumed exactly)\n",
 	            g_spawn_0d.size(), g_sync_20.size(), g_spawn_0c.size(),

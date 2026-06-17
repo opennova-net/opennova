@@ -959,6 +959,23 @@ sign=bit0, exponent=bits1-3, mantissa=bits4-15. World→wire is delta from
 instead (the case-3/4 vehicle branch transforms via `Entity_TransformWorldToLocal` before
 the cursor write).
 
+**Decompressor (the read-side inverse, solved 2026-06-17)** [orig: `Network_DecompressFixedPoint
+@ 0x4C27E0`] is a pure one-liner: `sign = (bit0 of c) sign-extended; world_delta = sign ^
+(mantissa(bits 4-15) << ((bits 1-3)|1))`. The per-entity records in the §5.9 `0x0A` event loop
+reconstruct WORLD position as **`Network_DecompressFixedPoint(compressed) + anchor`**, where the
+anchor is the three i32 refs at the head of the `0x0A` body — stored VERBATIM into
+`dword_A822E4 / A822E8 / A822EC` by [orig: `NapiNPClientMsg_0x00A @ 0x42FEC0`, writes at
+`0x42ff07 / 0x42ff24 / 0x42ff41`] and added back on read by every compact deserializer
+([orig: `NetPacket_SerializeInfantryEntityState @ 0x4C0320`, unmounted add at `0x4c04c3`], the
+player/vehicle mirrors, and the §5.9.1 weapon-hit reader). When the record's parent/vehicle
+handle is a real mount, the decompressed value is vehicle-LOCAL and is lifted to world via
+[orig: `Entity_TransformLocalToWorld @ 0x43BD00`, called at `0x4c05a2`] instead of the anchor.
+Cross-validated **byte-exact from the wire alone**: the first `0x0A` sample of every dvxi5
+entity lands on its `0x0D`/`0x0C` spawn position (Δ = 0.00000 m across all 8 dynamic entities).
+Ported as `network_decompress_fixedpoint` + `decode_frame_update` (libs/novaworld) and folded
+into the replay timeline (§5.25); the unmounted case is implemented, mounted (vehicle-local) is
+a tracked follow-up.
+
 #### Tag 0x0A trailing record — compact (type-11) [orig: `NetPacket_SerializePlayerState` case 1/2]
 
 Inside §5.9 tag-0x0A's event loop (`tag==1` branch): the lookup
@@ -1684,6 +1701,47 @@ Witnessed against the dvxi5 probe (2 trucks type `0x050E` → 0x0D; 2 objective 
   engine-side witnesses pin +354: the 0x0C/0x0D spawn handlers, `serialize_entity_pool_to_packet_0
   @ 0x503940`, and the `.sph` `FEDP` writer `@ 0x4e1cc0`). Same decompiler-mislabel class as the
   PDAT `+42` STAT byte (§5.22). onhook is a useful lead source only; IDA is the source of truth.
+
+### 5.25 Replay timeline — assembling a capture into per-entity tracks (tooling, 2026-06-17)
+
+The pool decoders (§5.11/§5.12/§5.23) and the C2S `0x0C` uplink (§5.10) are composed into a
+reusable **replay timeline** so a whole capture can be *seen*, not just byte-asserted. The
+outer-decode pipeline (envelope → NWU → SCRK → `0x43`/`0x83` → reassembly → tag dispatch) — long
+copy-pasted into `nw_pp` and each cross-validation test — is factored into the shared
+`libs/novaworld/wire_capture.{h,cpp}` (`decode_capture_to_messages` → `InGameMessage{frame, dir,
+tag, payload}`). `libs/novaworld/replay_timeline.{h,cpp}` then assembles those messages into an
+entity table keyed by handle `(pool<<12)|slot`: spawns (`0x0D`/`0x20`/`0x0C`) lay down the static
+world layout (type, name, team, initial pose); C2S `0x0C` extended uplinks append the joiner's own
+per-frame track; and the **S2C `0x0A` event loop appends per-frame motion for every nearby entity**
+(each compact record's compressed position decompressed + the message's header anchor, §5.10).
+`nw_pp <cap> --replay-json <out>` emits a self-contained JSON the standalone
+`tools/net/replay_viewer.html` (top-down canvas, timeline scrubber) loads directly. Walking `0x0A`
+needs items.def (the per-record width is class-dependent, §5.10b) — pass `--items`.
+
+Two facts worth recording, both observed on the dvxi5 probe + a 3-player capture:
+
+- **Multi-entity motion is decoded straight from the wire (no `.sph`, no hook).** Folding the
+  `0x0A` compact records via the now-solved decompression + header anchor (§5.10) turns the replay
+  from "static layout + the one uplink player" into every nearby entity moving: the dvxi5 probe
+  yields 8 dynamic entities (2 vehicles, 4 AI, 2 players) with 663–816 per-frame samples each, and
+  the 3-player capture yields 54 moving entities (51 vehicles + 3 players). Validation is
+  **wire-only** (per the project rule that the viewer / reimplementation never depend on the `.sph`
+  profiling recording): every dvxi5 entity's first `0x0A` sample lands on its `0x0D`/`0x0C` spawn
+  position exactly (Δ = 0.00000 m). (Mounted/vehicle-local records are skipped pending the parent
+  transform; markers carry no `0x0A` motion.)
+- **The C2S `0x0C` uplink lands in the spawn's WORLD frame.** §5.10 notes the unmounted uplink
+  position is "world + map_origin"; on the dvxi5 capture the first uplink sample equals the
+  player's `0x0C` spawn position exactly (Δx = Δy = 0), i.e. the map-origin contribution is zero
+  (or pre-folded) here. The exporter emits raw values and tags each sample's source; the viewer's
+  "anchor tracks to spawn" toggle reconciles the two frames for display and is a no-op when Δ = 0.
+
+CI coverage: `tests/novaworld/nw_replay_timeline_test` crafts inline captures (ServerAuth +
+ClientAuth deliver SCRK; an `0x0D` spawn + two C2S `0x0C` uplinks; and an `0x0A` message with a
+known header anchor + an unmounted infantry compact), drives them through
+`decode_capture_to_messages` → `build_replay_timeline`, and asserts the assembled entities +
+tracks — including `network_decompress_fixedpoint` vectors and that an `0x0A` sample equals
+`decompress(compressed) + anchor`. No capture fixture; runs in CI. The real-capture cross-checks
+(`nw_pool_groundtruth`, path-gated) were repointed onto the same shared helper.
 
 ## 6. Struct reference
 
