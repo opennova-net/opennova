@@ -205,7 +205,7 @@ sweep; blank = not yet characterized.
 | 0x08 | 0x4281D0 | `_0x008` | game-state snapshot / delta entity updates (~2 KB) |
 | 0x0A | 0x42FEC0 | `NapiNPClientMsg_0x00A` | **per-frame local-player + world-state update** (multiplexed player/timer/env/gametype + health + weapon-hit loop); full field map §5.9. Defined 2026-06-16 (was undefined — data blob mis-marked at 0x430000) |
 | 0x0B | 0x422660 | `_0x00B` | copies the 616-byte BMS header into `byte_A761D0` (field map §5.4) |
-| 0x0C | 0x42E730 | `_0x00C` | full entity spawn batch (~1 KB); parses name fields inline (no opt-in trailer) |
+| 0x0C | 0x42E730 | `_0x00C` | pool-0 organic spawn batch (AI infantry + players); `[u16 count]` header + per-record FLAT layout (slotId-first, no flag-gated optionals) per the §5.23 field map; parses name inline (crash-safe on `0x14B9` where 0x0D is not, §5.6); team → entity+354 |
 | 0x0D | 0x432C40 | `_0x00D` | pool-entity spawn batch; sets `dword_A82370=3`; `[u16 count]` header + per-entity record per the §5.11 field map (always: 2×u16 flags+slot, u16 type, cstr name, 3×i32 pos, u8 team byte → entity+354 (gate 0x10) + u8 bone byte → entity+290 always; D-NET-58; conditional fields gated by every flag bit 0x01-0x8000); AI-flagged item defs (`ItemDef[+84] & 0x100000`) require the `flags & 0x800` trailer = **`[u32][u32][cstring ai_name]`** (§5.6/§5.11) |
 | 0x0F | 0x42E200 | `_0x00F` | **WORLD-STATE-LOAD** (no descriptive Kong name; any "game-start" label is misleading): 4×i32 (sessionId, X, Y, Z), 3×i16 fixed-point angles, u8 flags, team scores, player count, waypoint + team names; sets `dword_81474C=0` (load-bearing input/heartbeat gate); client replies with the C2S burst 0x22 0x23 0x28 0x29 0x2D 0x32; ~624 B, sometimes fragmented in retail |
 | 0x10 | 0x433400 | `_0x010` | static entity batch (pool 2): u16 start_idx, u16 count, flag-driven per-entity records; 612-644 B in retail, every frame; **full field map §5.9** |
@@ -1523,7 +1523,8 @@ bit 0x4000 (no body byte) → client queues a C2S 0x22 ack
 ### Cross-note — pool-0 organic spawn path (controlled capture 2026-06-17)
 
 Pool-0 AI organics (infantry) spawn via **S2C 0x0C** `[orig: _0x00C @ 0x42E730]` (full-entity spawn
-batch; u32 count + inline name fields), NOT via 0x0D (pool-1 items/vehicles) — the probe's single
+batch; `[u16 count]` + per-record flat layout + inline name — full field map in §5.23), NOT via
+0x0D (pool-1 items/vehicles) — the probe's single
 0x0D batch carried only the 4 pool-1 items and the 0x10 static batch was empty, while the 4 AI
 soldiers (type 0x0816) first appear in the 0x0C batch at the authored (-70,-15) and thereafter in
 the per-frame 0x0A stream. 0x0A is live replication of already-spawned entities, never the spawn
@@ -1600,10 +1601,89 @@ a labeled death/join/disconnect timeline.
 
 **Limits.** `PDAT` is *decoded* state, so it validates VALUES, not wire byte-framing/encryption.
 Only pool-0 (the two human players) is recorded — the AI/mission entities (pool-1/3, the §5.11/5.12
-spawn batches) are not; the authored `mission_knowns.md` sheet covers those. Sampling is 8-tick
+spawn batches) are not; the authored-mission cross-validation (§5.24,
+`fixtures/novaworld/dvxi5_manifest.txt` + `nw_pool_groundtruth_test`) covers those. Sampling is 8-tick
 (~7.75 Hz). Tooling: `apps/nw_pp` reads `.sph` natively (suffix-dispatched); the decoder is
 `libs/novaworld/serverlog_decode.{h,cpp}`; `tests/novaworld/nw_serverlog_decode_test` witnesses the
 controlled knowns (gated on `NW_PROFILE_SPH_DIR`).
+
+### 5.23 Tag 0x0C — pool-0 organic spawn batch (field map; D-NET-62)
+
+`[orig: NapiNPClientMsg_0x00C @ 0x42E730]`. The route by which **pool-0 "organics"** — AI
+infantry and human-player infantry — enter the world; NOT 0x0D (which handles pool 1/3 and
+crashes on the player template type `0x14B9`, §5.6). On entry it raises `dword_A82370 ≥ 4`
+(§5.1), reads a `[u16 entityCount]` header (no start-index, unlike 0x10/0x20), and for each
+record resolves `(pool<<12)|slot` via `g_pool_list` (`0xFFFF` / `(s&0xF000)>=0x5000` / `slot ≥
+pool.capacity` end the batch), then `memset(entity,0,904)` + `memset(entity,0,692)`. It calls
+`Entity_AllocateAISlot` and parses the name cstring inline **for every record** — which is why
+0x0C is crash-safe on `0x14B9` where 0x0D is not.
+
+**The distinguishing structural fact: every field after `hasBody` is UNCONDITIONAL** — there are
+no flag-gated optionals (0x0D has 16, 0x20 has 6). The record is `slotId`-first (0x0D is
+flags-first).
+
+| order | width | field | landing | gate |
+|---|---|---|---|---|
+| 1 | u16 | **slotId** `(pool<<12)\|slot` | pool resolve via `g_pool_list`; sentinels end batch | always `[@ 0x42e78f]` |
+| 2 | u8 | **hasBody** | `0` ⇒ empty spawn, record ends here | always `[@ 0x42e813]` |
+| 3 | u16 | **itemTypeId** | entity+28 (`ItemList_FindIndexByTypeId` → `Entity_InitFromItemDef`) | hasBody `[@ 0x42e83b]` |
+| 4 | u32 | **entityFlags** | entity+120 (0x78) | hasBody `[@ 0x42e860]` |
+| 5 | cstr | **entityName** | entity+244 (Name[16], capped) | hasBody `[@ 0x42e867]` |
+| 6 | u16 | **minimapFlags** | entity+36 (Flags 0x24; bit 0x100 = minimap-register) | hasBody `[@ 0x42e912]` |
+| 7 | i32 | **posX** (16.16) | entity+4 | hasBody `[@ 0x42e928]` |
+| 8 | i32 | **posY** (16.16) | entity+8 | hasBody `[@ 0x42e93a]` |
+| 9 | i32 | **posZ** (16.16) | entity+12 | hasBody `[@ 0x42e94c]` |
+| 10 | i32 | **orientation** (32-bit BAM) | entity+16 (Yaw 0x10) | hasBody `[@ 0x42e95e]` |
+| 11 | u8 | **team** | entity+354 (Team 0x162) — BMS 1=Blue/2=Red | hasBody `[@ 0x42e970]` |
+| 12 | u8 | aiState | entity+692 (0x2B4) | hasBody |
+| 13 | u8 | animSlot | entity+884 (0x374) | hasBody |
+| 14 | u16 | netId | entity+348 (0x15C) | hasBody |
+| 15 | u8 | weaponState | entity+660 (0x294) | hasBody |
+| 16 | u8 | aiAction | `*(entity+104)+32` (AI sub-struct) | hasBody |
+| 17 | u8 | *(skip)* | cursor advance only, discarded `[@ 0x42e9f5]` | hasBody |
+| 18 | u8 | unusedByte | entity+340 (0x154) | hasBody |
+| 19 | u8 | alertLevel | entity+533 (0x215) | hasBody |
+| 20 | u8 | subType | entity+532 (0x214) | hasBody |
+| 21 | u8 | weaponType | entity+343 (0x157) | hasBody |
+| 22 | u8 | parentSlot | entity+360 (0x168) | hasBody |
+| 23 | u16 | parentHandle `(pool<<12)\|slot` | resolved → entity+364 (0x16C) | hasBody `[@ 0x42ea6e]` |
+
+Decoder: `libs/novaworld/ingame_decode.{h,cpp}` `decode_organic_spawn_batch` /
+`OrganicSpawnRecord`. **Both spawn paths land team at entity+354** (the unified team landing,
+D-NET-58); 0x0C orientation at entity+16 is the same 32-bit BAM as 0x20 `movement_val` (§5.12).
+
+### 5.24 Authored-mission cross-validation — pools 1/2/3 (D-NET-62)
+
+The `.sph` oracle (§5.22) sees **pool-0 only**. To validate the AI/vehicle/marker pools the
+`.sph` cannot witness, the authored **dvxi5 probe mission** is the ground-truth oracle: the
+host (retail `Jointops.exe`) serialized the *known* `mission.bms` onto the wire, so the decoded
+spawn records can be checked field-for-field against the authored facts — the sibling of
+D-NET-61 for pools 1/2/3.
+
+Tooling (this commit): the authored `.bms` is reduced to `fixtures/novaworld/dvxi5_manifest.txt`
+(via `opennova_mission_save_mis_path` → the libs/mission `.mis` writer); nw_pp's native pcap
+reader is factored into the shared `apps/common/pcap_reader.{h,cpp}` (buffer-core + file wrapper
++ `build_pcap_udp` in-memory builder); `tests/novaworld/nw_pool_groundtruth_test` decodes the
+real `.scratch` capture **directly** (no hexcap) and asserts every authored entity reproduces;
+`tests/novaworld/nw_pool_decode_unit_test` round-trips the 0x0D/0x20 decoders through the full
+S2C stack inside a crafted in-memory pcap (CI-runnable, no capture dependency).
+
+Witnessed against the dvxi5 probe (2 trucks type `0x050E` → 0x0D; 2 objective markers `0x0576`/
+`0x0575` → 0x0D pool-1; 4 start markers `0x1773`/`0x1774` → 0x20; 4 AI `0x0816` → 0x0C):
+
+- **type_id, position, team all reproduce.** posX/posY are byte-exact i32 16.16 (lossless); the
+  height (posZ) of vehicles and AI re-grounds onto the host's terrain (sub-unit delta, ≤1.0
+  world unit) while markers keep their authored z. team byte gate behaves per the manifest
+  (team 0 ⇒ gate clear; team 1/2 ⇒ gate set + value). 0x0C batches consume byte-exact.
+- **Heading convention `wire_BAM = 90 - facing`** (the IDA-verified "90 − yaw" fix), pinned by
+  the 0x0C AI authored at facing {0,90,180,270} → wire {90°,0°,270°,180°}. The 0x20 start
+  markers alone (facing 0/180) could NOT distinguish "90 − yaw" from "yaw + 90"; the diverse
+  asymmetric probe exposed it.
+- **Team offset reconfirmed `entity+354`.** The onhook PoC's reads at `+146`/`+196` are inside
+  `GamePlayerEntity.pad5` and carry at most a runtime/display mirror — NOT the BMS team (three
+  engine-side witnesses pin +354: the 0x0C/0x0D spawn handlers, `serialize_entity_pool_to_packet_0
+  @ 0x503940`, and the `.sph` `FEDP` writer `@ 0x4e1cc0`). Same decompiler-mislabel class as the
+  PDAT `+42` STAT byte (§5.22). onhook is a useful lead source only; IDA is the source of truth.
 
 ## 6. Struct reference
 
@@ -2542,6 +2622,7 @@ Controlled-capture validation (probe mission "ON RE Probe AS dvxi5", dvxi5 / A&S
 - **D-NET-59** [HIGH, DOC+CODE] §5.12 0x20 `flags&0x01` field is the engine's `entry[4]` **`movement_val` @ entitySlot+16**, written RAW (no pool-resolve) — a 32-bit BAM heading for pool-3 start markers, NOT a `pool<<12\|slot` parent handle. Renamed `ingame_decode.h Pool3SyncRecord.parent_handle→movement_val`. Controlled witness: Blue starts 0x40000000 (90°), Red starts 0xc0000000 (270°), team-correlated. [orig: serialize_entity_pool_to_packet @ 0x503460 (movement_val=entry[4], written raw) / NapiNPClientMsg_0x020 @ 0x425C00]
 - **D-NET-60** [LOW, DOC] §5.4 0x0B icon-key offset: "full_00" observed at off **220-226**, not the documented 246-253. Signature(0-3)/name(4-35)/designer(36-67)/basename(68) all matched their documented offsets, so only the icon row is suspect — re-diff against more retail maps or annotate as header-variant-dependent. Note: the synthesized header title-cases the basename to "Dvxi5" at +68 (client terrain lookup is case-insensitive). [orig: byte_A761D0 @ §5.5]
 - **D-NET-61** [INFO, VALIDATED] The `/PROFILE` `.sph` server-log (§5.22) — the engine's own decoded per-frame view of the SAME probe session — was decoded (`libs/novaworld/serverlog_decode.{h,cpp}`, `nw_pp` `.sph` mode, `nw_serverlog_decode_test`) and cross-validated against the `.pcapng`: FooPlayer (Red, pool-0 handle 0x0005) spawn state `(70.0, 25.0, 56.306)/0xc0000000` matches **byte-for-byte** across `.sph` `PDAT`, C2S 0x0C extended uplink (§5.10), and the S2C 0x0A header `refs` triple — independently confirming the 0x0C decoder, the 16.16/-Z + 32-bit-BAM conventions, pool-0=players (the recorder iterates `g_pool_list[0]`), and team@entity+354 (re-confirms D-NET-58 via the `FEDP` roster: TestPlayer=Blue/1, FooPlayer=Red/2). No code divergence — a validation pass + new oracle tooling. Two IDB-fidelity fixes were required to read the recorder: `sub_522350`→`Game_TeardownMission` decompilation was blocked by phantom-arg prototypes on 0-arg callees (`Database_GetFieldValue` is actually `void __thiscall Database_FreeFieldEntries`; `File_Seek`/`Terrain_RenderSectorsWithWhiteFog`/`CEffectWorld_IsNameAvailable` retyped to 0 args — each 1 xref, 0 stack-arg reads). [orig: Game_ProcessMainFrame @ 0x5263f0 / CServerLog_WritePositionRecord @ 0x4e1b00 / CServerLog_WritePlayerNameRecord @ 0x4e1cc0]
+- **D-NET-62** [INFO, VALIDATED] Authored-mission cross-validation of pools 1/2/3 (§5.24) — the dvxi5 probe's *known* `mission.bms`, serialized by the retail host, decoded field-for-field on the wire (the sibling of D-NET-61 for the pools the `.sph` can't see). Lands the **S2C 0x0C organic-spawn field map + decoder** (`decode_organic_spawn_batch` / `OrganicSpawnRecord`, §5.23) — byte-exact consume on the probe's 6-organic batch (4 AI `0x0816` + 2 players `0x14B9`); the shared pcap reader (`apps/common/pcap_reader`, nw_pp factored onto it); and two tests (`nw_pool_groundtruth_test` reads the real `.scratch` pcap directly; `nw_pool_decode_unit_test` inline-pcap round-trips 0x0D/0x20 through the full S2C stack). Confirms: type_id/position/team reproduce (posX/posY lossless i32 16.16; posZ re-grounds ≤1u for vehicles/AI, markers keep authored z); the heading convention **`wire_BAM = 90 - facing`** (pinned by AI authored at facing {0,90,180,270} → wire {90°,0°,270°,180°}; the 0x20 markers at facing {0,180} alone could not distinguish it from `facing+90`); and team @ **entity+354** — the onhook PoC's `+146`/`+196` reads are inside `GamePlayerEntity.pad5`, a runtime/display mirror, NOT the BMS team (same mislabel class as the PDAT `+42` STAT byte, §5.22). No divergence in the pool decoders — a new field map + validation oracle. [orig: NapiNPClientMsg_0x00C @ 0x42E730 / serialize_entity_pool_to_packet_0 @ 0x503940 / CServerLog_WritePlayerNameRecord @ 0x4e1cc0]
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;

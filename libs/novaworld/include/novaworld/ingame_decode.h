@@ -149,6 +149,56 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
                               Pool3SyncBatch &out);
 
+// One record from a S2C 0x0C organic-entity spawn batch (§5.23).
+// [orig: NapiNPClientMsg_0x00C @ 0x42E730]. Pool-0 "organics" — AI infantry and
+// human-player infantry — enter the world via 0x0C, NOT 0x0D (which handles
+// pool 1/3 and crashes on the player template type 0x14B9, §5.6). Unlike
+// PoolSpawnRecord, EVERY field after `has_body` is UNCONDITIONAL — there are no
+// flag-gated optionals — and the record is slot-id-first (0x0D is flags-first).
+// The name is parsed inline for every record (why 0x0C is crash-safe on 0x14B9).
+struct OrganicSpawnRecord {
+	uint16_t slot_id = 0;        // (pool<<12)|slot; 0xFFFF or (s&0xF000)>=0x5000 ends the batch
+	bool     has_body = false;   // u8 != 0; 0 ⇒ empty spawn, record ends after this byte
+
+	uint16_t item_type_id = 0;   // entity+28 (ItemList_FindIndexByTypeId → Entity_InitFromItemDef)
+	uint32_t entity_flags = 0;   // entity+120 (0x78)
+	std::string entity_name;     // cstring → entity+244 (Name[16], capped)
+	uint16_t minimap_flags = 0;  // entity+36 (Flags 0x24); bit 0x100 = minimap-register
+
+	int32_t  pos_x = 0;          // entity+4  (i32 16.16 world)
+	int32_t  pos_y = 0;          // entity+8
+	int32_t  pos_z = 0;          // entity+12
+	int32_t  orientation = 0;    // entity+16 (Yaw 0x10; 32-bit BAM)
+
+	uint8_t  team = 0;           // entity+354 (Team 0x162) — BMS team 1=Blue/2=Red (D-NET-58/62)
+	uint8_t  ai_state = 0;       // entity+692 (0x2B4)
+	uint8_t  anim_slot = 0;      // entity+884 (0x374)
+	uint16_t net_id = 0;         // entity+348 (0x15C)
+	uint8_t  weapon_state = 0;   // entity+660 (0x294)
+	uint8_t  ai_action = 0;      // *(entity+104)+32 (AI sub-struct)
+	uint8_t  skip_byte = 0;      // cursor advance only; retail discards it
+	uint8_t  unused_byte = 0;    // entity+340 (0x154)
+	uint8_t  alert_level = 0;    // entity+533 (0x215)
+	uint8_t  sub_type = 0;       // entity+532 (0x214)
+	uint8_t  weapon_type = 0;    // entity+343 (0x157)
+	uint8_t  parent_slot = 0;    // entity+360 (0x168)
+	uint16_t parent_handle = 0xFFFF; // (pool<<12)|slot, resolved → entity+364 (0x16C)
+};
+
+struct OrganicSpawnBatch {
+	uint16_t entity_count = 0;   // header u16 (no start-index, unlike 0x10/0x20)
+	std::vector<OrganicSpawnRecord> records;
+	// Set when the slot-id sentinel (0xFFFF or (slot & 0xF000) >= 0x5000) ends
+	// the batch before entity_count records were read.
+	bool sentinel_ended_early = false;
+};
+
+// Decode a S2C 0x0C body per the §5.23 field map. Same return contract as
+// decode_pool_spawn_batch: true iff the body was consumed without overrun /
+// leftover. [orig: NapiNPClientMsg_0x00C @ 0x42E730]
+bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
+                                OrganicSpawnBatch &out);
+
 // One entry from a S2C 0x40 minimap-overlay update / capture-zone state batch
 // (§5.19). 6 bytes per entry, prefixed by a u8 count. Overlay position is read
 // from the resolved pool entity, not the wire — this packet carries no coords.

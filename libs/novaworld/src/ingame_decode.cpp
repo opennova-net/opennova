@@ -194,6 +194,71 @@ bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
 	return (c.p == c.end);
 }
 
+// S2C 0x0C pool-0 organic spawn batch (§5.23). Fully flat per record — no
+// flag-gated optionals; slot-id-first; name parsed inline for every record.
+// [orig: NapiNPClientMsg_0x00C @ 0x42E730]
+bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
+                                OrganicSpawnBatch &out) {
+	out.records.clear();
+	out.sentinel_ended_early = false;
+	out.entity_count = 0;
+
+	Cursor c{body, body + len, true};
+	out.entity_count = c.u16();
+	if (!c.ok) return false;
+	if (out.entity_count == 0) return (c.p == c.end);
+
+	out.records.reserve(out.entity_count);
+	for (int i = 0; i < int(out.entity_count); ++i) {
+		OrganicSpawnRecord rec;
+		rec.slot_id = c.u16();
+		if (!c.ok) { out.records.push_back(std::move(rec)); return false; }
+		// Sentinel: retail returns immediately, without storing this record
+		// (@ 0x42e79d / 0x42e7b1). The slot >= pool.capacity guard is pool-state
+		// dependent and not reproducible from the wire alone — the two value
+		// sentinels below are.
+		if (rec.slot_id == 0xFFFF || (rec.slot_id & 0xF000) >= 0x5000) {
+			out.sentinel_ended_early = true;
+			return (c.p == c.end);
+		}
+		rec.has_body = (c.u8() != 0);
+		if (!c.ok) { out.records.push_back(std::move(rec)); return false; }
+		if (!rec.has_body) {
+			// Empty spawn — the record ends after the has_body byte (@ 0x42e813).
+			out.records.push_back(std::move(rec));
+			continue;
+		}
+
+		rec.item_type_id = c.u16();
+		rec.entity_flags = c.u32();
+		rec.entity_name = c.cstr();
+		rec.minimap_flags = c.u16();
+		rec.pos_x = int32_t(c.u32());
+		rec.pos_y = int32_t(c.u32());
+		rec.pos_z = int32_t(c.u32());
+		rec.orientation = int32_t(c.u32());
+		rec.team = c.u8();        // entity+354 — BMS team (D-NET-58/62)
+		rec.ai_state = c.u8();
+		rec.anim_slot = c.u8();
+		rec.net_id = c.u16();
+		rec.weapon_state = c.u8();
+		rec.ai_action = c.u8();
+		rec.skip_byte = c.u8();   // discarded by the handler (@ 0x42e9f5)
+		rec.unused_byte = c.u8();
+		rec.alert_level = c.u8();
+		rec.sub_type = c.u8();
+		rec.weapon_type = c.u8();
+		rec.parent_slot = c.u8();
+		rec.parent_handle = c.u16();
+
+		const bool record_ok = c.ok;
+		out.records.push_back(std::move(rec));
+		if (!record_ok) return false;
+	}
+
+	return (c.p == c.end);
+}
+
 // S2C 0x40 minimap-overlay update / capture-zone state (§5.19).
 // [orig: NapiNPClientMsg_0x040 @ 0x425A50 → MapOverlay_DecodeOverlayEntries @ 0x5BEBB0 (6-byte walker)]
 bool decode_capture_zone_overlay(const uint8_t *body, size_t len,

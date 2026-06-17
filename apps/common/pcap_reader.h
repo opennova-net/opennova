@@ -1,0 +1,45 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace opennova::net {
+
+// One IPv4/UDP datagram extracted from a capture: the UDP payload plus the
+// ports and 1-based capture order. `payload` is exactly the bytes after the UDP
+// header — the NAPI envelope onward, the same slice the legacy hexcap format
+// stored on each line.
+struct PcapDatagram {
+	int srcport = 0;
+	int dstport = 0;
+	int frame_index = 0; // 1-based order within the capture
+	std::vector<uint8_t> payload;
+};
+
+// Parse a legacy pcap or pcapng buffer already in memory; append every IPv4/UDP
+// datagram to `out`. Returns false on unrecognized magic / unsupported variant
+// (big-endian pcapng). IP fragments are skipped — when `frags_dropped` is
+// non-null it receives the count (loopback MTU 65535 → not expected).
+//
+// Supported link types: NULL/LOOP (BSD/OpenBSD loopback), Ethernet II, RAW,
+// IPv4 — the slice nw_pp and the in-game decoders consume.
+//
+// Spec sources: pcap-savefile(5); the pcapng block-format spec
+// (github.com/pcapng/pcapng) — SHB/IDB/EPB/SPB; tcpdump.org/linktypes.html.
+bool read_pcap_udp(const uint8_t *data, size_t len,
+                   std::vector<PcapDatagram> &out, int *frags_dropped = nullptr);
+
+// Convenience wrapper: slurp `path` then read_pcap_udp(). Returns false if the
+// file can't be read or isn't a pcap/pcapng.
+bool read_pcap_udp_file(const std::string &path, std::vector<PcapDatagram> &out,
+                        int *frags_dropped = nullptr);
+
+// Build a minimal legacy pcap (DLT_RAW: one synthetic IPv4+UDP frame per
+// datagram) in memory — for crafting tiny inline captures in tests. Only
+// srcport/dstport/payload are used; src/dst IPs are 127.0.0.1 and timestamps
+// are zero (deterministic). The result round-trips through read_pcap_udp().
+std::vector<uint8_t> build_pcap_udp(const std::vector<PcapDatagram> &dgrams);
+
+} // namespace opennova::net

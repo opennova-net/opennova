@@ -1024,6 +1024,28 @@ target_link_libraries(nw_serverlog_decode_test PRIVATE opennova_novaworld)
 target_include_directories(nw_serverlog_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_serverlog_decode COMMAND nw_serverlog_decode_test)
 
+# Authored-mission cross-validation (D-NET-62) — decode the dvxi5 probe capture
+# and assert every authored vehicle/marker reproduces on the wire (type_id +
+# position + team + heading), not just that the body was consumed. Reads the
+# real pcap directly via the shared apps/common reader; skips unless the capture
+# is present (NW_DVXI5_PCAP, else the in-tree .scratch path).
+add_executable(nw_pool_groundtruth_test novaworld/nw_pool_groundtruth_test.cpp)
+target_link_libraries(nw_pool_groundtruth_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_include_directories(nw_pool_groundtruth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nw_pool_groundtruth_test PRIVATE
+    FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld"
+    DEFAULT_DVXI5_PCAP="${CMAKE_SOURCE_DIR}/.scratch/host_and_join_game_on_opennovaworld_loopback_mission_probe.pcapng")
+add_test(NAME nw_pool_groundtruth COMMAND nw_pool_groundtruth_test)
+
+# Inline-pcap decoder regression — crafts tiny in-memory pcaps and round-trips
+# the 0x0D / 0x20 pool decoders through the full S2C stack (encode -> frame ->
+# NWU -> envelope -> build_pcap_udp -> read_pcap_udp -> decode). No capture
+# fixtures, so it runs unconditionally in CI.
+add_executable(nw_pool_decode_unit_test novaworld/nw_pool_decode_unit_test.cpp)
+target_link_libraries(nw_pool_decode_unit_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_include_directories(nw_pool_decode_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_pool_decode_unit COMMAND nw_pool_decode_unit_test)
+
 # Per-entity compact-record decoders — §5.10 player / §5.13 vehicle / §5.14
 # infantry. Hand-built input vectors mirror the wire layout; no capture
 # dependency, so the test runs unconditionally in CI.

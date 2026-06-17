@@ -1,0 +1,213 @@
+// Self-contained, CI-runnable decoder regression — no capture fixtures.
+//
+// Each case crafts a tiny in-memory pcap (apps/common build_pcap_udp), encodes
+// a known pool batch through the FULL S2C stack (inner encoder -> 0x83 protocol
+// frame -> SCRK -> outer NWU -> NAPI envelope -> UDP datagram), then reads that
+// pcap back through the shared reader and the exact decode pipeline nw_pp and
+// the real-capture harness use, asserting the decoded records equal the crafted
+// input. Exercises build_pcap_udp + read_pcap_udp + envelope + NWU + SCRK +
+// protocol reassembly + the §5.11 / §5.12 pool decoders end to end, on a few
+// dozen bytes — so the decoders stay covered in CI without the .scratch capture.
+
+#include <napi/envelope.h>
+#include <novacrypto/nwu.h>
+#include <novaworld/ingame_decode.h>
+#include <novaworld/ingame_encode.h>
+#include <novaworld/protocol_message.h>
+#include <novaworld/session_keys.h>
+
+#include "pcap_reader.h"
+
+#include <cstdint>
+#include <cstdio>
+#include <string>
+#include <string_view>
+#include <vector>
+
+using namespace opennova;
+
+namespace {
+
+int g_failures = 0;
+#define EXPECT(cond)                                                            \
+	do {                                                                        \
+		if (!(cond)) {                                                          \
+			std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);         \
+			g_failures++;                                                       \
+		}                                                                       \
+	} while (0)
+
+constexpr std::string_view kScrk = "UNIT_TEST_SCRK_0";
+
+// Wrap an inner S2C protocol-message body (e.g. a 0x0D batch) into the exact
+// on-wire UDP payload a server emits: 0x83 protocol frame (SCRK-encrypted) ->
+// outer NWU -> NAPI envelope. Mirror of the test/nw_pp decode_outer +
+// process_protocol path, run backwards.
+std::vector<uint8_t> make_s2c_udp_payload(uint8_t tag,
+                                          const std::vector<uint8_t> &inner) {
+	ProtocolMessage msg = make_protocol_message(tag, inner);
+	ProtocolPacketHeader hdr{};
+	hdr.session_id = 0x1234;
+	std::vector<uint8_t> proto; // NWU-plaintext, SCRK-encrypted
+	encode_protocol_packet_plaintext(hdr, {msg}, kScrk, proto);
+	// Outer NWU transform over the post-opcode region. nwu_encrypt/nwu_decrypt
+	// are inverses (reference_nwu_names_swapped): the receiver's decode_outer
+	// applies nwu_encrypt to DECRYPT, so the sender must apply nwu_decrypt here.
+	nwu_decrypt(proto.data(), proto.size(), SESSION_NWU_KEY);
+	std::vector<uint8_t> stripped;
+	stripped.reserve(proto.size() + 1);
+	stripped.push_back(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE); // 0x83
+	stripped.insert(stripped.end(), proto.begin(), proto.end());
+	std::vector<uint8_t> raw(stripped.size() + 4);
+	size_t out = 0;
+	if (napi_envelope_encode(stripped.data(), stripped.size(), raw.data(),
+	                         raw.size(), &out) != 0)
+		return {};
+	raw.resize(out);
+	return raw;
+}
+
+// Reverse of make_s2c_udp_payload, then dispatch the inner tag. Returns the
+// reassembled inner body for `want_tag`, or empty.
+std::vector<uint8_t> decode_s2c_udp_payload(const std::vector<uint8_t> &raw,
+                                            int want_tag) {
+	std::vector<uint8_t> stripped(raw.size());
+	size_t out = 0;
+	if (napi_envelope_decode(raw.data(), raw.size(), stripped.data(),
+	                         stripped.size(), &out) != 0)
+		return {};
+	stripped.resize(out);
+	if (stripped.empty() || stripped[0] != SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE)
+		return {};
+	std::vector<uint8_t> body(stripped.begin() + 1, stripped.end());
+	nwu_encrypt(body.data(), body.size(), SESSION_NWU_KEY);
+	ProtocolPacketHeader hdr;
+	std::vector<ProtocolMessage> msgs;
+	if (!decode_protocol_packet_plaintext(body.data(), body.size(), kScrk, hdr, msgs))
+		return {};
+	ProtocolReassemblyState rs;
+	for (const auto &pm : msgs) {
+		std::vector<uint8_t> assembled;
+		if (!reassemble_protocol_payload(rs, pm, assembled)) continue;
+		if (int(pm.full_tag) == want_tag) return assembled;
+	}
+	return {};
+}
+
+// --- the pcap reader/builder on their own --------------------------------
+void test_pcap_roundtrip() {
+	std::vector<net::PcapDatagram> in(3);
+	in[0] = {32768, 32769, 1, {0xDE, 0xAD, 0xBE, 0xEF}};
+	in[1] = {7597, 12345, 2, {}}; // empty payload
+	in[2] = {32769, 32768, 3, {0x01, 0x02, 0x03, 0x04, 0x05}};
+
+	std::vector<uint8_t> pcap = net::build_pcap_udp(in);
+	EXPECT(!pcap.empty());
+
+	std::vector<net::PcapDatagram> got;
+	EXPECT(net::read_pcap_udp(pcap.data(), pcap.size(), got));
+	EXPECT(got.size() == in.size());
+	for (size_t i = 0; i < got.size() && i < in.size(); ++i) {
+		EXPECT(got[i].srcport == in[i].srcport);
+		EXPECT(got[i].dstport == in[i].dstport);
+		EXPECT(got[i].payload == in[i].payload);
+		EXPECT(got[i].frame_index == int(i) + 1);
+	}
+}
+
+// --- full stack: a crafted 0x0D vehicle spawn through a tiny pcap ----------
+void test_pool_spawn_0d_via_pcap() {
+	PoolSpawnRecord r;
+	r.slot_id = 0x1002;          // pool-1 slot 2
+	r.item_type_id = 0x050E;     // the dvxi5 truck type
+	r.pos_x = -5570560;          // -85.0
+	r.pos_y = 2949120;           //  45.0
+	r.pos_z = 2480896;           //  37.857
+	r.team_byte = 2;             // -> gate 0x0010
+	r.target_handle = 0x2044;    // -> gate 0x0200
+	PoolSpawnBatch in;
+	in.entity_count = 1;
+	in.records.push_back(r);
+
+	std::vector<uint8_t> inner = encode_pool_spawn_batch(in);
+	std::vector<uint8_t> raw = make_s2c_udp_payload(0x0D, inner);
+	std::vector<net::PcapDatagram> dgrams(1);
+	dgrams[0] = {32768, 32769, 1, raw};
+	std::vector<uint8_t> pcap = net::build_pcap_udp(dgrams);
+
+	std::vector<net::PcapDatagram> got;
+	EXPECT(net::read_pcap_udp(pcap.data(), pcap.size(), got));
+	EXPECT(got.size() == 1);
+	if (got.empty()) return;
+
+	std::vector<uint8_t> assembled = decode_s2c_udp_payload(got[0].payload, 0x0D);
+	EXPECT(!assembled.empty());
+	PoolSpawnBatch out;
+	EXPECT(decode_pool_spawn_batch(assembled.data(), assembled.size(), out));
+	EXPECT(out.records.size() == 1);
+	if (out.records.empty()) return;
+	const auto &d = out.records[0];
+	EXPECT(d.item_type_id == 0x050E);
+	EXPECT(d.slot_id == 0x1002);
+	EXPECT(d.pos_x == -5570560 && d.pos_y == 2949120 && d.pos_z == 2480896);
+	EXPECT((d.spawn_flags & 0x0010) != 0);
+	EXPECT(d.team_byte == 2);
+	EXPECT((d.spawn_flags & 0x0200) != 0);
+	EXPECT(d.target_handle == 0x2044);
+}
+
+// --- full stack: a crafted 0x20 start marker through a tiny pcap -----------
+void test_pool3_sync_0x20_via_pcap() {
+	Pool3SyncRecord r;
+	r.item_type_id = 0x1774;     // Red start marker
+	r.pos_x = 4587520;           //  70.0
+	r.pos_y = 1638400;           //  25.0
+	r.pos_z = 3633152;           //  55.43
+	r.movement_val = 0xC0000000; // 270 deg BAM -> gate 0x01
+	r.net_handle = 8;            // authored bms id (always present)
+	r.team_byte = 2;             // -> gate 0x08
+	Pool3SyncBatch in;
+	in.start_index = 0;
+	in.entity_count = 1;
+	in.records.push_back(r);
+
+	std::vector<uint8_t> inner = encode_pool3_sync_batch(in);
+	std::vector<uint8_t> raw = make_s2c_udp_payload(0x20, inner);
+	std::vector<net::PcapDatagram> dgrams(1);
+	dgrams[0] = {32768, 32769, 1, raw};
+	std::vector<uint8_t> pcap = net::build_pcap_udp(dgrams);
+
+	std::vector<net::PcapDatagram> got;
+	EXPECT(net::read_pcap_udp(pcap.data(), pcap.size(), got));
+	if (got.empty()) { EXPECT(false); return; }
+
+	std::vector<uint8_t> assembled = decode_s2c_udp_payload(got[0].payload, 0x20);
+	EXPECT(!assembled.empty());
+	Pool3SyncBatch out;
+	EXPECT(decode_pool3_sync_batch(assembled.data(), assembled.size(), out));
+	EXPECT(out.records.size() == 1);
+	if (out.records.empty()) return;
+	const auto &d = out.records[0];
+	EXPECT(d.item_type_id == 0x1774);
+	EXPECT(d.pos_x == 4587520 && d.pos_y == 1638400 && d.pos_z == 3633152);
+	EXPECT((d.flags_byte & 0x01) != 0);
+	EXPECT(d.movement_val == 0xC0000000u);
+	EXPECT((d.flags_byte & 0x08) != 0);
+	EXPECT(d.team_byte == 2);
+	EXPECT(d.net_handle == 8);
+}
+
+} // namespace
+
+int main() {
+	test_pcap_roundtrip();
+	test_pool_spawn_0d_via_pcap();
+	test_pool3_sync_0x20_via_pcap();
+	if (g_failures) {
+		std::printf("\n%d assertion(s) failed\n", g_failures);
+		return 1;
+	}
+	std::printf("PASS: inline-pcap round-trip of the 0x0D / 0x20 pool decoders "
+	            "through the full S2C stack.\n");
+	return 0;
+}

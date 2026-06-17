@@ -1,6 +1,7 @@
 add_library(opennova_app_common STATIC
     net_sockets.cpp
     pcap_writer.cpp
+    pcap_reader.cpp
 )
 
 target_include_directories(opennova_app_common
